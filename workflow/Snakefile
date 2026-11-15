@@ -445,8 +445,8 @@ rule gold_gupta_h2h:
         """
 
 
-# GMIN against the paper preset at the paper force-call budgets.
-# Not part of `rule all`. Run it by name:
+# GMIN against the paper preset at the paper force-call budgets, LJ98
+# and LJ104. Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile gmin_h2h
 rule gmin_h2h:
     output:

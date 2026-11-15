@@ -26,7 +26,7 @@ WORK=${H2O_WORK:-/work/h2o20-goat}
 MOLECULES=${H2O_MOLECULES:-20}
 BUDGET=${H2O_BUDGET:-4000}
 CREST_LEN=${H2O_CREST_LEN:-0.2}
-SEEDS=${H2O_SEEDS:-15001,15002,15003}
+SEEDS=${H2O_SEEDS:-15001,15002,15003,15004,15005,15006}
 # Reuse CREST rows already in the results CSV. Set only when this VM still
 # holds the CREST binaries and the previous rows; a changed VM reruns both.
 SKIP_CREST=${H2O_SKIP_CREST:-0}
@@ -101,7 +101,7 @@ with ref.open(newline="") as handle:
 if int(row["molecules"]) != 20:
     raise SystemExit("reference.csv is not (H2O)20")
 out.write_text(
-    "molecules,seed,arm,order,energy_eV,hit,wall_s,reference_eV,status\n"
+    "molecules,seed,arm,order,energy_eV,hit,wall_s,reference_eV,status,code_revision,host\n"
 )
 print(f"reference_eV {row['energy_eV']}")
 PY
@@ -139,10 +139,10 @@ append_row() {
   python3 - "$OUT_CSV" "$@" << 'PY'
 import sys
 from pathlib import Path
-path, molecules, seed, arm, order, energy, hit, wall, reference, status = sys.argv[1:]
+path, molecules, seed, arm, order, energy, hit, wall, reference, status, revision, host = sys.argv[1:]
 with Path(path).open("a") as handle:
     handle.write(
-        f"{molecules},{seed},{arm},{order},{energy},{hit},{wall},{reference},{status}\n"
+        f"{molecules},{seed},{arm},{order},{energy},{hit},{wall},{reference},{status},{revision},{host}\n"
     )
 PY
 }
@@ -201,9 +201,12 @@ if len(kept) != 1:
     raise SystemExit(f"no stored CREST row for seed {seed}")
 row = kept[0]
 row["order"] = position
+row.setdefault("code_revision", "")
+row.setdefault("host", "")
 with Path(out).open("a") as handle:
     handle.write(
-        "{molecules},{seed},{arm},{order},{energy_eV},{hit},{wall_s},{reference_eV},{status}\n".format(**row)
+        "{molecules},{seed},{arm},{order},{energy_eV},{hit},{wall_s},{reference_eV},{status},"
+        "{code_revision},{host}\n".format(**row)
     )
 print(f"ROW {seed} crest {row['energy_eV']} {row['hit']} {row['wall_s']} kept")
 PY
@@ -230,13 +233,14 @@ PY
     else
       status=no_geometry
     fi
-    append_row "$MOLECULES" "$seed" "$arm" "$position" "$energy" "$hit" "$wall" "$REFERENCE" "$status"
+    append_row "$MOLECULES" "$seed" "$arm" "$position" "$energy" "$hit" "$wall" "$REFERENCE" "$status" \
+      "$COMMIT" "$(tr -d '\n' < "$base/$arm/hostname.txt")"
     echo "ROW $seed $arm $energy $hit $wall" | tee -a "$WORK/schedule.txt"
   done
 done
 
 if ! command -v orca >/dev/null 2>&1; then
-  append_row 16 "" goat "" "" "" "" "$REFERENCE" skipped_no_orca
-  append_row 20 "" goat "" "" "" "" "$REFERENCE" skipped_no_orca
+  append_row 16 "" goat "" "" "" "" "$REFERENCE" skipped_no_orca "$COMMIT" ""
+  append_row 20 "" goat "" "" "" "" "$REFERENCE" skipped_no_orca "$COMMIT" ""
 fi
 echo "CAMPAIGN_DONE $OUT_CSV"

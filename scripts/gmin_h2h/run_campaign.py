@@ -2,9 +2,11 @@
 # Copyright (c) anneal developers
 """Serial GMIN against the paper preset, at the paper force-call budgets.
 
-Sizes are LJ102, LJ150 and LJ200. Six seeds, the same list on both arms.
-Within a size the (seed, arm) pairs are shuffled. LJ102 runs before
-LJ150, and LJ150 runs before LJ200. A hit is a quenched energy within
+The default sizes are LJ98 and LJ104, the panel in
+``bench/gmin-h2h/results.csv``. ``--size`` picks any other size in
+``PAPER_BUDGETS``; LJ102, LJ150 and LJ200 are ``bench/lj-large``. Six
+seeds, the same list on both arms. Within a size the (seed, arm) pairs
+are shuffled, and sizes run in the order given. A hit is a quenched energy within
 0.001 of the Cambridge minimum. A miss is stored as the full budget, and the median and
 interquartile range use Hyndman-Fan type 7 on that column. The wall
 ratio is the GMIN median wall divided by the anneal median wall.
@@ -25,11 +27,13 @@ import sys
 from pathlib import Path
 
 PAPER_BUDGETS = {
+    98: 4_000_000,
     102: 4_000_000,
+    104: 4_000_000,
     150: 4_000_000,
     200: 4_000_000,
 }
-SIZES = (102, 150, 200)
+SIZES = (98, 104)
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261111
@@ -53,6 +57,8 @@ SUMMARY_FIELDS = [
     "gmin_url",
     "gmin_revision",
     "anneal_head",
+    "code_revision",
+    "host",
 ]
 
 
@@ -304,6 +310,8 @@ def summarise(
                     "gmin_url": url,
                     "gmin_revision": revision,
                     "anneal_head": head,
+                    "code_revision": head if arm == "anneal" else revision,
+                    "host": os.uname().nodename,
                 }
             )
     return out
@@ -350,10 +358,12 @@ def self_test() -> None:
     median, iqr = median_iqr(sample)
     if abs(median - 3.5) > 1e-12 or abs(iqr - 2.5) > 1e-12:
         raise SystemExit("median iqr")
-    if any(PAPER_BUDGETS[n] != 4_000_000 for n in (102, 150, 200)):
+    if any(budget != 4_000_000 for budget in PAPER_BUDGETS.values()):
         raise SystemExit("paper budgets")
-    if set(PAPER_BUDGETS) != {102, 150, 200}:
+    if set(PAPER_BUDGETS) != {98, 102, 104, 150, 200}:
         raise SystemExit("sizes")
+    if SIZES != (98, 104):
+        raise SystemExit("default sizes")
     order = schedule(SIZES, SEEDS, ARMS, SCHEDULE_SEED)
     seen: list[int] = []
     for n, _seed, _arm in order:

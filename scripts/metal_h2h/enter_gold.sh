@@ -29,6 +29,8 @@ WORK=${WORK:-$ROOT/bench/gold-gupta/work}
 REF38=-130.54001708
 REF55=-191.03085280
 REV=${GOLD_REVISION:-$(git -C "$ROOT" rev-parse --short=12 HEAD)}
+CODE_REVISION=$(git -C "$ROOT" rev-parse HEAD)
+HOST=$(hostname)
 mkdir -p "$WORK"
 # A, p, q, xi, r0. Same printing as run_darby.py's {:.10g}.
 GOLD_ROW="0.2061 10.229 4.036 1.79 2.884"
@@ -43,7 +45,7 @@ publish() {
   python3 - "$WORK/rows.csv" "$ROOT/bench/gold-gupta/seeds.csv" "$REV" << 'PY'
 import csv, sys
 fresh, stored, revision = sys.argv[1], sys.argv[2], sys.argv[3]
-fields = ["system","code","seed","budget","hit","evals_to_hit","charged","wall_s","best","pot_s","outside_s","revision"]
+fields = ["system","code","seed","budget","hit","evals_to_hit","charged","wall_s","best","pot_s","outside_s","revision","code_revision","host"]
 kept = []
 try:
     with open(stored, newline="") as handle:
@@ -115,7 +117,8 @@ EOF
 record_anneal() {
   local line
   line=$(anneal_one "$@" | awk -F, 'NF>=11 && $1!="system" {print}')
-  echo "$line" | awk -F, -v rev="$REV" 'BEGIN{OFS=","} {print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,rev}' | tee -a "$WORK/rows.csv"
+  echo "$line" | awk -F, -v rev="$REV" -v code="$CODE_REVISION" -v host="$HOST" \
+    'BEGIN{OFS=","} {print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,rev,code,host}' | tee -a "$WORK/rows.csv"
   publish
 }
 
@@ -131,8 +134,8 @@ for tok in line.split():
         k,v=tok.split("=",1); d[k]=v
 wall=float(d["wall_s"]); pot=float(d["pot_s"])
 hit="true" if d["hit"]=="1" else "false"
-print(",".join([d["system"],"gmin",d["seed"],d["budget"],hit,d["evals_to_hit"],d["charged"],f"{wall:.6f}",d["best"],f"{pot:.6f}",f"{wall-pot:.6f}",sys.argv[2]]))
-' "$line" "$REV" | tee -a "$WORK/rows.csv"
+print(",".join([d["system"],"gmin",d["seed"],d["budget"],hit,d["evals_to_hit"],d["charged"],f"{wall:.6f}",d["best"],f"{pot:.6f}",f"{wall-pot:.6f}",*sys.argv[2:]]))
+' "$line" "$REV" "$CODE_REVISION" "$HOST" | tee -a "$WORK/rows.csv"
   publish
 }
 
@@ -177,7 +180,7 @@ if [[ ${1:-} == --from-large ]]; then
   exit 0
 fi
 
-echo "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,revision" > "$WORK/rows.csv"
+echo "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,revision,code_revision,host" > "$WORK/rows.csv"
 
 for seed in $(seq 2000 2011); do
   run_pair au38 38 400000 "$REF38" "$seed"
