@@ -202,7 +202,9 @@ jobs:
       # A pull-request checkout is the merge of the base into the head, so
       # `git rev-list --objects HEAD` also lists blobs the base already has.
       # Those still fail a push of the base, which audits HEAD. A pull request
-      # audits the objects its own commits add, at the same 1 MiB bar.
+      # audits the objects its own commits add, at the same 1 MiB bar. The
+      # blobs in .github/large-blobs.txt landed before the audit could run
+      # and are skipped by object name.
       - name: Audit for large files
         if: ${{ !cancelled() }}
         shell: bash
@@ -227,7 +229,8 @@ jobs:
             oversized=$(
               printf '%s\n' "$objects" |
                 git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
-                awk '$1 == "blob" && $2 > 1048576'
+                awk 'NR == FNR { if ($1 !~ /^#/) known[$1] = 1; next }
+                     $1 == "blob" && $2 > 1048576 && !($3 in known)' .github/large-blobs.txt -
             )
           fi
           if [[ -n "$oversized" ]]; then

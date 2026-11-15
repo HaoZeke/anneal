@@ -1,0 +1,17 @@
+# Blobs over 1 MiB that develop already carries, by object name. The large
+# file audit skips these and no others; a new large blob still fails it.
+156339f213c05f4424ed76283e5aec2da892d043 paper/jctc/data/landfold_maps_v7/lj_csm/lj75/derived/aggregate/landscape.ld
+dd77aa9c3add92008d23883049123dd05e5589bb paper/jctc/data/landscapes_7695255/lj75_bh_s0.min
+92ae0c304de588a83a4472c41f0285b340a00b09 paper/jctc/data/landscapes_7695255/lj75_recommended_s0.min
+21d7ddae8896139c429d242f13dc2e594a7ee084 paper/jctc/data/landscapes_7695255/lj98_bh_s0.min
+a5cb8346544b858382c330f61b7fb56b526dc354 paper/jctc/data/landscapes_7695255/lj98_recommended_s0.min
+a4a50c80e4235c6e4821b345f673770d825acf42 paper/jctc/figs/landscapes.pdf
+cdce13a04d28d1807fc3228174eaa2e11d7de063 paper/jctc/figs/landscapes.pdf
+2bda13a66daf4db6b2f204107e975b0023fb75bd paper/jctc/figs/lj38_landscape.png
+a3314ea8b1c0df0b5438749ab946fbf615010e74 paper/jctc/figs/lj75_landscape.png
+1061264ad2ed6c5ee6d5ac9f79f86e4cd5357fcd paper/jctc/figs/lj98_landscape.png
+12ca133e9de0efc5ddbb8a84af50aadbcc6c570a paper/jctc/logs/lj75-source-37535ec1.tar.xz
+39e78b1ccb3b133df08975fe285cd5b4b126eafb paper/jctc/logs/lj75-source-37535ec1.tar.xz
+54733b5911072b9a931f9c384bc2dcd48d3e534e paper/jctc/logs/lj75-source-37535ec1.tar.xz
+5cd0af45f9ea0dab6cd8dc8a48b2ef4a85cc3fab paper/jctc/logs/lj75-source-37535ec1.tar.xz
+87a275255df79b1cf1a65715246586eaeb9caa3c paper/jctc/logs/lj75-source-37535ec1.tar.xz
