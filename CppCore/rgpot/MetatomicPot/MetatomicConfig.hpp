@@ -25,10 +25,14 @@ struct MetatomicConfig {
   std::string engine_path;
   /** UMA / OMol task head baked into or selected by the exported model. */
   std::string task_name;
+  /** Total charge, attached as rgpot::charge system data. */
   int charge = 0;
-  /** Spin multiplicity (1 = singlet). Attached as system extra data. */
+  /** Spin multiplicity (1 = singlet), attached as rgpot::spin_multiplicity
+   *  and rgpot::spin system data. */
   int spin = 1;
-  /** Attach charge/spin TensorMaps on every System (UMA omol). */
+  /** Each System carries the rgpot:: data the model declares in
+   *  requested_inputs; true attaches all three, for a model that reads them
+   *  without declaring them. */
   bool attach_system_extras = false;
 };
 

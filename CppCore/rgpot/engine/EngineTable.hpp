@@ -27,11 +27,18 @@
 
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "rgpot/Potential.hpp"
 
 namespace rgpot::engine {
+
+/// Thrown by a setting hook for a value the backend cannot take; the adapter
+/// returns 3 with the reason in last_error.
+struct Unsupported : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
 
 /// What a backend hands the adapter at create.
 struct Backend {
@@ -39,7 +46,8 @@ struct Backend {
   /// File whose SHA-256 identifies the loaded model; empty when the backend
   /// has no model file.
   std::string model_path;
-  /// Empty when the backend has no charge and spin to change.
+  /// Empty when the backend has no charge and spin to change. Throws
+  /// Unsupported, before changing anything, for a value it cannot take.
   std::function<void(int charge, int spin)> set_charge_spin;
   /// Empty when the backend has no tensor runtime.
   std::function<void(int intra_op, int inter_op)> set_num_threads;

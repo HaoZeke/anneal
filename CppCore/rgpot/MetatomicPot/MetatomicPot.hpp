@@ -50,6 +50,14 @@ public:
     m_config.spin = spin;
   }
 
+  /// Whether the model reads the charge (rgpot::charge) and the multiplicity
+  /// (rgpot::spin_multiplicity or rgpot::spin): it declares them, or
+  /// attach_system_extras is set.
+  [[nodiscard]] bool readsCharge() const noexcept { return m_attach_charge; }
+  [[nodiscard]] bool readsSpin() const noexcept {
+    return m_attach_spin_multiplicity || m_attach_spin;
+  }
+
   /// Internal mutex serializes the torch session, so a shared instance is
   /// safe; multi-image callers still prefer clones for throughput.
   [[nodiscard]] PotCaps caps() const noexcept override {
@@ -73,6 +81,9 @@ private:
   std::string m_energy_key;
   std::string m_energy_uncertainty_key;
   double m_uncertainty_threshold = -1.0;
+  bool m_attach_charge = false;
+  bool m_attach_spin_multiplicity = false;
+  bool m_attach_spin = false;
 
   mutable std::mutex m_mutex;
   mutable torch::Tensor m_cached_types;
@@ -82,6 +93,8 @@ private:
   computeNeighbors(metatomic_torch::NeighborListOptions request, long nAtoms,
                    const double *positions, const double *box,
                    const bool periodic[3]) const;
+
+  void attachSystemExtras(const metatomic_torch::System &system) const;
 };
 
 } // namespace rgpot

@@ -276,6 +276,9 @@ TEST_CASE("charge, spin and thread settings reach the backend",
   REQUIRE(s.charge() == -1);
   REQUIRE(s.spin() == 2);
   REQUIRE(s.set_charge_spin(pot, 0, 0) == 1);
+  REQUIRE(s.set_charge_spin(pot, 99, 1) == 3);
+  REQUIRE(error_of(s, pot).find("refused") != std::string::npos);
+  REQUIRE(s.charge() == -1);
   REQUIRE(s.set_num_threads(pot, 2, 1) == 0);
   REQUIRE(s.set_num_threads(pot, 2, 99) == 2);
   REQUIRE(error_of(s, pot).find("refused") != std::string::npos);
