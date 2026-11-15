@@ -424,7 +424,7 @@ if get_option('with_expr')
     has_expr = true
 endif
 
-# NWChemPot frontend always builds and dlopens the split nwchemc engine
+# With RPC on, the NWChemPot frontend builds and dlopens the split nwchemc engine
 # (libnwchemc.so) at runtime. rgpot carries no in-process NWChem embed.
 _args += ['-DRGPOT_HAS_NWCHEM_FRONTEND=TRUE']
 
