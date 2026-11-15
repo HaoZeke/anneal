@@ -22,14 +22,14 @@ void SumPot::add(std::unique_ptr<PotentialBase> term) {
   terms_.push_back(std::move(term));
 }
 
-void SumPot::share_neighbours(std::shared_ptr<DualList> lists) {
+void SumPot::shareNeighbours(std::shared_ptr<DualList> lists) {
   for (auto &term : terms_) {
     if (auto *c = dynamic_cast<CoulombPot *>(term.get())) {
-      c->set_neighbours(lists);
+      c->setNeighbours(lists);
     } else if (auto *d = dynamic_cast<DispersionPot *>(term.get())) {
-      d->set_neighbours(lists);
+      d->setNeighbours(lists);
     } else if (auto *n = dynamic_cast<NlhPot *>(term.get())) {
-      n->set_neighbours(lists);
+      n->setNeighbours(lists);
     }
   }
 }

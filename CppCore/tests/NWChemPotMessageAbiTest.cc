@@ -19,7 +19,7 @@ using Catch::Matchers::WithinAbs;
 
 TEST_CASE("NWChemPot passes serialized NWChemParams to nwchemc engine",
           "[nwchem][abi]") {
-  if (!rgpot::NWChemPot::probe_available()) {
+  if (!rgpot::NWChemPot::probeAvailable()) {
     SKIP("libnwchemc not available");
   }
 
@@ -68,7 +68,7 @@ TEST_CASE("NWChemPot passes serialized NWChemParams to nwchemc engine",
 
 TEST_CASE("NWChemPot preserves typed DFT convergence parameters",
           "[nwchem][abi]") {
-  if (!rgpot::NWChemPot::probe_available()) {
+  if (!rgpot::NWChemPot::probeAvailable()) {
     SKIP("libnwchemc not available");
   }
 

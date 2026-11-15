@@ -71,7 +71,7 @@ TEST_CASE("D4Pot is a Potential and PotentialConfig.d4 keeps its defaults",
 
 TEST_CASE("D4Pot default is PBE charge 0 with ATM on", "[d4][config]") {
   rgpot::D4Pot pot;
-  REQUIRE(pot.get_type() == rgpot::PotType::D4);
+  REQUIRE(pot.getType() == rgpot::PotType::D4);
   REQUIRE(pot.config().functional == "pbe");
   REQUIRE(pot.config().charge == 0.0);
   REQUIRE(pot.config().atm);

@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     bool profile = false;
     const int before = split_count(&profile);
-    const bool available = rgpot::CPMDPot::probe_available();
+    const bool available = rgpot::CPMDPot::probeAvailable();
     const auto group = rgpot::bindCalculators(2);
     const int splits = profile ? split_count(&profile) - before : -1;
     std::printf("adopt-probe rank %d available %d index %d splits %d\n", rank,

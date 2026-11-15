@@ -111,8 +111,8 @@ public:
    * @param c Pointer to a PotentialCache instance.
    * @return Void.
    */
-  virtual void set_cache(rgpot::cache::PotentialCache * /*c*/) {
-    throw std::runtime_error("PotentialBase::set_cache called directly");
+  virtual void setCache(rgpot::cache::PotentialCache * /*c*/) {
+    throw std::runtime_error("PotentialBase::setCache called directly");
   }
 #endif
 
@@ -120,7 +120,7 @@ public:
    * @brief Fetches the potential type.
    * @return The potential type.
    */
-  [[nodiscard]] PotType get_type() const { return m_type; }
+  [[nodiscard]] PotType getType() const { return m_type; }
 
 protected:
   PotType m_type; //!< The type of the potential energy surface.
@@ -144,7 +144,7 @@ public:
    * @param c Pointer to a PotentialCache instance.
    * @return Void.
    */
-  void set_cache(rgpot::cache::PotentialCache *c) override { _cache = c; }
+  void setCache(rgpot::cache::PotentialCache *c) override { _cache = c; }
 #endif
 
   /**

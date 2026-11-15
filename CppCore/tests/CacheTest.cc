@@ -60,7 +60,7 @@ TEST_CASE("Potential caching with rgpot", "[Potential]") {
 
     auto pcache = rgpot::cache::PotentialCache();
     pcache.set_db(db.get());
-    pot->set_cache(&pcache);
+    pot->setCache(&pcache);
 
     // 1. Miss & Write
     auto [e1, f1, v1] = (*pot)(positions, types, box);
@@ -86,7 +86,7 @@ TEST_CASE("Potential caching with rgpot", "[Potential]") {
 
     {
       auto pcache = rgpot::cache::PotentialCache(db_path);
-      pot->set_cache(&pcache);
+      pot->setCache(&pcache);
 
       // 1. Miss
       (*pot)(positions, types, box);
@@ -113,14 +113,14 @@ TEST_CASE("Potential caching with rgpot", "[Potential]") {
     // Phase 1: Create cache, write data, destroy object
     {
       auto pcache_write = rgpot::cache::PotentialCache(db_path);
-      pot->set_cache(&pcache_write);
+      pot->setCache(&pcache_write);
       (*pot)(positions, types, box); // Writes to DB
     }
 
     // Phase 2: Create NEW cache object pointing to SAME path
     {
       auto pcache_read = rgpot::cache::PotentialCache(db_path);
-      pot->set_cache(&pcache_read);
+      pot->setCache(&pcache_read);
 
       auto start = high_resolution_clock::now();
       auto [e_read, f_read, v_read] = (*pot)(positions, types, box);
@@ -138,7 +138,7 @@ TEST_CASE("Potential caching with rgpot", "[Potential]") {
   SECTION("Uninitialized Cache (Graceful Degradation)") {
     // Cache object created but no DB set
     auto pcache_empty = rgpot::cache::PotentialCache();
-    pot->set_cache(&pcache_empty);
+    pot->setCache(&pcache_empty);
 
     // Should call forceImpl directly without crashing
     auto start = high_resolution_clock::now();
@@ -175,8 +175,8 @@ TEST_CASE("Cache keys separate parameter sets", "[Potential][cache]") {
   rocksdb::Options opts;
   rocksdb::DestroyDB(db_path, opts);
   auto pcache = rgpot::cache::PotentialCache(db_path);
-  potWide->set_cache(&pcache);
-  potNarrow->set_cache(&pcache);
+  potWide->setCache(&pcache);
+  potNarrow->setCache(&pcache);
 
   auto [eWide, fWide, vWide] = (*potWide)(positions, types, box);
   // Same positions, types, box, and PotType: only paramsKey separates the
@@ -255,7 +255,7 @@ TEST_CASE("Cached force batches retain result metadata through misses and hits",
   const std::string path = resultCachePath();
   {
     rgpot::cache::PotentialCache cache(path);
-    pot.set_cache(&cache);
+    pot.setCache(&cache);
     pot.forceBatch(batch);
     REQUIRE(pot.evaluations == 2);
     for (size_t i = 0; i < 2; ++i) {
@@ -277,11 +277,11 @@ TEST_CASE("Cached force batches retain result metadata through misses and hits",
     for (size_t i = 0; i < 2; ++i) {
       checkResultMetadata(inputs[i], outputs[i]);
     }
-    pot.set_cache(nullptr);
+    pot.setCache(nullptr);
   }
   {
     rgpot::cache::PotentialCache cache(path);
-    pot.set_cache(&cache);
+    pot.setCache(&cache);
     for (auto &out : outputs) {
       out.energy = 0.0;
       out.variance = 0.0;
@@ -293,7 +293,7 @@ TEST_CASE("Cached force batches retain result metadata through misses and hits",
     for (size_t i = 0; i < 2; ++i) {
       checkResultMetadata(inputs[i], outputs[i]);
     }
-    pot.set_cache(nullptr);
+    pot.setCache(nullptr);
   }
   REQUIRE(rocksdb::DestroyDB(path, rocksdb::Options()).ok());
 }
@@ -314,7 +314,7 @@ TEST_CASE("Stress batches refresh energy-force-only cache records",
   rgpot::cache::PotentialCache cache;
   cache.set_db(db.get());
   ResultMetadataPotential pot;
-  pot.set_cache(&cache);
+  pot.setCache(&cache);
   double positions[6] = {0.25, 0.5, 0.75, 1.25, 1.5, 1.75};
   const int types[2] = {1, 1};
   const double box[9] = {8.0, 0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 8.0};
@@ -364,7 +364,7 @@ TEST_CASE("Stress batches refresh energy-force-only cache records",
   for (size_t i = 0; i < 6; ++i) {
     REQUIRE(decoded.data()[i] == out.F[i]);
   }
-  pot.set_cache(nullptr);
+  pot.setCache(nullptr);
   cache.set_db(nullptr);
   db.reset();
   REQUIRE(rocksdb::DestroyDB(path, rocksdb::Options()).ok());
@@ -379,7 +379,7 @@ TEST_CASE("Scalar cache retains calculator variance", "[Potential][cache]") {
       {{8.0, 0.0, 0.0}, {0.0, 8.0, 0.0}, {0.0, 0.0, 8.0}}};
   {
     rgpot::cache::PotentialCache cache(path);
-    pot.set_cache(&cache);
+    pot.setCache(&cache);
     const auto [first_energy, first_forces, first_variance] =
         pot(positions, types, box);
     const auto [energy, forces, variance] = pot(positions, types, box);
@@ -390,7 +390,7 @@ TEST_CASE("Scalar cache retains calculator variance", "[Potential][cache]") {
     for (size_t i = 0; i < 6; ++i) {
       REQUIRE(forces.data()[i] == first_forces.data()[i]);
     }
-    pot.set_cache(nullptr);
+    pot.setCache(nullptr);
   }
   REQUIRE(rocksdb::DestroyDB(path, rocksdb::Options()).ok());
 }
@@ -413,7 +413,7 @@ TEST_CASE("Cache counters split computed from served evaluations",
   {
     // Cold: both systems are computed.
     rgpot::cache::PotentialCache cache(path);
-    pot.set_cache(&cache);
+    pot.setCache(&cache);
     REQUIRE(cache.counts().computed == 0);
     REQUIRE(cache.counts().served == 0);
     pot.forceBatch(batch);
@@ -440,16 +440,16 @@ TEST_CASE("Cache counters split computed from served evaluations",
     cache.reset_counts();
     REQUIRE(cache.counts().computed == 0);
     REQUIRE(cache.counts().served == 0);
-    pot.set_cache(nullptr);
+    pot.setCache(nullptr);
   }
   {
     // Warm start from the persisted entries: nothing is computed.
     rgpot::cache::PotentialCache cache(path);
-    pot.set_cache(&cache);
+    pot.setCache(&cache);
     pot.forceBatch(batch);
     REQUIRE(cache.counts().computed == 0);
     REQUIRE(cache.counts().served == 2);
-    pot.set_cache(nullptr);
+    pot.setCache(nullptr);
   }
   REQUIRE(rocksdb::DestroyDB(path, rocksdb::Options()).ok());
 }

@@ -345,7 +345,7 @@ TEST_CASE("Sutton-Chen parameter fingerprint tracks the config",
   rgpot::SuttonChenPot other{rgpot::SuttonChenConfig{.c = 39.432, .n = 9, .m = 6}};
   REQUIRE(defaults.paramsKey() == same.paramsKey());
   REQUIRE(defaults.paramsKey() != other.paramsKey());
-  REQUIRE(defaults.get_type() == rgpot::PotType::SuttonChen);
+  REQUIRE(defaults.getType() == rgpot::PotType::SuttonChen);
   REQUIRE_THROWS(rgpot::SuttonChenPot(
       rgpot::SuttonChenConfig{.cutoff = 0.0, .periodic = true}));
 }

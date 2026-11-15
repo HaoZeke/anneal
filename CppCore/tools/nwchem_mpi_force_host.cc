@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
 #endif
           throw std::runtime_error("cannot set explicit NWChem engine path");
       }
-      if (!rgpot::NWChemPot::probe_available())
+      if (!rgpot::NWChemPot::probeAvailable())
         throw std::runtime_error("NWChem engine is not available on every rank");
     });
     host.collective([&] {

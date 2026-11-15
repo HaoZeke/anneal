@@ -26,8 +26,8 @@ std::array<std::array<double, 3>, 3> vacuumBox() {
 
 } // namespace
 
-TEST_CASE("MOPACPot probe_available with fake engine", "[mopac]") {
-  REQUIRE(rgpot::MOPACPot::probe_available());
+TEST_CASE("MOPACPot probeAvailable with fake engine", "[mopac]") {
+  REQUIRE(rgpot::MOPACPot::probeAvailable());
 }
 
 TEST_CASE("MOPACPot converts Hartree and Hartree/Bohr", "[mopac]") {

@@ -84,7 +84,7 @@ TEST_CASE("TIP4P energy and force on one distorted water", "[water]") {
   REQUIRE(pot.config().cutoff == 8.5);
   REQUIRE(pot.config().switching_width == 1.0);
   REQUIRE(pot.paramsKey() != 0);
-  REQUIRE(pot.get_type() == rgpot::PotType::TIP4P);
+  REQUIRE(pot.getType() == rgpot::PotType::TIP4P);
   requireNetForce(forces);
   const auto [again, forces2, variance2] = pot(waterPositions(), types, kBox);
   REQUIRE_THAT(again, WithinAbs(energy, 0.0));
@@ -102,7 +102,7 @@ TEST_CASE("SPC/E energy and force on one distorted water", "[water]") {
   REQUIRE_THAT(maxForce(forces), WithinAbs(8.458875831491, 1e-6));
   REQUIRE(variance == 0.0);
   REQUIRE(pot.paramsKey() != 0);
-  REQUIRE(pot.get_type() == rgpot::PotType::SPCE);
+  REQUIRE(pot.getType() == rgpot::PotType::SPCE);
   requireNetForce(forces);
   rgpot::TIP4PPot tip(rgpot::WaterConfig{});
   const auto [tipEnergy, tipForces, tipVar] = tip(waterPositions(), types, kBox);
@@ -136,7 +136,7 @@ TEST_CASE("TIP4P-Pt energy on one water and one platinum", "[water]") {
   REQUIRE_THAT(maxForce(forces), WithinAbs(15.396689248363, 1e-6));
   REQUIRE(variance == 0.0);
   REQUIRE(pot.paramsKey() != 0);
-  REQUIRE(pot.get_type() == rgpot::PotType::TIP4PPt);
+  REQUIRE(pot.getType() == rgpot::PotType::TIP4PPt);
   for (std::size_t i = 0; i < forces.rows(); ++i) {
     REQUIRE(std::isfinite(forces(i, 0)));
     REQUIRE(std::isfinite(forces(i, 1)));

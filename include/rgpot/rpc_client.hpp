@@ -124,7 +124,7 @@ public:
     CalcResult result;
     auto status =
         rgpot_rpc_calculate(handle_, &input.c_struct(), &result.c_struct());
-    details::check_status(status);
+    detail::check_status(status);
     return result;
   }
 

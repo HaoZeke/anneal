@@ -20,7 +20,7 @@ public:
   SumPot();
 
   void add(std::unique_ptr<PotentialBase> term);
-  void share_neighbours(std::shared_ptr<DualList> lists);
+  void shareNeighbours(std::shared_ptr<DualList> lists);
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 

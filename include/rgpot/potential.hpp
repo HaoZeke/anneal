@@ -124,7 +124,7 @@ public:
     CalcResult result;
     auto status = rgpot_potential_calculate(handle_, &input.c_struct(),
                                             &result.c_struct());
-    details::check_status(status);
+    detail::check_status(status);
     return result;
   }
 
@@ -140,7 +140,7 @@ public:
    */
   void hvp(const InputSpec &input, const double *direction, double *hv_out,
            double step = 0.0, rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO) const {
-    details::check_status(rgpot_potential_hvp(
+    detail::check_status(rgpot_potential_hvp(
         handle_, &input.c_struct(), direction, step,
         static_cast<int32_t>(scheme), hv_out));
   }
@@ -167,14 +167,14 @@ public:
    */
   CalcResult hvp_centre(const InputSpec &input) const {
     CalcResult result;
-    details::check_status(rgpot_potential_hvp_centre(
+    detail::check_status(rgpot_potential_hvp_centre(
         handle_, &input.c_struct(), &result.c_struct()));
     return result;
   }
 
   /// Register or clear (@c nullptr) the analytic product of this handle.
   void set_hvp_callback(HessianVectorCallback callback) const {
-    details::check_status(rgpot_potential_set_hvp_callback(handle_, callback));
+    detail::check_status(rgpot_potential_set_hvp_callback(handle_, callback));
   }
 
   /// Drop the cached centre, for a potential that changed in place.
@@ -183,7 +183,7 @@ public:
   /// Products, force calls, centre reuses and analytic products so far.
   rgpot_hvp_counts_t hvp_counts() const {
     rgpot_hvp_counts_t counts{};
-    details::check_status(rgpot_potential_hvp_counts(handle_, &counts));
+    detail::check_status(rgpot_potential_hvp_counts(handle_, &counts));
     return counts;
   }
 

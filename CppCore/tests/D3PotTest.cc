@@ -164,7 +164,7 @@ TEST_CASE("D3Pot is a Potential and PotentialConfig.d3 keeps its defaults",
 
 TEST_CASE("D3Pot default is BJ PBE with ATM on", "[d3][config]") {
   rgpot::D3Pot pot;
-  REQUIRE(pot.get_type() == rgpot::PotType::D3);
+  REQUIRE(pot.getType() == rgpot::PotType::D3);
   REQUIRE(pot.config().damping == rgpot::D3Damping::BJ);
   REQUIRE(pot.config().functional == "pbe");
   REQUIRE(pot.config().atm);

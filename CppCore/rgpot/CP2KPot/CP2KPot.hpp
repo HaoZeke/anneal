@@ -81,7 +81,7 @@ public:
   /// empty before the first force.
   std::string runDirectory() const;
 
-  static bool probe_available();
+  static bool probeAvailable();
 
   /// Collective on MPI_COMM_WORLD, as CPMDPot::bindCalculators: splits
   /// into calculators of ranks_per_calc ranks and hands the shim the

@@ -442,7 +442,7 @@ std::string CP2KPot::loadError() const {
 
 std::string CP2KPot::runDirectory() const { return impl_->run_dir.string(); }
 
-bool CP2KPot::probe_available() {
+bool CP2KPot::probeAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (!g_probe_done) {
     EngineBundle tmp;

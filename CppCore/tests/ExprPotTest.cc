@@ -129,7 +129,7 @@ TEST_CASE("ExprPot identity energy matches LJPot on two atoms", "[expr]") {
   (void)v_lj;
 
   rgpot::ExprPot pot("lj", oneLj());
-  REQUIRE(pot.get_type() == rgpot::PotType::Expr);
+  REQUIRE(pot.getType() == rgpot::PotType::Expr);
   REQUIRE(pot.expression() == "lj");
 
   auto [e_expr, f_expr, v_expr] = pot(positions, atmtypes, box);

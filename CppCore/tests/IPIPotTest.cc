@@ -377,7 +377,7 @@ TEST_CASE("IPIPot unix driver sequence, units and triclinic cell", "[ipi]") {
   const Reply reply;
   {
     rgpot::IPIPot pot(cfg);
-    REQUIRE(pot.get_type() == rgpot::PotType::IPI);
+    REQUIRE(pot.getType() == rgpot::PotType::IPI);
     REQUIRE(pot.caps().stress);
     REQUIRE(pot.caps().reentrancy == rgpot::Reentrancy::PerInstance);
     REQUIRE(pot.endpoint().rfind("unix:/tmp/ipi_", 0) == 0);

@@ -92,7 +92,7 @@ TEST_CASE("SW 1985 dimer at the pair minimum", "[SWSi]") {
       REQUIRE_THAT(forces(i, j), WithinAbs(0.0, 1e-8));
     }
   }
-  REQUIRE(pot.get_type() == rgpot::PotType::SWSi1985);
+  REQUIRE(pot.getType() == rgpot::PotType::SWSi1985);
   REQUIRE(pot.paramsKey() == StillingerWeberSi{}.paramsKey());
 }
 

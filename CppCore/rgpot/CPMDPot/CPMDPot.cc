@@ -556,7 +556,7 @@ int CPMDPot::bindCalculators(int ranks_per_calc) {
   return ::rgpot::bindCalculators(ranks_per_calc).index;
 }
 
-bool CPMDPot::probe_available() {
+bool CPMDPot::probeAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_probe_done)
     return g_probe_ok;
@@ -566,7 +566,7 @@ bool CPMDPot::probe_available() {
   return g_probe_ok;
 }
 
-bool CPMDPot::abi_available() {
+bool CPMDPot::abiAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_abi_probe_done)
     return g_abi_probe_ok;

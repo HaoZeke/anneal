@@ -42,10 +42,10 @@ static bool env_points_at_real_nwchem_engine() {
   return false;
 }
 
-TEST_CASE("NWChemPot probe_available without engine", "[nwchem]") {
+TEST_CASE("NWChemPot probeAvailable without engine", "[nwchem]") {
   // Without an nwchemc-compatible library on path, probe is false.
   // This documents expected behavior; does not require NWChem installed.
-  bool ok = rgpot::NWChemPot::probe_available();
+  bool ok = rgpot::NWChemPot::probeAvailable();
   if (!ok) {
     SUCCEED("engine not on path (expected in default CI)");
   } else {
@@ -53,18 +53,18 @@ TEST_CASE("NWChemPot probe_available without engine", "[nwchem]") {
   }
 }
 
-TEST_CASE("NWChemPot abi_available without real embed", "[nwchem]") {
+TEST_CASE("NWChemPot abiAvailable without real embed", "[nwchem]") {
   // Real embed only when the loaded library was built with RGPOT_HAS_NWCHEM.
-  bool abi = rgpot::NWChemPot::abi_available();
+  bool abi = rgpot::NWChemPot::abiAvailable();
   if (!abi) {
-    SUCCEED("stub or missing engine reports abi_available=false");
+    SUCCEED("stub or missing engine reports abiAvailable=false");
   } else {
-    SUCCEED("real NWChem embed reports abi_available=true");
+    SUCCEED("real NWChem embed reports abiAvailable=true");
   }
 }
 
 TEST_CASE("NWChemPot water energy when engine present", "[nwchem]") {
-  if (!rgpot::NWChemPot::probe_available()) {
+  if (!rgpot::NWChemPot::probeAvailable()) {
     SKIP("libnwchemc not available (set NWCHEMC_LIBRARY, RGPOT_NWCHEMC_ENGINE, or NWCHEM_TOP)");
   }
   // Real NWChem embed is effectively single-shot per process; prefer the B3LYP
@@ -84,7 +84,7 @@ TEST_CASE("NWChemPot water energy when engine present", "[nwchem]") {
   REQUIRE(pot.available());
 
   // Stub-only (nwchemc_available==0) cannot calculate; real or CI fake engines do.
-  if (!rgpot::NWChemPot::abi_available()) {
+  if (!rgpot::NWChemPot::abiAvailable()) {
     SKIP("engine loaded but stub-only (no calculable nwchemc ABI)");
   }
 
@@ -204,7 +204,7 @@ TEST_CASE("NWChemPot setParams updates Cap'n Proto-visible params", "[nwchem]") 
 
 TEST_CASE("NWChemPot water B3LYP/6-31G* when real engine present",
           "[nwchem][b3lyp][real]") {
-  if (!rgpot::NWChemPot::probe_available()) {
+  if (!rgpot::NWChemPot::probeAvailable()) {
     SKIP("libnwchemc not available");
   }
   if (!env_points_at_real_nwchem_engine()) {

@@ -116,7 +116,7 @@ the Rust source and regenerated.
 Hand-written C++ headers provide idiomatic wrappers around the C API:
 
 - =errors.hpp= :: Maps =rgpot_status_t= codes to =rgpot::Error= exceptions via
-=details::check_status()=.
+=detail::check_status()=.
 Internally calls =rgpot_last_error()= to populate the exception message.
 
 - =types.hpp= :: Provides =rgpot::InputSpec= (a lightweight view over borrowed
@@ -165,7 +165,7 @@ No exceptions cross FFI.
 Every Rust =extern "C"= function wraps its body in
 =catch_unwind= to convert panics to =RGPOT_INTERNAL_ERROR=.
 
-2. *Within C++* :: The RAII wrappers call =details::check_status()= which maps
+2. *Within C++* :: The RAII wrappers call =detail::check_status()= which maps
    non-
 success codes to =rgpot::Error= exceptions.
 C++ consumers work with exceptions as usual.

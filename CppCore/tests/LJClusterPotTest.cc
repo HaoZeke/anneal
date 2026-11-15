@@ -121,7 +121,7 @@ TEST_CASE("LJClusterPot parameter fingerprint tracks the config",
 
   REQUIRE(defaults.paramsKey() == sameAsDefaults.paramsKey());
   REQUIRE(defaults.paramsKey() != wider.paramsKey());
-  REQUIRE(defaults.get_type() == rgpot::PotType::LJCluster);
+  REQUIRE(defaults.getType() == rgpot::PotType::LJCluster);
   // Identical numbers hash identically; the result cache keeps the two
   // kernels apart through PotType, not through paramsKey.
   REQUIRE(defaults.paramsKey() == rgpot::LJPot{}.paramsKey());

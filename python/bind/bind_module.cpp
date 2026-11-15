@@ -621,7 +621,7 @@ NB_MODULE(_core, m) {
   lj.def(
       "set_cache",
       [](PotHolder<rgpot::LJPot> &self, rgpot::cache::PotentialCache *cache) {
-        self.primary().set_cache(cache);
+        self.primary().setCache(cache);
       },
       nb::arg("cache").none(), nb::keep_alive<1, 2>());
 #endif

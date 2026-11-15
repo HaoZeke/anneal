@@ -142,7 +142,7 @@ bool MOPACPot::available() const {
   return impl_ && impl_->bundle.loaded && impl_->bundle.energy_gradient;
 }
 
-bool MOPACPot::probe_available() {
+bool MOPACPot::probeAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_probe_done)
     return g_probe_ok;
@@ -155,7 +155,7 @@ bool MOPACPot::probe_available() {
   return g_probe_ok;
 }
 
-bool MOPACPot::abi_available() {
+bool MOPACPot::abiAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_abi_probe_done)
     return g_abi_probe_ok;

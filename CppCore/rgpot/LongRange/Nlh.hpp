@@ -30,7 +30,7 @@ public:
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override { return params_; }
 
-  void set_neighbours(std::shared_ptr<DualList> lists) { lists_ = std::move(lists); }
+  void setNeighbours(std::shared_ptr<DualList> lists) { lists_ = std::move(lists); }
 
 private:
   NlhConfig cfg_;

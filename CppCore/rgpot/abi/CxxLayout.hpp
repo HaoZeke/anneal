@@ -231,7 +231,7 @@ constexpr bool soversion_tags_unique() noexcept {
 static_assert(soversion_tags_unique(), "kCxxSoversionTable tags must be unique");
 
 /// Virtual functions declared by @c PotentialBase, destructor included.
-/// The cache hook @c set_cache adds one when @c RGPOT_HAS_CACHE is defined.
+/// The cache hook @c setCache adds one when @c RGPOT_HAS_CACHE is defined.
 /// A test counts the @c virtual declarations in Potential.hpp and fails when
 /// this and the header disagree.
 inline constexpr std::uint32_t kPotentialBaseVirtuals = 5;

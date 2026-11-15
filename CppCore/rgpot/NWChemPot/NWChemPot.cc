@@ -378,7 +378,7 @@ EngineBundle &probe_engine_bundle() {
   return retained;
 }
 
-bool NWChemPot::probe_available() {
+bool NWChemPot::probeAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_probe_done)
     return g_probe_ok;
@@ -391,7 +391,7 @@ bool NWChemPot::probe_available() {
   return g_probe_ok;
 }
 
-bool NWChemPot::abi_available() {
+bool NWChemPot::abiAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_abi_probe_done)
     return g_abi_probe_ok;

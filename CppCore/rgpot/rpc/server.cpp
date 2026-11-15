@@ -579,7 +579,7 @@ int runServer(int argc, char *argv[]
     };
 #ifdef RGPOT_POTSERV_MPI
     host.collective([&] {
-      if (!rgpot::NWChemPot::probe_available())
+      if (!rgpot::NWChemPot::probeAvailable())
         throw std::runtime_error("NWChem engine is not available on every rank");
     });
     host.collective(construct);
@@ -615,7 +615,7 @@ int runServer(int argc, char *argv[]
     std::unique_ptr<rgpot::CP2KPot> cp;
 #ifdef RGPOT_POTSERV_MPI
     host.collective([&] {
-      if (!rgpot::CP2KPot::probe_available())
+      if (!rgpot::CP2KPot::probeAvailable())
         throw std::runtime_error("CP2K shim is not available on every rank");
     });
     host.collective([&] { cp = std::make_unique<rgpot::CP2KPot>(); });
@@ -655,7 +655,7 @@ int runServer(int argc, char *argv[]
     std::unique_ptr<rgpot::CPMDPot> cp;
 #ifdef RGPOT_POTSERV_MPI
     host.collective([&] {
-      if (!rgpot::CPMDPot::probe_available())
+      if (!rgpot::CPMDPot::probeAvailable())
         throw std::runtime_error("CPMD engine is not available on every rank");
     });
     host.collective([&] { cp = std::make_unique<rgpot::CPMDPot>(); });

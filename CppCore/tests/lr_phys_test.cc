@@ -854,7 +854,7 @@ void test_edges() {
   sum.add(std::make_unique<DispersionPot>(scfg));
   sum.add(std::make_unique<NlhPot>());
   auto shared = std::make_shared<DualList>(2.0, 5.0, 0.4);
-  sum.share_neighbours(shared);
+  sum.shareNeighbours(shared);
   const Eval es = run(sum, tri, z3, box);
   check(es.has_stress, "the sum keeps child stress");
   threw = false;
