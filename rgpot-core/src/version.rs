@@ -295,4 +295,28 @@ mod tests {
             assert!(baseline.lines().any(|l| l == name), "baseline lacks {name}");
         }
     }
+
+    /// A library built without the schema feature lacks these names, so the
+    /// header declares them only when RGPOT_HAS_SCHEMA is defined.
+    #[test]
+    fn schema_only_names_are_behind_rgpot_has_schema() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let header = std::fs::read_to_string(format!("{root}/include/rgpot.h")).unwrap();
+        for needle in [
+            "#define PROTOCOL_MAJOR ",
+            "#define PROTOCOL_MINOR ",
+            "rgpot_potential_set_peer_capabilities(",
+        ] {
+            let name = needle.trim_end_matches([' ', '(']);
+            let at = header
+                .find(needle)
+                .unwrap_or_else(|| panic!("rgpot.h lacks {name}"));
+            let open = header[..at].rfind("#if").unwrap_or(0);
+            assert!(
+                header[open..].starts_with("#if defined(RGPOT_HAS_SCHEMA)")
+                    && !header[open..at].contains("#endif"),
+                "{name} is not behind #if defined(RGPOT_HAS_SCHEMA)"
+            );
+        }
+    }
 }

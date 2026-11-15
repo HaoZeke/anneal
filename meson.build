@@ -682,7 +682,9 @@ if get_option('with_rust_core')
     _cargo_features = []
     if rpc_enabled
         _cargo_features += ['rpc']
-        _args += ['-DRGPOT_HAS_RPC=TRUE']
+        # The rpc feature turns on schema, which guards
+        # rgpot_potential_set_peer_capabilities in rgpot.h.
+        _args += ['-DRGPOT_HAS_RPC=TRUE', '-DRGPOT_HAS_SCHEMA=TRUE']
     endif
     if get_option('with_cache')
         _cargo_features += ['cache']

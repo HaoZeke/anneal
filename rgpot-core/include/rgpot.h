@@ -48,15 +48,19 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
  */
 #define RGPOT_ABI_LAYOUT_REVISION 1
 
+#if defined(RGPOT_HAS_SCHEMA)
 /**
  * Wire-incompatible protocol revision.
  */
 #define PROTOCOL_MAJOR 1
+#endif
 
+#if defined(RGPOT_HAS_SCHEMA)
 /**
  * Additive protocol revision.
  */
 #define PROTOCOL_MINOR 0
+#endif
 
 /**
  * How a Hessian-vector product is computed.
@@ -349,6 +353,9 @@ DLManagedTensorVersioned *rgpot_tensor_cpu_f64_matrix3(double *data);
  * The returned tensor owns a copy of the data — the caller may free the
  * original buffer after this call.  Call `rgpot_tensor_free` when done.
  *
+ * Returns NULL, with a `rgpot_last_error()` message, when `data` is NULL,
+ * `rows` or `cols` is negative, or `rows * cols` overflows.
+ *
  * # Safety
  * `data` must point to at least `rows * cols` contiguous `f64` values.
  */
@@ -370,16 +377,20 @@ void rgpot_tensor_free(DLManagedTensorVersioned *tensor);
 /**
  * Get the device of a DLPack tensor.
  *
+ * For a NULL `tensor`, returns `{kDLCPU, -1}`; no real device has id -1.
+ *
  * # Safety
- * `tensor` must be a valid, non-null `DLManagedTensorVersioned*`.
+ * `tensor` must be NULL or a valid `DLManagedTensorVersioned*`.
  */
 DLDevice rgpot_tensor_device(const DLManagedTensorVersioned *tensor);
 
 /**
  * Get the raw data pointer of a DLPack tensor.
  *
+ * Returns NULL for a NULL `tensor`.
+ *
  * # Safety
- * `tensor` must be a valid, non-null `DLManagedTensorVersioned*`.
+ * `tensor` must be NULL or a valid `DLManagedTensorVersioned*`.
  */
 const void *rgpot_tensor_data(const DLManagedTensorVersioned *tensor);
 
@@ -387,10 +398,11 @@ const void *rgpot_tensor_data(const DLManagedTensorVersioned *tensor);
  * Get the shape array and number of dimensions of a DLPack tensor.
  *
  * Writes the number of dimensions to `*ndim_out` and returns a pointer to
- * the shape array (length `*ndim_out`).
+ * the shape array (length `*ndim_out`).  For a NULL `tensor`, writes 0 to
+ * `*ndim_out` and returns NULL; for a NULL `ndim_out`, returns NULL.
  *
  * # Safety
- * Both `tensor` and `ndim_out` must be valid, non-null pointers.
+ * `tensor` and `ndim_out` must each be NULL or a valid pointer.
  */
 const int64_t *rgpot_tensor_shape(const DLManagedTensorVersioned *tensor, int32_t *ndim_out);
 
@@ -431,6 +443,7 @@ eindir_abi_stamp_t rgpot_eindir_abi_stamp(void);
  */
 int32_t rgpot_eindir_abi_compatible(const eindir_abi_stamp_t *stamp);
 
+#if defined(RGPOT_HAS_SCHEMA)
 /**
  * Install the `Capabilities` message of the peer behind `pot`, checked
  * against what this build speaks.
@@ -454,6 +467,7 @@ int32_t rgpot_eindir_abi_compatible(const eindir_abi_stamp_t *stamp);
 enum rgpot_status_t rgpot_potential_set_peer_capabilities(const struct rgpot_potential_t *pot,
                                                           const uint8_t *caps,
                                                           uintptr_t size);
+#endif
 
 /**
  * Read the computed and served counters of `pot` into `out`.
@@ -820,6 +834,11 @@ int32_t rgpot_abi_compatible(const struct rgpot_abi_stamp_t *stamp);
  * Start an RPC server listening on `host:port`, dispatching to `pot`.
  *
  * This function blocks the current thread. It creates its own tokio runtime.
+ *
+ * A request whose `pos` does not hold three values per entry of `atmnrs`,
+ * or whose `box` does not hold 9 values, fails without calling the
+ * callback.  A successful callback whose forces tensor is not 3 doubles
+ * per atom on the CPU also fails the request.
  *
  * # Safety
  * `pot` must be a valid pointer obtained from `rgpot_potential_new`.
