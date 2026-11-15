@@ -283,25 +283,51 @@ if plumed_opt.allowed()
         plumed_lib = shared_library(
             'RgpotPlumed',
             files('plumed/RgpotColvar.cpp'),
-            dependencies: plumed_link + [lj_dep],
+            dependencies: plumed_link + [pot_spec_dep],
             link_with: rgpot,
             include_directories: [engines_inc, rgpot_inc],
             cpp_args: _args,
             name_prefix: 'lib',
             install: not meson.is_subproject(),
         )
-        if python3_engines.found() and find_program('plumed', required: false).found()
-            test(
-                'plumed_driver',
-                python3_engines,
-                args: [
-                    files('plumed/run_plumed.py'),
-                    rgpot_lj.full_path(),
-                    plumed_lib.full_path(),
-                ],
-                timeout: 180,
+        plumed_exe = find_program('plumed', required: false)
+        if python3_engines.found() and plumed_exe.found()
+            plumed_script = files('plumed/run_plumed.py')
+            plumed_eam = has_eam_table ? [
+                project_root / 'CppCore/tests/data/eam_table/CuNi.eam.alloy',
+            ] : []
+            plumed_python = get_option('with_python') ? [
+                meson.project_build_root() / 'python',
+            ] : []
+            plumed_cases = {
+                'plumed_driver': ['dimer', rgpot_lj.full_path()],
+                'plumed_debug_forces': ['forces'],
+                'plumed_box_derivatives': ['box'],
+                'plumed_units': ['units'],
+                'plumed_api': ['api'],
+            }
+            foreach name, head : plumed_cases
+                tail = [plumed_lib.full_path()]
+                if name in ['plumed_debug_forces', 'plumed_box_derivatives']
+                    tail += plumed_eam
+                elif name == 'plumed_api'
+                    tail += [rgpot.full_path()] + plumed_python
+                endif
+                test(
+                    name,
+                    python3_engines,
+                    args: [plumed_script] + head + tail,
+                    workdir: meson.current_build_dir(),
+                    timeout: 600,
+                )
+            endforeach
+        else
+            message(
+                'PLUMED tests skipped: needs python3 and the plumed program on PATH',
             )
         endif
+    else
+        message('PLUMED tests skipped: pkg-config plumed was not found')
     endif
 endif
 

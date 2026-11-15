@@ -66,12 +66,12 @@ def main() -> None:
     work_path = Path(work)
     work_path.mkdir(parents=True, exist_ok=True)
     factor = float(subprocess.check_output([tool, "--kJ-per-eV"], text=True).strip())
-    # 1 eV well, 0.8 nm cutoff, 0.1 nm zero crossing.
+    # 1 eV well, 8 Angstrom cutoff, 1 Angstrom zero crossing.
     (work_path / "plumed.dat").write_text(
         "\n".join(
             [
                 f"LOAD FILE={Path(plugin).resolve()}",
-                f"ene: RGPOT ATOMS=1,2 U0={factor:.16e} CUTOFF=0.8 PSI=0.1",
+                "ene: RGPOT ATOMS=1,2 POTENTIAL=LJ OPTIONS={u0 1.0 psi 1.0 cutoff 8.0} TYPES=Ar",
                 "b: BIASVALUE ARG=ene",
                 "PRINT ARG=ene FILE=COLVAR FMT=%16.10f",
                 "",
