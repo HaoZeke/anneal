@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 use anneal_core::methods::cluster_hopping::{Config, Ledger, run};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::packing::surface_hops;
