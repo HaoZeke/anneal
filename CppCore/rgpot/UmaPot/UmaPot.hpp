@@ -42,7 +42,7 @@ public:
 
   [[nodiscard]] PotCaps caps() const noexcept override {
     return {.reentrancy = Reentrancy::SharedInstance,
-            .perImageInstances = true};
+            .perImageInstances = true, .batched = true};
   }
 
   [[nodiscard]] const UmaConfig &config() const noexcept { return m_config; }

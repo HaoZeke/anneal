@@ -180,6 +180,16 @@ TEST_CASE("UmaPot empty model_path throws", "[UmaPot]") {
                       Catch::Matchers::ContainsSubstring("model_path"));
 }
 
+// forceBatchImpl is a real AOTI batch, not Potential's one-at-a-time
+// default. Callers (a NEB band) trust caps().batched for that.
+TEST_CASE("UmaPot advertises native batch evaluation", "[UmaPot]") {
+  rgpot::UmaConfig cfg;
+  cfg.model_path = "unused.pt2";
+  rgpot::UmaPot pot(cfg);
+  REQUIRE(pot.caps().batched);
+  REQUIRE(pot.caps().perImageInstances);
+}
+
 TEST_CASE("AOTI ZIP64 local sizes use the central directory",
           "[UmaPot][execstack]") {
   const auto elf = elf64_gnu_stack(7);
