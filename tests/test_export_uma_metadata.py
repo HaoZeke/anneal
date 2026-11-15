@@ -151,6 +151,69 @@ def test_dynamic_package_omits_natoms_when_counts_are_absent():
     assert meta["z_set"] == [6]
 
 
+def test_dynamic_bounds_default_to_the_neighbour_cap():
+    assert exp.dynamic_bounds(1024, 0, 300) == (2, 1024, 1, 307200)
+    assert exp.dynamic_bounds(64, 5000, 300) == (2, 64, 1, 5000)
+    with pytest.raises(SystemExit):
+        exp.dynamic_bounds(1, 0, 300)
+
+
+def test_trace_safe_refuses_sizes_that_merge_with_static_axes():
+    assert not exp.trace_safe(3, 6)  # HCN: 3 is the coordinate axis
+    assert not exp.trace_safe(2, 2)
+    assert not exp.trace_safe(8, 8)
+    assert not exp.trace_safe(9, 3)
+    assert exp.trace_safe(8, 56)
+    assert exp.trace_safe(9, 72)
+
+
+class _NeighbourSum(torch.nn.Module):
+    def forward(self, pos, atomic_numbers, cell, pbc, edge_index,
+                cell_offsets, charge, spin, batch, natoms):
+        shift = cell_offsets @ cell.squeeze(0)
+        vec = pos.index_select(0, edge_index[0]) - pos.index_select(
+            0, edge_index[1]) + shift
+        energy = vec.norm(dim=-1).sum() + atomic_numbers.sum() * 0
+        return energy, torch.zeros_like(pos)
+
+
+def _toy_example(n, e):
+    pos = torch.arange(3 * n, dtype=torch.float64).reshape(n, 3)
+    edge_index = torch.stack(
+        [torch.arange(e) % n, (torch.arange(e) + 1) % n]
+    ).long()
+    return (
+        pos,
+        torch.full((n,), 6, dtype=torch.long),
+        torch.eye(3, dtype=torch.float64).reshape(1, 3, 3) * 25,
+        torch.ones((1, 3), dtype=torch.bool),
+        edge_index,
+        torch.zeros((e, 3), dtype=torch.float64),
+        torch.zeros(1, dtype=torch.long),
+        torch.ones(1, dtype=torch.long),
+        torch.zeros(n, dtype=torch.long),
+        torch.tensor([n]),
+    )
+
+
+def test_export_dynamic_records_the_ranges_it_traced():
+    module = _NeighbourSum()
+    program, record = exp.export_dynamic(
+        module, _toy_example(9, 72), (2, 64, 1, 4096)
+    )
+    assert record["natoms_min"] == 2
+    assert record["natoms_max"] == 64
+    assert record["nedges_min"] == 1
+    assert record["nedges_max"] == 4096
+    assert record["pos_shape"] == "natoms,3"
+    assert record["edge_index_shape"] == "2,nedges"
+    for n, e in ((3, 6), (12, 7), (40, 900)):
+        example = _toy_example(n, e)
+        got, _ = program.module()(*example)
+        want, _ = module(*example)
+        torch.testing.assert_close(got, want, rtol=0, atol=0)
+
+
 def test_baker_dedup_keeps_compositions_that_share_an_element_set(
     tmp_path, monkeypatch
 ):

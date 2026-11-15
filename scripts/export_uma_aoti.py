@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Freeze UMA-omol, export a tensor-only module, AOTI-package it.
+"""Export UMA as a tensor-only module and AOTI-package it.
 
 Neighbor lists stay outside the graph (vesin). The exported module consumes
 precomputed edge_index / cell_offsets, matching eSCNMDBackbone with
-otf_graph=False. merge_mole stays on, so one .pt2 covers one composition
-(z_set, charge, spin).
+otf_graph=False.
 
 Stages:
   1. ASE FAIRChemCalculator reference on the chosen atoms
@@ -13,18 +12,39 @@ Stages:
   4. AOTInductor .pt2
   5. Load .pt2 in-process and compare again
 
+Dynamic export (the default: no --molecular-box, no --batch-max):
+  One graph with torch.export.Dim for the atom count and the edge count:
+    natoms in [2, --max-atoms]           (default [2, 1024])
+    nedges in [1, --max-edges]           (default [1, max_atoms * 300])
+  Every input whose size follows them (pos, atomic_numbers, batch;
+  edge_index, cell_offsets) shares the symbol. The bounds the program
+  accepts are read back from it and embedded as natoms_min/natoms_max
+  and nedges_min/nedges_max, with pos_shape natoms,3 and
+  edge_index_shape 2,nedges. rgpot's UmaPot refuses anything outside.
+  The MoLE experts stay in the graph and their mix is computed from the
+  input atoms, charge and spin, so one package covers every composition
+  of the --task head; it records no z_set, natoms or counts, and z_max
+  bounds the atomic numbers. --merge-mole folds the mix of --atoms into
+  the weights instead: a smaller package for that composition only.
+  Before the package is kept it must match FAIRChemCalculator on --atoms,
+  on --atoms with its last atom moved past the cutoff (fewer edges), on
+  a second molecule (unless --merge-mole) and on each --check-atoms.
+  Limits: one system per call; at least two atoms and one edge (a lone
+  atom has no edge and fairchem answers it from isolated-atom
+  references); charge, spin and task are recorded and checked as the
+  exported values; the package is compiled for the CPU ISA of the
+  export host. A float64 package keeps all experts, about 1.2 GB for
+  uma-s-1p1 (half that in float32; about 55 MB with --merge-mole).
+
+--molecular-box and --batch-max keep the earlier static or band graphs
+with merge_mole on: one composition, n(n-1) edges per system.
+
 ``--dtype float64`` converts the loaded model with ``hydra.double()`` before
 the trace and records ``pos_dtype`` and ``model_dtype`` as ``float64``.
 ``--dtype float32`` calls ``hydra.float()`` and records ``float32``.
 
-The edge count is exported as a symbol: integer-array gathers are
-replaced by index_select, the module is traced with
-make_fx(tracing_mode="symbolic"), and a second geometry has to match a
-same-dtype reference before that package is kept. The atom count stays
-the traced size. If the symbolic trace cannot be checked, the script
-falls back to a static make_fx(tracing_mode="real") package, and the
-runtime names both shapes instead of reading past the buffer. The path
-taken is embedded as export_path.
+The checkpoint is --checkpoint, else $RGPOT_UMA_CHECKPOINT, else --model
+downloaded from Hugging Face. The path taken is embedded as export_path.
 """
 
 from __future__ import annotations
@@ -360,16 +380,12 @@ class TensorUma(nn.Module):
         # requires-grad tensor back to the caller.
         pos = pos.clone().requires_grad_(True)
         cell = cell.clone().requires_grad_(True)
-        # The packed graph always applies the batched cell shift, which
-        # reads nedges. A static single-system trace has one edge count,
-        # n(n-1) under a molecular box, so the real count is the right
-        # value. A zero placeholder makes repeat_interleave allocate the
-        # wrong number of rows.
-        nedges = torch.tensor(
-            [int(edge_index.shape[1])],
-            dtype=torch.long,
-            device=edge_index.device,
-        )
+        # The patched graph always applies the batched cell shift, which
+        # reads nedges. int(edge_index.shape[1]) would bake the traced
+        # count into the program as a constant; a row count of ones
+        # stays a function of the input. A zero placeholder makes
+        # repeat_interleave allocate the wrong number of rows.
+        nedges = torch.ones_like(edge_index[1]).sum().reshape(1)
         z = atomic_numbers.long()
         b = batch.long()
         data = TensorData(
@@ -468,27 +484,56 @@ class TensorUmaBatched(TensorUma):
         return energy, forces
 
 
-def _settings():
+def _settings(merge_mole: bool = True, precision=None):
     from fairchem.core.units.mlip_unit.api.inference import InferenceSettings
 
+    extra = {} if precision is None else {"base_precision_dtype": precision}
     return InferenceSettings(
         tf32=False,
         activation_checkpointing=False,
-        merge_mole=True,
+        merge_mole=merge_mole,
         compile=False,
         external_graph_gen=True,
         internal_graph_gen_version=2,
         execution_mode="general",
         auto_add_default_untrained_tasks=True,
+        **extra,
     )
 
 
-def load_predictor(name: str, device: str):
+def checkpoint_from_env(explicit: str | None = None) -> str | None:
+    """``explicit``, else ``RGPOT_UMA_CHECKPOINT``, else None (download)."""
+    raw = explicit if explicit else os.environ.get("RGPOT_UMA_CHECKPOINT", "")
+    raw = raw.strip()
+    if not raw:
+        return None
+    if not Path(raw).is_file():
+        raise SystemExit(f"UMA checkpoint not found: {raw}")
+    return raw
+
+
+def predict_unit(model: str, device: str, settings, checkpoint: str | None = None):
+    """A fairchem predict unit from a local checkpoint or by model name.
+
+    A local checkpoint carries no isolated-atom references; fairchem only
+    reads those for a one-atom system, which no export accepts.
+    """
+    if checkpoint:
+        from fairchem.core.units.mlip_unit import load_predict_unit
+
+        return load_predict_unit(
+            checkpoint, inference_settings=settings, device=device
+        )
     from fairchem.core import pretrained_mlip
 
     return pretrained_mlip.get_predict_unit(
-        name, device=device, inference_settings=_settings()
+        model, device=device, inference_settings=settings
     )
+
+
+def load_predictor(name: str, device: str, checkpoint: str | None = None,
+                   merge_mole: bool = True):
+    return predict_unit(name, device, _settings(merge_mole), checkpoint)
 
 
 def ase_reference(
@@ -497,6 +542,7 @@ def ase_reference(
     device: str,
     task_name: str = "omol",
     dtype_name: str = "float32",
+    checkpoint: str | None = None,
 ):
     """ASE FAIRChemCalculator in ``dtype_name``, internal graph gen.
 
@@ -505,7 +551,7 @@ def ase_reference(
     ``hydra.double()``. float32 does the same with ``hydra.float()``.
     The 1e-4 gate compares an export only to this same-dtype result.
     """
-    from fairchem.core import FAIRChemCalculator, pretrained_mlip
+    from fairchem.core import FAIRChemCalculator
     from fairchem.core.units.mlip_unit.api.inference import InferenceSettings
 
     if dtype_name == "float64":
@@ -525,9 +571,7 @@ def ase_reference(
         execution_mode="general",
         base_precision_dtype=precision,
     )
-    pred = pretrained_mlip.get_predict_unit(
-        model, device=device, inference_settings=settings
-    )
+    pred = predict_unit(model, device, settings, checkpoint)
     apply_export_dtype(pred.model, dtype_name)
     a = atoms.copy()
     a.calc = FAIRChemCalculator(pred, task_name=task_name)
@@ -1229,9 +1273,339 @@ def _export_packed(
     )
 
 
+# Bounds of the dynamic single-system graph. One atom has no edge and
+# fairchem answers it from isolated-atom references, not the network.
+DYNAMIC_NATOMS_MIN = 2
+DYNAMIC_NATOMS_MAX = 1024
+DYNAMIC_NEDGES_MIN = 1
+# Traced instead of --atoms when --atoms cannot carry free symbols.
+TRACE_MOLECULE = "CH3CH2OH"
+SECOND_MOLECULE = "CH3CH2OH"
+SECOND_MOLECULE_ALT = "H2O"
+
+
+def dynamic_bounds(max_atoms: int, max_edges: int, max_neighbors: int):
+    """(natoms_min, natoms_max, nedges_min, nedges_max) of a dynamic export.
+
+    ``max_edges`` of 0 means every atom at the per-atom neighbour cap.
+    """
+    hi_atoms = int(max_atoms)
+    if hi_atoms < DYNAMIC_NATOMS_MIN:
+        raise SystemExit(
+            f"--max-atoms must be at least {DYNAMIC_NATOMS_MIN}, not {hi_atoms}"
+        )
+    hi_edges = int(max_edges) if int(max_edges) > 0 else hi_atoms * int(max_neighbors)
+    if hi_edges < DYNAMIC_NEDGES_MIN:
+        raise SystemExit(f"--max-edges must be positive, not {hi_edges}")
+    return DYNAMIC_NATOMS_MIN, hi_atoms, DYNAMIC_NEDGES_MIN, hi_edges
+
+
+def trace_safe(natoms: int, nedges: int) -> bool:
+    """Whether a geometry can be the example of a dynamic trace.
+
+    Symbolic make_fx gives every input axis a symbol and merges axes of
+    equal size. An atom or edge count of 1, 2 or 3 merges with the
+    batch, edge_index or coordinate axis, and equal atom and edge counts
+    merge with each other; export then refuses the declared Dim.
+    """
+    static = {0, 1, 2, 3}
+    return natoms not in static and nedges not in static and natoms != nedges
+
+
+def boxed_molecule(name: str, charge: int = 0, spin: int = 1,
+                   side: float = 25.0) -> Atoms:
+    from ase.build import molecule
+
+    atoms = molecule(name)
+    atoms.set_cell([side, side, side])
+    atoms.set_pbc(True)
+    atoms.center()
+    atoms.info.update({"charge": int(charge), "spin": int(spin)})
+    return atoms
+
+
+def _input_axis(program, index: int, axis: int):
+    """Symbol or int of one axis of user input ``index`` in ``program``."""
+    names = list(program.graph_signature.user_inputs)
+    nodes = {n.name: n for n in program.graph.nodes if n.op == "placeholder"}
+    val = nodes[names[index]].meta.get("val")
+    return val.shape[axis]
+
+
+def dynamic_export_record(program) -> dict:
+    """Atom and edge ranges the exported program accepts, read back from it.
+
+    A specialised axis is refused: it would freeze the traced size.
+    """
+    out = {}
+    for key, index, axis in (("natoms", 0, 0), ("nedges", 4, 1)):
+        size = _input_axis(program, index, axis)
+        if isinstance(size, int):
+            raise ExportRefusal(f"{key} was specialised to {size}")
+        expr = size.node.expr
+        bound = program.range_constraints.get(expr)
+        if bound is None:
+            raise ExportRefusal(f"{key} has no range in the exported program")
+        out[f"{key}_min"] = int(bound.lower)
+        out[f"{key}_max"] = int(bound.upper)
+    return {
+        "molecular_box": 0.0,
+        "molecular": False,
+        **out,
+        "pos_shape": "natoms,3",
+        "edge_index_shape": "2,nedges",
+    }
+
+
+def export_dynamic(wrap: nn.Module, example, bounds):
+    """One program with a symbolic atom count and a symbolic edge count.
+
+    torch.export of the module itself leaves a fake tensor from the
+    in-graph autograd.grad in the program constants. Symbolic make_fx
+    records the same graph without it, and the export then pins the
+    symbols to ``bounds``.
+    """
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    lo_a, hi_a, lo_e, hi_e = bounds
+    atoms_d = torch.export.Dim("natoms", min=lo_a, max=hi_a)
+    edges_d = torch.export.Dim("nedges", min=lo_e, max=hi_e)
+    # Positional: the make_fx graph's placeholder names are not the
+    # wrapper's argument names.
+    dyn = (
+        {0: atoms_d},  # pos
+        {0: atoms_d},  # atomic_numbers
+        None,  # cell
+        None,  # pbc
+        {1: edges_d},  # edge_index
+        {0: edges_d},  # cell_offsets
+        None,  # charge
+        None,  # spin
+        {0: atoms_d},  # batch
+        None,  # natoms
+    )
+    traced = tuple(tensor.clone() for tensor in example)
+    graph = make_fx(
+        wrap,
+        tracing_mode="symbolic",
+        _allow_non_fake_inputs=True,
+        _allow_fake_constant=True,
+    )(*traced)
+    print("dynamic make_fx nodes", len(graph.graph.nodes), flush=True)
+    program = torch.export.export(graph, example, dynamic_shapes=dyn, strict=False)
+    return program, dynamic_export_record(program)
+
+
+def merge_task_heads(hydra: nn.Module, data) -> None:
+    """Fold each output head onto the task of ``data``.
+
+    The head's expert is chosen by the dataset name alone, so this does
+    not depend on the composition. The backbone keeps its MoLE layers.
+    """
+    module = hydra.module if hasattr(hydra, "module") else hydra
+    for name, head in module.output_heads.items():
+        if getattr(head, "merged_on_dataset", None) is not None:
+            continue
+        if hasattr(head, "merge_MOLE_model"):
+            head.merge_MOLE_model(data)
+            print(f"merged head {name} on {data.dataset[0]}", flush=True)
+
+
+def _dynamic_checks(args, atoms, cutoff, max_n, bounds, task_name, charge,
+                    spin, e_ref, f_ref, merge_mole):
+    """Geometries a dynamic package must reproduce before it is kept.
+
+    The input, the input with its last atom moved past the cutoff (fewer
+    edges), a second molecule when the composition is free, and every
+    --check-atoms structure. References come from FAIRChemCalculator and
+    must be computed before patch_export_ops() changes fairchem.
+    """
+    lo_a, hi_a, lo_e, hi_e = bounds
+    checks = [("input", atoms, e_ref, f_ref)]
+    candidates = []
+    crossed = _separated(atoms, cutoff)
+    candidates.append(("cutoff", crossed))
+    if not merge_mole:
+        name = SECOND_MOLECULE
+        if counts_of(boxed_molecule(name)) == counts_of(atoms):
+            name = SECOND_MOLECULE_ALT
+        candidates.append(("second", boxed_molecule(name, charge, spin)))
+    for path in args.check_atoms or []:
+        extra = load_atoms(path)
+        extra.info["charge"] = int(charge)
+        extra.info["spin"] = int(spin)
+        if merge_mole and counts_of(extra) != counts_of(atoms):
+            raise SystemExit(
+                f"--check-atoms {path}: --merge-mole fixes the composition "
+                f"{counts_of(atoms)}, this structure is {counts_of(extra)}"
+            )
+        candidates.append((Path(path).stem, extra))
+    base_edges = int(_vesin_edges(
+        np.asarray(atoms.get_positions(), dtype=np.float64),
+        np.asarray(atoms.get_cell(), dtype=np.float64), cutoff,
+        max_neighbors=max_n)[0].shape[1])
+    for tag, cand in candidates:
+        n = len(cand)
+        edges = int(_vesin_edges(
+            np.asarray(cand.get_positions(), dtype=np.float64),
+            np.asarray(cand.get_cell(), dtype=np.float64), cutoff,
+            max_neighbors=max_n)[0].shape[1])
+        if tag == "cutoff" and (edges == base_edges or edges < lo_e):
+            print(f"skip cutoff check: {edges} edges", flush=True)
+            continue
+        if not (lo_a <= n <= hi_a and lo_e <= edges <= hi_e):
+            raise SystemExit(
+                f"check {tag}: {n} atoms and {edges} edges are outside "
+                f"natoms [{lo_a}, {hi_a}] and nedges [{lo_e}, {hi_e}]"
+            )
+        print(f"reference {tag}: natoms={n} nedges={edges}", flush=True)
+        e_c, f_c, _ = ase_reference(
+            cand, args.model, args.device, task_name,
+            dtype_name=args.dtype, checkpoint=args.checkpoint,
+        )
+        checks.append((tag, cand, e_c, f_c))
+    return checks
+
+
+def run_dynamic(args, wrap, hydra, cutoff, max_n, dtype, device,
+                meta, checks, bounds, merge_mole) -> int:
+    """Export, package and check the dynamic single-system graph."""
+    inputs = [
+        (tag, a, pack_example(a, cutoff, device, dtype, max_n), e_c, f_c)
+        for tag, a, e_c, f_c in checks
+    ]
+    for tag, _a, x, e_c, f_c in inputs:
+        with torch.enable_grad():
+            e_e, f_e = wrap(*x)
+        if not compare(f"eager-{tag}", e_e.detach().cpu(),
+                       f_e.detach().cpu().numpy(), e_c, f_c):
+            print(f"FAIL: eager wrapper does not match ASE on {tag}",
+                  file=sys.stderr)
+            return 2
+    trace = next(((tag, x) for tag, a, x, _e, _f in inputs
+                  if trace_safe(len(a), int(x[4].shape[1]))), None)
+    if trace is None:
+        trace_atoms = boxed_molecule(
+            TRACE_MOLECULE, int(meta.get("charge", 0)), int(meta.get("spin", 1))
+        )
+        trace = (TRACE_MOLECULE, pack_example(trace_atoms, cutoff, device,
+                                              dtype, max_n))
+    trace_tag, example = trace
+    print(
+        f"dynamic export: trace {trace_tag} natoms={example[0].shape[0]} "
+        f"nedges={example[4].shape[1]} bounds natoms=[{bounds[0]},{bounds[1]}] "
+        f"nedges=[{bounds[2]},{bounds[3]}]",
+        flush=True,
+    )
+    patch_export_ops()
+    dynamo_config = getattr(getattr(torch, "_dynamo", None), "config", None)
+    if dynamo_config is not None and hasattr(dynamo_config, "trace_autograd_ops"):
+        dynamo_config.trace_autograd_ops = True
+    try:
+        exported, record = export_dynamic(wrap, example, bounds)
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAIL: dynamic export: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 5
+    print(f"dynamic export ok {record}", flush=True)
+    for tag, _a, x, e_c, f_c in inputs:
+        with torch.enable_grad():
+            e_x, f_x = exported.module()(*x)
+        if not compare(f"exported-{tag}", e_x.detach().cpu(),
+                       f_x.detach().cpu().numpy(), e_c, f_c):
+            print(f"FAIL: exported program does not match ASE on {tag}",
+                  file=sys.stderr)
+            return 3
+    module = hydra.module if hasattr(hydra, "module") else hydra
+    meta.update(record)
+    meta["export_path"] = "dynamic"
+    meta["composition"] = "fixed" if merge_mole else "any"
+    meta["z_max"] = int(getattr(module.backbone, "max_num_elements", 100)) - 1
+    meta["validated"] = ",".join(
+        f"{tag}:{len(a)}/{int(x[4].shape[1])}" for tag, a, x, _e, _f in inputs
+    )
+    meta["shapes"] = {
+        "pos": ["natoms", 3],
+        "atomic_numbers": ["natoms"],
+        "cell": [1, 3, 3],
+        "pbc": [1, 3],
+        "edge_index": [2, "nedges"],
+        "cell_offsets": ["nedges", 3],
+        "charge": [1],
+        "spin": [1],
+        "batch": ["natoms"],
+        "natoms": [1],
+    }
+    if args.skip_aoti:
+        return 0
+    out = Path(args.out)
+    print("AOTI package", out, flush=True)
+    aoti_package(exported, out, metadata=meta)
+    pkg = load_aoti(out)
+    for tag, _a, x, e_c, f_c in inputs:
+        e_a, f_a = run_aoti(pkg, x)
+        if not compare(f"aoti-{tag}", torch.as_tensor(e_a).detach().cpu(),
+                       torch.as_tensor(f_a).detach().cpu().numpy(), e_c, f_c):
+            print(f"FAIL: AOTI package does not match ASE on {tag}; removed",
+                  file=sys.stderr)
+            out.unlink(missing_ok=True)
+            return 4
+    print("WROTE", out.resolve())
+    return 0
+
+
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--model", default="uma-s-1p1")
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "--model",
+        default="uma-s-1p1",
+        help="fairchem model name; downloaded unless --checkpoint is given",
+    )
+    p.add_argument(
+        "--checkpoint",
+        default=None,
+        help=(
+            "Local checkpoint file for --model (default: $RGPOT_UMA_CHECKPOINT; "
+            "unset downloads --model from Hugging Face)"
+        ),
+    )
+    p.add_argument(
+        "--merge-mole",
+        action="store_true",
+        help=(
+            "Dynamic export only: fold the expert mix of --atoms into the "
+            "weights. Smaller package, but it is valid for that composition "
+            "only and records z_set and counts. Default keeps the MoLE "
+            "layers, so one package covers every composition of the task."
+        ),
+    )
+    p.add_argument(
+        "--max-atoms",
+        type=int,
+        default=DYNAMIC_NATOMS_MAX,
+        help=f"Dynamic export: largest atom count (default {DYNAMIC_NATOMS_MAX})",
+    )
+    p.add_argument(
+        "--max-edges",
+        type=int,
+        default=0,
+        help=(
+            "Dynamic export: largest edge count (default 0: --max-atoms "
+            "times the model's per-atom neighbour cap, 300 for UMA)"
+        ),
+    )
+    p.add_argument(
+        "--check-atoms",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "Dynamic export: another structure the package must match "
+            "FAIRChemCalculator on before it is kept (repeatable)"
+        ),
+    )
     p.add_argument("--device", default="cpu")
     p.add_argument("--atoms", default=None, help="Structure (.xyz/.con). Default: Baker HCN.")
     p.add_argument("--charge", type=int, default=None, help="Total charge (default: atoms.info or 0)")
@@ -1320,16 +1694,33 @@ def main() -> int:
         f"z_set={z_set} counts={counts} natoms={len(atoms)}",
         flush=True,
     )
+    args.checkpoint = checkpoint_from_env(args.checkpoint)
+    molecular = bool(args.molecular_box and args.molecular_box > 0.0)
+    dynamic = (
+        not molecular
+        and int(args.batch_max) <= 1
+        and args.batch_style == "static"
+    )
+    merge_mole = bool(args.merge_mole) or not dynamic
     print(
         f"ASE FAIRChemCalculator reference {args.model} dtype={args.dtype}",
         flush=True,
     )
     e_ref, f_ref, pred = ase_reference(
-        atoms, args.model, args.device, task_name, dtype_name=args.dtype
+        atoms, args.model, args.device, task_name, dtype_name=args.dtype,
+        checkpoint=args.checkpoint,
     )
     print(f"ASE FAIRChemCalculator dtype={args.dtype} E={e_ref:.17g}", flush=True)
     for i, row in enumerate(f_ref):
         print(f"  F[{i}] {row[0]:.17g} {row[1]:.17g} {row[2]:.17g}")
+    if not merge_mole:
+        # The reference unit merged MoLE on this composition. The dynamic
+        # graph keeps the experts and computes their mix from the input.
+        precision = torch.float64 if args.dtype == "float64" else torch.float32
+        pred = predict_unit(
+            args.model, args.device, _settings(False, precision), args.checkpoint
+        )
+        apply_export_dtype(pred.model, args.dtype)
 
     hydra = pred.model
     backbone = hydra.module.backbone
@@ -1409,6 +1800,8 @@ def main() -> int:
     if not ok_ad:
         print("FAIL: vesin AtomicData via MLIPPredictUnit does not match ASE", file=sys.stderr)
         return 2
+    if not merge_mole:
+        merge_task_heads(hydra, data_v)
 
     # float64: hydra.double() before the trace. float32: hydra.float().
     apply_export_dtype(hydra, args.dtype)
@@ -1462,8 +1855,10 @@ def main() -> int:
         task_name=task_name,
         charge=charge,
         spin=spin,
-        z_set=z_set,
-        counts=counts,
+        # An unmerged graph computes the expert mix from its input, so
+        # it records no composition.
+        z_set=z_set if merge_mole else None,
+        counts=counts if merge_mole else None,
         label=label,
         model=args.model,
         molecular_box=float(args.molecular_box or 0.0),
@@ -1472,6 +1867,17 @@ def main() -> int:
     )
     if args.eager_only:
         return 0
+
+    if dynamic:
+        bounds = dynamic_bounds(args.max_atoms, args.max_edges, max_n)
+        checks = _dynamic_checks(
+            args, atoms, cutoff, max_n, bounds, task_name, charge, spin,
+            e_ref, f_ref, merge_mole,
+        )
+        return run_dynamic(
+            args, wrap, hydra, cutoff, max_n, dtype, device, meta,
+            checks, bounds, merge_mole,
+        )
 
     patch_export_ops()
     # torch 2.14 refuses torch.autograd.grad inside a strict export while
