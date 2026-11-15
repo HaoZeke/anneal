@@ -25,7 +25,8 @@ Use the standard prefixes:
 
 * Version
 
-The only handwritten package version is =[package].version= in the workspace =Cargo.toml=.
+The only handwritten package version is =[workspace.package].version= in the workspace =Cargo.toml=.
+Member crates inherit it.
 Edit that one line, then regenerate the copies from the repository root:
 
 #+BEGIN_SRC bash
@@ -38,7 +39,7 @@ It refreshes =pyproject.toml=, =pixi.toml=, =meson.build=, =CITATION.cff=, =incl
 The Zenodo creator list is read from =CITATION.cff=.
 =cog.toml= belongs to cocogitto (https://docs.cocogitto.io/), so this step does not call a bare =cog=.
 CMake, Sphinx, and the Rust crate read the same field when they configure or compile.
-=cargo update --workspace --offline= refreshes the =anneal-core= entry in =Cargo.lock= (https://doc.rust-lang.org/cargo/commands/cargo-update.html).
+=cargo update --workspace --offline= refreshes the =anneal-core= and =anneal-python= entries in =Cargo.lock= (https://doc.rust-lang.org/cargo/commands/cargo-update.html).
 Towncrier (https://towncrier.readthedocs.io/en/stable/) reads the field through =scripts/anneal_version.py=.
 Do not write a version into =towncrier.toml=.
 

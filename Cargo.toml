@@ -11,9 +11,13 @@
 members = ["crates/anneal-python"]
 exclude = ["vendor/nng", "vendor/nng-sys", "vendor/metatensor-sys"]
 
+# The one handwritten package version. Member crates inherit it.
+[workspace.package]
+version = "0.12.0"
+
 [package]
 name = "anneal-core"
-version = "0.12.0"
+version.workspace = true
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"

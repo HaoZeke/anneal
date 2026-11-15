@@ -1,5 +1,5 @@
-The package version is the ``version`` field in the workspace
-``Cargo.toml``.
+The package version is ``[workspace.package].version`` in the workspace
+``Cargo.toml``. Member crates inherit that field.
 Cog (https://nedbatchelder.com/code/cog/) generates the copies from that
 field.
 Those copies are the Python, Pixi, Meson, citation, Zenodo, README and C

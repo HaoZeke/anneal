@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Fail when a package version string disagrees with the workspace manifest.
 
-The canonical value is ``[package].version`` in the workspace ``Cargo.toml``.
+The canonical value is ``[workspace.package].version`` in the workspace ``Cargo.toml``.
 Generated copies are checked with cogapp (https://nedbatchelder.com/code/cog/).
 Towncrier reads the same field (https://towncrier.readthedocs.io/en/stable/).
 """
@@ -127,18 +128,34 @@ def main() -> int:
         ),
         None,
     )
-    # The first column-0 `version = "` line is [package].version.
+    # The first column-0 `version = "` line is [workspace.package].version.
     if first_version != version:
         fail(errors, f"first Cargo.toml version line is {first_version}")
 
     lock = anneal_version.load_toml(ROOT / "Cargo.lock")
-    locked = [
-        pkg.get("version")
-        for pkg in lock.get("package", [])
-        if pkg.get("name") == "anneal-core"
+    for crate in ("anneal-core", "anneal-python"):
+        locked = [
+            pkg.get("version")
+            for pkg in lock.get("package", [])
+            if pkg.get("name") == crate
+        ]
+        if locked != [version]:
+            fail(errors, f"Cargo.lock {crate} version is {locked}")
+
+    member = (ROOT / "crates" / "anneal-python" / "Cargo.toml").read_text(encoding="utf-8")
+    if "version.workspace = true" not in member:
+        fail(errors, "crates/anneal-python/Cargo.toml does not inherit the workspace version")
+    if re.search(r'(?m)^version = "[0-9]+\.[0-9]+\.[0-9]+"', member):
+        fail(errors, "crates/anneal-python/Cargo.toml has its own version")
+    handwritten = [
+        line
+        for line in cargo_text.splitlines()
+        if re.fullmatch(r'version = "[0-9]+\.[0-9]+\.[0-9]+"', line)
     ]
-    if locked != [version]:
-        fail(errors, f"Cargo.lock anneal-core version is {locked}")
+    if handwritten != [f'version = "{version}"']:
+        fail(errors, f"Cargo.toml handwritten versions are {handwritten}")
+    if "version.workspace = true" not in cargo_text:
+        fail(errors, "anneal-core does not inherit the workspace version")
 
     if anneal_version.__version__ != version:
         fail(errors, f"anneal_version.__version__ is {anneal_version.__version__}")

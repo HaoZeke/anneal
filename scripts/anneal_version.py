@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Read the workspace package version for towncrier.
 
 Towncrier imports this module when ``towncrier.toml`` names it.
@@ -34,7 +35,9 @@ def repo_root() -> Path:
 
 
 def package_version() -> str:
-    version = load_toml(repo_root() / "Cargo.toml")["package"]["version"]
+    manifest = load_toml(repo_root() / "Cargo.toml")
+    shared = (manifest.get("workspace") or {}).get("package") or {}
+    version = shared.get("version")
     if not isinstance(version, str) or version == "":
         raise SystemExit("workspace package version is missing")
     return version

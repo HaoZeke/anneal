@@ -20,8 +20,9 @@ commit. Do not move or delete the old name.
 
 * Version
 
-The handwritten package version is =[package].version= in the workspace
-=Cargo.toml=. Edit that one line, then run cogapp
+The handwritten package version is =[workspace.package].version= in the
+workspace =Cargo.toml=. Member crates inherit it. Edit that one line,
+then run cogapp
 (https://nedbatchelder.com/code/cog/) from the repository root:
 
 #+BEGIN_SRC bash
@@ -35,7 +36,7 @@ That refreshes =pyproject.toml=, =pixi.toml=, =meson.build=,
 CMake, Sphinx, and the Rust crate read the field
 themselves. CMake records =Cargo.toml= in =CMAKE_CONFIGURE_DEPENDS=
 so an existing build directory reconfigures after a bump.
-=cargo update --workspace --offline= refreshes the =anneal-core= entry in =Cargo.lock=
+=cargo update --workspace --offline= refreshes the =anneal-core= and =anneal-python= entries in =Cargo.lock=
 (https://doc.rust-lang.org/cargo/commands/cargo-update.html).
 Towncrier (https://towncrier.readthedocs.io/en/stable/)
 reads the field through =scripts/anneal_version.py=. Do not write a version

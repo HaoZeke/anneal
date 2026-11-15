@@ -8,9 +8,9 @@
 # system-wide consumers an alternate, install-time entry point.
 cmake_minimum_required(VERSION 3.22)
 
-# The project version is the workspace Cargo.toml [package].version.
-# The first column-0 `version = "` line is that field. The [workspace]
-# table does not set a version, so LIMIT_COUNT 1 stays on the package line.
+# The project version is [workspace.package].version in Cargo.toml.
+# The first column-0 `version = "` line is that field. Member crates
+# inherit it, so LIMIT_COUNT 1 stays on that one line.
 set_property(
     DIRECTORY
     APPEND

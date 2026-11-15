@@ -27,7 +27,11 @@ fn cff_value<'a>(source: &'a str, key: &str) -> &'a str {
 
 #[test]
 fn all_public_version_metadata_matches_manifest() {
-    let package_version = toml_value(include_str!("../Cargo.toml"), "[package]", "version");
+    let package_version = toml_value(
+        include_str!("../Cargo.toml"),
+        "[workspace.package]",
+        "version",
+    );
 
     assert_eq!(anneal_core::ANNEAL_VERSION, package_version);
     assert_eq!(
@@ -61,9 +65,20 @@ fn all_public_version_metadata_matches_manifest() {
 
     let lock = include_str!("../Cargo.lock");
     assert_eq!(lock_package_version(lock, "anneal-core"), package_version);
+    assert_eq!(lock_package_version(lock, "anneal-python"), package_version);
     assert_eq!(
         column_zero_version(include_str!("../Cargo.toml")),
         package_version
+    );
+    let root_manifest = include_str!("../Cargo.toml");
+    assert!(root_manifest.contains("version.workspace = true"));
+    let python_manifest = include_str!("../crates/anneal-python/Cargo.toml");
+    assert!(python_manifest.contains("version.workspace = true"));
+    assert!(
+        !python_manifest
+            .lines()
+            .any(|line| line.starts_with("version = \"")),
+        "anneal-python has a handwritten version"
     );
 
     let readme = include_str!("../README.md");
@@ -93,10 +108,12 @@ fn all_public_version_metadata_matches_manifest() {
     let reader = include_str!("../scripts/anneal_version.py");
     assert!(reader.contains("Cargo.toml"));
     assert!(reader.contains("anneal-core"));
-    assert!(reader.contains("[\"package\"][\"version\"]"));
+    assert!(reader.contains(".get(\"workspace\")"));
+    assert!(reader.contains(".get(\"package\")"));
+    assert!(reader.contains(".get(\"version\")"));
 }
 
-/// The first column-0 `version = "` line is `[package].version`.
+/// The first column-0 `version = "` line is `[workspace.package].version`.
 fn column_zero_version(source: &str) -> &str {
     source
         .lines()
@@ -173,7 +190,11 @@ fn citation_exposes_the_software_concept_doi() {
 
 #[test]
 fn changelog_has_release_notes_for_the_public_version() {
-    let package_version = toml_value(include_str!("../Cargo.toml"), "[package]", "version");
+    let package_version = toml_value(
+        include_str!("../Cargo.toml"),
+        "[workspace.package]",
+        "version",
+    );
     let changelog = include_str!("../CHANGELOG.md");
     let towncrier = include_str!("../towncrier.toml");
 
