@@ -102,6 +102,7 @@ fn main() {
             let scale = pair.r_min() / 2.0_f64.powf(1.0 / 6.0);
             cfg.min_separation *= scale;
             cfg.container *= scale;
+            cfg.pair_minimum = Some(pair.r_min());
             let mut rng = StdRng::seed_from_u64(seed);
             let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
             (cfg, start, Box::new(move |x| pot.value_and_gradient(x)))

@@ -214,12 +214,13 @@ fn main() {
     let prefix = &args[7];
 
     let water = kind == "tip4p";
-    let (model, start) = if water {
+    let (model, start, pair_minimum) = if water {
         let mut rng =
             StdRng::seed_from_u64(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(3));
         (
             Model::Water(GminTip4p::new(n)),
             random_tip4p_cluster(n, &mut rng),
+            None,
         )
     } else {
         let pair = match kind {
@@ -231,7 +232,8 @@ fn main() {
         let mut rng = StdRng::seed_from_u64(seed);
         let start =
             random_cluster_in_radius(n, sphere.start_radius(), sphere.min_separation, &mut rng);
-        (Model::Pair(pair), start)
+        let pair_minimum = pair.kind().r_min();
+        (Model::Pair(pair), start, Some(pair_minimum))
     };
     if water {
         std::fs::write(
@@ -269,15 +271,13 @@ fn main() {
             .0
         }
         (false, _) => {
-            search_from(
-                &objective,
-                &atomic_config(arm, n),
-                &mut ledger,
-                start.view(),
-                seed,
-            )
-            .expect("finite start")
-            .0
+            let mut cfg = atomic_config(arm, n);
+            if let Some(pair_minimum) = pair_minimum {
+                cfg.pair_minimum = Some(pair_minimum);
+            }
+            search_from(&objective, &cfg, &mut ledger, start.view(), seed)
+                .expect("finite start")
+                .0
         }
     };
     let wall = started.elapsed().as_secs_f64();

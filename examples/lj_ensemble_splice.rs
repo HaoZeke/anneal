@@ -787,6 +787,9 @@ fn run_chain(
             .unwrap_or_else(|_| panic!("TEMP must be a finite temperature"));
     }
     let surface_kind = Surface::from_environment(n);
+    if let Surface::Morse(pot, _) = &surface_kind {
+        cfg.pair_minimum = Some(pot.kind().r_min());
+    }
     let child_surface = surface_kind.clone();
     let mut rng = StdRng::seed_from_u64(seed);
     let mut exchange_rng = StdRng::seed_from_u64(seed ^ 0x0057_11ce);
