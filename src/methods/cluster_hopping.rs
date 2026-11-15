@@ -3593,6 +3593,10 @@ struct AcceptDial {
     /// Quenched energy changes of the opening hops while
     /// [`Config::measured_energy_scale`] is still reading them.
     rises: Option<Vec<f64>>,
+    /// Ratio of the measured scale to `energy_scale`, once measured.
+    measured: Option<f64>,
+    /// At the declared scale after a plateau, [`Self::reheat`].
+    hot: bool,
 }
 
 impl AcceptDial {
@@ -3608,6 +3612,8 @@ impl AcceptDial {
             floor,
             cap,
             rises: None,
+            measured: None,
+            hot: false,
         }
     }
 
@@ -3643,6 +3649,25 @@ impl AcceptDial {
         self.temperature *= factor;
         self.floor *= factor;
         self.cap *= factor;
+        self.measured = Some(factor);
+        Some(factor)
+    }
+
+    /// Moves a measured dial to the declared scale (`hot`) or back, and
+    /// returns the factor its temperature moved by. Nothing to move returns
+    /// `None`: an unmeasured dial, or one already where it is asked to be.
+    fn reheat(&mut self, hot: bool) -> Option<f64> {
+        let measured = self.measured?;
+        if self.hot == hot {
+            return None;
+        }
+        let factor = if hot { 1.0 / measured } else { measured };
+        self.temperature *= factor;
+        self.floor *= factor;
+        self.cap *= factor;
+        self.window = 0;
+        self.yes = 0;
+        self.hot = hot;
         Some(factor)
     }
 
@@ -3689,6 +3714,24 @@ mod contact_unit_tests {
             assert_eq!(fixed.measure(0.5, 1.0), None);
         }
         assert_eq!(fixed.temperature(), 0.8);
+    }
+
+    #[test]
+    fn a_reheated_dial_moves_between_the_declared_and_measured_scales() {
+        let mut dial = AcceptDial::new(0.8, 1.0).measuring(true);
+        assert_eq!(dial.reheat(true), None, "nothing measured yet");
+        for _ in 0..config::MEASURED_SCALE_HOPS {
+            dial.measure(0.04, 1.0);
+        }
+        assert!((dial.temperature() - 0.032).abs() < 1e-12);
+        let up = dial.reheat(true).expect("measured");
+        assert!((up - 25.0).abs() < 1e-9);
+        assert!((dial.temperature() - 0.8).abs() < 1e-12);
+        assert_eq!(dial.reheat(true), None, "already hot");
+        let down = dial.reheat(false).expect("hot");
+        assert!((down - 0.04).abs() < 1e-12);
+        assert!((dial.temperature() - 0.032).abs() < 1e-12);
+        assert_eq!(dial.reheat(false), None, "already measured");
     }
 
     fn tetrahedron() -> Array1<f64> {
@@ -4324,6 +4367,7 @@ where
     let mut continuous_symmetry_quenches = 0usize;
     let mut continuous_symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
+    let mut incumbent_hop = 0usize;
     let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
     let mut stall_escape_gain = 0.0_f64;
@@ -9127,6 +9171,21 @@ where
             quiet += 1;
         }
         let stuck = stalled(cfg, quiet, longest_quiet);
+        if cfg.plateau_reheat {
+            let moved = if improved {
+                incumbent_hop = hops;
+                dial.reheat(false)
+            } else if quiet >= config::MEASURED_SCALE_HOPS.max(incumbent_hop) {
+                dial.reheat(true)
+            } else {
+                None
+            };
+            if let Some(factor) = moved {
+                bias_height *= factor;
+                height = AdaptiveHeight::new(0.1, cfg.height_revisits, bias_height);
+                bias.set_height(height.height());
+            }
+        }
         // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
         // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
         // improvement, take `jump_steps` collective displacements with no
