@@ -11,6 +11,7 @@ exclude = """(?x)(
     ^docs/doctrees/|
     ^rgpot-core/target/|
     ^subprojects/(?!.*\\.wrap$)|
+    ^(CppCore/rgpot/rpc|rgpot-core/schema)/local/.*\\.diff$|
     ^CppCore/tests/data/|
     ^third_party/libxckernel/|
     ^third_party/lepton/|

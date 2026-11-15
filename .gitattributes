@@ -1,2 +1,5 @@
 # GitHub syntax highlighting
 pixi.lock linguist-language=YAML linguist-generated=true
+# Unified diffs mark a blank context line with one space.
+CppCore/rgpot/rpc/local/*.diff -whitespace
+rgpot-core/schema/local/*.diff -whitespace
