@@ -37,7 +37,7 @@ def run_enter(scratch, codes, arguments):
 
 class Gfn2Covalent:
     timeout = 86400
-    params: ClassVar[list[str]] = ["si10", "c10", "c20"]
+    params: ClassVar[list[str]] = ["si10", "c10", "si13", "c20"]
     param_names: ClassVar[list[str]] = ["system"]
 
     def setup(self, system):
