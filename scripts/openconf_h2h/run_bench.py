@@ -163,7 +163,12 @@ def paired(args) -> None:
     rng = random.Random(PAIRED_SCHEDULE_SEED)
     rng.shuffle(pairs)
     orders = {pair: rng.random() < 0.5 for pair in pairs}
-    pairs = [p for p in pairs if p[0] in names and p[1] in args.seeds]
+    # Seeds past the paired set follow it, so its schedule is unchanged.
+    beyond = sorted(set(args.seeds) - set(PAIRED_SEEDS))
+    extra = [(name, seed) for name in hc.molecules() for seed in beyond]
+    rng.shuffle(extra)
+    orders.update({pair: rng.random() < 0.5 for pair in extra})
+    pairs = [p for p in pairs + extra if p[0] in names and p[1] in args.seeds]
     tree = args.work / args.tree
     if args.pair:
         pairs = [(args.pair[0], int(args.pair[1]))]
