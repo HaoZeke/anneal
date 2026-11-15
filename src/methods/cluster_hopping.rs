@@ -5823,8 +5823,12 @@ where
         // acceptance rate. Nothing here reads a lattice or a motif, and a
         // chain that sets a new lowest before the gate never enters.
         let plateau_gap = (ledger.budget().saturating_mul(3) / 4).max(cfg.restart_patience.max(1));
+        // A free-atom restart is not a rigid or molecular state, so those
+        // chains never enter the atomic restart.
         if !plateau_restarted
             && hops > 0
+            && !cfg.move_library.is_rigid_body()
+            && !cfg.move_library.is_molecular()
             && ledger.spent().saturating_sub(spent_at_record) >= plateau_gap
             && ledger.remaining() > 0
             && !ledger.stopped()
