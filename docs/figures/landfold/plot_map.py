@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Draw the landfold map of the LJ38 minima book for the how-to.
 
 The script writes the LJ38 book with the ``landfold_lj_book`` example,
