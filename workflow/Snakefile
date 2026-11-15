@@ -693,3 +693,33 @@ rule h2o16_crest:
         set -euo pipefail
         python3 scripts/h2o16_crest/summarize.py
         """
+
+
+# Hyperband walkers and the discounted move bandit against the baseline.
+# Appends raw rows; finished (variant, system, seed) rows are kept. One
+# serial session on core 0, hostname bench, seeds 2000-2011, the paper
+# budgets. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile decide_rows
+rule decide_rows:
+    output:
+        "bench/decide/rows.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/decide_bench/enter_bench.sh baseline hyperband thompson ducb
+        """
+
+
+# Hits, median calls and the tests against the baseline. Reads the rows;
+# it does not launch a search. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile decide_summary
+rule decide_summary:
+    input:
+        "bench/decide/rows.csv",
+    output:
+        "bench/decide/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/decide_bench/summarise.py
+        """
