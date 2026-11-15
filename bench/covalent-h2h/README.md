@@ -657,7 +657,7 @@ GFN-FF runs on both clusters, but it is a bonded force field whose
 topology is fixed from the input geometry, so a search on it cannot
 rearrange the cluster. GFN2-xTB has no topology. Both codes search it with
 real xtb 6.7.1 (conda-forge build): anneal through rgpot's
-`libxtb_engine.so` at the pinned engine revision, and CREST 3.0.2 through
+`libxtb_engine.so` at engine `04aceaa7`, and CREST 3.0.2 through
 its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 300 K, so both run at an electronic temperature of 3000 K
 (`RGPOT_XTB_ETEMP`, 300 K when unset).
@@ -685,9 +685,17 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
   anneal.
 - The reference is the lowest minimum any run reached: -460.68373809 eV
   for Si10, and for C10 -571.32273783 eV, the cumulenic ring with every
-  bond at 1.285 Å. A hit is within 1e-3 eV. Seeds 2000-2011 on C10 for
-  both codes. On Si10, anneal runs all twelve seeds and CREST, at about
-  45 minutes a run, seeds 2000-2003. Serial on core 0, hostname `bench`.
+  bond at 1.285 Å. A hit is within 1e-3 eV. Seeds 2000-2011 on C10 and
+  C20 for both codes. On Si10, anneal runs all twelve seeds and CREST, at
+  about 45 minutes a run, seeds 2000-2003. Serial on core 0, hostname
+  `bench`.
+- The C20 reference, -1148.85383633 eV, is a cage with every atom
+  three-coordinated and bonds from 1.449 Å. One run found it: anneal
+  without the call floor (`91a4aa70`, develop `f2a628c0` with these
+  systems), seed 2006 at 1e5 calls, in an untimed comparison. No other run
+  of either code has reached it: the 24 timed runs below, and six untimed
+  anneal runs on seeds 3000-3005, three at 1e5 calls and three at 3e5.
+  xtb 6.7.1 gives the cage the same energy from a fresh SCC, to 1e-9 Eh.
 
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
@@ -695,6 +703,8 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 | Si10 | CREST | 4/4 | 99,300 | 7,900 | -460.683718 | 2699.1 | 26.76 ms | 0.252 ms |
 | C10 | anneal G | 12/12 | 2,517 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |
 | C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
+| C20 | anneal G | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |
+| C20 | CREST | 0/12 | 78,582 | 6,308 | -1146.770080 | 1545.1 | 19.30 ms | 0.307 ms |
 
 CREST's calls are the calls of its whole run, which does not stop at the
 reference.
@@ -718,6 +728,26 @@ reference.
   666, and no charged call is refused (`geometry_rejected`, which the
   example prints, is 0 on every Si10 and C10 seed). A refused call took
   no time in xtb, so the inside time per call rises on both.
+- C20: neither code reaches the cage. Anneal's best is lower than
+  CREST's on 134 of the 144 pairs of seeds (Mann-Whitney p = 0.0004):
+  -1148.293 eV at best (seed 2000), and -1146.550 eV on five seeds,
+  against CREST's -1146.770 eV at best (seed 2004) and median -1144.664.
+  No anneal call was refused or failed its SCC. The rows were
+  measured on `5351f272` (develop `eae26977` with the call floor and these
+  systems) with untimed searches on the other cores. The delivered code
+  ends seeds 2005 and 2007 at the same energies after the same 1e5 calls,
+  and repeats seeds 2000 and 2001 over their first 5000 calls.
+- Si13 and Si20 are pending. The engine hands a search's next SCC the
+  previous wavefunction as its guess, and on these clusters at 3000 K that
+  guess lands on another, lower solution. Anneal's Si13 minimum at
+  -601.12421 eV is -593.51232 eV from a fresh SCC in the same engine and
+  in xtb 6.7.1, which is what CREST's xtb processes see; CREST's best Si13
+  structure is -599.34544 eV either way. Si20 minima near -979 eV are near
+  -868 eV fresh. One Si13 search recorded a planar sheet at -640.659 eV
+  whose SCC does not converge from a fresh start. The Si10, C10 and C20
+  minima above evaluate to the same energy fresh, to 1e-10 eV. Develop's
+  pinned engine, `b4154a4d`, keeps the reused guess and adds a smeared
+  one for an SCC that does not converge.
 
 `scripts/covalent_h2h/gfn2_enter_bench.sh` builds the example from a
 clean tree and runs both codes; `GFN2_CODES=anneal-general` reruns
@@ -764,5 +794,5 @@ Three first-parent commits changed it:
 - `reference.csv`: the unstopped reference runs.
 - `tc20-bowl.xyz`, `tc20-flake.xyz`: the C20 bowl and the best unbiased flake.
 - `c10-96/`: the 96-seed C10 rows.
-- `gfn2/`: per-seed rows and summary of GFN2-xTB Si10 and C10, anneal
-  against CREST.
+- `gfn2/`: per-seed rows and summary of GFN2-xTB Si10, C10 and C20,
+  anneal against CREST.
