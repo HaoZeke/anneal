@@ -125,6 +125,8 @@ struct XtbConfig {
 type XtbCreate = unsafe extern "C" fn(*const XtbConfig, *mut u8, usize) -> *mut c_void;
 type XtbDestroy = unsafe extern "C" fn(*mut c_void);
 type XtbReset = unsafe extern "C" fn(*mut c_void);
+type XtbSetWarmMove = unsafe extern "C" fn(*mut c_void, f64);
+type XtbWarmMove = unsafe extern "C" fn(*const c_void) -> f64;
 type XtbForce = unsafe extern "C" fn(
     *mut c_void,
     i64,
@@ -631,7 +633,7 @@ impl RgpotObjective {
     }
 
     pub(crate) fn xtb(atmnrs: &[i32], box_: [f64; 9]) -> Self {
-        Self::xtb_with_overlap_limit(atmnrs, box_, OVERLAP_CALL_LIMIT_A)
+        Self::xtb_engine(atmnrs, box_, OVERLAP_CALL_LIMIT_A, None)
     }
 
     /// `xtb` with another refusal distance, for a caller that cannot take a
@@ -641,6 +643,23 @@ impl RgpotObjective {
         atmnrs: &[i32],
         box_: [f64; 9],
         overlap_limit_a: f64,
+    ) -> Self {
+        Self::xtb_engine(atmnrs, box_, overlap_limit_a, None)
+    }
+
+    /// Every call starts its SCC from xtb's own guess, as an xtb process
+    /// does. The engine otherwise reuses the previous call's wavefunction
+    /// within its warm move, and on a near-degenerate cluster that guess
+    /// can converge to another SCC solution.
+    pub(crate) fn xtb_fresh(atmnrs: &[i32], box_: [f64; 9]) -> Self {
+        Self::xtb_engine(atmnrs, box_, OVERLAP_CALL_LIMIT_A, Some(0.0))
+    }
+
+    fn xtb_engine(
+        atmnrs: &[i32],
+        box_: [f64; 9],
+        overlap_limit_a: f64,
+        warm_move: Option<f64>,
     ) -> Self {
         let path = first_existing(&[
             env_path("RGPOT_XTB_ENGINE").unwrap_or_default(),
@@ -677,6 +696,19 @@ impl RgpotObjective {
         let pot = unsafe { create(&cfg, err.as_mut_ptr(), err.len()) };
         if pot.is_null() {
             panic!("rgpot_xtb_create failed: {}", String::from_utf8_lossy(&err));
+        }
+        if let Some(angstrom) = warm_move {
+            // The worker is forked from this process and inherits the setting.
+            let set_warm: Symbol<XtbSetWarmMove> =
+                unsafe { lib.get(b"rgpot_xtb_set_warm_move\0") }.expect("rgpot_xtb_set_warm_move");
+            let get_warm: Symbol<XtbWarmMove> =
+                unsafe { lib.get(b"rgpot_xtb_warm_move\0") }.expect("rgpot_xtb_warm_move");
+            unsafe { set_warm(pot, angstrom) };
+            assert_eq!(
+                unsafe { get_warm(pot) },
+                angstrom,
+                "rgpot_xtb_set_warm_move"
+            );
         }
         let force =
             unsafe { std::mem::transmute::<Symbol<XtbForce>, Symbol<'static, XtbForce>>(force) };
