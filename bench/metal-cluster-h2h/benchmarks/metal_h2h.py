@@ -6,12 +6,23 @@ The clock is the same serial arm the Snakemake rule runs, inside
 one ``h2h_metal budget`` prints for that Cambridge system.
 """
 
-from pathlib import Path
 import subprocess
-
+import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "metal_h2h" / "enter_bench.sh"
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import check_budget, smoke
+
+PAPER_BUDGETS = {
+    "zn38": 50_000,
+    "zn55": 80_000,
+    "zn75": 100_000,
+    "zn80": 100_000,
+    "cu19au19": 80_000,
+}
 
 
 class MetalHeadToHead:
@@ -41,3 +52,14 @@ class MetalHeadToHead:
             ],
             check=True,
         )
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def time_smoke(self):
+        for system, budget in PAPER_BUDGETS.items():
+            check_budget("h2h_metal", system, budget)
+        smoke("h2h_metal", ["run", "zn38", "2000"])

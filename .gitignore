@@ -303,6 +303,16 @@ bench/growpal-h2h-v2/.asv/
 # Water GMIN head-to-head scratch. rows.csv, summary.csv and verify.csv are the record.
 bench/water-gmin/.asv/
 
+# Covalent, TRIC and (H2O)20 GOAT asv scratch. before/, after/, v2/, v3/
+# and the results CSVs are the record.
+bench/covalent-h2h/asv/
+bench/covalent-h2h/.asv/
+bench/tric-quench/.asv/
+bench/water-h2o20-goat/.asv/
+
+# Snakemake's own state, written by every run and dry run.
+.snakemake/
+
 # Raw logs, trajectories, frames, and Zenodo-bound archives.
 # paper/jctc/scripts/fetch_bench_data.py restores them.
 paper/jctc/logs/

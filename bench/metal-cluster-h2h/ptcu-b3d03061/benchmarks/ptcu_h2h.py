@@ -7,12 +7,16 @@ map in ``scripts/metal_h2h/run_ptcu.py``. N=38 is the LJ38 paper
 budget. N=13 and N=23 are not in that map.
 """
 
-from pathlib import Path
 import subprocess
-
+import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 ENTER = ROOT / "scripts" / "metal_h2h" / "enter_ptcu.sh"
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import check_budget, smoke
+
 PAPER_BUDGETS = {
     "pt13": 100_000,
     "cu13": 100_000,
@@ -51,3 +55,14 @@ class PlatinumCopperHeadToHead:
             ],
             check=True,
         )
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def time_smoke(self):
+        for system, budget in PAPER_BUDGETS.items():
+            check_budget("h2h_metal", system, budget)
+        smoke("h2h_metal", ["run", "pt13", "2000"])

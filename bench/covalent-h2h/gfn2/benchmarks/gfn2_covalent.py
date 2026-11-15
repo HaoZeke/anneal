@@ -8,12 +8,18 @@ a scratch file so the recorded ones stay put.
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import ClassVar
 
 ROOT = Path(__file__).resolve().parents[4]
 ENTER = ROOT / "scripts" / "covalent_h2h" / "gfn2_enter_bench.sh"
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import need_env, smoke
+
+PAPER_BUDGETS = {"si10": 100_000, "c10": 100_000}
 
 
 class Gfn2Covalent:
@@ -38,3 +44,15 @@ class Gfn2Covalent:
             check=True,
             env=env,
         )
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def setup(self):
+        self.env = need_env("RGPOT_XTB_ENGINE")
+
+    def time_smoke(self):
+        smoke("gfn2_covalent_h2h", ["si10", "2000", "2000"], budget=None, features=("rgpot-ex",), env=self.env)

@@ -8,13 +8,16 @@ is the call cap for each system, the ``paper_budget`` of
 a timing never adds to ``bench/growpal-h2h-v2``.
 """
 
-from pathlib import Path
 import subprocess
+import sys
 import tempfile
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "growpal_h2h_v2" / "enter_bench.sh"
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import check_budget, smoke
 
 PAPER_BUDGETS = {
     "lj38": 400_000,
@@ -57,3 +60,14 @@ class GrowpalHeadToHeadV2:
             ],
             check=True,
         )
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def time_smoke(self):
+        for system, budget in PAPER_BUDGETS.items():
+            check_budget("h2h_morse" if system.startswith("m") else "h2h_gmin_proof", system, budget)
+        smoke("h2h_gmin_proof", ["run", "lj38", "2000"])

@@ -6,12 +6,15 @@ benchmark times the anneal arm the Snakemake rule runs. A GMIN seed
 that is already stored at the paper budget is not launched again.
 """
 
-from pathlib import Path
 import subprocess
-
+import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "morse14_h2h" / "enter_bench.sh"
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import check_budget, smoke
 
 PAPER_BUDGETS = {
     "m55r14": 1_000_000,
@@ -44,3 +47,14 @@ class Morse14HeadToHead:
             ],
             check=True,
         )
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def time_smoke(self):
+        for system, budget in PAPER_BUDGETS.items():
+            check_budget("h2h_morse", system, budget)
+        smoke("h2h_morse", ["run", "m55r14", "2000"])

@@ -6,12 +6,15 @@ The clock is the same serial arm the Snakemake rule runs, inside
 force-call cap for each Lennard-Jones size.
 """
 
-from pathlib import Path
 import subprocess
-
+import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "gmin_h2h" / "enter_bench.sh"
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import check_budget, smoke
 
 PAPER_BUDGETS = {
     98: 4_000_000,
@@ -46,3 +49,14 @@ class GminHeadToHead:
             ],
             check=True,
         )
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def time_smoke(self):
+        for size, budget in PAPER_BUDGETS.items():
+            check_budget("h2h_gmin_proof", f"lj{size}", budget)
+        smoke("h2h_gmin_proof", ["run", "lj38", "2000"])

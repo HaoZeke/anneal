@@ -7,11 +7,11 @@ diffusion search from the seeded start; gad_deposit reads the Zenodo
 deposit. All reruns use the LJ38 force-call ceiling, 400000 calls.
 """
 
-from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "gad_published" / "enter_bench.sh"
@@ -19,6 +19,11 @@ WORK = Path("/work/gad-published")
 
 SIZES = (31, 38)
 ARMS = ("gad", "anneal", "gmin", "gad_deposit")
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import smoke
+
+PAPER_BUDGETS = {31: 400_000, 38: 400_000}
 
 
 class GadPublished:
@@ -54,3 +59,12 @@ class GadPublished:
             ],
             check=True,
         )
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def time_smoke(self):
+        smoke("gad_published", ["run", "lj38", "2000"])

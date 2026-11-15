@@ -8,13 +8,18 @@ the same start at a 2_000_000-evaluation cap, stopping at the Cambridge
 header. Rows go to scratch files under /work/water-gmin, not to the tree.
 """
 
-from pathlib import Path
 import subprocess
-
+import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "tip4p_h2h" / "enter_water_gmin.sh"
 SIZES = [8, 12, 16, 20, 21]
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import smoke
+
+PAPER_BUDGETS = {n: 2_000_000 for n in SIZES}
 
 
 class WaterGminHeadToHead:
@@ -31,3 +36,12 @@ class WaterGminHeadToHead:
             ["bash", str(ENTER), "--size", str(size), "--seed", "2000"],
             check=True,
         )
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def time_smoke(self):
+        smoke("h2h_seed", ["tip4p", "8", "0", "2000", "2000", "recommended", "-", "{work}/tip4p8"], budget=None)

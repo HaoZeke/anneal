@@ -7,11 +7,15 @@ PAPER_BUDGETS for LJ98 is 4_000_000 force evaluations.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "agox_lj98" / "summarize.py"
 ENTER = ROOT / "scripts" / "agox_lj98" / "enter_bench.sh"
+
+sys.path.insert(0, str(ROOT / "bench"))
+from h2h import smoke
 
 PAPER_BUDGETS = {98: 4_000_000}
 
@@ -29,3 +33,12 @@ class AgoxLj98:
 
     def time_summary(self):
         subprocess.run(["python3", str(SCRIPT)], check=True)
+
+
+class Smoke:
+    """One seed at a small budget, outside the bench namespace. Not a paper row."""
+
+    timeout = 1800
+
+    def time_smoke(self):
+        smoke("h2h_arm3", ["lj98", "default", "2000", "6400"], budget=None)
