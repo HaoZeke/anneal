@@ -723,12 +723,16 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 &mut ledger,
                 start.view(),
                 seed,
-                &template,
-                &reference_views,
-                gate,
-                ceiling,
-                cfg.witness_tripleton_ceiling,
-                &wall,
+                WitnessRule {
+                    template: &template,
+                    isomers: IsomerMatch {
+                        references: &reference_views,
+                        gate,
+                    },
+                    ceiling,
+                    require_incumbent: cfg.witness_tripleton_ceiling,
+                    wall: &wall,
+                },
             ) {
                 Ok((outcome, stats, trace, retired, marks)) => {
                     text.push_str(&trace);
@@ -919,8 +923,10 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                     &mut outcome,
                     &mut stats,
                     seed,
-                    &reference_views,
-                    gate,
+                    IsomerMatch {
+                        references: &reference_views,
+                        gate,
+                    },
                 )
             } else if polished_inside {
                 (
@@ -1451,6 +1457,22 @@ fn parse_xyz(text: &str) -> Option<Vec<f64>> {
     (coordinates.len() == 9 * WATER_HEXAMER_MOLECULES).then_some(coordinates)
 }
 
+/// Deposited isomers and the IRA gate a geometry is matched against.
+#[derive(Clone, Copy)]
+struct IsomerMatch<'a> {
+    references: &'a [(&'a str, &'a [f64])],
+    gate: Option<f64>,
+}
+
+/// What the good-Turing checkpoint reads besides the search itself.
+struct WitnessRule<'a> {
+    template: &'a [f64],
+    isomers: IsomerMatch<'a>,
+    ceiling: f64,
+    require_incumbent: bool,
+    wall: &'a Instant,
+}
+
 struct HitMarks {
     first_hit_calls: Option<usize>,
     first_hit_wall: Option<f64>,
@@ -1459,23 +1481,27 @@ struct HitMarks {
     first_prism_wall: Option<f64>,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn witnessed_good_turing<O>(
     objective: &O,
     cfg: &Config,
     ledger: &mut Ledger,
     start: ArrayView1<f64>,
     seed: u64,
-    template: &[f64],
-    reference_views: &[(&str, &[f64])],
-    gate: Option<f64>,
-    ceiling: f64,
-    require_incumbent: bool,
-    wall: &Instant,
+    rule: WitnessRule<'_>,
 ) -> Result<(Outcome, RelaxStats, String, bool, HitMarks), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let WitnessRule {
+        template,
+        isomers: IsomerMatch {
+            references: reference_views,
+            gate,
+        },
+        ceiling,
+        require_incumbent,
+        wall,
+    } = rule;
     let mut census = BasinCensus::new(
         sorted_oxygen_distances(template, WATER_HEXAMER_MOLECULES)
             .expect("descriptor")
@@ -1577,7 +1603,6 @@ where
     Ok((outcome, stats, trace, retired, marks))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn crest_then_library<O>(
     objective: &O,
     cfg: &Config,
@@ -1585,12 +1610,12 @@ fn crest_then_library<O>(
     outcome: &mut Outcome,
     stats: &mut RelaxStats,
     seed: u64,
-    references: &[(&str, &[f64])],
-    gate: Option<f64>,
+    isomers: IsomerMatch<'_>,
 ) -> (usize, f64, &'static str)
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let IsomerMatch { references, gate } = isomers;
     let kept_energy = outcome.best;
     let kept_state = outcome.best_state.clone();
     let kept_inside = incumbent_inside(
