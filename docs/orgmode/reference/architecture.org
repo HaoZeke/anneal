@@ -11,15 +11,22 @@ To add a potential, see
 
 ** Potentials
 
+Each potential lives under =CppCore/rgpot/<Name>/=.
+=PotType= in =CppCore/rgpot/pot_types.hpp= names every type the library knows.
+=CppCore/meson.build= decides which directories a build compiles.
+
 *** Built-in Potentials
 
-- =LJPot= :: Standard 12-6 Lennard-Jones (always available).
+These are compiled in every build of the main library (every build except
+=-Dwith_rpc_client_only=true=).
+
+- =LJPot= (=PotType::LJ=) :: Standard 12-6 Lennard-Jones.
 Configurable via =LJConfig= (=u0=, =cutoff=, =psi=, =switch_width=).
-- =LJClusterPot= :: 12-6 Lennard-Jones on free boundaries, for isolated
-clusters; the cell is ignored.
+- =LJClusterPot= (=PotType::LJCluster=) :: 12-6 Lennard-Jones on free
+  boundaries, for isolated clusters; the cell is ignored.
 Configurable via =LJClusterConfig= (=u0=, =cutoff=, =psi=, =switch_width=).
-- =MorsePot= :: Pairwise Morse with a shifted cutoff, platinum parameters by
-default.
+- =MorsePot= (=PotType::Morse=) :: Pairwise Morse with a shifted cutoff,
+  platinum parameters by default.
 Configurable via =MorseConfig= (=De=, =a=, =re=, =cutoff=, =switch_width=).
 
 With =switch_width= at 0 (the default) these three shift each pair energy to
@@ -30,197 +37,336 @@ w)/w$ clamped to $[0, 1]$, so energy, force and curvature reach zero at the
 cutoff (=PairSwitch.hpp=).
 The constructors throw =std::invalid_argument= unless $0 < w \le r_c$.
 =scripts/validation/pair_kernels.py= checks the kernels and the switch with sympy, and =scripts/validation/quintic_switch.sollya=
-bounds the switch's binary64 evaluation error at $28u$ for $S$ and $12u$ for
-$S'$ ($u = 2^{-53}$).
+bounds the switch's first-order binary64 rounding error at $28u$ for $S$ and
+$12u$ for $S'$ ($u = 2^{-53}$).
 
-These pair potentials share =rgpot::nlist::PairListCache=, a pool of Verlet
-lists with a 1 Angstrom skin.
-A search for pairs uses linked cells once the box holds 64 or more cells of one
-cutoff plus skin, and an all-pairs scan below that.
-The cached list is a CSR half list, and the force loop subtracts the periodic
-image recorded at build whenever cutoff plus skin is below half the box.
-- =StillingerWeberSi= :: Stillinger-Weber silicon with the 1985 parameters
-(Phys. Rev. B 31, 5262), equation (2.9).
-Epsilon is 3.4723e-12 erg, 2.16723920 eV.
-=energyAndGradient= and =energyAndGradientBatch= evaluate a whole configuration,
-and a batch that shares a cell and a species list.
-A =nlist::NeighborList= reuses the pairs across calls.
+These pair potentials take their pairs from the shared neighbour layer,
+=nlist::updateCells= in =CppCore/rgpot/nlist/Neighbours.hpp=.
+=nlist::Mode= selects a stored Verlet list (=Stored=), a walk over the cells
+that stores no pair list (=Stream=), or =Auto=, which stores when the candidate
+index array fits in the memory the OS reports as available.
+The Verlet skin is 1 Angstrom for =LJPot= and one fifth of the cutoff for
+=LJClusterPot= and =MorsePot=; a stream uses no skin.
+A stored list is reused while every atom has moved by at most half the skin and
+the cell, the atom count and the settings are unchanged.
+
+- =StillingerWeberSi= (=PotType::SWSi1985=) :: Stillinger-Weber silicon with the
+  1985 parameters (Phys. Rev. B 31, 5262).
+Epsilon is 3.4723e-12 erg, 2.16723920 eV, the value of equation (2.9).
+=energyAndGradient= evaluates one configuration, and =energyAndGradientBatch=
+several configurations that share a cell and a species list.
+See [[file:sw_si.org][Stillinger-Weber silicon (1985)]].
 The Fortran =SWPot= kernel (=PotType::SWSi=) uses eOn's rescaled epsilon,
 2.16826 × 1.06767385 = 2.3149945 eV.
 The ratio of that epsilon to the published value is 1.068176741337.
 The factor 1.06767385 is copied from eOn's =SWFortran.f90= and is untraced.
-- =TersoffSiC= :: 1989 Tersoff kernel for silicon, carbon, and
-silicon-carbide (Phys. Rev. B 39, 5566, and the 1990 erratum).
-=PotType::TersoffSi= and the engine name =tersoff= are this potential.
-All-silicon calls, and a null species pointer, use the Fortran gather.
-Any other atomic number uses this kernel, which accepts 14 and 6 and rejects the
-rest.
-=energyAndGradient= and =energyAndGradientBatch= on =TersoffSiC= always evaluate
-the 1989 form, including an all-silicon cell.
-A =nlist::NeighborList= reuses the pairs across those calls.
-=setHeldSkin= keeps one such list for =forceImpl=; skin 0, the default, rebuilds
-on every call.
-- =ZBLPot= :: Screened nuclear repulsion (Ziegler-Biersack-Littmark) with the
-LAMMPS switching function, on free boundaries.
+- =TersoffSiC= (=PotType::TersoffSi=) :: 1989 Tersoff kernel for silicon,
+  carbon, and silicon carbide (Phys. Rev. B 39, 5566, and the 1990 erratum).
+It accepts atomic numbers 14 and 6 and throws =std::invalid_argument= for any
+other.
+=TersoffSiC= always evaluates the 1989 form, including an all-silicon cell.
+The Fortran =TersoffPot=, which also reports =PotType::TersoffSi= and is the
+engine name =tersoff=, sends all-silicon calls and a null species pointer to its
+Fortran gather and every other call to =TersoffSiC=.
+=setHeldSkin= keeps one Verlet list for =forceImpl=.
+See [[file:tersoff_sic.org][Tersoff silicon-carbon (1989)]].
+- =ZBLPot= (=PotType::ZBL=) :: Screened nuclear repulsion
+  (Ziegler-Biersack-Littmark) with the LAMMPS switching function, on free
+  boundaries.
 Configurable via =ZBLConfig= (=cut_inner=, =cut_global=); the constructor throws
 =std::invalid_argument= unless =0 < cut_inner < cut_global=.
-- =rgpot::fortranpots::CuH2Pot= :: Copper-Hydrogen EAM.
-One of the Fortran 2018 kernels under =CppCore/rgpot/fortran/=, declared in
-=FortranPots.hpp= and built when =with_fortran_pots= finds a Fortran compiler.
+- =SuttonChenPot= (=PotType::SuttonChen=) :: Sutton-Chen 10-8 many-body
+  potential, in reduced units by default.
+See [[file:sutton_chen.org][Sutton-Chen potential]].
+- =EMTPot= (=PotType::EMT=, =CppCore/rgpot/EMT/=) :: Effective medium theory
+  from Asap.
+=EMTConfig::rasmussen= selects the Rasmussen parameters; the default is the Asap
+copper set.
+- =EAMPot= (=PotType::EAMCell=, =CppCore/rgpot/EAM/=) :: Cell-list embedded-atom
+  potential.
+- =MOPACPot= (=PotType::MOPAC=, =CppCore/rgpot/MOPACPot/=) :: Frontend that
+  loads the split =mopacc= engine at run time.
+- =LammpsPot=, =GromacsPot=, =OpenMMPot= :: Shifted Lennard-Jones in
+  =CppCore/rgpot/ExternalPot/=, as =PotType::Lammps=, =PotType::Gromacs= and =PotType::OpenMM=; =GromacsPot= and =OpenMMPot= store nm and kJ/mol
+  parameters.
+- Gupta and reduced cluster pairs :: C kernels
+  (=rgpot_gupta=, =rgpot_lj_gradient=, =rgpot_morse_gradient=) in
+  =CppCore/rgpot/Gupta/= and =CppCore/rgpot/ReducedPair/=, not =Potential=
+  classes.
+
+*** Fortran Potentials
+
+=-Dwith_fortran_pots= (a feature option, =auto= by default) builds the Fortran
+2018 kernels under =CppCore/rgpot/fortran/= when a Fortran compiler is found.
+The C++ classes are in =FortranPots.hpp=, in the namespace =rgpot::fortranpots=:
+
+| Class        | =PotType=   | Potential                                                     |
+|--------------+-------------+---------------------------------------------------------------|
+| =CuH2Pot=    | =CuH2=      | Copper-hydrogen EAM                                           |
+| =EDIPPot=    | =EDIP=      | Environment-dependent interatomic potential for silicon       |
+| =LenoskyPot= | =LenoskySi= | Lenosky silicon                                               |
+| =EAMAlPot=   | =EAMAl=     | EAM aluminium                                                 |
+| =FeHePot=    | =FeHe=      | Fe-He embedded atom                                           |
+| =WaterHPot=  | =WaterH=    | TIP4P water with a hydrogen atom                              |
+| =SWPot=      | =SWSi=      | Stillinger-Weber silicon with eOn's epsilon                   |
+| =TersoffPot= | =TersoffSi= | Tersoff silicon: Fortran gather, or =TersoffSiC= for other Z |
+
+The porting rules are in
+[[file:fortran_potentials.org][Fortran potentials: porting rules]].
 
 *** Feature-gated Potentials
 
-- =IPIPot= (=-Dwith_ipi=auto=, POSIX sockets) :: Listens for one i-PI driver
-on a UNIX or TCP socket.
-The driver connects and returns energy, forces and a virial. rgpot converts
-those to eV, eV/Angstrom and Cauchy stress.
+- =IPIPot= (=-Dwith_ipi=) :: Listens for one i-PI driver on a UNIX or TCP
+  socket.
+=-Dwith_ipi= is a feature option, =auto= by default; it needs POSIX sockets and
+is off on Windows.
+The driver connects and returns energy, forces and a virial in atomic units.
+rgpot converts those to eV, eV/Angstrom and the Cauchy stress.
 See =docs/orgmode/howto/ipi.org=.
 
-- =XTBPot= (=-Dwith_xtb=true=) :: GFN tight-binding methods (GFNFF, GFN0-xTB,
-GFN1-xTB, GFN2-xTB) via the [[https://github.com/grimme-lab/xtb][xtb]] C API.
-Configurable via =XTBConfig= struct (method, accuracy, electronic temperature,
-charge, spin).
-Not thread-safe on a single instance; create separate instances for parallel
+- =EAMTablePot= (=-Dwith_eam_table=true=) :: EAM and Finnis-Sinclair potentials
+  read from LAMMPS tables.
+See [[file:eam_table.org][Tabulated EAM and Finnis-Sinclair potentials]].
+
+- =TIP4PPot=, =SPCEPot=, =TIP4PPtPot= (=-Dwith_water=true=) :: Flexible TIP4P,
+  SPC/E and TIP4P on platinum, in =CppCore/rgpot/Water/=.
+
+- =XTBPot= (=-Dwith_xtb=true=) :: GFN tight-binding methods (GFN-FF, GFN0-xTB,
+  GFN1-xTB, GFN2-xTB) via the [[https://github.com/grimme-lab/xtb][xtb]] C API.
+=XTBConfig= holds the method, accuracy, electronic temperature (K), iteration
+limit, charge, unpaired electrons (=uhf=) and =warm_move=, the largest atom move
+in Angstrom that still reuses the previous wavefunction.
+Do not share one instance across threads; create separate instances for parallel
 use.
+The =XTBDlopen= frontend, which loads xtb at run time, is built in every build
+of the main library.
 
 - =TBLitePot= (=-Dwith_tblite=true=) :: GFN tight-binding methods (GFN1, GFN2,
-IPEA1) via the [[https://github.com/tblite/tblite][tblite]] C API.
-Same config pattern as =XTBPot=.
-Lighter weight than xtb but fewer methods.
+  IPEA1) via the [[https://github.com/tblite/tblite][tblite]] C API.
+=TBLiteConfig= has the fields of =XTBConfig= except =warm_move=.
 
 - =D3Pot= (=-Dwith_dftd3=true=) :: Grimme DFT-D3 via the
-[[https://github.com/dftd3/simple-dftd3][s-dftd3]] ISO C API.
-=D3Config= selects BJ or zero damping, the functional key for C6 parameters, and
-an explicit =atm= flag for the Axilrod-Teller-Muto E(3) term (default on).
-In-process =Potential= summand: construct it and evaluate =ForceInput= to
-energy+forces.
-Not an XC kernel.
+  [[https://github.com/dftd3/simple-dftd3][s-dftd3]] ISO C API.
+=D3Config= selects BJ or zero damping, the functional key for the C6 parameters
+(default =pbe=), and an =atm= flag for the Axilrod-Teller-Muto E(3) term
+(default on).
+It is an in-process =Potential= summand: it takes a =ForceInput= and returns
+energy and forces.
+It is not an XC kernel term.
 The schema has =PotentialConfig.d3= @12, and its =D3Params= mirror =D3Config=.
 Nothing applies that arm yet.
 The =potserv= =D3= backend runs the default =D3Config=.
 =configure()= refuses the =d3= arm by name on every =potserv= backend.
-A DFT host adds this as the Edisp summand next to XcKernel and VV10; do not fold
-D3 into the kernel.
 
 - =D4Pot= (=-Dwith_dftd4=true=) :: Grimme DFT-D4 via the
-[[https://github.com/dftd4/dftd4][dftd4]] ISO C API.
-=D4Config= selects the functional key, the total charge forwarded to
-=dftd4_new_structure=, and an explicit =atm= flag for the many-body (=mdb=) term
-(default on).
-Charge scaling stays inside dftd4.
-In-process =Potential= summand: construct it and evaluate =ForceInput= to
-energy+forces.
-Not an XC kernel.
+  [[https://github.com/dftd4/dftd4][dftd4]] ISO C API.
+=D4Config= selects the functional key (default =pbe=), the total charge
+forwarded to =dftd4_new_structure= (default 0), and an =atm= flag for the
+many-body (=mdb=) term (default on).
+It is an in-process =Potential= summand: it takes a =ForceInput= and returns
+energy and forces.
+It is not an XC kernel term.
 The schema has =PotentialConfig.d4= @13, and its =D4Params= mirror =D4Config=.
 Nothing applies that arm yet.
 The =potserv= =D4= backend runs the default =D4Config=.
 =configure()= refuses the =d4= arm by name on every =potserv= backend.
-A DFT host adds this as the Edisp summand next to XcKernel and VV10; do not fold
-D4 into the kernel.
 
-- =ExprPot= (=-Dwith_expr=true=) :: Named-child PES algebra compiled with
-vendored OpenMM Lepton (no pixi muparser).
-The constructor takes an energy string and =unique_ptr<PotentialBase>= children.
-Names must be Lepton identifiers; unknown, duplicate, unused, empty, or
-non-identifier names fail at construct.
-Forces are analytic chain-rule weights from
+- =ExprPot= (=-Dwith_expr=true=) :: Energy as an expression over named child
+  potentials.
+The vendored OpenMM Lepton (=third_party/lepton=) compiles the expression.
+The constructor takes an energy string and a list of names with
+=unique_ptr<PotentialBase>= children.
+It throws =std::invalid_argument= for an empty expression, no terms, a null
+term, a name that is not a Lepton identifier (including an empty name), a
+duplicate name, a name the expression does not use, an identifier in the
+expression that is not a term, and an expression Lepton cannot parse or
+differentiate.
+Forces are the chain rule, with the weights from
 =ParsedExpression::differentiate(name)=.
-=D3Pot= / =D4Pot= are ordinary children.
-=XcKernel= is not a term.
-=PotentialConfig.expr= is in the schema, but =potserv= does not apply it.
-=configure= refuses it by name.
-The C++ constructor is the first-slice API; RPC/config names the same tree as
-recursive =ExprParams= / =PotSpec=.
-=PotentialHandle::from_impl= / =rgpot_potential_new_eindir= wraps one =ExprPot=
+=D3Pot= and =D4Pot= can be children.
+=PotentialConfig.expr= is in the schema as =ExprParams= (with =PotSpec=
+children), but =potserv= does not apply it; =configure= refuses it by name.
+=PotentialHandle::from_impl= and =rgpot_potential_new_eindir= wrap one =ExprPot=
 as one eindir objective.
 
+- =lr::CoulombPot=, =lr::DispersionPot=, =lr::NlhPot=, =lr::SumPot= :: Ewald,
+  smooth PME or damped shifted force electrostatics, dispersion, SO3LR NLH
+  repulsion, and a sum of summands, built with =-Dwith_long_range=true= from
+  =CppCore/rgpot/LongRange/=.
+=-Dwith_cuda=true= compiles the CUDA path with nvcc.
+
+- =XcKernel= (=-Dwith_xckernel=true=) :: In-process libxckernel XC kernel.
+It is not a =Potential=.
+
 - =MetatomicPot= (=-Dwith_metatomic=true=) :: Pre-trained ML atomistic models
-via
-[[https://github.com/metatensor/metatomic][metatomic]]/PyTorch, loaded *directly* as TorchScript (=.pt=) in C++ with no Python at evaluation time. Uses [[https://github.com/Luthaf/vesin][vesin]] *0.5+* for neighbor lists and PyTorch autograd for forces. Pass CPU as =VesinDevice{VesinCPU, 0}= (=struct { VesinDeviceKind type; int device_id; }=; =VesinCPU= alone is only the kind enum). Thread-safe via internal mutex; caches the atomic-types tensor across geometry steps. Configurable device (CPU/CUDA),
-dtype override, length unit, consistency checks, and =torch_determinism= via
-=MetatomicConfig=.
+  via [[https://github.com/metatensor/metatomic][metatomic]] and PyTorch, loaded
+  as TorchScript (=.pt=) in C++ with no Python at evaluation time.
+Neighbour lists come from [[https://github.com/Luthaf/vesin][vesin]]; the source
+builds against vesin 0.3 and 0.5 or newer (=vesin_compat.hpp=).
+PyTorch autograd gives the forces.
+With vesin 0.5 or newer, pass CPU as =VesinDevice{VesinCPU, 0}=
+(=struct { VesinDeviceKind type; int device_id; }=); =VesinCPU= alone is only
+the kind enum.
+An internal mutex serialises the Torch session, so a shared instance is safe
+across threads.
+=MetatomicConfig= sets the model path, device, dtype override, length unit,
+consistency checks, and =torch_determinism=.
 =TorchDeterminismPolicy::Fast= (default) does not touch process-global LibTorch
 state.
 =Strict= calls =apply_torch_determinism_policy=, which sets
-=at::globalContext()= deterministic algorithms (no warn-only fallback), pins
-scaled-dot-product attention to the math SDP backend (flash, memory-efficient,
-and cuDNN SDP off), disables TF32 for cuBLAS and cuDNN (full fp32 mantissas on
-Ampere+), forces deterministic cuDNN algorithms with benchmarking off, and fills
-uninitialized memory deterministically.
+=at::globalContext()= deterministic algorithms (no warn-only fallback), turns
+off the flash, memory-efficient and cuDNN scaled-dot-product attention backends
+and keeps the math backend, disables TF32 for cuBLAS and cuDNN, forces
+deterministic cuDNN algorithms with benchmarking off, and fills uninitialized
+memory deterministically.
 Those flags are process-global: they affect every Torch user in the process, and
-Fast does not restore a previous Strict setting.
+=Fast= does not restore a previous =Strict= setting.
 CUDA host processes that need bit-stable cuBLAS must also export
-=CUBLAS_WORKSPACE_CONFIG=:4096:8= (or =:16:8=) *before* the first cuBLAS call —
-that is process environment, not =at::globalContext()= (see NVIDIA cuBLAS
-reproducibility and =alertCuBLASConfigNotDeterministic=).
-On the RPC server pass =Metatomic:/path/to/model.pt=.
-Build with the =metatomicbld= pixi env (linux-64; pulls torch, metatomic-torch,
-and vesin =>=0.5.2,<0.6= from PyPI).
-CI job =potentials_metatomic= in =ci- orchestrator.yml=.
+=CUBLAS_WORKSPACE_CONFIG=:4096:8= (or =:16:8=) before the first cuBLAS call;
+that is process environment, not =at::globalContext()=.
+On the RPC server pass =Metatomic:/path/to/model.pt=, optionally followed by
+=:<device>=.
+Build with the =metatomicbld= pixi environment (linux-64; it pulls torch,
+metatomic-torch, and vesin =>=0.6.0,<0.7= from PyPI).
+CI job =potentials_metatomic= is in =.github/workflows/ci-orchestrator.yml=.
+=UmaPot= (=PotType::Uma=) builds with it when =with_python= is false.
 
-The *pip* product (=rgpot= on PyPI) does not link Metatomic into the Python
+The pip product (=rgpot= on PyPI) does not link Metatomic into the Python
 extension.
-It =dlopen=s a portable =libmetatomic_engine.so= chosen from
-=rgpot/lib/torch- X.Y/= for the installed torch major.
-Supported torch majors for bundled engines start at *2.7* (wheels ship 2.7–
-2.13).
+It =dlopen=s a Metatomic engine library from =rgpot/lib/torch-X.Y/= that matches
+the installed torch major.
+Bundled engines start at torch 2.7.
 See:
 
 #+begin_export rst
 :doc:`../howto/pip-python`
 #+end_export
 
+The remaining feature-gated potentials need the RPC stack
+(=-Dwith_rpc=true= or =-Dwith_rpc_client_only=true=), because they read
+parameters from the generated Cap'n Proto schema:
 
-All feature-gated potentials are detected via =pkg-config= / =cmake= and
-controlled by Meson options.
+- =NWChemPot= (=PotType::NWChem=) and =CPMDPot= (=PotType::CPMD=) :: Frontends
+  that load the split =nwchemc= and =cpmdc= engines at run time.
+- =CP2KPot= (=PotType::CP2K=, =-Dwith_cp2k=, needs =with_rpc=) :: CP2K Quickstep
+  through the =libcp2kc_rgpot= shim against libcp2k.
+- =SkalaPot= (=PotType::Skala=, =-Dwith_skala=true=, needs =with_rpc=) :: Skala
+  XC on NWChem DFT through =libnwchemc=.
+
+Each feature-gated potential has its own Meson option.
+External libraries are found with Meson =dependency()= (pkg-config or CMake),
+some with a wrap fallback.
 
 *** NWChemPot (=rgpot/NWChemPot/=)
 
-Always-built frontend (=NWChemPot.cc=) that serializes =NWChemParams= and
-=dlopen=s =libnwchemc= (via =DynLib.hpp=).
-Stable consumer C-ABI contract in =nwchem_c_abi.h= uses
+=NWChemPot.cc= serializes =NWChemParams= and =dlopen=s =libnwchemc= (via
+=DynLib.hpp=).
+It is built whenever the RPC stack is on.
+The consumer C ABI in =nwchem_c_abi.h= uses
 =nwchemc_*= symbols and flat Cap'n Proto message bytes; =nwchem_c_abi_stub.c= is
-a no-op ABI linked by the conformance test only. rgpot is a pure consumer: the
-engine implementation (NWChem embed + Fortran) lives in the split
-=https://github.com/OmniPotentRPC/ nwchemc= project, not in rgpot.
-RPC schema adds =NWChemParams=, =PotentialConfig=, and =configure @1= on
-=Potential=; =potserv <port> NWChem=.
-Runtime: =NWCHEMC_LIBRARY=, =RGPOT_NWCHEMC_ENGINE=, =NWCHEM_TOP=.
+a no-op ABI for tests. rgpot is a pure consumer: the engine implementation
+(NWChem embed and Fortran) lives in the split
+[[https://github.com/OmniPotentRPC/nwchemc][nwchemc]] project, not in rgpot.
+The schema has =NWChemParams=, =PotentialConfig=, and =configure @1= on
+=Potential=; start the server with =potserv <port> NWChem=.
+Engine lookup tries =NWChemParams.enginePath=, then
+=NWCHEMC_LIBRARY=, =RGPOT_NWCHEMC_ENGINE=, =RGPOT_NWCHEM_ENGINE=, and the
+default library names.
+A non-empty =nwchemRoot= is exported as =NWCHEM_TOP=.
 Details: =CppCore/rgpot/NWChemPot/README.md=.
 
 *** Units (=rgpot/units.hpp=)
 
-rgpot's internal unit system is *energy = eV*, *length = Angstrom*,
-*force = eV/Angstrom*.
+rgpot's internal unit system is energy in eV, length in Angstrom, and force in
+eV/Angstrom.
 
-- *Compile-time constants* (CODATA 2018): =BOHR_TO_ANGSTROM=, =HARTREE_TO_EV=,
-=HARTREE_BOHR_TO_EV_ANGSTROM=, =NEG_GRAD_TO_FORCE=, Boltzmann constants, etc.
-Used by XTBPot/TBLitePot (Bohr/Hartree backends) and any caller that wants zero-
-overhead conversion.
-- *Runtime expression parser* (=unit_conversion_factor(from, to)=):
-  Shunting-Yard
-algorithm with SI dimensional analysis, derived from metatomic-torch (PR #173).
-Accepts compound expressions such as ="kJ/mol"=, ="eV/angstrom^3"=, or
+- Compile-time constants (CODATA 2018): =BOHR_TO_ANGSTROM=, =HARTREE_TO_EV=,
+  =HARTREE_BOHR_TO_EV_ANGSTROM=,
+  =NEG_GRAD_TO_FORCE=, =HARTREE_PER_BOHR3_TO_EV_PER_ANGSTROM3=, =KB_HARTREE= and
+  =KB_EV=.
+Backends that work in bohr and hartree, such as =XTBPot= and =TBLitePot=, use
+them.
+- Runtime expression parser (=unit_conversion_factor(from, to)=): a
+  Shunting-Yard parser with SI dimensional analysis, derived from
+  metatomic-torch (PR #173).
+It accepts compound expressions such as ="kJ/mol"=, ="eV/angstrom^3"=, or
 ="(eV*u)^(1/2)"=.
-Throws =std::invalid_argument= on dimension mismatch or unknown tokens.
+It throws =std::invalid_argument= on a dimension mismatch or an unknown token.
 =validate_unit(quantity, unit)= checks a unit against a known quantity
 (=length=, =energy=, =force=, =pressure=, =momentum=, =mass=, =velocity=,
 =charge=).
-- *RPC negotiation*: Cap'n Proto =ForceInput= carries optional =lengthUnit= and
-=energyUnit= (default ="angstrom"= / ="eV"=).
-The server converts inbound positions/box into Angstrom before =forceImpl=, then
-converts energy and forces into the caller's requested units on the response.
+- RPC negotiation: Cap'n Proto =ForceInput= carries =lengthUnit= and
+  =energyUnit= (default ="angstrom"= and ="eV"=).
+The server converts inbound positions and box into Angstrom before =forceImpl=,
+then converts energy and forces into the caller's units on the response.
+
+** Capability handshake
+
+Why the handshake exists is in
+[[file:../explanation/architecture.org][Architecture]].
+
+A backend loaded through the potential profile reports a =Capabilities= message
+through =<prefix>_capabilities_result=.
+Before a session is created, =ProfileSession::load= (Rust) and
+=rgpot::abi::checked_load= (C++) compare it with the host's expectation.
+They refuse the backend with a message that names the first mismatch.
+=ProfileSession::load= returns a =ProfileError=, and
+=checked_load= throws =std::runtime_error=.
+
+| Field                                                    | Refused when                                                                        |
+|----------------------------------------------------------+-------------------------------------------------------------------------------------|
+| =protocolFamily=                                         | the family differs from =rgpot.potentials=                                          |
+| =protocolMajor=, =protocolMinor=                         | the major differs, or the minor is below the host's required minor                  |
+| =schemaId=                                               | the identity differs from that of =Potentials.capnp=                                |
+| =bridgeAbiMajor/Minor=, =bridgeLayout=, =bridgeFeatures= | another eindir ABI major, a newer minor, another layout, or feature bits not known  |
+| =dlpackMajor/Minor=                                      | another DLPack major or a newer minor                                               |
+| =operations=                                             | energy or forces is not served                                                      |
+
+Metadata that a backend leaves unset is not a declaration and is not checked, so
+backends that predate the fields keep loading.
+An empty family skips the three protocol checks, an empty schema identity skips
+the schema check, and a zero bridge or DLPack major skips that group.
+=buildVersion= and =buildRevision= report the version and source revision of the
+build that produced the message.
+For a message that =rgpot-core= fills in, =rgpot_source_revision= returns the
+same revision through the C ABI.
+
+The same check guards RPC.
+The rgpot servers implement =Potential.getCapabilities=, in =potserv= and in
+=rgpot_rpc_server_start=.
+The Rust client (=RpcClient=) asks for the capabilities on every connection, and
+it opens one connection for each =calculate=.
+The C bridge (=pot_calculate=) asks once, before its first =calculate=.
+Both refuse a server whose capabilities are incompatible.
+A server that does not implement the call answers UNIMPLEMENTED.
+The client refuses it with a message that names =Potential.getCapabilities= and
+asks for an rgpot release whose =Potentials.capnp= carries it.
+
+A callback handle (=rgpot_potential_t=) takes the peer's message through
+=rgpot_potential_set_peer_capabilities=, which exists only when the crate is
+built with the =schema= feature.
+When the peer is incompatible, =rgpot_potential_calculate=,
+=eindir_objective_eval= and =eindir_objective_grad= fail before the callback
+runs.
+=rgpot_potential_calculate= returns =RGPOT_INVALID_PARAMETER=, and
+=rgpot_last_error= holds =peer refused: <first mismatch>=.
+A handle that never receives a message keeps the plain callback contract.
+The C entry point is listed in [[file:c_abi.org][C ABI of rgpot-core]].
 
 ** Directory Reference
 
-| Path | Purpose |
-|------+---------+
-| =rgpot-core/Cargo.toml= | Rust crate configuration. |
-| =rgpot-core/build.rs= | capnp compilation (+ cbindgen when =gen-header= enabled). |
-| =rgpot-core/cbindgen.toml= | cbindgen configuration. |
-| =rgpot-core/src/= | Rust source (types, status, potential, c_api, rpc). |
-| =rgpot-core/include/rgpot.h= | Auto-generated C header. |
-| =include/rgpot/= | Hand-written C++ RAII wrapper headers. |
-| =CppCore/rgpot/= | Original C++ potentials and helpers. |
-| =rgpot-core/schema/Potentials.capnp= | Bundled Cap'n Proto schema (canonical for crates.io). |
-| =CppCore/rgpot/rpc/Potentials.capnp= | Shared Cap'n Proto schema (monorepo fallback). |
+| Path                                   | Purpose                                                                                              |
+|----------------------------------------+------------------------------------------------------------------------------------------------------|
+| =rgpot-core/Cargo.toml=                | Rust crate configuration.                                                                            |
+| =rgpot-core/build.rs=                  | Compiles the Cap'n Proto schema with the =schema= feature and runs cbindgen with =gen-header=.        |
+| =rgpot-core/cbindgen.toml=             | cbindgen configuration.                                                                              |
+| =rgpot-core/src/=                      | Rust source (types, status, potential, c_api, rpc, eindir, hvp, tensor, profile, version).           |
+| =rgpot-core/include/rgpot.h=           | C header generated by cbindgen and checked in.                                                       |
+| =include/rgpot/=                       | Hand-written C++ RAII wrapper headers.                                                               |
+| =CppCore/rgpot/=                       | C++ potentials, neighbour lists, the RPC server and helpers.                                         |
+| =CppCore/rgpot/fortran/=               | Fortran 2018 potential kernels and their C entry points.                                             |
+| =engines/=                             | Engine plugins and =pot_spec.hpp=, which builds a potential from a name and options.                 |
+| =subprojects/potentials-schema.wrap=   | Pinned canonical Cap'n Proto schema, plus the local =neighbour-chunk.diff=.                          |
+| =rgpot-core/schema/Potentials.capnp=   | Vendored schema copy; =build.rs= prefers it (works on crates.io).                                     |
+| =CppCore/rgpot/rpc/Potentials.capnp=   | Vendored schema copy used by Meson; =build.rs= falls back to it. Both copies must equal the pinned one. |
+| =CppCore/rgpot/rpc/Potentials.ordinals= | Append-only ledger of schema ordinals.                                                              |

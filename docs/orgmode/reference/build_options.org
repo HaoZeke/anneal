@@ -18,29 +18,29 @@ A =feature= option takes =enabled=, =disabled= or =auto=.
 | Option | Type | Default | Description |
 |-|-|-|-|
 | =with_tests= | boolean | =false= | Build and register the C++ tests (=meson test=). |
-| =with_examples= | boolean | =false= | Build the examples. Pulls in Eigen and fmt unless =with_rpc_client_only= is set. |
+| =with_examples= | boolean | =false= | Build the examples. Unless =with_rpc_client_only= is set, this requires fmt and uses Eigen3 when it is found. |
 | =with_xtensor= | boolean | =false= | Link xtensor and xtensor-blas and define =WITH_XTENSOR=. |
 | =with_eigen= | boolean | =false= | Link Eigen3. A missing Eigen3 is an error only when this option is true. |
 | =with_rpc= | boolean | =false= | Build the Cap'n Proto RPC stack and the =potserv= server. |
 | =with_rpc_client_only= | boolean | =false= | Build only the RPC client and the dlopen frontends. Implies the RPC stack; disables the server and the cache. |
 | =with_cache= | boolean | =false= | Link RocksDB and xxhash and build =PotentialCache=. |
 | =pure_lib= | boolean | =true= | When false, link fmt and define =NOT_PURE_LIB=. |
-| =with_rust_core= | boolean | =false= | Build =rgpot-core= with cargo and link the static library. cbindgen writes =rgpot.h=. |
+| =with_rust_core= | boolean | =false= | Build =rgpot-core= with cargo and link =librgpot_core.a=. The cargo features =rpc= and =cache= follow =with_rpc= and =with_cache=. The C header is the checked-in =rgpot-core/include/rgpot.h=; cbindgen does not run. |
 | =with_fast_nlist= | feature | =auto= | linkcell/minimage pair list. Auto when cargo and rustc 1.89 or newer are found; otherwise the C++ pair scan is used. |
 | =with_cp2k= | feature | =disabled= | CP2KPot, the potserv CP2K backend and libcp2kc_rgpot.so against libcp2k (pkg-config libcp2k); needs with_rpc |
-| =with_mpi= | feature | =disabled= | Link MPI so calculator groups can split and share across ranks |
+| =with_mpi= | feature | =disabled= | Build =librgpot_mpi=, which =librgpot= loads with =dlopen= so calculator groups can split and share across ranks. =librgpot= itself never links MPI. |
 | =with_xtb= | boolean | =false= | Link xtb (=dependency('xtb')=) and build =XTBPot=. |
-| =with_xckernel= | boolean | =false= | In-process libxckernel XC Fock/fxc (generated C ABI; not a Potential) |
-| =with_dftd3= | boolean | =false= | Link conda-forge s-dftd3 (simple-dftd3) C API |
-| =with_dftd4= | boolean | =false= | Link conda-forge dftd4 C API |
-| =lapack= | combo | =auto= | LAPACK vendor for the dftd4 wrap and nested multicharge Choices: =auto=, =mkl=, =mkl-rt=, =openblas=, =netlib=, =custom=. |
-| =with_expr= | boolean | =false= | Compile vendored OpenMM Lepton (third_party/lepton) |
+| =with_xckernel= | boolean | =false= | Build the in-process libxckernel XC kernel (=XcKernel=, generated C ABI; not a Potential). |
+| =with_dftd3= | boolean | =false= | Link s-dftd3 (installed, or the s-dftd3 wrap built static) and build =D3Pot=. Needs a Fortran compiler. |
+| =with_dftd4= | boolean | =false= | Link dftd4 (installed, or the dftd4 wrap built static) and build =D4Pot=. Needs a Fortran compiler. |
+| =lapack= | combo | =auto= | LAPACK vendor for the dftd4 wrap and the nested multicharge wrap. Choices: =auto=, =mkl=, =mkl-rt=, =openblas=, =netlib=, =custom=. |
+| =with_expr= | boolean | =false= | Compile the vendored OpenMM Lepton (=third_party/lepton=) and build =ExprPot=. |
 | =with_tblite= | boolean | =false= | Link tblite and build =TBLitePot=. |
 | =with_metatomic= | boolean | =false= | Build the Metatomic potential and engine against torch and metatomic. |
-| =with_skala= | boolean | =false= | Skala XC via NWChemPot / libnwchemc (requires with_rpc) |
-| =with_python= | boolean | =false= | Build pip-installable Python package (rgpot._core) |
-| =with_fortran_pots= | feature | =auto= | Fortran-backed potentials (CuH2; grows with the eOn migration). Independent of the RPC options. |
-| =with_highway= | feature | =auto= | Google Highway runtime ISA dispatch for LJ, Morse, the analytical EAM kernel, and the orthorhombic fold. auto uses libhwy >= 1.2 or the wrap when that tree is already present. disabled keeps the scalar kernels. |
+| =with_skala= | boolean | =false= | Build =SkalaPot=, Skala XC through NWChemPot and =libnwchemc=. Needs =with_rpc= or =with_rpc_client_only=. |
+| =with_python= | boolean | =false= | Build the pip-installable Python package (=rgpot._core=). |
+| =with_fortran_pots= | feature | =auto= | Fortran 2018 kernels in =CppCore/rgpot/fortran= (CuH2, EDIP, LenoskySi, EAMAl, FeHe, WaterH, SWSi and the Tersoff silicon gather). =auto= builds them when a Fortran compiler is found. Independent of the RPC options. |
+| =with_highway= | feature | =auto= | Google Highway runtime ISA dispatch for the =rgpot::simd= LJ, Morse, EAM and orthorhombic-fold kernels; the shipped potentials do not call them (see [[file:../explanation/simd.org][SIMD]]). =auto= uses libhwy >= 1.2, or the =highway= wrap when its source tree is already unpacked under =subprojects/=; =enabled= also downloads it. =disabled= keeps the scalar kernels. |
 | =with_ipi= | feature | =auto= | i-PI socket server Potential (POSIX sockets). auto is on except on Windows. |
 | =with_water= | boolean | =false= | Flexible TIP4P, SPC/E and TIP4P-Pt kernels. Defaults false, matching the eOn with_water option. |
 | =with_eam_table= | boolean | =false= | EAM and Finnis-Sinclair potentials read from LAMMPS funcfl, setfl and eam/fs tables. |
@@ -52,8 +52,8 @@ A =feature= option takes =enabled=, =disabled= or =auto=.
 | =gromacs_dropin_gmx= | string | =(empty)= | gmx of a double-precision GROMACS linked against librgpot_gromacs. Empty looks for gmx_d on PATH and skips the mdrun tests without it. |
 | =with_openmm= | feature | =auto= | OpenMM shifted Lennard-Jones comparison. |
 | =with_plumed= | feature | =auto= | PLUMED RGPOT collective variable. |
-| =with_long_range= | boolean | =false= | Ewald, PME, dispersion and NLH summands. |
-| =with_cuda= | boolean | =false= | Compile the Ewald, PME and pair-sum kernels with nvcc. |
+| =with_long_range= | boolean | =false= | Build the Ewald, PME, dispersion and NLH summands (=CppCore/rgpot/LongRange=). |
+| =with_cuda= | boolean | =false= | Compile the long-range CUDA path with nvcc and link cudart. Used only with =with_long_range=. |
 
 ** CMake
 
@@ -61,7 +61,7 @@ Pass an option as =-DNAME=ON= or =-DNAME=OFF= to =cmake=.
 
 | Option | Type | Default | Description |
 |-|-|-|-|
-| =RGPOT_RPC_CLIENT_ONLY= | BOOL | OFF | Build only the RPC client bridge. Uses C++17 and forces xtensor, Eigen, the cache and the examples off. |
+| =RGPOT_RPC_CLIENT_ONLY= | BOOL | OFF | Build only the RPC client bridge. Uses C++17, forces xtensor, Eigen, the cache and the examples off, and forces =RGPOT_PURE_LIB= on. |
 | =RGPOT_WITH_RPC= | BOOL | OFF (ON when =RGPOT_RPC_CLIENT_ONLY= is ON) | Build with Cap'n Proto RPC support. |
 | =RGPOT_WITH_XTENSOR= | BOOL | OFF | Build with xtensor support. |
 | =RGPOT_WITH_EIGEN= | BOOL | OFF | Build with Eigen3 support. |

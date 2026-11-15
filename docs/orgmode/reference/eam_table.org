@@ -6,6 +6,7 @@
 =EAMTablePot= reads an embedded atom method (EAM) potential from a DYNAMO table
 and evaluates
 
+#+attr_rgpot: skip the energy formula, not code
 #+begin_example
 E = sum_i F_a(rho_i) + sum_{i<j} phi_ab(r_ij)
 rho_i = sum_{j != i} rho_ab(r_ij)
@@ -33,8 +34,9 @@ The potential is opt-in.
 Meson builds it with =-Dwith_eam_table=true= and CMake with
 =-DRGPOT_WITH_EAM_TABLE=ON=.
 Both define =RGPOT_HAS_EAM_TABLE=.
-The default build has no new object and no new symbol.
+Without the option, no EAMTable code is compiled.
 
+#+attr_rgpot: compile
 #+begin_src cpp
 #include "rgpot/EAMTable/EAMTablePot.hpp"
 
@@ -79,7 +81,8 @@ The =eam/he= and =eam/cd= layouts are not read.
 
 Periodic evaluation keeps one image of each partner, so it needs the cutoff
 under half of every face spacing of the cell.
-The constructor accepts any table.
+The constructor does not check the cutoff against a cell; it throws
+=std::invalid_argument= for a file it cannot open or parse.
 =forceImpl= throws =std::invalid_argument= for a smaller cell, for a periodic
 call without a cell, and for an atomic number that is in no element line.
 

@@ -16,7 +16,8 @@ A build for the x86-64 baseline picks the path once per process:
 - the hardware instruction, in functions compiled with =target("fma")=, when
   =simd::detail::fma_hw_active()= is true;
 - otherwise =simd::exact_fma=, a Dekker product and a round-to-odd sum (Boldo
-  and Melquiond, IEEE Trans. Comput. 57(4), 2008).
+  and Melquiond, IEEE Trans. Comput. 57(4), 2008); inputs outside the normal
+  range and subnormal results go to =std::fma=.
 
 =fma_hw_active()= reads CPUID leaf 1 (FMA, OSXSAVE and AVX) and XCR0 itself, so
 it needs no support from the C library.
@@ -47,9 +48,9 @@ no table and no fused multiply-add:
 4. Scale by 2^k as two powers of two, so only the last product rounds.
 
 The scalar function and the vector loops run this body, and their bits match.
-=exp_fixed_n= and the Morse row kernel are compiled as =target_clones= for the
-baseline, AVX2 and AVX-512F.
-The loader picks one clone from libgcc's own CPU check.
+On x86-64 Linux, =exp_fixed_n= is compiled as =target_clones= for the baseline,
+AVX2 and AVX-512F; a ThreadSanitizer build keeps only the baseline copy.
+The loader picks one clone from libgcc's or compiler-rt's own CPU check.
 Contraction is off in these files, and =-fno-trapping-math -fno-math-errno= let
 GCC vectorise them without changing a value.
 

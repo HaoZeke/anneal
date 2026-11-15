@@ -6,5 +6,1021 @@
 
 The C++ API in =include/rgpot/= wraps the C ABI of =rgpot-core= in move-only
 handles.
-=rgpot/rgpot.hpp= includes every header below.
-A failed C call throws =rgpot::Error=.
+=rgpot/rgpot.hpp= includes =errors.hpp=, =potential.hpp= and =types.hpp=, and
+=rpc_client.hpp= only when =RGPOT_HAS_RPC= is defined.
+It does not include =CppCore/rgpot/Potential.hpp=; each potential header (for
+example =rgpot/LennardJones/LJPot.hpp=) brings in =rgpot::PotentialBase= and
+=rgpot::Potential=.
+Most wrapper methods pass the C status code to an internal check that throws
+=rgpot::Error= for any status other than =RGPOT_SUCCESS=.
+The exceptions are stated in each entry: =invalidate_hvp= and =reset_hvp_counts=
+call C functions that return nothing, and the factories and the =InputSpec= and
+=CalcResult= constructors check nothing.
+The wrappers call the C functions of =rgpot-core=, which a Meson build links
+only with =-Dwith_rust_core=true=.
+Meson defines =RGPOT_HAS_RPC= only when =with_rust_core= is on together with
+=with_rpc= or =with_rpc_client_only=.
+
+The handles do not convert units.
+Positions, cell, energy and forces are in the units of the wrapped potential.
+The built-in potentials use Angstrom, eV and
+eV/Angstrom (=CppCore/rgpot/units.hpp=).
+
+** include/rgpot/errors.hpp
+
+*** =rgpot::Error=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+explicit Error(const std::string &msg);
+#+end_src
+
+- Inputs :: =msg=, the text that =what()= returns.
+- Units :: none.
+- Outputs :: an exception derived from =std::runtime_error=.
+- Errors :: none; the constructor has no failure path.
+
+The wrappers build =msg= from a category prefix and the =rgpot_last_error()=
+text, or "unknown error" when that pointer is NULL.
+The prefixes are "invalid parameter: " for =RGPOT_INVALID_PARAMETER=, "RPC
+error: " for =RGPOT_RPC_ERROR=, "buffer size error: " for
+=RGPOT_BUFFER_SIZE_ERROR=, and "internal error: " for =RGPOT_INTERNAL_ERROR= and
+any other code.
+Every category throws the same type, =rgpot::Error=.
+
+** include/rgpot/types.hpp
+
+*** =rgpot::InputSpec=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+InputSpec(size_t n_atoms, double *pos, int *atmnrs, double *box);
+InputSpec(std::vector<double> &positions, std::vector<int> &atmnrs, double *box);
+#+end_src
+
+- Inputs :: =n_atoms=; =pos= or =positions=, 3*n doubles, row-major xyz per
+  atom; =atmnrs=, n atomic numbers; =box=, 9 doubles, the cell vectors as rows.
+  The vector overload takes n as =positions.size() / 3=.
+- Units :: positions and cell in the length unit of the potential (Angstrom for
+  the built-in potentials); atomic numbers and counts have none.
+- Outputs :: a move-only object holding an =rgpot_force_input_t= with non-owning
+  DLPack tensors over the caller's arrays.
+  The arrays are borrowed, not copied, and must outlive the object.
+  The destructor frees the tensor metadata, not the arrays.
+- Errors :: none; nothing is checked.
+  The vector overload does not compare =atmnrs.size()= with n.
+  NULL pointers are stored as given and surface as errors from the call that
+  reads them.
+
+*** =rgpot::InputSpec::c_struct=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+const rgpot_force_input_t &c_struct() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a const reference to the wrapped =rgpot_force_input_t=, valid while
+  the =InputSpec= lives.
+- Errors :: none.
+
+*** =rgpot::InputSpec::n_atoms=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+size_t n_atoms() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the atom count given at construction.
+- Errors :: none.
+
+*** =rgpot::CalcResult=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+CalcResult();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a move-only result buffer from =rgpot_force_out_create()=: NULL
+  forces, energy and variance 0.0.
+  The destructor frees the forces tensor with =rgpot_tensor_free= when one was
+  set.
+- Errors :: none.
+
+*** =rgpot::CalcResult::c_struct=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+rgpot_force_out_t &c_struct();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a mutable reference to the wrapped =rgpot_force_out_t=.
+  The =CalcResult= keeps ownership of any forces tensor stored in it.
+- Errors :: none.
+
+*** =rgpot::CalcResult::energy=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+double energy() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: the energy unit of the potential (eV for the built-in potentials).
+- Outputs :: the potential energy; 0.0 before a calculation.
+- Errors :: none.
+
+*** =rgpot::CalcResult::variance=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+double variance() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: as the potential reports it; most potentials leave it at 0.0.
+- Outputs :: the variance or uncertainty estimate; 0.0 when unused.
+- Errors :: none.
+
+*** =rgpot::CalcResult::forces_data=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+const double *forces_data(size_t &n_elements) const;
+#+end_src
+
+- Inputs :: =n_elements=, an out-parameter.
+- Units :: forces in the energy-per-length unit of the potential (eV/Angstrom
+  for the built-in potentials).
+- Outputs :: a pointer to the forces tensor data, 3*n doubles in row-major
+  =[n, 3]= order, valid while the =CalcResult= lives; =n_elements= is set to the
+  product of the tensor shape.
+  With no forces tensor it returns =nullptr= and sets =n_elements= to 0.
+- Errors :: none.
+  The pointer is read as CPU memory; the device of the tensor is not checked.
+
+*** =rgpot::CalcResult::forces_vec=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+std::vector<double> forces_vec() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: as =forces_data=.
+- Outputs :: a copy of the forces, 3*n doubles row-major; empty when there is no
+  forces tensor.
+- Errors :: none.
+
+*** =rgpot::CalcResult::has_forces=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+bool has_forces() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: =true= when a forces tensor is set.
+- Errors :: none.
+
+** include/rgpot/potential.hpp
+
+*** =rgpot::PotentialHandle=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+explicit PotentialHandle(rgpot_potential_t *handle);
+#+end_src
+
+- Inputs :: =handle=, a pointer from =rgpot_potential_new= or
+  =rgpot_potential_new_eindir=, or NULL.
+- Units :: none.
+- Outputs :: a move-only handle that owns =handle= and passes it to
+  =rgpot_potential_free= on destruction.
+  A moved-from handle holds NULL.
+- Errors :: none; a NULL =handle= is stored as given.
+
+*** =rgpot::PotentialHandle::from_impl=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+template <typename Impl> static PotentialHandle from_impl(Impl &impl);
+template <typename Impl>
+static PotentialHandle from_impl(Impl &impl, size_t n_atoms,
+                                 const int32_t *atomic_numbers,
+                                 const double *box_matrix,
+                                 const double *bounds_low = nullptr,
+                                 const double *bounds_high = nullptr);
+#+end_src
+
+- Inputs :: =impl=, an object with
+  =forceImpl(const rgpot::ForceInput &, rgpot::ForceOut *)=; the caller keeps
+  ownership and must keep it alive while the handle lives.
+  The second overload also takes =n_atoms=, =atomic_numbers= (n values),
+  =box_matrix= (9 doubles) and optional bounds (3*n doubles each, default -50 and 50 per coordinate when NULL); =rgpot_potential_new_eindir=
+  copies them.
+- Units :: positions, cell and bounds in the length unit of =impl=.
+- Outputs :: a handle whose callback calls =impl.forceImpl= and returns the
+  forces as a new owning =[n, 3]= tensor.
+  When =Impl= has =hessianVectorImpl=, it is registered as the analytic
+  Hessian-vector product.
+- Errors :: none thrown by the factory.
+  When =n_atoms * 3= overflows, the second overload returns a handle holding
+  NULL, and later calls on it throw =rgpot::Error= ("invalid parameter").
+  At calculation time an exception from =impl.forceImpl= becomes
+  =RGPOT_INTERNAL_ERROR=, and missing positions become
+  =RGPOT_INVALID_PARAMETER=; the calling method throws =rgpot::Error=.
+  The exception's own message is dropped.
+
+The trampoline copies energy, variance and forces from =ForceOut=; it does not
+pass stress through.
+
+*** =rgpot::PotentialHandle::from_callback=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+static PotentialHandle from_callback(rgpot_status_t (*callback)(void *, const rgpot_force_input_t *, rgpot_force_out_t *),
+                                     void *user_data, void (*free_fn)(void *) = nullptr);
+#+end_src
+
+- Inputs :: =callback=, a C potential callback;
+  =user_data=, passed to every call; =free_fn=, called with =user_data= when the
+  handle is freed, or =nullptr=.
+- Units :: those of =callback=.
+- Outputs :: a handle from =rgpot_potential_new=.
+- Errors :: none; the result of =rgpot_potential_new= is not checked for NULL.
+  A non-success status from =callback= is thrown as =rgpot::Error= by the method
+  that called it.
+
+*** =rgpot::PotentialHandle::calculate=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+CalcResult calculate(const InputSpec &input);
+#+end_src
+
+- Inputs :: =input=, the configuration.
+- Units :: those of the wrapped potential.
+- Outputs :: a =CalcResult= with energy, variance and the =[n, 3]= forces tensor
+  set by the callback.
+- Errors :: throws =rgpot::Error= when =rgpot_potential_calculate= returns a
+  non-success status: a NULL handle gives "invalid parameter", and a failing
+  callback gives the category of its status.
+
+*** =rgpot::PotentialHandle::hvp=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void hvp(const InputSpec &input, const double *direction, double *hv_out,
+         double step = 0.0, rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO) const;
+std::vector<double> hvp(const InputSpec &input,
+                        const std::vector<double> &direction,
+                        double step = 0.0,
+                        rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO) const;
+#+end_src
+
+- Inputs :: =input=, the geometry; =direction=,
+  3*n doubles laid out like the positions; =hv_out=, room for 3*n doubles that
+  must not overlap =direction=; =step=, the displacement length, where 0 selects
+  =RGPOT_HVP_DEFAULT_STEP=; =scheme=, one of =RGPOT_HVP_AUTO=, =RGPOT_HVP_FORWARD=, =RGPOT_HVP_CENTRAL=, =RGPOT_HVP_ANALYTIC=.
+- Units :: =step= in the length unit of the positions; the product is the
+  Hessian (energy per length squared, eV/Angstrom^2 for the built-in potentials)
+  times =direction=.
+- Outputs :: the Hessian-vector product, 3*n doubles: written to =hv_out=, or
+  returned as a new vector by the second overload.
+- Errors :: throws =rgpot::Error= when =rgpot_potential_hvp= returns a
+  non-success status: NULL pointers, an unknown scheme, a negative or non-finite
+  step, a non-finite direction value, overlapping buffers, or
+  =RGPOT_HVP_ANALYTIC= with no analytic callback give "invalid parameter"; a
+  failing force callback gives the category of its status.
+  The vector overload throws =rgpot::Error= ("invalid parameter: direction must
+  hold 3 * n_atoms values") when =direction.size()= is not 3*n.
+
+With =RGPOT_HVP_FORWARD=, k products at one geometry make k+1 force calls.
+
+*** =rgpot::PotentialHandle::hvp_centre=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+CalcResult hvp_centre(const InputSpec &input) const;
+#+end_src
+
+- Inputs :: =input=, the geometry.
+- Units :: those of the wrapped potential.
+- Outputs :: a =CalcResult= with energy and an owning =[n, 3]= forces tensor,
+  taken from the cached centre when the geometry matches, otherwise from one
+  force call that becomes the cached centre.
+- Errors :: throws =rgpot::Error= when =rgpot_potential_hvp_centre= returns a
+  non-success status (NULL handle, failing callback).
+
+*** =rgpot::PotentialHandle::set_hvp_callback=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void set_hvp_callback(HessianVectorCallback callback) const;
+#+end_src
+
+- Inputs :: =callback=, an analytic Hessian-vector product called with the
+  handle's =user_data=, or =nullptr= to clear it.
+- Units :: those of the wrapped potential.
+- Outputs :: none.
+- Errors :: throws =rgpot::Error= ("invalid parameter") when the handle is NULL.
+
+*** =rgpot::PotentialHandle::invalidate_hvp=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void invalidate_hvp() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: none; drops the cached centre.
+- Errors :: none; a NULL handle is a no-op.
+
+Call it after changing the state behind the potential at a fixed geometry,
+because the centre is keyed on positions, atomic numbers and cell only.
+
+*** =rgpot::PotentialHandle::hvp_counts=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+rgpot_hvp_counts_t hvp_counts() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: an =rgpot_hvp_counts_t= with =products=, =force_calls=,
+  =centre_reused= and =analytic= since creation or the last reset.
+- Errors :: throws =rgpot::Error= ("invalid parameter") when the handle is NULL.
+
+*** =rgpot::PotentialHandle::reset_hvp_counts=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void reset_hvp_counts() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: none; zeroes the counters and keeps the cached centre.
+- Errors :: none; a NULL handle is a no-op.
+
+*** =rgpot::PotentialHandle::raw=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+rgpot_potential_t *raw() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the owned =rgpot_potential_t= pointer, NULL after a move; the
+  handle keeps ownership.
+- Errors :: none.
+
+** include/rgpot/rpc_client.hpp
+
+The class is declared only when =RGPOT_HAS_RPC= is defined.
+
+*** =rgpot::RpcClient=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+RpcClient(const std::string &host, uint16_t port);
+#+end_src
+
+- Inputs :: =host=, a host name or IP address; =port=, the TCP port of an rgpot
+  server.
+- Units :: none.
+- Outputs :: a move-only client connected by
+  =rgpot_rpc_client_new=; the destructor calls =rgpot_rpc_client_free=.
+- Errors :: throws =rgpot::Error= when
+  =rgpot_rpc_client_new= returns NULL; the message is the =rgpot_last_error()=
+  text without a category prefix, or "failed to create RPC client" when that
+  pointer is NULL.
+
+*** =rgpot::RpcClient::calculate=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+CalcResult calculate(const InputSpec &input);
+#+end_src
+
+- Inputs :: =input=, the configuration sent to the server.
+- Units :: those of the potential on the server.
+- Outputs :: a =CalcResult= with energy, variance and forces from the server.
+- Errors :: throws =rgpot::Error= when =rgpot_rpc_calculate= returns a
+  non-success status, for example "RPC error" on a transport or server failure.
+
+** CppCore/rgpot/Potential.hpp: rgpot::PotentialBase
+
+*** =rgpot::PotentialBase=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+explicit PotentialBase(PotType inp_type);
+#+end_src
+
+- Inputs :: =inp_type=, the =PotType= of the potential.
+- Units :: none.
+- Outputs :: the abstract base of every potential.
+  Its pure virtual =operator()= takes positions (n x 3 =AtomMatrix=), atomic
+  numbers and a 3 x 3 cell, and returns energy, forces (n x 3) and variance.
+- Errors :: none.
+
+*** =rgpot::PotentialBase::caps=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] virtual PotCaps caps() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a =PotCaps= with the reentrancy, per-image, batched, periodic,
+  group-collective and stress flags; the default is a value-initialised
+  =PotCaps= (=SharedInstance=, periodic, nothing else set).
+- Errors :: none; the method is =noexcept=.
+
+*** =rgpot::PotentialBase::forceBatch=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+virtual void forceBatch(const ForceBatch & /*batch*/);
+#+end_src
+
+- Inputs :: a =ForceBatch= of independent systems.
+- Units :: none in the base.
+- Outputs :: none in the base; =rgpot::Potential::forceBatch= overrides it.
+- Errors :: the base implementation throws =std::runtime_error=
+  ("PotentialBase::forceBatch called directly").
+
+*** =rgpot::PotentialBase::paramsKey=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] virtual uint64_t paramsKey() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a 64-bit fingerprint of the parameter set, mixed into the
+  result-cache key; the default is 0.
+- Errors :: none; the method is =noexcept=.
+
+*** =rgpot::PotentialBase::setCache=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+virtual void setCache(rgpot::cache::PotentialCache * /*c*/);
+#+end_src
+
+- Inputs :: a =rgpot::cache::PotentialCache= pointer.
+- Units :: none.
+- Outputs :: none in the base; =rgpot::Potential::setCache= overrides it.
+- Errors :: the base implementation throws =std::runtime_error=
+  ("PotentialBase::setCache called directly").
+
+Declared only when =RGPOT_HAS_CACHE= is defined.
+
+*** =rgpot::PotentialBase::getType=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] PotType getType() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the =PotType= given at construction.
+- Errors :: none.
+
+** CppCore/rgpot/Potential.hpp: rgpot::Potential
+
+*** =rgpot::Potential=
+
+- Inputs :: the template argument =Derived=, the concrete potential; the
+  constructor is inherited from =PotentialBase= and takes a =PotType=.
+- Units :: those of =Derived=; the built-in potentials use Angstrom, eV and
+  eV/Angstrom.
+- Outputs :: a CRTP base whose =operator()= flattens the positions and cell,
+  calls =forceImpl= with zeroed outputs, counts the force call, and returns
+  energy, forces (n x 3) and variance.
+  With =RGPOT_HAS_CACHE= and a cache set, =operator()= returns a cached result
+  when the key matches.
+- Errors :: =operator()= propagates any exception from =forceImpl=.
+
+*** =rgpot::Potential::forceImpl=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+virtual void forceImpl(const ForceInput &in, ForceOut *out) const = 0;
+#+end_src
+
+- Inputs :: =in.nAtoms=; =in.pos=, 3*n doubles row-major; =in.atmnrs=, n atomic
+  numbers; =in.box=, 9 doubles, cell vectors as rows.
+- Units :: those of =Derived=; built-in potentials take Angstrom and write eV,
+  eV/Angstrom and, for stress, eV/Angstrom^3.
+- Outputs :: =out->F=, 3*n force doubles row-major; =out->energy=;
+  =out->variance=; =out->stress=, 9 doubles row-major xx..zz; =out->has_stress=,
+  0 when no stress was computed.
+  =operator()= and =forceBatch= pass =out= zeroed.
+- Errors :: defined by each potential; an override may throw with =out= partly
+  written.
+
+*** =rgpot::Potential::forceBatchImpl=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+virtual void forceBatchImpl(const ForceBatch &batch) const;
+#+end_src
+
+- Inputs :: =batch=, =batch.nSystems= systems with parallel arrays =batch.in=
+  and =batch.out=.
+- Units :: as =forceImpl=.
+- Outputs :: fills =batch.out[i]= from =batch.in[i]= for every i; the default
+  calls =forceImpl= once per system.
+- Errors :: the default propagates any exception from =forceImpl=.
+
+An override must treat the systems as independent and set =caps().batched=.
+
+*** =rgpot::Potential::forceBatch=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void forceBatch(const ForceBatch &batch) override;
+#+end_src
+
+- Inputs :: =batch=; each =batch.out[i].F= must have room for 3 *
+  =batch.in[i].nAtoms= doubles.
+- Units :: as =forceImpl=.
+- Outputs :: =batch.out[i]= for every system.
+  Every slot is zeroed first.
+  With =RGPOT_HAS_CACHE= and a cache set, hits are served from the cache and
+  only the misses reach =forceBatchImpl=.
+- Errors :: propagates any exception from =forceBatchImpl=; the slots stay
+  zeroed or partly written.
+
+*** =rgpot::Potential::setCache=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setCache(rgpot::cache::PotentialCache *c) override;
+#+end_src
+
+- Inputs :: =c=, a =rgpot::cache::PotentialCache= pointer, or =nullptr= to stop
+  caching.
+- Units :: none.
+- Outputs :: none; stores =c= for =operator()= and =forceBatch=.
+  The caller keeps ownership.
+- Errors :: none.
+
+Declared only when =RGPOT_HAS_CACHE= is defined.
+
+** CppCore/rgpot/ForceStructs.hpp
+
+*** =rgpot::ForceInput=
+
+- Inputs :: four fields, all =const=, so the struct is filled by aggregate
+  initialisation: =nAtoms= (=size_t=), the atom count n; =pos=
+  (=const double *=), 3*n positions, row-major xyz per atom; =atmnrs=
+  (=const int *=), n atomic numbers; =box= (=const double *=), 9 doubles, the
+  three cell vectors as rows (ax ay az bx by bz cx cy cz).
+- Units :: =pos= and =box= in the length unit of the potential (Angstrom for the
+  built-in potentials); =nAtoms= and =atmnrs= have none.
+- Outputs :: none; the struct borrows the caller's arrays and owns nothing.
+- Errors :: none; the struct is plain data and nothing is checked.
+
+*** =rgpot::ForceOut=
+
+- Inputs :: =F= (=double *=), a caller-owned buffer with room for 3*n doubles.
+- Units :: =F= in the force unit of the potential
+  (eV/Angstrom for the built-in potentials); =energy= in its energy unit (eV); =stress= in energy per length cubed (eV/Angstrom^3);
+  =variance= as the potential reports it.
+- Outputs :: =F=, 3*n forces row-major like the positions; =energy= (=double=);
+  =variance= (=double=), 0 when unused; =stress= (=double[9]=), the Cauchy
+  stress row-major xx xy xz yx yy yz zx zy zz; =has_stress= (=int=), 0 when the
+  potential did not compute stress.
+- Errors :: none; the struct is plain data.
+
+Potentials that write stress set =caps().stress=.
+
+*** =rgpot::ForceBatch=
+
+- Inputs :: =nSystems= (=size_t=), the number of systems; =in=
+  (=const ForceInput *=), =nSystems= inputs; =out= (=ForceOut *=), =nSystems=
+  result slots, where =out[i]= belongs to =in[i]= and =out[i].F= has room for 3 *
+  =in[i].nAtoms= doubles.
+- Units :: as =ForceInput= and =ForceOut=.
+- Outputs :: none; the caller owns both arrays and every buffer they point at.
+- Errors :: none; the struct is plain data.
+
+The systems are independent: each has its own atom count, cell and species.
+
+** CppCore/rgpot/pot_caps.hpp
+
+*** =rgpot::Reentrancy=
+
+- Inputs :: none; an =enum class= with =uint8_t= storage.
+- Units :: none.
+- Outputs :: one of three values: =SharedInstance=, one instance may be called
+  from many threads at once; =PerInstance=, concurrent evaluation needs one
+  instance per thread; =ProcessSerial=, all evaluations in the process must be
+  serialised, whatever the instance count.
+- Errors :: none.
+
+*** =rgpot::PotCaps=
+
+- Inputs :: none; a struct of fields with default member initialisers.
+- Units :: none.
+- Outputs :: =reentrancy= (=Reentrancy=, default =SharedInstance=);
+  =perImageInstances= (=bool=, default false), callers should clone one instance
+  per NEB image; =batched= (=bool=, default false), the potential overrides
+  =forceBatchImpl=; =periodic= (=bool=, default true), the kernel supports
+  periodic boundaries; =groupCollective= (=bool=, default false), every rank of
+  a calculator group enters each force call together, so the result cache
+  decides hit or miss jointly over the group; =stress= (=bool=, default false),
+  =forceImpl= writes the Cauchy stress for a positive cell volume.
+- Errors :: none.
+
+=rgpot::PotentialBase::caps= returns this struct.
+
+** CppCore/rgpot/pot_types.hpp
+
+*** =rgpot::PotType=
+
+- Inputs :: none; an =enum class= with one enumerator per potential kind.
+- Units :: none.
+- Outputs :: =UNKNOWN= (0), =CuH2=, =LJ=, =XTB=, =TBLite=, =Metatomic=,
+  =NWChem=, =CPMD=, =Morse=, =LJCluster=, =ZBL=, =SWSi=, =EDIP=, =LenoskySi=,
+  =TersoffSi=, =EAMAl=, =FeHe=, =WaterH=, =D3=, =D4=, =Expr=, =Uma=, =Skala=,
+  =MOPAC=, =EMT=, =EAMCell=, =TIP4P=, =SPCE=, =TIP4PPt=, =IPI=, =SuttonChen=,
+  =SWSi1985=, =EAMTable=, =Lammps=, =Gromacs=, =OpenMM=, =CP2K=, =LrCoulomb=,
+  =LrDispersion=, =LrNlh=, =LrSum=, numbered in that order.
+- Errors :: none.
+
+Every enumerator is declared in every build; whether the potential behind it is
+compiled depends on the Meson options.
+The value is part of the result-cache key, and =rgpot::PotentialBase::getType=
+returns it.
+
+** CppCore/rgpot/CalculatorGroup.hpp
+
+A calculator is one independent evaluation, such as a NEB image or a dimer end;
+the ranks of one calculator share a subcommunicator.
+=librgpot= never links MPI.
+The MPI side is
+=librgpot_mpi=, which =bindCalculators= and =calculatorsUseMpi= load with =dlopen= on first use (Meson option =-Dwith_mpi=enabled=).
+Until that library is loaded, every function below behaves as a process of one
+calculator with one rank.
+Running under MPI is described in [[file:mpi.org][MPI]].
+
+*** =rgpot::CalculatorGroup=
+
+- Inputs :: none; a struct of four =int= fields.
+- Units :: none.
+- Outputs :: =index= (default 0), the calculator this rank belongs to, or -1
+  when the bind was refused; =ranks= (default 1), ranks per calculator;
+  =rank_in_group= (default 0), this rank within its calculator;
+  =world_size= (default 1), the size of =MPI_COMM_WORLD=.
+- Errors :: none.
+
+*** =rgpot::addCalculatorHook=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void addCalculatorHook(CalculatorHook hook);
+#+end_src
+
+- Inputs :: =hook=, a function =int (*)(int ranks_per_calculator)= that returns
+  the group index or -1 to refuse the bind.
+- Units :: none.
+- Outputs :: none; =hook= is called on every rank from each later
+  =bindCalculators= that performs a bind.
+  A hook already registered is not added twice.
+- Errors :: none; a null =hook= is ignored.
+
+*** =rgpot::bindCalculators=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+CalculatorGroup bindCalculators(int ranks_per_calculator);
+#+end_src
+
+- Inputs :: =ranks_per_calculator=; 0 or less means one calculator for the whole
+  world.
+- Units :: none.
+- Outputs :: the =CalculatorGroup= of this rank, also kept for =thisCalculator=.
+  With
+  =librgpot_mpi= loaded it is collective on =MPI_COMM_WORLD=, calls =MPI_Init=
+  when MPI is not up yet, and splits the world.
+  Without it, 1 or 0 or less gives index 0 with one rank, and any other value
+  gives index -1.
+  Registered hooks and communicator adopters are then called; a negative result
+  from any of them sets index to -1.
+- Errors :: no exception; failure is reported as index -1.
+  Index is -1 when the world size is not a multiple of =ranks_per_calculator= or
+  is smaller than it, and when a hook or adopter refuses.
+  After a bind, a call whose argument equals the stored ranks per calculator
+  returns the stored group.
+  Any other argument returns a group with index -1 and leaves the stored group
+  unchanged.
+  An argument of 0 or less is compared as its resolved value (the world size, or
+  1 without MPI), so repeating =bindCalculators(0)= returns the stored group.
+
+*** =rgpot::thisCalculator=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+const CalculatorGroup &thisCalculator();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the group stored by the last bind; a default =CalculatorGroup=
+  (index 0, one rank, world size 1) before any bind.
+- Errors :: none.
+
+*** =rgpot::calculatorComm=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int calculatorComm(void *comm_out, std::size_t comm_bytes);
+#+end_src
+
+- Inputs :: =comm_out=, storage for an =MPI_Comm=;
+  =comm_bytes=, =sizeof(MPI_Comm)= on the caller.
+- Units :: none.
+- Outputs :: 1 after copying the calculator's communicator into =*comm_out=; 0
+  otherwise.
+- Errors :: none; returns 0 without
+  =librgpot_mpi=, without a split, for a null =comm_out=, or when
+  =comm_bytes= differs from the library's =sizeof(MPI_Comm)=.
+
+*** =rgpot::adoptCalculatorComm=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int adoptCalculatorComm(CalculatorCommAdopter callback);
+#+end_src
+
+- Inputs :: =callback=, a function
+  =int (*)(const void *, std::size_t, int)= that receives the address and byte size of the calculator's =MPI_Comm=,
+  then the ranks per calculator; it must borrow the handle and not free it.
+- Units :: none.
+- Outputs :: the result of =callback=.
+- Errors :: none; returns -1 without =librgpot_mpi=, for a null =callback=,
+  before a bind, after a refused bind, or without a communicator.
+
+*** =rgpot::addCalculatorCommAdopter=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+bool addCalculatorCommAdopter(CalculatorCommAdopter callback);
+#+end_src
+
+- Inputs :: =callback=, as for =adoptCalculatorComm=; its code must stay loaded
+  for the life of the process.
+- Units :: none.
+- Outputs :: =true= when registered.
+  Before a bind the callback is queued for =bindCalculators=; after a bind it is
+  called at once with the existing communicator.
+  A callback already registered is not added twice.
+- Errors :: no exception; returns =false= for a null =callback= or after a
+  refused bind.
+  When the immediate call after a bind returns a value other than the group
+  index, the stored index becomes -1 and the result is =false=.
+
+Every rank must register the same callbacks in the same order.
+Registration does not load MPI.
+
+*** =rgpot::calculatorsUseMpi=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int calculatorsUseMpi();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: 1 when
+  =librgpot_mpi= is loaded (it loads it if needed) and =MPI_Initialized= reports
+  MPI up; else 0.
+- Errors :: none; a failed load returns 0, with the reason in
+  =calculatorMpiLoadError=.
+
+*** =rgpot::loadCalculatorMpi=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int loadCalculatorMpi(const char *path = nullptr);
+#+end_src
+
+- Inputs :: =path=, the library file to open, or =nullptr= (or an empty string)
+  to try in order: the =RGPOT_MPI_LIBRARY= environment variable,
+  =librgpot_mpi.so.3= (=librgpot_mpi.3.dylib= on macOS) in the directory of
+  =librgpot=, then that name through the dynamic linker's search path.
+- Units :: none.
+- Outputs :: 1 when the MPI side is available, also when it was loaded already;
+  else 0.
+  The library stays loaded for the life of the process.
+- Errors :: none thrown; returns 0 when no candidate opens, lacks the
+  =rgpot_mpi_api_v1= symbol, or has an incompatible ABI version, and on Windows.
+  The reason is kept for =calculatorMpiLoadError=.
+
+*** =rgpot::calculatorMpiLoaded=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int calculatorMpiLoaded();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: 1 once =librgpot_mpi= is loaded in this process, else 0.
+- Errors :: none.
+
+*** =rgpot::calculatorMpiLoadError=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+std::string calculatorMpiLoadError();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the reason the last =loadCalculatorMpi= failed; empty after a
+  success or before any attempt.
+- Errors :: none.
+
+*** =rgpot::calculatorWorldSize=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int calculatorWorldSize();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the =MPI_COMM_WORLD= size recorded by =bindCalculators=, also after
+  a refused split; 1 before a bind.
+- Errors :: none.
+
+*** =rgpot::calculatorCount=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int calculatorCount();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the number of calculators, world size divided by ranks per
+  calculator; 1 before a bind and after a refused one.
+- Errors :: none.
+
+*** =rgpot::shareFromCalculator=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int shareFromCalculator(int owner, void *data, std::size_t bytes);
+#+end_src
+
+- Inputs :: =owner=, a calculator index from 0 to =calculatorCount()= - 1;
+  =data=, =bytes= bytes, read on the first rank of =owner= and written on every
+  other rank.
+- Units :: none; the data is copied as raw bytes.
+- Outputs :: 1 once every rank of =MPI_COMM_WORLD= holds the bytes of =owner=; 0
+  otherwise.
+  With more than one rank it is collective on =MPI_COMM_WORLD=.
+- Errors :: returns 0 without =librgpot_mpi=, before a bind, after a refused
+  bind, for a null =data= with nonzero =bytes=, or for an out-of-range =owner=
+  in a single process.
+  With more than one rank, when any rank has one of those problems or the ranks
+  disagree on =owner= or =bytes=, every rank prints the reason to stderr and
+  =MPI_Abort(MPI_COMM_WORLD, 1)= runs.
+
+*** =rgpot::finalizeMpiAtExit=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void finalizeMpiAtExit();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: none; registers, once per process, an exit handler.
+  The handler calls
+  =MPI_Abort(MPI_COMM_WORLD, 1)= when =abortMpiAtExit= was called, otherwise =MPI_Finalize=
+  when =bindCalculators= called =MPI_Init= and MPI is not yet finalized.
+- Errors :: none; a no-op without =librgpot_mpi=.
+
+*** =rgpot::abortMpiAtExit=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void abortMpiAtExit();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: none; sets a process-wide flag that the =finalizeMpiAtExit= handler
+  reads.
+- Errors :: none; harmless without MPI.
+
+A backend calls it before throwing out of a failed engine call, so the other
+ranks are not left waiting in a collective.
+
+*** =rgpot::mpiAbortRequested=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+bool mpiAbortRequested();
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: =true= once =abortMpiAtExit= was called in this process.
+- Errors :: none.
+
+*** =rgpot::calculatorAgree=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+int calculatorAgree(unsigned char *flags, std::size_t n);
+#+end_src
+
+- Inputs :: =flags=, =n= bytes, each read as a boolean; every rank of the
+  calculator must pass the same =n=.
+- Units :: none.
+- Outputs :: 1 after replacing =flags= in place with their logical AND over the
+  ranks of this calculator; 0 with =flags= untouched.
+  It is collective on the calculator's communicator; other calculators take no
+  part.
+- Errors :: none; returns 0 without =librgpot_mpi=, when MPI is not initialized
+  or already finalized, before a split, after a refused bind, or for a
+  calculator of one rank.
+
+*** =rgpot::publishCalculatorError=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void publishCalculatorError(const std::string &message);
+#+end_src
+
+- Inputs :: =message=, empty for success; every rank of the calculator calls it
+  at the end of a =groupCollective= force call.
+- Units :: none.
+- Outputs :: none when no rank has a message.
+- Errors :: when any rank has a message, every message (at most 512 bytes each)
+  is printed to stderr on every rank of the calculator and
+  =MPI_Abort(MPI_COMM_WORLD, 1)= runs.
+  Without a split, or for a calculator of one rank, a non-empty message prints
+  and aborts.
+  A rank with a message that waits more than 10 seconds for the exchange aborts
+  on its own.
+  Without =librgpot_mpi=, or when MPI is not initialized, it returns and the
+  caller's exception carries the message.
+
+** Example
+
+The build in this tree is configured with =with_rust_core= off, so the
+=rgpot-core= symbols that the handles call are not linked; the example is only
+compiled.
+
+#+attr_rgpot: compile
+#+begin_src cpp
+#include <cstdio>
+
+#include "rgpot/LennardJones/LJPot.hpp"
+#include "rgpot/rgpot.hpp"
+
+int main() {
+  rgpot::LJPot lj;
+  auto pot = rgpot::PotentialHandle::from_impl(lj);
+
+  double pos[] = {0, 0, 0, 1.1, 0, 0};
+  int atm[] = {1, 1};
+  double box[] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
+  rgpot::InputSpec input(2, pos, atm, box);
+
+  try {
+    rgpot::CalcResult result = pot.calculate(input);
+    std::vector<double> forces = result.forces_vec();
+    std::printf("E = %.6f, Fx0 = %.6f\n", result.energy(), forces[0]);
+  } catch (const rgpot::Error &e) {
+    std::printf("%s\n", e.what());
+    return 1;
+  }
+  return 0;
+}
+#+end_src

@@ -26,14 +26,23 @@ Options come as =key value= pairs separated by spaces.
 
 A build with the Fortran potentials also accepts =SWSi= (with a stress), and
 =EDIP=, =LenoskySi=, =EAMAl=, =FeHe= and =CuH2= (without one).
-=EAMTable= needs =-Dwith_eam_table=true=; its format follows the file extension
-unless =format= is given.
+=SWSi1985= is =StillingerWeberSi= and =SWSi= is the Fortran =SWPot=.
+=TersoffSi= is =TersoffSiC=, which runs the 1989 kernel on every call, including
+an all-silicon one.
+=preset= also accepts =pt= and =au=.
+=EAMTable= needs =-Dwith_eam_table=true=.
+Its =format= also accepts =eam=, =alloy=, =eam/alloy= and =eam/fs=.
+Without =format=, the suffix decides: =.eam.alloy= or =.setfl= is =setfl=,
+=.eam.fs= is =fs=, and =.eam= is =funcfl=.
+=SuttonChen= and =EAMTable= are built periodic and with the stress on.
 
 =cutoff= defaults to the host's cutoff: the =pair_style= cutoff in LAMMPS.
 PLUMED and =rgpot-eval= have none, so there the potential's own default is used
 (15 Angstrom for =LJ=, 9.5 for =Morse=, 40 for =SuttonChen=).
-An unknown name or option stops with a message that lists what this build
-accepts.
+An unknown name stops with a message that lists the names this build accepts.
+An option the potential does not take, an option given twice, or a value that is
+not a number (or not an integer, for =n= and =m=) stops with a message that
+names the option.
 
 The stress column is what a periodic cell needs for the virial.
 LAMMPS takes a strain difference for a potential without one.

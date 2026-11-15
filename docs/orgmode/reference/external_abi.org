@@ -6,3 +6,208 @@
 
 =CppCore/rgpot/ExternalPot/external_potentials.h= declares the C constructors of
 the LAMMPS, GROMACS and OpenMM shifted Lennard-Jones potentials.
+=CppCore/rgpot/ExternalPot/ExternalPot.cc= implements them in =librgpot=.
+Positions and cells are Angstrom, energies eV and forces eV/Angstrom at this
+interface.
+A box is nine doubles, the lattice vectors as rows.
+Every call that can fail takes =err= and =err_len=.
+On failure it writes a message of at most
+=err_len - 1= characters and a terminating null into =err=; a null =err= or an =err_len=
+of 0 writes nothing.
+
+** Types
+
+*** =rgpot_external_potential=
+
+- Inputs :: none; an opaque handle from one of the constructors.
+- Units :: none.
+- Outputs :: none.
+- Errors :: none.
+
+One handle holds one potential.
+Each potential serialises the force calls of its own instance with a mutex.
+
+** Unit factors
+
+*** =rgpot_md_kj_per_ev=
+
+#+attr_rgpot: signature
+#+begin_src c
+double rgpot_md_kj_per_ev(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: kJ/mol per eV.
+- Outputs :: the elementary charge times the Avogadro number divided by 1000,
+  from the exact 2019 SI values in =CppCore/rgpot/ExternalPot/md_units.hpp=.
+- Errors :: none; the call cannot fail.
+
+*** =rgpot_md_nm_per_angstrom=
+
+#+attr_rgpot: signature
+#+begin_src c
+double rgpot_md_nm_per_angstrom(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: nm per Angstrom.
+- Outputs :: 0.1.
+- Errors :: none; the call cannot fail.
+
+** Constructors
+
+*** =rgpot_lammps_potential=
+
+#+attr_rgpot: signature
+#+begin_src c
+rgpot_external_potential *rgpot_lammps_potential(const char *engine_path,
+                                                double u0, double cutoff,
+                                                double psi, char *err,
+                                                size_t err_len);
+#+end_src
+
+- Inputs :: =engine_path=, the engine library, or null or empty to search.
+  =u0= is the well depth, =cutoff= the cutoff and =psi= the zero crossing of the
+  12-6 potential.
+  =err= and =err_len= receive a failure message.
+- Units :: =u0= is eV; =cutoff= and =psi= are Angstrom.
+- Outputs :: a new handle, freed with =rgpot_external_potential_free=.
+  The constructor opens the engine library, resolves =rgpot_engine_create=,
+  =rgpot_engine_destroy= and =rgpot_engine_force=, and calls
+  =rgpot_engine_create= with the three doubles =u0=, =cutoff=, =psi= in eV and
+  Angstrom.
+  Every force call goes to =rgpot_engine_force=.
+  A non-empty =engine_path= is the only library tried.
+  Otherwise the constructor tries =RGPOT_LAMMPS_ENGINE=, then
+  =LAMMPS_ENGINE= when they are set and not empty, then =liblammps_engine.so=
+  and =liblj_engine.so= through the dynamic linker's search path (=.dylib= on
+  macOS, =.dll= on Windows).
+- Errors :: returns null and writes =err= when =u0=, =cutoff= or =psi= is not
+  positive and finite ("u0, cutoff and psi must be positive and finite (eV and
+  Angstrom)").
+  Returns null and writes =err= when no candidate opens with all three symbols
+  ("engine library was not opened: " and the reason for each candidate) or when
+  =rgpot_engine_create= returns null (its message, or "rgpot_engine_create
+  failed").
+
+*** =rgpot_gromacs_potential=
+
+#+attr_rgpot: signature
+#+begin_src c
+rgpot_external_potential *rgpot_gromacs_potential(const char *engine_path,
+                                                 double u0, double cutoff,
+                                                 double psi, char *err,
+                                                 size_t err_len);
+#+end_src
+
+- Inputs ::
+  =engine_path=, a library, or null or empty to evaluate in process; =u0=, =cutoff=, =psi=, =err= and =err_len=
+  as in =rgpot_lammps_potential=.
+- Units :: =u0= is eV; =cutoff= and =psi= are Angstrom.
+  The constructor stores them once as kJ/mol and nm.
+- Outputs :: a new handle, freed with =rgpot_external_potential_free=.
+  Without a library the force is the in-process =LJPot= with =u0=, =cutoff= and
+  =psi=.
+  With a library the constructor resolves =rgpot_engine_create=,
+  =rgpot_engine_destroy= and
+  =rgpot_md_native_force=, and calls =rgpot_engine_create= with the three doubles in kJ/mol and nm. Each force call then passes positions and box in nm to =rgpot_md_native_force=
+  and converts the
+  kJ/mol energy and the (kJ/mol)/nm forces back to eV and eV/Angstrom.
+- Errors :: returns null and writes =err= for a =u0=, =cutoff= or =psi= that is
+  not positive and finite, a library that does not open or lacks one of the
+  three symbols, or a failed =rgpot_engine_create=, with the messages of
+  =rgpot_lammps_potential=.
+
+*** =rgpot_openmm_potential=
+
+#+attr_rgpot: signature
+#+begin_src c
+rgpot_external_potential *rgpot_openmm_potential(const char *engine_path,
+                                                double u0, double cutoff,
+                                                double psi, char *err,
+                                                size_t err_len);
+#+end_src
+
+- Inputs :: as =rgpot_gromacs_potential=.
+- Units :: =u0= is eV; =cutoff= and =psi= are Angstrom, stored once as kJ/mol
+  and nm.
+- Outputs :: a new handle that behaves as the one from
+  =rgpot_gromacs_potential=, with the OpenMM potential type.
+- Errors :: as =rgpot_gromacs_potential=.
+
+** Evaluation
+
+*** =rgpot_external_potential_free=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_external_potential_free(rgpot_external_potential *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle from a constructor, or null.
+- Units :: none.
+- Outputs :: destroys the potential, calls the engine's =rgpot_engine_destroy=
+  when there is one, and closes its library.
+- Errors :: none; a null =pot= is ignored.
+
+*** =rgpot_external_potential_energy_forces=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_external_potential_energy_forces(
+    rgpot_external_potential *pot, const double *xyz, const int *atomic_numbers,
+    size_t n, const double *box9, double *forces, double *energy, char *err,
+    size_t err_len);
+#+end_src
+
+- Inputs :: =pot=, =xyz= (=3 * n= doubles, row-major =x y z= per atom),
+  =atomic_numbers= (=n= ints), =box9= (nine doubles, lattice vectors as rows), =forces= (room for =3 * n= doubles), =energy=, =err= and =err_len=.
+  =box9= must not be null, also when =n= is 0.
+- Units :: =xyz= and =box9= are Angstrom, =*energy= is eV and =forces=
+  eV/Angstrom.
+- Outputs :: returns 0 and writes =*energy= and the =3 * n= forces, row-major
+  like =xyz=.
+  The variance the engine reports is not returned.
+- Errors :: returns 1 and writes
+  "energy_forces needs a potential and a geometry" for a null =pot=, =energy= or =box9=, or, when =n > 0=, a null =xyz=, =atomic_numbers=
+  or =forces=. Returns 1 and writes the message when the evaluation throws, for
+  example "rgpot_engine_force failed" or "rgpot_md_native_force failed" when the
+  engine returns nonzero.
+
+** Example
+
+The GROMACS potential evaluated in process, a dimer 1.5 Angstrom apart.
+
+#+attr_rgpot: run link=rgpot flags=-ICppCore,-Iinclude
+#+begin_src c
+#include <stdio.h>
+#include "rgpot/ExternalPot/external_potentials.h"
+
+int main(void) {
+  char err[256] = "";
+  rgpot_external_potential *pot = rgpot_gromacs_potential(NULL, 1.0, 8.0, 1.0, err, sizeof err);
+  if (pot == NULL) {
+    fprintf(stderr, "%s\n", err);
+    return 1;
+  }
+  const double xyz[6] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
+  const int z[2] = {1, 1};
+  const double box9[9] = {20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0};
+  double forces[6];
+  double energy = 0.0;
+  const int rc = rgpot_external_potential_energy_forces(pot, xyz, z, 2, box9, forces, &energy,
+                                                        err, sizeof err);
+  rgpot_external_potential_free(pot);
+  if (rc != 0) {
+    fprintf(stderr, "%s\n", err);
+    return 1;
+  }
+  if (!(energy < 0.0) || forces[0] != -forces[3]) {
+    return 1;
+  }
+  printf("%.10f eV, %.6f eV/Angstrom\n", energy, forces[0]);
+  printf("%.6f kJ/mol per eV, %.1f nm per Angstrom\n", rgpot_md_kj_per_ev(),
+         rgpot_md_nm_per_angstrom());
+  return 0;
+}
+#+end_src

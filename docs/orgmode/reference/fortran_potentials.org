@@ -16,8 +16,9 @@ The module asserts ~wp == c_double~ at compile time.
 3. *No COMMON, no ~save~ state in the physics.* Parameters live in a derived
    type
 with defaults; scratch lives in local automatic arrays.
-Saved state is allowed only in the ~_capi~ module (the neighbour table and the
-parameter set), never in a kernel.
+Saved state is allowed only in the ~_capi~ module (the parameter set and the
+legacy workspace of the handle-free entry), never in a kernel.
+Per-caller neighbour tables live in workspaces from ~rgpot_workspace~.
 ~params_ready~ is written once, under C++ ~std::call_once~, and the parameter
 block is read-only after that.
 The handle-free entry's legacy workspace is process-serial and is not on the
@@ -30,9 +31,12 @@ Python path.
 6. *Kernels are ~pure~* (or ~elemental~) wherever the algorithm allows, which is
 also what ~do concurrent~ requires of anything it calls.
 7. *Failures return a status.* No ~stop~, no ~write(6,*)~ diagnostics from a
-library kernel: set a message through ~rgpot_ferror~ and return non-zero.
+library kernel: set a message (in the workspace for a
+~_ws~ entry, through ~rgpot_ferror~ for the handle-free entry) and return
+non-zero.
 The C++ wrapper turns that into an exception.
-8. *Neighbours come from vesin* through ~rgpot_neighbors~.
+8. *Neighbours come from rgpot's neighbour query* (~rgpot_nlist_fortran_build~
+in ~CppCore/rgpot/nlist/rgpot_nlist.h~) through ~rgpot_neighbors~.
 No pot builds its own list, and no pot repeats minimum-image arithmetic: the
 table carries pair vectors and distances.
 
@@ -42,9 +46,15 @@ Two modules per potential:
 
 - ~rgpot_<pot>.f90~ :: parameters, pure kernels, the energy/force driver.
 Pure Fortran, testable without the C++ stack.
-- ~rgpot_<pot>_capi.f90~ :: the ~bind(c)~ entry ~rgpot_<pot>_force(natoms,
-positions, cell, forces, energy)~ returning a status, plus the saved neighbour
-table and parameter set.
+- ~rgpot_<pot>_capi.f90~ :: the ~bind(c)~ entries, each returning a status:
+~rgpot_<pot>_force_ws(handle, natoms, positions, cell, forces, energy)~ on a workspace from ~rgpot_fortran_workspace_new~,
+and the handle-free ~rgpot_<pot>_force(natoms, positions, cell, forces, energy)~
+on the module's legacy workspace.
+Potentials that take species (FeHe, CuH2, water-H) add
+~atomic_numbers~ after ~positions~ in both, and ~rgpot_sw_force_ws~ adds a
+~strain~ output.
+~rgpot_<pot>_ensure_params~ sets the saved parameter set once.
+The C++ classes call the ~_ws~ entries.
 
 The static library builds with hidden visibility.
 Only the C++ wrapper inside ~librgpot~ calls the entry points, so no Fortran
@@ -83,7 +93,7 @@ runtime appears when the kernels are enabled.
 
 C callers pass nine doubles, row-major, one cell vector per row.
 Fortran reads the same memory column-major, so a ~real(wp) :: cell(3, 3)~ dummy
-sees one cell vector per column -- which is what vesin expects.
+sees one cell vector per column, which is the layout ~rgpot_neighbors~ uses.
 No transpose anywhere in the chain.
 
 * Tests

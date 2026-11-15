@@ -4,8 +4,8 @@
 
 * Stillinger-Weber silicon (1985)
 
-=StillingerWeberSi= evaluates the silicon potential of F. H. Stillinger and T.
-A. Weber, Phys.
+=StillingerWeberSi= (=PotType::SWSi1985=) evaluates the silicon potential of F.
+H. Stillinger and T. A. Weber, Phys.
 Rev. B 31, 5262 (1985), doi:10.1103/PhysRevB.31.5262.
 
 The two-body and three-body parameters are equation (2.7).
@@ -22,13 +22,15 @@ The product is copied from
 The file header says "Last change: AA 3 Apr 2002", and the same lines are
 present at tags =svn-Dec16_2020= and =v2.8.0=:
 
+#+attr_rgpot: skip a quotation from eOn's SWFortran.f90, not rgpot code
 #+BEGIN_EXAMPLE
   EPSILON = 2.16826D0 * 1.06767385d0, &  !* 1.07d0
   LAMBDA  = 21.0d0,                   &  !* 1.07d0
 #+END_EXAMPLE
 
 Lambda stays 21 and is not multiplied.
-Neither that file nor the rgpot port (commit 7a3b5016) derives 1.06767385.
+Neither that file nor the rgpot port (commit 7a3b5016, per =rgpot_sw.f90=)
+derives 1.06767385.
 The factor is untraced.
 
 ** Calls
@@ -42,13 +44,16 @@ cell and one species list, so a caller enters the library once per batch.
 The Python method =energy_gradient= accepts positions of shape =(n_atoms, 3)= or
 =(n_config, n_atoms, 3)= and uses that entry.
 
-An orthogonal cell that holds at least three cutoff-lengths on each edge builds
-one half-shell pair list per call.
-The cell edge is the cutoff, or the cutoff plus the skin of a
-=nlist::NeighborList= passed to =energyAndGradient=.
-The list is reused while every atom has moved by at most half that skin.
-A null list rebuilds every call.
-Any other cell uses the minimum-image fold.
+Every call takes its pairs from the instance's shared neighbour layer
+(=nlist::updateCells=).
+The skin is that of a =nlist::NeighborList= passed to =energyAndGradient= when
+it is positive.
+Otherwise it is one fifth of the cutoff, or 0 under
+=setNeighbourMode(nlist::Mode::Stream)=.
+The pairs are reused while every atom has moved by at most half the skin and the
+cell and the atom count are unchanged.
+With skin 0 they are reused only for identical coordinates.
+=energyAndGradientBatch= passes no =nlist::NeighborList=.
 
 ** Stress
 
@@ -81,8 +86,8 @@ Both kernels are linear in epsilon, so the =SWPot= stress is the
 =StillingerWeberSi= stress times 1.068176741337.
 =FortranPotsTest= checks that ratio to 1e-14 eV/Angstrom^3, and the strain
 difference to 5e-10, on a compressed cubic cell and a sheared, rattled cell.
-=SWPot::forceBatch=, the call eOn's engine makes, skips the virial and leaves
-=has_stress= at 0.
+=SWPot::forceBatch=, the call eOn's engine makes, skips the virial, and its
+outputs have =has_stress= 0 and a zero tensor.
 =FortranPotsTest= checks that its energies and forces equal those of
 =forceImpl=.
 

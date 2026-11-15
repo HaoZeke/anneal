@@ -5,6 +5,7 @@
 
 =SuttonChenPot= evaluates
 
+#+attr_rgpot: skip the energy formula, not code
 #+begin_example
 E = epsilon * [ 1/2 sum_i sum_{j != i} (a / r_ij)^n
                 - c * sum_i sqrt(rho_i) ]
@@ -37,9 +38,11 @@ The reduced 10-8 well is 295.4645 epsilon, which is 5.860 eV for platinum and
 The default cutoff is 40 in the coordinate unit, with no energy shift.
 =cutoff = 0= keeps every pair.
 Cluster evaluation does not fold the cell.
-Periodic evaluation uses the minimum image and needs a positive cutoff.
-The neighbor list is =PairListCache::evaluate=: one pass builds the densities
-and a second pass writes the forces.
+Periodic evaluation uses the minimum image and needs a positive cutoff and a
+cell; otherwise it throws =std::invalid_argument=.
+Pairs come from the shared neighbour layer (=nlist::updateCells=), with a skin
+of one fifth of the cutoff, or none in =nlist::Mode::Stream=.
+One pass builds the densities and a second pass writes the forces.
 
 =rgpot_sutton_chen_energy_forces= is the C entry point.
 It takes an =rgpot_sc_config= and writes one energy and one force array.

@@ -8,65 +8,186 @@
 The default is =disabled=.
 The accepted values are =auto=, =enabled=, and =disabled=.
 
+#+attr_rgpot: syntax configures a separate build directory
 #+begin_src bash
 meson setup bbdir -Dwith_tests=true -Dwith_rpc=true -Dwith_mpi=enabled
 #+end_src
 
-=auto= links MPI when the build finds it.
+=auto= builds =librgpot_mpi= when Meson finds MPI.
 =enabled= stops configuration when MPI is absent.
-=disabled= leaves every process as one calculator of one rank.
+=disabled= does not build =librgpot_mpi=.
 
 =librgpot= never links MPI.
-With MPI found, the build adds =librgpot_mpi= (meson dependency and pkg-config
-name =rgpot-mpi=), which holds every MPI call of the calculator groups.
+=librgpot_mpi= (meson dependency and pkg-config name =rgpot-mpi=) holds every
+MPI call of the calculator groups.
 =bindCalculators= and =calculatorsUseMpi= load it with =dlopen= on first use, so
 a host that never asks for calculator groups never maps =libmpi= or its
 transport layers.
-The loader tries =loadCalculatorMpi(path)= when the host names a file, then the
-=RGPOT_MPI_LIBRARY= environment variable, then =librgpot_mpi.so.3= next to
-=librgpot=, then the dynamic linker's search path.
-That filename is =librgpot_mpi='s own SONAME (soversion 3).
+The loader, =loadCalculatorMpi=, tries the file the host names, else the
+=RGPOT_MPI_LIBRARY= environment variable, then
+=RGPOT_MPI_LIBRARY_NAME= in the directory of =librgpot= (or of the executable, when rgpot is linked statically), then =RGPOT_MPI_LIBRARY_NAME=
+through the dynamic linker's search path.
+It opens the library with =RTLD_NOW | RTLD_GLOBAL=.
+=RGPOT_MPI_LIBRARY_NAME= is =librgpot_mpi.so.3= (=librgpot_mpi.3.dylib= on
+macOS), the library's own SONAME with soversion 3.
 It is not =librgpot='s SONAME.
-=RGPOT_MPI_ABI_VERSION= is 1 and did not change with the C++ layouts, so this
-name stays.
 The two libraries meet at one C symbol,
-=rgpot_mpi_api_v1=, which returns the function table of =rgpot/calculator_mpi_abi.h= (=RGPOT_MPI_ABI_VERSION=
-1).
+=rgpot_mpi_api_v1= (=RGPOT_MPI_API_SYMBOL=), which returns the function table of
+=CppCore/rgpot/calculator_mpi_abi.h=.
+=RGPOT_MPI_ABI_VERSION= is 1.
+Windows has no loader; there the load fails with "calculator groups need
+dlopen".
 Until the library is loaded every calculator call behaves as in a build without
 MPI.
+When =bindCalculators= cannot load it, one rank per calculator or a value <= 0
+gives group 0 of one rank, and any other value gives index -1.
 
 A process with
 =librgpot_mpi= loaded can call =bindCalculators= to split =MPI_COMM_WORLD= into
 calculator groups.
 =shareFromCalculator= broadcasts one group's bytes to every rank.
-When more than one rank is bound, a rank that cannot enter that broadcast prints
-the error on every rank and calls =MPI_Abort= on =MPI_COMM_WORLD=.
+When more than one rank is bound, a rank that cannot enter that broadcast makes
+every rank print the error and call =MPI_Abort= on =MPI_COMM_WORLD=.
 The same abort runs when one rank leaves =CPMDPot::forceImpl= or
 =CP2KPot::forceImpl= by an exception, with one exception for CP2K: an
 unconverged SCF is agreed over the calculator's communicator, and every rank of
 that calculator throws =rgpot::CP2KScfError= without aborting.
-=MPI_Finalize= at process exit runs when =bindCalculators= called =MPI_Init=.
+=finalizeMpiAtExit= registers an exit handler, and =CPMDPot= and =CP2KPot= call
+it from their force calls.
+That handler calls =MPI_Finalize= when =bindCalculators= called =MPI_Init=.
 A host that called =MPI_Init= finalizes itself.
+After =abortMpiAtExit= the handler calls
+=MPI_Abort= instead, whoever called =MPI_Init=.
 
-=CPMDPot= and =CP2KPot= report =PotCaps::groupCollective=: every rank of a
-calculator enters each of its force calls together, and the call's collectives
-stay on that calculator's communicator.
-A host may hand calculators an uneven batch, with some calculators making no
-call at all, and then share results with =shareFromCalculator=.
-A failure inside the call prints on every rank of the failing calculator, then
-=MPI_Abort= on =MPI_COMM_WORLD= ends the run.
-For such a potential the result cache decides hit or miss jointly, through
-=calculatorAgree= (a logical AND over the calculator's communicator).
-A geometry that any rank of the calculator misses is computed on all of its
-ranks, so no rank waits alone inside the call.
-Give each rank its own cache directory: RocksDB locks a directory to one
-process.
+How =CPMDPot= and =CP2KPot= run a force call across the ranks of a calculator,
+how the result cache agrees on hits, and how CP2K takes its communicator are
+explained in [[file:../explanation/mpi.org][Calculator groups over MPI]].
 
-=CP2KPot::bindCalculators= splits the world as =CPMDPot::bindCalculators= does
-and hands the shim the calculator communicator through
-=cp2kc_adopt_calculator_comm=.
-Each force environment runs on that communicator, or on =MPI_COMM_WORLD= when no
-split exists.
-When MPI is initialised before the first session, the shim calls
-=cp2k_init_without_mpi=; otherwise =cp2k_init= starts MPI and the shim finalises
-CP2K and MPI at exit.
+** C ABI of librgpot_mpi
+
+=CppCore/rgpot/CalculatorGroupMpi.cc= implements the table.
+The library keeps one calculator split per process.
+
+*** =rgpot_mpi_group_t=
+
+- Inputs :: none; =bind= fills it.
+- Units :: none.
+- Outputs :: =index= is the calculator of this rank, or -1 when the world cannot
+  be split as asked.
+  =ranks= is the number of ranks per calculator, =rank_in_group= this rank's
+  rank in its calculator, and =world_size= the size of =MPI_COMM_WORLD=.
+  World rank =r= is in calculator =r / ranks= with rank =r % ranks=.
+- Errors :: none.
+
+It mirrors =rgpot::CalculatorGroup=.
+
+*** =rgpot_mpi_api_t=
+
+- Inputs :: none; =rgpot_mpi_api_v1= returns a static table.
+  The members take the arguments described under Outputs.
+- Units :: none; =share= and =agree= move bytes and the other members take
+  counts, ranks and handles.
+- Outputs :: =abi_version= is =RGPOT_MPI_ABI_VERSION= and
+  =struct_size= is =sizeof(rgpot_mpi_api_t)= of the library.
+  =bind(ranks_per_calculator, out)= is collective on =MPI_COMM_WORLD=, calls
+  =MPI_Init= when MPI is not up, splits the world into calculators of =ranks_per_calculator=
+  ranks (<= 0 means one calculator) and writes the group into =*out= when =out=
+  is not null.
+  =comm(comm_out, comm_bytes)= copies the calculator's
+  =MPI_Comm= into =comm_out= and returns 1 when
+  =comm_bytes= is =sizeof(MPI_Comm)= and a split exists, else 0.
+  =initialized()= returns 1 when =MPI_Initialized= reports MPI up, else 0.
+  =share(owner, data, bytes)= broadcasts =bytes= bytes from the first rank of
+  calculator =owner= to =MPI_COMM_WORLD= and returns 1.
+  =finalize_at_exit(abort_requested)= registers the exit handler once and stores the latest callback; at exit, while MPI is up and not finalized, the handler calls =MPI_Abort=
+  when =abort_requested= returns nonzero, else =MPI_Finalize= when =bind= called
+  =MPI_Init=.
+  With
+  =RGPOT_MPI_FINALIZE_TRACE= set to =1= the handler prints =rgpot MPI_Finalize=
+  to standard error before it finalizes.
+  =agree(flags, n)= replaces =flags[0..n)= with their logical AND over the
+  calculator's communicator and returns 1; it returns 0 and leaves =flags=
+  unchanged when MPI is not up or finalized, before a split, or on a calculator
+  of one rank.
+  =publish_error(message, len)= is entered by every rank of the calculator with its message (=len= 0 for none); when any rank has one, every message, cut to 512 bytes, prints on every rank of the calculator and =MPI_COMM_WORLD=
+  aborts, otherwise it returns.
+  =adopt(callback)= calls =callback= with the address and byte size of the
+  calculator's =MPI_Comm= and the ranks per calculator, and returns its result;
+  the handle is borrowed.
+- Errors :: =share= returns 0 in a single-rank or unbound world for a missing
+  split, a null =data= with =bytes > 0=, or an owner out of range.
+  In a bound world of more than one rank those cases, or ranks that disagree on
+  =owner= or =bytes=, make every rank print the reasons and call
+  =MPI_Abort(MPI_COMM_WORLD, 1)=.
+  With no split, or on a calculator of one rank, =publish_error= aborts at once
+  when its own message is not empty.
+  A rank with a message also aborts with it when the exchange does not complete
+  within 10 s.
+  Without MPI up, =publish_error= returns.
+  =adopt= returns -1 for a null callback, before a split, or when the split was
+  refused.
+
+The loader accepts a table whose =abi_version= equals =RGPOT_MPI_ABI_VERSION=
+and whose =struct_size= is at least the size it was compiled against.
+A later version may append members.
+
+*** =rgpot_mpi_api_fn=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef const rgpot_mpi_api_t *(*rgpot_mpi_api_fn)(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the type of =rgpot_mpi_api_v1=, which a loader casts the =dlsym=
+  result to.
+- Errors :: none.
+
+*** =rgpot_mpi_api_v1=
+
+#+attr_rgpot: signature
+#+begin_src c
+const rgpot_mpi_api_t *rgpot_mpi_api_v1(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a pointer to the library's static table, valid while the library is
+  loaded.
+- Errors :: none; the call cannot fail.
+  =loadCalculatorMpi= rejects a library without the symbol ("lacks
+  rgpot_mpi_api_v1") or a table with another =abi_version= or a smaller
+  =struct_size= ("has an incompatible rgpot MPI ABI"), and
+  =calculatorMpiLoadError= returns that reason.
+
+** Example
+
+A host that opens =librgpot_mpi= itself and checks the table.
+This build has no =librgpot_mpi=, so the block is only compiled.
+
+#+attr_rgpot: compile flags=-ICppCore librgpot_mpi is not built here
+#+begin_src c
+#include <dlfcn.h>
+#include <stdio.h>
+#include "rgpot/calculator_mpi_abi.h"
+
+int main(void) {
+  void *handle = dlopen(RGPOT_MPI_LIBRARY_NAME, RTLD_NOW | RTLD_GLOBAL);
+  if (handle == NULL) {
+    fprintf(stderr, "%s\n", dlerror());
+    return 1;
+  }
+  rgpot_mpi_api_fn get = (rgpot_mpi_api_fn)dlsym(handle, RGPOT_MPI_API_SYMBOL);
+  const rgpot_mpi_api_t *api = get ? get() : NULL;
+  if (api == NULL || api->abi_version != RGPOT_MPI_ABI_VERSION ||
+      api->struct_size < sizeof(rgpot_mpi_api_t)) {
+    fprintf(stderr, "incompatible %s\n", RGPOT_MPI_LIBRARY_NAME);
+    return 1;
+  }
+  rgpot_mpi_group_t group;
+  api->bind(0, &group);
+  printf("calculator %d of %d ranks, world %d\n", group.index, group.ranks, group.world_size);
+  return 0;
+}
+#+end_src

@@ -5,5 +5,288 @@
 * Plugin C ABI
 
 =include/rgpot/plugin.h= declares the descriptor a potential plugin exports.
+The header needs only =<stddef.h>= and =<stdint.h>=.
 A plugin shared library exports one function, =rgpot_plugin_init=, of type
 =rgpot_plugin_init_fn=.
+=RGPOT_PLUGIN_API_VERSION= is 1.
+=RGPOT_PLUGIN_EXPORT= marks a symbol for export: =__declspec(dllexport)= on
+Windows, default visibility elsewhere.
+
+The host side is in =CppCore/rgpot/plugin/=.
+=rgpot::plugin::PluginRegistry::discover= reads =RGPOT_PLUGIN_PATH=, a list of
+directories separated by =:= (=;= on Windows).
+It opens every regular file with the platform's library suffix (=.so=, =.dylib=
+or =.dll=) in sorted order, with =RTLD_NOW | RTLD_LOCAL= on POSIX, and calls
+=rgpot_plugin_init=.
+A library without that symbol is skipped.
+A descriptor that fails validation is skipped with a line
+=[rgpot] invalid plugin PATH: REASON= on standard error.
+A plugin whose name is already registered is skipped; the first one keeps the
+name.
+The registry always holds the built-in plugin =lennard-jones=.
+Nothing in =librgpot= calls =discover= on its own; the C++ host calls it.
+=rgpot::plugin::create_from_plugin= turns a descriptor and a configuration
+string, ="{}"= by default, into a potential.
+
+** Types
+
+*** =rgpot_plugin_status_t=
+
+- Inputs :: none; the return type of =create= and =calculate=.
+- Units :: none.
+- Outputs :: =RGPOT_PLUGIN_OK= (0),
+  =RGPOT_PLUGIN_INVALID_PARAM= (1), =RGPOT_PLUGIN_ERROR= (2), =RGPOT_PLUGIN_NOT_SUPPORTED=
+  (3).
+- Errors :: the host treats every value other than =RGPOT_PLUGIN_OK= as a
+  failure and does not distinguish the others.
+
+*** =rgpot_plugin_caps_t=
+
+- Inputs :: none; the bits a =capabilities= callback returns.
+- Units :: none.
+- Outputs :: =RGPOT_CAP_ENERGY= (1), =RGPOT_CAP_FORCES= (2),
+  =RGPOT_CAP_VARIANCE= (4), =RGPOT_CAP_STRESS= (8, reserved),
+  =RGPOT_CAP_INSTANCE_SAFE= (16), =RGPOT_CAP_PERIODIC= (32).
+- Errors :: the host throws
+  =std::invalid_argument= ("plugin must provide both energy and forces") when =RGPOT_CAP_ENERGY= or =RGPOT_CAP_FORCES=
+  is missing.
+
+The host reads
+=RGPOT_CAP_INSTANCE_SAFE= and =RGPOT_CAP_PERIODIC= and ignores =RGPOT_CAP_VARIANCE= and =RGPOT_CAP_STRESS=.
+With =RGPOT_CAP_INSTANCE_SAFE= the potential reports per-instance reentrancy and
+calls are not locked.
+Without it, every =calculate= takes one process-wide lock that all plugins
+without the flag share.
+=create= and =destroy= always take that lock.
+=RGPOT_CAP_PERIODIC= sets the potential's =periodic= capability.
+
+*** =rgpot_plugin_input_t=
+
+- Inputs :: =n_atoms=, =positions= (=3 * n_atoms= doubles, row-major =x y z= per
+  atom), =atomic_numbers= (=n_atoms= ints) and =cell= (9 doubles, lattice
+  vectors as rows).
+- Units :: =positions= and =cell= are in the plugin's =length_unit=; the host
+  multiplies Angstrom values by the conversion factor before the call.
+  =n_atoms= and =atomic_numbers= have none.
+- Outputs :: none; the host fills it and the plugin reads it during =calculate=.
+- Errors :: none.
+
+*** =rgpot_plugin_output_t=
+
+- Inputs :: =forces= points at =3 * n_atoms= doubles that the host allocates.
+- Units :: =energy= is in the plugin's
+  =energy_unit=, =variance= in that unit squared, and =forces= in =energy_unit=
+  per =length_unit=.
+  The host converts them to eV, eV^2 and eV/Angstrom.
+- Outputs :: the plugin writes =energy=, =variance= and every element of
+  =forces=, row-major like =positions=.
+  The host presets =energy= and every force to NaN and =variance= to 0.
+- Errors :: the host throws =std::runtime_error= ("plugin returned invalid
+  energy or variance") for a non-finite energy or variance or a negative
+  variance, and ("plugin returned invalid forces") for a non-finite force, so a
+  field left unset fails.
+
+*** =rgpot_plugin_instance=
+
+- Inputs :: none; an opaque type the plugin defines.
+- Units :: none.
+- Outputs :: none.
+- Errors :: none.
+
+*** =rgpot_plugin_create_fn=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef rgpot_plugin_status_t (*rgpot_plugin_create_fn)(
+    const char *config_json, rgpot_plugin_instance **out);
+#+end_src
+
+- Inputs :: =config_json=, the configuration string the host was given, and
+  =out=, where the instance goes.
+- Units :: none.
+- Outputs :: =RGPOT_PLUGIN_OK= and a non-null =*out=.
+- Errors :: a status other than =RGPOT_PLUGIN_OK=, or a null
+  =*out=, makes the host throw =std::runtime_error= with the =last_error= text of =*out=,
+  or "plugin create failed" when =*out= is null or has no message.
+  The host calls =destroy= on a non-null =*out= even when the status is a
+  failure.
+
+*** =rgpot_plugin_calculate_fn=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef rgpot_plugin_status_t (*rgpot_plugin_calculate_fn)(
+    rgpot_plugin_instance *instance, const rgpot_plugin_input_t *input,
+    rgpot_plugin_output_t *output);
+#+end_src
+
+- Inputs :: =instance= from =create=, =input= and =output=.
+- Units :: as =rgpot_plugin_input_t= and =rgpot_plugin_output_t=.
+- Outputs :: =RGPOT_PLUGIN_OK=, with =output= filled.
+- Errors :: any other status makes the host throw
+  =std::runtime_error= with the =last_error= text, or "plugin calculate failed"
+  when there is none.
+
+*** =rgpot_plugin_destroy_fn=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef void (*rgpot_plugin_destroy_fn)(rgpot_plugin_instance *instance);
+#+end_src
+
+- Inputs :: =instance=, a non-null instance from =create=.
+- Units :: none.
+- Outputs :: frees the instance; the host calls it once per instance.
+- Errors :: none; the function has no way to report one.
+
+*** =rgpot_plugin_capabilities_fn=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef uint32_t (*rgpot_plugin_capabilities_fn)(
+    const rgpot_plugin_instance *instance);
+#+end_src
+
+- Inputs :: =instance= from =create=.
+- Units :: none.
+- Outputs :: a bitmask of =rgpot_plugin_caps_t= values; the host calls it once,
+  after =create=.
+  A null =capabilities= in the descriptor means
+  =RGPOT_CAP_ENERGY | RGPOT_CAP_FORCES=.
+- Errors :: the host rejects a mask without both energy and forces, as listed
+  under =rgpot_plugin_caps_t=.
+
+*** =rgpot_plugin_last_error_fn=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef const char *(*rgpot_plugin_last_error_fn)(
+    const rgpot_plugin_instance *instance);
+#+end_src
+
+- Inputs :: =instance=, a non-null instance; the host does not call it without
+  one.
+- Units :: none.
+- Outputs :: the message of the last failure of that instance, owned by the
+  plugin.
+  The host copies it at once.
+- Errors :: none; a null or empty string makes the host use its own fallback
+  text.
+
+*** =rgpot_plugin_descriptor_t=
+
+- Inputs :: =descriptor_size= is =sizeof(rgpot_plugin_descriptor_t)= as the
+  plugin compiled it, and =api_version= is =RGPOT_PLUGIN_API_VERSION=.
+  =name= is a non-empty identifier and =version= a free-form string that may be
+  null.
+  =length_unit= and =energy_unit= name the plugin's units in the syntax of the
+  unit parser, for example ="bohr"=, ="hartree"= or ="kJ/mol"=; null or empty
+  means Angstrom and eV.
+  =create=, =destroy= and =calculate= are required; =capabilities= and
+  =last_error= may be null.
+- Units :: =length_unit= and =energy_unit= set the units of every number the
+  plugin sees and returns.
+- Outputs :: none; the plugin owns the descriptor.
+- Errors :: the host throws =std::invalid_argument= when =descriptor_size= does
+  not reach =capabilities= ("plugin descriptor is missing required fields"),
+  when =api_version= differs ("plugin API version mismatch"), or when =name= is
+  null or empty or a required function is null ("plugin descriptor has invalid
+  required fields").
+  An unknown unit, a dimension mismatch or a non-positive factor throws
+  =std::invalid_argument=.
+
+The host reads =capabilities= and =last_error= only when =descriptor_size=
+covers them, so a later version can append fields.
+The name, version, configuration string and unit names enter the potential's
+parameter key.
+
+*** =rgpot_plugin_init_fn=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef const rgpot_plugin_descriptor_t *(*rgpot_plugin_init_fn)(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a pointer to the plugin's descriptor, which stays valid until the
+  library is closed.
+- Errors :: a null pointer, or a descriptor that fails validation, makes the
+  registry skip the library.
+
+** Example
+
+A plugin with a harmonic bond to the origin, called the way the host calls it.
+
+#+attr_rgpot: run flags=-Iinclude
+#+begin_src c
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "rgpot/plugin.h"
+
+typedef struct rgpot_plugin_instance {
+  double k;
+} instance_t;
+
+static rgpot_plugin_status_t create(const char *config_json, rgpot_plugin_instance **out) {
+  (void)config_json;
+  if (!out)
+    return RGPOT_PLUGIN_INVALID_PARAM;
+  *out = malloc(sizeof **out);
+  if (!*out)
+    return RGPOT_PLUGIN_ERROR;
+  (*out)->k = 2.0;
+  return RGPOT_PLUGIN_OK;
+}
+
+static void destroy(rgpot_plugin_instance *instance) { free(instance); }
+
+static rgpot_plugin_status_t calculate(rgpot_plugin_instance *instance,
+                                       const rgpot_plugin_input_t *input,
+                                       rgpot_plugin_output_t *output) {
+  if (!instance || !input || !output)
+    return RGPOT_PLUGIN_INVALID_PARAM;
+  output->energy = 0.0;
+  output->variance = 0.0;
+  for (size_t i = 0; i < 3 * input->n_atoms; ++i) {
+    const double x = input->positions[i];
+    output->energy += 0.5 * instance->k * x * x;
+    output->forces[i] = -instance->k * x;
+  }
+  return RGPOT_PLUGIN_OK;
+}
+
+static uint32_t capabilities(const rgpot_plugin_instance *instance) {
+  (void)instance;
+  return RGPOT_CAP_ENERGY | RGPOT_CAP_FORCES | RGPOT_CAP_INSTANCE_SAFE;
+}
+
+RGPOT_PLUGIN_EXPORT const rgpot_plugin_descriptor_t *rgpot_plugin_init(void) {
+  static const rgpot_plugin_descriptor_t desc = {
+      sizeof(rgpot_plugin_descriptor_t), RGPOT_PLUGIN_API_VERSION,
+      "harmonic", "1.0", NULL, NULL,
+      create, destroy, calculate, capabilities, NULL};
+  return &desc;
+}
+
+int main(void) {
+  rgpot_plugin_init_fn init = rgpot_plugin_init;
+  const rgpot_plugin_descriptor_t *desc = init();
+  rgpot_plugin_instance *instance = NULL;
+  if (desc->create("{}", &instance) != RGPOT_PLUGIN_OK)
+    return 1;
+  const double positions[3] = {1.0, 0.0, 0.0};
+  const int numbers[1] = {1};
+  const double cell[9] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  double forces[3];
+  rgpot_plugin_input_t input = {1, positions, numbers, cell};
+  rgpot_plugin_output_t output = {NAN, 0.0, forces};
+  const rgpot_plugin_status_t status = desc->calculate(instance, &input, &output);
+  desc->destroy(instance);
+  if (status != RGPOT_PLUGIN_OK || output.energy != 1.0 || forces[0] != -2.0)
+    return 1;
+  printf("%s %.1f %.1f\n", desc->name, output.energy, forces[0]);
+  return 0;
+}
+#+end_src
