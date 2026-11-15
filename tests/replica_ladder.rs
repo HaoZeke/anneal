@@ -128,14 +128,7 @@ fn the_ladder_multiplies_the_budget_window_temperature() {
 /// estimate is on adopts 37, the same eight seeds. libSystem on macos-15
 /// sums those seeds to 221 against 74. `3 * 74` is 222, one rise over the
 /// hot count, so a factor of three does not survive eight seeds.
-///
-/// This test therefore sums seeds 0..16. Over seeds 0 to 4095 on x86_64
-/// Linux, in blocks of 16, the flat ladder averages 90 rises and the hot
-/// ladder 366, 4.05 times as many. A ladder that drops the ratio under the
-/// estimate averages 90, the flat count. Twice the flat count is the
-/// geometric mean of those two ratios. Against its own flat ladder, the hot
-/// ladder's lowest block is 2.70 times and the dropped ratio's highest 1.11
-/// times. Blocks of 8 were too noisy: 25 of 512 fell under three times.
+/// This test therefore sums seeds 0 to 15 at a factor of two.
 #[test]
 fn the_ladder_multiplies_the_statistical_temperature() {
     anneal_core::install_rgpot_kernels!();

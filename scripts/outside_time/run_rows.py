@@ -218,7 +218,7 @@ def main() -> None:
     parser.add_argument("--bin-dir", type=Path, required=True)
     parser.add_argument(
         "--sc-lib",
-        default="/tmp/rgpot-build/CppCore/librgpot.so",
+        default="/work/rgpot-build/CppCore/librgpot.so",
     )
     parser.add_argument("--systems", default="au98,au55,sc96-80,lj75,m80r3")
     parser.add_argument("--rows", type=Path, default=DEFAULT_ROWS)
@@ -229,7 +229,7 @@ def main() -> None:
     rev = revision()
     host = os.uname().nodename
     env = child_env(args.sc_lib)
-    scratch = Path("/tmp/outside-time-traces")
+    scratch = Path("/work/outside-time-traces")
     scratch.mkdir(parents=True, exist_ok=True)
     rows_path = args.rows
     rows = load_rows(rows_path)

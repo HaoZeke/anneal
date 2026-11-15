@@ -25,7 +25,7 @@ fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 GMIN_REV=gmin-$(sed -n 's/^revision=//p' /work/gmin-h2h/gmin-source.txt)
 
-mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm" "$OUT"
+mkdir -p "$WORK/bin" "$WORK/user" "$WORK/scratch" "$WORK/runs" "$WORK/gm" "$OUT"
 cp -a "$HERE/run_water_gmin.py" "$HERE/run_h2h.py" "$HERE/gm_radius.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 { sed 's/^STEPS .*/STEPS 0 1.0/' "$ROOT/examples/h2h_gmin_tip4p.data"; echo "CHECKD 0"; } \
@@ -47,8 +47,8 @@ fi
 cat > "$WORK/bin/inside.sh" << EOF
 #!/bin/bash
 set -eu
-export HOME=$WORK/home
-export TMPDIR=$WORK/tmp
+export HOME=$WORK/user
+export TMPDIR=$WORK/scratch
 export PATH=$WORK/bin:\$PATH
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
