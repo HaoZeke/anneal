@@ -75,24 +75,27 @@ PAR-2 charges a miss twice the budget.
 The p-value comes from a two-sided sign-flip test on the per-seed PAR-2 differences.
 
 #+begin_src bash
-python3 docs/scripts/plot_sc_hits.py 9532 9563 2000000 hits.png \
-  gmin=runs/gmin iso=runs/iso iso-hop=runs/iso-hop
+python3 scripts/sc96_78_hits.py
 #+end_src
+
+The script draws the figure with =docs/scripts/plot_sc_hits.py= from the run logs.
 
 #+begin_example
 label hits median_calls_to_hit mean_par2 paired_p
-gmin 31/32 398438 704181 -
-iso 25/32 494364 1330466 0.0596
-iso-hop 32/32 138950.5 355139 0.0436
+gmin 0/32 - 4000000 -
+iso 23/32 588617 1570333 0.0000
+iso-hop 32/32 127038.5 272221 0.0000
 #+end_example
 
-#+CAPTION: Fraction of the 32 evaluation seeds of 9-6 N=78 at the global minimum against energy calls, for Wales's global minimisation program (GMIN) and two anneal arms.
-[[file:fig/sc96-78-hits.png]]
+#+CAPTION: Fraction of seeds 9532 to 9563 of 9-6 N=78 at the global minimum against energy calls, for GMIN, iso and iso-hop.
 
-Here =runs/gmin= has the results of Wales's global minimisation program (GMIN) on the same 32 starts.
-On all 32 seeds =iso-hop= reaches the global minimum, with a median of 138950.5 calls.
-GMIN needs a median of 398438 calls and solves 31 seeds.
-=iso= stops short on 7 seeds.
+The table is written from =data/sc96_78_hits.csv=.
+The figure is written to =build/sc96-78/hits.png=.
+GMIN is the Wales program built from the pinned tarball.
+Its file is the 9-6 row, temperature 10, and the quench block in =scripts/metal_h2h/run_sc.py=.
+=gmin= hits 0 of 32 seeds. It misses 32.
+=iso= hits 23 of 32 seeds, median 588617 calls to a hit. It misses 9.
+=iso-hop= hits 32 of 32 seeds, median 127038.5 calls to a hit.
 When a curve rises earlier, its arm solves more seeds at a smaller budget.
 The paired p-value comes from a sign-flip test on the per-seed differences.
 The test flips the sign of each seed's difference at random.
