@@ -1,0 +1,1121 @@
+{
+  "about": "Every head-to-head Snakemake rule, its asv suite, where its paper budgets and seeds live, the committed rows it writes, and every known shortfall. pytest/test_h2h_coverage.py checks this file against workflow/Snakefile, the runners, the suites and the committed rows.",
+  "h2h": [
+    {
+      "rule": "metal_h2h",
+      "competitors": [
+        "ASE GA"
+      ],
+      "runners": [
+        "scripts/metal_h2h/run_campaign.py",
+        "scripts/metal_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "binary": "h2h_metal"
+      },
+      "seeds": {
+        "source": "scripts/metal_h2h/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/metal-cluster-h2h/benchmarks/metal_h2h.py",
+      "rows": [
+        {
+          "path": "bench/metal-cluster-h2h/results.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "metal_darby_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/metal_h2h/run_darby.py",
+        "scripts/metal_h2h/enter_darby.sh"
+      ],
+      "budgets": {
+        "source": "scripts/metal_h2h/run_darby.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/metal_h2h/run_darby.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/metal-cluster-h2h/benchmarks/metal_darby_h2h.py",
+      "rows": [
+        {
+          "path": "bench/metal-cluster-h2h/darby.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "sc_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/metal_h2h/run_sc.py",
+        "scripts/metal_h2h/enter_sc.sh"
+      ],
+      "budgets": {
+        "source": "scripts/metal_h2h/run_sc.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/metal_h2h/run_sc.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/metal-cluster-h2h/sc-8e076b7f/benchmarks/sc_h2h.py",
+      "rows": [
+        {
+          "path": "bench/metal-cluster-h2h/sc-8e076b7f/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "sc_h2h_n12",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/metal_h2h/run_sc_n12.py",
+        "scripts/metal_h2h/run_sc.py",
+        "scripts/metal_h2h/enter_sc_n12.sh"
+      ],
+      "budgets": {
+        "source": "scripts/metal_h2h/run_sc.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/metal_h2h/run_sc_n12.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/metal-cluster-h2h/sc-n12/benchmarks/sc_h2h_n12.py",
+      "rows": [
+        {
+          "path": "bench/metal-cluster-h2h/sc-n12/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "ptcu_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/metal_h2h/run_ptcu.py",
+        "scripts/metal_h2h/enter_ptcu.sh"
+      ],
+      "budgets": {
+        "source": "scripts/metal_h2h/run_ptcu.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/metal_h2h/run_ptcu.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/metal-cluster-h2h/ptcu-b3d03061/benchmarks/ptcu_h2h.py",
+      "rows": [
+        {
+          "path": "bench/metal-cluster-h2h/ptcu-b3d03061/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "gold_gupta_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/metal_h2h/enter_gold.sh"
+      ],
+      "budgets": {
+        "binary": "h2h_metal"
+      },
+      "asv": "bench/gold-gupta/benchmarks/gold_gupta.py",
+      "rows": [
+        {
+          "path": "bench/gold-gupta/seeds.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "morse_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/morse_h2h/run_campaign.py",
+        "scripts/morse_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/morse_h2h/run_campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/morse_h2h/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/morse-h2h/benchmarks/morse_h2h.py",
+      "rows": [
+        {
+          "path": "bench/morse-h2h/results.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "morse_panel",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/morse_panel/run_panel.py",
+        "scripts/morse_panel/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/morse_panel/run_panel.py",
+        "name": "SYSTEMS",
+        "field": 3
+      },
+      "seeds": {
+        "source": "scripts/morse_panel/run_panel.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/morse-panel/benchmarks/morse_panel.py",
+      "rows": [
+        {
+          "path": "bench/morse-panel/seeds.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "morse_gmin",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/morse_gmin/run_panel.py",
+        "scripts/morse_gmin/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/morse_gmin/run_panel.py",
+        "name": "SYSTEMS",
+        "field": 3
+      },
+      "seeds": {
+        "source": "scripts/morse_gmin/run_panel.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/morse-gmin/benchmarks/morse_gmin.py",
+      "rows": [
+        {
+          "path": "bench/morse-gmin/seeds.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "morse14_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/morse14_h2h/run_panel.py",
+        "scripts/morse14_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/morse14_h2h/run_panel.py",
+        "name": "SYSTEMS",
+        "field": "budget"
+      },
+      "seeds": {
+        "source": "scripts/morse14_h2h/run_panel.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/morse14-h2h/benchmarks/morse14_h2h.py",
+      "rows": [
+        {
+          "path": "bench/morse14-h2h/seeds.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "covalent_h2h",
+      "competitors": [
+        "GMIN",
+        "ASE basin hopping"
+      ],
+      "runners": [
+        "scripts/covalent_h2h/run_campaign.py",
+        "scripts/covalent_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/covalent_h2h/run_campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/covalent_h2h/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/covalent-h2h/benchmarks/covalent_h2h.py",
+      "rows": [
+        {
+          "path": "bench/covalent-h2h/v3/seeds.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "covalent_gfn2_crest",
+      "competitors": [
+        "CREST"
+      ],
+      "runners": [
+        "scripts/covalent_h2h/gfn2_crest.py",
+        "scripts/covalent_h2h/gfn2_enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/covalent_h2h/gfn2_crest.py",
+        "name": "BUDGET",
+        "keys": "SYSTEMS"
+      },
+      "seeds": {
+        "source": "scripts/covalent_h2h/gfn2_crest.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/covalent-h2h/gfn2/benchmarks/gfn2_covalent.py",
+      "rows": [
+        {
+          "path": "bench/covalent-h2h/gfn2/seeds.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ],
+      "uncapped_arms": {
+        "crest": "CREST runs its own iMTD-GC schedule; the budget column is the calls it made"
+      },
+      "short": [
+        {
+          "key": "si10",
+          "arm": "crest",
+          "n": 4,
+          "reason": "CREST Si10 was run on seeds 2000-2003 only (--crest-seeds); the eight missing seeds need xtb 6.7.1 and CREST 3.0.2 on the bench host"
+        }
+      ]
+    },
+    {
+      "rule": "gmin_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/gmin_h2h/run_campaign.py",
+        "scripts/gmin_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/gmin_h2h/run_campaign.py",
+        "name": "PAPER_BUDGETS",
+        "keys": "SIZES"
+      },
+      "seeds": {
+        "source": "scripts/gmin_h2h/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/gmin-h2h/benchmarks/gmin_h2h.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/gmin-h2h/results.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "pimc_lj38",
+      "competitors": [
+        "RPQA"
+      ],
+      "runners": [
+        "scripts/pimc_lj38/run_campaign.py",
+        "scripts/pimc_lj38/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/pimc_lj38/run_campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/pimc_lj38/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/pimc-lj38/benchmarks/pimc_lj38.py::PimcLj38",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/pimc-lj38/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ],
+      "uncapped_arms": {
+        "rpqa_paper": "the published-length RPQA schedule, run to its end; budget 0 marks no cap"
+      }
+    },
+    {
+      "rule": "pimc_lj38_paper",
+      "competitors": [
+        "RPQA"
+      ],
+      "runners": [
+        "scripts/pimc_lj38/run_campaign.py",
+        "scripts/pimc_lj38/enter_bench.sh"
+      ],
+      "budgets": {
+        "paired": "the published-length RPQA schedule runs to its end; there is no call cap"
+      },
+      "seeds": {
+        "source": "scripts/pimc_lj38/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/pimc-lj38/benchmarks/pimc_lj38.py::PimcLj38Paper",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/pimc-lj38/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "seed": "seed",
+          "arms": [
+            "rpqa_paper"
+          ],
+          "keys": [
+            "lj38",
+            "lj55",
+            "lj75"
+          ]
+        }
+      ],
+      "short": [
+        {
+          "key": "lj55",
+          "arm": "rpqa_paper",
+          "n": 0,
+          "reason": "the rule's LJ55 rows were never produced; they need the RPQA build on the bench host"
+        },
+        {
+          "key": "lj75",
+          "arm": "rpqa_paper",
+          "n": 0,
+          "reason": "the rule's LJ75 rows were never produced; they need the RPQA build on the bench host"
+        }
+      ],
+      "missing_outputs": {
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2000.row": "the LJ55 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2001.row": "the LJ55 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2002.row": "the LJ55 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2003.row": "the LJ55 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2004.row": "the LJ55 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2005.row": "the LJ55 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2000.row": "the LJ75 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2001.row": "the LJ75 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2002.row": "the LJ75 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2003.row": "the LJ75 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2004.row": "the LJ75 published-length RPQA rows were never produced",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2005.row": "the LJ75 published-length RPQA rows were never produced"
+      }
+    },
+    {
+      "rule": "growpal_h2h",
+      "competitors": [
+        "GrowPAL"
+      ],
+      "runners": [
+        "scripts/growpal_h2h/run_campaign.py",
+        "scripts/growpal_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/growpal_h2h/run_campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/growpal_h2h/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/growpal-h2h/benchmarks/growpal_h2h.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/growpal-h2h/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "growpal_h2h_v2",
+      "competitors": [
+        "GrowPAL"
+      ],
+      "runners": [
+        "scripts/growpal_h2h_v2/run_campaign.py",
+        "scripts/growpal_h2h_v2/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/growpal_h2h_v2/run_campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/growpal_h2h_v2/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/growpal-h2h-v2/benchmarks/growpal_h2h_v2.py",
+      "rows": [
+        {
+          "path": "bench/growpal-h2h-v2/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "lj_bonobo_h2h",
+      "competitors": [
+        "bonobo"
+      ],
+      "runners": [
+        "scripts/lj_bonobo_h2h/run_campaign.py",
+        "scripts/lj_bonobo_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/lj_bonobo_h2h/run_campaign.py",
+        "name": "RELAXATION_BUDGET",
+        "keys": "SIZES"
+      },
+      "seeds": {
+        "source": "scripts/lj_bonobo_h2h/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/lj-bonobo-h2h/benchmarks/lj_bonobo_h2h.py",
+      "rows": [
+        {
+          "path": "bench/lj-bonobo-h2h/seeds.tsv",
+          "key": "n",
+          "arm": "arm",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "water_h2o20_goat",
+      "competitors": [
+        "CREST",
+        "GOAT"
+      ],
+      "runners": [
+        "scripts/h2o20_goat_campaign.sh"
+      ],
+      "budgets": {
+        "source": "scripts/h2o20_goat_campaign.sh",
+        "name": "BUDGET",
+        "keys": [
+          20
+        ]
+      },
+      "seeds": {
+        "source": "scripts/h2o20_goat_campaign.sh",
+        "name": "SEEDS"
+      },
+      "asv": "bench/water-h2o20-goat/benchmarks/water_h2o20_goat.py",
+      "rows": [
+        {
+          "path": "bench/water-h2o20-goat/results.csv",
+          "key": "molecules",
+          "arm": "arm",
+          "seed": "seed",
+          "keys": [
+            "20"
+          ],
+          "arms": [
+            "anneal",
+            "crest",
+            "goat"
+          ]
+        }
+      ],
+      "uncapped_arms": {
+        "crest": "CREST runs its own schedule",
+        "goat": "GOAT runs its own schedule"
+      },
+      "short": [
+        {
+          "key": "20",
+          "arm": "goat",
+          "n": 0,
+          "reason": "ORCA 6 is login-gated and was not on the bench host, so every GOAT row is skipped_no_orca"
+        }
+      ]
+    },
+    {
+      "rule": "tip4p_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/tip4p_h2h/run_h2h.py",
+        "scripts/tip4p_h2h/enter_h2h.sh"
+      ],
+      "budgets": {
+        "source": "scripts/tip4p_h2h/run_h2h.py",
+        "name": "BUDGET",
+        "keys": "SIZES"
+      },
+      "seeds": {
+        "source": "scripts/tip4p_h2h/run_h2h.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/tip4p-h2h/benchmarks/tip4p_h2h.py::Tip4pHeadToHead",
+      "prefix": "tip4p",
+      "rows": [
+        {
+          "path": "bench/tip4p-h2h/h2h-summary.csv",
+          "key": "system",
+          "budget": "budget"
+        }
+      ]
+    },
+    {
+      "rule": "tip4p21_budget_h2h",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/tip4p_h2h/run_budget.py",
+        "scripts/tip4p_h2h/enter_budget.sh"
+      ],
+      "budgets": {
+        "source": "scripts/tip4p_h2h/run_budget.py",
+        "name": "BUDGETS",
+        "keys": [
+          21
+        ]
+      },
+      "seeds": {
+        "source": "scripts/tip4p_h2h/run_budget.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/tip4p-h2h/benchmarks/tip4p_h2h.py::Tip4p21BudgetHeadToHead",
+      "prefix": "tip4p",
+      "rows": [
+        {
+          "path": "bench/tip4p-h2h/rows-budget21.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed",
+          "group": "budget"
+        }
+      ]
+    },
+    {
+      "rule": "water_gmin",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/tip4p_h2h/run_water_gmin.py",
+        "scripts/tip4p_h2h/run_h2h.py",
+        "scripts/tip4p_h2h/enter_water_gmin.sh"
+      ],
+      "budgets": {
+        "source": "scripts/tip4p_h2h/run_h2h.py",
+        "name": "BUDGET",
+        "keys_source": "scripts/tip4p_h2h/run_water_gmin.py",
+        "keys": "SIZES"
+      },
+      "seeds": {
+        "source": "scripts/tip4p_h2h/run_h2h.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/water-gmin/benchmarks/water_gmin.py",
+      "prefix": "tip4p",
+      "rows": [
+        {
+          "path": "bench/water-gmin/rows.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "ase_bh_h2h",
+      "competitors": [
+        "ASE basin hopping"
+      ],
+      "runners": [
+        "scripts/ase_gofee_h2h/campaign.py",
+        "scripts/ase_gofee_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-gofee-h2h/benchmarks/ase_gofee_h2h.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/ase-gofee-h2h/ase_bh.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "ase_mh_h2h",
+      "competitors": [
+        "ASE minima hopping"
+      ],
+      "runners": [
+        "scripts/ase_gofee_h2h/campaign.py",
+        "scripts/ase_gofee_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-gofee-h2h/benchmarks/ase_gofee_h2h.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/ase-gofee-h2h/ase_mh.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "agox_gofee_h2h",
+      "competitors": [
+        "AGOX GOFEE"
+      ],
+      "runners": [
+        "scripts/ase_gofee_h2h/campaign.py",
+        "scripts/ase_gofee_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-gofee-h2h/benchmarks/ase_gofee_h2h.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/ase-gofee-h2h/agox_gofee.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "asg2_h2h",
+      "competitors": [
+        "ASE basin hopping",
+        "ASE minima hopping",
+        "AGOX GOFEE"
+      ],
+      "runners": [
+        "scripts/ase_gofee_h2h/asg2.py",
+        "scripts/ase_gofee_h2h/campaign.py",
+        "scripts/ase_gofee_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/ase_gofee_h2h/asg2.py",
+        "name": "EXPECTED",
+        "field": 2
+      },
+      "seeds": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-gofee-h2h/benchmarks/ase_gofee_h2h.py::Asg2HeadToHead",
+      "rows": [
+        {
+          "path": "bench/ase-gofee-h2h/asg2-summary.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "agox_lj98",
+      "competitors": [
+        "AGOX"
+      ],
+      "runners": [
+        "scripts/agox_lj98/enter_bench.sh"
+      ],
+      "budgets": {
+        "rows": "the driver passes 4000000 to h2h_arm3 and run_arm.py and summarize.py refuses any other; the committed rows are checked"
+      },
+      "seeds": {
+        "source": "scripts/agox_lj98/summarize.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/agox-lj98/benchmarks/agox_lj98.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/agox-lj98/rows.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
+      "rule": "gad_published",
+      "competitors": [
+        "GAD (rerun)",
+        "GAD (deposited)",
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/gad_published/run_campaign.py",
+        "scripts/gad_published/gad_rerun.py",
+        "scripts/gad_published/build_gad.sh",
+        "scripts/gad_published/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/gad_published/run_campaign.py",
+        "name": "BUDGET",
+        "keys": "SIZES"
+      },
+      "seeds": {
+        "source": "scripts/gad_published/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/gad-published/benchmarks/gad_published.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/gad-published/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ],
+      "short": [
+        {
+          "key": "lj31",
+          "arm": "gad_deposit",
+          "n": 1,
+          "reason": "gad_deposit is the one run deposited on Zenodo with the paper; the gad arm reruns GAD at twelve seeds"
+        },
+        {
+          "key": "lj38",
+          "arm": "gad_deposit",
+          "n": 1,
+          "reason": "gad_deposit is the one run deposited on Zenodo with the paper; the gad arm reruns GAD at twelve seeds"
+        }
+      ],
+      "missing_outputs": {
+        "/work/gad-published/rows-appended.stamp": "a touch() stamp outside the tree that marks the rows appended to bench/gad-published/rows.csv; it is never committed"
+      }
+    },
+    {
+      "rule": "openconf_h2h",
+      "competitors": [
+        "openconf",
+        "CREST"
+      ],
+      "runners": [
+        "scripts/openconf_h2h/run_bench.py",
+        "scripts/openconf_h2h/h2h_score.py",
+        "scripts/openconf_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "csv": "bench/openconf-h2h/budgets.csv",
+        "key": "molecule",
+        "value": "anneal_budget"
+      },
+      "seeds": {
+        "source": "scripts/openconf_h2h/run_bench.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/openconf-h2h/benchmarks/openconf_h2h.py",
+      "rows": [
+        {
+          "path": "bench/openconf-h2h/results.csv",
+          "key": "molecule",
+          "arm": "arm",
+          "n": "n"
+        }
+      ],
+      "uncapped_arms": {
+        "openconf": "the reference arm; anneal's budget is its pilot median",
+        "crest": "CREST runs its own iMTD-GC schedule"
+      },
+      "missing_outputs": {
+        "bench/openconf-h2h/seeds.csv": "the per-seed scores were not committed with results.csv; h2h_score.py writes them from the campaign runs under /work"
+      }
+    },
+    {
+      "rule": "openconf_h2h_n12",
+      "competitors": [
+        "openconf"
+      ],
+      "runners": [
+        "scripts/openconf_h2h/run_bench.py",
+        "scripts/openconf_h2h/paired_score.py",
+        "scripts/openconf_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "paired": "each anneal seed gets half of openconf's search calls on the same seed (run_bench.paired)"
+      },
+      "asv": "bench/openconf-h2h/benchmarks/openconf_h2h_n12.py::OpenconfPairedSeed",
+      "rows": [
+        {
+          "path": "bench/openconf-h2h/paired/summary.csv",
+          "key": "molecule",
+          "arm": "arm",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "openconf_h2h_conf_fix",
+      "competitors": [
+        "openconf"
+      ],
+      "runners": [
+        "scripts/openconf_h2h/run_bench.py",
+        "scripts/openconf_h2h/paired_score.py",
+        "scripts/openconf_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "paired": "each anneal and develop seed gets half of openconf's search calls on the same seed (run_bench.paired)"
+      },
+      "asv": "bench/openconf-h2h/benchmarks/openconf_h2h_n12.py::OpenconfThreeArmSeed",
+      "rows": [
+        {
+          "path": "bench/openconf-h2h/conf-fix/summary.csv",
+          "key": "molecule",
+          "arm": "arm",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "openconf_h2h_conf_fix3",
+      "competitors": [
+        "openconf"
+      ],
+      "runners": [
+        "scripts/openconf_h2h/run_bench.py",
+        "scripts/openconf_h2h/paired_score.py",
+        "scripts/openconf_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "paired": "each anneal and develop seed gets half of openconf's search calls on the same seed (run_bench.paired)"
+      },
+      "asv": "bench/openconf-h2h/benchmarks/openconf_h2h_n12.py::OpenconfThreeArmSeed",
+      "rows": [
+        {
+          "path": "bench/openconf-h2h/conf-fix3/summary.csv",
+          "key": "molecule",
+          "arm": "arm",
+          "n": "n"
+        },
+        {
+          "path": "bench/openconf-h2h/conf-fix3/xld24/summary.csv",
+          "key": "molecule",
+          "arm": "arm",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "openconf_h2h_conf_fix4",
+      "competitors": [
+        "openconf"
+      ],
+      "runners": [
+        "scripts/openconf_h2h/run_bench.py",
+        "scripts/openconf_h2h/paired_score.py",
+        "scripts/openconf_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "paired": "each anneal and develop seed gets half of openconf's search calls on the same seed (run_bench.paired)"
+      },
+      "asv": "bench/openconf-h2h/benchmarks/openconf_h2h_n12.py::OpenconfThreeArmSeed",
+      "rows": [
+        {
+          "path": "bench/openconf-h2h/conf-fix4/summary.csv",
+          "key": "molecule",
+          "arm": "arm",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "openconf_h2h_conf_fix4_n24",
+      "competitors": [
+        "openconf"
+      ],
+      "runners": [
+        "scripts/openconf_h2h/run_bench.py",
+        "scripts/openconf_h2h/paired_score.py",
+        "scripts/openconf_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "paired": "each anneal and develop seed gets half of openconf's search calls on the same seed (run_bench.paired)"
+      },
+      "asv": "bench/openconf-h2h/benchmarks/openconf_h2h_n12.py::OpenconfThreeArmSeed",
+      "rows": [
+        {
+          "path": "bench/openconf-h2h/conf-fix4/n24/summary.csv",
+          "key": "molecule",
+          "arm": "arm",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "tric_quench",
+      "competitors": [
+        "geomeTRIC"
+      ],
+      "runners": [
+        "scripts/tric_quench/quench_compare.py",
+        "scripts/tric_quench/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/tric_quench/quench_compare.py",
+        "name": "MAX_ITER",
+        "keys": [
+          "water",
+          "nh3",
+          "drug"
+        ]
+      },
+      "asv": "bench/tric-quench/benchmarks/tric_quench.py",
+      "rows": [
+        {
+          "path": "bench/tric-quench/results.csv",
+          "key": "system",
+          "arm": "arm",
+          "n": "starts",
+          "group": "gate"
+        }
+      ]
+    },
+    {
+      "rule": "h2o16_crest",
+      "competitors": [
+        "CREST"
+      ],
+      "runners": [],
+      "budgets": {
+        "paired": "no committed runner records the (H2O)16 budget"
+      },
+      "asv": "bench/h2o16-crest/benchmarks/h2o16_crest.py",
+      "rows": [
+        {
+          "path": "bench/h2o16-crest/seeds.csv",
+          "seed": "seed"
+        }
+      ],
+      "gap": "seeds.csv was written by a session whose runner is not committed; the rule only re-summarizes it, the rows carry hostname but no code_revision, and they are not backfilled"
+    }
+  ],
+  "not_h2h": {
+    "all": "the default target",
+    "lj_seed": "one anneal seed on the elja host",
+    "sc_search_rows": "anneal search diagnostics on the Sutton-Chen panel, no competitor",
+    "sc_restart_summary": "summary of anneal-only Sutton-Chen restart rows",
+    "sc_pop_summary": "summary of anneal-only Sutton-Chen population rows",
+    "sc_chain_summary": "summary of anneal-only Sutton-Chen chain rows",
+    "sc_portfolio_summary": "summary of anneal-only Sutton-Chen portfolio rows",
+    "morse_hop": "anneal hop statistics at one budget, no competitor",
+    "au55_scale": "anneal Au55 scaling, no competitor",
+    "depth_posterior_ablation": "anneal ablation, posterior against uniform depth, no competitor",
+    "tip4p_rates": "anneal TIP4P rates, no competitor",
+    "growpal_h2h_v2_uncapped": "one uncapped seed per system (5e8 calls) to see whether GrowPAL ever reaches LJ38 and LJ55; a diagnostic of the v2 panel, not a paper-budget comparison",
+    "fetch_paper_data": "downloads the paper data set"
+  }
+}

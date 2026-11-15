@@ -9,6 +9,7 @@ paper budget. This does not change a paper count.
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "ase_gofee_h2h" / "enter_bench.sh"
@@ -45,6 +46,14 @@ class AseGofeeHeadToHead:
 
 
 class Asg2HeadToHead:
+    PAPER_BUDGETS: ClassVar[dict[str, int]] = {
+        "au55": 1_000_000,
+        "cu38": 400_000,
+        "cu12au26": 400_000,
+        "sw10": 100_000,
+        "tc10": 100_000,
+        "tip4p8": 2_000_000,
+    }
     params = (
         ["au55", "cu38", "cu12au26", "sw10", "tc10", "tip4p8"],
         ["ase_bh", "ase_mh", "agox_gofee"],
