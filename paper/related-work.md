@@ -1054,3 +1054,37 @@ The missing ASE arm is basin hopping on tag 3.29.0. This paper does not run that
 
 Cite `semeniukAseGenetic2026`.
 
+## 2026-11-15 — EZGA recovers the targeted Lennard-Jones basins
+
+Lombardi, Riccius, Pare, Heenen, Reuter, and Scheurer, Computer Physics Communications 328, 110354 (November 2026), doi:10.1016/j.cpc.2026.110354, release EZGA. The record has no day. A multi-stage genetic algorithm explores molecules and crystals. The program summary says the benchmarks are peptide conformations, Lennard-Jones nanoclusters, a binary-oxide convex hull, and the surface phase diagrams of CuO and Cu\(_2\)O, and that those benchmarks recover the targeted low-energy basins. It lists ASE among the optional libraries, and it says an energy evaluator may be an ASE calculator.
+
+The abstract does not name LJ38, LJ55, LJ75, LJ98, or LJ104, and it does not report an energy below the Cambridge values, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It gives no force-call hit rate. The missing ASE arm is basin hopping on tag 3.29.0. EZGA does not run that arm, and it publishes no basin-hopping hit rate. Because the abstract does not name the manuscript sizes, it does not yet warrant a head-to-head on the sealed maps. A comparison that uses this search has to name the Lennard-Jones sizes it actually ran.
+
+Lombardi, Ducci, Panosetti, and co-workers, ChemRxiv (31 August 2026), doi:10.26434/chemrxiv.15008068/v1, add a transition-kernel layer to the same engine. The abstract says the layer turns the population search into fifteen statistical methods, from equilibrium sampling through free-energy calculations, and that each method is checked on a non-interacting gas or an interacting lattice gas. The abstract gives no Lennard-Jones energy and no water energy, so it does not contradict the sealed maps. It does not warrant a head-to-head on those maps or on the CREST table.
+
+Cite `lombardiEzga2026` and `lombardiEzgaKernels2026`.
+
+## 2026-11-15 — Basin hopping on iron oxide nanoparticles
+
+Slama, Issa, and Ben El Hadj Rhouma, Physica Scripta 101, 415401 (12 October 2026), doi:10.1088/1402-4896/aea9d8, optimise Fe\(_n\)O\(_m\) nanoparticles by Monte Carlo and basin hopping on a model potential. The abstract treats Fe\(_n\)O\(_m\) with \(n\) up to 100, stoichiometric (FeO)\(_n\) through 16 molecules, and (Fe\(_2\)O\(_3\))\(_n\) through 100 formula units. It says the (FeO)\(_n\) structures are three-dimensional, that from 12 molecules the iron atoms sit on pentagonal and square rings, and that the structures agree with the literature the authors could reach.
+
+The potential is their model potential. The abstract gives no Cambridge energy and no hexamer count, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be (FeO)\(_n\) or (Fe\(_2\)O\(_3\))\(_n\) on that model potential. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `slamaIronOxide2026`.
+
+## 2026-11-15 — Platinum--gold clusters through twenty-four atoms
+
+Chepkasov and co-workers, Small, e75835 (24 September 2026), doi:10.1002/smll.75835, search Pt--Au nanoclusters with the USPEX evolutionary algorithm. The record has no volume. The abstract says the search runs through 24 atoms, then screens oxygen and CO adsorption with a MACE model. It says the adsorption energy follows the local composition of the site, and that a set of low-energy isomers carries the same adsorption information as the most stable cluster. A graphene sheet with one carbon vacancy anchors the cluster.
+
+Twenty-four atoms sits outside 38, 55, 75, 98, and 104. The abstract gives no Cambridge energy and no water energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be a Pt--Au cluster on the density-functional surface they use. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `chepkasovPtau2026`.
+
+## 2026-11-15 — A surface search with a free cell and a free composition
+
+Kuroda and Otani, Science and Technology of Advanced Materials 27, 2688059 (16 July 2026), doi:10.1080/14686996.2026.2688059, search surfaces with an evolutionary algorithm and Bayesian optimisation on atomic cluster expansion descriptors. The abstract says the in-plane cell and the stoichiometry both vary. The cases are oxygen on Pt(111) and on Ge(100), and tin alloyed into Au(111). The structures they report agree with the experimental surface motifs they cite.
+
+The search is a surface. It gives no Lennard-Jones energy and no hexamer count, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be one of those surfaces on the first-principles ordering they use. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `kurodaSurface2026`.
+
