@@ -383,6 +383,7 @@ struct Hit {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     if !(8..=10).contains(&args.len()) {
         eprintln!(
