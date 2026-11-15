@@ -4612,7 +4612,6 @@ where
         crate::methods::stall_archive::MEMORY,
     );
     let cage_quantum = cfg.min_separation / 50.0;
-    let mut cage_walked = false;
     let mut archive_walked = false;
     let mut binary_core_offered = false;
     // Energy of the incumbent whose close-packed sheet has already been slid.
@@ -5393,22 +5392,46 @@ where
                 }
             }
         }
+        // A side walk's lowest quench is a minimum like any other. It is
+        // recorded, and the walker continues from it when it is lower than
+        // the walker's own. Left in the side walk, it is dropped: on
+        // (H2O)16 a side walk reached the global minimum's neighbour cage
+        // and the chain ended 4 kJ/mol above it.
+        macro_rules! hand_back {
+            ($low:ident) => {
+                if let Some((energy, state)) = $low.take()
+                    && energy < e - new_lowest
+                    && state.len() == x.len()
+                {
+                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                    let ok = gradient
+                        .as_ref()
+                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                    if ok || grad.is_none() {
+                        ledger.record(energy, state.view());
+                    }
+                    e = energy;
+                    x = state;
+                    current_validation_gradient = gradient.filter(|_| ok);
+                }
+            };
+        }
         // The main walker stays put and its generator is not advanced.
         // After many patience windows with no new lowest minimum, the calls
         // that remain are spent on another cage the chain already quenched.
         // A chain that is still descending never enters, so its proposals
-        // and its evaluation count stay what they were.
+        // and its evaluation count stay what they were. The walk comes
+        // round again after each further quiet stretch of the same length.
         let cage_patience = cfg
             .restart_patience
             .saturating_mul(RIGID_CAGE_WINDOWS)
             .max(1);
         if cfg.move_library.is_rigid_body()
-            && !cage_walked
             && !kernels.is_empty()
             && ledger.spent().saturating_sub(charged_at_best) >= cage_patience
         {
-            cage_walked = true;
             let shell_mark = ledger.spent();
+            let mut side_low: Option<(f64, Array1<f64>)> = None;
             // Start from the walker itself. Touching the shared cage archive
             // here would change the later walk's destination.
             let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
@@ -5436,6 +5459,9 @@ where
                         contain_trial(cfg, &mut trial, cfg.n_points);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == $state.len() {
+                            if side_low.as_ref().is_none_or(|(held, _)| quenched < *held) {
+                                side_low = Some((quenched, relaxed.clone()));
+                            }
                             let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
                             if rise <= 0.0 || $rng.random::<f64>() < (-rise).exp() {
                                 $energy = quenched;
@@ -5567,6 +5593,7 @@ where
             // before the main chain has actually stalled.
             charged_at_best =
                 charged_at_best.saturating_add(ledger.spent().saturating_sub(shell_mark));
+            hand_back!(side_low);
         }
         // The shell turn above is the early leave. A longer walk on a stored
         // cage is what reaches the minimum when the shell lands short of it,
@@ -5604,6 +5631,7 @@ where
             );
             let side_scale = orient_scale;
             let mut side_hops = 0usize;
+            let mut side_low: Option<(f64, Array1<f64>)> = None;
             let archive_end = ledger.spent().saturating_add(archive_patience);
             while ledger.spent() < archive_end && ledger.remaining() > 0 && !ledger.stopped() {
                 if side_hops > 0
@@ -5631,12 +5659,16 @@ where
                 if !quenched.is_finite() || relaxed.len() != side_state.len() {
                     break;
                 }
+                if side_low.as_ref().is_none_or(|(held, _)| quenched < *held) {
+                    side_low = Some((quenched, relaxed.clone()));
+                }
                 let rise = (quenched - side_energy) / cfg.temperature.max(1e-12);
                 if rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp() {
                     side_energy = quenched;
                     side_state = relaxed;
                 }
             }
+            hand_back!(side_low);
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)

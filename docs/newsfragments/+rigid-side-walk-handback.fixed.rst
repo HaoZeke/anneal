@@ -1,0 +1,1 @@
+A rigid-body chain's stall side walk records its lowest quench and the walker continues from it when it is below the walker's own minimum; the walk comes round again after each further quiet stretch instead of once per run. Before, a side walk that reached a lower cage dropped it, and (H2O)16 ended 4 kJ/mol above a cage it had quenched.
