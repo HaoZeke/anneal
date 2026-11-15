@@ -920,7 +920,15 @@ if get_option('with_rpc_client_only')
 endif
 
 # Engine drivers link the umbrella. A client-only build has no LJPot.
-if not get_option('with_rpc_client_only')
+# On Windows rgpot.dll exports only rgpot_library_version, so the drivers
+# have nothing to link against, and they load plugins with dlopen and run
+# pthreads; the CppCore engine plugins are left out there for the same
+# reason.
+if host_system == 'windows'
+    message(
+        'engines/ is not built on Windows: rgpot.dll does not export the C and C++ API the engine drivers link against',
+    )
+elif not get_option('with_rpc_client_only')
     subdir('engines')
 endif
 
