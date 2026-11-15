@@ -4404,9 +4404,8 @@ fn run_capnp_catalog(
     // A cooperative run must produce states at the share tolerance or the
     // coordinator has nothing valid to hold; solo runs leave this off and
     // keep the screened economy untouched.
-    // Extra local geometry optimization is a few hundred steps per
-    // record or visit, as Config::polish_records documents. Ten full
-    // quenches per improvement spend a short replica on one record.
+    // One full quench per record. Config::recommended sets relax_steps to
+    // 1000, which is what polish_records spends here.
     run_cfg.polish_records = run_cfg.relax_steps;
     let checkpoint_interval = std::env::var("CATALOG_SLICE")
         .or_else(|_| std::env::var("BANK_SLICE"))

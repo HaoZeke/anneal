@@ -1130,8 +1130,8 @@ pub struct Config {
     /// almost no state meets the tolerance a shared census identifies basins
     /// at, and a cooperative run has nothing valid to offer. Polishing only
     /// the states that improve the record bounds the cost to the number of
-    /// improvements, a few hundred evaluations each over tens of events,
-    /// about one percent of a campaign budget, all charged to the ledger.
+    /// improvements. `Config::recommended` sets that polish to one full quench,
+    /// 1000 steps, and the calls are charged to the ledger.
     /// Zero disables the polish and leaves the solo behaviour untouched.
     pub polish_records: usize,
     /// Predictive spread, in units of the temperature, above which the first
