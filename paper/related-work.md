@@ -1108,3 +1108,31 @@ The manuscript's basin hop is a free Lennard-Jones or water cluster, and the hex
 
 Cite `romeroHydration2026` and `solimanDds2026`.
 
+## 2026-11-15 — A Gaussian approximation potential for magnesium clusters through 100 atoms
+
+Steshin, Panteleev, Petukhov, and Ignatov, Physical Chemistry Chemical Physics 27, 18960--18977 (2025), doi:10.1039/d5cp02189h, fit a Gaussian approximation potential for magnesium clusters. A two-stage grid search with active learning sets the model parameters. The abstract says that fit supports structural predictions for Mg\(_n\) with \(n\) above 50. Global optimisation on the potential finds favourable structures at 51, 52, and 53 atoms, with a pyramidal core that earlier reports had placed only from 54 atoms. The same search names new global-minimum candidates at 59, 69, 74, and 99 atoms. It says hcp-like motifs do not change the stability ranking below 100 atoms. The record has no day.
+
+The manuscript sizes are Lennard-Jones. The abstract gives no Cambridge energy and no water energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be one of those magnesium sizes on this potential. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Ignatov, Panteleev, and Masunov, The Journal of Physical Chemistry A 130, 2287--2309 (9 March 2026), doi:10.1021/acs.jpca.5c07492, are three of the same authors. The abstract says an earlier global density-functional optimisation, refined at MP2/cc-pVQZ and at CCSD(T)/cc-pVQZ, had already produced the isomer set. This paper searches transition states on the density-functional surface and runs atom-centered density-matrix propagation for up to 50 ps, from 300 to 700 K. It names the 9-atom and 10-atom clusters as the most kinetically stable. It does not report a new global-minimum energy. Those lifetimes do not replace the Gaussian-approximation candidates, and they do not contradict the Cambridge hit targets.
+
+Cite `steshinMagnesium2025` and `ignatovMagnesium2026`.
+
+## 2026-11-15 — CREST and ABCluster on mixed-acid clusters, and ABCluster on iron--boron
+
+Hasan, Knattrup, Wu, and Elm, Aerosol Research 4, 501--515 (22 October 2026), doi:10.5194/ar-4-501-2026, sample sulfuric acid, methanesulfonic acid, and the bases ammonia, methylamine, and dimethylamine, up to 10 acid--base pairs. The abstract says the structures come from ABCluster and from metadynamics in CREST, followed by a B97-3c optimisation, with a PaiNN model used to speed the calculation. Sulfuric acid dominates the smallest clusters. Methanesulfonic acid can change the stability at larger sizes when the base is ammonia or methylamine. The abstract gives no GFN2-xTB energy and no Lennard-Jones energy.
+
+The hexamer comparison is a bare cluster at GFN2-xTB in xtb 6.7.1, against CREST 3.0.2. This CREST sampling is an atmospheric cluster, scored at B97-3c. It does not report 121 of 192, 97 of 192, or the polished gaps. It does not mention a user seed, so the sentence that CREST 3.0.2 exposes no seed still stands. Leave the CREST table on 3.0.2. A comparison, if it is run, is one of these acid--base clusters. It does not warrant a head-to-head on that table.
+
+Ren, Li, Zhang, Chen, and Wang, ACS Omega 11, 48642--48651 (6 August 2026), doi:10.1021/acsomega.6c06161, search FeC\(_x\)B\(_{(8-x)}^-\) for \(x\) from 1 to 4. The abstract says the global minima come from ABCluster, refined at M06-2X/def2-TZVP. Carbon shrinks the ligand ring, and FeC\(_4\)B\(_4^-\) is a \(C_{4v}\) bowl. Eight atoms sits outside 38, 55, 75, 98, and 104. ABCluster is the code already named beside CREST in `lauriaComplax2026` and beside CALYPSO in `luRutheniumSilicon2026`. This use is an iron--boron anion. It gives no Cambridge energy and no hexamer count, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `hasanAcidClusters2026` and `renIronBoron2026`.
+
+## 2026-11-15 — Particle swarm against a Python basin hop on a harmonic well
+
+Núñez and co-workers, Inorganics 13, 293 (31 August 2025), doi:10.3390/inorganics13090293, search carbon clusters of 3 to 5 atoms and tungsten--oxygen clusters WO\(_n^{m-}\) with \(n\) from 4 to 6 and \(m\) of 2, 4, or 6. A particle-swarm code in Fortran minimises a harmonic potential. The abstract compares those structures with a basin-hopping code written in Python 3.10 and with density-functional calculations in Gaussian 09, and with crystal structures. It says the swarm approximates the basin-hopping and density-functional geometries at lower cost, as a start for an ab initio calculation.
+
+That basin hop is their Python code on a harmonic well. It is not the ASE 3.29.0 arm, AGOX v3.11.1, GMIN, or pele 0.1.2. The sizes stop at 6 atoms. The abstract gives no Cambridge energy and no hit rate, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open kit. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `nunezHarmonic2025`.
+
