@@ -525,6 +525,24 @@ rule tip4p_h2h:
         """
 
 
+# (H2O)8, 12, 16, 20 and 21 against GMIN's rigid-body TIP4P basin-hopping
+# (pinned aac1548a) on anneal's default preset, Cambridge headers as the
+# target, twelve seeds, 2_000_000 charged evaluations, one serial session,
+# sudo unshare --uts with hostname bench. Rows append to rows.csv with
+# code_revision and host; a stored row is reused only at the same revision.
+# Not part of `rule all`:
+#   snakemake -s workflow/Snakefile water_gmin
+rule water_gmin:
+    output:
+        "bench/water-gmin/summary.csv",
+        "bench/water-gmin/verify.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/tip4p_h2h/enter_water_gmin.sh
+        """
+
+
 # (H2O)21 against GMIN on anneal develop's default preset across a budget
 # sweep: 2M, 4M and 8M charged evaluations, twelve seeds, the same serial arm
 # as tip4p_h2h. GMIN at a (budget, seed) pair is deterministic, so the rows

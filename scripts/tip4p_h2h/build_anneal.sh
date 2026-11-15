@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-WORK=/work/tip4p-h2h
+WORK=${H2H_WORK:-/work/tip4p-h2h}
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 mkdir -p "$WORK/target" "$WORK/rustc-tmp" "$WORK/bin"
 cd "$ROOT"

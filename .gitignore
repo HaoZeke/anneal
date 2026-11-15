@@ -303,3 +303,6 @@ bench/depth-posterior-ablation/.asv/
 
 # GrowPAL v2 head-to-head scratch. The appended CSVs and row files are the record.
 bench/growpal-h2h-v2/.asv/
+
+# Water GMIN head-to-head scratch. rows.csv, summary.csv and verify.csv are the record.
+bench/water-gmin/.asv/
