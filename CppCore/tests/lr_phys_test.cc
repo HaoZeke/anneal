@@ -19,6 +19,7 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -83,6 +84,19 @@ Eval run(Pot &pot, const std::vector<double> &pos, const std::vector<int> &z, co
   std::copy(out.stress, out.stress + 9, e.stress);
   return e;
 }
+
+#if !defined(RGPOT_HAS_DFTD3) || !defined(RGPOT_HAS_DFTD4)
+void check_unlinked(DispersionPot &pot, const std::vector<double> &pos, const std::vector<int> &z,
+                    const char *what) {
+  bool threw = false;
+  try {
+    run(pot, pos, z, nullptr);
+  } catch (const std::runtime_error &ex) {
+    threw = std::string(ex.what()).find("not linked") != std::string::npos;
+  }
+  check(threw, what);
+}
+#endif
 
 double fd_force(auto &&energy, std::vector<double> pos, std::size_t i, double step) {
   const double x = pos[i];
@@ -788,7 +802,16 @@ void test_edges() {
   auto d4 = rgpot::lr::make_dispersion(rgpot::lr::DispersionKind::D4);
   check(std::string(qdo->name()) == "QDO" && qdo->kind() == rgpot::lr::DispersionKind::QDO, "QDO name");
   check(std::string(mbd->name()) == "MBD@rsSCS", "MBD name");
-  check(std::string(d3->name()) == "D3BJ" && std::string(d4->name()) == "D4", "library names");
+#if defined(RGPOT_HAS_DFTD3)
+  check(std::string(d3->name()) == "D3BJ", "D3 library name");
+#else
+  check(std::string(d3->name()) == "unavailable", "D3 without s-dftd3 is unavailable");
+#endif
+#if defined(RGPOT_HAS_DFTD4)
+  check(std::string(d4->name()) == "D4", "D4 library name");
+#else
+  check(std::string(d4->name()) == "unavailable", "D4 without dftd4 is unavailable");
+#endif
 
   DispersionConfig dc;
   dc.kind = DispersionKind::QDO;
@@ -909,6 +932,7 @@ void test_edges() {
     threw = true;
   }
   check(threw, "dispersion requires atomic numbers");
+#if defined(RGPOT_HAS_DFTD3)
   threw = false;
   try {
     DispersionConfig badm = d3cfg;
@@ -919,6 +943,7 @@ void test_edges() {
     threw = true;
   }
   check(threw, "an unknown D3 functional is rejected");
+#endif
   threw = false;
   try {
     NlhPot pot;
@@ -1034,6 +1059,7 @@ void test_edges() {
     threw = true;
   }
   check(threw, "a short C6 ratio vector is rejected");
+#if defined(RGPOT_HAS_DFTD4)
   threw = false;
   try {
     DispersionConfig bad4;
@@ -1047,6 +1073,7 @@ void test_edges() {
     threw = true;
   }
   check(threw, "an unknown D4 functional is rejected");
+#endif
   {
     DispersionConfig close_cfg;
     close_cfg.kind = DispersionKind::MBD;
@@ -1061,14 +1088,22 @@ void test_edges() {
     }
   }
 
+#if defined(RGPOT_HAS_DFTD3)
   run(d3pot, pos, z, nullptr);
   run(d3pot, pos, z, nullptr);
+#else
+  check_unlinked(d3pot, pos, z, "D3 without s-dftd3 refuses to evaluate");
+#endif
   DispersionConfig d4cfg = d3cfg;
   d4cfg.kind = DispersionKind::D4;
   d4cfg.charge = 0;
   DispersionPot d4pot(d4cfg);
+#if defined(RGPOT_HAS_DFTD4)
   run(d4pot, pos, z, nullptr);
   run(d4pot, pos, z, nullptr);
+#else
+  check_unlinked(d4pot, pos, z, "D4 without dftd4 refuses to evaluate");
+#endif
 }
 
 void test_cuda_and_periodic_mbd() {
@@ -1323,10 +1358,18 @@ void test_cuda_and_periodic_mbd() {
     DispersionPot d3(cut);
     std::vector<double> wpos = {0, 0, 0, 0.96, 0, 0, -0.24, 0.93, 0};
     std::vector<int> wz = {8, 1, 1};
+#if defined(RGPOT_HAS_DFTD3)
     run(d3, wpos, wz, nullptr);
+#else
+    check_unlinked(d3, wpos, wz, "D3 with library cutoffs refuses to evaluate without s-dftd3");
+#endif
     cut.kind = DispersionKind::D4;
     DispersionPot d4(cut);
+#if defined(RGPOT_HAS_DFTD4)
     run(d4, wpos, wz, nullptr);
+#else
+    check_unlinked(d4, wpos, wz, "D4 with library cutoffs refuses to evaluate without dftd4");
+#endif
   }
   threw = false;
   try {
