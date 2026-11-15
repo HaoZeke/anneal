@@ -22,6 +22,10 @@ and M80 at rho = 6 through ``h2h_morse``, one with the priors off and one
 on. The priors-off campaign adds the branch with the stalled-incumbent
 reorder (``H2H_REORDER=1``) and LJ75 on its preset.
 
+The two g3 campaigns are the g2 campaigns again in one session, the
+priors-off one with the reorder that records and does not adopt. The six
+alloys, which move between arms, run 24 seeds; the rest run 12.
+
 Rows are appended to a CSV, one line per run, with the revision of the
 build and the host. A row already in that file for the same build
 revision is kept and its run is skipped; the summary reads only the rows
@@ -46,6 +50,7 @@ from pathlib import Path
 from scipy.stats import fisher_exact, mannwhitneyu
 
 SEEDS = tuple(range(2000, 2012))
+WIDE_SEEDS = tuple(range(2000, 2024))
 SCHEDULE_SEED = 20261114
 LJ75_REFERENCE = -397.492331
 LJ75_BUDGET = 4_000_000
@@ -63,7 +68,7 @@ ALLOYS = {
 }
 
 # Name, build, priors, H2H_HOMOTOP, further environment. The first arm of
-# a campaign is its control.
+# a campaign is its control. Systems listed under "wide" run WIDE_SEEDS.
 CAMPAIGNS = {
     "priors-off": {
         "systems": ("cu6au32", "cu19au19", "cu27au28", "pt12cu11", "cu10au45", "cu30au8"),
@@ -140,6 +145,42 @@ CAMPAIGNS = {
             ("branch", "branch", None, None, {}),
         ),
     },
+    "g3-priors-off": {
+        "systems": (
+            "cu6au32",
+            "cu19au19",
+            "cu27au28",
+            "pt12cu11",
+            "cu10au45",
+            "cu30au8",
+            "au55",
+            "lj75",
+            "m80r6",
+        ),
+        "wide": ("cu6au32", "cu19au19", "cu27au28", "pt12cu11", "cu10au45", "cu30au8"),
+        "arms": (
+            ("develop", "develop", "0", None, {}),
+            ("branch", "branch", "0", None, {}),
+            ("reorder", "branch", "0", None, {"H2H_REORDER": "1"}),
+        ),
+    },
+    "g3-priors-on": {
+        "systems": (
+            "cu6au32",
+            "cu19au19",
+            "cu27au28",
+            "pt12cu11",
+            "cu10au45",
+            "cu30au8",
+            "au55",
+            "m80r6",
+        ),
+        "wide": ("cu6au32", "cu19au19", "cu27au28", "pt12cu11", "cu10au45", "cu30au8"),
+        "arms": (
+            ("develop", "develop", None, None, {}),
+            ("branch", "branch", None, None, {}),
+        ),
+    },
 }
 
 ROW_FIELDS = [
@@ -209,14 +250,18 @@ def median(values: list[float]) -> float:
     return type7(sorted(values), 0.5)
 
 
+def seeds_of(spec: dict, system: str) -> tuple[int, ...]:
+    return WIDE_SEEDS if system in spec.get("wide", ()) else SEEDS
+
+
 def schedule(
-    systems: tuple[str, ...], seeds: tuple[int, ...], arms: tuple[str, ...], rng_seed: int
+    systems: tuple[str, ...], spec: dict, arms: tuple[str, ...], rng_seed: int
 ) -> list[tuple[str, int, str]]:
     """Systems in the given order. Pairs inside a system are shuffled."""
     rng = random.Random(rng_seed)
     order: list[tuple[str, int, str]] = []
     for system in systems:
-        jobs = [(system, seed, arm) for seed in seeds for arm in arms]
+        jobs = [(system, seed, arm) for seed in seeds_of(spec, system) for arm in arms]
         rng.shuffle(jobs)
         order.extend(jobs)
     return order
@@ -439,8 +484,11 @@ def self_test() -> None:
         if any(len(arm) != 5 for arm in spec["arms"]):
             raise SystemExit(f"{campaign} arm fields")
         names = tuple(arm for arm, *_ in spec["arms"])
-        order = schedule(spec["systems"], SEEDS, names, SCHEDULE_SEED)
-        if len(order) != len(spec["systems"]) * len(SEEDS) * len(names):
+        if any(system not in spec["systems"] for system in spec.get("wide", ())):
+            raise SystemExit(f"{campaign} wide systems")
+        order = schedule(spec["systems"], spec, names, SCHEDULE_SEED)
+        jobs = sum(len(seeds_of(spec, system)) for system in spec["systems"]) * len(names)
+        if len(order) != jobs:
             raise SystemExit(f"{campaign} schedule size")
         firsts = [
             system
@@ -514,7 +562,7 @@ def main(argv: list[str]) -> int:
         for row in read_rows(args.rows)
         if row["campaign"] == args.campaign
     }
-    order = schedule(systems, SEEDS, tuple(arms), SCHEDULE_SEED)
+    order = schedule(systems, spec, tuple(arms), SCHEDULE_SEED)
     for index, (system, seed, arm) in enumerate(order, start=1):
         build, priors, homotop, extra = arms[arm]
         directory, revision = builds[build]
