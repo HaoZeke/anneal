@@ -5,9 +5,11 @@
 * LAMMPS
 
 =pair_style rgpot= is a LAMMPS plugin that hands the whole periodic box to an
-rgpot potential and returns the energy, the forces and the global virial.
+rgpot potential and returns the energy, the forces and the global virial,
+and for the pair and EAM potentials the per-atom energy and virial.
 It runs under =fix nve=, =fix npt= and =fix box/relax= like a native pair
-style.
+style, and =compute pe/atom= and =compute stress/atom= work with those
+potentials.
 It can use any of the potentials listed below, Lennard-Jones through its own
 coefficients, or a library that exports =rgpot_engine_force=.
 
@@ -22,11 +24,14 @@ Build LAMMPS with the PLUGIN package and shared libraries, with or without
 MPI.
 The plugin was tested against =stable_22Jul2025_update2= built with
 =-D PKG_PLUGIN=on -D PKG_MANYBODY=on -D BUILD_MPI=on -D BUILD_SHARED_LIBS=on=
-and Open MPI 5.
+and Open MPI 5, and with Open MPI 4.1 and GCC 13.
 MANYBODY only provides the =eam/alloy= reference used by the tests.
 The plugin includes =mpi.h= through the LAMMPS headers, so the C++ compiler has
 to find the same MPI headers LAMMPS used; an MPI-less LAMMPS uses its own
 =STUBS= header.
+Like LAMMPS, the plugin is compiled with =OMPI_SKIP_MPICXX= and
+=MPICH_SKIP_MPICXX=, so the MPI C++ bindings of Open MPI 4 are not
+referenced.
 
 Then configure rgpot with the LAMMPS source tree and binary:
 
@@ -62,8 +67,9 @@ communication; the style does not request a neighbour list.
 
 All forms use =* *=; the style is set once for every type.
 
-- =pair_coeff * * u0 psi= is the in-process shifted Lennard-Jones potential
-  with well depth =u0= in eV and zero crossing =psi= in Angstrom.
+- =pair_coeff * * u0 psi= is the shifted Lennard-Jones potential =LJ= with
+  well depth =u0= in eV and zero crossing =psi= in Angstrom, truncated at the
+  =pair_style= cutoff.
   It matches =pair_style lj/cut= with =pair_modify shift yes=.
 - =pair_coeff * * engine /path/to/libengine.so [El ...]= dlopens an engine
   plugin, for example Metatomic or the in-tree =liblj_engine.so=.
@@ -148,10 +154,47 @@ path.
 =compute pressure=, =thermo_style= pressure columns, =fix npt= and
 =fix box/relax= then work unchanged.
 
-The style does not set the per-atom energy or virial; no rgpot potential
-returns them.
-=compute pe/atom=, =compute stress/atom= and the centroid variant stop the
-run with an error instead of reporting zeros.
+** Per-atom energy and virial
+
+=compute pe/atom=, =compute stress/atom= and =compute centroid/stress/atom=
+work with the potentials that split their energy and virial over the atoms:
+
+| Name                    | Per-atom energy                                           |
+|-------------------------+-----------------------------------------------------------|
+| =LJ=, =u0 psi=, =Morse= | half of each pair term                                    |
+| =SuttonChen=            | \(-\epsilon c \sqrt{\rho_i}\) plus half of each pair term |
+| =EAMTable=              | \(F_a(\rho_i)\) plus half of each \(\phi_{ab}\)           |
+
+The per-atom virial of every pair, with the force on atom \(i\) equal to
+\(f\,\mathbf{d}\) for \(\mathbf{d} = \mathbf{r}_i - \mathbf{r}_j\), is
+\(f\,\mathbf{d}\otimes\mathbf{d}/2\) on each atom.
+For EAM \(f\) includes the embedding derivatives, so the split is that of
+=pair_style eam=, =eam/alloy= and =eam/fs=.
+Every force is a central pair force, so the centroid stress is the same
+tensor.
+
+Rank 0 fills the per-atom arrays on the gathered box and they are scattered
+by tag like the forces, so they do not depend on the number of ranks.
+They sum to the energy and to the global virial.
+With =virial fd= the global virial is the strain difference while the
+per-atom virial stays analytic, so the two agree only to the accuracy of the
+difference.
+
+The engine form and the other potentials (=SWSi1985=, =TersoffSi=, =EMT=,
+=EAMCell= and the Fortran potentials) have no per-atom split.
+A per-atom request with them stops the run with an error that names the
+potential, for example
+=pair_style rgpot: the rgpot potential EMT has no per-atom energy or virial=.
+
+In C++ the split is the non-virtual member
+=forcePerAtom(const ForceInput &, ForceOut *, const PerAtomOut &)= of
+=LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot= and
+=EAMTablePot=.
+It fills the =ForceOut= as =forceImpl= does and writes =PerAtomOut::energy=
+(one per atom) and =PerAtomOut::virial= (six per atom, =xx yy zz yz xz xy=,
+summing to \(-V\sigma\)); either pointer may be null.
+The concept =rgpot::PerAtomPotential= in =rgpot/PerAtom.hpp= tells whether a
+potential type has it.
 
 ** Tests
 
@@ -185,14 +228,25 @@ The numbers below are from one run; the tests assert looser bounds.
 - EMT Cu (finite-difference virial) against an independent difference from
   =rgpot-eval=: within 7e-6 bar.
 - A =NULL= type under =hybrid/overlay= with =lj/cut= matches =lj/cut= alone.
-- Other units, free boundaries, per-atom requests, unknown names and unknown
-  symbols each stop with an error.
+- =compute pe/atom= and =compute stress/atom= against =lj/cut= and
+  =eam/alloy=, atom by atom in tag order, in orthogonal and triclinic cells
+  on 1, 2 and 4 ranks: Lennard-Jones per-atom energies within 2e-16 eV and
+  stress within 3e-9 bar Å^3 of values up to 9e4; CuNi per-atom energies
+  within 2e-14 eV and stress within 3e-8 bar Å^3 of values up to 2e6.
+  =Morse= against =pair_style morse= with =pair_modify shift yes=: 9e-15 eV
+  and 9e-8 bar Å^3 of 3.5e6.
+- The per-atom energies sum to the energy within 2e-13 eV for
+  Lennard-Jones and 2e-11 eV for CuNi, =SuttonChen= and =Morse=; the stress
+  per atom sums to \(-PV\) within 1e-13 of its largest component;
+  =centroid/stress/atom= equals =stress/atom=.
+- Other units, free boundaries, per-atom requests with =EMT= or an engine,
+  unknown names and unknown symbols each stop with an error.
 
 ** Limitations
 
 - One rank evaluates the whole box; see the MPI section.
-- No per-atom energy or virial, so no =compute pe/atom= or
-  =compute stress/atom=.
+- Per-atom energy and virial only for =LJ=, =Morse=, =SuttonChen= and
+  =EAMTable=; see the per-atom section.
 - =units metal= and =boundary p p p= only.
 - The finite-difference virial is only as smooth as the potential's energy.
   For EMT and =EAMAl= it changed by tens of bar when the strain step was
