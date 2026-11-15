@@ -878,8 +878,8 @@ mod tests {
         let cfg = GpConfig::defaults();
         let mut gp = GpSurrogate::new(4, 8, &cfg).expect("model creation failed");
         let x = cluster(4, 0.05, 11);
-        gp.record(&x, f64::NAN, &vec![0.0; 12]);
-        gp.record(&x, -1.0, &vec![f64::INFINITY; 12]);
+        gp.record(&x, f64::NAN, &[0.0; 12]);
+        gp.record(&x, -1.0, &[f64::INFINITY; 12]);
         assert!(gp.is_empty(), "a non-finite observation was accepted");
     }
 

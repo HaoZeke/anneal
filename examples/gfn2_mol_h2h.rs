@@ -190,9 +190,7 @@ fn build(system: &System) -> Built {
                 }
                 symbols.push(symbol(z).to_string());
                 species.push(z);
-                for axis in 0..3 {
-                    coords.push(piece.xyz[atom][axis]);
-                }
+                coords.extend_from_slice(&piece.xyz[atom]);
             }
         }
     }
