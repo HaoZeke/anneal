@@ -108,7 +108,10 @@ fn main() {
         eprintln!("PAPER_STARTS replaces a drawn start, and {system} {arm_name} draws none");
         std::process::exit(2);
     }
-    let cfg = apply_arm(campaign.n, arm);
+    let mut cfg = apply_arm(campaign.n, arm);
+    if let Some(rho) = campaign.rho {
+        cfg.pair_minimum = Some(PairKind::Morse { rho }.r_min());
+    }
     let config_digest = cfg.resolved_sha256().expect("config digest");
     let (engine_kind, engine_digest) = engine_identity(campaign.n, campaign.rho);
     let mut report = String::new();
