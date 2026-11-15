@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) anneal developers
-# Both arms, one UTS namespace, hostname bench, working directory under /work.
+# Both arms, one UTS namespace, hostname bench, core 0, working directory under /work.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -79,9 +79,9 @@ export OMP_PLACES=cores
 export RAYON_NUM_THREADS=1
 cd $WORK
 if [ "\${1:-}" = "--faithful" ]; then
-  exec bash $WORK/bin/faithful_rerun.sh
+  exec taskset -c 0 bash $WORK/bin/faithful_rerun.sh
 fi
-exec $WORK/venv/bin/python -u $WORK/bin/run_campaign.py \\
+exec taskset -c 0 $WORK/venv/bin/python -u $WORK/bin/run_campaign.py \\
   --fixture $ROOT/bench/lj-bonobo-h2h/cambridge_lj.tsv \\
   --binary $WORK/bin/lj_lean_relax_budget \\
   --upstream $WORK/upstream/bonobo \\

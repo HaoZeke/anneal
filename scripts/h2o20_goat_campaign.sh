@@ -3,8 +3,8 @@
 # Timed GFN2-xTB (H2O)20 comparison of anneal and CREST.
 #
 # Same wrapper as scripts/h2o16_v9_one_bench.sh: every search is
-#   sudo unshare --uts sh -c 'hostname bench; exec <cmd>'
-# with one thread, a shared start geometry, and the arm order drawn
+#   sudo unshare --uts sh -c 'hostname bench; exec taskset -c 0 <cmd>'
+# with one thread on core 0, a shared start geometry, and the arm order drawn
 # from the seed. The working directory is under /work.
 #
 # GOAT is run only when `orca` is already on PATH. ORCA 6 is login-gated
@@ -80,7 +80,7 @@ timed() {
     cd "$dir"
     set +e
     sudo -n unshare --uts sh -c \
-      'hostname bench; . "$1"; cd "$2"; hostname > hostname.txt; shift 2; exec "$@" > stdout.txt 2> stderr.txt' \
+      'hostname bench; . "$1"; cd "$2"; hostname > hostname.txt; shift 2; exec taskset -c 0 "$@" > stdout.txt 2> stderr.txt' \
       timed-sh "$WORK/bench-env.sh" "$dir" "$@"
     echo $? > exit.code
   )

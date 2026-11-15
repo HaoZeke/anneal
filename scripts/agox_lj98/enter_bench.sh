@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
-# LJ98 head-to-head. One UTS namespace, hostname bench, one thread.
+# LJ98 head-to-head. One UTS namespace, hostname bench, one thread on core 0.
 # No arguments rewrite the summary from the committed rows.
 # One seed appends a row:
 #   enter_bench.sh --code agox --seed 6400
@@ -73,9 +73,9 @@ echo hostname=\$host
 if [ "$CODE" = anneal ]; then
   rev=\$(git rev-parse HEAD)
   echo code_revision=\$rev
-  exec $WORK/target/release/examples/h2h_arm3 lj98 default 4000000 $SEED
+  exec taskset -c 0 $WORK/target/release/examples/h2h_arm3 lj98 default 4000000 $SEED
 fi
-exec python3 scripts/lj_board/run_arm.py $CODE 98 $SEED
+exec taskset -c 0 python3 scripts/lj_board/run_arm.py $CODE 98 $SEED
 EOF
 chmod +x "$WORK/bin/inside.sh"
 
