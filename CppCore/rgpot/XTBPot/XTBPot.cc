@@ -51,6 +51,11 @@ double maxAtomMove(const std::vector<double> &previous, const double *next,
   return std::sqrt(furthest2);
 }
 
+bool sccUnconverged(const std::string &message) {
+  return message.find("did not converge") != std::string::npos ||
+         message.find("Self consistent") != std::string::npos;
+}
+
 } // namespace
 
 XTBPot::XTBPot() : XTBPot(XTBConfig{}) {}
@@ -139,33 +144,43 @@ void XTBPot::freshResults() const {
   m_has_wavefunction = false;
 }
 
+bool XTBPot::singlepoint(std::string *error) const {
+  xtb_singlepoint(m_env, m_mol, m_calc, m_res);
+  if (xtb_checkEnvironment(m_env) == 0)
+    return true;
+  char err_msg[512] = {};
+  int err_len = static_cast<int>(sizeof(err_msg));
+  xtb_getError(m_env, err_msg, &err_len);
+  if (error)
+    *error = std::string("xTB Error: ") + err_msg;
+  return false;
+}
+
 bool XTBPot::rescueUnconvergedScc() const {
   // A dissociated or rearranged cluster can have a gap of a few tenths
   // of an eV. The charge iterator then runs out its budget at the
   // configured temperature. Smearing the levels converges that density
   // in a few iterations, and the cooled single point uses it as the
   // guess. The energy handed back is the configured-temperature one.
+  //
+  // A failed SCC leaves its last iterate in the results object, and on a
+  // near-zero-gap cluster that iterate has diverged. Started from it, the
+  // GFN2 charge iterator settles on a stationary point with charges of
+  // several electrons per atom, far below the physical solution. Each hot
+  // rung therefore starts from xtb's own guess.
   xtb_setMaxIter(m_env, m_calc, m_config.max_iterations);
   const double configured = m_config.electronic_temperature;
   const double ladder[] = {1000.0, 3000.0, 5000.0};
   for (double hot : ladder) {
     if (!(hot > configured))
       continue;
+    freshResults();
     xtb_setElectronicTemp(m_env, m_calc, hot);
-    xtb_singlepoint(m_env, m_mol, m_calc, m_res);
-    if (xtb_checkEnvironment(m_env) != 0) {
-      char ignored[512];
-      int ignored_len = static_cast<int>(sizeof(ignored));
-      xtb_getError(m_env, ignored, &ignored_len);
+    if (!singlepoint(nullptr))
       continue;
-    }
     xtb_setElectronicTemp(m_env, m_calc, configured);
-    xtb_singlepoint(m_env, m_mol, m_calc, m_res);
-    if (xtb_checkEnvironment(m_env) == 0)
+    if (singlepoint(nullptr))
       return true;
-    char ignored[512];
-    int ignored_len = static_cast<int>(sizeof(ignored));
-    xtb_getError(m_env, ignored, &ignored_len);
   }
   xtb_setElectronicTemp(m_env, m_calc, configured);
   return false;
@@ -229,8 +244,8 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   // The results object holds the previous SCC wavefunction. xtb reads it
   // as the guess. Past warm_move that guess is slower than xtb's own, so
   // the results object is replaced before the single point.
-  const bool reuse = !composition_changed && m_has_wavefunction &&
-                     m_warm_move > 0.0 && moved <= m_warm_move;
+  bool reuse = !composition_changed && m_has_wavefunction &&
+               m_warm_move > 0.0 && moved <= m_warm_move;
 
   if (composition_changed) {
     if (m_mol) {
@@ -259,20 +274,17 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   const int first_pass =
       m_config.max_iterations < 48 ? m_config.max_iterations : 48;
   xtb_setMaxIter(m_env, m_calc, first_pass);
-  xtb_singlepoint(m_env, m_mol, m_calc, m_res);
-
-  if (xtb_checkEnvironment(m_env) != 0) {
-    char err_msg[512];
-    int err_len = static_cast<int>(sizeof(err_msg));
-    xtb_getError(m_env, err_msg, &err_len);
-    const std::string message = std::string("xTB Error: ") + err_msg;
-    const bool unconverged =
-        message.find("did not converge") != std::string::npos ||
-        message.find("Self consistent") != std::string::npos;
-    if (!unconverged || !rescueUnconvergedScc()) {
-      discardAfterFailure();
-      throw std::runtime_error(message);
-    }
+  std::string message;
+  bool converged = singlepoint(&message);
+  if (reuse && !converged) {
+    // What follows is a fresh call.
+    reuse = false;
+    freshResults();
+    converged = singlepoint(&message);
+  }
+  if (!converged && !(sccUnconverged(message) && rescueUnconvergedScc())) {
+    discardAfterFailure();
+    throw std::runtime_error(message);
   }
 
   double energy_hartree;

@@ -2,6 +2,7 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 
+#include <string>
 #include <vector>
 
 #include <xtb.h>
@@ -23,8 +24,9 @@ namespace rgpot {
  * object while no atom moves by more than ``XTBConfig::warm_move``
  * (1 Angstrom unless changed). A larger move, a new composition, or
  * ``reset()`` drops that object so the next single point uses xtb's own
- * guess. ``xtb_releaseOutput`` is called on create (library recommendation
- * for multi-env processes). Do not share one instance across threads;
+ * guess. An SCC that does not converge never seeds another one.
+ * ``xtb_releaseOutput`` is called on create (library recommendation for
+ * multi-env processes). Do not share one instance across threads;
  * distinct instances may be used from different threads if the loaded
  * libxtb build is reentrant for independent handle sets.
  *
@@ -79,10 +81,13 @@ private:
   void loadParametrisation() const;
   void freshResults() const;
   void discardAfterFailure() const;
+  /// One xtb single point. On failure the environment log is read, which
+  /// clears it, and the message is stored in ``error`` when given.
+  bool singlepoint(std::string *error) const;
   /// A failed SCC on a rearranged cluster is retried with smeared
-  /// occupation, then evaluated again at the configured temperature.
-  /// The hot single point is only a guess. False leaves the caller to
-  /// discard the handles.
+  /// occupation from xtb's own guess, then evaluated again at the
+  /// configured temperature. The hot single point is only a guess. False
+  /// leaves the caller to discard the handles.
   bool rescueUnconvergedScc() const;
 };
 
