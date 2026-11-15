@@ -417,6 +417,22 @@ rule au55_scale:
         """
 
 
+# Stillinger-Weber silicon and Tersoff carbon, anneal against GMIN and ASE
+# basin hopping: the third panel, twelve seeds, the paper budgets, serial
+# on core 0. The "v2" arms are develop's build at 7da10659. Needs rgpot's
+# covalent library and ASE (paths in the scripts). Not part of `rule all`.
+#   snakemake -s workflow/Snakefile covalent_h2h
+rule covalent_h2h:
+    output:
+        "bench/covalent-h2h/v3/seeds.csv",
+        "bench/covalent-h2h/v3/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        BENCH_OUT=v3 BEFORE_REV=7da10659 bash scripts/covalent_h2h/enter_bench.sh
+        """
+
+
 # GFN2-xTB Si10 and C10, anneal's general arm against CREST 3.0.2, twelve
 # seeds, 1e5 calls, 3000 K electronic temperature. Needs xtb 6.7.1, CREST
 # and rgpot's libxtb_engine.so (paths in the script). Not part of `rule all`.
