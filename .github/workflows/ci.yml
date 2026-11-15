@@ -39,25 +39,41 @@ jobs:
       # and stable rustfmt rewrites that tree: its rustfmt.toml asks for
       # nightly options, and the `ignore` key is unstable on stable.
       # Format workspace members only. Do not reformat the vendored sources.
+      # Every check after fmt runs whatever the checks before it reported, so
+      # a red fmt does not hide a red clippy under a feature set. A step that
+      # needs an earlier setup step runs only when that setup succeeded.
+      # `!cancelled()` lets a cancelled, superseded run still stop.
       - name: cargo fmt
         run: cargo fmt -- --check
 
       - name: cargo clippy (default features)
+        if: ${{ !cancelled() }}
         run: cargo clippy --all-targets -- -D warnings
 
       # The rgpot-ex examples load rgpot through libloading. They need no
       # native dependency, so they are linted here on their own.
       - name: cargo clippy (rgpot-ex)
+        if: ${{ !cancelled() }}
         run: cargo clippy --all-targets --features rgpot-ex -- -D warnings
+
+      # rgsaddle compiles rgsaddle 0.3.0 from crates.io and needs no native
+      # library. `python` and `bank-rpc` turn it on, but alone it is a
+      # feature set of its own.
+      - name: cargo clippy (rgsaddle)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --all-targets --features rgsaddle -- -D warnings
 
       # `cargo package` writes anneal-core-${version}.crate and verifies
       # it. The next step extracts that crate, drops the development
       # cargo config and the lockfile, and checks the default features
       # plus `rgsaddle,python` against crates.io.
       - name: Package the crate
+        id: package
+        if: ${{ !cancelled() }}
         run: cargo package
 
       - name: Check packaged default features against crates.io
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -79,6 +95,8 @@ jobs:
           )
 
       - name: Checkout Vesin
+        id: vesin
+        if: ${{ !cancelled() }}
         uses: actions/checkout@v6
         with:
           repository: Luthaf/vesin
@@ -87,6 +105,8 @@ jobs:
           persist-credentials: false
 
       - name: Checkout IRA
+        id: ira
+        if: ${{ !cancelled() }}
         uses: actions/checkout@v6
         with:
           repository: mammasmias/IterativeRotationsAssignments
@@ -95,6 +115,8 @@ jobs:
           persist-credentials: false
 
       - name: Build all-feature dependencies
+        id: feature-deps
+        if: ${{ !cancelled() && steps.vesin.outcome == 'success' && steps.ira.outcome == 'success' }}
         shell: bash
         run: |
           sudo apt-get update
@@ -112,12 +134,14 @@ jobs:
             >> "$GITHUB_ENV"
 
       - name: cargo clippy
+        if: ${{ !cancelled() && steps.feature-deps.outcome == 'success' }}
         run: cargo clippy --features "$CI_FEATURES,lammps" --all-targets -- -D warnings
 
       # `gpr` is linted with the rest. clippy type-checks and never links, so
       # an empty file stands in for libgpr_optim, which a runner cannot fetch;
       # build.rs only checks that the file is there.
       - name: cargo clippy (all features)
+        if: ${{ !cancelled() && steps.feature-deps.outcome == 'success' }}
         shell: bash
         run: |
           mkdir -p .ci/gpr-optim
@@ -126,6 +150,8 @@ jobs:
             cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Install Cocogitto
+        id: cocogitto
+        if: ${{ !cancelled() }}
         uses: taiki-e/install-action@v2
         with:
           tool: cocogitto
@@ -138,6 +164,7 @@ jobs:
       # parent, and from it to the tip. The second part also walks the
       # commits of the base branch that 235683cf does not reach.
       - name: Conventional commits check
+        if: ${{ !cancelled() && steps.cocogitto.outcome == 'success' }}
         shell: bash
         env:
           COG_FROM: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
@@ -177,6 +204,7 @@ jobs:
       # Those still fail a push of the base, which audits HEAD. A pull request
       # audits the objects its own commits add, at the same 1 MiB bar.
       - name: Audit for large files
+        if: ${{ !cancelled() }}
         shell: bash
         env:
           AUDIT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}

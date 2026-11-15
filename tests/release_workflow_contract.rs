@@ -68,6 +68,39 @@ fn ci_cancels_superseded_main_branch_runs() {
 }
 
 #[test]
+fn ci_lint_reports_every_check_after_a_red_fmt() {
+    let workflow = include_str!("../.github/workflows/ci.yml");
+    let start = workflow.find("\n  lint:\n").expect("lint job");
+    let end = workflow[start + 1..]
+        .find("\n  test:\n")
+        .map(|offset| start + 1 + offset)
+        .expect("test job after lint");
+    let lint = &workflow[start..end];
+    let steps: Vec<&str> = lint.split("      - name: ").skip(1).collect();
+    let fmt = steps
+        .iter()
+        .position(|step| step.starts_with("cargo fmt\n"))
+        .expect("fmt step");
+    for step in &steps[fmt + 1..] {
+        let name = step.lines().next().unwrap_or_default();
+        assert!(
+            step.contains("if: ${{ !cancelled()"),
+            "lint step `{name}` is skipped after an earlier failure"
+        );
+    }
+    for set in [
+        "cargo clippy --all-targets -- -D warnings",
+        "cargo clippy --all-targets --features rgpot-ex -- -D warnings",
+        "cargo clippy --all-targets --features rgsaddle -- -D warnings",
+        "cargo clippy --features \"$CI_FEATURES,lammps\" --all-targets -- -D warnings",
+        "cargo clippy --all-targets --all-features -- -D warnings",
+    ] {
+        assert!(lint.contains(set), "lint runs {set}");
+    }
+    assert!(!lint.contains("always()"));
+}
+
+#[test]
 fn ci_provisions_pinned_all_feature_dependencies() {
     let workflow = include_str!("../.github/workflows/ci.yml");
 
