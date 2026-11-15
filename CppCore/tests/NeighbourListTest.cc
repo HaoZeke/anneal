@@ -596,3 +596,37 @@ TEST_CASE("eight threads match the serial list", "[nlist][api]") {
   REQUIRE(serial.size() == threaded.size());
   REQUIRE(from_table(serial) == from_table(threaded));
 }
+
+TEST_CASE("threads match the serial list when a thin or sheared box needs several images",
+          "[nlist][api]") {
+  constexpr std::size_t n = 9000;
+  const auto box = GENERATE(std::array<double, 9>{60.0, 0, 0, 0, 60.0, 0, 0, 0, 4.0},
+                            std::array<double, 9>{30.0, 0, 0, 3.0, 30.0, 0, 2.0, 1.5, 5.0});
+  std::vector<double> pos(3 * n);
+  std::uint64_t state = 12345;
+  auto uniform = [&state]() {
+    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return static_cast<double>(state >> 11) * 0x1.0p-53;
+  };
+  for (std::size_t i = 0; i < n; ++i) {
+    const double a = uniform();
+    const double b = uniform();
+    const double c = uniform();
+    for (int k = 0; k < 3; ++k) {
+      pos[3 * i + k] = a * box[k] + b * box[3 + k] + c * box[6 + k];
+    }
+  }
+  const auto shell = GENERATE(rgpot::nlist::Shell::Full, rgpot::nlist::Shell::Half);
+  rgpot::nlist::Query query;
+  query.cutoff = 3.0;
+  query.shape = rgpot::nlist::Pairs{shell};
+  set_omp_threads("1");
+  rgpot::nlist::Table serial;
+  rgpot::nlist::build(serial, pos.data(), n, box.data(), query);
+  set_omp_threads("8");
+  rgpot::nlist::Table threaded;
+  rgpot::nlist::build(threaded, pos.data(), n, box.data(), query);
+  set_omp_threads("1");
+  REQUIRE(serial.size() == threaded.size());
+  REQUIRE(from_table(serial) == from_table(threaded));
+}
