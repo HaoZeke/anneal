@@ -55,7 +55,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_ablation.py \\
   --develop $WORK/develop --develop-revision $develop_rev \\
   --branch $WORK/branch --branch-revision $branch_rev \\
   --rows $OUT/$campaign-rows.csv \\
-  --summary $OUT/$campaign-summary.csv \\
+  --summary $OUT/$campaign-summary-${branch_rev:0:8}.csv \\
   --logs $WORK/logs \\
   "\$@"
 EOF
