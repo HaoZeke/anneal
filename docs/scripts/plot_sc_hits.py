@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Score and plot a Sutton-Chen head-to-head over a seed range.
 
 usage: plot_sc_hits.py <lo> <hi> <budget> <out.png> <label=dir>...
