@@ -1136,3 +1136,33 @@ That basin hop is their Python code on a harmonic well. It is not the ASE 3.29.0
 
 Cite `nunezHarmonic2025`.
 
+## 2026-11-15 — Journal fit of the multidimensional Lennard-Jones count
+
+Varas, Acevedo, Carrasco, Rogan, and Valdivia, SciPost Physics Core 9, 036 (17 June 2026), doi:10.21468/scipostphyscore.9.2.036, fit the number of local minima and the energy of the global minimum for the Lennard-Jones potential. The data are the range already filed as the coordinate deposit `varasLennardJones2026`: 9 to 16 atoms, and dimension from 1 up to one less than the atom count. The abstract says the number of stable structures is largest in three dimensions, and that a second expression estimates global-minimum energies in dimensions above three. Both expressions are fits to that range. They do not report a computed energy at 38, 55, 75, 98, or 104 atoms, so they do not contradict the Cambridge hit targets. The sentence that those sizes are absent from the deposit stands.
+
+Cite `varasMinimaCount2026` beside the deposit. No head-to-head at the manuscript sizes.
+
+## 2026-11-15 — Lennard-Jones shells on a sphere
+
+Golushko, Konevtsova, Roshal, and Rochal, The Journal of Physical Chemistry B 130, 3305--3313 (16 March 2026), doi:10.1021/acs.jpcb.5c08354, grow spherical shells of at most 72 particles. Each particle has its own curvature and interacts by the Lennard-Jones potential. A new particle attaches at the lowest-energy site and the shell relaxes. The abstract compares those shells with the structures from an equilibrium assembly, which it calls the global energy minima, and it also runs a temperature-dependent stochastic assembly on a double-minimum Lennard-Jones--Gauss potential.
+
+The particles sit on a shell. They are not the free clusters in the Cambridge Lennard-Jones table. Rocha, Dias, and Costa already treat a Lennard-Jones cluster confined to a sphere at 55 and 147 atoms, filed as `rochaInflection2025`. This paper is the growth of the shell. The abstract gives no Cambridge energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. A head-to-head would be one of these shells on the potential they use. It does not warrant a head-to-head on the free-cluster maps or on the CREST hexamer table.
+
+Cite `golushkoShell2026`.
+
+## 2026-11-15 — Basin hopping on a knotted ring of Lennard-Jones particles
+
+Hao, Ge, Miller, Francesco, and Wales, Journal of Chemical Theory and Computation 21, 8168--8181 (14 August 2025), doi:10.1021/acs.jctc.5c01005, map the landscape of a ring of 100 Lennard-Jones particles tied by harmonic springs, for three knot topologies. The abstract says basin hopping with unrestricted moves locates the global minimum of the topologically unconstrained landscape, and that a radial potential both assigns the knot and proposes topology-preserving moves. All three topologies are multifunnel. The unknotted ring has low-energy minima that act as kinetic traps.
+
+One hundred particles with springs is not a free Lennard-Jones cluster. The abstract gives no Cambridge energy and no hexamer count, so it does not contradict the hit targets, 121 of 192, or 97 of 192. The moves that preserve a knot are not the preset. It does not fill the open ASE, AGOX, and GMIN kit. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+Cite `haoKnotted2025`.
+
+## 2026-11-15 — A sampler diagnostic on the real LJ38 potential
+
+Gangadharaiah, ChemRxiv (12 November 2026), doi:10.26434/chemrxiv.15011779/v3, shows that a self-normalized effective sample size stays high when a generative sampler misses a basin. The abstract includes the real LJ38 potential among model landscapes of up to 414 dimensions, and a Langevin sweep of LJ38 as the single-trajectory analogue: an unbiased run reports nothing about basins it has not reached. The only free-energy shift the abstract quotes is for Trp-cage, 0.417 kcal/mol from omitting the native basin. That shift is not a Lennard-Jones energy.
+
+The sealed LJ38 map records a potential-energy search for the truncated octahedron. This preprint does not report a potential energy, so it does not contradict the Cambridge value or that map. A Langevin sweep and a generative-sampler coverage are not the force-call hit rate. It does not warrant a head-to-head on the sealed map or on the CREST table.
+
+Cite `gangadharaiahSampler2026`.
+
