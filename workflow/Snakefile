@@ -854,3 +854,21 @@ rule h2o16_crest:
         set -euo pipefail
         python3 scripts/h2o16_crest/summarize.py
         """
+
+
+# (H2O)16 under GFN2 plus the O-H wall, anneal against CREST 3.0.2 with
+# the same evaluator (CREST's xtb runs through a driver into anneal's
+# objective), the same start per seed, 280305 calls, seeds 2000-2011.
+# Needs xtb 6.7.1, CREST and rgpot's libxtb_engine.so (paths in the
+# script). Rows and summaries are appended to bench/h2o16-crest/
+# capped-rows.csv and capped-summary.csv; the output is a stamp under
+# /work so Snakemake cannot delete them. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile h2o16_crest_capped
+rule h2o16_crest_capped:
+    output:
+        touch("/work/h2o16-crest-capped/stamps/panel.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/h2o16_crest/enter_capped.sh
+        """
