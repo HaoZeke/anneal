@@ -712,7 +712,10 @@ private:
               double dx = 0;
               double dy = 0;
               double dz = 0;
-              foldPair(static_cast<std::int32_t>(i), j, dx, dy, dz);
+              if (!foldPairWithin(static_cast<std::int32_t>(i), j, search2, dx,
+                                  dy, dz)) {
+                continue;
+              }
               const double r2 = dx * dx + dy * dy + dz * dz;
               if (r2 <= search2) {
                 fn(static_cast<std::int32_t>(i), j, dx, dy, dz, r2);
@@ -726,6 +729,11 @@ private:
 
   void foldPair(std::int32_t i, std::int32_t j, double &dx, double &dy,
                 double &dz) const;
+  /// foldPair for a walk that drops pairs beyond `within2`. False means
+  /// the pair has no image that close; true leaves the foldPair bits.
+  [[nodiscard]] bool foldPairWithin(std::int32_t i, std::int32_t j,
+                                    double within2, double &dx, double &dy,
+                                    double &dz) const;
   [[nodiscard]] int cellId(int ix, int iy, int iz) const;
 
   std::vector<std::int32_t> off_;
@@ -817,6 +825,21 @@ inline void Neighbours::foldPair(std::int32_t i, std::int32_t j, double &dx, dou
   dy = xyz_[ui + 1] - xyz_[uj + 1];
   dz = xyz_[ui + 2] - xyz_[uj + 2];
   fold(dx, dy, dz);
+}
+
+inline bool Neighbours::foldPairWithin(std::int32_t i, std::int32_t j,
+                                       double within2, double &dx, double &dy,
+                                       double &dz) const {
+  if (!use_general_) {
+    foldPair(i, j, dx, dy, dz);
+    return true;
+  }
+  const auto ui = static_cast<std::size_t>(i) * 3;
+  const auto uj = static_cast<std::size_t>(j) * 3;
+  dx = xyz_[ui] - xyz_[uj];
+  dy = xyz_[ui + 1] - xyz_[uj + 1];
+  dz = xyz_[ui + 2] - xyz_[uj + 2];
+  return general_.foldWithin(dx, dy, dz, within2);
 }
 
 inline int Neighbours::cellId(int ix, int iy, int iz) const {

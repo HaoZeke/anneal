@@ -32,6 +32,11 @@ constexpr double kReducedCap = 1048576.0;
 constexpr int kLllCap = 100000;
 // Largest j by k slab of cached partial images kept on the stack.
 constexpr std::uint64_t kPartialCap = 256;
+// Relative slack on the image length bounds. It covers the rounding in the
+// dual norms, about 1e-8 for a cell that passes well_conditioned.
+constexpr double kBoundSlack = 1e-6;
+
+thread_local std::uint64_t searches_run = 0;
 
 // Hardware instantiations are compiled inside a target("fma") function, so
 // __builtin_fma becomes vfmadd there. That builtin and the target attribute
@@ -469,9 +474,9 @@ void search_reduced(const double cell[9], const bool periodic[3],
 }
 
 template <bool Hardware>
-void search_bounds(const double cell[9], const double inv[9],
-                   const double dual[3], const bool periodic[3], double &dx,
-                   double &dy, double &dz) {
+bool search_bounds(const double cell[9], const double inv[9],
+                   const double dual[3], const bool periodic[3], double within2,
+                   double &dx, double &dy, double &dz) {
   double reduced[3] = {dx, dy, dz};
   double initial[3] = {};
   for (int k = 0; k < 3; ++k) {
@@ -488,6 +493,42 @@ void search_bounds(const double cell[9], const double inv[9],
   }
   double best[3] = {reduced[0], reduced[1], reduced[2]};
   double best2 = squared<Hardware>(best[0], best[1], best[2]);
+  // Any other image is this one less a lattice vector with a nonzero
+  // integer n_k on some periodic axis k. Its fractional coordinate there is
+  // f_k - n_k, so it is at least (1 - |f_k|) / |d_k| long. Rounding left
+  // |f_k| <= 1/2 unless the displacement outran double precision, and the
+  // bound is then clamped to zero. An image shorter than the bound on every
+  // periodic axis is the only one that short, and the search below would
+  // return its bits unchanged. Half the smallest plane spacing,
+  // 1 / (2 |d_k|), is the same test without the fractional coordinates.
+  double densest = 0.0;
+  for (int k = 0; k < 3; ++k) {
+    if (periodic[k]) {
+      densest = std::max(densest, dual[k]);
+    }
+  }
+  if (best2 * (densest * densest) < 0.25 * (1.0 - kBoundSlack)) {
+    dx = best[0];
+    dy = best[1];
+    dz = best[2];
+    return true;
+  }
+  double f[3] = {};
+  bool alone = true;
+  for (int k = 0; k < 3; ++k) {
+    if (periodic[k]) {
+      f[k] = frac_of<Hardware>(reduced[0], reduced[1], reduced[2], inv, k);
+      const double gap = std::max(1.0 - std::fabs(f[k]), 0.0);
+      alone = alone &&
+              best2 * (dual[k] * dual[k]) < (1.0 - kBoundSlack) * (gap * gap);
+    }
+  }
+  if (alone) {
+    dx = best[0];
+    dy = best[1];
+    dz = best[2];
+    return true;
+  }
   const double radius = std::sqrt(best2);
   std::int64_t low[3] = {};
   std::int64_t high[3] = {};
@@ -495,10 +536,9 @@ void search_bounds(const double cell[9], const double inv[9],
   double box = 1.0;
   for (int k = 0; k < 3; ++k) {
     if (periodic[k]) {
-      const double f = frac_of<Hardware>(reduced[0], reduced[1], reduced[2], inv, k);
       const double extent = radius * dual[k];
-      span[k][0] = std::floor(f - extent) - 1.0;
-      span[k][1] = std::ceil(f + extent) + 1.0;
+      span[k][0] = std::floor(f[k] - extent) - 1.0;
+      span[k][1] = std::ceil(f[k] + extent) + 1.0;
       box *= span[k][1] - span[k][0] + 1.0;
     }
   }
@@ -507,9 +547,28 @@ void search_bounds(const double cell[9], const double inv[9],
   // displacement along an open direction, makes it astronomically large.
   // Those cases go to a reduced-basis search over the periodic rows.
   if (!(box <= kExhaustiveCap)) {
+    ++searches_run;
     search_reduced<Hardware>(cell, periodic, reduced, dx, dy, dz);
-    return;
+    return true;
   }
+  // The same bound with the caller's radius: when the rounded image and
+  // every other image are longer than that radius, no search is needed.
+  // The box above is small enough that the search would not have thrown.
+  const double reach2 = within2 * (1.0 + kBoundSlack);
+  if (best2 > reach2) {
+    bool beyond = true;
+    for (int k = 0; k < 3; ++k) {
+      if (periodic[k]) {
+        const double gap = std::max(1.0 - std::fabs(f[k]), 0.0);
+        beyond = beyond && reach2 * (dual[k] * dual[k]) <
+                               (1.0 - kBoundSlack) * (gap * gap);
+      }
+    }
+    if (beyond) {
+      return false;
+    }
+  }
+  ++searches_run;
   std::uint64_t count = 1;
   for (int k = 0; k < 3; ++k) {
     if (periodic[k]) {
@@ -593,7 +652,7 @@ void search_bounds(const double cell[9], const double inv[9],
     dx = best[0];
     dy = best[1];
     dz = best[2];
-    return;
+    return true;
   }
   for (auto i = low[0]; i <= high[0]; ++i) {
     for (auto j = low[1]; j <= high[1]; ++j) {
@@ -617,6 +676,7 @@ void search_bounds(const double cell[9], const double inv[9],
   dx = best[0];
   dy = best[1];
   dz = best[2];
+  return true;
 }
 
 template <bool Hardware>
@@ -742,14 +802,16 @@ MinimumImage::MinimumImage(const double *cell,
 namespace {
 
 template <bool Hardware>
-void fold_search(bool narrow, const double cell[9], const double inv[9],
-                 const double dual[3], const bool periodic[3], double &dx,
-                 double &dy, double &dz) {
+bool fold_search(bool narrow, const double cell[9], const double inv[9],
+                 const double dual[3], const bool periodic[3], double within2,
+                 double &dx, double &dy, double &dz) {
   if (narrow) {
+    ++searches_run;
     search_narrow<Hardware>(cell, inv, periodic, dx, dy, dz);
-    return;
+    return true;
   }
-  search_bounds<Hardware>(cell, inv, dual, periodic, dx, dy, dz);
+  return search_bounds<Hardware>(cell, inv, dual, periodic, within2, dx, dy,
+                                 dz);
 }
 
 // The attribute keeps vfmadd in this body. The caller enters it only after
@@ -760,15 +822,23 @@ void fold_search(bool narrow, const double cell[9], const double inv[9],
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 __attribute__((target("fma"), noinline, flatten))
 #endif
-void fold_hardware(bool narrow, const double cell[9], const double inv[9],
-                   const double dual[3], const bool periodic[3], double &dx,
-                   double &dy, double &dz) {
-  fold_search<true>(narrow, cell, inv, dual, periodic, dx, dy, dz);
+bool fold_hardware(bool narrow, const double cell[9], const double inv[9],
+                   const double dual[3], const bool periodic[3], double within2,
+                   double &dx, double &dy, double &dz) {
+  return fold_search<true>(narrow, cell, inv, dual, periodic, within2, dx, dy,
+                           dz);
 }
 
 } // namespace
 
 void MinimumImage::fold(double &dx, double &dy, double &dz) const {
+  (void)foldWithin(dx, dy, dz, std::numeric_limits<double>::infinity());
+}
+
+std::uint64_t MinimumImage::searches() noexcept { return searches_run; }
+
+bool MinimumImage::foldWithin(double &dx, double &dy, double &dz,
+                              double within2) const {
   if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) {
     throw std::invalid_argument("pair displacement must be finite");
   }
@@ -781,10 +851,11 @@ void MinimumImage::fold(double &dx, double &dy, double &dz) const {
   }
   double dual[3] = {dual_norm_[0], dual_norm_[1], dual_norm_[2]};
   if (rgpot::simd::detail::fma_hw_active()) {
-    fold_hardware(narrow_, cell, inv, dual, periodic, dx, dy, dz);
-    return;
+    return fold_hardware(narrow_, cell, inv, dual, periodic, within2, dx, dy,
+                         dz);
   }
-  fold_search<false>(narrow_, cell, inv, dual, periodic, dx, dy, dz);
+  return fold_search<false>(narrow_, cell, inv, dual, periodic, within2, dx, dy,
+                            dz);
 }
 
 } // namespace rgpot::nlist

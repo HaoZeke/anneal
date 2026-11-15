@@ -274,7 +274,10 @@ void Neighbours::buildStored(const double *xyz, std::size_t n) {
             double dx = 0;
             double dy = 0;
             double dz = 0;
-            foldPair(static_cast<std::int32_t>(a), j, dx, dy, dz);
+            if (!foldPairWithin(static_cast<std::int32_t>(a), j, search2, dx,
+                                dy, dz)) {
+              continue;
+            }
             const double r2 = dx * dx + dy * dy + dz * dz;
             if (r2 <= search2) {
               gather.push_back(j);

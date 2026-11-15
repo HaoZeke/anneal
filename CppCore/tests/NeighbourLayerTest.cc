@@ -363,6 +363,26 @@ void loadCells(rgpot::nlist::Neighbours &cells, const std::vector<double> &pos, 
   cells.update(pos.data(), pos.size() / 3, box, spec);
 }
 
+// fcc(n, a) mapped into `cell`, which should be about n * a wide, with a
+// jitter that keeps pairs off bin and image boundaries.
+std::vector<double> shearedFcc(int n, double a, const double cell[9]) {
+  const double side = n * a;
+  const auto cube = fcc(n, a);
+  const std::size_t count = cube.size() / 3;
+  std::vector<double> pos(cube.size());
+  for (std::size_t i = 0; i < count; ++i) {
+    double f[3];
+    for (std::size_t k = 0; k < 3; ++k) {
+      const auto slot = static_cast<double>(3 * i + k);
+      f[k] = cube[3 * i + k] / side + 0.002 * std::sin(1.3 * slot + 0.7);
+    }
+    for (int c = 0; c < 3; ++c) {
+      pos[3 * i + c] = f[0] * cell[c] + f[1] * cell[3 + c] + f[2] * cell[6 + c];
+    }
+  }
+  return pos;
+}
+
 } // namespace
 
 TEST_CASE("a short cutoff stream matches the direct pair sum", "[nlist][stream][direct]") {
@@ -451,4 +471,51 @@ TEST_CASE("periodic and long-cutoff streams match the direct pair sum", "[nlist]
   rgpot::nlist::Neighbours tiles;
   loadCells(tiles, wide, side, side, side, long_cut, true, rgpot::nlist::Mode::Stream);
   requireSamePairs(walkedPairs(tiles, wide.size() / 3, long_cut), many);
+}
+
+TEST_CASE("a sheared cell wider than twice the search needs no image search",
+          "[nlist][triclinic]") {
+  // The kernel cell of the ASE morse-bulk check: a jittered copper cell,
+  // sheared as tests/python/test_ase_dropin.py shears it and tiled 3x3x3 by
+  // the calculator, 864 atoms. Every lattice plane spacing is above twice
+  // the cutoff plus the MorsePot skin, so the image bounds settle all 745k
+  // candidate pairs and neither the build nor the walks search over images.
+  setThreads("1");
+  const double a = 3.6;
+  const double side = 6 * a;
+  const double cell[9] = {
+      side, 0, 0, 0.08 * side, side, 0, 0.04 * side, -0.06 * side, side};
+  const auto pos = shearedFcc(6, a, cell);
+  const std::size_t n = pos.size() / 3;
+  const double cutoff = 2.7 * 2.866;
+  const rgpot::nlist::MinimumImage image(cell, {true, true, true});
+  PairMap direct;
+  for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t j = i + 1; j < n; ++j) {
+      double dx = pos[3 * i] - pos[3 * j];
+      double dy = pos[3 * i + 1] - pos[3 * j + 1];
+      double dz = pos[3 * i + 2] - pos[3 * j + 2];
+      image.fold(dx, dy, dz);
+      const double r2 = dx * dx + dy * dy + dz * dz;
+      if (r2 <= cutoff * cutoff) {
+        direct[{static_cast<int>(i), static_cast<int>(j)}] = r2;
+      }
+    }
+  }
+  REQUIRE(direct.size() > 10000);
+  for (const auto mode :
+       {rgpot::nlist::Mode::Stored, rgpot::nlist::Mode::Stream}) {
+    rgpot::nlist::Spec spec;
+    spec.cutoff = cutoff;
+    spec.skin = mode == rgpot::nlist::Mode::Stored ? cutoff / 5.0 : 0.0;
+    spec.image = rgpot::nlist::Image::Round;
+    spec.mode = mode;
+    rgpot::nlist::Neighbours cells;
+    const auto before = rgpot::nlist::MinimumImage::searches();
+    cells.update(pos.data(), n, cell, spec);
+    REQUIRE(cells.streaming() == (mode == rgpot::nlist::Mode::Stream));
+    const auto walked = walkedPairs(cells, n, cutoff);
+    REQUIRE(rgpot::nlist::MinimumImage::searches() == before);
+    requireSamePairs(walked, direct);
+  }
 }
