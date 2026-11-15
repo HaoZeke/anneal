@@ -82,6 +82,7 @@ impl DifferentiableObjective<f64> for Counted {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     assert!(
         args.len() == 7 || (args.len() == 8 && args[7] == "reduced"),
