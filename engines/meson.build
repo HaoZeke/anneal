@@ -173,7 +173,13 @@ if lammps_opt.allowed() and python3_engines.found()
                         engines_here,
                     ) : lammps_src,
                 ),
-                cpp_args: _args + ['-DLAMMPS_SMALLBIG'],
+                # The MPI C++ bindings of Open MPI 4 would leave
+                # MPI::Win::Free undefined; LAMMPS skips them too.
+                cpp_args: _args + [
+                    '-DLAMMPS_SMALLBIG',
+                    '-DOMPI_SKIP_MPICXX',
+                    '-DMPICH_SKIP_MPICXX',
+                ],
                 override_options: ['b_lundef=false'],
             )
             lammps_exe = get_option('lammps_exe')
