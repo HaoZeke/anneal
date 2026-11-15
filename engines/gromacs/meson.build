@@ -21,3 +21,48 @@ endif
 gmx_dropin_build_dir = meson.current_build_dir()
 gmx_dropin_source_dir = meson.current_source_dir()
 subdir('pkgconfig')
+
+gmx_dropin_here = meson.current_source_dir()
+gmx_dropin_pytest = python3_engines.found() ? run_command(
+    python3_engines,
+    '-c',
+    'import pytest, numpy',
+    check: false,
+).returncode() == 0 : false
+if gmx_dropin_pytest
+    gmx_dropin_env = environment()
+    gmx_dropin_env.set('RGPOT_GROMACS_DROPIN', gmx_dropin.full_path())
+    gmx_dropin_env.set('RGPOT_EVAL', rgpot_eval.full_path())
+    gmx_dropin_depends = [gmx_dropin, rgpot_eval]
+    if is_variable('classical_engine')
+        gmx_dropin_env.set(
+            'RGPOT_CLASSICAL_ENGINE',
+            classical_engine.full_path(),
+        )
+        gmx_dropin_env.set(
+            'RGPOT_CAPNP_SCHEMA',
+            project_root / 'CppCore' / 'rgpot' / 'rpc' / 'Potentials.capnp',
+        )
+        gmx_dropin_depends += [classical_engine]
+    endif
+    gmx_dropin_pytest_args = [
+        '-m',
+        'pytest',
+        '-q',
+        '-p',
+        'no:cacheprovider',
+        '--rootdir',
+        gmx_dropin_here,
+    ]
+    test(
+        'gromacs_dropin_api',
+        python3_engines,
+        args: gmx_dropin_pytest_args + [files('test_dropin_api.py')],
+        env: gmx_dropin_env,
+        depends: gmx_dropin_depends,
+        workdir: meson.current_build_dir(),
+        timeout: 300,
+    )
+else
+    message('GROMACS drop-in tests skipped: needs python3 with pytest and numpy')
+endif
