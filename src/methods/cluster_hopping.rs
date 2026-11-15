@@ -9171,19 +9171,16 @@ where
             quiet += 1;
         }
         let stuck = stalled(cfg, quiet, longest_quiet);
+        // Only the temperature moves: a deposit laid at the declared scale
+        // outlives the reheat and buries the conformers near it.
         if cfg.plateau_reheat {
-            let moved = if improved {
+            if improved {
                 incumbent_hop = hops;
-                dial.reheat(false)
-            } else if quiet >= config::MEASURED_SCALE_HOPS.max(incumbent_hop) {
-                dial.reheat(true)
-            } else {
-                None
-            };
-            if let Some(factor) = moved {
-                bias_height *= factor;
-                height = AdaptiveHeight::new(0.1, cfg.height_revisits, bias_height);
-                bias.set_height(height.height());
+                dial.reheat(false);
+            } else if quiet >= config::MEASURED_SCALE_HOPS.max(incumbent_hop)
+                && 2 * ledger.spent() >= ledger.budget()
+            {
+                dial.reheat(true);
             }
         }
         // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.

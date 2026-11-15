@@ -1366,14 +1366,16 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
-    /// Return a measured walk to the declared scale while it is on a
-    /// plateau, and to the measured scale at its next new incumbent.
+    /// Return a measured walk's temperature to the declared scale while it
+    /// is on a plateau, and to the measured scale at its next new incumbent.
     ///
     /// A plateau is as many hops without a new incumbent as the walk took
-    /// to reach the one it holds, and never fewer than
-    /// [`MEASURED_SCALE_HOPS`]. A landscape whose opening hops are all small
-    /// steps inside one family measures a temperature that cannot leave the
-    /// family, and the walk settles there for good. Needs
+    /// to reach the one it holds, never fewer than [`MEASURED_SCALE_HOPS`],
+    /// and only counts once half the budget is spent: a walk that is still
+    /// improving cold often sits that long between incumbents early on. A
+    /// landscape whose opening hops are all small steps inside one family
+    /// measures a temperature that cannot leave the family, and the walk
+    /// settles there for good. The deposit height stays measured. Needs
     /// `measured_energy_scale`.
     #[serde(skip_serializing_if = "is_false")]
     pub plateau_reheat: bool,

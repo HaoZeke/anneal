@@ -3533,8 +3533,9 @@ fn rigid_probe(
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
 ///   plateau_reheat: `Config::plateau_reheat` of a `groups` search, a
-///     measured walk on a plateau returns to the declared scale until its
-///     next new incumbent. Unset keeps the preset's: off.
+///     measured walk on a plateau in the second half of its budget returns
+///     to the declared temperature until its next new incumbent. Unset
+///     keeps the preset's: off.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
