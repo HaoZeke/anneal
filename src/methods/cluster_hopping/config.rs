@@ -1036,8 +1036,10 @@ pub struct Config {
     /// of a step of the walk's moves relaxed under one pair well, and the
     /// ordering is ranked by site energy and refined by quenched
     /// exchanges. It runs when the calls since the last lowest exceed the
-    /// calls it took to reach it, and the walk then runs at least as long
-    /// as the reorder did. Same scope as [`Config::homotop_descent`]. Off
+    /// calls it took to reach it. A lower ordering is recorded and the walk
+    /// stays on its own packing. The walk then runs at least as long as the
+    /// reorder did, twice as long after each further try that leaves the
+    /// lowest where it was. Same scope as [`Config::homotop_descent`]. Off
     /// in the paper preset.
     #[serde(skip_serializing_if = "is_false")]
     pub homotop_reorder: bool,

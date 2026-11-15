@@ -4629,6 +4629,10 @@ where
     // the walk runs on its own again.
     let mut reorder_tries: u64 = 0;
     let mut reorder_wait = 0usize;
+    // Tries in a row that left the lowest where it was, counted from the
+    // lowest they started at.
+    let mut reorder_misses = 0u32;
+    let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
@@ -5329,7 +5333,10 @@ where
         // refined by quenched exchanges. A stall is longer since the last
         // lowest than it took to reach it. A reorder spends at most the
         // stalled calls and half of what is left, and is followed by at
-        // least as many calls of the walk. After the first try the
+        // least as many calls of the walk, doubled after each try in a
+        // row that leaves the lowest where it was. A lower ordering is
+        // recorded but not adopted: a lower homotop of the wrong packing
+        // would hold the walker in that packing. After the first try the
         // packing is a step of the walk's own moves, relaxed under one
         // well, so a try does not repeat the last one.
         let lowest_at = improvements.last().map_or(0, |improvement| improvement.1);
@@ -5415,7 +5422,22 @@ where
             let found = binary_geometry::polish(placed, species, &mut walk);
             let found_at = start + walk.low_at;
             ledger.charge_many(side_ledger.spent());
-            reorder_wait = ledger.spent().saturating_add(side_ledger.spent());
+            if reorder_from != lowest_at {
+                reorder_from = lowest_at;
+                reorder_misses = 0;
+            }
+            let lowers = found
+                .as_ref()
+                .is_some_and(|(found_energy, _)| *found_energy < ledger.best - 1e-10);
+            reorder_misses = if lowers {
+                0
+            } else {
+                reorder_misses.saturating_add(1)
+            };
+            let backoff = 1usize << reorder_misses.saturating_sub(1).min(20);
+            reorder_wait = ledger
+                .spent()
+                .saturating_add(side_ledger.spent().saturating_mul(backoff));
             if let Some((found_energy, found_state)) = found
                 && found_energy < e - 1e-10
                 && quench_is_sane(cfg, found_energy, found_state.view())
@@ -5427,20 +5449,6 @@ where
                 if !gradient_required || found_gradient.is_some() {
                     let improved = found_energy < ledger.best - 1e-10;
                     ledger.record(found_energy, found_state.view());
-                    let reached = identity.basin_of(found_state.view());
-                    adopt_minimum!(
-                        found_energy,
-                        found_state,
-                        found_gradient,
-                        Some(reached),
-                        AdoptionHistory::Fresh,
-                        None,
-                        Some("reorder"),
-                        hops
-                    );
-                    soft_cache = None;
-                    basin_entry = None;
-                    quiet = 0;
                     if improved && improvements.len() < 512 {
                         improvements.push((hops, found_at, bias.n_basins(), found_energy));
                     }
