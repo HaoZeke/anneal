@@ -984,6 +984,15 @@ pub struct Config {
     /// Labelled close-packed core cuts. On in the paper preset.
     #[serde(skip_serializing_if = "is_true")]
     pub prior_core: bool,
+    /// The core cuts stop once they stall and the walk continues from the
+    /// best of them.
+    ///
+    /// The cuts get at most half of what is left. Every cut is arranged,
+    /// and before each refinement the cuts stop when the calls since their
+    /// last lower quench exceed the calls it took to reach it. On in the
+    /// paper preset.
+    #[serde(skip_serializing_if = "is_true")]
+    pub prior_handover: bool,
     /// Half-budget motif reseed. On in the paper preset.
     #[serde(skip_serializing_if = "is_true")]
     pub prior_motif: bool,
@@ -1788,6 +1797,7 @@ impl Config {
             prior_reseed: true,
             prior_growth: true,
             prior_core: true,
+            prior_handover: true,
             prior_motif: true,
             general_collective: false,
             homotop_descent: true,

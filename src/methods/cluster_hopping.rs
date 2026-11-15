@@ -4600,6 +4600,8 @@ where
     // start replaces the chain with a local minimum the later hops would
     // have left. The cut is kept when it still beats that incumbent.
     let mut pending_cut: Option<(f64, Array1<f64>)> = None;
+    // The call at which the probe reached the held cut.
+    let mut pending_cut_at = 0;
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
         cage_archive.offer_cage(
@@ -4966,10 +4968,10 @@ where
             }
             // A feature build compiles the escape, so the walk after the
             // cuts still has moves to spend calls on and keeps half of what
-            // is left. A default build offers the probe the whole remainder,
-            // which is what its binary pins measure.
+            // is left. A handover keeps the same half for the walk. Without
+            // either the probe is offered the whole remainder.
             let room = ledger.remaining().max(1);
-            let room = if cfg!(feature = "rgsaddle") {
+            let room = if cfg!(feature = "rgsaddle") || cfg.prior_handover {
                 room.div_ceil(2)
             } else {
                 room
@@ -4979,6 +4981,23 @@ where
                 probe: &'a mut Ledger,
                 relax: Relax<'a>,
                 steps: usize,
+                stalls: bool,
+                low: f64,
+                low_at: usize,
+            }
+            impl Side<'_> {
+                /// Longer since the last lower quench than it took to reach
+                /// it. Read between cuts, so a refinement runs to its end.
+                fn stalled(&self) -> bool {
+                    self.stalls && self.probe.spent().saturating_sub(self.low_at) > self.low_at
+                }
+
+                fn note(&mut self, value: f64) {
+                    if value < self.low - 1e-9 {
+                        self.low = value;
+                        self.low_at = self.probe.spent();
+                    }
+                }
             }
             impl binary_geometry::QuenchProbe for Side<'_> {
                 fn energy(&mut self, point: ArrayView1<f64>) -> Option<f64> {
@@ -5001,17 +5020,27 @@ where
                         && self.probe.best < value
                         && let Some(state) = self.probe.best_state.clone()
                     {
-                        return Some((self.probe.best, state));
+                        let best = self.probe.best;
+                        self.note(best);
+                        return Some((best, state));
                     }
-                    value.is_finite().then_some((value, relaxed))
+                    if !value.is_finite() {
+                        return None;
+                    }
+                    self.note(value);
+                    Some((value, relaxed))
                 }
             }
             let mut best_cut: Option<(f64, Array1<f64>)> = None;
+            let cut_at;
             {
                 let mut side = Side {
                     probe: &mut probe,
                     relax,
                     steps: cfg.relax_steps,
+                    stalls: cfg.prior_handover,
+                    low: f64::INFINITY,
+                    low_at: 0,
                 };
                 let mut arranged = Vec::new();
                 if species_count(species) >= 2
@@ -5043,7 +5072,7 @@ where
                 // Ordering can lower a worse packing by more than it lowers
                 // the best one, so every cut is polished while the probe lasts.
                 for (energy, state) in arranged {
-                    if side.probe.remaining() == 0 {
+                    if side.probe.remaining() == 0 || side.stalled() {
                         if best_cut.as_ref().is_none_or(|(held, _)| energy < *held) {
                             best_cut = Some((energy, state));
                         }
@@ -5057,6 +5086,7 @@ where
                         best_cut = Some(refined);
                     }
                 }
+                cut_at = side.low_at;
             }
             let before = ledger.spent();
             ledger.charge_many(probe.spent());
@@ -5064,6 +5094,7 @@ where
             // clock stays where the walker's own quenches left it.
             charged_at_best = charged_at_best.saturating_add(ledger.spent().saturating_sub(before));
             pending_cut = best_cut;
+            pending_cut_at = before + cut_at;
             if std::env::var("H2H_PRIOR_TRACE").ok().as_deref() == Some("1")
                 && let Some((energy, state)) = pending_cut.as_ref()
             {
@@ -5072,6 +5103,42 @@ where
                 eprintln!(
                     "prior core before 555 {before_555:.3} 421 {before_421:.3} 422 {before_422:.3} after {energy:.6} 555 {frac_555:.3} 421 {frac_421:.3} 422 {frac_422:.3}"
                 );
+            }
+            // The walk continues from the cut. An improvement is stamped
+            // with the call that found it, not the one that ended the probe.
+            if cfg.prior_handover
+                && let Some((cut_energy, cut_state)) = pending_cut.clone()
+                && cut_energy < e - 1e-10
+                && quench_is_sane(cfg, cut_energy, cut_state.view())
+            {
+                let cut_gradient = grad.as_deref_mut().and_then(|gradient| {
+                    gradient(ledger, cut_state.view())
+                        .filter(|values| answer_gradient_ok(cfg, values.view(), cut_state.len()))
+                });
+                if !gradient_required || cut_gradient.is_some() {
+                    pending_cut = None;
+                    let improved = cut_energy < ledger.best - 1e-10;
+                    ledger.record(cut_energy, cut_state.view());
+                    let reached = identity.basin_of(cut_state.view());
+                    adopt_minimum!(
+                        cut_energy,
+                        cut_state,
+                        cut_gradient,
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("prior-core"),
+                        hops
+                    );
+                    soft_cache = None;
+                    basin_entry = None;
+                    quiet = 0;
+                    if improved && improvements.len() < 512 {
+                        improvements.push((hops, pending_cut_at, bias.n_basins(), cut_energy));
+                    }
+                } else {
+                    unconverged_records += 1;
+                }
             }
         }
         // A rigid quench creeps by far less than an isomer gap. Treating
@@ -10020,7 +10087,7 @@ where
             ledger.record(energy, state.view());
         }
         if energy <= ledger.best + 1e-12 && improvements.len() < 512 {
-            improvements.push((hops, ledger.spent(), bias.n_basins(), energy));
+            improvements.push((hops, pending_cut_at, bias.n_basins(), energy));
         }
     }
 
@@ -10588,6 +10655,52 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cu6au32_core_cuts(handover: bool, budget: usize) -> (Outcome, f64) {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        use crate::potentials::Gupta;
+        let reference = -130.79994836;
+        let species = Gupta::copper_gold_species(6, 32);
+        let pot = Gupta::copper_gold(6, 32);
+        let mut cfg = Config::recommended(38).with_species(species, None);
+        cfg.prior_handover = handover;
+        let mut rng = StdRng::seed_from_u64(2000);
+        let start = random_cluster_in_radius(38, cfg.start_radius(), cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(budget);
+        ledger.stop_below(reference + 1e-3);
+        let mut optimiser = WarmLbfgs::default();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+            optimiser.forget();
+            let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
+                led.charge().then(|| pot.value_and_gradient(v))
+            });
+            (value, relaxed)
+        };
+        let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("start");
+        (outcome, reference)
+    }
+
+    #[test]
+    fn a_handed_over_core_cut_stops_the_walk_at_the_call_that_found_it() {
+        let budget = 400_000;
+        let (outcome, reference) = cu6au32_core_cuts(true, budget);
+        assert!(outcome.best < reference + 1e-3, "best {}", outcome.best);
+        assert!(outcome.charged < budget / 2, "charged {}", outcome.charged);
+        let (_, at, _, energy) = *outcome.improvements.last().expect("an improvement");
+        assert!(energy < reference + 1e-3);
+        assert!(at <= outcome.charged);
+    }
+
+    #[test]
+    fn a_held_core_cut_is_stamped_with_the_probe_call_that_found_it() {
+        let budget = 20_000;
+        let (outcome, reference) = cu6au32_core_cuts(false, budget);
+        assert!(outcome.best < reference + 1e-3, "best {}", outcome.best);
+        assert_eq!(outcome.charged, budget);
+        let (_, at, _, energy) = *outcome.improvements.last().expect("an improvement");
+        assert!(energy < reference + 1e-3);
+        assert!(at < budget / 2, "stamped at {at}");
+    }
 
     #[test]
     fn a_molecular_water_search_is_not_a_binary_homotop() {
