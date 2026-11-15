@@ -1,0 +1,4 @@
+comparison,a_only,b_only,mcnemar_exact_p
+pre/squash,21,11,0.110
+pre/post,14,11,0.690
+squash/post,9,16,0.230
