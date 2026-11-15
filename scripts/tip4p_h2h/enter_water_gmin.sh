@@ -4,18 +4,22 @@
 # rigid-body TIP4P basin-hopping, twelve seeds, one core.
 # One UTS namespace, hostname bench, working directory /work.
 # With --size/--seed (the asv suite) rows go to scratch files under WORK.
+# ANNEAL_ROOT builds the anneal arm from another checkout, WATER_GMIN_WORK
+# moves the scratch tree and WATER_GMIN_SUMMARY the summary, so two anneal
+# revisions append to the same rows and reuse the same GMIN rows.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-WORK=/work/water-gmin
+ANNEAL_ROOT=${ANNEAL_ROOT:-$ROOT}
+WORK=${WATER_GMIN_WORK:-/work/water-gmin}
 OUT=$ROOT/bench/water-gmin
 
-if [[ -n $(git -C "$ROOT" status --porcelain -- src examples Cargo.toml Cargo.lock build.rs) ]]; then
+if [[ -n $(git -C "$ANNEAL_ROOT" status --porcelain -- src examples Cargo.toml Cargo.lock build.rs) ]]; then
   echo "anneal sources differ from HEAD; code_revision would not name the binary" >&2
   exit 1
 fi
-H2H_WORK=$WORK bash "$HERE/build_anneal.sh"
+H2H_WORK=$WORK bash "$ANNEAL_ROOT/scripts/tip4p_h2h/build_anneal.sh"
 
 GMIN_SRC=/work/gmin-h2h/src/wales/GMIN/source/newtip.f90
 if [[ -f $GMIN_SRC ]] && ! grep -q H2H_POT_ENTER "$GMIN_SRC"; then
@@ -40,7 +44,7 @@ if [[ $# -gt 0 ]]; then
   VERIFY=$WORK/scratch-verify.csv
 else
   ROWS=$OUT/rows.csv
-  SUMMARY=$OUT/summary.csv
+  SUMMARY=${WATER_GMIN_SUMMARY:-$OUT/summary.csv}
   VERIFY=$OUT/verify.csv
 fi
 
@@ -82,4 +86,4 @@ if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
   echo '127.0.0.1 bench' | sudo -n tee -a /etc/hosts >/dev/null
 fi
 exec sudo -n unshare --uts sh -c \
-  'hostname bench; exec sudo -u ubuntu /work/water-gmin/bin/inside.sh "$@"' _ "$@"
+  'inside=$1; shift; hostname bench; exec sudo -u ubuntu "$inside" "$@"' _ "$WORK/bin/inside.sh" "$@"
