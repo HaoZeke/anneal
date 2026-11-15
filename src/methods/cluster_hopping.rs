@@ -4661,6 +4661,7 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
+    let mut spent_at_lowest = ledger.spent();
     // Water restarts from a stored basin on its own clock, and then
     // stays there for a few hops before the incumbent gap applies.
     let mut last_basin_restart = 0usize;
@@ -5264,6 +5265,7 @@ where
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
+            spent_at_lowest = ledger.spent();
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
             cage_edit = false;
@@ -6544,7 +6546,14 @@ where
         // common neighbours, so it runs only when a reseed can fire.
         // Counting on every hop was the Au38 slowdown, and with the
         // reseed interval still ahead the result cannot change the branch.
+        // A plateau is an incumbent that has stood for as many calls as the
+        // search had spent when it found it. Five hops without a new lowest
+        // is also a descent still under way, and reseeding it discards a
+        // funnel that can be the global one's. The clock is in calls, not
+        // hops, so a longer quench does not shorten the descent it waits
+        // out, and the stall exits' credits do not move it.
         if csm_reseed_hops > 0
+            && ledger.spent().saturating_sub(spent_at_lowest) >= spent_at_lowest
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
             && cfg.packing_cna_applies()
             && crate::soap::ih_dominated(
@@ -11656,6 +11665,104 @@ mod tests {
             out.charged >= on_main + off_main,
             "{on_main} search and {off_main} motif evaluations, {} charged",
             out.charged
+        );
+    }
+
+    /// An icosahedral reseed waits until the incumbent has stood for as many
+    /// calls as the search spent finding it.
+    ///
+    /// Every quench lands on a turned icosahedron and is recorded, as the
+    /// search's own relaxations are, so every chain state is icosahedral,
+    /// and the energy steps down with the charged count until a quarter
+    /// of the budget. Before the first step the incumbent is the start, so
+    /// reseeds fire on the reseed clock. The steps are even, so the second
+    /// comes as many calls after the first as the first took, and from it
+    /// to the floor every incumbent is younger than the search that found
+    /// it: none may fire there. On the floor the plateau grows and they
+    /// return.
+    #[test]
+    fn an_icosahedral_reseed_waits_out_the_descent() {
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let scale = 1.1 / (1.0 + p * p).sqrt();
+        let mut ico = Array1::<f64>::zeros(3 * 13);
+        for (i, v) in [
+            [0.0, 1.0, p],
+            [0.0, 1.0, -p],
+            [0.0, -1.0, p],
+            [0.0, -1.0, -p],
+            [1.0, p, 0.0],
+            [1.0, -p, 0.0],
+            [-1.0, p, 0.0],
+            [-1.0, -p, 0.0],
+            [p, 0.0, 1.0],
+            [-p, 0.0, 1.0],
+            [p, 0.0, -1.0],
+            [-p, 0.0, -1.0],
+        ]
+        .iter()
+        .enumerate()
+        {
+            for k in 0..3 {
+                ico[3 * (i + 1) + k] = scale * v[k];
+            }
+        }
+        assert!(crate::soap::ih_dominated(
+            ico.view(),
+            crate::soap::SoapSpec::default()
+        ));
+        let mut cfg = Config::recommended(13);
+        cfg.relax_steps = 16;
+        assert!(matches!(
+            cfg.continuous_symmetry,
+            ContinuousSymmetry::Measure { reseed_hops, .. } if reseed_hops > 0
+        ));
+        let budget = 40_000usize;
+        let stair = 499usize;
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut ledger = Ledger::new(budget);
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            for _ in 0..steps.max(1) {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let e = -((led.spent().min(budget / 4) / stair) as f64);
+            // A turned copy, so no quench returns the state it came from.
+            let angle = 0.37 * led.spent() as f64;
+            let (sin, cos) = (angle.sin(), angle.cos());
+            let mut turned = ico.clone();
+            for i in 0..13 {
+                let (a, b) = (ico[3 * i], ico[3 * i + 1]);
+                turned[3 * i] = cos * a - sin * b;
+                turned[3 * i + 1] = sin * a + cos * b;
+            }
+            led.record(e, turned.view());
+            (e, turned)
+        };
+        let out = run(&cfg, ico.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        let floor = -((budget / 4 / stair) as f64);
+        let reseeds: Vec<f64> = out
+            .accepted_transitions
+            .iter()
+            .filter(|t| t.action == "csm-reseed")
+            .map(|t| t.from_energy)
+            .collect();
+        assert!(
+            reseeds.contains(&0.0),
+            "no reseed from the start: {reseeds:?}"
+        );
+        assert!(
+            reseeds.contains(&floor),
+            "no reseed on the floor: {reseeds:?}"
+        );
+        let descending: Vec<f64> = reseeds
+            .iter()
+            .copied()
+            .filter(|&from| from < -1.0 && from > floor)
+            .collect();
+        assert!(
+            descending.is_empty(),
+            "reseeds on the descent, from {descending:?}"
         );
     }
 

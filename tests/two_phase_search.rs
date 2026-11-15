@@ -82,8 +82,10 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     // Merging develop's stall-growth hold moves which seeds reach the
     // octahedron. Cutoff 0xffff, plain 0x91e4 (7 seeds), with and
     // without IRA. A lowest the continuous-symmetry projection records
-    // now restarts the stall clocks, and plain is 0x30a1 (5 seeds).
-    let plain_exact = 0x30a1;
+    // now restarts the stall clocks, and plain is 0x30a1 (5 seeds). The
+    // icosahedral reseed now waits for a plateau as old in calls as the
+    // search that found it, and plain is 0x1c21 (5 seeds).
+    let plain_exact = 0x1c21;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"
