@@ -57,16 +57,17 @@ from pathlib import Path
 SYSTEMS = ("si10", "c10", "si13", "c20", "si20")
 CODES = ("anneal-general", "crest")
 TWELVE = tuple(range(2000, 2012))
-# Si20 runs six seeds in both arms: a GFN2 call there costs 0.3-0.7 s.
+# Si13 and Si20 run six seeds in both arms: from a fresh SCC a call costs
+# about 0.1 s on Si13 and more on Si20.
 SEEDS = {
     "si10": TWELVE,
     "c10": TWELVE,
-    "si13": TWELVE,
+    "si13": TWELVE[:6],
     "c20": TWELVE,
     "si20": TWELVE[:6],
 }
 # CREST's seeds where its wall time does not allow twelve.
-CREST_SEEDS = {**SEEDS, "si10": TWELVE[:4], "si13": TWELVE[:6]}
+CREST_SEEDS = {**SEEDS, "si10": TWELVE[:4]}
 BUDGET = 100000
 ETEMP = 3000.0
 HIT_TOL = 0.001
@@ -77,12 +78,13 @@ AUTOEV = 27.21138505
 # calls on six seeds each; the C10 minimum is the cumulenic ring, every
 # bond 1.285 angstrom. C20: the cage, every atom three-coordinated, from
 # one anneal run without the call floor (seed 2006 at 1e5 calls); no
-# other run of either code has reached it. Si13 and Si20 have none yet:
-# the engine's reused wavefunction gives their clusters energies a fresh
-# SCC does not reproduce.
+# other run of either code has reached it. Si13: anneal from a fresh SCC
+# on every call at 30000 calls, reached by seeds 3002-3005. Si20 has none
+# yet.
 REFERENCE = {
     "si10": -460.68373809,
     "c10": -571.32273783,
+    "si13": -599.34546694,
     "c20": -1148.85383633,
 }
 SCHEDULE_SEED = 20261114
