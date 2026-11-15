@@ -2538,6 +2538,37 @@ if get_option('with_tests')
                     'RGPOT_ENGINE_METATOMIC',
                     metatomic_engine.full_path(),
                 )
+                # Models with no weights that read the charge, the spin,
+                # both or neither; the last reads both without declaring
+                # them.
+                _mta_export = meson.project_source_root() / 'scripts' / 'export_tiny_metatomic_model.py'
+                foreach _spec : [
+                    [
+                        ['--inputs=charge,spin_multiplicity'],
+                        'MTA_CHARGE_SPIN_PT',
+                        'mta-charge-spin.pt',
+                    ],
+                    [['--inputs=charge'], 'MTA_CHARGE_PT', 'mta-charge.pt'],
+                    [['--inputs=spin'], 'MTA_SPIN_PT', 'mta-spin.pt'],
+                    [['--inputs='], 'MTA_PLAIN_PT', 'mta-plain.pt'],
+                    [
+                        ['--inputs=charge,spin_multiplicity', '--undeclared'],
+                        'MTA_UNDECLARED_PT',
+                        'mta-undeclared.pt',
+                    ],
+                ]
+                    _model = custom_target(
+                        'mta-' + _spec[1],
+                        output: _spec[2],
+                        command: [_uma_py, _mta_export] + _spec[0] + [
+                            '--out',
+                            '@OUTPUT@',
+                        ],
+                        build_by_default: false,
+                    )
+                    engine_table_depends += [_model]
+                    engine_table_env.set(_spec[1], _model.full_path())
+                endforeach
             endif
             engine_table_env.set(
                 'RGPOT_ENGINE_EXPECT',
