@@ -31,6 +31,9 @@ use std::time::Instant;
 
 /// Nanoseconds spent inside the potential, for the wall split.
 static POTENTIAL_NS: AtomicU64 = AtomicU64::new(0);
+/// Objective calls, and the first call whose objective reached the target.
+static OBJECTIVE_CALLS: AtomicU64 = AtomicU64::new(0);
+static FIRST_HIT_CALL: AtomicU64 = AtomicU64::new(0);
 
 use anneal_core::catalog::molecular::{
     WaterSearchArm, component_gradient_tolerance, configure_water_arm, monomers_intact,
@@ -61,6 +64,7 @@ struct ForceObjective {
     bounds: Bounds<f64>,
     dim: usize,
     n_molecules: usize,
+    target: Option<f64>,
     eval: Mutex<ForceEval>,
 }
 
@@ -68,6 +72,7 @@ impl ForceObjective {
     fn new(
         dim: usize,
         n_molecules: usize,
+        target: Option<f64>,
         eval: impl FnMut(&[f64]) -> (f64, Vec<f64>) + Send + 'static,
     ) -> Self {
         Self {
@@ -78,6 +83,7 @@ impl ForceObjective {
             ),
             dim,
             n_molecules,
+            target,
             eval: Mutex::new(Box::new(eval)),
         }
     }
@@ -99,6 +105,10 @@ impl ForceObjective {
             for (component, extra) in gradient.iter_mut().zip(wall_gradient) {
                 *component += extra;
             }
+        }
+        let call = OBJECTIVE_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+        if self.target.is_some_and(|target| energy + wall <= target) {
+            let _ = FIRST_HIT_CALL.compare_exchange(0, call, Ordering::Relaxed, Ordering::Relaxed);
         }
         (energy + wall, Array1::from_vec(gradient))
     }
@@ -299,7 +309,7 @@ fn audit_geometry(path: &std::path::Path, molecules: usize, seed: u64, outdir: &
     let atmnrs: Vec<i32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
     let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
     let pot = RgpotObjective::xtb(&atmnrs, box_);
-    let objective = ForceObjective::new(coords.len(), molecules, move |coordinates| {
+    let objective = ForceObjective::new(coords.len(), molecules, None, move |coordinates| {
         let (energy, gradient) = pot
             .wrapper()
             .value_and_gradient(ArrayView1::from(coordinates));
@@ -434,19 +444,24 @@ fn main() {
     // One pot for the seed. A search starts with the engine's own guess.
     pot.restart();
     let n_molecules = m;
-    let objective = ForceObjective::new(3 * atmnrs.len(), n_molecules, move |coordinates| {
-        let pot_at = Instant::now();
-        let (energy, gradient) = pot
-            .wrapper()
-            .value_and_gradient(ArrayView1::from(coordinates));
-        POTENTIAL_NS.fetch_add(pot_at.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        let values = if gradient.is_standard_layout() {
-            gradient.to_vec()
-        } else {
-            gradient.iter().copied().collect()
-        };
-        (energy, values)
-    });
+    let objective = ForceObjective::new(
+        3 * atmnrs.len(),
+        n_molecules,
+        target_energy,
+        move |coordinates| {
+            let pot_at = Instant::now();
+            let (energy, gradient) = pot
+                .wrapper()
+                .value_and_gradient(ArrayView1::from(coordinates));
+            POTENTIAL_NS.fetch_add(pot_at.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            let values = if gradient.is_standard_layout() {
+                gradient.to_vec()
+            } else {
+                gradient.iter().copied().collect()
+            };
+            (energy, values)
+        },
+    );
 
     // The search keeps at most a quarter of this budget to tighten the best
     // few recorded minima. Passing the whole budget avoids reserving twice.
@@ -465,6 +480,8 @@ fn main() {
     // value_and_gradient. The reported-geometry evaluation below is not
     // part of this sum.
     let spent = ledger.spent();
+    let objective_calls = OBJECTIVE_CALLS.load(Ordering::Relaxed);
+    let first_hit_call = FIRST_HIT_CALL.load(Ordering::Relaxed);
     let potential_s = POTENTIAL_NS.load(Ordering::Relaxed) as f64 / 1e9;
     let outside_s = (wall_s - potential_s).max(0.0);
     writeln!(meta, "wall_s: {wall_s:.6}").ok();
@@ -472,6 +489,12 @@ fn main() {
     writeln!(meta, "outside_s: {outside_s:.6}").ok();
     writeln!(meta, "energy_calls: {spent}").ok();
     writeln!(meta, "energy_calls_basis: search_ledger").ok();
+    writeln!(meta, "objective_calls: {objective_calls}").ok();
+    if first_hit_call > 0 {
+        writeln!(meta, "first_hit_call: {first_hit_call}").ok();
+    } else {
+        writeln!(meta, "first_hit_call: none").ok();
+    }
     writeln!(meta, "search_calls: {}", spent.saturating_sub(polish_calls)).ok();
     writeln!(meta, "polish_calls: {polish_calls}").ok();
     writeln!(meta, "polish_component_tolerance_eV_per_A: {tolerance:.6e}").ok();
