@@ -1,0 +1,43 @@
+#+TITLE: Potential names and options
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Potential names and options
+
+=pair_style rgpot= in LAMMPS (=pair_coeff * * Name [key value ...] El ...=), the
+PLUMED action =RGPOT= (=POTENTIAL=Name OPTIONS={key value ...}=) and the
+=rgpot-eval= tool build a potential from the same name and options.
+=engines/pot_spec.hpp= does the parsing for all three.
+
+Names are matched without case.
+Option values are Angstrom and eV, whatever units the host uses.
+Options come as =key value= pairs separated by spaces.
+
+| Name         | Options                                                                  | Stress |
+|--------------+--------------------------------------------------------------------------+--------|
+| =LJ=         | =u0=, =psi=, =cutoff=, =switch_width=                                    | yes    |
+| =Morse=      | =de=, =a=, =re=, =cutoff=, =switch_width=                                | yes    |
+| =SuttonChen= | =preset= (=platinum= or =gold=), =epsilon=, =c=, =a=, =n=, =m=, =cutoff= | yes    |
+| =EAMTable=   | =file=, =format= (=funcfl=, =setfl= or =fs=)                             | yes    |
+| =SWSi1985=   | none                                                                     | yes    |
+| =TersoffSi=  | none                                                                     | yes    |
+| =EMT=        | =parameters= (=asap= or =rasmussen=)                                     | no     |
+| =EAMCell=    | none                                                                     | no     |
+
+A build with the Fortran potentials also accepts =SWSi= (with a stress), and
+=EDIP=, =LenoskySi=, =EAMAl=, =FeHe= and =CuH2= (without one).
+=EAMTable= needs =-Dwith_eam_table=true=; its format follows the file extension
+unless =format= is given.
+
+=cutoff= defaults to the host's cutoff: the =pair_style= cutoff in LAMMPS.
+PLUMED and =rgpot-eval= have none, so there the potential's own default is used
+(15 Angstrom for =LJ=, 9.5 for =Morse=, 40 for =SuttonChen=).
+An unknown name or option stops with a message that lists what this build
+accepts.
+
+The stress column is what a periodic cell needs for the virial.
+LAMMPS takes a strain difference for a potential without one.
+PLUMED stops instead, unless the action has =NOPBC=.
+
+Species are element symbols (=Cu=, case as printed).
+=RGPOT= also takes atomic numbers.

@@ -10,8 +10,8 @@ for the pair and EAM potentials the per-atom energy and virial.
 It works under =fix nve=, =fix npt= and =fix box/relax= like a native style.
 =compute pe/atom= and =compute stress/atom= work with the pair and EAM
 potentials.
-It can use any of the potentials listed below, Lennard-Jones through its own
-coefficients, or a library that exports =rgpot_engine_force=.
+It can use Lennard-Jones through its own coefficients, a library that exports
+=rgpot_engine_force=, or any potential in :doc:`../reference/potential_names`.
 
 ** Build the plugin
 
@@ -77,26 +77,10 @@ All forms use =* *=; the style is set once for every type.
 - =pair_coeff * * Name [key value ...] El ...= builds an rgpot potential by name
   and maps each LAMMPS type to an element.
 
-The names are matched without case:
-
-| Name         | Options                                                    |
-|--------------+------------------------------------------------------------|
-| =LJ=         | =u0=, =psi=, =cutoff=, =switch_width=                      |
-| =Morse=      | =de=, =a=, =re=, =cutoff=, =switch_width=                  |
-| =SuttonChen= | =preset= (=platinum= or =gold=), =epsilon=, =c=, =a=, =n=, =m=, =cutoff= |
-| =EAMTable=   | =file=, =format= (=funcfl=, =setfl= or =fs=)               |
-| =SWSi1985=   | none                                                       |
-| =TersoffSi=  | none                                                       |
-| =EMT=        | =parameters= (=asap= or =rasmussen=)                       |
-| =EAMCell=    | none                                                       |
-
-A build with the Fortran potentials also accepts =SWSi=, =EDIP=, =LenoskySi=,
-=EAMAl=, =FeHe= and =CuH2=.
-=EAMTable= needs =-Dwith_eam_table=true=; its format follows the file extension
-unless =format= is given.
+The names and their options are listed in :doc:`../reference/potential_names`,
+which PLUMED's =RGPOT= shares.
 =cutoff= defaults to the =pair_style= cutoff.
-An unknown name, option or element symbol stops the run with a message that
-lists what is accepted.
+An unknown element symbol stops the run.
 
 After the options comes one word per LAMMPS type: an element symbol, or =NULL=
 for a type the style should not see.

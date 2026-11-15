@@ -115,6 +115,7 @@ meson compile -C bbdir && meson test -C bbdir
    reference/sutton_chen
    reference/eam_table
    reference/fortran_potentials
+   reference/potential_names
    api/index
    changelog
 

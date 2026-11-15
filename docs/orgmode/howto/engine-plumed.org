@@ -4,18 +4,81 @@
 
 * PLUMED
 
-=RGPOT= is a collective variable, not a copy of the GROMACS mdrun deck.
-=plumed driver= reads an xyz file in nanometres, the default PLUMED length, and
-=--debug-forces= finite-differences the value.
-=BIASVALUE= turns that value into the bias whose forces the driver checks.
-The printed number, divided by =rgpot-lj --kJ-per-eV=, is the rgpot energy in
-eV.
+=RGPOT= is a collective variable whose value is the energy of an rgpot potential
+on the atoms it lists.
+=BIASVALUE= adds that energy, its forces and its virial to the MD engine.
 
-Telling the driver =UNITS LENGTH=A= while the file is already in Angstrom makes
-PLUMED scale the coordinates again.
-The driver test therefore stays in nanometres: a 0.15 nm separation and a 2 nm
-cell.
-The meson test is =plumed_driver=.
+#+begin_src text
+LOAD FILE=libRgpotPlumed.so
+ene: RGPOT ATOMS=1-256 POTENTIAL=SuttonChen OPTIONS={preset platinum cutoff 5.0} TYPES=Pt
+b: BIASVALUE ARG=ene
+#+end_src
+
+- =ATOMS= are the atoms the potential sees.
+- =POTENTIAL= and =OPTIONS= are a name and its =key value= options from
+  :doc:`../reference/potential_names`, the same words as LAMMPS =pair_coeff=.
+  Option values are Angstrom and eV.
+- =TYPES= is one element symbol or atomic number for every atom, or one per atom
+  in =ATOMS= order, separated by commas: =TYPES=Cu,Ni,Ni,Cu= or
+  =TYPES=29,28,28,29=.
+- =NOPBC= evaluates the atoms as an isolated cluster.
+
+** Units
+
+Positions, the cell, the value and its derivatives are in the PLUMED units: nm
+and kJ/mol by default, as in GROMACS, or whatever =UNITS= sets.
+They are converted to Angstrom and eV through the PLUMED =Units= object.
+The rgpot eV is =96.48533212331002 kJ/mol=.
+The PLUMED =UNITS ENERGY=eV= is =96.48530749925792 kJ/mol=, so a value printed
+in that unit is 2.6e-7 larger, relative, than the rgpot energy in eV.
+The forces the MD engine receives do not depend on =UNITS=.
+Natural units stop with an error.
+
+=plumed driver= reads lengths in its =--length-units=, nm by default.
+=UNITS= only sets PLUMED's own units.
+A file in Angstrom needs =--length-units A=.
+
+** Cells
+
+With a periodic box, =RGPOT= passes PLUMED's cell to the potential, orthogonal
+or triclinic, with the positions wrapped into it.
+The potential takes the minimum image, so its cutoff must be shorter than half
+of every cell width.
+The box derivatives are \(-V\sigma\) from the potential's stress, so the
+pressure under =BIASVALUE= includes the rgpot virial and NPT runs are correct.
+A potential without a stress stops on a periodic cell with =returns no stress=
+instead of returning a wrong virial.
+
+With =NOPBC=, or with no cell, the atoms sit in a cube wider than twice their
+extent plus the cutoff, so no periodic image interacts.
+The box derivatives then come from the positions alone.
+
+PLUMED 2.9 reports an error raised during a step only as
+=An error happened while calculating=; =RGPOT= writes the reason to the PLUMED
+log first.
+
+** Build and tests
+
 The shared library is =libRgpotPlumed.so=, built when pkg-config finds PLUMED
 and linked with =libplumedKernel=.
 =-Dwith_plumed=enabled= is an error when those headers are missing.
+Without PLUMED the tests are not defined and meson prints why.
+
+=engines/plumed/run_plumed.py= runs these meson tests through =plumed driver=:
+
+- =plumed_driver=: the LJ dimer against =rgpot-lj=.
+- =plumed_debug_forces=: =--debug-forces= finite differences of the forces for
+  LJ, Sutton-Chen, Stillinger-Weber and EMT, on clusters and triclinic cells,
+  and for =EAMTable= with =-Dwith_eam_table=true=.
+  EMT on a periodic cell has to stop with the stress error.
+- =plumed_box_derivatives=: the nine box derivatives on triclinic cells.
+- =plumed_units=: one cell in nm and kJ/mol, and in Angstrom and eV.
+- =plumed_api=: energy, forces and virial against rgpot itself.
+  The C function is =rgpot_sutton_chen_energy_forces=.
+  The Python classes are =LJPot= and =StillingerWeberSi=.
+  The Python part needs =-Dwith_python=true= and otherwise prints a skip.
+
+The numerical column of =--debug-forces= is noisy at a few 1e-5 of the largest
+derivative on cells of a few hundred atoms, so the tests allow 5e-5.
+A central difference with a chosen step agrees with the analytic forces to about
+1e-8.

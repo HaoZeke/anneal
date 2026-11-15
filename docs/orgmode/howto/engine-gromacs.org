@@ -6,29 +6,44 @@
 
 GROMACS 2026's NNPot module loads a TorchScript model.
 The conda-forge build used here has no NNPot.
-It does accept =gmx mdrun -plumed=.
-The collective variable =RGPOT= calls the same Lennard-Jones evaluator as the
-other engines, and =BIASVALUE= applies that energy as the bias.
+It does accept =gmx mdrun -plumed=, and the PLUMED collective variable =RGPOT=
+evaluates any rgpot potential by name (see :doc:`engine-plumed`).
+=BIASVALUE= applies its energy, forces and virial.
 A topology with zero charge and zero Lennard-Jones leaves the bias as the only
 potential.
 
-Parameters in the PLUMED file are in GROMACS units: nanometres and kJ/mol.
-=U0= for a 1 eV well is the factor =rgpot-lj --kJ-per-eV= prints.
-=CUTOFF= 0.8 and =PSI= 0.1 are 8 Angstrom and 1 Angstrom.
-
 #+begin_src text
-ene: RGPOT ATOMS=1,2 U0=96.48533212331002 CUTOFF=0.8 PSI=0.1
+LOAD FILE=libRgpotPlumed.so
+ene: RGPOT ATOMS=1-256 POTENTIAL=SuttonChen OPTIONS={preset platinum cutoff 5.0} TYPES=Pt
 b: BIASVALUE ARG=ene
 PRINT ARG=ene FILE=COLVAR
 #+end_src
 
+GROMACS hands PLUMED positions and the box in nm and takes energies in kJ/mol.
+=RGPOT= converts both, so the =OPTIONS= stay in Angstrom and eV, the same words
+as in LAMMPS.
+The triclinic GROMACS box goes to the potential as it is, and the rgpot stress
+becomes the box derivatives.
+GROMACS adds them to its virial, so the pressure and pressure coupling include
+the potential.
+A potential without a stress stops on a periodic box; see
+:doc:`../reference/potential_names`.
+
 =gmx mdrun= needs =PLUMED_KERNEL= pointed at =libplumedKernel.so=.
-The meson test =gromacs_mdrun= writes a two-atom topology, runs =grompp= and
-=mdrun -nsteps 0 -plumed=, and checks the printed bias against =rgpot-lj=.
-The box is 4 nm so the neighbour list cutoff is shorter than half the cell.
+The meson test =gromacs_mdrun= runs two cases.
+The first is one step of the Lennard-Jones dimer in a 4 nm box, checked against
+=rgpot-lj=.
+The second is ten =md-vv= steps of a 256-atom Sutton-Chen platinum crystal in a
+triclinic box under C-rescale pressure coupling.
+For every frame it compares the bias, the GROMACS virial and the pressure with
+=rgpot-eval= on the positions PLUMED saw.
+The GROMACS virial is \(\Xi = \tfrac12 V\sigma\).
+With =md-vv= the pressure is \(\tfrac{2}{V}(E_\mathrm{kin} - \Xi)\) with the
+full-step kinetic energy.
 Set =-Dwith_gromacs=enabled= and =-Dwith_plumed=enabled= to require the
 binaries.
-Auto skips the test when =gmx= or the PLUMED headers are absent.
+Auto skips the test when =gmx= or the PLUMED headers are absent, and meson says
+so.
 
 ** Public constructor
 
