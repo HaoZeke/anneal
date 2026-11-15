@@ -5,11 +5,16 @@
 * Python package (PyPI)
 
 The =rgpot= package on [[https://pypi.org/project/rgpot/][PyPI]] ships manylinux
-wheels with:
+(x86_64 and aarch64) and macOS wheels with:
 
-- Lennard-Jones via a *nanobind* extension (=_core.abi3.so=, stable ABI /
-=Py_LIMITED_API= 3.12 when built on CPython >= 3.12)
+- the potentials of =librgpot= through a *nanobind* extension
+  (=rgpot._core=; =_core.abi3.so= with =Py_LIMITED_API= 3.12 when built on a GIL
+  CPython >= 3.12)
 - Metatomic force evaluation via *dlopen* of a portable C-ABI engine plugin
+
+The wheel build turns on the Fortran potentials, =with_expr=, =with_dftd3=,
+=with_dftd4= and =with_xckernel= (=[tool.meson-python.args]= in
+=pyproject.toml=).
 
 This is separate from the Cap'n Proto RPC path (=potserv=).
 LJ needs only =numpy=; Metatomic needs the optional dependency stack below.
@@ -17,7 +22,9 @@ LJ needs only =numpy=; Metatomic needs the optional dependency stack below.
 The package declares free-threading support as beta.
 The free-threaded wheel is =cp314t= and imports with the GIL disabled.
 =cp315t= is not built: PyPI has no torch wheel for that tag.
-The =cp312= wheel is the stable-ABI build for the GIL interpreters.
+The =cp312= wheel is the stable-ABI build for the GIL interpreters 3.12 and
+newer.
+=cp310= and =cp311= get version-specific wheels.
 The bundled gfortran runtime is built for macOS 15, so the macOS arm64 wheels
 need macOS 15 or newer.
 Tests run on 3.13t, 3.14t, and 3.15t.
@@ -25,6 +32,7 @@ ThreadSanitizer runs on 3.13t and 3.14t.
 
 ** Install
 
+#+attr_rgpot: syntax
 #+begin_src bash
 pip install -U rgpot
 # Metatomic path (provides the NEEDED shared libs at runtime):
@@ -37,12 +45,20 @@ pip install 'rgpot[metatomic]'
 
 Engines live in the wheel as:
 
+#+attr_rgpot: output file layout inside the installed wheel
 #+begin_example
 rgpot/lib/torch-X.Y/libmetatomic_engine.so
 #+end_example
 
-At import time, =rgpot.default_metatomic_engine_path()= picks the directory that
-matches the installed =torch= major (same multi-ABI idea as metatomic-torch).
+=rgpot.default_metatomic_engine_path()= imports =torch=, when it is installed,
+and picks the =torch-X.Y= directory that matches its version (same multi-ABI
+idea as metatomic-torch).
+It also accepts =librgpot_metatomic_engine.so= in that directory.
+When no matching directory exists it tries the other =torch-*= directories, then
+older single-engine layouts.
+Only when no bundled engine is found does it read =RGPOT_METATOMIC_ENGINE= or
+=METATOMIC_ENGINE=.
+It returns =None= when it finds nothing.
 
 | Torch major | Bundled engine (typical wheel) |
 |-------------+--------------------------------|
@@ -52,6 +68,7 @@ matches the installed =torch= major (same multi-ABI idea as metatomic-torch).
 Optional dependency pins match the floor (=torch>=2.7=).
 List what the installed wheel actually contains:
 
+#+attr_rgpot: run
 #+begin_src python
 import rgpot
 print(rgpot.__version__)
@@ -61,6 +78,10 @@ print(rgpot.default_metatomic_engine_path())
 
 ** Minimal LJ example
 
+=evaluate_lj= uses the default =LJPot= parameters and returns
+=(energy, forces, variance)=.
+
+#+attr_rgpot: run
 #+begin_src python
 import numpy as np
 import rgpot
@@ -68,7 +89,7 @@ import rgpot
 pos = np.ascontiguousarray([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0]], dtype=np.float64)
 types = np.ascontiguousarray([1, 1], dtype=np.int32)
 box = np.ascontiguousarray(np.eye(3) * 10.0, dtype=np.float64)
-energy, forces, virial = rgpot.evaluate_lj(pos, types, box)
+energy, forces, variance = rgpot.evaluate_lj(pos, types, box)
 print(energy, forces.shape)
 #+end_src
 
@@ -81,9 +102,16 @@ A positive
 =switch_width= replaces the shifted truncation with the C^2 quintic switch over the last =switch_width=
 Angstrom below the cutoff, so the energy, the force and the curvature reach zero
 there.
-A width above the cutoff raises =ValueError=.
+A negative width or a width above the cutoff raises =ValueError=.
 
+#+attr_rgpot: run
 #+begin_src python
+import numpy as np
+import rgpot
+
+pos = np.ascontiguousarray([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0]], dtype=np.float64)
+types = np.ascontiguousarray([1, 1], dtype=np.int32)
+box = np.ascontiguousarray(np.eye(3) * 10.0, dtype=np.float64)
 pot = rgpot.LJPot(cutoff=2.5, switch_width=0.5)
 energy, forces, variance = pot(pos, types, box)
 #+end_src
@@ -93,7 +121,10 @@ and =switch_width= for ="lj"=, and =De=, =a=, =re=, =cutoff= and =switch_width=
 for ="morse"=.
 A key the dict leaves out keeps its default.
 
+#+attr_rgpot: run requires=has_expr
 #+begin_src python
+import rgpot
+
 pot = rgpot.ExprPot("lj + morse", {
     "lj": {"kind": "lj", "switch_width": 0.5},
     "morse": {"kind": "morse", "cutoff": 6.0, "switch_width": 1.0},
@@ -102,12 +133,18 @@ pot = rgpot.ExprPot("lj + morse", {
 
 ** Metatomic dlopen
 
+=evaluate_metatomic= takes =model_path=, =engine_path= and =device= as
+keyword-only arguments.
+It raises =RuntimeError= when the build has no =MetatomicDlopen= frontend
+(=rgpot.has_metatomic_dlopen= is =False=).
+
+#+attr_rgpot: compile needs a Metatomic model file and the engine plugin
 #+begin_src python
 import numpy as np
 import rgpot
 
-# torch must be importable first so the engine's DT_NEEDED libs resolve
-# to the same process image.
+# evaluate_metatomic imports torch first, when it is installed, so the
+# engine's DT_NEEDED libs resolve to the same process image.
 energy, forces, variance = rgpot.evaluate_metatomic(
     positions,   # (N, 3) float64 C-contiguous
     atom_types,  # (N,) int32
@@ -118,8 +155,10 @@ energy, forces, variance = rgpot.evaluate_metatomic(
 )
 #+end_src
 
-Override the engine with =RGPOT_METATOMIC_ENGINE= / =METATOMIC_ENGINE= if
-needed.
+To use a different engine, pass =engine_path=.
+=RGPOT_METATOMIC_ENGINE= and
+=METATOMIC_ENGINE= take effect only when no bundled engine is found, because =evaluate_metatomic=
+passes the bundled path explicitly.
 
 ** Related
 

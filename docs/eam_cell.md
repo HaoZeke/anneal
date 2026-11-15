@@ -8,14 +8,24 @@ the element table is the aluminium value, 5.555 Angstrom.
 
 The list is the shared neighbour layer (`rgpot::nlist::Neighbours`): a
 linked-cell search with a Verlet skin. The skin is one fifth of the widest
-cutoff (`kEamSkinOverCutoff`). A later call on the same object reuses the
-list while every atom has moved by at most half of that distance and the
-cell, the atom count and the species are unchanged. The minimum image is
-one half-box correction after the coordinates have been wrapped into the
-cell. A streaming evaluation walks the cells and stores no pair list.
-Pairs are visited in atom-index order. One thread therefore performs the
-same arithmetic, on the same pairs, as the direct double loop, and the
-energy and forces match that loop bit for bit.
+cutoff (`kEamSkinOverCutoff`). A streaming walk uses no skin. A later call
+on the same object reuses a stored list while every atom has moved by at
+most half of the skin and the cell, the atom count and the neighbour mode
+are unchanged. The species are not part of that test: the list holds
+candidates out to the widest cutoff plus the skin for every atom. The
+minimum image is one half-box correction after the coordinates have been
+wrapped into the cell.
+
+The neighbour mode defaults to `Mode::Auto`, which stores the list when
+its index fits in memory and otherwise streams. `setNeighbourMode`
+selects a mode. With a stored list and one thread, the force loop visits
+each atom's partners in increasing index order. That is the same
+arithmetic, on the same pairs, as the direct double loop, and the energy
+and forces match that loop bit for bit. A streaming evaluation walks the
+cells twice, once for the density and once for the forces, and stores no
+pair list. It evaluates the pair terms from cubic Hermite tables
+(`CppCore/rgpot/EAM/StreamSpline.hpp`) instead of `std::exp`, so it is
+not bit-identical to the direct loop.
 
 The stored list is the neighbours inside the cutoff plus the skin. On a
 bulk aluminium crystal that is a few dozen neighbours per atom, not one
@@ -23,20 +33,29 @@ slot per atom pair.
 
 ## Threads
 
-`OMP_NUM_THREADS` is read on each call. When it is unset or empty the call
-stays on one thread. A value above 1 splits the atoms across that many
-OpenMP threads. Each thread writes only the forces of its own atoms. Density, the
-pair potential and that atom's own embedding are one pass. A second
-pass adds only the neighbour's embedding, using the scale stored on
-the first pass. Partial energies are added in thread-id order, so a
-fixed thread count repeats bit for bit.
+`OMP_NUM_THREADS` is read on each call. When it is unset, empty, not a
+number or below 1, the call stays on one thread. A build without OpenMP
+always uses one thread.
+
+With a stored list, a value above 1 splits the atoms into contiguous
+slices, one per OpenMP thread. Each thread writes only the forces of its
+own atoms. The first pass computes the density, the pair potential to
+higher-index partners and that atom's own embedding term. A second pass
+adds the neighbours' embedding terms and the pair forces from
+lower-index partners, using the scales stored on the first pass.
+Partial energies are added in thread-id order, so a fixed thread count
+repeats bit for bit.
+
+A streaming evaluation splits the cells across the threads. Each thread
+keeps its own density and force rows, and the rows are added in thread
+order.
 
 Several threads are not bit-identical to one thread. Energy and every
 force component stay within a relative tolerance of `1e-9`
 (`kEamThreadedTolerance`). A component whose one-thread magnitude is below
 1 is compared on an absolute scale of the same size. `EAMCellVerletTest`
-checks the one-thread bits, the skin rebuild, the linear list, and the
-threaded tolerance.
+checks the one-thread bits, the skin rebuild, the list length, and the
+threaded tolerance, all on a stored list.
 
 ## Timings
 
@@ -78,10 +97,16 @@ rows are in `docs/neighbour_layer.md`.
 
 ## Reproduce
 
+`EAM.cpp` needs the neighbour layer, the minimum image and the exact
+multiply-add sources at link time.
+
+<!-- rgpot-doc: syntax compiles for several seconds and runs the full benchmark -->
 ```bash
 g++ -std=c++20 -O3 -DNDEBUG -fopenmp -I CppCore -I CppCore/rgpot/EAM \
   -DEAM_STANDALONE \
   CppCore/tests/eam_cell_bench.cc CppCore/rgpot/EAM/EAM.cpp \
+  CppCore/rgpot/nlist/Neighbours.cc CppCore/rgpot/nlist/MinimumImage.cpp \
+  CppCore/rgpot/simd/exact_fma_hw.cc CppCore/rgpot/simd/exp.cc \
   -o eam_cell_bench
 ./eam_cell_bench
 ```

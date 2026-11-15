@@ -4,95 +4,140 @@
 
 * SIMD paths and dispatch
 
-LJ, Morse, the analytical EAM kernel, and the orthorhombic fold select an
-instruction set at run time when the build links Google Highway.
-=RGPOT_SIMD= names that target, and =rgpot::simd::chosen_target_name()= reports
-the one in use.
+This page explains how the C++ core picks instruction sets at run time, and why
+every path returns the same bits.
+
+** Dispatch through Highway
+
+=CppCore/rgpot/simd/= holds Lennard-Jones, Morse and analytical EAM pair kernels
+and an orthorhombic minimum-image fold that pick an instruction set at run time
+when the build links Google Highway (=-Dwith_highway=, =libhwy= 1.2 or newer).
+The entry points are =rgpot::simd::lj_force=, =morse_force=,
+=eam_force= and =fold_orthorhombic=; =lj_force_span= always runs the scalar
+kernel.
+=RGPOT_SIMD= names a target, and =rgpot::simd::chosen_target_name()= reports the
+one in use.
+=RGPOT_SIMD=scalar= selects the portable kernel.
+A known target that the CPU cannot run, or an unknown name, leaves the choice to
+Highway, and on x86-64 that choice is at least SSE2.
 A build without Highway keeps the scalar kernels.
-Code outside a dispatched function is compiled for the compiler default, which
-this repository keeps at x86-64 and armv8-a.
+
+In this revision the potential classes do not call these entry points.
+=LJPot=, =LJClusterPot=, =MorsePot= and =EAMPot= evaluate their pair terms
+inside the shared neighbour walk in =CppCore/rgpot/nlist/=, with scalar code.
+=CppCore/tests/IsaDispatchTest.cc= calls the dispatched kernels directly.
+
+The ISA audit measures every function against x86-64 on x86-64 files and armv8-a
+on aarch64 files.
+A function that is not dispatched must stay inside that baseline.
+
+** Fused multiply-add
 
 A product-sum uses a hardware fused multiply-add only on a target that has the
 instruction.
-On x86-64 the scalar kernel and the SSE2 and SSE4 kernels call a =target("fma")=
-body only after =detail::fma_hw_active()= reports a usable FMA.
-That bit follows glibc's hwcaps mask, so a masked FMA stays on the Dekker
-product.
+=rgpot::simd::detail::fma_hw_active()= decides that once per process.
+On x86-64 under GCC or Clang it reads CPUID (FMA, OSXSAVE and AVX) and XCR0.
+On glibc 2.33 and newer it also follows the glibc hwcaps mask, so
+~GLIBC_TUNABLES=glibc.cpu.hwcaps=-FMA~ turns the hardware path off.
+=RGPOT_FMA=software= turns it off as well.
+On other targets and compilers it returns false.
+
+When the probe is true, callers enter =target("fma")= bodies that run the
+instruction.
+In the Highway kernels, the scalar kernel and the SSE2 and SSE4 kernels on
+x86-64 do this, because those targets have no FMA of their own.
+In the neighbour layer, =MinimumImage::fold= calls =fold_hardware=.
+When the probe is false, =simd::exact_fma= computes the product with a Dekker
+product and a round-to-odd sum, and falls back to =std::fma= for inputs outside
+the range where that sequence is exact.
+The hardware instruction and the software sequence return the same bits, so the
+probe decides speed only.
+
 =target("fma")= compiles the whole body with AVX encodings, including ordinary
 moves, because the fused instruction is VEX-encoded.
-=rgpot/isa-allow.toml= names those functions for =avx= and =fma=:
-=eam_fma=, =lj_hw=, =morse_hw=, =eam_hw=, =exact_fma_hw=,
-=r2_hw=, =r2_hw_n=, =accept_row_hw=, =exp2_hw=, =exp_hw_n=, and =morse8_hw=.
+=rgpot/isa-allow.toml= therefore names those bodies for =avx= and =fma=:
+=accept_row_hw=, =eam_fma=, =eam_hw=, =exact_fma_hw=,
+=exp2_hw=, =exp_hw_n=, =lj_hw=, =lj_hw_span=, =morse8_hw=, =morse_hw=,
+=r2_hw= and =r2_hw_n=, and =fold_hardware= for =avx=, =fma= and =sse3=.
 The baseline caller does not contain those instructions.
 
-The pair-list force updates and the minimum-image fold use a fixed sequence that
-does not go through Highway.
-=simd::detail::fma_hw_active()= reads CPUID (FMA, OSXSAVE, and AVX) and XCR0,
-and on glibc 2.33 and newer it also follows the hwcaps mask.
-When that probe is true, =fold_hardware= and =accumulateHw= run the hardware
-instruction from =target("fma")= bodies.
-Otherwise =simd::exact_fma= computes the product with a Dekker product and a
-round-to-odd sum.
-=RGPOT_FMA=software= selects that software path.
-The hardware instruction and the software product return the same bits.
-
-The Morse kernel computes =exp= with =simd::exp_fixed=, a fixed sequence of IEEE
-additions, multiplications, and bit operations.
-That sequence has no table and no fused multiply-add, so the last bit does not
-depend on the C library or the instruction set.
-=exp_fixed_n= and the Morse row kernel are =target_clones= for the baseline,
-AVX2, and AVX-512F.
-The loader picks one clone from libgcc's own CPU check, and each clone returns
-the bits of the baseline one.
-
-=target("fma")= is an x86 target name, so the fold carries it only on x86-64
-under GCC or Clang, the one target where =fma_hw_active()= can be true.
+=target("fma")= is an x86 target name, so
+=fold_hardware= carries it only on x86-64 under GCC or Clang, the one configuration where =fma_hw_active()=
+can be true.
 On aarch64 and under MSVC the fold always runs the portable path through
 =simd::mul_add=, which returns the same bits.
+=simd::mul_add= emits the instruction directly when the translation unit is
+compiled with FMA, as on aarch64.
+
+** The exponential
+
+=MorsePot= computes =exp= with =simd::exp_fixed=, a fixed sequence of IEEE
+additions, multiplications and bit operations.
+That sequence has no table and no fused multiply-add, so the last bit does not
+depend on the C library or the instruction set.
+=exp_fixed_n= applies it to an array.
+On x86-64 Linux, outside ThreadSanitizer builds, =exp_fixed_n= is a
+=target_clones= function with baseline, AVX2 and AVX-512F clones.
+The loader picks one clone from the CPU check in libgcc or compiler-rt, and each
+clone returns the bits of the baseline one.
+
+** Contraction
 
 A compiler with contraction on may fuse a product and a sum into one fused
 multiply-add, and the result can then move by an ulp.
 Clang contracts by default and emits the instruction where the target has it,
 which is every macOS arm64 build.
-The Meson build compiles the kernels that keep fixed bits with
-=-ffp-contract=off=, or =/fp:precise= under MSVC, as per-target arguments.
+The Meson build compiles the core library, the =exp= and FMA helpers and
+=MinimumImage.cpp= with =-ffp-contract=off=, or =/fp:precise= under MSVC, as
+per-target arguments.
 Meson places those after =cpp_args=, so a global =-ffp-contract=fast= does not
 reach them.
 
-A Lennard-Jones cluster whose bounding-box diagonal sits on the cutoff uses
-=lj_cluster_direct= instead of the Highway kernel.
-On x86-64 that walk calls =lj_avx2= only after =__builtin_cpu_supports("avx2")=.
-=lj_avx2=, =eval_quad=, and =acc_quad= are =target("avx2")=.
+** The Lennard-Jones cluster walk
+
+=LJClusterPot= takes =lj_cluster_direct=, an all-pairs walk, when the
+bounding-box diagonal of the cluster is within the cutoff.
+It does so only without a switching function, outside stream mode and when no
+per-atom output is requested.
+Any other cluster goes through the shared neighbour walk.
+On x86-64 =lj_cluster_direct= calls
+=lj_avx2= only after =__builtin_cpu_supports("avx2")=; on aarch64 it calls =lj_neon=.
+=lj_avx2=, =eval_quad= and =acc_quad= are =target("avx2")=.
 The ISA audit proves from the linked library that they are reached only behind
 that check, so the allowlist does not name them.
 The same builtin's initializer, =__cpu_indicator_init=, is named for =xsave=
 because it reads XCR0 with =xgetbv=.
-A larger cluster stays on =simd::lj_force=.
+=cpuid_fma_usable=, which =fma_hw_active()= calls, is named for =xsave= for the
+same reason.
 
-The static gate in =ci/isa-audit= is what stops a later =-march=native=, a stray
+** The ISA gate
+
+The static gate in =ci/isa-audit= stops a later =-march=native=, a stray
 =-mavx2=, or an intrinsic outside a dispatched function from shipping.
 An instruction above the baseline is allowed only when =rgpot/isa-allow.toml=
 names the function and the feature, names the vendored file that contains a
-third-party dispatcher, or the audit proves the function is a dispatched clone:
-a local function entered only behind a libgcc CPU check or from a
-=target_clones= resolver, for the features that check covers.
+third-party dispatcher, or the audit proves the function is a dispatched clone.
+A dispatched clone is a local function entered only behind a libgcc CPU check or
+from a =target_clones= resolver, for the features that check covers.
 On a macOS arm64 slice, ~lse~ and ~rcpc~ are baseline: they are the platform
 atomics, and no other CPU can load that binary.
-The gate does not execute the instruction.
-A runtime test reports a path as not exercised when this machine cannot execute
-it.
+The gate does not execute the instructions.
+=IsaDispatchTest= lists the targets it exercised, and a target this machine
+cannot run is absent from that list.
 See =ci/isa-audit/README.org= for the allowlist format and for the reusable
 workflow other repositories call by commit SHA.
 
-A kernel added later has to keep the same bits on every path, every thread count
-and every rank count, down to the sign of zero and the NaN payload class.
-Reductions use a fixed width of eight partial sums in a fixed lane order, the
-order of ndarray 0.17 =unrolled_dot=.
-The hardware fused multiply-add and the Dekker product return the same bits.
-The cluster-pair layout for such kernels is the one in Páll and Hess, Computer
-Physics Communications 184, 2641 (2013), doi:10.1016/j.cpc.2013.06.003.
+** Same bits on every path
 
-The stack around such kernels is built per microarchitecture as in the European
-Environment for Scientific Software Installations (EESSI), Dröge et al.,
-Software: Practice and Experience 53, 176 (2023), doi:10.1002/spe.3075.
-Those runs are on real nodes, not under emulation in this CI.
+The design asks every path to return the same bits, whatever the instruction set
+and the thread count.
+The pair kernels in =rgpot::simd= reduce through eight partial sums combined in
+a fixed order, the order of ndarray 0.17 =unrolled_dot=
+(=CppCore/rgpot/simd/reduce.hpp=).
+=tests/python/test_invariance.py= compares a SHA-256 of the raw float64 results
+across Python and OpenMP thread counts.
+
+=ci/isa-audit/README.org= names the cluster-pair layout of Páll and Hess,
+Computer Physics Communications 184, 2641 (2013),
+doi:10.1016/j.cpc.2013.06.003, as the layout the dispatched kernels follow. It leaves per-microarchitecture runs to real nodes through the European Environment for Scientific Software Installations (EESSI), Dröge et al., Software: Practice and Experience 53, 176 (2023), doi:10.1002/spe.3075,
+because the gate does not emulate.

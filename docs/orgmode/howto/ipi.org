@@ -13,24 +13,35 @@ The protocol is Ceriotti, More and Manolopoulos, Comput Phys Commun 185, 1019
 
 ** Address
 
-The constructor takes =IPIConfig::address= and =timeout_s= (default 30).
-=timeout_s= is one budget for the driver to connect and for one force exchange.
+The constructor takes =IPIConfig::address= and =timeout_s= in seconds (default
+30).
+The socket is bound in the constructor; the driver is accepted on the first
+force call.
+=timeout_s= is one budget per force call that covers waiting for the driver to
+connect and the force exchange.
 
 - =unix:/absolute/path= binds that path.
 - =unix:<name>= binds
   =/tmp/ipi_<name>=, the i-PI default prefix, so =i-pi-py_driver -u -a <name>=
   connects.
+  The name must not contain =/=.
   On macOS the address length is set, which the kernel requires.
 - =tcp:<host>:<port>= listens on that IPv4 host and port.
 - =tcp:<port>= listens on 127.0.0.1.
 - Port 0 asks the kernel for a free port.
   =endpoint()= reports the chosen port.
 
-=potserv= uses the same strings after an =IPI:= prefix:
+A malformed address, a UNIX path too long for the socket address, or a
+=timeout_s= that is negative or not finite makes the constructor throw =std::invalid_argument=.
+A socket that cannot be bound throws =std::runtime_error=.
 
+=potserv= (built with =-Dwith_rpc=true=) uses the same strings after an =IPI:=
+prefix:
+
+#+attr_rgpot: syntax starts a server that waits for clients
 #+begin_src bash
-./bbdir/CppCore/potserv 12345 IPI:unix:/tmp/ipi_rgpot
-./bbdir/CppCore/potserv 12345 IPI:tcp:127.0.0.1:31415
+./build/CppCore/potserv 12345 IPI:unix:rgpot
+./build/CppCore/potserv 12345 IPI:tcp:127.0.0.1:31415
 #+end_src
 
 ** Wire contract
@@ -46,12 +57,17 @@ cell throws
 That tensor is left undivided by the cell volume. rgpot returns the Cauchy
 stress =sigma = -W / V= in eV/Angstrom^3.
 The driver keeps its own species list.
-The destructor sends =EXIT=.
+The destructor sends =EXIT= when a driver is connected.
 
-A force call sends =STATUS= until the driver reports =READY=.
+A force call sends =STATUS= until the driver reports =READY=, at most eight
+times.
 =NEEDINIT= is answered with =INIT= (bead id 0, empty init string).
 The server then writes =POSDATA= and =GETFORCE= in one payload and reads
 =FORCEREADY=.
+A timeout, a disconnect, an unexpected header, a driver that is not =READY=
+after eight =STATUS= messages, or an atom count that differs from the geometry
+throws =std::runtime_error= and closes the connection.
+The next force call accepts a new driver.
 
 ** Build
 
@@ -64,9 +80,21 @@ The compile definition is =RGPOT_HAS_IPI=.
 
 ** Python
 
-When the extension is built with =RGPOT_HAS_IPI=, =rgpot.IPIPot(address)=
-follows the same address forms.
-=__call__= returns energy, forces and variance in Angstrom and eV.
-=stress()= returns the Cauchy tensor from that call, shape =(3, 3)=, or =None=
-before a successful call.
-=has_ipi= is always present.
+When the extension is built with =RGPOT_HAS_IPI=,
+=rgpot.IPIPot(address, timeout_s=30.0)= follows the same address forms.
+=__call__= returns energy (eV), forces (eV/Angstrom) and variance; positions and the box are in Angstrom. =stress()= returns the Cauchy tensor from the last call in eV/Angstrom^3, shape =(3, 3)=, or =None= before a successful call. =has_ipi=
+is always present. A bad address raises =ValueError=, and a timeout or protocol
+failure raises =RuntimeError=.
+
+#+attr_rgpot: run requires=has_ipi
+#+begin_src python
+import numpy as np
+import rgpot
+
+pot = rgpot.IPIPot("tcp:0", timeout_s=0.2)
+assert pot.stress() is None
+try:
+    pot(np.zeros((1, 3)), [1], np.diag([10.0, 10.0, 10.0]))
+except RuntimeError as err:
+    print(err)  # no driver connected within timeout_s
+#+end_src

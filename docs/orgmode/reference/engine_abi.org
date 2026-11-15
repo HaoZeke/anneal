@@ -639,7 +639,8 @@ force call reports a mismatch.
 A Metatomic model reads the charge as =rgpot::charge= and the multiplicity as
 =rgpot::spin_multiplicity= or =rgpot::spin=.
 Each system carries the names the model declares in =requested_inputs=.
-A model that declares none of them gets 3 from =rgpot_engine_set_charge_spin=.
+Without =attachSystemExtras=, a model that declares none of them gets 3 from
+=rgpot_engine_set_charge_spin=.
 A value the model does not read must stay at its default, charge 0 or
 multiplicity 1.
 =rgpot_engine_set_charge_spin= returns 3 for another, and =create= fails for one
@@ -697,8 +698,9 @@ The digest of the weights inside it is package metadata, written by
 =UmaPot::checkpointProvenance()= returns them as a =UmaCheckpointProvenance=,
 whose fields are =std::optional= and unset for packages exported before the keys
 existed.
-The engine prints =UmaPot: checkpoint_sha256== on stderr when it loads the
-package (=unset= for those packages); the table exports no symbol for the keys.
+=UmaPot= prints =checkpoint_sha256= on stderr when it loads the package, and
+=unset= for those packages.
+No engine ABI call returns the keys.
 A malformed =checkpoint_sha256=, =checkpoint_hf_revision= or =checkpoint_source=
 fails the load.
 

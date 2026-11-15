@@ -30,6 +30,7 @@ The =&RGPOT= keys, the units, the cell, the errors and the limits are in
 
 Configure rgpot with the drop-in, which is off by default:
 
+#+attr_rgpot: syntax configures and compiles a build directory
 #+begin_src bash
 meson setup bbdir -Dwith_gromacs_dropin=enabled
 meson compile -C bbdir
@@ -41,6 +42,7 @@ through =CP2K_DIR=.
 GROMACS needs no change, only these CMake options (it also enables Fortran, so a
 Fortran compiler must be present):
 
+#+attr_rgpot: syntax configures a GROMACS build tree
 #+begin_src bash
 cmake .. -DGMX_DOUBLE=ON -DGMX_MPI=OFF -DGMX_CP2K=ON \
   -DCP2K_DIR=/path/to/bbdir/engines/gromacs
@@ -61,6 +63,7 @@ The run uses =qmmm-cp2k-qmmethod = INPUT= and a =-qmi= file with an =&RGPOT=
 section.
 The keys =grompp= checks stay as CP2K has them.
 
+#+attr_rgpot: skip GROMACS run parameters, read by gmx grompp
 #+begin_src text
 ; md.mdp
 qmmm-cp2k-active   = true
@@ -68,6 +71,7 @@ qmmm-cp2k-qmgroup  = QM
 qmmm-cp2k-qmmethod = INPUT
 #+end_src
 
+#+attr_rgpot: skip CP2K input with an &RGPOT section, read by librgpot_gromacs
 #+begin_src text
 &GLOBAL
   RUN_TYPE ENERGY_FORCE
@@ -91,6 +95,7 @@ qmmm-cp2k-qmmethod = INPUT
 &END
 #+end_src
 
+#+attr_rgpot: syntax needs a GROMACS built against librgpot_gromacs
 #+begin_src bash
 gmx_d grompp -f md.mdp -c conf.gro -p topol.top -n index.ndx -qmi rgpot.inp -o md.tpr
 gmx_d mdrun -deffnm md -ntmpi 1
@@ -102,6 +107,7 @@ To run an engine library instead, replace =POTENTIAL= and =OPTIONS= with
 =ENGINE= and =CONFIG=.
 An engine's configuration is the flat message the engine ABI takes, for example:
 
+#+attr_rgpot: syntax writes tersoff.bin
 #+begin_src bash
 capnp encode CppCore/rgpot/rpc/Potentials.capnp BuiltinParams \
   <<< '(name = "tersoff")' > tersoff.bin
@@ -109,8 +115,10 @@ capnp encode CppCore/rgpot/rpc/Potentials.capnp BuiltinParams \
 
 ** Tests
 
+Meson defines the tests only when it finds a Python with pytest and numpy.
 =gromacs_dropin_api= calls the library through =ctypes= in both box layouts and
-compares the energy and forces with =rgpot-eval= and an engine library.
+compares the energy and forces with =rgpot-eval=, and with the classical engine
+library when the build has it and =capnp= is on =PATH=.
 It also checks the unit factors and that every malformed input stops with its
 message.
 =gromacs_dropin_mdrun= runs =gmx mdrun= when =gromacs_dropin_gmx= names a
@@ -124,6 +132,7 @@ NVE runs, and that bad inputs stop =mdrun=.
 The NVE runs use switched Lennard-Jones, Tersoff and =EAMTable=: =SuttonChen= is
 truncated without a switch, so its energy jumps when a pair crosses the cutoff.
 
+#+attr_rgpot: syntax needs a GROMACS built against librgpot_gromacs
 #+begin_src bash
 meson setup bbdir -Dwith_tests=true -Dwith_gromacs_dropin=enabled \
   -Dgromacs_dropin_gmx=/path/to/gmx_d
@@ -168,6 +177,7 @@ atoms cross a face of the cell (see the limits in
 [[file:../reference/gromacs_dropin.org][GROMACS QM/MM drop-in reference]]),
 which any per-step evaluation of wrapped positions pays.
 
+#+attr_rgpot: syntax runs MD with a GROMACS built against librgpot_gromacs
 #+begin_src bash
 python3 engines/gromacs/bench_dropin.py --gmx /path/to/gmx_d --build bbdir \
   --eam CppCore/tests/data/eam_table/CuNi.eam.alloy --json bench.json

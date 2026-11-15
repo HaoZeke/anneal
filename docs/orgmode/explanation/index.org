@@ -20,4 +20,7 @@ Start with the RPC model, then use the architecture page for the layers.
    gromacs-qmmm
    simd
    thread-safety
+   neighbour-lists
+   mpi
+   global-optimization
 #+end_export

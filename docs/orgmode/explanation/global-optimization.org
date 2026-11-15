@@ -1,0 +1,34 @@
+#+TITLE: Local and global minimization
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Local and global minimization
+
+This page says when to reach for a local or a global minimizer, and why the
+plots of the minimization tutorial need their own environment.
+The tutorial is
+[[file:../tutorials/molecular-global-optimization.org][Find the Ground State of an EON Structure]].
+How an rgpot potential becomes an =anneal= objective is in
+[[file:../howto/eindir-anneal.org][rgpot potentials as eindir objectives]].
+
+** Which minimizer for which job
+
+- Local L-BFGS / FIRE / conjugate gradient (ASE or eOn): refine a structure
+inside the basin you want -- an eOn saddle endpoint, a perturbed crystal, an MD
+snapshot.
+- ~AnnealRunner~: search for the minimum when the basin is unknown -- cluster
+  ground
+states, conformer search, potential-parameter fitting.
+
+Chain them: an =anneal= search to locate the basin, then a local polish.
+
+** The eonviz environment
+
+The ``eonviz`` environment is separate from the C++ build env: ``eon`` pins
+``fmt>=12`` (clashing with rgpot's C++ ``fmt<12``), so it carries no default
+feature and pulls ``eon``, ``ira``, ``jax``, and the released ``chemparseplot``
+and ``rgpycrumbs`` (both pinned to 1.11.0, which carry the embedded-metadata
+trajectory parser and ``plt-min``).
+``pixi run check-eonviz-pins`` fails when ``chemparseplot`` or ``rgpycrumbs`` is
+not an exact ``==`` pin, when a git dependency does not name a full commit, or
+when an ``eonviz`` dependency has a path or url source or no version specifier.

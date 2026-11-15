@@ -4,85 +4,148 @@
 
 * ABI stamps
 
-The entry points and their contracts are in the
+rgpot carries compatibility numbers that are separate from its package version.
+This page explains what each one covers and why it exists.
+The functions and macros are listed in the
 [[file:../reference/c_abi.org][C ABI reference]].
-The steps to bump each number are in
+The steps to change each number are in
 [[file:../contributing/developer/abi-bump.org][Bump the ABI numbers]].
 
-** C++ layout stamp
+** The C ABI stamp
 
-The stamp above covers the C interface of =rgpot-core=.
-The header-only C++ classes are a second boundary: a consumer compiles
-=Potential=, the force structures and the pair potentials, and the library
-supplies their out-of-line members.
+=rgpot-core/include/rgpot.h= carries two identities.
+The package version (=RGPOT_VERSION= and its parts) follows the crate.
+The ABI stamp (=RGPOT_ABI_VERSION_MAJOR=, =RGPOT_ABI_VERSION_MINOR=,
+=RGPOT_ABI_LAYOUT_REVISION=) follows the layout of the exported structs and the
+signatures of the exported functions.
+A release that changes no exported symbol leaves the stamp where it is.
+
+A consumer that loads the library at run time compares the stamp it compiled
+against with =rgpot_abi_stamp()= of the library it loaded, or passes its own
+stamp to =rgpot_abi_compatible()=.
+The major number moves for a change an old caller cannot survive.
+The minor number moves for an addition that leaves every old call valid, so a
+library with a higher minor still serves an older caller.
+The layout revision moves when an exported struct changes size, field order or
+field type; callers and libraries with different layout revisions never match.
+
+The stamp is not an ELF soversion.
+In a Meson build with =with_rust_core=, =librgpot= links the static archive
+=librgpot_core.a= and keeps only the archive members it references.
+The cdylib
+=librgpot_core.so= that cargo builds next to it exports the whole C ABI, and the Meson test =abi_core_symbols=
+checks that library.
+
+** Scope
+
+The C ABI stamp covers =rgpot.h= only.
+Other interfaces carry their own numbers:
+
+- the C++ classes that cross the =librgpot= boundary: the layout stamp below and
+  the soversion =kCxxSoversion=;
+- the eindir objective that =rgpot_potential_t= embeds:
+  =rgpot_eindir_abi_stamp()= and =rgpot_eindir_abi_compatible()=, which report
+  and check the stamp of the =eindir-core= compiled into the library;
+- the neighbour query: =RGPOT_NLIST_ABI= in =CppCore/rgpot/nlist/rgpot_nlist.h=;
+- the plugin interface: =RGPOT_PLUGIN_API_VERSION= in =include/rgpot/plugin.h=;
+- the engine libraries:
+  =RGPOT_ENGINE_ABI_VERSION= in =CppCore/rgpot/engine_c_abi.h=;
+- =librgpot_mpi=: =RGPOT_MPI_ABI_VERSION= in
+  =CppCore/rgpot/calculator_mpi_abi.h=, with its own soversion 3.
+
+The engine plugins (for example
+=libclassical_engine.so= and =libmopac_engine.so=) are built without a soversion
+and opened by those unversioned names.
+
+** The C++ layout stamp
+
+The header-only C++ classes are a second boundary.
+A consumer compiles =Potential=, the force structures and the pair potentials
+from the headers, and the library supplies their out-of-line members.
 A library built from another revision of those headers, or with another value of
-=RGPOT_HAS_CACHE=, carries the same C stamp and still runs with the wrong
+=RGPOT_HAS_CACHE=, has the same C stamp and still runs with the wrong member
 offsets or the wrong vtable.
-=rgpot/abi/CxxLayout.hpp= stamps that boundary.
-It needs neither =rgpot.h= nor the Rust core, so every build of =librgpot=
-exports it.
+=CppCore/rgpot/abi/CxxLayout.hpp= stamps that boundary.
+It needs neither =rgpot.h= nor the Rust core.
 
+The stamp is the C struct =rgpot_cxx_layout_stamp_t= with =revision=
+(=kCxxLayoutRevision=), =features= and a 64-bit =hash=.
+=rgpot::abi::header_stamp()= is a =constexpr= of the header: the stamp the
+consumer compiled against.
+=rgpot::abi::library_stamp()= calls the exported =rgpot_cxx_layout_stamp()=: the
+stamp of the loaded library.
+=rgpot::abi::layout_compatible()= is true when revision, feature bits and hash are equal; =rgpot_cxx_layout_compatible()=
+is the same check for a caller that holds only the C struct, and returns 0 for
+NULL.
+
+#+attr_rgpot: run link=rgpot
 #+begin_src cpp
+#include <cstdio>
+
 #include "rgpot/abi/CxxLayout.hpp"
 
-if (!rgpot::abi::layout_compatible()) {
-  // the loaded library was built from other layouts than these headers
+int main() {
+  if (!rgpot::abi::layout_compatible()) {
+    std::fprintf(stderr, "librgpot was built from other C++ layouts\n");
+    return 1;
+  }
+  return 0;
 }
 #+end_src
 
-- =rgpot::abi::header_stamp()= is a =constexpr= of the header: the stamp the
-  consumer compiled against.
-- =rgpot::abi::library_stamp()= calls the exported =rgpot_cxx_layout_stamp()=:
-  the stamp of the loaded library.
-- =rgpot::abi::layout_compatible()= is true when the revision, the feature bits
-  and the hash are equal.
-- =rgpot_cxx_layout_compatible(const rgpot_cxx_layout_stamp_t *)= is the same check for a caller that holds only the C struct =(uint32_t revision, uint32_t features, uint64_t hash)=.
-  The C stamp struct of =rgpot.h= does not change.
-
-The hash folds =sizeof=, =alignof= and, for plain structures, =offsetof= of each
-covered type, plus the pointer width.
-Feature bit 0 is =RGPOT_HAS_CACHE=, which adds a virtual to =PotentialBase= and
-changes =Potential=.
+The hash folds =kCxxLayoutRevision=, the feature bits, the sizes of =void *= and
+=std::size_t=, and the =sizeof= and =alignof= of each covered type.
+For the plain structures it also folds the =offsetof= of each field, and for the
+enumerations the values consumers switch on.
+For the polymorphic classes it folds the number of virtual functions, because a
+vtable change does not show in =sizeof=.
+Feature bit 0 is =RGPOT_HAS_CACHE=, which adds the virtual =setCache= to
+=PotentialBase=.
 
 Covered types:
 
 - =ForceInput=, =ForceOut=, =ForceBatch=, =PotCaps=, =CalculatorGroup=
 - =LJConfig=, =LJClusterConfig=, =MorseConfig=, =ZBLConfig=
-- =Reentrancy= and =PotType= (width, and the values of the enumerators consumers
-  switch on)
+- =Reentrancy= and =PotType=
 - =PotentialBase=, =Potential<Derived>= (through one probe instantiation),
   =LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=
 - with the cache: =cache::EvalCounts= and =cache::PotentialCache=
 
-Not covered: the classes of optional backends (xtb, tblite, dftd3, dftd4,
+The classes of the optional backends are not covered (xtb, tblite, dftd3, dftd4,
 ExprPot, XcKernel, Metatomic, UMA, NWChem, CPMD, MOPAC, Skala, the Fortran
 potentials).
 Their headers and features differ between builds, so a stamp over them would
 refuse libraries that agree on everything a consumer uses.
-The plugin interface carries
-=RGPOT_PLUGIN_API_VERSION=, and the engine libraries carry =rgpot_engine_abi_version()=.
 
-** Scope
+The hash depends on the platform: operating system, architecture, standard
+library and data model form the tag =kCxxPlatformTag=.
+=kCxxSoversionTable= records the no-cache hash of each platform that CI builds,
+and =CppCore/rgpot/abi/cxx_soversion_ledger.txt= records a platform-independent
+fingerprint of the stamp's inputs for each soversion.
+=kCxxSoversion= is the ELF soversion of =librgpot=, read by Meson and CMake; it
+is not the hash.
 
-The first stamp covers the C surface of =rgpot-core=.
-The C++ and Python packages do not re-export it; the C++ classes have the layout
-stamp above.
-The engine plugins carry their own number, =rgpot_engine_abi_version()=.
-The eindir objective keeps
-=rgpot_eindir_abi_stamp()=, which reports the stamp of =eindir-core=, and =rgpot_eindir_abi_compatible()=,
-which checks a stamp against the =eindir-core= compiled into the loaded library.
+** History
 
-#+begin_src c
-eindir_abi_stamp_t rgpot_eindir_abi_stamp(void);
-int32_t rgpot_eindir_abi_compatible(const eindir_abi_stamp_t *stamp);
-#+end_src
+| Release | =rgpot.h= stamp | =librgpot= soversion |
+|---------+-----------------+----------------------|
+| 3.5.0   | 1, 0, 1         | 3                    |
+| 3.5.1   | 1, 0, 1         | 4                    |
+| 3.6.0   | 1, 1, 1         | 6                    |
+| 3.7.0   | 1, 1, 1         | 6                    |
 
-=rgpot_eindir_abi_compatible= returns what =eindir_core_abi_compatible= returns
-for the same stamp: nonzero for an equal =abi_major=, =objective_layout=,
-=objective_size=, =objective_align= and =dlpack_major=, an =abi_minor= and a
-=dlpack_minor= no newer than the library's, and no feature bit the library
-lacks.
-A null pointer returns 0.
-A caller that links only =librgpot= uses it instead of resolving
-=eindir_core_abi_compatible= itself.
+3.6.0 raised the minor for =rgpot_eindir_abi_compatible=; a caller built against
+minor 0 still matches it.
+The current header carries 1, 2 and 1.
+The Hessian-vector functions are additions, and their state lives behind the
+=fused_cache= pointer of the handle, so =rgpot_potential_t= keeps its layout and
+the layout revision stays at 1.
+A caller that needs them is refused by a 3.7 library.
 
+The ledger notes that soversion 3 was the 3.4.0 layout, which 3.5.0 reused after
+the layout changed, and that 4 is the 3.5.0 layout, shipped from 3.5.1.
+Soversion 5 recorded =LJPot= and =MorsePot= gaining a neighbour list and a
+cached pair table.
+Soversion 6 drops the copied half-list from LJ and Morse and gives ZBL and the
+open Lennard-Jones cluster a neighbour list.
+A program linked against soversion 4 does not load =librgpot.so.6=.

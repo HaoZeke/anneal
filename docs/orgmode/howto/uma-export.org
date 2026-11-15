@@ -16,8 +16,11 @@ It also evaluates other molecules for the same task head.
 The exporter needs fairchem-core 2.23, torch 2.13 and vesin, which the
 =umaexport= pixi environment provides.
 Point =RGPOT_UMA_CHECKPOINT= at a local =uma-s-1p1.pt=, or pass =--checkpoint=.
-When neither is set, fairchem downloads =--model= from Hugging Face.
+When neither is set, fairchem downloads =--model= (default =uma-s-1p1=) from
+Hugging Face.
+=--dtype= defaults to =float32=.
 
+#+attr_rgpot: syntax
 #+begin_src bash
 export RGPOT_UMA_CHECKPOINT=path/to/uma-s-1p1.pt
 pixi run -e umaexport export-uma-aoti -- \
@@ -52,8 +55,10 @@ export options.
 
 =UmaPot::checkpointProvenance()= returns these keys, and the load line on stderr
 prints =checkpoint_sha256=.
-In Python, with =scripts/= on the path, read them without loading the package:
+In Python, in the =umaexport= environment (the exporter imports torch, ASE and
+NumPy) and with =scripts/= on the path, read them without loading the package:
 
+#+attr_rgpot: compile
 #+begin_src python
 import export_uma_aoti as exp
 
@@ -88,7 +93,8 @@ spin, the same way fairchem does without =merge_mole=.
 The package records no =z_set=, =natoms= or =counts=.
 =z_max= (99 for =uma-s-1p1=) bounds the atomic numbers that the element
 embeddings can index.
-=UmaPot= refuses a larger atomic number with =UmaContractError= on =z_max=.
+=UmaPot= refuses an atomic number below 1 or above
+=z_max= with =UmaContractError= on =z_max=.
 =--merge-mole= instead folds the expert mix of =--atoms= into the weights.
 That package is smaller but valid for that composition only, and it records
 =z_set= and =counts=.
@@ -99,9 +105,11 @@ Before the package is kept, it must match =FAIRChemCalculator= on the same
 checkpoint and in the same dtype, within 1e-4 eV and 1e-4 eV/Angstrom, on:
 
 - =--atoms=,
-- =--atoms= with its last atom moved past the cutoff, which removes edges,
+- =--atoms= with its last atom moved past the cutoff, which removes edges
+  (skipped when the move removes none),
 - a second molecule, ethanol or water (skipped with =--merge-mole=),
-- each =--check-atoms= structure.
+- each =--check-atoms= structure (with =--merge-mole= it must have the
+  composition of =--atoms=).
 
 A package that fails any of these is deleted.
 =validated= in the metadata lists each check as =tag:natoms/nedges=.
@@ -113,8 +121,9 @@ before and after its methyl groups are pulled apart, and water against
 The bounds are 1e-5 eV and 1e-4 eV per Angstrom.
 The measured errors are at most 1.3e-7 eV and 6.4e-6 eV per Angstrom.
 That is the size of fairchem's own random edge-frame roll in float64.
-The test skips when fairchem, vesin or the checkpoint is missing.
+The test skips when torch, ASE, fairchem, vesin or the checkpoint is missing.
 
+#+attr_rgpot: syntax
 #+begin_src bash
 RGPOT_UMA_CHECKPOINT=path/to/uma-s-1p1.pt \
     pixi run -e umaexport python -m pytest tests/test_uma_dynamic_export.py -s
@@ -136,10 +145,12 @@ Nothing is written to the system temporary directory.
 On a fresh machine or a batch node, point the root at fast local storage that
 outlives the job, for example a scratch directory:
 
+#+attr_rgpot: syntax
 #+begin_src bash
 export RGPOT_CACHE_DIR="$SCRATCH/rgpot-cache"
 #+end_src
 
+#+attr_rgpot: fragment
 #+begin_src cpp
 rgpot::UmaConfig cfg;
 cfg.model_path = "uma-omol.pt2";
@@ -149,7 +160,8 @@ cfg.cache_dir = "/path/to/rgpot-cache";
 The unpack is reused by every later run with the same package, so only the first
 run pays for it.
 It may be deleted when no process is using it.
-=reference/engine_abi= describes the layout.
+The layout is under the UMA unpack cache in
+[[file:../reference/engine_abi.org][Engine plugin ABI]].
 
 ** Limits
 
@@ -164,8 +176,7 @@ It may be deleted when no process is using it.
   with a fixed axis.
   For such an input, for example HCN with 3 atoms, the exporter traces ethanol,
   then checks the input as usual.
-- The kernels are compiled for the CPU instruction set of the export host
-  (=AOTI_CPU_ISA= in the metadata).
-- A float64 =uma-s-1p1= package keeps all 32 experts and is about 1.2 GB.
+- The kernels are compiled for the CPU instruction set of the export host.
+- A float64 =uma-s-1p1= package keeps all experts and is about 1.2 GB.
   A float32 package is about half that size.
   A float64 =--merge-mole= package is about 55 MB.

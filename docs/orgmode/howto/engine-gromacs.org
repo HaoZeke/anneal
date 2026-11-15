@@ -15,6 +15,7 @@ A GROMACS built against =librgpot_gromacs= evaluates the potential without
 PLUMED and reports it as =Quantum En.=, but without a virial; see
 :doc:`engine-gromacs-qmmm`.
 
+#+attr_rgpot: skip PLUMED input deck, read by gmx mdrun -plumed
 #+begin_src text
 LOAD FILE=libRgpotPlumed.so
 ene: RGPOT ATOMS=1-256 POTENTIAL=SuttonChen OPTIONS={preset platinum cutoff 5.0} TYPES=Pt
@@ -33,9 +34,12 @@ A potential without a stress stops on a periodic box; see
 :doc:`../reference/potential_names`.
 
 =gmx mdrun= needs =PLUMED_KERNEL= pointed at =libplumedKernel.so=.
+The test driver
+=engines/gromacs/run_gromacs.py= sets it from =$CONDA_PREFIX/lib= when that file
+exists.
 The meson test =gromacs_mdrun= runs two cases.
-The first is one step of the Lennard-Jones dimer in a 4 nm box, checked against
-=rgpot-lj=.
+The first is a zero-step run (=nsteps = 0=) of the Lennard-Jones dimer in a 4 nm
+box, checked against =rgpot-lj=.
 The second is ten =md-vv= steps of a 256-atom Sutton-Chen platinum crystal in a
 triclinic box under C-rescale pressure coupling.
 For every frame it compares the bias, the GROMACS virial and the pressure with
@@ -43,23 +47,53 @@ For every frame it compares the bias, the GROMACS virial and the pressure with
 The GROMACS virial is \(\Xi = \tfrac12 V\sigma\).
 With =md-vv= the pressure is \(\tfrac{2}{V}(E_\mathrm{kin} - \Xi)\) with the
 full-step kinetic energy.
-Set =-Dwith_gromacs=enabled= and =-Dwith_plumed=enabled= to require the
-binaries.
-Auto skips the test when =gmx= or the PLUMED headers are absent, and meson says
-so.
+
+The test needs =gmx= on =PATH=, the PLUMED module (found through pkg-config
+=plumed=) and =python3=.
+With the default =auto= value of =with_gromacs=, a missing piece skips the test
+and meson prints
+=GROMACS test skipped: needs gmx, the PLUMED module and python3=.
+=-Dwith_gromacs=enabled= makes a missing piece a configure error.
+=-Dwith_plumed=enabled= makes a missing pkg-config =plumed= a configure error.
 
 ** Public constructor
 
-=rgpot_gromacs_potential= stores the GROMACS units once.
-=rgpot_md_kj_per_ev= is
-kJ/mol in one eV, 96.48533212331002, and =rgpot_md_nm_per_angstrom= is 0.1. A 1 eV well, an 8 Angstrom cutoff and a 1 Angstrom zero crossing are stored as =U0= from =rgpot_md_kj_per_ev=, cutoff 0.8 nm and psi 0.1 nm. An empty engine path evaluates the shifted potential in process. A path is a library whose =rgpot_md_native_force= already speaks nanometres and kJ/mol;
-the constructor converts the geometry and the result with the stored factors.
+=rgpot_gromacs_potential= is the shifted 12-6 Lennard-Jones potential.
+It takes =u0= in eV and =cutoff= and =psi= in Angstrom, and stores them once in
+GROMACS units.
+=rgpot_md_kj_per_ev()= returns 96.48533212331002, the
+kJ/mol in one eV, and =rgpot_md_nm_per_angstrom()= returns 0.1. So =u0= 1 eV, =cutoff= 8 Angstrom and =psi= 1 Angstrom are stored as 96.48533212331002 kJ/mol,
+0.8 nm and 0.1 nm.
+An empty engine path (=NULL= or =""= in C) evaluates the potential in process,
+in Angstrom and eV.
+A non-empty path is a library that exports =rgpot_engine_create=,
+=rgpot_engine_destroy= and =rgpot_md_native_force= in nanometres and
+kJ/mol. The constructor dlopens it, passes it the stored values, and converts the geometry to nm and the energy and forces back to eV and eV/Angstrom
+on every call.
+The in-tree =libnative_lj_engine.so= is such a library.
+
+A =u0=, =cutoff= or =psi= that is not positive and finite (NaN included) makes
+the C++ constructor throw =std::invalid_argument=.
+A library that cannot be opened, or that lacks one of the three symbols, makes
+it throw =std::runtime_error=.
+The C constructor returns =NULL= and writes the message to =err=; Python raises
+=ValueError= or =RuntimeError=.
+=rgpot_external_potential_energy_forces= returns 0, or 1 with a message in
+=err=.
 =rgpot_external_potential_energy_forces= and =rgpot_external_potential_free= are
 the same calls as for LAMMPS.
-The dimer is -0.3203213355 eV.
-When =gmx= or the GROMACS headers are absent the engine comparison is skipped
-and the log says so.
 
+The dimer at 1.5 Angstrom with these parameters is -0.3203213355 eV.
+The meson test
+=external_potentials= checks that value through =libnative_lj_engine.so= and in
+process.
+It needs no GROMACS installation.
+The meson test =gromacs_unit_reference= compares the stored factors with
+=gromacs/math/units.h=.
+It is defined only when that header is found under the Python prefix, and meson
+prints nothing when it is not.
+
+#+attr_rgpot: run
 #+begin_src python
 import numpy as np
 import rgpot
@@ -70,12 +104,23 @@ energy, forces, variance = pot(
     [1, 1],
     np.diag([20.0, 20.0, 20.0]),
 )
+assert f"{energy:.10f}" == "-0.3203213355"
 #+end_src
 
+#+attr_rgpot: run link=rgpot
 #+begin_src cpp
-rgpot::ExternalLjConfig cfg;
-cfg.u0 = 1.0;
-cfg.cutoff = 8.0;
-cfg.psi = 1.0;
-auto pot = rgpot::rgpot_gromacs_potential(cfg);
+#include "rgpot/ExternalPot/ExternalPot.hpp"
+
+#include <cstdio>
+
+int main() {
+  rgpot::ExternalLjConfig cfg;
+  cfg.u0 = 1.0;
+  cfg.cutoff = 8.0;
+  cfg.psi = 1.0;
+  auto pot = rgpot::rgpot_gromacs_potential(cfg);
+  std::printf("%.6f kJ/mol, %.2f nm, %.2f nm\n", pot->nativeU0(),
+              pot->nativeCutoff(), pot->nativePsi());
+  return 0;
+}
 #+end_src

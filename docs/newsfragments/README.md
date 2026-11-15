@@ -15,9 +15,9 @@ for Sphinx) and removes the fragment files.
 - **Required** when the PR touches shipped surfaces (CI: `towncrier` workflow
   runs `towncrier check` vs the PR base for `CppCore/`, `rgpot-core/`, meson,
   CMake, pixi workspace, etc.).
-- **May omit** for pure `docs` / `ci` / `chore` / `style` changes that do not
-  alter library/CLI/crate behavior (avoid those paths or accept that
-  `towncrier check` may still pass if no prior fragments are missing).
+- The `towncrier` job runs on every pull request with no path filter, so a
+  `docs` / `ci` / `chore` / `style` change also needs a fragment (`dev` type
+  when it does not alter library/CLI/crate behaviour).
 
 Preview: `uvx towncrier build --draft` or `pixi r towncrier-draft` if defined.
 

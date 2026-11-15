@@ -25,6 +25,7 @@ One way is =meson install= with =--destdir=.
 The harness reads the compiler and the build options from the build.
 It finds them in the =meson-info= directory.
 
+#+attr_rgpot: syntax
 #+begin_src bash
 python scripts/cpu_scaling.py --build-dir build --out results \
     --plot cpu_scaling.png

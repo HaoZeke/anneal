@@ -15,6 +15,7 @@ clients.
 
 ** Clone and build
 
+#+attr_rgpot: syntax
 #+begin_src bash
 git clone https://github.com/OmniPotentRPC/rgpot.git
 cd rgpot
@@ -25,27 +26,38 @@ meson compile -C bbdir
 
 The RPC build produces the =potserv= executable:
 
+#+attr_rgpot: output path of the built server
 #+begin_example
 bbdir/CppCore/potserv
 #+end_example
 
 ** Run the tests
 
+#+attr_rgpot: syntax
 #+begin_src bash
 meson test -C bbdir --print-errorlogs
 #+end_src
 
 ** Run the RPC smoke
 
-The checked smoke starts =potserv=, connects through pycapnp, sends a
-=ForceInput=, and verifies the returned =PotentialResult=:
+=tests/rpc_integ.py= starts =potserv= with the =CuH2= potential and connects
+through pycapnp.
+It sends one =ForceInput= for a Cu atom and an H atom 1.5 Angstrom apart and
+checks the energy and forces in the returned =PotentialResult=.
+It then starts a second =potserv= with =Morse= and checks that =configure=
+changes the energy.
 
+#+attr_rgpot: syntax
 #+begin_src bash
 python tests/rpc_integ.py --server-bin ./bbdir/CppCore/potserv
 #+end_src
 
+The script prints =Integration test passed.= and =Morse configure passed.= when
+both checks pass.
+
 Run configure smokes for the runtime-loaded quantum frontends:
 
+#+attr_rgpot: syntax
 #+begin_src bash
 python tests/rpc_integ.py \
   --server-bin ./bbdir/CppCore/potserv \
@@ -53,9 +65,14 @@ python tests/rpc_integ.py \
   --cpmd-smoke
 #+end_src
 
+These smokes send =configure= requests to an =NWChem= and a =CPMD= server.
+They do not need an engine: without one, =configure= of the engine arm returns
+=ok=False= and the smoke still passes.
+
 ** What just happened
 
-1. =potserv= loaded a built-in potential and exposed it over Cap'n Proto RPC.
+1. =potserv= loaded a built-in potential (=CuH2=, then =Morse=) and exposed it
+   over Cap'n Proto RPC.
 2. The Python client sent atomic positions in =ForceInput=.
 3. The server returned energy and forces in =PotentialResult=.
 4. The same wire protocol works from any language with a Cap'n Proto
@@ -65,12 +82,15 @@ implementation.
 
 Launch a Lennard-Jones server on port 12345:
 
+#+attr_rgpot: syntax
 #+begin_src bash
 ./bbdir/CppCore/potserv 12345 LJ
 #+end_src
 
-For runtime-loaded quantum engines, pass the matching selector and engine path:
+For runtime-loaded quantum engines, pass the matching selector and engine path.
+Each command starts a server on port 12345, so run one at a time:
 
+#+attr_rgpot: syntax
 #+begin_src bash
 RGPOT_CPMD_ENGINE="$PWD/bbdir/CppCore/libcpmdc_fake_engine.so" \
   ./bbdir/CppCore/potserv 12345 CPMD
@@ -84,6 +104,7 @@ This command reads the water geometry in =tests/data/cpmd/water.xyz=.
 The cell is a cube with side 20 angstrom.
 The stand-in engine comes from the tests build above.
 
+#+attr_rgpot: syntax
 #+begin_src bash
 export RGPOT_CPMD_ENGINE="$PWD/bbdir/CppCore/libcpmdc_fake_engine.so"
 python tests/cpmd_water.py \
@@ -93,12 +114,15 @@ python tests/cpmd_water.py \
 
 The command prints:
 
+#+attr_rgpot: output tests/cpmd_water.py with the stand-in engine
 #+begin_example
 water geometry: water
 water energy: 0.77
 #+end_example
 
-=0.77= is the energy that stand-in engine returns for this geometry and cell.
+The stand-in engine does not compute an energy from the geometry.
+Its energy is 0.75 plus 0.001 times the last entry of the cell (the z length),
+so the 20 angstrom cell gives 0.77 eV.
 The same command with =RGPOT_CPMD_ENGINE= pointed at a CPMD-archive
 =libcpmdc.so= evaluates that file with CPMD.
 

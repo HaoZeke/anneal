@@ -7,18 +7,20 @@
 ** Why is cbindgen behind a feature flag?
 
 =cargo publish= forbids build scripts that modify the source directory.
-Since =cbindgen= writes =include/rgpot.h= into the crate tree, it must be opt-
-in.
+Since =cbindgen= writes =rgpot-core/include/rgpot.h= into the crate tree, it
+must be opt-in.
 The committed header is the canonical copy; regenerate it with
-=pixi r gen- header= when the public Rust API changes.
+=pixi r gen-header= when the public Rust API changes.
 
 ** Why is the Cap'n Proto schema bundled?
 
 The schema at =rgpot-core/schema/Potentials.capnp= is included in the crate so
-that the =rpc= feature works when installed from =crates.io=, where the
-monorepo's =CppCore/= directory is not available.
+that the =schema= feature (and the =rpc= and =profile= features that enable it)
+works when installed from =crates.io=, where the monorepo's =CppCore/= directory
+is not available.
 The =build.rs= tries the bundled copy first, then falls back to
-=CppCore/rgpot/ rpc/Potentials.capnp= in the monorepo.
+=CppCore/rgpot/rpc/Potentials.capnp= in the monorepo.
+When neither exists, it writes an empty stub module instead.
 
 ** How do I repin potentials-schema?
 
@@ -31,6 +33,7 @@ Change =revision= and =directory= in =subprojects/potentials-schema.wrap= and
 copy the upstream file over both copies.
 Then append the new ordinals to =CppCore/rgpot/rpc/Potentials.ordinals=:
 
+#+attr_rgpot: syntax fetches the pinned schema over the network
 #+begin_src bash
 python3 CppCore/rgpot/rpc/schema_ledger.py append
 python3 CppCore/rgpot/rpc/schema_ledger.py check --fetch --base origin/develop
@@ -43,9 +46,11 @@ vendored copy is not the pinned file, and when the effective schema disagrees
 with the ledger.
 Ordinals belong to potentials-schema: add a new field or arm there first, then
 repin.
-The =schema ledger= CI job runs this check against the pinned commit, and the
-meson =schema= suite runs it and =schema-sync-canonical-*= against the
-subproject checkout.
+The =schema_ledger= job of =CI (orchestrator)= runs this check with =--fetch=
+and, when the base commit is available, =--base= set to the pull request base.
+The meson =schema= suite runs it too, and with the =potentials-schema=
+subproject also =schema-sync-canonical-rpc= and =schema-sync-canonical-core=
+against that checkout.
 
 ** How do I add an rgpot-local schema field?
 
@@ -56,6 +61,7 @@ Write a diff against the vendored copy that only adds lines, put it in
 Leave the vendored copies alone.
 =schema_ledger.py append= then records each new ordinal as =local=:
 
+#+attr_rgpot: syntax fetches the pinned schema over the network
 #+begin_src bash
 python3 CppCore/rgpot/rpc/schema_ledger.py append
 python3 CppCore/rgpot/rpc/schema_ledger.py check --fetch --base origin/develop
@@ -75,17 +81,22 @@ same ordinal retires it.
 ** Why is the crate README in org-mode?
 
 The source of truth is =rgpot-core/README.org=.
-It is exported to =README.md= via =pixi r -e docs gen-readme= (which uses Emacs
-=ox-md=).
+It is exported to =rgpot-core/README.md= via =pixi r -e docs gen-readme= (which
+uses Emacs =ox-md=).
 The rendered markdown is committed and referenced by =Cargo.toml= for display on
 crates.io.
 Edit the =.org= file, then regenerate.
+Both files carry the version in cogapp markers, so run
+=pixi r -e version release-cog= after a version change.
 
 ** How do I add a new pixi environment?
 
 Edit =pixi.toml=: add a feature section with its dependencies, then register it
 in =[environments]=.
-See the existing =rpctest= and =docs= features as examples.
+See the existing =rpc=, =itests= and =docs= features, and the =rpctest=
+environment that combines =rpc= and =itests=, as examples.
+Give a new environment that builds the project its own CI job, as the
+[[file:index.org][Developer Guide]] explains.
 
 ** Where does the Rust API documentation come from?
 
@@ -96,12 +107,14 @@ documentation site alongside the C++ API reference.
 
 ** How do I run a single Rust test?
 
+#+attr_rgpot: syntax compiles the Rust crate
 #+begin_src bash
 cargo nextest run --manifest-path rgpot-core/Cargo.toml -E 'test(test_name)'
 #+end_src
 
 Or with standard =cargo test=:
 
+#+attr_rgpot: syntax compiles the Rust crate
 #+begin_src bash
 cargo test --manifest-path rgpot-core/Cargo.toml -- test_name
 #+end_src

@@ -40,8 +40,9 @@ keep whatever the GROMACS force field gives them.
 =grompp= already removes the QM-QM nonbonded pairs and bonded terms, so the QM
 region interacts only through rgpot.
 A =POTENTIAL= needs =CHARGE 0= and =MULTIPLICITY 1=.
-An =ENGINE= gets both through =rgpot_engine_set_charge_spin=; one without that
-call needs =CHARGE 0= and =MULTIPLICITY 1= too.
+An =ENGINE= gets both through =rgpot_engine_set_charge_spin=; when the engine
+lacks that call or the call returns 3, the input needs =CHARGE 0= and
+=MULTIPLICITY 1= too.
 
 ** Errors
 

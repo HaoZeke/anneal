@@ -25,11 +25,13 @@ Run every command from the repository root.
 
 =potserv= takes a port and the name of one potential:
 
+#+attr_rgpot: syntax
 #+begin_src bash
 ./bbdir/CppCore/potserv 12345 LJ &
 #+end_src
 
-It prints =Server running on port 12345 with LJ potential.= when it is ready.
+It prints =Loading LJ potential...= and then
+=Server running on port 12345 with LJ potential.= when it is ready.
 
 ** Step 2: send one geometry
 
@@ -39,10 +41,12 @@ numbers and the cell, and reads energy and forces from the =PotentialResult=.
 
 #+INCLUDE: "pes_scan/evaluate_once.py" src python
 
+#+attr_rgpot: syntax
 #+begin_src bash
 python docs/orgmode/tutorials/pes_scan/evaluate_once.py 12345
 #+end_src
 
+#+attr_rgpot: output evaluate_once.py against the LJ server
 #+begin_example
 energy: -0.890965 eV
 force on atom 0: [+2.211693, +0.000000, +0.000000] eV/Angstrom
@@ -55,6 +59,7 @@ At 1.2 Angstrom the pair sits outside its minimum, so each atom is pulled toward
 the other and the two forces are equal and opposite.
 Stop the server before the next step:
 
+#+attr_rgpot: syntax
 #+begin_src bash
 kill %1
 #+end_src
@@ -65,12 +70,16 @@ kill %1
 per call over a single connection, and stops the server when the scan ends.
 It reuses =connect= and =calculate= from the client above.
 
+#+attr_rgpot: syntax
 #+begin_src bash
 python docs/orgmode/tutorials/pes_scan/scan_pes.py --server-bin ./bbdir/CppCore/potserv
 #+end_src
 
+The script writes =dimer_curves.png= and =cuh2_elbow.png= into
+=docs/orgmode/tutorials/pes_scan/=, over the copies in the repository.
 The first lines of output cover the two pair potentials:
 
+#+attr_rgpot: output first lines of scan_pes.py
 #+begin_example
 LJ dimer: 200 distances from 0.95 to 3.00 Angstrom
   lowest energy -0.999800 eV at r = 1.1251 Angstrom
@@ -86,8 +95,8 @@ Morse dimer: 200 distances from 2.30 to 7.00 Angstrom
 #+CAPTION: Angstrom.
 [[file:../../orgmode/tutorials/pes_scan/dimer_curves.png]]
 
-The LJ curve bottoms out one grid step from the 12-6 minimum, which sits at the
-sixth root of 2 times the zero crossing.
+The lowest LJ grid point is the one nearest the 12-6 minimum, which sits at the
+sixth root of 2 times the zero crossing (1.1225 Angstrom).
 The Morse server uses platinum parameters, a well depth of 0.7102 eV at 2.8970
 Angstrom (=CppCore/rgpot/Morse/MorsePot.hpp=); its lowest grid point is
 -0.710085 eV at 2.8905 Angstrom.
@@ -109,6 +118,7 @@ The reference energy is the same slab with the molecule 50 Angstrom up, beyond
 the 6.1 Angstrom cutoff of the potential
 (=CppCore/rgpot/fortran/rgpot_cuh2.f90=).
 
+#+attr_rgpot: output last lines of scan_pes.py
 #+begin_example
 fixture H2: bond 1.3428 Angstrom, height 0.8520 Angstrom
 CuH2 elbow: 4158 geometries of 216 Cu + 2 H

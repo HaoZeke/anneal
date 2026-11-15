@@ -4,29 +4,46 @@
 
 * Metatomic and the engine ABI
 
-A metatomic or UMA model is not linked into =librgpot=.
-The host dlopens a library that exports =rgpot_engine_create= and
-=rgpot_engine_force=, then passes positions in Angstrom, a row-major cell, and
-atomic numbers.
+With =-Dwith_python=true=, =librgpot= links neither =MetatomicPot= nor =UmaPot=,
+so =import rgpot= does not need libtorch.
+A metatomic or UMA model is then reached through an engine library.
+With =-Dwith_metatomic=true= and =-Dwith_python=false=, both potentials are
+linked into =librgpot=.
+
+The host dlopens a library that exports =rgpot_engine_create=,
+=rgpot_engine_destroy= and =rgpot_engine_force= (declared in
+=CppCore/rgpot/engine_c_abi.h=).
+It passes positions in Angstrom, a row-major cell, and atomic numbers.
 Energy comes back in eV and forces in eV/Angstrom.
-=rgpot_engine_force_batch= evaluates several systems that share one composition.
-=rgpot_engine_last_error= copies the last sentence into a caller buffer and
-returns its length.
+=rgpot_engine_force= returns 0 on success, a positive code for a recoverable
+failure, and a negative code when the instance is unusable.
+=rgpot_engine_force_batch= is optional; it evaluates several systems that share
+one composition.
+=rgpot_engine_last_error= copies the message of the last failed call into a
+caller buffer (at most =len - 1= bytes, NUL-terminated) and returns the full
+message length, or 0 when there is none.
 
 The in-tree LJ engine, =liblj_engine.so=, is that same ABI with a 24-byte config
-of three float64 values: =u0=, cutoff, =psi=.
-A null config is =u0= 1 eV, cutoff 15 Angstrom, =psi= 1 Angstrom.
-The meson test
-=lj_engine= dlopens it and compares the energy and the forces, bit for bit, with =rgpot_lj_eval=.
+of three float64 values: =u0= (eV), cutoff and =psi= (Angstrom).
+Any other non-zero config length fails =rgpot_engine_create= with a message in
+the error buffer.
+A null config, or a length of 0, is =u0= 1 eV, cutoff 15 Angstrom, =psi= 1
+Angstrom.
+A metatomic or UMA engine takes a Cap'n Proto message instead
+(=MetatomicParams=, =UmaParams=).
+The meson test =lj_engine= dlopens =liblj_engine.so= and compares the energy and
+the forces, bit for bit, with =rgpot_lj_eval=.
 A metatomic engine is selected by which library is opened, not by a different
 host call.
 
-=rgpot_engine_abi_version= is the major.
-=rgpot_engine_abi_stamp= reports minor and layout.
+=rgpot_engine_abi_version= returns the major version.
+=rgpot_engine_abi_stamp= is optional and reports the major, the minor and the
+layout revision; an engine without it counts as minor 0, layout 1.
 A host that only calls =rgpot_engine_abi_version= keeps working across a minor
 bump.
-The stamp and =rgpot_engine_abi_compatible= refuse a different major or a
-different layout.
+=rgpot_engine_abi_compatible= returns nonzero only for an equal major, an equal
+layout revision, and an engine minor at least the host's.
+A null stamp returns 0.
 
 ** Charge and spin
 
@@ -43,6 +60,7 @@ Each is a =TensorMap= with one block, one sample (=system=) and one property
 named after the value: =charge=, =spin_multiplicity= or =spin=.
 A model declares the names it reads and nothing else:
 
+#+attr_rgpot: fragment excerpt of a metatomic model class
 #+begin_src python
 def requested_inputs(self) -> Dict[str, ModelOutput]:
     return {
@@ -68,4 +86,4 @@ for a model that reads them without declaring them.
 It needs =checkConsistency= off, because metatomic then rejects data the model
 does not declare.
 =scripts/export_tiny_metatomic_model.py= exports the small models the engine
-tests use, each reading some of the three.
+tests use, which read the charge, the multiplicity, both or neither.

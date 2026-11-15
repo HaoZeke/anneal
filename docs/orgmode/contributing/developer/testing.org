@@ -6,31 +6,39 @@
 
 ** C/C++ Tests
 
+#+attr_rgpot: syntax full build and test run
 #+begin_src bash
 meson setup bbdir -Dwith_tests=true -Dwith_rpc=true --buildtype=debug
 meson compile -C bbdir
 meson test -C bbdir --print-errorlogs
 #+end_src
 
-=cmake= works as well:
+=cmake= works as well.
+CMake's =RGPOT_WITH_CACHE= defaults to =ON= and needs RocksDB, unlike Meson's
+=with_cache=false=, so the command below turns it off.
+[[file:../../reference/build_options.org][Build options]] lists every Meson and
+CMake option.
 
+#+attr_rgpot: syntax full build and test run
 #+begin_src bash
-cmake -B build \
+cmake -B build-cmake \
   -DRGPOT_BUILD_TESTS=ON \
   -DRGPOT_BUILD_EXAMPLES=ON \
-  -DRGPOT_WITH_RPC=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
+  -DRGPOT_WITH_RPC=ON \
+  -DRGPOT_WITH_CACHE=OFF
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
 #+end_src
 
 *** Floating-point contraction
 
-=FastNlistTest= and =ReducedPairTest= compare kernels bit for bit with plain
+=FastNlistTest=, =ReducedPairTest=, =EAMCellVerletTest=, =StreamParityTest=,
+=NeighbourLayerTest= and =TersoffSiCTest= compare kernels bit for bit with plain
 products and sums.
 The kernels are built with contraction off.
-=CppCore/meson.build= builds those two tests the same way, so neither side fuses
-and the compare stays exact.
-A new test of that kind belongs in the same condition.
+=CppCore/meson.build= builds those six tests with =-ffp-contract=off= too, so
+neither side fuses and the compare stays exact.
+A new test of that kind belongs in the same list.
 Outside it, the test can pass on x86-64, where the baseline has no fused
 multiply-add, and miss by an ulp on macOS arm64.
 To exercise contraction on x86-64, build with Clang at the default debug
@@ -38,6 +46,7 @@ buildtype.
 GCC does not fuse at =-O0=, and an optimized build folds the Morse test
 expressions to constants.
 
+#+attr_rgpot: syntax full build and test run
 #+begin_src bash
 CXX=clang++ meson setup bbfast -Dwith_tests=true \
   -Dcpp_args='-ffp-contract=fast -mfma'
@@ -47,13 +56,19 @@ meson test -C bbfast --print-errorlogs
 
 ** Rust Tests
 
+=rust-test-all= enables every feature of =rgpot-core= (=schema=, =profile=,
+=rpc=, =cache=, =gen-header=).
+=gen-header= makes the build rewrite =rgpot-core/include/rgpot.h=.
+
+#+attr_rgpot: syntax compiles the Rust crate
 #+begin_src bash
 pixi r rust-test          # default features only
-pixi r rust-test-all      # all features (rpc, cache, gen-header)
+pixi r rust-test-all      # all features
 #+end_src
 
 Or directly:
 
+#+attr_rgpot: syntax compiles the Rust crate
 #+begin_src bash
 cargo nextest run --manifest-path rgpot-core/Cargo.toml
 cargo test --doc --manifest-path rgpot-core/Cargo.toml  # doc tests
@@ -61,8 +76,11 @@ cargo test --doc --manifest-path rgpot-core/Cargo.toml  # doc tests
 
 ** RPC Integration Tests
 
-The =rpctest= environment includes Python bindings via =pycapnp=:
+The =rpctest= environment includes Python bindings via =pycapnp=.
+=tests/rpc_integ.py= starts =potserv= with the =CuH2= backend, so the build needs the Fortran potentials (=with_fortran_pots=,
+=auto= by default).
 
+#+attr_rgpot: syntax needs a built bbdir
 #+begin_src bash
 pixi shell -e rpctest
 python tests/rpc_integ.py --server-bin ./bbdir/CppCore/potserv
@@ -76,13 +94,16 @@ python tests/test_rpc_integ_cpmd.py
 
 ** NWChem suite (=--suite nwchem=)
 
-Frontend + stub ABI tests always build with the main library
-(=with_tests=true=).
-Energy/grad tests =SKIP= unless an external =libnwchemc= is on the library path
-(=NWCHEMC_LIBRARY=, =RGPOT_NWCHEMC_ENGINE=, or =RGPOT_NWCHEM_ENGINE=).
+The frontend and stub ABI tests build when
+=with_tests=true= and =with_rpc=true=.
+=meson test= points =RGPOT_NWCHEM_ENGINE= at the in-tree
+=libnwchemc_fake_engine.so=.
+Cases that need a real NWChem SCF =SKIP= unless
+=NWCHEMC_LIBRARY= or =RGPOT_NWCHEMC_ENGINE= names a real =libnwchemc=.
 The message ABI test uses a fake =nwchemc_*= shared library and verifies rgpot
 passes serialized =NWChemParams= bytes through the =dlopen= boundary.
 
+#+attr_rgpot: syntax full build and test run
 #+begin_src bash
 meson setup bbdir -Dwith_tests=true -Dwith_rpc=true
 meson compile -C bbdir
@@ -95,13 +116,14 @@ project, not by rgpot.
 
 ** CPMD suite (=--suite cpmd=)
 
-Frontend + stub ABI tests always build with the main library
-(=with_tests=true=).
+The frontend and stub ABI tests build when
+=with_tests=true= and =with_rpc=true=.
 The CPMD frontend loads a split =libcpmdc= engine at runtime via
 =CPMDC_LIBRARY=, =RGPOT_CPMDC_ENGINE=, or =RGPOT_CPMD_ENGINE=.
 Configure-only Python smokes use =PotentialConfig.cpmd= and do not require a
 live engine.
 
+#+attr_rgpot: syntax full build and test run
 #+begin_src bash
 meson setup bbdir -Dwith_tests=true -Dwith_rpc=true
 meson compile -C bbdir

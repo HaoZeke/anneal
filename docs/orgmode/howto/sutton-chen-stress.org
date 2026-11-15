@@ -14,7 +14,10 @@ The convention and the checks are in the
 Start from a parameter row, make it periodic, and set the flag.
 Keep the cutoff under half the smallest face spacing of the cell, since periodic
 evaluation keeps one image of each partner.
+A periodic configuration with a cutoff that is not positive makes the
+constructor throw =std::invalid_argument=.
 
+#+attr_rgpot: fragment first part of one main; the next two blocks continue it
 #+begin_src cpp
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/SuttonChen/SuttonChenScales.hpp"
@@ -32,6 +35,7 @@ The box is row-major, one lattice vector per row.
 This cell has four conventional face-centered cubic (fcc) cells along each edge,
 built at 0.99 of the lattice parameter, so 256 atoms in a compressed crystal.
 
+#+attr_rgpot: fragment continues the main started above
 #+begin_src cpp
 const double lattice = 0.99 * cfg.a;
 const double basis[4][3] = {
@@ -55,7 +59,10 @@ The cell edge is 15.52 Angstrom, more than twice the cutoff.
 
 A potential's call operator returns energy, forces and variance only.
 Call =forceImpl= with a =ForceOut= to get the stress as well.
+A periodic call whose box has a non-positive diagonal entry throws
+=std::invalid_argument=.
 
+#+attr_rgpot: fragment continues the main started above
 #+begin_src cpp
 std::vector<double> forces(pos.size());
 rgpot::ForceOut out{};
@@ -71,13 +78,17 @@ std::printf("pressure %.4f GPa\n",
 #+end_src
 
 After the call, =out.has_stress= is 1 when the stress tensor was written.
-It stays 0 when the flag is clear or the cell has no positive volume.
+With the flag set and a cell of zero volume (or a null box on a non-periodic
+call), the call sets it to 0 and zeroes the tensor.
+With the flag clear, the call leaves =has_stress= and =stress= as the caller set
+them, which is 0 here because =out= is value-initialised.
 
 ** What to expect
 
 The three blocks print these lines when they sit in one =main= that also
 includes =<cstdio>= and =<vector>=.
 
+#+attr_rgpot: output program output of the three blocks above in one main
 #+begin_example
 energy -1495.168516 eV, has_stress 1
 sigma_xx -9.3308 GPa

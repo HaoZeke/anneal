@@ -14,18 +14,22 @@ one Cap'n Proto schema (~Potentials.capnp~).
 ** Three carriers
 
 - ~ForceInput~ carries the geometry for one evaluation: positions, atomic
-numbers, the cell, and the unit strings the caller wants back.
+  numbers, the cell, and the unit strings the caller wants back.
+  It can also carry a per-step charge and spin multiplicity and a request for a
+  neighbour list.
 - ~PotentialResult~ carries the energy and the flat force array for that
-evaluation.
+  evaluation.
+  Optional fields, such as a Hessian, a dipole or a stress tensor, are filled in
+  by the backends that compute them.
 - ~PotentialConfig~ carries backend setup, and only setup.
-A client sends it once through ~configure~, then sends a new ~ForceInput~ for
-every geometry.
+  A client sends it once through ~configure~, then sends a new ~ForceInput~ for
+  every geometry.
 
 Geometry stays off the configuration message.
 A change of method does not reshape the coordinates, and a change of coordinates
 does not repeat the method.
-The same split is what ~cpmdc~ uses for ~CPMDParams~ and ~ForceInput~, and what
-eOn's ~RgpotPot~ uses when it calls the NWChem and CPMD frontends.
+The ~libcpmdc~ C ABI that ~CPMDPot~ loads uses the same split: a session takes
+the Cap'n Proto ~CPMDParams~ once, and each step takes a ~ForceInput~.
 
 ** One schema, many languages
 
@@ -42,14 +46,16 @@ can call a C++ server, and the reverse.
 Inside the library the units are fixed: energy in eV, length in Angstrom, force
 in eV/Angstrom.
 A caller that works in Hartree or Bohr names those units on ~ForceInput~.
-The server converts the inbound geometry before the potential runs, and converts
-the energy and forces on the way out.
-The potential implementations themselves stay in the native units.
+~potserv~ converts the inbound positions and cell to Angstrom before the
+potential runs, and converts the energy and forces to the caller's units on the
+way out.
+The potentials themselves compute in eV and Angstrom.
 
 ** Engines stay outside the server
 
 ~NWChemPot~ and ~CPMDPot~ are frontends.
-They always build.
+They build whenever the RPC stack is on
+(~-Dwith_rpc=true~ or ~-Dwith_rpc_client_only=true~).
 At run time they ~dlopen~ ~libnwchemc~ and ~libcpmdc~ from the split projects.
 rgpot does not embed those engines.
 A test build can point the same frontends at the in-tree fake engines.
@@ -57,11 +63,23 @@ Method options travel in the matching ~PotentialConfig~ arm (~nwchem~ or
 ~cpmd~).
 The geometry still arrives on ~ForceInput~.
 
+** eOn over rgpot
+
+eOn uses the same split, in process and over RPC; the setup is in
+[[file:../howto/eon-rgpot.org][eOn Potentials Over rgpot]].
+
+- =configure(PotentialConfig)= once per method (NWChemParams / CPMDParams).
+- =calculate(ForceInput)= per geometry (positions, atomic numbers, cell, units).
+- Units on the wire (=lengthUnit= / =energyUnit=); eOn's =RgpotPot= converts
+Hartree → eV and Hartree/bohr → eV/Å at the boundary.
+- Engines are optional at build time: CI uses fake =libnwchemc= / =libcpmdc=;
+production sets =NWCHEMC_LIBRARY= / =CPMDC_LIBRARY= (or aliases).
+
 ** Where the layers sit
 
 The schema is what a client sees.
 Under it, a Rust core owns the public types and the C ABI, and hand-written C++
-wrappers give RAII handles over that ABI.
+wrappers give move-only handles over that ABI.
 The C++ potentials stay in ~CppCore~ and register back into the core through a
 callback.
 One ~potserv~ process hosts one backend, named by the selector it starts with.
@@ -75,9 +93,8 @@ built with that option.
 #+CAPTION: Source: =figures/rpc_layers.dot=.
 [[file:../../orgmode/explanation/figures/rpc_layers.svg]]
 
-The layer-by-layer layout, the status codes, and the capability fields are
-reference material:
-
-#+begin_export rst
-:doc:`../reference/architecture`
-#+end_export
+The layers, the error conventions and the capability check are explained in
+[[file:architecture.org][Architecture]].
+The status codes and entry points are listed in
+[[file:../reference/c_abi.org][C ABI of rgpot-core]], and the directory layout
+in [[file:../reference/architecture.org][Architecture reference]].

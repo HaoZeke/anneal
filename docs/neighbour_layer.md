@@ -52,8 +52,8 @@ is twice that far and can miss a pair. The builder here uses half the
 skin, the distance that keeps every pair that was inside the cutoff.
 
 A stream does not allocate the pairs of the whole system. `Walk::pull`
-fills a caller buffer for one central atom, or one cluster of four, and
-the caller may stop. JAX-MD cannot do this: a jit-compiled list has a
+gathers one central atom, or one cluster of four, at a time, writes at
+most the length of the caller buffer, and the caller may stop. JAX-MD cannot do this: a jit-compiled list has a
 static capacity, `neighbor_fn.allocate` sizes it, and `did_buffer_overflow`
 tells the caller to allocate again
 ([partition.py](https://raw.githubusercontent.com/jax-md/jax-md/main/jax_md/partition.py)).
@@ -61,8 +61,10 @@ That is the right answer when the consumer is XLA. It is the wrong answer
 when the consumer is a force kernel that can run during the walk. The C
 function `rgpot_nlist_build` still reports the full count when the caller
 buffer is short, so a fixed buffer can grow the way JAX-MD does, without
-making that the only path. `Auto` stores when a bound on the pair count
-fits in `MemAvailable` and otherwise leaves the table empty.
+making that the only path. The public query has no automatic mode: the
+caller picks `build`, `Builder` or `Walk`. The automatic choice between
+storing and streaming is `Mode::Auto` in `rgpot::nlist::Neighbours`,
+described below.
 
 Cell shifts are integers along the three cell vectors, and the vector is
 `r_j - r_i + S H`, which is the sentence in vesin's `VesinNeighborList`
@@ -79,9 +81,17 @@ Neither is a cell list, and neither speaks triclinic shifts. This build
 does not fill a GPU. `Table::device` is 0. The arrays are the contract a
 later device fill would write.
 
-Threads, when `OMP_NUM_THREADS` is set, take contiguous atoms and the
-results are concatenated in thread order, so the stored order matches one
-thread. Vesin merges per-thread lists without promising that order.
+`build` uses threads when `OMP_NUM_THREADS` is above 1 and there are at
+least 8192 atoms. A pair list splits the cells into contiguous ranges
+when the cell is unsheared and at least two search radii across every
+periodic axis. A sheared or narrower cell may need several images of a
+pair, so the pair list then splits the atoms and each thread runs the
+one-thread walk; a cluster list always splits the atoms. Every thread
+count stores the same pairs and shifts. The results are concatenated in
+thread order, so a cluster list keeps the one-thread order; a pair list
+may store its rows in a different order. Vesin merges per-thread lists
+without promising an order. Below 512 atoms a pair list is a direct loop
+over atom pairs, without cells.
 
 Matscipy's `neighbour_list` returns whichever of pairs, distances and
 vectors the caller names in a string
@@ -105,28 +115,47 @@ fills a half pair list, periodic boundaries and every geometry column.
 structure-of-arrays buffers. `rgpot_nlist_strerror` names a code. A
 cluster with a half shell is `RGPOT_NLIST_SHAPE`.
 
-`Potentials.capnp` adds `NeighborRequest`, `NeighborList`, an optional
-`ForceInput.neighbors` at ordinal 9, an optional `PotentialResult.neighborList`
-at ordinal 28, and `Potential.neighbours` at ordinal 13. Older fields are
-unchanged. A stream chunk sets `NeighborList.more`; the client repeats the
-call instead of receiving every pair in one message.
+The rgpot-local schema diff `CppCore/rgpot/rpc/local/neighbour-chunk.diff`
+adds `NeighborRequest`, `NeighborList`, an optional `ForceInput.neighbors` at
+ordinal 9, an optional `PotentialResult.neighborList` at ordinal 28, and
+`Potential.neighbours` at ordinal 13 to the `Potentials.capnp` that rgpot
+compiles and installs; the vendored copy is the pinned upstream file. Older fields are
+unchanged. `NeighborRequest.mode = 2` asks for a stream: a chunk sets
+`NeighborList.more` and `next`, and the client repeats the call with
+`cursor` instead of receiving every pair in one message. `mode = 1` is
+one stored chunk. potserv does not implement `Potential.neighbours` and
+does not fill `PotentialResult.neighborList`.
 
+<!-- rgpot-doc: run link=rgpot -->
 ```cpp
-rgpot::nlist::Query query;
-query.cutoff = 5.0;
-query.skin = 0.5;
-query.shape = rgpot::nlist::Pairs{rgpot::nlist::Shell::Half};
-query.cut = rgpot::nlist::Cut::Loose;
-rgpot::nlist::Builder builder;
-builder.update(positions, n, box, query);
-rgpot::nlist::View pairs = builder.table().view();
-// pairs.first[k], pairs.second[k], pairs.shift[3 * k + axis]
+#include "rgpot/nlist/NeighbourList.hpp"
+
+#include <cstddef>
+
+int main() {
+  const double positions[] = {0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.3, 0.0};
+  const std::size_t n = 3;
+  const double box[9] = {20, 0, 0, 0, 20, 0, 0, 0, 20};
+
+  rgpot::nlist::Query query;
+  query.cutoff = 5.0;
+  query.skin = 0.5;
+  query.shape = rgpot::nlist::Pairs{rgpot::nlist::Shell::Half};
+  query.cut = rgpot::nlist::Cut::Loose;
+  rgpot::nlist::Builder builder;
+  builder.update(positions, n, box, query);
+  rgpot::nlist::View pairs = builder.table().view();
+  // pairs.first[k], pairs.second[k], pairs.shift[3 * k + axis]
+  return pairs.first.size() == 3 ? 0 : 1;
+}
 ```
 
-EAM, Lennard-Jones, Sutton-Chen, Stillinger-Weber, Tersoff, Morse and
-ZBL take candidate pairs from `rgpot::nlist::Neighbours`.
+EAM, EAMTable, Lennard-Jones, LJCluster, Sutton-Chen, Stillinger-Weber,
+Tersoff, Morse and ZBL take candidate pairs from
+`rgpot::nlist::Neighbours`.
 
-The layer bins atoms into cells whose edge is the cutoff plus the skin.
+The layer bins atoms into cells whose edge is at least the cutoff plus
+the skin.
 `Round` is the orthorhombic truncation used by the pair kernels. `Half`
 is one correction about the half-box, which is what EAM uses after
 wrapping coordinates into the cell. `General`, and any sheared cell,
@@ -136,13 +165,16 @@ calls `MinimumImage`.
 moved by at most half the skin. `Mode::Stream` walks the 27 neighbouring
 cells and stores no pair list. The bins are reused only when the geometry
 is identical. `Mode::Auto` stores when the candidate index array fits in
-`MemAvailable` and in a 32-bit offset, and streams otherwise. There is no
-cutoff on the atom count.
+`MemAvailable` and in a 32-bit offset, and streams otherwise.
+`Mode::Stored` makes the same test and also falls back to a stream when
+the index does not fit. When `MemAvailable` cannot be read, both modes
+store. There is no cutoff on the atom count.
 
-`OMP_NUM_THREADS` above 1 splits atoms into contiguous slices. The
-streaming cell walk itself runs on those slices: each thread reads the
-bins for its own atoms. Private forces are added in thread-id order, so
-a fixed thread count repeats bit for bit and stays within `1e-9` of one
+`OMP_NUM_THREADS` above 1 splits the work across threads. Most
+two-body walks use `forCellTeam`, which gives each thread a contiguous
+range of cells. Stored EAM, LJCluster and the three-body potentials
+split atoms into contiguous slices. Private forces are added in thread-id order, so a
+fixed thread count repeats bit for bit and stays within `1e-9` of one
 thread. One thread keeps the serial pair order.
 
 Stillinger-Weber and Tersoff use this layer for `Auto` as well as
@@ -243,8 +275,9 @@ Stored EAM at 108,000 atoms: 0.107392 s, 0.074392 s (1.44x), 0.037288 s
 (2.88x), 0.020593 s (5.22x). Streaming EAM at the same size: 0.501968 s,
 0.260581 s (1.93x), 0.132694 s (3.78x), 0.068205 s (7.36x). Two threads
 used to be slower than one because the stream recomputed the density
-exponential in a second pass; the threaded path now uses the same one
-walk as one thread and keeps neighbour forces in a private buffer.
+exponential in a second pass. The stream now makes two cell walks, one
+for the density and one for the forces, with the pair terms read from
+tabulated splines, and each thread keeps its own density and force rows.
 Tersoff's parallel stress used to land on one shared array. It now uses
 the private buffer. At 13,824 atoms the stored list reaches 3.01x on 8
 threads and the stream 4.89x. At 1,000,000 atoms the stream median on 8
@@ -276,7 +309,8 @@ Diamond repeats are 4, 5, 6 and 8 (512, 1,000, 1,728 and 4,096 atoms).
 a strict cutoff of 5. A 30-cube cell is 108,000 atoms and a 64-cube
 cell is 1,048,576. The triclinic cell is a 4×4×4 grid in
 
-```
+<!-- rgpot-doc: skip cell matrix copied from benches/neighbour_api_bench.py, not a program -->
+```text
 [[6.0, 0.0, 0.0], [1.2, 5.4, 0.0], [0.3, 0.7, 5.8]]
 ```
 
@@ -309,8 +343,9 @@ half list is 22,020,096 pairs and the full list is 44,040,192.
 | 1048576 | full | 1 |  | 2.507937 |  | 6.392880 |
 | 1048576 | full | 8 |  | 1.463148 |  | 6.618861 |
 
-The public query visits every atom pair. One half-list build at
-108,000 atoms was still inside its first call when 180 seconds
+These rgpot timings are from an earlier version of the public query
+that visited every atom pair; `build` now walks the cell list. One
+half-list build at 108,000 atoms was still inside its first call when 180 seconds
 elapsed, so the larger rgpot cells were not started. ASE's full list
 at 1,048,576 atoms was killed by the kernel at 48,137,444 kB and
 48,142,196 kB anonymous resident set, once per thread column, before
