@@ -324,7 +324,8 @@ def cluster_search(
       ring_moves: ring crankshafts beside the torsion move of a ``groups``
         search: one arc of a flexible ring turns about the axis through the
         two ring atoms that bound it, which keeps every bond length.
-        ``None`` keeps the preset's.
+        ``None`` keeps the preset's: on for ``recommended=True``, off
+        otherwise.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.

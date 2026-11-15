@@ -1302,7 +1302,8 @@ pub struct Config {
     /// change a ring's pucker or a macrocycle's backbone; the quench keeps
     /// whatever the start held. With this on, the torsion kernel also turns
     /// one arc of a flexible ring about the axis through the two ring atoms
-    /// that bound it (see [`super::moves::ring_crankshafts`]).
+    /// that bound it (see [`super::moves::ring_crankshafts`]). On in
+    /// [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub ring_moves: bool,
 }
@@ -2011,6 +2012,10 @@ impl Config {
         // its steps cost more than a cheap force field's call. The opening
         // quench times both.
         cfg.local_step = crate::methods::tric_opt::LocalStep::Auto;
+        // Without crankshafts every quench keeps the start's ring pucker and
+        // macrocycle backbone. A molecule without a flexible ring draws the
+        // same hops either way.
+        cfg.ring_moves = true;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;

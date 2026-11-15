@@ -3539,7 +3539,8 @@ fn rigid_probe(
 ///     the quench in force at the end, and `quench_seconds` the measured
 ///     seconds per potential call and per TRIC step under `auto`.
 ///   ring_moves: `Config::ring_moves` of a `groups` search, ring crankshafts
-///     beside the torsion move. Unset keeps the preset's.
+///     beside the torsion move. Unset keeps the preset's: on for
+///     `recommended=True`, off otherwise.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
