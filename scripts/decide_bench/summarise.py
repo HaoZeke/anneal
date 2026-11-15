@@ -4,7 +4,9 @@
 
 One line per (variant, system) and one ``total`` line per variant.
 ``--reference`` names the arm the others are tested against, ``develop``
-by default; the other unswitched arm is left out. Hits use a two-sided
+by default; the other unswitched arm is left out. ``--revision`` keeps
+only rows whose ``code_revision`` starts with one of the given
+prefixes, so one session is not pooled with an earlier one. Hits use a two-sided
 Fisher exact test against the reference; calls to
 hit, with a miss at the full budget, use a two-sided Mann-Whitney U
 with the normal approximation, tie and continuity corrections. Medians
@@ -195,8 +197,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--rows", type=Path, default=ROOT / "bench/decide/rows.csv")
     parser.add_argument("--out", type=Path, default=ROOT / "bench/decide/summary.csv")
     parser.add_argument("--reference", default="develop")
+    parser.add_argument("--revision", action="append", default=[])
     args = parser.parse_args(argv)
     rows = list(csv.DictReader(args.rows.open()))
+    if args.revision:
+        rows = [
+            row
+            for row in rows
+            if any(row["code_revision"].startswith(prefix) for prefix in args.revision)
+        ]
     lines = summarise(rows, args.reference)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", newline="") as handle:

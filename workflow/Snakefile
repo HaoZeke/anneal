@@ -720,7 +720,8 @@ rule decide_rows:
         """
 
 
-# Hits, median calls and the tests against develop. Reads the rows;
+# Hits, median calls and the tests against develop, over the rows of the
+# revisions in `decide_revisions` (all when unset). Reads the rows;
 # it does not launch a search. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile decide_summary
 rule decide_summary:
@@ -728,8 +729,12 @@ rule decide_summary:
         "bench/decide/rows.csv",
     output:
         "bench/decide/summary.csv",
+    params:
+        revisions=" ".join(
+            f"--revision {rev}" for rev in str(config.get("decide_revisions", "")).split()
+        ),
     shell:
         """
         set -euo pipefail
-        python3 scripts/decide_bench/summarise.py
+        python3 scripts/decide_bench/summarise.py {params.revisions}
         """
