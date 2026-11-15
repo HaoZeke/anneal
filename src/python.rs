@@ -3538,6 +3538,8 @@ fn rigid_probe(
 ///     `recommended=True`, L-BFGS otherwise. The result's `local_step` is
 ///     the quench in force at the end, and `quench_seconds` the measured
 ///     seconds per potential call and per TRIC step under `auto`.
+///   ring_moves: `Config::ring_moves` of a `groups` search, ring crankshafts
+///     beside the torsion move. Unset keeps the preset's.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3564,6 +3566,7 @@ fn rigid_probe(
     water_sites = None,
     groups = None,
     local_step = None,
+    ring_moves = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3586,6 +3589,7 @@ fn cluster_search(
     water_sites: Option<PyReadonlyArray1<'_, f64>>,
     groups: Option<Vec<Vec<usize>>>,
     local_step: Option<&str>,
+    ring_moves: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
@@ -3607,6 +3611,9 @@ fn cluster_search(
         }
     };
 
+    if ring_moves.is_some() && groups.is_none() {
+        return Err(PyValueError::new_err("ring_moves needs groups"));
+    }
     if let Some(groups) = groups.as_ref() {
         if ras || derived || communicating || length_scale.is_some() {
             return Err(PyValueError::new_err(
@@ -3723,6 +3730,9 @@ fn cluster_search(
         };
         if let Some(step) = local_step {
             cfg.local_step = step;
+        }
+        if let Some(rings) = ring_moves {
+            cfg.ring_moves = rings;
         }
         cfg
     } else if let Some(geometry) = water {

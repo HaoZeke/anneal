@@ -254,6 +254,7 @@ def cluster_search(
     water_sites=None,
     groups=None,
     local_step: str | None = None,
+    ring_moves: bool | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -320,6 +321,10 @@ def cluster_search(
         costs more than a TRIC step. ``None`` keeps the preset's: ``auto`` for
         ``recommended=True``, ``lbfgs`` otherwise. The result's
         ``local_step`` names the quench in force at the end.
+      ring_moves: ring crankshafts beside the torsion move of a ``groups``
+        search: one arc of a flexible ring turns about the axis through the
+        two ring atoms that bound it, which keeps every bond length.
+        ``None`` keeps the preset's.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
@@ -361,6 +366,8 @@ def cluster_search(
         kwargs["groups"] = [[int(atom) for atom in group] for group in groups]
     if local_step is not None:
         kwargs["local_step"] = str(local_step)
+    if ring_moves is not None:
+        kwargs["ring_moves"] = bool(ring_moves)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out

@@ -255,6 +255,7 @@ impl MoveLibrary {
                         species: species.clone(),
                         tolerance: cfg.bond_tolerance,
                         mobile,
+                        rings: cfg.ring_moves,
                     });
                 } else {
                     let _ = mobile;
@@ -814,6 +815,8 @@ pub enum ClusterMove {
         tolerance: f64,
         /// Atoms allowed to move. `None` is all atoms.
         mobile: Option<Vec<usize>>,
+        /// Also turn ring arcs, [`Config::ring_moves`].
+        rings: bool,
     },
 }
 
@@ -913,6 +916,191 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
         out.push(RotatableBond { fixed, pivot, side });
     }
     out
+}
+
+/// Largest triple product of the three unit bonds of a planar atom. An ideal
+/// tetrahedral centre has 0.77, three bonds in a plane 0.
+const PLANAR_VOLUME: f64 = 0.2;
+
+/// Ring crankshafts of a covalent structure, and the ring torsions they span.
+///
+/// Remove two atoms `a` and `b` from the bond graph. A component that was
+/// bonded to both is an arc of a ring through them, carrying its
+/// substituents. Turning that arc about the axis from `a` to `b` keeps every
+/// distance to `a` and `b`, so every bond length holds; only the angles at
+/// the two ends change. One atom between them is a corner flap, two a boat
+/// flip, a longer arc a macrocycle crankshaft. The smallest such arc of a
+/// pair is returned as a [`RotatableBond`] with `fixed = a`, `pivot = b` and
+/// that arc as `side`, so [`turn_bond`] turns it.
+///
+/// The ends are never bonded: an arc turned about its own ring bond is the
+/// whole ring turned rigidly, which only bends the substituents of the ends.
+/// An arc is offered when it meets each end through exactly one bond and
+/// both bonds are single: as long as [`SINGLE_BOND_FRACTION`] of the radius
+/// sum, and not between two conjugated atoms. An aromatic ring has no single
+/// bond, and a peptide C–N is no end. The second value counts the
+/// ring torsions those arcs move: the single non-bridge bonds less three per
+/// independent cycle they close, `m - 3` for a saturated ring of `m`.
+pub fn ring_crankshafts(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+) -> (Vec<RotatableBond>, usize) {
+    let n = species.len().min(x.len() / 3);
+    let mut adj = vec![Vec::<usize>::new(); n];
+    let mut long = Vec::new();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let sum = covalent_radius(species[i]) + covalent_radius(species[j]);
+            if sum <= 0.0 {
+                continue;
+            }
+            let d = atom_distance(x, i, j);
+            if d >= tolerance * sum {
+                continue;
+            }
+            adj[i].push(j);
+            adj[j].push(i);
+            if d >= SINGLE_BOND_FRACTION * sum {
+                long.push((i, j));
+            }
+        }
+    }
+    // A three-bonded atom whose bonds lie in one plane, and a two-bonded atom
+    // between two of those, is conjugated. A bond between two such atoms
+    // stays planar whatever its length, as an aromatic C-N or C-S is.
+    let unit = |i: usize, j: usize| -> [f64; 3] {
+        let v = [0, 1, 2].map(|k| x[3 * j + k] - x[3 * i + k]);
+        let norm = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-12);
+        v.map(|c| c / norm)
+    };
+    let flat: Vec<bool> = (0..n)
+        .map(|i| {
+            let [u, v, w] = match adj[i][..] {
+                [a, b, c] => [unit(i, a), unit(i, b), unit(i, c)],
+                _ => return false,
+            };
+            let volume = u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0])
+                + u[2] * (v[0] * w[1] - v[1] * w[0]);
+            volume.abs() < PLANAR_VOLUME
+        })
+        .collect();
+    let conjugated: Vec<bool> = (0..n)
+        .map(|i| flat[i] || matches!(adj[i][..], [a, b] if flat[a] && flat[b]))
+        .collect();
+    let mut single = vec![Vec::<usize>::new(); n];
+    for (i, j) in long {
+        if !(conjugated[i] && conjugated[j]) {
+            single[i].push(j);
+            single[j].push(i);
+        }
+    }
+    // Components of the graph without the atoms in `cut`.
+    let parts = |cut: &[usize]| -> Vec<Vec<usize>> {
+        let mut seen = vec![false; n];
+        for &c in cut {
+            seen[c] = true;
+        }
+        let mut out = Vec::new();
+        for s in 0..n {
+            if seen[s] {
+                continue;
+            }
+            seen[s] = true;
+            let mut part = vec![s];
+            let mut stack = vec![s];
+            while let Some(a) = stack.pop() {
+                for &b in &adj[a] {
+                    if !seen[b] {
+                        seen[b] = true;
+                        part.push(b);
+                        stack.push(b);
+                    }
+                }
+            }
+            out.push(part);
+        }
+        out
+    };
+    let bridge = |i: usize, j: usize| -> bool {
+        let mut seen = vec![false; n];
+        seen[i] = true;
+        let mut stack = vec![i];
+        while let Some(a) = stack.pop() {
+            for &b in &adj[a] {
+                if (a == i && b == j) || seen[b] {
+                    continue;
+                }
+                seen[b] = true;
+                stack.push(b);
+            }
+        }
+        !seen[j]
+    };
+    let mut ring_single = Vec::new();
+    for i in 0..n {
+        for &j in single[i].iter().filter(|&&j| j > i) {
+            if !bridge(i, j) {
+                ring_single.push((i, j));
+            }
+        }
+    }
+    if ring_single.is_empty() {
+        return (Vec::new(), 0);
+    }
+    let mut on_ring = vec![false; n];
+    for &(i, j) in &ring_single {
+        on_ring[i] = true;
+        on_ring[j] = true;
+    }
+    let vertices = on_ring.iter().filter(|&&v| v).count();
+    let mut root: Vec<usize> = (0..n).collect();
+    fn find(root: &mut [usize], mut a: usize) -> usize {
+        while root[a] != a {
+            root[a] = root[root[a]];
+            a = root[a];
+        }
+        a
+    }
+    let mut components = vertices;
+    for &(i, j) in &ring_single {
+        let (ri, rj) = (find(&mut root, i), find(&mut root, j));
+        if ri != rj {
+            root[ri] = rj;
+            components -= 1;
+        }
+    }
+    let cycles = ring_single.len() + components - vertices;
+    let dof = ring_single.len().saturating_sub(3 * cycles);
+    let ring_atoms: Vec<usize> = (0..n).filter(|&a| on_ring[a]).collect();
+    let mut out = Vec::new();
+    for (ia, &a) in ring_atoms.iter().enumerate() {
+        for &b in ring_atoms[ia + 1..].iter().filter(|b| !adj[a].contains(b)) {
+            let arc = parts(&[a, b])
+                .into_iter()
+                .filter(|part| {
+                    let ends = |end: usize| -> Option<usize> {
+                        let mut inside = adj[end].iter().filter(|q| part.contains(q));
+                        let first = *inside.next()?;
+                        inside.next().is_none().then_some(first)
+                    };
+                    match (ends(a), ends(b)) {
+                        (Some(ca), Some(cb)) => single[a].contains(&ca) && single[b].contains(&cb),
+                        _ => false,
+                    }
+                })
+                .min_by_key(Vec::len);
+            if let Some(mut side) = arc {
+                side.sort_unstable();
+                out.push(RotatableBond {
+                    fixed: a,
+                    pivot: b,
+                    side,
+                });
+            }
+        }
+    }
+    (out, dof)
 }
 
 fn atom_distance(x: ArrayView1<f64>, i: usize, j: usize) -> f64 {
@@ -2485,7 +2673,8 @@ impl ClusterMove {
                 species,
                 tolerance,
                 mobile,
-            } => super::torsion::Topology::of(x, species, *tolerance, mobile.as_deref())
+                rings,
+            } => super::torsion::Topology::of(x, species, *tolerance, mobile.as_deref(), *rings)
                 .propose(x, rng),
         }
     }
@@ -4199,6 +4388,101 @@ mod torsion_tests {
         }
     }
 
+    /// Chair cyclohexane, carbons only, 1.53 between neighbours.
+    fn chair() -> Array1<f64> {
+        let (h, r) = (0.25_f64, (1.53_f64.powi(2) - 0.25).sqrt());
+        Array1::from_iter((0..6).flat_map(|i| {
+            let a = i as f64 * std::f64::consts::FRAC_PI_3;
+            [r * a.cos(), r * a.sin(), if i % 2 == 0 { h } else { -h }]
+        }))
+    }
+
+    #[test]
+    fn a_saturated_ring_offers_crankshafts_that_keep_its_bonds() {
+        let x = chair();
+        let species = [6u32; 6];
+        let (cranks, dof) = ring_crankshafts(x.view(), &species, 1.25);
+        assert_eq!(dof, 3, "a six-ring has three ring torsions");
+        assert_eq!(
+            cranks.len(),
+            9,
+            "six corner flaps and three boat flips: {cranks:?}"
+        );
+        for crank in &cranks {
+            assert!(!crank.side.contains(&crank.fixed) && !crank.side.contains(&crank.pivot));
+            let mut y = x.clone();
+            turn_bond(&mut y, crank, 0.7);
+            assert_ne!(y, x);
+            for i in 0..6 {
+                let j = (i + 1) % 6;
+                let gap = atom_distance(y.view(), i, j) - atom_distance(x.view(), i, j);
+                assert!(gap.abs() < 1e-10, "{crank:?} moved bond {i}-{j} by {gap}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_aromatic_ring_and_a_chain_offer_no_crankshaft() {
+        let n = 6usize;
+        let r = 1.39_f64 / (2.0 * (std::f64::consts::PI / n as f64).sin());
+        let benzene = Array1::from_iter((0..n).flat_map(|i| {
+            let a = i as f64 * std::f64::consts::TAU / n as f64;
+            [r * a.cos(), r * a.sin(), 0.0]
+        }));
+        assert_eq!(
+            ring_crankshafts(benzene.view(), &[6; 6], 1.25),
+            (Vec::new(), 0)
+        );
+        assert_eq!(
+            ring_crankshafts(chain(1.52).view(), &[6; 4], 1.25),
+            (Vec::new(), 0)
+        );
+    }
+
+    /// A flat five-ring with a hydrogen on each atom, its ring bonds long
+    /// enough to pass for single, as an indole's C-N bonds can be.
+    #[test]
+    fn a_flat_ring_of_three_bonded_atoms_offers_no_crankshaft() {
+        let r = 1.42_f64 / (2.0 * (std::f64::consts::PI / 5.0).sin());
+        let mut x = Vec::new();
+        for radius in [r, r + 1.08] {
+            for i in 0..5 {
+                let a = i as f64 * std::f64::consts::TAU / 5.0;
+                x.extend([radius * a.cos(), radius * a.sin(), 0.0]);
+            }
+        }
+        let species = [7, 6, 6, 6, 6, 1, 1, 1, 1, 1];
+        assert_eq!(
+            ring_crankshafts(Array1::from_vec(x).view(), &species, 1.25),
+            (Vec::new(), 0)
+        );
+    }
+
+    #[test]
+    fn the_torsion_move_turns_a_ring_only_with_ring_moves() {
+        let x = chair();
+        let mv = |rings| ClusterMove::Torsion {
+            species: vec![6; 6],
+            tolerance: 1.25,
+            mobile: None,
+            rings,
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        assert_eq!(mv(false).propose(x.view(), 1.0, &mut rng), x);
+        let y = mv(true).propose(x.view(), 1.0, &mut rng);
+        let d0 = dihedral(&x, 0, 1, 2, 3);
+        let moved = (0..6).any(|i| {
+            let [a, b, c, d] = [i, (i + 1) % 6, (i + 2) % 6, (i + 3) % 6];
+            angle_gap(dihedral(&y, a, b, c, d), dihedral(&x, a, b, c, d)) > 1e-3
+        });
+        assert!(moved, "no ring dihedral changed from {d0}");
+        for i in 0..6 {
+            let j = (i + 1) % 6;
+            let gap = atom_distance(y.view(), i, j) - atom_distance(x.view(), i, j);
+            assert!(gap.abs() < 1e-8, "bond {i}-{j} moved by {gap}");
+        }
+    }
+
     #[test]
     fn a_torsion_leaves_immobile_atoms_where_they_are() {
         let (x, species) = methanol();
@@ -4206,6 +4490,7 @@ mod torsion_tests {
             species: species.clone(),
             tolerance: 1.25,
             mobile: Some(vec![0, 3, 4, 5]),
+            rings: false,
         };
         let mut rng = StdRng::seed_from_u64(3);
         assert_eq!(held.propose(x.view(), 1.0, &mut rng), x);
@@ -4213,6 +4498,7 @@ mod torsion_tests {
             species,
             tolerance: 1.25,
             mobile: None,
+            rings: false,
         };
         let y = free.propose(x.view(), 1.0, &mut rng);
         assert_ne!(y, x);

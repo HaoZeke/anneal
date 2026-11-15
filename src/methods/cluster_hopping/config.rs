@@ -1296,6 +1296,15 @@ pub struct Config {
     /// its Esty upper bound is already 0 and its hatch is one quarter.
     #[serde(skip_serializing_if = "is_false")]
     pub witness_tripleton_ceiling: bool,
+    /// Ring crankshafts beside the torsion move of a molecular library.
+    ///
+    /// A rotatable bond is a bridge of the bond graph, so torsions never
+    /// change a ring's pucker or a macrocycle's backbone; the quench keeps
+    /// whatever the start held. With this on, the torsion kernel also turns
+    /// one arc of a flexible ring about the axis through the two ring atoms
+    /// that bound it (see [`super::moves::ring_crankshafts`]).
+    #[serde(skip_serializing_if = "is_false")]
+    pub ring_moves: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -1774,6 +1783,7 @@ impl Config {
             superbasin_features: false,
             hmc: None,
             witness_tripleton_ceiling: false,
+            ring_moves: false,
         }
     }
 
