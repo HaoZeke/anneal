@@ -45,7 +45,6 @@ fortran_pots_sources = files(
     'rgpot_lenosky.f90',
     'rgpot_lenosky_capi.f90',
     'rgpot_neighbors.f90',
-    'rgpot_sw_capi.f90',
     'rgpot_tersoff.f90',
     'rgpot_tersoff_capi.f90',
     'rgpot_water_h.f90',
@@ -58,7 +57,7 @@ fortran_pots_sources = files(
 # the rgpot_sw object stale. The kernel compiles from a copy that depends
 # on the include. gfortran then finds the include through the -I of this
 # source directory.
-fortran_pots_sources += custom_target(
+_rgpot_sw_f90 = custom_target(
     'rgpot_sw_f90',
     input: 'rgpot_sw.f90',
     output: 'rgpot_sw.f90',
@@ -93,6 +92,32 @@ fortran_kernels = static_library(
     install: false,
 )
 
+# The copied rgpot_sw.f90 is generated, so meson cannot scan its `use`
+# lines until the copy exists and a parallel build compiles it before
+# rgpot_kinds.mod and rgpot_neighbors.mod. It is its own library, ordered
+# after the kernels. The C API uses that module, so it is a third library.
+# Both archives are hidden in the umbrella library with the kernels.
+rgpot_sw_lib = static_library(
+    'rgpot_sw_lib',
+    _rgpot_sw_f90,
+    fortran_args: _fpot_args,
+    include_directories: fortran_kernels.private_dir_include(),
+    link_with: fortran_kernels,
+    pic: true,
+    install: false,
+)
+rgpot_sw_capi_lib = static_library(
+    'rgpot_sw_capi_lib',
+    files('rgpot_sw_capi.f90'),
+    fortran_args: _fpot_args,
+    include_directories: [
+        rgpot_sw_lib.private_dir_include(),
+        fortran_kernels.private_dir_include(),
+    ],
+    link_with: [rgpot_sw_lib, fortran_kernels],
+    pic: true,
+    install: false,
+)
 # The C++ faces stay visible: consumers construct these classes.
 fortran_pots = static_library(
     'rgpot_fortran_pots',
@@ -100,13 +125,19 @@ fortran_pots = static_library(
     dependencies: _deps,
     cpp_args: _args,
     include_directories: _incdirs,
-    link_with: [fortran_kernels, tersoff_sic, rgpot_halfshell],
+    link_with: [
+        rgpot_sw_capi_lib,
+        rgpot_sw_lib,
+        fortran_kernels,
+        tersoff_sic,
+        rgpot_halfshell,
+    ],
     pic: true,
     install: false,
 )
 
 fortran_pots_dep = declare_dependency(
-    link_with: [fortran_pots, fortran_kernels],
+    link_with: [fortran_pots, rgpot_sw_capi_lib, rgpot_sw_lib, fortran_kernels],
     dependencies: [],
 )
 
@@ -125,6 +156,8 @@ if _fortran_nlist_omp.found()
 endif
 fortran_kernels_dep = declare_dependency(
     link_with: [
+        rgpot_sw_capi_lib,
+        rgpot_sw_lib,
         fortran_kernels,
         rgpot_halfshell,
         rgpot_minimage,

@@ -401,6 +401,16 @@ if (
         ],
         timeout: 300,
     )
+    test(
+        'fortran_sw_module_order',
+        python3_engines,
+        args: [
+            files('test_fortran_sw_module_order.py'),
+            meson.project_source_root(),
+            meson_prog.full_path(),
+        ],
+        timeout: 600,
+    )
 endif
 
 abi_script = find_program('../scripts/abi_symbols.sh')

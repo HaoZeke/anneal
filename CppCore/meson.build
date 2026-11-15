@@ -284,6 +284,8 @@ if not get_option('with_rpc_client_only')
         _fortran_hide_args = cppc.get_supported_link_arguments(
             [
                 '-Wl,--exclude-libs,librgpot_fortran_kernels.a',
+                '-Wl,--exclude-libs,librgpot_sw_lib.a',
+                '-Wl,--exclude-libs,librgpot_sw_capi_lib.a',
                 '-Wl,--exclude-libs,libvesin_fortran.a',
             ],
         )
