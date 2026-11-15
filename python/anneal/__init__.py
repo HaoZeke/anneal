@@ -259,6 +259,7 @@ def cluster_search(
     local_step: str | None = None,
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
+    measured_energy_scale: bool | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -333,6 +334,10 @@ def cluster_search(
       hold_stereocentres: refuse a quench step of a ``groups`` search that
         turns a four-bonded centre into its mirror image. ``None`` keeps the
         preset's: on for ``recommended=True``, off otherwise.
+      measured_energy_scale: take a ``groups`` search's temperature and
+        deposit height from the median quenched energy change of its opening
+        hops instead of an energy scale of one. ``None`` keeps the preset's:
+        off.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
@@ -378,6 +383,8 @@ def cluster_search(
         kwargs["ring_moves"] = bool(ring_moves)
     if hold_stereocentres is not None:
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
+    if measured_energy_scale is not None:
+        kwargs["measured_energy_scale"] = bool(measured_energy_scale)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out

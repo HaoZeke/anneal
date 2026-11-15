@@ -1353,7 +1353,24 @@ pub struct Config {
     /// not a call, and backs off as one into a compressed contact does.
     #[serde(skip_serializing_if = "is_false")]
     pub hold_stereocentres: bool,
+    /// Take the walk's temperature and deposit height from the hops it
+    /// makes rather than from `energy_scale`.
+    ///
+    /// The median quenched energy change of the first
+    /// [`MEASURED_SCALE_HOPS`] hops replaces `energy_scale` in the preset's
+    /// temperature and bias height; convergence and the return screen keep
+    /// the declared scale. A molecule handed over in electronvolts has
+    /// conformers a few hundredths of one apart, and at the declared scale
+    /// of one the chain accepts nearly every hop and its deposits empty a
+    /// basin on the first revisit. Single chains only; a replica ladder
+    /// keeps its rungs.
+    #[serde(skip_serializing_if = "is_false")]
+    pub measured_energy_scale: bool,
 }
+
+/// Opening hops whose quenched energy changes set
+/// [`Config::measured_energy_scale`].
+pub const MEASURED_SCALE_HOPS: usize = 20;
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -1874,6 +1891,7 @@ impl Config {
             witness_tripleton_ceiling: false,
             ring_moves: false,
             hold_stereocentres: false,
+            measured_energy_scale: false,
         }
     }
 

@@ -3590,6 +3590,9 @@ struct AcceptDial {
     temperature: f64,
     floor: f64,
     cap: f64,
+    /// Quenched energy changes of the opening hops while
+    /// [`Config::measured_energy_scale`] is still reading them.
+    rises: Option<Vec<f64>>,
 }
 
 impl AcceptDial {
@@ -3604,11 +3607,43 @@ impl AcceptDial {
             temperature,
             floor,
             cap,
+            rises: None,
         }
+    }
+
+    /// Reads the energy scale from the opening hops, [`Self::measure`].
+    fn measuring(mut self, on: bool) -> Self {
+        self.rises = on.then(Vec::new);
+        self
     }
 
     fn temperature(&self) -> f64 {
         self.temperature
+    }
+
+    /// Takes one hop's quenched energy change. Once the opening hops are
+    /// in, the temperature moves by the ratio of their median size to
+    /// `energy_scale`, and that ratio is returned for the bias height.
+    /// No hop that changed the energy leaves everything where it was.
+    fn measure(&mut self, rise: f64, energy_scale: f64) -> Option<f64> {
+        let rises = self.rises.as_mut()?;
+        if rise.is_finite() {
+            rises.push(rise.abs());
+        }
+        if rises.len() < config::MEASURED_SCALE_HOPS {
+            return None;
+        }
+        let mut rises = self.rises.take()?;
+        rises.sort_by(f64::total_cmp);
+        let median = rises[rises.len() / 2];
+        if !(median > 0.0) || !(energy_scale > 0.0) {
+            return None;
+        }
+        let factor = median / energy_scale;
+        self.temperature *= factor;
+        self.floor *= factor;
+        self.cap *= factor;
+        Some(factor)
     }
 
     fn observe(&mut self, accepted: bool) {
@@ -3637,6 +3672,24 @@ impl AcceptDial {
 mod contact_unit_tests {
     use super::*;
     use ndarray::Array1;
+
+    #[test]
+    fn a_measuring_dial_takes_the_median_opening_change_once() {
+        let mut dial = AcceptDial::new(0.8, 1.0).measuring(true);
+        for k in 0..config::MEASURED_SCALE_HOPS - 1 {
+            let rise = if k % 2 == 0 { 0.02 } else { -0.06 };
+            assert_eq!(dial.measure(rise, 1.0), None);
+        }
+        let factor = dial.measure(0.04, 1.0).expect("the opening hops are in");
+        assert!((factor - 0.04).abs() < 1e-12);
+        assert!((dial.temperature() - 0.032).abs() < 1e-12);
+        assert_eq!(dial.measure(1.0, 1.0), None, "measured once");
+        let mut fixed = AcceptDial::new(0.8, 1.0);
+        for _ in 0..2 * config::MEASURED_SCALE_HOPS {
+            assert_eq!(fixed.measure(0.5, 1.0), None);
+        }
+        assert_eq!(fixed.temperature(), 0.8);
+    }
 
     fn tetrahedron() -> Array1<f64> {
         Array1::from_vec(vec![
@@ -3975,7 +4028,8 @@ where
     }
     let contact = contact_factor(&scaled, e, x.view());
     apply_contact_convergence(&mut scaled, contact);
-    let mut dial = AcceptDial::new(scaled.temperature, contact);
+    let mut dial = AcceptDial::new(scaled.temperature, contact)
+        .measuring(scaled.measured_energy_scale && n_rep == 1);
     let cfg = &mut scaled;
     if initial_recordable {
         ledger.record(e, x.view());
@@ -4126,7 +4180,8 @@ where
     // The deposit height is set from the escape gaps observed rather than
     // fixed, since a height above the gap empties a basin on one revisit and
     // the gap is a property of the landscape.
-    let mut height = AdaptiveHeight::new(0.1, cfg.height_revisits, cfg.bias_height);
+    let mut bias_height = cfg.bias_height;
+    let mut height = AdaptiveHeight::new(0.1, cfg.height_revisits, bias_height);
     // Starts at the configured radius and narrows. The paper's rule takes the
     // start from the spread of an initial population; here the configured value
     // is the start, so a run that does not anneal is unchanged and one that does
@@ -8372,7 +8427,7 @@ where
         // is selected. Not another deposit: that is well-tempered
         // filling. This is rate scaling.
         if accept && cfg.adaptive_height {
-            let cap = cfg.bias_height * cfg.height_revisits.max(1.0);
+            let cap = bias_height * cfg.height_revisits.max(1.0);
             if bias.frequent_superbasin(s_old.view(), s_new.view(), cap)
                 && rng.random::<f64>() * 2.0 > 1.0
             {
@@ -8426,6 +8481,11 @@ where
             if biased > e_new - e {
                 accept = false;
             }
+        }
+        if let Some(factor) = dial.measure(e_new - e, cfg.energy_scale) {
+            bias_height *= factor;
+            height = AdaptiveHeight::new(0.1, cfg.height_revisits, bias_height);
+            bias.set_height(height.height());
         }
         dial.observe(accept);
         if accept {

@@ -3528,6 +3528,9 @@ fn rigid_probe(
 ///   hold_stereocentres: `Config::hold_stereocentres` of a `groups` search,
 ///     a quench step that inverts a stereocentre is refused. Unset keeps
 ///     the preset's: on for `recommended=True`, off otherwise.
+///   measured_energy_scale: `Config::measured_energy_scale` of a `groups`
+///     search, the temperature and deposit height are read from the opening
+///     hops. Unset keeps the preset's: off.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3556,6 +3559,7 @@ fn rigid_probe(
     local_step = None,
     ring_moves = None,
     hold_stereocentres = None,
+    measured_energy_scale = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3580,6 +3584,7 @@ fn cluster_search(
     local_step: Option<&str>,
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
+    measured_energy_scale: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
@@ -3606,6 +3611,9 @@ fn cluster_search(
     }
     if hold_stereocentres.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("hold_stereocentres needs groups"));
+    }
+    if measured_energy_scale.is_some() && groups.is_none() {
+        return Err(PyValueError::new_err("measured_energy_scale needs groups"));
     }
     if let Some(groups) = groups.as_ref() {
         if ras || derived || communicating || length_scale.is_some() {
@@ -3729,6 +3737,9 @@ fn cluster_search(
         }
         if let Some(hold) = hold_stereocentres {
             cfg.hold_stereocentres = hold;
+        }
+        if let Some(measured) = measured_energy_scale {
+            cfg.measured_energy_scale = measured;
         }
         cfg
     } else if let Some(geometry) = water {
