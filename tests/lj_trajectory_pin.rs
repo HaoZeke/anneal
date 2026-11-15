@@ -13,7 +13,9 @@
 //! this test forces rgmin's scalar dots.
 //!
 //! The fivefold assignment is the built-in one on every build, so the
-//! hash is `6e277f86…` with and without IRA.
+//! hash is `5cd9c957…` with and without IRA. It was `6e277f86…` until the
+//! icosahedral reseed waited for a plateau as old in calls as the search
+//! that found it.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -91,6 +93,6 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
     // The fivefold residual uses the built-in assignment on every build,
     // so linking IRA does not change this hash.
-    let expected = "6e277f8611c9988bbb95c72873fb5b044be414e9148ab9571b732f834e3dceb9";
+    let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
