@@ -4,8 +4,8 @@ use anneal_core::packing::surface_hops;
 use anneal_core::potentials::{SuttonChen, SuttonChenFamily};
 use anneal_core::soap::CONTACT_CUTOFF;
 use ndarray::{Array1, ArrayView1};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Points of the 9-6 shelf fixture.
 const SHELF_POINTS: usize = 78;
@@ -103,7 +103,10 @@ fn surface_hops_run_from_new_bests_only_when_asked() {
     assert!(
         on_outcome.surface_hops.0 > 0,
         "hops {} best {} charged {} surface {:?}",
-        on_outcome.hops, on_outcome.best, on_outcome.charged, on_outcome.surface_hops
+        on_outcome.hops,
+        on_outcome.best,
+        on_outcome.charged,
+        on_outcome.surface_hops
     );
     let plain = Config::with_scales(
         n,
