@@ -342,8 +342,7 @@ def cluster_search(
       plateau_reheat: return a measured ``groups`` search's temperature to
         the declared scale once, in the second half of its budget, it has
         gone as many hops without a new best as it took to find the one it
-        holds, until its next new best. ``None`` keeps the preset's: on for
-        ``recommended=True``, off otherwise.
+        holds, until its next new best. ``None`` keeps the preset's: off.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
