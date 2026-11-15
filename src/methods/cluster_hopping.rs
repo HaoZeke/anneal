@@ -11613,6 +11613,52 @@ mod tests {
         );
     }
 
+    /// Every evaluation a labelled search makes is charged to its ledger,
+    /// the motif reseed's quenches among them, whether or not a motif wins.
+    ///
+    /// The energy never improves, so the incumbent stands for half the
+    /// budget and the motif reseed runs, with its unlike-pair passes, and
+    /// misses.
+    #[test]
+    fn a_missed_motif_reseed_is_charged() {
+        let n = 13;
+        let species = (0..n).map(|i| if i < 6 { 29 } else { 79 }).collect();
+        let mut cfg = Config::recommended(n).with_species(species, None);
+        cfg.relax_steps = 16;
+        // The binary-core probe settles on its own ledger as well. Off, every
+        // call away from the search ledger is the motif probe's.
+        cfg.prior_core = false;
+        assert!(cfg.prior_motif);
+        let mut rng = StdRng::seed_from_u64(5);
+        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let budget = 6_000;
+        let mut ledger = Ledger::new(budget);
+        let main = &ledger as *const Ledger as usize;
+        let mut on_main = 0usize;
+        let mut off_main = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            for _ in 0..steps.max(1) {
+                if !led.charge() {
+                    break;
+                }
+                if led as *const Ledger as usize == main {
+                    on_main += 1;
+                } else {
+                    off_main += 1;
+                }
+            }
+            (-1.0, x.to_owned())
+        };
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        assert!(off_main > 0, "no motif quench ran");
+        assert!(out.charged <= budget);
+        assert!(
+            out.charged >= on_main + off_main,
+            "{on_main} search and {off_main} motif evaluations, {} charged",
+            out.charged
+        );
+    }
+
     /// A new lowest found by any quench of the hop restarts the restart
     /// clock, wherever in the hop that quench ran.
     ///
