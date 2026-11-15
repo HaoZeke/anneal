@@ -18,6 +18,15 @@ gmx_dropin = shared_library(
 if not meson.is_subproject()
     install_headers(files('libcp2k.h'), subdir: 'rgpot' / 'gromacs')
 endif
+gmx_dropin_bench = executable(
+    'rgpot-gromacs-bench',
+    files('bench_dropin.cpp'),
+    dependencies: [pot_spec_dep],
+    link_with: [rgpot, gmx_dropin],
+    include_directories: [engines_inc, rgpot_inc],
+    cpp_args: _args,
+    install: false,
+)
 gmx_dropin_build_dir = meson.current_build_dir()
 gmx_dropin_source_dir = meson.current_source_dir()
 subdir('pkgconfig')
