@@ -5,11 +5,14 @@
 One row per (variant, system, seed). Seeds 2000-2011, the paper budget
 of each system, one core, hostname bench. A finished row is never
 rewritten: a rerun skips every (variant, system, seed) already in the
-table and appends the rest. ``code_revision`` is the git revision the
-binaries were built from and ``host`` is the UTS hostname.
+table at the same revision and appends the rest. ``code_revision`` is
+the git revision the binaries were built from and ``host`` is the UTS
+hostname.
 
 A variant is the value of ``H2H_DECIDE`` handed to every binary;
-``baseline`` leaves it unset. A miss is stored as the full budget.
+``develop`` and ``baseline`` leave it unset. ``baseline`` names the rows
+taken against an older develop and is kept as provenance. A miss is
+stored as the full budget. ``--panel first`` is the reduced first pass.
 """
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ PANEL = (
     ("lj104", "h2h_gmin_proof", 4_000_000, -582.086642),
     ("lj150", "h2h_gmin_proof", 4_000_000, -893.310258),
 )
+FIRST_PASS = ("lj38", "lj75", "lj98", "lj103", "au55", "tip4p20", "m80r6", "sc108-55")
 TIP4P_TOL = 0.001
 
 FIELDS = (
@@ -70,6 +74,7 @@ FIELDS = (
 # Spec handed to H2H_DECIDE for each named variant.
 VARIANTS = {
     "baseline": None,
+    "develop": None,
     "hyperband": "hyperband",
     "thompson": "thompson",
     "ducb": "ducb",
@@ -148,10 +153,13 @@ def run_one(bindir: Path, system: str, binary: str, seed: int, budget: int,
     }
 
 
-def load_done(path: Path) -> set[tuple[str, str, str]]:
+def load_done(path: Path) -> set[tuple[str, str, str, str]]:
     if not path.exists():
         return set()
-    return {(r["variant"], r["system"], r["seed"]) for r in csv.DictReader(path.open())}
+    return {
+        (r["variant"], r["system"], r["seed"], r["code_revision"])
+        for r in csv.DictReader(path.open())
+    }
 
 
 def append_row(path: Path, row: dict[str, str]) -> None:
@@ -171,6 +179,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--panel", choices=("full", "first"), default="full")
     parser.add_argument("--system", action="append", default=[])
     parser.add_argument("--seed", type=int, action="append", default=[])
     args = parser.parse_args(argv)
@@ -183,12 +192,13 @@ def main(argv: list[str]) -> int:
     args.scratch.mkdir(parents=True, exist_ok=True)
     done = load_done(path)
     seeds = tuple(args.seed) or SEEDS
+    systems = set(args.system) or (set(FIRST_PASS) if args.panel == "first" else None)
     for variant in args.variants:
         for system, binary, budget, reference in PANEL:
-            if args.system and system not in args.system:
+            if systems is not None and system not in systems:
                 continue
             for seed in seeds:
-                key = (variant, system, str(seed))
+                key = (variant, system, str(seed), revision)
                 if key in done:
                     continue
                 print(f"run {variant} {system} {seed}", flush=True)

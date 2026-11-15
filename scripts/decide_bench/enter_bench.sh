@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
-# Build the panel binaries at HEAD and append raw rows on hostname bench.
+# Build the panel binaries and append raw rows on hostname bench.
 #
-#   enter_bench.sh <variant> [<variant> ...] [--system NAME] [--seed N]
+#   [DECIDE_REV=<rev>] enter_bench.sh <variant> ... [--panel first]
+#                                     [--system NAME] [--seed N]
 #
-# Variants: baseline, hyperband, thompson, ducb, adapt. Rows go to
-# bench/decide/rows.csv; finished (variant, system, seed) rows are kept.
+# Variants: develop, hyperband, thompson, ducb, adapt. The binaries are
+# built at DECIDE_REV (HEAD when unset) from a detached worktree; the row
+# runner is always this tree's. Rows go to bench/decide/rows.csv; a
+# finished (variant, system, seed, revision) row is kept.
 # The Sutton-Chen potential is rgpot's librgpot.so (RGPOT_SC_LIB).
 set -euo pipefail
 
@@ -20,15 +23,19 @@ if [ "$#" -lt 1 ]; then
   exit 2
 fi
 
-revision=$(git -C "$ROOT" rev-parse HEAD)
+revision=$(git -C "$ROOT" rev-parse "${DECIDE_REV:-HEAD}^{commit}")
 BIN=$WORK/bin-$revision
+SRC=$WORK/src-$revision
 if [ ! -x "$BIN/h2h_sc" ]; then
   mkdir -p "$WORK/target" "$WORK/rustc-tmp" "$BIN"
+  if [ ! -d "$SRC" ]; then
+    git -C "$ROOT" worktree add --detach "$SRC" "$revision" >/dev/null
+  fi
   (
-    cd "$ROOT"
+    cd "$SRC"
     export CARGO_TARGET_DIR=$WORK/target
     export TMPDIR=$WORK/rustc-tmp
-    export RUSTFLAGS="--remap-path-prefix=${ROOT}=/src --remap-path-prefix=${HOME}=/user --remap-path-prefix=${cargo_home}=/cargo"
+    export RUSTFLAGS="--remap-path-prefix=${SRC}=/src --remap-path-prefix=${HOME}=/user --remap-path-prefix=${cargo_home}=/cargo"
     cargo +1.88.0 build --release --locked --features rgpot-ex \
       --example h2h_gmin_proof --example h2h_metal --example h2h_morse \
       --example h2h_seed --example h2h_sc -j 4
