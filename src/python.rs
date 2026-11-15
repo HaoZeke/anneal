@@ -3530,7 +3530,8 @@ fn rigid_probe(
 ///     the preset's: on for `recommended=True`, off otherwise.
 ///   measured_energy_scale: `Config::measured_energy_scale` of a `groups`
 ///     search, the temperature and deposit height are read from the opening
-///     hops. Unset keeps the preset's: off.
+///     hops. Unset keeps the preset's: on for `recommended=True`, off
+///     otherwise.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is

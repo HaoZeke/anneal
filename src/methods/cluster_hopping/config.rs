@@ -1363,7 +1363,7 @@ pub struct Config {
     /// conformers a few hundredths of one apart, and at the declared scale
     /// of one the chain accepts nearly every hop and its deposits empty a
     /// basin on the first revisit. Single chains only; a replica ladder
-    /// keeps its rungs.
+    /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
 }
@@ -2126,6 +2126,9 @@ impl Config {
         // A conformer search keeps the molecule it was given; a centre the
         // quench pushes through its plane is another one.
         cfg.hold_stereocentres = true;
+        // The binding declares an energy scale of one; a conformer
+        // landscape in electronvolts is a few hundredths of that.
+        cfg.measured_energy_scale = true;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;
@@ -2305,6 +2308,7 @@ mod coverage_behaviour {
         let recommended = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
+        assert!(recommended.measured_energy_scale);
         assert!(
             recommended
                 .resolved_json()

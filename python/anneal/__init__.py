@@ -337,7 +337,7 @@ def cluster_search(
       measured_energy_scale: take a ``groups`` search's temperature and
         deposit height from the median quenched energy change of its opening
         hops instead of an energy scale of one. ``None`` keeps the preset's:
-        off.
+        on for ``recommended=True``, off otherwise.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
