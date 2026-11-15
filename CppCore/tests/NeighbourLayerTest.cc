@@ -519,3 +519,49 @@ TEST_CASE("a sheared cell wider than twice the search needs no image search",
     requireSamePairs(walked, direct);
   }
 }
+
+TEST_CASE("a stored half walk folds only the pairs it visits",
+          "[nlist][triclinic]") {
+  // The cell is wider than twice the cutoff but not twice the cutoff plus
+  // the skin, so folds of stored pairs near half its width search over
+  // images. A pair and its reverse search alike, so a half walk that folds
+  // only j > i searches half as often as the directed walk.
+  setThreads("1");
+  const double a = 3.6;
+  const double side = 3 * a;
+  const double cell[9] = {
+      side, 0, 0, 0.08 * side, side, 0, 0.04 * side, -0.06 * side, side};
+  const auto pos = shearedFcc(3, a, cell);
+  const auto n = static_cast<std::int64_t>(pos.size() / 3);
+  rgpot::nlist::Spec spec;
+  spec.cutoff = 5.0;
+  spec.skin = 1.0;
+  spec.image = rgpot::nlist::Image::Round;
+  spec.mode = rgpot::nlist::Mode::Stored;
+  rgpot::nlist::Neighbours cells;
+  cells.update(pos.data(), pos.size() / 3, cell, spec);
+  REQUIRE(cells.mode() == rgpot::nlist::Mode::Stored);
+
+  std::uint64_t directed = 0;
+  auto start = rgpot::nlist::MinimumImage::searches();
+  cells.forDirected(0, n,
+                    [&](std::int32_t, std::int32_t, double, double, double,
+                        double) { ++directed; });
+  const auto directed_searches = rgpot::nlist::MinimumImage::searches() - start;
+
+  std::uint64_t half = 0;
+  bool ordered = true;
+  start = rgpot::nlist::MinimumImage::searches();
+  cells.forHalf(
+      0, n,
+      [&](std::int32_t i, std::int32_t j, double, double, double, double) {
+        ordered = ordered && j > i;
+        ++half;
+      });
+  const auto half_searches = rgpot::nlist::MinimumImage::searches() - start;
+
+  REQUIRE(ordered);
+  REQUIRE(directed == 2 * half);
+  REQUIRE(directed_searches > 0);
+  REQUIRE(2 * half_searches == directed_searches);
+}

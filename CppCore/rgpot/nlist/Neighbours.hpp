@@ -113,7 +113,7 @@ public:
     if (streaming_) {
       walkCells(begin, end, fn, false);
     } else {
-      walkStored(begin, end, fn);
+      walkStored(begin, end, fn, false);
     }
   }
 
@@ -125,13 +125,7 @@ public:
     if (streaming_) {
       walkCells(begin, end, fn, true);
     } else {
-      auto half = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                      double r2) {
-        if (j > i) {
-          fn(i, j, dx, dy, dz, r2);
-        }
-      };
-      walkStored(begin, end, half);
+      walkStored(begin, end, fn, true);
     }
   }
 
@@ -224,11 +218,19 @@ private:
   void fold(double &dx, double &dy, double &dz) const;
 
   template <typename Fn>
-  void walkStored(std::int64_t begin, std::int64_t end, Fn &fn) const {
+  void walkStored(std::int64_t begin, std::int64_t end, Fn &fn,
+                  bool half) const {
     for (std::int64_t i = begin; i < end; ++i) {
       const auto a = static_cast<std::size_t>(i);
-      const auto lo = off_[a];
+      auto lo = off_[a];
       const auto hi = off_[a + 1];
+      if (half) {
+        // The partners are sorted, so those after i are a tail of the row.
+        const auto row = nbr_.begin();
+        lo = static_cast<std::int32_t>(
+            std::upper_bound(row + lo, row + hi, static_cast<std::int32_t>(i)) -
+            row);
+      }
       for (std::int32_t p = lo; p < hi; ++p) {
         const auto j = nbr_[static_cast<std::size_t>(p)];
         double dx = 0;
