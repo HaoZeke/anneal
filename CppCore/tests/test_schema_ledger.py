@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -248,6 +249,67 @@ class LedgerTest(unittest.TestCase):
         self.assertRejected(
             "local ForceInput @2 field tag :Text collides with upstream ForceInput @2 field charge :Int32"
         )
+
+    def test_crlf_checkout_passes(self) -> None:
+        # git with core.autocrlf=true checks every text file out with CRLF.
+        files = [
+            *(self.root / rel for rel in L.VENDORED),
+            self.ledger(),
+            self.root / L.WRAP,
+            self.upstream,
+            *sorted((self.root / L.PACKAGEFILES).glob("*.diff")),
+        ]
+        for path in files:
+            path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        self.assertIn(b"\r\n", (self.root / L.VENDORED[0]).read_bytes())
+        self.assertEqual(self.check(), 0, self.err.getvalue())
+
+        patched = self.root / "checkout" / L.SCHEMA_NAME
+        patched.parent.mkdir()
+        patched.write_bytes((self.root / L.VENDORED[0]).read_bytes())
+        self.assertEqual(
+            self.run_tool("check", "--subproject-schema", str(patched)), 0, self.err.getvalue()
+        )
+
+    @unittest.skipIf(shutil.which("git") is None, "git is not installed")
+    def test_subproject_at_the_pin_is_read_as_utf8(self) -> None:
+        # meson's wrap-git checkout sits at the pinned revision, so the
+        # upstream text comes from git. A locale code page that is not UTF-8
+        # (cp1252 on Windows) must not change a non-ASCII comment in it.
+        upstream = UPSTREAM + "# Pinned upstream \u2014 edit it there.\n"
+        self.write_tree(upstream, LOCAL_DIFF)
+        sub = self.root / "subprojects" / "potentials-schema"
+        sub.mkdir(parents=True)
+        (sub / L.SCHEMA_NAME).write_text(upstream, encoding="utf-8")
+        _git(sub, "init", "-q")
+        _git(sub, "add", "-A")
+        _git(sub, "commit", "-q", "-m", "pin")
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=sub, check=True, stdout=subprocess.PIPE, encoding="utf-8"
+        ).stdout.strip()
+        wrap = self.root / L.WRAP
+        wrap.write_text(wrap.read_text(encoding="utf-8").replace("0" * 40, head), encoding="utf-8")
+        (sub / L.SCHEMA_NAME).write_text(self.vendored(), encoding="utf-8")
+
+        env = {**os.environ, "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0", "LC_ALL": "C"}
+        done = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "CppCore" / "rgpot" / "rpc" / "schema_ledger.py"),
+                "check",
+                "--root",
+                str(self.root),
+                "--subproject-schema",
+                str(sub / L.SCHEMA_NAME),
+            ],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            errors="replace",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("unpatched upstream: git object", done.stdout)
 
     def test_append_refuses_to_rewrite(self) -> None:
         self.set_vendored(self.vendored().replace("de @0 :Float64", "de @0 :Float32"))

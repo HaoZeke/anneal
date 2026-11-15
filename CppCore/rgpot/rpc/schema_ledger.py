@@ -388,8 +388,15 @@ def schema_hunks(diff: Path) -> list[Hunk]:
 
 
 def _git(*args: str, cwd: Path | None = None) -> str:
+    # The schema is UTF-8; the locale's code page (cp1252 on Windows) would
+    # turn its non-ASCII comments into different text.
     return subprocess.run(
-        ["git", *args], cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
     ).stdout
 
 
@@ -616,7 +623,7 @@ def run_append(args: argparse.Namespace) -> int:
         if not text.endswith("\n"):
             text += "\n"
         text += "".join(e.line() + "\n" for e in fresh)
-        ledger_path.write_text(text, encoding="utf-8")
+        ledger_path.write_text(text, encoding="utf-8", newline="\n")
     print(f"appended {len(fresh)} entries to {ledger_path}")
     return 0
 
