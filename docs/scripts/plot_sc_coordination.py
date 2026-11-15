@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Coordination histograms of Sutton-Chen minima written by sc_minima.
 
 usage: plot_sc_coordination.py <length> <out.png> <label=file.xyz>...
