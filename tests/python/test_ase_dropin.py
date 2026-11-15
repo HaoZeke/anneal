@@ -286,14 +286,24 @@ def al_small() -> Atoms:
     return atoms
 
 
+def _spread(atoms: Atoms, count: int = 4) -> list[int]:
+    """Up to count atom indices spread over the range, first and last included."""
+    last = len(atoms) - 1
+    return sorted({round(k * last / (count - 1)) for k in range(count)})
+
+
 @pytest.mark.parametrize(("make", "geometry"), list(_fd_cases()))
 def test_forces_are_minus_the_energy_gradient(make, geometry) -> None:
     atoms = geometry()
     atoms.calc = make()
     analytic = atoms.get_forces()
-    numeric = calculate_numerical_forces(atoms, eps=1e-5)
+    # Every Cartesian component of a fixed spread of atoms. Each component
+    # costs two energies, and the free-threaded job repeats this body 20
+    # times on every thread.
+    picked = _spread(atoms)
+    numeric = calculate_numerical_forces(atoms, eps=1e-5, iatoms=picked)
     scale = max(1.0, float(np.max(np.abs(numeric))))
-    np.testing.assert_allclose(analytic, numeric, atol=2e-7 * scale, rtol=0.0)
+    np.testing.assert_allclose(analytic[picked], numeric, atol=2e-7 * scale, rtol=0.0)
 
 
 @pytest.mark.parametrize(("make", "geometry"), list(_fd_cases()))
