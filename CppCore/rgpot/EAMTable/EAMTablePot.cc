@@ -24,7 +24,7 @@
 // clang-format on
 
 #include "rgpot/EAMTable/EAMTablePot.hpp"
-#include "rgpot/nlist/PairListCache.hpp"
+#include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
 
 namespace {
@@ -285,19 +285,22 @@ void EAMTablePot::forceImpl(const ForceInput &in, ForceOut *out) const {
   } else {
     box = free_box;
   }
-  nlist::CachedPairList::Options opt;
-  opt.cutoff = t.cutoff;
-  opt.periodic = {m_periodic, m_periodic, m_periodic};
+  // A local list keeps one instance safe to share across threads.
+  nlist::Neighbours cells;
   const double cut2 = t.cutoff * t.cutoff;
   const double rdr = 1.0 / t.dr;
   const double rdrho = 1.0 / t.drho;
-  auto &pool = nlist::PairListCache::global();
 
   const bool pairs = n_size >= 2;
+  if (pairs) {
+    nlist::updateCells(cells, in.pos, n_size, box, t.cutoff, 0.0,
+                       nlist::Image::Round, nlist::Mode::Auto,
+                       {m_periodic, m_periodic, m_periodic});
+  }
 
   std::vector<double> rho(n_size, 0.0);
   if (pairs) {
-    pool.evaluate(in.pos, n_size, box, opt,
+    nlist::visitHalf(cells, 0, static_cast<std::int64_t>(n_size),
                   [&](int32_t i, int32_t j, double, double, double, double r2) {
                     if (!(r2 > 0.0) || !(r2 < cut2)) {
                       return;
@@ -325,8 +328,8 @@ void EAMTablePot::forceImpl(const ForceInput &in, ForceOut *out) const {
 
   double strain[6] = {};
   if (pairs) {
-    pool.evaluate(
-        in.pos, n_size, box, opt,
+    nlist::visitHalf(
+        cells, 0, static_cast<std::int64_t>(n_size),
         [&](int32_t i, int32_t j, double dx, double dy, double dz, double r2) {
           if (!(r2 > 0.0) || !(r2 < cut2)) {
             return;
