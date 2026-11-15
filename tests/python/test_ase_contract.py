@@ -58,8 +58,10 @@ def test_implemented_properties_follow_caps() -> None:
         "free_energy",
         "forces",
         "stress",
+        "energies",
+        "stresses",
     ]
-    assert "energies" not in lj.implemented_properties
+    assert callable(lj.potential.evaluate_per_atom)
     if not rgpot.has_fortran_pots:
         pytest.skip("this build has no Fortran potentials")
     eam = RgpotCalculator("eam_al")
@@ -267,11 +269,16 @@ def test_nonperiodic_pt7_ignores_cell() -> None:
     bare.calc = calc
     free = raw_bytes(bare.get_potential_energy(), bare.get_forces())
     assert confined == free
+    # Periodic x and z 40 Angstrom apart keep every image out of the
+    # 7.1 Angstrom cutoff, so the slab equals the cluster.
     mixed = cluster.copy()
+    mixed.set_cell([40.0, 10.0, 40.0])
     mixed.set_pbc([True, False, True])
     mixed.calc = calc
-    with pytest.raises(ValueError, match="non-periodic axes: y"):
-        mixed.get_potential_energy()
+    assert mixed.get_potential_energy() == pytest.approx(
+        bare.get_potential_energy(), rel=1e-13
+    )
+    np.testing.assert_allclose(mixed.get_forces(), bare.get_forces(), atol=1e-12)
 
 
 def test_rpc_bfgs_when_potserv_exists(tmp_path: Path) -> None:

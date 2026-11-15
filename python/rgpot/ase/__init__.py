@@ -8,13 +8,14 @@ from __future__ import annotations
 from typing import Any
 
 from rgpot.ase.anneal import AnnealOptimizer, AnnealRunner
-from rgpot.ase.calculator import RgpotCalculator
+from rgpot.ase.calculator import RgpotCalculator, available_kinds
 
 __all__ = [
     "AnnealOptimizer",
     "AnnealRunner",
     "RgpotCalculator",
     "RgpotRpcCalculator",
+    "available_kinds",
 ]
 
 
