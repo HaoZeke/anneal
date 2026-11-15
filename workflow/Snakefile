@@ -436,15 +436,31 @@ rule covalent_h2h:
 # GFN2-xTB Si10 and C10, anneal's general arm against CREST 3.0.2, twelve
 # seeds, 1e5 calls, 3000 K electronic temperature. Needs xtb 6.7.1, CREST
 # and rgpot's libxtb_engine.so (paths in the script). Not part of `rule all`.
+# Rows and summaries are appended to bench/covalent-h2h/gfn2/rows.csv and
+# summaries.csv; the output is a stamp under /work, because Snakemake
+# deletes declared outputs before a job and would take the rows with it.
 #   snakemake -s workflow/Snakefile covalent_gfn2_crest
 rule covalent_gfn2_crest:
     output:
-        "bench/covalent-h2h/gfn2/seeds.csv",
-        "bench/covalent-h2h/gfn2/summary.csv",
+        touch("/work/covalent-h2h/gfn2/stamps/panel.stamp"),
     shell:
         """
         set -euo pipefail
         bash scripts/covalent_h2h/gfn2_enter_bench.sh
+        """
+
+
+# CREST's Si10 seeds 2004-2011, bringing the arm to the twelve seeds of the
+# anneal arm. Same stamp rule as above; GFN2_CORE picks the core.
+#   snakemake -s workflow/Snakefile covalent_gfn2_crest_si10_n12
+rule covalent_gfn2_crest_si10_n12:
+    output:
+        touch("/work/covalent-h2h/gfn2/stamps/si10-crest-n12.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        GFN2_CODES=crest bash scripts/covalent_h2h/gfn2_enter_bench.sh \
+          --systems si10 --crest-seeds 2004 2005 2006 2007 2008 2009 2010 2011
         """
 
 
