@@ -51,34 +51,24 @@ const MASS_H: f64 = 1.008;
 
 /// Putative TIP4P global minima in kJ/mol for 2 to 21 molecules.
 ///
-/// The energy line of `TIP4P-N.xyz` in the Cambridge Cluster Database
-/// (`TIP4P-water.html`), from Wales and Hodges, *Chem. Phys. Lett.* **286**,
-/// 65 (1998). These are the
-/// energies this potential reproduces at the database coordinates.
+/// `scripts/tip4p_ccd_table.py` reads the Energy line of each Cambridge
+/// structure file and writes `data/tip4p_ccd.csv`. Wales and Hodges,
+/// *Chem. Phys. Lett.* **286**, 65
+/// (1998). These are the energies this potential reproduces at the database
+/// coordinates.
 pub fn ccd_tip4p_minimum(n_molecules: usize) -> Option<f64> {
-    Some(match n_molecules {
-        2 => -26.0875718462,
-        3 => -69.9938657427,
-        4 => -116.5904186160,
-        5 => -152.1090020006,
-        6 => -197.7805260034,
-        7 => -243.5723973918,
-        8 => -305.5183221676,
-        9 => -344.4352092012,
-        10 => -391.0226842125,
-        11 => -431.4890723318,
-        12 => -492.9082357122,
-        13 => -532.9705363445,
-        14 => -582.9911036211,
-        15 => -628.3722525077,
-        16 => -681.1925945898,
-        17 => -723.8077531390,
-        18 => -773.2318693143,
-        19 => -821.0369191145,
-        20 => -872.9887544952,
-        21 => -916.7074302940,
-        _ => return None,
-    })
+    for line in include_str!("../../data/tip4p_ccd.csv").lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('n') {
+            continue;
+        }
+        let mut cols = line.split(',');
+        let n: usize = cols.next()?.parse().ok()?;
+        if n == n_molecules {
+            return cols.next()?.parse().ok();
+        }
+    }
+    None
 }
 
 /// Wales and Hodges, *Chem. Phys. Lett.* **286**, 65 (1998), putative
