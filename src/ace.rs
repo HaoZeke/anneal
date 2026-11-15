@@ -57,11 +57,16 @@ fn fact(n: i32) -> f64 {
         121_645_100_408_832_000.0,
         2_432_902_008_176_640_000.0,
     ];
-    if n < 0 || n as usize >= F.len() {
-        0.0
-    } else {
-        F[n as usize]
+    if n < 0 {
+        return 0.0;
     }
+    let n = n as usize;
+    if n < F.len() {
+        return F[n];
+    }
+    // The cached tables reach l = 8, where the 3j prefactor divides by
+    // (l1 + l2 + l3 + 1)! = 25!.
+    (F.len()..=n).fold(F[F.len() - 1], |product, k| product * k as f64)
 }
 
 fn wigner_3j(l1: i32, l2: i32, l3: i32, m1: i32, m2: i32, m3: i32) -> f64 {
@@ -332,6 +337,26 @@ mod tests {
         assert!((cg(1, 1, 1, 1, 2, 2) - 1.0).abs() < 1e-12);
         // ⟨1 0, 1 0 | 2 0⟩ = √(2/3)
         assert!((cg(1, 0, 1, 0, 2, 0) - (2.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+    }
+
+    /// The cached tables go to l = 8, where l1 + l2 + l3 + 1 reaches 25.
+    #[test]
+    fn cg_stays_normalised_past_twenty_factorial() {
+        for (l1, l2, l3) in [(7, 7, 6), (7, 7, 7), (8, 8, 8)] {
+            let sum: f64 = (-l1..=l1)
+                .map(|m1| cg(l1, m1, l2, -m1, l3, 0).powi(2))
+                .sum();
+            assert!((sum - 1.0).abs() < 1e-10, "({l1} {l2} {l3}): {sum}");
+        }
+        let c: Vec<f64> = (0..3 * 9 * 9)
+            .map(|i| ((i * 17) % 11) as f64 * 0.01)
+            .collect();
+        for l_max in [7usize, 8] {
+            assert!(
+                from_c(&c, 3, l_max).iter().all(|v| v.is_finite()),
+                "l_max {l_max}"
+            );
+        }
     }
 
     #[test]
