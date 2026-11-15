@@ -25,7 +25,7 @@ from pathlib import Path
 
 ORDER = (
     "lj38", "lj75", "lj98", "lj104", "lj150",
-    "m55r6", "m80r6", "m55r14", "m80r14",
+    "m55r6", "m80r3", "m80r6", "m55r14", "m80r14",
     "au55", "cu6au32", "cu27au28",
     "cu19au19", "cu10au45", "cu30au8", "cu12au26", "pt12cu11",
     "tip4p4", "tip4p8", "tip4p15",
