@@ -2105,6 +2105,9 @@ impl Config {
         // macrocycle backbone. A molecule without a flexible ring draws the
         // same hops either way.
         cfg.ring_moves = true;
+        // A conformer search keeps the molecule it was given; a centre the
+        // quench pushes through its plane is another one.
+        cfg.hold_stereocentres = true;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;
@@ -2283,6 +2286,7 @@ mod coverage_behaviour {
         let species = vec![8, 1, 1, 8, 1, 1];
         let recommended = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
         assert_eq!(recommended.local_step, LocalStep::Auto);
+        assert!(recommended.hold_stereocentres);
         assert!(
             recommended
                 .resolved_json()

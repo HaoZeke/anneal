@@ -332,7 +332,7 @@ def cluster_search(
         otherwise.
       hold_stereocentres: refuse a quench step of a ``groups`` search that
         turns a four-bonded centre into its mirror image. ``None`` keeps the
-        preset's.
+        preset's: on for ``recommended=True``, off otherwise.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.

@@ -3527,7 +3527,7 @@ fn rigid_probe(
 ///     `recommended=True`, off otherwise.
 ///   hold_stereocentres: `Config::hold_stereocentres` of a `groups` search,
 ///     a quench step that inverts a stereocentre is refused. Unset keeps
-///     the preset's.
+///     the preset's: on for `recommended=True`, off otherwise.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
