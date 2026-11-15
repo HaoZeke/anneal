@@ -391,6 +391,16 @@ if (
         ],
         timeout: 300,
     )
+    test(
+        'gromacs_include_prefix',
+        python3_engines,
+        args: [
+            files('test_gromacs_include_prefix.py'),
+            meson.project_source_root(),
+            meson_prog.full_path(),
+        ],
+        timeout: 300,
+    )
 endif
 
 abi_script = find_program('../scripts/abi_symbols.sh')
@@ -554,7 +564,9 @@ if python3_engines.found()
         gromacs_inc = _gmx_inc.stdout().strip()
     endif
 endif
-if gromacs_inc != ''
+# A prefix inside the consumer source tree makes include_directories()
+# reject the path before the header check. Skip it; the test is optional.
+if gromacs_inc != '' and not gromacs_inc.startswith(meson.global_source_root())
     gromacs_headers = include_directories(
         gromacs_inc.startswith(project_root + '/') ? fs.relative_to(
             gromacs_inc,
