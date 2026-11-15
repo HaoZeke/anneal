@@ -85,6 +85,15 @@ void lj_pair(double r2, const simd::LjParams &p, double &energy, double &fscale)
  *
  */
 void LJPot::forceImpl(const ForceInput &in, ForceOut *out) const {
+  compute(in, out, nullptr);
+}
+
+void LJPot::forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const {
+  clearPerAtom(atoms, in.nAtoms);
+  compute(in, out, &atoms);
+}
+
+void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const {
   const long N = in.nAtoms;
   const double *R = in.pos;
   const double *box = in.box;
@@ -124,7 +133,8 @@ void LJPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   const double cutoff2 = cuttOffR * cuttOffR;
   const int nt = nlist::threadsRequested();
   auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                    double r2, double *force, double &energy, double *virial) {
+                    double r2, double *force, double &energy, double *virial,
+                    const PerAtomOut *share) {
     if (!(i < j) || r2 > cutoff2) {
       return;
     }
@@ -148,15 +158,24 @@ void LJPot::forceImpl(const ForceInput &in, ForceOut *out) const {
     force[3 * j + 1] -= fy;
     force[3 * j + 2] -= fz;
     accumulatePairStrain(virial, fscale, dx, dy, dz);
+    if (share != nullptr) {
+      tallyPair(*share, static_cast<std::size_t>(i), static_cast<std::size_t>(j), pair_e, fscale,
+                dx, dy, dz);
+    }
   };
   if (nt <= 1) {
     nlist::visitHalf(neighbours_, 0, N,
                      [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                         double r2) { accept(i, j, dx, dy, dz, r2, F, *U, strain); });
+                         double r2) { accept(i, j, dx, dy, dz, r2, F, *U, strain, atoms); });
   } else {
     std::vector<double> owned(static_cast<std::size_t>(nt) * n_atoms * 3, 0.0);
     std::vector<double> energy(static_cast<std::size_t>(nt), 0.0);
     std::vector<double> virial(static_cast<std::size_t>(nt) * 6, 0.0);
+    PerAtomTeam team(atoms, n_atoms, nt);
+    std::vector<PerAtomOut> slots(static_cast<std::size_t>(nt));
+    for (int t = 0; t < nt; ++t) {
+      slots[static_cast<std::size_t>(t)] = team.slot(t);
+    }
     // One shared tile build. A visit from each thread would allocate the
     // cell scratch once per thread.
     neighbours_.forCellTeam(
@@ -164,8 +183,10 @@ void LJPot::forceImpl(const ForceInput &in, ForceOut *out) const {
                       double r2) {
           double *local = owned.data() + static_cast<std::size_t>(t) * n_atoms * 3;
           double *st = virial.data() + static_cast<std::size_t>(t) * 6;
-          accept(i, j, dx, dy, dz, r2, local, energy[static_cast<std::size_t>(t)], st);
+          accept(i, j, dx, dy, dz, r2, local, energy[static_cast<std::size_t>(t)], st,
+                 atoms != nullptr ? &slots[static_cast<std::size_t>(t)] : nullptr);
         });
+    team.reduce();
     for (int t = 0; t < nt; ++t) {
       *U += energy[static_cast<std::size_t>(t)];
       const double *local = owned.data() + static_cast<std::size_t>(t) * n_atoms * 3;

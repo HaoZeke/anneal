@@ -36,6 +36,7 @@
 #include <vector>
 // clang-format on
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
 
 namespace rgpot {
@@ -98,8 +99,15 @@ public:
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
+  /// forceImpl plus per-atom terms: each atom's embedding F_a(rho_i), and
+  /// each phi_ab and pair virial split half to each atom, as pair_style
+  /// eam tallies eatom and vatom.
+  void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
 private:
   static constexpr uint64_t kKernelVersion = 1;
+
+  void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
   EAMTable m_table;
   /// PairEAM::interpolate coefficients, seven per point, same layout as

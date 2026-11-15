@@ -870,6 +870,7 @@ if get_option('with_tests')
                 '',
             ],
             ['ZBLPotTest', 'zbl_pot_test', 'ZBLPotTest.cc', ''],
+            ['PerAtomTest', 'per_atom_test', 'PerAtomTest.cc', ''],
             ['FastNlistTest', 'fast_nlist_test', 'FastNlistTest.cc', ''],
             ['IsaDispatchTest', 'isa_dispatch_test', 'IsaDispatchTest.cc', ''],
             ['FmaExactTest', 'fma_exact_test', 'FmaExactTest.cc', ''],

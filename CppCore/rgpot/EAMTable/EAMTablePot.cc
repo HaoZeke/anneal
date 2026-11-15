@@ -247,6 +247,17 @@ EAMTablePot::EAMTablePot(const EAMTable &table, bool periodic, bool stress)
 }
 
 void EAMTablePot::forceImpl(const ForceInput &in, ForceOut *out) const {
+  compute(in, out, nullptr);
+}
+
+void EAMTablePot::forcePerAtom(const ForceInput &in, ForceOut *out,
+                               const PerAtomOut &atoms) const {
+  clearPerAtom(atoms, in.nAtoms);
+  compute(in, out, &atoms);
+}
+
+void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
+                          const PerAtomOut *atoms) const {
   const auto n_size = in.nAtoms;
   double *F = out->F;
   std::fill(F, F + 3 * n_size, 0.0);
@@ -320,9 +331,15 @@ void EAMTablePot::forceImpl(const ForceInput &in, ForceOut *out) const {
   for (std::size_t i = 0; i < n_size; ++i) {
     const Knot k = lookup(m_frho[el[i]], rho[i], rdrho, t.nrho);
     fprime[i] = k.slope();
-    energy += k.value();
+    double embed = k.value();
+    energy += embed;
     if (rho[i] > t.rhomax) {
-      energy += fprime[i] * (rho[i] - t.rhomax);
+      const double above = fprime[i] * (rho[i] - t.rhomax);
+      energy += above;
+      embed += above;
+    }
+    if (atoms != nullptr && atoms->energy != nullptr) {
+      atoms->energy[i] += embed;
     }
   }
 
@@ -360,6 +377,9 @@ void EAMTablePot::forceImpl(const ForceInput &in, ForceOut *out) const {
           F[3 * uj + 2] -= fscale * dz;
           if (m_stress) {
             accumulatePairStrain(strain, fscale, dx, dy, dz);
+          }
+          if (atoms != nullptr) {
+            tallyPair(*atoms, ui, uj, phi, fscale, dx, dy, dz);
           }
         });
   }

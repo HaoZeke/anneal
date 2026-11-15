@@ -99,6 +99,17 @@ SuttonChenPot::SuttonChenPot(const SuttonChenConfig &c)
 }
 
 void SuttonChenPot::forceImpl(const ForceInput &in, ForceOut *out) const {
+  compute(in, out, nullptr);
+}
+
+void SuttonChenPot::forcePerAtom(const ForceInput &in, ForceOut *out,
+                                 const PerAtomOut &atoms) const {
+  clearPerAtom(atoms, in.nAtoms);
+  compute(in, out, &atoms);
+}
+
+void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
+                            const PerAtomOut *atoms) const {
   const auto n_atoms = static_cast<long>(in.nAtoms);
   const double *R = in.pos;
   double *F = out->F;
@@ -139,6 +150,7 @@ void SuttonChenPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   const int n_exp = cfg.n;
   const int m_exp = cfg.m;
   const auto n_size = static_cast<std::size_t>(n_atoms);
+  double *atom_e = atoms != nullptr ? atoms->energy : nullptr;
 
   std::vector<double> rho(n_size, 0.0);
   double epair = 0.0;
@@ -163,6 +175,10 @@ void SuttonChenPot::forceImpl(const ForceInput &in, ForceOut *out) const {
       rho[static_cast<std::size_t>(i)] += phi;
       rho[static_cast<std::size_t>(j)] += phi;
       epair += epsilon * rep;
+      if (atom_e != nullptr) {
+        atom_e[static_cast<std::size_t>(i)] += 0.5 * epsilon * rep;
+        atom_e[static_cast<std::size_t>(j)] += 0.5 * epsilon * rep;
+      }
     };
     if (stream) {
       nlist::visitHalf(neighbours_, 0, n_atoms, density);
@@ -190,6 +206,10 @@ void SuttonChenPot::forceImpl(const ForceInput &in, ForceOut *out) const {
           if (j > i) {
             partial[static_cast<std::size_t>(t)] += epsilon * rep;
           }
+          // Each atom is central in one cell, so only that thread writes it.
+          if (atom_e != nullptr) {
+            atom_e[static_cast<std::size_t>(i)] += 0.5 * epsilon * rep;
+          }
         });
     for (double part : partial) {
       epair += part;
@@ -205,6 +225,9 @@ void SuttonChenPot::forceImpl(const ForceInput &in, ForceOut *out) const {
     const double root = std::sqrt(rho[i]);
     eemb -= epsilon * c_coef * root;
     weight[i] = epsilon * c_coef / (2.0 * root);
+    if (atom_e != nullptr) {
+      atom_e[i] -= epsilon * c_coef * root;
+    }
   }
 
   auto apply = [&](int32_t i, int32_t j, double dx, double dy, double dz,
@@ -234,6 +257,12 @@ void SuttonChenPot::forceImpl(const ForceInput &in, ForceOut *out) const {
     }
     if (virial != nullptr && j > i) {
       accumulatePairStrain(virial, fscale, dx, dy, dz);
+    }
+    if (atoms != nullptr) {
+      tallyAtomVirial(*atoms, static_cast<std::size_t>(i), 0.5, fscale, dx, dy, dz);
+      if (both) {
+        tallyAtomVirial(*atoms, static_cast<std::size_t>(j), 0.5, fscale, dx, dy, dz);
+      }
     }
   };
   if (nt == 1) {

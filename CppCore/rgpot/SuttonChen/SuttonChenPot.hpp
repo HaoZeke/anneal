@@ -30,6 +30,7 @@
 #include <cstdint>
 // clang-format on
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -118,11 +119,18 @@ public:
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
+  /// forceImpl plus per-atom terms: each atom's embedding
+  /// -epsilon c sqrt(rho_i), and each pair energy and virial split half to
+  /// each atom.
+  void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
   /// Stored Verlet list or a streaming cell walk.
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 
 private:
   static constexpr uint64_t kKernelVersion = 1;
+
+  void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
   SuttonChenConfig m_config;
   uint64_t m_paramsKey{0};

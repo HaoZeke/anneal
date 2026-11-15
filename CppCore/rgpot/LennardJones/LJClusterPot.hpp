@@ -18,6 +18,7 @@
 // clang-format on
 #include "rgpot/PairSwitch.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 #include "rgpot/pot_caps.hpp"
@@ -100,6 +101,11 @@ public:
    */
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
+  /// forceImpl plus each pair energy and virial split half to each atom.
+  /// Always walks the cells, so the energy can differ from forceImpl's
+  /// direct all-pairs sum in the last bits.
+  void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 
   [[nodiscard]] bool listReused() const noexcept { return neighbours_.reused(); }
@@ -110,6 +116,8 @@ public:
 private:
   /// Bump when the kernel numerics change, so stale cache entries die.
   static constexpr uint64_t kKernelVersion = 2;
+
+  void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
   double u0;       //!< Well depth parameter.
   double cuttOffR; //!< Distance beyond which potential is truncated.
