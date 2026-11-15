@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-# SPDX-FileCopyrightText: 2026-present Rohit Goswami
 # SPDX-License-Identifier: MIT
 """Placeholder: extract and execute Python code blocks from org-mode files.
 
