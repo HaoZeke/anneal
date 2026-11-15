@@ -1,0 +1,4 @@
+Both vendored `Potentials.capnp` copies are again the pinned `potentials-schema` 190fee6 file byte for byte, so `schema-sync-canonical-rpc` and `schema-sync-canonical-core` pass when a parent such as gpridge resolves `potentials-schema` from its own wrap.
+The rgpot-local neighbour fields (`ForceInput.neighbors` @9, `PotentialResult.neighborList` @28, `Potential.neighbours` @13 and the `NeighborRequest`, `NeighborSystem` and `NeighborList` structs) moved from the wrap's `diff_files` to the add-only series `CppCore/rgpot/rpc/local/series`, mirrored in `rgpot-core/schema/local` for the crate.
+Meson, CMake and `rgpot-core/build.rs` apply the series and compile, install and serve that effective schema, which is unchanged on the wire.
+`schema_ledger.py check` now refuses a vendored copy that differs from the pinned file or carries a `local` ledger entry, a wrap that sets `diff_files`, and a series mirror that drifts; `schema_ledger.py apply` writes the effective schema.

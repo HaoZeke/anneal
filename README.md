@@ -49,6 +49,9 @@ See `docs/orgmode/howto/exprpot.org`.
 
 The public wire schema lives in `CppCore/rgpot/rpc/Potentials.capnp` and is
 shared by the C++ server, Python integration tests, and the Rust core crate.
+That file is the pinned potentials-schema release byte for byte; the build
+adds the rgpot-local fields listed in `CppCore/rgpot/rpc/local/series` and
+installs the result.
 Native rgpot units are eV and Angstrom.
 EAM, Lennard-Jones, Sutton-Chen, Stillinger-Weber, Tersoff, Morse and
 ZBL share one neighbour layer, with a stored Verlet list or a streaming
