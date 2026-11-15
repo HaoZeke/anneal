@@ -111,35 +111,43 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         return g
 
     extra = {} if local_step is None else {"local_step": local_step}
-    result = anneal.cluster_search(
-        energy,
-        gradient,
-        len(z),
-        budget,
-        seed=seed,
-        recommended=True,
-        start=x0.reshape(-1),
-        species=z,
-        groups=groups,
-        **extra,
-    )
+    # A search that raises is a finished run with what it harvested.
+    error = None
+    result: dict = {}
+    try:
+        result = anneal.cluster_search(
+            energy,
+            gradient,
+            len(z),
+            budget,
+            seed=seed,
+            recommended=True,
+            start=x0.reshape(-1),
+            species=z,
+            groups=groups,
+            **extra,
+        )
+    except ValueError as err:
+        error = str(err)
     harvest.close()
     wall = time.perf_counter() - t0
     counts = count.read()
     frames = [(x, e * hc.KCAL_PER_EV) for x, e in harvest.minima]
-    best = np.asarray(result["best"])
-    frames.append((best, float(result["best_energy"]) * hc.KCAL_PER_EV))
+    found = list(harvest.found)
+    if error is None:
+        frames.append((np.asarray(result["best"]), float(result["best_energy"]) * hc.KCAL_PER_EV))
+        found.append(harvest.calls)
     hc.write_xyz(out / "candidates.xyz", hc.symbols(mol), frames)
-    found = [*harvest.found, harvest.calls]
     write_trace(out / "trace.xyz", hc.symbols(mol), [(x, e, c) for (x, e), c in zip(frames, found, strict=True)])
     return {
         "callback_calls": harvest.calls,
+        "error": error,
         "wall_s": wall,
         **counts,
         "budget": budget,
-        "hops": int(result["hops"]),
+        "hops": result.get("hops"),
         "accepted": result.get("accepted"),
-        "best_kcal": float(result["best_energy"]) * hc.KCAL_PER_EV,
+        "best_kcal": float(result["best_energy"]) * hc.KCAL_PER_EV if error is None else None,
         "candidates": len(frames),
         "groups": len(groups),
         "local_step": result.get("local_step"),

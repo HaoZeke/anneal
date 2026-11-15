@@ -13,6 +13,7 @@ conformer is that geometry. Per run:
   first held a minimum that polishes to that conformer; the run's total
   when only its final output does
 - ``n_3kcal``: distinct conformers within 3 kcal/mol of E_ref
+- ``error``: the exception a run raised; it is scored on what it harvested
 
 Rows already in ``--rows`` (same molecule, arm and seed) are left as they
 are. The summary and the tests are rebuilt from every row in the file:
@@ -42,7 +43,7 @@ ARMS = ("anneal", "openconf")
 ROW_FIELDS = [
     "molecule", "arm", "seed", "budget", "calls", "energy_calls", "grad_calls", "hit", "calls_to_hit",
     "delta_min_kcal", "n_3kcal", "reference_3kcal", "candidates", "invalid", "wall_s", "pot_s",
-    "outside_s", "embed_s", "e_ref_kcal", "openconf_revision", "code_revision", "host",
+    "outside_s", "embed_s", "e_ref_kcal", "error", "openconf_revision", "code_revision", "host",
 ]
 
 
@@ -172,6 +173,7 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                     "outside_s": info["outside_s"],
                     "embed_s": info.get("embed_s"),
                     "e_ref_kcal": e_ref,
+                    "error": info.get("error"),
                     "openconf_revision": info.get("openconf_revision"),
                     "code_revision": info.get("code_revision"),
                     "host": info["hostname"],
@@ -198,7 +200,7 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path) -> None:
     summary_fields = [
         "molecule", "arm", "n", "hits", "n_3kcal_median", "reference_3kcal", "calls_median",
         "calls_to_hit_median", "delta_min_median_kcal", "wall_median_s", "pot_median_s",
-        "outside_median_s", "pot_share", "invalid_total",
+        "outside_median_s", "pot_share", "invalid_total", "errors",
     ]
     stats_fields = [
         "molecule", "hits_anneal", "hits_openconf", "fisher_odds_ratio", "fisher_p",
@@ -236,6 +238,7 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path) -> None:
                         "outside_median_s": _fmt(med(group, "outside_s")),
                         "pot_share": _fmt(pot / wall if wall else None, 4),
                         "invalid_total": sum(int(r["invalid"]) for r in group),
+                        "errors": sum(r["error"] != "" for r in group),
                     }
                 )
     with stats_path.open("w", newline="") as handle:
