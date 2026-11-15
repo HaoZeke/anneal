@@ -693,13 +693,17 @@ rule ase_mh_h2h:
         """
 
 
-# Deposited Guided Adaptive Diffusion figures against the recommended
-# preset and GMIN, on LJ31 and LJ38. The zip is downloaded here and is
-# not a committed output. Not part of `rule all`:
+# Guided Adaptive Diffusion rerun (CondEvo CHARLES with the deposited
+# settings) against the recommended preset and GMIN on LJ31 and LJ38,
+# seeds 2000-2011, plus the deposited run. The zip is downloaded here and
+# is not a committed output. Rows are appended to
+# bench/gad-published/rows.csv, which is not declared as an output because
+# Snakemake removes declared outputs before a job runs. Not part of
+# `rule all`:
 #   snakemake -s workflow/Snakefile gad_published
 rule gad_published:
     output:
-        "bench/gad-published/summary.csv",
+        touch("/work/gad-published/rows-appended.stamp"),
     shell:
         """
         set -euo pipefail
@@ -710,7 +714,7 @@ rule gad_published:
             https://zenodo.org/api/records/19001618/files/supplementary_data.zip/content
         fi
         echo "e140fde0c62c71f08b326b12ac50d77e  $zip" | md5sum -c -
-        bash scripts/gad_published/enter_bench.sh --summary bench/gad-published/summary.csv --zip "$zip"
+        GAD_ZIP="$zip" bash scripts/gad_published/enter_bench.sh --summary bench/gad-published/rows.csv
         """
 
 
