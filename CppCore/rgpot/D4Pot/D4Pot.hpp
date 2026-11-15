@@ -70,6 +70,7 @@ private:
   mutable dftd4_param m_param = nullptr;
   mutable bool m_initialized = false;
   mutable int m_natoms = 0;
+  mutable std::vector<int> m_numbers;
   mutable std::vector<double> m_pos_bohr;
 
   void initHandles();

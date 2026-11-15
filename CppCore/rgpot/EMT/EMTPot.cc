@@ -6,6 +6,7 @@
 #include "SuperCell.h"
 #include "Vec.h"
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -31,6 +32,7 @@ void EMTPot::reset() const {
   delete static_cast<EMTRasmussenParameterProvider *>(m_provider);
   m_provider = nullptr;
   m_nAtoms = 0;
+  m_numbers.clear();
 }
 
 void EMTPot::forceImpl(const ForceInput &in, ForceOut *out) const {
@@ -42,9 +44,11 @@ void EMTPot::forceImpl(const ForceInput &in, ForceOut *out) const {
       Vec(in.box[6], in.box[7], in.box[8]),
   };
   bool periodic[3] = {true, true, true};
-  if (m_nAtoms != n) {
+  if (m_nAtoms != n || !std::equal(in.atmnrs, in.atmnrs + n,
+                                   m_numbers.begin(), m_numbers.end())) {
     reset();
     m_nAtoms = n;
+    m_numbers.assign(in.atmnrs, in.atmnrs + n);
     auto *cell = new SuperCell(basis, periodic);
     auto *atoms = new Atoms(reinterpret_cast<Vec *>(pos.data()), n, cell);
     std::vector<int> numbers(in.atmnrs, in.atmnrs + n);

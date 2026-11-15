@@ -7,6 +7,7 @@
 // Development Team.
 
 #include <cstdint>
+#include <vector>
 
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/Potential.hpp"
@@ -47,6 +48,7 @@ private:
   EMTConfig m_config;
   uint64_t m_paramsKey = 0;
   mutable long m_nAtoms = 0;
+  mutable std::vector<int> m_numbers;
   mutable void *m_cell = nullptr;
   mutable void *m_atoms = nullptr;
   mutable void *m_provider = nullptr;

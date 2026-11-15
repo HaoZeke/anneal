@@ -313,3 +313,26 @@ TEST_CASE("D3Pot water-octamer forces match s-dftd3 C-API at sqrt(eps)",
   }
   REQUIRE(df2 > 0.0);
 }
+
+TEST_CASE("D3Pot reads the species again when only the species change",
+          "[d3]") {
+  AtomMatrix positions(3, 3);
+  std::vector<int> water;
+  std::array<std::array<double, 3>, 3> box{};
+  fill_water(positions, water, box);
+  const std::vector<int> swapped = {16, 1, 1};
+
+  rgpot::D3Pot reused;
+  (void)reused(positions, water, box);
+  const auto [e_reused, f_reused, v_reused] = reused(positions, swapped, box);
+
+  rgpot::D3Pot fresh;
+  const auto [e_fresh, f_fresh, v_fresh] = fresh(positions, swapped, box);
+
+  REQUIRE_THAT(e_reused, WithinAbs(e_fresh, 1e-12));
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      REQUIRE_THAT(f_reused(i, k), WithinAbs(f_fresh(i, k), 1e-12));
+    }
+  }
+}

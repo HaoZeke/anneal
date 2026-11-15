@@ -4,6 +4,7 @@
 #include "rgpot/D4Pot/D4Pot.hpp"
 #include "rgpot/units.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -79,7 +80,9 @@ void D4Pot::forceImpl(const ForceInput &in, ForceOut *out) const {
     box_bohr[i] = in.box[i] * ANGSTROM_TO_BOHR;
   }
 
-  if (!m_initialized || m_natoms != intN) {
+  if (!m_initialized || m_natoms != intN ||
+      !std::equal(in.atmnrs, in.atmnrs + in.nAtoms, m_numbers.begin(),
+                  m_numbers.end())) {
     if (m_model)
       dftd4_delete_model(&m_model);
     if (m_mol)
@@ -90,6 +93,7 @@ void D4Pot::forceImpl(const ForceInput &in, ForceOut *out) const {
     m_model = dftd4_new_d4_model(m_err, m_mol);
     throwIfError("dftd4 new D4 model");
     m_natoms = intN;
+    m_numbers.assign(in.atmnrs, in.atmnrs + in.nAtoms);
     m_initialized = true;
   } else {
     dftd4_update_structure(m_err, m_mol, m_pos_bohr.data(), box_bohr);
