@@ -1409,14 +1409,16 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
 /// True when the contact graph carries a substantial 555 (icosahedral) fraction.
 ///
 /// Observation, not a hop target. Used to *withhold* Ih-preserving
-/// symmetrise. Does not name a destination packing.
+/// symmetrise. Does not name a destination packing. The bond cutoff is the
+/// one [`fivefold_plateau`] reads, so a reduced-unit cluster keeps 1.35 and
+/// an ångström one is bonded at its own neighbour distance.
 pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     let n = x.len() / 3;
     if n == 0 {
         return false;
     }
     let _ = spec;
-    let (f555, _, _) = crate::structure::named_triplet_fractions(x, n, 1.35);
+    let (f555, _, _) = crate::structure::named_triplet_fractions(x, n, bond_cutoff(x));
     f555 > 0.12
 }
 
@@ -3627,6 +3629,23 @@ mod tests {
             moved >= 2,
             "SOAP pullback moved {moved} atoms; expected a concerted step"
         );
+    }
+
+    /// An icosahedron in ångström is as icosahedral as one in reduced
+    /// units. A Gupta gold cluster has its nearest neighbour at 2.884 Å.
+    #[test]
+    fn ih_dominated_reads_an_angstrom_icosahedron() {
+        for nn in [2.0_f64.powf(1.0 / 6.0), 2.884] {
+            let mut x = ico13();
+            for v in x.iter_mut() {
+                *v *= nn;
+            }
+            assert!(fivefold_plateau(x.view()), "nearest neighbour {nn}");
+            assert!(
+                ih_dominated(x.view(), SoapSpec::default()),
+                "ico13 at nearest neighbour {nn} is not Ih-dominated"
+            );
+        }
     }
 
     #[test]
