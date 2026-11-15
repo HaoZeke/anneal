@@ -1311,6 +1311,10 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+fn is_non_positive(value: &f64) -> bool {
+    *value <= 0.0
+}
+
 fn is_true(value: &bool) -> bool {
     *value
 }
@@ -2290,8 +2294,4 @@ mod coverage_behaviour {
             .expect("site");
         let _ = Config::with_scales(1, 1.0, 1.0).with_rigid_bodies(geometry);
     }
-}
-
-fn is_non_positive(value: &f64) -> bool {
-    *value <= 0.0
 }
