@@ -34,8 +34,9 @@ rewritten. ``--history`` names earlier rows files, such as ``seeds.csv``,
 read alongside it. ``--summary`` appends one line per system and code over
 all of them, with Fisher's exact test on hits and a two-sided Mann-Whitney
 on calls to the hit, with a miss ranked after every hit, both against
-anneal; alone when no binaries are given. Time per call skips a run that
-made no call.
+anneal; alone when no binaries are given, over ``--systems``, and with
+``--anneal-revision`` over anneal's rows of that ``code_revision`` only.
+Time per call skips a run that made no call.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
 hit is an energy within ``HIT_TOL`` eV of the reference. This process
@@ -290,6 +291,7 @@ def main() -> None:
     ap.add_argument("--crest-seeds", nargs="*", type=int)
     ap.add_argument("--codes", nargs="*", default=list(CODES))
     ap.add_argument("--summary", type=Path)
+    ap.add_argument("--anneal-revision")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -300,7 +302,14 @@ def main() -> None:
     host = socket.gethostname()
     revision = args.head_file.read_text().strip() if args.head_file else ""
     if args.summary is not None and not any((args.anneal, args.crest, args.xtb)):
-        summarise([*args.history, args.rows], args.summary, revision, host)
+        summarise(
+            [*args.history, args.rows],
+            args.summary,
+            revision,
+            host,
+            args.anneal_revision,
+            args.systems,
+        )
         return
     if None in (
         args.anneal,
@@ -414,16 +423,34 @@ def ranked_calls(runs: list[dict]) -> list[float]:
     ]
 
 
-def summarise(paths: list[Path], summary: Path, revision: str, host: str) -> None:
-    """Append one line per system and code over every rows file."""
+def summarise(
+    paths: list[Path],
+    summary: Path,
+    revision: str,
+    host: str,
+    anneal_revision: str | None = None,
+    systems: list[str] | None = None,
+) -> None:
+    """Append one line per system and code over every rows file.
+
+    With ``anneal_revision``, anneal's rows are only those of that
+    ``code_revision``.
+    """
     table = []
     for path in paths:
         if path.is_file():
             with open(path, newline="") as handle:
                 table.extend(csv.DictReader(handle))
+    if anneal_revision is not None:
+        table = [
+            row
+            for row in table
+            if row["code"] != "anneal-general"
+            or row.get("code_revision") == anneal_revision
+        ]
     date = datetime.date.today().isoformat()
     lines = []
-    for system in SYSTEMS:
+    for system in systems or SYSTEMS:
         groups = {
             code: [
                 row for row in table if row["system"] == system and row["code"] == code
