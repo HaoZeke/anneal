@@ -35,6 +35,9 @@ the anneal revision the panel ran at (``--revision``), and ``host``, the
 UTS hostname. ``--summary`` writes one line per system and code from the
 rows of that pair's newest revision, the one appended last, and runs
 alone when no binaries are given.
+``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` CREST's hits on
+that system against another reference; anneal stops at its own and is
+not rescored.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
 hit is an energy within ``HIT_TOL`` eV of the reference. This process
@@ -164,7 +167,7 @@ def run_anneal(binary: Path, system: str, seed: int, out: Path) -> dict:
         "evals_to_hit": int(row["evals_to_hit"]),
         "charged": int(row["charged"]),
         "wall_s": float(row["wall_s"]),
-        "best": float(row["best_eV"]),
+        "best": float(row["best"]),
         "pot_s": float(row["pot_s"]),
         "outside_s": float(row["outside_s"]),
     }
@@ -264,7 +267,14 @@ def main() -> None:
     ap.add_argument("--codes", nargs="*", default=list(CODES))
     ap.add_argument("--summary", type=Path)
     ap.add_argument("--revision")
+    ap.add_argument("--rescore", nargs=2, metavar=("SYSTEM", "ENERGY_EV"))
+    ap.add_argument("--rescored", type=Path)
     args = ap.parse_args()
+    if args.rescore is not None:
+        if args.rescored is None:
+            raise SystemExit("--rescore appends to --rescored")
+        rescore(args.rows, args.rescored, args.rescore[0], float(args.rescore[1]))
+        return
     if args.summary is not None and not any((args.anneal, args.crest, args.xtb)):
         summarise(args.rows, args.summary)
         return
@@ -380,6 +390,44 @@ def summarise(rows: Path, summary: Path) -> None:
                         "code_revision": newest,
                     }
                 )
+
+
+RESCORE_FIELDS = ["system", "code", "reference_eV", "runs", "hits", "code_revision"]
+
+
+def rescore(rows: Path, rescored: Path, system: str, reference: float) -> None:
+    """Append CREST's hits on ``system`` against another reference.
+
+    CREST runs to its own end, so its best energy is scored against any
+    reference after the fact. Anneal stops at the reference it ran with,
+    and its rows are not rescored. The rows counted are CREST's newest
+    revision on the system, as in the summary.
+    """
+    with open(rows, newline="") as handle:
+        pair = [
+            row
+            for row in csv.DictReader(handle)
+            if row["system"] == system and row["code"] == "crest"
+        ]
+    if not pair:
+        raise SystemExit(f"no CREST rows on {system}")
+    newest = pair[-1]["code_revision"]
+    runs = [row for row in pair if row["code_revision"] == newest]
+    write_header = not rescored.exists() or rescored.stat().st_size == 0
+    with open(rescored, "a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=RESCORE_FIELDS, lineterminator="\n")
+        if write_header:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "system": system,
+                "code": "crest",
+                "reference_eV": f"{reference:.8f}",
+                "runs": len(runs),
+                "hits": sum(float(row["best"]) <= reference + HIT_TOL for row in runs),
+                "code_revision": newest,
+            }
+        )
 
 
 if __name__ == "__main__":
