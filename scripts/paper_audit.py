@@ -1245,10 +1245,15 @@ def stale_claims(audit: Audit, paths: list[str] | None = None) -> None:
 SC_WALL = "bench/metal-cluster-h2h/sc-wall"
 
 
-def sc_wall_numbers(audit: Audit) -> dict[str, dict[str, float]]:
-    """Anneal's Sutton-Chen wall split against the GMIN rerun of the same system."""
+def sc_wall_numbers(audit: Audit, rgpot: str | None = None) -> dict[str, dict[str, float]]:
+    """Anneal's Sutton-Chen wall split against the GMIN rerun of the same system.
+
+    The rows are those of one rgpot build, by default that of the first row.
+    """
     runs = audit.rows(f"{SC_WALL}/seeds.csv")
-    micro = audit.rows(f"{SC_WALL}/micro.csv")
+    rgpot = rgpot or runs[0]["rgpot_revision"]
+    runs = pick(runs, rgpot_revision=rgpot)
+    micro = pick(audit.rows(f"{SC_WALL}/micro.csv"), rgpot_revision=rgpot)
     panel = audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
     summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
     out = {}
@@ -1329,6 +1334,218 @@ def sc_wall(audit: Audit) -> None:
         audit.said(path, f"On {system}, {n['anneal calls']:g} calls at {n['plain_us']:.1f} + {n['anneal outside']:.1f} µs "
                          f"would take {n['anneal calls'] * (n['plain_us'] + n['anneal outside']) * 1e-6:.3f} s, "
                          f"against GMIN's median {n['gmin wall']:.3f} s.")
+
+
+SC_WALL2 = "bench/metal-cluster-h2h/sc-wall2"
+SC_WALL2_SAME = ("hit", "evals_to_hit", "charged", "best", "final_e", "hops", "stall_escapes", "trail_escapes",
+                 "restarts", "paths", "path_improvements")
+
+
+def lead(a: list[float], g: list[float], p: float) -> str:
+    """The code lower in more seed pairs; n.s. at p >= 0.05."""
+    balance = sum((y < x) - (y > x) for x in a for y in g)
+    if balance == 0:
+        return "tie"
+    who = "GMIN" if balance > 0 else "anneal"
+    return who if p < 0.05 else f"{who}, n.s."
+
+
+def per_call(rows: list[dict[str, str]], column: str) -> float:
+    return 1e6 * sum(float(r[column]) for r in rows) / sum(float(r["charged"]) for r in rows)
+
+
+def sc_wall2_parts(audit: Audit) -> dict[str, object]:
+    new_rows = audit.rows(f"{SC_WALL2}/seeds.csv")
+    rgpot = new_rows[0]["rgpot_revision"]
+    harness = new_rows[0]["harness_revision"]
+    panel = audit.rows(f"{SC_N12}/seeds.csv")
+    _, now, reruns = sc_state(audit.rows(f"{SC_N12}/results.csv"))
+    wall = audit.rows(f"{SC_WALL}/seeds.csv")
+    base = wall[0]["rgpot_revision"]
+    micro = audit.rows(f"{SC_WALL}/micro.csv")
+    systems = [s for s in now if pick(new_rows, system=s)]
+    out: dict[str, object] = {"rgpot": rgpot, "base": base, "harness": harness, "systems": systems, "wall": {},
+                              "panel": {}, "micro": {}}
+    for system in dict.fromkeys(r["system"] for r in wall if r["rgpot_revision"] == rgpot):
+        old = {r["seed"]: r for r in pick(wall, system=system, rgpot_revision=base)}
+        new = {r["seed"]: r for r in pick(wall, system=system, rgpot_revision=rgpot)}
+        same = [k for k in new if k in old and all(old[k][c] == new[k][c] for c in ("hit", "evals_to_hit", "charged", "best"))]
+        out["wall"][system] = {"seeds": len(new), "same": len(same),
+                               **{f"{k} {tag}": f(list(rows.values())) for tag, rows in (("old", old), ("new", new))
+                                  for k, f in (("inside", lambda r: per_call(r, "pot_s")),
+                                               ("outside", lambda r: per_call(r, "outside_s")),
+                                               ("wall", lambda r: median([float(x["wall_s"]) for x in r])))}}
+        for tag, rev in (("old", base), ("new", rgpot)):
+            m = pick(micro, system=system, rgpot_revision=rev)
+            out["micro"][(system, tag)] = {c: median([float(r[c]) for r in m]) for c in
+                                           ("entry_us", "dlsym_alloc_us", "kept_us", "kept_stream_us", "plain_us")}
+    for system in systems:
+        a = pick(new_rows, system=system)
+        prior = {r["seed"]: r for r in sc_group(panel, now[system])}
+        g = sc_group(panel, reruns[system])
+        differ = [r["seed"] for r in a if any(r[c] != prior[r["seed"]][c] for c in SC_WALL2_SAME)]
+        ac, gc = [float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in g]
+        aw, gw = [float(r["wall_s"]) for r in a], [float(r["wall_s"]) for r in g]
+        n = {"gmin harness": reruns[system]["harness_revision"], "prior harness": now[system]["harness_revision"],
+             "differ": differ, "seeds": len(a), "anneal hits": frac(a), "gmin hits": frac(g),
+             "fisher": fisher(hits_of(a), len(a), hits_of(g), len(g)),
+             "anneal calls": median(ac), "gmin calls": median(gc), "p calls": mann_whitney(ac, gc, True),
+             "anneal wall": median(aw), "gmin wall": median(gw), "p wall": mann_whitney(aw, gw, True),
+             "prior wall": median([float(r["wall_s"]) for r in prior.values()])}
+        n["ratio"] = n["gmin wall"] / n["anneal wall"]
+        n["wall ahead"] = lead(aw, gw, n["p wall"])
+        for code, rows in (("prior", list(prior.values())), ("anneal", a), ("gmin", g)):
+            for key, column in (("inside", "pot_s"), ("outside", "outside_s"), ("per call", "wall_s")):
+                n[f"{code} {key}"] = per_call(rows, column)
+        out["panel"][system] = n
+    return out
+
+
+def sc_wall2_prose(parts: dict[str, object]) -> dict[str, list[str]]:
+    rgpot, base, harness = parts["rgpot"][:8], parts["base"][:8], parts["harness"][:8]
+    out: dict[str, list[str]] = {"wall": [], "same": [], "leads": [], "split": []}
+    for system, w in parts["wall"].items():
+        if w["same"] == w["seeds"]:
+            out["wall"].append(f"On {system} each of the {w['seeds']} {rgpot} rows of `sc_wall.sh` has the calls to the "
+                               f"hit, calls charged and best energy of its {base} row.")
+        else:
+            out["wall"].append(f"On {system} {w['seeds'] - w['same']} of the {w['seeds']} {rgpot} rows of `sc_wall.sh` "
+                               f"differ from their {base} rows.")
+        out["wall"].append(f"Inside the potential a call takes {w['inside new']:.2f} µs on {system} with {rgpot}, "
+                           f"against {w['inside old']:.2f} µs with {base}.")
+    panel = parts["panel"]
+    same = [s for s, n in panel.items() if not n["differ"]]
+    if same:
+        prior = sorted({panel[s]["prior harness"][:8] for s in same})
+        out["same"].append(f"On {and_list(same)} every seed matches its {and_list(prior)} row of `../sc-n12/seeds.csv`, "
+                           "rgpot " + base + ", in hit, calls to the hit, calls charged, best and final energy, hops, "
+                           "escapes, restarts and paths.")
+    for s, n in panel.items():
+        if n["differ"]:
+            out["same"].append(f"On {s} seeds {' '.join(n['differ'])} differ from their {n['prior harness'][:8]} rows.")
+    for who, other in (("anneal", "GMIN"), ("GMIN", "anneal")):
+        sig = [s for s, n in panel.items() if n["wall ahead"] == who]
+        ns = [s for s, n in panel.items() if n["wall ahead"] == f"{who}, n.s."]
+        name = who.capitalize() if who == "anneal" else who
+        if sig:
+            out["leads"].append(f"{name} beats {other} on wall time on {and_list(sig)}, at Mann-Whitney p < 0.05.")
+        if ns:
+            out["leads"].append(f"{name}'s lead on wall time on {and_list(ns)} is not significant.")
+    if ties := [s for s, n in panel.items() if n["wall ahead"] == "tie"]:
+        out["leads"].append(f"Neither code leads on wall time on {and_list(ties)}.")
+    for s, n in panel.items():
+        out["split"].append(f"On {s} anneal's wall per call is {n['anneal per call'] / n['gmin per call']:.2f} times "
+                            f"GMIN's with {rgpot}, against {n['prior per call'] / n['gmin per call']:.2f} with {base}.")
+    return out
+
+
+def sc_wall2_body(audit: Audit) -> str:
+    parts = sc_wall2_parts(audit)
+    rgpot, base, harness = parts["rgpot"][:8], parts["base"][:8], parts["harness"][:8]
+    prose = sc_wall2_prose(parts)
+    para = lambda key: " ".join(prose[key])  # noqa: E731
+    lines = [f"# Sutton-Chen wall with rgpot {rgpot}", "",
+             f"rgpot {parts['rgpot']} is the head of rgpot's `feat/sc-call-overhead` branch, seven commits on its "
+             "develop at 251aaade, which keep the Sutton-Chen C entry's potential between calls and read the pair "
+             f"powers back in the force pass. Anneal's `Cargo.lock` still pins rgpot {base}; {rgpot} is not merged, so "
+             f"it is only recorded here and in the rows. `scripts/metal_h2h/enter_sc_wall2.sh` builds its Sutton-Chen "
+             "entry with `build_rgpot_sc.sh` from a clean checkout, runs `sc_wall.sh` against it, appending to "
+             "`../sc-wall/seeds.csv` and `../sc-wall/micro.csv`, and then runs anneal alone on the 55- and 80-atom "
+             f"sc-n12 systems, seeds 2000-2011 at the paper budgets, into `seeds.csv`. Harness {harness}, one job at a "
+             "time on core 0 in a UTS namespace with hostname `bench`. GMIN is not rerun: its rows are the "
+             "corrected-file reruns in `../sc-n12/seeds.csv`. Per-call times are totals over the twelve seeds divided "
+             "by charged calls.", "",
+             "## sc_wall.sh", "",
+             f"| System | Seeds | Same as {base} | Inside {base} (µs/call) | Inside {rgpot} (µs/call) | "
+             f"Outside {base} (µs/call) | Outside {rgpot} (µs/call) | Wall {base} (s) | Wall {rgpot} (s) |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    for system, w in parts["wall"].items():
+        lines.append(f"| {system} | {w['seeds']} | {w['same']} | {w['inside old']:.2f} | {w['inside new']:.2f} | "
+                     f"{w['outside old']:.2f} | {w['outside new']:.2f} | {w['wall old']:.3f} | {w['wall new']:.3f} |")
+    lines += ["", para("wall"), "",
+              "`sc_wall_micro` medians in µs per call, as in `../sc-wall/README.md`:", "",
+              "| System | Rgpot | Entry | Entry with dlsym and allocation | Kept | Kept, streaming | Plain |",
+              "|---|---|---|---|---|---|---|"]
+    for (system, tag), m in parts["micro"].items():
+        rev = base if tag == "old" else rgpot
+        lines.append(f"| {system} | {rev} | {m['entry_us']:.2f} | {m['dlsym_alloc_us']:.2f} | {m['kept_us']:.2f} | "
+                     f"{m['kept_stream_us']:.2f} | {m['plain_us']:.2f} |")
+    lines += ["", "## Anneal against GMIN", "", para("same"), "",
+              "Fisher compares hits; Mann-Whitney, two-sided with the tie correction and the continuity "
+              "correction, compares calls to the hit and wall. The wall ratio is GMIN's median wall over anneal's. "
+              "The code ahead on wall is the one lower in more of the 144 seed pairs; n.s. marks p >= 0.05.", "",
+              "| System | GMIN harness | Anneal hits | GMIN hits | Fisher p | Anneal calls | GMIN calls | "
+              "Mann-Whitney p calls | Anneal wall (s) | GMIN wall (s) | Mann-Whitney p wall | Wall ratio | Wall ahead |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for system, n in parts["panel"].items():
+        lines.append(f"| {system} | {n['gmin harness'][:8]} | {n['anneal hits']} | {n['gmin hits']} | "
+                     f"{p_text(n['fisher'])} | {calls_text(n['anneal calls'])} | {calls_text(n['gmin calls'])} | "
+                     f"{p_text(n['p calls'])} | {n['anneal wall']:.3f} | {n['gmin wall']:.3f} | {p_text(n['p wall'])} | "
+                     f"{n['ratio']:.3f} | {n['wall ahead']} |")
+    lines += ["", para("leads"), "",
+              "| System | Code | Rgpot | Inside (µs/call) | Outside (µs/call) | Wall (µs/call) |", "|---|---|---|---|---|---|"]
+    for system, n in parts["panel"].items():
+        for code, label, rev in (("prior", "Anneal", base), ("anneal", "Anneal", rgpot), ("gmin", "GMIN", "-")):
+            lines.append(f"| {system} | {label} | {rev} | {n[code + ' inside']:.2f} | {n[code + ' outside']:.2f} | "
+                         f"{n[code + ' per call']:.2f} |")
+    lines += ["", para("split"), ""]
+    return "\n".join(lines)
+
+
+def write_sc_wall2() -> None:
+    (ROOT / SC_WALL2 / "README.md").write_text(sc_wall2_body(Audit()))
+
+
+def sc_wall2(audit: Audit) -> None:
+    path = f"{SC_WALL2}/README.md"
+    parts = sc_wall2_parts(audit)
+    rgpot, base = parts["rgpot"][:8], parts["base"][:8]
+    rows = md_table(audit, path, "System | Seeds | Same as")
+    audit.cell(path, "sc_wall.sh systems", " ".join(r["System"] for _, r in rows), " ".join(parts["wall"]))
+    for line, row in rows:
+        w = parts["wall"][row["System"]]
+        where = f"{path}:{line} {row['System']} sc_wall.sh"
+        audit.cell(where, "seeds", row["Seeds"], float(w["seeds"]))
+        audit.cell(where, "same", row[f"Same as {base}"], float(w["same"]))
+        for column, key in ((f"Inside {base} (µs/call)", "inside old"), (f"Inside {rgpot} (µs/call)", "inside new"),
+                            (f"Outside {base} (µs/call)", "outside old"), (f"Outside {rgpot} (µs/call)", "outside new"),
+                            (f"Wall {base} (s)", "wall old"), (f"Wall {rgpot} (s)", "wall new")):
+            audit.cell(where, column, row[column], w[key])
+    for line, row in md_table(audit, path, "System | Rgpot | Entry"):
+        tag = "old" if row["Rgpot"] == base else "new"
+        m = parts["micro"][(row["System"], tag)]
+        where = f"{path}:{line} {row['System']} {row['Rgpot']} micro"
+        for column, key in (("Entry", "entry_us"), ("Entry with dlsym and allocation", "dlsym_alloc_us"),
+                            ("Kept", "kept_us"), ("Kept, streaming", "kept_stream_us"), ("Plain", "plain_us")):
+            audit.cell(where, column, row[column], m[key])
+    rows = md_table(audit, path, "System | GMIN harness | Anneal hits")
+    audit.cell(path, "panel systems", " ".join(r["System"] for _, r in rows), " ".join(parts["panel"]))
+    for line, row in rows:
+        n = parts["panel"][row["System"]]
+        where = f"{path}:{line} {row['System']}"
+        audit.cell(where, "GMIN harness", row["GMIN harness"], n["gmin harness"][:8])
+        audit.cell(where, "anneal hits", row["Anneal hits"], n["anneal hits"])
+        audit.cell(where, "GMIN hits", row["GMIN hits"], n["gmin hits"])
+        for column, key in (("Fisher p", "fisher"), ("Anneal calls", "anneal calls"), ("GMIN calls", "gmin calls"),
+                            ("Mann-Whitney p calls", "p calls"), ("Anneal wall (s)", "anneal wall"),
+                            ("GMIN wall (s)", "gmin wall"), ("Mann-Whitney p wall", "p wall"), ("Wall ratio", "ratio")):
+            audit.cell(where, column, row[column], n[key])
+        audit.cell(where, "wall ahead", row["Wall ahead"], n["wall ahead"])
+    shown = set()
+    for line, row in md_table(audit, path, "System | Code | Rgpot | Inside"):
+        n = parts["panel"][row["System"]]
+        code = "gmin" if row["Code"] == "GMIN" else ("prior" if row["Rgpot"] == base else "anneal")
+        shown.add((row["System"], code))
+        where = f"{path}:{line} {row['System']} {row['Code']} {row['Rgpot']}"
+        for column, key in (("Inside (µs/call)", "inside"), ("Outside (µs/call)", "outside"), ("Wall (µs/call)", "per call")):
+            audit.cell(where, column, row[column], n[f"{code} {key}"])
+    for system in parts["panel"]:
+        for code in ("prior", "anneal", "gmin"):
+            audit.cell(path, f"split row {system} {code}", "shown" if (system, code) in shown else "missing", "shown")
+    for sentences in sc_wall2_prose(parts).values():
+        for sentence in sentences:
+            audit.said(path, sentence)
+    audit.said(f"{SC_WALL}/README.md", "also hold the rows of rgpot 14680ddb, which `../sc-wall2/README.md` reads.")
 
 
 def covalent_gfn2(audit: Audit) -> None:
@@ -1530,7 +1747,7 @@ def run(report: bool = False) -> int:
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, sc96_78_howto, stale_claims, sc_wall, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
+                  head_to_head, sc96_78_howto, stale_claims, sc_wall, sc_wall2, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
         check(audit)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
@@ -1556,9 +1773,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--report", action="store_true", help="print every check, not only the drifted ones")
     parser.add_argument("--write-sc-n12", action="store_true",
                         help=f"write {SC_N12_README} from its rows before the checks")
+    parser.add_argument("--write-sc-wall2", action="store_true",
+                        help=f"write {SC_WALL2}/README.md from its rows before the checks")
     args = parser.parse_args(argv)
     if args.write_sc_n12:
         write_sc_n12()
+    if args.write_sc_wall2:
+        write_sc_wall2()
     return run(args.report)
 
 
