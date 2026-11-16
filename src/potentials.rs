@@ -29,7 +29,7 @@ use std::sync::OnceLock;
 /// `rgpot_pair` is a git dependency, and crates.io refuses a published crate
 /// that names one, so the library takes the kernels at run time instead.
 /// Every binary in this repository installs them with
-/// [`install_rgpot_kernels!`](crate::install_rgpot_kernels); the wheel
+/// [install_rgpot_kernels!](crate::install_rgpot_kernels); the wheel
 /// installs them when the module loads. Without them, Lennard-Jones and
 /// Morse run the pair loop in [`PairPotential::value_and_gradient`] and
 /// [`gupta::Gupta`] refuses to evaluate.

@@ -899,7 +899,7 @@ impl Ledger {
     /// Moves the encounter of `value` to the call that found it.
     ///
     /// A core cut is charged as a block and recorded after that block.
-    /// [`record`](Self::record) would time it at the block's end.
+    /// [`record`] would time it at the block's end.
     /// [`improvements_from_encounters`] reports the encounter, so the
     /// encounter keeps the probe call.
     fn stamp_encounter(&mut self, value: f64, at: usize) {

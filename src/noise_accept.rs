@@ -20,7 +20,7 @@
 //! only up to noise -- exactly the regime of the finite-precision audit, where
 //! the rounding error on the energy difference is a bounded noise channel.
 //!
-//! Unlike [`AcceptRule`](crate::accept::AcceptRule), whose `(delta_e, T) -> p`
+//! Unlike [`AcceptRule`], whose `(delta_e, T) -> p`
 //! shape assumes an exact `delta_e`, OSA consumes a *sampler* of noisy energy
 //! differences plus a known noise scale, so it is its own component rather
 //! than an `AcceptRule` impl. This Rust component is the typed counterpart of

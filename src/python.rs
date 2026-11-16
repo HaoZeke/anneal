@@ -2829,8 +2829,8 @@ fn osa_acceptance_rate(
 
 /// Driver settings for the cluster-search layer.
 ///
-/// Construct with [`Config.recommended`], [`Config.derived`], or
-/// [`Config.for_cluster`]. The recommended stack is the measured
+/// Construct with `Config.recommended`, `Config.derived`, or
+/// `Config.for_cluster`. The recommended stack is the measured
 /// default: composed surface relocations, depth-rewarded move
 /// allocation, and tabu on stall.
 #[pyclass(name = "Config")]
