@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""GMIN alone on Sutton-Chen 9-6, at N=38 and N=78.
+"""GMIN alone on Sutton-Chen, at N=38 and on 9-6 at N=78.
 
-N=38 is seeds 2000-2011 at 400000 calls, from the sc-n12 starts. Its rows
-go to bench/metal-cluster-h2h/sc-n12/seeds.csv. N=78 is seeds 9532-9563 at
-2000000 calls, from the starts of scripts/sc96_78_common.py. Its rows go to
-data/sc96_78_hits.csv. The anneal rows of both files are kept as they are.
+N=38 is seeds 2000-2011 at 400000 calls, from the sc-n12 starts, on 9-6
+unless --n38-system names other rows of that panel. Its rows go to
+bench/metal-cluster-h2h/sc-n12/seeds.csv. N=78 is 9-6, seeds 9532-9563 at
+2000000 calls, from the starts of scripts/sc96_78_common.py, unless --no-n78.
+Its rows go to data/sc96_78_hits.csv. The anneal rows of both files are kept
+as they are.
 
 Each row records the GMIN revision, the host and the harness revision, the
 anneal commit whose run_sc.py wrote the GMIN data file. A seed already
@@ -27,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_sc as sc  # noqa: E402
 import run_sc_n12 as n12  # noqa: E402
 
-N38 = "sc96-38"
+N38_SYSTEMS = ("sc96-38", "sc126-38", "sc108-38")
 N78 = "sc96-78"
 N78_SEEDS = tuple(range(9532, 9564))
 N78_BUDGET = 2_000_000
@@ -63,15 +65,15 @@ def save(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
     tmp.replace(path)
 
 
-def run_n38(args, seed: int, head: str, revision: str) -> dict[str, str]:
-    coords = args.runs / N38 / f"start-{seed}.xyz"
+def run_n38(args, system: str, seed: int, head: str, revision: str) -> dict[str, str]:
+    coords = args.runs / system / f"start-{seed}.xyz"
     coords.parent.mkdir(parents=True, exist_ok=True)
     if not coords.is_file():
-        subprocess.run([str(args.binary), "coords", N38, str(seed), str(coords)], check=True)
-    log = args.logs / N38 / f"gmin-{seed}.log"
+        subprocess.run([str(args.binary), "coords", system, str(seed), str(coords)], check=True)
+    log = args.logs / system / f"gmin-{seed}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    row = sc.run_gmin(args.gmin, N38, seed, sc.PAPER_BUDGETS[N38], coords, args.runs / N38 / f"gmin-{seed}", log)
-    seed_row = n12.as_seed(N38, "gmin", row, {})
+    row = sc.run_gmin(args.gmin, system, seed, sc.PAPER_BUDGETS[system], coords, args.runs / system / f"gmin-{seed}", log)
+    seed_row = n12.as_seed(system, "gmin", row, {})
     seed_row.update({"code_revision": revision, "host": os.uname().nodename, "harness_revision": head})
     return seed_row
 
@@ -112,7 +114,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--reference78", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
+    parser.add_argument("--n38-system", action="append", choices=N38_SYSTEMS)
+    parser.add_argument("--no-n78", action="store_true")
     args = parser.parse_args(argv)
+    systems = tuple(args.n38_system) if args.n38_system else ("sc96-38",)
     if os.uname().nodename != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
@@ -136,18 +141,21 @@ def main(argv: list[str]) -> int:
             for r in rows
         )
 
-    for seed in n12.SEEDS:
-        if stored(n38_rows, seed, system=N38):
-            print(f"skip {N38} gmin seed {seed}", flush=True)
-            continue
-        print(f"run {N38} gmin seed {seed}", flush=True)
-        n38_rows.append(run_n38(args, seed, head, revision))
-        save(args.n38_seeds, list(n12.SEED_FIELDS), n38_rows)
-        print(f"done {N38} gmin seed {seed} best={n38_rows[-1]['best']} hit={n38_rows[-1]['hit']} "
-              f"wall={n38_rows[-1]['wall_s']}", flush=True)
+    for system in systems:
+        for seed in n12.SEEDS:
+            if stored(n38_rows, seed, system=system):
+                print(f"skip {system} gmin seed {seed}", flush=True)
+                continue
+            print(f"run {system} gmin seed {seed}", flush=True)
+            n38_rows.append(run_n38(args, system, seed, head, revision))
+            save(args.n38_seeds, list(n12.SEED_FIELDS), n38_rows)
+            print(f"done {system} gmin seed {seed} best={n38_rows[-1]['best']} hit={n38_rows[-1]['hit']} "
+                  f"wall={n38_rows[-1]['wall_s']}", flush=True)
     summary = n12.summarise(n38_rows, head, revision)
     save(args.n38_summary, list(n12.SUMMARY_FIELDS), summary)
 
+    if args.no_n78:
+        return 0
     for seed in N78_SEEDS:
         if stored(n78_rows, seed):
             print(f"skip {N78} gmin seed {seed}", flush=True)
