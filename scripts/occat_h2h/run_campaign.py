@@ -29,7 +29,7 @@ EXTRA_SEEDS = (2006, 2007, 2008, 2009, 2010, 2011)
 EXTEND_WALL_S = 6 * 3600.0
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-OCCAT = Path("/tmp/OCCat_release/bin/occat")
+OCCAT = Path("/work/occat-h2h/OCCat_release/bin/occat")
 ANNEAL_LJ = Path("/work/occat-h2h/target/release/examples/h2h_gmin_proof")
 ANNEAL_METAL = Path("/work/occat-h2h/target/release/examples/h2h_metal")
 GMIN = Path("/work/gmin-h2h/bin/GMIN")
@@ -49,8 +49,6 @@ SYSTEMS = {
     "lj38": {"kind": "lj", "n": 38, "budget": 400_000, "reference": -173.928427},
     "lj55": {"kind": "lj", "n": 55, "budget": 1_000_000, "reference": -279.248470},
     "lj75": {"kind": "lj", "n": 75, "budget": 4_000_000, "reference": -397.492331},
-    "lj98": {"kind": "lj", "n": 98, "budget": 4_000_000, "reference": -543.665361},
-    "lj104": {"kind": "lj", "n": 104, "budget": 4_000_000, "reference": -582.086642},
     # OCCat's published Gupta geometries, evaluated on this commit's potential.
     # Cobalt and Pd–Pt are not in that potential.
     "cu38": {"kind": "gupta", "n": 38, "budget": 400_000, "reference": -108.967590456248, "element": "Cu", "anneal": "cu38", "gmin": CU_GMIN},
@@ -67,6 +65,8 @@ SYSTEMS = {
     "cu6au32": {"kind": "gupta", "n": 38, "budget": 400_000, "reference": -130.79994836, "counts": (6, 32)},
     "cu19au19": {"kind": "gupta", "n": 38, "budget": 400_000, "reference": -122.99148391, "counts": (19, 19)},
     "cu27au28": {"kind": "gupta", "n": 55, "budget": 1_000_000, "reference": -182.93136675, "counts": (27, 28)},
+    "lj98": {"kind": "lj", "n": 98, "budget": 4_000_000, "reference": -543.665361},
+    "lj104": {"kind": "lj", "n": 104, "budget": 4_000_000, "reference": -582.086642},
 }
 
 SEED_FIELDS = [
@@ -81,6 +81,8 @@ SEED_FIELDS = [
     "best",
     "pot_s",
     "outside_s",
+    "code_revision",
+    "host",
 ]
 
 GMIN_SOURCES = [
@@ -670,6 +672,11 @@ def campaign(seeds_path: Path, summary_path: Path, tests_path: Path, work_root: 
     if socket.gethostname() != "bench":
         raise SystemExit("refusing to run unless the hostname is bench")
     stored = load_gmin()
+    revision = subprocess.check_output(
+        ["git", "-C", str(ROOT), "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    host = socket.gethostname()
     rows: list[dict[str, str]] = []
     if seeds_path.is_file():
         with seeds_path.open() as handle:
@@ -681,6 +688,8 @@ def campaign(seeds_path: Path, summary_path: Path, tests_path: Path, work_root: 
                 if (system, code, seed) in done:
                     continue
                 row = one(system, seed, code, stored, work_root)
+                row["code_revision"] = revision
+                row["host"] = host
                 rows.append(row)
                 done.add((system, code, seed))
                 write_seeds(seeds_path, rows)
@@ -696,6 +705,8 @@ def campaign(seeds_path: Path, summary_path: Path, tests_path: Path, work_root: 
                     if (system, code, seed) in done:
                         continue
                     row = one(system, seed, code, stored, work_root)
+                    row["code_revision"] = revision
+                    row["host"] = host
                     rows.append(row)
                     done.add((system, code, seed))
                     write_seeds(seeds_path, rows)
