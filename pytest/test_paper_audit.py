@@ -183,6 +183,14 @@ def test_a_drifted_anneal_rerun_comparison_is_reported():
     assert [r[2] for r in audit.drifts()] == ["new calls median"]
 
 
+def test_a_drifted_pooled_sc108_80_check_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("Over all 60 seeds e3ed7dad hits 19 and", "Over all 60 seeds e3ed7dad hits 20 and")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
+
 def test_a_drifted_inside_time_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
