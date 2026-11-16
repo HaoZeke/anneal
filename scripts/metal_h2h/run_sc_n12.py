@@ -303,8 +303,11 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
     come first, and the anneal row carries the tests against them. Every
     other harness of either arm gets its own row after all of those, in the
     order of the seed rows, with the tests against the other arm's rows of
-    the latest harness that comes before it in the seed rows. A row once
-    written is therefore written again with the same numbers.
+    the latest harness that comes before it in the seed rows. Those rows
+    are ordered by depth, then by system: a harness tested against a first
+    harness has depth 1, one tested against a harness of depth 1 has depth 2.
+    A new harness therefore appends rows, and the rows already written keep
+    their place and their numbers.
     """
     grouped: dict[str, dict[tuple[str, str], list[dict[str, str]]]] = {}
     for row in rows:
@@ -312,7 +315,7 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
         grouped.setdefault(row["system"], {}).setdefault((row["arm"], harness), []).append(row)
     seed_text = " ".join(str(seed) for seed in SEEDS)
     out: list[dict[str, str]] = []
-    later: list[dict[str, str]] = []
+    later: list[tuple[int, int, dict[str, str]]] = []
 
     def tests(anneal: list[dict[str, str]], gmin: list[dict[str, str]]) -> dict[str, str]:
         if not (anneal and gmin):
@@ -361,7 +364,7 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
             "harness_revision": harness,
         }
 
-    for system in list(EIGHTY) + list(SMALLER):
+    for place, system in enumerate(list(EIGHTY) + list(SMALLER)):
         groups = grouped.get(system, {})
         anneal_keys = [key for key in groups if key[0] == "anneal"]
         own = anneal_keys[0][1] if anneal_keys else head
@@ -372,16 +375,17 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
             out.append(line(system, "anneal", own, anneal, test, True, gmin))
         if gmin:
             out.append(line(system, "gmin", own, gmin, test, False, anneal))
-        before: dict[str, list[dict[str, str]]] = {}
+        before: dict[str, tuple[int, list[dict[str, str]]]] = {}
         for (arm, harness), group in groups.items():
             other = "anneal" if arm == "gmin" else "gmin"
-            partner = before.get(other, [])
-            before[arm] = group
+            depth, partner = before.get(other, (-1, []))
+            depth = 0 if harness == own else depth + 1
+            before[arm] = (depth, group)
             if harness == own:
                 continue
             pair = (partner, group) if arm == "gmin" else (group, partner)
-            later.append(line(system, arm, harness, group, tests(*pair), True, partner))
-    return out + later
+            later.append((depth, place, line(system, arm, harness, group, tests(*pair), True, partner)))
+    return out + [row for _, _, row in sorted(later, key=lambda item: item[:2])]
 
 
 def one_job(args, system: str, seed: int, arm: str) -> tuple[dict[str, str], list[dict[str, str]]]:

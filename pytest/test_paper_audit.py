@@ -141,7 +141,7 @@ def test_a_rerun_missing_from_the_sutton_chen_readme_is_reported():
 def test_a_rerun_without_its_tests_is_reported():
     audit = audit_mod.Audit()
     summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
-    row = [r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1]
+    row = [r for r in summary if r["system"] == "sc96-55"][-1]
     row["fisher_p_vs_gmin"] = ""
     audit_mod.head_to_head(audit)
     assert ("Fisher p", "1") in [(r[2], r[3]) for r in audit.drifts()]
@@ -160,9 +160,43 @@ def test_a_gmin_row_left_on_the_old_file_is_reported():
 def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| 0.113 | tie | GMIN, n.s. | GMIN |", "| 0.113 | tie | GMIN, n.s. | anneal |")
+    audit.text_cache[SC_N12] = text.replace("| 0.179 | tie | GMIN, n.s. | GMIN |", "| 0.179 | tie | GMIN, n.s. | anneal |")
     audit_mod.head_to_head(audit)
     assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
+
+
+def test_a_dropped_anneal_rerun_row_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| sc108-80 | anneal | c89653df | 0/12 | 1000000 | 128.014 |\n", "")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["table row sc108-80 anneal c89653df"]
+
+
+def test_a_drifted_anneal_rerun_comparison_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| 12/12 | 12/12 | 1 | 17280 | 28767 | 0.237 |",
+                                            "| 12/12 | 12/12 | 1 | 17280 | 28768 | 0.237 |")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["new calls median"]
+
+
+def test_a_drifted_inside_time_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| sc126-55 | anneal | c89653df | 3.216 | 2.952 |",
+                                            "| sc126-55 | anneal | c89653df | 3.216 | 2.000 |")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["Inside median (s)"]
+
+
+def test_a_drifted_sc96_55_check_sentence_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("more calls on 19 of 48 seeds", "more calls on 18 of 48 seeds")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
 def test_a_drifted_sutton_chen_wall_number_is_reported():
