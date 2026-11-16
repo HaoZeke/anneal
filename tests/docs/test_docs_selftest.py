@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import textwrap
@@ -175,6 +176,32 @@ class PlantedFactMistakes(unittest.TestCase):
 
     def test_build_outputs_count_as_paths(self):
         self.assertEqual(self._facts("Open =docs/build/index.html=.\n"), "")
+
+    def test_build_outputs_count_as_paths_without_a_repository(self):
+        # A tree from git archive has the .gitignore and no .git.
+        with tempfile.TemporaryDirectory(prefix="doccheck-tree-") as tmp:
+            shutil.copy(ROOT / ".gitignore", tmp)
+            for token in ("docs/build/index.html", "docs/source/crates/rgpot_core",
+                          "subprojects/xxHash-0.8.3/xxhash.h"):
+                self.assertTrue(doccheck._git_ignored(tmp, token), token)
+            for token in ("docs/source/conf.py", "subprojects/packagefiles/xxhash.diff",
+                          "CppCore/rgpot/Potential.hpp"):
+                self.assertFalse(doccheck._git_ignored(tmp, token), token)
+
+    def test_gitignore_rules_as_git_reads_them(self):
+        rules = "build/\n/out\n*.log\n!keep.log\nsub/*\n!sub/kept\ndocs/**/gen\n"
+        expected = {
+            "build/x": True, "a/build/x": True, "build": False,
+            "out": True, "a/out": False,
+            "x.log": True, "a/x.log": True, "keep.log": False, "a/keep.log": False,
+            "sub/a": True, "sub/kept": False, "sub/kept/y": False,
+            "logs.log/y": True, "build/keep.log": True,
+            "docs/gen": True, "docs/a/b/gen": True, "a/docs/gen": False,
+        }
+        with tempfile.TemporaryDirectory(prefix="doccheck-tree-") as tmp:
+            (Path(tmp) / ".gitignore").write_text(rules, encoding="utf-8")
+            got = {token: doccheck._git_ignored(tmp, token) for token in expected}
+        self.assertEqual(got, expected)
 
     def test_rgpot_keys_against_the_drop_in_parser(self):
         page = (ROOT / doccheck.GROMACS_DROPIN_PAGE).read_text(encoding="utf-8")

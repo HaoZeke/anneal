@@ -1343,16 +1343,83 @@ def _path_exists(token: str, root: Path, tracked: set[str], dirs: set[str]) -> b
     return (root / token).exists() or _git_ignored(str(root), token)
 
 
-@functools.lru_cache(maxsize=None)
 def _git_ignored(root: str, token: str) -> bool:
-    """True for a path .gitignore covers: an output of the build, such as docs/build."""
+    """True for a path .gitignore covers: an output of the build, such as docs/build.
+
+    The top-level .gitignore is read here rather than through git, which has
+    no repository to ask in a tree exported with git archive.  As in git,
+    nothing below an excluded directory comes back.
+    """
+    rules = _ignore_rules(root)
+    parts = token.strip("/").split("/")
+    for depth in range(1, len(parts) + 1):
+        path = "/".join(parts[:depth])
+        is_dir = depth < len(parts) or (Path(root) / path).is_dir()
+        ignored = False
+        for pattern, negated, dir_only in rules:
+            if (is_dir or not dir_only) and pattern.match(path):
+                ignored = not negated
+        if ignored:
+            return True
+    return False
+
+
+@functools.lru_cache(maxsize=None)
+def _ignore_rules(root: str) -> tuple[tuple[re.Pattern, bool, bool], ...]:
+    """(pattern, negated, directories only) for each line of the top-level .gitignore."""
     try:
-        proc = subprocess.run(
-            ["git", "check-ignore", "-q", "--no-index", "--", token], cwd=root, capture_output=True
-        )
+        lines = (Path(root) / ".gitignore").read_text(encoding="utf-8").splitlines()
     except OSError:
-        return False
-    return proc.returncode == 0
+        return ()
+    rules = []
+    for line in lines:
+        line = re.sub(r"(?<!\\)\s+$", "", line)
+        if not line or line.startswith("#"):
+            continue
+        negated = line.startswith("!")
+        if negated:
+            line = line[1:]
+        dir_only = line.endswith("/")
+        line = line.rstrip("/")
+        # A slash before the end ties the pattern to the top; without one it
+        # matches a name at any depth.
+        prefix = "" if "/" in line else "(?:.*/)?"
+        regex = prefix + _gitignore_glob(line.lstrip("/")) + r"\Z"
+        rules.append((re.compile(regex), negated, dir_only))
+    return tuple(rules)
+
+
+def _gitignore_glob(glob: str) -> str:
+    """Regex for one .gitignore glob, where * and ? stop at a slash and ** does not."""
+    out = []
+    i = 0
+    while i < len(glob):
+        at_start = i == 0 or glob[i - 1] == "/"
+        if at_start and glob.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif at_start and glob.startswith("**", i) and i + 2 == len(glob):
+            out.append(".*")
+            i += 2
+        elif glob[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif glob[i] == "?":
+            out.append("[^/]")
+            i += 1
+        elif glob[i] == "[" and (end := glob.find("]", i + 2)) != -1:
+            body = glob[i + 1 : end].replace("\\", "\\\\")
+            if body[0] in "!^":
+                body = "^" + body[1:]
+            out.append(f"[{body}]")
+            i = end + 1
+        elif glob[i] == "\\" and i + 1 < len(glob):
+            out.append(re.escape(glob[i + 1]))
+            i += 2
+        else:
+            out.append(re.escape(glob[i]))
+            i += 1
+    return "".join(out)
 
 
 _FOREIGN = re.compile(r"^(?:#\+rgpot_foreign:|<!--\s*rgpot-foreign:)(.*?)(?:-->)?\s*$", re.M)
