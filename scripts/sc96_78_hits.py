@@ -137,6 +137,11 @@ def median_text(values: list[float]) -> str:
     return f"{value:.1f}".removesuffix(".0")
 
 
+def same_runs(left: list[dict[str, str]], right: list[dict[str, str]]) -> bool:
+    key = lambda row: (row["hit"], row["hit_calls"], row["spent"], row["best"])  # noqa: E731
+    return {row["seed"]: key(row) for row in left} == {row["seed"]: key(row) for row in right}
+
+
 def result_paragraph(rows: list[dict[str, str]]) -> str:
     latest = {arm: current(rows, arm) for arm in ARMS}
     harness = latest["gmin"][0]
@@ -173,6 +178,8 @@ def result_paragraph(rows: list[dict[str, str]]) -> str:
         if earlier:
             lines.append(f"The earlier ={arm}= rows, without a harness revision, hit "
                          f"{sum(row['hit'] == '1' for row in earlier)} of {len(earlier)} seeds. They are kept in the file.")
+            if same_runs(earlier, latest[arm][1]):
+                lines.append(f"Their calls to a hit, calls spent and best energies match the latest ={arm}= rows seed for seed.")
     earlier = [row for row in rows if row["arm"] == "gmin" and row.get("harness_revision") != harness]
     if earlier:
         lines.append(

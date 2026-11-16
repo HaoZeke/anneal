@@ -749,28 +749,286 @@ def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str
         for r in group:
             if r["hit"] in ("1", "true") and float(r[calls_key]) > float(r["charged"]):
                 audit.record(False, per_seed, f"{r['system']} {r['seed']} hit after its charged stop", r[calls_key], r["charged"])
-        # A GMIN rerun under a later harness is tested against the anneal rows;
-        # the anneal row carries the tests against the GMIN rows of its own harness.
-        other = pick(rows, system=line["system"], **{arm_key: "gmin" if line["arm"] == "anneal" else "anneal"},
-                     **(harness if line["arm"] == "anneal" else {}))
+        # The first anneal harness carries the tests against the GMIN rows of
+        # its own harness; any later harness of either arm is tested against
+        # the other arm's latest harness before it in the seed rows.
+        other_arm = "gmin" if line["arm"] == "anneal" else "anneal"
+        mine = [r for r in rows if r["system"] == line["system"]]
+        if harness:
+            first = next((r["harness_revision"] for r in mine if r[arm_key] == "anneal"), "")
+            order = list(dict.fromkeys((r[arm_key], r["harness_revision"]) for r in mine))
+            earlier = order[:order.index((line["arm"], line["harness_revision"]))]
+            latest = [h for arm, h in earlier if arm == other_arm]
+            against = first if line["harness_revision"] == first else (latest[-1] if latest else "")
+            other = pick(mine, **{arm_key: other_arm}, harness_revision=against)
+        else:
+            other = pick(mine, **{arm_key: other_arm})
         if line.get(mw_column):
             b = [float(r[calls_key]) for r in other]
             audit.cell(where, mw_column, line[mw_column], mann_whitney(calls, b, continuity))
+        if line.get("mannwhitney_p_wall"):
+            audit.cell(where, "mannwhitney_p_wall", line["mannwhitney_p_wall"],
+                       mann_whitney([float(r["wall_s"]) for r in group], [float(r["wall_s"]) for r in other], continuity))
         if line.get("fisher_p_vs_gmin"):
             audit.cell(where, "fisher_p_vs_gmin", line["fisher_p_vs_gmin"],
                        fisher(hits_of(group), len(group), hits_of(other), len(other)))
 
 
-def head_to_head(audit: Audit) -> None:
-    summary_against_rows(audit, "bench/morse-h2h/results.csv", "bench/morse-h2h/seeds.csv", "code", "evals_to_hit", True)
-    summary_against_rows(audit, "bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv",
-                         "arm", "evals_to_hit", True)
-    path = "bench/metal-cluster-h2h/sc-n12/README.md"
-    sc_rows = audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
-    sc_summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
+SC_N12 = "bench/metal-cluster-h2h/sc-n12"
+SC_N12_README = f"{SC_N12}/README.md"
+SC_CHECK_ROWS = f"{SC_N12}/sc96-55-seeds.csv"
+SC_N12_START = "The GMIN rows rerun with the corrected file are"
+
+
+def p_text(p: float) -> str:
+    return "1" if p >= 0.9995 else (f"{p:.3g}" if p >= 1e-4 else f"{p:.2e}")
+
+
+def calls_text(v: float) -> str:
+    return f"{v:.1f}".removesuffix(".0")
+
+
+SC_TESTS = ("wall_ratio", "fisher_p_vs_gmin", "mannwhitney_p_evals", "mannwhitney_p_wall")
+
+
+def sc_state(summary: list[dict[str, str]]) -> tuple[dict, dict, dict]:
+    """First and latest anneal summary row, and the latest GMIN rerun, of each system.
+
+    A GMIN row whose harness is not that of the first anneal row of its
+    system is a rerun.
+    """
+    first: dict[str, dict[str, str]] = {}
+    now: dict[str, dict[str, str]] = {}
+    for r in summary:
+        if r["arm"] == "anneal":
+            first.setdefault(r["system"], r)
+            now[r["system"]] = r
+    reruns: dict[str, dict[str, str]] = {}
+    for r in summary:
+        if r["arm"] == "gmin" and r["harness_revision"] != first[r["system"]]["harness_revision"]:
+            reruns[r["system"]] = r
+    # The later of the latest anneal row and the GMIN rerun carries the tests
+    # between them; the rerun is read with those tests.
+    for system, r in reruns.items():
+        a = now[system]
+        if summary.index(a) > summary.index(r):
+            reruns[system] = {**r, **{c: a[c] for c in SC_TESTS}}
+    order = lambda d: dict(sorted(d.items(), key=lambda item: sc_order(item[0])))  # noqa: E731
+    return order(first), order(now), order(reruns)
+
+
+def sc_group(rows: list[dict[str, str]], line: dict[str, str]) -> list[dict[str, str]]:
+    return pick(rows, system=line["system"], arm=line["arm"], harness_revision=line["harness_revision"])
+
+
+def sc_moves(rows: list[dict[str, str]], first: dict, now: dict) -> dict[str, dict[str, object]]:
+    """The latest anneal rows of each rerun system against its first anneal rows."""
+    out = {}
+    for system, new in now.items():
+        old = first[system]
+        if new["harness_revision"] == old["harness_revision"]:
+            continue
+        a, b = sc_group(rows, old), sc_group(rows, new)
+        ca, cb = [float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in b]
+        out[system] = {
+            "old": old["harness_revision"], "new": new["harness_revision"],
+            "old hits": frac(a), "new hits": frac(b), "fisher": fisher(hits_of(a), len(a), hits_of(b), len(b)),
+            "old calls": median(ca), "new calls": median(cb), "p calls": mann_whitney(ca, cb, True),
+            # Positive when the latest rows are lower in more seed pairs.
+            "balance": sum((y < x) - (y > x) for x in ca for y in cb),
+            "hit balance": hits_of(b) - hits_of(a),
+        }
+    return out
+
+
+def sc_split(rows: list[dict[str, str]]) -> dict[str, float]:
+    charged = sum(float(r["charged"]) for r in rows)
+    return {
+        "wall": median([float(r["wall_s"]) for r in rows]),
+        "inside": median([float(r["pot_s"]) for r in rows]),
+        "outside": median([float(r["outside_s"]) for r in rows]),
+        "inside per call": 1e6 * sum(float(r["pot_s"]) for r in rows) / charged,
+        "outside per call": 1e6 * sum(float(r["outside_s"]) for r in rows) / charged,
+    }
+
+
+def sc_check(audit: Audit, now: dict, first: dict) -> dict[str, object] | None:
+    """sc96-55 on the further seeds under the first and the latest anneal build."""
+    if not (ROOT / SC_CHECK_ROWS).is_file():
+        return None
+    rows = audit.rows(SC_CHECK_ROWS)
+    new = now["sc96-55"]["harness_revision"]
+    old = first["sc96-55"]["harness_revision"]
+    a, b = pick(rows, code_revision=old), pick(rows, code_revision=new)
+    ca = {r["seed"]: float(r["calls"]) for r in a}
+    cb = {r["seed"]: float(r["calls"]) for r in b}
+    seeds = sorted(set(ca) & set(cb), key=int)
+    return {
+        "old": old, "new": new, "seeds": seeds, "n": len(seeds),
+        "old hits": hits_of(a), "new hits": hits_of(b),
+        "old calls": median(list(ca.values())), "new calls": median(list(cb.values())),
+        "p": mann_whitney(list(ca.values()), list(cb.values()), True),
+        "more": sum(cb[s] > ca[s] for s in seeds),
+    }
+
+
+def sc_n12_parts(audit: Audit) -> dict[str, object]:
+    rows = audit.rows(f"{SC_N12}/seeds.csv")
+    summary = audit.rows(f"{SC_N12}/results.csv")
+    first, now, reruns = sc_state(summary)
+    return {"rows": rows, "summary": summary, "first": first, "now": now, "reruns": reruns,
+            "moves": sc_moves(rows, first, now), "check": sc_check(audit, now, first)}
+
+
+def sc_n12_prose(parts: dict[str, object]) -> dict[str, list[str]]:
+    """The generated sentences of the sc-n12 README, by paragraph."""
+    rows, first, now, reruns, moves, check = (parts[k] for k in ("rows", "first", "now", "reruns", "moves", "check"))
+    by_harness: dict[str, list[str]] = {}
+    for system, r in reruns.items():
+        by_harness.setdefault(r["harness_revision"][:8], []).append(system)
+    out: dict[str, list[str]] = {}
+    out["reruns"] = [f"{SC_N12_START} {'; '.join(f'{and_list(v)} under harness {h}' for h, v in by_harness.items())}."]
+    news = sorted({m["new"] for m in moves.values()})
+    if news:
+        h = news[0][:8]
+        where = "all nine systems" if len(moves) == 9 else and_list(list(moves))
+        out["anneal"] = [f"The anneal rows are rerun on {where} under harness {h}, one seed at a time on core 0, "
+                         "with `scripts/metal_h2h/enter_sc_anneal.sh`."]
+        old = sorted({m["old"][:8] for m in moves.values()})
+        sig = [s for s, m in moves.items() if m["p calls"] < 0.05]
+        fewer = [s for s in sig if moves[s]["balance"] > 0]
+        more = [s for s in sig if moves[s]["balance"] < 0]
+        moved = []
+        if fewer:
+            moved.append(f"fewer calls on {and_list(fewer)}")
+        if more:
+            moved.append(f"more calls on {and_list(more)}")
+        if moved:
+            out["moves"] = [f"The {h} rows need {' and '.join(moved)} than the {and_list(old)} rows, at Mann-Whitney p < 0.05."]
+        else:
+            out["moves"] = [f"On no system do the {h} rows need fewer or more calls than the {and_list(old)} rows "
+                            "at Mann-Whitney p < 0.05."]
+        hits = [s for s, m in moves.items() if m["fisher"] < 0.05]
+        if hits:
+            out["moves"].append(f"Their hits differ at Fisher p < 0.05 on {and_list(hits)}.")
+        else:
+            out["moves"].append("On no system do their hits differ at Fisher p < 0.05.")
+        if check:
+            c = check
+            m = moves.get("sc96-55")
+            out["check"] = [
+                f"On sc96-55, seeds 2000-2011, the median calls move from {calls_text(m['old calls'])} at "
+                f"{m['old'][:8]} to {calls_text(m['new calls'])} at {m['new'][:8]}, Mann-Whitney p {p_text(m['p calls'])}.",
+                f"`sc96-55-seeds.csv` has seeds {c['seeds'][0]}-{c['seeds'][-1]} under both builds from the same starts.",
+                f"There {c['old'][:8]} hits {c['old hits']} of {c['n']} at a median of {calls_text(c['old calls'])} calls "
+                f"and {c['new'][:8]} hits {c['new hits']} of {c['n']} at a median of {calls_text(c['new calls'])}, "
+                f"Mann-Whitney p {p_text(c['p'])}; {c['new'][:8]} charges more calls on {c['more']} of {c['n']} seeds.",
+                ("The move on seeds 2000-2011 does not recur on these seeds, so no develop commit was bisected."
+                 if c["p"] >= 0.05 else "The move on seeds 2000-2011 recurs on these seeds."),
+            ]
+    tests = sc_reading(now, reruns, rows)
+    out["hits"] = [t for t in tests if " on hits " in t or "seeds than" in t]
+    out["bests"] = [t for t in tests if " GMIN seed" in t]
+    out["leads"] = [t for t in tests if t not in out["hits"] and t not in out["bests"]]
+    split = {s: (sc_split(sc_group(rows, now[s])), sc_split(sc_group(rows, reruns[s]))) for s in reruns
+             if sc_group(rows, reruns[s])}
+    if split:
+        def span(code: int, key: str) -> str:
+            values = [v[code][key] for v in split.values()]
+            return f"{min(values):.1f}-{max(values):.1f}"
+        out["split"] = [f"Per call, anneal spends {span(0, 'inside per call')} µs inside the potential and GMIN "
+                        f"{span(1, 'inside per call')} µs; outside it, anneal spends {span(0, 'outside per call')} µs "
+                        f"and GMIN {span(1, 'outside per call')} µs."]
+    return out
+
+
+def sc_n12_row_files() -> list[str]:
+    return [f"{SC_N12}/seeds.csv", f"{SC_N12}/results.csv"] + ([SC_CHECK_ROWS] if (ROOT / SC_CHECK_ROWS).is_file() else [])
+
+
+def sc_n12_body(audit: Audit) -> str:
+    """The sc-n12 README from its first generated sentence on."""
+    parts = sc_n12_parts(audit)
+    rows, first, now, reruns, moves = (parts[k] for k in ("rows", "first", "now", "reruns", "moves"))
+    prose = sc_n12_prose(parts)
+    h = next(iter(moves.values()))["new"][:8] if moves else first[next(iter(first))]["harness_revision"][:8]
+    para = lambda key: " ".join(prose.get(key, []))  # noqa: E731
+    lines = [para("reruns") + " Every system now has GMIN rows from the corrected file. The e3ed7dad GMIN rows "
+             "are kept in `seeds.csv` and shown below next to their reruns. Each rerun starts from the anneal row's "
+             "start files: the e3ed7dad and a50f4b02 builds of `h2h_sc` write the same bytes for every system and seed."
+             + (f" {aliases}" if (aliases := alias_sentence(audit, sc_n12_row_files(), "bench/revision-aliases.csv"))
+                else ""), ""]
+    if moves:
+        lines += [para("anneal") + " Its anneal code is that of develop. The e3ed7dad anneal rows are kept in "
+                  "`seeds.csv` and shown below. The " + h + " rows call rgpot's Sutton-Chen entry at the rgpot "
+                  "revision of `Cargo.lock`, built by `scripts/metal_h2h/build_rgpot_sc.sh`, from the same start "
+                  "files: the " + h + " build of `h2h_sc` writes the same bytes as the e3ed7dad build.", ""]
+    lines += ["| System | Arm | Harness | Hits | Calls median | Wall median (s) |", "|---|---|---|---|---|---|"]
+    for system in first:
+        shown = [first[system]] + ([now[system]] if now[system] is not first[system] else [])
+        shown += [r for r in parts["summary"] if r["system"] == system and r["arm"] == "gmin"
+                  and r["harness_revision"] == first[system]["harness_revision"]]
+        shown += [reruns[system]] if system in reruns else []
+        for r in shown:
+            g = sc_group(rows, r)
+            lines.append(f"| {system} | {r['arm']} | {r['harness_revision'][:8]} | {frac(g)} | "
+                         f"{calls_text(median([float(x['evals_to_hit']) for x in g]))} | "
+                         f"{median([float(x['wall_s']) for x in g]):.3f} |")
+    lines.append("")
+    if moves:
+        lines += [f"The {h} anneal rows against the e3ed7dad anneal rows of the same seeds: Fisher on hits, "
+                  "Mann-Whitney on calls to the hit.", "",
+                  "| System | Old harness | New harness | Old hits | New hits | Fisher p | Old calls median | "
+                  "New calls median | Mann-Whitney p calls |", "|---|---|---|---|---|---|---|---|---|"]
+        for system, m in moves.items():
+            lines.append(f"| {system} | {m['old'][:8]} | {m['new'][:8]} | {m['old hits']} | {m['new hits']} | "
+                         f"{p_text(m['fisher'])} | {calls_text(m['old calls'])} | {calls_text(m['new calls'])} | "
+                         f"{p_text(m['p calls'])} |")
+        lines += ["", para("moves"), ""]
+        if prose.get("check"):
+            lines += [para("check") + " Their calls are the calls charged; both builds stop at the hit, and "
+                      "the e3ed7dad build prints the budget for the calls to some hits.", ""]
+    lines += [f"Each rerun is tested against the {h} anneal rows of its system. The wall ratio is the GMIN median "
+              "wall over the anneal median wall. On calls and wall the code ahead is the one lower in more of the "
+              "144 seed pairs, the direction of the Mann-Whitney test; on hits it is the one with more hits. n.s. "
+              "marks a lead at p >= 0.05.", "",
+              "| System | Anneal harness | GMIN harness | Fisher p | Mann-Whitney p calls | Mann-Whitney p wall | "
+              "Wall ratio | Hits ahead | Calls ahead | Wall ahead |", "|---|---|---|---|---|---|---|---|---|---|"]
+    for system, r in reruns.items():
+        ahead = sc_ahead(now[system], r, rows)
+        lines.append(f"| {system} | {now[system]['harness_revision'][:8]} | {r['harness_revision'][:8]} | "
+                     f"{p_text(float(r['fisher_p_vs_gmin']))} | {p_text(float(r['mannwhitney_p_evals']))} | "
+                     f"{p_text(float(r['mannwhitney_p_wall']))} | {float(r['wall_ratio']):.3f} | "
+                     f"{ahead['Hits']} | {ahead['Calls']} | {ahead['Wall']} |")
+    lines += ["", para("hits"), "", para("leads"), "", para("bests"), ""]
+    lines += ["Inside is the time in the potential and outside the rest of the wall. The medians are over the twelve "
+              "seeds; per call is the sum over the twelve seeds over the calls charged.", "",
+              "| System | Code | Harness | Wall median (s) | Inside median (s) | Outside median (s) | "
+              "Inside (µs/call) | Outside (µs/call) |", "|---|---|---|---|---|---|---|---|"]
+    for system, r in reruns.items():
+        for code, line in (("anneal", now[system]), ("gmin", r)):
+            v = sc_split(sc_group(rows, line))
+            lines.append(f"| {system} | {code} | {line['harness_revision'][:8]} | {v['wall']:.3f} | {v['inside']:.3f} | "
+                         f"{v['outside']:.3f} | {v['inside per call']:.2f} | {v['outside per call']:.2f} |")
+    lines += ["", para("split"), "",
+              "GMIN still quenches to an RMS force of 1e-4 (`SLOPPYCONV`) and 1e-5 (`TIGHTCONV`). Anneal stops "
+              "its quench at its own default.", ""]
+    return "\n".join(lines)
+
+
+def write_sc_n12() -> None:
+    path = ROOT / SC_N12_README
+    text = path.read_text()
+    path.write_text(text[:text.index(SC_N12_START)] + sc_n12_body(Audit()))
+
+
+def sc_n12(audit: Audit) -> None:
+    path = SC_N12_README
+    parts = sc_n12_parts(audit)
+    rows, first, now, reruns, moves = (parts[k] for k in ("rows", "first", "now", "reruns", "moves"))
     shown = set()
     for line, row in md_table(audit, path, "System | Arm | Harness"):
-        group = [r for r in pick(sc_rows, system=row["System"], arm=row["Arm"])
+        group = [r for r in pick(rows, system=row["System"], arm=row["Arm"])
                  if r["harness_revision"].startswith(row["Harness"])]
         where = f"{path}:{line} {row['System']} {row['Arm']} {row['Harness']}"
         shown.add((row["System"], row["Arm"], row["Harness"]))
@@ -778,21 +1036,14 @@ def head_to_head(audit: Audit) -> None:
         audit.cell(where, "hits", row["Hits"], frac(group))
         audit.cell(where, "calls median", row["Calls median"], median([float(r["evals_to_hit"]) for r in group]))
         audit.cell(where, "wall median", row["Wall median (s)"], median([float(r["wall_s"]) for r in group]))
-    # A GMIN row whose harness is not that of the anneal row of its system is
-    # a rerun. Every rerun, the rows it replaces and its tests must be shown,
-    # and no system may be left with GMIN rows from the old file only.
-    anneal = {r["system"]: r for r in sc_summary if r["arm"] == "anneal"}
-    anneal_harness = {s: r["harness_revision"] for s, r in anneal.items()}
-    reruns: dict[str, dict[str, str]] = {}
-    for r in sc_summary:
-        if r["arm"] == "gmin" and r["harness_revision"] != anneal_harness[r["system"]]:
-            reruns[r["system"]] = r
-    reruns = dict(sorted(reruns.items(), key=lambda item: sc_order(item[0])))
+    # Every rerun of either arm, the rows it replaces and its tests must be
+    # shown, and no system may be left with GMIN rows from the old file only.
     tested = {}
-    for line, row in md_table(audit, path, "System | GMIN harness"):
+    for line, row in md_table(audit, path, "System | Anneal harness | GMIN harness"):
         where = f"{path}:{line} {row['System']} {row['GMIN harness']}"
         r = reruns.get(row["System"])
         tested[row["System"]] = row["GMIN harness"]
+        audit.cell(where, "latest anneal harness", row["Anneal harness"], now[row["System"]]["harness_revision"][:8])
         audit.cell(where, "latest GMIN harness", row["GMIN harness"], r["harness_revision"][:8] if r else "not rerun")
         if r:
             audit.cell(where, "Fisher p", row["Fisher p"], number(r["fisher_p_vs_gmin"]))
@@ -801,28 +1052,78 @@ def head_to_head(audit: Audit) -> None:
             audit.cell(where, "wall ratio", row["Wall ratio"], number(r["wall_ratio"]))
             if not all(r[c] for c in ("fisher_p_vs_gmin", "mannwhitney_p_evals", "mannwhitney_p_wall")):
                 continue
-            ahead = sc_ahead(anneal[row["System"]], r, sc_rows)
+            # The rerun line carries the tests against the latest anneal rows.
+            a, g = sc_group(rows, now[row["System"]]), sc_group(rows, r)
+            audit.cell(where, "Fisher p against the latest anneal rows", row["Fisher p"],
+                       fisher(hits_of(a), len(a), hits_of(g), len(g)))
+            ahead = sc_ahead(now[row["System"]], r, rows)
             for column in ("Hits", "Calls", "Wall"):
                 audit.cell(where, f"{column} ahead", row[f"{column} ahead"], ahead[column])
-    by_harness: dict[str, list[str]] = {}
     for system, r in reruns.items():
-        by_harness.setdefault(r["harness_revision"][:8], []).append(system)
-        for arm, harness in (("anneal", anneal_harness[system]), ("gmin", anneal_harness[system]),
-                             ("gmin", r["harness_revision"])):
+        wanted = [("anneal", first[system]["harness_revision"]), ("anneal", now[system]["harness_revision"]),
+                  ("gmin", first[system]["harness_revision"]), ("gmin", r["harness_revision"])]
+        for arm, harness in dict.fromkeys(wanted):
             audit.cell(path, f"table row {system} {arm} {harness[:8]}",
                        "shown" if (system, arm, harness[:8]) in shown else "missing", "shown")
         audit.cell(path, f"test row {system}", tested.get(system, "missing"), r["harness_revision"][:8])
     for system in tested:
         audit.cell(path, f"test row {system} is a rerun", "rerun" if system in reruns else "not rerun", "rerun")
-    for system in anneal_harness:
+    for system in first:
         audit.cell(path, f"{system} GMIN row from the corrected file",
-                   "rerun" if system in reruns else f"old file only ({anneal_harness[system][:8]})", "rerun")
-    parts = [f"{and_list(systems)} under harness {h}" for h, systems in by_harness.items()]
-    audit.said(path, f"The GMIN rows rerun with the corrected file are {'; '.join(parts)}.")
+                   "rerun" if system in reruns else f"old file only ({first[system]['harness_revision'][:8]})", "rerun")
+    if moves:
+        listed = {}
+        for line, row in md_table(audit, path, "System | Old harness | New harness"):
+            m = moves.get(row["System"])
+            where = f"{path}:{line} {row['System']} anneal rerun"
+            listed[row["System"]] = line
+            if m is None:
+                audit.record(False, where, "anneal rerun", row["New harness"], "not rerun")
+                continue
+            audit.cell(where, "old harness", row["Old harness"], m["old"][:8])
+            audit.cell(where, "new harness", row["New harness"], m["new"][:8])
+            audit.cell(where, "old hits", row["Old hits"], m["old hits"])
+            audit.cell(where, "new hits", row["New hits"], m["new hits"])
+            audit.cell(where, "Fisher p", row["Fisher p"], m["fisher"])
+            audit.cell(where, "old calls median", row["Old calls median"], m["old calls"])
+            audit.cell(where, "new calls median", row["New calls median"], m["new calls"])
+            audit.cell(where, "Mann-Whitney p calls", row["Mann-Whitney p calls"], m["p calls"])
+        for system in moves:
+            audit.cell(path, f"anneal rerun row {system}", "shown" if system in listed else "missing", "shown")
+    split_rows = md_table(audit, path, "System | Code | Harness | Wall median") if reruns else []
+    split_shown = set()
+    for line, row in split_rows:
+        system, code = row["System"], row["Code"]
+        r = (now if code == "anneal" else reruns).get(system)
+        where = f"{path}:{line} {system} {code} split"
+        if r is None:
+            audit.record(False, where, "split row of a rerun", row["Harness"], "not rerun")
+            continue
+        split_shown.add((system, code))
+        audit.cell(where, "harness", row["Harness"], r["harness_revision"][:8])
+        if not sc_group(rows, r):
+            audit.record(False, where, "per-seed rows", "12", 0)
+            continue
+        v = sc_split(sc_group(rows, r))
+        for column, key in (("Wall median (s)", "wall"), ("Inside median (s)", "inside"),
+                            ("Outside median (s)", "outside"), ("Inside (µs/call)", "inside per call"),
+                            ("Outside (µs/call)", "outside per call")):
+            audit.cell(where, column, row[column], v[key])
+    for system in reruns:
+        for code in ("anneal", "gmin"):
+            audit.cell(path, f"split row {system} {code}", "shown" if (system, code) in split_shown else "missing", "shown")
+    for sentences in sc_n12_prose(parts).values():
+        for sentence in sentences:
+            audit.said(path, sentence)
     audit.said("bench/metal-cluster-h2h/sc-8e076b7f/README.md",
                f"`../sc-n12/README.md` has the corrected file and GMIN reruns of {and_list(reruns)}.")
-    for sentence in sc_reading(anneal, reruns, sc_rows):
-        audit.said(path, sentence)
+
+
+def head_to_head(audit: Audit) -> None:
+    summary_against_rows(audit, "bench/morse-h2h/results.csv", "bench/morse-h2h/seeds.csv", "code", "evals_to_hit", True)
+    summary_against_rows(audit, "bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv",
+                         "arm", "evals_to_hit", True)
+    sc_n12(audit)
 
     path = "bench/morse-h2h/README.md"
     results = audit.rows("bench/morse-h2h/results.csv")
@@ -886,11 +1187,17 @@ def signflip(diffs: list[float], draws: int = 20000, seed: int = 0) -> float:
 
 
 def sc96_78_howto(audit: Audit) -> None:
-    """The 9-6 N=78 table scores the GMIN rows of the last harness revision."""
+    """The 9-6 N=78 table scores each arm's rows of its last harness revision.
+
+    The first iso and iso-hop rows have no harness revision; GMIN rows must have one.
+    """
     rows = audit.rows(SC96_78_ROWS)
-    gmin = [r for r in rows if r["arm"] == "gmin" and r["harness_revision"]]
-    harness = gmin[-1]["harness_revision"]
-    arms = {"gmin": pick(gmin, harness_revision=harness), "iso": pick(rows, arm="iso"), "iso-hop": pick(rows, arm="iso-hop")}
+    latest = {}
+    for arm in ("gmin", "iso", "iso-hop"):
+        group = [r for r in rows if r["arm"] == arm and (arm != "gmin" or r["harness_revision"])]
+        latest[arm] = group[-1]["harness_revision"]
+    harness = latest["gmin"]
+    arms = {arm: pick(rows, arm=arm, harness_revision=h) for arm, h in latest.items()}
     par2 = {arm: {r["seed"]: float(r["hit_calls"]) if r["hit"] == "1" else 2.0 * SC96_78_BUDGET for r in group}
             for arm, group in arms.items()}
     text = audit.text(SC96_78_HOWTO)
@@ -912,11 +1219,31 @@ def sc96_78_howto(audit: Audit) -> None:
     audit.said(SC96_78_HOWTO, f"Its rows are those of harness {harness[:8]}")
     earlier = [r for r in rows if r["arm"] == "gmin" and r["harness_revision"] != harness]
     audit.said(SC96_78_HOWTO, f"hit {hits_of(earlier)} of {len(earlier)} seeds. They are kept in the file.")
+    if latest["iso"] == latest["iso-hop"] and latest["iso"]:
+        audit.said(SC96_78_HOWTO, f"The iso and iso-hop rows are those of harness {latest['iso'][:8]}, one seed at a time "
+                                  "on core 0, from =scripts/metal_h2h/enter_sc_anneal.sh=.")
+    for arm, group in arms.items():
+        if all(r["wall_s"] and r["pot_s"] for r in group):
+            wall = median([round(float(r["wall_s"]), 3) for r in group])
+            pot = median([round(float(r["pot_s"]), 3) for r in group])
+            audit.said(SC96_78_HOWTO, f"The median ={arm}= seed takes {wall:.1f}".removesuffix(".0")
+                       + f" s, {f'{pot:.1f}'.removesuffix('.0')} s of it inside the potential.")
+    for arm in ("iso", "iso-hop"):
+        old_rows = [r for r in rows if r["arm"] == arm and r["harness_revision"] != latest[arm]]
+        if old_rows:
+            audit.said(SC96_78_HOWTO, f"The earlier ={arm}= rows, without a harness revision, hit {hits_of(old_rows)} "
+                                      f"of {len(old_rows)} seeds. They are kept in the file.")
+            key = lambda r: (r["hit"], r["hit_calls"], r["spent"], r["best"])  # noqa: E731
+            sentence = f"Their calls to a hit, calls spent and best energies match the latest ={arm}= rows seed for seed."
+            same = {r["seed"]: key(r) for r in old_rows} == {r["seed"]: key(r) for r in arms[arm]}
+            audit.record(same == (collapse(sentence) in collapse(audit.text(SC96_78_HOWTO))), SC96_78_HOWTO,
+                         "prose", sentence, "present" if same else "absent")
 
 
 # Numbers of the GMIN rows from the misread data file, as they were cited.
 STALE_GMIN = re.compile(r"\b0/32\b|\b0 of 32\b|\bp\s*[<≤]\s*\$?(?:1e-4|10\^\{?-4\}?|0\.0001)|(?<![\d.])0\.0000\b")
-RETIRED = ("Only 9-6 at N=38 has been rerun", "a rerun of 9-6 at 38 atoms", "from the old file, and are not rerun")
+RETIRED = ("Only 9-6 at N=38 has been rerun", "a rerun of 9-6 at 38 atoms", "from the old file, and are not rerun",
+           "The anneal rows are not rerun")
 # Sentences that cite the old rows as old rows; each is derived from the rows elsewhere.
 HISTORICAL = {
     (SC96_78_HOWTO, "The earlier GMIN rows, with temperature 0.8, step 0.40 and a container radius of 30, hit 0 of 32 seeds."),
@@ -1639,7 +1966,12 @@ def run(report: bool = False) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--report", action="store_true", help="print every check, not only the drifted ones")
-    return run(parser.parse_args(argv).report)
+    parser.add_argument("--write-sc-n12", action="store_true",
+                        help=f"write {SC_N12_README} from its rows before the checks")
+    args = parser.parse_args(argv)
+    if args.write_sc_n12:
+        write_sc_n12()
+    return run(args.report)
 
 
 if __name__ == "__main__":
