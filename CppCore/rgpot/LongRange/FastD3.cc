@@ -5,18 +5,16 @@
 
 #include "rgpot/LongRange/Pairs.hpp"
 #include "rgpot/LongRange/Team.hpp"
+#include "rgpot/Slices.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
 #include <span>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 namespace rgpot::lr {
 namespace {
@@ -139,14 +137,6 @@ double triple_scale(int i, int j, int k) {
   return 0.5;
 }
 
-int thread_id() {
-#ifdef _OPENMP
-  return omp_get_thread_num();
-#else
-  return 0;
-#endif
-}
-
 } // namespace
 
 bool d3bj_param(const char *functional, D3BjParam *out) {
@@ -179,21 +169,13 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
   const double reach = std::max(cut2, std::max(cut3, cut_cn));
   // Every requested thread does pair work. Leaving threads idle made
   // the next thread count no faster than the previous one.
-  int nt_build = 1;
-#ifdef _OPENMP
-  nt_build = std::max(omp_get_max_threads(), 1);
-#endif
+  const int nt_build = poolThreads();
+  const auto npairs = static_cast<std::int64_t>(pairs.size());
   std::vector<int> deg(static_cast<std::size_t>(nt_build) * n, 0);
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-  {
-    const int tid = thread_id();
-    if (tid < nt_build) {
-    int *mine = deg.data() + static_cast<std::size_t>(tid) * n;
-    const std::size_t begin = pairs.size() * static_cast<std::size_t>(tid) / static_cast<std::size_t>(nt_build);
-    const std::size_t end = pairs.size() * static_cast<std::size_t>(tid + 1) / static_cast<std::size_t>(nt_build);
-    for (std::size_t t = begin; t < end; ++t) {
+  forEachSlice(nt_build, [&](int slice) {
+    int *mine = deg.data() + static_cast<std::size_t>(slice) * n;
+    const Range run = partition(npairs, slice, nt_build);
+    for (auto t = static_cast<std::size_t>(run.begin); t < static_cast<std::size_t>(run.end); ++t) {
       const Pair &pr = pairs[t];
       if (!(pr.r < reach)) {
         continue;
@@ -203,8 +185,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
         mine[pr.j] += 1;
       }
     }
-    }
-  }
+  });
   std::vector<int> off(n + 1, 0);
   std::vector<int> base(static_cast<std::size_t>(nt_build) * n, 0);
   for (std::size_t i = 0; i < n; ++i) {
@@ -216,18 +197,10 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
     off[i + 1] = cursor;
   }
   std::vector<Nb> nb(static_cast<std::size_t>(off[n]));
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-  {
-    const int tid = thread_id();
-    if (tid >= nt_build) {
-      // This thread is past the work-size cap.
-    } else {
-    int *slot = base.data() + static_cast<std::size_t>(tid) * n;
-    const std::size_t begin = pairs.size() * static_cast<std::size_t>(tid) / static_cast<std::size_t>(nt_build);
-    const std::size_t end = pairs.size() * static_cast<std::size_t>(tid + 1) / static_cast<std::size_t>(nt_build);
-    for (std::size_t t = begin; t < end; ++t) {
+  forEachSlice(nt_build, [&](int slice) {
+    int *slot = base.data() + static_cast<std::size_t>(slice) * n;
+    const Range run = partition(npairs, slice, nt_build);
+    for (auto t = static_cast<std::size_t>(run.begin); t < static_cast<std::size_t>(run.end); ++t) {
       const Pair &pr = pairs[t];
       if (!(pr.r < reach)) {
         continue;
@@ -248,8 +221,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
         nb[static_cast<std::size_t>(slot[pr.j]++)] = b;
       }
     }
-    }
-  }
+  });
   const auto neigh = [&](std::size_t i) {
     return std::span<const Nb>(nb.data() + off[i], static_cast<std::size_t>(off[i + 1] - off[i]));
   };
@@ -287,22 +259,12 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
   std::vector<std::vector<double>> f_th(static_cast<std::size_t>(nt), std::vector<double>(3 * n, 0.0));
   std::vector<std::vector<double>> sig_th(static_cast<std::size_t>(nt), std::vector<double>(9, 0.0));
 
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-  {
-    const int tid =
-#ifdef _OPENMP
-        omp_get_thread_num();
-#else
-        0;
-#endif
-    if (tid < nt) {
-    auto &dedcn = dedcn_th[static_cast<std::size_t>(tid)];
-    auto &floc = f_th[static_cast<std::size_t>(tid)];
-    auto &sig = sig_th[static_cast<std::size_t>(tid)];
+  forEachSlice(nt, [&](int slice) {
+    auto &dedcn = dedcn_th[static_cast<std::size_t>(slice)];
+    auto &floc = f_th[static_cast<std::size_t>(slice)];
+    auto &sig = sig_th[static_cast<std::size_t>(slice)];
     double ene = 0.0;
-    for (std::size_t i = static_cast<std::size_t>(tid); i < n; i += static_cast<std::size_t>(nt)) {
+    for (std::size_t i = static_cast<std::size_t>(slice); i < n; i += static_cast<std::size_t>(nt)) {
       for (const Nb &a : neigh(i)) {
         if (a.j > static_cast<int>(i) || a.r >= cut2_b) {
           continue;
@@ -356,7 +318,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
         }
       }
     }
-    for (std::size_t i = static_cast<std::size_t>(tid); i < n; i += static_cast<std::size_t>(nt)) {
+    for (std::size_t i = static_cast<std::size_t>(slice); i < n; i += static_cast<std::size_t>(nt)) {
       for (const Nb &a : neigh(i)) {
         if (a.j > static_cast<int>(i) || a.r >= cut3_b) {
           continue;
@@ -474,9 +436,8 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
         }
       }
     }
-    ene_th[static_cast<std::size_t>(tid)] = ene;
-    }
-  }
+    ene_th[static_cast<std::size_t>(slice)] = ene;
+  });
 
   double ene = 0.0;
   std::vector<double> dedcn(n, 0.0);

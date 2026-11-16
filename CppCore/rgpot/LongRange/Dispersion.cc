@@ -8,6 +8,7 @@
 #include "rgpot/LongRange/Compensate.hpp"
 #include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/Slices.hpp"
 #include "rgpot/stress.hpp"
 #include "rgpot/units.hpp"
 
@@ -15,13 +16,10 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <numbers>
 #include <stdexcept>
 #include <vector>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #if defined(RGPOT_HAS_DFTD3)
 #include <dftd3.h>
@@ -465,10 +463,7 @@ public:
       alpha[i] = alpha_tab[z - 1] * hi;
       c6[i] = c6_tab[z - 1] * ratio;
     }
-    int nt = 1;
-#ifdef _OPENMP
-    nt = omp_get_max_threads();
-#endif
+    const int nt = poolThreads();
     std::vector<Neumaier> enes(static_cast<std::size_t>(nt));
     std::vector<std::vector<double>> forces(static_cast<std::size_t>(nt));
     std::vector<std::array<double, 6>> strains(static_cast<std::size_t>(nt));
@@ -477,22 +472,12 @@ public:
         buf.assign(3 * in.nAtoms, 0.0);
       }
     }
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-    {
-#ifdef _OPENMP
-      const int tid = omp_get_thread_num();
-#else
-      const int tid = 0;
-#endif
-      auto &ene = enes[static_cast<std::size_t>(tid)];
-      auto &floc = forces[static_cast<std::size_t>(tid)];
-      auto &sloc = strains[static_cast<std::size_t>(tid)];
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-      for (std::size_t ti = 0; ti < pairs.size(); ++ti) {
+    forEachSlice(nt, [&](int slice) {
+      auto &ene = enes[static_cast<std::size_t>(slice)];
+      auto &floc = forces[static_cast<std::size_t>(slice)];
+      auto &sloc = strains[static_cast<std::size_t>(slice)];
+      const Range run = partition(static_cast<std::int64_t>(pairs.size()), slice, nt);
+      for (auto ti = static_cast<std::size_t>(run.begin); ti < static_cast<std::size_t>(run.end); ++ti) {
       const Pair &pr = pairs[ti];
       const double R = pr.r / kBohr;
       if (!(R > 1e-8)) {
@@ -564,7 +549,7 @@ public:
         accumulatePairStrain(sloc.data(), -dedr_A * invr, -pr.x, -pr.y, -pr.z);
       }
       }
-    }
+    });
     Neumaier ene;
     for (const auto &part : enes) {
       ene.add(part);

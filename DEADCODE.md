@@ -63,3 +63,17 @@ The mesh cap and the atom cap never exceed the request.
 -    team = requested;
 -  }
 ```
+
+## Work team cap
+
+The commit that moves the dispersion and pair teams onto slices removes
+`work_team` from Team.hpp.
+Nothing called it, and it read the pool size outside the Slices helpers.
+
+```
+-inline int work_team(std::size_t n, std::size_t n_max, int cap) {
+-  int team = omp_get_max_threads();
+-  if (n <= n_max && cap > 0 && team > cap) {
+-    team = cap;
+-  }
+```

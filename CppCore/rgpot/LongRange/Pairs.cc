@@ -4,15 +4,13 @@
 #include "rgpot/LongRange/Pairs.hpp"
 
 #include "rgpot/LongRange/Lattice.hpp"
+#include "rgpot/Slices.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 namespace rgpot::lr {
 
@@ -25,23 +23,6 @@ struct Cand {
   int sb = 0;
   int sc = 0;
 };
-
-int thread_count() {
-#ifdef _OPENMP
-  const int n = omp_get_max_threads();
-  return n > 0 ? n : 1;
-#else
-  return 1;
-#endif
-}
-
-int thread_id() {
-#ifdef _OPENMP
-  return omp_get_thread_num();
-#else
-  return 0;
-#endif
-}
 
 void vacuum_box(const double *pos, std::size_t n, double reach, double *box9) {
   double lo[3] = {pos[0], pos[1], pos[2]};
@@ -152,17 +133,12 @@ void gather(const double *pos, std::size_t n, const CellGeom &cell, double reach
             std::vector<Cand> *out) {
   const Grid g = grid_of(pos, n, cell, reach);
   const double reach2 = reach * reach;
-  const int nt = team;
+  const int nt = std::max(team, 1);
   std::vector<std::vector<Cand>> local(static_cast<std::size_t>(nt));
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-  {
-    auto &mine = local[static_cast<std::size_t>(thread_id())];
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-    for (std::size_t i = 0; i < n; ++i) {
+  forEachSlice(nt, [&](int slice) {
+    auto &mine = local[static_cast<std::size_t>(slice)];
+    const Range run = partition(static_cast<std::int64_t>(n), slice, nt);
+    for (auto i = static_cast<std::size_t>(run.begin); i < static_cast<std::size_t>(run.end); ++i) {
       double ri[3] = {pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]};
       double si[3];
       cell.fractional(ri, si);
@@ -211,7 +187,7 @@ void gather(const double *pos, std::size_t n, const CellGeom &cell, double reach
         }
       }
     }
-  }
+  });
   std::size_t total = 0;
   for (const auto &part : local) {
     total += part.size();
@@ -226,17 +202,12 @@ void gather(const double *pos, std::size_t n, const CellGeom &cell, double reach
 void emit_pairs(const std::vector<Cand> &cand, const double *pos, const CellGeom &cell, double cutoff,
                 int team, std::vector<Pair> *out) {
   const double cut2 = cutoff * cutoff;
-  const int nt = team;
+  const int nt = std::max(team, 1);
   std::vector<std::vector<Pair>> local(static_cast<std::size_t>(nt));
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-  {
-    auto &mine = local[static_cast<std::size_t>(thread_id())];
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-    for (std::size_t t = 0; t < cand.size(); ++t) {
+  forEachSlice(nt, [&](int slice) {
+    auto &mine = local[static_cast<std::size_t>(slice)];
+    const Range run = partition(static_cast<std::int64_t>(cand.size()), slice, nt);
+    for (auto t = static_cast<std::size_t>(run.begin); t < static_cast<std::size_t>(run.end); ++t) {
       const Cand &c = cand[t];
       const double dx = pos[3 * c.j] - pos[3 * c.i] + c.sa * cell.H[0][0] + c.sb * cell.H[1][0] +
                         c.sc * cell.H[2][0];
@@ -257,7 +228,7 @@ void emit_pairs(const std::vector<Cand> &cand, const double *pos, const CellGeom
       p.r = std::sqrt(r2);
       mine.push_back(p);
     }
-  }
+  });
   std::size_t total = 0;
   for (const auto &part : local) {
     total += part.size();
@@ -315,9 +286,9 @@ void DualList::fill(Skin &skin, double cutoff, const double *pos, std::size_t n,
     }
   }
   *rebuilt = rebuild;
-  const int team = thread_count();
+  const int team = poolThreads();
   if (rebuild) {
-    // One OpenMP team. omp_set_num_threads(1) keeps this a single thread.
+    // One slice per pool thread. omp_set_num_threads(1) keeps this serial.
     gather(pos, n, cell, cutoff + skin_, team, &skin.cand);
     skin.ref.assign(pos, pos + 3 * n);
     std::copy(box9, box9 + 9, skin.ref_h);

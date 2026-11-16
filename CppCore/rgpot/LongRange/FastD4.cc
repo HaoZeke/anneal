@@ -9,21 +9,19 @@
 
 #include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/LongRange/Team.hpp"
+#include "rgpot/Slices.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <cstdlib>
 #include <numbers>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 namespace rgpot::lr {
 namespace {
@@ -268,10 +266,7 @@ void mat_inv(const double *box, double inv[9], double *vol);
 double bspline4(double x);
 
 void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
-  int team = 1;
-#ifdef _OPENMP
-  team = std::max(1, omp_get_max_threads());
-#endif
+  int team = poolThreads();
   // Column assembly of the dense charge system runs one serial transform
   // per thread. The outer parallel loop is the team.
   if (g_fft_team > 0) {
@@ -307,34 +302,14 @@ void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
     axis(0, 0, scale);
     return;
   }
-#ifdef _OPENMP
-  // The region is the live pool. Asking for a smaller team while the
-  // spare workers are still in an active wait stalls the transform.
-#pragma omp parallel
-#endif
-  {
-    const int tid =
-#ifdef _OPENMP
-        omp_get_thread_num();
-#else
-        0;
-#endif
-    if (tid < cap) {
-      axis(2, tid, 1.0);
+  // The region is the live pool, one slice per worker, and the slices
+  // past the cap are empty. Asking for a smaller team while the spare
+  // workers are still in an active wait stalls the transform.
+  forEachSlicePhase(3, team, [&](int phase, int slice) {
+    if (slice < cap) {
+      axis(2 - phase, slice, phase == 2 ? scale : 1.0);
     }
-#ifdef _OPENMP
-#pragma omp barrier
-#endif
-    if (tid < cap) {
-      axis(1, tid, 1.0);
-    }
-#ifdef _OPENMP
-#pragma omp barrier
-#endif
-    if (tid < cap) {
-      axis(0, tid, scale);
-    }
-  }
+  });
 }
 
 double bspline_order(int order, double x) {
@@ -588,19 +563,15 @@ struct Operator {
 
   void apply(const double *q, double *y) const {
     std::fill(y, y + n, 0.0);
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-    for (std::size_t i = 0; i < n; ++i) {
-      y[i] = diag[i] * q[i];
-    }
-    // Pair kernel. Writes to both ends, so each thread keeps a private vector.
-    const int nt =
-#ifdef _OPENMP
-        std::max(1, omp_get_max_threads());
-#else
-        1;
-#endif
+    const int nt = poolThreads();
+    const auto rows = static_cast<std::int64_t>(n);
+    forEachSlice(nt, [&](int slice) {
+      const Range run = partition(rows, slice, nt);
+      for (auto i = static_cast<std::size_t>(run.begin); i < static_cast<std::size_t>(run.end); ++i) {
+        y[i] = diag[i] * q[i];
+      }
+    });
+    // Pair kernel. Writes to both ends, so each slice keeps a private vector.
     if (acc_buf.size() != static_cast<std::size_t>(nt) * n) {
       acc_buf.assign(static_cast<std::size_t>(nt) * n, 0.0);
     } else {
@@ -608,21 +579,10 @@ struct Operator {
     }
     double *acc = acc_buf.data();
     prepare_ker();
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-    {
-      const int tid =
-#ifdef _OPENMP
-          omp_get_thread_num();
-#else
-          0;
-#endif
-      double *loc = acc + static_cast<std::size_t>(tid) * n;
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-      for (std::size_t i = 0; i < n; ++i) {
+    forEachSlice(nt, [&](int slice) {
+      double *loc = acc + static_cast<std::size_t>(slice) * n;
+      const Range run = partition(rows, slice, nt);
+      for (auto i = static_cast<std::size_t>(run.begin); i < static_cast<std::size_t>(run.end); ++i) {
         const std::size_t begin = static_cast<std::size_t>(real->off[i]);
         const std::size_t end = static_cast<std::size_t>(real->off[i + 1]);
         for (std::size_t k = begin; k < end; ++k) {
@@ -637,7 +597,7 @@ struct Operator {
           }
         }
       }
-    }
+    });
     for (int t = 0; t < nt; ++t) {
       const double *loc = acc + static_cast<std::size_t>(t) * n;
       for (std::size_t i = 0; i < n; ++i) {
@@ -663,19 +623,20 @@ struct Operator {
     }
     fact.assign(n * n, 0.0);
     const int cols = static_cast<int>(n);
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-    for (int j = 0; j < cols; ++j) {
+    const int nt = poolThreads();
+    forEachSlice(nt, [&](int slice) {
       g_fft_team = 1;
-      std::vector<double> basis(n, 0.0), column(n, 0.0);
-      basis[static_cast<std::size_t>(j)] = 1.0;
-      apply_one(basis.data(), column.data());
-      for (std::size_t i = 0; i < n; ++i) {
-        fact[i + n * static_cast<std::size_t>(j)] = column[i];
+      const Range run = partition(cols, slice, nt);
+      for (auto j = static_cast<int>(run.begin); j < static_cast<int>(run.end); ++j) {
+        std::vector<double> basis(n, 0.0), column(n, 0.0);
+        basis[static_cast<std::size_t>(j)] = 1.0;
+        apply_one(basis.data(), column.data());
+        for (std::size_t i = 0; i < n; ++i) {
+          fact[i + n * static_cast<std::size_t>(j)] = column[i];
+        }
       }
       g_fft_team = 0;
-    }
+    });
     ipiv.assign(n, 0);
     for (int k = 0; k < cols; ++k) {
       int piv = k;
@@ -1209,28 +1170,19 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
   std::vector<double> grad(3 * n, 0.0);
   std::vector<double> dedcn(n, 0.0);
   std::vector<double> dedq(n, 0.0);
-  int pair_nt = 1;
-#ifdef _OPENMP
-  pair_nt = std::max(1, omp_get_max_threads());
-#endif
+  const int pair_nt = poolThreads();
+  const auto natoms = static_cast<std::int64_t>(n);
   std::vector<std::vector<double>> pair_g(static_cast<std::size_t>(pair_nt), std::vector<double>(3 * n, 0.0));
   std::vector<std::vector<double>> pair_c(static_cast<std::size_t>(pair_nt), std::vector<double>(n, 0.0));
   std::vector<std::vector<double>> pair_q(static_cast<std::size_t>(pair_nt), std::vector<double>(n, 0.0));
   std::vector<double> pair_e(static_cast<std::size_t>(pair_nt), 0.0);
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-  for (std::size_t i = 0; i < n; ++i) {
-    const int tid =
-#ifdef _OPENMP
-        omp_get_thread_num();
-#else
-        0;
-#endif
-    double *const G = pair_g[static_cast<std::size_t>(tid)].data();
-    double *const C = pair_c[static_cast<std::size_t>(tid)].data();
-    double *const Q = pair_q[static_cast<std::size_t>(tid)].data();
-    double &eadd = pair_e[static_cast<std::size_t>(tid)];
+  forEachSlice(pair_nt, [&](int slice) {
+    double *const G = pair_g[static_cast<std::size_t>(slice)].data();
+    double *const C = pair_c[static_cast<std::size_t>(slice)].data();
+    double *const Q = pair_q[static_cast<std::size_t>(slice)].data();
+    double &eadd = pair_e[static_cast<std::size_t>(slice)];
+    const Range run = partition(natoms, slice, pair_nt);
+    for (auto i = static_cast<std::size_t>(run.begin); i < static_cast<std::size_t>(run.end); ++i) {
       for (const Nb &a : sh.of(i)) {
         if (a.j > static_cast<int>(i) || a.r >= cut2_b) {
           continue;
@@ -1272,7 +1224,8 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
           G[3 * a.j + 2] -= gz;
         }
       }
-  }
+    }
+  });
   for (int t = 0; t < pair_nt; ++t) {
     ene += pair_e[static_cast<std::size_t>(t)];
     const auto &lg = pair_g[static_cast<std::size_t>(t)];
@@ -1282,26 +1235,16 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
     for (std::size_t k = 0; k < n; ++k) { dedcn[k] += lc[k]; dedq[k] += lq[k]; }
   }
   if (param.s9 != 0.0) {
-    int atm_nt = 1;
-#ifdef _OPENMP
-    atm_nt = std::max(1, omp_get_max_threads());
-#endif
+    const int atm_nt = poolThreads();
     std::vector<std::vector<double>> atm_g(static_cast<std::size_t>(atm_nt), std::vector<double>(3 * n, 0.0));
     std::vector<std::vector<double>> atm_c(static_cast<std::size_t>(atm_nt), std::vector<double>(n, 0.0));
     std::vector<double> atm_e(static_cast<std::size_t>(atm_nt), 0.0);
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-    for (std::size_t i = 0; i < n; ++i) {
-      const int tid =
-#ifdef _OPENMP
-          omp_get_thread_num();
-#else
-          0;
-#endif
-      double *const G = atm_g[static_cast<std::size_t>(tid)].data();
-      double *const C = atm_c[static_cast<std::size_t>(tid)].data();
-      double &eadd = atm_e[static_cast<std::size_t>(tid)];
+    forEachSlice(atm_nt, [&](int slice) {
+      double *const G = atm_g[static_cast<std::size_t>(slice)].data();
+      double *const C = atm_c[static_cast<std::size_t>(slice)].data();
+      double &eadd = atm_e[static_cast<std::size_t>(slice)];
+      const Range run = partition(natoms, slice, atm_nt);
+      for (auto i = static_cast<std::size_t>(run.begin); i < static_cast<std::size_t>(run.end); ++i) {
         for (const Nb &a : sh.of(i)) {
           if (a.j > static_cast<int>(i) || a.r >= cut3_b) {
             continue;
@@ -1400,7 +1343,8 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
             G[3 * b.j + 2] += (gikz + gjkz) * triple;
           }
         }
-    }
+      }
+    });
     for (int t = 0; t < atm_nt; ++t) {
       ene += atm_e[static_cast<std::size_t>(t)];
       const auto &lg = atm_g[static_cast<std::size_t>(t)];
