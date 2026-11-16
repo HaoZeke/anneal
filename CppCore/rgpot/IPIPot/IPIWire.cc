@@ -86,10 +86,8 @@ int Deadline::remainingMs() const {
   if (left <= Clock::duration::zero()) {
     return 0;
   }
-  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(left).count();
-  if (ms <= 0) {
-    return 1;
-  }
+  // Rounded up, so poll() does not return before the deadline.
+  const auto ms = std::chrono::ceil<std::chrono::milliseconds>(left).count();
   if (ms > std::numeric_limits<int>::max()) {
     return std::numeric_limits<int>::max();
   }
