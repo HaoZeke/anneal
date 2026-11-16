@@ -1039,7 +1039,7 @@ def covalent_gfn2(audit: Audit) -> None:
     gfn2_revision_tables(audit, path, header, paper[-1][0] + 1, rows, crest)
 
 
-GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "C20": "c20"}
+GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "Si13": "si13", "C20": "c20"}
 # (system, anneal revision, Fisher p, Mann-Whitney p, its sample, sentence that prints them). The sample is
 # "calls", calls to the hit with a miss ranked after every hit, or "best", the best energies.
 GFN2_REVISION_TESTS = (
@@ -1048,6 +1048,8 @@ GFN2_REVISION_TESTS = (
     ("C10", "ce1e7a46", "0.0013", "2.6e-5", "calls", "CREST on 4 (Fisher p = 0.0013, Mann-Whitney p = 2.6e-5)"),
     ("C20", "5351f272", "1", "0.0004", "best",
      "CREST's on 134 of the 144 pairs of seeds (Mann-Whitney p = 0.0004 on the best energies)"),
+    ("Si13", "c1c02d16", "0.45", "0.005", "calls",
+     "CREST on four, in 95,213 to 143,630 (Fisher p = 0.45, Mann-Whitney p = 0.005, a miss ranked after every hit)"),
 )
 
 
