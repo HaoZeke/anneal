@@ -18,9 +18,10 @@ run:
 
 Rows already in ``--rows`` (same molecule, arm and seed) are left as they
 are. The summary and the tests are rebuilt from every row in the file:
-Fisher's exact test on hits and the Mann-Whitney U test on calls to hit,
-both two-sided, anneal against openconf in ``--stats`` and anneal against
-develop in ``--versus-develop``.
+Fisher's exact test on hits and the Mann-Whitney U test on calls to hit
+(normal approximation with the tie and continuity corrections at every
+sample size), both two-sided, anneal against openconf in ``--stats`` and
+anneal against develop in ``--versus-develop``.
 """
 
 from __future__ import annotations
@@ -262,7 +263,7 @@ def write_stats(path: Path, order: list[str], by: dict, other: str) -> None:
             co = [float(r["calls_to_hit"]) for r in o if r["calls_to_hit"] != ""]
             u = mw_p = None
             if ca and co:
-                test = mannwhitneyu(ca, co, alternative="two-sided")
+                test = mannwhitneyu(ca, co, alternative="two-sided", method="asymptotic", use_continuity=True)
                 u, mw_p = float(test.statistic), float(test.pvalue)
             writer.writerow(
                 {
