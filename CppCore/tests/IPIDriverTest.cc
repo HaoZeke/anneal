@@ -514,17 +514,20 @@ TEST_CASE("IPIDriver reports malformed messages", "[ipi_driver]") {
   CHECK(rec.calls == 0);
 }
 
+TEST_CASE("IPIDriver takes a close between messages as EXIT", "[ipi_driver]") {
+  Recorder rec;
+  auto server = FakeServer::unix_at(temp_socket("gone"));
+  rgpot::IPIDriver driver(config_for(server.address(), {1}), rec.evaluator());
+  DriverThread thread(driver);
+  server.accept();
+  REQUIRE(server.status() == "NEEDINIT");
+  server.hangup();
+  CHECK(thread.join().empty());
+  CHECK_FALSE(driver.connected());
+}
+
 TEST_CASE("IPIDriver reports a server that disconnects", "[ipi_driver]") {
   Recorder rec;
-  SECTION("between messages") {
-    auto server = FakeServer::unix_at(temp_socket("gone"));
-    rgpot::IPIDriver driver(config_for(server.address(), {1}), rec.evaluator());
-    DriverThread thread(driver);
-    server.accept();
-    REQUIRE(server.status() == "NEEDINIT");
-    server.hangup();
-    CHECK_THAT(thread.join(), ContainsSubstring("i-PI server disconnected"));
-  }
   SECTION("inside a header") {
     auto server = FakeServer::unix_at(temp_socket("half"));
     rgpot::IPIDriver driver(config_for(server.address(), {1}), rec.evaluator());

@@ -102,8 +102,11 @@ void failErrno(const char *who, const std::string &what) {
   fail(who, what + " (errno " + std::to_string(errno) + ")");
 }
 
-void waitFd(const Link &link, short event, const Deadline &deadline,
-            const char *what) {
+namespace {
+
+// False when hangup_ok and the peer has gone; throws otherwise.
+bool waitFdOrHangup(const Link &link, short event, const Deadline &deadline,
+                    const char *what, bool hangup_ok) {
   while (true) {
     if (deadline.expired()) {
       fail(link.who, std::string("timed out ") + what);
@@ -128,10 +131,20 @@ void waitFd(const Link &link, short event, const Deadline &deadline,
     // is the same disconnect; POLLIN still queued is handled by recv.
     if ((pfd.revents & POLLERR) != 0 ||
         ((pfd.revents & POLLHUP) != 0 && (pfd.revents & event) == 0)) {
+      if (hangup_ok) {
+        return false;
+      }
       fail(link.who, std::string(link.peer) + " disconnected");
     }
-    return;
+    return true;
   }
+}
+
+} // namespace
+
+void waitFd(const Link &link, short event, const Deadline &deadline,
+            const char *what) {
+  waitFdOrHangup(link, event, deadline, what, false);
 }
 
 void writeFull(const Link &link, const void *data, size_t n,
@@ -185,6 +198,33 @@ void readFull(const Link &link, void *data, size_t n,
     }
     got += static_cast<size_t>(rc);
   }
+}
+
+bool readFullOrEof(const Link &link, void *data, size_t n,
+                   const Deadline &deadline) {
+  const std::string what = std::string("reading from the ") + link.peer;
+  auto *bytes = static_cast<char *>(data);
+  ssize_t rc = 0;
+  while (true) {
+    if (!waitFdOrHangup(link, POLLIN, deadline, what.c_str(), true)) {
+      return false;
+    }
+    rc = ::recv(link.fd, bytes, n, 0);
+    if (rc > 0) {
+      break;
+    }
+    if (rc == 0 || errno == ECONNRESET) {
+      return false;
+    }
+    if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+      failErrno(link.who, what);
+    }
+  }
+  const auto got = static_cast<size_t>(rc);
+  if (got < n) {
+    readFull(link, bytes + got, n - got, deadline);
+  }
+  return true;
 }
 
 void setCloexec(int fd) {

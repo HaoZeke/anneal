@@ -75,6 +75,10 @@ void waitFd(const Link &link, short event, const Deadline &deadline,
 void writeFull(const Link &link, const void *data, size_t n,
                const Deadline &deadline);
 void readFull(const Link &link, void *data, size_t n, const Deadline &deadline);
+/// readFull, except that a peer that closes before the first byte returns
+/// false instead of throwing.
+bool readFullOrEof(const Link &link, void *data, size_t n,
+                   const Deadline &deadline);
 
 void setCloexec(int fd);
 void setNonblock(int fd);

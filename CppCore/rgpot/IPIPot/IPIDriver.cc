@@ -252,7 +252,12 @@ bool IPIDriver::step() {
                                 : Deadline::never();
   try {
     char got[kHeaderLen];
-    readFull(link, got, kHeaderLen, deadline);
+    // ASE's SocketIOCalculator closes without EXIT; its own client takes a
+    // close between messages as EXIT, and so does this one.
+    if (!readFullOrEof(link, got, kHeaderLen, deadline)) {
+      close();
+      return false;
+    }
     if (sameHeader(got, kStatus)) {
       const Header &reply = !m_initialised ? kNeedinit
                             : m_have_data  ? kHavedata

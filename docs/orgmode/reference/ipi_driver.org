@@ -79,6 +79,8 @@ Its atom count must equal the length of =species= on every message.
 =GETFORCE= gets =FORCEREADY=, the energy, the atom count and the forces.
 The virial and the extra string follow.
 =EXIT= closes the connection and ends =run()=.
+A server that closes between two messages ends it the same way.
+ASE's =SocketIOCalculator= closes like that, and ASE's own client agrees.
 
 ASE sends a singular cell (zero volume) for a cluster.
 The driver evaluates such a geometry in a cube at least 100 Angstrom wide.
@@ -125,9 +127,11 @@ bool step();
 - Inputs :: none.
 - Units :: =timeout_s= in seconds bounds the message.
 - Outputs :: true after a =STATUS=, =INIT=, =POSDATA= or =GETFORCE= message.
-  False after =EXIT=, which closes the connection.
+  False after =EXIT=, or when the server closes between messages.
+  Both close the connection.
 - Errors :: =std::runtime_error= when the driver is not connected.
-  The same on a timeout or a disconnect (=i-PI server disconnected=).
+  The same on a timeout.
+  The same on a disconnect inside a message (=i-PI server disconnected=).
   The same on an unexpected header.
   The same on an =INIT= string length outside 0 to 2^20.
   The same on a =POSDATA= atom count that differs from =species=.
@@ -301,6 +305,6 @@ It has one entry per atom, in the server's atom order.
 The tiling and open-box range is the potential's own cutoff when it has one.
 =LJ=, =Morse= and =SuttonChen= have one.
 For a kernel with a fixed range, =--cutoff= sets it.
-The exit code is 0 after =EXIT=.
+The exit code is 0 after =EXIT= or a close between messages.
 It is 2 for a usage error, an unknown potential or a bad species list.
 It is 1 when the connection or an evaluation fails.
