@@ -1221,7 +1221,9 @@ class RevisionIndex:
     the tips would list: those with a file pair, as ``git log --raw`` gives
     them, whose two sides hold the text a different number of times. One
     ``git grep -F`` over every blob of those pairs finds the blobs that hold
-    any text at all; only those are read and counted.
+    any text at all; only those are read and counted. When a configured diff
+    textconv driver applies to a path in that history, ``cites`` comes from
+    ``git log -S`` itself, once per text, and ``textconv`` names the paths.
     """
 
     def __init__(self, names: tuple[str, ...], texts: tuple[str, ...], tips: tuple[str, ...], patched: tuple[str, ...]) -> None:
@@ -1241,6 +1243,7 @@ class RevisionIndex:
                 pid, commit = line.split()
                 self.patch_ids[commit] = pid
         self.cites: dict[str, set[str]] = {t: set() for t in texts}
+        self.textconv: dict[str, str] = {}
         heads = sorted({self.commit[t] for t in tips if t in self.commit})
         if self.cites and heads:
             self.pickaxe(heads)
@@ -1255,7 +1258,30 @@ class RevisionIndex:
                 stack.extend(self.parents.get(commit, ()))
         return seen
 
+    def textconv_paths(self, heads: list[str]) -> dict[str, str]:
+        """Paths in the history of ``heads`` whose diff attribute names a driver with a textconv command.
+
+        git log -S counts a text in a path's textconv output, not in its blob,
+        so the blob counts of ``pickaxe`` do not hold for these paths.
+        """
+        config = git("config", "--null", "--get-regexp", r"^diff\..*\.textconv$").stdout
+        drivers = {entry.split("\n", 1)[0][len("diff."):-len(".textconv")] for entry in config.split("\0") if entry}
+        if not drivers:
+            return {}
+        listed = git("log", "--format=", "--name-only", "--no-renames", "-z", *heads).stdout
+        paths = sorted({p for p in listed.split("\0") if p})
+        out = git("check-attr", "-z", "--stdin", "diff", stdin="".join(f"{p}\0" for p in paths)).stdout.split("\0")
+        return {path: value for path, value in zip(out[0::3], out[2::3]) if value in drivers}
+
     def pickaxe(self, heads: list[str]) -> None:
+        self.textconv = self.textconv_paths(heads)
+        if self.textconv:
+            drivers = ", ".join(sorted(set(self.textconv.values())))
+            print(f"paper_audit: diff textconv driver {drivers} applies to {len(self.textconv)} paths; "
+                  "running git log -S once per revision", file=sys.stderr)
+            for text in self.cites:
+                self.cites[text] = set(git("log", "--format=%H", f"-S{text}", *heads).stdout.split())
+            return
         pairs: dict[str, list[tuple[str, str, str, str]]] = defaultdict(list)
         commit = ""
         for line in git("log", "--raw", "--no-abbrev", "--format=commit %H", *heads).stdout.splitlines():

@@ -308,6 +308,34 @@ def test_the_revision_index_answers_as_one_git_call_per_question(audited):
     assert sum(single[k] for k in single if k[-1] == "first") == len(table)
 
 
+@pytest.mark.parametrize(("driver", "attribute"), [(True, True), (True, False), (False, True)])
+def test_a_textconv_driver_sends_the_index_back_to_git_log(tmp_path, monkeypatch, driver, attribute):
+    text = "0123456789abcdef0123456789abcdef01234567"
+
+    def repo(*args):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null", *args],
+                              cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip()
+
+    repo("init", "-q")
+    if driver:
+        repo("config", "diff.swap.textconv", f"sed s/TOKEN/{text}/")
+    if attribute:
+        (tmp_path / ".gitattributes").write_text("*.txt diff=swap\n")
+    (tmp_path / "a.txt").write_text("nothing\n")
+    repo("add", "-A")
+    repo("commit", "-qm", "one")
+    (tmp_path / "a.txt").write_text("TOKEN\n")
+    repo("commit", "-qam", "two")
+    head = repo("rev-parse", "HEAD")
+    assert text not in repo("cat-file", "-p", "HEAD:a.txt")
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    index = audit_mod.RevisionIndex((), (text,), (head,), ())
+    assert index.textconv == ({"a.txt": "swap"} if driver and attribute else {})
+    assert index.cites[text] == set(repo("log", "--format=%H", f"-S{text}", head).split())
+    assert index.cites[text] == ({head} if driver and attribute else set())
+    assert index.first_cites(text, head) is (driver and attribute)
+
+
 @pytest.mark.parametrize(
     ("shown", "value", "ok"),
     [
