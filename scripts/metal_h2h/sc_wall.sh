@@ -2,10 +2,9 @@
 # Copyright (c) anneal developers
 # Where anneal's Sutton-Chen wall goes on sc126-55 and sc96-55.
 #
-# Builds rgpot's Sutton-Chen entry at the rgpot revision of Cargo.lock from
-# cargo's checkout, alone, with the neighbour list and SIMD sources it
-# needs. Then, in one UTS namespace with hostname bench, working directory
-# /work, one job at a time on core 0: anneal (h2h_sc of this HEAD) on seeds
+# Builds rgpot's Sutton-Chen entry with build_rgpot_sc.sh. Then, in one UTS
+# namespace with hostname bench, working directory /work, one job at a
+# time on core 0: anneal (h2h_sc of this HEAD) on seeds
 # 2000-2011 at 1000000 calls, and sc_wall_micro on the seed-2000 start of
 # each system. The harness must be committed, because its HEAD is the
 # harness_revision of every row.
@@ -24,21 +23,9 @@ if ! git -C "$ROOT" diff --quiet HEAD -- "${harness[@]}" ||
   exit 1
 fi
 
-rgpot_rev=$(sed -n 's|^source = "git+https://github.com/OmniPotentRPC/rgpot?rev=\([0-9a-f]*\)#.*|\1|p' \
-  "$ROOT/Cargo.lock" | sort -u)
-[[ $(wc -w <<< "$rgpot_rev") == 1 ]] || { echo "one rgpot revision expected in Cargo.lock" >&2; exit 1; }
-cargo_home=${CARGO_HOME:-$HOME/.cargo}
-src=$(ls -d "$cargo_home"/git/checkouts/rgpot-*/"${rgpot_rev:0:7}" | head -1)
-cpp=$src/CppCore
-
 bash "$HERE/build_sc.sh"
-mkdir -p "$LIBDIR" "$OUT" "$WORK/home" "$WORK/tmp"
-g++ -O3 -std=c++20 -fPIC -shared -DNDEBUG -w -I"$cpp" -I"$src/include" -o "$LIBDIR/librgpot.so" \
-  "$cpp/rgpot/SuttonChen/SuttonChenPot.cc" "$cpp"/rgpot/nlist/*.cc "$cpp"/rgpot/nlist/*.cpp \
-  "$cpp/rgpot/simd/exact_fma_hw.cc" "$cpp/rgpot/simd/exp.cc" -Wl,--no-undefined
-g++ -O3 -std=c++20 -DNDEBUG -w -I"$cpp" -I"$src/include" -o "$LIBDIR/sc_wall_micro" \
-  "$HERE/sc_wall_micro.cc" "$LIBDIR/librgpot.so" -ldl -Wl,-rpath,"$LIBDIR"
-printf '%s\n' "$rgpot_rev" > "$LIBDIR/rgpot-revision"
+bash "$HERE/build_rgpot_sc.sh"
+mkdir -p "$OUT" "$WORK/home" "$WORK/tmp"
 
 cat > "$WORK/bin/inside-sc-wall.sh" << EOF
 #!/bin/bash
