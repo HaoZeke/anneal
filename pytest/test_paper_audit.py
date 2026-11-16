@@ -189,6 +189,51 @@ def test_an_unnamed_gfn2_false_hit_is_reported():
     assert {"hits", "median calls", "best", "GFN2 paper Si10 Mann-Whitney p"} <= drifted
 
 
+SC_N12_ROWS = ("bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv")
+
+
+def aliased_audit(tmp_path, monkeypatch, edit):
+    table = (ROOT / audit_mod.ALIASES).read_text()
+    edited = tmp_path / "revision-aliases.csv"
+    edited.write_text(edit(table))
+    monkeypatch.setattr(audit_mod, "ALIASES", str(edited))
+    audit = audit_mod.Audit()
+    for path in SC_N12_ROWS:
+        audit.rows(path)
+    return audit, audit_mod.provenance(audit)
+
+
+def test_every_alias_is_verified_and_clears_the_sc_n12_rows(tmp_path, monkeypatch):
+    audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda table: table)
+    assert not audit.drifts()
+    assert len(audit.results) == 3 * 9
+    assert gaps == {}
+
+
+def test_an_alias_with_another_patch_id_is_reported(tmp_path, monkeypatch):
+    audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda t: t.replace("d4c75b4441714e8f", "d4c75b4441714e8e"))
+    assert {r[2] for r in audit.drifts()} == {"pushed_revision bc3e0cb1 has patch-id d4c75b44",
+                                               "branch_revision 6e425a39 has patch-id d4c75b44"}
+    assert gaps == {path: "revision f9d1ac05 is not in this repository" for path in SC_N12_ROWS}
+
+
+def test_an_alias_to_an_unknown_commit_is_reported(tmp_path, monkeypatch):
+    audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda t: t.replace("79ec1b7f16366d0c", "79ec1b7f16366d0d"))
+    assert {r[2] for r in audit.drifts()} == {"pushed_revision 79ec1b7f is in this repository",
+                                               "pushed_revision 79ec1b7f is on the remote",
+                                               "pushed_revision 79ec1b7f has patch-id debc2a84",
+                                               "rows commit ba7c3b45 sits on 79ec1b7f"}
+    assert gaps == {path: "revision a50f4b02 is not in this repository" for path in SC_N12_ROWS}
+
+
+def test_an_alias_whose_rows_commit_is_elsewhere_is_reported(tmp_path, monkeypatch):
+    audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda t: t.replace("dd9ef6f76ff8ec3adbc4495d401893d03d3bf916",
+                                                                             "ba7c3b45c0ddc9394156b1441519561555731e88", 1))
+    assert {r[2] for r in audit.drifts()} == {"rows commit ba7c3b45 sits on 016b6911",
+                                               "rows commit ba7c3b45 first cites 9149d1b0"}
+    assert gaps == {path: "revision 9149d1b0 is not in this repository" for path in SC_N12_ROWS}
+
+
 @pytest.mark.parametrize(
     ("shown", "value", "ok"),
     [

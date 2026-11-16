@@ -1,0 +1,13 @@
+# Harness revisions that committed rows cite but that were never pushed:
+# each was a local commit rebuilt with a new committer date on push. The
+# rows stay as written; scripts/paper_audit.py reads a cited revision that
+# is not in the repository as its pushed_revision when every check here
+# holds. pushed_revision is on develop and branch_revision is the same
+# commit on the branch that was pushed first; both have patch_id
+# (git patch-id --stable). rows_commit is the develop commit that first
+# wrote rows citing local_revision; its parent is pushed_revision, the
+# checkout the harness ran from.
+local_revision,pushed_revision,patch_id,branch,branch_revision,rows_commit
+9149d1b0c41d6412af3f9f09d90285db974ef259,016b6911faf00a1f0de0cc01745f5cffe4409c66,4275cca3ea8c829708b67e5704ace6d82e4864af,fix/gmin-sc,9a83bce73e465f4b96452522d7833b35d3d070d4,dd9ef6f76ff8ec3adbc4495d401893d03d3bf916
+f9d1ac05e286aba6107c1f881901f71896f6ae0d,bc3e0cb161d06a77eb46ba0043426139ab6a2295,d4c75b4441714e8f9fe573356c937dc7de499766,fix/gmin-sc2,6e425a39b307613d6ce6e2ab253c855bffbf55d1,1f9894c09c7e821324e0698a835c868434b29002
+a50f4b02f83ce58fb3f49d3e4de29de7cfda68b3,79ec1b7f16366d0c929b6a078e461f359b552169,debc2a84b7804f57421ff75f2b64820cdaeaab74,bench/gmin-sc3,9286c96b3c8776d0db2e03e8876f96bc6c0d275c,ba7c3b45c0ddc9394156b1441519561555731e88

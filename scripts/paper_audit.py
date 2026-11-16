@@ -13,8 +13,10 @@ read as exact, so a printed p of 1 cannot stand for 0.6.
 
 Every row file read here is checked for a code revision and a host. A file
 without them, or whose revision is not in this repository, must be listed in
-``KNOWN_GAPS``. Printed numbers no committed row backs are listed in
-``UNTRACED``; their text must still be where the list says.
+``KNOWN_GAPS``. A revision that was rebuilt on push is read through its alias
+in ``ALIASES`` once the pushed equivalent is verified. Printed numbers no
+committed row backs are listed in ``UNTRACED``; their text must still be where
+the list says.
 
     python3 scripts/paper_audit.py            # exit 1 on any drift
     python3 scripts/paper_audit.py --report   # also print every check
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import importlib.util
 import math
 import random
@@ -41,6 +44,8 @@ REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", 
 HOST_COLUMNS = ("host",)
 # Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
+# Local revisions that rows cite, each with the pushed commit it was rebuilt as.
+ALIASES = "bench/revision-aliases.csv"
 
 KNOWN_GAPS = {
     "data/sc96_78_hits.csv": "code_revision empty or unknown on some rows; harness_revision empty or unknown on some "
@@ -1184,14 +1189,74 @@ def provenance(audit: Audit) -> dict[str, str]:
         if problems:
             gaps[path] = "; ".join(problems)
     names = sorted(revisions)
-    out = subprocess.run(["git", "cat-file", "--batch-check"], input="".join(f"{n}^{{commit}}\n" for n in names),
-                         cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
-    for name, line in zip(names, out):
-        if line.endswith("missing"):
-            for path in revisions[name]:
-                note = f"revision {name[:8]} is not in this repository"
-                gaps[path] = f"{gaps[path]}; {note}" if path in gaps else note
+    aliases = verified_aliases(audit)
+    for name in (n for n in names if not commit_exists(n)):
+        if any(local.startswith(name) for local in aliases):
+            continue
+        for path in revisions[name]:
+            note = f"revision {name[:8]} is not in this repository"
+            gaps[path] = f"{gaps[path]}; {note}" if path in gaps else note
     return gaps
+
+
+def git(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=ROOT, input=stdin, capture_output=True, text=True, check=False)
+
+
+def commit_exists(revision: str) -> bool:
+    return git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+
+
+def on_github(revision: str) -> bool:
+    """The commit is reachable from a ref fetched from the remote."""
+    return bool(git("for-each-ref", "--count=1", "--contains", revision, "refs/remotes").stdout.strip())
+
+
+@functools.cache
+def patch_id(revision: str) -> str | None:
+    shown = git("show", revision)
+    if shown.returncode != 0:
+        return None
+    out = git("patch-id", "--stable", stdin=shown.stdout).stdout.split()
+    return out[0] if out else None
+
+
+@functools.cache
+def first_citation(text: str, revision: str) -> str | None:
+    """The oldest commit in the history of ``revision`` whose diff adds ``text``."""
+    out = git("log", "--reverse", "--format=%H", f"-S{text}", revision).stdout.split()
+    return out[0] if out else None
+
+
+def verified_aliases(audit: Audit) -> dict[str, str]:
+    """Local revisions of ALIASES whose pushed equivalent checks out, mapped to it.
+
+    Each alias is checked: the local revision is not in the repository; the
+    pushed and branch revisions are, are reachable from a remote ref, and have
+    the recorded patch-id; the rows commit is the first in its history to cite
+    the local revision and its parent is the pushed revision.
+    """
+    with (ROOT / ALIASES).open(newline="") as handle:
+        table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
+    verified = {}
+    for row in table:
+        local, pushed = row["local_revision"], row["pushed_revision"]
+        where = f"{ALIASES} {local[:8]}"
+        checks = [("local revision is not in this repository", not commit_exists(local))]
+        for column in ("pushed_revision", "branch_revision"):
+            revision = row[column]
+            checks.append((f"{column} {revision[:8]} is in this repository", commit_exists(revision)))
+            checks.append((f"{column} {revision[:8]} is on the remote", on_github(revision)))
+            checks.append((f"{column} {revision[:8]} has patch-id {row['patch_id'][:8]}", patch_id(revision) == row["patch_id"]))
+        rows_commit = row["rows_commit"]
+        parents = git("rev-parse", f"{rows_commit}^@").stdout.split()
+        checks.append((f"rows commit {rows_commit[:8]} sits on {pushed[:8]}", parents == [pushed]))
+        checks.append((f"rows commit {rows_commit[:8]} first cites {local[:8]}", first_citation(local, rows_commit) == rows_commit))
+        for label, ok in checks:
+            audit.record(ok, where, label, "holds", "holds" if ok else "fails")
+        if all(ok for _, ok in checks):
+            verified[local] = pushed
+    return verified
 
 
 def run(report: bool = False) -> int:

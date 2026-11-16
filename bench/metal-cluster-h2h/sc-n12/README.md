@@ -23,7 +23,9 @@ now has GMIN rows from the corrected file. The e3ed7dad GMIN rows are kept
 in `seeds.csv` and shown below next to their reruns. The anneal rows are
 not rerun. Each rerun starts from the anneal row's start files: the
 e3ed7dad and a50f4b02 builds of `h2h_sc` write the same bytes for every
-system and seed.
+system and seed. Harnesses f9d1ac05, 9149d1b0 and a50f4b02 were local
+commits, pushed as bc3e0cb1, 016b6911 and 79ec1b7f with the same patches;
+`bench/revision-aliases.csv` maps each to its pushed commit.
 
 | System | Arm | Harness | Hits | Calls median | Wall median (s) |
 |---|---|---|---|---|---|
