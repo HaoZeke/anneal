@@ -257,6 +257,21 @@ fn a_declared_floor_walls_a_species_free_search() {
     assert!(wall.refuses(pair(f64::NAN).view()));
 }
 
+#[test]
+fn declared_elements_raise_the_floor_to_their_covalent_fraction() {
+    let mut cfg = Config::for_cluster(2);
+    cfg.call_floor = Some(0.9);
+    cfg.call_floor_elements = Some(vec![14, 14]);
+    let wall = CallWall::of(&cfg);
+    let floor = crate::methods::cluster_hopping::element_call_floor(14, 14, 0.9);
+    assert!(wall.refuses(pair(1.2).view()));
+    assert!(wall.refuses(pair(floor).view()));
+    assert!(!wall.refuses(pair(floor + 1.0e-6).view()));
+    assert_eq!(wall.pair_floor(&wall.owners(2), 0, 1), floor);
+    cfg.call_floor_elements = Some(vec![1, 1]);
+    assert!(!CallWall::of(&cfg).refuses(pair(0.95).view()));
+}
+
 fn fixture(name: &str) -> (Vec<u32>, Array1<f64>) {
     let path = format!("{}/examples/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(path).unwrap();

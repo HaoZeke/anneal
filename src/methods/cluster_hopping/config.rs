@@ -1308,6 +1308,16 @@ pub struct Config {
     /// resolved JSON when unset, and unset on every stock preset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_floor: Option<f64>,
+    /// Atomic number of each point, read only by [`Self::call_floor`].
+    ///
+    /// Each pair's floor is then [`super::element_call_floor`], a fixed
+    /// fraction of its summed covalent radii, and never below
+    /// `call_floor`. Nothing else in the search reads these, so a cluster
+    /// of one element gets the floor without the moves and gates that
+    /// [`Self::species`] turns on. Absent from the resolved JSON when
+    /// unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_floor_elements: Option<Vec<u32>>,
     /// Cut the move library down to the uniform displacement alone: the
     /// control a Hamiltonian proposal is measured against, since the default
     /// library also carries moves that change a packing rather than displace
@@ -1950,6 +1960,7 @@ impl Config {
             pair_range: None,
             min_separation: LennardJonesPreset::MIN_SEPARATION * length_scale,
             call_floor: None,
+            call_floor_elements: None,
             displacement_only: false,
             superbasin_report: false,
             superbasin_escape: false,
