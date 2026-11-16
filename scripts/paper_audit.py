@@ -69,6 +69,9 @@ KNOWN_GAPS = {
     "bench/covalent-h2h/v2/seeds.csv": "no revision or host column",
     "bench/covalent-h2h/v3/seeds.csv": "no revision or host column",
     "bench/covalent-h2h/gfn2/seeds.csv": "no revision or host column",
+    "bench/covalent-h2h/gfn2/rows.csv": "revision e71e5de9 is not in this repository; revision f3d6a050 is not in "
+                                        "this repository",
+    "bench/covalent-h2h/gfn2/false-hits.csv": "no host column; revision f3d6a050 is not in this repository",
     "bench/ase-gofee-h2h/results.csv": "no host column; head empty or unknown on some rows; revision 0f988569 is not in "
                                        "this repository; revision 349523d3 is not in this repository; revision befbc3e8 "
                                        "is not in this repository; revision bf09f7a2 is not in this repository; revision "
@@ -932,31 +935,95 @@ def stale_claims(audit: Audit, paths: list[str] | None = None) -> None:
         audit.record(False, path, "historical sentence", sentence, "present")
 
 
-def covalent_gfn2(audit: Audit) -> None:
-    path = "bench/covalent-h2h/README.md"
-    rows = audit.rows("bench/covalent-h2h/gfn2/seeds.csv")
-    systems = {"Si10": "si10", "C10": "c10"}
-    codes = {"anneal G": "anneal-general", "CREST": "crest"}
-    groups = {}
-    for line, row in md_table(audit, path, "system | code | hits | median calls | IQR | best / eV"):
-        group = pick(rows, system=systems[row["system"]], code=codes[row["code"]])
-        groups[(row["system"], row["code"])] = group
+def gfn2_ranked(rows: list[dict[str, str]]) -> list[float]:
+    """Calls to the hit with a miss ranked after every hit, as gfn2_crest.py --summary ranks them."""
+    return [float(r["evals_to_hit"]) if hits_of([r]) else math.inf for r in rows]
+
+
+def gfn2_table(audit: Audit, path: str, rows: list[tuple[int, dict[str, str]]],
+               groups: dict[tuple[str, str], list[dict[str, str]]], per_call: str) -> None:
+    """``per_call`` "pooled" is summed time over summed calls; "median" is the median over runs that made a call."""
+    for line, row in rows:
+        group = groups[(row["system"], row["code"])]
         where = f"{path}:{line} {row['system']} {row['code']}"
         calls = [float(r["evals_to_hit"]) for r in group]
         charged = sum(float(r["charged"]) for r in group)
+
+        def time_per_call(column: str) -> float:
+            if per_call == "pooled":
+                return sum(float(r[column]) for r in group) / charged * 1e3
+            return median([float(r[column]) / float(r["charged"]) * 1e3 for r in group if float(r["charged"])])
+
         audit.cell(where, "hits", row["hits"], frac(group))
         audit.cell(where, "median calls", row["median calls"], median(calls))
         audit.cell(where, "IQR", row["IQR"], iqr(calls))
         audit.cell(where, "best", row["best / eV"], min(float(r["best"]) for r in group))
         audit.cell(where, "median wall", row["median wall / s"], median([float(r["wall_s"]) for r in group]))
-        audit.cell(where, "inside / call ms", row["inside / call"].split()[0], sum(float(r["pot_s"]) for r in group) / charged * 1e3)
-        audit.cell(where, "outside / call ms", row["outside / call"].split()[0], sum(float(r["outside_s"]) for r in group) / charged * 1e3)
-    for system, shown in (("Si10", "0.0044"), ("C10", "0.0005")):
-        a, c = groups[(system, "anneal G")], groups[(system, "CREST")]
-        p = mann_whitney([float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in c], continuity=True)
-        audit.cell(path, f"GFN2 {system} Mann-Whitney p", shown, p)
+        audit.cell(where, "inside / call ms", row["inside / call"].split()[0], time_per_call("pot_s"))
+        audit.cell(where, "outside / call ms", row["outside / call"].split()[0], time_per_call("outside_s"))
+
+
+def covalent_gfn2(audit: Audit) -> None:
+    """The GFN2 tables of the covalent README.
+
+    The first table takes anneal's rows from seeds.csv and CREST's from seeds.csv
+    and rows.csv. The paper's Si10 table takes anneal's rows of rows.csv at the
+    revision its code cell names, with each row false-hits.csv names counted as
+    a miss at its budget and given the energy of its geometry.
+    """
+    path = "bench/covalent-h2h/README.md"
+    header = "system | code | hits | median calls | IQR | best / eV"
+    seeds = audit.rows("bench/covalent-h2h/gfn2/seeds.csv")
+    rows = audit.rows("bench/covalent-h2h/gfn2/rows.csv")
+    named = {(r["system"], r["code"], r["code_revision"], r["seed"]): r
+             for r in audit.rows("bench/covalent-h2h/gfn2/false-hits.csv")}
+    systems = {"Si10": "si10", "C10": "c10"}
+
+    def crest(system: str) -> list[dict[str, str]]:
+        return pick(seeds, system=system, code="crest") + pick(rows, system=system, code="crest")
+
+    first = md_table(audit, path, header)
+    groups = {}
+    for _, row in first:
+        system = systems[row["system"]]
+        code = {"anneal G": "anneal-general", "CREST": "crest"}[row["code"]]
+        groups[(row["system"], row["code"])] = crest(system) if code == "crest" else pick(seeds, system=system, code=code)
+    gfn2_table(audit, path, first, groups, "pooled")
+    a, c = groups[("Si10", "anneal G")], groups[("Si10", "CREST")]
+    audit.cell(path, "GFN2 Si10 Fisher p", "1", fisher(hits_of(a), len(a), hits_of(c), len(c)))
+    audit.cell(path, "GFN2 Si10 Mann-Whitney p", "3.7e-5", mann_whitney(gfn2_ranked(a), gfn2_ranked(c), continuity=True))
+    audit.said(path, "CREST stops and CREST makes no call. Mann-Whitney p = 3.7e-5 over the twelve seeds of each code, "
+                     "a miss ranked after every hit")
     a, c = groups[("C10", "anneal G")], groups[("C10", "CREST")]
+    p = mann_whitney([float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in c], continuity=True)
+    audit.cell(path, "GFN2 C10 Mann-Whitney p", "0.0005", p)
     audit.cell(path, "GFN2 C10 Fisher p", "0.0094", fisher(hits_of(a), len(a), hits_of(c), len(c)))
+    audit.said(path, "CREST on 4 (Fisher p = 0.0094, Mann-Whitney p = 0.0005)")
+
+    paper = md_table(audit, path, header, after=first[-1][0] + 1)
+    revision = re.search(r"`([0-9a-f]{7,40})`", paper[0][1]["code"]).group(1)
+    recorded = [r for r in pick(rows, system="si10", code="anneal-general") if r["code_revision"].startswith(revision)]
+    counted = []
+    for r in recorded:
+        false_hit = named.get((r["system"], r["code"], r["code_revision"], r["seed"]))
+        counted.append(r if false_hit is None else dict(r, hit="false", evals_to_hit=r["budget"], best=false_hit["xtb_eV"]))
+    groups = {("Si10", paper[0][1]["code"]): counted, ("Si10", "CREST"): crest("si10")}
+    gfn2_table(audit, path, paper, groups, "median")
+    c = crest("si10")
+    audit.cell(path, "GFN2 paper Si10 Fisher p", "1", fisher(hits_of(counted), len(counted), hits_of(c), len(c)))
+    audit.cell(path, "GFN2 paper Si10 Mann-Whitney p", "5.3e-4",
+               mann_whitney(gfn2_ranked(counted), gfn2_ranked(c), continuity=True))
+    audit.said(path, "Mann-Whitney p = 5.3e-4 on calls to the hit, both misses ranked after every hit.")
+    calls = [float(r["evals_to_hit"]) for r in recorded]
+    audit.cell(path, "GFN2 Si10 recorded hits", "12/12", frac(recorded))
+    audit.cell(path, "GFN2 Si10 recorded median calls", "720.5", median(calls))
+    audit.cell(path, "GFN2 Si10 recorded IQR", "925", iqr(calls))
+    audit.cell(path, "GFN2 Si10 recorded Mann-Whitney p", "3.7e-5",
+               mann_whitney(gfn2_ranked(recorded), gfn2_ranked(c), continuity=True))
+    audit.said(path, "anneal has 12/12, median 720.5 calls and IQR 925, and CREST has Fisher p = 1 and Mann-Whitney p = 3.7e-5")
+    shown = [f"{int(r['evals_to_hit']):,}" for r in sorted(recorded, key=lambda r: int(r["seed"]))]
+    audit.said(path, f"Anneal takes {', '.join(shown[:9])}, {shown[9]} (the false hit), {shown[10]} and {shown[11]} "
+                     "calls on seeds 2000-2011")
 
 
 COVALENT_SYSTEMS = {"Si10": "sw10", "Si13": "sw13", "Si20": "sw20", "C10": "tc10", "C20": "tc20"}

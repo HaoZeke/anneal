@@ -170,6 +170,25 @@ def test_a_drifted_readme_p_value_is_reported():
     assert [(r[2], r[3]) for r in audit.drifts()] == [("Mann-Whitney p", "0.6429")]
 
 
+GFN2_README = "bench/covalent-h2h/README.md"
+
+
+def test_a_drifted_gfn2_paper_cell_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(GFN2_README)
+    audit.text_cache[GFN2_README] = text.replace("| 11/12 | 943.5 | 1,006 |", "| 11/12 | 944.5 | 1,006 |")
+    audit_mod.covalent_gfn2(audit)
+    assert [r[2] for r in audit.drifts()] == ["median calls"]
+
+
+def test_an_unnamed_gfn2_false_hit_is_reported():
+    audit = audit_mod.Audit()
+    audit.rows("bench/covalent-h2h/gfn2/false-hits.csv").clear()
+    audit_mod.covalent_gfn2(audit)
+    drifted = {r[2] for r in audit.drifts()}
+    assert {"hits", "median calls", "best", "GFN2 paper Si10 Mann-Whitney p"} <= drifted
+
+
 @pytest.mark.parametrize(
     ("shown", "value", "ok"),
     [
