@@ -116,7 +116,7 @@ capi_threads = executable(
     dependencies: thread_dep,
     link_language: 'cpp',
 )
-test('capi_threads', capi_threads, timeout: 60)
+test('capi_threads', capi_threads, kwargs: _rt_kw['capi_threads'])
 # A second binary built only with the thread sanitizer. b_sanitize is
 # already on every compile line, and -fsanitize=thread cannot be combined
 # with address or undefined. It is a test binary, so it follows
@@ -153,7 +153,12 @@ if (
         tsan_cmd = setarch
         tsan_args = ['-R', capi_tsan]
     endif
-    test('capi_threads_tsan', tsan_cmd, args: tsan_args, timeout: 120)
+    test(
+        'capi_threads_tsan',
+        tsan_cmd,
+        args: tsan_args,
+        kwargs: _rt_kw['capi_threads_tsan'],
+    )
 endif
 
 python3_engines = find_program('python3', required: false)
@@ -515,16 +520,16 @@ if get_option('with_tests')
         abi_script,
         args: [abi_fixture_so.full_path(), files('abi_fixture_hidden.txt')],
         depends: abi_fixture_so,
-        should_fail: true,
         timeout: 30,
+        kwargs: _rt_kw['abi_symbols_fixture_shared_hidden'],
     )
     test(
         'abi_symbols_fixture_archive_missing',
         abi_script,
         args: [abi_fixture_a.full_path(), abi_baselines],
         depends: abi_fixture_a,
-        should_fail: true,
         timeout: 30,
+        kwargs: _rt_kw['abi_symbols_fixture_archive_missing'],
     )
 endif
 

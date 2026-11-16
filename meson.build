@@ -985,18 +985,11 @@ if not get_option('with_python')
     install_headers('bind/include/rgbind/rgbind.hpp', subdir: 'rgbind')
 endif
 
-# Documentation against the source: reference entries, facts and code blocks
-# (static), then the run and compile blocks against this build.
+# The documentation's run and compile blocks against this build;
+# doccheck_static checks the rest against the source.
 _doc_python = find_program('python3', required: false)
 if get_option('with_tests') and _doc_python.found()
     _doccheck = files('docs/doccheck.py')
-    test(
-        'doccheck_static',
-        _doc_python,
-        args: [_doccheck, 'all', '--root', meson.project_source_root()],
-        suite: 'docs',
-        timeout: 120,
-    )
     # The C and C++ blocks are built with a cc driver (-fsyntax-only, -l,
     # -Wl,-rpath), and most run blocks link librgpot. Windows has cl.exe,
     # and rgpot.dll exports only rgpot_library_version, as for engines/.
@@ -1017,4 +1010,72 @@ if get_option('with_tests') and _doc_python.found()
             priority: -10,
         )
     endif
+endif
+
+# The py entries of CppCore/tests/registry.txt. @root@ is the source root
+# and @capnp@ the capnp compiler.
+_rt_python = find_program('python3', 'python')
+foreach _rt : _rt_tests
+    if _rt[1] != 'py'
+        continue
+    endif
+    _rt_args = []
+    foreach _arg : _rt[2]
+        if _rt_args.length() == 0
+            _rt_args += meson.project_source_root() / _arg
+        elif _arg == '@root@'
+            _rt_args += meson.project_source_root()
+        elif _arg == '@capnp@'
+            _rt_args += capnp.full_path()
+        else
+            _rt_args += _arg
+        endif
+    endforeach
+    test(_rt[0], _rt_python, args: _rt_args, kwargs: _rt_kw[_rt[0]])
+endforeach
+
+# Every test registered above against registry.txt, given the features
+# this configuration found.
+if get_option('with_tests') and _rt_atoms['python']
+    _rt_isa_variants = false
+    if is_variable('_isa_exes')
+        _rt_isa_variants = _isa_exes.length() > 0
+    endif
+    _rt_features = _rt_atoms + {
+        'cp2k': has_cp2k,
+        'mpi': _mpi_dep.found(),
+        'mpiexec': find_program('mpirun', 'mpiexec', required: false).found(),
+        'linux': host_system == 'linux',
+        'posix': host_system != 'windows',
+        'capnp': (
+            dependency('capnp', required: false).found()
+            and dependency('capnpc', required: false).found()
+        ),
+        'capnp_tool': find_program('capnp', required: false).found(),
+        'rustc': find_program('rustc', required: false).found(),
+        'tsan': (
+            cppc.has_argument('-fsanitize=thread')
+            and get_option('b_sanitize') == 'none'
+        ),
+        'isa_variants': _rt_isa_variants,
+        'toplevel': not meson.is_subproject(),
+        'xtb': has_xtb,
+        'xckernel': has_xckernel,
+        'expr': has_expr,
+        'skala': has_skala,
+    }
+    _rt_args = []
+    foreach _atom, _on : _rt_features
+        _rt_args += _atom + '=' + (_on ? '1' : '0')
+    endforeach
+    test(
+        'test_list_parity',
+        _rt_python,
+        args: [
+            files('CppCore/tests/check_test_registry.py'),
+            'meson',
+            meson.global_build_root(),
+        ] + _rt_args,
+        kwargs: _rt_kw['test_list_parity'],
+    )
 endif

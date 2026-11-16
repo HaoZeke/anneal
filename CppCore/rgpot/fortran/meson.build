@@ -200,76 +200,18 @@ rgpot_cuh2 = library(
 
 # Physics checks that run without the C++ stack: a failure here points at
 # the kernel, not the bindings.
-if get_option('with_tests')
-    test_sw_gather = executable(
-        'test_sw_gather',
-        'test_sw_gather.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranSWGather', test_sw_gather, timeout: 120)
-
-    test_cuh2_gather = executable(
-        'test_cuh2_gather',
-        'test_cuh2.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranCuH2Gather', test_cuh2_gather, timeout: 120)
-
-    test_eam_al = executable(
-        'test_eam_al',
-        'test_eam_al.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranEAMAlGather', test_eam_al, timeout: 120)
-
-    test_water_h = executable(
-        'test_water_h',
-        'test_water_h.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranWaterHGather', test_water_h, timeout: 120)
-
-    test_fehe = executable(
-        'test_fehe',
-        'test_fehe.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranFeHeGather', test_fehe, timeout: 120)
-
-    test_tersoff = executable(
-        'test_tersoff',
-        'test_tersoff.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranTersoffGather', test_tersoff, timeout: 180)
-
-    test_edip = executable(
-        'test_edip',
-        'test_edip.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranEDIPGather', test_edip, timeout: 180)
-
-    test_lenosky = executable(
-        'test_lenosky',
-        'test_lenosky.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranLenoskyGather', test_lenosky, timeout: 180)
-endif
+foreach _rt : _rt_tests
+    if _rt[1] == 'fortran'
+        test(
+            _rt[0],
+            executable(
+                _rt[2][0],
+                _rt[2][1],
+                dependencies: [fortran_kernels_dep],
+                fortran_args: _fpot_args,
+                install: false,
+            ),
+            kwargs: _rt_kw[_rt[0]],
+        )
+    endif
+endforeach

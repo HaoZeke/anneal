@@ -34,20 +34,6 @@ rgpot_effective_schema = custom_target(
     install: not meson.is_subproject(),
     install_dir: get_option('includedir') / 'rgpot' / 'rpc',
 )
-test(
-    'schema-ordinal-ledger-vendored',
-    python,
-    args: [schema_ledger, 'check', '--root', meson.project_source_root()],
-    suite: 'schema',
-)
-test(
-    'schema-ordinal-ledger-selftest',
-    python,
-    args: [
-        meson.project_source_root() / 'CppCore/tests/test_schema_ledger.py',
-    ],
-    suite: 'schema',
-)
 potentials_schema_proj = subproject('potentials-schema', required: false)
 if potentials_schema_proj.found()
     potentials_schema_canonical = potentials_schema_proj.get_variable(
