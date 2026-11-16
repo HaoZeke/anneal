@@ -881,6 +881,25 @@ explicit SuttonChenPot(const SuttonChenConfig &c);
 - Outputs :: the =rgpot::SuttonChenConfig= the instance was built with.
 - Errors :: none.
 
+*** =rgpot::SuttonChenPot::setPairTermLimit=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setPairTermLimit(std::size_t pairs) noexcept;
+#+end_src
+
+- Inputs :: =pairs=, the most pairs, summed over the threads of a call, whose
+  density-pass terms the force pass reads back.
+- Units :: none.
+- Outputs :: none.
+  A force call keeps =epsilon n (a/r)^n=, =m (a/r)^m= and =1/r^2= for each pair
+  the density pass accepts, 24 bytes a pair, and the force pass computes the
+  terms of the pairs past the limit again, with the same bits.
+  The room for a call follows the pairs the previous call saw, so a walk whose
+  pair count is not known in advance keeps its terms from the second call on.
+  The default keeps 32 MiB of terms, and 0 keeps none.
+- Errors :: none.
+
 *** =rgpot::EMTPot=
 
 #+attr_rgpot: signature

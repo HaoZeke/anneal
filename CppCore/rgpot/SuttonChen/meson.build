@@ -4,7 +4,9 @@ sutton_chen = static_library(
     'SuttonChenPot.cc',
     'SuttonChenScales.cc',
     dependencies: _deps,
-    cpp_args: _args,
+    # The force pass reads back terms the density pass rounded, and computes
+    # the rest again; fusing either into the force sum would split the bits.
+    cpp_args: _args + _fp_contract_off,
     include_directories: ['../../'],
     pic: true,
     install: false,

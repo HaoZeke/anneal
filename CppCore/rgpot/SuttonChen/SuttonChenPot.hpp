@@ -27,9 +27,12 @@
  */
 
 // clang-format off
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 // clang-format on
 #include "rgpot/Locality.hpp"
+#include "rgpot/PairTerms.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
@@ -145,15 +148,25 @@ public:
   /// Stored Verlet list or a streaming cell walk.
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 
+  /// Pairs, over all threads, whose density-pass powers the force pass
+  /// reads back. It computes the rest again, with the same bits. The
+  /// default keeps 32 MiB of terms.
+  void setPairTermLimit(std::size_t pairs) noexcept { term_limit_ = pairs; }
+
 private:
   static constexpr uint64_t kKernelVersion = 1;
+  using Terms = PairTerms<3>;
 
   void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
   SuttonChenConfig m_config;
   uint64_t m_paramsKey{0};
   nlist::Mode mode_ = nlist::Mode::Auto;
+  std::size_t term_limit_ = Terms::kDefaultLimit;
   mutable nlist::Neighbours neighbours_;
+  mutable std::vector<Terms> terms_;
+  mutable std::vector<double> rho_;
+  mutable std::vector<double> weight_;
 };
 
 } // namespace rgpot

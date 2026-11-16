@@ -46,6 +46,14 @@ With =cutoff = 0= the layer searches without a bound: it bins nothing, stores no
 list, and each pass takes the pairs straight from the coordinates, in the order
 of the one bin that a search wider than the cluster gives.
 One pass builds the densities and a second pass writes the forces.
+The density pass keeps the powers and =1/r^2= that the force of each pair takes,
+and the force pass reads them back instead of raising the distance to =n= and
+=m= again.
+With =a = 1= those are the density's own powers; otherwise the force's powers of
+=a^2 (1/r^2)= are kept, since they can differ from those of =a^2 / r^2= in the
+last bit.
+=SuttonChenPot::setPairTermLimit= bounds the store, 32 MiB by default, and the
+force pass computes the pairs past it again, with the same bits.
 
 =rgpot_sutton_chen_energy_forces= is the C entry point.
 It takes an =rgpot_sc_config= and writes one energy and one force array.
