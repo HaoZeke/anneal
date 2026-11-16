@@ -33,8 +33,9 @@ binary hashes, and a file with another header is refused, never
 rewritten. ``--history`` names earlier rows files, such as ``seeds.csv``,
 read alongside it. ``--summary`` appends one line per system and code over
 all of them, with Fisher's exact test on hits and a two-sided Mann-Whitney
-on calls to the hit, both against anneal; alone when no binaries are
-given.
+on calls to the hit, with a miss ranked after every hit, both against
+anneal; alone when no binaries are given. Time per call skips a run that
+made no call.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
 hit is an energy within ``HIT_TOL`` eV of the reference. This process
@@ -47,6 +48,7 @@ import argparse
 import csv
 import datetime
 import hashlib
+import math
 import os
 import random
 import re
@@ -393,8 +395,23 @@ def median(runs: list[dict], key: str) -> float:
     return type7([float(row[key]) for row in runs], 0.5)
 
 
-def per_call_ms(seconds: str, charged: str) -> float:
-    return float(seconds) / int(charged) * 1e3
+def per_call_ms(runs: list[dict], key: str) -> float:
+    """Median time per call over the runs that made a call."""
+    return type7(
+        [
+            float(row[key]) / int(row["charged"]) * 1e3
+            for row in runs
+            if int(row["charged"])
+        ],
+        0.5,
+    )
+
+
+def ranked_calls(runs: list[dict]) -> list[float]:
+    """Calls to the hit, with a miss ranked after every hit."""
+    return [
+        float(row["evals_to_hit"]) if row["hit"] == "true" else math.inf for row in runs
+    ]
 
 
 def summarise(paths: list[Path], summary: Path, revision: str, host: str) -> None:
@@ -434,17 +451,8 @@ def summarise(paths: list[Path], summary: Path, revision: str, host: str) -> Non
                 "median_wall_s": f"{median(runs, 'wall_s'):.3f}",
                 "median_pot_s": f"{median(runs, 'pot_s'):.3f}",
                 "median_outside_s": f"{median(runs, 'outside_s'):.3f}",
-                "inside_ms_per_call": "{:.4f}".format(
-                    type7(
-                        [per_call_ms(row["pot_s"], row["charged"]) for row in runs], 0.5
-                    )
-                ),
-                "outside_ms_per_call": "{:.4f}".format(
-                    type7(
-                        [per_call_ms(row["outside_s"], row["charged"]) for row in runs],
-                        0.5,
-                    )
-                ),
+                "inside_ms_per_call": f"{per_call_ms(runs, 'pot_s'):.4f}",
+                "outside_ms_per_call": f"{per_call_ms(runs, 'outside_s'):.4f}",
                 "fisher_p": "",
                 "mannwhitney_p": "",
                 "code_revision": revision,
@@ -458,9 +466,8 @@ def summarise(paths: list[Path], summary: Path, revision: str, host: str) -> Non
                     [anneal_hits, len(anneal) - anneal_hits],
                 ]
                 line["fisher_p"] = f"{fisher_exact(odds).pvalue:.6g}"
-                line["mannwhitney_p"] = "{:.6g}".format(
-                    two_sided_mw(evals, [float(row["evals_to_hit"]) for row in anneal])
-                )
+                mannwhitney = two_sided_mw(ranked_calls(runs), ranked_calls(anneal))
+                line["mannwhitney_p"] = f"{mannwhitney:.6g}"
             lines.append(line)
     append_rows(summary, SUMMARY_FIELDS, lines)
 
