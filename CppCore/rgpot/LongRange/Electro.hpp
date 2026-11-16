@@ -77,7 +77,8 @@ struct ElecOut {
 };
 
 // Last smooth particle-mesh evaluation. Times are microseconds.
-// Team sizes are the OpenMP teams that did the work, not a second pool.
+// Team sizes count the slices each phase split into. A shorter OpenMP
+// team runs the same slices on fewer threads.
 struct PmeTrace {
   double spread_us = 0;
   double fft_us = 0;
