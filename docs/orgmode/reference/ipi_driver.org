@@ -262,3 +262,45 @@ int main() {
   return 0;
 }
 #+end_src
+
+** The rgpot-ipi-driver program
+
+=engines/rgpot_ipi_driver.cpp= builds the =rgpot-ipi-driver= program.
+It is built with =-Dwith_ipi= and installed with the other engine programs.
+It wraps =IPIDriver= around any potential that =engines/pot_spec.hpp= builds.
+[[file:potential_names.org][Potential names and options]] lists the names.
+=--list= prints the names this build accepts.
+
+#+attr_rgpot: syntax a driver connects to a server that is already running
+#+begin_src bash
+rgpot-ipi-driver --pot "LJ u0 0.0104 psi 3.40 cutoff 8.5" --species 'Ar*108' -u -a rgpot
+rgpot-ipi-driver -m EAMCell --species-from start.xyz -a localhost -p 31415
+#+end_src
+
+| Flag                     | Meaning                                                |
+|--------------------------+--------------------------------------------------------|
+| =--pot SPEC=             | name and =key value= options in one string             |
+| =-m=, =--mode NAME=      | name only, as =i-pi-py_driver -m=                      |
+| =-o=, =--param LIST=     | =key=value= pairs separated by commas, for =-m=        |
+| =--list=                 | print the accepted names and exit                      |
+| =--species LIST=         | symbols or atomic numbers; =Sym*N= repeats             |
+| =--species-from FILE=    | symbols from an =.xyz=, =.extxyz= or eOn =.con= file   |
+| =-u=, =--unix=           | UNIX socket; =-a= is a name or an absolute path        |
+| =-a=, =--address=        | TCP host or UNIX name, default =localhost=             |
+| =-p=, =--port=           | TCP port, default 12345                                |
+| =-S=, =--sockets-prefix= | prefix of a UNIX name, default =/tmp/ipi_=             |
+| =--cutoff A=             | cutoff for a spec without one; tiling and box range    |
+| =--stress-step H=        | finite-difference virial for a stress-free potential   |
+| =--timeout S=            | seconds per message; 0, the default, waits forever     |
+| =--connect-timeout S=    | seconds to retry connecting, default 30                |
+| =--no-extras=            | empty extra string instead of JSON                     |
+| =-v=, =--verbose=        | connection, =INIT= and call count on stderr            |
+
+The species list is needed because the protocol carries no species.
+It has one entry per atom, in the server's atom order.
+The tiling and open-box range is the potential's own cutoff when it has one.
+=LJ=, =Morse= and =SuttonChen= have one.
+For a kernel with a fixed range, =--cutoff= sets it.
+The exit code is 0 after =EXIT=.
+It is 2 for a usage error, an unknown potential or a bad species list.
+It is 1 when the connection or an evaluation fails.

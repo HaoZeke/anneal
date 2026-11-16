@@ -44,6 +44,18 @@ rgpot_eval = executable(
     cpp_args: _args,
 )
 
+# i-PI driver client: answers an i-PI server with any pot_spec potential.
+if has_ipi
+    rgpot_ipi_driver = executable(
+        'rgpot-ipi-driver',
+        files('rgpot_ipi_driver.cpp'),
+        dependencies: pot_spec_dep,
+        link_with: rgpot,
+        cpp_args: _args,
+        install: not meson.is_subproject(),
+    )
+endif
+
 rgpot_lj = executable(
     'rgpot-lj',
     files('rgpot_lj.cpp'),
