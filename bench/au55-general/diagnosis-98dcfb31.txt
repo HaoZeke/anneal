@@ -1,0 +1,2044 @@
+== trace-2001.txt.gz
+best -191.00270211 gap 0.02815069 hops 22479 calls 1000000 best first held at 986210
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1428 0.90 0.44 0.32 0.24   0.4653   0.6749   0.8836     277  1212  -190.980017
+   100000   2399 0.85 0.42 0.53 0.05   0.3102   0.5362   0.7871     103  2007  -190.980017
+   200000   2219 0.82 0.42 0.52 0.06   0.3133   0.5203   0.7851     118  1766  -190.948714
+   300000   2319 0.75 0.46 0.48 0.06   0.2301   0.4000   0.6072     105  1702  -190.976926
+   400000   2333 0.70 0.43 0.51 0.06   0.2177   0.3595   0.5165      98  1610  -190.977377
+   500000   2289 0.79 0.43 0.51 0.06   0.3225   0.5304   0.7570     114  1789  -190.980017
+   600000   2328 0.70 0.39 0.55 0.06   0.2193   0.3599   0.5784     103  1618  -190.980017
+   700000   2358 0.69 0.40 0.54 0.06   0.2135   0.3570   0.5501     116  1613  -190.976926
+   800000   2427 0.73 0.41 0.53 0.06   0.2308   0.3745   0.5775     107  1718  -190.948714
+   900000   2378 0.81 0.42 0.52 0.06   0.3216   0.4921   0.6965     116  1853  -191.002702
+  1000000      1 1.00 0.00 0.00 1.00   1.4613   1.4613   1.4613       1     1  -190.245178
+arm                proposed accepted downhill
+dls-kernel             5870     3663      428
+single                 4813     4267       98
+soap                   4771     4187      109
+sym                    3772     3042      252
+surface                1744     1253       89
+burst                  1319      676       36
+all                     190      169        4
+actions {'prior-core': 1, 'orbit-completion': 277, 'stall-climb': 195}
+  hop 45 window ? stall-climb e -190.575879
+  hop 93 window ? stall-climb e -190.635515
+  hop 137 window ? stall-climb e -190.286213
+  hop 193 window ? stall-climb e -190.652963
+  hop 248 window ? stall-climb e -190.582928
+  hop 302 window ? stall-climb e -190.718346
+  hop 358 window ? stall-climb e -189.851797
+  hop 415 window ? stall-climb e -190.337672
+  hop 465 window ? stall-climb e -190.492280
+  hop 553 window ? stall-climb e -190.454342
+  hop 669 window ? stall-climb e -190.526607
+  hop 759 window ? stall-climb e -190.441475
+  hop 888 window ? stall-climb e -190.245394
+  hop 1008 window ? stall-climb e -189.650472
+  hop 1120 window ? stall-climb e -190.462468
+  hop 1230 window ? stall-climb e -190.088386
+  hop 1355 window ? stall-climb e -190.569857
+  hop 1476 window ? stall-climb e -190.259253
+  hop 1588 window ? stall-climb e -190.705431
+  hop 1716 window ? stall-climb e -190.498127
+  hop 1830 window ? stall-climb e -190.743167
+  hop 1950 window ? stall-climb e -190.779305
+  hop 2069 window ? stall-climb e -190.392036
+  hop 2197 window ? stall-climb e -190.779305
+  hop 2324 window ? stall-climb e -190.412491
+  hop 2415 window ? stall-climb e -190.654413
+  hop 2539 window ? stall-climb e -190.349492
+  hop 2675 window ? stall-climb e -190.339061
+  hop 2812 window ? stall-climb e -190.548610
+  hop 2931 window ? stall-climb e -190.559817
+  hop 3065 window ? stall-climb e -190.097499
+  hop 3184 window ? stall-climb e -190.611307
+  hop 3292 window ? stall-climb e -190.297314
+  hop 3440 window ? stall-climb e -190.279532
+  hop 3560 window ? stall-climb e -190.779305
+  hop 3679 window ? stall-climb e -190.768752
+  hop 3799 window ? stall-climb e -190.274176
+  hop 3928 window ? stall-climb e -190.771588
+  hop 4037 window ? stall-climb e -190.551794
+  hop 4158 window ? stall-climb e -190.227486
+  hop 4272 window ? stall-climb e -190.144647
+  hop 4389 window ? stall-climb e -189.887500
+  hop 4502 window ? stall-climb e -190.404078
+  hop 4621 window ? stall-climb e -190.323965
+  hop 4735 window ? stall-climb e -190.017359
+  hop 4862 window ? stall-climb e -190.492063
+  hop 4950 window ? stall-climb e -190.414808
+  hop 5057 window ? stall-climb e -190.443333
+  hop 5183 window ? stall-climb e -190.483202
+  hop 5303 window ? stall-climb e -190.668926
+  hop 5437 window ? stall-climb e -190.631811
+  hop 5560 window ? stall-climb e -190.544874
+  hop 5664 window ? stall-climb e -190.799805
+  hop 5794 window ? stall-climb e -190.779305
+  hop 5904 window ? stall-climb e -190.093192
+  hop 6013 window ? stall-climb e -190.588348
+  hop 6140 window ? stall-climb e -190.600090
+  hop 6242 window ? stall-climb e -190.815346
+  hop 6336 window ? stall-climb e -190.373648
+  hop 6438 window ? stall-climb e -190.948714
+  hop 6547 window ? stall-climb e -190.299256
+  hop 6675 window ? stall-climb e -190.161829
+  hop 6801 window ? stall-climb e -190.600687
+  hop 6942 window ? stall-climb e -190.910778
+  hop 7068 window ? stall-climb e -190.779305
+  hop 7196 window ? stall-climb e -190.399761
+  hop 7326 window ? stall-climb e -190.799805
+  hop 7442 window ? stall-climb e -190.597351
+  hop 7571 window ? stall-climb e -190.842966
+  hop 7691 window ? stall-climb e -190.629051
+  hop 7822 window ? stall-climb e -190.638708
+  hop 7923 window ? stall-climb e -190.663046
+  hop 8050 window ? stall-climb e -190.566007
+  hop 8169 window ? stall-climb e -190.720351
+  hop 8277 window ? stall-climb e -190.910778
+  hop 8390 window ? stall-climb e -190.770815
+  hop 8519 window ? stall-climb e -190.741197
+  hop 8646 window ? stall-climb e -190.603715
+  hop 8757 window ? stall-climb e -190.747173
+  hop 8883 window ? stall-climb e -190.779305
+  hop 9003 window ? stall-climb e -190.368730
+  hop 9118 window ? stall-climb e -190.779305
+  hop 9257 window ? stall-climb e -190.770313
+  hop 9375 window ? stall-climb e -190.774066
+  hop 9508 window ? stall-climb e -190.775411
+  hop 9630 window ? stall-climb e -190.762379
+  hop 9770 window ? stall-climb e -190.474817
+  hop 9902 window ? stall-climb e -190.814423
+  hop 10037 window ? stall-climb e -190.746805
+  hop 10150 window ? stall-climb e -190.508105
+  hop 10262 window ? stall-climb e -190.771588
+  hop 10372 window ? stall-climb e -190.815909
+  hop 10481 window ? stall-climb e -190.761447
+  hop 10588 window ? stall-climb e -190.761447
+  hop 10695 window ? stall-climb e -190.769600
+  hop 10811 window ? stall-climb e -190.668926
+  hop 10923 window ? stall-climb e -190.589169
+  hop 11049 window ? stall-climb e -190.525987
+  hop 11170 window ? stall-climb e -190.755044
+  hop 11289 window ? stall-climb e -190.943554
+  hop 11397 window ? stall-climb e -190.399565
+  hop 11527 window ? stall-climb e -190.777477
+  hop 11647 window ? stall-climb e -190.710500
+  hop 11740 window ? stall-climb e -190.411878
+  hop 11850 window ? stall-climb e -190.465047
+  hop 11958 window ? stall-climb e -190.453268
+  hop 12098 window ? stall-climb e -190.177921
+  hop 12217 window ? stall-climb e -190.095747
+  hop 12335 window ? stall-climb e -190.368568
+  hop 12448 window ? stall-climb e -190.458994
+  hop 12557 window ? stall-climb e -190.550992
+  hop 12679 window ? stall-climb e -190.528771
+  hop 12796 window ? stall-climb e -190.432757
+  hop 12928 window ? stall-climb e -190.375724
+  hop 13056 window ? stall-climb e -190.742248
+  hop 13183 window ? stall-climb e -190.820944
+  hop 13294 window ? stall-climb e -190.232722
+  hop 13413 window ? stall-climb e -190.347200
+  hop 13530 window ? stall-climb e -190.638708
+  hop 13630 window ? stall-climb e -190.948714
+  hop 13742 window ? stall-climb e -190.552693
+  hop 13868 window ? stall-climb e -189.859479
+  hop 13995 window ? stall-climb e -190.704625
+  hop 14095 window ? stall-climb e -190.553693
+  hop 14214 window ? stall-climb e -190.587251
+  hop 14338 window ? stall-climb e -190.637121
+  hop 14466 window ? stall-climb e -190.076585
+  hop 14594 window ? stall-climb e -190.855914
+  hop 14724 window ? stall-climb e -190.761447
+  hop 14842 window ? stall-climb e -190.749302
+  hop 14958 window ? stall-climb e -190.622739
+  hop 15076 window ? stall-climb e -190.634442
+  hop 15190 window ? stall-climb e -190.948714
+  hop 15316 window ? stall-climb e -190.621141
+  hop 15422 window ? stall-climb e -190.692522
+  hop 15556 window ? stall-climb e -190.378219
+  hop 15676 window ? stall-climb e -190.735900
+  hop 15787 window ? stall-climb e -190.910778
+  hop 15915 window ? stall-climb e -190.720351
+  hop 16024 window ? stall-climb e -190.455673
+  hop 16140 window ? stall-climb e -189.734408
+  hop 16275 window ? stall-climb e -190.595629
+  hop 16407 window ? stall-climb e -190.548560
+  hop 16527 window ? stall-climb e -190.779305
+  hop 16649 window ? stall-climb e -189.900881
+  hop 16781 window ? stall-climb e -190.702527
+  hop 16900 window ? stall-climb e -190.768752
+  hop 17014 window ? stall-climb e -190.572539
+  hop 17140 window ? stall-climb e -190.399605
+  hop 17251 window ? stall-climb e -190.632355
+  hop 17376 window ? stall-climb e -190.948714
+  hop 17477 window ? stall-climb e -190.247791
+  hop 17602 window ? stall-climb e -190.486411
+  hop 17717 window ? stall-climb e -190.768752
+  hop 17835 window ? stall-climb e -190.421257
+  hop 17955 window ? stall-climb e -190.948714
+  hop 18084 window ? stall-climb e -190.779305
+  hop 18212 window ? stall-climb e -190.223117
+  hop 18348 window ? stall-climb e -190.842966
+  hop 18469 window ? stall-climb e -190.654045
+  hop 18596 window ? stall-climb e -190.738607
+  hop 18729 window ? stall-climb e -190.653149
+  hop 18847 window ? stall-climb e -190.622254
+  hop 18967 window ? stall-climb e -190.851283
+  hop 19087 window ? stall-climb e -190.806220
+  hop 19217 window ? stall-climb e -190.511226
+  hop 19351 window ? stall-climb e -190.609658
+  hop 19459 window ? stall-climb e -190.484440
+  hop 19579 window ? stall-climb e -190.977377
+  hop 19710 window ? stall-climb e -190.820944
+  hop 19824 window ? stall-climb e -190.842966
+  hop 19965 window ? stall-climb e -190.328296
+  hop 20079 window ? stall-climb e -190.389895
+  hop 20205 window ? stall-climb e -190.691651
+  hop 20338 window ? stall-climb e -190.189648
+  hop 20464 window ? stall-climb e -190.466942
+  hop 20575 window ? stall-climb e -190.415985
+  hop 20707 window ? stall-climb e -190.425587
+  hop 20834 window ? stall-climb e -190.137860
+  hop 20955 window ? stall-climb e -190.550092
+  hop 21095 window ? stall-climb e -190.601416
+  hop 21231 window ? stall-climb e -190.563579
+  hop 21356 window ? stall-climb e -190.523140
+  hop 21480 window ? stall-climb e -190.526445
+  hop 21592 window ? stall-climb e -190.779305
+  hop 21726 window ? stall-climb e -190.762379
+  hop 21829 window ? stall-climb e -190.053139
+  hop 21946 window ? stall-climb e -190.272733
+  hop 22060 window ? stall-climb e -190.412430
+  hop 22169 window ? stall-climb e -190.473852
+  hop 22282 window ? stall-climb e -190.162733
+  hop 22403 window ? stall-climb e -190.578532
+  hop 22501 window ? stall-climb e -190.128473
+  hop 22781 window ? stall-climb e -190.491687
+  hop 22890 window ? stall-climb e -190.681041
+records
+  hop 5 e -190.779305 arm surface
+  hop 47 e -190.915719 arm dls-kernel
+  hop 480 e -190.976926 arm dls-kernel
+  hop 568 e -190.980017 arm dls-kernel
+  hop 22619 e -191.002702 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.492063 35
+  -190.779305 33
+  -190.842966 26
+  -190.815346 24
+  -190.915719 22
+  -190.842305 19
+  -190.910778 18
+  -190.886644 16
+after the final best: hops 346 acceptance 0.803 median gap 0.3276 distinct stood 242 fraction within 0.05 0.104
+== trace-2002.txt.gz
+best -191.00616498 gap 0.02468782 hops 20048 calls 1000000 best first held at 157634
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1509 0.90 0.44 0.33 0.23   0.4021   0.6267   0.8280     307  1292  -190.977377
+   100000   1370 0.85 0.41 0.52 0.07   0.2923   0.4538   0.6618      85  1108  -191.006165
+   200000    744 0.89 0.45 0.50 0.05   0.3417   0.5525   0.7503      33   620  -191.002702
+   300000   2360 0.80 0.42 0.52 0.06   0.2623   0.4987   0.7605     123  1865  -190.948714
+   400000   2386 0.82 0.46 0.49 0.06   0.2971   0.4899   0.6998     110  1930  -190.976926
+   500000   2349 0.79 0.41 0.53 0.06   0.3184   0.5455   0.7689     120  1841  -190.948714
+   600000   2318 0.80 0.44 0.50 0.06   0.2915   0.5596   0.8374     118  1834  -190.948714
+   700000   2343 0.73 0.42 0.52 0.06   0.2897   0.4372   0.5976     101  1685  -190.980017
+   800000   2398 0.79 0.40 0.54 0.06   0.3313   0.5104   0.7235     131  1831  -190.948714
+   900000   2270 0.83 0.42 0.52 0.06   0.3729   0.5730   0.8003     120  1815  -190.977377
+  1000000      1 1.00 0.00 1.00 0.00   1.0096   1.0096   1.0096       0     1  nan
+arm                proposed accepted downhill
+dls-kernel             5152     3683      433
+soap                   4218     3833       90
+single                 4134     3842       89
+sym                    3360     2753      192
+surface                1531     1148       70
+burst                  1482      784       46
+all                     171      161        2
+actions {'prior-core': 1, 'orbit-completion': 229, 'stall-climb': 175}
+  hop 103 window ? stall-climb e -189.910255
+  hop 142 window ? stall-climb e -190.392762
+  hop 215 window ? stall-climb e -190.541484
+  hop 272 window ? stall-climb e -190.176528
+  hop 318 window ? stall-climb e -190.554736
+  hop 357 window ? stall-climb e -190.611324
+  hop 399 window ? stall-climb e -190.486665
+  hop 443 window ? stall-climb e -190.427227
+  hop 487 window ? stall-climb e -190.595713
+  hop 529 window ? stall-climb e -190.228428
+  hop 600 window ? stall-climb e -190.087637
+  hop 729 window ? stall-climb e -190.299512
+  hop 880 window ? stall-climb e -190.780917
+  hop 968 window ? stall-climb e -190.165264
+  hop 1082 window ? stall-climb e -190.413146
+  hop 1218 window ? stall-climb e -190.236185
+  hop 1358 window ? stall-climb e -190.354595
+  hop 1492 window ? stall-climb e -190.000124
+  hop 1621 window ? stall-climb e -190.143019
+  hop 1756 window ? stall-climb e -190.735953
+  hop 1902 window ? stall-climb e -190.425992
+  hop 2013 window ? stall-climb e -190.059002
+  hop 2139 window ? stall-climb e -190.635380
+  hop 2398 window ? stall-climb e -190.580925
+  hop 2482 window ? stall-climb e -189.823458
+  hop 2610 window ? stall-climb e -190.158238
+  hop 2743 window ? stall-climb e -190.609496
+  hop 2866 window ? stall-climb e -190.259707
+  hop 2958 window ? stall-climb e -190.631202
+  hop 2960 window ? stall-climb e -190.810204
+  hop 2962 window ? stall-climb e -190.810204
+  hop 3111 window ? stall-climb e -190.640809
+  hop 3257 window ? stall-climb e -190.616638
+  hop 3398 window ? stall-climb e -190.523676
+  hop 3506 window ? stall-climb e -190.388260
+  hop 3620 window ? stall-climb e -190.545386
+  hop 3746 window ? stall-climb e -190.659186
+  hop 3866 window ? stall-climb e -190.948714
+  hop 3972 window ? stall-climb e -190.768752
+  hop 4100 window ? stall-climb e -190.541613
+  hop 4227 window ? stall-climb e -190.087722
+  hop 4345 window ? stall-climb e -190.275545
+  hop 4479 window ? stall-climb e -190.296388
+  hop 4595 window ? stall-climb e -190.613656
+  hop 4698 window ? stall-climb e -190.770815
+  hop 4819 window ? stall-climb e -190.111098
+  hop 4943 window ? stall-climb e -190.880692
+  hop 5050 window ? stall-climb e -190.042137
+  hop 5154 window ? stall-climb e -189.761425
+  hop 5299 window ? stall-climb e -190.118501
+  hop 5432 window ? stall-climb e -190.291399
+  hop 5559 window ? stall-climb e -190.405914
+  hop 5670 window ? stall-climb e -190.180167
+  hop 5799 window ? stall-climb e -190.589134
+  hop 5931 window ? stall-climb e -190.382992
+  hop 6039 window ? stall-climb e -190.553450
+  hop 6162 window ? stall-climb e -190.770969
+  hop 6264 window ? stall-climb e -190.425904
+  hop 6397 window ? stall-climb e -190.694023
+  hop 6499 window ? stall-climb e -190.374242
+  hop 6623 window ? stall-climb e -189.861172
+  hop 6756 window ? stall-climb e -190.472938
+  hop 6892 window ? stall-climb e -189.794779
+  hop 7016 window ? stall-climb e -190.407521
+  hop 7148 window ? stall-climb e -190.482805
+  hop 7274 window ? stall-climb e -190.320116
+  hop 7405 window ? stall-climb e -190.827664
+  hop 7532 window ? stall-climb e -190.022033
+  hop 7635 window ? stall-climb e -190.450616
+  hop 7754 window ? stall-climb e -190.635603
+  hop 7867 window ? stall-climb e -190.339306
+  hop 7997 window ? stall-climb e -190.726446
+  hop 8129 window ? stall-climb e -189.851593
+  hop 8246 window ? stall-climb e -190.510450
+  hop 8373 window ? stall-climb e -190.141068
+  hop 8500 window ? stall-climb e -190.976926
+  hop 8632 window ? stall-climb e -190.683696
+  hop 8755 window ? stall-climb e -190.936096
+  hop 8873 window ? stall-climb e -190.780917
+  hop 9001 window ? stall-climb e -190.573426
+  hop 9115 window ? stall-climb e -190.814423
+  hop 9235 window ? stall-climb e -190.438872
+  hop 9354 window ? stall-climb e -190.219664
+  hop 9474 window ? stall-climb e -190.306553
+  hop 9576 window ? stall-climb e -190.540863
+  hop 9690 window ? stall-climb e -189.952269
+  hop 9818 window ? stall-climb e -189.937337
+  hop 9941 window ? stall-climb e -190.515471
+  hop 10057 window ? stall-climb e -190.533623
+  hop 10181 window ? stall-climb e -190.370382
+  hop 10315 window ? stall-climb e -190.331637
+  hop 10416 window ? stall-climb e -190.308664
+  hop 10551 window ? stall-climb e -190.350735
+  hop 10672 window ? stall-climb e -190.910778
+  hop 10802 window ? stall-climb e -190.779305
+  hop 10904 window ? stall-climb e -189.931724
+  hop 11013 window ? stall-climb e -190.281715
+  hop 11138 window ? stall-climb e -190.616251
+  hop 11268 window ? stall-climb e -190.009936
+  hop 11393 window ? stall-climb e -190.779305
+  hop 11513 window ? stall-climb e -190.779305
+  hop 11621 window ? stall-climb e -190.779305
+  hop 11744 window ? stall-climb e -190.438414
+  hop 11869 window ? stall-climb e -190.730883
+  hop 11999 window ? stall-climb e -190.531633
+  hop 12099 window ? stall-climb e -190.799805
+  hop 12208 window ? stall-climb e -190.409351
+  hop 12340 window ? stall-climb e -190.129942
+  hop 12442 window ? stall-climb e -190.357059
+  hop 12574 window ? stall-climb e -190.033608
+  hop 12697 window ? stall-climb e -190.544931
+  hop 12811 window ? stall-climb e -190.627702
+  hop 12931 window ? stall-climb e -189.943656
+  hop 13052 window ? stall-climb e -189.845921
+  hop 13152 window ? stall-climb e -190.427585
+  hop 13275 window ? stall-climb e -190.371060
+  hop 13416 window ? stall-climb e -190.585400
+  hop 13539 window ? stall-climb e -190.408648
+  hop 13662 window ? stall-climb e -190.667394
+  hop 13784 window ? stall-climb e -190.814423
+  hop 13918 window ? stall-climb e -190.842966
+  hop 14035 window ? stall-climb e -190.786856
+  hop 14147 window ? stall-climb e -189.960166
+  hop 14250 window ? stall-climb e -190.437250
+  hop 14366 window ? stall-climb e -190.613728
+  hop 14485 window ? stall-climb e -190.475270
+  hop 14605 window ? stall-climb e -190.553189
+  hop 14721 window ? stall-climb e -190.468507
+  hop 14834 window ? stall-climb e -190.539408
+  hop 14962 window ? stall-climb e -190.530667
+  hop 15080 window ? stall-climb e -190.704625
+  hop 15220 window ? stall-climb e -190.842966
+  hop 15345 window ? stall-climb e -190.766096
+  hop 15456 window ? stall-climb e -190.740046
+  hop 15549 window ? stall-climb e -190.060833
+  hop 15675 window ? stall-climb e -190.404740
+  hop 15808 window ? stall-climb e -190.592124
+  hop 15927 window ? stall-climb e -190.577279
+  hop 16047 window ? stall-climb e -190.669956
+  hop 16183 window ? stall-climb e -190.421182
+  hop 16301 window ? stall-climb e -190.761447
+  hop 16414 window ? stall-climb e -190.779305
+  hop 16541 window ? stall-climb e -190.741328
+  hop 16644 window ? stall-climb e -190.815909
+  hop 16749 window ? stall-climb e -190.842966
+  hop 16864 window ? stall-climb e -190.755044
+  hop 16985 window ? stall-climb e -190.770815
+  hop 17079 window ? stall-climb e -190.257809
+  hop 17195 window ? stall-climb e -190.278295
+  hop 17318 window ? stall-climb e -190.624030
+  hop 17456 window ? stall-climb e -190.489790
+  hop 17593 window ? stall-climb e -190.620332
+  hop 17724 window ? stall-climb e -190.275145
+  hop 17865 window ? stall-climb e -189.914714
+  hop 18001 window ? stall-climb e -190.252314
+  hop 18122 window ? stall-climb e -190.556067
+  hop 18243 window ? stall-climb e -190.459799
+  hop 18373 window ? stall-climb e -190.403145
+  hop 18483 window ? stall-climb e -190.543462
+  hop 18608 window ? stall-climb e -190.196576
+  hop 18739 window ? stall-climb e -190.777483
+  hop 18839 window ? stall-climb e -190.557744
+  hop 18967 window ? stall-climb e -189.711089
+  hop 19101 window ? stall-climb e -190.315884
+  hop 19217 window ? stall-climb e -190.492063
+  hop 19304 window ? stall-climb e -190.301716
+  hop 19406 window ? stall-climb e -190.714635
+  hop 19531 window ? stall-climb e -190.640970
+  hop 19659 window ? stall-climb e -190.645888
+  hop 19785 window ? stall-climb e -190.720351
+  hop 19907 window ? stall-climb e -190.103112
+  hop 20033 window ? stall-climb e -190.948714
+  hop 20154 window ? stall-climb e -190.633578
+  hop 20281 window ? stall-climb e -190.725052
+  hop 20384 window ? stall-climb e -190.199565
+records
+  hop 1 e -190.779305 arm burst
+  hop 36 e -190.948714 arm surface
+  hop 742 e -190.977377 arm single
+  hop 2256 e -190.980017 arm surface
+  hop 2955 e -191.006165 arm soap
+most occupied minima (energy, hops)
+  -190.492063 33
+  -190.779305 27
+  -190.528423 21
+  -190.842966 21
+  -190.680091 16
+  -190.910778 14
+  -190.769036 14
+  -190.595627 14
+after the final best: hops 17171 acceptance 0.797 median gap 0.5141 distinct stood 13252 fraction within 0.05 0.006
+== trace-2003.txt.gz
+best -191.00616498 gap 0.02468782 hops 22568 calls 999874 best first held at 178575
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1374 0.87 0.42 0.33 0.26   0.2240   0.4531   0.7247     274  1105  -190.951987
+   100000   2358 0.81 0.49 0.45 0.06   0.1801   0.2789   0.4969      91  1519  -191.006165
+   200000   2387 0.77 0.43 0.51 0.05   0.2476   0.4114   0.6613     111  1832  -190.980017
+   300000   2339 0.82 0.43 0.51 0.06   0.3362   0.5257   0.7706     126  1878  -190.948714
+   400000   2390 0.76 0.45 0.50 0.06   0.2461   0.4227   0.7127      98  1782  -190.980017
+   500000   2297 0.71 0.41 0.53 0.06   0.2739   0.4261   0.6256     104  1613  -190.948714
+   600000   2419 0.78 0.45 0.50 0.05   0.3569   0.5232   0.7652     113  1857  -190.948714
+   700000   2319 0.70 0.41 0.53 0.06   0.2713   0.4171   0.6003     100  1597  -190.948714
+   800000   2326 0.71 0.43 0.51 0.06   0.2765   0.4666   0.7132     108  1631  -190.951987
+   900000   2359 0.75 0.40 0.54 0.06   0.3098   0.4948   0.6714     123  1759  -190.980017
+arm                proposed accepted downhill
+dls-kernel             5989     3761      485
+single                 5026     4427      106
+soap                   4799     4158       93
+sym                    3661     2929      224
+burst                  1498      751       42
+surface                1403     1002       61
+all                     192      169        2
+actions {'prior-core': 1, 'orbit-completion': 348, 'stall-climb': 196}
+  hop 68 window ? stall-climb e -189.949748
+  hop 97 window ? stall-climb e -190.099626
+  hop 145 window ? stall-climb e -190.320091
+  hop 194 window ? stall-climb e -190.317605
+  hop 243 window ? stall-climb e -190.548332
+  hop 293 window ? stall-climb e -190.631811
+  hop 340 window ? stall-climb e -190.708704
+  hop 383 window ? stall-climb e -190.913850
+  hop 422 window ? stall-climb e -190.584143
+  hop 479 window ? stall-climb e -190.589185
+  hop 522 window ? stall-climb e -190.451406
+  hop 570 window ? stall-climb e -190.395205
+  hop 680 window ? stall-climb e -190.223825
+  hop 819 window ? stall-climb e -190.800594
+  hop 956 window ? stall-climb e -189.553490
+  hop 1090 window ? stall-climb e -190.110534
+  hop 1189 window ? stall-climb e -190.080929
+  hop 1319 window ? stall-climb e -190.779305
+  hop 1544 window ? stall-climb e -190.768752
+  hop 1617 window ? stall-climb e -190.552383
+  hop 1735 window ? stall-climb e -190.547141
+  hop 1856 window ? stall-climb e -190.948714
+  hop 1980 window ? stall-climb e -190.631272
+  hop 2118 window ? stall-climb e -190.625685
+  hop 2252 window ? stall-climb e -190.654577
+  hop 2440 window ? stall-climb e -190.946856
+  hop 2549 window ? stall-climb e -190.263803
+  hop 2699 window ? stall-climb e -190.619806
+  hop 2837 window ? stall-climb e -189.878366
+  hop 2961 window ? stall-climb e -190.567134
+  hop 3084 window ? stall-climb e -190.789891
+  hop 3217 window ? stall-climb e -190.789891
+  hop 3351 window ? stall-climb e -190.789891
+  hop 3548 window ? stall-climb e -189.851458
+  hop 3676 window ? stall-climb e -190.665683
+  hop 3780 window ? stall-climb e -190.613221
+  hop 3900 window ? stall-climb e -190.779305
+  hop 4026 window ? stall-climb e -190.201203
+  hop 4148 window ? stall-climb e -190.770969
+  hop 4275 window ? stall-climb e -190.910778
+  hop 4406 window ? stall-climb e -190.787327
+  hop 4524 window ? stall-climb e -190.549352
+  hop 4668 window ? stall-climb e -190.318357
+  hop 4792 window ? stall-climb e -190.516098
+  hop 4914 window ? stall-climb e -190.001893
+  hop 5042 window ? stall-climb e -190.948714
+  hop 5159 window ? stall-climb e -190.539685
+  hop 5272 window ? stall-climb e -190.820944
+  hop 5387 window ? stall-climb e -190.827664
+  hop 5501 window ? stall-climb e -190.544874
+  hop 5617 window ? stall-climb e -190.276774
+  hop 5735 window ? stall-climb e -190.272076
+  hop 5864 window ? stall-climb e -190.772285
+  hop 5986 window ? stall-climb e -190.098836
+  hop 6091 window ? stall-climb e -190.019543
+  hop 6219 window ? stall-climb e -190.269983
+  hop 6351 window ? stall-climb e -190.760022
+  hop 6456 window ? stall-climb e -190.490714
+  hop 6557 window ? stall-climb e -190.470575
+  hop 6672 window ? stall-climb e -190.685232
+  hop 6795 window ? stall-climb e -190.779305
+  hop 6909 window ? stall-climb e -190.582711
+  hop 7030 window ? stall-climb e -190.755314
+  hop 7133 window ? stall-climb e -190.129421
+  hop 7258 window ? stall-climb e -190.373051
+  hop 7374 window ? stall-climb e -190.777483
+  hop 7486 window ? stall-climb e -190.507814
+  hop 7610 window ? stall-climb e -190.394010
+  hop 7745 window ? stall-climb e -190.196191
+  hop 7876 window ? stall-climb e -190.024556
+  hop 7993 window ? stall-climb e -190.507437
+  hop 8100 window ? stall-climb e -190.675077
+  hop 8234 window ? stall-climb e -190.527084
+  hop 8358 window ? stall-climb e -190.594417
+  hop 8490 window ? stall-climb e -190.539003
+  hop 8606 window ? stall-climb e -190.776603
+  hop 8741 window ? stall-climb e -190.615893
+  hop 8844 window ? stall-climb e -190.681973
+  hop 8972 window ? stall-climb e -190.529551
+  hop 9080 window ? stall-climb e -190.879028
+  hop 9207 window ? stall-climb e -190.842966
+  hop 9327 window ? stall-climb e -190.703975
+  hop 9451 window ? stall-climb e -190.442309
+  hop 9553 window ? stall-climb e -190.948714
+  hop 9683 window ? stall-climb e -190.469892
+  hop 9812 window ? stall-climb e -190.293474
+  hop 9945 window ? stall-climb e -190.292035
+  hop 10063 window ? stall-climb e -190.093380
+  hop 10188 window ? stall-climb e -190.526982
+  hop 10319 window ? stall-climb e -190.337806
+  hop 10463 window ? stall-climb e -190.587908
+  hop 10580 window ? stall-climb e -190.535024
+  hop 10703 window ? stall-climb e -190.779305
+  hop 10828 window ? stall-climb e -190.455339
+  hop 10944 window ? stall-climb e -190.948714
+  hop 11066 window ? stall-climb e -190.734788
+  hop 11194 window ? stall-climb e -190.910778
+  hop 11301 window ? stall-climb e -190.701366
+  hop 11412 window ? stall-climb e -190.747173
+  hop 11532 window ? stall-climb e -190.779305
+  hop 11657 window ? stall-climb e -190.910778
+  hop 11786 window ? stall-climb e -190.161590
+  hop 11905 window ? stall-climb e -190.660427
+  hop 12028 window ? stall-climb e -190.690497
+  hop 12149 window ? stall-climb e -190.780546
+  hop 12275 window ? stall-climb e -190.814178
+  hop 12402 window ? stall-climb e -190.562748
+  hop 12518 window ? stall-climb e -190.710169
+  hop 12636 window ? stall-climb e -190.910778
+  hop 12749 window ? stall-climb e -190.799805
+  hop 12861 window ? stall-climb e -190.815346
+  hop 12987 window ? stall-climb e -190.331365
+  hop 13093 window ? stall-climb e -190.589672
+  hop 13191 window ? stall-climb e -190.670046
+  hop 13322 window ? stall-climb e -190.768752
+  hop 13431 window ? stall-climb e -190.779305
+  hop 13560 window ? stall-climb e -190.457186
+  hop 13699 window ? stall-climb e -190.779305
+  hop 13826 window ? stall-climb e -190.915719
+  hop 13941 window ? stall-climb e -190.171643
+  hop 14073 window ? stall-climb e -190.799805
+  hop 14201 window ? stall-climb e -190.761447
+  hop 14310 window ? stall-climb e -190.222398
+  hop 14423 window ? stall-climb e -190.457621
+  hop 14548 window ? stall-climb e -190.743953
+  hop 14684 window ? stall-climb e -190.761447
+  hop 14804 window ? stall-climb e -190.188842
+  hop 14925 window ? stall-climb e -190.475923
+  hop 15037 window ? stall-climb e -190.738469
+  hop 15144 window ? stall-climb e -190.117719
+  hop 15284 window ? stall-climb e -190.003890
+  hop 15406 window ? stall-climb e -189.536919
+  hop 15555 window ? stall-climb e -190.330709
+  hop 15683 window ? stall-climb e -190.189196
+  hop 15807 window ? stall-climb e -190.653537
+  hop 15924 window ? stall-climb e -190.567078
+  hop 16045 window ? stall-climb e -190.496316
+  hop 16188 window ? stall-climb e -190.472011
+  hop 16303 window ? stall-climb e -190.735900
+  hop 16420 window ? stall-climb e -190.741197
+  hop 16568 window ? stall-climb e -190.363260
+  hop 16659 window ? stall-climb e -190.659280
+  hop 16772 window ? stall-climb e -190.362274
+  hop 16906 window ? stall-climb e -190.741197
+  hop 17028 window ? stall-climb e -190.572355
+  hop 17162 window ? stall-climb e -190.735148
+  hop 17260 window ? stall-climb e -190.640455
+  hop 17377 window ? stall-climb e -190.915719
+  hop 17501 window ? stall-climb e -190.555718
+  hop 17612 window ? stall-climb e -190.343624
+  hop 17720 window ? stall-climb e -190.389201
+  hop 17835 window ? stall-climb e -190.717865
+  hop 17959 window ? stall-climb e -190.948714
+  hop 18085 window ? stall-climb e -190.749302
+  hop 18205 window ? stall-climb e -190.684251
+  hop 18332 window ? stall-climb e -190.639102
+  hop 18445 window ? stall-climb e -190.407859
+  hop 18551 window ? stall-climb e -190.774066
+  hop 18678 window ? stall-climb e -190.206096
+  hop 18798 window ? stall-climb e -190.560238
+  hop 18908 window ? stall-climb e -190.593100
+  hop 19033 window ? stall-climb e -190.548560
+  hop 19147 window ? stall-climb e -190.672282
+  hop 19255 window ? stall-climb e -190.743167
+  hop 19370 window ? stall-climb e -190.770815
+  hop 19507 window ? stall-climb e -190.793297
+  hop 19618 window ? stall-climb e -190.438259
+  hop 19749 window ? stall-climb e -190.910778
+  hop 19865 window ? stall-climb e -190.760909
+  hop 19972 window ? stall-climb e -190.479116
+  hop 20074 window ? stall-climb e -190.725052
+  hop 20214 window ? stall-climb e -190.800288
+  hop 20348 window ? stall-climb e -190.611041
+  hop 20471 window ? stall-climb e -190.948714
+  hop 20588 window ? stall-climb e -190.348511
+  hop 20717 window ? stall-climb e -190.696473
+  hop 20820 window ? stall-climb e -190.167399
+  hop 20939 window ? stall-climb e -190.815346
+  hop 21076 window ? stall-climb e -190.698974
+  hop 21174 window ? stall-climb e -190.565095
+  hop 21283 window ? stall-climb e -190.815909
+  hop 21406 window ? stall-climb e -190.814423
+  hop 21514 window ? stall-climb e -190.326469
+  hop 21648 window ? stall-climb e -190.644326
+  hop 21773 window ? stall-climb e -190.703154
+  hop 21906 window ? stall-climb e -190.536081
+  hop 22043 window ? stall-climb e -190.245006
+  hop 22161 window ? stall-climb e -190.215306
+  hop 22279 window ? stall-climb e -190.155911
+  hop 22410 window ? stall-climb e -190.279859
+  hop 22540 window ? stall-climb e -190.527573
+  hop 22656 window ? stall-climb e -190.668926
+  hop 22771 window ? stall-climb e -190.624886
+  hop 22879 window ? stall-climb e -190.410365
+  hop 23008 window ? stall-climb e -190.690992
+  hop 23122 window ? stall-climb e -190.768752
+records
+  hop 13 e -190.783758 arm dls-kernel
+  hop 25 e -190.787327 arm dls-kernel
+  hop 26 e -190.948714 arm dls-kernel
+  hop 1397 e -190.951987 arm burst
+  hop 2284 e -191.002702 arm dls-kernel
+  hop 3384 e -191.006165 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.789891 98
+  -190.755314 34
+  -190.779305 29
+  -190.770650 26
+  -190.789885 24
+  -190.768752 22
+  -190.910778 21
+  -190.948714 20
+after the final best: hops 19360 acceptance 0.751 median gap 0.4604 distinct stood 14097 fraction within 0.05 0.008
+== trace-2006.txt.gz
+best -191.00616498 gap 0.02468782 hops 22273 calls 1000000 best first held at 63960
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1458 0.87 0.41 0.35 0.24   0.2647   0.4706   0.7357     261  1169  -191.006165
+   100000   2268 0.74 0.43 0.52 0.05   0.2410   0.3453   0.5971      79  1635  -190.977377
+   200000   2344 0.76 0.41 0.53 0.06   0.2702   0.5007   0.7768     115  1761  -190.980017
+   300000   2368 0.77 0.39 0.55 0.06   0.3489   0.5094   0.7461     115  1818  -190.980017
+   400000   2346 0.72 0.40 0.54 0.06   0.2511   0.4186   0.6295     104  1658  -190.980017
+   500000   2225 0.73 0.38 0.56 0.07   0.3158   0.5178   0.7423     115  1611  -190.980017
+   600000   2231 0.67 0.39 0.54 0.07   0.2380   0.3735   0.5883     107  1484  -190.948714
+   700000   2320 0.69 0.38 0.55 0.06   0.2531   0.3960   0.5922     103  1585  -190.948714
+   800000   2350 0.71 0.41 0.53 0.06   0.3042   0.4799   0.6959      98  1660  -190.948714
+   900000   2362 0.76 0.39 0.56 0.05   0.2945   0.4963   0.7314     104  1751  -191.006165
+  1000000      1 0.00 1.00 0.00 0.00   0.6121   0.6121   0.6121       0     1  nan
+arm                proposed accepted downhill
+dls-kernel             5998     3443      506
+soap                   4589     3936       99
+single                 4539     3986      112
+sym                    3828     2989      218
+surface                1579     1127       81
+burst                  1547      776       39
+all                     193      171        5
+actions {'prior-core': 1, 'stall-climb': 196, 'orbit-completion': 274}
+  hop 61 window ? stall-climb e -190.536081
+  hop 85 window ? stall-climb e -190.735900
+  hop 178 window ? stall-climb e -190.613281
+  hop 214 window ? stall-climb e -190.770969
+  hop 263 window ? stall-climb e -190.474475
+  hop 315 window ? stall-climb e -190.514972
+  hop 354 window ? stall-climb e -190.277876
+  hop 402 window ? stall-climb e -190.658127
+  hop 444 window ? stall-climb e -190.563733
+  hop 502 window ? stall-climb e -190.600583
+  hop 588 window ? stall-climb e -190.566472
+  hop 766 window ? stall-climb e -190.444209
+  hop 869 window ? stall-climb e -190.117771
+  hop 1010 window ? stall-climb e -190.758688
+  hop 1136 window ? stall-climb e -190.825979
+  hop 1245 window ? stall-climb e -190.635380
+  hop 1358 window ? stall-climb e -190.425930
+  hop 1479 window ? stall-climb e -190.736171
+  hop 1600 window ? stall-climb e -190.128494
+  hop 1730 window ? stall-climb e -190.880692
+  hop 1855 window ? stall-climb e -190.774066
+  hop 1964 window ? stall-climb e -190.770385
+  hop 2077 window ? stall-climb e -189.886695
+  hop 2200 window ? stall-climb e -190.526904
+  hop 2319 window ? stall-climb e -190.247361
+  hop 2443 window ? stall-climb e -190.478365
+  hop 2569 window ? stall-climb e -190.779305
+  hop 2680 window ? stall-climb e -190.770815
+  hop 2805 window ? stall-climb e -190.770969
+  hop 2928 window ? stall-climb e -190.910778
+  hop 3050 window ? stall-climb e -190.548560
+  hop 3164 window ? stall-climb e -190.755314
+  hop 3271 window ? stall-climb e -190.350479
+  hop 3399 window ? stall-climb e -190.529859
+  hop 3490 window ? stall-climb e -190.735148
+  hop 3600 window ? stall-climb e -190.325421
+  hop 3699 window ? stall-climb e -190.762379
+  hop 3831 window ? stall-climb e -190.263565
+  hop 3950 window ? stall-climb e -190.770969
+  hop 4063 window ? stall-climb e -190.815346
+  hop 4186 window ? stall-climb e -190.624886
+  hop 4289 window ? stall-climb e -190.714158
+  hop 4398 window ? stall-climb e -190.360275
+  hop 4513 window ? stall-climb e -190.150913
+  hop 4622 window ? stall-climb e -190.777483
+  hop 4732 window ? stall-climb e -190.327198
+  hop 4855 window ? stall-climb e -190.479118
+  hop 4969 window ? stall-climb e -190.137482
+  hop 5108 window ? stall-climb e -190.366583
+  hop 5244 window ? stall-climb e -189.528575
+  hop 5376 window ? stall-climb e -190.504817
+  hop 5504 window ? stall-climb e -190.517964
+  hop 5630 window ? stall-climb e -190.625837
+  hop 5759 window ? stall-climb e -189.920047
+  hop 5894 window ? stall-climb e -190.558831
+  hop 6017 window ? stall-climb e -190.491382
+  hop 6146 window ? stall-climb e -190.607706
+  hop 6245 window ? stall-climb e -190.434101
+  hop 6350 window ? stall-climb e -190.649311
+  hop 6459 window ? stall-climb e -190.470066
+  hop 6600 window ? stall-climb e -190.326456
+  hop 6739 window ? stall-climb e -190.948714
+  hop 6839 window ? stall-climb e -190.293975
+  hop 6951 window ? stall-climb e -190.500619
+  hop 7082 window ? stall-climb e -190.600553
+  hop 7221 window ? stall-climb e -190.328117
+  hop 7349 window ? stall-climb e -189.908454
+  hop 7476 window ? stall-climb e -190.367008
+  hop 7593 window ? stall-climb e -190.634926
+  hop 7735 window ? stall-climb e -190.980017
+  hop 7857 window ? stall-climb e -190.254842
+  hop 7970 window ? stall-climb e -190.293889
+  hop 8080 window ? stall-climb e -190.632518
+  hop 8200 window ? stall-climb e -190.752897
+  hop 8319 window ? stall-climb e -190.585885
+  hop 8446 window ? stall-climb e -190.318576
+  hop 8559 window ? stall-climb e -190.814423
+  hop 8686 window ? stall-climb e -190.842966
+  hop 8807 window ? stall-climb e -190.761447
+  hop 8910 window ? stall-climb e -190.948714
+  hop 9031 window ? stall-climb e -190.851283
+  hop 9148 window ? stall-climb e -190.583863
+  hop 9262 window ? stall-climb e -190.820944
+  hop 9364 window ? stall-climb e -190.780917
+  hop 9493 window ? stall-climb e -190.668988
+  hop 9620 window ? stall-climb e -190.768752
+  hop 9755 window ? stall-climb e -190.329252
+  hop 9849 window ? stall-climb e -190.443930
+  hop 9973 window ? stall-climb e -190.741197
+  hop 10116 window ? stall-climb e -190.640894
+  hop 10237 window ? stall-climb e -190.738657
+  hop 10368 window ? stall-climb e -190.587369
+  hop 10511 window ? stall-climb e -190.819799
+  hop 10627 window ? stall-climb e -190.809881
+  hop 10753 window ? stall-climb e -190.465998
+  hop 10865 window ? stall-climb e -190.762379
+  hop 10980 window ? stall-climb e -190.820944
+  hop 11082 window ? stall-climb e -190.755314
+  hop 11192 window ? stall-climb e -190.624886
+  hop 11309 window ? stall-climb e -190.359916
+  hop 11421 window ? stall-climb e -190.554847
+  hop 11534 window ? stall-climb e -190.363063
+  hop 11634 window ? stall-climb e -190.412727
+  hop 11741 window ? stall-climb e -190.526982
+  hop 11862 window ? stall-climb e -190.735900
+  hop 11986 window ? stall-climb e -190.594330
+  hop 12101 window ? stall-climb e -190.583520
+  hop 12216 window ? stall-climb e -190.603585
+  hop 12326 window ? stall-climb e -190.808306
+  hop 12436 window ? stall-climb e -190.754189
+  hop 12567 window ? stall-climb e -190.257288
+  hop 12674 window ? stall-climb e -190.599303
+  hop 12793 window ? stall-climb e -190.542091
+  hop 12917 window ? stall-climb e -190.277834
+  hop 13040 window ? stall-climb e -190.910778
+  hop 13156 window ? stall-climb e -190.376186
+  hop 13273 window ? stall-climb e -190.305993
+  hop 13398 window ? stall-climb e -190.518291
+  hop 13514 window ? stall-climb e -190.857490
+  hop 13628 window ? stall-climb e -190.465461
+  hop 13731 window ? stall-climb e -190.521651
+  hop 13822 window ? stall-climb e -190.683696
+  hop 13943 window ? stall-climb e -190.633578
+  hop 14036 window ? stall-climb e -190.714635
+  hop 14144 window ? stall-climb e -190.480573
+  hop 14245 window ? stall-climb e -190.762379
+  hop 14370 window ? stall-climb e -190.977377
+  hop 14498 window ? stall-climb e -189.907146
+  hop 14628 window ? stall-climb e -190.331810
+  hop 14738 window ? stall-climb e -190.948714
+  hop 14886 window ? stall-climb e -190.768752
+  hop 15012 window ? stall-climb e -190.738607
+  hop 15145 window ? stall-climb e -190.562748
+  hop 15246 window ? stall-climb e -190.749819
+  hop 15365 window ? stall-climb e -190.692427
+  hop 15483 window ? stall-climb e -190.690113
+  hop 15577 window ? stall-climb e -190.873466
+  hop 15683 window ? stall-climb e -190.815346
+  hop 15801 window ? stall-climb e -190.780546
+  hop 15918 window ? stall-climb e -190.768752
+  hop 16032 window ? stall-climb e -190.976926
+  hop 16158 window ? stall-climb e -190.799805
+  hop 16277 window ? stall-climb e -190.783863
+  hop 16396 window ? stall-climb e -190.827664
+  hop 16497 window ? stall-climb e -190.191315
+  hop 16605 window ? stall-climb e -190.611236
+  hop 16716 window ? stall-climb e -190.539756
+  hop 16827 window ? stall-climb e -190.842640
+  hop 16964 window ? stall-climb e -190.597351
+  hop 17073 window ? stall-climb e -190.760909
+  hop 17208 window ? stall-climb e -190.709767
+  hop 17329 window ? stall-climb e -190.556169
+  hop 17453 window ? stall-climb e -190.373191
+  hop 17581 window ? stall-climb e -190.614043
+  hop 17705 window ? stall-climb e -190.760165
+  hop 17814 window ? stall-climb e -190.623211
+  hop 17953 window ? stall-climb e -190.577279
+  hop 18072 window ? stall-climb e -190.948714
+  hop 18186 window ? stall-climb e -190.770969
+  hop 18296 window ? stall-climb e -190.411187
+  hop 18424 window ? stall-climb e -190.768752
+  hop 18545 window ? stall-climb e -190.470347
+  hop 18656 window ? stall-climb e -190.583495
+  hop 18782 window ? stall-climb e -190.731892
+  hop 18909 window ? stall-climb e -190.315594
+  hop 19032 window ? stall-climb e -190.059738
+  hop 19160 window ? stall-climb e -190.671054
+  hop 19282 window ? stall-climb e -190.441057
+  hop 19414 window ? stall-climb e -190.285717
+  hop 19521 window ? stall-climb e -190.910778
+  hop 19646 window ? stall-climb e -190.495660
+  hop 19737 window ? stall-climb e -190.744355
+  hop 19861 window ? stall-climb e -190.761447
+  hop 19976 window ? stall-climb e -190.193802
+  hop 20091 window ? stall-climb e -190.238428
+  hop 20235 window ? stall-climb e -190.808306
+  hop 20354 window ? stall-climb e -190.808306
+  hop 20473 window ? stall-climb e -190.497905
+  hop 20591 window ? stall-climb e -190.296269
+  hop 20704 window ? stall-climb e -190.513404
+  hop 20837 window ? stall-climb e -189.162396
+  hop 20934 window ? stall-climb e -190.124433
+  hop 21072 window ? stall-climb e -190.818756
+  hop 21206 window ? stall-climb e -190.485490
+  hop 21337 window ? stall-climb e -190.948714
+  hop 21442 window ? stall-climb e -190.808306
+  hop 21562 window ? stall-climb e -189.996477
+  hop 21682 window ? stall-climb e -190.842640
+  hop 21799 window ? stall-climb e -190.532039
+  hop 21917 window ? stall-climb e -190.238241
+  hop 22050 window ? stall-climb e -190.263798
+  hop 22182 window ? stall-climb e -190.429538
+  hop 22287 window ? stall-climb e -190.772285
+  hop 22423 window ? stall-climb e -190.779305
+  hop 22541 window ? stall-climb e -190.661635
+  hop 22660 window ? stall-climb e -190.755617
+records
+  hop 5 e -190.787327 arm dls-kernel
+  hop 11 e -190.936096 arm dls-kernel
+  hop 121 e -190.980017 arm dls-kernel
+  hop 592 e -191.003676 arm dls-kernel
+  hop 598 e -191.006165 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.779305 33
+  -190.768752 32
+  -190.842966 31
+  -190.915719 28
+  -190.910778 20
+  -190.762379 19
+  -190.735900 18
+  -190.771588 18
+after the final best: hops 21694 acceptance 0.734 median gap 0.4607 distinct stood 15357 fraction within 0.05 0.005
+== trace-2007.txt.gz
+best -191.00616498 gap 0.02468782 hops 21677 calls 1000000 best first held at 384087
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1460 0.88 0.47 0.30 0.24   0.2465   0.5099   0.7613     256  1171  -191.002702
+   100000   2339 0.80 0.41 0.54 0.06   0.2412   0.3934   0.6323     113  1832  -190.980017
+   200000   2351 0.75 0.45 0.50 0.06   0.2394   0.4109   0.6950      99  1738  -190.951987
+   300000   1994 0.81 0.43 0.51 0.06   0.3173   0.5030   0.7193     110  1569  -191.006165
+   400000   1767 0.86 0.42 0.53 0.05   0.3779   0.6154   0.8336      81  1425  -190.983312
+   500000   2422 0.81 0.43 0.51 0.06   0.2971   0.4215   0.6444     124  1891  -190.913850
+   600000   2371 0.77 0.40 0.54 0.06   0.2955   0.4873   0.7137     113  1802  -190.980017
+   700000   2253 0.69 0.41 0.52 0.07   0.2361   0.3686   0.5607     110  1539  -190.980017
+   800000   2311 0.75 0.41 0.53 0.05   0.2972   0.5595   0.7963     112  1710  -190.948714
+   900000   2408 0.74 0.40 0.54 0.05   0.3375   0.5078   0.6999     101  1754  -190.976926
+  1000000      1 0.00 0.00 1.00 0.00   0.7815   0.7815   0.7815       0     1  nan
+arm                proposed accepted downhill
+dls-kernel             5862     3769      455
+single                 4644     4190      111
+soap                   4450     3921       90
+sym                    3768     3047      210
+surface                1578     1176       60
+burst                  1193      600       27
+all                     182      165        1
+actions {'prior-core': 1, 'orbit-completion': 291, 'stall-climb': 187}
+  hop 81 window ? stall-climb e -190.613221
+  hop 133 window ? stall-climb e -190.770969
+  hop 164 window ? stall-climb e -190.815346
+  hop 242 window ? stall-climb e -190.137920
+  hop 270 window ? stall-climb e -190.348933
+  hop 322 window ? stall-climb e -190.236789
+  hop 368 window ? stall-climb e -190.436697
+  hop 501 window ? stall-climb e -190.265308
+  hop 537 window ? stall-climb e -190.185265
+  hop 631 window ? stall-climb e -190.153409
+  hop 775 window ? stall-climb e -190.481335
+  hop 898 window ? stall-climb e -190.948714
+  hop 1026 window ? stall-climb e -190.212765
+  hop 1164 window ? stall-climb e -190.458435
+  hop 1274 window ? stall-climb e -189.841224
+  hop 1388 window ? stall-climb e -190.371493
+  hop 1523 window ? stall-climb e -190.486346
+  hop 1659 window ? stall-climb e -190.214075
+  hop 1775 window ? stall-climb e -190.339571
+  hop 1893 window ? stall-climb e -189.849474
+  hop 2015 window ? stall-climb e -190.722459
+  hop 2143 window ? stall-climb e -190.885246
+  hop 2275 window ? stall-climb e -190.566585
+  hop 2391 window ? stall-climb e -190.770969
+  hop 2497 window ? stall-climb e -190.346164
+  hop 2628 window ? stall-climb e -190.880692
+  hop 2735 window ? stall-climb e -190.755322
+  hop 2853 window ? stall-climb e -190.692427
+  hop 2952 window ? stall-climb e -190.910778
+  hop 3074 window ? stall-climb e -190.948714
+  hop 3198 window ? stall-climb e -190.552004
+  hop 3316 window ? stall-climb e -190.638708
+  hop 3430 window ? stall-climb e -190.694307
+  hop 3568 window ? stall-climb e -190.535578
+  hop 3662 window ? stall-climb e -190.376789
+  hop 3772 window ? stall-climb e -190.774066
+  hop 3910 window ? stall-climb e -190.913850
+  hop 4032 window ? stall-climb e -190.735148
+  hop 4153 window ? stall-climb e -190.779305
+  hop 4268 window ? stall-climb e -190.395610
+  hop 4376 window ? stall-climb e -190.843347
+  hop 4489 window ? stall-climb e -190.055745
+  hop 4617 window ? stall-climb e -190.298252
+  hop 4743 window ? stall-climb e -190.143129
+  hop 4855 window ? stall-climb e -190.511537
+  hop 4986 window ? stall-climb e -190.465601
+  hop 5107 window ? stall-climb e -190.360029
+  hop 5230 window ? stall-climb e -190.746805
+  hop 5356 window ? stall-climb e -190.910778
+  hop 5471 window ? stall-climb e -190.842966
+  hop 5592 window ? stall-climb e -190.752897
+  hop 5713 window ? stall-climb e -190.780546
+  hop 5836 window ? stall-climb e -190.271356
+  hop 5953 window ? stall-climb e -190.771588
+  hop 6066 window ? stall-climb e -190.355445
+  hop 6199 window ? stall-climb e -190.760165
+  hop 6324 window ? stall-climb e -190.770969
+  hop 6439 window ? stall-climb e -190.736797
+  hop 6555 window ? stall-climb e -190.339673
+  hop 6678 window ? stall-climb e -190.200489
+  hop 6793 window ? stall-climb e -190.176522
+  hop 6915 window ? stall-climb e -190.638842
+  hop 7035 window ? stall-climb e -190.799805
+  hop 7162 window ? stall-climb e -189.967868
+  hop 7290 window ? stall-climb e -190.653537
+  hop 7410 window ? stall-climb e -190.452823
+  hop 7540 window ? stall-climb e -190.608182
+  hop 7658 window ? stall-climb e -190.266533
+  hop 7768 window ? stall-climb e -190.479325
+  hop 7887 window ? stall-climb e -190.691143
+  hop 7999 window ? stall-climb e -190.703576
+  hop 8131 window ? stall-climb e -190.946856
+  hop 8274 window ? stall-climb e -190.445911
+  hop 8352 window ? stall-climb e -191.006165
+  hop 8443 window ? stall-climb e -189.811902
+  hop 8563 window ? stall-climb e -190.842966
+  hop 8695 window ? stall-climb e -190.582502
+  hop 8837 window ? stall-climb e -190.377626
+  hop 8963 window ? stall-climb e -190.360354
+  hop 9091 window ? stall-climb e -190.775411
+  hop 9236 window ? stall-climb e -190.515158
+  hop 9363 window ? stall-climb e -190.143520
+  hop 9481 window ? stall-climb e -190.145699
+  hop 9617 window ? stall-climb e -190.957254
+  hop 9757 window ? stall-climb e -190.208094
+  hop 9888 window ? stall-climb e -190.887043
+  hop 10033 window ? stall-climb e -190.510760
+  hop 10167 window ? stall-climb e -190.801167
+  hop 10299 window ? stall-climb e -190.152971
+  hop 10422 window ? stall-climb e -190.612658
+  hop 10553 window ? stall-climb e -190.710036
+  hop 10686 window ? stall-climb e -190.640918
+  hop 10835 window ? stall-climb e -190.135641
+  hop 10968 window ? stall-climb e -190.597423
+  hop 11092 window ? stall-climb e -190.202146
+  hop 11212 window ? stall-climb e -190.644658
+  hop 11334 window ? stall-climb e -190.735387
+  hop 11463 window ? stall-climb e -190.419567
+  hop 11597 window ? stall-climb e -190.667394
+  hop 11712 window ? stall-climb e -190.710628
+  hop 11859 window ? stall-climb e -190.612988
+  hop 11973 window ? stall-climb e -190.457186
+  hop 12075 window ? stall-climb e -189.909574
+  hop 12202 window ? stall-climb e -190.642857
+  hop 12298 window ? stall-climb e -190.241843
+  hop 12416 window ? stall-climb e -190.735900
+  hop 12528 window ? stall-climb e -190.746805
+  hop 12661 window ? stall-climb e -190.178474
+  hop 12803 window ? stall-climb e -189.971161
+  hop 12928 window ? stall-climb e -190.187284
+  hop 13060 window ? stall-climb e -190.215734
+  hop 13167 window ? stall-climb e -190.602450
+  hop 13286 window ? stall-climb e -190.827233
+  hop 13422 window ? stall-climb e -190.659095
+  hop 13531 window ? stall-climb e -190.783585
+  hop 13663 window ? stall-climb e -190.539272
+  hop 13780 window ? stall-climb e -190.631410
+  hop 13912 window ? stall-climb e -190.293773
+  hop 14052 window ? stall-climb e -190.446627
+  hop 14158 window ? stall-climb e -190.276563
+  hop 14292 window ? stall-climb e -190.513975
+  hop 14424 window ? stall-climb e -190.532039
+  hop 14547 window ? stall-climb e -190.780917
+  hop 14665 window ? stall-climb e -190.842966
+  hop 14756 window ? stall-climb e -190.857490
+  hop 14872 window ? stall-climb e -190.827233
+  hop 14978 window ? stall-climb e -190.814423
+  hop 15095 window ? stall-climb e -190.562997
+  hop 15214 window ? stall-climb e -190.569087
+  hop 15325 window ? stall-climb e -190.458894
+  hop 15457 window ? stall-climb e -190.780917
+  hop 15560 window ? stall-climb e -190.614043
+  hop 15684 window ? stall-climb e -190.423190
+  hop 15796 window ? stall-climb e -190.768752
+  hop 15904 window ? stall-climb e -190.654045
+  hop 16032 window ? stall-climb e -190.413014
+  hop 16143 window ? stall-climb e -190.842966
+  hop 16264 window ? stall-climb e -190.779305
+  hop 16363 window ? stall-climb e -190.814423
+  hop 16498 window ? stall-climb e -190.085925
+  hop 16614 window ? stall-climb e -190.755314
+  hop 16728 window ? stall-climb e -190.783585
+  hop 16863 window ? stall-climb e -190.790789
+  hop 16972 window ? stall-climb e -190.880692
+  hop 17083 window ? stall-climb e -190.485232
+  hop 17198 window ? stall-climb e -190.755314
+  hop 17309 window ? stall-climb e -190.318298
+  hop 17423 window ? stall-climb e -190.508105
+  hop 17530 window ? stall-climb e -190.951987
+  hop 17651 window ? stall-climb e -190.910778
+  hop 17760 window ? stall-climb e -190.168537
+  hop 17881 window ? stall-climb e -190.221079
+  hop 17999 window ? stall-climb e -190.508608
+  hop 18121 window ? stall-climb e -190.307526
+  hop 18256 window ? stall-climb e -190.815346
+  hop 18378 window ? stall-climb e -190.808306
+  hop 18486 window ? stall-climb e -190.353829
+  hop 18597 window ? stall-climb e -190.948714
+  hop 18730 window ? stall-climb e -190.640455
+  hop 18862 window ? stall-climb e -190.275899
+  hop 18960 window ? stall-climb e -190.529838
+  hop 19084 window ? stall-climb e -190.771588
+  hop 19217 window ? stall-climb e -190.823283
+  hop 19351 window ? stall-climb e -190.032606
+  hop 19468 window ? stall-climb e -190.330339
+  hop 19600 window ? stall-climb e -190.812858
+  hop 19691 window ? stall-climb e -190.815346
+  hop 19791 window ? stall-climb e -189.330261
+  hop 19919 window ? stall-climb e -190.736213
+  hop 20045 window ? stall-climb e -190.668926
+  hop 20160 window ? stall-climb e -190.422387
+  hop 20288 window ? stall-climb e -190.106286
+  hop 20411 window ? stall-climb e -190.620026
+  hop 20529 window ? stall-climb e -190.427510
+  hop 20664 window ? stall-climb e -190.691781
+  hop 20781 window ? stall-climb e -190.375882
+  hop 20919 window ? stall-climb e -190.710500
+  hop 21044 window ? stall-climb e -190.714635
+  hop 21169 window ? stall-climb e -190.409797
+  hop 21301 window ? stall-climb e -190.807658
+  hop 21427 window ? stall-climb e -190.694707
+  hop 21549 window ? stall-climb e -190.323210
+  hop 21677 window ? stall-climb e -190.563022
+  hop 21790 window ? stall-climb e -190.526982
+  hop 21924 window ? stall-climb e -190.800288
+  hop 22042 window ? stall-climb e -190.301605
+  hop 22160 window ? stall-climb e -190.375512
+records
+  hop 3 e -190.771588 arm dls-kernel
+  hop 17 e -190.774066 arm dls-kernel
+  hop 19 e -190.779305 arm dls-kernel
+  hop 22 e -190.842966 arm dls-kernel
+  hop 86 e -190.913850 arm dls-kernel
+  hop 181 e -190.948714 arm dls-kernel
+  hop 396 e -190.957254 arm dls-kernel
+  hop 399 e -191.002702 arm dls-kernel
+  hop 8349 e -191.006165 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.842966 33
+  -190.768752 25
+  -190.910778 25
+  -190.915719 23
+  -190.815346 21
+  -190.779305 20
+  -190.905683 20
+  -190.946856 19
+after the final best: hops 13534 acceptance 0.765 median gap 0.4862 distinct stood 10024 fraction within 0.05 0.011
+== trace-2008.txt.gz
+best -191.00616498 gap 0.02468782 hops 22527 calls 999202 best first held at 470423
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1418 0.88 0.42 0.34 0.24   0.3063   0.5175   0.7897     264  1147  -190.980017
+   100000   2297 0.80 0.44 0.51 0.06   0.2263   0.4284   0.7241      98  1799  -190.980017
+   200000   2422 0.77 0.44 0.51 0.05   0.2175   0.3969   0.5865     107  1826  -190.980017
+   300000   2296 0.74 0.42 0.51 0.07   0.2631   0.4441   0.6271     129  1687  -190.980017
+   400000   2414 0.76 0.43 0.52 0.05   0.1914   0.3478   0.5555      87  1678  -191.006165
+   500000   2305 0.78 0.41 0.52 0.07   0.3015   0.4607   0.6805     129  1738  -191.006165
+   600000   2289 0.66 0.39 0.54 0.06   0.2712   0.4545   0.5913     107  1504  -190.948714
+   700000   2385 0.77 0.43 0.51 0.06   0.3004   0.4565   0.6573     114  1754  -191.006165
+   800000   2307 0.70 0.39 0.55 0.06   0.2749   0.4484   0.6696     114  1583  -190.948714
+   900000   2394 0.80 0.40 0.54 0.06   0.3835   0.6222   0.8138     120  1916  -190.915719
+arm                proposed accepted downhill
+dls-kernel             6128     3810      505
+single                 4814     4304      101
+soap                   4580     3962       83
+sym                    3677     2960      243
+surface                1580     1176       63
+burst                  1557      781       33
+all                     191      159        5
+actions {'prior-core': 1, 'orbit-completion': 289, 'stall-climb': 195}
+  hop 97 window ? stall-climb e -190.419884
+  hop 131 window ? stall-climb e -190.620658
+  hop 182 window ? stall-climb e -189.988761
+  hop 238 window ? stall-climb e -190.671054
+  hop 293 window ? stall-climb e -190.533623
+  hop 330 window ? stall-climb e -190.157790
+  hop 397 window ? stall-climb e -190.577279
+  hop 496 window ? stall-climb e -190.330270
+  hop 524 window ? stall-climb e -190.223130
+  hop 588 window ? stall-climb e -190.227922
+  hop 705 window ? stall-climb e -190.003666
+  hop 855 window ? stall-climb e -189.559530
+  hop 987 window ? stall-climb e -190.340314
+  hop 1117 window ? stall-climb e -190.555649
+  hop 1223 window ? stall-climb e -190.287660
+  hop 1346 window ? stall-climb e -189.766306
+  hop 1472 window ? stall-climb e -190.805778
+  hop 1590 window ? stall-climb e -190.349341
+  hop 1713 window ? stall-climb e -190.700857
+  hop 1818 window ? stall-climb e -190.708518
+  hop 1916 window ? stall-climb e -190.779305
+  hop 2024 window ? stall-climb e -190.774066
+  hop 2134 window ? stall-climb e -190.364128
+  hop 2255 window ? stall-climb e -190.304704
+  hop 2368 window ? stall-climb e -190.779305
+  hop 2469 window ? stall-climb e -190.526607
+  hop 2606 window ? stall-climb e -190.755314
+  hop 2723 window ? stall-climb e -190.749819
+  hop 2865 window ? stall-climb e -190.431744
+  hop 2991 window ? stall-climb e -190.635380
+  hop 3106 window ? stall-climb e -190.720351
+  hop 3237 window ? stall-climb e -190.779305
+  hop 3342 window ? stall-climb e -190.488018
+  hop 3458 window ? stall-climb e -190.263717
+  hop 3593 window ? stall-climb e -190.718206
+  hop 3721 window ? stall-climb e -190.755044
+  hop 3850 window ? stall-climb e -190.448923
+  hop 3981 window ? stall-climb e -190.755044
+  hop 4112 window ? stall-climb e -190.636707
+  hop 4240 window ? stall-climb e -190.561069
+  hop 4353 window ? stall-climb e -190.743167
+  hop 4487 window ? stall-climb e -190.302247
+  hop 4621 window ? stall-climb e -190.274316
+  hop 4731 window ? stall-climb e -190.489388
+  hop 4859 window ? stall-climb e -190.425930
+  hop 4972 window ? stall-climb e -190.664268
+  hop 5106 window ? stall-climb e -190.948714
+  hop 5238 window ? stall-climb e -190.583495
+  hop 5372 window ? stall-climb e -190.800288
+  hop 5512 window ? stall-climb e -190.770969
+  hop 5621 window ? stall-climb e -190.768752
+  hop 5729 window ? stall-climb e -190.713180
+  hop 5844 window ? stall-climb e -190.537120
+  hop 5976 window ? stall-climb e -190.747173
+  hop 6101 window ? stall-climb e -190.887225
+  hop 6211 window ? stall-climb e -190.842966
+  hop 6350 window ? stall-climb e -190.569087
+  hop 6469 window ? stall-climb e -190.630926
+  hop 6580 window ? stall-climb e -190.671054
+  hop 6704 window ? stall-climb e -190.779305
+  hop 6832 window ? stall-climb e -190.770815
+  hop 6934 window ? stall-climb e -190.770815
+  hop 7046 window ? stall-climb e -190.507020
+  hop 7143 window ? stall-climb e -190.449252
+  hop 7257 window ? stall-climb e -190.462067
+  hop 7378 window ? stall-climb e -190.948714
+  hop 7493 window ? stall-climb e -190.780546
+  hop 7616 window ? stall-climb e -190.784878
+  hop 7744 window ? stall-climb e -190.610112
+  hop 7860 window ? stall-climb e -190.761447
+  hop 7975 window ? stall-climb e -189.677649
+  hop 8080 window ? stall-climb e -190.936096
+  hop 8211 window ? stall-climb e -190.749819
+  hop 8335 window ? stall-climb e -190.910778
+  hop 8455 window ? stall-climb e -190.421591
+  hop 8576 window ? stall-climb e -190.600698
+  hop 8710 window ? stall-climb e -190.521472
+  hop 8815 window ? stall-climb e -190.799805
+  hop 8931 window ? stall-climb e -190.561912
+  hop 9064 window ? stall-climb e -190.704650
+  hop 9193 window ? stall-climb e -190.735900
+  hop 9312 window ? stall-climb e -190.700839
+  hop 9430 window ? stall-climb e -190.714158
+  hop 9547 window ? stall-climb e -190.768752
+  hop 9659 window ? stall-climb e -190.799805
+  hop 9780 window ? stall-climb e -190.977377
+  hop 9890 window ? stall-climb e -190.790789
+  hop 10003 window ? stall-climb e -190.530667
+  hop 10132 window ? stall-climb e -190.070420
+  hop 10270 window ? stall-climb e -190.423056
+  hop 10489 window ? stall-climb e -190.681004
+  hop 10594 window ? stall-climb e -190.672210
+  hop 10740 window ? stall-climb e -190.835168
+  hop 10869 window ? stall-climb e -190.486863
+  hop 11012 window ? stall-climb e -190.829759
+  hop 11143 window ? stall-climb e -190.528786
+  hop 11294 window ? stall-climb e -190.707402
+  hop 11415 window ? stall-climb e -190.682542
+  hop 11558 window ? stall-climb e -190.505023
+  hop 11671 window ? stall-climb e -190.388450
+  hop 11804 window ? stall-climb e -190.198050
+  hop 11914 window ? stall-climb e -190.475545
+  hop 12021 window ? stall-climb e -190.287659
+  hop 12136 window ? stall-climb e -190.277870
+  hop 12262 window ? stall-climb e -190.725387
+  hop 12394 window ? stall-climb e -190.770815
+  hop 12496 window ? stall-climb e -190.635380
+  hop 12623 window ? stall-climb e -190.915719
+  hop 12744 window ? stall-climb e -190.770013
+  hop 12830 window ? stall-climb e -190.596517
+  hop 12931 window ? stall-climb e -190.338042
+  hop 13039 window ? stall-climb e -190.779305
+  hop 13147 window ? stall-climb e -190.678080
+  hop 13254 window ? stall-climb e -190.355516
+  hop 13368 window ? stall-climb e -190.749819
+  hop 13490 window ? stall-climb e -190.277647
+  hop 13599 window ? stall-climb e -190.760419
+  hop 13704 window ? stall-climb e -190.530667
+  hop 13810 window ? stall-climb e -190.300968
+  hop 13940 window ? stall-climb e -190.574893
+  hop 14061 window ? stall-climb e -189.906420
+  hop 14178 window ? stall-climb e -190.910778
+  hop 14295 window ? stall-climb e -190.533623
+  hop 14418 window ? stall-climb e -190.624886
+  hop 14547 window ? stall-climb e -190.702527
+  hop 14672 window ? stall-climb e -190.779305
+  hop 14794 window ? stall-climb e -190.635603
+  hop 14910 window ? stall-climb e -190.800288
+  hop 15009 window ? stall-climb e -190.770385
+  hop 15132 window ? stall-climb e -190.375854
+  hop 15239 window ? stall-climb e -190.632823
+  hop 15376 window ? stall-climb e -190.771588
+  hop 15480 window ? stall-climb e -190.719643
+  hop 15612 window ? stall-climb e -190.567315
+  hop 15726 window ? stall-climb e -190.343396
+  hop 15851 window ? stall-climb e -190.323874
+  hop 15987 window ? stall-climb e -190.697376
+  hop 16116 window ? stall-climb e -190.178441
+  hop 16233 window ? stall-climb e -190.946856
+  hop 16347 window ? stall-climb e -190.789595
+  hop 16470 window ? stall-climb e -190.559372
+  hop 16596 window ? stall-climb e -191.006165
+  hop 16731 window ? stall-climb e -190.149645
+  hop 16869 window ? stall-climb e -190.681751
+  hop 17007 window ? stall-climb e -190.248916
+  hop 17116 window ? stall-climb e -190.409805
+  hop 17243 window ? stall-climb e -190.549067
+  hop 17368 window ? stall-climb e -190.842966
+  hop 17490 window ? stall-climb e -190.556779
+  hop 17609 window ? stall-climb e -190.769600
+  hop 17733 window ? stall-climb e -190.783585
+  hop 17851 window ? stall-climb e -190.910778
+  hop 17981 window ? stall-climb e -190.815909
+  hop 18106 window ? stall-climb e -190.880692
+  hop 18223 window ? stall-climb e -190.779937
+  hop 18326 window ? stall-climb e -190.910928
+  hop 18448 window ? stall-climb e -190.595689
+  hop 18568 window ? stall-climb e -190.471083
+  hop 18693 window ? stall-climb e -190.695838
+  hop 18790 window ? stall-climb e -190.510477
+  hop 18907 window ? stall-climb e -190.738656
+  hop 19031 window ? stall-climb e -190.779019
+  hop 19158 window ? stall-climb e -190.609339
+  hop 19282 window ? stall-climb e -190.614694
+  hop 19403 window ? stall-climb e -190.456922
+  hop 19508 window ? stall-climb e -190.755314
+  hop 19627 window ? stall-climb e -190.701366
+  hop 19752 window ? stall-climb e -190.755314
+  hop 19863 window ? stall-climb e -190.913850
+  hop 19980 window ? stall-climb e -190.779305
+  hop 20095 window ? stall-climb e -190.761447
+  hop 20215 window ? stall-climb e -189.979982
+  hop 20347 window ? stall-climb e -190.714152
+  hop 20478 window ? stall-climb e -190.161930
+  hop 20598 window ? stall-climb e -190.629130
+  hop 20724 window ? stall-climb e -190.735148
+  hop 20858 window ? stall-climb e -190.735900
+  hop 20978 window ? stall-climb e -190.842966
+  hop 21097 window ? stall-climb e -190.780917
+  hop 21209 window ? stall-climb e -190.771588
+  hop 21321 window ? stall-climb e -190.346120
+  hop 21445 window ? stall-climb e -190.067689
+  hop 21569 window ? stall-climb e -190.539792
+  hop 21705 window ? stall-climb e -190.735900
+  hop 21845 window ? stall-climb e -189.890319
+  hop 21960 window ? stall-climb e -190.773830
+  hop 22087 window ? stall-climb e -190.300290
+  hop 22195 window ? stall-climb e -190.948714
+  hop 22310 window ? stall-climb e -190.775411
+  hop 22435 window ? stall-climb e -190.440836
+  hop 22549 window ? stall-climb e -190.564234
+  hop 22670 window ? stall-climb e -190.392656
+  hop 22791 window ? stall-climb e -190.780917
+  hop 22915 window ? stall-climb e -190.380261
+  hop 23033 window ? stall-climb e -190.513344
+records
+  hop 4 e -190.768752 arm surface
+  hop 19 e -190.910778 arm sym
+  hop 40 e -190.915719 arm dls-kernel
+  hop 343 e -190.936096 arm dls-kernel
+  hop 398 e -190.948714 arm dls-kernel
+  hop 439 e -190.980017 arm dls-kernel
+  hop 10302 e -191.002702 arm burst
+  hop 10326 e -191.006165 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.768752 48
+  -190.842966 38
+  -190.867002 29
+  -190.779305 28
+  -190.948714 28
+  -190.837477 26
+  -190.915719 25
+  -190.741074 24
+after the final best: hops 12459 acceptance 0.748 median gap 0.4704 distinct stood 8899 fraction within 0.05 0.019
+== trace-2000.txt.gz
+best -190.98331173 gap 0.04754107 hops 5913 calls 302897 best first held at 302897
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1271 0.88 0.45 0.28 0.27   0.2384   0.4572   0.7171     253   996  -190.948714
+   100000   2271 0.79 0.42 0.51 0.07   0.2083   0.3647   0.6218     119  1779  -190.980017
+   200000   2308 0.71 0.45 0.49 0.06   0.2128   0.3750   0.6053      94  1621  -190.948714
+   300000     63 0.87 0.43 0.51 0.06   0.6670   0.7840   0.9520       4    55  -190.983312
+arm                proposed accepted downhill
+dls-kernel             1524      965      199
+soap                   1270     1132       35
+single                 1215     1097       20
+sym                    1009      822       82
+surface                 489      378       36
+burst                   350      180        8
+all                      56       51        1
+actions {'prior-core': 1, 'orbit-completion': 123, 'stall-climb': 58}
+  hop 93 window ? stall-climb e -190.610173
+  hop 138 window ? stall-climb e -190.260026
+  hop 197 window ? stall-climb e -190.884984
+  hop 245 window ? stall-climb e -190.779305
+  hop 299 window ? stall-climb e -190.779305
+  hop 345 window ? stall-climb e -190.774066
+  hop 382 window ? stall-climb e -190.842966
+  hop 431 window ? stall-climb e -189.993628
+  hop 488 window ? stall-climb e -190.286618
+  hop 545 window ? stall-climb e -190.082755
+  hop 598 window ? stall-climb e -190.724585
+  hop 650 window ? stall-climb e -190.456077
+  hop 741 window ? stall-climb e -190.377687
+  hop 855 window ? stall-climb e -190.205481
+  hop 973 window ? stall-climb e -190.527895
+  hop 1110 window ? stall-climb e -190.335698
+  hop 1202 window ? stall-climb e -190.492063
+  hop 1288 window ? stall-climb e -190.492063
+  hop 1382 window ? stall-climb e -190.469072
+  hop 1489 window ? stall-climb e -190.288615
+  hop 1624 window ? stall-climb e -190.660392
+  hop 1756 window ? stall-climb e -190.440796
+  hop 1859 window ? stall-climb e -189.266507
+  hop 1980 window ? stall-climb e -190.567092
+  hop 2101 window ? stall-climb e -190.779305
+  hop 2220 window ? stall-climb e -190.603486
+  hop 2327 window ? stall-climb e -190.575690
+  hop 2446 window ? stall-climb e -190.755314
+  hop 2579 window ? stall-climb e -190.770815
+  hop 2699 window ? stall-climb e -189.990424
+  hop 2830 window ? stall-climb e -190.755314
+  hop 3041 window ? stall-climb e -190.210517
+  hop 3113 window ? stall-climb e -190.735900
+  hop 3224 window ? stall-climb e -190.784878
+  hop 3345 window ? stall-climb e -190.635380
+  hop 3473 window ? stall-climb e -190.465504
+  hop 3588 window ? stall-climb e -190.808057
+  hop 3686 window ? stall-climb e -190.799805
+  hop 3836 window ? stall-climb e -190.167662
+  hop 3934 window ? stall-climb e -190.808306
+  hop 4069 window ? stall-climb e -190.814423
+  hop 4189 window ? stall-climb e -190.661745
+  hop 4323 window ? stall-climb e -190.842966
+  hop 4443 window ? stall-climb e -190.636707
+  hop 4537 window ? stall-climb e -190.424285
+  hop 4673 window ? stall-climb e -190.804252
+  hop 4791 window ? stall-climb e -190.319488
+  hop 4896 window ? stall-climb e -190.668926
+  hop 5006 window ? stall-climb e -190.936096
+  hop 5130 window ? stall-climb e -190.585730
+  hop 5230 window ? stall-climb e -190.755314
+  hop 5337 window ? stall-climb e -190.640455
+  hop 5468 window ? stall-climb e -190.252857
+  hop 5603 window ? stall-climb e -190.071442
+  hop 5729 window ? stall-climb e -190.657933
+  hop 5820 window ? stall-climb e -190.414643
+  hop 5951 window ? stall-climb e -190.252798
+  hop 6090 window ? stall-climb e -190.367911
+records
+  hop 9 e -190.780917 arm sym
+  hop 26 e -190.948714 arm surface
+  hop 2873 e -190.976926 arm dls-kernel
+  hop 2917 e -190.980017 arm dls-kernel
+  hop 6098 e -190.983312 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.492063 41
+  -190.768752 29
+  -190.842966 16
+  -190.779305 13
+  -190.491942 13
+  -190.792178 13
+  -190.756344 12
+  -190.769874 11
+after the final best: hops 1 acceptance 1.000 median gap 0.4198 distinct stood 1 fraction within 0.05 0.000
+== trace-2004.txt.gz
+best -191.00367602 gap 0.02717678 hops 8835 calls 428108 best first held at 428108
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1351 0.82 0.41 0.33 0.26   0.2126   0.3060   0.6187     242  1021  -190.980017
+   100000   2261 0.83 0.38 0.55 0.06   0.3339   0.5714   0.8174     129  1862  -190.948714
+   200000   2255 0.80 0.40 0.54 0.06   0.3142   0.4992   0.7395     112  1765  -190.948714
+   300000   2268 0.74 0.41 0.53 0.06   0.2449   0.4372   0.7002     122  1651  -190.951987
+   400000    700 0.82 0.44 0.50 0.06   0.2586   0.3900   0.6324      43   553  -191.003676
+arm                proposed accepted downhill
+dls-kernel             2315     1580      222
+soap                   1810     1618       51
+single                 1788     1649       48
+sym                    1509     1250      110
+surface                 776      583       48
+burst                   557      289       12
+all                      80       75        2
+actions {'prior-core': 1, 'orbit-completion': 125, 'stall-climb': 82}
+  hop 128 window ? stall-climb e -190.780917
+  hop 159 window ? stall-climb e -190.277256
+  hop 207 window ? stall-climb e -190.712305
+  hop 252 window ? stall-climb e -190.735900
+  hop 302 window ? stall-climb e -190.634926
+  hop 360 window ? stall-climb e -190.913850
+  hop 395 window ? stall-climb e -190.517549
+  hop 432 window ? stall-climb e -190.253147
+  hop 519 window ? stall-climb e -190.780917
+  hop 556 window ? stall-climb e -190.622254
+  hop 673 window ? stall-climb e -190.735148
+  hop 771 window ? stall-climb e -189.923715
+  hop 901 window ? stall-climb e -189.308540
+  hop 1007 window ? stall-climb e -190.533623
+  hop 1122 window ? stall-climb e -190.725052
+  hop 1253 window ? stall-climb e -190.356596
+  hop 1386 window ? stall-climb e -189.934066
+  hop 1499 window ? stall-climb e -190.290944
+  hop 1591 window ? stall-climb e -190.294103
+  hop 1710 window ? stall-climb e -190.625837
+  hop 1826 window ? stall-climb e -190.183701
+  hop 1920 window ? stall-climb e -190.140104
+  hop 2059 window ? stall-climb e -190.166294
+  hop 2191 window ? stall-climb e -190.037175
+  hop 2300 window ? stall-climb e -190.251564
+  hop 2419 window ? stall-climb e -190.576519
+  hop 2549 window ? stall-climb e -190.518993
+  hop 2669 window ? stall-climb e -190.365749
+  hop 2781 window ? stall-climb e -190.667772
+  hop 2895 window ? stall-climb e -190.563308
+  hop 3023 window ? stall-climb e -190.591399
+  hop 3142 window ? stall-climb e -190.137108
+  hop 3257 window ? stall-climb e -190.780917
+  hop 3381 window ? stall-climb e -190.355367
+  hop 3491 window ? stall-climb e -190.556483
+  hop 3605 window ? stall-climb e -190.913850
+  hop 3722 window ? stall-climb e -190.668926
+  hop 3833 window ? stall-climb e -190.569836
+  hop 3956 window ? stall-climb e -190.578733
+  hop 4082 window ? stall-climb e -189.865610
+  hop 4204 window ? stall-climb e -190.513629
+  hop 4282 window ? stall-climb e -190.492063
+  hop 4403 window ? stall-climb e -190.262295
+  hop 4542 window ? stall-climb e -190.730293
+  hop 4663 window ? stall-climb e -190.422236
+  hop 4781 window ? stall-climb e -190.744297
+  hop 4898 window ? stall-climb e -190.451197
+  hop 5030 window ? stall-climb e -190.735148
+  hop 5149 window ? stall-climb e -190.725052
+  hop 5273 window ? stall-climb e -190.770815
+  hop 5383 window ? stall-climb e -190.664268
+  hop 5481 window ? stall-climb e -190.683464
+  hop 5604 window ? stall-climb e -190.948714
+  hop 5715 window ? stall-climb e -190.256592
+  hop 5829 window ? stall-climb e -189.979977
+  hop 5947 window ? stall-climb e -190.297967
+  hop 6060 window ? stall-climb e -190.780917
+  hop 6166 window ? stall-climb e -190.681272
+  hop 6279 window ? stall-climb e -190.279866
+  hop 6401 window ? stall-climb e -190.470575
+  hop 6520 window ? stall-climb e -190.768752
+  hop 6626 window ? stall-climb e -190.815346
+  hop 6742 window ? stall-climb e -190.518291
+  hop 6839 window ? stall-climb e -190.298944
+  hop 6961 window ? stall-climb e -190.842966
+  hop 7084 window ? stall-climb e -190.156111
+  hop 7183 window ? stall-climb e -190.591656
+  hop 7317 window ? stall-climb e -190.780267
+  hop 7429 window ? stall-climb e -190.207830
+  hop 7548 window ? stall-climb e -190.540345
+  hop 7651 window ? stall-climb e -190.071794
+  hop 7759 window ? stall-climb e -190.537026
+  hop 7872 window ? stall-climb e -190.760419
+  hop 8008 window ? stall-climb e -190.642857
+  hop 8135 window ? stall-climb e -190.586873
+  hop 8268 window ? stall-climb e -190.007873
+  hop 8394 window ? stall-climb e -190.976926
+  hop 8527 window ? stall-climb e -190.354974
+  hop 8654 window ? stall-climb e -190.228755
+  hop 8778 window ? stall-climb e -190.681052
+  hop 8894 window ? stall-climb e -190.721452
+  hop 9037 window ? stall-climb e -190.816573
+records
+  hop 29 e -190.770815 arm dls-kernel
+  hop 33 e -190.779305 arm sym
+  hop 40 e -190.799805 arm dls-kernel
+  hop 48 e -190.913850 arm dls-kernel
+  hop 82 e -190.948714 arm dls-kernel
+  hop 462 e -190.980017 arm dls-kernel
+  hop 9049 e -191.003676 arm soap
+most occupied minima (energy, hops)
+  -190.492063 31
+  -190.809099 24
+  -190.948714 23
+  -190.768752 19
+  -190.913850 18
+  -190.842966 18
+  -190.532837 16
+  -190.779305 15
+after the final best: hops 1 acceptance 1.000 median gap 0.3926 distinct stood 1 fraction within 0.05 0.000
+== trace-2005.txt.gz
+best -190.98331173 gap 0.04754107 hops 6586 calls 327869 best first held at 327869
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1224 0.84 0.43 0.27 0.29   0.2111   0.3775   0.6047     259   957  -190.980017
+   100000   2376 0.79 0.41 0.53 0.06   0.2319   0.4196   0.6837     115  1873  -190.980017
+   200000   2347 0.72 0.39 0.56 0.06   0.2239   0.4141   0.6354     101  1682  -190.980017
+   300000    639 0.78 0.41 0.52 0.07   0.3265   0.4202   0.6325      41   491  -190.983312
+arm                proposed accepted downhill
+dls-kernel             1738     1112      210
+single                 1401     1258       32
+soap                   1317     1202       40
+sym                    1018      823       84
+surface                 543      405       32
+burst                   508      263       18
+all                      61       57        0
+actions {'prior-core': 1, 'orbit-completion': 69, 'stall-climb': 63}
+  hop 94 window ? stall-climb e -190.617726
+  hop 125 window ? stall-climb e -190.504509
+  hop 173 window ? stall-climb e -190.495035
+  hop 222 window ? stall-climb e -190.576213
+  hop 268 window ? stall-climb e -190.495875
+  hop 315 window ? stall-climb e -190.250592
+  hop 360 window ? stall-climb e -190.331982
+  hop 407 window ? stall-climb e -190.451421
+  hop 449 window ? stall-climb e -190.214547
+  hop 489 window ? stall-climb e -190.910778
+  hop 530 window ? stall-climb e -190.649784
+  hop 588 window ? stall-climb e -190.910778
+  hop 686 window ? stall-climb e -190.429728
+  hop 827 window ? stall-climb e -190.440461
+  hop 918 window ? stall-climb e -190.495060
+  hop 1041 window ? stall-climb e -190.842640
+  hop 1140 window ? stall-climb e -190.851283
+  hop 1263 window ? stall-climb e -190.915719
+  hop 1396 window ? stall-climb e -190.948714
+  hop 1499 window ? stall-climb e -190.783758
+  hop 1632 window ? stall-climb e -190.263580
+  hop 1739 window ? stall-climb e -190.550364
+  hop 1862 window ? stall-climb e -190.246247
+  hop 1982 window ? stall-climb e -190.200099
+  hop 2109 window ? stall-climb e -190.913850
+  hop 2211 window ? stall-climb e -190.498586
+  hop 2325 window ? stall-climb e -190.774066
+  hop 2450 window ? stall-climb e -190.398377
+  hop 2577 window ? stall-climb e -190.439773
+  hop 2729 window ? stall-climb e -190.399206
+  hop 2847 window ? stall-climb e -190.913850
+  hop 2964 window ? stall-climb e -190.835400
+  hop 3078 window ? stall-climb e -190.114569
+  hop 3196 window ? stall-climb e -190.459336
+  hop 3325 window ? stall-climb e -190.532879
+  hop 3454 window ? stall-climb e -190.842966
+  hop 3581 window ? stall-climb e -190.483437
+  hop 3692 window ? stall-climb e -190.779305
+  hop 3809 window ? stall-climb e -190.770313
+  hop 3927 window ? stall-climb e -190.659280
+  hop 4040 window ? stall-climb e -189.998077
+  hop 4165 window ? stall-climb e -190.351987
+  hop 4297 window ? stall-climb e -190.683255
+  hop 4406 window ? stall-climb e -190.582810
+  hop 4536 window ? stall-climb e -190.779305
+  hop 4660 window ? stall-climb e -190.539408
+  hop 4782 window ? stall-climb e -190.948714
+  hop 4897 window ? stall-climb e -190.720351
+  hop 5018 window ? stall-climb e -190.668926
+  hop 5153 window ? stall-climb e -190.481334
+  hop 5273 window ? stall-climb e -190.251360
+  hop 5406 window ? stall-climb e -190.081255
+  hop 5531 window ? stall-climb e -190.553172
+  hop 5660 window ? stall-climb e -190.770969
+  hop 5770 window ? stall-climb e -190.814423
+  hop 5872 window ? stall-climb e -190.790789
+  hop 5995 window ? stall-climb e -190.913850
+  hop 6103 window ? stall-climb e -190.582711
+  hop 6226 window ? stall-climb e -190.780917
+  hop 6339 window ? stall-climb e -190.541882
+  hop 6461 window ? stall-climb e -190.462862
+  hop 6569 window ? stall-climb e -190.635453
+  hop 6699 window ? stall-climb e -190.257609
+records
+  hop 3 e -190.768752 arm sym
+  hop 17 e -190.779305 arm dls-kernel
+  hop 45 e -190.780917 arm burst
+  hop 46 e -190.948714 arm dls-kernel
+  hop 691 e -190.980017 arm dls-kernel
+  hop 6725 e -190.983312 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.755314 29
+  -190.779305 22
+  -190.768752 15
+  -190.948714 13
+  -190.842966 12
+  -190.790663 11
+  -190.915719 10
+  -190.758548 10
+after the final best: hops 1 acceptance 1.000 median gap 0.4618 distinct stood 1 fraction within 0.05 0.000
+== trace-2009.txt.gz
+best -191.00367602 gap 0.02717678 hops 5235 calls 263868 best first held at 263868
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1331 0.89 0.39 0.34 0.27   0.3142   0.6066   0.8382     297  1121  -190.913850
+   100000   2359 0.86 0.44 0.51 0.06   0.2653   0.4897   0.7334     119  1953  -190.980017
+   200000   1545 0.88 0.39 0.55 0.06   0.3507   0.6051   0.8431      92  1288  -191.003676
+arm                proposed accepted downhill
+dls-kernel             1472     1257      185
+single                 1068     1041       15
+sym                     940      827       59
+soap                    807      773        6
+surface                 492      392       42
+burst                   413      236       18
+all                      43       41        0
+actions {'prior-core': 1, 'orbit-completion': 63, 'stall-climb': 48}
+  hop 67 window ? stall-climb e -190.714158
+  hop 155 window ? stall-climb e -189.497940
+  hop 177 window ? stall-climb e -190.509213
+  hop 225 window ? stall-climb e -190.403500
+  hop 274 window ? stall-climb e -190.198077
+  hop 307 window ? stall-climb e -189.750250
+  hop 351 window ? stall-climb e -189.783839
+  hop 400 window ? stall-climb e -190.277600
+  hop 460 window ? stall-climb e -190.278669
+  hop 493 window ? stall-climb e -190.016134
+  hop 534 window ? stall-climb e -190.036052
+  hop 610 window ? stall-climb e -190.455102
+  hop 724 window ? stall-climb e -190.401116
+  hop 843 window ? stall-climb e -189.791473
+  hop 969 window ? stall-climb e -189.990246
+  hop 1106 window ? stall-climb e -190.870048
+  hop 1245 window ? stall-climb e -190.436821
+  hop 1365 window ? stall-climb e -190.571111
+  hop 1499 window ? stall-climb e -190.688450
+  hop 1592 window ? stall-climb e -190.456901
+  hop 1730 window ? stall-climb e -190.672282
+  hop 1977 window ? stall-climb e -190.556684
+  hop 2072 window ? stall-climb e -190.285774
+  hop 2209 window ? stall-climb e -190.236395
+  hop 2330 window ? stall-climb e -190.176392
+  hop 2451 window ? stall-climb e -190.521105
+  hop 2682 window ? stall-climb e -190.613106
+  hop 2773 window ? stall-climb e -190.467222
+  hop 2895 window ? stall-climb e -190.755314
+  hop 3015 window ? stall-climb e -190.217260
+  hop 3147 window ? stall-climb e -190.378621
+  hop 3374 window ? stall-climb e -189.980488
+  hop 3464 window ? stall-climb e -190.338764
+  hop 3584 window ? stall-climb e -190.344414
+  hop 3675 window ? stall-climb e -190.385749
+  hop 3814 window ? stall-climb e -190.483747
+  hop 3939 window ? stall-climb e -190.784878
+  hop 4053 window ? stall-climb e -190.095170
+  hop 4171 window ? stall-climb e -189.923626
+  hop 4276 window ? stall-climb e -190.788952
+  hop 4408 window ? stall-climb e -190.204885
+  hop 4522 window ? stall-climb e -190.318221
+  hop 4663 window ? stall-climb e -190.600407
+  hop 4808 window ? stall-climb e -190.617061
+  hop 4945 window ? stall-climb e -190.797999
+  hop 5086 window ? stall-climb e -190.571098
+  hop 5189 window ? stall-climb e -190.239169
+  hop 5309 window ? stall-climb e -190.612364
+records
+  hop 3 e -190.768752 arm surface
+  hop 5 e -190.771588 arm dls-kernel
+  hop 12 e -190.842966 arm dls-kernel
+  hop 101 e -190.913850 arm dls-kernel
+  hop 1811 e -190.928811 arm dls-kernel
+  hop 2545 e -190.948714 arm dls-kernel
+  hop 3220 e -190.980017 arm dls-kernel
+  hop 5355 e -191.003676 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.906938 13
+  -190.835401 10
+  -190.906937 9
+  -190.771588 8
+  -190.731511 8
+  -190.936895 8
+  -190.870048 7
+  -190.685891 7
+after the final best: hops 1 acceptance 1.000 median gap 0.1164 distinct stood 1 fraction within 0.05 0.000
+== trace-2010.txt.gz
+best -191.00780522 gap 0.02304758 hops 15904 calls 705280 best first held at 705228
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1604 0.86 0.46 0.32 0.22   0.2355   0.3908   0.6134     269  1219  -191.006165
+   100000   2322 0.87 0.42 0.53 0.06   0.3841   0.6034   0.8222     120  1983  -190.948714
+   200000   2338 0.79 0.43 0.51 0.06   0.2591   0.4349   0.6719     110  1828  -190.948714
+   300000   2317 0.80 0.44 0.50 0.06   0.2707   0.5325   0.7817     128  1838  -190.976926
+   400000   2334 0.76 0.45 0.49 0.06   0.2491   0.4242   0.6232     114  1714  -191.003676
+   500000   2375 0.79 0.40 0.54 0.06   0.3521   0.5361   0.7428     122  1859  -190.951987
+   600000   2486 0.78 0.40 0.55 0.05   0.3139   0.4688   0.7747     107  1908  -190.980017
+   700000    128 0.90 0.55 0.36 0.09   0.3614   0.4510   0.6707      11   103  -191.007805
+arm                proposed accepted downhill
+dls-kernel             4202     2893      370
+single                 3434     3173       65
+soap                   3103     2835       45
+sym                    2866     2367      176
+surface                1167      863       64
+burst                   996      535       21
+all                     136      122        1
+actions {'prior-core': 1, 'orbit-completion': 186, 'stall-climb': 138}
+  hop 86 window ? stall-climb e -190.800288
+  hop 124 window ? stall-climb e -190.599096
+  hop 171 window ? stall-climb e -190.118045
+  hop 223 window ? stall-climb e -190.565135
+  hop 275 window ? stall-climb e -190.367170
+  hop 337 window ? stall-climb e -190.510572
+  hop 391 window ? stall-climb e -190.837477
+  hop 463 window ? stall-climb e -190.318521
+  hop 562 window ? stall-climb e -190.529808
+  hop 639 window ? stall-climb e -190.711934
+  hop 754 window ? stall-climb e -190.765333
+  hop 897 window ? stall-climb e -190.251809
+  hop 1039 window ? stall-climb e -190.498818
+  hop 1152 window ? stall-climb e -190.333035
+  hop 1258 window ? stall-climb e -190.779937
+  hop 1397 window ? stall-climb e -190.774066
+  hop 1499 window ? stall-climb e -190.755314
+  hop 1603 window ? stall-climb e -190.774066
+  hop 1714 window ? stall-climb e -190.249462
+  hop 1822 window ? stall-climb e -190.854337
+  hop 1936 window ? stall-climb e -190.536081
+  hop 2048 window ? stall-climb e -190.672393
+  hop 2169 window ? stall-climb e -190.277813
+  hop 2270 window ? stall-climb e -190.083161
+  hop 2386 window ? stall-climb e -189.570013
+  hop 2512 window ? stall-climb e -190.967663
+  hop 2633 window ? stall-climb e -189.935896
+  hop 2744 window ? stall-climb e -190.532343
+  hop 2878 window ? stall-climb e -190.345620
+  hop 3010 window ? stall-climb e -190.333615
+  hop 3127 window ? stall-climb e -190.454214
+  hop 3249 window ? stall-climb e -190.704625
+  hop 3349 window ? stall-climb e -190.668732
+  hop 3483 window ? stall-climb e -190.707146
+  hop 3602 window ? stall-climb e -190.290334
+  hop 3737 window ? stall-climb e -190.075662
+  hop 3882 window ? stall-climb e -190.768752
+  hop 3986 window ? stall-climb e -190.354834
+  hop 4101 window ? stall-climb e -190.356922
+  hop 4224 window ? stall-climb e -190.948714
+  hop 4353 window ? stall-climb e -190.735900
+  hop 4459 window ? stall-climb e -190.653671
+  hop 4583 window ? stall-climb e -190.384460
+  hop 4693 window ? stall-climb e -190.417819
+  hop 4830 window ? stall-climb e -190.913850
+  hop 4953 window ? stall-climb e -190.317820
+  hop 5065 window ? stall-climb e -190.659280
+  hop 5176 window ? stall-climb e -190.621545
+  hop 5302 window ? stall-climb e -190.842966
+  hop 5400 window ? stall-climb e -190.535636
+  hop 5508 window ? stall-climb e -190.814423
+  hop 5644 window ? stall-climb e -190.269522
+  hop 5759 window ? stall-climb e -190.415772
+  hop 5875 window ? stall-climb e -190.268788
+  hop 6004 window ? stall-climb e -190.391672
+  hop 6142 window ? stall-climb e -190.913850
+  hop 6277 window ? stall-climb e -190.567027
+  hop 6403 window ? stall-climb e -190.593100
+  hop 6492 window ? stall-climb e -190.625764
+  hop 6604 window ? stall-climb e -190.337070
+  hop 6704 window ? stall-climb e -190.857490
+  hop 6827 window ? stall-climb e -190.057453
+  hop 6940 window ? stall-climb e -190.772285
+  hop 7062 window ? stall-climb e -190.170590
+  hop 7176 window ? stall-climb e -190.431713
+  hop 7298 window ? stall-climb e -190.371145
+  hop 7419 window ? stall-climb e -190.397355
+  hop 7532 window ? stall-climb e -190.503804
+  hop 7665 window ? stall-climb e -190.791194
+  hop 7769 window ? stall-climb e -189.994342
+  hop 7889 window ? stall-climb e -190.319547
+  hop 8007 window ? stall-climb e -190.261484
+  hop 8142 window ? stall-climb e -190.790789
+  hop 8271 window ? stall-climb e -190.842640
+  hop 8401 window ? stall-climb e -190.770969
+  hop 8511 window ? stall-climb e -190.748263
+  hop 8635 window ? stall-climb e -190.366698
+  hop 8754 window ? stall-climb e -190.285028
+  hop 8887 window ? stall-climb e -190.703792
+  hop 9016 window ? stall-climb e -190.820944
+  hop 9142 window ? stall-climb e -190.463529
+  hop 9245 window ? stall-climb e -190.770815
+  hop 9374 window ? stall-climb e -190.779305
+  hop 9494 window ? stall-climb e -190.815909
+  hop 9618 window ? stall-climb e -190.755314
+  hop 9722 window ? stall-climb e -190.551794
+  hop 9829 window ? stall-climb e -190.725052
+  hop 9959 window ? stall-climb e -189.866787
+  hop 10056 window ? stall-climb e -190.234743
+  hop 10172 window ? stall-climb e -190.779305
+  hop 10299 window ? stall-climb e -190.784878
+  hop 10422 window ? stall-climb e -190.809881
+  hop 10544 window ? stall-climb e -190.539416
+  hop 10670 window ? stall-climb e -190.585730
+  hop 10773 window ? stall-climb e -190.631645
+  hop 10892 window ? stall-climb e -190.327248
+  hop 11036 window ? stall-climb e -190.361283
+  hop 11155 window ? stall-climb e -190.375517
+  hop 11274 window ? stall-climb e -190.646849
+  hop 11408 window ? stall-climb e -190.145088
+  hop 11530 window ? stall-climb e -190.251602
+  hop 11659 window ? stall-climb e -190.333443
+  hop 11773 window ? stall-climb e -190.429628
+  hop 11891 window ? stall-climb e -190.527969
+  hop 12018 window ? stall-climb e -190.635603
+  hop 12127 window ? stall-climb e -190.374660
+  hop 12256 window ? stall-climb e -190.714635
+  hop 12360 window ? stall-climb e -190.735148
+  hop 12474 window ? stall-climb e -190.226664
+  hop 12602 window ? stall-climb e -190.015807
+  hop 12732 window ? stall-climb e -190.239921
+  hop 12866 window ? stall-climb e -190.675660
+  hop 12991 window ? stall-climb e -190.615893
+  hop 13093 window ? stall-climb e -190.579653
+  hop 13217 window ? stall-climb e -190.741197
+  hop 13331 window ? stall-climb e -190.266355
+  hop 13464 window ? stall-climb e -190.423469
+  hop 13583 window ? stall-climb e -190.570448
+  hop 13715 window ? stall-climb e -190.622254
+  hop 13821 window ? stall-climb e -190.613632
+  hop 13944 window ? stall-climb e -189.984135
+  hop 14081 window ? stall-climb e -190.580022
+  hop 14223 window ? stall-climb e -190.879028
+  hop 14344 window ? stall-climb e -190.528851
+  hop 14453 window ? stall-climb e -190.842966
+  hop 14586 window ? stall-climb e -190.061133
+  hop 14721 window ? stall-climb e -190.326351
+  hop 14850 window ? stall-climb e -190.784584
+  hop 14980 window ? stall-climb e -190.185940
+  hop 15090 window ? stall-climb e -190.400500
+  hop 15208 window ? stall-climb e -190.352429
+  hop 15326 window ? stall-climb e -190.481369
+  hop 15460 window ? stall-climb e -190.077435
+  hop 15578 window ? stall-climb e -190.504467
+  hop 15716 window ? stall-climb e -189.978349
+  hop 15854 window ? stall-climb e -190.691651
+  hop 15983 window ? stall-climb e -190.537325
+  hop 16122 window ? stall-climb e -190.458103
+records
+  hop 23 e -190.880692 arm dls-kernel
+  hop 32 e -190.948714 arm dls-kernel
+  hop 467 e -191.006165 arm dls-kernel
+  hop 16243 e -191.007805 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.768752 30
+  -190.946856 18
+  -190.614196 17
+  -190.779305 16
+  -190.755314 15
+  -190.892555 15
+  -190.915719 15
+  -190.842966 13
+after the final best: hops 3 acceptance 1.000 median gap 0.0000 distinct stood 3 fraction within 0.05 0.667
+== trace-2011.txt.gz
+best -190.98331173 gap 0.04754107 hops 7622 calls 369690 best first held at 369690
+window      hops  acc  ret  scr  full   gap_q1   gap_med  gap_q3  offered stood  best_in_win
+        0   1351 0.83 0.43 0.32 0.25   0.2227   0.3524   0.6308     277  1055  -190.980017
+   100000   2228 0.76 0.42 0.51 0.06   0.2233   0.3568   0.5990      97  1670  -190.977377
+   200000   2389 0.74 0.40 0.54 0.05   0.2351   0.4083   0.6541     105  1742  -190.980017
+   300000   1654 0.82 0.42 0.53 0.05   0.3570   0.5617   0.7625      76  1335  -190.983312
+arm                proposed accepted downhill
+dls-kernel             1921     1241      188
+single                 1647     1504       42
+soap                   1483     1328       25
+sym                    1348     1094      109
+burst                   581      307       24
+surface                 571      405       41
+all                      71       63        0
+actions {'prior-core': 1, 'orbit-completion': 116, 'stall-climb': 72}
+  hop 63 window ? stall-climb e -190.738607
+  hop 90 window ? stall-climb e -190.948714
+  hop 131 window ? stall-climb e -190.585704
+  hop 171 window ? stall-climb e -190.189498
+  hop 213 window ? stall-climb e -190.157047
+  hop 258 window ? stall-climb e -190.284075
+  hop 302 window ? stall-climb e -190.184632
+  hop 338 window ? stall-climb e -190.658313
+  hop 392 window ? stall-climb e -190.361653
+  hop 444 window ? stall-climb e -190.326413
+  hop 489 window ? stall-climb e -190.469376
+  hop 542 window ? stall-climb e -190.283289
+  hop 651 window ? stall-climb e -190.779305
+  hop 780 window ? stall-climb e -190.537312
+  hop 900 window ? stall-climb e -190.713037
+  hop 1015 window ? stall-climb e -190.366027
+  hop 1128 window ? stall-climb e -190.384274
+  hop 1260 window ? stall-climb e -190.735900
+  hop 1385 window ? stall-climb e -190.842966
+  hop 1514 window ? stall-climb e -190.452515
+  hop 1612 window ? stall-climb e -190.779305
+  hop 1708 window ? stall-climb e -190.390533
+  hop 1840 window ? stall-climb e -190.815909
+  hop 1958 window ? stall-climb e -190.317049
+  hop 2084 window ? stall-climb e -190.658446
+  hop 2223 window ? stall-climb e -190.423469
+  hop 2339 window ? stall-climb e -190.450320
+  hop 2459 window ? stall-climb e -190.948714
+  hop 2577 window ? stall-climb e -190.541882
+  hop 2699 window ? stall-climb e -190.727960
+  hop 2817 window ? stall-climb e -190.948714
+  hop 2930 window ? stall-climb e -190.771588
+  hop 3039 window ? stall-climb e -190.948714
+  hop 3151 window ? stall-climb e -190.470575
+  hop 3261 window ? stall-climb e -189.876273
+  hop 3350 window ? stall-climb e -190.842966
+  hop 3474 window ? stall-climb e -190.668905
+  hop 3589 window ? stall-climb e -190.577279
+  hop 3692 window ? stall-climb e -190.713037
+  hop 3821 window ? stall-climb e -190.534535
+  hop 3939 window ? stall-climb e -190.936096
+  hop 4067 window ? stall-climb e -190.015148
+  hop 4200 window ? stall-climb e -190.423215
+  hop 4343 window ? stall-climb e -190.130512
+  hop 4461 window ? stall-climb e -190.646443
+  hop 4591 window ? stall-climb e -190.591885
+  hop 4717 window ? stall-climb e -190.635380
+  hop 4834 window ? stall-climb e -190.948714
+  hop 4963 window ? stall-climb e -190.613656
+  hop 5091 window ? stall-climb e -190.761447
+  hop 5189 window ? stall-climb e -190.537630
+  hop 5296 window ? stall-climb e -190.382663
+  hop 5421 window ? stall-climb e -190.746805
+  hop 5541 window ? stall-climb e -190.674525
+  hop 5655 window ? stall-climb e -190.771588
+  hop 5769 window ? stall-climb e -190.814423
+  hop 5883 window ? stall-climb e -190.790789
+  hop 6015 window ? stall-climb e -190.717865
+  hop 6126 window ? stall-climb e -190.948714
+  hop 6258 window ? stall-climb e -190.668926
+  hop 6382 window ? stall-climb e -190.246365
+  hop 6505 window ? stall-climb e -190.808306
+  hop 6630 window ? stall-climb e -190.555831
+  hop 6742 window ? stall-climb e -190.755314
+  hop 6835 window ? stall-climb e -190.815909
+  hop 6950 window ? stall-climb e -190.742797
+  hop 7070 window ? stall-climb e -190.607597
+  hop 7207 window ? stall-climb e -190.073387
+  hop 7335 window ? stall-climb e -189.873598
+  hop 7461 window ? stall-climb e -190.101856
+  hop 7587 window ? stall-climb e -190.428779
+  hop 7708 window ? stall-climb e -190.501608
+records
+  hop 8 e -190.762938 arm dls-kernel
+  hop 10 e -190.980017 arm dls-kernel
+  hop 7814 e -190.983312 arm dls-kernel
+most occupied minima (energy, hops)
+  -190.768752 25
+  -190.842966 18
+  -190.948714 17
+  -190.817557 13
+  -190.779305 12
+  -190.851720 12
+  -190.771443 12
+  -190.771588 11
+after the final best: hops 1 acceptance 1.000 median gap 0.2090 distinct stood 1 fraction within 0.05 0.000
