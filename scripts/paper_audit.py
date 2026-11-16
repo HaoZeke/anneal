@@ -625,8 +625,9 @@ def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str
     """A summary file derived from per-seed rows must match them."""
     rows = audit.rows(per_seed)
     for line in audit.rows(summary):
-        group = pick(rows, system=line["system"], **{arm_key: line["arm"]})
-        where = f"{summary} {line['system']} {line['arm']}"
+        harness = {"harness_revision": line["harness_revision"]} if "harness_revision" in line else {}
+        group = pick(rows, system=line["system"], **{arm_key: line["arm"]}, **harness)
+        where = f"{summary} {line['system']} {line['arm']}" + (f" {line['harness_revision'][:8]}" if harness else "")
         calls = [float(r[calls_key]) for r in group]
         audit.cell(where, "hits", line["hits"], float(hits_of(group)))
         audit.cell(where, "evals_median", line["evals_median"], median(calls))
@@ -636,7 +637,10 @@ def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str
         for r in group:
             if r["hit"] in ("1", "true") and float(r[calls_key]) > float(r["charged"]):
                 audit.record(False, per_seed, f"{r['system']} {r['seed']} hit after its charged stop", r[calls_key], r["charged"])
-        other = pick(rows, system=line["system"], **{arm_key: "gmin" if line["arm"] == "anneal" else "anneal"})
+        # A GMIN rerun under a later harness is tested against the anneal rows;
+        # the anneal row carries the tests against the GMIN rows of its own harness.
+        other = pick(rows, system=line["system"], **{arm_key: "gmin" if line["arm"] == "anneal" else "anneal"},
+                     **(harness if line["arm"] == "anneal" else {}))
         if line.get(mw_column):
             b = [float(r[calls_key]) for r in other]
             audit.cell(where, mw_column, line[mw_column], mann_whitney(calls, b, continuity))
@@ -649,6 +653,24 @@ def head_to_head(audit: Audit) -> None:
     summary_against_rows(audit, "bench/morse-h2h/results.csv", "bench/morse-h2h/seeds.csv", "code", "evals_to_hit", True)
     summary_against_rows(audit, "bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv",
                          "arm", "evals_to_hit", True)
+    path = "bench/metal-cluster-h2h/sc-n12/README.md"
+    sc_rows = audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
+    sc_summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
+    for line, row in md_table(audit, path, "System | Arm | Harness"):
+        group = [r for r in pick(sc_rows, system=row["System"], arm=row["Arm"])
+                 if r["harness_revision"].startswith(row["Harness"])]
+        where = f"{path}:{line} {row['System']} {row['Arm']} {row['Harness']}"
+        audit.cell(where, "seeds", "12", float(len(group)))
+        audit.cell(where, "hits", row["Hits"], frac(group))
+        audit.cell(where, "calls median", row["Calls median"], median([float(r["evals_to_hit"]) for r in group]))
+        audit.cell(where, "wall median", row["Wall median (s)"], median([float(r["wall_s"]) for r in group]))
+    rerun = [r for r in sc_summary if r["system"] == "sc96-38" and r["arm"] == "gmin"][-1]
+    audit.said(path, f"Only 9-6 at N=38 has been rerun, under harness {rerun['harness_revision'][:8]}.")
+    audit.cell(path, "rerun Fisher p", "1", float(rerun["fisher_p_vs_gmin"]))
+    audit.cell(path, "rerun Mann-Whitney p calls", "0.000592", float(rerun["mannwhitney_p_evals"]))
+    audit.cell(path, "rerun Mann-Whitney p wall", "0.624", float(rerun["mannwhitney_p_wall"]))
+    audit.cell(path, "rerun wall ratio", "1.148", float(rerun["wall_ratio"]))
+
     path = "bench/morse-h2h/README.md"
     results = audit.rows("bench/morse-h2h/results.csv")
     m38 = pick(results, system="m38r6", arm="anneal")[0]
