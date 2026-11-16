@@ -11656,7 +11656,7 @@ mod tests {
         assert!(rec.escape_on_stall && rec.trail_on_stall && !rec.restart_on_stall);
         assert!(rec.prior_soap && rec.prior_reseed && rec.prior_growth);
         assert!(rec.prior_core && rec.prior_motif && !rec.general_collective);
-        assert!(rec.plateau_heat && der.plateau_heat);
+        assert!(!rec.plateau_heat && !der.plateau_heat);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);

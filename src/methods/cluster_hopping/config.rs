@@ -1012,16 +1012,18 @@ pub struct Config {
     /// before any are spent. A walk whose cold hops keep finding records
     /// stays cold, and a hot walk keeps its heat and its position after a
     /// record, so the cold walk does not descend back into the funnel the
-    /// heat left. The factor multiplies
-    /// the biased Metropolis test, the Boltzmann weights of the exchange
-    /// kernel and the thermal soft-mode amplitude. The leave itself is
-    /// unchanged, and a chain that never reaches a plateau draws the same
-    /// calls. Needs [`Config::escape_on_stall`], which owns that clock. A
-    /// replica ladder sets its rungs' temperatures itself and does not heat.
+    /// heat left. The factor multiplies the biased Metropolis test, the
+    /// Boltzmann weights of the exchange kernel and the thermal soft-mode
+    /// amplitude. The leave itself is unchanged, and a chain that never
+    /// reaches a plateau draws the same calls. Needs
+    /// [`Config::escape_on_stall`], which owns that clock. A replica ladder
+    /// sets its rungs' temperatures itself and does not heat.
     ///
-    /// On in the paper preset. The factor is a ratio of the preset
+    /// Off in the paper preset: the same-session gate in
+    /// `bench/au55-general2` finds it gains Au55, LJ98 and LJ150 hits but
+    /// trails on M80 at rho=14. The factor is a ratio of the preset
     /// temperature and does not name a potential, a packing or a size.
-    #[serde(skip_serializing_if = "is_true")]
+    #[serde(skip_serializing_if = "is_false")]
     pub plateau_heat: bool,
     /// Exchange descent after every full quench of a labelled cluster.
     ///
@@ -1949,7 +1951,7 @@ impl Config {
             prior_handover: true,
             prior_motif: true,
             general_collective: false,
-            plateau_heat: true,
+            plateau_heat: false,
             homotop_descent: true,
             homotop_ranked: true,
             homotop_window: true,

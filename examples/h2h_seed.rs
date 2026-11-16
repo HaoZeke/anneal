@@ -129,7 +129,7 @@ fn apply_stride(mut cfg: Config) -> Config {
     {
         cfg.basin_stride = stride.max(1);
     }
-    // `0` keeps the walk at the preset temperature on a call plateau.
+    // `1` heats the walk on call plateaus, `0` keeps the preset temperature.
     match std::env::var("H2H_PLATEAU_HEAT").as_deref() {
         Ok("1") => cfg.plateau_heat = true,
         Ok("0") => cfg.plateau_heat = false,

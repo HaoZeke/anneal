@@ -145,16 +145,16 @@ fn paper_preset_priors_stay_out_of_the_resolved_hash() {
         dropped.resolved_sha256().unwrap(),
         cfg.resolved_sha256().unwrap()
     );
-    let mut cooled = cfg.clone();
-    cooled.plateau_heat = false;
+    let mut heated = cfg.clone();
+    heated.plateau_heat = true;
     assert!(
-        cooled
+        heated
             .resolved_json()
             .unwrap()
-            .contains("\"plateau_heat\":false")
+            .contains("\"plateau_heat\":true")
     );
     assert_ne!(
-        cooled.resolved_sha256().unwrap(),
+        heated.resolved_sha256().unwrap(),
         cfg.resolved_sha256().unwrap()
     );
     let mut plane = cfg;
