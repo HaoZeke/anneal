@@ -1312,3 +1312,13 @@ Neither quotes a Cambridge Lennard-Jones energy or a hexamer hit rate, so neithe
 
 Cite `xuCopperBorozene2026` and `changPathway2026`.
 
+## 2026-11-16 — The manuscript cites GOAT, and the printed gap is at sixteen waters
+
+The 11 November note said the manuscript does not cite de Souza. The manuscript cites `deSouzaGoat2025` and says the paper compares GOAT with CREST. It prints no water-cluster energy from that paper.
+
+The Wiley record of the same article, doi:10.1002/anie.202500393, read on 16 November 2026, is not limited to the abstract. On GFN2-xTB in the gas phase, the text says CREST and GOAT give the same results up to the octamer and then differ. For (H2O)16, GOAT finds an ice-derived structure with an ordered hydrogen-bond network, and CREST stops at a disordered configuration 1.45 kcal/mol above it. For (H2O)32, GOAT does not find that crystalline structure with the defaults, and it still finds lower minima. The figure caption says each algorithm was run three times, and the differences from the global minima are given in kcal/mol.
+
+The sealed hexamer counts are 121 of 192 and 97 of 192. The hexamer sits inside the range the paper calls the same. The paper gives no seed count and no motif hit rate, so those two fractions are not contradicted. The 1.45 kcal/mol gap is sixteen molecules. It is not one of the six polished hexamer gaps. A head-to-head that uses this comparison is (H2O)16 at GFN2-xTB, with the three-run protocol the figure names. The bare-hexamer comparison stays a budget-matched hit rate. Keep 1.45 kcal/mol out of the hexamer table.
+
+No new key. `deSouzaGoat2025` already carries that DOI.
+
