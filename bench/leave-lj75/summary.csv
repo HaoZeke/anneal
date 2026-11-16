@@ -1,0 +1,4 @@
+arm,hits,n,median_best,gap_to_reference,median_inside_s,median_outside_s,median_wall_s
+base,1,12,-396.28224883,1.21008217,36.787541,18.839934,55.681297
+leave,2,12,-396.28224883,1.21008217,36.428840,18.844169,55.213718
+compare,fisher_p,1,mann_whitney_U,67,mann_whitney_p,0.651291
