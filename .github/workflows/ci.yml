@@ -293,44 +293,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # ubuntu-latest keeps Android, .NET, Conda, browsers, and the
-      # toolcache on a disk that only guarantees about 14 GiB free.
-      # The test job then links a default-feature target and a second
-      # one for CI_FEATURES. The feature link died with no space left
-      # after the default suite had passed. Those preinstalled trees
-      # are unused here. Python stays; setup-python just installed it.
+      # The feature build's anneal-core test and example binaries outgrow
+      # the free disk an ubuntu-latest image guarantees.
       - name: Free disk space
         if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          df -h /
-          sudo rm -rf \
-            /usr/local/lib/android \
-            /usr/share/dotnet \
-            /usr/share/miniconda \
-            /usr/local/share/vcpkg \
-            /usr/local/.ghcup \
-            /opt/ghc \
-            /usr/share/swift \
-            /usr/local/share/powershell \
-            /usr/local/share/chromium \
-            /usr/local/share/chromedriver-linux64 \
-            /usr/local/share/edge_driver \
-            /usr/local/share/gecko_driver \
-            /opt/google \
-            /opt/microsoft \
-            /opt/az \
-            /usr/lib/jvm \
-            /home/linuxbrew
-          if [[ -d /opt/hostedtoolcache ]]; then
-            find /opt/hostedtoolcache -mindepth 1 -maxdepth 1 ! -name Python \
-              -exec sudo rm -rf {} +
-          fi
-          if command -v docker >/dev/null 2>&1; then
-            sudo docker image prune --all --force || true
-          fi
-          sudo apt-get clean
-          df -h /
+        run: bash scripts/ci_free_disk.sh
 
       - name: Checkout Vesin
         uses: actions/checkout@v6
@@ -385,21 +352,13 @@ jobs:
           echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
           echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
 
+      # The default-feature suite runs once per OS in `test-default`.
       # Do not pass `-undefined dynamic_lookup` on macOS. It applies to the
       # test harness as well as the cdylib. With pyo3's `extension-module`
       # feature the harness does not link libpython, and dyld then fails
       # before any test with `_PyBaseObject_Type` missing in the flat
       # namespace. build.rs links libpython for this invocation. Maturin
       # still passes the lookup flag when it builds the wheel.
-      - name: cargo test
-        run: cargo test
-
-      # Feature flags stamp new hashes on the same test binaries and
-      # examples. Keeping the default-feature target filled the disk
-      # during the second link.
-      - name: cargo clean (before feature tests)
-        run: cargo clean
-
       - name: cargo test (all satisfiable features)
         if: runner.os != 'macOS'
         run: cargo test --features "$CI_FEATURES,lammps"
@@ -473,6 +432,32 @@ jobs:
           .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'step')"
           .venv/bin/python -c "import array_api_strict"
           .venv/bin/python -m pytest pytest/test_chemfit*.py
+
+  # The default features pull in no pyo3 and link no Python, IRA, Vesin or
+  # LAMMPS, so this suite is the same binary under every matrix Python.
+  # It runs once per OS beside the feature cells instead of ahead of each
+  # of them. It is not a subset of the feature run: the
+  # `cfg(not(feature = ...))` fallbacks are compiled only here.
+  test-default:
+    name: Test default features (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, macos-26]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: bash scripts/ci_free_disk.sh
+
+      - name: cargo test
+        run: cargo test
 
   # pip builds the release sdist from its own files only. Installing it in a
   # fresh virtualenv catches a path the sdist leaves out. pytest runs from

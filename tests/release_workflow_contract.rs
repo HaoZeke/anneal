@@ -60,6 +60,50 @@ fn scientific_tests_optimize_kernels_without_disabling_debug_checks() {
     assert!(manifest.contains("overflow-checks = true"));
 }
 
+/// The text of one top-level job in a workflow, up to the next job.
+fn workflow_job<'a>(workflow: &'a str, name: &str) -> &'a str {
+    let start = workflow
+        .find(&format!("\n  {name}:\n"))
+        .unwrap_or_else(|| panic!("job {name}"))
+        + 1;
+    let rest = &workflow[start..];
+    let end = rest
+        .match_indices("\n  ")
+        .map(|(offset, _)| offset)
+        .find(|&offset| {
+            let line = rest[offset + 3..].lines().next().unwrap_or_default();
+            !line.starts_with(' ') && !line.starts_with('#') && line.ends_with(':')
+        })
+        .unwrap_or(rest.len());
+    &rest[..end]
+}
+
+// The default features run once per OS because no matrix Python reaches
+// them. The satisfiable features run on every OS and Python. CI may trim
+// debuginfo, never the optimisation or the checks of the test profile.
+#[test]
+fn ci_runs_the_default_and_feature_suites_on_every_os() {
+    let workflow = include_str!("../.github/workflows/ci.yml");
+    let features = workflow_job(workflow, "test");
+    let default = workflow_job(workflow, "test-default");
+    for job in [features, default] {
+        assert!(job.contains("os: [ubuntu-latest, macos-15, macos-26]"));
+    }
+    assert!(features.contains("python-version: [\"3.10\", \"3.11\", \"3.12\", \"3.13\"]"));
+    assert!(features.contains("cargo test --features \"$CI_FEATURES,lammps\""));
+    assert!(features.contains("cargo test --features \"$CI_FEATURES\"\n"));
+    assert!(default.contains("run: cargo test\n"));
+    assert!(workflow.contains("CARGO_PROFILE_TEST_DEBUG: line-tables-only"));
+    for knob in [
+        "CARGO_PROFILE_TEST_OPT_LEVEL",
+        "CARGO_PROFILE_TEST_DEBUG_ASSERTIONS",
+        "CARGO_PROFILE_TEST_OVERFLOW_CHECKS",
+        "--test-threads",
+    ] {
+        assert!(!workflow.contains(knob), "ci.yml sets {knob}");
+    }
+}
+
 #[test]
 fn ci_cancels_superseded_main_branch_runs() {
     let workflow = include_str!("../.github/workflows/ci.yml");
