@@ -37,9 +37,11 @@ import datetime
 import hashlib
 import os
 import random
+import shutil
 import signal
 import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -52,6 +54,7 @@ ARMS = ("anneal", "crest")
 # wdbase-1, -81.396292669509 Eh, at xtb 6.7.1's 27.21138505 eV per Hartree.
 REFERENCE_EV = -81.396292669509 * 27.21138505
 HIT_TOL = 0.001
+DRIVER_PATH_MAX = 64
 SCHEDULE_SEED = 20261115
 
 ROW_FIELDS = [
@@ -181,14 +184,23 @@ def run_crest(
     out.mkdir(parents=True, exist_ok=True)
     served = out / "driver"
     served.mkdir(exist_ok=True)
-    sock = out / "driver.sock"
+    # xtb 6.7.1 aborts on a --driver path of about 75 characters, so the
+    # wrappers and the socket sit in a short directory, copied into out.
+    short = Path(tempfile.mkdtemp(prefix="crest-"))
+    sock = short / "sock"
     target = f"{REFERENCE_EV + HIT_TOL:.10f}"
-    call = out / "driver-call"
-    call.write_text(f'#!/bin/sh\nexec "{driver}" call "{sock}"\n')
-    call.chmod(0o755)
-    wrapper = out / "xtb-driver"
-    wrapper.write_text(f'#!/bin/sh\nexec "{xtb}" "$@" --driver "{call}"\n')
-    wrapper.chmod(0o755)
+    call = short / "call"
+    wrapper = short / "xtb"
+    if len(str(call)) > DRIVER_PATH_MAX:
+        raise SystemExit(f"{call} is longer than {DRIVER_PATH_MAX} characters")
+    scripts = {
+        call: f'#!/bin/sh\nexec "{driver}" call "{sock}"\n',
+        wrapper: f'#!/bin/sh\nexec "{xtb}" "$@" --driver "{call}"\n',
+    }
+    for path, text in scripts.items():
+        path.write_text(text)
+        path.chmod(0o755)
+        (out / f"driver-{path.name}").write_text(text)
     with open(out / "driver.out", "w") as log:
         server = subprocess.Popen(
             [
@@ -272,8 +284,13 @@ def run_crest(
     wall = time.monotonic() - began
     subprocess.run([str(driver), "stop", str(sock)], check=True)
     server.wait(timeout=60)
+    shutil.rmtree(short, ignore_errors=True)
     (out / "exit.txt").write_text(code + "\n")
     fields = read_fields(served / "driver.txt")
+    if int(fields["calls"]) == 0:
+        raise RuntimeError(
+            f"no call reached the driver ({code}), see {preopt / 'opt.out'}"
+        )
     first = fields["first_hit_call"]
     hit = first != "none"
     inside = float(fields["inside_s"])
@@ -367,8 +384,6 @@ def summarise(
 
 
 def self_test() -> None:
-    import tempfile
-
     if abs(type7([1.0, 2.0, 3.0, 4.0], 0.5) - 2.5) > 1e-12:
         raise SystemExit("type 7")
     if two_sided_mw([1.0] * 3, [1.0] * 3) != 1.0:
