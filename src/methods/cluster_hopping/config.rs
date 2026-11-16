@@ -1347,6 +1347,16 @@ pub struct Config {
     /// [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub ring_moves: bool,
+    /// Coupled torsion draws beside the plain ones of a molecular library.
+    ///
+    /// The chain keeps the rotatable-bond changes of its accepted hops. Once
+    /// one of them turned two bonds or more, a quarter of the bond draws
+    /// turn every bond of one such change, each through a fresh uniform
+    /// angle (see [`super::torsion::Topology::propose_coupled`]). Crankshaft
+    /// draws keep their share. A library without the torsion arm, and a
+    /// chain without such a change, draws the same hops either way.
+    #[serde(skip_serializing_if = "is_false")]
+    pub torsion_coupling: bool,
     /// Refuse a quench step that turns over a stereocentre of a declared
     /// group, from the hand the quench started in.
     ///
@@ -1950,6 +1960,7 @@ impl Config {
             hmc: None,
             witness_tripleton_ceiling: false,
             ring_moves: false,
+            torsion_coupling: false,
             hold_stereocentres: false,
             measured_energy_scale: false,
         }

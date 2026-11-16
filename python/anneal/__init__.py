@@ -258,6 +258,7 @@ def cluster_search(
     groups=None,
     local_step: str | None = None,
     ring_moves: bool | None = None,
+    torsion_coupling: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
 ):
@@ -331,6 +332,10 @@ def cluster_search(
         two ring atoms that bound it, which keeps every bond length.
         ``None`` keeps the preset's: on for ``recommended=True``, off
         otherwise.
+      torsion_coupling: coupled torsion draws of a ``groups`` search. Once an
+        accepted hop has turned two rotatable bonds or more, a quarter of the
+        bond draws turn every bond of one such hop through fresh uniform
+        angles. ``None`` keeps the preset's.
       hold_stereocentres: refuse a quench step of a ``groups`` search that
         turns a four-bonded centre into its mirror image. ``None`` keeps the
         preset's: on for ``recommended=True``, off otherwise.
@@ -381,6 +386,8 @@ def cluster_search(
         kwargs["local_step"] = str(local_step)
     if ring_moves is not None:
         kwargs["ring_moves"] = bool(ring_moves)
+    if torsion_coupling is not None:
+        kwargs["torsion_coupling"] = bool(torsion_coupling)
     if hold_stereocentres is not None:
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:
