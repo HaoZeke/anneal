@@ -818,6 +818,12 @@ if get_option('with_tests')
                 'SuttonChenPotTest.cc',
                 '',
             ],
+            [
+                'KeptPotentialTest',
+                'kept_potential_test',
+                'KeptPotentialTest.cc',
+                '',
+            ],
             ['ReducedPairTest', 'reduced_pair_test', 'ReducedPairTest.cc', ''],
             ['EMTPotTest', 'emt_pot_test', 'EMTPotTest.cc', ''],
             ['EAMCellPotTest', 'eam_cell_pot_test', 'EAMCellPotTest.cc', ''],

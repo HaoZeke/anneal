@@ -13,7 +13,9 @@ extern "C" {
 #endif
 
 /* forces holds 3 * n doubles. stress holds 9 doubles when has_stress
- * is set. Returns 0, or 1 when an argument is unusable. */
+ * is set. Returns 0, or 1 when an argument is unusable. Each thread keeps
+ * the potential of its last call, whose pair list serves the next call
+ * with the same parameters, atom count and atomic numbers. */
 int rgpot_lj_eval(const double *xyz, const int *atomic_numbers, size_t n,
                   const double *box9, double u0, double cutoff, double psi,
                   double *forces, double *energy, int *has_stress,

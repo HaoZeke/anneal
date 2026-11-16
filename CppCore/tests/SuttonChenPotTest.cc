@@ -13,10 +13,12 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
 
+#include "rgpot/KeptPotential.hpp"
 #include "rgpot/PairTerms.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/SuttonChen/SuttonChenScales.hpp"
@@ -716,6 +718,160 @@ TEST_CASE("pair terms past the room are left for the second pass", "[SuttonChen]
   REQUIRE(terms.next() == nullptr);
   terms.release();
   REQUIRE(terms.size() == 0);
+}
+
+namespace {
+
+struct EntryResult {
+  int status = 1;
+  double energy = 0.0;
+  std::vector<double> forces;
+};
+
+EntryResult call_entry(const rgpot_sc_config &cfg, const std::vector<double> &xyz,
+                       const double *box) {
+  EntryResult r;
+  r.forces.assign(xyz.size(), 0.0);
+  r.status = rgpot_sutton_chen_energy_forces(&cfg, static_cast<int32_t>(xyz.size() / 3),
+                                             xyz.data(), box, &r.energy, r.forces.data());
+  return r;
+}
+
+/// A potential built for this call alone, as the C entry once did.
+EntryResult call_fresh(const rgpot_sc_config &raw, const std::vector<double> &xyz,
+                       const double *box) {
+  rgpot::SuttonChenConfig cfg;
+  cfg.epsilon = raw.epsilon;
+  cfg.c = raw.c;
+  cfg.a = raw.a;
+  cfg.n = raw.n;
+  cfg.m = raw.m;
+  cfg.cutoff = raw.cutoff;
+  cfg.periodic = raw.periodic != 0;
+  const rgpot::SuttonChenPot pot(cfg);
+  EntryResult r;
+  r.forces.assign(xyz.size(), 0.0);
+  rgpot::ForceOut out{};
+  out.F = r.forces.data();
+  pot.forceImpl({xyz.size() / 3, xyz.data(), nullptr, box}, &out);
+  r.status = 0;
+  r.energy = out.energy;
+  return r;
+}
+
+bool same_result(const EntryResult &a, const EntryResult &b) {
+  return a.status == b.status && std::memcmp(&a.energy, &b.energy, sizeof(double)) == 0 &&
+         same_bits(a.forces, b.forces);
+}
+
+} // namespace
+
+TEST_CASE("the C entry point keeps its potential until the parameters or atoms change",
+          "[SuttonChen][kept]") {
+  using Kept = rgpot::Kept<rgpot::SuttonChenPot>;
+  Kept::release();
+  double epsilon = 0.0;
+  double c = 0.0;
+  double a = 0.0;
+  int nexp = 0;
+  int mexp = 0;
+  const AtomMatrix pt38 = load_points("CppCore/tests/data/sc108/pt38", &epsilon,
+                                      &c, &a, &nexp, &mexp);
+  std::vector<double> pos;
+  std::vector<double> moved;
+  std::vector<double> spread;
+  for (size_t i = 0; i < pt38.rows(); ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      const double phase = 1.3 * static_cast<double>(3 * i + k);
+      pos.push_back(pt38(i, k) * (1.0 + 0.01 * std::sin(phase)));
+      moved.push_back(pt38(i, k) * (1.0 + 0.01 * std::cos(phase)));
+      // Past the skin of a 1.3 cutoff, so a kept list is built again.
+      spread.push_back(1.1 * pt38(i, k));
+    }
+  }
+  const std::vector<double> fewer(pos.begin(), pos.begin() + 3 * 13);
+
+  std::uint64_t builds = Kept::counts().builds;
+  std::uint64_t reuses = Kept::counts().reuses;
+  // Each call has the bits of a potential built for it alone, and either
+  // builds the kept potential or reuses it.
+  auto check = [&](const rgpot_sc_config &cfg, const std::vector<double> &xyz,
+                   const double *box, bool build) {
+    REQUIRE(same_result(call_entry(cfg, xyz, box), call_fresh(cfg, xyz, box)));
+    const rgpot::KeptCounts now = Kept::counts();
+    REQUIRE(now.builds == builds + (build ? 1 : 0));
+    REQUIRE(now.reuses == reuses + (build ? 0 : 1));
+    builds = now.builds;
+    reuses = now.reuses;
+  };
+
+  const rgpot_sc_config all{1.0, 34.408, 1.0, 10, 8, 0.0, 0};
+  check(all, pos, nullptr, true);
+  check(all, moved, nullptr, false);
+  check(all, pos, nullptr, false);
+  rgpot_sc_config deeper = all;
+  deeper.epsilon = 2.0;
+  check(deeper, pos, nullptr, true);
+  // One potential is kept, so going back builds again.
+  check(all, pos, nullptr, true);
+  check(all, fewer, nullptr, true);
+  check(all, pos, nullptr, true);
+  rgpot_sc_config nine_six = all;
+  nine_six.n = 9;
+  nine_six.m = 6;
+  check(nine_six, pos, nullptr, true);
+  // The key compares bits, so -0.0 is another cutoff with the same result.
+  rgpot_sc_config negative = all;
+  negative.cutoff = -0.0;
+  check(negative, pos, nullptr, true);
+
+  rgpot_sc_config cut = all;
+  cut.cutoff = 1.3;
+  check(cut, pos, nullptr, true);
+  check(cut, moved, nullptr, false);
+  check(cut, spread, nullptr, false);
+  check(cut, pos, nullptr, false);
+
+  const double box[9] = {20, 0, 0, 0, 20, 0, 0, 0, 20};
+  const double wider[9] = {24, 0, 0, 0, 22, 0, 0, 0, 20};
+  rgpot_sc_config cell = cut;
+  cell.periodic = 1;
+  check(cell, pos, box, true);
+  check(cell, moved, box, false);
+  // A new cell keeps the potential, whose neighbour update follows it.
+  check(cell, pos, wider, false);
+
+  // A call that fails drops the potential it ran on.
+  double energy = 0.0;
+  std::vector<double> forces(pos.size(), 0.0);
+  REQUIRE(rgpot_sutton_chen_energy_forces(&cell, 38, pos.data(), nullptr, &energy,
+                                          forces.data()) == 1);
+  REQUIRE(Kept::counts().reuses == reuses + 1);
+  reuses += 1;
+  check(cell, pos, box, true);
+  // Parameters the constructor rejects build nothing and keep nothing.
+  rgpot_sc_config flat = all;
+  flat.n = 0;
+  REQUIRE(rgpot_sutton_chen_energy_forces(&flat, 38, pos.data(), nullptr, &energy,
+                                          forces.data()) == 1);
+  REQUIRE(Kept::counts().builds == builds);
+  check(cell, pos, box, true);
+
+  // Another thread keeps its own potential.
+  EntryResult there;
+  EntryResult again;
+  rgpot::KeptCounts counts;
+  std::thread worker([&] {
+    there = call_entry(all, pos, nullptr);
+    again = call_entry(all, moved, nullptr);
+    counts = Kept::counts();
+  });
+  worker.join();
+  REQUIRE(same_result(there, call_fresh(all, pos, nullptr)));
+  REQUIRE(same_result(again, call_fresh(all, moved, nullptr)));
+  REQUIRE(counts.builds == 1);
+  REQUIRE(counts.reuses == 1);
+  check(cell, pos, box, false);
 }
 
 TEST_CASE("Sutton-Chen stress is opt-in and keeps the energy and force bits",

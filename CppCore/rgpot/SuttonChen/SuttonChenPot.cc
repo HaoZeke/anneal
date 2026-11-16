@@ -19,10 +19,12 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 // clang-format on
 
+#include "rgpot/KeptPotential.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
@@ -465,17 +467,31 @@ int export_force(const rgpot_sc_config *cfg, int32_t natoms,
       (natoms > 0 && (positions == nullptr || forces == nullptr))) {
     return 1;
   }
+  const auto n = static_cast<std::size_t>(natoms);
+  // The potential reads no species. Its neighbour update and pair terms
+  // carry over to the next call with the same parameters and atom count.
+  rgpot::KeptKey key;
+  key.f64(cfg->epsilon)
+      .f64(cfg->c)
+      .f64(cfg->a)
+      .i64(cfg->n)
+      .i64(cfg->m)
+      .f64(cfg->cutoff)
+      .i64(cfg->periodic != 0 ? 1 : 0)
+      .atoms(n, nullptr);
   try {
-    const rgpot::SuttonChenPot pot(config_from_c(*cfg));
-    rgpot::ForceOut out{};
-    out.F = forces;
-    out.energy = 0.0;
-    out.variance = 0.0;
-    out.has_stress = 0;
-    const rgpot::ForceInput in{static_cast<std::size_t>(natoms), positions,
-                               nullptr, box};
-    pot.forceImpl(in, &out);
-    *energy = out.energy;
+    *energy = rgpot::Kept<rgpot::SuttonChenPot>::with(
+        key, [&] { return std::make_unique<rgpot::SuttonChenPot>(config_from_c(*cfg)); },
+        [&](const rgpot::SuttonChenPot &pot) {
+          rgpot::ForceOut out{};
+          out.F = forces;
+          out.energy = 0.0;
+          out.variance = 0.0;
+          out.has_stress = 0;
+          const rgpot::ForceInput in{n, positions, nullptr, box};
+          pot.forceImpl(in, &out);
+          return out.energy;
+        });
   } catch (const std::exception &) {
     return 1;
   }

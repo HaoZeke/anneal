@@ -3,6 +3,7 @@
 
 #include "lj_eval.hpp"
 
+#include "rgpot/KeptPotential.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/engine_c_abi.h"
 
@@ -10,8 +11,7 @@
 
 #include <cstdio>
 #include <cstring>
-#include <string>
-#include <vector>
+#include <memory>
 
 namespace {
 
@@ -38,26 +38,27 @@ int rgpot_lj_eval(const double *xyz, const int *atomic_numbers, size_t n,
   if (!(cutoff > 0.0) || !(psi > 0.0)) {
     return 1;
   }
-  rgpot::LJConfig config;
-  config.u0 = u0;
-  config.cutoff = cutoff;
-  config.psi = psi;
-  rgpot::LJPot pot(config);
-  rgpot::types::AtomMatrix positions(n, 3);
-  if (n > 0) {
-    std::memcpy(positions.data(), xyz, 3 * n * sizeof(double));
-  }
-  std::vector<int> types(atomic_numbers, atomic_numbers + n);
-  rgpot::types::AtomMatrix force(rgpot::types::AtomMatrix::Zero(n, 3));
-  rgpot::ForceOut out{force.data(), 0.0, 0.0, {}, 0};
-  rgpot::ForceInput in{n, positions.data(), types.data(), box9};
-  pot.forceImpl(in, &out);
-  if (n > 0) {
-    std::memcpy(forces, force.data(), 3 * n * sizeof(double));
-  }
-  *energy = out.energy;
-  *has_stress = out.has_stress;
-  std::memcpy(stress, out.stress, 9 * sizeof(double));
+  // The pair list carries over to the next call with the same parameters,
+  // atom count and atomic numbers.
+  rgpot::KeptKey key;
+  key.f64(u0).f64(cutoff).f64(psi).atoms(n, n > 0 ? atomic_numbers : nullptr);
+  rgpot::Kept<rgpot::LJPot>::with(
+      key,
+      [&] {
+        rgpot::LJConfig config;
+        config.u0 = u0;
+        config.cutoff = cutoff;
+        config.psi = psi;
+        return std::make_unique<rgpot::LJPot>(config);
+      },
+      [&](const rgpot::LJPot &pot) {
+        rgpot::ForceOut out{forces, 0.0, 0.0, {}, 0};
+        const rgpot::ForceInput in{n, xyz, atomic_numbers, box9};
+        pot.forceImpl(in, &out);
+        *energy = out.energy;
+        *has_stress = out.has_stress;
+        std::memcpy(stress, out.stress, 9 * sizeof(double));
+      });
   return 0;
 }
 

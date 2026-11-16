@@ -64,7 +64,9 @@ struct rgpot_sc_config {
 /// The exported name is rgpot_sutton_chen_energy_forces. A trailing
 /// `_force` is the Fortran bind(c) shape the symbol audit hides.
 /// @a box may be null when @c periodic is 0. @a forces has room for
-/// @c 3 * natoms doubles.
+/// @c 3 * natoms doubles. Each thread keeps the potential of its last
+/// call: one with the same parameters and atom count reuses its neighbour
+/// update and pair terms, and any other builds a new one.
 RGPOT_SC_API int
 rgpot_sutton_chen_energy_forces(const rgpot_sc_config *cfg, int32_t natoms,
                                 const double *positions, const double *box,

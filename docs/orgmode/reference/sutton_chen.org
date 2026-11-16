@@ -57,6 +57,11 @@ force pass computes the pairs past it again, with the same bits.
 
 =rgpot_sutton_chen_energy_forces= is the C entry point.
 It takes an =rgpot_sc_config= and writes one energy and one force array.
+Each thread keeps the potential of its last call in =rgpot::Kept=
+(=rgpot/KeptPotential.hpp=), so a call with the same parameters and atom count
+reuses its neighbour update and the room for the pair terms.
+Any other call drops that potential and builds a new one, and so does a call
+that throws.
 
 * Reduced cluster pairs
 
