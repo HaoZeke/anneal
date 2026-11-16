@@ -774,6 +774,25 @@ rule agox_lj98:
         """
 
 
+# The paper headline panel on the 0.12.0 release build 07f89cad: LJ38,
+# LJ55, LJ75, LJ98, LJ102, LJ103, LJ104, LJ150, Au55 and M80 at rho 6 and
+# 14, seeds 2000-2011, paper budgets, one process on core 0, sudo unshare
+# --uts with hostname bench. Rows are appended to
+# bench/paper-0120/rows.csv with code_revision and host; that file is not
+# declared as an output because Snakemake removes declared outputs before
+# a job runs. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile paper_0120
+rule paper_0120:
+    output:
+        "bench/paper-0120/summary.csv",
+        "bench/paper-0120/compare.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/paper_0120/enter_bench.sh
+        """
+
+
 # Paired (H2O)16 rows. Not part of `rule all`. The script rewrites the
 # summary from the committed seeds and does not start a search.
 #   snakemake -s workflow/Snakefile h2o16_crest
