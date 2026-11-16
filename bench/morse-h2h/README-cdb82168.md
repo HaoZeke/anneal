@@ -9,4 +9,4 @@ These rows are the recommended unlabelled search. The Mackay cut, the spine cut,
 | m55r14 | 5/6 | 446461 | 10.161 |
 | m80r14 | 4/6 | 2387370.5 | 110.462 |
 
-M55 seed 2002 finishes at -220.518533, the Cambridge 55D energy. M80 seeds 2004 and 2005 finish at -340.802563, 0.0088 above 80G. Seeds 2000 and 2005 at M55 stop inside the budget; the charged count is the evaluations to the hit.
+M55 seed 2002 finishes at -220.518533, the Cambridge 55D energy. M80 seeds 2004 and 2005 finish at -340.802563, 0.0088 above 80G. Every hit stops inside the budget, M55 seeds 2000, 2001, 2003, 2004 and 2005 and M80 seeds 2000 to 2003; the charged count is the evaluations to the hit.
