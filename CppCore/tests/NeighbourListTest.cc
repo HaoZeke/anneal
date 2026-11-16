@@ -600,8 +600,8 @@ TEST_CASE("eight threads match the serial list", "[nlist][api]") {
 TEST_CASE("threads match the serial list when a thin or sheared box needs several images",
           "[nlist][api]") {
   constexpr std::size_t n = 9000;
-  const auto box = GENERATE(std::array<double, 9>{60.0, 0, 0, 0, 60.0, 0, 0, 0, 4.0},
-                            std::array<double, 9>{30.0, 0, 0, 3.0, 30.0, 0, 2.0, 1.5, 5.0});
+  const auto box = GENERATE(std::array<double, 9>{240.0, 0, 0, 0, 240.0, 0, 0, 0, 4.0},
+                            std::array<double, 9>{120.0, 0, 0, 3.0, 120.0, 0, 2.0, 1.5, 5.0});
   std::vector<double> pos(3 * n);
   std::uint64_t state = 12345;
   auto uniform = [&state]() {
@@ -627,6 +627,14 @@ TEST_CASE("threads match the serial list when a thin or sheared box needs severa
   rgpot::nlist::Table threaded;
   rgpot::nlist::build(threaded, pos.data(), n, box.data(), query);
   set_omp_threads("1");
+  const auto pairs = from_table(serial);
+  std::size_t repeated = 0;
+  const Key *last = nullptr;
+  for (const auto &key : pairs) {
+    repeated += last != nullptr && last->i == key.i && last->j == key.j;
+    last = &key;
+  }
+  REQUIRE(repeated > 0);
   REQUIRE(serial.size() == threaded.size());
-  REQUIRE(from_table(serial) == from_table(threaded));
+  REQUIRE(pairs == from_table(threaded));
 }
