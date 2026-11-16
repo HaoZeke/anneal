@@ -368,6 +368,9 @@ def test_cell_filter_on_a_many_body_potential() -> None:
     assert atoms.cell.lengths() == pytest.approx([5.431] * 3, abs=2e-3)
 
 
+# Under TSan on free-threaded 3.14 one 1000-step run takes 20s, so five runs
+# on each of four threads exceed the 120s faulthandler timeout.
+@pytest.mark.iterations(1)
 def test_velocity_verlet_conserves_energy() -> None:
     atoms = bulk("Ar", "fcc", a=5.26, cubic=True).repeat(3)
     atoms.calc = rgpot_lj(switch_width=1.0)
@@ -400,6 +403,9 @@ def _vacancy_endpoints() -> tuple[Atoms, Atoms]:
     return initial, final
 
 
+# Under TSan on free-threaded 3.14 five shared-calculator hops on each of
+# four threads take 80s of the 120s faulthandler timeout.
+@pytest.mark.iterations(1)
 @pytest.mark.parametrize("shared", [False, True], ids=["own", "shared"])
 def test_neb_vacancy_hop(shared: bool) -> None:
     initial, final = _vacancy_endpoints()
