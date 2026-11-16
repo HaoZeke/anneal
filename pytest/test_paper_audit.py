@@ -81,6 +81,35 @@ def test_a_drifted_sutton_chen_howto_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["hits"]
 
 
+SC_N12 = "bench/metal-cluster-h2h/sc-n12/README.md"
+
+
+def test_an_old_sutton_chen_gmin_cell_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | f9d1ac05 | 12/12 |", "| sc126-38 | gmin | f9d1ac05 | 1/12 |")
+    audit_mod.head_to_head(audit)
+    assert [(r[1].split()[-3:], r[2]) for r in audit.drifts()] == [(["sc126-38", "gmin", "f9d1ac05"], "hits")]
+
+
+def test_a_dropped_sutton_chen_rerun_row_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| sc108-38 | gmin | f9d1ac05 | 0/12 | 400000 | 4.305 |\n", "")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["table row sc108-38 gmin f9d1ac05"]
+
+
+def test_a_rerun_missing_from_the_sutton_chen_readme_is_reported():
+    audit = audit_mod.Audit()
+    summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
+    row = dict(next(r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"))
+    summary.append({**row, "harness_revision": "0" * 40})
+    audit_mod.head_to_head(audit)
+    labels = {r[2] for r in audit.drifts() if r[1] == SC_N12}
+    assert {"table row sc96-55 gmin 00000000", "test row sc96-55", "prose"} <= labels
+
+
 def test_a_drifted_readme_p_value_is_reported():
     audit = audit_mod.Audit()
     path = "bench/openconf-h2h/paired/README.md"
