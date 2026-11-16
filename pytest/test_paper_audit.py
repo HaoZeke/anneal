@@ -29,6 +29,7 @@ CHECKS = (
     audit_mod.head_to_head,
     audit_mod.sc96_78_howto,
     audit_mod.stale_claims,
+    audit_mod.sc_wall,
     audit_mod.tip4p_panel,
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
@@ -160,6 +161,14 @@ def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     audit.text_cache[SC_N12] = text.replace("| 0.113 | tie | GMIN, n.s. | GMIN |", "| 0.113 | tie | GMIN, n.s. | anneal |")
     audit_mod.head_to_head(audit)
     assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
+
+
+def test_a_drifted_sutton_chen_wall_number_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.SC_WALL}/README.md"
+    audit.text_cache[path] = audit.text(path).replace("| sc126-55 | Anneal | 62.69 |", "| sc126-55 | Anneal | 16.72 |")
+    audit_mod.sc_wall(audit)
+    assert [r[2] for r in audit.drifts()] == ["inside"]
 
 
 def test_a_drifted_readme_p_value_is_reported():
