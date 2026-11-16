@@ -17,7 +17,9 @@ Pt-Cu session. Every row carries --code-revision, the develop commit the
 ablation series was built on, and host, the first twelve hex digits of
 /etc/machine-id (the UTS hostname is always bench). A (system, arm, seed)
 already recorded at that revision on this host is not run again. Medians are Hyndman-Fan type 7. This process
-refuses to run unless the UTS hostname is bench.
+refuses to run unless the UTS hostname is bench. The seeds are 2000-2011
+unless --seeds names others, as single seeds or inclusive ranges such as
+2012-2023.
 """
 
 from __future__ import annotations
@@ -130,6 +132,11 @@ def parse_row(text: str) -> dict[str, str]:
     raise ValueError(f"no anneal row in {text[-800:]!r}")
 
 
+def seed_span(text: str) -> tuple[int, ...]:
+    first, _, last = text.partition("-")
+    return tuple(range(int(first), int(last or first) + 1))
+
+
 def run_one(bins: Path, runs: Path, spec, seed: int, arm: str) -> dict[str, str]:
     name, binary, target, budget, reference, extra = spec
     env = os.environ.copy()
@@ -183,7 +190,9 @@ def main() -> int:
     parser.add_argument("--systems", nargs="*")
     parser.add_argument("--arms", nargs="*", choices=tuple(ARMS))
     parser.add_argument("--code-revision", required=True)
+    parser.add_argument("--seeds", nargs="*", type=seed_span, default=[SEEDS])
     args = parser.parse_args()
+    seeds = tuple(dict.fromkeys(s for span in args.seeds for s in span))
     if socket.gethostname() != "bench":
         print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
         return 2
@@ -204,7 +213,7 @@ def main() -> int:
         if new_file:
             writer.writeheader()
         for spec in chosen:
-            jobs = [(seed, arm) for seed in SEEDS for arm in arms]
+            jobs = [(seed, arm) for seed in seeds for arm in arms]
             rng.shuffle(jobs)
             for seed, arm in jobs:
                 if (spec[0], arm, str(seed), args.code_revision, host) in done:
