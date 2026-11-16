@@ -1278,3 +1278,37 @@ None of the four quotes a Cambridge Lennard-Jones energy or a hexamer hit rate, 
 
 Cite `antalGalliumNickel2026`, `nguyenAluminiumScandium2026`, `haakanssonGoldDioxide2026`, and `wuArcade2026`.
 
+## 2026-11-16 — A planar four-point minimum, and a crystal-structure survey
+
+Luo, arXiv:2611.16990 (12 November 2026), classifies the minimizers of four points in the plane under a general Lennard-Jones potential \(V(r)=r^{-p}-br^{-q}\). For \(b\le 0\) the abstract says no minimizer exists. For \(b>0\) the minimizer is unique up to rotation and translation: a square when a stated threshold in the exponents is at least one, and otherwise a rhombus whose angle lies between \(\pi/3\) and \(\pi/2\).
+
+The proofs already on file are three-dimensional. Shen proves the pentagonal bipyramid at seven atoms. Kuznetsov and Sahinidis prove five and six. This letter is four points in the plane. It gives no energy at 38, 55, 75, 98, or 104, so it does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. It does not extend those three-dimensional proofs, and the sentence that they stop at seven atoms still stands. It does not warrant a head-to-head at the manuscript sizes.
+
+Hu and Feng, arXiv:2611.17670 (13 November 2026), survey crystal structure prediction from 1996 through October 2026. The abstract says benchmarks reveal no universally dominant approach. The text describes basin hopping as a perturbation followed by relaxation, with acceptance on the relaxed energies, and minima hopping as a short molecular-dynamics escape followed by relaxation. It names GOFEE and AGOX as atomistic frameworks whose original demonstrations focused largely on clusters and surfaces, and it names AGOX again as a package that can hold several algorithms. A software directory in the companion repository is a snapshot of 17 October 2026.
+
+The survey does not mention Lennard-Jones clusters, the water hexamer, CREST, or GOAT. It reports no Cambridge energy and no hit rate, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. The GOFEE and AGOX cluster demonstrations it points to are the searches already on file. Checked again on 16 November 2026, ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2 are still the pins already recorded, and the survey's October snapshot does not move them. It does not warrant a new head-to-head.
+
+Cite `luoFourPoints2026` and `huCrystalSurvey2026`.
+
+## 2026-11-16 — A quantum decomposition of the hexamer cage, and GFN1 fragmentation
+
+Patra, Ghosh, Patkhedkar, and Maitra, arXiv:2610.32968 (23 October 2026), decompose electronic-structure problems for sample-based quantum diagonalization. The abstract says the water hexamer cage, a 120-qubit problem, is split into six 20-qubit monomers and stitched under a dimeric approximation, and that the result agrees with the reference classical methods. The cage is the target of that decomposition. The abstract does not search for it.
+
+The manuscript scores bare GFN2-xTB motif hits for a prism, a cage, a book, or a chair, and it keeps a separate TIP4P reference. This preprint does not report a GFN2-xTB energy, a TIP4P energy, 121 of 192, or 97 of 192. A qubit decomposition of one cage geometry is not the motif hit rate. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+Einsele and Mitrić, Journal of Chemical Theory and Computation (13 November 2026), doi:10.1021/acs.jctc.6c01291, release FMO-xTB. The record has no volume or pages yet. The abstract combines the fragment molecular orbital method with GFN1-xTB, for two-body and three-body expansions, with analytic gradients. Water clusters are one of the benchmarks against nonfragmented xTB, beside anthracene aggregates and pentacene supercells. The deviation it quotes, on the order of \(10^{-4}\) hartree, is for those organic semiconductor systems.
+
+The hexamer comparison is a bare cluster at GFN2-xTB in xtb 6.7.1, against CREST 3.0.2. FMO-xTB measures a GFN1 fragmentation error against full GFN1-xTB. It does not report 121 of 192, 97 of 192, or the polished gaps. It does not mention a user seed. Leave the CREST table on 3.0.2 and on GFN2-xTB. It does not warrant a head-to-head on that table.
+
+Cite `patraHexamerQuantum2026` and `einseleFmoXtb2026`.
+
+## 2026-11-16 — A copper borozene minimum, and an energy-only path search
+
+Xu, Jiang, Liu, Dou, Yin, and Cui, Journal of Chemical Physics 165, 174309 (3 November 2026), doi:10.1063/5.0347651, report Cu\(_4\)B\(_8\). The abstract says the global minima are two-layered clusters, with a tetrahedral Cu\(_4\) unit on a B\(_8\) wheel. Born--Oppenheimer dynamics give a Cu\(_4\) rotation barrier of about 0.01 kcal/mol. Twelve atoms sits outside 38, 55, 75, 98, and 104.
+
+Chang, arXiv:2611.03699 (29 October 2026), releases tReax_expedition, an energy-only search for reaction paths. The abstract says that on GFN2-xTB, eight of nine gas-phase reactions have sampled chain maxima within 0.76 kJ/mol of independently refined saddle energies, and that alanine dipeptide instead shows incomplete conformational relaxation. A saddle difference on a gas-phase reaction is not a hexamer gap.
+
+Neither quotes a Cambridge Lennard-Jones energy or a hexamer hit rate, so neither contradicts the hit targets, 121 of 192, or 97 of 192. Neither fills the open ASE, AGOX, and GMIN kit. A head-to-head would be Cu\(_4\)B\(_8\) on the surface used in that paper, or one of those gas-phase reactions on GFN2-xTB. Neither warrants a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `xuCopperBorozene2026` and `changPathway2026`.
+
