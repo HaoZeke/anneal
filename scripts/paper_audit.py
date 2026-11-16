@@ -940,6 +940,97 @@ def stale_claims(audit: Audit, paths: list[str] | None = None) -> None:
         audit.record(False, path, "historical sentence", sentence, "present")
 
 
+SC_WALL = "bench/metal-cluster-h2h/sc-wall"
+
+
+def sc_wall_numbers(audit: Audit) -> dict[str, dict[str, float]]:
+    """Anneal's Sutton-Chen wall split against the GMIN rerun of the same system."""
+    runs = audit.rows(f"{SC_WALL}/seeds.csv")
+    micro = audit.rows(f"{SC_WALL}/micro.csv")
+    panel = audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
+    summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
+    out = {}
+    for system in dict.fromkeys(r["system"] for r in runs):
+        a = pick(runs, system=system)
+        harness = [r for r in summary if r["system"] == system and r["arm"] == "gmin"][-1]["harness_revision"]
+        g = pick(panel, system=system, arm="gmin", harness_revision=harness)
+        m = pick(micro, system=system)
+
+        def per_call(rows: list[dict[str, str]], column: str) -> float:
+            return 1e6 * sum(float(r[column]) for r in rows) / sum(float(r["charged"]) for r in rows)
+
+        ac, gc = [float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in g]
+        aw, gw = [float(r["wall_s"]) for r in a], [float(r["wall_s"]) for r in g]
+        n = {
+            "anneal hits": hits_of(a), "seeds": len(a), "gmin hits": hits_of(g), "gmin seeds": len(g),
+            "anneal calls": median(ac), "gmin calls": median(gc), "p calls": mann_whitney(ac, gc, True),
+            "anneal wall": median(aw), "gmin wall": median(gw), "p wall": mann_whitney(aw, gw, True),
+            "anneal inside": per_call(a, "pot_s"), "anneal outside": per_call(a, "outside_s"),
+            "gmin inside": per_call(g, "pot_s"), "gmin outside": per_call(g, "outside_s"),
+            "anneal per call": per_call(a, "wall_s"), "gmin per call": per_call(g, "wall_s"),
+        }
+        for column in ("entry_us", "dlsym_alloc_us", "kept_us", "kept_stream_us", "plain_us"):
+            n[column] = median([float(r[column]) for r in m])
+        n["max_abs_df"] = max(float(r["max_abs_df"]) for r in m)
+        n["abs_de"] = max(float(r["abs_de"]) for r in m)
+        n["gmin harness"] = harness
+        out[system] = n
+    return out
+
+
+def sc_wall(audit: Audit) -> None:
+    path = f"{SC_WALL}/README.md"
+    numbers = sc_wall_numbers(audit)
+    rows = md_table(audit, path, "System | Anneal hits")
+    audit.cell(path, "run table systems", " ".join(r["System"] for _, r in rows), " ".join(numbers))
+    for line, row in rows:
+        n = numbers[row["System"]]
+        where = f"{path}:{line} {row['System']}"
+        audit.cell(where, "anneal hits", row["Anneal hits"], f"{n['anneal hits']}/{n['seeds']}")
+        audit.cell(where, "GMIN hits", row["GMIN hits"], f"{n['gmin hits']}/{n['gmin seeds']}")
+        audit.cell(where, "GMIN harness", row["GMIN harness"], n["gmin harness"][:8])
+        for column, key in (("Anneal calls", "anneal calls"), ("GMIN calls", "gmin calls"),
+                            ("Mann-Whitney p calls", "p calls"), ("Anneal wall (s)", "anneal wall"),
+                            ("GMIN wall (s)", "gmin wall"), ("Mann-Whitney p wall", "p wall")):
+            audit.cell(where, column, row[column], n[key])
+    if sentence := alias_sentence(audit, [f"{SC_WALL}/seeds.csv", f"{SC_WALL}/micro.csv"], "../../revision-aliases.csv"):
+        audit.said(path, sentence)
+    for line, row in md_table(audit, path, "System | Code | Inside"):
+        code = row["Code"].lower()
+        n = numbers[row["System"]]
+        where = f"{path}:{line} {row['System']} {code}"
+        audit.cell(where, "inside", row["Inside (µs/call)"], n[f"{code} inside"])
+        audit.cell(where, "outside", row["Outside (µs/call)"], n[f"{code} outside"])
+        audit.cell(where, "wall per call", row["Wall (µs/call)"], n[f"{code} per call"])
+    for line, row in md_table(audit, path, "System | Entry"):
+        n = numbers[row["System"]]
+        where = f"{path}:{line} {row['System']}"
+        for column, key in (("Entry", "entry_us"), ("Entry with dlsym and allocation", "dlsym_alloc_us"),
+                            ("Kept", "kept_us"), ("Kept, streaming", "kept_stream_us"), ("Plain", "plain_us"),
+                            ("max abs dE", "abs_de"), ("max abs dF", "max_abs_df")):
+            audit.cell(where, column, row[column], n[key])
+    for system, n in numbers.items():
+        gap = n["anneal per call"] - n["gmin per call"]
+        inside = n["anneal inside"] - n["gmin inside"]
+        audit.said(path, f"On {system} anneal's wall per call is {n['anneal per call'] / n['gmin per call']:.2f} times "
+                         f"GMIN's and its median calls are {n['anneal calls'] / n['gmin calls']:.2f} times GMIN's, "
+                         f"at Mann-Whitney p {n['p calls']:.3g}.")
+        audit.said(path, f"Of the {gap:.1f} µs per call between them, {inside:.1f} µs is inside the potential.")
+        audit.said(path, f"On {system} the entry takes {n['entry_us'] - n['plain_us']:.1f} µs per call more than the "
+                         f"plain loop: {n['entry_us'] - n['kept_us']:.1f} µs to build the potential and its neighbour "
+                         f"list again, {n['kept_us'] - n['kept_stream_us']:.1f} µs for the stored list over the "
+                         f"streaming walk, and {n['kept_stream_us'] - n['plain_us']:.1f} µs for the walk and the "
+                         "second evaluation of both powers.")
+        first = system == next(iter(numbers))
+        wrapper = n["dlsym_alloc_us"] - n["entry_us"]
+        outside = n["anneal outside"] - n["gmin outside"]
+        audit.said(path, f"{wrapper:.2f} µs per call on {system}" if first else f"{wrapper:.2f} µs on {system}")
+        audit.said(path, f"{outside:.1f} µs per call more than GMIN's on {system}" if first else f"{outside:.1f} µs on {system}")
+        audit.said(path, f"On {system}, {n['anneal calls']:g} calls at {n['plain_us']:.1f} + {n['anneal outside']:.1f} µs "
+                         f"would take {n['anneal calls'] * (n['plain_us'] + n['anneal outside']) * 1e-6:.3f} s, "
+                         f"against GMIN's median {n['gmin wall']:.3f} s.")
+
+
 def gfn2_ranked(rows: list[dict[str, str]]) -> list[float]:
     """Calls to the hit with a miss ranked after every hit, as gfn2_crest.py --summary ranks them."""
     return [float(r["evals_to_hit"]) if hits_of([r]) else math.inf for r in rows]
@@ -1371,6 +1462,24 @@ def alias_index(names: list[str], table: list[dict[str, str]]) -> RevisionIndex:
                           patched=tuple(r[c] for r in table for c in ("pushed_revision", "branch_revision")))
 
 
+def alias_sentence(audit: Audit, paths: list[str], table: str) -> str | None:
+    """The sentence naming the aliased local revisions that the rows of ``paths`` cite.
+
+    ``table`` is the path of the alias table as the document links it.
+    """
+    cited = {r[c] for path in paths for r in audit.rows(path) for c in REVISION_COLUMNS if r.get(c)}
+    rows = [r for r in alias_table() if r["local_revision"] in cited]
+    if not rows:
+        return None
+    local = and_list([r["local_revision"][:8] for r in rows])
+    pushed = and_list([r["pushed_revision"][:8] for r in rows])
+    if len(rows) == 1:
+        return (f"Harness {local} was a local commit, pushed as {pushed} with the same patch; `{table}` maps it to "
+                "its pushed commit.")
+    return (f"Harnesses {local} were local commits, pushed as {pushed} with the same patches; `{table}` maps each to "
+            "its pushed commit.")
+
+
 def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionIndex) -> dict[str, str]:
     """Local revisions of ALIASES whose pushed equivalent checks out, mapped to it.
 
@@ -1418,7 +1527,7 @@ def run(report: bool = False) -> int:
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
+                  head_to_head, sc96_78_howto, stale_claims, sc_wall, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
         check(audit)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
