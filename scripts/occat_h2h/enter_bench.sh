@@ -11,11 +11,11 @@ if [[ ! -d /work ]]; then
   sudo -n mkdir -p /work
   sudo -n chown "$(id -u):$(id -g)" /work
 fi
-mkdir -p "$WORK/runs" "$WORK/home" "$WORK/tmp" "$ROOT/bench/occat-h2h"
+mkdir -p "$WORK/runs" "$WORK/home" "$WORK/scratch" "$ROOT/bench/occat-h2h"
 
-if [[ ! -x /tmp/OCCat_release/bin/occat ]]; then
-  rm -rf /tmp/OCCat_release
-  git clone --depth 1 https://github.com/LEDlamar/OCCat_release.git /tmp/OCCat_release
+if [[ ! -x $WORK/OCCat_release/bin/occat ]]; then
+  rm -rf "$WORK/OCCat_release"
+  git clone --depth 1 https://github.com/LEDlamar/OCCat_release.git "$WORK/OCCat_release"
 fi
 
 if [[ ! -x $WORK/target/release/examples/h2h_gmin_proof || ! -x $WORK/target/release/examples/h2h_metal ]]; then
@@ -36,7 +36,7 @@ cat > "$WORK/inside.sh" << EOF
 #!/bin/bash
 set -eu
 export HOME=$WORK/home
-export TMPDIR=$WORK/tmp
+export TMPDIR=$WORK/scratch
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1

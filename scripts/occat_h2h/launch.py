@@ -181,7 +181,7 @@ def inject_mmap(pid: int, syscall_at: int, fd: int, size: int) -> int:
 
 
 def assemble() -> tuple[bytes, dict[str, int]]:
-    work = Path("/tmp/occat-stub")
+    work = Path("/work/occat-h2h/tool")
     work.mkdir(exist_ok=True)
     subprocess.run(
         ["gcc", "-c", "-o", str(work / "stub.o"), str(STUB_S)],
@@ -224,11 +224,11 @@ def ns_per_tsc() -> float:
     libc.clock_gettime(1, a)
 
     def rdtsc() -> int:
-        return int.from_bytes(subprocess.check_output(["/tmp/occat-rdtsc"]), "little")
+        return int.from_bytes(subprocess.check_output(["/work/occat-h2h/tool/occat-rdtsc"]), "little")
 
     # Fallback below if the helper is absent. Build it once.
-    helper = Path("/tmp/occat-rdtsc.c")
-    if not Path("/tmp/occat-rdtsc").exists():
+    helper = Path("/work/occat-h2h/tool/occat-rdtsc.c")
+    if not Path("/work/occat-h2h/tool/occat-rdtsc").exists():
         helper.write_text(
             "int main(void){unsigned a,d; __asm__ volatile(\"lfence;rdtsc\":\"=a\"(a),\"=d\"(d));"
             "unsigned long long t=((unsigned long long)d<<32)|a; "
@@ -238,7 +238,7 @@ def ns_per_tsc() -> float:
 
 
 def calibrate() -> float:
-    src = Path("/tmp/occat-cal.c")
+    src = Path("/work/occat-h2h/tool/occat-cal.c")
     src.write_text(
         r"""
         #include <stdio.h>
@@ -261,7 +261,7 @@ def calibrate() -> float:
         }
         """
     )
-    bin_path = Path("/tmp/occat-cal")
+    bin_path = Path("/work/occat-h2h/tool/occat-cal")
     if not bin_path.exists():
         subprocess.run(["gcc", "-O2", "-o", str(bin_path), str(src)], check=True)
     return float(subprocess.check_output([str(bin_path)], text=True).strip())
@@ -290,7 +290,7 @@ def run(
         env["GOMAXPROCS"] = "1"
         env["OMP_NUM_THREADS"] = "1"
         os.execve(
-            "/tmp/OCCat_release/bin/occat",
+            "/work/occat-h2h/OCCat_release/bin/occat",
             ["occat", "--config", str(config)],
             env,
         )
