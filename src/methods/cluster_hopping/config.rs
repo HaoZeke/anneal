@@ -1354,7 +1354,8 @@ pub struct Config {
     /// turn every bond of one such change, each through a fresh uniform
     /// angle (see [`super::torsion::Topology::propose_coupled`]). Crankshaft
     /// draws keep their share. A library without the torsion arm, and a
-    /// chain without such a change, draws the same hops either way.
+    /// chain without such a change, draws the same hops either way. On in
+    /// [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub torsion_coupling: bool,
     /// Refuse a quench step that turns over a stereocentre of a declared
@@ -2136,6 +2137,9 @@ impl Config {
         // macrocycle backbone. A molecule without a flexible ring draws the
         // same hops either way.
         cfg.ring_moves = true;
+        // A lowest conformer several torsions from the chain's minimum
+        // needs them turned together; a plain draw turns at most three.
+        cfg.torsion_coupling = true;
         // A conformer search keeps the molecule it was given; a centre the
         // quench pushes through its plane is another one.
         cfg.hold_stereocentres = true;
@@ -2322,6 +2326,8 @@ mod coverage_behaviour {
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
+        assert!(recommended.torsion_coupling);
+        assert!(!Config::for_molecular(species.clone(), groups.clone(), 1.0).torsion_coupling);
         assert!(
             recommended
                 .resolved_json()

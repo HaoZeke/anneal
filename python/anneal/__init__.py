@@ -335,7 +335,8 @@ def cluster_search(
       torsion_coupling: coupled torsion draws of a ``groups`` search. Once an
         accepted hop has turned two rotatable bonds or more, a quarter of the
         bond draws turn every bond of one such hop through fresh uniform
-        angles. ``None`` keeps the preset's.
+        angles. ``None`` keeps the preset's: on for ``recommended=True``,
+        off otherwise.
       hold_stereocentres: refuse a quench step of a ``groups`` search that
         turns a four-bonded centre into its mirror image. ``None`` keeps the
         preset's: on for ``recommended=True``, off otherwise.
