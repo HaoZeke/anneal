@@ -82,8 +82,8 @@ The script draws the figure with =docs/scripts/plot_sc_hits.py= from the run log
 
 #+begin_example
 label hits median_calls_to_hit mean_par2 paired_p
-gmin 0/32 - 4000000 -
-iso 23/32 588617 1570333 0.0000
+gmin 20/32 1272371 2187979 -
+iso 23/32 588617 1570333 0.0562
 iso-hop 32/32 127038.5 272221 0.0000
 #+end_example
 
@@ -91,11 +91,13 @@ iso-hop 32/32 127038.5 272221 0.0000
 
 The table is written from =data/sc96_78_hits.csv=.
 The figure is written to =build/sc96-78/hits.png=.
-GMIN is the Wales program built from the pinned tarball.
-Its file is the 9-6 row, temperature 10, and the quench block in =scripts/metal_h2h/run_sc.py=.
-=gmin= hits 0 of 32 seeds. It misses 32.
+GMIN is the Wales program at SVNREV aac1548a, linked against OpenBLAS.
+Its rows are those of harness 9149d1b0, one seed at a time on one core, from =scripts/metal_h2h/enter_sc96_gmin.sh=.
+Its file is the 9-6 row of =scripts/metal_h2h/run_sc.py=: temperature 10, step 0.251984, the container GMIN sizes for Sutton-Chen, and the quench block there.
+=gmin= hits 20 of 32 seeds, median 1272371 calls to a hit. It misses 12.
 =iso= hits 23 of 32 seeds, median 588617 calls to a hit. It misses 9.
 =iso-hop= hits 32 of 32 seeds, median 127038.5 calls to a hit.
+The earlier GMIN rows, with temperature 0.8, step 0.40 and a container radius of 30, hit 0 of 32 seeds. They are kept in the file.
 When a curve rises earlier, its arm solves more seeds at a smaller budget.
 The paired p-value comes from a sign-flip test on the per-seed differences.
 The test flips the sign of each seed's difference at random.
