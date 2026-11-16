@@ -1226,3 +1226,55 @@ None of the four reports 121 of 192, 97 of 192, or an energy below the Cambridge
 
 Cite `ketterSaddle2026`, `qinGenerative2026`, `vandevenSpices2026`, and `caneteTastet2026`.
 
+## 2026-11-16 — Minima hopping on oxide vacancies, and a carbon landscape through ASE
+
+Liu, Zhang, Woodley, Goedecker, Catlow, Sokol, and co-workers, Journal of the American Chemical Society 148, 44973--44983 (7 October 2026), doi:10.1021/jacs.6c15378, search cation vacancies in metal oxides. Minima hopping on machine-learned potentials proposes the configurations. Hybrid quantum-mechanics/molecular-mechanics embedded clusters and periodic density-functional calculations follow. The abstract says a relaxation that starts from the lattice vacancy can miss a reconstruction. For charge-neutral vacancies in oxides whose cations have formal oxidation state +4 or higher, the preferred defects contain O--O bonds or O--O--O chains, with bond lengths of about 1.4 angstroms, and the formation energy can drop by up to several electronvolts. At lower oxidation states the conventional vacancy remains preferred at charge neutrality, and a positive charge can reverse that preference. The abstract says these defects need a global structure search.
+
+The embedded cluster is a quantum-mechanics region inside an oxide. It is a bulk vacancy, not a free Lennard-Jones cluster and not the water hexamer. The abstract gives no Cambridge energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. Goedecker is an author of the minima-hopping code already filed as `krummenacherMinimaHopping2024`. This paper runs that search on vacancies. It does not run the missing ASE basin-hopping arm on tag 3.29.0, and it publishes no basin-hopping hit rate. A head-to-head would be one of these vacancies on the potential they use. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Neuman, Park, Wilson, and Wales, The Journal of Physical Chemistry Letters 17, 11747--11753 (21 August 2026), doi:10.1021/acs.jpclett.6c02357, map an 8-atom periodic cell of carbon by discrete path sampling. MACE-MATPES-r2SCAN-0 supplies the energy, the forces, and the stress through an Atomic Simulation Environment interface. The abstract compares the enthalpy landscape with the experimental phase diagram and adds a dispersion correction on selected crystals. Eight periodic atoms are not LJ38. The missing ASE arm is basin hopping on tag 3.29.0. This paper uses ASE as the calculator interface for discrete path sampling. It publishes no basin-hopping hit rate and no Cambridge energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. A head-to-head would be that carbon cell on MACE. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+Cite `liuOxideVacancy2026` and `neumanCarbonLandscape2026`.
+
+## 2026-11-16 — Thomson configurations imaged in helium droplets
+
+Pohl, Mayerhofer, Liu, Mizouri, Sha, Mahmoodi Darian, Zappa, Ellis, Wales, Yang, and Scheier, Physical Review Letters 137, 183001 (26 October 2026), doi:10.1103/qby4-bm6q, image like charges on the surface of superfluid helium nanodroplets. Singly charged gold nanoparticles tag the charges, and transmission electron microscopy records the imprints. The abstract says the images run from finite-\(N\) Thomson minima to curvature-frustrated Coulomb crystals. The DOI, the volume, and the article number were read from the Physical Review Letters landing page.
+
+Amore and Wales already search this problem computationally, filed as `amoreThomson2026`. Shao already reports three Cambridge Coulomb energies below the database, filed as `shaoThomson2026`. This letter is an experiment. The abstract quotes no new Coulomb energy, so it does not replace those records or the Cambridge Lennard-Jones energies. The gold nanoparticles tag surface charges. They are not a search for the global minimum of a bare gold cluster, and they do not continue the minima-hopping gold searches already on file. The abstract gives no hexamer count, so it does not contradict 121 of 192 or 97 of 192. An electron-microscopy imprint is not the force-call hit rate. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `pohlThomsonImaging2026`. Keep the images out of the Lennard-Jones table and out of the gold-cluster comparisons.
+
+## 2026-11-16 — A two-valley trap with a Lennard-Jones interaction
+
+Daskin, doi:10.5281/zenodo.23281107 (12 October 2026), prices a real-time quantum simulation of tunneling for small clusters of light atoms. The model is \(N\) distinguishable particles in a two-valley trap with a Lennard-Jones interaction. The deposit says the note is not submitted to a journal. It also says an analysis of the prepared state does not support reading the resource bounds as a window between a tensor-network wall and a quantum computer. For five particles or fewer, the start state lies on essentially two eigenstates. The DOI was read from the Zenodo record.
+
+Fiorentino and Marzari already score the Cambridge clusters, including LJ38, filed as `fiorentinoQuantumAnnealing2026`. This deposit does not use those minima. It gives no energy at 38, 55, 75, 98, or 104, so it does not contradict the hit targets, 121 of 192, or 97 of 192. A resource bound on a two-valley trap is not the force-call hit rate. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+Cite `daskinLjTunneling2026`. Keep the two-valley model out of the Lennard-Jones table.
+
+## 2026-11-16 — Analytic xTB Hessians, and divide-and-conquer g-xTB
+
+Pracht and Rindt, ChemRxiv (3 September 2026), doi:10.26434/chemrxiv.15008278/v1, give analytic nuclear Hessians, dipole derivatives, and polarizability derivatives for GFN0-xTB, GFN1-xTB, and GFN2-xTB, on the public interfaces of tblite. The abstract says the response properties match finite-difference references at the noise floor. The preprint does not search a conformer ensemble.
+
+Pracht, Dittmer, Müller, and Rindt, ChemRxiv (7 August 2026), doi:10.26434/chemrxiv.15007156/v1, present DC-g-xTB, a divide-and-conquer form of g-xTB. On a 1500-atom water cluster the abstract says the default partition reproduces the full g-xTB energy to 2.5 microhartree per atom, with the buffer radius as the convergence parameter. Smooth partition weights, the abstract says, still leave the forces non-conservative, so they do not by themselves supply a surface for molecular dynamics.
+
+Froitzheim, Müller, Hansen, and Grimme already introduce g-xTB, filed as `froitzheimGxtb2025`. These two preprints add GFN response properties and a reduced-scaling g-xTB. The 2.5 microhartree per atom is a partition error against full g-xTB on that 1500-atom cluster. It is not a hexamer gap on GFN2-xTB, and it is not 121 of 192 or 97 of 192. Neither preprint mentions a user seed. CREST's newest numbered release, checked again on 16 November 2026, is still v3.0.2, and the master tip is still the 16 June 2026 CMake fix, so the sentence that CREST 3.0.2 exposes no seed still stands. Leave the CREST table on 3.0.2 and on GFN2-xTB. Neither preprint warrants a head-to-head on that table or on the sealed Lennard-Jones maps.
+
+On the same check, ASE 3.29.0 is still the newest tag on the GitLab tag list and on PyPI, and the master tip is still the 14 November 2026 merge of the MPI hook. AGOX v3.11.1 is still the newest tag, and the dev tip is still the 5 May 2026 import fix. pele v0.1.2 and xtb v6.8.0 are still the newest releases. No bibliographic entry for the tag check: a tag date is not a DOI.
+
+Cite `prachtXtbHessian2026` and `prachtDcGxtb2026`. Keep the 2.5 microhartree per atom out of the hexamer table.
+
+## 2026-11-16 — Small alloy clusters, carbon dioxide on gold, and a nanoparticle search
+
+Antal and Höltzl, ACS Omega (13 November 2026), doi:10.1021/acsomega.6c05381, report geometries and carbon-dioxide paths for small gallium--nickel clusters. The abstract names Ni\(_4\), Ga\(_2\)Ni\(_3\), and Ga\(_4\)Ni\(_2\), and it says Ga\(_2\)Ni\(_3\) lets products leave more readily. The record has no volume or pages yet. Four, five, and six metal atoms all sit outside 38, 55, 75, 98, and 104.
+
+Nguyen and co-workers, ACS Omega (12 November 2026), doi:10.1021/acsomega.6c11744, compute hydrogen dissociation on anionic aluminium--scandium clusters of 13 atoms. The abstract names Al\(_9\)Sc\(_4^-\) as the case with a submerged barrier. The record has no volume or pages yet. Thirteen atoms sits outside the manuscript sizes.
+
+Haakansson, Rubli, Vesty, Lushchikova, Bakker, and Mackenzie, ChemPhysChem 27, e70623 (10 November 2026), doi:10.1002/cphc.70623, assign carbon dioxide bound to Au\(_n^+\) for \(n\) from 4 to 11. Infrared spectra from a free-electron laser are matched to quantum-chemical structures. The record gives issue 21. The abstract says the carbon dioxide stays linear, binds through one oxygen to one gold atom, and that further carbon dioxide molecules bind in the same way. Eleven gold atoms sits outside the manuscript sizes. Bare gold anions are already filed as `aguadoGoldAnions2026` and `anGoldAnions2026`. This paper is a carbon-dioxide complex of a cation.
+
+Wu, Jia, and co-workers, ACS Catalysis (29 October 2026), doi:10.1021/acscatal.6c06280, release ARCADE. The record has no volume or pages yet. The abstract says an iterative search builds irregular multielement nanoparticles in place of a full enumeration, then scores sites for carbon-dioxide reduction. The particles are catalyst models.
+
+None of the four quotes a Cambridge Lennard-Jones energy or a hexamer hit rate, so none contradicts the hit targets, 121 of 192, or 97 of 192. None fills the open ASE, AGOX, and GMIN kit. A head-to-head would be Ga\(_2\)Ni\(_3\), Al\(_9\)Sc\(_4^-\), Au\(_n^+\) with carbon dioxide, or one ARCADE nanoparticle, each on the surface used in that paper. None warrants a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `antalGalliumNickel2026`, `nguyenAluminiumScandium2026`, `haakanssonGoldDioxide2026`, and `wuArcade2026`.
+
