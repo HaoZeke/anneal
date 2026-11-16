@@ -699,7 +699,7 @@ reference.
 
 - Si10: both codes reach the minimum on every seed they ran. On seeds
   2000-2003 anneal takes 620, 505, 520 and 2,581 calls, and CREST
-  108,264, 96,365, 102,236 and 94,277 (Mann-Whitney p = 0.0011 over all
+  108,264, 96,365, 102,236 and 94,277 (Mann-Whitney p = 0.0044 over all
   rows). Anneal's calls cost more inside xtb, 58 ms against 27 ms,
   because its quenches start from random clusters where the SCC
   struggles.

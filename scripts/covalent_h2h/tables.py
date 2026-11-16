@@ -93,7 +93,7 @@ def p_values(a: list[dict[str, str]], b: list[dict[str, str]]) -> tuple[float, f
     calls_b = [float(row["evals_to_hit"]) for row in b]
     hits_a = sum(row["hit"] == "true" for row in a)
     hits_b = sum(row["hit"] == "true" for row in b)
-    mw = mannwhitneyu(calls_a, calls_b, alternative="two-sided").pvalue
+    mw = mannwhitneyu(calls_a, calls_b, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue
     fisher = fisher_exact([[hits_a, len(a) - hits_a], [hits_b, len(b) - hits_b]]).pvalue
     return float(mw), float(fisher)
 

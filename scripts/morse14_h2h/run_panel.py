@@ -91,7 +91,7 @@ def mann_whitney(left: list[float], right: list[float]) -> float:
 
     if not left or not right:
         return float("nan")
-    return float(mannwhitneyu(left, right, alternative="two-sided").pvalue)
+    return float(mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue)
 
 
 def binary_path(root: Path) -> Path:
