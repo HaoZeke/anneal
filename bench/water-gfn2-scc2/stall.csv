@@ -1,0 +1,5 @@
+molecules,seed,code,budget,wall_s,calls,scc_rejected,potential_s,outside_s,energy_eV,status
+6,5,fixed,4000,18.541778,4000,0,18.498921,0.042857,-829.8522275291,ran
+6,5,unfixed,4000,,,,,4935,,stopped
+12,5,fixed,4000,67.167683,4000,0,67.100493,0.067190,-1660.6430148600,ran
+12,5,unfixed,4000,,,,,126,,stopped
