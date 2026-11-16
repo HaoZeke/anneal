@@ -36,6 +36,9 @@ all of them, with Fisher's exact test on hits and a two-sided Mann-Whitney
 on calls to the hit, with a miss ranked after every hit, both against
 anneal; alone when no binaries are given, over ``--systems``, and with
 ``--anneal-revision`` over anneal's rows of that ``code_revision`` only.
+``--false-hits`` names rows, by system, code, revision and seed, whose hit
+is not the geometry's energy; the summary counts them as misses at their
+budget.
 Time per call skips a run that made no call.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
@@ -292,6 +295,7 @@ def main() -> None:
     ap.add_argument("--codes", nargs="*", default=list(CODES))
     ap.add_argument("--summary", type=Path)
     ap.add_argument("--anneal-revision")
+    ap.add_argument("--false-hits", type=Path)
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -309,6 +313,7 @@ def main() -> None:
             host,
             args.anneal_revision,
             args.systems,
+            args.false_hits,
         )
         return
     if None in (
@@ -430,11 +435,13 @@ def summarise(
     host: str,
     anneal_revision: str | None = None,
     systems: list[str] | None = None,
+    false_hits: Path | None = None,
 ) -> None:
     """Append one line per system and code over every rows file.
 
     With ``anneal_revision``, anneal's rows are only those of that
-    ``code_revision``.
+    ``code_revision``. A row named in ``false_hits`` by system, code,
+    revision and seed counts as a miss at its budget.
     """
     table = []
     for path in paths:
@@ -447,6 +454,19 @@ def summarise(
             for row in table
             if row["code"] != "anneal-general"
             or row.get("code_revision") == anneal_revision
+        ]
+    if false_hits is not None:
+        with open(false_hits, newline="") as handle:
+            named = {
+                (row["system"], row["code"], row["code_revision"], row["seed"])
+                for row in csv.DictReader(handle)
+            }
+        table = [
+            dict(row, hit="false", evals_to_hit=row["budget"])
+            if (row["system"], row["code"], row.get("code_revision", ""), row["seed"])
+            in named
+            else row
+            for row in table
         ]
     date = datetime.date.today().isoformat()
     lines = []
