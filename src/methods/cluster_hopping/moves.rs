@@ -2678,6 +2678,29 @@ impl ClusterMove {
                 .propose(x, rng),
         }
     }
+
+    /// The torsion arm's proposal drawn through `coupling`, see
+    /// [`super::torsion::Topology::propose_coupled`]. `None` for every other
+    /// arm.
+    pub(super) fn propose_coupled<R: Rng + ?Sized>(
+        &self,
+        x: ArrayView1<f64>,
+        coupling: &mut super::torsion::Coupling,
+        rng: &mut R,
+    ) -> Option<Array1<f64>> {
+        match self {
+            ClusterMove::Torsion {
+                species,
+                tolerance,
+                mobile,
+                rings,
+            } => Some(
+                super::torsion::Topology::of(x, species, *tolerance, mobile.as_deref(), *rings)
+                    .propose_coupled(x, coupling, rng),
+            ),
+            _ => None,
+        }
+    }
 }
 
 /// Atoms the SOAP pullback is allowed to move.

@@ -49,6 +49,10 @@ pub(crate) struct Topology {
     /// carry it through the plane of the other three; a turn about a
     /// rotatable bond cannot.
     hands: Vec<[usize; 5]>,
+    /// Per rotatable bond, the four atoms whose dihedral reads its angle: a
+    /// neighbour of `fixed`, `fixed`, `pivot`, a neighbour of `pivot` on the
+    /// turning side.
+    quads: Vec<[usize; 4]>,
 }
 
 /// Signs of the volumes spanned by the bonds from `h[0]` to each three of
@@ -102,6 +106,7 @@ impl Topology {
         }
         let mut near = vec![false; n * n];
         let mut hands = Vec::new();
+        let mut quads = Vec::new();
         if !torsions.is_empty() {
             let mut nb = vec![Vec::new(); n];
             for i in 0..n {
@@ -132,6 +137,25 @@ impl Topology {
                 }
                 for j in 0..n {
                     near[i * n + j] = depth[j] != usize::MAX;
+                }
+            }
+            // The heaviest neighbour reads the angle, so a hydrogen does not
+            // when a heavy atom is there.
+            let reader = |centre: usize, skip: usize| {
+                nb[centre]
+                    .iter()
+                    .copied()
+                    .filter(|&q| q != skip)
+                    .max_by_key(|&q| (species[q], std::cmp::Reverse(q)))
+            };
+            for bond in &torsions[..bonds] {
+                if let (Some(a), Some(d)) = (
+                    reader(bond.fixed, bond.pivot),
+                    reader(bond.pivot, bond.fixed),
+                ) {
+                    quads.push([a, bond.fixed, bond.pivot, d]);
+                } else {
+                    quads.push([bond.fixed, bond.fixed, bond.pivot, bond.pivot]);
                 }
             }
             // Two lone atoms of one element on a centre swap places under
@@ -172,6 +196,7 @@ impl Topology {
             radius: species[..n].iter().map(|&z| covalent_radius(z)).collect(),
             moves,
             hands,
+            quads,
         }
     }
 
@@ -302,35 +327,116 @@ impl Topology {
     /// has, and a draw that inverts a crankshaft end is dropped. Without,
     /// the random stream is the torsion move's alone.
     pub(crate) fn propose<R: Rng + ?Sized>(&self, x: ArrayView1<f64>, rng: &mut R) -> Array1<f64> {
-        let start = x.to_owned();
         if self.torsions.is_empty() {
-            return start;
+            return x.to_owned();
         }
-        let cranks = self.torsions.len() - self.bonds;
-        let ring_share = if cranks > 0 {
-            self.ring_dof.max(1) as f64 / (self.ring_dof.max(1) + self.bonds) as f64
-        } else {
-            0.0
-        };
-        let mut best: Option<(f64, Array1<f64>)> = None;
         let mut order: Vec<usize> = (0..self.bonds).collect();
+        self.settle(x, rng, |y, rng| {
+            if self.draws_crank(rng) {
+                self.turn_crank(y, rng);
+            } else {
+                self.turn_bonds(y, &mut order, rng);
+            }
+        })
+    }
+
+    /// Whether a draw turns a ring crankshaft: with the probability that
+    /// ring torsions are among all torsions the molecule has. No random
+    /// number is drawn without a crankshaft.
+    fn draws_crank<R: Rng + ?Sized>(&self, rng: &mut R) -> bool {
+        let cranks = self.torsions.len() - self.bonds;
+        if cranks == 0 {
+            return false;
+        }
+        let ring_share = self.ring_dof.max(1) as f64 / (self.ring_dof.max(1) + self.bonds) as f64;
+        self.bonds == 0 || rng.random::<f64>() < ring_share
+    }
+
+    fn turn_crank<R: Rng + ?Sized>(&self, y: &mut Array1<f64>, rng: &mut R) {
+        let crank = self.bonds + rng.random_range(0..self.torsions.len() - self.bonds);
+        let angle = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+        turn_bond(y, &self.torsions[crank], angle);
+    }
+
+    /// One to three of the rotatable bonds `order` shuffles, each through a
+    /// uniform angle.
+    fn turn_bonds<R: Rng + ?Sized>(&self, y: &mut Array1<f64>, order: &mut [usize], rng: &mut R) {
+        let mut count = 1;
+        while count < 3.min(self.bonds) && rng.random::<f64>() < 0.5 {
+            count += 1;
+        }
+        order.shuffle(rng);
+        for &t in &order[..count] {
+            let angle = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+            turn_bond(y, &self.torsions[t], angle);
+        }
+    }
+
+    /// The move of [`Topology::propose`], except that a draw of rotatable
+    /// bonds is, in [`COUPLED_SHARE`] of proposals, a turn of every bond one
+    /// accepted hop of the chain changed together with another, each
+    /// through a fresh uniform angle. A crankshaft is drawn as often as
+    /// without coupling, and without such a hop on file the draw is the
+    /// plain one, random stream included.
+    ///
+    /// A plain draw turns at most three bonds. A minimum that differs from
+    /// the chain's in several torsions whose turns only pay together is out
+    /// of its reach, and a turn of any one of them alone is refused. The
+    /// bonds an accepted hop changed together are ones the landscape has let
+    /// move together.
+    pub(crate) fn propose_coupled<R: Rng + ?Sized>(
+        &self,
+        x: ArrayView1<f64>,
+        coupling: &mut Coupling,
+        rng: &mut R,
+    ) -> Array1<f64> {
+        let slots = coupling.align(self);
+        coupling.pending = Some(coupling.angles(x));
+        if self.torsions.is_empty() {
+            return x.to_owned();
+        }
+        let sets: Vec<Vec<usize>> = coupling
+            .history
+            .iter()
+            .map(|change| {
+                change
+                    .iter()
+                    .zip(&slots)
+                    .filter_map(|(a, slot)| slot.filter(|_| *a != 0.0))
+                    .collect::<Vec<usize>>()
+            })
+            .filter(|set| set.len() >= 2)
+            .collect();
+        let coupled = !sets.is_empty() && rng.random::<f64>() < COUPLED_SHARE;
+        let mut order: Vec<usize> = (0..self.bonds).collect();
+        self.settle(x, rng, |y, rng| {
+            if self.draws_crank(rng) {
+                self.turn_crank(y, rng);
+            } else if coupled {
+                for &t in &sets[rng.random_range(0..sets.len())] {
+                    let angle = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+                    turn_bond(y, &self.torsions[t], angle);
+                }
+            } else {
+                self.turn_bonds(y, &mut order, rng);
+            }
+        })
+    }
+
+    /// Draws with `turn` from `x`, repairs any contact the draw made, and
+    /// returns the first clean draw that inverts no crankshaft end, else the
+    /// least-clashing of [`REDRAWS`].
+    fn settle<R: Rng + ?Sized>(
+        &self,
+        x: ArrayView1<f64>,
+        rng: &mut R,
+        mut turn: impl FnMut(&mut Array1<f64>, &mut R),
+    ) -> Array1<f64> {
+        let start = x.to_owned();
+        let mut best: Option<(f64, Array1<f64>)> = None;
         for _ in 0..REDRAWS {
             let mut y = start.clone();
-            if cranks > 0 && (self.bonds == 0 || rng.random::<f64>() < ring_share) {
-                let crank = self.bonds + rng.random_range(0..cranks);
-                let angle = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
-                turn_bond(&mut y, &self.torsions[crank], angle);
-            } else {
-                let mut count = 1;
-                while count < 3.min(self.bonds) && rng.random::<f64>() < 0.5 {
-                    count += 1;
-                }
-                order.shuffle(rng);
-                for &t in &order[..count] {
-                    let angle = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
-                    turn_bond(&mut y, &self.torsions[t], angle);
-                }
-            }
+            turn(&mut y, rng);
             let clean = self.repair(&mut y);
             if self.inverts(start.view(), y.view()) {
                 continue;
@@ -344,6 +450,137 @@ impl Topology {
             }
         }
         best.map(|(_, y)| y).unwrap_or(start)
+    }
+}
+
+/// Dihedral angle of `q` in `x`, in radians; zero when it is undefined.
+fn dihedral(x: ArrayView1<f64>, q: &[usize; 4]) -> f64 {
+    let p = |i: usize| [x[3 * q[i]], x[3 * q[i] + 1], x[3 * q[i] + 2]];
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let (b0, b1, b2) = (sub(p(0), p(1)), sub(p(2), p(1)), sub(p(3), p(2)));
+    let n1 = cross(b0, b1);
+    let n2 = cross(b1, b2);
+    let len = dot(b1, b1).sqrt();
+    if len < 1e-12 || dot(n1, n1) < 1e-16 || dot(n2, n2) < 1e-16 {
+        return 0.0;
+    }
+    let m = cross(n1, b1.map(|c| c / len));
+    -(dot(m, n2)).atan2(dot(n1, n2))
+}
+
+/// `a` wrapped into `(-π, π]`.
+fn wrap(a: f64) -> f64 {
+    let tau = std::f64::consts::TAU;
+    let w = a - tau * (a / tau).round();
+    if w <= -std::f64::consts::PI {
+        w + tau
+    } else {
+        w
+    }
+}
+
+/// Least change of a dihedral, in radians, that counts as a rotatable bond
+/// having turned between two minima: 30°, a quarter of the gap between
+/// staggered wells. A quench that settles a well moves less.
+const TURNED: f64 = std::f64::consts::PI / 6.0;
+
+/// Accepted changes one chain keeps, oldest overwritten first.
+const HISTORY: usize = 32;
+
+/// Share of bond draws that are coupled once the chain has a coupled set.
+///
+/// A share adapted from how often each kind of draw moved the chain found
+/// fewer lowest conformers than a fixed quarter on the development seeds
+/// of `bench/openconf-h2h/conf-fix7`.
+const COUPLED_SHARE: f64 = 0.25;
+
+/// The rotatable-bond changes of a chain's accepted hops.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Coupling {
+    /// `(fixed, pivot)` of each rotatable bond the chain has turned, in the
+    /// order first seen; the history is indexed by it.
+    bonds: Vec<(usize, usize)>,
+    quads: Vec<[usize; 4]>,
+    /// Per accepted hop that turned a bond, each bond's change, zero below
+    /// [`TURNED`]. A change recorded before a bond was first seen is
+    /// shorter, and zero there.
+    history: Vec<Vec<f64>>,
+    next: usize,
+    /// The angles the torsion draw in flight left from.
+    pending: Option<Vec<f64>>,
+}
+
+impl Coupling {
+    /// Where each bond the history knows sits among the rotatable bonds of
+    /// `top`, `None` for one `top` does not turn. A bond `top` turns that
+    /// the history does not know joins it.
+    ///
+    /// A conjugated bond near the single-bond cut of [`rotatable_bonds`] is
+    /// rotatable in one minimum and not in the next, so the bonds are matched
+    /// one by one.
+    fn align(&mut self, top: &Topology) -> Vec<Option<usize>> {
+        for (bond, quad) in top.torsions[..top.bonds].iter().zip(&top.quads) {
+            if !self.bonds.contains(&(bond.fixed, bond.pivot)) {
+                self.bonds.push((bond.fixed, bond.pivot));
+                self.quads.push(*quad);
+            }
+        }
+        self.bonds
+            .iter()
+            .map(|&(fixed, pivot)| {
+                top.torsions[..top.bonds]
+                    .iter()
+                    .position(|b| b.fixed == fixed && b.pivot == pivot)
+            })
+            .collect()
+    }
+
+    /// Dihedral angle in `x` of every bond the history knows.
+    fn angles(&self, x: ArrayView1<f64>) -> Vec<f64> {
+        self.quads.iter().map(|q| dihedral(x, q)).collect()
+    }
+
+    /// Drops the draw in flight, for a hop another proposal replaced.
+    pub(crate) fn forget(&mut self) {
+        self.pending = None;
+    }
+
+    /// Records where the torsion draw in flight took the chain. When it was
+    /// accepted and turned a bond by [`TURNED`], that change joins the
+    /// history. Nothing is recorded without a draw in flight.
+    pub(crate) fn observe(&mut self, y: ArrayView1<f64>, accepted: bool) {
+        let Some(from) = self.pending.take() else {
+            return;
+        };
+        if !accepted {
+            return;
+        }
+        let change: Vec<f64> = self
+            .quads
+            .iter()
+            .zip(&from)
+            .map(|(q, a)| {
+                let d = wrap(dihedral(y, q) - a);
+                if d.abs() < TURNED { 0.0 } else { d }
+            })
+            .collect();
+        if change.iter().all(|d| *d == 0.0) {
+            return;
+        }
+        if self.history.len() < HISTORY {
+            self.history.push(change);
+        } else {
+            self.history[self.next] = change;
+        }
+        self.next = (self.next + 1) % HISTORY;
     }
 }
 
@@ -626,6 +863,72 @@ mod tests {
             assert!((distance(x.view(), 0, 1) - distance(y.view(), 0, 1)).abs() < 1e-10);
         }
         assert!(moved > 30);
+    }
+
+    #[test]
+    fn a_turn_reads_back_as_the_dihedral_change() {
+        let (x, z) = hook();
+        let top = Topology::of(x.view(), &z, 1.2, None, false);
+        let t = central(&top);
+        for angle in [-2.5, -0.4, 0.7, 3.0] {
+            let mut y = x.clone();
+            turn_bond(&mut y, &top.torsions[t], angle);
+            let read = wrap(dihedral(y.view(), &top.quads[t]) - dihedral(x.view(), &top.quads[t]));
+            assert!((read - angle).abs() < 1e-9, "{angle} read as {read}");
+        }
+    }
+
+    #[test]
+    fn a_coupled_draw_needs_an_accepted_hop_that_turned_two_bonds() {
+        let (x, z) = hook();
+        let top = Topology::of(x.view(), &z, 1.2, None, false);
+        assert!(top.bonds >= 2);
+        let mut coupling = Coupling::default();
+        let mut coupled = StdRng::seed_from_u64(5);
+        let mut plain = StdRng::seed_from_u64(5);
+        let mut both = |coupling: &mut Coupling| {
+            (
+                top.propose_coupled(x.view(), coupling, &mut coupled),
+                top.propose(x.view(), &mut plain),
+            )
+        };
+        let (y, p) = both(&mut coupling);
+        assert_eq!(y, p, "no history draws the plain move");
+        let mut one = x.clone();
+        turn_bond(&mut one, &top.torsions[central(&top)], 2.0);
+        coupling.observe(one.view(), true);
+        assert_eq!(coupling.history.len(), 1);
+        coupling.observe(one.view(), true);
+        assert_eq!(
+            coupling.history.len(),
+            1,
+            "no draw in flight records nothing"
+        );
+        for _ in 0..20 {
+            let (y, p) = both(&mut coupling);
+            assert_eq!(y, p, "a one-bond change draws the plain move");
+        }
+        let mut all = x.clone();
+        for bond in &top.torsions[..top.bonds] {
+            turn_bond(&mut all, bond, 2.0);
+        }
+        coupling.observe(all.view(), false);
+        both(&mut coupling);
+        assert_eq!(coupling.history.len(), 1, "a rejected hop records nothing");
+        coupling.observe(all.view(), true);
+        assert_eq!(coupling.history.len(), 2);
+        assert_eq!(
+            coupling.history[1].iter().filter(|a| **a != 0.0).count(),
+            top.bonds
+        );
+        let diverged = (0..40).filter(|_| {
+            let (y, p) = both(&mut coupling);
+            assert!(top.clashes(y.view()).is_empty());
+            y != p
+        });
+        assert!(diverged.count() > 0, "a two-bond change is drawn coupled");
+        coupling.forget();
+        assert!(coupling.pending.is_none());
     }
 
     #[test]

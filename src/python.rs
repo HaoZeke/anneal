@@ -3525,6 +3525,9 @@ fn rigid_probe(
 ///   ring_moves: `Config::ring_moves` of a `groups` search, ring crankshafts
 ///     beside the torsion move. Unset keeps the preset's: on for
 ///     `recommended=True`, off otherwise.
+///   torsion_coupling: `Config::torsion_coupling` of a `groups` search,
+///     coupled torsion draws from the chain's accepted hops beside the
+///     plain ones. Unset keeps the preset's.
 ///   hold_stereocentres: `Config::hold_stereocentres` of a `groups` search,
 ///     a quench step that inverts a stereocentre is refused. Unset keeps
 ///     the preset's: on for `recommended=True`, off otherwise.
@@ -3559,6 +3562,7 @@ fn rigid_probe(
     groups = None,
     local_step = None,
     ring_moves = None,
+    torsion_coupling = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
 ))]
@@ -3584,6 +3588,7 @@ fn cluster_search(
     groups: Option<Vec<Vec<usize>>>,
     local_step: Option<&str>,
     ring_moves: Option<bool>,
+    torsion_coupling: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
@@ -3609,6 +3614,9 @@ fn cluster_search(
 
     if ring_moves.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("ring_moves needs groups"));
+    }
+    if torsion_coupling.is_some() && groups.is_none() {
+        return Err(PyValueError::new_err("torsion_coupling needs groups"));
     }
     if hold_stereocentres.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("hold_stereocentres needs groups"));
@@ -3735,6 +3743,9 @@ fn cluster_search(
         }
         if let Some(rings) = ring_moves {
             cfg.ring_moves = rings;
+        }
+        if let Some(coupled) = torsion_coupling {
+            cfg.torsion_coupling = coupled;
         }
         if let Some(hold) = hold_stereocentres {
             cfg.hold_stereocentres = hold;

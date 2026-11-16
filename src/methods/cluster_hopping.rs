@@ -4359,6 +4359,11 @@ where
     // Ring buffer of accepted quenched displacements for the learned proposal.
     let mut cov_buf: Vec<Array1<f64>> = Vec::new();
     let mut cov_next = 0usize;
+    let mut coupling = (cfg.torsion_coupling
+        && kernels
+            .iter()
+            .any(|kernel| matches!(kernel, ClusterMove::Torsion { .. })))
+    .then(torsion::Coupling::default);
     let mut soft_fired = 0usize;
     let mut soft_recomputes = 0usize;
     // The basin the *chain* stands in, not the one the last quench produced.
@@ -7401,6 +7406,10 @@ where
                 _ => {
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
                         energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                    } else if let Some(c) = coupling.as_mut()
+                        && let Some(y) = kernels[k].propose_coupled(x.view(), c, rng)
+                    {
+                        y
                     } else {
                         kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
@@ -7442,6 +7451,10 @@ where
                     _ => {
                         if matches!(kernels[k], ClusterMove::EnergyLattice) {
                             energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                        } else if let Some(c) = coupling.as_mut()
+                            && let Some(y) = kernels[k].propose_coupled(x.view(), c, rng)
+                        {
+                            y
                         } else {
                             kernels[k].propose_scaled(
                                 x.view(),
@@ -8794,6 +8807,13 @@ where
                 accept = false;
             } else {
                 general_taboo.remember(e_new, x_new.view(), &species);
+            }
+        }
+        if let Some(c) = coupling.as_mut() {
+            if proposal_action == "torsion" {
+                c.observe(x_new.view(), accept && !unquenched);
+            } else {
+                c.forget();
             }
         }
         if accept {
