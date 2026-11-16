@@ -51,6 +51,7 @@ SEED_FIELDS = (
     "path_improvements",
     "code_revision",
     "host",
+    "harness_revision",
 )
 SUMMARY_FIELDS = (
     "system",
@@ -77,6 +78,7 @@ SUMMARY_FIELDS = (
     "gmin_revision",
     "code_revision",
     "host",
+    "harness_revision",
 )
 ARM_FIELDS = (
     "system",
@@ -295,63 +297,84 @@ def run_anneal(binary: Path, system: str, seed: int, budget: int, coords: Path, 
 
 
 def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict[str, str]]:
-    grouped: dict[str, dict[str, list[dict[str, str]]]] = {}
+    """One row per system, arm and harness revision.
+
+    The anneal row carries the tests against the GMIN rows of its own
+    harness. A GMIN rerun from a later harness gets its own row after all
+    of those, with the tests against the same anneal rows.
+    """
+    grouped: dict[str, dict[tuple[str, str], list[dict[str, str]]]] = {}
     for row in rows:
-        grouped.setdefault(row["system"], {}).setdefault(row["arm"], []).append(row)
+        harness = row.get("harness_revision") or head
+        grouped.setdefault(row["system"], {}).setdefault((row["arm"], harness), []).append(row)
     seed_text = " ".join(str(seed) for seed in SEEDS)
     out: list[dict[str, str]] = []
-    for system in list(EIGHTY) + list(SMALLER):
-        arms = grouped.get(system, {})
-        walls = {
-            arm: sc.median([float(item["wall_s"]) for item in group]) for arm, group in arms.items()
+    later: list[dict[str, str]] = []
+
+    def tests(anneal: list[dict[str, str]], gmin: list[dict[str, str]]) -> dict[str, str]:
+        if not (anneal and gmin):
+            return {"ratio": "", "fisher": "", "evals": "", "wall": ""}
+        wall_a = sc.median([float(r["wall_s"]) for r in anneal])
+        wall_g = sc.median([float(r["wall_s"]) for r in gmin])
+        return {
+            "ratio": f"{wall_g / wall_a:.6f}" if wall_a > 0.0 else "",
+            "fisher": f"{fisher(sum(r['hit'] == '1' for r in anneal), len(anneal), sum(r['hit'] == '1' for r in gmin), len(gmin)):.6g}",
+            "evals": f"{mann_whitney([float(r['evals_to_hit']) for r in anneal], [float(r['evals_to_hit']) for r in gmin]):.6g}",
+            "wall": f"{mann_whitney([float(r['wall_s']) for r in anneal], [float(r['wall_s']) for r in gmin]):.6g}",
         }
-        ratio = ""
-        if "anneal" in walls and "gmin" in walls and walls["anneal"] > 0.0:
-            ratio = f"{walls['gmin'] / walls['anneal']:.6f}"
-        anneal = arms.get("anneal", [])
-        gmin = arms.get("gmin", [])
-        fisher_p = ""
-        mw_evals = ""
-        mw_wall = ""
-        if anneal and gmin:
-            fisher_p = f"{fisher(sum(r['hit'] == '1' for r in anneal), len(anneal), sum(r['hit'] == '1' for r in gmin), len(gmin)):.6g}"
-            mw_evals = f"{mann_whitney([float(r['evals_to_hit']) for r in anneal], [float(r['evals_to_hit']) for r in gmin]):.6g}"
-            mw_wall = f"{mann_whitney([float(r['wall_s']) for r in anneal], [float(r['wall_s']) for r in gmin]):.6g}"
-        for arm in ("anneal", "gmin"):
-            group = arms.get(arm, [])
-            if not group:
-                continue
-            hits = [item for item in group if item["hit"] == "1"]
-            tts = f"{sc.median([float(item['wall_s']) for item in hits]):.6f}" if hits else ""
-            out.append(
-                {
-                    "system": system,
-                    "arm": arm,
-                    "n": str(len(group)),
-                    "hits": str(len(hits)),
-                    "hits_over_n": f"{len(hits)}/{len(group)}",
-                    "budget": str(sc.PAPER_BUDGETS[system]),
-                    "reference": f"{sc.REFERENCES[system]:.4f}",
-                    "evals_median": f"{sc.median([float(item['evals_to_hit']) for item in group]):.6f}",
-                    "wall_median_s": f"{sc.median([float(item['wall_s']) for item in group]):.6f}",
-                    "pot_median_s": f"{sc.median([float(item['pot_s']) for item in group]):.6f}",
-                    "outside_median_s": f"{sc.median([float(item['outside_s']) for item in group]):.6f}",
-                    "wall_ratio": ratio if arm == "anneal" else ratio,
-                    "tts_median_s": tts,
-                    "pot_per_eval_s": f"{sc.median([float(item['pot_per_eval_s']) for item in group]):.9f}",
-                    "outside_per_eval_s": f"{sc.median([float(item['outside_per_eval_s']) for item in group]):.9f}",
-                    "fisher_p_vs_gmin": fisher_p if arm == "anneal" else "",
-                    "mannwhitney_p_evals": mw_evals if arm == "anneal" else "",
-                    "mannwhitney_p_wall": mw_wall if arm == "anneal" else "",
-                    "seeds": seed_text,
-                    "schedule_seed": SCHEDULE_SEED,
-                    "anneal_head": head,
-                    "gmin_revision": revision,
-                    "code_revision": head if arm == "anneal" else revision,
-                    "host": os.uname().nodename,
-                }
-            )
-    return out
+
+    def line(system: str, arm: str, harness: str, group: list[dict[str, str]], test: dict[str, str], carries: bool,
+             partner: list[dict[str, str]]) -> dict[str, str]:
+        hits = [item for item in group if item["hit"] == "1"]
+        tts = f"{sc.median([float(item['wall_s']) for item in hits]):.6f}" if hits else ""
+        first = group[0]
+        code = first.get("code_revision") or (head if arm == "anneal" else revision)
+        gmin_code = code if arm == "gmin" else (partner[0].get("code_revision") if partner else "") or revision
+        return {
+            "system": system,
+            "arm": arm,
+            "n": str(len(group)),
+            "hits": str(len(hits)),
+            "hits_over_n": f"{len(hits)}/{len(group)}",
+            "budget": str(sc.PAPER_BUDGETS[system]),
+            "reference": f"{sc.REFERENCES[system]:.4f}",
+            "evals_median": f"{sc.median([float(item['evals_to_hit']) for item in group]):.6f}",
+            "wall_median_s": f"{sc.median([float(item['wall_s']) for item in group]):.6f}",
+            "pot_median_s": f"{sc.median([float(item['pot_s']) for item in group]):.6f}",
+            "outside_median_s": f"{sc.median([float(item['outside_s']) for item in group]):.6f}",
+            "wall_ratio": test["ratio"],
+            "tts_median_s": tts,
+            "pot_per_eval_s": f"{sc.median([float(item['pot_per_eval_s']) for item in group]):.9f}",
+            "outside_per_eval_s": f"{sc.median([float(item['outside_per_eval_s']) for item in group]):.9f}",
+            "fisher_p_vs_gmin": test["fisher"] if carries else "",
+            "mannwhitney_p_evals": test["evals"] if carries else "",
+            "mannwhitney_p_wall": test["wall"] if carries else "",
+            "seeds": seed_text,
+            "schedule_seed": SCHEDULE_SEED,
+            "anneal_head": harness,
+            "gmin_revision": gmin_code,
+            "code_revision": code,
+            "host": first.get("host") or os.uname().nodename,
+            "harness_revision": harness,
+        }
+
+    for system in list(EIGHTY) + list(SMALLER):
+        groups = grouped.get(system, {})
+        anneal_keys = [key for key in groups if key[0] == "anneal"]
+        if len(anneal_keys) > 1:
+            raise SystemExit(f"{system} has anneal rows from more than one harness")
+        own = anneal_keys[0][1] if anneal_keys else head
+        anneal = groups.get(("anneal", own), [])
+        gmin = groups.get(("gmin", own), [])
+        test = tests(anneal, gmin)
+        if anneal:
+            out.append(line(system, "anneal", own, anneal, test, True, gmin))
+        if gmin:
+            out.append(line(system, "gmin", own, gmin, test, False, anneal))
+        for (arm, harness), group in groups.items():
+            if arm == "gmin" and harness != own:
+                later.append(line(system, "gmin", harness, group, tests(anneal, group), True, anneal))
+    return out + later
 
 
 def one_job(args, system: str, seed: int, arm: str) -> tuple[dict[str, str], list[dict[str, str]]]:
@@ -428,6 +451,7 @@ def main(argv: list[str]) -> int:
             **seed_row,
             "code_revision": head if seed_row["arm"] == "anneal" else revision,
             "host": os.uname().nodename,
+            "harness_revision": head,
         }
         rows.append(seed_row)
         done.add(key)
