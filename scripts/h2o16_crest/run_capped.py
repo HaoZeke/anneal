@@ -26,7 +26,10 @@ budget, and both stop at the first call at or below the reference plus
 is stored as the full budget. Inside time is the time in the handle;
 outside is the rest of the wall. The (seed, arm) pairs run in one shuffled
 order. Rows are appended, never rewritten, with the anneal revision and
-the host. This process refuses to run unless the UTS hostname is bench.
+the host, and a pair already in the rows file at this budget is not run
+again, so a stopped panel resumes in the same order. The summary covers
+every row in the file at this budget for the chosen seeds and arms. This
+process refuses to run unless the UTS hostname is bench.
 """
 
 from __future__ import annotations
@@ -323,6 +326,13 @@ def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+def read_rows(path: Path, budget: int) -> list[dict]:
+    if not path.is_file() or path.stat().st_size == 0:
+        return []
+    with open(path, newline="") as handle:
+        return [row for row in csv.DictReader(handle) if int(row["budget"]) == budget]
+
+
 def summarise(
     rows: list[dict], revision: str, host: str, budget: int = BUDGET
 ) -> list[dict]:
@@ -484,8 +494,13 @@ def main() -> None:
         )
     pairs = [(seed, arm) for seed in seeds for arm in arms]
     random.Random(SCHEDULE_SEED).shuffle(pairs)
-    done = []
+    finished = {
+        (int(row["seed"]), row["arm"]) for row in read_rows(args.rows, args.budget)
+    }
     for seed, arm in pairs:
+        if (seed, arm) in finished:
+            print(f"skip {arm} {seed}, already in {args.rows}", flush=True)
+            continue
         start = starts / str(seed) / "start.xyz"
         where = args.out / arm / str(seed)
         print(
@@ -509,10 +524,14 @@ def main() -> None:
             **result,
         }
         append_rows(args.rows, ROW_FIELDS, [row])
-        done.append(row)
         print(",".join(str(row[key]) for key in ROW_FIELDS), flush=True)
     if args.summary is not None:
-        summary = summarise(done, revision, host, args.budget)
+        rows = [
+            row
+            for row in read_rows(args.rows, args.budget)
+            if int(row["seed"]) in seeds and row["arm"] in arms
+        ]
+        summary = summarise(rows, revision, host, args.budget)
         append_rows(args.summary, SUMMARY_FIELDS, summary)
         for row in summary:
             print(",".join(str(row[key]) for key in SUMMARY_FIELDS), flush=True)
