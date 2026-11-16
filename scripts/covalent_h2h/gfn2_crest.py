@@ -402,7 +402,15 @@ def type7(values: list[float], p: float) -> float:
 def two_sided_mw(left: list[float], right: list[float]) -> float:
     if len(set(left) | set(right)) == 1:
         return 1.0
-    return float(mannwhitneyu(left, right, alternative="two-sided").pvalue)
+    return float(
+        mannwhitneyu(
+            left,
+            right,
+            alternative="two-sided",
+            method="asymptotic",
+            use_continuity=True,
+        ).pvalue
+    )
 
 
 def median(runs: list[dict], key: str) -> float:
