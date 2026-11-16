@@ -38,11 +38,14 @@ fn squared_distances(points: &[[f64; 3]]) -> Vec<f64> {
     let mut costs = vec![0.0; n * n];
     for row in 0..n {
         for column in 0..n {
-            let mut squared = 0.0;
-            for axis in 0..3 {
-                let delta = points[row][axis] - points[(column + 3) % n][axis];
-                squared += delta * delta;
-            }
+            let squared = points[row]
+                .iter()
+                .zip(points[(column + 3) % n])
+                .map(|(left, right)| {
+                    let delta = left - right;
+                    delta * delta
+                })
+                .sum();
             costs[row * n + column] = squared;
         }
     }
