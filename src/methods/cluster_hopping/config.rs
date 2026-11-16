@@ -2445,7 +2445,7 @@ mod coverage_behaviour {
         assert!(recommended.measured_energy_scale);
         assert!(recommended.torsion_coupling);
         assert!(!Config::for_molecular(species.clone(), groups.clone(), 1.0).torsion_coupling);
-        assert_eq!(recommended.torsion_patience, TORSION_PATIENCE);
+        assert_eq!(recommended.torsion_patience, super::TORSION_PATIENCE);
         assert!(
             !recommended
                 .resolved_json()
