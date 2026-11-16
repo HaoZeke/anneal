@@ -1166,3 +1166,19 @@ The sealed LJ38 map records a potential-energy search for the truncated octahedr
 
 Cite `gangadharaiahSampler2026`.
 
+## 2026-11-16 — Tunneling in the prism, the cage, and the book
+
+Tokić, Eraković, and Cvitaš, Physical Chemistry Chemical Physics 27, 6938--6957 (2025), doi:10.1039/d5cp00155b, compute tunneling splittings of the low-lying water hexamer isomers. The record has no day. The abstract determines those splittings in vibrationally excited states of the prism and in the ground state of the cage and the book, with modified WKB in full dimensionality. Tokić and Cvitaš already have the prism-only calculation filed as `tokicPrism2025`. This paper adds Eraković and treats the cage and the book. The chair is absent.
+
+The manuscript scores bare GFN2-xTB motif hits, and it keeps a separate TIP4P reference. This paper does not report a TIP4P energy, a GFN2-xTB energy, 121 of 192, or 97 of 192. A tunneling splitting is not the motif hit rate. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+Cite `tokicHexamerIsomers2025` beside `tokicPrism2025`.
+
+## 2026-11-16 — Global minima of hyperchlorinated gold clusters
+
+Chen, Xu, Wang, Li, Veljković, Veličković, and Kong, Frontiers in Chemistry 14, 1986508 (1 October 2026), doi:10.3389/fchem.2026.1986508, report Au\(_n\)Cl\(_{n+5}^-\) for \(n\) from 2 to 7. The structures are scored at TPSSh/aug-cc-pVTZ/ECP60MDF, beside laser desorption/ionization mass spectra. The abstract says that, except for Au\(_2\)Cl\(_7^-\), the global minima are nearly planar zigzags. Terminal gold is in a tetracoordinate Au(III) state and internal gold is in an Au(I) state. It says aurophilicity emerges at Au\(_4\)Cl\(_9^-\).
+
+Seven gold atoms sits outside 38, 55, 75, 98, and 104. The abstract gives no Cambridge energy and no water energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be one of these chloride clusters on TPSSh. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `chenGoldChloride2026`.
+
