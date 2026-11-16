@@ -1877,7 +1877,9 @@ def build_info(build_dir: Path | None, root: Path = ROOT) -> BuildInfo | None:
         or _flags_from_compile_commands(build_dir, ".cc")
     )
     c = _flags_from_compile_commands(build_dir, ".c")
-    libs = sorted({str(p.parent) for p in build_dir.rglob("*.so*") if p.is_file()})
+    libs = sorted(
+        {str(p.parent) for glob in ("*.so*", "*.dylib") for p in build_dir.rglob(glob) if p.is_file()}
+    )
     python_ok = False
     features = {}
     _stage_python(build_dir, root)

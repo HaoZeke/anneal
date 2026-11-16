@@ -287,6 +287,15 @@ class PlantedBrokenExamples(unittest.TestCase):
             info = doccheck.build_info(build, ROOT)
         self.assertIn("-DRGPOT_HAS_CACHE=TRUE", info.cpp_flags)
 
+    def test_link_dirs_from_elf_and_mach_o_libraries(self):
+        with tempfile.TemporaryDirectory(prefix="doccheck-build-") as tmp:
+            build = Path(tmp).resolve()
+            for lib in ("elf/librgpot.so.0", "macho/librgpot.dylib"):
+                (build / lib).parent.mkdir()
+                (build / lib).touch()
+            info = doccheck.build_info(build, ROOT)
+        self.assertEqual(info.lib_dirs, [str(build / "elf"), str(build / "macho")])
+
     def test_cpp_block_needs_an_rpc_build(self):
         text = "#+attr_rgpot: compile requires=has_rpc\n#+begin_src cpp\nint main() { return 1; }\n#+end_src\n"
         [block] = self._blocks(text)
