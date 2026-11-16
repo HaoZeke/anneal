@@ -191,7 +191,7 @@ COMPARE_FIELDS = [
     "develop_pot_median_s",
     "release_outside_median_s",
     "develop_outside_median_s",
-    "identical_seeds",
+    "same_seeds",
     "release_revision",
     "develop_revision",
     "develop_source",
@@ -348,6 +348,18 @@ def develop_rows(root: Path, spec: dict) -> list[dict[str, str]]:
     return [row for row in rows if all(row.get(k) == v for k, v in spec["where"].items())]
 
 
+def same_seed(mine: dict[str, str], base: dict[str, str], calls: str) -> bool:
+    """Same hit and calls to the minimum, and the same best energy to 1e-8
+    where the develop row stores one. Without it two misses match on calls."""
+    if is_hit(base["hit"]) != (mine["hit"] == "1"):
+        return False
+    if int(float(base[calls])) != int(mine["evals_to_hit"]):
+        return False
+    if base.get("best"):
+        return f"{float(base['best']):.8f}" == f"{float(mine['best']):.8f}"
+    return True
+
+
 def fmt(value: float | None, digits: int = 6) -> str:
     return "" if value is None else f"{value:.{digits}f}"
 
@@ -451,13 +463,7 @@ def compare(root: Path, rows: list[dict[str, str]], revision: str) -> list[dict[
         base_hits = sum(is_hit(r["hit"]) for r in base)
         base_calls = [float(r[spec["calls"]]) for r in base]
         u, p = mann_whitney(mine_calls, base_calls)
-        same = sum(
-            1
-            for r in group
-            if int(r["seed"]) in by_seed
-            and int(float(by_seed[int(r["seed"])][spec["calls"]])) == int(r["evals_to_hit"])
-            and is_hit(by_seed[int(r["seed"])]["hit"]) == (r["hit"] == "1")
-        )
+        same = sum(1 for r in group if same_seed(r, by_seed[int(r["seed"])], spec["calls"]))
 
         def med(column: str) -> str:
             if column not in base[0]:
@@ -476,7 +482,7 @@ def compare(root: Path, rows: list[dict[str, str]], revision: str) -> list[dict[
                 "develop_wall_median_s": med("wall_s"),
                 "develop_pot_median_s": med("pot_s"),
                 "develop_outside_median_s": med("outside_s"),
-                "identical_seeds": str(same),
+                "same_seeds": str(same),
                 "develop_revision": " ".join(revisions) or spec.get("revision", ""),
             }
         )
