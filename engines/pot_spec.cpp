@@ -230,6 +230,7 @@ Built make(const std::string &key, Reader &r, double fallback) {
       throw std::invalid_argument("EAMTable needs file <path>");
     }
     c.format = tableFormat(r.text("format", ""), c.path);
+    c.skin = r.real("skin", c.skin);
     c.periodic = true;
     c.stress = true;
     return own<EAMTablePot>(c);
