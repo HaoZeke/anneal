@@ -57,7 +57,7 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     );
     assert_eq!(
         cfg.resolved_sha256().unwrap(),
-        "a75b733f8f10f0dba234630db84e7160a4e545f7e8693b5f8577221f585b89fa"
+        "d36724ee41c6241aa6b8387174e01514b58a4ee1e0f1c0ca114d403057b773a4"
     );
     let mut uniform = cfg;
     uniform.arm_selection = ArmSelection::Uniform;

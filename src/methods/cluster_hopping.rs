@@ -11192,7 +11192,9 @@ mod tests {
     fn a_rigid_chain_has_no_restart_among_its_stall_arms() {
         let mut atomic = Config::recommended(6);
         assert!(!atomic.restart_on_stall);
+        assert!(!atomic.angular_restart);
         atomic.restart_on_stall = true;
+        atomic.angular_restart = true;
         assert_eq!(
             stall_arms(&atomic),
             ["trail", "climb", "restart", "angular"]

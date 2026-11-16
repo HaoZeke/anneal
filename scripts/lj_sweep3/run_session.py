@@ -4,10 +4,11 @@
 
 One process, hostname bench. Seeds 2000-2011 on LJ38, 55, 75, 76, 77,
 98, 102, 103, 104 and 150. Seeds 2000-2023 on LJ76, 77, 102, 103 and
-150. Rows are appended with the code revision and the host. GMIN rows
-already stored are copied in and not rerun. Fisher is the two-sided
-exact test on the hit counts. Mann-Whitney is the tie-corrected normal
-approximation on calls to the minimum.
+150. Rows are appended with the code revision and the host. A repeated
+seed keeps the earliest row. GMIN rows already stored are copied in
+and not rerun. Fisher is the two-sided exact test on the hit counts.
+Mann-Whitney is the tie-corrected normal approximation on calls to
+the minimum.
 """
 
 from __future__ import annotations
@@ -297,14 +298,17 @@ def compare(
 ) -> list[dict[str, str]]:
     def take(revision: str) -> list[dict[str, str]]:
         wanted = {str(seed) for seed in seeds}
-        return [
-            row
-            for row in rows
-            if row["system"] == system
-            and row["code"] == "anneal"
-            and row["code_revision"] == revision
-            and row["seed"] in wanted
-        ]
+        chosen: dict[str, dict[str, str]] = {}
+        for row in rows:
+            if (
+                row["system"] == system
+                and row["code"] == "anneal"
+                and row["code_revision"] == revision
+                and row["seed"] in wanted
+                and row["seed"] not in chosen
+            ):
+                chosen[row["seed"]] = row
+        return [chosen[str(seed)] for seed in seeds if str(seed) in chosen]
 
     left = take(head)
     right = take(base)

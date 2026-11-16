@@ -1447,8 +1447,7 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     if n == 0 {
         return false;
     }
-    let (f555, _, _) =
-        crate::structure::named_triplet_fractions(x, n, contact_cutoff(spec));
+    let (f555, _, _) = crate::structure::named_triplet_fractions(x, n, contact_cutoff(spec));
     f555 > 0.12
 }
 

@@ -1489,8 +1489,10 @@ impl Config {
         // The angular move is a stall arm. Replacing every loose-point hop
         // with it held LJ75 on the Mackay icosahedron and dropped seeds at
         // 76 and 104. The stall allocator already picks among the leave
-        // arms by the improvement each one has produced.
-        cfg.angular_restart = true;
+        // arms by the improvement each one has produced. The same-session
+        // panel, with the arm on, matched develop on every seed, so the
+        // preset leaves the arm off.
+        cfg.angular_restart = false;
         // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
         // The same paper's LJ75 table used a restart of about five basin
         // hopping steps once symmetrisation was on. Both run inside this
@@ -2418,11 +2420,13 @@ mod coverage_behaviour {
     }
 
     #[test]
-    fn the_angular_restart_is_a_stall_arm_on_one_species_only() {
+    fn the_angular_restart_stays_off_unless_a_caller_asks() {
         let cfg = Config::recommended(75);
-        assert!(cfg.angular_restart);
+        assert!(!cfg.angular_restart);
         assert!(!cfg.angular_moves);
-        let labelled = cfg.clone().with_species(vec![1; 75], None);
+        let mut on = cfg.clone();
+        on.angular_restart = true;
+        let labelled = on.with_species(vec![1; 75], None);
         assert!(!labelled.angular_restart);
     }
 
