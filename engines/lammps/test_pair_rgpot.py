@@ -805,6 +805,57 @@ def test_domain_dynamics_match_gather(tmp_path, system, newton):
     assert dx < 1e-8
 
 
+REUSE_MD = [
+    *THERMO,
+    "velocity all create 1200 4127 dist gaussian",
+    "fix 1 all nve",
+    "run 60",
+    "change_box all x scale 1.004 y scale 0.997 remap",
+    "run 40",
+    "fix 2 all deform 1 x scale 1.002",
+    "run 20",
+]
+
+
+@pytest.mark.parametrize("nprocs", [1, 2])
+@pytest.mark.parametrize("system", ["lj", "eam"])
+def test_gather_list_reuse(tmp_path, system, nprocs):
+    """120 hot NVE steps on the gather path, with atoms wrapped through
+    the faces, moves past the skin of the potential's own pair list, a
+    change_box between runs and a fix deform. EAMTable with its 1 A skin
+    follows skin 0, which rebuilds the list whenever an atom moves, to
+    the bit. LJ, whose skin is fixed, follows the domain path, which runs
+    on the LAMMPS list."""
+    if nprocs > 1 and not MPIRUN:
+        pytest.skip("needs RGPOT_MPIRUN")
+    start, pair, _ = domain_systems(system, True, "full")
+    head = read_data_start(tmp_path, start, "start.data")
+    got = ok(run_case(tmp_path, head + with_mode(pair, "gather") + REUSE_MD, nprocs=nprocs))
+    if system == "eam":
+        rebuilt = [line.replace(f"file {EAM_ALLOY}", f"file {EAM_ALLOY} skin 0")
+                   for line in with_mode(pair, "gather")]
+        ref = ok(run_case(tmp_path, head + rebuilt + REUSE_MD, nprocs=nprocs))
+        label = "skin 1 vs skin 0"
+    else:
+        ref = ok(run_case(tmp_path, head + with_mode(pair, "domain") + REUSE_MD, nprocs=nprocs))
+        label = "gather vs domain"
+    de = abs(got["pe"] - ref["pe"])
+    df = max_abs_diff(got["forces"], ref["forces"])
+    dx = max_abs_diff(flat(got["x"]), flat(ref["x"]))
+    dp = max_abs_diff(got["press"], ref["press"])
+    print(f"{system} np {nprocs} {label} after 120 steps: |dE| {de:.3e} eV, "
+          f"max|dF| {df:.3e} eV/A, max|dx| {dx:.3e} A, max|dP| {dp:.3e} bar")
+    if system == "eam":
+        assert got["pe"] == ref["pe"]
+        assert got["forces"] == ref["forces"]
+        assert got["x"] == ref["x"]
+        assert got["press"] == ref["press"]
+    else:
+        assert de < 1e-8 * max(1.0, abs(ref["pe"]))
+        assert df < 1e-7
+        assert dx < 1e-8
+
+
 def mode_log(tmp_path: Path, commands: list[str], nprocs: int = 1) -> str:
     log = tmp_path / f"mode{len(list(tmp_path.glob('mode*.log')))}.log"
     result = run_case(tmp_path, [f"log {log}"] + commands, nprocs=nprocs)
