@@ -895,6 +895,24 @@ on `bench/cov-floor2`; this series carries the same change on this base.
   in either, and the median best is -1146.550 eV in both (p = 0.86). The
   `c1c02d16` arm repeats the timed Si13 calls to hit seed for seed. The
   Si10, C10, Si13 and C20 rows above are without it.
+- The same gate against develop `3c189e92` (`floor-gate/`, untimed,
+  eight runs at a time), on this series as it was based on `3c189e92`
+  (`bench/cov-floor-develop`). Develop's example has no Si13 or C20, so
+  the GFN2 arms are `98a69388`, develop with the series up to the Si13
+  rows, and `a52726af`, with the floor (`floor-gate/gfn2.csv`), pushed
+  as `51abe20f` and `c3566383` with the same trees. Both arms repeat the
+  `c1c02d16` gate seed for seed: on Si13 12/12 hits in each, SCC failures
+  2.89% of calls against 6.05%, median calls to hit 2,207 against 1,897
+  (p = 0.45). The floor arm takes more calls on six seeds, fewer on five
+  and the same on one. On C20 the two arms are 0/12 with no SCC failure,
+  median best -1146.550 eV (p = 0.86). The paper headline panel
+  (`scripts/paper_0120/arm_gate.py`, LJ38 to LJ150, Au55 and M80 at ρ=6
+  and 14, seeds 2000-2011, the paper budgets) ran on `3c189e92` and
+  `a52726af`: every one of the 144 seed pairs has the same hit, calls to
+  the minimum, calls charged and best energy (`floor-gate/panel.csv`).
+  The pins (`floor-gate/pins-a52726af.txt`, sha1 `a22093e7…`) and the
+  Au55 pins (`floor-gate/au55-pins-a52726af.txt`) are byte for byte
+  those of `bench/paper-0120` on develop.
 
 `scripts/covalent_h2h/gfn2_floor_gate.py` runs a same-session gate of
 two example builds and summarises its rows.
@@ -937,3 +955,5 @@ Three first-parent commits changed it:
 - `gfn2/`: per-seed rows and summaries of GFN2-xTB Si10, C10, Si13 and
   C20, anneal against CREST, CREST's rescore against the Si13 ring, the
   lowest minima with their xtb energies, and the element-floor gate.
+- `floor-gate/`: the element-floor gate against develop, GFN2 and the
+  paper headline panel, with the pins of the floor build.
