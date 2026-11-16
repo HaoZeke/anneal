@@ -519,6 +519,28 @@ jobs:
           OMP_THREAD_LIMIT: "2"
         run: meson test -C bbdir --print-errorlogs --logbase limit2
 
+  # meson and CMake register the tests CppCore/tests/registry.txt lists.
+  # Both are configured, not built, for the plain, RPC and cache, and
+  # client-only bridge configurations. Each one's test_list_parity compares
+  # its tests with the registry, and the two lists must match. mpibld adds
+  # the MPI tests.
+  test_parity:
+    name: meson / cmake [test registry parity]
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: v0.70.2
+          cache: true
+          environments: mpibld
+          activate-environment: mpibld
+      - name: Configure meson and CMake and compare their tests
+        shell: pixi run -e mpibld bash -e {0}
+        run: bash tools/check_test_parity.sh
+
   # --- Stage 2b: rust ---
   rust_tests:
     name: Rust Core Tests (${{ matrix.os }})
@@ -912,6 +934,7 @@ jobs:
       - build_fast_nlist_off
       - cxx_layout_ubsan
       - thread_limit
+      - test_parity
       - rust_tests
       - client_bridge_stress
       - potentials_metatomic
@@ -949,6 +972,7 @@ jobs:
             "build_fast_nlist_off:${{ needs.build_fast_nlist_off.result }}" \
             "cxx_layout_ubsan:${{ needs.cxx_layout_ubsan.result }}" \
             "thread_limit:${{ needs.thread_limit.result }}" \
+            "test_parity:${{ needs.test_parity.result }}" \
             "rust_tests:${{ needs.rust_tests.result }}" \
             "client_bridge_stress:${{ needs.client_bridge_stress.result }}" \
             "potentials_metatomic:${{ needs.potentials_metatomic.result }}" \

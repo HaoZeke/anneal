@@ -165,6 +165,11 @@ let thread_limit_test = fun limit =>
   }
 in
 
+let test_parity_check =
+  S.run_pixi_env "mpibld" "bash tools/check_test_parity.sh"
+  & { name = "Configure meson and CMake and compare their tests" }
+in
+
 {
   name = "Build Matrix",
   on = S.on_main_pr,
@@ -252,6 +257,19 @@ in
         thread_limit_build,
         thread_limit_test "1",
         thread_limit_test "2",
+      ],
+    },
+    # Both build systems configured, not built, for the plain, RPC and
+    # cache, and client-only bridge configurations: each one's
+    # test_list_parity checks its tests against CppCore/tests/registry.txt,
+    # and the two lists must match. mpibld adds the MPI tests.
+    test_parity = {
+      name = "meson / cmake [test registry parity]",
+      "runs-on" = P.ubuntu,
+      steps = [
+        S.checkout_minimal,
+        S.setup_pixi "mpibld" "mpibld",
+        test_parity_check,
       ],
     },
     rust_tests = {

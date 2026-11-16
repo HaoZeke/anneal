@@ -105,6 +105,12 @@ let P = S.pins in
       role = "one meson build, the suite under OMP_THREAD_LIMIT=1 and =2",
     },
     {
+      id = "test_parity",
+      runs_on = P.ubuntu,
+      needs = ["prepare"],
+      role = "meson and CMake configured, their tests compared with CppCore/tests/registry.txt",
+    },
+    {
       id = "rust_tests",
       needs = ["ci-tools"],
       role = "rgpot-core + potctl tests",
@@ -180,6 +186,7 @@ let P = S.pins in
         "build_fast_nlist_off",
         "cxx_layout_ubsan",
         "thread_limit",
+        "test_parity",
         "rust_tests",
         "client_bridge_stress",
         "potentials_metatomic",
