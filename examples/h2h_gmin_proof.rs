@@ -70,9 +70,11 @@ fn cmd_run(args: &[String]) -> i32 {
     {
         cfg.basin_stride = stride.max(1);
     }
-    // `1` heats the walk on each call plateau.
-    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
-        cfg.plateau_heat = true;
+    // `0` keeps the walk at the preset temperature on a call plateau.
+    match std::env::var("H2H_PLATEAU_HEAT").as_deref() {
+        Ok("1") => cfg.plateau_heat = true,
+        Ok("0") => cfg.plateau_heat = false,
+        _ => {}
     }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)

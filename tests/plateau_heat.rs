@@ -1,8 +1,8 @@
 //! `plateau_heat` rides the call-plateau clock of the climb.
 //!
 //! A chain that never runs out that clock hops at the preset temperature
-//! and draws the same trajectory as the preset. Once a plateau passes, the
-//! walk is hotter and the trajectory leaves the preset one.
+//! and draws the same trajectory as the chain with the flag off. Once a
+//! plateau passes, the walk is hotter and the trajectory leaves that one.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -67,8 +67,9 @@ fn transitions(outcome: &Outcome) -> Vec<(usize, String, u64, u64)> {
 }
 
 #[test]
-fn a_chain_without_a_plateau_walks_the_preset_trajectory() {
+fn a_chain_without_a_plateau_walks_the_unheated_trajectory() {
     let mut preset = Config::recommended(ATOMS);
+    preset.plateau_heat = false;
     preset.restart_patience = 10 * BUDGET;
     let mut heated = preset.clone();
     heated.plateau_heat = true;
@@ -82,6 +83,7 @@ fn a_chain_without_a_plateau_walks_the_preset_trajectory() {
 #[test]
 fn a_plateau_heats_the_walk() {
     let mut preset = Config::recommended(ATOMS);
+    preset.plateau_heat = false;
     preset.restart_patience = 2_000;
     let mut heated = preset.clone();
     heated.plateau_heat = true;
@@ -89,6 +91,6 @@ fn a_plateau_heats_the_walk() {
     assert_ne!(
         transitions(&cold),
         transitions(&hot),
-        "the walk after a plateau is the preset walk"
+        "the walk after a plateau is the unheated walk"
     );
 }

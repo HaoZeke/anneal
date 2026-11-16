@@ -1011,11 +1011,12 @@ pub struct Config {
     /// the biased Metropolis test, the Boltzmann weights of the exchange
     /// kernel and the thermal soft-mode amplitude. The leave itself is
     /// unchanged, and a chain that never reaches a plateau draws the same
-    /// calls. Needs [`Config::escape_on_stall`], which owns that clock.
+    /// calls. Needs [`Config::escape_on_stall`], which owns that clock. A
+    /// replica ladder sets its rungs' temperatures itself and does not heat.
     ///
-    /// Off in the paper preset. The factor is a ratio of the preset
+    /// On in the paper preset. The factor is a ratio of the preset
     /// temperature and does not name a potential, a packing or a size.
-    #[serde(skip_serializing_if = "is_false")]
+    #[serde(skip_serializing_if = "is_true")]
     pub plateau_heat: bool,
     /// Exchange descent after every full quench of a labelled cluster.
     ///
@@ -1912,7 +1913,7 @@ impl Config {
             prior_handover: true,
             prior_motif: true,
             general_collective: false,
-            plateau_heat: false,
+            plateau_heat: true,
             homotop_descent: true,
             homotop_ranked: true,
             homotop_window: true,
