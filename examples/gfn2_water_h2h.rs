@@ -11,7 +11,8 @@
 //! separation. `H2H_START_ONLY=1` writes that start and exits before
 //! any energy call, so CREST can be given the same geometry.
 //! `H2H_START_XYZ=<file>` starts from that geometry instead, which is how
-//! a run is seeded from the CREST minimum.
+//! a run is seeded from the CREST minimum. `H2H_PLATEAU=1` turns on the
+//! general plateau population. The recommended arm leaves it off.
 //!
 //! The objective is the rgpot GFN2 handle (eV, angstrom) plus the
 //! hexamer O-H wall, which is zero inside 1.15 angstrom. The reported
@@ -386,6 +387,9 @@ fn main() {
     let groups = water_groups(m).expect("groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     configure_water_arm(&mut cfg, WaterSearchArm::Recommended);
+    if std::env::var("H2H_PLATEAU").ok().as_deref() == Some("1") {
+        cfg.plateau_population = true;
+    }
     cfg.target_energy = target_energy;
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
@@ -421,6 +425,7 @@ fn main() {
     writeln!(meta, "code: anneal").ok();
     writeln!(meta, "arm: recommended_molecular").ok();
     writeln!(meta, "water_arm: recommended").ok();
+    writeln!(meta, "plateau_population: {}", cfg.plateau_population).ok();
     if cfg.orbit_complete_on_new {
         eprintln!("orbit completion is on; recommended_molecular was expected to leave it off");
         std::process::exit(2);
@@ -535,6 +540,9 @@ fn main() {
         }
     };
     writeln!(meta, "hops: {}", outcome.hops).ok();
+    writeln!(meta, "plateau_step: {:.6}", outcome.plateau_step).ok();
+    writeln!(meta, "plateau_heat: {:.6}", outcome.plateau_heat).ok();
+    writeln!(meta, "plateau_leaves: {}", outcome.plateau_leaves).ok();
     writeln!(meta, "basins: {}", outcome.basins).ok();
     let overlap_rejected = stats.overlap_rejected + outcome.overlap_rejected;
     writeln!(meta, "overlap_rejected: {overlap_rejected}").ok();
