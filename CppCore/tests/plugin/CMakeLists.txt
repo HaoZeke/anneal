@@ -21,14 +21,11 @@ if(APPLE)
                         ${CMAKE_Fortran_IMPLICIT_LINK_LIBRARIES})
 endif()
 foreach(_test PluginTest PluginContractTest ExternalPluginTest ExternalFortranPluginTest)
-  add_pot_test(${_test} ../${_test}.cc)
-  set_tests_properties(${_test} PROPERTIES
+  rgpot_test_executable(${_test} ../${_test}.cc)
+  rgpot_add_test(${_test} COMMAND ${_test}
     ENVIRONMENT "RGPOT_TEST_PLUGIN_DIR=$<TARGET_FILE_DIR:rgpot_null>")
 endforeach()
-add_executable(PluginLifetimeTest ../PluginLifetimeTest.cc)
-target_link_libraries(PluginLifetimeTest PRIVATE rgpot::rgpot)
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-add_test(NAME PluginLifetimeTest
-         COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/../test_plugin_lifetime.py"
-                 $<TARGET_FILE:PluginLifetimeTest> $<TARGET_FILE:rgpot_plugin_lifetime>)
-set_tests_properties(PluginLifetimeTest PROPERTIES TIMEOUT 30)
+rgpot_test_executable(PluginLifetimeTest ../PluginLifetimeTest.cc)
+rgpot_add_test(PluginLifetimeTest
+  COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/../test_plugin_lifetime.py"
+          $<TARGET_FILE:PluginLifetimeTest> $<TARGET_FILE:rgpot_plugin_lifetime>)

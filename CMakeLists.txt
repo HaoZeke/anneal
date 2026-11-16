@@ -133,14 +133,11 @@ endif()
 
 # --- Build Targets ---
 
-if(RGPOT_WITH_RPC)
-  set(CAPNP_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/CppCore")
-  file(MAKE_DIRECTORY "${CAPNP_OUTPUT_DIR}/rgpot/rpc")
-
-  # The compiled schema is the vendored copy (the pinned potentials-schema
-  # file) with the rgpot-local series applied. capnp_generate_cpp needs the
-  # file at configure time, so the series is applied here and a change to it
-  # reconfigures.
+# The compiled schema is the vendored copy (the pinned potentials-schema
+# file) with the rgpot-local series applied. capnp_generate_cpp needs the
+# file at configure time, so the series is applied here and a change to it
+# reconfigures. The neighbour tests read it without the RPC stack.
+if(RGPOT_WITH_RPC OR RGPOT_BUILD_TESTS)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   set(RGPOT_SCHEMA_SRC_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/schema")
   set(RGPOT_EFFECTIVE_SCHEMA
@@ -165,6 +162,11 @@ if(RGPOT_WITH_RPC)
   if(NOT _rgpot_schema_result EQUAL 0)
     message(FATAL_ERROR "schema_ledger.py apply failed: ${_rgpot_schema_result}")
   endif()
+endif()
+
+if(RGPOT_WITH_RPC)
+  set(CAPNP_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/CppCore")
+  file(MAKE_DIRECTORY "${CAPNP_OUTPUT_DIR}/rgpot/rpc")
 
   set(CAPNPC_SRC_PREFIX "${RGPOT_SCHEMA_SRC_PREFIX}")
   set(CAPNPC_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
@@ -236,6 +238,36 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/nlist/HalfShell.cc
       CppCore/rgpot/StillingerWeber/SWSi.cc
       CppCore/rgpot/Tersoff/TersoffSiC.cc)
+  # The rest of Meson's librgpot: pots potserv does not serve, and the
+  # MOPAC, XTB and external-engine frontends, which load their engines at
+  # run time.
+  set(_rgpot_emt_sources
+      CppCore/rgpot/EMT/Asap/NeighborList.cpp
+      CppCore/rgpot/EMT/Asap/GhostAtoms.cpp
+      CppCore/rgpot/EMT/Asap/CellList.cpp
+      CppCore/rgpot/EMT/Asap/Vec.cpp
+      CppCore/rgpot/EMT/Asap/Atoms.cpp
+      CppCore/rgpot/EMT/Asap/Exception.cpp
+      CppCore/rgpot/EMT/Asap/EMTRasmussenParameterProvider.cpp
+      CppCore/rgpot/EMT/Asap/EMTDefaultParameterProvider.cpp
+      CppCore/rgpot/EMT/Asap/EMT.cpp
+      CppCore/rgpot/EMT/Asap/stacktrace.c
+      CppCore/rgpot/EMT/Asap/SuperCell.cpp
+      CppCore/rgpot/EMT/EMTPot.cc)
+  list(APPEND RGPOT_SOURCES
+       CppCore/rgpot/Morse/cambridge_morse.c
+       CppCore/rgpot/Gupta/gupta.c
+       CppCore/rgpot/EAM/EAM.cpp
+       CppCore/rgpot/EAM/EAMPot.cc
+       CppCore/rgpot/MOPACPot/MOPACPot.cc
+       CppCore/rgpot/XTBPot/XTBDlopen.cc
+       CppCore/rgpot/ExternalPot/ExternalPot.cc
+       ${_rgpot_emt_sources})
+  # Asap's short includes (Atoms.h, EMT.h) resolve in its own directory.
+  set_source_files_properties(${_rgpot_emt_sources} PROPERTIES
+    INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/rgpot/EMT/Asap")
+  set_source_files_properties(CppCore/rgpot/EAM/EAM.cpp CppCore/rgpot/EAM/EAMPot.cc
+    PROPERTIES COMPILE_DEFINITIONS EAM_STANDALONE)
 
   if(RGPOT_WITH_HIGHWAY)
     list(APPEND RGPOT_SOURCES CppCore/rgpot/simd/hwy_kernels.cc)
@@ -323,14 +355,18 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/nlist/MinimumImage.cpp CppCore/rgpot/simd/exact_fma_hw.cc
       CppCore/rgpot/simd/exp.cc CppCore/rgpot/simd/dispatch.cc
       CppCore/rgpot/simd/scalar_kernels.cc CppCore/rgpot/simd/hwy_kernels.cc
-      CppCore/rgpot/Morse/MorsePot.cc
+      CppCore/rgpot/Morse/MorsePot.cc CppCore/rgpot/Morse/cambridge_morse.c
+      CppCore/rgpot/Gupta/gupta.c CppCore/rgpot/EAM/EAM.cpp
+      CppCore/rgpot/EAM/EAMPot.cc
       PROPERTIES COMPILE_OPTIONS "/fp:precise")
   else()
     set_source_files_properties(
       CppCore/rgpot/nlist/MinimumImage.cpp CppCore/rgpot/simd/exact_fma_hw.cc
       CppCore/rgpot/simd/exp.cc CppCore/rgpot/simd/dispatch.cc
       CppCore/rgpot/simd/scalar_kernels.cc CppCore/rgpot/simd/hwy_kernels.cc
-      CppCore/rgpot/Morse/MorsePot.cc
+      CppCore/rgpot/Morse/MorsePot.cc CppCore/rgpot/Morse/cambridge_morse.c
+      CppCore/rgpot/Gupta/gupta.c CppCore/rgpot/EAM/EAM.cpp
+      CppCore/rgpot/EAM/EAMPot.cc
       PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
     # Value-safe: lets the exp clamps if-convert and sqrt use sqrtpd, so
     # the exp and Morse row loops vectorise, also at -O2. Each flag is kept
@@ -565,158 +601,7 @@ if(RGPOT_IS_TOP_LEVEL)
 endif()
 
 # --- Tests ---
+# CppCore/tests/registry.txt lists them; tests.cmake registers them.
 if(RGPOT_BUILD_TESTS)
-  enable_testing()
-  find_package(Threads REQUIRED)
-  add_executable(AotiPublicationTest CppCore/tests/AotiPublicationTest.cc)
-  target_include_directories(AotiPublicationTest PRIVATE CppCore)
-  target_compile_features(AotiPublicationTest PRIVATE cxx_std_20)
-  target_link_libraries(AotiPublicationTest PRIVATE Threads::Threads)
-  add_test(NAME AotiPublicationTest COMMAND AotiPublicationTest)
-  add_executable(AotiPublicationStressTest
-                 CppCore/tests/AotiPublicationStressTest.cc)
-  target_include_directories(AotiPublicationStressTest PRIVATE CppCore)
-  target_compile_features(AotiPublicationStressTest PRIVATE cxx_std_20)
-  target_link_libraries(AotiPublicationStressTest PRIVATE Threads::Threads)
-  add_test(NAME AotiPublicationStressTest COMMAND AotiPublicationStressTest)
-  set_tests_properties(AotiPublicationStressTest PROPERTIES TIMEOUT 600)
-  add_executable(MolecularFrameTest CppCore/tests/MolecularFrameTest.cc)
-  target_include_directories(MolecularFrameTest PRIVATE CppCore)
-  # The RPC client bridge stays C++17. This test includes std::span.
-  target_compile_features(MolecularFrameTest PRIVATE cxx_std_20)
-  add_test(NAME MolecularFrameTest COMMAND MolecularFrameTest)
-  find_package(Catch2 3 REQUIRED)
-
-  if(RGPOT_RPC_CLIENT_ONLY)
-    add_executable(BridgeStressTest CppCore/tests/BridgeStressTest.cc)
-    target_link_libraries(BridgeStressTest PRIVATE rgpot_client_bridge
-                                                   Catch2::Catch2WithMain)
-    add_test(NAME BridgeStressTest COMMAND BridgeStressTest)
-  endif()
-
-  if(NOT RGPOT_RPC_CLIENT_ONLY)
-    function(add_pot_test TEST_NAME SOURCE_FILE)
-      add_executable(${TEST_NAME} ${SOURCE_FILE})
-      target_link_libraries(${TEST_NAME} PRIVATE rgpot::rgpot
-                                                 Catch2::Catch2WithMain)
-      set_target_properties(${TEST_NAME} PROPERTIES LINKER_LANGUAGE CXX)
-      add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
-    endfunction()
-
-    add_subdirectory(CppCore/tests/plugin)
-
-    add_pot_test(LJClusterPotTest CppCore/tests/LJClusterPotTest.cc)
-    add_pot_test(MinImageIsaHash CppCore/tests/MinImageIsaHash.cc)
-    add_pot_test(FoldDegenerateTest CppCore/tests/FoldDegenerateTest.cc)
-    set_tests_properties(FoldDegenerateTest PROPERTIES TIMEOUT 60)
-    add_executable(ExactFmaEq CppCore/tests/exact_fma_eq.cc)
-    target_link_libraries(ExactFmaEq PRIVATE rgpot::rgpot)
-    target_include_directories(ExactFmaEq PRIVATE CppCore)
-    target_compile_features(ExactFmaEq PRIVATE cxx_std_20)
-    if(NOT MSVC)
-      target_compile_options(ExactFmaEq PRIVATE -ffp-contract=off)
-    endif()
-    add_test(NAME ExactFmaEq COMMAND ExactFmaEq)
-    add_pot_test(BatchEvaluatorTest CppCore/tests/BatchEvaluatorTest.cc)
-    target_link_libraries(BatchEvaluatorTest PRIVATE Threads::Threads)
-    add_pot_test(CxxLayoutTest CppCore/tests/CxxLayoutTest.cc)
-    target_link_libraries(CxxLayoutTest PRIVATE ${CMAKE_DL_LIBS})
-    add_library(rgpot_layout_fixture SHARED CppCore/tests/layout_fixture.cc)
-    target_include_directories(rgpot_layout_fixture
-                               PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/CppCore)
-    target_link_libraries(rgpot_layout_fixture PRIVATE rgpot::rgpot)
-    set_target_properties(rgpot_layout_fixture PROPERTIES PREFIX "lib")
-    set_tests_properties(
-      CxxLayoutTest
-      PROPERTIES ENVIRONMENT
-                 "RGPOT_LAYOUT_FIXTURE=$<TARGET_FILE:rgpot_layout_fixture>")
-    find_package(Python3 COMPONENTS Interpreter)
-    if(Python3_FOUND)
-      add_test(NAME CxxLayoutVirtualCounts
-               COMMAND Python3::Interpreter
-                       "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/tests/check_virtual_counts.py")
-    endif()
-    add_pot_test(MorsePotTest CppCore/tests/MorsePotTest.cc)
-    add_pot_test(HessianVectorTest CppCore/tests/HessianVectorTest.cc)
-    add_pot_test(FortranPotsTest CppCore/tests/FortranPotsTest.cc)
-    target_link_libraries(FortranPotsTest PRIVATE Threads::Threads)
-    add_pot_test(SWSiTest CppCore/tests/SWSiTest.cc)
-    add_pot_test(TersoffSiCTest CppCore/tests/TersoffSiCTest.cc)
-    add_pot_test(CuH2PotTest CppCore/tests/CuH2PotTest.cc)
-    if(BUILD_SHARED_LIBS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-      add_test(NAME FortranSymbolAudit
-               COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_fortran_symbols.sh"
-                       $<TARGET_FILE:rgpot>)
-    endif()
-
-    if(RGPOT_WITH_CACHE)
-      add_pot_test(InvarianceTest CppCore/tests/InvarianceTest.cc)
-      add_pot_test(CacheTest CppCore/tests/CacheTest.cc)
-    endif()
-
-    if(RGPOT_WITH_IPI)
-      find_package(Threads REQUIRED)
-      add_pot_test(IPIPotTest CppCore/tests/IPIPotTest.cc)
-      target_link_libraries(IPIPotTest PRIVATE Threads::Threads)
-      add_pot_test(IPIDriverTest CppCore/tests/IPIDriverTest.cc)
-      target_link_libraries(IPIDriverTest PRIVATE Threads::Threads)
-    endif()
-
-    if(RGPOT_WITH_RPC)
-      add_pot_test(CapnpAdapterTest CppCore/tests/CapnpAdapterTest.cc)
-      if(NOT RGPOT_RPC_CLIENT_ONLY)
-        add_pot_test(MorseConfigureTest CppCore/tests/MorseConfigureTest.cc)
-      endif()
-      find_package(Python3 COMPONENTS Interpreter REQUIRED)
-      add_library(nwchemc_lifetime_engine SHARED
-                  CppCore/tests/nwchemc_lifetime_engine.cc)
-      target_include_directories(nwchemc_lifetime_engine PRIVATE CppCore)
-      add_executable(NWChemPotLifetimeTest CppCore/tests/NWChemPotLifetimeTest.cc)
-      target_link_libraries(NWChemPotLifetimeTest PRIVATE rgpot::rgpot)
-      foreach(_lifetime_mode ordinary probe)
-        add_test(
-          NAME NWChemPotLifetime-${_lifetime_mode}
-          COMMAND Python3::Interpreter
-                  "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/tests/test_nwchem_lifetime.py"
-                  $<TARGET_FILE:NWChemPotLifetimeTest>
-                  $<TARGET_FILE:nwchemc_lifetime_engine> ${_lifetime_mode})
-      endforeach()
-      if(RGPOT_HAVE_MPI)
-        add_executable(MpiHostContractTest CppCore/tests/MpiHostContractTest.cc)
-        target_include_directories(MpiHostContractTest PRIVATE CppCore)
-        target_link_libraries(MpiHostContractTest PRIVATE MPI::MPI_CXX)
-        add_library(collective_engine SHARED CppCore/tests/nwchemc_collective_engine.cc)
-        target_link_libraries(collective_engine PRIVATE rgpot::rgpot MPI::MPI_CXX)
-        add_executable(MpiRpcContractClient CppCore/tests/MpiRpcContractClient.cc)
-        target_link_libraries(MpiRpcContractClient PRIVATE rgpot::rgpot CapnProto::capnp-rpc)
-        set(_mpi_host_script "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/tests/test_mpi_hosts.py")
-        foreach(_mode owned borrowed)
-          add_test(NAME MpiHost-${_mode}
-                   COMMAND Python3::Interpreter "${_mpi_host_script}" ${_mode}
-                           "${MPIEXEC_EXECUTABLE}" $<TARGET_FILE:MpiHostContractTest>)
-          set_tests_properties(MpiHost-${_mode} PROPERTIES TIMEOUT 60 PROCESSORS 4)
-        endforeach()
-        add_test(NAME NWChemMpiForceHost
-                 COMMAND Python3::Interpreter "${_mpi_host_script}" force
-                         "${MPIEXEC_EXECUTABLE}" $<TARGET_FILE:nwchem_mpi_force_host>
-                         $<TARGET_FILE:collective_engine>)
-        set_tests_properties(NWChemMpiForceHost PROPERTIES TIMEOUT 60 PROCESSORS 2)
-        foreach(_backend NWChem CPMD)
-          foreach(_layout serial mpi)
-            set(_rpc_server potserv)
-            if(_layout STREQUAL "mpi")
-              set(_rpc_server potserv_mpi)
-            endif()
-            add_test(NAME CollectiveRPC-${_backend}-${_layout}
-                     COMMAND Python3::Interpreter "${_mpi_host_script}" rpc
-                             "${MPIEXEC_EXECUTABLE}" $<TARGET_FILE:${_rpc_server}>
-                             $<TARGET_FILE:MpiRpcContractClient>
-                             $<TARGET_FILE:collective_engine> ${_backend} ${_layout})
-            set_tests_properties(CollectiveRPC-${_backend}-${_layout}
-                                 PROPERTIES TIMEOUT 60 PROCESSORS 2)
-          endforeach()
-        endforeach()
-      endif()
-    endif()
-  endif()
+  include("${CMAKE_CURRENT_SOURCE_DIR}/CppCore/tests/tests.cmake")
 endif()
