@@ -5,7 +5,8 @@
 # run_sc_anneal.py). One UTS namespace, hostname bench, working directory
 # /work, one job at a time on core 0. The GMIN rows are not rerun. The
 # harness must be committed, because its HEAD is the harness_revision of
-# every row.
+# every row. Arguments go to run_sc_anneal.py: --no-panel --no-n78
+# --check-system sc108-80 --check-rows <file> runs only the check, on sc108-80.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
