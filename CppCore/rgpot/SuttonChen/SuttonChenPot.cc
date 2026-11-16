@@ -29,10 +29,6 @@
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 // The pair terms run once per pair and are called from the serial and the
 // team walks. Out of line, the call costs as much as the arithmetic.
 #if defined(__GNUC__) || defined(__clang__)

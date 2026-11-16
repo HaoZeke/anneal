@@ -16,10 +16,6 @@
 #include <vector>
 // clang-format on
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/simd/api.hpp"

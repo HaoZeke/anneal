@@ -139,13 +139,14 @@ rgpot_minimage = static_library(
     pic: true,
     install: false,
 )
-# threadsRequested lives in Neighbours.cc. The cell walk's OpenMP
-# pragmas are in the headers, but the thread count is read here, so this
-# archive has to be built with OpenMP or every potential stays on one thread.
+# threadsRequested lives in Slices.cc. The regions are templates in
+# Slices.hpp, but the thread count is read here, so this archive has to be
+# built with OpenMP or every potential stays on one thread.
 _halfshell_omp = dependency('openmp', language: 'cpp', required: false)
 rgpot_halfshell = static_library(
     'rgpot_halfshell',
     files(
+        'rgpot/Slices.cc',
         'rgpot/nlist/HalfShell.cc',
         'rgpot/nlist/HalfShellWalk.cc',
         'rgpot/nlist/NeighbourList.cc',

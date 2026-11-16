@@ -23,10 +23,6 @@
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot {
 
 namespace {

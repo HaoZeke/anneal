@@ -294,6 +294,7 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   endif()
   find_package(Threads REQUIRED)
   add_library(rgpot_nlist STATIC
+      CppCore/rgpot/Slices.cc
       CppCore/rgpot/nlist/NeighbourList.cc
       CppCore/rgpot/nlist/Neighbours.cc
       CppCore/rgpot/nlist/MinimumImage.cpp

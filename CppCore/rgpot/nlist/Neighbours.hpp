@@ -6,6 +6,7 @@
 // minimum image, an optional Verlet list, a streaming walk that does not
 // store pairs, and a deterministic OpenMP split.
 
+#include "rgpot/Slices.hpp"
 #include "rgpot/nlist/MinimumImage.hpp"
 
 #include <algorithm>
@@ -16,11 +17,12 @@
 #include <cstdint>
 #include <vector>
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot::nlist {
+
+using rgpot::forEachSlice;
+using rgpot::partition;
+using rgpot::Range;
+using rgpot::threadsRequested;
 
 /// How the minimum image is formed. Round is the orthorhombic truncation
 /// used by the pair kernels. Half is one correction about the half-box,
@@ -42,46 +44,6 @@ struct Spec {
   Image image = Image::Round;
   Mode mode = Mode::Auto;
 };
-
-struct Range {
-  std::int64_t begin = 0;
-  std::int64_t end = 0;
-};
-
-/// Thread count from OMP_NUM_THREADS. Unset, empty, or a non-positive
-/// value is one thread, so a call that does not ask for threads matches
-/// the serial pair order.
-[[nodiscard]] int threadsRequested();
-
-/// Contiguous slice of `n` items for `thread` in `[0, nthreads)`. The
-/// slices cover `n` without overlap, in thread order.
-[[nodiscard]] Range partition(std::int64_t n, int thread, int nthreads);
-
-/// Runs `body(slice)` once for each slice in `[0, nslices)`, with
-/// `nslices` at least one. The runtime may start fewer threads than
-/// slices: without OpenMP, inside another parallel region, or under
-/// OMP_THREAD_LIMIT. Each thread then takes the slices `thread`,
-/// `thread + team`, ... in turn. The body sees only its slice, so a sum
-/// taken in slice order is the same for any team.
-///
-/// MSVC rejects `#pragma omp` inside a lambda (C2760, token PRAGMA_OMP).
-/// The region lives here; the lambdas only supply the body.
-template <typename Body>
-void forEachSlice(int nslices, Body &&body) {
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nslices)
-  {
-    const int team = omp_get_num_threads();
-    for (int slice = omp_get_thread_num(); slice < nslices; slice += team) {
-      body(slice);
-    }
-  }
-#else
-  for (int slice = 0; slice < nslices; ++slice) {
-    body(slice);
-  }
-#endif
-}
 
 /// Bytes the process may still allocate, from MemAvailable. Zero when
 /// that figure is not reported.

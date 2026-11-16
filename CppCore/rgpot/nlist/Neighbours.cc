@@ -20,10 +20,6 @@
 #include <fstream>
 #endif
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot::nlist {
 namespace {
 
@@ -42,41 +38,6 @@ int axisCount(double length, double edge) {
 }
 
 } // namespace
-
-int threadsRequested() {
-#if defined(_OPENMP)
-  const char *env = std::getenv("OMP_NUM_THREADS");
-  if (env == nullptr || env[0] == '\0') {
-    return 1;
-  }
-  char *end = nullptr;
-  const long parsed = std::strtol(env, &end, 10);
-  if (end == env || parsed < 1) {
-    return 1;
-  }
-  if (parsed > 0x7fffffffL) {
-    return 0x7fffffff;
-  }
-  return static_cast<int>(parsed);
-#else
-  return 1;
-#endif
-}
-
-Range partition(std::int64_t n, int thread, int nthreads) {
-  if (nthreads < 1) {
-    nthreads = 1;
-  }
-  if (thread < 0 || thread >= nthreads || n <= 0) {
-    return {};
-  }
-  const auto nt = static_cast<std::int64_t>(nthreads);
-  const auto t = static_cast<std::int64_t>(thread);
-  Range out;
-  out.begin = (n * t) / nt;
-  out.end = (n * (t + 1)) / nt;
-  return out;
-}
 
 std::uint64_t availableBytes() {
 #if defined(_WIN32)
