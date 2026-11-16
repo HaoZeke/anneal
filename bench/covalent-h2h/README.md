@@ -660,7 +660,12 @@ real xtb 6.7.1 (conda-forge build): anneal through rgpot's
 `libxtb_engine.so` at engine `04aceaa7`, and CREST 3.0.2 through
 its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 300 K, so both run at an electronic temperature of 3000 K
-(`RGPOT_XTB_ETEMP`, 300 K when unset).
+(`RGPOT_XTB_ETEMP`, 300 K when unset). From `e37680df` on, every anneal
+call starts its SCC from xtb's own guess (the engine's warm move set to
+zero). The Si10, C10 and C20 rows below were measured before that, with
+the engine reusing the previous call's wavefunction; their minima give
+the same energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do
+not (below).
 
 - Anneal is the panel's G arm (`examples/gfn2_covalent_h2h`, the
   `general` configuration of `examples/h2h_covalent.rs`) on scales from
@@ -689,6 +694,11 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
   C20 for both codes. On Si10, anneal runs all twelve seeds and CREST, at
   about 45 minutes a run, seeds 2000-2003. Serial on core 0, hostname
   `bench`.
+- The Si13 reference, -599.34546694 eV, is the compact minimum anneal
+  reached with a fresh SCC on every call on four of six untimed seeds
+  (3002-3005 at 30000 calls; 3000 and 3001 were stopped before the end).
+  xtb 6.7.1 gives it -22.025539659 Eh. Si13 runs seeds 2000-2005 for both
+  codes.
 - The C20 reference, -1148.85383633 eV, is a cage with every atom
   three-coordinated and bonds from 1.449 Å. One run found it: anneal
   without the call floor (`91a4aa70`, develop `f2a628c0` with these
@@ -703,6 +713,8 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 | Si10 | CREST | 4/4 | 99,300 | 7,900 | -460.683718 | 2699.1 | 26.76 ms | 0.252 ms |
 | C10 | anneal G | 12/12 | 2,517 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |
 | C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
+| Si13 | anneal G | 6/6 | 1,975 | 1,210 | -624.704463 | 264.6 | 174.71 ms | 0.017 ms |
+| Si13 | CREST | 4/6 | 103,805 | 121,368 | -599.345440 | 4191.4 | 44.59 ms | 0.273 ms |
 | C20 | anneal G | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |
 | C20 | CREST | 0/12 | 78,582 | 6,308 | -1146.770080 | 1545.1 | 19.30 ms | 0.307 ms |
 
@@ -737,17 +749,31 @@ reference.
   systems) with untimed searches on the other cores. The delivered code
   ends seeds 2005 and 2007 at the same energies after the same 1e5 calls,
   and repeats seeds 2000 and 2001 over their first 5000 calls.
-- Si13 and Si20 are pending. The engine hands a search's next SCC the
-  previous wavefunction as its guess, and on these clusters at 3000 K that
-  guess lands on another, lower solution. Anneal's Si13 minimum at
-  -601.12421 eV is -593.51232 eV from a fresh SCC in the same engine and
-  in xtb 6.7.1, which is what CREST's xtb processes see; CREST's best Si13
-  structure is -599.34544 eV either way. Si20 minima near -979 eV are near
-  -868 eV fresh. One Si13 search recorded a planar sheet at -640.659 eV
-  whose SCC does not converge from a fresh start. The Si10, C10 and C20
-  minima above evaluate to the same energy fresh, to 1e-10 eV. Develop's
-  pinned engine, `b4154a4d`, keeps the reused guess and adds a smeared
-  one for an SCC that does not converge.
+- Si13: anneal reaches the reference on all six seeds, in 683 to 2,487
+  calls, and CREST on four, in 95,213 to 143,630 (Mann-Whitney p = 0.0022
+  with CREST's misses ranked last; Fisher p = 0.45 on the hits). CREST's
+  other two seeds, 2000 and 2005, end before any search: the SCC of the
+  xtb `--opt` of the start does not converge in xtb's 250 iterations, and
+  the summary counts their calls as 0. Measured on `c1c02d16`, serial on
+  core 0 with nothing else running. An anneal call costs 175 ms inside
+  xtb against CREST's 45 ms: from a fresh SCC, 0.5% to 15% of anneal's
+  calls on these seeds (366 of 2,487 on seed 2001) are SCCs that do not
+  converge in 500 iterations, each about 2 s.
+- Anneal stops at the first energy at or below the reference, and seeds
+  2003 and 2005 stop below it, at -624.70446339 and -617.18016907 eV. The
+  first is an open ring in which every atom has one or two neighbours,
+  and xtb 6.7.1 gives it -22.957465589557 Eh from a fresh start. It is
+  the lowest Si13 minimum any run has reached, recorded in
+  `gfn2/minima.csv` with its structure in `gfn2/minima/si13-ring.xyz`.
+  Against it CREST hits on none of its six seeds (`gfn2/rescore.csv`).
+  Anneal's rows are not rescored: each stopped at the reference it ran
+  with.
+- Si20 is pending. With the engine reusing the previous wavefunction,
+  the Si13 and Si20 minima had energies a fresh SCC does not reproduce:
+  an Si13 minimum at -601.12421 eV is -593.51232 eV fresh, and Si20 minima
+  near -979 eV are near -868 eV. From a fresh SCC on every call, 74% of
+  anneal's first 3,000 Si20 calls are SCCs that do not converge, nearly
+  all on trials with a pair at 0.90-0.92 Å, just past the call floor.
 
 `scripts/covalent_h2h/gfn2_enter_bench.sh` builds the example from a
 clean tree and runs both codes; `GFN2_CODES=anneal-general` reruns
@@ -757,7 +783,8 @@ revision appended last. The table is that summary. `gfn2/seeds.csv`
 keeps the anneal rows without the floor, measured on `bb486bfd`, beside
 the rows with it, measured on `ce1e7a46` (the fix on `f2a628c0`). The
 CREST rows were measured on `8b4a2592` from starts that are identical
-byte for byte on `f2a628c0`.
+byte for byte on `f2a628c0`. `--rescore SYSTEM ENERGY_EV` appends CREST's
+hits against another reference to `gfn2/rescore.csv`.
 
 ## Pins
 
@@ -794,5 +821,6 @@ Three first-parent commits changed it:
 - `reference.csv`: the unstopped reference runs.
 - `tc20-bowl.xyz`, `tc20-flake.xyz`: the C20 bowl and the best unbiased flake.
 - `c10-96/`: the 96-seed C10 rows.
-- `gfn2/`: per-seed rows and summary of GFN2-xTB Si10, C10 and C20,
-  anneal against CREST.
+- `gfn2/`: per-seed rows and summary of GFN2-xTB Si10, C10, Si13 and
+  C20, anneal against CREST, CREST's rescore against the Si13 ring, and
+  the lowest minima with their xtb energies.
