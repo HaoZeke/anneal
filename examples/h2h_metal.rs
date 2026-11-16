@@ -320,6 +320,10 @@ fn config(spec: &Spec) -> Config {
     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }
+    // `1` heats the walk on each call plateau.
+    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
+        cfg.plateau_heat = true;
+    }
     cfg
 }
 

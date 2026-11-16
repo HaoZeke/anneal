@@ -126,6 +126,7 @@ fn paper_preset_priors_stay_out_of_the_resolved_hash() {
         "homotop_reorder",
         "prior_motif",
         "general_collective",
+        "plateau_heat",
     ] {
         assert!(
             !json.contains(name),
@@ -142,6 +143,18 @@ fn paper_preset_priors_stay_out_of_the_resolved_hash() {
     );
     assert_ne!(
         dropped.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
+    let mut heated = cfg.clone();
+    heated.plateau_heat = true;
+    assert!(
+        heated
+            .resolved_json()
+            .unwrap()
+            .contains("\"plateau_heat\":true")
+    );
+    assert_ne!(
+        heated.resolved_sha256().unwrap(),
         cfg.resolved_sha256().unwrap()
     );
     let mut plane = cfg;
