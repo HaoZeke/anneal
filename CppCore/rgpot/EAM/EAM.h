@@ -11,14 +11,12 @@
 */
 #pragma once
 
+#include "rgpot/EAM/StreamSpline.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
-
-namespace rgpot::eam {
-struct ElementSpline;
-}
 
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <vector>
 
 #ifndef EAM_STANDALONE
@@ -143,6 +141,9 @@ private:
   std::vector<double> stream_rho_;
   std::vector<double> stream_force_;
   std::vector<rgpot::nlist::Range> parts_;
+  /// Tables for the elements seen so far. A deque keeps every table in
+  /// place as it grows, so the per-atom pointers into it stay valid.
+  std::deque<rgpot::eam::ElementSpline> splines_;
   rgpot::nlist::Neighbours neighbours_;
 
   double box_len_[3]{};

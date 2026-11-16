@@ -434,11 +434,7 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
 }
 
 const rgpot::eam::ElementSpline &EAM::splineFor(int Z) {
-  static std::vector<rgpot::eam::ElementSpline> tables;
-  if (tables.capacity() < 8) {
-    tables.reserve(8);
-  }
-  for (const auto &table : tables) {
+  for (const auto &table : splines_) {
     if (table.Z == Z) {
       return table;
     }
@@ -454,10 +450,10 @@ const rgpot::eam::ElementSpline &EAM::splineFor(int Z) {
     throw std::invalid_argument("EAM: no parameters for atomic number " +
                                 std::to_string(Z));
   }
-  tables.push_back(rgpot::eam::makeElementSpline(raw->Z, raw->Dm, raw->alphaM, raw->Rm,
-                                                 raw->beta1, raw->beta2, raw->r_cut,
-                                                 raw->func_coeff));
-  return tables.back();
+  splines_.push_back(rgpot::eam::makeElementSpline(raw->Z, raw->Dm, raw->alphaM, raw->Rm,
+                                                   raw->beta1, raw->beta2, raw->r_cut,
+                                                   raw->func_coeff));
+  return splines_.back();
 }
 
 void EAM::evaluateDensityStream(long N, const int *atomicNrs, double *F,
