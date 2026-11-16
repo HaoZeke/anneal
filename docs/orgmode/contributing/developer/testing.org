@@ -30,15 +30,53 @@ cmake --build build-cmake
 ctest --test-dir build-cmake --output-on-failure
 #+end_src
 
+Both register the same tests, except those only meson can run.
+
+*** One test list for meson and CMake
+
+=CppCore/tests/registry.txt= lists every test, one per line: its name, the
+features that gate it, its kind, and its timeout, suite, working directory,
+environment and flags.
+Meson reads the file in =CppCore/meson.build=.
+CMake reads it in =cmake/RgpotTestRegistry.cmake=.
+=CppCore/tests/tests.cmake= uses that module to register the tests.
+A test only meson can run, because it needs an engine, an external program or a
+meson-only option, keeps its line with the reason CMake leaves it out.
+The comments at the top of the file give the format and each feature.
+
+A unit test, a Fortran program, a neighbour example, a Python script, or a rerun
+of a test under other options needs nothing but its line, since both build
+systems register those kinds in a loop.
+A custom test is registered by hand in each build system, beside its fixtures,
+and CMake stops the configuration when it registers a test whose gate does not
+hold.
+
+Each build has a =test_list_parity= test, which runs
+=CppCore/tests/check_test_registry.py= against the configured build.
+It fails when a registered test has no line, when a test whose gate holds is
+missing, and when a test's options differ from its line.
+=tools/check_test_parity.sh= configures the plain, the RPC and cache, and the
+client-only builds with both build systems, without building them.
+It runs both checks, then compares the features each build system found and the
+tests each registered.
+The =test_parity= CI job runs it, and =ci_gate= waits on that job.
+
+#+attr_rgpot: syntax configures meson and CMake without building
+#+begin_src bash
+python3 CppCore/tests/check_test_registry.py lint
+pixi run -e mpibld bash tools/check_test_parity.sh
+#+end_src
+
 *** Floating-point contraction
 
 =FastNlistTest=, =ReducedPairTest=, =EAMCellVerletTest=, =StreamParityTest=,
 =NeighbourLayerTest= and =TersoffSiCTest= compare kernels bit for bit with plain
 products and sums.
 The kernels are built with contraction off.
-=CppCore/meson.build= builds those six tests with =-ffp-contract=off= too, so
-neither side fuses and the compare stays exact.
-A new test of that kind belongs in the same list.
+The registry gives those six tests =fp_contract=off=, so both build systems
+compile them with =-ffp-contract=off= too, neither side fuses, and the compare
+stays exact.
+A new test of that kind takes the same option.
 Outside it, the test can pass on x86-64, where the baseline has no fused
 multiply-add, and miss by an ulp on macOS arm64.
 To exercise contraction on x86-64, build with Clang at the default debug
