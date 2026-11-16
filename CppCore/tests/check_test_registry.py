@@ -17,9 +17,10 @@ should_fail flag differs from its entry. Meson's introspection does not
 report should_fail, so only CMake's is compared. lint checks the
 registry alone.
 
---list FILE (or RGPOT_TEST_LIST) writes the names of the registered
-entries both build systems share, so two builds of the same features can
-be compared.
+--list FILE (or RGPOT_TEST_LIST) writes the features that gate the entries
+both build systems share, then the shared entries the build registered, so
+a meson and a CMake build can be compared: where the features agree, the
+tests must too.
 """
 from __future__ import annotations
 
@@ -302,7 +303,9 @@ def compare(
         if name in registered or (system == "cmake" and entry.reason is not None):
             continue
         if entry.holds(features, probe=False):
-            problems.append(f"{name}: gate '{entry.gate_text()}' holds, but {system} did not register it")
+            problems.append(
+                f"{name}: gate '{entry.gate_text()}' holds, but {system} did not register it"
+            )
     return problems
 
 
@@ -338,10 +341,11 @@ def main() -> int:
             tests = cmake_tests(args.build, args.ctest)
         problems += compare(entries, tests, features, args.system, args.build)
         if args.list:
-            shared = sorted(
-                t.name for t in tests if t.name in entries and entries[t.name].reason is None
-            )
-            args.list.write_text("".join(f"{name}\n" for name in shared))
+            shared = {e.name for e in entries.values() if e.reason is None}
+            gating = {a for n in shared for c in entries[n].gate for a in c} - {PROBE}
+            lines = [f"feature {a}={int(features[a])}" for a in sorted(gating & set(features))]
+            lines += [f"test {name}" for name in sorted(t.name for t in tests if t.name in shared)]
+            args.list.write_text("".join(f"{line}\n" for line in lines))
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:

@@ -28,11 +28,11 @@ endif
 _args += _build_identity_args
 
 # tests/registry.txt lists every test with the features that enable it;
-# CMakeLists.txt reads the same file. The unit, fortran, nlist, py and
-# rerun entries this build enables land in _rt_tests and are registered in
-# loops below. _rt_kw holds each entry's test() options. The custom
-# entries' gates are checked by test_list_parity, which also takes the
-# features only known later (see the end of meson.build).
+# cmake/RgpotTestRegistry.cmake reads the same file. The unit, fortran,
+# nlist, py and rerun entries this build enables land in _rt_tests and are
+# registered in loops below. _rt_kw holds each entry's test() options. The
+# custom entries' gates are checked by test_list_parity, which also takes
+# the features only known later (see the end of meson.build).
 _rt_atoms = {
     'tests': get_option('with_tests'),
     'core': not get_option('with_rpc_client_only'),
@@ -40,7 +40,7 @@ _rt_atoms = {
     'rpc': rpc_enabled,
     'fortran': has_fortran,
     'cache': get_option('with_cache'),
-    'ipi': has_ipi,
+    'ipi': has_ipi and not get_option('with_rpc_client_only'),
     'eam_table': has_eam_table,
     'xtensor': has_xtensor,
     'python': find_program('python3', required: false).found(),

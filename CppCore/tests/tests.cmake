@@ -66,6 +66,12 @@ else()
   list(APPEND RGPOT_ISA_SPECS neon)
 endif()
 
+# Core builds already ran FindMPI. meson's mpiexec is a launcher on the PATH
+# in any build.
+if(NOT MPIEXEC_EXECUTABLE)
+  find_program(MPIEXEC_EXECUTABLE NAMES mpirun mpiexec)
+endif()
+
 macro(rgpot_test_set_feature feature)
   if(${ARGN})
     set(RGPOT_TEST_FEATURE_${feature} TRUE)
@@ -92,7 +98,7 @@ rgpot_test_set_feature(capnp TARGET CapnProto::capnp AND TARGET CapnProto::capnp
 rgpot_test_set_feature(capnp_tool RGPOT_CAPNP_TOOL)
 rgpot_test_set_feature(rustc RGPOT_RUSTC)
 rgpot_test_set_feature(tsan RGPOT_TEST_TSAN)
-rgpot_test_set_feature(isa_variants RGPOT_ISA_SPECS)
+rgpot_test_set_feature(isa_variants RGPOT_ISA_SPECS AND NOT RGPOT_RPC_CLIENT_ONLY)
 rgpot_test_set_feature(toplevel RGPOT_IS_TOP_LEVEL)
 foreach(feature water xtb tblite dftd3 dftd4 xckernel long_range expr
                 metatomic skala rust_core probe)
