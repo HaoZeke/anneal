@@ -40,7 +40,9 @@ anneal; alone when no binaries are given, over ``--systems``, and with
 ``--anneal-revision`` over anneal's rows of that ``code_revision`` only.
 ``--false-hits`` names rows, by system, code, revision and seed, whose hit
 is not the geometry's energy; the summary counts them as misses at their
-budget.
+budget. ``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` CREST's
+hits on that system, over the same files, against another reference;
+anneal stops at its own and is not rescored.
 Time per call skips a run that made no call.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
@@ -321,6 +323,8 @@ def main() -> None:
     ap.add_argument("--summary", type=Path)
     ap.add_argument("--anneal-revision")
     ap.add_argument("--false-hits", type=Path)
+    ap.add_argument("--rescore", nargs=2, metavar=("SYSTEM", "ENERGY_EV"))
+    ap.add_argument("--rescored", type=Path)
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -330,6 +334,18 @@ def main() -> None:
         raise SystemExit("--rows is required")
     host = socket.gethostname()
     revision = args.head_file.read_text().strip() if args.head_file else ""
+    if args.rescore is not None:
+        if args.rescored is None:
+            raise SystemExit("--rescore appends to --rescored")
+        rescore(
+            [*args.history, args.rows],
+            args.rescored,
+            args.rescore[0],
+            float(args.rescore[1]),
+            revision,
+            host,
+        )
+        return
     if args.summary is not None and not any((args.anneal, args.crest, args.xtb)):
         summarise(
             [*args.history, args.rows],
@@ -559,6 +575,58 @@ def summarise(
                 line["mannwhitney_p"] = f"{mannwhitney:.6g}"
             lines.append(line)
     append_rows(summary, SUMMARY_FIELDS, lines)
+
+
+RESCORE_FIELDS = [
+    "system",
+    "code",
+    "reference_eV",
+    "runs",
+    "hits",
+    "seeds",
+    "code_revision",
+    "host",
+    "date",
+]
+
+
+def rescore(
+    paths: list[Path],
+    rescored: Path,
+    system: str,
+    reference: float,
+    revision: str,
+    host: str,
+) -> None:
+    """Append CREST's hits on ``system`` against another reference.
+
+    CREST runs to its own end, so its best energy is scored against any
+    reference after the fact. Anneal stops at the reference it ran with,
+    and its rows are not rescored.
+    """
+    runs = []
+    for path in paths:
+        if path.is_file():
+            with open(path, newline="") as handle:
+                runs.extend(
+                    row
+                    for row in csv.DictReader(handle)
+                    if row["system"] == system and row["code"] == "crest"
+                )
+    if not runs:
+        raise SystemExit(f"no CREST rows on {system}")
+    line = {
+        "system": system,
+        "code": "crest",
+        "reference_eV": f"{reference:.8f}",
+        "runs": len(runs),
+        "hits": sum(float(row["best"]) <= reference + HIT_TOL for row in runs),
+        "seeds": " ".join(str(seed) for seed in sorted(int(r["seed"]) for r in runs)),
+        "code_revision": revision,
+        "host": host,
+        "date": datetime.date.today().isoformat(),
+    }
+    append_rows(rescored, RESCORE_FIELDS, [line])
 
 
 def self_test() -> None:
