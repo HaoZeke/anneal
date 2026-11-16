@@ -842,6 +842,44 @@
       ]
     },
     {
+      "rule": "occat_h2h",
+      "competitors": [
+        "OCCat",
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/occat_h2h/run_campaign.py",
+        "scripts/occat_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/occat_h2h/run_campaign.py",
+        "name": "SYSTEMS",
+        "field": "budget"
+      },
+      "seeds": {
+        "source": "scripts/occat_h2h/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/occat-h2h/benchmarks/occat_h2h.py",
+      "rows": [
+        {
+          "path": "bench/occat-h2h/seeds.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ],
+      "short": [
+        {
+          "key": "cu55",
+          "arm": "anneal",
+          "n": 1,
+          "reason": "the campaign stopped after anneal's Cu55 seed 2000; Cu55 seeds 2001-2005 and its OCCat and GMIN arms have not run"
+        }
+      ]
+    },
+    {
       "rule": "asg2_h2h",
       "competitors": [
         "ASE basin hopping",
@@ -870,6 +908,33 @@
           "arm": "arm",
           "budget": "budget",
           "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "agox_lj75",
+      "competitors": [
+        "AGOX"
+      ],
+      "runners": [
+        "scripts/agox_lj75/enter_bench.sh"
+      ],
+      "budgets": {
+        "rows": "the driver passes 4000000 to h2h_arm3 and run_arm.py and summarize.py refuses any other; the committed rows are checked"
+      },
+      "seeds": {
+        "source": "scripts/agox_lj75/summarize.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/agox-lj75/benchmarks/agox_lj75.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/agox-lj75/rows.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
         }
       ]
     },
