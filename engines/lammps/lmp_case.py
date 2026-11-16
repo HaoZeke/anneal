@@ -15,7 +15,8 @@ to r (I + e) and the energy of that cell is recorded, then the
 original cell is restored.
 
 A LAMMPS error is written as {"error": message}. The script may run
-under mpirun; rank 0 writes the file.
+under mpirun; rank 0 writes the file, and every rank r writes the count
+of atoms it owns at the end to out.json.nlocal<r>.
 """
 
 from __future__ import annotations
@@ -100,6 +101,8 @@ def main() -> None:
         if strains and not lmp.extract_global("triclinic"):
             lmp.command("change_box all triclinic")
         result["strained"] = [strained_energy(lmp, e) for e in strains]
+        nlocal = lmp.extract_global("nlocal")
+        out_path.with_name(f"{out_path.name}.nlocal{rank}").write_text(str(nlocal))
     except Exception as exc:  # LAMMPS raises its error text
         result = {"error": str(exc)}
     finally:
