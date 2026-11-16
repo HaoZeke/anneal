@@ -9,7 +9,10 @@
 //!
 //! `serve` holds one rgpot GFN2 handle (`RGPOT_XTB_ENGINE`) for the seed,
 //! started cold once, and adds the one-sided O-H wall of
-//! `common/water_oh_wall.rs`: the objective anneal searches. Every request
+//! `common/water_oh_wall.rs`: the objective anneal searches. xtb's
+//! optimiser and MD cannot take a refused call as an uphill step, so the
+//! handle refuses only pairs inside `OVERLAP_SEPARATION_A` rather than
+//! anneal's 0.90 angstrom; a failed SCC is still a failed call. Every request
 //! is one energy and gradient call. The server counts calls, times the
 //! handle, keeps the best objective and its geometry, and records the
 //! first call at or below `target_eV`. After the call that reaches the
@@ -36,7 +39,7 @@ use std::time::Instant;
 
 use eindir_core::gradient::DifferentiableObjective;
 use ndarray::ArrayView1;
-use rgpot_eindir::RgpotObjective;
+use rgpot_eindir::{OVERLAP_SEPARATION_A, RgpotObjective};
 use water_oh_wall::{OH_WALL_EV_PER_A2, OH_WALL_ONSET_A, oh_wall};
 
 /// xtb 6.7.1 conversion factors, so the driver round-trips xtb's own units.
@@ -148,7 +151,7 @@ fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f6
     let _ = fs::remove_file(rundir.join("stop"));
     let atmnrs: Vec<i32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
     let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
-    let mut pot = RgpotObjective::xtb(&atmnrs, box_);
+    let mut pot = RgpotObjective::xtb_with_overlap_limit(&atmnrs, box_, OVERLAP_SEPARATION_A);
     pot.restart();
     let dim = 3 * atmnrs.len();
     let listener = UnixListener::bind(socket).expect("bind socket");
@@ -221,6 +224,7 @@ fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f6
     writeln!(meta, "objective: rgpot GFN2 plus the one-sided O-H wall").ok();
     writeln!(meta, "oh_wall_onset_A: {OH_WALL_ONSET_A}").ok();
     writeln!(meta, "oh_wall_eV_per_A2: {OH_WALL_EV_PER_A2}").ok();
+    writeln!(meta, "overlap_limit_A: {OVERLAP_SEPARATION_A}").ok();
     writeln!(meta, "molecules: {molecules}").ok();
     writeln!(meta, "budget: {budget}").ok();
     writeln!(meta, "target_eV: {target:.10}").ok();

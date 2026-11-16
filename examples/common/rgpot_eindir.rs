@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Pair distance below which a geometry is an overlap, not a physical contact.
 /// Same threshold the cluster walk uses before it will record a molecular quench.
-const OVERLAP_SEPARATION_A: f64 = 0.35;
+pub(crate) const OVERLAP_SEPARATION_A: f64 = 0.35;
 /// Same gate as `OVERLAP_CALL_LIMIT`. Below a covalent O–H, above the shell
 /// where xtb's SCC fails.
 const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
@@ -400,6 +400,8 @@ struct XtbKernel {
     destroy: Symbol<'static, XtbDestroy>,
     worker: XtbWorker,
     evaluations: usize,
+    /// Calls with a pair at or inside this distance are refused before xtb.
+    overlap_limit_a: f64,
     /// Force buffer reused across calls. The owned DLPack tensor copies
     /// it before the callback returns.
     scratch: Vec<f64>,
@@ -488,7 +490,7 @@ unsafe extern "C" fn xtb_callback(
     let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
     let cell = unsafe { std::slice::from_raw_parts(boxp, 9) };
     let min_pair = min_pair_distance_a(positions);
-    if min_pair <= OVERLAP_CALL_LIMIT_A {
+    if min_pair <= kernel.overlap_limit_a {
         // xtb's SCC aborts when a trial step stacks two atoms. That geometry
         // is not an energy the search can record. The caller turns the error
         // into an uphill step and shortens it, so a finite quench stays eligible.
@@ -621,6 +623,17 @@ impl RgpotObjective {
     }
 
     pub(crate) fn xtb(atmnrs: &[i32], box_: [f64; 9]) -> Self {
+        Self::xtb_with_overlap_limit(atmnrs, box_, OVERLAP_CALL_LIMIT_A)
+    }
+
+    /// `xtb` with another refusal distance, for a caller that cannot take a
+    /// refused call as an uphill step. Below it the call is refused; above
+    /// it a failed SCC comes back from the forked worker as a failed call.
+    pub(crate) fn xtb_with_overlap_limit(
+        atmnrs: &[i32],
+        box_: [f64; 9],
+        overlap_limit_a: f64,
+    ) -> Self {
         let path = first_existing(&[
             env_path("RGPOT_XTB_ENGINE").unwrap_or_default(),
             PathBuf::from("libxtb_engine.so"),
@@ -675,6 +688,7 @@ impl RgpotObjective {
             destroy,
             worker,
             evaluations: 0,
+            overlap_limit_a,
             scratch: Vec::new(),
         });
         let kernel_ptr = Box::into_raw(kernel);
