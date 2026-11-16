@@ -105,10 +105,11 @@ def main() -> None:
         out_path.with_name(f"{out_path.name}.nlocal{rank}").write_text(str(nlocal))
     except Exception as exc:  # LAMMPS raises its error text
         result = {"error": str(exc)}
-    finally:
-        lmp.close()
     if rank == 0:
         out_path.write_text(json.dumps(result))
+    # A rank that exits without MPI_Finalize makes mpirun kill the others,
+    # perhaps before they have written their files.
+    lmp.finalize()
 
 
 if __name__ == "__main__":
