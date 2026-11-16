@@ -1182,3 +1182,47 @@ Seven gold atoms sits outside 38, 55, 75, 98, and 104. The abstract gives no Cam
 
 Cite `chenGoldChloride2026`.
 
+## 2026-11-16 — Lower Thomson energies at three Cambridge sizes
+
+Shao, Wang, Liu, and Peng, arXiv:2611.17776 (13 November 2026), report configurations of the Thomson problem at 912, 1382, and 2502 charges. The energies they give lie 0.0036186, 0.0109730, and 0.0614033 below the Cambridge Cluster Database values, and they say exact integer arithmetic certifies the gaps. The abstract says the largest-\(N\) entries in that database were set in October 2026. The search is unconstrained replica-exchange basin hopping, started from the database configurations, with a shared pool of minima, recombination after a geometric relabelling, and gradient-only polishing. Replica-exchange basin hopping alone found the 912-charge and 1382-charge configurations, the former in one of five runs. They say polishing alone lowered two database entries by more than the threshold at which their pipeline reports a candidate, and that those two records were spurious until the candidates were compared with the polished database energies.
+
+Amore and Wales already search this problem on a sphere, filed as `amoreThomson2026`. Meadows already deposits a 436-charge candidate, filed as `meadowsThomson2026`. Lavrov and Nikonov search the disk, filed as `lavrovThomsonDisk2026`. The sizes 912, 1382, and 2502 are not those records. This note does not recompute the configurations. The energies are Coulomb energies on a sphere. They do not contradict the Cambridge Lennard-Jones energies, 121 of 192, or 97 of 192. The comparison they describe is a polished baseline on the Thomson table. It is not the force-call hit rate. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `shaoThomson2026`. Keep the three gaps out of the Lennard-Jones table.
+
+## 2026-11-16 — Global minima across transition-metal compositions
+
+Li, Wang, Li, Shi, Liu, and He, Nature Communications 17, 10065 (22 August 2026), doi:10.1038/s41467-026-77099-7, map the thermodynamics of transition-metal clusters. The abstract says automated first-principles calculations produced about 93,000 global-minimum structures, and that a cluster-transformer-encoder network then predicts atomization energies, to about 40 meV per atom, for 9.13 million compositions. The set covers 30 d-block metals and the ligand elements carbon, nitrogen, oxygen, and sulfur. The abstract says the cluster atomization energies correlate with bulk cohesive energies, and that the map picks out heteronuclear stabilization and the stability of noble-metal-doped oxide clusters.
+
+The manuscript sizes are Lennard-Jones. The abstract gives no Cambridge energy and no water energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be one of these metal clusters on the first-principles surface they use. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `liClusterThermodynamics2026`.
+
+## 2026-11-16 — Alloy and boron structure searches
+
+Vaneeva, Mikhailova, Lepeshkin, Maltsev, and Oganov, Journal of Cluster Science 37, 140 (27 August 2026), doi:10.1007/s10876-026-03099-8, predict structures of Al\(_n\)B\(_m\) clusters with \(n\) and \(m\) from 0 to 16. The abstract says the low-energy motifs follow the boron subnetwork, from isolated boron atoms in an aluminium framework to dense boron networks. It names Al\(_{13}\) and Al\(_{12}\)B as the enhanced-stability sizes, consistent with the mass spectra they cite. Sixteen atoms of each element sits outside 38, 55, 75, 98, and 104. The abstract gives no Cambridge energy.
+
+Zhu, Deng, Bao, and Liu, ACS Omega 11, 54077--54087 (29 August 2026), doi:10.1021/acsomega.6c04564, search SnAu\(_n\) for \(n\) from 2 to 20. The abstract says the lowest-energy structures come from CALYPSO, refined at B3PW91/LANL2DZ. Through eight gold atoms the tin stays on a peripheral site, in geometries that are planar or three-dimensional. From nine gold atoms the tin is progressively enclosed, and from fifteen gold atoms it sits in a high-coordination cage. The abstract names SnAu\(_4\), SnAu\(_8\), and SnAu\(_{16}\) as the magic sizes. Twenty gold atoms sits outside the manuscript sizes.
+
+Nie, Lu, Guo, Shen, Cui, Tian, Shao, Zhang, and Li, International Journal of Quantum Chemistry 126, e70302 (20 October 2026), doi:10.1002/qua.70302, search lithium-doped B\(_8^-\) with CALYPSO. The abstract says lithium reconstructs the planar boron framework into a three-dimensional structure, with the lithium at the edge of the boron ring, and that the umbrella-shaped \(C_{7v}\) cluster is the stable form they report. Eight boron atoms sits outside the manuscript sizes. Gong and co-workers already use CALYPSO on iridium, filed as `gongIridium2026`. Lu and co-workers already use CALYPSO on ruthenium-doped silicon, filed as `luRutheniumSilicon2026`. Those searches are iridium and ruthenium--silicon. These two are tin-doped gold and lithium-doped boron.
+
+Sireci, Hoffman, Sharapa, Gambu, van Steen, and Studt, ACS Catalysis 16, 19336--19351 (14 September 2026), doi:10.1021/acscatal.6c04886, place manganese on cobalt nanoparticles with a genetic algorithm driven by a machine-learning potential. The particles are 6 to 8 nm, in face-centred cubic and hexagonal close-packed cobalt. The abstract says the manganese is hydroxylated under Fischer--Tropsch conditions, and that after activation the stoichiometry runs from MnO to MnO\(_{1.5}\). A particle of that diameter is not LJ38 through LJ104.
+
+None of the four quotes a Cambridge Lennard-Jones energy or a hexamer hit rate, so none contradicts the hit targets, 121 of 192, or 97 of 192. None fills the open ASE, AGOX, and GMIN kit. A head-to-head would be Al\(_n\)B\(_m\) on the surface used for that prediction, SnAu\(_n\) at B3PW91, LiB\(_8^-\) on the density functional they use, or manganese on one of the cobalt particles. None warrants a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `vaneevaAlb2026`, `zhuSnau2026`, `nieLithiumBoron2026`, and `sireciManganese2026`.
+
+## 2026-11-16 — A Lennard-Jones dividing surface, and conformer searches away from the hexamer
+
+Ketter and Madsen, Journal of Chemical Theory and Computation 22, 5797--5806 (1 June 2026), doi:10.1021/acs.jctc.6c00679, resample Langevin dynamics so the trajectory stays on configurations with a chosen number of negative Hessian eigenvalues. The abstract says the tests are a two-dimensional model, the isomerization of a Lennard-Jones cluster, the decomposition of isopropyl alcohol, and CO dissociation on Co(001) with and without explicit water. Madsen is an author of the diffusion search already filed as `adelGuidedDiffusion2026`, which names LJ38. This abstract does not name 38, 55, 75, 98, or 104, and it does not report a new global-minimum energy. A dividing surface is not the hop's hit rate.
+
+Qin, Shi, Tan, Liu, Zhang, and Lu, arXiv:2604.27636 (30 April 2026), couple a diffusion model to physical forces and call the method generative structure search. The abstract says the same process limits to diffusion on one side and to random structure search on the other. On molecular and crystalline tests it says the search recovers diverse metastable structures at more than tenfold lower sampling cost than random structure search, and that it still works for compositions outside the training set. The molecular code deposit, for aspirin conformers, is doi:10.5281/zenodo.23633742 (25 October 2026). The hexamer comparison is GFN2-xTB against CREST 3.0.2. This preprint does not report 121 of 192 or 97 of 192. A sampling cost against random structure search is not the force-call hit rate.
+
+van de Ven, Cuppen, and Galimberti, Journal of Chemical Theory and Computation 22, 11471--11483 (23 October 2026), doi:10.1021/acs.jctc.6c01326, release SPICES. A history-dependent bias follows a spectrum rather than the energy. The abstract says the method finds the diphenylalanine conformer that matches the spectrum, among 400 stable conformations, in a median of 22 spectral calculations, and that the search does not depend on how far that conformer sits above the global minimum. A spectral assignment is not the GFN2 motif table.
+
+Cañete-Arché, McGinley, Castro-Latorre, Watson, and García-Melchor, Research Square (7 October 2026), doi:10.21203/rs.3.rs-11013614/v1, release TASTET. The abstract says the package selects structures by geometry before an electronic-structure calculation. Selecting 3 percent of a 949-member rhodium-complex conformer ensemble recovered the principal energetic regions. Selecting 0.3 percent of 10,000 oxide-supported metal nanocluster structures recovered the dominant structure--energy relationships. The selection is not a generator.
+
+None of the four reports 121 of 192, 97 of 192, or an energy below the Cambridge hit targets. Leave the CREST table on 3.0.2. None warrants a head-to-head on that table or on the sealed Lennard-Jones maps. The open comparison with de Souza's GOAT stays the bare hexamer.
+
+Cite `ketterSaddle2026`, `qinGenerative2026`, `vandevenSpices2026`, and `caneteTastet2026`.
+
