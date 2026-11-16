@@ -4,7 +4,11 @@
 # cargo's checkout alone with the neighbour list and SIMD sources it needs,
 # into /work/metal-sc/rgpot-sc with sc_wall_micro and the revision. With
 # RGPOT_SRC set to a clean rgpot checkout, that checkout is built instead,
-# into /work/metal-sc/rgpot-sc-<first 8 digits of its revision>.
+# into /work/metal-sc/rgpot-sc-<first 8 digits of its revision>. With
+# RGPOT_OPENMP=1 it is built with -fopenmp, into that directory with -omp
+# after it, and reads OMP_NUM_THREADS; without, the potential runs on one
+# thread. The directory records the flag in openmp. sc_omp_bits is built
+# next to sc_wall_micro.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -23,13 +27,22 @@ else
   src=$(ls -d "$cargo_home"/git/checkouts/rgpot-*/"${rgpot_rev:0:7}" | head -1)
   LIBDIR=/work/metal-sc/rgpot-sc
 fi
+openmp=${RGPOT_OPENMP:-0}
+flags=()
+case $openmp in
+  0) ;;
+  1) LIBDIR=$LIBDIR-omp flags=(-fopenmp) ;;
+  *) echo "RGPOT_OPENMP is 0 or 1" >&2; exit 1 ;;
+esac
 cpp=$src/CppCore
 
 mkdir -p "$LIBDIR"
-g++ -O3 -std=c++20 -fPIC -shared -DNDEBUG -w -I"$cpp" -I"$src/include" -o "$LIBDIR/librgpot.so" \
+g++ -O3 -std=c++20 -fPIC -shared -DNDEBUG ${flags[@]+"${flags[@]}"} -w -I"$cpp" -I"$src/include" -o "$LIBDIR/librgpot.so" \
   "$cpp/rgpot/SuttonChen/SuttonChenPot.cc" "$cpp"/rgpot/nlist/*.cc "$cpp"/rgpot/nlist/*.cpp \
   "$cpp/rgpot/simd/exact_fma_hw.cc" "$cpp/rgpot/simd/exp.cc" -Wl,--no-undefined
-g++ -O3 -std=c++20 -DNDEBUG -w -I"$cpp" -I"$src/include" -o "$LIBDIR/sc_wall_micro" \
+g++ -O3 -std=c++20 -DNDEBUG ${flags[@]+"${flags[@]}"} -w -I"$cpp" -I"$src/include" -o "$LIBDIR/sc_wall_micro" \
   "$HERE/sc_wall_micro.cc" "$LIBDIR/librgpot.so" -ldl -Wl,-rpath,"$LIBDIR"
+g++ -O3 -std=c++20 -DNDEBUG -w -o "$LIBDIR/sc_omp_bits" "$HERE/sc_omp_bits.cc" -ldl
 printf '%s\n' "$rgpot_rev" > "$LIBDIR/rgpot-revision"
-echo "rgpot library=$LIBDIR/librgpot.so revision=$rgpot_rev"
+printf '%s\n' "$openmp" > "$LIBDIR/openmp"
+echo "rgpot library=$LIBDIR/librgpot.so revision=$rgpot_rev openmp=$openmp"
