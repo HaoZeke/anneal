@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- ``Config::recommended_molecular`` turns on ring crankshafts. A rotatable bond is a bridge of the bond graph, so a torsion never changes a ring. With ``ring_moves`` the torsion kernel also turns one arc of a flexible ring about the axis through the two ring atoms that bound it. A molecule with no flexible ring draws the same hops.
+- ``Config::hold_stereocentres`` refuses a quench step that turns a declared stereocentre over from the hand the quench started in. The refused step is not a potential call. It backs off toward the anchor and the descent continues. ``recommended_molecular`` sets it.
+- ``Config::measured_energy_scale`` replaces ``energy_scale`` in a single chain's temperature and deposit height with the median quenched energy change of the first 20 hops. Convergence and the return screen keep the declared scale. A replica ladder is left alone. ``recommended_molecular`` sets it. It is off unless the preset or the caller sets it.
+- On a labelled cluster the paper preset exchanges unlike pairs on the quenched geometry, keeps an exchange when the unrelaxed energy drops, quenches the reordered geometry, and keeps the lower of the two. It ranks that polish of a new best by one unrelaxed read and quenches the lowest of those reads. It sets the temperature from the budget-window law rather than from the Lennard-Jones well. The flags are ``homotop_descent``, ``homotop_ranked`` and ``homotop_window``.
+- ``Config::homotop_reorder`` reorders a stalled labelled incumbent from its own packing. The smaller label goes on the innermost sites and the ordering is ranked by site energy and refined by quenched exchanges. A lower ordering is recorded and the walker stays on its own packing. The wait after a try that leaves the lowest where it was doubles, and it resets when the lowest moves. Off in the paper preset. ``h2h_metal`` reads ``H2H_REORDER``.
+- ``Config::prior_handover`` stops the labelled core cuts once they stall and hands their best to the walk. The cuts get at most half of the calls that remain. Before each refinement they stop when the calls since their last lower quench exceed the calls it took to reach that quench. The improvement is stamped with the probe call that found it. On in the paper preset. ``h2h_metal`` reads ``H2H_HANDOVER``.
+- ``Config::recommended`` draws one lattice-site exchange. The occupied site of highest pair energy moves onto a vacant site of the lattice the current structure defines, and the quench is kept only when the Metropolis test accepts it. A fully coordinated interior atom stays put.
 - A how-to guide shows how to run the Sutton-Chen head-to-head runner over a seed range and score its arms.
   ``docs/scripts/plot_sc_hits.py`` prints hits, median calls to hit, mean penalised average runtime with factor 2 (PAR-2) and a paired sign-flip p-value.
   It also plots the fraction of seeds solved against energy calls.
@@ -70,103 +77,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   https://theory.cm.utexas.edu/benchmarks/globalopt/lj75/lj75_clusters.tgz,
   which is not vendored.
 
-### Developer
-
-- ``lj_causal_runner`` no longer fails on a checkout the causal runner refuses
-  to seal. Before it runs the script, the test applies the script's own
-  ``git diff --quiet HEAD --`` check. On a tree whose tracked files differ from
-  HEAD, or on a directory that is not a git checkout, it prints a warning naming
-  the reason and returns. On a clean commit it runs as before.
-
-### Changed
-
-- The package version is ``[workspace.package].version`` in the workspace
-  ``Cargo.toml``. Member crates inherit that field.
-  Cog (https://nedbatchelder.com/code/cog/) generates the copies from that
-  field.
-  Those copies are the Python, Pixi, Meson, citation, Zenodo, README and C
-  header files.
-  CMake, Sphinx and the compiled libraries read the same field when they
-  configure or compile.
-  Towncrier (https://towncrier.readthedocs.io/en/stable/) reads it when
-  assembling the changelog.
-  A release bump edits that one line, runs cog, then builds the news
-  fragments.
-  Meson and CMake had stayed at 0.5.0.
-- ``Config::for_cluster`` sets ``Config::orbit_core`` to ``OrbitCore::Both(ShellCore::scaled(length_scale))``.
-  Each orbit completion then relaxes a candidate from the shell core and one from the fraction core and offers the lower.
-  The setting carries over to every caller built on ``for_cluster``, such as ``packing_superbasin``.
-  ``recommended``, ``communicating`` and ``derived`` keep the fraction core.
-  ``for_cluster`` is not the base of the presets for the four-point transferable intermolecular potential (TIP4P) water model.
-
-### Fixed
-
-- Acklam's inverse-normal coefficients keep an allow for the published digits. The TIP4P profile keeps its index loops. The cutoff test names the fractional wrap inside its format string.
-- An orbit-completion quench that lowers the incumbent is an encounter. The charged count on that row is the ledger's spent when the incumbent was stored. A first-encounter hit reads that count.
-- The Python ``cluster_archive_search`` relaxes with
-  ``cluster_search::warm_relax``, the closure ``cluster_search::search``
-  uses. Its quench now reads the preset's surfaces, stops at
-  ``record_gradient``, and screens with the predictor. It ran a bare L-BFGS
-  to a 1e-6 gradient on the plain surface before. ``warm_relax`` is public,
-  so a driver that calls the chain itself can take the same relaxation.
-- The icosahedral contact test bonds the first shell at the preset's own length.
-  ``ih_dominated`` and the 555, 421 and 422 class masses use ``contact_cutoff(spec)``.
-  That cutoff is 1.35 at the default ``SoapSpec`` and scales with its cutoff.
-  The cluster hop passes ``SoapSpec::at_length(length_scale)`` at every call.
-  A Sutton-Chen cluster in Cambridge units has nearest neighbours near 0.71.
-  There the fixed 1.35 also bonded the second shell, and an icosahedron read no 555 pairs.
-  Lennard-Jones runs at length one are unchanged.
-- The quickstart now opens with a first `global_optimize` run, showing one budget, where it went, a repeat with the same seed, a gradient and a known start.
-  Its `run_ensemble` example passes an objective that returns one value per chain, which the ensemble requires.
-  The pixi and maturin builds moved to the install how-to, and the pixi steps now build the package before importing it.
-- When the chain is stuck, an orbit completion now faces the biased Metropolis test that a hop faces if it ends in the deposited basin of the lowest structure seen, so the deposits can refuse it.
-  Before, it was accepted on raw energy alone and returned the walk to the shelf it was stuck on.
-  Any other completion still faces the raw energy test.
-  On Sutton-Chen arm 3 (seeds 14100 to 14115, 2e6 potential evaluations), hits rose from 2/16 to 4/16 on 12-6 N=73, from 5/16 to 7/16 on 12-6 N=63, from 9/16 to 11/16 on 9-6 N=61, from 15/16 to 16/16 on 9-6 N=43 and from 14/16 to 15/16 on 9-6 N=78.
-  Every Lennard-Jones 38 seed reports the same calls and energy as before on the recommended preset and on the Smooth Overlap of Atomic Positions (SOAP) preset (72 seeds, 4e5 evaluations).
-  The biased test now takes the energy difference before adding the deposits.
-- ``Config::recommended_with_scales`` builds the recommended preset in a pair potential's own length.
-  ``PairKind::length_scale`` gives that length, ``r_min / 2^(1/6)``.
-  A Morse cluster on reduced units had every length in the preset 12% too wide, including its step and coordination shells.
-  The two-phase surface penalty scales with them.
-  ``Config::recommended`` and every other preset are unchanged.
-  ``examples/morse_table.rs`` scores Morse clusters against the Cambridge table.
-- ``Tip4pCluster`` uses the TIP4P parameters the Cambridge Cluster Database minima were computed with: the oxygen well depth is ``C6^2 / 4 C12`` from Jorgensen's coefficients instead of the rounded 0.6485 kJ/mol, and the Coulomb prefactor is GMIN's 1389.354848.
-  The rounded depth left every minimum about 1.3e-3 kJ/mol per molecule above the database, so 15 and 20 molecule runs on this objective could not reach the published energies.
-  ``ccd_tip4p_minimum`` lists the database energies for 2 to 21 molecules at full precision; ``wales_hodges_minimum`` now returns the same values, which adds the missing 15-molecule entry and replaces the two-decimal values for 8, 12, 20 and 21 molecules, which sat up to 2.57e-3 kJ/mol (N = 21) below the database energies.
-- ``WATER_POLISH_EXTERNAL=1`` runs the Euclidean answer polish only when the search geometry is outside the IRA gate, and stops that polish at the first accepted iterate inside the gate. CREST ``--opt extreme`` runs only on that outside path. Unset, ``answer_gradient`` stays zero and the reported geometry is unchanged.
-- ``WATER_POLISH_EXTERNAL=1`` stops the Euclidean polish after CREST at the first accepted iterate inside the IRA gate and keeps the lowest-energy geometry that is already inside that gate. A polish that starts inside the gate cannot report a geometry outside it.
-- ``WarmLbfgs`` backtracks from an evaluation answered with a non-finite
-  value or gradient, and a refused start ends only that relaxation, at
-  ``+inf``. ``rgmin`` 0.5.0's line search doubled the step on a NaN value,
-  and a NaN gradient at the start became a NaN direction, so one refused SCF
-  sent the engine geometries far out and then NaN coordinates.
-  ``RelaxStats::refused`` counts the refusals.
-- ``paper_controls`` runs every arm but ``population`` through
-  ``cluster_search``. The control arms had their own closure: a bare L-BFGS
-  to a 1e-6 gradient on the plain surface, a start in the preset sphere, and
-  no stop at the reference. ``recommended`` on LJ75 therefore ignored the
-  preset's surfaces and spent far more calls than ``cluster_search::search``
-  on the same seed. A system with a reference now stops at the reference
-  plus ``HIT``, and ``force_to_hit`` is the charged count at that stop. The
-  example's unit tests run under ``cargo test``, and one checks that the
-  ``recommended`` and ``derived`` arms match ``cluster_search::search`` on
-  LJ75 seeds 2000 to 2003 in best energy bits and charged calls.
-- ``ttt_lj38`` and the ``serial`` and ``indep`` arms of
-  ``lj_lattice_ensemble`` run ``cluster_search``, so they walk the preset
-  ``Config::recommended`` names, surfaces included. ``lj_lattice_ensemble``
-  no longer replays ``lj_ensemble_splice`` chains bit for bit, and those arms
-  print different energies and first hits.
-- ``water_tip4p`` relaxes with ``cluster_search::warm_relax`` on
-  ``Config::for_tip4p`` and folds the rotation vectors after it. The descent
-  stops at ``record_gradient`` and each full quench ends with the charged
-  convergence check, as in ``cluster_search::search_from``. It descended to
-  a 1e-6 gradient before, so its hops and first hits move.
-
-
-## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-14
-
-### Added
 
 - ``paper_controls`` runs the registered control arms: ``recommended``,
   ``for_cluster`` (screened basin hopping, and the in-tree control while
@@ -321,6 +231,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Developer
 
+- ``lj_causal_runner`` no longer fails on a checkout the causal runner refuses
+  to seal. Before it runs the script, the test applies the script's own
+  ``git diff --quiet HEAD --`` check. On a tree whose tracked files differ from
+  HEAD, or on a directory that is not a git checkout, it prints a warning naming
+  the reason and returns. On a clean commit it runs as before.
+
+
 - A half turn composed on the TIP4P Rodrigues chart stays on its own axis.
   The composition helper is what a rigid orientation step calls, and it
   lives with the potential so the hop and the energy share one product.
@@ -356,6 +273,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   Its start is ``examples/fixtures/ac-ala3-nhme-s9743.xyz``.
 
 ### Changed
+
+- The package version is ``[workspace.package].version`` in the workspace
+  ``Cargo.toml``. Member crates inherit that field.
+  Cog (https://nedbatchelder.com/code/cog/) generates the copies from that
+  field.
+  Those copies are the Python, Pixi, Meson, citation, Zenodo, README and C
+  header files.
+  CMake, Sphinx and the compiled libraries read the same field when they
+  configure or compile.
+  Towncrier (https://towncrier.readthedocs.io/en/stable/) reads it when
+  assembling the changelog.
+  A release bump edits that one line, runs cog, then builds the news
+  fragments.
+  Meson and CMake had stayed at 0.5.0.
+- ``Config::for_cluster`` sets ``Config::orbit_core`` to ``OrbitCore::Both(ShellCore::scaled(length_scale))``.
+  Each orbit completion then relaxes a candidate from the shell core and one from the fraction core and offers the lower.
+  The setting carries over to every caller built on ``for_cluster``, such as ``packing_superbasin``.
+  ``recommended``, ``communicating`` and ``derived`` keep the fraction core.
+  ``for_cluster`` is not the base of the presets for the four-point transferable intermolecular potential (TIP4P) water model.
+
 
 - The Pt(111) heptamer dimer stops translation on the maximum force
   component. ``rgsaddle`` 0.3.0 has no force-gate field on
@@ -450,6 +387,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Acklam's inverse-normal coefficients keep an allow for the published digits. The TIP4P profile keeps its index loops. The cutoff test names the fractional wrap inside its format string.
+- An orbit-completion quench that lowers the incumbent is an encounter. The charged count on that row is the ledger's spent when the incumbent was stored. A first-encounter hit reads that count.
+- The Python ``cluster_archive_search`` relaxes with
+  ``cluster_search::warm_relax``, the closure ``cluster_search::search``
+  uses. Its quench now reads the preset's surfaces, stops at
+  ``record_gradient``, and screens with the predictor. It ran a bare L-BFGS
+  to a 1e-6 gradient on the plain surface before. ``warm_relax`` is public,
+  so a driver that calls the chain itself can take the same relaxation.
+- The icosahedral contact test bonds the first shell at the preset's own length.
+  ``ih_dominated`` and the 555, 421 and 422 class masses use ``contact_cutoff(spec)``.
+  That cutoff is 1.35 at the default ``SoapSpec`` and scales with its cutoff.
+  The cluster hop passes ``SoapSpec::at_length(length_scale)`` at every call.
+  A Sutton-Chen cluster in Cambridge units has nearest neighbours near 0.71.
+  There the fixed 1.35 also bonded the second shell, and an icosahedron read no 555 pairs.
+  Lennard-Jones runs at length one are unchanged.
+- The quickstart now opens with a first `global_optimize` run, showing one budget, where it went, a repeat with the same seed, a gradient and a known start.
+  Its `run_ensemble` example passes an objective that returns one value per chain, which the ensemble requires.
+  The pixi and maturin builds moved to the install how-to, and the pixi steps now build the package before importing it.
+- When the chain is stuck, an orbit completion now faces the biased Metropolis test that a hop faces if it ends in the deposited basin of the lowest structure seen, so the deposits can refuse it.
+  Before, it was accepted on raw energy alone and returned the walk to the shelf it was stuck on.
+  Any other completion still faces the raw energy test.
+  On Sutton-Chen arm 3 (seeds 14100 to 14115, 2e6 potential evaluations), hits rose from 2/16 to 4/16 on 12-6 N=73, from 5/16 to 7/16 on 12-6 N=63, from 9/16 to 11/16 on 9-6 N=61, from 15/16 to 16/16 on 9-6 N=43 and from 14/16 to 15/16 on 9-6 N=78.
+  Every Lennard-Jones 38 seed reports the same calls and energy as before on the recommended preset and on the Smooth Overlap of Atomic Positions (SOAP) preset (72 seeds, 4e5 evaluations).
+  The biased test now takes the energy difference before adding the deposits.
+- ``Config::recommended_with_scales`` builds the recommended preset in a pair potential's own length.
+  ``PairKind::length_scale`` gives that length, ``r_min / 2^(1/6)``.
+  A Morse cluster on reduced units had every length in the preset 12% too wide, including its step and coordination shells.
+  The two-phase surface penalty scales with them.
+  ``Config::recommended`` and every other preset are unchanged.
+  ``examples/morse_table.rs`` scores Morse clusters against the Cambridge table.
+- ``Tip4pCluster`` uses the TIP4P parameters the Cambridge Cluster Database minima were computed with: the oxygen well depth is ``C6^2 / 4 C12`` from Jorgensen's coefficients instead of the rounded 0.6485 kJ/mol, and the Coulomb prefactor is GMIN's 1389.354848.
+  The rounded depth left every minimum about 1.3e-3 kJ/mol per molecule above the database, so 15 and 20 molecule runs on this objective could not reach the published energies.
+  ``ccd_tip4p_minimum`` lists the database energies for 2 to 21 molecules at full precision; ``wales_hodges_minimum`` now returns the same values, which adds the missing 15-molecule entry and replaces the two-decimal values for 8, 12, 20 and 21 molecules, which sat up to 2.57e-3 kJ/mol (N = 21) below the database energies.
+- ``WATER_POLISH_EXTERNAL=1`` runs the Euclidean answer polish only when the search geometry is outside the IRA gate, and stops that polish at the first accepted iterate inside the gate. CREST ``--opt extreme`` runs only on that outside path. Unset, ``answer_gradient`` stays zero and the reported geometry is unchanged.
+- ``WATER_POLISH_EXTERNAL=1`` stops the Euclidean polish after CREST at the first accepted iterate inside the IRA gate and keeps the lowest-energy geometry that is already inside that gate. A polish that starts inside the gate cannot report a geometry outside it.
+- ``WarmLbfgs`` backtracks from an evaluation answered with a non-finite
+  value or gradient, and a refused start ends only that relaxation, at
+  ``+inf``. ``rgmin`` 0.5.0's line search doubled the step on a NaN value,
+  and a NaN gradient at the start became a NaN direction, so one refused SCF
+  sent the engine geometries far out and then NaN coordinates.
+  ``RelaxStats::refused`` counts the refusals.
+- ``paper_controls`` runs every arm but ``population`` through
+  ``cluster_search``. The control arms had their own closure: a bare L-BFGS
+  to a 1e-6 gradient on the plain surface, a start in the preset sphere, and
+  no stop at the reference. ``recommended`` on LJ75 therefore ignored the
+  preset's surfaces and spent far more calls than ``cluster_search::search``
+  on the same seed. A system with a reference now stops at the reference
+  plus ``HIT``, and ``force_to_hit`` is the charged count at that stop. The
+  example's unit tests run under ``cargo test``, and one checks that the
+  ``recommended`` and ``derived`` arms match ``cluster_search::search`` on
+  LJ75 seeds 2000 to 2003 in best energy bits and charged calls.
+- ``ttt_lj38`` and the ``serial`` and ``indep`` arms of
+  ``lj_lattice_ensemble`` run ``cluster_search``, so they walk the preset
+  ``Config::recommended`` names, surfaces included. ``lj_lattice_ensemble``
+  no longer replays ``lj_ensemble_splice`` chains bit for bit, and those arms
+  print different energies and first hits.
+- ``water_tip4p`` relaxes with ``cluster_search::warm_relax`` on
+  ``Config::for_tip4p`` and folds the rotation vectors after it. The descent
+  stops at ``record_gradient`` and each full quench ends with the charged
+  convergence check, as in ``cluster_search::search_from``. It descended to
+  a 1e-6 gradient before, so its hops and first hits move.
+
+
+
 - A declared group that has lost a bond is not evaluated. The line search
   receives an uphill step back toward the last finite geometry, so a descent
   that already has a finite start does not end there when the first trial
@@ -469,13 +470,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - With the ``rgsaddle`` feature, the labelled binary-core probe takes half
   of the calls the chain has left. A default build still offers the probe
   the whole remainder.
-- ``Config::recommended`` at 38 points grows the named lattices (face-centred,
-  hexagonal, icosahedral, simple cubic, and the observed cloud) instead of
-  the LeanBurst displacement stack. That stack left 17 of 72 seeds on the
-  Mackay minimum ``-173.252378`` at 400000 calls. At 75 and 98 points the
-  global minimum is not one of those packings, and ``recommended`` stays
-  LeanBurst. A stall takes the recorded basin trail, the climb, and the
-  restart. ``for_cluster`` turns the Bayes screen on at
+- ``Config::recommended`` keeps ``MoveLibrary::LeanBurst`` at every size.
+  A reseed library that grows named face-centred, hexagonal, icosahedral
+  and simple cubic templates was installed at 38 atoms only. Those
+  templates are the truncated octahedron at that size, and at 75 and 98
+  atoms the published minima are not those packings, so the library is
+  not part of the preset. A stall takes the recorded basin trail, the
+  climb, and the restart. ``for_cluster`` turns the Bayes screen on at
   ``(R-S)/(2R-S)``, which is ``7/15`` at 25 and 200 steps. A call plateau
   with the climb enabled is the directed leave, not a fresh Mackay draw.
   ``paper_controls`` passes the potential gradient, which is what the

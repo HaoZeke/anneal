@@ -195,7 +195,7 @@ Constants and defaults: =LennardJonesPreset= and =MolecularPreset=
 coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=,
 =BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=,
 =MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
-=Config::recommended= (config.rs:755) selects =MoveLibrary::LeanBurst=
+=Config::recommended= (config.rs) selects =MoveLibrary::LeanBurst=
 with the SOAP arm and Thompson allocation over the arms. Like
 =Config::communicating=, it completes the core's orbit on every new basin
 and, below 98 points, draws between the plain and the two-phase relative
@@ -1881,12 +1881,11 @@ convention its doc comments hold every claim to: seed-matched A/B
 comparisons between a mechanism on and off (or one arm and its control)
 at an identical, evaluation-matched charged-work budget, reported as
 solved-seed counts with a Bayes factor rather than a bare percentage.
-Examples throughout this catalog: =Config::recommended='s
-"LJ75 49/144 against 17/144, Bayes factor 3104" and "LJ98 40/72 against
-20/72, Bayes factor 43.8" (src/methods/cluster_hopping/config.rs:749-752);
-the escape-on-stall patience comparison "2 seeds in 8 against 9 in 16"
-(config.rs:214-219); the CSA bank's "budget is split, not multiplied"
-principle (src/methods/csa_cluster.rs:18-20); the README's
+Examples throughout this catalog are the seed-matched counts the
+source comments still print, including the 1000-step quench note on
+=Config::recommended= in src/methods/cluster_hopping/config.rs; the CSA
+bank's "budget is split, not multiplied" principle
+(src/methods/csa_cluster.rs:18-20); the README's
 "sealed, evaluation-matched ensembles rather than reference energies or
 morphology labels."
 
