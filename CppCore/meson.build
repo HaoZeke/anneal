@@ -834,6 +834,7 @@ if get_option('with_tests')
                 'NeighbourLayerTest.cc',
                 '',
             ],
+            ['ThreadTeamTest', 'thread_team_test', 'ThreadTeamTest.cc', ''],
             [
                 'StreamParityTest',
                 'stream_parity_test',
@@ -2171,6 +2172,7 @@ if get_option('with_tests')
     endif
 
     calculator_group_test_exe = disabler()
+    thread_team_test_exe = disabler()
     foreach test : test_array
         # The fused-scan oracles are plain multiplies and adds, the same
         # form as the cluster kernel and the Fortran 26-image wrap. Apple
@@ -2223,7 +2225,23 @@ if get_option('with_tests')
         if test.get(1) == 'calculator_group_test'
             calculator_group_test_exe = _test_exe
         endif
+        if test.get(1) == 'thread_team_test'
+            thread_team_test_exe = _test_exe
+        endif
     endforeach
+    # Under a thread limit every region gets fewer threads than it asks for.
+    if not is_disabler(thread_team_test_exe)
+        foreach _limit : ['1', '2']
+            _limit_env = environment()
+            _limit_env.set('OMP_THREAD_LIMIT', _limit)
+            test(
+                'ThreadTeamTest_limit' + _limit,
+                thread_team_test_exe,
+                env: _limit_env,
+                timeout: 120,
+            )
+        endforeach
+    endif
     _confined_py = find_program('python3', 'python', required: false)
     if _confined_py.found()
         test(
