@@ -158,9 +158,43 @@ def test_a_gmin_row_left_on_the_old_file_is_reported():
 def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| 0.113 | tie | GMIN, n.s. | GMIN |", "| 0.113 | tie | GMIN, n.s. | anneal |")
+    audit.text_cache[SC_N12] = text.replace("| 0.179 | tie | GMIN, n.s. | GMIN |", "| 0.179 | tie | GMIN, n.s. | anneal |")
     audit_mod.head_to_head(audit)
     assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
+
+
+def test_a_dropped_anneal_rerun_row_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| sc108-80 | anneal | c89653df | 0/12 | 1000000 | 128.014 |\n", "")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["table row sc108-80 anneal c89653df"]
+
+
+def test_a_drifted_anneal_rerun_comparison_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| 12/12 | 12/12 | 1 | 17280 | 28767 | 0.237 |",
+                                            "| 12/12 | 12/12 | 1 | 17280 | 28768 | 0.237 |")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["new calls median"]
+
+
+def test_a_drifted_inside_time_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| sc126-55 | anneal | c89653df | 3.216 | 2.952 |",
+                                            "| sc126-55 | anneal | c89653df | 3.216 | 2.000 |")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["Inside median (s)"]
+
+
+def test_a_drifted_sc96_55_check_sentence_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("more calls on 19 of 48 seeds", "more calls on 18 of 48 seeds")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
 def test_a_drifted_sutton_chen_wall_number_is_reported():
