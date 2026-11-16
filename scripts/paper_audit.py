@@ -631,6 +631,9 @@ def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str
         harness = {"harness_revision": line["harness_revision"]} if "harness_revision" in line else {}
         group = pick(rows, system=line["system"], **{arm_key: line["arm"]}, **harness)
         where = f"{summary} {line['system']} {line['arm']}" + (f" {line['harness_revision'][:8]}" if harness else "")
+        if not group:
+            audit.record(False, where, "per-seed rows", line["n"] if "n" in line else "?", 0)
+            continue
         calls = [float(r[calls_key]) for r in group]
         audit.cell(where, "hits", line["hits"], float(hits_of(group)))
         audit.cell(where, "evals_median", line["evals_median"], median(calls))
