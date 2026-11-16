@@ -441,7 +441,16 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
 
   if(RGPOT_WITH_CACHE)
     target_sources(rgpot PRIVATE CppCore/rgpot/PotentialCache.cc)
-    target_link_libraries(rgpot PUBLIC RocksDB::rocksdb xxHash::xxhash)
+    # A static RocksDB can bring jemalloc onto each executable's own link
+    # line, where its malloc wins over libc's, and its free then recurses
+    # through __tls_get_addr once a library with TLS (libmpi) is dlopen'd.
+    # The shared library, which meson's pkg-config lookup links, keeps
+    # jemalloc behind libc.
+    if(TARGET RocksDB::rocksdb-shared)
+      target_link_libraries(rgpot PUBLIC RocksDB::rocksdb-shared xxHash::xxhash)
+    else()
+      target_link_libraries(rgpot PUBLIC RocksDB::rocksdb xxHash::xxhash)
+    endif()
     target_compile_definitions(rgpot PUBLIC RGPOT_HAS_CACHE)
   endif()
 
