@@ -2565,9 +2565,58 @@ fn finish_arm(arms: &mut Vec<ArmCount>, name: &str, accepted: bool, improved: bo
 /// the single growth it counts stays single.
 const GROWTH_RETRY_LEAVES: u32 = 8;
 
-/// Largest multiple of the preset temperature [`Config::plateau_heat`]
-/// reaches, after two plateaus without a new lowest minimum.
-const PLATEAU_HEAT_CAP: f64 = 4.0;
+/// Multiples of the preset temperature [`Config::plateau_heat`] chooses
+/// between.
+const PLATEAU_HEAT_LEVELS: [f64; 3] = [1.0, 2.0, 4.0];
+
+/// Records per call at each [`PLATEAU_HEAT_LEVELS`] entry, and the level
+/// the walk hops at.
+///
+/// Counting starts at the first call plateau, so the descent from the start
+/// does not credit the preset temperature. On each plateau the walk takes
+/// the level with the most new lowest minima per plateau window, with one
+/// record and one window of prior so an untried level is tried. A tie keeps
+/// the current level, or else takes the coldest. A new lowest minimum
+/// leaves the level where it is, and the chain is never moved back to the
+/// incumbent: both erased what a hot walk found on the larger
+/// Lennard-Jones clusters.
+#[derive(Debug, Clone, Default)]
+struct PlateauHeat {
+    level: usize,
+    calls: [usize; PLATEAU_HEAT_LEVELS.len()],
+    records: [usize; PLATEAU_HEAT_LEVELS.len()],
+    since: Option<usize>,
+}
+
+impl PlateauHeat {
+    fn heat(&self) -> f64 {
+        PLATEAU_HEAT_LEVELS[self.level]
+    }
+
+    fn record(&mut self) {
+        if self.since.is_some() {
+            self.records[self.level] += 1;
+        }
+    }
+
+    fn plateau(&mut self, spent: usize, window: usize) {
+        if let Some(since) = self.since {
+            self.calls[self.level] += spent.saturating_sub(since);
+        }
+        self.since = Some(spent);
+        let window = window.max(1) as f64;
+        let score =
+            |i: usize| (self.records[i] as f64 + 1.0) / (self.calls[i] as f64 / window + 1.0);
+        let top = (0..PLATEAU_HEAT_LEVELS.len())
+            .map(score)
+            .fold(f64::NEG_INFINITY, f64::max);
+        if score(self.level) < top {
+            self.level = (0..PLATEAU_HEAT_LEVELS.len())
+                .find(|&i| score(i) >= top)
+                .unwrap_or(0);
+        }
+    }
+}
 
 /// True while a failed growth should stay idle.
 ///
@@ -4983,6 +5032,7 @@ where
     // Multiple of the preset temperature the walk hops at. It stays one
     // unless `plateau_heat` is on.
     let mut heat = 1.0_f64;
+    let mut plateau_heat = PlateauHeat::default();
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
     // the chain already quenched, instead of redrawing inside the same one.
@@ -5583,7 +5633,7 @@ where
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
-            heat = 1.0;
+            plateau_heat.record();
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
             cage_edit = false;
@@ -6204,7 +6254,8 @@ where
             charged_at_best = ledger.spent();
             directed_leave = true;
             if cfg.plateau_heat && n_rep == 1 {
-                heat = (heat * 2.0).min(PLATEAU_HEAT_CAP);
+                plateau_heat.plateau(ledger.spent(), cfg.restart_patience);
+                heat = plateau_heat.heat();
             }
         }
         let checkpoint_due = matches!(
@@ -11568,6 +11619,31 @@ mod tests {
         assert!(stall_growth_waits(Some(-10.0), -10.0));
         assert!(stall_growth_waits(Some(-10.0), -10.0 - 1e-9));
         assert!(!stall_growth_waits(Some(-10.0), -10.0 - 1e-8));
+    }
+
+    #[test]
+    fn plateau_heat_stays_at_the_level_that_finds_records() {
+        let window = 100;
+        let mut heat = PlateauHeat::default();
+        heat.record();
+        assert_eq!(
+            heat.records,
+            [0, 0, 0],
+            "the descent before a plateau counted"
+        );
+        let mut levels = Vec::new();
+        for k in 1..=5 {
+            heat.plateau(k * window, window);
+            levels.push(heat.heat());
+        }
+        assert_eq!(levels, [1.0, 2.0, 4.0, 4.0, 1.0]);
+        heat.record();
+        heat.record();
+        assert_eq!(heat.heat(), 1.0, "a record moved the level");
+        for k in 6..=9 {
+            heat.plateau(k * window, window);
+            assert_eq!(heat.heat(), 1.0, "a cold walk with records was heated");
+        }
     }
 
     #[test]

@@ -1005,9 +1005,14 @@ pub struct Config {
     pub general_collective: bool,
     /// Heat the walk on each call plateau.
     ///
-    /// The clock that drives the plateau leave doubles the hop
-    /// temperature each time it runs out, up to four times the preset, and
-    /// a new lowest minimum returns it to the preset. The factor multiplies
+    /// Each time the clock that drives the plateau leave runs out, the walk
+    /// picks one, two or four times the preset temperature: the factor that
+    /// has found the most new lowest minima per plateau window since the
+    /// first plateau, counting one record and one window for each factor
+    /// before any are spent. A walk whose cold hops keep finding records
+    /// stays cold, and a hot walk keeps its heat and its position after a
+    /// record, so the cold walk does not descend back into the funnel the
+    /// heat left. The factor multiplies
     /// the biased Metropolis test, the Boltzmann weights of the exchange
     /// kernel and the thermal soft-mode amplitude. The leave itself is
     /// unchanged, and a chain that never reaches a plateau draws the same
