@@ -113,7 +113,8 @@ std::uint64_t availableBytes() {
 }
 
 bool Neighbours::reusable(const double *xyz, std::size_t n, const double *box9,
-                          const Spec &spec) const {
+                          const Spec &spec, bool &wrapped) const {
+  wrapped = false;
   if (!built_ || n != n_) {
     return false;
   }
@@ -132,7 +133,21 @@ bool Neighbours::reusable(const double *xyz, std::size_t n, const double *box9,
   if (streaming_) {
     return std::memcmp(ref_.data(), xyz, n * 3 * sizeof(double)) == 0;
   }
-  return withinSkin(ref_.data(), xyz, n, spec.skin);
+  const double limit2 = 0.25 * spec.skin * spec.skin;
+  for (std::size_t a = 0; a < n; ++a) {
+    double dx = xyz[3 * a] - ref_[3 * a];
+    double dy = xyz[3 * a + 1] - ref_[3 * a + 1];
+    double dz = xyz[3 * a + 2] - ref_[3 * a + 2];
+    if (dx * dx + dy * dy + dz * dz <= limit2) {
+      continue;
+    }
+    fold(dx, dy, dz);
+    if (!(dx * dx + dy * dy + dz * dz <= limit2)) {
+      return false;
+    }
+    wrapped = true;
+  }
+  return true;
 }
 
 void Neighbours::buildCells(const double *xyz, std::size_t n) {
@@ -295,8 +310,14 @@ void Neighbours::buildStored(const double *xyz, std::size_t n) {
 void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
                         const Spec &spec) {
   xyz_ = xyz;
-  if (reusable(xyz, n, box9, spec)) {
+  bool wrapped = false;
+  if (reusable(xyz, n, box9, spec, wrapped)) {
     reused_ = true;
+    // The tile walk takes the image of a pair from the bins of its atoms,
+    // and a wrapped atom left its bin on the far side of the cell.
+    if (wrapped) {
+      buildCells(xyz, n);
+    }
     return;
   }
   reused_ = false;

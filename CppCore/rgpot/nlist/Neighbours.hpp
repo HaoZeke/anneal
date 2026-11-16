@@ -81,8 +81,14 @@ struct Range {
 /// Candidate pairs around one configuration.
 ///
 /// A stored list is reused while every atom has moved by at most half
-/// the skin, and the cell, the count and the spec are unchanged. Skin 0
-/// reuses the list only when the coordinates and the cell match.
+/// the skin, and the cell, the count and the spec are unchanged. The
+/// list holds partner indices only and every walk takes the image from
+/// the current coordinates, so the move is measured to the nearest
+/// periodic image of the reference position: an atom wrapped back
+/// through a face of the cell has moved by its small step, not by a
+/// cell vector. The bins are redone after such a wrap, for the walks
+/// that read them. Skin 0 reuses the list only when the coordinates and
+/// the cell match.
 class Neighbours {
 public:
   void update(const double *xyz, std::size_t n, const double *box9,
@@ -91,8 +97,9 @@ public:
   [[nodiscard]] Mode mode() const noexcept { return mode_; }
   [[nodiscard]] bool streaming() const noexcept { return streaming_; }
   /// True when the last update kept the previous list. The displacement
-  /// test is `withinSkin`, the same one `Builder::update` uses.
+  /// test is `withinSkin` on the nearest image of each reference position.
   [[nodiscard]] bool reused() const noexcept { return reused_; }
+  /// Stored lists built so far. A reuse does not count.
   [[nodiscard]] std::uint64_t builds() const noexcept { return builds_; }
   /// Stored pair index. A stream leaves this empty.
   [[nodiscard]] std::size_t slots() const noexcept { return nbr_.size(); }
@@ -213,8 +220,11 @@ private:
   void buildCells(const double *xyz, std::size_t n);
   void buildStored(const double *xyz, std::size_t n);
   [[nodiscard]] std::uint64_t candidateBound() const;
+  /// `wrapped` is set when some atom is within the skin only through
+  /// another periodic image of its reference position.
   [[nodiscard]] bool reusable(const double *xyz, std::size_t n,
-                              const double *box9, const Spec &spec) const;
+                              const double *box9, const Spec &spec,
+                              bool &wrapped) const;
   void fold(double &dx, double &dy, double &dz) const;
 
   template <typename Fn>

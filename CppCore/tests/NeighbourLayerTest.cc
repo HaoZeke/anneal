@@ -1,6 +1,7 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -564,4 +565,131 @@ TEST_CASE("a stored half walk folds only the pairs it visits",
   REQUIRE(directed == 2 * half);
   REQUIRE(directed_searches > 0);
   REQUIRE(2 * half_searches == directed_searches);
+}
+
+namespace {
+
+/// Pairs within `cutoff` from one walk, sorted, with the bits of the
+/// image vector the walk gave.
+using PairBits = std::vector<std::array<std::uint64_t, 5>>;
+
+PairBits sortedPairs(PairBits pairs) {
+  std::sort(pairs.begin(), pairs.end());
+  return pairs;
+}
+
+struct Walks {
+  PairBits half, team, atom;
+};
+
+Walks walk(const rgpot::nlist::Neighbours &cells, std::size_t n, double cutoff) {
+  const double cut2 = cutoff * cutoff;
+  Walks out;
+  auto into = [&](PairBits &dst, bool once) {
+    return [&dst, cut2, once](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                              double r2) {
+      if (r2 < cut2 && (!once || i < j)) {
+        dst.push_back({static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j), bits(dx),
+                       bits(dy), bits(dz)});
+      }
+    };
+  };
+  cells.forHalf(0, static_cast<std::int64_t>(n), into(out.half, false));
+  auto team = into(out.team, false);
+  cells.forCellTeam(true, 1,
+                    [&](int, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                        double r2) { team(i, j, dx, dy, dz, r2); });
+  auto atom = into(out.atom, true);
+  for (std::size_t i = 0; i < n; ++i) {
+    cells.forAtom(static_cast<std::int32_t>(i), atom);
+  }
+  out.half = sortedPairs(out.half);
+  out.team = sortedPairs(out.team);
+  out.atom = sortedPairs(out.atom);
+  return out;
+}
+
+/// Wrap every coordinate of an orthorhombic cell into [0, side).
+void wrapInto(std::vector<double> &pos, double side) {
+  for (double &x : pos) {
+    x -= side * std::floor(x / side);
+  }
+}
+
+} // namespace
+
+TEST_CASE("a stored list survives atoms wrapped through the faces", "[nlist][skin]") {
+  // Five bins per side, so the tile walk takes the image of each pair from
+  // the bins of its atoms.
+  const double a = 3.6;
+  const double side = 9 * a;
+  const double cutoff = 5.0;
+  const double box[9] = {side, 0, 0, 0, side, 0, 0, 0, side};
+  auto pos = fcc(9, a);
+  for (std::size_t k = 0; k < pos.size(); ++k) {
+    pos[k] += 0.05 * std::sin(1.7 * static_cast<double>(k));
+  }
+  wrapInto(pos, side);
+  const std::size_t n = pos.size() / 3;
+
+  rgpot::nlist::Spec spec;
+  spec.cutoff = cutoff;
+  spec.skin = 1.0;
+  spec.image = rgpot::nlist::Image::Round;
+  spec.mode = rgpot::nlist::Mode::Stored;
+  rgpot::nlist::Neighbours warm;
+
+  auto check = [&](const std::vector<double> &xyz, const double *cell, bool reused,
+                   std::uint64_t builds) {
+    warm.update(xyz.data(), xyz.size() / 3, cell, spec);
+    REQUIRE(warm.mode() == rgpot::nlist::Mode::Stored);
+    REQUIRE(warm.reused() == reused);
+    REQUIRE(warm.builds() == builds);
+    rgpot::nlist::Neighbours fresh;
+    fresh.update(xyz.data(), xyz.size() / 3, cell, spec);
+    const Walks got = walk(warm, xyz.size() / 3, cutoff);
+    const Walks want = walk(fresh, xyz.size() / 3, cutoff);
+    REQUIRE(!want.half.empty());
+    REQUIRE(got.half == want.half);
+    REQUIRE(got.team == want.team);
+    REQUIRE(got.atom == want.atom);
+  };
+
+  check(pos, box, false, 1);
+
+  // Under half the skin, inside the cell.
+  for (std::size_t k = 0; k < pos.size(); ++k) {
+    pos[k] += 0.1 * std::cos(0.9 * static_cast<double>(k));
+  }
+  wrapInto(pos, side);
+  check(pos, box, true, 1);
+
+  // A step along x that takes the atoms near both x faces through them.
+  std::size_t crossed = 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    const double step = (i % 2 == 0 ? 0.25 : -0.25);
+    const double x = pos[3 * i] + step;
+    crossed += (x < 0.0 || x >= side) ? 1 : 0;
+    pos[3 * i] = x;
+  }
+  wrapInto(pos, side);
+  REQUIRE(crossed > 0);
+  check(pos, box, true, 1);
+
+  // One atom past half the skin.
+  pos[0] += 0.6;
+  wrapInto(pos, side);
+  check(pos, box, false, 2);
+
+  // Another cell.
+  const double grown = side * 1.002;
+  const double big[9] = {grown, 0, 0, 0, grown, 0, 0, 0, grown};
+  for (double &x : pos) {
+    x *= 1.002;
+  }
+  check(pos, big, false, 3);
+
+  // Another atom count.
+  pos.resize(pos.size() - 3);
+  check(pos, big, false, 4);
 }
