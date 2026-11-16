@@ -167,6 +167,7 @@ def run_gmin(
     coords: Path,
     work: Path,
     log: Path,
+    target: float | None = None,
 ) -> dict[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     (work / "data").write_text(data_text(system, 90_000_000) + f"RANSEED {seed}\n")
@@ -177,7 +178,7 @@ def run_gmin(
             "H2H_BUDGET": str(budget),
             "H2H_SYSTEM": system,
             "H2H_SEED": str(seed),
-            "H2H_TARGET": f"{REFERENCES[system]:.10f}",
+            "H2H_TARGET": f"{REFERENCES[system] if target is None else target:.10f}",
             "H2H_TOL": f"{HIT_TOL}",
             "H2H_ROW": str(work / "row.txt"),
             "OMP_NUM_THREADS": "1",
