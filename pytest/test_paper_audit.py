@@ -27,6 +27,7 @@ CHECKS = (
     audit_mod.gad_published,
     audit_mod.openconf,
     audit_mod.head_to_head,
+    audit_mod.sc96_78_howto,
     audit_mod.tip4p_panel,
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
@@ -70,6 +71,14 @@ def test_a_drifted_table_cell_is_reported():
     audit.text_cache[audit_mod.TEX] = tex.replace("& 5/6 & 1801909.5 & 1807535.5", "& 5/6 & 1801910.5 & 1807535.5")
     audit_mod.manuscript_gmin(audit)
     assert [r[2] for r in audit.drifts()] == ["median"]
+
+
+def test_a_drifted_sutton_chen_howto_cell_is_reported():
+    audit = audit_mod.Audit()
+    path = audit_mod.SC96_78_HOWTO
+    audit.text_cache[path] = audit.text(path).replace("gmin 20/32 1272371 2187979 -", "gmin 21/32 1272371 2187979 -")
+    audit_mod.sc96_78_howto(audit)
+    assert [r[2] for r in audit.drifts()] == ["hits"]
 
 
 def test_a_drifted_readme_p_value_is_reported():

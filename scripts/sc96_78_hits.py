@@ -1,29 +1,28 @@
 # Copyright (c) anneal developers
-"""Score iso and iso-hop on Sutton-Chen 9-6 N=78.
+"""Score GMIN, iso and iso-hop on Sutton-Chen 9-6 N=78.
 
 Seeds 9532 through 9563, two million energy calls, the Cambridge table
 energy as the stop. Starts are drawn by this script into ``build/``.
-``data/sc96_78_hits.csv`` has one row per seed and arm. The how-to
-figure and its table are written from that file.
+``data/sc96_78_hits.csv`` has one row per seed and arm. This script runs
+iso and iso-hop. The GMIN rows are written by
+``scripts/metal_h2h/enter_sc96_gmin.sh``, and the table scores those of the
+latest harness revision. The how-to figure and its table are written from
+that file.
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
-import hashlib
 import os
 import subprocess
 import sys
-import tarfile
-import urllib.request
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-sys.path.insert(0, str(ROOT / "scripts" / "metal_h2h"))
 
-import run_sc  # noqa: E402
 from sc96_78_common import binary, parse_run, reference_energy, write_start  # noqa: E402
 
 SCRATCH = ROOT / "build" / "sc96-78"
@@ -35,122 +34,34 @@ SEED1 = 9563
 BUDGET = 2_000_000
 N = 78
 ARMS = ("gmin", "iso", "iso-hop")
+ANNEAL_ARMS = ("iso", "iso-hop")
 WORKERS = 6
-GMIN_ROOT = ROOT / "build" / "gmin-sc"
-GMIN = GMIN_ROOT / "bin" / "GMIN"
-GMIN_URL = "http://www-wales.ch.cam.ac.uk/svn.tar.bz2"
-GMIN_SHA256 = "3ad3c5ad98dbc03a19a7deec69a6b1711983cf2f2b8d57a241dafebd60412829"
-GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 
 
-def ensure_gmin() -> None:
-    """Fetch the pinned Wales tarball into build/ and compile GMIN."""
-    if GMIN.is_file():
-        return
-    fetch = ROOT / "build" / "fetch"
-    fetch.mkdir(parents=True, exist_ok=True)
-    tarball = fetch / "svn.tar.bz2"
-    if not tarball.is_file():
-        request = urllib.request.Request(GMIN_URL, headers={"User-Agent": "anneal"})
-        tarball.write_bytes(urllib.request.urlopen(request, timeout=120).read())
-    digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
-    if digest != GMIN_SHA256:
-        raise SystemExit(f"GMIN tarball hash is {digest}, expected {GMIN_SHA256}")
-    source = GMIN_ROOT / "src"
-    svnrev = source / "wales" / "GMIN" / "source" / "SVNREV"
-    if not svnrev.is_file():
-        with tarfile.open(tarball, "r:bz2") as archive:
-            members = [
-                member
-                for member in archive.getmembers()
-                if member.name.startswith(
-                    (
-                        "./wales/GMIN",
-                        "./wales/CMakeModules",
-                        "./wales/INTERFACES",
-                        "./wales/SCRIPTS/all",
-                        "./wales/HiRE",
-                    )
-                )
-            ]
-            archive.extractall(source, members=members)
-    got = svnrev.read_text().strip()
-    if got != GMIN_REV:
-        raise SystemExit(f"GMIN SVNREV is {got}, expected {GMIN_REV}")
-    gmin = source / "wales" / "GMIN"
-    if not (gmin / "source" / "h2h_cap.f90").is_file():
-        subprocess.check_call(
-            ["patch", "-p1", "--forward", "--batch", "-d", str(gmin)],
-            stdin=(ROOT / "bench" / "lj104-lattice" / "v2" / "h2h-gmin.patch").open(),
+def current_gmin(rows: list[dict[str, str]]) -> tuple[str, list[dict[str, str]]]:
+    """The GMIN rows of the last harness revision in the file."""
+    gmin = [row for row in rows if row["arm"] == "gmin" and row.get("harness_revision")]
+    if not gmin:
+        raise SystemExit(f"{OUT} has no GMIN rows from scripts/metal_h2h/enter_sc96_gmin.sh")
+    harness = gmin[-1]["harness_revision"]
+    current = sorted((row for row in gmin if row["harness_revision"] == harness), key=lambda row: int(row["seed"]))
+    if [int(row["seed"]) for row in current] != list(range(SEED0, SEED1 + 1)):
+        raise SystemExit(f"GMIN rows of harness {harness[:8]} do not cover seeds {SEED0}-{SEED1}")
+    return harness, current
+
+
+def runs_from_rows(name: str, current: list[dict[str, str]]) -> Path:
+    directory = SCRATCH / "rows" / name
+    directory.mkdir(parents=True, exist_ok=True)
+    for row in current:
+        hit = row["hit"] == "1"
+        (directory / f"seed{row['seed']}.out").write_text(
+            f"hit: {'true' if hit else 'false'}\n"
+            f"hit_calls: {row['hit_calls'] if hit else 'none'}\n"
+            f"spent: {row['spent']}\n"
+            f"best: {row['best']}\n"
         )
-    potential = (gmin / "source" / "potential.f90").read_text()
-    if "H2H_SC_TICK" not in potential:
-        subprocess.check_call(
-            ["patch", "-p1", "--forward", "--batch", "-d", str(gmin)],
-            stdin=(ROOT / "bench" / "metal-cluster-h2h" / "gmin-sc-time.patch").open(),
-        )
-    build = gmin / "build" / "gfortran"
-    build.mkdir(parents=True, exist_ok=True)
-    if not (build / "Makefile").is_file():
-        subprocess.check_call(
-            [
-                "cmake", "../../source",
-                "-DWITH_ALIGN=OFF", "-DWITH_MPI=OFF", "-DWITH_OPENMP=OFF",
-                "-DWITH_SPARSE=OFF", "-DWITH_PYTHON=OFF", "-DWITH_MYBLAS=OFF",
-                "-DWITH_MYLAPACK=OFF",
-            ],
-            cwd=build,
-            env={**os.environ, "FC": "gfortran", "CC": "gcc", "CXX": "g++"},
-        )
-    subprocess.check_call(["make", "-j", str(os.cpu_count() or 1), "GMIN"], cwd=build)
-    GMIN.parent.mkdir(parents=True, exist_ok=True)
-    (GMIN).write_bytes((build / "GMIN").read_bytes())
-    GMIN.chmod(0o755)
-
-
-def gmin_data(seed: int) -> str:
-    return run_sc.data_text("sc96-78", 90_000_000) + f"RANSEED {seed}\n"
-
-
-def run_gmin(seed: int, reference: str, start: Path, dest: Path) -> None:
-    work = SCRATCH / "gmin-work" / str(seed)
-    work.mkdir(parents=True, exist_ok=True)
-    (work / "data").write_text(gmin_data(seed))
-    (work / "coords").write_text(start.read_text())
-    row = work / "row.txt"
-    env = os.environ.copy()
-    env.update(
-        {
-            "H2H_BUDGET": str(BUDGET),
-            "H2H_SYSTEM": "sc96-78",
-            "H2H_SEED": str(seed),
-            "H2H_TARGET": reference,
-            "H2H_TOL": "0.001",
-            "H2H_ROW": str(row),
-            "OMP_NUM_THREADS": "1",
-        }
-    )
-    log = work / "gmin.log"
-    with log.open("w") as handle:
-        proc = subprocess.run(
-            [str(GMIN)], cwd=work, env=env, stdout=handle, stderr=subprocess.STDOUT, text=True
-        )
-    if not row.is_file():
-        raise RuntimeError(f"gmin seed {seed} exited {proc.returncode}\n{log.read_text()[-1500:]}")
-    fields = {}
-    for part in row.read_text().split()[1:]:
-        key, value = part.split("=", 1)
-        fields[key] = value
-    hit = fields["hit"] == "1"
-    calls = fields["evals_to_hit"] if hit else "none"
-    dest.write_text(
-        f"hit: {'true' if hit else 'false'}\n"
-        f"hit_calls: {calls}\n"
-        f"spent: {fields['charged']}\n"
-        f"best: {fields['best']}\n"
-    )
-
-
+    return directory
 def one(task: tuple[str, int, str, str]) -> dict[str, str]:
     arm, seed, reference, exe = task
     start = SCRATCH / "starts" / f"seed{seed}.xyz"
@@ -159,19 +70,16 @@ def one(task: tuple[str, int, str, str]) -> dict[str, str]:
     if not start.is_file():
         write_start(start, N, seed)
     if not dest.is_file():
-        if arm == "gmin":
-            run_gmin(seed, reference, start, dest)
-        else:
-            env = os.environ.copy()
-            env["RAYON_NUM_THREADS"] = "1"
-            env["OMP_NUM_THREADS"] = "1"
-            text = subprocess.check_output(
-                [exe, arm, "9-6", str(N), str(BUDGET), str(seed), str(start), reference],
-                cwd=ROOT,
-                env=env,
-                text=True,
-            )
-            dest.write_text(text)
+        env = os.environ.copy()
+        env["RAYON_NUM_THREADS"] = "1"
+        env["OMP_NUM_THREADS"] = "1"
+        text = subprocess.check_output(
+            [exe, arm, "9-6", str(N), str(BUDGET), str(seed), str(start), reference],
+            cwd=ROOT,
+            env=env,
+            text=True,
+        )
+        dest.write_text(text)
     parsed = parse_run(dest.read_text())
     hit = parsed["hit"] == "true"
     return {
@@ -185,21 +93,17 @@ def one(task: tuple[str, int, str, str]) -> dict[str, str]:
     }
 
 
-def write_csv(rows: list[dict[str, str]]) -> None:
-    fields = ["arm", "seed", "hit", "hit_calls", "spent", "best", "reference"]
-    OUT.parent.mkdir(parents=True, exist_ok=True)
+def write_csv(fields: list[str], rows: list[dict[str, str]]) -> None:
     for path in (OUT, SCRATCH / "hits.csv"):
         with path.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows({field: row.get(field, "") for field in fields} for row in rows)
 
 
-def score(rows: list[dict[str, str]]) -> str:
+def score(directories: dict[str, Path]) -> str:
     plot = ROOT / "docs" / "scripts" / "plot_sc_hits.py"
-    labels = []
-    for arm in ARMS:
-        labels.append(f"{arm}={SCRATCH / arm}")
+    labels = [f"{arm}={directories[arm]}" for arm in ARMS]
     text = subprocess.check_output(
         [sys.executable, str(plot), str(SEED0), str(SEED1), str(BUDGET), str(FIGURE), *labels],
         cwd=ROOT,
@@ -208,15 +112,22 @@ def score(rows: list[dict[str, str]]) -> str:
     return text
 
 
-def result_paragraph(rows: list[dict[str, str]]) -> str:
+def result_paragraph(rows: list[dict[str, str]], harness: str) -> str:
     by_arm: dict[str, list[dict[str, str]]] = {arm: [] for arm in ARMS}
+    earlier = []
     for row in rows:
-        by_arm[row["arm"]].append(row)
+        if row["arm"] != "gmin" or row.get("harness_revision") == harness:
+            by_arm[row["arm"]].append(row)
+        else:
+            earlier.append(row)
     lines = [
         "The table is written from =data/sc96_78_hits.csv=.",
         "The figure is written to =build/sc96-78/hits.png=.",
-        "GMIN is the Wales program built from the pinned tarball.",
-        "Its file is the 9-6 row, temperature 10, and the quench block in =scripts/metal_h2h/run_sc.py=.",
+        "GMIN is the Wales program at SVNREV aac1548a, linked against OpenBLAS.",
+        f"Its rows are those of harness {harness[:8]}, one seed at a time on one core, "
+        "from =scripts/metal_h2h/enter_sc96_gmin.sh=.",
+        "Its file is the 9-6 row of =scripts/metal_h2h/run_sc.py=: temperature 10, step 0.251984, "
+        "the container GMIN sizes for Sutton-Chen, and the quench block there.",
     ]
     for arm in ARMS:
         arm_rows = by_arm[arm]
@@ -236,26 +147,49 @@ def result_paragraph(rows: list[dict[str, str]]) -> str:
             + (f", median {median} calls to a hit." if hits else ".")
             + (f" It misses {misses}." if misses else "")
         )
+    if earlier:
+        lines.append(
+            f"The earlier GMIN rows, with temperature 0.8, step 0.40 and a container radius of 30, "
+            f"hit {sum(row['hit'] == '1' for row in earlier)} of {len(earlier)} seeds. They are kept in the file."
+        )
     return "\n".join(lines) + "\n"
 
 
-def main() -> None:
-    ensure_gmin()
+def main(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--rows", action="store_true",
+                        help="score every arm from the committed rows, without running iso and iso-hop")
+    from_rows = parser.parse_args(argv).rows
+    with OUT.open() as handle:
+        reader = csv.DictReader(handle)
+        fields = list(reader.fieldnames or [])
+        rows = list(reader)
+    harness, current = current_gmin(rows)
     reference = f"{reference_energy(SCRATCH):.4f}"
-    exe = str(binary("sc_h2h"))
-    for seed in range(SEED0, SEED1 + 1):
-        write_start(SCRATCH / "starts" / f"seed{seed}.xyz", N, seed)
-    tasks = [
-        (arm, seed, reference, exe)
-        for arm in ARMS
-        for seed in range(SEED0, SEED1 + 1)
-    ]
-    with ProcessPoolExecutor(max_workers=WORKERS) as pool:
-        rows = list(pool.map(one, tasks))
-    rows.sort(key=lambda row: (row["arm"], int(row["seed"])))
-    write_csv(rows)
-    table = score(rows).rstrip("\n") + "\n"
-    paragraph = result_paragraph(rows)
+    if any(row["reference"] != reference for row in current):
+        raise SystemExit(f"GMIN rows of harness {harness[:8]} stop at another reference than {reference}")
+    directories = {"gmin": runs_from_rows(f"gmin-{harness[:8]}", current)}
+    if from_rows:
+        for arm in ANNEAL_ARMS:
+            directories[arm] = runs_from_rows(arm, [row for row in rows if row["arm"] == arm])
+    else:
+        exe = str(binary("sc_h2h"))
+        for seed in range(SEED0, SEED1 + 1):
+            write_start(SCRATCH / "starts" / f"seed{seed}.xyz", N, seed)
+        tasks = [
+            (arm, seed, reference, exe)
+            for arm in ANNEAL_ARMS
+            for seed in range(SEED0, SEED1 + 1)
+        ]
+        with ProcessPoolExecutor(max_workers=WORKERS) as pool:
+            fresh = {(row["arm"], row["seed"]): row for row in pool.map(one, tasks)}
+        for row in rows:
+            row.update(fresh.pop((row["arm"], row["seed"]), {}))
+        rows.extend(fresh.values())
+        write_csv(fields, rows)
+        directories.update({arm: SCRATCH / arm for arm in ANNEAL_ARMS})
+    table = score(directories).rstrip("\n") + "\n"
+    paragraph = result_paragraph(rows, harness)
     page = HOWTO.read_text()
     start = page.index("#+begin_example\nlabel hits")
     end = page.index("#+end_example", start) + len("#+end_example")
@@ -307,4 +241,4 @@ The script draws the figure with =docs/scripts/plot_sc_hits.py= from the run log
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

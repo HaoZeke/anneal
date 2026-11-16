@@ -26,6 +26,7 @@ import argparse
 import csv
 import importlib.util
 import math
+import random
 import re
 import subprocess
 import sys
@@ -42,6 +43,8 @@ HOST_COLUMNS = ("host",)
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
 
 KNOWN_GAPS = {
+    "data/sc96_78_hits.csv": "code_revision empty or unknown on some rows; harness_revision empty or unknown on some "
+                             "rows; host empty or unknown on some rows",
     "bench/depth-posterior-ablation/results.csv": "no revision column",
     "results/size-tiered-selection.csv": "no revision or host column",
     "results/lj-funnel-stalls.csv": "no revision or host column",
@@ -715,6 +718,52 @@ def head_to_head(audit: Audit) -> None:
                "; ".join(f"{s} " + " ".join(seed for sys_, seed in hits if sys_ == s) for s in ("m55r14", "m80r14")))
 
 
+SC96_78_ROWS = "data/sc96_78_hits.csv"
+SC96_78_HOWTO = "docs/orgmode/howto/sutton-chen-head-to-head.org"
+SC96_78_BUDGET = 2_000_000
+
+
+def signflip(diffs: list[float], draws: int = 20000, seed: int = 0) -> float:
+    """Two-sided paired sign-flip p of docs/scripts/plot_sc_hits.py."""
+    observed = sum(diffs) / len(diffs)
+    rng = random.Random(seed)
+    extreme = 0
+    for _ in range(draws):
+        total = sum(v if rng.randrange(2) == 0 else -v for v in diffs)
+        if abs(total / len(diffs)) >= abs(observed) - 1e-15:
+            extreme += 1
+    return (extreme + 1) / (draws + 1)
+
+
+def sc96_78_howto(audit: Audit) -> None:
+    """The 9-6 N=78 table scores the GMIN rows of the last harness revision."""
+    rows = audit.rows(SC96_78_ROWS)
+    gmin = [r for r in rows if r["arm"] == "gmin" and r["harness_revision"]]
+    harness = gmin[-1]["harness_revision"]
+    arms = {"gmin": pick(gmin, harness_revision=harness), "iso": pick(rows, arm="iso"), "iso-hop": pick(rows, arm="iso-hop")}
+    par2 = {arm: {r["seed"]: float(r["hit_calls"]) if r["hit"] == "1" else 2.0 * SC96_78_BUDGET for r in group}
+            for arm, group in arms.items()}
+    text = audit.text(SC96_78_HOWTO)
+    start = text.index("#+begin_example\nlabel hits")
+    block = text[start:text.index("#+end_example", start)].splitlines()[2:]
+    audit.cell(SC96_78_HOWTO, "table arms", " ".join(line.split()[0] for line in block), " ".join(arms))
+    for line in block:
+        label, hits, med, mean, p = line.split()
+        group = arms[label]
+        where = f"{SC96_78_HOWTO} {label}"
+        calls = [float(r["hit_calls"]) for r in group if r["hit"] == "1"]
+        audit.cell(where, "hits", hits, frac(group))
+        audit.cell(where, "median calls to a hit", med, median(calls) if calls else None)
+        audit.cell(where, "mean PAR-2", mean, sum(par2[label].values()) / len(group))
+        common = sorted(set(par2["gmin"]) & set(par2[label]))
+        audit.cell(where, "paired sign-flip p against gmin", p,
+                   None if label == "gmin" else signflip([par2["gmin"][s] - par2[label][s] for s in common]))
+        audit.said(SC96_78_HOWTO, f"={label}= hits {hits_of(group)} of {len(group)} seeds")
+    audit.said(SC96_78_HOWTO, f"Its rows are those of harness {harness[:8]}")
+    earlier = [r for r in rows if r["arm"] == "gmin" and r["harness_revision"] != harness]
+    audit.said(SC96_78_HOWTO, f"hit {hits_of(earlier)} of {len(earlier)} seeds. They are kept in the file.")
+
+
 def covalent_gfn2(audit: Audit) -> None:
     path = "bench/covalent-h2h/README.md"
     rows = audit.rows("bench/covalent-h2h/gfn2/seeds.csv")
@@ -914,7 +963,7 @@ def run(report: bool = False) -> int:
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
+                  head_to_head, sc96_78_howto, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
         check(audit)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
