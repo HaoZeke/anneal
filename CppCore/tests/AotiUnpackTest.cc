@@ -229,18 +229,59 @@ std::set<std::string> listing(const fs::path &dir) {
   return out;
 }
 
-// Names directly under the system temporary directory and under /tmp.
-std::set<std::string> temp_listing() {
-  std::set<std::string> out;
+// A temporary directory of the test's own. The system one is shared with
+// every process of the user, and on macOS system agents add entries to
+// $TMPDIR at any time. temp_directory_path reads TMPDIR, TMP, TEMP and
+// TEMPDIR on POSIX; GetTempPath, which it calls on Windows, reads TMP and
+// then TEMP.
+class PrivateTemp {
+public:
+  explicit PrivateTemp(fs::path dir) : path(std::move(dir)) {
+    fs::create_directories(path);
+    for (const char *name : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"})
+      set_env(name, path.string());
+  }
+  PrivateTemp(const PrivateTemp &) = delete;
+  PrivateTemp &operator=(const PrivateTemp &) = delete;
+  const fs::path path;
+
+private:
+  EnvGuard m_tmpdir{"TMPDIR"};
+  EnvGuard m_tmp{"TMP"};
+  EnvGuard m_temp{"TEMP"};
+  EnvGuard m_tempdir{"TEMPDIR"};
+};
+
+// Entries of /tmp missing from `before` that hold a file named like one
+// under `unpacked`, or carry `sha` in their name: what an unpack leaves
+// there, as torch's loader does in its mkdtemp directory. Other processes
+// add entries to /tmp too, so a new name alone shows nothing.
+std::vector<std::string> unpacks_in_tmp(const std::set<std::string> &before,
+                                        const fs::path &unpacked,
+                                        const std::string &sha) {
+  std::set<std::string> files;
   std::error_code ec;
-  const auto sys = fs::temp_directory_path(ec);
-  if (!ec)
-    for (const auto &name : listing(sys))
-      out.insert(sys.string() + "|" + name);
-#ifndef _WIN32
-  for (const auto &name : listing("/tmp"))
-    out.insert("/tmp|" + name);
-#endif
+  for (fs::recursive_directory_iterator it(unpacked, ec), end; !ec && it != end;
+       it.increment(ec)) {
+    std::error_code kind;
+    if (it->is_regular_file(kind))
+      files.insert(it->path().filename().string());
+  }
+  const fs::path tmp("/tmp");
+  std::vector<std::string> out;
+  for (const auto &entry : listing(tmp)) {
+    if (before.count(entry) != 0)
+      continue;
+    bool copy = files.count(entry) != 0 || entry.find(sha) != std::string::npos;
+    std::error_code walk;
+    for (fs::recursive_directory_iterator it(
+             tmp / entry, fs::directory_options::skip_permission_denied, walk),
+         end;
+         !copy && !walk && it != end; it.increment(walk))
+      copy = files.count(it->path().filename().string()) != 0;
+    if (copy)
+      out.push_back((tmp / entry).string());
+  }
   return out;
 }
 
@@ -535,8 +576,11 @@ TEST_CASE("RGPOT_CACHE_DIR unpacks without touching the temporary directory",
   EnvGuard env(unpack::kCacheDirEnv);
   EnvGuard xdg("XDG_CACHE_HOME");
   Scratch s;
-  const auto before = temp_listing();
-  const auto pkg = write_package(s.path, "fake.pt2", zip(fake_members("w0")));
+  const PrivateTemp temp(s.path / "tmp");
+  REQUIRE(fs::equivalent(fs::temp_directory_path(), temp.path));
+  const auto tmp_before = listing("/tmp");
+  const auto data = zip(fake_members("w0"));
+  const auto pkg = write_package(s.path, "fake.pt2", data);
   set_env(unpack::kCacheDirEnv, (s.path / "env-cache").string());
   unset_env("XDG_CACHE_HOME");
   const auto root = unpack::resolve_cache_root("");
@@ -544,10 +588,8 @@ TEST_CASE("RGPOT_CACHE_DIR unpacks without touching the temporary directory",
   REQUIRE(u.dir.string().rfind((s.path / "env-cache").string(), 0) == 0);
   const auto again = unpack::unpack(pkg, unpack::resolve_cache_root("").path);
   REQUIRE(again.reused);
-  const auto after = temp_listing();
-  std::vector<std::string> added;
-  std::set_difference(after.begin(), after.end(), before.begin(), before.end(),
-                      std::back_inserter(added));
-  for (const auto &name : added)
+  for (const auto &name : listing(temp.path))
     FAIL("new entry in the temporary directory: " << name);
+  for (const auto &path : unpacks_in_tmp(tmp_before, u.dir, sha256(data)))
+    FAIL("unpacked files in " << path);
 }

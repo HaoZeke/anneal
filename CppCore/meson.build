@@ -745,7 +745,6 @@ if get_option('with_tests')
         modules: ['Catch2::Catch2WithMain'],
     )
     test_deps += catch2_dep
-    # Not parallel: it asserts the system temporary directory gains no entry.
     test(
         'AotiUnpackTest',
         executable(
@@ -756,7 +755,6 @@ if get_option('with_tests')
             override_options: ['cpp_std=c++20'],
         ),
         workdir: meson.current_build_dir(),
-        is_parallel: false,
     )
     test_args = _args
     test_args += ['-DRGPOTTEST']
