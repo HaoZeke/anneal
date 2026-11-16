@@ -1,7 +1,7 @@
 # GFN2 (NH3)8
 
-Same protocol as the tetramer. The search is `recommended_molecular` at
-4000 charged calls. A dissociated monomer is refused before xtb. CREST is
+Same protocol as the tetramer. The search is `recommended_molecular` with a
+budget of 4000 charged calls. A dissociated monomer is refused before xtb. CREST is
 native xtb, no wall. Seeds 17000–17005, serial, hostname `bench`. A hit is
 within 1e-6 Eh of the lowest intact energy either arm found,
 −35.470769324714 Eh. Every geometry is intact.
@@ -17,8 +17,9 @@ within 1e-6 Eh of the lowest intact energy either arm found,
 
 The `3141987e` rows are the anneal arm again after the rebase onto that
 develop. CREST is unchanged. Every seed charges 4000. On the previous
-tree, seeds 17000 and 17002 stopped near 4000 calls because a lost-bond
-refusal ended the quench without a charge and the hop returned early.
+tree, seeds 17000 and 17002 stopped at 4080 and 2855 calls whatever the
+budget (`ladder.csv`), because a lost-bond refusal ended the quench
+without a charge and the hop returned early.
 On this tree the same gate leaves the ledger open. At the CREST call
 count both seeds charge every call and finish 3.6e-5 Eh above CREST
 (−35.470732540153 at 243868 calls, −35.470732881715 at 332675).
