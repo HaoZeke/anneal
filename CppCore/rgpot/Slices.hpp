@@ -8,7 +8,8 @@
 // region, with dynamic teams, or below a TeamCap. A thread then runs several
 // slices in turn. No other file reads a thread number or a team size, so a
 // buffer is indexed by its slice, and a sum taken in slice order has the same
-// bits on any team.
+// bits on any team. CppCore/tests/test_openmp_confined.py fails the test
+// suite when OpenMP appears outside Slices.hpp and Slices.cc.
 
 #include <cstdint>
 

@@ -2224,6 +2224,17 @@ if get_option('with_tests')
             calculator_group_test_exe = _test_exe
         endif
     endforeach
+    _confined_py = find_program('python3', 'python', required: false)
+    if _confined_py.found()
+        test(
+            'openmp_confined',
+            _confined_py,
+            args: [
+                meson.current_source_dir() / 'tests/test_openmp_confined.py',
+                meson.source_root(),
+            ],
+        )
+    endif
     _nlist_link = [rgpot_halfshell, rgpot_minimage, rgpot_exact_fma]
     _nlist_examples = [
         ['nlist_lj', 'examples/nlist_lj.cc'],
