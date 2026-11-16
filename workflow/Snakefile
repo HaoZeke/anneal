@@ -308,6 +308,29 @@ rule openconf_h2h_conf_fix4_n24:
             --results bench/openconf-h2h/conf-fix4/n24
         """
 
+
+# Coupled torsion draws on, develop at fb178f40, all eight molecules at
+# 24 seeds in one session. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile openconf_h2h_conf_fix7
+rule openconf_h2h_conf_fix7:
+    input:
+        "bench/openconf-h2h/molecules.csv",
+    output:
+        "bench/openconf-h2h/conf-fix7/summary.csv",
+        "bench/openconf-h2h/conf-fix7/stats.csv",
+        "bench/openconf-h2h/conf-fix7/stats-develop.csv",
+    shell:
+        """
+        set -euo pipefail
+        OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=fb178f4023d2da4e5fc9060985a5c8cf5c58bb37 \
+            bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix7 \
+            --baseline /work/openconf-h2h/baseline --seeds $(seq 2000 2023)
+        OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh paired-score \
+            --tree conf-fix7 --baseline /work/openconf-h2h/baseline \
+            --results bench/openconf-h2h/conf-fix7
+        """
+
+
 # Gradients per GFN2 quench: anneal L-BFGS and TRIC against geomeTRIC.
 # Not part of `rule all`:
 #   snakemake -s workflow/Snakefile tric_quench

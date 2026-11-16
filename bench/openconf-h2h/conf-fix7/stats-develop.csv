@@ -1,0 +1,9 @@
+molecule,hits_anneal,hits_develop,fisher_odds_ratio,fisher_p,hit_runs_anneal,hit_runs_develop,mannwhitney_u,mannwhitney_p
+rq3,24/24,24/24,nan,1.0000,24,24,231.0,0.2440
+915,18/24,15/24,1.8000,0.5343,18,15,128.0,0.8142
+xld,21/24,16/24,3.5000,0.1681,21,16,105.0,0.0554
+fluvastatin,14/24,10/24,1.9600,0.3868,14,10,81.0,0.5387
+z34,2/24,0/24,inf,0.4894,2,0,,
+amprenavir,2/24,3/24,0.6364,1.0000,2,3,0.0,0.2000
+lopinavir,0/24,2/24,0.0000,0.4894,0,2,,
+lorlatinib,12/24,12/24,1.0000,1.0000,12,12,72.0,1.0000
