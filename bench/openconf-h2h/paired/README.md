@@ -25,14 +25,15 @@ within 0.5 kcal/mol). `n_3kcal` counts distinct conformers within
 trace first held a minimum that polishes to it; medians are over hitting
 runs. `seeds.csv` holds one row per run, `summary.csv` the medians and
 `stats.csv` the two-sided Fisher exact test on hits and Mann-Whitney U
-test on calls to hit. No correction for eight tests is applied.
+test on calls to hit (normal approximation with the tie and continuity
+corrections). No correction for eight tests is applied.
 
 | molecule | hits anneal | hits openconf | Fisher p | n_3kcal anneal | n_3kcal openconf | calls to hit anneal | calls to hit openconf | Mann-Whitney p |
 |---|---|---|---|---|---|---|---|---|
 | rq3 | 12/12 | 10/12 | 0.4783 | 41 | 22 | 8266 | 1779 | 0.0698 |
-| 915 | 2/12 | 6/12 | 0.1930 | 0 | 2.5 | 9617 | 4339 | 0.6429 |
-| xld | 8/12 | 1/12 | 0.0094 | 15 | 2.5 | 14640 | 21918 | 0.8889 |
-| fluvastatin | 3/12 | 6/12 | 0.4003 | 25.5 | 7 | 23857 | 5616 | 0.3810 |
+| 915 | 2/12 | 6/12 | 0.1930 | 0 | 2.5 | 9617 | 4339 | 0.6171 |
+| xld | 8/12 | 1/12 | 0.0094 | 15 | 2.5 | 14640 | 21918 | 0.8465 |
+| fluvastatin | 3/12 | 6/12 | 0.4003 | 25.5 | 7 | 23857 | 5616 | 0.3662 |
 | z34 | 1/12 | 0/12 | 1.0000 | 18 | 2 | 10765 | | |
 | amprenavir | 0/12 | 1/12 | 1.0000 | 0 | 0 | | 18311 | |
 | lopinavir | 1/12 | 0/12 | 1.0000 | 1 | 0 | 57687 | | |

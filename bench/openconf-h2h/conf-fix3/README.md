@@ -44,13 +44,13 @@ same.
 | molecule | calls to hit branch | calls to hit develop | calls to hit openconf | Mann-Whitney p vs develop | Mann-Whitney p vs openconf |
 |---|---|---|---|---|---|
 | rq3 | 8266 | 8266 | 1779 | 1.0000 | 0.0698 |
-| 915 | 27454.5 | 27454.5 | 4339 | 1.0000 | 0.0714 |
-| xld | 35688.5 | 35688.5 | 13369 | 1.0000 | 0.6667 |
-| fluvastatin | 23857 | 23857 | 5616 | 1.0000 | 0.3810 |
+| 915 | 27454.5 | 27454.5 | 4339 | 1.0000 | 0.0668 |
+| xld | 35688.5 | 35688.5 | 13369 | 1.0000 | 0.5613 |
+| fluvastatin | 23857 | 23857 | 5616 | 1.0000 | 0.3662 |
 | z34 | 14961 | 14961 |  |  |  |
 | amprenavir | 29466 | 29466 |  |  |  |
 | lopinavir | 73630 | 73630 |  | 1.0000 |  |
-| lorlatinib | 39210 | 39210 | 7971 | 1.0000 | 0.1333 |
+| lorlatinib | 39210 | 39210 | 7971 | 1.0000 | 0.1258 |
 
 Median wall time per run, and each anneal arm's median time inside and
 outside the potential:

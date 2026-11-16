@@ -1,5 +1,5 @@
 molecule,hits_anneal,hits_develop,fisher_odds_ratio,fisher_p,hit_runs_anneal,hit_runs_develop,mannwhitney_u,mannwhitney_p
-915,15/24,5/24,6.3333,0.0077,15,5,34.0,0.8001
+915,15/24,5/24,6.3333,0.0077,15,5,34.0,0.7934
 xld,16/24,16/24,1.0000,1.0000,16,16,153.0,0.3558
 fluvastatin,10/24,6/24,2.1429,0.3587,10,6,14.5,0.1035
 z34,0/24,1/24,0.0000,1.0000,0,1,,

@@ -24,7 +24,8 @@ bonds differ from the SMILES is invalid and dropped. ΔE_min is the median
 of each run's lowest valid polished energy above that minimum, in
 kcal/mol. `stats.csv` tests the branch against openconf, `stats-develop.csv`
 against develop: two-sided Fisher exact on hits, Mann-Whitney U on calls to
-hit, no correction for eight tests.
+hit (normal approximation with the tie and continuity corrections), no
+correction for eight tests.
 
 | molecule | hits branch | hits develop | hits openconf | Fisher p vs develop | Fisher p vs openconf | n_3kcal branch | n_3kcal develop | n_3kcal openconf | ΔE_min branch | ΔE_min develop | ΔE_min openconf |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -53,13 +54,13 @@ run of every arm has none.
 | molecule | calls to hit branch | calls to hit develop | calls to hit openconf | Mann-Whitney p vs develop | Mann-Whitney p vs openconf |
 |---|---|---|---|---|---|
 | rq3 | 8266 | 8266 | 1779 | 1.0000 | 0.0698 |
-| 915 | 27454.5 | 9617 | 4339 | 0.3333 | 0.0714 |
-| xld | 23840 | 14640 | 21918 | 0.7242 | 0.6667 |
-| fluvastatin | 23857 | 23857 | 5616 | 1.0000 | 0.3810 |
+| 915 | 27454.5 | 9617 | 4339 | 0.2453 | 0.0668 |
+| xld | 23840 | 14640 | 21918 | 0.7144 | 0.5582 |
+| fluvastatin | 23857 | 23857 | 5616 | 1.0000 | 0.3662 |
 | z34 | | 10765 | | | |
 | amprenavir | 29466 | | | | |
 | lopinavir | 73630 | | | | |
-| lorlatinib | 39210 | | 7971 | | 0.1333 |
+| lorlatinib | 39210 | | 7971 | | 0.1258 |
 
 Median wall time per run, and each anneal arm's median time inside and
 outside the potential:

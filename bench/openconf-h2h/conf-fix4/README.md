@@ -61,13 +61,13 @@ reference `n24/` takes.
 | molecule | calls to hit branch | calls to hit develop | calls to hit openconf | Mann-Whitney p vs develop | Mann-Whitney p vs openconf |
 |---|---|---|---|---|---|
 | rq3 | 4546 | 8266 | 1779 | 0.5440 | 0.1062 |
-| 915 | 9852 | 27454.5 | 4339 | 0.4000 | 0.0200 |
-| xld | 34388.5 | 23840 | 21918 | 0.4620 | 0.7273 |
-| fluvastatin | 16039 | 23857 | 5616 | 0.7954 | 0.2403 |
+| 915 | 9852 | 27454.5 | 4339 | 0.3608 | 0.0239 |
+| xld | 34388.5 | 23840 | 21918 | 0.4620 | 0.6353 |
+| fluvastatin | 16039 | 23857 | 5616 | 0.7954 | 0.2298 |
 | z34 |  | 14961 |  |  |  |
 | amprenavir | 57119 | 29466 |  | 1.0000 |  |
 | lopinavir | 33079 |  |  |  |  |
-| lorlatinib | 63752 | 39210 | 7971 | 0.7546 | 0.0476 |
+| lorlatinib | 63752 | 39210 | 7971 | 0.7469 | 0.0528 |
 
 Median wall time per run, and each anneal arm's median time inside and
 outside the potential:
@@ -107,12 +107,12 @@ leaves; its median ΔE_min is 0.60 against 0.00.
 
 | molecule | calls to hit branch | calls to hit develop | calls to hit openconf | Mann-Whitney p vs develop | Mann-Whitney p vs openconf |
 |---|---|---|---|---|---|
-| 915 | 18883 | 19397 | 4339 | 0.8001 | 0.0017 |
-| xld | 36271.5 | 33966 | 10363 | 0.3558 | 0.0523 |
-| fluvastatin | 13292 | 43611 | 3523.5 | 0.1035 | 0.0545 |
+| 915 | 18883 | 19397 | 4339 | 0.7934 | 0.0017 |
+| xld | 36271.5 | 33966 | 10363 | 0.3558 | 0.0579 |
+| fluvastatin | 13292 | 43611 | 3523.5 | 0.1035 | 0.0561 |
 | z34 |  | 14961 |  |  |  |
 | lopinavir | 48892.5 |  |  |  |  |
-| lorlatinib | 55483.5 | 32657 | 7971 | 0.2648 | 0.0013 |
+| lorlatinib | 55483.5 | 32657 | 7971 | 0.2648 | 0.0037 |
 
 | molecule | wall branch (s) | wall develop (s) | wall openconf (s) | branch inside (s) | branch outside (s) | develop inside (s) | develop outside (s) |
 |---|---|---|---|---|---|---|---|
