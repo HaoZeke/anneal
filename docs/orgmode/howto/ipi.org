@@ -1,29 +1,49 @@
-#+TITLE: i-PI socket server
+#+TITLE: i-PI socket server and driver
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
 #+STARTUP: content
 
-* i-PI socket server
+* i-PI socket server and driver
 
-=IPIPot= is the i-PI socket *server*.
-It binds a UNIX or TCP socket, accepts one driver, and sends geometries.
-The driver (CP2K, Quantum ESPRESSO, FHI-aims, LAMMPS, or =i-pi-py_driver=)
-connects and returns energy, forces and a virial.
-The protocol is Ceriotti, More and Manolopoulos, Comput Phys Commun 185, 1019
-(2014), and i-PI 3.0, J Chem Phys 161, 062504 (2024).
+rgpot speaks the i-PI socket protocol in both directions.
+=IPIPot= is the *server*: it sends geometries to an external driver.
+=IPIDriver= and the =rgpot-ipi-driver= program are the *driver*.
+They answer a server with an rgpot potential.
+The server can be i-PI, ASE's =SocketIOCalculator= or =IPIPot=.
+The protocol is Ceriotti, More and Manolopoulos, CPC 185, 1019 (2014).
+The i-PI 3.0 paper is Litman et al., J Chem Phys 161, 062504 (2024).
+[[file:../reference/ipi_driver.org][The driver reference]] lists its names.
 
-** Address
+** Wire contract
 
-The constructor takes =IPIConfig::address= and =timeout_s= in seconds (default
-30).
-The socket is bound in the constructor; the driver is accepted on the first
-force call.
-=timeout_s= is one budget per force call that covers waiting for the driver to
-connect and the force exchange.
+Headers are 12-byte space-padded ASCII.
+Integers are int32 and floats are float64.
+Both are in the host byte order, as in the i-PI C wrappers and =driver.py=.
+Lengths are bohr, energies are hartree, and forces are hartree per bohr.
+The cell and its inverse are 3x3, with lattice vectors in the columns.
+Internally rgpot stores lattice vectors as rows, and both sides transpose.
+The virial is the extensive tensor in hartree, =W_ij = sum_a F_a,i * r_a,j=.
+It is not divided by the cell volume.
+The rgpot Cauchy stress is =sigma = -W / V= in eV/Angstrom^3.
+The protocol carries no species, so each driver keeps its own list.
+
+** Server: IPIPot
+
+=IPIPot= binds a UNIX or TCP socket, accepts one driver, and sends geometries.
+The driver can be CP2K, Quantum ESPRESSO, FHI-aims, LAMMPS or =i-pi-py_driver=.
+It connects and returns energy, forces and a virial.
+
+*** Address
+
+The constructor takes =IPIConfig::address= and =timeout_s= in seconds.
+The default timeout is 30 seconds.
+The socket is bound in the constructor.
+The driver is accepted on the first force call.
+=timeout_s= is one budget per force call.
+It covers waiting for the driver to connect and the force exchange.
 
 - =unix:/absolute/path= binds that path.
-- =unix:<name>= binds
-  =/tmp/ipi_<name>=, the i-PI default prefix, so =i-pi-py_driver -u -a <name>=
-  connects.
+- =unix:<name>= binds =/tmp/ipi_<name>=, the i-PI default prefix.
+  =i-pi-py_driver -u -a <name>= then connects.
   The name must not contain =/=.
   On macOS the address length is set, which the kernel requires.
 - =tcp:<host>:<port>= listens on that IPv4 host and port.
@@ -31,12 +51,12 @@ connect and the force exchange.
 - Port 0 asks the kernel for a free port.
   =endpoint()= reports the chosen port.
 
-A malformed address, a UNIX path too long for the socket address, or a
-=timeout_s= that is negative or not finite makes the constructor throw =std::invalid_argument=.
+The constructor throws =std::invalid_argument= for a malformed address.
+It does the same for a UNIX path too long for the socket address.
+It does the same for a =timeout_s= that is negative or not finite.
 A socket that cannot be bound throws =std::runtime_error=.
 
-=potserv= (built with =-Dwith_rpc=true=) uses the same strings after an =IPI:=
-prefix:
+=potserv= (built with =-Dwith_rpc=true=) takes the same strings after =IPI:=.
 
 #+attr_rgpot: syntax starts a server that waits for clients
 #+begin_src bash
@@ -44,47 +64,32 @@ prefix:
 ./build/CppCore/potserv 12345 IPI:tcp:127.0.0.1:31415
 #+end_src
 
-** Wire contract
+*** Messages
 
-Headers are 12-byte space-padded ASCII.
-Integers are int32 and floats are float64, in the host endianness used by the
-i-PI C wrappers and =driver.py=.
-Lengths are bohr, energies are hartree, and forces are hartree/bohr. The cell
-and its inverse are 3x3, with lattice vectors in the columns. rgpot stores
-lattice vectors as rows, and the server transposes on the way out. A singular
-cell throws
-=std::invalid_argument= before a driver is accepted. The virial is the extensive tensor in hartree, =W_ij = sum_a F_a,i * r_a,j=.
-That tensor is left undivided by the cell volume. rgpot returns the Cauchy
-stress =sigma = -W / V= in eV/Angstrom^3.
-The driver keeps its own species list.
+A singular cell throws =std::invalid_argument= before a driver is accepted.
+A force call sends =STATUS= until the driver reports =READY=.
+It tries at most eight times.
+=NEEDINIT= is answered with =INIT=, with bead id 0 and an empty init string.
+The server then writes =POSDATA= and =GETFORCE= in one payload.
+It reads =FORCEREADY= back.
+These throw =std::runtime_error= and close the connection.
+A timeout, a disconnect or an unexpected header.
+A driver that is not =READY= after eight =STATUS= messages.
+An atom count that differs from the geometry.
+The next force call accepts a new driver.
 The destructor sends =EXIT= when a driver is connected.
 
-A force call sends =STATUS= until the driver reports =READY=, at most eight
-times.
-=NEEDINIT= is answered with =INIT= (bead id 0, empty init string).
-The server then writes =POSDATA= and =GETFORCE= in one payload and reads
-=FORCEREADY=.
-A timeout, a disconnect, an unexpected header, a driver that is not =READY=
-after eight =STATUS= messages, or an atom count that differs from the geometry
-throws =std::runtime_error= and closes the connection.
-The next force call accepts a new driver.
+*** Python
 
-** Build
-
-Meson =with_ipi= is a feature option.
-=auto= compiles the server on POSIX hosts and leaves it out on Windows.
-=-Dwith_ipi=enabled= is an error on Windows.
-CMake =RGPOT_WITH_IPI= defaults on except on Windows, and =ON= there is a fatal
-error.
-The compile definition is =RGPOT_HAS_IPI=.
-
-** Python
-
-When the extension is built with =RGPOT_HAS_IPI=,
-=rgpot.IPIPot(address, timeout_s=30.0)= follows the same address forms.
-=__call__= returns energy (eV), forces (eV/Angstrom) and variance; positions and the box are in Angstrom. =stress()= returns the Cauchy tensor from the last call in eV/Angstrom^3, shape =(3, 3)=, or =None= before a successful call. =has_ipi=
-is always present. A bad address raises =ValueError=, and a timeout or protocol
-failure raises =RuntimeError=.
+With =RGPOT_HAS_IPI= the extension has =rgpot.IPIPot(address, timeout_s=30.0)=.
+=has_ipi= is always present.
+The address forms are those above.
+=__call__= takes positions and the box in Angstrom.
+It returns the energy in eV, the forces in eV per Angstrom and the variance.
+The =stress()= method returns the last Cauchy tensor in eV/Angstrom^3.
+Its shape is =(3, 3)=, and it is =None= before a successful call.
+A bad address raises =ValueError=.
+A timeout or protocol failure raises =RuntimeError=.
 
 #+attr_rgpot: run requires=has_ipi
 #+begin_src python
@@ -98,3 +103,147 @@ try:
 except RuntimeError as err:
     print(err)  # no driver connected within timeout_s
 #+end_src
+
+** Driver: rgpot-ipi-driver
+
+=rgpot-ipi-driver= connects to a server and answers it with a potential.
+Any name that =engines/pot_spec.hpp= builds works, and =--list= prints them.
+The socket flags follow =i-pi-py_driver=: =-u=, =-a=, =-p=, =-S=, =-m=, =-o=.
+The species come from =--species= or from a structure file.
+
+#+attr_rgpot: syntax a driver connects to a server that is already running
+#+begin_src bash
+rgpot-ipi-driver --pot "LJ u0 0.0104 psi 3.40 cutoff 8.5" --species 'Ar*108' -u -a rgpot
+rgpot-ipi-driver -m EAMTable -o file=Cu_u3.eam --species-from start.xyz -p 31415
+rgpot-ipi-driver -m EAMAl --species 'Al*108' --cutoff 7.1 --stress-step 1e-5 -u -a al
+#+end_src
+
+The driver retries the connection for =--connect-timeout= seconds.
+So it can start before the server listens.
+It answers =STATUS=, =INIT=, =POSDATA= and =GETFORCE= until =EXIT=.
+A server that closes the socket between messages also ends it.
+ASE does that.
+The exit code is then 0.
+Every =POSDATA= must carry as many atoms as the species list.
+
+*** Cells
+
+A singular cell (zero volume) is an open cluster.
+ASE sends one for =pbc=False=.
+The driver evaluates it in a cube at least 100 Angstrom wide.
+The cube is also wider than twice the cluster extent plus the cutoff.
+A periodic cell no wider than twice the cutoff is tiled before evaluation.
+The cutoff is the potential's own (=LJ=, =Morse=, =SuttonChen=) or =--cutoff=.
+RgpotCalculator handles small and open cells the same way.
+
+*** Virial
+
+The virial is =W = -sigma V= in hartree for a potential that reports stress.
+For one that does not, =--stress-step H= takes a central difference.
+It strains positions and cell together by =H=.
+That costs twelve extra evaluations per geometry.
+Without it the virial is zero.
+The extra string is a small JSON object, such as
+={"virial": "kernel", "virial_units": "hartree"}=.
+=--no-extras= sends an empty string.
+
+*** ASE
+
+ASE's =SocketIOCalculator= is a server.
+It can launch the driver itself.
+
+#+attr_rgpot: syntax needs rgpot-ipi-driver on PATH
+#+begin_src python
+import subprocess
+
+from ase.build import bulk
+from ase.calculators.socketio import SocketIOCalculator
+
+atoms = bulk("Ar", "fcc", a=5.26, cubic=True).repeat(3)
+cmd = ["rgpot-ipi-driver", "--pot", "LJ u0 0.0104 psi 3.40 cutoff 8.5",
+       "--species", f"Ar*{len(atoms)}", "-u", "-a", "rgpot"]
+with SocketIOCalculator(unixsocket="rgpot",
+                        launch_client=lambda *a, **k: subprocess.Popen(cmd)) as calc:
+    atoms.calc = calc
+    print(atoms.get_potential_energy(), atoms.get_stress())
+#+end_src
+
+ASE uses CODATA 2014 constants and rgpot uses CODATA 2018.
+So the results agree with =RgpotCalculator= to about 1e-8 relative.
+The =ipi_driver_ase= meson test checks LJ and EAM-Al on sheared cells.
+It also checks an LJ cluster, TCP and the usage errors.
+
+*** i-PI
+
+An i-PI input names the driver's socket in =ffsocket=.
+The driver then serves every bead.
+
+#+attr_rgpot: skip an i-PI input fragment, not rgpot code
+#+begin_src xml
+<ffsocket name='rgpot' mode='unix' pbc='false'>
+  <address>rgpot</address>
+</ffsocket>
+#+end_src
+
+#+attr_rgpot: syntax needs i-pi and input.xml
+#+begin_src bash
+i-pi input.xml &
+rgpot-ipi-driver --pot "LJ u0 0.0104 psi 3.40 cutoff 8.5" --species-from init.xyz -u -a rgpot
+#+end_src
+
+The =ipi_driver_ase= test runs a two-bead NVE run like this when =i-pi= is on
+=PATH=.
+
+*** C++
+
+=IPIDriver= takes an =IPIDriverConfig= and any evaluation function.
+[[file:../reference/ipi_driver.org][The driver reference]] has an example.
+=IPIPot= and =IPIDriver= in one process reproduce a direct evaluation.
+The =IPIDriverTest= cases check energy, forces and virial to 1e-12 relative.
+
+** Overhead
+
+=rgpot-ipi-bench= times one force call through =IPIPot= and =IPIDriver=.
+It compares a UNIX socket and TCP on the loopback with a direct call.
+Server and driver run in one process, one thread each.
+Each case is the median over five runs of the per-call median.
+The geometries are displaced fcc blocks: LJ argon (cutoff 8.5 Angstrom) and
+Foiles copper EAM from =CppCore/tests/data/eam_table/Cu_u3.eam=.
+The 4.95 Angstrom cutoff of the copper table exceeds half of any 64-atom cell.
+So that row is missing.
+
+#+attr_rgpot: syntax builds with -Dwith_eam_table=true
+#+begin_src bash
+./build/engines/rgpot-ipi-bench --eam CppCore/tests/data/eam_table/Cu_u3.eam
+#+end_src
+
+| Potential   | Atoms | Direct (us) | UNIX (us) | TCP (us) | UNIX - direct | TCP - direct |
+|-------------+-------+-------------+-----------+----------+---------------+--------------|
+| LJ Ar       |    64 |        24.2 |      56.1 |     62.2 |          31.9 |         38.0 |
+| LJ Ar       |   256 |       183.5 |     225.8 |    241.1 |          42.3 |         57.6 |
+| LJ Ar       |  1024 |       722.9 |     785.8 |    801.7 |          62.9 |         78.8 |
+| LJ Ar       | 16384 |     11410.3 |   12005.6 |  12096.9 |         595.3 |        686.6 |
+| EAMTable Cu |   256 |      1134.6 |    1225.6 |   1233.1 |          91.0 |         98.5 |
+| EAMTable Cu |  1024 |      5637.9 |    5812.7 |   5824.6 |         174.8 |        186.7 |
+| EAMTable Cu | 16384 |     76209.9 |   76539.7 |  76945.6 |         329.8 |        735.7 |
+
+The machine was a cloud VM with 8 vCPUs of an unnamed Intel Xeon and 47 GB.
+The build was a meson release build with GCC 14.3 on Linux 6.12.
+The kernels ran on one thread.
+Up to 1024 atoms a socket adds about 30 to 90 microseconds per call.
+At 16384 atoms the extra cost is a few percent of an LJ call.
+For EAM it is below one percent.
+At that size the overhead is a difference of separate runs.
+It carries their noise.
+
+** Build
+
+Meson =with_ipi= is a feature option.
+=auto= compiles the server, the driver and the program on POSIX hosts.
+It leaves them out on Windows.
+=-Dwith_ipi=enabled= is an error on Windows.
+CMake =RGPOT_WITH_IPI= defaults on except on Windows.
+=ON= there is an error.
+The compile definition is =RGPOT_HAS_IPI=.
+=rgpot-ipi-driver= is installed with the other engine programs.
+=rgpot-ipi-bench= is not installed.

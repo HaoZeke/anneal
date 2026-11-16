@@ -122,6 +122,8 @@ The porting rules are in
 is off on Windows.
 The driver connects and returns energy, forces and a virial in atomic units.
 rgpot converts those to eV, eV/Angstrom and the Cauchy stress.
+The same option builds =IPIDriver= and =rgpot-ipi-driver=, the client side.
+They answer an i-PI server with any =engines/pot_spec.hpp= potential.
 See =docs/orgmode/howto/ipi.org=.
 
 - =EAMTablePot= (=-Dwith_eam_table=true=) :: EAM and Finnis-Sinclair potentials
