@@ -660,7 +660,7 @@ real xtb 6.7.1 (conda-forge build): anneal through rgpot's
 `libxtb_engine.so` at engine `04aceaa7`, and CREST 3.0.2 through
 its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 300 K, so both run at an electronic temperature of 3000 K
-(`RGPOT_XTB_ETEMP`, 300 K when unset). From `e37680df` on, every anneal
+(`RGPOT_XTB_ETEMP`, 300 K when unset). From `ab93b60b` on, every anneal
 call starts its SCC from xtb's own guess (the engine's warm move set to
 zero). The Si10, C10 and C20 rows below were measured before that, with
 the engine reusing the previous call's wavefunction; their minima give
