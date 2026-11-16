@@ -747,6 +747,21 @@ rule asg2_h2h:
 
 
 # Paper preset against AGOX GOFEE. Not part of `rule all`.
+
+# OCCat against anneal and GMIN at the paper evaluation budgets.
+# Not part of `rule all`. One serial session, hostname bench:
+#   snakemake -s workflow/Snakefile occat_h2h
+rule occat_h2h:
+    output:
+        "bench/occat-h2h/summary.csv",
+        "bench/occat-h2h/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/occat_h2h/enter_bench.sh
+        """
+
+
 #   snakemake -s workflow/Snakefile agox_gofee_h2h
 rule agox_gofee_h2h:
     output:
