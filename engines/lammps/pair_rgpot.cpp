@@ -4,7 +4,7 @@
 // pair_style rgpot. This file includes the LAMMPS headers, so it is
 // distributed under the LAMMPS license. The rest of rgpot stays MIT.
 //
-//   pair_style rgpot cutoff [virial auto|fd]
+//   pair_style rgpot cutoff [virial auto|fd] [mode auto|gather|domain]
 //   pair_coeff * * u0 psi
 //   pair_coeff * * engine /path/to/libengine.so [El ...]
 //   pair_coeff * * Name [key value ...] El ...
@@ -18,12 +18,31 @@
 // a type the style leaves out. Without them the engine form receives the
 // LAMMPS type numbers as atomic numbers.
 //
-// Units must be metal: Angstrom, eV, eV/Angstrom. Every step the owned
-// atoms of all ranks are gathered on rank 0 in tag order, the backend
-// evaluates the whole periodic cell once, and the forces go back to the
-// owners. Energy and virial are tallied on rank 0 only. That costs one
-// O(N) gather and scatter per step and the evaluation is serial, so extra
-// ranks only distribute the integration.
+// Units must be metal: Angstrom, eV, eV/Angstrom. There are two ways to
+// evaluate a step.
+//
+// Gather: the owned atoms of all ranks are gathered on rank 0 in tag
+// order, the backend evaluates the whole periodic cell once, and the
+// forces go back to the owners. Energy and virial are tallied on rank 0
+// only. That costs one O(N) gather and scatter per step and the
+// evaluation is serial, so extra ranks only distribute the integration.
+//
+// Domain: for a potential with a finite range (rgpot/Locality.hpp) and a
+// per-atom split, each rank evaluates its owned atoms plus the ghosts
+// within the force range R (the cutoff for a pairwise potential, twice
+// the cutoff otherwise) as one cluster in an orthogonal box padded so
+// that no periodic image is within the cutoff. init_one returns R, so
+// LAMMPS keeps every atom within R of an owned atom as a ghost. The
+// forces, site energies and per-atom virials of the owned atoms are then
+// those of the whole system, and only they are kept: the ghosts' own
+// results are discarded and no force goes to a ghost, so there is no
+// reverse communication and the boundary work is done on both sides, as
+// a LAMMPS style does with newton_pair off. Every rank tallies the
+// energy and virial of its owned atoms; LAMMPS sums them over ranks.
+//
+// mode auto takes the domain path when the potential allows it and the
+// virial is not the strain difference; mode gather and mode domain force
+// one (domain stops at init when the potential cannot use it).
 //
 // The global virial is -V sigma from the backend's Cauchy stress. When
 // the backend returns no stress (an engine plugin, or a potential whose
@@ -39,7 +58,8 @@
 // each atom and EAM gives each atom its embedding term. Rank 0 fills them
 // on the gathered box and they are scattered by tag like the forces. A
 // potential without them, or an engine plugin, stops the run when they are
-// requested.
+// requested. On the domain path the per-atom arrays of the owned atoms come
+// straight from each rank's cluster and the global virial is their sum.
 
 #include "pair.h"
 
@@ -58,6 +78,7 @@
 #include "pot_spec.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -70,6 +91,7 @@ using namespace LAMMPS_NS;
 namespace {
 
 enum class Backend { Engine, Potential };
+enum class Mode { Auto, Gather, Domain };
 
 constexpr int kWhyLen = 512;
 constexpr double kStrain = 1.0e-5;
@@ -93,9 +115,13 @@ class PairRgpot : public Pair {
   rgpot::spec::Built built;
   // What the error names when per-atom output is requested but missing.
   std::string pot_name;
-  // Known on every rank; only rank 0 keeps the kernel.
+  // Every rank keeps the kernel: rank 0 evaluates the gathered box, and on
+  // the domain path every rank evaluates its own cluster.
   bool per_atom = false;
   bool virial_fd = false;
+  Mode mode = Mode::Auto;
+  // Set by init_style.
+  bool use_domain = false;
   // Atomic number per LAMMPS type, index 1..ntypes. 0 leaves the type out.
   std::vector<int> type_z;
 
@@ -107,6 +133,10 @@ class PairRgpot : public Pair {
                const rgpot::PerAtomOut *atoms = nullptr);
   int strain_virial(std::size_t n, const double *xyz, const int *z, const double *box, double *w,
                     char *why);
+  // Empty when the domain path can be used, else why not.
+  std::string domain_refusal() const;
+  void compute_gather();
+  void compute_domain();
 };
 
 PairRgpot::PairRgpot(LAMMPS *lmp) : Pair(lmp) {
@@ -141,19 +171,39 @@ void PairRgpot::allocate() {
 }
 
 void PairRgpot::settings(int narg, char **arg) {
-  if (narg != 1 && !(narg == 3 && strcmp(arg[1], "virial") == 0)) {
-    error->all(FLERR, "pair_style rgpot takes the cutoff, then optionally virial auto or fd");
+  if (narg < 1 || narg % 2 != 1) {
+    error->all(FLERR, "pair_style rgpot takes the cutoff, then optionally virial auto|fd and "
+                      "mode auto|gather|domain");
   }
   cut_global = utils::numeric(FLERR, arg[0], false, lmp);
   if (!(cut_global > 0.0)) {
     error->all(FLERR, "pair_style rgpot cutoff must be positive");
   }
   virial_fd = false;
-  if (narg == 3) {
-    if (strcmp(arg[2], "fd") == 0) {
-      virial_fd = true;
-    } else if (strcmp(arg[2], "auto") != 0) {
-      error->all(FLERR, "pair_style rgpot virial is auto or fd, not {}", arg[2]);
+  mode = Mode::Auto;
+  for (int k = 1; k < narg; k += 2) {
+    const char *key = arg[k];
+    const char *value = arg[k + 1];
+    if (strcmp(key, "virial") == 0) {
+      if (strcmp(value, "fd") == 0) {
+        virial_fd = true;
+      } else if (strcmp(value, "auto") == 0) {
+        virial_fd = false;
+      } else {
+        error->all(FLERR, "pair_style rgpot virial is auto or fd, not {}", value);
+      }
+    } else if (strcmp(key, "mode") == 0) {
+      if (strcmp(value, "auto") == 0) {
+        mode = Mode::Auto;
+      } else if (strcmp(value, "gather") == 0) {
+        mode = Mode::Gather;
+      } else if (strcmp(value, "domain") == 0) {
+        mode = Mode::Domain;
+      } else {
+        error->all(FLERR, "pair_style rgpot mode is auto, gather or domain, not {}", value);
+      }
+    } else {
+      error->all(FLERR, "pair_style rgpot has no keyword {}", key);
     }
   }
 }
@@ -241,7 +291,6 @@ void PairRgpot::coeff(int narg, char **arg) {
 }
 
 void PairRgpot::use_potential(const char *name, const rgpot::spec::Options &options) {
-  // Every rank checks the line; only rank 0 keeps the kernel it evaluates.
   built = rgpot::spec::build(name, options, cut_global);
   if (!built.pot) {
     error->all(FLERR, "pair_coeff rgpot: {}", built.error);
@@ -258,9 +307,22 @@ void PairRgpot::use_potential(const char *name, const rgpot::spec::Options &opti
   per_atom = static_cast<bool>(built.perAtom);
   // Every force is a central pair force, so the centroid stress is vatom.
   centroidstressflag = per_atom ? CENTROID_SAME : CENTROID_NOTAVAIL;
-  if (comm->me != 0) {
-    built = rgpot::spec::Built{};
+}
+
+std::string PairRgpot::domain_refusal() const {
+  if (backend == Backend::Engine) {
+    return pot_name + " is an engine, which reports no range or per-atom energy";
   }
+  if (!built.locality.finite()) {
+    return pot_name + " declares no finite range";
+  }
+  if (!built.perAtom) {
+    return pot_name + " has no per-atom energy";
+  }
+  if (virial_fd) {
+    return "virial fd differentiates the whole box";
+  }
+  return {};
 }
 
 void PairRgpot::init_style() {
@@ -273,13 +335,31 @@ void PairRgpot::init_style() {
   if (!domain->xperiodic || !domain->yperiodic || !domain->zperiodic) {
     error->all(FLERR, "pair_style rgpot needs boundary p p p");
   }
-  if (atom->natoms > MAXSMALLINT) {
+  const std::string refusal = domain_refusal();
+  if (mode == Mode::Domain && !refusal.empty()) {
+    error->all(FLERR, "pair_style rgpot mode domain: {}", refusal);
+  }
+  use_domain = mode == Mode::Domain || (mode == Mode::Auto && refusal.empty());
+  if (!use_domain && atom->natoms > MAXSMALLINT) {
     error->all(FLERR, "pair_style rgpot: too many atoms");
+  }
+  if (comm->me == 0) {
+    if (use_domain) {
+      utils::logmesg(lmp,
+                     "pair_style rgpot: domain decomposition, cutoff {:.8g}, force range "
+                     "{:.8g}\n",
+                     built.locality.cutoff, built.locality.forceRange());
+    } else {
+      utils::logmesg(lmp, "pair_style rgpot: gather on rank 0{}{}\n",
+                     refusal.empty() ? "" : "; ", refusal);
+    }
   }
 }
 
 double PairRgpot::init_one(int, int) {
-  return cut_global;
+  // The domain path needs every atom within the force range of an owned
+  // atom as a ghost; LAMMPS adds the skin.
+  return use_domain ? built.locality.forceRange() : cut_global;
 }
 
 int PairRgpot::evaluate(std::size_t n, const double *xyz, const int *z, const double *box,
@@ -359,7 +439,127 @@ void PairRgpot::compute(int eflag, int vflag) {
                "and stress/atom cannot be used with it",
                pot_name);
   }
+  if (use_domain) {
+    compute_domain();
+  } else {
+    compute_gather();
+  }
+}
 
+void PairRgpot::compute_domain() {
+  const int nlocal = atom->nlocal;
+  const int nall = nlocal + atom->nghost;
+  double **x = atom->x;
+  double **f = atom->f;
+  const int *type = atom->type;
+  const rgpot::Locality range = built.locality;
+
+  std::vector<int> cluster;
+  double lo[3] = {};
+  double hi[3] = {};
+  for (int i = 0; i < nlocal; ++i) {
+    if (type_z[static_cast<std::size_t>(type[i])] == 0) {
+      continue;
+    }
+    for (int d = 0; d < 3; ++d) {
+      lo[d] = cluster.empty() ? x[i][d] : std::min(lo[d], x[i][d]);
+      hi[d] = cluster.empty() ? x[i][d] : std::max(hi[d], x[i][d]);
+    }
+    cluster.push_back(i);
+  }
+  const std::size_t nowned = cluster.size();
+  if (nowned == 0) {
+    return;
+  }
+  // A ghost farther than the force range from every owned atom changes
+  // nothing the owned atoms keep. The test against the owned atoms'
+  // bounding box keeps a superset of the ones within range.
+  const double reach = range.forceRange();
+  for (int i = nlocal; i < nall; ++i) {
+    if (type_z[static_cast<std::size_t>(type[i])] == 0) {
+      continue;
+    }
+    bool near = true;
+    for (int d = 0; d < 3 && near; ++d) {
+      near = x[i][d] >= lo[d] - reach && x[i][d] <= hi[d] + reach;
+    }
+    if (near) {
+      cluster.push_back(i);
+    }
+  }
+  const std::size_t n = cluster.size();
+
+  // An orthogonal box at least 3 cutoffs wider than the cluster, so
+  // periodic images stay beyond the cutoff and the cutoff under half the
+  // box. Its corners sit on a grid of one cutoff: between reneighbourings
+  // the box usually stays the same and the kernel can keep its own
+  // neighbour list.
+  const double grid = range.cutoff;
+  const double pad = 1.5 * range.cutoff;
+  double origin[3];
+  double box[9] = {};
+  for (int d = 0; d < 3; ++d) {
+    double cmin = lo[d];
+    double cmax = hi[d];
+    for (std::size_t k = nowned; k < n; ++k) {
+      cmin = std::min(cmin, x[cluster[k]][d]);
+      cmax = std::max(cmax, x[cluster[k]][d]);
+    }
+    origin[d] = std::floor(cmin / grid) * grid - pad;
+    box[4 * d] = std::ceil(cmax / grid) * grid + pad - origin[d];
+  }
+  std::vector<double> xyz(3 * n);
+  std::vector<int> z(n);
+  for (std::size_t k = 0; k < n; ++k) {
+    const int i = cluster[k];
+    z[k] = type_z[static_cast<std::size_t>(type[i])];
+    for (int d = 0; d < 3; ++d) {
+      xyz[3 * k + static_cast<std::size_t>(d)] = x[i][d] - origin[d];
+    }
+  }
+
+  const bool want_e = eflag_global || eflag_atom;
+  const bool want_v = vflag_global || vflag_atom;
+  std::vector<double> forces(3 * n, 0.0);
+  std::vector<double> atom_e(want_e ? n : 0);
+  std::vector<double> atom_v(want_v ? 6 * n : 0);
+  rgpot::PerAtomOut atoms{want_e ? atom_e.data() : nullptr, want_v ? atom_v.data() : nullptr};
+  double energy = 0.0;
+  double stress[9] = {};
+  int has_stress = 0;
+  char why[kWhyLen] = {};
+  if (evaluate(n, xyz.data(), z.data(), box, forces.data(), &energy, stress, &has_stress, why,
+               (want_e || want_v) ? &atoms : nullptr) != 0) {
+    error->one(FLERR, "pair_style rgpot: {}", why[0] != '\0' ? why : "evaluation failed");
+  }
+
+  // rgpot Voigt xx yy zz yz xz xy to LAMMPS xx yy zz xy xz yz.
+  const int to_lammps[6] = {0, 1, 2, 5, 4, 3};
+  for (std::size_t k = 0; k < nowned; ++k) {
+    const int i = cluster[k];
+    for (int d = 0; d < 3; ++d) {
+      f[i][d] += forces[3 * k + static_cast<std::size_t>(d)];
+    }
+    if (eflag_global) {
+      eng_vdwl += atom_e[k];
+    }
+    if (eflag_atom) {
+      eatom[i] += atom_e[k];
+    }
+    for (int c = 0; c < 6 && want_v; ++c) {
+      const double w = atom_v[6 * k + static_cast<std::size_t>(to_lammps[c])];
+      if (vflag_global) {
+        virial[c] += w;
+      }
+      if (vflag_atom) {
+        vatom[i][c] += w;
+      }
+    }
+  }
+}
+
+void PairRgpot::compute_gather() {
+  const bool want_atoms = eflag_atom || vflag_atom;
   const int me = comm->me;
   const int nprocs = comm->nprocs;
   const int nlocal = atom->nlocal;
