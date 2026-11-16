@@ -149,6 +149,46 @@ endif
 
 python3_engines = find_program('python3', required: false)
 
+# rgpot-ipi-driver under ASE's SocketIOCalculator, and under i-PI when
+# i-pi is on PATH. The cases skip without ASE or the Python package.
+if has_ipi and python3_engines.found()
+    ipi_pytest = run_command(
+        python3_engines,
+        '-c',
+        'import pytest',
+        check: false,
+    )
+    if ipi_pytest.returncode() == 0
+        ipi_env = environment()
+        ipi_env.set('RGPOT_IPI_DRIVER', rgpot_ipi_driver.full_path())
+        if get_option('with_python')
+            ipi_env.set(
+                'RGPOT_PYTHON_BUILD',
+                meson.project_build_root() / 'python',
+            )
+        endif
+        test(
+            'ipi_driver_ase',
+            python3_engines,
+            args: [
+                '-m',
+                'pytest',
+                '-q',
+                '-p',
+                'no:cacheprovider',
+                '--rootdir',
+                engines_here / 'ipi',
+                files('ipi/test_ipi_driver.py'),
+            ],
+            env: ipi_env,
+            workdir: meson.current_build_dir(),
+            timeout: 600,
+        )
+    else
+        message('i-PI driver tests skipped: needs pytest')
+    endif
+endif
+
 lammps_opt = get_option('with_lammps')
 if lammps_opt.allowed() and python3_engines.found()
     # Drop '' and '.'. Meson runs this from engines/, and engines/lammps
