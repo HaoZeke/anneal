@@ -208,16 +208,20 @@ struct Terms {
   }
 };
 
+/// Element index of atomic number z, -1 when the table lacks it.
+int element_of(const std::vector<int> &element, int z) {
+  return z >= 0 && static_cast<std::size_t>(z) < element.size()
+             ? element[static_cast<std::size_t>(z)]
+             : -1;
+}
+
 /// Element index of each atom of a staged list, -1 for an atomic number
 /// the table lacks. The host may hold such atoms, as long as no listed
 /// pair reaches them.
-std::vector<int> elements(const rgpot::EAMTable &t, const rgpot::HalfList &list) {
-  std::vector<int> el(list.nAtoms, -1);
+std::vector<int> elements(const std::vector<int> &element, const rgpot::HalfList &list) {
+  std::vector<int> el(list.nAtoms);
   for (std::size_t i = 0; i < list.nAtoms; ++i) {
-    const auto it = std::find(t.z.begin(), t.z.end(), list.atmnrs[i]);
-    if (it != t.z.end()) {
-      el[i] = static_cast<int>(it - t.z.begin());
-    }
+    el[i] = element_of(element, list.atmnrs[i]);
   }
   return el;
 }
@@ -307,15 +311,31 @@ EAMTable read_eam_table(std::istream &in, EAMTableFormat format) {
 }
 
 EAMTablePot::EAMTablePot(const EAMTableConfig &c)
-    : EAMTablePot(load(c), c.periodic, c.stress) {}
+    : EAMTablePot(load(c), c.periodic, c.stress, c.skin) {}
 
-EAMTablePot::EAMTablePot(const EAMTable &table, bool periodic, bool stress)
+EAMTablePot::EAMTablePot(const EAMTable &table, bool periodic, bool stress, double skin)
     : Potential(PotType::EAMTable), m_table{table}, m_periodic{periodic},
-      m_stress{stress} {
+      m_stress{stress}, m_skin{skin} {
   const std::size_t n = table.z.size();
   if (n == 0 || table.frho.size() != n || table.rhor.size() != n * n ||
       table.z2r.size() != n * (n + 1) / 2) {
     bad("array count does not match");
+  }
+  if (!(skin >= 0.0) || !std::isfinite(skin)) {
+    bad("skin must be finite and not negative");
+  }
+  for (std::size_t a = 0; a < n; ++a) {
+    const int z = table.z[a];
+    if (z < 0) {
+      bad("negative atomic number " + std::to_string(z));
+    }
+    if (static_cast<std::size_t>(z) >= m_element.size()) {
+      m_element.resize(static_cast<std::size_t>(z) + 1, -1);
+    }
+    // Atoms take the first of two element lines with one atomic number.
+    if (m_element[static_cast<std::size_t>(z)] < 0) {
+      m_element[static_cast<std::size_t>(z)] = static_cast<int>(a);
+    }
   }
   Fnv1a fp;
   fp.u64(kKernelVersion);
@@ -367,11 +387,11 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
   const EAMTable &t = m_table;
   std::vector<std::size_t> el(n_size);
   for (std::size_t i = 0; i < n_size; ++i) {
-    const auto it = std::find(t.z.begin(), t.z.end(), in.atmnrs[i]);
-    if (it == t.z.end()) {
+    const int a = element_of(m_element, in.atmnrs[i]);
+    if (a < 0) {
       bad("no element for atomic number " + std::to_string(in.atmnrs[i]));
     }
-    el[i] = static_cast<std::size_t>(it - t.z.begin());
+    el[i] = static_cast<std::size_t>(a);
   }
 
   static constexpr double free_box[9] = {1.0e6, 0.0, 0.0, 0.0,  1.0e6,
@@ -396,15 +416,18 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
   } else {
     box = free_box;
   }
-  // A local list keeps one instance safe to share across threads.
-  nlist::Neighbours cells;
+  nlist::Neighbours &cells = m_neighbours;
   const double cut2 = t.cutoff * t.cutoff;
   const Terms terms{t, m_frho, m_rhor, m_z2r};
 
   const bool pairs = n_size >= 2;
   if (pairs) {
-    nlist::updateCells(cells, in.pos, n_size, box, t.cutoff, 0.0,
-                       nlist::Image::Round, nlist::Mode::Auto,
+    // A stored list keeps the pairs out to cutoff + skin and the sums
+    // below drop those past the cutoff. A stream reuses nothing unless
+    // the coordinates match, so it takes no skin.
+    const double skin = m_mode == nlist::Mode::Stream ? 0.0 : m_skin;
+    nlist::updateCells(cells, in.pos, n_size, box, t.cutoff, skin,
+                       nlist::Image::Round, m_mode,
                        {m_periodic, m_periodic, m_periodic});
   }
 
@@ -470,7 +493,7 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
 
 void EAMTablePot::densityStage(const HalfList &list, double *densities) const {
   const Terms terms{m_table, m_frho, m_rhor, m_z2r};
-  const std::vector<int> el = elements(m_table, list);
+  const std::vector<int> el = elements(m_element, list);
   const double cut2 = m_table.cutoff * m_table.cutoff;
   staged::forEachPair(list, [&](int i, int j, double, double, double, double r2, bool both) {
     if (!(r2 > 0.0) || !(r2 < cut2)) {
@@ -493,7 +516,7 @@ void EAMTablePot::densityStage(const HalfList &list, double *densities) const {
 void EAMTablePot::forceStage(const HalfList &list, const double *densities, double *forces,
                              StageTally *tally) const {
   const Terms terms{m_table, m_frho, m_rhor, m_z2r};
-  const std::vector<int> el = elements(m_table, list);
+  const std::vector<int> el = elements(m_element, list);
   std::vector<double> fprime(list.nAtoms, 0.0);
   for (std::size_t i = 0; i < list.nAtoms; ++i) {
     if (el[i] >= 0) {

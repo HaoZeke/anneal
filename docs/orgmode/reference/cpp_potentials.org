@@ -122,12 +122,14 @@ class.
 - Inputs :: =path= (the table file, no default), =format=
   (=EAMTableFormat::Funcfl=, =Setfl= or =FinnisSinclair=, default =Setfl=),
   =periodic= (minimum image, default true), =stress= (write the stress, default
-  false).
+  false), =skin= (Verlet skin of the potential's own pair list, default 1.0).
 - Units :: none; the table carries its own units, eV and Angstrom for the LAMMPS
   metal files.
+  =skin= is in the length unit of the table.
 - Outputs :: the parameters of =rgpot::EAMTablePot=.
 - Errors :: the constructor throws =std::invalid_argument= when =path= cannot be
-  opened and when the file does not parse as =format=.
+  opened, when the file does not parse as =format=, and when =skin= is negative
+  or not finite.
 
 *** =rgpot::EMTConfig=
 
@@ -259,8 +261,8 @@ A sentence after the fields names a class whose behaviour differs in detail.
 void setNeighbourMode(nlist::Mode mode) noexcept;
 #+end_src
 
-- Applies to :: rgpot::EAMPot, rgpot::LJClusterPot, rgpot::LJPot,
-  rgpot::MorsePot, rgpot::StillingerWeberSi, rgpot::SuttonChenPot,
+- Applies to :: rgpot::EAMPot, rgpot::EAMTablePot, rgpot::LJClusterPot,
+  rgpot::LJPot, rgpot::MorsePot, rgpot::StillingerWeberSi, rgpot::SuttonChenPot,
   rgpot::TersoffSiC, rgpot::ZBLPot
 - Inputs :: =mode=: =nlist::Mode::Stored= keeps a Verlet list of candidate
   pairs, =nlist::Mode::Stream= walks the cells and stores no pairs,
@@ -400,8 +402,8 @@ void forceStage(const HalfList &list, const double *densities, double *forces,
 [[nodiscard]] bool listReused() const noexcept;
 #+end_src
 
-- Applies to :: rgpot::EAMPot, rgpot::LJClusterPot, rgpot::LJPot,
-  rgpot::MorsePot, rgpot::ZBLPot
+- Applies to :: rgpot::EAMPot, rgpot::EAMTablePot, rgpot::LJClusterPot,
+  rgpot::LJPot, rgpot::MorsePot, rgpot::ZBLPot
 - Inputs :: none.
 - Units :: none.
 - Outputs :: true when the last force call kept the Verlet list, because no atom
@@ -804,11 +806,12 @@ explicit EAMPot(const EAMCellConfig &);
 #+attr_rgpot: signature
 #+begin_src cpp
 explicit EAMTablePot(const EAMTableConfig &c);
-EAMTablePot(const EAMTable &table, bool periodic, bool stress);
+EAMTablePot(const EAMTable &table, bool periodic, bool stress,
+            double skin = 1.0);
 #+end_src
 
 - Inputs :: a =rgpot::EAMTableConfig=, or a parsed =EAMTable= with the
-  =periodic= and =stress= flags.
+  =periodic= and =stress= flags and the =skin= of the pair list.
 - Units :: the units of the table; eV and Angstrom for the LAMMPS metal files.
   Stress in energy per length cubed of the table.
 - Outputs :: the tabulated EAM or Finnis-Sinclair energy and forces.
@@ -816,15 +819,34 @@ EAMTablePot(const EAMTable &table, bool periodic, bool stress);
   field of each element line.
   A pair counts when r is below the cutoff on the grid line of the table.
   With =stress= set the force call writes the stress.
+  The force calls keep a list of the pairs within the cutoff plus =skin= while
+  every atom stays within half of it, so =caps().reentrancy= is
+  =Reentrancy::PerInstance=.
   See [[file:eam_table.org][Tabulated EAM and Finnis-Sinclair potentials]].
 - Errors :: =std::invalid_argument= with a message starting =EAM table:=.
-  The constructors throw it in the cases of =rgpot::EAMTableConfig= and when an
-  array count or length does not match.
+  The constructors throw it in the cases of =rgpot::EAMTableConfig=, when an
+  array count or length does not match, when =skin= is negative or not finite,
+  and for a negative atomic number in an element line.
   The force call throws it for an atomic number in no element line, for a
   periodic call without a cell, and when the cutoff exceeds half a face spacing
   of the cell.
 
 This class is built with =-Dwith_eam_table=true=.
+
+*** =rgpot::EAMTablePot::listBuilds=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] std::uint64_t listBuilds() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the number of pair lists =forceImpl= and =forcePerAtom= have built
+  so far.
+  A call that keeps the list does not count, and the two stages, which run on
+  the host's list, build none.
+- Errors :: none.
 
 *** =rgpot::SuttonChenPot=
 

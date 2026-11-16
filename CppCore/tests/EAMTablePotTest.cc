@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -221,5 +222,178 @@ TEST_CASE("EAM table rejects bad input", "[EAMTable]") {
     head += line + "\n";
   std::istringstream cut(head);
   REQUIRE_THROWS_AS(rgpot::read_eam_table(cut, EAMTableFormat::Funcfl),
+                    std::invalid_argument);
+}
+
+namespace {
+
+struct Full {
+  Eval e;
+  std::vector<double> eatom, vatom;
+};
+
+/// forceImpl, then forcePerAtom on the same atoms. `reused` is
+/// listReused() after the first of the two.
+Full eval_full(const rgpot::EAMTablePot &pot, const std::vector<double> &pos,
+               const std::vector<int> &z, const double *box, bool *reused = nullptr) {
+  Full f;
+  f.e = eval(pot, pos, z, box);
+  if (reused != nullptr) {
+    *reused = pot.listReused();
+  }
+  const std::uint64_t builds = pot.listBuilds();
+  std::vector<double> forces(pos.size(), 0.0);
+  f.eatom.assign(z.size(), 0.0);
+  f.vatom.assign(6 * z.size(), 0.0);
+  rgpot::ForceOut out{};
+  out.F = forces.data();
+  pot.forcePerAtom(rgpot::ForceInput{z.size(), pos.data(), z.data(), box}, &out,
+                   rgpot::PerAtomOut{f.eatom.data(), f.vatom.data()});
+  REQUIRE(pot.listBuilds() == builds);
+  REQUIRE(out.energy == f.e.energy);
+  REQUIRE(forces == f.e.forces);
+  return f;
+}
+
+/// Positions sent into a lower-triangular cell whose rows are a, b, c.
+void wrap_cell(std::vector<double> &pos, const double *box) {
+  for (std::size_t i = 0; i < pos.size() / 3; ++i) {
+    double *r = pos.data() + 3 * i;
+    double s2 = r[2] / box[8];
+    double s1 = (r[1] - s2 * box[7]) / box[4];
+    double s0 = (r[0] - s1 * box[3] - s2 * box[6]) / box[0];
+    s0 -= std::floor(s0);
+    s1 -= std::floor(s1);
+    s2 -= std::floor(s2);
+    r[0] = s0 * box[0] + s1 * box[3] + s2 * box[6];
+    r[1] = s1 * box[4] + s2 * box[7];
+    r[2] = s2 * box[8];
+  }
+}
+
+} // namespace
+
+TEST_CASE("EAM table pair list reuse gives the bits of a rebuilt list", "[EAMTable][skin]") {
+  // The cached list keeps its pairs out to the cutoff plus 1 Angstrom; a
+  // skin of 0 rebuilds the list whenever an atom moves, so it is the
+  // evaluation without the cache. Both visit the pairs in the same order.
+  const LammpsRef ref = load_ref("eam_table/cuni_sheared.ref", true);
+  const std::string path = kData + "eam_table/CuNi.eam.alloy";
+  const rgpot::EAMTablePot warm({.path = path, .stress = true});
+  const rgpot::EAMTablePot cold({.path = path, .stress = true, .skin = 0.0});
+  REQUIRE(warm.paramsKey() == cold.paramsKey());
+  REQUIRE(warm.caps().reentrancy == rgpot::Reentrancy::PerInstance);
+
+  std::vector<double> pos = ref.pos;
+  std::vector<int> z = ref.z;
+  std::vector<double> box(ref.box, ref.box + 9);
+  wrap_cell(pos, box.data());
+  std::uint64_t builds = 0;
+
+  auto step = [&](bool reused) {
+    bool kept = false;
+    const Full got = eval_full(warm, pos, z, box.data(), &kept);
+    builds += reused ? 0 : 1;
+    REQUIRE(kept == reused);
+    REQUIRE(warm.listBuilds() == builds);
+    const Full want = eval_full(cold, pos, z, box.data());
+    REQUIRE(got.e.energy == want.e.energy);
+    REQUIRE(got.e.forces == want.e.forces);
+    REQUIRE(std::equal(got.e.stress, got.e.stress + 9, want.e.stress));
+    REQUIRE(got.eatom == want.eatom);
+    REQUIRE(got.vatom == want.vatom);
+    return got;
+  };
+
+  const Full first = step(false);
+  REQUIRE_THAT(first.e.energy, WithinAbs(ref.energy, 1e-10));
+
+  // Steps of at most 0.12 Angstrom in all, under half the skin.
+  for (int k = 0; k < 3; ++k) {
+    for (std::size_t c = 0; c < pos.size(); ++c) {
+      pos[c] += 0.04 / std::sqrt(3.0) * std::sin(0.37 * static_cast<double>(c) + k);
+    }
+    step(true);
+  }
+
+  // The same atoms seen through other images, and wrapped back.
+  for (std::size_t i = 0; i < z.size(); i += 3) {
+    pos[3 * i] += box[0] - box[3];
+    pos[3 * i + 1] -= box[4];
+  }
+  step(true);
+  wrap_cell(pos, box.data());
+  step(true);
+
+  // Another element on some sites leaves the list alone.
+  for (std::size_t i = 0; i < z.size(); i += 5) {
+    z[i] = z[i] == 29 ? 28 : 29;
+  }
+  step(true);
+
+  // One atom past half the skin.
+  pos[0] += 0.55;
+  step(false);
+  step(true);
+
+  // A strained cell.
+  for (double &v : box) {
+    v *= 1.003;
+  }
+  for (double &v : pos) {
+    v *= 1.003;
+  }
+  step(false);
+
+  // One atom fewer.
+  pos.resize(pos.size() - 3);
+  z.pop_back();
+  step(false);
+}
+
+TEST_CASE("EAM table pair list follows a free cluster and a stream", "[EAMTable][skin]") {
+  const LammpsRef ref = load_ref("eam_table/cu_u3_cubic.ref", true);
+  const std::string path = kData + "eam_table/Cu_u3.eam";
+  const rgpot::EAMTablePot warm(
+      {.path = path, .format = EAMTableFormat::Funcfl, .periodic = false});
+  rgpot::EAMTablePot stream(
+      {.path = path, .format = EAMTableFormat::Funcfl, .periodic = false});
+  stream.setNeighbourMode(rgpot::nlist::Mode::Stream);
+  const rgpot::EAMTablePot cold(
+      {.path = path, .format = EAMTableFormat::Funcfl, .periodic = false, .skin = 0.0});
+  std::vector<double> pos = ref.pos;
+  std::vector<double> built;
+  int reuses = 0;
+  for (int k = 0; k < 6; ++k) {
+    for (std::size_t c = 0; c < pos.size(); ++c) {
+      pos[c] += 0.08 * std::cos(0.53 * static_cast<double>(c) + k);
+    }
+    // No cell, so the move is the plain displacement.
+    const bool keep = !built.empty() &&
+                      rgpot::nlist::withinSkin(built.data(), pos.data(), pos.size() / 3, 1.0);
+    const Eval got = eval(warm, pos, ref.z, nullptr);
+    const Eval want = eval(cold, pos, ref.z, nullptr);
+    REQUIRE(warm.listReused() == keep);
+    if (!keep) {
+      built = pos;
+    }
+    reuses += keep ? 1 : 0;
+    REQUIRE(got.energy == want.energy);
+    REQUIRE(got.forces == want.forces);
+    const Eval streamed = eval(stream, pos, ref.z, nullptr);
+    REQUIRE(stream.listBuilds() == 0);
+    REQUIRE_THAT(streamed.energy, WithinAbs(want.energy, 1e-10));
+    for (std::size_t c = 0; c < pos.size(); ++c) {
+      REQUIRE_THAT(streamed.forces[c], WithinAbs(want.forces[c], 1e-10));
+    }
+  }
+  REQUIRE(reuses > 0);
+  REQUIRE(warm.listBuilds() < 6);
+}
+
+TEST_CASE("EAM table rejects a negative skin", "[EAMTable][skin]") {
+  REQUIRE_THROWS_AS(rgpot::EAMTablePot({.path = kData + "eam_table/Cu_u3.eam",
+                                        .format = EAMTableFormat::Funcfl,
+                                        .skin = -0.5}),
                     std::invalid_argument);
 }
