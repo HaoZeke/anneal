@@ -2,4 +2,5 @@ An infinite cutoff or skin in `rgpot::nlist::Neighbours` walks every pair straig
 That walk takes a copy of its callback, so a caller reads back only the state it captured by reference.
 `SuttonChenPot` with `cutoff <= 0` searches that way.
 It used to stand in a 1e6 search, which binned a cluster into one cell, read `MemAvailable` twice and stored and sorted every pair on each call.
-Energies and forces keep their bits.
+Energies and forces keep their bits on one thread.
+A team of threads used to leave that one cell to one thread and now splits the atoms into runs, one per thread: the forces keep their bits, and the energy, a sum over threads, can move in the last bits.

@@ -45,6 +45,11 @@ of one fifth of the cutoff, or none in =nlist::Mode::Stream=.
 With =cutoff = 0= the layer searches without a bound: it bins nothing, stores no
 list, and each pass takes the pairs straight from the coordinates, in the order
 of the one bin that a search wider than the cluster gives.
+A team of threads splits the atoms into runs, one per thread, where that one bin
+went to a single thread.
+The forces keep their bits, and the energy, summed per thread, can move in the
+last bits: by up to 1.5e-14 of the energy in clusters of up to 561 atoms on 2 to
+8 threads.
 One pass builds the densities and a second pass writes the forces.
 The density pass keeps the powers and =1/r^2= that the force of each pair takes,
 and the force pass reads them back instead of raising the distance to =n= and

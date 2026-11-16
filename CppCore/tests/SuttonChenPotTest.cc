@@ -874,6 +874,53 @@ TEST_CASE("the C entry point keeps its potential until the parameters or atoms c
   check(cell, pos, box, false);
 }
 
+TEST_CASE("Sutton-Chen with no cutoff splits the atoms across a team",
+          "[SuttonChen][nlist]") {
+  // A one-bin search left its cell to one thread. The unbounded walk gives
+  // each thread a run of atoms, whose densities and forces sum in the same
+  // order. Only the energy is summed by thread.
+  double epsilon = 0.0;
+  double c = 0.0;
+  double a = 0.0;
+  int nexp = 0;
+  int mexp = 0;
+  const AtomMatrix pt38 = load_points("CppCore/tests/data/sc108/pt38", &epsilon,
+                                      &c, &a, &nexp, &mexp);
+  std::vector<double> pos;
+  for (size_t i = 0; i < pt38.rows(); ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      pos.push_back(pt38(i, k) *
+                    (1.0 + 0.01 * std::sin(0.9 * static_cast<double>(3 * i + k))));
+    }
+  }
+  std::vector<double> scaled = pos;
+  for (double &x : scaled) {
+    x *= rgpot::sutton_chen_platinum().a;
+  }
+  const rgpot::SuttonChenConfig rows[] = {rgpot::SuttonChenConfig{},
+                                          rgpot::sutton_chen_platinum()};
+  for (const auto &row : rows) {
+    const std::vector<double> &xyz = row.a == 1.0 ? pos : scaled;
+    rgpot::SuttonChenConfig none = row;
+    none.cutoff = 0.0;
+    rgpot::SuttonChenConfig wide = row;
+    wide.cutoff = 1.0e6;
+    setThreads("1");
+    const StressEval want = eval_stress(rgpot::SuttonChenPot(wide), xyz, nullptr);
+    for (const char *threads : {"2", "3", "5"}) {
+      INFO("a " << row.a << ", threads " << threads);
+      setThreads(threads);
+      const StressEval one_bin = eval_stress(rgpot::SuttonChenPot(wide), xyz, nullptr);
+      const StressEval got = eval_stress(rgpot::SuttonChenPot(none), xyz, nullptr);
+      REQUIRE(std::memcmp(&one_bin.energy, &want.energy, sizeof(double)) == 0);
+      REQUIRE(same_bits(one_bin.forces, want.forces));
+      REQUIRE(same_bits(got.forces, want.forces));
+      REQUIRE(std::abs(got.energy - want.energy) <= 1e-13 * std::abs(want.energy));
+    }
+  }
+  setThreads("1");
+}
+
 TEST_CASE("Sutton-Chen stress is opt-in and keeps the energy and force bits",
           "[SuttonChen][stress]") {
   REQUIRE_FALSE(rgpot::SuttonChenConfig{}.stress);
