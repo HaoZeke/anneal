@@ -31,7 +31,7 @@ using rgpot::types::AtomMatrix;
 namespace rgpot {
 namespace {
 
-void lj_pair(double r2, const simd::LjParams &p, double &energy, double &fscale) {
+inline void lj_pair(double r2, const simd::LjParams &p, double &energy, double &fscale) {
   const double inv_r2 = 1.0 / r2;
   const double sr2 = p.psi2 * inv_r2;
   const double sr4 = sr2 * sr2;

@@ -55,6 +55,20 @@ void MorsePot::forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOu
   compute(in, out, &atoms);
 }
 
+inline void MorsePot::pairTerm(double r, double &energy, double &fscale) const {
+  const double twoDeA = 2.0 * De * a;
+  const double d = 1.0 - simd::exp_fixed(-a * (r - re));
+  const double bare = De * d * d - De;
+  if (m_config.switch_width != 0.0) {
+    const auto s = m_switch(r);
+    energy = bare * s.s;
+    fscale = (twoDeA * d * (d - 1.0) * s.s - bare * s.dsdr) / r;
+  } else {
+    energy = bare - energyCutoff;
+    fscale = twoDeA * d * (d - 1.0) / r;
+  }
+}
+
 void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const {
   const auto N = static_cast<long>(in.nAtoms);
   double *F = out->F;
@@ -135,20 +149,6 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
   }
   *U = energy;
   publishCauchyStress(out, strain, volume);
-}
-
-void MorsePot::pairTerm(double r, double &energy, double &fscale) const {
-  const double twoDeA = 2.0 * De * a;
-  const double d = 1.0 - simd::exp_fixed(-a * (r - re));
-  const double bare = De * d * d - De;
-  if (m_config.switch_width != 0.0) {
-    const auto s = m_switch(r);
-    energy = bare * s.s;
-    fscale = (twoDeA * d * (d - 1.0) * s.s - bare * s.dsdr) / r;
-  } else {
-    energy = bare - energyCutoff;
-    fscale = twoDeA * d * (d - 1.0) / r;
-  }
 }
 
 void MorsePot::forceStage(const HalfList &list, const double *, double *forces,

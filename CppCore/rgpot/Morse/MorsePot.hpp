@@ -157,7 +157,7 @@ private:
   void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
   /// Energy of one pair at distance r, and its force scale.
-  void pairTerm(double r, double &energy, double &fscale) const;
+  inline void pairTerm(double r, double &energy, double &fscale) const;
 
   double De;           //!< Well depth parameter.
   double a;            //!< Range parameter.

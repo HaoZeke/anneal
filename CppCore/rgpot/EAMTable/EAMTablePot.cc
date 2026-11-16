@@ -113,22 +113,38 @@ std::vector<double> spline(const std::vector<double> &f, double delta) {
   return s;
 }
 
-/// The cubic on [m, m + 1] of a PairEAM::interpolate table and the local
-/// coordinate p in it.
+/// Where x falls in a PairEAM::interpolate table of n knots 1/rdx apart:
+/// the offset of the coefficients of its cubic and the local coordinate in
+/// it. The tables on one grid share it.
+struct Place {
+  std::size_t offset;
+  double p;
+};
+
+Place place(double x, double rdx, int n) {
+  const double q = x * rdx + 1.0;
+  const int m = std::max(1, std::min(static_cast<int>(q), n - 1));
+  return {7 * static_cast<std::size_t>(m - 1), std::min(q - m, 1.0)};
+}
+
+/// The cubic of a table at a Place.
 struct Knot {
   const double *c;
   double p;
+  Knot(const double *s, Place at) : c(s + at.offset), p(at.p) {}
   [[nodiscard]] double value() const {
     return ((c[3] * p + c[4]) * p + c[5]) * p + c[6];
   }
   [[nodiscard]] double slope() const { return (c[0] * p + c[1]) * p + c[2]; }
 };
 
-Knot lookup(const std::vector<double> &s, double x, double rdx, int n) {
-  const double q = x * rdx + 1.0;
-  const int m = std::max(1, std::min(static_cast<int>(q), n - 1));
-  return {s.data() + 7 * static_cast<std::size_t>(m - 1), std::min(q - m, 1.0)};
-}
+/// The radial tables of a pair of an a atom i and a b atom j: the density
+/// j puts at i, the density i puts at j, and r phi_ab.
+struct Couple {
+  const double *atI;
+  const double *atJ;
+  const double *z2;
+};
 
 /// The terms of one EAMTablePot that compute() and the stages share.
 struct Terms {
@@ -139,21 +155,37 @@ struct Terms {
   std::size_t nel = t.z.size();
   double rdr = 1.0 / t.dr;
   double rdrho = 1.0 / t.drho;
+  /// The Couple of an a atom and a b atom at a * nel + b.
+  std::vector<Couple> couples = coupled();
 
-  /// rho_ab(r), the density element b puts at an a site.
-  [[nodiscard]] double density(std::size_t a, std::size_t b, double r) const {
-    return lookup(rhor[b * nel + a], r, rdr, t.nr).value();
+  [[nodiscard]] std::vector<Couple> coupled() const {
+    std::vector<Couple> out(nel * nel);
+    for (std::size_t a = 0; a < nel; ++a) {
+      for (std::size_t b = 0; b < nel; ++b) {
+        const auto hi = std::max(a, b);
+        out[a * nel + b] = {rhor[b * nel + a].data(), rhor[a * nel + b].data(),
+                            z2r[hi * (hi + 1) / 2 + std::min(a, b)].data()};
+      }
+    }
+    return out;
   }
+
+  [[nodiscard]] const Couple &couple(std::size_t a, std::size_t b) const {
+    return couples[a * nel + b];
+  }
+
+  /// Where r falls in the radial tables, which share their grid.
+  [[nodiscard]] Place radial(double r) const { return place(r, rdr, t.nr); }
 
   /// F'_a(rho).
   [[nodiscard]] double slope(std::size_t a, double rho) const {
-    return lookup(frho[a], rho, rdrho, t.nrho).slope();
+    return Knot(frho[a].data(), place(rho, rdrho, t.nrho)).slope();
   }
 
   /// F_a(rho), extended linearly above rhomax as pair_style eam does, and
   /// F'_a(rho) in @p slope.
   double embedding(std::size_t a, double rho, double &slope) const {
-    const Knot k = lookup(frho[a], rho, rdrho, t.nrho);
+    const Knot k(frho[a].data(), place(rho, rdrho, t.nrho));
     slope = k.slope();
     double e = k.value();
     if (rho > t.rhomax) {
@@ -162,13 +194,13 @@ struct Terms {
     return e;
   }
 
-  /// phi_ab(r), and the force scale of the pair of an a atom i and a b
-  /// atom j at distance r, with fi = F'_a(rho_i) and fj = F'_b(rho_j).
-  double pair(std::size_t a, std::size_t b, double r, double fi, double fj, double &phi) const {
-    const double rhoip = lookup(rhor[a * nel + b], r, rdr, t.nr).slope();
-    const double rhojp = lookup(rhor[b * nel + a], r, rdr, t.nr).slope();
-    const auto hi = std::max(a, b);
-    const Knot z2 = lookup(z2r[hi * (hi + 1) / 2 + std::min(a, b)], r, rdr, t.nr);
+  /// phi_ab(r), and the force scale of the pair @p c at distance r, with
+  /// fi = F'_a(rho_i) and fj = F'_b(rho_j).
+  double pair(const Couple &c, double r, double fi, double fj, double &phi) const {
+    const Place k = radial(r);
+    const double rhoip = Knot(c.atJ, k).slope();
+    const double rhojp = Knot(c.atI, k).slope();
+    const Knot z2(c.z2, k);
     const double recip = 1.0 / r;
     phi = z2.value() * recip;
     const double phip = z2.slope() * recip - phi * recip;
@@ -383,11 +415,11 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
                     if (!(r2 > 0.0) || !(r2 < cut2)) {
                       return;
                     }
-                    const auto a = el[static_cast<std::size_t>(i)];
-                    const auto b = el[static_cast<std::size_t>(j)];
-                    const double r = std::sqrt(r2);
-                    rho[static_cast<std::size_t>(i)] += terms.density(a, b, r);
-                    rho[static_cast<std::size_t>(j)] += terms.density(b, a, r);
+                    const Couple &c = terms.couple(el[static_cast<std::size_t>(i)],
+                                                   el[static_cast<std::size_t>(j)]);
+                    const Place k = terms.radial(std::sqrt(r2));
+                    rho[static_cast<std::size_t>(i)] += Knot(c.atI, k).value();
+                    rho[static_cast<std::size_t>(j)] += Knot(c.atJ, k).value();
                   });
   }
 
@@ -412,8 +444,8 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
           const auto ui = static_cast<std::size_t>(i);
           const auto uj = static_cast<std::size_t>(j);
           double phi = 0.0;
-          const double fscale =
-              terms.pair(el[ui], el[uj], std::sqrt(r2), fprime[ui], fprime[uj], phi);
+          const double fscale = terms.pair(terms.couple(el[ui], el[uj]), std::sqrt(r2),
+                                           fprime[ui], fprime[uj], phi);
           energy += phi;
           F[3 * ui] += fscale * dx;
           F[3 * ui + 1] += fscale * dy;
@@ -449,12 +481,11 @@ void EAMTablePot::densityStage(const HalfList &list, double *densities) const {
     if (a < 0 || b < 0) {
       unmapped(list, el, i, j);
     }
-    const double r = std::sqrt(r2);
-    const auto ua = static_cast<std::size_t>(a);
-    const auto ub = static_cast<std::size_t>(b);
-    densities[i] += terms.density(ua, ub, r);
+    const Couple &c = terms.couple(static_cast<std::size_t>(a), static_cast<std::size_t>(b));
+    const Place k = terms.radial(std::sqrt(r2));
+    densities[i] += Knot(c.atI, k).value();
     if (both) {
-      densities[j] += terms.density(ub, ua, r);
+      densities[j] += Knot(c.atJ, k).value();
     }
   });
 }
@@ -494,9 +525,9 @@ void EAMTablePot::forceStage(const HalfList &list, const double *densities, doub
             unmapped(list, el, i, j);
           }
           double phi = 0.0;
-          const double fscale =
-              terms.pair(static_cast<std::size_t>(el[ui]), static_cast<std::size_t>(el[uj]),
-                         std::sqrt(r2), fprime[ui], fprime[uj], phi);
+          const double fscale = terms.pair(
+              terms.couple(static_cast<std::size_t>(el[ui]), static_cast<std::size_t>(el[uj])),
+              std::sqrt(r2), fprime[ui], fprime[uj], phi);
           staged::addPair(tallied, forces, tally, i, j, both, phi, fscale, dx, dy, dz);
         });
   });
