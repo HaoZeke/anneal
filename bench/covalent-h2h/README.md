@@ -720,6 +720,31 @@ reference.
   `geometry_rejected`, two to a call because the energy and the gradient
   each reach the handle.
 
+On the machine that ran CREST seeds 2004-2011, anneal does not take the
+calls of `seeds.csv`: only seed 2002 matches. Anneal's Si10 seeds
+2000-2011 ran again there at `f3d6a050`, serial on core 4 with hostname
+`bench`, after the CREST seeds, and are the anneal rows of
+`gfn2/rows.csv` at that revision. The summary's `--anneal-revision`
+takes only them in `gfn2/summaries.csv`, against the same twelve CREST
+rows.
+
+| system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
+|---|---|---|---|---|---|---|---|---|
+| Si10 | anneal G, `f3d6a050` | 12/12 | 720.5 | 925 | -460.683738 | 44.9 | 45.06 ms | 0.011 ms |
+| Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.79 ms | 0.243 ms |
+
+- Anneal takes 1,191, 1,512, 520, 618, 560, 1,723, 556, 539, 2,344, 745,
+  696 and 1,475 calls on seeds 2000-2011, against 620, 505, 520, 2,581,
+  801, 778, 306, 712, 601, 728, 1,619 and 302 in `seeds.csv`.
+- Against these rows CREST has Fisher p = 1 and Mann-Whitney p = 3.7e-5,
+  as against `seeds.csv`: every anneal row is below every CREST row.
+- Seed 2009's hit at call 745 is an SCC solution of the handle at
+  -492.595118 eV. xtb 6.7.1 `--sp --etemp 3000` gives the same geometry
+  -16.502296 Eh, -449.050334 eV, 11.6 eV above the reference, and the
+  best geometries of seeds 2002 and 2008 -460.683718 eV. With seed 2009
+  a miss, anneal has 11/12 hits, Fisher p = 1 and Mann-Whitney p =
+  5.3e-4.
+
 `scripts/covalent_h2h/gfn2_enter_bench.sh` builds the example and runs
 both codes (`GFN2_CODES` picks them, `GFN2_CORE` the core). New rows are
 appended to `gfn2/rows.csv` with the anneal revision, the host and the
