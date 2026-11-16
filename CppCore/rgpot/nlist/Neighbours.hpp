@@ -89,6 +89,11 @@ struct Range {
 /// cell vector. The bins are redone after such a wrap, for the walks
 /// that read them. Skin 0 reuses the list only when the coordinates and
 /// the cell match.
+///
+/// An infinite cutoff or skin makes every pair a candidate. Such an
+/// update bins nothing and stores nothing, in any mode: each walk takes
+/// the pairs straight from the coordinates, i ascending and then j
+/// ascending, which is the order of the single cell the bins would hold.
 class Neighbours {
 public:
   void update(const double *xyz, std::size_t n, const double *box9,
@@ -96,6 +101,10 @@ public:
 
   [[nodiscard]] Mode mode() const noexcept { return mode_; }
   [[nodiscard]] bool streaming() const noexcept { return streaming_; }
+  /// True when the search has no bound and the walks visit every pair.
+  /// Such an update also reports streaming(). One atom has no pairs and
+  /// keeps the empty stored list.
+  [[nodiscard]] bool allPairs() const noexcept { return streaming_ && std::isinf(search_); }
   /// True when the last update kept the previous list. The displacement
   /// test is `withinSkin` on the nearest image of each reference position.
   [[nodiscard]] bool reused() const noexcept { return reused_; }
@@ -117,7 +126,9 @@ public:
   /// index order.
   template <typename Fn>
   void forDirected(std::int64_t begin, std::int64_t end, Fn &&fn) const {
-    if (streaming_) {
+    if (allPairs()) {
+      walkAll(begin, end, fn, false);
+    } else if (streaming_) {
       walkCells(begin, end, fn, false);
     } else {
       walkStored(begin, end, fn, false);
@@ -129,7 +140,9 @@ public:
   /// unordered pair is visited once per pass.
   template <typename Fn>
   void forHalf(std::int64_t begin, std::int64_t end, Fn &&fn) const {
-    if (streaming_) {
+    if (allPairs()) {
+      walkAll(begin, end, fn, true);
+    } else if (streaming_) {
       walkCells(begin, end, fn, true);
     } else {
       walkStored(begin, end, fn, true);
@@ -155,7 +168,8 @@ public:
 
   /// One walk of the directed pairs, split by cell across `nthreads`.
   /// The bins are built once and shared. `fn(thread, i, j, dx, dy, dz, r2)`.
-  /// A thread owns each cell, so a pair is visited once.
+  /// A thread owns each cell, so a pair is visited once. Without bins,
+  /// as in an unbounded search, a thread owns a contiguous run of atoms.
   template <typename Fn>
   void forCellTeam(bool half, int nthreads, Fn &&fn) const {
     if (nthreads < 1) {
@@ -198,6 +212,10 @@ public:
   /// atom, not every bond.
   template <typename Fn>
   void forAtom(std::int32_t i, Fn fn) const {
+    if (allPairs()) {
+      walkAll(static_cast<std::int64_t>(i), static_cast<std::int64_t>(i) + 1, fn, false);
+      return;
+    }
     // One atom, often from several threads. The cached stencil is built
     // once for a whole walk; this call does not touch it.
     walkCellsScattered(static_cast<std::int64_t>(i), static_cast<std::int64_t>(i) + 1, fn, false,
@@ -253,6 +271,47 @@ private:
     }
   }
 
+  /// Every pair of an unbounded search. A free axis has no image, so the
+  /// separation is the coordinate difference that foldPair returns there.
+  template <typename Fn>
+  void walkAll(std::int64_t begin, std::int64_t end, Fn &fn, bool half) const {
+    const auto n = static_cast<std::int64_t>(n_);
+    const double search2 = search_ * search_;
+    const double *x = xyz_;
+    const bool no_image = !use_general_ && !periodic_[0] && !periodic_[1] && !periodic_[2];
+    for (std::int64_t i = begin; i < end; ++i) {
+      const auto a = static_cast<std::int32_t>(i);
+      const double xi = x[3 * i];
+      const double yi = x[3 * i + 1];
+      const double zi = x[3 * i + 2];
+      auto visit = [&](std::int64_t jj) {
+        const auto j = static_cast<std::int32_t>(jj);
+        double dx = 0;
+        double dy = 0;
+        double dz = 0;
+        if (no_image) {
+          dx = xi - x[3 * jj];
+          dy = yi - x[3 * jj + 1];
+          dz = zi - x[3 * jj + 2];
+        } else {
+          foldPair(a, j, dx, dy, dz);
+        }
+        const double r2 = dx * dx + dy * dy + dz * dz;
+        if (r2 <= search2) {
+          fn(a, j, dx, dy, dz, r2);
+        }
+      };
+      if (!half) {
+        for (std::int64_t jj = 0; jj < i; ++jj) {
+          visit(jj);
+        }
+      }
+      for (std::int64_t jj = i + 1; jj < n; ++jj) {
+        visit(jj);
+      }
+    }
+  }
+
   /// True when one materialised 27-slot stencil per cell is no larger than
   /// the pair index it stands in for. A short cutoff makes one bin per atom
   /// and that stencil no longer fits; the same cache then keeps only the
@@ -271,8 +330,10 @@ private:
   template <typename Loop>
   bool fastTiles(Loop &&loop) const {
     // Half is the same orthorhombic minimum image once coordinates sit in
-    // the cell. A sheared box stays on the scattered walk.
-    if (use_general_ || (image_ != Image::Round && image_ != Image::Half) || n_ < 2) {
+    // the cell. A sheared box stays on the scattered walk. An unbounded
+    // search has no bins to tile.
+    if (allPairs() || use_general_ || (image_ != Image::Round && image_ != Image::Half) ||
+        n_ < 2) {
       return false;
     }
     // One stencil. A 27-slot entry per cell is reused while the coordinates

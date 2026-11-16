@@ -42,6 +42,9 @@ Periodic evaluation uses the minimum image and needs a positive cutoff and a
 cell; otherwise it throws =std::invalid_argument=.
 Pairs come from the shared neighbour layer (=nlist::updateCells=), with a skin
 of one fifth of the cutoff, or none in =nlist::Mode::Stream=.
+With =cutoff = 0= the layer searches without a bound: it bins nothing, stores no
+list, and each pass takes the pairs straight from the coordinates, in the order
+of the one bin that a search wider than the cluster gives.
 One pass builds the densities and a second pass writes the forces.
 
 =rgpot_sutton_chen_energy_forces= is the C entry point.

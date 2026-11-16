@@ -173,6 +173,14 @@ The bins are reused only when the geometry is identical.
 When `MemAvailable` cannot be read, both modes store.
 There is no cutoff on the atom count.
 
+An infinite cutoff or skin has no search radius, in any mode.
+The update bins nothing and stores nothing, and `allPairs()` reports it with `streaming()` set.
+Each walk takes the pairs straight from the coordinates, `i` ascending and then `j` ascending, which is the order of the one bin a search wider than the system gives, and folds each pair with the image of the spec.
+No move takes a pair out of such a search, so the update is reused for any coordinates while the atom count, the cell and the spec stay the same.
+A team walk with no bins gives each thread a contiguous range of atoms.
+Sutton-Chen with `cutoff <= 0` searches this way.
+The public `Query` still rejects a cutoff that is not finite.
+
 `OMP_NUM_THREADS` above 1 splits the work across threads. Most
 two-body walks use `forCellTeam`, which gives each thread a contiguous
 range of cells. Stored EAM, LJCluster and the three-body potentials

@@ -127,6 +127,9 @@ bool Neighbours::reusable(const double *xyz, std::size_t n, const double *box9,
   if (!(key == key_) || std::memcmp(box_, box9, sizeof(box_)) != 0) {
     return false;
   }
+  if (allPairs()) {
+    return true;
+  }
   // A streaming walk trusts the bins. Atoms that have moved may sit in
   // another cell, so the bins are reused only for an identical geometry.
   // A stored list keeps its candidates out to the skin.
@@ -356,6 +359,14 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
     nbr_.clear();
     built_ = true;
     ref_.assign(xyz, xyz + 3 * n);
+    return;
+  }
+  // Every pair is a candidate, so the walks need neither bins nor a list,
+  // and the coordinates never invalidate the update. allPairs() reads
+  // this state back.
+  if (std::isinf(search_)) {
+    mode_ = Mode::Stream;
+    built_ = true;
     return;
   }
   buildCells(xyz, n);

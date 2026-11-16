@@ -289,6 +289,52 @@ TEST_CASE("Sutton-Chen reproduces the Doye 10-8 cluster energies",
   }
 }
 
+TEST_CASE("Sutton-Chen with no cutoff keeps the bits of a one-bin search",
+          "[SuttonChen][nlist]") {
+  // cutoff <= 0 once stood for a 1e6 search, which bins a cluster in one
+  // cell. The unbounded walk takes the pairs of that cell in its order.
+  double epsilon = 0.0;
+  double c = 0.0;
+  double a = 0.0;
+  int nexp = 0;
+  int mexp = 0;
+  const AtomMatrix pt38 = load_points("CppCore/tests/data/sc108/pt38", &epsilon,
+                                      &c, &a, &nexp, &mexp);
+  std::vector<double> pos;
+  for (size_t i = 0; i < pt38.rows(); ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      pos.push_back(pt38(i, k) *
+                    (1.0 + 0.01 * std::sin(1.7 * static_cast<double>(3 * i + k))));
+    }
+  }
+  std::vector<double> scaled = pos;
+  for (double &x : scaled) {
+    x *= rgpot::sutton_chen_platinum().a;
+  }
+  const rgpot::SuttonChenConfig rows[] = {rgpot::SuttonChenConfig{},
+                                          rgpot::sutton_chen_platinum()};
+  for (const auto &row : rows) {
+    const std::vector<double> &xyz = row.a == 1.0 ? pos : scaled;
+    for (const auto mode : {rgpot::nlist::Mode::Auto, rgpot::nlist::Mode::Stored,
+                            rgpot::nlist::Mode::Stream}) {
+      INFO("a " << row.a << " mode " << static_cast<int>(mode));
+      rgpot::SuttonChenConfig none = row;
+      none.cutoff = 0.0;
+      rgpot::SuttonChenConfig wide = row;
+      wide.cutoff = 1.0e6;
+      rgpot::SuttonChenPot unbounded(none);
+      rgpot::SuttonChenPot one_bin(wide);
+      unbounded.setNeighbourMode(mode);
+      one_bin.setNeighbourMode(mode);
+      const StressEval got = eval_stress(unbounded, xyz, nullptr);
+      const StressEval want = eval_stress(one_bin, xyz, nullptr);
+      REQUIRE(std::memcmp(&got.energy, &want.energy, sizeof(double)) == 0);
+      REQUIRE(std::memcmp(got.forces.data(), want.forces.data(),
+                          got.forces.size() * sizeof(double)) == 0);
+    }
+  }
+}
+
 TEST_CASE("periodic Sutton-Chen folds a pair and agrees in a wide cell",
           "[SuttonChen]") {
   const AtomMatrix pos{{0.1, 0.0, 0.0}, {4.9, 0.0, 0.0}};

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <utility>
 #include <vector>
@@ -692,4 +693,176 @@ TEST_CASE("a stored list survives atoms wrapped through the faces", "[nlist][ski
   // Another atom count.
   pos.resize(pos.size() - 3);
   check(pos, big, false, 4);
+}
+
+namespace {
+
+/// Every visit of a walk in order, with the bits of its image vector.
+using Visits = std::vector<std::array<std::uint64_t, 6>>;
+
+auto into(Visits &dst) {
+  return [&dst](std::int32_t i, std::int32_t j, double dx, double dy, double dz, double r2) {
+    dst.push_back({static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j), bits(dx),
+                   bits(dy), bits(dz), bits(r2)});
+  };
+}
+
+Visits halfVisits(const rgpot::nlist::Neighbours &cells, std::size_t n) {
+  Visits out;
+  cells.forHalf(0, static_cast<std::int64_t>(n), into(out));
+  return out;
+}
+
+Visits directedVisits(const rgpot::nlist::Neighbours &cells, std::size_t n) {
+  Visits out;
+  cells.forDirected(0, static_cast<std::int64_t>(n), into(out));
+  return out;
+}
+
+/// fcc(n, a) centred on the origin, with a jitter.
+std::vector<double> jitteredCluster(int n, double a) {
+  auto pos = fcc(n, a);
+  const double centre = 0.5 * (n - 0.5) * a;
+  for (std::size_t k = 0; k < pos.size(); ++k) {
+    pos[k] += 0.07 * std::sin(2.3 * static_cast<double>(k)) - centre;
+  }
+  return pos;
+}
+
+constexpr double kInf = std::numeric_limits<double>::infinity();
+
+// The box a cluster potential passes when it has no cell.
+constexpr double kFreeBox[9] = {1.0e6, 0, 0, 0, 1.0e6, 0, 0, 0, 1.0e6};
+
+} // namespace
+
+TEST_CASE("an unbounded search visits every pair in the order of one bin",
+          "[nlist][allpairs]") {
+  setThreads("1");
+  const auto pos = jitteredCluster(3, 3.9);
+  const std::size_t n = pos.size() / 3;
+  // A search wider than the cluster puts every atom in one bin. The stored
+  // walk of that bin is the order of the unbounded walk.
+  rgpot::nlist::Spec wide;
+  wide.cutoff = 1.0e6;
+  wide.skin = 2.0e5;
+  wide.image = rgpot::nlist::Image::Round;
+  wide.mode = rgpot::nlist::Mode::Stored;
+  rgpot::nlist::Neighbours one_bin;
+  one_bin.update(pos.data(), n, kFreeBox, wide);
+  REQUIRE(one_bin.mode() == rgpot::nlist::Mode::Stored);
+  REQUIRE(one_bin.slots() == n * (n - 1));
+  const Visits half_ref = halfVisits(one_bin, n);
+  const Visits directed_ref = directedVisits(one_bin, n);
+
+  for (const auto mode :
+       {rgpot::nlist::Mode::Auto, rgpot::nlist::Mode::Stored, rgpot::nlist::Mode::Stream}) {
+    INFO("mode " << static_cast<int>(mode));
+    rgpot::nlist::Spec spec = wide;
+    spec.cutoff = kInf;
+    spec.skin = mode == rgpot::nlist::Mode::Stream ? 0.0 : kInf;
+    spec.mode = mode;
+    rgpot::nlist::Neighbours all;
+    all.update(pos.data(), n, kFreeBox, spec);
+    REQUIRE(all.allPairs());
+    REQUIRE(all.streaming());
+    REQUIRE(all.mode() == rgpot::nlist::Mode::Stream);
+    REQUIRE(all.slots() == 0);
+    REQUIRE(all.builds() == 0);
+    REQUIRE(halfVisits(all, n) == half_ref);
+    const Visits directed = directedVisits(all, n);
+    REQUIRE(directed == directed_ref);
+
+    Visits by_atom;
+    for (std::size_t i = 0; i < n; ++i) {
+      all.forAtom(static_cast<std::int32_t>(i), into(by_atom));
+    }
+    REQUIRE(by_atom == directed);
+
+    // A team splits the atoms into runs, one per thread.
+    std::vector<Visits> parts(3);
+    all.forCellTeam(false, 3,
+                    [&](int t, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                        double r2) {
+                      into(parts[static_cast<std::size_t>(t)])(i, j, dx, dy, dz, r2);
+                    });
+    Visits joined;
+    for (const auto &part : parts) {
+      REQUIRE(!part.empty());
+      joined.insert(joined.end(), part.begin(), part.end());
+    }
+    REQUIRE(joined == directed);
+  }
+
+  // A finite search past the cluster still bins.
+  rgpot::nlist::Neighbours finite;
+  finite.update(pos.data(), n, kFreeBox, wide);
+  REQUIRE(!finite.allPairs());
+}
+
+TEST_CASE("an unbounded search keeps its update until the atoms, the cell or the search change",
+          "[nlist][allpairs][skin]") {
+  setThreads("1");
+  auto pos = jitteredCluster(2, 3.9);
+  const std::size_t n = pos.size() / 3;
+  rgpot::nlist::Spec spec;
+  spec.cutoff = kInf;
+  spec.skin = kInf;
+  spec.image = rgpot::nlist::Image::Round;
+  spec.mode = rgpot::nlist::Mode::Auto;
+  rgpot::nlist::Neighbours all;
+  all.update(pos.data(), n, kFreeBox, spec);
+  REQUIRE(all.allPairs());
+  REQUIRE(!all.reused());
+
+  // No move takes a pair out of an unbounded search, however far.
+  for (std::size_t k = 0; k < pos.size(); ++k) {
+    pos[k] += 3.0 * std::cos(1.3 * static_cast<double>(k));
+  }
+  all.update(pos.data(), n, kFreeBox, spec);
+  REQUIRE(all.reused());
+  rgpot::nlist::Neighbours fresh;
+  fresh.update(pos.data(), n, kFreeBox, spec);
+  REQUIRE(halfVisits(all, n) == halfVisits(fresh, n));
+  REQUIRE(directedVisits(all, n) == directedVisits(fresh, n));
+
+  const double other_box[9] = {2.0e6, 0, 0, 0, 2.0e6, 0, 0, 0, 2.0e6};
+  all.update(pos.data(), n, other_box, spec);
+  REQUIRE(!all.reused());
+  REQUIRE(all.allPairs());
+
+  all.update(pos.data(), n - 1, other_box, spec);
+  REQUIRE(!all.reused());
+  REQUIRE(halfVisits(all, n - 1).size() == (n - 1) * (n - 2) / 2);
+
+  rgpot::nlist::Spec bounded = spec;
+  bounded.cutoff = 4.0;
+  bounded.skin = 0.8;
+  all.update(pos.data(), n - 1, other_box, bounded);
+  REQUIRE(!all.reused());
+  REQUIRE(!all.allPairs());
+  REQUIRE(all.mode() == rgpot::nlist::Mode::Stored);
+  REQUIRE(all.slots() < (n - 1) * (n - 2));
+
+  all.update(pos.data(), n - 1, other_box, spec);
+  REQUIRE(!all.reused());
+  REQUIRE(all.allPairs());
+  REQUIRE(all.slots() == 0);
+}
+
+TEST_CASE("an unbounded periodic search takes the nearest image of every pair",
+          "[nlist][allpairs][direct]") {
+  setThreads("1");
+  const double a = 4.05;
+  auto pos = fccBlock(3, 2, 2, a);
+  for (std::size_t k = 0; k < pos.size(); ++k) {
+    pos[k] += 0.05 * std::cos(1.1 * static_cast<double>(k));
+  }
+  const std::size_t n = pos.size() / 3;
+  const auto direct = directPairs(pos, 3 * a, 2 * a, 2 * a, kInf, true);
+  REQUIRE(direct.size() == n * (n - 1) / 2);
+  rgpot::nlist::Neighbours all;
+  loadCells(all, pos, 3 * a, 2 * a, 2 * a, kInf, true, rgpot::nlist::Mode::Auto);
+  REQUIRE(all.allPairs());
+  requireSamePairs(walkedPairs(all, n, kInf), direct);
 }

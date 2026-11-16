@@ -18,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 // clang-format on
@@ -51,6 +52,12 @@ double pow_ar(double ar2, int exp) {
     p *= std::sqrt(ar2);
   }
   return p;
+}
+
+/// cutoff <= 0 keeps every pair. The unbounded search walks them all
+/// without bins or a list.
+double searchCutoff(const rgpot::SuttonChenConfig &cfg) {
+  return cfg.cutoff > 0.0 ? cfg.cutoff : std::numeric_limits<double>::infinity();
 }
 
 rgpot::SuttonChenConfig config_from_c(const rgpot_sc_config &raw) {
@@ -129,7 +136,7 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
     return;
   }
 
-  const double cutoff = (cfg.cutoff > 0.0) ? cfg.cutoff : 1.0e6;
+  const double cutoff = searchCutoff(cfg);
   const double cutoff2 = cutoff * cutoff;
   const std::array<bool, 3> periodic =
       cfg.periodic ? std::array<bool, 3>{true, true, true}
@@ -307,7 +314,7 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
 
 void SuttonChenPot::densityStage(const HalfList &list, double *densities) const {
   const SuttonChenConfig &cfg = m_config;
-  const double cutoff = (cfg.cutoff > 0.0) ? cfg.cutoff : 1.0e6;
+  const double cutoff = searchCutoff(cfg);
   const double cutoff2 = cutoff * cutoff;
   const double a2 = cfg.a * cfg.a;
   staged::forEachPair(list, [&](int i, int j, double, double, double, double r2, bool both) {
@@ -325,7 +332,7 @@ void SuttonChenPot::densityStage(const HalfList &list, double *densities) const 
 void SuttonChenPot::forceStage(const HalfList &list, const double *densities, double *forces,
                                StageTally *tally) const {
   const SuttonChenConfig &cfg = m_config;
-  const double cutoff = (cfg.cutoff > 0.0) ? cfg.cutoff : 1.0e6;
+  const double cutoff = searchCutoff(cfg);
   const double cutoff2 = cutoff * cutoff;
   const double a2 = cfg.a * cfg.a;
   const double ec = cfg.epsilon * cfg.c;
