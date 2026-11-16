@@ -701,8 +701,9 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 CREST's calls are the calls of its whole run, which does not stop at the
 reference.
 
-- Si10: anneal reaches the minimum on 12 of 12 seeds and CREST on 11
-  (Fisher p = 1). On seeds 2000-2003 anneal takes 620, 505, 520 and 2,581
+- Si10, with the anneal rows of `seeds.csv` (the paper's Si10 number,
+  from the anneal rerun beside CREST, is below): anneal reaches the
+  minimum on 12 of 12 seeds and CREST on 11 (Fisher p = 1). On seeds 2000-2003 anneal takes 620, 505, 520 and 2,581
   calls, and CREST 108,264, 96,365, 102,236 and 94,277. On seeds
   2004-2011 CREST takes 103,294, 93,076, 98,677, 94,481, 100,309, 0,
   103,479 and 92,415 calls. On seed 2009 xtb's SCC does not converge on
@@ -731,22 +732,34 @@ calls of `seeds.csv`: only seed 2002 matches. Anneal's Si10 seeds
 takes only them in `gfn2/summaries.csv`, against the same twelve CREST
 rows.
 
+Seed 2009's hit is not an energy of its geometry. Anneal stops at call
+745 on -492.59511796 eV, an SCC solution that rgpot's xtb engine reaches
+from a reused wavefunction; the same geometry alone in the engine, and
+xtb 6.7.1 `--sp --etemp 3000`, give -449.050334 eV, 11.6 eV above the
+reference (`gfn2/scc-false-minimum/`, which reproduces it in three
+calls). `gfn2/false-hits.csv` names the row, and `--false-hits` counts it
+as a miss at the full budget, ranked after every hit. The Si10 number
+for the paper is that one:
+
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
-| Si10 | anneal G, `f3d6a050` | 12/12 | 720.5 | 925 | -460.683738 | 44.9 | 45.06 ms | 0.011 ms |
+| Si10 | anneal G, `f3d6a050` | 11/12 | 943.5 | 1,006 | -460.683738 | 44.9 | 45.06 ms | 0.011 ms |
 | Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.79 ms | 0.243 ms |
 
-- Anneal takes 1,191, 1,512, 520, 618, 560, 1,723, 556, 539, 2,344, 745,
-  696 and 1,475 calls on seeds 2000-2011, against 620, 505, 520, 2,581,
-  801, 778, 306, 712, 601, 728, 1,619 and 302 in `seeds.csv`.
-- Against these rows CREST has Fisher p = 1 and Mann-Whitney p = 3.7e-5,
-  as against `seeds.csv`: every anneal row is below every CREST row.
-- Seed 2009's hit at call 745 is an SCC solution of the handle at
-  -492.595118 eV. xtb 6.7.1 `--sp --etemp 3000` gives the same geometry
-  -16.502296 Eh, -449.050334 eV, 11.6 eV above the reference, and the
-  best geometries of seeds 2002 and 2008 -460.683718 eV. With seed 2009
-  a miss, anneal has 11/12 hits, Fisher p = 1 and Mann-Whitney p =
-  5.3e-4.
+- Anneal reaches the minimum on 11 of 12 seeds and CREST on 11 (Fisher p
+  = 1). Mann-Whitney p = 5.3e-4 on calls to the hit, both misses ranked
+  after every hit. Anneal's median counts seed 2009 at 1e5 calls.
+- Anneal takes 1,191, 1,512, 520, 618, 560, 1,723, 556, 539, 2,344, 745
+  (the false hit), 696 and 1,475 calls on seeds 2000-2011, against 620,
+  505, 520, 2,581, 801, 778, 306, 712, 601, 728, 1,619 and 302 in
+  `seeds.csv`.
+- Counting seed 2009 as the hit it records, anneal has 12/12, median
+  720.5 calls and IQR 925, and CREST has Fisher p = 1 and Mann-Whitney p =
+  3.7e-5, as against `seeds.csv`: every anneal row is below every CREST
+  row. Both lines are in `gfn2/summaries.csv`, the one with the false hit
+  at `8aeb3b0b` and the one without at `b22eb285`.
+- The best geometries of seeds 2002 and 2008 give -460.683718 eV under
+  the same xtb single point.
 
 `scripts/covalent_h2h/gfn2_enter_bench.sh` builds the example and runs
 both codes (`GFN2_CODES` picks them, `GFN2_CORE` the core). New rows are
