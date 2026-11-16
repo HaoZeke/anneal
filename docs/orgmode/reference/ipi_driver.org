@@ -308,3 +308,4 @@ For a kernel with a fixed range, =--cutoff= sets it.
 The exit code is 0 after =EXIT= or a close between messages.
 It is 2 for a usage error, an unknown potential or a bad species list.
 It is 1 when the connection or an evaluation fails.
+=SIGPIPE= is ignored, so a peer that closes cannot kill the program.

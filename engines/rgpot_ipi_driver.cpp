@@ -11,6 +11,7 @@
 #include "rgpot/IPIPot/IPIDriver.hpp"
 
 #include <cctype>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -369,6 +370,11 @@ int main(int argc, char **argv) {
     return 2;
   }
   cfg.cutoff = built.cutoff > 0.0 ? built.cutoff : cutoff;
+
+  // IPIDriver's socket writes already avoid SIGPIPE. This covers the other
+  // writes (stderr piped to a launcher that has gone, a potential's own
+  // sockets), which then fail with EPIPE instead of killing the run.
+  std::signal(SIGPIPE, SIG_IGN);
 
   try {
     rgpot::IPIDriver driver(cfg, built.eval);
