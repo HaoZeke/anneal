@@ -1428,8 +1428,9 @@ def per_call(rows: list[dict[str, str]], column: str) -> float:
 
 
 def sc_wall2_parts(audit: Audit) -> dict[str, object]:
-    new_rows = audit.rows(f"{SC_WALL2}/seeds.csv")
-    rgpot = new_rows[0]["rgpot_revision"]
+    all_rows = audit.rows(f"{SC_WALL2}/seeds.csv")
+    rgpot = all_rows[0]["rgpot_revision"]
+    new_rows = pick(all_rows, rgpot_revision=rgpot)
     harness = new_rows[0]["harness_revision"]
     panel = audit.rows(f"{SC_N12}/seeds.csv")
     _, now, reruns = sc_state(audit.rows(f"{SC_N12}/results.csv"))
@@ -1437,8 +1438,9 @@ def sc_wall2_parts(audit: Audit) -> dict[str, object]:
     base = wall[0]["rgpot_revision"]
     micro = audit.rows(f"{SC_WALL}/micro.csv")
     systems = [s for s in now if pick(new_rows, system=s)]
+    later = [r for r in dict.fromkeys(r["rgpot_revision"] for r in all_rows) if r != rgpot]
     out: dict[str, object] = {"rgpot": rgpot, "base": base, "harness": harness, "systems": systems, "wall": {},
-                              "panel": {}, "micro": {}}
+                              "panel": {}, "micro": {}, "later": {}}
     for system in dict.fromkeys(r["system"] for r in wall if r["rgpot_revision"] == rgpot):
         old = {r["seed"]: r for r in pick(wall, system=system, rgpot_revision=base)}
         new = {r["seed"]: r for r in pick(wall, system=system, rgpot_revision=rgpot)}
@@ -1448,10 +1450,10 @@ def sc_wall2_parts(audit: Audit) -> dict[str, object]:
                                   for k, f in (("inside", lambda r: per_call(r, "pot_s")),
                                                ("outside", lambda r: per_call(r, "outside_s")),
                                                ("wall", lambda r: median([float(x["wall_s"]) for x in r])))}}
-        for tag, rev in (("old", base), ("new", rgpot)):
-            m = pick(micro, system=system, rgpot_revision=rev)
-            out["micro"][(system, tag)] = {c: median([float(r[c]) for r in m]) for c in
-                                           ("entry_us", "dlsym_alloc_us", "kept_us", "kept_stream_us", "plain_us")}
+        for rev in (base, rgpot, *later):
+            if m := pick(micro, system=system, rgpot_revision=rev):
+                out["micro"][(system, rev[:8])] = {c: median([float(r[c]) for r in m]) for c in
+                                                   ("entry_us", "dlsym_alloc_us", "kept_us", "kept_stream_us", "plain_us")}
     for system in systems:
         a = pick(new_rows, system=system)
         prior = {r["seed"]: r for r in sc_group(panel, now[system])}
@@ -1471,11 +1473,23 @@ def sc_wall2_parts(audit: Audit) -> dict[str, object]:
             for key, column in (("inside", "pot_s"), ("outside", "outside_s"), ("per call", "wall_s")):
                 n[f"{code} {key}"] = per_call(rows, column)
         out["panel"][system] = n
+    for rev in later:
+        groups = []
+        for source, rows, same in (("sc_wall.sh", wall, ("hit", "evals_to_hit", "charged", "best")),
+                                   ("panel", all_rows, SC_WALL2_SAME)):
+            for system in dict.fromkeys(r["system"] for r in rows if r["rgpot_revision"] == rev):
+                ref = {r["seed"]: r for r in pick(rows, system=system, rgpot_revision=rgpot)}
+                got = pick(rows, system=system, rgpot_revision=rev)
+                groups.append({"source": source, "system": system, "seeds": len(got),
+                               "same": sum(r["seed"] in ref and all(r[c] == ref[r["seed"]][c] for c in same) for r in got),
+                               "inside ref": per_call(list(ref.values()), "pot_s"), "inside": per_call(got, "pot_s"),
+                               "harness": {r["harness_revision"] for r in got}})
+        out["later"][rev] = groups
     return out
 
 
 def sc_wall2_prose(parts: dict[str, object]) -> dict[str, list[str]]:
-    rgpot, base, harness = parts["rgpot"][:8], parts["base"][:8], parts["harness"][:8]
+    rgpot, base = parts["rgpot"][:8], parts["base"][:8]
     out: dict[str, list[str]] = {"wall": [], "same": [], "leads": [], "split": []}
     for system, w in parts["wall"].items():
         if w["same"] == w["seeds"]:
@@ -1506,6 +1520,19 @@ def sc_wall2_prose(parts: dict[str, object]) -> dict[str, list[str]]:
             out["leads"].append(f"{name}'s lead on wall time on {and_list(ns)} is not significant.")
     if ties := [s for s, n in panel.items() if n["wall ahead"] == "tie"]:
         out["leads"].append(f"Neither code leads on wall time on {and_list(ties)}.")
+    out["later"] = []
+    for rev, groups in parts["later"].items():
+        seeds = sum(g["seeds"] for g in groups)
+        harnesses = and_list(sorted({h[:8] for g in groups for h in g["harness"]}))
+        off = [g for g in groups if g["same"] != g["seeds"]]
+        if not off:
+            out["later"].append(f"Each of the {seeds} {rev[:8]} rows, harness {harnesses}, has the calls to the hit, "
+                                f"calls charged and best energy of its {rgpot} row, and each panel row also its final "
+                                f"energy, hops, escapes, restarts and paths, so the {rgpot} rows hold.")
+        else:
+            out["later"].append(f"{sum(g['seeds'] - g['same'] for g in off)} of the {seeds} {rev[:8]} rows differ from "
+                                f"their {rgpot} rows, on {and_list(sorted({g['system'] for g in off}))}, so the "
+                                f"{rgpot} rows do not hold for {rev[:8]}.")
     for s, n in panel.items():
         out["split"].append(f"On {s} anneal's wall per call is {n['anneal per call'] / n['gmin per call']:.2f} times "
                             f"GMIN's with {rgpot}, against {n['prior per call'] / n['gmin per call']:.2f} with {base}.")
@@ -1518,10 +1545,10 @@ def sc_wall2_body(audit: Audit) -> str:
     prose = sc_wall2_prose(parts)
     para = lambda key: " ".join(prose[key])  # noqa: E731
     lines = [f"# Sutton-Chen wall with rgpot {rgpot}", "",
-             f"rgpot {parts['rgpot']} is the head of rgpot's `feat/sc-call-overhead` branch, seven commits on its "
-             "develop at 251aaade, which keep the Sutton-Chen C entry's potential between calls and read the pair "
-             f"powers back in the force pass. Anneal's `Cargo.lock` still pins rgpot {base}; {rgpot} is not merged, so "
-             f"it is only recorded here and in the rows. `scripts/metal_h2h/enter_sc_wall2.sh` builds its Sutton-Chen "
+             f"rgpot {parts['rgpot']} is seven commits of rgpot's `feat/sc-call-overhead` branch on its develop at "
+             "251aaade, which keep the Sutton-Chen C entry's potential between calls and read the pair powers back in "
+             f"the force pass. Anneal's `Cargo.lock` still pins rgpot {base}; {rgpot} is not merged, so it is only "
+             f"recorded here and in the rows. `scripts/metal_h2h/enter_sc_wall2.sh` builds its Sutton-Chen "
              "entry with `build_rgpot_sc.sh` from a clean checkout, runs `sc_wall.sh` against it, appending to "
              "`../sc-wall/seeds.csv` and `../sc-wall/micro.csv`, and then runs anneal alone on the 55- and 80-atom "
              f"sc-n12 systems, seeds 2000-2011 at the paper budgets, into `seeds.csv`. Harness {harness}, one job at a "
@@ -1541,10 +1568,24 @@ def sc_wall2_body(audit: Audit) -> str:
               "`sc_wall_micro` medians in µs per call, as in `../sc-wall/README.md`:", "",
               "| System | Rgpot | Entry | Entry with dlsym and allocation | Kept | Kept, streaming | Plain |",
               "|---|---|---|---|---|---|---|"]
-    for (system, tag), m in parts["micro"].items():
-        rev = base if tag == "old" else rgpot
+    for (system, rev), m in parts["micro"].items():
         lines.append(f"| {system} | {rev} | {m['entry_us']:.2f} | {m['dlsym_alloc_us']:.2f} | {m['kept_us']:.2f} | "
                      f"{m['kept_stream_us']:.2f} | {m['plain_us']:.2f} |")
+    for rev, groups in parts["later"].items():
+        lines += ["", f"## rgpot {rev[:8]}", "",
+                  f"rgpot {rev} is the head of `feat/sc-call-overhead` after {rgpot}: two commits that run the team "
+                  "slices of the potential and of the neighbour walk on whatever threads the OpenMP runtime starts. "
+                  "`build_rgpot_sc.sh` builds without OpenMP, so here the potential runs on one thread. rgpot's develop "
+                  f"is still at 251aaade, so {rev[:8]} is not merged either. `enter_sc_wall2.sh` ran again with it, from "
+                  "the pushed harness, and its rows are appended to `../sc-wall/seeds.csv`, `../sc-wall/micro.csv` "
+                  "and `seeds.csv`.", "",
+                  f"| Rows | System | Seeds | Same as {rgpot} | Inside {rgpot} (µs/call) | Inside {rev[:8]} (µs/call) |",
+                  "|---|---|---|---|---|---|"]
+        for g in groups:
+            lines.append(f"| {g['source']} | {g['system']} | {g['seeds']} | {g['same']} | {g['inside ref']:.2f} | "
+                         f"{g['inside']:.2f} |")
+    if parts["later"]:
+        lines += ["", para("later")]
     lines += ["", "## Anneal against GMIN", "", para("same"), "",
               "Fisher compares hits; Mann-Whitney, two-sided with the tie correction and the continuity "
               "correction, compares calls to the hit and wall. The wall ratio is GMIN's median wall over anneal's. "
@@ -1586,13 +1627,25 @@ def sc_wall2(audit: Audit) -> None:
                             (f"Outside {base} (µs/call)", "outside old"), (f"Outside {rgpot} (µs/call)", "outside new"),
                             (f"Wall {base} (s)", "wall old"), (f"Wall {rgpot} (s)", "wall new")):
             audit.cell(where, column, row[column], w[key])
-    for line, row in md_table(audit, path, "System | Rgpot | Entry"):
-        tag = "old" if row["Rgpot"] == base else "new"
-        m = parts["micro"][(row["System"], tag)]
+    micro_rows = md_table(audit, path, "System | Rgpot | Entry")
+    audit.cell(path, "micro rows", " ".join(f"{r['System']}/{r['Rgpot']}" for _, r in micro_rows),
+               " ".join(f"{s}/{r}" for s, r in parts["micro"]))
+    for line, row in micro_rows:
+        m = parts["micro"][(row["System"], row["Rgpot"])]
         where = f"{path}:{line} {row['System']} {row['Rgpot']} micro"
         for column, key in (("Entry", "entry_us"), ("Entry with dlsym and allocation", "dlsym_alloc_us"),
                             ("Kept", "kept_us"), ("Kept, streaming", "kept_stream_us"), ("Plain", "plain_us")):
             audit.cell(where, column, row[column], m[key])
+    for rev, groups in parts["later"].items():
+        rows = md_table(audit, path, f"Rows | System | Seeds | Same as {rgpot}")
+        audit.cell(path, f"{rev[:8]} rows", " ".join(f"{r['Rows']}/{r['System']}" for _, r in rows),
+                   " ".join(f"{g['source']}/{g['system']}" for g in groups))
+        for (line, row), g in zip(rows, groups):
+            where = f"{path}:{line} {row['Rows']} {row['System']} {rev[:8]}"
+            audit.cell(where, "seeds", row["Seeds"], float(g["seeds"]))
+            audit.cell(where, "same", row[f"Same as {rgpot}"], float(g["same"]))
+            audit.cell(where, f"Inside {rgpot} (µs/call)", row[f"Inside {rgpot} (µs/call)"], g["inside ref"])
+            audit.cell(where, f"Inside {rev[:8]} (µs/call)", row[f"Inside {rev[:8]} (µs/call)"], g["inside"])
     rows = md_table(audit, path, "System | GMIN harness | Anneal hits")
     audit.cell(path, "panel systems", " ".join(r["System"] for _, r in rows), " ".join(parts["panel"]))
     for line, row in rows:
@@ -1620,7 +1673,8 @@ def sc_wall2(audit: Audit) -> None:
     for sentences in sc_wall2_prose(parts).values():
         for sentence in sentences:
             audit.said(path, sentence)
-    audit.said(f"{SC_WALL}/README.md", "also hold the rows of rgpot 14680ddb, which `../sc-wall2/README.md` reads.")
+    later = and_list([rgpot] + [r[:8] for r in parts["later"]])
+    audit.said(f"{SC_WALL}/README.md", f"also hold the rows of rgpot {later}, which `../sc-wall2/README.md` reads.")
     if sentence := alias_sentence(audit, [f"{SC_WALL2}/seeds.csv"], "../../revision-aliases.csv"):
         audit.said(path, sentence)
 
@@ -1876,7 +1930,7 @@ def provenance(audit: Audit) -> dict[str, str]:
     names = sorted(revisions)
     table = alias_table()
     index = alias_index(names, table)
-    aliases = verified_aliases(audit, table, index)
+    aliases = verified_aliases(audit, table, index, set(revisions))
     unpushed = set()
     for name in (n for n in names if not index.exists(n)):
         if any(local.startswith(name) for local in aliases):
@@ -2074,7 +2128,8 @@ def alias_sentence(audit: Audit, paths: list[str], table: str) -> str | None:
             "its pushed commit.")
 
 
-def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionIndex) -> dict[str, str]:
+def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionIndex,
+                     cited: set[str] = frozenset()) -> dict[str, str]:
     """Local revisions of ALIASES whose pushed equivalent checks out, mapped to it.
 
     Each alias is checked: the local revision is not in the repository; the
@@ -2083,7 +2138,8 @@ def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionI
     commit is the first in its history to cite the local revision and has
     one parent. That parent is the pushed revision, or, when the alias names
     the paths in ``differs_only_in``, descends from it and differs from it
-    in those paths alone.
+    in those paths alone. An alias with no rows commit names a local
+    revision that no row in ``cited`` starts.
     """
     verified = {}
     for row in table:
@@ -2098,18 +2154,21 @@ def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionI
             checks.append((f"{column} {revision[:8]} is on the remote", index.on_remote(revision)))
             checks.append((f"{column} {revision[:8]} has patch-id {row['patch_id'][:8]}", index.patch_id(revision) == row["patch_id"]))
         rows_commit = row["rows_commit"]
-        parents = index.parents_of(rows_commit)
-        allowed = row["differs_only_in"].split()
-        if allowed:
-            parent = parents[0] if len(parents) == 1 else ""
-            descends = bool(parent) and index.is_ancestor(pushed, parent)
-            changed = git("diff", "--name-only", pushed, parent, "--").stdout.split() if descends else None
-            checks.append((f"rows commit {rows_commit[:8]} sits on a descendant of {pushed[:8]}", descends))
-            checks.append((f"{pushed[:8]} differs from the rows commit's parent only in {' '.join(allowed)}",
-                           changed is not None and set(changed) <= set(allowed)))
+        if rows_commit:
+            parents = index.parents_of(rows_commit)
+            allowed = row["differs_only_in"].split()
+            if allowed:
+                parent = parents[0] if len(parents) == 1 else ""
+                descends = bool(parent) and index.is_ancestor(pushed, parent)
+                changed = git("diff", "--name-only", pushed, parent, "--").stdout.split() if descends else None
+                checks.append((f"rows commit {rows_commit[:8]} sits on a descendant of {pushed[:8]}", descends))
+                checks.append((f"{pushed[:8]} differs from the rows commit's parent only in {' '.join(allowed)}",
+                               changed is not None and set(changed) <= set(allowed)))
+            else:
+                checks.append((f"rows commit {rows_commit[:8]} sits on {pushed[:8]}", parents == [pushed]))
+            checks.append((f"rows commit {rows_commit[:8]} first cites {local[:8]}", index.first_cites(local, rows_commit)))
         else:
-            checks.append((f"rows commit {rows_commit[:8]} sits on {pushed[:8]}", parents == [pushed]))
-        checks.append((f"rows commit {rows_commit[:8]} first cites {local[:8]}", index.first_cites(local, rows_commit)))
+            checks.append((f"no row cites {local[:8]}", not any(local.startswith(c) for c in cited)))
         for label, ok in checks:
             audit.record(ok, where, label, "holds", "holds" if ok else "fails")
         if all(ok for _, ok in checks):

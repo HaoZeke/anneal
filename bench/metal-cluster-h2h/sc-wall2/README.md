@@ -1,6 +1,6 @@
 # Sutton-Chen wall with rgpot 14680ddb
 
-rgpot 14680ddb20e3d8e80010ac8e6f1c07c44234319e is the head of rgpot's `feat/sc-call-overhead` branch, seven commits on its develop at 251aaade, which keep the Sutton-Chen C entry's potential between calls and read the pair powers back in the force pass. Anneal's `Cargo.lock` still pins rgpot 8efdd246; 14680ddb is not merged, so it is only recorded here and in the rows. `scripts/metal_h2h/enter_sc_wall2.sh` builds its Sutton-Chen entry with `build_rgpot_sc.sh` from a clean checkout, runs `sc_wall.sh` against it, appending to `../sc-wall/seeds.csv` and `../sc-wall/micro.csv`, and then runs anneal alone on the 55- and 80-atom sc-n12 systems, seeds 2000-2011 at the paper budgets, into `seeds.csv`. Harness 91c8dbf0, one job at a time on core 0 in a UTS namespace with hostname `bench`. GMIN is not rerun: its rows are the corrected-file reruns in `../sc-n12/seeds.csv`. Per-call times are totals over the twelve seeds divided by charged calls. Harness 91c8dbf0 was a local commit, pushed as 0e11e9ae with the same patch; `../../revision-aliases.csv` maps it to its pushed commit.
+rgpot 14680ddb20e3d8e80010ac8e6f1c07c44234319e is seven commits of rgpot's `feat/sc-call-overhead` branch on its develop at 251aaade, which keep the Sutton-Chen C entry's potential between calls and read the pair powers back in the force pass. Anneal's `Cargo.lock` still pins rgpot 8efdd246; 14680ddb is not merged, so it is only recorded here and in the rows. `scripts/metal_h2h/enter_sc_wall2.sh` builds its Sutton-Chen entry with `build_rgpot_sc.sh` from a clean checkout, runs `sc_wall.sh` against it, appending to `../sc-wall/seeds.csv` and `../sc-wall/micro.csv`, and then runs anneal alone on the 55- and 80-atom sc-n12 systems, seeds 2000-2011 at the paper budgets, into `seeds.csv`. Harness 91c8dbf0, one job at a time on core 0 in a UTS namespace with hostname `bench`. GMIN is not rerun: its rows are the corrected-file reruns in `../sc-n12/seeds.csv`. Per-call times are totals over the twelve seeds divided by charged calls. Harness 91c8dbf0 was a local commit, pushed as 0e11e9ae with the same patch; `../../revision-aliases.csv` maps it to its pushed commit.
 
 ## sc_wall.sh
 
@@ -17,8 +17,27 @@ On sc126-55 each of the 12 14680ddb rows of `sc_wall.sh` has the calls to the hi
 |---|---|---|---|---|---|---|
 | sc126-55 | 8efdd246 | 58.19 | 58.44 | 30.95 | 23.80 | 9.86 |
 | sc126-55 | 14680ddb | 13.61 | 13.61 | 13.52 | 13.49 | 9.55 |
+| sc126-55 | efd0750f | 13.40 | 13.58 | 13.38 | 13.38 | 9.56 |
 | sc96-55 | 8efdd246 | 59.78 | 60.12 | 32.54 | 25.23 | 10.85 |
 | sc96-55 | 14680ddb | 14.36 | 14.25 | 14.05 | 14.08 | 10.22 |
+| sc96-55 | efd0750f | 14.03 | 14.20 | 14.01 | 14.00 | 10.24 |
+
+## rgpot efd0750f
+
+rgpot efd0750f28d6bf55ac6282e4bf430227d547fb75 is the head of `feat/sc-call-overhead` after 14680ddb: two commits that run the team slices of the potential and of the neighbour walk on whatever threads the OpenMP runtime starts. `build_rgpot_sc.sh` builds without OpenMP, so here the potential runs on one thread. rgpot's develop is still at 251aaade, so efd0750f is not merged either. `enter_sc_wall2.sh` ran again with it, from the pushed harness, and its rows are appended to `../sc-wall/seeds.csv`, `../sc-wall/micro.csv` and `seeds.csv`.
+
+| Rows | System | Seeds | Same as 14680ddb | Inside 14680ddb (µs/call) | Inside efd0750f (µs/call) |
+|---|---|---|---|---|---|
+| sc_wall.sh | sc126-55 | 12 | 12 | 13.63 | 13.55 |
+| sc_wall.sh | sc96-55 | 12 | 12 | 14.41 | 14.22 |
+| panel | sc126-80 | 12 | 12 | 28.23 | 28.40 |
+| panel | sc96-80 | 12 | 12 | 29.64 | 29.23 |
+| panel | sc108-80 | 12 | 12 | 29.60 | 28.96 |
+| panel | sc126-55 | 12 | 12 | 13.87 | 13.51 |
+| panel | sc108-55 | 12 | 12 | 14.40 | 14.00 |
+| panel | sc96-55 | 12 | 12 | 14.31 | 14.18 |
+
+Each of the 96 efd0750f rows, harness a3c23c1e, has the calls to the hit, calls charged and best energy of its 14680ddb row, and each panel row also its final energy, hops, escapes, restarts and paths, so the 14680ddb rows hold.
 
 ## Anneal against GMIN
 
