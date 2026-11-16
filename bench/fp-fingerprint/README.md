@@ -1,6 +1,7 @@
 # Mean-SOAP collisions
 
-Twelve quenched minima per system, each shaken and quenched again. A pair
+Twelve quenched minima per system. Minima are shaken and quenched again:
+twelve on Au55 and LJ38, ten on LJ75 and two on TIP4P15 (`requenches`). A pair
 counts when its energy gap exceeds both 0.1 and 100 times the re-quench
 energy width. The taboo calls two mean-SOAP spectra one minimum at
 distance 0.02. Rows are in `rows.csv`.
