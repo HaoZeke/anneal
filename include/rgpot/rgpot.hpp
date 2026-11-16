@@ -24,10 +24,10 @@
  * whenever the underlying C API returns a non-success status code.
  */
 
-#include "rgpot/errors.hpp"
-#include "rgpot/potential.hpp"
-#include "rgpot/types.hpp"
+#include "errors.hpp"
+#include "potential.hpp"
+#include "types.hpp"
 
 #ifdef RGPOT_HAS_RPC
-#include "rgpot/rpc_client.hpp"
+#include "rpc_client.hpp"
 #endif

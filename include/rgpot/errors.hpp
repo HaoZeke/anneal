@@ -20,7 +20,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "rgpot/c_api.hpp"
+#include "c_api.hpp"
 
 namespace rgpot {
 

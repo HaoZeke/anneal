@@ -11,6 +11,10 @@ evaluates.
 The C++ wrappers used here are in =include/rgpot/potential.hpp= and
 =include/rgpot/types.hpp=.
 They include =rgpot.h= from =rgpot-core/include=.
+The example includes them through =rgpot/rgpot.hpp=.
+Where the file system ignores case, as it does by default on macOS and Windows,
+=rgpot/potential.hpp= and =rgpot/Potential.hpp= are the same name, and the first
+include directory that has either file supplies both.
 
 ** Write the potential class
 
@@ -39,7 +43,7 @@ It returns =RGPOT_INTERNAL_ERROR= when =forceImpl= throws.
 #+attr_rgpot: compile flags=-Irgpot-core/include
 #+begin_src cpp
 #include "rgpot/Potential.hpp"
-#include "rgpot/potential.hpp"
+#include "rgpot/rgpot.hpp"
 
 namespace demo {
 

@@ -28,7 +28,7 @@
 #include <cstring>
 #include <vector>
 
-#include "rgpot/c_api.hpp"
+#include "c_api.hpp"
 
 namespace rgpot {
 

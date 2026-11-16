@@ -35,8 +35,8 @@
 #include <string>
 
 #include "rgpot.h"
-#include "rgpot/errors.hpp"
-#include "rgpot/types.hpp"
+#include "errors.hpp"
+#include "types.hpp"
 
 #ifdef RGPOT_HAS_RPC
 

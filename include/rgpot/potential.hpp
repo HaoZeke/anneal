@@ -46,9 +46,9 @@
 #include <vector>
 
 #include "rgpot/HessianVector.hpp"
-#include "rgpot/c_api.hpp"
-#include "rgpot/errors.hpp"
-#include "rgpot/types.hpp"
+#include "c_api.hpp"
+#include "errors.hpp"
+#include "types.hpp"
 
 namespace rgpot {
 
