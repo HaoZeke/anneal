@@ -53,8 +53,8 @@ The objective is GFN2 through rgpot's `libxtb_engine.so` plus the O-H wall
 above.
 Anneal is `examples/gfn2_water_h2h`.
 CREST 3.0.2 is
-`crest start.xyz --gfn2 -T 1 --legacy -notopo -nocross -shake 1 -tstep 2`,
-with its xtb run through `xtb --driver` into
+`crest start.xyz --gfn2 -T 1 --legacy -notopo -shake 1`, with
+`-xnam` naming a wrapper that runs its xtb through `xtb --driver` into
 `examples/gfn2_water_crest_driver`, which evaluates the same objective in
 one handle.
 Both arms start from anneal's random start for the seed.
