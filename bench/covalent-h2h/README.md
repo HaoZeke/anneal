@@ -768,6 +768,21 @@ reference.
   Against it CREST hits on none of its six seeds (`gfn2/rescore.csv`).
   Anneal's rows are not rescored: each stopped at the reference it ran
   with.
+- From `95aed412` the example names its element, and each pair's call
+  floor is 0.70 of the summed covalent radii and never below 0.90 Å:
+  1.55 Å for Si–Si and 1.06 Å for C–C. A trial pair inside it is opened
+  to 1.05 times that floor. The rule has no per-system constant, and an
+  objective that names no elements keeps the single floor, so the pins
+  do not change. It was gated against `c1c02d16` on seeds 2000-2011 of
+  Si13 and C20 at 1e5 calls, both arms in one untimed session with
+  eight runs at a time (`gfn2/floor_gate.csv`). On Si13 both arms hit on
+  all twelve seeds. 2.89% of the floor arm's calls are SCCs that do not
+  converge, against 6.05%. Its median calls to hit is 2,207 against
+  1,897 (Mann-Whitney p = 0.45). On C20 neither arm reaches the cage, no
+  call fails its SCC in either, and the median best is -1146.550 eV in
+  both (p = 0.86). The `c1c02d16` arm repeats the timed Si13 calls to
+  hit seed for seed. The Si10, C10, Si13 and C20 rows above are without
+  it.
 - Si20 is pending. With the engine reusing the previous wavefunction,
   the Si13 and Si20 minima had energies a fresh SCC does not reproduce:
   an Si13 minimum at -601.12421 eV is -593.51232 eV fresh, and Si20 minima
@@ -785,6 +800,8 @@ the rows with it, measured on `ce1e7a46` (the fix on `f2a628c0`). The
 CREST rows were measured on `8b4a2592` from starts that are identical
 byte for byte on `f2a628c0`. `--rescore SYSTEM ENERGY_EV` appends CREST's
 hits against another reference to `gfn2/rescore.csv`.
+`scripts/covalent_h2h/gfn2_floor_gate.py` runs a same-session gate of
+two example builds and summarises its rows.
 
 ## Pins
 
@@ -822,5 +839,5 @@ Three first-parent commits changed it:
 - `tc20-bowl.xyz`, `tc20-flake.xyz`: the C20 bowl and the best unbiased flake.
 - `c10-96/`: the 96-seed C10 rows.
 - `gfn2/`: per-seed rows and summary of GFN2-xTB Si10, C10, Si13 and
-  C20, anneal against CREST, CREST's rescore against the Si13 ring, and
-  the lowest minima with their xtb energies.
+  C20, anneal against CREST, CREST's rescore against the Si13 ring, the
+  lowest minima with their xtb energies, and the element-floor gate.
