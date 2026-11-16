@@ -8,9 +8,11 @@ The LJ38 length above is the published schedule. LJ55 and LJ75 are derived, not 
 
 | Arm | Hits | Median calls | Median wall (s) | Inside us | Outside us | Code revision |
 | --- | --- | --- | --- | --- | --- | --- |
-| anneal | 12/12 | 13469.5 | 0.224667 | 11.9589 | 4.8309 | f2a628c0 |
+| anneal | 12/12 | 13469.5 | 0.224667 | 11.9589 | 4.8309 | 238f3582 |
 | gmin | 7/12 | 389399 | 3.792015 | 7.1525 | 2.5612 | aac1548a |
 | rpqa_paper | 0/6 | 12925808 | 7751.411038 | 210.4986 | 389.3438 | 4e86f5fd |
+
+The anneal and gmin rows are the twelve-seed `rerun` rows of `bench/gad-published/summary.csv`: anneal head `238f3582`, which is not in this history, and GMIN `aac1548a`.
 
 | Seed | Hit | Best energy | Force calls | Wall (s) | Inside us | Outside us | Code revision |
 | --- | --- | --- | --- | --- | --- | --- | --- |
