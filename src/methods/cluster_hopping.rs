@@ -1134,6 +1134,16 @@ pub struct Outcome {
     pub soft_escapes: usize,
     /// Of those, the ones whose climb reached a saddle.
     pub soft_crossed: usize,
+    /// Kick factor at the end when [`Config::plateau_population`] is on.
+    ///
+    /// Zero when that population is off, which is also [`Default`].
+    pub plateau_step: f64,
+    /// Temperature factor at the end when [`Config::plateau_population`] is on.
+    ///
+    /// Zero when that population is off.
+    pub plateau_heat: f64,
+    /// Leaves taken from the diverse population. Zero when it is off.
+    pub plateau_leaves: u32,
     /// Hop, charged evaluations spent, basin count and value at each new
     /// global best.
     ///
@@ -4646,6 +4656,7 @@ where
     // stays there for a few hops before the incumbent gap applies.
     let mut last_basin_restart = 0usize;
     let mut basin_hold = 0usize;
+    let mut plateau = crate::methods::plateau::PlateauSearch::new();
     // Set after a rigid stall when the preset relocates one molecule.
     // Cleared when a new lowest minimum is recorded.
     let mut cage_edit = false;
@@ -5736,6 +5747,7 @@ where
             }
         }
         if cfg.improvement_rewards
+            && !cfg.plateau_population
             && hops.saturating_sub(hops_at_lowest)
                 >= crate::catalog::molecular::WATER_BASIN_STALL_HOPS
             && hops.saturating_sub(last_basin_restart)
@@ -5758,6 +5770,24 @@ where
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
                 basin_hold = crate::catalog::molecular::WATER_BASIN_HOLD;
+            }
+        }
+        if cfg.plateau_population {
+            if let Some(state) = ledger.best_state.as_ref() {
+                plateau.offer(ledger.best, state.view());
+            }
+            let due = hops > 0
+                && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
+            if due
+                && let Some((energy, state)) = plateau.leave(e, x.view())
+                && state.len() == x.len()
+            {
+                e = energy;
+                x = state;
+                current_validation_gradient = None;
+                soft_cache = None;
+                charged_at_best = ledger.spent();
+                plateau.hold_until(ledger.spent().saturating_add(cfg.restart_patience.max(1)));
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -6797,6 +6827,9 @@ where
             ratios[rep]
         };
         let mut temperature = single * scale;
+        if cfg.plateau_population {
+            temperature *= plateau.heat();
+        }
         if cfg.general_collective
             && let Some(spread) = general_taboo.spread()
         {
@@ -7121,7 +7154,13 @@ where
         } else {
             1.0
         };
-        let proposal_scale = escape * orient_scale;
+        let proposal_scale = escape
+            * orient_scale
+            * if cfg.plateau_population {
+                plateau.step()
+            } else {
+                1.0
+            };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -7326,6 +7365,7 @@ where
         if basin_hold > 0 {
             basin_hold -= 1;
         } else if cfg.incumbent_gap > 0.0
+            && !(cfg.plateau_population && plateau.holding(ledger.spent()))
             && e > ledger.best + cfg.incumbent_gap
             && let Some(state) = ledger.best_state.clone()
             && state.len() == x.len()
@@ -8496,6 +8536,12 @@ where
             bias.set_height(height.height());
         }
         dial.observe(accept);
+        if cfg.plateau_population {
+            plateau.observe(accept, improved);
+            if accept {
+                plateau.offer(e_new, x_new.view());
+            }
+        }
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage
@@ -10495,6 +10541,21 @@ where
             r
         }),
         energy_bias: ebias,
+        plateau_step: if cfg.plateau_population {
+            plateau.step()
+        } else {
+            0.0
+        },
+        plateau_heat: if cfg.plateau_population {
+            plateau.heat()
+        } else {
+            0.0
+        },
+        plateau_leaves: if cfg.plateau_population {
+            plateau.leaves()
+        } else {
+            0
+        },
     })
 }
 

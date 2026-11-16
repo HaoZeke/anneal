@@ -48,6 +48,8 @@ pub mod minima_hopping;
 pub mod nested;
 /// Umbrella bridges between two catalog minima in descriptor space.
 pub mod neus_bridge;
+/// Acceptance dial and a fingerprint-diverse population for a plateau.
+pub(crate) mod plateau;
 /// Rigid-body record tolerance and the hop count for a stall.
 pub mod rigid_quench;
 /// Cut-and-splice mixing of two quenched clusters.

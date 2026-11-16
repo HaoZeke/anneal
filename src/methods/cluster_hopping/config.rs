@@ -1245,6 +1245,15 @@ pub struct Config {
     /// low basin other than the one it is in.
     #[serde(skip_serializing_if = "is_false")]
     pub improvement_rewards: bool,
+    /// Leave a plateau for a kept structure far from the chain in its
+    /// sorted pair distances, and move the kick and the temperature with
+    /// the acceptance of the last block.
+    ///
+    /// Off by default, and absent from the resolved JSON while off, so a
+    /// Lennard-Jones pin is the same search. On, every potential takes
+    /// the same leave.
+    #[serde(skip_serializing_if = "is_false")]
+    pub plateau_population: bool,
     /// Relaunch from the incumbent when the chain is this far above it.
     ///
     /// Zero leaves the walk where acceptance put it. A positive gap, in
@@ -1925,6 +1934,7 @@ impl Config {
             quench_once: false,
             target_energy: None,
             improvement_rewards: false,
+            plateau_population: false,
             incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,
@@ -2231,6 +2241,16 @@ impl Config {
             cfg.merge_radius = crate::featomic_hop::SOAP_PACK_MERGE;
         }
         cfg
+    }
+
+    /// [`Config::plateau_population`] on this configuration.
+    ///
+    /// The kick and the temperature then follow the acceptance of the last
+    /// block, and a run of calls with no new incumbent leaves from a kept
+    /// structure whose sorted pair distances are far from the chain.
+    pub fn with_plateau_population(mut self) -> Self {
+        self.plateau_population = true;
+        self
     }
 
     /// The same search with each flexible molecule as one group, when

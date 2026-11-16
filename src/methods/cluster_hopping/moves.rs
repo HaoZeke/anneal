@@ -2117,6 +2117,7 @@ impl ClusterMove {
                     let u1: f64 = rng.random::<f64>().max(1e-12);
                     let u2: f64 = rng.random::<f64>();
                     *v = amplitude
+                        * scale
                         * super::portable_sqrt(-2.0 * super::portable_ln(u1))
                         * super::portable_cos(std::f64::consts::TAU * u2);
                 }
@@ -2137,9 +2138,10 @@ impl ClusterMove {
                     }
                     v
                 };
-                // A modest rotation, half a radian at most, so the shake stays
-                // a shake rather than a relocation.
-                let angle = rng.random::<f64>() - 0.5;
+                // A modest rotation, half a radian at the preset scale, so the
+                // shake stays a shake rather than a relocation. The acceptance
+                // dial multiplies that angle when a plateau population is on.
+                let angle = (rng.random::<f64>() - 0.5) * scale;
                 let (sa, ca) = angle.sin_cos();
                 let n = x.len() / 3;
                 for &a in atoms {
