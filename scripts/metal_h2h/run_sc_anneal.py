@@ -11,9 +11,11 @@ on seeds 2012-2059 with h2h_sc of e3ed7dad and of the harness revision,
 written to bench/metal-cluster-h2h/sc-n12/sc96-55-seeds.csv, which says
 whether the calls of sc96-55 moved between the two.
 
---panel-system limits the panel to the systems named, --no-n78 and
---no-check skip the other two parts, and --rgpot-revision names the rgpot
-build of RGPOT_SC_LIB in an rgpot_revision column of the panel rows.
+--panel-system limits the panel to the systems named; --no-panel, --no-n78
+and --no-check skip the three parts; --check-system runs the check on
+another system, at its paper budget, into --check-rows; and
+--rgpot-revision names the rgpot build of RGPOT_SC_LIB in an
+rgpot_revision column of the panel rows.
 
 Each row records the anneal revision, the host and the harness revision.
 A seed already stored for this harness revision is skipped, and no row is
@@ -94,22 +96,23 @@ def panel(args, head: str, revision: str) -> None:
 
 def check(args, head: str) -> None:
     rows = n12.load_rows(args.check_rows)
-    budget = sc.PAPER_BUDGETS[CHECK_SYSTEM]
+    system = args.check_system
+    budget = sc.PAPER_BUDGETS[system]
     builds = ((args.check_binary, args.check_revision), (args.binary, head))
     for seed in CHECK_SEEDS:
-        coords = start(args.binary, args.runs, CHECK_SYSTEM, seed)
+        coords = start(args.binary, args.runs, system, seed)
         for binary, code in builds:
             if any(r["seed"] == str(seed) and r["code_revision"] == code and r["harness_revision"] == head
                    for r in rows):
                 continue
-            log = args.logs / f"{CHECK_SYSTEM}-check" / f"{code[:8]}-{seed}.log"
+            log = args.logs / f"{system}-check" / f"{code[:8]}-{seed}.log"
             log.parent.mkdir(parents=True, exist_ok=True)
-            parsed, _ = n12.run_anneal(binary, CHECK_SYSTEM, seed, budget, coords, log, args.runs / "check" / code[:8])
+            parsed, _ = n12.run_anneal(binary, system, seed, budget, coords, log, args.runs / "check" / code[:8])
             hit = parsed["hit"] in {"1", "true", "True"}
             # Both builds stop at the hit, so the calls charged are the calls
             # to the hit; the e3ed7dad build prints the budget as evals_to_hit.
             rows.append({
-                "system": CHECK_SYSTEM,
+                "system": system,
                 "seed": str(seed),
                 "budget": str(budget),
                 "hit": "1" if hit else "0",
@@ -121,7 +124,7 @@ def check(args, head: str) -> None:
                 "harness_revision": head,
             })
             gm.save(args.check_rows, list(CHECK_FIELDS), rows)
-            print(f"done {CHECK_SYSTEM} {code[:8]} seed {seed} calls={rows[-1]['calls']} hit={rows[-1]['hit']}",
+            print(f"done {system} {code[:8]} seed {seed} calls={rows[-1]['calls']} hit={rows[-1]['hit']}",
                   flush=True)
 
 
@@ -138,6 +141,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--panel-system", action="append", choices=tuple(sc.PAPER_BUDGETS))
     parser.add_argument("--rgpot-revision")
     parser.add_argument("--check-rows", type=Path)
+    parser.add_argument("--check-system", default=CHECK_SYSTEM, choices=tuple(sc.PAPER_BUDGETS))
+    parser.add_argument("--no-panel", action="store_true")
     parser.add_argument("--n78-rows", type=Path)
     parser.add_argument("--starts78", type=Path)
     parser.add_argument("--reference78", type=Path)
@@ -156,7 +161,8 @@ def main(argv: list[str]) -> int:
         print(f"working directory is {Path.cwd()}, expected /work", file=sys.stderr)
         return 2
     head = args.head_file.read_text().strip()
-    panel(args, head, "")
+    if not args.no_panel:
+        panel(args, head, "")
     if not args.no_n78:
         n78.append_runs(str(args.sc_h2h), head, args.reference78.read_text().strip(), args.starts78,
                         args.logs / "sc96-78", args.n78_rows)
