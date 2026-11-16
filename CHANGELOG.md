@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- ``bench/h2h.json`` lists every head-to-head Snakemake rule with its competitors, runners, budget source, asv suite and committed row tables. Rules that are not head-to-heads are listed with a reason. ``pytest/test_h2h_coverage.py`` checks that every rule is classified, that each suite imports and has a smoke, that the suite, the runner and the committed rows agree on ``PAPER_BUDGETS``, that runners use at least six seeds, that drivers pin to one core, that committed rows carry ``code_revision`` and ``host``, and that ``snakemake -n`` resolves every head-to-head target.
+- Every head-to-head asv suite has a smoke built on ``bench/h2h.py``. The helper builds an example and runs it at a small budget in a scratch directory. Setup raises ``NotImplementedError`` when an external engine, library or Python stack is missing, so asv reports n/a. New suites cover the Darby metal run, the third covalent panel, the (H2O)20 GOAT campaign and the TRIC quench. Those smokes write to scratch instead of over the committed tables.
+- ``covalent_h2h`` runs the third covalent panel. It calls ``scripts/covalent_h2h/enter_bench.sh`` with ``BENCH_OUT=v3`` and ``BEFORE_REV=7da10659``, and writes ``bench/covalent-h2h/v3/seeds.csv`` and ``results.csv``.
+- Head-to-head rows record ``code_revision`` and ``host``. ``code_revision`` is the anneal checkout for anneal rows and the competitor's own revision where the runner knows it. openconf keeps its harness checkout in ``code_revision`` and the pinned openconf commit in ``openconf_revision``. ``host`` is the UTS nodename the drivers set to bench. Rows already on disk are not backfilled. An append-only table widens a stored header to the new columns once and leaves the new cells empty.
 - ``Config::recommended_molecular`` turns on ring crankshafts. A rotatable bond is a bridge of the bond graph, so a torsion never changes a ring. With ``ring_moves`` the torsion kernel also turns one arc of a flexible ring about the axis through the two ring atoms that bound it. A molecule with no flexible ring draws the same hops.
 - ``Config::hold_stereocentres`` refuses a quench step that turns a declared stereocentre over from the hand the quench started in. The refused step is not a potential call. It backs off toward the anchor and the descent continues. ``recommended_molecular`` sets it.
 - ``Config::measured_energy_scale`` replaces ``energy_scale`` in a single chain's temperature and deposit height with the median quenched energy change of the first 20 hops. Convergence and the return screen keep the declared scale. A replica ladder is left alone. ``recommended_molecular`` sets it. It is off unless the preset or the caller sets it.
@@ -387,6 +391,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- ``LocalStep::Auto`` times one TRIC step as the least of three probes. The call side is already a mean over at least three charged calls. One cold wall-clock sample could make a slow gradient look cheaper than the step and keep L-BFGS.
 - Acklam's inverse-normal coefficients keep an allow for the published digits. The TIP4P profile keeps its index loops. The cutoff test names the fractional wrap inside its format string.
 - An orbit-completion quench that lowers the incumbent is an encounter. The charged count on that row is the ledger's spent when the incumbent was stored. A first-encounter hit reads that count.
 - The Python ``cluster_archive_search`` relaxes with
@@ -640,6 +645,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Miscellaneous
 
+- The large-file audit skips the blobs named in ``.github/large-blobs.txt`` and no others. Those objects are already in develop and are over 1 MiB. Any other blob over 1 MiB still fails a push or a pull request. Lint steps after ``cargo fmt`` run unless the job is cancelled, so a red fmt still reports the clippy checks. ``rgsaddle`` has its own clippy step.
 - CI runs on pushes to ``develop`` and to ``main``. ``cargo fmt`` checks
   the workspace member. Workspace exclude covers ``nng`` and ``nng-sys``.
   It also covers ``metatensor-sys``. Stable rustfmt formats the workspace
