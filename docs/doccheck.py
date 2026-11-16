@@ -1735,10 +1735,14 @@ def _code_corpus(root: Path) -> str:
 
 def bash_errors(code: str, root: Path, ctx) -> list[str]:
     errors = []
-    if shutil.which("bash"):
-        proc = subprocess.run(["bash", "-n"], input=code, capture_output=True, text=True)
+    # The path from PATH: for a bare name Windows searches System32, where
+    # WSL puts its own bash.exe, before PATH.  Bytes, because a text pipe
+    # there writes CRLF, and bash then reads "then\r" for "then".
+    bash = shutil.which("bash")
+    if bash:
+        proc = subprocess.run([bash, "-n"], input=code.encode(), capture_output=True)
         if proc.returncode != 0:
-            errors.append(f"bash -n: {proc.stderr.strip()}")
+            errors.append(f"bash -n: {proc.stderr.decode(errors='replace').strip()}")
     errors.extend(e.split(": ", 1)[1] for e in facts_line_errors(code, root, ctx))
     return errors
 
