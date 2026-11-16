@@ -352,6 +352,19 @@ jobs:
           echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
           echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
 
+      # Restores third-party crates and the native libraries their build
+      # scripts compile; anneal-core itself always rebuilds. The Python
+      # cells of one OS share an entry: three feature entries instead of
+      # twelve fit the repository's cache quota. pyo3-build-config reruns
+      # when PATH names another interpreter, so a cell rebuilds only the
+      # pyo3 crates. Pull requests read the entries that main and develop
+      # pushes save.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> ../tmp/anneal-target"
+          key: features-${{ matrix.os }}
+          save-if: ${{ github.event_name == 'push' }}
+
       # The default-feature suite runs once per OS in `test-default`.
       # Do not pass `-undefined dynamic_lookup` on macOS. It applies to the
       # test harness as well as the cdylib. With pyo3's `extension-module`
@@ -368,10 +381,12 @@ jobs:
         run: cargo test --features "$CI_FEATURES"
 
       # maturin develop builds the dev profile and cannot reuse the
-      # opt-level 2 test artifacts. Drop them before the wheel.
-      - name: cargo clean (before the wheel)
+      # opt-level 2 test artifacts. Drop the anneal-core test and example
+      # binaries before the wheel; they are nearly all of the tree. The
+      # third-party crates stay for rust-cache to save.
+      - name: cargo clean -p anneal-core (before the wheel)
         if: runner.os != 'macOS'
-        run: cargo clean
+        run: cargo clean -p anneal-core
 
       - name: Create virtualenv
         shell: bash
@@ -455,6 +470,12 @@ jobs:
       - name: Free disk space
         if: runner.os == 'Linux'
         run: bash scripts/ci_free_disk.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> ../tmp/anneal-target"
+          key: default-${{ matrix.os }}
+          save-if: ${{ github.event_name == 'push' }}
 
       - name: cargo test
         run: cargo test
