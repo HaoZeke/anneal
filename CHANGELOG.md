@@ -6,6 +6,164 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-16
+
+### Added
+
+- A how-to guide shows how to run the Sutton-Chen head-to-head runner over a seed range and score its arms.
+  ``docs/scripts/plot_sc_hits.py`` prints hits, median calls to hit, mean penalised average runtime with factor 2 (PAR-2) and a paired sign-flip p-value.
+  It also plots the fraction of seeds solved against energy calls.
+- A shared minimum history can claim the orbit completion of each minimum.
+  ``HistoryHook::claim_completion`` returns true the first time a chain asks for a minimum and false after that.
+  Its default is true, so a chain without a history completes as before.
+  Each completion product is now reported to the history, so other chains recognise it.
+  When a second orbit candidate is identical to the first, it is skipped before its quench.
+  ``Outcome::orbit_duplicates`` counts those skips.
+- The Sutton-Chen potential has the 10-8 row for gold and platinum.
+  Its constants are ``c = 34.408`` and a basin-hopping temperature of 5, from Doye and Wales (1998).
+  A test minimises the 13-point icosahedron over its one free length for all three rows.
+  Each energy agrees with the printed Cambridge value to within 5e-4.
+- ``Config::orbit_core`` chooses the core orbit completion reads its point group from.
+  The default, ``OrbitCore::Fraction``, is the innermost ``Config::symmetrise_core_fraction`` of the atoms about the centroid, as before.
+  ``OrbitCore::Shells(ShellCore)`` builds the core one shell at a time about a centroid weighted by ``exp(-decay r)``.
+  The core grows until the detector finds an operation on it or until it reaches ``max_points`` atoms.
+  Each operation found is refined to the orthogonal fit of the core onto its images, and products equal within ``closure`` close the set.
+  Completion then acts about that core's centre.
+  ``OrbitCore::Both`` relaxes the shell candidate and the fraction candidate and offers the lower.
+  ``ShellCore::scaled`` takes the ``SYMMETRY`` settings of Wales's global minimisation program (GMIN) at 75 atoms.
+  Core symmetrisation and the continuous-symmetry reseed keep the fraction core.
+  ``graph_split`` takes ``GRAPH_ORBIT_CORE=fraction|shells|both``.
+- ``Config::surface_hop_on_best`` adds surface hops to the cluster hop.
+  Each time the run finds a new lowest structure, every least-bound atom is tried on every vacant hollow site where it keeps its neighbour count.
+  Every try is quenched, and the descent follows the lowest product while it goes down.
+  ``packing::surface_hops`` builds the tries.
+  The flag is off by default, and a configuration without it has the same resolved digest as before.
+- ``PairPotential::ccd_morse_minimum`` gives the Cambridge Cluster Database
+  Morse global minima for 38, 55 and 75 atoms, including 55 atoms at
+  ``rho = 3``. A test relaxes the database's 55-atom structures to the table
+  energies.
+- ``anneal landfold`` folds a minima book onto the plane by landmark
+  sketch-map, with farthest-point landmarks, a classical MDS start, the
+  mixed sketch-map stress, and out-of-sample placement. ``anneal.landfold``
+  and ``anneal.landfold_book`` expose it to Python, and a seed fixes the
+  map at any thread count.
+- ``examples/sc_h2h.rs`` records each chain's validated minima in a readcon-db corpus when ``ANNEAL_MINIMA_DB`` names its root.
+  Those minima are read back by ``examples/sc_minima.rs``.
+  The reader lists the distinct energies, how many chains reached each, and their common-neighbour and coordination counts.
+- ``examples/sc_h2h.rs`` runs arm 3 on a Sutton-Chen cluster from a start file.
+  The runner lets the head-to-head with Wales's global minimisation program (GMIN) start both codes at the same random point.
+  Its ``iso`` arm is one chain.
+  In the ``ens`` arm, chains split the budget and share one exact minimum history.
+  That ensemble has no shared bias, no gossip and no restart.
+  The chains take turns at each checkpoint, so a run uses one thread and repeats exactly.
+  A hit stops every chain once a validated quench reaches the reference energy plus 0.001.
+  The ``iso-hop`` and ``ens-hop`` arms add surface hops from each new lowest structure.
+- ``methods::gmin_hop`` is a basin-hopping chain with the structural moves the literature uses on short-range Morse clusters and rigid water: a surface-vacancy relocation and a Deaven-Ho cut-and-splice for atoms, and for TIP4P a whole-cluster orientation step, single-molecule reorientation, relocation of the worst hydrogen-bonded molecule to the surface and a molecular cut-and-splice.
+  Every value-and-gradient call is charged.
+  ``ccd_hits`` runs it as the ``gmin`` arm.
+  On Morse 55 at ``rho = 14`` it does worse than the ``recommended`` preset, 0 of 32 hits against 2 of 32 on seeds 9200 to 9231, so it is not a Morse default.
+- ``paper_controls`` starts each hop arm from a GMIN ``coords`` file when
+  ``PAPER_STARTS`` names a directory of them. Seed ``seed_start + k`` takes
+  ``coords.<k + 1>`` centred at the origin, and the log records the file name
+  and its SHA-256. The walk still draws from the seed. The 200 LJ75 starts
+  are ``lj75_clusters.tgz`` from
+  https://theory.cm.utexas.edu/benchmarks/globalopt/lj75/lj75_clusters.tgz,
+  which is not vendored.
+
+### Developer
+
+- ``lj_causal_runner`` no longer fails on a checkout the causal runner refuses
+  to seal. Before it runs the script, the test applies the script's own
+  ``git diff --quiet HEAD --`` check. On a tree whose tracked files differ from
+  HEAD, or on a directory that is not a git checkout, it prints a warning naming
+  the reason and returns. On a clean commit it runs as before.
+
+### Changed
+
+- The package version is ``[workspace.package].version`` in the workspace
+  ``Cargo.toml``. Member crates inherit that field.
+  Cog (https://nedbatchelder.com/code/cog/) generates the copies from that
+  field.
+  Those copies are the Python, Pixi, Meson, citation, Zenodo, README and C
+  header files.
+  CMake, Sphinx and the compiled libraries read the same field when they
+  configure or compile.
+  Towncrier (https://towncrier.readthedocs.io/en/stable/) reads it when
+  assembling the changelog.
+  A release bump edits that one line, runs cog, then builds the news
+  fragments.
+  Meson and CMake had stayed at 0.5.0.
+- ``Config::for_cluster`` sets ``Config::orbit_core`` to ``OrbitCore::Both(ShellCore::scaled(length_scale))``.
+  Each orbit completion then relaxes a candidate from the shell core and one from the fraction core and offers the lower.
+  The setting carries over to every caller built on ``for_cluster``, such as ``packing_superbasin``.
+  ``recommended``, ``communicating`` and ``derived`` keep the fraction core.
+  ``for_cluster`` is not the base of the presets for the four-point transferable intermolecular potential (TIP4P) water model.
+
+### Fixed
+
+- Acklam's inverse-normal coefficients keep an allow for the published digits. The TIP4P profile keeps its index loops. The cutoff test names the fractional wrap inside its format string.
+- An orbit-completion quench that lowers the incumbent is an encounter. The charged count on that row is the ledger's spent when the incumbent was stored. A first-encounter hit reads that count.
+- The Python ``cluster_archive_search`` relaxes with
+  ``cluster_search::warm_relax``, the closure ``cluster_search::search``
+  uses. Its quench now reads the preset's surfaces, stops at
+  ``record_gradient``, and screens with the predictor. It ran a bare L-BFGS
+  to a 1e-6 gradient on the plain surface before. ``warm_relax`` is public,
+  so a driver that calls the chain itself can take the same relaxation.
+- The icosahedral contact test bonds the first shell at the preset's own length.
+  ``ih_dominated`` and the 555, 421 and 422 class masses use ``contact_cutoff(spec)``.
+  That cutoff is 1.35 at the default ``SoapSpec`` and scales with its cutoff.
+  The cluster hop passes ``SoapSpec::at_length(length_scale)`` at every call.
+  A Sutton-Chen cluster in Cambridge units has nearest neighbours near 0.71.
+  There the fixed 1.35 also bonded the second shell, and an icosahedron read no 555 pairs.
+  Lennard-Jones runs at length one are unchanged.
+- The quickstart now opens with a first `global_optimize` run, showing one budget, where it went, a repeat with the same seed, a gradient and a known start.
+  Its `run_ensemble` example passes an objective that returns one value per chain, which the ensemble requires.
+  The pixi and maturin builds moved to the install how-to, and the pixi steps now build the package before importing it.
+- When the chain is stuck, an orbit completion now faces the biased Metropolis test that a hop faces if it ends in the deposited basin of the lowest structure seen, so the deposits can refuse it.
+  Before, it was accepted on raw energy alone and returned the walk to the shelf it was stuck on.
+  Any other completion still faces the raw energy test.
+  On Sutton-Chen arm 3 (seeds 14100 to 14115, 2e6 potential evaluations), hits rose from 2/16 to 4/16 on 12-6 N=73, from 5/16 to 7/16 on 12-6 N=63, from 9/16 to 11/16 on 9-6 N=61, from 15/16 to 16/16 on 9-6 N=43 and from 14/16 to 15/16 on 9-6 N=78.
+  Every Lennard-Jones 38 seed reports the same calls and energy as before on the recommended preset and on the Smooth Overlap of Atomic Positions (SOAP) preset (72 seeds, 4e5 evaluations).
+  The biased test now takes the energy difference before adding the deposits.
+- ``Config::recommended_with_scales`` builds the recommended preset in a pair potential's own length.
+  ``PairKind::length_scale`` gives that length, ``r_min / 2^(1/6)``.
+  A Morse cluster on reduced units had every length in the preset 12% too wide, including its step and coordination shells.
+  The two-phase surface penalty scales with them.
+  ``Config::recommended`` and every other preset are unchanged.
+  ``examples/morse_table.rs`` scores Morse clusters against the Cambridge table.
+- ``Tip4pCluster`` uses the TIP4P parameters the Cambridge Cluster Database minima were computed with: the oxygen well depth is ``C6^2 / 4 C12`` from Jorgensen's coefficients instead of the rounded 0.6485 kJ/mol, and the Coulomb prefactor is GMIN's 1389.354848.
+  The rounded depth left every minimum about 1.3e-3 kJ/mol per molecule above the database, so 15 and 20 molecule runs on this objective could not reach the published energies.
+  ``ccd_tip4p_minimum`` lists the database energies for 2 to 21 molecules at full precision; ``wales_hodges_minimum`` now returns the same values, which adds the missing 15-molecule entry and replaces the two-decimal values for 8, 12, 20 and 21 molecules, which sat up to 2.57e-3 kJ/mol (N = 21) below the database energies.
+- ``WATER_POLISH_EXTERNAL=1`` runs the Euclidean answer polish only when the search geometry is outside the IRA gate, and stops that polish at the first accepted iterate inside the gate. CREST ``--opt extreme`` runs only on that outside path. Unset, ``answer_gradient`` stays zero and the reported geometry is unchanged.
+- ``WATER_POLISH_EXTERNAL=1`` stops the Euclidean polish after CREST at the first accepted iterate inside the IRA gate and keeps the lowest-energy geometry that is already inside that gate. A polish that starts inside the gate cannot report a geometry outside it.
+- ``WarmLbfgs`` backtracks from an evaluation answered with a non-finite
+  value or gradient, and a refused start ends only that relaxation, at
+  ``+inf``. ``rgmin`` 0.5.0's line search doubled the step on a NaN value,
+  and a NaN gradient at the start became a NaN direction, so one refused SCF
+  sent the engine geometries far out and then NaN coordinates.
+  ``RelaxStats::refused`` counts the refusals.
+- ``paper_controls`` runs every arm but ``population`` through
+  ``cluster_search``. The control arms had their own closure: a bare L-BFGS
+  to a 1e-6 gradient on the plain surface, a start in the preset sphere, and
+  no stop at the reference. ``recommended`` on LJ75 therefore ignored the
+  preset's surfaces and spent far more calls than ``cluster_search::search``
+  on the same seed. A system with a reference now stops at the reference
+  plus ``HIT``, and ``force_to_hit`` is the charged count at that stop. The
+  example's unit tests run under ``cargo test``, and one checks that the
+  ``recommended`` and ``derived`` arms match ``cluster_search::search`` on
+  LJ75 seeds 2000 to 2003 in best energy bits and charged calls.
+- ``ttt_lj38`` and the ``serial`` and ``indep`` arms of
+  ``lj_lattice_ensemble`` run ``cluster_search``, so they walk the preset
+  ``Config::recommended`` names, surfaces included. ``lj_lattice_ensemble``
+  no longer replays ``lj_ensemble_splice`` chains bit for bit, and those arms
+  print different energies and first hits.
+- ``water_tip4p`` relaxes with ``cluster_search::warm_relax`` on
+  ``Config::for_tip4p`` and folds the rotation vectors after it. The descent
+  stops at ``record_gradient`` and each full quench ends with the charged
+  convergence check, as in ``cluster_search::search_from``. It descended to
+  a 1e-6 gradient before, so its hops and first hits move.
+
+
 ## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-14
 
 ### Added
