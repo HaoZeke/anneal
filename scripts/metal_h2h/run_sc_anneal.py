@@ -11,6 +11,10 @@ on seeds 2012-2059 with h2h_sc of e3ed7dad and of the harness revision,
 written to bench/metal-cluster-h2h/sc-n12/sc96-55-seeds.csv, which says
 whether the calls of sc96-55 moved between the two.
 
+--panel-system limits the panel to the systems named, --no-n78 and
+--no-check skip the other two parts, and --rgpot-revision names the rgpot
+build of RGPOT_SC_LIB in an rgpot_revision column of the panel rows.
+
 Each row records the anneal revision, the host and the harness revision.
 A seed already stored for this harness revision is skipped, and no row is
 rewritten. One job at a time, on core 0. The process refuses to run
@@ -58,10 +62,12 @@ def start(binary: Path, runs: Path, system: str, seed: int) -> Path:
 
 
 def panel(args, head: str, revision: str) -> None:
-    fields, rows = gm.load(args.panel_seeds)
-    if list(fields) != list(n12.SEED_FIELDS):
-        raise SystemExit(f"{args.panel_seeds} columns are not run_sc_n12.SEED_FIELDS")
-    for system in n12.EIGHTY + n12.SMALLER:
+    wanted = list(n12.SEED_FIELDS) + (["rgpot_revision"] if args.rgpot_revision else [])
+    fields, rows = gm.load(args.panel_seeds) if args.panel_seeds.is_file() else (wanted, [])
+    if list(fields) != wanted:
+        raise SystemExit(f"{args.panel_seeds} columns are not {', '.join(wanted)}")
+    systems = n12.EIGHTY + n12.SMALLER
+    for system in [s for s in systems if not args.panel_system or s in args.panel_system]:
         for seed in n12.SEEDS:
             if any(r["system"] == system and r["arm"] == "anneal" and r["seed"] == str(seed)
                    and r["harness_revision"] == head for r in rows):
@@ -75,11 +81,15 @@ def panel(args, head: str, revision: str) -> None:
             diag.pop("_arms", None)
             row = n12.as_seed(system, "anneal", parsed, diag)
             row.update({"code_revision": head, "host": os.uname().nodename, "harness_revision": head})
+            if args.rgpot_revision:
+                row["rgpot_revision"] = args.rgpot_revision
             rows.append(row)
-            gm.save(args.panel_seeds, list(n12.SEED_FIELDS), rows)
+            args.panel_seeds.parent.mkdir(parents=True, exist_ok=True)
+            gm.save(args.panel_seeds, wanted, rows)
             print(f"done {system} anneal seed {seed} best={row['best']} hit={row['hit']} wall={row['wall_s']}",
                   flush=True)
-    gm.save(args.panel_summary, list(n12.SUMMARY_FIELDS), n12.summarise(rows, head, revision))
+    if args.panel_summary:
+        gm.save(args.panel_summary, list(n12.SUMMARY_FIELDS), n12.summarise(rows, head, revision))
 
 
 def check(args, head: str) -> None:
@@ -118,19 +128,27 @@ def check(args, head: str) -> None:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
-    parser.add_argument("--sc-h2h", type=Path, required=True)
-    parser.add_argument("--check-binary", type=Path, required=True)
-    parser.add_argument("--check-revision", required=True)
+    parser.add_argument("--sc-h2h", type=Path)
+    parser.add_argument("--check-binary", type=Path)
+    parser.add_argument("--check-revision")
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--logs", type=Path, required=True)
     parser.add_argument("--panel-seeds", type=Path, required=True)
-    parser.add_argument("--panel-summary", type=Path, required=True)
-    parser.add_argument("--check-rows", type=Path, required=True)
-    parser.add_argument("--n78-rows", type=Path, required=True)
-    parser.add_argument("--starts78", type=Path, required=True)
-    parser.add_argument("--reference78", type=Path, required=True)
+    parser.add_argument("--panel-summary", type=Path)
+    parser.add_argument("--panel-system", action="append", choices=tuple(sc.PAPER_BUDGETS))
+    parser.add_argument("--rgpot-revision")
+    parser.add_argument("--check-rows", type=Path)
+    parser.add_argument("--n78-rows", type=Path)
+    parser.add_argument("--starts78", type=Path)
+    parser.add_argument("--reference78", type=Path)
     parser.add_argument("--head-file", type=Path, required=True)
+    parser.add_argument("--no-n78", action="store_true")
+    parser.add_argument("--no-check", action="store_true")
     args = parser.parse_args(argv)
+    needed = ([] if args.no_n78 else ["sc_h2h", "n78_rows", "starts78", "reference78"]) + \
+             ([] if args.no_check else ["check_binary", "check_revision", "check_rows"])
+    if missing := [name for name in needed if getattr(args, name) is None]:
+        parser.error("missing " + ", ".join("--" + name.replace("_", "-") for name in missing))
     if os.uname().nodename != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
@@ -139,9 +157,11 @@ def main(argv: list[str]) -> int:
         return 2
     head = args.head_file.read_text().strip()
     panel(args, head, "")
-    n78.append_runs(str(args.sc_h2h), head, args.reference78.read_text().strip(), args.starts78,
-                    args.logs / "sc96-78", args.n78_rows)
-    check(args, head)
+    if not args.no_n78:
+        n78.append_runs(str(args.sc_h2h), head, args.reference78.read_text().strip(), args.starts78,
+                        args.logs / "sc96-78", args.n78_rows)
+    if not args.no_check:
+        check(args, head)
     return 0
 
 
