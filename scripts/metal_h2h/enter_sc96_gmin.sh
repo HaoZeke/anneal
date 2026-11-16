@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
-# GMIN alone on Sutton-Chen 9-6, N=38 and N=78. One UTS namespace, hostname
-# bench, working directory /work, one job at a time. The anneal rows are not
-# rerun. The harness must be committed, because its HEAD is the
+# GMIN alone on the sc-n12 Sutton-Chen panel and on 9-6 at N=78. One UTS
+# namespace, hostname bench, working directory /work, one job at a time. The
+# anneal rows are not rerun. The harness must be committed, because its HEAD is the
 # harness_revision of every row.
 set -euo pipefail
 
@@ -60,8 +60,8 @@ exec /usr/bin/python3 -u $WORK/bin/run_sc96_gmin.py \\
   --gmin $WORK/bin/GMIN \\
   --runs $RUNS \\
   --logs $LOGS \\
-  --n38-seeds $ROOT/bench/metal-cluster-h2h/sc-n12/seeds.csv \\
-  --n38-summary $ROOT/bench/metal-cluster-h2h/sc-n12/results.csv \\
+  --panel-seeds $ROOT/bench/metal-cluster-h2h/sc-n12/seeds.csv \\
+  --panel-summary $ROOT/bench/metal-cluster-h2h/sc-n12/results.csv \\
   --n78-rows $ROOT/data/sc96_78_hits.csv \\
   --starts78 $STARTS78 \\
   --reference78 $WORK/sc96-78/reference.txt \\
