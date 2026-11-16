@@ -14,7 +14,8 @@ read as exact, so a printed p of 1 cannot stand for 0.6.
 Every row file read here is checked for a code revision and a host. A file
 without them, or whose revision is not in this repository, must be listed in
 ``KNOWN_GAPS``. A revision that was rebuilt on push is read through its alias
-in ``ALIASES`` once the pushed equivalent is verified. Printed numbers no
+in ``ALIASES`` once the pushed equivalent is verified; one with no pushed
+equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
 committed row backs are listed in ``UNTRACED``; their text must still be where
 the list says.
 
@@ -46,6 +47,16 @@ HOST_COLUMNS = ("host",)
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
+# Cited revisions with no pushed equivalent. de22f437 records the ASE and GOFEE
+# panel from five campaign heads and sits on the last, e09e0487, alone. The
+# pushed history before it has one commit, 57735de1, that adds the two-hour
+# cap, yet three heads ran capped, so the heads are not its commits one to one.
+UNPUSHED = {
+    "0f988569b49afe162e2f5ffd71b2ab45d0b3afec": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
+    "349523d3f5f42b748f3af1573166fd17155ac461": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
+    "befbc3e8": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own; the row gives eight digits",
+    "bf09f7a2b7a6bd6359898db675eeafefcd20548b": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
+}
 
 KNOWN_GAPS = {
     "data/sc96_78_hits.csv": "code_revision empty or unknown on some rows; harness_revision empty or unknown on some "
@@ -62,11 +73,9 @@ KNOWN_GAPS = {
     "paper/jctc/data/water_v45b/water-v45b-perseed.csv": "no revision or host column",
     "paper/jctc/data/campaign-scores.csv": "no revision or host column",
     "paper/jctc/data/system_visuals/references.csv": "no revision or host column",
-    "bench/gad-published/rows.csv": "revision 48ecd4c0 is not in this repository",
-    "bench/gad-published/summary.csv": "no host column; revision 238f3582 is not in this repository",
+    "bench/gad-published/summary.csv": "no host column",
     "bench/morse-panel/seeds.csv": "no revision or host column",
     "bench/morse-h2h/seeds.csv": "no revision or host column",
-    "bench/morse-h2h/results.csv": "revision fe9671c8 is not in this repository",
     "bench/fp-fingerprint/rows.csv": "no revision or host column",
     "bench/tip4p-h2h/h2h-summary.csv": "no revision or host column",
     "bench/covalent-h2h/before/seeds.csv": "no revision or host column",
@@ -74,24 +83,13 @@ KNOWN_GAPS = {
     "bench/covalent-h2h/v2/seeds.csv": "no revision or host column",
     "bench/covalent-h2h/v3/seeds.csv": "no revision or host column",
     "bench/covalent-h2h/gfn2/seeds.csv": "no revision or host column",
-    "bench/covalent-h2h/gfn2/rows.csv": "revision e71e5de9 is not in this repository; revision f3d6a050 is not in "
-                                        "this repository",
-    "bench/covalent-h2h/gfn2/false-hits.csv": "no host column; revision f3d6a050 is not in this repository",
+    "bench/covalent-h2h/gfn2/false-hits.csv": "no host column",
     "bench/ase-gofee-h2h/results.csv": "no host column; head empty or unknown on some rows; revision 0f988569 is not in "
                                        "this repository; revision 349523d3 is not in this repository; revision befbc3e8 "
-                                       "is not in this repository; revision bf09f7a2 is not in this repository; revision "
-                                       "e09e0487 is not in this repository",
+                                       "is not in this repository; revision bf09f7a2 is not in this repository",
     "bench/growpal-h2h/seeds.csv": "no revision or host column",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "no revision or host column",
     "bench/nh3-octamer/ladder.csv": "no revision or host column",
-    "bench/generic-alloy/g3-priors-off-rows.csv": "revision 95c27427 is not in this repository",
-    "bench/generic-alloy/g3-priors-on-rows.csv": "revision 95c27427 is not in this repository",
-    "bench/regress-bb486bfd/rows.csv": "revision bdf08495 is not in this repository",
-    "bench/openconf-h2h/paired/seeds.csv": "revision d178bd15 is not in this repository",
-    "bench/openconf-h2h/conf-fix/seeds.csv": "revision b09285bb is not in this repository",
-    "bench/openconf-h2h/conf-fix3/seeds.csv": "revision cf660e19 is not in this repository",
-    "bench/openconf-h2h/conf-fix4/seeds.csv": "revision 2a5b4553 is not in this repository",
-    "bench/openconf-h2h/conf-fix4/n24/seeds.csv": "revision 26b70c01 is not in this repository",
 }
 
 UNTRACED = [
@@ -1190,12 +1188,17 @@ def provenance(audit: Audit) -> dict[str, str]:
             gaps[path] = "; ".join(problems)
     names = sorted(revisions)
     aliases = verified_aliases(audit)
+    unpushed = set()
     for name in (n for n in names if not commit_exists(n)):
         if any(local.startswith(name) for local in aliases):
             continue
+        unpushed.add(name)
         for path in revisions[name]:
             note = f"revision {name[:8]} is not in this repository"
             gaps[path] = f"{gaps[path]}; {note}" if path in gaps else note
+    for name in sorted(unpushed | (set(UNPUSHED) & set(names))):
+        audit.record(name in unpushed and name in UNPUSHED, ", ".join(sorted(revisions[name])), f"unpushed revision {name[:8]}",
+                     UNPUSHED.get(name, "not listed"), "no pushed equivalent" if name in unpushed else "resolved")
     return gaps
 
 
@@ -1232,9 +1235,12 @@ def verified_aliases(audit: Audit) -> dict[str, str]:
     """Local revisions of ALIASES whose pushed equivalent checks out, mapped to it.
 
     Each alias is checked: the local revision is not in the repository; the
-    pushed and branch revisions are, are reachable from a remote ref, and have
-    the recorded patch-id; the rows commit is the first in its history to cite
-    the local revision and its parent is the pushed revision.
+    pushed revision and the branch revision, when there is one, are, are
+    reachable from a remote ref, and have the recorded patch-id; the rows
+    commit is the first in its history to cite the local revision and has
+    one parent. That parent is the pushed revision, or, when the alias names
+    the paths in ``differs_only_in``, descends from it and differs from it
+    in those paths alone.
     """
     with (ROOT / ALIASES).open(newline="") as handle:
         table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
@@ -1245,12 +1251,23 @@ def verified_aliases(audit: Audit) -> dict[str, str]:
         checks = [("local revision is not in this repository", not commit_exists(local))]
         for column in ("pushed_revision", "branch_revision"):
             revision = row[column]
+            if not revision and column == "branch_revision":
+                continue
             checks.append((f"{column} {revision[:8]} is in this repository", commit_exists(revision)))
             checks.append((f"{column} {revision[:8]} is on the remote", on_github(revision)))
             checks.append((f"{column} {revision[:8]} has patch-id {row['patch_id'][:8]}", patch_id(revision) == row["patch_id"]))
         rows_commit = row["rows_commit"]
         parents = git("rev-parse", f"{rows_commit}^@").stdout.split()
-        checks.append((f"rows commit {rows_commit[:8]} sits on {pushed[:8]}", parents == [pushed]))
+        allowed = row["differs_only_in"].split()
+        if allowed:
+            parent = parents[0] if len(parents) == 1 else ""
+            descends = bool(parent) and git("merge-base", "--is-ancestor", pushed, parent).returncode == 0
+            changed = git("diff", "--name-only", pushed, parent, "--").stdout.split() if descends else None
+            checks.append((f"rows commit {rows_commit[:8]} sits on a descendant of {pushed[:8]}", descends))
+            checks.append((f"{pushed[:8]} differs from the rows commit's parent only in {' '.join(allowed)}",
+                           changed is not None and set(changed) <= set(allowed)))
+        else:
+            checks.append((f"rows commit {rows_commit[:8]} sits on {pushed[:8]}", parents == [pushed]))
         checks.append((f"rows commit {rows_commit[:8]} first cites {local[:8]}", first_citation(local, rows_commit) == rows_commit))
         for label, ok in checks:
             audit.record(ok, where, label, "holds", "holds" if ok else "fails")
@@ -1268,6 +1285,9 @@ def run(report: bool = False) -> int:
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
     gaps = provenance(audit)
+    cited = {r[c].strip() for rows in audit.read.values() for r in rows for c in REVISION_COLUMNS if c in r}
+    for name in sorted(set(UNPUSHED) - cited):
+        audit.record(False, "UNPUSHED", f"unpushed revision {name[:8]}", UNPUSHED[name], "no row cites it")
     for path in sorted(set(gaps) | set(KNOWN_GAPS)):
         listed = path in KNOWN_GAPS
         audit.record(listed and path in gaps and KNOWN_GAPS[path] == gaps[path], path, "provenance",

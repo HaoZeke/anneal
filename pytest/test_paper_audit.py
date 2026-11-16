@@ -190,15 +190,17 @@ def test_an_unnamed_gfn2_false_hit_is_reported():
 
 
 SC_N12_ROWS = ("bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv")
+CONF_FIX4 = "bench/openconf-h2h/conf-fix4/seeds.csv"
+ASE_GOFEE = "bench/ase-gofee-h2h/results.csv"
 
 
-def aliased_audit(tmp_path, monkeypatch, edit):
+def aliased_audit(tmp_path, monkeypatch, edit, paths=SC_N12_ROWS):
     table = (ROOT / audit_mod.ALIASES).read_text()
     edited = tmp_path / "revision-aliases.csv"
     edited.write_text(edit(table))
     monkeypatch.setattr(audit_mod, "ALIASES", str(edited))
     audit = audit_mod.Audit()
-    for path in SC_N12_ROWS:
+    for path in paths:
         audit.rows(path)
     return audit, audit_mod.provenance(audit)
 
@@ -206,14 +208,44 @@ def aliased_audit(tmp_path, monkeypatch, edit):
 def test_every_alias_is_verified_and_clears_the_sc_n12_rows(tmp_path, monkeypatch):
     audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda table: table)
     assert not audit.drifts()
-    assert len(audit.results) == 3 * 9
+    table = [line for line in (ROOT / audit_mod.ALIASES).read_text().splitlines() if line[:1] not in ("#", "l")]
+    assert {r[1] for r in audit.results} == {f"{audit_mod.ALIASES} {line[:8]}" for line in table}
     assert gaps == {}
+
+
+def test_an_alias_off_the_rows_commit_parent_is_held_to_its_paths(tmp_path, monkeypatch):
+    audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda t: t.replace(",workflow/Snakefile\n", ",README.md\n"),
+                                (CONF_FIX4,))
+    assert [r[2] for r in audit.drifts()] == ["fc1ddc5b differs from the rows commit's parent only in README.md",
+                                              "unpushed revision 2a5b4553"]
+    assert gaps == {CONF_FIX4: "revision 2a5b4553 is not in this repository"}
+
+
+def test_an_alias_off_the_rows_commit_parent_must_be_its_ancestor(tmp_path, monkeypatch):
+    audit, _ = aliased_audit(tmp_path, monkeypatch, lambda t: t.replace("fc1ddc5b6aedcb1bac5cf428ee4ff8d8c894d9cd",
+                                                                        "d99354073ae917995172e9a49f7e2694a0848441"),
+                             (CONF_FIX4,))
+    assert {"rows commit 93c14173 sits on a descendant of d9935407",
+            "d9935407 differs from the rows commit's parent only in workflow/Snakefile"} <= {r[2] for r in audit.drifts()}
+
+
+def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
+    unpushed = dict(audit_mod.UNPUSHED)
+    del unpushed["bf09f7a2b7a6bd6359898db675eeafefcd20548b"]
+    unpushed["e09e0487c52b7f4789bc556ee7fe07ead4999824"] = "listed although its alias holds"
+    monkeypatch.setattr(audit_mod, "UNPUSHED", unpushed)
+    audit, _ = aliased_audit(tmp_path, monkeypatch, lambda table: table, (ASE_GOFEE,))
+    assert [(r[2], r[3], r[4]) for r in audit.drifts()] == [
+        ("unpushed revision bf09f7a2", "not listed", "no pushed equivalent"),
+        ("unpushed revision e09e0487", "listed although its alias holds", "resolved"),
+    ]
 
 
 def test_an_alias_with_another_patch_id_is_reported(tmp_path, monkeypatch):
     audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda t: t.replace("d4c75b4441714e8f", "d4c75b4441714e8e"))
     assert {r[2] for r in audit.drifts()} == {"pushed_revision bc3e0cb1 has patch-id d4c75b44",
-                                               "branch_revision 6e425a39 has patch-id d4c75b44"}
+                                               "branch_revision 6e425a39 has patch-id d4c75b44",
+                                               "unpushed revision f9d1ac05"}
     assert gaps == {path: "revision f9d1ac05 is not in this repository" for path in SC_N12_ROWS}
 
 
@@ -222,7 +254,8 @@ def test_an_alias_to_an_unknown_commit_is_reported(tmp_path, monkeypatch):
     assert {r[2] for r in audit.drifts()} == {"pushed_revision 79ec1b7f is in this repository",
                                                "pushed_revision 79ec1b7f is on the remote",
                                                "pushed_revision 79ec1b7f has patch-id debc2a84",
-                                               "rows commit ba7c3b45 sits on 79ec1b7f"}
+                                               "rows commit ba7c3b45 sits on 79ec1b7f",
+                                               "unpushed revision a50f4b02"}
     assert gaps == {path: "revision a50f4b02 is not in this repository" for path in SC_N12_ROWS}
 
 
@@ -230,7 +263,8 @@ def test_an_alias_whose_rows_commit_is_elsewhere_is_reported(tmp_path, monkeypat
     audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda t: t.replace("dd9ef6f76ff8ec3adbc4495d401893d03d3bf916",
                                                                              "ba7c3b45c0ddc9394156b1441519561555731e88", 1))
     assert {r[2] for r in audit.drifts()} == {"rows commit ba7c3b45 sits on 016b6911",
-                                               "rows commit ba7c3b45 first cites 9149d1b0"}
+                                               "rows commit ba7c3b45 first cites 9149d1b0",
+                                               "unpushed revision 9149d1b0"}
     assert gaps == {path: "revision 9149d1b0 is not in this repository" for path in SC_N12_ROWS}
 
 
