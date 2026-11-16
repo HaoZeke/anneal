@@ -281,7 +281,8 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   endif()
 
   if(RGPOT_WITH_IPI)
-    list(APPEND RGPOT_SOURCES CppCore/rgpot/IPIPot/IPIPot.cc)
+    list(APPEND RGPOT_SOURCES CppCore/rgpot/IPIPot/IPIWire.cc
+         CppCore/rgpot/IPIPot/IPIPot.cc)
   endif()
 
   if(RGPOT_WITH_EAM_TABLE)
