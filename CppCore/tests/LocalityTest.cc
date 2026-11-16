@@ -4,8 +4,8 @@
 // locality() of the finite-range potentials. Half of a periodic box,
 // evaluated with every periodic image within the force range around it
 // in a padded orthogonal box, gives that half the forces, site energies
-// and per-atom virials of the periodic box. This is what pair_style
-// rgpot's domain path relies on.
+// and per-atom virials of the periodic box. StagedTest.cc covers the
+// staged evaluation, which needs the images within one cutoff only.
 
 #include <algorithm>
 #include <array>

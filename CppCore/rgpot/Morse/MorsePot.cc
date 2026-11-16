@@ -73,8 +73,6 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
   const auto n_atoms = static_cast<std::size_t>(N);
   updateNeighbours(in);
   const double cutoff2 = cuttOffR * cuttOffR;
-  const double twoDeA = 2.0 * De * a;
-  const bool switched = m_config.switch_width != 0.0;
   const int nt = nlist::threadsRequested();
   auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
                     double r2, double *force, double &energy, double *virial,
@@ -82,19 +80,9 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
     if (!(i < j) || !(r2 > 0.0) || r2 > cutoff2) {
       return;
     }
-    const double r = std::sqrt(r2);
-    const double d = 1.0 - simd::exp_fixed(-a * (r - re));
-    const double bare = De * d * d - De;
     double pair_e = 0.0;
     double fscale = 0.0;
-    if (switched) {
-      const auto s = m_switch(r);
-      pair_e = bare * s.s;
-      fscale = (twoDeA * d * (d - 1.0) * s.s - bare * s.dsdr) / r;
-    } else {
-      pair_e = bare - energyCutoff;
-      fscale = twoDeA * d * (d - 1.0) / r;
-    }
+    pairTerm(std::sqrt(r2), pair_e, fscale);
     energy += pair_e;
     const double fx = fscale * dx;
     const double fy = fscale * dy;
@@ -147,6 +135,40 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
   }
   *U = energy;
   publishCauchyStress(out, strain, volume);
+}
+
+void MorsePot::pairTerm(double r, double &energy, double &fscale) const {
+  const double twoDeA = 2.0 * De * a;
+  const double d = 1.0 - simd::exp_fixed(-a * (r - re));
+  const double bare = De * d * d - De;
+  if (m_config.switch_width != 0.0) {
+    const auto s = m_switch(r);
+    energy = bare * s.s;
+    fscale = (twoDeA * d * (d - 1.0) * s.s - bare * s.dsdr) / r;
+  } else {
+    energy = bare - energyCutoff;
+    fscale = twoDeA * d * (d - 1.0) / r;
+  }
+}
+
+void MorsePot::forceStage(const HalfList &list, const double *, double *forces,
+                          StageTally *tally) const {
+  if (cuttOffR <= 0.0) {
+    return;
+  }
+  const double cutoff2 = cuttOffR * cuttOffR;
+  staged::withTally(tally, [&](auto tallied) {
+    staged::forEachPair(
+        list, [&](int i, int j, double dx, double dy, double dz, double r2, bool both) {
+          if (!(r2 > 0.0) || r2 > cutoff2) {
+            return;
+          }
+          double pair_e = 0.0;
+          double fscale = 0.0;
+          pairTerm(std::sqrt(r2), pair_e, fscale);
+          staged::addPair(tallied, forces, tally, i, j, both, pair_e, fscale, dx, dy, dz);
+        });
+  });
 }
 
 void MorsePot::updateNeighbours(const ForceInput &in) const {

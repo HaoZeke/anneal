@@ -21,6 +21,7 @@
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
+#include "rgpot/Staged.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
@@ -98,6 +99,13 @@ public:
 
   /// forceImpl plus each pair energy and virial split half to each atom.
   void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
+  /// Staged.hpp: a pair potential has no densities.
+  void densityStage(const HalfList &, double *) const {}
+
+  /// Staged.hpp: the pair terms of forceImpl on a host's list.
+  void forceStage(const HalfList &list, const double *densities, double *forces,
+                  StageTally *tally) const;
 
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 

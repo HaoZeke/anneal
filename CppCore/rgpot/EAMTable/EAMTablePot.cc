@@ -9,6 +9,9 @@
  * (src/MANYBODY/pair_eam.cpp). The force on atom i along d = r_i - r_j is
  * fscale * d with fscale = -(F'_a rho'_ab + F'_b rho'_ba + phi'_ab) / r,
  * and with EAMTableConfig::stress the same pass sums -fscale * d (x) d.
+ * The stages of Staged.hpp evaluate the same terms on a host's list; the
+ * force stage takes F' of every atom, copies too, from the densities the
+ * host completed.
  */
 
 // clang-format off
@@ -125,6 +128,72 @@ Knot lookup(const std::vector<double> &s, double x, double rdx, int n) {
   const double q = x * rdx + 1.0;
   const int m = std::max(1, std::min(static_cast<int>(q), n - 1));
   return {s.data() + 7 * static_cast<std::size_t>(m - 1), std::min(q - m, 1.0)};
+}
+
+/// The terms of one EAMTablePot that compute() and the stages share.
+struct Terms {
+  const rgpot::EAMTable &t;
+  const std::vector<std::vector<double>> &frho;
+  const std::vector<std::vector<double>> &rhor;
+  const std::vector<std::vector<double>> &z2r;
+  std::size_t nel = t.z.size();
+  double rdr = 1.0 / t.dr;
+  double rdrho = 1.0 / t.drho;
+
+  /// rho_ab(r), the density element b puts at an a site.
+  [[nodiscard]] double density(std::size_t a, std::size_t b, double r) const {
+    return lookup(rhor[b * nel + a], r, rdr, t.nr).value();
+  }
+
+  /// F'_a(rho).
+  [[nodiscard]] double slope(std::size_t a, double rho) const {
+    return lookup(frho[a], rho, rdrho, t.nrho).slope();
+  }
+
+  /// F_a(rho), extended linearly above rhomax as pair_style eam does, and
+  /// F'_a(rho) in @p slope.
+  double embedding(std::size_t a, double rho, double &slope) const {
+    const Knot k = lookup(frho[a], rho, rdrho, t.nrho);
+    slope = k.slope();
+    double e = k.value();
+    if (rho > t.rhomax) {
+      e += slope * (rho - t.rhomax);
+    }
+    return e;
+  }
+
+  /// phi_ab(r), and the force scale of the pair of an a atom i and a b
+  /// atom j at distance r, with fi = F'_a(rho_i) and fj = F'_b(rho_j).
+  double pair(std::size_t a, std::size_t b, double r, double fi, double fj, double &phi) const {
+    const double rhoip = lookup(rhor[a * nel + b], r, rdr, t.nr).slope();
+    const double rhojp = lookup(rhor[b * nel + a], r, rdr, t.nr).slope();
+    const auto hi = std::max(a, b);
+    const Knot z2 = lookup(z2r[hi * (hi + 1) / 2 + std::min(a, b)], r, rdr, t.nr);
+    const double recip = 1.0 / r;
+    phi = z2.value() * recip;
+    const double phip = z2.slope() * recip - phi * recip;
+    return -(fi * rhojp + fj * rhoip + phip) * recip;
+  }
+};
+
+/// Element index of each atom of a staged list, -1 for an atomic number
+/// the table lacks. The host may hold such atoms, as long as no listed
+/// pair reaches them.
+std::vector<int> elements(const rgpot::EAMTable &t, const rgpot::HalfList &list) {
+  std::vector<int> el(list.nAtoms, -1);
+  for (std::size_t i = 0; i < list.nAtoms; ++i) {
+    const auto it = std::find(t.z.begin(), t.z.end(), list.atmnrs[i]);
+    if (it != t.z.end()) {
+      el[i] = static_cast<int>(it - t.z.begin());
+    }
+  }
+  return el;
+}
+
+[[noreturn]] void unmapped(const rgpot::HalfList &list, const std::vector<int> &el, int i,
+                           int j) {
+  bad("no element for atomic number " +
+      std::to_string(list.atmnrs[el[static_cast<std::size_t>(i)] < 0 ? i : j]));
 }
 
 } // namespace
@@ -264,7 +333,6 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
   out->energy = 0.0;
   out->variance = 0.0;
   const EAMTable &t = m_table;
-  const auto nel = t.z.size();
   std::vector<std::size_t> el(n_size);
   for (std::size_t i = 0; i < n_size; ++i) {
     const auto it = std::find(t.z.begin(), t.z.end(), in.atmnrs[i]);
@@ -299,8 +367,7 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
   // A local list keeps one instance safe to share across threads.
   nlist::Neighbours cells;
   const double cut2 = t.cutoff * t.cutoff;
-  const double rdr = 1.0 / t.dr;
-  const double rdrho = 1.0 / t.drho;
+  const Terms terms{t, m_frho, m_rhor, m_z2r};
 
   const bool pairs = n_size >= 2;
   if (pairs) {
@@ -319,25 +386,16 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
                     const auto a = el[static_cast<std::size_t>(i)];
                     const auto b = el[static_cast<std::size_t>(j)];
                     const double r = std::sqrt(r2);
-                    rho[static_cast<std::size_t>(i)] +=
-                        lookup(m_rhor[b * nel + a], r, rdr, t.nr).value();
-                    rho[static_cast<std::size_t>(j)] +=
-                        lookup(m_rhor[a * nel + b], r, rdr, t.nr).value();
+                    rho[static_cast<std::size_t>(i)] += terms.density(a, b, r);
+                    rho[static_cast<std::size_t>(j)] += terms.density(b, a, r);
                   });
   }
 
   std::vector<double> fprime(n_size, 0.0);
   double energy = 0.0;
   for (std::size_t i = 0; i < n_size; ++i) {
-    const Knot k = lookup(m_frho[el[i]], rho[i], rdrho, t.nrho);
-    fprime[i] = k.slope();
-    double embed = k.value();
+    const double embed = terms.embedding(el[i], rho[i], fprime[i]);
     energy += embed;
-    if (rho[i] > t.rhomax) {
-      const double above = fprime[i] * (rho[i] - t.rhomax);
-      energy += above;
-      embed += above;
-    }
     if (atoms != nullptr && atoms->energy != nullptr) {
       atoms->energy[i] += embed;
     }
@@ -353,21 +411,9 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
           }
           const auto ui = static_cast<std::size_t>(i);
           const auto uj = static_cast<std::size_t>(j);
-          const auto a = el[ui];
-          const auto b = el[uj];
-          const double r = std::sqrt(r2);
-          const double rhoip =
-              lookup(m_rhor[a * nel + b], r, rdr, t.nr).slope();
-          const double rhojp =
-              lookup(m_rhor[b * nel + a], r, rdr, t.nr).slope();
-          const auto hi = std::max(a, b);
-          const Knot z2 =
-              lookup(m_z2r[hi * (hi + 1) / 2 + std::min(a, b)], r, rdr, t.nr);
-          const double recip = 1.0 / r;
-          const double phi = z2.value() * recip;
-          const double phip = z2.slope() * recip - phi * recip;
+          double phi = 0.0;
           const double fscale =
-              -(fprime[ui] * rhojp + fprime[uj] * rhoip + phip) * recip;
+              terms.pair(el[ui], el[uj], std::sqrt(r2), fprime[ui], fprime[uj], phi);
           energy += phi;
           F[3 * ui] += fscale * dx;
           F[3 * ui + 1] += fscale * dy;
@@ -388,6 +434,72 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
   if (m_stress) {
     publishCauchyStress(out, strain, cellVolume(in.box));
   }
+}
+
+void EAMTablePot::densityStage(const HalfList &list, double *densities) const {
+  const Terms terms{m_table, m_frho, m_rhor, m_z2r};
+  const std::vector<int> el = elements(m_table, list);
+  const double cut2 = m_table.cutoff * m_table.cutoff;
+  staged::forEachPair(list, [&](int i, int j, double, double, double, double r2, bool both) {
+    if (!(r2 > 0.0) || !(r2 < cut2)) {
+      return;
+    }
+    const int a = el[static_cast<std::size_t>(i)];
+    const int b = el[static_cast<std::size_t>(j)];
+    if (a < 0 || b < 0) {
+      unmapped(list, el, i, j);
+    }
+    const double r = std::sqrt(r2);
+    const auto ua = static_cast<std::size_t>(a);
+    const auto ub = static_cast<std::size_t>(b);
+    densities[i] += terms.density(ua, ub, r);
+    if (both) {
+      densities[j] += terms.density(ub, ua, r);
+    }
+  });
+}
+
+void EAMTablePot::forceStage(const HalfList &list, const double *densities, double *forces,
+                             StageTally *tally) const {
+  const Terms terms{m_table, m_frho, m_rhor, m_z2r};
+  const std::vector<int> el = elements(m_table, list);
+  std::vector<double> fprime(list.nAtoms, 0.0);
+  for (std::size_t i = 0; i < list.nAtoms; ++i) {
+    if (el[i] >= 0) {
+      fprime[i] = terms.slope(static_cast<std::size_t>(el[i]), densities[i]);
+    }
+  }
+  if (tally != nullptr) {
+    for (std::size_t k = 0; k < list.nRows; ++k) {
+      const int i = list.rows[k];
+      const int a = el[static_cast<std::size_t>(i)];
+      if (a < 0) {
+        unmapped(list, el, i, i);
+      }
+      double slope = 0.0;
+      staged::addSite(*tally, i,
+                      terms.embedding(static_cast<std::size_t>(a), densities[i], slope));
+    }
+  }
+  const double cut2 = m_table.cutoff * m_table.cutoff;
+  staged::withTally(tally, [&](auto tallied) {
+    staged::forEachPair(
+        list, [&](int i, int j, double dx, double dy, double dz, double r2, bool both) {
+          if (!(r2 > 0.0) || !(r2 < cut2)) {
+            return;
+          }
+          const auto ui = static_cast<std::size_t>(i);
+          const auto uj = static_cast<std::size_t>(j);
+          if (el[ui] < 0 || el[uj] < 0) {
+            unmapped(list, el, i, j);
+          }
+          double phi = 0.0;
+          const double fscale =
+              terms.pair(static_cast<std::size_t>(el[ui]), static_cast<std::size_t>(el[uj]),
+                         std::sqrt(r2), fprime[ui], fprime[uj], phi);
+          staged::addPair(tallied, forces, tally, i, j, both, phi, fscale, dx, dy, dz);
+        });
+  });
 }
 
 } // namespace rgpot

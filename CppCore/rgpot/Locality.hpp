@@ -26,6 +26,11 @@
  * per-atom virials (PerAtom.hpp) of its own atoms: they equal those of
  * the whole system.
  *
+ * A potential with the staged evaluation of Staged.hpp needs less: atoms
+ * within @c cutoff and an exchange of @c densities values per atom
+ * between its two stages, which carries what the neighbours of the
+ * neighbours contribute.
+ *
  * A cutoff of 0 declares no finite range (a whole-system or long-range
  * potential, or a truncation switched off).
  */
@@ -39,6 +44,10 @@ struct Locality {
   double cutoff = 0.0;
   /// Every energy term is a function of one pair distance.
   bool pairwise = false;
+  /// Values per atom that the density stage of Staged.hpp sums over the
+  /// neighbours and the force stage reads at both atoms of a pair. 0 for
+  /// a potential without densities.
+  int densities = 0;
 
   [[nodiscard]] constexpr bool finite() const noexcept { return cutoff > 0.0; }
 

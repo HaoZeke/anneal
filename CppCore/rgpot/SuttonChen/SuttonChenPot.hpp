@@ -33,6 +33,7 @@
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
+#include "rgpot/Staged.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
@@ -119,9 +120,10 @@ public:
   }
 
   /// The density and the pair term both stop at the cutoff. A cutoff <= 0
-  /// keeps every pair, so there is no finite range.
+  /// keeps every pair, so there is no finite range. The staged evaluation
+  /// exchanges rho.
   [[nodiscard]] Locality locality() const noexcept {
-    return {.cutoff = m_config.cutoff > 0.0 ? m_config.cutoff : 0.0};
+    return {.cutoff = m_config.cutoff > 0.0 ? m_config.cutoff : 0.0, .densities = 1};
   }
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
@@ -130,6 +132,15 @@ public:
   /// -epsilon c sqrt(rho_i), and each pair energy and virial split half to
   /// each atom.
   void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
+  /// Staged.hpp: adds (a / r)^m to the density of each atom of a pair.
+  void densityStage(const HalfList &list, double *densities) const;
+
+  /// Staged.hpp: -epsilon c sqrt(rho_i) of each owned atom and the pair
+  /// forces with the embedding weights of both atoms, tallied as
+  /// forcePerAtom tallies them.
+  void forceStage(const HalfList &list, const double *densities, double *forces,
+                  StageTally *tally) const;
 
   /// Stored Verlet list or a streaming cell walk.
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }

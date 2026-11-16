@@ -310,22 +310,88 @@ void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) 
   =rgpot::LJPot= and =rgpot::MorsePot=, the unit of =a= for
   =rgpot::SuttonChenPot= and the unit of the table for =rgpot::EAMTablePot=.
 - Outputs :: a =rgpot::Locality= from =CppCore/rgpot/Locality.hpp=.
-  =cutoff= is the range of each site energy, and =pairwise= is true when every
-  energy term is a function of one pair distance.
+  =cutoff= is the range of each site energy, =pairwise= is true when every
+  energy term is a function of one pair distance, and =densities= is the number
+  of values per atom that =densityStage= sums and =forceStage= reads.
   =forceRange()= is =cutoff= for a pairwise potential and twice =cutoff=
   otherwise; the atoms within it of an atom set the force on that atom.
   A host that evaluates its own atoms with every atom within =forceRange()= of
   them, free of periodic images, gets the forces, site energies and per-atom
   virials those atoms have in the whole system.
+  With =densityStage= and =forceStage= it needs only the atoms within =cutoff=,
+  and exchanges =densities= values per atom between the two stages.
   A =cutoff= of 0 declares no finite range.
 - Errors :: none.
 
 =rgpot::LJPot= and =rgpot::MorsePot= return their cutoff with =pairwise= set,
 and 0 when the cutoff is 0 or less.
 =rgpot::SuttonChenPot= and =rgpot::EAMTablePot= return their cutoff as a
-many-body range.
+many-body range with =densities= 1.
 =rgpot::SuttonChenPot= returns 0 when its cutoff is 0 or less, since it then
 keeps every pair.
+
+*** =.densityStage=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void densityStage(const HalfList &list, double *densities) const;
+#+end_src
+
+- Applies to :: rgpot::EAMTablePot, rgpot::SuttonChenPot
+- Inputs :: =list=, a =rgpot::HalfList= from =CppCore/rgpot/Staged.hpp=.
+  It holds the positions and atomic numbers of the host's =nOwned= atoms
+  followed by their copies, =nAtoms= in all, and a half neighbour list over the
+  owned atoms in the layout of a LAMMPS =NeighList=.
+  =densities= holds =locality().densities= values per atom for all =nAtoms=
+  atoms, zeroed by the caller.
+- Units :: positions in the length unit of the potential.
+  The densities are those of the table for =rgpot::EAMTablePot= and sums of
+  \((a/r)^m\) for =rgpot::SuttonChenPot=.
+- Outputs :: adds the density of each listed pair to its row atom, and to the
+  other atom when that one is owned or =list.newton= is set.
+  Pairs beyond the cutoff are skipped, so a list built with a skin works.
+  The host completes the sums before =forceStage=: with =newton= it adds the
+  values of each copy into its owner, and it copies the values of each owner to
+  its copies.
+- Errors :: =rgpot::EAMTablePot= throws =std::invalid_argument= when a pair
+  within the cutoff has an atomic number in no element line.
+  =rgpot::SuttonChenPot= throws nothing.
+
+=rgpot::LJPot= and =rgpot::MorsePot= have no densities; their =densityStage= is
+listed with each class.
+
+*** =.forceStage=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void forceStage(const HalfList &list, const double *densities, double *forces,
+                StageTally *tally) const;
+#+end_src
+
+- Applies to :: rgpot::EAMTablePot, rgpot::LJPot, rgpot::MorsePot,
+  rgpot::SuttonChenPot
+- Inputs :: =list= as for =.densityStage=, and =densities= after the host
+  completed them; the pair potentials do not read =densities=.
+  =forces= holds 3 * nAtoms doubles, and =tally= is a =rgpot::StageTally= or
+  null.
+- Units :: the units of =forceImpl=.
+- Outputs :: adds the force of each listed pair to its row atom, and the
+  opposite force to the other atom when that one is owned or =list.newton= is
+  set.
+  The many-body potentials take the embedding derivative of both atoms of a pair
+  from their densities, so a copy needs the densities of its owner.
+  With a tally it adds the host's share of the energy and of the virial W = -V
+  sigma, in the order xx, yy, zz, yz, xz, xy.
+  That share is all of a pair that only this host lists, half of a pair that
+  both hosts list, and the embedding energy of each owned atom.
+  =tally->atoms= takes the per-atom split of =.forcePerAtom=; the entries of a
+  copy are written only with =newton=, for the host to add to its owner.
+- Errors :: =rgpot::EAMTablePot= throws =std::invalid_argument= when a pair
+  within the cutoff, or with a tally an owned atom, has an atomic number in no
+  element line.
+  The other classes throw nothing.
+
+=rgpot::LJPot= sets =tally->energy= to NaN when two listed atoms coincide.
 
 *** =.listReused=
 
@@ -523,6 +589,20 @@ explicit LJPot(const LJConfig &c);
 - Outputs :: the =rgpot::LJConfig= the instance was built with.
 - Errors :: none.
 
+*** =rgpot::LJPot::densityStage=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void densityStage(const HalfList &, double *) const;
+#+end_src
+
+- Inputs :: a =rgpot::HalfList= and a density array, as for =.densityStage=.
+- Units :: none.
+- Outputs :: none.
+  A pair potential has no densities: =locality().densities= is 0, and the call
+  writes nothing.
+- Errors :: none.
+
 *** =rgpot::LJClusterPot=
 
 #+attr_rgpot: signature
@@ -598,6 +678,20 @@ explicit MorsePot(const MorseConfig &c);
 - Outputs :: the unshifted pair energy at the cutoff, which is subtracted from
   every pair term.
   It is 0 when =switch_width= is non-zero.
+- Errors :: none.
+
+*** =rgpot::MorsePot::densityStage=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void densityStage(const HalfList &, double *) const;
+#+end_src
+
+- Inputs :: a =rgpot::HalfList= and a density array, as for =.densityStage=.
+- Units :: none.
+- Outputs :: none.
+  A pair potential has no densities: =locality().densities= is 0, and the call
+  writes nothing.
 - Errors :: none.
 
 *** =rgpot::ZBLPot=

@@ -39,6 +39,7 @@
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
+#include "rgpot/Staged.hpp"
 
 namespace rgpot {
 
@@ -99,9 +100,9 @@ public:
   }
 
   /// The density, the embedding argument and phi all stop at the table
-  /// cutoff.
+  /// cutoff. The staged evaluation exchanges rho.
   [[nodiscard]] Locality locality() const noexcept {
-    return {.cutoff = m_table.cutoff};
+    return {.cutoff = m_table.cutoff, .densities = 1};
   }
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
@@ -110,6 +111,14 @@ public:
   /// each phi_ab and pair virial split half to each atom, as pair_style
   /// eam tallies eatom and vatom.
   void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
+  /// Staged.hpp: adds rho_ab(r) to the density of each atom of a pair.
+  void densityStage(const HalfList &list, double *densities) const;
+
+  /// Staged.hpp: F_a(rho_i) of each owned atom and the pair forces with
+  /// F'(rho) of both atoms, tallied as forcePerAtom tallies them.
+  void forceStage(const HalfList &list, const double *densities, double *forces,
+                  StageTally *tally) const;
 
 private:
   static constexpr uint64_t kKernelVersion = 1;

@@ -64,6 +64,21 @@ void lj_pair(double r2, const simd::LjParams &p, double &energy, double &fscale)
   fscale = f_un * s - (v * dsdr) / r;
 }
 
+simd::LjParams lj_params(double u0, double psi, double shift, const LJConfig &c,
+                         const QuinticSwitch &sw) {
+  simd::LjParams params{};
+  params.psi2 = psi * psi;
+  params.four_u0 = 4.0 * u0;
+  params.shift = shift;
+  params.use_switch = 0;
+  if (c.switch_width != 0.0) {
+    params.use_switch = 1;
+    params.r_on = sw.r_on;
+    params.inv_width = sw.inv_width;
+  }
+  return params;
+}
+
 } // namespace
 
 /**
@@ -112,16 +127,7 @@ void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms
     return;
   }
 
-  simd::LjParams params{};
-  params.psi2 = psi * psi;
-  params.four_u0 = 4.0 * u0;
-  params.shift = cuttOffU;
-  params.use_switch = 0;
-  if (m_config.switch_width != 0.0) {
-    params.use_switch = 1;
-    params.r_on = m_switch.r_on;
-    params.inv_width = m_switch.inv_width;
-  }
+  const simd::LjParams params = lj_params(u0, psi, cuttOffU, m_config, m_switch);
   const auto n_atoms = static_cast<std::size_t>(N);
   // One angstrom of skin. A stored list keeps pairs out to cutoff + skin
   // and the kernel below drops those past the cutoff. Stream asks for no
@@ -199,6 +205,33 @@ void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms
     }
   }
   publishCauchyStress(out, strain, volume);
+}
+
+void LJPot::forceStage(const HalfList &list, const double *, double *forces,
+                       StageTally *tally) const {
+  if (cuttOffR <= 0.0) {
+    return;
+  }
+  const simd::LjParams params = lj_params(u0, psi, cuttOffU, m_config, m_switch);
+  const double cutoff2 = cuttOffR * cuttOffR;
+  staged::withTally(tally, [&](auto tallied) {
+    staged::forEachPair(
+        list, [&](int i, int j, double dx, double dy, double dz, double r2, bool both) {
+          if (r2 > cutoff2) {
+            return;
+          }
+          if (!(r2 > 0.0)) {
+            if constexpr (decltype(tallied)::value) {
+              tally->energy = std::numeric_limits<double>::quiet_NaN();
+            }
+            return;
+          }
+          double pair_e = 0.0;
+          double fscale = 0.0;
+          lj_pair(r2, params, pair_e, fscale);
+          staged::addPair(tallied, forces, tally, i, j, both, pair_e, fscale, dx, dy, dz);
+        });
+  });
 }
 
 } // namespace rgpot

@@ -305,6 +305,65 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
   }
 }
 
+void SuttonChenPot::densityStage(const HalfList &list, double *densities) const {
+  const SuttonChenConfig &cfg = m_config;
+  const double cutoff = (cfg.cutoff > 0.0) ? cfg.cutoff : 1.0e6;
+  const double cutoff2 = cutoff * cutoff;
+  const double a2 = cfg.a * cfg.a;
+  staged::forEachPair(list, [&](int i, int j, double, double, double, double r2, bool both) {
+    if (!(r2 > 0.0) || r2 > cutoff2) {
+      return;
+    }
+    const double phi = pow_ar(a2 / r2, cfg.m);
+    densities[i] += phi;
+    if (both) {
+      densities[j] += phi;
+    }
+  });
+}
+
+void SuttonChenPot::forceStage(const HalfList &list, const double *densities, double *forces,
+                               StageTally *tally) const {
+  const SuttonChenConfig &cfg = m_config;
+  const double cutoff = (cfg.cutoff > 0.0) ? cfg.cutoff : 1.0e6;
+  const double cutoff2 = cutoff * cutoff;
+  const double a2 = cfg.a * cfg.a;
+  const double ec = cfg.epsilon * cfg.c;
+  std::vector<double> weight(list.nAtoms, 0.0);
+  for (std::size_t i = 0; i < list.nAtoms; ++i) {
+    if (densities[i] > 0.0) {
+      weight[i] = ec / (2.0 * std::sqrt(densities[i]));
+    }
+  }
+  if (tally != nullptr) {
+    for (std::size_t k = 0; k < list.nRows; ++k) {
+      const int i = list.rows[k];
+      if (densities[i] > 0.0) {
+        staged::addSite(*tally, i, -(ec * std::sqrt(densities[i])));
+      }
+    }
+  }
+  const double n_exp = static_cast<double>(cfg.n);
+  const double m_exp = static_cast<double>(cfg.m);
+  staged::withTally(tally, [&](auto tallied) {
+    staged::forEachPair(
+        list, [&](int i, int j, double dx, double dy, double dz, double r2, bool both) {
+          if (!(r2 > 0.0) || r2 > cutoff2) {
+            return;
+          }
+          const double inv_r2 = 1.0 / r2;
+          const double ar2 = a2 * inv_r2;
+          const double phi = pow_ar(ar2, cfg.m);
+          const double rep = pow_ar(ar2, cfg.n);
+          const double wi = weight[static_cast<std::size_t>(i)];
+          const double wj = weight[static_cast<std::size_t>(j)];
+          const double fscale = (cfg.epsilon * n_exp * rep - m_exp * phi * (wi + wj)) * inv_r2;
+          staged::addPair(tallied, forces, tally, i, j, both, cfg.epsilon * rep, fscale, dx,
+                          dy, dz);
+        });
+  });
+}
+
 } // namespace rgpot
 
 namespace {
