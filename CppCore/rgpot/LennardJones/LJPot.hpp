@@ -16,6 +16,7 @@
 #include <vector>
 #include <stdexcept>
 // clang-format on
+#include "rgpot/Locality.hpp"
 #include "rgpot/PairSwitch.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/PerAtom.hpp"
@@ -80,6 +81,11 @@ public:
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
     return m_paramsKey;
+  }
+
+  /// Pairs count out to the cutoff; a cutoff <= 0 has no pairs.
+  [[nodiscard]] Locality locality() const noexcept {
+    return {.cutoff = cuttOffR > 0.0 ? cuttOffR : 0.0, .pairwise = true};
   }
 
   /**

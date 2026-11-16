@@ -29,6 +29,7 @@
 // clang-format off
 #include <cstdint>
 // clang-format on
+#include "rgpot/Locality.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
@@ -115,6 +116,12 @@ public:
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
     return m_paramsKey;
+  }
+
+  /// The density and the pair term both stop at the cutoff. A cutoff <= 0
+  /// keeps every pair, so there is no finite range.
+  [[nodiscard]] Locality locality() const noexcept {
+    return {.cutoff = m_config.cutoff > 0.0 ? m_config.cutoff : 0.0};
   }
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;

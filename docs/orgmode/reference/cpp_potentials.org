@@ -296,6 +296,37 @@ void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) 
 =rgpot::LJClusterPot= always walks the cells here, so its energy can differ from
 =forceImpl= in the last bits.
 
+*** =.locality=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] Locality locality() const noexcept;
+#+end_src
+
+- Applies to :: rgpot::EAMTablePot, rgpot::LJPot, rgpot::MorsePot,
+  rgpot::SuttonChenPot
+- Inputs :: none.
+- Units :: =cutoff= in the length unit of the potential: Angstrom for
+  =rgpot::LJPot= and =rgpot::MorsePot=, the unit of =a= for
+  =rgpot::SuttonChenPot= and the unit of the table for =rgpot::EAMTablePot=.
+- Outputs :: a =rgpot::Locality= from =CppCore/rgpot/Locality.hpp=.
+  =cutoff= is the range of each site energy, and =pairwise= is true when every
+  energy term is a function of one pair distance.
+  =forceRange()= is =cutoff= for a pairwise potential and twice =cutoff=
+  otherwise; the atoms within it of an atom set the force on that atom.
+  A host that evaluates its own atoms with every atom within =forceRange()= of
+  them, free of periodic images, gets the forces, site energies and per-atom
+  virials those atoms have in the whole system.
+  A =cutoff= of 0 declares no finite range.
+- Errors :: none.
+
+=rgpot::LJPot= and =rgpot::MorsePot= return their cutoff with =pairwise= set,
+and 0 when the cutoff is 0 or less.
+=rgpot::SuttonChenPot= and =rgpot::EAMTablePot= return their cutoff as a
+many-body range.
+=rgpot::SuttonChenPot= returns 0 when its cutoff is 0 or less, since it then
+keeps every pair.
+
 *** =.listReused=
 
 #+attr_rgpot: signature

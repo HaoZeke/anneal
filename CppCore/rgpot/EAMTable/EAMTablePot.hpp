@@ -35,6 +35,7 @@
 #include <string>
 #include <vector>
 // clang-format on
+#include "rgpot/Locality.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
@@ -95,6 +96,12 @@ public:
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
     return m_paramsKey;
+  }
+
+  /// The density, the embedding argument and phi all stop at the table
+  /// cutoff.
+  [[nodiscard]] Locality locality() const noexcept {
+    return {.cutoff = m_table.cutoff};
   }
 
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
