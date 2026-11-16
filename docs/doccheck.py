@@ -1842,6 +1842,7 @@ class BuildInfo:
     lib_dirs: list[str]
     python_ok: bool
     features: dict[str, bool]
+    targets: list[dict] = field(default_factory=list)
 
 
 def _flags_from_compile_commands(build_dir: Path, suffix: str) -> list[str]:
@@ -1895,7 +1896,11 @@ def build_info(build_dir: Path | None, root: Path = ROOT) -> BuildInfo | None:
     if proc.returncode == 0:
         python_ok = True
         features = json.loads(proc.stdout.strip().splitlines()[-1])
-    return BuildInfo(build_dir, cpp, c, libs, python_ok, features)
+    try:
+        targets = json.loads((build_dir / "meson-info" / "intro-targets.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        targets = []
+    return BuildInfo(build_dir, cpp, c, libs, python_ok, features, targets)
 
 
 def _stage_python(build_dir: Path, root: Path) -> Path | None:
@@ -2018,15 +2023,50 @@ def _compile_c(block: Block, info: BuildInfo, root: Path) -> tuple[str, str]:
         src.write_text(block.body + "\n")
         if block.kind == "compile":
             return _run([compiler, "-fsyntax-only", *flags, *extra, str(src)], "", None, root)
-        exe = Path(tmp) / "block"
-        libs = [f"-l{name}" for name in block.options.get("link", "").split(",") if name]
-        ldirs = [f"-L{d}" for d in info.lib_dirs] + [f"-Wl,-rpath,{d}" for d in info.lib_dirs]
-        status, detail = _run(
-            [compiler, *flags, *extra, str(src), "-o", str(exe), *ldirs, *libs], "", None, root
+        obj, exe = Path(tmp) / "block.o", Path(tmp) / "block"
+        status, detail = _run([compiler, "-c", *flags, *extra, str(src), "-o", str(obj)], "", None, root)
+        if status != "ok":
+            return status, detail
+        names = [name for name in block.options.get("link", "").split(",") if name]
+        linker, args = _meson_link(info, names, block.lang) or (
+            [compiler], [f"-L{d}" for d in info.lib_dirs] + [f"-l{name}" for name in names]
         )
+        if not shutil.which(linker[0]):
+            return "skip", f"no linker {linker[0]}"
+        rpath = [f"-Wl,-rpath,{d}" for d in info.lib_dirs]
+        # Meson names its own outputs relative to the build directory.
+        status, detail = _run([*linker, str(obj), "-o", str(exe), *args, *rpath], "", None, info.build_dir)
         if status != "ok":
             return status, detail
         return _run([str(exe)], "", None, root)
+
+
+def _meson_link(info: BuildInfo, names: list[str], lang: str) -> tuple[list[str], list[str]] | None:
+    """Linker and arguments of the plainest ``lang`` program meson links to ``names``.
+
+    A static library carries none of its dependencies: a program that links
+    librgpot.a names rocksdb, OpenMP and the Fortran runtime itself, and a C
+    program links with the C++ driver, which is what brings in the C++
+    runtime on Darwin.  Meson records that line for every executable it links.
+    """
+    libs = [t for t in info.targets if t["type"].endswith("library")]
+    outputs = [{Path(f) for t in libs if t["name"] == name for f in t["filename"]} for name in names]
+    if not outputs or not all(outputs):
+        return None
+    lines = []
+    for target in info.targets:
+        if target["type"] != "executable":
+            continue
+        langs = {s["language"] for s in target["target_sources"] if "language" in s}
+        for link in (s for s in target["target_sources"] if "linker" in s):
+            named = {info.build_dir / p for p in link["parameters"]}
+            if langs == {lang} and all(out & named for out in outputs):
+                lines.append(link)
+    if not lines:
+        return None
+    # The fewest arguments: capi_threads, not its -fsanitize=thread twin.
+    best = min(lines, key=lambda link: len(link["parameters"]))
+    return best["linker"], best["parameters"]
 
 
 def _run(cmd, stdin, env, cwd, timeout=300) -> tuple[str, str]:

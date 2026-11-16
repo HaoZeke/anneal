@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -295,6 +296,69 @@ class PlantedBrokenExamples(unittest.TestCase):
                 (build / lib).touch()
             info = doccheck.build_info(build, ROOT)
         self.assertEqual(info.lib_dirs, [str(build / "elf"), str(build / "macho")])
+
+    def test_link_line_of_the_plainest_program_in_the_block_language(self):
+        def exe(name, lang, args):
+            return {"name": name, "type": "executable", "filename": [f"/build/{name}"],
+                    "target_sources": [{"language": lang}, {"linker": ["c++"], "parameters": args}]}
+
+        targets = [
+            {"name": "rgpot", "type": "static library", "filename": ["/build/CppCore/librgpot.a"],
+             "target_sources": []},
+            exe("capi_threads_tsan", "c", ["-fsanitize=thread", "CppCore/librgpot.a", "-ldl"]),
+            exe("capi_threads", "c", ["CppCore/librgpot.a", "-ldl"]),
+            exe("rgpot-eval", "cpp", ["CppCore/librgpot.a"]),
+            exe("plain_c", "c", ["-ldl"]),
+        ]
+        info = doccheck.BuildInfo(Path("/build"), [], [], [], False, {}, targets)
+        self.assertEqual(doccheck._meson_link(info, ["rgpot"], "c"), (["c++"], ["CppCore/librgpot.a", "-ldl"]))
+        self.assertEqual(doccheck._meson_link(info, ["rgpot"], "cpp"), (["c++"], ["CppCore/librgpot.a"]))
+        self.assertIsNone(doccheck._meson_link(info, ["m"], "c"))
+        self.assertIsNone(doccheck._meson_link(info, [], "c"))
+
+    @unittest.skipUnless(
+        all(shutil.which(os.environ.get(var, tool)) for var, tool in (("CC", "cc"), ("CXX", "c++"), ("AR", "ar"))),
+        "needs cc, c++ and ar",
+    )
+    def test_c_block_links_a_static_cxx_library_as_meson_does(self):
+        cxx = shutil.which(os.environ.get("CXX", "c++"))
+        ar = shutil.which(os.environ.get("AR", "ar"))
+        text = (
+            "#+attr_rgpot: run link=cxxlib\n#+begin_src c\nint cxxlib_answer(void);\n"
+            "int main(void) { return cxxlib_answer() == 42 ? 0 : 1; }\n#+end_src\n"
+        )
+        [block] = self._blocks(text)
+        with tempfile.TemporaryDirectory(prefix="doccheck-build-") as tmp:
+            build = Path(tmp).resolve()
+            # libdep.a stands in for rocksdb, and new and throw for the C++
+            # runtime: the block names neither, so only meson's line links them.
+            (build / "dep.cc").write_text('extern "C" int dep_base() { return 40; }\n', encoding="utf-8")
+            (build / "cxxlib.cc").write_text(textwrap.dedent("""\
+                extern "C" int dep_base();
+                extern "C" int cxxlib_answer() {
+                    int *base = new int(dep_base());
+                    try {
+                        throw *base + 2;
+                    } catch (int answer) {
+                        delete base;
+                        return answer;
+                    }
+                }
+            """), encoding="utf-8")
+            for name in ("dep", "cxxlib"):
+                subprocess.run([cxx, "-c", f"{name}.cc", "-o", f"{name}.o"], cwd=build, check=True)
+                subprocess.run([ar, "rcs", f"lib{name}.a", f"{name}.o"], cwd=build, check=True)
+            targets = [
+                {"name": "cxxlib", "type": "static library", "filename": [str(build / "libcxxlib.a")],
+                 "target_sources": [{"language": "cpp"}]},
+                {"name": "consumer", "type": "executable", "filename": [str(build / "consumer")],
+                 "target_sources": [{"language": "c"},
+                                    {"linker": [cxx], "parameters": ["libcxxlib.a", "libdep.a"]}]},
+            ]
+            (build / "meson-info").mkdir()
+            (build / "meson-info" / "intro-targets.json").write_text(json.dumps(targets), encoding="utf-8")
+            info = doccheck.build_info(build, ROOT)
+            self.assertEqual(doccheck.run_block(block, info, ROOT), ("ok", ""))
 
     def test_cpp_block_needs_an_rpc_build(self):
         text = "#+attr_rgpot: compile requires=has_rpc\n#+begin_src cpp\nint main() { return 1; }\n#+end_src\n"
