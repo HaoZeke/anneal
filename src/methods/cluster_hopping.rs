@@ -6203,7 +6203,7 @@ where
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
             directed_leave = true;
-            if cfg.plateau_heat {
+            if cfg.plateau_heat && n_rep == 1 {
                 heat = (heat * 2.0).min(PLATEAU_HEAT_CAP);
             }
         }
@@ -11580,7 +11580,7 @@ mod tests {
         assert!(rec.escape_on_stall && rec.trail_on_stall && !rec.restart_on_stall);
         assert!(rec.prior_soap && rec.prior_reseed && rec.prior_growth);
         assert!(rec.prior_core && rec.prior_motif && !rec.general_collective);
-        assert!(!rec.plateau_heat && !der.plateau_heat);
+        assert!(rec.plateau_heat && der.plateau_heat);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);

@@ -206,11 +206,13 @@ fn evaluate(lib: &libloading::Library, family: &Family, x: ArrayView1<f64>) -> (
 
 fn config(spec: &Spec) -> Config {
     // Stock atomic preset. The basin stride stays 1, which is what
-    // Lennard-Jones uses. This example does not set it. `H2H_PLATEAU_HEAT=1`
-    // heats the walk on each call plateau.
+    // Lennard-Jones uses. This example does not set it. `H2H_PLATEAU_HEAT=0`
+    // keeps the walk at the preset temperature on a call plateau.
     let mut cfg = Config::recommended(spec.n);
-    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
-        cfg.plateau_heat = true;
+    match std::env::var("H2H_PLATEAU_HEAT").as_deref() {
+        Ok("1") => cfg.plateau_heat = true,
+        Ok("0") => cfg.plateau_heat = false,
+        _ => {}
     }
     cfg
 }
