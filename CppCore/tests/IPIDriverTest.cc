@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -108,6 +109,7 @@ public:
     std::swap(m_conn, o.m_conn);
     std::swap(m_path, o.m_path);
     std::swap(m_address, o.m_address);
+    std::swap(m_rejection, o.m_rejection);
     return *this;
   }
   ~FakeServer() {
@@ -131,7 +133,15 @@ public:
     if (m_conn < 0) {
       throw std::runtime_error("fake server: accept failed");
     }
+    // send() passes no flags where MSG_NOSIGNAL is missing; the socket
+    // option keeps a closed driver from raising SIGPIPE there.
+    wire::disableSigpipe(m_conn);
   }
+
+  /// The driver closes as soon as it rejects a message, so the rest of
+  /// that message can meet EPIPE or ECONNRESET. After this call those end
+  /// the send instead of failing the test.
+  void expect_rejection() { m_rejection = true; }
 
   void hangup() {
     if (m_conn >= 0) {
@@ -149,6 +159,12 @@ public:
 #else
       const ssize_t rc = ::send(m_conn, bytes + sent, n - sent, 0);
 #endif
+      if (rc < 0 && errno == EINTR) {
+        continue;
+      }
+      if (rc < 0 && m_rejection && (errno == EPIPE || errno == ECONNRESET)) {
+        return;
+      }
       if (rc <= 0) {
         throw std::runtime_error("fake server: send failed");
       }
@@ -257,6 +273,7 @@ private:
   int m_conn = -1;
   std::string m_path;
   std::string m_address;
+  bool m_rejection = false;
 };
 
 // Runs driver.run() on a thread and keeps its exception text.
@@ -451,6 +468,8 @@ TEST_CASE("IPIDriver rejects a POSDATA atom count that differs from the "
                           rec.evaluator());
   DriverThread thread(driver);
   server.accept();
+  // The driver stops reading at the atom count, before the positions.
+  server.expect_rejection();
   double h[9];
   ipi_cell(kRows, h);
   server.posdata(h, {0, 0, 0, 1, 1, 1}, 2);
