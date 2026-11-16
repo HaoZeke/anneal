@@ -41,7 +41,7 @@ A =feature= option takes =enabled=, =disabled= or =auto=.
 | =with_python= | boolean | =false= | Build the pip-installable Python package (=rgpot._core=). |
 | =with_fortran_pots= | feature | =auto= | Fortran 2018 kernels in =CppCore/rgpot/fortran= (CuH2, EDIP, LenoskySi, EAMAl, FeHe, WaterH, SWSi and the Tersoff silicon gather). =auto= builds them when a Fortran compiler is found. Independent of the RPC options. |
 | =with_highway= | feature | =auto= | Google Highway runtime ISA dispatch for the =rgpot::simd= LJ, Morse, EAM and orthorhombic-fold kernels; the shipped potentials do not call them (see [[file:../explanation/simd.org][SIMD]]). =auto= uses libhwy >= 1.2, or the =highway= wrap when its source tree is already unpacked under =subprojects/=; =enabled= also downloads it. =disabled= keeps the scalar kernels. |
-| =with_ipi= | feature | =auto= | i-PI socket server Potential (POSIX sockets). auto is on except on Windows. |
+| =with_ipi= | feature | =auto= | i-PI socket server Potential (IPIPot), driver client (IPIDriver) and rgpot-ipi-driver (POSIX sockets). auto is on except on Windows. |
 | =with_water= | boolean | =false= | Flexible TIP4P, SPC/E and TIP4P-Pt kernels. Defaults false, matching the eOn with_water option. |
 | =with_eam_table= | boolean | =false= | EAM and Finnis-Sinclair potentials read from LAMMPS funcfl, setfl and eam/fs tables. |
 | =with_lammps= | feature | =auto= | LAMMPS pair_style rgpot and the lj/cut comparison. Needs the lammps Python module. pair_style rgpot also needs lammps_src. |
@@ -69,7 +69,7 @@ Pass an option as =-DNAME=ON= or =-DNAME=OFF= to =cmake=.
 | =RGPOT_WITH_CACHE= | BOOL | ON | Build =PotentialCache= against RocksDB. Unlike Meson, the CMake default is ON, so a CMake build without RocksDB needs =-DRGPOT_WITH_CACHE=OFF=. |
 | =RGPOT_BUILD_EXAMPLES= | BOOL | ON when rgpot is the top-level project, else OFF | Build the examples. |
 | =RGPOT_WITH_HIGHWAY= | BOOL | ON | Google Highway runtime ISA dispatch. |
-| =RGPOT_WITH_IPI= | BOOL | ON (OFF on Windows) | i-PI socket server potential. Enabling it on Windows is a configure error. |
+| =RGPOT_WITH_IPI= | BOOL | ON (OFF on Windows) | i-PI socket server potential and driver client. Enabling it on Windows is a configure error. |
 | =RGPOT_WITH_EAM_TABLE= | BOOL | OFF | EAM and Finnis-Sinclair potentials read from LAMMPS tables. |
 | =RGPOT_BUILD_TESTS= | BOOL | ON when rgpot is the top-level project, else OFF | Build the tests. |
 | =RGPOT_WITH_CP2K= | BOOL | OFF | =CP2KPot=, the =potserv= CP2K backend and =libcp2kc_rgpot= against libcp2k. |

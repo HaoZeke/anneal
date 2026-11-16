@@ -686,11 +686,12 @@ CPP_FUNCTION_HEADERS = (
 )
 # Classes outside the potential hierarchy whose public members are part of
 # the surface: the frontends that open the Metatomic and XTB engine tables,
-# and the checkpoint provenance a UmaPot reports.
+# the checkpoint provenance a UmaPot reports, and the i-PI driver client.
 CPP_MEMBER_CLASSES = (
     ("CppCore/rgpot/MetatomicPot/MetatomicDlopen.hpp", "MetatomicDlopen"),
     ("CppCore/rgpot/XTBPot/XTBDlopen.hpp", "XTBDlopen"),
     ("CppCore/rgpot/UmaPot/UmaProvenance.hpp", "UmaCheckpointProvenance"),
+    ("CppCore/rgpot/IPIPot/IPIDriver.hpp", "IPIDriver"),
 )
 
 

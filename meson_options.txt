@@ -90,7 +90,7 @@ option(
     'with_ipi',
     type: 'feature',
     value: 'auto',
-    description: 'i-PI socket server Potential (POSIX sockets). auto is on except on Windows.',
+    description: 'i-PI socket server Potential (IPIPot), driver client (IPIDriver) and rgpot-ipi-driver (POSIX sockets). auto is on except on Windows.',
 )
 option(
     'with_water',

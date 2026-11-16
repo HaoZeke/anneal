@@ -112,6 +112,7 @@ meson compile -C bbdir && meson test -C bbdir
    reference/cpp_api
    reference/cpp_potentials
    reference/cpp_backends
+   reference/ipi_driver
    reference/build_options
    reference/potential_config
    reference/sw_si

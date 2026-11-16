@@ -44,7 +44,7 @@ else()
   else()
     set(_rgpot_ipi_default ON)
   endif()
-  option(RGPOT_WITH_IPI "i-PI socket server Potential (POSIX sockets)"
+  option(RGPOT_WITH_IPI "i-PI socket server and driver client (POSIX sockets)"
          ${_rgpot_ipi_default})
   if(RGPOT_WITH_IPI AND WIN32)
     message(
@@ -282,7 +282,7 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
 
   if(RGPOT_WITH_IPI)
     list(APPEND RGPOT_SOURCES CppCore/rgpot/IPIPot/IPIWire.cc
-         CppCore/rgpot/IPIPot/IPIPot.cc)
+         CppCore/rgpot/IPIPot/IPIPot.cc CppCore/rgpot/IPIPot/IPIDriver.cc)
   endif()
 
   if(RGPOT_WITH_EAM_TABLE)
@@ -657,6 +657,8 @@ if(RGPOT_BUILD_TESTS)
       find_package(Threads REQUIRED)
       add_pot_test(IPIPotTest CppCore/tests/IPIPotTest.cc)
       target_link_libraries(IPIPotTest PRIVATE Threads::Threads)
+      add_pot_test(IPIDriverTest CppCore/tests/IPIDriverTest.cc)
+      target_link_libraries(IPIDriverTest PRIVATE Threads::Threads)
     endif()
 
     if(RGPOT_WITH_RPC)

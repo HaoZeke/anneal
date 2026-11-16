@@ -910,6 +910,12 @@ if get_option('with_tests')
         if has_ipi
             test_array += [
                 ['IPIPotTest', 'ipi_pot_test', 'IPIPotTest.cc', ''],
+                [
+                    'IPIDriverTest',
+                    'ipi_driver_test',
+                    'IPIDriverTest.cc',
+                    '',
+                ],
             ]
         endif
         if has_water
