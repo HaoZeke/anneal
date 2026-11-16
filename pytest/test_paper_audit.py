@@ -28,6 +28,7 @@ CHECKS = (
     audit_mod.openconf,
     audit_mod.head_to_head,
     audit_mod.sc96_78_howto,
+    audit_mod.stale_claims,
     audit_mod.tip4p_panel,
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
@@ -82,6 +83,30 @@ def test_a_drifted_sutton_chen_howto_cell_is_reported():
 
 
 SC_N12 = "bench/metal-cluster-h2h/sc-n12/README.md"
+
+
+def test_an_old_gmin_number_in_a_sentence_is_reported():
+    audit = audit_mod.Audit()
+    path = audit_mod.SC96_78_HOWTO
+    old = "=gmin= hits 20 of 32 seeds, median 1272371 calls to a hit. It misses 12."
+    audit.text_cache[path] = audit.text(path).replace(old, "=gmin= hits 0 of 32 seeds. It misses 32.")
+    audit_mod.stale_claims(audit, [path])
+    assert [(r[2], r[3]) for r in audit.drifts()] == [("old GMIN number", "=gmin= hits 0 of 32 seeds.")]
+
+
+def test_an_old_gmin_p_value_in_a_new_document_is_reported():
+    audit = audit_mod.Audit()
+    audit.text_cache["paper/note.md"] = "On 9-6 at 78 atoms iso beats GMIN, p<1e-4.\n"
+    audit_mod.stale_claims(audit, ["paper/note.md"])
+    assert [r[2] for r in audit.drifts()] == ["old GMIN number"]
+
+
+def test_a_retired_rerun_sentence_is_reported():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text + "\nOnly 9-6 at N=38 has been rerun, under harness 9149d1b0.\n"
+    audit_mod.stale_claims(audit, [SC_N12])
+    assert [r[2] for r in audit.drifts()] == ["retired claim"]
 
 
 def test_an_old_sutton_chen_gmin_cell_is_reported():

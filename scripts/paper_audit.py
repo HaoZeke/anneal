@@ -813,6 +813,39 @@ def sc96_78_howto(audit: Audit) -> None:
     audit.said(SC96_78_HOWTO, f"hit {hits_of(earlier)} of {len(earlier)} seeds. They are kept in the file.")
 
 
+# Numbers of the GMIN rows from the misread data file, as they were cited.
+STALE_GMIN = re.compile(r"\b0/32\b|\b0 of 32\b|\bp\s*[<≤]\s*\$?(?:1e-4|10\^\{?-4\}?|0\.0001)|(?<![\d.])0\.0000\b")
+RETIRED = ("Only 9-6 at N=38 has been rerun", "a rerun of 9-6 at 38 atoms")
+# Sentences that cite the old rows as old rows; each is derived from the rows elsewhere.
+HISTORICAL = {
+    (SC96_78_HOWTO, "The earlier GMIN rows, with temperature 0.8, step 0.40 and a container radius of 30, hit 0 of 32 seeds."),
+}
+
+
+def documents() -> list[str]:
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "*.md", "*.org", "*.tex", "*.rst"],
+                            capture_output=True, text=True, check=True).stdout
+    return listed.split()
+
+
+def stale_claims(audit: Audit, paths: list[str] | None = None) -> None:
+    """No sentence about GMIN still cites a number of its old data file."""
+    seen = set()
+    for path in sorted(set(documents() if paths is None else paths)):
+        text = audit.text(path)
+        for phrase in RETIRED:
+            if phrase in collapse(text):
+                audit.record(False, path, "retired claim", phrase, "absent")
+        for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+            if re.search(r"gmin", sentence, re.I) and STALE_GMIN.search(sentence):
+                key = (path, collapse(sentence))
+                seen.add(key)
+                audit.record(key in HISTORICAL, path, "old GMIN number", collapse(sentence), "derived or absent")
+    scanned = set(documents() if paths is None else paths)
+    for path, sentence in sorted(h for h in HISTORICAL - seen if h[0] in scanned):
+        audit.record(False, path, "historical sentence", sentence, "present")
+
+
 def covalent_gfn2(audit: Audit) -> None:
     path = "bench/covalent-h2h/README.md"
     rows = audit.rows("bench/covalent-h2h/gfn2/seeds.csv")
@@ -1012,7 +1045,7 @@ def run(report: bool = False) -> int:
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, sc96_78_howto, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
+                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
         check(audit)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
