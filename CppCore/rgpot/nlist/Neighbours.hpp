@@ -123,7 +123,8 @@ public:
   /// after the selected image. `r2` is the squared length of that vector.
   /// Candidates lie inside the cutoff plus the skin; the caller drops the
   /// rest. In stored mode the partners of each atom are in increasing
-  /// index order.
+  /// index order. A walk may copy `fn`, so state the caller reads back is
+  /// captured by reference.
   template <typename Fn>
   void forDirected(std::int64_t begin, std::int64_t end, Fn &&fn) const {
     if (allPairs()) {
@@ -273,41 +274,56 @@ private:
 
   /// Every pair of an unbounded search. A free axis has no image, so the
   /// separation is the coordinate difference that foldPair returns there.
+  /// `fn` is a copy that does not escape, so what it captured by value
+  /// can stay in registers for the whole walk.
   template <typename Fn>
-  void walkAll(std::int64_t begin, std::int64_t end, Fn &fn, bool half) const {
+  void walkAll(std::int64_t begin, std::int64_t end, Fn fn, bool half) const {
+    if (!use_general_ && !periodic_[0] && !periodic_[1] && !periodic_[2]) {
+      walkAllRows<false>(begin, end, fn, half);
+    } else {
+      walkAllRows<true>(begin, end, fn, half);
+    }
+  }
+
+  /// The rows of walkAll. Each row runs over the partners below i, then
+  /// those above it, so `fn` has one call site and no pair tests j == i.
+  template <bool Fold, typename Fn>
+  void walkAllRows(std::int64_t begin, std::int64_t end, Fn fn, bool half) const {
     const auto n = static_cast<std::int64_t>(n_);
     const double search2 = search_ * search_;
     const double *x = xyz_;
-    const bool no_image = !use_general_ && !periodic_[0] && !periodic_[1] && !periodic_[2];
     for (std::int64_t i = begin; i < end; ++i) {
       const auto a = static_cast<std::int32_t>(i);
-      const double xi = x[3 * i];
-      const double yi = x[3 * i + 1];
-      const double zi = x[3 * i + 2];
-      auto visit = [&](std::int64_t jj) {
-        const auto j = static_cast<std::int32_t>(jj);
-        double dx = 0;
-        double dy = 0;
-        double dz = 0;
-        if (no_image) {
-          dx = xi - x[3 * jj];
-          dy = yi - x[3 * jj + 1];
-          dz = zi - x[3 * jj + 2];
-        } else {
-          foldPair(a, j, dx, dy, dz);
+      [[maybe_unused]] const double xi = x[3 * i];
+      [[maybe_unused]] const double yi = x[3 * i + 1];
+      [[maybe_unused]] const double zi = x[3 * i + 2];
+      for (int run = half ? 1 : 0; run < 2; ++run) {
+        const std::int64_t hi = run == 0 ? i : n;
+        for (std::int64_t jj = run == 0 ? 0 : i + 1; jj < hi; ++jj) {
+          const auto j = static_cast<std::int32_t>(jj);
+          double dx = 0;
+          double dy = 0;
+          double dz = 0;
+          if constexpr (Fold) {
+            // A general cell folds out of line. Its own copies keep the
+            // separations out of memory.
+            double fx = 0;
+            double fy = 0;
+            double fz = 0;
+            foldPair(a, j, fx, fy, fz);
+            dx = fx;
+            dy = fy;
+            dz = fz;
+          } else {
+            dx = xi - x[3 * jj];
+            dy = yi - x[3 * jj + 1];
+            dz = zi - x[3 * jj + 2];
+          }
+          const double r2 = dx * dx + dy * dy + dz * dz;
+          if (r2 <= search2) {
+            fn(a, j, dx, dy, dz, r2);
+          }
         }
-        const double r2 = dx * dx + dy * dy + dz * dz;
-        if (r2 <= search2) {
-          fn(a, j, dx, dy, dz, r2);
-        }
-      };
-      if (!half) {
-        for (std::int64_t jj = 0; jj < i; ++jj) {
-          visit(jj);
-        }
-      }
-      for (std::int64_t jj = i + 1; jj < n; ++jj) {
-        visit(jj);
       }
     }
   }
