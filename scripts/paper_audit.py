@@ -759,7 +759,7 @@ def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str
 
 SC_N12 = "bench/metal-cluster-h2h/sc-n12"
 SC_N12_README = f"{SC_N12}/README.md"
-SC_CHECK_ROWS = f"{SC_N12}/sc96-55-seeds.csv"
+SC_CHECKS = ("sc96-55", "sc108-80")
 SC_N12_START = "The GMIN rows rerun with the corrected file are"
 
 
@@ -826,24 +826,52 @@ def sc_split(rows: list[dict[str, str]]) -> dict[str, float]:
     }
 
 
-def sc_check(audit: Audit, now: dict, first: dict) -> dict[str, object] | None:
-    """sc96-55 on the further seeds under the first and the latest anneal build."""
-    if not (ROOT / SC_CHECK_ROWS).is_file():
-        return None
-    rows = audit.rows(SC_CHECK_ROWS)
-    new = now["sc96-55"]["harness_revision"]
-    old = first["sc96-55"]["harness_revision"]
-    a, b = pick(rows, code_revision=old), pick(rows, code_revision=new)
-    ca = {r["seed"]: float(r["calls"]) for r in a}
-    cb = {r["seed"]: float(r["calls"]) for r in b}
-    seeds = sorted(set(ca) & set(cb), key=int)
-    return {
-        "old": old, "new": new, "seeds": seeds, "n": len(seeds),
-        "old hits": hits_of(a), "new hits": hits_of(b),
-        "old calls": median(list(ca.values())), "new calls": median(list(cb.values())),
-        "p": mann_whitney(list(ca.values()), list(cb.values()), True),
-        "more": sum(cb[s] > ca[s] for s in seeds),
-    }
+SEARCH_PATHS = ("src", "crates", "examples/h2h_sc.rs", "Cargo.toml", "Cargo.lock")
+
+
+def same_search(a: str, b: str) -> bool:
+    """Whether two revisions build the same h2h_sc."""
+    return a == b or subprocess.run(["git", "diff", "--quiet", a, b, "--", *SEARCH_PATHS], cwd=ROOT).returncode == 0
+
+
+def sc_check(audit: Audit, rows: list[dict[str, str]], now: dict, first: dict) -> dict[str, dict[str, object]]:
+    """Each checked system on the further seeds under the first and the latest anneal build.
+
+    The pooled figures add seeds 2000-2011 from the panel rows. Calls are
+    the calls charged, as in the check rows.
+    """
+    out = {}
+    for system in SC_CHECKS:
+        path = f"{SC_N12}/{system}-seeds.csv"
+        if not (ROOT / path).is_file():
+            continue
+        check = audit.rows(path)
+        old = first[system]["harness_revision"]
+        latest = {r["code_revision"] for r in check} - {old}
+        if len(latest) != 1:
+            raise SystemExit(f"{path}: one code revision besides {old} expected")
+        new = latest.pop()
+        a, b = pick(check, code_revision=old), pick(check, code_revision=new)
+        ca = {r["seed"]: float(r["calls"]) for r in a}
+        cb = {r["seed"]: float(r["calls"]) for r in b}
+        seeds = sorted(set(ca) & set(cb), key=int)
+        pa, pb = sc_group(rows, first[system]), sc_group(rows, now[system])
+        qa = list(ca.values()) + [float(r["charged"]) for r in pa]
+        qb = list(cb.values()) + [float(r["charged"]) for r in pb]
+        ha, hb = hits_of(a) + hits_of(pa), hits_of(b) + hits_of(pb)
+        out[system] = {
+            "file": path.rsplit("/", 1)[1], "old": old, "new": new, "seeds": seeds, "n": len(seeds),
+            "panel": now[system]["harness_revision"], "same code": same_search(new, now[system]["harness_revision"]),
+            "old hits": hits_of(a), "new hits": hits_of(b), "fisher": fisher(hits_of(a), len(a), hits_of(b), len(b)),
+            "old calls": median(list(ca.values())), "new calls": median(list(cb.values())),
+            "p": mann_whitney(list(ca.values()), list(cb.values()), True),
+            "more": sum(cb[s] > ca[s] for s in seeds), "fewer": sum(cb[s] < ca[s] for s in seeds),
+            "pooled n": len(qa), "pooled old hits": ha, "pooled new hits": hb,
+            "pooled fisher": fisher(ha, len(qa), hb, len(qb)),
+            "pooled old calls": median(qa), "pooled new calls": median(qb),
+            "pooled p": mann_whitney(qa, qb, True),
+        }
+    return out
 
 
 def sc_n12_parts(audit: Audit) -> dict[str, object]:
@@ -851,7 +879,7 @@ def sc_n12_parts(audit: Audit) -> dict[str, object]:
     summary = audit.rows(f"{SC_N12}/results.csv")
     first, now, reruns = sc_state(summary)
     return {"rows": rows, "summary": summary, "first": first, "now": now, "reruns": reruns,
-            "moves": sc_moves(rows, first, now), "check": sc_check(audit, now, first)}
+            "moves": sc_moves(rows, first, now), "check": sc_check(audit, rows, now, first)}
 
 
 def sc_n12_prose(parts: dict[str, object]) -> dict[str, list[str]]:
@@ -887,18 +915,29 @@ def sc_n12_prose(parts: dict[str, object]) -> dict[str, list[str]]:
             out["moves"].append(f"Their hits differ at Fisher p < 0.05 on {and_list(hits)}.")
         else:
             out["moves"].append("On no system do their hits differ at Fisher p < 0.05.")
-        if check:
-            c = check
-            m = moves.get("sc96-55")
-            out["check"] = [
-                f"On sc96-55, seeds 2000-2011, the median calls move from {calls_text(m['old calls'])} at "
-                f"{m['old'][:8]} to {calls_text(m['new calls'])} at {m['new'][:8]}, Mann-Whitney p {p_text(m['p calls'])}.",
-                f"`sc96-55-seeds.csv` has seeds {c['seeds'][0]}-{c['seeds'][-1]} under both builds from the same starts.",
-                f"There {c['old'][:8]} hits {c['old hits']} of {c['n']} at a median of {calls_text(c['old calls'])} calls "
-                f"and {c['new'][:8]} hits {c['new hits']} of {c['n']} at a median of {calls_text(c['new calls'])}, "
-                f"Mann-Whitney p {p_text(c['p'])}; {c['new'][:8]} charges more calls on {c['more']} of {c['n']} seeds.",
-                ("The move on seeds 2000-2011 does not recur on these seeds, so no develop commit was bisected."
-                 if c["p"] >= 0.05 else "The move on seeds 2000-2011 recurs on these seeds."),
+        for system, c in check.items():
+            m = moves.get(system)
+            o, n, panel = c["old"][:8], c["new"][:8], c["panel"][:8]
+            both = n if n == panel else f"{panel} and {n}"
+            calls = (f"the median calls stay at {calls_text(m['old calls'])}" if m["old calls"] == m["new calls"] else
+                     f"the median calls move from {calls_text(m['old calls'])} to {calls_text(m['new calls'])}")
+            out["check " + system] = [
+                f"On {system}, seeds 2000-2011, {o} hits {m['old hits']} and {panel} {m['new hits']}, Fisher p "
+                f"{p_text(m['fisher'])}, and {calls}, Mann-Whitney p {p_text(m['p calls'])}.",
+                f"`{c['file']}` has seeds {c['seeds'][0]}-{c['seeds'][-1]} under both builds from the same starts."
+                + ("" if c["new"] == c["panel"] else
+                   f" Its {n} build has the search code of {c['panel'][:8]}."
+                   if c["same code"] else f" Its {n} build does not have the search code of {c['panel'][:8]}."),
+                f"There {o} hits {c['old hits']} of {c['n']} at a median of {calls_text(c['old calls'])} calls "
+                f"and {n} hits {c['new hits']} of {c['n']} at a median of {calls_text(c['new calls'])}, "
+                f"Fisher p {p_text(c['fisher'])} and Mann-Whitney p {p_text(c['p'])}; {n} charges more calls on "
+                f"{c['more']} of {c['n']} seeds and fewer on {c['fewer']}.",
+                f"Over all {c['pooled n']} seeds {o} hits {c['pooled old hits']} and {both} {c['pooled new hits']}, "
+                f"Fisher p {p_text(c['pooled fisher'])}, at median calls charged of {calls_text(c['pooled old calls'])} "
+                f"and {calls_text(c['pooled new calls'])}, Mann-Whitney p {p_text(c['pooled p'])}.",
+                (f"The move on seeds 2000-2011 does not hold over the {c['pooled n']} seeds, so it is seed noise and no "
+                 "develop commit was bisected." if min(c["pooled fisher"], c["pooled p"]) >= 0.05 else
+                 f"The move on seeds 2000-2011 holds over the {c['pooled n']} seeds."),
             ]
     tests = sc_reading(now, reruns, rows)
     out["hits"] = [t for t in tests if " on hits " in t or "seeds than" in t]
@@ -953,8 +992,8 @@ def sc_n12_body(audit: Audit) -> str:
                          f"{p_text(m['fisher'])} | {calls_text(m['old calls'])} | {calls_text(m['new calls'])} | "
                          f"{p_text(m['p calls'])} |")
         lines += ["", para("moves"), ""]
-        if prose.get("check"):
-            lines += [para("check") + " Their calls are the calls charged; both builds stop at the hit, and "
+        for key in (k for k in prose if k.startswith("check ")):
+            lines += [para(key) + " Their calls are the calls charged; both builds stop at the hit, and "
                       "the e3ed7dad build prints the budget for the calls to some hits.", ""]
     lines += [f"Each rerun is tested against the {h} anneal rows of its system. The wall ratio is the GMIN median "
               "wall over the anneal median wall. On calls and wall the code ahead is the one lower in more of the "
