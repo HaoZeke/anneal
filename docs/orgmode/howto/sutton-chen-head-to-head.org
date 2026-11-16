@@ -94,9 +94,17 @@ The figure is written to =build/sc96-78/hits.png=.
 GMIN is the Wales program at SVNREV aac1548a, linked against OpenBLAS.
 Its rows are those of harness 9149d1b0, one seed at a time on one core, from =scripts/metal_h2h/enter_sc96_gmin.sh=.
 Its file is the 9-6 row of =scripts/metal_h2h/run_sc.py=: temperature 10, step 0.251984, the container GMIN sizes for Sutton-Chen, and the quench block there.
+The iso and iso-hop rows are those of harness c89653df, one seed at a time on core 0, from =scripts/metal_h2h/enter_sc_anneal.sh=.
 =gmin= hits 20 of 32 seeds, median 1272371 calls to a hit. It misses 12.
 =iso= hits 23 of 32 seeds, median 588617 calls to a hit. It misses 9.
 =iso-hop= hits 32 of 32 seeds, median 127038.5 calls to a hit.
+The median =gmin= seed takes 68.2 s, 63.3 s of it inside the potential.
+The median =iso= seed takes 36.6 s, 26.8 s of it inside the potential.
+The median =iso-hop= seed takes 4.3 s, 3.4 s of it inside the potential.
+The earlier =iso= rows, without a harness revision, hit 23 of 32 seeds. They are kept in the file.
+Their calls to a hit, calls spent and best energies match the latest =iso= rows seed for seed.
+The earlier =iso-hop= rows, without a harness revision, hit 32 of 32 seeds. They are kept in the file.
+Their calls to a hit, calls spent and best energies match the latest =iso-hop= rows seed for seed.
 The earlier GMIN rows, with temperature 0.8, step 0.40 and a container radius of 30, hit 0 of 32 seeds. They are kept in the file.
 When a curve rises earlier, its arm solves more seeds at a smaller budget.
 The paired p-value comes from a sign-flip test on the per-seed differences.
