@@ -18,7 +18,7 @@ Options come as =key value= pairs separated by spaces.
 | =LJ=         | =u0=, =psi=, =cutoff=, =switch_width=                                    | yes    |
 | =Morse=      | =de=, =a=, =re=, =cutoff=, =switch_width=                                | yes    |
 | =SuttonChen= | =preset= (=platinum= or =gold=), =epsilon=, =c=, =a=, =n=, =m=, =cutoff= | yes    |
-| =EAMTable=   | =file=, =format= (=funcfl=, =setfl= or =fs=)                             | yes    |
+| =EAMTable=   | =file=, =format= (=funcfl=, =setfl= or =fs=), =skin=                     | yes    |
 | =SWSi1985=   | none                                                                     | yes    |
 | =TersoffSi=  | none                                                                     | yes    |
 | =EMT=        | =parameters= (=asap= or =rasmussen=)                                     | no     |
@@ -34,6 +34,8 @@ an all-silicon one.
 Its =format= also accepts =eam=, =alloy=, =eam/alloy= and =eam/fs=.
 Without =format=, the suffix decides: =.eam.alloy= or =.setfl= is =setfl=,
 =.eam.fs= is =fs=, and =.eam= is =funcfl=.
+=skin= is the Verlet skin of its own pair list in Angstrom, 1 by default (see
+:doc:`eam_table`); it changes how often the list is rebuilt, not the result.
 =SuttonChen= and =EAMTable= are built periodic and with the stress on.
 
 =cutoff= defaults to the host's cutoff: the =pair_style= cutoff in LAMMPS.

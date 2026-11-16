@@ -97,6 +97,33 @@ With the flag clear, the stress slots and =has_stress= are left as the caller
 set them, and the energy and forces are the same bits.
 Setting the flag changes =paramsKey()=.
 
+* Pair list
+
+The spline tables and the map from atomic numbers to elements are made once, in
+the constructor.
+The potential has no setter for them, so they change only with a new potential.
+=forceImpl= and =forcePerAtom= keep one =nlist::Neighbours= list of the pairs
+within the cutoff plus =EAMTableConfig::skin= (1 Angstrom by default), and reuse
+it while every atom stays within half the skin of where it was at the last
+build.
+The move is measured to the nearest periodic image, so atoms that the caller
+wraps back into the cell keep the list.
+A new cell, another atom count, or a move past half the skin rebuilds it.
+Another element on a site does not, as the list holds positions only.
+The pairs within the cutoff are visited in the same order with any skin, so the
+skin changes how often the list is built, not the bits of the result, and it is
+not part of =paramsKey()=.
+=skin = 0= rebuilds the list whenever an atom moves.
+=setNeighbourMode(nlist::Mode::Stream)= walks the cells on every call and keeps
+no list.
+=listReused()= tells whether the last call kept the list and =listBuilds()=
+counts the builds.
+
+The list is scratch that each call rewrites, so =caps().reentrancy= is
+=Reentrancy::PerInstance=, as for the other potentials that keep one: give each
+thread its own instance.
+The two stages of =Staged.hpp= run on the host's list and do not touch it.
+
 * Checks
 
 =EAMTablePotTest= compares rgpot with LAMMPS version 22 Jul 2025.
@@ -126,6 +153,16 @@ A third case takes the Sutton-Chen platinum row as LAMMPS saw it.
 The test asks for 1e-10 eV, 1e-10 eV/Angstrom and 1e-13 eV/Angstrom^3.
 The test rebuilds the Sutton-Chen table in C++ from the formulas of that script
 rather than reading a file.
+
+=[skin]= follows the sheared =CuNi= cell through small moves, atoms shifted by
+cell vectors and wrapped back, another element on some sites, one atom past half
+the skin, a strained cell and one atom fewer.
+After each step the potential with its 1 Angstrom skin gives the energy, the
+forces, the stress and the per-atom energies and virials of a potential with
+skin 0 to the bit, and =listReused()= and =listBuilds()= show a rebuild exactly
+for the move past the skin, the strain and the atom count.
+On a free =Cu_u3= cluster the kept list matches skin 0 to the bit and a stream
+within 1e-10 eV and eV/Angstrom.
 
 A two-element =eam/fs= table of constants checks the order of the density
 blocks.
