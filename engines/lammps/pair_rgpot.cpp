@@ -80,6 +80,7 @@
 #include "pot_spec.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -494,11 +495,13 @@ void PairRgpot::compute_domain() {
   }
   const std::size_t n = cluster.size();
 
-  // An orthogonal box at least 3 cutoffs wider than the cluster, so
-  // periodic images stay beyond the cutoff and the cutoff under half the
-  // box. It spans the subdomain grown by the force range and the skin,
-  // which holds the cluster between reneighbourings, so it changes only
-  // with the LAMMPS box and the kernel can keep its own neighbour list.
+  // An orthogonal box that spans the subdomain grown by the force range
+  // and the skin, which holds the cluster between reneighbourings, so it
+  // changes only with the LAMMPS box and the kernel can keep its own
+  // neighbour list. That span is over two cutoffs, so the cutoff stays
+  // under half the box. A pad of 0.75 cutoff on each side keeps periodic
+  // images beyond the cutoff. A whole number of cutoffs wide, a kernel
+  // without a skin bins it in cells of exactly one cutoff.
   double sub_lo[3];
   double sub_hi[3];
   if (domain->triclinic == 0) {
@@ -519,7 +522,7 @@ void PairRgpot::compute_domain() {
     }
   }
   const double margin = reach + neighbor->skin;
-  const double pad = 1.5 * range.cutoff;
+  const double pad = 0.75 * range.cutoff;
   double origin[3];
   double box[9] = {};
   for (int d = 0; d < 3; ++d) {
@@ -530,7 +533,7 @@ void PairRgpot::compute_domain() {
       cmax = std::max(cmax, x[cluster[k]][d]);
     }
     origin[d] = cmin - pad;
-    box[4 * d] = cmax + pad - origin[d];
+    box[4 * d] = std::ceil((cmax + pad - origin[d]) / range.cutoff) * range.cutoff;
   }
   std::vector<double> xyz(3 * n);
   std::vector<int> z(n);
