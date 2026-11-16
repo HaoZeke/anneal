@@ -30,6 +30,7 @@ CHECKS = (
     audit_mod.sc96_78_howto,
     audit_mod.stale_claims,
     audit_mod.sc_wall,
+    audit_mod.sc_wall2,
     audit_mod.tip4p_panel,
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
@@ -205,6 +206,24 @@ def test_a_drifted_sutton_chen_wall_number_is_reported():
     assert [r[2] for r in audit.drifts()] == ["inside"]
 
 
+def test_a_drifted_sc_wall2_inside_time_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.SC_WALL2}/README.md"
+    audit.text_cache[path] = audit.text(path).replace("| sc126-55 | Anneal | 14680ddb | 13.87 |",
+                                                      "| sc126-55 | Anneal | 14680ddb | 13.00 |")
+    audit_mod.sc_wall2(audit)
+    assert [r[2] for r in audit.drifts()] == ["Inside (µs/call)"]
+
+
+def test_an_sc_wall2_row_off_its_8efdd246_path_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(f"{audit_mod.SC_WALL2}/seeds.csv")
+    row = next(r for r in rows if r["system"] == "sc96-80")
+    row["hops"] = str(int(row["hops"]) + 1)
+    audit_mod.sc_wall2(audit)
+    assert {r[2] for r in audit.drifts()} == {"prose"}
+
+
 def test_a_drifted_readme_p_value_is_reported():
     audit = audit_mod.Audit()
     path = "bench/openconf-h2h/paired/README.md"
@@ -256,7 +275,7 @@ def test_every_alias_is_verified_and_clears_the_sc_n12_rows(tmp_path, monkeypatc
 def test_a_wrong_pushed_revision_in_the_sc_wall_readme_is_reported():
     audit = audit_mod.Audit()
     path = f"{audit_mod.SC_WALL}/README.md"
-    audit.text_cache[path] = audit.text(path).replace("pushed as 3cae4806", "pushed as 3cae4807")
+    audit.text_cache[path] = audit.text(path).replace("3cae4806 and 0e11e9ae", "3cae4807 and 0e11e9ae")
     audit_mod.sc_wall(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
