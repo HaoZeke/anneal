@@ -3529,6 +3529,9 @@ fn rigid_probe(
 ///     coupled torsion draws from the chain's accepted hops beside the
 ///     plain ones. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   torsion_patience: `Config::torsion_patience` of a `groups` search,
+///     hops without a new best before coupled draws begin. Unset keeps 100;
+///     0 draws them from the first coupled change.
 ///   hold_stereocentres: `Config::hold_stereocentres` of a `groups` search,
 ///     a quench step that inverts a stereocentre is refused. Unset keeps
 ///     the preset's: on for `recommended=True`, off otherwise.
@@ -3564,6 +3567,7 @@ fn rigid_probe(
     local_step = None,
     ring_moves = None,
     torsion_coupling = None,
+    torsion_patience = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
 ))]
@@ -3590,6 +3594,7 @@ fn cluster_search(
     local_step: Option<&str>,
     ring_moves: Option<bool>,
     torsion_coupling: Option<bool>,
+    torsion_patience: Option<usize>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
@@ -3618,6 +3623,9 @@ fn cluster_search(
     }
     if torsion_coupling.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("torsion_coupling needs groups"));
+    }
+    if torsion_patience.is_some() && groups.is_none() {
+        return Err(PyValueError::new_err("torsion_patience needs groups"));
     }
     if hold_stereocentres.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("hold_stereocentres needs groups"));
@@ -3747,6 +3755,9 @@ fn cluster_search(
         }
         if let Some(coupled) = torsion_coupling {
             cfg.torsion_coupling = coupled;
+        }
+        if let Some(patience) = torsion_patience {
+            cfg.torsion_patience = patience;
         }
         if let Some(hold) = hold_stereocentres {
             cfg.hold_stereocentres = hold;

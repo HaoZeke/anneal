@@ -1350,14 +1350,21 @@ pub struct Config {
     /// Coupled torsion draws beside the plain ones of a molecular library.
     ///
     /// The chain keeps the rotatable-bond changes of its accepted hops. Once
-    /// one of them turned two bonds or more, a quarter of the bond draws
-    /// turn every bond of one such change, each through a fresh uniform
-    /// angle (see [`super::torsion::Topology::propose_coupled`]). Crankshaft
-    /// draws keep their share. A library without the torsion arm, and a
-    /// chain without such a change, draws the same hops either way. On in
+    /// one of them turned two bonds or more and the chain has gone
+    /// [`Config::torsion_patience`] hops without a new best, a quarter of
+    /// the bond draws turn every bond of one such change, each through a
+    /// fresh uniform angle (see
+    /// [`super::torsion::Topology::propose_coupled`]). Crankshaft draws keep
+    /// their share. A library without the torsion arm, and a chain without
+    /// such a change or such a stall, draws the same hops either way. On in
     /// [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub torsion_coupling: bool,
+    /// Hops without a new best before [`Config::torsion_coupling`] draws
+    /// coupled, 100 by default. Zero draws them as soon as a coupled change
+    /// is on file, the move of `bench/openconf-h2h/conf-fix7`.
+    #[serde(skip_serializing_if = "is_default_torsion_patience")]
+    pub torsion_patience: usize,
     /// Refuse a quench step that turns over a stereocentre of a declared
     /// group, from the hand the quench started in.
     ///
@@ -1384,6 +1391,21 @@ pub struct Config {
 /// Opening hops whose quenched energy changes set
 /// [`Config::measured_energy_scale`].
 pub const MEASURED_SCALE_HOPS: usize = 20;
+
+fn is_default_torsion_patience(value: &usize) -> bool {
+    *value == TORSION_PATIENCE
+}
+
+/// Default [`Config::torsion_patience`].
+///
+/// A coupled draw spends a random number the plain draw would not, so
+/// every hop after the first one differs from the plain search's. Drawn
+/// from the outset, that cost lopinavir and amprenavir lowest conformers
+/// the plain search found on the 24 evaluation seeds of
+/// `bench/openconf-h2h/conf-fix7`; while the chain still improves, the
+/// plain draw is kept. 100 hops kept the gains on the development seeds
+/// of `bench/openconf-h2h/conf-fix8`, 200 lost most of them.
+pub const TORSION_PATIENCE: usize = 100;
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -1962,6 +1984,7 @@ impl Config {
             witness_tripleton_ceiling: false,
             ring_moves: false,
             torsion_coupling: false,
+            torsion_patience: TORSION_PATIENCE,
             hold_stereocentres: false,
             measured_energy_scale: false,
         }
@@ -2422,6 +2445,13 @@ mod coverage_behaviour {
         assert!(recommended.measured_energy_scale);
         assert!(recommended.torsion_coupling);
         assert!(!Config::for_molecular(species.clone(), groups.clone(), 1.0).torsion_coupling);
+        assert_eq!(recommended.torsion_patience, TORSION_PATIENCE);
+        assert!(
+            !recommended
+                .resolved_json()
+                .unwrap()
+                .contains("torsion_patience")
+        );
         assert!(
             recommended
                 .resolved_json()

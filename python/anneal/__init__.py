@@ -259,6 +259,7 @@ def cluster_search(
     local_step: str | None = None,
     ring_moves: bool | None = None,
     torsion_coupling: bool | None = None,
+    torsion_patience: int | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
 ):
@@ -333,10 +334,14 @@ def cluster_search(
         ``None`` keeps the preset's: on for ``recommended=True``, off
         otherwise.
       torsion_coupling: coupled torsion draws of a ``groups`` search. Once an
-        accepted hop has turned two rotatable bonds or more, a quarter of the
+        accepted hop has turned two rotatable bonds or more and the chain has
+        gone ``torsion_patience`` hops without a new best, a quarter of the
         bond draws turn every bond of one such hop through fresh uniform
-        angles. ``None`` keeps the preset's: on for ``recommended=True``,
-        off otherwise.
+        angles. ``None`` keeps the preset's: on for ``recommended=True``, off
+        otherwise.
+      torsion_patience: hops without a new best before ``torsion_coupling``
+        draws coupled. ``None`` keeps 100; 0 draws them from the first
+        coupled change.
       hold_stereocentres: refuse a quench step of a ``groups`` search that
         turns a four-bonded centre into its mirror image. ``None`` keeps the
         preset's: on for ``recommended=True``, off otherwise.
@@ -389,6 +394,8 @@ def cluster_search(
         kwargs["ring_moves"] = bool(ring_moves)
     if torsion_coupling is not None:
         kwargs["torsion_coupling"] = bool(torsion_coupling)
+    if torsion_patience is not None:
+        kwargs["torsion_patience"] = int(torsion_patience)
     if hold_stereocentres is not None:
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:

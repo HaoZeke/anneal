@@ -372,12 +372,13 @@ impl Topology {
         }
     }
 
-    /// The move of [`Topology::propose`], except that a draw of rotatable
+    /// The move of [`Topology::propose`], except that once the chain has
+    /// gone its patience in hops without a new best, a draw of rotatable
     /// bonds is, in [`COUPLED_SHARE`] of proposals, a turn of every bond one
     /// accepted hop of the chain changed together with another, each
     /// through a fresh uniform angle. A crankshaft is drawn as often as
-    /// without coupling, and without such a hop on file the draw is the
-    /// plain one, random stream included.
+    /// without coupling. Before that stall, and without such a hop on file,
+    /// the draw is the plain one, random stream included.
     ///
     /// A plain draw turns at most three bonds. A minimum that differs from
     /// the chain's in several torsions whose turns only pay together is out
@@ -407,7 +408,15 @@ impl Topology {
             })
             .filter(|set| set.len() >= 2)
             .collect();
-        let coupled = !sets.is_empty() && rng.random::<f64>() < COUPLED_SHARE;
+        let stalled = coupling.stall >= coupling.patience;
+        let coupled = !sets.is_empty() && stalled && rng.random::<f64>() < COUPLED_SHARE;
+        if std::env::var("ANNEAL_HOP_TRACE").is_ok() {
+            eprintln!(
+                "DRAWTRACE {{\"coupled\":{coupled},\"sets\":{},\"stall\":{}}}",
+                sets.len(),
+                coupling.stall
+            );
+        }
         let mut order: Vec<usize> = (0..self.bonds).collect();
         self.settle(x, rng, |y, rng| {
             if self.draws_crank(rng) {
@@ -516,9 +525,20 @@ pub(crate) struct Coupling {
     next: usize,
     /// The angles the torsion draw in flight left from.
     pending: Option<Vec<f64>>,
+    /// Hops since the chain's best last fell.
+    stall: usize,
+    /// Hops without a new best before coupled draws begin.
+    patience: usize,
 }
 
 impl Coupling {
+    pub(crate) fn new(patience: usize) -> Self {
+        Self {
+            patience,
+            ..Self::default()
+        }
+    }
+
     /// Where each bond the history knows sits among the rotatable bonds of
     /// `top`, `None` for one `top` does not turn. A bond `top` turns that
     /// the history does not know joins it.
@@ -546,6 +566,11 @@ impl Coupling {
     /// Dihedral angle in `x` of every bond the history knows.
     fn angles(&self, x: ArrayView1<f64>) -> Vec<f64> {
         self.quads.iter().map(|q| dihedral(x, q)).collect()
+    }
+
+    /// Counts one hop of any arm, `improved` when it found a new best.
+    pub(crate) fn hop(&mut self, improved: bool) {
+        self.stall = if improved { 0 } else { self.stall + 1 };
     }
 
     /// Drops the draw in flight, for a hop another proposal replaced.
@@ -883,7 +908,8 @@ mod tests {
         let (x, z) = hook();
         let top = Topology::of(x.view(), &z, 1.2, None, false);
         assert!(top.bonds >= 2);
-        let mut coupling = Coupling::default();
+        let patience = 7;
+        let mut coupling = Coupling::new(patience);
         let mut coupled = StdRng::seed_from_u64(5);
         let mut plain = StdRng::seed_from_u64(5);
         let mut both = |coupling: &mut Coupling| {
@@ -921,12 +947,28 @@ mod tests {
             coupling.history[1].iter().filter(|a| **a != 0.0).count(),
             top.bonds
         );
+        for _ in 1..patience {
+            coupling.hop(false);
+        }
+        for _ in 0..20 {
+            let (y, p) = both(&mut coupling);
+            assert_eq!(y, p, "a chain that still improves draws the plain move");
+        }
+        coupling.hop(false);
         let diverged = (0..40).filter(|_| {
             let (y, p) = both(&mut coupling);
             assert!(top.clashes(y.view()).is_empty());
             y != p
         });
         assert!(diverged.count() > 0, "a two-bond change is drawn coupled");
+        coupling.hop(true);
+        let mut plain = StdRng::seed_from_u64(9);
+        let mut again = StdRng::seed_from_u64(9);
+        assert_eq!(
+            top.propose_coupled(x.view(), &mut coupling, &mut again),
+            top.propose(x.view(), &mut plain),
+            "a new best restarts the wait"
+        );
         coupling.forget();
         assert!(coupling.pending.is_none());
     }

@@ -4363,7 +4363,7 @@ where
         && kernels
             .iter()
             .any(|kernel| matches!(kernel, ClusterMove::Torsion { .. })))
-    .then(torsion::Coupling::default);
+    .then(|| torsion::Coupling::new(cfg.torsion_patience));
     let mut soft_fired = 0usize;
     let mut soft_recomputes = 0usize;
     // The basin the *chain* stands in, not the one the last quench produced.
@@ -8810,6 +8810,7 @@ where
             }
         }
         if let Some(c) = coupling.as_mut() {
+            c.hop(improved && !unquenched);
             if proposal_action == "torsion" {
                 c.observe(x_new.view(), accept && !unquenched);
             } else {
