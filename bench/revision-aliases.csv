@@ -2,13 +2,15 @@
 # pushed: each was a local commit rebuilt with a new committer date on push.
 # The rows stay as written; scripts/paper_audit.py reads a cited revision
 # that is not in the repository as its pushed_revision when every check here
-# holds. pushed_revision is on develop with patch_id (git patch-id --stable).
-# branch_revision, when given, is the same commit on the branch that was
-# pushed first, with the same patch_id; it is empty when develop holds the
-# only pushed copy. rows_commit is the commit that first wrote rows citing
-# local_revision. Its parent is pushed_revision, the checkout the rows ran
-# from, or, when differs_only_in names paths, a descendant of
-# pushed_revision that differs from it in those paths alone.
+# holds. pushed_revision is on develop, or on its branch while that branch
+# has not landed, with patch_id (git patch-id --stable). branch_revision,
+# when given, is the same commit on the branch that was pushed first, with
+# the same patch_id; it is empty when develop holds the only pushed copy,
+# and is pushed_revision itself when the branch holds it. rows_commit is
+# the commit that first wrote rows citing local_revision. Its parent is
+# pushed_revision, the checkout the rows ran from, or, when differs_only_in
+# names paths, a descendant of pushed_revision that differs from it in
+# those paths alone.
 local_revision,pushed_revision,patch_id,branch,branch_revision,rows_commit,differs_only_in
 9149d1b0c41d6412af3f9f09d90285db974ef259,016b6911faf00a1f0de0cc01745f5cffe4409c66,4275cca3ea8c829708b67e5704ace6d82e4864af,fix/gmin-sc,9a83bce73e465f4b96452522d7833b35d3d070d4,dd9ef6f76ff8ec3adbc4495d401893d03d3bf916,
 f9d1ac05e286aba6107c1f881901f71896f6ae0d,bc3e0cb161d06a77eb46ba0043426139ab6a2295,d4c75b4441714e8f9fe573356c937dc7de499766,fix/gmin-sc2,6e425a39b307613d6ce6e2ab253c855bffbf55d1,1f9894c09c7e821324e0698a835c868434b29002,
@@ -26,3 +28,4 @@ cf660e192df3d8e220e2e15a8089c2fa1f30d3d3,2a8c80c93f49c45ba10265449bcced03a2d77cb
 bdf084959a2f3cec6c7f124967f350590c7aedc5,8bcc47c2e709febc7708204a566e006e56582134,f13d37f891d0317316623cd22ffbc3a6a6d3e23d,,,2788595c06e2cd80d9ea654d7e55007ed5548bb4,
 e71e5de958fdcb97ff9579ad5c694b7b8ca753f3,e1f580ac86b7ee3273b3541c8b87cf33f6ad06b2,c7095f3ee0604a1073320a0e7860b9b0210254cb,bench/crest-gaps,f272087b03013d9857986b2cd130cdc60c40f5ea,d99354073ae917995172e9a49f7e2694a0848441,
 f3d6a05013f1e029ba02f093b300d938e2b8748f,9f00ba0f4621cc4e50010a6ff16fc3d6176c2c87,1a7ae4e7fce28e2e53faead29eb4feef39a9decb,bench/crest-gaps,391b8c19f810a009d66a042f3fc7bd58b3a3666f,02f1fc1ab5c918aba0b9b36cc0e651d86d16d6f4,
+e7ee1e86806312132d8ab8cc9bf75f29b31ff46c,3cae480646fe6eae83477b2faf71199761375176,3f47dc7a3f60e0a8ebd9815426d51c376a5dc754,record/sc-wall,3cae480646fe6eae83477b2faf71199761375176,c3cf8b7c687e4d7ec0ffa44815ef9c3e2119b4d3,

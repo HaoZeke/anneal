@@ -31,6 +31,7 @@ CHECKS = (
     audit_mod.head_to_head,
     audit_mod.sc96_78_howto,
     audit_mod.stale_claims,
+    audit_mod.sc_wall,
     audit_mod.tip4p_panel,
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
@@ -164,6 +165,14 @@ def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
 
 
+def test_a_drifted_sutton_chen_wall_number_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.SC_WALL}/README.md"
+    audit.text_cache[path] = audit.text(path).replace("| sc126-55 | Anneal | 62.69 |", "| sc126-55 | Anneal | 16.72 |")
+    audit_mod.sc_wall(audit)
+    assert [r[2] for r in audit.drifts()] == ["inside"]
+
+
 def test_a_drifted_readme_p_value_is_reported():
     audit = audit_mod.Audit()
     path = "bench/openconf-h2h/paired/README.md"
@@ -241,6 +250,14 @@ def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
         ("unpushed revision bf09f7a2", "not listed", "no pushed equivalent"),
         ("unpushed revision e09e0487", "listed although its alias holds", "resolved"),
     ]
+
+
+def test_a_wrong_pushed_revision_in_the_sc_wall_readme_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.SC_WALL}/README.md"
+    audit.text_cache[path] = audit.text(path).replace("pushed as 3cae4806", "pushed as 3cae4807")
+    audit_mod.sc_wall(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
 def test_an_alias_with_another_patch_id_is_reported(tmp_path, monkeypatch):
