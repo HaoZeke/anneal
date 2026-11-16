@@ -997,19 +997,24 @@ if get_option('with_tests') and _doc_python.found()
         suite: 'docs',
         timeout: 120,
     )
-    test(
-        'doccheck_examples',
-        _doc_python,
-        args: [
-            _doccheck,
-            'blocks',
-            '--root',
-            meson.project_source_root(),
-            '--build-dir',
-            meson.project_build_root(),
-        ],
-        suite: 'docs',
-        timeout: 1200,
-        priority: -10,
-    )
+    # The C and C++ blocks are built with a cc driver (-fsyntax-only, -l,
+    # -Wl,-rpath), and most run blocks link librgpot. Windows has cl.exe,
+    # and rgpot.dll exports only rgpot_library_version, as for engines/.
+    if host_system != 'windows'
+        test(
+            'doccheck_examples',
+            _doc_python,
+            args: [
+                _doccheck,
+                'blocks',
+                '--root',
+                meson.project_source_root(),
+                '--build-dir',
+                meson.project_build_root(),
+            ],
+            suite: 'docs',
+            timeout: 1200,
+            priority: -10,
+        )
+    endif
 endif
