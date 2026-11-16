@@ -23,10 +23,6 @@
 #include "rgpot/simd/api.hpp"
 #include "rgpot/simd/exact_fma.hpp"
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot {
 
 /**
@@ -186,15 +182,7 @@ void LJClusterPot::compute(const ForceInput &in, ForceOut *out,
     for (int t = 0; t < nt; ++t) {
       slots[static_cast<std::size_t>(t)] = team.slot(t);
     }
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-    {
-#if defined(_OPENMP)
-      const int t = omp_get_thread_num();
-#else
-      const int t = 0;
-#endif
+    nlist::forEachSlice(nt, [&](int t) {
       const auto range = nlist::partition(N, t, nt);
       double *local =
           owned.data() + static_cast<std::size_t>(t) * static_cast<std::size_t>(N) * 3;
@@ -206,7 +194,7 @@ void LJClusterPot::compute(const ForceInput &in, ForceOut *out,
                    atoms != nullptr ? &slots[static_cast<std::size_t>(t)] : nullptr);
           });
       partial[static_cast<std::size_t>(t)] = local_e;
-    }
+    });
     team.reduce();
     for (int t = 0; t < nt; ++t) {
       *U += partial[static_cast<std::size_t>(t)];

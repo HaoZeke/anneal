@@ -31,11 +31,13 @@ struct ElementSpline;
 inline constexpr double kEamSkinOverCutoff = 1.0 / 5.0;
 
 /// One OpenMP thread matches the direct pair loop bit for bit. Several
-/// threads each write the forces of their own atoms and add partial
-/// energies in thread-id order, so a fixed thread count repeats bit for
-/// bit. Energy and every force component stay within this relative
-/// tolerance of the one-thread value. A component whose one-thread
-/// magnitude is below 1 is compared on an absolute scale of the same size.
+/// threads split the atoms into one slice per requested thread, write the
+/// forces of each slice's own atoms and add partial energies in slice
+/// order, so a fixed thread count repeats bit for bit, also when the
+/// runtime starts fewer threads. Energy and every force component stay
+/// within this relative tolerance of the one-thread value. A component
+/// whose one-thread magnitude is below 1 is compared on an absolute scale
+/// of the same size.
 inline constexpr double kEamThreadedTolerance = 1e-9;
 
 /// Embedded-atom aluminium, palladium and gold.

@@ -20,10 +20,6 @@
 #include <stdexcept>
 #include <vector>
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot {
 namespace {
 
@@ -290,15 +286,7 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
     std::vector<double> owned(static_cast<std::size_t>(nt) * n3, 0.0);
     std::vector<double> energies(static_cast<std::size_t>(nt), 0.0);
     std::vector<double> vir(static_cast<std::size_t>(nt) * 6, 0.0);
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-    {
-#if defined(_OPENMP)
-      const int t = omp_get_thread_num();
-#else
-      const int t = 0;
-#endif
+    nlist::forEachSlice(nt, [&](int t) {
       const auto range = nlist::partition(n, t, nt);
       double *local = owned.data() + static_cast<std::size_t>(t) * n3;
       double local_e = 0.0;
@@ -365,7 +353,7 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
     }
   }
       energies[static_cast<std::size_t>(t)] = local_e;
-    }
+    });
     for (int t = 0; t < nt; ++t) {
       *energy += energies[static_cast<std::size_t>(t)];
       const double *local = owned.data() + static_cast<std::size_t>(t) * n3;

@@ -38,13 +38,16 @@ number or below 1, the call stays on one thread. A build without OpenMP
 always uses one thread.
 
 With a stored list, a value above 1 splits the atoms into contiguous
-slices, one per OpenMP thread. Each thread writes only the forces of its
-own atoms. The first pass computes the density, the pair potential to
-higher-index partners and that atom's own embedding term. A second pass
-adds the neighbours' embedding terms and the pair forces from
-lower-index partners, using the scales stored on the first pass.
-Partial energies are added in thread-id order, so a fixed thread count
-repeats bit for bit.
+slices, one per requested thread. Each slice writes only the forces of
+its own atoms. The first pass computes the density, the pair potential
+to higher-index partners and that atom's own embedding term. A second
+pass, which starts once every slice has finished the first, adds the
+neighbours' embedding terms and the pair forces from lower-index
+partners, using the scales stored on the first pass. Partial energies
+are added in slice order, so a fixed thread count repeats bit for bit.
+The threads the runtime starts take every slice, also when there are
+fewer of them, as under `OMP_THREAD_LIMIT` or inside another OpenMP
+region.
 
 A streaming evaluation splits the cells across the threads. Each thread
 keeps its own density and force rows, and the rows are added in thread

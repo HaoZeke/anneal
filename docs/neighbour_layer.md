@@ -177,16 +177,19 @@ An infinite cutoff or skin has no search radius, in any mode.
 The update bins nothing and stores nothing, and `allPairs()` reports it with `streaming()` set.
 Each walk takes the pairs straight from the coordinates, `i` ascending and then `j` ascending, which is the order of the one bin a search wider than the system gives, and folds each pair with the image of the spec.
 No move takes a pair out of such a search, so the update is reused for any coordinates while the atom count, the cell and the spec stay the same.
-A team walk with no bins gives each thread a contiguous range of atoms.
+A team walk with no bins gives each slice a contiguous range of atoms; with more slices than atoms, some ranges are empty.
 Sutton-Chen with `cutoff <= 0` searches this way.
 The public `Query` still rejects a cutoff that is not finite.
 
-`OMP_NUM_THREADS` above 1 splits the work across threads. Most
-two-body walks use `forCellTeam`, which gives each thread a contiguous
+`OMP_NUM_THREADS` above 1 splits the work into that many slices. Most
+two-body walks use `forCellTeam`, which gives each slice a contiguous
 range of cells. Stored EAM, LJCluster and the three-body potentials
-split atoms into contiguous slices. Private forces are added in thread-id order, so a
-fixed thread count repeats bit for bit and stays within `1e-9` of one
-thread. One thread keeps the serial pair order.
+split atoms into contiguous slices. `forEachSlice` hands every slice to
+the threads the runtime starts, also when there are fewer of them, as
+under `OMP_THREAD_LIMIT` or inside another OpenMP region. Private forces
+are added in slice order, so a fixed thread count repeats bit for bit
+and stays within `1e-9` of one thread. One thread keeps the serial pair
+order.
 
 Stillinger-Weber and Tersoff use this layer for `Auto` as well as
 `Stored` and `Stream`. Bonds are gathered for one atom at a time, sorted

@@ -23,10 +23,6 @@
 #include <string>
 #include <vector>
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 void EAM::cleanMemory() {
   std::vector<double>().swap(wrapped_);
   std::vector<Delta>().swap(deltas_);
@@ -308,15 +304,7 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
   }
   const auto &off = neighbours_.offsets();
   const auto &nbr = neighbours_.neighbours();
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-  {
-#if defined(_OPENMP)
-    const int t = omp_get_thread_num();
-#else
-    const int t = 0;
-#endif
+  rgpot::nlist::forEachSlice(nt, [&](int t) {
     const long begin = static_cast<long>(parts_[static_cast<std::size_t>(t)].begin);
     const long end = static_cast<long>(parts_[static_cast<std::size_t>(t)].end);
     for (long i = begin; i < end; ++i) {
@@ -395,9 +383,11 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
       partial_f_[static_cast<std::size_t>(3 * i + 2)] = fz;
       thread_energy_[static_cast<std::size_t>(t)] += energy;
     }
-#if defined(_OPENMP)
-#pragma omp barrier
-#endif
+  });
+  // The second pass reads the dF and pair terms of every slice.
+  rgpot::nlist::forEachSlice(nt, [&](int t) {
+    const long begin = static_cast<long>(parts_[static_cast<std::size_t>(t)].begin);
+    const long end = static_cast<long>(parts_[static_cast<std::size_t>(t)].end);
     for (long i = begin; i < end; ++i) {
       double fx = partial_f_[static_cast<std::size_t>(3 * i)];
       double fy = partial_f_[static_cast<std::size_t>(3 * i + 1)];
@@ -430,7 +420,7 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
       partial_f_[static_cast<std::size_t>(3 * i + 1)] = fy;
       partial_f_[static_cast<std::size_t>(3 * i + 2)] = fz;
     }
-  }
+  });
   for (long i = 0; i < N; ++i) {
     F[3 * i] = partial_f_[static_cast<std::size_t>(3 * i)];
     F[3 * i + 1] = partial_f_[static_cast<std::size_t>(3 * i + 1)];

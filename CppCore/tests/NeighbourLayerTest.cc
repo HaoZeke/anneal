@@ -15,6 +15,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "rgpot/EAM/EAMPot.hpp"
+#include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/StillingerWeber/SWSi.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
@@ -208,6 +209,18 @@ void checkThreads(Pot &&serial_pot, Pot &&parallel_pot,
     REQUIRE(close(fs.data()[i], fa.data()[i]));
     REQUIRE(bits(fa.data()[i]) == bits(fb.data()[i]));
   }
+#if defined(_OPENMP) && _OPENMP >= 200805
+  // Both slices on one thread give the bits of two threads.
+  {
+    const OneThreadTeams one;
+    const auto c = parallel_pot(xyz, z, box);
+    REQUIRE(bits(std::get<0>(c)) == bits(std::get<0>(a)));
+    const auto &fc = std::get<1>(c);
+    for (std::size_t i = 0; i < z.size() * 3; ++i) {
+      REQUIRE(bits(fc.data()[i]) == bits(fa.data()[i]));
+    }
+  }
+#endif
   setThreads("");
 }
 
@@ -242,6 +255,10 @@ TEST_CASE("threaded classical forces repeat and stay near one thread",
   lj_one_s.setNeighbourMode(rgpot::nlist::Mode::Stream);
   lj_two_s.setNeighbourMode(rgpot::nlist::Mode::Stream);
   checkThreads(std::move(lj_one_s), std::move(lj_two_s), ljpos, ar, 3 * a_lj);
+  rgpot::LJClusterConfig clcfg;
+  clcfg.cutoff = 2.5;
+  checkThreads(rgpot::LJClusterPot(clcfg), rgpot::LJClusterPot(clcfg), ljpos,
+               ar, 3 * a_lj);
 
   rgpot::SuttonChenConfig sc;
   sc.cutoff = 3.0;
