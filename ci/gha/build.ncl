@@ -142,6 +142,29 @@ let fast_nlist_off_build_test =
   & { name = "Build and test without the fast pair list" }
 in
 
+let thread_limit_build =
+  S.run_pixi m%"
+  meson setup bbdir \
+    -Dwith_tests=true \
+    -Dwith_examples=false \
+    -Dwith_xtensor=false \
+    -Dwith_eigen=false \
+    -Dwith_rpc=false \
+    -Dwith_cache=false
+  meson compile -C bbdir
+"%
+  & { name = "Build", id = "build" }
+in
+
+let thread_limit_test = fun limit =>
+  S.run_pixi "meson test -C bbdir --print-errorlogs --logbase limit%{limit}"
+  & {
+    name = "Test with OMP_THREAD_LIMIT=%{limit}",
+    "if" = "${{ !cancelled() && steps.build.outcome == 'success' }}",
+    env = { OMP_THREAD_LIMIT = limit },
+  }
+in
+
 {
   name = "Build Matrix",
   on = S.on_main_pr,
@@ -216,6 +239,19 @@ in
         S.checkout_minimal,
         S.setup_pixi "devbld" "devbld",
         fast_nlist_off_build_test,
+      ],
+    },
+    # Under OMP_THREAD_LIMIT every region gets fewer threads than it asks
+    # for. One build, then the suite at a limit of one and of two.
+    thread_limit = {
+      name = "meson / ubuntu [OMP_THREAD_LIMIT 1, 2]",
+      "runs-on" = P.ubuntu,
+      steps = [
+        S.checkout_minimal,
+        S.setup_pixi "devbld" "devbld",
+        thread_limit_build,
+        thread_limit_test "1",
+        thread_limit_test "2",
       ],
     },
     rust_tests = {

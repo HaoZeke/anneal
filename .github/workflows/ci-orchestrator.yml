@@ -477,6 +477,48 @@ jobs:
         shell: pixi run bash -e {0}
         run: bash tools/check_cxx_layout_ubsan.sh
 
+  # The suite on short OpenMP teams. Under OMP_THREAD_LIMIT every region gets
+  # fewer threads than it asks for, and results must keep the bits of their
+  # slice count. One build, two test runs. Linux only: the macOS legs build
+  # without OpenMP, and MSVC's OpenMP 2.0 runtime has no thread limit.
+  thread_limit:
+    name: meson / ubuntu [OMP_THREAD_LIMIT 1, 2]
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: v0.70.2
+          cache: true
+          environments: devbld
+          activate-environment: true
+      - name: Build
+        id: build
+        shell: pixi run bash -e {0}
+        run: |
+          meson setup bbdir \
+            -Dwith_tests=true \
+            -Dwith_examples=false \
+            -Dwith_xtensor=false \
+            -Dwith_eigen=false \
+            -Dwith_rpc=false \
+            -Dwith_cache=false
+          meson compile -C bbdir
+      - name: Test with OMP_THREAD_LIMIT=1
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pixi run bash -e {0}
+        env:
+          OMP_THREAD_LIMIT: "1"
+        run: meson test -C bbdir --print-errorlogs --logbase limit1
+      - name: Test with OMP_THREAD_LIMIT=2
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pixi run bash -e {0}
+        env:
+          OMP_THREAD_LIMIT: "2"
+        run: meson test -C bbdir --print-errorlogs --logbase limit2
+
   # --- Stage 2b: rust ---
   rust_tests:
     name: Rust Core Tests (${{ matrix.os }})
@@ -869,6 +911,7 @@ jobs:
       - nodownload_rehearsal
       - build_fast_nlist_off
       - cxx_layout_ubsan
+      - thread_limit
       - rust_tests
       - client_bridge_stress
       - potentials_metatomic
@@ -905,6 +948,7 @@ jobs:
             "nodownload_rehearsal:${{ needs.nodownload_rehearsal.result }}" \
             "build_fast_nlist_off:${{ needs.build_fast_nlist_off.result }}" \
             "cxx_layout_ubsan:${{ needs.cxx_layout_ubsan.result }}" \
+            "thread_limit:${{ needs.thread_limit.result }}" \
             "rust_tests:${{ needs.rust_tests.result }}" \
             "client_bridge_stress:${{ needs.client_bridge_stress.result }}" \
             "potentials_metatomic:${{ needs.potentials_metatomic.result }}" \

@@ -129,13 +129,15 @@ prek ∥ docs_snapper ∥ docs_lychee ∥ towncrier(PR) ∥ ci-tools
 build_and_test ∥ rust_tests ∥ client_bridge_stress
   ∥ potentials_metatomic ∥ potentials_uma_engine ∥ potentials_tight_binding
   ∥ potentials_tblite_06 ∥ potentials_plugins (plugin-test) ∥ xckernel_goldens
-  ∥ build_windows_meson ∥ nodownload_rehearsal ∥ build_fast_nlist_off ∥ eonviz_pins   (need `prepare` only; no potctl)
+  ∥ build_windows_meson ∥ nodownload_rehearsal ∥ build_fast_nlist_off ∥ thread_limit
+  ∥ eonviz_pins   (need `prepare` only; no potctl)
   (build_windows_meson: MSVC meson leg, fortran suppressed via
    ci/gha/machines/no-fortran.ini so the flang/MSVC kernel pairing stays out.
    nodownload_rehearsal: `git archive` tree built with --wrap-mode=nodownload,
    the conda-forge source-build rehearsal; fortran kernels included, since
    they are in-tree and pull no wrap.
    build_fast_nlist_off: meson with the linkcell/minimage pair list disabled.
+   thread_limit: one meson build, the suite under OMP_THREAD_LIMIT=1 and =2.
    eonviz_pins: pixi task check-eonviz-pins and the byte-exact restart golden.)
   (NWChemPot frontend/stub always; energy/grad need an external libnwchemc engine.)
     ↓

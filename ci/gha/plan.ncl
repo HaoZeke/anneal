@@ -99,6 +99,12 @@ let P = S.pins in
       role = "ABI layout tests with -Db_sanitize=address,undefined",
     },
     {
+      id = "thread_limit",
+      runs_on = P.ubuntu,
+      needs = ["prepare"],
+      role = "one meson build, the suite under OMP_THREAD_LIMIT=1 and =2",
+    },
+    {
       id = "rust_tests",
       needs = ["ci-tools"],
       role = "rgpot-core + potctl tests",
@@ -173,6 +179,7 @@ let P = S.pins in
         "nodownload_rehearsal",
         "build_fast_nlist_off",
         "cxx_layout_ubsan",
+        "thread_limit",
         "rust_tests",
         "client_bridge_stress",
         "potentials_metatomic",
