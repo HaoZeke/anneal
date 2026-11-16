@@ -299,9 +299,12 @@ def run_anneal(binary: Path, system: str, seed: int, budget: int, coords: Path, 
 def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict[str, str]]:
     """One row per system, arm and harness revision.
 
-    The anneal row carries the tests against the GMIN rows of its own
-    harness. A GMIN rerun from a later harness gets its own row after all
-    of those, with the tests against the same anneal rows.
+    The first anneal harness of a system and the GMIN rows of that harness
+    come first, and the anneal row carries the tests against them. Every
+    other harness of either arm gets its own row after all of those, in the
+    order of the seed rows, with the tests against the other arm's rows of
+    the latest harness that comes before it in the seed rows. A row once
+    written is therefore written again with the same numbers.
     """
     grouped: dict[str, dict[tuple[str, str], list[dict[str, str]]]] = {}
     for row in rows:
@@ -361,8 +364,6 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
     for system in list(EIGHTY) + list(SMALLER):
         groups = grouped.get(system, {})
         anneal_keys = [key for key in groups if key[0] == "anneal"]
-        if len(anneal_keys) > 1:
-            raise SystemExit(f"{system} has anneal rows from more than one harness")
         own = anneal_keys[0][1] if anneal_keys else head
         anneal = groups.get(("anneal", own), [])
         gmin = groups.get(("gmin", own), [])
@@ -371,9 +372,15 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
             out.append(line(system, "anneal", own, anneal, test, True, gmin))
         if gmin:
             out.append(line(system, "gmin", own, gmin, test, False, anneal))
+        before: dict[str, list[dict[str, str]]] = {}
         for (arm, harness), group in groups.items():
-            if arm == "gmin" and harness != own:
-                later.append(line(system, "gmin", harness, group, tests(anneal, group), True, anneal))
+            other = "anneal" if arm == "gmin" else "gmin"
+            partner = before.get(other, [])
+            before[arm] = group
+            if harness == own:
+                continue
+            pair = (partner, group) if arm == "gmin" else (group, partner)
+            later.append(line(system, arm, harness, group, tests(*pair), True, partner))
     return out + later
 
 
