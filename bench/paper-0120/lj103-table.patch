@@ -1,0 +1,21 @@
+diff --git a/examples/h2h_gmin_proof.rs b/examples/h2h_gmin_proof.rs
+index dc4ad054..2f9e494c 100644
+--- a/examples/h2h_gmin_proof.rs
++++ b/examples/h2h_gmin_proof.rs
+@@ -244,6 +244,7 @@ fn system_spec(name: &str) -> Option<Spec> {
+         "lj75" => (75, -397.492331),
+         "lj98" => (98, -543.665361),
+         "lj102" => (102, -569.363652),
++        "lj103" => (103, -575.766131),
+         "lj104" => (104, -582.086642),
+         "lj150" => (150, -893.310258),
+         "lj200" => (200, -1229.184776),
+@@ -261,7 +262,7 @@ fn paper_budget(n: usize) -> Option<usize> {
+     match n {
+         38 => Some(400_000),
+         55 => Some(1_000_000),
+-        75 | 98 | 102 | 104 | 150 | 200 => Some(4_000_000),
++        75 | 98 | 102 | 103 | 104 | 150 | 200 => Some(4_000_000),
+         _ => None,
+     }
+ }
