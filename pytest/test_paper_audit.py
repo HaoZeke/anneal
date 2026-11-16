@@ -4,6 +4,8 @@ matches its committed rows, and the audit notices a drifted cell."""
 
 import importlib.util
 import math
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -266,6 +268,44 @@ def test_an_alias_whose_rows_commit_is_elsewhere_is_reported(tmp_path, monkeypat
                                                "rows commit ba7c3b45 first cites 9149d1b0",
                                                "unpushed revision 9149d1b0"}
     assert gaps == {path: "revision 9149d1b0 is not in this repository" for path in SC_N12_ROWS}
+
+
+def git(*args, stdin=None):
+    return subprocess.run(["git", *args], cwd=ROOT, input=stdin, capture_output=True, text=True, check=False)
+
+
+def test_the_revision_index_answers_as_one_git_call_per_question(audited):
+    names = sorted({r[c].strip() for rows in audited.read.values() for r in rows for c in audit_mod.REVISION_COLUMNS
+                    if c in r and re.fullmatch(r"[0-9a-f]{7,40}", r[c].strip())} - set(audit_mod.EXTERNAL_REVISIONS))
+    table = audit_mod.alias_table()
+    index = audit_mod.alias_index(names, table)
+    revisions = sorted({*names, *(r[c] for r in table for c in ("local_revision", "pushed_revision", "branch_revision") if r[c])})
+    batched, single = {}, {}
+    for revision in revisions:
+        batched[revision, "exists"] = index.exists(revision)
+        single[revision, "exists"] = git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+    for row in table:
+        for column in ("pushed_revision", "branch_revision"):
+            revision = row[column]
+            if not revision:
+                continue
+            batched[revision, "remote"] = index.on_remote(revision)
+            single[revision, "remote"] = bool(git("for-each-ref", "--count=1", "--contains", revision, "refs/remotes").stdout.strip())
+            batched[revision, "patch-id"] = index.patch_id(revision)
+            single[revision, "patch-id"] = git("patch-id", "--stable", stdin=git("show", revision).stdout).stdout.split()[0]
+        rows_commit, local, pushed = row["rows_commit"], row["local_revision"], row["pushed_revision"]
+        parents = git("rev-parse", f"{rows_commit}^@").stdout.split()
+        batched[rows_commit, "parents"] = index.parents_of(rows_commit)
+        single[rows_commit, "parents"] = parents
+        batched[pushed, rows_commit, "ancestor"] = index.is_ancestor(pushed, parents[0])
+        single[pushed, rows_commit, "ancestor"] = git("merge-base", "--is-ancestor", pushed, parents[0]).returncode == 0
+        citing = git("log", "--reverse", "--format=%H", f"-S{local}", rows_commit).stdout.split()
+        batched[local, rows_commit, "citing"] = index.cites[local] & index.closure([rows_commit])
+        single[local, rows_commit, "citing"] = set(citing)
+        batched[local, rows_commit, "first"] = index.first_cites(local, rows_commit)
+        single[local, rows_commit, "first"] = citing[:1] == [rows_commit]
+    assert batched == single
+    assert sum(single[k] for k in single if k[-1] == "first") == len(table)
 
 
 @pytest.mark.parametrize(

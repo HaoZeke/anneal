@@ -30,10 +30,12 @@ import csv
 import functools
 import importlib.util
 import math
+import os
 import random
 import re
 import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -1187,9 +1189,11 @@ def provenance(audit: Audit) -> dict[str, str]:
         if problems:
             gaps[path] = "; ".join(problems)
     names = sorted(revisions)
-    aliases = verified_aliases(audit)
+    table = alias_table()
+    index = alias_index(names, table)
+    aliases = verified_aliases(audit, table, index)
     unpushed = set()
-    for name in (n for n in names if not commit_exists(n)):
+    for name in (n for n in names if not index.exists(n)):
         if any(local.startswith(name) for local in aliases):
             continue
         unpushed.add(name)
@@ -1206,32 +1210,142 @@ def git(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=ROOT, input=stdin, capture_output=True, text=True, check=False)
 
 
-def commit_exists(revision: str) -> bool:
-    return git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+def git_bytes(*args: str, stdin: bytes = b"", env: dict[str, str] | None = None) -> bytes:
+    return subprocess.run(["git", *args], cwd=ROOT, input=stdin, capture_output=True, check=False, env=env).stdout
 
 
-def on_github(revision: str) -> bool:
-    """The commit is reachable from a ref fetched from the remote."""
-    return bool(git("for-each-ref", "--count=1", "--contains", revision, "refs/remotes").stdout.strip())
+class RevisionIndex:
+    """The revision lookups of one audit, from a fixed number of git calls.
+
+    ``cites`` holds, for each text, the commits that ``git log -S<text>`` over
+    the tips would list: those with a file pair, as ``git log --raw`` gives
+    them, whose two sides hold the text a different number of times. One
+    ``git grep -F`` over every blob of those pairs finds the blobs that hold
+    any text at all; only those are read and counted.
+    """
+
+    def __init__(self, names: tuple[str, ...], texts: tuple[str, ...], tips: tuple[str, ...], patched: tuple[str, ...]) -> None:
+        asked = sorted({n for n in names + tips + patched if n})
+        out = git("cat-file", "--batch-check", stdin="".join(f"{n}^{{commit}}\n" for n in asked)).stdout.splitlines()
+        self.commit = {n: line.split()[0] for n, line in zip(asked, out) if line.split()[1:2] == ["commit"]}
+        self.parents: dict[str, list[str]] = {}
+        for line in git("rev-list", "--parents", "--all", *sorted(set(self.commit.values()))).stdout.splitlines():
+            commit, *parents = line.split()
+            self.parents[commit] = parents
+        remote = git("for-each-ref", "--format=%(objectname)", "refs/remotes").stdout.split()
+        self.remote = self.closure(r for r in remote if r in self.parents)
+        self.patch_ids: dict[str, str] = {}
+        shown = sorted({self.commit[p] for p in patched if p in self.commit})
+        if shown:
+            for line in git("patch-id", "--stable", stdin=git("show", *shown).stdout).stdout.splitlines():
+                pid, commit = line.split()
+                self.patch_ids[commit] = pid
+        self.cites: dict[str, set[str]] = {t: set() for t in texts}
+        heads = sorted({self.commit[t] for t in tips if t in self.commit})
+        if self.cites and heads:
+            self.pickaxe(heads)
+
+    def closure(self, starts) -> set[str]:
+        seen: set[str] = set()
+        stack = list(starts)
+        while stack:
+            commit = stack.pop()
+            if commit not in seen:
+                seen.add(commit)
+                stack.extend(self.parents.get(commit, ()))
+        return seen
+
+    def pickaxe(self, heads: list[str]) -> None:
+        pairs: dict[str, list[tuple[str, str, str, str]]] = defaultdict(list)
+        commit = ""
+        for line in git("log", "--raw", "--no-abbrev", "--format=commit %H", *heads).stdout.splitlines():
+            if line.startswith("commit "):
+                commit = line[len("commit "):]
+            elif line.startswith(":"):
+                old_mode, new_mode, old, new = line[1:].split("\t", 1)[0].split()[:4]
+                pairs[commit].append((old_mode, old, new_mode, new))
+        absent = "0" * 40
+        blobs = sorted({b for ps in pairs.values() for m1, b1, m2, b2 in ps for m, b in ((m1, b1), (m2, b2))
+                        if b != absent and m != "160000"})
+        objects = git("rev-parse", "--path-format=absolute", "--git-path", "objects").stdout.strip()
+        with tempfile.TemporaryDirectory() as scratch:
+            env = dict(os.environ, GIT_OBJECT_DIRECTORY=scratch, GIT_ALTERNATE_OBJECT_DIRECTORIES=objects)
+            listing = "".join(f"100644 blob {b}\t{b}\n" for b in blobs).encode()
+            tree = git_bytes("mktree", stdin=listing, env=env).decode().strip()
+            patterns = [arg for t in self.cites for arg in ("-e", t)]
+            found = git_bytes("grep", "-a", "-l", "-F", *patterns, tree, env=env).decode().split()
+        held = sorted(line.split(":", 1)[1] for line in found)
+        counts: dict[str, dict[str, int]] = {}
+        stream = git_bytes("cat-file", "--batch", stdin="".join(f"{b}\n" for b in held).encode())
+        at = 0
+        for blob in held:
+            end = stream.index(b"\n", at)
+            size = int(stream[at:end].split()[2])
+            content = stream[end + 1:end + 1 + size]
+            at = end + 2 + size
+            counts[blob] = {t: content.count(t.encode()) for t in self.cites}
+        none = dict.fromkeys(self.cites, 0)
+
+        def held_in(mode: str, blob: str) -> dict[str, int]:
+            if blob == absent:
+                return none
+            if mode == "160000":
+                content = f"Subproject commit {blob}\n".encode()
+                return {t: content.count(t.encode()) for t in self.cites}
+            return counts.get(blob, none)
+
+        for commit, ps in pairs.items():
+            for old_mode, old, new_mode, new in ps:
+                before, after = held_in(old_mode, old), held_in(new_mode, new)
+                for text in self.cites:
+                    if before[text] != after[text]:
+                        self.cites[text].add(commit)
+
+    def resolve(self, revision: str) -> str | None:
+        return self.commit.get(revision) or (revision if revision in self.parents else None)
+
+    def exists(self, revision: str) -> bool:
+        return revision in self.commit
+
+    def on_remote(self, revision: str) -> bool:
+        """The commit is reachable from a ref fetched from the remote."""
+        return self.resolve(revision) in self.remote
+
+    def patch_id(self, revision: str) -> str | None:
+        return self.patch_ids.get(self.resolve(revision) or "")
+
+    def parents_of(self, revision: str) -> list[str]:
+        return self.parents.get(self.resolve(revision) or "", [])
+
+    def is_ancestor(self, ancestor: str, revision: str) -> bool:
+        commit, of = self.resolve(ancestor), self.resolve(revision)
+        return bool(commit and of) and commit in self.closure([of])
+
+    def first_cites(self, text: str, revision: str) -> bool:
+        """``revision`` is the oldest commit in its history whose diff changes how often ``text`` occurs."""
+        citing = self.cites.get(text, set())
+        return revision in citing and not citing & self.closure(self.parents.get(revision, ()))
 
 
 @functools.cache
-def patch_id(revision: str) -> str | None:
-    shown = git("show", revision)
-    if shown.returncode != 0:
-        return None
-    out = git("patch-id", "--stable", stdin=shown.stdout).stdout.split()
-    return out[0] if out else None
+def revision_index(names: tuple[str, ...], texts: tuple[str, ...], tips: tuple[str, ...], patched: tuple[str, ...]) -> RevisionIndex:
+    return RevisionIndex(names, texts, tips, patched)
 
 
-@functools.cache
-def first_citation(text: str, revision: str) -> str | None:
-    """The oldest commit in the history of ``revision`` whose diff adds ``text``."""
-    out = git("log", "--reverse", "--format=%H", f"-S{text}", revision).stdout.split()
-    return out[0] if out else None
+def alias_table() -> list[dict[str, str]]:
+    with (ROOT / ALIASES).open(newline="") as handle:
+        return list(csv.DictReader(line for line in handle if not line.startswith("#")))
 
 
-def verified_aliases(audit: Audit) -> dict[str, str]:
+def alias_index(names: list[str], table: list[dict[str, str]]) -> RevisionIndex:
+    """The index for the cited revisions ``names`` and every revision ``table`` names."""
+    revisions = ("local_revision", "pushed_revision", "branch_revision")
+    return revision_index(tuple(names) + tuple(r[c] for r in table for c in revisions),
+                          texts=tuple(r["local_revision"] for r in table), tips=tuple(r["rows_commit"] for r in table),
+                          patched=tuple(r[c] for r in table for c in ("pushed_revision", "branch_revision")))
+
+
+def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionIndex) -> dict[str, str]:
     """Local revisions of ALIASES whose pushed equivalent checks out, mapped to it.
 
     Each alias is checked: the local revision is not in the repository; the
@@ -1242,33 +1356,31 @@ def verified_aliases(audit: Audit) -> dict[str, str]:
     the paths in ``differs_only_in``, descends from it and differs from it
     in those paths alone.
     """
-    with (ROOT / ALIASES).open(newline="") as handle:
-        table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
     verified = {}
     for row in table:
         local, pushed = row["local_revision"], row["pushed_revision"]
         where = f"{ALIASES} {local[:8]}"
-        checks = [("local revision is not in this repository", not commit_exists(local))]
+        checks = [("local revision is not in this repository", not index.exists(local))]
         for column in ("pushed_revision", "branch_revision"):
             revision = row[column]
             if not revision and column == "branch_revision":
                 continue
-            checks.append((f"{column} {revision[:8]} is in this repository", commit_exists(revision)))
-            checks.append((f"{column} {revision[:8]} is on the remote", on_github(revision)))
-            checks.append((f"{column} {revision[:8]} has patch-id {row['patch_id'][:8]}", patch_id(revision) == row["patch_id"]))
+            checks.append((f"{column} {revision[:8]} is in this repository", index.exists(revision)))
+            checks.append((f"{column} {revision[:8]} is on the remote", index.on_remote(revision)))
+            checks.append((f"{column} {revision[:8]} has patch-id {row['patch_id'][:8]}", index.patch_id(revision) == row["patch_id"]))
         rows_commit = row["rows_commit"]
-        parents = git("rev-parse", f"{rows_commit}^@").stdout.split()
+        parents = index.parents_of(rows_commit)
         allowed = row["differs_only_in"].split()
         if allowed:
             parent = parents[0] if len(parents) == 1 else ""
-            descends = bool(parent) and git("merge-base", "--is-ancestor", pushed, parent).returncode == 0
+            descends = bool(parent) and index.is_ancestor(pushed, parent)
             changed = git("diff", "--name-only", pushed, parent, "--").stdout.split() if descends else None
             checks.append((f"rows commit {rows_commit[:8]} sits on a descendant of {pushed[:8]}", descends))
             checks.append((f"{pushed[:8]} differs from the rows commit's parent only in {' '.join(allowed)}",
                            changed is not None and set(changed) <= set(allowed)))
         else:
             checks.append((f"rows commit {rows_commit[:8]} sits on {pushed[:8]}", parents == [pushed]))
-        checks.append((f"rows commit {rows_commit[:8]} first cites {local[:8]}", first_citation(local, rows_commit) == rows_commit))
+        checks.append((f"rows commit {rows_commit[:8]} first cites {local[:8]}", index.first_cites(local, rows_commit)))
         for label, ok in checks:
             audit.record(ok, where, label, "holds", "holds" if ok else "fails")
         if all(ok for _, ok in checks):
