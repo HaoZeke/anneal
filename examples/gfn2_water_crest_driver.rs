@@ -129,8 +129,10 @@ fn read_f64s(stream: &mut UnixStream, count: usize) -> Vec<f64> {
     let mut bytes = vec![0u8; 8 * count];
     stream.read_exact(&mut bytes).expect("socket read");
     bytes
-        .chunks_exact(8)
-        .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("eight bytes")))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| f64::from_le_bytes(*chunk))
         .collect()
 }
 
@@ -242,7 +244,7 @@ fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f6
         let mut xyz = fs::File::create(rundir.join("best.xyz")).expect("best.xyz");
         writeln!(xyz, "{}", atmnrs.len()).ok();
         writeln!(xyz, "objective {:.10} eV", served.best).ok();
-        for (index, atom) in served.best_coords.chunks_exact(3).enumerate() {
+        for (index, atom) in served.best_coords.as_chunks::<3>().0.iter().enumerate() {
             let symbol = if index % 3 == 0 { "O" } else { "H" };
             writeln!(
                 xyz,
@@ -281,7 +283,7 @@ fn call(socket: &Path) -> i32 {
     text.push_str(&format!(
         "  cycle =      1    SCF energy = {energy:20.11}   |dE/dxyz| = {norm:10.6}\n"
     ));
-    for (symbol, atom) in symbols.iter().zip(coords.chunks_exact(3)) {
+    for (symbol, atom) in symbols.iter().zip(coords.as_chunks::<3>().0) {
         text.push_str(&format!(
             "{:22.14} {:22.14} {:22.14}      {}\n",
             atom[0] / AUTOAA,
@@ -290,7 +292,7 @@ fn call(socket: &Path) -> i32 {
             symbol.to_lowercase()
         ));
     }
-    for component in gradient.chunks_exact(3) {
+    for component in gradient.as_chunks::<3>().0 {
         text.push_str(&format!(
             "{:22.13E} {:22.13E} {:22.13E}\n",
             component[0] * AUTOAA / AUTOEV,
