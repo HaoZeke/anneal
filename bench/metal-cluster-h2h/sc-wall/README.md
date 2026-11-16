@@ -12,7 +12,8 @@ needs. It runs anneal (`h2h_sc` of the harness revision, the search code of
 develop) on seeds 2000-2011 at 1000000 calls, one job at a time on core 0
 in a UTS namespace with hostname `bench`. `seeds.csv` holds those rows. The
 tables below are the rows of rgpot 8efdd246; `seeds.csv` and `micro.csv`
-also hold the rows of rgpot 14680ddb, which `../sc-wall2/README.md` reads. The
+also hold the rows of rgpot 14680ddb and efd0750f, which `../sc-wall2/README.md`
+reads. The
 GMIN rows are the corrected-file reruns in `../sc-n12/seeds.csv`. Both
 codes time only the potential call: anneal around the C entry, GMIN around
 its `SC` routine (`../gmin-sc-time.patch`). Outside time is the rest of the
