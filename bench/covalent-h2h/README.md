@@ -685,24 +685,30 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
   for Si10, and for C10 -571.32273783 eV, the cumulenic ring with every
   bond at 1.285 Å. A hit is within 1e-3 eV. Seeds 2000-2011 on C10 for
   both codes. On Si10, anneal runs all twelve seeds and CREST, at about
-  45 minutes a run, seeds 2000-2003. Serial on core 0, hostname `bench`.
+  45 minutes a run, seeds 2000-2003 on core 0 and seeds 2004-2011 in
+  `gfn2/rows.csv` on core 4 (`e71e5de9`). Serial, hostname `bench`.
 
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
 | Si10 | anneal G | 12/12 | 666 | 268 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |
-| Si10 | CREST | 4/4 | 99,300 | 7,900 | -460.683718 | 2699.1 | 26.76 ms | 0.252 ms |
+| Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.72 ms | 0.244 ms |
 | C10 | anneal G | 11/12 | 6,350 | 6,077 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |
 | C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
 
 CREST's calls are the calls of its whole run, which does not stop at the
 reference.
 
-- Si10: both codes reach the minimum on every seed they ran. On seeds
-  2000-2003 anneal takes 620, 505, 520 and 2,581 calls, and CREST
-  108,264, 96,365, 102,236 and 94,277 (Mann-Whitney p = 0.0011 over all
-  rows). Anneal's calls cost more inside xtb, 58 ms against 27 ms,
-  because its quenches start from random clusters where the SCC
-  struggles.
+- Si10: anneal reaches the minimum on 12 of 12 seeds and CREST on 11
+  (Fisher p = 1). On seeds 2000-2003 anneal takes 620, 505, 520 and 2,581
+  calls, and CREST 108,264, 96,365, 102,236 and 94,277. On seeds
+  2004-2011 CREST takes 103,294, 93,076, 98,677, 94,481, 100,309, 0,
+  103,479 and 92,415 calls. On seed 2009 xtb's SCC does not converge on
+  the start, with 250 or 1000 iterations, so the optimisation before
+  CREST stops and CREST makes no call. Mann-Whitney p = 3.7e-5 over the
+  twelve seeds of each code, a miss ranked after every hit
+  (`gfn2/summaries.csv`). Anneal's calls cost more inside xtb, 58 ms
+  against 27 ms, because its quenches start from random clusters where
+  the SCC struggles.
 - C10: anneal reaches the ring on 11 of 12 seeds and CREST on 4 (Fisher p
   = 0.0094, Mann-Whitney p = 0.0005). Seven CREST runs end in a compact
   cage with four three-coordinated atoms at -566.877 eV, and its eighth
