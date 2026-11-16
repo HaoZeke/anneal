@@ -1,0 +1,3 @@
+system,n,anneal_hits,occat_hits,gmin_hits,fisher_occat,fisher_gmin,mannwhitney_evals_occat,mannwhitney_wall_occat,mannwhitney_pot_occat,mannwhitney_outside_occat,mannwhitney_evals_gmin,mannwhitney_wall_gmin,mannwhitney_pot_gmin,mannwhitney_outside_gmin
+lj38,12,12,0,7,7.39602e-07,0.0372671,8.90101e-06,3.22564e-05,3.22564e-05,3.22564e-05,2.97837e-05,4.14604e-05,4.14604e-05,4.14604e-05
+lj55,12,12,0,12,7.39602e-07,1,8.90101e-06,3.22564e-05,3.22564e-05,3.22564e-05,0.0567468,0.563703,0.386476,0.326348
