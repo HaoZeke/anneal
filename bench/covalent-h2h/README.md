@@ -39,13 +39,16 @@ Silicon is in reduced units, with \(\sigma = 2.0951\) Å and
 | C10 | -55.08979464 eV | lowest of reference.csv |
 | C20 | -120.69889105 eV | relaxed corannulene bowl, `tc20-bowl.xyz` |
 
-`reference.csv` holds unstopped 1e6-call runs at seeds 9000-9002 for every code.
-On Si10, Si13 and Si20 every code reaches the same minimum. On C10 every anneal
-arm does, and ASE stops at -51.30 eV. I did not find a published Tersoff value
-for C10 or C20.
+`reference.csv` holds unstopped runs at seeds 9000-9002: 1e6 calls for each
+anneal arm, 4e5 for ASE and, on silicon, 2e6 for GMIN. On Si10 every code
+reaches the same minimum, within the 0.001 hit band. On Si13 and Si20 every
+anneal arm and GMIN do; ASE stops at -17.19 ε on Si13 seed 9000, and its best
+on Si20 is -29.51 ε. On C10 every anneal arm reaches it, and ASE does on seeds
+9001 and 9002 and stops at -51.30 eV on seed 9000. I did not find a published
+Tersoff value for C10 or C20.
 
 On C20, no unbiased run reaches the bowl. The best in `reference.csv` is
--119.1536 eV. The lowest unbiased minimum I saw is a planar flake at
+-119.6919 eV, anneal G on seed 9001. The lowest unbiased minimum I saw is a planar flake at
 -119.6919 eV, `tc20-flake.xyz`, from an exploratory G run with a wider
 container. `scripts/covalent_h2h/bowl.py` builds the
 corannulene skeleton and the dodecahedral cage and relaxes both. The bowl
@@ -358,7 +361,7 @@ The protocol is that of the first panel, with these changes:
 
 ### Findings
 
-- Si20: P and G go from 106k and 60k calls to 9.2k and 8.2k, p ≤ 3e-4.
+- Si20: P and G go from 106k and 60k calls to 9.2k and 8.2k, p ≤ 3.1e-4.
   GMIN takes 9.6k at 1e-6 (p = 0.84) and 5.9k at 5e-3, against 6.1k-7.3k
   for anneal at 5e-3 (p ≥ 0.75). R stays faster at 4.5k, but the gap to R
   is not significant at n=12 (p = 0.11 and 0.29).
@@ -592,11 +595,11 @@ The protocol is that of the second panel, with these changes:
 - Si10: P goes from 1,782 calls to 734 and G from 1,599 to 990 (p = 0.089
   and 0.13 against v2). Against R's 597, p is 0.51 for P and 0.31 for G,
   where the second panel had p = 0.019 for both. At 5e-3, P takes 502 calls
-  and G 472, against 567 for R and 550 for GMIN (p ≥ 0.51).
+  and G 472, against 567 for R and 550 for GMIN (p ≥ 0.50).
 - Si13: P takes 640 calls and G 658, against 1,006 and 1,016 in v2 (p =
   0.03 and 0.11) and 769 for R (p = 0.14 and 0.37). GMIN takes 1,164 at
   1e-6 and 784 at 5e-3.
-- Si20: P takes 10.9k and G 9.7k, against 9.2k and 8.2k in v2 (p ≥ 0.89)
+- Si20: P takes 10.9k and G 9.7k, against 9.2k and 8.2k in v2 (p ≥ 0.88)
   and 9.0k for R (p ≥ 0.93). GMIN takes 20.9k at 1e-6 and 12.6k at 5e-3.
   ASE hits 0 of 12.
 - C10: every anneal arm hits 12/12. G takes 11.3k calls against R's 27.5k
