@@ -3527,7 +3527,8 @@ fn rigid_probe(
 ///     `recommended=True`, off otherwise.
 ///   torsion_coupling: `Config::torsion_coupling` of a `groups` search,
 ///     coupled torsion draws from the chain's accepted hops beside the
-///     plain ones. Unset keeps the preset's.
+///     plain ones. Unset keeps the preset's: on for `recommended=True`, off
+///     otherwise.
 ///   hold_stereocentres: `Config::hold_stereocentres` of a `groups` search,
 ///     a quench step that inverts a stereocentre is refused. Unset keeps
 ///     the preset's: on for `recommended=True`, off otherwise.
