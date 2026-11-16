@@ -58,7 +58,6 @@ REFERENCE_DIR = "docs/orgmode/reference"
 # static checks still run on them.
 UNOWNED_PAGES = {
     "docs/orgmode/howto/ase.org",
-    "docs/orgmode/howto/engine-lammps.org",
     "docs/orgmode/howto/engine-plumed.org",
 }
 

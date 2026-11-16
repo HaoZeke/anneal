@@ -8,7 +8,7 @@
 returns the energy, the forces and the global virial, and for the pair and EAM
 potentials the per-atom energy and virial.
 On several MPI ranks, a potential with a finite cutoff is evaluated by domain:
-each rank works on its own atoms.
+each rank works on its own atoms, on the LAMMPS neighbour list.
 Other potentials see the whole periodic box on rank 0.
 It works under =fix nve=, =fix npt= and =fix box/relax= like a native style.
 =compute pe/atom= and =compute stress/atom= work with the pair and EAM
@@ -38,6 +38,7 @@ Like LAMMPS, the plugin is compiled with =OMPI_SKIP_MPICXX= and
 
 Then configure rgpot with the LAMMPS source tree and binary:
 
+#+attr_rgpot: syntax configures and compiles a build directory with the LAMMPS plugin
 #+begin_src bash
 meson setup bld -Dwith_lammps=enabled \
     -Dlammps_src=$LAMMPS/src -Dlammps_exe=$PREFIX/bin/lmp \
@@ -51,6 +52,7 @@ The integer layout is =LAMMPS_SMALLBIG=, which the plugin compile flag repeats.
 
 ** Load it
 
+#+attr_rgpot: skip LAMMPS input, read by lmp
 #+begin_src lammps
 plugin load libpair_rgpot.so
 units metal
@@ -63,10 +65,10 @@ pair_coeff * * 0.0104 3.40
 =pair_style rgpot cutoff [virial auto|fd] [mode auto|gather|domain]= takes the
 cutoff in Angstrom.
 It is the default cutoff of the potential.
-On the gather path it is also the ghost cutoff of the communication; on the
-domain path the ghost cutoff is the force range of the potential (see MPI
-below).
-The style does not request a neighbour list.
+On the gather path it is also the ghost cutoff of the communication, and the
+style requests no neighbour list.
+On the domain path the cutoff of the potential sets the neighbour list and the
+ghosts (see MPI below).
 =virial= is described under pressure below and =mode= under MPI.
 
 ** pair_coeff forms
@@ -95,11 +97,13 @@ The symbol sets the atomic number passed to the potential.
 =NULL= types are left out of the box the potential sees, so they are only useful
 under =pair_style hybrid/overlay=, where another style handles them.
 
+#+attr_rgpot: skip LAMMPS input, read by lmp
 #+begin_src lammps
 pair_style rgpot 6.0
 pair_coeff * * EAMTable file CuNi.eam.alloy Cu Ni
 #+end_src
 
+#+attr_rgpot: skip LAMMPS input, read by lmp
 #+begin_src lammps
 pair_style rgpot 7.0
 pair_coeff * * SuttonChen preset platinum cutoff 7.0 Pt
@@ -120,8 +124,9 @@ The style has two ways to evaluate a step.
 =init= writes the one it uses to the screen and the log; these lines come from
 two runs:
 
+#+attr_rgpot: output lines that init writes to the log
 #+begin_example
-pair_style rgpot: domain decomposition, cutoff 6.3943324, force range 12.788665
+pair_style rgpot: domain decomposition, cutoff 6.3943324, densities 1
 pair_style rgpot: gather on rank 0; the rgpot potential EMT declares no finite range
 #+end_example
 
@@ -143,43 +148,59 @@ The atom count must fit in a 32-bit int.
 
 A potential can declare a finite range: its energy is a sum of site energies,
 and each site energy depends only on the atoms within the cutoff of that atom.
-The force on an atom then depends only on the atoms within the force range: the
-cutoff for a pair potential, and twice the cutoff for a many-body potential such
-as EAM, whose forces involve the densities at the neighbours.
+For a pair potential the force on an atom then depends on the atoms within the
+cutoff.
+For a many-body potential such as EAM it also depends on the densities at those
+atoms, and so on atoms up to twice the cutoff away.
+=pair_style eam= does not widen its ghost shell for that.
+It sums the densities in one pass over its neighbour list, exchanges them
+between the ranks, and takes the forces in a second pass.
+The domain path runs every rgpot potential that has these two stages the same
+way (see the C++ interface under per-atom energy below).
 
-| Name                    | Range                | Force range       |
-|-------------------------+----------------------+-------------------|
-| =LJ=, =u0 psi=, =Morse= | cutoff, pairwise     | cutoff            |
-| =SuttonChen=            | cutoff, if positive  | twice the cutoff  |
-| =EAMTable=              | cutoff of the table  | twice the cutoff  |
+| Name                    | Range               | Densities per atom |
+|-------------------------+---------------------+--------------------|
+| =LJ=, =u0 psi=, =Morse= | cutoff, pairwise    |                  0 |
+| =SuttonChen=            | cutoff, if positive |                  1 |
+| =EAMTable=              | cutoff of the table |                  1 |
 
-For these potentials the style returns the force range from =init_one=, so
-LAMMPS keeps every atom within the force range plus the neighbour skin of a
-rank's atoms as a ghost.
-Each rank puts its own atoms and the ghosts within the force range of them in an
-orthogonal box, and evaluates that cluster with the potential's per-atom call.
-The box spans the rank's subdomain grown by the force range and the skin, plus
-0.75 cutoff on each side, rounded up to a whole number of cutoffs.
-No periodic image of the cluster comes within the cutoff, and the box changes
-only when the LAMMPS box does.
-The forces, the site energies and the per-atom virials of its own atoms are then
-those of the whole periodic system, and the rank keeps only those.
-It does not write forces on the ghosts, so nothing is sent back to the owners,
-whatever =newton= is set to.
-Interactions that cross a subdomain boundary are computed on both sides.
-Each rank adds the energy and virial of its own atoms, and LAMMPS sums them over
-the ranks.
-A rank that owns no atoms does nothing.
+For these potentials the style returns the cutoff from =init_one= and requests a
+half neighbour list, as a native style does.
+LAMMPS keeps the atoms within the cutoff plus the neighbour skin of a rank's
+atoms as ghosts, and rebuilds the list when an atom has moved half the skin.
+On every step:
+
+1. The density stage adds the contribution of each listed pair to the densities
+   of its atoms.
+   Under =newton on= a pair with a ghost is listed on one rank only, which
+   writes the ghost's share; reverse communication adds it to the owner.
+2. Forward communication copies the completed densities of each atom to its
+   ghosts.
+3. The force stage takes the embedding energy \(F(\rho)\) and its derivative
+   \(F'(\rho)\) of every atom, ghosts included, and adds the pair forces to the
+   LAMMPS force array.
+   Under =newton on= it also writes forces on ghosts, which LAMMPS returns to
+   their owners as it does for any pair style.
+
+A pair potential has no densities, so the style skips both exchanges and runs
+the force stage alone.
+
+=pair_style eam= sends \(F'(\rho)\) instead of \(\rho\).
+Sending \(\rho\) and taking \(F'\) of the ghosts on every rank means a potential
+needs two stages, not a third one between the reverse and the forward exchange.
+The messages are the same size, one value per density and atom, and the extra
+work is one spline evaluation per ghost.
+
+Energies and virials follow the convention of the native styles.
+A pair that one rank lists counts fully there.
+Under =newton off= a pair of an owned atom and a ghost is listed on both ranks,
+and each counts half.
+The site energy, \(F(\rho_i)\) for EAM, counts on the rank that owns the atom.
+LAMMPS sums the energy and the virial over the ranks.
+A rank that owns no atoms still takes part in the exchanges.
 
 Results agree with the gather path to rounding, not bit for bit: the sums run in
 another order.
-
-The cluster costs more than the atoms a rank owns.
-The ghosts within the force range are evaluated too, and their own results are
-thrown away.
-That shell is twice as wide for a many-body potential as for a pair potential.
-For CuNi EAM (cutoff 6.39 Å) a 32000 atom box on one rank took 2.3 times longer
-per step through its cluster than through the gathered box.
 
 *** Choosing the path
 
@@ -188,8 +209,8 @@ per step through its cluster than through the gathered box.
 - the run has more than one rank;
 - the potential is built by name or with =u0 psi=, not an engine;
 - it declares a finite range;
-- it has a per-atom split (see below), which gives each rank the energy and
-  virial of its own atoms;
+- it has the density and force stages (=LJ=, =u0 psi=, =Morse=, =SuttonChen= and
+  =EAMTable= do);
 - the virial is not =virial fd=, which strains the whole box.
 
 =mode gather= always gathers.
@@ -215,35 +236,59 @@ The one-rank =domain= column is =mode domain=; =mode auto= gathers there.
 
 | Scaling | System | Atoms | Ranks | Native | Gather | Domain |
 |---------+--------+-------+-------+--------+--------+--------|
-| strong  | LJ     | 16384 |     1 |   8.41 |  77.03 |  36.02 |
-| strong  | LJ     | 16384 |     2 |   4.27 |  76.54 |  26.61 |
-| strong  | LJ     | 16384 |     4 |   2.20 |  79.81 |  17.52 |
-| strong  | LJ     | 16384 |     8 |   1.19 |  76.31 |  13.03 |
-| strong  | CuNi   | 32000 |     1 |  44.33 | 335.66 | 764.57 |
-| strong  | CuNi   | 32000 |     2 |  23.58 | 335.42 | 475.72 |
-| strong  | CuNi   | 32000 |     4 |  13.43 | 353.09 | 305.72 |
-| strong  | CuNi   | 32000 |     8 |   6.94 | 366.96 | 203.29 |
-| weak    | LJ     |  8192 |     1 |   4.43 |  33.42 |  17.06 |
-| weak    | LJ     | 16384 |     2 |   4.31 |  77.65 |  26.77 |
-| weak    | LJ     | 32768 |     4 |   4.35 | 235.47 |  35.77 |
-| weak    | LJ     | 65536 |     8 |   4.93 | 596.51 |  54.32 |
-| weak    | CuNi   |  8192 |     1 |  12.31 |  92.98 | 327.23 |
-| weak    | CuNi   | 16384 |     2 |  13.84 | 179.06 | 310.86 |
-| weak    | CuNi   | 32768 |     4 |  13.77 | 360.92 | 338.09 |
-| weak    | CuNi   | 65536 |     8 |  13.90 | 748.17 | 330.05 |
+| strong  | LJ     | 16384 |     1 |   8.56 |  78.51 |   8.36 |
+| strong  | LJ     | 16384 |     2 |   4.24 |  76.75 |   4.23 |
+| strong  | LJ     | 16384 |     4 |   2.18 |  79.98 |   2.17 |
+| strong  | LJ     | 16384 |     8 |   1.11 |  78.12 |   1.15 |
+| strong  | CuNi   | 32000 |     1 |  44.22 | 330.27 |  47.48 |
+| strong  | CuNi   | 32000 |     2 |  23.52 | 328.48 |  25.47 |
+| strong  | CuNi   | 32000 |     4 |  12.48 | 327.67 |  13.56 |
+| strong  | CuNi   | 32000 |     8 |   7.05 | 335.38 |   7.15 |
+| weak    | LJ     |  8192 |     1 |   4.14 |  32.33 |   4.17 |
+| weak    | LJ     | 16384 |     2 |   4.31 |  79.27 |   4.33 |
+| weak    | LJ     | 32768 |     4 |   4.37 | 228.91 |   4.33 |
+| weak    | LJ     | 65536 |     8 |   4.60 | 551.15 |   4.29 |
+| weak    | CuNi   |  8192 |     1 |  12.23 |  94.87 |  13.37 |
+| weak    | CuNi   | 16384 |     2 |  12.39 | 167.09 |  13.22 |
+| weak    | CuNi   | 32768 |     4 |  12.72 | 333.34 |  13.42 |
+| weak    | CuNi   | 65536 |     8 |  12.65 | 672.97 |  14.26 |
 
-The gather path does not get faster with ranks, and under weak scaling its time
-grows with the atom count, as a serial evaluation on rank 0 does.
-The domain path gets faster with ranks in both systems.
-Under weak scaling its CuNi time stays near 330 ms per step, while its
-Lennard-Jones time grows from 17 to 54 ms.
-In a separate 8-rank run the Pair section averaged 19 ms per step per rank,
-close to the one-rank time, and the Comm section took most of the rest: ranks
-wait there for whichever rank is slowest in that step.
-For CuNi it is slower than the gather path on one and two ranks, because each
-rank also evaluates a ghost shell two cutoffs thick.
-The native styles are 4 to 30 times faster than the domain path; these numbers
-measure the decomposition, not the kernels.
+The three repeats of a case differ by up to 14 % (largest minus smallest, over
+the median), most on 8 ranks, where every core runs a rank.
+Columns closer than that are within the noise.
+
+The domain path runs on the neighbour list of LAMMPS, as the native styles do,
+and its time follows theirs.
+Lennard-Jones takes the time of =lj/cut= on every rank count, and under weak
+scaling stays near 4.3 ms per step from 8192 to 65536 atoms.
+CuNi takes 1 to 13 % longer than =eam/alloy=, 47.48 against 44.22 ms on one
+rank.
+A perf profile of that case, with the sample shares scaled to the Pair time of
+LAMMPS, puts 1.7 ms of the difference in the density stage, 1.0 ms in the force
+stage and 0.6 ms in mapping the atom types to the elements of the table.
+The stages check every pair for coincident atoms and for types the table lacks,
+which =eam/alloy= does not.
+The force stage also takes \(F'(\rho)\) of the 26825 ghosts, which =eam/alloy=
+receives from their owners.
+
+The gather path does not get faster with ranks: rank 0 evaluates the whole box
+while the other ranks wait, so its time depends on the atom count alone.
+Most of it goes to the neighbour list that rgpot builds on rank 0, not to the
+exchange.
+=EAMTable= builds that list on every call; a perf profile of the one-rank CuNi
+run puts 79 % of the samples in the build and 16 % in the EAM sums.
+=LJ= keeps its list while every atom stays within half of a 1 Å skin.
+The atoms of the Lennard-Jones box leave their lattice sites over the first
+hundred steps, as the temperature falls from 300 K to about 100 K, and after
+about 50 steps the list is rebuilt every one to three steps: in 33 of the 112
+calls for 8192 atoms and in 78 for 65536 atoms.
+A larger box rebuilds more often, so its time grows faster than the atom count.
+
+The CuNi deck sets both masses to 60.
+=eam/alloy= replaces them in =pair_coeff= with the masses in the potential file,
+so the native CuNi runs follow another trajectory than the =rgpot= runs and end
+at another energy.
+The cost of a step does not depend on the masses.
 
 ** Pressure, NPT and box relaxation
 
@@ -279,7 +324,8 @@ Every force is a central pair force, so the centroid stress is the same tensor.
 
 On the gather path rank 0 fills the per-atom arrays on the gathered box and they
 are scattered by tag like the forces.
-On the domain path each rank takes them from its cluster.
+On the domain path the force stage fills them with the same split, and under
+=newton on= LAMMPS adds the halves written to ghosts to their owners.
 Either way they do not depend on the number of ranks.
 They sum to the energy and to the global virial.
 With =virial fd= the global virial is the strain difference while the per-atom
@@ -307,12 +353,28 @@ The range is the non-virtual member =Locality locality() const noexcept= of
 a function of one pair distance.
 =Locality::forceRange()= is the cutoff for a pairwise potential and twice it
 otherwise.
+=Locality::densities= is the number of densities per atom that the stages below
+exchange, 0 for a pairwise potential.
 The concept =rgpot::LocalPotential= tells whether a potential type declares one,
 and =rgpot::spec::Built::locality= carries it for a potential built by name.
-Like =forcePerAtom= it adds no virtual function and no field to =PotCaps=, so
-the C++ layout stamp of =librgpot= does not change.
+
+The stages are the non-virtual members =densityStage= and =forceStage= of the
+same four classes, in =rgpot/Staged.hpp=; :doc:`../reference/cpp_potentials`
+gives their signatures.
+=HalfList= is a host's half neighbour list over its own atoms and their copies,
+in the layout of a LAMMPS =NeighList=, with or without =newton=.
+The host zeroes the densities and runs the density stage.
+It then completes them: with =newton= it adds the entries of the copies to their
+owners, and it copies the values of each owner to its copies.
+The force stage adds the forces, and the host's share of the energy and virial
+and the per-atom split go to a =StageTally= when one is passed.
+The concept =rgpot::StagedPotential= tells whether a potential type has the
+stages, and =rgpot::spec::Built::densityStage= and =forceStage= carry them for a
+potential built by name.
+Like =forcePerAtom=, the range and the stages add no virtual function and no
+field to =PotCaps=, so the C++ layout stamp of =librgpot= does not change.
 The engine C interface (=RgpotEngineCaps=) has no range field: an engine has no
-per-atom energy, so the domain path could not use one.
+stages, so the domain path could not use one.
 
 ** Tests
 
@@ -338,8 +400,9 @@ The numbers below are from one run; the tests assert looser bounds.
   Against =rgpot-eval= on the same box the energy agrees within 7e-13 eV.
 - Pt with =SuttonChen= and =Morse=: pressure within 2e-10 bar of =rgpot-eval=.
 - Lennard-Jones and CuNi after 20 NVE steps under =mpirun -np 1, 2, 4=.
-  Energies agree within 3e-13 eV and forces by tag within 4e-14 eV/Å.
-  The pressure agrees within 5e-11 bar.
+  =mode auto= gathers on one rank and takes the domain path on two and four.
+  Energies agree within 6e-12 eV and forces by tag within 4e-14 eV/Å.
+  The pressure agrees within 3e-10 bar.
   These cases need an MPI =lmp= and skip against a serial one.
 - =fix box/relax= from a strained fcc cell, iso and with a 0.25 triclinic tilt.
   It finds \(a = 5.26865164\) Å, as =lj/cut= and the analytic lattice sum do.
@@ -347,13 +410,16 @@ The numbers below are from one run; the tests assert looser bounds.
   Its pressure is within 3e-7 bar of the named LJ and its analytic stress.
 - EMT Cu also uses the finite-difference virial.
   It is within 7e-6 bar of an independent difference from =rgpot-eval=.
-- A =NULL= type under =hybrid/overlay= with =lj/cut= matches =lj/cut= alone.
+- A =NULL= type under =hybrid/overlay= with =lj/cut= matches =lj/cut= alone, on
+  two ranks, on both paths and with =newton on= and =off=.
 - =compute pe/atom= and =compute stress/atom= against =lj/cut= and =eam/alloy=.
   Atoms are compared in tag order, in both cell shapes, on 1, 2 and 4 ranks.
   Lennard-Jones per-atom energies agree within 2e-16 eV.
   Its per-atom stress agrees within 3e-9 bar Å^3 of values up to 9e4.
   CuNi per-atom energies agree within 2e-14 eV.
   Its per-atom stress agrees within 3e-8 bar Å^3 of values up to 2e6.
+  On two and four ranks, where =mode auto= takes the domain path, the CuNi
+  per-atom energies equal those of =eam/alloy= to the last bit.
   =Morse= is checked against =pair_style morse= with =pair_modify shift yes=.
   It agrees within 9e-15 eV and 9e-8 bar Å^3 of 3.5e6.
 - The per-atom energies sum to the energy within 2e-13 eV for Lennard-Jones.
@@ -362,22 +428,30 @@ The numbers below are from one run; the tests assert looser bounds.
   =centroid/stress/atom= equals =stress/atom=.
 - Other units, free boundaries, per-atom requests with =EMT= or an engine,
   unknown names and unknown symbols each stop with an error.
-- The domain path against the gather path and the native style.
+- The domain path against the gather path and the native style, with =newton on=
+  and =off=.
   Lennard-Jones against =lj/cut= and CuNi against =eam/alloy=, orthogonal and
   triclinic, on 1, 2 and 4 ranks, with =processors * 1 1=.
   One set keeps every atom.
   The other keeps the atoms in the lower 43 % of the box along x, so the upper
   ranks own none; the test checks that one rank owns none.
+  =Morse= against =pair_style morse= and =SuttonChen= against the gather path
+  run on that set in the triclinic cell.
   Energy, forces, pressure, =pe/atom= and =stress/atom= are compared.
-  The domain path and the gather path agree within 2e-11 eV in the energy.
-  They agree within 9e-14 eV/Å in the forces and 3e-10 bar in the pressure.
-  Per-atom energies agree within 3e-14 eV.
-  Per-atom stress agrees within 6e-8 bar Å^3 of values up to 3e6.
-  Both agree with the native styles to the same order.
-- 200 NVE steps from 1200 K on four ranks, triclinic.
-  The domain path follows the gather path within 3e-14 Å in the positions.
-  Energies agree within 1e-12 eV and forces within 2e-13 eV/Å.
+  Against the gather path the domain path is within 1.3e-11 eV in the energy and
+  3e-10 bar in the pressure, and against the native styles within 2.1e-11 eV and
+  2.3e-10 bar.
+  Its forces are within 7e-14 eV/Å of the gather path and 2.1e-15 eV/Å of the
+  native styles.
+  Per-atom energies agree within 2e-14 eV.
+  Per-atom stress agrees within 3e-8 bar Å^3 of values up to 7.4e6.
+- 200 NVE steps from 1200 K on four ranks, triclinic, with =newton on= and =off=
+  and a 0.5 Å skin, so that LAMMPS rebuilds the lists 9 to 11 times.
+  The domain path follows the gather path within 2e-14 Å in the positions.
+  Energies agree within 3e-12 eV and forces within 2e-13 eV/Å.
 - The log names the path =mode auto= takes and why, on one rank and on two.
+  For =SuttonChen= with a 7 Å cutoff the ghosts reach 9 Å, the cutoff plus the
+  skin.
   =mode domain= stops with an error for =EMT=.
 - =LocalityTest= (C++) evaluates half of a periodic box with every image within
   the force range in a padded box.
@@ -385,14 +459,24 @@ The numbers below are from one run; the tests assert looser bounds.
   within 1e-12 relative, for LJ, Morse, SuttonChen and EAMTable.
   With only one cutoff of images, EAM forces differ, which is why its force
   range is twice the cutoff.
+- =StagedTest= (C++) splits a periodic box into one to three slabs and adds a
+  host that owns no atoms.
+  Each host holds the images within the cutoff and a 1 Å skin as copies, and
+  builds a half list as LAMMPS does, with =newton= on and off, in shuffled order
+  and with marked entries.
+  The two stages with the exchange between them give the owned atoms the forces,
+  site energies and per-atom virials of the whole box within 1e-12 relative, and
+  the tallies of the hosts add up to its energy and virial within 1e-12, for LJ,
+  Morse, SuttonChen and EAMTable, orthogonal and triclinic.
+  Without the exchange, Sutton-Chen forces near a slab boundary are off by more
+  than 1e-3 of the largest force.
 
 ** Limitations
 
-- Engines and potentials without a finite range or a per-atom split are
-  evaluated on rank 0 alone; see the MPI section.
-- On the domain path each rank also evaluates the ghost shell, so with few atoms
-  per rank, or a many-body potential, it can be slower than the gather path.
-  =mode gather= keeps the gather.
+- Engines and potentials without a finite range or the two stages are evaluated
+  on rank 0 alone; see the MPI section.
+- On one rank =mode auto= gathers, although the domain path is faster there for
+  the potentials that have it (see the timings); =mode domain= selects it.
 - Per-atom energy and virial only for =LJ=, =Morse=, =SuttonChen= and
   =EAMTable=; see the per-atom section.
 - =units metal= and =boundary p p p= only.
@@ -414,6 +498,7 @@ The plugin stays the backend: the constructor dlopens
 =rgpot_external_potential_free= releases the potential.
 The dimer in =engines/compare_geom.txt= is -0.3203213355 eV.
 
+#+attr_rgpot: fragment statements of a caller; needs liblj_engine.so on the library path
 #+begin_src c
 #include "rgpot/ExternalPot/external_potentials.h"
 
@@ -429,6 +514,7 @@ rgpot_external_potential_energy_forces(pot, xyz, z, 2, box, forces, &energy,
 rgpot_external_potential_free(pot);
 #+end_src
 
+#+attr_rgpot: syntax needs liblj_engine.so on the library path
 #+begin_src python
 import numpy as np
 import rgpot
@@ -441,6 +527,7 @@ energy, forces, variance = pot(
 )
 #+end_src
 
+#+attr_rgpot: fragment statements of a caller; needs liblj_engine.so on the library path
 #+begin_src cpp
 rgpot::ExternalLjConfig cfg;
 cfg.u0 = 1.0;
