@@ -1,6 +1,6 @@
 # GFN2 (H2O)20, both arms in one session
 
-Anneal and CREST both ran on this VM, serial, arm order shuffled per seed. The wrapper is `sudo unshare --uts` with hostname `bench`, working directory `/work`, one thread. Anneal is 28000 charged calls. CREST is `crest --gfn2 -T 1 --legacy -xnam /work/xtb-gfn2 -len 0.2`. Seeds 15001–15006. A hit is a vtight GFN2 energy within 0.01 eV of the reference, −2768.551087 eV. xtb is 6.7.1 (edcfbbe). GOAT is absent because ORCA 6 is login-gated.
+Anneal and CREST both ran on this VM, serial, arm order shuffled per seed. The wrapper is `sudo unshare --uts` with hostname `bench`, working directory `/work`, one thread. Anneal is 28000 charged calls. CREST is `crest --gfn2 -T 1 --legacy -xnam /work/xtb-gfn2 -len 0.2`. Seeds 15001–15006. A hit is a vtight GFN2 energy at or below the reference plus 0.01 eV, the reference being −2768.551087 eV. xtb is 6.7.1 (edcfbbe). GOAT is absent because ORCA 6 is login-gated.
 
 The 0.90 Å gate spike fix is what moved the hits. Separation had been leaving every hop on that gate, where the force is a few hundred eV/Å and the line search accepts nothing. A non-bonded pair closer than 1.40 Å is now opened to 2.20 Å before the quench, and a compressed covalent bond is restored to the sum of its covalent radii.
 
@@ -17,7 +17,7 @@ The anneal mean wall is 1203.0 s. The CREST mean wall is 690.9 s. The ratio of t
 
 ## Where the (H2O)16 wall goes
 
-Seed 16001, 28000 calls, same wrapper as the table above, scored −2214.506788 eV in 655.035 s. CREST on the same start scored −2214.590238 eV in 292.682 s. Of the anneal wall, 649.696 s is inside xtb and 5.338 s is outside it, 0.206 ms per call. That remainder does not account for the gap.
+Seed 16001, 28000 calls, same wrapper as the table above, scored −2214.506788 eV in 655.035 s. CREST on the same start scored −2214.590238 eV in 292.682 s. Of the anneal wall, 649.696 s is inside xtb and 5.338 s is outside it, 0.191 ms per call. That remainder does not account for the gap.
 
 The 28000 charged calls are 191 converged quenches and 1 capped quench, 146.6 calls per converged quench. There were 177 hops. Every hop started inside the overlap gate (`proposal_overlap_rejected` 177) and was separated, then quenched in full (`screens` 0). Line-search overlap rejections (665) and geometry rejections (0) are not charged. SCC rejections were 0.
 
