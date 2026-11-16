@@ -2064,6 +2064,14 @@ if get_option('with_tests')
             'RGPOT_MOPACC_ENGINE',
             mopacc_fake_engine.full_path(),
         )
+        # The case cannot empty the variable itself: the MSVC runtime has no
+        # setenv, and _putenv_s removes a variable given an empty value.
+        mopacc_empty_env = environment(
+            {
+                'RGPOT_MOPACC_ENGINE': mopacc_fake_engine.full_path(),
+                'MOPACC_LIBRARY': '',
+            },
+        )
         mopac_pot_test = executable(
             'mopac_pot_test',
             sources: ['tests/MOPACPotTest.cc'],
@@ -2085,7 +2093,7 @@ if get_option('with_tests')
             'MOPACPotEmptyVariable',
             mopac_pot_test,
             args: ['[empty-variable]'],
-            env: mopacc_fake_env,
+            env: mopacc_empty_env,
             depends: mopacc_fake_engine,
             workdir: meson.source_root(),
             suite: 'mopac',

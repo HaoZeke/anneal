@@ -58,14 +58,15 @@ TEST_CASE("MOPACPot packed charge reaches the engine", "[mopac]") {
   REQUIRE(energy == Approx((0.25 + 0.02) * rgpot::units::HARTREE_TO_EV));
 }
 
-// Hidden: meson runs it in a process of its own as MOPACPotEmptyVariable.
-// An empty path opens the running program, which resolves the engine
-// symbols once another case has opened the fake engine RTLD_GLOBAL.
+// Hidden: meson runs it in a process of its own as MOPACPotEmptyVariable,
+// which starts it with MOPACC_LIBRARY set and empty. An empty path opens the
+// running program, which resolves the engine symbols once another case has
+// opened the fake engine RTLD_GLOBAL.
 TEST_CASE("MOPACPot skips an empty MOPACC_LIBRARY",
           "[.][mopac][empty-variable]") {
-  setenv("MOPACC_LIBRARY", "", 1);
+  const char *library = std::getenv("MOPACC_LIBRARY");
+  REQUIRE(library != nullptr);
+  REQUIRE(*library == '\0');
   rgpot::MOPACPot pot(rgpot::MOPACPot::Config{});
-  const bool available = pot.available();
-  unsetenv("MOPACC_LIBRARY");
-  REQUIRE(available);
+  REQUIRE(pot.available());
 }
