@@ -11,10 +11,6 @@
 #include <cstdint>
 #include <vector>
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot::simd {
 
 /// Cutoff, skin and periodicity for one half-list build.
@@ -75,15 +71,7 @@ inline void fill_view(CachedPairs &out, const double *R, std::size_t n,
                       });
   } else {
     std::vector<std::vector<std::int32_t>> part(static_cast<std::size_t>(nt));
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-    {
-#if defined(_OPENMP)
-      const int t = omp_get_thread_num();
-#else
-      const int t = 0;
-#endif
+    nlist::forEachSlice(nt, [&](int t) {
       const auto range = nlist::partition(static_cast<std::int64_t>(n), t, nt);
       auto &mine = part[static_cast<std::size_t>(t)];
       nlist::visitDirected(found, range.begin, range.end,
@@ -91,7 +79,7 @@ inline void fill_view(CachedPairs &out, const double *R, std::size_t n,
                             double, double r2) {
                           detail_fill::append_half(mine, i, j, r2, cutoff2);
                         });
-    }
+    });
     std::size_t total = 0;
     for (const auto &mine : part) {
       total += mine.size();

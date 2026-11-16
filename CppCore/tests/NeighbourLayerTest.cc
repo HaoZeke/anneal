@@ -21,6 +21,10 @@
 #include "rgpot/Tersoff/TersoffSiC.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+
 namespace {
 
 void setThreads(const char *value) {
@@ -34,6 +38,21 @@ void setThreads(const char *value) {
   }
 #endif
 }
+
+#if defined(_OPENMP) && _OPENMP >= 200805
+/// While this lives, no parallel region starts more than one thread, as
+/// inside another region or under OMP_THREAD_LIMIT=1.
+class OneThreadTeams {
+public:
+  OneThreadTeams() { omp_set_max_active_levels(0); }
+  ~OneThreadTeams() { omp_set_max_active_levels(levels_); }
+  OneThreadTeams(const OneThreadTeams &) = delete;
+  OneThreadTeams &operator=(const OneThreadTeams &) = delete;
+
+private:
+  int levels_ = omp_get_max_active_levels();
+};
+#endif
 
 bool close(double a, double b) {
   const double scale = std::max(1.0, std::max(std::abs(a), std::abs(b)));
@@ -734,6 +753,26 @@ constexpr double kInf = std::numeric_limits<double>::infinity();
 // The box a cluster potential passes when it has no cell.
 constexpr double kFreeBox[9] = {1.0e6, 0, 0, 0, 1.0e6, 0, 0, 0, 1.0e6};
 
+/// The directed walk of an unbounded search split into `nslices`, joined
+/// in slice order. A slice holds the n - 1 pairs of each atom in its run,
+/// so a slice past the atom count holds none.
+Visits teamVisits(const rgpot::nlist::Neighbours &cells, std::size_t n, int nslices) {
+  std::vector<Visits> parts(static_cast<std::size_t>(nslices));
+  cells.forCellTeam(false, nslices,
+                    [&](int t, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                        double r2) {
+                      into(parts[static_cast<std::size_t>(t)])(i, j, dx, dy, dz, r2);
+                    });
+  Visits joined;
+  for (int t = 0; t < nslices; ++t) {
+    const auto run = rgpot::nlist::partition(static_cast<std::int64_t>(n), t, nslices);
+    const auto &part = parts[static_cast<std::size_t>(t)];
+    REQUIRE(part.size() == static_cast<std::size_t>(run.end - run.begin) * (n - 1));
+    joined.insert(joined.end(), part.begin(), part.end());
+  }
+  return joined;
+}
+
 } // namespace
 
 TEST_CASE("an unbounded search visits every pair in the order of one bin",
@@ -779,20 +818,27 @@ TEST_CASE("an unbounded search visits every pair in the order of one bin",
     }
     REQUIRE(by_atom == directed);
 
-    // A team splits the atoms into runs, one per thread.
-    std::vector<Visits> parts(3);
-    all.forCellTeam(false, 3,
-                    [&](int t, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                        double r2) {
-                      into(parts[static_cast<std::size_t>(t)])(i, j, dx, dy, dz, r2);
-                    });
-    Visits joined;
-    for (const auto &part : parts) {
-      REQUIRE(!part.empty());
-      joined.insert(joined.end(), part.begin(), part.end());
+    // A team splits the atoms into one run per slice. Every slice is
+    // walked, also when the runtime starts fewer threads than slices.
+    REQUIRE(teamVisits(all, n, 3) == directed);
+#if defined(_OPENMP) && _OPENMP >= 200805
+    {
+      const OneThreadTeams one;
+      REQUIRE(teamVisits(all, n, 3) == directed);
     }
-    REQUIRE(joined == directed);
+#endif
   }
+
+  // More slices than atoms leaves some slices without atoms.
+  const auto few = jitteredCluster(1, 3.9);
+  const std::size_t m = few.size() / 3;
+  rgpot::nlist::Spec unbounded = wide;
+  unbounded.cutoff = kInf;
+  unbounded.skin = kInf;
+  rgpot::nlist::Neighbours small;
+  small.update(few.data(), m, kFreeBox, unbounded);
+  REQUIRE(small.allPairs());
+  REQUIRE(teamVisits(small, m, static_cast<int>(m) + 2) == directedVisits(small, m));
 
   // A finite search past the cluster still bins.
   rgpot::nlist::Neighbours finite;

@@ -17,7 +17,8 @@
  * objects at the same time. One walk, and the buffers of one build, are
  * used by one thread. build may start an OpenMP team when OMP_NUM_THREADS
  * is set and the system has at least 8192 atoms. A smaller system stays
- * on the calling thread. Do not call build from inside an OpenMP region.
+ * on the calling thread. Inside another OpenMP region the team may get
+ * fewer threads, and the list does not depend on how many.
  * There is no mutable global. rgpot_nlist_strerror returns a literal.
  *
  * The walk borrows positions and box9 until rgpot_nlist_walk_close.

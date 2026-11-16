@@ -532,7 +532,8 @@ and `nlist_rust/main.rs` (the C ABI, hand-written).
 
 Thread safety is in the headers. Distinct tables, builders and walks
 may run at the same time. One object is not shared. `build` may start
-an OpenMP team, so it is not called from inside an OpenMP region.
+an OpenMP team; inside another OpenMP region that team may get fewer
+threads, and the list does not depend on how many.
 `rgpot_nlist_strerror` returns a literal. A walk borrows the positions
 until it is closed. A view dies at the next update of its table.
 

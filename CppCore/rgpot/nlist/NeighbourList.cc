@@ -12,10 +12,6 @@
 #include <string>
 #include <utility>
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot::nlist {
 namespace {
 
@@ -878,21 +874,13 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
     }
     // The cell team walks one folded image per pair. A sheared cell, or one
     // narrower than two search radii, needs the shift stencil, so each
-    // thread runs the serial walk on its own atom range instead.
+    // slice runs the serial walk on its own atom range instead.
     if (!one_image) {
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-      {
-#if defined(_OPENMP)
-        const int t = omp_get_thread_num();
-#else
-        const int t = 0;
-#endif
+      forEachSlice(nt, [&](int t) {
         const auto range = partition(static_cast<std::int64_t>(n), t, nt);
         fill(parts[static_cast<std::size_t>(t)], static_cast<std::size_t>(range.begin),
              static_cast<std::size_t>(range.end));
-      }
+      });
       for (int t = 1; t < nt; ++t) {
         append(parts[0], parts[static_cast<std::size_t>(t)]);
       }
@@ -1003,20 +991,12 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
   if (nt <= 1) {
     collect(cells, positions, n, box9, query, nmax, one_image, 0, n, parts[0]);
   } else {
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-    {
-#if defined(_OPENMP)
-      const int t = omp_get_thread_num();
-#else
-      const int t = 0;
-#endif
+    forEachSlice(nt, [&](int t) {
       const auto range = partition(static_cast<std::int64_t>(n), t, nt);
       collect(cells, positions, n, box9, query, nmax, one_image,
               static_cast<std::size_t>(range.begin), static_cast<std::size_t>(range.end),
               parts[static_cast<std::size_t>(t)]);
-    }
+    });
   }
   std::vector<Rec> rows;
   for (const auto &part : parts) {

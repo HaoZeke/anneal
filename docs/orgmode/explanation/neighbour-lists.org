@@ -27,7 +27,10 @@ One object is not shared.
 =build= may start an OpenMP team when =OMP_NUM_THREADS= is set and the system
 has at least 8192 atoms.
 A smaller system stays on the calling thread.
-Do not call =build= from inside an OpenMP region.
+The work is split into =OMP_NUM_THREADS= slices, and the threads the runtime
+starts take all of them.
+A build inside another OpenMP region may get one thread and returns the same
+list.
 There is no mutable global.
 =rgpot_nlist_strerror= returns a literal.
 

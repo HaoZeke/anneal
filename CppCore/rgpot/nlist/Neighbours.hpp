@@ -57,6 +57,32 @@ struct Range {
 /// slices cover `n` without overlap, in thread order.
 [[nodiscard]] Range partition(std::int64_t n, int thread, int nthreads);
 
+/// Runs `body(slice)` once for each slice in `[0, nslices)`, with
+/// `nslices` at least one. The runtime may start fewer threads than
+/// slices: without OpenMP, inside another parallel region, or under
+/// OMP_THREAD_LIMIT. Each thread then takes the slices `thread`,
+/// `thread + team`, ... in turn. The body sees only its slice, so a sum
+/// taken in slice order is the same for any team.
+///
+/// MSVC rejects `#pragma omp` inside a lambda (C2760, token PRAGMA_OMP).
+/// The region lives here; the lambdas only supply the body.
+template <typename Body>
+void forEachSlice(int nslices, Body &&body) {
+#if defined(_OPENMP)
+#pragma omp parallel num_threads(nslices)
+  {
+    const int team = omp_get_num_threads();
+    for (int slice = omp_get_thread_num(); slice < nslices; slice += team) {
+      body(slice);
+    }
+  }
+#else
+  for (int slice = 0; slice < nslices; ++slice) {
+    body(slice);
+  }
+#endif
+}
+
 /// Bytes the process may still allocate, from MemAvailable. Zero when
 /// that figure is not reported.
 [[nodiscard]] std::uint64_t availableBytes();
@@ -150,27 +176,14 @@ public:
     }
   }
 
-  /// MSVC rejects `#pragma omp` inside a lambda (C2760, token PRAGMA_OMP).
-  /// The region lives in this method; the lambdas only supply the body.
-  template <typename Body>
-  void withTeam(int nthreads, Body &&body) const {
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nthreads)
-#endif
-    {
-#if defined(_OPENMP)
-      const int thread = omp_get_thread_num();
-#else
-      const int thread = 0;
-#endif
-      body(thread);
-    }
-  }
-
-  /// One walk of the directed pairs, split by cell across `nthreads`.
-  /// The bins are built once and shared. `fn(thread, i, j, dx, dy, dz, r2)`.
-  /// A thread owns each cell, so a pair is visited once. Without bins,
-  /// as in an unbounded search, a thread owns a contiguous run of atoms.
+  /// One walk of the directed pairs, split by cell into `nthreads` slices,
+  /// each walked once by `forEachSlice`. The bins are built once and shared.
+  /// `fn(slice, i, j, dx, dy, dz, r2)`. A slice owns each cell, so a pair
+  /// is visited once, and one thread walks a slice, so state kept per slice
+  /// needs no lock. Without bins, as in an unbounded search, a slice owns a
+  /// contiguous run of atoms. A slice may visit nothing: there can be more
+  /// slices than cells, or than atoms without bins, and a cell may hold no
+  /// pair.
   template <typename Fn>
   void forCellTeam(bool half, int nthreads, Fn &&fn) const {
     if (nthreads < 1) {
@@ -180,10 +193,10 @@ public:
                        const std::int32_t *head, std::size_t ncells,
                        bool cell_shift, double search2, double L0, double L1, double L2, double i0,
                        double i1, double i2, bool p0, bool p1, bool p2) {
-          withTeam(nthreads, [&](int thread) {
-            const auto range = partition(static_cast<std::int64_t>(ncells), thread, nthreads);
+          forEachSlice(nthreads, [&](int slice) {
+            const auto range = partition(static_cast<std::int64_t>(ncells), slice, nthreads);
             auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                              double r2) { fn(thread, i, j, dx, dy, dz, r2); };
+                              double r2) { fn(slice, i, j, dx, dy, dz, r2); };
             if (head != nullptr) {
               visitTiles<true>(tile, neigh, nneigh, head, static_cast<std::size_t>(range.begin),
                                static_cast<std::size_t>(range.end), 0, n_, half, cell_shift,
@@ -195,10 +208,10 @@ public:
             }
           });
         })) {
-      withTeam(nthreads, [&](int thread) {
-        const auto range = partition(static_cast<std::int64_t>(n_), thread, nthreads);
+      forEachSlice(nthreads, [&](int slice) {
+        const auto range = partition(static_cast<std::int64_t>(n_), slice, nthreads);
         auto adapt = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                         double r2) { fn(thread, i, j, dx, dy, dz, r2); };
+                         double r2) { fn(slice, i, j, dx, dy, dz, r2); };
         if (half) {
           forHalf(range.begin, range.end, adapt);
         } else {

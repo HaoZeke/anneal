@@ -22,7 +22,8 @@ Different objects may be used from different threads at the same time.
 One walk, one builder and the buffers of one call are used by one thread.
 A build of at least 8192 atoms starts an OpenMP team when =OMP_NUM_THREADS= asks
 for more than one thread.
-Do not call a build from inside an OpenMP region.
+The runtime may start fewer threads, as inside another OpenMP region; the list
+does not depend on how many.
 
 ** Codes
 
