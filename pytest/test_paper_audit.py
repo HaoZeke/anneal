@@ -228,10 +228,28 @@ def test_a_drifted_sc_wall2_inside_time_is_reported():
 def test_an_sc_wall2_row_off_its_8efdd246_path_is_reported():
     audit = audit_mod.Audit()
     rows = audit.rows(f"{audit_mod.SC_WALL2}/seeds.csv")
-    row = next(r for r in rows if r["system"] == "sc96-80")
+    row = next(r for r in rows if r["system"] == "sc96-80" and r["rgpot_revision"].startswith("14680ddb"))
     row["hops"] = str(int(row["hops"]) + 1)
     audit_mod.sc_wall2(audit)
-    assert {r[2] for r in audit.drifts()} == {"prose"}
+    assert {r[2] for r in audit.drifts()} == {"prose", "same"}
+
+
+def test_an_efd0750f_row_off_its_14680ddb_path_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(f"{audit_mod.SC_WALL2}/seeds.csv")
+    row = next(r for r in rows if r["system"] == "sc108-80" and r["rgpot_revision"].startswith("efd0750f"))
+    row["hops"] = str(int(row["hops"]) + 1)
+    audit_mod.sc_wall2(audit)
+    assert {r[2] for r in audit.drifts()} == {"same", "prose"}
+
+
+def test_a_drifted_efd0750f_inside_time_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.SC_WALL2}/README.md"
+    audit.text_cache[path] = audit.text(path).replace("| panel | sc96-80 | 12 | 12 | 29.64 | 29.23 |",
+                                                      "| panel | sc96-80 | 12 | 12 | 29.64 | 29.00 |")
+    audit_mod.sc_wall2(audit)
+    assert [r[2] for r in audit.drifts()] == ["Inside efd0750f (µs/call)"]
 
 
 def test_a_drifted_readme_p_value_is_reported():
@@ -321,6 +339,15 @@ def test_a_wrong_pushed_revision_in_the_sc_wall_readme_is_reported():
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
+def test_an_alias_without_rows_for_a_cited_revision_is_reported(tmp_path, monkeypatch):
+    def drop_rows_commit(table):
+        return "\n".join(re.sub(r"[0-9a-f]{40}(,[^,]*)$", r"\1", line) if line.startswith("c89653df") else line
+                          for line in table.split("\n"))
+    audit, gaps = aliased_audit(tmp_path, monkeypatch, drop_rows_commit)
+    assert [r[2] for r in audit.drifts()] == ["no row cites c89653df", "unpushed revision c89653df"]
+    assert gaps == {path: "revision c89653df is not in this repository" for path in SC_N12_ROWS}
+
+
 def test_an_alias_with_another_patch_id_is_reported(tmp_path, monkeypatch):
     audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda t: t.replace("d4c75b4441714e8f", "d4c75b4441714e8e"))
     assert {r[2] for r in audit.drifts()} == {"pushed_revision bc3e0cb1 has patch-id d4c75b44",
@@ -372,6 +399,8 @@ def test_the_revision_index_answers_as_one_git_call_per_question(audited):
             batched[revision, "patch-id"] = index.patch_id(revision)
             single[revision, "patch-id"] = git("patch-id", "--stable", stdin=git("show", revision).stdout).stdout.split()[0]
         rows_commit, local, pushed = row["rows_commit"], row["local_revision"], row["pushed_revision"]
+        if not rows_commit:
+            continue
         parents = git("rev-parse", f"{rows_commit}^@").stdout.split()
         batched[rows_commit, "parents"] = index.parents_of(rows_commit)
         single[rows_commit, "parents"] = parents
@@ -383,7 +412,7 @@ def test_the_revision_index_answers_as_one_git_call_per_question(audited):
         batched[local, rows_commit, "first"] = index.first_cites(local, rows_commit)
         single[local, rows_commit, "first"] = citing[:1] == [rows_commit]
     assert batched == single
-    assert sum(single[k] for k in single if k[-1] == "first") == len(table)
+    assert sum(single[k] for k in single if k[-1] == "first") == sum(1 for row in table if row["rows_commit"])
 
 
 @pytest.mark.parametrize(("driver", "attribute"), [(True, True), (True, False), (False, True)])
