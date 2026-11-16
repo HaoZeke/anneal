@@ -19,7 +19,7 @@
 //! A `-hop` arm adds surface hops from each new lowest structure,
 //! `Config::surface_hop_on_best`, and is otherwise its base arm.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
@@ -359,11 +359,21 @@ struct Calls {
     single_points: AtomicUsize,
     gradients_paid: AtomicUsize,
     gradients_reused: AtomicUsize,
+    potential_ns: AtomicU64,
 }
 
 impl Calls {
     fn add(counter: &AtomicUsize, v: usize) {
         counter.fetch_add(v, Ordering::Relaxed);
+    }
+
+    /// Runs one potential evaluation and adds its time to `potential_ns`.
+    fn timed<T>(&self, evaluate: impl FnOnce() -> T) -> T {
+        let started = Instant::now();
+        let out = evaluate();
+        let ns = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.potential_ns.fetch_add(ns, Ordering::Relaxed);
+        out
     }
 
     fn print(&self) {
@@ -374,6 +384,8 @@ impl Calls {
         println!("single_point_calls: {}", get(&self.single_points));
         println!("gradient_calls: {}", get(&self.gradients_paid));
         println!("gradients_reused: {}", get(&self.gradients_reused));
+        let pot_ns = self.potential_ns.load(Ordering::Relaxed);
+        println!("pot_s: {:.6}", pot_ns as f64 * 1e-9);
     }
 }
 
@@ -511,7 +523,7 @@ fn main() {
                         if iters == 0 || led.remaining() == 0 {
                             return if led.charge() {
                                 Calls::add(&calls.single_points, 1);
-                                (pot_r.value_and_gradient(x).0, x.to_owned())
+                                (calls.timed(|| pot_r.value_and_gradient(x)).0, x.to_owned())
                             } else {
                                 (f64::INFINITY, x.to_owned())
                             };
@@ -522,11 +534,12 @@ fn main() {
                         opt.gtol = if full { QUENCH_RMS } else { SCREEN_GTOL };
                         let cap = if full { iters.min(QUENCH_ITERS) } else { iters };
                         let (mut energy, xr, _) = opt.minimize(x, cap, |v| {
-                            led.charge().then(|| pot_r.value_and_gradient(v))
+                            led.charge()
+                                .then(|| calls.timed(|| pot_r.value_and_gradient(v)))
                         });
                         let mut grad = Array1::zeros(0);
                         if full && led.charge() {
-                            let (e2, g2) = pot_r.value_and_gradient(xr.view());
+                            let (e2, g2) = calls.timed(|| pot_r.value_and_gradient(xr.view()));
                             energy = e2;
                             grad = g2;
                         }
@@ -577,7 +590,7 @@ fn main() {
                         }
                         led.charge().then(|| {
                             Calls::add(&calls.gradients_paid, 1);
-                            pot_g.value_and_gradient(x).1
+                            calls.timed(|| pot_g.value_and_gradient(x)).1
                         })
                     };
                     let mut hook = RadialHistory {
