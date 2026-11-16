@@ -57,6 +57,13 @@ SC_ROWS = {
     "108": (10, 8, 1.0, 1.0, 34.408),
     "96": (9, 6, 1.0, 1.0, 39.432),
 }
+# Doye and Wales's basin-hopping kT/eps for each row, New J. Chem. 22, 733 (1998).
+BASIN_HOPPING_TEMPERATURE = {"126": 30.0, "108": 5.0, "96": 10.0}
+# The STEP line of examples/h2h_gmin_lj.data is in sigma. A Lennard-Jones
+# nearest neighbour is 2**(1/6) sigma and a Sutton-Chen one is a/sqrt(2),
+# so the same displacement per neighbour distance is this many a per sigma.
+SC_LENGTH_PER_LJ = 2.0**-0.5 / 2.0 ** (1.0 / 6.0)
+LJ_STEP = 0.40
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261115
@@ -124,11 +131,17 @@ def schedule() -> list[tuple[str, int, str]]:
 
 
 def family_of(system: str) -> str:
-    return system.split("-", 1)[0].removeprefix("sc")
+    family = system.split("-", 1)[0].removeprefix("sc")
+    if family not in SC_ROWS:
+        raise SystemExit(f"{system} is not a Sutton-Chen row")
+    return family
 
 
 def data_text(system: str, steps: int) -> str:
-    n_exp, m_exp, sigma, epsilon, c = SC_ROWS[family_of(system)]
+    family = family_of(system)
+    n_exp, m_exp, sigma, epsilon, c = SC_ROWS[family]
+    # No RADIUS line: GMIN then sizes the container for SC itself, in units
+    # of a (io1.f90), and a full NEWRESTART reseed fills that container.
     lines = [
         f"SC {n_exp} {m_exp} {sigma} {epsilon} {c}",
         "SLOPPYCONV 1.0D-4",
@@ -137,10 +150,9 @@ def data_text(system: str, steps: int) -> str:
         "MAXIT 600 500",
         "SAVE 2",
         "CENTRE",
-        "RADIUS 30.0",
-        "TEMPERATURE 0.8",
+        f"TEMPERATURE {BASIN_HOPPING_TEMPERATURE[family]}",
         f"STEPS {steps} 1.0",
-        "STEP 0.40 0.51",
+        f"STEP {LJ_STEP * SC_LENGTH_PER_LJ:.6f} 0.51",
         "NEWRESTART 40",
         "",
     ]

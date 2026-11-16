@@ -21,7 +21,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "scripts" / "metal_h2h"))
 
+import run_sc  # noqa: E402
 from sc96_78_common import binary, parse_run, reference_energy, write_start  # noqa: E402
 
 SCRATCH = ROOT / "build" / "sc96-78"
@@ -107,23 +109,7 @@ def ensure_gmin() -> None:
 
 
 def gmin_data(seed: int) -> str:
-    # Quench settings are the Sutton-Chen file in scripts/metal_h2h/run_sc.py.
-    # The temperature is the 9-6 basin-hopping temperature, 10.
-    return (
-        "SC 9 6 1.0 1.0 39.432\n"
-        "SLOPPYCONV 1.0D-4\n"
-        "TIGHTCONV 1.0D-5\n"
-        "EDIFF 0.001\n"
-        "MAXIT 600 500\n"
-        "SAVE 2\n"
-        "CENTRE\n"
-        "RADIUS 30.0\n"
-        "TEMPERATURE 10.0\n"
-        "STEPS 90000000 1.0\n"
-        "STEP 0.40 0.51\n"
-        "NEWRESTART 40\n"
-        f"RANSEED {seed}\n"
-    )
+    return run_sc.data_text("sc96-78", 90_000_000) + f"RANSEED {seed}\n"
 
 
 def run_gmin(seed: int, reference: str, start: Path, dest: Path) -> None:
