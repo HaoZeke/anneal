@@ -91,7 +91,8 @@ def main() -> None:
         inside = median([float(row["inside_s"]) for row in group])
         outside = median([float(row["outside_s"]) for row in group])
         wall_stops = sum(row.get("stop") == "wall" for row in group)
-        cap = group[0].get("cap_s") or ""
+        caps_here = [row["cap_s"] for row in group if row.get("cap_s")]
+        cap = caps_here[0] if caps_here else ""
         if arm == "anneal":
             over = back = fisher_p = 1.0
             u_stat, mw_p = len(base_calls) * len(base_calls) / 2.0, 1.0
