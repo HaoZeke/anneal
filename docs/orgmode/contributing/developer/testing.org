@@ -54,6 +54,37 @@ meson compile -C bbfast
 meson test -C bbfast --print-errorlogs
 #+end_src
 
+*** OpenMP teams
+
+The OpenMP runtime may start fewer threads than a region asks for: under
+=OMP_THREAD_LIMIT=, inside another parallel region, or with dynamic teams.
+Every region in the library therefore opens in =CppCore/rgpot/Slices.hpp=.
+A caller cuts its work into slices before the region and keeps one buffer per
+slice.
+=forEachSlice= and =forEachSlicePhase= run each slice once on the threads that
+start, several to a thread on a short team, and the caller adds the buffers in
+slice order, so the slice count fixes the bits and the team only the speed.
+Ranks that wait for each other use =onFullTeam=, which runs them only when each
+has its own thread; otherwise it returns false and the caller does the same work
+through =forEachSlice=.
+No other library file names a thread number or a team size.
+The test suite fails when an OpenMP pragma, a runtime call, the OpenMP header or
+the OpenMP macro appears anywhere else in the library sources.
+That check is =CppCore/tests/test_openmp_confined.py=.
+
+=ThreadTeamTest= requires the bits of the full team from the threaded potentials
+and neighbour tables under =rgpot::TeamCap= short teams, dynamic teams and
+nested regions.
+The test suite runs it again under =OMP_THREAD_LIMIT=1= and
+=OMP_THREAD_LIMIT=2=, and the =thread_limit= CI job runs the whole suite at both
+limits:
+
+#+attr_rgpot: syntax needs a built bbdir
+#+begin_src bash
+OMP_THREAD_LIMIT=1 meson test -C bbdir --print-errorlogs
+OMP_THREAD_LIMIT=2 meson test -C bbdir --print-errorlogs
+#+end_src
+
 ** Rust Tests
 
 =rust-test-all= enables every feature of =rgpot-core= (=schema=, =profile=,

@@ -82,11 +82,11 @@ inline void tallyPair(const PerAtomOut &atoms, std::size_t i, std::size_t j, dou
 }
 
 /**
- * @brief Thread-private per-atom arrays for a walk that writes both atoms
- * of a pair from any thread.
+ * @brief Private per-atom arrays, one per slice, for a walk that writes
+ * both atoms of a pair from any slice.
  *
- * Each thread tallies into @c slot(t); @c reduce adds the slots into the
- * caller's arrays in thread order. A null target allocates nothing and
+ * Slice @c t tallies into @c slot(t); @c reduce adds the slots into the
+ * caller's arrays in slice order. A null target allocates nothing and
  * hands out empty slots.
  */
 class PerAtomTeam {

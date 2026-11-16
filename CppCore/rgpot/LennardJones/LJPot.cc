@@ -88,8 +88,8 @@ simd::LjParams lj_params(double u0, double psi, double shift, const LJConfig &c,
  * does not copy a half-list. A stored call keeps candidates out to the
  * cutoff plus the skin and drops the rest from the current distances, so
  * a later call inside half the skin reuses the candidates. Several
- * threads split the atoms, keep a private force buffer, and add those
- * buffers in thread order. A nonzero switch width uses the quintic
+ * slices split the atoms, each with a private force buffer, and the
+ * buffers are added in slice order. A nonzero switch width uses the quintic
  * switch. Cauchy stress is published from the kernel's strain accumulator.
  *
  * @warning The box is assumed to be orthogonal.

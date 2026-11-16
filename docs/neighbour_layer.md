@@ -85,10 +85,10 @@ later device fill would write.
 least 8192 atoms. A pair list splits the cells into contiguous ranges
 when the cell is unsheared and at least two search radii across every
 periodic axis. A sheared or narrower cell may need several images of a
-pair, so the pair list then splits the atoms and each thread runs the
+pair, so the pair list then splits the atoms and each slice runs the
 one-thread walk; a cluster list always splits the atoms. Every thread
 count stores the same pairs and shifts. The results are concatenated in
-thread order, so a cluster list keeps the one-thread order; a pair list
+slice order, so a cluster list keeps the one-thread order; a pair list
 may store its rows in a different order. Vesin merges per-thread lists
 without promising an order. Below 512 atoms a pair list is a direct loop
 over atom pairs, without cells.
@@ -184,12 +184,13 @@ The public `Query` still rejects a cutoff that is not finite.
 `OMP_NUM_THREADS` above 1 splits the work into that many slices. Most
 two-body walks use `forCellTeam`, which gives each slice a contiguous
 range of cells. Stored EAM, LJCluster and the three-body potentials
-split atoms into contiguous slices. `forEachSlice` hands every slice to
-the threads the runtime starts, also when there are fewer of them, as
-under `OMP_THREAD_LIMIT` or inside another OpenMP region. Private forces
-are added in slice order, so a fixed thread count repeats bit for bit
-and stays within `1e-9` of one thread. One thread keeps the serial pair
-order.
+split atoms into contiguous slices. `forEachSlice`, in
+`CppCore/rgpot/Slices.hpp` with every other OpenMP region, hands every
+slice to the threads the runtime starts, also when there are fewer of
+them, as under `OMP_THREAD_LIMIT` or inside another OpenMP region.
+Private forces are added in slice order, so a fixed thread count repeats
+bit for bit and stays within `1e-9` of one thread. One thread keeps the
+serial pair order.
 
 Stillinger-Weber and Tersoff use this layer for `Auto` as well as
 `Stored` and `Stream`. Bonds are gathered for one atom at a time, sorted
@@ -291,7 +292,7 @@ Stored EAM at 108,000 atoms: 0.107392 s, 0.074392 s (1.44x), 0.037288 s
 used to be slower than one because the stream recomputed the density
 exponential in a second pass. The stream now makes two cell walks, one
 for the density and one for the forces, with the pair terms read from
-tabulated splines, and each thread keeps its own density and force rows.
+tabulated splines, and each slice keeps its own density and force rows.
 Tersoff's parallel stress used to land on one shared array. It now uses
 the private buffer. At 13,824 atoms the stored list reaches 3.01x on 8
 threads and the stream 4.89x. At 1,000,000 atoms the stream median on 8

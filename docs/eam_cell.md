@@ -49,9 +49,9 @@ The threads the runtime starts take every slice, also when there are
 fewer of them, as under `OMP_THREAD_LIMIT` or inside another OpenMP
 region.
 
-A streaming evaluation splits the cells across the threads. Each thread
-keeps its own density and force rows, and the rows are added in thread
-order.
+A streaming evaluation splits the cells into slices, one per requested
+thread. Each slice keeps its own density and force rows, and the rows
+are added in slice order.
 
 Several threads are not bit-identical to one thread. Energy and every
 force component stay within a relative tolerance of `1e-9`
