@@ -136,8 +136,8 @@ private:
   std::vector<std::int32_t> rev_;
   std::vector<double> thread_energy_;
   std::vector<double> partial_f_;
-  /// Per-thread density and force for the stream. One row per thread,
-  /// so a half pair can update both atoms without a lock.
+  /// Density and force rows for the stream, one per slice, so a half
+  /// pair can update both atoms without a lock.
   std::vector<double> stream_rho_;
   std::vector<double> stream_force_;
   std::vector<rgpot::nlist::Range> parts_;

@@ -459,7 +459,7 @@ const rgpot::eam::ElementSpline &EAM::splineFor(int Z) {
 void EAM::evaluateDensityStream(long N, const int *atomicNrs, double *F,
                                  double *U) {
   // One half pair, tabulated. The density walk and the force walk
-  // share the cell bins. Each thread keeps its own rows, so the
+  // share the cell bins. Each slice keeps its own rows, so the
   // partner atom needs no lock and no pair index.
   js_.clear();
   const int nt = threads_used_;
@@ -486,10 +486,7 @@ void EAM::evaluateDensityStream(long N, const int *atomicNrs, double *F,
   dF_.resize(static_cast<std::size_t>(N));
   stream_force_.assign(rows * 3, 0.0);
   double embedded = 0.0;
-  auto absorb = [&](int thread) {
-    if (thread != 0) {
-      return;
-    }
+  auto absorb = [&] {
     for (long i = 0; i < N; ++i) {
       double dens = 0.0;
       for (int t = 0; t < nt; ++t) {
@@ -574,7 +571,7 @@ void EAM::evaluateDensityStream(long N, const int *atomicNrs, double *F,
         }
   };
   neighbours_.forCellTeam(true, nt, density_of);
-  absorb(0);
+  absorb();
   neighbours_.forCellTeam(true, nt, force_of);
   for (long i = 0; i < N; ++i) {
     double fx = 0.0;
