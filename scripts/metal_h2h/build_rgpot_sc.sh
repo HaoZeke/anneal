@@ -2,18 +2,27 @@
 # Copyright (c) anneal developers
 # rgpot's Sutton-Chen entry at the rgpot revision of Cargo.lock, built from
 # cargo's checkout alone with the neighbour list and SIMD sources it needs,
-# into /work/metal-sc/rgpot-sc with sc_wall_micro and the revision.
+# into /work/metal-sc/rgpot-sc with sc_wall_micro and the revision. With
+# RGPOT_SRC set to a clean rgpot checkout, that checkout is built instead,
+# into /work/metal-sc/rgpot-sc-<first 8 digits of its revision>.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-LIBDIR=/work/metal-sc/rgpot-sc
 
-rgpot_rev=$(sed -n 's|^source = "git+https://github.com/OmniPotentRPC/rgpot?rev=\([0-9a-f]*\)#.*|\1|p' \
-  "$ROOT/Cargo.lock" | sort -u)
-[[ $(wc -w <<< "$rgpot_rev") == 1 ]] || { echo "one rgpot revision expected in Cargo.lock" >&2; exit 1; }
-cargo_home=${CARGO_HOME:-$HOME/.cargo}
-src=$(ls -d "$cargo_home"/git/checkouts/rgpot-*/"${rgpot_rev:0:7}" | head -1)
+if [[ -n ${RGPOT_SRC:-} ]]; then
+  src=$RGPOT_SRC
+  [[ -z $(git -C "$src" status --porcelain) ]] || { echo "$src has uncommitted changes" >&2; exit 1; }
+  rgpot_rev=$(git -C "$src" rev-parse HEAD)
+  LIBDIR=/work/metal-sc/rgpot-sc-${rgpot_rev:0:8}
+else
+  rgpot_rev=$(sed -n 's|^source = "git+https://github.com/OmniPotentRPC/rgpot?rev=\([0-9a-f]*\)#.*|\1|p' \
+    "$ROOT/Cargo.lock" | sort -u)
+  [[ $(wc -w <<< "$rgpot_rev") == 1 ]] || { echo "one rgpot revision expected in Cargo.lock" >&2; exit 1; }
+  cargo_home=${CARGO_HOME:-$HOME/.cargo}
+  src=$(ls -d "$cargo_home"/git/checkouts/rgpot-*/"${rgpot_rev:0:7}" | head -1)
+  LIBDIR=/work/metal-sc/rgpot-sc
+fi
 cpp=$src/CppCore
 
 mkdir -p "$LIBDIR"

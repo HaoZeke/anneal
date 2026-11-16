@@ -2,7 +2,8 @@
 # Copyright (c) anneal developers
 # Where anneal's Sutton-Chen wall goes on sc126-55 and sc96-55.
 #
-# Builds rgpot's Sutton-Chen entry with build_rgpot_sc.sh. Then, in one UTS
+# Builds rgpot's Sutton-Chen entry with build_rgpot_sc.sh, from RGPOT_SRC
+# when that is set. Rows are appended to seeds.csv and micro.csv. Then, in one UTS
 # namespace with hostname bench, working directory /work, one job at a
 # time on core 0: anneal (h2h_sc of this HEAD) on seeds
 # 2000-2011 at 1000000 calls, and sc_wall_micro on the seed-2000 start of
@@ -14,7 +15,11 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/metal-sc
 OUT=$ROOT/bench/metal-cluster-h2h/sc-wall
-LIBDIR=$WORK/rgpot-sc
+if [[ -n ${RGPOT_SRC:-} ]]; then
+  LIBDIR=$WORK/rgpot-sc-$(git -C "$RGPOT_SRC" rev-parse --short=8 HEAD)
+else
+  LIBDIR=$WORK/rgpot-sc
+fi
 
 harness=(scripts/metal_h2h)
 if ! git -C "$ROOT" diff --quiet HEAD -- "${harness[@]}" ||
@@ -38,8 +43,8 @@ head=\$(cat $WORK/anneal-head)
 rgpot=\$(cat $LIBDIR/rgpot-revision)
 seeds=$OUT/seeds.csv
 micro=$OUT/micro.csv
-echo "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,pot_per_eval_s,outside_per_eval_s,code_revision,rgpot_revision,host,harness_revision" > \$seeds
-echo "system,atoms,reps,entry_us,dlsym_alloc_us,kept_us,kept_stream_us,plain_us,abs_de,max_abs_df,rgpot_revision,host,harness_revision" > \$micro
+[ -f \$seeds ] || echo "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,pot_per_eval_s,outside_per_eval_s,code_revision,rgpot_revision,host,harness_revision" > \$seeds
+[ -f \$micro ] || echo "system,atoms,reps,entry_us,dlsym_alloc_us,kept_us,kept_stream_us,plain_us,abs_de,max_abs_df,rgpot_revision,host,harness_revision" > \$micro
 for system in sc126-55 sc96-55; do
   for seed in \$(seq 2000 2011); do
     row=\$(H2H_BUDGET=1000000 taskset -c 0 $WORK/bin/h2h_sc run \$system \$seed 2>/dev/null | grep ",anneal,")
