@@ -54,6 +54,15 @@ if has_ipi
         cpp_args: _args,
         install: not meson.is_subproject(),
     )
+    # Not a meson test: the timings in docs/orgmode/howto/ipi.org come from it.
+    executable(
+        'rgpot-ipi-bench',
+        files('ipi/bench_ipi_driver.cpp'),
+        dependencies: [pot_spec_dep, thread_dep],
+        link_with: rgpot,
+        cpp_args: _args,
+        install: false,
+    )
 endif
 
 rgpot_lj = executable(
