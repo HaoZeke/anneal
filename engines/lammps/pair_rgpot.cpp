@@ -27,18 +27,21 @@
 // only. That costs one O(N) gather and scatter per step and the
 // evaluation is serial, so extra ranks only distribute the integration.
 //
-// Domain: for a potential with a finite range (rgpot/Locality.hpp) and a
-// per-atom split, each rank evaluates its owned atoms plus the ghosts
-// within the force range R (the cutoff for a pairwise potential, twice
-// the cutoff otherwise) as one cluster in an orthogonal box padded so
-// that no periodic image is within the cutoff. init_one returns R, so
-// LAMMPS keeps every atom within R of an owned atom as a ghost. The
-// forces, site energies and per-atom virials of the owned atoms are then
-// those of the whole system, and only they are kept: the ghosts' own
-// results are discarded and no force goes to a ghost, so there is no
-// reverse communication and the boundary work is done on both sides, as
-// a LAMMPS style does with newton_pair off. Every rank tallies the
-// energy and virial of its owned atoms; LAMMPS sums them over ranks.
+// Domain: for a potential with a finite range (rgpot/Locality.hpp) and
+// the staged evaluation of rgpot/Staged.hpp, each rank evaluates its
+// owned atoms on the LAMMPS half neighbour list, the scheme of pair_style
+// eam. init_one returns the potential's cutoff, so the ghosts reach one
+// cutoff plus the skin past the subdomain and LAMMPS rebuilds the list
+// only when atoms have moved half the skin. The density stage sums each
+// atom's densities (the electron density of EAM and Sutton-Chen; a
+// pairwise potential has none) over the list. Under newton_pair on, the
+// entries it wrote to ghosts go back to their owners by reverse
+// communication. Forward communication then gives every ghost its
+// owner's completed densities, and the force stage adds the pair forces
+// into the LAMMPS force array: to ghosts as well under newton_pair on,
+// for LAMMPS to return to their owners as it does for any pair style.
+// Every rank tallies its share of the energy and virial and LAMMPS sums
+// them over ranks.
 //
 // mode auto takes the domain path on more than one rank when the
 // potential allows it and the virial is not the strain difference; mode
@@ -59,8 +62,9 @@
 // each atom and EAM gives each atom its embedding term. Rank 0 fills them
 // on the gathered box and they are scattered by tag like the forces. A
 // potential without them, or an engine plugin, stops the run when they are
-// requested. On the domain path the per-atom arrays of the owned atoms come
-// straight from each rank's cluster and the global virial is their sum.
+// requested. On the domain path the force stage tallies the per-atom
+// arrays with the same split, and the global virial is the sum of its
+// pair terms.
 
 #include "pair.h"
 
@@ -71,6 +75,7 @@
 #include "force.h"
 #include "lammpsplugin.h"
 #include "memory.h"
+#include "neigh_list.h"
 #include "neighbor.h"
 #include "update.h"
 #include "utils.h"
@@ -80,9 +85,9 @@
 #include "pot_spec.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -109,6 +114,10 @@ class PairRgpot : public Pair {
   void coeff(int, char **) override;
   void init_style() override;
   double init_one(int, int) override;
+  int pack_forward_comm(int, int *, double *, int, int *) override;
+  void unpack_forward_comm(int, int, double *) override;
+  int pack_reverse_comm(int, int, double *) override;
+  void unpack_reverse_comm(int, int *, double *) override;
 
  protected:
   double cut_global = 0.0;
@@ -118,7 +127,7 @@ class PairRgpot : public Pair {
   // What the error names when per-atom output is requested but missing.
   std::string pot_name;
   // Every rank keeps the kernel: rank 0 evaluates the gathered box, and on
-  // the domain path every rank evaluates its own cluster.
+  // the domain path every rank evaluates its own atoms.
   bool per_atom = false;
   bool virial_fd = false;
   Mode mode = Mode::Auto;
@@ -126,6 +135,12 @@ class PairRgpot : public Pair {
   bool use_domain = false;
   // Atomic number per LAMMPS type, index 1..ntypes. 0 leaves the type out.
   std::vector<int> type_z;
+  // Domain path, over owned and ghost atoms: atomic numbers, the
+  // Locality::densities values of each atom that the comm functions move,
+  // and per-atom virials in rgpot order.
+  std::vector<int> atom_z;
+  std::vector<double> densities;
+  std::vector<double> atom_virial;
 
   void allocate();
   void map_elements(int narg, char **arg, int first);
@@ -313,13 +328,13 @@ void PairRgpot::use_potential(const char *name, const rgpot::spec::Options &opti
 
 std::string PairRgpot::domain_refusal() const {
   if (backend == Backend::Engine) {
-    return pot_name + " is an engine, which reports no range or per-atom energy";
+    return pot_name + " is an engine, which reports no range or staged evaluation";
   }
   if (!built.locality.finite()) {
     return pot_name + " declares no finite range";
   }
-  if (!built.perAtom) {
-    return pot_name + " has no per-atom energy";
+  if (!built.forceStage) {
+    return pot_name + " has no staged evaluation";
   }
   if (virial_fd) {
     return "virial fd differentiates the whole box";
@@ -341,18 +356,19 @@ void PairRgpot::init_style() {
   if (mode == Mode::Domain && !refusal.empty()) {
     error->all(FLERR, "pair_style rgpot mode domain: {}", refusal);
   }
-  // One rank has nothing to split, and its cluster would only add the
-  // ghost shell to the box.
+  // One rank has nothing to split.
   use_domain = mode == Mode::Domain || (mode == Mode::Auto && refusal.empty() && comm->nprocs > 1);
   if (!use_domain && atom->natoms > MAXSMALLINT) {
     error->all(FLERR, "pair_style rgpot: too many atoms");
   }
+  comm_forward = comm_reverse = use_domain ? built.locality.densities : 0;
+  if (use_domain) {
+    neighbor->add_request(this);
+  }
   if (comm->me == 0) {
     if (use_domain) {
-      utils::logmesg(lmp,
-                     "pair_style rgpot: domain decomposition, cutoff {:.8g}, force range "
-                     "{:.8g}\n",
-                     built.locality.cutoff, built.locality.forceRange());
+      utils::logmesg(lmp, "pair_style rgpot: domain decomposition, cutoff {:.8g}, densities {}\n",
+                     built.locality.cutoff, built.locality.densities);
     } else {
       const std::string why =
           !refusal.empty() ? refusal : (mode == Mode::Auto ? "one rank" : "");
@@ -363,9 +379,10 @@ void PairRgpot::init_style() {
 }
 
 double PairRgpot::init_one(int, int) {
-  // The domain path needs every atom within the force range of an owned
-  // atom as a ghost; LAMMPS adds the skin.
-  return use_domain ? built.locality.forceRange() : cut_global;
+  // The neighbour list of the domain path, and its ghosts, reach the
+  // cutoff plus the skin; the density exchange stands in for the second
+  // cutoff that a many-body force needs.
+  return use_domain ? built.locality.cutoff : cut_global;
 }
 
 int PairRgpot::evaluate(std::size_t n, const double *xyz, const int *z, const double *box,
@@ -455,139 +472,103 @@ void PairRgpot::compute(int eflag, int vflag) {
 void PairRgpot::compute_domain() {
   const int nlocal = atom->nlocal;
   const int nall = nlocal + atom->nghost;
-  double **x = atom->x;
-  double **f = atom->f;
+  const auto n = static_cast<std::size_t>(nall);
   const int *type = atom->type;
-  const rgpot::Locality range = built.locality;
-
-  std::vector<int> cluster;
-  double lo[3] = {};
-  double hi[3] = {};
-  for (int i = 0; i < nlocal; ++i) {
-    if (type_z[static_cast<std::size_t>(type[i])] == 0) {
-      continue;
-    }
-    for (int d = 0; d < 3; ++d) {
-      lo[d] = cluster.empty() ? x[i][d] : std::min(lo[d], x[i][d]);
-      hi[d] = cluster.empty() ? x[i][d] : std::max(hi[d], x[i][d]);
-    }
-    cluster.push_back(i);
+  atom_z.resize(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    atom_z[i] = type_z[static_cast<std::size_t>(type[i])];
   }
-  const std::size_t nowned = cluster.size();
-  if (nowned == 0) {
-    return;
-  }
-  // A ghost farther than the force range from every owned atom changes
-  // nothing the owned atoms keep. The test against the owned atoms'
-  // bounding box keeps a superset of the ones within range.
-  const double reach = range.forceRange();
-  for (int i = nlocal; i < nall; ++i) {
-    if (type_z[static_cast<std::size_t>(type[i])] == 0) {
-      continue;
-    }
-    bool near = true;
-    for (int d = 0; d < 3 && near; ++d) {
-      near = x[i][d] >= lo[d] - reach && x[i][d] <= hi[d] + reach;
-    }
-    if (near) {
-      cluster.push_back(i);
-    }
-  }
-  const std::size_t n = cluster.size();
-
-  // An orthogonal box that spans the subdomain grown by the force range
-  // and the skin, which holds the cluster between reneighbourings, so it
-  // changes only with the LAMMPS box and the kernel can keep its own
-  // neighbour list. That span is over two cutoffs, so the cutoff stays
-  // under half the box. A pad of 0.75 cutoff on each side keeps periodic
-  // images beyond the cutoff. A whole number of cutoffs wide, a kernel
-  // without a skin bins it in cells of exactly one cutoff.
-  double sub_lo[3];
-  double sub_hi[3];
-  if (domain->triclinic == 0) {
-    std::copy(domain->sublo, domain->sublo + 3, sub_lo);
-    std::copy(domain->subhi, domain->subhi + 3, sub_hi);
-  } else {
-    for (int corner = 0; corner < 8; ++corner) {
-      double lamda[3];
-      double r[3];
-      for (int d = 0; d < 3; ++d) {
-        lamda[d] = ((corner >> d) & 1) != 0 ? domain->subhi_lamda[d] : domain->sublo_lamda[d];
-      }
-      domain->lamda2x(lamda, r);
-      for (int d = 0; d < 3; ++d) {
-        sub_lo[d] = corner == 0 ? r[d] : std::min(sub_lo[d], r[d]);
-        sub_hi[d] = corner == 0 ? r[d] : std::max(sub_hi[d], r[d]);
-      }
-    }
-  }
-  const double margin = reach + neighbor->skin;
-  const double pad = 0.75 * range.cutoff;
-  double origin[3];
-  double box[9] = {};
-  for (int d = 0; d < 3; ++d) {
-    double cmin = std::min(lo[d], sub_lo[d] - margin);
-    double cmax = std::max(hi[d], sub_hi[d] + margin);
-    for (std::size_t k = nowned; k < n; ++k) {
-      cmin = std::min(cmin, x[cluster[k]][d]);
-      cmax = std::max(cmax, x[cluster[k]][d]);
-    }
-    origin[d] = cmin - pad;
-    const double cells = std::ceil((cmax + pad - origin[d]) / range.cutoff);
-    double width = cells * range.cutoff;
-    // Rounding can leave width / cells a hair under the cutoff, and a
-    // kernel would then bin one cell fewer.
-    while (width / cells < range.cutoff) {
-      width = std::nextafter(width, 2.0 * width);
-    }
-    box[4 * d] = width;
-  }
-  std::vector<double> xyz(3 * n);
-  std::vector<int> z(n);
-  for (std::size_t k = 0; k < n; ++k) {
-    const int i = cluster[k];
-    z[k] = type_z[static_cast<std::size_t>(type[i])];
-    for (int d = 0; d < 3; ++d) {
-      xyz[3 * k + static_cast<std::size_t>(d)] = x[i][d] - origin[d];
-    }
-  }
+  rgpot::HalfList half;
+  half.nAtoms = n;
+  half.nOwned = static_cast<std::size_t>(nlocal);
+  half.pos = nall > 0 ? atom->x[0] : nullptr;
+  half.atmnrs = atom_z.data();
+  half.nRows = static_cast<std::size_t>(list->inum);
+  half.rows = list->ilist;
+  half.count = list->numneigh;
+  half.neighbours = list->firstneigh;
+  half.indexMask = NEIGHMASK;
+  half.newton = force->newton_pair != 0;
 
   const bool want_e = eflag_global || eflag_atom;
   const bool want_v = vflag_global || vflag_atom;
-  std::vector<double> forces(3 * n, 0.0);
-  std::vector<double> atom_e(want_e ? n : 0);
-  std::vector<double> atom_v(want_v ? 6 * n : 0);
-  rgpot::PerAtomOut atoms{want_e ? atom_e.data() : nullptr, want_v ? atom_v.data() : nullptr};
-  double energy = 0.0;
-  double stress[9] = {};
-  int has_stress = 0;
-  char why[kWhyLen] = {};
-  if (evaluate(n, xyz.data(), z.data(), box, forces.data(), &energy, stress, &has_stress, why,
-               (want_e || want_v) ? &atoms : nullptr) != 0) {
-    error->one(FLERR, "pair_style rgpot: {}", why[0] != '\0' ? why : "evaluation failed");
+  rgpot::StageTally tally;
+  if (eflag_atom) {
+    tally.atoms.energy = eatom;
+  }
+  if (vflag_atom) {
+    atom_virial.assign(6 * n, 0.0);
+    tally.atoms.virial = atom_virial.data();
+  }
+  // The exchange between the stages is collective, so every rank takes
+  // part even when it holds no atoms.
+  densities.assign(static_cast<std::size_t>(comm_forward) * n, 0.0);
+  try {
+    if (comm_forward > 0) {
+      built.densityStage(half, densities.data());
+      if (half.newton) {
+        comm->reverse_comm(this);
+      }
+      comm->forward_comm(this);
+    }
+    built.forceStage(half, densities.data(), nall > 0 ? atom->f[0] : nullptr,
+                     (want_e || want_v) ? &tally : nullptr);
+  } catch (const std::exception &e) {
+    error->one(FLERR, "pair_style rgpot: {}", e.what());
   }
 
   // rgpot Voigt xx yy zz yz xz xy to LAMMPS xx yy zz xy xz yz.
   const int to_lammps[6] = {0, 1, 2, 5, 4, 3};
-  for (std::size_t k = 0; k < nowned; ++k) {
-    const int i = cluster[k];
-    for (int d = 0; d < 3; ++d) {
-      f[i][d] += forces[3 * k + static_cast<std::size_t>(d)];
+  if (eflag_global) {
+    eng_vdwl += tally.energy;
+  }
+  if (vflag_global) {
+    for (int c = 0; c < 6; ++c) {
+      virial[c] += tally.virial[to_lammps[c]];
     }
-    if (eflag_global) {
-      eng_vdwl += atom_e[k];
-    }
-    if (eflag_atom) {
-      eatom[i] += atom_e[k];
-    }
-    for (int c = 0; c < 6 && want_v; ++c) {
-      const double w = atom_v[6 * k + static_cast<std::size_t>(to_lammps[c])];
-      if (vflag_global) {
-        virial[c] += w;
+  }
+  if (vflag_atom) {
+    // Under newton_pair on, LAMMPS returns the ghosts' entries to their
+    // owners as it does their forces.
+    const int rows = half.newton ? nall : nlocal;
+    for (int i = 0; i < rows; ++i) {
+      for (int c = 0; c < 6; ++c) {
+        vatom[i][c] += atom_virial[6 * static_cast<std::size_t>(i) +
+                                   static_cast<std::size_t>(to_lammps[c])];
       }
-      if (vflag_atom) {
-        vatom[i][c] += w;
-      }
+    }
+  }
+}
+
+int PairRgpot::pack_forward_comm(int n, int *atoms, double *buf, int, int *) {
+  const auto width = static_cast<std::size_t>(comm_forward);
+  double *out = buf;
+  for (int k = 0; k < n; ++k) {
+    const double *row = densities.data() + width * static_cast<std::size_t>(atoms[k]);
+    out = std::copy(row, row + width, out);
+  }
+  return static_cast<int>(out - buf);
+}
+
+void PairRgpot::unpack_forward_comm(int n, int first, double *buf) {
+  const auto width = static_cast<std::size_t>(comm_forward);
+  std::copy(buf, buf + width * static_cast<std::size_t>(n),
+            densities.data() + width * static_cast<std::size_t>(first));
+}
+
+int PairRgpot::pack_reverse_comm(int n, int first, double *buf) {
+  const auto width = static_cast<std::size_t>(comm_reverse);
+  const double *row = densities.data() + width * static_cast<std::size_t>(first);
+  std::copy(row, row + width * static_cast<std::size_t>(n), buf);
+  return static_cast<int>(width) * n;
+}
+
+void PairRgpot::unpack_reverse_comm(int n, int *atoms, double *buf) {
+  const auto width = static_cast<std::size_t>(comm_reverse);
+  for (int k = 0; k < n; ++k) {
+    double *row = densities.data() + width * static_cast<std::size_t>(atoms[k]);
+    for (std::size_t c = 0; c < width; ++c) {
+      row[c] += buf[width * static_cast<std::size_t>(k) + c];
     }
   }
 }

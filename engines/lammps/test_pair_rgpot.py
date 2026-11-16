@@ -441,23 +441,28 @@ def test_per_atom_sums_of_other_forms(tmp_path, name):
     check_per_atom_sums(name, per_atom_case(tmp_path, start, pair))
 
 
-def test_null_type_under_hybrid_overlay(tmp_path):
-    """NULL leaves type 2 out; lj/cut adds the pairs that involve it."""
-    start = fcc(A_LJ, True, ["set type 1 type/fraction 2 0.3 77"])
+@pytest.mark.parametrize("newton", ["on", "off"])
+@pytest.mark.parametrize("mode", ["gather", "domain"])
+def test_null_type_under_hybrid_overlay(tmp_path, mode, newton):
+    """NULL leaves type 2 out; lj/cut adds the pairs that involve it. On
+    the domain path rgpot walks the skip list LAMMPS builds for it."""
+    nprocs = 2 if MPIRUN else 1
+    start = [f"newton {newton}"] + fcc(A_LJ, True, ["set type 1 type/fraction 2 0.3 77"])
     hybrid = [
         f"plugin load {PLUGIN}",
-        f"pair_style hybrid/overlay rgpot {CUT} lj/cut {CUT}",
+        f"pair_style hybrid/overlay rgpot {CUT} mode {mode} lj/cut {CUT}",
         "pair_modify shift yes",
         f"pair_coeff * * rgpot LJ u0 {U0} psi {PSI} cutoff {CUT} Ar NULL",
         f"pair_coeff 1 2 lj/cut {U0} {PSI}",
         f"pair_coeff 2 2 lj/cut {U0} {PSI}",
     ]
-    got = ok(run_case(tmp_path, start + hybrid + THERMO + ["run 0"]))
-    ref = ok(run_case(tmp_path, start + LJ_CUT + THERMO + ["run 0"]))
+    got = ok(run_case(tmp_path, start + hybrid + THERMO + ["run 0"], nprocs=nprocs))
+    ref = ok(run_case(tmp_path, start + LJ_CUT + THERMO + ["run 0"], nprocs=nprocs))
     de = abs(got["pe"] - ref["pe"])
     df = max_abs_diff(got["forces"], ref["forces"])
     dp = max_abs_diff(got["press"], ref["press"])
-    print(f"hybrid/overlay NULL: |dE| {de:.3e} eV, max|dF| {df:.3e} eV/A, max|dP| {dp:.3e} bar")
+    print(f"hybrid/overlay NULL {mode} newton {newton} np {nprocs}: |dE| {de:.3e} eV, "
+          f"max|dF| {df:.3e} eV/A, max|dP| {dp:.3e} bar")
     assert de < 1e-9
     assert df < 1e-9
     assert dp < 1e-6 * max(abs(p) for p in ref["press"])
@@ -651,10 +656,12 @@ def test_refuses_free_boundaries(tmp_path):
 # The domain path. Every case reads one data file, so atom IDs do not
 # depend on the ranks that created the atoms.
 
-def read_data_start(tmp_path: Path, start: list[str], name: str) -> list[str]:
+def read_data_start(tmp_path: Path, start: list[str], name: str,
+                    newton: str = "on") -> list[str]:
     ok(run_case(tmp_path, start + ["pair_style zero 1.0", "pair_coeff * *", "run 0",
                                    f"write_data {name} nocoeff"]))
     return [
+        f"newton {newton}",
         "units metal",
         "atom_style atomic",
         "atom_modify map array",
@@ -669,12 +676,27 @@ def with_mode(pair: list[str], mode: str) -> list[str]:
             for line in pair]
 
 
+MORSE_NATIVE = ["pair_style morse 7.0", "pair_modify shift yes",
+                "pair_coeff * * 0.7102 1.6047 2.8970"]
+
+
+def named_pair(name: str) -> list[str]:
+    _, cutoff, coeff, _ = NAMED[name]
+    return [f"plugin load {PLUGIN}", f"pair_style rgpot {cutoff}", f"pair_coeff * * {coeff}"]
+
+
 def domain_systems(system: str, triclinic: bool, fill: str):
-    """Start, rgpot pair lines, native pair lines. fill "part" keeps the
-    atoms with x under 0.43 of the box, so under processors * 1 1 the
-    upper half of the ranks own none."""
+    """Start, rgpot pair lines, native pair lines (None for Sutton-Chen,
+    which LAMMPS lacks). fill "part" keeps the atoms with x under 0.43 of
+    the box, so under processors * 1 1 the upper half of the ranks own
+    none."""
     if system == "lj":
         start, pair, native, side = fcc(A_LJ, triclinic), lj_rgpot("named"), LJ_CUT, 4 * A_LJ
+    elif system in ("sc", "morse"):
+        name = "SuttonChen" if system == "sc" else "Morse"
+        lattice = NAMED[name][0]
+        start, pair, side = fcc(lattice, triclinic), named_pair(name), 4 * lattice
+        native = MORSE_NATIVE if system == "morse" else None
     else:
         if not EAM_ALLOY:
             pytest.skip("needs RGPOT_EAM_ALLOY")
@@ -706,53 +728,67 @@ def compare(label: str, got: dict, ref: dict, tol: dict) -> None:
     assert dva < tol["va"] * vscale
 
 
-@pytest.mark.parametrize("fill", ["full", "part"])
-@pytest.mark.parametrize("triclinic", [False, True], ids=["orthogonal", "triclinic"])
-@pytest.mark.parametrize("system", ["lj", "eam"])
-def test_domain_matches_gather_and_native(tmp_path, system, triclinic, fill):
+DOMAIN_CASES = [
+    pytest.param(system, triclinic, fill,
+                 id=f"{system}-{'triclinic' if triclinic else 'orthogonal'}-{fill}")
+    for system in ("lj", "eam") for triclinic in (False, True) for fill in ("full", "part")
+] + [pytest.param(system, True, "part", id=f"{system}-triclinic-part")
+     for system in ("sc", "morse")]
+
+
+@pytest.mark.parametrize("newton", ["on", "off"])
+@pytest.mark.parametrize("system,triclinic,fill", DOMAIN_CASES)
+def test_domain_matches_gather_and_native(tmp_path, system, triclinic, fill, newton):
     """Energy, forces, global virial, pe/atom and stress/atom of the
     domain path against the gather path and the native style, on 1, 2
-    and 4 ranks, all against the native style on one rank."""
+    and 4 ranks, all against the native style on one rank (the gather
+    path for Sutton-Chen), with newton_pair on and off."""
     ranks = (1, 2, 4) if MPIRUN else (1,)
     start, pair, native = domain_systems(system, triclinic, fill)
-    head = read_data_start(tmp_path, start, "start.data")
+    head = read_data_start(tmp_path, start, "start.data", newton)
     tail = PER_ATOM + THERMO + ["run 0"]
 
     def case(lines, n):
         return ok(run_case(tmp_path, head + lines + tail, nprocs=n,
                            peratom=PER_ATOM_COLUMNS))
 
-    ref = case(native, 1)
+    ref_name = "native" if native else "gather"
+    ref = case(native or with_mode(pair, "gather"), 1)
     natoms = len(ref["forces"]) // 3
     if fill == "part":
         assert 0 < natoms < 128
     # Within rounding of the summation order; the native styles sum the
     # same terms in another order.
     tol = {"e": 1e-12, "f": 1e-11, "p": 1e-10, "ea": 1e-12, "va": 1e-10}
+    label = f"{system} {fill} triclinic={triclinic} newton {newton}"
     for n in ranks:
-        runs = {"native": case(native, n), "gather": case(with_mode(pair, "gather"), n),
+        runs = {"gather": case(with_mode(pair, "gather"), n),
                 "domain": case(with_mode(pair, "domain"), n)}
+        if native:
+            runs["native"] = case(native, n)
         for name, got in runs.items():
             assert got["nprocs"] == n
             assert sum(got["nlocal"]) == natoms
             if fill == "part" and n > 1:
                 assert 0 in got["nlocal"], got["nlocal"]
-            compare(f"{system} {fill} triclinic={triclinic} np {n} {name} vs native np 1",
-                    got, ref, tol)
-        compare(f"{system} {fill} triclinic={triclinic} np {n} domain vs gather",
-                runs["domain"], runs["gather"], tol)
-        check_per_atom_sums(f"{system} {fill} np {n} domain", runs["domain"])
+            compare(f"{label} np {n} {name} vs {ref_name} np 1", got, ref, tol)
+        compare(f"{label} np {n} domain vs gather", runs["domain"], runs["gather"], tol)
+        check_per_atom_sums(f"{label} np {n} domain", runs["domain"])
 
 
 @pytest.mark.skipif(not MPIRUN, reason="needs RGPOT_MPIRUN")
+@pytest.mark.parametrize("newton", ["on", "off"])
 @pytest.mark.parametrize("system", ["lj", "eam"])
-def test_domain_dynamics_match_gather(tmp_path, system):
+def test_domain_dynamics_match_gather(tmp_path, system, newton):
     """200 hot NVE steps on 4 ranks, through reneighbourings and atoms
-    moving between ranks: the domain path follows the gather path."""
+    moving between ranks: the domain path follows the gather path. The
+    0.5 A skin makes LAMMPS rebuild its lists about ten times, the solid
+    CuNi too."""
     start, pair, _ = domain_systems(system, True, "full")
-    head = read_data_start(tmp_path, start, "start.data")
+    head = read_data_start(tmp_path, start, "start.data", newton)
     md = [
         *THERMO,
+        "neighbor 0.5 bin",
         "velocity all create 1200 4127 dist gaussian",
         "fix 1 all nve",
         "run 200",
@@ -762,7 +798,7 @@ def test_domain_dynamics_match_gather(tmp_path, system):
     de = abs(domain["pe"] - gather["pe"])
     df = max_abs_diff(domain["forces"], gather["forces"])
     dx = max_abs_diff(flat(domain["x"]), flat(gather["x"]))
-    print(f"{system} 200 steps np 4 domain vs gather: |dE| {de:.3e} eV, "
+    print(f"{system} 200 steps np 4 newton {newton} domain vs gather: |dE| {de:.3e} eV, "
           f"max|dF| {df:.3e} eV/A, max|dx| {dx:.3e} A")
     assert de < 1e-8 * max(1.0, abs(gather["pe"]))
     assert df < 1e-7
@@ -781,16 +817,16 @@ def mode_log(tmp_path: Path, commands: list[str], nprocs: int = 1) -> str:
 @pytest.mark.skipif(not MPIRUN, reason="needs RGPOT_MPIRUN")
 def test_mode_follows_the_capabilities(tmp_path):
     """On two ranks auto takes the domain path for a finite-range
-    potential with a per-atom split and the gather path otherwise, and
-    says which."""
+    potential with a staged evaluation and the gather path otherwise, and
+    says which. The ghosts reach one cutoff plus the skin, many-body
+    potentials included."""
     lj = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("named") + ["run 0"], 2)
-    assert "pair_style rgpot: domain decomposition, cutoff 8.5, force range 8.5" in lj
+    assert "pair_style rgpot: domain decomposition, cutoff 8.5, densities 0" in lj
     u0psi = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("u0psi") + ["run 0"], 2)
-    assert "domain decomposition, cutoff 8.5, force range 8.5" in u0psi
-    sc_pair = [f"plugin load {PLUGIN}", "pair_style rgpot 7.0",
-               f"pair_coeff * * {NAMED['SuttonChen'][2]}"]
-    sc = mode_log(tmp_path, fcc(3.92, False) + sc_pair + ["run 0"], 2)
-    assert "domain decomposition, cutoff 7, force range 14" in sc
+    assert "domain decomposition, cutoff 8.5, densities 0" in u0psi
+    sc = mode_log(tmp_path, fcc(3.92, False) + named_pair("SuttonChen") + ["run 0"], 2)
+    assert "domain decomposition, cutoff 7, densities 1" in sc
+    assert "ghost atom cutoff = 9" in sc
     fd = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("named-fd") + ["run 0"], 2)
     assert "gather on rank 0; virial fd differentiates the whole box" in fd
     emt_pair = [f"plugin load {PLUGIN}", "pair_style rgpot 6.0", "pair_coeff * * EMT Cu Cu"]
@@ -808,7 +844,7 @@ def test_mode_on_one_rank(tmp_path):
     assert "pair_style rgpot: gather on rank 0; one rank" in lj
     forced = mode_log(tmp_path, fcc(A_LJ, False) + with_mode(lj_rgpot("named"), "domain")
                       + ["run 0"])
-    assert "domain decomposition, cutoff 8.5, force range 8.5" in forced
+    assert "domain decomposition, cutoff 8.5, densities 0" in forced
     emt_pair = [f"plugin load {PLUGIN}", "pair_style rgpot 6.0", "pair_coeff * * EMT Cu Cu"]
     refused = mode_log(tmp_path, fcc(3.61, False) + with_mode(emt_pair, "domain") + ["run 0"])
     assert ("pair_style rgpot mode domain: the rgpot potential EMT declares no finite range"
