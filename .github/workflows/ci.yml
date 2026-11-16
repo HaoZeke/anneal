@@ -19,6 +19,14 @@ env:
   # source at all yet and its dependency builds the nng C library
   # through cmake; put it back the day it does.
   CI_FEATURES: ira,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex
+  # The test profile keeps opt-level 2, debug assertions and overflow
+  # checks. Full DWARF in the ~270 anneal-core test and example units
+  # cost a third of their compile and link time and two thirds of the
+  # feature target tree. Line tables keep file and line in panics and
+  # backtraces. Every CI build starts from a cold workspace crate, so
+  # incremental state is written and never read.
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   lint:
