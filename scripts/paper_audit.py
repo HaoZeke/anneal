@@ -17,7 +17,8 @@ without them, or whose revision is not in this repository, must be listed in
 in ``ALIASES`` once the pushed equivalent is verified; one with no pushed
 equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
 committed row backs are listed in ``UNTRACED``; their text must still be where
-the list says.
+the list says. The revision checks need the full history and the remote
+branches; a clone without them is refused, with exit status 2.
 
     python3 scripts/paper_audit.py            # exit 1 on any drift
     python3 scripts/paper_audit.py --report   # also print every check
@@ -1414,7 +1415,34 @@ def verified_aliases(audit: Audit, table: list[dict[str, str]], index: RevisionI
     return verified
 
 
+def unauditable() -> list[str]:
+    """Why this clone cannot answer the revision checks, if it cannot.
+
+    A shallow clone, or one without the remote branches, would read every
+    revision as missing or unpushed; the audit stops instead of reporting that.
+    """
+    problems = []
+    if git("rev-parse", "--is-shallow-repository").stdout.strip() != "false":
+        problems.append("the clone is shallow; fetch the full history (actions/checkout with fetch-depth: 0, "
+                        "or git fetch --unshallow origin)")
+    if not git("for-each-ref", "--count=1", "refs/remotes").stdout.strip():
+        problems.append("there are no remote-tracking refs; fetch the branches of origin "
+                        "(git fetch origin '+refs/heads/*:refs/remotes/origin/*')")
+    wanted = [(row[c], row["branch"] if c == "branch_revision" else "develop")
+              for row in alias_table() for c in ("pushed_revision", "branch_revision") if row[c]]
+    out = git("cat-file", "--batch-check", stdin="".join(f"{rev}^{{commit}}\n" for rev, _ in wanted)).stdout.splitlines()
+    for (rev, branch), line in zip(wanted, out):
+        if line.split()[1:2] != ["commit"]:
+            problems.append(f"{ALIASES} names {rev[:8]}, which this clone does not have; fetch {branch} from origin")
+    return problems
+
+
 def run(report: bool = False) -> int:
+    problems = unauditable()
+    if problems:
+        for problem in problems:
+            print(f"paper_audit: cannot check revisions: {problem}", file=sys.stderr)
+        return 2
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
