@@ -34,6 +34,7 @@ class H2o16Crest:
 
 
 class H2o16CrestCapped:
+    PAPER_BUDGETS: ClassVar[dict[str, int]] = {"h2o16": 280305}
     timeout = 43200
     params: ClassVar[list[str]] = ["anneal", "crest"]
     param_names: ClassVar[list[str]] = ["arm"]

@@ -333,6 +333,13 @@
           "arm": "code",
           "budget": "budget",
           "seed": "seed"
+        },
+        {
+          "path": "bench/covalent-h2h/gfn2/rows.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
         }
       ],
       "uncapped_arms": {
@@ -343,9 +350,49 @@
           "key": "si10",
           "arm": "crest",
           "n": 4,
-          "reason": "CREST Si10 was run on seeds 2000-2003 only (--crest-seeds); the eight missing seeds need xtb 6.7.1 and CREST 3.0.2 on the bench host"
+          "reason": "seeds.csv holds CREST Si10 seeds 2000-2003 only (--crest-seeds); seeds 2004-2011 are in rows.csv, from covalent_gfn2_crest_si10_n12, and each rows file is counted alone"
         }
-      ]
+      ],
+      "missing_outputs": {
+        "/work/covalent-h2h/gfn2/stamps/panel.stamp": "a touch() stamp outside the tree that marks the rows appended to bench/covalent-h2h/gfn2/rows.csv; it is never committed"
+      }
+    },
+    {
+      "rule": "covalent_gfn2_crest_si10_n12",
+      "competitors": [
+        "CREST"
+      ],
+      "runners": [
+        "scripts/covalent_h2h/gfn2_crest.py",
+        "scripts/covalent_h2h/gfn2_enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/covalent_h2h/gfn2_crest.py",
+        "name": "BUDGET",
+        "keys": "SYSTEMS"
+      },
+      "asv": "bench/covalent-h2h/gfn2/benchmarks/gfn2_covalent.py::Gfn2Si10Crest",
+      "rows": [
+        {
+          "path": "bench/covalent-h2h/gfn2/rows.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed",
+          "keys": [
+            "si10"
+          ],
+          "arms": [
+            "crest"
+          ]
+        }
+      ],
+      "uncapped_arms": {
+        "crest": "CREST runs its own iMTD-GC schedule; the budget column is the calls it made"
+      },
+      "missing_outputs": {
+        "/work/covalent-h2h/gfn2/stamps/si10-crest-n12.stamp": "a touch() stamp outside the tree that marks CREST's Si10 seeds 2004-2011 appended to bench/covalent-h2h/gfn2/rows.csv; it is never committed"
+      }
     },
     {
       "rule": "gmin_h2h",
@@ -1108,6 +1155,32 @@
         }
       ],
       "gap": "seeds.csv was written by a session whose runner is not committed; the rule only re-summarizes it, the rows carry hostname but no code_revision, and they are not backfilled"
+    },
+    {
+      "rule": "h2o16_crest_capped",
+      "competitors": [
+        "CREST"
+      ],
+      "runners": [
+        "scripts/h2o16_crest/run_capped.py",
+        "scripts/h2o16_crest/enter_capped.sh"
+      ],
+      "budgets": {
+        "source": "scripts/h2o16_crest/run_capped.py",
+        "name": "BUDGET",
+        "keys": [
+          "h2o16"
+        ]
+      },
+      "seeds": {
+        "source": "scripts/h2o16_crest/run_capped.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/h2o16-crest/benchmarks/h2o16_crest.py::H2o16CrestCapped",
+      "rows": [],
+      "missing_outputs": {
+        "/work/h2o16-crest-capped/stamps/panel.stamp": "a touch() stamp outside the tree that marks the rows appended to bench/h2o16-crest/capped-rows.csv; it is never committed"
+      }
     }
   ],
   "not_h2h": {
