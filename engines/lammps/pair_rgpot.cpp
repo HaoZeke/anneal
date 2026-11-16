@@ -533,7 +533,14 @@ void PairRgpot::compute_domain() {
       cmax = std::max(cmax, x[cluster[k]][d]);
     }
     origin[d] = cmin - pad;
-    box[4 * d] = std::ceil((cmax + pad - origin[d]) / range.cutoff) * range.cutoff;
+    const double cells = std::ceil((cmax + pad - origin[d]) / range.cutoff);
+    double width = cells * range.cutoff;
+    // Rounding can leave width / cells a hair under the cutoff, and a
+    // kernel would then bin one cell fewer.
+    while (width / cells < range.cutoff) {
+      width = std::nextafter(width, 2.0 * width);
+    }
+    box[4 * d] = width;
   }
   std::vector<double> xyz(3 * n);
   std::vector<int> z(n);
