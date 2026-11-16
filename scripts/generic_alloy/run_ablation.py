@@ -436,7 +436,7 @@ def summarise(campaign: str, rows: list[dict[str, str]]) -> list[dict[str, str]]
                     left = [float(row[column]) for row in group]
                     right = [float(row[column]) for row in base]
                     if len(set(left + right)) > 1:
-                        p = mannwhitneyu(left, right, alternative="two-sided").pvalue
+                        p = mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue
                         tests[f"mannwhitney_p_{key}"] = fmt_p(p)
                     else:
                         tests[f"mannwhitney_p_{key}"] = "1"
