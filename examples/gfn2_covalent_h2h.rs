@@ -28,13 +28,17 @@
 //! charges nothing but the dimer probe it needs for the radius.
 //!
 //! A hit is a recorded energy at or below `target_eV` plus 1e-3 eV.
+//!
+//! `H2H_WALL_S` closes the ledger that many seconds after the start, and
+//! the search returns its best so far. `charged` is then the calls made
+//! before it closed.
 
 #[path = "common/rgpot_eindir.rs"]
 mod rgpot_eindir;
 
 use std::io::Write;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anneal_core::methods::cluster_hopping::{
@@ -215,7 +219,19 @@ fn main() {
         .and_then(|v| v.parse().ok());
     let out = args.get(4).cloned();
 
-    let mut ledger = Ledger::new(budget);
+    let mut ledger = match std::env::var("H2H_WALL_S").ok() {
+        Some(text) => {
+            let seconds: f64 = text.parse().expect("H2H_WALL_S in seconds");
+            let stop = Arc::new(AtomicBool::new(false));
+            let raise = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
+                raise.store(true, Ordering::Relaxed);
+            });
+            Ledger::with_stop(budget, stop)
+        }
+        None => Ledger::new(budget),
+    };
     if let Some(target) = target {
         ledger.stop_below(target + HIT_TOL_EV);
     }
