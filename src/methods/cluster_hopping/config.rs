@@ -1359,7 +1359,7 @@ pub struct Config {
     /// makes rather than from `energy_scale`.
     ///
     /// The median quenched energy change of the first
-    /// [`MEASURED_SCALE_HOPS`] hops replaces `energy_scale` in the preset's
+    /// `MEASURED_SCALE_HOPS` hops replaces `energy_scale` in the preset's
     /// temperature and bias height; convergence and the return screen keep
     /// the declared scale. A molecule handed over in electronvolts has
     /// conformers a few hundredths of one apart, and at the declared scale
@@ -1452,6 +1452,14 @@ impl Config {
     /// [`Config::for_cluster`] remains the plain Wales-Doye baseline.
     /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
     /// and adaptive height.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::recommended(13);
+    /// assert_eq!(cfg.n_points, 13);
+    /// assert_eq!(cfg.relax_steps, 1000);
+    /// assert!(cfg.energy_lattice);
+    /// ```
     pub fn recommended(n_points: usize) -> Self {
         Self::recommended_with_scales(
             n_points,
@@ -1469,6 +1477,13 @@ impl Config {
     /// units, its steps, neighbour shells, merge radius and container are all
     /// 12% wide of the ones the preset was measured with, and the coordination
     /// count behind surface relocation reaches past the second shell.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::recommended_with_scales(13, 1.0, 2.0);
+    /// assert_eq!((cfg.length_scale, cfg.energy_scale), (1.0, 2.0));
+    /// assert_eq!(cfg.relax_steps, 1000);
+    /// ```
     pub fn recommended_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
         cfg.move_library = MoveLibrary::LeanBurst;
@@ -1530,6 +1545,14 @@ impl Config {
     /// stay off the escape controller. Two-phase relative 0.7 stays on
     /// below 98 (occupancy-measured on 38 and 75; 18/48 Leary when left
     /// on at 98). Grosso replacement is not installed.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::communicating(38);
+    /// assert!(cfg.allocate_moves && cfg.return_screen);
+    /// assert_eq!(cfg.shared_deposits, 0);
+    /// assert!(cfg.orbit_complete_on_new);
+    /// ```
     pub fn communicating(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.allocate_moves = true;
@@ -1572,6 +1595,13 @@ impl Config {
     ///
     /// The LeanBurst flags are named here rather than left to inheritance,
     /// so the occupancy harvests keep the stack they were measured on.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::packing_superbasin(38);
+    /// assert!(cfg.adaptive_height);
+    /// assert_eq!(cfg.height_revisits, 20.0);
+    /// ```
     pub fn packing_superbasin(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.move_library = MoveLibrary::LeanBurst;
@@ -1633,6 +1663,13 @@ impl Config {
     /// step counts so a caller who changed those counts keeps the
     /// cost-asymmetric threshold. Hit rates for the budget window are
     /// not claimed until a campaign records them.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::derived(38);
+    /// assert!(cfg.budget_window && cfg.bayes_screen);
+    /// assert_eq!(cfg.relax_steps, 1000);
+    /// ```
     pub fn derived(n_points: usize) -> Self {
         let mut cfg = Self::recommended(n_points);
         cfg.budget_window = true;
@@ -1649,6 +1686,13 @@ impl Config {
     /// and relax steps, `7/15` when those are 25 and 200. The old
     /// hand-set pair, screen off and threshold `0.05`, is not a second
     /// default.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::for_cluster(13);
+    /// assert_eq!(cfg.n_points, 13);
+    /// assert!(cfg.bayes_screen);
+    /// ```
     pub fn for_cluster(n_points: usize) -> Self {
         let mut cfg = Self::screened_with_scales(
             n_points,
@@ -1675,6 +1719,13 @@ impl Config {
     ///
     /// Opt-in only: no other preset builds on this one, and
     /// [`Config::for_cluster`] itself completes no orbits.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::for_cluster_dual_core(13);
+    /// assert!(cfg.orbit_complete_on_new && cfg.restart_on_stall);
+    /// assert_eq!(cfg.restart_patience, 4_000);
+    /// ```
     pub fn for_cluster_dual_core(n_points: usize) -> Self {
         Self::for_cluster(n_points).with_dual_orbit_core()
     }
@@ -1704,6 +1755,13 @@ impl Config {
     }
 
     /// Lennard-Jones preset expressed against declared physical scales.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::with_scales(13, 1.5, 0.5);
+    /// assert_eq!(cfg.n_points, 13);
+    /// assert_eq!((cfg.length_scale, cfg.energy_scale), (1.5, 0.5));
+    /// ```
     pub fn with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         assert!(
             length_scale.is_finite() && length_scale > 0.0,
@@ -1904,6 +1962,13 @@ impl Config {
     /// move library is Wales--Hodges translation and rotation, each with
     /// its own step, not the atomic Cartesian kernels.
     /// A third arm reverses a directed hydrogen-bond cycle.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::for_tip4p(6);
+    /// assert_eq!(cfg.n_points, 6);
+    /// assert_eq!(cfg.temperature, 2.0);
+    /// ```
     pub fn for_tip4p(n_molecules: usize) -> Self {
         assert!(
             n_molecules >= 2,
@@ -1993,7 +2058,7 @@ impl Config {
     /// cleared. Temperature, allocation, the return screen, depth reward,
     /// and tabu stay on the preset. The container grows to fit the
     /// body-frame site reach. The orientation cap is
-    /// [`super::moves::RIGID_ORIENTATION_CAP`].
+    /// `RIGID_ORIENTATION_CAP`.
     pub fn with_rigid_bodies(mut self, geometry: crate::rigid_body::RigidBodyGeometry) -> Self {
         assert!(
             self.n_points >= 2,
@@ -2036,6 +2101,13 @@ impl Config {
     /// Thompson allocation, the return screen and Recognition carry over.
     /// Orbit completion, symmetrisation and the two-phase surface act on
     /// atom positions, not on centre-and-rotation states, so they stay off.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::communicating_tip4p(6);
+    /// assert!(cfg.return_screen);
+    /// assert_eq!(cfg.shared_deposits, 0);
+    /// ```
     pub fn communicating_tip4p(n_molecules: usize) -> Self {
         let mut cfg = Self::for_tip4p(n_molecules);
         cfg.allocate_moves = true;
@@ -2050,6 +2122,13 @@ impl Config {
     /// Thompson allocation with depth reward, the return screen and tabu
     /// on stall carry over; the atom-position moves stay off, as in
     /// [`Config::communicating_tip4p`].
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::recommended_tip4p(6);
+    /// assert!(cfg.allocate_moves);
+    /// assert!(!cfg.depth_reward && !cfg.return_screen);
+    /// ```
     pub fn recommended_tip4p(n_molecules: usize) -> Self {
         let mut cfg = Self::for_tip4p(n_molecules);
         // Depth reward, stall tabu and the return screen are the atomic
@@ -2065,6 +2144,13 @@ impl Config {
     }
 
     /// Species-aware molecular preset with rigid groups.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// let cfg = Config::for_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+    /// assert_eq!(cfg.n_points, 3);
+    /// assert!(!cfg.ring_moves);
+    /// ```
     pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
         assert!(!species.is_empty(), "species must not be empty");
         let length_scale = MolecularPreset::COVALENT_DIAMETER
@@ -2100,6 +2186,14 @@ impl Config {
     /// `2p − μ` within each observed atomic number. No CNA, no fcc
     /// prototype. A slab sets `active_region`; frozen atoms stay as
     /// SOAP neighbours and do not move.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// use anneal_core::methods::tric_opt::LocalStep;
+    /// let cfg = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+    /// assert!(cfg.ring_moves && cfg.hold_stereocentres && cfg.measured_energy_scale);
+    /// assert_eq!(cfg.local_step, LocalStep::Auto);
+    /// ```
     pub fn recommended_molecular(
         species: Vec<u32>,
         groups: Vec<Vec<usize>>,
@@ -2152,7 +2246,7 @@ impl Config {
     ///
     /// A declared start whose own bonds are longer than
     /// [`Config::bond_tolerance`] widens the tolerance to hold them (see
-    /// [`start_bond_tolerance`]); otherwise the bond screen would refuse the
+    /// `start_bond_tolerance`); otherwise the bond screen would refuse the
     /// caller's geometry before its first call. `None` when the tolerance
     /// stands and no two declared groups share a fragment, so a molecular
     /// cluster keeps its configuration unchanged.

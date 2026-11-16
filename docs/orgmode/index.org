@@ -56,6 +56,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 - [[file:quickstart.org][Quickstart]] shows the smallest Python workflow.
 - [[file:howto/choose-driver.org][Choose a driver]] maps geometry and gradient to =cluster_search= or =ensemble_optimize=.
 - [[file:reference/presets-and-advanced.org][Presets and advanced drivers]] gives the parameter surface.
+- [[file:reference/features.org][Cargo features]] lists every feature flag with the command that compiles it.
 - The generated Rust API starts at [[file:reference/rust-api.org][Rust API Reference]] and follows the =anneal-core= crate modules.
 - [[file:used_by.org][Used by]] links the reproducibility harness that regenerates the CUTEst tables and figures.
 
@@ -128,6 +129,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    reference/rust-api
    reference/glossary
    reference/presets-and-advanced
+   reference/features
    reference/rigid-water-moves
    bindings
    device

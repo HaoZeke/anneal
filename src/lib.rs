@@ -146,7 +146,7 @@ pub mod graphkey;
 pub mod hessian_fit;
 /// Per-epoch run history returned by `run_rs`.
 pub mod history;
-/// nng REQ/REP for [`MinimumHistory`] observe / mark_accepted.
+/// nng REQ/REP for [`crate::methods::minima_hopping::MinimumHistory`] observe / mark_accepted.
 #[cfg(feature = "history-nng")]
 pub mod history_nng;
 /// Hamiltonian Monte Carlo inside SA (Method B Phase 1).

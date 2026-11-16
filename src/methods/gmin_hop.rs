@@ -15,7 +15,7 @@
 //! many hops to anneal the surface. Doye, Wales and Berry (1995) and Doye and
 //! Wales (1997) locate these minima with moves that take a poorly bonded
 //! surface atom and put it in a surface vacancy, which is what
-//! [`Moves::Atomic`] proposes alongside the uniform kick. The third atomic
+//! [`crate::methods::gmin_hop::Moves::Atomic`] proposes alongside the uniform kick. The third atomic
 //! move is the cut-and-splice crossover of Deaven and Ho (1995) between the
 //! live structure and a member of a small pool of low distinct minima, which
 //! recombines well-formed halves the chain found at different times.
@@ -32,14 +32,14 @@
 //! farthest projection of any other centre onto that ray. The surface
 //! operator of Takeuchi (2008) inspired it, but that operator is a different
 //! move: it takes the highest-energy molecule to the most stable surface
-//! position. [`Moves::Water`] proposes all four, plus a molecular
+//! position. [`crate::methods::gmin_hop::Moves::Water`] proposes all four, plus a molecular
 //! cut-and-splice that keeps each molecule whole.
 //!
 //! On Morse 55 at `rho = 14` this chain does worse than
 //! `cluster_hopping::Config::recommended(55)`: 0 of 32 hits against 2 of 32
 //! on the registered seeds 9200 to 9231. It is not a Morse default.
 //!
-//! Every value-and-gradient call is charged to the [`Ledger`], and the run
+//! Every value-and-gradient call is charged to the [`crate::methods::cluster_hopping::Ledger`], and the run
 //! ends when the ledger refuses a charge.
 
 use crate::methods::cluster_hopping::{Ledger, Outcome};

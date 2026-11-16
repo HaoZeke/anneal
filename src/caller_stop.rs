@@ -1,6 +1,6 @@
 //! Caller-owned stop flag for the thread that runs a search.
 //!
-//! A harness stops evaluation by raising an [`AtomicBool`]. Binding that
+//! A harness stops evaluation by raising an [`std::sync::atomic::AtomicBool`]. Binding that
 //! flag here makes every driver on this thread see it. A [`crate::methods::cluster_hopping::Ledger`]
 //! also carries the flag, because a worker thread does not inherit
 //! thread-local state.

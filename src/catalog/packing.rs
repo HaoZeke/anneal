@@ -867,7 +867,7 @@ pub const PACKING_REFERENCE_MERGE: f64 = 1e-9;
 /// minimisation level. The catalog already holds what the others are
 /// standing on, and its size does grow with the ensemble, so an arm takes
 /// several entries at once and the repulsion scales with chain count.
-/// Twelve fills the [`PACKING_REFERENCE_CAP`] within a handful of Leaves
+/// Twelve fills the `PACKING_REFERENCE_CAP` within a handful of Leaves
 /// while staying well under the round trips a checkpoint can afford.
 pub const PACKING_REFERENCE_DRAWS: usize = 12;
 
@@ -894,7 +894,7 @@ thread_local! {
     static PACKING_REFERENCES: RefCell<Vec<PackingReference>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Publish the packings on file. Keeps the newest [`PACKING_REFERENCE_CAP`].
+/// Publish the packings on file. Keeps the newest `PACKING_REFERENCE_CAP`.
 ///
 /// Arrival counts start at one: a well on file has been arrived on once
 /// by construction, and a zero count would read as an impossible packing

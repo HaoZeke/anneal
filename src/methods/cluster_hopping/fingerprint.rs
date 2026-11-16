@@ -21,7 +21,7 @@ pub fn taboo_soap() -> SoapSpec {
     }
 }
 
-/// Mean per-atom SOAP, the spectrum [`super::general`] stores.
+/// Mean per-atom SOAP, the spectrum `super::general` stores.
 pub fn mean_soap(coords: ArrayView1<f64>, species: Option<&[u32]>) -> Option<Vec<f64>> {
     let local = local_rows(coords, species)?;
     let n = local.len();

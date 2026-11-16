@@ -16,19 +16,19 @@
 //! and the mean stays in it because it is a convex combination of in-box
 //! points.
 //!
-//! An elitist run ([`CmaEs::with_elite`]) carries the best point it knows into
+//! An elitist run ([`crate::methods::cma_es::CmaEs::with_elite`]) carries the best point it knows into
 //! every generation as one pre-evaluated candidate, entered the same way as a
 //! repaired one, so the elite costs no evaluation and is never lost.
 //!
 //! The eigendecomposition is refreshed lazily, once per
 //! `lambda / ((c1 + c_mu) n 10)` evaluations, through the crate's Jacobi
-//! solver. A separable run ([`CmaEs::separable`], sep-CMA-ES of Ros and
+//! solver. A separable run ([`crate::methods::cma_es::CmaEs::separable`], sep-CMA-ES of Ros and
 //! Hansen 2008) keeps only the diagonal of the covariance, with learning
 //! rates raised by `(n + 2) / 3`: linear time and memory per candidate, for
 //! dimensions or budgets at which the full matrix cannot be learned (see
-//! [`covariance_learning_evaluations`]).
+//! [`crate::methods::cma_es::covariance_learning_evaluations`]).
 //!
-//! Restarts are planned by [`Bipop`]: large-population runs double
+//! Restarts are planned by [`crate::methods::cma_es::Bipop`]: large-population runs double
 //! lambda (IPOP) and small-population runs draw a reduced population and a
 //! step size up to two decades smaller, each regime taking its turn when it
 //! has spent less of the budget (Hansen 2009, BIPOP-CMA-ES).

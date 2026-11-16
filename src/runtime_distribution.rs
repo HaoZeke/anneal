@@ -17,8 +17,8 @@
 //! - Whether running replicas in parallel buys time proportionally.
 //!   For a time-to-target that is exponential the answer is yes; for a
 //!   shifted exponential the offset is dead weight every replica pays
-//!   and the speedup has a ceiling, which is [`parallel_speedup`] and
-//!   its limit [`speedup_ceiling`].
+//!   and the speedup has a ceiling, which is [`crate::runtime_distribution::parallel_speedup`] and
+//!   its limit [`crate::runtime_distribution::speedup_ceiling`].
 //! - Whether restarting beats continuing, which is a question about the
 //!   tail and not about the mean.
 //!

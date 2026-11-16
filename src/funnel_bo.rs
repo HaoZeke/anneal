@@ -635,7 +635,7 @@ impl FunnelModel {
 
     /// Wang and Jegelka MES for a minimizer, given samples of the min value.
     ///
-    /// \(I(E^\star; y) = H[y] - \mathbb{E}_{E^\star}[H[y \mid E^\star]]\).
+    /// \(I(E^\star; y) = H\[y\] - \mathbb{E}_{E^\star}[H\[y \mid E^\star\]]\).
     /// Jones EI is kept for retire ([`Self::max_expected_improvement_at_data`]).
     /// Occupancy Leave ranks holes with this, not with EI. Independent
     /// marginal draws, not the GIBBON determinant bound.
@@ -1200,7 +1200,7 @@ fn unit_normal(state: &mut u64) -> f64 {
     (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
 }
 
-/// Standard normal density, shared with [`crate::gpr`] so both acquisition
+/// Standard normal density, shared with `crate::gpr` so both acquisition
 /// surfaces use one implementation.
 pub(crate) fn normal_pdf(z: f64) -> f64 {
     (-0.5 * z * z).exp() / (std::f64::consts::TAU).sqrt()

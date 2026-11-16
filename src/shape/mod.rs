@@ -276,11 +276,11 @@ impl crate::bias::Fingerprint for CanonicalOrder {
     /// same question:
     ///
     /// - A relabelling of the *reference itself*, in
-    ///   [`tests::a_canonical_order_absorbs_relabelling`]. The easy case: the
+    ///   `tests::a_canonical_order_absorbs_relabelling`. The easy case: the
     ///   structure being matched is the one the order is defined against.
     /// - A relabelling of a structure that *differs from the reference by a
     ///   real distortion*, in
-    ///   [`tests::canonicalising_a_relabelled_copy_of_a_distorted_structure`].
+    ///   `tests::canonicalising_a_relabelled_copy_of_a_distorted_structure`.
     ///   This is what a search actually produces and the only case that bears
     ///   on whether a coordinate-space model can be trusted. A jittered cluster
     ///   and a relabelled copy of it canonicalise to the same coordinates at

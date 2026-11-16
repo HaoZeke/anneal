@@ -1,7 +1,7 @@
 //! nng REQ/REP for [`crate::methods::minima_hopping::MinimumHistory`].
 //!
 //! One server owns the table and the exact witness. Clients implement
-//! [`HistoryHook`]: they send a certified (energy, state, gradient) and
+//! [`crate::methods::minima_hopping::HistoryHook`]: they send a certified (energy, state, gradient) and
 //! get identity plus visit counts back. No coordinates are returned.
 //! This is not the census bus (Pub/Sub of live Cartesian minima), not
 //! catalog VatNetwork, not bank Cap'n, not a Unix-stream pump, and not

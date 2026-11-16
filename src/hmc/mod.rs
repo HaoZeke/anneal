@@ -4,7 +4,7 @@
 //! Omelyan integrators, fixed-length HMC steps, and NUTS-style trajectory
 //! adaptation behind the shared sampler trait.
 //!
-//! [`hop`] is a separate consumer of the same theory and does not share this
+//! [`crate::hmc::hop`] is a separate consumer of the same theory and does not share this
 //! stack. It proposes for the basin-hopping chain rather than stepping a
 //! continuous SA chain, so it charges an evaluation ledger, carries Stan's
 //! full adaptation (dual-averaged step size, windowed metric estimation) per

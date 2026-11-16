@@ -613,7 +613,7 @@ pub const GOOD_TURING_CHECKPOINT_INTERVAL: usize = 1;
 /// quenched energies, so the quench error has to sit below the gap
 /// between basins. At the GFN2 hexamer minimum the softest projected
 /// Hessian eigenvalue is 0.032 eV/A^2 and the next basin is 4.5 meV up,
-/// so the quadratic model asks for |g| below sqrt(0.032 * 0.0045), about
+/// so the quadratic model asks for `|g|` below sqrt(0.032 * 0.0045), about
 /// 1.2e-2 eV/A. The molecular preset's 5e-2 left recorded energies up to
 /// 0.3 eV above their own minima and ranked a higher basin first.
 pub const WATER_RECORD_GRADIENT: f64 = 2.0e-4 * 27.211_386_245_988 / 0.529_177_210_903;

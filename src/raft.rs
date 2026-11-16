@@ -9,8 +9,8 @@
 //! the current-term restriction that closes the stale-commit hazard.
 //!
 //! The node here is pure state and arithmetic: no clock, no socket, no
-//! randomness. The caller supplies logical time to [`RaftNode::tick`]
-//! and delivers messages to [`RaftNode::receive`]; both return the
+//! randomness. The caller supplies logical time to [`crate::raft::RaftNode::tick`]
+//! and delivers messages to [`crate::raft::RaftNode::receive`]; both return the
 //! messages to send, and any transport that carries them faithfully
 //! (an in-memory bus in tests, nng between processes) yields the same
 //! transcripts. Election timeouts stagger deterministically by node

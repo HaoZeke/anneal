@@ -1,11 +1,13 @@
 //! Binary Lennard-Jones and rigid TIP4P on the stock cluster presets.
 //!
-//! [`Config::recommended`] and [`Config::communicating`] stay numerically
+//! [`crate::methods::cluster_hopping::Config::recommended`] and
+//! [`crate::methods::cluster_hopping::Config::communicating`] stay numerically
 //! unchanged. Species labels and a rigid chart are applied afterwards.
 //! A wide diameter ratio escapes by one softened constant-energy (NVE)
 //! step across a barrier and tries one downhill unlike-pair exchange on
 //! a side generator. That escape needs the `rgsaddle` feature. Without
-//! it the search stops and [`StockSearch::nve_unavailable`] is set; the
+//! it the search stops and
+//! [`crate::binary_water::StockSearch::nve_unavailable`] is set; the
 //! library kick is not substituted. A narrow ratio exchanges mismatched
 //! labels. Water takes
 //! an all-body orientation step. A chart with more than ten bodies holds

@@ -4,10 +4,10 @@
 //!   update descriptor-space coverage independently of minimum certificates.
 //! * [`box_values_ensemble_optimize`] is the same replica/coverage path
 //!   without a user gradient: kick, budgeted scalar quasi-Newton refinement,
-//!   optional finite-difference certificate. [`MinimumHistory`] only admits
+//!   optional finite-difference certificate. [`crate::methods::minima_hopping::MinimumHistory`] only admits
 //!   a point when that certificate is flat; coverage does not require one.
 //! * The explicit `*_with_coverage` entry points separate coverage sharing
-//!   from the optional [`HistoryHook`] and certified-minimum ledger.
+//!   from the optional [`crate::methods::minima_hopping::HistoryHook`] and certified-minimum ledger.
 //!   [`ensemble_hop_optimize`] uses the values-only portfolio for one
 //!   replica without a gradient.
 //! * [`ensemble_hop_optimize_with_config`] selects either box engine from

@@ -52,10 +52,10 @@
 //! textbook `(1/T_i - 1/T_j)(E_i - E_j)` only when the bias is also flat. A
 //! bias the two rungs share still moves with the configuration and does not
 //! cancel, which is the step that is easy to get wrong. The collapse is a test
-//! ([`tests::equal_biases_collapse_to_the_canonical_swap`]),
+//! (`tests::equal_biases_collapse_to_the_canonical_swap`),
 //! not a remark, and so is the failure mode: exchanging on raw energies between
 //! rungs whose biases differ leaves a measurably wrong stationary distribution
-//! ([`tests::raw_energy_exchange_between_biased_rungs_is_not_the_product_measure`]).
+//! (`tests::raw_energy_exchange_between_biased_rungs_is_not_the_product_measure`).
 //!
 //! # Why a deterministic sweep moves configurations faster
 //!
@@ -99,7 +99,7 @@
 //!
 //! which fits `N^0.84`, `N^1.83` and `N^2.91`. This is the scaling the tests
 //! measure rather than assert; see
-//! [`tests::round_trip_time_is_linear_for_the_deterministic_sweep_and_quadratic_otherwise`].
+//! `tests::round_trip_time_is_linear_for_the_deterministic_sweep_and_quadratic_otherwise`.
 //!
 //! The same measurement inside the cluster driver, where the rungs share one
 //! budget instead of each having their own, says the scaling is real and says
@@ -178,7 +178,7 @@
 //! rungs and never move chains: a step size adapted at `T_k` belongs to `T_k`
 //! and not to the configuration that happens to be sitting there.
 //!
-//! [`MetropolisWalk`] is the default and is what the shipped move set reduces
+//! [`crate::tempering::MetropolisWalk`] is the default and is what the shipped move set reduces
 //! to. A Hamiltonian chain with its own dual-averaged step size and its own
 //! metric satisfies the same trait with `Chain` being the per-rung adaptation
 //! state. The shape it takes, for a chain object owning a dual-averaged step

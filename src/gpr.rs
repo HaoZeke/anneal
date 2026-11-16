@@ -604,7 +604,7 @@ pub enum Acquisition {
     /// gradient-enhanced Gaussian process regression*, Phys Rev B 103, 174114
     /// (2021), doi:10.1103/PhysRevB.103.174114, use the same value, and cap
     /// training at 100 structures rather than sparsifying, which is the same
-    /// answer [`GpSurrogate::capacity`] gives to the same problem.
+    /// answer `GpSurrogate::capacity` gives to the same problem.
     #[default]
     ConfidenceBound,
     /// Expected improvement over the incumbent.

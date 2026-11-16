@@ -1,19 +1,19 @@
 //! Gradient-enhanced Gaussian process over structures, with a SOAP kernel.
 //!
-//! # Why this and not [`crate::gpr`]
+//! # Why this and not `crate::gpr`
 //!
 //! `gpr_optim` carries a gradient-enhanced process already, and binding it was
 //! the right first move: reusing a maintained implementation beats writing one.
 //! Two measurements taken through that binding say it cannot serve as an
 //! acquisition surface at this cluster size, and both are recorded in
-//! [`crate::gpr`]'s module docs.
+//! `crate::gpr`'s module docs.
 //!
 //! Its kernel compares pair `(i, j)` of one structure with pair `(i, j)` of
 //! another, so it is not invariant to relabelling the points. On 13 points a
 //! relabelling that changes nothing physical moved the posterior mean by 218
 //! standard deviations and raised the reported standard deviation from 1.42e-4
 //! to 9.74e-1. That is fixable, by canonicalising with
-//! [`crate::shape::CanonicalOrder`], at 2.4 ms per structure.
+//! `crate::shape::CanonicalOrder`, at 2.4 ms per structure.
 //!
 //! The cost is not fixable through that C API. At 38 points with 20
 //! observations a prediction takes 3116 ms, of which 3.46 ms is the posterior
@@ -31,7 +31,7 @@
 //!
 //! `k(A, B) = sigma^2 (pA . pB)^zeta` on normalised structure descriptors. With
 //! `aA` the descriptor-space image of a coordinate direction on `A`, that is
-//! `aA = JA u` for `JA` the Jacobian [`crate::morphology::SoapFeatures`]
+//! `aA = JA u` for `JA` the Jacobian `crate::morphology::SoapFeatures`
 //! returns:
 //!
 //! ```text
@@ -57,7 +57,7 @@
 //! by a direction. Conditioning on the derivative along the gradient direction
 //! keeps the two things a search wants, the slope and the direction of steepest
 //! descent, at one extra row per observation instead of 114. The joint matrix
-//! is `2n` square. [`Conditioning::Full`] is kept so the loss is measurable
+//! is `2n` square. [`crate::soap_gp::Conditioning::Full`] is kept so the loss is measurable
 //! rather than asserted.
 //!
 //! # Sources
@@ -195,7 +195,7 @@ impl SoapGp {
     ///
     /// `p` is the normalised descriptor of length `D`; `jacobian` is
     /// `(D, 3N)` row-major; `gradient` is length `3N`. Both come from
-    /// [`crate::morphology::SoapFeatures::describe`].
+    /// `crate::morphology::SoapFeatures::describe`.
     pub fn observe(
         &mut self,
         p: &[f64],
@@ -384,7 +384,7 @@ impl SoapGp {
     /// Lower confidence bound as a score to be maximised, `-(mean - kappa sd)`.
     ///
     /// kappa = 2 is what GOFEE and BEACON both use; see
-    /// [`crate::gpr::Acquisition`] for the sweep behind it.
+    /// `crate::gpr::Acquisition` for the sweep behind it.
     pub fn lower_confidence_bound(&mut self, p: &[f64], kappa: f64) -> f64 {
         let (mean, sd) = self.predict(p);
         -(mean - kappa * sd)

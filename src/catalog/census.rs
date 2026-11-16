@@ -262,7 +262,7 @@ impl BasinCensus {
         self.target_found_below(PRODUCTION_MAX_UNSEEN_MASS)
     }
 
-    /// [`target_found_with_confidence`] at `ceiling` instead of
+    /// [`Self::target_found_with_confidence`] at `ceiling` instead of
     /// [`PRODUCTION_MAX_UNSEEN_MASS`].
     ///
     /// The predicate is the same hatch-and-Esty pair. Only the ceiling

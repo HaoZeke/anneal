@@ -4,10 +4,10 @@
 //! energy, Cartesian coordinates) on a `Pub0` socket when it changes, with
 //! an unchanged-state refresh every eight eligible checkpoints. One `Sub0`
 //! socket reads direct neighbours selected by the configured topology.
-//! [`CensusBus::new`] binds this replica and dials those neighbours
+//! [`crate::census_bus::CensusBus::new`] binds this replica and dials those neighbours
 //! immediately; a peer that is not listening yet is retried in the
-//! background. Several replicas in one process must [`CensusBus::bind`]
-//! every publisher before any [`CensusBus::dial`]. A dial that finishes
+//! background. Several replicas in one process must [`crate::census_bus::CensusBus::bind`]
+//! every publisher before any [`crate::census_bus::CensusBus::dial`]. A dial that finishes
 //! its TCP handshake against a placeholder still holding the port waits
 //! for a protocol header that never arrives. That wait is ten seconds.
 //! macOS does not reset the unaccepted connection when the placeholder

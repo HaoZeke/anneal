@@ -73,7 +73,7 @@
 //!
 //! It does cost. `G` has `N^2` entries and each is a sum over `N^2` terms,
 //! `G_ab = sum_jk (A_aj A_bj) A_jk^2 (A_ak A_bk)`, with no factorisation, so
-//! [`mode_gram`] is order `N^4`, measured at 50 times the cost from 38 points
+//! [`crate::tensor_id::mode_gram`] is order `N^4`, measured at 50 times the cost from 38 points
 //! to 98 against the 44 the exponent predicts: 257 us and 12.8 ms, against the
 //! 91 us and 1.05 ms of the whole descriptor. It stays as a reference the
 //! tests check the cheap path against.
@@ -82,7 +82,7 @@
 //! marginal `M_ij = sum_k T_ijk = A_ij (A A)_ij` is one matrix product, order
 //! `N^3`, it is exactly permutation equivariant, `M -> P M P^T`, so `spec(M)`
 //! is exactly invariant, and it still carries the triangle content:
-//! `tr M = tr A^2` while `sum_ij M_ij = tr A^3`. That is [`triplet_matrix`],
+//! `tr M = tr A^2` while `sum_ij M_ij = tr A^3`. That is [`crate::tensor_id::triplet_matrix`],
 //! and it is what the descriptor uses.
 //!
 //! # The descriptor is a superset, not a replacement
@@ -90,7 +90,7 @@
 //! `spec(A)` does not determine the distance multiset and the distance
 //! multiset does not determine `spec(A)`: the two invariants are incomparable,
 //! so dropping one for the other trades unknown failures for unknown failures.
-//! [`TripletSpectrum`] therefore emits the sorted distances unchanged followed
+//! [`crate::tensor_id::TripletSpectrum`] therefore emits the sorted distances unchanged followed
 //! by the two spectra. Writing `d_new^2 = d_old^2 + w^2 d_spec^2`, any two
 //! structures the new descriptor merges at radius `R` the old one also merged
 //! at `R`, so at a fixed radius the new descriptor can only split what the old

@@ -88,9 +88,9 @@ const MERGE_BOND_FRACTION: f64 = 0.3;
 /// first and second shells. A hollow site is above a triangle of mutually
 /// bonded atoms, on the side away from the centroid, at the mean bond length
 /// from all three. It is vacant when no atom is within
-/// [`VACANT_BOND_FRACTION`] bond lengths or `min_separation`, the moving atom
+/// `VACANT_BOND_FRACTION` bond lengths or `min_separation`, the moving atom
 /// included, so a hop is at least that far. Sites closer than
-/// [`MERGE_BOND_FRACTION`] bond lengths to an earlier one are merged.
+/// `MERGE_BOND_FRACTION` bond lengths to an earlier one are merged.
 ///
 /// The order is the atoms' order, then the triangles' order, so equal
 /// inputs give equal candidates.

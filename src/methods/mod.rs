@@ -1,4 +1,4 @@
-//! Annealing-method extensions built on top of the trait Sampler<T>
+//! Annealing-method extensions built on top of the trait `Sampler<T>`
 //! algebra: multi-chain MCMC-style SA with Gelman-Rubin termination,
 //! parallel tempering, Bayesian pilot tuning, local polish, and
 //! surrogate-assisted moves.

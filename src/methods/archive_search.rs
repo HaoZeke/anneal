@@ -1,6 +1,6 @@
 //! Residual archive search: explore, then spend what the fingerprints owe.
 //!
-//! This is not [`Config::recommended`]. That preset keeps its measured rates.
+//! This is not [`crate::methods::cluster_hopping::Config::recommended`]. That preset keeps its measured rates.
 //! Large-budget ras records local-topology keys and energy classes on the
 //! explore hop. Leftover evaluations go to residual-field holes (new draws
 //! that can open a class) and to unsaturated keys on non-incumbent floors,

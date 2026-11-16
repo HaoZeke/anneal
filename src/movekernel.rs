@@ -390,7 +390,7 @@ pub fn reflect_into_box(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> Array1<f64>
 /// proposed coordinate back into the supplied box. Unlike clipping (which piles
 /// probability mass on the boundary and breaks proposal symmetry), reflection
 /// keeps the proposal symmetric, so `Reflected<M>` is safe to pair with
-/// [`BoxConstrained`](crate::neigh::BoxConstrained) and satisfies L1/L2 without
+/// [`BoxConstrained`] and satisfies L1/L2 without
 /// a Hastings term whenever the inner kernel `M` is symmetric (`Gaussian`,
 /// `Cauchy`, `TsallisVisit`). When `M` exposes its step `d` through
 /// [`MoveKernel::displacement`], a sum `i + d` that overflows `f64` is mirrored

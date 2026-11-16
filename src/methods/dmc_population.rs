@@ -449,7 +449,7 @@ pub fn population_control_weighted<R: Rng>(
 
 /// Residual population control with **legacy soft-reference** weights
 /// \(w_i=\exp(-\beta(E_i-E_{\mathrm{ref}})_+)\) where \(E_{\mathrm{ref}}\) is
-/// the min/median blend from [`branch_reference`]. Prefer
+/// the min/median blend from `branch_reference`. Prefer
 /// [`population_control_ecit`] for the D8 pure-softmax residual law.
 pub fn population_control<R: Rng>(
     walkers: &[Walker],

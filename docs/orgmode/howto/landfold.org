@@ -28,9 +28,10 @@ cargo run --release --example landfold_lj_book -- 38 2000 38 lj38.min \
 
 #+begin_src sh
 cargo build --release --bin anneal
-target/release/anneal landfold lj38.min --seed 0 --out lj38.csv
-target/release/anneal landfold lj38.min --seed 0 --out lj38.json --dump-descriptors lj38.desc.csv
-target/release/anneal landfold --descriptors lj38.desc.csv --out again.csv
+target/release/anneal landfold --help
+target/release/anneal landfold lj38.min --seed 0 --format csv --quiet --out lj38.csv
+target/release/anneal landfold lj38.min --seed 0 --format json --out lj38.json --dump-descriptors lj38.desc.csv
+target/release/anneal landfold --descriptors lj38.desc.csv --metric l2 --out again.csv
 #+end_src
 
 If you pass more than one book, landfold reads them in order and folds them as one.
@@ -50,21 +51,27 @@ Folding that file with =--descriptors= therefore gives the map of the book bit f
 
 The options below control how landfold folds a book.
 
-| option             | default          | meaning                                       |
-|--------------------+------------------+-----------------------------------------------|
-| =--seed N=         | 0                | first landmark and eigensolve start           |
-| =--landmarks M=    | 400              | farthest-point landmarks                      |
-| =--sigma S=        | auto             | high-dimensional switch scale                 |
-| =--sigma-scale F=  | 0.5              | auto sigma as F times median landmark distance |
-| =--sigma-low S=    | sigma            | map switch scale                              |
-| =--high A,B=       | 2,4              | high-dimensional switch exponents             |
-| =--low a,b=        | 2,4              | map switch exponents                          |
-| =--grid G=         | 21               | grid nodes per axis; 0 skips the grid         |
-| =--iterations K=   | 200              | L-BFGS iterations per stage                   |
-| =--mix M1,...=     | 1,0.5,0.25,0.1,0 | raw-distance weight of each stage             |
-| =--weight-power G= | 0.5              | landmark weight is Voronoi population to G    |
-| =--metric l1/l2=   | l1               | row distance                                  |
-| =--threads T=      | all cores        | worker threads                                |
+| option                  | default          | meaning                                       |
+|-------------------------+------------------+-----------------------------------------------|
+| =-o=, =--out FILE=      | standard output  | write the map here                            |
+| =--format=              | from =--out=     | =csv= or =json=; =csv= when =--out= has none  |
+| =--descriptors=         | off              | read each BOOK as CSV descriptor rows         |
+| =--dump-descriptors FILE= |                | also write the descriptor rows as CSV         |
+| =--seed N=              | 0                | first landmark and eigensolve start           |
+| =--landmarks M=         | 400              | farthest-point landmarks                      |
+| =--sigma S=             | auto             | high-dimensional switch scale                 |
+| =--sigma-scale F=       | 0.5              | auto sigma as F times median landmark distance |
+| =--sigma-low S=         | sigma            | map switch scale                              |
+| =--high A,B=            | 2,4              | high-dimensional switch exponents             |
+| =--low a,b=             | 2,4              | map switch exponents                          |
+| =--grid G=              | 21               | grid nodes per axis; 0 skips the grid         |
+| =--iterations K=        | 200              | L-BFGS iterations per stage                   |
+| =--mix M1,...=          | 1,0.5,0.25,0.1,0 | raw-distance weight of each stage             |
+| =--weight-power G=      | 0.5              | landmark weight is Voronoi population to G    |
+| =--metric=              | l1               | row distance, =l1= or =l2=                    |
+| =--threads T=           | all cores        | worker threads                                |
+| =-q=, =--quiet=         | off              | drop the timing summary on standard error     |
+| =-h=, =--help=          |                  | print the usage text and exit                 |
 
 A summary on standard error gives sigma, the final stress, and the read and fold times.
 It also gives lambda1 and lambda2 of the landmark multidimensional scaling (MDS) start.

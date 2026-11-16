@@ -1,6 +1,6 @@
 //! Thread-replica ensembles of the hop loop with typed communication.
 //!
-//! One seed is one ensemble: `replicas` chains of [`cluster_hopping`] that
+//! One seed is one ensemble: `replicas` chains of [`crate::methods::cluster_hopping`] that
 //! divide one aggregate budget, start from their own random clusters with
 //! their own streams, and talk through exactly the channels the
 //! [`EnsembleConfig`] names. Exact history exchanges identity and visit

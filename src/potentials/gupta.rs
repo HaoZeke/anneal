@@ -163,7 +163,7 @@ impl Gupta {
 
     /// Platinum atoms followed by copper atoms.
     ///
-    /// The species labels are [`PLATINUM_Z`] then [`COPPER_Z`]. A homotop
+    /// The species labels are `PLATINUM_Z` then [`COPPER_Z`]. A homotop
     /// keeps that labelling and exchanges coordinates.
     pub fn platinum_copper(n_platinum: usize, n_copper: usize) -> Self {
         Self::from_slots(

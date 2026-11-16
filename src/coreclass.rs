@@ -2,7 +2,7 @@
 //!
 //! Chains report the coarse five-fold class of their live state
 //! ([`crate::corekey::motif_class`]) together with the energy and charged
-//! work at that checkpoint. The table keeps one [`CoreClassStat`] per
+//! work at that checkpoint. The table keeps one [`crate::coreclass::CoreClassStat`] per
 //! class and one private record per chain. A chain restarts when its own
 //! best inside its class has not improved for `core_patience` charged
 //! calls, or when, once it has spent `core_trial` calls in a fresh class,

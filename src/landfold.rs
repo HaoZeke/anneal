@@ -2,15 +2,15 @@
 
 //! Landfold: a sketch-map embedding of a minima book.
 //!
-//! A minima book is a set of quenched structures. [`book_descriptors`]
+//! A minima book is a set of quenched structures. [`crate::landfold::book_descriptors`]
 //! reads each one as a DECAF class histogram on a shared codebook, and two
-//! minima are compared by the L1 distance of their histograms. [`landfold`]
+//! minima are compared by the L1 distance of their histograms. [`crate::landfold::landfold`]
 //! maps any set of descriptor rows to the plane in four steps, the hybrid
 //! `docs/orgmode/explanation/landfold-survey.org` argues for:
 //!
 //! 1. Landmarks by farthest-point sampling (Gonzalez 1985), the first one
 //!    drawn from the seed. Each landmark is weighted by the number of rows
-//!    in its Voronoi cell raised to [`LandfoldConfig::weight_power`]. One is
+//!    in its Voronoi cell raised to [`crate::landfold::LandfoldConfig::weight_power`]. One is
 //!    the reference `dimlandmark -w`. The default one half keeps sparse
 //!    regions from being outvoted by the dense funnel bottoms.
 //! 2. Classical MDS (Torgerson 1952) of the landmark distances. Block
@@ -23,7 +23,7 @@
 //!    each stage.
 //! 4. Every other row is placed by minimising its own sketch-map stress
 //!    against the fixed landmarks, as the reference `dimproj` does. The
-//!    fitted [`LandfoldMap`] places rows that were never in the book.
+//!    fitted [`crate::landfold::LandfoldMap`] places rows that were never in the book.
 //!
 //! The switch on both sides is
 //! \(s(r)=1-(1+(2^{a/b}-1)(r/\sigma)^a)^{-b/a}\), with the high-dimensional

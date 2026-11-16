@@ -1,0 +1,108 @@
+#+TITLE: Cargo features
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
+
+The library builds with no features. Each flag below is off until named to Cargo. The command is the check that compiles that flag.
+
+* =ira=
+
+Shape matching through the IRA Fortran library. The link path needs =libira=. Set =IRA_LIB_DIR= when it is not on the default path.
+
+#+begin_src sh
+IRA_LIB_DIR=/path/to/ira/lib cargo check --locked --features ira
+#+end_src
+
+* =lammps=
+
+In-process MD segments through the LAMMPS C library. The link path needs =liblammps=. Set =LAMMPS_LIB_DIR= when it is not on the default path.
+
+#+begin_src sh
+LAMMPS_LIB_DIR=/path/to/lammps/lib cargo check --locked --features lammps
+#+end_src
+
+* =graphkey=
+
+Exact basin identity by canonical contact-graph labelling through nauty.
+
+#+begin_src sh
+cargo check --locked --features graphkey
+#+end_src
+
+* =featomic=
+
+featomic SOAP power spectrum. Off by default because the metatensor C core is built from source by cmake.
+
+#+begin_src sh
+cargo check --locked --features featomic
+#+end_src
+
+* =vesin-nl=
+
+Neighbour construction through the vesin cell lists. The build script reads =VESIN_SRC=, a checkout of vesin.
+
+#+begin_src sh
+VESIN_SRC=/path/to/vesin cargo check --locked --features vesin-nl
+#+end_src
+
+* =rgsaddle=
+
+Minimum-saddle-minimum sessions, stationary-index checks, the constant-energy (NVE) minima-hopping escape, and the dense symmetric eigensolve used by a connected spectral split. The feature compiles rgsaddle 0.3.0 from crates.io against rgmin 0.5.0.
+
+#+begin_src sh
+cargo check --locked --features rgsaddle
+#+end_src
+
+* =bank-rpc=
+
+Cap'n Proto shared bank. Chains are separate processes. This flag turns =rgsaddle= on.
+
+#+begin_src sh
+cargo check --locked --features bank-rpc
+#+end_src
+
+* =history-nng=
+
+REQ/REP transport for =MinimumHistory=. Independent of the catalog and census sockets.
+
+#+begin_src sh
+cargo check --locked --features history-nng
+#+end_src
+
+* =gpr=
+
+The gradient-enhanced Gaussian process of gpr_optim, over its C API. The link path needs =libgpr_optim=. Set =GPR_OPTIM_LIB_DIR= when it is not on the default path.
+
+#+begin_src sh
+GPR_OPTIM_LIB_DIR=/path/to/gpr cargo check --locked --features gpr
+#+end_src
+
+* =capi=
+
+C API of the eindir objective bridge.
+
+#+begin_src sh
+cargo check --locked --features capi
+#+end_src
+
+* =python=
+
+PyO3 extension. This flag turns =rgsaddle= on. =maturin develop --features python= is the install used by the README quickstart.
+
+#+begin_src sh
+maturin develop --features python
+#+end_src
+
+* =python-host=
+
+The crate that links this one supplies the =anneal._core= entry point. =crates/anneal-python= does, after it installs the rgpot kernels.
+
+#+begin_src sh
+cargo check --locked --features python-host
+#+end_src
+
+* =rgpot-ex=
+
+Examples that use an in-process rgpot eindir handle. The library does not link rgpot. The molecular-cluster example is the consumer.
+
+#+begin_src sh
+cargo check --locked --features rgpot-ex --example molecular_cluster
+#+end_src

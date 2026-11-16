@@ -39,7 +39,7 @@ pub(super) fn packing_rows(coordinates: &[f64]) -> Arc<Array2<f64>> {
 }
 
 /// Prepare and cache the rows of a structure so a later
-/// [`packing_rows`] on any thread is a lookup. The coordinator's
+/// `packing_rows` on any thread is a lookup. The coordinator's
 /// validation pool calls this for every validated candidate before the
 /// request takes the state lock.
 pub fn prepare_rows(coordinates: &[f64]) {

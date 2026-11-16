@@ -524,7 +524,7 @@ pub enum ClusterMove {
     /// One Boltzmann-weighted exchange of a high-energy atom onto a
     /// vacant hollow of the current geometry. It is not the published
     /// dynamic lattice search. The charged draw is
-    /// [`crate::methods::cluster_hopping::energy_lattice_proposal`].
+    /// `energy_lattice_proposal`.
     EnergyLattice,
     /// Rotate the outer shell against the core.
     ShellRotate(ShellRotate),
@@ -767,7 +767,7 @@ pub enum ClusterMove {
     /// The turn is past the half-radian shake, so the quench does not fall
     /// back into the hydrogen bond that was left. A cluster with no free
     /// neighbour turns the molecule over instead. See
-    /// [`crate::methods::cluster_hopping::cycles::rewire_cartesian`].
+    /// `rewire_cartesian`.
     GroupRewire {
         /// Atom indices of each three-atom water group: `[O, H, H]`.
         groups: Vec<Vec<usize>>,
@@ -841,7 +841,7 @@ pub struct RotatableBond {
 
 /// Rotatable bonds of a covalent structure.
 ///
-/// A bond is rotatable when it is single by [`SINGLE_BOND_FRACTION`], is a
+/// A bond is rotatable when it is single by `SINGLE_BOND_FRACTION`, is a
 /// bridge of the bond graph (not in a ring), and has at least two atoms on
 /// each side. The smaller side is the one that turns, and of two sides of one
 /// size, one that is not a symmetric top. A bond whose turning side is a
@@ -936,7 +936,7 @@ const PLANAR_VOLUME: f64 = 0.2;
 /// The ends are never bonded: an arc turned about its own ring bond is the
 /// whole ring turned rigidly, which only bends the substituents of the ends.
 /// An arc is offered when it meets each end through exactly one bond and
-/// both bonds are single: as long as [`SINGLE_BOND_FRACTION`] of the radius
+/// both bonds are single: as long as `SINGLE_BOND_FRACTION` of the radius
 /// sum, and not between two conjugated atoms. An aromatic ring has no single
 /// bond, and a peptide C–N is no end. The second value counts the
 /// ring torsions those arcs move: the single non-bridge bonds less three per

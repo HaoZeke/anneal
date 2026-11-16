@@ -88,7 +88,7 @@
 //!   which covers the whole range shape estimates are reported in. The lower
 //!   truncation at `-1` is where the likelihood stops being bounded (Smith
 //!   1985) and discards prior mass 2.275e-2;
-//!   [`TailPosterior::p_xi_floor`] reports how much posterior mass ends up
+//!   [`crate::tail::TailPosterior::p_xi_floor`] reports how much posterior mass ends up
 //!   against it, so a fit the truncation is driving is visible as such. The
 //!   upper truncation discards 3.17e-5 and exists only to bound the
 //!   quadrature box.
@@ -112,7 +112,7 @@
 //!
 //! So the endpoint posterior computed at every threshold in a ladder must agree
 //! wherever the approximation has taken hold, and disagree below it. That is
-//! the diagnostic [`ladder`] reports and the rule [`select_threshold`]
+//! the diagnostic [`crate::tail::ladder`] reports and the rule [`crate::tail::select_threshold`]
 //! applies, in place of a percentile picked by convention.
 
 use std::f64::consts::PI;

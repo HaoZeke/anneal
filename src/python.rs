@@ -8,10 +8,10 @@
 //! evaluation cost dominates the per-call GIL overhead (~hundreds of ns),
 //! which is true for any non-toy objective.
 //!
-//! Replica-spawning pyfunctions must [`with_replica_threads`] so this
+//! Replica-spawning pyfunctions must `with_replica_threads` so this
 //! frame is not still holding the GIL when workers attach. Holding it
 //! deadlocks: workers wait for the GIL, this frame waits for
-//! `thread::scope` to join. Box search ([`ensemble_optimize`]) drops
+//! `thread::scope` to join. Box search (`ensemble_optimize`) drops
 //! the GIL around the native hop so a Python objective can be called
 //! back.
 

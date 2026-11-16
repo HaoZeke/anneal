@@ -258,6 +258,8 @@ Temporary Items
 .venv/
 
 # Sphinx build artefacts (regenerated from docs/orgmode/*.org via orgbld)
+docs/orgmode/.changelog-body.org
+docs/orgmode/.changelog-body.rst
 docs/source/*.rst
 docs/source/**/*.rst
 docs/source/crates/

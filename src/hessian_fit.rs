@@ -90,9 +90,9 @@
 //! # Degrading safely
 //!
 //! Below `min_samples` observations the accumulator hands back
-//! [`ModelParams::default`] unchanged, so a cold run is exactly the uncalibrated
+//! [`crate::model_hessian::ModelParams::default`] unchanged, so a cold run is exactly the uncalibrated
 //! behaviour and no caller needs a branch. A fit that does not beat the defaults
-//! by [`ADOPT_MARGIN`] on the samples it was given is discarded rather than
+//! by [`crate::hessian_fit::ADOPT_MARGIN`] on the samples it was given is discarded rather than
 //! adopted, which matters because the objective on real descents is nearly
 //! flat and a search will always return something nominally better.
 

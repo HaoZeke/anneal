@@ -1665,7 +1665,7 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// A quenched LJ75 Mackay competitor has best-axis length 1.24 (core
 /// versus an incomplete shell). A cuboctahedron about an icosahedral
 /// axis sits above this. The hop fires when at least
-/// [`FIVEFOLD_MIN_AXES`] axes clear the cut, so a single D5h axis
+/// `FIVEFOLD_MIN_AXES` axes clear the cut, so a single D5h axis
 /// does not keep the arm live.
 const FIVEFOLD_AXIS: f64 = 1.40;
 
@@ -1706,7 +1706,7 @@ pub fn fivefold_length(x: ArrayView1<f64>) -> f64 {
     fivefold_residual(x).0
 }
 
-/// Number of candidate axes whose fivefold length is below [`FIVEFOLD_AXIS`].
+/// Number of candidate axes whose fivefold length is below `FIVEFOLD_AXIS`.
 pub fn fivefold_axis_count(x: ArrayView1<f64>) -> usize {
     fivefold_axis_table(x)
         .into_iter()
@@ -2378,11 +2378,11 @@ fn pentagon_break(x: ArrayView1<f64>, axis: [f64; 3]) -> Array1<f64> {
 pub struct FivefoldProbe {
     /// SOFI/greedy C5 length of `x` on the best axis.
     pub d5: f64,
-    /// How many candidate axes sit below [`FIVEFOLD_AXIS`].
+    /// How many candidate axes sit below `FIVEFOLD_AXIS`.
     pub n_axes: usize,
     /// RMS of `x − R_5 x` under the best axis.
     pub residual_rms: f64,
-    /// True when fewer than [`FIVEFOLD_MIN_AXES`] axes are fivefold.
+    /// True when fewer than `FIVEFOLD_MIN_AXES` axes are fivefold.
     pub gated: bool,
     /// True when the residual vanished and the step is a pentagon break.
     pub used_pentagon: bool,
@@ -2450,7 +2450,7 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
 /// Measured LJ packing hop: SOFI C5 residual on the best axis.
 ///
 /// Yields only when the best-axis fivefold length already exceeds
-/// [`FIVEFOLD_GATE`]. This is the hop that produced the LJ38 58/72
+/// `FIVEFOLD_GATE`. This is the hop that produced the LJ38 58/72
 /// campaign. The multi-axis gated hop is [`step_away_fivefold`].
 pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
     if candidate_axes(x)

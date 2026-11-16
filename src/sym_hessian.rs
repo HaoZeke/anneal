@@ -891,7 +891,7 @@ pub fn pair_hessian(x: ArrayView1<f64>, n: usize, kind: PairKind) -> Array2<f64>
 /// (M v)_slot = R v_{source[slot]}
 /// ```
 ///
-/// which is the convention [`crate::shape::match_shapes`] already returns, no
+/// which is the convention `crate::shape::match_shapes` already returns, no
 /// transposes and no index shifts: the library reorders its own output to
 /// C-style before returning.
 #[derive(Debug, Clone, PartialEq)]

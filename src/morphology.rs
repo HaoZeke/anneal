@@ -131,7 +131,7 @@
 //! `atomistic-cookbook/examples/metatomic-plumed/metatomic-plumed.py`, class
 //! `CoordinationHistogram`, which was written to drive metadynamics on this
 //! exact cluster problem. Its kernel width and switching-function shape are
-//! carried across unchanged; the cutoff radius is not, and [`CoordinationKde`]
+//! carried across unchanged; the cutoff radius is not, and [`crate::morphology::CoordinationKde`]
 //! says why with numbers.
 //!
 //! # Cost
@@ -150,7 +150,7 @@ use ndarray::{Array1, ArrayView1};
 use crate::bias::Fingerprint;
 
 /// Published Steinhardt values for a site with its full first shell, used as
-/// the correctness bar for [`SteinhardtQ`].
+/// the correctness bar for `SteinhardtQ`.
 ///
 /// Ordered `(Q4, Q6)`. From Steinhardt, Nelson and Ronchetti,
 /// *Bond-orientational order in liquids and glasses*, Phys Rev B 28, 784

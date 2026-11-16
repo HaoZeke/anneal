@@ -15,7 +15,7 @@
 //! worker log opens by saying which channels it runs.
 //!
 //! Loading bridges onto the existing environment-variable transport:
-//! [`CampaignConfig::bootstrap`] reads the file named by
+//! [`crate::campaign::CampaignConfig::bootstrap`] reads the file named by
 //! `CATALOG_CONFIG`, validates it, refuses to run if the environment
 //! already carries conflicting `CATALOG_*` settings, and then exports
 //! the file's values into the environment before any thread spawns.

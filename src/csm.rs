@@ -4,7 +4,7 @@
 //! Section 3.3, and GMIN `SYMMETRYCSM`. The structure is centred and scaled
 //! so its largest radius is 1. For each operation, a class-blocked assignment
 //! matches the operated image to the original, and the proposed geometry is
-//! the mean of those operated, permuted images. [`propose`] takes its
+//! the mean of those operated, permuted images. [`crate::csm::propose`] takes its
 //! orientations from the inertia tensor plus one fixed one-fifth turn, and
 //! draws no random number.
 

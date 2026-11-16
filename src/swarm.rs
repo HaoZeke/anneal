@@ -10,7 +10,7 @@
 //!   a competitive other class may be adopted. Late in the ledger,
 //!   only a deeper member.
 //! * The occupied packing is exhausted for this chain — it is locally
-//!   raised, or this chain has not deepened for [`STALL_LEAVE`] slices:
+//!   raised, or this chain has not deepened for [`crate::swarm::STALL_LEAVE`] slices:
 //!   step into a SOAP hole. Do not redraw the catalog incumbent.
 //!
 //! A chain that just deepened its own quench does not adopt. That is

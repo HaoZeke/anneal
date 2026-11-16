@@ -11,7 +11,7 @@
 //! The relaxation is where the budget goes. A full one costs a few hundred
 //! charged evaluations and most trials land nowhere near the incumbent, so
 //! trials are screened by a short relaxation first and only promoted when they
-//! land within [`Config::screen_margin`] of the incumbent. Measured on LJ38,
+//! land within [`crate::methods::cluster_hopping::Config::screen_margin`] of the incumbent. Measured on LJ38,
 //! screening took basin discovery from 27 to 327 at a fixed charge.
 //!
 //! The bias is keyed on basin identity rather than on a collective variable.
@@ -1782,7 +1782,7 @@ mod call_wall_tests {
 
 /// How far past [`OVERLAP_CALL_LIMIT`] a non-bonded spike is opened.
 ///
-/// Only pairs closer than [`OVERLAP_SPIKE`] move. 1.30 Å past the call limit
+/// Only pairs closer than `OVERLAP_SPIKE` move. 1.30 Å past the call limit
 /// puts such a pair at 2.20 Å, where the force is a contact the line search
 /// can follow. A hydrogen bond already longer than the spike is not moved.
 pub const OVERLAP_CLASH_CLEARANCE: f64 = 1.30;

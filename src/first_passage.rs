@@ -22,7 +22,7 @@
 //! before a few hundred thousand forces except the rare start that lands
 //! beside it, and a memoryless mixture cannot say that one chain of 4e6
 //! beats two of 2e6 (measured 31 against 20 of 48). Each component
-//! therefore carries a shift below which it cannot fire; [`fit_shifted`]
+//! therefore carries a shift below which it cannot fire; [`crate::first_passage::ExponentialMixture::fit_shifted`]
 //! profiles the slow component's shift over a grid and keeps the
 //! likelihood's maximum.
 

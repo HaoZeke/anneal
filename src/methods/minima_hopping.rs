@@ -932,7 +932,7 @@ impl EscapeFeedback {
         self.observe_driver_local_scored(current, reached, true)
     }
 
-    /// As [`Self::observe_driver_local`], but a new basin that is not
+    /// As `observe_driver_local`, but a new basin that is not
     /// `competitive` grows the escape instead of shrinking it.
     ///
     /// A rigid search records a new basin on almost every kick that
@@ -966,7 +966,7 @@ impl EscapeFeedback {
     /// map has not seen it. The global count also drives enhanced feedback.
     ///
     /// This is [`SharedVisitPolicy::Tabu`]. Recognition keeps the catalog
-    /// report off the controller: call [`Self::observe_driver_local`] with
+    /// report off the controller: call `observe_driver_local` with
     /// this chain's own basin ids.
     pub fn observe_shared(
         &mut self,

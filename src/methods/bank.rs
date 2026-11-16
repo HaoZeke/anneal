@@ -22,7 +22,7 @@
 //! `Dcut` starts wide, so distinct-looking solutions are held apart and the
 //! search stays broad, and narrows, so finer distinctions are resolved as the
 //! budget runs down. The schedule is [`crate::diversity`]; the distance is the
-//! caller's, and for clusters it is the shape distance in [`crate::shape`].
+//! caller's, and for clusters it is the shape distance in `crate::shape`.
 //!
 //! # What this is not
 //!

@@ -28,7 +28,7 @@
 //! other way, or holding it at the narrow end, collapses the population early.
 //!
 //! What this module supplies is the schedule. The distance measure is the
-//! caller's, which for clusters is the shape distance in [`crate::shape`].
+//! caller's, which for clusters is the shape distance in `crate::shape`.
 //!
 //! # What this must not be applied to
 //!

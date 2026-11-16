@@ -432,7 +432,7 @@ pub const OCCUPANCY_SEAM_CONDUCTANCE: f64 = 0.1;
 /// Two when both live sides are nonempty, DECAF labels them as
 /// distinct packings, and the cut is a bottleneck: conductance is
 /// zero (disconnected) or strictly below algebraic connectivity.
-/// On the normalised Laplacian \(\lambda_2\in[0,2]\), \(c<\lambda_2\)
+/// On the normalised Laplacian \(\lambda_2\in\[0,2\]\), \(c<\lambda_2\)
 /// implies the Cheeger bound \(c^2<2\lambda_2\)
 /// (`Hop.code_cut_is_cheeger`). A missing \(\lambda_2\) is not a
 /// substitute cut. A superbasin, a one-sided split, or a well-mixed

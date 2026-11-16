@@ -21,7 +21,7 @@
 //! path's own endpoint, to every printed digit. A fully relaxed image slides
 //! into whichever basin owns it and the corridor is never sampled.
 //!
-//! [`transverse_path`] removes the component of the gradient along the path
+//! [`crate::path::transverse_path`] removes the component of the gradient along the path
 //! before descending, so an image falls to the valley floor while staying where
 //! it was placed. That projection is what a nudged elastic band uses and the
 //! reason it is used.

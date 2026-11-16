@@ -1936,7 +1936,7 @@ impl<O: DifferentiableObjective<f64> + ?Sized> DifferentiableObjective<f64> for 
     }
 }
 
-/// [`search_from`] when `BANK_RPC` is unset; [`search_from_bank`] when it is.
+/// [`search_from`] when `BANK_RPC` is unset; `search_from_bank` when it is.
 ///
 /// One binary, two arms. The control is the same walk without the shared
 /// catalog. First-encounter charged evaluations are what says which is
