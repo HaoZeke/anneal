@@ -89,8 +89,9 @@ run again on anneal develop's default preset at 2 M, 4 M and 8 M charged
 evaluations, the same twelve seeds and the same serial arm. The driver is
 `scripts/tip4p_h2h/enter_budget.sh`, the Snakemake rule is
 `tip4p21_budget_h2h`, and the asv class is `Tip4p21BudgetHeadToHead`. GMIN at
-a (budget, seed) pair is deterministic, so the rows the panel above and the
-4 M/8 M runs already stored are reused. Summary rows are `summary-budget21.csv`
+a (budget, seed) pair is deterministic: the 2 M GMIN rows repeat the panel's
+best and median energies, and their median wall is 75.15 s against the
+panel's 76.37 s. Summary rows are `summary-budget21.csv`
 and per-seed rows are `rows-budget21.csv`. `p(U)` is the two-sided
 Mann–Whitney U test on the per-seed best energies; the hit counts are 0/12 on
 both arms at every budget, so the Fisher exact p is 1.000 throughout.
@@ -137,8 +138,8 @@ contacts and 37 hydrogen bonds as the minimum and the same coordination counts
 five- and six-membered, against the minimum's 14/7/10, at 0.99 Å oxygen RMSD.
 That is a different cage, not a missing bond. The other seeds fall in two
 families. 2000, 2001, 2002, 2003, 2006 and 2009 are pentagon-rich with 34 to
-36 contacts. 2004, 2005, 2008, 2010 and 2011 are square-rich but arranged
-differently.
+36 contacts. 2004, 2005 and 2010 are square-rich, and 2008 and 2011 have ten four- and
+ten five-membered rings, all arranged differently from 2007.
 
 A hop costs 105 to 184 calls, nearly all of them in its quench. Of those
 quenches, 61 to 87% fall back into the basin they started from, and only 20 to

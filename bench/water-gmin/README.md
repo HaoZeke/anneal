@@ -58,13 +58,14 @@ two-sided Mann–Whitney U test on calls. Times are medians in seconds;
 | (H₂O)₂₀ | 6/12 | 0/12 | 1_686_249.5 / 556_785 | 2_000_000 / – | 18.8 / 69.2 | 14.7 / 4.09 | 64.6 | 0.014 | 0.0063 |
 | (H₂O)₂₁ | 0/12 | 0/12 | 2_000_000 / – | 2_000_000 / – | 24.8 / 75.4 | 18.9 / 5.88 | 70.5 | 1.000 | 1.000 |
 
-Anneal loses no size. It has at least GMIN's hits everywhere and fewer calls
-everywhere but (H₂O)₂₁, where neither code reaches the minimum in 2 M calls.
+Anneal loses no size. It has at least GMIN's hits everywhere and fewer median
+calls at 8, 12 and 20. At 16 and 21 both all-seed medians are the 2 M budget,
+and at 21 neither code reaches the minimum in 2 M calls.
 There anneal's lowest energy is below GMIN's on all twelve paired seeds,
 median −914.368 against −895.593 kJ/mol. The hit counts separate at 12 and 20
 (p(F) ≤ 0.014); at 8 and 16 they do not at twelve seeds. Over the twelve
 seeds anneal spends 73–77% of its wall inside the potential from 16 up, and
-58–61% at 8 and 12, where runs stop within 0.25 s.
+58–61% at 8 and 12, where the median run stops within 0.25 s.
 
 At (H₂O)₁₆ anneal's ten misses end in a few recurring basins: −676.186 kJ/mol
 on four seeds and −674.006 on three, 5.0 and 7.2 kJ/mol above the header.

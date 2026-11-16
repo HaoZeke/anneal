@@ -23,7 +23,7 @@ Per-seed rows are `rows.csv`.
 
 `scripts/tip4p_h2h/enter_followup.sh` appends three comparisons. The budget, seeds, core, and hostname are the same. The develop arm is `4fdc37e8`. The adaptive GMIN arm is `examples/h2h_gmin_tip4p_accrat.data`: `ACCEPTRATIO 0.5`, temperature held at 2 kJ/mol, step free to move from 0.40 / 0.51.
 
-A GMIN call is one entry to `POTENTIAL`. The L-BFGS quench asks for the gradient on that entry, so the call is one energy and one gradient, and `NPCALL` advances by one. Anneal's `calls` column equals `charged`, and each charge is one `value_and_gradient`. On a full (H₂O)₁₅ budget the potential time is 5.64 µs per anneal call and 18.3 µs per GMIN call. The adaptive arm has the same 18.3 µs, so the gap is the kernel. `NEWTIP` builds the rotation matrix and its three derivatives for every molecule before the pair loop. The fixed-step and adaptive arms spend about 3.4 s outside the potential; a full-budget anneal miss spends about 6 s outside it.
+A GMIN call is one entry to `POTENTIAL`. The L-BFGS quench asks for the gradient on that entry, so the call is one energy and one gradient, and `NPCALL` advances by one. Anneal's `calls` column equals `charged`, and each charge is one `value_and_gradient`. On a full (H₂O)₁₅ budget the potential time is 5.64 µs per anneal call and 18.4 µs per GMIN call. The adaptive arm takes 18.3 µs, so the gap is the kernel. `NEWTIP` builds the rotation matrix and its three derivatives for every molecule before the pair loop. The fixed-step and adaptive arms spend about 3.4 s outside the potential; a full-budget anneal miss spends about 6 s outside it.
 
 On seed 2000 the adaptive step finished at an acceptance ratio of 0.016 and a step of 1e-5. The best energy did not move after that collapse. The fixed step is the stronger of the two GMIN arms.
 
@@ -46,14 +46,14 @@ The new rows are in `rows.csv`. The medians of those rows are `summary-followup.
 
 The energy archive was keeping proton isomers of the lowest cage, so a stall had no other cage to walk. The cage archive keeps one structure per oxygen framework. After 160 patience windows with no new lowest minimum, the calls that remain are spent on another stored cage. That walk uses its own generator. The main walker is not moved, and a seed that is still descending keeps the same proposals and the same evaluation count.
 
-(H₂O)₁₅ seed 2002, previously −623.022 kJ/mol, now reaches −628.372. Seed 2004 stays at −623.877. The three (H₂O)₂₀ misses stay at −864.746, −859.404 and −863.975. Every previous hit keeps its evaluation count.
+(H₂O)₁₅ seed 2002, previously −623.022 kJ/mol, now reaches −628.372. Seed 2004 moves from −623.336 to −623.877 and still misses. The three (H₂O)₂₀ misses stay at −864.746, −859.404 and −863.975. Every previous hit keeps its evaluation count.
 
 The descriptor of a rigid minimum is reused when the centres and rotations are unchanged. A full-budget (H₂O)₁₅ miss drops from 5.90 s outside the potential to 4.57 s. The three (H₂O)₂₀ misses drop from 9.58, 8.79 and 9.26 s to 6.37, 8.87 and 5.72 s. GMIN's full-budget outside time stays near 3.4 s at 15 molecules and 3.6 s at 20.
 
 | Size | Arm | Hits | Median evals | Median wall (s) | Ratio | Inside (s) | Outside (s) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| (H₂O)₁₅ | anneal-cage | 5/6 | 988081 | 7.679 | 5.236 | 5.279 | 2.400 |
-| (H₂O)₁₅ | GMIN, fixed step | 0/6 | 2000000 | 40.212 | 5.236 | 36.866 | 3.359 |
+| (H₂O)₁₅ | anneal-cage | 5/6 | 988081 | 7.679 | 5.237 | 5.279 | 2.400 |
+| (H₂O)₁₅ | GMIN, fixed step | 0/6 | 2000000 | 40.212 | 5.237 | 36.866 | 3.359 |
 | (H₂O)₂₀ | anneal-cage | 3/6 | 1396032 | 16.656 | 4.101 | 12.364 | 4.291 |
 | (H₂O)₂₀ | GMIN, fixed step | 0/6 | 2000000 | 68.305 | 4.101 | 64.713 | 3.580 |
 
@@ -67,7 +67,7 @@ The new rows are in `rows.csv`. The medians of those rows are `summary-cage.csv`
 
 A stalled rigid chain turns the outer half of the cage about the core by three orientation steps, on a generator of its own, and also walks a stored cage before turning that shell. One molecule moved into a hollow quenches back into the same oxygen cage. The shell turn does not. The main walker is left where it is.
 
-(H₂O)₁₅ is 6/6. Seeds 2002 and 2004, the two one-contact misses, reach −628.372. The three (H₂O)₂₀ misses stay one contact off, at −864.746, −859.404 and −863.975. (H₂O)₂₁ is 0/6 on both arms. Anneal's six bests lie between −915.230 and −907.019. GMIN's lie between −903.037 and −893.409.
+(H₂O)₁₅ is 6/6. Seeds 2002 and 2004, the two one-contact misses, reach −628.371. The three (H₂O)₂₀ misses stay one contact off, at −864.746, −859.404 and −863.975. (H₂O)₂₁ is 0/6 on both arms. Anneal's six bests lie between −915.230 and −907.019. GMIN's lie between −903.037 and −893.409.
 
 A full-budget call on (H₂O)₂₁ costs 9.68 µs inside the potential and 3.55 µs outside it for anneal, and 35.67 µs inside and 1.92 µs outside for GMIN. On (H₂O)₂₀ the three full-budget anneal misses are 8.85 µs inside and about 3.1 µs outside. On (H₂O)₁₅, where every seed hits, a call is 5.33 µs inside.
 
