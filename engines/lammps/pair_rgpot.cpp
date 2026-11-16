@@ -40,9 +40,10 @@
 // a LAMMPS style does with newton_pair off. Every rank tallies the
 // energy and virial of its owned atoms; LAMMPS sums them over ranks.
 //
-// mode auto takes the domain path when the potential allows it and the
-// virial is not the strain difference; mode gather and mode domain force
-// one (domain stops at init when the potential cannot use it).
+// mode auto takes the domain path on more than one rank when the
+// potential allows it and the virial is not the strain difference; mode
+// gather and mode domain force one (domain stops at init when the
+// potential cannot use it).
 //
 // The global virial is -V sigma from the backend's Cauchy stress. When
 // the backend returns no stress (an engine plugin, or a potential whose
@@ -339,7 +340,9 @@ void PairRgpot::init_style() {
   if (mode == Mode::Domain && !refusal.empty()) {
     error->all(FLERR, "pair_style rgpot mode domain: {}", refusal);
   }
-  use_domain = mode == Mode::Domain || (mode == Mode::Auto && refusal.empty());
+  // One rank has nothing to split, and its cluster would only add the
+  // ghost shell to the box.
+  use_domain = mode == Mode::Domain || (mode == Mode::Auto && refusal.empty() && comm->nprocs > 1);
   if (!use_domain && atom->natoms > MAXSMALLINT) {
     error->all(FLERR, "pair_style rgpot: too many atoms");
   }
@@ -350,8 +353,10 @@ void PairRgpot::init_style() {
                      "{:.8g}\n",
                      built.locality.cutoff, built.locality.forceRange());
     } else {
-      utils::logmesg(lmp, "pair_style rgpot: gather on rank 0{}{}\n",
-                     refusal.empty() ? "" : "; ", refusal);
+      const std::string why =
+          !refusal.empty() ? refusal : (mode == Mode::Auto ? "one rank" : "");
+      utils::logmesg(lmp, "pair_style rgpot: gather on rank 0{}{}\n", why.empty() ? "" : "; ",
+                     why);
     }
   }
 }

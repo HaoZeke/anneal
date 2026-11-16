@@ -769,34 +769,47 @@ def test_domain_dynamics_match_gather(tmp_path, system):
     assert dx < 1e-8
 
 
-def mode_log(tmp_path: Path, commands: list[str]) -> str:
+def mode_log(tmp_path: Path, commands: list[str], nprocs: int = 1) -> str:
     log = tmp_path / f"mode{len(list(tmp_path.glob('mode*.log')))}.log"
-    result = run_case(tmp_path, [f"log {log}"] + commands)
+    result = run_case(tmp_path, [f"log {log}"] + commands, nprocs=nprocs)
     text = log.read_text() if log.exists() else ""
     if "error" in result:
         return text + result["error"]
     return text
 
 
+@pytest.mark.skipif(not MPIRUN, reason="needs RGPOT_MPIRUN")
 def test_mode_follows_the_capabilities(tmp_path):
-    """auto takes the domain path for a finite-range potential with a
-    per-atom split and the gather path otherwise, and says which."""
-    lj = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("named") + ["run 0"])
+    """On two ranks auto takes the domain path for a finite-range
+    potential with a per-atom split and the gather path otherwise, and
+    says which."""
+    lj = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("named") + ["run 0"], 2)
     assert "pair_style rgpot: domain decomposition, cutoff 8.5, force range 8.5" in lj
-    u0psi = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("u0psi") + ["run 0"])
+    u0psi = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("u0psi") + ["run 0"], 2)
     assert "domain decomposition, cutoff 8.5, force range 8.5" in u0psi
     sc_pair = [f"plugin load {PLUGIN}", "pair_style rgpot 7.0",
                f"pair_coeff * * {NAMED['SuttonChen'][2]}"]
-    sc = mode_log(tmp_path, fcc(3.92, False) + sc_pair + ["run 0"])
+    sc = mode_log(tmp_path, fcc(3.92, False) + sc_pair + ["run 0"], 2)
     assert "domain decomposition, cutoff 7, force range 14" in sc
-    fd = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("named-fd") + ["run 0"])
+    fd = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("named-fd") + ["run 0"], 2)
     assert "gather on rank 0; virial fd differentiates the whole box" in fd
     emt_pair = [f"plugin load {PLUGIN}", "pair_style rgpot 6.0", "pair_coeff * * EMT Cu Cu"]
-    emt = mode_log(tmp_path, fcc(3.61, False) + emt_pair + ["run 0"])
+    emt = mode_log(tmp_path, fcc(3.61, False) + emt_pair + ["run 0"], 2)
     assert "gather on rank 0; the rgpot potential EMT declares no finite range" in emt
     forced = mode_log(tmp_path, fcc(A_LJ, False) + with_mode(lj_rgpot("named"), "gather")
-                      + ["run 0"])
+                      + ["run 0"], 2)
     assert "pair_style rgpot: gather on rank 0\n" in forced
+
+
+def test_mode_on_one_rank(tmp_path):
+    """One rank gathers unless told otherwise; mode domain refuses a
+    potential that cannot use it."""
+    lj = mode_log(tmp_path, fcc(A_LJ, False) + lj_rgpot("named") + ["run 0"])
+    assert "pair_style rgpot: gather on rank 0; one rank" in lj
+    forced = mode_log(tmp_path, fcc(A_LJ, False) + with_mode(lj_rgpot("named"), "domain")
+                      + ["run 0"])
+    assert "domain decomposition, cutoff 8.5, force range 8.5" in forced
+    emt_pair = [f"plugin load {PLUGIN}", "pair_style rgpot 6.0", "pair_coeff * * EMT Cu Cu"]
     refused = mode_log(tmp_path, fcc(3.61, False) + with_mode(emt_pair, "domain") + ["run 0"])
     assert ("pair_style rgpot mode domain: the rgpot potential EMT declares no finite range"
             in refused)
