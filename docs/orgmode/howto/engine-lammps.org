@@ -144,6 +144,19 @@ More ranks do not make the potential faster; they only spread the rest of the
 LAMMPS work.
 The atom count must fit in a 32-bit int.
 
+Rank 0 hands the potential the atoms in tag order on every step, so a potential
+that keeps its own pair list (=LJ=, =Morse=, =SuttonChen=, =EAMTable= and the
+other potentials on =nlist::Neighbours=) reuses it across steps.
+The list holds the pairs within the cutoff plus the potential's skin, 1 Å for
+=LJ= and =EAMTable= (=skin= in =pair_coeff * * EAMTable ...=), and is kept while
+every atom stays within half the skin of where it was at the last build.
+That move is measured to the nearest periodic image, so the atoms that the
+gather wraps back into the box through a face keep the list.
+A new box, as under =fix npt=, =fix deform=, =change_box= or the strains of
+=virial fd=, or another atom count rebuilds it.
+The list does not change the result: =EAMTable= with its skin gives the bits of
+=skin 0=, which rebuilds whenever an atom moves.
+
 *** Domain
 
 A potential can declare a finite range: its energy is a sum of site energies,
@@ -231,58 +244,75 @@ rank.
 The table is milliseconds per step, the median of 3 repeats, 100 steps for
 Lennard-Jones and 50 for CuNi.
 It was taken on an 8-core Intel Xeon virtual machine (one thread per core,
-AVX-512, 47 GB), with LAMMPS 22 Jul 2025 Update 2 and Open MPI 4.1.6.
+AVX-512, 47 GB), with LAMMPS 22 Jul 2025 Update 2 built by GCC 13 and Open MPI
+4.1.6, from
+
+#+attr_rgpot: syntax times every case; needs an MPI lmp and the plugin
+#+begin_src bash
+python engines/lammps/bench_pair_rgpot.py --lmp lmp --plugin libpair_rgpot.so \
+    --eam CppCore/tests/data/eam_table/CuNi.eam.alloy --repeats 3 --eam-steps 50
+#+end_src
+
 The one-rank =domain= column is =mode domain=; =mode auto= gathers there.
 
 | Scaling | System | Atoms | Ranks | Native | Gather | Domain |
 |---------+--------+-------+-------+--------+--------+--------|
-| strong  | LJ     | 16384 |     1 |   8.56 |  78.51 |   8.36 |
-| strong  | LJ     | 16384 |     2 |   4.24 |  76.75 |   4.23 |
-| strong  | LJ     | 16384 |     4 |   2.18 |  79.98 |   2.17 |
-| strong  | LJ     | 16384 |     8 |   1.11 |  78.12 |   1.15 |
-| strong  | CuNi   | 32000 |     1 |  44.22 | 330.27 |  47.48 |
-| strong  | CuNi   | 32000 |     2 |  23.52 | 328.48 |  25.47 |
-| strong  | CuNi   | 32000 |     4 |  12.48 | 327.67 |  13.56 |
-| strong  | CuNi   | 32000 |     8 |   7.05 | 335.38 |   7.15 |
-| weak    | LJ     |  8192 |     1 |   4.14 |  32.33 |   4.17 |
-| weak    | LJ     | 16384 |     2 |   4.31 |  79.27 |   4.33 |
-| weak    | LJ     | 32768 |     4 |   4.37 | 228.91 |   4.33 |
-| weak    | LJ     | 65536 |     8 |   4.60 | 551.15 |   4.29 |
-| weak    | CuNi   |  8192 |     1 |  12.23 |  94.87 |  13.37 |
-| weak    | CuNi   | 16384 |     2 |  12.39 | 167.09 |  13.22 |
-| weak    | CuNi   | 32768 |     4 |  12.72 | 333.34 |  13.42 |
-| weak    | CuNi   | 65536 |     8 |  12.65 | 672.97 |  14.26 |
+| strong  | LJ     | 16384 |     1 |   8.38 |  15.10 |   8.27 |
+| strong  | LJ     | 16384 |     2 |   4.30 |  15.34 |   4.20 |
+| strong  | LJ     | 16384 |     4 |   2.21 |  15.44 |   2.16 |
+| strong  | LJ     | 16384 |     8 |   1.16 |  15.76 |   1.14 |
+| strong  | CuNi   | 32000 |     1 |  44.47 |  70.10 |  46.84 |
+| strong  | CuNi   | 32000 |     2 |  24.09 |  71.17 |  24.95 |
+| strong  | CuNi   | 32000 |     4 |  12.84 |  72.17 |  13.52 |
+| strong  | CuNi   | 32000 |     8 |   7.14 |  74.70 |   7.06 |
+| weak    | LJ     |  8192 |     1 |   4.24 |   7.66 |   4.16 |
+| weak    | LJ     | 16384 |     2 |   4.33 |  15.53 |   4.52 |
+| weak    | LJ     | 32768 |     4 |   4.65 |  30.80 |   4.54 |
+| weak    | LJ     | 65536 |     8 |   4.56 |  63.17 |   4.64 |
+| weak    | CuNi   |  8192 |     1 |  13.19 |  19.11 |  13.27 |
+| weak    | CuNi   | 16384 |     2 |  13.10 |  40.88 |  13.42 |
+| weak    | CuNi   | 32768 |     4 |  12.82 |  74.91 |  15.00 |
+| weak    | CuNi   | 65536 |     8 |  15.70 | 151.82 |  13.91 |
 
-The three repeats of a case differ by up to 14 % (largest minus smallest, over
-the median), most on 8 ranks, where every core runs a rank.
+The three repeats of a case differ by up to 28 % (largest minus smallest, over
+the median), most on 8 ranks, where every core runs a rank, and up to 15 % on
+the gather path.
 Columns closer than that are within the noise.
 
 The domain path runs on the neighbour list of LAMMPS, as the native styles do,
 and its time follows theirs.
 Lennard-Jones takes the time of =lj/cut= on every rank count, and under weak
-scaling stays near 4.3 ms per step from 8192 to 65536 atoms.
-CuNi takes 1 to 13 % longer than =eam/alloy=, 47.48 against 44.22 ms on one
-rank.
-A perf profile of that case, with the sample shares scaled to the Pair time of
-LAMMPS, puts 1.7 ms of the difference in the density stage, 1.0 ms in the force
-stage and 0.6 ms in mapping the atom types to the elements of the table.
+scaling stays between 4.1 and 4.7 ms per step from 8192 to 65536 atoms.
+CuNi takes up to 17 % longer than =eam/alloy= on four ranks or fewer, 46.84
+against 44.47 ms on one rank.
 The stages check every pair for coincident atoms and for types the table lacks,
 which =eam/alloy= does not.
 The force stage also takes \(F'(\rho)\) of the 26825 ghosts, which =eam/alloy=
 receives from their owners.
+A perf profile of the one-rank run puts 92 % of the samples in the two stages;
+mapping the atom types to the elements of the table takes 0.12 %.
 
 The gather path does not get faster with ranks: rank 0 evaluates the whole box
-while the other ranks wait, so its time depends on the atom count alone.
-Most of it goes to the neighbour list that rgpot builds on rank 0, not to the
-exchange.
-=EAMTable= builds that list on every call; a perf profile of the one-rank CuNi
-run puts 79 % of the samples in the build and 16 % in the EAM sums.
-=LJ= keeps its list while every atom stays within half of a 1 Å skin.
-The atoms of the Lennard-Jones box leave their lattice sites over the first
-hundred steps, as the temperature falls from 300 K to about 100 K, and after
-about 50 steps the list is rebuilt every one to three steps: in 33 of the 112
-calls for 8192 atoms and in 78 for 65536 atoms.
-A larger box rebuilds more often, so its time grows faster than the atom count.
+while the other ranks wait, so its time depends on the atom count alone, and
+under weak scaling it doubles with the atoms.
+The potential keeps its own pair list across steps (see Gather above).
+In the one-rank strong runs, =LJ= built its list in 3 of 112 calls and
+=EAMTable= in 1 of 62.
+A perf profile puts 86 % of the =EAMTable= samples in the EAM sums and 8 % in
+the list build; for =LJ= it is 64 % in the pair sum and 24 % in the builds.
+
+While a wrapped atom still rebuilt the list, and =EAMTable= built a list with no
+skin on every call, the gather path was about five times slower.
+The same machine and command, with =--ranks 1 2 4 --scaling strong=, gave the
+gather path 83.46, 78.53 and 83.68 ms per Lennard-Jones step on 1, 2 and 4 ranks
+before, and 15.22, 15.65 and 15.81 ms after.
+For CuNi they were 338.63, 360.29 and 370.46 ms before, and 70.74, 72.93 and
+78.70 ms after.
+Before, the one-rank =EAMTable= profile had 79.5 % of its samples in the list
+build (72.6 % in its scan, 5.4 % in sorting its rows, 1.6 % in counting its
+candidates) and 16 % in the EAM sums.
+=LJ= rebuilt its list in 40 of 112 calls: the gather wraps every atom into the
+box, and each atom that crossed a face looked as if it had moved a box length.
 
 The CuNi deck sets both masses to 60.
 =eam/alloy= replaces them in =pair_coeff= with the masses in the potential file,
@@ -449,6 +479,14 @@ The numbers below are from one run; the tests assert looser bounds.
   and a 0.5 Å skin, so that LAMMPS rebuilds the lists 9 to 11 times.
   The domain path follows the gather path within 2e-14 Å in the positions.
   Energies agree within 3e-12 eV and forces within 2e-13 eV/Å.
+- 120 NVE steps from 1200 K on the gather path, on one and two ranks, with a
+  =change_box= between runs and 20 steps of =fix deform=, so that atoms wrap
+  through the faces, move past the 1 Å skin of the potential's own list, and the
+  box changes.
+  =EAMTable= with its default skin gives the energy, forces, positions and
+  pressure of =skin 0= to the bit.
+  =LJ= follows the domain path within 4e-14 Å in the positions, 9e-14 eV/Å in
+  the forces and 9e-11 bar in the pressure.
 - The log names the path =mode auto= takes and why, on one rank and on two.
   For =SuttonChen= with a 7 Å cutoff the ghosts reach 9 Å, the cutoff plus the
   skin.
@@ -480,6 +518,8 @@ The numbers below are from one run; the tests assert looser bounds.
 - Per-atom energy and virial only for =LJ=, =Morse=, =SuttonChen= and
   =EAMTable=; see the per-atom section.
 - =units metal= and =boundary p p p= only.
+- On the gather path a new box rebuilds the potential's pair list, so under
+  =fix npt=, =fix box/relax= or =fix deform= it is built on every step.
 - The finite-difference virial is only as smooth as the potential's energy.
   For EMT and =EAMAl= it changed by tens of bar when the strain step was changed
   around \(10^{-5}\), so their pressure carries that uncertainty.
