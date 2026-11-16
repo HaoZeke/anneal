@@ -342,6 +342,10 @@ def run_occat(system: str, seed: int, work: Path) -> dict[str, str]:
     hit = fields["hit"] == "1"
     charged = int(float(fields["energy_evals"]))
     budget = spec["budget"]
+    if int(fields.get("stop", "0")) not in (1, 2):
+        raise RuntimeError(
+            f"occat {system} seed {seed} stopped early\n{line}"
+        )
     wall = float(fields["wall_s"])
     pot = float(fields["pot_s"])
     return {

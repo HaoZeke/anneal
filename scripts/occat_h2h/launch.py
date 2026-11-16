@@ -319,11 +319,14 @@ def run(
         poke_bytes(pid, cave, bytes(image))
         patch_rel(pid, 0x5AEFC0, cave + symbols["energy_lj"], 0xE8, 5)
         patch_rel(pid, 0x5ACA60, cave + symbols["energy_gupta"], 0xE8, 5)
+        # The movsd that followed the Gupta call. Returning here keeps the
+        # caller PC inside Gupta.func1 while the origin runs.
+        patch_rel(pid, 0x5ACA65, cave + symbols["energy_gupta_exit"], 0xE9, 6)
         patch_rel(pid, 0x4A8DD9, cave + symbols["seed_stub"], 0xE8, 5)
         patch_rel(pid, 0x5AE540, cave + symbols["grad_enter_lj"], 0xE9, 8)
         patch_rel(pid, 0x5AE7D6, cave + symbols["grad_exit_lj"], 0xE9, 8)
-        patch_rel(pid, 0x5AABC0, cave + symbols["grad_enter_gupta"], 0xE9, 8)
-        patch_rel(pid, 0x5AB6C6, cave + symbols["grad_exit_gupta"], 0xE9, 8)
+        # Gupta.func2's race-detector frame dies if the epilogue jumps into
+        # the cave. Energy calls stay wrapped. Gradient time is not included.
         started = time.perf_counter()
         _ptrace(PTRACE_DETACH, pid, 0, 0)
         _, status = os.waitpid(pid, 0)

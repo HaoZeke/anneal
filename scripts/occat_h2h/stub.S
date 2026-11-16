@@ -4,6 +4,7 @@
 .globl blob
 .globl energy_lj
 .globl energy_gupta
+.globl energy_gupta_exit
 .globl grad_enter_lj
 .globl grad_exit_lj
 .globl grad_enter_gupta
@@ -81,8 +82,71 @@ blob:
 energy_lj:
     ENERGY_WRAP lj_origin
 
+/* GuptaOrigin must return to the Go text. A return address in this cave
+   makes the race detector abort the collector. The call site still
+   returns to 0x5aca65, and that instruction jumps here afterwards. */
 energy_gupta:
-    ENERGY_WRAP gupta_origin
+    sub $0x28, %rsp
+    mov %rax, (%rsp)
+    mov %rbx, 8(%rsp)
+    mov %rcx, 16(%rsp)
+    mov %rdx, 24(%rsp)
+    movsd %xmm0, 32(%rsp)
+    lfence
+    rdtsc
+    shl $32, %rdx
+    or %rax, %rdx
+    mov %rdx, tsc0(%rip)
+    mov (%rsp), %rax
+    mov 8(%rsp), %rbx
+    mov 16(%rsp), %rcx
+    mov 24(%rsp), %rdx
+    movsd 32(%rsp), %xmm0
+    add $0x28, %rsp
+    jmp *gupta_origin(%rip)
+
+energy_gupta_exit:
+    sub $0x28, %rsp
+    movsd %xmm0, 32(%rsp)
+    lfence
+    rdtsc
+    shl $32, %rdx
+    or %rax, %rdx
+    sub tsc0(%rip), %rdx
+    lea acct_energy(%rip), %r11
+    lock add %rdx, 16(%r11)
+    lock incq (%r11)
+    mov 56(%r11), %rax
+    test %rax, %rax
+    jz 1f
+    cmp %rax, (%r11)
+    jb 1f
+    movl $1, stop(%rip)
+    mov $231, %rax
+    xor %edi, %edi
+    syscall
+1:
+    movsd 32(%rsp), %xmm0
+    movsd best(%rip), %xmm2
+    ucomisd %xmm2, %xmm0
+    jae 2f
+    movsd %xmm0, best(%rip)
+2:
+    movsd limit(%rip), %xmm2
+    ucomisd %xmm2, %xmm0
+    ja 3f
+    jp 3f
+    movl $1, hit(%rip)
+    movl $2, stop(%rip)
+    mov $231, %rax
+    xor %edi, %edi
+    syscall
+3:
+    movsd 32(%rsp), %xmm0
+    add $0x28, %rsp
+    movsd %xmm0, 0x68(%rsp)
+    pushq gupta_back(%rip)
+    ret
 
 .macro GRAD_ENTER disp, slot
     push %rax
@@ -178,6 +242,7 @@ lj_resume:    .quad 0x5ae548
 gupta_resume: .quad 0x5aabc8
 lj_origin:    .quad 0x5af020
 gupta_origin: .quad 0x5acac0
+gupta_back:   .quad 0x5aca6b
 save_rax: .quad 0
 save_rbx: .quad 0
 save_rcx: .quad 0
