@@ -1,0 +1,10 @@
+# scripts/covalent_h2h/pins.sh and h2h_metal run au55 (seeds 2000-2002, clock columns removed)
+# code_revision,setting,pins_sha1,au55_sha1,host
+98dcfb31,preset,a22093e707faa91d683813fa7cc507706c5265e6,b22e212181eff57e9412f780c40e85208b355d07,vm-unpinned
+3c78e32d,preset (plateau_heat off),a22093e707faa91d683813fa7cc507706c5265e6,b22e212181eff57e9412f780c40e85208b355d07,vm-unpinned
+f500f84f,H2H_PLATEAU_HEAT=0,a22093e707faa91d683813fa7cc507706c5265e6,b22e212181eff57e9412f780c40e85208b355d07,vm-unpinned
+f500f84f,preset (plateau_heat on),0d237fddf8eceb695922ea0496d9fefc88f5168e,8a68f89417d76f009ca3a2dbc367639880012529,vm-unpinned
+# f500f84f preset au55 rows:
+# au55,anneal,2000,1000000,true,375514,375514,-191.03085280
+# au55,anneal,2001,1000000,false,1000000,1000000,-191.00270211
+# au55,anneal,2002,1000000,true,229494,229494,-191.03085280

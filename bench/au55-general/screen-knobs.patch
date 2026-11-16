@@ -1,0 +1,225 @@
+diff --git a/examples/h2h_metal.rs b/examples/h2h_metal.rs
+index c26533ad..4a990718 100644
+--- a/examples/h2h_metal.rs
++++ b/examples/h2h_metal.rs
+@@ -317,6 +317,21 @@ fn config(spec: &Spec) -> Config {
+         Ok("0") => cfg.homotop_reorder = false,
+         _ => {}
+     }
++    if let Some(f) = std::env::var("AU_T_FACTOR").ok().and_then(|t| t.parse::<f64>().ok()) {
++        cfg.temperature *= f;
++    }
++    if let Some(p) = std::env::var("AU_PATIENCE").ok().and_then(|t| t.parse::<usize>().ok()) {
++        cfg.restart_patience = p;
++    }
++    if let Some(f) = std::env::var("AU_BIAS").ok().and_then(|t| t.parse::<f64>().ok()) {
++        cfg.bias_height *= f;
++    }
++    if std::env::var("AU_MEASURED").is_ok() {
++        cfg.measured_energy_scale = true;
++    }
++    if std::env::var("AU_NO_CLIMB").is_ok() {
++        cfg.escape_on_stall = false;
++    }
+     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
+         cfg.general_collective = true;
+     }
+diff --git a/src/methods/cluster_hopping.rs b/src/methods/cluster_hopping.rs
+index 278ecc4f..5c57e12e 100644
+--- a/src/methods/cluster_hopping.rs
++++ b/src/methods/cluster_hopping.rs
+@@ -2310,8 +2310,9 @@ fn energy_lattice_proposal<R: Rng + ?Sized>(
+     ledger: &mut Ledger,
+     x: ArrayView1<f64>,
+     rng: &mut R,
++    heat: f64,
+ ) -> Array1<f64> {
+-    let reduced = cfg.temperature / cfg.energy_scale.max(1e-12);
++    let reduced = heat * cfg.temperature / cfg.energy_scale.max(1e-12) * std::env::var("AU_T_DLS").ok().and_then(|t| t.parse::<f64>().ok()).unwrap_or(1.0);
+     let lattice = crate::methods::lattice_search::Lattice::default();
+     let coords = x.to_vec();
+     if let Some(y) = lattice.propose_energy_exchange(&coords, ledger, reduced, rng) {
+@@ -3895,6 +3896,15 @@ where
+     R: Rng + ?Sized,
+     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+ {
++    let au_noesc_cfg;
++    let cfg = if std::env::var("AU_NOESC_LIB").is_ok() {
++        let mut c = cfg.clone();
++        c.escape_on_stall = false;
++        au_noesc_cfg = c;
++        &au_noesc_cfg
++    } else {
++        cfg
++    };
+     let _caller_stop = ledger.bind_stop();
+     // A target on the configuration is the same stop a caller can raise
+     // on the ledger. A ledger target already set is left alone, so an
+@@ -4728,6 +4738,19 @@ where
+             }
+         }
+     }
++    let mut au_elite: Vec<(f64, Array1<f64>)> = Vec::new();
++    let au_elite_k: usize = std::env::var("AU_ELITE").ok().and_then(|t| t.parse().ok()).unwrap_or(0);
++    let au_elite_uniform = std::env::var("AU_ELITE_PICK").is_ok_and(|v| v == "uniform");
++    let au_reheat_cap: f64 = std::env::var("AU_REHEAT").ok().and_then(|t| t.parse().ok()).unwrap_or(0.0);
++    let au_reheat_climb = std::env::var("AU_REHEAT_CLIMB").is_ok();
++    let heat0: f64 = std::env::var("AU_HEAT0").ok().and_then(|t| t.parse().ok()).unwrap_or(1.0);
++    let au_noclimb_lib = std::env::var("AU_NOCLIMB_LIB").is_ok();
++    let au_reheat_keep = std::env::var("AU_REHEAT_KEEP").is_ok();
++    let mut heat = heat0;
++    let au_backoff = std::env::var("AU_CLIMB_BACKOFF").is_ok();
++    let mut climb_mult: usize = 1;
++    let au_retire = std::env::var("AU_CLIMB_RETIRE").is_ok();
++    let (mut climb_pending, mut climb_wins, mut climb_losses) = (false, 0u32, 0u32);
+     let stop = loop {
+         // A finished checkpoint interval is delivered before the budget
+         // exit. The loop otherwise returns here with nothing left to
+@@ -5234,6 +5257,14 @@ where
+         if ledger.best < best_seen - new_lowest {
+             best_seen = ledger.best;
+             charged_at_best = ledger.spent();
++            if !au_reheat_keep {
++                heat = heat0;
++            }
++            climb_mult = 1;
++            if climb_pending {
++                climb_wins += 1;
++                climb_pending = false;
++            }
+             hops_at_lowest = hops;
+             csm_reseed_stamp = hops;
+             cage_edit = false;
+@@ -5785,7 +5816,7 @@ where
+         // patience is thousands of hops and does not fall inside a paper
+         // force budget, so this call plateau is the leave that runs.
+         let call_due = hops > 0
+-            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
++            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1).saturating_mul(climb_mult);
+         let mut directed_leave = false;
+         if cfg.general_collective
+             && !cfg.move_library.is_rigid_body()
+@@ -5848,11 +5879,52 @@ where
+                 });
+             }
+         }
+-        if internal_action.is_none() && cfg.escape_on_stall && call_due {
++        if internal_action.is_none()
++            && cfg.escape_on_stall
++            && call_due
++            && au_reheat_cap > 0.0
++            && !(au_reheat_climb && heat >= au_reheat_cap)
++        {
++            charged_at_best = ledger.spent();
++            heat = (heat * 2.0).min(au_reheat_cap);
++            directed_leave = std::env::var("AU_REHEAT_WITH").is_ok();
++        } else if internal_action.is_none() && cfg.escape_on_stall && call_due && au_elite_k > 0 {
++            charged_at_best = ledger.spent();
++            if let Some(best_state) = ledger.best_state.as_ref() {
++                if !au_elite.iter().any(|(energy, _)| (energy - ledger.best).abs() < 1e-6) {
++                    au_elite.push((ledger.best, best_state.clone()));
++                    au_elite.sort_by(|a, b| a.0.total_cmp(&b.0));
++                    au_elite.truncate(au_elite_k);
++                }
++            }
++            if !au_elite.is_empty() {
++                let pick = if au_elite_uniform { rng.random_range(0..au_elite.len()) } else { 0 };
++                let (energy, state) = au_elite[pick].clone();
++                x = state;
++                e = energy;
++                here = None;
++                soft_cache = None;
++                current_validation_gradient = None;
++            }
++        } else if internal_action.is_none() && cfg.escape_on_stall && call_due {
+             // One response per plateau. Without the reset the clock stays
+             // due and the leave runs on every following hop.
+             charged_at_best = ledger.spent();
+-            directed_leave = true;
++            directed_leave = !au_noclimb_lib;
++            if au_retire {
++                if climb_pending {
++                    climb_losses += 1;
++                    climb_pending = false;
++                }
++                if climb_losses > climb_wins {
++                    directed_leave = false;
++                } else {
++                    climb_pending = true;
++                }
++            }
++            if au_backoff {
++                climb_mult = climb_mult.saturating_mul(2);
++            }
+         }
+         let checkpoint_due = matches!(
+             (checkpoint_interval, next_checkpoint),
+@@ -6804,6 +6876,8 @@ where
+             let cap = 4.0 * cfg.temperature;
+             temperature = spread.clamp(floor, cap);
+         }
++        temperature *= heat;
++        temperature *= std::env::var("AU_T_ACC").ok().and_then(|t| t.parse::<f64>().ok()).unwrap_or(1.0);
+         if cfg.move_library.is_rigid_body() {
+             // The preset temperature stays in its own energy unit. A rigid
+             // water chart is not that unit, so a local factor moves the
+@@ -7375,7 +7449,7 @@ where
+                     let u2: f64 = rng.random::<f64>();
+                     portable_sqrt(-2.0 * portable_ln(u1)) * portable_cos(std::f64::consts::TAU * u2)
+                 };
+-                let c = z * (cfg.temperature / lam.max(0.05)).sqrt() * escape;
++                let c = z * (heat * cfg.temperature / lam.max(0.05)).sqrt() * escape;
+                 for i in 0..t.len() {
+                     t[i] += c * mode[i];
+                 }
+@@ -7400,7 +7474,7 @@ where
+                 }
+                 _ => {
+                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
+-                        energy_lattice_proposal(cfg, ledger, x.view(), rng)
++                        energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
+                     } else {
+                         kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
+                     }
+@@ -7441,7 +7515,7 @@ where
+                     }
+                     _ => {
+                         if matches!(kernels[k], ClusterMove::EnergyLattice) {
+-                            energy_lattice_proposal(cfg, ledger, x.view(), rng)
++                            energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
+                         } else {
+                             kernels[k].propose_scaled(
+                                 x.view(),
+@@ -8059,6 +8133,14 @@ where
+         // record. Gap and energy are not that comparison.
+         let channel_floor_energy = ledger.best;
+         let channel_floor_state = seam.as_ref().and_then(|_| ledger.best_state.clone());
++        if recordable && au_elite_k > 0 && !unquenched
++            && !au_elite.iter().any(|(energy, _)| (energy - e_new).abs() < 1e-6)
++            && (au_elite.len() < au_elite_k || e_new < au_elite[au_elite.len() - 1].0)
++        {
++            au_elite.push((e_new, x_new.clone()));
++            au_elite.sort_by(|a, b| a.0.total_cmp(&b.0));
++            au_elite.truncate(au_elite_k);
++        }
+         if recordable {
+             ledger.record(e_new, x_new.view());
+             if ledger.target_reached() {
+@@ -8411,6 +8493,9 @@ where
+             d < 0.0 || rng.random::<f64>() < portable_exp(-d)
+         };
+         let mut accept = accept;
++        if unquenched && std::env::var("AU_QUENCHED_ONLY").is_ok() {
++            accept = false;
++        }
+         if cfg.move_library.is_rigid_body() && !unquenched {
+             // Metropolis at the preset temperature. The threshold rule
+             // collapses under a run of small accepts and then cannot
+@@ -9726,6 +9811,7 @@ where
+                 }
+             }
+             if hop_room(hops)
++                && std::env::var("AU_NO_ACTIVATE").is_err()
+                 && let Some(g) = grad.as_deref_mut()
+             {
+                 let scale = if cfg.minima_hopping {
