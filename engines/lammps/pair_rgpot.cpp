@@ -71,6 +71,7 @@
 #include "force.h"
 #include "lammpsplugin.h"
 #include "memory.h"
+#include "neighbor.h"
 #include "update.h"
 #include "utils.h"
 #include "version.h"
@@ -79,7 +80,6 @@
 #include "pot_spec.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -496,22 +496,41 @@ void PairRgpot::compute_domain() {
 
   // An orthogonal box at least 3 cutoffs wider than the cluster, so
   // periodic images stay beyond the cutoff and the cutoff under half the
-  // box. Its corners sit on a grid of one cutoff: between reneighbourings
-  // the box usually stays the same and the kernel can keep its own
-  // neighbour list.
-  const double grid = range.cutoff;
+  // box. It spans the subdomain grown by the force range and the skin,
+  // which holds the cluster between reneighbourings, so it changes only
+  // with the LAMMPS box and the kernel can keep its own neighbour list.
+  double sub_lo[3];
+  double sub_hi[3];
+  if (domain->triclinic == 0) {
+    std::copy(domain->sublo, domain->sublo + 3, sub_lo);
+    std::copy(domain->subhi, domain->subhi + 3, sub_hi);
+  } else {
+    for (int corner = 0; corner < 8; ++corner) {
+      double lamda[3];
+      double r[3];
+      for (int d = 0; d < 3; ++d) {
+        lamda[d] = ((corner >> d) & 1) != 0 ? domain->subhi_lamda[d] : domain->sublo_lamda[d];
+      }
+      domain->lamda2x(lamda, r);
+      for (int d = 0; d < 3; ++d) {
+        sub_lo[d] = corner == 0 ? r[d] : std::min(sub_lo[d], r[d]);
+        sub_hi[d] = corner == 0 ? r[d] : std::max(sub_hi[d], r[d]);
+      }
+    }
+  }
+  const double margin = reach + neighbor->skin;
   const double pad = 1.5 * range.cutoff;
   double origin[3];
   double box[9] = {};
   for (int d = 0; d < 3; ++d) {
-    double cmin = lo[d];
-    double cmax = hi[d];
+    double cmin = std::min(lo[d], sub_lo[d] - margin);
+    double cmax = std::max(hi[d], sub_hi[d] + margin);
     for (std::size_t k = nowned; k < n; ++k) {
       cmin = std::min(cmin, x[cluster[k]][d]);
       cmax = std::max(cmax, x[cluster[k]][d]);
     }
-    origin[d] = std::floor(cmin / grid) * grid - pad;
-    box[4 * d] = std::ceil(cmax / grid) * grid + pad - origin[d];
+    origin[d] = cmin - pad;
+    box[4 * d] = cmax + pad - origin[d];
   }
   std::vector<double> xyz(3 * n);
   std::vector<int> z(n);
