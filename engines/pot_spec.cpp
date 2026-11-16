@@ -164,6 +164,15 @@ template <typename P, typename... A> Built own(A &&...args) {
   if constexpr (LocalPotential<P>) {
     out.locality = kernel->locality();
   }
+  if constexpr (StagedPotential<P>) {
+    out.densityStage = [kernel](const HalfList &list, double *densities) {
+      kernel->densityStage(list, densities);
+    };
+    out.forceStage = [kernel](const HalfList &list, const double *densities,
+                              double *forces, StageTally *tally) {
+      kernel->forceStage(list, densities, forces, tally);
+    };
+  }
   out.pot = std::move(pot);
   return out;
 }

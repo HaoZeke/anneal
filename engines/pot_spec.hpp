@@ -10,6 +10,7 @@
 #include "rgpot/Locality.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
+#include "rgpot/Staged.hpp"
 
 #include <functional>
 #include <memory>
@@ -35,6 +36,10 @@ struct Built {
   /// The kernel's locality() (Locality.hpp). Zero cutoff when the kernel
   /// declares no finite range.
   Locality locality;
+  /// The kernel's densityStage and forceStage (Staged.hpp) on a host's
+  /// half list. Empty when the kernel has no staged evaluation.
+  std::function<void(const HalfList &, double *)> densityStage;
+  std::function<void(const HalfList &, const double *, double *, StageTally *)> forceStage;
   std::string error; ///< Reason when pot is null.
 };
 
