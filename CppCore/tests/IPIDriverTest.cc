@@ -481,7 +481,8 @@ TEST_CASE("IPIDriver reports malformed messages", "[ipi_driver]") {
     char junk[kHeader];
     std::memset(junk, 1, sizeof(junk));
     server.send(junk, sizeof(junk));
-    CHECK_THAT(thread.join(), ContainsSubstring("'????????????'"));
+    CHECK_THAT(thread.join(),
+               ContainsSubstring("'" + std::string(kHeader, '?') + "'"));
   }
   SECTION("negative INIT length") {
     auto server = FakeServer::unix_at(temp_socket("init"));

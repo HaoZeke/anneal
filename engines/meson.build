@@ -183,6 +183,7 @@ if has_ipi and python3_engines.found()
                 '-m',
                 'pytest',
                 '-q',
+                '-rs',
                 '-p',
                 'no:cacheprovider',
                 '--rootdir',
