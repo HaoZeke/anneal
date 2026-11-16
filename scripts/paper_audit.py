@@ -628,6 +628,92 @@ def and_list(items: list[str]) -> str:
     return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
 
 
+SC_FAMILIES = ("126", "108", "96")
+
+
+def number(text: str) -> float | None:
+    return float(text) if text else None
+
+
+def sc_order(system: str) -> tuple[int, int]:
+    family, n = system.removeprefix("sc").split("-")
+    return int(n), SC_FAMILIES.index(family)
+
+
+def sc_ahead(anneal: dict[str, str], gmin: dict[str, str], rows: list[dict[str, str]]) -> dict[str, str]:
+    """Which code leads on hits, calls and wall; n.s. is p >= 0.05.
+
+    On calls and wall the lead is the code lower in more seed pairs, the
+    direction of the Mann-Whitney test.
+    """
+    a_rows = pick(rows, system=anneal["system"], arm="anneal", harness_revision=anneal["harness_revision"])
+    g_rows = pick(rows, system=gmin["system"], arm="gmin", harness_revision=gmin["harness_revision"])
+
+    def lead(column: str, p: str) -> str:
+        a = [float(r[column]) for r in a_rows]
+        g = [float(r[column]) for r in g_rows]
+        balance = sum((y < x) - (y > x) for x in a for y in g)
+        if balance == 0:
+            return "tie"
+        who = "GMIN" if balance > 0 else "anneal"
+        return who if float(p) < 0.05 else f"{who}, n.s."
+
+    a_hits, g_hits = int(anneal["hits"]), int(gmin["hits"])
+    hits = "tie" if a_hits == g_hits else ("GMIN" if g_hits > a_hits else "anneal")
+    if hits != "tie" and float(gmin["fisher_p_vs_gmin"]) >= 0.05:
+        hits += ", n.s."
+    return {"Hits": hits, "Calls": lead("evals_to_hit", gmin["mannwhitney_p_evals"]),
+            "Wall": lead("wall_s", gmin["mannwhitney_p_wall"])}
+
+
+def sc_reading(anneal: dict[str, dict[str, str]], reruns: dict[str, dict[str, str]],
+               rows: list[dict[str, str]]) -> list[str]:
+    """The sentences of the sc-n12 README that read the rerun tests."""
+    reruns = {s: r for s, r in reruns.items()
+              if all(r[c] for c in ("fisher_p_vs_gmin", "mannwhitney_p_evals", "mannwhitney_p_wall"))}
+    ahead = {s: sc_ahead(anneal[s], r, rows) for s, r in reruns.items()}
+    level = [s for s, r in reruns.items() if int(r["hits"]) >= int(anneal[s]["hits"])]
+
+    def where(column: str, value: str, among: list[str]) -> list[str]:
+        return [s for s in among if ahead[s][column] == value]
+
+    out = []
+    if ties := where("Hits", "tie", list(reruns)):
+        out.append(f"GMIN ties anneal on hits on {and_list(ties)}.")
+    for who, other in (("GMIN", "anneal"), ("anneal", "GMIN")):
+        sig, ns = where("Hits", who, list(reruns)), where("Hits", f"{who}, n.s.", list(reruns))
+        if sig or ns:
+            parts = ([f"on {and_list(sig)} at Fisher p < 0.05"] if sig else []) + \
+                    ([f"on {and_list(ns)} not significantly" if sig else f"on {and_list(ns)}, not significantly"] if ns else [])
+            out.append(f"{who.capitalize() if who == 'anneal' else who} hits more seeds than {other} {', and '.join(parts)}.")
+    for column, noun in (("Wall", "wall time"), ("Calls", "calls")):
+        if wins := where(column, "GMIN", level):
+            out.append(f"GMIN beats anneal on {noun} on {and_list(wins)}, at Mann-Whitney p < 0.05.")
+        if leads := where(column, "GMIN, n.s.", level):
+            out.append(f"GMIN's lead on {noun} on {and_list(leads)} is not significant.")
+        if losses := where(column, "anneal", level):
+            out.append(f"Anneal beats GMIN on {noun} on {and_list(losses)}, at Mann-Whitney p < 0.05.")
+        if trails := where(column, "anneal, n.s.", level):
+            out.append(f"Anneal's lead on {noun} on {and_list(trails)} is not significant.")
+    cheap = [s for s in reruns if s not in level
+             and float(reruns[s]["wall_median_s"]) < float(anneal[s]["wall_median_s"])
+             and float(reruns[s]["evals_median"]) == float(reruns[s]["budget"])]
+    if cheap:
+        out.append(f"On {and_list(cheap)} GMIN's median wall is lower while it hits fewer seeds, "
+                   "and its median calls are the full budget.")
+    for s, r in reruns.items():
+        if r["hits"] != "0":
+            continue
+        bests = sorted(float(x["best"]) for x in pick(rows, system=s, arm="gmin", harness_revision=r["harness_revision"]))
+        h = r["harness_revision"][:8]
+        if bests and f"{bests[0]:.4f}" == f"{bests[-1]:.4f}":
+            out.append(f"On {s} every {h} GMIN seed ends at {bests[0]:.4f}.")
+        elif bests:
+            out.append(f"On {s} the {h} GMIN seeds end between {bests[0]:.4f} and {bests[-1]:.4f}, "
+                       f"against {float(r['reference']):.4f}.")
+    return out
+
+
 def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str, calls_key: str,
                          continuity: bool, mw_column: str = "mannwhitney_p_evals") -> None:
     """A summary file derived from per-seed rows must match them."""
@@ -678,13 +764,15 @@ def head_to_head(audit: Audit) -> None:
         audit.cell(where, "calls median", row["Calls median"], median([float(r["evals_to_hit"]) for r in group]))
         audit.cell(where, "wall median", row["Wall median (s)"], median([float(r["wall_s"]) for r in group]))
     # A GMIN row whose harness is not that of the anneal row of its system is
-    # a rerun. Every rerun, the rows it replaces and its tests must be shown;
-    # every system without one is named as still on the old file.
-    anneal_harness = {r["system"]: r["harness_revision"] for r in sc_summary if r["arm"] == "anneal"}
+    # a rerun. Every rerun, the rows it replaces and its tests must be shown,
+    # and no system may be left with GMIN rows from the old file only.
+    anneal = {r["system"]: r for r in sc_summary if r["arm"] == "anneal"}
+    anneal_harness = {s: r["harness_revision"] for s, r in anneal.items()}
     reruns: dict[str, dict[str, str]] = {}
     for r in sc_summary:
         if r["arm"] == "gmin" and r["harness_revision"] != anneal_harness[r["system"]]:
             reruns[r["system"]] = r
+    reruns = dict(sorted(reruns.items(), key=lambda item: sc_order(item[0])))
     tested = {}
     for line, row in md_table(audit, path, "System | GMIN harness"):
         where = f"{path}:{line} {row['System']} {row['GMIN harness']}"
@@ -692,10 +780,15 @@ def head_to_head(audit: Audit) -> None:
         tested[row["System"]] = row["GMIN harness"]
         audit.cell(where, "latest GMIN harness", row["GMIN harness"], r["harness_revision"][:8] if r else "not rerun")
         if r:
-            audit.cell(where, "Fisher p", row["Fisher p"], float(r["fisher_p_vs_gmin"]))
-            audit.cell(where, "Mann-Whitney p calls", row["Mann-Whitney p calls"], float(r["mannwhitney_p_evals"]))
-            audit.cell(where, "Mann-Whitney p wall", row["Mann-Whitney p wall"], float(r["mannwhitney_p_wall"]))
-            audit.cell(where, "wall ratio", row["Wall ratio"], float(r["wall_ratio"]))
+            audit.cell(where, "Fisher p", row["Fisher p"], number(r["fisher_p_vs_gmin"]))
+            audit.cell(where, "Mann-Whitney p calls", row["Mann-Whitney p calls"], number(r["mannwhitney_p_evals"]))
+            audit.cell(where, "Mann-Whitney p wall", row["Mann-Whitney p wall"], number(r["mannwhitney_p_wall"]))
+            audit.cell(where, "wall ratio", row["Wall ratio"], number(r["wall_ratio"]))
+            if not all(r[c] for c in ("fisher_p_vs_gmin", "mannwhitney_p_evals", "mannwhitney_p_wall")):
+                continue
+            ahead = sc_ahead(anneal[row["System"]], r, sc_rows)
+            for column in ("Hits", "Calls", "Wall"):
+                audit.cell(where, f"{column} ahead", row[f"{column} ahead"], ahead[column])
     by_harness: dict[str, list[str]] = {}
     for system, r in reruns.items():
         by_harness.setdefault(r["harness_revision"][:8], []).append(system)
@@ -706,22 +799,15 @@ def head_to_head(audit: Audit) -> None:
         audit.cell(path, f"test row {system}", tested.get(system, "missing"), r["harness_revision"][:8])
     for system in tested:
         audit.cell(path, f"test row {system} is a rerun", "rerun" if system in reruns else "not rerun", "rerun")
+    for system in anneal_harness:
+        audit.cell(path, f"{system} GMIN row from the corrected file",
+                   "rerun" if system in reruns else f"old file only ({anneal_harness[system][:8]})", "rerun")
     parts = [f"{and_list(systems)} under harness {h}" for h, systems in by_harness.items()]
-    audit.said(path, f"The GMIN rows rerun with the corrected file are {', and '.join(parts)}.")
-    old = [s for s in anneal_harness if s not in reruns]
-    if old:
-        olds = {anneal_harness[s][:8] for s in old}
-        audit.said(path, f"The GMIN rows of {and_list(old)} are those of {and_list(sorted(olds))}, from the old file, "
-                         "and are not rerun.")
+    audit.said(path, f"The GMIN rows rerun with the corrected file are {'; '.join(parts)}.")
     audit.said("bench/metal-cluster-h2h/sc-8e076b7f/README.md",
                f"`../sc-n12/README.md` has the corrected file and GMIN reruns of {and_list(reruns)}.")
-    for system, r in reruns.items():
-        if r["hits"] == "0":
-            bests = {f"{float(x['best']):.4f}" for x in pick(sc_rows, system=system, arm="gmin",
-                                                            harness_revision=r["harness_revision"])}
-            audit.cell(path, f"{system} rerun ends at one minimum", "1", float(len(bests)))
-            if bests:
-                audit.said(path, f"On {system} every {r['harness_revision'][:8]} GMIN seed ends at {min(bests)}.")
+    for sentence in sc_reading(anneal, reruns, sc_rows):
+        audit.said(path, sentence)
 
     path = "bench/morse-h2h/README.md"
     results = audit.rows("bench/morse-h2h/results.csv")
@@ -815,7 +901,7 @@ def sc96_78_howto(audit: Audit) -> None:
 
 # Numbers of the GMIN rows from the misread data file, as they were cited.
 STALE_GMIN = re.compile(r"\b0/32\b|\b0 of 32\b|\bp\s*[<≤]\s*\$?(?:1e-4|10\^\{?-4\}?|0\.0001)|(?<![\d.])0\.0000\b")
-RETIRED = ("Only 9-6 at N=38 has been rerun", "a rerun of 9-6 at 38 atoms")
+RETIRED = ("Only 9-6 at N=38 has been rerun", "a rerun of 9-6 at 38 atoms", "from the old file, and are not rerun")
 # Sentences that cite the old rows as old rows; each is derived from the rows elsewhere.
 HISTORICAL = {
     (SC96_78_HOWTO, "The earlier GMIN rows, with temperature 0.8, step 0.40 and a container radius of 30, hit 0 of 32 seeds."),

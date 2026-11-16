@@ -20,4 +20,4 @@ Six seeds, 2000–2005. The (system, seed, arm) list is shuffled with schedule s
 snakemake -s workflow/Snakefile sc_h2h
 ```
 
-The GMIN rows here ran from a data file with `RADIUS 30.0`, `TEMPERATURE 0.8` and `STEP 0.40 0.51`, the LJ38 tutorial values and a reseed box far wider than the cluster. They are not rerun. `../sc-n12/README.md` has the corrected file and GMIN reruns of sc126-38, sc108-38 and sc96-38.
+The GMIN rows here ran from a data file with `RADIUS 30.0`, `TEMPERATURE 0.8` and `STEP 0.40 0.51`, the LJ38 tutorial values and a reseed box far wider than the cluster. They are not rerun. `../sc-n12/README.md` has the corrected file and GMIN reruns of sc126-38, sc108-38, sc96-38, sc126-55, sc108-55, sc96-55, sc126-80, sc108-80 and sc96-80.

@@ -128,11 +128,38 @@ def test_a_dropped_sutton_chen_rerun_row_is_reported():
 def test_a_rerun_missing_from_the_sutton_chen_readme_is_reported():
     audit = audit_mod.Audit()
     summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
-    row = dict(next(r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"))
+    row = dict([r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1])
     summary.append({**row, "harness_revision": "0" * 40})
     audit_mod.head_to_head(audit)
     labels = {r[2] for r in audit.drifts() if r[1] == SC_N12}
     assert {"table row sc96-55 gmin 00000000", "test row sc96-55", "prose"} <= labels
+
+
+def test_a_rerun_without_its_tests_is_reported():
+    audit = audit_mod.Audit()
+    summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
+    row = [r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1]
+    row["fisher_p_vs_gmin"] = ""
+    audit_mod.head_to_head(audit)
+    assert ("Fisher p", "1") in [(r[2], r[3]) for r in audit.drifts()]
+
+
+def test_a_gmin_row_left_on_the_old_file_is_reported():
+    audit = audit_mod.Audit()
+    summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
+    old = next(r["harness_revision"] for r in summary if r["system"] == "sc108-80" and r["arm"] == "anneal")
+    summary[:] = [r for r in summary if not (r["system"] == "sc108-80" and r["arm"] == "gmin"
+                                             and r["harness_revision"] != old)]
+    audit_mod.head_to_head(audit)
+    assert "sc108-80 GMIN row from the corrected file" in {r[2] for r in audit.drifts()}
+
+
+def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace("| 0.113 | tie | GMIN, n.s. | GMIN |", "| 0.113 | tie | GMIN, n.s. | anneal |")
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
 
 
 def test_a_drifted_readme_p_value_is_reported():
