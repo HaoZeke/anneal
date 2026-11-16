@@ -1,0 +1,4 @@
+code,hits,n,median_wall_s,median_best,gap_to_reference,median_over_anneal,median_anneal_over
+agox,0,6,5655.108823,-392.980553,4.511777,103.663412,0.009647
+agox-documented,0,6,14493.759020,-372.106043,25.386287,263.511422,0.003795
+anneal,0,6,55.299841,-396.282249,1.210082,1.000000,1.000000
