@@ -2,3 +2,4 @@
 Any other call, and one that throws, drops it and builds a new one.
 Energies and forces keep the bits of a potential built for the call.
 `rgpot::Kept` in `rgpot/KeptPotential.hpp` holds one potential per thread and potential type, keyed by the bits of its parameters.
+With this and the unbounded search and kept pair terms, a Sutton-Chen 12-6 call on a free 55-atom cluster with no cutoff went from 60.901 to 13.690 microseconds on one core (`sc_call_bench`, `docs/orgmode/reference/sutton_chen.org`).

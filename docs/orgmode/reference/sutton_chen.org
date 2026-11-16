@@ -68,6 +68,22 @@ reuses its neighbour update and the room for the pair terms.
 Any other call drops that potential and builds a new one, and so does a call
 that throws.
 
+** Cost of a call
+
+=sc_call_bench= (=meson test --benchmark sc_call_bench=) times the C entry on
+free clusters with no cutoff, one thread pinned to one core, against a plain
+loop over the half pairs that keeps each pair's powers for its force.
+Both give the same bits.
+The medians of five runs, in microseconds per call:
+
+| Atoms | 12-6 entry | 12-6 plain loop | 9-6 entry | 9-6 plain loop |
+|-------+------------+-----------------+-----------+----------------|
+|    13 |      0.749 |           0.580 |     0.848 |          0.634 |
+|    38 |      6.434 |           4.939 |     6.686 |          5.223 |
+|    55 |     13.690 |          10.267 |    13.739 |         10.914 |
+|   147 |     91.082 |          72.088 |    94.165 |         75.244 |
+|   561 |   1302.449 |        1063.068 |  1374.253 |       1122.602 |
+
 * Reduced cluster pairs
 
 =rgpot_lj_gradient= and =rgpot_morse_gradient= return the energy gradient of an
