@@ -64,8 +64,8 @@ with xtb 6.8.0.
 On xtb 6.7.1, five of six gaps lie within \(1\times 10^{-7}\)~Eh, and
 on the 4000-call ledger seed 1 lies \(1.3509\times 10^{-7}\)~Eh lower.
 On xtb 6.8.0 both the 4000-call arm and the old-counter arm lie within
-\(1\times 10^{-7}\)~Eh on 6 of 6 seeds, and seed 1 lies at
-\(-4.34\times 10^{-8}\)~Eh.
+\(1\times 10^{-7}\)~Eh on 6 of 6 seeds, and on the 4000-call ledger
+seed 1 lies at \(-4.35\times 10^{-8}\)~Eh.
 \end{abstract}
 
 \section{Introduction}
@@ -791,7 +791,9 @@ The same eighteen finals, from CREST, the 4000-call arm, and the
 old-counter arm on seeds 0--5, were optimised again and evaluated as
 single points with xtb 6.8.0 at GFN2, the same vtight setting, and
 accuracy \(0.01\).
-The totals moved by about \(1\times 10^{-8}\)~Eh.
+Seventeen of the eighteen totals moved by \(0.9\times 10^{-8}\) to
+\(2.0\times 10^{-8}\)~Eh, and the CREST final of seed 1 by
+\(1.08\times 10^{-7}\)~Eh.
 The vtight energy threshold is \(1\times 10^{-7}\)~Eh.
 A row is kept when the run exits cleanly, the polished energy is
 finite, and the maximum force is at or below \(0.001\)~Eh/bohr.
@@ -847,7 +849,9 @@ On xtb 6.8.0 the gaps hold.
 Both the 4000-call arm and the old-counter arm lie within
 \(1\times 10^{-7}\)~Eh on 6 of 6 seeds.
 Seed 1, outside the line at xtb 6.7.1, lies inside it at
-\(-4.34\times 10^{-8}\)~Eh.
+\(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and
+\(-4.34\times 10^{-8}\)~Eh on the ledger whose cap equals the old
+counter.
 The logs name the processor as Intel Xeon, family 6, model 207.
 Each CREST run used one thread.
 The wall-time medians are \(544.0\)~s for CREST, \(18.8\)~s for the
@@ -957,7 +961,8 @@ At GFN2-xTB the polished hexamer gaps hold on xtb 6.7.1 and on
 xtb 6.8.0.
 On xtb 6.7.1, five of six seeds lie within \(1\times 10^{-7}\)~Eh.
 On xtb 6.8.0 both arms lie within that line on 6 of 6 seeds, and
-seed 1 lies at \(-4.34\times 10^{-8}\)~Eh.
+seed 1 lies at \(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and
+\(-4.34\times 10^{-8}\)~Eh on the old-counter ledger.
 The motif match remains 121 of 192 for the default hop and 97 of 192
 for CREST, at xtb 6.7.1.
 
