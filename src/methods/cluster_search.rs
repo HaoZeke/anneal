@@ -21,9 +21,9 @@ use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::declared_group_lost_a_bond;
 use crate::methods::cluster_hopping::inside_molecular_call_wall;
 use crate::methods::cluster_hopping::min_pair_distance;
-use crate::methods::cluster_hopping::molecular_call_floor;
 use crate::methods::cluster_hopping::separate_contacts;
 use crate::methods::cluster_hopping::structure_is_sane;
+use crate::methods::cluster_hopping::{CallFloor, molecular_call_floor};
 use crate::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, Config, Ledger, MoveLibrary, Outcome, SearchError,
     optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
@@ -432,8 +432,9 @@ enum CallWall<'a> {
     /// No species. LJ, TIP4P and Gupta stay on the path that never
     /// consulted a pair distance before the call.
     Open,
-    /// No species, and the objective declares [`Config::call_floor`].
-    Floor(f64),
+    /// No species, and the objective declares [`Config::call_floor`],
+    /// per pair when [`Config::call_floor_elements`] names the atoms.
+    Floor(CallFloor<'a>),
     /// Labelled atoms with no declared bonds: [`OVERLAP_CALL_LIMIT`].
     ///
     /// A metal's nearest neighbour sits inside its covalent sum (Cu–Cu
@@ -456,7 +457,7 @@ enum CallWall<'a> {
 impl<'a> CallWall<'a> {
     fn of(cfg: &'a Config) -> Self {
         match (cfg.species.as_deref(), &cfg.move_library) {
-            (None, _) => cfg.call_floor.map_or(Self::Open, Self::Floor),
+            (None, _) => CallFloor::of(cfg).map_or(Self::Open, Self::Floor),
             (
                 Some(species),
                 MoveLibrary::Molecular {
@@ -496,6 +497,7 @@ impl<'a> CallWall<'a> {
                 let bonded = *reactive || (owner[i] != usize::MAX && owner[i] == owner[j]);
                 molecular_call_floor(species[i], species[j], bonded)
             }
+            Self::Floor(floor) if floor.elements.is_some() => floor.pair(i, j),
             _ => OVERLAP_CALL_LIMIT,
         }
     }
@@ -527,7 +529,7 @@ impl<'a> CallWall<'a> {
         match self {
             Self::Open => false,
             _ if point.iter().any(|value| !value.is_finite()) => true,
-            Self::Floor(floor) => min_pair_distance(point) <= *floor,
+            Self::Floor(floor) => !floor.clears(point),
             Self::Absolute => min_pair_distance(point) <= OVERLAP_CALL_LIMIT,
             Self::Covalent {
                 species,

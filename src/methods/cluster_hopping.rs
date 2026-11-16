@@ -1555,6 +1555,149 @@ pub fn clears_call_floor(x: ArrayView1<f64>, floor: f64) -> bool {
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x) > floor
 }
 
+/// Distance at or below which a pair of elements `za` and `zb` is not
+/// handed to an objective that refuses every pair at or inside `absolute`.
+///
+/// [`COVALENT_CALL_FRACTION`] of the summed covalent radii, the floor a
+/// declared bond has in [`molecular_call_floor`], below the shortest bond
+/// of any order, and never below `absolute`: Si–Si 1.55 Å, C–C 1.06 Å, and
+/// any pair with hydrogen stays at `absolute`. A trial that stacks two
+/// heavy atoms at `absolute` is a geometry the potential's SCC cannot
+/// converge, and each line-search probe there is a charged call that fails.
+pub fn element_call_floor(za: u32, zb: u32, absolute: f64) -> f64 {
+    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
+    (COVALENT_CALL_FRACTION * sum).max(absolute)
+}
+
+/// The pair distances at or below which the objective is not called.
+///
+/// [`Config::call_floor`] for every pair, raised pair by pair to
+/// [`element_call_floor`] where [`Config::call_floor_elements`] names the
+/// atoms. Without elements it is the single floor, and every test and
+/// opening is the one [`clears_call_floor`] and [`open_call_floor`] make.
+#[derive(Debug, Clone, Copy)]
+pub struct CallFloor<'a> {
+    /// The floor every pair keeps, [`Config::call_floor`].
+    pub absolute: f64,
+    /// Atomic number of each point, [`Config::call_floor_elements`].
+    pub elements: Option<&'a [u32]>,
+}
+
+impl<'a> CallFloor<'a> {
+    /// The floor `cfg` declares, if any.
+    pub fn of(cfg: &'a Config) -> Option<Self> {
+        cfg.call_floor.map(|absolute| Self {
+            absolute,
+            elements: cfg.call_floor_elements.as_deref(),
+        })
+    }
+
+    /// The species-free floor of [`OVERLAP_CALL_LIMIT`].
+    pub fn overlap() -> Self {
+        Self {
+            absolute: OVERLAP_CALL_LIMIT,
+            elements: None,
+        }
+    }
+
+    /// Distance at or below which the pair `(i, j)` is refused.
+    pub fn pair(&self, i: usize, j: usize) -> f64 {
+        match self.elements {
+            Some(z) if z.len() > i.max(j) => element_call_floor(z[i], z[j], self.absolute),
+            _ => self.absolute,
+        }
+    }
+
+    /// Whether every coordinate is finite and every pair lies past its floor.
+    pub fn clears(&self, x: ArrayView1<f64>) -> bool {
+        if self.elements.is_none() {
+            return clears_call_floor(x, self.absolute);
+        }
+        let n = x.len() / 3;
+        x.iter().all(|value| value.is_finite())
+            && (0..n).all(|a| ((a + 1)..n).all(|b| pair_distance(x, a, b) > self.pair(a, b)))
+    }
+
+    /// Opens every pair at or inside its floor to [`CALL_FLOOR_OPENING`]
+    /// times that floor, as [`open_call_floor`] does for a single one.
+    pub fn open(&self, x: &mut Array1<f64>, frozen: Option<&[bool]>) -> bool {
+        if self.elements.is_none() {
+            return open_call_floor(x, self.absolute, CALL_FLOOR_OPENING * self.absolute, frozen);
+        }
+        if !(self.absolute.is_finite() && self.absolute > 0.0)
+            || x.iter().any(|value| !value.is_finite())
+        {
+            return false;
+        }
+        let n = x.len() / 3;
+        for _ in 0..CALL_FLOOR_SWEEPS {
+            let mut moved = false;
+            for a in 0..n {
+                for b in (a + 1)..n {
+                    let floor = self.pair(a, b);
+                    moved |= open_pair(x, a, b, floor, CALL_FLOOR_OPENING * floor, frozen);
+                }
+            }
+            if !moved {
+                break;
+            }
+        }
+        self.clears(x.view())
+    }
+}
+
+fn pair_distance(x: ArrayView1<f64>, a: usize, b: usize) -> f64 {
+    let mut square = 0.0;
+    for axis in 0..3 {
+        let delta = x[3 * b + axis] - x[3 * a + axis];
+        square += delta * delta;
+    }
+    square.sqrt()
+}
+
+/// Opens the pair `(a, b)` to `target` along its own axis when it is at or
+/// inside `floor`. Returns whether it moved.
+fn open_pair(
+    x: &mut Array1<f64>,
+    a: usize,
+    b: usize,
+    floor: f64,
+    target: f64,
+    frozen: Option<&[bool]>,
+) -> bool {
+    let held = |atom: usize| frozen.and_then(|f| f.get(atom).copied()).unwrap_or(false);
+    let mut delta = [0.0; 3];
+    let mut square = 0.0;
+    for axis in 0..3 {
+        delta[axis] = x[3 * b + axis] - x[3 * a + axis];
+        square += delta[axis] * delta[axis];
+    }
+    let distance = square.sqrt();
+    if distance > floor || (held(a) && held(b)) {
+        return false;
+    }
+    let unit = if distance > 1.0e-12 {
+        [
+            delta[0] / distance,
+            delta[1] / distance,
+            delta[2] / distance,
+        ]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    let gap = target - distance;
+    let (step_a, step_b) = match (held(a), held(b)) {
+        (true, _) => (0.0, gap),
+        (_, true) => (gap, 0.0),
+        _ => (0.5 * gap, 0.5 * gap),
+    };
+    for axis in 0..3 {
+        x[3 * a + axis] -= step_a * unit[axis];
+        x[3 * b + axis] += step_b * unit[axis];
+    }
+    true
+}
+
 /// Sweeps [`open_call_floor`] makes before it gives a trial up.
 const CALL_FLOOR_SWEEPS: usize = 32;
 
@@ -1635,23 +1778,34 @@ pub fn open_call_floor(
 
 /// Opens a trial for an objective that refuses pairs at or inside `floor`.
 ///
-/// Declared species keep the group-aware [`separate_contacts`]. A point set
+/// Declared species keep the group-aware [`separate_contacts`], and a pair
+/// it leaves inside its element floor is opened after it. A point set
 /// without them opens only the offending pairs, to [`CALL_FLOOR_OPENING`]
 /// times the floor, because every pair of an atomic cluster may be a bond
 /// and the group repair would stretch it.
-fn open_for_call(cfg: &Config, x: &mut Array1<f64>, floor: f64, frozen: Option<&[bool]>) -> bool {
+fn open_for_call(
+    cfg: &Config,
+    x: &mut Array1<f64>,
+    floor: CallFloor<'_>,
+    frozen: Option<&[bool]>,
+) -> bool {
     if cfg.species.is_some() {
-        separate_contacts(
+        let separated = separate_contacts(
             x,
             cfg.move_library.declared_groups(),
-            floor,
+            floor.absolute,
             OVERLAP_CLASH_CLEARANCE,
             frozen,
             cfg.species.as_deref(),
             cfg.bond_tolerance,
-        )
+        );
+        if floor.elements.is_none() || !separated || floor.clears(x.view()) {
+            separated
+        } else {
+            floor.open(x, frozen)
+        }
     } else {
-        open_call_floor(x, floor, CALL_FLOOR_OPENING * floor, frozen)
+        floor.open(x, frozen)
     }
 }
 
@@ -3986,8 +4140,9 @@ where
     // Every relaxation, not only the hop's own proposal, starts from a
     // geometry the objective will answer. A start it cannot open is a
     // refusal the ledger never sees.
-    let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| match cfg.call_floor {
-        Some(floor) if !clears_call_floor(x, floor) => {
+    let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| match CallFloor::of(cfg)
+    {
+        Some(floor) if !floor.clears(x) => {
             let mut opened = x.to_owned();
             if open_for_call(cfg, &mut opened, floor, cfg.frozen.as_deref()) {
                 relax(led, opened.view(), steps)
@@ -7734,13 +7889,13 @@ where
         // The raw overlapping proposal is not an energy call.
         // [`Config::call_floor`] is the same rule for an objective that
         // declares its own floor, with or without species.
-        let overlapping = match cfg.call_floor {
-            Some(floor) => !clears_call_floor(trial.view(), floor),
+        let overlapping = match CallFloor::of(cfg) {
+            Some(floor) => !floor.clears(trial.view()),
             None => cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_CALL_LIMIT),
         };
         if overlapping {
             proposal_overlaps += 1;
-            let floor = cfg.call_floor.unwrap_or(OVERLAP_CALL_LIMIT);
+            let floor = CallFloor::of(cfg).unwrap_or_else(CallFloor::overlap);
             let separated = open_for_call(cfg, &mut trial, floor, hop_frozen.as_deref());
             if !separated {
                 hops += 1;
@@ -13788,5 +13943,63 @@ mod call_floor_tests {
         assert!((distance(&x, 0, 1) - 1.0).abs() < 1.0e-12);
         let mut held = Array1::from(vec![0.0, 0.0, 0.0, 0.5, 0.0, 0.0]);
         assert!(!open_call_floor(&mut held, FLOOR, 1.0, Some(&[true, true])));
+    }
+
+    #[test]
+    fn an_element_floor_sits_between_the_absolute_floor_and_any_bond() {
+        assert!((element_call_floor(14, 14, FLOOR) - 0.70 * 2.22).abs() < 1.0e-12);
+        assert!((element_call_floor(6, 6, FLOOR) - 0.70 * 1.52).abs() < 1.0e-12);
+        assert_eq!(element_call_floor(1, 1, FLOOR), FLOOR);
+        assert_eq!(element_call_floor(6, 1, FLOOR), FLOOR);
+        for za in 0..=96 {
+            for zb in za..=96 {
+                let floor = element_call_floor(za, zb, FLOOR);
+                assert!(floor >= FLOOR, "{za}-{zb}");
+                let shortest = shortest_bond_length(za, zb);
+                if za > 1 && shortest > FLOOR {
+                    assert!(floor < shortest, "{za}-{zb}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_floor_without_elements_is_the_single_floor() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let floor = CallFloor {
+            absolute: FLOOR,
+            elements: None,
+        };
+        for _ in 0..200 {
+            let x: Array1<f64> = (0..3 * 6).map(|_| rng.random_range(0.0..2.0)).collect();
+            assert_eq!(floor.clears(x.view()), clears_call_floor(x.view(), FLOOR));
+            let mut single = x.clone();
+            let mut paired = x.clone();
+            let opened = open_call_floor(&mut single, FLOOR, CALL_FLOOR_OPENING * FLOOR, None);
+            assert_eq!(floor.open(&mut paired, None), opened);
+            assert!(
+                single
+                    .iter()
+                    .zip(paired.iter())
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+        }
+    }
+
+    #[test]
+    fn a_silicon_pair_is_opened_past_its_element_floor() {
+        let elements = [14u32; 3];
+        let floor = CallFloor {
+            absolute: FLOOR,
+            elements: Some(&elements),
+        };
+        let mut x = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 2.3, 0.0]);
+        assert!(clears_call_floor(x.view(), FLOOR));
+        assert!(!floor.clears(x.view()));
+        assert!(floor.open(&mut x, None));
+        let target = CALL_FLOOR_OPENING * element_call_floor(14, 14, FLOOR);
+        assert!((distance(&x, 0, 1) - target).abs() < 1.0e-12);
+        assert!(floor.clears(x.view()));
+        assert!(distance(&x, 0, 2) > floor.pair(0, 2));
     }
 }

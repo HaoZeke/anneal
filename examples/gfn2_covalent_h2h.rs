@@ -18,6 +18,9 @@
 //! 2^(1/6) and the well depth against two atoms at 20 angstrom. The dimer
 //! probe runs on a two-atom handle and is charged to the same ledger. There
 //! is no pair-range cut, because dispersion has no finite reach.
+//! The call floor is the handle's 0.90 Å, raised pair by pair to
+//! `element_call_floor` of the atomic numbers: 1.55 Å for Si–Si and 1.06 Å
+//! for C–C.
 //!
 //! The start is a random cluster in the scaled start radius from
 //! `StdRng::seed_from_u64(seed)`. `H2H_START_ONLY=1` writes it to
@@ -220,7 +223,8 @@ fn main() {
     let (length, energy) =
         dimer_scales(sys.z, || ledger.charge()).expect("a bound dimer inside the budget");
     let probe_calls = ledger.spent();
-    let cfg = general(sys.n, length, energy);
+    let mut cfg = general(sys.n, length, energy);
+    cfg.call_floor_elements = Some(vec![sys.z as u32; sys.n]);
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(sys.n, cfg.start_radius(), cfg.min_separation, &mut rng);
     if std::env::var("H2H_START_ONLY").ok().as_deref() == Some("1") {
