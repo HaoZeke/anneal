@@ -161,6 +161,9 @@ template <typename P, typename... A> Built own(A &&...args) {
       kernel->forcePerAtom(in, res, atoms);
     };
   }
+  if constexpr (LocalPotential<P>) {
+    out.locality = kernel->locality();
+  }
   out.pot = std::move(pot);
   return out;
 }

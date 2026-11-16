@@ -7,6 +7,7 @@
 // Names are the PotType enumerators, matched without case. Lengths are
 // Angstrom and energies eV.
 
+#include "rgpot/Locality.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
 
@@ -31,6 +32,9 @@ struct Built {
   /// Cutoff of a potential that takes one (LJ, Morse, SuttonChen), in
   /// Angstrom. 0 for a kernel with a fixed range.
   double cutoff = 0.0;
+  /// The kernel's locality() (Locality.hpp). Zero cutoff when the kernel
+  /// declares no finite range.
+  Locality locality;
   std::string error; ///< Reason when pot is null.
 };
 
