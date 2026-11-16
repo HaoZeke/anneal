@@ -28,18 +28,86 @@ const SHORTEST_PATH_FROM: usize = 98;
 /// column occurs exactly once. Invalid shapes, non-finite entries, or failure
 /// to construct a perfect matching return `None`.
 pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    certified_assignment(costs, n).map(|(assignment, _)| assignment)
+}
+
+/// [`minimum_cost_assignment`] and, below 98 rows, the [`Certificate`]
+/// that forced it, if one did.
+pub(crate) fn certified_assignment(
+    costs: &[f64],
+    n: usize,
+) -> Option<(Vec<usize>, Option<Certificate>)> {
     ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(false));
     if n == 0 {
-        return costs.is_empty().then(Vec::new);
+        return costs.is_empty().then(|| (Vec::new(), None));
     }
-    if n.checked_mul(n) != Some(costs.len()) || costs.iter().any(|value| !value.is_finite()) {
+    if !well_formed(costs, n) {
         return None;
     }
     if n < SHORTEST_PATH_FROM {
-        kuhn_munkres(costs, n)
+        forced_kuhn_munkres(costs, n)
     } else {
-        successive_shortest_paths(costs, n)
+        successive_shortest_paths(costs, n).map(|assignment| (assignment, None))
     }
+}
+
+fn well_formed(costs: &[f64], n: usize) -> bool {
+    n.checked_mul(n) == Some(costs.len()) && costs.iter().all(|value| value.is_finite())
+}
+
+/// Duals under which one assignment is the only one a Kuhn-Munkres walk
+/// can return.
+///
+/// They are checked against the costs they are used with, so duals from a
+/// nearby problem, such as the transpose or a rotated copy, prove an
+/// assignment of that problem without solving it.
+#[derive(Clone, Debug)]
+pub(crate) struct Certificate {
+    row_potential: Vec<f64>,
+    column_potential: Vec<f64>,
+}
+
+impl Certificate {
+    /// The certificate of the transposed costs, whose assignment is the inverse.
+    pub(crate) fn transposed(&self) -> Self {
+        Self {
+            row_potential: self.column_potential.clone(),
+            column_potential: self.row_potential.clone(),
+        }
+    }
+}
+
+/// Whether `certificate` forces `assignment` on `costs`, in which case
+/// [`minimum_cost_assignment`] returns `assignment`.
+pub(crate) fn certifies(
+    costs: &[f64],
+    n: usize,
+    assignment: &[usize],
+    certificate: &Certificate,
+) -> bool {
+    if n == 0
+        || n >= SHORTEST_PATH_FROM
+        || assignment.len() != n
+        || certificate.row_potential.len() != n + 1
+        || certificate.column_potential.len() != n + 1
+        || !well_formed(costs, n)
+    {
+        return false;
+    }
+    let mut used = vec![false; n];
+    for &column in assignment {
+        if column >= n || std::mem::replace(&mut used[column], true) {
+            return false;
+        }
+    }
+    optimum_is_unique(
+        costs,
+        n,
+        assignment,
+        &certificate.row_potential,
+        &certificate.column_potential,
+        Separation::KuhnMunkres,
+    )
 }
 
 /// # Safety
@@ -424,7 +492,41 @@ pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<u
 /// that cache reads the flag only after its own call to
 /// [`minimum_cost_assignment`].
 pub(crate) fn successive_shortest_paths_matching(costs: &[f64], n: usize) -> Option<Vec<usize>> {
-    solve_shortest_paths(costs, n, false).map(|(assignment, _)| assignment)
+    solve_shortest_paths(costs, n, None).map(|(assignment, _)| assignment)
+}
+
+/// The Kuhn-Munkres permutation, from the shortest-path scan when the
+/// optimum forces it.
+///
+/// Every edge the walk matches is within [`kuhn_munkres_tolerance`] of
+/// tight, and its duals stay feasible, so its assignment costs at most `n`
+/// tolerances more than the optimum. When every other assignment costs more
+/// than that above the shortest-path optimum, the walk can only return that
+/// optimum. The scan is O(n³); the walk restarts its search after every dual
+/// step. A near tie runs the walk, which keeps its own tie break.
+fn forced_kuhn_munkres(costs: &[f64], n: usize) -> Option<(Vec<usize>, Option<Certificate>)> {
+    if let Some((assignment, Some(certificate))) =
+        solve_shortest_paths(costs, n, Some(Separation::KuhnMunkres))
+    {
+        return Some((assignment, Some(certificate)));
+    }
+    kuhn_munkres(costs, n).map(|assignment| (assignment, None))
+}
+
+/// How far every other assignment must cost above the optimum.
+#[derive(Clone, Copy)]
+enum Separation {
+    /// More than dual noise: no other optimal edge.
+    Noise,
+    /// More than a Kuhn-Munkres walk can fall short of the optimum.
+    KuhnMunkres,
+}
+
+fn kuhn_munkres_tolerance(costs: &[f64]) -> f64 {
+    let scale = costs
+        .iter()
+        .fold(1.0_f64, |largest, value| largest.max(value.abs()));
+    scale * 1e-9
 }
 
 /// Whether the last successful dense scan had no other optimal edge.
@@ -440,7 +542,8 @@ std::thread_local! {
 }
 
 fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usize>, bool)> {
-    solve_shortest_paths(costs, n, true)
+    solve_shortest_paths(costs, n, Some(Separation::Noise))
+        .map(|(assignment, certificate)| (assignment, certificate.is_some()))
 }
 
 struct PathScratch {
@@ -468,8 +571,8 @@ std::thread_local! {
 fn solve_shortest_paths(
     costs: &[f64],
     n: usize,
-    report_unique: bool,
-) -> Option<(Vec<usize>, bool)> {
+    separation: Option<Separation>,
+) -> Option<(Vec<usize>, Option<Certificate>)> {
     // Column 0 is the dummy used to grow the matching. Rows and columns of
     // `costs` are 1-indexed in the dual update so the dummy sits at index 0.
     // `used` is a byte flag, not `Vec<bool>`: the bit-packed form turns this
@@ -498,7 +601,7 @@ fn solve_shortest_paths(
         solve_shortest_paths_in(
             costs,
             n,
-            report_unique,
+            separation,
             &mut row_potential[..width],
             &mut column_potential[..width],
             &mut column_match[..width],
@@ -512,14 +615,14 @@ fn solve_shortest_paths(
 fn solve_shortest_paths_in(
     costs: &[f64],
     n: usize,
-    report_unique: bool,
+    separation: Option<Separation>,
     row_potential: &mut [f64],
     column_potential: &mut [f64],
     column_match: &mut [usize],
     predecessor: &mut [usize],
     min_reduced: &mut [f64],
     used: &mut [u8],
-) -> Option<(Vec<usize>, bool)> {
+) -> Option<(Vec<usize>, Option<Certificate>)> {
     for row in 1..=n {
         column_match[0] = row;
         let mut column = 0usize;
@@ -579,25 +682,70 @@ fn solve_shortest_paths_in(
         seen[slot] = true;
         assignment[slot] = column - 1;
     }
-    let unique =
-        report_unique && optimum_is_unique(costs, n, &assignment, row_potential, column_potential);
-    Some((assignment, unique))
+    let unique = separation.is_some_and(|separation| {
+        optimum_is_unique(
+            costs,
+            n,
+            &assignment,
+            row_potential,
+            column_potential,
+            separation,
+        )
+    });
+    let certificate = unique.then(|| Certificate {
+        row_potential: row_potential.to_vec(),
+        column_potential: column_potential.to_vec(),
+    });
+    Some((assignment, certificate))
 }
 
+/// Whether no alternating cycle of edges within the separation's slack
+/// of tight leaves the optimum.
+///
+/// Any other assignment differs by such cycles, and its extra cost is the
+/// sum of the reduced costs along them. A cycle with one edge above the
+/// slack and every other edge within `noise` of feasible costs more than
+/// the slack less `2 n noise`.
 fn optimum_is_unique(
     costs: &[f64],
     n: usize,
     assignment: &[usize],
     row_potential: &[f64],
     column_potential: &[f64],
+    separation: Separation,
 ) -> bool {
-    let mut scale = 1.0_f64;
-    for value in costs {
-        scale = scale.max(value.abs());
-    }
-    // A negative reduced cost of one ulp is dual noise. An edge within this
-    // slack of zero can belong to another optimum; anything larger cannot.
-    let slack = 1.0e-8 * (1.0 + scale);
+    let reduced = |row: usize, column: usize| {
+        costs[row * n + column] - row_potential[row + 1] - column_potential[column + 1]
+    };
+    let slack = match separation {
+        Separation::Noise => {
+            let mut scale = 1.0_f64;
+            for value in costs {
+                scale = scale.max(value.abs());
+            }
+            // A negative reduced cost of one ulp is dual noise. An edge within this
+            // slack of zero can belong to another optimum; anything larger cannot.
+            1.0e-8 * (1.0 + scale)
+        }
+        Separation::KuhnMunkres => {
+            let mut noise = 0.0_f64;
+            for row in 0..n {
+                for column in 0..n {
+                    let value = reduced(row, column);
+                    noise = noise.max(if column == assignment[row] {
+                        value.abs()
+                    } else {
+                        -value
+                    });
+                }
+            }
+            if !noise.is_finite() {
+                return false;
+            }
+            let width = n as f64;
+            2.0 * (width * kuhn_munkres_tolerance(costs) + 2.0 * width * noise)
+        }
+    };
     let mut matched_row = vec![0usize; n];
     for (row, &column) in assignment.iter().enumerate() {
         matched_row[column] = row;
@@ -605,14 +753,11 @@ fn optimum_is_unique(
     let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
     for row in 0..n {
         let matched = assignment[row];
-        let base = row * n;
         for column in 0..n {
             if column == matched {
                 continue;
             }
-            let reduced =
-                costs[base + column] - row_potential[row + 1] - column_potential[column + 1];
-            if reduced <= slack {
+            if reduced(row, column) <= slack {
                 outgoing[row].push(matched_row[column]);
             }
         }
@@ -766,11 +911,13 @@ unsafe fn phase_delta_avx2(
 ///
 /// The numerical scheme follows the Kuhn-Munkres implementation
 /// used by gpr_optim's MIT-licensed `Distance.cpp`.
+#[cfg(test)]
+pub(crate) fn kuhn_munkres_walk(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    kuhn_munkres(costs, n)
+}
+
 fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
-    let scale = costs
-        .iter()
-        .fold(1.0_f64, |largest, value| largest.max(value.abs()));
-    let tight_tolerance = scale * 1e-9;
+    let tight_tolerance = kuhn_munkres_tolerance(costs);
     let weights: Vec<f64> = costs.iter().map(|cost| -cost).collect();
     let mut row_potential = vec![f64::NEG_INFINITY; n];
     for row in 0..n {
@@ -947,13 +1094,102 @@ unsafe fn group_ineligible(
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_arch = "x86_64")]
-    use super::{group_ineligible, phase_delta_avx2};
     use super::{
-        kuhn_munkres, minimum_cost_assignment, phase_delta_scalar, strict_unique_row_minima,
-        successive_shortest_paths, successive_shortest_paths_matching,
+        certified_assignment, certifies, kuhn_munkres, minimum_cost_assignment, phase_delta_scalar,
+        strict_unique_row_minima, successive_shortest_paths, successive_shortest_paths_matching,
         successive_shortest_paths_scanned,
     };
+    #[cfg(target_arch = "x86_64")]
+    use super::{group_ineligible, phase_delta_avx2};
+
+    fn geometry_costs(n: usize, seed: u64, shift: usize) -> Vec<f64> {
+        let mut state = seed;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        let points: Vec<[f64; 3]> = (0..n).map(|_| [next(), next(), next()]).collect();
+        let mut costs = vec![0.0; n * n];
+        for row in 0..n {
+            for column in 0..n {
+                let image = points[(column + shift) % n];
+                costs[row * n + column] = (0..3)
+                    .map(|axis| (points[row][axis] - image[axis] * 0.9).powi(2))
+                    .sum();
+            }
+        }
+        costs
+    }
+
+    /// Below the shortest-path threshold the dispatched permutation is the
+    /// walk's, forced or walked, on separated optima and on exact ties.
+    #[test]
+    fn a_forced_permutation_is_the_walks() {
+        let mut forced = 0;
+        for n in [2usize, 3, 17, 40, 80, 97] {
+            for seed in 0..4u64 {
+                let costs = geometry_costs(n, 0x5eed + seed, seed as usize);
+                let (assignment, certificate) = certified_assignment(&costs, n).expect("square");
+                assert_eq!(
+                    Some(&assignment),
+                    kuhn_munkres(&costs, n).as_ref(),
+                    "n={n} seed={seed}"
+                );
+                forced += usize::from(certificate.is_some());
+                let ties: Vec<f64> = costs.iter().map(|cost| (cost * 4.0).floor()).collect();
+                assert_eq!(
+                    minimum_cost_assignment(&ties, n),
+                    kuhn_munkres(&ties, n),
+                    "ties n={n} seed={seed}"
+                );
+            }
+        }
+        assert!(forced > 16, "only {forced} separated optima were forced");
+        let flat = vec![1.0; 25];
+        let (assignment, certificate) = certified_assignment(&flat, 5).expect("flat");
+        assert!(
+            certificate.is_none(),
+            "every permutation of a flat matrix is optimal"
+        );
+        assert_eq!(Some(assignment), kuhn_munkres(&flat, 5));
+    }
+
+    #[test]
+    fn a_certificate_proves_the_transpose_and_not_other_costs() {
+        let n = 40;
+        let costs = geometry_costs(n, 0xc0de, 3);
+        let (assignment, certificate) = certified_assignment(&costs, n).expect("square");
+        let certificate = certificate.expect("a separated optimum");
+        assert!(certifies(&costs, n, &assignment, &certificate));
+        let mut transposed = vec![0.0; n * n];
+        for row in 0..n {
+            for column in 0..n {
+                transposed[column * n + row] = costs[row * n + column];
+            }
+        }
+        let mut inverse = vec![0usize; n];
+        for (row, &column) in assignment.iter().enumerate() {
+            inverse[column] = row;
+        }
+        assert!(certifies(
+            &transposed,
+            n,
+            &inverse,
+            &certificate.transposed()
+        ));
+        assert_eq!(kuhn_munkres(&transposed, n), Some(inverse));
+        let mut moved = costs.clone();
+        let (first, second) = (assignment[0], assignment[1]);
+        moved[first] += 1.0;
+        moved[n + second] += 1.0;
+        moved[second] -= 1.0;
+        moved[n + first] -= 1.0;
+        assert!(!certifies(&moved, n, &assignment, &certificate));
+        let mut swapped = assignment.clone();
+        swapped.swap(0, 1);
+        assert!(!certifies(&costs, n, &swapped, &certificate));
+        assert!(!certifies(&costs, n, &assignment[1..], &certificate));
+    }
 
     #[test]
     fn a_strict_row_minimum_permutation_matches_the_solver() {
