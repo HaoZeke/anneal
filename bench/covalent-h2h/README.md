@@ -768,7 +768,7 @@ reference.
   Against it CREST hits on none of its six seeds (`gfn2/rescore.csv`).
   Anneal's rows are not rescored: each stopped at the reference it ran
   with.
-- From `95aed412` the example names its element, and each pair's call
+- From `fa455c34` the example names its element, and each pair's call
   floor is 0.70 of the summed covalent radii and never below 0.90 Å:
   1.55 Å for Si–Si and 1.06 Å for C–C. A trial pair inside it is opened
   to 1.05 times that floor. The rule has no per-system constant, and an
@@ -783,6 +783,23 @@ reference.
   both (p = 0.86). The `c1c02d16` arm repeats the timed Si13 calls to
   hit seed for seed. The Si10, C10, Si13 and C20 rows above are without
   it.
+- The same gate against develop `3c189e92` (`floor-gate/`, untimed,
+  eight runs at a time). Develop's example has no Si13 or C20, so the
+  GFN2 arms are `98a69388`, develop with this series up to the Si13
+  rows, and `a52726af`, with the floor (`floor-gate/gfn2.csv`). Both
+  arms repeat the `c1c02d16` gate seed for seed: on Si13 12/12 hits in
+  each, SCC failures 2.89% of calls against 6.05%, median calls to hit
+  2,207 against 1,897 (p = 0.45). The floor arm takes more calls on
+  six seeds, fewer on five and the same on one. On C20 the two arms are
+  0/12 with no SCC failure, median best -1146.550 eV (p = 0.86). The
+  paper headline panel (`scripts/paper_0120/arm_gate.py`, LJ38 to
+  LJ150, Au55 and M80 at ρ=6 and 14, seeds 2000-2011, the paper
+  budgets) ran on `3c189e92` and `a52726af`: every one of the 144 seed
+  pairs has the same hit, calls to the minimum, calls charged and best
+  energy (`floor-gate/panel.csv`). The pins (`floor-gate/pins-a52726af.txt`,
+  sha1 `a22093e7…`) and the Au55 pins
+  (`floor-gate/au55-pins-a52726af.txt`) are byte for byte those of
+  `bench/paper-0120` on develop.
 - Si20 is pending. With the engine reusing the previous wavefunction,
   the Si13 and Si20 minima had energies a fresh SCC does not reproduce:
   an Si13 minimum at -601.12421 eV is -593.51232 eV fresh, and Si20 minima
@@ -841,3 +858,5 @@ Three first-parent commits changed it:
 - `gfn2/`: per-seed rows and summary of GFN2-xTB Si10, C10, Si13 and
   C20, anneal against CREST, CREST's rescore against the Si13 ring, the
   lowest minima with their xtb energies, and the element-floor gate.
+- `floor-gate/`: the element-floor gate against develop, GFN2 and the
+  paper headline panel, with the pins of the floor build.
