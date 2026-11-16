@@ -2565,6 +2565,10 @@ fn finish_arm(arms: &mut Vec<ArmCount>, name: &str, accepted: bool, improved: bo
 /// the single growth it counts stays single.
 const GROWTH_RETRY_LEAVES: u32 = 8;
 
+/// Largest multiple of the preset temperature [`Config::plateau_heat`]
+/// reaches, after two plateaus without a new lowest minimum.
+const PLATEAU_HEAT_CAP: f64 = 4.0;
+
 /// True while a failed growth should stay idle.
 ///
 /// The energy test is [`stall_growth_waits`]. At 98 atoms and above, after
@@ -2627,14 +2631,16 @@ fn search_kernels(cfg: &Config) -> Vec<ClusterMove> {
 }
 
 /// One charged dynamic-lattice exchange, or a single-point step when the
-/// lattice has nothing to offer.
+/// lattice has nothing to offer. `heat` multiplies the preset temperature
+/// of the exchange weights.
 fn energy_lattice_proposal<R: Rng + ?Sized>(
     cfg: &Config,
     ledger: &mut Ledger,
     x: ArrayView1<f64>,
     rng: &mut R,
+    heat: f64,
 ) -> Array1<f64> {
-    let reduced = cfg.temperature / cfg.energy_scale.max(1e-12);
+    let reduced = heat * cfg.temperature / cfg.energy_scale.max(1e-12);
     let lattice = crate::methods::lattice_search::Lattice::default();
     let coords = x.to_vec();
     if let Some(y) = lattice.propose_energy_exchange(&coords, ledger, reduced, rng) {
@@ -4974,6 +4980,9 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    // Multiple of the preset temperature the walk hops at. It stays one
+    // unless `plateau_heat` is on.
+    let mut heat = 1.0_f64;
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
     // the chain already quenched, instead of redrawing inside the same one.
@@ -5574,6 +5583,7 @@ where
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
+            heat = 1.0;
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
             cage_edit = false;
@@ -6193,6 +6203,9 @@ where
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
             directed_leave = true;
+            if cfg.plateau_heat {
+                heat = (heat * 2.0).min(PLATEAU_HEAT_CAP);
+            }
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
@@ -7144,6 +7157,7 @@ where
             let cap = 4.0 * cfg.temperature;
             temperature = spread.clamp(floor, cap);
         }
+        temperature *= heat;
         if cfg.move_library.is_rigid_body() {
             // The preset temperature stays in its own energy unit. A rigid
             // water chart is not that unit, so a local factor moves the
@@ -7715,7 +7729,7 @@ where
                     let u2: f64 = rng.random::<f64>();
                     portable_sqrt(-2.0 * portable_ln(u1)) * portable_cos(std::f64::consts::TAU * u2)
                 };
-                let c = z * (cfg.temperature / lam.max(0.05)).sqrt() * escape;
+                let c = z * (heat * cfg.temperature / lam.max(0.05)).sqrt() * escape;
                 for i in 0..t.len() {
                     t[i] += c * mode[i];
                 }
@@ -7740,7 +7754,7 @@ where
                 }
                 _ => {
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
-                        energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                        energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
                     } else {
                         kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
@@ -7781,7 +7795,7 @@ where
                     }
                     _ => {
                         if matches!(kernels[k], ClusterMove::EnergyLattice) {
-                            energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                            energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
                         } else {
                             kernels[k].propose_scaled(
                                 x.view(),
@@ -11566,6 +11580,7 @@ mod tests {
         assert!(rec.escape_on_stall && rec.trail_on_stall && !rec.restart_on_stall);
         assert!(rec.prior_soap && rec.prior_reseed && rec.prior_growth);
         assert!(rec.prior_core && rec.prior_motif && !rec.general_collective);
+        assert!(!rec.plateau_heat && !der.plateau_heat);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);
