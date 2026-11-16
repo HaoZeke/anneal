@@ -36,8 +36,10 @@ ROOT = Path(__file__).resolve().parents[1]
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
 
-REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head")
+REVISION_COLUMNS = ("code_revision", "anneal_head", "release_revision", "head", "harness_revision")
 HOST_COLUMNS = ("host",)
+# Revisions of other codes. The GMIN build scripts refuse a tarball whose SVNREV differs.
+EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
 
 KNOWN_GAPS = {
     "bench/depth-posterior-ablation/results.csv": "no revision or host column",
@@ -59,8 +61,6 @@ KNOWN_GAPS = {
     "bench/morse-panel/seeds.csv": "no revision or host column",
     "bench/morse-h2h/seeds.csv": "no revision or host column",
     "bench/morse-h2h/results.csv": "no host column; revision fe9671c8 is not in this repository",
-    "bench/metal-cluster-h2h/sc-n12/seeds.csv": "no revision or host column",
-    "bench/metal-cluster-h2h/sc-n12/results.csv": "no host column",
     "bench/fp-fingerprint/rows.csv": "no revision or host column",
     "bench/tip4p-h2h/h2h-summary.csv": "no revision or host column",
     "bench/covalent-h2h/before/seeds.csv": "no revision or host column",
@@ -876,7 +876,7 @@ def provenance(audit: Audit) -> dict[str, str]:
         for column in revs:
             for r in rows:
                 value = r[column].strip()
-                if re.fullmatch(r"[0-9a-f]{7,40}", value):
+                if re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
                     revisions[value].add(path)
         if problems:
             gaps[path] = "; ".join(problems)
