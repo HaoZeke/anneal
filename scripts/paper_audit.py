@@ -623,6 +623,11 @@ def openconf_value(label: str, by: dict, mol: str) -> object:
     raise SystemExit(f"openconf column {label!r} has no rule")
 
 
+def and_list(items: list[str]) -> str:
+    items = list(items)
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 def summary_against_rows(audit: Audit, summary: str, per_seed: str, arm_key: str, calls_key: str,
                          continuity: bool, mw_column: str = "mannwhitney_p_evals") -> None:
     """A summary file derived from per-seed rows must match them."""
@@ -662,20 +667,61 @@ def head_to_head(audit: Audit) -> None:
     path = "bench/metal-cluster-h2h/sc-n12/README.md"
     sc_rows = audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
     sc_summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
+    shown = set()
     for line, row in md_table(audit, path, "System | Arm | Harness"):
         group = [r for r in pick(sc_rows, system=row["System"], arm=row["Arm"])
                  if r["harness_revision"].startswith(row["Harness"])]
         where = f"{path}:{line} {row['System']} {row['Arm']} {row['Harness']}"
+        shown.add((row["System"], row["Arm"], row["Harness"]))
         audit.cell(where, "seeds", "12", float(len(group)))
         audit.cell(where, "hits", row["Hits"], frac(group))
         audit.cell(where, "calls median", row["Calls median"], median([float(r["evals_to_hit"]) for r in group]))
         audit.cell(where, "wall median", row["Wall median (s)"], median([float(r["wall_s"]) for r in group]))
-    rerun = [r for r in sc_summary if r["system"] == "sc96-38" and r["arm"] == "gmin"][-1]
-    audit.said(path, f"Only 9-6 at N=38 has been rerun, under harness {rerun['harness_revision'][:8]}.")
-    audit.cell(path, "rerun Fisher p", "1", float(rerun["fisher_p_vs_gmin"]))
-    audit.cell(path, "rerun Mann-Whitney p calls", "0.000592", float(rerun["mannwhitney_p_evals"]))
-    audit.cell(path, "rerun Mann-Whitney p wall", "0.624", float(rerun["mannwhitney_p_wall"]))
-    audit.cell(path, "rerun wall ratio", "1.148", float(rerun["wall_ratio"]))
+    # A GMIN row whose harness is not that of the anneal row of its system is
+    # a rerun. Every rerun, the rows it replaces and its tests must be shown;
+    # every system without one is named as still on the old file.
+    anneal_harness = {r["system"]: r["harness_revision"] for r in sc_summary if r["arm"] == "anneal"}
+    reruns: dict[str, dict[str, str]] = {}
+    for r in sc_summary:
+        if r["arm"] == "gmin" and r["harness_revision"] != anneal_harness[r["system"]]:
+            reruns[r["system"]] = r
+    tested = {}
+    for line, row in md_table(audit, path, "System | GMIN harness"):
+        where = f"{path}:{line} {row['System']} {row['GMIN harness']}"
+        r = reruns.get(row["System"])
+        tested[row["System"]] = row["GMIN harness"]
+        audit.cell(where, "latest GMIN harness", row["GMIN harness"], r["harness_revision"][:8] if r else "not rerun")
+        if r:
+            audit.cell(where, "Fisher p", row["Fisher p"], float(r["fisher_p_vs_gmin"]))
+            audit.cell(where, "Mann-Whitney p calls", row["Mann-Whitney p calls"], float(r["mannwhitney_p_evals"]))
+            audit.cell(where, "Mann-Whitney p wall", row["Mann-Whitney p wall"], float(r["mannwhitney_p_wall"]))
+            audit.cell(where, "wall ratio", row["Wall ratio"], float(r["wall_ratio"]))
+    by_harness: dict[str, list[str]] = {}
+    for system, r in reruns.items():
+        by_harness.setdefault(r["harness_revision"][:8], []).append(system)
+        for arm, harness in (("anneal", anneal_harness[system]), ("gmin", anneal_harness[system]),
+                             ("gmin", r["harness_revision"])):
+            audit.cell(path, f"table row {system} {arm} {harness[:8]}",
+                       "shown" if (system, arm, harness[:8]) in shown else "missing", "shown")
+        audit.cell(path, f"test row {system}", tested.get(system, "missing"), r["harness_revision"][:8])
+    for system in tested:
+        audit.cell(path, f"test row {system} is a rerun", "rerun" if system in reruns else "not rerun", "rerun")
+    parts = [f"{and_list(systems)} under harness {h}" for h, systems in by_harness.items()]
+    audit.said(path, f"The GMIN rows rerun with the corrected file are {', and '.join(parts)}.")
+    old = [s for s in anneal_harness if s not in reruns]
+    if old:
+        olds = {anneal_harness[s][:8] for s in old}
+        audit.said(path, f"The GMIN rows of {and_list(old)} are those of {and_list(sorted(olds))}, from the old file, "
+                         "and are not rerun.")
+    audit.said("bench/metal-cluster-h2h/sc-8e076b7f/README.md",
+               f"`../sc-n12/README.md` has the corrected file and GMIN reruns of {and_list(reruns)}.")
+    for system, r in reruns.items():
+        if r["hits"] == "0":
+            bests = {f"{float(x['best']):.4f}" for x in pick(sc_rows, system=system, arm="gmin",
+                                                            harness_revision=r["harness_revision"])}
+            audit.cell(path, f"{system} rerun ends at one minimum", "1", float(len(bests)))
+            if bests:
+                audit.said(path, f"On {system} every {r['harness_revision'][:8]} GMIN seed ends at {min(bests)}.")
 
     path = "bench/morse-h2h/README.md"
     results = audit.rows("bench/morse-h2h/results.csv")
