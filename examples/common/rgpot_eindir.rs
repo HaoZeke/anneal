@@ -415,6 +415,11 @@ struct XtbKernel {
     /// Force buffer reused across calls. The owned DLPack tensor copies
     /// it before the callback returns.
     scratch: Vec<f64>,
+    /// Every SCC starts from xtb's own guess (a warm move of zero).
+    fresh: bool,
+    /// Coordinate bits of the request before this one, if its SCC failed,
+    /// and whether the gradient request of that call is still to come.
+    failed: Option<(Vec<u64>, bool)>,
 }
 
 impl Drop for XtbKernel {
@@ -523,6 +528,23 @@ unsafe extern "C" fn xtb_callback(
             );
         }
     }
+    let bits: Vec<u64> = positions.iter().map(|value| value.to_bits()).collect();
+    if kernel.fresh
+        && let Some((failed, gradient_pending)) = kernel.failed.as_mut()
+        && *failed == bits
+    {
+        // rgpot's split eindir call asks for the value and then the gradient,
+        // and keeps no answer for a failed SCC, so the same geometry comes
+        // straight back. From xtb's own guess it fails there again; a warm
+        // engine's guess has moved, so it is asked again. A repeat after the
+        // gradient is the caller's next call, and is counted.
+        if !*gradient_pending {
+            note_scc_rejected(min_pair);
+        }
+        *gradient_pending = !*gradient_pending;
+        kernel.scratch.fill(f64::NAN);
+        return rgpot_status_t::RGPOT_INTERNAL_ERROR;
+    }
     let (energy, var) =
         match kernel
             .worker
@@ -532,9 +554,11 @@ unsafe extern "C" fn xtb_callback(
             Err(_) => {
                 note_scc_rejected(min_pair);
                 kernel.scratch.fill(f64::NAN);
+                kernel.failed = Some((bits, true));
                 return rgpot_status_t::RGPOT_INTERNAL_ERROR;
             }
         };
+    kernel.failed = None;
     out.energy = energy;
     out.variance = var;
     // rgpot_xtb_force already returns force; rgpot negates it to build the
@@ -732,6 +756,8 @@ impl RgpotObjective {
             evaluations: 0,
             overlap_limit_a,
             scratch: Vec::new(),
+            fresh: warm_move == Some(0.0),
+            failed: None,
         });
         let kernel_ptr = Box::into_raw(kernel);
         let n = atmnrs.len();
