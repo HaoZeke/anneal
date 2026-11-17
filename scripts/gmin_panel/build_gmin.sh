@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
-# One serial GMIN for the whole panel: Wales's public tarball at the pinned
+# One GMIN for the whole panel: Wales's public tarball at the pinned
 # SVNREV, the evaluator cap with the Lennard-Jones timer, and the timers
-# inside Morse and binary Gupta. ALIGN, MPI and OpenMP stay off.
+# inside Morse and binary Gupta. ALIGN and MPI stay off. OpenMP is on,
+# because GMIN's build supports it; the runs still set one thread.
+# The link is OpenBLAS. symmetrise-jp.patch passes the run index
+# into TESTSYMOP. On this SVNREV the three live calls in symmetry.f90
+# omit it, and TESTSYMOP then indexes ATMASS with an undefined run,
+# which segfaults as soon as SYMMETRISE is used. The patch changes no
+# tolerance and no step.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -15,6 +21,7 @@ PATCHES=(
   "$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch"
   "$ROOT/scripts/morse_h2h/morse-timer.patch"
   "$ROOT/bench/metal-cluster-h2h/gmin-bgupta.patch"
+  "$ROOT/scripts/gmin_panel/symmetrise-jp.patch"
 )
 
 mkdir -p "$WORK/bin" "$SRC"
@@ -43,8 +50,14 @@ fi
 
 if [[ ! -f $SRC/wales/GMIN/source/h2h_cap.f90 ]]; then
   for patch in "${PATCHES[@]}"; do
+    [[ $patch == *symmetrise-jp.patch ]] && continue
     patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$patch"
   done
+fi
+if ! grep -q 'TESTSYMOP(LNCORE,NEWQ,CORECOORDS,PERM,LTOLD,DIST2,WORSTRAD,JP)' \
+  "$SRC/wales/GMIN/source/symmetry.f90"; then
+  patch -p1 --forward --batch -d "$SRC/wales/GMIN" \
+    < "$ROOT/scripts/gmin_panel/symmetrise-jp.patch"
 fi
 
 if [[ ! -x $WORK/bin/GMIN ]]; then
@@ -53,9 +66,10 @@ if [[ ! -x $WORK/bin/GMIN ]]; then
   (
     cd "$build"
     FC=gfortran CC=gcc CXX=g++ cmake ../../source \
+      -DBLA_VENDOR=OpenBLAS \
       -DWITH_ALIGN=OFF \
       -DWITH_MPI=OFF \
-      -DWITH_OPENMP=OFF \
+      -DWITH_OPENMP=ON \
       -DWITH_SPARSE=OFF \
       -DWITH_PYTHON=OFF \
       -DWITH_MYBLAS=OFF \
@@ -74,7 +88,7 @@ fi
   for patch in "${PATCHES[@]}"; do
     echo "patch=${patch#"$ROOT"/} $(sha256sum "$patch" | cut -d' ' -f1)"
   done
-  echo "cmake=-DWITH_ALIGN=OFF -DWITH_MPI=OFF -DWITH_OPENMP=OFF -DWITH_SPARSE=OFF -DWITH_PYTHON=OFF -DWITH_MYBLAS=OFF -DWITH_MYLAPACK=OFF"
+  echo "cmake=-DBLA_VENDOR=OpenBLAS -DWITH_ALIGN=OFF -DWITH_MPI=OFF -DWITH_OPENMP=ON -DWITH_SPARSE=OFF -DWITH_PYTHON=OFF -DWITH_MYBLAS=OFF -DWITH_MYLAPACK=OFF"
   echo "gfortran=$(gfortran -dumpfullversion)"
   echo "linked=$(ldd "$WORK/bin/GMIN" | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' -)"
   echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | cut -d' ' -f1)"

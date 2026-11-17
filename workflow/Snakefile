@@ -826,8 +826,8 @@ rule agox_lj75:
 # LJ75 ASE basin hopping and minima hopping against Config::for_cluster.
 # Not part of `rule all`. The script rewrites the summary from the
 # committed rows and does not start a search. A seed run appends one row
-# and leaves an existing row in place. An ASE seed stops at the paper
-# call budget or at three times the slowest anneal wall.
+# and leaves an existing row in place. Basin hopping and minima hopping
+# stop at the paper call budget.
 #   snakemake -s workflow/Snakefile ase_lj75
 rule ase_lj75:
     input:
@@ -978,7 +978,8 @@ rule ase_recommended:
 # Non-LJ ASE head-to-head on Cambridge Morse clusters: M38 and M55 at
 # rho = 6 and rho = 14, seeds 2000-2011, paper budgets, one core, host
 # bench. Both Config::for_cluster and Config::recommended run against ASE
-# basin hopping and minima hopping. Not part of `rule all`.
+# basin hopping and minima hopping. Those ASE arms stop at the call budget.
+# Not part of `rule all`.
 #   snakemake -s workflow/Snakefile ase_nonlj
 rule ase_nonlj:
     input:
@@ -1017,8 +1018,9 @@ rule paper_0120:
 
 # anneal develop c2de652d against GMIN aac1548a on LJ38, LJ55, LJ75, LJ98,
 # LJ102, LJ103, LJ104, LJ150, Gupta Au55 and Morse M55 and M80 at rho 6
-# and 14: seeds 2000-2011, paper budgets, both arms in one session, one
-# process on core 0, sudo unshare --uts with hostname bench. Rows are
+# and 14: seeds 2000-2011, paper budgets, one published GMIN input per
+# size, one process on core 0, sudo unshare --uts with hostname bench.
+# The anneal rows are the stored campaign. Rows are
 # appended to bench/gmin-panel/rows.csv with code_revision and host; that
 # file is not declared as an output because Snakemake removes declared
 # outputs before a job runs. The summary, the README table and tab:gmin
@@ -1030,8 +1032,8 @@ rule gmin_panel:
         "scripts/gmin_panel/enter_bench.sh",
         "scripts/gmin_panel/build_gmin.sh",
         "scripts/gmin_panel/run_panel.py",
-        "examples/h2h_gmin_lj.data",
-        "examples/h2h_gmin_morse.data",
+        "scripts/gmin_panel/inputs.py",
+        "scripts/gmin_panel/symmetrise-jp.patch",
     output:
         "bench/gmin-panel/summary.csv",
     shell:

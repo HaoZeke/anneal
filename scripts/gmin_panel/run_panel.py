@@ -372,12 +372,20 @@ def gmin_gupta_radius(n: int, r0: float = GOLD_R0) -> float:
     return (2.0 + (3.0 * n / 17.77153175) ** (1.0 / 3.0)) * r0
 
 
-def gmin_data(system: str, seed: int, lj_data: str, morse_data: str) -> str:
+def gmin_data(system: str, seed: int, lj_data: str = "", morse_data: str = "") -> str:
+    """Published per-size block from inputs.py, or the reviewed Gupta block.
+
+    The lj_data and morse_data arguments are accepted so an older launcher
+    can still pass the teaching files. They are not used: Lennard-Jones and
+    Morse take the published block.
+    """
+    del lj_data, morse_data
     _name, kind, n, _reference, rho, _driver, _binary = spec(system)
-    if kind == "lj":
-        return lj_data + f"RANSEED {seed}\n"
-    if kind == "morse":
-        return morse_data + f"MORSE {rho:.1f}\nRANSEED {seed}\n"
+    if kind != "gupta":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from inputs import body
+
+        return body(system) + f"RANSEED {seed}\n"
     radius = gmin_gupta_radius(n)
     step = LJ_STEP * GOLD_LENGTH_PER_LJ
     avoid = LJ_AVOID * GOLD_LENGTH_PER_LJ
@@ -481,6 +489,10 @@ def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, s
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
         if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
+            continue
+        # The stored tutorial rows keep driver GMIN. The fair rerun uses
+        # driver "GMIN fair". A row with no driver is a test fixture.
+        if row["code"] == "gmin" and row.get("driver", "GMIN fair") != "GMIN fair":
             continue
         groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
     return {key: [group[s] for s in sorted(group)] for key, group in groups.items()}
@@ -683,15 +695,15 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
     for index, cells in enumerate(lines):
         system = summary[index // 2]["system"]
         arm = "anneal" if index % 2 == 0 else "gmin"
-        if arm == "gmin" and system in ("lj75", "lj98"):
-            cells[3] += "~\\rerun{5}"
         if arm == "anneal" and system == "m55r6":
             cells[3] += "~\\rerun{6}"
     body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
-            "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
+            "\\caption{This work against GMIN, both arms of each cluster on one host.",
+            "The anneal rows are the stored campaign. GMIN was rerun with a",
+            "published input for each size, on the same host and one core.",
             f"Revisions: anneal \\texttt{{{revision[:8]}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
@@ -787,8 +799,11 @@ def self_test() -> None:
     row = gmin_result(line, "m80r6", 2001, 4_000_000)
     if row["hit"] != "0" or row["outside_s"] != "10.250000":
         raise SystemExit(f"gmin row {row}")
-    if "MORSE 14.0\nRANSEED 2003\n" not in gmin_data("m80r14", 2003, "", "x\n"):
+    morse = gmin_data("m80r14", 2003, "", "x\n")
+    if "MORSE 14.0\nRANSEED 2003\n" not in morse or "SYMMETRISE " not in morse or "TEMPERATURE 1.0\n" in morse:
         raise SystemExit("morse data")
+    if "NEWRESTART 6\n" not in gmin_data("lj98", 2000) or "SYMMETRISECSM" not in gmin_data("lj38", 2000):
+        raise SystemExit("published blocks")
     au_data = gmin_data("au55", 2000, "", "")
     if not au_data.startswith(f"BGUPTAT 55 {GOLD_ROW}\n"):
         raise SystemExit("gupta data")
@@ -863,9 +878,9 @@ def main(argv: list[str]) -> int:
     if os.sched_getaffinity(0) != {0}:
         print(f"pinned to {sorted(os.sched_getaffinity(0))}, expected core 0", file=sys.stderr)
         return 2
-    needed = (args.bin, args.tree, args.work, args.logs, args.gmin_source, args.lj_data, args.morse_data)
+    needed = (args.bin, args.tree, args.work, args.logs, args.gmin_source)
     if any(value is None for value in needed):
-        parser.error("--bin, --tree, --work, --logs, --gmin-source, --lj-data and --morse-data are needed to run")
+        parser.error("--bin, --tree, --work, --logs and --gmin-source are needed to run")
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=args.tree, capture_output=True, text=True, check=True
     ).stdout.strip()
@@ -881,14 +896,18 @@ def main(argv: list[str]) -> int:
         budget, reference = binary_budget(args.bin, args.tree, system)
         if budget != PAPER_BUDGETS[system] or abs(reference - spec(system)[3]) > 1e-8:
             raise SystemExit(f"{resolve_driver(args.bin, args.tree, system)[1]} {system}: budget {budget} reference {reference}")
-    lj_data = args.lj_data.read_text()
-    morse_data = args.morse_data.read_text()
+    lj_data = args.lj_data.read_text() if args.lj_data else ""
+    morse_data = args.morse_data.read_text() if args.morse_data else ""
     lj_data += "" if lj_data.endswith("\n") else "\n"
     morse_data += "" if morse_data.endswith("\n") else "\n"
     host = socket.gethostname()
     cpu = cpu_model()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    done = set() if args.rerun else {row_key(r) for r in read_rows(args.rows)}
+    # A tutorial GMIN row shares the revision key and must not block the fair rerun.
+    done = set() if args.rerun else {
+        row_key(r) for r in read_rows(args.rows)
+        if not (r["code"] == "gmin" and r.get("driver", "GMIN fair") != "GMIN fair")
+    }
     seeds = tuple(args.seed) if args.seed else SEEDS
     print(f"session {session} revision {args.revision} gmin {GMIN_REV}", flush=True)
     for system in systems:
@@ -913,7 +932,7 @@ def main(argv: list[str]) -> int:
                 row = {
                     "system": system,
                     "code": code,
-                    "driver": driver if code == "anneal" else "GMIN",
+                    "driver": driver if code == "anneal" else "GMIN fair",
                     "seed": str(seed),
                     "budget": str(PAPER_BUDGETS[system]),
                     **result,

@@ -129,7 +129,7 @@ def verify_agreement(system: str, seed: int) -> tuple[float, float, float, float
     return e_anneal, e_ase, abs_de, max_df
 
 
-def make_morse_calculator(rho: float, budget: int, reference: float, fmax: float, deadline: float):
+def make_morse_calculator(rho: float, budget: int, reference: float, fmax: float, deadline: float | None):
     from ase.calculators.morse import MorsePotential
 
     class MeteredMorse(MorsePotential):
@@ -179,7 +179,7 @@ def make_morse_calculator(rho: float, budget: int, reference: float, fmax: float
     return MeteredMorse()
 
 
-def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
+def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float | None) -> dict:
     from ase import Atoms
     from ase.optimize.basin import BasinHopping
     from ase.optimize.minimahopping import MinimaHopping
@@ -200,7 +200,7 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
         spec["budget"],
         spec["reference"],
         FMAX[arm],
-        started + cap_s,
+        None if cap_s is None else started + cap_s,
     )
     atoms.calc = calc
     np.random.seed(seed)
@@ -232,7 +232,7 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
         "inside": calc.inside_s,
         "outside": max(0.0, wall - calc.inside_s),
         "stop": "hit" if hit else stop,
-        "cap_s": cap_s,
+        "cap_s": "" if cap_s is None else cap_s,
     }
 
 
@@ -301,15 +301,12 @@ def main() -> int:
         row = run_anneal(system, seed, arm, cap_text)
     else:
         cap_text = os.environ.get("ASE_NONLJ_WALL_CAP", "")
-        if not cap_text:
-            print("ASE_NONLJ_WALL_CAP is unset", file=sys.stderr)
-            return 2
         row = run_ase(
             system,
             arm,
             seed,
             Path(os.environ.get("ASE_NONLJ_WORK", "/work/ase-nonlj/runs")) / f"{system}-{arm}-{seed}",
-            float(cap_text),
+            float(cap_text) if cap_text else None,
         )
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
     print(

@@ -1,6 +1,7 @@
 # anneal against GMIN on the paper panel
 
-Both arms of each cluster in one session on one host: anneal develop
+Both arms of each cluster on one host. The anneal rows are the stored
+campaign; GMIN was rerun. anneal develop
 `c2de652dca0bc75e2b0cb4afffac91fd656404e4`, built with Rust 1.88.0,
 `--release --locked`, and GMIN at Wales revision
 `aac1548a8aec13b53ad12a8d6904625081685d2e`.
@@ -28,24 +29,35 @@ and the 4e6 budget and nothing else; those rows have driver
 GMIN is one build (`scripts/gmin_panel/build_gmin.sh`) of the public
 tarball with the evaluator cap and Lennard-Jones timer of
 `bench/lj104-lattice/v2/h2h-gmin.patch`, the Morse timer of
-`scripts/morse_h2h/morse-timer.patch` and the binary Gupta timer of
-`bench/metal-cluster-h2h/gmin-bgupta.patch`, without ALIGN, MPI or OpenMP,
-linked against the reference BLAS and LAPACK. Its inputs are
-`examples/h2h_gmin_lj.data` (from the Wales group LJ38 introduction),
-`examples/h2h_gmin_morse.data` plus `MORSE <rho>`, and for Au55 the same
-quench and taboo block on `BGUPTAT` with the Darby gold row (A 0.2061,
-p 10.229, q 4.036, ξ 1.790, r0 2.884), GMIN's `io1.f90` nearest-neighbour
-container radius (`RADIUS 11.829521`), `STEP 1.027741 0.51` and
-`AVOID 10.277408 20 F` converted from `σ` by `r0 / 2^(1/6)`, and
-`TEMPERATURE 0.1` eV from Wales's `examples/GMIN/MGupta.tar.bz2`, each
-with `RANSEED <seed>`.
+`scripts/morse_h2h/morse-timer.patch`, the binary Gupta timer of
+`bench/metal-cluster-h2h/gmin-bgupta.patch`, and
+`scripts/gmin_panel/symmetrise-jp.patch`. ALIGN and MPI stay off. OpenMP
+is on, because the GMIN build supports it; each run still sets one
+thread. The link is OpenBLAS. `symmetrise-jp.patch` passes the run index
+into `TESTSYMOP`. On this SVNREV the three live calls in `symmetry.f90`
+omit it, and `TESTSYMOP` then indexes `ATMASS` with an undefined run,
+which segfaults as soon as `SYMMETRISE` is used. The patch changes no
+tolerance and no step.
 
 The earlier Au55 rows of session `20261117T035457Z` ran the alloy block of
 `scripts/metal_h2h/enter_gold.sh` (`RADIUS 50.0`, `TEMPERATURE 1.0`,
 `STEP 0.40 0.51` and `NEWRESTART 40` without `AVOID ... F`), which left
 `AVOIDRESEEDT` true, reseeded into a 57.7 Å cube after 40 stagnant steps,
-and hit 0/12; those rows stay in `rows.csv`, and session `20261117T152941Z`
-reran both arms of Au55 under the Gupta input above (6/12 against 1/12).
+and hit 0/12; those rows stay in `rows.csv`, and session `20261117T173638Z`
+reran GMIN under the Gupta input above (6/12 against 0/12).
+
+The fair rerun, driver `GMIN fair`, takes one published block per size
+from `scripts/gmin_panel/inputs.py`, plus `RANSEED <seed>`. The stored
+rows with driver `GMIN` are the earlier tutorial-file runs and are not
+scored. Lennard-Jones uses the OptBench or Oakley block for that size.
+Morse adds `MORSE <rho>` to the Lennard-Jones block of the matching
+range. Au55 keeps the reviewed Gupta block and is not retuned: the Darby
+gold row (A 0.2061, p 10.229, q 4.036, ξ 1.790, r0 2.884), GMIN's
+`io1.f90` nearest-neighbour container (`RADIUS 11.829521`),
+`STEP 1.027741 0.51` and `AVOID 10.277408 20 F` converted from `σ` by
+`r0 / 2^(1/6)`, and `TEMPERATURE 0.1` eV from Wales's
+`examples/GMIN/MGupta.tar.bz2`. The `F` keeps the taboo list and does
+not reseed. Sources for each block are in the docstring of `inputs.py`.
 
 Wall is the search wall each code reports. Inside is `pot_s`, the time
 inside the potential; outside is the rest of the wall. Medians and
@@ -84,30 +96,30 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
 <!-- gmin-panel table: start -->
 | System | Budget | Arm | Hits | Median calls | IQR | Wall (s) | Inside (s) | Outside (s) | Fisher p | MW p calls | MW p wall |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LJ38 | 400000 | anneal | 12/12 | 10615.5 | 3591.25 | 0.075 | 0.029 | 0.047 | 0.037 | 3.4e-5 | 3.4e-5 |
-|  |  | GMIN | 7/12 | 389399 | 173127.75 | 3.658 | 2.673 | 0.979 |  |  |  |
-| LJ55 | 1000000 | anneal | 12/12 | 12242 | 22988.5 | 0.142 | 0.062 | 0.082 | 1 | 0.75 | 0.31 |
-|  |  | GMIN | 12/12 | 12764.5 | 12435.75 | 0.236 | 0.191 | 0.045 |  |  |  |
-| LJ75 | 4000000 | anneal | 12/12 | 1409229.5 | 983622 | 27.019 | 12.543 | 13.818 | 7.4e-7 | 1.0e-5 | 1.0e-5 |
-|  |  | GMIN | 0/12 | 4000000 | 0 | 119.9 | 102.9 | 16.952 |  |  |  |
-| LJ98 | 4000000 | anneal | 10/12 | 1511030.5 | 1985194.5 | 41.586 | 23.825 | 17.949 | 6.7e-5 | 1.3e-4 | - |
-|  |  | GMIN | 0/12 | 4000000 | 0 | 182.5 | 161.9 | 20.311 |  |  |  |
-| LJ102 | 4000000 | anneal | 9/12 | 894801 | 3401143.75 | 27.445 | 15.463 | 11.982 | 0.21 | 0.093 | - |
-|  |  | GMIN | 5/12 | 4000000 | 2463305.5 | 194.4 | 173.8 | 20.614 |  |  |  |
-| LJ103 | 4000000 | anneal | 8/12 | 2293133 | 2608443.75 | 66.188 | 39.673 | 26.763 | 0.10 | 0.047 | - |
-|  |  | GMIN | 3/12 | 4000000 | 239453.25 | 204.9 | 183.1 | 21.660 |  |  |  |
-| LJ104 | 4000000 | anneal | 9/12 | 2328723 | 2947098 | 69.306 | 39.241 | 30.064 | 0.40 | 0.16 | - |
-|  |  | GMIN | 6/12 | 3696118 | 1285122.25 | 193.6 | 173.6 | 20.007 |  |  |  |
-| LJ150 | 4000000 | anneal | 5/12 | 4000000 | 1477851 | 237.2 | 139.7 | 96.075 | 0.21 | 0.17 | - |
-|  |  | GMIN | 9/12 | 3129518.5 | 3240050.5 | 326.1 | 302.1 | 23.955 |  |  |  |
-| Au55 | 1000000 | anneal | 6/12 | 852736 | 572700.75 | 30.533 | 22.719 | 7.706 | 0.069 | 0.057 | - |
-|  |  | GMIN | 1/12 | 1000000 | 0 | 59.573 | 56.427 | 3.152 |  |  |  |
+| LJ38 | 400000 | anneal | 12/12 | 10615.5 | 3591.25 | 0.075 | 0.029 | 0.047 | 1 | 0.11 | 0.51 |
+|  |  | GMIN | 12/12 | 3388.5 | 9862.25 | 0.037 | 0.020 | 0.018 |  |  |  |
+| LJ55 | 1000000 | anneal | 12/12 | 12242 | 22988.5 | 0.142 | 0.062 | 0.082 | 1 | 0.40 | 0.93 |
+|  |  | GMIN | 12/12 | 8070.5 | 11203.75 | 0.121 | 0.097 | 0.027 |  |  |  |
+| LJ75 | 4000000 | anneal | 12/12 | 1409229.5 | 983622 | 27.019 | 12.543 | 13.818 | 1 | 1.2e-4 | 2.9e-3 |
+|  |  | GMIN | 12/12 | 70388 | 177511.5 | 3.672 | 1.577 | 2.059 |  |  |  |
+| LJ98 | 4000000 | anneal | 10/12 | 1511030.5 | 1985194.5 | 41.586 | 23.825 | 17.949 | 0.48 | 2.9e-3 | 0.026 |
+|  |  | GMIN | 12/12 | 370350 | 529297.75 | 16.378 | 14.740 | 1.638 |  |  |  |
+| LJ102 | 4000000 | anneal | 9/12 | 894801 | 3401143.75 | 27.445 | 15.463 | 11.982 | 1 | 0.93 | - |
+|  |  | GMIN | 8/12 | 2764598 | 3641355.25 | 127.0 | 115.0 | 12.022 |  |  |  |
+| LJ103 | 4000000 | anneal | 8/12 | 2293133 | 2608443.75 | 66.188 | 39.673 | 26.763 | 1 | 0.66 | - |
+|  |  | GMIN | 7/12 | 1929800.5 | 3208932.25 | 91.998 | 83.636 | 8.396 |  |  |  |
+| LJ104 | 4000000 | anneal | 9/12 | 2328723 | 2947098 | 69.306 | 39.241 | 30.064 | 0.21 | 0.063 | - |
+|  |  | GMIN | 5/12 | 4000000 | 1326273.25 | 192.0 | 174.4 | 17.507 |  |  |  |
+| LJ150 | 4000000 | anneal | 5/12 | 4000000 | 1477851 | 237.2 | 139.7 | 96.075 | 4.6e-3 | 5.1e-4 | 5.1e-4 |
+|  |  | GMIN | 12/12 | 123671.5 | 103274.5 | 11.353 | 10.761 | 0.592 |  |  |  |
+| Au55 | 1000000 | anneal | 6/12 | 852736 | 572700.75 | 31.522 | 23.474 | 7.920 | 0.014 | 7.1e-3 | - |
+|  |  | GMIN | 0/12 | 1000000 | 0 | 60.540 | 58.077 | 2.463 |  |  |  |
 | M55 ρ=6 | 1000000 | anneal | 12/12 | 563 | 128.75 | 0.010 | 0.008 | 0.001 | 1 | 3.7e-5 | 3.7e-5 |
-|  |  | GMIN | 12/12 | 37047.5 | 37358.75 | 0.751 | 0.637 | 0.115 |  |  |  |
+|  |  | GMIN | 12/12 | 24190 | 25035.25 | 0.469 | 0.391 | 0.079 |  |  |  |
 | M55 ρ=14 | 1000000 | anneal | 7/12 | 730604 | 623707.5 | 13.593 | 9.672 | 3.921 | 4.6e-3 | 2.9e-3 | - |
-|  |  | GMIN | 0/12 | 1000000 | 0 | 18.898 | 16.322 | 2.577 |  |  |  |
-| M80 ρ=6 | 4000000 | anneal | 2/12 | 4000000 | 0 | 168.9 | 111.3 | 57.363 | 6.7e-5 | 3.1e-5 | 3.1e-5 |
-|  |  | GMIN | 12/12 | 268934 | 268091.5 | 10.691 | 9.582 | 1.109 |  |  |  |
+|  |  | GMIN | 0/12 | 1000000 | 0 | 18.875 | 15.784 | 3.075 |  |  |  |
+| M80 ρ=6 | 4000000 | anneal | 2/12 | 4000000 | 0 | 168.9 | 111.3 | 57.363 | 0.012 | 3.4e-3 | - |
+|  |  | GMIN | 9/12 | 1378958 | 2895956.25 | 68.281 | 45.984 | 22.297 |  |  |  |
 | M80 ρ=14 | 4000000 | anneal | 9/12 | 1338932.5 | 3064673 | 49.869 | 38.033 | 12.262 | 3.4e-4 | 3.8e-4 | - |
-|  |  | GMIN | 0/12 | 4000000 | 0 | 152.7 | 138.3 | 14.430 |  |  |  |
+|  |  | GMIN | 0/12 | 4000000 | 0 | 166.8 | 134.1 | 32.494 |  |  |  |
 <!-- gmin-panel table: end -->

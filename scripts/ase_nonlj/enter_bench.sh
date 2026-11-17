@@ -4,8 +4,11 @@
 # Config::for_cluster and Config::recommended.
 #   enter_bench.sh --system m38r6 --arm for_cluster --seed 2000
 # No --arm rewrites the summary and README from committed rows.
-# An existing seed is left untouched. Recommended, ASE basin hopping and
-# minima hopping stop at three times the slowest for_cluster wall.
+# An existing for_cluster or recommended seed is left untouched. An
+# existing basin-hopping or minima-hopping seed is left untouched when
+# its row has no wall cap, and rerun when the stored row has one.
+# Those two arms stop at the call budget, the same budget as for_cluster.
+# A recommended seed stops at the cap already stored on its rows.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -43,28 +46,47 @@ esac
 
 mkdir -p "$WORK/runs" "$WORK/home" "$WORK/numba"
 ROWS=$ROOT/bench/ase-nonlj/rows.csv
-if [[ -f $ROWS ]] && grep -q "^${SYSTEM},${ARM},${SEED}," "$ROWS"; then
-  echo "keep existing $SYSTEM $ARM seed $SEED"
-  exit 0
+if [[ -f $ROWS ]]; then
+  KIND=$(python3 - "$ROWS" "$SYSTEM" "$ARM" "$SEED" << 'PY'
+import csv, sys
+path, system, arm, seed = sys.argv[1:]
+matches = [
+    row for row in csv.DictReader(open(path, newline=""))
+    if (row["system"], row["arm"], row["seed"]) == (system, arm, seed)
+]
+if not matches:
+    print("missing")
+elif any(not row["cap_s"] for row in matches):
+    print("keep")
+elif arm in ("ase_bh", "ase_mh"):
+    print("capped")
+else:
+    print("keep")
+PY
+)
+  if [[ $KIND == keep ]]; then
+    echo "keep existing $SYSTEM $ARM seed $SEED"
+    exit 0
+  fi
+  if [[ $KIND == capped ]]; then
+    echo "rerun $SYSTEM $ARM seed $SEED; the stored row has a wall cap"
+  fi
 fi
 
 CAP=""
-if [[ $ARM != for_cluster ]]; then
+if [[ $ARM == recommended ]]; then
   CAP=$(python3 - "$ROWS" "$SYSTEM" << 'PY'
-import csv
-import sys
+import csv, sys
 from pathlib import Path
-
 path, system = Path(sys.argv[1]), sys.argv[2]
-rows = list(csv.DictReader(path.open())) if path.exists() else []
-base = [
-    row for row in rows
-    if row["arm"] == "for_cluster" and row["system"] == system and row["host"] == "bench"
-]
-seeds = tuple(sorted(int(row["seed"]) for row in base))
-if seeds != tuple(range(2000, 2012)):
-    raise SystemExit(f"wall cap needs for_cluster seeds 2000-2011 for {system}, found {seeds}")
-print(f"{3.0 * max(float(row['wall_s']) for row in base):.6f}")
+rows = list(csv.DictReader(path.open()))
+caps = sorted({
+    row["cap_s"] for row in rows
+    if row["system"] == system and row["arm"] == "recommended" and row["cap_s"]
+})
+if len(caps) != 1:
+    raise SystemExit(f"the stored recommended wall cap is not unique: {caps}")
+print(caps[0])
 PY
 )
 fi
@@ -72,12 +94,14 @@ fi
 BIN=${ASE_NONLJ:-/work/target-panel/release/examples/ase_nonlj}
 REV=${ASE_NONLJ_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}
 PY=${PYTHON:-python3}
+user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 sudo -n unshare --uts sh -c "hostname bench; \
-  export HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba; \
-  export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1; \
-  export OMP_PROC_BIND=TRUE OMP_PLACES=cores PYTHONUNBUFFERED=1; \
-  export ASE_NONLJ_WORK=$WORK/runs ASE_NONLJ=$BIN ASE_NONLJ_WALL_CAP=$CAP ASE_NONLJ_REVISION=$REV; \
-  exec taskset -c 0 $PY $HERE/run_one.py $SYSTEM $ARM $SEED" \
+  exec sudo -u $(id -un) env \
+  HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba PYTHONPATH=$user_site \
+  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1 \
+  OMP_PROC_BIND=TRUE OMP_PLACES=cores PYTHONUNBUFFERED=1 \
+  ASE_NONLJ_WORK=$WORK/runs ASE_NONLJ=$BIN ASE_NONLJ_WALL_CAP=$CAP ASE_NONLJ_REVISION=$REV \
+  taskset -c 0 $PY $HERE/run_one.py $SYSTEM $ARM $SEED" \
   > "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" 2> "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stderr"
 
 python3 - "$SYSTEM" "$ARM" "$SEED" "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" "$ROWS" << 'PY'
@@ -95,7 +119,7 @@ if len(fields) != 15:
 path = Path(rows_path)
 header = "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,outside_s,code_revision,host,stop,cap_s"
 text = path.read_text() if path.exists() else ""
-if f"{system},{arm},{seed}," in text:
+if f"{system},{arm},{seed}," in text and fields[14] != "":
     print(f"keep existing {system} {arm} seed {seed}")
     raise SystemExit(0)
 path.parent.mkdir(parents=True, exist_ok=True)

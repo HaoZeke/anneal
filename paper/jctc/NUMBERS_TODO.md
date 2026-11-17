@@ -23,7 +23,7 @@ We record no replacement digest.
 
 The article reports LJ75 in tab:ablation and tab:gmin.
 In tab:gmin, seeds 2000-2011, the recommended preset hits 12 of 12.
-And the Wales-group basin-hopping program (GMIN) hits 0 of 12.
+And the Wales-group basin-hopping program (GMIN) hits 12 of 12.
 The 200-seed campaign on seeds 0 through 199 runs at a cap of 4e6 force calls.
 No per-arm hit rate from that campaign is typed.
 No CSV for that campaign is in the tree.

@@ -1601,7 +1601,9 @@
       ],
       "runners": [
         "scripts/gmin_panel/run_panel.py",
-        "scripts/gmin_panel/enter_bench.sh"
+        "scripts/gmin_panel/inputs.py",
+        "scripts/gmin_panel/enter_bench.sh",
+        "scripts/gmin_panel/build_gmin.sh"
       ],
       "budgets": {
         "source": "scripts/gmin_panel/run_panel.py",

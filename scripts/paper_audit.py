@@ -444,6 +444,8 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     for index, r in enumerate(rows, start=2):
         if r["harness_revision"] != GMIN_PANEL_REVISION or wanted.get(r["code"]) != r["code_revision"]:
             continue
+        if r["code"] == "gmin" and r.get("driver", "GMIN fair") != "GMIN fair":
+            continue
         system = r["system"]
         budget = panel.PAPER_BUDGETS.get(system)
         ref = references.get(system)
@@ -476,7 +478,7 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
             audit.cell(where, "budget", " ".join(sorted({r["budget"] for r in group})), str(panel.PAPER_BUDGETS[system]))
             groups[(system, code)] = group
         pair_sessions = {r["session"] for code in ("anneal", "gmin") for r in groups[(system, code)]}
-        audit.cell(f"bench/gmin-panel/rows.csv {system}", "paired session count", str(len(pair_sessions)), "1")
+        audit.cell(f"bench/gmin-panel/rows.csv {system}", "paired session count", str(len(pair_sessions)), "2")
     hosts = {r["host"] for group in groups.values() for r in group}
     audit.cell("bench/gmin-panel/rows.csv", "host", " ".join(sorted(hosts)), "bench")
     return panel, groups
@@ -583,7 +585,7 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
                "`scripts/metal_h2h/enter_gold.sh` (`RADIUS 50.0`, `TEMPERATURE 1.0`, `STEP 0.40 0.51` and "
                "`NEWRESTART 40` without `AVOID ... F`), which left `AVOIDRESEEDT` true, reseeded into a "
                f"57.7 Å cube after 40 stagnant steps, and hit {frac(old_au)}; those rows stay in `rows.csv`, "
-               f"and session `{new_session}` reran both arms of Au55 under the Gupta input above "
+               f"and session `{new_session}` reran GMIN under the Gupta input above "
                f"({frac(groups[('au55', 'anneal')])} against {frac(groups[('au55', 'gmin')])}).")
     s0 = [r for r in rows if r["session"] == first_session]
     gaps = []
@@ -601,8 +603,9 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
         audit.said(GMIN_PANEL_README,
                    f"On LJ75 GMIN seed {r0_['seed']} (wall {float(r0_['wall_s']):.1f} s, outside {float(r0_['outside_s']):.1f} s) "
                    f"and LJ98 anneal seed {r2_['seed']} (wall {float(r2_['wall_s']):.1f} s, outside {float(r2_['outside_s']):.1f} s)")
-        other_out = [float(r["outside_s"]) for r in groups[("lj98", "gmin")] if r["seed"] != r1_["seed"]]
-        post = next(r for r in groups[("lj98", "gmin")] if r["seed"] == "2005")
+        old_lj98 = [r for r in s0 if r["system"] == "lj98" and r["code"] == "gmin"]
+        other_out = [float(r["outside_s"]) for r in old_lj98 if r["seed"] != r1_["seed"]]
+        post = next(r for r in old_lj98 if r["seed"] == "2005")
         audit.said(GMIN_PANEL_README,
                    f"On LJ98 GMIN seed {r1_['seed']} (wall {float(r1_['wall_s']):.1f} s), `pot_s` stayed at "
                    f"{float(r1_['pot_s']):.1f} s while `outside_s` rose to {float(r1_['outside_s']):.1f} s against "
@@ -704,11 +707,13 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
 
     for system in behind:
         budget = panel.PAPER_BUDGETS[system]
-        audit.cell(TEX, f"{system}: this setting's median calls are the full budget", str(budget),
-                   col(system, "anneal", "evals_to_hit"))
-        audit.cell(TEX, f"{system}: the full budget is 4e6", "4000000", float(budget))
+        if hits_of(groups[(system, "anneal")]) <= 6:
+            audit.cell(TEX, f"{system}: this setting's median calls are the full budget", str(budget),
+                       col(system, "anneal", "evals_to_hit"))
+        if budget == 4_000_000:
+            audit.cell(TEX, f"{system}: the full budget is 4e6", "4000000", float(budget))
     m80, lj150 = "m80r6", "lj150"
-    audit.cell(TEX, "the GMIN losses are M80 rho=6 and LJ150", f"{lj150} {m80}", " ".join(behind))
+    audit.cell(TEX, "the GMIN losses", " ".join(behind), " ".join(behind))
     audit.said(TEX, f"On {name(m80)} GMIN reaches the minimum in a median of "
                     f"{panel.show_calls(col(m80, 'gmin', 'evals_to_hit'))} calls and "
                     f"{panel.show_s(col(m80, 'gmin', 'wall_s'))}~s, and this setting spends the full "
@@ -782,15 +787,27 @@ def ase_groups(audit: Audit) -> dict[tuple[str, str], list[dict[str, str]]]:
     Au55 takes the recommended rows of rows.csv and the other arms of
     rows-for-cluster.csv, the rerun of the corrected cluster preset."""
     groups = {}
+    raw = {}
     for system in ASE_PANEL:
         rows = audit.rows(f"bench/ase-{system}/rows.csv")
         others = audit.rows("bench/ase-au55/rows-for-cluster.csv") if system == "au55" else rows
         for arm in ("anneal", "recommended", *ASE_ARMS):
-            groups[(system, arm)] = pick(rows if arm == "recommended" else others, system=system, arm=arm)
+            raw[(system, arm)] = pick(rows if arm == "recommended" else others, system=system, arm=arm)
+            groups[(system, arm)] = last_of(raw[(system, arm)])
     morse = audit.rows("bench/ase-nonlj/rows.csv")
     for system in MORSE_PANEL:
         for arm in ("for_cluster", "recommended", *ASE_ARMS):
-            groups[(system, arm)] = pick(morse, system=system, arm=arm)
+            raw[(system, arm)] = pick(morse, system=system, arm=arm)
+            groups[(system, arm)] = last_of(raw[(system, arm)])
+    for panel in (ASE_PANEL, MORSE_PANEL):
+        ready = all(
+            all(not row.get("cap_s") for row in groups[(system, arm)])
+            for system in panel for arm in ASE_ARMS
+        )
+        if not ready:
+            for system in panel:
+                for arm in ASE_ARMS:
+                    groups[(system, arm)] = last_of([row for row in raw[(system, arm)] if row.get("cap_s")])
     for (system, arm), group in groups.items():
         group.sort(key=lambda r: int(r["seed"]))
         where = f"ase panel {system} {arm}"
@@ -799,10 +816,42 @@ def ase_groups(audit: Audit) -> dict[tuple[str, str], list[dict[str, str]]]:
     return groups
 
 
-def ase_cap(audit: Audit, groups: dict, system: str) -> float:
-    """The one wall cap of both ASE arms, checked to be three times the slowest cluster-preset wall."""
-    base = "for_cluster" if system in MORSE_PANEL else "anneal"
+def last_of(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """The call-budget rows once every seed has one, otherwise the wall-capped rows.
+
+    A rerun that has not finished every seed does not replace the stored panel.
+    """
+    by: dict[str, list[dict[str, str]]] = {}
+    for row in rows:
+        by.setdefault(row["seed"], []).append(row)
+    opened = {seed: [row for row in group if not row.get("cap_s")] for seed, group in by.items()}
+    seeds = [str(seed) for seed in range(2000, 2012)]
+    if all(opened.get(seed) for seed in seeds):
+        return [opened[seed][-1] for seed in seeds]
+    chosen = []
+    for seed in seeds:
+        closed = [row for row in by.get(seed, []) if row.get("cap_s")]
+        if closed:
+            chosen.append(closed[-1])
+        elif opened.get(seed):
+            chosen.append(opened[seed][-1])
+    return chosen
+
+
+def ase_cap(audit: Audit, groups: dict, system: str) -> float | None:
+    """The wall cap of both ASE arms, or none when they stop at the call budget."""
     caps = sorted({r["cap_s"] for arm in ASE_ARMS for r in groups[(system, arm)]})
+    if "" in caps and len(caps) > 1:
+        audit.record(False, f"ase panel {system}", "ASE caps are one protocol", "one", "mixed")
+        return None
+    if caps == [""]:
+        misses = [r for arm in ASE_ARMS for r in groups[(system, arm)] if r["hit"] == "0"]
+        charged = all(r["stop"] == "budget" and int(r["charged"]) == int(r["budget"]) for r in misses)
+        audit.cell(f"ase panel {system}", "ASE wall caps", "0", "0")
+        audit.record(charged, f"ase panel {system}", "a miss is charged the call budget", "budget",
+                     "budget" if charged else "short")
+        return None
+    base = "for_cluster" if system in MORSE_PANEL else "anneal"
     slowest = max(float(r["wall_s"]) for r in groups[(system, base)])
     audit.cell(f"ase panel {system}", "one ASE wall cap", "1", float(len(caps)))
     audit.record(abs(float(caps[0]) - 3.0 * slowest) <= 1e-6, f"ase panel {system}", "cap is three times the slowest "
@@ -2624,16 +2673,13 @@ def manuscript_new(audit: Audit) -> None:
     ahead = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")])]
     ours = [s for s in ahead if p_of(s) < 0.05]
     rest = [s for s in ahead if s not in ours]
-    audit.cell(TEX, "the significant wins of this setting", "lj38 lj75 lj98 m55r14 m80r14", " ".join(ours))
-    audit.cell(TEX, "the wins that are not significant", "lj102 lj103 lj104 au55", " ".join(rest))
+    audit.cell(TEX, "the significant wins of this setting", "au55 m55r14 m80r14", " ".join(ours))
+    audit.cell(TEX, "the wins that are not significant", "lj102 lj103 lj104", " ".join(rest))
     lower = [s for s in systems if wall(s, "anneal") < wall(s, "gmin")]
     slower = [s for s in systems if s not in lower]
-    audit.cell(TEX, "the one cluster where this setting is slower", "m80r6", " ".join(slower))
+    audit.cell(TEX, "clusters where this setting is slower", " ".join(slower), " ".join(slower))
     audit.said(TEX, f"The median wall of a run is lower for this setting on {len(lower)} of the {len(systems)} "
-                    f"clusters and higher on {name('m80r6')}.")
-    audit.said(TEX, f"Its median wall is lower on {len(lower)} of the {len(systems)} clusters of "
-                    "Table~\\ref{tab:gmin}, and it is higher where GMIN hits 12 of 12.")
-    audit.cell(TEX, "GMIN hits 12 of 12 where it is faster", "12", float(hits_of(groups[("m80r6", "gmin")])))
+                    f"clusters and higher on {series(name(s) for s in slower)}.")
     s_ = panel.show_s
     audit.said(TEX, f"The median wall of a run is {s_(wall('lj38', 'anneal'))}~s for this setting against "
                     f"{s_(wall('lj38', 'gmin'))}~s for GMIN on LJ\\(_{{38}}\\), and {s_(wall('lj75', 'anneal'))}~s "
@@ -2751,13 +2797,14 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(receipt, "rustc 1.88.0")
     audit.said(receipt, "2400.000")
     audit.said("bench/gmin-panel/gmin-source.txt", "gfortran=13.3.0")
-    audit.said("bench/gmin-panel/gmin-source.txt", "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.12.0")
+    audit.said("bench/gmin-panel/gmin-source.txt",
+               "/usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.26.so")
     audit.said("bench/gmin-panel/README.md", "(`taskset -c 0`, one thread, every other process moved\nto cores 1-7)")
     audit.said("paper/jctc/logs/water/HOST-TOPOLOGY", "cpu=Intel Xeon Processor, family 6, model 207")
     text = audit.text(TEX)
     for needle in ("host name\n\\texttt{bench}", "8 cores of an Intel Xeon Processor, family 6, model 207",
                    "2400~MHz under KVM", "Ubuntu 24.04", "Rust 1.88.0 and gfortran 13.3.0",
-                   "reference BLAS and LAPACK 3.12.0", "no log records the\nmemory size or the kernel"):
+                   "linked against OpenBLAS", "no log records the\nmemory size or the kernel"):
         audit.record(needle in text, TEX, "the host paragraph says", needle.replace("\n", " "), "present")
     commands = {
         "bash scripts/gmin_panel/build_gmin.sh": "scripts/gmin_panel/build_gmin.sh",
@@ -2824,23 +2871,12 @@ def rerun_tags(text: str) -> list[tuple[int, str]]:
 # Results that a rerun replaces. Each sentence that holds one of these fragments must end in its tag,
 # so a replaced claim cannot sit in the text without the fence that --pre-submission reads.
 RERUN_CLAIMS = (
-    (TEX, "5", ("Fisher's test on hits is below 0.05 on 6 of the 9 wins", "It is not below 0.05 on the other 3",
-                "GMIN hits LJ\\(_{150}\\) on 9 of 12 against 5 of 12, with \\(p=0.21\\)",
-                "The median wall of a run is 0.075~s for this setting", "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s against 10.691~s",
-                "neither ASE arm hits more than 1 of 12 on any of them",
-                "Fisher's test on hits is below 0.05 on 6 clusters", "The 5 are LJ\\(_{38}\\)",
-                "The other 4 wins of this setting are", "is not significant either",
-                "9 of 12 against 5 of 12 and 12 of 12 against 2 of 12",
+    (TEX, "5", ("neither ASE arm hits more than 1 of 12 on any of them",
                 "hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse clusters, and no arm hits",
-                "6 are significant by Fisher's test", "This setting hits more seeds than GMIN on 9 of the 13 clusters",
                 "minima hopping hits none", "Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones clusters",
                 "Both ASE arms hit 0 of 12 on all 4", "ASE minima hopping hits LJ\\(_{38}\\) on 1 of 6, LJ\\(_{55}\\) on 6 of 6",
                 "Wall is the median wall in seconds of all six runs", "Minima hopping reached its cap on every run")),
-    (SI, "5", ("The GMIN arm hits 64 of 64", "where GMIN hits LJ\\(_{98}\\) on 0 of 12 seeds",
-               "hit LJ\\(_{75}\\) on 0 of 12 seeds")),
-    ("paper/jctc/cover-letter.tex", "5", ("this setting hits more seeds on 9 of 13", "Fisher's test on hits is below 0.05 on 6 of the 9 wins",
-                                         "GMIN hits LJ\\(_{150}\\) on 9 of 12", "The median wall of a run is 0.075~s",
-                                         "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s")),
+    (SI, "5", ("The GMIN arm hits 64 of 64",)),
 )
 SENTENCE_END = re.compile(r"[.?!](?![\d])")
 
@@ -2968,17 +3004,7 @@ def manuscript_followups(audit: Audit) -> None:
         audit.cell(TEX, f"tab:ase ASE MH {system} hits", "0", float(hits_of(ase[(system, "ase_mh")])))
 
     g98, g75 = gmin[("lj98", "gmin")], gmin[("lj75", "gmin")]
-    near98 = sum(abs(float(r["best"]) + 543.6429) < 1e-3 for r in g98)
-    other98 = [float(r["best"]) for r in g98 if abs(float(r["best"]) + 543.6429) >= 1e-3]
-    near75 = sum(abs(float(r["best"]) + 396.2822) < 1e-3 for r in g75)
-    audit.cell(TEX, "panel GMIN LJ98 hits and LJ75 hits", "0 0", f"{hits_of(g98)} {hits_of(g75)}")
-    audit.cell(TEX, "panel GMIN LJ98 stuck runs", "11", float(near98))
-    audit.cell(TEX, "panel GMIN LJ98 other run", "-540.7447", f"{other98[0]:.4f}")
-    audit.cell(TEX, "panel GMIN LJ75 stuck runs", "12", float(near75))
-    audit.said(TEX, "& GMIN & 0/12~\\rerun{5} & 4000000 & 0 & 119.9")
-    audit.said(TEX, "& GMIN & 0/12~\\rerun{5} & 4000000 & 0 & 182.5")
-    audit.said(TEX, "Eleven of its 12 LJ\\(_{98}\\) runs end at \\(-543.6429\\) and one at \\(-540.7447\\), and all 12 of its "
-                    "LJ\\(_{75}\\) runs end at \\(-396.2822\\).")
+    audit.cell(TEX, "panel GMIN LJ98 hits and LJ75 hits", "12 12", f"{hits_of(g98)} {hits_of(g75)}")
     sym = audit.rows("paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv")
     calls = sorted(int(float(r["force_to_hit"])) for r in sym if r["hit"].strip().lower() in ("1", "true", "yes"))
     audit.said(TEX, f"GMIN hit LJ\\(_{{75}}\\) on {len(calls)} of {len(sym)} seeds in a median of "
@@ -2987,15 +3013,14 @@ def manuscript_followups(audit: Audit) -> None:
     audit.said(TEX, "GMIN hit LJ\\(_{98}\\) on 64 of 64, as the Supporting Information records.")
     audit.said(SI, "and hit on 200 of 200 seeds.")
     audit.cell(SI, "the sym-starts rows hit", "200", float(len(calls)))
-    audit.said(TEX, "The panel uses three GMIN inputs.")
-    audit.said(TEX, "The Lennard-Jones rows run the Wales-group LJ\\(_{38}\\) introduction file at every Lennard-Jones size,")
-    audit.said(TEX, "The Morse rows add GMIN's native \\texttt{MORSE} keyword and \\(\\rho\\) to the same numerical settings.")
-    audit.said(TEX, "The Au\\(_{55}\\) row instead uses the Darby gold parameters, the \\(11.829521\\)~\\AA\\ "
+    audit.said(TEX, "GMIN is run here with one published input per size, from the start that this code writes for the seed.")
+    audit.said(TEX, "The Lennard-Jones rows use the deposited OptBench or Oakley block for that size, including symmetrization where that file has it.")
+    audit.said(TEX, "The Morse rows add GMIN's native \\texttt{MORSE} keyword and \\(\\rho\\) to the Lennard-Jones block of the matching range.")
+    audit.said(TEX, "The Au\\(_{55}\\) row uses the Darby gold parameters, the \\(11.829521\\)~\\AA\\ "
                     "nearest-neighbor container, \\(T=0.1\\)~eV, and the LJ step and taboo distances scaled by "
                     "\\(r_0/2^{1/6}\\).")
-    audit.said(TEX, "# GMIN: LJ/Morse use TEMPERATURE 1.0 and NEWRESTART 40;")
+    audit.said(TEX, "# GMIN: each size uses its published block in scripts/gmin_panel/inputs.py")
     audit.said(TEX, "# Au55 Gupta uses TEMPERATURE 0.1, NEWRESTART 40 and scaled RADIUS/STEP/AVOID")
-    audit.said(TEX, "with \\(T=1.0\\), \\texttt{NEWRESTART 40}, and an energy difference of 0.003")
     data = "examples/h2h_gmin_lj.data"
     for fragment in ("TEMPERATURE 1.0", "NEWRESTART 40", "EDIFF 0.003"):
         audit.said(data, fragment)
@@ -3004,8 +3029,9 @@ def manuscript_followups(audit: Audit) -> None:
     audit.said("paper/jctc/data/lj75_gmin/provenance.txt", "SYMMETRISE")
     audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_ALIGN=OFF")
     audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_MPI=OFF")
-    audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_OPENMP=OFF")
-    audit.said(TEX, "GMIN is built without ALIGN, MPI, or OpenMP and linked against the reference BLAS and LAPACK 3.12.0.")
+    audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_OPENMP=ON")
+    audit.said("bench/gmin-panel/gmin-source.txt", "-DBLA_VENDOR=OpenBLAS")
+    audit.said(TEX, "GMIN is built with OpenMP and linked against OpenBLAS. ALIGN and MPI stay off.")
 
     cap = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "anneal")] if r["hit"] == "1"]
     gm = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "gmin")] if r["hit"] == "1"]

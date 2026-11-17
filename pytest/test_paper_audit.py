@@ -122,7 +122,7 @@ def test_a_drifted_gmin_panel_summary_cell_is_reported():
     audit = audit_mod.Audit()
     summary = audit.rows("bench/gmin-panel/summary.csv")
     au = next(r for r in summary if r["system"] == "au55")
-    au["gmin_hits"] = "0"
+    au["gmin_hits"] = "1"
     audit_mod.manuscript_gmin(audit)
     assert [r[2] for r in audit.drifts()] == ["gmin_hits"]
 
@@ -130,7 +130,7 @@ def test_a_drifted_gmin_panel_summary_cell_is_reported():
 def test_a_censored_gmin_panel_wall_p_claim_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    audit.text_cache[audit_mod.TEX] = tex.replace("& 0.40 & 0.16 & -- \\\\", "& 0.40 & 0.16 & 0.0073 \\\\")
+    audit.text_cache[audit_mod.TEX] = tex.replace("& 0.21 & 0.063 & -- \\\\", "& 0.21 & 0.063 & 0.0073 \\\\")
     audit_mod.manuscript_gmin(audit)
     assert [r[2] for r in audit.drifts()] == ["MW p wall"]
 

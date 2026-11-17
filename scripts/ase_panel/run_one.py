@@ -99,7 +99,7 @@ def place(n: int, seed: int, length: float) -> np.ndarray:
     return np.vstack(points)
 
 
-def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float, budget: int) -> dict:
+def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float | None, budget: int) -> dict:
     import ase
     from ase import Atoms
     from ase.optimize.basin import BasinHopping
@@ -120,14 +120,15 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float, budget: 
         length = 1.0
     atoms = Atoms(f"{symbol}{spec['n']}", positions=place(spec["n"], seed, length), pbc=False)
     started = time.perf_counter()
+    deadline = None if cap_s is None else started + cap_s
     server = None
     if spec["kind"] == "lj":
         warmup()
-        calc = LjCalculator(budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=started + cap_s)
+        calc = LjCalculator(budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=deadline)
     else:
         server = AnnealServer(binary, system)
         calc = AnnealCalculator(
-            server, budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=started + cap_s
+            server, budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=deadline
         )
     atoms.calc = calc
     np.random.seed(seed)
@@ -162,7 +163,7 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float, budget: 
         "inside": calc.inside_s,
         "outside": max(0.0, wall - calc.inside_s),
         "stop": "hit" if hit else stop,
-        "cap_s": cap_s,
+        "cap_s": "" if cap_s is None else cap_s,
     }
 
 
@@ -191,7 +192,7 @@ def run_anneal(system: str, seed: int, budget: int, preset: str, cap_s: str) -> 
         "inside": float(fields["inside_s"]),
         "outside": float(fields["outside_s"]),
         "stop": stop,
-        "cap_s": cap_s,
+        "cap_s": "" if cap_s is None else cap_s,
     }
 
 
@@ -241,15 +242,12 @@ def main() -> int:
         row = run_anneal(system, seed, budget, preset, cap_text)
     else:
         cap_text = os.environ.get("ASE_PANEL_WALL_CAP", "")
-        if not cap_text:
-            print("ASE_PANEL_WALL_CAP is unset", file=sys.stderr)
-            return 2
         row = run_ase(
             system,
             arm,
             seed,
             Path(os.environ.get("ASE_PANEL_WORK", "/work/ase-panel/runs")) / f"{system}-{arm}-{seed}",
-            float(cap_text),
+            float(cap_text) if cap_text else None,
             budget,
         )
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
