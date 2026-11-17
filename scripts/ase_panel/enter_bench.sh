@@ -67,12 +67,13 @@ fi
 
 PANEL=${ASE_PANEL:-/work/target-panel/release/examples/ase_panel}
 ASG=${ASG_EVAL:-/work/target-panel/release/examples/asg_eval}
+REV=${ASE_PANEL_REVISION:-5a7f629d79be88b9d3f0cb2c6665062bda4ac625}
 PY=${PYTHON:-python3}
 sudo -n unshare --uts sh -c "hostname bench; \
   export HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba; \
   export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1; \
   export OMP_PROC_BIND=TRUE OMP_PLACES=cores PYTHONUNBUFFERED=1; \
-  export ASE_PANEL_WORK=$WORK/runs ASE_PANEL=$PANEL ASG_EVAL=$ASG ASE_PANEL_WALL_CAP=$CAP; \
+  export ASE_PANEL_WORK=$WORK/runs ASE_PANEL=$PANEL ASG_EVAL=$ASG ASE_PANEL_WALL_CAP=$CAP ASE_PANEL_REVISION=$REV; \
   exec taskset -c 0 $PY $HERE/run_one.py $SYSTEM $ARM $SEED" \
   > "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" 2> "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stderr"
 

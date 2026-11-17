@@ -48,8 +48,7 @@ fn main() {
                 (Config::for_cluster(n), Box::new(move |x| potential.value_and_gradient(x)))
             }
             Kind::Gold => {
-                let potential = Gupta::copper_gold(0, n);
-                let (length, well) = gupta_scales(&potential);
+                let (length, well) = gupta_scales();
                 let mut cfg = Config::with_scales(n, length, well);
                 let proto = Config::for_cluster(n);
                 cfg.bayes_screen = proto.bayes_screen;
@@ -143,7 +142,8 @@ fn system(name: &str) -> Option<(usize, Kind, f64)> {
 }
 
 /// Pair minimum over 2^(1/6), and the well depth. Same probe as asg_eval.
-fn gupta_scales(potential: &Gupta) -> (f64, f64) {
+fn gupta_scales() -> (f64, f64) {
+    let potential = Gupta::copper_gold(0, 2);
     let mut best_r = 0.0;
     let mut best_e = f64::INFINITY;
     let mut r = 1.8;
