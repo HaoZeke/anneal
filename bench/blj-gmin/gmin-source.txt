@@ -9,5 +9,5 @@ patch=scripts/blj_gmin/blj-timer.patch a22f03219fa664d035c6e053408f5e36f799ac47e
 keyword=BLJCLUSTER_NOCUT
 cmake=-DWITH_ALIGN=OFF -DWITH_MPI=OFF -DWITH_OPENMP=OFF -DWITH_SPARSE=OFF -DWITH_PYTHON=OFF -DWITH_MYBLAS=OFF -DWITH_MYLAPACK=OFF
 gfortran=13.3.0
-linked=/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.12.0 /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0 
+linked=/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.12.0 /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0
 binary_sha256=c5bed79389cea8302fb530c99a9e2e892b191e9dfe7ca5c35702548f61ba6d37
