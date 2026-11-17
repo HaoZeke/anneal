@@ -142,16 +142,6 @@ KNOWN_GAPS = {
 
 UNTRACED = [
     (SI, "-197.7750", "only REPORT.md quotes it; no committed row holds it"),
-    ("bench/gad-published/README.md", "seed 2000 at 226282 calls and seed 2006 at 114143 calls",
-     "the per-seed GAD rerun rows were not committed"),
-    ("bench/gad-published/README.md", "a median of 13 generations on LJ31 (2–20) and 15.5 on LJ38 (12–24)",
-     "the per-seed GAD rerun rows were not committed"),
-    ("bench/gad-published/README.md", "| LJ31 | gmin | 12/12 | 47139.5 | 73509.5 |",
-     "Mann-Whitney p needs the per-seed rows, which were not committed"),
-    ("bench/metal-cluster-h2h/ptcu-b3d03061/README.md", "No committed row holds the −81.90409805",
-     "the earlier Pt6Cu17 energy has no committed row"),
-    ("bench/water-h2o20-goat/README.md", "Seed 16001, 28000 calls, same wrapper as the table above, scored −2214.506788 eV",
-     "the seed 16001 rows were not committed"),
 ]
 
 
@@ -2280,6 +2270,27 @@ def bench_prose(audit: Audit) -> None:
                f"reach −{-min(pt):.8f} for Pt6Cu17 on all six seeds")
     audit.cell("bench/metal-cluster-h2h/ptcu-b3d03061/README.md", "Pt6Cu17 seeds at that energy", "6",
                float(sum(abs(x - min(pt)) < 1e-8 for x in pt)))
+    polish_path = "bench/metal-cluster-h2h/ptcu-b3d03061/polish-reruns.csv"
+    polish = pick(audit.rows(polish_path), system="pt6cu17", host="bench")[0]
+    audit.said("bench/metal-cluster-h2h/ptcu-b3d03061/README.md",
+               f"gives −{-float(polish['energy_eV']):.8f} eV in `polish-reruns.csv`")
+    audit.record(polish["code_revision"] == "be3849e7811634aca67688da70f5413f9d860ec9", polish_path,
+                 "Pt6Cu17 polish rerun revision", "be3849e7", polish["code_revision"][:8])
+    audit.record(polish["code_tree"] == "93b2b874d245fed5d538386e590c415029243ae5", polish_path,
+                 "Pt6Cu17 polish rerun tree", "93b2b874", polish["code_tree"][:8])
+
+    water_path = "bench/water-h2o20-goat/rerun-attempts.csv"
+    water = pick(audit.rows(water_path), system="h2o16", seed="16001")[0]
+    missing = set(water["missing"].split(";"))
+    audit.record(water["status"] == "blocked" and water["host"] == "bench", water_path,
+                 "water seed 16001 rerun records the dependency block", "blocked on bench",
+                 f"{water['status']} on {water['host']}")
+    audit.record(missing == {"anneal-binary", "crest", "xtb", "rgpot-xtb-engine"}, water_path,
+                 "water seed 16001 names every missing executable", "all four", " ".join(sorted(missing)))
+    audit.said("bench/water-h2o20-goat/README.md",
+               "Those are historical session quotes, not reproduced rows: the attempted rerun recorded in "
+               "`rerun-attempts.csv` could not start because this host has none of the anneal binary, CREST, xTB "
+               "or the rgpot xTB engine.")
 
     tip = "bench/tip4p-h2h/README.md"
     audit.said(tip, "18.4 µs per GMIN call. The adaptive arm takes 18.3 µs")
@@ -2804,13 +2815,22 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(TEX, lf.caption_tex())
     raster = lf.raster_letters()
     audit.said(TEX, f"Panels (a) to ({chr(ord(raster[0]) - 1)}) are drawn as vectors from the landscape tables.")
-    audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) redraw the sealed maps of the campaigns pixel for pixel as "
-                    "vector rectangles, because their landscape tables are not in the repository.")
+    audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) show the sealed raster maps of the campaigns, because "
+                    "their landscape tables and the campaign driver are not in the repository.")
     audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), TEX,
                  "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
-    figure = (ROOT / "paper/jctc/figs/landfold_maps.pdf").read_bytes()
-    audit.record(b"/Subtype /Image" not in figure, "paper/jctc/figs/landfold_maps.pdf",
-                 "the landfold figure holds no embedded image", "none", "an image" if b"/Subtype /Image" in figure else "none")
+    blocked = audit.rows("paper/jctc/data/landfold_maps_v7/rerun-status.csv")
+    audit.record("".join(row["panels"] for row in blocked).replace("-", "") == raster,
+                 "paper/jctc/data/landfold_maps_v7/rerun-status.csv",
+                 "every raster panel has a regeneration status", raster,
+                 "".join(row["panels"] for row in blocked).replace("-", ""))
+    for row in blocked:
+        audit.record(row["status"] == "blocked" and row["host"] == "bench"
+                     and set(row["missing"].split(";")) == {"campaign-driver", "campaign-tables"},
+                     "paper/jctc/data/landfold_maps_v7/rerun-status.csv",
+                     f"panels {row['panels']} record the missing campaign inputs",
+                     "blocked on bench: driver and tables",
+                     f"{row['status']} on {row['host']}: {row['missing']}")
 
 
 RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "6": "the Mackay cap and mackay_cut", "7": "the GFN2 sign and rerun"}
