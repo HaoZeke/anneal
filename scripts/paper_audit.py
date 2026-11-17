@@ -142,6 +142,8 @@ KNOWN_GAPS = {
 
 UNTRACED = [
     (SI, "-197.7750", "only REPORT.md quotes it; no committed row holds it"),
+    (TEX, "hits 121 of 192 seeds for the default hop and 97 of 192 for CREST",
+     "the per-seed hexamer logs for the 192-seed campaign were not committed"),
     ("bench/gad-published/README.md", "seed 2000 at 226282 calls and seed 2006 at 114143 calls",
      "the per-seed GAD rerun rows were not committed"),
     ("bench/gad-published/README.md", "a median of 13 generations on LJ31 (2–20) and 15.5 on LJ38 (12–24)",

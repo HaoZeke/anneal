@@ -1030,13 +1030,17 @@ repository root.
 # Au55 Gupta uses TEMPERATURE 0.1, NEWRESTART 40 and scaled RADIUS/STEP/AVOID
 bash scripts/gmin_panel/build_gmin.sh
 snakemake -s workflow/Snakefile gmin_panel
+# rerun only the Au55 rows even when rows.csv already carries that seed set
+bash scripts/gmin_panel/enter_bench.sh --system au55 --rerun
 bash scripts/gmin_panel/enter_bench.sh --summarize --tex
 
 # ASE: rewrite the tables from the committed rows, with no new search
 bash scripts/ase_panel/enter_bench.sh --system lj38
-bash scripts/ase_nonlj/enter_bench.sh
+ASE_NONLJ_REVISION=90b88235fe54abace3bde32789582eb6573ed40a \
+  pixi run --locked --frozen bash scripts/ase_nonlj/enter_bench.sh
 
 # CREST: one draw, then the polish, and the anneal arm
+tar -xJf paper/jctc/logs/logs-water.tar.xz -O water/anneal-paper4000-seed0/start.xyz > start.xyz
 crest start.xyz -T 1
 xtb --gfn 2 --opt vtight --acc 0.01 --iterations 500
 gfn2_water_h2h 6 4000 0 anneal-paper4000-seed0
