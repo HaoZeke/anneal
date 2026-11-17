@@ -31,6 +31,7 @@ import csv
 import datetime
 import functools
 import importlib.util
+import json
 import math
 import os
 import random
@@ -2967,7 +2968,7 @@ def manuscript_new(audit: Audit) -> None:
     raster = lf.raster_letters()
     audit.said(TEX, f"Panels (a) to ({chr(ord(raster[0]) - 1)}) are drawn as vectors from the landscape tables.")
     audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) show the sealed raster maps of the campaigns, because "
-                    "the current-code serial regeneration is incomplete.")
+                    "the current-code regeneration could not publish all six tables.")
     audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), TEX,
                  "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
     blocked = audit.rows("paper/jctc/data/landfold_maps_v7/rerun-status.csv")
@@ -2980,18 +2981,38 @@ def manuscript_new(audit: Audit) -> None:
                  "every raster panel has a regeneration status", raster,
                  "".join(row["panels"] for row in attempts).replace("-", ""))
     expected = {
-        "lj_csm/lj75/recommended": {"198-seeds", "792000000-potential-calls"},
-        "lj_csm/lj98/derived": {"48-seeds", "192000000-potential-calls"},
-        "lj_csm_c26/lj98/recommended": {"48-seeds", "192000000-potential-calls"},
-        "tip4p/hexamer/for_tip4p": {"4-seeds", "80000-potential-calls"},
+        "lj_csm/lj75/recommended": {"aggregate-fold", "representative-table-unpublished"},
+        "lj_csm/lj98/derived": {"representative-fold"},
+        "lj_csm_c26/lj98/recommended": {"representative-fold"},
+        "tip4p/hexamer/for_tip4p": {"representative-fold", "aggregate-fold"},
     }
     for row in attempts:
-        audit.record(row["status"] == "incomplete" and row["host"] == "cloud-run"
+        audit.record(row["status"] == "shards-complete" and row["host"] == "cloud-run"
                      and set(row["missing"].split(";")) == expected[row["campaign"]],
                      "paper/jctc/data/landfold_maps_v7/rerun-status.csv",
-                     f"panels {row['panels']} record the unfinished current-code campaign",
-                     "incomplete on cloud-run: declared remaining work",
+                     f"panels {row['panels']} record the checkpointed current-code campaign",
+                     "shards complete on cloud-run: declared remaining folds",
                      f"{row['status']} on {row['host']}: {row['missing']}")
+    shards = audit.rows("paper/jctc/data/landfold_maps_v7/campaign-shards.csv")
+    charged = sum(int(row["charged"]) for row in shards)
+    minima = sum(int(row["minima"]) for row in shards)
+    audit.record(len(shards) == 300 and charged == 1_184_080_000 and minima == 2_076_648,
+                 "paper/jctc/data/landfold_maps_v7/campaign-shards.csv",
+                 "all current-code shards are authenticated",
+                 "300 shards; 1184080000 calls; 2076648 minima",
+                 f"{len(shards)} shards; {charged} calls; {minima} minima")
+    checkpoint = json.loads(
+        audit.text("paper/jctc/data/landfold_maps_v7/current-rerun-status.json")
+    )
+    audit.record(checkpoint["status"] == "shards-complete"
+                 and checkpoint["shards"] == 300
+                 and checkpoint["charged"] == charged
+                 and checkpoint["minima"] == minima,
+                 "paper/jctc/data/landfold_maps_v7/current-rerun-status.json",
+                 "the current landfold checkpoint matches its shard rows",
+                 "shards complete; 300; 1184080000; 2076648",
+                 f"{checkpoint['status']}; {checkpoint['shards']}; "
+                 f"{checkpoint['charged']}; {checkpoint['minima']}")
 
 
 RERUN_ITEMS = {

@@ -1635,6 +1635,7 @@
     "au55_scale": "anneal Au55 scaling, no competitor",
     "depth_posterior_ablation": "anneal ablation, posterior against uniform depth, no competitor",
     "tip4p_rates": "anneal TIP4P rates, no competitor",
+    "landfold_map_shard": "one seed of the anneal-only landscape regeneration, no competitor",
     "landfold_maps_current": "regenerates anneal-only landscape source tables, no competitor",
     "growpal_h2h_v2_uncapped": "one uncapped seed per system (5e8 calls) to see whether GrowPAL ever reaches LJ38 and LJ55; a diagnostic of the v2 panel, not a paper-budget comparison",
     "fetch_paper_data": "downloads the paper data set",

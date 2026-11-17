@@ -579,9 +579,9 @@ def test_the_obsolete_significance_count_is_not_a_registered_claim():
     assert fragments and not any("6 are significant" in fragment for fragment in fragments)
 
 
-def test_every_raster_landfold_panel_records_the_unfinished_current_campaign():
+def test_every_raster_landfold_panel_records_the_checkpointed_current_campaign():
     audit = audit_mod.Audit()
     audit_mod.manuscript_new(audit)
-    rows = [row for row in audit.results if "record the unfinished current-code campaign" in row[2]]
+    rows = [row for row in audit.results if "record the checkpointed current-code campaign" in row[2]]
     assert len(rows) == 4
     assert all(row[0] == "OK" for row in rows)

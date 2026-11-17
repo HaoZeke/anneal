@@ -1,0 +1,18 @@
+{
+  "blocker": "the LJ75 aggregate has 1124747 minima; current landfold descriptor classification remained serial for 68 minutes before this checkpoint",
+  "charged": 1184080000,
+  "code_revision": "5598b6c2f6f0b1e41fd910e572bdc31b3034f7c0",
+  "code_tree": "fa3d94397a8395bbb0bb4ecee5dffc2ba4a2f29c",
+  "host": "cloud-run",
+  "minima": 2076648,
+  "remaining": [
+    "lj_csm/lj75/recommended/representative",
+    "lj_csm/lj75/recommended/aggregate",
+    "lj_csm/lj98/derived/representative",
+    "lj_csm_c26/lj98/recommended/representative",
+    "tip4p/hexamer/for_tip4p/representative",
+    "tip4p/hexamer/for_tip4p/aggregate"
+  ],
+  "shards": 300,
+  "status": "shards-complete"
+}

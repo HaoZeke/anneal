@@ -255,7 +255,9 @@ def publish_shard_status(work: Path, publish: Path) -> None:
     )
     pending = publish / "campaign-shards.csv.tmp"
     with pending.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+        writer = csv.DictWriter(
+            handle, fieldnames=columns, extrasaction="ignore", lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(sorted(records, key=lambda row: (row["campaign"], row["seed"])))
     pending.replace(publish / "campaign-shards.csv")
@@ -334,7 +336,9 @@ def finalize(work: Path, publish: Path) -> None:
         "calls_per_second", "sha256", "code_revision", "code_tree", "host",
     )
     with (publish / "campaign-shards.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+        writer = csv.DictWriter(
+            handle, fieldnames=columns, extrasaction="ignore", lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(sorted(records, key=lambda row: (row["campaign"], row["seed"])))
     commit, tree = revision()
