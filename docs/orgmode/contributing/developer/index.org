@@ -11,47 +11,65 @@ This section covers the day-to-day development workflow for ~rgpot~.
 All development is managed through [[https://pixi.sh][pixi]].
 Install it first, then:
 
+#+attr_rgpot: syntax installs the pixi environment
 #+begin_src bash
 pixi install          # default environment (build + test)
 pixi shell            # activate the environment
 #+end_src
 
-Available environments:
+Environments declared in =pixi.toml=:
 
 | Environment | Purpose |
 |-------------+---------|
-| /(default)/ | C/C++ build tools, Rust toolchain, linting |
-| =rpctest= | RPC integration tests (pycapnp, numpy) |
-| =devbld= | Full dev build (RPC + cache features) |
-| =docs= | Documentation build (Sphinx, Doxygen, doxyrest) |
+| /(default)/ | Compilers, Meson, CMake, Rust and cargo-nextest, clang-format, cppcheck, cpplint, ccache |
+| =rpctest= | RPC integration tests: Cap'n Proto, pycapnp, numpy, ASE, pytest |
+| =devbld= | Cap'n Proto and RocksDB (=rpc= and =cache= features) |
+| =mpibld= | =devbld= plus Open MPI |
+| =docs= | Documentation build (Sphinx, Doxygen, doxyrest, Emacs, pandoc) |
 | =cigen= | CI workflow generation (Nickel) |
+| =version= | cogapp for the version copies; no default feature |
+| =xtbbld=, =tblitebld=, =tbbld= | xtb, tblite, or both |
+| =tblite06bld= | tblite 0.6, to compile =TBLitePot= against that API |
+| =metatomicbld= | torch, metatomic-torch, metatensor-torch and vesin from PyPI |
+| =umaenginebld= | =rpc=, =metatomic= and =xtb= features together |
+| =umaexport= | fairchem-core and torch for =scripts/export_uma_aoti.py=; no default feature |
+| =xckernel=, =xckerneltest= | libxc and pylibxc; =xckerneltest= adds PySCF |
+| =dftd3=, =dftd4=, =dftd= | s-dftd3, dftd4, or both |
+| =engines= | LAMMPS, GROMACS, OpenMM, PLUMED and nanobind |
+| =eonviz= | eOn and plotting packages; no default feature |
 
 ** Common Tasks
 
-All tasks are invoked via =pixi r <task>=:
+Tasks run with =pixi r <task>=.
+A task that belongs to a feature needs that environment, as in
+=pixi r -e docs docbld=.
+=prek=, =lychee= and =snapper= are not pixi dependencies; install them before
+running the tasks that call them.
 
-| Task | Description |
-|------+-------------|
-| =rust-test= | Run Rust unit tests with nextest |
-| =rust-test-all= | Run Rust tests with all features enabled |
-| =gen-header= | Regenerate =include/rgpot.h= from Rust source via cbindgen |
-| =gen-gha= | Regenerate nickel-exported workflows (release/docs/cosmo; not orchestrator) |
-| =towncrier-draft= | Preview release notes (dry run) |
-| =towncrier-build= | Write release notes into =CHANGELOG.md= |
-| =release-potctl= / =potctl= | Project CLI (=cargo run -p potctl -- …=; =pixi r release-potctl -- release assert=) |
-| =release-sync-versions= | Write the version in =Cargo.toml= (=potctl release sync=; =pixi r release-sync-versions -- 1.2.3=), then =release-cog= |
-| =release-cog= / =version-drift= | Regenerate or check every version copy with cogapp (=version= environment) |
-| =release-assert-lockstep= | Assert every version copy matches =Cargo.toml= (=potctl release assert=) |
-| =release-extract-changelog= | One =CHANGELOG.md= section (=potctl release notes=; optional =-o=) |
-| =release-towncrier-check= | =towncrier check= vs base (CI: orchestrator =towncrier= job on PRs) |
-| Cut release | On =main=: =cog bump --auto= (cog 7+) then =git push --follow-tags=; see [[file:release.org][release.org]] |
-| Potentials CI | =ci-orchestrator.yml= jobs =potentials_metatomic= / =potentials_uma_engine= (=potctl ci metatomic-test --rpc=) / =potentials_tight_binding= / =potentials_plugins= (=potctl ci plugin-test=); see [[*One job and one ccache key per pixi environment][below]] |
-| =docbld= | Build full documentation (org export + Doxygen + Sphinx) |
-| =docdel= | Clean all generated documentation artifacts |
-| =gen-readme= | Export =rgpot-core/README.org= to =README.md= (docs env) |
-| =snapper-check= / =snapper-fix= | Semantic line breaks (TurtleTech snapper; GHA orchestrator =docs_snapper=) |
-| =lychee-check= | Link audit with lychee (=.lychee.toml=; GHA orchestrator =docs_lychee=) |
-| =prek= / =prek-install= / =prek-validate= | Run / install / validate =prek.toml= hooks (GHA orchestrator =prek= job) |
+| Task | Environment | Description |
+|------+-------------+-------------|
+| =rust-test= | default | Run Rust unit tests with nextest |
+| =rust-test-all= | default | Run Rust tests with all features enabled (also rewrites the C header) |
+| =gen-header= | default | Regenerate =rgpot-core/include/rgpot.h= from Rust source via cbindgen |
+| =gen-gha= | =cigen= | Export the Nickel workflows (=release.yml=, =release-prepare.yml=, =ci_docs.yml=, =cosmo-potctl.yml=, =ci_doc_commenter.yml=); =ci-orchestrator.yml= is hand-maintained |
+| =gha-drift= | =cigen= | Fail when =.github/workflows= differs from a fresh =gen-gha= |
+| =towncrier-draft= | default | Preview release notes (dry run) |
+| =towncrier-build= | default | Write release notes into =CHANGELOG.md= |
+| =release-potctl= | default | Project CLI (=cargo run -q -p potctl --=); for example =pixi r release-potctl -- release assert= |
+| =release-sync-versions= | default | Write the version in =Cargo.toml= (=potctl release sync=; =pixi r release-sync-versions -- 1.2.3=), then run =release-cog= |
+| =release-cog= / =version-drift= | =version= | Regenerate or check every version copy with cogapp |
+| =release-assert-lockstep= | default | Assert every version copy matches =Cargo.toml= (=potctl release assert=) |
+| =release-extract-changelog= | default | One =CHANGELOG.md= section (=potctl release notes=; optional =-o=) |
+| =release-towncrier-check= | default | =towncrier check= vs base (CI: orchestrator =towncrier= job on PRs) |
+| =ci-preflight= / =potctl-test= | default | =potctl ci preflight= / the =potctl= unit tests |
+| Cut release | none | On =main=: =cog bump --auto= (cog 7+) then =git push --follow-tags=; see [[file:release.org][release.org]] |
+| Potentials CI | none | =ci-orchestrator.yml= jobs =potentials_metatomic= (=potctl ci metatomic-test=) / =potentials_uma_engine= (=potctl ci metatomic-test --rpc=) / =potentials_tight_binding= (=potctl ci xtb-tblite-test=) / =potentials_tblite_06= / =potentials_plugins= (=potctl ci plugin-test=) / =xckernel_goldens= (=potctl ci xckernel-test=); see [[*One job and one ccache key per pixi environment][below]] |
+| =docbld= | =docs= | Build full documentation (org export + Doxygen + Sphinx) |
+| =docdel= | =docs= | Clean all generated documentation artifacts |
+| =gen-readme= | =docs= | Export =rgpot-core/README.org= to =rgpot-core/README.md= |
+| =snapper-check= / =snapper-fix= | default | Semantic line breaks in =docs/orgmode= (TurtleTech snapper; GHA orchestrator =docs_snapper=) |
+| =lychee-check= | default | Link audit with lychee (=.lychee.toml=; GHA orchestrator =docs_lychee=) |
+| =prek= / =prek-install= / =prek-validate= | default | Run / install / validate =prek.toml= hooks (GHA orchestrator =prek= job) |
 
 ** One job and one ccache key per pixi environment
 
@@ -74,26 +92,29 @@ the Rust source.
 It is committed to the repository so C/C++ consumers always have a working copy.
 After changing the public Rust API:
 
+#+attr_rgpot: syntax rebuilds the Rust crate and rewrites the header
 #+begin_src bash
 pixi r gen-header
 git diff rgpot-core/include/rgpot.h  # review changes
 #+end_src
 
-The =gen-header= feature is excluded from default builds and from
-=cargo publish= to avoid modifying the source tree during packaging.
+=gen-header= is an optional Cargo feature of =rgpot-core= and is not in its
+default features, so neither a normal build nor =cargo publish= rewrites the
+header.
 
 ** Building Documentation
 
-Documentation is built with Sphinx and served at [[https://rgpot.rgoswami.me]
-[rgpot.rgoswami.me]].
+Documentation is built with Sphinx and served at
+[[https://rgpot.rgoswami.me][rgpot.rgoswami.me]].
 It combines:
 
 - *Org-mode pages* (this guide, architecture, changelog) exported to RST
 - *C++ API reference* generated by Doxygen + doxyrest
 - *Rust API reference* generated by =sphinxcontrib-rust=
 
-To build locally:
+To build locally (=docbld= runs =cargo install sphinx-rustdocgen= on the way):
 
+#+attr_rgpot: syntax full documentation build
 #+begin_src bash
 pixi r -e docs docbld
 # Open docs/build/index.html
@@ -101,6 +122,7 @@ pixi r -e docs docbld
 
 To clean generated artifacts:
 
+#+attr_rgpot: syntax deletes generated documentation
 #+begin_src bash
 pixi r -e docs docdel
 #+end_src
@@ -111,6 +133,7 @@ Hooks are configured in =prek.toml= and run with [[https://prek.j178.dev][prek]]
 (Rust drop-in for pre-commit).
 Prefer =prek= over =pre-commit= / =uvx pre-commit=.
 
+#+attr_rgpot: syntax needs prek installed
 #+begin_src bash
 # one-time: install shims into .git/hooks
 pixi r prek-install   # or: prek install
@@ -122,9 +145,12 @@ pixi r prek           # or: prek run -a --config prek.toml
 pixi r prek-validate
 #+end_src
 
-CI runs =prek run -a= on every PR via =CI (orchestrator)= (=prek= job).
-Org docs also go through =snapper= (semantic line breaks); links are audited
-separately by orchestrator =docs_lychee= (and weekly schedule).
+The =prek= job of =CI (orchestrator)= runs =prek run -a --config prek.toml= on
+pushes and pull requests (not on the weekly schedule).
+Org docs also go through =snapper= (semantic line breaks) in the =docs_snapper=
+job.
+Links are audited separately by the orchestrator =docs_lychee= job, which also
+runs on the weekly schedule.
 
 #+begin_export rst
   .. toctree::
@@ -133,5 +159,6 @@ separately by orchestrator =docs_lychee= (and weekly schedule).
 
      testing
      release
+     abi-bump
      faq
 #+end_export

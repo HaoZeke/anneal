@@ -1,0 +1,98 @@
+#+TITLE: Evaluate diamond silicon with CP2K
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Evaluate diamond silicon with CP2K
+
+This tutorial builds rgpot with the CP2K shim and evaluates an eight-atom
+diamond silicon cell (lattice constant 5.431 angstrom) with PBE, the
+=DZVP-MOLOPT-SR-GTH= basis and =GTH-PBE= pseudopotentials at a reduced 300/40 Ry
+cutoff.
+Atom 0 is displaced by (0.05, 0.03, -0.02) angstrom so it carries a force.
+
+** What you will need
+
+- [[https://pixi.sh][pixi]] (manages the full toolchain)
+- a libcp2k that ships =libcp2k.pc=; the conda-forge =cp2k= package does:
+
+#+attr_rgpot: syntax
+#+begin_src bash
+mkdir cp2k-env
+cat > cp2k-env/pixi.toml <<'EOF'
+[workspace]
+name = "cp2k-env"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+cp2k = { version = "2026.2.*", build = "mpi_openmpi*" }
+openmpi = "*"
+libint = "2.13.*"
+EOF
+pixi install --manifest-path cp2k-env/pixi.toml
+#+end_src
+
+Use the same Open MPI for rgpot and CP2K.
+The =mpibld= environment pins conda-forge =openmpi= to 5.x (=>=5.0.0,<6=), and
+the =mpi_openmpi= builds of =cp2k= link Open MPI's =libmpi.so.40=.
+The =libint= pin keeps =libint2.so.2=, which this =libcp2k= links.
+The =cp2k= package also accepts libint 2.14, which ships =libint2.so.3= instead.
+
+** Clone and build
+
+#+attr_rgpot: syntax
+#+begin_src bash
+git clone https://github.com/OmniPotentRPC/rgpot.git
+cd rgpot
+pixi shell -e mpibld
+export PKG_CONFIG_PATH="$PWD/../cp2k-env/.pixi/envs/default/lib/pkgconfig:$PKG_CONFIG_PATH"
+meson setup bbdir -Dwith_tests=true -Dwith_rpc=true -Dwith_mpi=enabled \
+  -Dwith_cp2k=enabled -Dwith_plumed=disabled
+meson compile -C bbdir
+#+end_src
+
+=with_cp2k= needs =with_rpc=: CP2KPot reads =CP2KParams= from the generated
+schema.
+The CP2K environment also ships a PLUMED whose headers the RGPOT collective
+variable does not build against, and =with_plumed= is =auto=, so the setup line
+turns it off.
+
+The build produces the shim and the smoke test:
+
+#+attr_rgpot: output paths of the built shim and test
+#+begin_example
+bbdir/CppCore/rgpot/CP2KPot/libcp2kc_rgpot.so
+bbdir/CppCore/cp2k_pot_smoke_test
+#+end_example
+
+** Evaluate the cell
+
+#+attr_rgpot: syntax
+#+begin_src bash
+meson test -C bbdir --suite cp2k --verbose CP2KPotSmokeTest
+#+end_src
+
+The test sets =RGPOT_CP2K_ENGINE= to the shim it built.
+It prints the energy of the cell in eV and the force on atom 0 in
+eV/angstrom. For each axis of atom 0 it prints the analytic force and minus the central difference of the energy, with a step of 1e-3 angstrom. The test fails when the two differ by 1e-2 eV/angstrom
+or more.
+It then rotates the crystal rigidly and prints the energy of the rotated cell
+and its difference from the first energy.
+The test fails when that difference is 1e-6 eV or more, which checks that the
+shim passes the cell rows to CP2K as cell vectors.
+A second test case sets the SCF iteration limit to 1 and checks that the call
+throws =rgpot::CP2KScfError= without requesting an MPI abort.
+When meson finds =mpiexec=, =CP2KPotSmokeMpi= runs the same tests on two MPI
+ranks.
+
+To use CP2K from your own code, construct =rgpot::CP2KPot= from a =CP2KParams=
+reader and point =RGPOT_CP2K_ENGINE= (or =CP2KParams.enginePath=) at
+=libcp2kc_rgpot.so=.
+
+** Next steps
+
+#+begin_export rst
+- :doc:`../reference/engine_abi`: the cp2kc shim ABI, units and return codes
+- :doc:`../reference/mpi`: calculators, communicators and the SCF failure path
+- :doc:`cpmd`: the same frontend pattern for CPMD
+#+end_export

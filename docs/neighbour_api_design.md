@@ -1,11 +1,15 @@
+<!-- rgpot-foreign: python/vesin/vesin/_neighbors.py -->
 # Neighbour query, four passes
 
 The public surface is `rgpot::nlist::Query`, `Builder` and `Walk`, the C
 ABI in `CppCore/rgpot/nlist/rgpot_nlist.h`, and `NeighborRequest` /
-`NeighborList` in `CppCore/rgpot/rpc/Potentials.capnp`. The classical
+`NeighborList`, which the rgpot-local schema diff
+`CppCore/rgpot/rpc/local/neighbour-chunk.diff` adds to the
+`Potentials.capnp` that rgpot compiles and installs. The classical
 kernels keep `rgpot::nlist::Neighbours`. This log is the design of the
 public surface. Each pass below was written against the API as it stood,
-then the API moved.
+then the API moved. A code block inside a pass shows the API at that
+pass; the current calls are in "What the final surface is".
 
 ## Survey
 
@@ -300,6 +304,7 @@ like this. The fields that make it a half list are the defaults, and
 the fields that make it periodic and stored are not, depending on the
 language.
 
+<!-- rgpot-doc: skip historical API at 2a195864; Format and Mode no longer exist -->
 ```cpp
 rgpot::nlist::Query query;
 query.cutoff = 2.5;
@@ -317,6 +322,7 @@ for (std::size_t k = 0; k < table.size(); ++k) {
 
 The same request in C, zero-filled the way a C caller writes a struct:
 
+<!-- rgpot-doc: skip historical C API at 2a195864; rgpot_nlist_build took a separate capacity then -->
 ```c
 rgpot_nlist_request request;
 memset(&request, 0, sizeof request);
@@ -372,6 +378,7 @@ vectors, because a zeroed struct is mode auto and every flag false.
 After this pass the C caller initialises the request, and a bad value
 is a code with a fixed sentence:
 
+<!-- rgpot-doc: skip historical pass-1 C API; rgpot_nlist_build took a separate capacity then -->
 ```c
 rgpot_nlist_request request;
 rgpot_nlist_request_init(&request);
@@ -387,7 +394,7 @@ if (rc != RGPOT_NLIST_OK) {
 `rgpot_nlist_request_init` sets `bytes` to the compiled size, the abi,
 a half list, a strict cutoff, periodic boundaries, shifts, vectors,
 distances, and a stored list. A zeroed request fails with
-`RGPOT_NLIST_ABI` instead of building the wrong crystal. `format` 9,
+`RGPOT_NLIST_ERR_ABI` instead of building the wrong crystal. `format` 9,
 `cut` 3 and `mode` 7 return `RGPOT_NLIST_SHAPE` instead of becoming a
 half list. A negative cutoff returns `RGPOT_NLIST_CUTOFF`. A short
 buffer returns `RGPOT_NLIST_SHORT` and still writes what fit, with
@@ -419,6 +426,7 @@ A three-body term wants every ordered pair around one atom. The pass-1
 call could still ask for a cluster with the half-list default next to
 it, and `Mode::Auto` could hand back an empty table:
 
+<!-- rgpot-doc: skip historical pass-1 C++ API; Format and Mode no longer exist -->
 ```cpp
 rgpot::nlist::Query query;
 query.cutoff = 3.0;
@@ -434,6 +442,7 @@ with `stored == false`.
 
 The shape is now a variant. Pairs carry a shell. A cluster does not:
 
+<!-- rgpot-doc: fragment -->
 ```cpp
 rgpot::nlist::Query query;
 query.cutoff = 3.0;
@@ -449,8 +458,10 @@ There is no `mode` on `Query`. `build` and `Builder` store every pair.
 full pair list; the mask uses the low four bits and never `0xff`.
 
 In C the two fields are `shape` and `shell`. `shape == 1` with
-`shell == 0` returns `RGPOT_NLIST_SHAPE` and the sentence "a cluster
-list stores every neighbour; set shell to 1 (full)". The abi is 3
+`shell == 0` returns `RGPOT_NLIST_SHAPE`. The C ABI returns only the
+code; `rgpot_nlist_strerror` gives the generic sentence for it. The
+sentence "a cluster list stores every neighbour; set shell to 1 (full)"
+is the `what()` of the C++ `Error`. The abi is 3
 because `format` and `mode` left the struct. `bytes` still has to
 cover the struct the caller compiled.
 
@@ -472,6 +483,7 @@ first field is `bytes` and whose columns are `first`, `second`,
 `walk_pull` write the caller's arrays. They do not allocate a second
 copy.
 
+<!-- rgpot-doc: fragment -->
 ```c
 rgpot_nlist_soa soa;
 memset(&soa, 0, sizeof soa);
@@ -504,12 +516,15 @@ a stateless server could not know which chunk was next. `NeighborRequest`
 now has `cursor` and `limit`. `NeighborList` returns `next`, `status`
 and `message`. The client sends `next` back as `cursor` until `more` is
 false. `format` stays one field, so a half cluster is still not a value
-on the wire. Mode 0 is not a mode.
+on the wire. Mode 0 is not a mode: mode 1 is one stored chunk and mode 2
+is the stream that honours `cursor` and `limit`. A `limit` of 0 means
+4096 pairs. potserv does not implement `Potential.neighbours`; only the
+example below answers these messages.
 
 `CppCore/examples/nlist_stream.cc` is that client and a server in two
 processes on one socket. The server slices a stored list. The client
 checks each chunk against a build of the same geometry. The other
-examples are the calls from the passes, compiled as tests:
+examples are the calls from the passes, built and run as tests:
 `nlist_lj.cc` (half-list Lennard-Jones, energy -1),
 `nlist_threebody.cc` (a right angle from a full list),
 `nlist_metatomic.cc` (the five label columns), `nlist_c.c` (no C++),
@@ -517,7 +532,8 @@ and `nlist_rust/main.rs` (the C ABI, hand-written).
 
 Thread safety is in the headers. Distinct tables, builders and walks
 may run at the same time. One object is not shared. `build` may start
-an OpenMP team, so it is not called from inside an OpenMP region.
+an OpenMP team; inside another OpenMP region that team may get fewer
+threads, and the list does not depend on how many.
 `rgpot_nlist_strerror` returns a literal. A walk borrows the positions
 until it is closed. A view dies at the next update of its table.
 
@@ -531,14 +547,19 @@ or `Cluster4`), a `Cut`, periodicity and `Fields`. `build` fills a
 atom moves more than half the skin. `Walk::pull` fills `Buffers`.
 Failure throws `Error`, whose `code()` matches the C integer.
 
-C: `rgpot_nlist_request_init`, `rgpot_nlist_build`, `rgpot_nlist_walk_open`,
-`rgpot_nlist_walk_pull`, `rgpot_nlist_walk_close`, `rgpot_nlist_strerror`,
-`rgpot_nlist_abi_version`. ABI 4. `bytes` leads the request and the
-buffer struct. Columns are `first`, `second`, `shift`, `vector`,
-`distance`, `mask`.
+C: `rgpot_nlist_request_init`, `rgpot_nlist_build`,
+`rgpot_nlist_build_systems`, `rgpot_nlist_walk_open`,
+`rgpot_nlist_walk_pull`, `rgpot_nlist_walk_close`,
+`rgpot_nlist_builder_open`, `rgpot_nlist_builder_update`,
+`rgpot_nlist_builder_close`, `rgpot_nlist_fortran_open`,
+`rgpot_nlist_fortran_build`, `rgpot_nlist_fortran_close`,
+`rgpot_nlist_strerror`, `rgpot_nlist_abi_version`. `RGPOT_NLIST_ABI` is 4.
+`bytes` leads the request and the buffer struct. Columns are `first`,
+`second`, `shift`, `vector`, `distance`, `mask`.
 
 Cap'n Proto: `NeighborRequest` and `NeighborList` use those columns.
-`cursor`, `limit`, `next`, `status` and `message` are the stream.
+`mode = 2` with `cursor`, `limit`, `next`, `status` and `message` is the
+stream. The potserv server does not answer `Potential.neighbours`.
 
 ## The query walks the cell list
 
@@ -552,7 +573,7 @@ share a neighbouring cell. `Walk` keeps one cell list for its whole
 life.
 
 `NeighbourListTest` rejects an all-pairs scan: the 108000-atom half
-list must finish in five seconds and contain 21 neighbours per atom.
+list must finish in under 30 seconds and contain 21 neighbours per atom.
 A wide orthorhombic cell is checked against the same brute force as
 the triclinic cell.
 
@@ -579,8 +600,9 @@ atoms held about 30 GB and was stopped. matscipy has no half list.
 
 A system of fewer than 8192 atoms stays on the calling thread, so the
 64-atom list costs the same with `OMP_NUM_THREADS=8` as with one
-thread. It is also a direct pair loop: a sheared cell that small has
-only a few bins, and the cell list was spending the call on setup.
+thread. Below 512 atoms a pair list is also a direct pair loop: a
+sheared cell that small has only a few bins, and the cell list was
+spending the call on setup.
 Eight threads share one cell list and write into slices of one table.
 The slices are then packed in place. The resident set is that table.
 Every row above is faster than vesin and uses less memory.
@@ -622,15 +644,26 @@ moves one atom inside the skin, then past it.
 Lennard-Jones, Morse, EAM, Sutton-Chen, Stillinger-Weber and Tersoff
 were each calling `Neighbours::update` and `forDirected` with their
 own `Spec`. Metatomic and UMA already called `build`. The six
-potentials now call `updateCells`, `visitDirected` and `visitHalf`.
+potentials now call `updateCells`. Lennard-Jones, Morse, Sutton-Chen,
+Stillinger-Weber and Tersoff walk it with `visitDirected`, `visitHalf`,
+`forCellTeam` or `forAtom`. EAM walks it with `forCellTeam` when it
+streams and keeps its own index list when it stores.
 Those functions are the cell list `build` walks, so a kernel and a
 stored table are two uses of one walk. `dx` in a visit is
 `r_i - r_j` after the image, which is the negation of the vector the
 table stores. EAM still asks for `Image::Half` because it wraps
 coordinates into the cell first.
 
+<!-- rgpot-doc: run -->
 ```python
+import numpy as np
+import rgpot
+
+positions = np.array([[0.0, 0.0, 0.0], [1.2, 0.0, 0.0], [0.0, 1.3, 0.0]])
+cell = np.eye(3) * 20.0
+cutoff = 5.0
 i, j, d = rgpot.neighbor_list(positions, cell, cutoff)
+assert len(i) == 3
 ```
 
 `positions` is `(natoms, 3)` and `cell` is `(3, 3)`, the ASE layout.
@@ -651,8 +684,8 @@ one atom per thread: thread `i` walks the 27 cells around atom `i`,
 which is `visitDirected(cells, i, i + 1)`. `buildByAtom` does that
 walk on the host and must return the same pairs as `build`. A device
 port replaces the loop over atoms with a grid of the same body and
-keeps `build` as the check. A sheared cell, a cluster, or fewer than
-512 atoms stays on the host `build`, which is also what a device
+keeps `build` as the check. A cluster, or fewer than 512 atoms, stays
+on the host `build`, which is also what a device
 runtime would do when the grid degenerates.
 
 ## The Fortran gather uses the same list
@@ -662,8 +695,8 @@ runtime would do when the grid degenerates.
 The search radius is the cutoff plus the skin. While every atom stays
 within half the skin the builder reuses that candidate list. Each call
 still writes `r_j - r_i + S H` for the positions it was given and keeps
-only pairs strictly inside the cutoff. `vec(3, npairs)` is
-`Table::column_major_vectors()`: column `p` is the vector of pair `p`.
+only pairs strictly inside the cutoff. `vec(3, npairs)` has the layout
+of `Table::column_major_vectors()`: column `p` is the vector of pair `p`.
 On 4000 FCC atoms and a cutoff of 5 with skin 0.5, a fresh search
 takes 0.012 s and a reused call, which only refreshes the vectors,
 takes 0.001 s. The Stillinger-Weber, EAM, water, Fe-He, Tersoff, EDIP

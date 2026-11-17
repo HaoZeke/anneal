@@ -33,6 +33,11 @@ on:
         required: false
         type: string
         default: ""
+      timeout-minutes:
+        description: Job timeout. The default is 10 minutes.
+        required: false
+        type: string
+        default: "10"
 
 permissions:
   contents: read
@@ -41,6 +46,7 @@ jobs:
   audit:
     name: isa audit
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}
     steps:
       - name: Checkout caller
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -7,6 +7,8 @@
 #include "rgpot/engine/TorchRuntime.hpp"
 #include "rgpot/MetatomicPot/MetatomicPot.hpp"
 
+#include <string>
+
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 #include <kj/io.h>
@@ -14,6 +16,26 @@
 #include "rgpot/rpc/Potentials.capnp.h"
 
 namespace rgpot::engine {
+
+namespace {
+
+/// Why the model cannot take this charge and multiplicity, or empty. A model
+/// that does not read one of them takes only its default, charge 0 or
+/// multiplicity 1.
+std::string unread_charge_spin(const MetatomicPot &pot, int charge, int spin) {
+  if (!pot.readsCharge() && charge != 0) {
+    return "the model reads no charge (rgpot::charge), so charge " +
+           std::to_string(charge) + " cannot reach it";
+  }
+  if (!pot.readsSpin() && spin != 1) {
+    return "the model reads no spin multiplicity (rgpot::spin_multiplicity "
+           "or rgpot::spin), so spin " +
+           std::to_string(spin) + " cannot reach it";
+  }
+  return {};
+}
+
+} // namespace
 
 const char *backend_name() { return "metatomic"; }
 
@@ -44,17 +66,31 @@ Created create(const void *config, std::size_t config_len) {
         params.getTorchDeterminism() == ::MetatomicParams::TorchDeterminism::DETERMINISTIC
             ? TorchDeterminismPolicy::Strict
             : TorchDeterminismPolicy::Fast;
+    c.charge = params.getCharge();
+    c.spin = params.getSpin() > 0 ? params.getSpin() : 1;
+    c.attach_system_extras = params.getAttachSystemExtras();
 
     set_torch_threads(params.getIntraopThreads(), params.getInteropThreads());
 
     auto backend = std::make_unique<Backend>();
     auto pot = std::make_unique<MetatomicPot>(c);
     MetatomicPot *raw = pot.get();
+    const std::string refused = unread_charge_spin(*raw, c.charge, c.spin);
+    if (!refused.empty()) {
+      out.error = "rgpot_engine_create(metatomic): " + refused;
+      return out;
+    }
     backend->pot = std::move(pot);
     backend->model_path = c.model_path;
-    backend->set_charge_spin = [raw](int charge, int spin) {
-      raw->setChargeSpin(charge, spin);
-    };
+    if (raw->readsCharge() || raw->readsSpin()) {
+      backend->set_charge_spin = [raw](int charge, int spin) {
+        const std::string reason = unread_charge_spin(*raw, charge, spin);
+        if (!reason.empty()) {
+          throw Unsupported(reason);
+        }
+        raw->setChargeSpin(charge, spin);
+      };
+    }
     backend->set_num_threads = [](int intra_op, int inter_op) {
       set_torch_threads(intra_op, inter_op);
     };

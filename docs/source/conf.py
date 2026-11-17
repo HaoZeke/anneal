@@ -11,8 +11,8 @@ project = "rgpot"
 copyright = "2025--present, rgpot developers"
 author = "Rohit Goswami"
 # [[[cog import rgpot_version as v; cog.outl(f'version = "{v.VERSION}"'); cog.outl(f'release = "{v.VERSION}"')]]]
-version = "3.6.0"
-release = "3.6.0"
+version = "3.7.0"
+release = "3.7.0"
 # [[[end]]]
 # Navbar falls back to html_logo when light_logo/dark_logo are unset.
 html_logo = "_static/logo-light.svg"
@@ -160,3 +160,22 @@ sitemap_url_scheme = "{link}"
 html_css_files = [
     "custom.css",
 ]
+
+
+def _doxyrest_unrendered(app, env, node, contnode):
+    """Render a Doxygen link to a page doxyrest does not write as plain text.
+
+    Doxyrest writes no page for source listings, Fortran derived types or
+    undocumented private members, but still links to them.
+    """
+    if node.get("refdomain") == "std" and node.get("reftarget", "").startswith("doxid-"):
+        return contnode
+    return None
+
+
+def setup(app):
+    from pygments.lexers.special import TextLexer
+
+    # Pygments has no LAMMPS input lexer.
+    app.add_lexer("lammps", TextLexer)
+    app.connect("missing-reference", _doxyrest_unrendered)

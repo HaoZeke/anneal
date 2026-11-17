@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "project": "rgpot-long-range",
+  "repo": ".",
+  "branches": ["HEAD"],
+  "environment_type": "existing",
+  "benchmark_dir": "tools/lr_physics",
+  "results_dir": "asv-results",
+  "html_dir": "asv-html"
+}

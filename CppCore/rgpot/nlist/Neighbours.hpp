@@ -6,6 +6,7 @@
 // minimum image, an optional Verlet list, a streaming walk that does not
 // store pairs, and a deterministic OpenMP split.
 
+#include "rgpot/Slices.hpp"
 #include "rgpot/nlist/MinimumImage.hpp"
 
 #include <algorithm>
@@ -16,11 +17,12 @@
 #include <cstdint>
 #include <vector>
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot::nlist {
+
+using rgpot::forEachSlice;
+using rgpot::partition;
+using rgpot::Range;
+using rgpot::threadsRequested;
 
 /// How the minimum image is formed. Round is the orthorhombic truncation
 /// used by the pair kernels. Half is one correction about the half-box,
@@ -42,20 +44,6 @@ struct Spec {
   Image image = Image::Round;
   Mode mode = Mode::Auto;
 };
-
-struct Range {
-  std::int64_t begin = 0;
-  std::int64_t end = 0;
-};
-
-/// Thread count from OMP_NUM_THREADS. Unset, empty, or a non-positive
-/// value is one thread, so a call that does not ask for threads matches
-/// the serial pair order.
-[[nodiscard]] int threadsRequested();
-
-/// Contiguous slice of `n` items for `thread` in `[0, nthreads)`. The
-/// slices cover `n` without overlap, in thread order.
-[[nodiscard]] Range partition(std::int64_t n, int thread, int nthreads);
 
 /// Bytes the process may still allocate, from MemAvailable. Zero when
 /// that figure is not reported.
@@ -81,8 +69,19 @@ struct Range {
 /// Candidate pairs around one configuration.
 ///
 /// A stored list is reused while every atom has moved by at most half
-/// the skin, and the cell, the count and the spec are unchanged. Skin 0
-/// reuses the list only when the coordinates and the cell match.
+/// the skin, and the cell, the count and the spec are unchanged. The
+/// list holds partner indices only and every walk takes the image from
+/// the current coordinates, so the move is measured to the nearest
+/// periodic image of the reference position: an atom wrapped back
+/// through a face of the cell has moved by its small step, not by a
+/// cell vector. The bins are redone after such a wrap, for the walks
+/// that read them. Skin 0 reuses the list only when the coordinates and
+/// the cell match.
+///
+/// An infinite cutoff or skin makes every pair a candidate. Such an
+/// update bins nothing and stores nothing, in any mode: each walk takes
+/// the pairs straight from the coordinates, i ascending and then j
+/// ascending, which is the order of the single cell the bins would hold.
 class Neighbours {
 public:
   void update(const double *xyz, std::size_t n, const double *box9,
@@ -90,9 +89,14 @@ public:
 
   [[nodiscard]] Mode mode() const noexcept { return mode_; }
   [[nodiscard]] bool streaming() const noexcept { return streaming_; }
+  /// True when the search has no bound and the walks visit every pair.
+  /// Such an update also reports streaming(). One atom has no pairs and
+  /// keeps the empty stored list.
+  [[nodiscard]] bool allPairs() const noexcept { return streaming_ && std::isinf(search_); }
   /// True when the last update kept the previous list. The displacement
-  /// test is `withinSkin`, the same one `Builder::update` uses.
+  /// test is `withinSkin` on the nearest image of each reference position.
   [[nodiscard]] bool reused() const noexcept { return reused_; }
+  /// Stored lists built so far. A reuse does not count.
   [[nodiscard]] std::uint64_t builds() const noexcept { return builds_; }
   /// Stored pair index. A stream leaves this empty.
   [[nodiscard]] std::size_t slots() const noexcept { return nbr_.size(); }
@@ -107,13 +111,16 @@ public:
   /// after the selected image. `r2` is the squared length of that vector.
   /// Candidates lie inside the cutoff plus the skin; the caller drops the
   /// rest. In stored mode the partners of each atom are in increasing
-  /// index order.
+  /// index order. A walk may copy `fn`, so state the caller reads back is
+  /// captured by reference.
   template <typename Fn>
   void forDirected(std::int64_t begin, std::int64_t end, Fn &&fn) const {
-    if (streaming_) {
+    if (allPairs()) {
+      walkAll(begin, end, fn, false);
+    } else if (streaming_) {
       walkCells(begin, end, fn, false);
     } else {
-      walkStored(begin, end, fn);
+      walkStored(begin, end, fn, false);
     }
   }
 
@@ -122,39 +129,23 @@ public:
   /// unordered pair is visited once per pass.
   template <typename Fn>
   void forHalf(std::int64_t begin, std::int64_t end, Fn &&fn) const {
-    if (streaming_) {
+    if (allPairs()) {
+      walkAll(begin, end, fn, true);
+    } else if (streaming_) {
       walkCells(begin, end, fn, true);
     } else {
-      auto half = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                      double r2) {
-        if (j > i) {
-          fn(i, j, dx, dy, dz, r2);
-        }
-      };
-      walkStored(begin, end, half);
+      walkStored(begin, end, fn, true);
     }
   }
 
-  /// MSVC rejects `#pragma omp` inside a lambda (C2760, token PRAGMA_OMP).
-  /// The region lives in this method; the lambdas only supply the body.
-  template <typename Body>
-  void withTeam(int nthreads, Body &&body) const {
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nthreads)
-#endif
-    {
-#if defined(_OPENMP)
-      const int thread = omp_get_thread_num();
-#else
-      const int thread = 0;
-#endif
-      body(thread);
-    }
-  }
-
-  /// One walk of the directed pairs, split by cell across `nthreads`.
-  /// The bins are built once and shared. `fn(thread, i, j, dx, dy, dz, r2)`.
-  /// A thread owns each cell, so a pair is visited once.
+  /// One walk of the directed pairs, split by cell into `nthreads` slices,
+  /// each walked once by `forEachSlice`. The bins are built once and shared.
+  /// `fn(slice, i, j, dx, dy, dz, r2)`. A slice owns each cell, so a pair
+  /// is visited once, and one thread walks a slice, so state kept per slice
+  /// needs no lock. Without bins, as in an unbounded search, a slice owns a
+  /// contiguous run of atoms. A slice may visit nothing: there can be more
+  /// slices than cells, or than atoms without bins, and a cell may hold no
+  /// pair.
   template <typename Fn>
   void forCellTeam(bool half, int nthreads, Fn &&fn) const {
     if (nthreads < 1) {
@@ -164,10 +155,10 @@ public:
                        const std::int32_t *head, std::size_t ncells,
                        bool cell_shift, double search2, double L0, double L1, double L2, double i0,
                        double i1, double i2, bool p0, bool p1, bool p2) {
-          withTeam(nthreads, [&](int thread) {
-            const auto range = partition(static_cast<std::int64_t>(ncells), thread, nthreads);
+          forEachSlice(nthreads, [&](int slice) {
+            const auto range = partition(static_cast<std::int64_t>(ncells), slice, nthreads);
             auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                              double r2) { fn(thread, i, j, dx, dy, dz, r2); };
+                              double r2) { fn(slice, i, j, dx, dy, dz, r2); };
             if (head != nullptr) {
               visitTiles<true>(tile, neigh, nneigh, head, static_cast<std::size_t>(range.begin),
                                static_cast<std::size_t>(range.end), 0, n_, half, cell_shift,
@@ -179,10 +170,10 @@ public:
             }
           });
         })) {
-      withTeam(nthreads, [&](int thread) {
-        const auto range = partition(static_cast<std::int64_t>(n_), thread, nthreads);
+      forEachSlice(nthreads, [&](int slice) {
+        const auto range = partition(static_cast<std::int64_t>(n_), slice, nthreads);
         auto adapt = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                         double r2) { fn(thread, i, j, dx, dy, dz, r2); };
+                         double r2) { fn(slice, i, j, dx, dy, dz, r2); };
         if (half) {
           forHalf(range.begin, range.end, adapt);
         } else {
@@ -197,6 +188,10 @@ public:
   /// atom, not every bond.
   template <typename Fn>
   void forAtom(std::int32_t i, Fn fn) const {
+    if (allPairs()) {
+      walkAll(static_cast<std::int64_t>(i), static_cast<std::int64_t>(i) + 1, fn, false);
+      return;
+    }
     // One atom, often from several threads. The cached stencil is built
     // once for a whole walk; this call does not touch it.
     walkCellsScattered(static_cast<std::int64_t>(i), static_cast<std::int64_t>(i) + 1, fn, false,
@@ -219,16 +214,27 @@ private:
   void buildCells(const double *xyz, std::size_t n);
   void buildStored(const double *xyz, std::size_t n);
   [[nodiscard]] std::uint64_t candidateBound() const;
+  /// `wrapped` is set when some atom is within the skin only through
+  /// another periodic image of its reference position.
   [[nodiscard]] bool reusable(const double *xyz, std::size_t n,
-                              const double *box9, const Spec &spec) const;
+                              const double *box9, const Spec &spec,
+                              bool &wrapped) const;
   void fold(double &dx, double &dy, double &dz) const;
 
   template <typename Fn>
-  void walkStored(std::int64_t begin, std::int64_t end, Fn &fn) const {
+  void walkStored(std::int64_t begin, std::int64_t end, Fn &fn,
+                  bool half) const {
     for (std::int64_t i = begin; i < end; ++i) {
       const auto a = static_cast<std::size_t>(i);
-      const auto lo = off_[a];
+      auto lo = off_[a];
       const auto hi = off_[a + 1];
+      if (half) {
+        // The partners are sorted, so those after i are a tail of the row.
+        const auto row = nbr_.begin();
+        lo = static_cast<std::int32_t>(
+            std::upper_bound(row + lo, row + hi, static_cast<std::int32_t>(i)) -
+            row);
+      }
       for (std::int32_t p = lo; p < hi; ++p) {
         const auto j = nbr_[static_cast<std::size_t>(p)];
         double dx = 0;
@@ -237,6 +243,62 @@ private:
         foldPair(static_cast<std::int32_t>(i), j, dx, dy, dz);
         const double r2 = dx * dx + dy * dy + dz * dz;
         fn(static_cast<std::int32_t>(i), j, dx, dy, dz, r2);
+      }
+    }
+  }
+
+  /// Every pair of an unbounded search. A free axis has no image, so the
+  /// separation is the coordinate difference that foldPair returns there.
+  /// `fn` is a copy that does not escape, so what it captured by value
+  /// can stay in registers for the whole walk.
+  template <typename Fn>
+  void walkAll(std::int64_t begin, std::int64_t end, Fn fn, bool half) const {
+    if (!use_general_ && !periodic_[0] && !periodic_[1] && !periodic_[2]) {
+      walkAllRows<false>(begin, end, fn, half);
+    } else {
+      walkAllRows<true>(begin, end, fn, half);
+    }
+  }
+
+  /// The rows of walkAll. Each row runs over the partners below i, then
+  /// those above it, so `fn` has one call site and no pair tests j == i.
+  template <bool Fold, typename Fn>
+  void walkAllRows(std::int64_t begin, std::int64_t end, Fn fn, bool half) const {
+    const auto n = static_cast<std::int64_t>(n_);
+    const double search2 = search_ * search_;
+    const double *x = xyz_;
+    for (std::int64_t i = begin; i < end; ++i) {
+      const auto a = static_cast<std::int32_t>(i);
+      [[maybe_unused]] const double xi = x[3 * i];
+      [[maybe_unused]] const double yi = x[3 * i + 1];
+      [[maybe_unused]] const double zi = x[3 * i + 2];
+      for (int run = half ? 1 : 0; run < 2; ++run) {
+        const std::int64_t hi = run == 0 ? i : n;
+        for (std::int64_t jj = run == 0 ? 0 : i + 1; jj < hi; ++jj) {
+          const auto j = static_cast<std::int32_t>(jj);
+          double dx = 0;
+          double dy = 0;
+          double dz = 0;
+          if constexpr (Fold) {
+            // A general cell folds out of line. Its own copies keep the
+            // separations out of memory.
+            double fx = 0;
+            double fy = 0;
+            double fz = 0;
+            foldPair(a, j, fx, fy, fz);
+            dx = fx;
+            dy = fy;
+            dz = fz;
+          } else {
+            dx = xi - x[3 * jj];
+            dy = yi - x[3 * jj + 1];
+            dz = zi - x[3 * jj + 2];
+          }
+          const double r2 = dx * dx + dy * dy + dz * dz;
+          if (r2 <= search2) {
+            fn(a, j, dx, dy, dz, r2);
+          }
+        }
       }
     }
   }
@@ -259,8 +321,10 @@ private:
   template <typename Loop>
   bool fastTiles(Loop &&loop) const {
     // Half is the same orthorhombic minimum image once coordinates sit in
-    // the cell. A sheared box stays on the scattered walk.
-    if (use_general_ || (image_ != Image::Round && image_ != Image::Half) || n_ < 2) {
+    // the cell. A sheared box stays on the scattered walk. An unbounded
+    // search has no bins to tile.
+    if (allPairs() || use_general_ || (image_ != Image::Round && image_ != Image::Half) ||
+        n_ < 2) {
       return false;
     }
     // One stencil. A 27-slot entry per cell is reused while the coordinates
@@ -712,7 +776,10 @@ private:
               double dx = 0;
               double dy = 0;
               double dz = 0;
-              foldPair(static_cast<std::int32_t>(i), j, dx, dy, dz);
+              if (!foldPairWithin(static_cast<std::int32_t>(i), j, search2, dx,
+                                  dy, dz)) {
+                continue;
+              }
               const double r2 = dx * dx + dy * dy + dz * dz;
               if (r2 <= search2) {
                 fn(static_cast<std::int32_t>(i), j, dx, dy, dz, r2);
@@ -726,6 +793,11 @@ private:
 
   void foldPair(std::int32_t i, std::int32_t j, double &dx, double &dy,
                 double &dz) const;
+  /// foldPair for a walk that drops pairs beyond `within2`. False means
+  /// the pair has no image that close; true leaves the foldPair bits.
+  [[nodiscard]] bool foldPairWithin(std::int32_t i, std::int32_t j,
+                                    double within2, double &dx, double &dy,
+                                    double &dz) const;
   [[nodiscard]] int cellId(int ix, int iy, int iz) const;
 
   std::vector<std::int32_t> off_;
@@ -817,6 +889,21 @@ inline void Neighbours::foldPair(std::int32_t i, std::int32_t j, double &dx, dou
   dy = xyz_[ui + 1] - xyz_[uj + 1];
   dz = xyz_[ui + 2] - xyz_[uj + 2];
   fold(dx, dy, dz);
+}
+
+inline bool Neighbours::foldPairWithin(std::int32_t i, std::int32_t j,
+                                       double within2, double &dx, double &dy,
+                                       double &dz) const {
+  if (!use_general_) {
+    foldPair(i, j, dx, dy, dz);
+    return true;
+  }
+  const auto ui = static_cast<std::size_t>(i) * 3;
+  const auto uj = static_cast<std::size_t>(j) * 3;
+  dx = xyz_[ui] - xyz_[uj];
+  dy = xyz_[ui + 1] - xyz_[uj + 1];
+  dz = xyz_[ui + 2] - xyz_[uj + 2];
+  return general_.foldWithin(dx, dy, dz, within2);
 }
 
 inline int Neighbours::cellId(int ix, int iy, int iz) const {

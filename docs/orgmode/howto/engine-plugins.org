@@ -1,0 +1,156 @@
+#+TITLE: Open, build and test engine plugins
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Open, build and test engine plugins
+
+An engine plugin is a shared library that exports the =rgpot_engine_*= functions
+of =CppCore/rgpot/engine_c_abi.h=.
+A host opens it with =dlopen= and needs neither the library's tensor runtime nor
+its backend at link time.
+This page shows how a host opens an engine, and how to build and test the engine
+libraries.
+Every function, its units and its error codes are in the
+[[file:../reference/engine_abi.org][engine plugin ABI]] reference.
+
+** Open an engine
+
+The header defines no search path: the host opens the path it was given.
+Check the major version before anything else, then the stamp when the engine
+exports it.
+
+#+attr_rgpot: compile flags=-ICppCore needs the path of a built engine library at run time
+#+begin_src c
+#include <dlfcn.h>
+#include <stdio.h>
+
+#include "rgpot/engine_c_abi.h"
+
+int main(int argc, char **argv) {
+  if (argc < 2) {
+    fprintf(stderr, "usage: %s ENGINE_LIBRARY\n", argv[0]);
+    return 2;
+  }
+  void *h = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+  if (!h) {
+    fprintf(stderr, "%s\n", dlerror());
+    return 1;
+  }
+  int (*version)(void) = (int (*)(void))dlsym(h, "rgpot_engine_abi_version");
+  if (!version || version() != RGPOT_ENGINE_ABI_VERSION) {
+    fprintf(stderr, "not an rgpot engine of major %d\n", RGPOT_ENGINE_ABI_VERSION);
+    return 1;
+  }
+  int (*compatible)(const RgpotEngineAbiStamp *) =
+      (int (*)(const RgpotEngineAbiStamp *))dlsym(h, "rgpot_engine_abi_compatible");
+  const RgpotEngineAbiStamp mine = {RGPOT_ENGINE_ABI_VERSION, RGPOT_ENGINE_ABI_MINOR,
+                                    RGPOT_ENGINE_ABI_LAYOUT_REVISION};
+  if (compatible && !compatible(&mine)) {
+    fprintf(stderr, "engine is older than this host\n");
+    return 1;
+  }
+  const char *(*name)(void) = (const char *(*)(void))dlsym(h, "rgpot_engine_name");
+  printf("engine %s\n", name ? name() : "(unnamed)");
+  return 0;
+}
+#+end_src
+
+A host without =rgpot_engine_abi_compatible= in the engine treats the engine as
+minor 0, layout 1.
+To create an instance, pass =rgpot_engine_create= the Cap'n Proto flat-array
+message whose root is the library's params struct (=UmaParams=, =BuiltinParams=,
+...).
+A message whose length is not a multiple of 8 bytes is refused with a reason in
+=errbuf=.
+
+Do not =dlclose= an engine: the tensor runtime keeps process-wide state.
+=libuma_engine.so= is linked with =-z nodelete=, so a =dlclose= leaves it
+mapped.
+Destroy every handle before the process exits.
+
+** Build and test the engine libraries
+
+The Meson build makes the engine libraries when =-Dwith_rpc=true=, because the
+params messages need the Cap'n Proto schema.
+=libclassical_engine=, =libmopac_engine= and =libnwchem_engine= need only that.
+=libxtb_engine= also needs =-Dwith_xtb=true=,
+=libskala_engine= =-Dwith_skala=true=, and
+=libmetatomic_engine= =-Dwith_metatomic=true=.
+=libuma_engine= needs =-Dwith_metatomic=true= and is not built with
+=-Dwith_python=true=.
+The classical, MOPAC, NWChem and Skala libraries are not built on Windows.
+
+The =umaenginebld= pixi environment has the rpc, metatomic and xtb dependencies.
+CI builds and tests every engine with the =potctl= command line tool (a cargo
+binary in =potctl/=; =cargo install --path potctl= puts it on the =PATH=):
+
+#+attr_rgpot: syntax installs torch and runs a full meson build and test
+#+begin_src bash
+pixi run -e umaenginebld potctl ci ensure-torch-metatomic
+pixi run -e umaenginebld potctl ci metatomic-test --rpc --build-dir bbdir-uma-engine
+#+end_src
+
+The first command installs a CPU torch and the metatensor and metatomic C++
+packages into the environment when they are missing.
+The second runs =meson setup= with =-Dwith_tests=true=, =-Dwith_metatomic=true=,
+=-Dwith_rpc=true=, =-Dwith_xtb=true= and =-Dwith_skala=true=, then
+=meson compile= and =meson test=.
+
+Three Meson tests cover the engine table:
+
+- =EngineAdapterTest= runs the table over a stand-in backend
+  (=CppCore/tests/engine_stub.cc=) without torch: argument checks, the
+  transform, batching, error text, identity queries, the setting calls and each
+  =reentrancy= policy.
+- =EngineTableTest= opens each engine library the build made and compares the
+  classical engine with the directly compiled =LJPot=; one classical handle
+  serves eight threads.
+  For the Metatomic engine it loads the models that
+  =scripts/export_tiny_metatomic_model.py= writes into the build directory: they
+  have no weights, and the energy moves by a known amount with the charge and
+  multiplicity each one reads.
+- =UmaEngineTest= opens =libuma_engine= as a host does.
+
+To run one of them in an existing build directory:
+
+#+attr_rgpot: syntax needs a configured build directory with the engine tests
+#+begin_src bash
+meson test -C bbdir-uma-engine --print-errorlogs EngineTableTest
+#+end_src
+
+The tests find the libraries through environment variables that Meson sets:
+=RGPOT_ENGINE_STUB= and
+=RGPOT_ENGINE_STUB_MODEL= for =EngineAdapterTest=, =RGPOT_ENGINE_CLASSICAL=, =RGPOT_ENGINE_MOPAC=, =RGPOT_ENGINE_NWCHEM=, =RGPOT_ENGINE_XTB=, =RGPOT_ENGINE_SKALA=, =RGPOT_ENGINE_METATOMIC= and =RGPOT_ENGINE_EXPECT= for =EngineTableTest=, and =RGPOT_UMA_ENGINE=
+for =UmaEngineTest=.
+With =RGPOT_ENGINE_METATOMIC= Meson also sets
+=MTA_CHARGE_SPIN_PT=, =MTA_CHARGE_PT=, =MTA_SPIN_PT=, =MTA_PLAIN_PT= and =MTA_UNDECLARED_PT=
+to the paths of those models.
+
+=UmaEngineTest= needs model files for most of its cases, and skips them when the
+variables are unset:
+
+- =RGPOT_UMA_OMOL_PT2= names a UMA package; with it the test compares the engine
+  with the directly compiled =UmaPot=, checks the model digest against the file,
+  checks the thread settings against libtorch, and runs four threads on one
+  handle.
+- =RGPOT_UMA_OMOL_BAND_PT2= names a band package for the batch case.
+- =UMA_FLOAT64_PT2= names a small package that Meson exports with
+  =scripts/export_tiny_uma_contract.py=; with it the test checks that
+  =UmaParams.cacheDir= places the unpack.
+- =RGPOT_UMA_REQUIRE_FIXTURES=, when set and not empty, turns a missing fixture
+  into a failure.
+
+Two more tests cover the UMA unpack cache:
+
+- =AotiUnpackTest= checks the cache without torch on small fake packages: the
+  order of the cache roots, reuse, replacement of a broken unpack, concurrent
+  unpacks from threads and processes, and that the system temporary directory
+  gains no entry.
+- =UmaCacheDirTest= loads the =UMA_FLOAT64_PT2= package with
+  =UmaConfig::cache_dir=, with =RGPOT_CACHE_DIR=, and from several potentials at
+  once.
+
+Neither runs in parallel with other tests, because each checks that the system
+temporary directory gains no entry.
+Meson points =RGPOT_CACHE_DIR= of the UMA tests at =uma-cache= in the build
+directory.

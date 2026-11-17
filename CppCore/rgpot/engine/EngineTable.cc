@@ -373,6 +373,8 @@ int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {
     pot->backend->set_charge_spin(charge, spin);
     pot->clear_error();
     return 0;
+  } catch (const rgpot::engine::Unsupported &e) {
+    return fail(pot, 3, e.what());
   } catch (const std::exception &e) {
     return fail(pot, 2, e.what());
   } catch (...) {

@@ -35,8 +35,12 @@
 #include <string>
 #include <vector>
 // clang-format on
+#include "rgpot/Locality.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
+#include "rgpot/Staged.hpp"
+#include "rgpot/nlist/Neighbours.hpp"
 
 namespace rgpot {
 
@@ -76,6 +80,11 @@ struct EAMTableConfig {
   bool periodic = true;
   /// Write the Cauchy stress of stress.hpp when the cell volume is positive.
   bool stress = false;
+  /// Verlet skin of the potential's own pair list, in the length unit of
+  /// the table. forceImpl keeps the list while every atom stays within
+  /// half of it (nlist::Neighbours). 0 rebuilds it whenever an atom moves.
+  /// The skin changes when the list is rebuilt, not the result.
+  double skin = 1.0;
 };
 
 /**
@@ -86,28 +95,66 @@ struct EAMTableConfig {
 class EAMTablePot : public Potential<EAMTablePot> {
 public:
   explicit EAMTablePot(const EAMTableConfig &c);
-  EAMTablePot(const EAMTable &table, bool periodic, bool stress);
+  EAMTablePot(const EAMTable &table, bool periodic, bool stress, double skin = 1.0);
 
   [[nodiscard]] PotCaps caps() const noexcept override {
-    return {.periodic = m_periodic, .stress = m_stress};
+    // The pair list is scratch rewritten by every force call.
+    return {.reentrancy = Reentrancy::PerInstance,
+            .periodic = m_periodic,
+            .stress = m_stress};
   }
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
     return m_paramsKey;
   }
 
+  /// The density, the embedding argument and phi all stop at the table
+  /// cutoff. The staged evaluation exchanges rho.
+  [[nodiscard]] Locality locality() const noexcept {
+    return {.cutoff = m_table.cutoff, .densities = 1};
+  }
+
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
+
+  /// forceImpl plus per-atom terms: each atom's embedding F_a(rho_i), and
+  /// each phi_ab and pair virial split half to each atom, as pair_style
+  /// eam tallies eatom and vatom.
+  void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
+  /// Staged.hpp: adds rho_ab(r) to the density of each atom of a pair.
+  void densityStage(const HalfList &list, double *densities) const;
+
+  /// Staged.hpp: F_a(rho_i) of each owned atom and the pair forces with
+  /// F'(rho) of both atoms, tallied as forcePerAtom tallies them.
+  void forceStage(const HalfList &list, const double *densities, double *forces,
+                  StageTally *tally) const;
+
+  /// Stream walks the cells on every call and keeps no list.
+  void setNeighbourMode(nlist::Mode mode) noexcept { m_mode = mode; }
+
+  /// True when the last forceImpl or forcePerAtom kept the pair list.
+  [[nodiscard]] bool listReused() const noexcept { return m_neighbours.reused(); }
+
+  /// Pair lists built by forceImpl and forcePerAtom so far.
+  [[nodiscard]] std::uint64_t listBuilds() const noexcept { return m_neighbours.builds(); }
 
 private:
   static constexpr uint64_t kKernelVersion = 1;
+
+  void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
   EAMTable m_table;
   /// PairEAM::interpolate coefficients, seven per point, same layout as
   /// the m_table arrays.
   std::vector<std::vector<double>> m_frho, m_rhor, m_z2r;
+  /// Element index of each atomic number, -1 for one the table lacks.
+  std::vector<int> m_element;
   bool m_periodic;
   bool m_stress;
+  double m_skin;
   uint64_t m_paramsKey{0};
+  nlist::Mode m_mode = nlist::Mode::Auto;
+  mutable nlist::Neighbours m_neighbours;
 };
 
 } // namespace rgpot

@@ -89,7 +89,7 @@ int main() {
   {
     rgpot::cache::PotentialCache cache(path);
     CollectivePot pot;
-    pot.set_cache(&cache);
+    pot.setCache(&cache);
 
     const std::vector<int> types{1, 1};
     const std::array<std::array<double, 3>, 3> box{

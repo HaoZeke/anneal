@@ -156,10 +156,12 @@ template <bool Hw> inline double exp_fast(double x) {
 /// operations per lane.
 double exp(double x);
 
-#if defined(__x86_64__)
-/// Same bits as exp(). The body is compiled with a hardware FMA.
+/// Same bits as exp(), for n values. Declared on every target. On x86-64
+/// GCC and Clang the body is compiled with a hardware FMA, so call it only
+/// where detail::fma_hw_active() holds. Elsewhere it calls exp().
 void exp_hw_n(const double *in, double *out, std::size_t n);
 
+#if defined(__x86_64__)
 struct PairView;
 struct LjParams;
 struct MorseParams;

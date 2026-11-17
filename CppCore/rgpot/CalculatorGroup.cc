@@ -151,7 +151,11 @@ bool addCalculatorCommAdopter(CalculatorCommAdopter callback) {
 CalculatorGroup bindCalculators(int ranks_per_calculator) {
   loadCalculatorMpi(nullptr);
   std::lock_guard<std::mutex> lock(g_mu);
-  if (g_bound && g_bound_rpc == ranks_per_calculator)
+  // g_bound_rpc holds the resolved size, so resolve the argument the same way.
+  const int asked = ranks_per_calculator > 0 ? ranks_per_calculator
+                    : api() != nullptr       ? g_group.world_size
+                                             : 1;
+  if (g_bound && g_bound_rpc == asked)
     return g_group;
   if (g_bound) {
     CalculatorGroup refused;

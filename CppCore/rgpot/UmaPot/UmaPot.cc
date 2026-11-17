@@ -5,12 +5,12 @@
 
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/UmaPot/UmaContract.hpp"
-#include "rgpot/UmaPot/aoti_execstack.hpp"
+#include "rgpot/UmaPot/aoti_unpack.hpp"
 
 #include <array>
 #include <vector>
 
-#include <torch/csrc/inductor/aoti_package/model_package_loader.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -224,8 +224,12 @@ struct UmaPot::Impl {
   double molecular_box{0.0};
   int max_neighbors{300};
   int64_t batch_max{0};
+  // A packed package is one disjoint graph with a dynamic atom count
+  // and a dynamic edge count. Chunks are not padded.
+  bool batch_packed{false};
   UmaContract contract;
-  std::unique_ptr<torch::inductor::AOTIModelPackageLoader> loader;
+  UmaCheckpointProvenance provenance;
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
   mutable std::mutex mutex;
 };
 
@@ -241,16 +245,36 @@ void UmaPot::recomputeParamsKey() {
 }
 
 void UmaPot::ensureLoaded() const {
-  if (m_impl->loader)
+  if (m_impl->runner)
     return;
   c10::InferenceMode guard;
-  const std::string load_path =
-      aoti_execstack::prepare_pt2_for_load(m_config.model_path);
-  m_impl->loader =
-      std::make_unique<torch::inductor::AOTIModelPackageLoader>(load_path);
+  // torch's AOTIModelPackageLoader would unpack into a fresh directory
+  // under the system temporary path; the same runner is built here from
+  // a persistent unpack under the configured cache root.
+  const auto root = aoti_unpack::resolve_cache_root(m_config.cache_dir);
+  const auto unpacked = aoti_unpack::unpack(m_config.model_path, root.path);
+  std::fprintf(stderr, "UmaPot: %s unpack %s (cache root from %s)\n",
+               unpacked.reused ? "reusing" : "created",
+               unpacked.dir.string().c_str(), root.source.c_str());
   // The package's embedded metadata is the runtime contract: one
   // producer (scripts/export_uma_aoti.py), the .pt2 self-describing.
-  const auto meta = m_impl->loader->get_metadata();
+  const auto meta = aoti_unpack::read_metadata(unpacked.metadata_json);
+  const auto device_key = meta.find("AOTI_DEVICE_KEY");
+  if (device_key == meta.end() || device_key->second.empty())
+    throw std::runtime_error("UmaPot: AOTI package " + m_config.model_path +
+                             " records no AOTI_DEVICE_KEY");
+  auto &registry = torch::inductor::getAOTIModelRunnerRegistry();
+  const auto create = registry.find(device_key->second);
+  if (create == registry.end())
+    throw std::runtime_error("UmaPot: this torch has no AOTI runner for "
+                             "device '" + device_key->second + "'");
+  c10::Device device(device_key->second);
+  device.set_index(-1);
+  m_impl->runner =
+      create->second(unpacked.so.string(), 1, device.str(),
+                     unpacked.model_dir.string(), false);
+  if (!unpacked.blob.empty())
+    m_impl->runner->update_constant_buffer_from_blob(unpacked.blob.string());
   auto num = [&](const char *key, double fallback) {
     const auto it = meta.find(key);
     if (it == meta.end() || it->second.empty())
@@ -266,6 +290,7 @@ void UmaPot::ensureLoaded() const {
   m_impl->max_neighbors = static_cast<int>(
       num("max_neighbors", static_cast<double>(m_impl->max_neighbors)));
   m_impl->batch_max = static_cast<int64_t>(num("batch_max", 0.0));
+  m_impl->batch_packed = num("batch_packed", 0.0) != 0.0;
   auto named = [&](const char *key) -> std::optional<torch::ScalarType> {
     const auto it = meta.find(key);
     if (it == meta.end() || it->second.empty())
@@ -300,6 +325,10 @@ void UmaPot::ensureLoaded() const {
                m_impl->pos_dtype_name.c_str(),
                m_impl->model_dtype_name.c_str());
   m_impl->contract = UmaContract::fromMetadata(meta);
+  m_impl->provenance = UmaCheckpointProvenance::fromMetadata(meta);
+  std::fprintf(stderr, "UmaPot: checkpoint_sha256=%s\n",
+               m_impl->provenance.sha256 ? m_impl->provenance.sha256->c_str()
+                                         : "unset");
 }
 
 void UmaPot::checkContract(const ForceInput &in) const {
@@ -344,8 +373,8 @@ void UmaPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   }
   checkContract(in);
   if (m_impl->batch_max > 1) {
-    // A band package carries only the batched (B >= 2) graph; a lone
-    // system rides the batch path, which pads it to two.
+    // A static band carries only the batched graph, so a lone system
+    // is padded. A packed graph accepts one system as itself.
     ForceBatch one{.nSystems = 1, .in = &in, .out = out};
     forceBatchImpl(one);
     return;
@@ -429,7 +458,7 @@ void UmaPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   std::lock_guard<std::mutex> lock(m_impl->mutex);
   ensureLoaded();
   c10::InferenceMode guard;
-  auto outputs = m_impl->loader->run(inputs);
+  auto outputs = m_impl->runner->run(inputs);
   if (outputs.size() < 2)
     throw std::runtime_error("UmaPot: AOTI package returned <2 tensors");
 
@@ -487,11 +516,11 @@ void UmaPot::forceBatchImpl(const ForceBatch &batch) const {
     const size_t stop =
         std::min(batch.nSystems, start + static_cast<size_t>(bmax));
     const auto B_real = static_cast<int64_t>(stop - start);
-    // The band graph is traced at exactly batch_max systems (static
-    // shapes; merge_mole freezes per-atom buffers at the traced
-    // total), so every chunk pads to that size by repeating the last
-    // system and the padded results are discarded.
-    const int64_t B = bmax;
+    // A static band is traced at exactly batch_max systems, so a short
+    // chunk repeats its last system. A packed graph takes the real
+    // count: the atom and edge dimensions are dynamic.
+    const bool packed = m_impl->batch_packed;
+    const int64_t B = packed ? B_real : bmax;
     auto in_at = [&](int64_t b) -> const ForceInput & {
       const int64_t src = b < B_real ? b : B_real - 1;
       return batch.in[start + static_cast<size_t>(src)];
@@ -608,7 +637,7 @@ void UmaPot::forceBatchImpl(const ForceBatch &batch) const {
 
     std::lock_guard<std::mutex> lock(m_impl->mutex);
     c10::InferenceMode guard;
-    auto outputs = m_impl->loader->run(inputs);
+    auto outputs = m_impl->runner->run(inputs);
     if (outputs.size() < 2)
       throw std::runtime_error("UmaPot: AOTI package returned <2 tensors");
     auto energies = outputs[0].to(torch::kFloat64).cpu().contiguous();
@@ -637,6 +666,12 @@ const char *UmaPot::modelDtypeName() const {
   std::lock_guard<std::mutex> lock(m_impl->mutex);
   ensureLoaded();
   return m_impl->model_dtype_name.c_str();
+}
+
+const UmaCheckpointProvenance &UmaPot::checkpointProvenance() const {
+  std::lock_guard<std::mutex> lock(m_impl->mutex);
+  ensureLoaded();
+  return m_impl->provenance;
 }
 
 } // namespace rgpot

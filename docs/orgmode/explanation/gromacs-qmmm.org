@@ -1,0 +1,26 @@
+#+TITLE: GROMACS QM/MM through the CP2K interface
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* GROMACS QM/MM through the CP2K interface
+
+The steps are in
+[[file:../howto/engine-gromacs-qmmm.org][GROMACS QM/MM drop-in]], and the input
+keys and limits are in
+[[file:../reference/gromacs_dropin.org][GROMACS QM/MM drop-in reference]].
+
+GROMACS 2024 to 2026 has three in-process hooks for an external potential.
+
+- QM/MM through libcp2k (=-DGMX_CP2K=ON=) calls a fixed C API, in double
+  precision, every step, and passes the topology elements through a PDB file.
+  Its energy is a GROMACS energy term.
+  It carries no virial: =QMMMForceProvider= adds its forces without a virial
+  contribution.
+- NNPot (2025 and later) loads only TorchScript =.pt= models, converts positions
+  to single precision, and also carries no virial.
+- PLUMED applies a bias.
+  It carries the virial but keeps the energy out of the GROMACS energy terms.
+
+MiMiC serves CPMD only, and GROMACS has no i-PI client.
+The libcp2k API is the one that takes any potential without a model format and
+reports the energy as GROMACS' own, so the drop-in implements it.

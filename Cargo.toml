@@ -7,7 +7,7 @@ resolver = "2"
 [workspace.package]
 # The release version. Edit it here only; every other copy is generated
 # from it (ci/version/files.txt) and CI fails when one drifts.
-version = "3.6.0"
+version = "3.7.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/OmniPotentRPC/rgpot"

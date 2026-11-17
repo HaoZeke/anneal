@@ -20,11 +20,8 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
-
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
 
 void EAM::cleanMemory() {
   std::vector<double>().swap(wrapped_);
@@ -56,7 +53,8 @@ EAM::element_parameters EAM::get_element_parameters(int atomic_number) const {
       return el_params[i];
     }
   }
-  throw 14324;
+  throw std::invalid_argument("EAM: no parameters for atomic number " +
+                              std::to_string(atomic_number));
 }
 
 void EAM::prepare(long N, const double *R, const double *box) {
@@ -306,15 +304,7 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
   }
   const auto &off = neighbours_.offsets();
   const auto &nbr = neighbours_.neighbours();
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-  {
-#if defined(_OPENMP)
-    const int t = omp_get_thread_num();
-#else
-    const int t = 0;
-#endif
+  rgpot::nlist::forEachSlice(nt, [&](int t) {
     const long begin = static_cast<long>(parts_[static_cast<std::size_t>(t)].begin);
     const long end = static_cast<long>(parts_[static_cast<std::size_t>(t)].end);
     for (long i = begin; i < end; ++i) {
@@ -393,9 +383,11 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
       partial_f_[static_cast<std::size_t>(3 * i + 2)] = fz;
       thread_energy_[static_cast<std::size_t>(t)] += energy;
     }
-#if defined(_OPENMP)
-#pragma omp barrier
-#endif
+  });
+  // The second pass reads the dF and pair terms of every slice.
+  rgpot::nlist::forEachSlice(nt, [&](int t) {
+    const long begin = static_cast<long>(parts_[static_cast<std::size_t>(t)].begin);
+    const long end = static_cast<long>(parts_[static_cast<std::size_t>(t)].end);
     for (long i = begin; i < end; ++i) {
       double fx = partial_f_[static_cast<std::size_t>(3 * i)];
       double fy = partial_f_[static_cast<std::size_t>(3 * i + 1)];
@@ -428,7 +420,7 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
       partial_f_[static_cast<std::size_t>(3 * i + 1)] = fy;
       partial_f_[static_cast<std::size_t>(3 * i + 2)] = fz;
     }
-  }
+  });
   for (long i = 0; i < N; ++i) {
     F[3 * i] = partial_f_[static_cast<std::size_t>(3 * i)];
     F[3 * i + 1] = partial_f_[static_cast<std::size_t>(3 * i + 1)];
@@ -442,11 +434,7 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
 }
 
 const rgpot::eam::ElementSpline &EAM::splineFor(int Z) {
-  static std::vector<rgpot::eam::ElementSpline> tables;
-  if (tables.capacity() < 8) {
-    tables.reserve(8);
-  }
-  for (const auto &table : tables) {
+  for (const auto &table : splines_) {
     if (table.Z == Z) {
       return table;
     }
@@ -459,18 +447,19 @@ const rgpot::eam::ElementSpline &EAM::splineFor(int Z) {
     }
   }
   if (raw == nullptr) {
-    throw 14324;
+    throw std::invalid_argument("EAM: no parameters for atomic number " +
+                                std::to_string(Z));
   }
-  tables.push_back(rgpot::eam::makeElementSpline(raw->Z, raw->Dm, raw->alphaM, raw->Rm,
-                                                 raw->beta1, raw->beta2, raw->r_cut,
-                                                 raw->func_coeff));
-  return tables.back();
+  splines_.push_back(rgpot::eam::makeElementSpline(raw->Z, raw->Dm, raw->alphaM, raw->Rm,
+                                                   raw->beta1, raw->beta2, raw->r_cut,
+                                                   raw->func_coeff));
+  return splines_.back();
 }
 
 void EAM::evaluateDensityStream(long N, const int *atomicNrs, double *F,
                                  double *U) {
   // One half pair, tabulated. The density walk and the force walk
-  // share the cell bins. Each thread keeps its own rows, so the
+  // share the cell bins. Each slice keeps its own rows, so the
   // partner atom needs no lock and no pair index.
   js_.clear();
   const int nt = threads_used_;
@@ -497,10 +486,7 @@ void EAM::evaluateDensityStream(long N, const int *atomicNrs, double *F,
   dF_.resize(static_cast<std::size_t>(N));
   stream_force_.assign(rows * 3, 0.0);
   double embedded = 0.0;
-  auto absorb = [&](int thread) {
-    if (thread != 0) {
-      return;
-    }
+  auto absorb = [&] {
     for (long i = 0; i < N; ++i) {
       double dens = 0.0;
       for (int t = 0; t < nt; ++t) {
@@ -585,7 +571,7 @@ void EAM::evaluateDensityStream(long N, const int *atomicNrs, double *F,
         }
   };
   neighbours_.forCellTeam(true, nt, density_of);
-  absorb(0);
+  absorb();
   neighbours_.forCellTeam(true, nt, force_of);
   for (long i = 0; i < N; ++i) {
     double fx = 0.0;

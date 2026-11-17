@@ -206,6 +206,20 @@ MetatomicPot::MetatomicPot(const MetatomicConfig &config)
     m_nl_requests.push_back(request);
   }
 
+  // The charge and multiplicity reach the model as the rgpot:: system data it
+  // declares. With check_consistency metatomic rejects a System that lacks a
+  // declared input or carries an undeclared one.
+  if (m_model.find_method("requested_inputs")) {
+    const auto inputs = m_model.run_method("requested_inputs").toGenericDict();
+    m_attach_charge = inputs.contains(std::string("rgpot::charge"));
+    m_attach_spin_multiplicity =
+        inputs.contains(std::string("rgpot::spin_multiplicity"));
+    m_attach_spin = inputs.contains(std::string("rgpot::spin"));
+  }
+  if (m_config.attach_system_extras) {
+    m_attach_charge = m_attach_spin_multiplicity = m_attach_spin = true;
+  }
+
   // 3. Device selection
   torch::optional<std::string> desired = torch::nullopt;
   if (!m_config.device.empty()) {
@@ -296,6 +310,28 @@ MetatomicPot::MetatomicPot(const MetatomicConfig &config)
   }
 
   m_check_consistency = m_config.check_consistency;
+}
+
+void MetatomicPot::attachSystemExtras(
+    const metatomic_torch::System &system) const {
+  // add_data rejects bare names that are not known outputs; extras must be
+  // <domain>::<name>. The multiplicity goes under the metatomic name and the
+  // UMA/fairchem "spin" alias.
+  const auto charge = static_cast<double>(m_config.charge);
+  const auto spin = static_cast<double>(m_config.spin);
+  if (m_attach_charge) {
+    system->add_data("rgpot::charge",
+                     scalar_system_data("charge", charge, m_device, m_dtype));
+  }
+  if (m_attach_spin_multiplicity) {
+    system->add_data(
+        "rgpot::spin_multiplicity",
+        scalar_system_data("spin_multiplicity", spin, m_device, m_dtype));
+  }
+  if (m_attach_spin) {
+    system->add_data("rgpot::spin",
+                     scalar_system_data("spin", spin, m_device, m_dtype));
+  }
 }
 
 
@@ -404,25 +440,7 @@ void MetatomicPot::forceImpl(const ForceInput &in, ForceOut *out) const {
 
     auto system = torch::make_intrusive<metatomic_torch::SystemHolder>(
         atomic_types, torch_positions, torch_cell, torch_pbc);
-
-    if (m_config.attach_system_extras) {
-      // add_data rejects bare names that are not known outputs; extras
-      // must be <domain>::<name>. Keep both the metatomic multiplicity
-      // name and the UMA/fairchem "spin" alias.
-      system->add_data("rgpot::charge",
-                       scalar_system_data("charge",
-                                          static_cast<double>(m_config.charge),
-                                          m_device, m_dtype));
-      system->add_data(
-          "rgpot::spin_multiplicity",
-          scalar_system_data("spin_multiplicity",
-                             static_cast<double>(m_config.spin), m_device,
-                             m_dtype));
-      system->add_data("rgpot::spin",
-                       scalar_system_data("spin",
-                                          static_cast<double>(m_config.spin),
-                                          m_device, m_dtype));
-    }
+    attachSystemExtras(system);
 
     for (const auto &request : m_nl_requests) {
       auto neighbors = computeNeighbors(request, nAtoms, pos_buf.data(),
@@ -571,21 +589,7 @@ void MetatomicPot::forceBatchImpl(const ForceBatch &batch) const {
               .to(m_device);
       auto system = torch::make_intrusive<metatomic_torch::SystemHolder>(
           atomic_types, torch_positions, torch_cell, torch_pbc);
-      if (m_config.attach_system_extras) {
-        system->add_data("rgpot::charge",
-                         scalar_system_data("charge",
-                                            static_cast<double>(m_config.charge),
-                                            m_device, m_dtype));
-        system->add_data(
-            "rgpot::spin_multiplicity",
-            scalar_system_data("spin_multiplicity",
-                               static_cast<double>(m_config.spin), m_device,
-                               m_dtype));
-        system->add_data("rgpot::spin",
-                         scalar_system_data("spin",
-                                            static_cast<double>(m_config.spin),
-                                            m_device, m_dtype));
-      }
+      attachSystemExtras(system);
       for (const auto &request : m_nl_requests) {
         auto neighbors = computeNeighbors(request, nAtoms, in.pos, in.box,
                                           periodic);

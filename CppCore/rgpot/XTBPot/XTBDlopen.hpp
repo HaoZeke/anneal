@@ -56,6 +56,11 @@ public:
 
   [[nodiscard]] double warmMove() const;
 
+  /// HOMO-LUMO gap guard in eV. Zero or negative reuses at any gap.
+  void setWarmMinGap(double ev);
+
+  [[nodiscard]] double warmMinGap() const;
+
   /// True when the last successful force reused the previous wavefunction.
   [[nodiscard]] bool reusedWavefunction() const;
 
@@ -82,6 +87,8 @@ private:
   reset_fn m_reset{nullptr};
   set_warm_fn m_set_warm{nullptr};
   warm_move_fn m_warm_move{nullptr};
+  set_warm_fn m_set_min_gap{nullptr};
+  warm_move_fn m_min_gap{nullptr};
   reused_fn m_reused{nullptr};
 };
 

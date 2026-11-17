@@ -1653,18 +1653,27 @@ void GrowableNeighborList::grow(size_t new_size) {
 void GrowableNeighborList::reset() {
 #ifndef NDEBUG
     auto size = this->neighbors.length;
-    // set all allocated data to a bit pattern that maps to NaN for double
-    std::memset(this->neighbors.pairs, 0b11111111, size * sizeof(size_t[2]));
+    // eOn local patch (upstream candidate): poison only storage this list
+    // allocated. A list with zero pairs still has a null pairs pointer, and
+    // memset of a null pointer is undefined even when the byte count is
+    // zero. length can also exceed the allocation, so stop at capacity.
+    if (size > this->capacity) {
+        size = this->capacity;
+    }
+    if (this->neighbors.pairs != nullptr && size > 0) {
+        // set all allocated data to a bit pattern that maps to NaN for double
+        std::memset(this->neighbors.pairs, 0b11111111, size * sizeof(size_t[2]));
+    }
 
-    if (this->neighbors.shifts != nullptr) {
+    if (this->neighbors.shifts != nullptr && size > 0) {
         std::memset(this->neighbors.shifts, 0b11111111, size * sizeof(int32_t[3]));
     }
 
-    if (this->neighbors.distances != nullptr) {
+    if (this->neighbors.distances != nullptr && size > 0) {
         std::memset(this->neighbors.distances, 0b11111111, size * sizeof(double));
     }
 
-    if (this->neighbors.vectors != nullptr) {
+    if (this->neighbors.vectors != nullptr && size > 0) {
         std::memset(this->neighbors.vectors, 0b11111111, size * sizeof(double[3]));
     }
 #endif

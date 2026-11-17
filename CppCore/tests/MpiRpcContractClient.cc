@@ -51,6 +51,11 @@ int main(int argc, char **argv) {
         auto parameters = configuration.initNwchem();
         parameters.setCharge(charge);
         parameters.setTitle(title);
+      } else if (backend == "CP2K") {
+        // CP2K renders its deck at the first force, so the engine sees the
+        // charge there; the title has no CP2KParams field.
+        (void)title;
+        configuration.initCp2k().setCharge(charge);
       } else {
         auto parameters = configuration.initCpmd();
         parameters.setCharge(charge);
@@ -109,7 +114,11 @@ int main(int argc, char **argv) {
     if (multi) {
       calculate(2, true);
       calculate(2, false);
-      configure(4, "reject-worker", false);
+      // NWChem and CPMD hand their params to the engine at configure time,
+      // where the fixture rejects them on rank 1. CP2KPot keeps them until
+      // the next force, so no engine call can refuse a configuration.
+      if (backend != "CP2K")
+        configure(4, "reject-worker", false);
     }
     configure(3, "recovered", true);
     calculate(3, false);

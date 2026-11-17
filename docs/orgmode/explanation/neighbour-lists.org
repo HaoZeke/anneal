@@ -1,0 +1,45 @@
+#+TITLE: Neighbour list design
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Neighbour list design
+
+This page says why the neighbour layers behave the way they do.
+The tutorial is [[file:../tutorials/neighbour-list.org][Neighbour lists]].
+The C ABIs are in [[file:../reference/nlist_abi.org][Neighbour-list C ABI]] and
+[[file:../reference/fast_nlist.org][Fast pair list C ABI]].
+
+** All pairs below three bins
+
+=rgpot_fast_pairs= answers with all pairs when a periodic axis is narrower than
+three cutoffs; the table is in
+[[file:../reference/fast_nlist.org][Fast pair list C ABI]].
+Each linkcell bin is checked against itself and its 26 neighbours.
+Below three bins on an axis, the bins on either side are the same bin.
+Allen and Tildesley stop their cell-list codes below three bins,
+/Computer Simulation of Liquids/, 2nd ed. (2017), section 5.3.2.
+
+** Threads
+
+Distinct =Table=, =Builder= and =Walk= objects may be used from different
+threads.
+One object is not shared.
+=build= may start an OpenMP team when =OMP_NUM_THREADS= is set and the system
+has at least 8192 atoms.
+A smaller system stays on the calling thread.
+The work is split into =OMP_NUM_THREADS= slices, and the threads the runtime
+starts take all of them.
+A build inside another OpenMP region may get one thread and returns the same
+list.
+There is no mutable global.
+=rgpot_nlist_strerror= returns a literal.
+
+The thread rules of the potentials are in
+[[file:thread-safety.org][Thread safety]].
+
+** Where the design came from
+
+=docs/neighbour_api_design.md= records the survey of vesin, JAX-MD, LAMMPS,
+ArborX, matscipy, ASE, freud and torch-nl, and the passes that produced this
+surface.
+=docs/neighbour_layer.md= records the kernel the classical potentials still use.

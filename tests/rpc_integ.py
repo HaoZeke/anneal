@@ -23,6 +23,31 @@ except ImportError:
     from nwchem_params import configure_nwchem, make_potential_config_none
 
 
+def potential_config_arm(name):
+    """A PotentialConfig with arm `name` set to its schema defaults."""
+    cfg = pot_capnp.PotentialConfig.new_message()
+    field = pot_capnp.PotentialConfig.schema.fields[name]
+    if field.proto.slot.type.which() == "void":
+        setattr(cfg, name, None)
+    else:
+        cfg.init(name)
+    return cfg
+
+
+async def refuse_every_arm(pot, label, applied):
+    """configure() with each arm outside `applied` is refused by name, not dropped."""
+    arms = list(pot_capnp.PotentialConfig.schema.union_fields)
+    for name in arms:
+        if name == "none" or name in applied:
+            continue
+        reply = await pot.configure(potential_config_arm(name))
+        assert not reply.ok, f"{label} accepted configure({name}): {reply.message}"
+        assert name in reply.message, f"{label} configure({name}) message: {reply.message}"
+    none = await pot.configure(potential_config_arm("none"))
+    assert none.ok, f"{label} configure(none): {none.message}"
+    print(f"{label}: configure refused {len(arms) - 1 - len(applied)} arms by name, none is a no-op")
+
+
 async def run_client(port):
     # Retry connection a few times to allow server startup
     for _ in range(10):
@@ -82,6 +107,58 @@ async def run_client(port):
         print("Error: Energy is zero or NaN")
         return False
 
+    await refuse_every_arm(pot, "CuH2", applied=())
+    again = await pot.calculate(fip)
+    assert again.result.energy == result.result.energy
+    return True
+
+
+async def run_morse_configure(port):
+    """configure(morse) on a Morse server changes the energy it returns."""
+    for _ in range(10):
+        try:
+            connection = await capnp.AsyncIoStream.create_connection(
+                host="localhost", port=port
+            )
+            break
+        except OSError:
+            await asyncio.sleep(0.5)
+    else:
+        print("Morse configure: failed to connect to server.")
+        return False
+
+    client = capnp.TwoPartyClient(connection)
+    pot = client.bootstrap().cast_as(pot_capnp.Potential)
+
+    defaults = pot_capnp.MorseParams.new_message()
+    fip = pot_capnp.ForceInput.new_message()
+    fip.init("pos", 6)
+    for i, p in enumerate([10.0, 10.0, 10.0, 10.0 + defaults.re, 10.0, 10.0]):
+        fip.pos[i] = p
+    fip.init("atmnrs", 2)
+    fip.atmnrs[0] = 78
+    fip.atmnrs[1] = 78
+    fip.init("box", 9)
+    for i, b in enumerate([40.0, 0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 0.0, 40.0]):
+        fip.box[i] = b
+
+    before = (await pot.calculate(fip)).result.energy
+
+    cfg = pot_capnp.PotentialConfig.new_message()
+    cfg.init("morse").de = 2.0 * defaults.de
+    reply = await pot.configure(cfg)
+    print(f"Morse configure(morse): ok={reply.ok} msg={reply.message}")
+    assert reply.ok, reply.message
+
+    after = (await pot.calculate(fip)).result.energy
+    print(f"Morse energy at re: default de {before}, doubled de {after}")
+    # At r = re the shifted pair energy is -de d^2, linear in de.
+    d = 1.0 - math.exp(-defaults.a * (defaults.cutoff - defaults.re))
+    assert math.isclose(after, -2.0 * defaults.de * d * d, rel_tol=1e-12)
+    assert math.isclose(after, 2.0 * before, rel_tol=1e-12)
+
+    await refuse_every_arm(pot, "Morse", applied=("morse",))
+    assert (await pot.calculate(fip)).result.energy == after
     return True
 
 
@@ -112,6 +189,7 @@ async def run_nwchem_smoke(port):
     )
     print(f"NWChem configure(nwchem): ok={ok} msg={msg}")
     # ok may be False without engine; still a valid RPC round-trip
+    await refuse_every_arm(pot, "NWChem", applied=("nwchem",))
     print("NWChem smoke: configure RPC completed.")
     return True
 
@@ -224,7 +302,10 @@ async def run_cpmd_smoke(port):
 
     client = capnp.TwoPartyClient(connection)
     pot = client.bootstrap().cast_as(pot_capnp.Potential)
-    return await configure_cpmd_smoke(pot, pot_capnp)
+    if not await configure_cpmd_smoke(pot, pot_capnp):
+        return False
+    await refuse_every_arm(pot, "CPMD", applied=("cpmd",))
+    return True
 
 
 def main():
@@ -277,6 +358,30 @@ def main():
     if not success:
         sys.exit(1)
     print("Integration test passed.")
+
+    morse_port = args.port + 3
+    print(f"Starting Morse server: {args.server_bin} {morse_port} Morse")
+    morse_proc = subprocess.Popen(
+        [args.server_bin, str(morse_port), "Morse"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        morse_ok = asyncio.run(capnp.run(run_morse_configure(morse_port)))
+    except BaseException as e:
+        print(f"Morse configure exception: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        morse_proc.kill()
+        out, err = morse_proc.communicate(timeout=30)
+        print("Server stdout:", out.decode(errors="replace")[-4000:])
+        print("Server stderr:", err.decode(errors="replace")[-4000:])
+        morse_ok = False
+    finally:
+        morse_proc.kill()
+        morse_proc.wait()
+    if not morse_ok:
+        sys.exit(1)
+    print("Morse configure passed.")
 
     if args.nwchem_smoke:
         nw_port = args.port + 1

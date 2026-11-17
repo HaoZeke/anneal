@@ -48,8 +48,8 @@ void record_objects_destroyed() {
 int main(int argc, char **argv) {
   try {
     if (argc > 1 && std::string(argv[1]) == "probe") {
-      if (!rgpot::NWChemPot::probe_available() ||
-          !rgpot::NWChemPot::abi_available())
+      if (!rgpot::NWChemPot::probeAvailable() ||
+          !rgpot::NWChemPot::abiAvailable())
         throw std::runtime_error("fixture probe failed");
     }
     {

@@ -32,9 +32,9 @@ engine_lib_candidates(const std::string &explicit_path) {
   std::vector<std::string> out;
   if (!explicit_path.empty())
     out.emplace_back(explicit_path);
-  if (const char *e = std::getenv("MOPACC_LIBRARY"))
+  if (const char *e = std::getenv("MOPACC_LIBRARY"); e && *e)
     out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_MOPACC_ENGINE"))
+  if (const char *e = std::getenv("RGPOT_MOPACC_ENGINE"); e && *e)
     out.emplace_back(e);
   out.emplace_back("libmopacc.so");
   out.emplace_back("./libmopacc.so");
@@ -142,7 +142,7 @@ bool MOPACPot::available() const {
   return impl_ && impl_->bundle.loaded && impl_->bundle.energy_gradient;
 }
 
-bool MOPACPot::probe_available() {
+bool MOPACPot::probeAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_probe_done)
     return g_probe_ok;
@@ -155,7 +155,7 @@ bool MOPACPot::probe_available() {
   return g_probe_ok;
 }
 
-bool MOPACPot::abi_available() {
+bool MOPACPot::abiAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_abi_probe_done)
     return g_abi_probe_ok;

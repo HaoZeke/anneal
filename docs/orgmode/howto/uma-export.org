@@ -1,0 +1,182 @@
+#+TITLE: Export a UMA model with dynamic shapes
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+
+* Export a UMA model with dynamic shapes
+
+=scripts/export_uma_aoti.py= turns a UMA checkpoint into an AOTInductor package
+(=.pt2=) that =UmaPot= and =libuma_engine= load.
+Without =--molecular-box= and =--batch-max= it exports a dynamic package.
+The atom count and the edge count are =torch.export.Dim= symbols.
+One package then follows a nudged elastic band or a dimer walk when atoms enter
+or leave the 6 Angstrom cutoff.
+It also evaluates other molecules for the same task head.
+
+** Run it
+
+The exporter needs fairchem-core 2.23, torch 2.13 and vesin, which the
+=umaexport= pixi environment provides.
+Point =RGPOT_UMA_CHECKPOINT= at a local =uma-s-1p1.pt=, or pass =--checkpoint=.
+When neither is set, fairchem downloads =--model= (default =uma-s-1p1=) from
+Hugging Face.
+=--dtype= defaults to =float32=.
+
+#+attr_rgpot: syntax
+#+begin_src bash
+export RGPOT_UMA_CHECKPOINT=path/to/uma-s-1p1.pt
+pixi run -e umaexport export-uma-aoti -- \
+    --atoms path/to/geometry.xyz --task omol --charge 0 --spin 1 \
+    --dtype float64 --out uma-omol.pt2
+#+end_src
+
+=--help= lists every option.
+Do not commit the checkpoint or the package.
+
+** Checkpoint provenance
+
+The exporter resolves the checkpoint once, before the first reference
+calculation, and every predict unit of the export loads that one file.
+A Hugging Face download goes into fairchem's cache and is loaded from there.
+The package metadata then names the weights it was built from:
+
+| Key                      | Written for     | Value                                                         |
+|--------------------------+-----------------+---------------------------------------------------------------|
+| =checkpoint_source=      | every export    | =cli= (=--checkpoint=), =env= (=RGPOT_UMA_CHECKPOINT=) or =hf= |
+| =checkpoint_path=        | =cli=, =env=    | absolute path of the checkpoint file                          |
+| =checkpoint_hf_repo=     | =hf=            | repository, =facebook/UMA= for =uma-s-1p1=                    |
+| =checkpoint_hf_filename= | =hf=            | file inside the repository, =checkpoints/uma-s-1p1.pt=        |
+| =checkpoint_hf_revision= | =hf=            | the 40-digit commit the file was served from, not a branch    |
+| =checkpoint_sha256=      | every export    | SHA-256 of the checkpoint file that was loaded                |
+
+The revision is the commit in the hub cache path (=snapshots/<commit>/=), so a
+download of =main= records the commit =main= pointed to.
+=checkpoint_sha256= is the digest of the weights.
+=rgpot_engine_model_digest= hashes the =.pt2= itself, which changes with the
+export options.
+
+=UmaPot::checkpointProvenance()= returns these keys, and the load line on stderr
+prints =checkpoint_sha256=.
+In Python, in the =umaexport= environment (the exporter imports torch, ASE and
+NumPy) and with =scripts/= on the path, read them without loading the package:
+
+#+attr_rgpot: compile
+#+begin_src python
+import export_uma_aoti as exp
+
+meta = exp.package_metadata("uma-omol.pt2")
+print(exp.checkpoint_provenance(meta)["checkpoint_sha256"])
+#+end_src
+
+Packages exported before these keys still load.
+=checkpointProvenance()= leaves every field unset for them, and
+=checkpoint_provenance= reports each key as =None=.
+
+** Bounds
+
+| Symbol   | Inputs that share it                      | Default range            | Option        |
+|----------+-------------------------------------------+--------------------------+---------------|
+| =natoms= | =pos= rows, =atomic_numbers=, =batch=     | 2 to 1024                | =--max-atoms= |
+| =nedges= | =edge_index= columns, =cell_offsets= rows | 1 to =max_atoms= x 300 | =--max-edges= |
+
+300 is the per-atom neighbour cap of UMA, so the default edge bound covers every
+atom at that cap.
+The exporter reads the ranges back from the exported program and embeds them as
+=natoms_min=, =natoms_max=, =nedges_min= and =nedges_max=.
+It also writes =pos_shape= =natoms,3= and =edge_index_shape= =2,nedges=.
+=UmaPot= checks every call against them and throws =UmaShapeError= outside them.
+That check runs before the compiled graph.
+
+** Composition
+
+By default the MoLE experts stay in the graph.
+The graph computes the expert mix from the input atomic numbers, charge and
+spin, the same way fairchem does without =merge_mole=.
+The package records no =z_set=, =natoms= or =counts=.
+=z_max= (99 for =uma-s-1p1=) bounds the atomic numbers that the element
+embeddings can index.
+=UmaPot= refuses an atomic number below 1 or above
+=z_max= with =UmaContractError= on =z_max=.
+=--merge-mole= instead folds the expert mix of =--atoms= into the weights.
+That package is smaller but valid for that composition only, and it records
+=z_set= and =counts=.
+
+** Validation
+
+Before the package is kept, it must match =FAIRChemCalculator= on the same
+checkpoint and in the same dtype, within 1e-4 eV and 1e-4 eV/Angstrom, on:
+
+- =--atoms=,
+- =--atoms= with its last atom moved past the cutoff, which removes edges
+  (skipped when the move removes none),
+- a second molecule, ethanol or water (skipped with =--merge-mole=),
+- each =--check-atoms= structure (with =--merge-mole= it must have the
+  composition of =--atoms=).
+
+A package that fails any of these is deleted.
+=validated= in the metadata lists each check as =tag:natoms/nedges=.
+
+=tests/test_uma_dynamic_export.py= exports one float64 package from HCN.
+It then compares HCN, HCN with the hydrogen past the nitrogen cutoff, ethane
+before and after its methyl groups are pulled apart, and water against
+=FAIRChemCalculator=.
+The bounds are 1e-5 eV and 1e-4 eV per Angstrom.
+The measured errors are at most 1.3e-7 eV and 6.4e-6 eV per Angstrom.
+That is the size of fairchem's own random edge-frame roll in float64.
+The test skips when torch, ASE, fairchem, vesin or the checkpoint is missing.
+
+#+attr_rgpot: syntax
+#+begin_src bash
+RGPOT_UMA_CHECKPOINT=path/to/uma-s-1p1.pt \
+    pixi run -e umaexport python -m pytest tests/test_uma_dynamic_export.py -s
+#+end_src
+
+** Choose where the package is unpacked
+
+=UmaPot= and =libuma_engine= unpack the =.pt2= into a cache directory on the
+first force call and load the compiled library from there.
+The first of these that is set names the cache root:
+
+1. =UmaConfig::cache_dir=, or =cacheDir= in the engine's =UmaParams=,
+2. the =RGPOT_CACHE_DIR= environment variable,
+3. =$XDG_CACHE_HOME/rgpot= when =XDG_CACHE_HOME= is an absolute path,
+4. =.rgpot-cache= in the working directory.
+
+A relative root is resolved against the working directory when the model loads.
+Nothing is written to the system temporary directory.
+On a fresh machine or a batch node, point the root at fast local storage that
+outlives the job, for example a scratch directory:
+
+#+attr_rgpot: syntax
+#+begin_src bash
+export RGPOT_CACHE_DIR="$SCRATCH/rgpot-cache"
+#+end_src
+
+#+attr_rgpot: fragment
+#+begin_src cpp
+rgpot::UmaConfig cfg;
+cfg.model_path = "uma-omol.pt2";
+cfg.cache_dir = "/path/to/rgpot-cache";
+#+end_src
+
+The unpack is reused by every later run with the same package, so only the first
+run pays for it.
+It may be deleted when no process is using it.
+The layout is under the UMA unpack cache in
+[[file:../reference/engine_abi.org][Engine plugin ABI]].
+
+** Limits
+
+- One system per call.
+  =--batch-max= and =--molecular-box= keep the static graphs and =merge_mole=.
+- At least two atoms and one edge. fairchem answers a lone atom from
+  isolated-atom references, not from the network.
+- Charge, spin and task are graph inputs, but the package records and checks the
+  exported values.
+- The tracer gives every input axis a symbol and merges axes of equal size.
+  An example with 1 to 3 atoms or edges, or as many atoms as edges, would merge
+  with a fixed axis.
+  For such an input, for example HCN with 3 atoms, the exporter traces ethanol,
+  then checks the input as usual.
+- The kernels are compiled for the CPU instruction set of the export host.
+- A float64 =uma-s-1p1= package keeps all experts and is about 1.2 GB.
+  A float32 package is about half that size.
+  A float64 =--merge-mole= package is about 55 MB.

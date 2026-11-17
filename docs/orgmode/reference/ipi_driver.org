@@ -1,0 +1,311 @@
+#+TITLE: i-PI driver client
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* i-PI driver client
+
+=IPIDriver= is the client side of the i-PI socket protocol.
+Its header is =CppCore/rgpot/IPIPot/IPIDriver.hpp=.
+It connects to a server and answers each geometry with an rgpot evaluation.
+=IPIPot= is the server side.
+[[file:../howto/ipi.org][The i-PI how-to]] shows both directions.
+The protocol is Ceriotti, More and Manolopoulos, CPC 185, 1019 (2014).
+The i-PI 3.0 paper is J Chem Phys 161, 062504 (2024).
+The class is built with =-Dwith_ipi= (CMake =RGPOT_WITH_IPI=).
+The default, =auto=, builds it everywhere except Windows.
+
+On the wire, lengths are bohr, energies hartree and forces hartree/bohr.
+The cell arrives with its lattice vectors in the columns.
+The driver transposes it to rgpot rows.
+The virial is the extensive tensor =W = -sigma V= in hartree, row-major.
+That is the tensor =IPIPot= reads.
+
+** =rgpot::IPIDriverConfig=
+
+- Inputs :: =address= (default empty) and =species= (default empty).
+  =unix_prefix= (default =/tmp/ipi_=).
+  =connect_timeout_s= (default 30.0) and =timeout_s= (default 0.0).
+  =cutoff= (default 0.0) and =stress_step= (default 0.0).
+  =extras_json= (default true).
+  =address= is =unix:/absolute/path=, =unix:<name>=, =tcp:<host>:<port>= or
+  =tcp:<port>=.
+  =unix:<name>= connects to =unix_prefix= followed by the name.
+  =tcp:<port>= uses the host 127.0.0.1.
+  =species= holds one atomic number per atom, in the server's atom order.
+- Units :: =connect_timeout_s= and =timeout_s= are seconds.
+  =timeout_s= bounds each message, and 0 waits forever.
+  =cutoff= is in Angstrom.
+  It is the range used to tile a thin periodic cell and to pad an open box.
+  =stress_step= is a dimensionless strain.
+  Above 0 it turns on the central-difference virial for a stress-free kernel.
+- Outputs :: a plain struct read by =IPIDriver=.
+- Errors :: =IPIDriver= throws =std::invalid_argument= for these values.
+  An empty species list or an atomic number outside 1 to 118.
+  More atoms than the protocol limit of 10^7.
+  An address without a =unix:= or =tcp:= prefix, or an empty UNIX address.
+  A UNIX name containing =/=, or a path too long for the socket address.
+  A missing, out-of-range or zero port.
+  A timeout or cutoff that is negative or not finite.
+  A =stress_step= outside [0, 0.1).
+
+** =rgpot::IPIDriver=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+IPIDriver(const IPIDriverConfig &config, IPIEvaluator evaluate);
+#+end_src
+
+- Inputs :: =config=, an =rgpot::IPIDriverConfig=.
+  =evaluate=, an =rgpot::IPIEvaluator=.
+  =IPIEvaluator= is =std::function<void(const ForceInput &, ForceOut *)>=.
+  It gets the positions, the atomic numbers and the cell.
+  Its =ForceOut= arrives with zeroed forces.
+  The =eval= member of =rgpot::spec::Built= fits it.
+  That struct is what =engines/pot_spec.hpp= returns.
+  A lambda around any potential's =forceImpl= fits it too.
+- Units :: the evaluation sees Angstrom, with the cell vectors as rows.
+  It returns eV, eV/Angstrom and any Cauchy stress in eV/Angstrom^3.
+  The driver sends hartree, hartree/bohr and the virial =-sigma V= in hartree.
+- Outputs :: a driver that has checked its configuration and not connected.
+- Errors :: =std::invalid_argument= for an empty =evaluate=.
+  The configuration errors are those of =rgpot::IPIDriverConfig=.
+
+The driver follows the reference =driver.py=.
+=STATUS= gets =NEEDINIT= before the first =INIT=.
+It gets =HAVEDATA= while a result waits for =GETFORCE=, and =READY= otherwise.
+=INIT= carries a bead index and an init string, and both are kept.
+=POSDATA= carries the cell, its inverse and the positions.
+Its atom count must equal the length of =species= on every message.
+=GETFORCE= gets =FORCEREADY=, the energy, the atom count and the forces.
+The virial and the extra string follow.
+=EXIT= closes the connection and ends =run()=.
+A server that closes between two messages ends it the same way.
+ASE's =SocketIOCalculator= closes like that, and ASE's own client agrees.
+
+ASE sends a singular cell (zero volume) for a cluster.
+The driver evaluates such a geometry in a cube at least 100 Angstrom wide.
+The cube is also wider than twice the cluster extent plus =cutoff=.
+This is the open box of the PLUMED and GROMACS hosts.
+A periodic cell can be no wider than twice =cutoff= along an axis.
+The driver tiles such a cell along that axis.
+The energy is divided by the number of copies.
+The forces of the first copy are sent.
+
+An evaluation may report no stress while =stress_step= is above 0.
+The virial is then a central difference of the energy under strain.
+Positions and cell are deformed together by =stress_step=.
+That costs twelve extra evaluations per geometry.
+Otherwise a missing stress is sent as a zero virial.
+
+=extras_json= sends ={"virial": "<source>", "virial_units": "hartree"}=.
+The source is =kernel=, =finite_difference= or =none=.
+Without it the extra string is empty.
+
+** =rgpot::IPIDriver::connect=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void connect();
+#+end_src
+
+- Inputs :: none.
+- Units :: the retry window =connect_timeout_s= is in seconds.
+- Outputs :: an open connection; a call while connected does nothing.
+  A refused, reset or missing socket is retried every 50 ms.
+  The retries stop when =connect_timeout_s= ends.
+  So the driver may start before the server listens.
+- Errors :: =std::runtime_error= when the window ends without a connection.
+  The same when the error cannot be retried or a TCP host does not resolve.
+
+** =rgpot::IPIDriver::step=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+bool step();
+#+end_src
+
+- Inputs :: none.
+- Units :: =timeout_s= in seconds bounds the message.
+- Outputs :: true after a =STATUS=, =INIT=, =POSDATA= or =GETFORCE= message.
+  False after =EXIT=, or when the server closes between messages.
+  Both close the connection.
+- Errors :: =std::runtime_error= when the driver is not connected.
+  The same on a timeout.
+  The same on a disconnect inside a message (=i-PI server disconnected=).
+  The same on an unexpected header.
+  The same on an =INIT= string length outside 0 to 2^20.
+  The same on a =POSDATA= atom count that differs from =species=.
+  The same on non-finite positions or cell values.
+  The same on =GETFORCE= before =POSDATA=.
+  An exception from the evaluation propagates unchanged.
+  Every error closes the connection.
+
+** =rgpot::IPIDriver::run=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void run();
+#+end_src
+
+- Inputs :: none.
+- Units :: those of =connect= and =step=.
+- Outputs :: returns after =EXIT=.
+- Errors :: those of =connect= and =step=.
+
+** =rgpot::IPIDriver::close=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void close() noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the connection is closed without a message.
+  The next connection starts at =NEEDINIT=.
+  The destructor calls it.
+- Errors :: none.
+
+** =rgpot::IPIDriver::config=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const IPIDriverConfig &config() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: those of =rgpot::IPIDriverConfig=.
+- Outputs :: the configuration given to the constructor.
+- Errors :: none.
+
+** =rgpot::IPIDriver::endpoint=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const std::string &endpoint() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: =unix:<path>= with the prefix applied, or =tcp:<host>:<port>=.
+- Errors :: none.
+
+** =rgpot::IPIDriver::connected=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] bool connected() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: true from a successful =connect= until =EXIT=, =close= or an error.
+- Errors :: none.
+
+** =rgpot::IPIDriver::bead=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] int32_t bead() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the bead index of the last =INIT=, or -1 before one.
+- Errors :: none.
+
+** =rgpot::IPIDriver::initString=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const std::string &initString() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the init string of the last =INIT=, empty before one.
+- Errors :: none.
+
+** =rgpot::IPIDriver::evaluations=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] uint64_t evaluations() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the number of =POSDATA= messages evaluated.
+  The finite-difference virial does not add to it.
+- Errors :: none.
+
+This example compiles here.
+Running it needs a server listening on =/tmp/ipi_rgpot=.
+=IPIPot= with =unix:rgpot= is one; ASE's =SocketIOCalculator= is another.
+
+#+attr_rgpot: compile
+#+begin_src cpp
+#include "rgpot/IPIPot/IPIDriver.hpp"
+#include "rgpot/LennardJones/LJPot.hpp"
+
+#include <cstdio>
+
+int main() {
+  rgpot::LJPot pot({.u0 = 0.0104, .cutoff = 8.5, .psi = 3.40});
+  rgpot::IPIDriverConfig cfg;
+  cfg.address = "unix:rgpot";
+  cfg.species.assign(108, 18);
+  cfg.cutoff = 8.5;
+  rgpot::IPIDriver driver(cfg, [&pot](const rgpot::ForceInput &in,
+                                      rgpot::ForceOut *out) {
+    pot.forceImpl(in, out);
+  });
+  driver.run();
+  std::printf("served %llu geometries\n",
+              static_cast<unsigned long long>(driver.evaluations()));
+  return 0;
+}
+#+end_src
+
+** The rgpot-ipi-driver program
+
+=engines/rgpot_ipi_driver.cpp= builds the =rgpot-ipi-driver= program.
+It is built with =-Dwith_ipi= and installed with the other engine programs.
+It wraps =IPIDriver= around any potential that =engines/pot_spec.hpp= builds.
+[[file:potential_names.org][Potential names and options]] lists the names.
+=--list= prints the names this build accepts.
+
+#+attr_rgpot: syntax a driver connects to a server that is already running
+#+begin_src bash
+rgpot-ipi-driver --pot "LJ u0 0.0104 psi 3.40 cutoff 8.5" --species 'Ar*108' -u -a rgpot
+rgpot-ipi-driver -m EAMCell --species-from start.xyz -a localhost -p 31415
+#+end_src
+
+| Flag                     | Meaning                                                |
+|--------------------------+--------------------------------------------------------|
+| =--pot SPEC=             | name and =key value= options in one string             |
+| =-m=, =--mode NAME=      | name only, as =i-pi-py_driver -m=                      |
+| =-o=, =--param LIST=     | =key=value= pairs separated by commas, for =-m=        |
+| =--list=                 | print the accepted names and exit                      |
+| =--species LIST=         | symbols or atomic numbers; =Sym*N= repeats             |
+| =--species-from FILE=    | symbols from an =.xyz=, =.extxyz= or eOn =.con= file   |
+| =-u=, =--unix=           | UNIX socket; =-a= is a name or an absolute path        |
+| =-a=, =--address=        | TCP host or UNIX name, default =localhost=             |
+| =-p=, =--port=           | TCP port, default 12345                                |
+| =-S=, =--sockets-prefix= | prefix of a UNIX name, default =/tmp/ipi_=             |
+| =--cutoff A=             | cutoff for a spec without one; tiling and box range    |
+| =--stress-step H=        | finite-difference virial for a stress-free potential   |
+| =--timeout S=            | seconds per message; 0, the default, waits forever     |
+| =--connect-timeout S=    | seconds to retry connecting, default 30                |
+| =--no-extras=            | empty extra string instead of JSON                     |
+| =-v=, =--verbose=        | connection, =INIT= and call count on stderr            |
+
+The species list is needed because the protocol carries no species.
+It has one entry per atom, in the server's atom order.
+The tiling and open-box range is the potential's own cutoff when it has one.
+=LJ=, =Morse= and =SuttonChen= have one.
+For a kernel with a fixed range, =--cutoff= sets it.
+The exit code is 0 after =EXIT= or a close between messages.
+It is 2 for a usage error, an unknown potential or a bad species list.
+It is 1 when the connection or an evaluation fails.
+=SIGPIPE= is ignored, so a peer that closes cannot kill the program.

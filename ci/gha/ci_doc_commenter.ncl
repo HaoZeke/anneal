@@ -13,6 +13,7 @@ let P = S.pins in
     pr_comment = {
       "if" = "github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       permissions = {
         "pull-requests" = "write",
         issues = "write",

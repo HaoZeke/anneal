@@ -39,6 +39,11 @@
 !! The two roles together reproduce the scatter sum exactly, at the cost
 !! of walking each neighbour's neighbour list. Energy accrues to the
 !! centre atom only, so it is counted once.
+!!
+!! The strain derivative follows the energy: atom `i` adds d ⊗ dE/dd for
+!! the folded bond vectors d of its pair halves and of the triplets it
+!! centres (Thompson, Plimpton and Mattson, J. Chem. Phys. 131, 154107
+!! (2009), doi:10.1063/1.3245303).
 module rgpot_sw
    use rgpot_kinds, only: wp, ip, c_double, c_int
    use rgpot_neighbors, only: neighbor_table_t
@@ -174,8 +179,13 @@ contains
    end function triplet_energy
 
    !> Energy and forces for `positions` (3 x natoms) in `cell`.
+   !!
+   !! `strain`, when present, receives dE/dε in eV for the right strain
+   !! that sends each position and cell vector r to r (I + ε). The order
+   !! is xx, yy, zz, yz, xz, xy, and the off-diagonal entries are
+   !! d_a dE/dd_b with a < b, as in stress.hpp.
    subroutine sw_energy_forces(positions, cell, par, table, energy, forces, &
-                               status, errmsg)
+                               status, errmsg, strain)
       real(wp), intent(in), contiguous :: positions(:, :)
       real(wp), intent(in) :: cell(3, 3)
       type(sw_params_t), intent(in) :: par
@@ -184,14 +194,17 @@ contains
       real(wp), intent(out), contiguous :: forces(:, :)
       integer, intent(out) :: status
       character(len=:), allocatable, intent(out) :: errmsg
+      real(wp), intent(out), optional :: strain(6)
 
       integer(ip) :: natoms, i
+      integer :: nw
       real(wp) :: rcut
-      real(wp), allocatable :: e_atom(:)
+      real(wp), allocatable :: e_atom(:), w_atom(:, :)
 
       natoms = int(size(positions, 2), ip)
       energy = 0.0_wp
       forces = 0.0_wp
+      if (present(strain)) strain = 0.0_wp
       rcut = par%cutoff()
 
       call table%build(positions, cell, rcut, status, errmsg)
@@ -199,31 +212,59 @@ contains
 
       allocate (e_atom(natoms), source=0.0_wp)
 
-      ! Atom loop writes only its own force column and energy slot, so the
-      ! iterations are independent.
+      ! Without `strain`, w_atom has no rows and atom_contribution skips the
+      ! virial. One call site keeps two_body inlined in the pair loop.
+      nw = 0
+      if (present(strain)) nw = 6
+      allocate (w_atom(nw, natoms), source=0.0_wp)
+
+      ! Atom loop writes only its own force column, energy slot and strain
+      ! column, so the iterations are independent.
       do concurrent(i=1:natoms)
-         call atom_contribution(par, table, i, e_atom(i), forces(:, i))
+         call atom_contribution(par, table, i, e_atom(i), forces(:, i), &
+                                w_atom(:, i))
       end do
+
+      if (present(strain)) strain = sum(w_atom, dim=2)
 
       energy = sum(e_atom)
    end subroutine sw_energy_forces
 
+   !> Add d ⊗ g to the six strain entries `w`, upper triangle d_a g_b.
+   pure subroutine add_bond_strain(w, d, g)
+      real(wp), intent(inout) :: w(6)
+      real(wp), intent(in) :: d(3), g(3)
+
+      w(1) = w(1) + d(1)*g(1)
+      w(2) = w(2) + d(2)*g(2)
+      w(3) = w(3) + d(3)*g(3)
+      w(4) = w(4) + d(2)*g(3)
+      w(5) = w(5) + d(1)*g(3)
+      w(6) = w(6) + d(1)*g(2)
+   end subroutine add_bond_strain
+
    !> Energy owned by atom `i` (its two-body halves plus the triplets it
-   !! centres) and the total force acting on it.
-   pure subroutine atom_contribution(par, table, i, e_i, f_i)
+   !! centres), the total force acting on it, and, when `w_i` has six
+   !! entries, the strain derivative of that same energy. A zero-size
+   !! `w_i` skips it.
+   pure subroutine atom_contribution(par, table, i, e_i, f_i, w_i)
       type(sw_params_t), intent(in) :: par
       type(neighbor_table_t), intent(in) :: table
       integer(ip), intent(in) :: i
       real(wp), intent(out) :: e_i
       real(wp), intent(out) :: f_i(3)
+      real(wp), intent(out), contiguous :: w_i(:)
 
       integer(ip) :: sj, sk, sm, sn, m, n
       real(wp) :: rij, rik, rim, rmn
       real(wp) :: u_ij(3), u_ik(3), u_mi(3), u_mn(3)
-      real(wp) :: e_pair, dedr
+      real(wp) :: e_pair, dedr, f_j(3), f_k(3), w(6)
+      logical :: with_strain
 
       e_i = 0.0_wp
       f_i = 0.0_wp
+      w = 0.0_wp
+      with_strain = size(w_i) > 0
 
       do sj = table%row(i), table%row(i + 1_ip) - 1_ip
          rij = table%dist(sj)
@@ -234,15 +275,28 @@ contains
          call two_body(par, rij, e_pair, dedr)
          e_i = e_i + 0.5_wp*e_pair
          f_i = f_i - dedr*u_ij
+         ! two_body returns dedr = -dE/dr, so the half pair has
+         ! dE/d(vec) = -0.5 dedr u_ij.
+         if (with_strain) then
+            call add_bond_strain(w, table%vec(:, sj), -0.5_wp*dedr*u_ij)
+         end if
 
          ! Three-body, i at the centre: every unordered pair of neighbours.
-         do sk = sj + 1_ip, table%row(i + 1_ip) - 1_ip
-            rik = table%dist(sk)
-            u_ik = table%vec(:, sk)/rik
-            e_i = e_i + triplet_energy(par, u_ij, rij, u_ik, rik)
-            f_i = f_i - end_atom_force(par, u_ij, rij, u_ik, rik) &
-                  - end_atom_force(par, u_ik, rik, u_ij, rij)
-         end do
+         ! There are two loops because a strain test inside the force-only
+         ! loop slows that loop by several percent. sw_centred_body.inc is
+         ! the one copy of the energy and the end-atom forces.
+         if (with_strain) then
+            do sk = sj + 1_ip, table%row(i + 1_ip) - 1_ip
+               include 'sw_centred_body.inc'
+               ! An end atom's force is -dE/d(its bond vector from i).
+               call add_bond_strain(w, table%vec(:, sj), -f_j)
+               call add_bond_strain(w, table%vec(:, sk), -f_k)
+            end do
+         else
+            do sk = sj + 1_ip, table%row(i + 1_ip) - 1_ip
+               include 'sw_centred_body.inc'
+            end do
+         end if
       end do
 
       ! Three-body, i at an end: triplets centred on each neighbour m.
@@ -259,6 +313,8 @@ contains
             f_i = f_i + end_atom_force(par, u_mi, rim, u_mn, rmn)
          end do
       end do
+
+      if (with_strain) w_i = w
    end subroutine atom_contribution
 
 end module rgpot_sw

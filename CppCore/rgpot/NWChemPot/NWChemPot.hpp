@@ -49,8 +49,8 @@ public:
                           std::string *message_out = nullptr);
 
   bool available() const;
-  static bool probe_available();
-  static bool abi_available();
+  static bool probeAvailable();
+  static bool abiAvailable();
 
 private:
   struct Impl;

@@ -1,0 +1,314 @@
+# Every test meson and CMake register, with the features that enable it.
+#
+# Both build systems read this file: CppCore/meson.build, and
+# cmake/RgpotTestRegistry.cmake for CppCore/tests/tests.cmake. They register
+# the unit, fortran, nlist, py and rerun entries from it in a loop, and take
+# every entry's options from it. A custom entry is built next to its fixtures
+# in each build system, under the same gate. CMake registers no test unless
+# RGPOT_BUILD_TESTS is on, whatever the gate. check_test_registry.py, run as
+# the test_list_parity test, compares the tests a configured build registered
+# with the entries its features enable, so a test missing here or in either
+# build system fails it.
+#
+#   name | gate | kind [arguments] [options] | [@reason]
+#
+# gate: clauses separated by spaces, all of which must hold. A clause names
+# one feature, or several separated by commas of which one must hold.
+#
+#   tests         with_tests / RGPOT_BUILD_TESTS
+#   core          the potential library: not the RPC client-only build
+#   client        the RPC client-only build
+#   rpc           the Cap'n Proto stack (with_rpc, or client-only)
+#   fortran       the Fortran potentials
+#   cache         with_cache / RGPOT_WITH_CACHE (CMake forces it off in the
+#                 client-only build)
+#   ipi           the i-PI server and driver client
+#   eam_table     tabulated EAM / Finnis-Sinclair
+#   xtensor       the xtensor faces
+#   cp2k          the CP2K frontend and shim
+#   mpi           librgpot_mpi, built against an MPI found at configure
+#   mpiexec       an MPI launcher (mpirun or mpiexec)
+#   linux         the host is Linux
+#   posix         the host is not Windows
+#   python        a python3 interpreter
+#   capnp         the capnp and capnpc libraries
+#   capnp_tool    the capnp compiler
+#   rustc         a Rust compiler
+#   tsan          -fsanitize=thread compiles and no sanitizer is configured
+#   isa_variants  at least one MinimumImage ISA variant builds
+#   toplevel      the build is not a subproject
+#   water xtb tblite dftd3 dftd4 xckernel long_range expr metatomic skala
+#   rust_core     meson-only features (meson options of the same name)
+#   probe         an optional program or module the build looks for: the
+#                 test may be absent even when the rest of the gate holds
+#
+# kind:
+#
+#   unit EXE SOURCE     Catch2 test in CppCore/tests, linked to the library
+#   fortran EXE SOURCE  program in CppCore/rgpot/fortran, linked to the kernels
+#   nlist EXE SOURCE    example in CppCore/examples, linked to the neighbour
+#                       archives
+#   py SCRIPT [ARG...]  SCRIPT relative to the source root, where @root@ is
+#                       the source root and @capnp@ the capnp compiler
+#   rerun TEST          TEST's executable again, under these options
+#   custom              built and registered by hand in each build system
+#
+# options:
+#
+#   timeout=SECONDS     default 30
+#   suite=NAME
+#   workdir=DIR         relative to the source root, . for the root itself.
+#                       unit defaults to . and other tests run in a build
+#                       directory unless they name one
+#   env=NAME=VALUE      repeatable
+#   serial              never runs beside another test
+#   should_fail         passes when the command fails
+#   fp_contract=off     unit only: the test source is compiled unfused, for
+#                       oracles compared exactly with unfused sums
+#
+# @reason: the entry is meson-only. Each reason below says what CMake does
+# not build.
+
+@engines CMake does not build engines/: the drivers, engine plugins and the LAMMPS, PLUMED, GROMACS, OpenMM and i-PI harnesses these tests run.
+@engine_plugins CMake does not build the rgpot_engine_* plugins (classical, MOPAC, NWChem) this test loads.
+@meson The test configures meson, reads meson's build directory, or reads a subproject only a meson wrap resolves.
+@water CMake has no option for the water potentials.
+@xtb CMake has no option for xtb.
+@tblite CMake has no option for tblite.
+@dftd CMake has no option for s-dftd3 or dftd4.
+@xckernel CMake has no option for the XC kernel.
+@long_range CMake has no option for the long-range electrostatics.
+@expr CMake has no option for the Lepton expression potential.
+@metatomic CMake has no option for libtorch, metatomic or UMA.
+@skala CMake has no option for Skala.
+@rust_core CMake does not build rgpot-core.
+
+# Header-only and role-independent tests.
+AotiPublicationTest | tests | custom |
+AotiPublicationStressTest | tests | custom timeout=600 |
+MolecularFrameTest | tests | custom |
+AotiUnpackTest | tests | custom |
+UnitsTest | tests | unit units_test UnitsTest.cc |
+CuH2test | tests fortran | unit cuh2_test CuH2PotTest.cc |
+RPCTest | tests rpc | unit test_rpc CapnpAdapterTest.cc |
+RPCClientTest | tests client | unit test_rpc_client BridgeStressTest.cc |
+test_list_parity | tests python | custom |
+
+# The library's exported surface.
+FortranSymbolAudit | tests core fortran linux | custom |
+CoreLinksNoMpi | tests core linux | custom |
+ExprLeptonSymbols | tests core posix | custom suite=expr |
+CxxLayoutTest | tests core | custom workdir=. |
+CxxLayoutVirtualCounts | tests core python | py CppCore/tests/check_virtual_counts.py |
+CxxSoversion | tests core python | custom |
+abi_symbols | core posix | custom |
+abi_symbols_fixture_shared | tests core posix | custom |
+abi_symbols_fixture_archive_a | tests core posix | custom |
+abi_symbols_fixture_archive_lib | tests core posix | custom |
+abi_symbols_fixture_shared_hidden | tests core posix | custom should_fail |
+abi_symbols_fixture_archive_missing | tests core posix | custom should_fail |
+capi_threads | core posix | custom timeout=60 |
+capi_threads_tsan | tests core posix tsan | custom timeout=120 |
+
+# Potentials and the neighbour machinery.
+FortranPotsTest | tests core fortran | unit fortran_pots_test FortranPotsTest.cc |
+MorsePotTest | tests core | unit morse_pot_test MorsePotTest.cc |
+CambridgeMorseTest | tests core | unit cambridge_morse_test CambridgeMorseTest.cc |
+GuptaTest | tests core | unit gupta_test GuptaTest.cc |
+HessianVectorTest | tests core | unit hessian_vector_test HessianVectorTest.cc |
+SWSiTest | tests core | unit sw_si_test SWSiTest.cc |
+TersoffSiCTest | tests core | unit tersoff_sic_test TersoffSiCTest.cc fp_contract=off |
+HalfShellScanTest | tests core | unit half_shell_scan_test HalfShellScanTest.cc |
+HalfShellTest | tests core | unit half_shell_test HalfShellTest.cc |
+# Two cluster relaxations, up to 2000 force calls each.
+SuttonChenPotTest | tests core | unit sutton_chen_pot_test SuttonChenPotTest.cc timeout=120 |
+KeptPotentialTest | tests core | unit kept_potential_test KeptPotentialTest.cc |
+ReducedPairTest | tests core | unit reduced_pair_test ReducedPairTest.cc fp_contract=off |
+EMTPotTest | tests core | unit emt_pot_test EMTPotTest.cc |
+EAMCellPotTest | tests core | unit eam_cell_pot_test EAMCellPotTest.cc |
+NeighbourLayerTest | tests core | unit neighbour_layer_test NeighbourLayerTest.cc fp_contract=off |
+ThreadTeamTest | tests core | unit thread_team_test ThreadTeamTest.cc |
+StreamParityTest | tests core | unit stream_parity_test StreamParityTest.cc fp_contract=off timeout=900 |
+NeighbourListTest | tests core | unit neighbour_list_test NeighbourListTest.cc |
+VesinEmptyResetTest | tests core | unit vesin_empty_reset_test VesinEmptyResetTest.cc |
+EAMCellVerletTest | tests core | unit eam_cell_verlet_test EAMCellVerletTest.cc fp_contract=off |
+ManyBodyForceTest | tests core | unit many_body_force_test ManyBodyForceTest.cc |
+SkinPairTest | tests core | unit skin_pair_test SkinPairTest.cc |
+MinImageIsaHash | tests core | unit minimage_isa_hash MinImageIsaHash.cc |
+BatchEvaluatorTest | tests core | unit batch_evaluator_test BatchEvaluatorTest.cc |
+CalculatorGroupTest | tests core | unit calculator_group_test CalculatorGroupTest.cc |
+CalculatorAbortFlagTest | tests core | unit calculator_abort_flag_test CalculatorAbortFlagTest.cc |
+LJClusterPotTest | tests core | unit ljcluster_pot_test LJClusterPotTest.cc |
+ZBLPotTest | tests core | unit zbl_pot_test ZBLPotTest.cc |
+PerAtomTest | tests core | unit per_atom_test PerAtomTest.cc |
+LocalityTest | tests core | unit locality_test LocalityTest.cc |
+StagedTest | tests core | unit staged_test StagedTest.cc |
+FastNlistTest | tests core | unit fast_nlist_test FastNlistTest.cc fp_contract=off |
+IsaDispatchTest | tests core | unit isa_dispatch_test IsaDispatchTest.cc |
+FmaExactTest | tests core | unit fma_exact_test FmaExactTest.cc |
+MinimumImageTest | tests core | unit minimum_image_test MinimumImageTest.cc |
+FoldDegenerateTest | tests core | unit fold_degenerate_test FoldDegenerateTest.cc timeout=60 |
+IPIPotTest | tests core ipi | unit ipi_pot_test IPIPotTest.cc |
+IPIDriverTest | tests core ipi | unit ipi_driver_test IPIDriverTest.cc |
+EAMTablePotTest | tests core eam_table | unit eam_table_pot_test EAMTablePotTest.cc |
+CuH2 Utils Test | tests core xtensor | unit cuh2_util_test cuh2UtilsTest.cc |
+CacheTest | tests cache | unit cache_test CacheTest.cc |
+InvarianceTest | tests cache | unit invariance_test InvarianceTest.cc |
+XTBDlopenTest | tests core,xtb | custom suite=xtb workdir=. |
+# Under a thread limit every region gets fewer threads than it asks for.
+ThreadTeamTest_limit1 | tests core | rerun ThreadTeamTest env=OMP_THREAD_LIMIT=1 timeout=120 |
+ThreadTeamTest_limit2 | tests core | rerun ThreadTeamTest env=OMP_THREAD_LIMIT=2 timeout=120 |
+openmp_confined | tests python | py CppCore/tests/test_openmp_confined.py @root@ |
+MinImageIsaVariants | tests core isa_variants | custom |
+ExactFmaEq | tests core | custom |
+ExpFixedEq | tests core | custom |
+FmaPathEq | tests core | custom |
+simd-env-scalar | tests core | custom env=RGPOT_SIMD=scalar |
+simd-env-unknown | tests core | custom env=RGPOT_SIMD=not_a_target |
+simd-env-rvv | tests core | custom env=RGPOT_SIMD=rvv |
+simd-env-avx2 | tests core | custom env=RGPOT_SIMD=avx2 |
+EngineAdapterTest | tests core posix | custom workdir=. |
+
+# Fortran kernels on their own, without the C++ stack.
+FortranSWGather | tests core fortran | fortran test_sw_gather test_sw_gather.f90 timeout=120 |
+FortranCuH2Gather | tests core fortran | fortran test_cuh2_gather test_cuh2.f90 timeout=120 |
+FortranEAMAlGather | tests core fortran | fortran test_eam_al test_eam_al.f90 timeout=120 |
+FortranWaterHGather | tests core fortran | fortran test_water_h test_water_h.f90 timeout=120 |
+FortranFeHeGather | tests core fortran | fortran test_fehe test_fehe.f90 timeout=120 |
+FortranTersoffGather | tests core fortran | fortran test_tersoff test_tersoff.f90 timeout=180 |
+FortranEDIPGather | tests core fortran | fortran test_edip test_edip.f90 timeout=180 |
+FortranLenoskyGather | tests core fortran | fortran test_lenosky test_lenosky.f90 timeout=180 |
+
+# The neighbour C ABI from C, C++ and Rust callers.
+nlist_lj | tests | nlist nlist_lj nlist_lj.cc |
+nlist_threebody | tests | nlist nlist_threebody nlist_threebody.cc |
+nlist_metatomic | tests | nlist nlist_metatomic nlist_metatomic.cc |
+nlist_batch | tests | nlist nlist_batch nlist_batch.cc |
+nlist_c | tests | nlist nlist_c nlist_c.c |
+nlist_verlet | tests | nlist nlist_verlet nlist_verlet.c |
+nlist_stream | tests capnp posix | custom |
+nlist_capnp_roundtrip | tests capnp posix capnp_tool | custom |
+nlist_rust | tests rustc | custom |
+
+# Plugins.
+PluginTest | tests core | custom suite=plugin |
+PluginContractTest | tests core | custom suite=plugin |
+ExternalPluginTest | tests core | custom suite=plugin |
+ExternalFortranPluginTest | tests core fortran | custom suite=plugin |
+PluginLifetimeTest | tests core | custom timeout=30 suite=plugin |
+
+# MOPAC frontend over a fake engine.
+MOPACPotTest | tests core | custom suite=mopac workdir=. |
+MOPACPotEmptyVariable | tests core | custom suite=mopac workdir=. |
+test_mopac_abi | tests core | custom suite=mopac |
+MOPACDlopenContract | tests core | py CppCore/tests/test_mopac_dlopen_contract.py @root@ suite=mopac |
+
+# Schema contract. Registered with the RPC stack, with or without tests.
+schema-ordinal-ledger-vendored | rpc | py CppCore/rgpot/rpc/schema_ledger.py check --root @root@ suite=schema |
+schema-ordinal-ledger-selftest | rpc | py CppCore/tests/test_schema_ledger.py suite=schema |
+schema-sync-canonical-rpc | rpc probe | custom suite=schema | @meson
+schema-sync-canonical-core | rpc probe | custom suite=schema | @meson
+schema-ordinal-ledger | rpc probe | custom suite=schema | @meson
+
+# RPC, NWChem and CPMD frontends over fake engines.
+RPCSchemaSync | tests core rpc | custom suite=rpc |
+CapabilitiesWire | tests core rpc | py CppCore/tests/test_capabilities_wire.py @root@ @capnp@ suite=rpc |
+MorseConfigureTest | tests core rpc | unit morse_configure_test MorseConfigureTest.cc |
+ProfileLoaderTest | tests core rpc | custom suite=abi workdir=. |
+NWChemPotLifetime-ordinary | tests core rpc | custom suite=nwchem |
+NWChemPotLifetime-probe | tests core rpc | custom suite=nwchem |
+NWChemPotTest | tests core rpc | custom suite=nwchem workdir=. |
+NWChemPotMessageAbiTest | tests core rpc | custom suite=nwchem workdir=. |
+test_nwchem_abi | tests core rpc | custom suite=nwchem |
+NWChemDlopenContract | tests core rpc | py CppCore/tests/test_nwchem_dlopen_contract.py @root@ suite=nwchem |
+CPMDPotGradientStressTest | tests core rpc | custom suite=cpmd workdir=. |
+CPMDPotMessageAbiTest | tests core rpc | custom suite=cpmd workdir=. |
+test_cpmd_abi | tests core rpc | custom suite=cpmd |
+CPMDDlopenContract | tests core rpc | py CppCore/tests/test_cpmd_dlopen_contract.py @root@ suite=cpmd |
+CP2KPotFakeEngineTest | tests core rpc cp2k | custom suite=cp2k workdir=. |
+CP2KDeckTest | tests core rpc cp2k | custom suite=cp2k |
+CP2KPotSmokeTest | tests core rpc cp2k | custom timeout=900 serial suite=cp2k |
+
+# MPI calculator groups and hosts. Each runs mpirun itself.
+CP2KPotSmokeMpi | tests core rpc cp2k mpiexec | custom timeout=900 serial suite=cp2k |
+MpiHost-owned | tests core rpc mpi mpiexec | custom timeout=60 suite=mpi-host |
+MpiHost-borrowed | tests core rpc mpi mpiexec | custom timeout=60 suite=mpi-host |
+NWChemMpiForceHost | tests core rpc mpi mpiexec | custom timeout=60 suite=mpi-host |
+CollectiveRPC-NWChem-serial | tests core rpc mpi mpiexec | custom timeout=60 suite=mpi-host |
+CollectiveRPC-NWChem-mpi | tests core rpc mpi mpiexec | custom timeout=60 suite=mpi-host |
+CollectiveRPC-CPMD-serial | tests core rpc mpi mpiexec | custom timeout=60 suite=mpi-host |
+CollectiveRPC-CPMD-mpi | tests core rpc mpi mpiexec | custom timeout=60 suite=mpi-host |
+CollectiveRPC-CP2K-serial | tests core rpc mpi mpiexec cp2k | custom timeout=60 suite=mpi-host |
+CollectiveRPC-CP2K-mpi | tests core rpc mpi mpiexec cp2k | custom timeout=60 suite=mpi-host |
+RankExceptionAbort | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+CalculatorUnevenBatch | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+RankExceptionFinalizeOwner | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+RankExceptionFinalizeGuest | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+ShareBroadcastMismatch | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+ShareBroadcastMatch | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+RefusedSplit | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommMissing | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommSplit | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommRefusedHook | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommProbe | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommInstanceFirst | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommBoundStatic | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommBoundInstance | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommRefusedForce | tests core rpc mpi mpiexec | custom timeout=60 serial suite=cpmd |
+AdoptCommCP2K | tests core rpc mpi mpiexec cp2k | custom timeout=60 serial suite=cp2k |
+CollectiveCache | tests core rpc mpi mpiexec cache | custom timeout=60 serial suite=cpmd |
+CalculatorGroupShare | tests core mpi mpiexec | custom timeout=60 serial suite=cpmd |
+CalculatorGroupBadOwner | tests core mpi mpiexec | custom timeout=60 serial suite=cpmd |
+
+# Documentation.
+doccheck_static | tests python | py docs/doccheck.py all --root @root@ timeout=120 suite=docs |
+doccheck_examples | tests python posix | custom timeout=1200 suite=docs | @meson
+
+# Meson-only.
+WaterPotTest | tests core water | unit water_pot_test WaterPotTest.cc | @water
+# OpenMP threads spin while waiting. Beside other tests they slow a hot
+# cluster SCF by more than a hundredfold.
+TBLitetest | tests tblite | unit tblite_test TBLitePotTest.cc env=OMP_NUM_THREADS=1 | @tblite
+D3test | tests dftd3 | unit d3_test D3PotTest.cc | @dftd
+D4test | tests dftd4 | unit d4_test D4PotTest.cc | @dftd
+DftdGoldens | tests dftd3,dftd4 | custom suite=dftd workdir=. | @dftd
+XcKernelGoldens | tests xckernel | custom suite=xckernel workdir=. | @xckernel
+XTBtest | tests xtb | custom timeout=120 suite=xtb workdir=. | @xtb
+LongRangeTest | tests core long_range | unit lr_phys_test lr_phys_test.cc | @long_range
+ExprPotTest | tests core expr | custom suite=expr workdir=. | @expr
+ExprGoldens | tests core expr | custom suite=expr workdir=. | @expr
+ExprEindirTest | tests core expr rust_core | custom suite=expr workdir=. | @expr
+MetatomicTest | tests metatomic | unit metatomic_test MetatomicPotTest.cc workdir=CppCore/tests | @metatomic
+UmaPotTest | tests metatomic | unit uma_pot_test UmaPotTest.cc workdir=CppCore/tests | @metatomic
+UmaGraphSizeTest | tests metatomic | custom workdir=. | @metatomic
+UmaExportBounds | tests metatomic | custom workdir=. | @metatomic
+UmaEngineTest | tests metatomic rpc | custom workdir=. | @metatomic
+UmaEngineHarness | tests metatomic rpc | custom workdir=. | @metatomic
+UmaOffReference | tests metatomic rpc | custom workdir=. | @metatomic
+UmaCacheDirTest | tests metatomic | custom serial | @metatomic
+UmaFloat64Test | tests metatomic | custom workdir=. | @metatomic
+UmaProvenanceTest | tests metatomic | custom workdir=. | @metatomic
+SkalaPotTest | tests core rpc skala | custom suite=skala workdir=. | @skala
+PotentialHvpTest | tests core rust_core | unit potential_hvp_test PotentialHvpTest.cc | @rust_core
+abi_core_symbols | rust_core linux | custom | @rust_core
+EngineTableTest | tests core rpc posix | custom workdir=. | @engine_plugins
+lj_eval | core posix | custom timeout=60 | @engines
+lj_engine | core posix | custom timeout=60 | @engines
+external_potentials | core posix | custom timeout=120 | @engines
+ipi_driver_ase | core posix ipi probe | custom timeout=600 | @engines
+lammps_lj | core posix probe | custom timeout=180 | @engines
+lammps_pair_rgpot | core posix probe | custom timeout=900 | @engines
+plumed_driver | core posix probe | custom timeout=600 | @engines
+plumed_debug_forces | core posix probe | custom timeout=600 | @engines
+plumed_box_derivatives | core posix probe | custom timeout=600 | @engines
+plumed_units | core posix probe | custom timeout=600 | @engines
+plumed_api | core posix probe | custom timeout=600 | @engines
+gromacs_mdrun | core posix probe | custom timeout=300 | @engines
+gromacs_unit_reference | core posix probe | custom | @engines
+gromacs_dropin_api | core posix probe | custom timeout=300 | @engines
+gromacs_dropin_mdrun | core posix probe | custom timeout=1800 | @engines
+openmm_lj | core posix probe | custom timeout=120 | @engines
+optional_engine_install | tests core posix python toplevel | custom timeout=300 | @meson
+eigen_subproject_fallback | tests core posix python toplevel | custom timeout=300 | @meson
+gromacs_include_prefix | tests core posix python toplevel | custom timeout=300 | @meson
+fortran_sw_module_order | tests core posix python toplevel | custom timeout=600 | @meson

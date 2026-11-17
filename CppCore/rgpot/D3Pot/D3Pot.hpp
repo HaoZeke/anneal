@@ -32,9 +32,12 @@ struct D3Config {
  * Grimme DFT-D3 dispersion via the s-dftd3 ISO C API (``dftd3.h``).
  *
  * In-process Potential summand: ForceInput in, energy+forces out. Do not
- * fold this into XcKernel::contract or applyFxc. No PotentialConfig.d3
- * arm until a DFT host sums XcKernel + VV10 + D4 on the wire
- * (rgpot-8mse; rgpot-uw9w / rgpot-eipa add this as Edisp from rgpot-2ftk).
+ * fold this into XcKernel::contract or applyFxc. The schema carries
+ * PotentialConfig.d3 @12, whose D3Params mirror D3Config, but nothing
+ * applies it: potserv's D3 backend runs the default D3Config, and
+ * configure() refuses the d3 arm on every backend. Wiring it waits on a DFT
+ * host summing XcKernel + VV10 + D4 on the wire (rgpot-8mse; rgpot-uw9w /
+ * rgpot-eipa add this as Edisp from rgpot-2ftk).
  *
  * Each instance owns ``dftd3_error`` / ``dftd3_structure`` / ``dftd3_model``
  * / ``dftd3_param`` handles. First force builds the structure and model;
@@ -67,6 +70,7 @@ private:
   mutable dftd3_param m_param = nullptr;
   mutable bool m_initialized = false;
   mutable int m_natoms = 0;
+  mutable std::vector<int> m_numbers;
   mutable std::vector<double> m_pos_bohr;
 
   void initHandles();

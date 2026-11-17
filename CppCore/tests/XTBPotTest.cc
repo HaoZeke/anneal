@@ -17,6 +17,8 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -25,6 +27,8 @@
 #include "rgpot/XTBPot/XTBDlopen.hpp"
 #include "rgpot/XTBPot/XTBPot.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
+
+#include "XtbHotClusters.hpp"
 
 using rgpot::types::AtomMatrix;
 using Catch::Matchers::WithinAbs;
@@ -477,4 +481,187 @@ TEST_CASE("XTBDlopen reuses the GFN2 wavefunction inside the move guard",
   check_wavefunction_reuse([](const rgpot::XTBConfig &cfg) {
     return std::make_unique<rgpot::XTBDlopen>(dlopen_cfg(cfg));
   });
+}
+
+// A dissociated ammonia tetramer. One nitrogen has no hydrogen inside
+// 1.3 Å. GFN2 at 300 K does not converge the SCC; the gap is 0.29 eV.
+// The rescue smears the occupation and returns the cooled 300 K energy.
+TEST_CASE("XTBPot cools a nonconverged SCC back to the configured temperature",
+          "[xtb][linked][scc]") {
+  const int z[16] = {7, 1, 1, 1, 7, 1, 1, 1, 7, 1, 1, 1, 7, 1, 1, 1};
+  const double xyz[16][3] = {
+      {-1.66532428, 0.54889027, -2.03940010},
+      {0.11165024, 2.04946110, 1.43904553},
+      {-0.42884806, 2.72524649, 0.30972045},
+      {1.43338889, 2.19082068, 0.90531718},
+      {0.53411760, 1.59058476, -4.48817656},
+      {-0.62302497, 2.69900828, -3.26741719},
+      {1.34429373, 3.32407404, -1.22950979},
+      {-0.35527480, 1.88804157, -4.87298828},
+      {1.47996713, 0.55484625, 3.71752121},
+      {1.28956128, -0.72444169, 2.95951158},
+      {-0.20031872, 0.12475055, 3.35919321},
+      {1.70295493, -0.38386526, 4.03334277},
+      {-2.71341888, -5.98849237, 1.22333256},
+      {-1.72758892, -6.21046903, 1.63826395},
+      {-1.69113306, -6.08127583, -0.32892162},
+      {-2.20633610, -6.61433582, 0.61469530},
+  };
+  rgpot::XTBConfig cfg;
+  cfg.method = rgpot::GFNMethod::GFN2xTB;
+  cfg.accuracy = 0.01;
+  cfg.electronic_temperature = 300.0;
+  cfg.max_iterations = 500;
+  rgpot::XTBPot pot(cfg);
+  AtomMatrix positions(16, 3);
+  std::vector<int> atmtypes(z, z + 16);
+  for (int i = 0; i < 16; ++i)
+    for (int j = 0; j < 3; ++j)
+      positions(i, j) = xyz[i][j];
+  std::array<std::array<double, 3>, 3> box{};
+  box[0][0] = box[1][1] = box[2][2] = 60.0;
+
+  auto [energy, forces, variance] = pot(positions, atmtypes, box);
+  (void)variance;
+  // Cooled 300 K result, not the 1000 K single point (−448.36 eV).
+  REQUIRE_THAT(energy, WithinAbs(-447.8814, 1.0e-3));
+  require_finite_forces(forces, 16);
+}
+
+// ---------------------------------------------------------------------------
+// Hot clusters: a session's energy must not depend on its call history
+// ---------------------------------------------------------------------------
+
+struct HotOutcome {
+  bool ok = false;
+  double energy = std::numeric_limits<double>::quiet_NaN();
+  AtomMatrix forces;
+  bool reused = false;
+};
+
+template <typename PotPtr, int N>
+static HotOutcome evaluate_frame(PotPtr &pot, const double (&frame)[N][3],
+                                 int z) {
+  AtomMatrix positions(N, 3);
+  for (int i = 0; i < N; ++i)
+    for (int j = 0; j < 3; ++j)
+      positions(static_cast<size_t>(i), static_cast<size_t>(j)) = frame[i][j];
+  std::vector<int> atmtypes(N, z);
+  std::array<std::array<double, 3>, 3> box{};
+  box[0][0] = box[1][1] = box[2][2] = 60.0;
+  HotOutcome out;
+  try {
+    auto [energy, forces, variance] = (*pot)(positions, atmtypes, box);
+    (void)variance;
+    out.ok = true;
+    out.energy = energy;
+    out.forces = forces;
+    out.reused = pot->reusedWavefunction();
+  } catch (const std::exception &ex) {
+    UNSCOPED_INFO("throws: " << ex.what());
+  }
+  return out;
+}
+
+// One session walks the frames in order. Every frame is also evaluated by
+// a new instance. Both must agree on success and on the energy, and the
+// new instance must reproduce standalone xtb where its SCC converges.
+// Returns how many frames the session evaluated from the previous
+// wavefunction.
+template <typename Factory, int F, int N>
+static int check_session_matches_fresh(Factory make,
+                                       const rgpot::XTBConfig &cfg,
+                                       const double (&frames)[F][N][3], int z,
+                                       const double (&xtb)[F],
+                                       double energy_tol, double force_tol) {
+  auto session = make(cfg);
+  int reused = 0;
+  for (int f = 0; f < F; ++f) {
+    auto warm = evaluate_frame(session, frames[f], z);
+    auto cold_pot = make(cfg);
+    auto cold = evaluate_frame(cold_pot, frames[f], z);
+    INFO("frame " << f << " session " << warm.energy << " fresh " << cold.energy
+                  << " xtb " << xtb[f]);
+    REQUIRE(warm.ok == cold.ok);
+    if (warm.ok) {
+      REQUIRE_THAT(warm.energy, WithinAbs(cold.energy, energy_tol));
+      require_close_forces(warm.forces, cold.forces, force_tol);
+      reused += warm.reused ? 1 : 0;
+    }
+    if (!std::isnan(xtb[f])) {
+      REQUIRE(cold.ok);
+      REQUIRE_THAT(cold.energy, WithinAbs(xtb[f], 1e-4));
+    }
+  }
+  return reused;
+}
+
+static auto make_linked = [](const rgpot::XTBConfig &cfg) {
+  return std::make_unique<rgpot::XTBPot>(cfg);
+};
+
+static auto make_dlopen = [](const rgpot::XTBConfig &cfg) {
+  return std::make_unique<rgpot::XTBDlopen>(dlopen_cfg(cfg));
+};
+
+// Si13 at 300 K has a HOMO-LUMO gap below 0.6 eV on every frame. The SCC
+// of frame 1 does not converge at 300 K, and its last iterate holds charges
+// of several electrons per atom. Seeded from it, the session used to land
+// on a self-consistent state 25 to 40 eV below xtb (-627.44 eV against
+// -584.39 eV on frame 5). From a converged frame, the session's guess can
+// also reach a second physical solution about 5 eV below xtb's.
+template <typename Factory> static void check_hot_si13(Factory make) {
+  using namespace rgpot_test_hot;
+  const rgpot::XTBConfig cfg;
+  const int reused = check_session_matches_fresh(make, cfg, kSi13Pos, kSi13Z,
+                                                 kSi13Xtb, 1e-6, 1e-5);
+  REQUIRE(reused == 0);
+}
+
+TEST_CASE("XTBPot session matches a fresh start on hot Si13",
+          "[xtb][linked][warm][hot]") {
+  check_hot_si13(make_linked);
+}
+
+TEST_CASE("XTBDlopen session matches a fresh start on hot Si13",
+          "[xtb][dlopen][warm][hot]") {
+  check_hot_si13(make_dlopen);
+}
+
+TEST_CASE("XTBPot hot Si10 and C10 agree with a fresh start",
+          "[xtb][linked][warm][hot]") {
+  using namespace rgpot_test_hot;
+  SECTION("Si10 with the gap guard") {
+    const rgpot::XTBConfig cfg;
+    check_session_matches_fresh(make_linked, cfg, kSi10Pos, kSi10Z, kSi10Xtb,
+                                1e-6, 1e-5);
+  }
+  SECTION("Si10 reusing the wavefunction at any gap") {
+    rgpot::XTBConfig cfg;
+    cfg.warm_min_gap = 0.0;
+    const int reused = check_session_matches_fresh(
+        make_linked, cfg, kSi10Pos, kSi10Z, kSi10Xtb, 1e-5, 1e-3);
+    REQUIRE(reused > 0);
+  }
+  SECTION("C10 keeps the wavefunction above the gap guard") {
+    const rgpot::XTBConfig cfg;
+    const int reused = check_session_matches_fresh(make_linked, cfg, kC10Pos,
+                                                   kC10Z, kC10Xtb, 1e-5, 1e-3);
+    REQUIRE(reused == kC10Frames - 1);
+  }
+}
+
+TEST_CASE("XTBPot gap guard is adjustable on a live handle",
+          "[xtb][linked][warm]") {
+  rgpot::XTBPot pot;
+  REQUIRE(pot.warmMinGap() == 1.0);
+  pot.setWarmMinGap(0.25);
+  REQUIRE(pot.warmMinGap() == 0.25);
+
+  rgpot::XTBConfig cfg;
+  cfg.warm_min_gap = 0.5;
+  auto dl = make_dlopen(cfg);
+  REQUIRE(dl->warmMinGap() == 0.5);
+  dl->setWarmMinGap(2.0);
+  REQUIRE(dl->warmMinGap() == 2.0);
 }

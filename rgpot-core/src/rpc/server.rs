@@ -21,8 +21,8 @@ use crate::potential::{PotentialCallback, rgpot_potential_t};
 use crate::rpc::schema::potential;
 use crate::status::rgpot_status_t;
 use crate::tensor::{
-    rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
-    rgpot_tensor_free,
+    copy_f64_tensor, rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3,
+    rgpot_tensor_cpu_i32_1d, rgpot_tensor_free,
 };
 use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 
@@ -59,6 +59,19 @@ impl potential::Server for PotentialServer {
         let box_data = pry!(fip.get_box());
 
         let n_atoms = atmnrs.len() as usize;
+        if positions.len() as usize != 3 * n_atoms {
+            return capnp::capability::Promise::err(CapnpError::failed(format!(
+                "positions: expected {} values for {n_atoms} atoms, got {}",
+                3 * n_atoms,
+                positions.len()
+            )));
+        }
+        if box_data.len() != 9 {
+            return capnp::capability::Promise::err(CapnpError::failed(format!(
+                "box: expected 9 values, got {}",
+                box_data.len()
+            )));
+        }
 
         // Copy capnp data into owned buffers
         let mut pos_vec: Vec<f64> = (0..positions.len()).map(|i| positions.get(i)).collect();
@@ -85,17 +98,12 @@ impl potential::Server for PotentialServer {
 
         let status = unsafe { (self.callback)(self.user_data, &input, &mut output) };
 
-        // Read forces from the output DLPack tensor before freeing
-        let forces_data = if !output.forces.is_null() {
-            let ft = unsafe { &(*output.forces).dl_tensor };
-            let len = n_atoms * 3;
-            unsafe { std::slice::from_raw_parts(ft.data as *const f64, len) }
+        let forces_copy = if status == rgpot_status_t::RGPOT_SUCCESS {
+            copy_f64_tensor(output.forces, "callback forces", n_atoms * 3, false)
         } else {
-            &[] as &[f64]
+            Ok(Vec::new())
         };
 
-        // Free all tensors
-        let forces_copy: Vec<f64> = forces_data.to_vec();
         unsafe {
             rgpot_tensor_free(output.forces);
             rgpot_tensor_free(input.positions);
@@ -108,6 +116,10 @@ impl potential::Server for PotentialServer {
                 "potential callback returned an error".to_string(),
             ));
         }
+        let forces_copy = match forces_copy {
+            Ok(f) => f,
+            Err(why) => return capnp::capability::Promise::err(CapnpError::failed(why)),
+        };
 
         let mut result_builder = results.get().init_result();
         result_builder.set_energy(output.energy);
@@ -124,6 +136,11 @@ impl potential::Server for PotentialServer {
 /// Start an RPC server listening on `host:port`, dispatching to `pot`.
 ///
 /// This function blocks the current thread. It creates its own tokio runtime.
+///
+/// A request whose `pos` does not hold three values per entry of `atmnrs`,
+/// or whose `box` does not hold 9 values, fails without calling the
+/// callback.  A successful callback whose forces tensor is not 3 doubles
+/// per atom on the CPU also fails the request.
 ///
 /// # Safety
 /// `pot` must be a valid pointer obtained from `rgpot_potential_new`.
@@ -212,4 +229,112 @@ pub unsafe extern "C" fn rgpot_rpc_server_start(
             }
         })
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static mut SHORT_FORCES: [f64; 6] = [0.0; 6];
+
+    struct Probe {
+        calls: AtomicUsize,
+        short_forces: bool,
+    }
+
+    unsafe extern "C" fn probe_callback(
+        user_data: *mut c_void,
+        input: *const rgpot_force_input_t,
+        output: *mut rgpot_force_out_t,
+    ) -> rgpot_status_t {
+        let probe = unsafe { &*(user_data as *const Probe) };
+        probe.calls.fetch_add(1, Ordering::SeqCst);
+        let n = unsafe { (*input).n_atoms() }.unwrap_or(0);
+        let out = unsafe { &mut *output };
+        out.energy = 1.0;
+        out.forces = if probe.short_forces {
+            // Shape [n - 1, 3] over a buffer large enough for [n, 3].
+            unsafe {
+                rgpot_tensor_cpu_f64_2d(
+                    std::ptr::addr_of_mut!(SHORT_FORCES).cast(),
+                    n as i64 - 1,
+                    3,
+                )
+            }
+        } else {
+            crate::tensor::create_owned_f64_tensor(vec![0.5; 3 * n], vec![n as i64, 3])
+        };
+        rgpot_status_t::RGPOT_SUCCESS
+    }
+
+    fn call(probe: &Probe, pos: &[f64], atm: &[i32], cell: &[f64]) -> Result<Vec<f64>, String> {
+        let client = capnp_rpc::new_client::<potential::Client, _>(PotentialServer {
+            callback: probe_callback,
+            user_data: probe as *const Probe as *mut c_void,
+        });
+        let mut request = client.calculate_request();
+        {
+            let mut fip = request.get().init_fip();
+            let mut b = fip.reborrow().init_pos(pos.len() as u32);
+            for (i, &v) in pos.iter().enumerate() {
+                b.set(i as u32, v);
+            }
+            let mut b = fip.reborrow().init_atmnrs(atm.len() as u32);
+            for (i, &v) in atm.iter().enumerate() {
+                b.set(i as u32, v);
+            }
+            let mut b = fip.init_box(cell.len() as u32);
+            for (i, &v) in cell.iter().enumerate() {
+                b.set(i as u32, v);
+            }
+        }
+        futures::executor::block_on(async {
+            let response = request.send().promise.await.map_err(|e| e.to_string())?;
+            let forces = response
+                .get()
+                .and_then(|r| r.get_result())
+                .and_then(|r| r.get_forces())
+                .map_err(|e| e.to_string())?;
+            Ok((0..forces.len()).map(|i| forces.get(i)).collect())
+        })
+    }
+
+    fn probe(short_forces: bool) -> Probe {
+        Probe { calls: AtomicUsize::new(0), short_forces }
+    }
+
+    const CELL: [f64; 9] = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
+
+    #[test]
+    fn well_formed_request_succeeds() {
+        let p = probe(false);
+        let forces = call(&p, &[0.0; 6], &[1, 1], &CELL).unwrap();
+        assert_eq!(forces, vec![0.5; 6]);
+        assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn short_positions_are_rejected_before_the_callback() {
+        let p = probe(false);
+        let err = call(&p, &[0.0; 3], &[1, 1], &CELL).unwrap_err();
+        assert!(err.contains("positions"), "{err}");
+        assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn short_box_is_rejected_before_the_callback() {
+        let p = probe(false);
+        let err = call(&p, &[0.0; 6], &[1, 1], &CELL[..6]).unwrap_err();
+        assert!(err.contains("box"), "{err}");
+        assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn mismatched_forces_shape_is_rejected() {
+        let p = probe(true);
+        let err = call(&p, &[0.0; 6], &[1, 1], &CELL).unwrap_err();
+        assert!(err.contains("forces"), "{err}");
+        assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+    }
 }

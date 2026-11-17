@@ -1,0 +1,12 @@
+component,units,value,notes
+neighbour_list_one_system,seconds,0.000521,vesin cutoff 12 A (0.4 times a 30 A molecular box); median of five
+neighbour_list_eight_systems,seconds,0.002279,eight independent lists; median of five
+tensor_pack_eight_systems,seconds,0.000043,concatenate positions edges and the batch index; median of twenty
+aoti_eight_single_forwards,seconds,0.385462,cope2-b0.pt2; mean of five; 2 threads
+aoti_one_b8_forward_eight_real,seconds,0.368414,cope2-b8.pt2 static band; mean of five; 2 threads
+aoti_one_b8_forward_last_repeated,seconds,0.365367,same shapes as the real b8 call; padding does not change the graph
+sgemm_kernel_time_one_single,milliseconds,25.634,MKL_VERBOSE sum of 143 SGEMM calls; N is 240 or 480 edges
+sgemm_kernel_time_one_b8,milliseconds,20.831,MKL_VERBOSE sum of 77 SGEMM calls; N is 1920 or 3840
+packed_vs_eight_singles_threads_2,seconds,0.3755,one packed forward of 8; eight singles were 0.3889
+packed_vs_eight_singles_threads_4,seconds,0.3075,eight singles were 0.4043
+packed_vs_eight_singles_threads_8,seconds,0.2698,eight singles were 0.4765

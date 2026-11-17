@@ -45,13 +45,30 @@ fortran_pots_sources = files(
     'rgpot_lenosky.f90',
     'rgpot_lenosky_capi.f90',
     'rgpot_neighbors.f90',
-    'rgpot_sw.f90',
-    'rgpot_sw_capi.f90',
     'rgpot_tersoff.f90',
     'rgpot_tersoff_capi.f90',
     'rgpot_water_h.f90',
     'rgpot_water_h_capi.f90',
     'rgpot_workspace.f90',
+)
+
+# meson passes gfortran no depfile flags, and its scanner reads `include`
+# lines only to find modules, so an edit of sw_centred_body.inc would leave
+# the rgpot_sw object stale. The kernel compiles from a copy that depends
+# on the include. gfortran then finds the include through the -I of this
+# source directory.
+_rgpot_sw_f90 = custom_target(
+    'rgpot_sw_f90',
+    input: 'rgpot_sw.f90',
+    output: 'rgpot_sw.f90',
+    command: [
+        find_program('python3', 'python'),
+        '-c',
+        'import shutil, sys; shutil.copyfile(sys.argv[1], sys.argv[2])',
+        '@INPUT@',
+        '@OUTPUT@',
+    ],
+    depend_files: files('sw_centred_body.inc'),
 )
 
 # C++ faces over the bind(c) entries.
@@ -75,6 +92,32 @@ fortran_kernels = static_library(
     install: false,
 )
 
+# The copied rgpot_sw.f90 is generated, so meson cannot scan its `use`
+# lines until the copy exists and a parallel build compiles it before
+# rgpot_kinds.mod and rgpot_neighbors.mod. It is its own library, ordered
+# after the kernels. The C API uses that module, so it is a third library.
+# Both archives are hidden in the umbrella library with the kernels.
+rgpot_sw_lib = static_library(
+    'rgpot_sw_lib',
+    _rgpot_sw_f90,
+    fortran_args: _fpot_args,
+    include_directories: fortran_kernels.private_dir_include(),
+    link_with: fortran_kernels,
+    pic: true,
+    install: false,
+)
+rgpot_sw_capi_lib = static_library(
+    'rgpot_sw_capi_lib',
+    files('rgpot_sw_capi.f90'),
+    fortran_args: _fpot_args,
+    include_directories: [
+        rgpot_sw_lib.private_dir_include(),
+        fortran_kernels.private_dir_include(),
+    ],
+    link_with: [rgpot_sw_lib, fortran_kernels],
+    pic: true,
+    install: false,
+)
 # The C++ faces stay visible: consumers construct these classes.
 fortran_pots = static_library(
     'rgpot_fortran_pots',
@@ -82,13 +125,19 @@ fortran_pots = static_library(
     dependencies: _deps,
     cpp_args: _args,
     include_directories: _incdirs,
-    link_with: [fortran_kernels, tersoff_sic, rgpot_halfshell],
+    link_with: [
+        rgpot_sw_capi_lib,
+        rgpot_sw_lib,
+        fortran_kernels,
+        tersoff_sic,
+        rgpot_halfshell,
+    ],
     pic: true,
     install: false,
 )
 
 fortran_pots_dep = declare_dependency(
-    link_with: [fortran_pots, fortran_kernels],
+    link_with: [fortran_pots, rgpot_sw_capi_lib, rgpot_sw_lib, fortran_kernels],
     dependencies: [],
 )
 
@@ -107,6 +156,8 @@ if _fortran_nlist_omp.found()
 endif
 fortran_kernels_dep = declare_dependency(
     link_with: [
+        rgpot_sw_capi_lib,
+        rgpot_sw_lib,
         fortran_kernels,
         rgpot_halfshell,
         rgpot_minimage,
@@ -149,76 +200,18 @@ rgpot_cuh2 = library(
 
 # Physics checks that run without the C++ stack: a failure here points at
 # the kernel, not the bindings.
-if get_option('with_tests')
-    test_sw_gather = executable(
-        'test_sw_gather',
-        'test_sw_gather.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranSWGather', test_sw_gather, timeout: 120)
-
-    test_cuh2_gather = executable(
-        'test_cuh2_gather',
-        'test_cuh2.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranCuH2Gather', test_cuh2_gather, timeout: 120)
-
-    test_eam_al = executable(
-        'test_eam_al',
-        'test_eam_al.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranEAMAlGather', test_eam_al, timeout: 120)
-
-    test_water_h = executable(
-        'test_water_h',
-        'test_water_h.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranWaterHGather', test_water_h, timeout: 120)
-
-    test_fehe = executable(
-        'test_fehe',
-        'test_fehe.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranFeHeGather', test_fehe, timeout: 120)
-
-    test_tersoff = executable(
-        'test_tersoff',
-        'test_tersoff.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranTersoffGather', test_tersoff, timeout: 180)
-
-    test_edip = executable(
-        'test_edip',
-        'test_edip.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranEDIPGather', test_edip, timeout: 180)
-
-    test_lenosky = executable(
-        'test_lenosky',
-        'test_lenosky.f90',
-        dependencies: [fortran_kernels_dep],
-        fortran_args: _fpot_args,
-        install: false,
-    )
-    test('FortranLenoskyGather', test_lenosky, timeout: 180)
-endif
+foreach _rt : _rt_tests
+    if _rt[1] == 'fortran'
+        test(
+            _rt[0],
+            executable(
+                _rt[2][0],
+                _rt[2][1],
+                dependencies: [fortran_kernels_dep],
+                fortran_args: _fpot_args,
+                install: false,
+            ),
+            kwargs: _rt_kw[_rt[0]],
+        )
+    endif
+endforeach

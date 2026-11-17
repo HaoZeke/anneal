@@ -74,6 +74,9 @@ Created create(const void *config, std::size_t) {
   backend->pot = std::make_unique<StubPot>(static_cast<Reentrancy>(bytes[0]));
   if (bytes[1] == 0) {
     backend->set_charge_spin = [](int charge, int spin) {
+      if (charge == 99) {
+        throw rgpot::engine::Unsupported("charge 99 refused");
+      }
       g_charge = charge;
       g_spin = spin;
     };

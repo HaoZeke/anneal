@@ -1,0 +1,92 @@
+#+TITLE: Fortran kernels: port, not wrap
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Fortran kernels: port, not wrap
+
+This page explains why the Fortran potentials in =CppCore/rgpot/fortran/= are
+ports rather than wrappers, and why their force loops gather.
+The rules a port follows, the module layout, the cell convention and the tests
+are in
+[[file:../reference/fortran_potentials.org][Fortran potentials: porting rules]].
+
+** Why a port and not a wrapper
+
+The Fortran kernels descend from eOn, as the header of each =rgpot_<pot>.f90=
+module records.
+The CuH2 routines that this repository carried before the port show what the
+legacy code looked like.
+They kept state across calls in COMMON blocks, used ~goto~, and capped a system
+at 500 atoms through a fixed array size.
+Wrapping such code in ~bind(c)~ keeps all of that and adds a language boundary
+on top.
+
+Each kernel is instead rewritten as a Fortran 2018 module, and the Meson build
+compiles it with ~-std=f2018~.
+The physics expressions carry over term by term; everything around them is
+replaced.
+Saved state is limited to the ~_capi~ module, which holds the neighbour table
+and the parameter set.
+=rgpot::fortranpots= gives each C++ instance its own workspace, so instances can
+run on separate threads at once (=Reentrancy::PerInstance=).
+
+** Gather, not scatter
+
+A pair loop written as a scatter updates both atoms of a pair
+(~f(i) += g; f(j) -= g~), so the atom loop carries dependencies and cannot be
+parallelised as written.
+Every port restates the sum as a *gather*: with a full neighbour list, atom ~i~
+accumulates the entire force acting on it and writes only ~f(:, i)~.
+Iterations then touch disjoint memory.
+The Stillinger-Weber driver in =rgpot_sw.f90= is one example:
+
+#+attr_rgpot: fragment the atom loop of sw_energy_forces in rgpot_sw.f90
+#+begin_src fortran
+do concurrent(i=1:natoms)
+   call atom_contribution(par, table, i, e_atom(i), forces(:, i), &
+                          w_atom(:, i))
+end do
+
+if (present(strain)) strain = sum(w_atom, dim=2)
+
+energy = sum(e_atom)
+#+end_src
+
+Energy reduces through a per-atom array rather than a shared accumulator,
+because ~do concurrent~ gained reduction clauses only in Fortran 2023.
+
+*** What ~do concurrent~ buys
+
+Compilers are not obliged to run these iterations in parallel. gfortran treats
+the construct as an assertion about independence unless it is given
+~-ftree-parallelize-loops~, and the Meson build does not pass that flag.
+The assertion is still worth having.
+It licenses vectorisation, and it documents the dependency structure for the
+next reader.
+It also enforces the discipline that made the port correct: every procedure the
+loop body calls must be ~pure~, and every write must land in memory no other
+iteration touches.
+Turning the construct into real parallelism later is then a compiler flag rather
+than a rewrite.
+
+*** Cost
+
+A gather evaluates each pair term twice, once from each end.
+For three-body terms an atom also walks its neighbours' neighbour lists to
+collect the triplets in which it is an end atom rather than the centre.
+In exchange the atom loop has no dependencies, and each iteration works on one
+atom's neighbourhood.
+
+*** When the gather does not close
+
+Some terms have a force that cannot be attributed to one atom without
+recomputing a large intermediate, such as a bond-order derivative that depends
+on a full coordination sum.
+EDIP closes its gather because the environment dependence collapses to one
+scalar per atom, the coordination ~Z_i~ and ~dE_i/dZ_i~, computed in a first
+~do concurrent~ pass.
+Where restating a term would cost more than it saves, the design keeps a
+structured scatter loop for that phase, runs the independent phases under
+~do concurrent~, and names the dependency in a comment.
+A scatter inside ~do concurrent~ breaks the independence the construct asserts,
+so it is never placed there.

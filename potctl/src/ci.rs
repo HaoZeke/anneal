@@ -168,6 +168,35 @@ pub fn cmake_configure_core_args(rpc: bool, cache: bool) -> Vec<String> {
     ]
 }
 
+/// Pure: `cmake --build` argv with an explicit job count. A bare `-j` lets
+/// make start every ready compile at once, more than a 7 GB macOS runner
+/// holds, and ignores CMAKE_BUILD_PARALLEL_LEVEL.
+pub fn cmake_build_args(build_dir: &str, jobs: usize) -> Vec<String> {
+    vec![
+        "--build".into(),
+        build_dir.into(),
+        "--parallel".into(),
+        jobs.max(1).to_string(),
+    ]
+}
+
+/// Pure: the `cmake --build` job count, CMAKE_BUILD_PARALLEL_LEVEL when it
+/// holds a positive count and the usable CPUs otherwise.
+pub fn cmake_build_jobs(level: Option<&str>, cpus: usize) -> usize {
+    level
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(cpus.max(1))
+}
+
+fn run_cmake_build(root: &Path, build_dir: &str) -> Result<()> {
+    let level = env::var("CMAKE_BUILD_PARALLEL_LEVEL").ok();
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let args = cmake_build_args(build_dir, cmake_build_jobs(level.as_deref(), cpus));
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_cmd("cmake", &refs, root)
+}
+
 fn run_cmd(bin: &str, args: &[&str], cwd: &Path) -> Result<()> {
     let status = Command::new(bin)
         .args(args)
@@ -243,7 +272,7 @@ pub fn run_cmake_test(
     ));
     let cmake_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run_cmd("cmake", &cmake_refs, root)?;
-    run_cmd("cmake", &["--build", build_dir, "-j"], root)?;
+    run_cmake_build(root, build_dir)?;
     run_cmd(
         "ctest",
         &["--test-dir", build_dir, "--output-on-failure"],
@@ -1184,7 +1213,7 @@ pub fn run_bridge_client_build(root: &Path, build_dir: &str) -> Result<()> {
     let cfg = bridge_client_cmake_configure_args(build_dir);
     let refs: Vec<&str> = cfg.iter().map(String::as_str).collect();
     run_cmd("cmake", &refs, root)?;
-    run_cmd("cmake", &["--build", build_dir, "-j"], root)?;
+    run_cmake_build(root, build_dir)?;
     Ok(())
 }
 
@@ -1652,6 +1681,25 @@ mod tests {
         let off = cmake_configure_core_args(false, false);
         assert!(off.iter().any(|x| x == "-DRGPOT_WITH_RPC=OFF"));
         assert!(off.iter().any(|x| x == "-DRGPOT_WITH_CACHE=OFF"));
+    }
+
+    #[test]
+    fn cmake_build_names_its_job_count() {
+        assert_eq!(
+            cmake_build_args("build", 3),
+            vec![
+                "--build".to_string(),
+                "build".to_string(),
+                "--parallel".to_string(),
+                "3".to_string(),
+            ]
+        );
+        assert_eq!(cmake_build_args("build", 0)[3], "1");
+        assert_eq!(cmake_build_jobs(None, 3), 3);
+        assert_eq!(cmake_build_jobs(Some(" 8 "), 3), 8);
+        assert_eq!(cmake_build_jobs(Some("0"), 3), 3);
+        assert_eq!(cmake_build_jobs(Some("all"), 3), 3);
+        assert_eq!(cmake_build_jobs(None, 0), 1);
     }
 
     #[test]

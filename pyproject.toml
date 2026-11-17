@@ -1,7 +1,7 @@
 [project]
 name = "rgpot"
 # [[[cog import rgpot_version as v; cog.outl(f'version = "{v.VERSION}"')]]]
-version = "3.6.0"
+version = "3.7.0"
 # [[[end]]]
 description = "Potential energy surfaces for atomistic simulation (LJ + Metatomic multi-ABI dlopen; nanobind abi3)"
 readme = "README.md"

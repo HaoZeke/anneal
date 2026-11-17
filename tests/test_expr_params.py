@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for recursive ExprParams / PotSpec (not PotentialConfig)."""
+"""Contract tests for recursive ExprParams / PotSpec and PotentialConfig.expr."""
 
 from __future__ import annotations
 
@@ -28,12 +28,16 @@ def test_schema_has_recursive_expr_tree() -> None:
     assert not hasattr(pot_capnp, "SumPot")
 
 
-def test_potential_config_stays_single_backend() -> None:
-    names = _union_names(pot_capnp.PotentialConfig.schema)
-    assert "expr" not in names
+def test_potential_config_expr_is_upstream_arm_16() -> None:
+    schema = pot_capnp.PotentialConfig.schema
+    names = _union_names(schema)
+    assert "expr" in names
     assert "sum" not in names
     assert "list" not in names
     assert {"none", "nwchem", "cpmd", "metatomic", "lammps"} <= names
+    expr = schema.fields["expr"].proto
+    assert expr.ordinal.explicit == 16
+    assert expr.slot.type.struct.typeId == pot_capnp.ExprParams.schema.node.id
 
 
 def test_expr_params_names_half_lj_plus_d3() -> None:
@@ -82,7 +86,7 @@ def test_expr_params_recurses_through_potspec() -> None:
 
 if __name__ == "__main__":
     test_schema_has_recursive_expr_tree()
-    test_potential_config_stays_single_backend()
+    test_potential_config_expr_is_upstream_arm_16()
     test_expr_params_names_half_lj_plus_d3()
     test_expr_params_recurses_through_potspec()
     print("test_expr_params: all ok")

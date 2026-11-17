@@ -41,6 +41,8 @@ Created create(const void *config, std::size_t config_len) {
       c.cutoff = params.getCutoff();
     if (params.getMaxNeighbors() > 0)
       c.max_neighbors = params.getMaxNeighbors();
+    if (params.hasCacheDir())
+      c.cache_dir = params.getCacheDir().cStr();
 
     set_torch_threads(params.getIntraopThreads(), params.getInteropThreads());
     set_torch_deterministic(params.getDeterministicAlgorithms());

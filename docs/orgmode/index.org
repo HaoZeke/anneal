@@ -44,8 +44,8 @@ Its documentation is at [[https://cpmdc.rgoswami.me][cpmdc.rgoswami.me]].
 Both quantum frontends keep geometry on ~ForceInput~.
 They carry method options in the matching ~PotentialConfig~ arm.
 
-The pip package (~pip install rgpot~) ships nanobind abi3 bindings and multi-ABI
-Metatomic engines for *torch 2.7+*.
+The pip package (~pip install rgpot~) ships nanobind bindings, one abi3 wheel
+for CPython 3.12 and newer, and a Metatomic engine for *torch 2.7+*.
 See:
 
 #+begin_export rst
@@ -53,6 +53,7 @@ See:
 #+end_export
 
 
+#+attr_rgpot: syntax clones the repository and runs a full build
 #+begin_src bash
 git clone https://github.com/OmniPotentRPC/rgpot.git
 cd rgpot && pixi shell -e rpctest
@@ -69,6 +70,7 @@ meson compile -C bbdir && meson test -C bbdir
    tutorials/neighbour-list
    tutorials/pes-scan
    tutorials/cpmd
+   tutorials/cp2k
    tutorials/molecular-global-optimization
 
 .. toctree::
@@ -77,13 +79,23 @@ meson compile -C bbdir && meson test -C bbdir
 
    howto/pip-python
    howto/ase
+   howto/engine-lammps
+   howto/engine-gromacs
+   howto/engine-gromacs-qmmm
+   howto/engine-openmm
+   howto/engine-plumed
+   howto/engine-metatomic
+   howto/uma-export
    howto/embedding
    howto/exprpot
    howto/ipi
    howto/integration
+   howto/add-potential
+   howto/engine-plugins
    howto/eindir-anneal
    howto/eon-rgpot
    howto/sutton-chen-stress
+   howto/cpu-scaling
 
 .. toctree::
    :maxdepth: 2
@@ -97,15 +109,27 @@ meson compile -C bbdir && meson test -C bbdir
 
    reference/architecture
    reference/python_api
+   reference/cpp_api
+   reference/cpp_potentials
+   reference/cpp_backends
+   reference/ipi_driver
+   reference/build_options
+   reference/potential_config
    reference/sw_si
    reference/tersoff_sic
    reference/mpi
    reference/c_abi
+   reference/nlist_abi
+   reference/fast_nlist
    reference/engine_abi
+   reference/gromacs_dropin
+   reference/plugin_abi
+   reference/external_abi
    reference/simd_exp
    reference/sutton_chen
    reference/eam_table
    reference/fortran_potentials
+   reference/potential_names
    api/index
    changelog
 

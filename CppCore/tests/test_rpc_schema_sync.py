@@ -51,8 +51,54 @@ def _assert_expr_potspec(schema_path: Path, lines: list[str]) -> None:
         raise AssertionError(f"{rel} PotSpec must not invent dummy leaf arms")
 
     cfg = "\n".join(_struct_body(lines, "PotentialConfig", rel))
-    if re.search(r"^\s+(expr|sum|list)\s+@", cfg, re.MULTILINE):
-        raise AssertionError(f"{rel} PotentialConfig must not grow expr/sum/list arms")
+    if not re.search(r"^\s+expr\s+@16\s*:\s*ExprParams;", cfg, re.MULTILINE):
+        raise AssertionError(f"{rel} PotentialConfig.expr must be ExprParams @16")
+    if re.search(r"^\s+(sum|list)\s+@", cfg, re.MULTILINE):
+        raise AssertionError(f"{rel} PotentialConfig must not grow sum/list arms")
+
+
+_CP2K_FIELDS = (
+    ("inputTemplate", 0, "Text"),
+    ("functional", 1, "Text"),
+    ("basisSet", 2, "Text"),
+    ("pseudopotential", 3, "Text"),
+    ("basisSetFile", 4, "Text"),
+    ("potentialFile", 5, "Text"),
+    ("cutoffRy", 6, "Float64"),
+    ("relCutoffRy", 7, "Float64"),
+    ("charge", 8, "Int32"),
+    ("multiplicity", 9, "Int32"),
+    ("uks", 10, "Bool"),
+    ("periodic", 11, "Text"),
+    ("epsScf", 12, "Float64"),
+    ("maxScf", 13, "Int32"),
+    ("outerMaxScf", 14, "Int32"),
+    ("ot", 15, "Bool"),
+    ("dataDir", 16, "Text"),
+    ("workDir", 17, "Text"),
+    ("keepWorkDir", 18, "Bool"),
+    ("enginePath", 19, "Text"),
+    ("extraDftSections", 20, r"List\(Text\)"),
+    ("extraForceEvalSections", 21, r"List\(Text\)"),
+)
+
+
+def _assert_cp2k_arm(schema_path: Path, lines: list[str]) -> None:
+    """CP2KParams keeps its ordinals and both unions carry the cp2k arm."""
+    rel = schema_path
+    params = "\n".join(_struct_body(lines, "CP2KParams", rel))
+    for name, ordinal, kind in _CP2K_FIELDS:
+        if not re.search(rf"^\s+{name}\s+@{ordinal}\s*:\s*{kind}\s*[;=]", params, re.MULTILINE):
+            raise AssertionError(f"{rel} CP2KParams.{name} must be @{ordinal} :{kind}")
+    if re.search(rf"@{len(_CP2K_FIELDS)}\b", params):
+        raise AssertionError(f"{rel} CP2KParams has a field this check does not know")
+
+    spec = "\n".join(_struct_body(lines, "PotentialSpec", rel))
+    if not re.search(r"^\s+cp2k\s+@6\s*:\s*CP2KParams;", spec, re.MULTILINE):
+        raise AssertionError(f"{rel} PotentialSpec.cp2k must be CP2KParams @6")
+    cfg = "\n".join(_struct_body(lines, "PotentialConfig", rel))
+    if not re.search(r"^\s+cp2k\s+@17\s*:\s*CP2KParams;", cfg, re.MULTILINE):
+        raise AssertionError(f"{rel} PotentialConfig.cp2k must be CP2KParams @17")
 
 
 def _regenerate(root: Path, capnp: str, schema: Path, out: Path) -> dict[str, bytes]:
@@ -88,11 +134,27 @@ def _assert_generated_in_sync(root: Path, capnp: str, build_dir: Path | None) ->
         tmp_path = Path(tmp)
         # Each copy sits alone in its own directory so the generated names and
         # the embedded source paths cannot differ for incidental reasons.
+        # Each copy gets its own local series applied, as the meson build
+        # and rgpot-core/build.rs do, so the comparison is of what compiles.
         cpp_copy = tmp_path / "cpp" / "Potentials.capnp"
         rust_copy = tmp_path / "rust" / "Potentials.capnp"
         for src, dst in ((cpp_schema, cpp_copy), (rust_schema, rust_copy)):
-            dst.parent.mkdir(parents=True)
-            shutil.copyfile(src, dst)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(root / "CppCore" / "rgpot" / "rpc" / "schema_ledger.py"),
+                    "apply",
+                    "--root",
+                    str(root),
+                    "--schema",
+                    str(src),
+                    "--series",
+                    str(src.parent / "local"),
+                    "--out",
+                    str(dst),
+                ],
+                check=True,
+            )
 
         from_cpp = _regenerate(root, capnp, cpp_copy, tmp_path / "gen_cpp")
         from_rust = _regenerate(root, capnp, rust_copy, tmp_path / "gen_rust")
@@ -129,6 +191,7 @@ def main() -> int:
             rel = schema_path.relative_to(root)
             raise AssertionError(f"{rel} must expose CPMDSectionKind")
         _assert_expr_potspec(schema_path.relative_to(root), lines)
+        _assert_cp2k_arm(schema_path.relative_to(root), lines)
 
     if cpp_lines == rust_lines:
         if capnp is None:

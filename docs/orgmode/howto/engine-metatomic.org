@@ -1,0 +1,89 @@
+#+TITLE: Metatomic and the engine ABI
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Metatomic and the engine ABI
+
+With =-Dwith_python=true=, =librgpot= links neither =MetatomicPot= nor =UmaPot=,
+so =import rgpot= does not need libtorch.
+A metatomic or UMA model is then reached through an engine library.
+With =-Dwith_metatomic=true= and =-Dwith_python=false=, both potentials are
+linked into =librgpot=.
+
+The host dlopens a library that exports =rgpot_engine_create=,
+=rgpot_engine_destroy= and =rgpot_engine_force= (declared in
+=CppCore/rgpot/engine_c_abi.h=).
+It passes positions in Angstrom, a row-major cell, and atomic numbers.
+Energy comes back in eV and forces in eV/Angstrom.
+=rgpot_engine_force= returns 0 on success, a positive code for a recoverable
+failure, and a negative code when the instance is unusable.
+=rgpot_engine_force_batch= is optional; it evaluates several systems that share
+one composition.
+=rgpot_engine_last_error= copies the message of the last failed call into a
+caller buffer (at most =len - 1= bytes, NUL-terminated) and returns the full
+message length, or 0 when there is none.
+
+The in-tree LJ engine, =liblj_engine.so=, is that same ABI with a 24-byte config
+of three float64 values: =u0= (eV), cutoff and =psi= (Angstrom).
+Any other non-zero config length fails =rgpot_engine_create= with a message in
+the error buffer.
+A null config, or a length of 0, is =u0= 1 eV, cutoff 15 Angstrom, =psi= 1
+Angstrom.
+A metatomic or UMA engine takes a Cap'n Proto message instead
+(=MetatomicParams=, =UmaParams=).
+The meson test =lj_engine= dlopens =liblj_engine.so= and compares the energy and
+the forces, bit for bit, with =rgpot_lj_eval=.
+A metatomic engine is selected by which library is opened, not by a different
+host call.
+
+=rgpot_engine_abi_version= returns the major version.
+=rgpot_engine_abi_stamp= is optional and reports the major, the minor and the
+layout revision; an engine without it counts as minor 0, layout 1.
+A host that only calls =rgpot_engine_abi_version= keeps working across a minor
+bump.
+=rgpot_engine_abi_compatible= returns nonzero only for an equal major, an equal
+layout revision, and an engine minor at least the host's.
+A null stamp returns 0.
+
+** Charge and spin
+
+A metatomic model receives the total charge and the spin multiplicity as system
+data it declares in =requested_inputs=:
+
+| name | value |
+|------+-------|
+| =rgpot::charge= | total charge |
+| =rgpot::spin_multiplicity= | spin multiplicity, 1 for a singlet |
+| =rgpot::spin= | the same multiplicity, under the UMA and fairchem name |
+
+Each is a =TensorMap= with one block, one sample (=system=) and one property
+named after the value: =charge=, =spin_multiplicity= or =spin=.
+A model declares the names it reads and nothing else:
+
+#+attr_rgpot: fragment excerpt of a metatomic model class
+#+begin_src python
+def requested_inputs(self) -> Dict[str, ModelOutput]:
+    return {
+        "rgpot::charge": ModelOutput(
+            quantity="charge", unit="e", per_atom=False
+        ),
+        "rgpot::spin_multiplicity": ModelOutput(per_atom=False),
+    }
+#+end_src
+
+=forward= then reads each one with =system.get_data(name)=.
+=MetatomicParams.charge= and =spin= are the values at =rgpot_engine_create=, and
+=rgpot_engine_set_charge_spin= changes them for the next calls.
+A value the model does not read must stay at its default, charge 0 or
+multiplicity 1.
+=rgpot_engine_create= fails for another, and =rgpot_engine_set_charge_spin=
+returns 3 and changes nothing.
+A model that reads neither has no charge or spin, so
+=rgpot_engine_set_charge_spin= returns 3 for any value.
+
+=MetatomicParams.attachSystemExtras= attaches all three names to every system,
+for a model that reads them without declaring them.
+It needs =checkConsistency= off, because metatomic then rejects data the model
+does not declare.
+=scripts/export_tiny_metatomic_model.py= exports the small models the engine
+tests use, which read the charge, the multiplicity, both or neither.

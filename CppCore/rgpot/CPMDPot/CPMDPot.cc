@@ -11,6 +11,7 @@
 #include "rgpot/CPMDPot/cpmd_c_abi.h"
 #include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
@@ -69,11 +70,11 @@ engine_lib_candidates(const std::string &explicit_path) {
   std::vector<std::string> out;
   if (!explicit_path.empty())
     out.emplace_back(explicit_path);
-  if (const char *e = std::getenv("CPMDC_LIBRARY"))
+  if (const char *e = std::getenv("CPMDC_LIBRARY"); e && *e)
     out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_CPMDC_ENGINE"))
+  if (const char *e = std::getenv("RGPOT_CPMDC_ENGINE"); e && *e)
     out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_CPMD_ENGINE"))
+  if (const char *e = std::getenv("RGPOT_CPMD_ENGINE"); e && *e)
     out.emplace_back(e);
   out.emplace_back("libcpmdc.so");
   out.emplace_back("./libcpmdc.so");
@@ -532,8 +533,8 @@ bool CPMDPot::setPotentialConfig(const ::PotentialConfig::Reader &cfg,
   }
   default:
     if (message_out)
-      *message_out =
-          "rgpot params arm not handled by CPMDPot (use matching backend pot)";
+      *message_out = "rgpot params arm " + rgpot::rpc::potentialConfigArm(cfg) +
+                     " not handled by CPMDPot (use matching backend pot)";
     return false;
   }
 }
@@ -555,7 +556,7 @@ int CPMDPot::bindCalculators(int ranks_per_calc) {
   return ::rgpot::bindCalculators(ranks_per_calc).index;
 }
 
-bool CPMDPot::probe_available() {
+bool CPMDPot::probeAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_probe_done)
     return g_probe_ok;
@@ -565,7 +566,7 @@ bool CPMDPot::probe_available() {
   return g_probe_ok;
 }
 
-bool CPMDPot::abi_available() {
+bool CPMDPot::abiAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_abi_probe_done)
     return g_abi_probe_ok;

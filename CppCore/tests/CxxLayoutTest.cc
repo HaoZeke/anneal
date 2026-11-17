@@ -32,6 +32,28 @@ TEST_CASE("the header stamp is a compile-time constant", "[abi][layout]") {
   REQUIRE(stamp.hash == abi::header_stamp().hash);
 }
 
+TEST_CASE(
+    "the soversion index finds a listed platform and rejects an absent one",
+    "[abi][layout]") {
+  constexpr int present =
+      abi::find_soversion_index("linux-x86_64-libstdc++-lp64");
+  constexpr int absent = abi::find_soversion_index("not-a-platform");
+  static_assert(present >= 0);
+  static_assert(absent < 0);
+  REQUIRE(present >= 0);
+  REQUIRE(absent < 0);
+  REQUIRE(abi::cxx_tag_eq(
+      abi::kCxxSoversionTable[static_cast<std::size_t>(present)].tag,
+      "linux-x86_64-libstdc++-lp64"));
+  constexpr int here = abi::find_soversion_index(abi::kCxxPlatformTag);
+  if (here < 0) {
+    REQUIRE(abi::recorded_layout_hash() == 0u);
+  } else {
+    REQUIRE(abi::recorded_layout_hash() ==
+            abi::kCxxSoversionTable[static_cast<std::size_t>(here)].hash);
+  }
+}
+
 TEST_CASE("the recorded soversion hash matches this platform",
           "[abi][layout]") {
   REQUIRE(abi::kCxxSoversion > 0u);

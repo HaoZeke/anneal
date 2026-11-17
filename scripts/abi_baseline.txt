@@ -1,0 +1,14 @@
+rgpot_nlist_abi_version
+rgpot_nlist_build
+rgpot_nlist_builder_close
+rgpot_nlist_builder_open
+rgpot_nlist_builder_update
+rgpot_nlist_build_systems
+rgpot_nlist_fortran_build
+rgpot_nlist_fortran_close
+rgpot_nlist_fortran_open
+rgpot_nlist_request_init
+rgpot_nlist_strerror
+rgpot_nlist_walk_close
+rgpot_nlist_walk_open
+rgpot_nlist_walk_pull

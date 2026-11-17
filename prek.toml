@@ -11,9 +11,11 @@ exclude = """(?x)(
     ^docs/doctrees/|
     ^rgpot-core/target/|
     ^subprojects/(?!.*\\.wrap$)|
+    ^(CppCore/rgpot/rpc|rgpot-core/schema)/local/.*\\.diff$|
     ^CppCore/tests/data/|
     ^third_party/libxckernel/|
-    ^third_party/lepton/
+    ^third_party/lepton/|
+    ^CppCore/rgpot/LongRange/pocketfft\\.hpp$
 )"""
 
 # Fast native implementations (no clone / no Python env).
@@ -71,7 +73,7 @@ hooks = [
     entry = "pixi",
     language = "system",
     pass_filenames = false,
-    files = '^(ci/gha/.*\\.ncl|\\.github/workflows/.*\\.yml)$',
+    files = '^(ci/gha/.*\.ncl|\.github/workflows/.*\.yml)$',
     args = ["r", "-e", "cigen", "gha-drift"],
   },
   {
@@ -116,7 +118,7 @@ hooks = [
     language = "system",
     pass_filenames = false,
     always_run = false,
-    files = '^(towncrier\\.toml|docs/newsfragments/)',
+    files = '^(towncrier\.toml|docs/newsfragments/)',
     args = ["-c", "test -f towncrier.toml && test -d docs/newsfragments"],
   },
 ]

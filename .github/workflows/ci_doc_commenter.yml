@@ -13,6 +13,7 @@ jobs:
         comment_header: '### rgPot Documentation Preview'
         head_sha: ${{ github.event.workflow_run.head_sha }}
         workflow_run_id: ${{ github.event.workflow_run.id }}
+    timeout-minutes: 10
 name: Comment on pull request
 on:
   workflow_run:

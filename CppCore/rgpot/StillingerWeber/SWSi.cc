@@ -12,16 +12,13 @@
 
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
+#include "rgpot/stress.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
 #include <vector>
-
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
 
 namespace rgpot {
 namespace {
@@ -93,7 +90,10 @@ void StillingerWeberSi::forceImpl(const ForceInput &in, ForceOut *out) const {
       (in.pos == nullptr || in.box == nullptr || out->F == nullptr)) {
     throw std::invalid_argument("StillingerWeberSi: null force buffer");
   }
-  evaluate(in.pos, in.box, in.nAtoms, &out->energy, out->F, 1.0, nullptr);
+  double strain[6] = {};
+  evaluate(in.pos, in.box, in.nAtoms, &out->energy, out->F, 1.0, nullptr,
+           strain);
+  publishCauchyStress(out, strain, cellVolume(in.box));
 }
 
 void StillingerWeberSi::energyAndGradient(
@@ -107,7 +107,7 @@ void StillingerWeberSi::energyAndGradient(
     throw std::invalid_argument("StillingerWeberSi: null energy buffer");
   }
   // Gradient is dE/dx, the negation of the force written by forceImpl.
-  evaluate(positions, box, n_atoms, energy, gradient, -1.0, neighbors);
+  evaluate(positions, box, n_atoms, energy, gradient, -1.0, neighbors, nullptr);
 }
 
 void StillingerWeberSi::energyAndGradientBatch(
@@ -132,7 +132,8 @@ void StillingerWeberSi::energyAndGradientBatch(
 void StillingerWeberSi::evaluate(const double *positions, const double *box,
                                  std::size_t n_atoms, double *energy,
                                  double *acc, double scale,
-                                 nlist::NeighborList *neighbors) const {
+                                 nlist::NeighborList *neighbors,
+                                 double *strain) const {
   *energy = 0.0;
   const std::size_t n3 = n_atoms * 3;
   for (std::size_t i = 0; i < n3; ++i) {
@@ -189,7 +190,7 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
     std::sort(nb.begin(), nb.end(), [](const Bond &a, const Bond &b) { return a.j < b.j; });
   };
   auto pairForces = [&](int i, const std::vector<Bond> &nb, double *force,
-                        double &local_e) {
+                        double &local_e, double *local_strain) {
     for (const Bond &bj : nb) {
       if (bj.j <= i) {
         continue;
@@ -209,6 +210,12 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
       force[3 * bj.j] -= sx;
       force[3 * bj.j + 1] -= sy;
       force[3 * bj.j + 2] -= sz;
+      if (local_strain != nullptr) {
+        // dE/d(bj) is (dedr / r) bj. bj is the negative of the d in
+        // stress.hpp when the walk stores r_i - r_j. The term is
+        // quadratic in that vector, so the sign does not change it.
+        accumulatePairStrain(local_strain, -t.dedr * inv_r, bj.x, bj.y, bj.z);
+      }
     }
   };
 
@@ -217,7 +224,7 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
   std::vector<Bond> nb;
   for (int i = 0; i < n; ++i) {
     load(i, nb);
-    pairForces(i, nb, acc, *energy);
+    pairForces(i, nb, acc, *energy, strain);
     const int m = static_cast<int>(nb.size());
     for (int a = 0; a < m; ++a) {
       const Bond &bj = nb[static_cast<std::size_t>(a)];
@@ -267,6 +274,10 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
         acc[3 * i] += scale * (g1x + g2x);
         acc[3 * i + 1] += scale * (g1y + g2y);
         acc[3 * i + 2] += scale * (g1z + g2z);
+        if (strain != nullptr) {
+          accumulateBondStrain(strain, bj.x, bj.y, bj.z, g1x, g1y, g1z);
+          accumulateBondStrain(strain, bk.x, bk.y, bk.z, g2x, g2y, g2z);
+        }
       }
     }
   }
@@ -274,22 +285,17 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
   } else {
     std::vector<double> owned(static_cast<std::size_t>(nt) * n3, 0.0);
     std::vector<double> energies(static_cast<std::size_t>(nt), 0.0);
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-    {
-#if defined(_OPENMP)
-      const int t = omp_get_thread_num();
-#else
-      const int t = 0;
-#endif
+    std::vector<double> vir(static_cast<std::size_t>(nt) * 6, 0.0);
+    nlist::forEachSlice(nt, [&](int t) {
       const auto range = nlist::partition(n, t, nt);
       double *local = owned.data() + static_cast<std::size_t>(t) * n3;
       double local_e = 0.0;
+      double *local_strain =
+          strain == nullptr ? nullptr : vir.data() + static_cast<std::size_t>(t) * 6;
       std::vector<Bond> nb;
   for (int i = static_cast<int>(range.begin); i < static_cast<int>(range.end); ++i) {
     load(i, nb);
-    pairForces(i, nb, local, local_e);
+    pairForces(i, nb, local, local_e, local_strain);
     const int m = static_cast<int>(nb.size());
     for (int a = 0; a < m; ++a) {
       const Bond &bj = nb[static_cast<std::size_t>(a)];
@@ -339,16 +345,25 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
         local[3 * i] += scale * (g1x + g2x);
         local[3 * i + 1] += scale * (g1y + g2y);
         local[3 * i + 2] += scale * (g1z + g2z);
+        if (local_strain != nullptr) {
+          accumulateBondStrain(local_strain, bj.x, bj.y, bj.z, g1x, g1y, g1z);
+          accumulateBondStrain(local_strain, bk.x, bk.y, bk.z, g2x, g2y, g2z);
+        }
       }
     }
   }
       energies[static_cast<std::size_t>(t)] = local_e;
-    }
+    });
     for (int t = 0; t < nt; ++t) {
       *energy += energies[static_cast<std::size_t>(t)];
       const double *local = owned.data() + static_cast<std::size_t>(t) * n3;
       for (std::size_t k = 0; k < n3; ++k) {
         acc[k] += local[k];
+      }
+      if (strain != nullptr) {
+        for (int k = 0; k < 6; ++k) {
+          strain[k] += vir[static_cast<std::size_t>(t) * 6 + static_cast<std::size_t>(k)];
+        }
       }
     }
   }

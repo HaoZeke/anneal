@@ -50,7 +50,7 @@ let cmake_build_test =
     -DRGPOT_WITH_CACHE=${{ matrix.cache }} \
     -DRGPOT_PURE_LIB=OFF \
     $CMAKE_EXTRA
-  cmake --build build -j
+  cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
   ctest --test-dir build --output-on-failure
   ccache -s
 "%
@@ -142,6 +142,34 @@ let fast_nlist_off_build_test =
   & { name = "Build and test without the fast pair list" }
 in
 
+let thread_limit_build =
+  S.run_pixi m%"
+  meson setup bbdir \
+    -Dwith_tests=true \
+    -Dwith_examples=false \
+    -Dwith_xtensor=false \
+    -Dwith_eigen=false \
+    -Dwith_rpc=false \
+    -Dwith_cache=false
+  meson compile -C bbdir
+"%
+  & { name = "Build", id = "build" }
+in
+
+let thread_limit_test = fun limit =>
+  S.run_pixi "meson test -C bbdir --print-errorlogs --logbase limit%{limit}"
+  & {
+    name = "Test with OMP_THREAD_LIMIT=%{limit}",
+    "if" = "${{ !cancelled() && steps.build.outcome == 'success' }}",
+    env = { OMP_THREAD_LIMIT = limit },
+  }
+in
+
+let test_parity_check =
+  S.run_pixi_env "mpibld" "bash tools/check_test_parity.sh"
+  & { name = "Configure meson and CMake and compare their tests" }
+in
+
 {
   name = "Build Matrix",
   on = S.on_main_pr,
@@ -157,6 +185,7 @@ in
       needs = ["ci-tools"],
       name = "${{ matrix.sys }} / ${{ matrix.os }} [RPC:${{ matrix.rpc }} CACHE:${{ matrix.cache }}]",
       "runs-on" = "${{ matrix.os }}",
+      "timeout-minutes" = 30,
       env = S.ccache_env,
       strategy = {
         "fail-fast" = false,
@@ -178,6 +207,7 @@ in
     build_windows_meson = {
       name = "meson / windows-2022 [MSVC flang RPC:true CACHE:false]",
       "runs-on" = P.windows,
+      "timeout-minutes" = 25,
       steps = [
         S.checkout_minimal,
         # No activate-environment: vs2022_win-64/vswhere rewrite PATH and
@@ -200,6 +230,7 @@ in
     nodownload_rehearsal = {
       name = "offline tarball build (nodownload / ubuntu)",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 25,
       steps = [
         S.checkout_minimal,
         S.setup_pixi_default "default",
@@ -212,16 +243,46 @@ in
     build_fast_nlist_off = {
       name = "meson / ubuntu [fast nlist off]",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 25,
       steps = [
         S.checkout_minimal,
         S.setup_pixi "devbld" "devbld",
         fast_nlist_off_build_test,
       ],
     },
+    # Under OMP_THREAD_LIMIT every region gets fewer threads than it asks
+    # for. One build, then the suite at a limit of one and of two.
+    thread_limit = {
+      name = "meson / ubuntu [OMP_THREAD_LIMIT 1, 2]",
+      "runs-on" = P.ubuntu,
+      "timeout-minutes" = 30,
+      steps = [
+        S.checkout_minimal,
+        S.setup_pixi "devbld" "devbld",
+        thread_limit_build,
+        thread_limit_test "1",
+        thread_limit_test "2",
+      ],
+    },
+    # Both build systems configured, not built, for the plain, RPC and
+    # cache, and client-only bridge configurations: each one's
+    # test_list_parity checks its tests against CppCore/tests/registry.txt,
+    # and the two lists must match. mpibld adds the MPI tests.
+    test_parity = {
+      name = "meson / cmake [test registry parity]",
+      "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
+      steps = [
+        S.checkout_minimal,
+        S.setup_pixi "mpibld" "mpibld",
+        test_parity_check,
+      ],
+    },
     rust_tests = {
       needs = ["ci-tools"],
       name = "Rust Core Tests (${{ matrix.os }})",
       "runs-on" = "${{ matrix.os }}",
+      "timeout-minutes" = 10,
       strategy = {
         "fail-fast" = false,
         matrix = { os = [P.ubuntu, P.macos] },
@@ -251,6 +312,7 @@ in
       needs = ["ci-tools"],
       name = "Client Bridge Stress Test (Linux)",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 15,
       env = {
         CCACHE_DIR = "${{ github.workspace }}/.ccache",
         CCACHE_COMPILERCHECK = "content",
@@ -276,7 +338,7 @@ in
                 -DCMAKE_BUILD_TYPE=Release \
                 -DRGPOT_RPC_CLIENT_ONLY=ON \
                 -DRGPOT_BUILD_TESTS=ON
-          cmake --build build_client -j
+          cmake --build build_client --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
         "%,
         S.run_pixi m%"
           echo "--- Starting Server ---"

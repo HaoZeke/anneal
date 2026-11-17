@@ -370,3 +370,6 @@ benchflow/out/
 .snakemake/
 __pycache__/
 *.pyc
+
+# UmaPot unpack cache when no cache root is configured
+.rgpot-cache/

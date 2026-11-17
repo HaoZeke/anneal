@@ -20,9 +20,12 @@ documentation_style = "doxy"
 
 [defines]
 "feature = rpc" = "RGPOT_HAS_RPC"
+"feature = schema" = "RGPOT_HAS_SCHEMA"
 
 [export]
-include = []
+# Named by the documentation of rgpot_potential_hvp and
+# rgpot_potential_set_hvp_callback, not by a signature.
+include = ["rgpot_hvp_scheme_t", "HessianVectorCallback"]
 exclude = []
 
 [export.rename]

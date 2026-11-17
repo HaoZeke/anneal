@@ -1,0 +1,32 @@
+# Comparator rules for the long-range ladder.
+# The timed arms are OpenMM's CPU platform, s-dftd3 and dftd4.
+# dftd4 at 4096 and 8192 atoms has a 1800 s budget. A kill is a
+# timeout, not a median.
+
+rule all:
+    input:
+        "bench.log",
+        "ref.log",
+        "REPORT.md",
+
+rule bench:
+    output:
+        "bench.log",
+    shell:
+        "LR_LOG={output} LR_GEOM_DIR=geom lr_phys_bench 6"
+
+rule references:
+    input:
+        "bench.log",
+    output:
+        "ref.log",
+    shell:
+        "python3 ref_bench.py drive geom lr_phys_bench 1 2 4 8 > {output}"
+
+rule report:
+    input:
+        "bench.log",
+    output:
+        "REPORT.md",
+    shell:
+        "python3 report_from_log.py {input} > {output}"

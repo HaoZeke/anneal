@@ -6,6 +6,7 @@
 #include "rgpot/units.hpp"
 
 #include <array>
+#include <cstdlib>
 #include <vector>
 
 #include <catch2/catch_approx.hpp>
@@ -26,8 +27,8 @@ std::array<std::array<double, 3>, 3> vacuumBox() {
 
 } // namespace
 
-TEST_CASE("MOPACPot probe_available with fake engine", "[mopac]") {
-  REQUIRE(rgpot::MOPACPot::probe_available());
+TEST_CASE("MOPACPot probeAvailable with fake engine", "[mopac]") {
+  REQUIRE(rgpot::MOPACPot::probeAvailable());
 }
 
 TEST_CASE("MOPACPot converts Hartree and Hartree/Bohr", "[mopac]") {
@@ -55,4 +56,17 @@ TEST_CASE("MOPACPot packed charge reaches the engine", "[mopac]") {
   (void)forces;
   (void)variance;
   REQUIRE(energy == Approx((0.25 + 0.02) * rgpot::units::HARTREE_TO_EV));
+}
+
+// Hidden: meson runs it in a process of its own as MOPACPotEmptyVariable,
+// which starts it with MOPACC_LIBRARY set and empty. An empty path opens the
+// running program, which resolves the engine symbols once another case has
+// opened the fake engine RTLD_GLOBAL.
+TEST_CASE("MOPACPot skips an empty MOPACC_LIBRARY",
+          "[.][mopac][empty-variable]") {
+  const char *library = std::getenv("MOPACC_LIBRARY");
+  REQUIRE(library != nullptr);
+  REQUIRE(*library == '\0');
+  rgpot::MOPACPot pot(rgpot::MOPACPot::Config{});
+  REQUIRE(pot.available());
 }

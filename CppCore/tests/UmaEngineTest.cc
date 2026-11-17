@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -426,4 +427,40 @@ TEST_CASE("one UMA handle serves several threads", "[uma][engine][fixture]") {
   }
   REQUIRE(bad == 0);
   e.destroy(pot);
+}
+
+TEST_CASE("UmaParams.cacheDir places the unpack", "[uma][engine][cache]") {
+  const std::string model = fixture("UMA_FLOAT64_PT2");
+  if (model.empty()) {
+    SKIP("UMA_FLOAT64_PT2 names no fixture");
+  }
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::path(model).parent_path() / "uma-engine-cache-dir-test";
+  std::error_code ignored;
+  fs::remove_all(root, ignored);
+  const Engine &e = engine();
+  capnp::MallocMessageBuilder msg;
+  auto params = msg.initRoot<::UmaParams>();
+  params.setModelPath(model);
+  params.setCacheDir(root.string());
+  auto words = capnp::messageToFlatArray(msg);
+  auto bytes = words.asBytes();
+  char err[512] = {0};
+  RgpotEnginePot *pot = e.create(bytes.begin(), bytes.size(), err, sizeof(err));
+  INFO(err);
+  REQUIRE(pot != nullptr);
+  const std::vector<double> pos = {12.5, 12.5, 12.5, 12.5, 12.5,
+                                   13.5, 12.5, 12.5, 11.5};
+  const std::vector<int> z = {6, 7, 1};
+  std::vector<double> forces(9, 0.0);
+  double energy = 0.0;
+  REQUIRE(e.force(pot, 3, pos.data(), z.data(), forces.data(), &energy,
+                  nullptr, kBox.data(), nullptr, nullptr) == 0);
+  REQUIRE_THAT(energy, Catch::Matchers::WithinAbs(112.5, 1e-9));
+  const fs::path unpacked = root / "aoti" /
+                            (rgpot::engine::Sha256::of_file(model) + ".model");
+  REQUIRE(fs::exists(unpacked / "rgpot-unpack.manifest"));
+  e.destroy(pot);
+  fs::remove_all(root, ignored);
 }

@@ -134,6 +134,7 @@ in
       needs = ["ci-tools"],
       name = "xtb+tblite (meson / ${{ matrix.os }})",
       "runs-on" = "${{ matrix.os }}",
+      "timeout-minutes" = 25,
       strategy = {
         "fail-fast" = false,
         matrix = { os = [P.ubuntu] },
@@ -171,6 +172,7 @@ in
       needs = ["ci-tools"],
       name = "tblite 0.6.0 compile (meson / ubuntu)",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       env = S.ccache_env,
       steps = [
         S.checkout_full,
@@ -199,6 +201,7 @@ in
       needs = ["ci-tools"],
       name = "metatomic+vesin (meson / ubuntu)",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 30,
       env = {
         CCACHE_DIR = "${{ github.workspace }}/.ccache",
         CCACHE_COMPILERCHECK = "content",

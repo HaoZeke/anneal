@@ -7,15 +7,19 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
 
+#include "rgpot/KeptPotential.hpp"
+#include "rgpot/PairTerms.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/SuttonChen/SuttonChenScales.hpp"
 #include "rgpot/stress.hpp"
@@ -289,6 +293,52 @@ TEST_CASE("Sutton-Chen reproduces the Doye 10-8 cluster energies",
   }
 }
 
+TEST_CASE("Sutton-Chen with no cutoff keeps the bits of a one-bin search",
+          "[SuttonChen][nlist]") {
+  // cutoff <= 0 once stood for a 1e6 search, which bins a cluster in one
+  // cell. The unbounded walk takes the pairs of that cell in its order.
+  double epsilon = 0.0;
+  double c = 0.0;
+  double a = 0.0;
+  int nexp = 0;
+  int mexp = 0;
+  const AtomMatrix pt38 = load_points("CppCore/tests/data/sc108/pt38", &epsilon,
+                                      &c, &a, &nexp, &mexp);
+  std::vector<double> pos;
+  for (size_t i = 0; i < pt38.rows(); ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      pos.push_back(pt38(i, k) *
+                    (1.0 + 0.01 * std::sin(1.7 * static_cast<double>(3 * i + k))));
+    }
+  }
+  std::vector<double> scaled = pos;
+  for (double &x : scaled) {
+    x *= rgpot::sutton_chen_platinum().a;
+  }
+  const rgpot::SuttonChenConfig rows[] = {rgpot::SuttonChenConfig{},
+                                          rgpot::sutton_chen_platinum()};
+  for (const auto &row : rows) {
+    const std::vector<double> &xyz = row.a == 1.0 ? pos : scaled;
+    for (const auto mode : {rgpot::nlist::Mode::Auto, rgpot::nlist::Mode::Stored,
+                            rgpot::nlist::Mode::Stream}) {
+      INFO("a " << row.a << " mode " << static_cast<int>(mode));
+      rgpot::SuttonChenConfig none = row;
+      none.cutoff = 0.0;
+      rgpot::SuttonChenConfig wide = row;
+      wide.cutoff = 1.0e6;
+      rgpot::SuttonChenPot unbounded(none);
+      rgpot::SuttonChenPot one_bin(wide);
+      unbounded.setNeighbourMode(mode);
+      one_bin.setNeighbourMode(mode);
+      const StressEval got = eval_stress(unbounded, xyz, nullptr);
+      const StressEval want = eval_stress(one_bin, xyz, nullptr);
+      REQUIRE(std::memcmp(&got.energy, &want.energy, sizeof(double)) == 0);
+      REQUIRE(std::memcmp(got.forces.data(), want.forces.data(),
+                          got.forces.size() * sizeof(double)) == 0);
+    }
+  }
+}
+
 TEST_CASE("periodic Sutton-Chen folds a pair and agrees in a wide cell",
           "[SuttonChen]") {
   const AtomMatrix pos{{0.1, 0.0, 0.0}, {4.9, 0.0, 0.0}};
@@ -345,7 +395,7 @@ TEST_CASE("Sutton-Chen parameter fingerprint tracks the config",
   rgpot::SuttonChenPot other{rgpot::SuttonChenConfig{.c = 39.432, .n = 9, .m = 6}};
   REQUIRE(defaults.paramsKey() == same.paramsKey());
   REQUIRE(defaults.paramsKey() != other.paramsKey());
-  REQUIRE(defaults.get_type() == rgpot::PotType::SuttonChen);
+  REQUIRE(defaults.getType() == rgpot::PotType::SuttonChen);
   REQUIRE_THROWS(rgpot::SuttonChenPot(
       rgpot::SuttonChenConfig{.cutoff = 0.0, .periodic = true}));
 }
@@ -483,6 +533,392 @@ TEST_CASE("gold clusters relax from the rescaled platinum geometries",
     }
     REQUIRE_THAT(energy, WithinAbs(au.epsilon * e_reduced, 1e-6));
   }
+}
+
+namespace {
+
+void setThreads(const char *value) {
+#if defined(_WIN32)
+  _putenv_s("OMP_NUM_THREADS", value);
+#else
+  setenv("OMP_NUM_THREADS", value, 1);
+#endif
+}
+
+bool same_bits(const std::vector<double> &a, const std::vector<double> &b) {
+  return a.size() == b.size() &&
+         std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0;
+}
+
+/// Energy, forces, stress and the per-atom terms, with the pair terms of
+/// the density pass kept for at most `limit` pairs.
+struct TermEval {
+  double energy = 0.0;
+  std::vector<double> forces, stress, atom_energy, atom_virial;
+};
+
+TermEval eval_terms(const rgpot::SuttonChenConfig &cfg, rgpot::nlist::Mode mode,
+                    const std::size_t *limit, const std::vector<double> &pos,
+                    const double *box, int calls) {
+  rgpot::SuttonChenPot pot(cfg);
+  pot.setNeighbourMode(mode);
+  if (limit != nullptr) {
+    pot.setPairTermLimit(*limit);
+  }
+  const std::size_t n = pos.size() / 3;
+  TermEval e;
+  for (int call = 0; call < calls; ++call) {
+    TermEval now;
+    now.forces.assign(pos.size(), 0.0);
+    now.stress.assign(9, 0.0);
+    now.atom_energy.assign(n, 0.0);
+    now.atom_virial.assign(6 * n, 0.0);
+    rgpot::ForceOut out{};
+    out.F = now.forces.data();
+    const rgpot::ForceInput in{n, pos.data(), nullptr, box};
+    pot.forcePerAtom(in, &out, {now.atom_energy.data(), now.atom_virial.data()});
+    now.energy = out.energy;
+    std::copy(out.stress, out.stress + 9, now.stress.begin());
+    if (call > 0) {
+      // The same potential again, on the update and the block it kept.
+      REQUIRE(std::memcmp(&now.energy, &e.energy, sizeof(double)) == 0);
+      REQUIRE(same_bits(now.forces, e.forces));
+    }
+    e = std::move(now);
+  }
+  return e;
+}
+
+} // namespace
+
+TEST_CASE("Sutton-Chen force terms read back keep the bits of computing them again",
+          "[SuttonChen][terms]") {
+  double epsilon = 0.0;
+  double c = 0.0;
+  double a = 0.0;
+  int nexp = 0;
+  int mexp = 0;
+  const AtomMatrix pt38 = load_points("CppCore/tests/data/sc108/pt38", &epsilon,
+                                      &c, &a, &nexp, &mexp);
+  std::vector<double> reduced;
+  for (size_t i = 0; i < pt38.rows(); ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      reduced.push_back(pt38(i, k) *
+                        (1.0 + 0.01 * std::cos(0.7 * static_cast<double>(3 * i + k))));
+    }
+  }
+  const double a_pt = rgpot::sutton_chen_platinum().a;
+  std::vector<double> scaled = reduced;
+  for (double &x : scaled) {
+    x *= a_pt;
+  }
+  const auto sheared = load_lammps_ref("pt_sheared");
+
+  struct Case {
+    const char *name;
+    rgpot::SuttonChenConfig cfg;
+    const std::vector<double> *pos;
+    const double *box;
+  };
+  rgpot::SuttonChenConfig unit_all{.cutoff = 0.0};
+  rgpot::SuttonChenConfig unit_cut{.cutoff = 1.3};
+  rgpot::SuttonChenConfig pt_all = rgpot::sutton_chen_platinum();
+  pt_all.cutoff = 0.0;
+  rgpot::SuttonChenConfig pt_cut = rgpot::sutton_chen_platinum();
+  pt_cut.cutoff = 1.3 * a_pt;
+  rgpot::SuttonChenConfig pt_cell = rgpot::sutton_chen_platinum();
+  pt_cell.cutoff = sheared.cutoff;
+  pt_cell.periodic = true;
+  pt_cell.stress = true;
+  const Case cases[] = {
+      {"a = 1, no cutoff", unit_all, &reduced, nullptr},
+      {"a = 1, cutoff", unit_cut, &reduced, nullptr},
+      {"platinum, no cutoff", pt_all, &scaled, nullptr},
+      {"platinum, cutoff", pt_cut, &scaled, nullptr},
+      {"platinum, sheared cell", pt_cell, &sheared.pos, sheared.box},
+  };
+  // 0 computes every force term again. 40 keeps some pairs and computes
+  // the rest; across three threads each keeps 13.
+  const std::size_t none = 0;
+  const std::size_t some = 40;
+  for (const char *threads : {"1", "3"}) {
+    setThreads(threads);
+    for (const auto &item : cases) {
+      for (const auto mode : {rgpot::nlist::Mode::Auto, rgpot::nlist::Mode::Stored,
+                              rgpot::nlist::Mode::Stream}) {
+        INFO(item.name << ", threads " << threads << ", mode " << static_cast<int>(mode));
+        const TermEval want = eval_terms(item.cfg, mode, &none, *item.pos, item.box, 1);
+        for (const std::size_t *limit : {static_cast<const std::size_t *>(nullptr), &some}) {
+          const TermEval got = eval_terms(item.cfg, mode, limit, *item.pos, item.box, 2);
+          REQUIRE(std::memcmp(&got.energy, &want.energy, sizeof(double)) == 0);
+          REQUIRE(same_bits(got.forces, want.forces));
+          REQUIRE(same_bits(got.stress, want.stress));
+          REQUIRE(same_bits(got.atom_energy, want.atom_energy));
+          REQUIRE(same_bits(got.atom_virial, want.atom_virial));
+        }
+      }
+    }
+  }
+  setThreads("1");
+}
+
+TEST_CASE("pair terms past the room are left for the second pass", "[SuttonChen][terms]") {
+  // Pushes `pairs` pairs and reads back what the pass kept.
+  auto pass = [](rgpot::PairTerms<2> &terms, int pairs) {
+    for (int k = 0; k < pairs; ++k) {
+      double *slot = terms.push();
+      if (slot != nullptr) {
+        slot[0] = 0.5 * k;
+        slot[1] = -k;
+      }
+    }
+    const auto kept = static_cast<int>(terms.size());
+    terms.replay();
+    for (int k = 0; k < kept; ++k) {
+      const double *back = terms.next();
+      REQUIRE(back != nullptr);
+      REQUIRE(back[0] == 0.5 * k);
+      REQUIRE(back[1] == -k);
+    }
+    REQUIRE(terms.next() == nullptr);
+    return kept;
+  };
+
+  rgpot::PairTerms<2> terms;
+  terms.setLimit(3);
+  terms.record(10);
+  REQUIRE(pass(terms, 5) == 3);
+
+  // A pass allocates nothing, so one with no room keeps no pair. The next
+  // record makes room for all that the last pass saw, up to the limit.
+  rgpot::PairTerms<2> grown;
+  grown.setLimit(1000);
+  grown.record(0);
+  REQUIRE(pass(grown, 700) == 0);
+  grown.record(0);
+  REQUIRE(pass(grown, 700) == 700);
+  grown.record(0);
+  REQUIRE(pass(grown, 900) == 700);
+  grown.record(0);
+  REQUIRE(pass(grown, 900) == 900);
+  grown.record(0);
+  REQUIRE(pass(grown, 1200) == 900);
+  grown.record(0);
+  REQUIRE(pass(grown, 1200) == 1000);
+
+  // A lower limit gives the room back.
+  grown.setLimit(2);
+  grown.record(0);
+  REQUIRE(pass(grown, 5) == 2);
+
+  terms.setLimit(0);
+  terms.record(5);
+  REQUIRE(terms.push() == nullptr);
+  terms.replay();
+  REQUIRE(terms.next() == nullptr);
+  terms.release();
+  REQUIRE(terms.size() == 0);
+}
+
+namespace {
+
+struct EntryResult {
+  int status = 1;
+  double energy = 0.0;
+  std::vector<double> forces;
+};
+
+EntryResult call_entry(const rgpot_sc_config &cfg, const std::vector<double> &xyz,
+                       const double *box) {
+  EntryResult r;
+  r.forces.assign(xyz.size(), 0.0);
+  r.status = rgpot_sutton_chen_energy_forces(&cfg, static_cast<int32_t>(xyz.size() / 3),
+                                             xyz.data(), box, &r.energy, r.forces.data());
+  return r;
+}
+
+/// A potential built for this call alone, as the C entry once did.
+EntryResult call_fresh(const rgpot_sc_config &raw, const std::vector<double> &xyz,
+                       const double *box) {
+  rgpot::SuttonChenConfig cfg;
+  cfg.epsilon = raw.epsilon;
+  cfg.c = raw.c;
+  cfg.a = raw.a;
+  cfg.n = raw.n;
+  cfg.m = raw.m;
+  cfg.cutoff = raw.cutoff;
+  cfg.periodic = raw.periodic != 0;
+  const rgpot::SuttonChenPot pot(cfg);
+  EntryResult r;
+  r.forces.assign(xyz.size(), 0.0);
+  rgpot::ForceOut out{};
+  out.F = r.forces.data();
+  pot.forceImpl({xyz.size() / 3, xyz.data(), nullptr, box}, &out);
+  r.status = 0;
+  r.energy = out.energy;
+  return r;
+}
+
+bool same_result(const EntryResult &a, const EntryResult &b) {
+  return a.status == b.status && std::memcmp(&a.energy, &b.energy, sizeof(double)) == 0 &&
+         same_bits(a.forces, b.forces);
+}
+
+} // namespace
+
+TEST_CASE("the C entry point keeps its potential until the parameters or atoms change",
+          "[SuttonChen][kept]") {
+  using Kept = rgpot::Kept<rgpot::SuttonChenPot>;
+  Kept::release();
+  double epsilon = 0.0;
+  double c = 0.0;
+  double a = 0.0;
+  int nexp = 0;
+  int mexp = 0;
+  const AtomMatrix pt38 = load_points("CppCore/tests/data/sc108/pt38", &epsilon,
+                                      &c, &a, &nexp, &mexp);
+  std::vector<double> pos;
+  std::vector<double> moved;
+  std::vector<double> spread;
+  for (size_t i = 0; i < pt38.rows(); ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      const double phase = 1.3 * static_cast<double>(3 * i + k);
+      pos.push_back(pt38(i, k) * (1.0 + 0.01 * std::sin(phase)));
+      moved.push_back(pt38(i, k) * (1.0 + 0.01 * std::cos(phase)));
+      // Past the skin of a 1.3 cutoff, so a kept list is built again.
+      spread.push_back(1.1 * pt38(i, k));
+    }
+  }
+  const std::vector<double> fewer(pos.begin(), pos.begin() + 3 * 13);
+
+  std::uint64_t builds = Kept::counts().builds;
+  std::uint64_t reuses = Kept::counts().reuses;
+  // Each call has the bits of a potential built for it alone, and either
+  // builds the kept potential or reuses it.
+  auto check = [&](const rgpot_sc_config &cfg, const std::vector<double> &xyz,
+                   const double *box, bool build) {
+    REQUIRE(same_result(call_entry(cfg, xyz, box), call_fresh(cfg, xyz, box)));
+    const rgpot::KeptCounts now = Kept::counts();
+    REQUIRE(now.builds == builds + (build ? 1 : 0));
+    REQUIRE(now.reuses == reuses + (build ? 0 : 1));
+    builds = now.builds;
+    reuses = now.reuses;
+  };
+
+  const rgpot_sc_config all{1.0, 34.408, 1.0, 10, 8, 0.0, 0};
+  check(all, pos, nullptr, true);
+  check(all, moved, nullptr, false);
+  check(all, pos, nullptr, false);
+  rgpot_sc_config deeper = all;
+  deeper.epsilon = 2.0;
+  check(deeper, pos, nullptr, true);
+  // One potential is kept, so going back builds again.
+  check(all, pos, nullptr, true);
+  check(all, fewer, nullptr, true);
+  check(all, pos, nullptr, true);
+  rgpot_sc_config nine_six = all;
+  nine_six.n = 9;
+  nine_six.m = 6;
+  check(nine_six, pos, nullptr, true);
+  // The key compares bits, so -0.0 is another cutoff with the same result.
+  rgpot_sc_config negative = all;
+  negative.cutoff = -0.0;
+  check(negative, pos, nullptr, true);
+
+  rgpot_sc_config cut = all;
+  cut.cutoff = 1.3;
+  check(cut, pos, nullptr, true);
+  check(cut, moved, nullptr, false);
+  check(cut, spread, nullptr, false);
+  check(cut, pos, nullptr, false);
+
+  const double box[9] = {20, 0, 0, 0, 20, 0, 0, 0, 20};
+  const double wider[9] = {24, 0, 0, 0, 22, 0, 0, 0, 20};
+  rgpot_sc_config cell = cut;
+  cell.periodic = 1;
+  check(cell, pos, box, true);
+  check(cell, moved, box, false);
+  // A new cell keeps the potential, whose neighbour update follows it.
+  check(cell, pos, wider, false);
+
+  // A call that fails drops the potential it ran on.
+  double energy = 0.0;
+  std::vector<double> forces(pos.size(), 0.0);
+  REQUIRE(rgpot_sutton_chen_energy_forces(&cell, 38, pos.data(), nullptr, &energy,
+                                          forces.data()) == 1);
+  REQUIRE(Kept::counts().reuses == reuses + 1);
+  reuses += 1;
+  check(cell, pos, box, true);
+  // Parameters the constructor rejects build nothing and keep nothing.
+  rgpot_sc_config flat = all;
+  flat.n = 0;
+  REQUIRE(rgpot_sutton_chen_energy_forces(&flat, 38, pos.data(), nullptr, &energy,
+                                          forces.data()) == 1);
+  REQUIRE(Kept::counts().builds == builds);
+  check(cell, pos, box, true);
+
+  // Another thread keeps its own potential.
+  EntryResult there;
+  EntryResult again;
+  rgpot::KeptCounts counts;
+  std::thread worker([&] {
+    there = call_entry(all, pos, nullptr);
+    again = call_entry(all, moved, nullptr);
+    counts = Kept::counts();
+  });
+  worker.join();
+  REQUIRE(same_result(there, call_fresh(all, pos, nullptr)));
+  REQUIRE(same_result(again, call_fresh(all, moved, nullptr)));
+  REQUIRE(counts.builds == 1);
+  REQUIRE(counts.reuses == 1);
+  check(cell, pos, box, false);
+}
+
+TEST_CASE("Sutton-Chen with no cutoff splits the atoms across a team",
+          "[SuttonChen][nlist]") {
+  // A one-bin search left its cell to one thread. The unbounded walk gives
+  // each thread a run of atoms, whose densities and forces sum in the same
+  // order. Only the energy is summed by thread.
+  double epsilon = 0.0;
+  double c = 0.0;
+  double a = 0.0;
+  int nexp = 0;
+  int mexp = 0;
+  const AtomMatrix pt38 = load_points("CppCore/tests/data/sc108/pt38", &epsilon,
+                                      &c, &a, &nexp, &mexp);
+  std::vector<double> pos;
+  for (size_t i = 0; i < pt38.rows(); ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      pos.push_back(pt38(i, k) *
+                    (1.0 + 0.01 * std::sin(0.9 * static_cast<double>(3 * i + k))));
+    }
+  }
+  std::vector<double> scaled = pos;
+  for (double &x : scaled) {
+    x *= rgpot::sutton_chen_platinum().a;
+  }
+  const rgpot::SuttonChenConfig rows[] = {rgpot::SuttonChenConfig{},
+                                          rgpot::sutton_chen_platinum()};
+  for (const auto &row : rows) {
+    const std::vector<double> &xyz = row.a == 1.0 ? pos : scaled;
+    rgpot::SuttonChenConfig none = row;
+    none.cutoff = 0.0;
+    rgpot::SuttonChenConfig wide = row;
+    wide.cutoff = 1.0e6;
+    setThreads("1");
+    const StressEval want = eval_stress(rgpot::SuttonChenPot(wide), xyz, nullptr);
+    for (const char *threads : {"2", "3", "5"}) {
+      INFO("a " << row.a << ", threads " << threads);
+      setThreads(threads);
+      const StressEval one_bin = eval_stress(rgpot::SuttonChenPot(wide), xyz, nullptr);
+      const StressEval got = eval_stress(rgpot::SuttonChenPot(none), xyz, nullptr);
+      REQUIRE(std::memcmp(&one_bin.energy, &want.energy, sizeof(double)) == 0);
+      REQUIRE(same_bits(one_bin.forces, want.forces));
+      REQUIRE(same_bits(got.forces, want.forces));
+      REQUIRE(std::abs(got.energy - want.energy) <= 1e-13 * std::abs(want.energy));
+    }
+  }
+  setThreads("1");
 }
 
 TEST_CASE("Sutton-Chen stress is opt-in and keeps the energy and force bits",

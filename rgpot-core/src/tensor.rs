@@ -330,6 +330,25 @@ pub(crate) fn checked_f64_data(
     label: &str,
     expected_len: usize,
 ) -> Result<*mut f64, String> {
+    checked_data::<f64>(tensor, label, expected_len, dtype_f64(), "f64")
+}
+
+/// [`checked_f64_data`] for an i32 tensor.
+pub(crate) fn checked_i32_data(
+    tensor: *const DLManagedTensorVersioned,
+    label: &str,
+    expected_len: usize,
+) -> Result<*mut i32, String> {
+    checked_data::<i32>(tensor, label, expected_len, dtype_i32(), "i32")
+}
+
+fn checked_data<T>(
+    tensor: *const DLManagedTensorVersioned,
+    label: &str,
+    expected_len: usize,
+    dtype: DLDataType,
+    dtype_name: &str,
+) -> Result<*mut T, String> {
     if tensor.is_null() {
         return Err(format!("{label}: tensor is NULL"));
     }
@@ -337,8 +356,8 @@ pub(crate) fn checked_f64_data(
     if t.data.is_null() {
         return Err(format!("{label}: data pointer is NULL"));
     }
-    if t.dtype != dtype_f64() {
-        return Err(format!("{label}: expected f64, got {:?}", t.dtype));
+    if t.dtype != dtype {
+        return Err(format!("{label}: expected {dtype_name}, got {:?}", t.dtype));
     }
     if t.device.device_type != DLDeviceType::kDLCPU {
         return Err(format!("{label}: expected a CPU tensor"));
@@ -379,11 +398,22 @@ pub(crate) fn checked_f64_data(
     if t.byte_offset > isize::MAX as u64 {
         return Err(format!("{label}: byte_offset out of range"));
     }
-    let ptr = unsafe { base.add(t.byte_offset as usize) }.cast::<f64>();
-    if (ptr as usize) % std::mem::align_of::<f64>() != 0 {
-        return Err(format!("{label}: data is not 8-byte aligned"));
+    let ptr = unsafe { base.add(t.byte_offset as usize) }.cast::<T>();
+    let align = std::mem::align_of::<T>();
+    if (ptr as usize) % align != 0 {
+        return Err(format!("{label}: data is not {align}-byte aligned"));
     }
     Ok(ptr)
+}
+
+/// Copy a validated i32 tensor into a `Vec`; see [`checked_f64_data`].
+pub(crate) fn copy_i32_tensor(
+    tensor: *const DLManagedTensorVersioned,
+    label: &str,
+    expected_len: usize,
+) -> Result<Vec<i32>, String> {
+    let ptr = checked_i32_data(tensor, label, expected_len)?;
+    Ok(unsafe { std::slice::from_raw_parts(ptr, expected_len) }.to_vec())
 }
 
 /// Copy a validated f64 tensor into a `Vec`; see [`checked_f64_data`].
@@ -454,6 +484,9 @@ pub unsafe extern "C" fn rgpot_tensor_cpu_f64_matrix3(
 /// The returned tensor owns a copy of the data — the caller may free the
 /// original buffer after this call.  Call `rgpot_tensor_free` when done.
 ///
+/// Returns NULL, with a `rgpot_last_error()` message, when `data` is NULL,
+/// `rows` or `cols` is negative, or `rows * cols` overflows.
+///
 /// # Safety
 /// `data` must point to at least `rows * cols` contiguous `f64` values.
 #[no_mangle]
@@ -462,7 +495,21 @@ pub unsafe extern "C" fn rgpot_tensor_owned_cpu_f64_2d(
     rows: i64,
     cols: i64,
 ) -> *mut DLManagedTensorVersioned {
-    let len = (rows * cols) as usize;
+    use crate::status::set_last_error;
+    if data.is_null() {
+        set_last_error("rgpot_tensor_owned_cpu_f64_2d: data is NULL");
+        return std::ptr::null_mut();
+    }
+    let len = match (usize::try_from(rows), usize::try_from(cols)) {
+        (Ok(r), Ok(c)) => r.checked_mul(c).filter(|&n| n <= isize::MAX as usize / 8),
+        _ => None,
+    };
+    let Some(len) = len else {
+        set_last_error(&format!(
+            "rgpot_tensor_owned_cpu_f64_2d: invalid shape [{rows}, {cols}]"
+        ));
+        return std::ptr::null_mut();
+    };
     let vec = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
     create_owned_f64_tensor(vec, vec![rows, cols])
 }
@@ -486,38 +533,59 @@ pub unsafe extern "C" fn rgpot_tensor_free(tensor: *mut DLManagedTensorVersioned
 
 /// Get the device of a DLPack tensor.
 ///
+/// For a NULL `tensor`, returns `{kDLCPU, -1}`; no real device has id -1.
+///
 /// # Safety
-/// `tensor` must be a valid, non-null `DLManagedTensorVersioned*`.
+/// `tensor` must be NULL or a valid `DLManagedTensorVersioned*`.
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_tensor_device(
     tensor: *const DLManagedTensorVersioned,
 ) -> DLDevice {
+    if tensor.is_null() {
+        return DLDevice {
+            device_type: DLDeviceType::kDLCPU,
+            device_id: -1,
+        };
+    }
     unsafe { (*tensor).dl_tensor.device }
 }
 
 /// Get the raw data pointer of a DLPack tensor.
 ///
+/// Returns NULL for a NULL `tensor`.
+///
 /// # Safety
-/// `tensor` must be a valid, non-null `DLManagedTensorVersioned*`.
+/// `tensor` must be NULL or a valid `DLManagedTensorVersioned*`.
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_tensor_data(
     tensor: *const DLManagedTensorVersioned,
 ) -> *const c_void {
+    if tensor.is_null() {
+        return std::ptr::null();
+    }
     unsafe { (*tensor).dl_tensor.data as *const c_void }
 }
 
 /// Get the shape array and number of dimensions of a DLPack tensor.
 ///
 /// Writes the number of dimensions to `*ndim_out` and returns a pointer to
-/// the shape array (length `*ndim_out`).
+/// the shape array (length `*ndim_out`).  For a NULL `tensor`, writes 0 to
+/// `*ndim_out` and returns NULL; for a NULL `ndim_out`, returns NULL.
 ///
 /// # Safety
-/// Both `tensor` and `ndim_out` must be valid, non-null pointers.
+/// `tensor` and `ndim_out` must each be NULL or a valid pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_tensor_shape(
     tensor: *const DLManagedTensorVersioned,
     ndim_out: *mut i32,
 ) -> *const i64 {
+    if ndim_out.is_null() {
+        return std::ptr::null();
+    }
+    if tensor.is_null() {
+        unsafe { *ndim_out = 0 };
+        return std::ptr::null();
+    }
     let t = unsafe { &(*tensor) };
     unsafe { *ndim_out = t.dl_tensor.ndim };
     t.dl_tensor.shape as *const i64
@@ -621,6 +689,35 @@ mod tests {
         let slice =
             unsafe { std::slice::from_raw_parts(t.dl_tensor.data as *const f64, 6) };
         assert_eq!(slice, &source);
+        unsafe { rgpot_tensor_free(tensor) };
+    }
+
+    #[test]
+    fn owned_cpu_f64_2d_rejects_bad_arguments() {
+        let source = [1.0_f64; 6];
+        let null = unsafe { rgpot_tensor_owned_cpu_f64_2d(std::ptr::null(), 2, 3) };
+        assert!(null.is_null());
+        let msg = unsafe { std::ffi::CStr::from_ptr(crate::status::rgpot_last_error()) };
+        assert!(msg.to_string_lossy().contains("data is NULL"), "{msg:?}");
+        let negative = unsafe { rgpot_tensor_owned_cpu_f64_2d(source.as_ptr(), -2, -3) };
+        assert!(negative.is_null());
+        let overflow = unsafe { rgpot_tensor_owned_cpu_f64_2d(source.as_ptr(), i64::MAX, 2) };
+        assert!(overflow.is_null());
+    }
+
+    #[test]
+    fn accessors_tolerate_null() {
+        let dev = unsafe { rgpot_tensor_device(std::ptr::null()) };
+        assert_eq!(dev.device_type, DLDeviceType::kDLCPU);
+        assert_eq!(dev.device_id, -1);
+        assert!(unsafe { rgpot_tensor_data(std::ptr::null()) }.is_null());
+        let mut ndim: i32 = 7;
+        let shape = unsafe { rgpot_tensor_shape(std::ptr::null(), &mut ndim) };
+        assert!(shape.is_null());
+        assert_eq!(ndim, 0);
+        let mut data = [0.0_f64; 6];
+        let tensor = unsafe { rgpot_tensor_cpu_f64_2d(data.as_mut_ptr(), 2, 3) };
+        assert!(unsafe { rgpot_tensor_shape(tensor, std::ptr::null_mut()) }.is_null());
         unsafe { rgpot_tensor_free(tensor) };
     }
 

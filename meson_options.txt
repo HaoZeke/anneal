@@ -15,6 +15,12 @@ option(
     description: 'linkcell/minimage pair list. Auto when cargo and rustc 1.89 or newer are found; otherwise the C++ pair scan is used.',
 )
 option(
+    'with_cp2k',
+    type: 'feature',
+    value: 'disabled',
+    description: 'CP2KPot, the potserv CP2K backend and libcp2kc_rgpot.so against libcp2k (pkg-config libcp2k); needs with_rpc',
+)
+option(
     'with_mpi',
     type: 'feature',
     value: 'disabled',
@@ -78,13 +84,13 @@ option(
     'with_highway',
     type: 'feature',
     value: 'auto',
-    description: 'Google Highway runtime ISA dispatch for LJ, Morse, the analytical EAM kernel, and the orthorhombic fold. auto uses libhwy >= 1.2 or the wrap when that tree is already present. disabled keeps the scalar kernels.',
+    description: 'Google Highway runtime ISA dispatch for the rgpot::simd LJ, Morse, EAM and orthorhombic-fold kernels. auto uses libhwy >= 1.2 or the wrap when that tree is already present. disabled keeps the scalar kernels.',
 )
 option(
     'with_ipi',
     type: 'feature',
     value: 'auto',
-    description: 'i-PI socket server Potential (POSIX sockets). auto is on except on Windows.',
+    description: 'i-PI socket server Potential (IPIPot), driver client (IPIDriver) and rgpot-ipi-driver (POSIX sockets). auto is on except on Windows.',
 )
 option(
     'with_water',
@@ -97,4 +103,64 @@ option(
     type: 'boolean',
     value: false,
     description: 'EAM and Finnis-Sinclair potentials read from LAMMPS funcfl, setfl and eam/fs tables.',
+)
+option(
+    'with_lammps',
+    type: 'feature',
+    value: 'auto',
+    description: 'LAMMPS pair_style rgpot and the lj/cut comparison. Needs the lammps Python module. pair_style rgpot also needs lammps_src.',
+)
+option(
+    'lammps_src',
+    type: 'string',
+    value: '',
+    description: 'LAMMPS src directory that contains pair.h, matching the liblammps that will load the plugin.',
+)
+option(
+    'lammps_exe',
+    type: 'string',
+    value: '',
+    description: 'lmp built from lammps_src. When set, the LAMMPS test also runs pair_style rgpot.',
+)
+option(
+    'with_gromacs',
+    type: 'feature',
+    value: 'auto',
+    description: 'GROMACS mdrun -plumed using the RGPOT collective variable.',
+)
+option(
+    'with_gromacs_dropin',
+    type: 'feature',
+    value: 'disabled',
+    description: 'librgpot_gromacs, the libcp2k API GROMACS -DGMX_CP2K=ON links, so mdrun takes QM/MM energies and forces from any rgpot potential',
+)
+option(
+    'gromacs_dropin_gmx',
+    type: 'string',
+    value: '',
+    description: 'gmx of a double-precision GROMACS linked against librgpot_gromacs; empty looks for gmx_d on PATH and skips the mdrun tests without it',
+)
+option(
+    'with_openmm',
+    type: 'feature',
+    value: 'auto',
+    description: 'OpenMM shifted Lennard-Jones comparison.',
+)
+option(
+    'with_plumed',
+    type: 'feature',
+    value: 'auto',
+    description: 'PLUMED RGPOT collective variable.',
+)
+option(
+    'with_long_range',
+    type: 'boolean',
+    value: false,
+    description: 'Ewald, PME, dispersion and NLH summands.',
+)
+option(
+    'with_cuda',
+    type: 'boolean',
+    value: false,
+    description: 'Compile the Ewald, PME and pair-sum kernels with nvcc.',
 )

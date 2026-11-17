@@ -1,6 +1,7 @@
 #+TITLE: Embedding as a Subproject
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
 #+STARTUP: content
+#+rgpot_foreign: subprojects/rgpot.wrap subprojects/rgpot -Dwith_nwchem -Dwith_cpmd
 
 * Embedding as a Subproject
 
@@ -16,6 +17,7 @@ Add a
 
 Use this when your project hosts an RPC server with rgpot's built-in potentials:
 
+#+attr_rgpot: fragment
 #+begin_src meson
 rgpot_proj = subproject('rgpot',
     default_options: ['with_rpc=true', 'with_tests=false'])
@@ -28,6 +30,7 @@ Use this when your project only needs to /call/ a remote potential server, or
 when you want to avoid namespace collisions with your own types (see
 [[file:integration.org][integration guide]]):
 
+#+attr_rgpot: fragment
 #+begin_src meson
 rgpot_proj = subproject('rgpot',
     default_options: ['with_rpc_client_only=true', 'pure_lib=true'])
@@ -36,9 +39,12 @@ ptlrpc_dep = rgpot_proj.get_variable('ptlrpc_dep')
 
 The =ptlrpc_dep= provides only the Cap'n Proto schema and generated code,
 without pulling in =Potential.hpp= or the existing C++ potentials.
-It is a static convenience archive: the same symbols are also inside =librgpot=,
-so a consumer that resolves rgpot through =pkg-config= instead of the wrap links
-them from the umbrella and has no separate =libptlrpc= to find at run time.
+It links =ptlrpc=, a static convenience archive
+(=CppCore/rgpot/rpc/meson.build=).
+A client-only build does not build =librgpot=.
+A build without =with_rpc_client_only= links the same archive whole into
+=librgpot=, so a consumer that resolves rgpot through =pkg-config= has no
+separate =libptlrpc= to find at run time.
 
 *** Feature-gated potentials (Meson)
 
@@ -49,24 +55,24 @@ Enable only what the host project needs:
 |--------------+----------+---------|
 | =-Dwith_xtb=true= | =xtbbld= / =tbbld= | =XTBPot= (GFNFF, GFN0/1/2-xTB) |
 | =-Dwith_tblite=true= | =tblitebld= / =tbbld= | =TBLitePot= (GFN1, GFN2, IPEA1) |
-| =-Dwith_dftd3=true= | =dftd3= / =dftd= | =D3Pot= in-process Potential summand (DFT-D3 BJ/zero, explicit ATM; no =PotentialConfig.d3=; goldens =meson test --suite dftd=) |
-| =-Dwith_dftd4=true= | =dftd4= / =dftd= | =D4Pot= in-process Potential summand (DFT-D4 functional/charge, explicit ATM; no =PotentialConfig.d4=; goldens =meson test --suite dftd=) |
-| =-Dwith_expr=true= | none (vendored OpenMM Lepton; no pixi muparser) | =ExprPot= named-child PES algebra (no =PotentialConfig.expr=) |
+| =-Dwith_dftd3=true= | =dftd3= / =dftd= | =D3Pot= in-process Potential summand (DFT-D3 BJ/zero, explicit ATM; =PotentialConfig.d3= is not applied and every =potserv= backend refuses it; goldens =meson test --suite dftd=) |
+| =-Dwith_dftd4=true= | =dftd4= / =dftd= | =D4Pot= in-process Potential summand (DFT-D4 functional/charge, explicit ATM; =PotentialConfig.d4= is not applied and every =potserv= backend refuses it; goldens =meson test --suite dftd=) |
+| =-Dwith_expr=true= | none (vendored OpenMM Lepton; no pixi muparser) | =ExprPot= named-child PES algebra (=potserv= refuses =PotentialConfig.expr=) |
 | =-Dwith_metatomic=true= | =metatomicbld= (linux-64) | =MetatomicPot= (TorchScript models) |
 
-=NWChemPot= is a pure consumer: the frontend is always compiled and
-=dlopen=s =libnwchemc.so= from
+=NWChemPot= is a pure consumer: the frontend =dlopen=s =libnwchemc.so= from
 [[https://github.com/OmniPotentRPC/nwchemc][nwchemc]] (stable
 =nwchemc_*= C symbols). rgpot builds no in-process NWChem embed of its own and has no =-Dwith_nwchem=
 option.
 No =nwchem= CLI/subprocess path.
 Build =libnwchemc.so= from the =nwchemc= project, then set
-=NWCHEMC_LIBRARY= or =RGPOT_NWCHEMC_ENGINE=.
-See =CppCore/ rgpot/NWChemPot/README.md=.
+=NWCHEMC_LIBRARY=, =RGPOT_NWCHEMC_ENGINE= or =RGPOT_NWCHEM_ENGINE=.
+See =CppCore/rgpot/NWChemPot/README.md=.
 
-=CPMDPot= follows the same split-engine pattern: the frontend is always compiled
-and =dlopen=s =libcpmdc.so= from [[https://github.com/OmniPotentRPC/cpmdc]
-[cpmdc]].
+=CPMDPot= follows the same split-engine pattern: the frontend
+=dlopen=s =libcpmdc.so= from [[https://github.com/OmniPotentRPC/cpmdc] [cpmdc]].
+Both frontends use the Cap'n Proto parameter structs, so they are compiled only
+when =with_rpc= or =with_rpc_client_only= is on (CMake: =RGPOT_WITH_RPC=).
 The engine is documented at [[https://cpmdc.rgoswami.me][cpmdc.rgoswami.me]].
 rgpot builds no in-process OpenCPMD embed of its own and has no =-Dwith_cpmd=
 option.
@@ -76,6 +82,7 @@ See =CppCore/rgpot/CPMDPot/README.md=.
 
 Example -- embed with metatomic support:
 
+#+attr_rgpot: fragment
 #+begin_src meson
 rgpot_proj = subproject('rgpot',
     default_options: [
@@ -86,11 +93,19 @@ rgpot_proj = subproject('rgpot',
 rgpot_dep = rgpot_proj.get_variable('rgpot_dep')
 #+end_src
 
-The metatomic path needs PyTorch (=Torch= CMake package),
-=metatensor_torch=, =metatomic_torch=, and =vesin= on the linker path.
-The Meson build supplements Torch CMake discovery with explicit =-L= / =-rpath=
-/ =-ltorch_cpu= taken from =python3 -c 'import torch; ...'= so =libtorch_cpu.so=
-resolves under conda/pixi layouts.
+The metatomic path needs PyTorch, =metatensor=,
+=metatensor_torch= and =metatomic_torch= installed for the =python3= that Meson
+finds.
+Meson does not use the Torch CMake package.
+It locates =torch/version.py= through =RGPOT_TORCH_ROOT= or =sys.path= without
+importing torch.
+It then passes =-L=, =-ltorch=, =-ltorch_cpu= and =-lc10= (with
+=-Wl,-rpath-link= on GNU ld).
+The metatensor and metatomic headers and libraries come from the =purelib=
+directory of that Python.
+=vesin= comes from the top-level =vesin= dependency, with the copy in
+=third_party/vesin= as the fallback.
+Torch links only into the =metatomic_engine= plugin, not into =librgpot=.
 
 For the *pip* wheel (nanobind abi3 + multi-ABI =dlopen= engines, torch *2.7+*),
 see:
@@ -106,19 +121,38 @@ instead of embedding as a subproject.
 rgpot also provides a CMake build.
 To use it as a subdirectory:
 
+#+attr_rgpot: fragment
 #+begin_src cmake
+set(RGPOT_WITH_CACHE OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/rgpot)
 target_link_libraries(my_target PRIVATE rgpot::rgpot)
 #+end_src
+
+=rgpot::rgpot= exists only when =RGPOT_RPC_CLIENT_ONLY= is =OFF=.
+A client-only build defines the =ptlrpc= and =rgpot_client_bridge= targets
+instead.
 
 *** Build options
 
 | Option | Default | Description |
 |--------+---------+-------------|
-| =RGPOT_BUILD_TESTS= | =OFF= | Build the test suite |
-| =RGPOT_BUILD_EXAMPLES= | =OFF= | Build example programs |
-| =RGPOT_RPC_CLIENT_ONLY= | =OFF= | Build only the RPC client (schema library) |
+| =RGPOT_BUILD_TESTS= | =ON= when rgpot is the top-level project, else =OFF= | Build the test suite |
+| =RGPOT_BUILD_EXAMPLES= | =ON= when rgpot is the top-level project, else =OFF= | Build example programs |
+| =RGPOT_RPC_CLIENT_ONLY= | =OFF= | Build only the RPC client (schema library and client bridge) |
+| =RGPOT_WITH_CACHE= | =ON= | Build =PotentialCache= against RocksDB |
 
+=RGPOT_WITH_CACHE= defaults to =ON= and =find_package(RocksDB REQUIRED)= then
+fails without RocksDB.
+The snippet above turns it off before =add_subdirectory=.
+Meson's =with_cache= defaults to =false=.
+=RGPOT_RPC_CLIENT_ONLY= forces the cache off.
+See the build options reference for every option:
+
+#+begin_export rst
+:doc:`../reference/build_options`
+#+end_export
+
+#+attr_rgpot: syntax
 #+begin_src bash
 cmake -B build -DRGPOT_BUILD_TESTS=ON -DRGPOT_BUILD_EXAMPLES=ON
 cmake --build build
@@ -130,16 +164,19 @@ ctest --test-dir build
 rgpot builds on Windows with MSVC 2022.
 Install Cap'n Proto via conda-forge or vcpkg, then use the standard meson or
 cmake workflow.
-No special flags are required since v1.0.3.
+CI builds with Meson on =windows-2022= with the Fortran potentials enabled.
+For those it sets =AR=lib= and passes
+=--native-file ci/gha/machines/win-flang-msvc.ini=, so MSVC =lib.exe= archives
+the Flang objects.
 
-For conda-forge builds, the following are handled automatically by the build
-system:
+The Meson build handles the following itself:
 
-- =capnp compile= is used instead of =capnpc= (the Windows =capnpc.EXE= does not
-support the =-o= flag)
-- Generated =.c++= files are renamed to =.cpp= (MSVC does not recognize the =.c+
-+= extension)
+- =CppCore/rgpot/rpc/capnp_compile.py= runs =capnp compile -oc++= instead of
+  =capnpc=
+- It renames the generated
+  =.c++= file to =.cpp= (MSVC does not recognize the =.c++= extension)
 - =ws2_32= is linked for Cap'n Proto's async networking layer
+- =with_ipi= (=auto=) stays off, since the i-PI potential needs POSIX sockets
 
 #+begin_export rst
 See :doc:`../reference/mpi` for the ``with_mpi`` values ``auto``, ``enabled``, and ``disabled``.

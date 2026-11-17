@@ -1,0 +1,189 @@
+#+TITLE: Fast pair list C ABI
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Fast pair list C ABI
+
+=CppCore/rgpot/nlist/fastnlist.h= is the C ABI of a Rust static library, =CppCore/rgpot/nlist/fastnlist/src/lib.rs=.
+The library is built on the =linkcell= crate and the =minimage= crate that
+=linkcell= uses.
+Meson builds it when it finds cargo and rustc 1.89 or newer, the =rust-version=
+in its =Cargo.toml=.
+That is the default, =-Dwith_fast_nlist=auto=.
+The build then defines =RGPOT_HAS_FAST_NLIST= and links the archive into
+=librgpot=.
+CMake does not build it.
+
+The library does not convert units.
+Coordinates, cells, cutoffs and difference vectors share the caller's length
+unit.
+=cell9= is nine doubles, the lattice vectors as rows:
+=ax ay az bx by bz cx cy cz=.
+A hard failure returns -1 and stores a message for =rgpot_fast_last_error= on
+the calling thread.
+
+** Callers
+
+The Fortran water-H kernel, =CppCore/rgpot/fortran/rgpot_water_h.f90=, wraps its
+legs with =rgpot_fast_wrap=.
+On a sheared cell it keeps that result only when it is shorter than half the
+smallest face width, and otherwise uses its 26-image scan.
+=rgpot_fast_pairs= and =rgpot_fast_wrap_axes= have no caller inside the
+potentials.
+=LJPot=, =MorsePot= and =LJClusterPot= search pairs with the C++ cell list
+=rgpot::nlist::Neighbours=, not with this library.
+=LJClusterPot= walks all pairs directly when the bounding box of the atoms fits
+inside the cutoff, there is no switch, and the neighbour mode is not a stream.
+=CppCore/tests/FastNlistTest.cc= checks the counts from =rgpot_fast_pairs= and
+checks the potentials against a direct scan.
+
+** Pair candidates
+
+Which set =rgpot_fast_pairs= returns depends on the cell.
+
+| Cell                                                   | Candidates                       |
+|--------------------------------------------------------+----------------------------------|
+| any periodic axis narrower than three cutoffs          | all pairs, =(0, 1), (0, 2), ...= |
+| any open axis whose atoms span at most one cutoff      | all pairs                        |
+| otherwise                                              | linkcell pairs inside the cutoff |
+
+The width of a periodic axis is the diagonal element of the cell.
+Each linkcell bin is checked against itself and its 26 neighbours.
+Why the cut is at three bins is in
+[[file:../explanation/neighbour-lists.org][Neighbour list design]].
+On an all-pairs answer the caller folds every pair with the minimum image and
+drops the pairs outside the cutoff.
+
+An all-pairs answer has =n * (n - 1) / 2= pairs.
+The call computes that count without building a list and writes the pairs
+straight into the caller's buffer.
+For 10000 atoms that is 49995000 pairs of two 4-byte ints, about 400 MB.
+On the linkcell path each call runs the search, so a probe followed by a fill
+searches twice.
+
+** Functions
+
+*** =rgpot_fast_pairs=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_fast_pairs(const double *xyz, size_t n, const double *cell9,
+                     const int32_t *periodic, double list_cutoff,
+                     int32_t *out_ij, size_t cap, size_t *out_count);
+#+end_src
+
+- Inputs :: =xyz= is =3 * n= doubles, row-major =x y z= per atom.
+  =cell9= is the cell and =periodic= three ints, nonzero for a periodic axis.
+  =list_cutoff= is the candidate cutoff.
+  =out_ij= holds =cap= pairs, two ints each; it may be null when the call only
+  probes.
+- Units :: =xyz=, =cell9= and =list_cutoff= share the caller's length unit.
+- Outputs :: =*out_count= is the number of candidate pairs.
+  When that count fits in =cap=, =out_ij= receives the pairs as =i, j= with
+  =i < j=, unique and sorted, and the call returns 0.
+  When it does not fit, the call returns 1 and leaves =out_ij= untouched.
+  Fewer than two atoms, or a =list_cutoff= that is not positive and finite,
+  gives 0 pairs and returns 0.
+  Self images are never included.
+  An open axis is padded inside the call so that no periodic image across it
+  falls inside the cutoff.
+- Errors :: -1 for a null
+  =out_count=, =cell9= or =periodic=, a null =xyz= with =n > 0=, or a null =out_ij=
+  when the pairs fit in =cap= and there is at least one. -1 for a cell with a
+  nonzero off-diagonal element ("pair list requires an orthorhombic cell") or a
+  periodic axis whose width is not positive. -1 when =n= does not fit in
+  =int32_t= or the count does not fit in =size_t=.
+  A return of 0 or 1 clears the message of =rgpot_fast_last_error=.
+
+*** =rgpot_fast_wrap=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_fast_wrap(const double *cell9, const double *diffs, size_t n,
+                    double *out);
+#+end_src
+
+- Inputs :: =cell9=, any non-singular cell, and =diffs=, =n= difference vectors
+  as =3 * n= doubles.
+  =out= holds =3 * n= doubles.
+- Units :: =cell9=, =diffs= and =out= share the caller's length unit.
+- Outputs :: =out= receives each vector wrapped on every axis, and the call
+  returns 0.
+  The wrap rounds the fractional coordinates =H^-1 d= to the nearest image and
+  returns =H= times the remainder.
+  On an orthorhombic cell that is the minimum image.
+  On a sheared cell a result shorter than half the smallest face width is the
+  minimum image; a longer one may not be.
+- Errors :: -1 for a null =cell9=, a null =diffs= or =out= with =n > 0=, or a
+  singular cell ("singular or non-positive cell").
+
+*** =rgpot_fast_wrap_axes=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_fast_wrap_axes(const double *cell9, const int32_t *periodic,
+                         const double *diffs, size_t n, double *out);
+#+end_src
+
+- Inputs :: as =rgpot_fast_wrap=, plus =periodic=, three ints, nonzero for a
+  periodic axis.
+- Units :: =cell9=, =diffs= and =out= share the caller's length unit.
+- Outputs :: =out= receives each vector with its periodic components folded to
+  the minimum image and its open components unchanged, and the call returns 0.
+  An open axis is given a width of 1e16, so a component folds only once its
+  magnitude reaches 5e15.
+- Errors :: -1 for a null =cell9= or =periodic=, a null =diffs= or =out= with
+  =n > 0=, a cell with a nonzero off-diagonal element ("axis wrap requires an
+  orthorhombic cell"), or a periodic axis whose width is not positive.
+
+*** =rgpot_fast_last_error=
+
+#+attr_rgpot: signature
+#+begin_src c
+const char *rgpot_fast_last_error(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the message of the most recent -1 return on this thread, or null
+  when the most recent call on this thread succeeded or no call has failed.
+  The pointer is owned by the library and stays valid until the next call of
+  this library on the same thread.
+- Errors :: none; the call cannot fail.
+
+** Probe and fill
+
+The caller owns the buffer.
+A probe with no buffer returns the count, and a second call fills it.
+
+#+attr_rgpot: run link=rgpot flags=-ICppCore,-Iinclude requires=has_fast_nlist
+#+begin_src c
+#include <stdio.h>
+#include <stdlib.h>
+#include "rgpot/nlist/fastnlist.h"
+
+int main(void) {
+  const double xyz[9] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 1.5, 0.0};
+  const double cell9[9] = {20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0};
+  const int32_t periodic[3] = {1, 1, 1};
+  const double list_cutoff = 2.0;
+
+  size_t count = 0;
+  int rc = rgpot_fast_pairs(xyz, 3, cell9, periodic, list_cutoff, NULL, 0, &count);
+  if (rc < 0) {
+    fprintf(stderr, "%s\n", rgpot_fast_last_error());
+    return 1;
+  }
+  int32_t *ij = malloc(2 * (count ? count : 1) * sizeof *ij);
+  rc = rgpot_fast_pairs(xyz, 3, cell9, periodic, list_cutoff, ij, count, &count);
+  if (rc != 0 || count != 2) {
+    fprintf(stderr, "rc %d count %zu\n", rc, count);
+    return 1;
+  }
+  for (size_t p = 0; p < count; ++p) {
+    printf("%d %d\n", ij[2 * p], ij[2 * p + 1]);
+  }
+  free(ij);
+  return 0;
+}
+#+end_src

@@ -8,7 +8,9 @@
 //! per pair. The same tree is in `rgpot_lj_pair`. Gradients are
 //! derivatives of the energy.
 
+mod cluster;
 mod scales;
+pub use cluster::{cambridge_morse, cluster_lj, gupta};
 pub use scales::{
     SuttonChenMetal, fcc_power_sum, lennard_jones_scales, morse_scales, sutton_chen_fcc_energy,
     sutton_chen_gold, sutton_chen_platinum, sutton_chen_scales,

@@ -51,12 +51,25 @@ double maxAtomMove(const std::vector<double> &previous, const double *next,
   return std::sqrt(furthest2);
 }
 
+bool sccUnconverged(const std::string &message) {
+  return message.find("did not converge") != std::string::npos ||
+         message.find("Self consistent") != std::string::npos;
+}
+
+// Reading the log is what clears an xtb environment.
+void clearError(xtb_TEnvironment env) {
+  char ignored[512];
+  int ignored_len = static_cast<int>(sizeof(ignored));
+  xtb_getError(env, ignored, &ignored_len);
+}
+
 } // namespace
 
 XTBPot::XTBPot() : XTBPot(XTBConfig{}) {}
 
 XTBPot::XTBPot(const XTBConfig &config)
-    : Potential(PotType::XTB), m_config(config), m_warm_move(config.warm_move) {
+    : Potential(PotType::XTB), m_config(config), m_warm_move(config.warm_move),
+      m_warm_min_gap(config.warm_min_gap) {
   initHandles();
 }
 
@@ -70,6 +83,10 @@ void XTBPot::reset() {
 void XTBPot::setWarmMove(double angstrom) { m_warm_move = angstrom; }
 
 double XTBPot::warmMove() const noexcept { return m_warm_move; }
+
+void XTBPot::setWarmMinGap(double ev) { m_warm_min_gap = ev; }
+
+double XTBPot::warmMinGap() const noexcept { return m_warm_min_gap; }
 
 bool XTBPot::reusedWavefunction() const noexcept { return m_last_reused; }
 
@@ -139,6 +156,79 @@ void XTBPot::freshResults() const {
   m_has_wavefunction = false;
 }
 
+double XTBPot::frontierGap() const {
+  // GFN-FF has no orbitals, and asking for them logs an xtb error.
+  if (m_config.method == GFNMethod::GFNFF)
+    return std::numeric_limits<double>::infinity();
+  int nao = 0;
+  xtb_getNao(m_env, m_res, &nao);
+  if (xtb_checkEnvironment(m_env) != 0 || nao <= 0) {
+    clearError(m_env);
+    return std::numeric_limits<double>::infinity();
+  }
+  m_orbital_buffer.resize(2 * static_cast<size_t>(nao));
+  double *emo = m_orbital_buffer.data();
+  double *occ = emo + nao;
+  xtb_getOrbitalEigenvalues(m_env, m_res, emo);
+  xtb_getOrbitalOccupations(m_env, m_res, occ);
+  if (xtb_checkEnvironment(m_env) != 0) {
+    clearError(m_env);
+    return std::numeric_limits<double>::infinity();
+  }
+  double electrons = 0.0;
+  for (int i = 0; i < nao; ++i)
+    electrons += occ[i];
+  // Occupations are summed over spin. The highest occupied level holds
+  // the last electron, smeared or not.
+  const long nel = std::lround(electrons);
+  const long homo = (nel + 1) / 2 - 1;
+  if (homo < 0 || homo + 1 >= nao)
+    return std::numeric_limits<double>::infinity();
+  return (emo[homo + 1] - emo[homo]) * HARTREE_TO_EV;
+}
+
+bool XTBPot::singlepoint(std::string *error) const {
+  xtb_singlepoint(m_env, m_mol, m_calc, m_res);
+  if (xtb_checkEnvironment(m_env) == 0)
+    return true;
+  char err_msg[512] = {};
+  int err_len = static_cast<int>(sizeof(err_msg));
+  xtb_getError(m_env, err_msg, &err_len);
+  if (error)
+    *error = std::string("xTB Error: ") + err_msg;
+  return false;
+}
+
+bool XTBPot::rescueUnconvergedScc() const {
+  // A dissociated or rearranged cluster can have a gap of a few tenths
+  // of an eV. The charge iterator then runs out its budget at the
+  // configured temperature. Smearing the levels converges that density
+  // in a few iterations, and the cooled single point uses it as the
+  // guess. The energy handed back is the configured-temperature one.
+  //
+  // A failed SCC leaves its last iterate in the results object, and on a
+  // near-zero-gap cluster that iterate has diverged. Started from it, the
+  // GFN2 charge iterator settles on a stationary point with charges of
+  // several electrons per atom, far below the physical solution. Each hot
+  // rung therefore starts from xtb's own guess.
+  xtb_setMaxIter(m_env, m_calc, m_config.max_iterations);
+  const double configured = m_config.electronic_temperature;
+  const double ladder[] = {1000.0, 3000.0, 5000.0};
+  for (double hot : ladder) {
+    if (!(hot > configured))
+      continue;
+    freshResults();
+    xtb_setElectronicTemp(m_env, m_calc, hot);
+    if (!singlepoint(nullptr))
+      continue;
+    xtb_setElectronicTemp(m_env, m_calc, configured);
+    if (singlepoint(nullptr))
+      return true;
+  }
+  xtb_setElectronicTemp(m_env, m_calc, configured);
+  return false;
+}
+
 void XTBPot::discardAfterFailure() const {
   // A failed SCC leaves the environment in an error state and the
   // wavefunction is not a guess. Replace the handle set.
@@ -197,8 +287,14 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   // The results object holds the previous SCC wavefunction. xtb reads it
   // as the guess. Past warm_move that guess is slower than xtb's own, so
   // the results object is replaced before the single point.
-  const bool reuse = !composition_changed && m_has_wavefunction &&
-                     m_warm_move > 0.0 && moved <= m_warm_move;
+  //
+  // With near-degenerate frontier orbitals the SCC can have more than one
+  // self-consistent solution, and a guess carried over from another
+  // geometry can settle on a different one than xtb's own guess does.
+  // Below warm_min_gap the energy therefore comes from xtb's guess.
+  bool reuse = !composition_changed && m_has_wavefunction &&
+               m_warm_move > 0.0 && moved <= m_warm_move &&
+               !(m_gap < m_warm_min_gap);
 
   if (composition_changed) {
     if (m_mol) {
@@ -221,15 +317,25 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
       freshResults();
   }
 
-  xtb_singlepoint(m_env, m_mol, m_calc, m_res);
-
-  if (xtb_checkEnvironment(m_env) != 0) {
-    char err_msg[512];
-    xtb_getError(m_env, err_msg, nullptr);
-    const std::string message = std::string("xTB Error: ") + err_msg;
+  // A bound cluster converges in about ten iterations. One that has
+  // not done so by a few times that is the near-zero-gap case, and
+  // spending the rest of the iteration budget only delays the rescue.
+  const int first_pass =
+      m_config.max_iterations < 48 ? m_config.max_iterations : 48;
+  xtb_setMaxIter(m_env, m_calc, first_pass);
+  std::string message;
+  bool converged = singlepoint(&message);
+  if (reuse && (!converged || frontierGap() < m_warm_min_gap)) {
+    // What follows is a fresh call.
+    reuse = false;
+    freshResults();
+    converged = singlepoint(&message);
+  }
+  if (!converged && !(sccUnconverged(message) && rescueUnconvergedScc())) {
     discardAfterFailure();
     throw std::runtime_error(message);
   }
+  m_gap = frontierGap();
 
   double energy_hartree;
   xtb_getEnergy(m_env, m_res, &energy_hartree);

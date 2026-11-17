@@ -408,6 +408,14 @@ __attribute__((target("fma"), noinline)) void exp_hw_n(const double *in,
   }
 }
 
+#else
+
+void exp_hw_n(const double *in, double *out, std::size_t n) {
+  for (std::size_t i = 0; i < n; ++i) {
+    out[i] = exp(in[i]);
+  }
+}
+
 #endif
 
 double exp_fixed(double x) { return detail::exp_fixed_lane(x); }

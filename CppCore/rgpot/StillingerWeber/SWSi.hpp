@@ -50,13 +50,16 @@ public:
   StillingerWeberSi();
 
   [[nodiscard]] PotCaps caps() const noexcept override {
-    return {.reentrancy = Reentrancy::PerInstance};
+    return {.reentrancy = Reentrancy::PerInstance, .stress = true};
   }
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
     return m_paramsKey;
   }
 
+  /// Forces, energy and the Cauchy stress sigma = (1/V) dE/dε in
+  /// eV/Angstrom^3, the convention of stress.hpp. The virial sums each
+  /// folded bond vector times the energy gradient with respect to it.
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
   /// Auto, Stored and Stream all use the shared neighbour layer. One
@@ -73,8 +76,8 @@ public:
    * @param energy Receives the potential energy, eV.
    * @param gradient Receives dE/dx, length 3 * n_atoms, eV/Angstrom.
    *        The library force is the negation of this gradient.
-   * @param neighbors Optional Verlet list. Null rebuilds the pairs on
-   *        every call. A list is reused while each atom has moved by at
+   * @param neighbors Optional Verlet list. Null uses the internal list,
+   *        with a skin of one fifth of the cutoff (none in Stream mode). A list is reused while each atom has moved by at
    *        most half its skin and the cell is unchanged.
    */
   void energyAndGradient(const double *positions, const int *atomic_numbers,
@@ -99,10 +102,11 @@ public:
                               double *gradients) const;
 
 private:
-  /// scale +1 writes forces, scale -1 writes dE/dx.
+  /// scale +1 writes forces, scale -1 writes dE/dx. A non-null strain
+  /// gains dE/dε in eV, in the Voigt order of stress.hpp.
   void evaluate(const double *positions, const double *box, std::size_t n_atoms,
                 double *energy, double *acc, double scale,
-                nlist::NeighborList *neighbors) const;
+                nlist::NeighborList *neighbors, double *strain) const;
 
   uint64_t m_paramsKey{0};
   nlist::Mode mode_ = nlist::Mode::Auto;

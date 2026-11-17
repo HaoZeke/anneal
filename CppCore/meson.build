@@ -27,6 +27,94 @@ if _fs.read('rgpot/rpc/Potentials.capnp').contains('buildVersion')
 endif
 _args += _build_identity_args
 
+# tests/registry.txt lists every test with the features that enable it;
+# cmake/RgpotTestRegistry.cmake reads the same file. The unit, fortran,
+# nlist, py and rerun entries this build enables land in _rt_tests and are
+# registered in loops below. _rt_kw holds each entry's test() options. The
+# custom entries' gates are checked by test_list_parity, which also takes
+# the features only known later (see the end of meson.build).
+_rt_atoms = {
+    'tests': get_option('with_tests'),
+    'core': not get_option('with_rpc_client_only'),
+    'client': get_option('with_rpc_client_only'),
+    'rpc': rpc_enabled,
+    'fortran': has_fortran,
+    'cache': get_option('with_cache'),
+    'ipi': has_ipi and not get_option('with_rpc_client_only'),
+    'eam_table': has_eam_table,
+    'xtensor': has_xtensor,
+    'python': find_program('python3', required: false).found(),
+    'water': has_water,
+    'tblite': has_tblite,
+    'dftd3': has_dftd3,
+    'dftd4': has_dftd4,
+    'long_range': has_long_range,
+    'metatomic': has_metatomic,
+    'rust_core': get_option('with_rust_core'),
+}
+_rt_tests = []
+_rt_kw = {}
+foreach _line : _fs.read('tests/registry.txt').split('\n')
+    _line = _line.strip()
+    if _line == '' or _line.startswith('#') or _line.startswith('@')
+        continue
+    endif
+    _fields = _line.split('|')
+    _name = _fields[0].strip()
+    _words = _fields[2].strip().split()
+    _kind = _words[0]
+    _positional = []
+    _unfused = false
+    _workdir = _kind == 'unit' ? '.' : ''
+    _env = {}
+    _kw = {}
+    _first = true
+    foreach _word : _words
+        if _first
+            _first = false
+        elif _word.startswith('timeout=')
+            _kw += {'timeout': _word.substring(8).to_int()}
+        elif _word.startswith('suite=')
+            _kw += {'suite': _word.substring(6)}
+        elif _word.startswith('workdir=')
+            _workdir = _word.substring(8)
+        elif _word.startswith('env=')
+            _pair = _word.substring(4).split('=')
+            _env += {_pair[0]: _pair[1]}
+        elif _word == 'serial'
+            _kw += {'is_parallel': false}
+        elif _word == 'should_fail'
+            _kw += {'should_fail': true}
+        elif _word == 'fp_contract=off'
+            _unfused = true
+        else
+            _positional += [_word]
+        endif
+    endforeach
+    if _workdir == '.'
+        _kw += {'workdir': meson.project_source_root()}
+    elif _workdir != ''
+        _kw += {'workdir': meson.project_source_root() / _workdir}
+    endif
+    if _env.keys().length() > 0
+        _kw += {'env': _env}
+    endif
+    _rt_kw += {_name: _kw}
+    if _kind != 'custom'
+        _on = true
+        foreach _clause : _fields[1].strip().split()
+            _any = false
+            foreach _atom : _clause.split(',')
+                _any = _any or _rt_atoms[_atom]
+            endforeach
+            _on = _on and _any
+        endforeach
+        if _on
+            _rt_tests += [[_name, _kind, _positional, _unfused]]
+        endif
+    endif
+endforeach
+
 if get_option('with_cache') and not get_option('with_rpc_client_only')
     _deps += dependency('rocksdb')
     _deps += subproject('xxhash', default_options: ['cli=false']).get_variable(
@@ -139,13 +227,14 @@ rgpot_minimage = static_library(
     pic: true,
     install: false,
 )
-# threadsRequested lives in Neighbours.cc. The cell walk's OpenMP
-# pragmas are in the headers, but the thread count is read here, so this
-# archive has to be built with OpenMP or every potential stays on one thread.
+# threadsRequested lives in Slices.cc. The regions are templates in
+# Slices.hpp, but the thread count is read here, so this archive has to be
+# built with OpenMP or every potential stays on one thread.
 _halfshell_omp = dependency('openmp', language: 'cpp', required: false)
 rgpot_halfshell = static_library(
     'rgpot_halfshell',
     files(
+        'rgpot/Slices.cc',
         'rgpot/nlist/HalfShell.cc',
         'rgpot/nlist/HalfShellWalk.cc',
         'rgpot/nlist/NeighbourList.cc',
@@ -162,12 +251,26 @@ rgpot_halfshell = static_library(
 # them in when RPC is on (server or client-only); lean -Dwith_rpc=false builds
 # (xtb/tblite/metatomic CI) must not require pkg-config 'capnp-rpc'.
 _rpc_stack = rpc_enabled or get_option('with_rpc_client_only')
+# Inputs of the effective schema (the vendored copy plus the rgpot-local
+# series in rgpot/rpc/local/series); every target that applies it depends
+# on them.
+rgpot_schema_inputs = files('rgpot/rpc/local/series')
+foreach _line : _fs.read('rgpot/rpc/local/series').split('\n')
+    _line = _line.strip()
+    if _line != '' and not _line.startswith('#')
+        rgpot_schema_inputs += files('rgpot/rpc/local' / _line)
+    endif
+endforeach
 _metatomic_build_rpath = ''
 if _rpc_stack
     subdir('rgpot/rpc')
     # Pure dlopen consumers of split nwchemc / cpmdc; need generated schema only.
     subdir('rgpot/NWChemPot')  # 'nwchempot' frontend + no-op ABI stub
-    subdir('rgpot/CPMDPot')    # 'cpmdpot' frontend + no-op ABI stub
+    subdir('rgpot/CPMDPot')  # 'cpmdpot' frontend + no-op ABI stub
+    if has_cp2k
+        # 'cp2kpot' frontend + libcp2k shim
+        subdir('rgpot/CP2KPot')
+    endif
 endif
 
 # ------------------------ Main library
@@ -217,6 +320,9 @@ if not get_option('with_rpc_client_only')
     subdir('rgpot/Morse')  # 'morse'
     rgpotentials += [morse]
 
+    subdir('rgpot/Gupta')  # 'gupta'
+    rgpotentials += [gupta]
+
     subdir('rgpot/StillingerWeber')  # 'sw_si': 1985 Stillinger-Weber silicon
     rgpotentials += [sw_si]
 
@@ -260,6 +366,9 @@ if not get_option('with_rpc_client_only')
     subdir('rgpot/MOPACPot')  # 'mopacpot'
     rgpotentials += [mopacpot]
 
+    subdir('rgpot/ExternalPot')  # lammps / gromacs / openmm constructors
+    rgpotentials += [external_pot]
+
     subdir('rgpot/CuH2')  # 'cuh2': slab-geometry helpers
     rgpotentials += [cuh2]
 
@@ -274,6 +383,8 @@ if not get_option('with_rpc_client_only')
         _fortran_hide_args = cppc.get_supported_link_arguments(
             [
                 '-Wl,--exclude-libs,librgpot_fortran_kernels.a',
+                '-Wl,--exclude-libs,librgpot_sw_lib.a',
+                '-Wl,--exclude-libs,librgpot_sw_capi_lib.a',
                 '-Wl,--exclude-libs,libvesin_fortran.a',
             ],
         )
@@ -306,6 +417,11 @@ if not get_option('with_rpc_client_only')
         rgpotentials += [d4pot]
     endif
 
+    if has_long_range
+        subdir('rgpot/LongRange')  # 'lr_phys'
+        rgpotentials += [lr_phys]
+    endif
+
     if has_expr
         subdir('rgpot/ExprPot')  # 'exprpot'
         rgpotentials += [exprpot]
@@ -330,6 +446,9 @@ if not get_option('with_rpc_client_only')
     if _rpc_stack
         rgpotentials += [nwchempot]
         rgpotentials += [cpmdpot]
+        if has_cp2k
+            rgpotentials += [cp2kpot]
+        endif
         if has_skala
             subdir('rgpot/SkalaPot')
             rgpotentials += [skala]
@@ -503,7 +622,7 @@ if not get_option('with_rpc_client_only')
             find_program('../scripts/check_lepton_symbols.sh'),
             args: [rgpot.full_path(), has_expr ? 'present' : 'absent'],
             depends: [rgpot],
-            suite: 'expr',
+            kwargs: _rt_kw['ExprLeptonSymbols'],
         )
     endif
 endif
@@ -694,7 +813,7 @@ if get_option('with_tests')
             dependencies: dependency('threads'),
             override_options: ['cpp_std=c++20'],
         ),
-        timeout: 600,
+        kwargs: _rt_kw['AotiPublicationStressTest'],
     )
     test(
         'MolecularFrameTest',
@@ -709,10 +828,22 @@ if get_option('with_tests')
     if has_metatomic
         test_deps += _mta_engine_deps
     endif
-    test_deps += dependency(
+    catch2_dep = dependency(
         'Catch2',
         method: 'cmake',
         modules: ['Catch2::Catch2WithMain'],
+    )
+    test_deps += catch2_dep
+    test(
+        'AotiUnpackTest',
+        executable(
+            'aoti_unpack_test',
+            'tests/AotiUnpackTest.cc',
+            include_directories: ['.'],
+            dependencies: [catch2_dep, dependency('threads')],
+            override_options: ['cpp_std=c++20'],
+        ),
+        workdir: meson.current_build_dir(),
     )
     test_args = _args
     test_args += ['-DRGPOTTEST']
@@ -734,183 +865,6 @@ if get_option('with_tests')
             install: false,
         )
         test_deps += declare_dependency(link_with: units_for_tests)
-    endif
-    test_array = [
-        ['UnitsTest', 'units_test', 'UnitsTest.cc', ''],
-    ]
-    # Classical pots live in the rgpotentials static libs, which client-only
-    # builds never produce.
-    if not get_option('with_rpc_client_only') and has_fortran
-        test_array += [
-            ['FortranPotsTest', 'fortran_pots_test', 'FortranPotsTest.cc', ''],
-        ]
-    endif
-    if not get_option('with_rpc_client_only')
-        test_array += [
-            ['MorsePotTest', 'morse_pot_test', 'MorsePotTest.cc', ''],
-            ['SWSiTest', 'sw_si_test', 'SWSiTest.cc', ''],
-            ['TersoffSiCTest', 'tersoff_sic_test', 'TersoffSiCTest.cc', ''],
-            [
-                'HalfShellScanTest',
-                'half_shell_scan_test',
-                'HalfShellScanTest.cc',
-                '',
-            ],
-            ['HalfShellTest', 'half_shell_test', 'HalfShellTest.cc', ''],
-            [
-                'SuttonChenPotTest',
-                'sutton_chen_pot_test',
-                'SuttonChenPotTest.cc',
-                '',
-            ],
-            ['ReducedPairTest', 'reduced_pair_test', 'ReducedPairTest.cc', ''],
-            ['EMTPotTest', 'emt_pot_test', 'EMTPotTest.cc', ''],
-            ['EAMCellPotTest', 'eam_cell_pot_test', 'EAMCellPotTest.cc', ''],
-            [
-                'NeighbourLayerTest',
-                'neighbour_layer_test',
-                'NeighbourLayerTest.cc',
-                '',
-            ],
-            [
-                'StreamParityTest',
-                'stream_parity_test',
-                'StreamParityTest.cc',
-                '',
-            ],
-            [
-                'NeighbourListTest',
-                'neighbour_list_test',
-                'NeighbourListTest.cc',
-                '',
-            ],
-            [
-                'EAMCellVerletTest',
-                'eam_cell_verlet_test',
-                'EAMCellVerletTest.cc',
-                '',
-            ],
-            [
-                'ManyBodyForceTest',
-                'many_body_force_test',
-                'ManyBodyForceTest.cc',
-                '',
-            ],
-            [
-                'SkinPairTest',
-                'skin_pair_test',
-                'SkinPairTest.cc',
-                '',
-            ],
-            [
-                'MinImageIsaHash',
-                'minimage_isa_hash',
-                'MinImageIsaHash.cc',
-                '',
-            ],
-            [
-                'BatchEvaluatorTest',
-                'batch_evaluator_test',
-                'BatchEvaluatorTest.cc',
-                '',
-            ],
-            [
-                'CalculatorGroupTest',
-                'calculator_group_test',
-                'CalculatorGroupTest.cc',
-                '',
-            ],
-            [
-                'CalculatorAbortFlagTest',
-                'calculator_abort_flag_test',
-                'CalculatorAbortFlagTest.cc',
-                '',
-            ],
-            [
-                'LJClusterPotTest',
-                'ljcluster_pot_test',
-                'LJClusterPotTest.cc',
-                '',
-            ],
-            ['ZBLPotTest', 'zbl_pot_test', 'ZBLPotTest.cc', ''],
-            ['FastNlistTest', 'fast_nlist_test', 'FastNlistTest.cc', ''],
-            ['IsaDispatchTest', 'isa_dispatch_test', 'IsaDispatchTest.cc', ''],
-            ['FmaExactTest', 'fma_exact_test', 'FmaExactTest.cc', ''],
-            [
-                'MinimumImageTest',
-                'minimum_image_test',
-                'MinimumImageTest.cc',
-                '',
-            ],
-        ]
-        if has_ipi
-            test_array += [
-                ['IPIPotTest', 'ipi_pot_test', 'IPIPotTest.cc', ''],
-            ]
-        endif
-        if has_water
-            test_array += [
-                ['WaterPotTest', 'water_pot_test', 'WaterPotTest.cc', ''],
-            ]
-        endif
-        if has_eam_table
-            test_array += [
-                [
-                    'EAMTablePotTest',
-                    'eam_table_pot_test',
-                    'EAMTablePotTest.cc',
-                    '',
-                ],
-            ]
-        endif
-    endif
-    if has_fortran
-        test_array += [
-            ['CuH2test', 'cuh2_test', 'CuH2PotTest.cc', ''],
-        ]
-    endif
-    # Slab helpers are pure C++; only their xtensor faces are conditional.
-    if has_xtensor and not get_option('with_rpc_client_only')
-        test_array += [
-            ['CuH2 Utils Test', 'cuh2_util_test', 'cuh2UtilsTest.cc', ''],
-        ]
-    endif
-    if get_option('with_cache')
-        test_array += [  #
-            ['CacheTest', 'cache_test', 'CacheTest.cc', ''],
-            ['InvarianceTest', 'invariance_test', 'InvarianceTest.cc', ''],
-        ]
-    endif
-    # XTB tests registered below with RGPOT_XTB_ENGINE for dlopen parity
-    if has_tblite
-        test_array += [
-            ['TBLitetest', 'tblite_test', 'TBLitePotTest.cc', ''],
-        ]
-    endif
-    if has_dftd3
-        test_array += [
-            ['D3test', 'd3_test', 'D3PotTest.cc', ''],
-        ]
-    endif
-    if has_dftd4
-        test_array += [
-            ['D4test', 'd4_test', 'D4PotTest.cc', ''],
-        ]
-    endif
-    if not get_option('with_rpc_client_only')
-        test(
-            'FoldDegenerateTest',
-            executable(
-                'fold_degenerate_test',
-                sources: ['tests/FoldDegenerateTest.cc'],
-                dependencies: test_deps,
-                include_directories: _incdirs + ['.'],
-                cpp_args: test_args,
-                link_with: _linkto,
-                link_language: 'cpp',
-            ),
-            timeout: 60,
-        )
     endif
     if has_expr and not get_option('with_rpc_client_only')
         test(
@@ -969,20 +923,6 @@ if get_option('with_tests')
         endif
     endif
     if has_metatomic
-        test_array += [
-            [
-                'MetatomicTest',
-                'metatomic_test',
-                'MetatomicPotTest.cc',
-                '/CppCore/tests',
-            ],
-            [
-                'UmaPotTest',
-                'uma_pot_test',
-                'UmaPotTest.cc',
-                '/CppCore/tests',
-            ],
-        ]
         executable(
             'uma_ase_parity',
             sources: ['tests/uma_ase_parity.cc'],
@@ -1005,13 +945,6 @@ if get_option('with_tests')
                 link_language: 'cpp',
                 build_rpath: _metatomic_build_rpath,
             )
-            test(
-                'UmaEngineTest',
-                uma_engine_test,
-                env: uma_engine_env,
-                depends: [uma_engine],
-                workdir: meson.source_root(),
-            )
         endif
         if _rpc_stack
             executable(
@@ -1028,6 +961,8 @@ if get_option('with_tests')
         _uma_export = meson.project_source_root() / 'scripts' / 'export_tiny_uma_contract.py'
         _uma_fix_pkgs = []
         _uma_fix_env = environment()
+        _uma_cache_dir = meson.current_build_dir() / 'uma-cache'
+        _uma_fix_env.set('RGPOT_CACHE_DIR', _uma_cache_dir)
         foreach _spec : [
             ['float64', 'both', 'UMA_FLOAT64_PT2', 'line-float64.pt2'],
             ['float32', 'both', 'UMA_FLOAT32_PT2', 'line-float32.pt2'],
@@ -1059,6 +994,9 @@ if get_option('with_tests')
             )
             _uma_fix_pkgs += [_pkg]
             _uma_fix_env.set(_spec[2], _pkg.full_path())
+            if _spec[2] == 'UMA_FLOAT64_PT2'
+                _uma_float64 = _pkg
+            endif
         endforeach
         _uma_batch = custom_target(
             'uma-line-batch',
@@ -1077,6 +1015,23 @@ if get_option('with_tests')
         )
         _uma_fix_pkgs += [_uma_batch]
         _uma_fix_env.set('UMA_FLOAT64_BATCH_PT2', _uma_batch.full_path())
+        _uma_packed = custom_target(
+            'uma-line-packed',
+            output: 'line-float64-packed.pt2',
+            command: [
+                _uma_py,
+                _uma_export,
+                '--kind',
+                'packed',
+                '--dtype',
+                'float64',
+                '--out',
+                '@OUTPUT@',
+            ],
+            build_by_default: false,
+        )
+        _uma_fix_pkgs += [_uma_packed]
+        _uma_fix_env.set('UMA_PACKED_PT2', _uma_packed.full_path())
         _uma_gather_static = custom_target(
             'uma-gather-static',
             output: 'gather-static.pt2',
@@ -1229,8 +1184,18 @@ if get_option('with_tests')
             workdir: meson.source_root(),
         )
         if _rpc_stack
+            uma_engine_env.set('RGPOT_CACHE_DIR', _uma_cache_dir)
+            uma_engine_env.set('UMA_FLOAT64_PT2', _uma_float64.full_path())
+            test(
+                'UmaEngineTest',
+                uma_engine_test,
+                env: uma_engine_env,
+                depends: [uma_engine, _uma_float64],
+                workdir: meson.source_root(),
+            )
             _uma_harness_env = environment()
             _uma_harness_env.prepend('LD_LIBRARY_PATH', _torch_libdir)
+            _uma_harness_env.set('RGPOT_CACHE_DIR', _uma_cache_dir)
             test(
                 'UmaEngineHarness',
                 _uma_py,
@@ -1260,6 +1225,24 @@ if get_option('with_tests')
                 workdir: meson.source_root(),
             )
         endif
+        # Not parallel: it asserts the system temporary directory gains no entry.
+        test(
+            'UmaCacheDirTest',
+            executable(
+                'uma_cache_dir_test',
+                sources: ['tests/UmaCacheDirTest.cc'],
+                dependencies: test_deps,
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+            ),
+            env: _uma_fix_env,
+            depends: _uma_fix_pkgs,
+            workdir: meson.current_build_dir(),
+            is_parallel: false,
+        )
         test(
             'UmaFloat64Test',
             executable(
@@ -1274,6 +1257,44 @@ if get_option('with_tests')
             ),
             env: _uma_fix_env,
             depends: _uma_fix_pkgs,
+            workdir: meson.source_root(),
+        )
+        _uma_provenance = custom_target(
+            'uma-provenance',
+            output: ['line-provenance.pt2', 'line-provenance-weights.pt'],
+            command: [
+                _uma_py,
+                _uma_export,
+                '--kind',
+                'provenance',
+                '--dtype',
+                'float64',
+                '--out',
+                '@OUTPUT0@',
+                '--checkpoint-out',
+                '@OUTPUT1@',
+            ],
+            build_by_default: false,
+        )
+        _uma_fix_env.set('UMA_PROVENANCE_PT2', _uma_provenance[0].full_path())
+        _uma_fix_env.set(
+            'UMA_PROVENANCE_WEIGHTS',
+            _uma_provenance[1].full_path(),
+        )
+        test(
+            'UmaProvenanceTest',
+            executable(
+                'uma_provenance_test',
+                sources: ['tests/UmaProvenanceTest.cc'],
+                dependencies: test_deps,
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+            ),
+            env: _uma_fix_env,
+            depends: _uma_fix_pkgs + [_uma_provenance],
             workdir: meson.source_root(),
         )
     endif
@@ -1312,7 +1333,7 @@ if get_option('with_tests')
                     lifetime_mode,
                 ],
                 depends: [nwchem_lifetime_test, nwchemc_lifetime_engine],
-                suite: 'nwchem',
+                kwargs: _rt_kw['NWChemPotLifetime-' + lifetime_mode],
             )
         endforeach
         nwchemc_fake_env = environment()
@@ -1334,8 +1355,7 @@ if get_option('with_tests')
             ),
             env: nwchemc_fake_env,
             depends: nwchemc_fake_engine,
-            workdir: meson.source_root(),
-            suite: 'nwchem',
+            kwargs: _rt_kw['NWChemPotTest'],
         )
         if has_skala
             test(
@@ -1369,8 +1389,7 @@ if get_option('with_tests')
             ),
             env: nwchemc_fake_env,
             depends: nwchemc_fake_engine,
-            workdir: meson.source_root(),
-            suite: 'nwchem',
+            kwargs: _rt_kw['NWChemPotMessageAbiTest'],
         )
         test(
             'test_nwchem_abi',
@@ -1380,7 +1399,7 @@ if get_option('with_tests')
                 dependencies: [nwchem_abi_stub_dep],
                 include_directories: include_directories('rgpot/NWChemPot'),
             ),
-            suite: 'nwchem',
+            kwargs: _rt_kw['test_nwchem_abi'],
         )
         cpmdc_fake_engine = shared_library(
             'cpmdc_fake_engine',
@@ -1424,8 +1443,7 @@ if get_option('with_tests')
             ),
             env: cpmdc_gradient_env,
             depends: cpmdc_gradient_engine,
-            workdir: meson.source_root(),
-            suite: 'cpmd',
+            kwargs: _rt_kw['CPMDPotGradientStressTest'],
         )
         test(
             'CPMDPotMessageAbiTest',
@@ -1441,10 +1459,112 @@ if get_option('with_tests')
             ),
             env: cpmdc_fake_env,
             depends: cpmdc_fake_engine,
-            workdir: meson.source_root(),
-            suite: 'cpmd',
+            kwargs: _rt_kw['CPMDPotMessageAbiTest'],
         )
+        if has_cp2k
+            cp2kc_fake_engine = shared_library(
+                'cp2kc_fake_engine',
+                sources: ['tests/cp2kc_fake_engine.cc'],
+                include_directories: _incdirs + ['.'],
+                install: false,
+            )
+            cp2kc_fake_env = environment()
+            cp2kc_fake_env.set(
+                'RGPOT_CP2K_ENGINE',
+                cp2kc_fake_engine.full_path(),
+            )
+            cp2kc_fake_env.set('CP2KC_LIBRARY', cp2kc_fake_engine.full_path())
+            test(
+                'CP2KPotFakeEngineTest',
+                executable(
+                    'cp2k_pot_fake_engine_test',
+                    sources: ['tests/CP2KPotFakeEngineTest.cc'],
+                    dependencies: test_deps + [ptlrpc_dep],
+                    include_directories: _incdirs + ['.'],
+                    cpp_args: test_args,
+                    link_with: _linkto,
+                    link_language: 'cpp',
+                    build_rpath: _metatomic_build_rpath,
+                ),
+                env: cp2kc_fake_env,
+                depends: cp2kc_fake_engine,
+                kwargs: _rt_kw['CP2KPotFakeEngineTest'],
+            )
+            test(
+                'CP2KDeckTest',
+                executable(
+                    'cp2k_deck_test',
+                    sources: ['tests/CP2KDeckTest.cc'],
+                    dependencies: test_deps + [ptlrpc_dep],
+                    include_directories: _incdirs + ['.'],
+                    cpp_args: test_args,
+                    link_with: _linkto,
+                    link_language: 'cpp',
+                    build_rpath: _metatomic_build_rpath,
+                ),
+                kwargs: _rt_kw['CP2KDeckTest'],
+            )
+        endif
         mpiexec = find_program('mpirun', 'mpiexec', required: false)
+        if has_cp2k
+            cp2k_smoke_env = environment()
+            cp2k_smoke_env.set('RGPOT_CP2K_ENGINE', cp2kc_shim.full_path())
+            cp2k_smoke_env.set('OMP_NUM_THREADS', '2')
+            _cp2k_prefix = cp2k_lib_dep.get_variable(
+                pkgconfig: 'prefix',
+                default_value: '',
+            )
+            if _cp2k_prefix != ''
+                cp2k_smoke_env.set(
+                    'CP2K_DATA_DIR',
+                    _cp2k_prefix / 'share' / 'cp2k' / 'data',
+                )
+            endif
+            cp2k_smoke = executable(
+                'cp2k_pot_smoke_test',
+                sources: ['tests/CP2KPotSmokeTest.cc'],
+                dependencies: test_deps + [ptlrpc_dep],
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+            )
+            test(
+                'CP2KPotSmokeTest',
+                cp2k_smoke,
+                env: cp2k_smoke_env,
+                depends: cp2kc_shim,
+                kwargs: _rt_kw['CP2KPotSmokeTest'],
+            )
+            if mpiexec.found()
+                _cp2k_mpi_args = ['-n', '2']
+                _mpiexec_version = run_command(
+                    mpiexec,
+                    '--version',
+                    check: false,
+                ).stdout()
+                if _mpiexec_version.contains('Open MPI') or _mpiexec_version.contains(
+                    'OpenRTE',
+                )
+                    _cp2k_mpi_args = ['--oversubscribe'] + _cp2k_mpi_args
+                endif
+                test(
+                    'CP2KPotSmokeMpi',
+                    mpiexec,
+                    # Every rank runs the test cases in declaration order:
+                    # their CP2K calls are collectives.
+                    args: _cp2k_mpi_args + [
+                        cp2k_smoke.full_path(),
+                        '--order',
+                        'decl',
+                    ],
+                    env: cp2k_smoke_env,
+                    depends: [cp2kc_shim, cp2k_smoke],
+                    kwargs: _rt_kw['CP2KPotSmokeMpi'],
+                )
+            endif
+        endif
         if _mpi_dep.found() and mpiexec.found()
             mpi_host_contract = executable(
                 'mpi_host_contract',
@@ -1480,8 +1600,7 @@ if get_option('with_tests')
                         mpi_host_contract.full_path(),
                     ],
                     depends: mpi_host_contract,
-                    timeout: 60,
-                    suite: 'mpi-host',
+                    kwargs: _rt_kw['MpiHost-' + mode],
                 )
             endforeach
             test(
@@ -1495,10 +1614,9 @@ if get_option('with_tests')
                     collective_engine.full_path(),
                 ],
                 depends: [nwchem_mpi_force_host, collective_engine],
-                timeout: 60,
-                suite: 'mpi-host',
+                kwargs: _rt_kw['NWChemMpiForceHost'],
             )
-            foreach backend : ['NWChem', 'CPMD']
+            foreach backend : ['NWChem', 'CPMD'] + (has_cp2k ? ['CP2K'] : [])
                 foreach layout : ['serial', 'mpi']
                     rpc_server = layout == 'mpi' ? mpi_server : server
                     test(
@@ -1515,8 +1633,7 @@ if get_option('with_tests')
                             layout,
                         ],
                         depends: [rpc_server, mpi_rpc_client, collective_engine],
-                        timeout: 60,
-                        suite: 'mpi-host',
+                        kwargs: _rt_kw['CollectiveRPC-' + backend + '-' + layout],
                     )
                 endforeach
             endforeach
@@ -1539,9 +1656,7 @@ if get_option('with_tests')
                 args: [rank_exception.full_path(), 'abort'],
                 env: cpmdc_fake_env,
                 depends: [cpmdc_fake_engine, rank_exception],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['RankExceptionAbort'],
             )
             test(
                 'CalculatorUnevenBatch',
@@ -1549,9 +1664,7 @@ if get_option('with_tests')
                 args: [rank_exception.full_path(), 'uneven'],
                 env: cpmdc_fake_env,
                 depends: [cpmdc_fake_engine, rank_exception],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['CalculatorUnevenBatch'],
             )
             test(
                 'RankExceptionFinalizeOwner',
@@ -1559,9 +1672,7 @@ if get_option('with_tests')
                 args: [rank_exception.full_path(), 'finalize-owner'],
                 env: cpmdc_fake_env,
                 depends: [rank_exception],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['RankExceptionFinalizeOwner'],
             )
             test(
                 'RankExceptionFinalizeGuest',
@@ -1569,9 +1680,7 @@ if get_option('with_tests')
                 args: [rank_exception.full_path(), 'finalize-guest'],
                 env: cpmdc_fake_env,
                 depends: [rank_exception],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['RankExceptionFinalizeGuest'],
             )
             test(
                 'ShareBroadcastMismatch',
@@ -1579,9 +1688,7 @@ if get_option('with_tests')
                 args: [rank_exception.full_path(), 'share-bad'],
                 env: cpmdc_fake_env,
                 depends: [rank_exception],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['ShareBroadcastMismatch'],
             )
             test(
                 'ShareBroadcastMatch',
@@ -1589,9 +1696,7 @@ if get_option('with_tests')
                 args: [rank_exception.full_path(), 'share-ok'],
                 env: cpmdc_fake_env,
                 depends: [rank_exception],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['ShareBroadcastMatch'],
             )
             refused_split = executable(
                 'refused_split',
@@ -1611,9 +1716,7 @@ if get_option('with_tests')
                 refused_split_sh,
                 args: [refused_split.full_path()],
                 depends: [refused_split],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['RefusedSplit'],
             )
             cpmdc_adopt_engine = shared_library(
                 'cpmdc_adopt_engine',
@@ -1643,7 +1746,7 @@ if get_option('with_tests')
             adopt_comm_sh = find_program(
                 meson.current_source_dir() / 'tests/adopt_comm.sh',
             )
-            foreach entry : [
+            adopt_cases = [
                 ['AdoptCommMissing', 'missing', cpmdc_gradient_engine],
                 ['AdoptCommSplit', 'split', cpmdc_adopt_engine],
                 ['AdoptCommRefusedHook', 'refused-hook', cpmdc_adopt_engine],
@@ -1653,6 +1756,19 @@ if get_option('with_tests')
                 ['AdoptCommBoundInstance', 'bound-instance', cpmdc_adopt_engine],
                 ['AdoptCommRefusedForce', 'refused-force', cpmdc_adopt_engine],
             ]
+            if has_cp2k
+                cp2kc_adopt_engine = shared_library(
+                    'cp2kc_adopt_engine',
+                    sources: ['tests/cp2kc_adopt_engine.cc'],
+                    dependencies: [_mpi_dep],
+                    include_directories: _incdirs + ['.'],
+                    install: false,
+                )
+                adopt_cases += [
+                    ['AdoptCommCP2K', 'cp2k-split', cp2kc_adopt_engine],
+                ]
+            endif
+            foreach entry : adopt_cases
                 test(
                     entry[0],
                     adopt_comm_sh,
@@ -1663,9 +1779,7 @@ if get_option('with_tests')
                         mpi_split_profile.full_path(),
                     ],
                     depends: [adopt_comm, entry[2], mpi_split_profile],
-                    timeout: 60,
-                    is_parallel: false,
-                    suite: 'cpmd',
+                    kwargs: _rt_kw[entry[0]],
                 )
             endforeach
             if get_option('with_cache')
@@ -1686,9 +1800,7 @@ if get_option('with_tests')
                     ),
                     args: [collective_cache.full_path()],
                     depends: [collective_cache],
-                    timeout: 60,
-                    is_parallel: false,
-                    suite: 'cpmd',
+                    kwargs: _rt_kw['CollectiveCache'],
                 )
             endif
         endif
@@ -1706,8 +1818,7 @@ if get_option('with_tests')
             ),
             env: cpmdc_fake_env,
             depends: cpmdc_fake_engine,
-            workdir: meson.source_root(),
-            suite: 'abi',
+            kwargs: _rt_kw['ProfileLoaderTest'],
         )
         test(
             'test_cpmd_abi',
@@ -1717,35 +1828,7 @@ if get_option('with_tests')
                 dependencies: [cpmd_abi_stub_dep],
                 include_directories: include_directories('rgpot/CPMDPot'),
             ),
-            suite: 'cpmd',
-        )
-        test(
-            'CPMDDlopenContract',
-            find_program('python3'),
-            args: [
-                meson.current_source_dir() / 'tests/test_cpmd_dlopen_contract.py',
-                meson.source_root(),
-            ],
-            suite: 'cpmd',
-        )
-        test(
-            'NWChemDlopenContract',
-            find_program('python3'),
-            args: [
-                meson.current_source_dir() / 'tests/test_nwchem_dlopen_contract.py',
-                meson.source_root(),
-            ],
-            suite: 'nwchem',
-        )
-        test(
-            'CapabilitiesWire',
-            find_program('python3'),
-            args: [
-                meson.current_source_dir() / 'tests/test_capabilities_wire.py',
-                meson.source_root(),
-                capnp.full_path(),
-            ],
-            suite: 'rpc',
+            kwargs: _rt_kw['test_cpmd_abi'],
         )
         test(
             'RPCSchemaSync',
@@ -1757,18 +1840,14 @@ if get_option('with_tests')
                 meson.project_build_root(),
             ],
             depends: gen_rpc,
-            suite: 'rpc',
+            kwargs: _rt_kw['RPCSchemaSync'],
         )
     endif
     if rpc_enabled
         test_deps += dependency('capnp-rpc')
         test_deps += ptlrpc_dep
-        test_array += [['RPCTest', 'test_rpc', 'CapnpAdapterTest.cc', '']]
         if get_option('with_rpc_client_only')
             test_deps += pot_bridge_dep
-            test_array += [
-                ['RPCClientTest', 'test_rpc_client', 'BridgeStressTest.cc', ''],
-            ]
         endif
     endif
     if not get_option('with_rpc_client_only')
@@ -1783,21 +1862,37 @@ if get_option('with_tests')
             'RGPOT_MOPACC_ENGINE',
             mopacc_fake_engine.full_path(),
         )
+        # The case cannot empty the variable itself: the MSVC runtime has no
+        # setenv, and _putenv_s removes a variable given an empty value.
+        mopacc_empty_env = environment(
+            {
+                'RGPOT_MOPACC_ENGINE': mopacc_fake_engine.full_path(),
+                'MOPACC_LIBRARY': '',
+            },
+        )
+        mopac_pot_test = executable(
+            'mopac_pot_test',
+            sources: ['tests/MOPACPotTest.cc'],
+            dependencies: test_deps,
+            include_directories: _incdirs + ['.'],
+            cpp_args: test_args,
+            link_with: _linkto,
+            link_language: 'cpp',
+        )
         test(
             'MOPACPotTest',
-            executable(
-                'mopac_pot_test',
-                sources: ['tests/MOPACPotTest.cc'],
-                dependencies: test_deps,
-                include_directories: _incdirs + ['.'],
-                cpp_args: test_args,
-                link_with: _linkto,
-                link_language: 'cpp',
-            ),
+            mopac_pot_test,
             env: mopacc_fake_env,
             depends: mopacc_fake_engine,
-            workdir: meson.source_root(),
-            suite: 'mopac',
+            kwargs: _rt_kw['MOPACPotTest'],
+        )
+        test(
+            'MOPACPotEmptyVariable',
+            mopac_pot_test,
+            args: ['[empty-variable]'],
+            env: mopacc_empty_env,
+            depends: mopacc_fake_engine,
+            kwargs: _rt_kw['MOPACPotEmptyVariable'],
         )
         test(
             'test_mopac_abi',
@@ -1807,16 +1902,7 @@ if get_option('with_tests')
                 dependencies: [mopac_abi_stub_dep],
                 include_directories: include_directories('rgpot/MOPACPot'),
             ),
-            suite: 'mopac',
-        )
-        test(
-            'MOPACDlopenContract',
-            find_program('python3'),
-            args: [
-                meson.current_source_dir() / 'tests/test_mopac_dlopen_contract.py',
-                meson.source_root(),
-            ],
-            suite: 'mopac',
+            kwargs: _rt_kw['test_mopac_abi'],
         )
     endif
 
@@ -1848,28 +1934,25 @@ if get_option('with_tests')
     endif
 
     calculator_group_test_exe = disabler()
-    foreach test : test_array
+    _rt_exes = {}
+    foreach _rt : _rt_tests
+        if _rt[1] != 'unit'
+            continue
+        endif
         # The fused-scan oracles are plain multiplies and adds, the same
         # form as the cluster kernel and the Fortran 26-image wrap. Apple
         # Clang fuses those products unless contraction is off, and the
         # sums then miss by an ulp. ReducedPair.cc is built unfused, and
         # its test compares exactly against the same expressions.
         case_args = test_args
-        if test.get(2) in [
-            'FastNlistTest.cc',
-            'ReducedPairTest.cc',
-            'EAMCellVerletTest.cc',
-            'StreamParityTest.cc',
-            'NeighbourLayerTest.cc',
-            'TersoffSiCTest.cc',
-        ]
+        if _rt[3]
             case_args += cppc.get_supported_arguments(
                 ['-ffp-contract=off', '/fp:precise'],
             )
         endif
         _test_exe = executable(
-            test.get(1),
-            sources: ['tests/' + test.get(2)],
+            _rt[2][0],
+            sources: ['tests/' + _rt[2][1]],
             dependencies: test_deps,
             include_directories: _incdirs + ['.'],
             cpp_args: case_args,
@@ -1877,68 +1960,62 @@ if get_option('with_tests')
             link_language: 'cpp',
             build_rpath: _metatomic_build_rpath,
         )
-        _timeout = 30
-        if test.get(0) == 'StreamParityTest'
-            _timeout = 900
-        elif test.get(0) == 'SuttonChenPotTest'
-            # Two cluster relaxations, up to 2000 force calls each.
-            _timeout = 120
-        endif
-        test(
-            test.get(0),
-            _test_exe,
-            workdir: meson.source_root() + test.get(3),
-            timeout: _timeout,
-        )
-        if test.get(1) == 'calculator_group_test'
+        test(_rt[0], _test_exe, kwargs: _rt_kw[_rt[0]])
+        _rt_exes += {_rt[0]: _test_exe}
+        if _rt[0] == 'CalculatorGroupTest'
             calculator_group_test_exe = _test_exe
         endif
     endforeach
-    _nlist_link = [rgpot_halfshell, rgpot_minimage, rgpot_exact_fma]
-    _nlist_examples = [
-        ['nlist_lj', 'examples/nlist_lj.cc'],
-        ['nlist_threebody', 'examples/nlist_threebody.cc'],
-        ['nlist_metatomic', 'examples/nlist_metatomic.cc'],
-        ['nlist_batch', 'examples/nlist_batch.cc'],
-    ]
-    foreach example : _nlist_examples
-        test(
-            example.get(0),
-            executable(
-                example.get(0),
-                sources: [example.get(1)],
-                include_directories: _incdirs + ['.'],
-                cpp_args: _args,
-                link_with: _nlist_link,
-            ),
-        )
+    foreach _rt : _rt_tests
+        if _rt[1] == 'rerun'
+            test(_rt[0], _rt_exes[_rt[2][0]], kwargs: _rt_kw[_rt[0]])
+        endif
     endforeach
-    test(
-        'nlist_c',
-        executable(
-            'nlist_c',
-            sources: ['examples/nlist_c.c'],
-            include_directories: _incdirs + ['.'],
-            c_args: _args,
-            link_with: _nlist_link,
-            link_language: 'cpp',
-        ),
-    )
-    test(
-        'nlist_verlet',
-        executable(
-            'nlist_verlet',
-            sources: ['examples/nlist_verlet.c'],
-            include_directories: _incdirs + ['.'],
-            c_args: _args,
-            link_with: _nlist_link,
-            link_language: 'cpp',
-        ),
-    )
+    _nlist_link = [rgpot_halfshell, rgpot_minimage, rgpot_exact_fma]
+    foreach _rt : _rt_tests
+        if _rt[1] == 'nlist'
+            test(
+                _rt[0],
+                executable(
+                    _rt[2][0],
+                    sources: ['examples/' + _rt[2][1]],
+                    include_directories: _incdirs + ['.'],
+                    c_args: _args,
+                    cpp_args: _args,
+                    link_with: _nlist_link,
+                    link_language: 'cpp',
+                ),
+                kwargs: _rt_kw[_rt[0]],
+            )
+        endif
+    endforeach
     _capnp_dep = dependency('capnp', required: false)
     _capnpc_dep = dependency('capnpc', required: false)
     # socketpair, fork and waitpid. Windows has no POSIX process pair.
     if _capnp_dep.found() and _capnpc_dep.found() and host_machine.system() != 'windows'
+        # The neighbour structs are rgpot-local: they exist only in the
+        # effective schema, not in the vendored copy.
+        if is_variable('rgpot_effective_schema')
+            _nlist_schema = rgpot_effective_schema
+        else
+            _nlist_schema = custom_target(
+                'nlist_effective_schema',
+                input: 'rgpot/rpc/Potentials.capnp',
+                output: 'Potentials.capnp',
+                command: [
+                    find_program('python3', 'python'),
+                    files('rgpot/rpc/schema_ledger.py'),
+                    'apply',
+                    '--root',
+                    meson.project_source_root(),
+                    '--schema',
+                    '@INPUT@',
+                    '--out',
+                    '@OUTPUT@',
+                ],
+                depend_files: rgpot_schema_inputs,
+            )
+        endif
         test(
             'nlist_stream',
             executable(
@@ -1949,10 +2026,23 @@ if get_option('with_tests')
                 dependencies: [_capnp_dep, _capnpc_dep],
                 link_with: _nlist_link,
             ),
-            args: [
-                meson.project_source_root() / 'CppCore' / 'rgpot' / 'rpc' / 'Potentials.capnp',
-            ],
+            args: [_nlist_schema.full_path()],
+            depends: _nlist_schema,
         )
+        _capnp_tool = find_program('capnp', required: false)
+        if _capnp_tool.found()
+            test(
+                'nlist_capnp_roundtrip',
+                find_program('python3', 'python'),
+                args: [
+                    meson.current_source_dir() / 'tests' / 'test_nlist_capnp.py',
+                    meson.project_source_root(),
+                    _capnp_tool.full_path(),
+                    _nlist_schema.full_path(),
+                ],
+                depends: _nlist_schema,
+            )
+        endif
     endif
     _rustc = find_program('rustc', required: false)
     if _rustc.found()
@@ -2095,7 +2185,7 @@ if get_option('with_tests')
             ),
             env: {'RGPOT_LAYOUT_FIXTURE': layout_fixture.full_path()},
             depends: [layout_fixture],
-            workdir: meson.source_root(),
+            kwargs: _rt_kw['CxxLayoutTest'],
         )
         simd_env = executable(
             'simd_env',
@@ -2110,25 +2200,25 @@ if get_option('with_tests')
             'simd-env-scalar',
             simd_env,
             args: ['known', 'scalar'],
-            env: ['RGPOT_SIMD=scalar'],
+            kwargs: _rt_kw['simd-env-scalar'],
         )
         test(
             'simd-env-unknown',
             simd_env,
             args: ['unknown'],
-            env: ['RGPOT_SIMD=not_a_target'],
+            kwargs: _rt_kw['simd-env-unknown'],
         )
         test(
             'simd-env-rvv',
             simd_env,
             args: ['known', 'rvv'],
-            env: ['RGPOT_SIMD=rvv'],
+            kwargs: _rt_kw['simd-env-rvv'],
         )
         test(
             'simd-env-avx2',
             simd_env,
             args: ['known', 'avx2'],
-            env: ['RGPOT_SIMD=avx2'],
+            kwargs: _rt_kw['simd-env-avx2'],
         )
         if host_system != 'windows'
             # The generic engine table over a stand-in backend: no rpc stack,
@@ -2163,7 +2253,7 @@ if get_option('with_tests')
                 ),
                 env: engine_stub_env,
                 depends: [engine_stub],
-                workdir: meson.source_root(),
+                kwargs: _rt_kw['EngineAdapterTest'],
             )
         endif
         if _rpc_stack and host_system != 'windows'
@@ -2203,6 +2293,37 @@ if get_option('with_tests')
                     'RGPOT_ENGINE_METATOMIC',
                     metatomic_engine.full_path(),
                 )
+                # Models with no weights that read the charge, the spin,
+                # both or neither; the last reads both without declaring
+                # them.
+                _mta_export = meson.project_source_root() / 'scripts' / 'export_tiny_metatomic_model.py'
+                foreach _spec : [
+                    [
+                        ['--inputs=charge,spin_multiplicity'],
+                        'MTA_CHARGE_SPIN_PT',
+                        'mta-charge-spin.pt',
+                    ],
+                    [['--inputs=charge'], 'MTA_CHARGE_PT', 'mta-charge.pt'],
+                    [['--inputs=spin'], 'MTA_SPIN_PT', 'mta-spin.pt'],
+                    [['--inputs='], 'MTA_PLAIN_PT', 'mta-plain.pt'],
+                    [
+                        ['--inputs=charge,spin_multiplicity', '--undeclared'],
+                        'MTA_UNDECLARED_PT',
+                        'mta-undeclared.pt',
+                    ],
+                ]
+                    _model = custom_target(
+                        'mta-' + _spec[1],
+                        output: _spec[2],
+                        command: [_uma_py, _mta_export] + _spec[0] + [
+                            '--out',
+                            '@OUTPUT@',
+                        ],
+                        build_by_default: false,
+                    )
+                    engine_table_depends += [_model]
+                    engine_table_env.set(_spec[1], _model.full_path())
+                endforeach
             endif
             engine_table_env.set(
                 'RGPOT_ENGINE_EXPECT',
@@ -2227,11 +2348,6 @@ if get_option('with_tests')
         endif
         python3_prog = find_program('python3', required: false)
         if python3_prog.found()
-            test(
-                'CxxLayoutVirtualCounts',
-                python3_prog,
-                args: [files('tests/check_virtual_counts.py')],
-            )
             cxx_layout_stamp = executable(
                 'print_cxx_layout_stamp',
                 sources: ['tests/print_cxx_layout_stamp.cc'],
@@ -2263,18 +2379,14 @@ if get_option('with_tests')
                 calculator_group_mpi_sh,
                 args: [calculator_group_test_exe.full_path(), 'share'],
                 depends: [calculator_group_test_exe],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['CalculatorGroupShare'],
             )
             test(
                 'CalculatorGroupBadOwner',
                 calculator_group_mpi_sh,
                 args: [calculator_group_test_exe.full_path(), 'bad-owner'],
                 depends: [calculator_group_test_exe],
-                timeout: 60,
-                is_parallel: false,
-                suite: 'cpmd',
+                kwargs: _rt_kw['CalculatorGroupBadOwner'],
             )
         endif
     endif
@@ -2349,6 +2461,9 @@ if get_option('with_tests')
         # Tells XTBDlopenTest to require that the bare soname resolves, so a
         # broken loader path cannot skip the module-load regression.
         xtb_test_env.set('RGPOT_XTB_EXPECT_BARE_SONAME', '1')
+        # OpenMP threads spin while waiting. Beside other tests they slow a
+        # hot cluster SCC by more than a hundredfold.
+        xtb_test_env.set('OMP_NUM_THREADS', '1')
         # Glibc and dyld snapshot the loader path at exec. setenv inside a
         # Catch process does not make the bare soname visible, so the test
         # environment (and the binary rpath below) publish xtb_engine_dir
@@ -2381,6 +2496,8 @@ if get_option('with_tests')
             depends: [xtb_engine],
             workdir: meson.source_root(),
             suite: 'xtb',
+            # Hot Si13 frames whose SCC runs out its iterations, twice.
+            timeout: 120,
         )
         test(
             'XTBDlopenTest',
@@ -2396,8 +2513,7 @@ if get_option('with_tests')
             ),
             env: xtb_test_env,
             depends: [xtb_engine],
-            workdir: meson.source_root(),
-            suite: 'xtb',
+            kwargs: _rt_kw['XTBDlopenTest'],
         )
         # Timing microbench: linked vs dlopen (same process OK for xTB).
         xtb_backend_bench = executable(
@@ -2441,8 +2557,7 @@ if get_option('with_tests')
                     link_language: 'cpp',
                     build_rpath: _metatomic_build_rpath,
                 ),
-                workdir: meson.source_root(),
-                suite: 'xtb',
+                kwargs: _rt_kw['XTBDlopenTest'],
             )
         endif
     endif
@@ -2542,6 +2657,50 @@ if get_option('with_tests')
             workdir: meson.source_root(),
             timeout: 0,
         )
+        sc_call_bench = executable(
+            'sc_call_bench',
+            sources: ['tests/sc_call_bench.cc'],
+            dependencies: test_deps,
+            include_directories: _incdirs + ['.'],
+            cpp_args: test_args,
+            link_with: _linkto,
+            link_language: 'cpp',
+            build_rpath: _metatomic_build_rpath,
+            install: false,
+        )
+        benchmark(
+            'sc_call_bench',
+            sc_call_bench,
+            workdir: meson.source_root(),
+            timeout: 0,
+        )
+        # tools/lr_physics drives these. The bench pins workers with
+        # sched_setaffinity, which only Linux has.
+        if has_long_range and host_machine.system() == 'linux'
+            foreach _lr : ['lr_phys_bench', 'lr_sets', 'lr_d4_periodic']
+                set_variable(
+                    _lr,
+                    executable(
+                        _lr,
+                        sources: ['tests/' + _lr + '.cc'],
+                        dependencies: test_deps,
+                        include_directories: _incdirs + ['.'],
+                        cpp_args: test_args,
+                        link_with: _linkto,
+                        link_language: 'cpp',
+                        build_rpath: _metatomic_build_rpath,
+                        install: false,
+                    ),
+                )
+            endforeach
+            benchmark(
+                'lr_phys_bench',
+                lr_phys_bench,
+                args: ['6'],
+                env: {'LR_LOG': meson.current_build_dir() / 'lr_phys_bench.log'},
+                timeout: 0,
+            )
+        endif
         # One child process per row, via fork and waitpid, and the peak
         # resident set is read from /proc. Windows has neither.
         if host_machine.system() != 'windows'
@@ -2598,7 +2757,7 @@ if not meson.is_subproject()
     install_subdir(
         'rgpot',
         install_dir: get_option('includedir'),
-        exclude_directories: ['__pycache__'],
+        exclude_directories: ['__pycache__', 'rpc/local'],
         exclude_files: [
             '*.o',
             '*.a',
@@ -2609,15 +2768,10 @@ if not meson.is_subproject()
             '*.f90',
             '*.F',
             '*.py',
+            # rpc/meson.build installs the effective schema in its place.
+            'rpc/Potentials.capnp',
         ],
     )
-    if _rpc_stack
-        # Schema source next to generated header (rpc meson installs .h).
-        install_data(
-            'rgpot/rpc/Potentials.capnp',
-            install_dir: get_option('includedir') / 'rgpot' / 'rpc',
-        )
-    endif
 
     # The .pc always ships: consumers discover whatever this build enabled
     # through the RGPOT_HAS_* cflags rather than by the file's absence.
@@ -2654,6 +2808,9 @@ if not meson.is_subproject()
         endif
         if has_dftd4
             _pc_cflags += ['-DRGPOT_HAS_DFTD4_POT=TRUE']
+        endif
+        if has_cp2k
+            _pc_cflags += ['-DRGPOT_HAS_CP2K=TRUE']
         endif
         if has_expr
             _pc_cflags += ['-DRGPOT_HAS_EXPR=TRUE']

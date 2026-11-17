@@ -148,7 +148,7 @@ TEST_CASE("ZBLPot parameter fingerprint tracks the config", "[ZBLPot]") {
 
   REQUIRE(defaults.paramsKey() == sameAsDefaults.paramsKey());
   REQUIRE(defaults.paramsKey() != wider.paramsKey());
-  REQUIRE(defaults.get_type() == rgpot::PotType::ZBL);
+  REQUIRE(defaults.getType() == rgpot::PotType::ZBL);
   REQUIRE(defaults.config().cut_inner == 2.0);
   REQUIRE(defaults.config().cut_global == 2.5);
 }

@@ -6,15 +6,14 @@
 
 #if !defined(RGPOT_HAS_CACHE)
 #if defined(RGPOT_CXX_PLATFORM_LISTED)
-static_assert(rgpot::abi::find_soversion_entry(rgpot::abi::kCxxPlatformTag) !=
-                  nullptr,
+static_assert(rgpot::abi::find_soversion_index(rgpot::abi::kCxxPlatformTag) >=
+                  0,
               "platform marked listed but missing from kCxxSoversionTable");
 static_assert(rgpot::abi::platform_soversion_ok(),
               "C++ layout hash changed for this platform; bump kCxxSoversion "
               "and kCxxSoversionTable");
 #else
-static_assert(rgpot::abi::find_soversion_entry(rgpot::abi::kCxxPlatformTag) ==
-                  nullptr,
+static_assert(rgpot::abi::find_soversion_index(rgpot::abi::kCxxPlatformTag) < 0,
               "kCxxSoversionTable has this platform; add its listed guard");
 #pragma message(                                                           \
     "rgpot: no kCxxSoversionTable entry for " RGPOT_CXX_PLATFORM_TAG        \

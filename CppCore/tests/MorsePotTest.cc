@@ -129,5 +129,5 @@ TEST_CASE("MorsePot parameter fingerprint tracks the config", "[MorsePot]") {
 
   REQUIRE(defaults.paramsKey() == sameAsDefaults.paramsKey());
   REQUIRE(defaults.paramsKey() != deeper.paramsKey());
-  REQUIRE(defaults.get_type() == rgpot::PotType::Morse);
+  REQUIRE(defaults.getType() == rgpot::PotType::Morse);
 }

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(
   rgpot
   # [[[cog import rgpot_version as v; cog.outl(f"  VERSION {v.VERSION}")]]]
-  VERSION 3.6.0
+  VERSION 3.7.0
   # [[[end]]]
   DESCRIPTION "Cpp core for potential energy surface functionality"
   HOMEPAGE_URL "https://github.com/OmniPotentRPC/rgpot"
@@ -44,7 +44,7 @@ else()
   else()
     set(_rgpot_ipi_default ON)
   endif()
-  option(RGPOT_WITH_IPI "i-PI socket server Potential (POSIX sockets)"
+  option(RGPOT_WITH_IPI "i-PI socket server and driver client (POSIX sockets)"
          ${_rgpot_ipi_default})
   if(RGPOT_WITH_IPI AND WIN32)
     message(
@@ -57,6 +57,8 @@ endif()
 option(RGPOT_WITH_EAM_TABLE
        "EAM and Finnis-Sinclair potentials read from LAMMPS tables" OFF)
 option(RGPOT_BUILD_TESTS "Build tests" ${RGPOT_IS_TOP_LEVEL})
+option(RGPOT_WITH_CP2K
+       "CP2KPot, the potserv CP2K backend and libcp2kc_rgpot against libcp2k (pkg-config libcp2k)" OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # librgpot's ELF soversion is kCxxSoversion in CxxLayout.hpp, the same
@@ -131,12 +133,44 @@ endif()
 
 # --- Build Targets ---
 
+# The compiled schema is the vendored copy (the pinned potentials-schema
+# file) with the rgpot-local series applied. capnp_generate_cpp needs the
+# file at configure time, so the series is applied here and a change to it
+# reconfigures. The neighbour tests read it without the RPC stack.
+if(RGPOT_WITH_RPC OR RGPOT_BUILD_TESTS)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  set(RGPOT_SCHEMA_SRC_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/schema")
+  set(RGPOT_EFFECTIVE_SCHEMA
+      "${RGPOT_SCHEMA_SRC_PREFIX}/CppCore/rgpot/rpc/Potentials.capnp")
+  set(_rgpot_schema_dir "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/rgpot/rpc")
+  file(STRINGS "${_rgpot_schema_dir}/local/series" _rgpot_series_lines)
+  set(_rgpot_schema_inputs "${_rgpot_schema_dir}/Potentials.capnp"
+                           "${_rgpot_schema_dir}/local/series")
+  foreach(_line IN LISTS _rgpot_series_lines)
+    string(STRIP "${_line}" _line)
+    if(_line AND NOT _line MATCHES "^#")
+      list(APPEND _rgpot_schema_inputs "${_rgpot_schema_dir}/local/${_line}")
+    endif()
+  endforeach()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                                         ${_rgpot_schema_inputs})
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${_rgpot_schema_dir}/schema_ledger.py"
+            apply --root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --out "${RGPOT_EFFECTIVE_SCHEMA}"
+    RESULT_VARIABLE _rgpot_schema_result)
+  if(NOT _rgpot_schema_result EQUAL 0)
+    message(FATAL_ERROR "schema_ledger.py apply failed: ${_rgpot_schema_result}")
+  endif()
+endif()
+
 if(RGPOT_WITH_RPC)
   set(CAPNP_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/CppCore")
   file(MAKE_DIRECTORY "${CAPNP_OUTPUT_DIR}/rgpot/rpc")
 
-  capnp_generate_cpp(CAPNP_SOURCES CAPNP_HEADERS
-                     CppCore/rgpot/rpc/Potentials.capnp)
+  set(CAPNPC_SRC_PREFIX "${RGPOT_SCHEMA_SRC_PREFIX}")
+  set(CAPNPC_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+  capnp_generate_cpp(CAPNP_SOURCES CAPNP_HEADERS "${RGPOT_EFFECTIVE_SCHEMA}")
 
   # On Apple, static intermediate RPC libs avoid install_name / mixed
   # toolchain dylib issues when system clang links conda Cap'n Proto; the
@@ -204,6 +238,36 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/nlist/HalfShell.cc
       CppCore/rgpot/StillingerWeber/SWSi.cc
       CppCore/rgpot/Tersoff/TersoffSiC.cc)
+  # The rest of Meson's librgpot: pots potserv does not serve, and the
+  # MOPAC, XTB and external-engine frontends, which load their engines at
+  # run time.
+  set(_rgpot_emt_sources
+      CppCore/rgpot/EMT/Asap/NeighborList.cpp
+      CppCore/rgpot/EMT/Asap/GhostAtoms.cpp
+      CppCore/rgpot/EMT/Asap/CellList.cpp
+      CppCore/rgpot/EMT/Asap/Vec.cpp
+      CppCore/rgpot/EMT/Asap/Atoms.cpp
+      CppCore/rgpot/EMT/Asap/Exception.cpp
+      CppCore/rgpot/EMT/Asap/EMTRasmussenParameterProvider.cpp
+      CppCore/rgpot/EMT/Asap/EMTDefaultParameterProvider.cpp
+      CppCore/rgpot/EMT/Asap/EMT.cpp
+      CppCore/rgpot/EMT/Asap/stacktrace.c
+      CppCore/rgpot/EMT/Asap/SuperCell.cpp
+      CppCore/rgpot/EMT/EMTPot.cc)
+  list(APPEND RGPOT_SOURCES
+       CppCore/rgpot/Morse/cambridge_morse.c
+       CppCore/rgpot/Gupta/gupta.c
+       CppCore/rgpot/EAM/EAM.cpp
+       CppCore/rgpot/EAM/EAMPot.cc
+       CppCore/rgpot/MOPACPot/MOPACPot.cc
+       CppCore/rgpot/XTBPot/XTBDlopen.cc
+       CppCore/rgpot/ExternalPot/ExternalPot.cc
+       ${_rgpot_emt_sources})
+  # Asap's short includes (Atoms.h, EMT.h) resolve in its own directory.
+  set_source_files_properties(${_rgpot_emt_sources} PROPERTIES
+    INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/rgpot/EMT/Asap")
+  set_source_files_properties(CppCore/rgpot/EAM/EAM.cpp CppCore/rgpot/EAM/EAMPot.cc
+    PROPERTIES COMPILE_DEFINITIONS EAM_STANDALONE)
 
   if(RGPOT_WITH_HIGHWAY)
     list(APPEND RGPOT_SOURCES CppCore/rgpot/simd/hwy_kernels.cc)
@@ -215,6 +279,17 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   if(RGPOT_WITH_RPC)
     list(APPEND RGPOT_SOURCES CppCore/rgpot/NWChemPot/NWChemPot.cc
          CppCore/rgpot/CPMDPot/CPMDPot.cc)
+  endif()
+  # CP2KPot dlopens the libcp2k shim. It is built only with the shim, so a
+  # build without libcp2k compiles no CP2K code.
+  if(RGPOT_WITH_CP2K)
+    if(NOT RGPOT_WITH_RPC)
+      message(FATAL_ERROR "RGPOT_WITH_CP2K requires RGPOT_WITH_RPC")
+    endif()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBCP2K REQUIRED IMPORTED_TARGET libcp2k)
+    list(APPEND RGPOT_SOURCES CppCore/rgpot/CP2KPot/CP2KPot.cc
+         CppCore/rgpot/CP2KPot/CP2KDeck.cc)
   endif()
 
   if(RGPOT_WITH_HIGHWAY)
@@ -238,7 +313,8 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   endif()
 
   if(RGPOT_WITH_IPI)
-    list(APPEND RGPOT_SOURCES CppCore/rgpot/IPIPot/IPIPot.cc)
+    list(APPEND RGPOT_SOURCES CppCore/rgpot/IPIPot/IPIWire.cc
+         CppCore/rgpot/IPIPot/IPIPot.cc CppCore/rgpot/IPIPot/IPIDriver.cc)
   endif()
 
   if(RGPOT_WITH_EAM_TABLE)
@@ -250,6 +326,7 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   endif()
   find_package(Threads REQUIRED)
   add_library(rgpot_nlist STATIC
+      CppCore/rgpot/Slices.cc
       CppCore/rgpot/nlist/NeighbourList.cc
       CppCore/rgpot/nlist/Neighbours.cc
       CppCore/rgpot/nlist/MinimumImage.cpp
@@ -273,20 +350,47 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/vesin>
            $<INSTALL_INTERFACE:include/rgpot/vesin>)
   target_link_libraries(rgpot_vesin PRIVATE Threads::Threads)
-  if(MSVC)
-    set_source_files_properties(
-      CppCore/rgpot/nlist/MinimumImage.cpp CppCore/rgpot/simd/exact_fma_hw.cc
-      CppCore/rgpot/simd/exp.cc CppCore/rgpot/simd/dispatch.cc
-      CppCore/rgpot/simd/scalar_kernels.cc CppCore/rgpot/simd/hwy_kernels.cc
+  # The sources meson compiles without contraction: rgpot_core,
+  # rgpot_minimage, rgpot_exact_fma, and the lennard_jones, morse, gupta,
+  # sutton_chen, tersoff_sic, reduced_pair and eam_cell libraries. Tests
+  # compare their bits with unfused references, and arm64 contracts a*b+c
+  # by default, so a source missing here fails there and nowhere else.
+  # tools/check_test_parity.sh checks this list against meson.
+  set(_rgpot_unfused_sources
+      CppCore/rgpot/CalculatorGroup.cc
+      CppCore/rgpot/PotHelpers.cc
+      CppCore/rgpot/PotentialCache.cc
+      CppCore/rgpot/units.cc
+      CppCore/rgpot/abi/CxxLayout.cc
+      CppCore/rgpot/plugin/PluginRegistry.cc
+      CppCore/rgpot/plugin/PluginBridge.cc
+      CppCore/rgpot/plugin/builtins/lj_plugin.cpp
+      CppCore/rgpot/nlist/MinimumImage.cpp
+      CppCore/rgpot/simd/exact_fma_hw.cc
+      CppCore/rgpot/simd/exp.cc
+      CppCore/rgpot/simd/dispatch.cc
+      CppCore/rgpot/simd/scalar_kernels.cc
+      CppCore/rgpot/simd/hwy_kernels.cc
+      CppCore/rgpot/LennardJones/LJPot.cc
+      CppCore/rgpot/LennardJones/LJClusterPot.cc
+      CppCore/rgpot/LennardJones/LJClusterKernel.cc
       CppCore/rgpot/Morse/MorsePot.cc
+      CppCore/rgpot/Morse/cambridge_morse.c
+      CppCore/rgpot/Gupta/gupta.c
+      CppCore/rgpot/SuttonChen/SuttonChenPot.cc
+      CppCore/rgpot/SuttonChen/SuttonChenScales.cc
+      CppCore/rgpot/Tersoff/TersoffSiC.cc
+      CppCore/rgpot/ReducedPair/ReducedPair.cc
+      CppCore/rgpot/EAM/EAM.cpp
+      CppCore/rgpot/EAM/EAMPot.cc)
+  if(MSVC)
+    set_source_files_properties(${_rgpot_unfused_sources}
       PROPERTIES COMPILE_OPTIONS "/fp:precise")
   else()
-    set_source_files_properties(
-      CppCore/rgpot/nlist/MinimumImage.cpp CppCore/rgpot/simd/exact_fma_hw.cc
-      CppCore/rgpot/simd/exp.cc CppCore/rgpot/simd/dispatch.cc
-      CppCore/rgpot/simd/scalar_kernels.cc CppCore/rgpot/simd/hwy_kernels.cc
-      CppCore/rgpot/Morse/MorsePot.cc
+    set_source_files_properties(${_rgpot_unfused_sources}
       PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    set_property(SOURCE CppCore/rgpot/ReducedPair/ReducedPair.cc
+      APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
     # Value-safe: lets the exp clamps if-convert and sqrt use sqrtpd, so
     # the exp and Morse row loops vectorise, also at -O2. Each flag is kept
     # only where the compiler accepts it (clang has no -fvect-cost-model),
@@ -360,7 +464,16 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
 
   if(RGPOT_WITH_CACHE)
     target_sources(rgpot PRIVATE CppCore/rgpot/PotentialCache.cc)
-    target_link_libraries(rgpot PUBLIC RocksDB::rocksdb xxHash::xxhash)
+    # A static RocksDB can bring jemalloc onto each executable's own link
+    # line, where its malloc wins over libc's, and its free then recurses
+    # through __tls_get_addr once a library with TLS (libmpi) is dlopen'd.
+    # The shared library, which meson's pkg-config lookup links, keeps
+    # jemalloc behind libc.
+    if(TARGET RocksDB::rocksdb-shared)
+      target_link_libraries(rgpot PUBLIC RocksDB::rocksdb-shared xxHash::xxhash)
+    else()
+      target_link_libraries(rgpot PUBLIC RocksDB::rocksdb xxHash::xxhash)
+    endif()
     target_compile_definitions(rgpot PUBLIC RGPOT_HAS_CACHE)
   endif()
 
@@ -385,6 +498,20 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   endif()
 
   add_library(rgpot::rgpot ALIAS rgpot)
+
+  # The libcp2k shim is the only target linking libcp2k and MPI; CP2KPot
+  # dlopens it.
+  if(RGPOT_WITH_CP2K)
+    target_compile_definitions(rgpot PUBLIC RGPOT_HAS_CP2K)
+    find_package(MPI REQUIRED COMPONENTS C)
+    add_library(cp2kc_rgpot SHARED CppCore/rgpot/CP2KPot/cp2kc_shim.c)
+    target_include_directories(cp2kc_rgpot
+                               PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/CppCore/rgpot/CP2KPot)
+    target_link_libraries(cp2kc_rgpot PRIVATE PkgConfig::LIBCP2K MPI::MPI_C)
+    set_target_properties(cp2kc_rgpot PROPERTIES BUILD_RPATH "${LIBCP2K_LIBDIR}"
+                                                 INSTALL_RPATH "${LIBCP2K_LIBDIR}")
+    install(TARGETS cp2kc_rgpot LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
 
   target_include_directories(
     rgpot PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/CppCore>
@@ -452,7 +579,7 @@ if(RGPOT_IS_TOP_LEVEL)
     # Install the bridge header in the correct directory structure
     install(FILES CppCore/rgpot/rpc/pot_bridge.h
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rgpot/rpc)
-    install(FILES ${CAPNP_HEADERS} CppCore/rgpot/rpc/Potentials.capnp
+    install(FILES ${CAPNP_HEADERS} "${RGPOT_EFFECTIVE_SCHEMA}"
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rgpot/rpc)
   endif()
 
@@ -506,151 +633,7 @@ if(RGPOT_IS_TOP_LEVEL)
 endif()
 
 # --- Tests ---
+# CppCore/tests/registry.txt lists them; tests.cmake registers them.
 if(RGPOT_BUILD_TESTS)
-  enable_testing()
-  find_package(Threads REQUIRED)
-  add_executable(AotiPublicationTest CppCore/tests/AotiPublicationTest.cc)
-  target_include_directories(AotiPublicationTest PRIVATE CppCore)
-  target_compile_features(AotiPublicationTest PRIVATE cxx_std_20)
-  target_link_libraries(AotiPublicationTest PRIVATE Threads::Threads)
-  add_test(NAME AotiPublicationTest COMMAND AotiPublicationTest)
-  add_executable(AotiPublicationStressTest
-                 CppCore/tests/AotiPublicationStressTest.cc)
-  target_include_directories(AotiPublicationStressTest PRIVATE CppCore)
-  target_compile_features(AotiPublicationStressTest PRIVATE cxx_std_20)
-  target_link_libraries(AotiPublicationStressTest PRIVATE Threads::Threads)
-  add_test(NAME AotiPublicationStressTest COMMAND AotiPublicationStressTest)
-  set_tests_properties(AotiPublicationStressTest PROPERTIES TIMEOUT 600)
-  add_executable(MolecularFrameTest CppCore/tests/MolecularFrameTest.cc)
-  target_include_directories(MolecularFrameTest PRIVATE CppCore)
-  # The RPC client bridge stays C++17. This test includes std::span.
-  target_compile_features(MolecularFrameTest PRIVATE cxx_std_20)
-  add_test(NAME MolecularFrameTest COMMAND MolecularFrameTest)
-  find_package(Catch2 3 REQUIRED)
-
-  if(RGPOT_RPC_CLIENT_ONLY)
-    add_executable(BridgeStressTest CppCore/tests/BridgeStressTest.cc)
-    target_link_libraries(BridgeStressTest PRIVATE rgpot_client_bridge
-                                                   Catch2::Catch2WithMain)
-    add_test(NAME BridgeStressTest COMMAND BridgeStressTest)
-  endif()
-
-  if(NOT RGPOT_RPC_CLIENT_ONLY)
-    function(add_pot_test TEST_NAME SOURCE_FILE)
-      add_executable(${TEST_NAME} ${SOURCE_FILE})
-      target_link_libraries(${TEST_NAME} PRIVATE rgpot::rgpot
-                                                 Catch2::Catch2WithMain)
-      set_target_properties(${TEST_NAME} PROPERTIES LINKER_LANGUAGE CXX)
-      add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
-    endfunction()
-
-    add_subdirectory(CppCore/tests/plugin)
-
-    add_pot_test(LJClusterPotTest CppCore/tests/LJClusterPotTest.cc)
-    add_pot_test(MinImageIsaHash CppCore/tests/MinImageIsaHash.cc)
-    add_pot_test(FoldDegenerateTest CppCore/tests/FoldDegenerateTest.cc)
-    set_tests_properties(FoldDegenerateTest PROPERTIES TIMEOUT 60)
-    add_executable(ExactFmaEq CppCore/tests/exact_fma_eq.cc)
-    target_link_libraries(ExactFmaEq PRIVATE rgpot::rgpot)
-    target_include_directories(ExactFmaEq PRIVATE CppCore)
-    target_compile_features(ExactFmaEq PRIVATE cxx_std_20)
-    if(NOT MSVC)
-      target_compile_options(ExactFmaEq PRIVATE -ffp-contract=off)
-    endif()
-    add_test(NAME ExactFmaEq COMMAND ExactFmaEq)
-    add_pot_test(BatchEvaluatorTest CppCore/tests/BatchEvaluatorTest.cc)
-    target_link_libraries(BatchEvaluatorTest PRIVATE Threads::Threads)
-    add_pot_test(CxxLayoutTest CppCore/tests/CxxLayoutTest.cc)
-    target_link_libraries(CxxLayoutTest PRIVATE ${CMAKE_DL_LIBS})
-    add_library(rgpot_layout_fixture SHARED CppCore/tests/layout_fixture.cc)
-    target_include_directories(rgpot_layout_fixture
-                               PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/CppCore)
-    target_link_libraries(rgpot_layout_fixture PRIVATE rgpot::rgpot)
-    set_target_properties(rgpot_layout_fixture PROPERTIES PREFIX "lib")
-    set_tests_properties(
-      CxxLayoutTest
-      PROPERTIES ENVIRONMENT
-                 "RGPOT_LAYOUT_FIXTURE=$<TARGET_FILE:rgpot_layout_fixture>")
-    find_package(Python3 COMPONENTS Interpreter)
-    if(Python3_FOUND)
-      add_test(NAME CxxLayoutVirtualCounts
-               COMMAND Python3::Interpreter
-                       "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/tests/check_virtual_counts.py")
-    endif()
-    add_pot_test(MorsePotTest CppCore/tests/MorsePotTest.cc)
-    add_pot_test(FortranPotsTest CppCore/tests/FortranPotsTest.cc)
-    target_link_libraries(FortranPotsTest PRIVATE Threads::Threads)
-    add_pot_test(TersoffSiCTest CppCore/tests/TersoffSiCTest.cc)
-    add_pot_test(CuH2PotTest CppCore/tests/CuH2PotTest.cc)
-    if(BUILD_SHARED_LIBS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-      add_test(NAME FortranSymbolAudit
-               COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_fortran_symbols.sh"
-                       $<TARGET_FILE:rgpot>)
-    endif()
-
-    if(RGPOT_WITH_CACHE)
-      add_pot_test(InvarianceTest CppCore/tests/InvarianceTest.cc)
-      add_pot_test(CacheTest CppCore/tests/CacheTest.cc)
-    endif()
-
-    if(RGPOT_WITH_IPI)
-      find_package(Threads REQUIRED)
-      add_pot_test(IPIPotTest CppCore/tests/IPIPotTest.cc)
-      target_link_libraries(IPIPotTest PRIVATE Threads::Threads)
-    endif()
-
-    if(RGPOT_WITH_RPC)
-      add_pot_test(CapnpAdapterTest CppCore/tests/CapnpAdapterTest.cc)
-      find_package(Python3 COMPONENTS Interpreter REQUIRED)
-      add_library(nwchemc_lifetime_engine SHARED
-                  CppCore/tests/nwchemc_lifetime_engine.cc)
-      target_include_directories(nwchemc_lifetime_engine PRIVATE CppCore)
-      add_executable(NWChemPotLifetimeTest CppCore/tests/NWChemPotLifetimeTest.cc)
-      target_link_libraries(NWChemPotLifetimeTest PRIVATE rgpot::rgpot)
-      foreach(_lifetime_mode ordinary probe)
-        add_test(
-          NAME NWChemPotLifetime-${_lifetime_mode}
-          COMMAND Python3::Interpreter
-                  "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/tests/test_nwchem_lifetime.py"
-                  $<TARGET_FILE:NWChemPotLifetimeTest>
-                  $<TARGET_FILE:nwchemc_lifetime_engine> ${_lifetime_mode})
-      endforeach()
-      if(RGPOT_HAVE_MPI)
-        add_executable(MpiHostContractTest CppCore/tests/MpiHostContractTest.cc)
-        target_include_directories(MpiHostContractTest PRIVATE CppCore)
-        target_link_libraries(MpiHostContractTest PRIVATE MPI::MPI_CXX)
-        add_library(collective_engine SHARED CppCore/tests/nwchemc_collective_engine.cc)
-        target_link_libraries(collective_engine PRIVATE rgpot::rgpot MPI::MPI_CXX)
-        add_executable(MpiRpcContractClient CppCore/tests/MpiRpcContractClient.cc)
-        target_link_libraries(MpiRpcContractClient PRIVATE rgpot::rgpot CapnProto::capnp-rpc)
-        set(_mpi_host_script "${CMAKE_CURRENT_SOURCE_DIR}/CppCore/tests/test_mpi_hosts.py")
-        foreach(_mode owned borrowed)
-          add_test(NAME MpiHost-${_mode}
-                   COMMAND Python3::Interpreter "${_mpi_host_script}" ${_mode}
-                           "${MPIEXEC_EXECUTABLE}" $<TARGET_FILE:MpiHostContractTest>)
-          set_tests_properties(MpiHost-${_mode} PROPERTIES TIMEOUT 60 PROCESSORS 4)
-        endforeach()
-        add_test(NAME NWChemMpiForceHost
-                 COMMAND Python3::Interpreter "${_mpi_host_script}" force
-                         "${MPIEXEC_EXECUTABLE}" $<TARGET_FILE:nwchem_mpi_force_host>
-                         $<TARGET_FILE:collective_engine>)
-        set_tests_properties(NWChemMpiForceHost PROPERTIES TIMEOUT 60 PROCESSORS 2)
-        foreach(_backend NWChem CPMD)
-          foreach(_layout serial mpi)
-            set(_rpc_server potserv)
-            if(_layout STREQUAL "mpi")
-              set(_rpc_server potserv_mpi)
-            endif()
-            add_test(NAME CollectiveRPC-${_backend}-${_layout}
-                     COMMAND Python3::Interpreter "${_mpi_host_script}" rpc
-                             "${MPIEXEC_EXECUTABLE}" $<TARGET_FILE:${_rpc_server}>
-                             $<TARGET_FILE:MpiRpcContractClient>
-                             $<TARGET_FILE:collective_engine> ${_backend} ${_layout})
-            set_tests_properties(CollectiveRPC-${_backend}-${_layout}
-                                 PROPERTIES TIMEOUT 60 PROCESSORS 2)
-          endforeach()
-        endforeach()
-      endif()
-    endif()
-  endif()
+  include("${CMAKE_CURRENT_SOURCE_DIR}/CppCore/tests/tests.cmake")
 endif()

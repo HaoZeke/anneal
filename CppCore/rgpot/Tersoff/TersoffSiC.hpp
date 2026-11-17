@@ -53,7 +53,7 @@ public:
   TersoffSiC();
 
   [[nodiscard]] PotCaps caps() const noexcept override {
-    // neighbours_ is scratch on every call. A positive held skin adds a
+    // neighbours_ is kept between calls. A positive held skin adds a
     // second list that also cannot be shared.
     return {.reentrancy = Reentrancy::PerInstance,
             .perImageInstances = m_held.skin > 0.0,
@@ -72,10 +72,11 @@ public:
   /**
    * @brief Keep one Verlet list across forceImpl calls.
    * @param skin Extra search distance, Angstrom. Zero, the default,
-   *        rebuilds the pairs on every call. A positive skin reuses them
+   *        uses the internal list, with a skin of one fifth of the
+   *        cutoff (none in Stream mode). A positive skin reuses the pairs
    *        until an atom has moved by more than skin/2 since the last
    *        build, or the cell or the atom count changes. The instance then
-   *        reports Reentrancy::PerInstance.
+   *        reports perImageInstances.
    */
   void setHeldSkin(double skin);
 
@@ -96,8 +97,8 @@ public:
    * @param n_atoms Atom count.
    * @param energy Receives the energy, eV.
    * @param gradient Receives dE/dx, eV/Angstrom. The force is its negation.
-   * @param neighbors Optional Verlet list. Null rebuilds the pairs on
-   *        every call. A list is reused while each atom has moved by at
+   * @param neighbors Optional Verlet list. Null uses the internal list,
+   *        with a skin of one fifth of the cutoff (none in Stream mode). A list is reused while each atom has moved by at
    *        most half its skin and the cell is unchanged.
    */
   void energyAndGradient(const double *positions, const int *atomic_numbers,

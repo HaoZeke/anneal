@@ -1,0 +1,494 @@
+#+TITLE: Neighbour-list C ABI
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Neighbour-list C ABI
+
+=CppCore/rgpot/nlist/rgpot_nlist.h= declares the neighbour query of =librgpot=.
+=CppCore/rgpot/nlist/NeighbourList.cc= implements it.
+Every function returns an =RGPOT_NLIST_*= code unless its entry says otherwise.
+=RGPOT_NLIST_ABI= is 4.
+
+The library does not convert units.
+Positions, =cutoff=, =skin=, pair vectors and distances share one length unit,
+the one the caller uses.
+=box9= is nine doubles, the lattice vectors as rows:
+=ax ay az bx by bz cx cy cz=.
+The pair vector of =(i, j)= at integer shift =S= is =r_j - r_i + S H=, with =H=
+the rows of =box9=.
+A pair of an atom with itself at shift zero is never returned.
+
+Different objects may be used from different threads at the same time.
+One walk, one builder and the buffers of one call are used by one thread.
+A build of at least 8192 atoms starts an OpenMP team when =OMP_NUM_THREADS= asks
+for more than one thread.
+The runtime may start fewer threads, as inside another OpenMP region; the list
+does not depend on how many.
+
+** Codes
+
+| Code                  | Value | =rgpot_nlist_strerror= text                                              |
+|-----------------------+-------+--------------------------------------------------------------------------|
+| =RGPOT_NLIST_OK=      |     0 | ok                                                                       |
+| =RGPOT_NLIST_ERR_ABI= |     1 | neighbour request abi or size does not match this library                |
+| =RGPOT_NLIST_NULL=    |     2 | a required neighbour pointer is null                                     |
+| =RGPOT_NLIST_CUTOFF=  |     3 | cutoff and skin must be finite and >= 0                                  |
+| =RGPOT_NLIST_BOX=     |     4 | box must be finite, and a periodic box must have positive volume         |
+| =RGPOT_NLIST_SHAPE=   |     5 | neighbour shape, shell or cut is not a supported value                   |
+| =RGPOT_NLIST_SHORT=   |     6 | neighbour buffer is shorter than the list; needed holds the full count   |
+| =RGPOT_NLIST_NOMEM=   |     7 | neighbour list allocation failed                                         |
+| =RGPOT_NLIST_SKIN=    |     8 | a positive skin needs a loose cut; a strict cut stores no buffer         |
+
+The functions that take a request check it in this order.
+A null request returns =RGPOT_NLIST_NULL=.
+=bytes= shorter than the struct through
+=want_distances=, or =abi= other than =RGPOT_NLIST_ABI=, returns =RGPOT_NLIST_ERR_ABI=.
+=shape=, =shell= or =cut= outside 0 and 1, or =shape= 1 with =shell= 0, returns
+=RGPOT_NLIST_SHAPE=.
+Null =positions= with =n > 0=, or a null =box9=, returns =RGPOT_NLIST_NULL=.
+A negative or non-finite =cutoff= or =skin= returns =RGPOT_NLIST_CUTOFF=.
+=skin > 0= with =cut= 0 returns =RGPOT_NLIST_SKIN=.
+A non-finite element of =box9=, or a zero-volume box with any periodic axis,
+returns =RGPOT_NLIST_BOX=.
+A failed allocation returns =RGPOT_NLIST_NOMEM=.
+
+** Types
+
+*** =rgpot_nlist_request=
+
+- Inputs :: =bytes= is =sizeof(rgpot_nlist_request)= as the caller compiled it,
+  and =abi= is =RGPOT_NLIST_ABI=.
+  =cutoff= and =skin= are the cutoff and the Verlet buffer.
+  =shape= is 0 for pairs and 1 for a cluster of four.
+  =shell= is 0 for a half list and 1 for a full list.
+  =cut= is 0 for strict (distance < =cutoff=) and 1 for loose (distance <
+  =cutoff + skin=, or distance <= =cutoff= when =skin= is 0).
+  =periodic= is one flag per axis, nonzero when the axis is periodic.
+  =want_shifts=, =want_vectors= and =want_distances= are nonzero for each column
+  the call fills.
+- Units :: =cutoff= and =skin= are in the length unit of the positions; every
+  other field has none.
+- Outputs :: none; the caller fills the struct, normally after
+  =rgpot_nlist_request_init=.
+- Errors :: the codes listed under Codes for a bad request.
+
+A half list keeps one direction of each pair, with the rule vesin uses for an
+atom and its own periodic image.
+A full list keeps both directions.
+A cluster list stores every neighbour, so it needs =shell= 1.
+
+*** =rgpot_nlist_soa=
+
+- Inputs :: =bytes= is =sizeof(rgpot_nlist_soa)= as the caller compiled it.
+  =cap= is the number of pairs each column holds.
+  =first= and =second= hold =cap= ints.
+  =shift= holds =3 * cap= ints and =vector= =3 * cap= doubles, pair =p= at
+  elements =3p=, =3p+1=, =3p+2=.
+  =distance= holds =cap= doubles and =mask= =cap= bytes.
+  A null column pointer skips that column.
+- Units :: =vector= and =distance= are in the length unit of the positions; the
+  other columns have none.
+- Outputs :: the calls write zero-based atom indices into =first= and =second=,
+  and each requested column for every pair they write.
+  =mask= is 0xff for a pair list.
+  For a cluster list =first= is the lowest index of four consecutive atoms,
+  =second= the partner, and bit =k= of =mask= is set when atom =first + k= has
+  that partner at that shift.
+  The vector and distance of a cluster row belong to the lowest atom whose bit
+  is set.
+  A column the request did not ask for is not written even when its pointer is
+  set.
+- Errors :: =bytes= smaller than the struct through =cap= returns
+  =RGPOT_NLIST_ERR_ABI=.
+  With =cap > 0=, a null =first= or =second=, a null pointer for a requested
+  column, or a null =mask= on a cluster list returns =RGPOT_NLIST_NULL= before
+  anything is written.
+
+*** =rgpot_nlist_walk=
+
+- Inputs :: none; an opaque handle from =rgpot_nlist_walk_open=.
+- Units :: none.
+- Outputs :: none.
+- Errors :: none.
+
+A walk borrows =positions= and =box9= until =rgpot_nlist_walk_close=.
+The caller keeps those arrays alive and does not write them during a pull.
+
+*** =rgpot_nlist_builder=
+
+- Inputs :: none; an opaque handle from =rgpot_nlist_builder_open=.
+- Units :: none.
+- Outputs :: none.
+- Errors :: none.
+
+*** =rgpot_nlist_fortran_list=
+
+- Inputs :: none; an opaque handle from =rgpot_nlist_fortran_open=.
+- Units :: none.
+- Outputs :: none.
+- Errors :: none.
+
+** Functions
+
+*** =rgpot_nlist_abi_version=
+
+#+attr_rgpot: signature
+#+begin_src c
+int32_t rgpot_nlist_abi_version(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: =RGPOT_NLIST_ABI= of the loaded library.
+- Errors :: none; the call cannot fail.
+
+*** =rgpot_nlist_strerror=
+
+#+attr_rgpot: signature
+#+begin_src c
+const char *rgpot_nlist_strerror(int32_t code);
+#+end_src
+
+- Inputs :: =code=, a value returned by a neighbour call.
+- Units :: none.
+- Outputs :: a string literal, the text in the Codes table.
+  The caller does not free it.
+- Errors :: none; an unknown code returns "unknown neighbour error".
+
+*** =rgpot_nlist_request_init=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_nlist_request_init(rgpot_nlist_request *request);
+#+end_src
+
+- Inputs :: =request=, caller storage.
+- Units :: none.
+- Outputs :: zeroes
+  =*request=, then sets =bytes=, =abi=, a half pair list with a strict cut, every axis periodic, and all three =want_*=
+  flags.
+  =cutoff= and =skin= stay 0.
+- Errors :: none; a null =request= is ignored.
+
+*** =rgpot_nlist_build=
+
+#+attr_rgpot: signature
+#+begin_src c
+int32_t rgpot_nlist_build(const double *positions, size_t n, const double *box9,
+                          const rgpot_nlist_request *request, rgpot_nlist_soa *out,
+                          size_t *count, size_t *needed);
+#+end_src
+
+- Inputs :: =positions= is =3 * n= doubles, row-major =x y z= per atom.
+  =box9= is the cell, =request= the query and =out= the caller's columns.
+  =count= and =needed= may be null.
+- Units :: =positions=, =box9=, the request's =cutoff= and =skin=, and the
+  written =vector= and =distance= share the caller's length unit.
+- Outputs :: =*needed= is the number of pairs in the list.
+  =*count= is the number written, at most =out->cap=.
+  A null =out=, or =out->cap= 0, writes no pair, sets =*count= to 0 and returns
+  =RGPOT_NLIST_OK=; this is the size probe.
+- Errors :: =RGPOT_NLIST_SHORT= after writing =out->cap= pairs when the list is
+  longer.
+  The request, geometry and buffer errors listed under Codes and
+  =rgpot_nlist_soa=.
+  On an error other than =RGPOT_NLIST_SHORT=, =*count= is 0.
+
+Each call searches again; the probe and the fill search twice.
+
+*** =rgpot_nlist_walk_open=
+
+#+attr_rgpot: signature
+#+begin_src c
+int32_t rgpot_nlist_walk_open(const double *positions, size_t n,
+                              const double *box9,
+                              const rgpot_nlist_request *request,
+                              rgpot_nlist_walk **walk);
+#+end_src
+
+- Inputs :: =positions= (=3 * n= doubles), =box9=, =request=, and =walk=, where
+  the handle goes.
+- Units :: as =rgpot_nlist_build=.
+- Outputs :: =*walk=, a new walk over the geometry.
+  The walk does not store the pairs of the whole system.
+- Errors :: =RGPOT_NLIST_NULL= for a null =walk=.
+  The request and geometry errors listed under Codes.
+  On any error =*walk= is null when =walk= is not null.
+
+*** =rgpot_nlist_walk_pull=
+
+#+attr_rgpot: signature
+#+begin_src c
+int32_t rgpot_nlist_walk_pull(rgpot_nlist_walk *walk, rgpot_nlist_soa *out,
+                              size_t *count, int32_t *done);
+#+end_src
+
+- Inputs :: =walk=, =out= (the caller's columns), and =count= and =done=, which
+  may be null.
+- Units :: =vector= and =distance= are in the length unit of the positions given
+  to =rgpot_nlist_walk_open=.
+- Outputs :: up to =out->cap= pairs written into =out=.
+  =*count= is the number written.
+  =*done= is 1 once the geometry is exhausted, which can be on a pull that also
+  wrote pairs.
+  =out->cap= 0 writes nothing and does not advance.
+- Errors :: =RGPOT_NLIST_NULL= for a null =walk= or =out=.
+  The buffer errors of =rgpot_nlist_soa=.
+  An error does not advance the walk and sets =*count= to 0.
+
+*** =rgpot_nlist_walk_close=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_nlist_walk_close(rgpot_nlist_walk *walk);
+#+end_src
+
+- Inputs :: =walk=, a handle from =rgpot_nlist_walk_open= or null.
+- Units :: none.
+- Outputs :: frees the walk and ends its borrow of =positions= and =box9=.
+- Errors :: none; a null =walk= is ignored.
+
+*** =rgpot_nlist_build_systems=
+
+#+attr_rgpot: signature
+#+begin_src c
+int32_t rgpot_nlist_build_systems(const double *positions, const int32_t *counts,
+                                  size_t nsystems, const double *box9,
+                                  const rgpot_nlist_request *request,
+                                  rgpot_nlist_soa *out, int32_t *system,
+                                  size_t *count, size_t *needed);
+#+end_src
+
+- Inputs :: =positions= is the concatenation of =nsystems= systems, =counts[s]=
+  atoms each, =3= doubles per atom.
+  =box9= holds =9 * nsystems= doubles, one cell per system in the same order.
+  =system=, when not null, holds =out->cap= ints.
+- Units :: as =rgpot_nlist_build=; every system uses the same length unit.
+- Outputs :: the pairs of every system, system 0 first.
+  =first= and =second= index the concatenated positions.
+  =system[p]= is the system of pair =p=.
+  =*needed=, =*count= and the size probe behave as in =rgpot_nlist_build=.
+- Errors :: =RGPOT_NLIST_NULL= when =nsystems > 0= and =positions=, =counts= or
+  =box9= is null.
+  =RGPOT_NLIST_SHAPE= for a negative =counts[s]=.
+  The other codes as in =rgpot_nlist_build=.
+
+The systems do not see each other's atoms.
+
+*** =rgpot_nlist_builder_open=
+
+#+attr_rgpot: signature
+#+begin_src c
+int32_t rgpot_nlist_builder_open(rgpot_nlist_builder **builder);
+#+end_src
+
+- Inputs :: =builder=, where the handle goes.
+- Units :: none.
+- Outputs :: =*builder=, a builder that holds no list yet.
+- Errors :: =RGPOT_NLIST_NULL= for a null =builder=; =RGPOT_NLIST_NOMEM= with
+  =*builder= null when the allocation fails.
+
+*** =rgpot_nlist_builder_update=
+
+#+attr_rgpot: signature
+#+begin_src c
+int32_t rgpot_nlist_builder_update(rgpot_nlist_builder *builder,
+                                   const double *positions, size_t n,
+                                   const double *box9,
+                                   const rgpot_nlist_request *request,
+                                   rgpot_nlist_soa *out, size_t *count,
+                                   size_t *needed, int32_t *reused);
+#+end_src
+
+- Inputs :: =builder= and the arguments of =rgpot_nlist_build=.
+  =reused= may be null.
+- Units :: as =rgpot_nlist_build=.
+- Outputs :: =*reused= is 1 when the stored list was kept, else 0.
+  The list is kept when =n=, =box9= and every request field are unchanged and
+  every atom has moved by at most =skin / 2= since the last search.
+  With =skin= 0 that means the coordinates did not move.
+  =out=, =*count=, =*needed= and the size probe behave as in
+  =rgpot_nlist_build=.
+  On a kept list every column, =vector= and =distance= included, describes the
+  geometry of the last search.
+- Errors :: =RGPOT_NLIST_NULL= for a null =builder=.
+  The other codes as in =rgpot_nlist_build=.
+  A rejected geometry leaves the stored list as it was.
+
+*** =rgpot_nlist_builder_close=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_nlist_builder_close(rgpot_nlist_builder *builder);
+#+end_src
+
+- Inputs :: =builder=, a handle from =rgpot_nlist_builder_open= or null.
+- Units :: none.
+- Outputs :: frees the builder and its list.
+- Errors :: none; a null =builder= is ignored.
+
+*** =rgpot_nlist_fortran_open=
+
+#+attr_rgpot: signature
+#+begin_src c
+rgpot_nlist_fortran_list *rgpot_nlist_fortran_open(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a new list handle.
+- Errors :: returns null when the allocation fails.
+
+*** =rgpot_nlist_fortran_close=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_nlist_fortran_close(rgpot_nlist_fortran_list *list);
+#+end_src
+
+- Inputs :: =list=, a handle from =rgpot_nlist_fortran_open= or null.
+- Units :: none.
+- Outputs :: frees the list.
+- Errors :: none; a null =list= is ignored.
+
+*** =rgpot_nlist_fortran_build=
+
+#+attr_rgpot: signature
+#+begin_src c
+int32_t rgpot_nlist_fortran_build(rgpot_nlist_fortran_list *list,
+                                  const double *positions, size_t natoms,
+                                  const double *box9, double cutoff, double skin,
+                                  const int32_t periodic[3], int32_t *first,
+                                  int32_t *second, double *vector, double *distance,
+                                  size_t cap, size_t *count, int32_t *reused);
+#+end_src
+
+- Inputs :: =list=, =positions= (=3 * natoms= doubles), =box9=, =cutoff=,
+  =skin=, and =periodic=, three ints, nonzero for a periodic axis.
+  =first=, =second= and =distance= hold =cap= values and =vector= =3 * cap=
+  doubles.
+  When =first= is not null, =second=, =vector= and =distance= must not be null;
+  the call does not check them.
+  =count= and =reused= may be null.
+- Units :: =positions=, =box9=, =cutoff=, =skin=, =vector= and =distance= share
+  the caller's length unit.
+- Outputs :: the pairs strictly inside =cutoff= for the positions passed in,
+  both directions of each pair (a full list), indices zero-based.
+  =vector= is in Fortran =(3, npairs)= order, =x y z= of pair 0, then pair 1.
+  Vectors and distances are computed from these positions even when the stored
+  search is reused.
+  =*count= is the number of such pairs, which can exceed =cap=; at most =cap=
+  are written.
+  A null =first= writes no pair and only sets =*count=.
+  =*reused= is 1 when the stored search was kept.
+- Errors :: =RGPOT_NLIST_NULL= with =*count= 0 when =list=, =positions=, =box9=
+  or =periodic= is null.
+  =RGPOT_NLIST_SHORT= when =first= is not null and the count exceeds =cap=.
+  The geometry codes listed under Codes, with =*count= 0.
+
+The list keeps a builder that searches at =cutoff + skin= with a loose cut when
+=skin > 0=, and at =cutoff= with a strict cut when =skin= is 0.
+The search is reused while every atom stays within =skin / 2= of the last
+search.
+
+** Cap'n Proto messages
+
+=CppCore/rgpot/rpc/local/neighbour-chunk.diff= adds the query to the
+=Potentials.capnp= that rgpot compiles and installs.
+The pinned potentials-schema file does not have it;
+=CppCore/rgpot/rpc/local/series= lists the rgpot-local diffs.
+The messages carry the columns of =rgpot_nlist_request= and =rgpot_nlist_soa=.
+Lengths are in the unit of the positions, =ForceInput.lengthUnit= on the wire.
+
+No rgpot server answers the query yet.
+=potserv= and =rgpot_rpc_server_start= do not implement =Potential.neighbours=,
+so a call fails with Cap'n Proto's unimplemented error.
+They ignore =ForceInput.neighbors= and never set =PotentialResult.neighborList=.
+=CppCore/examples/nlist_stream.cc= sends =NeighborRequest= and =NeighborList= as
+framed messages over a socket and serves each chunk from a stored list.
+
+| Field                          | Type              | Meaning                                                                                      |
+|--------------------------------+-------------------+----------------------------------------------------------------------------------------------|
+| =ForceInput.neighbors=         | =NeighborRequest= | The query to answer with the forces. A client that does not know it leaves it unset.         |
+| =PotentialResult.neighborList= | =NeighborList=    | The answer, present only when =ForceInput.neighbors= was set. A stream returns one chunk.    |
+| =Potential.neighbours=         | method            | Takes =fip :ForceInput= and =request :NeighborRequest= and returns one chunk as =neighbors=. |
+
+| =NeighborRequest= field     | Type                   | Default | Meaning                                                                                                    |
+|-----------------------------+------------------------+---------+------------------------------------------------------------------------------------------------------------|
+| =NeighborRequest.cutoff=    | =Float64=              |       0 | The cutoff, as =cutoff= of =rgpot_nlist_request=.                                                          |
+| =NeighborRequest.skin=      | =Float64=              |       0 | The Verlet buffer, as =skin=.                                                                              |
+| =NeighborRequest.format=    | =UInt8=                |       0 | 0 half pairs, 1 full pairs, 2 cluster of four. It is =shape= and =shell= in one field, so no half cluster. |
+| =NeighborRequest.cut=       | =UInt8=                |       0 | 0 strict, 1 loose, as =cut=.                                                                               |
+| =NeighborRequest.periodic=  | =List(Bool)=           |   empty | One flag per axis. Empty means every axis is periodic.                                                     |
+| =NeighborRequest.shifts=    | =Bool=                 |    true | Fill =NeighborList.shift=, as =want_shifts=.                                                               |
+| =NeighborRequest.vectors=   | =Bool=                 |    true | Fill =NeighborList.vector=, as =want_vectors=.                                                             |
+| =NeighborRequest.distances= | =Bool=                 |    true | Fill =NeighborList.distance=, as =want_distances=.                                                         |
+| =NeighborRequest.mode=      | =UInt8=                |       1 | 1 one stored chunk, 2 a stream that honours =cursor= and =limit=. 0 is not a mode.                         |
+| =NeighborRequest.cursor=    | =UInt64=               |       0 | The pair index the chunk starts at.                                                                        |
+| =NeighborRequest.limit=     | =UInt32=               |       0 | The most pairs in the reply. 0 means 4096 on a stream.                                                     |
+| =NeighborRequest.systems=   | =List(NeighborSystem)= |   empty | Empty for one system. Otherwise systems that do not interact, as in =rgpot_nlist_build_systems=.           |
+| =NeighborSystem.count=      | =UInt32=               |       0 | The atoms of the system. Positions are concatenated in the order of =systems=.                             |
+| =NeighborSystem.box=        | =List(Float64)=        |   empty | The cell of the system, the lattice vectors as rows.                                                       |
+
+| =NeighborList= field    | Type            | Meaning                                                                            |
+|-------------------------+-----------------+------------------------------------------------------------------------------------|
+| =NeighborList.first=    | =List(Int32)=   | The first atom of each pair. With =systems= it indexes the concatenated positions. |
+| =NeighborList.second=   | =List(Int32)=   | The second atom of each pair, the same length as =first=.                          |
+| =NeighborList.shift=    | =List(Int32)=   | Three integers per pair when shifts were requested.                                |
+| =NeighborList.vector=   | =List(Float64)= | Three values per pair.                                                             |
+| =NeighborList.distance= | =List(Float64)= | One value per pair.                                                                |
+| =NeighborList.mask=     | =List(UInt8)=   | One byte per pair, 0xff for a pair list and the low four bits for a cluster.       |
+| =NeighborList.more=     | =Bool=          | True when a later chunk exists. The client repeats the call with the same query.   |
+| =NeighborList.next=     | =UInt64=        | The =cursor= to send for that chunk.                                               |
+| =NeighborList.status=   | =Int32=         | 0 on success.                                                                      |
+| =NeighborList.message=  | =Text=          | A sentence when =status= is not 0. The lists are empty then.                       |
+| =NeighborList.system=   | =List(Int32)=   | The system of each pair. Empty when the request named one system.                  |
+
+** Example
+
+The size probe, then the fill.
+
+#+attr_rgpot: run link=rgpot flags=-ICppCore,-Iinclude
+#+begin_src c
+#include <stdio.h>
+#include <stdlib.h>
+#include "rgpot/nlist/rgpot_nlist.h"
+
+int main(void) {
+  const double positions[9] = {0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 1.5, 0.0};
+  const double box9[9] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  rgpot_nlist_request request;
+  rgpot_nlist_request_init(&request);
+  request.cutoff = 2.0;
+
+  size_t count = 0, needed = 0;
+  int32_t rc = rgpot_nlist_build(positions, 3, box9, &request, NULL, &count, &needed);
+  if (rc != RGPOT_NLIST_OK) {
+    fprintf(stderr, "%s\n", rgpot_nlist_strerror(rc));
+    return 1;
+  }
+
+  rgpot_nlist_soa out = {0};
+  out.bytes = sizeof out;
+  out.cap = needed;
+  out.first = malloc(needed * sizeof *out.first);
+  out.second = malloc(needed * sizeof *out.second);
+  out.shift = malloc(3 * needed * sizeof *out.shift);
+  out.vector = malloc(3 * needed * sizeof *out.vector);
+  out.distance = malloc(needed * sizeof *out.distance);
+  rc = rgpot_nlist_build(positions, 3, box9, &request, &out, &count, &needed);
+  if (rc != RGPOT_NLIST_OK || count != 2) {
+    fprintf(stderr, "rc %d count %zu\n", rc, count);
+    return 1;
+  }
+  for (size_t p = 0; p < count; ++p) {
+    printf("%d %d %.3f\n", out.first[p], out.second[p], out.distance[p]);
+  }
+  free(out.first);
+  free(out.second);
+  free(out.shift);
+  free(out.vector);
+  free(out.distance);
+  return 0;
+}
+#+end_src

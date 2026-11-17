@@ -1,0 +1,138 @@
+#+TITLE: Bump the ABI numbers
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Bump the ABI numbers
+
+This page lists the steps to change the C ABI stamp of =rgpot-core= and the C++
+soversion and layout stamp of =librgpot=.
+Each step names the constant to change and the check that fails when it is
+stale.
+What each number means and its history are in
+[[file:../../explanation/abi-stamps.org][ABI stamps]].
+
+** The C ABI stamp
+
+The numbers live in =rgpot-core/src/version.rs= as
+=RGPOT_ABI_VERSION_MAJOR=, =RGPOT_ABI_VERSION_MINOR= and
+=RGPOT_ABI_LAYOUT_REVISION=.
+
+- =abi_major=: increment for a change a caller built against the old header
+  cannot survive: removing or renaming an exported function, changing a
+  signature, changing the meaning of an existing argument or status code.
+  Reset =abi_minor= to 0.
+- =abi_minor=: increment for an additive change that leaves every old call
+  valid: a new exported function, a new status code, a new enum value a caller
+  may ignore.
+- =layout_revision=: increment when the size or field order of an exported
+  struct changes, or an existing field changes type, even when every function
+  keeps its name.
+
+Then:
+
+1. Regenerate the header with =pixi run gen-header= and commit it with the
+   change.
+2. Append each new exported function to =scripts/abi_core_baseline.txt=.
+   The list only grows; it holds the functions of a build with the crate's
+   default features.
+3. Run the crate tests with =pixi run rust-test=.
+   =committed_header_matches_the_crate= fails when the version and ABI macros,
+   or the Hessian-vector declarations, of the committed header differ from the
+   crate.
+   =the_abi_baseline_is_declared_by_the_header= fails when the header stops
+   declaring a baseline name.
+
+In a Meson build with =with_rust_core= on Linux, the test =abi_core_symbols=
+fails when =librgpot_core.so= no longer exports a baseline name.
+=scripts/abi_baseline.txt= and =scripts/abi_baseline_fast.txt= are the same
+check for the neighbour-list and fast-list exports of =librgpot= (Meson test
+=abi_symbols=).
+The neighbour-list C ABI has its own number, =RGPOT_NLIST_ABI= in
+=CppCore/rgpot/nlist/rgpot_nlist.h=.
+
+** The C++ soversion and layout stamp
+
+The constants live in =CppCore/rgpot/abi/CxxLayout.hpp=.
+=kCxxSoversion= is the ELF soversion of =librgpot=; =CppCore/meson.build= and
+=CMakeLists.txt= read it, so it is written nowhere else.
+
+- A change to the size, alignment or a field offset of a covered type moves the
+  hash by itself.
+  Bump =kCxxSoversion= in the same change, update the platform table as
+  described below, and append a line to
+  =CppCore/rgpot/abi/cxx_soversion_ledger.txt= with the new soversion and the fingerprint that =CppCore/tests/check_cxx_soversion.py=
+  prints.
+  Do not edit a shipped ledger line.
+- =kCxxLayoutRevision=: increment when a change keeps every size and offset and
+  still alters the ABI: reordering virtual functions without changing their
+  count, changing the meaning of a field, or changing a base class of a covered
+  type.
+  The revision is an input of the hash, so bump =kCxxSoversion= in that change
+  as well.
+- =kPotentialBaseVirtuals=, =kPotentialBaseCacheVirtuals= and
+  =kPotentialVirtuals= count the virtual functions of =PotentialBase= (without
+  and with =RGPOT_HAS_CACHE=) and the ones =Potential<Derived>= adds.
+  =CppCore/tests/check_virtual_counts.py= counts the =virtual= declarations in
+  =Potential.hpp= and fails when a count is stale.
+  Update the constant and increment =kCxxLayoutRevision= together.
+- To cover a new type, add it to =detail::compute_hash()= and bump
+  =kCxxSoversion= in the same commit; the hash changes, so no revision bump is
+  needed.
+
+=CppCore/tests/check_cxx_soversion.py= (Meson test =CxxSoversion=) fails when:
+
+- the last ledger soversion differs from =kCxxSoversion=, or the ledger
+  soversions do not increase;
+- the fingerprint of the stamp's inputs (the text of =compute_hash()=, the four
+  constants, the covered structures and the data members of the covered classes)
+  differs from the last ledger line;
+- compared with =main=, a shipped ledger line changed or was dropped, or
+  =compute_hash()= changed without a new ledger line;
+- the SONAME of the built =librgpot= is not =librgpot.so.N= for =N= =
+  =kCxxSoversion=;
+- the table tags and the =RGPOT_CXX_PLATFORM_LISTED_TAG= guards differ;
+- the live no-cache hash of a platform that has a table row differs from that
+  row.
+
+A platform without a row passes the last check, and =CxxLayout.cc= prints a
+compiler message that the tag is unlisted.
+
+** Updating the platform table
+
+=kCxxSoversionTable= holds one no-cache hash per platform tag, copied from CI.
+Do not copy a hash from another platform or from a local build.
+
+The stamp printer
+=CppCore/tests/print_cxx_layout_stamp.cc= prints one line: =RGPOT_CXX_LAYOUT_STAMP tag=...
+hash=...
+hash_dec=... features=... revision=...=. =features= is 1 for a cache build; ignore those lines. The workflow "C++ layout stamp" (=.github/workflows/cxx-layout-stamp.yml=) runs the printer on Linux x86_64,
+Linux aarch64, macOS arm64, macOS x86_64 and Windows MSVC.
+The Linux and macOS wheel builds run it too, from the compiler that builds the
+wheel, and so does the Meson test =CxxSoversion=.
+The wheels skip musllinux, so no CI log prints a =linux-musl= tag.
+
+When the soversion is bumped:
+
+1. Increment =kCxxSoversion=.
+2. Empty =kCxxSoversionTable= and delete the listed-platform guards, so every
+   platform builds and the printers run.
+3. Read each =RGPOT_CXX_LAYOUT_STAMP= line whose =features= is 0.
+4. Add one table row per distinct tag, using that line's =hash= as
+   =0x<hash>ull=.
+   Add a matching guard: an =#if=, then =#elif=, on
+   =RGPOT_OS_*=, =RGPOT_ARCH_*=, =RGPOT_STDLIB_*= and =RGPOT_MODEL_*=, which
+   defines =RGPOT_CXX_PLATFORM_LISTED= as 1 and =RGPOT_CXX_PLATFORM_LISTED_TAG=
+   as that tag.
+5. Append one ledger line: the new soversion and the fingerprint the check
+   prints.
+6. Push and wait until the jobs that printed the hashes are green.
+   =CxxLayout.cc= fails to compile on a listed platform whose live hash differs
+   from its row.
+
+=CxxLayoutTest= loads the fixture =CppCore/tests/layout_fixture.cc=, a shared
+object built with a =ForceOut= that has an extra field, and requires that its
+hash differs and that its compatibility check refuses the real stamp.
+
+=kCxxSoversion= applies to =librgpot= only.
+=librgpot_mpi= keeps soversion 3 in both build systems, and =check_cxx_soversion.py=
+fails when that changes.

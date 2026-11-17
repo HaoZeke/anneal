@@ -16,9 +16,12 @@
 #include <vector>
 #include <stdexcept>
 // clang-format on
+#include "rgpot/Locality.hpp"
 #include "rgpot/PairSwitch.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
+#include "rgpot/Staged.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
@@ -81,6 +84,11 @@ public:
     return m_paramsKey;
   }
 
+  /// Pairs count out to the cutoff; a cutoff <= 0 has no pairs.
+  [[nodiscard]] Locality locality() const noexcept {
+    return {.cutoff = cuttOffR > 0.0 ? cuttOffR : 0.0, .pairwise = true};
+  }
+
   /**
    * @brief Computes the forces and energy for a given configuration.
    * @param in Structure containing coordinates and cell info.
@@ -88,6 +96,16 @@ public:
    * @return Void.
    */
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
+
+  /// forceImpl plus each pair energy and virial split half to each atom.
+  void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
+  /// Staged.hpp: a pair potential has no densities.
+  void densityStage(const HalfList &, double *) const {}
+
+  /// Staged.hpp: the pair terms of forceImpl on a host's list.
+  void forceStage(const HalfList &list, const double *densities, double *forces,
+                  StageTally *tally) const;
 
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 
@@ -104,6 +122,8 @@ public:
 private:
   /// Bump when the kernel numerics change, so stale cache entries die.
   static constexpr uint64_t kKernelVersion = 2;
+
+  void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
   double u0;       //!< Well depth parameter.
   double cuttOffR; //!< Distance beyond which potential is truncated.

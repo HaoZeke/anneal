@@ -4,165 +4,1057 @@
 
 * Engine plugin ABI
 
-=CppCore/rgpot/engine_c_abi.h= is the function table a host uses to drive an
-engine shared library without linking the library's tensor runtime or its
-backend.
-Backend selection is which library the host opens with =dlopen=, and the
-configuration is a Cap'n Proto flat-array message whose root is the engine's
-params struct.
-Units are Angstrom, eV and eV/Angstrom, and a box is nine doubles in row-major
+=CppCore/rgpot/engine_c_abi.h= declares the functions a host calls to drive an
+engine shared library through =dlopen= and =dlsym=.
+The host selects the backend by the library it opens.
+The configuration is a Cap'n Proto flat-array message whose root is the engine's
+params struct in =Potentials.capnp=.
+Positions and cells are in Angstrom, energies in eV and forces in eV/Angstrom.
+A cell is nine doubles in row-major order.
+
+Status codes are three-valued. 0 is success.
+A positive value means the evaluation failed at this input and the caller may
+back off.
+A negative value means the instance is unusable.
+The engines in this repository return 1 for an invalid argument, 2 when the
+evaluation or the setting failed (the reason is in =rgpot_engine_last_error=),
+and 3 when the backend does not support the operation.
+=rgpot_engine_force= and =rgpot_engine_force_batch= also return the nonzero code
+of the host's coordinate transform.
+
+To open, build and test an engine, see
+[[file:../howto/engine-plugins.org][Open, build and test engine plugins]].
+
+** Libraries
+
+=CppCore/rgpot/engine/EngineTable.cc= implements every function the engine
+libraries export, for any =PotentialBase=.
+Each library adds one file that defines =rgpot::engine::create= (build the
+potential from the params message) and =rgpot::engine::backend_name=.
+
+| library | root message | backend name | selects |
+|---------+--------------+--------------+---------|
+| =libuma_engine= | =UmaParams= | =uma= | the UMA package at =modelPath= |
+| =libmetatomic_engine= | =MetatomicParams= | =metatomic= | the metatomic model at =modelPath= |
+| =libxtb_engine= | =BuiltinParams= | =xtb= | GFN2-xTB with the =XTBConfig= defaults; =name= is empty or =xtb= |
+| =libclassical_engine= | =BuiltinParams= | =classical= | =name= =lj=, =ljcluster=, =morse= or =zbl=; with the water kernels =tip4p=, =spce=, =tip4p_pt=; with the Fortran kernels =sw=, =edip=, =lenosky=, =tersoff=, =eamal=, =fehe=, =cuh2=, =waterh=; all with default parameters |
+| =libmopac_engine= | =BuiltinParams= | =mopac= | MOPAC; =name= is empty or =mopac=, =library= is the path of =libmopacc= |
+| =libnwchem_engine= | =NWChemParams= | =nwchem= | NWChem through =libnwchemc= |
+| =libskala_engine= | =NWChemParams= | =skala= | Skala XC on NWChem; reads =basis=, =charge=, =multiplicity=, =enginePath= and =nwchemRoot= |
+
+=BuiltinParams.name= is compared in lower case.
+The Metatomic and XTB libraries also export their own tables
+(=rgpot_mta_*=, =rgpot_xtb_*=).
+NWChem and CPMD keep the prefix-parameterized profile ABI that =NWChemPot= and
+=CPMDPot= load, and MOPAC keeps =mopac_c_abi.h=.
+The plugin interface in =include/rgpot/plugin.h= is a separate family. tblite,
+dftd3, dftd4, ExprPot, XcKernel, CPMD and CP2K have no engine library.
+
+Every library above exports
+=rgpot_engine_force_batch=, =rgpot_engine_abi_stamp=,
+=rgpot_engine_abi_compatible=, =rgpot_engine_name=, =rgpot_engine_version=, =rgpot_engine_model_digest=,
+=rgpot_engine_caps=,
+=rgpot_engine_last_error=, =rgpot_engine_set_num_threads= and =rgpot_engine_set_charge_spin=.
+None of them exports =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=,
+=rgpot_engine_hint= or =rgpot_engine_neighbor_options=.
+
+** Identity and version
+
+*** =rgpot_engine_abi_version=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_abi_version(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the major version, =RGPOT_ENGINE_ABI_VERSION= (1).
+- Errors :: none; the call cannot fail.
+
+Required symbol.
+A host compares the value for equality with its own =RGPOT_ENGINE_ABI_VERSION=.
+
+*** =rgpot_engine_available=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_available(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: nonzero when the engine can create instances; the engines in this
+  repository return 1.
+- Errors :: none; the call cannot fail.
+
+Required symbol.
+
+*** =RgpotEngineAbiStamp=
+
+- Inputs :: none; a value type.
+- Units :: none.
+- Outputs :: three =unsigned short= fields:
+  =abi_major= (=RGPOT_ENGINE_ABI_VERSION=, 1),
+  =abi_minor= (=RGPOT_ENGINE_ABI_MINOR=, 2) and
+  =layout_revision= (=RGPOT_ENGINE_ABI_LAYOUT_REVISION=, 1).
+- Errors :: none.
+
+The major increments for an incompatible change.
+The minor increments for an addition that leaves every existing call valid: a
+new optional symbol, or a new field at the end of a size-prefixed structure.
+The layout revision increments when an existing structure changes size or field
 order.
-A call returns 0 on success, a positive value when the evaluation failed at this
-input and the caller may back off, and a negative value when the instance is
-unusable.
-The engines in this repository return 1 for an invalid argument, 2 for a failed
-evaluation or setting (the reason is in
-=rgpot_engine_last_error=), 3 when the backend does not support the operation, and for =rgpot_engine_force=
-the transform's own nonzero code.
-
-** One table for every backend
-
-=CppCore/rgpot/engine/EngineTable.cc= exports every =rgpot_engine_*= symbol for
-any =PotentialBase=.
-A backend library adds a small file that builds its potential from the params
-message and defines two functions, =rgpot::engine::create= and
-=rgpot::engine::backend_name=; the table does argument validation, the
-coordinate transform, batching, error text, the thread-safety policy, the
-identity queries and the Python GIL release.
-
-| library | root message | selects |
-|---------+--------------+---------|
-| =libuma_engine= | =UmaParams= | the UMA package |
-| =libmetatomic_engine= | =MetatomicParams= | the metatomic model |
-| =libxtb_engine= | =BuiltinParams= | name =xtb=, GFN2-xTB defaults |
-| =libclassical_engine= | =BuiltinParams= | =lj=, =ljcluster=, =morse=, =zbl= and, with the Fortran kernels, =sw=, =edip=, =lenosky=, =tersoff=, =eamal=, =fehe=, =cuh2=, =waterh=, all with default parameters |
-| =libmopac_engine= | =BuiltinParams= | name =mopac=; =library= is the path of =libmopacc= |
-| =libnwchem_engine= | =NWChemParams= | NWChem through =libnwchemc= |
-| =libskala_engine= | =NWChemParams= | Skala XC on NWChem; reads =basis=, =charge=, =multiplicity=, =enginePath= and =nwchemRoot= |
-
-The Metatomic and XTB engines keep their own tables
-(=rgpot_mta_*=, =rgpot_xtb_*=) beside the generic one.
-NWChem and CPMD also keep the prefix-parameterized profile ABI that =NWChemPot=
-and =CPMDPot= load, and MOPAC keeps =mopac_c_abi.h=.
-The plugin interface in =rgpot/plugin.h= is a separate family.
-The remaining backends (tblite, dftd3, dftd4, ExprPot, XcKernel, CPMD) have no
-engine library.
-
-** Symbols
-
-Required:
-=rgpot_engine_abi_version=, =rgpot_engine_available=, =rgpot_engine_create=, =rgpot_engine_destroy=, =rgpot_engine_force=.
-
-Optional, probed with =dlsym=:
-
-| symbol | purpose |
-|--------+---------|
-| =rgpot_engine_force_batch= | one composition, system stride =3*nAtoms= and 9 |
-| =rgpot_engine_abi_stamp=, =rgpot_engine_abi_compatible= | major, minor and layout revision |
-| =rgpot_engine_name=, =rgpot_engine_version= | backend name and =<name>/<rgpot version>= |
-| =rgpot_engine_model_digest= | SHA-256 of the loaded model file as 64 hexadecimal digits; 0 when the backend has no model file |
-| =rgpot_engine_caps= | the engine-side =PotCaps=: reentrancy, per-image instances, batching, periodicity, stress |
-| =rgpot_engine_last_error= | message of the last failed call on an instance |
-| =rgpot_engine_set_num_threads= | intra-op and inter-op threads of the tensor runtime |
-| =rgpot_engine_set_charge_spin= | charge and spin multiplicity of the next calls |
-| =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=, =rgpot_engine_hint= | learning engines |
-| =rgpot_engine_neighbor_options= | neighbor lists the host must provision |
-
-Every engine built on the table exports all of them down to
-=rgpot_engine_set_charge_spin=.
-=rgpot_engine_set_num_threads= returns 3 for a backend without a tensor runtime,
-and =rgpot_engine_set_charge_spin= returns 3 for a backend without a charge or
-spin.
-
-** Tensor runtime parameters
-
-=UmaParams= and =MetatomicParams= carry =intraopThreads= and =interopThreads=
-(default 1; a value below 1 leaves the runtime alone), applied once when the
-engine creates the model.
-=UmaParams.deterministicAlgorithms= requests deterministic torch algorithms.
-=MetatomicParams.torchDeterminism= (=fast= or =deterministic=) is the same
-request for that arm, with the attention-backend and TF32 restrictions of
-rgpot's =TorchDeterminismPolicy=, and =nSymmetryRotations=, =randomRotation= and
-=so3ProbeScatter= mirror =MetatomicConfig=.
-The inter-op count can be set once per process before the runtime starts
-parallel work; asking for the value already in force is accepted, and another
-value afterwards fails =create= (or =rgpot_engine_set_num_threads=) with the
-reason.
-The thread counts act on the process's libtorch, so two engines in one process
-share them.
-
-** Thread safety of a handle
-
-Any thread may call =rgpot_engine_force= and =rgpot_engine_force_batch= on any
-handle.
-What happens inside follows the backend's =rgpot_engine_caps().reentrancy=:
-
-- 0, shared instance: calls run concurrently on one handle (UMA, Metatomic and
-  the classical shared-state-free potentials).
-- 1, per instance: the engine admits one call at a time per handle, so a handle
-  is safe from any thread and calls on it are serialized; handles do not wait
-  for each other.
-  A host that wants parallelism creates one handle per worker (XTB and the
-  Fortran potentials).
-- 2, process serial: the engine admits one call at a time in the process across
-  all handles of the library (MOPAC, NWChem, Skala).
-
-=rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=,
-=rgpot_engine_set_callbacks=, =rgpot_engine_hint= and =rgpot_engine_destroy=
-must not run concurrently with a call on the same handle.
-=rgpot_engine_last_error= and =rgpot_engine_model_digest= may run at any time.
-=EngineAdapterTest= checks each policy with a stand-in backend that records how
-many calls are inside it at once; =EngineTableTest= and =UmaEngineTest= run
-eight and four threads on one handle.
-
-** Version scheme
-
-=RGPOT_ENGINE_ABI_VERSION= is the major and a host compares it for equality.
-=RGPOT_ENGINE_ABI_MINOR= increments for an addition that leaves every existing
-call valid: a new optional symbol, or a new field at the end of a size-prefixed
-structure.
-=RGPOT_ENGINE_ABI_LAYOUT_REVISION= increments when an existing structure changes
-size or field order.
 A host built against minor N runs against an engine of the same major and layout
 revision whose minor is at least N. An engine without =rgpot_engine_abi_stamp=
 is minor 0, layout 1.
-Minor 1 added the stamp, =caps=,
-=last_error=, =set_num_threads= and =set_charge_spin=; minor 2 added =name=, =version= and =model_digest=
-and the generic table for every backend.
-Structures that grow (=RgpotEngineCaps=) begin with a =size= field, so an older
-host receives the bytes it announced room for.
-The version covers the table and its conventions; it does not cover the Cap'n
-Proto params schema (versioned by the =potentials-schema= pin), the tensor
-runtime the engine links, or the model.
+Minor 1 added the stamp, =rgpot_engine_caps=,
+=rgpot_engine_last_error=, =rgpot_engine_set_num_threads= and =rgpot_engine_set_charge_spin=.
+Minor 2 added =rgpot_engine_name=, =rgpot_engine_version=,
+=rgpot_engine_model_digest= and the generic table for every backend.
+The version does not cover the Cap'n Proto params schema, the tensor runtime the
+engine links, or the model.
 
-** Opening an engine
+*** =rgpot_engine_abi_stamp=
 
-The header defines no search path: the host opens the path it was given.
-
+#+attr_rgpot: signature
 #+begin_src c
-void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-int (*version)(void) = dlsym(h, "rgpot_engine_abi_version");
-if (!version || version() != RGPOT_ENGINE_ABI_VERSION) { /* refuse */ }
+RgpotEngineAbiStamp rgpot_engine_abi_stamp(void);
 #+end_src
 
-Do not =dlclose= an engine: the tensor runtime keeps process-wide state.
-=libuma_engine.so= is linked with =-z nodelete=, so a =dlclose= leaves it
-mapped.
-Destroy every handle before the process exits.
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the stamp of the loaded engine.
+- Errors :: none; the call cannot fail.
 
-** Building and testing the engines
+Optional symbol.
 
-The engine libraries need the rpc stack; UMA and Metatomic also need the
-metatomic stack, which the =umaenginebld= pixi environment provides together
-with xtb:
+*** =rgpot_engine_abi_compatible=
 
-#+begin_src bash
-pixi run -e umaenginebld potctl ci metatomic-test --rpc --build-dir bbdir-uma-engine
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_abi_compatible(const RgpotEngineAbiStamp *stamp);
 #+end_src
 
-=EngineAdapterTest= runs the table over a stand-in backend without rpc or torch,
-=EngineTableTest= opens each backend library, and =UmaEngineTest= opens the UMA
-engine as a host does.
-With
-=RGPOT_UMA_OMOL_PT2= (and =RGPOT_UMA_OMOL_BAND_PT2= for the batch case) =UmaEngineTest= compares the engine with the directly compiled =UmaPot=, checks the model digest against the file and the runtime settings against libtorch, and =RGPOT_UMA_REQUIRE_FIXTURES=
-turns a missing fixture into a failure.
+- Inputs :: =stamp=, the stamp the host was built against.
+- Units :: none.
+- Outputs :: 1 when the major and the layout revision equal the engine's and the
+  host's minor is at most the engine's; 0 otherwise.
+- Errors :: a null =stamp= returns 0.
+
+Optional symbol.
+
+*** =rgpot_engine_name=
+
+#+attr_rgpot: signature
+#+begin_src c
+const char *rgpot_engine_name(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the backend name, a static NUL-terminated string (the backend name
+  column of the library table).
+- Errors :: none; the call cannot fail.
+
+Optional symbol.
+
+*** =rgpot_engine_version=
+
+#+attr_rgpot: signature
+#+begin_src c
+const char *rgpot_engine_version(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: =<name>/<rgpot version>=, a static NUL-terminated string; the
+  version part is =unknown= when the library was built without
+  =RGPOT_ENGINE_PROJECT_VERSION=.
+- Errors :: none; the call cannot fail.
+
+Optional symbol.
+
+** Instances
+
+*** =RgpotEnginePot=
+
+- Inputs :: none; an opaque handle.
+- Units :: none.
+- Outputs :: returned by =rgpot_engine_create= and released by
+  =rgpot_engine_destroy=.
+- Errors :: none.
+
+A handle holds the backend potential, its capabilities, the last error message
+and the model digest once computed.
+
+*** =rgpot_engine_create=
+
+#+attr_rgpot: signature
+#+begin_src c
+RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,
+                                    char *errbuf, size_t errlen);
+#+end_src
+
+- Inputs :: =config=, a Cap'n Proto flat-array message (as produced by
+  =capnp::messageToFlatArray=) whose root is the library's params struct;
+  =config_len=, its length in bytes; =errbuf= and =errlen=, a buffer for the
+  failure reason (may be null or 0).
+- Units :: none.
+- Outputs :: a new handle, or NULL on failure.
+- Errors :: returns NULL and writes the reason to =errbuf= (at most =errlen - 1=
+  bytes, NUL-terminated).
+  A null =config=, a zero
+  =config_len= or a length that is not a multiple of 8 gives =rgpot_engine_create(<name>): a word-aligned Cap'n Proto params message is required=.
+  An empty =modelPath= (UMA, Metatomic), an unknown =BuiltinParams.name=, a
+  malformed message or an exception from the backend constructor gives that
+  message.
+  A =MetatomicParams.charge= or =spin= the model does not read, other than
+  charge 0 or multiplicity 1, gives =rgpot_engine_create(metatomic):= followed
+  by the reason =rgpot_engine_set_charge_spin= gives.
+
+Required symbol.
+=UmaParams= and =MetatomicParams= carry =intraopThreads= and =interopThreads=
+(default 1), which create applies with the rules of
+=rgpot_engine_set_num_threads=; a refused inter-op count fails create with the
+reason.
+=UmaParams.deterministicAlgorithms= turns on deterministic torch algorithms, so
+an operation without a deterministic implementation throws.
+=MetatomicParams.torchDeterminism= (=fast= or =deterministic=) selects the
+=TorchDeterminismPolicy= of the Metatomic potential.
+=MetatomicParams.charge=, =spin= (a value below 1 becomes 1) and
+=attachSystemExtras= go to the Metatomic potential; see Charge and spin below.
+=UmaParams.cacheDir= is the root of the cache the UMA package is unpacked into;
+see the UMA unpack cache below.
+
+*** =rgpot_engine_destroy=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_engine_destroy(RgpotEnginePot *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle from =rgpot_engine_create= or NULL.
+- Units :: none.
+- Outputs :: none; the handle and its backend are freed.
+- Errors :: none; NULL is accepted.
+
+Required symbol.
+Must not run concurrently with another call on the same handle.
+
+*** =RgpotEngineCaps=
+
+- Inputs :: =size=, set by the host to =sizeof(RgpotEngineCaps)= before
+  =rgpot_engine_caps=.
+- Units :: none.
+- Outputs :: =size= (bytes the engine wrote), =reentrancy=,
+  =per_image_instances=, =batched=, =periodic=, =stress= and =group_collective=;
+  the flags are 0 or 1.
+- Errors :: none.
+
+The fields mirror rgpot's =PotCaps=.
+=per_image_instances= asks multi-image methods (NEB) to clone one instance per
+image.
+=batched= means the backend serves =rgpot_engine_force_batch= natively.
+=periodic= means periodic boundary conditions are supported.
+=stress= means the backend computes cell stress; the engine ABI has no call that
+returns it.
+=group_collective= means every rank of a calculator group enters each call.
+
+=reentrancy= decides how the table admits concurrent =rgpot_engine_force= and
+=rgpot_engine_force_batch= calls:
+
+- 0, shared instance: calls run concurrently on one handle (UMA, Metatomic).
+- 1, per instance: one call at a time per handle; calls on different handles run
+  concurrently (XTB and every potential of the classical engine).
+- 2, process serial: one call at a time across all handles of the library in the
+  process (MOPAC, NWChem, Skala).
+
+*** =rgpot_engine_caps=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_caps(const RgpotEnginePot *pot, RgpotEngineCaps *out);
+#+end_src
+
+- Inputs :: =pot=, a handle; =out=, a structure whose =size= field the host has
+  set.
+- Units :: none.
+- Outputs :: 0 on success; the engine copies at most =out->size= bytes of its
+  structure into =out= and sets =out->size= to the number of bytes written.
+- Errors :: returns 1 when =pot= or =out= is null, or when =out->size= is
+  smaller than an =unsigned=; =out= is then not written and
+  =rgpot_engine_last_error= is not set.
+
+Optional symbol.
+
+*** =rgpot_engine_last_error=
+
+#+attr_rgpot: signature
+#+begin_src c
+size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len);
+#+end_src
+
+- Inputs :: =pot=, a handle; =buf= and =len=, the destination (may be null or 0
+  to query the length).
+- Units :: none.
+- Outputs :: the full length of the message of the last failed call on the
+  handle, 0 when there is none; at most =len - 1= bytes are copied to =buf= and
+  NUL-terminated.
+- Errors :: a null =pot= returns 0 and writes nothing.
+
+Optional symbol.
+Reading does not clear the message.
+A successful =rgpot_engine_force=,
+=rgpot_engine_force_batch=, =rgpot_engine_set_num_threads= or =rgpot_engine_set_charge_spin=
+clears it.
+Errors of =rgpot_engine_create= go to its =errbuf=.
+May run at any time, also during an evaluation on the same handle.
+
+*** =rgpot_engine_model_digest=
+
+#+attr_rgpot: signature
+#+begin_src c
+size_t rgpot_engine_model_digest(const RgpotEnginePot *pot, char *buf, size_t len);
+#+end_src
+
+- Inputs :: =pot=, a handle; =buf= and =len=, the destination.
+- Units :: none.
+- Outputs :: 64, with the SHA-256 of the model file as 64 lowercase hexadecimal
+  digits copied to =buf= (at most =len - 1= bytes, NUL-terminated); 0 when the
+  backend has no model file.
+- Errors :: returns 0 and writes an empty string when =pot= is null, the backend
+  has no model file (every library except UMA and Metatomic), or the file cannot
+  be read.
+
+Optional symbol.
+The digest is computed on the first request and kept for the life of the handle,
+including a failed read.
+For =libuma_engine= it is the digest of the =.pt2=; the digest of the weights
+inside it is package metadata, under UMA checkpoint provenance below.
+May run at any time.
+
+*** =rgpot_engine_set_num_threads=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_set_num_threads(RgpotEnginePot *pot, int intra_op, int inter_op);
+#+end_src
+
+- Inputs :: =pot=, a handle; =intra_op= and =inter_op=, the intra-op and
+  inter-op worker thread counts of the engine's tensor runtime (a value below 1
+  leaves that count alone).
+- Units :: none.
+- Outputs :: 0 on success.
+- Errors :: returns 1 for a null =pot= (no message).
+  Returns 3 for a backend without a tensor runtime (every library except UMA and
+  Metatomic), with =backend has no tensor runtime= in =rgpot_engine_last_error=.
+  Returns 2 when the runtime refuses the setting, with the reason in
+  =rgpot_engine_last_error=.
+
+Optional symbol.
+The counts act on the process's libtorch, so engines in one process share them.
+The inter-op count can be set once per process before the runtime starts
+parallel work; asking for the count already in force succeeds and another count
+afterwards returns 2.
+Must not run concurrently with another call on the same handle.
+
+*** =rgpot_engine_set_charge_spin=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin);
+#+end_src
+
+- Inputs :: =pot=, a handle; =charge=, the total charge; =spin=, the spin
+  multiplicity (1 is a singlet).
+- Units :: =charge= in elementary charges; =spin= none.
+- Outputs :: 0 on success; the next evaluations use the new values.
+- Errors :: returns 1 for a null =pot= or =spin= below 1 (no message).
+  Returns 3 for a backend without a charge or spin, with
+  =backend has no charge or spin to change= in =rgpot_engine_last_error=: the
+  classical, MOPAC, NWChem and XTB libraries, and Metatomic with a model that
+  reads neither.
+  Returns 3 for a value the backend cannot take, with the reason in
+  =rgpot_engine_last_error=; the values in force do not change.
+  For Metatomic the reason is
+  =the model reads no charge (rgpot::charge), so charge <n> cannot reach it= or
+  the same sentence for the spin multiplicity.
+  Returns 2 when the backend throws, with the reason in
+  =rgpot_engine_last_error=.
+
+Optional symbol.
+UMA stores the values and passes them to the model at the next evaluation.
+Skala applies them to NWChem at once.
+Metatomic stores them for the next evaluations of a model that reads them; see
+Charge and spin below.
+Must not run concurrently with another call on the same handle.
+
+** Evaluation
+
+*** =rgpot_engine_coord_transform=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef int (*rgpot_engine_coord_transform)(void *user, long nAtoms,
+                                            double *positions, double *box);
+#+end_src
+
+- Inputs :: =user=, the =transform_user= pointer of the force call; =nAtoms=;
+  =positions=, 3*nAtoms doubles; =box=, 9 doubles, row-major.
+- Units :: =positions= and =box= in Angstrom.
+- Outputs :: 0 on success; the transform edits =positions= and =box= in place.
+- Errors :: a nonzero return aborts the force call, which returns the same code.
+
+The engine applies the transform to its own scratch copy, so the caller's
+buffers are not changed.
+An example is a molecular-box convention that recentres a gas-phase molecule in
+a fixed cell.
+
+*** =rgpot_engine_force=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_force(RgpotEnginePot *pot, long nAtoms, const double *positions,
+                       const int *atomicNrs, double *forces, double *energy,
+                       double *variance, const double *box,
+                       rgpot_engine_coord_transform transform,
+                       void *transform_user);
+#+end_src
+
+- Inputs :: =pot=, a handle; =nAtoms=, the atom count; =positions=, 3*nAtoms
+  doubles, row-major (x, y, z per atom); =atomicNrs=, nAtoms atomic numbers;
+  =box=, 9 doubles, row-major; =transform= and =transform_user=, an optional
+  coordinate transform (may be NULL).
+- Units :: =positions= and =box= in Angstrom; energy in eV; forces in
+  eV/Angstrom.
+- Outputs :: 0 on success; =forces=,
+  3*nAtoms doubles in the layout of =positions=; =*energy=; =*variance=, the
+  backend's uncertainty estimate without unit conversion (0 for backends that
+  have none; =variance= may be NULL).
+- Errors :: returns 1 when =pot=, =positions=, =atomicNrs=, =forces=, =energy=
+  or =box= is null or =nAtoms= is not positive, with =invalid argument= in
+  =rgpot_engine_last_error=.
+  Returns the transform's nonzero code with
+  =coordinate transform returned <code>=.
+  Returns 2 when the backend throws, with the exception text in
+  =rgpot_engine_last_error= and on standard error as =rgpot_engine(<name>): <text>=.
+  On failure =forces=, =*energy= and =*variance= are not written.
+
+Required symbol.
+Any thread may call it on any handle; concurrency follows
+=RgpotEngineCaps.reentrancy=.
+When the host holds the Python GIL, the call releases it during the evaluation.
+
+*** =rgpot_engine_force_batch=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_force_batch(RgpotEnginePot *pot, long nSystems, long nAtoms,
+                             const double *positions, const int *atomicNrs,
+                             double *forces, double *energies, double *variances,
+                             const double *boxes,
+                             rgpot_engine_coord_transform transform,
+                             void *transform_user);
+#+end_src
+
+- Inputs :: =pot=, a handle; =nSystems= systems of one composition (=nAtoms=,
+  =atomicNrs= with nAtoms entries); =positions=, 3*nAtoms*nSystems doubles with
+  system stride 3*nAtoms; =boxes=, 9*nSystems doubles with system stride 9;
+  =transform= and =transform_user=, applied per system (may be NULL).
+- Units :: as =rgpot_engine_force=.
+- Outputs :: 0 on success; =forces=, 3*nAtoms*nSystems doubles in the layout of
+  =positions=; =energies=, nSystems doubles; =variances=, nSystems doubles (may
+  be NULL).
+- Errors :: returns 1 when a required pointer is null or =nSystems= or =nAtoms=
+  is not positive, with =invalid argument (batch)= in =rgpot_engine_last_error=.
+  Returns the first nonzero transform code; no system is evaluated.
+  Returns 2 when the backend throws, with the reason as for
+  =rgpot_engine_force=.
+  The backend writes =forces= in place, so after a code 2 =forces= may be partly
+  written; =energies= and =variances= are not written.
+
+Optional symbol.
+For learning engines the call is also an incorporation boundary.
+A variant for groups of different compositions would be a separate symbol.
+
+** Learning engines
+
+No engine in this repository implements this set; the entries state what the
+header requires.
+
+*** =RgpotEngineGprGate=
+
+- Inputs :: =magic= (=RGPOT_ENGINE_GPR_GATE_MAGIC=, =0x47505247=), =version=
+  (=RGPOT_ENGINE_GPR_GATE_VERSION=, 1), =sigmaLoFactor=, =sigmaHiFactor=,
+  =certifyBelowForce=, =refitTrainingRevisions=.
+- Units :: =sigmaLoFactor= and =sigmaHiFactor= are multiples of the model's
+  likelihood noise (none); =certifyBelowForce= in eV/Angstrom;
+  =refitTrainingRevisions= is a count.
+- Outputs :: passed as the =config= blob of =rgpot_engine_create= to a learning
+  engine.
+- Errors :: none in the header; an engine dispatches on =magic=.
+
+The model answers below =sigmaLoFactor= times its noise.
+Above =sigmaHiFactor= times its noise the geometry is not learned from.
+A predicted force magnitude below =certifyBelowForce= forces a ground-truth
+call; a non-positive value disables this check.
+=refitTrainingRevisions= is the refit cadence in training-set appends; 0 refits
+at every incorporation boundary.
+The header marks the structure as interim, to be replaced by a Cap'n Proto
+=GprParams= arm.
+
+*** =rgpot_engine_model_state=
+
+#+attr_rgpot: signature
+#+begin_src c
+unsigned long long rgpot_engine_model_state(const RgpotEnginePot *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle.
+- Units :: none.
+- Outputs :: a monotone counter that increments on every refit, hyperparameter
+  change or observation incorporation.
+- Errors :: none in the header.
+
+Optional symbol.
+Host caches keyed on model output are valid only while the value is unchanged.
+Acquisition never increments it.
+An engine without the symbol behaves as a counter fixed at 0.
+
+*** =rgpot_engine_acquire_reason=
+
+- Inputs :: none; an enum.
+- Units :: none.
+- Outputs :: =RGPOT_ACQUIRE_VARIANCE= (1, predictive variance above the low
+  threshold), =RGPOT_ACQUIRE_CERTIFY= (2, checking a surrogate convergence
+  claim), =RGPOT_ACQUIRE_BATCH= (3, batched acquisition sweep),
+  =RGPOT_ACQUIRE_REJECT= (4, geometry above the high threshold, evaluated and
+  not incorporated).
+- Errors :: none.
+
+Passed to =RgpotEngineCallbacks.on_acquire=.
+
+*** =RgpotEngineCallbacks=
+
+- Inputs :: =ctx=, passed back to every callback; =oracle=, the ground-truth
+  evaluation; =on_acquire= and =on_model_update=, notifications (either may be
+  NULL).
+- Units :: =oracle= uses the units of =rgpot_engine_force= (Angstrom, eV,
+  eV/Angstrom).
+- Outputs :: =oracle= writes =forces= (3*nAtoms doubles) and =*energy= and
+  returns a three-valued status like =rgpot_engine_force=; it has no variance.
+- Errors :: none.
+
+=on_acquire= fires when the engine delegates a point to the oracle.
+=on_model_update= fires after each incorporation with the new model-state value;
+host state built from history (quasi-Newton memory, cached factorizations) must
+be reset there.
+
+*** =rgpot_engine_set_callbacks=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_set_callbacks(RgpotEnginePot *pot,
+                               const RgpotEngineCallbacks *callbacks);
+#+end_src
+
+- Inputs :: =pot=, a handle; =callbacks=, copied by the engine.
+- Units :: none.
+- Outputs :: a three-valued status.
+- Errors :: the header defines no codes beyond the three-valued convention.
+
+Optional symbol.
+=ctx= must outlive the handle or the next call that replaces it.
+A learning engine requires an oracle before the first evaluation.
+Must not run concurrently with another call on the same handle.
+
+*** =rgpot_engine_hint=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_engine_hint(RgpotEnginePot *pot, const void *msg, size_t msg_len,
+                      char *errbuf, size_t errlen);
+#+end_src
+
+- Inputs :: =pot=, a handle; =msg= and =msg_len=, a Cap'n Proto flat-array
+  message whose root is the engine's hint struct in =Potentials.capnp=; =errbuf=
+  and =errlen=, a buffer for the reason.
+- Units :: none.
+- Outputs :: a three-valued status; on success the new configuration takes
+  effect.
+- Errors :: the engine validates the resulting configuration as a whole; on
+  failure the previous configuration stays active and =errbuf= holds the reason.
+
+Optional symbol.
+For learning engines it is also the host-initiated incorporation boundary.
+Must not run concurrently with another call on the same handle.
+
+*** =RgpotEngineNeighborOptions=
+
+- Inputs :: none; filled by =rgpot_engine_neighbor_options=.
+- Units :: =cutoff= in Angstrom; =full_list= and =strict= none.
+- Outputs :: =cutoff=; =full_list= (1 full list, 0 half list); =strict= (0
+  tolerates neighbours beyond the cutoff).
+- Errors :: none.
+
+*** =rgpot_engine_neighbor_options=
+
+#+attr_rgpot: signature
+#+begin_src c
+long rgpot_engine_neighbor_options(const RgpotEnginePot *pot,
+                                   RgpotEngineNeighborOptions *opts,
+                                   long capacity);
+#+end_src
+
+- Inputs :: =pot=, a handle; =opts=, room for =capacity= declarations
+  (=capacity= 0 queries the count).
+- Units :: as =RgpotEngineNeighborOptions=.
+- Outputs :: the total number of declarations; up to =capacity= are written to
+  =opts=.
+- Errors :: none in the header.
+
+Optional symbol.
+An engine that exports it expects the host to provide every declared list before
+evaluation; an engine without it builds its own.
+Declarations may change after =on_model_update=, so hosts query again there.
+
+** Charge and spin
+
+=rgpot_engine_set_charge_spin= sets the total charge and the spin multiplicity
+of the next calls on a handle, and a multiplicity below 1 returns 1.
+A value the backend cannot take returns 3, keeps the values in force and leaves
+the reason in =rgpot_engine_last_error=.
+No engine returns 0 for a value its model does not receive.
+
+| library | charge and multiplicity |
+|---------+-------------------------|
+| =libuma_engine= | graph inputs of every call; =UmaParams.charge= and =spin= at create |
+| =libmetatomic_engine= | system data the model declares; =MetatomicParams.charge= and =spin= at create |
+| =libskala_engine= | the NWChem input of the next call; =NWChemParams.charge= and =multiplicity= at create |
+| =libclassical_engine=, =libmopac_engine=, =libnwchem_engine=, =libxtb_engine= | none, so 3 for any value |
+
+A UMA package records the charge and spin it was exported for, and the next
+force call reports a mismatch.
+A Metatomic model reads the charge as =rgpot::charge= and the multiplicity as
+=rgpot::spin_multiplicity= or =rgpot::spin=.
+Each system carries the names the model declares in =requested_inputs=.
+Without =attachSystemExtras=, a model that declares none of them gets 3 from
+=rgpot_engine_set_charge_spin=.
+A value the model does not read must stay at its default, charge 0 or
+multiplicity 1.
+=rgpot_engine_set_charge_spin= returns 3 for another, and =create= fails for one
+in =MetatomicParams=.
+=MetatomicParams.attachSystemExtras= attaches all three names and accepts any
+value, for a model that reads them without declaring them.
+It needs =checkConsistency= off, because metatomic then rejects data the model
+does not declare.
+[[file:../howto/engine-metatomic.org][Metatomic and the engine ABI]] shows the
+declaration.
+
+** UMA unpack cache
+
+=UmaParams.cacheDir= (=UmaConfig::cache_dir= for a directly compiled =UmaPot=)
+names the root of the persistent cache that the =.pt2= is unpacked into.
+When it is empty the root is =$RGPOT_CACHE_DIR=, then =$XDG_CACHE_HOME/rgpot=
+(absolute values only), then =.rgpot-cache= in the working directory. torch's
+=AOTIModelPackageLoader= is not used, because it unpacks into a new directory
+under the system temporary directory and leaves it behind when the process dies.
+
+| Path under the root                         | Contents                                             |
+|---------------------------------------------+------------------------------------------------------|
+| =aoti/<sha256>.model/=                      | the package's =data/aotinductor/model= files and constants, as torch lays them out |
+| =aoti/<sha256>.model/rgpot-unpack.manifest= | package digest, model name, and the size of every unpacked file |
+| =aoti/.<sha256>.model.tmp-*=                | an unpack in progress                                |
+
+=<sha256>= is the digest of the =.pt2= bytes, so two models never share a
+directory and a rewritten package gets a new one.
+An unpack is written into a private =.tmp-= sibling and renamed into place once
+its manifest is complete.
+Processes and threads that load the same package at once each build a sibling,
+one rename wins, and the others use the winner's directory.
+A directory whose manifest is missing or whose files have the wrong size is
+replaced.
+Shared libraries lose the executable-stack flag (=PT_GNU_STACK= =PF_X=) on the
+way, for loaders that refuse an executable stack.
+A =.tmp-= sibling older than an hour, left by a process that died, is removed
+the next time that package is loaded.
+
+** UMA checkpoint provenance
+
+=rgpot_engine_model_digest= of =libuma_engine= is the SHA-256 of the =.pt2=.
+The digest of the weights inside it is package metadata, written by
+=scripts/export_uma_aoti.py=:
+
+| Key                      | Value                                                          |
+|--------------------------+----------------------------------------------------------------|
+| =checkpoint_source=      | =cli=, =env= or =hf=: where the exporter took the checkpoint from |
+| =checkpoint_path=        | the local checkpoint file (=cli= and =env=)                    |
+| =checkpoint_hf_repo=     | Hugging Face repository (=hf=)                                 |
+| =checkpoint_hf_filename= | file inside that repository (=hf=)                             |
+| =checkpoint_hf_revision= | commit the file was served from (=hf=)                         |
+| =checkpoint_sha256=      | SHA-256 of the checkpoint file, 64 lowercase hexadecimal digits |
+
+=UmaPot::checkpointProvenance()= returns them as a =UmaCheckpointProvenance=,
+whose fields are =std::optional= and unset for packages exported before the keys
+existed.
+=UmaPot= prints =checkpoint_sha256= on stderr when it loads the package, and
+=unset= for those packages.
+No engine ABI call returns the keys.
+A malformed =checkpoint_sha256=, =checkpoint_hf_revision= or =checkpoint_source=
+fails the load.
+
+** CP2K shim
+
+=CP2KPot= drives CP2K through
+=libcp2kc_rgpot=, a shim over libcp2k declared in =CppCore/rgpot/CP2KPot/cp2kc_abi.h=
+(=CP2KC_ABI_VERSION= 1).
+This is a separate ABI from the engine table.
+The shim is the only target that links libcp2k and MPI; =CP2KPot= opens it with
+=dlopen=, so =librgpot= gains neither dependency.
+Meson builds it with
+=-Dwith_cp2k=enabled= from the =libcp2k= pkg-config module (CMake: =-DRGPOT_WITH_CP2K=ON=).
+Without it =librgpot= contains no CP2K code, =potserv CP2K= exits with an error
+naming the option, and the other potserv backends refuse the =cp2k= arm in
+=configure()=.
+=CP2KPot= tries =CP2KParams.enginePath=, then
+=CP2KC_LIBRARY=, then =RGPOT_CP2K_ENGINE=, then =libcp2kc_rgpot.so= and
+=./libcp2kc_rgpot.so= (=.dylib= on macOS).
+
+| symbol | purpose |
+|--------+---------|
+| =cp2kc_abi_version=, =cp2kc_version=, =cp2kc_available= | identity |
+| =cp2kc_adopt_calculator_comm= | borrow the calculator's =MPI_Comm= |
+| =cp2kc_session_create= | write the deck to =dir/input.inp=, initialise libcp2k once |
+| =cp2kc_session_select_orbitals= | name the key whose force environment the next call uses |
+| =cp2kc_session_calculate= | positions and cell in Bohr in, Hartree and Hartree/Bohr forces out |
+| =cp2kc_session_destroy= | destroy the session's force environments |
+
+The shim uses CP2K's atomic units and takes no Cap'n Proto.
+=CP2KPot= renders the deck from =CP2KParams= and the first geometry, multiplies
+positions and cell rows by =ANGSTROM_TO_BOHR=, and returns the energy times
+=HARTREE_TO_EV= and the forces times =HARTREE_BOHR_TO_EV_ANGSTROM=. libcp2k
+returns forces, so there is no sign change.
+The cell rows are the cell vectors a, b and c.
+
+=cp2kc_session_calculate= returns 0 on success, 1 for a bad argument (including
+an atom count that differs from the deck), 2 when the SCF did not converge, and
+a negative value on a fatal error.
+The rendered deck sets =IGNORE_CONVERGENCE_FAILURE=, so CP2K warns instead of
+calling =MPI_ABORT=.
+After each evaluation the first rank of the calculator reads the new part of
+=cp2k.out= for =SCF run NOT converged= and shares the result, so every rank
+returns 2 for the same call.
+=CP2KPot= turns code 2 into =rgpot::CP2KScfError= (a =std::runtime_error=) on
+every rank without the error exchange.
+Any other failure takes the abort path described in [[file:mpi.org][MPI]].
+=CP2KPot= sets =has_stress= to 0.
+
+** XTB table
+
+=CppCore/rgpot/XTBPot/xtb_c_abi.h= declares the table that
+=libxtb_engine= exports next to the engine table and that =XTBDlopen= loads; see [[file:cpp_backends.org][C++
+engine-backed potentials]].
+=CppCore/rgpot/XTBPot/XTBEngineAbi.cc= implements it over a linked =XTBPot=, so
+Meson builds the library only with =-Dwith_xtb=true=.
+Positions and cells are in Angstrom, energies in eV and forces in eV/Angstrom.
+A cell is nine doubles in row-major order.
+=RGPOT_XTB_ABI_VERSION= is 1.
+The return codes of =rgpot_xtb_force= are not those of the engine table.
+
+=XTBDlopen= needs every function below.
+It refuses a =libxtb_engine= built before =rgpot_xtb_set_warm_min_gap= and
+=rgpot_xtb_warm_min_gap= existed as missing the C ABI, although that library
+reports the same version.
+
+*** =RgpotXtbPot=
+
+- Inputs :: none; an opaque handle.
+- Units :: none.
+- Outputs :: returned by =rgpot_xtb_create= and released by =rgpot_xtb_destroy=.
+- Errors :: none.
+
+A handle owns one =XTBPot=, so one thread uses it at a time.
+
+*** =RgpotXtbConfig=
+
+- Inputs :: =method= (=RGPOT_XTB_METHOD_GFNFF= 0, =RGPOT_XTB_METHOD_GFN0= 1,
+  =RGPOT_XTB_METHOD_GFN1= 2 or =RGPOT_XTB_METHOD_GFN2= 3), =accuracy=,
+  =electronic_temperature=, =max_iterations=, =charge= and =uhf=, the
+  =XTBConfig= fields with those names.
+- Units :: =electronic_temperature= in K; =charge= in elementary charges; the
+  other fields have no unit.
+- Outputs :: read by =rgpot_xtb_create=.
+- Errors :: none; a =method= outside 0 to 3 selects GFN2-xTB.
+
+The struct has no =warm_move= or =warm_min_gap=.
+A new handle starts with the =XTBConfig= defaults, and =rgpot_xtb_set_warm_move=
+and =rgpot_xtb_set_warm_min_gap= change them.
+
+*** =rgpot_xtb_abi_version=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_xtb_abi_version(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: =RGPOT_XTB_ABI_VERSION= (1).
+- Errors :: none.
+
+=XTBDlopen= refuses a library that returns another value.
+
+*** =rgpot_xtb_available=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_xtb_available(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: 1.
+- Errors :: none.
+
+*** =rgpot_xtb_create=
+
+#+attr_rgpot: signature
+#+begin_src c
+RgpotXtbPot *rgpot_xtb_create(const RgpotXtbConfig *cfg,
+                              char *errbuf, size_t errlen);
+#+end_src
+
+- Inputs :: =cfg=, the settings, or NULL for the =XTBConfig= defaults; =errbuf=
+  and =errlen=, a buffer for the failure reason (may be null or 0).
+- Units :: as =RgpotXtbConfig=.
+- Outputs :: a new handle, or NULL on failure.
+- Errors :: returns NULL and writes the message of the =XTBPot= constructor to
+  =errbuf= when xtb cannot create its environment, calculator or results.
+
+*** =rgpot_xtb_destroy=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_xtb_destroy(RgpotXtbPot *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle from =rgpot_xtb_create= or NULL.
+- Units :: none.
+- Outputs :: none; the handle and its =XTBPot= are freed.
+- Errors :: none; NULL is accepted.
+
+*** =rgpot_xtb_force=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_xtb_force(RgpotXtbPot *pot, long nAtoms,
+                    const double *positions, const int *atomicNrs,
+                    double *forces, double *energy,
+                    double *variance, const double *box);
+#+end_src
+
+- Inputs :: =pot=; =nAtoms=; =positions=, =3 * nAtoms= doubles; =atomicNrs=,
+  =nAtoms= atomic numbers; =box=, the cell; =forces= (=3 * nAtoms= doubles),
+  =energy= and =variance=, where the results go.
+  =variance= may be NULL.
+- Units :: =positions= and =box= in Angstrom, =energy= in eV, =forces= in
+  eV/Angstrom.
+- Outputs :: 0, with =*energy=, =forces= and =*variance= (always 0) written.
+- Errors :: -1 for a null handle, a null pointer other than =variance=, or
+  =nAtoms= of zero or less. -2 when =XTBPot= threw a =std::exception=; the
+  message is not kept. -3 for any other exception.
+  Nothing is written on an error.
+
+*** =rgpot_xtb_reset=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_xtb_reset(RgpotXtbPot *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle or NULL.
+- Units :: none.
+- Outputs :: none; =XTBPot::reset= drops the stored wavefunction.
+- Errors :: none returned; NULL is ignored.
+  The call does not catch the =std::runtime_error= of =XTBPot::reset=.
+
+*** =rgpot_xtb_set_warm_move=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_xtb_set_warm_move(RgpotXtbPot *pot, double angstrom);
+#+end_src
+
+- Inputs :: =pot=, a handle or NULL; =angstrom=, the displacement guard of
+  =XTBPot::setWarmMove=.
+- Units :: Angstrom.
+- Outputs :: none.
+- Errors :: none; NULL is ignored.
+
+*** =rgpot_xtb_warm_move=
+
+#+attr_rgpot: signature
+#+begin_src c
+double rgpot_xtb_warm_move(const RgpotXtbPot *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle or NULL.
+- Units :: Angstrom.
+- Outputs :: the displacement guard, or 0 for NULL.
+- Errors :: none.
+
+*** =rgpot_xtb_set_warm_min_gap=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_xtb_set_warm_min_gap(RgpotXtbPot *pot, double ev);
+#+end_src
+
+- Inputs :: =pot=, a handle or NULL; =ev=, the gap guard of
+  =XTBPot::setWarmMinGap=.
+- Units :: eV.
+- Outputs :: none.
+- Errors :: none; NULL is ignored.
+
+*** =rgpot_xtb_warm_min_gap=
+
+#+attr_rgpot: signature
+#+begin_src c
+double rgpot_xtb_warm_min_gap(const RgpotXtbPot *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle or NULL.
+- Units :: eV.
+- Outputs :: the gap guard, or 0 for NULL.
+- Errors :: none.
+
+*** =rgpot_xtb_reused_wavefunction=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_xtb_reused_wavefunction(const RgpotXtbPot *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle or NULL.
+- Units :: none.
+- Outputs :: 1 when =XTBPot::reusedWavefunction= is true, else 0; 0 for NULL.
+- Errors :: none.
+
+** Metatomic table
+
+=CppCore/rgpot/MetatomicPot/metatomic_c_abi.h= declares the table that
+=libmetatomic_engine= exports next to the engine table and that
+=MetatomicDlopen= loads.
+=CppCore/rgpot/MetatomicPot/MetatomicEngineAbi.cc= implements it over a
+=MetatomicPot=.
+Positions and cells are in Angstrom, energies in eV and forces in eV/Angstrom,
+unless the config names another =length_unit=.
+=RGPOT_MTA_ABI_VERSION= is 1.
+The return codes of =rgpot_mta_force= are not those of the engine table.
+
+*** =RgpotMtaPot=
+
+- Inputs :: none; an opaque handle.
+- Units :: none.
+- Outputs :: returned by =rgpot_mta_create= and released by =rgpot_mta_destroy=.
+- Errors :: none.
+
+*** =RgpotMtaConfig=
+
+- Inputs :: =model_path=, =device=, =length_unit=,
+  =extensions_directory=, =check_consistency=,
+  =uncertainty_threshold=, =dtype_override=,
+  =random_rotation=, =n_symmetry_rotations= and =so3_probe_scatter=, the =MetatomicConfig= fields with those names, and =torch_determinism_strict=
+  (0 for =TorchDeterminismPolicy::Fast=, 1 for =Strict=).
+  A null string counts as empty.
+- Units :: as =MetatomicConfig=.
+- Outputs :: read by =rgpot_mta_create=.
+- Errors :: none here; =rgpot_mta_create= reports a missing model.
+
+An empty =device= becomes =cpu=, not metatomic's choice, and an empty
+=length_unit= becomes =angstrom=.
+The struct has no =engine_path=, =task_name=, =charge=, =spin= or
+=attach_system_extras=.
+
+*** =rgpot_mta_abi_version=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_mta_abi_version(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: =RGPOT_MTA_ABI_VERSION= (1).
+- Errors :: none.
+
+=MetatomicDlopen= refuses a library that returns another value.
+
+*** =rgpot_mta_available=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_mta_available(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: 1.
+- Errors :: none.
+
+=MetatomicDlopen= does not call it.
+
+*** =rgpot_mta_create=
+
+#+attr_rgpot: signature
+#+begin_src c
+RgpotMtaPot *rgpot_mta_create(const RgpotMtaConfig *cfg,
+                              char *errbuf, size_t errlen);
+#+end_src
+
+- Inputs :: =cfg=, the settings; =errbuf= and =errlen=, a buffer for the failure
+  reason (may be null or 0).
+- Units :: as =RgpotMtaConfig=.
+- Outputs :: a new handle, or NULL on failure.
+- Errors :: returns NULL and writes
+  =rgpot_mta_create: model_path required= for a null =cfg= or an empty =model_path=.
+  Returns NULL with the message of the =MetatomicPot= constructor when the model
+  does not load, has no energy output, or has a dtype other than =float32= or
+  =float64=.
+
+*** =rgpot_mta_destroy=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_mta_destroy(RgpotMtaPot *pot);
+#+end_src
+
+- Inputs :: =pot=, a handle from =rgpot_mta_create= or NULL.
+- Units :: none.
+- Outputs :: none; the handle and its =MetatomicPot= are freed.
+- Errors :: none; NULL is accepted.
+
+*** =rgpot_mta_force=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_mta_force(RgpotMtaPot *pot, long nAtoms,
+                    const double *positions, const int *atomicNrs,
+                    double *forces, double *energy,
+                    double *variance, const double *box);
+#+end_src
+
+- Inputs :: as =rgpot_xtb_force=, with an =RgpotMtaPot= handle.
+- Units :: as =MetatomicPot=: Angstrom in, eV and eV/Angstrom out with the
+  default =length_unit=.
+- Outputs :: 0, with =*energy=, =forces= and =*variance=, the =MetatomicPot=
+  variance, written.
+- Errors :: 1 for a null handle, a null pointer other than =variance=, or
+  =nAtoms= of zero or less. 2 when the potential threw, after printing
+  =rgpot_mta_force: <message>= on stderr.
+  Nothing is written on an error.
+
+A thread that holds the Python GIL releases it for the evaluation, so torch
+autograd can run.
+The engine looks the CPython calls up at run time and does not link libpython.

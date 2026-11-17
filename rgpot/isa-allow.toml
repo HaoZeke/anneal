@@ -1,10 +1,14 @@
 # An above-baseline instruction in librgpot or _core is a violation
-# unless an [[allow]] names that symbol.
+# unless an [[allow]] names that symbol or the auditor proves the function
+# is a dispatched clone (ci/isa-audit/dispatch.py): a local function that
+# is entered only behind a __cpu_model test or from a target_clones
+# resolver. Those clones (the AVX2 Lennard-Jones, Morse and Gupta bodies,
+# the exp_fixed_n clones) need no entry here.
 #
-# Highway target("fma") bodies and the target("avx2") Lennard-Jones
-# cluster kernel are entered only after a runtime check. The FMA fold
-# and the fixed-sequence exp clones are entered only after
-# fma_hw_active() or the CPU check of function multiversioning.
+# The entries below are the bodies the proof cannot see. The Highway
+# target("fma") helpers are exported, and they and the FMA fold are
+# entered only after fma_hw_active(), a cached flag rather than a CPU
+# model bit.
 # Vendored entries cover libraries that auditwheel or delocate copy into
 # the wheel and that select kernels at run time. A feature not listed
 # here still fails the audit.
@@ -14,12 +18,7 @@ baseline = "x86-64"
 [[allow]]
 symbol = "^rgpot::simd::(?:accept_row_hw|eam_fma|eam_hw|exact_fma_hw|exp2_hw|exp_hw_n|lj_hw_span|lj_hw|morse8_hw|morse_hw|r2_hw_n|r2_hw)(?:\\(|$)"
 features = ["avx", "fma"]
-reason = "target(\"fma\") bodies, entered only after glibc_fma_active()"
-
-[[allow]]
-symbol = "^rgpot::(?:_GLOBAL__N_[0-9]+::|\\(anonymous namespace\\)::)(?:lj_avx2|eval_quad|acc_quad)(?:\\(|$)"
-features = ["avx", "avx2"]
-reason = "target(\"avx2\") LJ cluster bodies, entered only after __builtin_cpu_supports(\"avx2\")"
+reason = "target(\"fma\") bodies, entered only after fma_hw_active()"
 
 [[allow]]
 symbol = "^__cpu_indicator_init(?:\\(|$)"
@@ -143,14 +142,6 @@ reason = "libquadmath, vendored beside libgfortran"
 symbol = '^(rgpot::simd::exact_fma_hw|rgpot::nlist::_GLOBAL__N_[0-9]+::fold_hardware)\b|rgpot::nlist::CachedPairList::accumulateHw<'
 features = ["avx", "fma", "sse3"]
 reason = "FMA bodies selected when the processor's FMA is usable"
-
-# Vector-width clones (target_clones) of loops that use no FMA. The loader
-# picks a clone from libgcc's own CPU check; each clone returns the bits of
-# the baseline one.
-[[allow]]
-symbol = '^rgpot::(simd::exp_fixed_n|detail::morse_row)\(.*\) \[clone \.(avx2|avx512f)[^\]]*\]|^_ZN5rgpot(4simd11exp_fixed_n|6detail9morse_row)E\S*\.(avx2|avx512f)$'
-features = ["avx", "avx2", "avx512f", "sse3", "ssse3", "sse4_1", "sse4_2", "popcnt"]
-reason = "vector-width clones selected by the CPU check of function multiversioning"
 
 # The FMA probe and libgcc's CPU model (linked in for the target_clones
 # resolvers) read XCR0 after CPUID reports OSXSAVE.

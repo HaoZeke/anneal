@@ -173,6 +173,7 @@ def compile_rgpot() -> None:
         "-I",
         str(ROOT / "CppCore"),
         str(source),
+        str(ROOT / "CppCore/rgpot/Slices.cc"),
         str(ROOT / "CppCore/rgpot/nlist/NeighbourList.cc"),
         str(ROOT / "CppCore/rgpot/nlist/Neighbours.cc"),
         str(ROOT / "CppCore/rgpot/nlist/MinimumImage.cpp"),

@@ -30,7 +30,7 @@ TEST_CASE("Invariance and Caching Behavior", "[Invariance]") {
   rocksdb::DestroyDB(db_path, opts);
   auto pcache = rgpot::cache::PotentialCache(db_path);
   auto pot = std::make_shared<rgpot::LJPot>();
-  pot->set_cache(&pcache);
+  pot->setCache(&pcache);
 
   // 2. Define System (Dimer)
   rgpot::types::AtomMatrix pos(2, 3);

@@ -129,7 +129,7 @@ TEST_CASE("Tersoff 1989 diamond cohesive energies", "[TersoffSiC]") {
   pot.energyAndGradient(big.data(), types.data(), box, types.size(), &e_big,
                         grad.data());
   REQUIRE_THAT(e_big, WithinAbs(27.0 * e_si, 1e-6));
-  REQUIRE(pot.get_type() == rgpot::PotType::TersoffSi);
+  REQUIRE(pot.getType() == rgpot::PotType::TersoffSi);
   REQUIRE(pot.paramsKey() == TersoffSiC{}.paramsKey());
 }
 

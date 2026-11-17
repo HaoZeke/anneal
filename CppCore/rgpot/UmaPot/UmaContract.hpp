@@ -78,7 +78,7 @@ private:
 /**
  * @brief Charge, spin, task and composition embedded in a ``.pt2``.
  *
- * Built from ``AOTIModelPackageLoader::get_metadata()``. Every field is
+ * Built from the package's embedded metadata JSON. Every field is
  * optional: a key the exporter did not write is not checked.
  * ``scripts/export_uma_aoti.py`` writes ``task_name``, ``charge``,
  * ``spin``, ``z_set`` (a list such as ``[1, 6, 7]``), ``natoms`` and
@@ -87,6 +87,12 @@ private:
  * the edge-count range the exported graph accepts (equal for a static
  * package, whose graph is traced at one edge count); packages from older
  * exporters carry the first four only.
+ *
+ * A dynamic package declares ``pos_shape`` ``natoms,3`` with
+ * ``natoms_min`` and ``natoms_max``, and ``edge_index_shape``
+ * ``2,nedges``. When it keeps the MoLE experts it records no ``z_set``,
+ * ``natoms`` or ``counts``; ``z_max`` then bounds the atomic numbers the
+ * element embeddings can index.
  */
 struct UmaContract {
   std::optional<std::string> task_name;
@@ -99,6 +105,7 @@ struct UmaContract {
   std::optional<int64_t> natoms_max;
   std::optional<int64_t> nedges_min;
   std::optional<int64_t> nedges_max;
+  std::optional<int64_t> z_max;
 
   /// One axis of a declared tensor shape. A symbolic axis is a name
   /// such as ``nedges`` with an inclusive range; a fixed axis is one
@@ -119,6 +126,53 @@ struct UmaContract {
 
   ShapeDecl pos_decl;
   ShapeDecl edge_decl;
+
+  /// Second extent of ``edge_index`` inside the exporter's ``shapes``
+  /// dict (``{'edge_index': [2, 1332], ...}``). Packages written before
+  /// ``nedges_min`` and ``nedges_max`` record a fixed edge list there
+  /// and nowhere else. A missing or non-fixed entry is not a count.
+  static std::optional<int64_t>
+  fixedEdgesFromShapes(const std::string *shapes) {
+    if (shapes == nullptr)
+      return std::nullopt;
+    const std::string &s = *shapes;
+    const std::string key = "edge_index";
+    std::size_t at = 0;
+    while (at < s.size()) {
+      const auto found = s.find(key, at);
+      if (found == std::string::npos)
+        return std::nullopt;
+      const bool boundary = found == 0 || s[found - 1] == '\'' ||
+                            s[found - 1] == '"' || s[found - 1] == '{' ||
+                            s[found - 1] == ' ' || s[found - 1] == ',';
+      std::size_t i = found + key.size();
+      if (!boundary || i > s.size()) {
+        at = found + 1;
+        continue;
+      }
+      if (i < s.size() && (s[i] == '\'' || s[i] == '"'))
+        ++i;
+      // ``edge_index_shape`` and other longer names are not this key.
+      if (i < s.size() &&
+          ((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z') ||
+           s[i] == '_')) {
+        at = i;
+        continue;
+      }
+      while (i < s.size() && (s[i] == ' ' || s[i] == ':' || s[i] == '='))
+        ++i;
+      if (i >= s.size() || s[i] != '[')
+        return std::nullopt;
+      const auto close = s.find(']', i);
+      if (close == std::string::npos)
+        return std::nullopt;
+      const auto dims = integers(s.substr(i, close - i + 1));
+      if (dims.size() == 2 && dims[0] == 2 && dims[1] > 0)
+        return dims[1];
+      return std::nullopt;
+    }
+    return std::nullopt;
+  }
 
   /// Signed decimal integers in order of appearance; anything else
   /// separates them.
@@ -166,15 +220,27 @@ struct UmaContract {
     c.natoms = one_int("natoms");
     c.nedges_min = one_int("nedges_min");
     c.nedges_max = one_int("nedges_max");
-    // A package with no edge range used to skip the check and then run
-    // a static graph. That returns a finite force for the wrong
-    // neighbour list. Both keys are required.
-    if (!c.nedges_min || !c.nedges_max) {
-      throw UmaContractError("nedges", "nedges_min and nedges_max", "absent",
+    // Published packages record a fixed edge list in ``shapes`` and
+    // carry neither range key. That count is the traced size: the
+    // neighbour list is built or padded to it, and a graph that cannot
+    // fit is named before the compiled graph runs. One key without the
+    // other is still not a range.
+    if (!c.nedges_min && !c.nedges_max) {
+      if (const auto fixed = fixedEdgesFromShapes(get("shapes"))) {
+        c.nedges_min = fixed;
+        c.nedges_max = fixed;
+      } else {
+        throw UmaContractError("nedges", "nedges_min and nedges_max", "absent",
+                               "package");
+      }
+    } else if (!c.nedges_min || !c.nedges_max) {
+      const char *missing = c.nedges_min ? "nedges_max" : "nedges_min";
+      throw UmaContractError(missing, "nedges_min and nedges_max", "absent",
                              "package");
     }
     c.natoms_min = one_int("natoms_min");
     c.natoms_max = one_int("natoms_max");
+    c.z_max = one_int("z_max");
     c.pos_decl = c.parseShape(get("pos_shape"));
     c.edge_decl = c.parseShape(get("edge_index_shape"));
     if (!c.pos_decl.known && c.natoms) {
@@ -404,6 +470,14 @@ struct UmaContract {
     if (natoms && *natoms != static_cast<int64_t>(nAtoms))
       throw UmaContractError("natoms", std::to_string(*natoms),
                              std::to_string(nAtoms), "input");
+    if (z_max) {
+      for (size_t i = 0; i < nAtoms; ++i) {
+        if (atmnrs[i] >= 1 && atmnrs[i] <= *z_max)
+          continue;
+        throw UmaContractError("z_max", "1 to " + std::to_string(*z_max),
+                               std::to_string(atmnrs[i]), "input atomic number");
+      }
+    }
     if (!z_set && !counts)
       return;
     std::map<int64_t, int64_t> have;

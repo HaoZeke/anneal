@@ -9,9 +9,10 @@
  * that exports a single symbol: rgpot_plugin_init(), returning a pointer to a
  * static descriptor struct.
  *
- * The host (rgpot) discovers plugins by scanning directories listed in the
- * RGPOT_PLUGIN_PATH environment variable, dlopen's each library, calls
+ * A host that calls rgpot::plugin::PluginRegistry::discover() scans the
+ * directories listed in RGPOT_PLUGIN_PATH, dlopens each library, calls
  * rgpot_plugin_init(), validates the API version, and registers the plugin.
+ * librgpot itself never calls discover().
  *
  * Plugins can be implemented in any language that can produce a C-compatible
  * shared library: C, C++, Rust, Fortran (bind(C)), Python (ctypes/cffi), etc.
@@ -51,7 +52,8 @@ typedef enum rgpot_plugin_caps_t {
   RGPOT_CAP_VARIANCE = (1 << 2),
   RGPOT_CAP_STRESS = (1 << 3), /* reserved */
   /* Independent instances may calculate concurrently. Absent means the
-   * host serializes calls across all instances of this plugin. */
+   * host serializes the call behind one process-wide lock shared by every
+   * plugin without this flag. */
   RGPOT_CAP_INSTANCE_SAFE = (1 << 4),
   RGPOT_CAP_PERIODIC = (1 << 5),
 } rgpot_plugin_caps_t;

@@ -8,7 +8,13 @@ the [[https://symengine.org/symengine/md_md_doc_guide.html][Symengine C++ bindin
 - Language :: English.
 - Dates :: All dates must be formatted as =YYYY-MM-DD=.
 - Symbols :: Avoid Unicode symbols. TeX math mode is permitted for equations.
-- Naming :: Use =snake_case= for variables and functions.
+- Naming :: Variables use =snake_case=.
+  Member functions of the potential classes and the =rgpot::lr= summands use
+  =camelCase= (=getType=, =setCache=, =probeAvailable=, =setNeighbours=).
+  Some classes keep =snake_case= members, such as =PotentialCache::set_db=;
+  match the class you edit.
+  C ABI functions are =rgpot_= plus =snake_case=, and Python names are
+  =snake_case=.
 - Lists :: Use =.= at the end of each list item.
 
 ** Doxygen Markup
@@ -27,9 +33,11 @@ We use the =@= character for all Doxygen commands.
 
 ** License and Copyright
 
-Every source file must begin with the specific license header before any
-includes, guards, or documentation blocks.
+Every source file begins with the license header, before any includes and
+documentation blocks.
+Headers put =#pragma once= on the line above it.
 
+#+attr_rgpot: fragment
 #+BEGIN_SRC cpp
 // MIT License
 // Copyright 2023--present rgpot developers
@@ -45,6 +53,7 @@ Every file may contain a =@file= block immediately following the license header.
 - =@brief= : A single-line summary.
 - =Created on:= : (Non-Doxygen field) The original creation date.
 
+#+attr_rgpot: fragment
 #+BEGIN_SRC cpp
 /**
  * @file MyFile.hpp
@@ -59,8 +68,9 @@ Every file may contain a =@file= block immediately following the license header.
 ** C++ Guidelines
 
 *** Documentation Style
-- Blocks :: Use the =/ ... */= style.
+- Blocks :: Use the =/** ... */= style.
 - Indentation :: One space before the asterisk, two spaces after.
+  #+attr_rgpot: fragment
   #+BEGIN_SRC cpp
   /**
    * @brief ...
@@ -88,8 +98,11 @@ Required directives order:
 
 ** Cap'n Proto Guidelines
 
-Since Doxygen is configured to map =.capnp= files to C++, use standard Doxygen commands prefixed by the Cap'n Proto comment character =#=.
+=docs/source/Doxyfile_potlib.cfg= does not read =.capnp= files.
+Schema comments still use Doxygen commands after the Cap'n Proto comment
+character =#=, as in =CppCore/rgpot/rpc/Potentials.capnp=.
 
+#+attr_rgpot: fragment
 #+BEGIN_SRC capnp
 # @struct ForceInput
 # @brief Input configuration for a potential energy evaluation.
@@ -100,8 +113,9 @@ struct ForceInput {
 
 ** Example: C++ Class
 
+#+attr_rgpot: fragment
 #+BEGIN_SRC cpp
-namespace rgpot {
+namespace rgpot::cache {
 
 /**
  * @class PotentialCache
@@ -118,5 +132,5 @@ public:
   void set_db(rocksdb::DB *db);
 };
 
-} // namespace rgpot
+} // namespace rgpot::cache
 #+END_SRC

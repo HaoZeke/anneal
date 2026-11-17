@@ -26,8 +26,10 @@
 #include <cmath>
 #include <vector>
 
+#include "rgpot/StillingerWeber/SWSi.hpp"
 #include "rgpot/Tersoff/TersoffSiC.hpp"
 #include "rgpot/fortran/FortranPots.hpp"
+#include "rgpot/stress.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
 #include <stdexcept>
@@ -106,6 +108,161 @@ TEST_CASE("SW silicon matches the eOn reference", "[fortran][sw]") {
   REQUIRE_THAT(energy, WithinRel(-16.204955, 1e-4));
   REQUIRE_THAT(maxForceNorm(forces), WithinRel(0.005232, 1e-2));
   requireNoNetForce(forces);
+}
+
+namespace {
+
+struct SwStress {
+  double energy = 0.0;
+  std::array<double, 9> stress{};
+};
+
+template <typename Pot>
+SwStress swStress(const Pot &pot, const std::vector<double> &R,
+                  const std::array<double, 9> &box) {
+  std::vector<double> F(R.size(), 0.0);
+  const std::vector<int> types(R.size() / 3, 14);
+  rgpot::ForceInput in{.nAtoms = R.size() / 3,
+                       .pos = R.data(),
+                       .atmnrs = types.data(),
+                       .box = box.data()};
+  rgpot::ForceOut fo{.F = F.data(),
+                     .energy = 0.0,
+                     .variance = 0.0,
+                     .stress = {},
+                     .has_stress = 0};
+  pot.forceImpl(in, &fo);
+  REQUIRE(fo.has_stress == 1);
+  SwStress out{fo.energy, {}};
+  std::copy(fo.stress, fo.stress + 9, out.stress.begin());
+  return out;
+}
+
+/// 216 diamond silicon atoms at fractions of `box`, moved by up to
+/// `wobble` Angstrom along each Cartesian direction.
+std::vector<double> siBlock(const std::array<double, 9> &box, double wobble) {
+  static const double basis[8][3] = {
+      {0.00, 0.00, 0.00}, {0.00, 0.50, 0.50}, {0.50, 0.00, 0.50},
+      {0.50, 0.50, 0.00}, {0.25, 0.25, 0.25}, {0.25, 0.75, 0.75},
+      {0.75, 0.25, 0.75}, {0.75, 0.75, 0.25}};
+  std::vector<double> R;
+  for (int ix = 0; ix < 3; ++ix)
+    for (int iy = 0; iy < 3; ++iy)
+      for (int iz = 0; iz < 3; ++iz)
+        for (const auto &b : basis) {
+          const double f[3] = {(ix + b[0]) / 3, (iy + b[1]) / 3,
+                               (iz + b[2]) / 3};
+          const auto k = static_cast<double>(R.size() / 3);
+          for (int c = 0; c < 3; ++c) {
+            R.push_back(f[0] * box[c] + f[1] * box[3 + c] + f[2] * box[6 + c] +
+                        wobble * std::sin((1.3 + 0.4 * c) * k + c));
+          }
+        }
+  return R;
+}
+
+/// (1/V) dE/d(eps_row,col) by the fourth-order central difference, step
+/// 2e-4. The strain maps every position and cell row r to r (I + eps).
+double swStrainDifference(const std::vector<double> &R,
+                          const std::array<double, 9> &box, int row, int col) {
+  constexpr double h = 2e-4;
+  const rgpot::fortranpots::SWPot pot;
+  auto energyAt = [&](double eps) {
+    std::vector<double> p = R;
+    std::array<double, 9> cell = box;
+    for (std::size_t a = 0; a < R.size() / 3; ++a) {
+      p[3 * a + col] += eps * R[3 * a + row];
+    }
+    for (int k = 0; k < 3; ++k) {
+      cell[3 * k + col] += eps * box[3 * k + row];
+    }
+    return swStress(pot, p, cell).energy;
+  };
+  return (8.0 * (energyAt(h) - energyAt(-h)) -
+          (energyAt(2 * h) - energyAt(-2 * h))) /
+         (12.0 * h * rgpot::cellVolume(box.data()));
+}
+
+} // namespace
+
+TEST_CASE("SW stress matches a strain difference and the 1985 kernel",
+          "[fortran][sw][stress]") {
+  rgpot::fortranpots::SWPot pot;
+  REQUIRE(pot.caps().stress);
+  // Both kernels are linear in epsilon and share every other parameter.
+  const double ratio =
+      2.16826 * 1.06767385 / rgpot::StillingerWeberSi::kEpsilon;
+  const double l = 3 * 5.431;
+  const std::array<double, 9> compressed{0.98 * l, 0, 0, 0, 0.98 * l,
+                                         0,        0, 0, 0.98 * l};
+  const std::array<double, 9> sheared{l, 0,        0,         0.10 * l, l,
+                                      0, 0.05 * l, -0.07 * l, l};
+  for (const auto &[box, wobble] :
+       {std::pair{compressed, 0.0}, std::pair{sheared, 0.1}}) {
+    const std::vector<double> R = siBlock(box, wobble);
+    const SwStress got = swStress(pot, R, box);
+    const SwStress ref = swStress(rgpot::StillingerWeberSi{}, R, box);
+    REQUIRE_THAT(got.energy, WithinRel(ratio * ref.energy, 1e-13));
+    for (int k = 0; k < 9; ++k) {
+      CAPTURE(wobble, k, got.stress[k], ref.stress[k]);
+      REQUIRE_THAT(got.stress[k], WithinAbs(ratio * ref.stress[k], 1e-14));
+      REQUIRE_THAT(got.stress[k],
+                   WithinAbs(swStrainDifference(R, box, k / 3, k % 3), 5e-10));
+    }
+    if (wobble == 0.0) {
+      for (int k : {0, 4, 8}) {
+        REQUIRE(got.stress[k] < -1e-2);
+      }
+    } else {
+      for (int k : {1, 2, 5}) {
+        REQUIRE(std::abs(got.stress[k]) > 1e-3);
+      }
+    }
+  }
+}
+
+TEST_CASE("SW batch returns the forceImpl energies and forces without stress",
+          "[fortran][sw][stress]") {
+  rgpot::fortranpots::SWPot pot;
+  const double l = 3 * 5.431;
+  const std::array<double, 9> compressed{0.98 * l, 0, 0, 0, 0.98 * l,
+                                         0,        0, 0, 0.98 * l};
+  const std::array<double, 9> sheared{l, 0,        0,         0.10 * l, l,
+                                      0, 0.05 * l, -0.07 * l, l};
+  const std::array<std::array<double, 9>, 2> boxes{compressed, sheared};
+  const std::array<std::vector<double>, 2> R{siBlock(compressed, 0.0),
+                                             siBlock(sheared, 0.1)};
+  const std::vector<int> types(R[0].size() / 3, 14);
+
+  std::array<std::vector<double>, 2> refF, gotF;
+  std::vector<rgpot::ForceInput> in;
+  std::array<rgpot::ForceOut, 2> ref{}, got{};
+  for (std::size_t s = 0; s < 2; ++s) {
+    refF[s].assign(R[s].size(), 0.0);
+    gotF[s].assign(R[s].size(), 0.0);
+    in.push_back({.nAtoms = R[s].size() / 3,
+                  .pos = R[s].data(),
+                  .atmnrs = types.data(),
+                  .box = boxes[s].data()});
+    ref[s].F = refF[s].data();
+    got[s].F = gotF[s].data();
+    std::fill(got[s].stress, got[s].stress + 9, 1.0);
+    got[s].has_stress = 1;
+    pot.forceImpl(in[s], &ref[s]);
+    REQUIRE(ref[s].has_stress == 1);
+  }
+
+  pot.forceBatch({.nSystems = 2, .in = in.data(), .out = got.data()});
+  for (std::size_t s = 0; s < 2; ++s) {
+    CAPTURE(s);
+    REQUIRE(got[s].energy == ref[s].energy);
+    REQUIRE(gotF[s] == refF[s]);
+    REQUIRE(got[s].variance == 0.0);
+    REQUIRE(got[s].has_stress == 0);
+    for (const double v : got[s].stress) {
+      REQUIRE(v == 0.0);
+    }
+  }
 }
 
 TEST_CASE("Tersoff silicon matches the eOn reference", "[fortran][tersoff]") {

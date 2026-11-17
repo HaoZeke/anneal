@@ -35,6 +35,21 @@ def lj_crystal() -> Atoms:
     return atoms
 
 
+def si_crystal() -> Atoms:
+    """64 diamond silicon atoms in a sheared periodic cell, rattled."""
+    from ase.build import bulk
+
+    atoms = bulk("Si", "diamond", a=5.431, cubic=True).repeat(2)
+    cell = atoms.cell.array.copy()
+    side = cell[0, 0]
+    cell[1, 0] = 0.10 * side
+    cell[2, 0] = 0.05 * side
+    cell[2, 1] = -0.07 * side
+    atoms.set_cell(cell, scale_atoms=True)
+    atoms.rattle(stdev=0.05, seed=3)
+    return atoms
+
+
 def pt7(side: float = 2.7, z: int = 13, jitter: float = 0.0, seed: int = 0) -> Atoms:
     """Pentagonal bipyramid. Atomic number 13 is aluminium for EAM-Al."""
     radius = side / (2.0 * math.sin(math.pi / 5.0))

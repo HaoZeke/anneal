@@ -2,18 +2,8 @@
 #+OPTIONS: author:nil
 #+DESCRIPTION: How legacy potential kernels become Fortran 2018 modules in rgpot.
 
-* Why a port and not a wrapper
-
-The kernels absorbed from eOn were written between 1985 and 2010: fixed form,
-~implicit real*8 (a-h,o-z)~, COMMON blocks holding state across calls, ~goto~
-chains, and hand-rolled neighbour lists with fixed-size caps that overflow
-silently.
-Wrapping that in ~bind(c)~ preserves every one of those properties and adds a
-language boundary on top.
-
-Each kernel is instead rewritten as a Fortran 2018 module.
-The physics expressions carry over term by term; everything around them is
-replaced.
+Why kernels are ported and why they gather are explained in
+[[file:../explanation/fortran-kernels.org][Fortran kernels: port, not wrap]].
 
 * Rules
 
@@ -26,8 +16,9 @@ The module asserts ~wp == c_double~ at compile time.
 3. *No COMMON, no ~save~ state in the physics.* Parameters live in a derived
    type
 with defaults; scratch lives in local automatic arrays.
-Saved state is allowed only in the ~_capi~ module (the neighbour table and the
-parameter set), never in a kernel.
+Saved state is allowed only in the ~_capi~ module (the parameter set and the
+legacy workspace of the handle-free entry), never in a kernel.
+Per-caller neighbour tables live in workspaces from ~rgpot_workspace~.
 ~params_ready~ is written once, under C++ ~std::call_once~, and the parameter
 block is read-only after that.
 The handle-free entry's legacy workspace is process-serial and is not on the
@@ -40,61 +31,14 @@ Python path.
 6. *Kernels are ~pure~* (or ~elemental~) wherever the algorithm allows, which is
 also what ~do concurrent~ requires of anything it calls.
 7. *Failures return a status.* No ~stop~, no ~write(6,*)~ diagnostics from a
-library kernel: set a message through ~rgpot_ferror~ and return non-zero.
+library kernel: set a message (in the workspace for a
+~_ws~ entry, through ~rgpot_ferror~ for the handle-free entry) and return
+non-zero.
 The C++ wrapper turns that into an exception.
-8. *Neighbours come from vesin* through ~rgpot_neighbors~.
+8. *Neighbours come from rgpot's neighbour query* (~rgpot_nlist_fortran_build~
+in ~CppCore/rgpot/nlist/rgpot_nlist.h~) through ~rgpot_neighbors~.
 No pot builds its own list, and no pot repeats minimum-image arithmetic: the
 table carries pair vectors and distances.
-
-* Gather, not scatter
-
-Legacy pair loops update both atoms of a pair (~f(i) += g; f(j) -= g~), so the
-atom loop carries dependencies and cannot be parallelised as written.
-Every port restates the sum as a *gather*: with a full neighbour list, atom ~i~
-accumulates the entire force acting on it and writes only ~f(:, i)~.
-Iterations then touch disjoint memory:
-
-#+begin_src fortran
-do concurrent(i=1:natoms)
-   call atom_contribution(par, table, i, e_atom(i), forces(:, i))
-end do
-energy = sum(e_atom)
-#+end_src
-
-Energy reduces through a per-atom array rather than a shared accumulator,
-because ~do concurrent~ gained reduction clauses only in Fortran 2023.
-
-** What ~do concurrent~ actually buys
-
-Compilers are not obliged to run these iterations in parallel, and by default
-gfortran does not: without ~-ftree-parallelize-loops~ (or a compiler that maps
-the construct onto threads) it treats the construct as an assertion about
-independence.
-The assertion is still worth having.
-It licenses vectorisation, it documents the dependency structure for the next
-reader, and above all it forces the discipline that made the port correct: every
-procedure the loop body calls must be ~pure~, and every write must land in
-memory no other iteration touches.
-Turning the construct into real parallelism later is then a compiler flag rather
-than a rewrite.
-
-** Cost
-
-A gather evaluates each pair twice (once from each end).
-For three-body terms the atom also walks its neighbours' neighbour lists to
-collect the triplets it participates in without centring.
-The arithmetic roughly doubles; the loop becomes trivially parallel and cache-
-local per atom.
-
-** When the gather does not close
-
-Some kernels have terms whose force cannot be attributed to one atom without
-recomputing a large intermediate (bond-order derivatives that depend on a full
-coordination sum, for instance).
-Where restating the term would cost more than it saves, keep a structured
-scatter loop for that phase, run the independent phases under ~do concurrent~,
-and say so in a comment naming the dependency.
-Do not silently put a scatter inside ~do concurrent~.
 
 * Layout
 
@@ -102,9 +46,15 @@ Two modules per potential:
 
 - ~rgpot_<pot>.f90~ :: parameters, pure kernels, the energy/force driver.
 Pure Fortran, testable without the C++ stack.
-- ~rgpot_<pot>_capi.f90~ :: the ~bind(c)~ entry ~rgpot_<pot>_force(natoms,
-positions, cell, forces, energy)~ returning a status, plus the saved neighbour
-table and parameter set.
+- ~rgpot_<pot>_capi.f90~ :: the ~bind(c)~ entries, each returning a status:
+~rgpot_<pot>_force_ws(handle, natoms, positions, cell, forces, energy)~ on a workspace from ~rgpot_fortran_workspace_new~,
+and the handle-free ~rgpot_<pot>_force(natoms, positions, cell, forces, energy)~
+on the module's legacy workspace.
+Potentials that take species (FeHe, CuH2, water-H) add
+~atomic_numbers~ after ~positions~ in both, and ~rgpot_sw_force_ws~ adds a
+~strain~ output.
+~rgpot_<pot>_ensure_params~ sets the saved parameter set once.
+The C++ classes call the ~_ws~ entries.
 
 The static library builds with hidden visibility.
 Only the C++ wrapper inside ~librgpot~ calls the entry points, so no Fortran
@@ -143,7 +93,7 @@ runtime appears when the kernels are enabled.
 
 C callers pass nine doubles, row-major, one cell vector per row.
 Fortran reads the same memory column-major, so a ~real(wp) :: cell(3, 3)~ dummy
-sees one cell vector per column -- which is what vesin expects.
+sees one cell vector per column, which is the layout ~rgpot_neighbors~ uses.
 No transpose anywhere in the chain.
 
 * Tests

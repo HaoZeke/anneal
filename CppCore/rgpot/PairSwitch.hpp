@@ -55,6 +55,12 @@ struct QuinticSwitch {
     return {1.0 + t2 * t * (-10.0 + t * (15.0 - 6.0 * t)),
             -30.0 * t2 * omt * omt * inv_width};
   }
+
+  /// @f$d^2S/dr^2 = -60 t (1 - t) (1 - 2t) / w^2@f$, 0 outside the switch.
+  [[nodiscard]] double d2sdr2(double r) const noexcept {
+    const double t = std::min(std::max((r - r_on) * inv_width, 0.0), 1.0);
+    return -60.0 * t * (1.0 - t) * (1.0 - 2.0 * t) * inv_width * inv_width;
+  }
 };
 
 } // namespace rgpot

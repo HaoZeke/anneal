@@ -1,0 +1,92 @@
+#+TITLE: OpenMM
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* OpenMM
+
+OpenMM has no callback that can call an arbitrary C++ potential.
+The comparison that the meson test
+=openmm_lj= runs (=engines/openmm/run_openmm.py=) is a =CustomNonbondedForce=
+whose expression is the shifted 12-6 potential rgpot evaluates, written in
+OpenMM's nanometres and kJ/mol.
+
+The energy is one expression with no named subexpressions.
+Sigma and epsilon are combined geometrically, which is exact when both atoms
+carry the same parameters, as they do in the test.
+
+Positions are 0 and 0.15 nm in a 2 nm cube, cutoff 0.8 nm.
+The context energy, converted with =rgpot-lj --kJ-per-eV=, matches the direct
+evaluation to 1e-6 eV, and the force on the second atom matches to 1e-5
+eV/Angstrom.
+The test runs when the =openmm= Python module imports.
+=-Dwith_openmm=enabled= makes a missing =openmm= module a configure error.
+
+** Public constructor
+
+=rgpot_openmm_potential= stores the same nanometre and
+kJ/mol factors as =rgpot_gromacs_potential=; =rgpot_md_kj_per_ev()= and =rgpot_md_nm_per_angstrom()= return them. It takes =u0= in eV and =cutoff= and =psi= in Angstrom. An empty engine path (=NULL= or =""= in C) evaluates the potential in process, in Angstrom and eV. A non-empty path is a library that exports =rgpot_engine_create=, =rgpot_engine_destroy= and =rgpot_md_native_force= in nanometres and kJ/mol,
+such as =libopenmm_engine.so=; a library that lacks one of them is refused.
+That library evaluates the shifted 12-6 expression with an OpenMM
+=CustomNonbondedForce= on the CPU platform.
+The constructor converts =u0=, =cutoff= and =psi= to the library's units once
+and passes them to =rgpot_engine_create=.
+Every call then converts the positions and the box to nanometres and the energy
+and forces back to eV and eV/Angstrom.
+=rgpot_external_potential_energy_forces= returns 0 and that result, or 1 with a
+message in =err=, and =rgpot_external_potential_free= releases the potential.
+The errors are the same as for =rgpot_gromacs_potential=: the C constructor
+returns =NULL= and writes =err=.
+
+Meson builds =libopenmm_engine.so= when the =openmm= Python module reports its
+library path and =libOpenMM= and =openmm/Platform.h= are found there.
+With =-Dwith_openmm=enabled=, a missing =libOpenMM= there is a configure error.
+The meson test =external_potentials= then loads it through =RGPOT_OPENMM_ENGINE=
+and checks the dimer at 1.5 Angstrom: -0.3203213355 eV from =rgpot-lj=, matched
+to 1e-6 eV, and the force on the second atom to 1e-5 eV/Angstrom.
+When the library was not built, the test prints a =SKIP openmm engine= line with
+that reason and still passes.
+
+#+attr_rgpot: run
+#+begin_src python
+import numpy as np
+import rgpot
+
+pot = rgpot.rgpot_openmm_potential(1.0, 8.0, 1.0)
+energy, forces, variance = pot(
+    np.array([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]]),
+    [1, 1],
+    np.diag([20.0, 20.0, 20.0]),
+)
+assert f"{energy:.10f}" == "-0.3203213355"
+#+end_src
+
+#+attr_rgpot: run link=rgpot
+#+begin_src c
+#include "rgpot/ExternalPot/external_potentials.h"
+
+#include <stdio.h>
+
+int main(void) {
+  char err[256] = "";
+  const double xyz[6] = {0, 0, 0, 1.5, 0, 0};
+  const int z[2] = {1, 1};
+  const double box[9] = {20, 0, 0, 0, 20, 0, 0, 0, 20};
+  double forces[6];
+  double energy = 0.0;
+  rgpot_external_potential *pot =
+      rgpot_openmm_potential(NULL, 1.0, 8.0, 1.0, err, sizeof err);
+  if (pot == NULL) {
+    fprintf(stderr, "%s\n", err);
+    return 1;
+  }
+  if (rgpot_external_potential_energy_forces(pot, xyz, z, 2, box, forces,
+                                             &energy, err, sizeof err) != 0) {
+    fprintf(stderr, "%s\n", err);
+    rgpot_external_potential_free(pot);
+    return 1;
+  }
+  printf("%.10f eV\n", energy);
+  rgpot_external_potential_free(pot);
+  return 0;
+}
+#+end_src

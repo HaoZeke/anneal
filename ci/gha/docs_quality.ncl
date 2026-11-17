@@ -15,6 +15,7 @@ let P = S.pins in
     snapper = {
       name = "snapper semantic line breaks",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         S.checkout_minimal,
         {
@@ -56,6 +57,7 @@ let P = S.pins in
     lychee = {
       name = "lychee link check",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         S.checkout_minimal,
         {

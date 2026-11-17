@@ -35,6 +35,7 @@ on:
       - "pyproject.toml"
       - "meson.build"
       - "CppCore/**"
+      - "engines/**"
       - "python/**"
       - "tests/check_wheel_contents.py"
       - "tests/test_wheel_contents.py"
@@ -51,6 +52,7 @@ on:
       - "pyproject.toml"
       - "meson.build"
       - "CppCore/**"
+      - "engines/**"
       - "python/**"
       - "tests/check_wheel_contents.py"
       - "tests/test_wheel_contents.py"
@@ -79,6 +81,9 @@ jobs:
       package-dir: .
       import-names: rgpot._core
       test-path: tests/python
+      # tests/python/test_cpu_scaling.py runs scripts/cpu_scaling.py from the
+      # repository root. The wheel test tree is only the copied sources.
+      extra-test-sources: scripts/cpu_scaling.py
       extras: ase
       test-requires: pytest-timeout hypothesis
       os: '["ubuntu-latest","ubuntu-24.04-arm","macos-15"]'
@@ -89,6 +94,7 @@ jobs:
     needs: py-wheels
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -239,6 +245,7 @@ jobs:
     name: macOS libraries for the ISA audit
     needs: py-wheels
     runs-on: macos-15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -369,6 +376,7 @@ jobs:
     name: Import each repaired arm wheel without LD_LIBRARY_PATH
     needs: py-wheels
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -404,6 +412,7 @@ jobs:
 
   sdist:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -457,6 +466,7 @@ jobs:
       github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
       || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi') && 'testpypi-rgpot' || 'pypi-rgpot' }}
       url: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi') && 'https://test.pypi.org/p/rgpot' || 'https://pypi.org/p/rgpot' }}

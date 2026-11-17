@@ -83,6 +83,17 @@ double rgpot_xtb_warm_move(const RgpotXtbPot *pot) {
   return pot->pot->warmMove();
 }
 
+void rgpot_xtb_set_warm_min_gap(RgpotXtbPot *pot, double ev) {
+  if (pot && pot->pot)
+    pot->pot->setWarmMinGap(ev);
+}
+
+double rgpot_xtb_warm_min_gap(const RgpotXtbPot *pot) {
+  if (!pot || !pot->pot)
+    return 0.0;
+  return pot->pot->warmMinGap();
+}
+
 int rgpot_xtb_reused_wavefunction(const RgpotXtbPot *pot) {
   if (!pot || !pot->pot)
     return 0;

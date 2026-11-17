@@ -26,3 +26,17 @@ TEST_CASE("Cell-list EAM returns a finite aluminium pair", "[eam]") {
   REQUIRE(pot.paramsKey() != 0);
   (void)variance;
 }
+
+TEST_CASE("Cell-list EAM rejects an element it has no parameters for",
+          "[eam]") {
+  auto positions = rgpot::types::AtomMatrix::Zero(2, 3);
+  positions(1, 0) = 2.5;
+  const std::vector<int> types = {13, 1};
+  const std::array<std::array<double, 3>, 3> box = {{
+      {20.0, 0.0, 0.0},
+      {0.0, 20.0, 0.0},
+      {0.0, 0.0, 20.0},
+  }};
+  rgpot::EAMPot pot;
+  REQUIRE_THROWS_AS(pot(positions, types, box), std::invalid_argument);
+}

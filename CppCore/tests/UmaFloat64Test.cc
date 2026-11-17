@@ -159,6 +159,122 @@ TEST_CASE("a changed neighbour list names both edge shapes",
   REQUIRE(threw);
 }
 
+TEST_CASE("a single-system package evaluates a batch one system at a time",
+          "[uma][float64][batch]") {
+  // batch_max 0: forceBatch is the per-system loop, so two geometries
+  // match two forceImpl calls exactly.
+  rgpot::UmaPot pot = open_pot(package_path("UMA_FLOAT64_PT2"));
+  const std::vector<int> z = {6, 7, 1};
+  const double box[9] = {25, 0, 0, 0, 25, 0, 0, 0, 25};
+  std::vector<double> first_pos = line_geometry();
+  std::vector<double> second_pos = first_pos;
+  second_pos[0] += 0.2;
+  const Eval first = run(pot, first_pos);
+  const Eval second = run(pot, second_pos);
+  std::vector<double> force0(first_pos.size(), 0.0);
+  std::vector<double> force1(second_pos.size(), 0.0);
+  rgpot::ForceInput in[2] = {
+      {3, first_pos.data(), z.data(), box},
+      {3, second_pos.data(), z.data(), box},
+  };
+  rgpot::ForceOut out[2] = {
+      {force0.data(), 0.0, 0.0},
+      {force1.data(), 0.0, 0.0},
+  };
+  const rgpot::ForceBatch batch{2, in, out};
+  pot.forceBatch(batch);
+  REQUIRE(out[0].energy == first.energy);
+  REQUIRE(out[1].energy == second.energy);
+  for (size_t i = 0; i < force0.size(); ++i) {
+    REQUIRE(force0[i] == first.force[i]);
+    REQUIRE(force1[i] == second.force[i]);
+  }
+}
+
+TEST_CASE("a band package chunks past batch_max and matches per-system calls",
+          "[uma][float64][batch]") {
+  // The float64 band package is traced at batch_max 2. Three systems
+  // are one chunk of two and one padded chunk of one. Each system
+  // matches the single-call entry, which pads a lone system the same way.
+  rgpot::UmaPot pot = open_pot(package_path("UMA_FLOAT64_BATCH_PT2"));
+  const std::vector<int> z = {6, 7, 1};
+  const double box[9] = {25, 0, 0, 0, 25, 0, 0, 0, 25};
+  std::vector<double> geoms[3] = {line_geometry(), line_geometry(),
+                                  line_geometry()};
+  geoms[1][0] += 0.05;
+  geoms[2][3] -= 0.04;
+  Eval singles[3];
+  for (int i = 0; i < 3; ++i)
+    singles[i] = run(pot, geoms[i]);
+  std::vector<double> forces[3] = {
+      std::vector<double>(9),
+      std::vector<double>(9),
+      std::vector<double>(9),
+  };
+  rgpot::ForceInput in[3] = {
+      {3, geoms[0].data(), z.data(), box},
+      {3, geoms[1].data(), z.data(), box},
+      {3, geoms[2].data(), z.data(), box},
+  };
+  rgpot::ForceOut out[3] = {
+      {forces[0].data(), 0.0, 0.0},
+      {forces[1].data(), 0.0, 0.0},
+      {forces[2].data(), 0.0, 0.0},
+  };
+  const rgpot::ForceBatch batch{3, in, out};
+  pot.forceBatch(batch);
+  for (int s = 0; s < 3; ++s) {
+    REQUIRE_THAT(out[s].energy,
+                 Catch::Matchers::WithinAbs(singles[s].energy, 1e-9));
+    for (size_t i = 0; i < forces[s].size(); ++i)
+      REQUIRE_THAT(forces[s][i],
+                   Catch::Matchers::WithinAbs(singles[s].force[i], 1e-9));
+  }
+}
+
+TEST_CASE("a packed graph accepts one, two and three systems",
+          "[uma][float64][batch]") {
+  // batch_packed: the real system count is sent. Three systems are one
+  // call, not a padded chunk of four, and each matches forceImpl.
+  rgpot::UmaPot pot = open_pot(package_path("UMA_PACKED_PT2"));
+  const std::vector<int> z = {6, 7, 1};
+  const double box[9] = {25, 0, 0, 0, 25, 0, 0, 0, 25};
+  std::vector<double> geoms[3] = {line_geometry(), line_geometry(),
+                                  line_geometry()};
+  geoms[1][0] += 0.2;
+  geoms[2].back() += 1e-6;
+  Eval singles[3];
+  for (int i = 0; i < 3; ++i)
+    singles[i] = run(pot, geoms[i]);
+  REQUIRE_THAT(singles[0].energy, Catch::Matchers::WithinAbs(112.5, 1e-9));
+  REQUIRE_THAT(singles[1].energy - singles[0].energy,
+               Catch::Matchers::WithinAbs(0.2, 1e-9));
+  std::vector<double> forces[3] = {
+      std::vector<double>(9),
+      std::vector<double>(9),
+      std::vector<double>(9),
+  };
+  rgpot::ForceInput in[3] = {
+      {3, geoms[0].data(), z.data(), box},
+      {3, geoms[1].data(), z.data(), box},
+      {3, geoms[2].data(), z.data(), box},
+  };
+  rgpot::ForceOut out[3] = {
+      {forces[0].data(), 0.0, 0.0},
+      {forces[1].data(), 0.0, 0.0},
+      {forces[2].data(), 0.0, 0.0},
+  };
+  const rgpot::ForceBatch batch{3, in, out};
+  pot.forceBatch(batch);
+  for (int s = 0; s < 3; ++s) {
+    REQUIRE_THAT(out[s].energy,
+                 Catch::Matchers::WithinAbs(singles[s].energy, 1e-9));
+    for (size_t i = 0; i < 9; ++i)
+      REQUIRE_THAT(forces[s][i],
+                   Catch::Matchers::WithinAbs(singles[s].force[i], 1e-9));
+  }
+}
+
 TEST_CASE("batch path resolves a 1e-7 angstrom shift", "[uma][float64]") {
   rgpot::UmaPot pot = open_pot(package_path("UMA_FLOAT64_BATCH_PT2"));
   const std::vector<int> z = {6, 7, 1};

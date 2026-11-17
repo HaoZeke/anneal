@@ -10,10 +10,11 @@
 //
 // Distinct Table, Builder and Walk objects may be used from different
 // threads. One object is not shared. build() may start an OpenMP team
-// when OMP_NUM_THREADS is set, so do not call it from inside an OpenMP
-// region. There is no mutable global. A Walk borrows positions and the
-// box until it is destroyed. A View is invalidated by the next update
-// of the table that owns it.
+// when OMP_NUM_THREADS is set. Inside another OpenMP region that team may
+// get fewer threads, and the list does not depend on how many. There is
+// no mutable global. A Walk borrows positions and the box until it is
+// destroyed. A View is invalidated by the next update of the table that
+// owns it.
 
 #include "rgpot/nlist/Neighbours.hpp"
 

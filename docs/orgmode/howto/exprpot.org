@@ -4,18 +4,24 @@
 
 * Compose potentials with ExprPot
 
-=ExprPot= (meson =-Dwith_expr=true=) compiles an energy string over named child
-=Potential= objects with vendored OpenMM Lepton.
+=ExprPot= (meson
+=-Dwith_expr=true=) compiles an energy string over named child =Potential= objects with vendored OpenMM Lepton (=third_party/lepton=).
 There is no pixi muparser feature.
 One =ExprPot= is one =Potential=, so
-=PotentialHandle::from_impl= / =rgpot_potential_new_eindir= makes that one
-eindir objective for rgmin, rgsaddle, and anneal.
+=PotentialHandle::from_impl= (which calls =rgpot_potential_new_eindir=) makes it
+one eindir objective for rgmin, rgsaddle, and anneal.
+Use the =from_impl= overload that takes the atom count, atomic numbers and box
+when the host reads the objective dimension.
 See [[file:eindir-anneal.org][rgpot potentials as eindir objectives]].
 
-There is no =PotentialConfig.expr= arm.
-The C++ constructor is the first-slice API.
-RPC/config names the same tree as recursive =ExprParams= / =PotSpec= (expression
-plus named =ExprTerm= children), not a =configure= union.
+The Cap'n Proto schema describes the same tree as =ExprParams=: an expression
+and a list of =ExprTerm= children, each a name and a =PotSpec=, so a child can
+itself be an expression.
+=PotentialConfig= carries it as the =expr= arm, but =potserv= does not apply it.
+=configure= with that arm returns =ok = false= and a message that names the
+=expr= arm.
+In process, the C++ constructor and the Python class below are the way to build
+one.
 
 ** Named terms
 
@@ -26,19 +32,27 @@ Each name in the string is that child's energy.
 =0.5*lj + morse= means half the Lennard-Jones energy plus the Morse energy on
 the same geometry.
 
+#+attr_rgpot: run requires=has_expr link=rgpot
 #+begin_src cpp
 #include "rgpot/ExprPot/ExprPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 
-std::vector<rgpot::ExprPot::Term> terms;
-terms.emplace_back("lj", std::make_unique<rgpot::LJPot>());
-terms.emplace_back("morse", std::make_unique<rgpot::MorsePot>());
-rgpot::ExprPot pot("0.5*lj + morse", std::move(terms));
+#include <memory>
+#include <vector>
+
+int main() {
+  std::vector<rgpot::ExprPot::Term> terms;
+  terms.emplace_back("lj", std::make_unique<rgpot::LJPot>());
+  terms.emplace_back("morse", std::make_unique<rgpot::MorsePot>());
+  rgpot::ExprPot pot("0.5*lj + morse", std::move(terms));
+  return pot.expression() == "0.5*lj + morse" ? 0 : 1;
+}
 #+end_src
 
 When =-Dwith_dftd3=true=, =D3Pot= is an ordinary child:
 
+#+attr_rgpot: fragment needs -Dwith_dftd3=true
 #+begin_src cpp
 #include "rgpot/D3Pot/D3Pot.hpp"
 #include "rgpot/ExprPot/ExprPot.hpp"
@@ -50,26 +64,33 @@ terms.emplace_back("d3", std::make_unique<rgpot::D3Pot>());
 rgpot::ExprPot pot("0.5*lj + d3", std::move(terms));
 #+end_src
 
-** Lepton identifier grammar
+From Python, =rgpot.ExprPot(expression, terms)= takes a dict that maps each name
+to ='lj'=, ='morse'=, ='d3'= or ='d4'=, or to a dict with =kind= and that kind's
+fields.
+=rgpot.ExprPot= is =None= when the extension was built without
+=with_expr=; =rgpot.has_expr= reports it.
 
-A term name must be a Lepton identifier: an ASCII letter or underscore first,
-then ASCII letters, digits, or underscores.
-=lj=, =morse=, and =d3= are valid.
-=1lj=, =lj-x=, and =lj.x= are not.
+#+attr_rgpot: run requires=has_expr
+#+begin_src python
+import numpy as np
+import rgpot
 
-** Construct-time fail-closed names
+pot = rgpot.ExprPot("0.5*lj + morse", {"lj": "lj", "morse": "morse"})
+positions = np.array([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]])
+box = np.diag([40.0, 40.0, 40.0])
+energy, forces, variance = pot(positions, [18, 18], box)
 
-The constructor throws =std::invalid_argument= before any force call when:
+e_lj, f_lj, _ = rgpot.LJPot()(positions, [18, 18], box)
+e_morse, f_morse, _ = rgpot.MorsePot()(positions, [18, 18], box)
+assert abs(energy - (0.5 * e_lj + e_morse)) < 1e-12
+assert np.allclose(forces, 0.5 * f_lj + f_morse)
+assert pot.d_energy_d_term("lj") == 0.5
+#+end_src
 
-- the expression is empty or blank
-- there are zero terms
-- a name is not a Lepton identifier
-- a name is duplicated
-- a child pointer is null
-- Lepton cannot parse or compile the expression
-- a supplied name is missing from the expression
-- an identifier in the expression has no child
-- =ParsedExpression::differentiate(name)= fails
+A term name must be a Lepton identifier.
+The name grammar and every constructor failure are listed in
+[[file:../reference/cpp_potentials.org][C++ potentials]], under Expression of
+potentials.
 
 ** Analytic forces
 
@@ -77,8 +98,12 @@ At construct, Lepton compiles the energy once and
 =ParsedExpression::differentiate(name)= once per term.
 A force call evaluates each child, then applies the chain rule
 =F = sum_i (df/dE_i) F_i=.
-Variance uses the same analytic weights.
+The variance is =sum_i (df/dE_i) var_i= with the same weights; when any child
+variance is not finite, the variance is 0.
 There is no finite-difference force path.
+=dEnergyDTerm(name)= (Python =d_energy_d_term=) returns =df/dE_name= at the last
+child energies, and throws =std::invalid_argument= for a name that is not a
+term.
 
 ** What is a term
 
@@ -105,8 +130,14 @@ repo defaults (no invented cheaper pot settings):
 - B: in-process pyeonclient =Matter= with =PotType.LJ= (not potserv RPC).
 - C (optional, =-Dwith_expr=true=): =ExprPot("lj", {lj})= vs A.
 
+The script exits unless the host name is listed in =RGPOT_REGEN_HOSTS=
+(comma-separated) or =TIME_LJ_ALLOW=1= is set.
+Its defaults are =--n 100000= timed calls and =--warmup 1000=.
+=time_lj_force= is built only with =-Dwith_examples=true=.
+
 Build the helper (workstation-a only; release, repo options):
 
+#+attr_rgpot: syntax release build and a timing run on the benchmark host
 #+begin_src bash
 pixi run meson setup bbdir-lj-bench \
   -Dwith_examples=true -Dwith_expr=true -Dwith_tests=false \
@@ -130,7 +161,7 @@ A energy =-0.3203362431126247= eV; B energy =-0.3203362431126207= eV.
 B was pyeonclient 0.3.2 with =built_with_rgpot()= true, in-process (=B_rpc=no=),
 not potserv.
 C (=ExprPot("lj")=) was not measured: the helper was compiled without
-=-Dwith_expr=true= (the wheel still ships =with_expr= off).
+=-Dwith_expr=true=.
 This is not a claim that =XcKernel= beats pyeonclient.
 
 #+begin_export rst

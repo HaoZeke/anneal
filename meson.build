@@ -2,7 +2,7 @@ project(
     'rgpot',
     'cpp',
     # [[[cog import rgpot_version as v; cog.outl(f"    version: '{v.VERSION}',")]]]
-    version: '3.6.0',
+    version: '3.7.0',
     # [[[end]]]
     default_options: ['warning_level=2', 'cpp_std=c++20'],
 )
@@ -304,7 +304,7 @@ if get_option('with_eigen') or (
     if not eigen_dep.found()
         eigen_dep = dependency(
             'eigen3',
-            subproject: subproject('eigen'),
+            fallback: ['eigen', 'eigen_dep'],
             required: get_option('with_eigen'),
         )
     endif
@@ -379,6 +379,8 @@ if get_option('with_dftd3')
     has_dftd3 = true
 endif
 
+has_long_range = get_option('with_long_range')
+
 has_dftd4 = false
 if get_option('with_dftd4')
     dftd4_dep = dependency(
@@ -399,6 +401,21 @@ if get_option('with_dftd4')
     has_dftd4 = true
 endif
 
+# CP2KPot, potserv's CP2K backend and the libcp2k shim build together or
+# not at all, so a build without libcp2k compiles no CP2K code.
+has_cp2k = false
+if get_option('with_rpc')
+    cp2k_lib_dep = dependency('libcp2k', required: get_option('with_cp2k'))
+    has_cp2k = cp2k_lib_dep.found()
+elif get_option('with_cp2k').enabled()
+    error(
+        'with_cp2k needs with_rpc: CP2KPot reads CP2KParams from the generated schema',
+    )
+endif
+if has_cp2k
+    _args += ['-DRGPOT_HAS_CP2K=TRUE']
+endif
+
 has_expr = false
 if get_option('with_expr')
     subdir('third_party/lepton')
@@ -407,7 +424,7 @@ if get_option('with_expr')
     has_expr = true
 endif
 
-# NWChemPot frontend always builds and dlopens the split nwchemc engine
+# With RPC on, the NWChemPot frontend builds and dlopens the split nwchemc engine
 # (libnwchemc.so) at runtime. rgpot carries no in-process NWChem embed.
 _args += ['-DRGPOT_HAS_NWCHEM_FRONTEND=TRUE']
 
@@ -665,7 +682,9 @@ if get_option('with_rust_core')
     _cargo_features = []
     if rpc_enabled
         _cargo_features += ['rpc']
-        _args += ['-DRGPOT_HAS_RPC=TRUE']
+        # The rpc feature turns on schema, which guards
+        # rgpot_potential_set_peer_capabilities in rgpot.h.
+        _args += ['-DRGPOT_HAS_RPC=TRUE', '-DRGPOT_HAS_SCHEMA=TRUE']
     endif
     if get_option('with_cache')
         _cargo_features += ['cache']
@@ -707,6 +726,24 @@ if get_option('with_rust_core')
     dl_dep = cppc.find_library('dl', required: false)
 
     _deps += [rgpot_rust_lib, thread_dep, dl_dep]
+
+    # librgpot links the archive and keeps only the members it references,
+    # so the C ABI of rgpot-core is checked on the cdylib cargo builds
+    # next to it.
+    if host_machine.system() == 'linux'
+        test(
+            'abi_core_symbols',
+            find_program('scripts/abi_symbols.sh'),
+            args: [
+                '-p',
+                '^rgpot_',
+                _rust_target_dir / 'librgpot_core.so',
+                files('scripts/abi_core_baseline.txt'),
+            ],
+            depends: rgpot_rust_target,
+            timeout: 30,
+        )
+    endif
 
     # Include paths: generated C header + C++ RAII wrappers
     _incdirs += [
@@ -919,6 +956,19 @@ if get_option('with_rpc_client_only')
     )
 endif
 
+# Engine drivers link the umbrella. A client-only build has no LJPot.
+# On Windows rgpot.dll exports only rgpot_library_version, so the drivers
+# have nothing to link against, and they load plugins with dlopen and run
+# pthreads; the CppCore engine plugins are left out there for the same
+# reason.
+if host_system == 'windows'
+    message(
+        'engines/ is not built on Windows: rgpot.dll does not export the C and C++ API the engine drivers link against',
+    )
+elif not get_option('with_rpc_client_only')
+    subdir('engines')
+endif
+
 # --------------------- Python package (pip install rgpot)
 if get_option('with_python')
     if get_option('with_rpc_client_only')
@@ -933,4 +983,99 @@ endif
 # wheel headers scheme, so this header stays out of those wheels.
 if not get_option('with_python')
     install_headers('bind/include/rgbind/rgbind.hpp', subdir: 'rgbind')
+endif
+
+# The documentation's run and compile blocks against this build;
+# doccheck_static checks the rest against the source.
+_doc_python = find_program('python3', required: false)
+if get_option('with_tests') and _doc_python.found()
+    _doccheck = files('docs/doccheck.py')
+    # The C and C++ blocks are built with a cc driver (-fsyntax-only, -l,
+    # -Wl,-rpath), and most run blocks link librgpot. Windows has cl.exe,
+    # and rgpot.dll exports only rgpot_library_version, as for engines/.
+    if host_system != 'windows'
+        test(
+            'doccheck_examples',
+            _doc_python,
+            args: [
+                _doccheck,
+                'blocks',
+                '--root',
+                meson.project_source_root(),
+                '--build-dir',
+                meson.project_build_root(),
+            ],
+            suite: 'docs',
+            timeout: 1200,
+            priority: -10,
+        )
+    endif
+endif
+
+# The py entries of CppCore/tests/registry.txt. @root@ is the source root
+# and @capnp@ the capnp compiler.
+_rt_python = find_program('python3', 'python')
+foreach _rt : _rt_tests
+    if _rt[1] != 'py'
+        continue
+    endif
+    _rt_args = []
+    foreach _arg : _rt[2]
+        if _rt_args.length() == 0
+            _rt_args += meson.project_source_root() / _arg
+        elif _arg == '@root@'
+            _rt_args += meson.project_source_root()
+        elif _arg == '@capnp@'
+            _rt_args += capnp.full_path()
+        else
+            _rt_args += _arg
+        endif
+    endforeach
+    test(_rt[0], _rt_python, args: _rt_args, kwargs: _rt_kw[_rt[0]])
+endforeach
+
+# Every test registered above against registry.txt, given the features
+# this configuration found.
+if get_option('with_tests') and _rt_atoms['python']
+    _rt_isa_variants = false
+    if is_variable('_isa_exes')
+        _rt_isa_variants = _isa_exes.length() > 0
+    endif
+    _rt_features = _rt_atoms + {
+        'cp2k': has_cp2k,
+        'mpi': _mpi_dep.found(),
+        'mpiexec': find_program('mpirun', 'mpiexec', required: false).found(),
+        'linux': host_system == 'linux',
+        'posix': host_system != 'windows',
+        'capnp': (
+            dependency('capnp', required: false).found()
+            and dependency('capnpc', required: false).found()
+        ),
+        'capnp_tool': find_program('capnp', required: false).found(),
+        'rustc': find_program('rustc', required: false).found(),
+        'tsan': (
+            cppc.has_argument('-fsanitize=thread')
+            and get_option('b_sanitize') == 'none'
+        ),
+        'isa_variants': _rt_isa_variants,
+        'toplevel': not meson.is_subproject(),
+        'xtb': has_xtb,
+        'xckernel': has_xckernel,
+        'expr': has_expr,
+        'skala': has_skala,
+    }
+    _rt_args = []
+    foreach _atom, _on : _rt_features
+        _rt_args += _atom + '=' + (_on ? '1' : '0')
+    endforeach
+    test(
+        'test_list_parity',
+        _rt_python,
+        args: [
+            files('CppCore/tests/check_test_registry.py'),
+            'meson',
+            meson.global_build_root(),
+        ] + _rt_args,
+        kwargs: _rt_kw['test_list_parity'],
+    )
 endif

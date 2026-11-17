@@ -2,7 +2,7 @@ name: C++ layout stamp
 
 # Prints header_stamp().hash for each platform that does not already come
 # from a librgpot wheel. Fill kCxxSoversionTable from these lines.
-# docs/orgmode/reference/c_abi.org describes the update.
+# docs/orgmode/contributing/developer/abi-bump.org describes the update.
 on:
   pull_request:
   push:
@@ -15,6 +15,7 @@ jobs:
   stamp:
     name: layout stamp (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:

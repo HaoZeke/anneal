@@ -26,7 +26,7 @@
  *
  * The covered types, the rule for @c kCxxLayoutRevision and the
  * virtual-function counters are documented in
- * @c docs/orgmode/reference/c_abi.org.
+ * @c docs/orgmode/explanation/abi-stamps.org.
  */
 
 #include <array>
@@ -164,7 +164,7 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 1;
 /// did not increase.
 ///
 /// This is not `RGPOT_ABI_LAYOUT_REVISION`. The C ABI stamp in `rgpot.h`
-/// is major 1, minor 1, layout revision 1. Minor 1 adds
+/// is major 1, minor 2, layout revision 1. Minor 1 added
 /// `rgpot_eindir_abi_compatible`. No exported C struct of that header
 /// changed layout. The neighbour query is `RGPOT_NLIST_ABI` 4.
 /// The C API is exported from librgpot, so it has no shared library of
@@ -189,7 +189,7 @@ struct CxxSoversionEntry {
 /// No-cache `header_stamp().hash` for each platform ABI CI builds.
 /// Rows are copied from `RGPOT_CXX_LAYOUT_STAMP` lines. An unlisted
 /// platform still compiles. How to update the table:
-/// docs/orgmode/reference/c_abi.org.
+/// docs/orgmode/contributing/developer/abi-bump.org.
 inline constexpr std::array<CxxSoversionEntry, 1> kCxxSoversionTable{{
     {"linux-x86_64-libstdc++-lp64", 0x0bba2f6c8fb3f542ull},
 }};
@@ -205,14 +205,16 @@ constexpr bool cxx_tag_eq(const char *a, const char *b) noexcept {
   return *a == *b;
 }
 
-constexpr const CxxSoversionEntry *
-find_soversion_entry(const char *tag) noexcept {
-  for (const CxxSoversionEntry &row : kCxxSoversionTable) {
-    if (cxx_tag_eq(row.tag, tag)) {
-      return &row;
+/// Index of @p tag in @c kCxxSoversionTable, or -1 when the platform is absent.
+/// A pointer into the table is not a constant expression under
+/// @c -fsanitize=undefined, so callers compare this index with zero.
+constexpr int find_soversion_index(const char *tag) noexcept {
+  for (std::size_t i = 0; i < kCxxSoversionTable.size(); ++i) {
+    if (cxx_tag_eq(kCxxSoversionTable[i].tag, tag)) {
+      return static_cast<int>(i);
     }
   }
-  return nullptr;
+  return -1;
 }
 
 constexpr bool soversion_tags_unique() noexcept {
@@ -229,7 +231,7 @@ constexpr bool soversion_tags_unique() noexcept {
 static_assert(soversion_tags_unique(), "kCxxSoversionTable tags must be unique");
 
 /// Virtual functions declared by @c PotentialBase, destructor included.
-/// The cache hook @c set_cache adds one when @c RGPOT_HAS_CACHE is defined.
+/// The cache hook @c setCache adds one when @c RGPOT_HAS_CACHE is defined.
 /// A test counts the @c virtual declarations in Potential.hpp and fails when
 /// this and the header disagree.
 inline constexpr std::uint32_t kPotentialBaseVirtuals = 5;
@@ -369,17 +371,21 @@ inline constexpr rgpot_cxx_layout_stamp_t header_stamp() noexcept {
 
 /// Recorded no-cache hash for this platform, or 0 when it has no row.
 constexpr std::uint64_t recorded_layout_hash() noexcept {
-  const CxxSoversionEntry *row = find_soversion_entry(kCxxPlatformTag);
-  return row == nullptr ? 0 : row->hash;
+  const int index = find_soversion_index(kCxxPlatformTag);
+  if (index < 0) {
+    return 0;
+  }
+  return kCxxSoversionTable[static_cast<std::size_t>(index)].hash;
 }
 
 /// True when this platform has no row, or the row matches `header_stamp`.
 constexpr bool platform_soversion_ok() noexcept {
-  const CxxSoversionEntry *row = find_soversion_entry(kCxxPlatformTag);
-  if (row == nullptr) {
+  const int index = find_soversion_index(kCxxPlatformTag);
+  if (index < 0) {
     return true;
   }
-  return header_stamp().hash == row->hash;
+  return header_stamp().hash ==
+         kCxxSoversionTable[static_cast<std::size_t>(index)].hash;
 }
 
 /// What the loaded library was built with.

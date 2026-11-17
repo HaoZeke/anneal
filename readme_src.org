@@ -7,6 +7,8 @@
 
 [[https://raw.githubusercontent.com/OmniPotentRPC/rgpot/refs/heads/main/branding/logo/rgpot_logo.webp]]
 
+[[https://app.codecov.io/gh/OmniPotentRPC/rgpot][https://codecov.io/gh/OmniPotentRPC/rgpot/graph/badge.svg]]
+
 ~rgpot~ is a potential-energy library and Cap'n Proto RPC server for atomistic
 simulation codes.
 Documentation: [[https://rgpot.rgoswami.me][rgpot.rgoswami.me]].
@@ -14,19 +16,36 @@ It gives clients one geometry carrier, one result carrier, and one extensible
 backend-configuration carrier:
 
 - ~ForceInput~: positions, atomic numbers, box, and unit strings
-- ~PotentialResult~: energy plus flat force array
+- ~PotentialResult~: energy, a flat force array, and optional outputs such as
+  the Hessian or the stress
 - ~PotentialConfig~: backend setup, with arms such as ~none~, ~nwchem~, and
   ~cpmd~
 
+XC response kernels (=rgpot::XcKernel=, meson =-Dwith_xckernel=true=) are
+in-process only.
+They are not a =Potential=, and there is no =PotentialConfig.xckernel= arm:
+the operands are AO collocation arrays and named Libxc arrays, not =ForceInput=.
+See =docs/xckernel.md=.
+=pylibxc= is not on PyPI (=pylibxc2= there is an unrelated stub); the pixi
+=xckernel= environment (=pixi install -e xckernel=, linux-64 only) takes
+=libxc= and =pylibxc= from conda-forge.
+
 =D3Pot= and =D4Pot= (meson =-Dwith_dftd3= / =-Dwith_dftd4=) are in-process
 =Potential= summands: construct them and evaluate =ForceInput= to energy and
-forces. There is no =PotentialConfig.d3= or =PotentialConfig.d4= arm.
+forces.
+The schema has =PotentialConfig.d3= @12 and =PotentialConfig.d4= @13 arms.
+Nothing applies them yet.
+The =potserv= =D3= and =D4= backends run the default configuration.
+=configure()= refuses both arms by name on every =potserv= backend.
 A DFT host sums XcKernel + VV10 + D4 itself; dispersion is not folded into
 the XC kernel.
 
 =ExprPot= (meson =-Dwith_expr=true=) compiles a Lepton energy string over
-named child =Potential= objects. The parser is vendored OpenMM Lepton;
-there is no pixi muparser feature and no =PotentialConfig.expr= arm.
+named child =Potential= objects.
+The parser is vendored OpenMM Lepton (=third_party/lepton=); there is no pixi
+muparser feature.
+The schema carries =PotentialConfig.expr= @16, but =potserv= does not apply it
+and refuses it by name.
 
 In-process =LJPot= vs pyeonclient =Matter= on the same LJ fixture is
 =scripts/time_lj_rgpot_vs_pyeonclient.py= (on a host listed in
@@ -36,17 +55,38 @@ B (in-process pyeonclient =Matter.forces=, not potserv) was 687 to 791
 ns/call. =XcKernel= is not a =Potential= and is not part of that race.
 See =docs/orgmode/howto/exprpot.org=.
 
+From Python, =rgpot.ase.RgpotCalculator= is an ASE calculator over any bound
+potential:
+~atoms.calc = RgpotCalculator("lj", u0=0.0104, psi=3.4, cutoff=8.5)~.
+See =docs/orgmode/howto/ase.org=.
+
 The public wire schema lives in ~CppCore/rgpot/rpc/Potentials.capnp~ and is
 shared by the C++ server, Python integration tests, and the Rust core crate.
+That file is the pinned potentials-schema release byte for byte; the build
+adds the rgpot-local fields listed in ~CppCore/rgpot/rpc/local/series~ and
+installs the result.
 Native rgpot units are eV and Angstrom.
 RPC clients may request compatible units through ~ForceInput.lengthUnit~ and
 ~ForceInput.energyUnit~.
 
+EAM, Lennard-Jones, Sutton-Chen, Stillinger-Weber, Tersoff, Morse and ZBL take
+candidate pairs from one neighbour layer, =rgpot::nlist::Neighbours=.
+It keeps a stored Verlet list or walks the cells without storing pairs.
+With =OMP_NUM_THREADS= unset, empty or below 1, the layer runs on one thread in
+the serial pair order.
+A fixed thread count repeats bit for bit.
+See =docs/neighbour_layer.md=.
+
 ** Python (PyPI)
 
-Install the manylinux wheel (nanobind **abi3**, Python >= 3.12 for the stable
-ABI extension; requires-python is >= 3.10 for pure metadata):
+=.github/workflows/wheels.yml= builds the wheels with cibuildwheel for Linux
+x86_64 and aarch64 (manylinux) and for macOS 15.
+CPython 3.12 and newer share one nanobind *abi3* wheel.
+CPython 3.10 and 3.11 get version-specific wheels, and free-threaded CPython
+3.14 gets its own wheel.
+=requires-python= is =>=3.10=.
 
+#+attr_rgpot: syntax installs packages from PyPI
 #+begin_src bash
 pip install rgpot
 # Metatomic path (engine libs resolve from these packages at runtime):
@@ -54,33 +94,57 @@ pip install 'rgpot[metatomic]'
 # or: pip install torch metatomic-torch metatensor-torch metatensor-core vesin
 #+end_src
 
-The PyPI wheel compiles ExprPot (vendored Lepton), D3Pot, D4Pot, and
-XcKernel. ~s-dftd3~ / ~dftd4~ are linked and vendored; no conda install
-is required at ~pip install~ time. Lennard-Jones needs only ~numpy~.
-Metatomic uses **dlopen** of a bundled
-engine:
+The wheel build turns on ExprPot (vendored Lepton), D3Pot, D4Pot, XcKernel and
+the Fortran-backed potentials (=[tool.meson-python.args]= in
+=pyproject.toml=).
+~s-dftd3~ / ~dftd4~ are built into the wheel; no conda install is required at
+~pip install~ time.
+Lennard-Jones needs only ~numpy~.
+Metatomic loads its engine library with *dlopen*:
 
-- layout: ~rgpot/lib/torch-X.Y/libmetatomic_engine.so~
-- picker: installed ~torch~ major (same multi-ABI idea as metatomic-torch)
-- **supported torch majors: 2.7 and newer** (wheels ship 2.7–2.13 engines)
-- torch 2.6 and older are not supported for Metatomic dlopen
+- =rgpot.default_metatomic_engine_path()= looks in
+  ~rgpot/lib/torch-X.Y/~ for the installed ~torch~ X.Y first
+  (~librgpot_metatomic_engine.so~, then ~libmetatomic_engine.so~), then in the
+  other ~torch-*~ directories, then next to the package
+- the CI wheel build installs one engine, built against the torch that the
+  isolated build installs (=torch>=2.7= in the build requirements)
+- =scripts/rgpot_pack_multi_abi_engines.sh= builds engines for torch 2.7
+  through 2.13 (=RGPOT_TORCH_MAJORS= overrides the list) and adds them to a
+  wheel under ~rgpot/lib/torch-X.Y/~
+- torch 2.6 and older are not supported
 
+#+attr_rgpot: run
 #+begin_src python
 import numpy as np
 import rgpot
 
 print(rgpot.__version__)
 print(rgpot.has_expr, rgpot.has_dftd3, rgpot.has_dftd4, rgpot.has_xckernel, rgpot.has_ipi)
-print(rgpot.available_metatomic_engine_abis())  # e.g. 2.7 .. 2.13
-# energy, forces, variance = rgpot.LJPot()(positions, atom_types, box)
-# energy, forces, variance = rgpot.D3Pot()(positions, atom_types, box)
-# energy, forces, variance = rgpot.ExprPot(
-#     "0.5*lj + d3", {"lj": "lj", "d3": "d3"})(positions, atom_types, box)
-# print(rgpot.XcKernel.catalog())
-# energy, forces, variance = rgpot.evaluate_metatomic(
-#     positions, atom_types, box, model_path="model.pt")
+print(rgpot.available_metatomic_engine_abis())
+
+positions = np.array([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0]])
+atom_types = [0, 0]
+box = np.diag([15.0, 20.0, 30.0])
+energy, forces, variance = rgpot.LJPot()(positions, atom_types, box)
 #+end_src
 
+=ExprPot= takes a Lepton string and a dict that maps each name in it to a
+child kind (='lj'=, ='morse'=, ='d3'=, ='d4'=):
+
+#+attr_rgpot: run requires=has_expr
+#+begin_src python
+import numpy as np
+import rgpot
+
+positions = np.array([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0]])
+box = np.diag([15.0, 20.0, 30.0])
+pot = rgpot.ExprPot("0.5*lj + morse", {"lj": "lj", "morse": "morse"})
+energy, forces, variance = pot(positions, [0, 0], box)
+#+end_src
+
+=rgpot.D3Pot()= needs =rgpot.has_dftd3=.
+~rgpot.evaluate_metatomic(positions, atom_types, box, model_path="model.pt")~
+needs a Metatomic engine.
 See https://pypi.org/project/rgpot/ .
 
 ** Build And Test
@@ -89,6 +153,7 @@ Meson is the primary build path.
 Use the ~rpctest~ environment when running the RPC integration scripts because
 they need pycapnp.
 
+#+attr_rgpot: syntax full build and test run
 #+begin_src bash
 pixi shell -e rpctest
 meson setup bbdir -Dwith_tests=true -Dwith_rpc=true --buildtype=debug
@@ -97,20 +162,27 @@ meson test -C bbdir --print-errorlogs
 python tests/rpc_integ.py --server-bin ./bbdir/CppCore/potserv
 #+end_src
 
-CMake is supported as well:
+CMake is supported as well.
+CMake's =RGPOT_WITH_CACHE= defaults to =ON= and needs RocksDB, unlike Meson's
+=with_cache=false=, so turn it off unless RocksDB is installed (the pixi
+=devbld= environment has it).
+=docs/orgmode/reference/build_options.org= lists every option.
 
+#+attr_rgpot: syntax full build and test run
 #+begin_src bash
-cmake -B build \
+cmake -B build-cmake \
   -DRGPOT_BUILD_TESTS=ON \
   -DRGPOT_BUILD_EXAMPLES=ON \
-  -DRGPOT_WITH_RPC=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
+  -DRGPOT_WITH_RPC=ON \
+  -DRGPOT_WITH_CACHE=OFF
+cmake --build build-cmake
+ctest --test-dir build-cmake --output-on-failure
 #+end_src
 
 For client-only consumers that only need the Cap'n Proto schema and generated
-RPC client types:
+RPC client types (=RGPOT_RPC_CLIENT_ONLY= turns the cache off):
 
+#+attr_rgpot: syntax full build and test run
 #+begin_src bash
 cmake -B build_client \
   -DRGPOT_RPC_CLIENT_ONLY=ON \
@@ -123,25 +195,28 @@ ctest --test-dir build_client --output-on-failure
 
 | Backend | Server selector | Build / runtime notes |
 |---------+-----------------+-----------------------|
-| =LJ= | =LJ= | Built-in 12-6 Lennard-Jones reference potential |
-| =CuH2Pot= | =CuH2= | Built-in Cu-H EAM potential |
-| =XTBPot= | =XTB=, =GFNFF=, =GFN0xTB=, =GFN1xTB= | Enable with =-Dwith_xtb=true=; use pixi env =xtbbld= or =tbbld= |
-| =TBLitePot= | =TBLite=, =TBLiteGFN1=, =TBLiteIPEA1= | Enable with =-Dwith_tblite=true=; use pixi env =tblitebld= or =tbbld= |
-| =D3Pot= | =D3= | In-process Potential summand. Enable with =-Dwith_dftd3=true=; use pixi env =dftd3= or =dftd=. BJ/zero damping, functional key, explicit ATM flag. No =PotentialConfig.d3=. Goldens: =meson test --suite dftd= |
-| =D4Pot= | =D4= | In-process Potential summand. Enable with =-Dwith_dftd4=true=; use pixi env =dftd4= or =dftd=. Functional key, charge, explicit ATM/many-body flag. No =PotentialConfig.d4=. Goldens: =meson test --suite dftd= |
-| =ExprPot= | in-process | Enable with =-Dwith_expr=true=. Vendored OpenMM Lepton (no pixi muparser). Named =Potential= children; construct-time fail-closed names. No =PotentialConfig.expr=. |
-| =MetatomicPot= | =Metatomic:<model_path>= | Enable with =-Dwith_metatomic=true=; use pixi env =metatomicbld=. Pip engines: torch 2.7+ |
-| =NWChemPot= | =NWChem= | Frontend always builds; load =libnwchemc= from the split =nwchemc= project at runtime |
+| =LJPot= | =LJ= | Built-in 12-6 Lennard-Jones reference potential |
+| =LJClusterPot=, =MorsePot=, =ZBLPot= | =LJCluster=, =Morse=, =ZBL= | Built-in; =LJCluster= has free boundaries |
+| =CuH2Pot= | =CuH2= | Fortran-backed Cu-H EAM potential; needs =-Dwith_fortran_pots= (=auto=) |
+| =XTBPot= | =XTB=, =GFNFF=, =GFN0xTB=, =GFN1xTB= | Enable with =-Dwith_xtb=true=; use pixi env =xtbbld= or =tbbld=. =potserv= uses the linked =XTBPot=; =XTBDlopen= loads =libxtb_engine.so= (see =docs/xtb_backends.md=) |
+| =TBLitePot= | =TBLite= (or =TBLiteGFN2=), =TBLiteGFN1=, =TBLiteIPEA1= | Enable with =-Dwith_tblite=true=; use pixi env =tblitebld= or =tbbld= |
+| =D3Pot= | =D3= | In-process Potential summand. Enable with =-Dwith_dftd3=true=; use pixi env =dftd3= or =dftd=. BJ/zero damping, functional key, explicit ATM flag. =PotentialConfig.d3= is not applied; every =potserv= backend refuses it. Goldens: =meson test --suite dftd= |
+| =D4Pot= | =D4= | In-process Potential summand. Enable with =-Dwith_dftd4=true=; use pixi env =dftd4= or =dftd=. Functional key, charge, explicit ATM/many-body flag. =PotentialConfig.d4= is not applied; every =potserv= backend refuses it. Goldens: =meson test --suite dftd= |
+| =ExprPot= | in-process | Enable with =-Dwith_expr=true=. Vendored OpenMM Lepton (no pixi muparser). Named =Potential= children; construct-time fail-closed names. =potserv= refuses =PotentialConfig.expr=. |
+| =MetatomicPot= | =Metatomic:<model_path>[:<device>]= | Enable with =-Dwith_metatomic=true=; use pixi env =metatomicbld=. Pip engines: torch 2.7+ |
+| =UmaPot= | =Uma:<model.pt2>[:<task>]= | Built with =-Dwith_metatomic=true=. UMA / OMol AOTInductor =.pt2=; =<task>= is one of =omol=, =omat=, =oc20=, =oc22=, =oc25=, =odac=, =omc=. Vesin neighbour lists, one package per composition, charge and spin. See =CppCore/rgpot/UmaPot/README.md=. |
+| =NWChemPot= | =NWChem[:basis[:theory[:xc]]]= | Frontend always builds; load =libnwchemc= from the split =nwchemc= project at runtime |
 | =CPMDPot= | =CPMD= | Frontend always builds; load =libcpmdc= from the split =cpmdc= project at runtime |
-| =UmaPot= | =Uma:<model.pt2>= | UMA / OMol AOTInductor =.pt2=. Vesin neighbors, one package per composition. See =CppCore/rgpot/UmaPot/README.md=. |
-| =SkalaPot= | =Skala= | Skala XC on NWChem DFT via =libnwchemc=. |
-| =MOPACPot= | =MOPAC= | Frontend always builds; load =libmopacc= from the split [[https://github.com/OmniPotentRPC/mopacc][mopacc]] project at runtime (OpenMOPAC). Packed params. Default model AM1. |
+| =CP2KPot= | =CP2K= | Enable with =-Dwith_cp2k=enabled= (needs =with_rpc= and pkg-config =libcp2k=) |
+| =SkalaPot= | =Skala=, =Skala:<basis>= | Skala XC on NWChem DFT via =libnwchemc=. Enable with =-Dwith_skala=true= (needs =with_rpc=) |
+| =MOPACPot= | none | Not a =potserv= backend. Frontend always builds; load =libmopacc= from the split [[https://github.com/OmniPotentRPC/mopacc][mopacc]] project at runtime (OpenMOPAC). Packed params. Default model AM1. |
 | =IPIPot= | =IPI:unix:<path>=, =IPI:tcp:<host>:<port>= | POSIX socket server for an i-PI force driver. =-Dwith_ipi=auto= (off on Windows). See =docs/orgmode/howto/ipi.org=. |
 
 Copyable construct-and-evaluate (meson =-Dwith_expr=true=).
 =PotentialHandle::from_impl= / =rgpot_potential_new_eindir= wraps that
 one =ExprPot= as one eindir objective for rgmin, rgsaddle, and anneal.
 
+#+attr_rgpot: run requires=has_expr link=rgpot
 #+begin_src cpp
 #include "rgpot/ExprPot/ExprPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
@@ -175,11 +250,13 @@ int main() {
 When the build also has =-Dwith_dftd3=true=, swap the Morse child for
 =D3Pot= and the string ="0.5*lj + d3"=.
 
-Example server commands:
+Example server commands (=IPI:unix:rgpot= binds the socket =ipi_rgpot= in the
+system temporary directory):
 
+#+attr_rgpot: syntax starts a server that runs until stopped
 #+begin_src bash
 ./bbdir/CppCore/potserv 12345 LJ
-./bbdir/CppCore/potserv 12345 IPI:unix:/tmp/ipi_rgpot
+./bbdir/CppCore/potserv 12345 IPI:unix:rgpot
 ./bbdir/CppCore/potserv 12345 Metatomic:CppCore/tests/data/lj38/lennard-jones.pt
 CPMDC_LIBRARY=/path/to/libcpmdc.so ./bbdir/CppCore/potserv 12345 CPMD
 NWCHEMC_LIBRARY=/path/to/libnwchemc.so ./bbdir/CppCore/potserv 12345 NWChem
@@ -212,23 +289,28 @@ The CPMD runtime path is:
    output units.
 
 For NWChem, =tests/nwchem_params.py= builds =NWChemParams= /
-=PotentialConfig.nwchem=. Engine lookup order is =NWCHEMC_LIBRARY=,
-=RGPOT_NWCHEMC_ENGINE=, =RGPOT_NWCHEM_ENGINE=, then =enginePath= on params.
-See =CppCore/rgpot/NWChemPot/README.md=. The NWChem runtime path mirrors CPMD:
+=PotentialConfig.nwchem=.
+The engine lookup order is =enginePath= on the params, then
+=NWCHEMC_LIBRARY=, =RGPOT_NWCHEMC_ENGINE=, =RGPOT_NWCHEM_ENGINE=, then
+=libnwchemc.so= on the loader path.
+See =CppCore/rgpot/NWChemPot/README.md=.
+The NWChem runtime path mirrors CPMD:
 
 1. Build =libnwchemc.so= in the split =nwchemc= repository (or
    =libnwchemc_fake_engine.so= from a tests build).
 2. Start =potserv <port> NWChem= with the library env vars above.
 3. =configure(PotentialConfig.nwchem)= once, then =calculate(ForceInput)=.
 
-=potctl= drives the same Potential Cap'n Proto RPC against =potserv= (bridge
-stress and CI legs pass the potential name such as =NWChem= or =CPMD=).
+=potctl ci bridge-stress= starts =potserv= with a potential name, runs the
+client-only =ctest= suite against it, then stops the server.
 
 ** Developer Tasks
 
 Hooks use [[https://prek.j178.dev][prek]] through =prek.toml=.
+=prek= is not a pixi dependency; install it first.
 Common commands:
 
+#+attr_rgpot: syntax needs prek, cargo and a built bbdir
 #+begin_src sh
 pixi r prek-install
 pixi r prek

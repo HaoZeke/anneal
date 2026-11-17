@@ -1,0 +1,151 @@
+#+TITLE: Add a potential to the Rust core
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Add a potential to the Rust core
+
+This page shows how to put a C++ potential behind the C ABI of the Rust core
+(=rgpot-core=).
+The result is an =rgpot_potential_t= handle that =rgpot_potential_calculate=
+evaluates.
+The C++ wrappers used here are in =include/rgpot/potential.hpp= and
+=include/rgpot/types.hpp=.
+They include =rgpot.h= from =rgpot-core/include=.
+The example includes them through =rgpot/rgpot.hpp=.
+Where the file system ignores case, as it does by default on macOS and Windows,
+=rgpot/potential.hpp= and =rgpot/Potential.hpp= are the same name, and the first
+include directory that has either file supplies both.
+
+** Write the potential class
+
+Derive the class from =rgpot::Potential<MyPot>= (=CppCore/rgpot/Potential.hpp=).
+The constructor passes a =rgpot::PotType= to the base class.
+A new potential adds its own entry to the =PotType= enum in
+=CppCore/rgpot/pot_types.hpp=.
+The class must override
+=void forceImpl(const ForceInput &in, ForceOut *out) const=.
+=in.pos= holds =3 * in.nAtoms= positions, row-major, and =in.box= holds the 3x3
+cell, row-major.
+=forceImpl= writes =out->energy= and the =3 * in.nAtoms= forces in =out->F=.
+=Potential<MyPot>= hands =out= over zeroed.
+
+** Wrap it in a handle
+
+=rgpot::PotentialHandle::from_impl= registers a trampoline that converts the DLPack tensors of =rgpot_force_input_t=
+to a =ForceInput= and calls =forceImpl=.
+The caller keeps the potential object alive for as long as the handle exists.
+=calculate= throws =rgpot::Error= when the callback returns a status other than
+=RGPOT_SUCCESS=.
+The trampoline returns =RGPOT_INVALID_PARAMETER= when the positions tensor is
+missing.
+It returns =RGPOT_INTERNAL_ERROR= when =forceImpl= throws.
+
+#+attr_rgpot: compile flags=-Irgpot-core/include
+#+begin_src cpp
+#include "rgpot/Potential.hpp"
+#include "rgpot/rgpot.hpp"
+
+namespace demo {
+
+// Harmonic tether of every atom to the origin, E = 0.5 * k * |r|^2.
+class MyPot : public rgpot::Potential<MyPot> {
+public:
+  MyPot() : Potential(rgpot::PotType::UNKNOWN) {}
+
+  void forceImpl(const rgpot::ForceInput &in,
+                 rgpot::ForceOut *out) const override {
+    const double k = 1.0;
+    for (size_t i = 0; i < 3 * in.nAtoms; ++i) {
+      out->energy += 0.5 * k * in.pos[i] * in.pos[i];
+      out->F[i] = -k * in.pos[i];
+    }
+  }
+};
+
+} // namespace demo
+
+int main() {
+  demo::MyPot my_pot;
+  auto handle = rgpot::PotentialHandle::from_impl(my_pot);
+
+  double pos[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+  int atm[] = {1, 1};
+  double box[] = {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0};
+  rgpot::InputSpec input_spec(2, pos, atm, box);
+
+  auto result = handle.calculate(input_spec);
+  double energy = result.energy();
+  return energy > 0.0 ? 0 : 1;
+}
+#+end_src
+
+** Register a C callback instead
+
+Without the C++ wrappers, write an =extern "C"=-compatible callback and pass it
+to =rgpot_potential_new=.
+The third argument is an optional destructor for the user data, or =NULL=.
+=rgpot_potential_free= releases the handle and calls that destructor.
+
+=rgpot.h= names =eindir_objective_t= without defining it.
+=rgpot/c_api.hpp= defines it and then includes =rgpot.h=, and it compiles as C.
+
+#+attr_rgpot: compile flags=-Iinclude,-Irgpot-core/include
+#+begin_src c
+#include <stddef.h>
+#include "rgpot/c_api.hpp"
+
+static rgpot_status_t my_trampoline(void *ud, const rgpot_force_input_t *in,
+                                    rgpot_force_out_t *out) {
+  (void)ud;
+  (void)in;
+  (void)out;
+  /* ... forward to your implementation and set out->forces ... */
+  return RGPOT_SUCCESS;
+}
+
+int main(void) {
+  int my_data = 0;
+  rgpot_potential_t *pot = rgpot_potential_new(my_trampoline, &my_data, NULL);
+  rgpot_potential_free(pot);
+  return 0;
+}
+#+end_src
+
+** Build with the Rust core
+
+*** Meson
+
+The =with_rust_core= option (default =false=) adds a =custom_target= in
+=meson.build= that runs =cargo build= on =rgpot-core/Cargo.toml=.
+Cargo writes to =<builddir>/cargo-target/debug=, or to
+=<builddir>/cargo-target/release= when =buildtype= is =release=.
+Meson links the resulting =librgpot_core.a= and adds =rgpot-core/include= and
+=include= to the include path.
+The =rpc= cargo feature is enabled when =with_rpc= or =with_rpc_client_only= is
+on.
+The =cache= cargo feature is enabled when =with_cache= is on.
+
+=meson setup= looks for =librgpot_core.a= in that directory, so a fresh setup
+fails until cargo has built it once.
+Build the crate into the build directory first, with the same features:
+
+#+attr_rgpot: syntax
+#+begin_src bash
+cargo build --manifest-path rgpot-core/Cargo.toml --target-dir bbdir/cargo-target
+meson setup bbdir -Dwith_rust_core=true
+meson compile -C bbdir
+#+end_src
+
+*** Standalone Rust
+
+The crate also builds and tests on its own:
+
+#+attr_rgpot: syntax
+#+begin_src bash
+cd rgpot-core
+cargo build
+cargo test
+cargo build --features rpc  # with RPC support
+#+end_src
+
+The =rust-test-all= pixi task runs =cargo nextest= with all features.

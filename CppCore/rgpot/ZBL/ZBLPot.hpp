@@ -21,6 +21,7 @@
 #include <vector>
 // clang-format on
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 #include "rgpot/pot_caps.hpp"
@@ -95,6 +96,9 @@ public:
    */
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
+  /// forceImpl plus each pair energy and virial split half to each atom.
+  void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
   /// Stored list, streaming walk, or Auto (memory and the candidate bound).
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 
@@ -113,6 +117,8 @@ public:
 private:
   /// Bump when the kernel numerics change, so stale cache entries die.
   static constexpr uint64_t kKernelVersion = 1;
+
+  void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
   /**
    * @brief Coefficient tables for the species present in a system.

@@ -23,10 +23,6 @@
 #include "rgpot/simd/api.hpp"
 #include "rgpot/simd/exact_fma.hpp"
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot {
 
 /**
@@ -43,6 +39,17 @@ namespace rgpot {
  * replaced by a 1e6 Angstrom cube.
  */
 void LJClusterPot::forceImpl(const ForceInput &in, ForceOut *out) const {
+  compute(in, out, nullptr);
+}
+
+void LJClusterPot::forcePerAtom(const ForceInput &in, ForceOut *out,
+                                const PerAtomOut &atoms) const {
+  clearPerAtom(atoms, in.nAtoms);
+  compute(in, out, &atoms);
+}
+
+void LJClusterPot::compute(const ForceInput &in, ForceOut *out,
+                           const PerAtomOut *atoms) const {
   const auto N = static_cast<long>(in.nAtoms);
   const double *R = in.pos;
   double *F = out->F;
@@ -92,7 +99,7 @@ void LJClusterPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   // The direct walk is the shifted pair term, so a quintic switch stays
   // on the cell walk. A stream never takes the direct walk: that walk
   // is an all-pairs kernel, and a stream has to stay on the shared cells.
-  if (!switched && mode_ != nlist::Mode::Stream &&
+  if (!switched && mode_ != nlist::Mode::Stream && atoms == nullptr &&
       ((ex * ex + ey * ey) + ez * ez <= cutoff * cutoff)) {
     double energyAcc = 0.0;
     lj_cluster_direct(R, static_cast<std::size_t>(N), cutoff, u0, psi, cuttOffU, F,
@@ -119,7 +126,7 @@ void LJClusterPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   retained_ = neighbours_.streaming() ? 0 : neighbours_.slots();
   const double cutoff2 = cutoff * cutoff;
   auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                    double r2, double *force, double &energy) {
+                    double r2, double *force, double &energy, const PerAtomOut *share) {
     if (!(i < j) || !(r2 > 0.0) || r2 > cutoff2) {
       return;
     }
@@ -156,25 +163,26 @@ void LJClusterPot::forceImpl(const ForceInput &in, ForceOut *out) const {
     force[3 * j] -= fx;
     force[3 * j + 1] -= fy;
     force[3 * j + 2] -= fz;
+    if (share != nullptr) {
+      tallyPair(*share, static_cast<std::size_t>(i), static_cast<std::size_t>(j), pair_e, fscale,
+                dx, dy, dz);
+    }
   };
   const int nt = nlist::threadsRequested();
   if (nt <= 1) {
     nlist::visitHalf(neighbours_, 0, N,
                      [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                         double r2) { accept(i, j, dx, dy, dz, r2, F, *U); });
+                         double r2) { accept(i, j, dx, dy, dz, r2, F, *U, atoms); });
   } else {
     std::vector<double> owned(static_cast<std::size_t>(nt) * static_cast<std::size_t>(N) * 3,
                               0.0);
     std::vector<double> partial(static_cast<std::size_t>(nt), 0.0);
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-    {
-#if defined(_OPENMP)
-      const int t = omp_get_thread_num();
-#else
-      const int t = 0;
-#endif
+    PerAtomTeam team(atoms, static_cast<std::size_t>(N), nt);
+    std::vector<PerAtomOut> slots(static_cast<std::size_t>(nt));
+    for (int t = 0; t < nt; ++t) {
+      slots[static_cast<std::size_t>(t)] = team.slot(t);
+    }
+    nlist::forEachSlice(nt, [&](int t) {
       const auto range = nlist::partition(N, t, nt);
       double *local =
           owned.data() + static_cast<std::size_t>(t) * static_cast<std::size_t>(N) * 3;
@@ -182,10 +190,12 @@ void LJClusterPot::forceImpl(const ForceInput &in, ForceOut *out) const {
       nlist::visitDirected(
           neighbours_, range.begin, range.end,
           [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz, double r2) {
-            accept(i, j, dx, dy, dz, r2, local, local_e);
+            accept(i, j, dx, dy, dz, r2, local, local_e,
+                   atoms != nullptr ? &slots[static_cast<std::size_t>(t)] : nullptr);
           });
       partial[static_cast<std::size_t>(t)] = local_e;
-    }
+    });
+    team.reduce();
     for (int t = 0; t < nt; ++t) {
       *U += partial[static_cast<std::size_t>(t)];
       const double *local =

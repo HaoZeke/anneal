@@ -15,11 +15,12 @@ All contributors must follow our
 Please review the technical requirements before submitting a Pull Request:
 
 - Development Environment :: We use ~pixi~ for environment management.
-See the [[file:developer/index.org][Developer Guide]] for setup and common
-tasks.
-- Documentation :: We author all documentation in ~orgmode~ converted to ~rst~.
-See [[file:developer/faq.org][Developer FAQ]] for documentation workflow
-details.
+  See the [[file:developer/index.org][Developer Guide]] for setup and common
+  tasks.
+- Documentation :: The Sphinx pages are written in ~orgmode~ under
+  =docs/orgmode/= and exported to ~rst~.
+  See the Developer Guide and the [[file:developer/faq.org][Developer FAQ]] for
+  the documentation workflow.
 
 * Reporting Issues
 Ask questions, report bugs and suggest enhancements on the
@@ -30,7 +31,8 @@ Report security vulnerabilities privately, following
 Do not open a public issue for them.
 
 * Contributing
-For details on the dispatcher architecture or internal API:
+The Developer Guide covers the environments, tasks, tests, releases and the ABI
+bump procedure:
 
 #+begin_export rst
   .. toctree::

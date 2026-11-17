@@ -20,10 +20,6 @@
 #include <fstream>
 #endif
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot::nlist {
 namespace {
 
@@ -42,41 +38,6 @@ int axisCount(double length, double edge) {
 }
 
 } // namespace
-
-int threadsRequested() {
-#if defined(_OPENMP)
-  const char *env = std::getenv("OMP_NUM_THREADS");
-  if (env == nullptr || env[0] == '\0') {
-    return 1;
-  }
-  char *end = nullptr;
-  const long parsed = std::strtol(env, &end, 10);
-  if (end == env || parsed < 1) {
-    return 1;
-  }
-  if (parsed > 0x7fffffffL) {
-    return 0x7fffffff;
-  }
-  return static_cast<int>(parsed);
-#else
-  return 1;
-#endif
-}
-
-Range partition(std::int64_t n, int thread, int nthreads) {
-  if (nthreads < 1) {
-    nthreads = 1;
-  }
-  if (thread < 0 || thread >= nthreads || n <= 0) {
-    return {};
-  }
-  const auto nt = static_cast<std::int64_t>(nthreads);
-  const auto t = static_cast<std::int64_t>(thread);
-  Range out;
-  out.begin = (n * t) / nt;
-  out.end = (n * (t + 1)) / nt;
-  return out;
-}
 
 std::uint64_t availableBytes() {
 #if defined(_WIN32)
@@ -113,7 +74,8 @@ std::uint64_t availableBytes() {
 }
 
 bool Neighbours::reusable(const double *xyz, std::size_t n, const double *box9,
-                          const Spec &spec) const {
+                          const Spec &spec, bool &wrapped) const {
+  wrapped = false;
   if (!built_ || n != n_) {
     return false;
   }
@@ -126,13 +88,30 @@ bool Neighbours::reusable(const double *xyz, std::size_t n, const double *box9,
   if (!(key == key_) || std::memcmp(box_, box9, sizeof(box_)) != 0) {
     return false;
   }
+  if (allPairs()) {
+    return true;
+  }
   // A streaming walk trusts the bins. Atoms that have moved may sit in
   // another cell, so the bins are reused only for an identical geometry.
   // A stored list keeps its candidates out to the skin.
   if (streaming_) {
     return std::memcmp(ref_.data(), xyz, n * 3 * sizeof(double)) == 0;
   }
-  return withinSkin(ref_.data(), xyz, n, spec.skin);
+  const double limit2 = 0.25 * spec.skin * spec.skin;
+  for (std::size_t a = 0; a < n; ++a) {
+    double dx = xyz[3 * a] - ref_[3 * a];
+    double dy = xyz[3 * a + 1] - ref_[3 * a + 1];
+    double dz = xyz[3 * a + 2] - ref_[3 * a + 2];
+    if (dx * dx + dy * dy + dz * dz <= limit2) {
+      continue;
+    }
+    fold(dx, dy, dz);
+    if (!(dx * dx + dy * dy + dz * dz <= limit2)) {
+      return false;
+    }
+    wrapped = true;
+  }
+  return true;
 }
 
 void Neighbours::buildCells(const double *xyz, std::size_t n) {
@@ -274,7 +253,10 @@ void Neighbours::buildStored(const double *xyz, std::size_t n) {
             double dx = 0;
             double dy = 0;
             double dz = 0;
-            foldPair(static_cast<std::int32_t>(a), j, dx, dy, dz);
+            if (!foldPairWithin(static_cast<std::int32_t>(a), j, search2, dx,
+                                dy, dz)) {
+              continue;
+            }
             const double r2 = dx * dx + dy * dy + dz * dz;
             if (r2 <= search2) {
               gather.push_back(j);
@@ -292,8 +274,14 @@ void Neighbours::buildStored(const double *xyz, std::size_t n) {
 void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
                         const Spec &spec) {
   xyz_ = xyz;
-  if (reusable(xyz, n, box9, spec)) {
+  bool wrapped = false;
+  if (reusable(xyz, n, box9, spec, wrapped)) {
     reused_ = true;
+    // The tile walk takes the image of a pair from the bins of its atoms,
+    // and a wrapped atom left its bin on the far side of the cell.
+    if (wrapped) {
+      buildCells(xyz, n);
+    }
     return;
   }
   reused_ = false;
@@ -332,6 +320,14 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
     nbr_.clear();
     built_ = true;
     ref_.assign(xyz, xyz + 3 * n);
+    return;
+  }
+  // Every pair is a candidate, so the walks need neither bins nor a list,
+  // and the coordinates never invalidate the update. allPairs() reads
+  // this state back.
+  if (std::isinf(search_)) {
+    mode_ = Mode::Stream;
+    built_ = true;
     return;
   }
   buildCells(xyz, n);

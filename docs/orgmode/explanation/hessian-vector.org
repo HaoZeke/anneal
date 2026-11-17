@@ -1,0 +1,74 @@
+#+TITLE: Hessian-vector products
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Hessian-vector products
+
+This page explains why a potential handle computes Hessian-vector products
+itself and keeps a cached centre.
+The functions, their arguments and their errors are in the
+[[file:../reference/c_abi.org][C ABI reference]].
+
+A minimum-mode search (Lanczos, dimer) applies the Hessian =H= of the energy to
+many directions =v= at one geometry.
+With only a force callback each product is a difference of two force
+evaluations, and one of them is the centre the search has not moved from.
+A potential handle answers =H v= itself and keeps the forces of that centre.
+
+** Cost and error
+
+| Scheme               | Force calls per product        | Error          |
+|----------------------+--------------------------------+----------------|
+| =RGPOT_HVP_FORWARD=  | 1, plus 1 for each new centre  | =O(h)=         |
+| =RGPOT_HVP_CENTRAL=  | 2                              | =O(h^2)=       |
+| =RGPOT_HVP_ANALYTIC= | 0                              | the callback's |
+
+The forward scheme reuses the forces of the centre.
+=k= forward products at one centre therefore cost =k + 1= force calls instead of
+=2k=.
+No finite difference makes one call per product at =O(h^2)=.
+The forward error is =(h/2) T(u, u) |v|=, with =T= the third derivative of the
+energy and =u = v / |v|=, and cancelling it takes the second evaluation that the
+central scheme makes.
+A search that needs second-order products at no extra force call registers an
+analytic product.
+
+=h= is the displacement along the unit direction =u=, in the units of the
+positions, and the difference is scaled back by =|v|=.
+The forward product is therefore positively homogeneous in =v= but not odd: the
+=O(h)= term keeps its sign when =v= changes sign.
+
+** The cached centre
+
+The handle keys its centre on the bits of the positions, the atomic numbers and
+the cell.
+Comparing bits rather than values keeps the forces computed at =0.0= from being
+served at =-0.0=.
+Moving one coordinate by one ulp, changing a species or changing the cell is a
+new centre.
+
+The key does not see the state behind the callback's =user_data=.
+A potential whose parameters change at a fixed geometry calls
+=rgpot_potential_hvp_invalidate= to drop the centre.
+
+A search usually needs the centre forces as well as the products.
+=rgpot_potential_hvp_centre= returns them from the same cache, so the force call
+that the search makes at the centre is the one the forward products reuse.
+The handle holds one centre, which matches a search that stays at one geometry
+for many products and then moves.
+
+** Analytic products
+
+A potential that knows its Hessian registers the product with
+=rgpot_potential_set_hvp_callback=.
+=RGPOT_HVP_AUTO= then uses it and makes no force call.
+In C++, =rgpot::PotentialHandle::from_impl= registers it for a potential with a
+member
+=void hessianVectorImpl(const ForceInput &, const double *, double *) const=;
+=MorsePot= has one.
+
+** Without the Rust core
+
+=CppCore/rgpot/HessianVector.hpp= gives the same schemes, default step, centre
+cache and counters to C++ potentials used without the Rust core.
+The Python module uses it.

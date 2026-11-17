@@ -2,11 +2,13 @@
 // Copyright 2023--present rgpot developers
 //
 // The generic engine table of each backend library this build produces:
-// classical (lj, ljcluster, morse, zbl and the Fortran potentials), mopac,
-// nwchem, skala and xtb. Each library is opened the way a host opens it:
-// dlopen of the path in RGPOT_ENGINE_<NAME> and dlsym of each symbol.
+// classical (lj, ljcluster, morse, zbl and the Fortran potentials), metatomic,
+// mopac, nwchem, skala and xtb. Each library is opened the way a host opens
+// it: dlopen of the path in RGPOT_ENGINE_<NAME> and dlsym of each symbol.
 // RGPOT_ENGINE_EXPECT lists the engines the build made; one of them without a
-// path fails the test instead of skipping it.
+// path fails the test instead of skipping it. The metatomic cases load the
+// models in MTA_<NAME>_PT, which scripts/export_tiny_metatomic_model.py
+// writes.
 
 #include <array>
 #include <atomic>
@@ -17,6 +19,8 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <capnp/message.h>
@@ -455,4 +459,167 @@ TEST_CASE("metatomic engine keeps its own table and adds the generic one",
   REQUIRE(r.getNSymmetryRotations() == 4);
   REQUIRE(r.getTorchDeterminism() == ::MetatomicParams::TorchDeterminism::DETERMINISTIC);
   REQUIRE(r.getIntraopThreads() == 2);
+}
+
+namespace {
+
+/// A model the build exports next to the Metatomic engine.
+std::string mta_model(const char *key) {
+  const char *path = std::getenv(key);
+  INFO(key << " is unset; the build sets it with RGPOT_ENGINE_METATOMIC");
+  REQUIRE(path != nullptr);
+  return path;
+}
+
+kj::Array<capnp::word> metatomic_params(const std::string &model,
+                                        int charge = 0, int spin = 1,
+                                        bool attach_system_extras = false) {
+  capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::MetatomicParams>();
+  p.setModelPath(model);
+  p.setCharge(charge);
+  p.setSpin(spin);
+  p.setAttachSystemExtras(attach_system_extras);
+  return capnp::messageToFlatArray(msg);
+}
+
+// An isolated H and O, Angstrom. A model that reads both gives
+// E = 2.5 + 10 * charge + multiplicity eV; the forces are -positions.
+const double kPair[6] = {0.0, 0.0, 1.0, 0.0, 2.0, 0.0};
+const int kPairZ[2] = {1, 8};
+const std::array<double, 9> kNoCell = {};
+
+double pair_energy(const Engine &e, RgpotEnginePot *pot) {
+  std::vector<double> forces(6, 0.0);
+  double energy = 0.0;
+  const int rc = e.force(pot, 2, kPair, kPairZ, forces.data(), &energy,
+                         nullptr, kNoCell.data(), nullptr, nullptr);
+  INFO(error_of(e, pot));
+  REQUIRE(rc == 0);
+  for (int k = 0; k < 6; ++k) {
+    REQUIRE(forces[k] == Catch::Approx(-kPair[k]).margin(1e-12));
+  }
+  return energy;
+}
+
+/// Two copies of the pair in one call, which is one model forward.
+std::array<double, 2> pair_batch_energies(const Engine &e,
+                                          RgpotEnginePot *pot) {
+  std::vector<double> R(kPair, kPair + 6);
+  R.insert(R.end(), kPair, kPair + 6);
+  std::vector<double> cells(18, 0.0), forces(12, 0.0);
+  std::array<double, 2> energies = {0.0, 0.0};
+  const int rc = e.force_batch(pot, 2, 2, R.data(), kPairZ, forces.data(),
+                               energies.data(), nullptr, cells.data(), nullptr,
+                               nullptr);
+  INFO(error_of(e, pot));
+  REQUIRE(rc == 0);
+  return energies;
+}
+
+} // namespace
+
+TEST_CASE("metatomic charge and spin reach a model that reads them",
+          "[engine][metatomic][charge]") {
+  Engine e;
+  if (!open_engine("METATOMIC", e)) {
+    SKIP("no metatomic engine in this build");
+  }
+  const std::string model = mta_model("MTA_CHARGE_SPIN_PT");
+  std::string error;
+  RgpotEnginePot *pot = create(e, metatomic_params(model), &error);
+  INFO(error);
+  REQUIRE(pot != nullptr);
+  CHECK(pair_energy(e, pot) == Catch::Approx(3.5));
+
+  REQUIRE(e.set_charge_spin(pot, -1, 3) == 0);
+  CHECK(pair_energy(e, pot) == Catch::Approx(-4.5));
+  const auto batch = pair_batch_energies(e, pot);
+  CHECK(batch[0] == Catch::Approx(-4.5));
+  CHECK(batch[1] == Catch::Approx(-4.5));
+  REQUIRE(e.set_charge_spin(pot, 0, 1) == 0);
+  CHECK(pair_energy(e, pot) == Catch::Approx(3.5));
+  e.destroy(pot);
+
+  // MetatomicParams.charge and spin hold until the first set_charge_spin.
+  pot = create(e, metatomic_params(model, 1, 2), &error);
+  REQUIRE(pot != nullptr);
+  CHECK(pair_energy(e, pot) == Catch::Approx(14.5));
+  e.destroy(pot);
+
+  // The multiplicity also reaches a model that reads it as rgpot::spin.
+  pot = create(e, metatomic_params(mta_model("MTA_SPIN_PT")), &error);
+  REQUIRE(pot != nullptr);
+  REQUIRE(e.set_charge_spin(pot, 0, 3) == 0);
+  CHECK(pair_energy(e, pot) == Catch::Approx(5.5));
+  e.destroy(pot);
+
+  // attachSystemExtras hands both to a model that reads them without
+  // declaring them.
+  pot = create(e, metatomic_params(mta_model("MTA_UNDECLARED_PT"), -1, 3, true),
+               &error);
+  REQUIRE(pot != nullptr);
+  CHECK(pair_energy(e, pot) == Catch::Approx(-4.5));
+  REQUIRE(e.set_charge_spin(pot, 1, 2) == 0);
+  CHECK(pair_energy(e, pot) == Catch::Approx(14.5));
+  e.destroy(pot);
+}
+
+TEST_CASE("metatomic engine refuses a charge or spin its model does not read",
+          "[engine][metatomic][charge]") {
+  Engine e;
+  if (!open_engine("METATOMIC", e)) {
+    SKIP("no metatomic engine in this build");
+  }
+  std::string error;
+
+  // Declares neither, so the model sees neither and there is none to change.
+  // The undeclared model reads its defaults, charge 0 and multiplicity 1.
+  for (const auto &[key, energy] : {std::pair{"MTA_PLAIN_PT", 2.5},
+                                    std::pair{"MTA_UNDECLARED_PT", 3.5}}) {
+    INFO(key);
+    RgpotEnginePot *pot = create(e, metatomic_params(mta_model(key)), &error);
+    INFO(error);
+    REQUIRE(pot != nullptr);
+    CHECK(e.set_charge_spin(pot, -1, 3) == 3);
+    CHECK(!error_of(e, pot).empty());
+    CHECK(e.set_charge_spin(pot, 0, 1) == 3);
+    CHECK(pair_energy(e, pot) == Catch::Approx(energy));
+    e.destroy(pot);
+  }
+
+  // Reads the charge only: the multiplicity must stay 1, and a refused
+  // setting changes nothing.
+  RgpotEnginePot *pot = create(e, metatomic_params(mta_model("MTA_CHARGE_PT")),
+                               &error);
+  REQUIRE(pot != nullptr);
+  CHECK(e.set_charge_spin(pot, -1, 1) == 0);
+  CHECK(pair_energy(e, pot) == Catch::Approx(-7.5));
+  CHECK(e.set_charge_spin(pot, 1, 3) == 3);
+  CHECK(error_of(e, pot).find("spin") != std::string::npos);
+  CHECK(pair_energy(e, pot) == Catch::Approx(-7.5));
+  e.destroy(pot);
+
+  // Reads the multiplicity only: the charge must stay 0.
+  pot = create(e, metatomic_params(mta_model("MTA_SPIN_PT")), &error);
+  REQUIRE(pot != nullptr);
+  CHECK(e.set_charge_spin(pot, -1, 3) == 3);
+  CHECK(error_of(e, pot).find("charge") != std::string::npos);
+  CHECK(pair_energy(e, pot) == Catch::Approx(3.5));
+  e.destroy(pot);
+
+  // The same holds for the values in MetatomicParams: create fails.
+  for (const auto &[key, charge, spin, word] :
+       {std::tuple{"MTA_PLAIN_PT", -1, 1, "charge"},
+        std::tuple{"MTA_CHARGE_PT", 0, 2, "spin"},
+        std::tuple{"MTA_SPIN_PT", 1, 1, "charge"}}) {
+    INFO(key << " charge " << charge << " spin " << spin);
+    error.clear();
+    pot = create(e, metatomic_params(mta_model(key), charge, spin), &error);
+    CHECK(pot == nullptr);
+    CHECK(error.find(word) != std::string::npos);
+    if (pot != nullptr) {
+      e.destroy(pot);
+    }
+  }
 }

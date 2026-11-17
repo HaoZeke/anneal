@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -29,6 +30,8 @@
 
 #include "rgpot/BatchEvaluator.hpp"
 #include "rgpot/ForceStructs.hpp"
+#include "rgpot/HessianVector.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
 #include "rgpot/pot_caps.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -182,6 +185,18 @@ stress_to_numpy(const double stress[9]) {
   return nb::ndarray<nb::numpy, double, nb::c_contig>(buf, {3, 3}, owner);
 }
 
+inline nb::ndarray<nb::numpy, double, nb::c_contig>
+vector_to_numpy(const std::vector<double> &values,
+                std::initializer_list<size_t> shape) {
+  const size_t n = values.size();
+  double *buf = new double[n == 0 ? 1 : n];
+  if (n != 0) {
+    std::memcpy(buf, values.data(), n * sizeof(double));
+  }
+  nb::capsule owner(buf, [](void *p) noexcept { delete[] static_cast<double *>(p); });
+  return nb::ndarray<nb::numpy, double, nb::c_contig>(buf, shape, owner);
+}
+
 inline nb::dict caps_dict(const PotCaps &caps) {
   nb::dict out;
   const char *reentrancy = "shared";
@@ -208,16 +223,22 @@ struct FullResult {
   double stress[9]{};
 };
 
+/// The cell of @a g, row-major.
+inline std::array<double, 9> flat_box(const Geom &g) {
+  std::array<double, 9> flat{};
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      flat[i * 3 + j] = g.box[i][j];
+    }
+  }
+  return flat;
+}
+
 /// forceImpl while the caller is already detached (F4).
 template <typename Pot>
 FullResult run_force(Pot &pot, const Geom &g) {
   AtomMatrix forces = AtomMatrix::Zero(g.pos.rows(), 3);
-  double flat[9];
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      flat[i * 3 + j] = g.box[static_cast<size_t>(i)][static_cast<size_t>(j)];
-    }
-  }
+  const std::array<double, 9> flat = flat_box(g);
   ForceOut fo{.F = forces.data(),
               .energy = 0.0,
               .variance = 0.0,
@@ -226,7 +247,7 @@ FullResult run_force(Pot &pot, const Geom &g) {
   ForceInput in{.nAtoms = g.pos.rows(),
                 .pos = g.pos.data(),
                 .atmnrs = g.types.data(),
-                .box = flat};
+                .box = flat.data()};
   pot.forceImpl(in, &fo);
   if (!std::isfinite(fo.energy)) {
     throw rgbind::NumericalError("energy is not finite");
@@ -237,6 +258,43 @@ FullResult run_force(Pot &pot, const Geom &g) {
   result.variance = fo.variance;
   result.has_stress = fo.has_stress != 0;
   std::memcpy(result.stress, fo.stress, sizeof(result.stress));
+  return result;
+}
+
+struct PerAtomResult {
+  FullResult total;
+  std::vector<double> energies;
+  std::vector<double> virials;
+};
+
+/// forcePerAtom while the caller is already detached (F4).
+template <PerAtomPotential Pot>
+PerAtomResult run_force_per_atom(Pot &pot, const Geom &g) {
+  const auto n = static_cast<size_t>(g.pos.rows());
+  PerAtomResult result;
+  result.energies.assign(n, 0.0);
+  result.virials.assign(6 * n, 0.0);
+  AtomMatrix forces = AtomMatrix::Zero(g.pos.rows(), 3);
+  const std::array<double, 9> flat = flat_box(g);
+  ForceOut fo{.F = forces.data(),
+              .energy = 0.0,
+              .variance = 0.0,
+              .stress = {},
+              .has_stress = 0};
+  ForceInput in{.nAtoms = g.pos.rows(),
+                .pos = g.pos.data(),
+                .atmnrs = g.types.data(),
+                .box = flat.data()};
+  pot.forcePerAtom(in, &fo,
+                   PerAtomOut{result.energies.data(), result.virials.data()});
+  if (!std::isfinite(fo.energy)) {
+    throw rgbind::NumericalError("energy is not finite");
+  }
+  result.total.energy = fo.energy;
+  result.total.forces = std::move(forces);
+  result.total.variance = fo.variance;
+  result.total.has_stress = fo.has_stress != 0;
+  std::memcpy(result.total.stress, fo.stress, sizeof(result.total.stress));
   return result;
 }
 
@@ -257,10 +315,11 @@ inline nb::dict result_dict(const FullResult &result) {
 /**
  * One potential object, reentrant (F2, F3).
  *
- * SharedInstance kernels (LJ) keep a single instance: concurrent calls
- * are the same calls the GIL used to serialise. Every other kernel gets
- * one instance per calling thread, created on first use under mu_ while
- * the caller is detached, and destroyed with this object.
+ * A kernel whose caps() report Reentrancy::SharedInstance keeps a single
+ * instance: concurrent calls are the same calls the GIL used to serialise.
+ * Every other kernel gets one instance per calling thread, created on
+ * first use under mu_ while the caller is detached, and destroyed with
+ * this object.
  *
  * The Calculator path does not use this as a session claim. Only the
  * RPC client claims its connection.
@@ -325,6 +384,10 @@ public:
 
   std::unique_ptr<Pot> make() const { return make_(); }
 
+  /// Centre and counters of hvp(). Every instance comes from one factory,
+  /// so a centre computed on one thread's instance serves the others.
+  HessianVectorCache &hvp() { return hvp_; }
+
 private:
   void clear() noexcept {
     std::lock_guard<std::mutex> lock(mu_);
@@ -338,7 +401,54 @@ private:
   bool shared_ = false;
   std::mutex mu_;
   std::unordered_map<std::thread::id, std::unique_ptr<Pot>> extra_;
+  HessianVectorCache hvp_;
 };
+
+inline HvpScheme parse_hvp_scheme(const std::string &name) {
+  if (name == "auto") {
+    return HvpScheme::Auto;
+  }
+  if (name == "forward") {
+    return HvpScheme::Forward;
+  }
+  if (name == "central") {
+    return HvpScheme::Central;
+  }
+  if (name == "analytic") {
+    return HvpScheme::Analytic;
+  }
+  const std::string msg = "scheme: expected 'auto', 'forward', 'central' or "
+                          "'analytic', got '" + name + "'";
+  throw nb::value_error(msg.c_str());
+}
+
+/// HessianVectorCache::apply or centre while the caller is detached (F4).
+/// A non-finite kernel value is a NumericalError, as for evaluate().
+template <typename Fn> auto detached_hvp(Fn &&fn) {
+  nb::gil_scoped_release release;
+  try {
+    return fn();
+  } catch (const std::domain_error &e) {
+    throw rgbind::NumericalError(e.what());
+  }
+}
+
+/// (energy, forces, variance) of one call on a bare potential, made
+/// detached (F4). A non-finite energy is a NumericalError, as for the
+/// PotHolder __call__.
+template <typename Pot> nb::tuple call_detached(Pot &pot, const Geom &geom) {
+  double energy = 0.0;
+  double variance = 0.0;
+  AtomMatrix forces;
+  {
+    nb::gil_scoped_release release;
+    std::tie(energy, forces, variance) = pot(geom.pos, geom.types, geom.box);
+  }
+  if (!std::isfinite(energy)) {
+    throw rgbind::NumericalError("energy is not finite");
+  }
+  return nb::make_tuple(energy, matrix_to_numpy(forces), variance);
+}
 
 template <typename Pot>
 void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
@@ -381,7 +491,31 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert(),
       "Energy, forces, variance, and stress when the kernel writes it. "
-      "F4: the kernel runs detached.");
+      "The kernel runs with the interpreter released.");
+  if constexpr (PerAtomPotential<Pot>) {
+    cls.def(
+        "evaluate_per_atom",
+        [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
+           const F64 &box) {
+          Geom geom = read_geom(positions, atom_types, box);
+          PerAtomResult result;
+          {
+            nb::gil_scoped_release release;
+            result = run_force_per_atom(self.slot(), geom);
+          }
+          const auto n = static_cast<size_t>(geom.pos.rows());
+          nb::dict out = result_dict(result.total);
+          out["energies"] = vector_to_numpy(result.energies, {n});
+          out["virials"] = vector_to_numpy(result.virials, {n, 6});
+          return out;
+        },
+        nb::arg("positions").noconvert(), nb::arg("atom_types"),
+        nb::arg("box").noconvert(),
+        "evaluate() plus energies, shape (N,), eV, summing to energy, and "
+        "virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to "
+        "-volume * stress. A pair term goes half to each atom. The kernel "
+        "runs with the interpreter released.");
+  }
   cls.def(
       "evaluate_batch",
       [](PotHolder<Pot> &self, nb::list positions, nb::list atom_types,
@@ -396,9 +530,22 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
         }
         std::vector<BatchInput> inputs;
         inputs.reserve(positions.size());
+        // F6. A wrong dtype or order is a TypeError, not nb::cast_error.
+        auto f64_item = [](nb::handle item, const char *what, size_t i) {
+          try {
+            return nb::cast<F64>(item, false);
+          } catch (const nb::cast_error &) {
+            PyErr_Clear();
+            throw nb::type_error(
+                ("evaluate_batch: " + std::string(what) + "[" +
+                 std::to_string(i) +
+                 "] must be a C-contiguous float64 array")
+                    .c_str());
+          }
+        };
         for (size_t i = 0; i < positions.size(); ++i) {
-          auto pos = nb::cast<F64>(positions[i], false);
-          auto box = nb::cast<F64>(boxes[i], false);
+          auto pos = f64_item(positions[i], "positions", i);
+          auto box = f64_item(boxes[i], "box", i);
           Geom geom = read_geom(pos, atom_types[i], box);
           BatchInput item;
           item.positions = std::move(geom.pos);
@@ -439,6 +586,85 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       "One detached BatchEvaluator call. results[i] matches a serial "
       "call on inputs[i], bit for bit. n_threads 0 uses the hardware "
       "concurrency.");
+  cls.def(
+      "hvp",
+      [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
+         const F64 &box, const F64 &direction, double step,
+         const std::string &scheme) {
+        Geom geom = read_geom(positions, atom_types, box);
+        const size_t n = static_cast<size_t>(geom.pos.rows());
+        rgbind::check_f64_2d(direction, n, 3, "direction");
+        const HvpScheme parsed = parse_hvp_scheme(scheme);
+        std::vector<double> v(direction.data(), direction.data() + 3 * n);
+        AtomMatrix hv = AtomMatrix::Zero(geom.pos.rows(), 3);
+        detached_hvp([&] {
+          const std::array<double, 9> flat = flat_box(geom);
+          const ForceInput in{.nAtoms = n,
+                              .pos = geom.pos.data(),
+                              .atmnrs = geom.types.data(),
+                              .box = flat.data()};
+          self.hvp().apply(self.slot(), in, v.data(), hv.data(), step, parsed);
+          return 0;
+        });
+        return matrix_to_numpy(hv);
+      },
+      nb::arg("positions").noconvert(), nb::arg("atom_types"),
+      nb::arg("box").noconvert(), nb::arg("direction").noconvert(),
+      nb::arg("step") = 0.0, nb::arg("scheme") = "auto",
+      "Hessian-vector product H @ direction, shape (N, 3). 'forward' "
+      "reuses the forces of the last geometry this object evaluated, so k "
+      "products at one geometry cost k + 1 force calls; 'central' costs 2 "
+      "a product and is second order in step; 'analytic' uses the "
+      "kernel's own product; 'auto' is analytic where the kernel has one, "
+      "otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the "
+      "interpreter released.");
+  cls.def(
+      "hvp_centre",
+      [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
+         const F64 &box) {
+        Geom geom = read_geom(positions, atom_types, box);
+        const HvpCentre centre = detached_hvp([&] {
+          const std::array<double, 9> flat = flat_box(geom);
+          const ForceInput in{.nAtoms = static_cast<size_t>(geom.pos.rows()),
+                              .pos = geom.pos.data(),
+                              .atmnrs = geom.types.data(),
+                              .box = flat.data()};
+          return self.hvp().centre(self.slot(), in);
+        });
+        AtomMatrix forces(geom.pos.rows(), 3);
+        std::copy(centre.forces.begin(), centre.forces.end(), forces.data());
+        return nb::make_tuple(centre.energy, matrix_to_numpy(forces),
+                              centre.variance);
+      },
+      nb::arg("positions").noconvert(), nb::arg("atom_types"),
+      nb::arg("box").noconvert(),
+      "(energy, forces, variance) at the geometry, from the centre that "
+      "hvp() reuses. A search that needs the centre forces asks here so "
+      "the forward products that follow make one force call each.");
+  cls.def(
+      "invalidate_hvp",
+      [](PotHolder<Pot> &self) { self.hvp().invalidate(); },
+      "Drop the centre hvp() reuses.");
+  cls.def(
+      "hvp_counts",
+      [](PotHolder<Pot> &self) {
+        const HvpCounts c = self.hvp().counts();
+        nb::dict out;
+        out["products"] = c.products;
+        out["force_calls"] = c.forceCalls;
+        out["centre_reused"] = c.centreReused;
+        out["analytic"] = c.analytic;
+        return out;
+      },
+      "Products, force calls, centre reuses and analytic products of "
+      "hvp() and hvp_centre() so far.");
+  cls.def(
+      "reset_hvp_counts", [](PotHolder<Pot> &self) { self.hvp().resetCounts(); },
+      "Zero hvp_counts(). The centre stays.");
+  cls.def(
+      "has_analytic_hvp",
+      [](const PotHolder<Pot> &) { return AnalyticHessianVector<Pot>; },
+      "Whether hvp(scheme='auto') uses the kernel's own product.");
 }
 
 } // namespace rgpot::pybind

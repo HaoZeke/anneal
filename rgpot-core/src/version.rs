@@ -43,7 +43,7 @@ pub struct rgpot_abi_stamp_t {
 /// ABI major of this build.
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
-pub const RGPOT_ABI_VERSION_MINOR: u16 = 1;
+pub const RGPOT_ABI_VERSION_MINOR: u16 = 2;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -249,8 +249,74 @@ mod tests {
             "rgpot_version_patch(void)",
             "rgpot_abi_stamp(void)",
             "rgpot_abi_compatible(const struct rgpot_abi_stamp_t *stamp)",
+            "rgpot_potential_hvp(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_hvp_centre(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_set_hvp_callback(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_hvp_invalidate(const struct rgpot_potential_t *pot)",
+            "rgpot_potential_hvp_counts(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_reset_hvp_counts(const struct rgpot_potential_t *pot)",
+            "(*HessianVectorCallback)(void *user_data,",
+            "typedef enum rgpot_hvp_scheme_t {",
+            "typedef struct rgpot_hvp_counts_t {",
         ] {
             assert!(header.contains(f), "rgpot.h lacks {f}");
+        }
+        let default_step = format!(
+            "#define RGPOT_HVP_DEFAULT_STEP {:.1e}",
+            crate::hvp::RGPOT_HVP_DEFAULT_STEP
+        );
+        assert!(header.contains(&default_step), "rgpot.h lacks {default_step}");
+    }
+
+    /// Every name in the rgpot-core ABI baseline is still declared by the
+    /// committed header. The meson test `abi_core_symbols` checks the same
+    /// list against the symbols the shared library exports.
+    #[test]
+    fn the_abi_baseline_is_declared_by_the_header() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let header = std::fs::read_to_string(format!("{root}/include/rgpot.h")).unwrap();
+        let Ok(baseline) =
+            std::fs::read_to_string(format!("{root}/../scripts/abi_core_baseline.txt"))
+        else {
+            // A packaged crate carries the header but not the repository scripts.
+            return;
+        };
+        for name in baseline.lines().filter(|l| !l.is_empty()) {
+            assert!(header.contains(&format!("{name}(")), "rgpot.h lacks {name}");
+        }
+        for name in [
+            "rgpot_potential_hvp",
+            "rgpot_potential_hvp_centre",
+            "rgpot_potential_set_hvp_callback",
+            "rgpot_potential_hvp_invalidate",
+            "rgpot_potential_hvp_counts",
+            "rgpot_potential_reset_hvp_counts",
+        ] {
+            assert!(baseline.lines().any(|l| l == name), "baseline lacks {name}");
+        }
+    }
+
+    /// A library built without the schema feature lacks these names, so the
+    /// header declares them only when RGPOT_HAS_SCHEMA is defined.
+    #[test]
+    fn schema_only_names_are_behind_rgpot_has_schema() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let header = std::fs::read_to_string(format!("{root}/include/rgpot.h")).unwrap();
+        for needle in [
+            "#define PROTOCOL_MAJOR ",
+            "#define PROTOCOL_MINOR ",
+            "rgpot_potential_set_peer_capabilities(",
+        ] {
+            let name = needle.trim_end_matches([' ', '(']);
+            let at = header
+                .find(needle)
+                .unwrap_or_else(|| panic!("rgpot.h lacks {name}"));
+            let open = header[..at].rfind("#if").unwrap_or(0);
+            assert!(
+                header[open..].starts_with("#if defined(RGPOT_HAS_SCHEMA)")
+                    && !header[open..at].contains("#endif"),
+                "{name} is not behind #if defined(RGPOT_HAS_SCHEMA)"
+            );
         }
     }
 }

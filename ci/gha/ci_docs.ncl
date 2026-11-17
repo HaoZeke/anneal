@@ -14,6 +14,7 @@ let P = S.pins in
     build_docs = {
       name = "Build documentation",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       # One group per ref, so parallel pull requests do not cancel each other
       # or a pages deploy. A new push to the same ref still cancels its build.
       concurrency = {
@@ -28,12 +29,18 @@ let P = S.pins in
         },
         S.setup_pixi_cache_write_main "docs",
         S.run_pixi m%"
+          pixi r -e docs doccheck
+          pixi r -e docs python -m unittest discover -s tests/docs -p 'test_docs_*.py' -v
+        "%
+        & { name = "Check docs against the source" },
+        # sphinxbld runs sphinx-build -W, so a warning fails this step.
+        S.run_pixi m%"
           pixi r docbld
         "%
         & { name = "Generate Docs" },
         {
           name = "Upload artifact",
-          uses = P.upload_artifact_v6,
+          uses = P.upload_artifact,
           with = { name = "documentation", path = "docs/build" },
         },
       ],
@@ -43,6 +50,7 @@ let P = S.pins in
       needs = ["build_docs"],
       "if" = "github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       permissions = { contents = "write" },
       # Shared pages group, and a running deploy is left to finish.
       concurrency = {
@@ -53,7 +61,7 @@ let P = S.pins in
         { uses = P.checkout, with = { "persist-credentials" = false } },
         {
           name = "Download documentation",
-          uses = P.download_artifact_v6,
+          uses = P.download_artifact,
           with = { name = "documentation", path = "docs/build" },
         },
         {

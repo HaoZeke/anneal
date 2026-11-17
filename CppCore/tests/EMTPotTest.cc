@@ -45,3 +45,40 @@ TEST_CASE("EMT energy matches the copper cluster pin", "[emt]") {
   REQUIRE(pot.config().rasmussen == false);
   REQUIRE(pot.paramsKey() != 0);
 }
+
+TEST_CASE("EMT reads the species again when only the species change",
+          "[emt]") {
+  rgpot::types::AtomMatrix positions(4, 3);
+  const std::array<std::array<double, 3>, 4> xyz = {{
+      {8.1925, 8.1925, 8.1925},
+      {10.0, 10.0, 8.1925},
+      {10.0, 8.1925, 10.0},
+      {8.1925, 10.0, 10.0},
+  }};
+  for (int i = 0; i < 4; ++i) {
+    for (int k = 0; k < 3; ++k) {
+      positions(i, k) = xyz[static_cast<size_t>(i)][static_cast<size_t>(k)];
+    }
+  }
+  const std::array<std::array<double, 3>, 3> box = {{
+      {20.0, 0.0, 0.0},
+      {0.0, 20.0, 0.0},
+      {0.0, 0.0, 20.0},
+  }};
+  const std::vector<int> copper(4, 29);
+  const std::vector<int> mixed = {29, 79, 29, 79};
+
+  rgpot::EMTPot reused;
+  (void)reused(positions, copper, box);
+  const auto [e_reused, f_reused, v_reused] = reused(positions, mixed, box);
+
+  rgpot::EMTPot fresh;
+  const auto [e_fresh, f_fresh, v_fresh] = fresh(positions, mixed, box);
+
+  REQUIRE_THAT(e_reused, WithinAbs(e_fresh, 1e-12));
+  for (int i = 0; i < 4; ++i) {
+    for (int k = 0; k < 3; ++k) {
+      REQUIRE_THAT(f_reused(i, k), WithinAbs(f_fresh(i, k), 1e-12));
+    }
+  }
+}

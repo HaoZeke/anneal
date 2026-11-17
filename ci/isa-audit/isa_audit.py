@@ -3,8 +3,10 @@
 Decode every executable section. An instruction outside the baseline
 (x86-64 or armv8-a) is a violation unless its demangled function matches
 an allow rule whose feature list contains that feature, or the file path
-matches a vendored rule that lists the feature. A file with no function
-symbols fails closed: release jobs must audit unstripped artefacts.
+matches a vendored rule that lists the feature, or dispatch.py proves the
+function is a dispatched clone that is entered only after a CPU check for
+that feature. A file with no function symbols fails closed: release jobs
+must audit unstripped artefacts.
 
 x86_64 is decoded with iced-x86. aarch64 and Mach-O are decoded with
 capstone (pinned in requirements.txt). Mach-O that this parser cannot
@@ -32,6 +34,7 @@ from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 from elftools.elf.elffile import ELFFile
 
 from demangle import demangle
+from dispatch import prove
 
 try:
     from iced_x86 import CpuidFeature, Decoder, Formatter, FormatterSyntax
@@ -356,6 +359,7 @@ class Func:
     demangled: str
     start: int
     end: int
+    local: bool = False
 
 
 @dataclass
@@ -379,6 +383,7 @@ class Violation:
     address: str
     mnemonic: str
     feature: str
+    func_start: int | None = field(default=None, compare=False, repr=False)
 
     def line(self) -> str:
         return (
@@ -397,6 +402,7 @@ class AuditStats:
     not_audited: list[dict[str, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     duplicates: int = 0
+    dispatched: list[dict[str, object]] = field(default_factory=list)
 
     def allow(self, feature: str) -> None:
         self.allowed_feature_counts[feature] = (
@@ -553,6 +559,7 @@ def _record(
                 address=f"0x{address:x}",
                 mnemonic=mnemonic,
                 feature=feature,
+                func_start=func.start if func is not None and func.local else None,
             )
         )
 
@@ -773,6 +780,7 @@ def _elf_funcs(elf: ELFFile, section_index: int, base: int, reloc: bool) -> list
                     demangled=demangle(raw),
                     start=start,
                     end=start + size if size else start,
+                    local=sym["st_info"]["bind"] == "STB_LOCAL",
                 )
             )
         if found:
@@ -803,6 +811,8 @@ def _audit_elf(
     reloc = elf_type == "ET_REL"
     file_has_symbols = _elf_file_has_functions(elf)
     any_code = False
+    first_violation = len(stats.violations)
+    sections: list[tuple[int, bytes, list[Func]]] = []
     for index, section in enumerate(elf.iter_sections()):
         flags = section["sh_flags"]
         if not flags & 0x4:
@@ -816,6 +826,7 @@ def _audit_elf(
             _elf_funcs(elf, index, base, reloc),
             base + len(data),
         )
+        sections.append((base, data, funcs))
         if arch == "x86_64":
             _decode_x86(data, base, stats, allow, path, funcs, file_has_symbols, baseline)
         else:
@@ -824,6 +835,46 @@ def _audit_elf(
         stats.not_audited.append({"file": path, "reason": "ELF has no executable section"})
         return
     stats.files_audited += 1
+    if arch == "x86_64":
+        _allow_dispatched(elf, sections, stats, path, first_violation)
+
+
+def _allow_dispatched(
+    elf: ELFFile,
+    sections: list[tuple[int, bytes, list[Func]]],
+    stats: AuditStats,
+    path: str,
+    first: int,
+) -> None:
+    """Drop this file's violations that sit in a proven dispatched clone."""
+    pending = stats.violations[first:]
+    wanted = {item.func_start for item in pending if item.func_start is not None}
+    if not wanted:
+        return
+    proofs = prove(elf, sections, wanted)
+    kept: list[Violation] = []
+    used: dict[int, set[str]] = {}
+    symbols: dict[int, str] = {}
+    for item in pending:
+        proof = proofs.get(item.func_start) if item.func_start is not None else None
+        if proof is not None and item.feature in proof.features:
+            stats.allow(item.feature)
+            used.setdefault(item.func_start, set()).add(item.feature)
+            symbols[item.func_start] = item.symbol
+            continue
+        kept.append(item)
+    stats.violations[first:] = kept
+    for start in sorted(used):
+        stats.dispatched.append(
+            {
+                "file": path,
+                "symbol": symbols[start],
+                "name": proofs[start].name,
+                "features": sorted(used[start]),
+                "proven": sorted(proofs[start].features),
+                "via": list(proofs[start].via),
+            }
+        )
 
 
 def _macho_slices(blob: bytes) -> list[tuple[str, bytes]]:
@@ -1118,6 +1169,13 @@ def render_text(stats: AuditStats) -> str:
         lines.append("notes:")
         for note in stats.notes:
             lines.append(f"  {note}")
+    if stats.dispatched:
+        lines.append(f"dispatched clones: {len(stats.dispatched)}")
+        for item in stats.dispatched:
+            lines.append(
+                f"  DISPATCHED {item['file']} {item['name']} "
+                f"[{', '.join(item['features'])}] via {', '.join(item['via'])}"
+            )
     lines.append(f"violations: {len(stats.violations)}")
     for item in stats.violations:
         lines.append(item.line())
@@ -1145,6 +1203,7 @@ def render_json(stats: AuditStats) -> dict[str, object]:
             for item in stats.violations
         ],
         "not_audited": stats.not_audited,
+        "dispatched": stats.dispatched,
         "notes": stats.notes,
         "duplicate_files_skipped": stats.duplicates,
     }

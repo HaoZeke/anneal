@@ -17,9 +17,12 @@
 #include <cmath>
 #include <cstdint>
 // clang-format on
+#include "rgpot/Locality.hpp"
 #include "rgpot/PairSwitch.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
+#include "rgpot/Staged.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 #include "rgpot/simd/exp.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -92,6 +95,11 @@ public:
     return m_paramsKey;
   }
 
+  /// Pairs count out to the cutoff; a cutoff <= 0 has no pairs.
+  [[nodiscard]] Locality locality() const noexcept {
+    return {.cutoff = cuttOffR > 0.0 ? cuttOffR : 0.0, .pairwise = true};
+  }
+
   /**
    * @brief Computes the forces and energy for a given configuration.
    * @param in Structure containing coordinates and cell info.
@@ -99,6 +107,28 @@ public:
    * @return Void.
    */
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
+
+  /**
+   * @brief Analytic Hessian-vector product @f$H v@f$.
+   *
+   * The pairs, minimum image, shift or switch of @c forceImpl, each pair
+   * adding @f$K (v_i - v_j)@f$ to atom @c i and its negative to @c j, with
+   * @f$K = \phi'' \hat d \hat d^T + (\phi' / r)(I - \hat d \hat d^T)@f$.
+   * @a v and @a hv hold @c 3*in.nAtoms doubles. @c HessianVectorCache
+   * (HessianVector.hpp) uses it in place of finite differences.
+   */
+  void hessianVectorImpl(const ForceInput &in, const double *v,
+                         double *hv) const;
+
+  /// forceImpl plus each pair energy and virial split half to each atom.
+  void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
+
+  /// Staged.hpp: a pair potential has no densities.
+  void densityStage(const HalfList &, double *) const {}
+
+  /// Staged.hpp: the pair terms of forceImpl on a host's list.
+  void forceStage(const HalfList &list, const double *densities, double *forces,
+                  StageTally *tally) const;
 
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 
@@ -120,6 +150,14 @@ public:
 private:
   /// Bump when the kernel numerics change, so stale cache entries die.
   static constexpr uint64_t kKernelVersion = 2;
+
+  /// Bring neighbours_ to the positions of @a in.
+  void updateNeighbours(const ForceInput &in) const;
+
+  void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
+
+  /// Energy of one pair at distance r, and its force scale.
+  inline void pairTerm(double r, double &energy, double &fscale) const;
 
   double De;           //!< Well depth parameter.
   double a;            //!< Range parameter.

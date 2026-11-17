@@ -21,7 +21,7 @@ from ase.optimize import BFGS
 import rgpot
 from rgpot.ase import AnnealOptimizer, AnnealRunner, RgpotCalculator
 
-from support import lj_crystal, lj_dimer, pt7, raw_bytes
+from support import lj_crystal, lj_dimer, pt7, raw_bytes, si_crystal
 
 
 def test_import_rgpot_does_not_import_ase() -> None:
@@ -58,8 +58,10 @@ def test_implemented_properties_follow_caps() -> None:
         "free_energy",
         "forces",
         "stress",
+        "energies",
+        "stresses",
     ]
-    assert "energies" not in lj.implemented_properties
+    assert callable(lj.potential.evaluate_per_atom)
     if not rgpot.has_fortran_pots:
         pytest.skip("this build has no Fortran potentials")
     eam = RgpotCalculator("eam_al")
@@ -115,12 +117,56 @@ def test_atom_types_accept_int64_and_python_list() -> None:
         pot.evaluate(positions, [1.5, 1], box)
 
 
+def test_cluster_stress_matches_finite_difference() -> None:
+    """A non-periodic cell is the volume ASE strains, not the padded cube."""
+    atoms = lj_dimer()
+    assert not np.any(atoms.pbc)
+    atoms.calc = RgpotCalculator("lj", cutoff=8.0)
+    analytic = atoms.get_stress()
+    numeric = calculate_numerical_stress(atoms, eps=1e-5, voigt=True)
+    np.testing.assert_allclose(analytic, numeric, atol=1e-5, rtol=0.0)
+
+
 def test_lj_stress_matches_finite_difference() -> None:
     atoms = lj_crystal()
     atoms.calc = RgpotCalculator("lj", cutoff=8.0)
     analytic = atoms.get_stress()
     numeric = calculate_numerical_stress(atoms, eps=1e-6, voigt=True)
     np.testing.assert_allclose(analytic, numeric, atol=1e-6, rtol=0.0)
+
+
+def test_stillinger_weber_si_stress_matches_finite_difference() -> None:
+    pot = rgpot.StillingerWeberSi()
+    assert pot.caps()["stress"] is True
+    atoms = si_crystal()
+    atoms.calc = RgpotCalculator(pot)
+    assert "stress" in atoms.calc.implemented_properties
+    analytic = atoms.get_stress()
+    numeric = calculate_numerical_stress(atoms, eps=1e-6, voigt=True)
+    np.testing.assert_allclose(analytic, numeric, atol=1e-6, rtol=0.0)
+
+
+@pytest.mark.skipif(not rgpot.has_fortran_pots, reason="no SWPot in this build")
+def test_sw_stress_matches_finite_difference() -> None:
+    atoms = si_crystal()
+    atoms.calc = RgpotCalculator("sw")
+    assert "stress" in atoms.calc.implemented_properties
+    analytic = atoms.get_stress()
+    numeric = calculate_numerical_stress(atoms, eps=1e-6, voigt=True)
+    np.testing.assert_allclose(analytic, numeric, atol=1e-6, rtol=0.0)
+
+
+@pytest.mark.skipif(not rgpot.has_fortran_pots, reason="no SWPot in this build")
+def test_sw_stress_is_the_1985_stress_scaled_by_epsilon() -> None:
+    atoms = si_crystal()
+    args = (atoms.positions, atoms.numbers, np.ascontiguousarray(atoms.cell.array))
+    eon = rgpot.SWPot().evaluate(*args)
+    published = rgpot.StillingerWeberSi().evaluate(*args)
+    ratio = 2.16826 * 1.06767385 / (3.4723e-12 * 1.0e-7 / 1.602176634e-19)
+    assert eon["energy"] == pytest.approx(ratio * published["energy"], rel=1e-13)
+    np.testing.assert_allclose(
+        eon["stress"], ratio * published["stress"], atol=1e-14, rtol=0.0
+    )
 
 
 def test_single_point_round_trip() -> None:
@@ -223,11 +269,16 @@ def test_nonperiodic_pt7_ignores_cell() -> None:
     bare.calc = calc
     free = raw_bytes(bare.get_potential_energy(), bare.get_forces())
     assert confined == free
+    # Periodic x and z 40 Angstrom apart keep every image out of the
+    # 7.1 Angstrom cutoff, so the slab equals the cluster.
     mixed = cluster.copy()
+    mixed.set_cell([40.0, 10.0, 40.0])
     mixed.set_pbc([True, False, True])
     mixed.calc = calc
-    with pytest.raises(ValueError, match="non-periodic axes: y"):
-        mixed.get_potential_energy()
+    assert mixed.get_potential_energy() == pytest.approx(
+        bare.get_potential_energy(), rel=1e-13
+    )
+    np.testing.assert_allclose(mixed.get_forces(), bare.get_forces(), atol=1e-12)
 
 
 def test_rpc_bfgs_when_potserv_exists(tmp_path: Path) -> None:

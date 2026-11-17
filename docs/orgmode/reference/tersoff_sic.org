@@ -13,22 +13,25 @@ Carbon beta is 1.5724e-7 and is dimensionless.
 It is the Table I value in the NIST and LAMMPS transcriptions.
 The erratum does not print it.
 
-=PotType::TersoffSi= and the engine name =tersoff= are one potential.
+=TersoffSiC= and the Fortran =TersoffPot= both report =PotType::TersoffSi=.
 There is no =PotType::TersoffSiC=.
-An all-silicon configuration, and a null species pointer, use the Fortran gather
-in =TersoffPot=.
-Any atomic number other than 14 uses this kernel.
+The engine name =tersoff= builds =TersoffPot=.
+In =TersoffPot=, an all-silicon configuration and a null species pointer use the
+Fortran gather, and a call with any atomic number other than 14 uses this
+kernel.
+The =pot_spec= name =TersoffSi= builds =TersoffSiC= itself.
 Calling =TersoffSiC= directly always evaluates the 1989 form, including an
 all-silicon cell, whose silicon column matches that gather.
 
 Atomic number 14 is silicon and 6 is carbon.
-Any other species is rejected. lambda3 is zero for both elements, so the factor
-exp(lambda3^m (rij - rik)^m) is identically one and is not evaluated.
-The cross term uses chi = 0.9776. lambda and the repulsive amplitude are
-arithmetic and geometric means.
+Any other species throws =std::invalid_argument=. lambda3 is zero for both
+elements, so the factor exp(lambda3^m (rij - rik)^m) is identically one and is
+not evaluated.
+The cross term uses chi = 0.9776.
+The lambdas are arithmetic means and the repulsive amplitude is a geometric
+mean.
 The attractive amplitude is chi times the geometric mean.
-The inner cutoffs are averaged with each other, and the outer cutoffs are
-averaged with each other.
+The inner cutoffs and the outer cutoffs are each mixed as geometric means.
 
 ** Calls
 
@@ -41,33 +44,42 @@ cell and one species list, so a caller enters the library once per batch.
 The Python method =energy_gradient= accepts positions of shape =(n_atoms, 3)= or
 =(n_config, n_atoms, 3)= and uses that entry.
 
-An orthogonal cell that holds at least three cutoff-lengths on each edge builds
-the bond list once per call.
-The cell edge is the silicon outer cutoff, the longest in this set, or that
-cutoff plus the skin of a =nlist::NeighborList=.
-A null list rebuilds on every call.
-A held list is reused while each atom has moved by at most half the skin.
-Any other cell uses the minimum-image fold.
+Every call takes its pairs from the instance's shared neighbour layer
+(=nlist::updateCells=), searched to the silicon outer cutoff, 3.0 Angstrom, the
+longest in this set.
+The skin is that of a =nlist::NeighborList= passed to =energyAndGradient= when
+it is positive.
+Otherwise it is one fifth of that cutoff, 0.6 Angstrom, or 0 under
+=setNeighbourMode(nlist::Mode::Stream)=.
+The pairs are reused while each atom has moved by at most half the skin and the
+cell and the atom count are unchanged.
+With skin 0 they are reused only for identical coordinates.
+=energyAndGradientBatch= passes no =nlist::NeighborList=.
 
 ** Held list on the force path
 
-=forceImpl= rebuilds the pairs on every call by default.
+By default (held skin 0) =forceImpl= keeps no =nlist::NeighborList= and uses the
+skin of the section above.
 =setHeldSkin(skin)= with a positive skin in Angstrom makes the instance keep one
-=nlist::NeighborList= across =forceImpl= calls.
+=nlist::NeighborList= across =forceImpl= calls, and that skin replaces the
+default.
 The list is rebuilt when any atom has moved by more than half the skin since the
 last build, or when the cell or the atom count changes.
-=setHeldSkin(0)= drops the list and goes back to a rebuild per call.
+=setHeldSkin(0)= drops the list and goes back to the default.
 A negative or non-finite skin throws =std::invalid_argument=.
 =heldList()= returns the list, so a caller can see when it was last built.
 
-With a positive skin the instance reports =Reentrancy::PerInstance= and
-=perImageInstances=, since a call writes the list.
+The instance always reports =Reentrancy::PerInstance=.
+With a positive held skin it also reports =perImageInstances=, since a call
+writes the list.
 =TersoffPot::setHeldSkin= passes the skin to its own 1989 kernel.
 All-silicon calls through =TersoffPot= stay on the Fortran gather, which keeps
-its own vesin table with a skin of 0.3 Angstrom.
+its own neighbour table (=rgpot_neighbors=) with a skin of 0.3 Angstrom, a tenth
+of its 3.0 Angstrom cutoff.
 
 On the call that builds the list, and on a call with the coordinates of that
-build, a held list returns the same bits as a rebuild.
+build, a held list returns the same bits as an instance without one given the
+same calls.
 After a move inside the skin the bits also match while every atom stays in its
 cell of the cutoff-edged grid that orders the pairs.
 An atom that crosses a cell face keeps the pair order of the last build, so the

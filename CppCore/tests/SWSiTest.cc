@@ -11,13 +11,16 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <random>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
 
 #include "rgpot/StillingerWeber/SWSi.hpp"
 #include "rgpot/nlist/HalfShell.hpp"
+#include "rgpot/stress.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
 using Catch::Matchers::WithinAbs;
@@ -89,7 +92,7 @@ TEST_CASE("SW 1985 dimer at the pair minimum", "[SWSi]") {
       REQUIRE_THAT(forces(i, j), WithinAbs(0.0, 1e-8));
     }
   }
-  REQUIRE(pot.get_type() == rgpot::PotType::SWSi1985);
+  REQUIRE(pot.getType() == rgpot::PotType::SWSi1985);
   REQUIRE(pot.paramsKey() == StillingerWeberSi{}.paramsKey());
 }
 
@@ -289,4 +292,142 @@ TEST_CASE("SW 1985 skewed cell still sees one pair", "[SWSi]") {
   double grad[6];
   StillingerWeberSi{}.energyAndGradient(pos, nullptr, box, 2, &energy, grad);
   REQUIRE_THAT(energy, WithinAbs(-StillingerWeberSi::kEpsilon, 1e-9));
+}
+
+namespace {
+
+// The worst error seen on these cells was 2.1e-11 eV/Angstrom^3.
+constexpr double kStressTol = 5e-10; // eV/Angstrom^3
+
+/// (1/V) dE/d(eps_row,col) by the fourth-order central difference. The
+/// strain maps every position and every cell row r to r (I + eps).
+double strainDifference(const std::vector<double> &pos,
+                        const std::array<double, 9> &box, int row, int col) {
+  constexpr double h = 2e-4;
+  const std::size_t n = pos.size() / 3;
+  const StillingerWeberSi pot;
+  auto energyAt = [&](double eps) {
+    std::vector<double> p = pos;
+    std::array<double, 9> cell = box;
+    for (std::size_t a = 0; a < n; ++a) {
+      p[3 * a + col] += eps * pos[3 * a + row];
+    }
+    for (int k = 0; k < 3; ++k) {
+      cell[3 * k + col] += eps * box[3 * k + row];
+    }
+    double e = 0.0;
+    std::vector<double> g(p.size());
+    pot.energyAndGradient(p.data(), nullptr, cell.data(), n, &e, g.data());
+    return e;
+  };
+  return (8.0 * (energyAt(h) - energyAt(-h)) -
+          (energyAt(2 * h) - energyAt(-2 * h))) /
+         (12.0 * h * rgpot::cellVolume(box.data()));
+}
+
+/// Checks forceImpl stress on (pos, box) against strainDifference on
+/// (fdPos, fdBox) for all nine entries and returns the differences,
+/// row-major. When the two cells differ, they are cells of one crystal.
+std::array<double, 9> checkStressByStrain(const std::vector<double> &pos,
+                                          const std::array<double, 9> &box,
+                                          const std::vector<double> &fdPos,
+                                          const std::array<double, 9> &fdBox) {
+  const std::size_t n = pos.size() / 3;
+  const StillingerWeberSi pot;
+  REQUIRE(pot.caps().stress);
+  std::vector<double> forces(pos.size());
+  const std::vector<int> types(n, 14);
+  rgpot::ForceOut out{forces.data(), 0.0, 0.0, {}, 0};
+  pot.forceImpl({n, pos.data(), types.data(), box.data()}, &out);
+  REQUIRE(out.has_stress == 1);
+  std::array<double, 9> fd{};
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      fd[3 * row + col] = strainDifference(fdPos, fdBox, row, col);
+      CAPTURE(row, col, fd[3 * row + col]);
+      REQUIRE_THAT(out.stress[3 * row + col],
+                   WithinAbs(fd[3 * row + col], kStressTol));
+    }
+  }
+  return fd;
+}
+
+std::array<double, 9> checkStressByStrain(const std::vector<double> &pos,
+                                          const std::array<double, 9> &box) {
+  return checkStressByStrain(pos, box, pos, box);
+}
+
+double diamondA0() {
+  return pairMinimumU() * StillingerWeberSi::kSigma * 4.0 / std::sqrt(3.0);
+}
+
+} // namespace
+
+TEST_CASE("SW 1985 stress matches a strain difference", "[SWSi][stress]") {
+  SECTION("compressed cubic diamond, 216 atoms") {
+    const double a = 0.98 * diamondA0();
+    std::vector<double> pos;
+    appendDiamond(pos, 3, a);
+    const std::array<double, 9> box{3 * a, 0, 0, 0, 3 * a, 0, 0, 0, 3 * a};
+    // Edges of three cutoffs put forceImpl on the half-shell list. A
+    // strained 216-atom cell is not orthogonal and takes the all-pairs
+    // fold, so the strain difference uses the 64-atom cell of the same
+    // crystal. The stress is per volume and does not change.
+    std::vector<double> fdPos;
+    appendDiamond(fdPos, 2, a);
+    const std::array<double, 9> fdBox{2 * a, 0, 0, 0, 2 * a, 0, 0, 0, 2 * a};
+    const auto fd = checkStressByStrain(pos, box, fdPos, fdBox);
+    // Compression lowers the energy on expansion, so sigma is negative.
+    for (int k : {0, 4, 8}) {
+      REQUIRE(fd[k] < -1e-2);
+    }
+  }
+  SECTION("sheared diamond, 64 atoms") {
+    const double l = 2 * diamondA0();
+    std::vector<double> cubicPos;
+    appendDiamond(cubicPos, 2, diamondA0());
+    const std::array<double, 9> box{l, 0,        0,         0.10 * l, l,
+                                    0, 0.05 * l, -0.07 * l, l};
+    std::vector<double> pos(cubicPos.size());
+    for (std::size_t a = 0; a < pos.size() / 3; ++a) {
+      for (int c = 0; c < 3; ++c) {
+        pos[3 * a + c] =
+            (cubicPos[3 * a] * box[c] + cubicPos[3 * a + 1] * box[3 + c] +
+             cubicPos[3 * a + 2] * box[6 + c]) /
+            l;
+      }
+    }
+    const auto fd = checkStressByStrain(pos, box);
+    REQUIRE(std::abs(fd[1]) > 1e-3);
+    REQUIRE(std::abs(fd[2]) > 1e-3);
+    REQUIRE(std::abs(fd[5]) > 1e-3);
+  }
+  SECTION("rattled cubic diamond, 64 atoms") {
+    const double a = diamondA0();
+    std::vector<double> pos;
+    appendDiamond(pos, 2, a);
+    std::mt19937_64 gen(20261030);
+    for (double &x : pos) {
+      x += 0.4 * (static_cast<double>(gen() >> 11) * 0x1.0p-53 - 0.5);
+    }
+    const std::array<double, 9> box{2 * a, 0, 0, 0, 2 * a, 0, 0, 0, 2 * a};
+    const auto fd = checkStressByStrain(pos, box);
+    REQUIRE(std::abs(fd[1]) > 1e-4);
+    REQUIRE(std::abs(fd[2]) > 1e-4);
+    REQUIRE(std::abs(fd[5]) > 1e-4);
+  }
+}
+
+TEST_CASE("SW 1985 stress is zero without a pair", "[SWSi][stress]") {
+  const double position[3] = {1.0, 2.0, 3.0};
+  const int type = 14;
+  const double box[9] = {20, 0, 0, 0, 20, 0, 0, 0, 20};
+  double forces[3] = {};
+  rgpot::ForceOut out{forces, 1.0, 0.0, {1, 2, 3, 4, 5, 6, 7, 8, 9}, 0};
+  StillingerWeberSi{}.forceImpl({1, position, &type, box}, &out);
+  REQUIRE(out.has_stress == 1);
+  REQUIRE(out.energy == 0.0);
+  for (double component : out.stress) {
+    REQUIRE(component == 0.0);
+  }
 }

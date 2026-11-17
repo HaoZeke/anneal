@@ -25,6 +25,11 @@ on:
         required: false
         type: string
         default: ""
+      extra-test-sources:
+        description: Extra repository-root paths copied into the wheel test tree. Space-separated. Empty adds nothing.
+        required: false
+        type: string
+        default: ""
       os:
         description: JSON array of runner labels. The default is ubuntu-latest, ubuntu-24.04-arm, macos-15, and windows-2022.
         required: false
@@ -125,7 +130,7 @@ jobs:
           # cibuildwheel copies test sources from the repository root, not package-dir.
           # An empty test-requires input does not set CIBW_TEST_REQUIRES, so the
           # package table is used. A non-empty input was appended above.
-          CIBW_TEST_SOURCES: ${{ inputs.package-dir }}/${{ inputs.test-path }} ${{ inputs.package-dir }}/_ci
+          CIBW_TEST_SOURCES: ${{ inputs.package-dir }}/${{ inputs.test-path }} ${{ inputs.package-dir }}/_ci ${{ inputs.extra-test-sources }}
           CIBW_TEST_COMMAND: python ${{ inputs.package-dir }}/_ci/check_f1.py && python -m pytest -q ${{ inputs.package-dir }}/${{ inputs.test-path }} --timeout=180 -o faulthandler_timeout=120
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6

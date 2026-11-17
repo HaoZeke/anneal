@@ -42,7 +42,7 @@ foreach item : [
         plugin_test,
         env: plugin_env,
         depends: [plugin_null, plugin_morse],
-        suite: 'plugin',
+        kwargs: _rt_kw[item[0]],
     )
 endforeach
 if has_fortran
@@ -71,7 +71,7 @@ if has_fortran
         plugin_fortran_test,
         env: plugin_env,
         depends: plugin_coulomb,
-        suite: 'plugin',
+        kwargs: _rt_kw['ExternalFortranPluginTest'],
     )
 endif
 plugin_lifetime = executable(
@@ -93,6 +93,5 @@ test(
         plugin_fixture.full_path(),
     ],
     depends: [plugin_lifetime, plugin_fixture],
-    timeout: 30,
-    suite: 'plugin',
+    kwargs: _rt_kw['PluginLifetimeTest'],
 )

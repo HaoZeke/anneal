@@ -12,10 +12,6 @@
 #include <string>
 #include <utility>
 
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
 namespace rgpot::nlist {
 namespace {
 
@@ -857,12 +853,41 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
         cols.distance.resize(count);
       }
     };
+    auto append = [&](Columns &dst, const Columns &src) {
+      dst.first.insert(dst.first.end(), src.first.begin(), src.first.end());
+      dst.second.insert(dst.second.end(), src.second.begin(), src.second.end());
+      dst.mask.insert(dst.mask.end(), src.mask.begin(), src.mask.end());
+      if (query.fields.shifts) {
+        dst.shift.insert(dst.shift.end(), src.shift.begin(), src.shift.end());
+      }
+      if (query.fields.vectors) {
+        dst.vector.insert(dst.vector.end(), src.vector.begin(), src.vector.end());
+      }
+      if (query.fields.distances) {
+        dst.distance.insert(dst.distance.end(), src.distance.begin(), src.distance.end());
+      }
+    };
     if (nt <= 1) {
       fill(parts[0], 0, n);
       move_columns(table, parts[0]);
       return;
     }
-    const int stencil = one_image ? 1 : (2 * nmax[0] + 1) * (2 * nmax[1] + 1) * (2 * nmax[2] + 1);
+    // The cell team walks one folded image per pair. A sheared cell, or one
+    // narrower than two search radii, needs the shift stencil, so each
+    // slice runs the serial walk on its own atom range instead.
+    if (!one_image) {
+      forEachSlice(nt, [&](int t) {
+        const auto range = partition(static_cast<std::int64_t>(n), t, nt);
+        fill(parts[static_cast<std::size_t>(t)], static_cast<std::size_t>(range.begin),
+             static_cast<std::size_t>(range.end));
+      });
+      for (int t = 1; t < nt; ++t) {
+        append(parts[0], parts[static_cast<std::size_t>(t)]);
+      }
+      move_columns(table, parts[0]);
+      return;
+    }
+    const int stencil = 1;
     const std::size_t slice = pair_guess(n, n, box9, search, full, stencil) /
                                   static_cast<std::size_t>(nt) +
                               8;
@@ -957,22 +982,7 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
       compact_f64(cols.distance, 1, cursors.data(), base.data(), nt);
     }
     for (int t = 0; t < nt; ++t) {
-      auto &over = extra[static_cast<std::size_t>(t)];
-      if (over.first.empty()) {
-        continue;
-      }
-      cols.first.insert(cols.first.end(), over.first.begin(), over.first.end());
-      cols.second.insert(cols.second.end(), over.second.begin(), over.second.end());
-      cols.mask.insert(cols.mask.end(), over.mask.begin(), over.mask.end());
-      if (query.fields.shifts) {
-        cols.shift.insert(cols.shift.end(), over.shift.begin(), over.shift.end());
-      }
-      if (query.fields.vectors) {
-        cols.vector.insert(cols.vector.end(), over.vector.begin(), over.vector.end());
-      }
-      if (query.fields.distances) {
-        cols.distance.insert(cols.distance.end(), over.distance.begin(), over.distance.end());
-      }
+      append(cols, extra[static_cast<std::size_t>(t)]);
     }
     move_columns(table, cols);
     return;
@@ -981,20 +991,12 @@ void build(Table &table, const double *positions, std::size_t n, const double *b
   if (nt <= 1) {
     collect(cells, positions, n, box9, query, nmax, one_image, 0, n, parts[0]);
   } else {
-#if defined(_OPENMP)
-#pragma omp parallel num_threads(nt)
-#endif
-    {
-#if defined(_OPENMP)
-      const int t = omp_get_thread_num();
-#else
-      const int t = 0;
-#endif
+    forEachSlice(nt, [&](int t) {
       const auto range = partition(static_cast<std::int64_t>(n), t, nt);
       collect(cells, positions, n, box9, query, nmax, one_image,
               static_cast<std::size_t>(range.begin), static_cast<std::size_t>(range.end),
               parts[static_cast<std::size_t>(t)]);
-    }
+    });
   }
   std::vector<Rec> rows;
   for (const auto &part : parts) {

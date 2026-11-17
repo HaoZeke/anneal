@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <random>
 #include <stdexcept>
@@ -248,6 +249,56 @@ TEST_CASE("Double minimum image agrees with the long-double search",
   REQUIRE(std::isfinite(tx));
   REQUIRE(std::isfinite(ty));
   REQUIRE(std::isfinite(tz));
+}
+
+TEST_CASE("foldWithin drops only displacements with no image inside the radius",
+          "[PairList][triclinic]") {
+  // The first cell is the kernel cell of the ASE morse-bulk check.
+  const std::array<std::array<double, 9>, 4> cells{{
+      {21.6, 0.0, 0.0, 1.728, 21.6, 0.0, 0.864, -1.296, 21.6},
+      {4.0, 0.2, 0.1, 0.3, 5.0, -0.2, 0.1, -0.3, 6.0},
+      {6.0, 0.0, 0.0, 2.7, 5.4, 0.0, -1.9, 2.2, 5.1},
+      {10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0},
+  }};
+  std::mt19937_64 rng(5);
+  const auto unit = [&rng] {
+    return static_cast<double>(rng() >> 11) * 0x1p-53;
+  };
+  std::uint64_t dropped = 0;
+  std::uint64_t kept = 0;
+  for (const auto &cell : cells) {
+    for (unsigned mask = 1; mask < 8; ++mask) {
+      std::array<bool, 3> periodic{};
+      for (int k = 0; k < 3; ++k)
+        periodic[k] = (mask & (1u << k)) != 0;
+      const LongDoubleMinimumImage oracle(cell.data(), periodic);
+      const rgpot::nlist::MinimumImage image(cell.data(), periodic);
+      for (int t = 0; t < 400; ++t) {
+        const double reach = t % 8 == 0 ? 300.0 : 30.0;
+        const double d[3] = {reach * (2.0 * unit() - 1.0),
+                             reach * (2.0 * unit() - 1.0),
+                             reach * (2.0 * unit() - 1.0)};
+        const double radius = 0.5 + 12.0 * unit();
+        double g[3] = {d[0], d[1], d[2]};
+        image.fold(g[0], g[1], g[2]);
+        double h[3] = {d[0], d[1], d[2]};
+        const bool near = image.foldWithin(h[0], h[1], h[2], radius * radius);
+        CAPTURE(cell, mask, d[0], d[1], d[2], radius);
+        if (near) {
+          ++kept;
+          REQUIRE(std::memcmp(g, h, sizeof(g)) == 0);
+          continue;
+        }
+        ++dropped;
+        double o[3] = {d[0], d[1], d[2]};
+        oracle.fold(o[0], o[1], o[2]);
+        REQUIRE(o[0] * o[0] + o[1] * o[1] + o[2] * o[2] > radius * radius);
+        REQUIRE(g[0] * g[0] + g[1] * g[1] + g[2] * g[2] > radius * radius);
+      }
+    }
+  }
+  REQUIRE(dropped > 0);
+  REQUIRE(kept > 0);
 }
 
 TEST_CASE("Benchmark minimum image fold", "[.][benchmark]") {

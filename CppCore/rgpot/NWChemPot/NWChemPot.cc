@@ -9,6 +9,7 @@
 
 #include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/NWChemPot/nwchem_c_abi.h"
+#include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/units.hpp"
 
 #include <cstdlib>
@@ -42,11 +43,11 @@ engine_lib_candidates(const std::string &explicit_path) {
   std::vector<std::string> out;
   if (!explicit_path.empty())
     out.emplace_back(explicit_path);
-  if (const char *e = std::getenv("NWCHEMC_LIBRARY"))
+  if (const char *e = std::getenv("NWCHEMC_LIBRARY"); e && *e)
     out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_NWCHEMC_ENGINE"))
+  if (const char *e = std::getenv("RGPOT_NWCHEMC_ENGINE"); e && *e)
     out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_NWCHEM_ENGINE"))
+  if (const char *e = std::getenv("RGPOT_NWCHEM_ENGINE"); e && *e)
     out.emplace_back(e);
   out.emplace_back("libnwchemc.so");
   out.emplace_back("./libnwchemc.so");
@@ -358,8 +359,8 @@ bool NWChemPot::setPotentialConfig(const ::PotentialConfig::Reader &cfg,
   }
   default:
     if (message_out)
-      *message_out =
-          "rgpot params arm not handled by NWChemPot (use matching backend pot)";
+      *message_out = "rgpot params arm " + rgpot::rpc::potentialConfigArm(cfg) +
+                     " not handled by NWChemPot (use matching backend pot)";
     return false;
   }
 }
@@ -377,7 +378,7 @@ EngineBundle &probe_engine_bundle() {
   return retained;
 }
 
-bool NWChemPot::probe_available() {
+bool NWChemPot::probeAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_probe_done)
     return g_probe_ok;
@@ -390,7 +391,7 @@ bool NWChemPot::probe_available() {
   return g_probe_ok;
 }
 
-bool NWChemPot::abi_available() {
+bool NWChemPot::abiAvailable() {
   std::lock_guard<std::mutex> lock(g_probe_mu);
   if (g_abi_probe_done)
     return g_abi_probe_ok;

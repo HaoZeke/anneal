@@ -5,6 +5,7 @@
 #include "rgpot/Potential.hpp"
 #include "rgpot/UmaPot/UmaConfig.hpp"
 #include "rgpot/UmaPot/UmaContract.hpp"
+#include "rgpot/UmaPot/UmaProvenance.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -18,9 +19,11 @@ namespace rgpot {
  * Each force call builds a fairchem-convention edge list with the neighbour query and
  * runs the compiled graph. Charge and spin are per-call tensor inputs.
  *
- * The package was merged for one composition, charge, spin and task.
- * Every force call checks the config and the input against the
- * metadata embedded in the package and throws UmaContractError on a
+ * A package is exported for one charge, spin and task, and either one
+ * composition (merged MoLE) or any composition up to ``z_max``. A
+ * dynamic package accepts a range of atom and edge counts. Every force
+ * call checks the config and the input against the metadata embedded
+ * in the package and throws UmaContractError or UmaShapeError on a
  * mismatch (see UmaContract).
  */
 class UmaPot : public Potential<UmaPot> {
@@ -40,7 +43,7 @@ public:
 
   [[nodiscard]] PotCaps caps() const noexcept override {
     return {.reentrancy = Reentrancy::SharedInstance,
-            .perImageInstances = true};
+            .perImageInstances = true, .batched = true};
   }
 
   [[nodiscard]] const UmaConfig &config() const noexcept { return m_config; }
@@ -53,6 +56,11 @@ public:
   /// Weight dtype recorded in the package. Same lifetime rules as
   /// posDtypeName().
   [[nodiscard]] const char *modelDtypeName() const;
+  /// Checkpoint the package was exported from and its SHA-256, read
+  /// from the package metadata. Every field is unset for a package
+  /// exported before the keys existed. Loads the package on the first
+  /// call; the reference lives as long as this UmaPot.
+  [[nodiscard]] const UmaCheckpointProvenance &checkpointProvenance() const;
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
     return m_paramsKey;

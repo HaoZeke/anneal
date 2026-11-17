@@ -73,6 +73,11 @@ RGPOT_XTB_API void rgpot_xtb_set_warm_move(RgpotXtbPot *pot, double angstrom);
 
 RGPOT_XTB_API double rgpot_xtb_warm_move(const RgpotXtbPot *pot);
 
+/** HOMO-LUMO gap guard in eV. Zero or negative reuses at any gap. */
+RGPOT_XTB_API void rgpot_xtb_set_warm_min_gap(RgpotXtbPot *pot, double ev);
+
+RGPOT_XTB_API double rgpot_xtb_warm_min_gap(const RgpotXtbPot *pot);
+
 /** 1 when the last successful force reused the previous wavefunction. */
 RGPOT_XTB_API int rgpot_xtb_reused_wavefunction(const RgpotXtbPot *pot);
 

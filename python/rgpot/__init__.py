@@ -1,15 +1,16 @@
-"""rgpot — potential energy surfaces for atomistic simulation.
+"""rgpot: potential energy surfaces for atomistic simulation.
 
-Core: Lennard-Jones, ExprPot, D3Pot, D4Pot, and XcKernel (when the
-wheel/meson build compiled them). Metatomic path uses **dlopen** of a
-portable ``libmetatomic_engine.so`` (stable C ABI). Engines are multi-ABI:
+Positions and cells are in Angstrom, energies in eV and forces in eV/Angstrom.
+Names that depend on a build option (``D3Pot``, ``D4Pot``, ``ExprPot``,
+``XcKernel``, ``PotentialCache``, the Fortran potentials and others) are
+``None`` when the build left them out; the ``has_*`` flags say which parts
+were compiled.
 
-  ``rgpot/lib/torch-X.Y/libmetatomic_engine.so``
-
-selected from the installed ``torch`` major (same layout as metatomic-torch).
-
-Supported torch majors for bundled engines: **2.7 and newer**. Older torch
-builds may still import LJ, but Metatomic dlopen needs a matching engine.
+Metatomic models run through an engine library opened with ``dlopen``.
+``default_metatomic_engine_path`` looks for a bundled engine under
+``rgpot/lib/torch-X.Y/`` for the installed torch, then under any other
+``torch-X.Y`` directory, then in legacy layouts, then for the file named by ``RGPOT_METATOMIC_ENGINE`` or ``METATOMIC_ENGINE``.
+Wheels bundle engines for torch 2.7 and newer.
 """
 
 from __future__ import annotations
@@ -22,6 +23,12 @@ import rgpot._core as _core
 
 __version__: str = str(getattr(_core, "__version__", "0"))
 LJPot = _core.LJPot
+rgpot_lammps_potential = _core.rgpot_lammps_potential
+rgpot_gromacs_potential = _core.rgpot_gromacs_potential
+rgpot_openmm_potential = _core.rgpot_openmm_potential
+LammpsPot = _core.LammpsPot
+GromacsPot = _core.GromacsPot
+OpenMMPot = _core.OpenMMPot
 LJClusterPot = _core.LJClusterPot
 MorsePot = _core.MorsePot
 NumericalError = _core.NumericalError
@@ -74,7 +81,12 @@ def _torch_major() -> str | None:
 
 
 def default_metatomic_engine_path() -> str | None:
-    """Return package-bundled engine matching installed torch ABI if possible."""
+    """Return the path of a Metatomic engine library, or None.
+
+    Bundled engines for the installed torch come first, then any bundled
+    engine, then legacy layouts, then the file named by
+    ``RGPOT_METATOMIC_ENGINE`` or ``METATOMIC_ENGINE`` if it exists.
+    """
     here = Path(__file__).resolve().parent
     maj = _torch_major()
     candidates: list[Path] = []
@@ -149,7 +161,10 @@ def evaluate_metatomic(
     engine_path: str | None = None,
     device: str = "cpu",
 ) -> Any:
-    """Force evaluation through MetatomicDlopen (real engine plugin)."""
+    """Evaluate a Metatomic model through the dlopen engine.
+
+    Raises RuntimeError when the build has no Metatomic dlopen frontend.
+    """
     # Load torch via the Python extension first so the engine's DT_NEEDED
     # libtorch resolves to the same process image (avoids dual-load races).
     try:
@@ -168,6 +183,12 @@ __all__ = [
     "LJPot",
     "LJClusterPot",
     "MorsePot",
+    "LammpsPot",
+    "GromacsPot",
+    "OpenMMPot",
+    "rgpot_lammps_potential",
+    "rgpot_gromacs_potential",
+    "rgpot_openmm_potential",
     "NumericalError",
     "StillingerWeberSi",
     "TersoffSiC",

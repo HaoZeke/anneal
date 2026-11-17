@@ -17,6 +17,7 @@ The cell is a cube with side 20 angstrom.
 
 ** Clone and build
 
+#+attr_rgpot: syntax
 #+begin_src bash
 git clone https://github.com/OmniPotentRPC/rgpot.git
 cd rgpot
@@ -27,6 +28,7 @@ meson compile -C bbdir
 
 A tests build produces the stand-in engine and the server:
 
+#+attr_rgpot: output paths of the built engine and server
 #+begin_example
 bbdir/CppCore/libcpmdc_fake_engine.so
 bbdir/CppCore/potserv
@@ -34,6 +36,7 @@ bbdir/CppCore/potserv
 
 ** Evaluate water
 
+#+attr_rgpot: syntax
 #+begin_src bash
 export RGPOT_CPMD_ENGINE="$PWD/bbdir/CppCore/libcpmdc_fake_engine.so"
 python tests/cpmd_water.py \
@@ -43,15 +46,20 @@ python tests/cpmd_water.py \
 
 The command prints:
 
+#+attr_rgpot: output tests/cpmd_water.py with the stand-in engine
 #+begin_example
 water geometry: water
 water energy: 0.77
 #+end_example
 
-=0.77= is the energy the stand-in engine returns for this geometry and this
-cell.
+The script asks for the energy in eV.
+The stand-in engine does not compute an energy from the geometry.
+Its energy is 0.75 plus 0.001 times the last entry of the cell (the z length),
+so the 20 angstrom cell gives 0.77 eV.
+=--expect= makes the script exit with status 1 when the energy differs from the
+given value by more than 1e-12.
 Point =RGPOT_CPMD_ENGINE= at a =libcpmdc.so= built from the CPMD archive to
-evaluate the same file with CPMD.
+evaluate the same file with CPMD, and leave out =--expect=.
 Read the energy the command prints.
 
 ** Next steps

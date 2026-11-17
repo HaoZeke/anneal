@@ -56,7 +56,15 @@ enum class PotType {
   IPI,         //!<  i-PI socket server. Built with -Dwith_ipi (POSIX).
   SuttonChen,  //!<  Sutton-Chen 10-8. Reduced units by default.
   SWSi1985,    //!<  Stillinger-Weber silicon, 1985 parameters.
-  EAMTable     //!<  EAM / Finnis-Sinclair tables. -Dwith_eam_table=true.
+  EAMTable,    //!<  EAM / Finnis-Sinclair tables. -Dwith_eam_table=true.
+  Lammps,      //!<  Shifted Lennard-Jones via the engine plugin.
+  Gromacs,     //!<  Shifted Lennard-Jones; nm and kJ/mol stored once.
+  OpenMM,      //!<  Shifted Lennard-Jones; nm and kJ/mol stored once.
+  CP2K,        //!<  CP2K Quickstep via the libcp2k shim. -Dwith_cp2k.
+  LrCoulomb,   //!<  Ewald, smooth PME, or damped shifted force.
+  LrDispersion, //!<  D3(BJ), D4, MBD, or SO3LR QDO dispersion.
+  LrNlh,       //!<  SO3LR NLH short-range repulsion.
+  LrSum        //!<  Sum of potential summands.
 };
 
 } // namespace rgpot

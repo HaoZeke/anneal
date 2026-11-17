@@ -103,6 +103,58 @@ PY
   expect_fail "andn_bits" "$work/andn.o" --allow "$TESTS/allow-ok.toml"
   expect_fail "bmi1" "$work/andn.o" --allow "$TESTS/allow-ok.toml"
 
+  # Dispatched clones pass with no allowlist entry; look-alikes do not.
+  # -fno-ipa-icf keeps GCC from folding the identical bad bodies into one.
+  local icf=()
+  if "$cc" -fno-ipa-icf -x c -c /dev/null -o "$work/icf.o" 2>/dev/null; then
+    icf=(-fno-ipa-icf)
+  fi
+  # The baseline pin does not reach libgcc.a, which keeps its toolchain's
+  # default (Ubuntu 26.04's amd64v3 GCC has BMI2 in __cpu_indicator_init),
+  # so GCC's fixtures link without it and import __cpu_model, which the
+  # proof reads through its GOT slot. Clang reads __cpu_model PC-relative
+  # and needs libgcc's copy in the library.
+  local dso=(-shared -fPIC)
+  if "$cc" --version | grep -q "Free Software Foundation"; then
+    dso+=(-nodefaultlibs)
+  fi
+  "$cc" "${dso[@]}" -O2 "${base[@]}" "$TESTS/dispatch_ok.c" -o "$work/dispatch_ok.so"
+  "$cc" "${dso[@]}" -O2 "${base[@]}" "${icf[@]}" "$TESTS/dispatch_bad.c" -o "$work/dispatch_bad.so"
+  expect_ok "$work/dispatch_ok.so" --allow "$TESTS/allow-dispatch.toml" --json "$work/dispatch.json"
+  python3 - "$work/dispatch.json" <<'PY'
+import json, sys
+report = json.load(open(sys.argv[1]))
+names = {item["name"]: item for item in report["dispatched"]}
+assert report["violations"] == [], report["violations"]
+assert names["clone_avx2"]["via"] == ["dispatch_entry"], names
+assert names["clone_tail"]["via"] == ["clone_avx2"], names
+assert names["probed_avx2"]["via"] == ["probed_entry"], names
+print("dispatch ok:", sorted(names))
+PY
+  for name in unguarded_avx2 wrong_guard_avx2 inverted_guard_avx2 escaped_avx2 \
+    partial_guard_avx2 exported_avx2 lying_probe_avx2 weak_probe_avx2; do
+    expect_fail "$name" "$work/dispatch_bad.so" --allow "$TESTS/allow-dispatch.toml"
+  done
+  # At -O0 GCC calls the probes and its target_clones resolver uses jle.
+  # Clang -O0 keeps the probe result in a stack slot, which the proof does
+  # not follow, so its clones stay violations.
+  if "$cc" --version | grep -q "Free Software Foundation"; then
+    "$cc" "${dso[@]}" -O0 "${base[@]}" "$TESTS/dispatch_ok.c" -o "$work/dispatch_ok0.so"
+    "$cc" "${dso[@]}" -O0 "${base[@]}" "${icf[@]}" "$TESTS/dispatch_bad.c" -o "$work/dispatch_bad0.so"
+    expect_ok "$work/dispatch_ok0.so" --allow "$TESTS/allow-dispatch.toml"
+    for name in unguarded_avx2 wrong_guard_avx2 inverted_guard_avx2 escaped_avx2 \
+      partial_guard_avx2 exported_avx2 lying_probe_avx2 weak_probe_avx2; do
+      expect_fail "$name" "$work/dispatch_bad0.so" --allow "$TESTS/allow-dispatch.toml"
+    done
+  fi
+  for name in clone_scalar dispatch_entry; do
+    python3 "$TESTS/plant.py" "$work/dispatch_ok.so" "$work/planted.so" "$name"
+    expect_fail "$name 0x[0-9a-f]* vzeroupper avx" "$work/planted.so" \
+      --allow "$TESTS/allow-dispatch.toml"
+  done
+  python3 "$TESTS/plant.py" "$work/dispatch_ok.so" "$work/planted.so" clone_avx2
+  expect_ok "$work/planted.so" --allow "$TESTS/allow-dispatch.toml"
+
   rm -f "$work/ok.whl"
   python3 - "$work" <<'PY'
 import sys, zipfile

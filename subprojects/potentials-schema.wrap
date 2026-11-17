@@ -1,6 +1,10 @@
 [wrap-git]
-directory = potentials-schema-2a1d127c2dd0
+directory = potentials-schema-190fee68f3fb
 url = https://github.com/OmniPotentRPC/potentials-schema.git
-revision = 2a1d127c2dd0172fc4ea3412f267faebc942b46f
-# Same ExprParams/PotSpec tree as the vendored copies, on top of the UMA pin.
-diff_files = expr-potspec.diff
+revision = 190fee68f3fb99e0b99ac200d25c7d484b7dac9e
+# 190fee6 is upstream feat/cp2k-arm: main 7fa9046 plus the CP2K arm
+# (CP2KParams, PotentialSpec.cp2k @6, PotentialConfig.cp2k @17).
+# No diff_files: a parent project (gpridge) resolves this subproject from its
+# own wrap, so the checkout must be the pinned file for the vendored copies to
+# match it in both builds. rgpot-local fields live in the add-only series
+# CppCore/rgpot/rpc/local/series, which the build applies to the vendored copy.

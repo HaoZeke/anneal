@@ -90,64 +90,6 @@ static std::vector<uint8_t> elf64_gnu_stack(uint32_t flags) {
   return elf;
 }
 
-static std::vector<uint8_t> stored_zip_with_so(const std::vector<uint8_t> &so) {
-  const char *name = "model/foo.wrapper.so";
-  const uint16_t namelen = static_cast<uint16_t>(std::strlen(name));
-  const uint32_t sz = static_cast<uint32_t>(so.size());
-  std::vector<uint8_t> z;
-  auto push32 = [&](uint32_t v) {
-    z.push_back(uint8_t(v));
-    z.push_back(uint8_t(v >> 8));
-    z.push_back(uint8_t(v >> 16));
-    z.push_back(uint8_t(v >> 24));
-  };
-  auto push16 = [&](uint16_t v) {
-    z.push_back(uint8_t(v));
-    z.push_back(uint8_t(v >> 8));
-  };
-  push32(0x04034b50u);
-  push16(20);
-  push16(0);
-  push16(0);
-  push16(0);
-  push16(0);
-  push32(0);
-  push32(sz);
-  push32(sz);
-  push16(namelen);
-  push16(0);
-  z.insert(z.end(), name, name + namelen);
-  z.insert(z.end(), so.begin(), so.end());
-  const uint32_t local_len = 30u + namelen + sz;
-  push32(0x02014b50u);
-  push16(20);
-  push16(20);
-  push16(0);
-  push16(0);
-  push16(0);
-  push16(0);
-  push32(0);
-  push32(sz);
-  push32(sz);
-  push16(namelen);
-  push16(0);
-  push16(0);
-  push16(0);
-  push16(0);
-  push32(0);
-  push32(0);
-  z.insert(z.end(), name, name + namelen);
-  push32(0x06054b50u);
-  push16(0);
-  push16(0);
-  push16(1);
-  push16(1);
-  push32(46u + namelen);
-  push32(local_len);
-  push16(0);
-  return z;
-}
-
 TEST_CASE("clear_elf_gnu_stack drops PF_X", "[UmaPot][execstack]") {
   auto elf = elf64_gnu_stack(7);
   REQUIRE(
@@ -158,82 +100,20 @@ TEST_CASE("clear_elf_gnu_stack drops PF_X", "[UmaPot][execstack]") {
   REQUIRE(rgpot::aoti_execstack::rd32(elf.data() + 68) == 6u);
 }
 
-TEST_CASE("prepare_pt2_for_load caches a noexec copy", "[UmaPot][execstack]") {
-  auto zip = stored_zip_with_so(elf64_gnu_stack(7));
-  const fs::path src = fs::temp_directory_path() / "rgpot-elmc-src.pt2";
-  {
-    std::ofstream out(src, std::ios::binary | std::ios::trunc);
-    REQUIRE(out.write(reinterpret_cast<const char *>(zip.data()),
-                      static_cast<std::streamsize>(zip.size())));
-  }
-  const std::string dst =
-      rgpot::aoti_execstack::prepare_pt2_for_load(src.string());
-  REQUIRE(dst != src.string());
-  auto patched = rgpot::aoti_execstack::read_all(dst);
-  REQUIRE_FALSE(rgpot::aoti_execstack::scan_or_clear_pt2(
-      patched.data(), patched.size(), /*write=*/false));
-}
-
 TEST_CASE("UmaPot empty model_path throws", "[UmaPot]") {
   rgpot::UmaConfig cfg;
   REQUIRE_THROWS_WITH(rgpot::UmaPot(cfg),
                       Catch::Matchers::ContainsSubstring("model_path"));
 }
 
-TEST_CASE("AOTI ZIP64 local sizes use the central directory",
-          "[UmaPot][execstack]") {
-  const auto elf = elf64_gnu_stack(7);
-  auto zip = stored_zip_with_so(elf);
-  const size_t extra = 30 + rgpot::aoti_execstack::rd16(zip.data() + 26);
-  zip.insert(zip.begin() + extra, 20, 0);
-  zip[28] = 20;
-  zip[extra] = 1;
-  zip[extra + 2] = 16;
-  rgpot::aoti_execstack::wr32(zip.data() + extra + 4, elf.size());
-  rgpot::aoti_execstack::wr32(zip.data() + extra + 12, elf.size());
-  rgpot::aoti_execstack::wr32(zip.data() + 18, 0xffffffffu);
-  rgpot::aoti_execstack::wr32(zip.data() + 22, 0xffffffffu);
-  const size_t payload = extra + 20;
-  const size_t central = payload + elf.size();
-  rgpot::aoti_execstack::wr32(zip.data() + zip.size() - 6, central);
-
-  REQUIRE(
-      rgpot::aoti_execstack::scan_or_clear_pt2(zip.data(), zip.size(), false));
-  REQUIRE(
-      rgpot::aoti_execstack::scan_or_clear_pt2(zip.data(), zip.size(), true));
-  REQUIRE(rgpot::aoti_execstack::rd32(zip.data() + payload + 68) == 6u);
-  // CRC-32 of elf64_gnu_stack(6), independently evaluated with zlib.
-  REQUIRE(rgpot::aoti_execstack::rd32(zip.data() + 14) == 0x43b0270au);
-  REQUIRE(rgpot::aoti_execstack::rd32(zip.data() + central + 16) ==
-          0x43b0270au);
-}
-
-TEST_CASE("AOTI data descriptors retain payload checksums",
-          "[UmaPot][execstack]") {
-  const auto elf = elf64_gnu_stack(7);
-  auto zip = stored_zip_with_so(elf);
-  const size_t payload = 30 + rgpot::aoti_execstack::rd16(zip.data() + 26);
-  const size_t descriptor = payload + elf.size();
-  zip.insert(zip.begin() + descriptor, 16, 0);
-  const size_t central = descriptor + 16;
-  zip[6] = 8;
-  zip[central + 8] = 8;
-  rgpot::aoti_execstack::wr32(zip.data() + 18, 0);
-  rgpot::aoti_execstack::wr32(zip.data() + 22, 0);
-  rgpot::aoti_execstack::wr32(zip.data() + descriptor, 0x08074b50u);
-  rgpot::aoti_execstack::wr32(zip.data() + descriptor + 8, elf.size());
-  rgpot::aoti_execstack::wr32(zip.data() + descriptor + 12, elf.size());
-  rgpot::aoti_execstack::wr32(zip.data() + zip.size() - 6, central);
-
-  REQUIRE(
-      rgpot::aoti_execstack::scan_or_clear_pt2(zip.data(), zip.size(), false));
-  REQUIRE(
-      rgpot::aoti_execstack::scan_or_clear_pt2(zip.data(), zip.size(), true));
-  REQUIRE(rgpot::aoti_execstack::rd32(zip.data() + payload + 68) == 6u);
-  REQUIRE(rgpot::aoti_execstack::rd32(zip.data() + descriptor + 4) ==
-          0x43b0270au);
-  REQUIRE(rgpot::aoti_execstack::rd32(zip.data() + central + 16) ==
-          0x43b0270au);
+// forceBatchImpl is a real AOTI batch, not Potential's one-at-a-time
+// default. Callers (a NEB band) trust caps().batched for that.
+TEST_CASE("UmaPot advertises native batch evaluation", "[UmaPot]") {
+  rgpot::UmaConfig cfg;
+  cfg.model_path = "unused.pt2";
+  rgpot::UmaPot pot(cfg);
+  REQUIRE(pot.caps().batched);
+  REQUIRE(pot.caps().perImageInstances);
 }
 
 TEST_CASE("UmaPot rejects a metatomic checkpoint", "[UmaPot]") {
@@ -395,6 +275,31 @@ TEST_CASE("UmaContract refuses an edge count the graph was not exported for",
       rgpot::UmaContract::fromMetadata(missing),
       Catch::Matchers::ContainsSubstring("nedges") &&
           Catch::Matchers::ContainsSubstring("absent"));
+
+  // Grignard: 37 * 36 directed pairs, recorded only in shapes.
+  auto shaped = missing;
+  shaped.erase("natoms");
+  shaped["shapes"] =
+      "{'pos': [37, 3], 'edge_index': [2, 1332], 'cell_offsets': [1332, 3]}";
+  const auto grignard = rgpot::UmaContract::fromMetadata(shaped);
+  REQUIRE(grignard.nedges_min == 1332);
+  REQUIRE(grignard.nedges_max == 1332);
+  REQUIRE_NOTHROW(grignard.checkEdges(1332));
+  REQUIRE_THROWS_WITH(
+      grignard.checkCallShapes(37, 1000),
+      Catch::Matchers::ContainsSubstring("edge_index shape is") &&
+          Catch::Matchers::ContainsSubstring("[2, 1332]"));
+
+  auto min_only = hcn_metadata();
+  min_only.erase("nedges_max");
+  REQUIRE_THROWS_WITH(
+      rgpot::UmaContract::fromMetadata(min_only),
+      Catch::Matchers::ContainsSubstring("nedges_max is absent"));
+  auto max_only = hcn_metadata();
+  max_only.erase("nedges_min");
+  REQUIRE_THROWS_WITH(
+      rgpot::UmaContract::fromMetadata(max_only),
+      Catch::Matchers::ContainsSubstring("nedges_min is absent"));
 }
 
 TEST_CASE("UmaContract checks z_set alone for packages without counts",

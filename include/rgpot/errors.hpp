@@ -9,7 +9,7 @@
  * @brief Maps C status codes to C++ exceptions.
  *
  * Provides @c rgpot::Error (an @c std::runtime_error subclass) and the
- * internal @c details::check_status() helper used by all RAII wrappers.
+ * internal @c detail::check_status() helper used by all RAII wrappers.
  * On a non-success status code, @c check_status fetches the thread-local
  * error message from the Rust core via @c rgpot_last_error() and throws
  * an appropriately categorised exception.
@@ -20,7 +20,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "rgpot/c_api.hpp"
+#include "c_api.hpp"
 
 namespace rgpot {
 
@@ -42,7 +42,7 @@ public:
   explicit Error(const std::string &msg) : std::runtime_error(msg) {}
 };
 
-namespace details {
+namespace detail {
 
 /**
  * @brief Checks a status code and throws @c rgpot::Error on failure.
@@ -75,5 +75,5 @@ inline void check_status(rgpot_status_t status) {
   }
 }
 
-} // namespace details
+} // namespace detail
 } // namespace rgpot

@@ -1,9 +1,12 @@
 #pragma once
-// Clear PT_GNU_STACK PF_X inside a stored AOTI .pt2 so dlopen of
+// Clear PT_GNU_STACK PF_X in AOTI shared libraries so dlopen of
 // wrapper.so does not need an executable stack (Elja inductor output
 // on a kernel that refuses mprotect(PROT_EXEC) on the stack).
+// aoti_unpack.hpp applies it to every .so it unpacks.
 
+#include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -56,16 +59,6 @@ inline uint32_t rd32(const uint8_t *p) {
 
 inline uint64_t rd64(const uint8_t *p) {
   return uint64_t(rd32(p)) | (uint64_t(rd32(p + 4)) << 32);
-}
-
-inline uint32_t zip_crc32(const uint8_t *data, size_t n) {
-  uint32_t crc = 0xffffffffu;
-  for (size_t i = 0; i < n; ++i) {
-    crc ^= data[i];
-    for (int bit = 0; bit < 8; ++bit)
-      crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
-  }
-  return ~crc;
 }
 
 inline void wr32(uint8_t *p, uint32_t v) {
@@ -126,142 +119,18 @@ inline bool elf_needs_gnu_stack_clear(const uint8_t *data, size_t n) {
   return false;
 }
 
-// The central directory owns sizes and offsets for ZIP64 and streamed
-// records. Every changed payload retains valid ZIP CRC fields.
-inline bool scan_or_clear_pt2(uint8_t *buf, size_t n, bool write) {
-  auto require_region = [&](uint64_t off, uint64_t len) {
-    if (off > n || len > n - off)
-      throw std::runtime_error("UmaPot: truncated AOTI ZIP record");
-  };
-  size_t eocd = n;
-  if (n >= 22) {
-    const size_t first = n > 65557 ? n - 65557 : 0;
-    for (size_t at = n - 22;; --at) {
-      if (rd32(buf + at) == 0x06054b50u &&
-          size_t(rd16(buf + at + 20)) == n - at - 22) {
-        eocd = at;
-        break;
-      }
-      if (at == first)
-        break;
-    }
-  }
-  if (eocd == n)
-    throw std::runtime_error("UmaPot: AOTI ZIP has no central directory");
-  if (rd16(buf + eocd + 4) != 0 || rd16(buf + eocd + 6) != 0)
-    throw std::runtime_error("UmaPot: split AOTI ZIP is unsupported");
-  uint64_t entries = rd16(buf + eocd + 10);
-  uint64_t central_size = rd32(buf + eocd + 12);
-  uint64_t central_off = rd32(buf + eocd + 16);
-  if (entries == 0xffffu || central_size == 0xffffffffu ||
-      central_off == 0xffffffffu) {
-    if (eocd < 20 || rd32(buf + eocd - 20) != 0x07064b50u)
-      throw std::runtime_error("UmaPot: missing AOTI ZIP64 locator");
-    const uint64_t zip64 = rd64(buf + eocd - 12);
-    require_region(zip64, 56);
-    if (rd32(buf + zip64) != 0x06064b50u || rd32(buf + zip64 + 16) != 0 ||
-        rd32(buf + zip64 + 20) != 0)
-      throw std::runtime_error("UmaPot: invalid AOTI ZIP64 directory");
-    entries = rd64(buf + zip64 + 32);
-    central_size = rd64(buf + zip64 + 40);
-    central_off = rd64(buf + zip64 + 48);
-  }
-  require_region(central_off, central_size);
-  const size_t central_end = central_off + central_size;
-  size_t pos = central_off;
-  bool needed = false;
-  for (uint64_t entry = 0; entry < entries; ++entry) {
-    require_region(pos, 46);
-    if (pos > central_end || central_end - pos < 46 ||
-        rd32(buf + pos) != kZipCentral)
-      throw std::runtime_error("UmaPot: invalid AOTI ZIP central entry");
-    const uint16_t flags = rd16(buf + pos + 8);
-    const uint16_t method = rd16(buf + pos + 10);
-    uint64_t csize = rd32(buf + pos + 20);
-    uint64_t usize = rd32(buf + pos + 24);
-    const uint16_t namelen = rd16(buf + pos + 28);
-    const uint16_t extralen = rd16(buf + pos + 30);
-    const uint16_t commentlen = rd16(buf + pos + 32);
-    uint64_t local = rd32(buf + pos + 42);
-    const size_t name_off = pos + 46;
-    const size_t record_len = 46u + namelen + extralen + commentlen;
-    if (record_len > central_end - pos)
-      throw std::runtime_error("UmaPot: truncated AOTI ZIP central entry");
-
-    if (usize == 0xffffffffu || csize == 0xffffffffu || local == 0xffffffffu) {
-      const size_t extra_end = name_off + namelen + extralen;
-      size_t extra = name_off + namelen;
-      bool found = false;
-      while (extra_end - extra >= 4) {
-        const uint16_t kind = rd16(buf + extra);
-        const uint16_t len = rd16(buf + extra + 2);
-        extra += 4;
-        if (len > extra_end - extra)
-          throw std::runtime_error("UmaPot: truncated AOTI ZIP extra field");
-        if (kind == 1) {
-          const size_t end = extra + len;
-          auto expand = [&](uint64_t &value) {
-            if (value != 0xffffffffu)
-              return;
-            if (end - extra < 8)
-              throw std::runtime_error("UmaPot: truncated AOTI ZIP64 size");
-            value = rd64(buf + extra);
-            extra += 8;
-          };
-          expand(usize);
-          expand(csize);
-          expand(local);
-          found = true;
-          break;
-        }
-        extra += len;
-      }
-      if (!found)
-        throw std::runtime_error("UmaPot: missing AOTI ZIP64 sizes");
-    }
-
-    const bool is_so = namelen >= 3 &&
-                       std::memcmp(buf + name_off + namelen - 3, ".so", 3) == 0;
-    if (is_so) {
-      if (method != 0 || (flags & 1u))
-        throw std::runtime_error(
-            "UmaPot: AOTI libraries must use stored ZIP records");
-      require_region(local, 30);
-      if (rd32(buf + local) != kZipLocal || csize != usize)
-        throw std::runtime_error("UmaPot: invalid stored AOTI ZIP library");
-      const uint64_t data_off =
-          local + 30 + rd16(buf + local + 26) + rd16(buf + local + 28);
-      require_region(data_off, csize);
-      if (elf_needs_gnu_stack_clear(buf + data_off, csize)) {
-        needed = true;
-        if (write) {
-          clear_elf_gnu_stack(buf + data_off, csize);
-          const uint32_t crc = zip_crc32(buf + data_off, csize);
-          wr32(buf + local + 14, crc);
-          wr32(buf + pos + 16, crc);
-          if (flags & 8u) {
-            uint64_t descriptor = data_off + csize;
-            require_region(descriptor, 4);
-            if (rd32(buf + descriptor) == 0x08074b50u)
-              descriptor += 4;
-            require_region(descriptor, 4);
-            wr32(buf + descriptor, crc);
-          }
-        }
-      }
-    }
-    pos += record_len;
-  }
-  return needed;
-}
-
 // Publication writes a private complete file, then replaces the destination.
 // A reader therefore observes one full payload, whichever writer landed last.
-// On Windows, exists, status, and replace can return access denied (5) or
-// sharing violation (32) while another replace of that path is in flight.
-// Those two errors are retried with exponential backoff until the deadline.
-// Readers open with delete sharing so an open read does not refuse the
-// replace. POSIX still uses rename, and only permission_denied is transient.
+// MoveFileExW refuses to replace a destination that has any open handle,
+// whatever its sharing, with access denied (5), so a reader in a loop can
+// keep a writer out past the deadline. That refusal is retried at once with
+// POSIX semantics (FileRenameInfoEx, Windows 10 1607 and later, NTFS), which
+// replace a destination held open with delete sharing, as read_all opens it;
+// the holder keeps reading the file it opened. Access denied and sharing
+// violation (32) that remain, from a holder without delete sharing or a
+// filesystem without POSIX semantics, and those of exists and status while
+// another replace is in flight, are retried with exponential backoff until
+// the deadline. POSIX uses rename, and only permission_denied is transient.
 inline constexpr std::chrono::milliseconds kPublicationInitialBackoff{1};
 inline constexpr std::chrono::milliseconds kPublicationMaxBackoff{32};
 inline constexpr std::chrono::milliseconds kPublicationDeadline{2000};
@@ -274,6 +143,19 @@ inline void publication_backoff(std::chrono::milliseconds &delay) {
   std::this_thread::sleep_for(delay);
   const auto doubled = delay * 2;
   delay = doubled < kPublicationMaxBackoff ? doubled : kPublicationMaxBackoff;
+}
+
+// The last error of a retry loop that gave up, with its code and the attempts
+// the loop made before the deadline.
+inline std::string
+publication_failure(const std::error_code &ec, int attempts,
+                    std::chrono::steady_clock::time_point start) {
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - start);
+  return ec.message() + " (" + ec.category().name() + " error " +
+         std::to_string(ec.value()) + ", " + std::to_string(attempts) +
+         (attempts == 1 ? " attempt in " : " attempts in ") +
+         std::to_string(elapsed.count()) + " ms)";
 }
 
 #ifdef _WIN32
@@ -365,6 +247,58 @@ inline bool publication_slot_taken(const std::error_code &ec) {
   return ec.default_error_condition() == std::errc::file_exists;
 }
 
+#ifdef _WIN32
+// FILE_RENAME_INFO as FileRenameInfoEx reads it. Headers that target Windows
+// before 10 1607 declare neither its Flags member nor the class.
+struct PublicationRenameInfo {
+  DWORD flags;
+  HANDLE root_directory;
+  DWORD file_name_length;
+  WCHAR file_name[1];
+};
+static_assert(offsetof(PublicationRenameInfo, root_directory) ==
+              offsetof(FILE_RENAME_INFO, RootDirectory));
+static_assert(offsetof(PublicationRenameInfo, file_name_length) ==
+              offsetof(FILE_RENAME_INFO, FileNameLength));
+static_assert(offsetof(PublicationRenameInfo, file_name) ==
+              offsetof(FILE_RENAME_INFO, FileName));
+inline constexpr int kFileRenameInfoEx = 22;
+inline constexpr DWORD kRenameReplaceIfExists = 0x1;
+inline constexpr DWORD kRenamePosixSemantics = 0x2;
+
+inline std::error_code publish_replace_posix(const std::filesystem::path &from,
+                                             const std::filesystem::path &to) {
+  std::error_code ec;
+  const std::wstring target = std::filesystem::absolute(to, ec).native();
+  if (ec)
+    return ec;
+  const std::size_t name_bytes = target.size() * sizeof(wchar_t);
+  const std::size_t size =
+      offsetof(PublicationRenameInfo, file_name) + name_bytes + sizeof(wchar_t);
+  std::vector<std::max_align_t> storage(
+      (size + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
+  auto *bytes = reinterpret_cast<unsigned char *>(storage.data());
+  auto *info = reinterpret_cast<PublicationRenameInfo *>(bytes);
+  info->flags = kRenameReplaceIfExists | kRenamePosixSemantics;
+  info->root_directory = nullptr;
+  info->file_name_length = static_cast<DWORD>(name_bytes);
+  std::memcpy(bytes + offsetof(PublicationRenameInfo, file_name),
+              target.c_str(), name_bytes + sizeof(wchar_t));
+  HANDLE handle = CreateFileW(
+      from.c_str(), DELETE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (handle == INVALID_HANDLE_VALUE)
+    return win_last_error();
+  if (!SetFileInformationByHandle(
+          handle, static_cast<FILE_INFO_BY_HANDLE_CLASS>(kFileRenameInfoEx),
+          info, static_cast<DWORD>(size)))
+    ec = win_last_error();
+  CloseHandle(handle);
+  return ec;
+}
+#endif
+
 inline std::error_code publish_replace(const std::filesystem::path &from,
                                        const std::filesystem::path &to) {
 #ifdef _WIN32
@@ -376,7 +310,16 @@ inline std::error_code publish_replace(const std::filesystem::path &from,
     return std::error_code(ERROR_DIRECTORY, std::system_category());
   if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING))
     return {};
-  return win_last_error();
+  const std::error_code moved = win_last_error();
+  if (moved.value() != ERROR_ACCESS_DENIED)
+    return moved;
+  const std::error_code posix = publish_replace_posix(from, to);
+  if (!posix)
+    return {};
+  // Without POSIX semantics the class is rejected (invalid parameter, not
+  // supported or invalid function), and the refusal stands until the
+  // holder closes.
+  return publication_retryable(posix) ? posix : moved;
 #else
   std::error_code ec;
   std::filesystem::rename(from, to, ec);
@@ -388,7 +331,7 @@ inline std::vector<uint8_t> read_all(const std::string &path) {
   const auto start = std::chrono::steady_clock::now();
   auto delay = kPublicationInitialBackoff;
   const std::filesystem::path file(path);
-  for (;;) {
+  for (int attempts = 1;; ++attempts) {
 #ifdef _WIN32
     std::error_code ec;
     auto buf = read_shared(file, ec);
@@ -398,9 +341,10 @@ inline std::vector<uint8_t> read_all(const std::string &path) {
         publication_retryable(ec) || publication_slot_absent(ec);
     if (!again || !publication_time_left(start))
       throw std::runtime_error("UmaPot: cannot read AOTI package " + path +
-                               ": " + ec.message());
+                               ": " + publication_failure(ec, attempts, start));
     publication_backoff(delay);
 #else
+    errno = 0;
     std::ifstream in(path, std::ios::binary);
     if (in) {
       in.seekg(0, std::ios::end);
@@ -412,6 +356,9 @@ inline std::vector<uint8_t> read_all(const std::string &path) {
         throw std::runtime_error("UmaPot: short read of AOTI package " + path);
       return buf;
     }
+    const std::error_code opened =
+        errno ? std::error_code(errno, std::generic_category())
+              : std::make_error_code(std::errc::io_error);
     std::error_code ec;
     const bool present = std::filesystem::exists(file, ec);
     if ((publication_retryable(ec) || present) &&
@@ -419,7 +366,9 @@ inline std::vector<uint8_t> read_all(const std::string &path) {
       publication_backoff(delay);
       continue;
     }
-    throw std::runtime_error("UmaPot: cannot read AOTI package " + path);
+    throw std::runtime_error("UmaPot: cannot read AOTI package " + path +
+                             ": " +
+                             publication_failure(opened, attempts, start));
 #endif
   }
 }
@@ -454,10 +403,12 @@ inline void write_all(const std::string &path,
   // and threads. Only a closed, complete file is renamed to the shared path.
   const auto reserve_start = std::chrono::steady_clock::now();
   auto delay = kPublicationInitialBackoff;
+  int reserve_attempts = 0;
   for (std::size_t slot = 0; !publication.owned;) {
     publication.directory = path + ".tmp." + std::to_string(slot);
     publication.payload = publication.directory / "payload.pt2";
     std::error_code error;
+    ++reserve_attempts;
     publication.owned = fs::create_directory(publication.directory, error);
     if (publication.owned)
       break;
@@ -473,8 +424,9 @@ inline void write_all(const std::string &path,
       publication_backoff(delay);
       continue;
     }
-    throw std::runtime_error("UmaPot: cannot reserve publication for " + path +
-                             ": " + error.message());
+    throw std::runtime_error(
+        "UmaPot: cannot reserve publication for " + path + ": " +
+        publication_failure(error, reserve_attempts, reserve_start));
   }
   const std::string tmp = publication.payload.string();
   {
@@ -490,65 +442,19 @@ inline void write_all(const std::string &path,
   }
   const auto publish_start = std::chrono::steady_clock::now();
   delay = kPublicationInitialBackoff;
+  int publish_attempts = 1;
   std::error_code ec = publish_replace(publication.payload, path);
   while (publication_retryable(ec) && publication_time_left(publish_start)) {
     publication_backoff(delay);
     if (!publication_time_left(publish_start))
       break;
+    ++publish_attempts;
     ec = publish_replace(publication.payload, path);
   }
   if (ec)
-    throw std::runtime_error("UmaPot: cannot publish " + path + ": " +
-                             ec.message());
-}
-
-inline std::string cache_path_for(const std::string &src) {
-  namespace fs = std::filesystem;
-  const fs::path p(src);
-  std::error_code ec;
-  const auto st = fs::status(p, ec);
-  if (ec)
-    throw std::runtime_error("UmaPot: cannot stat AOTI package " + src + ": " +
-                             ec.message());
-  (void)st;
-  const auto mtime_tp = fs::last_write_time(p, ec);
-  if (ec)
-    throw std::runtime_error("UmaPot: cannot stat AOTI package " + src + ": " +
-                             ec.message());
-  const auto mtime = mtime_tp.time_since_epoch().count();
-  const auto sz = fs::file_size(p, ec);
-  if (ec)
-    throw std::runtime_error("UmaPot: cannot stat AOTI package " + src + ": " +
-                             ec.message());
-  const std::string key = "zipcd1-" + p.filename().string() + "-" +
-                          std::to_string(sz) + "-" +
-                          std::to_string(static_cast<long long>(mtime));
-  fs::path base;
-  if (const char *env = std::getenv("RGPOT_AOTI_NOEXEC_DIR"); env && *env)
-    base = env;
-  else
-    base = fs::temp_directory_path() / "rgpot-aoti-noexec";
-  return (base / (key + ".pt2")).string();
-}
-
-// Path UmaPot should hand to AOTIModelPackageLoader. Original if the
-// package already has no executable-stack objects; otherwise a cached
-// copy with PT_GNU_STACK PF_X cleared.
-inline std::string prepare_pt2_for_load(const std::string &src) {
-  auto buf = read_all(src);
-  if (!scan_or_clear_pt2(buf.data(), buf.size(), /*write=*/false))
-    return src;
-  const std::string dst = cache_path_for(src);
-  std::error_code ec;
-  const auto cached_size = std::filesystem::file_size(dst, ec);
-  if (!ec && cached_size == buf.size()) {
-    auto cached = read_all(dst);
-    if (!scan_or_clear_pt2(cached.data(), cached.size(), /*write=*/false))
-      return dst;
-  }
-  scan_or_clear_pt2(buf.data(), buf.size(), /*write=*/true);
-  write_all(dst, buf);
-  return dst;
+    throw std::runtime_error(
+        "UmaPot: cannot publish " + path + ": " +
+        publication_failure(ec, publish_attempts, publish_start));
 }
 
 } // namespace aoti_execstack

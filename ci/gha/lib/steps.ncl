@@ -88,6 +88,7 @@ let P = import "pins.ncl" in
     {
       name = "ci-tools (potctl / ${{ matrix.os }})",
       "runs-on" = "${{ matrix.os }}",
+      "timeout-minutes" = 10,
       strategy = {
         "fail-fast" = false,
         matrix = { os = os_list },
@@ -161,6 +162,7 @@ let P = import "pins.ncl" in
   job_tools_linux = fun install_cog step_name =>
     {
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         { uses = P.checkout },
         {

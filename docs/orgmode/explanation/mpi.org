@@ -1,0 +1,47 @@
+#+TITLE: Calculator groups over MPI
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Calculator groups over MPI
+
+This page explains how the MPI-parallel engines share one force call across the
+ranks of a calculator.
+The build option, the loader of =librgpot_mpi= and its C ABI are in
+[[file:../reference/mpi.org][MPI]].
+The C++ functions (=bindCalculators=, =shareFromCalculator=, =calculatorAgree=
+and the rest) are in [[file:../reference/cpp_api.org][C++ API]].
+
+** Collective force calls
+
+=CPMDPot= and =CP2KPot= report =PotCaps::groupCollective=: every rank of a
+calculator enters each of its force calls together, and the call's collectives
+stay on that calculator's communicator.
+A host may hand calculators an uneven batch, with some calculators making no
+call at all, and then share results with =shareFromCalculator=.
+A failure inside the call prints on every rank of the failing calculator, then
+=MPI_Abort= on =MPI_COMM_WORLD= ends the run.
+
+** The result cache
+
+For such a potential the result cache decides hit or miss jointly, through
+=calculatorAgree= (a logical AND over the calculator's communicator).
+A geometry that any rank of the calculator misses is computed on all of its
+ranks, so no rank waits alone inside the call.
+Give each rank its own cache directory: RocksDB locks a directory to one
+process.
+
+** CP2K's communicator
+
+=CP2KPot::bindCalculators= splits the world as =CPMDPot::bindCalculators= does
+and hands the shim the calculator communicator through
+=cp2kc_adopt_calculator_comm=.
+It returns -1 without splitting when the shim does not load or lacks that
+symbol.
+Each force environment runs on that communicator, or on =MPI_COMM_WORLD= when no
+split exists.
+When MPI is initialised before the first session, the shim calls
+=cp2k_init_without_mpi=; otherwise =cp2k_init= starts MPI and the shim finalises
+CP2K and MPI at exit.
+
+The CP2K tutorial is
+[[file:../tutorials/cp2k.org][Evaluate diamond silicon with CP2K]].

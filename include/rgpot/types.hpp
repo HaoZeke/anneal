@@ -28,7 +28,7 @@
 #include <cstring>
 #include <vector>
 
-#include "rgpot/c_api.hpp"
+#include "c_api.hpp"
 
 namespace rgpot {
 
@@ -57,9 +57,9 @@ public:
   /**
    * @brief Construct from raw arrays (data is borrowed, not copied).
    * @param n_atoms Number of atoms in the configuration.
-   * @param pos     Flat position array @c [n_atoms*3], row-major xyz.
-   * @param atmnrs  Atomic number array @c [n_atoms].
-   * @param box     Flat 3x3 cell matrix @c [9], row-major.
+   * @param pos     Flat position array of 3 * n_atoms doubles, row-major xyz.
+   * @param atmnrs  Atomic number array of n_atoms ints.
+   * @param box     Flat 3x3 cell matrix of 9 doubles, row-major.
    */
   InputSpec(size_t n_atoms, double *pos, int *atmnrs, double *box)
       : n_atoms_(n_atoms),
@@ -69,7 +69,7 @@ public:
    * @brief Construct from STL containers and a flat box pointer.
    * @param positions Flat position vector; size must be a multiple of 3.
    * @param atmnrs    Atomic number vector.
-   * @param box       Flat 3x3 cell matrix @c [9], row-major.
+   * @param box       Flat 3x3 cell matrix of 9 doubles, row-major.
    *
    * @note The vectors must outlive this InputSpec since the tensors borrow
    *       their data.

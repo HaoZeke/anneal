@@ -27,6 +27,7 @@ import torch.nn as nn
 from export_uma_aoti import (  # noqa: E402
     aoti_package,
     apply_export_dtype,
+    resolve_checkpoint,
     runtime_metadata,
 )
 
@@ -265,9 +266,9 @@ def _enforce_metadata(path: Path, meta: dict) -> None:
         for info in source.infolist():
             data = source.read(info.filename)
             if info.filename.endswith(".json"):
-                # A zero-length member makes AOTIModelPackageLoader::get_metadata
-                # throw from nlohmann::json::parse. An empty object is the
-                # same "no keys" contract.
+                # A zero-length member is not valid JSON and the metadata
+                # parse throws. An empty object is the same "no keys"
+                # contract.
                 if not data.strip():
                     data = b"{}"
                 try:
@@ -288,7 +289,9 @@ def _enforce_metadata(path: Path, meta: dict) -> None:
     path.write_bytes(out.getvalue())
 
 
-def export_precision(path: Path, dtype_name: str, meta_mode: str) -> None:
+def export_precision(
+    path: Path, dtype_name: str, meta_mode: str, checkpoint=None
+) -> None:
     dtype = torch.float64 if dtype_name == "float64" else torch.float32
     example = _single_example(dtype, 6)
     module = apply_export_dtype(SumEnergy().eval(), dtype_name)
@@ -307,6 +310,7 @@ def export_precision(path: Path, dtype_name: str, meta_mode: str) -> None:
         counts={1: 1, 6: 1, 7: 1},
         label="line",
         model="tiny-sum",
+        checkpoint=checkpoint,
     )
     meta["nedges_min"] = 6
     meta["nedges_max"] = 6
@@ -314,6 +318,18 @@ def export_precision(path: Path, dtype_name: str, meta_mode: str) -> None:
     wanted = _apply_meta(meta, meta_mode)
     aoti_package(exported, path, metadata=wanted)
     _enforce_metadata(path, wanted)
+
+
+def export_provenance(path: Path, dtype_name: str, weights: Path) -> None:
+    """The precision line package, built from a stand-in checkpoint file.
+
+    The file is written next to the package and passed as --checkpoint
+    would be, so the package records its path and SHA-256.
+    """
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"rgpot tiny UMA stand-in checkpoint\n")
+    source = resolve_checkpoint(str(weights), "tiny-sum", environ={})
+    export_precision(path, dtype_name, "both", checkpoint=source)
 
 
 def _drop_metadata_keys(path: Path, keys: tuple[str, ...]) -> None:
@@ -338,6 +354,61 @@ def _drop_metadata_keys(path: Path, keys: tuple[str, ...]) -> None:
                     data = json.dumps(payload).encode()
             dest.writestr(info, data)
     path.write_bytes(out.getvalue())
+
+
+def export_packed(path: Path, dtype_name: str) -> None:
+    """Dynamic disjoint graph: one, two or three systems, no padding.
+
+    ``batch_packed`` tells UmaPot to send the real system count. The
+    traced example is two copies of the three-atom line.
+    """
+    dtype = torch.float64 if dtype_name == "float64" else torch.float32
+    example = _batch_example(dtype, 6)
+    module = apply_export_dtype(SumEnergyBatch().eval(), dtype_name)
+    nsys = torch.export.Dim("nsys", min=1, max=4)
+    atoms = torch.export.Dim("atoms", min=3, max=12)
+    edges = torch.export.Dim("edges", min=1, max=48)
+    exported = torch.export.export(
+        module,
+        example,
+        dynamic_shapes={
+            "pos": {0: atoms},
+            "atomic_numbers": {0: atoms},
+            "cell": {0: nsys},
+            "pbc": {0: nsys},
+            "edge_index": {1: edges},
+            "cell_offsets": {0: edges},
+            "charge": {0: nsys},
+            "spin": {0: nsys},
+            "batch": {0: atoms},
+            "natoms": {0: nsys},
+            "nedges": {0: nsys},
+        },
+        strict=False,
+    )
+    meta = runtime_metadata(
+        path,
+        6.0,
+        300,
+        example,
+        dtype,
+        model_dtype=dtype,
+        task_name="omol",
+        charge=0,
+        spin=1,
+        z_set=[1, 6, 7],
+        counts={1: 1, 6: 1, 7: 1},
+        label="line",
+        model="tiny-sum-packed",
+        batch_max=4,
+        batch_packed=1,
+    )
+    meta["nedges_min"] = 1
+    meta["nedges_max"] = 48
+    meta["edge_index_shape"] = "2,nedges"
+    meta["export_path"] = "packed-dynamic"
+    meta["pos_shape"] = "3,3"
+    aoti_package(exported, path, metadata=meta)
 
 
 def export_batch(path: Path, dtype_name: str, static: bool = False) -> None:
@@ -608,6 +679,7 @@ def export_gather(path: Path, dtype_name: str, dynamic: bool) -> None:
         meta["natoms_max"] = 64
         meta["pos_shape"] = "natoms,3"
         meta["edge_index_shape"] = "2,nedges"
+        meta["z_max"] = 99
         meta["export_path"] = "tiny-gather-dynamic"
     else:
         meta["natoms"] = 8
@@ -706,8 +778,17 @@ def export_tetrazine_keyless(path: Path, dtype_name: str) -> None:
 
 def export_no_edges(path: Path, dtype_name: str) -> None:
     export_precision(path, dtype_name, "both")
+    # ``shapes`` still carries the example edge list. Drop that too, or
+    # the package is a fixed-shape export rather than one with no range.
     _drop_metadata_keys(
-        path, ("nedges_min", "nedges_max", "edge_index_shape", "pos_shape")
+        path,
+        (
+            "nedges_min",
+            "nedges_max",
+            "edge_index_shape",
+            "pos_shape",
+            "shapes",
+        ),
     )
 
 
@@ -746,6 +827,7 @@ def main() -> int:
         choices=(
             "precision",
             "batch",
+            "packed",
             "cost",
             "gather",
             "no-edges",
@@ -755,8 +837,15 @@ def main() -> int:
             "guard-single",
             "guard-batch",
             "guard-periodic",
+            "provenance",
         ),
         required=True,
+    )
+    parser.add_argument(
+        "--checkpoint-out",
+        type=Path,
+        default=None,
+        help="provenance only: where to write the stand-in checkpoint",
     )
     parser.add_argument(
         "--dynamic",
@@ -781,6 +870,10 @@ def main() -> int:
         export_precision(args.out, args.dtype, args.meta)
     elif args.kind == "gather":
         export_gather(args.out, args.dtype, args.dynamic)
+    elif args.kind == "packed":
+        if args.meta != "both":
+            raise SystemExit("packed packages always record both dtype keys")
+        export_packed(args.out, args.dtype)
     elif args.kind == "batch":
         if args.meta != "both":
             raise SystemExit("batch packages always record both dtype keys")
@@ -799,6 +892,10 @@ def main() -> int:
         export_guard(args.out, args.dtype, "batch")
     elif args.kind == "guard-periodic":
         export_guard(args.out, args.dtype, "periodic")
+    elif args.kind == "provenance":
+        if args.checkpoint_out is None:
+            raise SystemExit("--kind provenance needs --checkpoint-out")
+        export_provenance(args.out, args.dtype, args.checkpoint_out)
     else:
         if args.meta != "both":
             raise SystemExit("cost packages always record both dtype keys")

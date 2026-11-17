@@ -60,11 +60,6 @@ private:
     FortranWorkspace m_ws;                                                     \
   }
 
-/// Stillinger-Weber silicon (PotType::SWSi). Epsilon is eOn's
-/// 2.16826 * 1.06767385 = 2.3149945 eV, not the published 2.16723920 eV
-/// of PotType::SWSi1985. Their ratio is 1.068176741337. The factor
-/// 1.06767385 is untraced; see rgpot_sw.f90.
-RGPOT_FORTRAN_POT_CLASS(SWPot, SWSi);
 RGPOT_FORTRAN_POT_CLASS(EDIPPot, EDIP);
 RGPOT_FORTRAN_POT_CLASS(LenoskyPot, LenoskySi);
 RGPOT_FORTRAN_POT_CLASS(EAMAlPot, EAMAl);
@@ -73,6 +68,29 @@ RGPOT_FORTRAN_POT_CLASS(CuH2Pot, CuH2);
 RGPOT_FORTRAN_POT_CLASS(WaterHPot, WaterH);
 
 #undef RGPOT_FORTRAN_POT_CLASS
+
+/// Stillinger-Weber silicon (PotType::SWSi). Epsilon is eOn's
+/// 2.16826 * 1.06767385 = 2.3149945 eV, not the published 2.16723920 eV
+/// of PotType::SWSi1985. Their ratio is 1.068176741337. The factor
+/// 1.06767385 is untraced; see rgpot_sw.f90.
+class SWPot : public Potential<SWPot> {
+public:
+  SWPot() : Potential(PotType::SWSi) {}
+  /// Forces, energy and the Cauchy stress sigma = (1/V) dE/dε in
+  /// eV/Angstrom^3, the convention of stress.hpp.
+  void forceImpl(const ForceInput &in, ForceOut *out) const override;
+  /// Forces and energy only. eOn's engine calls arrive here and discard
+  /// the stress, so the kernel skips the virial and has_stress stays 0.
+  void forceBatchImpl(const ForceBatch &batch) const override;
+  [[nodiscard]] PotCaps caps() const noexcept override {
+    return {.reentrancy = Reentrancy::PerInstance,
+            .perImageInstances = true,
+            .stress = true};
+  }
+
+private:
+  FortranWorkspace m_ws;
+};
 
 /// Tersoff silicon (PotType::TersoffSi). All-silicon calls, and a null
 /// species pointer, use the Fortran gather. Any other atomic number

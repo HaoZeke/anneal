@@ -9,7 +9,7 @@
  * cbindgen emits unmangled C symbols without an @c extern "C" guard.
  */
 
-#include "rgpot/eindir_abi.hpp"
+#include "eindir_abi.hpp"
 
 #ifdef __cplusplus
 extern "C" {

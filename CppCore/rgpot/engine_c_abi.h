@@ -316,9 +316,13 @@ RGPOT_ENGINE_API int rgpot_engine_set_num_threads(RgpotEnginePot *pot,
 
 /**
  * Change the total charge and spin multiplicity the next evaluations assume.
- * The package was exported for one charge and spin; a mismatch is reported by
- * the next force call. Returns 0 on success and 3 for a backend without a
- * charge or spin.
+ * Returns 0 when the values reach the backend, 1 for a multiplicity below 1,
+ * and 3 for a backend without a charge or spin or a value it cannot take; a
+ * refused call changes nothing and leaves the reason in last_error. A UMA
+ * package was exported for one charge and spin; a mismatch is reported by the
+ * next force call. A Metatomic model reads those it declares in
+ * requested_inputs, and one it does not read must stay at charge 0 or
+ * multiplicity 1.
  */
 RGPOT_ENGINE_API int rgpot_engine_set_charge_spin(RgpotEnginePot *pot,
                                                   int charge, int spin);

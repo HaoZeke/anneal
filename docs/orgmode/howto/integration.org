@@ -12,156 +12,65 @@ strategies, and a worked example using [[https://github.com/TheochemUI/eOn]
 
 ** The Namespace Collision Problem
 
-~rgpot~ defines two names that are common in atomistic simulation codebases:
-
-- =AtomMatrix= :: A lightweight row-major matrix class in
-=rgpot::types::AtomMatrix=.
-However, =Potential.hpp= contains a top-level =using rgpot::types::AtomMatrix;=
-directive (line 30) that pulls this name into the global scope of any
-translation unit that includes the header.
-
-- =Potential= :: The Cap'n Proto schema (=Potentials.capnp=) defines =interface
-Potential=, which the capnp compiler generates as a global =class Potential=.
-This collides with any consumer that defines its own =class Potential= at global
+Legacy atomistic codes often declare =Potential= and =AtomMatrix= at global
 scope.
+The C++ library of ~rgpot~ keeps both names inside =namespace rgpot=:
 
-Both names are extremely common in computational chemistry codebases.
+- =AtomMatrix= :: A lightweight row-major matrix class,
+  =rgpot::types::AtomMatrix= (=CppCore/rgpot/types/AtomMatrix.hpp=).
+=CppCore/rgpot/Potential.hpp= uses it as =types::AtomMatrix= inside
+=namespace rgpot= and declares no =using= at global scope.
+- =Potential= :: =rgpot::Potential<Derived>= and =rgpot::PotentialBase= live in
+  =namespace rgpot=.
 
-*** rgpot user parameters (=PotentialConfig=) over RPC
+The Cap'n Proto schema is the part that still collides.
+=CppCore/rgpot/rpc/Potentials.capnp= has no =$Cxx.namespace= annotation.
+The generated =Potentials.capnp.h= therefore declares =Potential= (from
+=interface Potential=), =ForceInput=, =PotentialResult=, =PotentialConfig= and
+the other schema types at global scope.
+This collides with any consumer that defines its own =class Potential= or
+=ForceInput= at global scope.
 
-Backend knobs for a live =Potential= use Cap'n Proto =PotentialConfig=: an
-extensible union (=none=, =nwchem=, =cpmd=, =metatomic=; later =xtb= / …).
-Geometry stays on =ForceInput=; =configure(config)= applies method/backend setup
-only.
-=D3Pot= and =D4Pot= stay in-process =Potential= summands.
-There is no =PotentialConfig.d3= or =PotentialConfig.d4= arm.
-A DFT host that wants XcKernel + VV10 + D4 sums those terms itself; do not fold
-dispersion into the XC kernel.
-
-*** NWChem arm (=PotentialConfig.nwchem= / =NWChemParams=)
-
-With =potserv <port> NWChem=, pass =configure= with the =nwchem= arm set.
-Payload fields (=basis=, =theory=, =scfType=, =charge=, =multiplicity=,
-=enginePath=, =nwchemRoot=) are NWChem-specific; the outer message is still
-generic rgpot params so other backends can add arms without a new config
-language.
-
-Python: =tests/nwchem_params.py= builds =PotentialConfig= + =nwchem=.
-BLYP: =theory="dft"=, =scfType="blyp"=. Embed =.so= still required for
-=calculate=.
-
-*** CPMD arm (=PotentialConfig.cpmd= / =CPMDParams=)
-
-With =potserv <port> CPMD=, pass =configure= with the =cpmd= arm set.
-=CPMDParams= is method/backend setup only; each =calculate()= call still carries
-geometry in =ForceInput=.
-
-The rgpot frontend loads =libcpmdc= at runtime and forwards serialized
-=CPMDParams= to that C ABI.
-Engine lookup checks =CPMDParams.enginePath=,
-=CPMDC_LIBRARY=, =RGPOT_CPMDC_ENGINE=, =RGPOT_CPMD_ENGINE=, and default
-shared-library names.
-=CPMDParams.cpmdRoot= is applied as =CPMD_ROOT= before loading the engine.
-
-Payload fields include method-level defaults (=functional=, =cutOffRy=,
-=charge=, =multiplicity=, =task=), frontend hints (=enginePath=, =cpmdRoot=),
-runtime file placement (=scratchDir=, =permanentDir=), raw =inputBlocks=, and
-structured =inputSections= for =SYSTEM=, =CPMD=, =DFT=, =ATOMS=, =SET=, and raw
-sections.
-The typed =cpmd= section covers wavefunction and geometry optimization,
-molecular dynamics, orbital and geometry convergence thresholds, iteration
-limits, timestep, electron mass, CP/BO/EH/PT/classical MD variants, MD file,
-Nose/Berendsen/Langevin/annealing/quench thermostat controls,
-RATTLE/SHAKE, constraints, Trotter factor, restart, print/store, center
-molecule, DIIS/ ODIIS/PCG/diagonalization, free-energy, interface, QMMM,
-bicanonical, CDFT, properties, and trajectory controls.
-The typed =dft= section covers functional, LSD, GC cutoff, XC driver, LIBXC, LR
-kernel, refunct, MTS
-high/low functionals, HFX, HFX screening, Hubbard, alpha, beta, old/new code
-selection, correlation, exchange, and Becke88 controls.
-
-Python: =tests/cpmd_params.py= builds =PotentialConfig= + =cpmd=.
-The helper uses =CPMD_ROOT= for =cpmdRoot= and =CPMDC_LIBRARY= /
-=RGPOT_CPMDC_ENGINE= / =RGPOT_CPMD_ENGINE= for =enginePath= when explicit values
-are not supplied.
-Use =input_sections= to build every structured =CPMDInputSection= arm
-(=generic=, =system=, =cpmd=, =dft=, =atoms=, =set=, and =raw=) without raw
-Cap'n Proto builder code in clients.
-
-Typed =atoms= sections carry pseudopotential entries keyed by element symbol.
-The engine groups =ForceInput= coordinates into =&ATOMS= and requires entries
-for every atomic number present in a step.
-Without an =atoms= section, built-in BLYP pseudopotential defaults cover H and O
-only.
-The same =atoms= section also accepts structured =directives= for ATOMS keywords
-that are not pseudopotential entries.
-
-The integration script exercises RPC =configure()= plumbing.
-The =cpmd= configure result is =ok=false= when no usable =libcpmdc= engine can
-be loaded or when the engine rejects the params:
-
-#+begin_src bash
-pixi run -e rpctest python tests/rpc_integ.py \
-  --server-bin ./bbdir/CppCore/potserv \
-  --cpmd-smoke
-#+end_src
+The =PotentialConfig= arms that carry backend parameters over RPC are listed in
+[[file:../reference/potential_config.org][PotentialConfig arms]].
 
 For example, [[https://github.com/TheochemUI/eOn][eOn]] defines:
 
 - =AtomMatrix= :: A typedef for =Eigen::Matrix<double, Eigen::Dynamic, 3>=.
 - =class Potential= :: The base class for all eOn potential energy surfaces.
 
-Including both eOn and rgpot headers in the same translation unit produces hard
-compilation errors from the conflicting definitions.
+Including both eOn's =Potential.h= and =Potentials.capnp.h= in the same
+translation unit fails to compile.
+Including =rgpot/Potential.hpp= next to eOn's headers does not bring a second
+global =AtomMatrix= or =Potential=.
+This translation unit compiles:
 
-*** Root Cause
-
-The collision stems from two issues:
-
-1. The =using= directive in =Potential.hpp=:
-
+#+attr_rgpot: compile
 #+begin_src cpp
-// rgpot/CppCore/rgpot/Potential.hpp, line 30
-using rgpot::types::AtomMatrix;
+// Consumer types at global scope.
+class Potential {
+public:
+  virtual ~Potential() = default;
+};
+using AtomMatrix = int;
+
+#include "rgpot/LennardJones/LJPot.hpp"
+
+int main() {
+  rgpot::LJPot lj;
+  AtomMatrix a = 0;
+  return a;
+}
 #+end_src
-
-This leaks =AtomMatrix= into the global namespace for any downstream consumer.
-The =PotentialBase= class itself is correctly inside =namespace rgpot=, but the
-=using= directive precedes the namespace block.
-
-2. Cap'n Proto code generation does not namespace its output.
-The =interface Potential= in =Potentials.capnp= produces a top-level
-=class Potential= in the generated C++ header.
-This is a constraint of the capnp compiler rather than an rgpot design choice.
 
 ** Mitigation Strategies
 
-*** Strategy 1: Namespace the =using= directive (recommended for rgpot)
-
-Move the =using= directive inside the =rgpot= namespace:
-
-#+begin_src cpp
-// Before (leaks to global scope):
-using rgpot::types::AtomMatrix;
-namespace rgpot { ... }
-
-// After (contained within rgpot):
-namespace rgpot {
-using types::AtomMatrix;
-...
-} // namespace rgpot
-#+end_src
-
-This is a backward-compatible change for any code that already qualifies
-=rgpot::PotentialBase= or =rgpot::Potential<D>=.
-Code that relied on the global =AtomMatrix= leak would need to switch to
-=rgpot::types::AtomMatrix= or add its own =using= inside its own namespace.
-
-*** Strategy 2: Namespace the consumer's types
+*** Strategy 1: Namespace the consumer's types
 
 If the consuming codebase can be refactored, placing its types inside a project
 namespace eliminates collisions entirely:
 
+#+attr_rgpot: fragment
 #+begin_src cpp
 // Instead of global scope:
 class Potential { ... };
@@ -177,11 +86,13 @@ using AtomMatrix = Eigen::Matrix<double, Eigen::Dynamic, 3>;
 This is the cleanest solution but requires touching every file in the consumer
 codebase -- impractical for large legacy projects.
 
-*** Strategy 3: Separate translation units (for legacy codes)
+*** Strategy 2: Separate translation units (for legacy codes)
 
-When neither rgpot nor the consumer can be easily modified, use separate
-translation units (TUs) so the conflicting headers never appear together:
+When the consumer cannot be easily modified, use separate translation units
+(TUs) so the consumer's =Potential= and the generated capnp header never appear
+together:
 
+#+attr_rgpot: skip layout sketch of two translation units, not compilable code
 #+begin_example
 TU 1 (ConsumerBridge.cpp):
   #include "consumer/Potential.h"    // consumer's Potential
@@ -193,18 +104,19 @@ TU 2 (RpcServer.cpp):
 #+end_example
 
 The two TUs communicate through a type-free interface such as a =std::function=
-over flat C arrays, avoiding any shared header that contains either =Potential=
-or =AtomMatrix=.
+over flat C arrays, avoiding any shared header that contains either =Potential=.
 
-*** Strategy 4: RPC-client-only linking
+*** Strategy 3: RPC-client-only linking
 
-For consumers that only need to /call/ rgpot potentials (not serve them), link
-only the Cap'n Proto schema library
-(=ptlrpc_dep= in meson) rather than the full =rgpot_dep=.
-This avoids pulling in =Potential.hpp= and its =AtomMatrix= leak entirely.
+For consumers that only need the Cap'n Proto schema, link only the schema
+library (=ptlrpc_dep= in meson) rather than the full =rgpot_dep=.
+This avoids pulling in =librgpot= and the C++ potentials.
+It does not avoid the global names of =Potentials.capnp.h=, so it combines with
+Strategy 2.
 
 In meson:
 
+#+attr_rgpot: fragment
 #+begin_src meson
 rgpot_proj = subproject('rgpot', default_options: ['with_rpc_client_only=true'])
 ptlrpc_dep = rgpot_proj.get_variable('ptlrpc_dep')
@@ -222,7 +134,10 @@ translation unit.
 The recommended integration pattern for legacy codes is a flat-array callback
 that requires no shared types between the consumer and rgpot:
 
+#+attr_rgpot: compile
 #+begin_src cpp
+#include <functional>
+
 // ForceCallback: a std::function over flat C arrays
 using ForceCallback = std::function<void(
     long nAtoms,
@@ -258,10 +173,13 @@ This is row-major and matches the convention used by both the Rust core
 
 [[https://github.com/TheochemUI/eOn][eOn]] is a saddle-point search framework
 with its own =class Potential= and =AtomMatrix= (Eigen-based) at global scope.
-It integrates with rgpot's RPC server using the two-TU + flat-array pattern.
+Its serve mode exposes eOn potentials through rgpot's Cap'n Proto =Potential=
+interface using the two-TU + flat-array pattern.
+The code below is from the eOn tree, not from this repository.
 
 *** Architecture
 
+#+attr_rgpot: skip ASCII diagram of the two eOn translation units
 #+begin_example
 +---------------------------+     +---------------------------+
 | ServeMode.cpp (TU 1)      |     | ServeRpcServer.cpp (TU 2) |
@@ -284,6 +202,7 @@ It integrates with rgpot's RPC server using the two-TU + flat-array pattern.
 This file includes eOn's =Potential.h= and wraps any eOn potential into a
 =ForceCallback=:
 
+#+attr_rgpot: skip eOn source; needs eOn's Potential.h, Parameters and helper_functions
 #+begin_src cpp
 #include "Potential.h"       // eOn's Potential, AtomMatrix
 #include "ServeRpcServer.h"  // ForceCallback typedef only
@@ -310,11 +229,16 @@ void serveMode(const Parameters &params, const std::string &host,
 *** TU 2: ServeRpcServer.cpp
 
 This file includes the capnp-generated header and implements the RPC server.
-It never includes eOn's =Potential.h=:
+It never includes eOn's =Potential.h=.
+The capnp list readers returned by =getPos()=, =getAtmnrs()= and =getBox()= are
+not C arrays, so the server copies them into vectors before the callback:
 
+#+attr_rgpot: fragment
 #+begin_src cpp
 #include "Potentials.capnp.h"   // capnp's Potential interface
 #include "ServeRpcServer.h"     // ForceCallback typedef
+
+#include <vector>
 
 class CallbackPotImpl final : public Potential::Server {
   ForceCallback m_callback;
@@ -324,17 +248,25 @@ public:
 
   kj::Promise<void> calculate(CalculateContext ctx) override {
     auto fip = ctx.getParams().getFip();
-    auto pos = fip.getPos();
-    auto atmnrs = fip.getAtmnrs();
-    auto box = fip.getBox();
+    // A capnp list reader is not a C array; copy it out.
+    auto copy = [](auto list) {
+      std::vector<std::decay_t<decltype(list[0])>> out(list.size());
+      for (unsigned i = 0; i < list.size(); ++i) {
+        out[i] = list[i];
+      }
+      return out;
+    };
+    const std::vector<double> pos = copy(fip.getPos());
+    const std::vector<int32_t> atmnrs = copy(fip.getAtmnrs());
+    const std::vector<double> box = copy(fip.getBox());
 
     long nAtoms = static_cast<long>(atmnrs.size());
     std::vector<double> forces(nAtoms * 3, 0.0);
     double energy = 0.0;
 
     // Call through the flat-array callback -- no eOn types here
-    m_callback(nAtoms, pos.begin(), atmnrs.begin(),
-               forces.data(), &energy, box.begin());
+    m_callback(nAtoms, pos.data(), atmnrs.data(),
+               forces.data(), &energy, box.data());
 
     auto result = ctx.getResults().initResult();
     result.setEnergy(energy);
@@ -353,6 +285,7 @@ The bridge header defines only the =ForceCallback= type and the server entry
 points.
 It includes neither eOn nor capnp headers:
 
+#+attr_rgpot: compile
 #+begin_src cpp
 #pragma once
 #include <functional>
@@ -375,6 +308,7 @@ void startPooledRpcServer(std::vector<ForceCallback> pool,
 eOn pulls rgpot as a meson subproject with =with_rpc_client_only=true=, linking
 only the capnp schema dependency:
 
+#+attr_rgpot: fragment
 #+begin_src meson
 rgpot_proj = subproject('rgpot',
     default_options: ['with_rpc_client_only=true'])
@@ -386,6 +320,7 @@ serve_sources = ['ServeMode.cpp', 'ServeRpcServer.cpp']
 
 *** Running the server
 
+#+attr_rgpot: skip eonclient commands from the eOn tree
 #+begin_src bash
 # Serve a Lennard-Jones potential on port 12345
 eonclient --serve "lj:12345"
@@ -403,6 +338,7 @@ eonclient -p metatomic --serve-port 12345 --replicas 4 --gateway \
 
 Any rgpot-compatible client (Julia, Python, C++) can then connect:
 
+#+attr_rgpot: skip ChemGP Julia client, not part of this repository
 #+begin_src julia
 # Julia (ChemGP)
 using ChemGP
@@ -415,15 +351,14 @@ E, F = calculate(pot, Float64[0,0,0, 2.2,0,0])
 
 | Approach | Effort | When to use |
 |----------+--------+-------------|
-| Move =using= inside namespace | Low (rgpot change) | Default for new rgpot releases. |
 | Namespace consumer types | High (consumer refactor) | Greenfield projects or major rewrites. |
-| Separate TUs + flat callback | Medium (build system) | Legacy codes with global-scope types. |
-| RPC-client-only linking | Low (build option) | Consumer only calls potentials, does not serve. |
+| Separate TUs + flat callback | Medium (build system) | Legacy codes with global-scope types next to =Potentials.capnp.h=. |
+| RPC-client-only linking | Low (build option) | Consumer needs the schema (client or server stubs) but not =librgpot=. |
 
 For legacy codebases like eOn where refactoring all types into a namespace is
-impractical, the two-TU + flat-array callback pattern provides a clean
-integration path with no modifications required to either rgpot or the
-consumer's existing type system.
+impractical, the two-TU + flat-array callback pattern provides an integration
+path with no modifications required to either rgpot or the consumer's existing
+type system.
 
 #+begin_export rst
 See :doc:`../reference/mpi` for the ``with_mpi`` values ``auto``, ``enabled``, and ``disabled``.

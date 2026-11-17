@@ -23,7 +23,7 @@ Data exchange uses the [DLPack](https://github.com/dmlc/dlpack) tensor protocol 
 <!-- [[[cog import rgpot_version as v; cog.outl(v.readme_md())]]] -->
 ```toml
 [dependencies]
-rgpot-core = "3.6.0"
+rgpot-core = "3.7.0"
 ```
 <!-- [[[end]]] -->
 
@@ -32,7 +32,7 @@ Enable the in-process profile loader for backends such as `nwchemc` and `cpmdc`:
 <!-- [[[cog import rgpot_version as v; cog.outl(v.readme_md("profile"))]]] -->
 ```toml
 [dependencies]
-rgpot-core = { version = "3.6.0", features = ["profile"] }
+rgpot-core = { version = "3.7.0", features = ["profile"] }
 ```
 <!-- [[[end]]] -->
 
@@ -41,7 +41,7 @@ Enable the RPC client and server:
 <!-- [[[cog import rgpot_version as v; cog.outl(v.readme_md("rpc"))]]] -->
 ```toml
 [dependencies]
-rgpot-core = { version = "3.6.0", features = ["rpc"] }
+rgpot-core = { version = "3.7.0", features = ["rpc"] }
 ```
 <!-- [[[end]]] -->
 

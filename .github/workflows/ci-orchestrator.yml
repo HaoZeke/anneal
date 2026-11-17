@@ -4,6 +4,8 @@
 #   release.yml, release-prepare.yml, ci_docs.yml, ci_doc_commenter.yml, cosmo-potctl.yml
 # Nickel modules under ci/gha/ still document job bodies; only the files above are
 # exported by gen-gha (plus this file is hand-maintained). See ci/gha/README.md.
+# Each job's timeout-minutes comes from the rule in ci/gha/README.md (Timeouts),
+# which also lists the measured p95 behind every value.
 name: CI (orchestrator)
 
 on:
@@ -31,6 +33,7 @@ jobs:
   prepare:
     name: prepare (nickel plan)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       plan_sha: ${{ steps.plan.outputs.plan_sha }}
     steps:
@@ -77,6 +80,7 @@ jobs:
     name: prek
     needs: [prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # schedule runs are docs-only hygiene; skip full prek (slow, needs apt hooks)
     if: github.event_name != 'schedule'
     steps:
@@ -129,6 +133,7 @@ jobs:
     name: snapper semantic line breaks
     needs: [prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install snapper-fmt
@@ -164,6 +169,7 @@ jobs:
     name: lychee link check
     needs: [prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Restore lychee cache
@@ -197,6 +203,7 @@ jobs:
     # needs ci-tools for potctl (thin body); was prepare-only when using pipx towncrier
     needs: [prepare, ci-tools]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -209,12 +216,38 @@ jobs:
       - name: Towncrier check vs base branch
         run: potctl ci towncrier-check --compare-with ${{ github.event.pull_request.base.sha }}
 
+  # Potentials.ordinals against the unpatched pinned potentials-schema commit,
+  # the wrap diffs and both vendored copies; append only against the base.
+  schema_ledger:
+    name: schema ordinal ledger
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Ledger vs pinned schema, wrap diffs and base ledger
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base=()
+          if [ -n "${BASE}" ] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            base=(--base "${BASE}")
+          fi
+          python3 CppCore/rgpot/rpc/schema_ledger.py check --fetch "${base[@]}"
+      - name: Ledger self-test
+        run: python3 CppCore/tests/test_schema_ledger.py
+
   # --- Stage 1: potctl tools ---
   ci-tools:
     name: ci-tools (potctl / ${{ matrix.os }})
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -233,6 +266,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_COMPILERCHECK: content
@@ -308,6 +342,7 @@ jobs:
     # windows-latest ships VS 18, where ilammy/msvc-dev-cmd fails (invalid
     # params on 18, "VS not found" when pinned to 2022).
     runs-on: windows-2022
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # No activate-environment here: the default env carries
@@ -370,6 +405,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
@@ -412,6 +448,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: prefix-dev/setup-pixi@a0af7a228712d6121d37aba47adf55c1332c9c2e # v0.9.4
@@ -435,12 +472,98 @@ jobs:
           meson compile -C bbdir
           meson test -C bbdir --print-errorlogs
 
+  # Address+UBSan must still compile the soversion static asserts.
+  cxx_layout_ubsan:
+    name: meson / ubuntu [ASan+UBSan layout]
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: prefix-dev/setup-pixi@a0af7a228712d6121d37aba47adf55c1332c9c2e # v0.9.4
+        with:
+          pixi-version: v0.70.2
+          cache: true
+          environments: devbld
+          activate-environment: true
+      - name: ABI layout tests under address,undefined
+        shell: pixi run bash -e {0}
+        run: bash tools/check_cxx_layout_ubsan.sh
+
+  # The suite on short OpenMP teams. Under OMP_THREAD_LIMIT every region gets
+  # fewer threads than it asks for, and results must keep the bits of their
+  # slice count. One build, two test runs. Linux only: the macOS legs build
+  # without OpenMP, and MSVC's OpenMP 2.0 runtime has no thread limit.
+  thread_limit:
+    name: meson / ubuntu [OMP_THREAD_LIMIT 1, 2]
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: v0.70.2
+          cache: true
+          environments: devbld
+          activate-environment: true
+      - name: Build
+        id: build
+        shell: pixi run bash -e {0}
+        run: |
+          meson setup bbdir \
+            -Dwith_tests=true \
+            -Dwith_examples=false \
+            -Dwith_xtensor=false \
+            -Dwith_eigen=false \
+            -Dwith_rpc=false \
+            -Dwith_cache=false
+          meson compile -C bbdir
+      - name: Test with OMP_THREAD_LIMIT=1
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pixi run bash -e {0}
+        env:
+          OMP_THREAD_LIMIT: "1"
+        run: meson test -C bbdir --print-errorlogs --logbase limit1
+      - name: Test with OMP_THREAD_LIMIT=2
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pixi run bash -e {0}
+        env:
+          OMP_THREAD_LIMIT: "2"
+        run: meson test -C bbdir --print-errorlogs --logbase limit2
+
+  # meson and CMake register the tests CppCore/tests/registry.txt lists.
+  # Both are configured, not built, for the plain, RPC and cache, and
+  # client-only bridge configurations. Each one's test_list_parity compares
+  # its tests with the registry, and the two lists must match. mpibld adds
+  # the MPI tests.
+  test_parity:
+    name: meson / cmake [test registry parity]
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: v0.70.2
+          cache: true
+          environments: mpibld
+          activate-environment: mpibld
+      - name: Configure meson and CMake and compare their tests
+        shell: pixi run -e mpibld bash -e {0}
+        run: bash tools/check_test_parity.sh
+
   # --- Stage 2b: rust ---
   rust_tests:
     name: Rust Core Tests (${{ matrix.os }})
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -481,6 +604,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_COMPILERCHECK: content
@@ -516,6 +640,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -559,6 +684,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -597,6 +723,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -638,6 +765,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -666,6 +794,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -710,6 +839,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -748,6 +878,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
@@ -759,6 +890,58 @@ jobs:
       - name: Byte-exact restart golden
         run: pixi run bash scripts/check_readcon_golden.sh
 
+  engines:
+    name: engines
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: prefix-dev/setup-pixi@a0af7a228712d6121d37aba47adf55c1332c9c2e # v0.9.4
+        with:
+          pixi-version: v0.70.2
+          environments: engines
+          cache: true
+      - name: Build a serial LAMMPS with the PLUGIN package
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --filter=blob:none --sparse --branch stable_22Jul2025 \
+            https://github.com/lammps/lammps.git "$GITHUB_WORKSPACE/lammps-src"
+          git -C "$GITHUB_WORKSPACE/lammps-src" sparse-checkout set src cmake
+          pixi run -e engines bash -lc '
+            export CC="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-cc"
+            export CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++"
+            cmake -S "$GITHUB_WORKSPACE/lammps-src/cmake" \
+              -B "$GITHUB_WORKSPACE/lammps-src/build-lmp" \
+              -DBUILD_MPI=OFF -DBUILD_SHARED_LIBS=ON -DPKG_PLUGIN=ON \
+              -DCMAKE_BUILD_TYPE=Release -DBUILD_TOOLS=OFF
+            cmake --build "$GITHUB_WORKSPACE/lammps-src/build-lmp" -j "$(nproc)" --target lmp
+          '
+      - name: Build rgpot and run the engine tests
+        run: |
+          set -euo pipefail
+          pixi run -e engines meson setup build \
+            -Dwith_lammps=enabled \
+            -Dlammps_src="$GITHUB_WORKSPACE/lammps-src/src" \
+            -Dlammps_exe="$GITHUB_WORKSPACE/lammps-src/build-lmp/lmp" \
+            -Dwith_gromacs=enabled -Dwith_openmm=enabled -Dwith_plumed=enabled \
+            -Dwith_eam_table=true -Dwith_python=true \
+            --buildtype=release
+          pixi run -e engines meson compile -C build
+          pixi run -e engines meson test -C build --print-errorlogs \
+            lj_eval lj_engine capi_threads abi_symbols \
+            lammps_lj plumed_driver plumed_debug_forces plumed_box_derivatives \
+            plumed_units plumed_api gromacs_mdrun openmm_lj \
+            | tee build/engine-tests.txt
+          for name in lj_eval lj_engine lammps_lj plumed_driver plumed_debug_forces \
+            plumed_box_derivatives plumed_units plumed_api gromacs_mdrun openmm_lj; do
+            if ! grep -E "${name}[[:space:]]+OK" build/engine-tests.txt >/dev/null; then
+              echo "${name} did not pass" >&2
+              exit 1
+            fi
+          done
+
   # --- Single branch-protection target (require this job name in settings) ---
   ci_gate:
     name: CI gate
@@ -769,11 +952,15 @@ jobs:
       - docs_snapper
       - docs_lychee
       - towncrier
+      - schema_ledger
       - ci-tools
       - build_and_test
       - build_windows_meson
       - nodownload_rehearsal
       - build_fast_nlist_off
+      - cxx_layout_ubsan
+      - thread_limit
+      - test_parity
       - rust_tests
       - client_bridge_stress
       - potentials_metatomic
@@ -783,7 +970,9 @@ jobs:
       - potentials_tblite_06
       - potentials_plugins
       - eonviz_pins
+      - engines
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Aggregate job results
         run: |
@@ -802,11 +991,15 @@ jobs:
             "docs_snapper:${{ needs.docs_snapper.result }}" \
             "docs_lychee:${{ needs.docs_lychee.result }}" \
             "towncrier:${{ needs.towncrier.result }}" \
+            "schema_ledger:${{ needs.schema_ledger.result }}" \
             "ci-tools:${{ needs.ci-tools.result }}" \
             "build_and_test:${{ needs.build_and_test.result }}" \
             "build_windows_meson:${{ needs.build_windows_meson.result }}" \
             "nodownload_rehearsal:${{ needs.nodownload_rehearsal.result }}" \
             "build_fast_nlist_off:${{ needs.build_fast_nlist_off.result }}" \
+            "cxx_layout_ubsan:${{ needs.cxx_layout_ubsan.result }}" \
+            "thread_limit:${{ needs.thread_limit.result }}" \
+            "test_parity:${{ needs.test_parity.result }}" \
             "rust_tests:${{ needs.rust_tests.result }}" \
             "client_bridge_stress:${{ needs.client_bridge_stress.result }}" \
             "potentials_metatomic:${{ needs.potentials_metatomic.result }}" \
@@ -815,7 +1008,8 @@ jobs:
             "xckernel_goldens:${{ needs.xckernel_goldens.result }}" \
             "potentials_tblite_06:${{ needs.potentials_tblite_06.result }}" \
             "potentials_plugins:${{ needs.potentials_plugins.result }}" \
-            "eonviz_pins:${{ needs.eonviz_pins.result }}"
+            "eonviz_pins:${{ needs.eonviz_pins.result }}" \
+            "engines:${{ needs.engines.result }}"
           do
             name="${pair%%:*}"
             res="${pair##*:}"
