@@ -18,6 +18,7 @@
 
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
+#include "rgpot/nlist/PairSum.hpp"
 #include "rgpot/simd/api.hpp"
 #include "rgpot/simd/exact_fma.hpp"
 #include "rgpot/stress.hpp"
@@ -87,10 +88,10 @@ simd::LjParams lj_params(double u0, double psi, double shift, const LJConfig &c,
  * streaming walk. The pair term runs during that walk. A streaming call
  * does not copy a half-list. A stored call keeps candidates out to the
  * cutoff plus the skin and drops the rest from the current distances, so
- * a later call inside half the skin reuses the candidates. Several
- * slices split the atoms, each with a private force buffer, and the
- * buffers are added in slice order. A nonzero switch width uses the quintic
- * switch. Cauchy stress is published from the kernel's strain accumulator.
+ * a later call inside half the skin reuses the candidates. nlist::sumPairs
+ * adds the pairs, with the same bits on any number of threads. A nonzero
+ * switch width uses the quintic switch. Cauchy stress is published from
+ * the kernel's strain accumulator.
  *
  * @warning The box is assumed to be orthogonal.
  *
@@ -133,73 +134,14 @@ void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms
   nlist::updateCells(neighbours_, R, n_atoms, box, cuttOffR, skin, nlist::Image::Round,
                      mode_, periodic);
   const double cutoff2 = cuttOffR * cuttOffR;
-  const int nt = nlist::threadsRequested();
-  auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                    double r2, double *force, double &energy, double *virial,
-                    const PerAtomOut *share) {
-    if (!(i < j) || r2 > cutoff2) {
-      return;
-    }
-    // Two different atoms on the same point. Skipping the pair reports a
-    // finite energy of zero and hides the singularity.
-    if (!(r2 > 0.0)) {
-      energy = std::numeric_limits<double>::quiet_NaN();
-      return;
-    }
-    double pair_e = 0.0;
-    double fscale = 0.0;
-    lj_pair(r2, params, pair_e, fscale);
-    energy += pair_e;
-    const double fx = fscale * dx;
-    const double fy = fscale * dy;
-    const double fz = fscale * dz;
-    force[3 * i] += fx;
-    force[3 * i + 1] += fy;
-    force[3 * i + 2] += fz;
-    force[3 * j] -= fx;
-    force[3 * j + 1] -= fy;
-    force[3 * j + 2] -= fz;
-    accumulatePairStrain(virial, fscale, dx, dy, dz);
-    if (share != nullptr) {
-      tallyPair(*share, static_cast<std::size_t>(i), static_cast<std::size_t>(j), pair_e, fscale,
-                dx, dy, dz);
-    }
-  };
-  if (nt <= 1) {
-    nlist::visitHalf(neighbours_, 0, N,
-                     [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                         double r2) { accept(i, j, dx, dy, dz, r2, F, *U, strain, atoms); });
-  } else {
-    std::vector<double> owned(static_cast<std::size_t>(nt) * n_atoms * 3, 0.0);
-    std::vector<double> energy(static_cast<std::size_t>(nt), 0.0);
-    std::vector<double> virial(static_cast<std::size_t>(nt) * 6, 0.0);
-    PerAtomTeam team(atoms, n_atoms, nt);
-    std::vector<PerAtomOut> slots(static_cast<std::size_t>(nt));
-    for (int t = 0; t < nt; ++t) {
-      slots[static_cast<std::size_t>(t)] = team.slot(t);
-    }
-    // One shared tile build. A visit from each thread would allocate the
-    // cell scratch once per thread.
-    neighbours_.forCellTeam(
-        true, nt, [&](int t, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                      double r2) {
-          double *local = owned.data() + static_cast<std::size_t>(t) * n_atoms * 3;
-          double *st = virial.data() + static_cast<std::size_t>(t) * 6;
-          accept(i, j, dx, dy, dz, r2, local, energy[static_cast<std::size_t>(t)], st,
-                 atoms != nullptr ? &slots[static_cast<std::size_t>(t)] : nullptr);
-        });
-    team.reduce();
-    for (int t = 0; t < nt; ++t) {
-      *U += energy[static_cast<std::size_t>(t)];
-      const double *local = owned.data() + static_cast<std::size_t>(t) * n_atoms * 3;
-      for (std::size_t k = 0; k < n_atoms * 3; ++k) {
-        F[k] += local[k];
-      }
-      for (int c = 0; c < 6; ++c) {
-        strain[c] += virial[static_cast<std::size_t>(t) * 6 + static_cast<std::size_t>(c)];
-      }
-    }
-  }
+  // Two different atoms on the same point make the energy NaN. Skipping
+  // the pair would report a finite energy of zero and hide the singularity.
+  nlist::sumPairs(
+      neighbours_, n_atoms, cutoff2, nlist::Overlap::Poison,
+      [&params](std::int32_t, std::int32_t, double r2, double &pair_e, double &fscale) {
+        lj_pair(r2, params, pair_e, fscale);
+      },
+      F, *U, strain, atoms);
   publishCauchyStress(out, strain, volume);
 }
 

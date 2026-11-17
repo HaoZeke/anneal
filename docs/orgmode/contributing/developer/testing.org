@@ -105,6 +105,9 @@ slice.
 =forEachSlice= and =forEachSlicePhase= run each slice once on the threads that
 start, several to a thread on a short team, and the caller adds the buffers in
 slice order, so the slice count fixes the bits and the team only the speed.
+A potential takes its slice count from =teamSize=, which is one below
+=kTeamMinAtoms= (8192) atoms, and adds its sums atom by atom in index order, so
+neither the slice count nor the team changes its bits.
 Ranks that wait for each other use =onFullTeam=, which runs them only when each
 has its own thread; otherwise it returns false and the caller does the same work
 through =forEachSlice=.
@@ -113,9 +116,12 @@ The test suite fails when an OpenMP pragma, a runtime call, the OpenMP header or
 the OpenMP macro appears anywhere else in the library sources.
 That check is =CppCore/tests/test_openmp_confined.py=.
 
-=ThreadTeamTest= requires the bits of the full team from the threaded potentials
-and neighbour tables under =rgpot::TeamCap= short teams, dynamic teams and
-nested regions.
+=ThreadTeamTest= requires the one-thread bits from every threaded potential at
+1, 2, 3 and 8 threads and under =rgpot::TeamCap= short teams, dynamic teams and
+nested regions, on a system below =kTeamMinAtoms= atoms and on one above it.
+Through =rgpot::teamsOpened= it checks that the small system opens no region and
+that the large one opens a region in the potential's own sums.
+Neighbour tables must keep the bits of the full team under the same teams.
 The test suite runs it again under =OMP_THREAD_LIMIT=1= and
 =OMP_THREAD_LIMIT=2=, and the =thread_limit= CI job runs the whole suite at both
 limits:

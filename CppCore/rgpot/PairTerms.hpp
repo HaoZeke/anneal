@@ -35,9 +35,12 @@ namespace rgpot {
  * call; the next @c record makes room for every pair the last pass saw,
  * up to @c limit(). The block is kept from one evaluation to the next, so
  * a potential that outlives a call refills the same memory.
+ *
+ * A team keeps one per thread side by side, and every pair a thread
+ * pushes writes a count, so each takes a cache line of its own.
  */
 template <std::size_t Width>
-class PairTerms {
+class alignas(64) PairTerms {
 public:
   static_assert(Width > 0, "a pair keeps at least one term");
 

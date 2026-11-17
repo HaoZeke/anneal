@@ -1,0 +1,7 @@
+A classical potential call on fewer than 8192 atoms (`rgpot::kTeamMinAtoms`) no longer starts an OpenMP team, whatever `OMP_NUM_THREADS` asks for, which is the rule the neighbour-list build already followed.
+`SuttonChenPot` started one on every call: on 8 threads a 55-atom cluster took 41.9 to 62.4 µs per call over four runs, against 14.0 to 14.1 µs on one thread, and now takes 13.0 to 13.1 µs on either.
+From 8192 atoms up, `SuttonChenPot`, `LJPot`, `LJClusterPot`, `MorsePot`, `ZBLPot`, EAM, `StillingerWeberSi` and `TersoffSiC` sum each atom's energy, force and strain on their own and add the atoms in index order, so the energy, forces, stress and per-atom terms have the same bits on any `OMP_NUM_THREADS`.
+A team used to add one partial sum per thread: on 8 threads the energy moved in the last bits on 10 to 16 of 16 noisy cluster frames for every potential but ZBL, by up to 2.06e-4 epsilon for a 10000-atom reduced Sutton-Chen cluster, and the forces moved for every potential but Sutton-Chen and ZBL.
+EAM, `LJClusterPot`, `StillingerWeberSi` and `TersoffSiC` used to gain from a team below 8192 atoms and now run on one thread there: at 4000 atoms on 8 threads Stillinger-Weber takes 2006 µs per call, where it took 469 µs.
+`rgpot::teamSize` gives the thread count of a call, and `rgpot::teamsOpened` counts the OpenMP regions the calling thread has opened.
+`kEamThreadedTolerance` is gone from `EAM.h`, since every thread count now gives the bits of one thread.

@@ -21,6 +21,7 @@
 
 #include "rgpot/ZBL/ZBLPot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
+#include "rgpot/nlist/PairSum.hpp"
 #include "rgpot/stress.hpp"
 
 namespace rgpot {
@@ -229,78 +230,25 @@ void ZBLPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atom
   const double rInnerSq = cut_inner_sq;
   const int *types = typeIdx.data();
   const double cutoff2 = cut_global * cut_global;
-  const int nt = nlist::threadsRequested();
-  auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                    double r2, double *force, double &energy, double *virial,
-                    const PerAtomOut *share) {
-    if (!(i < j) || !(r2 > 0.0) || r2 > cutoff2) {
-      return;
-    }
+  // The table is symmetric, so (j, i) reads the coefficients of (i, j).
+  auto term = [=](std::int32_t i, std::int32_t j, double r2, double &energy_pair,
+                  double &fscale) {
     const auto ti = static_cast<std::size_t>(types[i]);
     const auto tj = static_cast<std::size_t>(types[j]);
     const ZblPairCoeffs &coeff = coeffs[ti * nTypes + tj];
     const double r = std::sqrt(r2);
-    double energy_pair = e_zbl(coeff, r) + coeff.sw5;
+    energy_pair = e_zbl(coeff, r) + coeff.sw5;
     double dEdr = dzbldr(coeff, r);
     if (r2 > rInnerSq) {
       const double t = r - rInner;
       energy_pair += t * t * t * (coeff.sw3 + coeff.sw4 * t);
       dEdr += t * t * (coeff.sw1 + coeff.sw2 * t);
     }
-    const double fscale = -dEdr / r;
-    energy += energy_pair;
-    const double fx = fscale * dx;
-    const double fy = fscale * dy;
-    const double fz = fscale * dz;
-    force[3 * i] += fx;
-    force[3 * i + 1] += fy;
-    force[3 * i + 2] += fz;
-    force[3 * j] -= fx;
-    force[3 * j + 1] -= fy;
-    force[3 * j + 2] -= fz;
-    accumulatePairStrain(virial, fscale, dx, dy, dz);
-    if (share != nullptr) {
-      tallyPair(*share, static_cast<std::size_t>(i), static_cast<std::size_t>(j), energy_pair,
-                fscale, dx, dy, dz);
-    }
+    fscale = -dEdr / r;
   };
   double energy = 0.0;
-  if (nt <= 1) {
-    nlist::visitHalf(neighbours_, 0, N,
-                     [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                         double r2) { accept(i, j, dx, dy, dz, r2, F, energy, strain, atoms); });
-  } else {
-    std::vector<double> owned(static_cast<std::size_t>(nt) * static_cast<std::size_t>(N) * 3,
-                              0.0);
-    std::vector<double> partial(static_cast<std::size_t>(nt), 0.0);
-    std::vector<double> virial(static_cast<std::size_t>(nt) * 6, 0.0);
-    PerAtomTeam team(atoms, static_cast<std::size_t>(N), nt);
-    std::vector<PerAtomOut> slots(static_cast<std::size_t>(nt));
-    for (int t = 0; t < nt; ++t) {
-      slots[static_cast<std::size_t>(t)] = team.slot(t);
-    }
-    neighbours_.forCellTeam(
-        true, nt, [&](int t, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                      double r2) {
-          double *local =
-              owned.data() + static_cast<std::size_t>(t) * static_cast<std::size_t>(N) * 3;
-          double *st = virial.data() + static_cast<std::size_t>(t) * 6;
-          accept(i, j, dx, dy, dz, r2, local, partial[static_cast<std::size_t>(t)], st,
-                 atoms != nullptr ? &slots[static_cast<std::size_t>(t)] : nullptr);
-        });
-    team.reduce();
-    for (int t = 0; t < nt; ++t) {
-      energy += partial[static_cast<std::size_t>(t)];
-      const double *local =
-          owned.data() + static_cast<std::size_t>(t) * static_cast<std::size_t>(N) * 3;
-      for (long k = 0; k < 3 * N; ++k) {
-        F[k] += local[k];
-      }
-      for (int c = 0; c < 6; ++c) {
-        strain[c] += virial[static_cast<std::size_t>(t) * 6 + static_cast<std::size_t>(c)];
-      }
-    }
-  }
+  nlist::sumPairs(neighbours_, static_cast<std::size_t>(N), cutoff2, nlist::Overlap::Skip, term,
+                  F, energy, strain, atoms);
   *U = energy;
   publishCauchyStress(out, strain, volume);
 }

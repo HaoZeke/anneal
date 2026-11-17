@@ -874,11 +874,11 @@ TEST_CASE("the C entry point keeps its potential until the parameters or atoms c
   check(cell, pos, box, false);
 }
 
-TEST_CASE("Sutton-Chen with no cutoff splits the atoms across a team",
+TEST_CASE("Sutton-Chen with no cutoff keeps the one-bin bits on any thread count",
           "[SuttonChen][nlist]") {
-  // A one-bin search left its cell to one thread. The unbounded walk gives
-  // each thread a run of atoms, whose densities and forces sum in the same
-  // order. Only the energy is summed by thread.
+  // 38 atoms stay on the calling thread whatever OMP_NUM_THREADS asks for,
+  // and the unbounded walk takes the pairs in the order of the one bin that
+  // a search wider than the cluster gives.
   double epsilon = 0.0;
   double c = 0.0;
   double a = 0.0;
@@ -915,7 +915,7 @@ TEST_CASE("Sutton-Chen with no cutoff splits the atoms across a team",
       REQUIRE(std::memcmp(&one_bin.energy, &want.energy, sizeof(double)) == 0);
       REQUIRE(same_bits(one_bin.forces, want.forces));
       REQUIRE(same_bits(got.forces, want.forces));
-      REQUIRE(std::abs(got.energy - want.energy) <= 1e-13 * std::abs(want.energy));
+      REQUIRE(std::memcmp(&got.energy, &want.energy, sizeof(double)) == 0);
     }
   }
   setThreads("1");

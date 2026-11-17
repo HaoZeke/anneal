@@ -11,6 +11,7 @@
 
 #include "rgpot/Tersoff/TersoffSiC.hpp"
 
+#include "rgpot/CentreTerms.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
@@ -303,11 +304,8 @@ void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
     std::sort(nb.begin(), nb.end(), [](const Bond &a, const Bond &b) { return a.j < b.j; });
   };
 
-  const int nt = nlist::threadsRequested();
-  if (nt == 1) {
-  std::vector<Bond> nb;
-  for (int i = 0; i < n; ++i) {
-    load(i, nb);
+  // The terms of centre i, into a CentreDirect or a CentreTerms.
+  auto centre = [&](int i, const std::vector<Bond> &nb, auto &sink) {
     const Species &sp = m_species[kind[i]];
     const int m = static_cast<int>(nb.size());
     for (int a = 0; a < m; ++a) {
@@ -325,22 +323,17 @@ void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
       double bij = 0.0;
       double db = 0.0;
       bondOrder(sp, zeta, bij, db);
-      *energy += 0.5 * bj.fc * (bj.f_r + bij * bj.f_a);
+      sink.energy(0.5 * bj.fc * (bj.f_r + bij * bj.f_a));
       const double dedr = 0.5 * (bj.dfc * (bj.f_r + bij * bj.f_a) +
                                  bj.fc * (bj.df_r + bij * bj.df_a));
       const double inv_r = 1.0 / bj.r;
       const double sx = scale * dedr * bj.x * inv_r;
       const double sy = scale * dedr * bj.y * inv_r;
       const double sz = scale * dedr * bj.z * inv_r;
-      acc[3 * i] += sx;
-      acc[3 * i + 1] += sy;
-      acc[3 * i + 2] += sz;
-      acc[3 * bj.j] -= sx;
-      acc[3 * bj.j + 1] -= sy;
-      acc[3 * bj.j + 2] -= sz;
-      if (strain != nullptr) {
+      sink.pair(static_cast<std::size_t>(a), bj.j, sx, sy, sz);
+      if (sink.strained()) {
         // dE/d(bj) is (dedr / r) bj, the gradient along the folded bond.
-        accumulatePairStrain(strain, -dedr * inv_r, bj.x, bj.y, bj.z);
+        sink.pairStrain(-dedr * inv_r, bj.x, bj.y, bj.z);
       }
       const double dedz = 0.5 * bj.fc * bj.f_a * db;
       if (dedz == 0.0) {
@@ -375,136 +368,33 @@ void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
         const double g2z =
             d_edr2 * bk.z * inv_r2 +
             d_edcth * (bj.z * inv - cth * bk.z * inv_r2 * inv_r2);
-        acc[3 * bj.j] -= scale * g1x;
-        acc[3 * bj.j + 1] -= scale * g1y;
-        acc[3 * bj.j + 2] -= scale * g1z;
-        acc[3 * bk.j] -= scale * g2x;
-        acc[3 * bk.j + 1] -= scale * g2y;
-        acc[3 * bk.j + 2] -= scale * g2z;
-        acc[3 * i] += scale * (g1x + g2x);
-        acc[3 * i + 1] += scale * (g1y + g2y);
-        acc[3 * i + 2] += scale * (g1z + g2z);
-        if (strain != nullptr) {
-          accumulateBondStrain(strain, bj.x, bj.y, bj.z, g1x, g1y, g1z);
-          accumulateBondStrain(strain, bk.x, bk.y, bk.z, g2x, g2y, g2z);
+        sink.triplet(static_cast<std::size_t>(a), bj.j, static_cast<std::size_t>(k), bk.j, scale,
+                     g1x, g1y, g1z, g2x, g2y, g2z);
+        if (sink.strained()) {
+          sink.bondStrain(bj.x, bj.y, bj.z, g1x, g1y, g1z);
+          sink.bondStrain(bk.x, bk.y, bk.z, g2x, g2y, g2z);
         }
       }
     }
-  }
-  } else {
-    const std::size_t n3 = static_cast<std::size_t>(n) * 3;
-    std::vector<double> owned(static_cast<std::size_t>(nt) * n3, 0.0);
-    std::vector<double> energies(static_cast<std::size_t>(nt), 0.0);
-    std::vector<double> vir(static_cast<std::size_t>(nt) * 6, 0.0);
-    nlist::forEachSlice(nt, [&](int t) {
-      const auto range = nlist::partition(n, t, nt);
-      double *local = owned.data() + static_cast<std::size_t>(t) * n3;
-      double local_e = 0.0;
-      double *local_strain = strain == nullptr ? nullptr : vir.data() + static_cast<std::size_t>(t) * 6;
-      std::vector<Bond> nb;
-      for (int i = static_cast<int>(range.begin); i < static_cast<int>(range.end); ++i) {
-    load(i, nb);
-    const Species &sp = m_species[kind[i]];
-    const int m = static_cast<int>(nb.size());
-    for (int a = 0; a < m; ++a) {
-      const Bond &bj = nb[static_cast<std::size_t>(a)];
-      double zeta = 0.0;
-      for (int k = 0; k < m; ++k) {
-        if (k == a) {
-          continue;
-        }
-        double g = 0.0;
-        double dg = 0.0;
-        angular(sp, cosine(bj, nb[static_cast<std::size_t>(k)]), g, dg);
-        zeta += nb[static_cast<std::size_t>(k)].fc * g;
-      }
-      double bij = 0.0;
-      double db = 0.0;
-      bondOrder(sp, zeta, bij, db);
-      local_e += 0.5 * bj.fc * (bj.f_r + bij * bj.f_a);
-      const double dedr = 0.5 * (bj.dfc * (bj.f_r + bij * bj.f_a) +
-                                 bj.fc * (bj.df_r + bij * bj.df_a));
-      const double inv_r = 1.0 / bj.r;
-      const double sx = scale * dedr * bj.x * inv_r;
-      const double sy = scale * dedr * bj.y * inv_r;
-      const double sz = scale * dedr * bj.z * inv_r;
-      local[3 * i] += sx;
-      local[3 * i + 1] += sy;
-      local[3 * i + 2] += sz;
-      local[3 * bj.j] -= sx;
-      local[3 * bj.j + 1] -= sy;
-      local[3 * bj.j + 2] -= sz;
-      if (local_strain != nullptr) {
-        // dE/d(bj) is (dedr / r) bj, the gradient along the folded bond.
-        // The private buffer keeps this off the shared stress, which
-        // every bond would otherwise fight over.
-        accumulatePairStrain(local_strain, -dedr * inv_r, bj.x, bj.y, bj.z);
-      }
-      const double dedz = 0.5 * bj.fc * bj.f_a * db;
-      if (dedz == 0.0) {
-        continue;
-      }
-      for (int k = 0; k < m; ++k) {
-        if (k == a) {
-          continue;
-        }
-        const Bond &bk = nb[static_cast<std::size_t>(k)];
-        const double cth = cosine(bj, bk);
-        double g = 0.0;
-        double dg = 0.0;
-        angular(sp, cth, g, dg);
-        const double inv_r1 = inv_r;
-        const double inv_r2 = 1.0 / bk.r;
-        const double inv = inv_r1 * inv_r2;
-        const double d_edcth = dedz * bk.fc * dg;
-        const double d_edr2 = dedz * bk.dfc * g;
-        const double g1x =
-            d_edcth * (bk.x * inv - cth * bj.x * inv_r1 * inv_r1);
-        const double g1y =
-            d_edcth * (bk.y * inv - cth * bj.y * inv_r1 * inv_r1);
-        const double g1z =
-            d_edcth * (bk.z * inv - cth * bj.z * inv_r1 * inv_r1);
-        const double g2x =
-            d_edr2 * bk.x * inv_r2 +
-            d_edcth * (bj.x * inv - cth * bk.x * inv_r2 * inv_r2);
-        const double g2y =
-            d_edr2 * bk.y * inv_r2 +
-            d_edcth * (bj.y * inv - cth * bk.y * inv_r2 * inv_r2);
-        const double g2z =
-            d_edr2 * bk.z * inv_r2 +
-            d_edcth * (bj.z * inv - cth * bk.z * inv_r2 * inv_r2);
-        local[3 * bj.j] -= scale * g1x;
-        local[3 * bj.j + 1] -= scale * g1y;
-        local[3 * bj.j + 2] -= scale * g1z;
-        local[3 * bk.j] -= scale * g2x;
-        local[3 * bk.j + 1] -= scale * g2y;
-        local[3 * bk.j + 2] -= scale * g2z;
-        local[3 * i] += scale * (g1x + g2x);
-        local[3 * i + 1] += scale * (g1y + g2y);
-        local[3 * i + 2] += scale * (g1z + g2z);
-        if (local_strain != nullptr) {
-          accumulateBondStrain(local_strain, bj.x, bj.y, bj.z, g1x, g1y, g1z);
-          accumulateBondStrain(local_strain, bk.x, bk.y, bk.z, g2x, g2y, g2z);
-        }
-      }
-    }
-  }
-      energies[static_cast<std::size_t>(t)] = local_e;
-    });
-    for (int t = 0; t < nt; ++t) {
-      *energy += energies[static_cast<std::size_t>(t)];
-      const double *local = owned.data() + static_cast<std::size_t>(t) * n3;
-      for (std::size_t k = 0; k < n3; ++k) {
-        acc[k] += local[k];
-      }
-      if (strain != nullptr) {
-        for (int k = 0; k < 6; ++k) {
-          strain[k] += vir[static_cast<std::size_t>(t) * 6 + static_cast<std::size_t>(k)];
-        }
-      }
-    }
-  }
+  };
 
+  if (n_atoms < kTeamMinAtoms) {
+    std::vector<Bond> nb;
+    for (int i = 0; i < n; ++i) {
+      load(i, nb);
+      CentreDirect sink(i, acc, energy, strain);
+      centre(i, nb, sink);
+    }
+    return;
+  }
+  sumCentres<std::vector<Bond>>(
+      n_atoms,
+      [&](std::int32_t i, CentreTerms &terms, std::vector<Bond> &nb) {
+        load(i, nb);
+        terms.reset(i, nb);
+        centre(i, nb, terms);
+      },
+      acc, *energy, strain);
 }
 
 } // namespace rgpot

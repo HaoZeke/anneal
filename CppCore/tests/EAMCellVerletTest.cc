@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #ifndef EAM_STANDALONE
@@ -349,19 +350,6 @@ TEST_CASE("EAM matches the direct pair loop bit for bit", "[eam]") {
   REQUIRE(pot.threadsUsed() == 1);
 }
 
-void expectClose(const Outcome &got, const Outcome &ref) {
-  const double tol = kEamThreadedTolerance;
-  const double escale =
-      std::max(1.0, std::max(std::abs(got.energy), std::abs(ref.energy)));
-  REQUIRE(std::abs(got.energy - ref.energy) <= tol * escale);
-  REQUIRE(got.force.size() == ref.force.size());
-  for (std::size_t i = 0; i < got.force.size(); ++i) {
-    const double scale = std::max(
-        1.0, std::max(std::abs(got.force[i]), std::abs(ref.force[i])));
-    REQUIRE(std::abs(got.force[i] - ref.force[i]) <= tol * scale);
-  }
-}
-
 TEST_CASE("EAM keeps a short neighbour list and reuses it inside the skin",
           "[eam]") {
   setThreads("");
@@ -401,49 +389,45 @@ TEST_CASE("EAM keeps a short neighbour list and reuses it inside the skin",
   expectBits(outside, direct(pos, z, length));
 }
 
-TEST_CASE("EAM OpenMP sums are deterministic and near one thread", "[eam]") {
-  std::vector<int> z;
-  std::vector<double> pos = fcc(5, 4.05, z, 13);
-  const double length = 5 * 4.05;
-  setThreads("");
-  rgpot::EAMPot serial;
-  const Outcome one = evaluate(serial, pos, z, length);
-  REQUIRE(serial.threadsUsed() == 1);
-
-  setThreads("2");
-  rgpot::EAMPot parallel;
-  const Outcome first = evaluate(parallel, pos, z, length);
-  const Outcome second = evaluate(parallel, pos, z, length);
+TEST_CASE("EAM gives the one-thread bits on any thread count", "[eam]") {
+  struct Crystal {
+    int nrep;
+    bool team; // OMP_NUM_THREADS=n gives n slices rather than one.
+  };
+  // 500 atoms stay on one thread. 8788 atoms reach rgpot::kTeamMinAtoms.
+  for (const Crystal c : {Crystal{5, false}, Crystal{13, true}}) {
+    std::vector<int> z;
+    std::vector<double> pos = fcc(c.nrep, 4.05, z, 13);
+    pos[0] += 0.37;
+    pos[4] -= 0.11;
+    const double length = c.nrep * 4.05;
+    setThreads("");
+    rgpot::EAMPot serial;
+    const Outcome one = evaluate(serial, pos, z, length);
+    REQUIRE(serial.threadsUsed() == 1);
+    for (const int threads : {1, 2, 3, 8}) {
+      const std::string count = std::to_string(threads);
+      setThreads(count.c_str());
+      rgpot::EAMPot parallel;
+      expectBits(evaluate(parallel, pos, z, length), one);
+      expectBits(evaluate(parallel, pos, z, length), one);
 #if defined(_OPENMP)
-  REQUIRE(parallel.threadsUsed() == 2);
+      REQUIRE(parallel.threadsUsed() == (c.team ? threads : 1));
 #else
-  REQUIRE(parallel.threadsUsed() == 1);
+      REQUIRE(parallel.threadsUsed() == 1);
 #endif
-  expectBits(second, first);
-  expectClose(first, one);
+    }
+  }
 
-  setThreads("4");
-  rgpot::EAMPot four;
-  const Outcome wide = evaluate(four, pos, z, length);
-  const Outcome wideAgain = evaluate(four, pos, z, length);
-#if defined(_OPENMP)
-  REQUIRE(four.threadsUsed() == 4);
-#else
-  REQUIRE(four.threadsUsed() == 1);
-#endif
-  expectBits(wideAgain, wide);
-  expectClose(wide, one);
-
-  pos = {0.2, 0.2, 0.2, 2.2, 0.3, 0.4, 0.4, 3.1, 1.2, 5.5, 6.6, 7.1};
-  z = {13, 46, 79, 13};
+  std::vector<double> pos = {0.2, 0.2, 0.2, 2.2, 0.3, 0.4,
+                             0.4, 3.1, 1.2, 5.5, 6.6, 7.1};
+  std::vector<int> z = {13, 46, 79, 13};
   setThreads("");
   rgpot::EAMPot mixedSerial;
   const Outcome mixedOne = evaluate(mixedSerial, pos, z, 12.0);
   setThreads("2");
   rgpot::EAMPot mixedParallel;
-  const Outcome mixedTwo = evaluate(mixedParallel, pos, z, 12.0);
-  const Outcome mixedTwoAgain = evaluate(mixedParallel, pos, z, 12.0);
-  expectBits(mixedTwoAgain, mixedTwo);
-  expectClose(mixedTwo, mixedOne);
+  expectBits(evaluate(mixedParallel, pos, z, 12.0), mixedOne);
+  REQUIRE(mixedParallel.threadsUsed() == 1);
   setThreads("");
 }

@@ -10,6 +10,7 @@
 
 #include "rgpot/StillingerWeber/SWSi.hpp"
 
+#include "rgpot/CentreTerms.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
@@ -189,9 +190,11 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
     }
     std::sort(nb.begin(), nb.end(), [](const Bond &a, const Bond &b) { return a.j < b.j; });
   };
-  auto pairForces = [&](int i, const std::vector<Bond> &nb, double *force,
-                        double &local_e, double *local_strain) {
-    for (const Bond &bj : nb) {
+  // The terms of centre i, into a CentreDirect or a CentreTerms.
+  auto centre = [&](int i, const std::vector<Bond> &nb, auto &sink) {
+    const int m = static_cast<int>(nb.size());
+    for (int a = 0; a < m; ++a) {
+      const Bond &bj = nb[static_cast<std::size_t>(a)];
       if (bj.j <= i) {
         continue;
       }
@@ -199,174 +202,85 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
       if (!t.live) {
         continue;
       }
-      local_e += kEpsilon * t.f2;
+      sink.energy(kEpsilon * t.f2);
       const double inv_r = 1.0 / bj.r;
       const double sx = scale * t.dedr * bj.x * inv_r;
       const double sy = scale * t.dedr * bj.y * inv_r;
       const double sz = scale * t.dedr * bj.z * inv_r;
-      force[3 * i] += sx;
-      force[3 * i + 1] += sy;
-      force[3 * i + 2] += sz;
-      force[3 * bj.j] -= sx;
-      force[3 * bj.j + 1] -= sy;
-      force[3 * bj.j + 2] -= sz;
-      if (local_strain != nullptr) {
+      sink.pair(static_cast<std::size_t>(a), bj.j, sx, sy, sz);
+      if (sink.strained()) {
         // dE/d(bj) is (dedr / r) bj. bj is the negative of the d in
         // stress.hpp when the walk stores r_i - r_j. The term is
         // quadratic in that vector, so the sign does not change it.
-        accumulatePairStrain(local_strain, -t.dedr * inv_r, bj.x, bj.y, bj.z);
+        sink.pairStrain(-t.dedr * inv_r, bj.x, bj.y, bj.z);
+      }
+    }
+    for (int a = 0; a < m; ++a) {
+      const Bond &bj = nb[static_cast<std::size_t>(a)];
+      for (int b = a + 1; b < m; ++b) {
+        const Bond &bk = nb[static_cast<std::size_t>(b)];
+        const double inv_r1 = 1.0 / bj.r;
+        const double inv_r2 = 1.0 / bk.r;
+        const double inv = inv_r1 * inv_r2;
+        double cth = (bj.x * bk.x + bj.y * bk.y + bj.z * bk.z) * inv;
+        if (cth > 1.0) {
+          cth = 1.0;
+        } else if (cth < -1.0) {
+          cth = -1.0;
+        }
+        const double ang = cth + (1.0 / 3.0);
+        const double ang2 = ang * ang;
+        sink.energy(kEpsilon * kLambda * bj.gexp * bk.gexp * ang2);
+        const double pref = kEpsilon * kLambda;
+        const double d_edcth = pref * bj.gexp * bk.gexp * 2.0 * ang;
+        const double d_edr1 = pref * bj.dgdr * bk.gexp * ang2;
+        const double d_edr2 = pref * bj.gexp * bk.dgdr * ang2;
+        const double g1x =
+            d_edr1 * bj.x * inv_r1 +
+            d_edcth * (bk.x * inv - cth * bj.x * inv_r1 * inv_r1);
+        const double g1y =
+            d_edr1 * bj.y * inv_r1 +
+            d_edcth * (bk.y * inv - cth * bj.y * inv_r1 * inv_r1);
+        const double g1z =
+            d_edr1 * bj.z * inv_r1 +
+            d_edcth * (bk.z * inv - cth * bj.z * inv_r1 * inv_r1);
+        const double g2x =
+            d_edr2 * bk.x * inv_r2 +
+            d_edcth * (bj.x * inv - cth * bk.x * inv_r2 * inv_r2);
+        const double g2y =
+            d_edr2 * bk.y * inv_r2 +
+            d_edcth * (bj.y * inv - cth * bk.y * inv_r2 * inv_r2);
+        const double g2z =
+            d_edr2 * bk.z * inv_r2 +
+            d_edcth * (bj.z * inv - cth * bk.z * inv_r2 * inv_r2);
+        // g is dE/d(neighbor). Force on that atom is -g.
+        sink.triplet(static_cast<std::size_t>(a), bj.j, static_cast<std::size_t>(b), bk.j, scale,
+                     g1x, g1y, g1z, g2x, g2y, g2z);
+        if (sink.strained()) {
+          sink.bondStrain(bj.x, bj.y, bj.z, g1x, g1y, g1z);
+          sink.bondStrain(bk.x, bk.y, bk.z, g2x, g2y, g2z);
+        }
       }
     }
   };
 
-  const int nt = nlist::threadsRequested();
-  if (nt == 1) {
-  std::vector<Bond> nb;
-  for (int i = 0; i < n; ++i) {
-    load(i, nb);
-    pairForces(i, nb, acc, *energy, strain);
-    const int m = static_cast<int>(nb.size());
-    for (int a = 0; a < m; ++a) {
-      const Bond &bj = nb[static_cast<std::size_t>(a)];
-      for (int b = a + 1; b < m; ++b) {
-        const Bond &bk = nb[static_cast<std::size_t>(b)];
-        const double inv_r1 = 1.0 / bj.r;
-        const double inv_r2 = 1.0 / bk.r;
-        const double inv = inv_r1 * inv_r2;
-        double cth = (bj.x * bk.x + bj.y * bk.y + bj.z * bk.z) * inv;
-        if (cth > 1.0) {
-          cth = 1.0;
-        } else if (cth < -1.0) {
-          cth = -1.0;
-        }
-        const double ang = cth + (1.0 / 3.0);
-        const double ang2 = ang * ang;
-        *energy += kEpsilon * kLambda * bj.gexp * bk.gexp * ang2;
-        const double pref = kEpsilon * kLambda;
-        const double d_edcth = pref * bj.gexp * bk.gexp * 2.0 * ang;
-        const double d_edr1 = pref * bj.dgdr * bk.gexp * ang2;
-        const double d_edr2 = pref * bj.gexp * bk.dgdr * ang2;
-        const double g1x =
-            d_edr1 * bj.x * inv_r1 +
-            d_edcth * (bk.x * inv - cth * bj.x * inv_r1 * inv_r1);
-        const double g1y =
-            d_edr1 * bj.y * inv_r1 +
-            d_edcth * (bk.y * inv - cth * bj.y * inv_r1 * inv_r1);
-        const double g1z =
-            d_edr1 * bj.z * inv_r1 +
-            d_edcth * (bk.z * inv - cth * bj.z * inv_r1 * inv_r1);
-        const double g2x =
-            d_edr2 * bk.x * inv_r2 +
-            d_edcth * (bj.x * inv - cth * bk.x * inv_r2 * inv_r2);
-        const double g2y =
-            d_edr2 * bk.y * inv_r2 +
-            d_edcth * (bj.y * inv - cth * bk.y * inv_r2 * inv_r2);
-        const double g2z =
-            d_edr2 * bk.z * inv_r2 +
-            d_edcth * (bj.z * inv - cth * bk.z * inv_r2 * inv_r2);
-        // g is dE/d(neighbor). Force on that atom is -g.
-        acc[3 * bj.j] -= scale * g1x;
-        acc[3 * bj.j + 1] -= scale * g1y;
-        acc[3 * bj.j + 2] -= scale * g1z;
-        acc[3 * bk.j] -= scale * g2x;
-        acc[3 * bk.j + 1] -= scale * g2y;
-        acc[3 * bk.j + 2] -= scale * g2z;
-        acc[3 * i] += scale * (g1x + g2x);
-        acc[3 * i + 1] += scale * (g1y + g2y);
-        acc[3 * i + 2] += scale * (g1z + g2z);
-        if (strain != nullptr) {
-          accumulateBondStrain(strain, bj.x, bj.y, bj.z, g1x, g1y, g1z);
-          accumulateBondStrain(strain, bk.x, bk.y, bk.z, g2x, g2y, g2z);
-        }
-      }
+  if (n_atoms < kTeamMinAtoms) {
+    std::vector<Bond> nb;
+    for (int i = 0; i < n; ++i) {
+      load(i, nb);
+      CentreDirect sink(i, acc, energy, strain);
+      centre(i, nb, sink);
     }
+    return;
   }
-
-  } else {
-    std::vector<double> owned(static_cast<std::size_t>(nt) * n3, 0.0);
-    std::vector<double> energies(static_cast<std::size_t>(nt), 0.0);
-    std::vector<double> vir(static_cast<std::size_t>(nt) * 6, 0.0);
-    nlist::forEachSlice(nt, [&](int t) {
-      const auto range = nlist::partition(n, t, nt);
-      double *local = owned.data() + static_cast<std::size_t>(t) * n3;
-      double local_e = 0.0;
-      double *local_strain =
-          strain == nullptr ? nullptr : vir.data() + static_cast<std::size_t>(t) * 6;
-      std::vector<Bond> nb;
-  for (int i = static_cast<int>(range.begin); i < static_cast<int>(range.end); ++i) {
-    load(i, nb);
-    pairForces(i, nb, local, local_e, local_strain);
-    const int m = static_cast<int>(nb.size());
-    for (int a = 0; a < m; ++a) {
-      const Bond &bj = nb[static_cast<std::size_t>(a)];
-      for (int b = a + 1; b < m; ++b) {
-        const Bond &bk = nb[static_cast<std::size_t>(b)];
-        const double inv_r1 = 1.0 / bj.r;
-        const double inv_r2 = 1.0 / bk.r;
-        const double inv = inv_r1 * inv_r2;
-        double cth = (bj.x * bk.x + bj.y * bk.y + bj.z * bk.z) * inv;
-        if (cth > 1.0) {
-          cth = 1.0;
-        } else if (cth < -1.0) {
-          cth = -1.0;
-        }
-        const double ang = cth + (1.0 / 3.0);
-        const double ang2 = ang * ang;
-        local_e += kEpsilon * kLambda * bj.gexp * bk.gexp * ang2;
-        const double pref = kEpsilon * kLambda;
-        const double d_edcth = pref * bj.gexp * bk.gexp * 2.0 * ang;
-        const double d_edr1 = pref * bj.dgdr * bk.gexp * ang2;
-        const double d_edr2 = pref * bj.gexp * bk.dgdr * ang2;
-        const double g1x =
-            d_edr1 * bj.x * inv_r1 +
-            d_edcth * (bk.x * inv - cth * bj.x * inv_r1 * inv_r1);
-        const double g1y =
-            d_edr1 * bj.y * inv_r1 +
-            d_edcth * (bk.y * inv - cth * bj.y * inv_r1 * inv_r1);
-        const double g1z =
-            d_edr1 * bj.z * inv_r1 +
-            d_edcth * (bk.z * inv - cth * bj.z * inv_r1 * inv_r1);
-        const double g2x =
-            d_edr2 * bk.x * inv_r2 +
-            d_edcth * (bj.x * inv - cth * bk.x * inv_r2 * inv_r2);
-        const double g2y =
-            d_edr2 * bk.y * inv_r2 +
-            d_edcth * (bj.y * inv - cth * bk.y * inv_r2 * inv_r2);
-        const double g2z =
-            d_edr2 * bk.z * inv_r2 +
-            d_edcth * (bj.z * inv - cth * bk.z * inv_r2 * inv_r2);
-        // g is dE/d(neighbor). Force on that atom is -g.
-        local[3 * bj.j] -= scale * g1x;
-        local[3 * bj.j + 1] -= scale * g1y;
-        local[3 * bj.j + 2] -= scale * g1z;
-        local[3 * bk.j] -= scale * g2x;
-        local[3 * bk.j + 1] -= scale * g2y;
-        local[3 * bk.j + 2] -= scale * g2z;
-        local[3 * i] += scale * (g1x + g2x);
-        local[3 * i + 1] += scale * (g1y + g2y);
-        local[3 * i + 2] += scale * (g1z + g2z);
-        if (local_strain != nullptr) {
-          accumulateBondStrain(local_strain, bj.x, bj.y, bj.z, g1x, g1y, g1z);
-          accumulateBondStrain(local_strain, bk.x, bk.y, bk.z, g2x, g2y, g2z);
-        }
-      }
-    }
-  }
-      energies[static_cast<std::size_t>(t)] = local_e;
-    });
-    for (int t = 0; t < nt; ++t) {
-      *energy += energies[static_cast<std::size_t>(t)];
-      const double *local = owned.data() + static_cast<std::size_t>(t) * n3;
-      for (std::size_t k = 0; k < n3; ++k) {
-        acc[k] += local[k];
-      }
-      if (strain != nullptr) {
-        for (int k = 0; k < 6; ++k) {
-          strain[k] += vir[static_cast<std::size_t>(t) * 6 + static_cast<std::size_t>(k)];
-        }
-      }
-    }
-  }
+  sumCentres<std::vector<Bond>>(
+      n_atoms,
+      [&](std::int32_t i, CentreTerms &terms, std::vector<Bond> &nb) {
+        load(i, nb);
+        terms.reset(i, nb);
+        centre(i, nb, terms);
+      },
+      acc, *energy, strain);
 }
 
 } // namespace rgpot

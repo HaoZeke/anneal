@@ -35,30 +35,28 @@ slot per atom pair.
 
 `OMP_NUM_THREADS` is read on each call. When it is unset, empty, not a
 number or below 1, the call stays on one thread. A build without OpenMP
-always uses one thread.
+always uses one thread, and so does a call on fewer than 8192 atoms
+(`rgpot::kTeamMinAtoms`), for which a team costs more than it saves.
 
-With a stored list, a value above 1 splits the atoms into contiguous
-slices, one per requested thread. Each slice writes only the forces of
-its own atoms. The first pass computes the density, the pair potential
-to higher-index partners and that atom's own embedding term. A second
-pass, which starts once every slice has finished the first, adds the
-neighbours' embedding terms and the pair forces from lower-index
-partners, using the scales stored on the first pass. Partial energies
-are added in slice order, so a fixed thread count repeats bit for bit.
-The threads the runtime starts take every slice, also when there are
-fewer of them, as under `OMP_THREAD_LIMIT` or inside another OpenMP
-region.
+From 8192 atoms up, the energy of each atom's row, the pair potential to
+higher-index partners and the atom's own embedding term, is summed on
+its own, and the rows are added in index order. With a stored list, a
+value above 1 splits the atoms into contiguous slices, one per requested
+thread. Each slice writes only the forces of its own atoms. The first
+pass computes the density, the row energy and the scale of each pair. A
+second pass, which starts once every slice has finished the first, sums
+the force on each atom from the stored scales, in the order of the
+one-thread loop. A streaming evaluation walks each atom's whole row on
+the slice that owns the atom, once for the density and once for the
+forces, on any thread count. The threads the runtime starts take every
+slice, also when there are fewer of them, as under `OMP_THREAD_LIMIT` or
+inside another OpenMP region.
 
-A streaming evaluation splits the cells into slices, one per requested
-thread. Each slice keeps its own density and force rows, and the rows
-are added in slice order.
-
-Several threads are not bit-identical to one thread. Energy and every
-force component stay within a relative tolerance of `1e-9`
-(`kEamThreadedTolerance`). A component whose one-thread magnitude is below
-1 is compared on an absolute scale of the same size. `EAMCellVerletTest`
-checks the one-thread bits, the skin rebuild, the list length, and the
-threaded tolerance, all on a stored list.
+Every thread count therefore gives the bits of one thread.
+`EAMCellVerletTest` checks the one-thread bits against the direct loop,
+the skin rebuild, the list length, and the same bits on 1, 2, 3 and 8
+threads at 500 and 8788 atoms, all on a stored list. `ThreadTeamTest`
+checks both modes, also on short teams.
 
 ## Timings
 
@@ -100,8 +98,8 @@ rows are in `docs/neighbour_layer.md`.
 
 ## Reproduce
 
-`EAM.cpp` needs the neighbour layer, the minimum image and the exact
-multiply-add sources at link time.
+`EAM.cpp` needs the neighbour layer, the slice helpers, the minimum image
+and the exact multiply-add sources at link time.
 
 <!-- rgpot-doc: syntax compiles for several seconds and runs the full benchmark -->
 ```bash
@@ -109,6 +107,7 @@ g++ -std=c++20 -O3 -DNDEBUG -fopenmp -I CppCore -I CppCore/rgpot/EAM \
   -DEAM_STANDALONE \
   CppCore/tests/eam_cell_bench.cc CppCore/rgpot/EAM/EAM.cpp \
   CppCore/rgpot/nlist/Neighbours.cc CppCore/rgpot/nlist/MinimumImage.cpp \
+  CppCore/rgpot/Slices.cc \
   CppCore/rgpot/simd/exact_fma_hw.cc CppCore/rgpot/simd/exp.cc \
   -o eam_cell_bench
 ./eam_cell_bench

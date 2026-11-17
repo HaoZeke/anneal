@@ -82,16 +82,17 @@ does not fill a GPU. `Table::device` is 0. The arrays are the contract a
 later device fill would write.
 
 `build` uses threads when `OMP_NUM_THREADS` is above 1 and there are at
-least 8192 atoms. A pair list splits the cells into contiguous ranges
-when the cell is unsheared and at least two search radii across every
-periodic axis. A sheared or narrower cell may need several images of a
-pair, so the pair list then splits the atoms and each slice runs the
-one-thread walk; a cluster list always splits the atoms. Every thread
-count stores the same pairs and shifts. The results are concatenated in
-slice order, so a cluster list keeps the one-thread order; a pair list
-may store its rows in a different order. Vesin merges per-thread lists
-without promising an order. Below 512 atoms a pair list is a direct loop
-over atom pairs, without cells.
+least 8192 atoms, the rule every potential call follows (`teamSize` in
+`CppCore/rgpot/Slices.hpp`). A pair list splits the cells into
+contiguous ranges when the cell is unsheared and at least two search
+radii across every periodic axis. A sheared or narrower cell may need
+several images of a pair, so the pair list then splits the atoms and
+each slice runs the one-thread walk; a cluster list always splits the
+atoms. Every thread count stores the same pairs and shifts. The results
+are concatenated in slice order, so a cluster list keeps the one-thread
+order; a pair list may store its rows in a different order. Vesin merges
+per-thread lists without promising an order. Below 512 atoms a pair list
+is a direct loop over atom pairs, without cells.
 
 Matscipy's `neighbour_list` returns whichever of pairs, distances and
 vectors the caller names in a string
@@ -181,16 +182,32 @@ A team walk with no bins gives each slice a contiguous range of atoms; with more
 Sutton-Chen with `cutoff <= 0` searches this way.
 The public `Query` still rejects a cutoff that is not finite.
 
-`OMP_NUM_THREADS` above 1 splits the work into that many slices. Most
-two-body walks use `forCellTeam`, which gives each slice a contiguous
-range of cells. Stored EAM, LJCluster and the three-body potentials
-split atoms into contiguous slices. `forEachSlice`, in
-`CppCore/rgpot/Slices.hpp` with every other OpenMP region, hands every
-slice to the threads the runtime starts, also when there are fewer of
-them, as under `OMP_THREAD_LIMIT` or inside another OpenMP region.
-Private forces are added in slice order, so a fixed thread count repeats
-bit for bit and stays within `1e-9` of one thread. One thread keeps the
-serial pair order.
+A potential call on fewer than 8192 atoms (`kTeamMinAtoms`) runs on the
+calling thread, whatever `OMP_NUM_THREADS` says, and keeps the serial
+pair order. `teamSize` in `CppCore/rgpot/Slices.hpp` gives the slice
+count of every call, and `teamsOpened` counts the regions a thread has
+opened, so a test can see that a small call opened none.
+
+From 8192 atoms up a result has the bits of one thread on any
+`OMP_NUM_THREADS`. Each atom keeps the energy and strain of its pairs
+with higher-index partners, and the atoms are added in index order. The
+pair potentials (`nlist::sumPairs` in `CppCore/rgpot/nlist/PairSum.hpp`),
+Sutton-Chen and EAM give each slice a contiguous range of atoms, and
+`forRowTeam` walks each atom's whole row on the slice that owns it, so
+the force on an atom has one writer and sums in the order of the
+one-thread walk. In stored mode and in an unbounded search, a partner
+below the atom takes the negated vector of the half walk from that
+partner, so both visits of a pair agree even where two images tie. One
+thread on a stored list or an unbounded search walks the half list. A
+stream walks whole rows on any thread count, so on one thread a two-body
+potential evaluates each pair twice where a stored list evaluates it
+once. Stillinger-Weber and Tersoff
+(`CppCore/rgpot/CentreTerms.hpp`) sum the terms of each centre into one
+force on the centre and on each partner, an energy and a strain, and add
+the centres in index order. `forEachSlice`, with every other OpenMP
+region, hands every slice to the threads the runtime starts, also when
+there are fewer of them, as under `OMP_THREAD_LIMIT` or inside another
+OpenMP region, so those teams give the same bits too.
 
 Stillinger-Weber and Tersoff use this layer for `Auto` as well as
 `Stored` and `Stream`. Bonds are gathered for one atom at a time, sorted

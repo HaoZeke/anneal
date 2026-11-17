@@ -21,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 // clang-format on
 
@@ -171,17 +172,38 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
   const double skin = mode_ == nlist::Mode::Stream ? 0.0 : cutoff / 5.0;
   nlist::updateCells(neighbours_, R, n_size, box_use, cutoff, skin, nlist::Image::Round,
                      mode_, periodic);
-  const int nt = nlist::threadsRequested();
   const bool stream = neighbours_.streaming();
 
+  // From kTeamMinAtoms up, each atom keeps the pair energy and strain of
+  // its partners above it and the totals add them in atom order, as in
+  // nlist/PairSum.hpp. A team, or a stream, then walks the rows of the
+  // atoms; one thread on a stored list or an unbounded search keeps the
+  // half walks, whose densities and forces the rows repeat bit for bit.
+  const bool rows = n_size >= kTeamMinAtoms;
+  const int nt = nlist::teamSize(n_size);
+  const bool by_row = rows && (nt > 1 || (stream && !neighbours_.allPairs()));
+  std::vector<double> row_e(rows ? n_size : 0, 0.0);
+  std::vector<double> row_s(rows && cfg.stress ? 6 * n_size : 0, 0.0);
+  double *e_sum = rows ? row_e.data() : &epair;
+  double *s_sum = !cfg.stress ? nullptr : (rows ? row_s.data() : strain);
+  // The half walks take the stride of the sums as a type, so below
+  // kTeamMinAtoms every pair adds to the one total with no index.
+  auto by_stride = [rows](auto walk) {
+    if (rows) {
+      walk(std::integral_constant<std::size_t, 1>{});
+    } else {
+      walk(std::integral_constant<std::size_t, 0>{});
+    }
+  };
+
   // Each walk visits the same pairs in the same order, one lane per
-  // thread, so the force pass reads back what the density pass kept.
-  const auto lanes = static_cast<std::size_t>(nt);
+  // slice, so the force pass reads back what the density pass kept.
+  const auto lanes = static_cast<std::size_t>(by_row ? nt : 1);
   if (terms_.size() < lanes) {
     terms_.resize(lanes);
   }
   std::size_t expected = 0;
-  if (nt == 1) {
+  if (!by_row) {
     expected = neighbours_.allPairs() ? n_size * (n_size - 1) / 2
                : stream               ? 0
                                       : neighbours_.slots() / 2;
@@ -225,44 +247,33 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
       kept[2] = inv_r2;
     }
   };
-  if (nt == 1) {
+  if (!by_row) {
     Terms &lane = terms_[0];
-    auto density = [=, &epair, &lane](int32_t i, int32_t j, double, double, double,
-                                      double r2) RGPOT_SC_PAIR_INLINE {
-      if (!(r2 > 0.0) || r2 > cutoff2) {
-        return;
-      }
-      double phi = 0.0;
-      double rep = 0.0;
-      pair_term(r2, phi, rep, lane);
-      rho[static_cast<std::size_t>(i)] += phi;
-      rho[static_cast<std::size_t>(j)] += phi;
-      epair += epsilon * rep;
-      if (atom_e != nullptr) {
-        atom_e[static_cast<std::size_t>(i)] += 0.5 * epsilon * rep;
-        atom_e[static_cast<std::size_t>(j)] += 0.5 * epsilon * rep;
-      }
-    };
-    if (stream) {
-      nlist::visitHalf(neighbours_, 0, n_atoms, density);
-    } else {
-      nlist::visitDirected(neighbours_,
+    by_stride([&](auto stride) {
+      nlist::visitHalf(neighbours_,
           0, n_atoms,
-          [density](int32_t i, int32_t j, double dx, double dy, double dz,
-                    double r2) RGPOT_SC_PAIR_INLINE {
-            if (!(j > i)) {
+          [=, &lane](int32_t i, int32_t j, double, double, double,
+                     double r2) RGPOT_SC_PAIR_INLINE {
+            if (!(r2 > 0.0) || r2 > cutoff2) {
               return;
             }
-            density(i, j, dx, dy, dz, r2);
+            double phi = 0.0;
+            double rep = 0.0;
+            pair_term(r2, phi, rep, lane);
+            rho[static_cast<std::size_t>(i)] += phi;
+            rho[static_cast<std::size_t>(j)] += phi;
+            e_sum[static_cast<std::size_t>(i) * decltype(stride)::value] += epsilon * rep;
+            if (atom_e != nullptr) {
+              atom_e[static_cast<std::size_t>(i)] += 0.5 * epsilon * rep;
+              atom_e[static_cast<std::size_t>(j)] += 0.5 * epsilon * rep;
+            }
           });
-    }
+    });
   } else {
-    std::vector<double> partial(static_cast<std::size_t>(nt), 0.0);
-    double *thread_e = partial.data();
     Terms *lane_terms = terms_.data();
-    // One shared tile. A visit from each thread would build it again.
-    neighbours_.forCellTeam(
-        false, nt,
+    // Each row belongs to one slice, so only that thread writes its atom.
+    neighbours_.forRowTeam(
+        nt,
         [=](int t, int32_t i, int32_t j, double, double, double, double r2) RGPOT_SC_PAIR_INLINE {
           if (!(r2 > 0.0) || r2 > cutoff2) {
             return;
@@ -272,16 +283,12 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
           pair_term(r2, phi, rep, lane_terms[t]);
           rho[static_cast<std::size_t>(i)] += phi;
           if (j > i) {
-            thread_e[t] += epsilon * rep;
+            e_sum[static_cast<std::size_t>(i)] += epsilon * rep;
           }
-          // Each atom is central in one cell, so only that thread writes it.
           if (atom_e != nullptr) {
             atom_e[static_cast<std::size_t>(i)] += 0.5 * epsilon * rep;
           }
         });
-    for (double part : partial) {
-      epair += part;
-    }
   }
 
   weight_.assign(n_size, 0.0);
@@ -302,7 +309,7 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
   for (std::size_t t = 0; t < lanes; ++t) {
     terms_[t].replay();
   }
-  auto apply = [=](int32_t i, int32_t j, double dx, double dy, double dz, double r2,
+  auto apply = [=](auto stride, int32_t i, int32_t j, double dx, double dy, double dz, double r2,
                    double *force, double *virial, bool both, Terms &terms) RGPOT_SC_PAIR_INLINE {
     if (!(r2 > 0.0) || r2 > cutoff2) {
       return;
@@ -335,7 +342,8 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
       force[3 * j + 2] -= fz;
     }
     if (virial != nullptr && j > i) {
-      accumulatePairStrain(virial, fscale, dx, dy, dz);
+      accumulatePairStrain(virial + 6 * static_cast<std::size_t>(i) * decltype(stride)::value,
+                           fscale, dx, dy, dz);
     }
     if (atoms != nullptr) {
       tallyAtomVirial(*atoms, static_cast<std::size_t>(i), 0.5, fscale, dx, dy, dz);
@@ -344,44 +352,37 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
       }
     }
   };
-  if (nt == 1) {
+  if (!by_row) {
     Terms &lane = terms_[0];
-    double *virial = cfg.stress ? strain : nullptr;
-    if (stream) {
+    double *virial = s_sum;
+    by_stride([&](auto stride) {
       nlist::visitHalf(neighbours_,
           0, n_atoms,
           [=, &lane](int32_t i, int32_t j, double dx, double dy, double dz,
                      double r2) RGPOT_SC_PAIR_INLINE {
-            apply(i, j, dx, dy, dz, r2, F, virial, true, lane);
+            apply(stride, i, j, dx, dy, dz, r2, F, virial, true, lane);
           });
-    } else {
-      nlist::visitDirected(neighbours_,
-          0, n_atoms,
-          [=, &lane](int32_t i, int32_t j, double dx, double dy, double dz,
-                     double r2) RGPOT_SC_PAIR_INLINE {
-            if (!(j > i)) {
-              return;
-            }
-            apply(i, j, dx, dy, dz, r2, F, virial, true, lane);
-          });
-    }
+    });
   } else {
-    std::vector<double> vir(static_cast<std::size_t>(nt) * 6, 0.0);
-    double *thread_vir = cfg.stress ? vir.data() : nullptr;
+    double *virial = s_sum;
     Terms *lane_terms = terms_.data();
-    // Each atom is central in one cell, so its force is written once.
-    neighbours_.forCellTeam(
-        false, nt,
+    // Each row belongs to one slice, so its atom's force is written once.
+    neighbours_.forRowTeam(
+        nt,
         [=](int t, int32_t i, int32_t j, double dx, double dy, double dz,
             double r2) RGPOT_SC_PAIR_INLINE {
-          double *virial =
-              thread_vir != nullptr ? thread_vir + static_cast<std::size_t>(t) * 6 : nullptr;
-          apply(i, j, dx, dy, dz, r2, F, virial, false, lane_terms[t]);
+          apply(std::integral_constant<std::size_t, 1>{}, i, j, dx, dy, dz, r2, F, virial, false,
+                lane_terms[t]);
         });
+  }
+  if (rows) {
+    for (std::size_t i = 0; i < n_size; ++i) {
+      epair += row_e[i];
+    }
     if (cfg.stress) {
-      for (int t = 0; t < nt; ++t) {
-        for (int k = 0; k < 6; ++k) {
-          strain[k] += vir[static_cast<std::size_t>(t) * 6 + static_cast<std::size_t>(k)];
+      for (std::size_t i = 0; i < n_size; ++i) {
+        for (std::size_t k = 0; k < 6; ++k) {
+          strain[k] += row_s[6 * i + k];
         }
       }
     }

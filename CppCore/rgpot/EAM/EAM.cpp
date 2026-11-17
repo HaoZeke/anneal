@@ -36,8 +36,8 @@ void EAM::cleanMemory() {
   std::vector<double>().swap(gdz_);
   std::vector<double>().swap(ginv_);
   std::vector<std::int32_t>().swap(rev_);
-  std::vector<double>().swap(thread_energy_);
-  std::vector<double>().swap(partial_f_);
+  std::vector<double>().swap(row_energy_);
+  std::vector<double>().swap(row_pull_);
   std::vector<double>().swap(stream_rho_);
   std::vector<double>().swap(stream_force_);
   parts_.clear();
@@ -255,8 +255,6 @@ void EAM::accumulate(long i, const int *atomicNrs, double *F, double &U,
   }
 }
 
-int EAM::threadsRequested() const { return rgpot::nlist::threadsRequested(); }
-
 void EAM::geometry(long i, long j, double &dx, double &dy, double &dz,
                    double &r2) const {
   const double half0 = box_len_[0] * 0.5;
@@ -286,13 +284,20 @@ void EAM::geometry(long i, long j, double &dx, double &dy, double &dz,
   r2 = dx * dx + dy * dy + dz * dz;
 }
 
+// The terms of accumulate, by atom. A first pass walks each row as
+// accumulate does and keeps each slot's terms. A second pass adds up the
+// force on each atom in the order accumulate reaches it: per partner
+// below, that partner's pair force and then its density term; then the
+// atom's own pair forces, its own density term, and the density terms of
+// its partners above. A partner's slot holds its view of the pair, d_ji =
+// -d_ij, so each term is the one accumulate adds, negated exactly.
 void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
                                   double *U) {
   const int nt = threads_used_;
   rho_.resize(static_cast<std::size_t>(N));
   dF_.resize(static_cast<std::size_t>(N));
-  partial_f_.assign(static_cast<std::size_t>(3 * N), 0.0);
-  thread_energy_.assign(static_cast<std::size_t>(nt), 0.0);
+  row_pull_.resize(static_cast<std::size_t>(3 * N));
+  row_energy_.resize(static_cast<std::size_t>(N));
   ensureParts(N, nt);
   const auto nslot = neighbours_.slots();
   if (fscale_.size() != nslot) {
@@ -311,9 +316,9 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
       const element_parameters epar = get_element_parameters(atomicNrs[i]);
       const double cutoff2 = epar.r_cut * epar.r_cut;
       double dens = 0.0;
-      double fx = 0.0;
-      double fy = 0.0;
-      double fz = 0.0;
+      double dix = 0.0;
+      double diy = 0.0;
+      double diz = 0.0;
       double energy = 0.0;
       const auto lo = off[static_cast<std::size_t>(i)];
       const auto hi = off[static_cast<std::size_t>(i) + 1];
@@ -328,60 +333,43 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
         gdx_[s] = dx;
         gdy_[s] = dy;
         gdz_[s] = dz;
-        if (!(r2 > 0.0)) {
-          fscale_[s] = 0.0;
-          morse_[s] = 0.0;
+        fscale_[s] = 0.0;
+        morse_[s] = 0.0;
+        if (r2 > cutoff2) {
           continue;
         }
         const double r = std::sqrt(r2);
+        const double r6 = r2 * r2 * r2;
+        const double exp_b1 = std::exp(-epar.beta1 * r);
+        const double exp_b2 = std::exp(-2.0 * epar.beta2 * r);
+        const double rho_pair = exp_b1 + 512.0 * exp_b2;
+        dens += r6 * rho_pair;
+        const double r5 = r2 * r2 * r;
+        const double mag_force_den =
+            6.0 * r5 * rho_pair +
+            r6 * (-epar.beta1 * exp_b1 - 1024.0 * epar.beta2 * exp_b2);
         const double invR = 1.0 / r;
-        if (r2 <= cutoff2) {
-          const double r6 = r2 * r2 * r2;
-          const double exp_b1 = std::exp(-epar.beta1 * r);
-          const double exp_b2 = std::exp(-2.0 * epar.beta2 * r);
-          const double rho_pair = exp_b1 + 512.0 * exp_b2;
-          dens += r6 * rho_pair;
-          const double r5 = r2 * r2 * r;
-          const double mag =
-              6.0 * r5 * rho_pair +
-              r6 * (-epar.beta1 * exp_b1 - 1024.0 * epar.beta2 * exp_b2);
-          fscale_[s] = -mag * invR;
-          if (j > i) {
-            const double expArg = std::exp(-epar.alphaM * (r - epar.Rm));
-            const double d = 1.0 - expArg;
-            energy += epar.Dm * d * d - epar.Dm;
-            const double fcomp =
-                2.0 * epar.alphaM * epar.Dm * d * (d - 1.0) * invR;
-            morse_[s] = fcomp;
-            fx += fcomp * dx;
-            fy += fcomp * dy;
-            fz += fcomp * dz;
-          } else {
-            morse_[s] = 0.0;
-          }
-        } else {
-          fscale_[s] = 0.0;
-          morse_[s] = 0.0;
+        const double fscale = -mag_force_den * invR;
+        dix += fscale * dx;
+        diy += fscale * dy;
+        diz += fscale * dz;
+        fscale_[s] = fscale;
+        if (j > i) {
+          const double expArg = std::exp(-epar.alphaM * (r - epar.Rm));
+          const double d = 1.0 - expArg;
+          const double phi_r = epar.Dm * d * d - epar.Dm;
+          const double mag_force = 2.0 * epar.alphaM * epar.Dm * d * (d - 1.0);
+          morse_[s] = mag_force * invR;
+          energy += phi_r;
         }
-      }
-      const double dFi = embedding_force(epar.func_coeff, dens);
-      rho_[static_cast<std::size_t>(i)] = dens;
-      dF_[static_cast<std::size_t>(i)] = dFi;
-      for (std::int32_t p = lo; p < hi; ++p) {
-        const auto s = static_cast<std::size_t>(p);
-        const double fscale = fscale_[s];
-        if (fscale == 0.0) {
-          continue;
-        }
-        fx -= dFi * fscale * gdx_[s];
-        fy -= dFi * fscale * gdy_[s];
-        fz -= dFi * fscale * gdz_[s];
       }
       energy += embedding_function(epar.func_coeff, dens);
-      partial_f_[static_cast<std::size_t>(3 * i)] = fx;
-      partial_f_[static_cast<std::size_t>(3 * i + 1)] = fy;
-      partial_f_[static_cast<std::size_t>(3 * i + 2)] = fz;
-      thread_energy_[static_cast<std::size_t>(t)] += energy;
+      rho_[static_cast<std::size_t>(i)] = dens;
+      dF_[static_cast<std::size_t>(i)] = embedding_force(epar.func_coeff, dens);
+      row_pull_[static_cast<std::size_t>(3 * i)] = dix;
+      row_pull_[static_cast<std::size_t>(3 * i + 1)] = diy;
+      row_pull_[static_cast<std::size_t>(3 * i + 2)] = diz;
+      row_energy_[static_cast<std::size_t>(i)] = energy;
     }
   });
   // The second pass reads the dF and pair terms of every slice.
@@ -389,46 +377,63 @@ void EAM::evaluateStoredParallel(long N, const int *atomicNrs, double *F,
     const long begin = static_cast<long>(parts_[static_cast<std::size_t>(t)].begin);
     const long end = static_cast<long>(parts_[static_cast<std::size_t>(t)].end);
     for (long i = begin; i < end; ++i) {
-      double fx = partial_f_[static_cast<std::size_t>(3 * i)];
-      double fy = partial_f_[static_cast<std::size_t>(3 * i + 1)];
-      double fz = partial_f_[static_cast<std::size_t>(3 * i + 2)];
+      double fx = 0.0;
+      double fy = 0.0;
+      double fz = 0.0;
       const auto lo = off[static_cast<std::size_t>(i)];
       const auto hi = off[static_cast<std::size_t>(i) + 1];
-      for (std::int32_t p = lo; p < hi; ++p) {
-        const auto s = static_cast<std::size_t>(p);
-        const long j = nbr[s];
-        const auto rev_slot = rev_[s];
-        const double fnei =
-            rev_slot >= 0 ? fscale_[static_cast<std::size_t>(rev_slot)] : 0.0;
-        const double fcomp =
-            (rev_slot >= 0 && j < i)
-                ? morse_[static_cast<std::size_t>(rev_slot)]
-                : 0.0;
-        if (fnei == 0.0 && fcomp == 0.0) {
-          continue;
+      const auto mid = static_cast<std::int32_t>(
+          std::upper_bound(nbr.data() + lo, nbr.data() + hi, static_cast<std::int32_t>(i)) -
+          nbr.data());
+      // A term of zero leaves a sum that starts at +0 unchanged, so a
+      // partner outside its own cutoff is skipped.
+      auto partner = [&](std::size_t s, bool pair) {
+        const auto back = static_cast<std::size_t>(rev_[s]);
+        const double fs = fscale_[back];
+        const double mo = pair ? morse_[back] : 0.0;
+        if (fs == 0.0 && mo == 0.0) {
+          return;
         }
-        // fcomp is (d phi/dr) with a minus already in mag_force. The
-        // neighbour's pair force is +fcomp * dx, while the embedding
-        // term stays -dF * fnei * dx.
-        const double scale = dF_[static_cast<std::size_t>(j)] * fnei - fcomp;
-        const double dx = gdx_[s];
-        fx -= scale * dx;
-        fy -= scale * gdy_[s];
-        fz -= scale * gdz_[s];
+        const double dx = -gdx_[s];
+        const double dy = -gdy_[s];
+        const double dz = -gdz_[s];
+        if (pair) {
+          fx -= mo * dx;
+          fy -= mo * dy;
+          fz -= mo * dz;
+        }
+        const double dFj = dF_[static_cast<std::size_t>(nbr[s])];
+        fx -= dFj * (-fs * dx);
+        fy -= dFj * (-fs * dy);
+        fz -= dFj * (-fs * dz);
+      };
+      for (std::int32_t p = lo; p < mid; ++p) {
+        partner(static_cast<std::size_t>(p), true);
       }
-      partial_f_[static_cast<std::size_t>(3 * i)] = fx;
-      partial_f_[static_cast<std::size_t>(3 * i + 1)] = fy;
-      partial_f_[static_cast<std::size_t>(3 * i + 2)] = fz;
+      for (std::int32_t p = mid; p < hi; ++p) {
+        const auto s = static_cast<std::size_t>(p);
+        const double mo = morse_[s];
+        if (mo != 0.0) {
+          fx += mo * gdx_[s];
+          fy += mo * gdy_[s];
+          fz += mo * gdz_[s];
+        }
+      }
+      const double dFi = dF_[static_cast<std::size_t>(i)];
+      fx -= dFi * row_pull_[static_cast<std::size_t>(3 * i)];
+      fy -= dFi * row_pull_[static_cast<std::size_t>(3 * i + 1)];
+      fz -= dFi * row_pull_[static_cast<std::size_t>(3 * i + 2)];
+      for (std::int32_t p = mid; p < hi; ++p) {
+        partner(static_cast<std::size_t>(p), false);
+      }
+      F[3 * i] = fx;
+      F[3 * i + 1] = fy;
+      F[3 * i + 2] = fz;
     }
   });
-  for (long i = 0; i < N; ++i) {
-    F[3 * i] = partial_f_[static_cast<std::size_t>(3 * i)];
-    F[3 * i + 1] = partial_f_[static_cast<std::size_t>(3 * i + 1)];
-    F[3 * i + 2] = partial_f_[static_cast<std::size_t>(3 * i + 2)];
-  }
   double energy = 0.0;
-  for (int t = 0; t < nt; ++t) {
-    energy += thread_energy_[static_cast<std::size_t>(t)];
+  for (long i = 0; i < N; ++i) {
+    energy += row_energy_[static_cast<std::size_t>(i)];
   }
   *U = energy;
 }
@@ -595,17 +600,112 @@ void EAM::evaluateDensityStream(long N, const int *atomicNrs, double *F,
   *U = energy;
 }
 
+void EAM::evaluateStreamRows(long N, const int *atomicNrs, double *F, double *U) {
+  js_.clear();
+  const int nt = threads_used_;
+  std::vector<const rgpot::eam::ElementSpline *> kind(static_cast<std::size_t>(N));
+  for (long i = 0; i < N; ++i) {
+    kind[static_cast<std::size_t>(i)] = &splineFor(atomicNrs[i]);
+  }
+  const rgpot::eam::ElementSpline *only = kind.empty() ? nullptr : kind[0];
+  bool uniform = true;
+  for (const auto *k : kind) {
+    if (k != only) {
+      uniform = false;
+      break;
+    }
+  }
+  rho_.assign(static_cast<std::size_t>(N), 0.0);
+  dF_.resize(static_cast<std::size_t>(N));
+  row_energy_.assign(static_cast<std::size_t>(N), 0.0);
+  // The density of an atom takes its own table, and the pair term of a
+  // pair belongs to its lower atom, as on the half walk.
+  neighbours_.forRowTeam(nt, [&](int, std::int32_t i, std::int32_t j, double, double, double,
+                                 double r2) {
+    const auto a = static_cast<std::size_t>(i);
+    const auto *si = kind[a];
+    if (!(r2 > 0.0) || r2 > si->cutoff2) {
+      return;
+    }
+    const double r = std::sqrt(r2);
+    rho_[a] += si->density(r);
+    if (j > i) {
+      row_energy_[a] += si->pairEnergy(r);
+    }
+  });
+  double energy = 0.0;
+  for (long i = 0; i < N; ++i) {
+    const auto a = static_cast<std::size_t>(i);
+    const auto *s = kind[a];
+    dF_[a] = embedding_force(s->embed, rho_[a]);
+    energy += embedding_function(s->embed, rho_[a]);
+  }
+  // The scale of a pair is taken from its lower atom first, so both
+  // atoms of the pair see the same bits.
+  neighbours_.forRowTeam(nt, [&](int, std::int32_t i, std::int32_t j, double dx, double dy,
+                                 double dz, double r2) {
+    if (!(r2 > 0.0)) {
+      return;
+    }
+    const double r = std::sqrt(r2);
+    double scale = 0.0;
+    if (uniform && only != nullptr) {
+      if (r2 > only->cutoff2) {
+        return;
+      }
+      const double fs = only->densityForce(r);
+      scale = only->pairForce(r) -
+              (dF_[static_cast<std::size_t>(i)] + dF_[static_cast<std::size_t>(j)]) * fs;
+    } else {
+      const auto lo = static_cast<std::size_t>(std::min(i, j));
+      const auto hi = static_cast<std::size_t>(std::max(i, j));
+      const auto *slo = kind[lo];
+      const auto *shi = kind[hi];
+      if (r2 <= slo->cutoff2) {
+        scale += slo->pairForce(r);
+        scale -= dF_[lo] * slo->densityForce(r);
+      }
+      if (r2 <= shi->cutoff2) {
+        scale -= dF_[hi] * shi->densityForce(r);
+      }
+    }
+    if (scale != 0.0) {
+      F[3 * i] += scale * dx;
+      F[3 * i + 1] += scale * dy;
+      F[3 * i + 2] += scale * dz;
+    }
+  });
+  for (long i = 0; i < N; ++i) {
+    energy += row_energy_[static_cast<std::size_t>(i)];
+  }
+  *U = energy;
+}
+
 void EAM::evaluate(long N, const int *atomicNrs, double *F, double *U) {
-  const int nt = threadsRequested();
+  const auto n = static_cast<std::size_t>(N);
+  const int nt = rgpot::nlist::teamSize(n);
   threads_used_ = nt;
+  const bool rows = n >= rgpot::nlist::kTeamMinAtoms;
   if (neighbours_.streaming()) {
-    evaluateDensityStream(N, atomicNrs, F, U);
+    if (rows) {
+      evaluateStreamRows(N, atomicNrs, F, U);
+    } else {
+      evaluateDensityStream(N, atomicNrs, F, U);
+    }
     return;
   }
   if (nt == 1) {
+    // From kTeamMinAtoms up each row's energy is summed on its own and the
+    // rows are added in order, the sum evaluateStoredParallel takes.
     double energy = 0.0;
     for (long i = 0; i < N; ++i) {
-      accumulate(i, atomicNrs, F, energy, deltas_, nullptr, 0);
+      if (rows) {
+        double row = 0.0;
+        accumulate(i, atomicNrs, F, row, deltas_, nullptr, 0);
+        energy += row;
+      } else {
+        accumulate(i, atomicNrs, F, energy, deltas_, nullptr, 0);
+      }
     }
     *U = energy;
     return;

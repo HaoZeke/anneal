@@ -20,6 +20,7 @@
 #include "rgpot/LennardJones/LJClusterKernel.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
+#include "rgpot/nlist/PairSum.hpp"
 #include "rgpot/simd/api.hpp"
 #include "rgpot/simd/exact_fma.hpp"
 
@@ -125,17 +126,11 @@ void LJClusterPot::compute(const ForceInput &in, ForceOut *out,
                      nlist::Image::Round, mode_, open);
   retained_ = neighbours_.streaming() ? 0 : neighbours_.slots();
   const double cutoff2 = cutoff * cutoff;
-  auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                    double r2, double *force, double &energy, const PerAtomOut *share) {
-    if (!(i < j) || !(r2 > 0.0) || r2 > cutoff2) {
-      return;
-    }
+  auto term = [&params](std::int32_t, std::int32_t, double r2, double &pair_e, double &fscale) {
     const double inv_r2 = 1.0 / r2;
     const double sr2 = params.psi2 * inv_r2;
     const double a = (sr2 * sr2) * sr2;
     const double b = params.four_u0 * a;
-    double pair_e = 0.0;
-    double fscale = 0.0;
     if (params.use_switch == 0) {
       pair_e = b * (a - 1.0) - params.shift;
       fscale = ((6.0 * b) * inv_r2) * ((2.0 * a) - 1.0);
@@ -153,58 +148,9 @@ void LJClusterPot::compute(const ForceInput &in, ForceOut *out,
       pair_e = v * s;
       fscale = f_un * s - (v * dsdr) / r;
     }
-    energy += pair_e;
-    const double fx = fscale * dx;
-    const double fy = fscale * dy;
-    const double fz = fscale * dz;
-    force[3 * i] += fx;
-    force[3 * i + 1] += fy;
-    force[3 * i + 2] += fz;
-    force[3 * j] -= fx;
-    force[3 * j + 1] -= fy;
-    force[3 * j + 2] -= fz;
-    if (share != nullptr) {
-      tallyPair(*share, static_cast<std::size_t>(i), static_cast<std::size_t>(j), pair_e, fscale,
-                dx, dy, dz);
-    }
   };
-  const int nt = nlist::threadsRequested();
-  if (nt <= 1) {
-    nlist::visitHalf(neighbours_, 0, N,
-                     [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
-                         double r2) { accept(i, j, dx, dy, dz, r2, F, *U, atoms); });
-  } else {
-    std::vector<double> owned(static_cast<std::size_t>(nt) * static_cast<std::size_t>(N) * 3,
-                              0.0);
-    std::vector<double> partial(static_cast<std::size_t>(nt), 0.0);
-    PerAtomTeam team(atoms, static_cast<std::size_t>(N), nt);
-    std::vector<PerAtomOut> slots(static_cast<std::size_t>(nt));
-    for (int t = 0; t < nt; ++t) {
-      slots[static_cast<std::size_t>(t)] = team.slot(t);
-    }
-    nlist::forEachSlice(nt, [&](int t) {
-      const auto range = nlist::partition(N, t, nt);
-      double *local =
-          owned.data() + static_cast<std::size_t>(t) * static_cast<std::size_t>(N) * 3;
-      double local_e = 0.0;
-      nlist::visitDirected(
-          neighbours_, range.begin, range.end,
-          [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz, double r2) {
-            accept(i, j, dx, dy, dz, r2, local, local_e,
-                   atoms != nullptr ? &slots[static_cast<std::size_t>(t)] : nullptr);
-          });
-      partial[static_cast<std::size_t>(t)] = local_e;
-    });
-    team.reduce();
-    for (int t = 0; t < nt; ++t) {
-      *U += partial[static_cast<std::size_t>(t)];
-      const double *local =
-          owned.data() + static_cast<std::size_t>(t) * static_cast<std::size_t>(N) * 3;
-      for (long k = 0; k < 3 * N; ++k) {
-        F[k] += local[k];
-      }
-    }
-  }
+  nlist::sumPairs(neighbours_, static_cast<std::size_t>(N), cutoff2, nlist::Overlap::Skip, term,
+                  F, *U, nullptr, atoms);
 }
 
 } // namespace rgpot
