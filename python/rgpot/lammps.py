@@ -291,6 +291,7 @@ class FixExternal:
             parts = comm.gather((tags, xu, numbers), root=0)
             outcome: tuple[Any, ...]
             shares: list[Any] | None = None
+            caught: BaseException | None = None
             if self._root:
                 try:
                     all_tags = np.concatenate([part[0] for part in parts])
@@ -308,6 +309,7 @@ class FixExternal:
                         shares.append(ordered[start:stop])
                         start = stop
                 except Exception as exc:
+                    caught = exc
                     outcome = (
                         str(exc) or type(exc).__name__,
                         0.0,
@@ -318,6 +320,8 @@ class FixExternal:
                 outcome if self._root else None, root=0
             )
             forces = comm.scatter(shares, root=0)
+            if caught is not None:
+                raise caught
             if problem:
                 raise RuntimeError(problem)
 

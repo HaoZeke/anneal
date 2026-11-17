@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -216,6 +220,59 @@ class RootComm:
         return shares[0]
 
 
+def test_duplicate_ids_are_refused():
+    lmp = FakeLammps(tags=(1, 1), types=(1, 1))
+    driver = FixExternal(lmp, RecordingPotential(), "H He")
+    with pytest.raises(RuntimeError, match="atom IDs 1..N"):
+        driver._step(2, lmp.tags, lmp.positions, np.zeros((2, 3)))
+
+
+def test_rank_zero_reraises_the_original_error():
+    parts = [
+        (np.array([1]), np.zeros((1, 3)), np.array([1])),
+        (np.array([2]), np.zeros((1, 3)), np.array([2])),
+    ]
+    comm = RootComm(parts)
+
+    class Boom:
+        def __call__(self, *_args):
+            raise ValueError("evaluation failed")
+
+    lmp = FakeLammps(
+        tags=(1,),
+        types=(1,),
+        positions=((0.0, 0.0, 0.0),),
+        world_size=2,
+    )
+    driver = FixExternal(lmp, Boom(), "H He", comm=comm)
+    with pytest.raises(ValueError, match="evaluation failed"):
+        driver._step(1, lmp.tags, lmp.positions, np.zeros((1, 3)))
+    assert comm.outcome[0] == "evaluation failed"
+
+
+def test_import_rgpot_does_not_import_lammps():
+    env = os.environ.copy()
+    root = Path(__file__).resolve().parents[2]
+    pythonpath = env.get("PYTHONPATH", "")
+    extra = str(root / "python")
+    env["PYTHONPATH"] = extra if not pythonpath else extra + os.pathsep + pythonpath
+    script = (
+        "import sys, rgpot; "
+        "assert 'lammps' not in sys.modules, sorted(sys.modules); "
+        "assert 'rgpot.lammps' not in sys.modules; "
+        "import rgpot.lammps; "
+        "assert 'lammps' not in sys.modules, sorted(sys.modules)"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
 def test_rank_zero_gathers_by_id_and_scatters_local_forces():
     rows = box_rows([1.0, 2.0, 3.0], [10.0, 10.5, 12.4], 1.2, 0.9, -0.7)
     parts = [
@@ -259,24 +316,56 @@ def test_callback_failure_stops_run_and_reraises_original_error():
 
 
 def test_real_lammps_smoke():
+    """Energy, forces, and virial from fix external match a direct LJ evaluation."""
     lammps = pytest.importorskip("lammps")
-    lmp = lammps.lammps(cmdargs=["-log", "none", "-screen", "none"])
+    positions = np.array([[1.0, 1.0, 1.0], [2.2, 1.0, 1.0]])
+    cell = np.diag([20.0, 20.0, 20.0])
+    pot = rgpot.LJPot(cutoff=8.0)
+    direct = pot.evaluate(positions, np.array([1, 1], dtype=np.int32), cell)
+    stress = np.asarray(direct["stress"], dtype=float).reshape(3, 3)
+    virial = -abs(float(np.linalg.det(cell))) * stress
+    expected = np.array(
+        [
+            virial[0, 0],
+            virial[1, 1],
+            virial[2, 2],
+            virial[0, 1],
+            virial[0, 2],
+            virial[1, 2],
+        ]
+    )
+    lmp = lammps.lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
     try:
         lmp.commands_string(
             """
             clear
             units metal
             atom_style atomic
+            atom_modify map array sort 0 0
             boundary p p p
             region box block 0 20 0 20 0 20
             create_box 1 box
             create_atoms 1 single 1 1 1
             create_atoms 1 single 2.2 1 1
             mass 1 1
+            compute vrg all pressure NULL virial
             """
         )
-        with FixExternal(lmp, rgpot.LJPot(cutoff=8.0), "H") as driver:
+        with FixExternal(lmp, pot, "H") as driver:
             driver.run(0)
-            assert np.isfinite(lmp.get_thermo("pe"))
+            pe = float(lmp.get_thermo("pe"))
+            forces = np.array(lmp.gather_atoms("f", 1, 3), dtype=float).reshape(-1, 3)
+            pressure = np.array(lmp.numpy.extract_compute("vrg", 0, 1), dtype=float)
+            volume = float(lmp.get_thermo("vol"))
+            nktv2p = float(lmp.extract_global("nktv2p"))
+            assert driver.evaluations == 1
+        assert pe == pytest.approx(direct["energy"])
+        np.testing.assert_allclose(forces, direct["forces"], atol=1e-12, rtol=1e-12)
+        np.testing.assert_allclose(
+            np.asarray(pressure, dtype=float).reshape(-1)[:6] * volume / nktv2p,
+            expected,
+            atol=1e-12,
+            rtol=1e-12,
+        )
     finally:
         lmp.close()
