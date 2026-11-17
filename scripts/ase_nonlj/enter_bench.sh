@@ -11,6 +11,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/ase-nonlj
+PIXI=${PIXI:-$HOME/.pixi/bin/pixi}
 SYSTEM=""
 ARM=""
 SEED=""
@@ -25,7 +26,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$SYSTEM" && -z "$ARM" && -z "$SEED" ]]; then
-  exec "${PYTHON:-python3}" "$HERE/summarize.py"
+  exec "$PIXI" run --locked --frozen -e chem "${PYTHON:-python3}" "$HERE/summarize.py"
 fi
 
 case "$SYSTEM" in
@@ -42,7 +43,7 @@ case "$SEED" in
 esac
 
 mkdir -p "$WORK/runs" "$WORK/home" "$WORK/numba"
-ROWS=$ROOT/bench/ase-nonlj/rows.csv
+ROWS=${ASE_NONLJ_ROWS:-$ROOT/bench/ase-nonlj/rows.csv}
 if [[ -f $ROWS ]] && grep -q "^${SYSTEM},${ARM},${SEED}," "$ROWS"; then
   echo "keep existing $SYSTEM $ARM seed $SEED"
   exit 0
@@ -50,7 +51,7 @@ fi
 
 CAP=""
 if [[ $ARM != for_cluster ]]; then
-  CAP=$(python3 - "$ROWS" "$SYSTEM" << 'PY'
+  CAP=$("$PIXI" run --locked --frozen -e chem "${PYTHON:-python3}" - "$ROWS" "$SYSTEM" << 'PY'
 import csv
 import sys
 from pathlib import Path
@@ -70,17 +71,29 @@ PY
 fi
 
 BIN=${ASE_NONLJ:-/work/target-panel/release/examples/ase_nonlj}
-REV=${ASE_NONLJ_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}
-PY=${PYTHON:-python3}
+REV=${ASE_NONLJ_REVISION:-0582a5b2608ddea3a239c1877008d22df38ae73a}
+if [[ ! $REV =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ASE_NONLJ_REVISION must be a full lowercase commit SHA" >&2
+  exit 2
+fi
+if [[ ! -f $ROOT/pixi.lock ]]; then
+  echo "pixi.lock is required" >&2
+  exit 2
+fi
+if ! git -C "$ROOT" cat-file -e "${REV}^{commit}" 2>/dev/null; then
+  echo "revision $REV is not in this checkout; fetch it or set ASE_NONLJ_REVISION to a reachable commit SHA" >&2
+  exit 2
+fi
+PYRUN="$PIXI run --locked --frozen -e chem ${PYTHON:-python3}"
 sudo -n unshare --uts sh -c "hostname bench; \
   export HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba; \
   export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1; \
   export OMP_PROC_BIND=TRUE OMP_PLACES=cores PYTHONUNBUFFERED=1; \
   export ASE_NONLJ_WORK=$WORK/runs ASE_NONLJ=$BIN ASE_NONLJ_WALL_CAP=$CAP ASE_NONLJ_REVISION=$REV; \
-  exec taskset -c 0 $PY $HERE/run_one.py $SYSTEM $ARM $SEED" \
+  exec taskset -c 0 $PYRUN $HERE/run_one.py $SYSTEM $ARM $SEED" \
   > "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" 2> "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stderr"
 
-python3 - "$SYSTEM" "$ARM" "$SEED" "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" "$ROWS" << 'PY'
+$PYRUN - "$SYSTEM" "$ARM" "$SEED" "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" "$ROWS" << 'PY'
 import sys
 from pathlib import Path
 

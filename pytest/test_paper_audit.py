@@ -102,8 +102,8 @@ def test_a_drifted_ase_table_cell_is_reported():
 def test_a_drifted_morse_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 46.983 & 0.037 & 0.037 \\\\"
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 46.983 & 0.037 & 0.37 \\\\")
+    old = "& 54.135 & 0.037 & 0.037 \\\\"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 54.135 & 0.037 & 0.37 \\\\")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["Fisher p against ase_mh", "tab:ase-morse is the summariser's block"]

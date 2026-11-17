@@ -75,8 +75,6 @@ UNPUSHED = {
                                                 "pushed branch holds it",
     "fc1af066a915a80eb46a3bc478caaf155cc9b29f": "the build head of the Au55 cluster-preset rerun and its ASE arms, first "
                                                 "cited by 0f69a6b1; no pushed branch holds it",
-    "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
-                                                "branch holds it",
 }
 
 KNOWN_GAPS = {
@@ -124,9 +122,7 @@ KNOWN_GAPS = {
     "bench/ase-lj55/rows.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                "repository; revision b49341e3 is not in this repository",
     "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
     "bench/ase-recommended/summary.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                          "repository; revision b49341e3 is not in this repository; revision fc1af066 is "
                                          "not in this repository",
@@ -141,7 +137,6 @@ KNOWN_GAPS = {
 }
 
 UNTRACED = [
-    (SI, "-197.7750", "only REPORT.md quotes it; no committed row holds it"),
     ("bench/gad-published/README.md", "seed 2000 at 226282 calls and seed 2006 at 114143 calls",
      "the per-seed GAD rerun rows were not committed"),
     ("bench/gad-published/README.md", "a median of 13 generations on LJ31 (2–20) and 15.5 on LJ38 (12–24)",
