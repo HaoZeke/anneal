@@ -1,0 +1,2 @@
+system,seed,budget,claim_energy_eV,code_revision,code_tree,host,date,status,missing
+h2o16,16001,28000,-2214.506788,be3849e7811634aca67688da70f5413f9d860ec9,93b2b874d245fed5d538386e590c415029243ae5,bench,2026-11-17,blocked,anneal-binary;crest;xtb;rgpot-xtb-engine
