@@ -18,6 +18,12 @@
 //! chain's own history. The same paper supplies the cluster-hopping
 //! packing bank's exit from an icosahedral plateau.
 //!
+//! [`DescriptorArchive`] is the same step for a chain whose minima are
+//! told apart by a descriptor rather than an energy, the one
+//! [`Config::elite_return`] keeps.
+//!
+//! [`Config::elite_return`]: crate::methods::cluster_hopping::Config::elite_return
+//!
 //! [`STAGNATION_HOPS`]: crate::methods::rigid_quench::STAGNATION_HOPS
 
 use std::collections::VecDeque;
@@ -228,6 +234,148 @@ impl StallArchive {
     }
 }
 
+struct KeyedSeat {
+    energy: f64,
+    offered: usize,
+    key: Array1<f64>,
+    state: Array1<f64>,
+}
+
+fn separation(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+    if a.len() != b.len() {
+        return f64::INFINITY;
+    }
+    a.iter()
+        .zip(b.iter())
+        .map(|(p, q)| (p - q) * (p - q))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// The lowest minima of one chain that a descriptor tells apart, and the
+/// chain's recent destinations among them.
+///
+/// The rule of [`StallArchive`] on a descriptor instead of an energy. A
+/// molecular quench stops at a gradient loose enough that two quenches
+/// of one conformer differ in energy far beyond [`same_minimum`], and an
+/// energy archive fills with copies of it. Two minima share a seat when
+/// their descriptors lie within the radius given with the offer, the one
+/// the bias merges basins at.
+pub struct DescriptorArchive {
+    seats: Vec<KeyedSeat>,
+    capacity: usize,
+    memory: usize,
+    offered: usize,
+    recent: VecDeque<usize>,
+}
+
+impl Default for DescriptorArchive {
+    fn default() -> Self {
+        Self::new(SEATS, MEMORY)
+    }
+}
+
+impl DescriptorArchive {
+    pub fn new(capacity: usize, memory: usize) -> Self {
+        Self {
+            seats: Vec::new(),
+            capacity: capacity.max(1),
+            memory,
+            offered: 0,
+            recent: VecDeque::new(),
+        }
+    }
+
+    /// Kept minima, lowest energy first.
+    #[cfg(test)]
+    fn stored(&self) -> Vec<(f64, Array1<f64>)> {
+        let mut rows: Vec<(f64, Array1<f64>)> = self
+            .seats
+            .iter()
+            .map(|seat| (seat.energy, seat.state.clone()))
+            .collect();
+        rows.sort_by(|left, right| left.0.total_cmp(&right.0));
+        rows
+    }
+
+    /// Keep `state` when its descriptor `key` is farther than `radius` from
+    /// every kept one and it is among the lowest, or when it is a lower
+    /// copy of the kept minimum it lies within `radius` of.
+    pub fn offer(
+        &mut self,
+        energy: f64,
+        state: ArrayView1<f64>,
+        key: ArrayView1<f64>,
+        radius: f64,
+    ) {
+        if !energy.is_finite() || state.is_empty() || key.is_empty() {
+            return;
+        }
+        self.offered += 1;
+        if let Some(seat) = self
+            .seats
+            .iter_mut()
+            .find(|seat| separation(seat.key.view(), key) <= radius)
+        {
+            if energy < seat.energy {
+                seat.energy = energy;
+                seat.state = state.to_owned();
+                seat.key = key.to_owned();
+            }
+            return;
+        }
+        let seat = KeyedSeat {
+            energy,
+            offered: self.offered,
+            key: key.to_owned(),
+            state: state.to_owned(),
+        };
+        if self.seats.len() < self.capacity {
+            self.seats.push(seat);
+            return;
+        }
+        if let Some(highest) = self
+            .seats
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                a.energy
+                    .total_cmp(&b.energy)
+                    .then(a.offered.cmp(&b.offered))
+            })
+            .map(|(index, _)| index)
+            && seat.energy < self.seats[highest].energy
+        {
+            self.seats[highest] = seat;
+        }
+    }
+
+    /// The stall destination for a walker whose descriptor is `here`: the
+    /// lowest kept minimum farther than `radius` from it and not among the
+    /// last [`MEMORY`] destinations. `None` leaves the walker where it is.
+    pub fn escape(&mut self, here: ArrayView1<f64>, radius: f64) -> Option<(f64, Array1<f64>)> {
+        let chosen = self
+            .seats
+            .iter()
+            .filter(|seat| separation(seat.key.view(), here) > radius)
+            .filter(|seat| !self.recent.contains(&seat.offered))
+            .min_by(|a, b| {
+                a.energy
+                    .total_cmp(&b.energy)
+                    .then(a.offered.cmp(&b.offered))
+            })
+            .map(|seat| (seat.offered, seat.energy, seat.state.clone()));
+        let (offered, energy, state) = chosen?;
+        if self.memory > 0 {
+            self.recent.push_back(offered);
+            while self.recent.len() > self.memory {
+                self.recent.pop_front();
+            }
+        }
+        Some((energy, state))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +448,47 @@ mod tests {
         assert_eq!(kept.seats.len(), 2);
         assert_eq!(kept.escape_other_cage(7).map(|(e, _)| e), Some(-610.0));
         assert_eq!(kept.escape_other_cage(9).map(|(e, _)| e), Some(-623.4));
+    }
+
+    #[test]
+    fn descriptor_seats_merge_within_the_radius_and_keep_the_lower_copy() {
+        let mut kept = DescriptorArchive::new(2, 0);
+        kept.offer(-1.0, array![1.0].view(), array![0.0, 0.0].view(), 0.5);
+        kept.offer(-1.2, array![2.0].view(), array![0.3, 0.0].view(), 0.5);
+        kept.offer(-0.9, array![3.0].view(), array![0.0, 0.4].view(), 0.5);
+        assert_eq!(kept.stored(), vec![(-1.2, array![2.0])]);
+        kept.offer(-0.5, array![4.0].view(), array![2.0, 0.0].view(), 0.5);
+        kept.offer(-0.7, array![5.0].view(), array![4.0, 0.0].view(), 0.5);
+        assert_eq!(
+            kept.stored(),
+            vec![(-1.2, array![2.0]), (-0.7, array![5.0])]
+        );
+        kept.offer(f64::NAN, array![6.0].view(), array![9.0, 0.0].view(), 0.5);
+        kept.offer(-9.0, array![7.0].view(), Array1::zeros(0).view(), 0.5);
+        assert_eq!(kept.stored().len(), 2);
+    }
+
+    #[test]
+    fn a_descriptor_stall_skips_the_walkers_own_seat_and_recent_destinations() {
+        let mut kept = DescriptorArchive::new(8, 1);
+        kept.offer(-3.0, array![0.0].view(), array![0.0].view(), 0.1);
+        kept.offer(-2.0, array![1.0].view(), array![1.0].view(), 0.1);
+        kept.offer(-1.0, array![2.0].view(), array![2.0].view(), 0.1);
+        assert_eq!(
+            kept.escape(array![0.05].view(), 0.1).map(|(e, _)| e),
+            Some(-2.0)
+        );
+        assert_eq!(
+            kept.escape(array![5.0].view(), 0.1).map(|(e, _)| e),
+            Some(-3.0)
+        );
+        assert_eq!(
+            kept.escape(array![0.0].view(), 0.1).map(|(e, _)| e),
+            Some(-2.0)
+        );
+        let mut alone = DescriptorArchive::default();
+        assert!(alone.escape(array![0.0].view(), 0.1).is_none());
+        alone.offer(-1.0, array![0.0].view(), array![0.0].view(), 0.1);
+        assert!(alone.escape(array![0.0].view(), 0.1).is_none());
     }
 }

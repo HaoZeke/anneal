@@ -1368,11 +1368,35 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
+    /// Move a chain that has gone [`Config::elite_patience`] hops without a
+    /// new best to one of the lowest distinct minima it has accepted.
+    ///
+    /// The chain keeps its quenched start, its accepted quenches and the
+    /// lowest recorded minimum, eight at most, told apart by the bias
+    /// descriptor at the merge radius (see
+    /// [`crate::methods::stall_archive::DescriptorArchive`]). At each stall
+    /// the walker moves to the lowest of them that is neither where it
+    /// stands nor one of the last four destinations, and continues from
+    /// there with its bias. The choice reads no random number, so a chain
+    /// that keeps improving walks the same hops either way.
+    #[serde(skip_serializing_if = "is_false")]
+    pub elite_return: bool,
+    /// Hops without a new best before [`Config::elite_return`] moves the
+    /// walker, and between moves while the stall lasts.
+    #[serde(skip_serializing_if = "is_default_elite_patience")]
+    pub elite_patience: usize,
 }
 
 /// Opening hops whose quenched energy changes set
 /// [`Config::measured_energy_scale`].
 pub const MEASURED_SCALE_HOPS: usize = 20;
+
+/// Default [`Config::elite_patience`].
+pub const ELITE_PATIENCE: usize = 40;
+
+fn is_default_elite_patience(value: &usize) -> bool {
+    *value == ELITE_PATIENCE
+}
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -1952,6 +1976,8 @@ impl Config {
             ring_moves: false,
             hold_stereocentres: false,
             measured_energy_scale: false,
+            elite_return: false,
+            elite_patience: ELITE_PATIENCE,
         }
     }
 
@@ -2405,6 +2431,9 @@ mod coverage_behaviour {
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
+        assert!(!recommended.elite_return);
+        assert_eq!(recommended.elite_patience, super::ELITE_PATIENCE);
+        assert!(!recommended.resolved_json().unwrap().contains("elite_"));
         assert!(
             recommended
                 .resolved_json()

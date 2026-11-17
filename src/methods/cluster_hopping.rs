@@ -1228,6 +1228,8 @@ pub struct Outcome {
     pub exchanges_refused: usize,
     /// Occasional jumps taken on stagnation.
     pub jumps: usize,
+    /// Stalls that moved the walker to a kept minimum, [`Config::elite_return`].
+    pub elite_returns: usize,
     /// Certified quenches reported to the minimum history, and how many of
     /// them the history called new under its membership policy.
     pub history_visits: (usize, usize),
@@ -4692,6 +4694,14 @@ where
         );
     } else if cfg.improvement_rewards {
         stall_archive.offer(e, x.view());
+    }
+    // Lowest distinct minima of the chain under `elite_return`, and the
+    // hops since its last new best.
+    let mut elites = crate::methods::stall_archive::DescriptorArchive::default();
+    let mut elite_quiet = 0usize;
+    let mut elite_returns = 0usize;
+    if cfg.elite_return {
+        elites.offer(e, x.view(), bias.cv(x.view()).view(), bias.merge_radius());
     }
 
     // Descriptor and seat of the geometry the chain is standing on.
@@ -8808,6 +8818,14 @@ where
                     rigid_cage_key(x_new.view(), cfg.n_points, cage_quantum),
                 );
             }
+            if cfg.elite_return && recordable && !unquenched {
+                let key = if s_new.is_empty() {
+                    bias.cv(x_new.view())
+                } else {
+                    s_new.clone()
+                };
+                elites.offer(e_new, x_new.view(), key.view(), bias.merge_radius());
+            }
             // An accepted uphill step to a different basin samples the escape
             // distribution, which is the quantity the deposit height has to be
             // commensurate with.
@@ -9134,6 +9152,11 @@ where
         } else {
             quiet += 1;
         }
+        elite_quiet = if improved && !unquenched {
+            0
+        } else {
+            elite_quiet + 1
+        };
         let stuck = stalled(cfg, quiet, longest_quiet);
         // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
         // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
@@ -10283,6 +10306,47 @@ where
                 }
             }
         }
+
+        // At the end of the hop, so the bookkeeping above sees the hop the
+        // chain made and not the jump. No charged evaluation but the
+        // destination's gradient, no hop and no random number.
+        if cfg.elite_return && elite_quiet >= cfg.elite_patience.max(1) && hop_room(hops) {
+            elite_quiet = 0;
+            if let Some(state) = ledger.best_state.as_ref() {
+                elites.offer(
+                    ledger.best,
+                    state.view(),
+                    bias.cv(state.view()).view(),
+                    bias.merge_radius(),
+                );
+            }
+            if let Some((energy, state)) =
+                elites.escape(bias.cv(x.view()).view(), bias.merge_radius())
+                && state.len() == x.len()
+            {
+                let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                let ok = gradient
+                    .as_ref()
+                    .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                if std::env::var("ANNEAL_HOP_TRACE").is_ok() {
+                    eprintln!(
+                        "ELITETRACE {{\"hop\":{hops},\"spent\":{},\"from\":{e:.8},\"to\":{energy:.8}}}",
+                        ledger.spent()
+                    );
+                }
+                elite_returns += 1;
+                adopt_minimum!(
+                    energy,
+                    state,
+                    gradient.filter(|_| ok),
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("elite-return"),
+                    hops
+                );
+            }
+        }
     };
 
     if let Some((energy, state)) = pending_cut
@@ -10374,6 +10438,7 @@ where
         restarts,
         exchanges_refused,
         jumps,
+        elite_returns,
         history_visits: (history_observations, history_new),
         shared_deposits,
         gossip_rounds,

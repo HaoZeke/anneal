@@ -260,6 +260,8 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    elite_return: bool | None = None,
+    elite_patience: int | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -338,6 +340,12 @@ def cluster_search(
         deposit height from the median quenched energy change of its opening
         hops instead of an energy scale of one. ``None`` keeps the preset's:
         on for ``recommended=True``, off otherwise.
+      elite_return: a ``groups`` search that has gone ``elite_patience`` hops
+        without a new best moves its walker to the lowest of the distinct
+        minima it has accepted that is neither where it stands nor one of its
+        last four such destinations. ``None`` keeps the preset's.
+      elite_patience: hops without a new best before ``elite_return`` moves
+        the walker. ``None`` keeps 40.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
@@ -385,6 +393,10 @@ def cluster_search(
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:
         kwargs["measured_energy_scale"] = bool(measured_energy_scale)
+    if elite_return is not None:
+        kwargs["elite_return"] = bool(elite_return)
+    if elite_patience is not None:
+        kwargs["elite_patience"] = int(elite_patience)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out

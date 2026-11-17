@@ -3532,6 +3532,11 @@ fn rigid_probe(
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   elite_return: `Config::elite_return` of a `groups` search, a chain
+///     without a new best for `elite_patience` hops moves to one of the
+///     lowest distinct minima it has accepted. Unset keeps the preset's.
+///   elite_patience: `Config::elite_patience`, hops without a new best
+///     before `elite_return` moves the walker. Unset keeps 40.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3561,6 +3566,8 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    elite_return = None,
+    elite_patience = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3586,6 +3593,8 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    elite_return: Option<bool>,
+    elite_patience: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
@@ -3615,6 +3624,11 @@ fn cluster_search(
     }
     if measured_energy_scale.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("measured_energy_scale needs groups"));
+    }
+    if (elite_return.is_some() || elite_patience.is_some()) && groups.is_none() {
+        return Err(PyValueError::new_err(
+            "elite_return and elite_patience need groups",
+        ));
     }
     if let Some(groups) = groups.as_ref() {
         if ras || derived || communicating || length_scale.is_some() {
@@ -3741,6 +3755,12 @@ fn cluster_search(
         }
         if let Some(measured) = measured_energy_scale {
             cfg.measured_energy_scale = measured;
+        }
+        if let Some(elite) = elite_return {
+            cfg.elite_return = elite;
+        }
+        if let Some(patience) = elite_patience {
+            cfg.elite_patience = patience;
         }
         cfg
     } else if let Some(geometry) = water {
