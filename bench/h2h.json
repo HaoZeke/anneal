@@ -432,6 +432,41 @@
       ]
     },
     {
+      "rule": "gmin_h2h_lj150",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/gmin_h2h/run_campaign.py",
+        "scripts/gmin_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/gmin_h2h/run_campaign.py",
+        "name": "PAPER_BUDGETS",
+        "keys": [
+          150
+        ]
+      },
+      "asv": "bench/gmin-h2h/benchmarks/gmin_h2h.py::GminHeadToHeadLJ150",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/lj150-gmin/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        },
+        {
+          "path": "bench/lj150-gmin/summary.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
       "rule": "pimc_lj38",
       "competitors": [
         "RPQA"
@@ -1292,6 +1327,7 @@
     "tip4p_rates": "anneal TIP4P rates, no competitor",
     "growpal_h2h_v2_uncapped": "one uncapped seed per system (5e8 calls) to see whether GrowPAL ever reaches LJ38 and LJ55; a diagnostic of the v2 panel, not a paper-budget comparison",
     "fetch_paper_data": "downloads the paper data set",
-    "paper_0120": "the headline panel on the 0.12.0 release build against stored develop rows, no competitor"
+    "paper_0120": "the headline panel on the 0.12.0 release build against stored develop rows, no competitor",
+    "branch_gate": "anneal branch_on_stall against anneal develop on the paper panel, no competitor"
   }
 }

@@ -7,9 +7,10 @@ potential calls each, the `PAPER_BUDGETS` cap. One session:
 revision in a detached worktree (Rust 1.88.0, `--release --locked`) and runs
 `scripts/gmin_h2h/run_campaign.py` serially on core 0 under
 `sudo unshare --uts` with hostname `bench`. Each arm gets the same start per
-seed. Before it, `asv run` of `bench/gmin-h2h` (`TimeGminH2H` at size 150,
-seed 2000) repeated seed 2000 on both arms: anneal 1,672,453 calls, GMIN
-3,562,012, the calls in `rows.csv`.
+seed. Before it, `asv run` of `bench/gmin-h2h` (`time_seed` at size 150,
+seed 2000, then in `GminHeadToHead`, now `GminHeadToHeadLJ150`) repeated
+seed 2000 on both arms: anneal 1,672,453 calls, GMIN 3,562,012, the calls
+in `rows.csv`.
 
 - `rows.csv`: one row per run, appended as each run finished, with
   `code_revision` and `host`. `pot_s` is the time inside the potential and

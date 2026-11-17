@@ -19,17 +19,17 @@ from h2h import check_budget, smoke
 PAPER_BUDGETS = {
     98: 4_000_000,
     104: 4_000_000,
-    150: 4_000_000,
 }
 
 
 class GminHeadToHead:
+    PAPER_BUDGETS = PAPER_BUDGETS
     params = (list(PAPER_BUDGETS), ["anneal", "gmin"])
     param_names = ["size", "arm"]
     timeout = 86400
 
     def setup(self, size, arm):
-        if size not in PAPER_BUDGETS:
+        if size not in self.PAPER_BUDGETS:
             raise RuntimeError(f"no paper budget for {size}")
         if not ENTER.is_file():
             raise RuntimeError(f"missing {ENTER}")
@@ -46,10 +46,17 @@ class GminHeadToHead:
                 "--arm",
                 arm,
                 "--budget",
-                str(PAPER_BUDGETS[size]),
+                str(self.PAPER_BUDGETS[size]),
             ],
             check=True,
         )
+
+
+class GminHeadToHeadLJ150(GminHeadToHead):
+    """Seed 2000 of the LJ150 panel, rule ``gmin_h2h_lj150``."""
+
+    PAPER_BUDGETS = {150: 4_000_000}
+    params = (list(PAPER_BUDGETS), ["anneal", "gmin"])
 
 
 class Smoke:
@@ -58,6 +65,6 @@ class Smoke:
     timeout = 1800
 
     def time_smoke(self):
-        for size, budget in PAPER_BUDGETS.items():
+        for size, budget in {**PAPER_BUDGETS, **GminHeadToHeadLJ150.PAPER_BUDGETS}.items():
             check_budget("h2h_gmin_proof", f"lj{size}", budget)
         smoke("h2h_gmin_proof", ["run", "lj38", "2000"])
