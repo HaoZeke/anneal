@@ -132,15 +132,16 @@ is not the hash.
 | 3.5.0   | 1, 0, 1         | 3                    |
 | 3.5.1   | 1, 0, 1         | 4                    |
 | 3.6.0   | 1, 1, 1         | 6                    |
-| 3.7.0   | 1, 1, 1         | 6                    |
+| 3.7.0   | 1, 2, 1         | 6                    |
 
 3.6.0 raised the minor for =rgpot_eindir_abi_compatible=; a caller built against
 minor 0 still matches it.
-The current header carries 1, 2 and 1.
-The Hessian-vector functions are additions, and their state lives behind the
+3.7.0 raised the minor to 2 for the Hessian-vector functions.
+They are additions, and their state lives behind the
 =fused_cache= pointer of the handle, so =rgpot_potential_t= keeps its layout and
 the layout revision stays at 1.
-A caller that needs them is refused by a 3.7 library.
+A 3.7 library still serves a caller built against minor 0 or 1.
+A caller built against minor 2 is refused by a 3.6 library.
 
 The ledger notes that soversion 3 was the 3.4.0 layout, which 3.5.0 reused after
 the layout changed, and that 4 is the 3.5.0 layout, shipped from 3.5.1.

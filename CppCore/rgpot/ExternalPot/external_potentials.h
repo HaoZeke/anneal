@@ -5,8 +5,10 @@
  * Copyright 2023--present rgpot developers
  *
  * Positions are Angstrom, energies are eV, forces are eV/Angstrom.
- * A box is nine doubles, lattice vectors as rows. GROMACS and OpenMM
- * convert nanometres and kJ/mol once, inside the constructor.
+ * A box is nine doubles, lattice vectors as rows. With an engine path,
+ * GROMACS and OpenMM convert u0, cutoff and psi to kJ/mol and nanometres
+ * once, in the constructor, and the geometry, energy and forces on every
+ * call.
  */
 
 #ifndef RGPOT_EXTERNAL_POTENTIALS_H

@@ -59,6 +59,9 @@ missing, and when a test's options differ from its line.
 client-only builds with both build systems, without building them.
 It runs both checks, then compares the features each build system found and the
 tests each registered.
+It then passes both =compile_commands.json= files to =tools/check_fp_parity.py=,
+which fails when a source both build systems compile gets different contraction
+or fast-math flags from each.
 The =test_parity= CI job runs it, and =ci_gate= waits on that job.
 
 #+attr_rgpot: syntax configures meson and CMake without building

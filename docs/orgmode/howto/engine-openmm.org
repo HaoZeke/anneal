@@ -24,12 +24,14 @@ The test runs when the =openmm= Python module imports.
 ** Public constructor
 
 =rgpot_openmm_potential= stores the same nanometre and
-kJ/mol factors as =rgpot_gromacs_potential=; =rgpot_md_kj_per_ev()= and =rgpot_md_nm_per_angstrom()= return them. It takes =u0= in eV and =cutoff= and =psi= in Angstrom. An empty engine path (=NULL= or =""= in C) evaluates the potential in process, in Angstrom and eV. A non-empty path is a library that exports =rgpot_md_native_force= in nanometres and kJ/mol,
-such as =libopenmm_engine.so=.
+kJ/mol factors as =rgpot_gromacs_potential=; =rgpot_md_kj_per_ev()= and =rgpot_md_nm_per_angstrom()= return them. It takes =u0= in eV and =cutoff= and =psi= in Angstrom. An empty engine path (=NULL= or =""= in C) evaluates the potential in process, in Angstrom and eV. A non-empty path is a library that exports =rgpot_engine_create=, =rgpot_engine_destroy= and =rgpot_md_native_force= in nanometres and kJ/mol,
+such as =libopenmm_engine.so=; a library that lacks one of them is refused.
 That library evaluates the shifted 12-6 expression with an OpenMM
 =CustomNonbondedForce= on the CPU platform.
-With a path, the constructor converts positions and the box to nanometres and
-the energy and forces back to eV and eV/Angstrom.
+The constructor converts =u0=, =cutoff= and =psi= to the library's units once
+and passes them to =rgpot_engine_create=.
+Every call then converts the positions and the box to nanometres and the energy
+and forces back to eV and eV/Angstrom.
 =rgpot_external_potential_energy_forces= returns 0 and that result, or 1 with a
 message in =err=, and =rgpot_external_potential_free= releases the potential.
 The errors are the same as for =rgpot_gromacs_potential=: the C constructor

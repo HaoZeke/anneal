@@ -5,14 +5,15 @@
 * LAMMPS
 
 =pair_style rgpot= is a LAMMPS plugin that evaluates an rgpot potential and
-returns the energy, the forces and the global virial, and for the pair and EAM
-potentials the per-atom energy and virial.
-On several MPI ranks, a potential with a finite cutoff is evaluated by domain:
-each rank works on its own atoms, on the LAMMPS neighbour list.
+returns the energy, the forces and the global virial, and for LJ, Morse,
+SuttonChen and EAMTable the per-atom energy and virial.
+On several MPI ranks, a potential with a finite range and the staged evaluation
+of =rgpot/Staged.hpp= is evaluated by domain: each rank works on its own atoms,
+on the LAMMPS neighbour list.
 Other potentials see the whole periodic box on rank 0.
 It works under =fix nve=, =fix npt= and =fix box/relax= like a native style.
-=compute pe/atom= and =compute stress/atom= work with the pair and EAM
-potentials.
+=compute pe/atom= and =compute stress/atom= work with LJ, Morse, SuttonChen and
+EAMTable.
 It can use Lennard-Jones through its own coefficients, a library that exports
 =rgpot_engine_force=, or any potential in :doc:`../reference/potential_names`.
 

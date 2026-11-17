@@ -68,8 +68,7 @@ An empty engine path (=NULL= or =""= in C) evaluates the potential in process,
 in Angstrom and eV.
 A non-empty path is a library that exports =rgpot_engine_create=,
 =rgpot_engine_destroy= and =rgpot_md_native_force= in nanometres and
-kJ/mol. The constructor dlopens it, passes it the stored values, and converts the geometry to nm and the energy and forces back to eV and eV/Angstrom
-on every call.
+kJ/mol. The constructor dlopens it and passes it the stored values. Every call converts the geometry to nm and the energy and forces back to eV and eV/Angstrom.
 The in-tree =libnative_lj_engine.so= is such a library.
 
 A =u0=, =cutoff= or =psi= that is not positive and finite (NaN included) makes

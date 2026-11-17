@@ -42,8 +42,9 @@ case, with or without the =Pot= suffix, with =_=, =-=, =.= and spaces ignored.
 =tersoffsic= and =lennard-jones= all resolve.
 =rgpot.ase.available_kinds()= lists the strings this build accepts.
 
-The other keyword arguments, apart from ASE's =label=, =directory=, =restart=,
-=ignore_bad_restart_file= and =atoms=, go to that class's constructor.
+The other keyword arguments go to that class's constructor, apart from the
+calculator's own =numerical_stress= and =stress_step= and ASE's =label=,
+=directory=, =restart=, =ignore_bad_restart_file= and =atoms=.
 A name the constructor does not take raises =ValueError= and lists the names it
 does take.
 
@@ -130,10 +131,14 @@ as the infinite system:
   twice the kernel cutoff is tiled into a supercell that is wider.
   The energy is divided by the number of copies and the forces of the first copy
   are returned.
-  An 8.5 Angstrom LJ cutoff tiles a 32-atom argon cell four times.
+  An 8.5 Angstrom LJ cutoff tiles a cubic 32-atom argon cell, 10.52 Angstrom
+  wide, into 8 copies, two along each axis.
 - =pbc= false on every axis is a cluster.
   The kernel sees a cube whose side is at least 100 Angstrom and at least the
   cluster extent plus twice the cutoff, so no image enters the cutoff.
+  When that side is not longer than twice the extent, it is twice the extent
+  plus twice the cutoff instead, so a minimum-image kernel does not fold the
+  cluster.
   Energy and forces ignore the caller's cell.
 - A mixed =pbc= (a slab or a wire) keeps the periodic cell vectors and replaces
   each non-periodic one with a padded vector orthogonal to them.
@@ -144,8 +149,9 @@ A cluster or slab with no volume keeps the padded box's stress.
 
 The cutoff is =config()["cutoff"]= where the binding has one, and otherwise the
 kernel's published cutoff.
-A kernel with no known cutoff (=ExprPot=, D3, D4, WaterH) is not tiled and its
-cluster box is the 100 Angstrom cube.
+A kernel with no known cutoff (=ExprPot=, D3, D4, WaterH) is not tiled.
+Its cluster box is the 100 Angstrom cube while the cluster spans less than 50
+Angstrom, and twice the extent beyond that.
 =ljcluster= has free boundaries and raises =ValueError= for a periodic
 structure.
 
