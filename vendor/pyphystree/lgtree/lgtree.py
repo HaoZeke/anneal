@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
 import logging
@@ -11,7 +12,7 @@ class MCTSBatch:
         self,
         objfunc: Any,
         config_dict: Dict[int, Dict[str, Any]],
-        logger, 
+        logger,
         nplayouts: int = 5,
         explore_constant_max: float = 1e20,
         explore_constant_min: float = 1e-20,
@@ -270,28 +271,28 @@ def run_local_tree_batch(
             last_b = previous_b[idx]
             last_score = previous_score[idx]
 
-     
-            
+
+
             if curr_score < last_score:
                 # Improvement: use distance to target to scale b
                 prev_dist = abs(last_score - target) + epsilon
                 curr_dist = abs(curr_score - target) + epsilon
-            
+
                 ratio = curr_dist / prev_dist          # strictly positive
                 ratio = max(ratio, epsilon)           # numeric safety
-            
+
                 updated_b = last_b * (ratio ** alpha)
-            
+
                 stagnation_counter[idx] = 0
                 prev_best[idx] = dict(result)
                 ref_param = curr_param
                 ref_a = curr_a
                 ref_b = updated_b
-            
+
             else:
                 # No improvement: shrink b aggressively and revert to previous best
                 updated_b = last_b * aggressive_drop_factor
-            
+
                 stagnation_counter[idx] += 1
                 ref = prev_best[idx]
                 ref_param = np.asarray(ref["parameter"], dtype=float)
@@ -301,7 +302,7 @@ def run_local_tree_batch(
                 curr_ub = np.asarray(ref["ub"], dtype=float)
                 curr_depth = ref["depth"]
 
-                
+
 
             previous_score[idx] = curr_score
             previous_b[idx] = updated_b

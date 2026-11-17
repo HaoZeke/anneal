@@ -42,6 +42,16 @@ SUMMARY_FIELDS = [
     "bh_anchor_calls",
 ]
 
+REVISION_FIELDS = ["system", "anneal_arm", "anneal_revision", "superseded", *SUMMARY_FIELDS[2:]]
+SUPERSEDED_FIELDS = [
+    "system",
+    "arm",
+    "seed",
+    "code_revision",
+    "status",
+    "superseded_by",
+]
+
 
 def type7(ordered: list[float], p: float) -> float:
     n = len(ordered)
@@ -136,6 +146,10 @@ def _latest(rows: list[dict[str, str]], system: str, arm: str) -> list[dict[str,
     revision = chosen[-1]["code_revision"]
     return [row for row in chosen if row["code_revision"] == revision]
 
+def _latest_revision(rows: list[dict[str, str]], system: str, arm: str) -> str:
+    chosen = [row for row in rows if row["system"] == system and row["arm"] == arm]
+    return chosen[-1]["code_revision"] if chosen else ""
+
 
 def _hits(rows: list[dict[str, str]]) -> int:
     return sum(row["hit"] == "1" for row in rows)
@@ -193,14 +207,105 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             )
     return lines
 
+def summarise_by_revision(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    systems: list[str] = []
+    for row in rows:
+        if row["system"] not in systems:
+            systems.append(row["system"])
+    lines: list[dict[str, str]] = []
+    for system in systems:
+        cmcts = _latest(rows, system, "cmcts")
+        anneal_arms: list[str] = []
+        for row in rows:
+            if row["system"] == system and row["arm"] not in ("cmcts",) and row["arm"] not in anneal_arms:
+                anneal_arms.append(row["arm"])
+        for arm in anneal_arms:
+            latest = _latest_revision(rows, system, arm)
+            revisions: list[str] = []
+            for row in rows:
+                if row["system"] == system and row["arm"] == arm and row["code_revision"] not in revisions:
+                    revisions.append(row["code_revision"])
+            for revision in revisions:
+                anneal = [row for row in rows if row["system"] == system and row["arm"] == arm and row["code_revision"] == revision]
+                shared = sorted(set(row["seed"] for row in anneal) & set(row["seed"] for row in cmcts))
+                anneal_shared = [row for row in anneal if row["seed"] in shared]
+                cmcts_shared = [row for row in cmcts if row["seed"] in shared]
+                calls_per = anneal[0].get("calls_per_minimisation", "") if anneal else ""
+                paper_anchor = anneal[0].get("paper_anchor_calls", "") if anneal else ""
+                bh_anchor = anneal[0].get("bh_anchor_calls", "") if anneal else ""
+                lines.append(
+                    {
+                        "system": system,
+                        "anneal_arm": arm,
+                        "anneal_revision": revision,
+                        "superseded": "0" if revision == latest else "1",
+                        "anneal_hits": str(_hits(anneal)),
+                        "anneal_n": str(len(anneal)),
+                        "cmcts_hits": str(_hits(cmcts_shared)),
+                        "cmcts_n": str(len(cmcts_shared)),
+                        "fisher_p": f"{fisher_two_sided(_hits(anneal_shared), len(anneal_shared), _hits(cmcts_shared), len(cmcts_shared)):.6g}",
+                        "mannwhitney_p_calls": f"{mann_whitney(_column(anneal_shared, 'evals_to_hit'), _column(cmcts_shared, 'evals_to_hit')):.6g}",
+                        "mannwhitney_p_wall": f"{mann_whitney(_column(anneal_shared, 'wall_s'), _column(cmcts_shared, 'wall_s')):.6g}",
+                        "mannwhitney_p_pot": f"{mann_whitney(_column(anneal_shared, 'pot_s'), _column(cmcts_shared, 'pot_s')):.6g}",
+                        "mannwhitney_p_outside": f"{mann_whitney(_column(anneal_shared, 'outside_s'), _column(cmcts_shared, 'outside_s')):.6g}",
+                        "anneal_calls_median": f"{median(_column(anneal, 'evals_to_hit')):.6f}",
+                        "cmcts_calls_median": f"{median(_column(cmcts, 'evals_to_hit')):.6f}" if cmcts else "",
+                        "anneal_wall_median_s": f"{median(_column(anneal, 'wall_s')):.6f}",
+                        "cmcts_wall_median_s": f"{median(_column(cmcts, 'wall_s')):.6f}" if cmcts else "",
+                        "anneal_pot_median_s": f"{median(_column(anneal, 'pot_s')):.6f}",
+                        "anneal_outside_median_s": f"{median(_column(anneal, 'outside_s')):.6f}",
+                        "cmcts_pot_median_s": f"{median(_column(cmcts, 'pot_s')):.6f}" if cmcts else "",
+                        "cmcts_outside_median_s": f"{median(_column(cmcts, 'outside_s')):.6f}" if cmcts else "",
+                        "calls_per_minimisation": calls_per,
+                        "paper_anchor_calls": paper_anchor,
+                        "bh_anchor_calls": bh_anchor,
+                    }
+                )
+    return lines
+
+def superseded_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    latest: dict[tuple[str, str], str] = {}
+    for row in rows:
+        if row["arm"] == "cmcts":
+            continue
+        latest[(row["system"], row["arm"])] = row["code_revision"]
+    lines: list[dict[str, str]] = []
+    for row in rows:
+        if row["arm"] == "cmcts":
+            continue
+        key = (row["system"], row["arm"])
+        current = latest.get(key, "")
+        status = "latest" if row["code_revision"] == current else "superseded"
+        lines.append(
+            {
+                "system": row["system"],
+                "arm": row["arm"],
+                "seed": row["seed"],
+                "code_revision": row["code_revision"],
+                "status": status,
+                "superseded_by": "" if status == "latest" else current,
+            }
+        )
+    return lines
+
 
 def write_summary(seeds: Path, summary: Path) -> list[dict[str, str]]:
-    lines = summarise(read_rows(seeds))
+    rows = read_rows(seeds)
+    lines = summarise(rows)
     summary.parent.mkdir(parents=True, exist_ok=True)
     with summary.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(lines)
+    by_revision = summarise_by_revision(rows)
+    with summary.with_name("summary-by-revision.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=REVISION_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(by_revision)
+    with seeds.with_name("superseded.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUPERSEDED_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(superseded_rows(rows))
     return lines
 
 

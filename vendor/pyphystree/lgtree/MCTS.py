@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 import logging
 from math import log
 from typing import List, Optional, Tuple, Deque, Dict, Any

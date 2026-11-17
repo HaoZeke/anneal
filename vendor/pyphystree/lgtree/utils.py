@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 import numpy as np
 from pyDOE import lhs
 from typing import List, Tuple, Dict, Any, Optional
@@ -111,16 +112,16 @@ class DirectionalLogisticSurrogate:
         self.dim = dim
         self.rbf_count = rbf_count
         self.history_window = history_window
-        
+
         # History storage: deltas (trial - center) and labels (1 for success, 0 for failure)
         self.history_deltas: List[np.ndarray] = []
         self.history_labels: List[int] = []
-        
+
         # Models
         self.model_dir = LogisticRegression(solver='liblinear', warm_start=True)
         self.model_dist = LogisticRegression(solver='liblinear', warm_start=True)
         self.is_fitted = False
-        
+
         # RBF Centers (initialized lazily or static)
         # We assume reduced space distance usually < 0.5, but we can scale dynamically
         self.rbf_centers = np.linspace(0.0, 0.5, self.rbf_count)
@@ -135,7 +136,7 @@ class DirectionalLogisticSurrogate:
         """Adds a new observation to history."""
         self.history_deltas.append(delta)
         self.history_labels.append(1 if success else 0)
-        
+
         # Maintain window size
         if len(self.history_deltas) > self.history_window:
             self.history_deltas.pop(0)
@@ -148,11 +149,11 @@ class DirectionalLogisticSurrogate:
 
         deltas = np.array(self.history_deltas)
         labels = np.array(self.history_labels)
-        
+
         # 1. Directional Features: sign(delta)
         # Use simple epsilon to avoid sign(0) issues
         X_dir = np.sign(deltas + 1e-9)
-        
+
         # 2. Distance Features: RBFs of norm(delta)
         norms = np.linalg.norm(deltas, axis=1)
         X_dist = np.array([self._get_rbf_features(r) for r in norms])
@@ -175,10 +176,10 @@ class DirectionalLogisticSurrogate:
         best_u = np.sign(current_weights)
         # Handle zeros in weights
         best_u[best_u == 0] = 1.0
-        
+
         # Calculate score: w^T * u
         current_score = np.dot(current_weights, best_u)
-        
+
         # Iteratively try flipping dimensions
         # (Since this is a linear model, the optimal is actually just sign(weights),
         # but we implement the hill climber as described to allow for stochasticity
@@ -189,13 +190,13 @@ class DirectionalLogisticSurrogate:
             idx = np.random.randint(0, self.dim)
             candidate_u = best_u.copy()
             candidate_u[idx] *= -1
-            
+
             candidate_score = np.dot(current_weights, candidate_u)
-            
+
             if candidate_score > current_score:
                 best_u = candidate_u
                 current_score = candidate_score
-        
+
         return best_u
 
     def _sample_distance_inverse_transform(self, r_max: float) -> float:
@@ -209,32 +210,32 @@ class DirectionalLogisticSurrogate:
         # Create a grid of r values
         grid_size = 50
         r_grid = np.linspace(0, r_max, grid_size)
-        
+
         # Predict P(success|r) for each r
         # Features for batch
         features = np.array([self._get_rbf_features(r) for r in r_grid])
         probs = self.model_dist.predict_proba(features)[:, 1] # Probability of class 1
-        
+
         # Numerical integration (Cumulative Sum)
         cdf = np.cumsum(probs)
         cdf = cdf / cdf[-1] # Normalize
-        
+
         # Inverse sampling
         target_p = random()
-        
+
         # Use interpolation to invert CDF
         # Find index where cdf >= target_p
         idx = np.searchsorted(cdf, target_p)
-        
+
         if idx == 0:
             return r_grid[0]
         if idx >= grid_size:
             return r_grid[-1]
-            
+
         # Linear interpolation between idx-1 and idx
         r0, r1 = r_grid[idx-1], r_grid[idx]
         c0, c1 = cdf[idx-1], cdf[idx]
-        
+
         # r = r0 + (target - c0) * (r1 - r0) / (c1 - c0)
         return r0 + (target_p - c0) * (r1 - r0) / (c1 - c0)
 
@@ -250,7 +251,7 @@ class DirectionalLogisticSurrogate:
         # Get weights w_dir from model (coef_ is shape (1, n_features))
         weights = self.model_dir.coef_[0]
         u_opt = self._optimize_direction_hill_climbing(weights)
-        
+
         # Add slight noise to direction to ensure exploration (probabilistic nature)
         if random() < 0.1:
             flip_idx = np.random.randint(0, self.dim)
@@ -258,11 +259,11 @@ class DirectionalLogisticSurrogate:
 
         # 2. Sample Step Size
         r_opt = self._sample_distance_inverse_transform(r_max)
-        
+
         # Construct Step
         # u is a sign vector, normalize it to unit vector for direction
         u_norm = u_opt / np.linalg.norm(u_opt)
-        
+
         # New point
         x_new = x_current + r_opt * u_norm
         return np.clip(x_new, 0.0, 1.0)
@@ -272,7 +273,7 @@ class DirectionalLogisticSurrogate:
         Bootstrapping phase: Physical heuristics.
         """
         strategy = random()
-        
+
         if strategy < 0.33:
             # 1. Momentum/Center bias (simplified as random step towards 0.5)
             direction = 0.5 - x_current
@@ -281,7 +282,7 @@ class DirectionalLogisticSurrogate:
                 direction /= dist
             r = random() * r_max
             return np.clip(x_current + r * direction, 0.0, 1.0)
-            
+
         elif strategy < 0.66:
             # 2. Diagonal Extrema exploration
             # Pick a random corner
@@ -292,14 +293,14 @@ class DirectionalLogisticSurrogate:
                 direction /= dist
             r = random() * r_max
             return np.clip(x_current + r * direction, 0.0, 1.0)
-            
+
         else:
             # 3. Pure random (Hypersphere fallback)
             return _hypersphere_step_reduced(x_current, 0, 0.01, r_max)  # Dummy depth/a params
 
 
 # ============================================================
-# Unified Perturbate wrapper 
+# Unified Perturbate wrapper
 # ============================================================
 
 class Perturbate:
@@ -366,14 +367,14 @@ class Perturbate:
         """
         x_center = np.asarray(parameter, dtype=float)
         x_center_r = self._to_reduced(x_center)
-        
+
         # Calculate max radius based on depth scaling
         r_max = Depthscale(depth, a=self.a, b=self.b)
 
         if self.mode == "logistic" and self.surrogate is not None:
             # Periodically retrain (e.g., every call, or optimize to train less often)
             self.surrogate.train()
-            
+
             x_new_r = self.surrogate.generate_proposal(x_center_r, r_max)
         else:
             # Fallback to Hypersphere
@@ -399,8 +400,8 @@ class Perturbate:
         x_center_r = self._to_reduced(x_center)
         x_trial_r = self._to_reduced(x_trial)
         delta = x_trial_r - x_center_r
-        
+
         # Success definition: did we improve over reference?
         is_success = f_trial < f_ref
-        
+
         self.surrogate.update(delta, is_success)
