@@ -6,7 +6,8 @@ Reads data/landfold_maps_v7/: PROVENANCE.json of every campaign that wrote a map
 the digests of provenance.txt. When landscape.ld is present it is drawn as a scatter on
 the Ruhi free-energy ramp, recomputed on a uniform grid from the sealed coordinates when
 fes.csv is missing or failed. When only the sealed landscape.png of the handoff is present,
-that PNG is shown. A map the seal skips is no panel.
+that PNG is redrawn as vector rectangles, pixel for pixel, with no image object in the PDF.
+A map the seal skips is no panel.
 
 Usage: fig_landfold_maps.py [--data DIR] OUT.pdf
 """
@@ -167,8 +168,42 @@ def fes_from_points(coords: np.ndarray, nx: int) -> tuple[np.ndarray, np.ndarray
     return xc, yc, fes
 
 
+def pixel_rectangles(image: np.ndarray) -> tuple[int, int, list[np.ndarray], np.ndarray]:
+    """Lossless vector form of a sealed map: one rectangle per run of equal pixels.
+
+    Runs along a row are merged downwards while the next row repeats the same
+    run, so a flat region is one rectangle. The result is drawn as paths and the
+    PDF holds no image object.
+    """
+    rgb = np.clip(np.rint(image[..., :3] * 255), 0, 255).astype(np.int64)
+    key = (rgb[..., 0] << 16) | (rgb[..., 1] << 8) | rgb[..., 2]
+    height, width = key.shape
+    open_runs: dict[tuple[int, int, int], int] = {}
+    rects: list[np.ndarray] = []
+    colors: list[tuple[float, float, float]] = []
+
+    def close(run: tuple[int, int, int], top: int, bottom: int) -> None:
+        left, right, value = run
+        rects.append(np.array([[left, top], [right, top], [right, bottom], [left, bottom]], dtype=float))
+        colors.append(((value >> 16) / 255.0, ((value >> 8) & 255) / 255.0, (value & 255) / 255.0))
+
+    for row in range(height):
+        edges = np.flatnonzero(np.diff(key[row])) + 1
+        starts = np.concatenate(([0], edges))
+        stops = np.concatenate((edges, [width]))
+        now = {(int(a), int(b), int(key[row, a])) for a, b in zip(starts, stops)}
+        for run in [r for r in open_runs if r not in now]:
+            close(run, open_runs.pop(run), row)
+        for run in now:
+            open_runs.setdefault(run, row)
+    for run, top in open_runs.items():
+        close(run, top, height)
+    return height, width, rects, np.asarray(colors)
+
+
 def draw_panel(ax, entry: Map):
     import matplotlib.pyplot as plt
+    from matplotlib.collections import PolyCollection
     from matplotlib.colors import Normalize
 
     ld = entry.folder / "landscape.ld"
@@ -200,8 +235,13 @@ def draw_panel(ax, entry: Map):
         ax.set_ylabel("landfold coordinate 2 (arb. units)", fontsize=figstyle.SMALLEST, labelpad=1)
         return mesh
     # Sealed campaign PNG for maps whose tables are still on the campaign disk.
-    image = plt.imread(png)
-    ax.imshow(image, origin="upper")
+    height, width, rects, colors = pixel_rectangles(plt.imread(png))
+    ax.add_collection(
+        PolyCollection(rects, facecolors=colors, edgecolors=colors, linewidths=0.15, antialiaseds=False, rasterized=False)
+    )
+    ax.set_xlim(0, width)
+    ax.set_ylim(height, 0)
+    ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
     for side in ax.spines.values():
