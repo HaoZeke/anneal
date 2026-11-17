@@ -257,6 +257,21 @@ fn a_declared_floor_walls_a_species_free_search() {
     assert!(wall.refuses(pair(f64::NAN).view()));
 }
 
+/// A refused pair past [`OVERLAP_CALL_LIMIT`] but inside a declared floor
+/// is pushed apart by the refusal step, not left to the fallback slope.
+#[test]
+fn a_declared_floor_pushes_a_refused_pair_off_itself() {
+    let mut cfg = Config::for_cluster(2);
+    cfg.call_floor = Some(1.2);
+    let wall = CallWall::of(&cfg);
+    assert_eq!(wall.pair_floor(&wall.owners(2), 0, 1), 1.2);
+    let point = pair(1.0);
+    assert!(wall.refuses(point.view()));
+    let (_, gradient) = overlap_rejection_step(point.view(), None, wall).expect("a step");
+    assert!(gradient[0] > 0.0 && gradient[3] < 0.0, "{gradient}");
+    assert_eq!(gradient[0], -gradient[3]);
+}
+
 #[test]
 fn declared_elements_raise_the_floor_to_their_covalent_fraction() {
     let mut cfg = Config::for_cluster(2);

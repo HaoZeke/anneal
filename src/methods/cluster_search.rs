@@ -498,7 +498,7 @@ impl<'a> CallWall<'a> {
                 let bonded = *reactive || (owner[i] != usize::MAX && owner[i] == owner[j]);
                 molecular_call_floor(species[i], species[j], bonded)
             }
-            Self::Floor(floor) if floor.elements.is_some() => floor.pair(i, j),
+            Self::Floor(floor) => floor.pair(i, j),
             _ => OVERLAP_CALL_LIMIT,
         }
     }
