@@ -5,8 +5,15 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#include <limits.h>
+#include <unistd.h>
+#endif
 
 #include "rgpot/CalculatorGroup.hpp"
+#include "rgpot/calculator_mpi_abi.h"
 
 // A process started without mpirun is one calculator of one rank, with
 // or without MPI in the build. A second bind with another size is
@@ -81,5 +88,43 @@ TEST_CASE("One process is one calculator", "[CalculatorGroup]") {
                   buf[1], buf[2], buf[3]);
       std::fflush(stdout);
     }
+  }
+}
+
+TEST_CASE("calculator-group C ABI exports unmangled symbols",
+          "[CalculatorGroup][abi]") {
+#if defined(_WIN32)
+  SUCCEED("symbol probe uses dlsym");
+#else
+  char exe[PATH_MAX] = {0};
+  const ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+  REQUIRE(n > 0);
+  std::string path(exe, static_cast<size_t>(n));
+  const std::size_t slash = path.find_last_of('/');
+  REQUIRE(slash != std::string::npos);
+  const std::string libdir = path.substr(0, slash + 1);
+  path = libdir + "librgpot.so.3";
+  void *lib = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (lib == nullptr) {
+    path = libdir + "librgpot.so";
+    lib = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  }
+  REQUIRE(lib != nullptr);
+  REQUIRE(dlsym(lib, "rgpot_mpi_host_abi_version") != nullptr);
+  REQUIRE(dlsym(lib, "rgpot_mpi_bind_calculators") != nullptr);
+  REQUIRE(dlsym(lib, "rgpot_mpi_share_bytes") != nullptr);
+  dlclose(lib);
+#endif
+
+  rgpot_mpi_group_t group{};
+  const int index = rgpot_mpi_bind_calculators(1, &group);
+  REQUIRE(index == group.index);
+  REQUIRE(rgpot_mpi_host_abi_version() == RGPOT_MPI_ABI_VERSION);
+  std::array<double, 2> values{4.0, -1.0};
+  const int rc = rgpot_mpi_share_bytes(0, values.data(), sizeof(values));
+  if (group.world_size == 1) {
+    REQUIRE((rc == 0 || rc == 1));
+  } else {
+    REQUIRE(rc == 1);
   }
 }

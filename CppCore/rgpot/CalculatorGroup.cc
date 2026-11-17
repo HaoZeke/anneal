@@ -264,3 +264,28 @@ void publishCalculatorError(const std::string &message) {
 }
 
 } // namespace rgpot
+
+extern "C" {
+
+RGPOT_CALC_API uint32_t rgpot_mpi_host_abi_version(void) {
+  return RGPOT_MPI_ABI_VERSION;
+}
+
+RGPOT_CALC_API int rgpot_mpi_bind_calculators(int ranks_per_calculator,
+                                              rgpot_mpi_group_t *out) {
+  const rgpot::CalculatorGroup group =
+      rgpot::bindCalculators(ranks_per_calculator);
+  if (out) {
+    out->index = group.index;
+    out->ranks = group.ranks;
+    out->rank_in_group = group.rank_in_group;
+    out->world_size = group.world_size;
+  }
+  return group.index;
+}
+
+RGPOT_CALC_API int rgpot_mpi_share_bytes(int owner, void *data, size_t bytes) {
+  return rgpot::shareFromCalculator(owner, data, bytes);
+}
+
+} // extern "C"

@@ -161,6 +161,51 @@ const rgpot_mpi_api_t *rgpot_mpi_api_v1(void);
   =struct_size= ("has an incompatible rgpot MPI ABI"), and
   =calculatorMpiLoadError= returns that reason.
 
+** C ABI of librgpot calculator helpers
+
+=CppCore/rgpot/CalculatorGroup.cc= also exports C entry points from
+=calculator_mpi_abi.h= so hosts no longer dlopen Itanium-mangled C++ names.
+
+*** =rgpot_mpi_host_abi_version=
+
+#+attr_rgpot: signature
+#+begin_src c
+uint32_t rgpot_mpi_host_abi_version(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: =RGPOT_MPI_ABI_VERSION=.
+- Errors :: none.
+
+*** =rgpot_mpi_bind_calculators=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_mpi_bind_calculators(int ranks_per_calculator, rgpot_mpi_group_t *out);
+#+end_src
+
+- Inputs :: =ranks_per_calculator=, as for =bindCalculators=.
+  =out=, optional storage for the resulting =rgpot_mpi_group_t=.
+- Units :: none.
+- Outputs :: this rank's calculator index, and when =out= is not null the same
+  group fields =bindCalculators= stores.
+- Errors :: none; refusals are reported as index -1.
+
+*** =rgpot_mpi_share_bytes=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_mpi_share_bytes(int owner, void *data, size_t bytes);
+#+end_src
+
+- Inputs :: =owner=, =data= and =bytes=, as for =shareFromCalculator=.
+- Units :: none.
+- Outputs :: the return code of =shareFromCalculator= (1 on a successful
+  collective share, 0 otherwise).
+- Errors :: none; in collective error cases it aborts the world as described for
+  =shareFromCalculator=.
+
 ** Example
 
 A host that opens =librgpot_mpi= itself and checks the table.

@@ -32,6 +32,12 @@
 extern "C" {
 #endif
 
+#if !defined(_WIN32)
+#define RGPOT_CALC_API __attribute__((visibility("default")))
+#else
+#define RGPOT_CALC_API
+#endif
+
 #define RGPOT_MPI_ABI_VERSION 1u
 #define RGPOT_MPI_API_SYMBOL "rgpot_mpi_api_v1"
 /* SONAME of librgpot_mpi. Independent of librgpot's kCxxSoversion:
@@ -88,6 +94,12 @@ typedef const rgpot_mpi_api_t *(*rgpot_mpi_api_fn)(void);
 
 /* Exported by librgpot_mpi. */
 const rgpot_mpi_api_t *rgpot_mpi_api_v1(void);
+
+/* Exported by librgpot (stable C ABI for calculator-group hosts). */
+RGPOT_CALC_API uint32_t rgpot_mpi_host_abi_version(void);
+RGPOT_CALC_API int rgpot_mpi_bind_calculators(int ranks_per_calculator,
+                                              rgpot_mpi_group_t *out);
+RGPOT_CALC_API int rgpot_mpi_share_bytes(int owner, void *data, size_t bytes);
 
 #ifdef __cplusplus
 }
