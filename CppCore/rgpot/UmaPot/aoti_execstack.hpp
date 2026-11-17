@@ -6,6 +6,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -120,11 +121,16 @@ inline bool elf_needs_gnu_stack_clear(const uint8_t *data, size_t n) {
 
 // Publication writes a private complete file, then replaces the destination.
 // A reader therefore observes one full payload, whichever writer landed last.
-// On Windows, exists, status, and replace can return access denied (5) or
-// sharing violation (32) while another replace of that path is in flight.
-// Those two errors are retried with exponential backoff until the deadline.
-// Readers open with delete sharing so an open read does not refuse the
-// replace. POSIX still uses rename, and only permission_denied is transient.
+// MoveFileExW refuses to replace a destination that has any open handle,
+// whatever its sharing, with access denied (5), so a reader in a loop can
+// keep a writer out past the deadline. That refusal is retried at once with
+// POSIX semantics (FileRenameInfoEx, Windows 10 1607 and later, NTFS), which
+// replace a destination held open with delete sharing, as read_all opens it;
+// the holder keeps reading the file it opened. Access denied and sharing
+// violation (32) that remain, from a holder without delete sharing or a
+// filesystem without POSIX semantics, and those of exists and status while
+// another replace is in flight, are retried with exponential backoff until
+// the deadline. POSIX uses rename, and only permission_denied is transient.
 inline constexpr std::chrono::milliseconds kPublicationInitialBackoff{1};
 inline constexpr std::chrono::milliseconds kPublicationMaxBackoff{32};
 inline constexpr std::chrono::milliseconds kPublicationDeadline{2000};
@@ -241,6 +247,58 @@ inline bool publication_slot_taken(const std::error_code &ec) {
   return ec.default_error_condition() == std::errc::file_exists;
 }
 
+#ifdef _WIN32
+// FILE_RENAME_INFO as FileRenameInfoEx reads it. Headers that target Windows
+// before 10 1607 declare neither its Flags member nor the class.
+struct PublicationRenameInfo {
+  DWORD flags;
+  HANDLE root_directory;
+  DWORD file_name_length;
+  WCHAR file_name[1];
+};
+static_assert(offsetof(PublicationRenameInfo, root_directory) ==
+              offsetof(FILE_RENAME_INFO, RootDirectory));
+static_assert(offsetof(PublicationRenameInfo, file_name_length) ==
+              offsetof(FILE_RENAME_INFO, FileNameLength));
+static_assert(offsetof(PublicationRenameInfo, file_name) ==
+              offsetof(FILE_RENAME_INFO, FileName));
+inline constexpr int kFileRenameInfoEx = 22;
+inline constexpr DWORD kRenameReplaceIfExists = 0x1;
+inline constexpr DWORD kRenamePosixSemantics = 0x2;
+
+inline std::error_code publish_replace_posix(const std::filesystem::path &from,
+                                             const std::filesystem::path &to) {
+  std::error_code ec;
+  const std::wstring target = std::filesystem::absolute(to, ec).native();
+  if (ec)
+    return ec;
+  const std::size_t name_bytes = target.size() * sizeof(wchar_t);
+  const std::size_t size =
+      offsetof(PublicationRenameInfo, file_name) + name_bytes + sizeof(wchar_t);
+  std::vector<std::max_align_t> storage(
+      (size + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
+  auto *bytes = reinterpret_cast<unsigned char *>(storage.data());
+  auto *info = reinterpret_cast<PublicationRenameInfo *>(bytes);
+  info->flags = kRenameReplaceIfExists | kRenamePosixSemantics;
+  info->root_directory = nullptr;
+  info->file_name_length = static_cast<DWORD>(name_bytes);
+  std::memcpy(bytes + offsetof(PublicationRenameInfo, file_name),
+              target.c_str(), name_bytes + sizeof(wchar_t));
+  HANDLE handle = CreateFileW(
+      from.c_str(), DELETE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (handle == INVALID_HANDLE_VALUE)
+    return win_last_error();
+  if (!SetFileInformationByHandle(
+          handle, static_cast<FILE_INFO_BY_HANDLE_CLASS>(kFileRenameInfoEx),
+          info, static_cast<DWORD>(size)))
+    ec = win_last_error();
+  CloseHandle(handle);
+  return ec;
+}
+#endif
+
 inline std::error_code publish_replace(const std::filesystem::path &from,
                                        const std::filesystem::path &to) {
 #ifdef _WIN32
@@ -252,7 +310,16 @@ inline std::error_code publish_replace(const std::filesystem::path &from,
     return std::error_code(ERROR_DIRECTORY, std::system_category());
   if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING))
     return {};
-  return win_last_error();
+  const std::error_code moved = win_last_error();
+  if (moved.value() != ERROR_ACCESS_DENIED)
+    return moved;
+  const std::error_code posix = publish_replace_posix(from, to);
+  if (!posix)
+    return {};
+  // Without POSIX semantics the class is rejected (invalid parameter, not
+  // supported or invalid function), and the refusal stands until the
+  // holder closes.
+  return publication_retryable(posix) ? posix : moved;
 #else
   std::error_code ec;
   std::filesystem::rename(from, to, ec);
