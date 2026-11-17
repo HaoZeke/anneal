@@ -1715,11 +1715,25 @@ impl Config {
     /// assert!(cfg.bayes_screen);
     /// ```
     pub fn for_cluster(n_points: usize) -> Self {
-        let mut cfg = Self::screened_with_scales(
+        Self::for_cluster_with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
-        );
+        )
+    }
+
+    /// [`Config::for_cluster`] expressed at caller-supplied physical scales.
+    ///
+    /// This preserves the complete cluster preset, including its scaled shell
+    /// core, while changing the characteristic length and energy. It is the
+    /// constructor for a non-Lennard-Jones potential benchmarked with the same
+    /// search preset.
+    pub fn for_cluster_with_scales(
+        n_points: usize,
+        length_scale: f64,
+        energy_scale: f64,
+    ) -> Self {
+        let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
         // Arm 3: each orbit completion relaxes a shell-core candidate and a
         // fraction-core candidate and offers the lower. Callers that keep the
         // fraction core set it back after this preset. `derived` does not:
@@ -2417,7 +2431,7 @@ pub fn start_bond_tolerance(
 
 #[cfg(test)]
 mod coverage_behaviour {
-    use super::{ArmSelection, Config, Keying};
+    use super::{ArmSelection, Config, Keying, OrbitCore};
 
     #[test]
     fn the_recommended_molecular_preset_chooses_its_quench() {
@@ -2530,6 +2544,22 @@ mod coverage_behaviour {
         assert_eq!(Config::recommended(13).basin_stride, 1);
         assert_eq!(Config::recommended_tip4p(4).basin_stride, 1);
         assert_eq!(Config::for_tip4p(4).basin_stride, 1);
+    }
+
+    #[test]
+    fn scaled_cluster_constructor_keeps_the_complete_preset() {
+        let reduced = Config::for_cluster(13);
+        let scaled = Config::for_cluster_with_scales(13, 1.0, 1.0);
+        assert_eq!(
+            serde_json::to_value(&scaled).expect("scaled preset"),
+            serde_json::to_value(&reduced).expect("reduced preset")
+        );
+
+        let physical = Config::for_cluster_with_scales(13, 2.0, 3.0);
+        assert!(physical.bayes_screen);
+        assert!(matches!(physical.orbit_core, OrbitCore::Both(_)));
+        assert_eq!(physical.length_scale, 2.0);
+        assert_eq!(physical.energy_scale, 3.0);
     }
 
     #[test]

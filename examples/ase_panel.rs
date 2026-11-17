@@ -144,7 +144,7 @@ fn main() {
     let inside_s = inside.load(Ordering::Relaxed) as f64 / 1.0e9;
     let outside_s = (wall - inside_s).max(0.0);
     let best = outcome.best;
-    let hit = best < level;
+    let hit = is_hit(best, reference);
     let seen = first_seen.load(Ordering::Relaxed);
     let first_calls = match (hit, seen) {
         (false, _) => "-".to_string(),
@@ -172,13 +172,7 @@ fn for_cluster_cfg(n: usize, kind: Kind) -> Config {
         Kind::Lj => Config::for_cluster(n),
         Kind::Gold => {
             let (length, well) = gupta_scales();
-            let mut cfg = Config::with_scales(n, length, well);
-            let proto = Config::for_cluster(n);
-            cfg.bayes_screen = proto.bayes_screen;
-            cfg.bayes_threshold = proto.bayes_threshold;
-            cfg.bayes_exploration = proto.bayes_exploration;
-            cfg.bayes_warmup = proto.bayes_warmup;
-            cfg
+            Config::for_cluster_with_scales(n, length, well)
         }
     }
 }
@@ -205,6 +199,10 @@ fn system(name: &str) -> Option<(usize, Kind, f64)> {
     })
 }
 
+fn is_hit(best: f64, reference: f64) -> bool {
+    best <= reference + TOL
+}
+
 /// Pair minimum over 2^(1/6), and the well depth. Same probe as asg_eval.
 fn gupta_scales() -> (f64, f64) {
     let potential = Gupta::copper_gold(0, 2);
@@ -222,4 +220,15 @@ fn gupta_scales() -> (f64, f64) {
         r += 0.002;
     }
     (best_r / 2.0_f64.powf(1.0 / 6.0), -best_e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_hit;
+
+    #[test]
+    fn hit_window_includes_its_declared_boundary() {
+        assert!(is_hit(-10.0 + 0.001, -10.0));
+        assert!(!is_hit(-10.0 + 0.001_001, -10.0));
+    }
 }
