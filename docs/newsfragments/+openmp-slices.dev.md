@@ -1,3 +1,0 @@
-Every OpenMP region in the library now opens in `CppCore/rgpot/Slices.hpp`, through `forEachSlice`, `forEachSlicePhase` or `onFullTeam`, so a result depends on its slice count and not on how many threads the runtime starts.
-`CppCore/tests/test_openmp_confined.py` fails the test suite when OpenMP appears in any other library source, `ThreadTeamTest` checks the threaded potentials and neighbour tables on short, dynamic and nested teams, and the `thread_limit` CI job runs the suite under `OMP_THREAD_LIMIT=1` and `OMP_THREAD_LIMIT=2`.
-The long-range summands follow the same rule, so particle mesh Ewald, D3 and D4 no longer stall or skip work when the runtime starts fewer threads than they ask for.

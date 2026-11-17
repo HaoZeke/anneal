@@ -1,2 +1,0 @@
-`scripts/export_uma_aoti.py` resolves the checkpoint once (`--checkpoint`, `RGPOT_UMA_CHECKPOINT` or a Hugging Face download) and records it in the package: `checkpoint_source` (`cli`, `env` or `hf`), `checkpoint_path` or `checkpoint_hf_repo` and `checkpoint_hf_filename`, the resolved commit as `checkpoint_hf_revision`, and `checkpoint_sha256` of the file it loaded.
-`UmaPot::checkpointProvenance()` and the exporter's `checkpoint_provenance()` read them back; packages exported earlier load as before and report the keys absent.

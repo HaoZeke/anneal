@@ -1,1 +1,0 @@
-`rgpot::simd::exp_hw_n` is declared on every target. MSVC, Arm and other builds without the x86-64 hardware body get one that calls `rgpot::simd::exp`, so a caller that picks the body at run time compiles everywhere.

@@ -1,1 +1,0 @@
-A project that vendors rgpot with `subproject()` no longer installs `rgpot-lj` and the engine plugins from `engines/`. They are installed only when rgpot is the top-level project, like the rest of rgpot, so `meson install` in the parent no longer stops on an engine output the parent never built.

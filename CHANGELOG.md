@@ -7,9 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
-## [3.7.0] - 2026-11-13
+## [3.7.0] - 2026-11-17
 
 [3.7.0]: https://github.com/OmniPotentRPC/rgpot/tree/v3.7.0
+
+### Breaking
+
+- C++ member functions of the potentials now use camelCase, like the
+  other members of those classes.
+  Rename the calls; no old name remains.
+
+  - `PotentialBase::get_type()` is `PotentialBase::getType()`.
+  - `PotentialBase::set_cache()` and `Potential::set_cache()` are
+    `setCache()`.
+    An override in a derived class must use the new name.
+    The Python method stays `set_cache`.
+  - `CP2KPot::probe_available()`, `CPMDPot::probe_available()`,
+    `MOPACPot::probe_available()` and `NWChemPot::probe_available()` are
+    `probeAvailable()`.
+  - `CPMDPot::abi_available()`, `MOPACPot::abi_available()` and
+    `NWChemPot::abi_available()` are `abiAvailable()`.
+  - `lr::CoulombPot::set_neighbours()`,
+    `lr::DispersionPot::set_neighbours()` and
+    `lr::NlhPot::set_neighbours()` are `setNeighbours()`.
+  - `lr::SumPot::share_neighbours()` is `shareNeighbours()`.
+  - The namespace `rgpot::details` in `include/rgpot/errors.hpp` is
+    `rgpot::detail`, like every other internal namespace.
+
+- `RGPOT` no longer takes `U0`, `CUTOFF` and `PSI` in PLUMED units.
+  Write `RGPOT ATOMS=... POTENTIAL=LJ OPTIONS={u0 1.0 psi 1.0 cutoff
+  8.0} TYPES=Ar` instead, with the options in eV and Angstrom:
+  `U0=96.48533212331002 CUTOFF=0.8 PSI=0.1` under GROMACS units is
+  `u0 1.0 cutoff 8.0 psi 1.0`.
+  `TYPES` is required.
 
 ### Added
 
@@ -69,6 +99,213 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Every row is checked bit for bit against a 1-thread call.
   It runs only when called and changes no library behaviour.
 
+- Free-cluster Cambridge Morse and reduced Lennard-Jones kernels,
+  `rgpot_cambridge_morse` and `rgpot_cluster_lj`.
+  Both sums run over every pair: a neighbour list would drop a tail that
+  is not zero.
+  Energy and gradient are one pass.
+
+- Free-cluster Cleri–Rosato kernel `rgpot_gupta`.
+  The sum visits every pair: a neighbour list would drop a tail the
+  Cambridge minima include.
+  The density is accumulated once and the force reuses that pair
+  derivative.
+
+- Hessian-vector products for any potential, for minimum-mode searches
+  (Lanczos, dimer) that apply the Hessian to many directions at one
+  geometry.
+  In the C ABI, `rgpot_potential_hvp` computes `H v` on a potential
+  handle.
+  `RGPOT_HVP_FORWARD`, the default, reuses the forces of the last centre
+  the handle evaluated, so k products at one geometry cost k + 1 force
+  calls instead of 2k, at first order in the step.
+  `RGPOT_HVP_CENTRAL` costs two calls a product at second order.
+  A potential that knows its Hessian registers an analytic product with
+  `rgpot_potential_set_hvp_callback` and the products make no force
+  call.
+  `rgpot_potential_hvp_centre` returns the centre energy and forces from
+  the same cache, `rgpot_potential_hvp_invalidate` drops it, and
+  `rgpot_potential_hvp_counts` reports the calls made.
+  The centre is keyed on the bits of the positions, atomic numbers and
+  cell.
+  In C++, `PotentialHandle` gains `hvp`, `hvp_centre`,
+  `set_hvp_callback`, `invalidate_hvp` and `hvp_counts`, and
+  `rgpot/HessianVector.hpp` gives the same products to potentials used
+  without the Rust core.
+  `MorsePot::hessianVectorImpl` is the analytic product of the shifted
+  and switched Morse potential, and `PotentialHandle::from_impl`
+  registers it.
+  In Python, every potential gains `hvp`, `hvp_centre`,
+  `invalidate_hvp`, `hvp_counts`, `reset_hvp_counts` and
+  `has_analytic_hvp`.
+
+- Long-range summands behind `-Dwith_long_range=true`: Ewald, smooth
+  particle mesh Ewald and damped shifted force electrostatics, D3(BJ),
+  D4, MBD and QDO dispersion, SO3LR NLH repulsion, and a sum that adds
+  them to any other potential on the same `ForceInput`.
+
+- The PLUMED action `RGPOT` evaluates any potential `pair_style rgpot`
+  accepts: `POTENTIAL=Name OPTIONS={key value ...} TYPES=El,...`, with
+  the names and options of `pair_coeff` (now listed once in the
+  potential names reference).
+  Positions, the cell, the value and its derivatives follow PLUMED's
+  units, converted with its `Units` object.
+  Periodic cells, including triclinic GROMACS boxes, go to the
+  potential, and the box derivatives come from its stress, so
+  `BIASVALUE` under `gmx mdrun -plumed` gives the right virial and
+  pressure in NPT runs.
+  A potential without a stress stops on a periodic cell; `NOPBC`
+  evaluates an isolated cluster.
+  New meson tests check the forces and box derivatives against
+  `plumed driver --debug-forces`, the units, and the C and Python
+  interfaces, and `gromacs_mdrun` now also checks the bias, virial and
+  pressure of a short Sutton-Chen NPT run.
+
+- The header `rgpot/Staged.hpp` lets a host that builds its own
+  neighbour list, such as LAMMPS, evaluate a finite-range potential on
+  that list in two stages, the scheme of `pair_style eam`:
+  `densityStage` sums each atom's densities, the host completes them
+  across its copies of neighbouring atoms (`Locality::densities` values
+  per atom), and `forceStage` adds the forces.
+  `HalfList` takes a half list in the layout of a LAMMPS `NeighList`,
+  with newton on or off, and `StageTally` takes the host's share of the
+  energy and virial and the per-atom split.
+  `LJPot`, `MorsePot`, `SuttonChenPot` and `EAMTablePot` have the
+  stages, the concept `rgpot::StagedPotential` detects them, and
+  `rgpot::spec::Built` carries them for a potential built by name.
+  `PotCaps` and the C++ layout are unchanged.
+
+- `CP2KPot` runs CP2K Quickstep through `libcp2kc_rgpot`, a shim over
+  libcp2k built with `-Dwith_cp2k=enabled`.
+  `CP2KParams` (`PotentialConfig.cp2k`) renders a default GPW deck or
+  fills `@RGPOT_COORD@` and `@RGPOT_CELL@` in a verbatim template.
+  The shim keeps one force environment per orbital key, and an
+  unconverged SCF raises `rgpot::CP2KScfError` on every rank instead of
+  aborting the MPI world.
+  potserv serves it as `CP2K`.
+
+- `LJPot`, `LJClusterPot` and `MorsePot` gain `evaluate_per_atom`, which
+  returns everything `evaluate` does plus per-atom `energies` (shape
+  `(N,)`, eV, summing to the energy) and `virials` (shape `(N, 6)`, eV,
+  Voigt order, summing to minus the volume times the stress).
+  It exists only on potentials whose C++ kernel has `forcePerAtom`.
+
+- `compute pe/atom`, `compute stress/atom` and
+  `compute centroid/stress/atom` work with `pair_style rgpot` for LJ,
+  Morse, SuttonChen and EAMTable, on any number of ranks; they match
+  `lj/cut`, `morse` and `eam/alloy` atom by atom.
+  `LJPot`, `LJClusterPot`, `MorsePot`, `ZBLPot`, `SuttonChenPot` and
+  `EAMTablePot` gain `forcePerAtom`, which also writes per-atom energies
+  (pair terms split half to each atom, EAM and Sutton-Chen embedding to
+  its own atom) and per-atom virials; `rgpot::PerAtomPotential` in
+  `rgpot/PerAtom.hpp` detects it.
+  No virtual or data member changes, so the C++ layout is unchanged.
+  Potentials without the split stop the run with an error naming the
+  potential.
+
+- `librgpot_gromacs` (`-Dwith_gromacs_dropin=enabled`, off by default)
+  serves any rgpot potential through the libcp2k C API of the GROMACS
+  QM/MM interface.
+  A double-precision GROMACS 2024 to 2026 built with `-DGMX_CP2K=ON`
+  against it (`engines/gromacs/build_gromacs.sh`) evaluates the QM group
+  in `gmx mdrun` without PLUMED, with the energy in GROMACS'
+  `Quantum En.` term.
+  An `&RGPOT` section of the `grompp -qmi` file chooses a `pot_spec`
+  name and options or an `rgpot_engine_*` library and its configuration;
+  elements come from the topology.
+  Periodic (including triclinic) and isolated QM regions work; there is
+  no virial, so NPT is not supported, and MM charges do not act on the
+  QM region.
+  Bad input stops `mdrun` with an `rgpot-gromacs:` message.
+  New meson tests `gromacs_dropin_api` and `gromacs_dropin_mdrun`
+  compare with `rgpot-eval` through real `mdrun` runs, and
+  `engines/gromacs/bench_dropin.py` measures the per-step cost.
+
+- `pair_style rgpot` evaluates finite-range potentials by domain on more
+  than one rank, the way `pair_style eam` does.
+  For LJ, the `u0 psi` form, Morse, SuttonChen with a positive cutoff
+  and EAMTable, each rank runs the density and force stages of the
+  potential on the half neighbour list of LAMMPS, whose ghosts reach one
+  cutoff plus the skin, and the densities of a many-body potential pass
+  between the ranks between the two stages, so the force call no longer
+  runs on rank 0 alone.
+  On one rank with `mode domain`, the 16384-atom Lennard-Jones box of
+  `bench_pair_rgpot.py` takes 8.27 ms per step (`lj/cut` 8.38, the
+  gather path 15.10) and the 32000-atom CuNi box 46.84 ms (`eam/alloy`
+  44.47, the gather path 70.10).
+  Energies, forces, the global virial, `pe/atom` and `stress/atom` match
+  the gather path and `lj/cut`, `eam/alloy` and `morse` on 1, 2 and 4
+  ranks, under `newton on` and `off`, including ranks that own no atoms.
+  Engines, potentials without a finite range or the two stages,
+  `virial fd` and one-rank runs keep the gather on rank 0.
+  The new `pair_style rgpot cutoff mode auto|gather|domain` keyword
+  forces either path, and `init` logs which one runs and why.
+  In C++, `rgpot/Locality.hpp` adds `rgpot::Locality` and the concept
+  `rgpot::LocalPotential`, a non-virtual `locality()` on `LJPot`,
+  `MorsePot`, `SuttonChenPot` and `EAMTablePot`; `PotCaps` and the C++
+  layout are unchanged.
+
+- `pair_style rgpot` works as a native LAMMPS pair style.
+  It fills the global virial from the potential's stress, or from a
+  strain difference when there is none, so pressure, NPT and
+  `fix box/relax` work in orthogonal and triclinic boxes.
+  `pair_coeff * * Name [key value ...] El ...` selects an rgpot
+  potential by name and maps types to elements.
+  MPI runs gather the box on rank 0.
+  Other unit styles stop with an error.
+  `rgpot-eval` evaluates a named potential on one geometry.
+
+- `rgpot.ase.RgpotCalculator` accepts any potential class the bindings
+  expose, by class name or kind string (`"morse"`, `"ljcluster"`,
+  `"tersoffsic"`, ...; `rgpot.ase.available_kinds()` lists them), and
+  passes keyword arguments to that class's constructor.
+  It reports per-atom `energies` and `stresses` for LJ, LJ-cluster and
+  Morse, offers a finite-difference `stress` for kernels without one
+  (`numerical_stress=True`), rebuilds the potential on `calc.set(...)`,
+  and pickles, `copy`s and `deepcopy`s by rebuilding the potential from
+  its parameters.
+  It matches ASE's `LennardJones`, `MorsePotential` and an analytic
+  `EAM` for EAM-Al to 1e-10 relative, and runs under the ASE optimizers,
+  cell filters, Velocity Verlet, NEB, `Vibrations` and `SumCalculator`.
+
+- `rgpot::IPIDriver` and the `rgpot-ipi-driver` program are the client
+  side of the i-PI socket protocol (built with `with_ipi`).
+  They connect to i-PI, ASE's `SocketIOCalculator` or `IPIPot` over a
+  UNIX socket or TCP and answer `STATUS`, `INIT`, `POSDATA`, `GETFORCE`
+  and `EXIT` with any potential `engines/pot_spec.hpp` builds, returning
+  hartree, hartree/bohr and the virial `-sigma V`.
+  Open clusters get a padded box, thin periodic cells are tiled to the
+  cutoff, and `--stress-step` gives a finite-difference virial for
+  kernels without stress.
+  The flags follow `i-pi-py_driver`.
+  `rgpot-ipi-bench` times the socket round trip against a direct call;
+  `docs/orgmode/howto/ipi.org` now covers both directions and lists the
+  timings.
+
+- `scripts/export_uma_aoti.py` exports a dynamic UMA package by default:
+  the atom count (2 to `--max-atoms`, default 1024) and the edge count
+  (1 to `--max-edges`, default 300 per atom) are symbolic, so one
+  package keeps working when an NEB image or a dimer step changes the
+  neighbour list, and, with the MoLE experts kept in the graph, for
+  other molecules of the same task head.
+  The package is kept only after it matches `FAIRChemCalculator` on the
+  input, on the input with one atom moved past the cutoff, and on a
+  second molecule.
+  The checkpoint can come from `--checkpoint` or `RGPOT_UMA_CHECKPOINT`.
+  `UmaPot` refuses an atomic number above the package's `z_max` before
+  the compiled graph runs.
+
+- `scripts/export_uma_aoti.py` resolves the checkpoint once
+  (`--checkpoint`, `RGPOT_UMA_CHECKPOINT` or a Hugging Face download)
+  and records it in the package: `checkpoint_source` (`cli`, `env` or
+  `hf`), `checkpoint_path` or `checkpoint_hf_repo` and
+  `checkpoint_hf_filename`, the resolved commit as
+  `checkpoint_hf_revision`, and `checkpoint_sha256` of the file it
+  loaded.
+  `UmaPot::checkpointProvenance()` and the exporter's
+  `checkpoint_provenance()` read them back; packages exported earlier
+  load as before and report the keys absent.
+
 ### Developer
 
 - The benchmark description states the comparison in plain words.
@@ -90,6 +327,244 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or a LAMMPS checkout under the workspace could not configure.
   The path is made relative to `engines/meson.build`.
   A path outside the tree stays absolute.
+
+- CMake's `nlist_rust` test passes the script the OpenMP libraries
+  FindOpenMP chose, and the runtime's directory as an rpath, so the
+  shared library the script links finds the OpenMP runtime with
+  AppleClang, which has no `-fopenmp`.
+  Called without them, as meson calls it, the script uses `-fopenmp`
+  only if a test program links with it, so a build without OpenMP no
+  longer fails where clang takes the flag but finds no libomp.
+
+- Every CI job that runs on a runner sets `timeout-minutes`: its
+  measured p95 plus a margin that covers the longest per-test timeout it
+  runs, so meson or CTest still kills and names a hung test before the
+  job times out.
+  `ci/gha/README.md` gives the rule and the numbers, and shows how to
+  tell a job no runner took, which a timeout cannot catch, from one that
+  hung.
+  The reusable `isa-audit.yml` takes a `timeout-minutes` input, 10 by
+  default.
+
+- Every OpenMP region in the library now opens in
+  `CppCore/rgpot/Slices.hpp`, through `forEachSlice`,
+  `forEachSlicePhase` or `onFullTeam`, so a result depends on its slice
+  count and not on how many threads the runtime starts.
+  `CppCore/tests/test_openmp_confined.py` fails the test suite when
+  OpenMP appears in any other library source, `ThreadTeamTest` checks
+  the threaded potentials and neighbour tables on short, dynamic and
+  nested teams, and the `thread_limit` CI job runs the suite under
+  `OMP_THREAD_LIMIT=1` and `OMP_THREAD_LIMIT=2`.
+  The long-range summands follow the same rule, so particle mesh Ewald,
+  D3 and D4 no longer stall or skip work when the runtime starts fewer
+  threads than they ask for.
+
+- The C ABI stamp of `rgpot-core` moves to 1, 2 and 1: the
+  Hessian-vector entry points are additions, and `rgpot_potential_t`
+  keeps its layout.
+  `scripts/abi_core_baseline.txt` lists the `rgpot_*` functions the
+  `rgpot-core` shared library exports.
+  The meson test `abi_core_symbols` fails when one of them is no longer
+  exported.
+  `scripts/abi_symbols.sh` takes the name pattern with `-p`, ahead of
+  the library and its baselines.
+
+- The ISA audit proves dispatched clones from the linked library instead
+  of reading them from `rgpot/isa-allow.toml`.
+  A local function reached only behind a `__builtin_cpu_supports` test
+  or from a `target_clones` resolver may use the features that test
+  covers, so the AVX2 Cambridge Morse, cluster Lennard-Jones and Gupta
+  bodies pass the wheel audit with no entry.
+  AVX in any other function is still a violation, and the report lists
+  each clone with its dispatcher.
+
+- The `abi_symbols` test picks the `nm` mode from the library it is
+  given: `nm -D --defined-only` for a shared object and
+  `nm -g --defined-only` for a static `lib*.a` or `*.lib` archive, which
+  has no dynamic symbol table.
+  macOS still uses `nm -gU`.
+  A small fixture built as a shared object and as both archive kinds
+  runs every mode in every `with_tests` build, and checks that a shared
+  object's hidden names and an archive's missing names still fail.
+
+- `CppCore/rgpot/rpc/Potentials.ordinals` records every field, union
+  arm, enumerant and method ordinal of `Potentials.capnp` with its name
+  and type, append only.
+  `schema_ledger.py check` (meson suite `schema`, CI job
+  `schema ordinal ledger`) holds the pinned `potentials-schema` commit,
+  the local series diffs and both vendored copies to it, and refuses a
+  series diff that removes or rewrites an `@N` line or adds an ordinal
+  that is not a `local` ledger entry.
+
+- `CppCore/tests/registry.txt` lists every test with the features that
+  gate it, its kind and its options, and meson and CMake both register
+  their tests from it.
+  CMake now registers each test meson does except those only meson can
+  run, whose lines give the reason: in the build the `thread_limit` CI
+  job tests, that is 99 of meson's 107 tests, where CMake registered 31.
+  CMake's unit tests link OpenMP as meson's do, and its ABI symbol tests
+  run their script through `sh`.
+  `CuH2PotTest`, `CapnpAdapterTest` and `BridgeStressTest` take meson's
+  names, `CuH2test`, `RPCTest` and `RPCClientTest`.
+  Each build registers `test_list_parity`, which fails when the build's
+  tests or their options differ from the registry.
+  `tools/check_test_parity.sh` configures the plain, the RPC and cache,
+  and the client-only builds with meson and CMake, without building
+  them, and fails when the two register different tests.
+  The `test_parity` CI job runs it, and `ci_gate` waits on that job.
+
+- `EAMCellVerletTest` requires a NaN wherever the direct pair loop gives
+  one, whatever its sign bit, and every other value bit for bit.
+  IEEE 754 does not specify the sign of a NaN result, and optimised
+  Clang builds flip it for the forces between coincident atoms, so the
+  test failed in the macOS CMake builds and passed in the unoptimised
+  meson builds.
+
+- `docs/doccheck.py` checks the documentation against the source.
+  It requires a reference entry with Inputs, Units, Outputs and Errors
+  for every public C, C++ and Python name, and a classification for
+  every code block in the README and the docs.
+  The C names include the Metatomic and XTB engine tables and the
+  libcp2k API of the GROMACS drop-in.
+  The entry of each `*Config` struct must name every field, a reference
+  page must name every field the rgpot-local schema diffs add, and the
+  `&RGPOT` key table must list the keys the drop-in reads.
+  It runs, compiles or statically checks each block according to that
+  classification, and flags option names, paths and `RGPOT_*` names that
+  do not exist; paths that `.gitignore` covers, such as `docs/build`,
+  count as build outputs.
+  `pixi r -e docs doccheck` runs it, and the docs CI job runs it with
+  the Sphinx build, which now uses `-W --keep-going`.
+  It replaces `docs/check_c_symbols.py`; the engines CI job no longer
+  asks for the `c_symbols` test.
+
+- `potctl ci cmake-test` and `potctl ci bridge-client-build` give
+  `cmake --build` an explicit `--parallel` count:
+  `CMAKE_BUILD_PARALLEL_LEVEL` when it is set, the usable CPUs
+  otherwise.
+  A bare `-j` let make start every ready compile at once, and with the
+  whole test registry to build, the macOS CMake legs (3 cores, 7 GB)
+  spent 7 to 49 minutes compiling, where the meson legs of the same run
+  built and tested in 3 to 6.
+
+- `rgpot::simd::exp_hw_n` is declared on every target.
+  MSVC, Arm and other builds without the x86-64 hardware body get one
+  that calls `rgpot::simd::exp`, so a caller that picks the body at run
+  time compiles everywhere.
+
+- `sc_call_bench` (`meson test --benchmark sc_call_bench`) times
+  Sutton-Chen calls on free clusters of 13 to 561 atoms with no cutoff:
+  the C entry `rgpot_sutton_chen_energy_forces`, a `SuttonChenPot` built
+  per call, one kept across calls in the default and the streaming
+  neighbour mode, and a plain half-pair loop.
+  Each mode also prints its largest energy and force gaps to that loop
+  and a hash of the energy and force bits, so two builds can be compared
+  bit for bit.
+
+- `tools/check_test_parity.sh`, and so the `test_parity` CI job, also
+  reads the `compile_commands.json` meson and CMake write when
+  configured, and fails when a source both compile gets different
+  contraction or fast-math flags from each.
+  `tools/check_fp_parity.py` does the comparison.
+
+### Changed
+
+- A stored `nlist::Neighbours` list is kept when the caller wraps atoms
+  back into the periodic cell.
+  The half-skin test measures each atom's move to the nearest image of
+  its reference position, so an atom that crossed a face no longer
+  counts as having moved a cell vector, and the bins are redone after
+  such a wrap.
+  The potentials that keep such a list (`LJPot`, `LJClusterPot`,
+  `MorsePot`, `ZBLPot`, `SuttonChenPot`, `EAMPot`, `StillingerWeberSi`,
+  `TersoffSiC` and `EAMTablePot`) rebuild it less often on wrapped
+  input: on the gather path of `pair_style rgpot`, 3 instead of 40
+  builds in 112 calls for 16384 Lennard-Jones atoms.
+  One thread walks the pairs in index order, so its results keep their
+  bits; with `OMP_NUM_THREADS` above 1 the order follows the bins and
+  results agree to rounding.
+  `nlist::Builder`, whose table stores image shifts, is unchanged.
+
+- An infinite cutoff or skin in `rgpot::nlist::Neighbours` walks every
+  pair straight from the coordinates, with no bins and no stored list,
+  `i` ascending and then `j` ascending, and keeps the update for any
+  move while the atom count, the cell and the spec stay the same;
+  `allPairs()` reports it.
+  That walk takes a copy of its callback, so a caller reads back only
+  the state it captured by reference.
+  `SuttonChenPot` with `cutoff <= 0` searches that way.
+  It used to stand in a 1e6 search, which binned a cluster into one
+  cell, read `MemAvailable` twice and stored and sorted every pair on
+  each call.
+  Energies and forces keep their bits on one thread.
+  A team of threads used to leave that one cell to one thread and now
+  splits the atoms into runs, one per thread: the forces keep their
+  bits, and the energy, a sum over threads, can move in the last bits.
+
+- `EAMTablePot` keeps its pair list between force calls, with a Verlet
+  skin of `EAMTableConfig::skin` (1 Angstrom by default, `skin` in
+  `pair_coeff * * EAMTable ...` and the other hosts of
+  `rgpot::spec::build`), instead of building a list with no skin on
+  every call.
+  Energies, forces, stress and per-atom terms keep their bits for any
+  skin.
+  The spline tables were and are made once, in the constructor.
+  Because the list is per-instance scratch, `caps().reentrancy` is now
+  `Reentrancy::PerInstance`: a caller that evaluates one `EAMTablePot`
+  from several threads at once needs one instance per thread, as for
+  `LJPot`.
+  On the gather path of `pair_style rgpot` a 32000-atom CuNi step went
+  from 338.63 to 70.74 ms on one rank, with one list build in 62 calls
+  (`docs/orgmode/howto/engine-lammps.org`).
+
+- `EAMTablePot` locates each pair distance on its radial grid once per
+  pass.
+  It located it once per table before: twice per pair in the density
+  pass and three times in the force pass.
+  It also keeps the three radial tables of each element pair together
+  instead of indexing nested vectors for every pair.
+  The arithmetic is the same, so the results do not change.
+  On one rank with `mode domain`, a 32000-atom CuNi step of
+  `pair_style rgpot` went from 54.13 to 47.03 ms, against 43.87 ms for
+  `eam/alloy`.
+
+- `SuttonChenPot` keeps the powers and `1/r^2` that the force of each
+  pair takes from the density pass, and the force pass reads them back
+  instead of raising the distance to `n` and `m` a second time.
+  `setPairTermLimit` bounds the store, 32 MiB by default, and the force
+  pass computes the pairs past it again.
+  The pair lambdas inline into the walks and take their constants by
+  value, and the density and weight arrays are kept with the instance.
+  `SuttonChenPot.cc` is built with `-ffp-contract=off`, as the other
+  kernels are, so reading a term back and computing it again round
+  alike.
+  Energies, forces, the stress and the per-atom split keep their bits
+  wherever the old build fused no multiply into an add.
+
+- `potentials-schema` is pinned at 190fee6, upstream main 7fa9046 plus
+  the CP2K arm, and both vendored `Potentials.capnp` copies are that
+  file byte for byte.
+  `PotentialConfig` gains the upstream arms `xtb` @6, `tblite` @7, `uma`
+  @8, `lj` @9, `morse` @10, `zbl` @11, `d3` @12, `d4` @13, `mopac` @14,
+  `skala` @15, `expr` @16 and `cp2k` @17, with their parameter structs,
+  so rgpot numbers them as gpridge and every other consumer does.
+  `BuiltinParams` gains `config` @2, `PotentialSpec` gains `cp2k` @6,
+  `PotSpec` gains `potential` @2 and `MetatomicParams` gains
+  `lengthUnit` through `attachSystemExtras` (@13 to @18).
+
+- `rgpot_sutton_chen_energy_forces` and `rgpot_lj_eval` keep the
+  potential of their last call on each thread instead of building one
+  per call, so the next call with the same parameters and atom count,
+  and for `rgpot_lj_eval` the same atomic numbers, reuses its neighbour
+  update and scratch.
+  Any other call, and one that throws, drops it and builds a new one.
+  Energies and forces keep the bits of a potential built for the call.
+  `rgpot::Kept` in `rgpot/KeptPotential.hpp` holds one potential per
+  thread and potential type, keyed by the bits of its parameters.
+  With this and the unbounded search and kept pair terms, a Sutton-Chen
+  12-6 call on a free 55-atom cluster with no cutoff went from 60.901 to
+  13.690 microseconds on one core (`sc_call_bench`,
+  `docs/orgmode/reference/sutton_chen.org`).
 
 ### Fixed
 
@@ -139,6 +614,253 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Those directories sat on the interpreter's path, so the probes
   reported the modules present and the meson suite ran tests that need
   the libraries.
+
+- A CMake build compiles the core library sources and the reduced pair,
+  Lennard-Jones, Sutton-Chen and Tersoff potentials without
+  floating-point contraction, as meson does.
+  On arm64, where the compiler fuses `a*b+c` into one multiply-add by
+  default, the CMake library's results differed from meson's in the last
+  bits, and `ReducedPairTest` and the skewed-cell case of
+  `FastNlistTest` failed on macOS.
+
+- A CMake build with the cache links the shared RocksDB library when
+  there is one, as meson does.
+  conda-forge's static RocksDB put jemalloc ahead of libc in every
+  program that links `librgpot`, and such a program crashed in `free`
+  once it loaded `libmpi`, as the MPI calculator group and collective
+  RPC tests do.
+
+- A GFN2 single point that does not converge at the configured
+  electronic temperature is retried with smeared occupation and
+  evaluated again at that temperature.
+  The returned energy is the cooled one.
+
+- A meson build with `with_eigen=true` configures again when neither
+  pkg-config nor CMake finds `eigen3`.
+  The lookup passed `dependency()` a `subproject:` keyword, which
+  current meson rejects; it now names the fallback
+  `['eigen', 'eigen_dep']`, so Eigen comes from
+  `subprojects/eigen.wrap`.
+
+- A neighbour walk split across more slices than the OpenMP runtime
+  started threads now walks every slice.
+  `nlist::Neighbours::forCellTeam`, the threaded `nlist` builds and
+  `simd::fill_view` handed slice `t` only to thread `t`, so a build
+  without OpenMP, a call inside another OpenMP region or a run under
+  `OMP_THREAD_LIMIT` dropped the pairs of the missing threads: with
+  `OMP_NUM_THREADS=3` and `OMP_THREAD_LIMIT=2`, the threaded Sutton-Chen
+  energy came out wrong, and the macOS meson build, which has no OpenMP,
+  failed `NeighbourLayerTest`.
+  `nlist::forEachSlice` runs the slices on the threads the runtime
+  starts, so a sum taken in slice order is the same for any team.
+  A build inside another OpenMP region is no longer ruled out.
+
+- A project that vendors rgpot with `subproject()` no longer installs
+  `rgpot-lj` and the engine plugins from `engines/`.
+  They are installed only when rgpot is the top-level project, like the
+  rest of rgpot, so `meson install` in the parent no longer stops on an
+  engine output the parent never built.
+
+- A threaded pair-list `build` (`OMP_NUM_THREADS` above 1, at least 8192
+  atoms) now stores the same pairs as one thread when a pair has more
+  than one image inside the cutoff, as in a periodic box thinner than
+  two search radii.
+  Before, it kept only one image of each pair and lost the rest.
+
+- Both vendored `Potentials.capnp` copies are again the pinned
+  `potentials-schema` 190fee6 file byte for byte, so
+  `schema-sync-canonical-rpc` and `schema-sync-canonical-core` pass when
+  a parent such as gpridge resolves `potentials-schema` from its own
+  wrap.
+  The rgpot-local neighbour fields (`ForceInput.neighbors` @9,
+  `PotentialResult.neighborList` @28, `Potential.neighbours` @13 and the
+  `NeighborRequest`, `NeighborSystem` and `NeighborList` structs) moved
+  from the wrap's `diff_files` to the add-only series
+  `CppCore/rgpot/rpc/local/series`, mirrored in
+  `rgpot-core/schema/local` for the crate.
+  Meson, CMake and `rgpot-core/build.rs` apply the series and compile,
+  install and serve that effective schema, which is unchanged on the
+  wire.
+  `schema_ledger.py check` now refuses a vendored copy that differs from
+  the pinned file or carries a `local` ledger entry, a wrap that sets
+  `diff_files`, and a series mirror that drifts;
+  `schema_ledger.py apply` writes the effective schema.
+
+- Repeating `bindCalculators` with an argument of 0 or less returns the
+  stored group when it names the same split.
+  Before, the repeat compared the raw argument with the resolved size
+  and returned index -1.
+
+- The C++ potentials that share the neighbour list (LJ, Morse,
+  Sutton-Chen, ZBL, EAM, Stillinger-Weber, Tersoff) are several times
+  faster on a sheared or otherwise non-orthogonal periodic cell, with
+  bit-identical results.
+  The minimum image of a pair no longer searches the nearby lattice
+  images when the rounded image is provably the shortest, and the
+  neighbour list drops a pair without that search when every image lies
+  beyond the cutoff plus skin.
+  Through `rgpot.ase.RgpotCalculator`, a sheared 32-atom copper cell,
+  which the Morse cutoff tiles into 864 atoms, went from 203 to 37 ms
+  for the first evaluation and from 48 to 6.1 ms for each one after a
+  small move.
+
+- The Rust RPC server rejects a `calculate` request whose positions do
+  not hold three values per atom or whose box does not hold 9 values,
+  and a callback result whose forces tensor has the wrong size.
+  Before, the callback read past the end of a short request and the
+  server read past the end of short forces.
+
+- The headers in `include/rgpot` include each other by file name, so
+  `rgpot/rgpot.hpp` compiles on a case-insensitive file system such as
+  APFS or NTFS.
+  There, with `CppCore` ahead of `include` on the search path,
+  `rgpot/potential.hpp` also named `CppCore/rgpot/Potential.hpp`, and
+  code using `rgpot.hpp` failed with "no member named
+  'PotentialHandle'".
+
+- Threaded stored EAM, `LJClusterPot`, `SWSi` and `TersoffSiC` now
+  evaluate every atom when the OpenMP runtime starts fewer threads than
+  `OMP_NUM_THREADS` asks for.
+  Each split the atoms into one slice per requested thread and handed
+  slice `t` only to thread `t`, so a call inside another OpenMP region
+  or under `OMP_THREAD_LIMIT` left out the atoms of the missing threads:
+  with `OMP_NUM_THREADS=2` and `OMP_THREAD_LIMIT=1`, the stored EAM
+  energy of a 500-atom aluminium crystal was 151.6 eV off.
+  They now run their slices through `nlist::forEachSlice`, so a fixed
+  thread count gives the same bits whatever team the runtime starts.
+
+- Two `EAMPot` objects evaluated at the same time on different threads
+  no longer race on one process-wide table of element splines.
+  Each potential now keeps the tables of the elements it has seen.
+
+- `CP2KPot`, `CPMDPot`, `MOPACPot` and `NWChemPot` skip an engine
+  variable that is set but empty, as the other engine-backed potentials
+  do.
+  Before, the empty path opened the running program and stopped the
+  search with a missing-symbol error.
+
+- `D3Pot` and the `"d3"` term of `ExprPot` accept `damping` as `"bj"`,
+  `"BJ"`, `"zero"` or `"Zero"` and raise `ValueError` for any other
+  string.
+  Before, an unknown or misspelled name silently selected Becke-Johnson
+  damping.
+
+- `EAMPot` throws `std::invalid_argument` for an atomic number it has no
+  parameters for.
+  Before, it threw the bare `int` 14324, which callers catching
+  `std::exception` could not handle.
+
+- `EAMTable` builds again: its pair walk uses the `Neighbours` cell list
+  after the removal of the old pair-list cache header.
+
+- `EMTPot`, `D3Pot` and `D4Pot` rebuild their cached structure when the
+  atomic numbers change.
+  Before, they did this only when the atom count changed, so a reused
+  instance gave the energy and forces of the previous species.
+
+- `IPIPot` no longer fails with "timed out" just before its deadline.
+  The wait it passed to `poll()` was the time left rounded down to whole
+  milliseconds, so `poll()` could return while time remained; it is now
+  rounded up.
+
+- `StillingerWeberSi`, `TersoffSiC` and `IPIPot` raise
+  `rgpot.NumericalError` from `__call__` for a non-finite energy, and
+  `StillingerWeberSi` and `TersoffSiC` release the interpreter during
+  the call, like the other potentials.
+  Before, they returned the energy unchecked, and the two kernels held
+  the interpreter.
+
+- `UmaPot::caps()` reports `batched`.
+  `UmaPot` already evaluated a batch of images in one AOTInductor call,
+  but the flag was false, so a caller that trusts it, such as a nudged
+  elastic band, evaluated the images one at a time.
+
+- `UmaPot` and `libuma_engine` no longer unpack the `.pt2` into a new
+  directory under the system temporary directory, which torch left
+  behind whenever a process died and which could fill or be missing on a
+  fresh machine.
+  The package is unpacked once into
+  `<root>/aoti/<sha256 of the .pt2>.model/` and reused by later runs,
+  and concurrent processes share one unpack.
+  The root is `UmaConfig::cache_dir` or the new `UmaParams.cacheDir`,
+  then `RGPOT_CACHE_DIR`, then `$XDG_CACHE_HOME/rgpot`, then
+  `.rgpot-cache` in the working directory.
+
+- `XTBPot` and `XTBDlopen` no longer start an SCC from the iterate of
+  one that failed, and a session's GFN2 energy on hot Si clusters
+  matches a fresh start and standalone xtb.
+  The new `XTBConfig::warm_min_gap` (1 eV) uses xtb's own guess when the
+  HOMO-LUMO gap is too small for a unique SCC solution.
+  The engine exports `rgpot_xtb_set_warm_min_gap` and
+  `rgpot_xtb_warm_min_gap`.
+  `TBLitePot` drops the wavefunction of a failed SCF.
+
+- `evaluate_batch` raises `TypeError` for a positions or box entry that
+  is not a C-contiguous float64 array, as the other entry points do.
+  Before, it raised `RuntimeError` with the message `std::bad_cast`.
+
+- `from rgpot import *` now also imports `LammpsPot`, `GromacsPot`,
+  `OpenMMPot`, `rgpot_lammps_potential`, `rgpot_gromacs_potential` and
+  `rgpot_openmm_potential`.
+  They were exported but missing from `rgpot.__all__`.
+
+- `potserv` on the Morse backend applies
+  `configure(PotentialConfig.morse)`, rebuilding the pot with the sent
+  `de`, `a`, `re` and `cutoff` and keeping its switch width; it used to
+  refuse every configure call that was not for NWChem or CPMD.
+  A value it cannot use, such as a cutoff below the switch width, gets
+  `ok=false` and leaves the pot unchanged.
+  On every backend `none` is a no-op, and any other arm the backend does
+  not apply, including one from a newer schema, gets `ok=false` with a
+  message that names the arm.
+
+- `rgpot-eval LJ`, `Morse` and `SuttonChen` without a `cutoff` option
+  use the potential's own default cutoff (15, 9.5 and 40 Angstrom)
+  instead of 0.
+  `pair_style rgpot` still passes its cutoff.
+
+- `rgpot.ase.RgpotCalculator` gives the right energy, forces and stress
+  for a periodic cell narrower than twice the potential's cutoff.
+  The kernels take the minimum image of each pair, so before this a
+  32-atom argon cell with an 8.5 Angstrom LJ cutoff came out 12% too
+  high and a 4-atom EAM-Al cell gave -2.996 instead of -3.356 eV/atom.
+  The calculator now tiles such a cell into a supercell that is wide
+  enough and returns the energy per copy and the forces of the first
+  copy.
+  Structures with periodic and non-periodic axes (slabs, wires) are
+  evaluated instead of raising `ValueError`.
+
+- `rgpot.h` declares `rgpot_potential_set_peer_capabilities` only when
+  `RGPOT_HAS_SCHEMA` is defined, which the meson build does with RPC on.
+  Before, the header declared it in builds whose library did not define
+  it, so a call failed at link time.
+
+- `rgpot_engine_last_error` in the in-tree Lennard-Jones engine plugin
+  writes the terminating NUL into a one-byte buffer, as `engine_c_abi.h`
+  promises.
+  Before, it left that buffer untouched.
+
+- `rgpot_engine_set_charge_spin` on the Metatomic engine reaches the
+  model: each system carries the `rgpot::charge`,
+  `rgpot::spin_multiplicity` and `rgpot::spin` data the model declares
+  in `requested_inputs`, and the engine reads `charge`, `spin` and
+  `attachSystemExtras` from `MetatomicParams`.
+  It used to return 0 and drop the values.
+  For a value the model does not read, other than charge 0 or
+  multiplicity 1, `rgpot_engine_set_charge_spin` now returns 3 and
+  `rgpot_engine_create` fails.
+
+- `rgpot_external_potential_energy_forces` returns 1 with its usual
+  message for a null `box9` when `n` is 0, instead of reading through
+  the null pointer.
+  The LAMMPS, GROMACS and OpenMM constructors also reject an infinite
+  `u0`, `cutoff` or `psi`, which they used to accept.
+
+- `rgpot_tensor_owned_cpu_f64_2d` returns NULL with an error message for
+  NULL data, a negative extent or an overflowing size, and
+  `rgpot_tensor_device`, `rgpot_tensor_data` and `rgpot_tensor_shape`
+  return a safe value for a NULL tensor.
+  Before, these cases were undefined behaviour.
 
 ## [3.6.0] - 2026-11-13
 

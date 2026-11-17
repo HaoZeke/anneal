@@ -1,2 +1,0 @@
-`sc_call_bench` (`meson test --benchmark sc_call_bench`) times Sutton-Chen calls on free clusters of 13 to 561 atoms with no cutoff: the C entry `rgpot_sutton_chen_energy_forces`, a `SuttonChenPot` built per call, one kept across calls in the default and the streaming neighbour mode, and a plain half-pair loop.
-Each mode also prints its largest energy and force gaps to that loop and a hash of the energy and force bits, so two builds can be compared bit for bit.

@@ -1,3 +1,0 @@
-Threaded stored EAM, `LJClusterPot`, `SWSi` and `TersoffSiC` now evaluate every atom when the OpenMP runtime starts fewer threads than `OMP_NUM_THREADS` asks for.
-Each split the atoms into one slice per requested thread and handed slice `t` only to thread `t`, so a call inside another OpenMP region or under `OMP_THREAD_LIMIT` left out the atoms of the missing threads: with `OMP_NUM_THREADS=2` and `OMP_THREAD_LIMIT=1`, the stored EAM energy of a 500-atom aluminium crystal was 151.6 eV off.
-They now run their slices through `nlist::forEachSlice`, so a fixed thread count gives the same bits whatever team the runtime starts.
