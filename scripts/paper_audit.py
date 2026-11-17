@@ -77,6 +77,7 @@ UNPUSHED = {
                                                 "cited by 0f69a6b1; no pushed branch holds it",
     "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
                                                 "branch holds it",
+    "1ce3ab64493196afd25e8690648e21157d91b882": "the template-free benchmark campaign head from bench/no-templates2, with no pushed equivalent in this checkout",
 }
 
 KNOWN_GAPS = {
@@ -115,9 +116,9 @@ KNOWN_GAPS = {
     "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
     "bench/nh3-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-au55/rows-for-cluster.csv": "revision fc1af066 is not in this repository",
+    "bench/ase-au55/rows-for-cluster.csv": "revision 1ce3ab64 is not in this repository; revision fc1af066 is not in this repository",
     "bench/ase-au55/superseded.csv": "revision 33bed75f is not in this repository",
-    "bench/ase-au55/rows.csv": "revision 33bed75f is not in this repository; revision b49341e3 is not in this repository",
+    "bench/ase-au55/rows.csv": "revision 1ce3ab64 is not in this repository; revision 33bed75f is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-lj104/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-lj150/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-lj38/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
@@ -127,8 +128,11 @@ KNOWN_GAPS = {
     "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
     "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
-    "bench/ase-recommended/summary.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
+    "bench/ase-recommended/summary.csv": "revision 1ce3ab64 is not in this repository; revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                          "repository; revision b49341e3 is not in this repository",
+    "bench/gmin-panel/rows.csv": "revision 1ce3ab64 is not in this repository",
+    "bench/gmin-panel/summary.csv": "revision 1ce3ab64 is not in this repository",
+    "bench/morse-panel/template-free-rows.csv": "revision 1ce3ab64 is not in this repository",
     "paper/jctc/data/lj55_lj98/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "revision and host unrecorded (no revision or host "
