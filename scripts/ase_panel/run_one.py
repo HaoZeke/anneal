@@ -210,9 +210,9 @@ def main() -> int:
         return 2
     if SYSTEMS[system]["kind"] == "lj":
         check_lj()
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
-    ).stdout.strip()
+    revision = os.environ.get(
+        "ASE_PANEL_REVISION", "5a7f629d79be88b9d3f0cb2c6665062bda4ac625"
+    )
     spec = SYSTEMS[system]
     if arm == "anneal":
         row = run_anneal(system, seed)
