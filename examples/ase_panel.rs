@@ -13,7 +13,7 @@
 //! value_and_gradient.
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, Outcome, random_cluster, run_with_gradient,
+    Config, Ledger, Outcome, random_cluster, random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{Gupta, PairPotential};
@@ -60,7 +60,14 @@ fn main() {
             }
         };
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+    let start = match kind {
+        Kind::Lj => random_cluster(n, 0.7, cfg.min_separation, &mut rng),
+        Kind::Gold => {
+            let reduced = (3.0 * n as f64 / (4.0 * std::f64::consts::PI * 0.7)).cbrt();
+            random_cluster_in_radius(n, reduced * cfg.length_scale, cfg.min_separation, &mut rng)
+        }
+    };
+    assert_eq!(start.len(), 3 * n, "the start did not place every atom");
     let inside = AtomicU64::new(0);
     let energy = |x: ArrayView1<f64>| {
         let mark = Instant::now();
