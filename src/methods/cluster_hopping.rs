@@ -94,6 +94,7 @@ mod packing_bank;
 mod preset;
 mod torsion;
 pub(crate) use torsion::HeldHands;
+use torsion::{Topology, TorsionWalk, Turn};
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
@@ -4699,6 +4700,7 @@ where
     // Ring buffer of accepted quenched displacements for the learned proposal.
     let mut cov_buf: Vec<Array1<f64>> = Vec::new();
     let mut cov_next = 0usize;
+    let mut torsion_walk = TorsionWalk::default();
     let mut soft_fired = 0usize;
     let mut soft_recomputes = 0usize;
     // The basin the *chain* stands in, not the one the last quench produced.
@@ -7673,6 +7675,8 @@ where
             x = state;
             e = ledger.best;
         }
+        let mut turned_now: Vec<Turn> = Vec::new();
+        let spent_before = ledger.spent();
         let mut trial = if let Some(t) = hmc_trial {
             t
         } else if cov_fire {
@@ -7741,6 +7745,22 @@ where
                 _ => {
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
                         energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                    } else if let ClusterMove::Torsion {
+                        species,
+                        tolerance,
+                        mobile,
+                        rings,
+                    } = &kernels[k]
+                    {
+                        let (y, turns) =
+                            Topology::of(x.view(), species, *tolerance, mobile.as_deref(), *rings)
+                                .propose_with(
+                                    x.view(),
+                                    cfg.torsion_walk.then_some(&torsion_walk),
+                                    rng,
+                                );
+                        turned_now = turns;
+                        y
                     } else {
                         kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
@@ -9094,6 +9114,31 @@ where
         // Every hop, accepted or not, so a basin census can tell a minimum
         // that was never proposed from one that was proposed and then lost
         // to the return screen, the record gate or the acceptance test.
+        let mut torsions_changed: Vec<usize> = Vec::new();
+        if !turned_now.is_empty()
+            && (cfg.torsion_walk || std::env::var("ANNEAL_HOP_TRACE").is_ok())
+            && let ClusterMove::Torsion {
+                species,
+                tolerance,
+                mobile,
+                rings,
+            } = &kernels[k]
+        {
+            let topology = Topology::of(x.view(), species, *tolerance, mobile.as_deref(), *rings);
+            if !unquenched {
+                torsions_changed = topology.turned_between(x.view(), x_new.view());
+            }
+            if cfg.torsion_walk {
+                let keys = topology.keys();
+                let turned: Vec<_> = turned_now.iter().map(|t| keys[t.torsion]).collect();
+                let kept: Vec<_> = if accept {
+                    torsions_changed.iter().map(|&t| keys[t]).collect()
+                } else {
+                    Vec::new()
+                };
+                torsion_walk.observe(&turned, &kept, (ledger.spent() - spent_before) as f64);
+            }
+        }
         if std::env::var("ANNEAL_HOP_TRACE").is_ok() {
             let max_gradient = validation_gradient
                 .as_ref()
@@ -9101,9 +9146,14 @@ where
                 .unwrap_or(f64::NAN);
             let coordinates: Vec<String> = x_new.iter().map(|v| format!("{v:.6}")).collect();
             eprintln!(
-                "HOPTRACE {{\"hop\":{hops},\"spent\":{},\"arm\":\"{proposal_action}\",\"e\":{e:.8},\"e_screen\":{e_screen:.8},\"e_new\":{e_new:.8},\"best\":{:.8},\"drift\":{drift:.6},\"returning\":{returning},\"screened\":{screened_this},\"unquenched\":{unquenched},\"recordable\":{recordable},\"max_gradient\":{max_gradient:.6e},\"accept\":{accept},\"x\":[{}]}}",
+                "HOPTRACE {{\"hop\":{hops},\"spent\":{},\"arm\":\"{proposal_action}\",\"e\":{e:.8},\"e_screen\":{e_screen:.8},\"e_new\":{e_new:.8},\"best\":{:.8},\"drift\":{drift:.6},\"returning\":{returning},\"screened\":{screened_this},\"unquenched\":{unquenched},\"recordable\":{recordable},\"max_gradient\":{max_gradient:.6e},\"temperature\":{temperature:.8},\"delta\":{delta:.8},\"accept\":{accept},\"turned\":[{}],\"changed\":{torsions_changed:?},\"x\":[{}]}}",
                 ledger.spent(),
                 ledger.best,
+                turned_now
+                    .iter()
+                    .map(|t| format!("[{},{:.4}]", t.torsion, t.angle))
+                    .collect::<Vec<_>>()
+                    .join(","),
                 coordinates.join(",")
             );
         }

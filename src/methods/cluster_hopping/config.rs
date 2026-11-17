@@ -1389,6 +1389,18 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
+    /// Draw torsions by what they have yielded.
+    ///
+    /// A molecular hop turns one to three rotatable bonds, or one ring arc,
+    /// drawn uniformly. The walk keeps, for each torsion, the force calls
+    /// its hops have cost and the accepted hops that left it more than a
+    /// third of a turn from the walker's. A torsion's chance of being drawn
+    /// first is its uniform share scaled by the square root of its yield
+    /// per call over the walk's, the yield starting from its class's, bond
+    /// or ring arc, and a fifth of the draws stay uniform. Needs species and
+    /// groups for a lone molecule; off in every stock preset.
+    #[serde(skip_serializing_if = "is_false")]
+    pub torsion_walk: bool,
 }
 
 /// Opening hops whose quenched energy changes set
@@ -1985,6 +1997,7 @@ impl Config {
             ring_moves: false,
             hold_stereocentres: false,
             measured_energy_scale: false,
+            torsion_walk: false,
         }
     }
 
@@ -2438,6 +2451,13 @@ mod coverage_behaviour {
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
+        assert!(!recommended.torsion_walk);
+        assert!(
+            !recommended
+                .resolved_json()
+                .unwrap()
+                .contains("torsion_walk")
+        );
         assert!(
             recommended
                 .resolved_json()

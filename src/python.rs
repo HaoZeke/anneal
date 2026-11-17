@@ -3532,6 +3532,10 @@ fn rigid_probe(
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   torsion_walk: `Config::torsion_walk` of a `groups` search, the torsion a
+///     hop turns is drawn by the force calls each torsion's accepted hops
+///     have cost against the changes they have left, not uniformly. Unset
+///     keeps the preset's: off.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3561,6 +3565,7 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    torsion_walk = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3586,6 +3591,7 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    torsion_walk: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
@@ -3615,6 +3621,9 @@ fn cluster_search(
     }
     if measured_energy_scale.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("measured_energy_scale needs groups"));
+    }
+    if torsion_walk.is_some() && groups.is_none() {
+        return Err(PyValueError::new_err("torsion_walk needs groups"));
     }
     if let Some(groups) = groups.as_ref() {
         if ras || derived || communicating || length_scale.is_some() {
@@ -3741,6 +3750,9 @@ fn cluster_search(
         }
         if let Some(measured) = measured_energy_scale {
             cfg.measured_energy_scale = measured;
+        }
+        if let Some(walk) = torsion_walk {
+            cfg.torsion_walk = walk;
         }
         cfg
     } else if let Some(geometry) = water {

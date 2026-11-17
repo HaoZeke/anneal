@@ -9,6 +9,7 @@ use super::moves::{RotatableBond, covalent_radius, ring_crankshafts, rotatable_b
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use rand::seq::SliceRandom;
+use std::collections::BTreeMap;
 
 /// Added to the covalent radii sum to give the closest non-bonded approach a
 /// proposal may keep. 0.8 Å puts H···H at 1.42 Å, C···C at 2.32 Å and
@@ -28,6 +29,169 @@ const REDRAWS: usize = 4;
 
 /// Largest single repair rotation, in radians.
 const REPAIR_STEP_CAP: f64 = 0.35;
+
+/// A torsion whose side stands this far from where it was counts as turned:
+/// half the spacing of three rotamers.
+pub(crate) const TURNED: f64 = std::f64::consts::FRAC_PI_3;
+
+fn wrap(angle: f64) -> f64 {
+    let tau = std::f64::consts::TAU;
+    angle - tau * (angle / tau).round()
+}
+
+/// Dihedral of `a`, `b`, `c`, `d`, in radians on `(-pi, pi]`.
+fn dihedral(x: ArrayView1<f64>, a: usize, b: usize, c: usize, d: usize) -> f64 {
+    let v = |i: usize, j: usize| [0, 1, 2].map(|k| x[3 * j + k] - x[3 * i + k]);
+    let cross = |u: [f64; 3], w: [f64; 3]| {
+        [
+            u[1] * w[2] - u[2] * w[1],
+            u[2] * w[0] - u[0] * w[2],
+            u[0] * w[1] - u[1] * w[0],
+        ]
+    };
+    let dot = |u: [f64; 3], w: [f64; 3]| u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
+    let (b0, b1, b2) = (v(a, b), v(b, c), v(c, d));
+    let n1 = cross(b0, b1);
+    let n2 = cross(b1, b2);
+    let axis = dot(b1, b1).sqrt().max(1e-12);
+    let m1 = cross(n1, b1.map(|c| c / axis));
+    dot(m1, n2).atan2(dot(n1, n2))
+}
+
+/// Hops of memory in the walk's yield table.
+const MEMORY: f64 = 1000.0;
+
+/// Proposals' worth of the class's own yield each torsion's estimate starts
+/// from.
+const PRIOR_TRIES: f64 = 3.0;
+
+/// Share of proposals that ignore the table and draw the uniform way, so no
+/// torsion is starved by an estimate that has stopped being true.
+const EXPLORE: f64 = 0.2;
+
+/// Power of a torsion's relative yield in its draw weight.
+const SHARPNESS: f64 = 0.5;
+
+/// A torsion as the walk remembers it: the atoms at the ends of its axis,
+/// and whether it is a ring crank. The list of torsions a geometry offers
+/// can change with the geometry, so an index would not name one torsion.
+pub(crate) type TorsionKey = (usize, usize, bool);
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Yield {
+    hits: f64,
+    calls: f64,
+    tries: f64,
+}
+
+/// What each torsion has yielded per force call, as the walk has seen it.
+///
+/// A proposal that turns a torsion and is accepted with that torsion more
+/// than [`TURNED`] from the walker's earns it a hit, and every proposal
+/// pays its calls, split over the torsions it turned. A hindered rotor, or
+/// a ring arc that quenches back where it was, pays and never earns. The
+/// draw weights each torsion's share of the uniform draw by its yield
+/// relative to the walk's, so the calls go where the conformer changes.
+/// Counts fade over [`MEMORY`] hops, and a torsion's yield starts from its
+/// class's, rotatable bond or ring crank. Until the first accepted change
+/// there is nothing to weigh and the draw and the random stream are the
+/// uniform one's.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TorsionWalk {
+    seen: BTreeMap<TorsionKey, Yield>,
+}
+
+impl TorsionWalk {
+    /// Adds one hop that turned `turned` and spent `calls`. `kept` are the
+    /// turned torsions an accepted hop left more than [`TURNED`] from the
+    /// walker's.
+    pub(crate) fn observe(&mut self, turned: &[TorsionKey], kept: &[TorsionKey], calls: f64) {
+        let fade = 1.0 - 1.0 / MEMORY;
+        for v in self.seen.values_mut() {
+            v.hits *= fade;
+            v.calls *= fade;
+            v.tries *= fade;
+        }
+        let share = 1.0 / turned.len().max(1) as f64;
+        for key in turned {
+            let entry = self.seen.entry(*key).or_default();
+            entry.tries += share;
+            entry.calls += calls * share;
+            if kept.contains(key) {
+                entry.hits += share;
+            }
+        }
+    }
+
+    /// Chance of drawing each of `keys` first: the uniform draw's, moved
+    /// toward the torsions that have yielded. `ring_share` is the uniform
+    /// draw's chance of a ring crank. `None` until a torsion has yielded.
+    fn probabilities(&self, keys: &[TorsionKey], ring_share: f64) -> Option<Vec<f64>> {
+        let n = keys.len();
+        let sum = |pick: &dyn Fn(&TorsionKey) -> bool| {
+            self.seen
+                .iter()
+                .filter(|(k, _)| pick(k))
+                .fold(Yield::default(), |a, (_, v)| Yield {
+                    hits: a.hits + v.hits,
+                    calls: a.calls + v.calls,
+                    tries: a.tries + v.tries,
+                })
+        };
+        let all = sum(&|_| true);
+        if n == 0 || !(all.hits > 0.0) || !(all.calls > 0.0) || !(all.tries > 0.0) {
+            return None;
+        }
+        let per_call = all.calls / all.tries;
+        let overall = all.hits / all.calls;
+        let prior = PRIOR_TRIES * per_call;
+        let class_yield = |crank: bool| {
+            let c = sum(&|k| k.2 == crank);
+            (c.hits + prior * overall) / (c.calls + prior)
+        };
+        let class_yield = [class_yield(false), class_yield(true)];
+        let bonds = keys.iter().filter(|k| !k.2).count();
+        let cranks = n - bonds;
+        let uniform = |key: &TorsionKey| {
+            if key.2 {
+                ring_share / cranks as f64
+            } else {
+                (1.0 - ring_share) / bonds as f64
+            }
+        };
+        let weights: Vec<f64> = keys
+            .iter()
+            .map(|key| {
+                let own = self.seen.get(key).copied().unwrap_or_default();
+                let y = (own.hits + prior * class_yield[usize::from(key.2)]) / (own.calls + prior);
+                uniform(key) * (y / overall).powf(SHARPNESS)
+            })
+            .collect();
+        let total: f64 = weights.iter().sum();
+        if !(total > 0.0) {
+            return None;
+        }
+        Some(
+            keys.iter()
+                .zip(&weights)
+                .map(|(key, w)| (1.0 - EXPLORE) * w / total + EXPLORE * uniform(key))
+                .collect(),
+        )
+    }
+}
+
+/// Index drawn from `p` among `allowed`, with the weights renormalised.
+fn pick<R: Rng + ?Sized>(p: &[f64], allowed: &[usize], rng: &mut R) -> usize {
+    let total: f64 = allowed.iter().map(|&t| p[t]).sum();
+    let mut at = rng.random::<f64>() * total;
+    for &t in allowed {
+        if at < p[t] {
+            return t;
+        }
+        at -= p[t];
+    }
+    allowed[allowed.len() - 1]
+}
 
 /// Rotatable bonds and contact radii of one structure.
 #[derive(Debug, Clone)]
@@ -49,6 +213,17 @@ pub(crate) struct Topology {
     /// carry it through the plane of the other three; a turn about a
     /// rotatable bond cannot.
     hands: Vec<[usize; 5]>,
+    /// One atom off the turning side next to `fixed` and one on it next to
+    /// `pivot`, per torsion. Their dihedral about the axis reads how far the
+    /// side has turned between two geometries of one bond graph.
+    frames: Vec<Option<[usize; 2]>>,
+}
+
+/// One torsion turned by a proposal, and the angle it was turned through.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Turn {
+    pub(crate) torsion: usize,
+    pub(crate) angle: f64,
 }
 
 /// Signs of the volumes spanned by the bonds from `h[0]` to each three of
@@ -102,6 +277,7 @@ impl Topology {
         }
         let mut near = vec![false; n * n];
         let mut hands = Vec::new();
+        let mut frames = vec![None; torsions.len()];
         if !torsions.is_empty() {
             let mut nb = vec![Vec::new(); n];
             for i in 0..n {
@@ -113,6 +289,19 @@ impl Topology {
                         nb[j].push(i);
                     }
                 }
+            }
+            for (t, torsion) in torsions.iter().enumerate() {
+                let off = nb[torsion.fixed]
+                    .iter()
+                    .copied()
+                    .filter(|a| *a != torsion.pivot && !torsion.side.contains(a))
+                    .min();
+                let on = nb[torsion.pivot]
+                    .iter()
+                    .copied()
+                    .filter(|a| *a != torsion.pivot && torsion.side.contains(a))
+                    .min();
+                frames[t] = off.zip(on).map(|(a, b)| [a, b]);
             }
             for i in 0..n {
                 let mut depth = vec![usize::MAX; n];
@@ -172,7 +361,42 @@ impl Topology {
             radius: species[..n].iter().map(|&z| covalent_radius(z)).collect(),
             moves,
             hands,
+            frames,
         }
+    }
+
+    /// Each torsion as the walk names it.
+    pub(crate) fn keys(&self) -> Vec<TorsionKey> {
+        self.torsions
+            .iter()
+            .enumerate()
+            .map(|(t, torsion)| (torsion.fixed, torsion.pivot, t >= self.bonds))
+            .collect()
+    }
+
+    /// How far each torsion's side stands turned about its axis, in radians,
+    /// as the dihedral of its frame. A torsion without a frame reads zero.
+    pub(crate) fn angles(&self, x: ArrayView1<f64>) -> Vec<f64> {
+        self.torsions
+            .iter()
+            .zip(&self.frames)
+            .map(|(torsion, frame)| {
+                let Some([a, b]) = *frame else { return 0.0 };
+                dihedral(x, a, torsion.fixed, torsion.pivot, b)
+            })
+            .collect()
+    }
+
+    /// Torsions whose side stands more than [`TURNED`] from where `from`
+    /// has it, in `to`.
+    pub(crate) fn turned_between(&self, from: ArrayView1<f64>, to: ArrayView1<f64>) -> Vec<usize> {
+        self.angles(from)
+            .into_iter()
+            .zip(self.angles(to))
+            .enumerate()
+            .filter(|(_, (before, after))| wrap(after - before).abs() > TURNED)
+            .map(|(t, _)| t)
+            .collect()
     }
 
     fn contact(&self, i: usize, j: usize) -> f64 {
@@ -302,9 +526,22 @@ impl Topology {
     /// has, and a draw that inverts a crankshaft end is dropped. Without,
     /// the random stream is the torsion move's alone.
     pub(crate) fn propose<R: Rng + ?Sized>(&self, x: ArrayView1<f64>, rng: &mut R) -> Array1<f64> {
+        self.propose_with(x, None, rng).0
+    }
+
+    /// [`Self::propose`], also saying which torsions it turned and through
+    /// what angles. With a `walk` the further torsions of a multi-bond turn
+    /// are drawn from it; without one, or while it has nothing to say, the
+    /// draw and the random stream are those of [`Self::propose`].
+    pub(crate) fn propose_with<R: Rng + ?Sized>(
+        &self,
+        x: ArrayView1<f64>,
+        walk: Option<&TorsionWalk>,
+        rng: &mut R,
+    ) -> (Array1<f64>, Vec<Turn>) {
         let start = x.to_owned();
         if self.torsions.is_empty() {
-            return start;
+            return (start, Vec::new());
         }
         let cranks = self.torsions.len() - self.bonds;
         let ring_share = if cranks > 0 {
@@ -312,23 +549,55 @@ impl Topology {
         } else {
             0.0
         };
-        let mut best: Option<(f64, Array1<f64>)> = None;
+        let mut best: Option<(f64, Array1<f64>, Vec<Turn>)> = None;
         let mut order: Vec<usize> = (0..self.bonds).collect();
+        let guide = walk.and_then(|walk| walk.probabilities(&self.keys(), ring_share));
         for _ in 0..REDRAWS {
             let mut y = start.clone();
-            if cranks > 0 && (self.bonds == 0 || rng.random::<f64>() < ring_share) {
-                let crank = self.bonds + rng.random_range(0..cranks);
+            let mut turns = Vec::new();
+            let first = guide.as_ref().map(|p| {
+                let all: Vec<usize> = (0..self.torsions.len()).collect();
+                pick(p, &all, rng)
+            });
+            let ring = match first {
+                Some(t) => t >= self.bonds,
+                None => cranks > 0 && (self.bonds == 0 || rng.random::<f64>() < ring_share),
+            };
+            if ring {
+                let crank = match first {
+                    Some(t) => t,
+                    None => self.bonds + rng.random_range(0..cranks),
+                };
                 let angle = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
                 turn_bond(&mut y, &self.torsions[crank], angle);
+                turns.push(Turn {
+                    torsion: crank,
+                    angle,
+                });
             } else {
                 let mut count = 1;
                 while count < 3.min(self.bonds) && rng.random::<f64>() < 0.5 {
                     count += 1;
                 }
-                order.shuffle(rng);
-                for &t in &order[..count] {
+                let chosen = match (&guide, first) {
+                    (Some(p), Some(t)) => {
+                        let mut chosen = vec![t];
+                        while chosen.len() < count {
+                            let rest: Vec<usize> =
+                                (0..self.bonds).filter(|u| !chosen.contains(u)).collect();
+                            chosen.push(pick(p, &rest, rng));
+                        }
+                        chosen
+                    }
+                    _ => {
+                        order.shuffle(rng);
+                        order[..count].to_vec()
+                    }
+                };
+                for t in chosen {
                     let angle = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
                     turn_bond(&mut y, &self.torsions[t], angle);
+                    turns.push(Turn { torsion: t, angle });
                 }
             }
             let clean = self.repair(&mut y);
@@ -336,14 +605,15 @@ impl Topology {
                 continue;
             }
             if clean {
-                return y;
+                return (y, turns);
             }
             let p = self.penalty(&self.clashes(y.view()));
-            if best.as_ref().is_none_or(|(held, _)| p < *held) {
-                best = Some((p, y));
+            if best.as_ref().is_none_or(|(held, _, _)| p < *held) {
+                best = Some((p, y, turns));
             }
         }
-        best.map(|(_, y)| y).unwrap_or(start)
+        best.map(|(_, y, turns)| (y, turns))
+            .unwrap_or((start, Vec::new()))
     }
 }
 
@@ -636,5 +906,173 @@ mod tests {
         let mut untouched = StdRng::seed_from_u64(1);
         assert_eq!(top.propose(x.view(), &mut rng), x);
         assert_eq!(rng.random::<u64>(), untouched.random::<u64>());
+    }
+
+    /// A zig-zag chain of `n` carbons in one plane, anti throughout.
+    fn zigzag(n: usize) -> Array1<f64> {
+        let half = (0.5 * 112.0_f64).to_radians();
+        let mut x = Array1::zeros(3 * n);
+        for i in 1..n {
+            x[3 * i] = x[3 * (i - 1)] + 1.52 * half.sin();
+            x[3 * i + 1] = if i % 2 == 1 { 1.52 * half.cos() } else { 0.0 };
+        }
+        x
+    }
+
+    #[test]
+    fn a_turn_reads_back_as_a_change_in_that_torsion_alone() {
+        let x = zigzag(8);
+        let top = Topology::of(x.view(), &[6; 8], 1.25, None, false);
+        assert_eq!(top.bonds, 5);
+        assert!(top.turned_between(x.view(), x.view()).is_empty());
+        for t in 0..top.bonds {
+            let mut y = x.clone();
+            turn_bond(&mut y, &top.torsions[t], 2.0);
+            let (before, after) = (top.angles(x.view()), top.angles(y.view()));
+            assert!((wrap(after[t] - before[t]).abs() - 2.0).abs() < 1e-9);
+            assert_eq!(top.turned_between(x.view(), y.view()), vec![t]);
+            let mut small = x.clone();
+            turn_bond(&mut small, &top.torsions[t], 0.5 * TURNED);
+            assert!(top.turned_between(x.view(), small.view()).is_empty());
+        }
+    }
+
+    fn bond(t: usize) -> TorsionKey {
+        (t, t + 1, false)
+    }
+
+    fn crank(t: usize) -> TorsionKey {
+        (t, t + 1, true)
+    }
+
+    #[test]
+    fn the_walk_has_nothing_to_weigh_until_a_turn_is_kept() {
+        let keys: Vec<_> = (0..5).map(bond).collect();
+        let mut walk = TorsionWalk::default();
+        assert!(walk.probabilities(&keys, 0.0).is_none());
+        for _ in 0..30 {
+            walk.observe(&[bond(1), bond(3)], &[], 90.0);
+        }
+        assert!(walk.probabilities(&keys, 0.0).is_none());
+        walk.observe(&[bond(2)], &[bond(2)], 90.0);
+        assert!(walk.probabilities(&keys, 0.0).is_some());
+    }
+
+    #[test]
+    fn the_walk_moves_the_draw_toward_torsions_that_yield_and_starves_none() {
+        let keys: Vec<_> = (0..5).map(bond).collect();
+        let mut walk = TorsionWalk::default();
+        for _ in 0..40 {
+            walk.observe(&[bond(2)], &[bond(2)], 80.0);
+            for t in [0, 1, 3, 4] {
+                walk.observe(&[bond(t)], &[], 80.0);
+            }
+        }
+        let p = walk
+            .probabilities(&keys, 0.0)
+            .expect("a torsion has yielded");
+        assert!((p.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        assert!(p[2] > 0.5, "{p:?}");
+        let floor = EXPLORE / 5.0;
+        assert!(p.iter().all(|&q| q >= floor - 1e-12), "{p:?}");
+    }
+
+    #[test]
+    fn a_class_that_yields_takes_its_share_from_one_that_does_not() {
+        let keys: Vec<_> = (0..4).map(bond).chain((10..12).map(crank)).collect();
+        let mut walk = TorsionWalk::default();
+        for _ in 0..40 {
+            for t in 0..4 {
+                walk.observe(&[bond(t)], &[], 80.0);
+            }
+            for t in 10..12 {
+                walk.observe(&[crank(t)], &[crank(t)], 80.0);
+            }
+        }
+        let p = walk.probabilities(&keys, 0.1).expect("cranks have yielded");
+        assert!(p[4] + p[5] > 0.5, "{p:?}");
+        let mut flat = TorsionWalk::default();
+        for _ in 0..40 {
+            for key in &keys {
+                flat.observe(&[*key], &[*key], 80.0);
+            }
+        }
+        let q = flat.probabilities(&keys, 0.1).expect("all have yielded");
+        assert!((q[4] + q[5] - 0.1).abs() < 1e-9, "{q:?}");
+    }
+
+    #[test]
+    fn a_torsion_the_geometry_stops_offering_keeps_its_record() {
+        let mut walk = TorsionWalk::default();
+        for _ in 0..20 {
+            walk.observe(&[crank(7)], &[crank(7)], 80.0);
+            walk.observe(&[bond(0)], &[], 80.0);
+        }
+        let without: Vec<_> = vec![bond(0), bond(1)];
+        let with: Vec<_> = vec![bond(0), bond(1), crank(7)];
+        assert!(walk.probabilities(&without, 0.2).is_some());
+        let p = walk.probabilities(&with, 0.2).expect("seen");
+        assert!(p[2] > 0.5, "{p:?}");
+    }
+
+    #[test]
+    fn a_trained_walk_proposes_the_torsion_that_yields_more_often() {
+        let x = zigzag(8);
+        let top = Topology::of(x.view(), &[6; 8], 1.25, None, false);
+        let keys = top.keys();
+        let mut walk = TorsionWalk::default();
+        for _ in 0..40 {
+            walk.observe(&[keys[2]], &[keys[2]], 80.0);
+            for t in [0, 1, 3, 4] {
+                walk.observe(&[keys[t]], &[], 80.0);
+            }
+        }
+        let share = |walk: Option<&TorsionWalk>| {
+            let mut rng = StdRng::seed_from_u64(21);
+            let hits = (0..400)
+                .filter(|_| {
+                    top.propose_with(x.view(), walk, &mut rng)
+                        .1
+                        .iter()
+                        .any(|t| t.torsion == 2)
+                })
+                .count();
+            hits as f64 / 400.0
+        };
+        let (plain, guided) = (share(None), share(Some(&walk)));
+        assert!(guided > plain + 0.15, "{plain} against {guided}");
+    }
+
+    #[test]
+    fn a_walk_with_nothing_to_say_proposes_what_the_plain_draw_does() {
+        let x = zigzag(8);
+        let top = Topology::of(x.view(), &[6; 8], 1.25, None, false);
+        let walk = TorsionWalk::default();
+        for seed in 0..8 {
+            let mut plain = StdRng::seed_from_u64(seed);
+            let mut guided = StdRng::seed_from_u64(seed);
+            let (y, turns) = top.propose_with(x.view(), None, &mut plain);
+            let (z, again) = top.propose_with(x.view(), Some(&walk), &mut guided);
+            assert_eq!(y, z);
+            assert_eq!(turns, again);
+            assert_eq!(top.propose(x.view(), &mut StdRng::seed_from_u64(seed)), y);
+            assert_eq!(plain.random::<u64>(), guided.random::<u64>());
+        }
+    }
+
+    #[test]
+    fn the_turns_a_proposal_reports_are_the_ones_it_made() {
+        let x = zigzag(8);
+        let top = Topology::of(x.view(), &[6; 8], 1.25, None, false);
+        let mut rng = StdRng::seed_from_u64(9);
+        for _ in 0..20 {
+            let (_, turns) = top.propose_with(x.view(), None, &mut rng);
+            assert!((1..=3).contains(&turns.len()));
+            let mut ids: Vec<usize> = turns.iter().map(|t| t.torsion).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), turns.len());
+            assert!(turns.iter().all(|t| t.torsion < top.bonds));
+        }
     }
 }
