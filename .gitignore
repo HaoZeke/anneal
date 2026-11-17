@@ -305,6 +305,9 @@ bench/growpal-h2h-v2/.asv/
 # Water GMIN head-to-head scratch. rows.csv, summary.csv and verify.csv are the record.
 bench/water-gmin/.asv/
 
+# GMIN panel asv scratch. rows.csv and summary.csv are the record.
+bench/gmin-panel/.asv/
+
 # Covalent, TRIC and (H2O)20 GOAT asv scratch. before/, after/, v2/, v3/
 # and the results CSVs are the record.
 bench/covalent-h2h/asv/
