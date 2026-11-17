@@ -870,8 +870,7 @@ def manuscript_ase(audit: Audit) -> None:
     rev_gmin_text = sorted(rev_gmin)[0][:8]
     audit.cell(TEX, "the GMIN panel revision", GMIN_PANEL_REVISION[:8], rev_gmin_text)
     audit.said(TEX, f"{name('m55r14')} is in both panels: {hits('m55r14', 'recommended')} of 12 on revision "
-                    f"\\texttt{{{rev_morse[:8]}}} with the preset scaled to the Morse pair, and {of('m55r14', 'anneal')} "
-                    f"on \\texttt{{{rev_gmin_text}}} with the Morse driver of Section~\\ref{{sec:gmin}}.")
+                    f"\\texttt{{{rev_morse[:8]}}} and {of('m55r14', 'anneal')} on \\texttt{{{rev_gmin_text}}}.")
     p_au = fisher(hits_of(gmin_au[0]), len(gmin_au[0]), hits_of(gmin_au[1]), len(gmin_au[1]))
     audit.said(TEX, f"On {label('au55')} this setting hits {au_gmin[0]} in the GMIN panel, where GMIN hits {au_gmin[1]} "
                     f"and Fisher's \\(p\\) is {show_p(p_au)}.")
@@ -2709,6 +2708,80 @@ def revision_map(audit: Audit) -> None:
                  f"{len(UNPUSHED)} revisions", f"{len({r['revision'] for r in rows})} mapped")
 
 
+def manuscript_followups(audit: Audit) -> None:
+    """The cluster-preset hits, the wall-cap reconciliation, the GMIN settings, and the M55 disclosures."""
+    ase = ase_groups(audit)
+    _panel, gmin = gmin_panel_groups(audit)
+    names = {"lj38": "LJ\\(_{38}\\)", "lj55": "LJ\\(_{55}\\)", "lj98": "LJ\\(_{98}\\)", "lj104": "LJ\\(_{104}\\)",
+             "lj150": "LJ\\(_{150}\\)", "au55": "Au\\(_{55}\\)"}
+    hits = [hits_of(ase[(system, "anneal")]) for system in ASE_PANEL]
+    audit.said(TEX, f"Its hits are {', '.join(map(str, hits[:-1]))}, and {hits[-1]} of 12 on "
+                    f"{', '.join(names[s] for s in ASE_PANEL[:-1])}, and {names['au55']}.")
+    audit.cell(TEX, "cluster-preset arm rows per system", "12", float(len(ase[("lj38", "anneal")])))
+
+    summary = audit.rows("bench/ase-recommended/summary.csv")
+    caps = {r["system"]: float(r["wall_cap_s"]) for r in summary if r["arm"] == "recommended"}
+    gofee = {(r["system"], r["arm"]): r for r in audit.rows("bench/ase-gofee-h2h/summary.csv")}
+    mh38, mh55 = gofee[("lj38", "ase_mh")], gofee[("lj55", "ase_mh")]
+    audit.said(TEX, f"ASE minima hopping on 0 of 12 seeds at LJ\\(_{{38}}\\) and LJ\\(_{{55}}\\), because its runs stop at wall caps "
+                    f"of {caps['lj38']:.3f} and {caps['lj55']:.3f}~s.")
+    audit.said(TEX, f"They hit LJ\\(_{{38}}\\) on {mh38['hits']} of {mh38['n']} seeds in a median wall of "
+                    f"{float(mh38['wall_median_s']):.1f}~s and LJ\\(_{{55}}\\) on {mh55['hits']} of {mh55['n']} in "
+                    f"{float(mh55['wall_median_s']):.1f}~s, both far beyond those caps.")
+    audit.cell(TEX, "gofee ASE MH LJ38 and LJ55 are uncapped", "0 0", f"{mh38['capped']} {mh55['capped']}")
+    audit.cell(TEX, "gofee walls exceed the panel caps", "1", float(float(mh38["wall_median_s"]) > caps["lj38"]
+                                                                  and float(mh55["wall_median_s"]) > caps["lj55"]))
+    for system in ("lj38", "lj55"):
+        audit.cell(TEX, f"tab:ase ASE MH {system} hits", "0", float(hits_of(ase[(system, "ase_mh")])))
+
+    g98, g75 = gmin[("lj98", "gmin")], gmin[("lj75", "gmin")]
+    near98 = sum(abs(float(r["best"]) + 543.6429) < 1e-3 for r in g98)
+    other98 = [float(r["best"]) for r in g98 if abs(float(r["best"]) + 543.6429) >= 1e-3]
+    near75 = sum(abs(float(r["best"]) + 396.2822) < 1e-3 for r in g75)
+    audit.cell(TEX, "panel GMIN LJ98 hits and LJ75 hits", "0 0", f"{hits_of(g98)} {hits_of(g75)}")
+    audit.cell(TEX, "panel GMIN LJ98 stuck runs", "11", float(near98))
+    audit.cell(TEX, "panel GMIN LJ98 other run", "-540.7447", f"{other98[0]:.4f}")
+    audit.cell(TEX, "panel GMIN LJ75 stuck runs", "12", float(near75))
+    audit.said(TEX, "Eleven of its 12 LJ\\(_{98}\\) runs end at \\(-543.6429\\) and one at \\(-540.7447\\), and all 12 of its "
+                    "LJ\\(_{75}\\) runs end at \\(-396.2822\\).")
+    sym = audit.rows("paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv")
+    calls = sorted(int(float(r["force_to_hit"])) for r in sym if r["hit"].strip().lower() in ("1", "true", "yes"))
+    audit.said(TEX, f"GMIN hit LJ\\(_{{75}}\\) on {len(calls)} of {len(sym)} seeds in a median of "
+                    f"{int(median(calls))} force calls.")
+    audit.said(TEX, "GMIN hit LJ\\(_{98}\\) on 64 of 64, as the Supporting Information records.")
+    audit.said(SI, "and hit on 200 of 200 seeds.")
+    audit.cell(SI, "the sym-starts rows hit", "200", float(len(calls)))
+    audit.said(TEX, "with \\(T=1.0\\), \\texttt{NEWRESTART 40}, and an energy difference of 0.003")
+    data = "examples/h2h_gmin_lj.data"
+    for fragment in ("TEMPERATURE 1.0", "NEWRESTART 40", "EDIFF 0.003"):
+        audit.said(data, fragment)
+    audit.record("SYMMETRISE" not in audit.text(data), data, "the panel input has no symmetrization keyword", "absent",
+                 "absent" if "SYMMETRISE" not in audit.text(data) else "present")
+    audit.said("paper/jctc/data/lj75_gmin/provenance.txt", "SYMMETRISE")
+    audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_ALIGN=OFF")
+    audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_MPI=OFF")
+    audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_OPENMP=OFF")
+    audit.said(TEX, "GMIN is built without ALIGN, MPI, or OpenMP and linked against the reference BLAS and LAPACK 3.12.0.")
+
+    cap = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "anneal")] if r["hit"] == "1"]
+    gm = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "gmin")] if r["hit"] == "1"]
+    ar = [int(r["evals_to_hit"]) for r in ase[("m55r6", "recommended")] if r["hit"] == "1"]
+    audit.said(TEX, f"so the {len(cap)} hits of this setting come at {min(cap)} to {max(cap)} calls, from the cap and not from a move.")
+    audit.said(TEX, f"GMIN hits the same cluster in {min(gm)} to {max(gm)} calls.")
+    audit.said(TEX, f"its {len(ar)} hits at the same cluster come at {min(ar)} to {max(ar)} calls.")
+    tests = "src/methods/cluster_hopping/mackay_cap_tests.rs"
+    audit.said(tests, "fn the_rho6_cap_quenches_to_the_minimum_at_38_and_55()")
+    audit.said(tests, "fn the_flag_is_inert_past_the_two_shell_body()")
+    audit.said("examples/h2h_morse.rs", "let cfg = Config::recommended(spec.n);")
+    audit.said("bench/ase-nonlj/README.md", "Anneal `recommended` uses `Config::recommended_with_scales`")
+    audit.cell(TEX, "the M55 rho=14 revisions", "5 7", " ".join(str(hits_of(g)) for g in (
+        ase[("m55r14", "recommended")], gmin[("m55r14", "anneal")])))
+    audit.said(TEX, "The two panels differ in revision and in that scaling, and no run separates the two, so we do not "
+                    "assign the difference to either.")
+    audit.said(TEX, "Recommended is the preset of this article.")
+    audit.said(TEX, "Derived adds the budget window and the Bayes screen of")
+
+
 def run(report: bool = False, write_map: bool = False, pre_submission: bool = False) -> int:
     problems = unauditable()
     if problems:
@@ -2719,7 +2792,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, cover_letter):
+                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, cover_letter):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

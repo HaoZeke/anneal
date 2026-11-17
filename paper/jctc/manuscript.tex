@@ -931,10 +931,13 @@ No join is a barrier.}
 
 \begin{figure*}
 \centering
-\includegraphics[width=\textwidth,height=0.72\textheight,keepaspectratio]{landfold_maps.pdf}
+\includegraphics[width=\textwidth,height=0.68\textheight,keepaspectratio]{landfold_maps.pdf}
 \caption{Maps of the Lennard-Jones minima and of the TIP4P hexamer.
 Each panel runs from the lowest free energy to the highest, and the
 minimum is marked.
+Recommended is the preset of this article.
+Derived adds the budget window and the Bayes screen of
+equation~\ref{eq:screen} with its cost-asymmetric threshold.
 (a) LJ\(_{38}\) derived, aggregate, 72 seeds; (b) LJ\(_{38}\) recommended, aggregate, 72 seeds; (c) LJ\(_{55}\) derived, representative, seed 2000; (d) LJ\(_{55}\) derived, aggregate, 48 seeds; (e) LJ\(_{55}\) recommended, representative, seed 2000; (f) LJ\(_{55}\) recommended, aggregate, 48 seeds; (g) LJ\(_{75}\) derived, representative, seed 2000; (h) LJ\(_{75}\) derived, aggregate, 200 seeds; (i) LJ\(_{75}\) recommended, representative, seed 2000; (j) LJ\(_{75}\) recommended, aggregate, 200 seeds; (k) LJ\(_{98}\) derived, representative, seed 2000; (l) LJ\(_{98}\) recommended, representative, seed 2000; (m) TIP4P hexamer, representative, seed 0; (n) TIP4P hexamer, aggregate, 4 seeds.
 Panels (a) to (h) are drawn as vectors from the landscape tables.
 Panels (i) to (n) show the sealed raster maps of the campaigns, because
@@ -1001,7 +1004,7 @@ Every wall time in this article comes from one virtual machine, host name
 It has 8 cores of an Intel Xeon Processor, family 6, model 207, which the
 hardware receipt lists at 2400~MHz under KVM, on x86\_64 and Ubuntu 24.04, with
 Rust 1.88.0 and gfortran 13.3.0.
-GMIN is linked against the reference BLAS and LAPACK 3.12.0.
+GMIN is built without ALIGN, MPI, or OpenMP and linked against the reference BLAS and LAPACK 3.12.0.
 Each run uses one thread, pinned to core 0 with \texttt{taskset}, and the other
 processes of the session sit on cores 1--7.
 The panel logs name the processor and the compilers and no more.
@@ -1077,6 +1080,20 @@ The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\) and
 They are the baseline in Section~\ref{sec:cross-field}.
 They are not a new comparison with GMIN.
 
+At M\(_{55}\) and \(\rho=6\) the cap is the complete Mackay icosahedron, which is the Cambridge minimum, so the 12 hits of this setting come at 345 to 709 calls, from the cap and not from a move.
+GMIN hits the same cluster in 4594 to 103829 calls.
+The ASE panel runs another revision, and its 12 hits at the same cluster come at 2266 to 47255 calls.
+At M\(_{80}\) and \(\rho=6\) the cap has no sites, so that row is a search of the moves alone, and this code loses that row.~\rerun{6}
+
+GMIN is run here differently from two earlier campaigns.
+The panel runs one input at every size, the Wales-group LJ\(_{38}\) introduction file with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, and no symmetrization keyword, from the start that this code writes for the seed.
+An earlier campaign on seeds 0--63 at a ceiling of \(1\times 10^{6}\) calls has GMIN hit LJ\(_{98}\) on 64 of 64, as the Supporting Information records.
+A separate campaign gave GMIN the published LJ\(_{75}\) input with symmetrization and the OptBench starts, and GMIN hit LJ\(_{75}\) on 200 of 200 seeds in a median of 33122 force calls.
+In the panel GMIN hits LJ\(_{98}\) and LJ\(_{75}\) on 0 of 12 seeds.
+Eleven of its 12 LJ\(_{98}\) runs end at \(-543.6429\) and one at \(-540.7447\), and all 12 of its LJ\(_{75}\) runs end at \(-396.2822\).
+So the panel measures GMIN under one setting at every size, and not GMIN tuned to each cluster.
+No run of the panel's GMIN with the per-size input exists, so the panel does not say whether the input, the symmetrization, or the start separates the two results.~\rerun{5}
+
 % gmin-panel table: start
 \begin{table}
 \caption{This work against GMIN on one host in one session.
@@ -1148,6 +1165,8 @@ The cap of the basin-hopping and minima-hopping runs is three times
 the slowest wall of the panel's cluster-preset arm on that cluster.~\rerun{5}
 That arm is not the setting of this article, and the tables leave it
 out.
+Its hits are 10, 12, 4, 0, 0, and 0 of 12 on LJ\(_{38}\), LJ\(_{55}\),
+LJ\(_{98}\), LJ\(_{104}\), LJ\(_{150}\), and Au\(_{55}\).
 No run of this setting reached its cap.
 A run stopped at the cap is a miss with fewer calls than the budget, so
 its calls to the minimum are censored.
@@ -1305,6 +1324,14 @@ LJ\(_{75}\) & This work & \(4\times 10^{6}\) & 6/6 & 0 & 979290 & 26.220 \\
 \end{table}
 % gofee table: end
 
+Table~\ref{tab:ase} shows ASE minima hopping on 0 of 12 seeds at
+LJ\(_{38}\) and LJ\(_{55}\), because its runs stop at wall caps of
+4.654 and 4.425~s.
+The runs of Table~\ref{tab:gofee} have no wall cap.
+They hit LJ\(_{38}\) on 1 of 6 seeds in a median wall of 1037.8~s and
+LJ\(_{55}\) on 6 of 6 in 410.4~s, both far beyond those caps.
+The two tables are different runs, and neither contradicts the other.~\rerun{5}
+
 \subsection{TIP4P clusters}
 Ten, fifteen, and twenty TIP4P molecules were run for six seeds,
 0 through 5, at \(5\times 10^{5}\) force calls.
@@ -1391,6 +1418,20 @@ GFN2-xTB with xtb 6.7.1.~\rerun{7}
 \cite{gundeIraShapeMatching2021}
 The 192-seed geometries were not kept, so those two counts stay at
 that scoring.
+Figure~\ref{fig:water-crest} draws the four arms of that campaign.
+
+\begin{figure}
+\centering
+\includegraphics[width=\linewidth]{water_crest.pdf}
+\caption{The water hexamer against CREST on 192 seeds at 4000 force calls.
+(a) The share of the seeds that hit for each arm, with the 95\% Wilson
+interval.
+(b) The hit rate of each hop arm less that of CREST, with the Newcombe
+interval and the exact McNemar \(p\).
+The arms are the default hop, the hop with the budget-fair polish, CREST,
+and CREST with the polish under the same budget.~\rerun{7}}
+\label{fig:water-crest}
+\end{figure}
 
 Table~\ref{tab:crest-counters} lists two CREST counters.
 The old counter sums the dynamics steps and the optimization steps.
@@ -1562,9 +1603,13 @@ M\(_{55}\) at \(\rho=14\) on 7 of 12, and M\(_{80}\) at \(\rho=14\) on
 9 of 12, where GMIN hits 12, 0, and 0, and it hits M\(_{80}\) at
 \(\rho=6\) on 2 of 12, where GMIN hits 12.
 M\(_{55}\) at \(\rho=14\) is in both panels: 5 of 12 on revision
-\texttt{90b88235} with the preset scaled to the Morse pair, and 7 of
-12 on \texttt{c2de652d} with the Morse driver of
-Section~\ref{sec:gmin}.
+\texttt{90b88235} and 7 of 12 on \texttt{c2de652d}.
+The Mackay cap is off at \(\rho=14\), so it does not explain the
+difference.
+The ASE panel scales the preset to the Morse pair, and the driver
+\path{examples/h2h_morse.rs} of this repository runs the preset unscaled.
+The two panels differ in revision and in that scaling, and no run
+separates the two, so we do not assign the difference to either.
 On Au\(_{55}\) this setting hits 6 of 12 in the GMIN panel, where GMIN
 hits 0 of 12 and Fisher's \(p\) is 0.014.
 In the ASE panel it hits 0 of 12, as do both ASE arms, and its median

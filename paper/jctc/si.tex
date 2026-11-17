@@ -123,6 +123,11 @@ The encounter-curve figure draws that earlier campaign: the recommended
 hop, the derived hop, and the Wales-group basin-hopping program (GMIN),
 on 200 seeds.
 The panel prints that run's PAR-2 values.
+Figure~\ref{fig:si-lj75-ecdf} draws it.
+Its GMIN arm ran the published LJ\(_{75}\) input with symmetrization, from
+the OptBench starts, and hit on 200 of 200 seeds.
+The same-session panel of the main text hit LJ\(_{75}\) on 0 of 12 seeds
+with one input at every size and the start that this code writes.
 We keep the source archive at \path{logs/lj75-source-37535ec1.tar.xz}.
 It includes \texttt{LICENSE.txt}.
 The notice reads Copyright (c) 2023 anneal core developers.
@@ -145,6 +150,17 @@ The hexamer engine digest is the \texttt{engine\_sha256} line of
 That digest is
 \texttt{\seqsplit{4836648ee77203e9462d51e25a1970b3f0df3a3bcd126f9a7454f6896ac66df8}}.
 The hexamer wall-time medians are in \path{logs/hexamer-walls.txt}.
+
+\begin{figure}
+\centering
+\includegraphics[width=0.8\textwidth]{lj75_ecdf.pdf}
+\caption{The share of the 200 LJ\(_{75}\) runs that have hit against the force
+calls spent, for the recommended hop, the derived hop, and GMIN with
+core-orbit symmetrization.
+A miss never steps the curve.
+A dotted line marks each arm's call PAR-2.}
+\label{fig:si-lj75-ecdf}
+\end{figure}
 
 \section{Structure plates, sketch-maps, and landfold}
 Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.
@@ -255,7 +271,7 @@ Table~\ref{tab:gofee-si} gives the ASE basin hopping, the ASE minima hopping, an
 AGOX GOFEE on the panel systems that are not Lennard-Jones.
 The potential is that of this code, through \texttt{asg\_eval} for the Gupta
 systems.
-The rows are the arms measured in \texttt{bench/ase-gofee-h2h/asg2-summary.csv}.
+The rows are the arms measured in \path{bench/ase-gofee-h2h/asg2-summary.csv}.
 The other arms of that file are rows recorded in other campaigns, and they are not
 repeated here.
 
