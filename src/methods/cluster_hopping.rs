@@ -3489,9 +3489,28 @@ fn stalled(cfg: &Config, quiet: usize, longest_quiet: usize) -> bool {
             .max((cfg.escape_stall_factor * longest_quiet as f64) as usize)
 }
 
+/// Whether one quarter of the search budget has passed without a new record
+/// or a fresh population member.
+///
+/// The budget fraction makes the restart law independent of system size and
+/// potential units. `restart_patience` remains a lower bound for short runs.
+fn population_restart_due(
+    budget: usize,
+    restart_patience: usize,
+    spent: usize,
+    best_at: usize,
+    restarted_at: usize,
+) -> bool {
+    let window = budget.div_ceil(4).max(restart_patience.max(1));
+    spent.saturating_sub(best_at.max(restarted_at)) >= window
+}
+
 #[cfg(test)]
 mod biased_metropolis_tests {
-    use super::{Config, biased_metropolis, returns_to_best, returns_to_deposit, stalled};
+    use super::{
+        Config, biased_metropolis, population_restart_due, returns_to_best, returns_to_deposit,
+        stalled,
+    };
     use crate::bias::{BasinBias, Bias, SortedPairs};
     use ndarray::Array1;
     use rand::SeedableRng;
@@ -3595,6 +3614,22 @@ mod biased_metropolis_tests {
         assert!(stalled(&cfg, patience, 0));
         assert!(!stalled(&cfg, 2 * patience - 1, patience));
         assert!(stalled(&cfg, 2 * patience, patience));
+    }
+
+    #[test]
+    fn a_population_restart_uses_budget_fraction_and_resets_on_progress() {
+        assert!(!population_restart_due(1_000, 20, 249, 0, 0));
+        assert!(population_restart_due(1_000, 20, 250, 0, 0));
+        assert!(!population_restart_due(1_000, 20, 499, 250, 0));
+        assert!(population_restart_due(1_000, 20, 500, 250, 0));
+        assert!(!population_restart_due(1_000, 20, 499, 0, 250));
+        assert!(population_restart_due(1_000, 20, 500, 0, 250));
+    }
+
+    #[test]
+    fn restart_patience_is_the_floor_for_short_budgets() {
+        assert!(!population_restart_due(40, 20, 19, 0, 0));
+        assert!(population_restart_due(40, 20, 20, 0, 0));
     }
 }
 
@@ -4921,6 +4956,10 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    // A local escape resets `charged_at_best`; a population restart must not.
+    // Keep its own clock so repeated local leaves cannot consume the whole
+    // budget inside one funnel.
+    let mut last_population_restart = ledger.spent();
     // CNA labels are collected for diagnostics only and never read by search.
     let mut packing = packing_bank::PackingBank::new();
     let packing_cutoff = 1.2 * cfg.length_scale;
@@ -5594,14 +5633,22 @@ where
                 collective.observe(false, false);
             }
         }
+        let population_due = population_restart_due(
+            ledger.budget(),
+            cfg.restart_patience,
+            ledger.spent(),
+            lowest_at,
+            last_population_restart,
+        );
         if internal_action.is_none()
             && cfg.restart_on_stall
-            && !cfg.escape_on_stall
             && !cfg.move_library.is_rigid_body()
-            && call_due
+            && population_due
         {
-            let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
+            let fresh =
+                random_cluster_in_radius(x.len() / 3, cfg.start_radius(), cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
+            last_population_restart = ledger.spent();
             charged_at_best = ledger.spent();
             best_seen = ledger.best;
             if energy.is_finite() && relaxed.len() == x.len() {
