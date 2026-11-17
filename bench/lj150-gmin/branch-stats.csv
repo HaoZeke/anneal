@@ -1,0 +1,2 @@
+system,n,anneal_hits,gmin_hits,fisher_p,anneal_evals_median,gmin_evals_median,mannwhitney_u,mannwhitney_p,anneal_pot_median_s,gmin_pot_median_s,mannwhitney_p_pot,anneal_outside_median_s,gmin_outside_median_s,mannwhitney_p_outside,anneal_revision,gmin_revision,host
+lj150,12,11,9,0.590062,843181.500000,3129518.500000,51.5,0.247183,29.842950,292.143706,0.014138,22.188513,22.578294,0.260236,396a8c9de6e829be4e2fbda0431904363b8d9d26,aac1548a8aec13b53ad12a8d6904625081685d2e,bench

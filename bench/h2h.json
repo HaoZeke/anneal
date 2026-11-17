@@ -467,6 +467,41 @@
       ]
     },
     {
+      "rule": "gmin_h2h_lj150_branch",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/gmin_h2h/run_campaign.py",
+        "scripts/gmin_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/gmin_h2h/run_campaign.py",
+        "name": "PAPER_BUDGETS",
+        "keys": [
+          150
+        ]
+      },
+      "asv": "bench/gmin-h2h/benchmarks/gmin_h2h.py::GminHeadToHeadLJ150",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/lj150-gmin/branch-rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        },
+        {
+          "path": "bench/lj150-gmin/branch-summary.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
       "rule": "pimc_lj38",
       "competitors": [
         "RPQA"

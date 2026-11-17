@@ -514,6 +514,30 @@ rule gmin_h2h_lj150:
         """
 
 
+# The LJ150 panel again with `Config::branch_on_stall` on in the anneal arm
+# (H2H_BRANCH=1), anneal built from `anneal_rev` (default this checkout's
+# HEAD), GMIN rerun in the same session. Rows go to
+# bench/lj150-gmin/branch-rows.csv. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile gmin_h2h_lj150_branch [--config anneal_rev=<sha>]
+rule gmin_h2h_lj150_branch:
+    params:
+        rev=config.get("anneal_rev", ""),
+        seeds=" ".join(f"--seed {seed}" for seed in range(2000, 2012)),
+    output:
+        "bench/lj150-gmin/branch-summary.csv",
+        "bench/lj150-gmin/branch-stats.csv",
+    shell:
+        """
+        set -euo pipefail
+        out=$(pwd)/bench/lj150-gmin
+        rev={params.rev}
+        H2H_BRANCH=1 ANNEAL_REV=${{rev:-$(git rev-parse HEAD)}} bash scripts/gmin_h2h/enter_bench.sh \
+          --size 150 {params.seeds} \
+          --summary "$out/branch-summary.csv" --rows "$out/branch-rows.csv" \
+          --stats "$out/branch-stats.csv"
+        """
+
+
 # `Config::branch_on_stall` against develop on the paper panel: LJ38, LJ55,
 # LJ75, LJ98, LJ102, LJ103, LJ104, LJ150, Au55, M80 rho 6 and 14, seeds
 # 2000-2011. One session on core 0 with hostname bench; for each system and
