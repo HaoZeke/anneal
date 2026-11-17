@@ -334,6 +334,141 @@ Diamond repeats are 4, 5, 6 and 8 (512, 1,000, 1,728 and 4,096 atoms).
 | Tersoff | stored | 0.000318 | 0.000521 | 0.000834 | 0.001916 |
 | Tersoff | stream | 0.000672 | 0.000769 | 0.000833 | 0.002062 |
 
+### Thread count
+
+`thread_count_bench` times the force call of each potential on a free
+cluster: the N sites of its lattice nearest one site, with Gaussian noise
+of 0.02 on each coordinate, over 16 frames in turn. LJ, with a cutoff of
+2.5, Morse, EAM, SW and Tersoff put the cluster in the middle of a cell
+with vacuum on every side. The LJ cluster, ZBL and Sutton-Chen take no
+cell, and Sutton-Chen has no cutoff, as a global optimisation calls it.
+The neighbour mode is `Auto`, which stored the list at every size in the
+first table. A time is the median of five runs of at least 0.2 s, in
+microseconds per call. Both builds are the Meson release build of the
+pixi `devbld` environment with GCC 14.3.0, on the eight cores above under
+`taskset -c 0-7`. Before is 47c46f97.
+
+| potential | atoms | 1 thread, before | 1 thread, after | 8 threads, before | 8 threads, after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Sutton-Chen | 38 | 6.9 | 6.3 | 26.7 | 6.3 |
+| Sutton-Chen | 55 | 14.1 | 13.0 | 41.9 | 13.0 |
+| Sutton-Chen | 80 | 33.3 | 27.1 | 90.8 | 27.1 |
+| Sutton-Chen | 500 | 1136 | 1021 | 3236 | 1017 |
+| Sutton-Chen | 4000 | 85998 | 82619 | 309289 | 82530 |
+| Sutton-Chen | 10000 | 547670 | 541027 | 2113282 | 156037 |
+| LJ | 38 | 10.1 | 8.8 | 23.6 | 8.7 |
+| LJ | 55 | 20.4 | 17.3 | 39.1 | 17.3 |
+| LJ | 80 | 38.5 | 33.7 | 60.9 | 33.7 |
+| LJ | 500 | 495 | 463 | 484 | 463 |
+| LJ | 4000 | 5054 | 4651 | 6829 | 4651 |
+| LJ | 10000 | 13139 | 12581 | 20444 | 3701 |
+| LJ cluster | 38 | 4.5 | 4.0 | 5.4 | 4.0 |
+| LJ cluster | 55 | 9.5 | 8.5 | 7.8 | 8.5 |
+| LJ cluster | 80 | 18.0 | 16.2 | 9.9 | 16.2 |
+| LJ cluster | 500 | 220 | 212 | 78.5 | 212 |
+| LJ cluster | 4000 | 2301 | 2133 | 554 | 2127 |
+| LJ cluster | 10000 | 6040 | 5528 | 1388 | 1639 |
+| Morse | 38 | 21.1 | 20.0 | 26.8 | 19.9 |
+| Morse | 55 | 42.7 | 40.2 | 51.8 | 40.2 |
+| Morse | 80 | 82.0 | 80.3 | 94.4 | 77.8 |
+| Morse | 500 | 1241 | 1192 | 1171 | 1190 |
+| Morse | 4000 | 13814 | 13154 | 15035 | 13196 |
+| Morse | 10000 | 36873 | 36139 | 41316 | 10886 |
+| ZBL | 38 | 2.9 | 2.7 | 8.3 | 2.7 |
+| ZBL | 55 | 3.9 | 3.7 | 11.0 | 3.7 |
+| ZBL | 80 | 6.2 | 5.8 | 16.3 | 5.8 |
+| ZBL | 500 | 43.3 | 40.8 | 236 | 40.9 |
+| ZBL | 4000 | 386 | 366 | 10937 | 365 |
+| ZBL | 10000 | 996 | 1001 | 66237 | 361 |
+| EAM | 38 | 17.0 | 16.8 | 9.9 | 16.8 |
+| EAM | 55 | 29.8 | 28.9 | 14.8 | 28.8 |
+| EAM | 80 | 51.6 | 48.8 | 30.0 | 48.6 |
+| EAM | 500 | 459 | 455 | 178 | 455 |
+| EAM | 4000 | 4110 | 4042 | 1411 | 4041 |
+| EAM | 10000 | 10625 | 10339 | 3439 | 3337 |
+| SW | 38 | 11.2 | 11.1 | 6.7 | 11.1 |
+| SW | 55 | 16.1 | 16.0 | 8.2 | 16.0 |
+| SW | 80 | 25.8 | 25.7 | 10.8 | 25.7 |
+| SW | 500 | 213 | 216 | 60.7 | 216 |
+| SW | 4000 | 1997 | 2007 | 469 | 2006 |
+| SW | 10000 | 5165 | 5375 | 1236 | 1115 |
+| Tersoff | 38 | 16.5 | 16.0 | 10.0 | 16.0 |
+| Tersoff | 55 | 22.8 | 22.2 | 11.7 | 22.2 |
+| Tersoff | 80 | 37.6 | 36.6 | 16.9 | 36.6 |
+| Tersoff | 500 | 272 | 266 | 118 | 266 |
+| Tersoff | 4000 | 2420 | 2371 | 818 | 2369 |
+| Tersoff | 10000 | 6174 | 6284 | 2032 | 1274 |
+
+Below 8192 atoms every call now runs on the calling thread, with the
+bits the old build gave on one thread, at most 1.2% slower (SW at 500
+atoms) and up to 19% faster (Sutton-Chen at 80 atoms). The old build
+started a team on any call. In this run, on 8 threads Sutton-Chen took
+2.7 to 3.9 times its one-thread time at every size, the LJ and Morse
+teams were slower than one thread at five of the six sizes, and the ZBL
+team at all six. Three more runs of Sutton-Chen at 38 to 500 atoms put
+the old 8-thread call at 2.7 to 6.3 times one thread, 2.7 to 4.4 times
+at 55 and 80 atoms, while the new times stayed within 1.2% of the table.
+
+EAM, the LJ cluster, SW and Tersoff split their atoms into slices, and
+on 8 threads those teams beat one thread from 38 or 55 atoms up. Below
+8192 atoms they now run on one thread, up to 4.3 times slower than their
+old teams: SW at 4000 atoms takes 2006 µs per call, where its team took
+469 µs. That is the cost of one threshold for every call. The sums do not
+depend on it, so a lower threshold for these potentials would change
+only their speed.
+
+At 10000 atoms 8 threads are 2.8 to 4.9 times faster than one, and
+faster than the old team for every potential but the LJ cluster, 18%
+slower: its team now evaluates each pair once from each end, where its
+old slices evaluated a pair once and added both forces to private
+buffers. One thread costs at most 4% more than before, for SW, whose
+centres now sum their terms before adding them.
+
+On 8 threads the old build moved the energy on 10 to 16 of the 16 frames
+for every potential but ZBL, by up to 2.06e-4 epsilon for the reduced
+Sutton-Chen at 10000 atoms, and moved the forces of every potential but
+Sutton-Chen and ZBL. The new build gives the bits of one thread on every
+frame. At 10000 atoms one thread now adds the same per-atom sums as a
+team, so its bits are not those of the old build.
+
+At 100000 atoms:
+
+| potential | 1 thread, before | 1 thread, after | 8 threads, before | 8 threads, after |
+| --- | ---: | ---: | ---: | ---: |
+| LJ | 144577 | 139135 | 192722 | 36995 |
+| LJ cluster | 8773537 | 14933502 | 1872959 | 1909984 |
+| Morse | 409610 | 402374 | 406363 | 109952 |
+| EAM | 113326 | 112897 | 32373 | 32774 |
+| SW | 55391 | 57159 | 12427 | 10341 |
+| Tersoff | 64455 | 64937 | 24281 | 10983 |
+
+But for the LJ cluster, one thread costs at most 3.2% more than before
+(SW), and 8 threads are 3.4 to 5.9 times faster than one: up to 5.2
+times faster than the old team, and 1.2% slower for EAM. The LJ cluster
+takes no cell, so the layer bins a box a million wide, which falls back
+to one bin. At this size its candidates do not fit an index, so both
+builds stream that bin and test every pair on each call. ZBL takes no
+cell either and was not timed here.
+
+A stream walks each atom's whole row on any thread count, so one thread
+has the bits of a team, and a two-body potential evaluates each pair
+from both ends. At 100000 atoms that makes the LJ cluster 1.70 times
+slower on one thread, and 2% slower on 8. In `Stream` mode at 10000
+atoms:
+
+| potential | 1 thread, before | 1 thread, after | 8 threads, before | 8 threads, after |
+| --- | ---: | ---: | ---: | ---: |
+| LJ | 30466 | 49931 | 18115 | 12004 |
+| Morse | 32512 | 50444 | 42515 | 8325 |
+| EAM | 36088 | 50280 | 12000 | 11514 |
+| SW | 13560 | 13656 | 2168 | 2154 |
+| Tersoff | 13873 | 13969 | 2563 | 2215 |
+
+One thread on a stream is 1.39 to 1.64 times slower for EAM, Morse and
+LJ, which used to walk half pairs. SW and Tersoff gather each centre's
+bonds either way and stay within 1%. On 8 threads none is slower than
+its old team.
+
 ## Reproduce
 
 `benches/neighbour_api_bench.py` times the public query against vesin
@@ -405,3 +540,23 @@ Resident set, kB, for the runs that printed one:
 `Tersoff`) prints the peak resident set of one million-atom streaming
 call in that process. Meson builds the same program as the
 `classical_scaling_bench` benchmark.
+
+`thread_count_bench` prints the thread-count tables, a line per
+potential, size and thread count, and Meson builds it as the
+`thread_count_bench` benchmark. The old build is 47c46f97 with
+`CppCore/tests/thread_count_bench.cc` and its Meson target added. The
+first table is, on each build,
+
+<!-- rgpot-doc: syntax needs a Meson build and runs for several minutes -->
+```bash
+for pot in sc lj ljcluster morse zbl eam sw tersoff; do
+  taskset -c 0-7 build/CppCore/thread_count_bench --pots "$pot" \
+    --sizes 38,55,80,500,4000,10000 --threads 1,8
+done
+```
+
+`--sizes 100000` gives the second table, and `--mode stream --sizes
+10000` the third. Each line also counts, against the first thread count,
+the frames whose energy bits differ and the force components whose bits
+differ, and hashes the bits of every energy and force, so two builds can
+be compared.
