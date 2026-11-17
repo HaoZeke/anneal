@@ -231,6 +231,60 @@ def revision() -> tuple[str, str]:
     return commit, tree
 
 
+def publish_shard_status(work: Path, publish: Path) -> None:
+    records = []
+    for campaign_id, campaign in CAMPAIGN_IDS.items():
+        source = work / "shards" / campaign_id
+        for seed in range(campaign.first, campaign.last + 1):
+            book = source / f"seed-{seed:04d}.min"
+            receipt = source / f"seed-{seed:04d}.json"
+            if not book.is_file() or not receipt.is_file():
+                raise SystemExit(f"{campaign_id} seed {seed}: shard is incomplete")
+            row = json.loads(receipt.read_text())
+            rows, dimension = validate_book(book, campaign)
+            if row["sha256"] != digest(book) or row["minima"] != rows:
+                raise SystemExit(f"{receipt}: receipt does not authenticate its source book")
+            if row["charged"] != campaign.budget or not row["code_revision"] or not row["host"]:
+                raise SystemExit(f"{receipt}: incomplete campaign receipt")
+            row["dimension"] = dimension
+            records.append(row)
+    publish.mkdir(parents=True, exist_ok=True)
+    columns = (
+        "campaign", "seed", "budget", "charged", "hops", "minima", "dimension", "best", "seconds",
+        "calls_per_second", "sha256", "code_revision", "code_tree", "host",
+    )
+    pending = publish / "campaign-shards.csv.tmp"
+    with pending.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(sorted(records, key=lambda row: (row["campaign"], row["seed"])))
+    pending.replace(publish / "campaign-shards.csv")
+    commit, tree = revision()
+    status = {
+        "status": "shards-complete",
+        "code_revision": commit,
+        "code_tree": tree,
+        "host": os.environ.get("LANDFOLD_HOST", "cloud-run"),
+        "shards": len(records),
+        "charged": sum(row["charged"] for row in records),
+        "minima": sum(row["minima"] for row in records),
+        "remaining": [
+            "lj_csm/lj75/recommended/aggregate",
+            "lj_csm/lj98/derived/representative",
+            "lj_csm_c26/lj98/recommended/representative",
+            "tip4p/hexamer/for_tip4p/representative",
+            "tip4p/hexamer/for_tip4p/aggregate",
+        ],
+        "blocker": (
+            "the LJ75 aggregate has 1124747 minima; current landfold descriptor "
+            "classification remained serial for 68 minutes before this checkpoint"
+        ),
+    }
+    (publish / "current-rerun-status.json").write_text(
+        json.dumps(status, sort_keys=True, indent=2) + "\n"
+    )
+
+
 def finalize(work: Path, publish: Path) -> None:
     landfold = ROOT.parent / "tmp/anneal-target/release/anneal"
     if not landfold.is_file():
@@ -305,6 +359,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--finalize-only", action="store_true")
+    parser.add_argument("--status-only", action="store_true")
     parser.add_argument("--limit-seeds", type=int, help="run at most this many seeds per campaign; never publish")
     parser.add_argument("--budget-cap", type=int, help="cap each budget for a smoke run; never publish")
     args = parser.parse_args()
@@ -316,6 +371,9 @@ def main() -> None:
         return
     if args.finalize_only:
         finalize(args.work, args.publish)
+        return
+    if args.status_only:
+        publish_shard_status(args.work, args.publish)
         return
     run(["cargo", "build", "--release", "--example", "landfold_campaign", "--bin", "anneal"])
     search = ROOT.parent / "tmp/anneal-target/release/examples/landfold_campaign"
