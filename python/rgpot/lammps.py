@@ -104,12 +104,10 @@ class FixExternal:
     or the object is callable and returns ``(energy, forces, variance)``.
     Native rgpot units are Angstrom, eV, and eV/Angstrom.
 
-    ``virial="auto"`` uses an analytic stress when the potential reports one
-    and otherwise takes twelve finite-difference energy evaluations.  Use
-    ``"finite-difference"`` to force that route or ``"none"`` for zero virial.
+    ``virial="auto"`` uses the potential's analytic stress. A periodic box
+    whose potential reports no stress is an error. A non-periodic box with
+    no stress gets a zero virial. ``virial="none"`` sends a zero virial.
     """
-
-    _STRAIN = 1.0e-5
 
     def __init__(
         self,
@@ -124,8 +122,8 @@ class FixExternal:
     ) -> None:
         if not callable(potential) and not callable(getattr(potential, "evaluate", None)):
             raise TypeError("potential must be a Python rgpot potential object")
-        if virial not in {"auto", "finite-difference", "none"}:
-            raise ValueError("virial must be 'auto', 'finite-difference', or 'none'")
+        if virial not in {"auto", "none"}:
+            raise ValueError("virial must be 'auto' or 'none'")
 
         self._lmp = lmp
         self.potential = potential
@@ -220,33 +218,14 @@ class FixExternal:
         )
         return energy, np.ascontiguousarray(forces), tensor
 
-    def _finite_difference_virial(
-        self, positions: np.ndarray, numbers: np.ndarray, rows: np.ndarray
-    ) -> np.ndarray:
-        virial = np.zeros((3, 3))
-        for i, j in ((0, 0), (1, 1), (2, 2), (1, 0), (2, 0), (2, 1)):
-            energies = []
-            for sign in (1.0, -1.0):
-                deform = np.eye(3)
-                deform[i, j] += sign * self._STRAIN
-                energy, _forces, _stress = self._raw(
-                    np.ascontiguousarray(positions @ deform),
-                    numbers,
-                    np.ascontiguousarray(rows @ deform),
-                )
-                energies.append(energy)
-            value = -(energies[0] - energies[1]) / (2.0 * self._STRAIN)
-            virial[i, j] = virial[j, i] = value
-        return virial
-
     def _evaluate(
         self, tags: np.ndarray, xu: np.ndarray, numbers: np.ndarray, rows: np.ndarray
     ) -> tuple[float, np.ndarray, np.ndarray]:
         """Energy, local-order forces, and virial in LAMMPS units."""
         natoms = tags.size
-        if not np.array_equal(np.sort(tags), np.arange(1, natoms + 1)):
-            low = tags.min() if natoms else "-"
-            high = tags.max() if natoms else "-"
+        if natoms == 0 or not np.array_equal(np.sort(tags), np.arange(1, natoms + 1)):
+            low = int(tags.min()) if natoms else "-"
+            high = int(tags.max()) if natoms else "-"
             raise RuntimeError(
                 f"rgpot needs atom IDs 1..N; LAMMPS holds {natoms} atoms "
                 f"with IDs {low}..{high}"
@@ -261,12 +240,13 @@ class FixExternal:
         energy, forces, stress = self._raw(positions, ordered, native_rows)
         if not self.periodic or self.virial == "none":
             virial = np.zeros((3, 3))
-        elif stress is not None and self.virial == "auto":
-            virial = -abs(float(np.linalg.det(native_rows))) * stress
-        else:
-            virial = self._finite_difference_virial(
-                positions, ordered, native_rows
+        elif stress is None:
+            raise RuntimeError(
+                f"{type(self.potential).__name__} lacks analytic stress "
+                "on a periodic LAMMPS box"
             )
+        else:
+            virial = -abs(float(np.linalg.det(native_rows))) * stress
 
         force_factor = self.energy_per_ev / self.length_per_angstrom
         return (

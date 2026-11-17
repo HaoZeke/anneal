@@ -175,22 +175,43 @@ def test_lammps_unit_conversion(style):
     )
 
 
-def test_missing_stress_uses_strain_difference():
+def test_periodic_box_without_stress_is_refused():
     class Harmonic:
         def __call__(self, positions, _numbers, _cell):
             return 0.5 * float(np.sum(positions**2)), -positions, 0.0
 
     lmp = FakeLammps()
     driver = FixExternal(lmp, Harmonic(), "H He")
-    forces = np.zeros((2, 3))
-    driver._step(2, lmp.tags, lmp.positions, forces)
-    expected = -(lmp.positions.T @ lmp.positions)
-    np.testing.assert_allclose(
-        lmp.virial,
-        [expected[0, 0], expected[1, 1], expected[2, 2],
-         expected[0, 1], expected[0, 2], expected[1, 2]],
-        atol=1e-8,
-    )
+    with pytest.raises(RuntimeError, match="Harmonic lacks analytic stress"):
+        driver._step(2, lmp.tags, lmp.positions, np.zeros((2, 3)))
+
+
+def test_nonperiodic_box_without_stress_sends_zero_virial():
+    class Harmonic:
+        def __call__(self, positions, _numbers, _cell):
+            return 0.5 * float(np.sum(positions**2)), -positions, 0.0
+
+    lmp = FakeLammps(periodic=(0, 0, 0))
+    driver = FixExternal(lmp, Harmonic(), "H He")
+    driver._step(2, lmp.tags, lmp.positions, np.zeros((2, 3)))
+    np.testing.assert_array_equal(lmp.virial, np.zeros(6))
+
+
+def test_finite_difference_virial_is_refused():
+    with pytest.raises(ValueError, match="virial must be 'auto' or 'none'"):
+        FixExternal(
+            FakeLammps(),
+            RecordingPotential(),
+            "H He",
+            virial="finite-difference",
+        )
+
+
+def test_empty_atom_list_is_refused():
+    lmp = FakeLammps(tags=(), types=(), positions=np.zeros((0, 3)))
+    driver = FixExternal(lmp, RecordingPotential(), "H He")
+    with pytest.raises(RuntimeError, match="atom IDs 1..N"):
+        driver._step(0, lmp.tags, lmp.positions, np.zeros((0, 3)))
 
 
 class RootComm:

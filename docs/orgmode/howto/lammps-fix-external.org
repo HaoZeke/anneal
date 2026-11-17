@@ -39,12 +39,11 @@ Use =fix_id= to choose another fix name.  With =create=False= the input must
 already define the external fix and its =fix_modify energy yes virial yes=
 settings.
 
-The default =virial="auto"= uses the potential's analytic stress.  If the
-potential reports no stress, it takes a central strain difference (twelve
-extra energy evaluations on every force call), so =fix npt=,
-=fix nph= and =fix box/relax= still receive pressure.  Set
-=virial="finite-difference"= to force this check or =virial="none"= when a zero
-virial is intentional.
+The default =virial="auto"= uses the potential's analytic stress.  A periodic
+box whose potential reports no stress raises an error that names the potential
+and says it lacks analytic stress, so =fix npt=, =fix nph= and =fix box/relax=
+are not driven by a guessed pressure.  A non-periodic box with no stress
+returns a zero virial.  Set =virial="none"= when a zero virial is intentional.
 
 Under =mpirun= install mpi4py.  Rank zero gathers atoms by LAMMPS atom ID,
 evaluates the whole system once, and scatters each rank's forces.  Pass =comm=

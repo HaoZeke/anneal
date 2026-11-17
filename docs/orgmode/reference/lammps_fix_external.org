@@ -70,11 +70,9 @@ external-fix virial is =W = -dE/depsilon=, so the frontend returns
 =-V sigma=, symmetrized, in LAMMPS order =xx yy zz xy xz yz= and in the
 LAMMPS energy unit.
 
-With =virial="auto"= and no reported stress, the frontend deforms the cell and
-positions together by plus and minus =1e-5= in each of the six
-lower-triangular strain components.  The central energy differences produce
-the virial.  =virial="finite-difference"= always takes this route, while
-=virial="none"= returns zeros.  A non-periodic box returns zero virial.
+With =virial="auto"=, a missing stress on a periodic box raises =RuntimeError=
+naming the potential and saying it lacks analytic stress.  A non-periodic box
+with no stress returns a zero virial.  =virial="none"= returns zeros.
 
 ** MPI and errors
 
