@@ -48,6 +48,17 @@ test on hits. Mann-Whitney (MW) is two-sided, the normal approximation with
 the tie and continuity corrections, on calls to the minimum and on wall.
 
 <!-- blj-gmin prose: start -->
+BLJ38 σ=1.05 hits on 1 of 12 against GMIN on 0 of 12.
+BLJ55 σ=1.05 hits on 12 of 12 against GMIN on 0 of 12.
+BLJ38 σ=1.15 hits on 12 of 12 against GMIN on 10 of 12.
+BLJ55 σ=1.15 hits on 0 of 12 against GMIN on 1 of 12.
+BLJ38 σ=1.30 hits on 12 of 12 against GMIN on 4 of 12.
+BLJ55 σ=1.30 hits on 1 of 12 against GMIN on 7 of 12.
+BLJ98 σ=1.30 hits on 0 of 12 against GMIN on 0 of 12.
+This setting hits more seeds than GMIN on 4 of the 7 clusters.
+GMIN hits more on BLJ55 σ=1.15, 1 of 12 against 0 of 12, and on BLJ55 σ=1.30, 7 of 12 against 1 of 12.
+The two tie on BLJ98 σ=1.30.
+Fisher's test on hits is below 0.05 on 3 of the 7 clusters: 2 for this setting and BLJ55 σ=1.30 for GMIN.
 <!-- blj-gmin prose: end -->
 
 - `rows.csv`: one row per run, appended and never rewritten.
@@ -65,4 +76,20 @@ the tie and continuity corrections, on calls to the minimum and on wall.
   `bash scripts/blj_gmin/enter_bench.sh --summarize --tex`.
 
 <!-- blj-gmin table: start -->
+| System | Budget | Arm | Hits | Median calls | IQR | Wall (s) | Inside (s) | Outside (s) | Fisher p | MW p calls | MW p wall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| BLJ38 σ=1.05 | 400000 | anneal | 1/12 | 400000 | 0 | 53.683 | 1.667 | 52.014 | 1 | 0.36 | 3.7e-5 |
+|  |  | GMIN | 0/12 | 400000 | 0 | 2.337 | 1.442 | 0.893 |  |  |  |
+| BLJ55 σ=1.05 | 1000000 | anneal | 12/12 | 5413 | 51.75 | 0.733 | 0.676 | 0.057 | 7.4e-7 | 1.0e-5 | 3.7e-5 |
+|  |  | GMIN | 0/12 | 1000000 | 0 | 10.223 | 7.372 | 2.850 |  |  |  |
+| BLJ38 σ=1.15 | 400000 | anneal | 12/12 | 47287.5 | 108.75 | 0.536 | 0.449 | 0.087 | 0.48 | 3.6e-5 | 3.5e-3 |
+|  |  | GMIN | 10/12 | 219767.5 | 170116 | 1.266 | 0.780 | 0.486 |  |  |  |
+| BLJ55 σ=1.15 | 1000000 | anneal | 0/12 | 1000000 | 0 | 121.9 | 8.829 | 113.1 | 1 | 0.36 | 3.7e-5 |
+|  |  | GMIN | 1/12 | 1000000 | 0 | 10.460 | 7.543 | 2.916 |  |  |  |
+| BLJ38 σ=1.30 | 400000 | anneal | 12/12 | 3202 | 122.25 | 0.408 | 0.336 | 0.072 | 1.3e-3 | 2.6e-5 | 3.7e-5 |
+|  |  | GMIN | 4/12 | 400000 | 26012.5 | 2.556 | 1.551 | 1.005 |  |  |  |
+| BLJ55 σ=1.30 | 1000000 | anneal | 1/12 | 1000000 | 0 | 85.630 | 9.250 | 76.212 | 0.027 | 0.028 | 4.8e-4 |
+|  |  | GMIN | 7/12 | 712287 | 418274 | 7.660 | 5.500 | 2.160 |  |  |  |
+| BLJ98 σ=1.30 | 4000000 | anneal | 0/12 | 4000000 | 0 | 772.4 | 114.4 | 655.9 | 1 | 1 | 3.7e-5 |
+|  |  | GMIN | 0/12 | 4000000 | 0 | 114.8 | 95.806 | 19.079 |  |  |  |
 <!-- blj-gmin table: end -->

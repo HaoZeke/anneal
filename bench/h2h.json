@@ -1621,6 +1621,34 @@
           "seed": "seed"
         }
       ]
+    },
+    {
+      "rule": "blj_gmin",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/blj_gmin/run_panel.py",
+        "scripts/blj_gmin/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/blj_gmin/run_panel.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/blj_gmin/run_panel.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/blj-gmin/benchmarks/blj_gmin.py",
+      "rows": [
+        {
+          "path": "bench/blj-gmin/rows.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
     }
   ],
   "not_h2h": {

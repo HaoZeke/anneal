@@ -352,6 +352,7 @@ def manuscript_retry(audit: Audit) -> None:
 
 
 GMIN_PANEL_REVISION = "c2de652dca0bc75e2b0cb4afffac91fd656404e4"
+BLJ_PANEL_REVISION = "d5b0e86166eb74a779de70921ee3243029dc1f41"
 
 
 def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[dict[str, str]]]]:
@@ -457,6 +458,56 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(TEX, f"this setting hits more seeds on {len(ahead)} of {total} clusters, and GMIN hits more on "
                     f"{' and on '.join(name(s) for s in behind)}.")
     audit.said(TEX, "Section~\\ref{sec:gmin} scores it on the clusters of Table~\\ref{tab:gmin}.")
+
+
+def blj_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[dict[str, str]]]]:
+    """The binary Lennard-Jones rows of each system and arm, one per seed, in seed order."""
+    spec = importlib.util.spec_from_file_location("blj_gmin", ROOT / "scripts/blj_gmin/run_panel.py")
+    panel = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(panel)
+    rows = audit.rows("bench/blj-gmin/rows.csv")
+    groups = {}
+    for system in panel.PAPER_BUDGETS:
+        for code, revision in (("anneal", BLJ_PANEL_REVISION), ("gmin", panel.GMIN_REV)):
+            group = pick(rows, system=system, code=code, code_revision=revision, harness_revision=BLJ_PANEL_REVISION)
+            seeds = [int(r["seed"]) for r in group]
+            where = f"bench/blj-gmin/rows.csv {system} {code}"
+            audit.cell(where, "seeds", " ".join(map(str, sorted(seeds))), " ".join(map(str, panel.SEEDS)))
+            audit.cell(where, "budget", " ".join(sorted({r["budget"] for r in group})), str(panel.PAPER_BUDGETS[system]))
+            groups[(system, code)] = sorted(group, key=lambda r: int(r["seed"]))
+    sessions = {r["session"] for group in groups.values() for r in group}
+    hosts = {r["host"] for group in groups.values() for r in group}
+    audit.cell("bench/blj-gmin/rows.csv", "sessions", str(len(sessions)), "1")
+    audit.cell("bench/blj-gmin/rows.csv", "host", " ".join(sorted(hosts)), "bench")
+    return panel, groups
+
+
+def manuscript_blj(audit: Audit) -> None:
+    panel, groups = blj_panel_groups(audit)
+    arms = {"this work": "anneal", "anneal": "anneal", "GMIN": "gmin"}
+    for path, label_index, lines in (
+        (TEX, 1, [(None, row) for row in tex_table(audit, TEX, "tab:blj")]),
+        ("bench/blj-gmin/README.md", 0,
+         [(n, list(row.values())) for n, row in md_table(audit, "bench/blj-gmin/README.md", "System | Budget | Arm")]),
+    ):
+        by_label = {labels[label_index]: system for system, labels in panel.LABELS.items()}
+        shown = []
+        system = None
+        for line, cells in lines:
+            if cells[0]:
+                system = by_label.get(cells[0])
+            arm = arms.get(cells[2])
+            where = f"{path}:{line} {cells[0] or system} {cells[2]}" if line else f"{path} tab:blj {system} {cells[2]}"
+            if system is None or arm is None or len(cells) != 12:
+                audit.record(False, where, "table line", " & ".join(cells), "a panel system and arm")
+                continue
+            shown.append((system, arm))
+            gmin_panel_line(audit, where, cells[1:], groups, system, arm, panel.PAPER_BUDGETS[system])
+        want = [(system, arm) for system in panel.PAPER_BUDGETS for arm in ("anneal", "gmin")]
+        audit.cell(path, "blj panel lines", " ".join(f"{s}/{a}" for s, a in shown), " ".join(f"{s}/{a}" for s, a in want))
+    for path, tex in ((TEX, True), ("bench/blj-gmin/README.md", False)):
+        for sentence in panel.result_sentences(groups, tex=tex):
+            audit.said(path, sentence)
 
 
 def manuscript_tip4p(audit: Audit) -> None:
@@ -1618,7 +1669,7 @@ def run(report: bool = False) -> int:
             print(f"paper_audit: cannot check revisions: {problem}", file=sys.stderr)
         return 2
     audit = Audit()
-    for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
+    for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_blj, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose):
         check(audit)
