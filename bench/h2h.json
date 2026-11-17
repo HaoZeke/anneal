@@ -1151,6 +1151,35 @@
       ]
     },
     {
+      "rule": "ase_au55",
+      "competitors": [
+        "ASE basin hopping",
+        "ASE minima hopping"
+      ],
+      "runners": [
+        "scripts/ase_panel/enter_bench.sh",
+        "scripts/ase_au55/run_one.py"
+      ],
+      "budgets": {
+        "source": "scripts/ase_au55/run_one.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_au55/run_one.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-au55/benchmarks/ase_au55.py",
+      "rows": [
+        {
+          "path": "bench/ase-au55/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "agox_lj98",
       "competitors": [
         "AGOX"

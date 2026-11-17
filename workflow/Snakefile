@@ -921,6 +921,23 @@ rule ase_lj150:
         """
 
 
+# Au55 ASE basin hopping and minima hopping against Config::for_cluster.
+# Gupta is Gupta::copper_gold through asg_eval. Not part of `rule all`.
+# The script rewrites the summary from the committed rows and does not
+# start a search.
+#   snakemake -s workflow/Snakefile ase_au55
+rule ase_au55:
+    input:
+        "bench/ase-au55/rows.csv",
+    output:
+        "bench/ase-au55/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/ase_panel/enter_bench.sh --system au55
+        """
+
+
 # The paper headline panel on the 0.12.0 release build 07f89cad: LJ38,
 # LJ55, LJ75, LJ98, LJ102, LJ103, LJ104, LJ150, Au55 and M80 at rho 6 and
 # 14, seeds 2000-2011, paper budgets, one process on core 0, sudo unshare
