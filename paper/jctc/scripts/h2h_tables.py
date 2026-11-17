@@ -89,7 +89,7 @@ def gofee_block() -> str:
         "Seeds 2000--2005, one core, budget in force calls.",
         "Capped counts the runs stopped by a wall cap of 2 hours, which are misses.",
         "Calls is the median force-call count of the runs that hit, and Wall is the median",
-        "wall in seconds of all six runs.}",
+        "wall in seconds of all six runs.~\\rerun{5}}",
         "\\label{tab:gofee}",
         "\\centering",
         "\\small",

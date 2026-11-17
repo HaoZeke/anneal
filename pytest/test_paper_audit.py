@@ -44,7 +44,9 @@ CHECKS = (
     audit_mod.supporting_numbers,
     audit_mod.au55_superseded,
     audit_mod.manuscript_new,
+    audit_mod.manuscript_followups,
     audit_mod.cover_letter,
+    audit_mod.rerun_claims,
     audit_mod.rerun_check,
     audit_mod.revision_map,
 )
@@ -485,3 +487,19 @@ def test_no_tag_passes_pre_submission():
     audit = _audit_with_tags("clean text\n")
     audit_mod.rerun_check(audit, pre_submission=True)
     assert not audit.drifts()
+
+
+def test_a_replaced_claim_without_its_tag_is_reported():
+    claims = ("GMIN hits 9 of 12",)
+    fenced = "GMIN hits 9 of 12, with p of 0.21.~\\rerun{5}\nNext sentence.\n"
+    assert audit_mod.untagged_claims(fenced, claims[0], "5") == (1, 1)
+    bare = "GMIN hits 9 of 12, with p of 0.21.\nNext sentence.~\\rerun{5}\n"
+    assert audit_mod.untagged_claims(bare, claims[0], "5") == (1, 0)
+    assert audit_mod.untagged_claims(bare, "a missing result", "5") == (0, 0)
+    assert audit_mod.untagged_claims(fenced, claims[0], "6") == (1, 0)
+
+
+def test_the_british_spelling_of_labeled_is_caught():
+    for word in ("labelled", "labelling", "modelled", "travelled"):
+        assert audit_mod.BRITISH.search(word)
+    assert not audit_mod.BRITISH.search("labeled")

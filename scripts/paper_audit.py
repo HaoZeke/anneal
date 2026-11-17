@@ -79,40 +79,41 @@ UNPUSHED = {
 }
 
 KNOWN_GAPS = {
-    "data/sc96_78_hits.csv": "code_revision empty or unknown on some rows; harness_revision empty or unknown on some "
-                             "rows; host empty or unknown on some rows",
-    "bench/depth-posterior-ablation/results.csv": "no revision column",
-    "results/size-tiered-selection.csv": "no revision or host column",
-    "results/lj-funnel-stalls.csv": "no revision or host column",
-    "results/cross-field-hits.csv": "no revision or host column",
-    "bench/tip4p-water-rates/rates-a24ba760.csv": "no revision column",
-    "bench/tip4p-water-rates/rates.csv": "no revision column",
-    "paper/jctc/logs/water/NUMBERS.tsv": "no revision or host column",
-    "paper/jctc/data/hexamer-xtb680-repolish.csv": "no revision column",
-    "paper/jctc/data/water_v45b/water-v45b-perseed.csv": "no revision or host column",
-    "paper/jctc/data/campaign-scores.csv": "no revision or host column",
-    "paper/jctc/data/system_visuals/references.csv": "no revision or host column",
-    "bench/gad-published/summary.csv": "no host column",
-    "bench/morse-panel/seeds.csv": "no revision or host column",
-    "bench/morse-h2h/seeds.csv": "no revision or host column",
-    "bench/fp-fingerprint/rows.csv": "no revision or host column",
-    "bench/tip4p-h2h/h2h-summary.csv": "no revision or host column",
-    "bench/covalent-h2h/before/seeds.csv": "no revision or host column",
-    "bench/covalent-h2h/after/seeds.csv": "no revision or host column",
-    "bench/covalent-h2h/v2/seeds.csv": "no revision or host column",
-    "bench/covalent-h2h/v3/seeds.csv": "no revision or host column",
-    "bench/covalent-h2h/gfn2/seeds.csv": "no revision or host column",
-    "bench/covalent-h2h/gfn2/false-hits.csv": "no host column",
+    "data/sc96_78_hits.csv": "code_revision unrecorded on some rows; harness_revision unrecorded on some rows; host "
+                             "empty or unknown on some rows",
+    "bench/depth-posterior-ablation/results.csv": "revision unrecorded (no revision column)",
+    "results/size-tiered-selection.csv": "revision and host unrecorded (no revision or host column)",
+    "results/lj-funnel-stalls.csv": "revision and host unrecorded (no revision or host column)",
+    "results/cross-field-hits.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/tip4p-water-rates/rates-a24ba760.csv": "revision unrecorded (no revision column)",
+    "bench/tip4p-water-rates/rates.csv": "revision unrecorded (no revision column)",
+    "paper/jctc/logs/water/NUMBERS.tsv": "revision and host unrecorded (no revision or host column)",
+    "paper/jctc/data/hexamer-xtb680-repolish.csv": "revision unrecorded (no revision column)",
+    "paper/jctc/data/water_v45b/water-v45b-perseed.csv": "revision and host unrecorded (no revision or host column)",
+    "paper/jctc/data/campaign-scores.csv": "revision and host unrecorded (no revision or host column)",
+    "paper/jctc/data/system_visuals/references.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/gad-published/summary.csv": "revision recorded; no host column",
+    "bench/morse-panel/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/morse-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/fp-fingerprint/rows.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/tip4p-h2h/h2h-summary.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/covalent-h2h/before/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/covalent-h2h/after/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/covalent-h2h/v2/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/covalent-h2h/v3/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/covalent-h2h/gfn2/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/covalent-h2h/gfn2/false-hits.csv": "revision recorded; no host column",
     "bench/covalent-h2h/gfn2/rows.csv": "revision 5351f272 is not in this repository; revision ce1e7a46 is not in "
                                         "this repository",
-    "bench/ase-gofee-h2h/results.csv": "no host column; head empty or unknown on some rows; revision 0f988569 is not in "
-                                       "this repository; revision 349523d3 is not in this repository; revision befbc3e8 "
-                                       "is not in this repository; revision bf09f7a2 is not in this repository",
-    "bench/ase-gofee-h2h/summary.csv": "no revision or host column",
-    "bench/ase-gofee-h2h/asg2-summary.csv": "no revision or host column",
-    "bench/growpal-h2h/seeds.csv": "no revision or host column",
-    "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "no revision or host column",
-    "bench/nh3-octamer/ladder.csv": "no revision or host column",
+    "bench/ase-gofee-h2h/results.csv": "revision recorded; no host column; head unrecorded on some rows; revision "
+                                       "0f988569 is not in this repository; revision 349523d3 is not in this "
+                                       "repository; revision befbc3e8 is not in this repository; revision bf09f7a2 is "
+                                       "not in this repository",
+    "bench/ase-gofee-h2h/summary.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/ase-gofee-h2h/asg2-summary.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/nh3-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
     "bench/ase-au55/rows-for-cluster.csv": "revision fc1af066 is not in this repository",
     "bench/ase-au55/superseded.csv": "revision 33bed75f is not in this repository",
     "bench/ase-au55/rows.csv": "revision 33bed75f is not in this repository; revision b49341e3 is not in this repository",
@@ -123,16 +124,19 @@ KNOWN_GAPS = {
                                "repository; revision b49341e3 is not in this repository",
     "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
-    "bench/ase-nonlj/identity.csv": "no revision or host column",
+    "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
     "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
     "bench/ase-recommended/summary.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                          "repository; revision b49341e3 is not in this repository; revision fc1af066 is "
                                          "not in this repository",
-    "paper/jctc/data/lj55_lj98/seeds.csv": "no revision or host column",
-    "paper/jctc/data/literature.tsv": "no revision or host column",
-    "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "no revision or host column",
-    "paper/jctc/data/lj75_gmin/lj75-derived-seeds-2000-2199.csv": "no revision or host column",
-    "paper/jctc/data/lj75_gmin/lj75-recommended-seeds-2000-2199.csv": "no revision or host column",
+    "paper/jctc/data/lj55_lj98/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
+    "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "revision and host unrecorded (no revision or host "
+                                                                "column)",
+    "paper/jctc/data/lj75_gmin/lj75-derived-seeds-2000-2199.csv": "revision and host unrecorded (no revision or host "
+                                                                  "column)",
+    "paper/jctc/data/lj75_gmin/lj75-recommended-seeds-2000-2199.csv": "revision and host unrecorded (no revision or "
+                                                                      "host column)",
 }
 
 UNTRACED = [
@@ -2111,14 +2115,15 @@ def provenance(audit: Audit) -> dict[str, str]:
         hosts = [c for c in HOST_COLUMNS if c in columns]
         problems = []
         if not revs and not hosts:
-            problems.append("no revision or host column")
+            problems.append("revision and host unrecorded (no revision or host column)")
         elif not revs:
-            problems.append("no revision column")
+            problems.append("revision unrecorded (no revision column)")
         elif not hosts:
-            problems.append("no host column")
+            problems.append("revision recorded; no host column")
         for column in revs + hosts:
             if any(r[column].strip() in ("", "unknown") for r in rows):
-                problems.append(f"{column} empty or unknown on some rows")
+                what = "unrecorded" if column in revs else "empty or unknown"
+                problems.append(f"{column} {what} on some rows")
         for column in revs:
             for r in rows:
                 value = r[column].strip()
@@ -2583,8 +2588,8 @@ def manuscript_new(audit: Audit) -> None:
         "bash scripts/gmin_panel/build_gmin.sh": "scripts/gmin_panel/build_gmin.sh",
         "snakemake -s workflow/Snakefile gmin_panel": "workflow/Snakefile",
         "bash scripts/gmin_panel/enter_bench.sh --summarize --tex": "scripts/gmin_panel/enter_bench.sh",
-        "bash scripts/ase_panel/enter_bench.sh --system lj38 --arm ase_bh --seed 2000": "scripts/ase_panel/enter_bench.sh",
-        "bash scripts/ase_nonlj/enter_bench.sh --system m38r6 --arm ase_bh --seed 2000": "scripts/ase_nonlj/enter_bench.sh",
+        "bash scripts/ase_panel/enter_bench.sh --system lj38\n": "scripts/ase_panel/enter_bench.sh",
+        "bash scripts/ase_nonlj/enter_bench.sh\n": "scripts/ase_nonlj/enter_bench.sh",
         "python3 paper/jctc/scripts/water_h2h.py": "paper/jctc/scripts/water_h2h.py",
     }
     for command, path in commands.items():
@@ -2594,10 +2599,16 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("scripts/gmin_panel/enter_bench.sh", "--summarize")
     audit.said("scripts/ase_panel/enter_bench.sh", "lj38|lj55|lj98|lj104|lj150|au55")
     audit.said("scripts/ase_nonlj/enter_bench.sh", "m38r6")
+    audit.said("scripts/ase_panel/enter_bench.sh", ': "${ASE_PANEL_REVISION:?')
+    audit.said("scripts/ase_panel/enter_bench.sh", "ROWS=${ASE_PANEL_ROWS:-$DEFAULT_ROWS}")
+    audit.said("scripts/ase_nonlj/enter_bench.sh", 'echo "keep existing $SYSTEM $ARM seed $SEED"')
+    audit.said(TEX, "The ASE rows cannot be searched again from this repository.")
+    audit.said(TEX, "\\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.")
     audit.said("paper/jctc/scripts/water_h2h.py", 'command = f"gfn2_water_h2h {MOLECULES} {budget} {seed} {outdir.name}"')
+    audit.said("paper/jctc/scripts/water_h2h.py", 'paper_dir = LOGS / f"anneal-paper4000-seed{seed}"')
     audit.said("paper/jctc/logs/water/crest-hexamer-seed0.log", "$ path start.xyz -T 1")
     audit.said("paper/jctc/logs/water/VERSIONS", "polish=xtb --gfn 2 --opt vtight --acc 0.01 --iterations 500")
-    audit.said(TEX, "crest start.xyz -T 1\nxtb --gfn 2 --opt vtight --acc 0.01 --iterations 500\ngfn2_water_h2h 6 4000 0 anneal-seed0")
+    audit.said(TEX, "crest start.xyz -T 1\nxtb --gfn 2 --opt vtight --acc 0.01 --iterations 500\ngfn2_water_h2h 6 4000 0 anneal-paper4000-seed0")
     audit.said(TEX, "\\texttt{paper/jctc/scripts/ablation\\_table.py} writes Table~\\ref{tab:ablation}")
     audit.record((ROOT / "paper/jctc/scripts/ablation_table.py").exists(), TEX, "ablation_table.py exists", "exists", "exists")
 
@@ -2611,11 +2622,8 @@ def manuscript_new(audit: Audit) -> None:
         audit.record("SURF BV" not in audit.text(path), path, "the affiliation is spelled one way", "SURF B.V.", "SURF B.V.")
     audit.record("\\todo{" not in audit.text(TEX), TEX, "no \\todo remains in the manuscript", "none", "none")
     audit.said(TEX, "The Zenodo record for this submission is pending, and it has no DOI yet.")
-    british = re.compile(r"\b\w*(?:optimis|neighbour|initialis|symmetris|normalis|minimis|colour|centred|licence|"
-                         r"favour|behaviour|analyse|organis|recognis|characteris|parametris|summaris|catalogue)\w*\b",
-                         re.IGNORECASE)
     for path in (TEX, SI, cover):
-        found = sorted({m.group(0) for m in british.finditer(audit.text(path))})
+        found = sorted({m.group(0) for m in BRITISH.finditer(audit.text(path))})
         audit.record(not found, path, "American spelling", "none", " ".join(found) or "none")
     lf = load_script("landfold_panels_tex", "paper/jctc/scripts/landfold_panels.py")
     audit.said(TEX, lf.caption_tex())
@@ -2636,6 +2644,50 @@ def rerun_tags(text: str) -> list[tuple[int, str]]:
     """The line number and item of each [RERUN: item N] tag in a source text."""
     return [(number, found.group(1)) for number, line in enumerate(text.splitlines(), 1)
             for found in RERUN_TAG.finditer(line) if not line.lstrip().startswith("%")]
+
+
+# Results that a rerun replaces. Each sentence that holds one of these fragments must end in its tag,
+# so a replaced claim cannot sit in the text without the fence that --pre-submission reads.
+RERUN_CLAIMS = (
+    (TEX, "5", ("Fisher's test on hits is below 0.05 on 6 of the 9 wins", "It is not below 0.05 on the other 3",
+                "GMIN hits LJ\\(_{150}\\) on 9 of 12 against 5 of 12, with \\(p=0.21\\)",
+                "The median wall of a run is 0.075~s for this setting", "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s against 10.691~s",
+                "neither ASE arm hits more than 1 of 12 on any of them",
+                "Fisher's test on hits is below 0.05 on 7 clusters", "The 6 are LJ\\(_{38}\\)",
+                "The other 3 wins of this setting are", "is not significant either",
+                "9 of 12 against 5 of 12 and 12 of 12 against 2 of 12",
+                "hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse clusters, and no arm hits",
+                "6 are significant by Fisher's test", "This setting hits more seeds than GMIN on 9 of the 13 clusters",
+                "minima hopping hits none", "Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones clusters",
+                "Both ASE arms hit 0 of 12 on all 4", "ASE minima hopping hits LJ\\(_{38}\\) on 1 of 6, LJ\\(_{55}\\) on 6 of 6",
+                "Wall is the median wall in seconds of all six runs", "Minima hopping reached its cap on every run")),
+    (SI, "5", ("The GMIN arm hits 64 of 64", "where GMIN hits LJ\\(_{98}\\) on 0 of 12 seeds",
+               "hit LJ\\(_{75}\\) on 0 of 12 seeds")),
+    ("paper/jctc/cover-letter.tex", "5", ("this setting hits more seeds on 9 of 13", "Fisher's test on hits is below 0.05 on 6 of the 9 wins",
+                                         "GMIN hits LJ\\(_{150}\\) on 9 of 12", "The median wall of a run is 0.075~s",
+                                         "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s")),
+)
+SENTENCE_END = re.compile(r"[.?!](?![\d])")
+
+
+def untagged_claims(text: str, fragment: str, item: str) -> tuple[int, int]:
+    """The occurrences of a fragment, and how many of them end their sentence in the tag of that item."""
+    flat, found, tagged, start = collapse(text), 0, 0, 0
+    while (at := flat.find(collapse(fragment), start)) >= 0:
+        found += 1
+        end = SENTENCE_END.search(flat, at + len(collapse(fragment)))
+        tagged += bool(end and flat.startswith(f"~\\rerun{{{item}}}", end.end()))
+        start = at + 1
+    return found, tagged
+
+
+def rerun_claims(audit: Audit) -> None:
+    """Every replaced result is present and fenced with the tag of its item."""
+    for path, item, fragments in RERUN_CLAIMS:
+        for fragment in fragments:
+            found, tagged = untagged_claims(audit.text(path), fragment, item)
+            audit.record(found > 0 and tagged == found, path, f"a result of item {item} ends its sentence in its tag",
+                         fragment, f"{found} found, {tagged} tagged")
 
 
 def rerun_check(audit: Audit, pre_submission: bool = False) -> None:
@@ -2706,6 +2758,12 @@ def revision_map(audit: Audit) -> None:
                  "committed file", f"{len(rows)} row groups")
     audit.record({r["revision"] for r in rows} == set(UNPUSHED), REVISION_MAP, "every unreachable revision is mapped",
                  f"{len(UNPUSHED)} revisions", f"{len({r['revision'] for r in rows})} mapped")
+
+
+BRITISH = re.compile(r"\b\w*(?:optimis|neighbour|initialis|symmetris|normalis|minimis|colour|centred|licence|"
+         r"favour|behaviour|analyse|organis|recognis|characteris|parametris|summaris|catalogue|"
+         r"labell|travell|modell|cancell|fuell)\w*\b",
+         re.IGNORECASE)
 
 
 def manuscript_followups(audit: Audit) -> None:
@@ -2779,6 +2837,12 @@ def manuscript_followups(audit: Audit) -> None:
     audit.said(TEX, "The two panels differ in revision and in that scaling, and no run separates the two, so we do not "
                     "assign the difference to either.")
     audit.said(TEX, "Recommended is the preset of this article.")
+    audit.said(TEX, "At M\\(_{55}\\) and \\(\\rho=6\\) the cap holds all 55 sites of the two-shell icosahedron, which is the exact "
+                    "global minimum there, so a hit of that row is the quench and not a search.")
+    audit.said(TEX, "At M\\(_{80}\\) and \\(\\rho=6\\) the cap is empty, because 55 sites is the largest cap, and that row is a "
+                    "search of the moves.")
+    audit.said(TEX, f"this setting hits M\\(_{{55}}\\) at \\(\\rho=6\\) there in {min(ar)} to {max(ar)} calls, and not in the "
+                    f"{min(cap)} to {max(cap)} calls of the cap.")
     audit.said(TEX, "Derived adds the budget window and the Bayes screen of")
 
 
@@ -2797,6 +2861,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
     revision_map(audit)
+    rerun_claims(audit)
     rerun_check(audit, pre_submission)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
@@ -2804,6 +2869,9 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     cited = {r[c].strip() for rows in audit.read.values() for r in rows for c in REVISION_COLUMNS if c in r}
     for name in sorted(set(UNPUSHED) - cited):
         audit.record(False, "UNPUSHED", f"unpushed revision {name[:8]}", UNPUSHED[name], "no row cites it")
+    for path, why in sorted(KNOWN_GAPS.items()):
+        audit.record(any(word in why for word in ("unrecorded", "revision recorded", "is not in this repository")), path,
+                     "a known gap names the revision or says it is unrecorded", "revision or unrecorded", why)
     for path in sorted(set(gaps) | set(KNOWN_GAPS)):
         listed = path in KNOWN_GAPS
         audit.record(listed and path in gaps and KNOWN_GAPS[path] == gaps[path], path, "provenance",

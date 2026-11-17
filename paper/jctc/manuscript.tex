@@ -35,6 +35,8 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \begin{document}
 
 \begin{abstract}
+Basin-hopping searches of cluster energy surfaces are usually tuned to one
+cluster size, so a hit rate reported at one size says little about the next.
 Here, we present one basin-hopping setting for atomic and rigid-molecule
 clusters.
 It has a fixed library of six moves, a reduced temperature of \(0.8\), and a
@@ -55,20 +57,20 @@ Lennard-Jones, Gupta, and Morse clusters in one session, this setting
 hits more seeds on 9 of 13, the two tie on 2, and GMIN hits more on 2.~\rerun{5}
 Fisher's test on hits is below 0.05 on 6 of the 9 wins: LJ\(_{38}\),
 LJ\(_{75}\), LJ\(_{98}\), Au\(_{55}\), and M\(_{55}\) and M\(_{80}\) at
-\(\rho=14\).
+\(\rho=14\).~\rerun{5}
 It is not below 0.05 on the other 3: LJ\(_{102}\), LJ\(_{103}\), and
-LJ\(_{104}\).
+LJ\(_{104}\).~\rerun{5}
 GMIN hits LJ\(_{150}\) on 9 of 12 against 5 of 12, with \(p=0.21\), and
 M\(_{80}\) at \(\rho=6\) on 12 of 12 against 2 of 12, with
-\(p=6.7\times 10^{-5}\).
+\(p=6.7\times 10^{-5}\).~\rerun{5}
 The median wall of a run is 0.075~s for this setting against 3.658~s for
-GMIN on LJ\(_{38}\), and 27.019~s against 119.9~s on LJ\(_{75}\).
-On M\(_{80}\) at \(\rho=6\) it is 168.9~s against 10.691~s.
+GMIN on LJ\(_{38}\), and 27.019~s against 119.9~s on LJ\(_{75}\).~\rerun{5}
+On M\(_{80}\) at \(\rho=6\) it is 168.9~s against 10.691~s.~\rerun{5}
 Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, with each run capped in wall time, this setting
 hits LJ\(_{38}\), LJ\(_{55}\), LJ\(_{98}\), LJ\(_{104}\), and
 LJ\(_{150}\) on 12, 12, 10, 9, and 5 of 12 seeds, and neither ASE arm
-hits more than 1 of 12 on any of them.
+hits more than 1 of 12 on any of them.~\rerun{5}
 On LJ\(_{38}\) the median wall of this setting is 0.067~s, and every ASE run
 stops at the cap of 4.654~s.~\rerun{5}
 On seeds 2000--2005 against AGOX GOFEE, this setting hits LJ\(_{38}\),
@@ -581,6 +583,14 @@ This holds at \(\rho=6\) and not at \(\rho=14\).
 The cap is built from the Mackay icosahedron and is not drawn by a move, so it
 is a motif cut, and a hit that this quench makes counts as a hit of the
 setting.
+At M\(_{55}\) and \(\rho=6\) the cap holds all 55 sites of the two-shell
+icosahedron, which is the exact global minimum there, so a hit of that row is
+the quench and not a search.
+At M\(_{80}\) and \(\rho=6\) the cap is empty, because 55 sites is the
+largest cap, and that row is a search of the moves.
+The Morse rows of the Atomic Simulation Environment panel are searches too:
+this setting hits M\(_{55}\) at \(\rho=6\) there in 2266 to 47255
+calls, and not in the 345 to 709 calls of the cap.~\rerun{6}
 The rows that these switches reach are Au\(_{55}\) in both panels, which
 \texttt{prior\_core} reaches, the Morse rows at \(\rho=6\), which the cap
 reaches, and any run that lasts half a budget without an improvement, which
@@ -1021,19 +1031,26 @@ bash scripts/gmin_panel/build_gmin.sh
 snakemake -s workflow/Snakefile gmin_panel
 bash scripts/gmin_panel/enter_bench.sh --summarize --tex
 
-# ASE: one seed of one arm, Lennard-Jones and Morse
-bash scripts/ase_panel/enter_bench.sh --system lj38 --arm ase_bh --seed 2000
-bash scripts/ase_nonlj/enter_bench.sh --system m38r6 --arm ase_bh --seed 2000
+# ASE: rewrite the tables from the committed rows, with no new search
+bash scripts/ase_panel/enter_bench.sh --system lj38
+bash scripts/ase_nonlj/enter_bench.sh
 
 # CREST: one draw, then the polish, and the anneal arm
 crest start.xyz -T 1
 xtb --gfn 2 --opt vtight --acc 0.01 --iterations 500
-gfn2_water_h2h 6 4000 0 anneal-seed0
+gfn2_water_h2h 6 4000 0 anneal-paper4000-seed0
 python3 paper/jctc/scripts/water_h2h.py
 \end{verbatim}
 \end{footnotesize}
 The GMIN script writes \texttt{bench/gmin-panel/rows.csv}, and the summarizers
 of each panel rewrite its table from the committed rows without a new search.
+The ASE rows cannot be searched again from this repository.
+They come from builds whose commits are not in it, and
+\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.
+The Lennard-Jones script reruns a seed only under
+\texttt{ASE\_PANEL\_REVISION}, a full commit SHA, and a new rows file in
+\texttt{ASE\_PANEL\_ROWS}, and the Morse script keeps every stored seed.
+The rows themselves are what this article reports.
 
 \subsection{GMIN on the paper panel}
 \label{sec:gmin}
@@ -1062,12 +1079,12 @@ GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12, and on
 M\(_{80}\) at \(\rho=6\), 12 of 12 against 2 of 12.
 The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\).~\rerun{6}
 Fisher's test on hits is below 0.05 on 7 clusters: 6 for this setting and
-M\(_{80}\) at \(\rho=6\) for GMIN.
+M\(_{80}\) at \(\rho=6\) for GMIN.~\rerun{5}
 The 6 are LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), Au\(_{55}\), and
-M\(_{55}\) and M\(_{80}\) at \(\rho=14\).
+M\(_{55}\) and M\(_{80}\) at \(\rho=14\).~\rerun{5}
 The other 3 wins of this setting are LJ\(_{102}\), LJ\(_{103}\), and
 LJ\(_{104}\), at \(p\) of 0.21, 0.100, and 0.40, and the GMIN win on
-LJ\(_{150}\) is not significant either.
+LJ\(_{150}\) is not significant either.~\rerun{5}
 The median wall of a run is lower for this setting on 12 of the 13 clusters and
 higher on M\(_{80}\) at \(\rho=6\).
 On M\(_{80}\) at \(\rho=6\) GMIN reaches the minimum in a median of
@@ -1175,15 +1192,15 @@ test on calls or on wall.
 
 Minima hopping stopped at the cap on all 72 runs of
 Table~\ref{tab:ase}, and basin hopping on 35: 12 on LJ\(_{38}\), 11 on
-LJ\(_{55}\), and 12 on Au\(_{55}\).
+LJ\(_{55}\), and 12 on Au\(_{55}\).~\rerun{5}
 On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
 full \(4\times 10^{6}\) calls on every seed.
 This setting hits LJ\(_{38}\) and LJ\(_{55}\) on 12 of 12, LJ\(_{98}\)
 on 10 of 12, LJ\(_{104}\) on 9 of 12, and LJ\(_{150}\) on 5 of 12.~\rerun{5}
 Basin hopping hits LJ\(_{55}\) on 1 of 12 and no other cluster, and
-minima hopping hits none.
+minima hopping hits none.~\rerun{5}
 Fisher's test against each ASE arm is below 0.05 on all 5
-Lennard-Jones clusters.
+Lennard-Jones clusters.~\rerun{5}
 No arm hits Au\(_{55}\).
 There the median best energy lies 0.048~eV above the reference for this
 setting, 1.210~eV for basin hopping, and 0.737~eV for minima hopping.~\rerun{6}
@@ -1229,9 +1246,9 @@ Table~\ref{tab:ase-morse} stopped at the cap.
 This setting hits M\(_{38}\) at \(\rho=6\) and \(\rho=14\) and
 M\(_{55}\) at \(\rho=6\) on 12 of 12, and M\(_{55}\) at \(\rho=14\) on
 5 of 12.~\rerun{6}
-Both ASE arms hit 0 of 12 on all 4.
+Both ASE arms hit 0 of 12 on all 4.~\rerun{5}
 Fisher's \(p\) against each ASE arm is \(7.4\times 10^{-7}\) on the
-first three and 0.037 on M\(_{55}\) at \(\rho=14\).
+first three and 0.037 on M\(_{55}\) at \(\rho=14\).~\rerun{5}
 
 % ase-nonlj table: start
 \begin{table}
@@ -1280,7 +1297,7 @@ per seed, and a seed stopped there is a miss.
 This setting hits all three clusters on 6 of 6 seeds.
 ASE basin hopping hits none of them, and GOFEE hits none.
 ASE minima hopping hits LJ\(_{38}\) on 1 of 6, LJ\(_{55}\) on 6 of 6, and
-LJ\(_{75}\) on none.
+LJ\(_{75}\) on none.~\rerun{5}
 The median wall of a GOFEE run is 499.4~s on LJ\(_{38}\), 3453.6~s on
 LJ\(_{55}\), and 7203.7~s on LJ\(_{75}\), against 0.081~s, 0.154~s, and
 26.220~s for this setting.
@@ -1297,7 +1314,7 @@ and AGOX GOFEE on the same three Lennard-Jones clusters.
 Seeds 2000--2005, one core, budget in force calls.
 Capped counts the runs stopped by a wall cap of 2 hours, which are misses.
 Calls is the median force-call count of the runs that hit, and Wall is the median
-wall in seconds of all six runs.}
+wall in seconds of all six runs.~\rerun{5}}
 \label{tab:gofee}
 \centering
 \small
@@ -1566,7 +1583,7 @@ The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\), where both hit
 The preset behind every count carries the motif cuts of
 Section~\ref{sec:priors}.
 The Morse rows at \(\rho=6\) are counted with the Mackay cap, and the gold
-rows with the labelled cuts, so a hit there may be a hit of a cut and not of a
+rows with the labeled cuts, so a hit there may be a hit of a cut and not of a
 move.
 No panel was run with those switches off, and the counts do not say how much
 of each hit they carry.~\rerun{6}
@@ -1582,7 +1599,7 @@ Against GMIN on TIP4P, this setting hits more seeds on 4 of the 5 sizes
 The comparisons with the Atomic Simulation Environment count hits only.
 Minima hopping reached its cap on every run, and basin hopping on every
 run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11 of 12
-on LJ\(_{55}\).
+on LJ\(_{55}\).~\rerun{5}
 Those runs did not receive the budget, so their calls to the minimum
 and their wall are not completed observations.
 On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
@@ -1629,15 +1646,15 @@ The arm rule makes no difference beyond the seed-to-seed spread at
 these sizes.
 Against GMIN on seeds 2000--2011, this setting hits more seeds on 9 of
 13 clusters, and GMIN hits more on LJ\(_{150}\) and on M\(_{80}\) at
-\(\rho=6\), 9 of 12 against 5 of 12 and 12 of 12 against 2 of 12.
+\(\rho=6\), 9 of 12 against 5 of 12 and 12 of 12 against 2 of 12.~\rerun{5}
 Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, scored by Fisher's test on hits, this setting
 hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse
-clusters, and no arm hits Au\(_{55}\).
+clusters, and no arm hits Au\(_{55}\).~\rerun{5}
 On Au\(_{55}\) in the GMIN panel it hits 6 of 12 and GMIN 0 of 12.~\rerun{6}
 Of the 9 clusters where this setting hits more seeds than GMIN, 6 are
 significant by Fisher's test, and the 3 that are not are LJ\(_{102}\),
-LJ\(_{103}\), and LJ\(_{104}\).
+LJ\(_{103}\), and LJ\(_{104}\).~\rerun{5}
 AGOX GOFEE hits none of the three Lennard-Jones clusters on 6 seeds, and
 against GMIN on TIP4P this setting hits \((\mathrm{H_2O})_{15}\) on 9 of 12
 and GMIN on 0 of 12.
