@@ -1,3 +1,4 @@
 system,energy_eV,xtb_Eh,xtb_eV,code,seed,code_revision,host,xyz
 si13,-624.70446339,-22.957465589557,-624.70443593,anneal-general,2003,c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4,bench,minima/si13-ring.xyz
+si13,-632.49855758,-23.243893267921,-632.49852977,anneal-general,2031,ccd69256770d99ae724a723d073736a18f8533ce,bench,minima/si13-2031.xyz
 si20,-922.98227162,-33.918972862053,-922.98223105,anneal-general,3003,a52726af5f3cee9506124c70ac0f3917ad335bb0,bench,minima/si20-ring.xyz

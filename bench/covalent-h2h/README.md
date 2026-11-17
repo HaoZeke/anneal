@@ -861,9 +861,10 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
 - Anneal stops at the first energy at or below the reference, and seeds
   2003 and 2005 stop below it, at -624.70446339 and -617.18016907 eV. The
   first is an open ring in which every atom has one or two neighbours,
-  and xtb 6.7.1 gives it -22.957465589557 Eh from a fresh start. It is
-  the lowest Si13 minimum any run has reached, recorded in
-  `gfn2/minima.csv` with its structure in `gfn2/minima/si13-ring.xyz`.
+  and xtb 6.7.1 gives it -22.957465589557 Eh from a fresh start. It was
+  the lowest Si13 minimum any run had reached until the floor gate below,
+  recorded in `gfn2/minima.csv` with its structure in
+  `gfn2/minima/si13-ring.xyz`.
   Against it CREST hits on none of its six seeds (`gfn2/rescore.csv`,
   from `--rescore si13 -624.70446339`). Anneal's rows are not rescored:
   each stopped at the reference it ran with.
@@ -906,10 +907,11 @@ on `bench/cov-floor2`; this series carries the same change on this base.
 - It was gated against `c1c02d16` on seeds 2000-2011 of Si13 and C20 at
   1e5 calls, both arms in one untimed session with eight runs at a time
   (`gfn2/floor_gate.csv`). On Si13 both arms hit on all twelve seeds.
-  2.89% of the floor arm's calls are SCCs that do not converge, against
-  6.05%. Its median calls to hit is 2,207 against 1,897 (Mann-Whitney
-  p = 0.45). On C20 neither arm reaches the cage, no call fails its SCC
-  in either, and the median best is -1146.550 eV in both (p = 0.86). The
+  1.44% of the floor arm's calls are SCCs that do not converge, against
+  3.02%; the rows count each such call twice, 2.89% and 6.05%, as every
+  build before `7136fcc8` does: it ran a failed fresh SCC a second time.
+  Its median calls to hit is 2,207 against 1,897 (Mann-Whitney p = 0.45).
+  On C20 neither arm reaches the cage, no call fails its SCC in either, and the median best is -1146.550 eV in both (p = 0.86). The
   `c1c02d16` arm repeats the timed Si13 calls to hit seed for seed. The
   Si10, C10, Si13 and C20 rows above are without it.
 - The same gate against develop `3c189e92` (`floor-gate/`, untimed,
@@ -919,7 +921,7 @@ on `bench/cov-floor2`; this series carries the same change on this base.
   rows, and `a52726af`, with the floor (`floor-gate/gfn2.csv`), pushed
   as `51abe20f` and `c3566383` with the same trees. Both arms repeat the
   `c1c02d16` gate seed for seed: on Si13 12/12 hits in each, SCC failures
-  2.89% of calls against 6.05%, median calls to hit 2,207 against 1,897
+  1.44% of calls against 3.02%, median calls to hit 2,207 against 1,897
   (p = 0.45). The floor arm takes more calls on six seeds, fewer on five
   and the same on one. On C20 the two arms are 0/12 with no SCC failure,
   median best -1146.550 eV (p = 0.86). The paper headline panel
@@ -931,8 +933,81 @@ on `bench/cov-floor2`; this series carries the same change on this base.
   Au55 pins (`floor-gate/au55-pins-a52726af.txt`) are byte for byte
   those of `bench/paper-0120` on develop.
 
+### The floor gate on `c2de652d`
+
+On this series rebased on `c2de652d`, three example builds ran in one
+untimed session at 1e5 calls, seven runs at a time on cores 1-7 while
+core 0 ran CREST (`gfn2/floor-gate-c2de652d.csv`, one row per arm and
+seed): `3be9554e`, the series up to the Si13 rows, with no element
+floor; `ccd69256`, the element floor; and `e5e21199`, the floor with the
+line-search spacing below. `c2de652d` itself has no Si13 or C20 in the
+example. Each build before `7136fcc8` counts a failed SCC twice, and the
+counts below are halved for them. In short: the floor takes 16% more
+median Si13 calls at twelve seeds and 9% more at sixty, neither
+significant, and with the spacing the example takes as many Si13 calls
+as the base, fails a quarter as many SCCs, and is the floor on Si10 and
+C20.
+
+- Si13, seeds 2000-2011: both arms hit on all twelve. The floor's median
+  calls to hit is 2,206.5 against 1,896.5 (Mann-Whitney p = 0.45), and
+  1.44% of its calls fail their SCC against 3.02% (p = 0.30 over the
+  per-seed rates), the numbers of `gfn2/floor_gate.csv`.
+- Why the floor took more calls there, from builds that trace every
+  trial: the two arms part at the first hop or the second on eleven of
+  the twelve seeds, at the first trial with a pair inside 1.55 Å, which
+  the floor opens and the base hands to xtb as drawn; seed 2009 is the
+  same in both. From there each seed's calls to hit is a separate draw.
+  The base's hit came from such a trial on seeds 2000, 2004 and 2010,
+  shortest pair 1.135, 1.014 and 1.081 Å, and the floor opened each of
+  those. The floor's own hit came from a trial it opened on six seeds.
+  The floor refuses trials that lead the base to the hit and opens others
+  that lead it there.
+- Seeds 2012-2059 added to both arms give 60 of 60 hits in each, a median
+  of 1,665.5 calls against 1,525 (p = 0.76), and SCC failures in 1.76% of
+  calls against 2.85% (p = 0.035). The 16% at twelve seeds is the spread
+  of those draws. The halving at twelve was mostly three base seeds, 2008,
+  2001 and 2011, with 319, 183 and 143 of its 823 failed SCCs.
+- Where the failures are: of the base's failed Si13 SCCs on 2000-2011, 28%
+  had their shortest pair at 0.90-1.55 Å, which the floor keeps out of a
+  trial's start, and 62% at 2.0 Å or more, where no floor acts. Of the
+  failed SCCs of all Si10 and Si13 runs, 63% had a shortest pair within
+  0.002 Å of the failure before them: a line search bisecting towards
+  its accepted step, each probe an SCC that fails. On Si10 seed 2000 the
+  base took 16,819 calls and five hours to hit, 4,528 of them failed
+  SCCs, two thirds of those so; the floor hit in 1,019 calls with 7.
+- `0ebf7300` gives `WarmLbfgs` a refusal spacing, and `e5e21199` sets it
+  to 0.01 Å in the example: a line search asks no probe within 0.01 Å, in
+  every coordinate, of a probe just refused, and ends at its accepted
+  step. On Si13 over seeds 2000-2059 it hits on 60 of 60, median 1,517
+  calls against the base's 1,525 (p = 0.92), and 0.66% of its calls fail
+  their SCC against 2.85% (p = 0.0011) and the floor's 1.76%. Its rows are
+  the floor's on 42 of the 60 seeds, the same calls, hit, energy and
+  halved failed SCCs; on the other 18 it has fewer failed SCCs on 15 and
+  as many on 3, never more. On Si10 and C20, seeds 2000-2011, every row
+  is the floor's.
+- The floor and the spacing both stop Si13 seed 2031 at -632.49855758
+  eV, 7.8 eV below the ring, on the same geometry: a branched chain of
+  thirteen atoms with one to three neighbours within 2.7 Å and a shortest
+  pair of 1.63 Å. A fresh xtb 6.7.1 SCC at 3000 K does not converge there in its
+  default 250 iterations; with the engine's 500 it converges at the
+  265th to -23.243893267921 Eh, -632.49852977 eV, so the hit is the
+  geometry's energy. It is in `gfn2/minima.csv` and
+  `gfn2/minima/si13-2031.xyz`. A fresh single point of every other best
+  geometry in the gate gives its recorded energy to 0.01 eV.
+- Si10: every arm hits on 12 of 12. The floor and the spacing take a
+  median of 1,094.5 calls against the base's 1,001.5 (p = 0.86), and
+  0.33% of their calls fail their SCC against 15.81%, 1.00% without seed
+  2000 (p = 0.023 over the per-seed rates). C20: no arm reaches the cage, no call fails its SCC,
+  and the median best is -1146.550 eV in all three (floor against base p
+  = 0.86).
+- A third arm opened only pairs inside 0.90 Å, to 1.05 times the element
+  floor, and left 0.90-1.55 Å to xtb. Over seeds 2000-2011 it took a
+  median of 2,541.5 Si13 calls with 3.39% failing, and is not kept; its
+  rows are not in the file, as its build is not on this branch.
+
 `scripts/covalent_h2h/gfn2_floor_gate.py` runs a same-session gate of
-two example builds and summarises its rows.
+any number of example builds on named cores and summarises every arm
+against the first.
 
 ## Pins
 
@@ -971,8 +1046,8 @@ Three first-parent commits changed it:
 - `c10-96/`: the 96-seed C10 rows.
 - `gfn2/`: per-seed rows and summaries of GFN2-xTB Si10, C10, Si13 and
   C20, anneal against CREST, CREST's rescore against the Si13 ring, the
-  lowest minima with their xtb energies, the element-floor gate, and
-  the capped Si20 reference search with a fresh xtb single point of each
-  best geometry.
+  lowest minima with their xtb energies, the element-floor gates on
+  `c1c02d16` and `c2de652d`, and the capped Si20 reference search with a
+  fresh xtb single point of each best geometry.
 - `floor-gate/`: the element-floor gate against develop, GFN2 and the
   paper headline panel, with the pins of the floor build.
