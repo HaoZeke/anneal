@@ -1,0 +1,7 @@
+system,panel,preset,driver,seeds,n,budget,hits,code_revision,record,host
+lj98,gmin-n12,recommended,h2h_gmin_proof,2000-2011,12,4000000,10,500aaf651dcb613c644c202a5519417b872b0e6e,bench/lj-n12-500aaf65/summary.csv,bench
+lj104,gmin-n12,recommended,h2h_gmin_proof,2000-2011,12,4000000,9,500aaf651dcb613c644c202a5519417b872b0e6e,bench/lj-n12-500aaf65/summary.csv,bench
+lj98,gmin-wall-v8,recommended,h2h_gmin_proof,2000-2005,6,4000000,5,ec64b77b,27f6ee98827e09caed21bd100e019886e9585c00,bench
+lj104,gmin-wall-v8,recommended,h2h_gmin_proof,2000-2005,6,4000000,6,ec64b77b,27f6ee98827e09caed21bd100e019886e9585c00,bench
+lj98,ase-panel,for_cluster,ase_panel,2000-2011,12,4000000,4,c2de652dca0bc75e2b0cb4afffac91fd656404e4,bench/ase-lj98/rows.csv,bench
+lj104,ase-panel,for_cluster,ase_panel,2000-2011,12,4000000,0,c2de652dca0bc75e2b0cb4afffac91fd656404e4,bench/ase-lj104/rows.csv,bench
