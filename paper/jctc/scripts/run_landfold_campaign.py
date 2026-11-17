@@ -183,7 +183,7 @@ def fold(binary: Path, books: list[Path], family: str, folder: Path) -> int:
 
 
 def validate_book(path: Path, campaign: Campaign) -> tuple[int, int]:
-    expected = campaign.size * (7 if campaign.family == "tip4p" else 3)
+    expected = campaign.size * (6 if campaign.family == "tip4p" else 3)
     rows = 0
     for number, line in enumerate(path.read_text().splitlines(), 1):
         if not line.strip():
