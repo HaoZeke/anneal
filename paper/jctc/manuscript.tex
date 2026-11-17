@@ -49,9 +49,18 @@ The arm rule makes no difference beyond the seed-to-seed spread at
 these sizes.
 Against the Wales-group program GMIN, on seeds 2000--2011 of thirteen
 Lennard-Jones, Gupta and Morse clusters in one session, this setting
-hits more seeds on 9 of 13 and GMIN hits more on 2.
+hits more seeds on 9 of 13, the two tie on 2, and GMIN hits more on 2.
 GMIN hits LJ\(_{150}\) on 9 of 12 against 5 of 12, and M\(_{80}\) at
 \(\rho=6\) on 12 of 12 against 2 of 12.
+Against the basin hopping and the minima hopping of the Atomic
+Simulation Environment, with each run capped in wall time, this setting
+hits LJ\(_{38}\), LJ\(_{55}\), LJ\(_{98}\), LJ\(_{104}\), and
+LJ\(_{150}\) on 12, 12, 10, 9, and 5 of 12 seeds, and neither ASE arm
+hits more than 1 of 12 on any of them.
+No arm of that panel hits Au\(_{55}\); in the GMIN panel, on another
+revision, this setting hits it on 6 of 12 and GMIN on 0 of 12.
+On Morse clusters of 38 and 55 atoms at \(\rho=6\) and \(\rho=14\) it
+hits 12, 12, 12, and 5 of 12, and both ASE arms hit 0 of 12.
 On seeds 6400--6405 the retry rows hit LJ\(_{104}\) on 3 of 6 and
 LJ\(_{98}\) on 6 of 6.
 Section~\ref{sec:cross-field} does not improve those counts.
@@ -85,6 +94,13 @@ Below 98 atoms the quench chooses between the plain potential and one
 diameter penalty.
 At 98 atoms and above the penalty is absent.
 A stall does not replace the walker with a random cluster.
+Section~\ref{sec:results} runs this setting against GMIN on 13
+Lennard-Jones, Gupta, and Morse clusters, and against the basin hopping
+and the minima hopping of the Atomic Simulation Environment on 5
+Lennard-Jones clusters, Gupta Au\(_{55}\), and 4 Morse clusters.
+\cite{wales1997,larsenAse2017,goedecker2004}
+GMIN hits more seeds on 2 of the 13, LJ\(_{150}\) and M\(_{80}\) at
+\(\rho=6\).
 
 The published Lennard-Jones minima at 38, 55, 75, 98, and 104 atoms are
 the Cambridge energies.
@@ -377,6 +393,14 @@ The Cambridge references, in reduced units, are \(-173.928427\) at 38
 atoms, \(-279.248470\) at 55, \(-397.492331\) at 75, \(-543.665361\) at
 98, and \(-582.086642\) at 104.
 \cite{walesCambridgeClusterDatabase}
+The panels of Sections~\ref{sec:gmin} and~\ref{sec:ase} add
+\(-569.363652\) at 102 atoms, \(-575.766131\) at 103, and
+\(-893.310258\) at 150, \(-191.0308528\)~eV for gold at 55 atoms in
+the copper--gold Gupta archive, and from the Morse table
+\(-157.477108\) and \(-144.321054\) for M\(_{38}\) at \(\rho=6\) and
+\(14\), \(-250.286609\) and \(-220.646208\) for M\(_{55}\), and
+\(-378.333471\) and \(-340.811371\) for M\(_{80}\).
+\cite{walesCambridgeClusterDatabase,cleriRosato1993,darbyCuAu2002,doyeWalesMorse1997}
 
 For TIP4P the same test is applied in kilojoules per mole, with the
 thermochemical calorie \(4.184\)~kJ:
@@ -465,9 +489,11 @@ clusters of 20, 30, and 40 atoms.
 GMIN is the Wales-group basin-hopping program.
 \cite{wales1997,oakley2013}
 Section~\ref{sec:gmin} scores it on the clusters of Table~\ref{tab:gmin}.
-The Atomic Simulation Environment provides a basin-hopping optimiser.
-\cite{larsenAse2017}
-This article reports no force-call count for that optimiser.
+The Atomic Simulation Environment provides a basin-hopping optimiser
+and a minima-hopping optimiser.
+\cite{larsenAse2017,goedecker2004}
+Section~\ref{sec:ase} scores both on the clusters of
+Tables~\ref{tab:ase} and~\ref{tab:ase-morse}.
 AGOX searches with a local surrogate, and later releases add
 replica exchange.
 \cite{christiansenAgox2022}
@@ -484,8 +510,10 @@ landscape to propose candidates, a universal potential as a Gaussian-process
 prior, fractional existence variables, an on-the-fly potential in a
 grand-canonical search, and a delta model on silver--sulfur systems.
 \cite{slavenskyComplementary2023,lyngbyUniversalPrior2024,larsenFractional2023,quinlivanGrandCanonical2026,pitfieldActiveDelta2026}
-Minima hopping on the Atomic Simulation Environment is a separate
-package, with a corrigendum and a deposit dated 7 November 2026.
+The minima hopping of Krummenacher and co-workers on the Atomic
+Simulation Environment is a separate package from the optimiser of
+Section~\ref{sec:ase}, with a corrigendum and a deposit dated
+7 November 2026.
 \cite{krummenacherMinimaHopping2024,krummenacherAseMh2026,goedecker2004}
 None of those searches is given a hit rate in the tables below.
 
@@ -603,7 +631,8 @@ The hexamer polish below is a local relaxation of a structure already in
 hand.
 
 Further basin-hopping searches sit on other potentials: adaptive
-basin hopping on density-functional surfaces, Stillinger--Weber silicon,
+basin hopping on surfaces from density functional theory,
+Stillinger--Weber silicon,
 surface-supported clusters, a firefly search, minima hopping on ionized
 gold, and doped boron clusters.
 \cite{carmonaAbhDft2026,shuklaSilicon2026,zhangSgmsc2026,leeNara2026,safaGoldIons2026,rodriguezKesslerYttrium2026,rodriguezKesslerB18ca2026,rodriguezKesslerB7ca2026,rodriguezKesslerB18ag2026}
@@ -742,12 +771,26 @@ Both arms use seeds 2000--2011, the budget in the table and the start
 this code writes for the seed.
 The hit is a quenched energy at most 0.001 above the Cambridge Cluster
 Database minimum.
+The Lennard-Jones, gold, and Morse rows run the preset through three
+drivers.
+The gold driver gives it the copper--gold species list with no copper
+atom, applies the basin bias of equation~\ref{eq:delta} to every downhill or
+accepted proposal and to one other proposal in 8, and decides the rest
+on the bare energy.
+The Morse driver quenches one Mackay cap before the walk when the pair
+energy at \(\sqrt{2}\) times the pair minimum is below \(-0.05\), which
+holds at \(\rho=6\) and not at \(\rho=14\).
 This setting hits more seeds than GMIN on 9 of the 13 clusters.
 GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12, and on
 M\(_{80}\) at \(\rho=6\), 12 of 12 against 2 of 12.
 The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\).
 Fisher's test on hits is below 0.05 on 7 clusters: 6 for this setting and
 M\(_{80}\) at \(\rho=6\) for GMIN.
+On M\(_{80}\) at \(\rho=6\) GMIN reaches the minimum in a median of
+268934 calls and 10.691~s, and this setting spends the full
+\(4\times 10^{6}\) calls in a median of 168.9~s.
+On LJ\(_{150}\) the median calls are 3129518.5 for GMIN and the full
+\(4\times 10^{6}\) for this setting, and Fisher's \(p\) is 0.21.
 The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\) and
 6 of 6 on LJ\(_{98}\).
 They are the baseline in Section~\ref{sec:cross-field}.
@@ -1092,6 +1135,53 @@ Wales--Hodges reference.
 
 Neither arm is part of the recommended preset.
 
+\section{Discussion}
+\label{sec:discussion}
+GMIN hits more seeds than this setting on 2 of the 13 clusters of
+Table~\ref{tab:gmin}.
+On M\(_{80}\) at \(\rho=6\) GMIN hits 12 of 12 and this setting 2 of
+12, and Fisher's \(p\) is \(6.7\times 10^{-5}\).
+On LJ\(_{150}\) GMIN hits 9 of 12 and this setting 5 of 12, and
+Fisher's \(p\) is 0.21.
+The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\), where both hit
+12 of 12.
+
+The comparisons with the Atomic Simulation Environment count hits only.
+Minima hopping reached its cap on every run, and basin hopping on every
+run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11 of 12
+on LJ\(_{55}\).
+Those runs did not receive the budget, so their calls to the minimum
+and their wall are not completed observations.
+On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
+budget before the cap and missed on every seed.
+
+The moves, the temperature, and the stall rules of
+Section~\ref{sec:search} were set on Lennard-Jones clusters.
+The Morse and gold rows apply them to other surfaces: the Morse pair
+at \(\rho=6\), whose well has the curvature of the Lennard-Jones well,
+and at the shorter range \(\rho=14\), and the many-body Gupta potential
+of gold.
+\cite{doyeWalesMorse1997,cleriRosato1993,darbyCuAu2002}
+Against the Atomic Simulation Environment this setting hits M\(_{38}\)
+at \(\rho=6\) and \(\rho=14\) and M\(_{55}\) at \(\rho=6\) on 12 of 12
+and M\(_{55}\) at \(\rho=14\) on 5 of 12, where neither ASE arm hits.
+Against GMIN it hits M\(_{55}\) at \(\rho=6\) on 12 of 12,
+M\(_{55}\) at \(\rho=14\) on 7 of 12, and M\(_{80}\) at \(\rho=14\) on
+9 of 12, where GMIN hits 12, 0, and 0, and it hits M\(_{80}\) at
+\(\rho=6\) on 2 of 12, where GMIN hits 12.
+M\(_{55}\) at \(\rho=14\) is in both panels: 5 of 12 on revision
+\texttt{90b88235} with the preset scaled to the Morse pair, and 7 of
+12 on \texttt{c2de652d} with the Morse driver of
+Section~\ref{sec:gmin}.
+On Au\(_{55}\) this setting hits 6 of 12 in the GMIN panel, where GMIN
+hits 0 of 12 and Fisher's \(p\) is 0.014.
+In the ASE panel it hits 0 of 12, as do both ASE arms, and its median
+best energy lies 0.048~eV above the reference.
+Those two Au\(_{55}\) counts come from revision \texttt{c2de652d} with
+the gold driver of Section~\ref{sec:gmin} and from revision
+\texttt{b49341e3} with the preset scaled to the Gupta length and well
+depth.
+
 \section{Conclusions}
 One basin-hopping setting, with the moves of Section~\ref{sec:moves}
 and \(T=0.8\), is the search reported here.
@@ -1103,7 +1193,12 @@ The arm rule makes no difference beyond the seed-to-seed spread at
 these sizes.
 Against GMIN on seeds 2000--2011, this setting hits more seeds on 9 of
 13 clusters, and GMIN hits more on LJ\(_{150}\) and on M\(_{80}\) at
-\(\rho=6\).
+\(\rho=6\), 9 of 12 against 5 of 12 and 12 of 12 against 2 of 12.
+Against the basin hopping and the minima hopping of the Atomic
+Simulation Environment, scored by Fisher's test on hits, this setting
+hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse
+clusters, and no arm hits Au\(_{55}\).
+On Au\(_{55}\) in the GMIN panel it hits 6 of 12 and GMIN 0 of 12.
 The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\).
 Section~\ref{sec:cross-field} rescales that leave on the same seeds.
 It hit 2 of 6 and was not kept.
