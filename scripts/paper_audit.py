@@ -94,7 +94,7 @@ KNOWN_GAPS = {
     "paper/jctc/data/campaign-scores.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/system_visuals/references.csv": "revision and host unrecorded (no revision or host column)",
     "bench/gad-published/summary.csv": "revision recorded; no host column",
-    "bench/morse-panel/seeds.csv": "code_revision unrecorded on some rows; host empty or unknown on some rows",
+    "bench/morse-panel/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/morse-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/fp-fingerprint/rows.csv": "revision and host unrecorded (no revision or host column)",
     "bench/tip4p-h2h/h2h-summary.csv": "revision and host unrecorded (no revision or host column)",
@@ -1075,7 +1075,7 @@ def manuscript_ase(audit: Audit) -> None:
                     f"{series(ours(s) for s in behind)}, where GMIN hits "
                     f"{series(str(hits_of(gmin[(s, 'gmin')])) for s in behind)}.")
     rev_gmin_text = sorted(rev_gmin)[0][:8]
-    audit.cell(TEX, "the GMIN panel revision", "61b5c9a0", rev_gmin_text)
+    audit.cell(TEX, "the GMIN panel revision", "1ce3ab64", rev_gmin_text)
     audit.said(TEX, f"{name('m55r14')} is in both panels: {hits('m55r14', 'recommended')} of 12 on revision "
                     f"\\texttt{{{rev_morse_short}}} and {of('m55r14', 'anneal')} on \\texttt{{{rev_gmin_text}}}.")
     p_au = fisher(hits_of(gmin_au[0]), len(gmin_au[0]), hits_of(gmin_au[1]), len(gmin_au[1]))
@@ -1560,6 +1560,8 @@ def paper_0120(audit: Audit) -> None:
         group = groups[(system, driver)]
         dev = panel.DEVELOP[(system, driver)]
         found = pick(audit.rows(dev["path"]), **dev["where"])
+        if dev["path"] == "bench/morse-panel/seeds.csv":
+            found.extend(pick(audit.rows("bench/morse-panel/template-free-rows.csv"), **dev["where"]))
         found = [r for r in found if r["system"] == system]
         where = f"{path}:{line} {row['system']}"
         calls = [float(r["evals_to_hit"]) for r in group]
@@ -2950,10 +2952,15 @@ def revision_map_text(rows: list[dict[str, str]]) -> str:
 def au55_superseded(audit: Audit) -> None:
     """Each row of rows.csv that rows-for-cluster.csv replaces is listed, and no other row is."""
     old = audit.rows("bench/ase-au55/rows.csv")
-    new = {(r["arm"], r["seed"]): r for r in audit.rows("bench/ase-au55/rows-for-cluster.csv")}
+    new = {
+        (r["arm"], r["seed"]): r
+        for r in audit.rows("bench/ase-au55/rows-for-cluster.csv")
+        if r["code_revision"].startswith("fc1af066")
+    }
     listed = audit.rows("bench/ase-au55/superseded.csv")
     want = {(r["system"], r["arm"], r["seed"], r["code_revision"], "bench/ase-au55/rows-for-cluster.csv",
-             new[(r["arm"], r["seed"])]["code_revision"]) for r in old if r["arm"] != "recommended"}
+             new[(r["arm"], r["seed"])]["code_revision"]) for r in old
+            if r["arm"] != "recommended" and not r["code_revision"].startswith("1ce3ab64")}
     got = {(r["system"], r["arm"], r["seed"], r["code_revision"], r["superseded_by_file"], r["superseded_by_revision"])
            for r in listed if r["host"] == "bench"}
     audit.record(got == want, "bench/ase-au55/superseded.csv", "the superseded rows are the replaced ones",

@@ -94,8 +94,9 @@ On this build `scripts/covalent_h2h/pins.sh` prints sha1
 `7192e9f8` in `bench/generic-alloy/g3-pins.txt` and for `7d8fa6ea` in
 `bench/openconf-h2h/conf-fix4`. `h2h_metal run au55` on seeds 2000-2002,
 clock columns removed, prints sha1
-`b22e212181eff57e9412f780c40e85208b355d07`, the value recorded in
-`bench/openconf-h2h/conf-fix4`.
+`1213f9cdf92a2dabfc8a51c83522086f8a9d7cdc`; the template-era value recorded
+in `bench/openconf-h2h/conf-fix4` was
+`b22e212181eff57e9412f780c40e85208b355d07`.
 `tests/lj_trajectory_pin.rs` passes. The committed pins files,
 `bench/generic-alloy/g2-pins.txt` and `g3-pins.txt`, are unchanged.
 

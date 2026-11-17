@@ -79,10 +79,9 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // Merging develop's stall-growth hold moves which seeds reach the
-    // octahedron. Cutoff 0xffff, plain 0x91e4 (7 seeds), with and
-    // without IRA.
-    let plain_exact = 0x91e4;
+    // The template-free walk is deterministic: cutoff 0xffff, plain
+    // 0x240d (5 seeds), with and without IRA.
+    let plain_exact = 0x240d;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

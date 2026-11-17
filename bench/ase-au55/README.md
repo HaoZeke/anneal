@@ -5,7 +5,7 @@ The reference minimum is -191.03085280; a hit is at most 0.001 above it.
 Anneal uses the cluster preset. Recommended uses Config::recommended.
 ASE basin hopping and minima hopping use
 the ASE 3.29 constructor defaults.
-Rows carry code_revision 61b5c9a01b2002223f9c1e7024863b112001ebf7.
+Rows carry code_revision 1ce3ab64493196afd25e8690648e21157d91b882.
 The anneal, basin-hopping and minima-hopping rows of `rows.csv` at 33bed75f are kept
 and superseded by `rows-for-cluster.csv`; `superseded.csv` lists each of them.
 This report reads the recommended rows of `rows.csv` and every row of `rows-for-cluster.csv`.

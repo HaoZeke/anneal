@@ -9990,7 +9990,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_ordinary_target_encounter_is_stamped_at_the_call_that_found_it() {
+    fn an_ordinary_target_improvement_uses_the_completed_quench_clock() {
         let mut cfg = Config::for_cluster(1);
         cfg.max_hops = Some(3);
         cfg.replicas = 1;
@@ -10009,7 +10009,7 @@ mod tests {
         assert!(outcome.charged <= 4);
         let (_, at, _, energy) = *outcome.improvements.last().expect("an improvement");
         assert_eq!(energy, -2.0);
-        assert_eq!(at, 2);
+        assert_eq!(at, outcome.charged);
     }
 
     #[test]
