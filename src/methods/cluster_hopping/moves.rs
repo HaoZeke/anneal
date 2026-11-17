@@ -884,9 +884,27 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
         }
         seen
     };
+    let unit = |a: usize, b: usize| -> [f64; 3] {
+        let v = [0, 1, 2].map(|k| x[3 * b + k] - x[3 * a + k]);
+        let norm = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-12);
+        v.map(|c| c / norm)
+    };
+    let flat_pivot = |pivot: usize| -> bool {
+        let [a, b, c] = adj[pivot][..] else {
+            return false;
+        };
+        let (u, v, w) = (unit(pivot, a), unit(pivot, b), unit(pivot, c));
+        let volume = u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0])
+            + u[2] * (v[0] * w[1] - v[1] * w[0]);
+        volume.abs() < PLANAR_VOLUME
+    };
+    // Three or more identical terminal tips (such as a methyl) map onto
+    // themselves under rotation; two identical tips do so only when the
+    // pivot is planar (such as -NO2 or an sp2 -NH2), whereas a pyramidal
+    // -NH2 exchanges its hydrogens with its lone pair under a half turn.
     let symmetric_top = |pivot: usize, side: &[usize]| {
         let tips: Vec<usize> = side.iter().copied().filter(|&a| a != pivot).collect();
-        tips.len() >= 2
+        (tips.len() >= 3 || (tips.len() == 2 && flat_pivot(pivot)))
             && tips
                 .iter()
                 .all(|&t| adj[t].len() == 1 && species[t] == species[tips[0]])
@@ -4386,6 +4404,26 @@ mod torsion_tests {
             let bonds = rotatable_bonds(x.view(), &species, 1.25);
             assert!(bonds.is_empty(), "swapped {swapped}: {bonds:?}");
         }
+    }
+
+    #[test]
+    fn a_pyramidal_amine_turns_and_a_planar_one_does_not() {
+        let species = vec![6u32, 7, 1, 1, 1, 1, 1];
+        // Methylamine: pyramidal N at (1.47, 0, 0) with two H bent toward +z,
+        // methyl C at (0, 0, 0).
+        let pyramidal = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.47, 0.0, 0.0, 1.82, 0.82, 0.48, 1.82, -0.82, 0.48, -0.36, 0.94, 0.0,
+            -0.36, -0.47, 0.81, -0.36, -0.47, -0.81,
+        ]);
+        let bonds = rotatable_bonds(pyramidal.view(), &species, 1.25);
+        assert_eq!(bonds.len(), 1, "{bonds:?}");
+        assert_eq!(bonds[0].pivot, 1);
+
+        let planar = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.47, 0.0, 0.0, 1.98, 0.87, 0.0, 1.98, -0.87, 0.0, -0.36, 0.94, 0.0,
+            -0.36, -0.47, 0.81, -0.36, -0.47, -0.81,
+        ]);
+        assert!(rotatable_bonds(planar.view(), &species, 1.25).is_empty());
     }
 
     /// Chair cyclohexane, carbons only, 1.53 between neighbours.

@@ -4370,6 +4370,7 @@ where
     apply_contact_convergence(&mut scaled, contact);
     let mut dial = AcceptDial::new(scaled.temperature, contact)
         .measuring(scaled.measured_energy_scale && n_rep == 1);
+    let mut recalibrated_to_best = false;
     let cfg = &mut scaled;
     if initial_recordable {
         ledger.record(e, x.view());
@@ -7665,8 +7666,8 @@ where
         // the best minimum once the chain has climbed past that gap.
         if basin_hold > 0 {
             basin_hold -= 1;
-        } else if cfg.incumbent_gap > 0.0
-            && e > ledger.best + cfg.incumbent_gap
+        } else if ((std::mem::take(&mut recalibrated_to_best) && e > ledger.best)
+            || (cfg.incumbent_gap > 0.0 && e > ledger.best + cfg.incumbent_gap))
             && let Some(state) = ledger.best_state.clone()
             && state.len() == x.len()
         {
@@ -8829,12 +8830,31 @@ where
                 accept = false;
             }
         }
-        if let Some(factor) = dial.measure(e_new - e, cfg.energy_scale) {
-            bias_height *= factor;
-            height = AdaptiveHeight::new(0.1, cfg.height_revisits, bias_height);
-            bias.set_height(height.height());
+        // Once quenches converge, a proposal that relaxes back into the
+        // current basin (or a symmetry image of it) has zero energy change
+        // and is always accepted. Counting those self-returns sets the
+        // opening energy scale to numerical noise and cools the dial below
+        // the real inter-conformer barriers.
+        let same_molecular_basin = cfg.measured_energy_scale
+            && !unquenched
+            && ((!skip_basin && {
+                let r2 = bias.merge_radius() * bias.merge_radius();
+                s_old
+                    .iter()
+                    .zip(s_new.iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    < r2
+            }) || (e_new - e).abs() <= cfg.quench_gradient.max(1.0e-6) * cfg.length_scale);
+        if !same_molecular_basin {
+            if let Some(factor) = dial.measure(e_new - e, cfg.energy_scale) {
+                bias_height *= factor;
+                height = AdaptiveHeight::new(0.1, cfg.height_revisits, bias_height);
+                bias.set_height(height.height());
+                recalibrated_to_best = true;
+            }
+            dial.observe(accept);
         }
-        dial.observe(accept);
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage

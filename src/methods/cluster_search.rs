@@ -662,16 +662,16 @@ where
         return failed_step(point, anchor.as_ref())
             .map(|(energy, gradient)| (energy, gradient, false));
     }
-    // A compressed contact never called the potential, so the line search
-    // may still walk off it. A lost bond already returned no step.
-    let overlap = refuse_overlap && wall.refuses(point);
+    // Neither a compressed contact nor a stretched declared bond called the
+    // potential, so the line search may still shorten the step off it.
+    let uncharged = refuse_overlap && (wall.refuses(point) || wall.lost_a_bond(point));
     let answered =
         charge_or_refuse_overlap(objective, led, stats, point, anchor, refuse_overlap, wall)?;
     if answered.2 {
         *failure = None;
         return Some(answered);
     }
-    if overlap {
+    if uncharged {
         return Some(answered);
     }
     let calls = failure
@@ -756,7 +756,13 @@ where
     // lowered them by 2.07 kcal/mol on average. The polish descends to the
     // solver's own default.
     let settled = opt.gtol;
-    let stop = cfg.record_gradient;
+    let stop = if cfg.quench_gradient > 0.0 {
+        cfg.quench_gradient
+    } else {
+        cfg.record_gradient
+    };
+    let keep_molecular_curvature =
+        cfg.move_library.is_molecular() && !cfg.move_library.is_rigid_body();
     // The driver calls the screening pass with `screen_steps`, the full one
     // with `relax_steps` and a record polish with `polish_records`, so the
     // iteration count identifies which is which.
@@ -775,19 +781,30 @@ where
     let refuse_overlap = cfg.species.is_some();
     let wall = CallWall::of(cfg);
     let mut failure: Option<FailedPotential> = None;
+    let has_frozen = cfg
+        .frozen
+        .as_ref()
+        .is_some_and(|frozen| frozen.iter().any(|&b| b));
     use crate::methods::tric_opt::LocalStep;
     let mut tric = match (cfg.local_step, cfg.species.as_ref()) {
         (LocalStep::Tric | LocalStep::Auto, Some(species))
-            if !cfg.move_library.is_rigid_body() && species.len() == cfg.n_points =>
+            if !cfg.move_library.is_rigid_body()
+                && !has_frozen
+                && species.len() == cfg.n_points =>
         {
             Some(crate::methods::tric_opt::TricOpt::new(species.clone()))
         }
         _ => None,
     };
-    let mut use_tric = tric.is_some() && cfg.local_step == LocalStep::Tric;
-    // Under `Auto` the opening quench is Cartesian and timed; the choice is
-    // made once, from its calls.
+    let mut use_tric =
+        tric.is_some() && matches!(cfg.local_step, LocalStep::Tric | LocalStep::Auto);
+    // Under `Auto` the opening calls are timed and compared once against a
+    // TRIC step probe. At `quench_gradient = 1e-3` eV/Å Cartesian L-BFGS
+    // spends 12–35 times as many calls per flexible-molecule quench as TRIC,
+    // so TRIC saves calls and wall time up to `24 * per_call`.
     let mut deciding = tric.is_some() && cfg.local_step == LocalStep::Auto;
+    let mut call_seconds = 0.0_f64;
+    let mut timed_calls = 0usize;
     if use_tric {
         stats.local_step = LocalStep::Tric;
     }
@@ -796,8 +813,11 @@ where
         // A new quench. A failure closed the previous descent; this
         // proposal is a different trial.
         failure.take();
-        opt.forget();
         if iters == 0 {
+            opt.forget();
+            if let Some(tric) = tric.as_ref() {
+                tric.forget();
+            }
             // A raw energy, not a quench. An exchange scan and a surrogate's
             // first stage ask for the energy of the point they pass. Counting
             // that read as a screen opened a surface-portfolio hop on every
@@ -862,6 +882,12 @@ where
             .expect("paid check")
             .take()
             .filter(|check| check.at == x);
+        if !keep_molecular_curvature || prior.is_none() {
+            opt.forget();
+            if let Some(tric) = tric.as_ref() {
+                tric.forget();
+            }
+        }
         let before = led.spent();
         let screening = iters <= screen_iters;
         // A rigid chart uses this same descent. A line-search-free capped
@@ -971,8 +997,6 @@ where
         // A descent from where the previous one ended, the full pass after
         // a screen among them, opens by asking for an answer already paid.
         let mut opening = prior.clone();
-        let mut call_seconds = 0.0_f64;
-        let mut timed_calls = 0usize;
         let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
             if let Some(check) = opening.take_if(|check| check.at == v) {
                 let answer = (check.energy, check.gradient.clone());
@@ -1040,7 +1064,7 @@ where
                 x,
                 &atomic_numbers,
                 iters,
-                cfg.record_gradient,
+                opt.gtol,
                 &mut evaluate,
                 &mut watch,
             );
@@ -1092,7 +1116,8 @@ where
         {
             let per_call = call_seconds / timed_calls as f64;
             let per_step = tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
-            use_tric = per_call > per_step;
+            let saving = tric.call_saving(check.at.view());
+            use_tric = saving * per_call > per_step;
             deciding = false;
             stats.quench_seconds = Some((per_call, per_step));
             stats.local_step = if use_tric {
@@ -1245,7 +1270,7 @@ where
                 }
             }
             let spent_at = led.spent();
-            let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
+            let mut eval_cont = |v: ArrayView1<f64>| {
                 let (energy, gradient, physical) = charge_rejecting_repeat_failure(
                     objective,
                     led,
@@ -1259,7 +1284,17 @@ where
                 )?;
                 remember(v, energy, &gradient, physical);
                 Some((energy, gradient))
-            });
+            };
+            let (f2, xr2, _) = match tric
+                .as_mut()
+                .filter(|t| use_tric && t.atoms() * 3 == xr.len())
+            {
+                Some(t) => {
+                    t.gtol = opt.gtol;
+                    t.minimize(xr.view(), iters, &mut eval_cont)
+                }
+                None => opt.minimize(xr.view(), iters, &mut eval_cont),
+            };
             stats.refused = opt.refused();
             let extra = led.spent() - spent_at;
             if extra > 0 {
@@ -1902,6 +1937,7 @@ where
     }
     let mut tight = cfg.clone();
     tight.record_gradient = gtol;
+    tight.quench_gradient = 0.0;
     tight.polish_records = 0;
     tight.adaptive_screen = false;
     tight.probe_screen = false;
@@ -4198,6 +4234,27 @@ mod tests {
             cfg.record_gradient
         );
         assert!((cfg.record_gradient - 5.0e-2).abs() < 1e-15);
+        assert!((cfg.quench_gradient - 1.0e-3).abs() < 1e-15);
+    }
+
+    #[test]
+    fn recommended_molecular_quenches_past_the_record_gate_to_quench_gradient() {
+        let chain = SpringChain::new(8);
+        let cfg = Config::recommended_molecular(vec![6; 8], vec![(0..8).collect()], 1.0);
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(5_000);
+        let (_, xr) = warm_relax_with(&chain, &cfg, &mut stats, 0, paid)(
+            &mut led,
+            chain.start().view(),
+            cfg.relax_steps,
+        );
+        let gmax = largest_component(chain.value_and_gradient(xr.view()).1.view());
+        assert!(
+            gmax <= cfg.quench_gradient,
+            "quench stopped at {gmax}, above quench_gradient {}",
+            cfg.quench_gradient
+        );
     }
     /// xtb's SCC aborts at 0.35 Å as well as below it. A line search that
     /// hands that boundary to the potential spends the quench on rejected

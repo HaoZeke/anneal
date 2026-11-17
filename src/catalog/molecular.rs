@@ -669,6 +669,7 @@ pub enum WaterSearchArm {
 /// [`WATER_RECORD_GRADIENT`].
 pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
     cfg.record_gradient = WATER_RECORD_GRADIENT;
+    cfg.quench_gradient = 0.0;
     // The split screen does not identify a GFN2 hexamer basin, and a
     // walk that has climbed off its best minimum does not find the prism
     // by sampling that high basin. Both apply to every water arm.
