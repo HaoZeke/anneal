@@ -1378,7 +1378,8 @@ pub struct Config {
     /// the walker moves to the lowest of them that is neither where it
     /// stands nor one of the last four destinations, and continues from
     /// there with its bias. The choice reads no random number, so a chain
-    /// that keeps improving walks the same hops either way.
+    /// that keeps improving walks the same hops either way. On in
+    /// [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub elite_return: bool,
     /// Hops without a new best before [`Config::elite_return`] moves the
@@ -2251,6 +2252,9 @@ impl Config {
         // The binding declares an energy scale of one; a conformer
         // landscape in electronvolts is a few hundredths of that.
         cfg.measured_energy_scale = true;
+        // The walker otherwise stands a median 5 kcal/mol above its own
+        // best on the weak molecules of `bench/openconf-h2h/conf-fix9`.
+        cfg.elite_return = true;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;
@@ -2431,9 +2435,12 @@ mod coverage_behaviour {
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
-        assert!(!recommended.elite_return);
+        assert!(recommended.elite_return);
+        assert!(!Config::for_molecular(species.clone(), groups.clone(), 1.0).elite_return);
         assert_eq!(recommended.elite_patience, super::ELITE_PATIENCE);
-        assert!(!recommended.resolved_json().unwrap().contains("elite_"));
+        let resolved = recommended.resolved_json().unwrap();
+        assert!(resolved.contains("\"elite_return\":true"));
+        assert!(!resolved.contains("elite_patience"));
         assert!(
             recommended
                 .resolved_json()

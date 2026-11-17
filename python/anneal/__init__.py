@@ -343,7 +343,8 @@ def cluster_search(
       elite_return: a ``groups`` search that has gone ``elite_patience`` hops
         without a new best moves its walker to the lowest of the distinct
         minima it has accepted that is neither where it stands nor one of its
-        last four such destinations. ``None`` keeps the preset's.
+        last four such destinations. ``None`` keeps the preset's: on for
+        ``recommended=True``, off otherwise.
       elite_patience: hops without a new best before ``elite_return`` moves
         the walker. ``None`` keeps 40.
 

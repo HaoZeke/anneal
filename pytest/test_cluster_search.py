@@ -377,9 +377,10 @@ def test_cluster_search_elite_return_kwargs():
         return flexible_water(x, 2)[1]
 
     kwargs = dict(start=WATER_DIMER, species=[8, 1, 1] * 2, groups=[[0, 1, 2], [3, 4, 5]], seed=2)
-    plain = cluster_search(energy, grad, 6, 600, **kwargs)
     off = cluster_search(energy, grad, 6, 600, elite_return=False, **kwargs)
-    assert off["best_energy"] == plain["best_energy"] and off["hops"] == plain["hops"]
+    never = cluster_search(energy, grad, 6, 600, elite_return=True, elite_patience=10**6, **kwargs)
+    assert (never["best_energy"], never["hops"]) == (off["best_energy"], off["hops"])
+    assert np.array_equal(never["best"], off["best"])
     on = cluster_search(energy, grad, 6, 600, elite_return=True, elite_patience=2, **kwargs)
     assert np.isfinite(on["best_energy"])
     for name, value in (("elite_return", True), ("elite_patience", 5)):
