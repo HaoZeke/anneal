@@ -1191,6 +1191,7 @@ has_analytic_hvp()
 - Outputs :: =True= when the kernel has its own Hessian-vector product, so
   =scheme='auto'= uses it.
   Of these classes only =MorsePot= returns =True=.
+  The query is read-only and reads =primary().caps()=, as for =caps()=.
 - Errors :: none.
 
 *** =.energy_gradient=

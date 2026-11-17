@@ -664,7 +664,7 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
   cls.def(
       "has_analytic_hvp",
       [](const PotHolder<Pot> &self) {
-        return self.slot().caps().analyticHvp;
+        return self.primary().caps().analyticHvp;
       },
       "Whether hvp(scheme='auto') uses the kernel's own product.");
 }
