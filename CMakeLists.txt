@@ -351,10 +351,10 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
            $<INSTALL_INTERFACE:include/rgpot/vesin>)
   target_link_libraries(rgpot_vesin PRIVATE Threads::Threads)
   # The sources meson compiles without contraction: rgpot_core,
-  # rgpot_minimage, rgpot_exact_fma, and the lennard_jones, morse, gupta,
-  # sutton_chen, tersoff_sic, reduced_pair and eam_cell libraries. Tests
-  # compare their bits with unfused references, and arm64 contracts a*b+c
-  # by default, so a source missing here fails there and nowhere else.
+  # rgpot_minimage, rgpot_exact_fma, and the lennard_jones, morse, zbl,
+  # gupta, sutton_chen, tersoff_sic, reduced_pair and eam_cell libraries.
+  # Tests compare their bits with unfused references, and arm64 contracts
+  # a*b+c by default, so a source missing here fails there and nowhere else.
   # tools/check_test_parity.sh checks this list against meson.
   set(_rgpot_unfused_sources
       CppCore/rgpot/CalculatorGroup.cc
@@ -376,6 +376,7 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/LennardJones/LJClusterKernel.cc
       CppCore/rgpot/Morse/MorsePot.cc
       CppCore/rgpot/Morse/cambridge_morse.c
+      CppCore/rgpot/ZBL/ZBLPot.cc
       CppCore/rgpot/Gupta/gupta.c
       CppCore/rgpot/SuttonChen/SuttonChenPot.cc
       CppCore/rgpot/SuttonChen/SuttonChenScales.cc

@@ -13,9 +13,10 @@
  * an unbounded search walks the half pairs, which reach the force of an
  * atom through its partners in index order. A team walks the same rows by
  * atom range and each atom adds the force of all its partners in index
- * order itself; the vectors of forDirected make every term the negation of
- * the one-thread term, so the bits match. A stream reaches the partners of
- * an atom by cell, so it takes the walk by atom on any team.
+ * order itself. The vectors of forDirected make every term the negation of
+ * the one-thread term, and the force adds the rounded product, as the
+ * one-thread walk does. A stream reaches the partners of an atom by cell,
+ * so it takes the walk by atom on any team.
  */
 
 #include "rgpot/PerAtom.hpp"
@@ -130,9 +131,17 @@ void sumPairs(const Neighbours &cells, std::size_t n, double cutoff2, Overlap ov
       double pair_e = 0.0;
       double fscale = 0.0;
       term(i, j, r2, pair_e, fscale);
-      force[3 * a] += fscale * dx;
-      force[3 * a + 1] += fscale * dy;
-      force[3 * a + 2] += fscale * dz;
+      // Round fscale * d, then add that product. The one-thread walk does
+      // this, so a target that contracts within a statement keeps both
+      // walks on the same force bits. The reversed vector is the negation
+      // of the one-thread vector, and the product of a negation is the
+      // negation of the product.
+      const double fx = fscale * dx;
+      const double fy = fscale * dy;
+      const double fz = fscale * dz;
+      force[3 * a] += fx;
+      force[3 * a + 1] += fy;
+      force[3 * a + 2] += fz;
       if (upper) {
         row_e[a] += pair_e;
         if (row_s != nullptr) {
