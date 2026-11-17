@@ -418,6 +418,7 @@ C_HEADERS = (
     "CppCore/rgpot/engine_c_abi.h",
     "CppCore/rgpot/ExternalPot/external_potentials.h",
     "CppCore/rgpot/calculator_mpi_abi.h",
+    "CppCore/rgpot/Models/ModelCapi.h",
     "CppCore/rgpot/MetatomicPot/metatomic_c_abi.h",
     "CppCore/rgpot/XTBPot/xtb_c_abi.h",
     "engines/gromacs/libcp2k.h",

@@ -30,12 +30,25 @@ typedef enum rgpot_builtin_kind {
   RGPOT_BUILTIN_CBE = 7
 } rgpot_builtin_kind;
 
+/*
+ * Construct one fixed-parameter analytic model by enum tag.
+ * Returns NULL on failure; call rgpot_builtin_model_last_error() for details.
+ */
 RGPOT_MODEL_API rgpot_builtin_model *
 rgpot_builtin_model_new(rgpot_builtin_kind kind);
 
+/*
+ * Construct a DoubleWell model with caller-provided parameters.
+ * The model is analytic and supports both calculate and hvp.
+ * Returns NULL on failure; call rgpot_builtin_model_last_error() for details.
+ */
 RGPOT_MODEL_API rgpot_builtin_model *rgpot_builtin_double_well_new(
     size_t dimensions, double v0, double x0, double omega, double coupling);
 
+/*
+ * Construct a CoupledProtonWell model with caller-provided parameters.
+ * Returns NULL on failure; call rgpot_builtin_model_last_error() for details.
+ */
 RGPOT_MODEL_API rgpot_builtin_model *rgpot_builtin_coupled_proton_well_new(
     double v0, double x0, double spring);
 

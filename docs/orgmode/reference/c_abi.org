@@ -1028,6 +1028,146 @@ enum rgpot_status_t rgpot_ch5_2008_taylor_jet(void *user_data,
   =RGPOT_BUFFER_SIZE_ERROR= for an =order= whose =order + 1= doubles overflow in bytes; =RGPOT_JET_BRANCH= when the enclosure of a saturation guard (=arg < 19=), the =rch < 3.8= switch or the handedness test (=argd > 0=) contains its threshold; =RGPOT_JET_DOMAIN= for coincident atoms or a collinear methane frame, where a distance, a quotient or an arc cosine leaves its domain; =RGPOT_INTERNAL_ERROR= with the panic message in =rgpot_last_error=
   for a caught Rust panic.
 
+** Built-in analytic model C API
+
+=CppCore/rgpot/Models/ModelCapi.h= declares the C wrapper for built-in analytic
+model potentials exposed by =librgpot=. The API evaluates row-major batches in
+rgpot native units (eV and angstrom) and reports failures as status integers
+plus a thread-local error string.
+
+*** =rgpot_builtin_model=
+
+- Inputs :: none; an opaque handle type.
+- Units :: none.
+- Outputs :: none; instances come from the constructor functions below and are
+  released with =rgpot_builtin_model_free=.
+- Errors :: none.
+
+*** =rgpot_builtin_kind=
+
+- Inputs :: none; an enum.
+- Units :: none.
+- Outputs :: =RGPOT_BUILTIN_ECKART=, =RGPOT_BUILTIN_MULLER_BROWN=,
+  =RGPOT_BUILTIN_MODIFIED_MULLER_BROWN=, =RGPOT_BUILTIN_LEPS_HH2=,
+  =RGPOT_BUILTIN_LEPS_HCL2=, =RGPOT_BUILTIN_LEPS_FH2= and
+  =RGPOT_BUILTIN_CBE=.
+- Errors :: none.
+
+*** =rgpot_builtin_model_new=
+
+#+attr_rgpot: signature
+#+begin_src c
+rgpot_builtin_model *rgpot_builtin_model_new(rgpot_builtin_kind kind);
+#+end_src
+
+- Inputs :: =kind=, the built-in model tag.
+- Units :: none.
+- Outputs :: a new model handle with the preset parameters of =kind=.
+- Errors :: NULL when construction fails; call =rgpot_builtin_model_last_error=
+  for the reason.
+
+*** =rgpot_builtin_double_well_new=
+
+#+attr_rgpot: signature
+#+begin_src c
+rgpot_builtin_model *rgpot_builtin_double_well_new(
+    size_t dimensions, double v0, double x0, double omega, double coupling);
+#+end_src
+
+- Inputs :: =dimensions= coordinate count; =v0=, =x0=, =omega= and =coupling=
+  are the DoubleWell parameters.
+- Units :: coordinates in angstrom and energies in eV.
+- Outputs :: a new DoubleWell model handle.
+- Errors :: NULL when parameters are invalid or allocation fails; see
+  =rgpot_builtin_model_last_error=.
+
+*** =rgpot_builtin_coupled_proton_well_new=
+
+#+attr_rgpot: signature
+#+begin_src c
+rgpot_builtin_model *rgpot_builtin_coupled_proton_well_new(
+    double v0, double x0, double spring);
+#+end_src
+
+- Inputs :: the coupled proton well parameters =v0=, =x0= and =spring=.
+- Units :: coordinates in angstrom and energies in eV.
+- Outputs :: a new CoupledProtonWell handle.
+- Errors :: NULL on construction failure; see =rgpot_builtin_model_last_error=.
+
+*** =rgpot_builtin_model_free=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_builtin_model_free(rgpot_builtin_model *model);
+#+end_src
+
+- Inputs :: =model= is NULL or a handle returned by a model constructor.
+- Units :: none.
+- Outputs :: releases the model handle.
+- Errors :: none; NULL is a no-op.
+
+*** =rgpot_builtin_model_dimensions=
+
+#+attr_rgpot: signature
+#+begin_src c
+size_t rgpot_builtin_model_dimensions(const rgpot_builtin_model *model);
+#+end_src
+
+- Inputs :: =model= is a live handle.
+- Units :: none.
+- Outputs :: number of active coordinates in each batch row.
+- Errors :: returns 0 when =model= is NULL and stores an error message.
+
+*** =rgpot_builtin_model_calculate=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_builtin_model_calculate(
+    rgpot_builtin_model *model, size_t count, const double *coordinates,
+    double *energies, double *forces);
+#+end_src
+
+- Inputs :: =model= handle; =count= batch rows; =coordinates= with
+  =count * dimensions= doubles; writable =energies= with =count= entries;
+  writable =forces= with =count * dimensions= entries.
+- Units :: coordinates in angstrom, energies in eV, and forces in eV/angstrom.
+- Outputs :: writes one energy and force row per batch row; returns 0 on
+  success.
+- Errors :: returns 1 when inputs are malformed or evaluation fails; details are
+  in =rgpot_builtin_model_last_error=.
+
+*** =rgpot_builtin_model_hvp=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_builtin_model_hvp(
+    rgpot_builtin_model *model, size_t count, const double *coordinates,
+    const double *directions, double *products);
+#+end_src
+
+- Inputs :: =model= handle; =count= batch rows; =coordinates= and =directions=
+  with =count * dimensions= doubles; writable =products= with
+  =count * dimensions= doubles.
+- Units :: coordinates and directions in angstrom, products in eV/angstrom.
+- Outputs :: writes one analytic Hessian-vector product row per batch row;
+  returns 0 on success.
+- Errors :: returns 1 when buffers are invalid, values are non-finite, or the
+  model lacks analytic HVP support; details are in
+  =rgpot_builtin_model_last_error=.
+
+*** =rgpot_builtin_model_last_error=
+
+#+attr_rgpot: signature
+#+begin_src c
+const char *rgpot_builtin_model_last_error(void);
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: thread-local NUL-terminated text of the last model API failure.
+- Errors :: none; the pointer is valid until the next built-in model API call
+  on the same thread.
+
 ** RPC
 
 These names are declared when =RGPOT_HAS_RPC= is defined and exported when the
