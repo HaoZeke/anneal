@@ -1,0 +1,5 @@
+panels,campaign,kinds,code_revision,code_tree,host,date,status,missing
+i-j,lj_csm/lj75/recommended,representative;aggregate,be3849e7811634aca67688da70f5413f9d860ec9,93b2b874d245fed5d538386e590c415029243ae5,bench,2026-11-17,blocked,campaign-driver;campaign-tables
+k,lj_csm/lj98/derived,representative,be3849e7811634aca67688da70f5413f9d860ec9,93b2b874d245fed5d538386e590c415029243ae5,bench,2026-11-17,blocked,campaign-driver;campaign-tables
+l,lj_csm_c26/lj98/recommended,representative,be3849e7811634aca67688da70f5413f9d860ec9,93b2b874d245fed5d538386e590c415029243ae5,bench,2026-11-17,blocked,campaign-driver;campaign-tables
+m-n,tip4p/hexamer/for_tip4p,representative;aggregate,be3849e7811634aca67688da70f5413f9d860ec9,93b2b874d245fed5d538386e590c415029243ae5,bench,2026-11-17,blocked,campaign-driver;campaign-tables

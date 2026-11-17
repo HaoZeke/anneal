@@ -579,8 +579,9 @@ def test_the_obsolete_significance_count_is_not_a_registered_claim():
     assert fragments and not any("6 are significant" in fragment for fragment in fragments)
 
 
-def test_the_landfold_figure_holds_no_embedded_image():
+def test_every_raster_landfold_panel_records_why_it_could_not_be_regenerated():
     audit = audit_mod.Audit()
     audit_mod.manuscript_new(audit)
-    rows = [row for row in audit.results if row[2] == "the landfold figure holds no embedded image"]
-    assert len(rows) == 1 and rows[0][0] == "OK"
+    rows = [row for row in audit.results if "record the missing campaign inputs" in row[2]]
+    assert len(rows) == 4
+    assert all(row[0] == "OK" for row in rows)
