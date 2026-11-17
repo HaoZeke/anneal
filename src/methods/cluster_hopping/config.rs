@@ -1303,7 +1303,8 @@ pub struct Config {
     ///
     /// A trial inside it has each such pair opened just past the floor
     /// before the relaxation sees it, and is dropped uncharged when the
-    /// opening fails. Declared species
+    /// opening fails. A read of zero steps inside it, which asks for the
+    /// energy of that geometry, is refused uncharged. Declared species
     /// without a floor keep [`super::OVERLAP_CALL_LIMIT`]. Absent from the
     /// resolved JSON when unset, and unset on every stock preset.
     #[serde(skip_serializing_if = "Option::is_none")]

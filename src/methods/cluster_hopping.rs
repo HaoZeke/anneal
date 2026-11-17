@@ -1810,6 +1810,34 @@ fn open_for_call(
     }
 }
 
+/// `relax` for an objective that declares [`Config::call_floor`].
+///
+/// Every relaxation, not only the hop's own proposal, starts from a
+/// geometry the objective will answer. A start it cannot open is a refusal
+/// the ledger never sees. A read of zero steps asks for the energy at `x`
+/// itself, and its caller pairs that energy with `x`, so one inside the
+/// floor is refused, not answered at an opened geometry. Without a floor
+/// this is `relax`.
+fn relax_off_call_floor(
+    cfg: &Config,
+    relax: Relax<'_>,
+    led: &mut Ledger,
+    x: ArrayView1<f64>,
+    steps: usize,
+) -> (f64, Array1<f64>) {
+    match CallFloor::of(cfg) {
+        Some(floor) if !floor.clears(x) => {
+            let mut opened = x.to_owned();
+            if steps > 0 && open_for_call(cfg, &mut opened, floor, cfg.frozen.as_deref()) {
+                relax(led, opened.view(), steps)
+            } else {
+                (f64::NAN, x.to_owned())
+            }
+        }
+        _ => relax(led, x, steps),
+    }
+}
+
 /// Pair distance below which an external molecular potential is observing an
 /// overlap artifact rather than a physical bond.
 pub const OVERLAP_SEPARATION: f64 = 0.35;
@@ -4191,20 +4219,8 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let _caller_stop = ledger.bind_stop();
-    // Every relaxation, not only the hop's own proposal, starts from a
-    // geometry the objective will answer. A start it cannot open is a
-    // refusal the ledger never sees.
-    let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| match CallFloor::of(cfg)
-    {
-        Some(floor) if !floor.clears(x) => {
-            let mut opened = x.to_owned();
-            if open_for_call(cfg, &mut opened, floor, cfg.frozen.as_deref()) {
-                relax(led, opened.view(), steps)
-            } else {
-                (f64::NAN, x.to_owned())
-            }
-        }
-        _ => relax(led, x, steps),
+    let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+        relax_off_call_floor(cfg, &mut *relax, led, x, steps)
     };
     let relax: Relax<'_> = &mut floored;
     // A target on the configuration is the same stop a caller can raise
@@ -13983,6 +13999,34 @@ mod call_floor_tests {
         let (floored, charged) = starts_inside_the_floor(Some(FLOOR));
         assert_eq!(floored, 0, "{floored} relaxations started inside the floor");
         assert!(charged > 0);
+    }
+
+    #[test]
+    fn a_zero_step_read_inside_the_floor_is_refused_where_it_stands() {
+        let mut cfg = Config::for_cluster(2);
+        cfg.call_floor = Some(FLOOR);
+        let inside = Array1::from(vec![0.0, 0.0, 0.0, 0.5, 0.0, 0.0]);
+        let seen = std::sync::Mutex::new(Vec::new());
+        let mut relax = |_: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            seen.lock().unwrap().push((steps, x.to_owned()));
+            (-1.0, x.to_owned())
+        };
+        let mut ledger = Ledger::new(10);
+        let (energy, state) = relax_off_call_floor(&cfg, &mut relax, &mut ledger, inside.view(), 0);
+        assert!(energy.is_nan());
+        assert_eq!(state, inside);
+        assert!(seen.lock().unwrap().is_empty());
+        let (energy, state) = relax_off_call_floor(&cfg, &mut relax, &mut ledger, inside.view(), 5);
+        assert_eq!(energy, -1.0);
+        assert!(clears_call_floor(state.view(), FLOOR));
+        cfg.call_floor = None;
+        let (energy, state) = relax_off_call_floor(&cfg, &mut relax, &mut ledger, inside.view(), 0);
+        assert_eq!((energy, state), (-1.0, inside.clone()));
+        let seen = seen.into_inner().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].0, 5);
+        assert!(clears_call_floor(seen[0].1.view(), FLOOR));
+        assert_eq!(seen[1], (0, inside));
     }
 
     #[test]
