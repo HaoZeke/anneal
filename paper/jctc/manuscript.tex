@@ -57,7 +57,7 @@ Fisher's test on hits is below 0.05 on 6 clusters: 5 for this setting,
 LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), and M\(_{55}\) and M\(_{80}\) at
 \(\rho=14\), and M\(_{80}\) at \(\rho=6\) for GMIN.~\rerun{5}
 It is not below 0.05 on the other 4 wins: LJ\(_{102}\), LJ\(_{103}\),
-LJ\(_{104}\), and Au\(_{55}\), where \(p=0.32\).~\rerun{5}
+LJ\(_{104}\), and Au\(_{55}\), where \(p=0.069\).~\rerun{5}
 GMIN hits LJ\(_{150}\) on 9 of 12 against 5 of 12, with \(p=0.21\), and
 M\(_{80}\) at \(\rho=6\) on 12 of 12 against 2 of 12, with
 \(p=6.7\times 10^{-5}\).~\rerun{5}
@@ -75,7 +75,7 @@ On seeds 2000--2005 against AGOX GOFEE, this setting hits LJ\(_{38}\),
 LJ\(_{55}\), and LJ\(_{75}\) on 6 of 6 and GOFEE hits none of them, and the
 median wall of a GOFEE run on LJ\(_{38}\) is 499.4~s against 0.081~s.
 No arm of the ASE panel hits Au\(_{55}\); in the GMIN panel, on another
-revision, this setting hits it on 4 of 12 and GMIN on 1 of 12.~\rerun{5}
+revision, this setting hits it on 6 of 12 and GMIN on 1 of 12.~\rerun{5}
 On Morse clusters of 38 and 55 atoms at \(\rho=6\) and \(\rho=14\) it
 hits 12, 12, 12, and 5 of 12, and both ASE arms hit 0 of 12.
 On seeds 6400--6405 the retry rows hit LJ\(_{104}\) on 3 of 6 and
@@ -574,8 +574,12 @@ the atoms is below \(0.20\), \(0.15\), and \(0.20\), and it adopts a quench that
 lower.
 
 The rows that these switches reach are Au\(_{55}\) in both panels, which
-\texttt{prior\_core} reaches, and any run that lasts half a budget without an
-improvement, which \texttt{prior\_motif} reaches.
+\texttt{prior\_core} reaches, the M\(_{55}\), \(\rho=6\) row of the GMIN panel,
+which the cap reaches, and any run that lasts half a budget without an improvement, which
+\texttt{prior\_motif} reaches.
+None of the panels was repeated with the switches off, so the counts in those
+rows do not separate the moves from the cuts, and the sentences that report
+them carry a tag.~\rerun{6}
 
 \subsection{The hit}
 \label{sec:hit}
@@ -1066,6 +1070,14 @@ The gold driver gives it the copper--gold species list with no copper
 atom, applies the basin bias of equation~\ref{eq:delta} to every downhill or
 accepted proposal and to one other proposal in 8, and decides the rest
 on the bare energy.
+The Morse driver quenches one Mackay cap before the walk when the pair
+energy at \(\sqrt{2}\) times the pair minimum is below \(-0.05\), which
+holds at \(\rho=6\) and not at \(\rho=14\).
+That cap is a motif cut in the sense of Section~\ref{sec:priors}: it is built
+from the Mackay icosahedron and no move draws it.
+Only the M\(_{55}\), \(\rho=6\) row of the GMIN panel is counted with a
+cap that holds the minimum; the M\(_{80}\) cap is empty and the cap is off at
+\(\rho=14\).~\rerun{6}
 This setting hits more seeds than GMIN on 9 of the 13 clusters.~\rerun{5}
 GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12, and on
 M\(_{80}\) at \(\rho=6\), 12 of 12 against 2 of 12.
@@ -1588,6 +1600,15 @@ The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\), where both hit
 On M\(_{80}\) at \(\rho=6\) GMIN reaches the minimum in a median of
 268934 calls and 10.691~s, and this setting spends the full
 \(4\times 10^{6}\) calls in a median of 161.4~s.
+The preset behind every count carries the motif cuts of
+Section~\ref{sec:priors}.
+The M\(_{55}\), \(\rho=6\) row of the GMIN panel is counted with the Mackay
+cap, and the gold rows with the labeled cuts, so a hit there may be a hit of a
+cut and not of a move.
+The M\(_{80}\) row has no cap, the \(\rho=14\) rows run without it, and the
+Morse rows of the Atomic Simulation Environment panel are searches.
+No panel was run with those switches off, and the counts do not say how much
+of each hit they carry.~\rerun{6}
 
 This setting is compared with GMIN on hits and on wall time.
 The median wall of a run is lower for this setting on 11 of the 13 clusters and
@@ -1628,10 +1649,10 @@ M\(_{55}\) at \(\rho=14\) is in both panels: 5 of 12 on revision
 \texttt{9a30f319} and 7 of 12 on \texttt{1ce3ab64}.
 The ASE panel scales the preset to the Morse pair, and the driver
 \path{examples/h2h_morse.rs} of this repository runs the preset unscaled.
-The two panels differ in that scaling, and no run separates the two, so
-we do not assign the difference to it.
-On Au\(_{55}\) this setting hits 4 of 12 in the GMIN panel, where GMIN
-hits 1 of 12 and Fisher's \(p\) is 0.32.~\rerun{5}
+The two panels differ in revision and in that scaling, and no run
+separates the two, so we do not assign the difference to either.
+On Au\(_{55}\) this setting hits 6 of 12 in the GMIN panel, where GMIN
+hits 1 of 12 and Fisher's \(p\) is 0.069.~\rerun{5}
 In the ASE panel it hits 0 of 12, as do both ASE arms, and its median
 best energy lies 0.051~eV above the reference.
 Those two Au\(_{55}\) counts come from revision \texttt{1ce3ab64} with
@@ -1654,8 +1675,8 @@ Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, scored by Fisher's test on hits, this setting
 hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse
 clusters, and no arm hits Au\(_{55}\).~\rerun{5}
-On Au\(_{55}\) in the GMIN panel it hits 4 of 12 and GMIN 1 of 12, with
-\(p=0.32\).~\rerun{5}
+On Au\(_{55}\) in the GMIN panel it hits 6 of 12 and GMIN 1 of 12, with
+\(p=0.069\).~\rerun{5}
 Of the 9 clusters where this setting hits more seeds than GMIN, 5 are
 significant by Fisher's test, and the 4 that are not are LJ\(_{102}\),
 LJ\(_{103}\), LJ\(_{104}\), and Au\(_{55}\).~\rerun{5}
