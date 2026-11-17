@@ -149,6 +149,51 @@ ci_gate   ← single required-check aggregator
 `prepare` always runs first. `plan.ncl` / `ci-plan.json` documents the same graph;
 GHA `needs:` in the orchestrator is the executable order.
 
+## Timeouts
+
+Every job that runs on a runner sets `timeout-minutes`, so a hang fails at a
+known time instead of at GitHub's 360-minute default. A job that only `uses:` a
+reusable workflow cannot set one; the called workflow's job carries it.
+
+**Rule.** `timeout-minutes` is the job's p95 plus the largest of that p95, 5
+minutes and the longest per-test timeout among the tests the job runs, rounded
+up to a multiple of 5 and at least 10. The test term lets meson or CTest kill a
+hung test at its own timeout (`timeout=` in `CppCore/tests/registry.txt`, 30 s
+by default) and print its name before the job timer fires, which only names the
+running step. Raising a registry timeout past a job's margin means raising that
+job's `timeout-minutes` too.
+
+p95 is runner execution time (`completed_at` minus `started_at`) of successful
+jobs, matrix legs pooled: the last 100 completed orchestrator runs and the last
+40 runs of every other workflow, as of 2026-11-16.
+
+| Jobs | p95 (min) | Longest test timeout | `timeout-minutes` |
+|------|-----------|----------------------|-------------------|
+| `potentials_uma_engine` | 10.9 | 1200 s, `doccheck_examples` | 35 |
+| `build_and_test`, `thread_limit`, `potentials_metatomic` | 7.2, 5.2, 8.4 | 1200 s | 30 |
+| `coverage-cpp`, `coverage-fortran` (`coverage.yml`) | 6.3, 6.1 | 1200 s | 30 |
+| `nodownload_rehearsal`, `build_fast_nlist_off`, `potentials_tight_binding` | 4.0, 3.9, 4.4 | 1200 s | 25 |
+| `build_windows_meson` | 7.1 | 900 s, `StreamParityTest` | 25 |
+| `engines` | 5.4 | 600 s, the plumed tests | 20 |
+| `client_bridge_stress` | 2.9 | 600 s, `AotiPublicationStressTest` | 15 |
+| Every other orchestrator job | at most 3.9 | at most 30 s | 10 |
+| Every other job that had no timeout | at most 4.2 | at most 120 s | 10 |
+| `isa-audit.yml` (reusable) | 1.0 | none | input `timeout-minutes`, default 10 |
+
+Timeouts set before the rule stay, all above it: cosmo `build-ape` 120 (a cache
+miss rebuilds the Cosmopolitan toolchain), the reusable `py-wheels` 150,
+`py-tsan` 120, `py-freethreading` 60, `py-typing` 30 and `py-rgbind-sync` 10,
+which other packages call, and `py-ci.yml`'s `rgpot-pytest` 45, `schedule-cpp`
+15 and `rust-demo` 90.
+
+**Queue time is not covered.** The timer starts when a runner takes the job. A
+job no runner takes is cancelled by GitHub with the annotation "The job was not
+acquired by Runner of type hosted even after multiple attempts". It has
+`runner_id` 0, no steps and no log, and its `started_at` equals `created_at`, so
+the run page shows the wait as run time. All 15 cancelled macOS jobs in the
+last 30 completed orchestrator runs as of 2026-11-16 were of this kind, after 18
+to 87 minutes in the queue; re-run them.
+
 ## Why some YAML remains (GHA limit)
 
 GitHub Actions only loads workflow files **committed** under `.github/workflows/`

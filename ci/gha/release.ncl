@@ -11,6 +11,7 @@ let P = S.pins in
     gate = {
       needs = ["tools"],
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       outputs = {
         is_prerelease = "${{ steps.prerelease.outputs.is_prerelease }}",
         version = "${{ steps.meta.outputs.version }}",
@@ -67,6 +68,7 @@ let P = S.pins in
     "cpp-smoke" = {
       needs = ["gate"],
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         S.checkout_minimal,
         S.setup_pixi_default "devbld",
@@ -89,6 +91,7 @@ let P = S.pins in
     "rust-test" = {
       needs = ["gate"],
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         S.checkout_minimal,
         S.setup_pixi_default "devbld",
@@ -117,6 +120,7 @@ let P = S.pins in
       needs = ["gate", "cpp-smoke", "rust-test"],
       "if" = "needs.gate.outputs.is_prerelease != 'true'",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         S.checkout_minimal,
         { uses = P.rust_toolchain, with = { toolchain = "stable" } },
@@ -157,6 +161,7 @@ let P = S.pins in
       needs = ["gate", "cpp-smoke", "rust-test"],
       "if" = "needs.gate.outputs.is_prerelease == 'true'",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         {
           run = m%"
@@ -177,6 +182,7 @@ let P = S.pins in
         (needs.publish-skip-rc.result == 'success' || needs.publish-skip-rc.result == 'skipped')
       "%,
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         S.checkout_minimal,
         {

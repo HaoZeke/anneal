@@ -32,6 +32,7 @@ env:
 jobs:
   coverage-rust:
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     name: rust coverage
     strategy:
       matrix:
@@ -88,6 +89,7 @@ jobs:
 
   coverage-cpp:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     name: cpp coverage
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -127,6 +129,7 @@ jobs:
 
   coverage-python:
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     name: python coverage
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -158,6 +161,7 @@ jobs:
   # Dedicated fortran path when the cpp job skipped the kernels; no-op if already uploaded.
   coverage-fortran:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     name: fortran coverage
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -196,6 +200,7 @@ jobs:
   # no other job, and pull_request runs stay read-only.
   codecov-upload:
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     name: codecov upload
     needs: [coverage-rust, coverage-cpp, coverage-python, coverage-fortran]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

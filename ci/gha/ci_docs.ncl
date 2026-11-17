@@ -14,6 +14,7 @@ let P = S.pins in
     build_docs = {
       name = "Build documentation",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       # One group per ref, so parallel pull requests do not cancel each other
       # or a pages deploy. A new push to the same ref still cancels its build.
       concurrency = {
@@ -49,6 +50,7 @@ let P = S.pins in
       needs = ["build_docs"],
       "if" = "github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       permissions = { contents = "write" },
       # Shared pages group, and a running deploy is left to finish.
       concurrency = {

@@ -207,6 +207,7 @@ in
       needs = ["build-ape"],
       "if" = "needs.build-ape.result == 'success'",
       "runs-on" = "${{ matrix.os }}",
+      "timeout-minutes" = 10,
       strategy = {
         "fail-fast" = false,
         matrix = { os = [P.ubuntu, P.macos] },

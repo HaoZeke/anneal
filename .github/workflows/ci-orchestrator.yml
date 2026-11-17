@@ -4,6 +4,8 @@
 #   release.yml, release-prepare.yml, ci_docs.yml, ci_doc_commenter.yml, cosmo-potctl.yml
 # Nickel modules under ci/gha/ still document job bodies; only the files above are
 # exported by gen-gha (plus this file is hand-maintained). See ci/gha/README.md.
+# Each job's timeout-minutes comes from the rule in ci/gha/README.md (Timeouts),
+# which also lists the measured p95 behind every value.
 name: CI (orchestrator)
 
 on:
@@ -31,6 +33,7 @@ jobs:
   prepare:
     name: prepare (nickel plan)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       plan_sha: ${{ steps.plan.outputs.plan_sha }}
     steps:
@@ -77,6 +80,7 @@ jobs:
     name: prek
     needs: [prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # schedule runs are docs-only hygiene; skip full prek (slow, needs apt hooks)
     if: github.event_name != 'schedule'
     steps:
@@ -129,6 +133,7 @@ jobs:
     name: snapper semantic line breaks
     needs: [prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install snapper-fmt
@@ -164,6 +169,7 @@ jobs:
     name: lychee link check
     needs: [prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Restore lychee cache
@@ -197,6 +203,7 @@ jobs:
     # needs ci-tools for potctl (thin body); was prepare-only when using pipx towncrier
     needs: [prepare, ci-tools]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -216,6 +223,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -239,6 +247,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -257,6 +266,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_COMPILERCHECK: content
@@ -332,6 +342,7 @@ jobs:
     # windows-latest ships VS 18, where ilammy/msvc-dev-cmd fails (invalid
     # params on 18, "VS not found" when pinned to 2022).
     runs-on: windows-2022
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # No activate-environment here: the default env carries
@@ -394,6 +405,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
@@ -436,6 +448,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: prefix-dev/setup-pixi@a0af7a228712d6121d37aba47adf55c1332c9c2e # v0.9.4
@@ -465,6 +478,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: prefix-dev/setup-pixi@a0af7a228712d6121d37aba47adf55c1332c9c2e # v0.9.4
@@ -486,6 +500,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
@@ -529,6 +544,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
@@ -547,6 +563,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -587,6 +604,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_COMPILERCHECK: content
@@ -622,6 +640,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -665,6 +684,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -703,6 +723,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -744,6 +765,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -772,6 +794,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -816,6 +839,7 @@ jobs:
     needs: [prepare, ci-tools]
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -854,6 +878,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
@@ -870,6 +895,7 @@ jobs:
     needs: [prepare]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: prefix-dev/setup-pixi@a0af7a228712d6121d37aba47adf55c1332c9c2e # v0.9.4
@@ -946,6 +972,7 @@ jobs:
       - eonviz_pins
       - engines
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Aggregate job results
         run: |

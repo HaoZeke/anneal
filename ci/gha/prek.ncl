@@ -9,6 +9,7 @@ let P = S.pins in
   jobs = {
     prek = {
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         S.checkout_depth 0,
         {

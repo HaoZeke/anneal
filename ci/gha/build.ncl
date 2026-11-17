@@ -185,6 +185,7 @@ in
       needs = ["ci-tools"],
       name = "${{ matrix.sys }} / ${{ matrix.os }} [RPC:${{ matrix.rpc }} CACHE:${{ matrix.cache }}]",
       "runs-on" = "${{ matrix.os }}",
+      "timeout-minutes" = 30,
       env = S.ccache_env,
       strategy = {
         "fail-fast" = false,
@@ -206,6 +207,7 @@ in
     build_windows_meson = {
       name = "meson / windows-2022 [MSVC flang RPC:true CACHE:false]",
       "runs-on" = P.windows,
+      "timeout-minutes" = 25,
       steps = [
         S.checkout_minimal,
         # No activate-environment: vs2022_win-64/vswhere rewrite PATH and
@@ -228,6 +230,7 @@ in
     nodownload_rehearsal = {
       name = "offline tarball build (nodownload / ubuntu)",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 25,
       steps = [
         S.checkout_minimal,
         S.setup_pixi_default "default",
@@ -240,6 +243,7 @@ in
     build_fast_nlist_off = {
       name = "meson / ubuntu [fast nlist off]",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 25,
       steps = [
         S.checkout_minimal,
         S.setup_pixi "devbld" "devbld",
@@ -251,6 +255,7 @@ in
     thread_limit = {
       name = "meson / ubuntu [OMP_THREAD_LIMIT 1, 2]",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 30,
       steps = [
         S.checkout_minimal,
         S.setup_pixi "devbld" "devbld",
@@ -266,6 +271,7 @@ in
     test_parity = {
       name = "meson / cmake [test registry parity]",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 10,
       steps = [
         S.checkout_minimal,
         S.setup_pixi "mpibld" "mpibld",
@@ -276,6 +282,7 @@ in
       needs = ["ci-tools"],
       name = "Rust Core Tests (${{ matrix.os }})",
       "runs-on" = "${{ matrix.os }}",
+      "timeout-minutes" = 10,
       strategy = {
         "fail-fast" = false,
         matrix = { os = [P.ubuntu, P.macos] },
@@ -305,6 +312,7 @@ in
       needs = ["ci-tools"],
       name = "Client Bridge Stress Test (Linux)",
       "runs-on" = P.ubuntu,
+      "timeout-minutes" = 15,
       env = {
         CCACHE_DIR = "${{ github.workspace }}/.ccache",
         CCACHE_COMPILERCHECK = "content",

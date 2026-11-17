@@ -183,6 +183,7 @@ jobs:
         os:
         - ubuntu-latest
         - macos-latest
+    timeout-minutes: 10
 name: potctl Cosmopolitan APE
 on:
   pull_request:
