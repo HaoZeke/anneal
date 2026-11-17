@@ -48,24 +48,28 @@ The wall cap for `recommended`, `ase_bh` and `ase_mh` is three times the slowest
 
 | system | comparison | hits | Fisher p | U | Mann-Whitney p | wall ratio | inverse ratio |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| m38r6 | for_cluster vs basin hopping | 5/12 vs 0/12 | 0.0372671 | 42 | 0.0164732 | 0.330189 | 3.028571 |
-| m38r6 | for_cluster vs minima hopping | 5/12 vs 0/12 | 0.0372671 | 42 | 0.0164732 | 0.325825 | 3.069140 |
-| m38r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0 | 1.02689e-05 | 0.027227 | 36.737360 |
-| m38r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0 | 1.02689e-05 | 0.027007 | 37.048184 |
-| m38r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | 72 | 1 | 0.332626 | 3.006382 |
-| m38r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | 72 | 1 | 0.332639 | 3.006267 |
-| m38r14 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0 | 1.02689e-05 | 0.020392 | 49.139416 |
-| m38r14 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0 | 1.02689e-05 | 0.020389 | 49.148012 |
-| m55r6 | for_cluster vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0 | 1.02689e-05 | 0.080961 | 12.397519 |
-| m55r6 | for_cluster vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0 | 1.02689e-05 | 0.079588 | 12.589774 |
-| m55r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0 | 1.02689e-05 | 0.016945 | 59.111154 |
-| m55r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0 | 1.02689e-05 | 0.016306 | 61.735838 |
-| m55r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | 72 | 1 | 0.328740 | 3.041919 |
-| m55r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | 72 | 1 | 0.325512 | 3.072114 |
-| m55r14 | recommended vs basin hopping | 5/12 vs 0/12 | 0.0372671 | 42 | 0.0164732 | 0.342127 | 2.922891 |
-| m55r14 | recommended vs minima hopping | 5/12 vs 0/12 | 0.0372671 | 42 | 0.0164732 | 0.332982 | 3.003164 |
+| m38r6 | for_cluster vs basin hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.330201 | 3.028462 |
+| m38r6 | for_cluster vs minima hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.330161 | 3.028824 |
+| m38r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.027227 | 36.728502 |
+| m38r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.027224 | 36.732897 |
+| m38r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.332621 | 3.006424 |
+| m38r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.332603 | 3.006590 |
+| m38r14 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.020392 | 49.039507 |
+| m38r14 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.020391 | 49.042229 |
+| m55r6 | for_cluster vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.080959 | 12.351890 |
+| m55r6 | for_cluster vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.080155 | 12.475862 |
+| m55r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.016945 | 59.013415 |
+| m55r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | not estimated | not estimated | 0.016777 | 59.605718 |
+| m55r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.328745 | 3.041874 |
+| m55r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.327369 | 3.054657 |
+| m55r14 | recommended vs basin hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.342131 | 2.922859 |
+| m55r14 | recommended vs minima hopping | 5/12 vs 0/12 | 0.0372671 | not estimated | not estimated | 0.340699 | 2.935142 |
 
-Medians are Hyndman-Fan type 7. Wall ratios are paired by seed.
+Medians are Hyndman-Fan type 7. Wall ratios are ratios of arm medians.
+The Rust and NumPy random generators do not make a shared starting
+geometry from the same numeric seed, so seed labels are not treated as pairs.
 Fisher is two-sided exact. Mann-Whitney is two-sided asymptotic with
-the tie correction and the continuity correction; misses are censored at the call budget.
+the tie correction and the continuity correction. It is not estimated
+when either arm has wall-censored misses; assigning those misses the
+larger paper budget would manufacture observations that were never run.
 Inside is time in the potential. Outside is the rest of the wall.

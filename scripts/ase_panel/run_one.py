@@ -18,6 +18,7 @@ outside the potential, the cap, code_revision and host.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -26,6 +27,8 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+from evaluator import evaluator_spec
+
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import (  # noqa: E402
     AnnealCalculator,
@@ -56,7 +59,6 @@ SYSTEMS = {
         "budget": 1_000_000,
         "reference": -191.03085280,
         "kind": "gupta",
-        "length": 2.057976038904,
         "symbol": "Au",
     },
 }
@@ -66,6 +68,7 @@ DENSITY = 0.7
 SEEDS = tuple(range(2000, 2012))
 FMAX = {"ase_bh": 0.1, "ase_mh": 0.05}
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
+ASE_VERSION = "3.29.0"
 
 
 def hostname() -> str:
@@ -96,27 +99,35 @@ def place(n: int, seed: int, length: float) -> np.ndarray:
     return np.vstack(points)
 
 
-def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
+def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float, budget: int) -> dict:
+    import ase
     from ase import Atoms
     from ase.optimize.basin import BasinHopping
     from ase.optimize.minimahopping import MinimaHopping
 
+    if ase.__version__ != ASE_VERSION:
+        raise RuntimeError(f"ASE {ASE_VERSION} required, found {ase.__version__}")
     spec = SYSTEMS[system]
     work.mkdir(parents=True, exist_ok=True)
     os.chdir(work)
     symbol = spec.get("symbol", "Ar")
-    length = float(spec.get("length", 1.0))
+    binary = os.environ.get("ASG_EVAL", "/work/target-panel/release/examples/asg_eval")
+    if spec["kind"] == "gupta":
+        n_atoms, paper_budget, reference, length = evaluator_spec(binary, system)
+        if (n_atoms, paper_budget) != (spec["n"], spec["budget"]) or reference != spec["reference"]:
+            raise RuntimeError("asg_eval spec differs from the panel")
+    else:
+        length = 1.0
     atoms = Atoms(f"{symbol}{spec['n']}", positions=place(spec["n"], seed, length), pbc=False)
     started = time.perf_counter()
     server = None
     if spec["kind"] == "lj":
         warmup()
-        calc = LjCalculator(spec["budget"], spec["reference"], HIT_TOL, FMAX[arm], deadline=started + cap_s)
+        calc = LjCalculator(budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=started + cap_s)
     else:
-        binary = os.environ.get("ASG_EVAL", "/work/target-panel/release/examples/asg_eval")
         server = AnnealServer(binary, system)
         calc = AnnealCalculator(
-            server, spec["budget"], spec["reference"], HIT_TOL, FMAX[arm], deadline=started + cap_s
+            server, budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=started + cap_s
         )
     atoms.calc = calc
     np.random.seed(seed)
@@ -155,10 +166,9 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
     }
 
 
-def run_anneal(system: str, seed: int, preset: str, cap_s: str) -> dict:
+def run_anneal(system: str, seed: int, budget: int, preset: str, cap_s: str) -> dict:
     binary = os.environ.get("ASE_PANEL", "/work/target-panel/release/examples/ase_panel")
-    spec = SYSTEMS[system]
-    command = [binary, system, str(spec["budget"]), str(seed), preset]
+    command = [binary, system, str(budget), str(seed), preset]
     if cap_s:
         command.append(cap_s)
     proc = subprocess.run(command, check=False, capture_output=True, text=True)
@@ -212,10 +222,14 @@ def main() -> int:
     if SYSTEMS[system]["kind"] == "lj":
         check_lj()
     revision = os.environ.get("ASE_PANEL_REVISION", "")
-    if not revision:
-        print("ASE_PANEL_REVISION is unset", file=sys.stderr)
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        print("ASE_PANEL_REVISION must be the full revision used to build the binaries", file=sys.stderr)
         return 2
     spec = SYSTEMS[system]
+    budget = int(os.environ.get("ASE_PANEL_BUDGET", spec["budget"]))
+    if not 0 < budget <= spec["budget"]:
+        print(f"ASE_PANEL_BUDGET must be in 1-{spec['budget']}", file=sys.stderr)
+        return 2
     if arm in ("anneal", "recommended"):
         cap_text = ""
         if arm == "recommended":
@@ -223,7 +237,8 @@ def main() -> int:
             if not cap_text:
                 print("ASE_PANEL_WALL_CAP is unset", file=sys.stderr)
                 return 2
-        row = run_anneal(system, seed, "for_cluster" if arm == "anneal" else "recommended", cap_text)
+        preset = "for_cluster" if arm == "anneal" else "recommended"
+        row = run_anneal(system, seed, budget, preset, cap_text)
     else:
         cap_text = os.environ.get("ASE_PANEL_WALL_CAP", "")
         if not cap_text:
@@ -235,6 +250,7 @@ def main() -> int:
             seed,
             Path(os.environ.get("ASE_PANEL_WORK", "/work/ase-panel/runs")) / f"{system}-{arm}-{seed}",
             float(cap_text),
+            budget,
         )
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
     print(
@@ -243,7 +259,7 @@ def main() -> int:
                 system,
                 arm,
                 str(seed),
-                str(spec["budget"]),
+                str(budget),
                 str(row["hit"]),
                 "" if row["evals"] == "" else str(row["evals"]),
                 str(row["charged"]),

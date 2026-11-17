@@ -1,5 +1,4 @@
-arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,median_over_anneal,median_anneal_over,fisher_p,mann_whitney_U,mann_whitney_p,wall_stops,wall_cap_s,fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh
-anneal,0,12,-190.81083051,0.22002228,31.896040,26.788756,5.087176,1.000000,1.000000,1,72,1,0,,1,72,1,1,72,1
-recommended,0,12,-190.98331173,0.04754107,33.663735,26.379868,7.288144,1.053887,0.948869,1,72,1,0,96.650229,1,72,1,1,72,1
-ase_bh,0,12,-189.78747254,1.24338026,96.650629,14.617083,82.033499,3.030182,0.330013,1,72,1,12,96.650229,1,72,1,1,72,1
-ase_mh,0,12,-190.29395447,0.73689833,98.391769,2.126042,96.272051,3.092070,0.323408,1,72,1,12,96.650229,1,72,1,1,72,1
+arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,median_over_anneal,median_anneal_over,fisher_p,mann_whitney_U,mann_whitney_p,wall_stops,wall_cap_s
+anneal,0,12,-190.81083051,0.22002228,31.896040,26.788756,5.087176,1.000000,1.000000,1,72,1,0,
+ase_bh,0,12,-189.78747254,1.24338026,96.650629,14.617083,82.033499,3.030176,0.330014,1,,,12,96.650229
+ase_mh,0,12,-190.29395447,0.73689833,98.391769,2.126042,96.272051,3.084764,0.324174,1,,,12,96.650229

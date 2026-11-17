@@ -43,10 +43,37 @@ case "$SEED" in
 esac
 
 mkdir -p "$WORK/runs" "$WORK/home" "$WORK/numba"
-ROWS=$ROOT/bench/ase-$SYSTEM/rows.csv
-if [[ -f $ROWS ]] && grep -q ",${ARM},${SEED}," "$ROWS"; then
-  echo "keep existing $SYSTEM $ARM seed $SEED"
-  exit 0
+ROWS=${ASE_PANEL_ROWS:-$ROOT/bench/ase-$SYSTEM/rows.csv}
+: "${ASE_PANEL_REVISION:?set ASE_PANEL_REVISION to the exact revision used to build the binaries}"
+REV=$ASE_PANEL_REVISION
+if [[ ! $REV =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ASE_PANEL_REVISION must be a full lowercase commit SHA" >&2
+  exit 2
+fi
+if [[ -f $ROWS ]]; then
+  EXISTING=$(python3 - "$ROWS" "$SYSTEM" "$ARM" "$SEED" << 'PY'
+import csv
+import sys
+
+path, system, arm, seed = sys.argv[1:]
+with open(path, newline="") as handle:
+    matches = [
+        row for row in csv.DictReader(handle)
+        if (row["system"], row["arm"], row["seed"]) == (system, arm, seed)
+    ]
+if len(matches) > 1:
+    raise SystemExit(f"duplicate stored rows for {system} {arm} {seed}")
+print(matches[0]["code_revision"] if matches else "")
+PY
+)
+  if [[ -n $EXISTING ]]; then
+    if [[ $EXISTING != "$REV" ]]; then
+      echo "stored $SYSTEM $ARM seed $SEED is revision $EXISTING, requested $REV; use a new campaign table" >&2
+      exit 2
+    fi
+    echo "keep existing $SYSTEM $ARM seed $SEED at revision $REV"
+    exit 0
+  fi
 fi
 
 CAP=""
@@ -82,7 +109,6 @@ fi
 
 PANEL=${ASE_PANEL:-/work/target-panel/release/examples/ase_panel}
 ASG=${ASG_EVAL:-/work/target-panel/release/examples/asg_eval}
-REV=${ASE_PANEL_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}
 PY=${PYTHON:-python3}
 sudo -n unshare --uts sh -c "hostname bench; \
   export HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba; \

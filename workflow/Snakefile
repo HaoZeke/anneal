@@ -848,8 +848,10 @@ rule ase_lj75:
 rule ase_lj38:
     input:
         "bench/ase-lj38/rows.csv",
+        "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-lj38/summary.csv",
+        "bench/ase-lj38/README.md",
     shell:
         """
         set -euo pipefail
@@ -864,8 +866,10 @@ rule ase_lj38:
 rule ase_lj55:
     input:
         "bench/ase-lj55/rows.csv",
+        "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-lj55/summary.csv",
+        "bench/ase-lj55/README.md",
     shell:
         """
         set -euo pipefail
@@ -880,8 +884,10 @@ rule ase_lj55:
 rule ase_lj98:
     input:
         "bench/ase-lj98/rows.csv",
+        "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-lj98/summary.csv",
+        "bench/ase-lj98/README.md",
     shell:
         """
         set -euo pipefail
@@ -896,8 +902,10 @@ rule ase_lj98:
 rule ase_lj104:
     input:
         "bench/ase-lj104/rows.csv",
+        "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-lj104/summary.csv",
+        "bench/ase-lj104/README.md",
     shell:
         """
         set -euo pipefail
@@ -912,8 +920,10 @@ rule ase_lj104:
 rule ase_lj150:
     input:
         "bench/ase-lj150/rows.csv",
+        "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-lj150/summary.csv",
+        "bench/ase-lj150/README.md",
     shell:
         """
         set -euo pipefail
@@ -929,8 +939,10 @@ rule ase_lj150:
 rule ase_au55:
     input:
         "bench/ase-au55/rows.csv",
+        "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-au55/summary.csv",
+        "bench/ase-au55/README.md",
     shell:
         """
         set -euo pipefail
@@ -951,6 +963,7 @@ rule ase_recommended:
         "bench/ase-lj104/rows.csv",
         "bench/ase-lj150/rows.csv",
         "bench/ase-au55/rows.csv",
+        "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-recommended/summary.csv",
     shell:
@@ -969,8 +982,10 @@ rule ase_nonlj:
     input:
         "bench/ase-nonlj/rows.csv",
         "bench/ase-nonlj/identity.csv",
+        "scripts/ase_nonlj/summarize.py",
     output:
         "bench/ase-nonlj/summary.csv",
+        "bench/ase-nonlj/README.md",
     shell:
         """
         set -euo pipefail

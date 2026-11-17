@@ -7,6 +7,7 @@ The LJ38 paper budget is 400_000 force evaluations.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -25,7 +26,7 @@ class AseLj38:
             raise RuntimeError("missing the panel summary")
 
     def time_summary(self):
-        subprocess.run(["python3", str(SCRIPT), "lj38"], check=True)
+        subprocess.run(["python3", str(SCRIPT), "lj38", "--check"], check=True)
 
 
 class Smoke:
@@ -42,3 +43,29 @@ class Smoke:
              f"hostname bench; exec taskset -c 0 {binary} lj38 2000 2000"],
             check=True,
         )
+
+
+class AseSmoke:
+    """Exercise both ASE search arms without writing a paper row."""
+
+    timeout = 120
+
+    def time_smoke(self):
+        try:
+            import ase
+        except ImportError as missing:
+            raise NotImplementedError("ASE is not installed") from missing
+        if ase.__version__ != "3.29.0":
+            raise NotImplementedError(f"ASE 3.29.0 required, found {ase.__version__}")
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        script = ROOT / "scripts" / "ase_panel" / "run_one.py"
+        for arm in ("ase_bh", "ase_mh"):
+            command = (
+                "hostname bench; "
+                f"export ASE_PANEL_REVISION={revision} ASE_PANEL_BUDGET=8 "
+                "ASE_PANEL_WALL_CAP=30 ASE_PANEL_WORK=/tmp/ase-panel-asv; "
+                f"exec taskset -c 0 {sys.executable} {script} lj38 {arm} 2000"
+            )
+            subprocess.run(["sudo", "-n", "unshare", "--uts", "sh", "-c", command], check=True)

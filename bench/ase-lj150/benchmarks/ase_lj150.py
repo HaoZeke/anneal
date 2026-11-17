@@ -25,7 +25,7 @@ class AseLj150:
             raise RuntimeError("missing the panel summary")
 
     def time_summary(self):
-        subprocess.run(["python3", str(SCRIPT), "lj150"], check=True)
+        subprocess.run(["python3", str(SCRIPT), "lj150", "--check"], check=True)
 
 
 class Smoke:
