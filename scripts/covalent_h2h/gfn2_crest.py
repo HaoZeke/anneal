@@ -6,13 +6,16 @@ Both codes run real xtb 6.7.1 GFN2 at one electronic temperature,
 ``ETEMP`` K: anneal through rgpot's ``libxtb_engine.so``
 (``examples/gfn2_covalent_h2h``), CREST 3.0.2 as
 
-    crest start.xyz --gfn2 -T 1 --legacy -notopo -nocross -shake 0 \
-        -tstep 2 -xnam <wrapper>
+    crest start.xyz --gfn2 -T 1 --legacy -notopo -noreftopo -nocross \
+        -shake 0 -tstep 2 -xnam <wrapper>
 
 from the shared start after one xtb ``--opt`` of it. Each option is
 there because a cluster search rearranges bonds. CREST stops when its
 first optimisation changes the topology of a random cluster, so the start
-is optimised before it. CREGEN removes every structure whose topology
+is optimised before it, and on Si20 seeds 2008, 2010 and 2012 CREST's
+own first optimisation still changed the topology of that and stopped:
+``-noreftopo`` takes the new topology and goes on, and where the topology
+holds CREST runs as without it. CREGEN removes every structure whose topology
 differs from the input unless ``-notopo``. The genetic crossing then has
 one structure and ends the run with an error, so ``-nocross``. The
 default SHAKE holds every bond at its starting length during the
@@ -40,6 +43,9 @@ all of them, with Fisher's exact test on hits and a two-sided Mann-Whitney
 on calls to the hit, with a miss ranked after every hit, both against
 anneal; alone when no binaries are given, over ``--systems``, and with
 ``--anneal-revision`` over anneal's rows of that ``code_revision`` only.
+``--superseded`` names rows, by system, code, revision and seed, that a
+later run of the same seed replaces: the summary and the wall cap leave
+them out, and the summary refuses a CREST seed with two rows left.
 ``--false-hits`` names rows, by system, code, revision and seed, whose hit
 is not the geometry's energy; the summary counts them as misses at their
 budget. ``--rescore SYSTEM ENERGY_EV`` appends to ``--rescored`` CREST's
@@ -280,14 +286,33 @@ def fresh_energy(xtb: Path, start: Path, where: Path) -> float | None:
     return float(found[-1]) if proc.returncode == 0 and found else None
 
 
-def wall_cap(paths: list[Path], system: str, seeds: list[int]) -> float:
+def row_key(row: dict) -> tuple[str, str, str, str]:
+    return (row["system"], row["code"], row.get("code_revision", ""), str(row["seed"]))
+
+
+def named_rows(path: Path | None) -> set[tuple[str, str, str, str]]:
+    """The rows ``path`` names by system, code, code_revision and seed."""
+    if path is None:
+        return set()
+    with open(path, newline="") as handle:
+        return {row_key(row) for row in csv.DictReader(handle)}
+
+
+def wall_cap(
+    paths: list[Path], system: str, seeds: list[int], superseded: Path | None = None
+) -> float:
     """``WALL_CAP[system]`` times the slowest CREST wall over ``seeds``."""
+    left_out = named_rows(superseded)
     walls = {}
     for path in paths:
         if path.is_file():
             with open(path, newline="") as handle:
                 for row in csv.DictReader(handle):
-                    if row["system"] == system and row["code"] == "crest":
+                    if (
+                        row["system"] == system
+                        and row["code"] == "crest"
+                        and row_key(row) not in left_out
+                    ):
                         walls[int(row["seed"])] = float(row["wall_s"])
     missing = sorted(set(seeds) - set(walls))
     if missing:
@@ -322,6 +347,7 @@ def run_crest(
         "1",
         "--legacy",
         "-notopo",
+        "-noreftopo",
         "-nocross",
         "-shake",
         "0",
@@ -432,6 +458,7 @@ def main() -> None:
     ap.add_argument("--summary", type=Path)
     ap.add_argument("--anneal-revision")
     ap.add_argument("--false-hits", type=Path)
+    ap.add_argument("--superseded", type=Path)
     ap.add_argument("--rescore", nargs=2, metavar=("SYSTEM", "ENERGY_EV"))
     ap.add_argument("--rescored", type=Path)
     ap.add_argument("--check-starts", type=Path)
@@ -465,6 +492,7 @@ def main() -> None:
             args.anneal_revision,
             args.systems,
             args.false_hits,
+            args.superseded,
         )
         return
     if None in (
@@ -556,6 +584,7 @@ def main() -> None:
                         [*args.history, args.rows],
                         system,
                         sorted(crest_seeds | set(seeds)),
+                        args.superseded,
                     )
                 row = run_anneal(args.anneal, system, seed, where, cap)
             if system in WALL_CAP:
@@ -564,7 +593,13 @@ def main() -> None:
             append_rows(args.rows, fields, [row])
             print(",".join(str(row[k]) for k in fields), flush=True)
     if args.summary is not None:
-        summarise([*args.history, args.rows], args.summary, revision, host)
+        summarise(
+            [*args.history, args.rows],
+            args.summary,
+            revision,
+            host,
+            superseded=args.superseded,
+        )
 
 
 def type7(values: list[float], p: float) -> float:
@@ -622,24 +657,29 @@ def summarise(
     anneal_revision: str | None = None,
     systems: list[str] | None = None,
     false_hits: Path | None = None,
+    superseded: Path | None = None,
 ) -> None:
     """Append one line per system and code over every rows file.
 
     With ``anneal_revision``, anneal's rows are only those of that
     ``code_revision``. A row named in ``false_hits`` by system, code,
     revision and seed counts as a miss at its budget. Rows of a seed outside
-    ``SEEDS``, or ``CREST_SEEDS`` for CREST, are left out.
+    ``SEEDS``, or ``CREST_SEEDS`` for CREST, and rows ``superseded`` names
+    are left out. A CREST seed with two rows left is refused, as is an anneal
+    one under ``anneal_revision``.
     """
     table = []
     for path in paths:
         if path.is_file():
             with open(path, newline="") as handle:
                 table.extend(csv.DictReader(handle))
+    left_out = named_rows(superseded)
     table = [
         row
         for row in table
         if int(row["seed"])
         in (CREST_SEEDS if row["code"] == "crest" else SEEDS)[row["system"]]
+        and row_key(row) not in left_out
     ]
     if anneal_revision is not None:
         table = [
@@ -648,16 +688,17 @@ def summarise(
             if row["code"] != "anneal-general"
             or row.get("code_revision") == anneal_revision
         ]
+    seen = set()
+    for row in table:
+        run = (row["system"], row["code"], row["seed"])
+        if run in seen and (row["code"] == "crest" or anneal_revision is not None):
+            raise SystemExit(f"{run} has two rows; name the older in --superseded")
+        seen.add(run)
     if false_hits is not None:
-        with open(false_hits, newline="") as handle:
-            named = {
-                (row["system"], row["code"], row["code_revision"], row["seed"])
-                for row in csv.DictReader(handle)
-            }
+        named = named_rows(false_hits)
         table = [
             dict(row, hit="false", evals_to_hit=row["budget"])
-            if (row["system"], row["code"], row.get("code_revision", ""), row["seed"])
-            in named
+            if row_key(row) in named
             else row
             for row in table
         ]
@@ -819,6 +860,22 @@ def self_test() -> None:
             runs = {line["code"]: line["runs"] for line in csv.DictReader(handle)}
         if runs.get("crest") != "1":
             raise SystemExit(f"a seed outside the panel was summarised: {runs}")
+        append_rows(
+            panel,
+            fields,
+            [dict(row, system="si20", code="crest", seed="2003", code_revision="2")],
+        )
+        try:
+            summarise([panel], lines, "", "", systems=["si20"])
+        except SystemExit:
+            pass
+        else:
+            raise SystemExit("two rows of one seed were summarised")
+        superseded = Path(scratch) / "superseded.csv"
+        superseded.write_text("system,code,code_revision,seed\nsi20,crest,1,2003\n")
+        summarise([panel], lines, "", "", systems=["si20"], superseded=superseded)
+        if wall_cap([panel], "si20", [2003], superseded) != 3.0 * float(row["wall_s"]):
+            raise SystemExit("wall cap over a superseded row")
     print("ok")
 
 
