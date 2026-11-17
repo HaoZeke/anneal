@@ -20,7 +20,9 @@
 //! is no pair-range cut, because dispersion has no finite reach.
 //! The call floor is the handle's 0.90 Å, raised pair by pair to
 //! `element_call_floor` of the atomic numbers: 1.55 Å for Si–Si and 1.06 Å
-//! for C–C.
+//! for C–C. A line search whose probe failed its SCC asks no probe within
+//! `REFUSAL_SPACING_A` of it in every coordinate
+//! (`WarmLbfgs::refusal_spacing`), and ends at its accepted step.
 //!
 //! The start is a random cluster in the scaled start radius from
 //! `StdRng::seed_from_u64(seed)`. `H2H_START_ONLY=1` writes it to
@@ -54,6 +56,8 @@ use rgpot_eindir::RgpotObjective;
 
 const HIT_TOL_EV: f64 = anneal_core::DEFAULT_HIT_TOL;
 const FAR_A: f64 = 20.0;
+/// About a hundredth of the C–C call floor, 1.06 Å.
+const REFUSAL_SPACING_A: f64 = 0.01;
 
 static POTENTIAL_NS: AtomicU64 = AtomicU64::new(0);
 
@@ -257,6 +261,7 @@ fn main() {
     pot.restart();
     let pot = Mutex::new(pot);
     let mut optimiser = WarmLbfgs::default();
+    optimiser.refusal_spacing = REFUSAL_SPACING_A;
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
