@@ -19,6 +19,7 @@ from h2h import check_budget, smoke
 PAPER_BUDGETS = {
     98: 4_000_000,
     104: 4_000_000,
+    150: 4_000_000,
 }
 
 

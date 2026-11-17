@@ -490,6 +490,30 @@ rule gmin_h2h:
         """
 
 
+# The same runner on LJ150 at twelve seeds, 2000-2011, against the same
+# GMIN binary, with anneal built from `anneal_rev` (default the develop
+# tip c2de652d) in a worktree. Per-seed rows are appended to
+# bench/lj150-gmin/rows.csv with code_revision and host; that file is not
+# declared as an output because Snakemake removes declared outputs before
+# a job runs. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile gmin_h2h_lj150 [--config anneal_rev=<sha>]
+rule gmin_h2h_lj150:
+    params:
+        rev=config.get("anneal_rev", "c2de652dca0bc75e2b0cb4afffac91fd656404e4"),
+        seeds=" ".join(f"--seed {seed}" for seed in range(2000, 2012)),
+    output:
+        "bench/lj150-gmin/summary.csv",
+        "bench/lj150-gmin/stats.csv",
+    shell:
+        """
+        set -euo pipefail
+        out=$(pwd)/bench/lj150-gmin
+        ANNEAL_REV={params.rev} bash scripts/gmin_h2h/enter_bench.sh \
+          --size 150 {params.seeds} \
+          --summary "$out/summary.csv" --rows "$out/rows.csv" --stats "$out/stats.csv"
+        """
+
+
 # Fiorentino and Marzari RPQA against the paper preset on LJ38.
 # Not part of `rule all`. One serial session, both arms, core 0:
 #   snakemake -s workflow/Snakefile pimc_lj38

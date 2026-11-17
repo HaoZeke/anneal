@@ -14,12 +14,15 @@ mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/starts"
 cp -a "$HERE/run_campaign.py" "$WORK/bin/run_campaign.py"
 cp -a "$ROOT/examples/h2h_gmin_lj.data" "$WORK/bin/h2h_gmin_lj.data"
 chmod +x "$WORK/bin/h2h_gmin_proof" "$WORK/bin/GMIN"
+# Captured before HOME moves, so --stats can import scipy.
+user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 
 cat > "$WORK/bin/inside.sh" << EOF
 #!/bin/bash
 set -eu
 export HOME=$WORK/home
 export TMPDIR=$WORK/tmp
+export PYTHONPATH=$user_site\${PYTHONPATH:+:\$PYTHONPATH}
 export PATH=$WORK/bin:\$PATH
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1

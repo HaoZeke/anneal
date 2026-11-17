@@ -14,6 +14,15 @@ ratio is the GMIN median wall divided by the anneal median wall.
 The search binaries are the existing ``h2h_gmin_proof`` example and a
 GMIN built from Wales's public tarball. This process refuses to run
 unless the UTS hostname is bench.
+
+``--rows`` appends one line per run, after the run, with the code
+revision, the host, the time inside the potential and the rest of the
+wall; a line already there for the same size, arm, seed and revision is
+kept and its run skipped. ``--stats`` writes, per size, Fisher's exact
+test on hits and the two-sided Mann-Whitney test on calls to the minimum
+(normal approximation with the tie and continuity corrections, a miss
+entered at the budget), and the same test on the inside and outside
+times, read from those rows.
 """
 
 from __future__ import annotations
@@ -58,6 +67,43 @@ SUMMARY_FIELDS = [
     "gmin_revision",
     "anneal_head",
     "code_revision",
+    "host",
+]
+
+ROW_FIELDS = [
+    "system",
+    "arm",
+    "seed",
+    "budget",
+    "hit",
+    "evals_to_hit",
+    "charged",
+    "wall_s",
+    "best",
+    "pot_s",
+    "outside_s",
+    "code_revision",
+    "host",
+]
+
+STATS_FIELDS = [
+    "system",
+    "n",
+    "anneal_hits",
+    "gmin_hits",
+    "fisher_p",
+    "anneal_evals_median",
+    "gmin_evals_median",
+    "mannwhitney_u",
+    "mannwhitney_p",
+    "anneal_pot_median_s",
+    "gmin_pot_median_s",
+    "mannwhitney_p_pot",
+    "anneal_outside_median_s",
+    "gmin_outside_median_s",
+    "mannwhitney_p_outside",
+    "anneal_revision",
+    "gmin_revision",
     "host",
 ]
 
@@ -146,7 +192,8 @@ def parse_anneal(text: str) -> dict[str, str]:
     data = [line for line in text.splitlines() if ",anneal," in line]
     if len(data) != 1:
         raise ValueError(f"expected one anneal row, saw {len(data)}")
-    header = (
+    printed = [line for line in text.splitlines() if line.startswith("system,code,")]
+    header = printed[0] if len(printed) == 1 else (
         "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,"
         "head,tree,cpu,pins"
     )
@@ -257,8 +304,10 @@ def as_result(n: int, arm: str, row: dict[str, str]) -> dict:
         "budget": int(row["budget"]),
         "hit": hit,
         "evals": float(row["evals_to_hit"]),
+        "charged": int(row["charged"]) if row.get("charged") else "",
         "wall_s": float(row["wall_s"]),
         "best": float(row["best"]),
+        "pot_s": float(row["pot_s"]) if row.get("pot_s") else None,
     }
 
 
@@ -320,14 +369,139 @@ def summarise(
 def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
 
-def job_paths(runs: Path, n: int, seed: int, arm: str) -> tuple[Path, Path]:
-    directory = runs / system_name(n)
+def job_paths(runs: Path, n: int, seed: int, arm: str, revision: str) -> tuple[Path, Path]:
+    """Saved runs are kept per code revision, so a rebuilt binary does not
+    pick up another revision's row."""
+    directory = runs / revision / system_name(n)
     return directory / f"{arm}-{seed}.row", directory / f"{arm}-{seed}.log"
+
+
+def read_rows(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def append_row(path: Path, row: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fresh = not path.is_file() or path.stat().st_size == 0
+    with path.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
+        if fresh:
+            writer.writeheader()
+        writer.writerow(row)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def row_line(result: dict, revision: str) -> dict[str, str]:
+    pot = result["pot_s"]
+    return {
+        "system": system_name(result["n"]),
+        "arm": result["arm"],
+        "seed": str(result["seed"]),
+        "budget": str(result["budget"]),
+        "hit": "1" if result["hit"] else "0",
+        "evals_to_hit": f"{result['evals']:.0f}",
+        "charged": str(result.get("charged", "")),
+        "wall_s": f"{result['wall_s']:.6f}",
+        "best": f"{result['best']:.10f}",
+        "pot_s": "" if pot is None else f"{pot:.6f}",
+        "outside_s": "" if pot is None else f"{result['wall_s'] - pot:.6f}",
+        "code_revision": revision,
+        "host": os.uname().nodename,
+    }
+
+
+def fisher(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
+    from scipy.stats import fisher_exact
+
+    return float(fisher_exact([[hits_a, n_a - hits_a], [hits_b, n_b - hits_b]])[1])
+
+
+def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
+    """Two-sided, normal approximation with the tie and continuity corrections."""
+    from scipy.stats import mannwhitneyu
+
+    if len(set(left + right)) == 1:
+        return len(left) * len(right) / 2.0, 1.0
+    result = mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True)
+    return float(result.statistic), float(result.pvalue)
+
+
+def stats(
+    rows: list[dict[str, str]], sizes: tuple[int, ...], seeds: tuple[int, ...], head: str, revision: str
+) -> list[dict[str, str]]:
+    """Anneal at ``head`` against GMIN at ``revision``, on the seeds both
+    arms have, the first row of each seed."""
+    out = []
+    for n in sizes:
+        arms: dict[str, dict[int, dict[str, str]]] = {"anneal": {}, "gmin": {}}
+        for row in rows:
+            want = head if row["arm"] == "anneal" else revision
+            if row["system"] != system_name(n) or row["code_revision"] != want:
+                continue
+            seed = int(row["seed"])
+            if seed in seeds:
+                arms[row["arm"]].setdefault(seed, row)
+        common = sorted(set(arms["anneal"]) & set(arms["gmin"]))
+        if not common:
+            continue
+        a = [arms["anneal"][s] for s in common]
+        g = [arms["gmin"][s] for s in common]
+
+        def column(group: list[dict[str, str]], name: str) -> list[float]:
+            return [float(r[name]) for r in group if r[name] != ""]
+
+        def median(values: list[float]) -> str:
+            return f"{type7(sorted(values), 0.5):.6f}" if values else ""
+
+        def mw_p(name: str) -> str:
+            left, right = column(a, name), column(g, name)
+            if len(left) != len(common) or len(right) != len(common):
+                return ""
+            return f"{mann_whitney(left, right)[1]:.6g}"
+
+        a_hits = sum(r["hit"] == "1" for r in a)
+        g_hits = sum(r["hit"] == "1" for r in g)
+        u, p = mann_whitney(column(a, "evals_to_hit"), column(g, "evals_to_hit"))
+        out.append(
+            {
+                "system": system_name(n),
+                "n": str(len(common)),
+                "anneal_hits": str(a_hits),
+                "gmin_hits": str(g_hits),
+                "fisher_p": f"{fisher(a_hits, len(common), g_hits, len(common)):.6g}",
+                "anneal_evals_median": median(column(a, "evals_to_hit")),
+                "gmin_evals_median": median(column(g, "evals_to_hit")),
+                "mannwhitney_u": f"{u:.1f}",
+                "mannwhitney_p": f"{p:.6g}",
+                "anneal_pot_median_s": median(column(a, "pot_s")),
+                "gmin_pot_median_s": median(column(g, "pot_s")),
+                "mannwhitney_p_pot": mw_p("pot_s"),
+                "anneal_outside_median_s": median(column(a, "outside_s")),
+                "gmin_outside_median_s": median(column(g, "outside_s")),
+                "mannwhitney_p_outside": mw_p("outside_s"),
+                "anneal_revision": head,
+                "gmin_revision": revision,
+                "host": " ".join(sorted({r["host"] for r in a + g})),
+            }
+        )
+    return out
+
+
+def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def load_saved(path: Path, n: int, arm: str) -> dict | None:
@@ -381,6 +555,26 @@ def self_test() -> None:
             raise SystemExit(f"LJ{n} is not interleaved")
         if arms == ["gmin"] * len(SEEDS) + ["anneal"] * len(SEEDS):
             raise SystemExit(f"LJ{n} is not interleaved")
+    text = (
+        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins,pot_s\n"
+        "lj150,anneal,2000,4000000,true,9000,9100,0.5,-893.31025788,abc,t,c,0,0.25\n"
+    )
+    line = row_line(as_result(150, "anneal", parse_anneal(text)), "abc")
+    if (line["pot_s"], line["outside_s"], line["charged"]) != ("0.250000", "0.250000", "9100"):
+        raise SystemExit(f"row {line}")
+    gmin = parse_gmin(
+        "h2h_row system=lj150 code=gmin seed=2000 budget=4000000 hit=0 "
+        "evals_to_hit=4000000 charged=4000000 best=-883.1 wall_s=300.0 pot_s=280.0"
+    )
+    other = row_line(as_result(150, "gmin", gmin), "rev")
+    if other["outside_s"] != "20.000000":
+        raise SystemExit(f"gmin row {other}")
+    table = stats([line, other], (150,), (2000,), "abc", "rev")
+    if len(table) != 1 or table[0]["anneal_hits"] != "1" or table[0]["fisher_p"] != "1":
+        raise SystemExit(f"stats {table}")
+    u, p = mann_whitney([1.0, 2.0, 3.0], [1.0, 2.0, 3.0])
+    if abs(u - 4.5) > 1e-12 or abs(p - 1.0) > 1e-12:
+        raise SystemExit(f"mann whitney {u} {p}")
     print("ok")
 
 
@@ -404,6 +598,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("anneal", "gmin", "both"), default="both")
     parser.add_argument("--budget", type=int)
+    parser.add_argument("--rows", type=Path)
+    parser.add_argument("--stats", type=Path)
     args = parser.parse_args(argv[1:])
     sizes = tuple(args.size) if args.size else SIZES
     seeds = tuple(args.seed) if args.seed else SEEDS
@@ -422,6 +618,10 @@ def main(argv: list[str]) -> int:
     order = schedule(sizes, seeds, arms, SCHEDULE_SEED)
     note(progress, "schedule " + " ".join(f"lj{n}:{arm}:{seed}" for n, seed, arm in order))
     rows: list[dict] = []
+    stored = {
+        (r["system"], r["arm"], r["seed"], r["code_revision"])
+        for r in (read_rows(args.rows) if args.rows else [])
+    }
     for n, seed, arm in order:
         budget = PAPER_BUDGETS[n]
         _budget, target = binary_budget(args.binary, n)
@@ -429,11 +629,16 @@ def main(argv: list[str]) -> int:
             raise SystemExit(f"binary budget {_budget} != paper budget {budget}")
         coords = args.starts / system_name(n) / f"seed-{seed}.xyz"
         write_start(args.binary, n, seed, coords)
-        saved, log = job_paths(args.runs, n, seed, arm)
+        code = head if arm == "anneal" else revision
+        saved, log = job_paths(args.runs, n, seed, arm, code)
         saved.parent.mkdir(parents=True, exist_ok=True)
         existing = load_saved(saved, n, arm) if saved.is_file() else None
         if existing is not None:
             rows.append(existing)
+            key = (system_name(n), arm, str(seed), code)
+            if args.rows and key not in stored:
+                append_row(args.rows, row_line(existing, code))
+                stored.add(key)
             note(
                 progress,
                 f"skip n={n} arm={arm} seed={seed} hit={int(existing['hit'])} "
@@ -452,12 +657,15 @@ def main(argv: list[str]) -> int:
                 budget,
                 target,
                 coords,
-                args.runs / system_name(n) / f"gmin-{seed}",
+                saved.parent / f"gmin-{seed}",
                 log,
                 saved,
             )
         result = as_result(n, arm, raw)
         rows.append(result)
+        if args.rows:
+            append_row(args.rows, row_line(result, code))
+            stored.add((system_name(n), arm, str(seed), code))
         note(
             progress,
             f"done n={n} arm={arm} seed={seed} hit={int(result['hit'])} "
@@ -469,6 +677,8 @@ def main(argv: list[str]) -> int:
     text_rows = summarise(rows, seeds, url, revision, head)
     if args.summary:
         write_summary(args.summary, text_rows)
+    if args.stats and args.rows:
+        write_csv(args.stats, STATS_FIELDS, stats(read_rows(args.rows), sizes, seeds, head, revision))
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
     writer.writeheader()
     writer.writerows(text_rows)
