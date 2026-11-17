@@ -250,6 +250,27 @@ def mann_whitney(a: list[float], b: list[float], continuity: bool, degenerate: f
     return min(1.0, math.erfc(max(dev, 0.0) / math.sqrt(var) / math.sqrt(2.0)))
 
 
+def mann_whitney_exact_no_ties(a: list[float], b: list[float]) -> float:
+    """Exact two-sided rank-sum tail for two samples whose pooled values do not tie."""
+    if len(set(a + b)) != len(a) + len(b):
+        raise ValueError("exact no-ties Mann-Whitney received a tie")
+    n_a, n_b = len(a), len(b)
+    observed = sum(x > y for x in a for y in b)
+    smaller = min(observed, n_a * n_b - observed)
+    n = n_a + n_b
+    max_sum = n_a * (2 * n - n_a + 1) // 2
+    ways = [[0] * (max_sum + 1) for _ in range(n_a + 1)]
+    ways[0][0] = 1
+    for rank in range(1, n + 1):
+        for count in range(min(n_a, rank), 0, -1):
+            for total in range(max_sum, rank - 1, -1):
+                ways[count][total] += ways[count - 1][total - rank]
+    base = n_a * (n_a + 1) / 2
+    extreme = sum(count for total, count in enumerate(ways[n_a])
+                  if min(total - base, n_a * n_b - (total - base)) <= smaller)
+    return extreme / math.comb(n, n_a)
+
+
 def parse(shown: str) -> tuple[float, float, bool] | None:
     """Value, half a unit in the last printed digit, and whether it is a bare integer."""
     s = shown.strip().strip("$").replace("\\(", "").replace("\\)", "").strip()
@@ -1598,13 +1619,14 @@ def paper_0120(audit: Audit) -> None:
 def gad_published(audit: Audit) -> None:
     path = "bench/gad-published/README.md"
     rows = audit.rows("bench/gad-published/rows.csv")
+    seeds = audit.rows("bench/gad-published/seed-reruns.csv")
     columns = {"Median calls to hit": "evals_median", "IQR": "evals_iqr", "Best (median)": "best_median",
                "Wall (s)": "wall_median_s", "Pot (s)": "pot_median_s", "Outside (s)": "outside_median_s",
                "Inside µs/call": "inside_us", "Outside µs/call": "outside_us"}
     for line, row in md_table(audit, path, "Size | Arm | Hits"):
         system = row["Size"].lower()
         line_rows = pick(rows, system=system, arm=row["Arm"])
-        base = line_rows[0]
+        base = line_rows[-1]
         where = f"{path}:{line} {system} {row['Arm']}"
         audit.cell(where, "hits", row["Hits"], f"{base['hits']}/{base['n']}")
         for label, key in columns.items():
@@ -1612,17 +1634,46 @@ def gad_published(audit: Audit) -> None:
         if row["Arm"] == "anneal":
             audit.cell(where, "Fisher p", row["Fisher p"], None)
             continue
-        anneal = pick(rows, system=system, arm="anneal")[0]
+        anneal = pick(rows, system=system, arm="anneal")[-1]
+        inferential = next(candidate for candidate in reversed(line_rows)
+                           if candidate["fisher_p"] and candidate["mannwhitney_p"])
         p = fisher(int(base["hits"]), int(base["n"]), int(anneal["hits"]), int(anneal["n"]))
         audit.cell(where, "Fisher p (recomputed)", row["Fisher p"], p)
-        audit.cell(where, "Fisher p (rows.csv)", row["Fisher p"], float(base["fisher_p"]))
-        audit.cell(where, "Mann-Whitney p (rows.csv)", row["Mann–Whitney p"], float(base["mannwhitney_p"]))
+        audit.cell(where, "Fisher p (rows.csv)", row["Fisher p"], float(inferential["fisher_p"]))
+        audit.cell(where, "Mann-Whitney p (rows.csv)", row["Mann–Whitney p"],
+                   float(inferential["mannwhitney_p"]))
     for row in pick(rows, arm="gad_deposit"):
         gen, lo, hi = row["hit_generation"], row["evals_lower"], row["evals_upper"]
         audit.cell(path, f"{row['system']} lower bound, generations 0..{gen} x 64", lo, float((int(gen) + 1) * 64))
         audit.cell(path, f"{row['system']} upper bound, x 1000 FIRE steps", hi, float((int(gen) + 1) * 64 * 1000))
         size = row["system"].removeprefix("lj")
         audit.said(path, f"generation {gen} for LJ{size} (bounds {lo} and {hi} calls)")
+    expected = {("lj31", "anneal"): 12, ("lj31", "gmin"): 12, ("lj31", "gad"): 12, ("lj38", "gad"): 12}
+    for group, count in expected.items():
+        found = pick(seeds, system=group[0], arm=group[1])
+        audit.cell("bench/gad-published/seed-reruns.csv", f"{group[0]} {group[1]} seed rows", str(count), float(len(found)))
+        audit.record({row["host"] for row in found} == {"bench"}, "bench/gad-published/seed-reruns.csv",
+                     f"{group[0]} {group[1]} rerun host", "bench", " ".join(sorted({row["host"] for row in found})))
+    hits = {row["seed"]: row["evals_to_hit"] for row in pick(seeds, system="lj31", arm="gad") if row["hit"] == "1"}
+    audit.said(path, f"seed 2000 at {hits['2000']} calls and seed 2006 at {hits['2006']} calls")
+    generations = {}
+    for system in ("lj31", "lj38"):
+        values = [float(row["generations"]) for row in pick(seeds, system=system, arm="gad")]
+        generations[system] = (median(values), min(values), max(values))
+    audit.said(path, "a median of "
+               f"{generations['lj31'][0]:g} generations on LJ31 "
+               f"({generations['lj31'][1]:g}–{generations['lj31'][2]:g}) and "
+               f"{generations['lj38'][0]:g} on LJ38 "
+               f"({generations['lj38'][1]:g}–{generations['lj38'][2]:g})")
+    anneal_calls = [float(row["evals_to_hit"]) for row in pick(seeds, system="lj31", arm="anneal")]
+    gmin_calls = [float(row["evals_to_hit"]) for row in pick(seeds, system="lj31", arm="gmin")]
+    audit.cell(path, "LJ31 GMIN median calls from per-seed reruns",
+               pick(rows, system="lj31", arm="gmin")[-1]["evals_median"], median(gmin_calls))
+    audit.cell(path, "LJ31 GMIN IQR from per-seed reruns",
+               pick(rows, system="lj31", arm="gmin")[-1]["evals_iqr"], iqr(gmin_calls))
+    audit.cell(path, "LJ31 GMIN Mann-Whitney from per-seed reruns",
+               pick(rows, system="lj31", arm="gmin")[-1]["mannwhitney_p"],
+               mann_whitney_exact_no_ties(gmin_calls, anneal_calls))
 
 
 OPENCONF_ARM = {"branch": "anneal", "anneal": "anneal", "develop": "develop", "openconf": "openconf"}
