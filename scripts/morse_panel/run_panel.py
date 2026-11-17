@@ -263,6 +263,10 @@ def run_gmin(
 
 
 def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[dict[str, str]]:
+    latest: dict[tuple[str, str, int], dict[str, str]] = {}
+    for row in rows:
+        latest[(row["system"], row["code"], int(row["seed"]))] = row
+    rows = list(latest.values())
     out = []
     for name, _n, _rho, _budget, _ref in SYSTEMS:
         anneal = [row for row in rows if row["system"] == name and row["code"] == "anneal"]

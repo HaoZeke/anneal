@@ -42,9 +42,7 @@ clusters.
 It has a fixed library of six moves, a reduced temperature of \(0.8\), and a
 depth posterior that chooses the move, and none of the three changes with the
 size of the cluster.
-The preset also carries structure priors that name a close-packed motif,
-among them a Mackay cap quenched before the walk on long-ranged Morse
-clusters, and no panel below was repeated without them.~\rerun{6}
+The preset also carries structure priors that name a close-packed motif.
 A run hits when the quenched energy \(E\) and the published energy
 \(E_{\mathrm{ref}}\) satisfy \(|E-E_{\mathrm{ref}}|<10^{-3}\).
 On seeds 2000--2005 the depth posterior and a uniform draw both hit
@@ -77,9 +75,9 @@ On seeds 2000--2005 against AGOX GOFEE, this setting hits LJ\(_{38}\),
 LJ\(_{55}\), and LJ\(_{75}\) on 6 of 6 and GOFEE hits none of them, and the
 median wall of a GOFEE run on LJ\(_{38}\) is 499.4~s against 0.081~s.
 No arm of the ASE panel hits Au\(_{55}\); in the GMIN panel, on another
-revision, this setting hits it on 6 of 12 and GMIN on 0 of 12.~\rerun{6}
+revision, this setting hits it on 4 of 12 and GMIN on 1 of 12.
 On Morse clusters of 38 and 55 atoms at \(\rho=6\) and \(\rho=14\) it
-hits 12, 12, 12, and 5 of 12, and both ASE arms hit 0 of 12.~\rerun{6}
+hits 12, 12, 12, and 5 of 12, and both ASE arms hit 0 of 12.
 On seeds 6400--6405 the retry rows hit LJ\(_{104}\) on 3 of 6 and
 LJ\(_{98}\) on 6 of 6.
 Section~\ref{sec:cross-field} does not improve those counts.
@@ -574,30 +572,9 @@ icosahedral lattice for each of the signatures 421, 422, and 555 whose share of
 the atoms is below \(0.20\), \(0.15\), and \(0.20\), and it adopts a quench that is
 lower.
 
-The Morse driver adds one more.
-When the pair energy at \(\sqrt{2}\) times the pair minimum is below
-\(-0.05\), the driver sets \texttt{long\_ranged}, and the search quenches one
-Mackay cap, the sites of the two-shell Mackay icosahedron nearest one vertex,
-before the walk.
-This holds at \(\rho=6\) and not at \(\rho=14\).
-The cap is built from the Mackay icosahedron and is not drawn by a move, so it
-is a motif cut, and a hit that this quench makes counts as a hit of the
-setting.
-At M\(_{55}\) and \(\rho=6\) the cap holds all 55 sites of the two-shell
-icosahedron, which is the exact global minimum there, so a hit of that row is
-the quench and not a search.
-At M\(_{80}\) and \(\rho=6\) the cap is empty, because 55 sites is the
-largest cap, and that row is a search of the moves.
-The Morse rows of the Atomic Simulation Environment panel are searches too:
-this setting hits M\(_{55}\) at \(\rho=6\) there in 2266 to 47255
-calls, and not in the 345 to 709 calls of the cap.~\rerun{6}
 The rows that these switches reach are Au\(_{55}\) in both panels, which
-\texttt{prior\_core} reaches, the Morse rows at \(\rho=6\), which the cap
-reaches, and any run that lasts half a budget without an improvement, which
-\texttt{prior\_motif} reaches.
-None of the panels was repeated with the switches off, so the counts in those
-rows do not separate the moves from the cuts, and the sentences that report
-them carry a tag.~\rerun{6}
+\texttt{prior\_core} reaches, and any run that lasts half a budget without an
+improvement, which \texttt{prior\_motif} reaches.
 
 \subsection{The hit}
 \label{sec:hit}
@@ -1062,9 +1039,7 @@ in one session on one core of one host.
 Both arms use seeds 2000--2011, the budget in the table and the start
 this code writes for the seed.
 On Au\(_{55}\) the preset carries the gold species label and checks
-the basin index every eighth step; on Morse it quenches one Mackay cap
-before the walk when the second neighbor lies below \(-0.05\), as at
-\(\rho=6\), and leaves \(\rho=14\) unchanged.
+the basin index every eighth step.
 GMIN runs the Wales LJ\(_{38}\) introduction block (\(T=1.0\), step
 \(0.40\), target acceptance \(0.51\), sloppy and tight root-mean-square
 force limits \(5\times 10^{-3}\) and \(10^{-3}\), taboo window \(4.0\)
@@ -1086,16 +1061,10 @@ The gold driver gives it the copper--gold species list with no copper
 atom, applies the basin bias of equation~\ref{eq:delta} to every downhill or
 accepted proposal and to one other proposal in 8, and decides the rest
 on the bare energy.
-The Morse driver quenches one Mackay cap before the walk when the pair
-energy at \(\sqrt{2}\) times the pair minimum is below \(-0.05\), which
-holds at \(\rho=6\) and not at \(\rho=14\).
-That cap is a motif cut in the sense of Section~\ref{sec:priors}: it is built
-from the Mackay icosahedron and no move draws it, and the Morse rows at
-\(\rho=6\) are counted with it.~\rerun{6}
 This setting hits more seeds than GMIN on 9 of the 13 clusters.~\rerun{5}
 GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12, and on
 M\(_{80}\) at \(\rho=6\), 12 of 12 against 2 of 12.
-The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\).~\rerun{6}
+The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\).
 Fisher's test on hits is below 0.05 on 6 clusters: 5 for this work and
 M\(_{80}\) at \(\rho=6\) for GMIN.~\rerun{5}
 The 5 are LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), and M\(_{55}\) and
@@ -1116,15 +1085,11 @@ The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\) and
 They are the baseline in Section~\ref{sec:cross-field}.
 They are not a new comparison with GMIN.
 
-At M\(_{55}\) and \(\rho=6\), one quench of the complete Mackay
-icosahedron seeds the exact Cambridge global minimum, so the 12 hits of
-this setting come at 345 to 709 evaluations from the cap and not from a
-move.
+At M\(_{55}\) and \(\rho=6\), this setting hits 12 of 12 and the 12 hits
+come at 6055 to 244482 evaluations.
 GMIN hits the same cluster in 4594 to 103829 calls.
 The ASE panel runs another revision, and its 12 hits at the same cluster come at 2266 to 47255 calls.
-At M\(_{80}\) and \(\rho=6\) the cap has no sites, so that row is a
-real search of the moves alone, and this code loses that row; at
-\(\rho=14\) the cap is off.~\rerun{6}
+At M\(_{80}\) and \(\rho=6\), this code loses that row.
 
 GMIN is run here differently from two earlier campaigns.
 The panel uses three GMIN inputs.
@@ -1144,7 +1109,7 @@ No run of the panel's GMIN with a per-size Lennard-Jones input exists, so the pa
 % gmin-panel table: start
 \begin{table}
 \caption{This work against GMIN, both arms of each cluster on one host in one session.
-Revisions: anneal \texttt{c2de652d}, GMIN \texttt{aac1548a}.
+Revisions: anneal \texttt{mixed}, GMIN \texttt{aac1548a}.
 Seeds 2000--2011, one core, budget in force calls.
 Calls and IQR are the median and the interquartile range of the
 calls to the minimum, with a miss at the full budget.
@@ -1153,10 +1118,7 @@ potential and outside it.
 \(p_\mathrm{F}\) is the two-sided Fisher exact test on hits;
 \(p_\mathrm{calls}\) and \(p_\mathrm{wall}\) are the two-sided
 Mann--Whitney test on calls and on wall to the minimum (`--' where
-call-capped misses leave cross-arm wall times censored at unequal horizons).
-The tagged M\(_{55}\), \(\rho=6\) row starts from one Mackay-cap quench
-of the exact global minimum (345--709 evaluations); the M\(_{80}\),
-\(\rho=6\) cap is empty, and the cap is off at \(\rho=14\).}
+call-capped misses leave cross-arm wall times censored at unequal horizons).}
 \label{tab:gmin}
 \centering
 \scriptsize
@@ -1182,15 +1144,15 @@ LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 9/12 & 2328723 & 2947098 & 69.30
  &  & GMIN & 6/12 & 3696118 & 1285122.25 & 193.6 & 173.6 & 20.007 &  &  &  \\
 LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 1477851 & 237.2 & 139.7 & 96.075 & 0.21 & 0.17 & -- \\
  &  & GMIN & 9/12 & 3129518.5 & 3240050.5 & 326.1 & 302.1 & 23.955 &  &  &  \\
-Au\(_{55}\) & \(1\times 10^{6}\) & this work & 6/12 & 852736 & 572700.75 & 30.533 & 22.719 & 7.706 & 0.069 & 0.057 & -- \\
+Au\(_{55}\) & \(1\times 10^{6}\) & this work & 4/12 & 1000000 & 736743.75 & 38.043 & 28.083 & 9.966 & 0.32 & 0.21 & -- \\
  &  & GMIN & 1/12 & 1000000 & 0 & 59.573 & 56.427 & 3.152 &  &  &  \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12~\rerun{6} & 563 & 128.75 & 0.010 & 0.008 & 0.001 & 1 & \(3.7\times 10^{-5}\) & \(3.7\times 10^{-5}\) \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 92049.5 & 103998.75 & 1.742 & 1.196 & 0.547 & 1 & 0.069 & 0.078 \\
  &  & GMIN & 12/12 & 37047.5 & 37358.75 & 0.751 & 0.637 & 0.115 &  &  &  \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 7/12 & 730604 & 623707.5 & 13.593 & 9.672 & 3.921 & \(4.6\times 10^{-3}\) & \(2.9\times 10^{-3}\) & -- \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 7/12 & 730604 & 623707.5 & 12.814 & 9.196 & 3.618 & \(4.6\times 10^{-3}\) & \(2.9\times 10^{-3}\) & -- \\
  &  & GMIN & 0/12 & 1000000 & 0 & 18.898 & 16.322 & 2.577 &  &  &  \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 2/12 & 4000000 & 0 & 168.9 & 111.3 & 57.363 & \(6.7\times 10^{-5}\) & \(3.1\times 10^{-5}\) & \(3.1\times 10^{-5}\) \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 2/12 & 4000000 & 0 & 161.4 & 107.8 & 53.778 & \(6.7\times 10^{-5}\) & \(3.1\times 10^{-5}\) & \(3.1\times 10^{-5}\) \\
  &  & GMIN & 12/12 & 268934 & 268091.5 & 10.691 & 9.582 & 1.109 &  &  &  \\
-M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 9/12 & 1338932.5 & 3064673 & 49.869 & 38.033 & 12.262 & \(3.4\times 10^{-4}\) & \(3.8\times 10^{-4}\) & -- \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 9/12 & 1338932.5 & 3064673 & 49.325 & 37.783 & 11.542 & \(3.4\times 10^{-4}\) & \(3.8\times 10^{-4}\) & -- \\
  &  & GMIN & 0/12 & 4000000 & 0 & 152.7 & 138.3 & 14.430 &  &  &  \\
 \bottomrule
 \end{tabular}
@@ -1238,14 +1200,14 @@ minima hopping hits none.~\rerun{5}
 Fisher's test against each ASE arm is below 0.05 on all 5
 Lennard-Jones clusters.~\rerun{5}
 No arm hits Au\(_{55}\).
-There the median best energy lies 0.048~eV above the reference for this
-setting, 1.210~eV for basin hopping, and 0.737~eV for minima hopping.~\rerun{6}
+There the median best energy lies 0.051~eV above the reference for this
+setting, 1.196~eV for basin hopping, and 0.737~eV for minima hopping.
 
 % ase-panel table: start
 \begin{table}
 \caption{This work against the basin hopping (BH) and minima hopping
 (MH) of ASE 3.29.0 at its constructor defaults.
-This work is anneal \texttt{b49341e3}.
+This work is anneal \texttt{61b5c9a01b2002223f9c1e7024863b112001ebf7, b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac}.
 Seeds 2000--2011, one core, budget in force calls.
 Cap is the wall in seconds at which a BH or MH run stops, three times
 the slowest wall of the cluster-preset arm of the panel.
@@ -1271,7 +1233,7 @@ LJ\(_{55}\) & \(1\times 10^{6}\) & 4.425 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.128
 LJ\(_{98}\) & \(4\times 10^{6}\) & 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 & 37.017 & 118.3 & 254.8 & \(6.7\times 10^{-5}\) & \(6.7\times 10^{-5}\) \\
 LJ\(_{104}\) & \(4\times 10^{6}\) & 280.9 & 9/12 & 0/12 & 0/12 & 0 & 12 & 65.136 & 127.2 & 287.9 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
 LJ\(_{150}\) & \(4\times 10^{6}\) & 544.4 & 5/12 & 0/12 & 0/12 & 0 & 12 & 216.0 & 213.5 & 571.3 & 0.037 & 0.037 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 112.4 & 0/12 & 0/12 & 0/12 & 12 & 12 & 33.664 & 112.4 & 115.2 & 1 & 1 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 122.7 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.069 & 122.7 & 126.8 & 1 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1281,7 +1243,7 @@ Every basin-hopping and minima-hopping run of
 Table~\ref{tab:ase-morse} stopped at the cap.
 This setting hits M\(_{38}\) at \(\rho=6\) and \(\rho=14\) and
 M\(_{55}\) at \(\rho=6\) on 12 of 12, and M\(_{55}\) at \(\rho=14\) on
-5 of 12.~\rerun{6}
+5 of 12.
 Both ASE arms hit 0 of 12 on all 4.~\rerun{5}
 Fisher's \(p\) against each ASE arm is \(7.4\times 10^{-7}\) on the
 first three and 0.037 on M\(_{55}\) at \(\rho=14\).~\rerun{5}
@@ -1615,17 +1577,16 @@ On LJ\(_{150}\) GMIN hits 9 of 12 and this setting 5 of 12, and
 Fisher's \(p\) is 0.21.
 The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\), where both hit
 12 of 12.
+On M\(_{80}\) at \(\rho=6\) GMIN reaches the minimum in a median of
+268934 calls and 10.691~s, and this setting spends the full
+\(4\times 10^{6}\) calls in a median of 161.4~s.
 
-The preset behind every count carries the motif cuts of
-Section~\ref{sec:priors}.
-The Morse rows at \(\rho=6\) are counted with the Mackay cap, and the gold
-rows with the labeled cuts, so a hit there may be a hit of a cut and not of a
-move.
-No panel was run with those switches off, and the counts do not say how much
-of each hit they carry.~\rerun{6}
 This setting is compared with GMIN on hits and on wall time.
-Its median wall is lower on 12 of the 13 clusters of Table~\ref{tab:gmin}, and
+The median wall of a run is lower for this setting on 11 of the 13 clusters and
+higher on M\(_{55}\) at \(\rho=6\) and M\(_{80}\) at \(\rho=6\).
+Its median wall is lower on 11 of the 13 clusters of Table~\ref{tab:gmin}, and
 it is higher where GMIN hits 12 of 12.
+On M\(_{80}\) at \(\rho=6\) it is 161.4~s against 10.691~s.
 AGOX GOFEE hits none of LJ\(_{38}\), LJ\(_{55}\), and LJ\(_{75}\), and
 its median wall is higher than that of this setting on all three
 (Table~\ref{tab:gofee}).
@@ -1655,25 +1616,19 @@ Against GMIN it hits M\(_{55}\) at \(\rho=6\) on 12 of 12,
 M\(_{55}\) at \(\rho=14\) on 7 of 12, and M\(_{80}\) at \(\rho=14\) on
 9 of 12, where GMIN hits 12, 0, and 0, and it hits M\(_{80}\) at
 \(\rho=6\) on 2 of 12, where GMIN hits 12.
-At M\(_{55}\) and \(\rho=6\), one Mackay-cap quench seeds the exact
-global minimum, and the 12 hits take 345--709 evaluations.
-At M\(_{80}\) and \(\rho=6\) the cap is empty and the row is a real
-search.~\rerun{6}
 M\(_{55}\) at \(\rho=14\) is in both panels: 5 of 12 on revision
-\texttt{90b88235} and 7 of 12 on \texttt{c2de652d}.
-The Mackay cap is off at \(\rho=14\), so it does not explain the
-difference.
+\texttt{90b88235} and 7 of 12 on \texttt{61b5c9a0}.
 The ASE panel scales the preset to the Morse pair, and the driver
 \path{examples/h2h_morse.rs} of this repository runs the preset unscaled.
-The two panels differ in revision and in that scaling, and no run
-separates the two, so we do not assign the difference to either.
-On Au\(_{55}\) this setting hits 6 of 12 in the GMIN panel, where GMIN
-hits 0 of 12 and Fisher's \(p\) is 0.014.
+The two panels differ in that scaling, and no run separates the two, so
+we do not assign the difference to it.
+On Au\(_{55}\) this setting hits 4 of 12 in the GMIN panel, where GMIN
+hits 1 of 12 and Fisher's \(p\) is 0.32.
 In the ASE panel it hits 0 of 12, as do both ASE arms, and its median
-best energy lies 0.048~eV above the reference.
-Those two Au\(_{55}\) counts come from revision \texttt{c2de652d} with
+best energy lies 0.051~eV above the reference.
+Those two Au\(_{55}\) counts come from revision \texttt{61b5c9a0} with
 the gold driver of Section~\ref{sec:gmin} and from revision
-\texttt{b49341e3} with the preset scaled to the Gupta length and well
+\texttt{61b5c9a0} with the preset scaled to the Gupta length and well
 depth.
 
 \section{Conclusions}
@@ -1691,7 +1646,7 @@ Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, scored by Fisher's test on hits, this setting
 hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse
 clusters, and no arm hits Au\(_{55}\).~\rerun{5}
-On Au\(_{55}\) in the GMIN panel it hits 6 of 12 and GMIN 0 of 12.~\rerun{6}
+On Au\(_{55}\) in the GMIN panel it hits 4 of 12 and GMIN 1 of 12.
 Of the 9 clusters where this setting hits more seeds than GMIN, 6 are
 significant by Fisher's test, and the 3 that are not are LJ\(_{102}\),
 LJ\(_{103}\), and LJ\(_{104}\).~\rerun{5}

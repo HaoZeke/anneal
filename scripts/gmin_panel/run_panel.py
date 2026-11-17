@@ -480,8 +480,12 @@ def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, s
     wanted = {"anneal": revision, "gmin": GMIN_REV}
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
-        if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
-            continue
+        if revision == "latest":
+            if row["code"] == "gmin" and row["code_revision"] != GMIN_REV:
+                continue
+        else:
+            if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
+                continue
         groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
     return {key: [group[s] for s in sorted(group)] for key, group in groups.items()}
 
@@ -563,6 +567,8 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
         wall_pair = ranked_wall(anneal, gmin)
         wall_mw = mann_whitney(*wall_pair) if wall_pair is not None else None
         both = anneal + gmin
+        anneal_revisions = " ".join(sorted({r["code_revision"] for r in anneal}))
+        harness_revisions = " ".join(sorted({r["harness_revision"] for r in both}))
         out.append(
             {
                 "system": system,
@@ -591,9 +597,9 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
                 "gmin_outside_median_s": fmt(type7(col(gmin, "outside_s"), 0.5)),
                 "anneal_best_min": f"{min(col(anneal, 'best')):.8f}",
                 "gmin_best_min": f"{min(col(gmin, 'best')):.8f}",
-                "anneal_revision": revision,
+                "anneal_revision": anneal_revisions,
                 "gmin_revision": GMIN_REV,
-                "harness_revision": revision,
+                "harness_revision": harness_revisions,
                 "host": " ".join(sorted({r["host"] for r in both})),
                 "sessions": " ".join(sorted({r["session"] for r in both})),
                 "seeds": " ".join(r["seed"] for r in anneal),
@@ -685,14 +691,13 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
         arm = "anneal" if index % 2 == 0 else "gmin"
         if arm == "gmin" and system in ("lj75", "lj98"):
             cells[3] += "~\\rerun{5}"
-        if arm == "anneal" and system == "m55r6":
-            cells[3] += "~\\rerun{6}"
+    shown_revision = revision[:8] if revision != "latest" else "mixed"
     body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
             "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{revision[:8]}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
+            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -701,10 +706,7 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits;",
             "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided",
             "Mann--Whitney test on calls and on wall to the minimum (`--' where",
-            "call-capped misses leave cross-arm wall times censored at unequal horizons).",
-            "The tagged M\\(_{55}\\), \\(\\rho=6\\) row starts from one Mackay-cap quench",
-            "of the exact global minimum (345--709 evaluations); the M\\(_{80}\\),",
-            "\\(\\rho=6\\) cap is empty, and the cap is off at \\(\\rho=14\\).}",
+            "call-capped misses leave cross-arm wall times censored at unequal horizons).}",
             "\\label{tab:gmin}",
             "\\centering",
             "\\scriptsize",

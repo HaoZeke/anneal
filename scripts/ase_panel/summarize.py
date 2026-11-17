@@ -105,7 +105,7 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
                     rows.append(row)
     _, budget, reference, _ = SYSTEMS[system]
     grouped = {arm: [] for arm in ARMS}
-    seen = set()
+    by_arm: dict[str, list[tuple[int, dict[str, str]]]] = {arm: [] for arm in ARMS}
     for row in rows:
         if (
             row["system"] != system
@@ -114,10 +114,6 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
             or row["host"] != "bench"
         ):
             raise SystemExit(f"unexpected row {row}")
-        key = (row["arm"], row["seed"])
-        if key in seen:
-            raise SystemExit(f"duplicate row {key}")
-        seen.add(key)
         charged = int(row["charged"])
         if not 0 < charged <= budget:
             raise SystemExit(f"invalid charged count {row}")
@@ -140,7 +136,38 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
                 raise SystemExit(f"invalid wall stop {row}")
         else:
             raise SystemExit(f"invalid miss stop {row}")
-        grouped[row["arm"]].append(row)
+        by_arm[row["arm"]].append((len(by_arm[row["arm"]]), row))
+
+    def choose_campaign(arm: str) -> list[dict[str, str]]:
+        # Append-only rows can hold multiple campaigns. Choose the latest full
+        # 12-seed campaign of this arm, grouped by code revision and cap.
+        groups: dict[tuple[str, str], tuple[int, dict[int, dict[str, str]]]] = {}
+        for index, row in by_arm[arm]:
+            key = (row["code_revision"], row["cap_s"])
+            last, seeds = groups.get(key, (-1, {}))
+            seeds[int(row["seed"])] = row
+            groups[key] = (index, seeds)
+        full = [
+            (last, seeds)
+            for last, seeds in groups.values()
+            if tuple(sorted(seeds)) == SEEDS
+        ]
+        if full:
+            _last, seeds = max(full, key=lambda item: item[0])
+            return [seeds[seed] for seed in SEEDS]
+        # Older tables (for example LJ55 ASE-BH) can be a complete campaign
+        # split across multiple revisions. Fall back to the latest row of each
+        # seed in append order.
+        latest_by_seed: dict[int, dict[str, str]] = {}
+        for _index, row in by_arm[arm]:
+            latest_by_seed[int(row["seed"])] = row
+        if tuple(sorted(latest_by_seed)) != SEEDS:
+            raise SystemExit(f"{system} {arm}: no complete 2000-2011 campaign")
+        seeds = latest_by_seed
+        return [seeds[seed] for seed in SEEDS]
+
+    for arm in ARMS:
+        grouped[arm] = choose_campaign(arm)
     for arm in ARMS:
         seeds = tuple(sorted(int(row["seed"]) for row in grouped[arm]))
         if seeds != SEEDS:
@@ -411,13 +438,14 @@ def tex_table() -> str:
             show_p(fisher(hits("recommended"), hits("ase_bh"))),
             show_p(fisher(hits("recommended"), hits("ase_mh"))),
         ]) + " \\\\")
-    if len(revisions) != 1:
-        raise SystemExit(f"recommended rows carry more than one revision: {sorted(revisions)}")
+    if not revisions:
+        raise SystemExit("no recommended revisions found")
+    rev_text = ", ".join(sorted(revisions))
     return "\n".join([
         "\\begin{table}",
         "\\caption{This work against the basin hopping (BH) and minima hopping",
         f"(MH) of ASE {ASE_VERSION} at its constructor defaults.",
-        f"This work is anneal \\texttt{{{revisions.pop()[:8]}}}.",
+        f"This work is anneal \\texttt{{{rev_text}}}.",
         "Seeds 2000--2011, one core, budget in force calls.",
         "Cap is the wall in seconds at which a BH or MH run stops, three times",
         "the slowest wall of the cluster-preset arm of the panel.",

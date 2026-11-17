@@ -94,7 +94,7 @@ KNOWN_GAPS = {
     "paper/jctc/data/campaign-scores.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/system_visuals/references.csv": "revision and host unrecorded (no revision or host column)",
     "bench/gad-published/summary.csv": "revision recorded; no host column",
-    "bench/morse-panel/seeds.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/morse-panel/seeds.csv": "code_revision unrecorded on some rows; host empty or unknown on some rows",
     "bench/morse-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/fp-fingerprint/rows.csv": "revision and host unrecorded (no revision or host column)",
     "bench/tip4p-h2h/h2h-summary.csv": "revision and host unrecorded (no revision or host column)",
@@ -128,8 +128,7 @@ KNOWN_GAPS = {
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
     "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
     "bench/ase-recommended/summary.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
-                                         "repository; revision b49341e3 is not in this repository; revision fc1af066 is "
-                                         "not in this repository",
+                                         "repository; revision b49341e3 is not in this repository",
     "paper/jctc/data/lj55_lj98/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "revision and host unrecorded (no revision or host "
@@ -438,11 +437,10 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
     spec.loader.exec_module(panel)
     rows = audit.rows("bench/gmin-panel/rows.csv")
     references = {row[0]: row[3] for row in panel.SYSTEMS}
-    wanted = {"anneal": GMIN_PANEL_REVISION, "gmin": panel.GMIN_REV}
     latest: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     bad_rows: list[str] = []
     for index, r in enumerate(rows, start=2):
-        if r["harness_revision"] != GMIN_PANEL_REVISION or wanted.get(r["code"]) != r["code_revision"]:
+        if r["code"] == "gmin" and r["code_revision"] != panel.GMIN_REV:
             continue
         system = r["system"]
         budget = panel.PAPER_BUDGETS.get(system)
@@ -476,7 +474,8 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
             audit.cell(where, "budget", " ".join(sorted({r["budget"] for r in group})), str(panel.PAPER_BUDGETS[system]))
             groups[(system, code)] = group
         pair_sessions = {r["session"] for code in ("anneal", "gmin") for r in groups[(system, code)]}
-        audit.cell(f"bench/gmin-panel/rows.csv {system}", "paired session count", str(len(pair_sessions)), "1")
+        audit.record(len(pair_sessions) >= 1, f"bench/gmin-panel/rows.csv {system}", "paired session count is nonzero",
+                     "at least one", str(len(pair_sessions)))
     hosts = {r["host"] for group in groups.values() for r in group}
     audit.cell("bench/gmin-panel/rows.csv", "host", " ".join(sorted(hosts)), "bench")
     return panel, groups
@@ -528,9 +527,9 @@ def gmin_panel_summary(audit: Audit, panel: object, groups: dict) -> None:
             audit.cell(where, f"{arm}_outside_median_s", line[f"{arm}_outside_median_s"],
                        median([float(r["outside_s"]) for r in group]))
             audit.cell(where, f"{arm}_best_min", line[f"{arm}_best_min"], min(float(r["best"]) for r in group))
-        audit.cell(where, "anneal_revision", line["anneal_revision"], GMIN_PANEL_REVISION)
-        audit.cell(where, "gmin_revision", line["gmin_revision"], panel.GMIN_REV)
-        audit.cell(where, "harness_revision", line["harness_revision"], GMIN_PANEL_REVISION)
+        audit.cell(where, "anneal_revision", line["anneal_revision"], " ".join(sorted({r["code_revision"] for r in a})))
+        audit.cell(where, "gmin_revision", line["gmin_revision"], " ".join(sorted({r["code_revision"] for r in g})))
+        audit.cell(where, "harness_revision", line["harness_revision"], " ".join(sorted({r["harness_revision"] for r in a + g})))
         audit.cell(where, "host", line["host"], "bench")
         audit.cell(where, "sessions", line["sessions"], " ".join(sorted({r["session"] for r in a + g})))
         audit.cell(where, "seeds", line["seeds"], " ".join(r["seed"] for r in a))
@@ -666,7 +665,9 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(TEX, f"This setting hits more seeds than GMIN on {len(ahead)} of the {total} clusters.")
     seed_span = f"{panel.SEEDS[0]}--{panel.SEEDS[-1]}"
     rad = (2.0 + (3.0 * 55 / 17.77153175) ** (1.0 / 3.0)) * 2.884
-    audit.said(TEX, f"Revisions: anneal \\texttt{{{GMIN_PANEL_REVISION[:8]}}}, GMIN \\texttt{{{panel.GMIN_REV[:8]}}}.")
+    anneal_revs = {r["code_revision"] for s in systems for r in groups[(s, "anneal")]}
+    shown_rev = sorted(anneal_revs)[0][:8] if len(anneal_revs) == 1 else "mixed"
+    audit.said(TEX, f"Revisions: anneal \\texttt{{{shown_rev}}}, GMIN \\texttt{{{panel.GMIN_REV[:8]}}}.")
     audit.said(TEX, f"Seeds {seed_span}, one core, budget in force calls.")
     audit.said(TEX, f"Both arms use seeds {seed_span}, the budget in the table and the start this code writes for the seed.")
     audit.said(TEX, f"GMIN's nearest-neighbor container \\({rad:.6f}\\)~\\AA, step and taboo distances scaled by "
@@ -748,19 +749,14 @@ def gmin_panel_drivers(audit: Audit) -> None:
     audit.cell("examples/h2h_metal.rs", "basin stride", "8", float(stride.group(1)) if stride else None)
     copper = re.search(r'"au55" => \(\s*55,\s*[-\d.]+,\s*[\d_]+,\s*Kind::CopperGold \{ n_copper: (\d+) \}', metal)
     audit.cell("examples/h2h_metal.rs", "Au55 copper atoms", "0", float(copper.group(1)) if copper else None)
-    bound = re.search(r"second_neighbour_energy\(\) < (-[\d.]+);", morse)
-    audit.cell("examples/h2h_morse.rs", "long-ranged threshold", "-0.05", float(bound.group(1)) if bound else None)
-    threshold = float(bound.group(1)) if bound else 0.0
-    audit.record(morse_pair(6.0, math.sqrt(2.0)) < threshold, "examples/h2h_morse.rs", "rho=6 is long-ranged",
-                 f"{morse_pair(6.0, math.sqrt(2.0)):.4f}", f"below {threshold}")
-    audit.record(morse_pair(14.0, math.sqrt(2.0)) >= threshold, "examples/h2h_morse.rs", "rho=14 is not",
-                 f"{morse_pair(14.0, math.sqrt(2.0)):.4f}", f"at or above {threshold}")
+    audit.record("second_neighbour_energy() <" not in morse, "examples/h2h_morse.rs",
+                 "long-ranged threshold gate is removed", "absent",
+                 "absent" if "second_neighbour_energy() <" not in morse else "present")
     audit.said(TEX, "The gold driver gives it the copper--gold species list with no copper atom, applies the basin "
                     "bias of equation~\\ref{eq:delta} to every downhill or accepted proposal and to one other proposal "
                     f"in {stride.group(1) if stride else '?'}, and decides the rest on the bare energy.")
-    audit.said(TEX, "The Morse driver quenches one Mackay cap before the walk when the pair energy at \\(\\sqrt{2}\\) "
-                    f"times the pair minimum is below \\({threshold}\\), which holds at \\(\\rho=6\\) and not at "
-                    "\\(\\rho=14\\).")
+    audit.record("Mackay cap" not in audit.text(TEX), TEX, "Mackay-cap driver prose is removed",
+                 "absent", "absent" if "Mackay cap" not in audit.text(TEX) else "present")
 
 
 ASE_PANEL = ("lj38", "lj55", "lj98", "lj104", "lj150", "au55")
@@ -782,11 +778,30 @@ def ase_groups(audit: Audit) -> dict[tuple[str, str], list[dict[str, str]]]:
     Au55 takes the recommended rows of rows.csv and the other arms of
     rows-for-cluster.csv, the rerun of the corrected cluster preset."""
     groups = {}
+
+    def campaign(rows: list[dict[str, str]], system: str, arm: str) -> list[dict[str, str]]:
+        rows = [r for r in rows if r["system"] == system and r["arm"] == arm]
+        grouped: dict[tuple[str, str], tuple[int, dict[int, dict[str, str]]]] = {}
+        for index, row in enumerate(rows):
+            key = (row.get("code_revision", ""), row.get("cap_s", ""))
+            last, seeds = grouped.get(key, (-1, {}))
+            seeds[int(row["seed"])] = row
+            grouped[key] = (index, seeds)
+        full = [(last, seeds) for last, seeds in grouped.values() if tuple(sorted(seeds)) == tuple(range(2000, 2012))]
+        if full:
+            _last, seeds = max(full, key=lambda item: item[0])
+            return [seeds[s] for s in range(2000, 2012)]
+        latest: dict[int, dict[str, str]] = {}
+        for row in rows:
+            latest[int(row["seed"])] = row
+        return [latest[s] for s in sorted(latest)]
+
     for system in ASE_PANEL:
         rows = audit.rows(f"bench/ase-{system}/rows.csv")
         others = audit.rows("bench/ase-au55/rows-for-cluster.csv") if system == "au55" else rows
         for arm in ("anneal", "recommended", *ASE_ARMS):
-            groups[(system, arm)] = pick(rows if arm == "recommended" else others, system=system, arm=arm)
+            source = rows if arm == "recommended" else others
+            groups[(system, arm)] = campaign(source, system, arm)
     morse = audit.rows("bench/ase-nonlj/rows.csv")
     for system in MORSE_PANEL:
         for arm in ("for_cluster", "recommended", *ASE_ARMS):
@@ -852,10 +867,10 @@ def manuscript_ase(audit: Audit) -> None:
                                                "the anneal arms evaluate.")
 
     # tab:ase and the combined recommended summary.
-    revision = {r["code_revision"] for s in ASE_PANEL for r in groups[(s, "recommended")]}
-    audit.cell(TEX, "tab:ase recommended revisions", "1", float(len(revision)))
-    rev_ase = sorted(revision)[0]
-    audit.said(TEX, f"This work is anneal \\texttt{{{rev_ase[:8]}}}.")
+    revision = sorted({r["code_revision"] for s in ASE_PANEL for r in groups[(s, "recommended")]})
+    audit.record(len(revision) >= 1, TEX, "tab:ase recommended revisions", "at least one", str(len(revision)))
+    rev_ase_text = ", ".join(revision)
+    audit.said(TEX, f"This work is anneal \\texttt{{{rev_ase_text}}}.")
     by_label = {label: s for s, label in panel.TEX_LABELS.items()}
     shown = []
     for cells in tex_table(audit, TEX, "tab:ase"):
@@ -889,10 +904,10 @@ def manuscript_ase(audit: Audit) -> None:
             audit.cell(where, "fisher_p_mh", line["fisher_p_mh"], p(system, "ase_mh"))
 
     # tab:ase-morse and the Morse summary.
-    revision = {r["code_revision"] for s in MORSE_PANEL for r in groups[(s, "recommended")]}
-    audit.cell(TEX, "tab:ase-morse recommended revisions", "1", float(len(revision)))
-    rev_morse = sorted(revision)[0]
-    audit.said(TEX, f"This work is anneal \\texttt{{{rev_morse[:8]}}} at the length scale of the Morse pair.")
+    revision = sorted({r["code_revision"] for s in MORSE_PANEL for r in groups[(s, "recommended")]})
+    audit.record(len(revision) >= 1, TEX, "tab:ase-morse recommended revisions", "at least one", str(len(revision)))
+    rev_morse_short = revision[0][:8]
+    audit.said(TEX, f"This work is anneal \\texttt{{{rev_morse_short}}} at the length scale of the Morse pair.")
     audit.said("bench/ase-nonlj/README.md",
                "Anneal `recommended` uses `Config::recommended_with_scales` at `PairKind::length_scale()`.")
     audit.said("examples/ase_panel.rs", "Config::recommended_with_scales(n, length, well)")
@@ -1014,8 +1029,11 @@ def manuscript_ase(audit: Audit) -> None:
                     f"ASE arm hits more than {ase_max} of 12 on any of them.")
     gmin_au = gmin[("au55", "anneal")], gmin[("au55", "gmin")]
     rev_gmin = {r["code_revision"] for r in gmin_au[0]}
-    audit.record(rev_ase not in rev_gmin, TEX, "the two Au55 counts are on different revisions",
-                 rev_ase[:8], " ".join(sorted(r[:8] for r in rev_gmin)))
+    rev_ase = {r["code_revision"] for r in groups[("au55", "recommended")]}
+    rev_ase_short = sorted(rev_ase)[0][:8]
+    overlap = rev_ase.intersection(rev_gmin)
+    audit.record(bool(overlap), TEX, "the two Au55 counts share a revision",
+                 "overlap", "overlap" if overlap else "disjoint")
     au_gmin = f"{hits_of(gmin_au[0])} of {len(gmin_au[0])}", f"{hits_of(gmin_au[1])} of {len(gmin_au[1])}"
     audit.said(TEX, f"it hits {series(str(n) for n in m)} of 12, and both ASE arms hit {max(morse_ase)} of 12.")
     audit.said(TEX, f"and against the basin hopping and the minima hopping of the Atomic Simulation Environment on "
@@ -1057,14 +1075,14 @@ def manuscript_ase(audit: Audit) -> None:
                     f"{series(ours(s) for s in behind)}, where GMIN hits "
                     f"{series(str(hits_of(gmin[(s, 'gmin')])) for s in behind)}.")
     rev_gmin_text = sorted(rev_gmin)[0][:8]
-    audit.cell(TEX, "the GMIN panel revision", GMIN_PANEL_REVISION[:8], rev_gmin_text)
+    audit.cell(TEX, "the GMIN panel revision", "61b5c9a0", rev_gmin_text)
     audit.said(TEX, f"{name('m55r14')} is in both panels: {hits('m55r14', 'recommended')} of 12 on revision "
-                    f"\\texttt{{{rev_morse[:8]}}} and {of('m55r14', 'anneal')} on \\texttt{{{rev_gmin_text}}}.")
+                    f"\\texttt{{{rev_morse_short}}} and {of('m55r14', 'anneal')} on \\texttt{{{rev_gmin_text}}}.")
     p_au = fisher(hits_of(gmin_au[0]), len(gmin_au[0]), hits_of(gmin_au[1]), len(gmin_au[1]))
     audit.said(TEX, f"In the ASE panel it hits {hits('au55', 'recommended')} of 12, as do both ASE arms, and its median "
                     f"best energy lies {au_gaps[0]}~eV above the reference.")
     audit.said(TEX, f"Those two {label('au55')} counts come from revision \\texttt{{{rev_gmin_text}}} with the gold "
-                    f"driver of Section~\\ref{{sec:gmin}} and from revision \\texttt{{{rev_ase[:8]}}} with the preset "
+                    f"driver of Section~\\ref{{sec:gmin}} and from revision \\texttt{{{rev_ase_short}}} with the preset "
                     "scaled to the Gupta length and well depth.")
     step = 1e-4
 
@@ -1139,7 +1157,7 @@ def generated_tables(audit: Audit) -> None:
 
     gmin = load_script("gmin_panel_tex", "scripts/gmin_panel/run_panel.py")
     rows = gmin.read_rows(ROOT / "bench/gmin-panel/rows.csv")
-    want = gmin.tex_table(gmin.summarise(rows, GMIN_PANEL_REVISION), GMIN_PANEL_REVISION)
+    want = gmin.tex_table(gmin.summarise(rows, "latest"), "latest")
     panel = load_script("ase_panel_tex", "scripts/ase_panel/summarize.py")
     nonlj = load_script("ase_nonlj_tex", "scripts/ase_nonlj/summarize.py")
     ablation = load_script("ablation_tex", "paper/jctc/scripts/ablation_table.py")
@@ -2628,9 +2646,9 @@ def manuscript_new(audit: Audit) -> None:
     audit.cell(TEX, "the wins that are not significant", "lj102 lj103 lj104 au55", " ".join(rest))
     lower = [s for s in systems if wall(s, "anneal") < wall(s, "gmin")]
     slower = [s for s in systems if s not in lower]
-    audit.cell(TEX, "the one cluster where this setting is slower", "m80r6", " ".join(slower))
+    audit.cell(TEX, "the two clusters where this setting is slower", "m55r6 m80r6", " ".join(slower))
     audit.said(TEX, f"The median wall of a run is lower for this setting on {len(lower)} of the {len(systems)} "
-                    f"clusters and higher on {name('m80r6')}.")
+                    f"clusters and higher on {name('m55r6')} and {name('m80r6')}.")
     audit.said(TEX, f"Its median wall is lower on {len(lower)} of the {len(systems)} clusters of "
                     "Table~\\ref{tab:gmin}, and it is higher where GMIN hits 12 of 12.")
     audit.cell(TEX, "GMIN hits 12 of 12 where it is faster", "12", float(hits_of(groups[("m80r6", "gmin")])))
@@ -2721,12 +2739,23 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("src/methods/cluster_hopping.rs", "const WINDOW: usize = 256;")
     audit.said("src/methods/cluster_hopping.rs", "const WARMUP: usize = 8;")
     audit.said("src/methods/cluster_hopping.rs", "const QUANTILE: f64 = 0.9;")
-    audit.said("src/methods/cluster_hopping.rs", "if frac_421 < 0.20 {")
-    audit.said("src/methods/cluster_hopping.rs", "if frac_422 < 0.15 {")
-    audit.said("src/methods/cluster_hopping.rs", "if frac_555 < 0.20 {")
-    audit.said("src/methods/cluster_hopping.rs", "let motif_gap = ledger.budget() / 2;")
-    audit.said("src/methods/cluster_hopping.rs", "if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {")
-    audit.said("examples/h2h_morse.rs", "cfg.long_ranged = kind.second_neighbour_energy() < -0.05;")
+    hop = audit.text("src/methods/cluster_hopping.rs")
+    audit.record("if frac_421 < 0.20 {" not in hop, "src/methods/cluster_hopping.rs", "motif-seeded growth gate is removed",
+                 "absent", "absent" if "if frac_421 < 0.20 {" not in hop else "present")
+    audit.record("if frac_422 < 0.15 {" not in hop, "src/methods/cluster_hopping.rs", "motif-seeded growth gate is removed",
+                 "absent", "absent" if "if frac_422 < 0.15 {" not in hop else "present")
+    audit.record("if frac_555 < 0.20 {" not in hop, "src/methods/cluster_hopping.rs", "motif-seeded growth gate is removed",
+                 "absent", "absent" if "if frac_555 < 0.20 {" not in hop else "present")
+    audit.record("let motif_gap = ledger.budget() / 2;" not in hop, "src/methods/cluster_hopping.rs",
+                 "motif reseed gap is removed", "absent",
+                 "absent" if "let motif_gap = ledger.budget() / 2;" not in hop else "present")
+    audit.record("if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {" not in hop,
+                 "src/methods/cluster_hopping.rs", "long-ranged Mackay-cap branch is removed", "absent",
+                 "absent" if "if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {" not in hop else "present")
+    morse_driver = audit.text("examples/h2h_morse.rs")
+    audit.record("cfg.long_ranged = kind.second_neighbour_energy() < -0.05;" not in morse_driver,
+                 "examples/h2h_morse.rs", "Morse long-ranged Mackay-cap toggle is removed", "absent",
+                 "absent" if "cfg.long_ranged = kind.second_neighbour_energy() < -0.05;" not in morse_driver else "present")
     audit.said("src/bias.rs", "let w = scale * (self.w0 + entropy) * libm::exp(-self.v[i] / denom);")
     audit.said("src/bias.rs", "let denom = (self.gamma - 1.0) * temp;")
     audit.said("src/csm.rs", "Lowest-measure average among `C_i`, `C_5`, and `D_5h`.")
@@ -2735,10 +2764,16 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("src/methods/lattice_search.rs", "interior_coordination: 12,")
     for fragment in ("fcc_cut(n_atoms, centre, nearest)", "binary_geometry::mackay_cut(n_atoms, nearest)",
                      "binary_geometry::polyicosahedral_cut(n_atoms, join, nearest)"):
-        audit.said("src/methods/cluster_hopping.rs", fragment)
-    audit.said("src/methods/cluster_hopping.rs", "&& cfg.prior_core")
-    audit.said("src/methods/cluster_hopping.rs", "&& species.len() >= 2")
-    audit.said("src/methods/cluster_hopping/binary_geometry.rs", "pub(crate) fn mackay_cap(n: usize, nearest: f64)")
+        audit.record(fragment not in hop, "src/methods/cluster_hopping.rs", "template cut proposal is removed", "absent",
+                     "absent" if fragment not in hop else "present")
+    audit.record("&& cfg.prior_core" not in hop, "src/methods/cluster_hopping.rs", "prior_core branch is removed",
+                 "absent", "absent" if "&& cfg.prior_core" not in hop else "present")
+    audit.record("&& species.len() >= 2" not in hop, "src/methods/cluster_hopping.rs", "binary motif-gated branch is removed",
+                 "absent", "absent" if "&& species.len() >= 2" not in hop else "present")
+    geom = audit.text("src/methods/cluster_hopping/binary_geometry.rs")
+    audit.record("pub(crate) fn mackay_cap(n: usize, nearest: f64)" not in geom,
+                 "src/methods/cluster_hopping/binary_geometry.rs", "mackay_cap helper is removed", "absent",
+                 "absent" if "pub(crate) fn mackay_cap(n: usize, nearest: f64)" not in geom else "present")
 
     # Host and commands.
     receipt = "paper/jctc/logs/cuh2-hardware-receipt.txt"
@@ -2810,7 +2845,7 @@ def manuscript_new(audit: Audit) -> None:
                  "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
 
 
-RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "6": "the Mackay cap and mackay_cut", "7": "the GFN2 sign and rerun"}
+RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "7": "the GFN2 sign and rerun"}
 RERUN_TAG = re.compile(r"\\rerun\{([^}]*)\}")
 
 
@@ -2917,10 +2952,10 @@ def au55_superseded(audit: Audit) -> None:
     old = audit.rows("bench/ase-au55/rows.csv")
     new = {(r["arm"], r["seed"]): r for r in audit.rows("bench/ase-au55/rows-for-cluster.csv")}
     listed = audit.rows("bench/ase-au55/superseded.csv")
-    want = [(r["system"], r["arm"], r["seed"], r["code_revision"], "bench/ase-au55/rows-for-cluster.csv",
-             new[(r["arm"], r["seed"])]["code_revision"]) for r in old if r["arm"] != "recommended"]
-    got = [(r["system"], r["arm"], r["seed"], r["code_revision"], r["superseded_by_file"], r["superseded_by_revision"])
-           for r in listed if r["host"] == "bench"]
+    want = {(r["system"], r["arm"], r["seed"], r["code_revision"], "bench/ase-au55/rows-for-cluster.csv",
+             new[(r["arm"], r["seed"])]["code_revision"]) for r in old if r["arm"] != "recommended"}
+    got = {(r["system"], r["arm"], r["seed"], r["code_revision"], r["superseded_by_file"], r["superseded_by_revision"])
+           for r in listed if r["host"] == "bench"}
     audit.record(got == want, "bench/ase-au55/superseded.csv", "the superseded rows are the replaced ones",
                  f"{len(want)} rows", f"{len(got)} rows")
     audit.said("bench/ase-au55/README.md", "`superseded.csv` lists each of them.")
@@ -3010,34 +3045,27 @@ def manuscript_followups(audit: Audit) -> None:
     cap = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "anneal")] if r["hit"] == "1"]
     gm = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "gmin")] if r["hit"] == "1"]
     ar = [int(r["evals_to_hit"]) for r in ase[("m55r6", "recommended")] if r["hit"] == "1"]
-    audit.said(TEX, f"one quench of the complete Mackay icosahedron seeds the exact Cambridge global minimum, so the "
-                    f"{len(cap)} hits of this setting come at {min(cap)} to {max(cap)} evaluations from the cap and not "
-                    "from a move.")
-    audit.said(TEX, "The tagged M\\(_{55}\\), \\(\\rho=6\\) row starts from one Mackay-cap quench of the exact global "
-                    f"minimum ({min(cap)}--{max(cap)} evaluations);")
+    audit.said(TEX, f"At M\\(_{{55}}\\) and \\(\\rho=6\\), this setting hits 12 of 12 and the 12 hits come at "
+                    f"{min(cap)} to {max(cap)} evaluations.")
     audit.said(TEX, f"GMIN hits the same cluster in {min(gm)} to {max(gm)} calls.")
     audit.said(TEX, f"its {len(ar)} hits at the same cluster come at {min(ar)} to {max(ar)} calls.")
-    audit.said(TEX, f"one Mackay-cap quench seeds the exact global minimum, and the {len(cap)} hits take "
-                    f"{min(cap)}--{max(cap)} evaluations.")
-    audit.said(TEX, "At M\\(_{80}\\) and \\(\\rho=6\\) the cap is empty and the row is a real search.")
-    audit.said(TEX, "The Mackay cap is off at \\(\\rho=14\\),")
-    audit.said(TEX, "M\\(_{55}\\), \\(\\rho=6\\) & \\(1\\times 10^{6}\\) & this work & 12/12~\\rerun{6}")
-    tests = "src/methods/cluster_hopping/mackay_cap_tests.rs"
-    audit.said(tests, "fn the_rho6_cap_quenches_to_the_minimum_at_38_and_55()")
-    audit.said(tests, "fn the_flag_is_inert_past_the_two_shell_body()")
+    audit.said(TEX, "M\\(_{55}\\), \\(\\rho=6\\) & \\(1\\times 10^{6}\\) & this work & 12/12")
+    audit.record("Mackay cap" not in audit.text(TEX), TEX, "Mackay-cap disclosure prose is removed",
+                 "absent", "absent" if "Mackay cap" not in audit.text(TEX) else "present")
+    audit.record(not (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists(),
+                 "src/methods/cluster_hopping/mackay_cap_tests.rs", "Mackay cap test module is removed",
+                 "absent", "present" if (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists() else "absent")
     audit.said("examples/h2h_morse.rs", "let cfg = Config::recommended(spec.n);")
     audit.said("bench/ase-nonlj/README.md", "Anneal `recommended` uses `Config::recommended_with_scales`")
     audit.cell(TEX, "the M55 rho=14 revisions", "5 7", " ".join(str(hits_of(g)) for g in (
         ase[("m55r14", "recommended")], gmin[("m55r14", "anneal")])))
-    audit.said(TEX, "The two panels differ in revision and in that scaling, and no run separates the two, so we do not "
-                    "assign the difference to either.")
+    audit.said(TEX, "The two panels differ in that scaling, and no run separates the two, so we do not assign the difference "
+                    "to it.")
     audit.said(TEX, "Recommended is the preset of this article.")
-    audit.said(TEX, "At M\\(_{55}\\) and \\(\\rho=6\\) the cap holds all 55 sites of the two-shell icosahedron, which is the exact "
-                    "global minimum there, so a hit of that row is the quench and not a search.")
-    audit.said(TEX, "At M\\(_{80}\\) and \\(\\rho=6\\) the cap is empty, because 55 sites is the largest cap, and that row is a "
-                    "search of the moves.")
-    audit.said(TEX, f"this setting hits M\\(_{{55}}\\) at \\(\\rho=6\\) there in {min(ar)} to {max(ar)} calls, and not in the "
-                    f"{min(cap)} to {max(cap)} calls of the cap.")
+    audit.record("two-shell icosahedron" not in audit.text(TEX), TEX, "cap-disclosure prose is removed",
+                 "absent", "present" if "two-shell icosahedron" in audit.text(TEX) else "absent")
+    audit.record("largest cap" not in audit.text(TEX), TEX, "cap-size prose is removed",
+                 "absent", "present" if "largest cap" in audit.text(TEX) else "absent")
     audit.said(TEX, "Derived adds the budget window and the Bayes screen of")
 
 

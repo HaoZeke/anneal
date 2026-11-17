@@ -550,6 +550,10 @@ def wall_allows(rows: list[dict[str, str]], system: str) -> bool:
 
 
 def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
+    latest: dict[tuple[str, str, int], dict[str, str]] = {}
+    for row in rows:
+        latest[(row["system"], row["code"], int(row["seed"]))] = row
+    rows = list(latest.values())
     summary_fields = [
         "system",
         "code",
