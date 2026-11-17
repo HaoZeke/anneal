@@ -105,6 +105,13 @@ pub unsafe extern "C" fn rgpot_rpc_calculate(
 /// Compute an analytic Hessian-vector product through the remote potential.
 ///
 /// `direction` and `product` each hold `3 * n_atoms` doubles.
+///
+/// # Safety
+///
+/// `client` must be a live pointer from `rgpot_rpc_client_new`.
+/// `input` must point to a valid `rgpot_force_input_t`.
+/// `direction` and `product` must each point to arrays of at least
+/// `3 * n_atoms` doubles, where `n_atoms` comes from `input`.
 #[cfg(feature = "rpc")]
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_rpc_calculate_hvp(

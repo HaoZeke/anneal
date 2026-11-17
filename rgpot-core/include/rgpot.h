@@ -729,6 +729,13 @@ enum rgpot_status_t rgpot_rpc_calculate(rgpot_rpc_client_t *client,
  * Compute an analytic Hessian-vector product through the remote potential.
  *
  * `direction` and `product` each hold `3 * n_atoms` doubles.
+ *
+ * # Safety
+ *
+ * `client` must be a live pointer from `rgpot_rpc_client_new`.
+ * `input` must point to a valid `rgpot_force_input_t`.
+ * `direction` and `product` must each point to arrays of at least
+ * `3 * n_atoms` doubles, where `n_atoms` comes from `input`.
  */
 enum rgpot_status_t
 rgpot_rpc_calculate_hvp(rgpot_rpc_client_t *client,
