@@ -350,24 +350,47 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/vesin>
            $<INSTALL_INTERFACE:include/rgpot/vesin>)
   target_link_libraries(rgpot_vesin PRIVATE Threads::Threads)
+  # The sources meson compiles without contraction: rgpot_core,
+  # rgpot_minimage, rgpot_exact_fma, and the lennard_jones, morse, gupta,
+  # sutton_chen, tersoff_sic, reduced_pair and eam_cell libraries. Tests
+  # compare their bits with unfused references, and arm64 contracts a*b+c
+  # by default, so a source missing here fails there and nowhere else.
+  # tools/check_test_parity.sh checks this list against meson.
+  set(_rgpot_unfused_sources
+      CppCore/rgpot/CalculatorGroup.cc
+      CppCore/rgpot/PotHelpers.cc
+      CppCore/rgpot/PotentialCache.cc
+      CppCore/rgpot/units.cc
+      CppCore/rgpot/abi/CxxLayout.cc
+      CppCore/rgpot/plugin/PluginRegistry.cc
+      CppCore/rgpot/plugin/PluginBridge.cc
+      CppCore/rgpot/plugin/builtins/lj_plugin.cpp
+      CppCore/rgpot/nlist/MinimumImage.cpp
+      CppCore/rgpot/simd/exact_fma_hw.cc
+      CppCore/rgpot/simd/exp.cc
+      CppCore/rgpot/simd/dispatch.cc
+      CppCore/rgpot/simd/scalar_kernels.cc
+      CppCore/rgpot/simd/hwy_kernels.cc
+      CppCore/rgpot/LennardJones/LJPot.cc
+      CppCore/rgpot/LennardJones/LJClusterPot.cc
+      CppCore/rgpot/LennardJones/LJClusterKernel.cc
+      CppCore/rgpot/Morse/MorsePot.cc
+      CppCore/rgpot/Morse/cambridge_morse.c
+      CppCore/rgpot/Gupta/gupta.c
+      CppCore/rgpot/SuttonChen/SuttonChenPot.cc
+      CppCore/rgpot/SuttonChen/SuttonChenScales.cc
+      CppCore/rgpot/Tersoff/TersoffSiC.cc
+      CppCore/rgpot/ReducedPair/ReducedPair.cc
+      CppCore/rgpot/EAM/EAM.cpp
+      CppCore/rgpot/EAM/EAMPot.cc)
   if(MSVC)
-    set_source_files_properties(
-      CppCore/rgpot/nlist/MinimumImage.cpp CppCore/rgpot/simd/exact_fma_hw.cc
-      CppCore/rgpot/simd/exp.cc CppCore/rgpot/simd/dispatch.cc
-      CppCore/rgpot/simd/scalar_kernels.cc CppCore/rgpot/simd/hwy_kernels.cc
-      CppCore/rgpot/Morse/MorsePot.cc CppCore/rgpot/Morse/cambridge_morse.c
-      CppCore/rgpot/Gupta/gupta.c CppCore/rgpot/EAM/EAM.cpp
-      CppCore/rgpot/EAM/EAMPot.cc
+    set_source_files_properties(${_rgpot_unfused_sources}
       PROPERTIES COMPILE_OPTIONS "/fp:precise")
   else()
-    set_source_files_properties(
-      CppCore/rgpot/nlist/MinimumImage.cpp CppCore/rgpot/simd/exact_fma_hw.cc
-      CppCore/rgpot/simd/exp.cc CppCore/rgpot/simd/dispatch.cc
-      CppCore/rgpot/simd/scalar_kernels.cc CppCore/rgpot/simd/hwy_kernels.cc
-      CppCore/rgpot/Morse/MorsePot.cc CppCore/rgpot/Morse/cambridge_morse.c
-      CppCore/rgpot/Gupta/gupta.c CppCore/rgpot/EAM/EAM.cpp
-      CppCore/rgpot/EAM/EAMPot.cc
+    set_source_files_properties(${_rgpot_unfused_sources}
       PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    set_property(SOURCE CppCore/rgpot/ReducedPair/ReducedPair.cc
+      APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
     # Value-safe: lets the exp clamps if-convert and sqrt use sqrtpd, so
     # the exp and Morse row loops vectorise, also at -O2. Each flag is kept
     # only where the compiler accepts it (clang has no -fvect-cost-model),
