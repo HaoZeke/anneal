@@ -308,6 +308,30 @@ rule openconf_h2h_conf_fix4_n24:
             --results bench/openconf-h2h/conf-fix4/n24
         """
 
+# The torsion walk (a hop draws the torsion it turns by what each torsion
+# has yielded) against develop at 0ae5bfe0 and openconf, fresh seeds
+# 2048-2071, all eight molecules. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile openconf_h2h_conf_fix11
+rule openconf_h2h_conf_fix11:
+    input:
+        "bench/openconf-h2h/molecules.csv",
+    output:
+        "bench/openconf-h2h/conf-fix11/summary.csv",
+        "bench/openconf-h2h/conf-fix11/stats.csv",
+        "bench/openconf-h2h/conf-fix11/stats-develop.csv",
+    shell:
+        """
+        set -euo pipefail
+        OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=0ae5bfe0efb874a718f8e9632d18ff5fbc29f782 \
+            bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix11 \
+            --baseline /work/openconf-h2h/baseline --torsion-walk \
+            --seeds $(seq 2048 2071)
+        OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh paired-score \
+            --tree conf-fix11 --baseline /work/openconf-h2h/baseline \
+            --results bench/openconf-h2h/conf-fix11
+        """
+
+
 # Gradients per GFN2 quench: anneal L-BFGS and TRIC against geomeTRIC.
 # Not part of `rule all`:
 #   snakemake -s workflow/Snakefile tric_quench
