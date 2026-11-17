@@ -66,6 +66,7 @@ import math
 import os
 import random
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -292,16 +293,26 @@ def run_crest(
             prepare, check=False, cwd=preopt, stdout=stdout, stderr=subprocess.STDOUT
         )
     code = 1
+    group = None
     if (preopt / "xtbopt.xyz").is_file():
         (out / "start.xyz").write_bytes((preopt / "xtbopt.xyz").read_bytes())
         with (
             open(out / "crest.out", "w") as stdout,
             open(out / "crest.err", "w") as stderr,
         ):
-            code = subprocess.run(
-                command, check=False, cwd=out, stdout=stdout, stderr=stderr
-            ).returncode
+            crest_run = subprocess.Popen(
+                command, cwd=out, stdout=stdout, stderr=stderr, start_new_session=True
+            )
+            group = crest_run.pid
+            code = crest_run.wait()
     wall = time.monotonic() - began
+    if group is not None:
+        # On Si20 seed 2005 a CREST process outlived the run and wrote 58 GB
+        # of unformatted memory to crest_rotamers_0.xyz until the disk filled.
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     (out / "exit.code").write_text(f"{code}\n")
     inside = 0.0
     calls = 0
