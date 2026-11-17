@@ -210,8 +210,9 @@ public:
    * @c eindir_objective_t (first-member IS-A). Child terms stay inside
    * @a impl; this factory does not build a list of objectives.
    *
-   * When @a Impl has @c hessianVectorImpl (see HessianVector.hpp), it is
-   * registered as the analytic product of the handle.
+   * The analytic callback is registered only when this specific instance
+   * advertises @c caps().analyticHvp. This gate is done at registration time
+   * on @a impl because @c caps() is an instance query.
    */
   template <typename Impl> static PotentialHandle from_impl(Impl &impl) {
     auto *handle = rgpot_potential_new_eindir(&trampoline_callback<Impl>,
@@ -419,10 +420,19 @@ private:
   }
 
   template <typename Impl>
-  static PotentialHandle with_analytic_hvp(PotentialHandle handle) {
+  static PotentialHandle with_analytic_hvp(PotentialHandle handle,
+                                           const Impl &impl) {
     if constexpr (::rgpot::AnalyticHessianVector<Impl>) {
-      if (handle.raw() != nullptr) {
-        handle.set_hvp_callback(&hvp_trampoline<Impl>);
+      if (handle.raw() != nullptr && impl.caps().analyticHvp) {
+        if constexpr (requires(const Impl &self, const ::rgpot::ForceInput &in,
+                               const double *direction, double *product) {
+                        self.hessianVectorImpl(in, direction, product);
+                      }) {
+          handle.set_hvp_callback(&hvp_trampoline<Impl>);
+        } else {
+          throw std::invalid_argument(
+              "from_impl: caps().analyticHvp is true but hessianVectorImpl is missing");
+        }
       }
     }
     return handle;

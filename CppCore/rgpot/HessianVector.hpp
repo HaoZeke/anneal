@@ -19,7 +19,7 @@
  * result. A failed centre is not evaluated again at the same bits; a changed
  * setting of the potential, or @c invalidate(), is the way to retry it.
  * @c k forward products at one centre cost @c k+1 force calls instead of
- * @c 2k. A potential with a member
+ * @c 2k. A potential that sets @c caps().analyticHvp and provides
  * @code
  * void hessianVectorImpl(const ForceInput &in, const double *v,
  *                        double *hv) const;
@@ -96,12 +96,18 @@ concept ForceKernel = requires(Pot &pot, const ForceInput &in, ForceOut *out) {
   pot.forceImpl(in, out);
 };
 
-/// A kernel that also knows its Hessian-vector product.
+/// A kernel that reports an analytic Hessian-vector capability bit.
 template <typename Pot>
 concept AnalyticHessianVector =
-    requires(const Pot &pot, const ForceInput &in, const double *v, double *hv) {
-      pot.hessianVectorImpl(in, v, hv);
+    requires(const Pot &pot) {
+      { pot.caps().analyticHvp } -> std::convertible_to<bool>;
     };
+
+/// A kernel that implements the analytic Hessian-vector product hook.
+template <typename Pot>
+concept AnalyticHessianVectorKernel =
+    requires(const Pot &pot, const ForceInput &in, const double *v,
+             double *hv) { pot.hessianVectorImpl(in, v, hv); };
 
 /**
  * @class HessianVectorCache
@@ -170,11 +176,8 @@ public:
                                   std::to_string(step));
     }
     const bool analyticAvailable = [&]() {
-      if constexpr (AnalyticHessianVector<Pot> &&
-                    requires(const Pot &p) {
-                      { p.caps().analyticHvp } -> std::convertible_to<bool>;
-                    }) {
-        return pot.caps().analyticHvp;
+      if constexpr (AnalyticHessianVector<Pot>) {
+        return static_cast<bool>(pot.caps().analyticHvp);
       }
       return false;
     }();
@@ -204,10 +207,14 @@ public:
       return x;
     };
     if (scheme == HvpScheme::Analytic) {
-      if constexpr (AnalyticHessianVector<Pot>) {
+      if constexpr (AnalyticHessianVectorKernel<Pot>) {
         std::as_const(pot).hessianVectorImpl(in, v, hv);
         requireFinite(hv, dim, "hessianVectorImpl");
         analytic_.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        throw std::invalid_argument(
+            "HvpScheme::Analytic: potential advertises analyticHvp but "
+            "provides no hessianVectorImpl");
       }
     } else if (scheme == HvpScheme::Central) {
       const HvpCentre plus = forcesAt(pot, in, displaced(1.0));

@@ -5,19 +5,25 @@
 // call counts of a product loop, the analytic product that from_impl
 // registers, and agreement with HessianVectorCache.
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
 
 #include "rgpot/HessianVector.hpp"
+#include "rgpot/LennardJones/LJPot.hpp"
+#include "rgpot/Models/ModelPots.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/potential.hpp"
 
 using rgpot::ForceInput;
 using rgpot::ForceOut;
 using rgpot::InputSpec;
+using rgpot::LJPot;
 using rgpot::MorsePot;
 using rgpot::PotentialHandle;
 
@@ -112,6 +118,64 @@ TEST_CASE("from_impl registers the analytic product of MorsePot", "[hvp]") {
   pot.set_hvp_callback(nullptr);
   pot.hvp(input, v);
   CHECK(pot.hvp_counts().analytic == 1);
+}
+
+TEST_CASE("from_impl keeps LJPot Auto on finite differences", "[hvp]") {
+  LJPot lj;
+  auto pot = PotentialHandle::from_impl(lj);
+  const std::array<double, 9> pos{
+      0.0, 0.0, 0.0, 1.2, 0.1, 0.0, 0.3, 1.1, 0.2};
+  const std::array<int, 3> atmnrs{1, 1, 1};
+  const std::array<double, 9> box{
+      20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0};
+  InputSpec input(atmnrs.size(), pos.data(), atmnrs.data(), box.data());
+  const std::vector<double> direction{
+      0.2, -0.1, 0.4, -0.3, 0.5, 0.1, 0.3, -0.2, -0.4};
+  const double step = std::cbrt(std::numeric_limits<double>::epsilon()) *
+                      (1.0 + std::sqrt(static_cast<double>(direction.size())));
+
+  const auto auto_hv = pot.hvp(input, direction, step, RGPOT_HVP_AUTO);
+  const auto forward_hv = pot.hvp(input, direction, step, RGPOT_HVP_FORWARD);
+  CHECK(auto_hv == forward_hv);
+  const auto fine_forward =
+      pot.hvp(input, direction, step / 2.0, RGPOT_HVP_FORWARD);
+  const auto central = pot.hvp(input, direction, step / 2.0, RGPOT_HVP_CENTRAL);
+
+  const auto counts = pot.hvp_counts();
+  CHECK(counts.analytic == 0);
+  CHECK(counts.force_calls > 0);
+  for (std::size_t i = 0; i < auto_hv.size(); ++i) {
+    const double scale =
+        std::max(std::abs(auto_hv[i]),
+                 std::max(std::abs(fine_forward[i]), std::abs(central[i])));
+    const double truncation = std::abs(forward_hv[i] - fine_forward[i]);
+    const double roundoff =
+        std::sqrt(std::numeric_limits<double>::epsilon()) * (1.0 + scale);
+    CHECK(std::abs(auto_hv[i] - central[i]) <= truncation + roundoff);
+  }
+}
+
+TEST_CASE("from_impl registers the analytic product of DoubleWellPot", "[hvp]") {
+  rgpot::DoubleWellPot model(2, 1.0, 2.0, 1.0, 0.25);
+  auto pot = PotentialHandle::from_impl(model);
+  const std::array<double, 3> pos{0.7, -0.2, 0.0};
+  const std::array<int, 1> atmnrs{1};
+  const std::array<double, 9> box{
+      40.0, 0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 0.0, 40.0};
+  InputSpec input(atmnrs.size(), pos.data(), atmnrs.data(), box.data());
+  const std::vector<double> direction{0.3, -0.4, 0.2};
+  const auto hv = pot.hvp(input, direction, 0.0, RGPOT_HVP_AUTO);
+  const auto counts = pot.hvp_counts();
+  CHECK(counts.analytic == 1);
+  CHECK(counts.force_calls == 0);
+
+  std::array<double, 3> want{};
+  ForceInput legacy{.nAtoms = atmnrs.size(),
+                    .pos = pos.data(),
+                    .atmnrs = atmnrs.data(),
+                    .box = box.data()};
+  model.hessianVectorImpl(legacy, direction.data(), want.data());
+  CHECK(hv == std::vector<double>(want.begin(), want.end()));
 }
 
 TEST_CASE("The handle and HessianVectorCache agree", "[hvp]") {
