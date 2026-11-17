@@ -891,3 +891,20 @@ rule h2o16_crest_capped:
         set -euo pipefail
         bash scripts/h2o16_crest/enter_capped.sh
         """
+
+
+# AGOX GOFEE on LJ98, LJ102, LJ103, LJ104 and LJ150, seeds 2000-2005.
+# Not part of `rule all`. Rows are appended to bench/ase-gofee-h2h/lj-large.csv
+# with code_revision and host; that file is not an output because Snakemake
+# removes declared outputs before a job runs. The stamp only marks a finished
+# append. An existing system and arm is left as written.
+#   snakemake -s workflow/Snakefile agox_gofee_lj_large
+rule agox_gofee_lj_large:
+    output:
+        touch("/work/ase-gofee-h2h/stamps/lj-large.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/ase_gofee_h2h/enter_bench.sh --comparison agox_gofee --no-paper \\
+          --systems lj98,lj102,lj103,lj104,lj150
+        """

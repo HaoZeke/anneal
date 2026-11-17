@@ -26,9 +26,13 @@ used for that box.
 
 A hit is a quenched energy within 0.001 of the Cambridge minimum. Misses
 stop at the paper force-call budget. ASE minima hopping and AGOX GOFEE on
-LJ75 also stop at a wall cap of two hours per seed. A seed stopped by that
-cap is recorded as capped, which is a miss, and the budget column stays the
-paper budget. Jobs run one at a time in an order shuffled with seed 20261111.
+LJ75 and on LJ98, LJ102, LJ103, LJ104 and LJ150 stop at a wall cap of two
+hours per seed. A seed stopped by that cap is recorded as capped, which is
+a miss, and the budget column stays the paper budget. Jobs run one at a
+time in an order shuffled with seed 20261111. A run that names those larger
+sizes writes bench/ase-gofee-h2h/lj-large.csv and leaves the LJ38, LJ55 and
+LJ75 tables alone. The anneal and GMIN lines in that file are the committed
+n=12 panel.
 """
 
 from __future__ import annotations
@@ -56,7 +60,24 @@ from potential import (
 HERE = Path(__file__).resolve().parent
 REPO = Path(".")
 PAPER_BUDGETS = {"lj38": 400_000, "lj55": 1_000_000, "lj75": 4_000_000}
-REFERENCES = {"lj38": -173.928427, "lj55": -279.248470, "lj75": -397.492331}
+LARGE_BUDGETS = {
+    "lj98": 4_000_000,
+    "lj102": 4_000_000,
+    "lj103": 4_000_000,
+    "lj104": 4_000_000,
+    "lj150": 4_000_000,
+}
+BUDGETS = {**PAPER_BUDGETS, **LARGE_BUDGETS}
+REFERENCES = {
+    "lj38": -173.928427,
+    "lj55": -279.248470,
+    "lj75": -397.492331,
+    "lj98": -543.665361,
+    "lj102": -569.363652,
+    "lj103": -575.766131,
+    "lj104": -582.086642,
+    "lj150": -893.310258,
+}
 # ASE minima hopping and AGOX GOFEE on LJ75. The paper budget stays in the
 # budget column. A seed that reaches this wall is a miss marked capped.
 LJ75_WALL_CAP_S = 7200.0
@@ -98,9 +119,13 @@ def check_type7() -> None:
         raise RuntimeError("iqr drifted")
 
 
-def schedule(comparison: str | None) -> list[tuple[str, int, str]]:
-    arms = ("paper", comparison) if comparison else ARMS
-    jobs = [(system, seed, arm) for system in PAPER_BUDGETS for seed in SEEDS for arm in arms]
+def schedule(comparison: str | None, systems: list[str] | None = None, include_paper: bool = True) -> list[tuple[str, int, str]]:
+    if comparison:
+        arms = ("paper", comparison) if include_paper else (comparison,)
+    else:
+        arms = ARMS
+    chosen = systems if systems else list(PAPER_BUDGETS)
+    jobs = [(system, seed, arm) for system in chosen for seed in SEEDS for arm in arms]
     random.Random(ORDER_SEED).shuffle(jobs)
     return jobs
 
@@ -447,8 +472,8 @@ def git_head() -> str:
 
 
 def run_job(binary, repo, runs, system, seed, arm, head) -> dict:
-    budget = PAPER_BUDGETS[system]
-    cap = LJ75_WALL_CAP_S if system == "lj75" and arm in {"ase_mh", "agox_gofee"} else None
+    budget = BUDGETS[system]
+    cap = LJ75_WALL_CAP_S if (system == "lj75" or system in LARGE_BUDGETS) and arm in {"ase_mh", "agox_gofee"} else None
     work = runs / system / arm / f"seed{seed}"
     if work.exists():
         shutil.rmtree(work)
@@ -631,6 +656,119 @@ def load_journal(path: Path) -> list[dict]:
     return rows
 
 
+LJ_LARGE_COLUMNS = [
+    "system",
+    "arm",
+    "n",
+    "hits",
+    "calls_to_hit_median",
+    "best",
+    "inside_median_s",
+    "outside_median_s",
+    "wall_median_s",
+    "budget",
+    "code_revision",
+    "host",
+]
+
+
+def load_n12(repo: Path) -> dict[tuple[str, str], dict[str, str]]:
+    path = repo / "bench" / "lj-n12-500aaf65" / "summary.csv"
+    lines = path.read_text().splitlines()
+    header = lines[0].split(",")
+    found: dict[tuple[str, str], dict[str, str]] = {}
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        fields = dict(zip(header, line.split(",")))
+        found[(fields["system"], fields["arm"])] = fields
+    return found
+
+
+def lj_large_line(fields: list[str]) -> str:
+    return ",".join(fields)
+
+
+def write_lj_large(rows: list[dict], repo: Path, systems: list[str]) -> None:
+    """Append missing system/arm rows. A row already in the file stays as written."""
+    panel = load_n12(repo)
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        grouped.setdefault((row["system"], row["arm"]), []).append(row)
+    out = repo / "bench" / "ase-gofee-h2h" / "lj-large.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    present: set[tuple[str, str]] = set()
+    if out.is_file() and out.read_text().strip():
+        text = out.read_text()
+        for line in text.splitlines()[1:]:
+            if line.strip():
+                system, arm = line.split(",", 2)[:2]
+                present.add((system, arm))
+    else:
+        text = lj_large_line(LJ_LARGE_COLUMNS) + "\n"
+    extra: list[str] = []
+    for system in systems:
+        for arm, revision_key in (("anneal", "anneal_head"), ("gmin", "gmin_revision")):
+            if (system, arm) in present:
+                continue
+            src = panel[(system, arm)]
+            extra.append(
+                lj_large_line(
+                    [
+                        system,
+                        arm,
+                        src["n"],
+                        src["hits"],
+                        src["evals_median"],
+                        "",
+                        "",
+                        "",
+                        src["wall_median_s"],
+                        src["budget"],
+                        src[revision_key],
+                        src.get("host", ""),
+                    ]
+                )
+            )
+            present.add((system, arm))
+        if (system, "agox_gofee") in present:
+            continue
+        group = [item for item in grouped.get((system, "agox_gofee"), [])]
+        if not group:
+            continue
+        hits = [float(item["calls_to_hit"]) for item in group if item["hit"]]
+        bests = [float(item["best"]) for item in group if item["best"] != ""]
+        walls = [float(item["wall_s"]) for item in group if item["wall_s"] != ""]
+        insides = [float(item["inside_s"]) for item in group if item["inside_s"] != ""]
+        outsides = [float(item["outside_s"]) for item in group if item["outside_s"] != ""]
+        hosts = [str(item.get("host") or "") for item in group if item.get("host")]
+        extra.append(
+            lj_large_line(
+                [
+                    system,
+                    "agox_gofee",
+                    str(len(group)),
+                    str(sum(int(item["hit"]) for item in group)),
+                    f"{median_iqr(hits)[0]:.6f}" if hits else "",
+                    f"{median_iqr(bests)[0]:.8f}" if bests else "",
+                    f"{median_iqr(insides)[0]:.6f}" if insides else "",
+                    f"{median_iqr(outsides)[0]:.6f}" if outsides else "",
+                    f"{median_iqr(walls)[0]:.6f}" if walls else "",
+                    str(group[0]["budget"]),
+                    str(group[0].get("head") or ""),
+                    hosts[0] if hosts else "",
+                ]
+            )
+        )
+    if not extra:
+        if not out.is_file():
+            out.write_text(text)
+        return
+    if text and not text.endswith("\n"):
+        text += "\n"
+    out.write_text(text + "\n".join(extra) + "\n")
+
+
 def write_tables(rows: list[dict], repo: Path, comparison: str | None) -> None:
     out = repo / "bench" / "ase-gofee-h2h"
     out.mkdir(parents=True, exist_ok=True)
@@ -661,6 +799,8 @@ def main() -> int:
     parser.add_argument("--size", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--arm", choices=ARMS)
+    parser.add_argument("--systems", default="")
+    parser.add_argument("--no-paper", action="store_true")
     args = parser.parse_args()
     if args.panel == "asg2":
         from asg2 import main as asg2_main
@@ -681,7 +821,7 @@ def main() -> int:
             print("a single run needs --size, --seed and --arm", file=sys.stderr)
             return 2
         system = f"lj{args.size}"
-        if system not in PAPER_BUDGETS:
+        if system not in BUDGETS:
             print(f"unknown size {args.size}", file=sys.stderr)
             return 2
         row = run_job(args.binary, args.repo, args.runs, system, args.seed, args.arm, head)
@@ -689,7 +829,13 @@ def main() -> int:
         print(format_results([row]), end="")
         return 0
 
-    jobs = schedule(args.comparison)
+    systems = [item for item in args.systems.split(",") if item] or None
+    if systems:
+        unknown = [item for item in systems if item not in BUDGETS]
+        if unknown:
+            print(f"unknown systems {unknown}", file=sys.stderr)
+            return 2
+    jobs = schedule(args.comparison, systems, include_paper=not args.no_paper)
     journal_path = args.runs / ("journal.csv" if args.comparison is None else f"journal-{args.comparison}.csv")
     rows = load_journal(journal_path)
     done = {(row["system"], row["seed"], row["arm"]) for row in rows}
@@ -707,7 +853,8 @@ def main() -> int:
         rows.append(row)
         journal_path.parent.mkdir(parents=True, exist_ok=True)
         journal_path.write_text(format_results(rows))
-        write_tables(rows, args.repo, args.comparison)
+        if not systems:
+            write_tables(rows, args.repo, args.comparison)
         inside_text = "" if row["inside_s"] == "" else f"{row['inside_s']:.3f}"
         print(
             f"done {index}/{len(jobs)} {system} {arm} seed={seed} hit={row['hit']} "
@@ -716,7 +863,10 @@ def main() -> int:
             f"inside={inside_text} best={row['best']:.6f}",
             flush=True,
         )
-    write_tables(rows, args.repo, args.comparison)
+    if systems:
+        write_lj_large(rows, args.repo, systems)
+    else:
+        write_tables(rows, args.repo, args.comparison)
     print(summarise(rows), end="", flush=True)
     return 0
 

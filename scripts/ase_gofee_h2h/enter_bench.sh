@@ -25,13 +25,13 @@ if [[ ! -x "$VENV/bin/python" ]]; then
 fi
 
 export CARGO_TARGET_DIR=/work/target
-export RUSTFLAGS="--remap-path-prefix=/work/anneal=/src --remap-path-prefix=/agent/repos/anneal=/src --remap-path-prefix=/work/target=/src --remap-path-prefix=/work/scratch=/build"
+export RUSTFLAGS="--remap-path-prefix=${ROOT}=/src --remap-path-prefix=/work/target=/src --remap-path-prefix=/work/scratch=/build"
 if [[ ! -x "$BINARY" ]]; then
-  (cd /work/anneal && cargo +1.88 build --release --example h2h_gmin_proof)
+  (cd "$ROOT" && cargo +1.88 build --release --example h2h_gmin_proof)
 fi
 if [[ $PANEL == 1 ]]; then
-  if [[ ! -x "$EVAL" || /work/anneal/examples/asg_eval.rs -nt "$EVAL" ]]; then
-    (cd /work/anneal && cargo +1.88 build --release --example asg_eval)
+  if [[ ! -x "$EVAL" || "$ROOT/examples/asg_eval.rs" -nt "$EVAL" ]]; then
+    (cd "$ROOT" && cargo +1.88 build --release --example asg_eval)
   fi
   if [[ ! -f /work/covalent-h2h/lib/librgpot_covalent.so ]]; then
     echo "missing librgpot_covalent.so" >&2
@@ -53,7 +53,7 @@ exec sudo -n unshare --uts sh -c \
     NUMBA_CACHE_DIR=/work/ase-gofee-h2h/numba \
     XDG_CACHE_HOME=/work/ase-gofee-h2h/cache \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/work/anneal/scripts/ase_gofee_h2h \
+    PYTHONPATH='"$ROOT"'/scripts/ase_gofee_h2h \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1 \
@@ -67,8 +67,8 @@ exec sudo -n unshare --uts sh -c \
     RGPOT_COVALENT_LIB=/work/covalent-h2h/lib/librgpot_covalent.so \
     PATH=/work/ase-gofee-h2h/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     taskset -c 0 \
-    /work/ase-gofee-h2h/venv/bin/python -u /work/anneal/scripts/ase_gofee_h2h/campaign.py \
+    /work/ase-gofee-h2h/venv/bin/python -u '"$ROOT"'/scripts/ase_gofee_h2h/campaign.py \
       --binary '"$BINARY"' \
-      --repo /work/anneal \
+      --repo '"$ROOT"' \
       --runs /work/ase-gofee-h2h/runs \
       "$@"' _ "$@"

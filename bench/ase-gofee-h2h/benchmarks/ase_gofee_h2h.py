@@ -83,6 +83,40 @@ class Asg2HeadToHead:
         )
 
 
+class AgoxGofeeLarge:
+    """AGOX GOFEE on LJ98, LJ102, LJ103, LJ104 and LJ150."""
+
+    PAPER_BUDGETS: ClassVar[dict[int, int]] = {
+        98: 4_000_000,
+        102: 4_000_000,
+        103: 4_000_000,
+        104: 4_000_000,
+        150: 4_000_000,
+    }
+    params = ([98, 102, 103, 104, 150], ["agox_gofee"])
+    param_names = ["size", "arm"]
+    timeout = 86400
+
+    def setup(self, size, arm):
+        if not ENTER.is_file():
+            raise RuntimeError(f"missing {ENTER}")
+
+    def time_seed(self, size, arm):
+        subprocess.run(
+            [
+                "bash",
+                str(ENTER),
+                "--size",
+                str(size),
+                "--seed",
+                "2000",
+                "--arm",
+                arm,
+            ],
+            check=True,
+        )
+
+
 class Smoke:
     """One seed at a small budget, outside the bench namespace. Not a paper row."""
 

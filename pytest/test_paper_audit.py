@@ -35,6 +35,7 @@ CHECKS = (
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
     audit_mod.ase_gofee,
+    audit_mod.lj_large,
     audit_mod.bench_prose,
 )
 

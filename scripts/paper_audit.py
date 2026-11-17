@@ -1150,6 +1150,10 @@ def release(audit: Audit) -> None:
     audit.record(tagged, TEX, "release tag exists", f"v{version}", "tagged" if tagged else "no tag")
 
 
+def lj_large(audit: Audit) -> None:
+    audit.rows("bench/ase-gofee-h2h/lj-large.csv")
+
+
 def ase_gofee(audit: Audit) -> None:
     rows = audit.rows("bench/ase-gofee-h2h/results.csv")
     row = pick(rows, system="lj75", arm="agox_gofee", seed="2000")[0]
@@ -1503,7 +1507,7 @@ def run(report: bool = False) -> int:
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
+                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose):
         check(audit)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)

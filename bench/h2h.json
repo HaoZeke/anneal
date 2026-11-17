@@ -842,6 +842,38 @@
       ]
     },
     {
+      "rule": "agox_gofee_lj_large",
+      "competitors": [
+        "AGOX GOFEE"
+      ],
+      "runners": [
+        "scripts/ase_gofee_h2h/campaign.py",
+        "scripts/ase_gofee_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "LARGE_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-gofee-h2h/benchmarks/ase_gofee_h2h.py::AgoxGofeeLarge",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/ase-gofee-h2h/lj-large.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ],
+      "missing_outputs": {
+        "/work/ase-gofee-h2h/stamps/lj-large.stamp": "a touch() stamp outside the tree that marks rows appended to bench/ase-gofee-h2h/lj-large.csv; it is never committed"
+      }
+    },
+    {
       "rule": "occat_h2h",
       "competitors": [
         "OCCat",
