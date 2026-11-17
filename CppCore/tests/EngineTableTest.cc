@@ -56,6 +56,8 @@ struct Engine {
   size_t (*digest)(const RgpotEnginePot *, char *, size_t) = nullptr;
   int (*set_num_threads)(RgpotEnginePot *, int, int) = nullptr;
   int (*set_charge_spin)(RgpotEnginePot *, int, int) = nullptr;
+  int (*select_orbitals)(RgpotEnginePot *, long long) = nullptr;
+  int (*copy_orbitals)(RgpotEnginePot *, long long, long long) = nullptr;
 };
 
 template <typename Fn> Fn sym(void *h, const char *name) {
@@ -100,6 +102,10 @@ bool open_engine(const std::string &key, Engine &out) {
       sym<decltype(out.set_num_threads)>(h, "rgpot_engine_set_num_threads");
   out.set_charge_spin =
       sym<decltype(out.set_charge_spin)>(h, "rgpot_engine_set_charge_spin");
+  out.select_orbitals =
+      sym<decltype(out.select_orbitals)>(h, "rgpot_engine_select_orbitals");
+  out.copy_orbitals =
+      sym<decltype(out.copy_orbitals)>(h, "rgpot_engine_copy_orbitals");
   return true;
 }
 
@@ -206,6 +212,8 @@ TEST_CASE("classical engine matches the directly compiled LJPot",
   REQUIRE(buf[0] == '\0');
   REQUIRE(e.set_charge_spin(pot, 0, 1) == 3);
   REQUIRE(e.set_num_threads(pot, 1, 1) == 3);
+  REQUIRE(e.select_orbitals(pot, 1) == 3);
+  REQUIRE(e.copy_orbitals(pot, 1, 2) == 3);
   e.destroy(pot);
 }
 

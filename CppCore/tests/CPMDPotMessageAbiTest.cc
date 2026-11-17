@@ -160,16 +160,19 @@ TEST_CASE("CPMDPot paramsKey follows the serialized params", "[cpmd][abi]") {
   REQUIRE(defaults.paramsKey() != b.paramsKey());
 }
 
-// selectOrbitals reaches the engine session before every force, so a
-// calculator that evaluates several images or beads in turn keeps each
-// one's orbitals apart. A pot that never names a key names none.
-TEST_CASE("CPMDPot names the orbital key before each force", "[cpmd][abi]") {
+// selectOrbitals applies immediately to a live session, so callers can
+// intentionally select several keys before the next force.
+TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   rgpot::DynLib lib;
   const char *path = std::getenv("RGPOT_CPMD_ENGINE");
   REQUIRE(path != nullptr);
   lib.open(path);
   using KeyFn = long long (*)(void);
+  using OrbitalFn = double (*)(void);
   auto last_key = lib.sym<KeyFn>("cpmdc_fake_last_orbital_key");
+  auto last_initial_orbital =
+      lib.sym<OrbitalFn>("cpmdc_fake_last_initial_orbital_state");
+  auto last_final_orbital = lib.sym<OrbitalFn>("cpmdc_fake_last_final_orbital_state");
   constexpr long long kNone = -1000000;
 
   ::capnp::MallocMessageBuilder msg;
@@ -201,4 +204,55 @@ TEST_CASE("CPMDPot names the orbital key before each force", "[cpmd][abi]") {
   positions(0, 0) += 0.01;
   (void)pot(positions, atmtypes, box);
   REQUIRE(last_key() == 41);
+
+  // select(seed), select(slot), then force(slot) starts from seed state.
+  constexpr long long seed = 7;
+  constexpr long long slot = 9;
+  pot.selectOrbitals(seed);
+  positions(0, 0) += 0.01;
+  (void)pot(positions, atmtypes, box);
+  const double seed_state = last_final_orbital();
+  pot.selectOrbitals(seed);
+  pot.selectOrbitals(slot);
+  positions(0, 0) += 0.01;
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(last_key() == slot);
+  REQUIRE_THAT(last_initial_orbital(), WithinAbs(seed_state, 1e-12));
+}
+
+TEST_CASE("CPMDPot copies orbitals between keys", "[cpmd][abi]") {
+  rgpot::DynLib lib;
+  const char *path = std::getenv("RGPOT_CPMD_ENGINE");
+  REQUIRE(path != nullptr);
+  lib.open(path);
+  using OrbitalFn = double (*)(void);
+  auto last_initial_orbital =
+      lib.sym<OrbitalFn>("cpmdc_fake_last_initial_orbital_state");
+  auto last_final_orbital = lib.sym<OrbitalFn>("cpmdc_fake_last_final_orbital_state");
+
+  ::capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::CPMDParams>();
+  p.setFunctional("BLYP");
+  p.setCutOffRy(70.0);
+  rgpot::CPMDPot pot(p.asReader());
+  REQUIRE(pot.available());
+  REQUIRE(pot.keepsOrbitalsPerKey());
+
+  rgpot::types::AtomMatrix positions = rgpot::types::AtomMatrix::Zero(1, 3);
+  std::vector<int> atmtypes{8};
+  std::array<std::array<double, 3>, 3> box = {
+      {{20.0, 0.0, 0.0}, {0.0, 21.0, 0.0}, {0.0, 0.0, 23.0}}};
+
+  constexpr long long seed = 101;
+  constexpr long long slot = 202;
+  pot.selectOrbitals(seed);
+  positions(0, 0) += 0.01;
+  (void)pot(positions, atmtypes, box);
+  const double seed_state = last_final_orbital();
+
+  REQUIRE(pot.copyOrbitals(seed, slot));
+  pot.selectOrbitals(slot);
+  positions(0, 0) += 0.01;
+  (void)pot(positions, atmtypes, box);
+  REQUIRE_THAT(last_initial_orbital(), WithinAbs(seed_state, 1e-12));
 }

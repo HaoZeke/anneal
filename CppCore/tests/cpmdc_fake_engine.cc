@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,8 @@ struct CPMDCSession {
   std::vector<unsigned char> params;
   long long orbital_key = -1;
   bool has_orbital_key = false;
+  double orbital_state = 0.0;
+  std::unordered_map<long long, double> orbital_store;
 };
 
 namespace {
@@ -104,6 +107,8 @@ int g_session_create_count = 0;
 // Key named for the last session evaluation; kNoOrbitalKey when none was.
 constexpr long long kNoOrbitalKey = -1000000;
 long long g_last_orbital_key = kNoOrbitalKey;
+double g_last_initial_orbital_state = -1.0;
+double g_last_final_orbital_state = -1.0;
 
 } // namespace
 
@@ -160,6 +165,7 @@ CPMDCSession *cpmdc_session_create(const void *params_capnp,
   auto *session = new CPMDCSession;
   session->params.resize(params_capnp_size_bytes);
   std::memcpy(session->params.data(), params_capnp, params_capnp_size_bytes);
+  session->orbital_state = static_cast<double>(g_session_create_count);
   return session;
 }
 
@@ -178,8 +184,25 @@ void cpmdc_session_destroy(CPMDCSession *session) { delete session; }
 int cpmdc_session_select_orbitals(CPMDCSession *session, long long key) {
   if (session == nullptr)
     return -1;
+  auto it = session->orbital_store.find(key);
+  if (it == session->orbital_store.end()) {
+    session->orbital_store.emplace(key, session->orbital_state);
+  } else {
+    session->orbital_state = it->second;
+  }
   session->orbital_key = key;
   session->has_orbital_key = true;
+  return 0;
+}
+
+int cpmdc_session_copy_orbitals(CPMDCSession *session, long long from_key,
+                                long long to_key) {
+  if (session == nullptr)
+    return -1;
+  auto it = session->orbital_store.find(from_key);
+  if (it == session->orbital_store.end())
+    return -1;
+  session->orbital_store[to_key] = it->second;
   return 0;
 }
 
@@ -291,8 +314,14 @@ CPMDCResult cpmdc_session_calculate_result(
                         &force_count, &cell_zz))
       return fail_result("invalid fake ForceInput");
     const auto result_bytes = make_result(force_count, cell_zz);
+    g_last_initial_orbital_state = session->orbital_state;
     g_last_orbital_key =
         session->has_orbital_key ? session->orbital_key : kNoOrbitalKey;
+    session->orbital_state = cell_zz + static_cast<double>(force_count) * 1e-3;
+    if (session->has_orbital_key) {
+      session->orbital_store[session->orbital_key] = session->orbital_state;
+    }
+    g_last_final_orbital_state = session->orbital_state;
     const size_t required = result_bytes.size();
     *potential_result_capnp_size_bytes = required;
     if (potential_result_capnp == nullptr ||
@@ -369,6 +398,14 @@ RGPOT_FAKE_ONLY int cpmdc_fake_session_create_count(void) {
 // -1000000 when the session never named one.
 RGPOT_FAKE_ONLY long long cpmdc_fake_last_orbital_key(void) {
   return g_last_orbital_key;
+}
+
+RGPOT_FAKE_ONLY double cpmdc_fake_last_initial_orbital_state(void) {
+  return g_last_initial_orbital_state;
+}
+
+RGPOT_FAKE_ONLY double cpmdc_fake_last_final_orbital_state(void) {
+  return g_last_final_orbital_state;
 }
 
 RGPOT_FAKE_ONLY const char *cpmdc_last_error(void) { return ""; }

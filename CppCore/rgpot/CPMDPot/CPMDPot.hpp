@@ -48,17 +48,18 @@ public:
 
   bool setParams(const ::CPMDParams::Reader &params);
 
-  /// Names the calculation the following forces belong to: an image of a
-  /// band, a bead of a ring polymer. The engine keeps the converged
-  /// orbitals per key, so a calculator that evaluates several of them in
-  /// turn starts each SCF from that key's own previous orbitals instead of
-  /// from whichever calculation it ran last. Every rank of a calculator
-  /// names the same key before the same force. An engine without
-  /// cpmdc_session_select_orbitals ignores the key.
+  /// Names the active orbital key in the engine session at call time.
+  /// The key is applied eagerly to a live session and re-applied when a
+  /// session is recreated by setParams, so the selected key is never
+  /// deferred to the next force call.
   void selectOrbitals(int64_t key);
 
   /// True when the loaded engine keeps orbitals per key.
   [[nodiscard]] bool keepsOrbitalsPerKey() const;
+
+  /// Copy converged orbitals from one key to another in the engine session.
+  /// Returns false when the loaded engine does not export a copy primitive.
+  [[nodiscard]] bool copyOrbitals(int64_t from_key, int64_t to_key);
 
   void getParams(::CPMDParams::Builder out) const;
 

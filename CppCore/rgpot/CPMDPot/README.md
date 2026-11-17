@@ -73,12 +73,16 @@ orthorhombic box, `CELL VECTORS` otherwise). An isolated deck
 convention of hosts that pass no cell for a non-periodic system, keeps
 the deck's `CELL`.
 
-`CPMDPot::selectOrbitals(key)` names the calculation the following forces
-belong to, an image of a band or a bead of a ring polymer. When the engine
-exports `cpmdc_session_select_orbitals`, it keeps the converged orbitals per
-key, so a calculator that evaluates several images or beads in turn starts
-each SCF from that key's own previous orbitals. Every rank of a calculator
-names the same key before the same force.
+`CPMDPot::selectOrbitals(key)` applies the key to the live engine session at
+call time and re-applies it after session recreation. A caller can therefore
+issue `selectOrbitals` calls before the next force without ambiguity. When the
+engine exports `cpmdc_session_select_orbitals`, it keeps converged orbitals per
+key, so each SCF starts from that key's own previous orbitals. Every rank of a
+calculator names the same key before the same force.
+
+`CPMDPot::copyOrbitals(from, to)` requests an explicit copy from one key to
+another through `cpmdc_session_copy_orbitals` and returns false when the engine
+does not provide that primitive.
 
 ## `CPMDParams` Fields
 

@@ -44,6 +44,8 @@ struct Stub {
   size_t (*digest)(const RgpotEnginePot *, char *, size_t) = nullptr;
   int (*set_num_threads)(RgpotEnginePot *, int, int) = nullptr;
   int (*set_charge_spin)(RgpotEnginePot *, int, int) = nullptr;
+  int (*select_orbitals)(RgpotEnginePot *, long long) = nullptr;
+  int (*copy_orbitals)(RgpotEnginePot *, long long, long long) = nullptr;
   int (*max_concurrent)() = nullptr;
   void (*reset)() = nullptr;
   int (*charge)() = nullptr;
@@ -79,6 +81,10 @@ Stub &stub() {
         sym<decltype(out.set_num_threads)>(h, "rgpot_engine_set_num_threads");
     out.set_charge_spin =
         sym<decltype(out.set_charge_spin)>(h, "rgpot_engine_set_charge_spin");
+    out.select_orbitals =
+        sym<decltype(out.select_orbitals)>(h, "rgpot_engine_select_orbitals");
+    out.copy_orbitals =
+        sym<decltype(out.copy_orbitals)>(h, "rgpot_engine_copy_orbitals");
     out.max_concurrent = sym<int (*)()>(h, "stub_max_concurrent");
     out.reset = sym<void (*)()>(h, "stub_reset");
     out.charge = sym<int (*)()>(h, "stub_charge");
@@ -145,7 +151,7 @@ TEST_CASE("the table identifies the engine", "[engine][adapter]") {
   const RgpotEngineAbiStamp stamp = s.stamp();
   REQUIRE(stamp.abi_major == RGPOT_ENGINE_ABI_VERSION);
   REQUIRE(stamp.abi_minor == RGPOT_ENGINE_ABI_MINOR);
-  REQUIRE(RGPOT_ENGINE_ABI_MINOR >= 2);
+  REQUIRE(RGPOT_ENGINE_ABI_MINOR >= 3);
 }
 
 TEST_CASE("create refuses a missing or ragged configuration",
@@ -228,6 +234,8 @@ TEST_CASE("the capabilities come from the backend", "[engine][adapter]") {
     REQUIRE(s.caps(pot, &caps) == 0);
     REQUIRE(caps.reentrancy == r);
     REQUIRE(caps.per_image_instances == 1);
+    REQUIRE(caps.orbital_selection == 0);
+    REQUIRE(caps.orbital_copy == 0);
     s.destroy(pot);
   }
 }
@@ -288,6 +296,8 @@ TEST_CASE("charge, spin and thread settings reach the backend",
   REQUIRE(s.set_charge_spin(bare, 0, 1) == 3);
   REQUIRE(s.set_num_threads(bare, 1, 1) == 3);
   REQUIRE(!error_of(s, bare).empty());
+  REQUIRE(s.select_orbitals(bare, 1) == 3);
+  REQUIRE(s.copy_orbitals(bare, 1, 2) == 3);
   s.destroy(bare);
 }
 

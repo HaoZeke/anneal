@@ -1719,12 +1719,28 @@ void selectOrbitals(int64_t key);
 - Inputs :: =key=, an identifier of the calculation the following forces belong
   to (a band image, a ring-polymer bead).
 - Units :: none.
-- Outputs :: none; every later force names this key to the engine first, so each
-  key restarts from its own converged orbitals.
+- Outputs :: none; the key is applied to the live engine session when this call
+  runs and is re-applied after a session recreation.
   Every rank of a calculator names the same key before the same force.
   An engine without =cpmdc_session_select_orbitals= ignores the key.
 - Errors :: none here; a force throws =std::runtime_error= when the engine
   refuses the key.
+
+*** =rgpot::CPMDPot::copyOrbitals=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] bool copyOrbitals(int64_t from_key, int64_t to_key);
+#+end_src
+
+- Inputs :: =from_key=, the source orbital key; =to_key=, the destination
+  orbital key.
+- Units :: none.
+- Outputs :: true when the loaded engine supports and accepts
+  =cpmdc_session_copy_orbitals=.
+  False when that primitive is unavailable or no session is active.
+- Errors :: none here; a later force throws =std::runtime_error= if the engine
+  rejects the selected key.
 
 *** =rgpot::CP2KPot::keepsOrbitalsPerKey=
 

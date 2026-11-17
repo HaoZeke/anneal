@@ -95,7 +95,7 @@ typedef int (*rgpot_engine_coord_transform)(void *user, long nAtoms,
  * minor 0, layout 1.
  */
 #define RGPOT_ENGINE_ABI_VERSION 1
-#define RGPOT_ENGINE_ABI_MINOR 2
+#define RGPOT_ENGINE_ABI_MINOR 3
 #define RGPOT_ENGINE_ABI_LAYOUT_REVISION 1
 
 RGPOT_ENGINE_API int rgpot_engine_abi_version(void);
@@ -270,6 +270,8 @@ typedef struct {
   int periodic;            /**< periodic boundary conditions supported */
   int stress;              /**< cell stress is available */
   int group_collective;    /**< every rank of a group enters each call */
+  int orbital_selection;   /**< select_orbitals is supported */
+  int orbital_copy;        /**< copy_orbitals is supported */
 } RgpotEngineCaps;
 
 RGPOT_ENGINE_API int rgpot_engine_caps(const RgpotEnginePot *pot,
@@ -326,6 +328,21 @@ RGPOT_ENGINE_API int rgpot_engine_set_num_threads(RgpotEnginePot *pot,
  */
 RGPOT_ENGINE_API int rgpot_engine_set_charge_spin(RgpotEnginePot *pot,
                                                   int charge, int spin);
+
+/**
+ * Select the active orbital key for subsequent evaluations.
+ * Returns 0 on success and 3 when the backend has no orbital selection.
+ */
+RGPOT_ENGINE_API int rgpot_engine_select_orbitals(RgpotEnginePot *pot,
+                                                  long long key);
+
+/**
+ * Copy stored orbitals from one key to another.
+ * Returns 0 on success and 3 when the backend has no orbital-copy primitive.
+ */
+RGPOT_ENGINE_API int rgpot_engine_copy_orbitals(RgpotEnginePot *pot,
+                                                long long from_key,
+                                                long long to_key);
 
 /**
  * Neighbor-list declaration. An engine exporting this symbol expects
