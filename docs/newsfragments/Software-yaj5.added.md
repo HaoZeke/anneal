@@ -1,0 +1,1 @@
+`rgpot.lammps.FixExternal` now runs any Python rgpot potential through LAMMPS `fix external`, including unit conversion, triclinic cells, image unwrapping, analytic or finite-difference virials, MPI rank gathering, and callback error propagation, without importing LAMMPS or mpi4py until needed.

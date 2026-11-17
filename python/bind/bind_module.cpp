@@ -40,8 +40,10 @@
 #include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/Tersoff/TersoffSiC.hpp"
 #include "rgpot/XcKernel/XcKernel.hpp"
+#include "rgpot/elements.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
+#include "rgpot/units.hpp"
 
 #include "rgpot/MetatomicPot/MetatomicConfig.hpp"
 #include "rgpot/MetatomicPot/MetatomicDlopen.hpp"
@@ -674,6 +676,19 @@ NB_MODULE(_core, m) {
 #else
   m.attr("has_ipi") = false;
 #endif
+
+  m.def(
+      "atomic_number",
+      [](const std::string &symbol) {
+        const int number = rgpot::elements::atomicNumber(symbol);
+        if (number == 0)
+          throw std::invalid_argument("unknown element " + symbol);
+        return number;
+      },
+      nb::arg("symbol"), "Atomic number of an element symbol.");
+  m.def("unit_conversion_factor", &rgpot::units::unit_conversion_factor,
+        nb::arg("from_unit"), nb::arg("to_unit"),
+        "Multiplicative conversion factor between compatible unit expressions.");
 
   // F6 round trip. -0.0, NaN, and subnormals are copied unchanged.
   m.def(

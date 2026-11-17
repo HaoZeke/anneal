@@ -20,13 +20,15 @@ The =rgpot.has_*= entries below name the flag for each one.
 | =rgpot.ase.AnnealRunner= | Portfolio relaxation, not an ASE optimizer |
 | =rgpot.ase.AnnealOptimizer= | Deprecated alias of =AnnealRunner=   |
 | =rgpot.ase.available_kinds()= | Kind strings =RgpotCalculator= accepts in this build |
+| =rgpot.lammps.FixExternal= | LAMMPS =fix external= frontend |
 
 =RgpotCalculator.calculate_many(frames)= returns one dict per frame.
 =threads= selects the worker count; 0 uses the hardware concurrency.
 Results for energy and forces match one call per frame, bit for bit.
 The worker count is not part of the result.
 
-See the [[file:../howto/ase.org][ASE how-to]] and the
+See the [[file:../howto/ase.org][ASE how-to]], the
+[[file:../howto/lammps-fix-external.org][LAMMPS how-to]], and the
 [[file:../explanation/thread-safety.org][thread-safety]] page.
 
 ** Conventions
@@ -238,6 +240,31 @@ LJPot force is undefined for coincident atoms
 - Errors :: none.
 
 ** Functions
+
+*** =rgpot.atomic_number=
+
+#+attr_rgpot: signature
+#+begin_src python
+atomic_number(symbol)
+#+end_src
+
+- Inputs :: a case-sensitive element symbol.
+- Units :: none.
+- Outputs :: its integer atomic number from rgpot's shared element table.
+- Errors :: an unknown symbol raises =ValueError=.
+
+*** =rgpot.unit_conversion_factor=
+
+#+attr_rgpot: signature
+#+begin_src python
+unit_conversion_factor(from_unit, to_unit)
+#+end_src
+
+- Inputs :: two compatible unit-expression strings.
+- Units :: the returned factor converts a value in =from_unit= to =to_unit=.
+- Outputs :: the multiplicative conversion factor as a float, from rgpot's
+  runtime unit parser.
+- Errors :: unknown units or dimensions that do not match raise =ValueError=.
 
 *** =rgpot.evaluate_lj=
 
