@@ -35,18 +35,14 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \begin{document}
 
 \begin{abstract}
-We keep one basin-hopping setting at every Lennard-Jones size.
-The moves stay fixed, and the reduced temperature stays at \(0.8\).
-A run hits when the quenched energy \(E\) and the published energy
-\(E_{\mathrm{ref}}\) satisfy \(|E-E_{\mathrm{ref}}|<10^{-3}\).
+The number of local minima on the Lennard-Jones potential grows quickly with the number of atoms.
+Here, we present tests of one fixed basin-hopping setting, with a reduced temperature of \(0.8\), on Lennard-Jones, Gupta, Morse, and TIP4P clusters and on the GFN2-xTB water hexamer.
+A Lennard-Jones run hits when the quenched energy \(E\) and the published energy \(E_{\mathrm{ref}}\) satisfy \(|E-E_{\mathrm{ref}}|<10^{-3}\).
 On seeds 2000--2005 the depth posterior and a uniform draw both hit
 LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6 seeds.
 Pooled with seeds 7000--7005, the posterior hits LJ\(_{75}\) on 11 of
 12 and the uniform draw hits 12 of 12.
-Both hit LJ\(_{98}\) on 9 of 12.
-At LJ\(_{104}\) the counts are 5 of 12 and 6 of 12.
-The arm rule makes no difference beyond the seed-to-seed spread at
-these sizes.
+Both hit LJ\(_{98}\) on 9 of 12, and at LJ\(_{104}\) the counts are 5 of 12 and 6 of 12, which differ by no more than the seed-to-seed spread.
 Against the Wales-group program GMIN, on seeds 2000--2011 of thirteen
 Lennard-Jones, Gupta and Morse clusters in one session, this setting
 hits more seeds on 9 of 13, the two tie on 2, and GMIN hits more on 2.
@@ -61,69 +57,28 @@ No arm of that panel hits Au\(_{55}\); in the GMIN panel, on another
 revision, this setting hits it on 6 of 12 and GMIN on 0 of 12.
 On Morse clusters of 38 and 55 atoms at \(\rho=6\) and \(\rho=14\) it
 hits 12, 12, 12, and 5 of 12, and both ASE arms hit 0 of 12.
-On seeds 6400--6405 the retry rows hit LJ\(_{104}\) on 3 of 6 and
-LJ\(_{98}\) on 6 of 6.
-Section~\ref{sec:cross-field} does not improve those counts.
+On seeds 6400--6405 the retry rows hit LJ\(_{104}\) on 3 of 6 and LJ\(_{98}\) on 6 of 6, and the arms of Section~\ref{sec:cross-field} do not improve those counts.
 
 On TIP4P, within \(0.001\)~kcal/mol and \(5\times 10^{5}\) force calls,
-\((\mathrm{H_2O})_{10}\) hits on 6 of 6 seeds.
-\((\mathrm{H_2O})_{15}\) and \((\mathrm{H_2O})_{20}\) hit on 0 of 6.
-On the water hexamer the motif match hits 121 of 192 seeds for the
-default hop and 97 of 192 for CREST, both at GFN2-xTB with xtb 6.7.1.
-The polished gaps on seeds 0--5 hold at GFN2-xTB with xtb 6.7.1 and
-with xtb 6.8.0.
-On xtb 6.7.1, five of six gaps lie within \(1\times 10^{-7}\)~Eh, and
-on the 4000-call ledger seed 1 lies \(1.3509\times 10^{-7}\)~Eh lower.
+\((\mathrm{H_2O})_{10}\) hits on 6 of 6 seeds, and \((\mathrm{H_2O})_{15}\) and \((\mathrm{H_2O})_{20}\) hit on 0 of 6.
+On the water hexamer at GFN2-xTB with xtb 6.7.1, the motif match hits 121 of 192 seeds for the default hop and 97 of 192 for CREST.
+On seeds 0--5 the polished gaps hold at both versions: on xtb 6.7.1, five of six gaps lie within \(1\times 10^{-7}\)~Eh, and on the 4000-call ledger seed 1 lies \(1.3509\times 10^{-7}\)~Eh lower.
 On xtb 6.8.0 both the 4000-call arm and the old-counter arm lie within
 \(1\times 10^{-7}\)~Eh on 6 of 6 seeds, and on the 4000-call ledger
 seed 1 lies at \(-4.35\times 10^{-8}\)~Eh.
 \end{abstract}
 
 \section{Introduction}
-A basin-hopping step proposes a geometry, quenches it to a local minimum,
-and accepts or rejects that minimum at one temperature.
-\cite{li1987,wales1997}
-On the Lennard-Jones pair potential the number of minima grows quickly
-with the number of atoms.
-\cite{jones1924,wales1997,wales2003}
-The search below uses one setting at every size.
-The move library does not change with the atom count.
-The reduced temperature is \(0.8\), the value Wales and Doye used.
-\cite{wales1997}
-Below 98 atoms the quench chooses between the plain potential and one
-diameter penalty.
-At 98 atoms and above the penalty is absent.
-A stall does not replace the walker with a random cluster.
-Section~\ref{sec:results} runs this setting against GMIN on 13
-Lennard-Jones, Gupta, and Morse clusters, and against the basin hopping
-and the minima hopping of the Atomic Simulation Environment on 5
-Lennard-Jones clusters, Gupta Au\(_{55}\), and 4 Morse clusters.
-\cite{wales1997,larsenAse2017,goedecker2004}
-GMIN hits more seeds on 2 of the 13, LJ\(_{150}\) and M\(_{80}\) at
-\(\rho=6\).
+A basin-hopping step proposes a trial geometry, quenches it to a local minimum, and accepts or rejects that minimum under a Metropolis criterion at a fixed temperature \cite{li1987,wales1997}.
+On the Lennard-Jones pair potential the number of minima grows quickly with the number of atoms \cite{jones1924,wales1997,wales2003}.
+Here, we keep one fixed setting across all sizes, with a move library that does not change with the atom count and a reduced temperature of \(0.8\), the value Wales and Doye used \cite{wales1997}.
+Below 98 atoms the quench chooses between the plain potential and one diameter penalty, and at 98 atoms and above the penalty is absent.
+At every size, a stall does not replace the walker with a random cluster.
+Section~\ref{sec:results} runs this setting against GMIN on 13 Lennard-Jones, Gupta, and Morse clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 5 Lennard-Jones clusters, Gupta Au\(_{55}\), and 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
+GMIN hits more seeds on 2 of the 13, LJ\(_{150}\) and M\(_{80}\) at \(\rho=6\).
 
-The published Lennard-Jones minima at 38, 55, 75, 98, and 104 atoms are
-the Cambridge energies.
-\cite{walesCambridgeClusterDatabase,wales1997}
-Kuznetsov and Sahinidis prove the five-atom optimum and the six-atom
-optimum.
-\cite{kuznetsovLennardJones2025}
-Shen proves that the seven-atom global minimiser is the pentagonal
-bipyramid.
-\cite{shenSevenParticle2026}
-Lecomte tightens the diameter bound and leaves every case of 38 atoms
-and larger unproved.
-\cite{lecomteDiameter2026}
-Kiessling states a necessary condition on a list of putative lowest
-pair energies.
-The sizes used here are not among the failures he names.
-\cite{kiesslingLennardJones2023}
-A later argument with Wales bounds the nearest-neighbour distance of a
-stationary Lennard-Jones configuration.
-\cite{kiesslingPairDistance2025}
-Barr\'on Romero enumerates clusters through 13 particles.
-\cite{barronRomeroLennardJones2026}
-The hit targets below remain the Cambridge energies.
+We adopt the Cambridge Cluster Database energies as the reference global minima at 38, 55, 75, 98, and 104 atoms \cite{walesCambridgeClusterDatabase,wales1997}.
+Although exact optimality proofs now cover five and six atoms \cite{kuznetsovLennardJones2025}, the seven-atom pentagonal bipyramid \cite{shenSevenParticle2026}, tighter diameter bounds \cite{lecomteDiameter2026}, nearest-neighbor stationarity bounds \cite{kiesslingPairDistance2025}, necessary pair-energy conditions whose named exceptions exclude our test sizes \cite{kiesslingLennardJones2023}, and complete enumerations through 13 particles \cite{barronRomeroLennardJones2026}, every cluster of 38 atoms or larger remains unproved, so the Cambridge energies serve as the benchmark targets throughout.
 
 \section{The search}
 \label{sec:search}
@@ -151,7 +106,7 @@ y_{i,a} = x_{i,a} + U(-1,1), \qquad a\in\{1,2,3\}.
 \end{equation}
 
 One move relocates the atom of lowest coordination.
-Two atoms are neighbours when their separation is below \(1.6\).
+Two atoms are neighbors when their separation is below \(1.6\).
 Let \(c\) be the centroid, let \(i^\star\) be a lowest-coordination atom,
 and let \(R_{\mathrm{shell}}\) be the largest distance from \(c\) among
 the other atoms.
@@ -174,7 +129,7 @@ K = 1 + \max\{m\in\{0,\ldots,7\}: U_1,\ldots,U_m < 2/3\}.
 \(U_j\) are independent uniform draws on \((0,1)\), and the maximum over
 the empty set is \(0\).
 
-A symmetrisation move looks for axes of order \(2, 3, 4, 5,\) and \(6\)
+A symmetrization move looks for axes of order \(2, 3, 4, 5,\) and \(6\)
 inside a pair cutoff of \(2.5\), projects the cluster onto the group
 those axes generate, and quenches the image.
 If the projection leaves the coordinates unchanged, the move falls back
@@ -214,7 +169,7 @@ the potential.
 \cite{doye2000,locatelli2002}
 Equation~\ref{eq:penalty} has no such term.
 
-The face-centred cubic truncated octahedron is the published minimum at
+The face-centered cubic truncated octahedron is the published minimum at
 38 atoms, the Mackay icosahedron at 55, and the Marks decahedron at 75.
 \cite{wales1997,marksSurfaceStructureEnergetics1984,Doye_Miller_Wales_1999}
 A library that grows a named lattice of one of those packings would be
@@ -355,12 +310,9 @@ E \ge E_{\mathrm{held}} - 10^{-9}
 \bigl(N < 98 \;\text{or}\; m < 8\bigr).
 \label{eq:hold}
 \end{equation}
-Below 98 atoms a failed growth stays idle until the incumbent drops.
-At 98 atoms and above, the eighth idle leave is the last wait.
-The next leave proposes the crossing growth again, including the
-pentagonal order, and \(m\) returns to \(0\).
-The proposal used while equation~\ref{eq:hold} holds is a displacement
-of every coordinate by an independent draw from \((-0.38,0.38)\).
+Below 98 atoms, a failed growth stays idle until the incumbent drops.
+At 98 atoms and above, the eighth idle leave is the last wait, and the next leave proposes the crossing growth again, including the pentagonal order, and \(m\) returns to \(0\).
+While equation~\ref{eq:hold} holds, the proposal is a displacement of every coordinate by an independent draw from \((-0.38,0.38)\).
 
 A rigid walker, such as a TIP4P chain, uses a different stall.
 Let \(h\) be the hop count and \(h_{\star}\) the hop of the last new
@@ -464,7 +416,7 @@ With the default coefficients the log weight is
 \label{eq:weight}
 \end{equation}
 and a log weight more than \(4\) below the largest is clipped before
-the weights are normalised.
+the weights are normalized.
 Offspring go to chains that are low in energy, rare as packings, and
 uncertain as basins.
 A packing whose Good--Turing unseen mass has collapsed is retired.
@@ -489,8 +441,8 @@ clusters of 20, 30, and 40 atoms.
 GMIN is the Wales-group basin-hopping program.
 \cite{wales1997,oakley2013}
 Section~\ref{sec:gmin} scores it on the clusters of Table~\ref{tab:gmin}.
-The Atomic Simulation Environment provides a basin-hopping optimiser
-and a minima-hopping optimiser.
+The Atomic Simulation Environment provides a basin-hopping optimizer
+and a minima-hopping optimizer.
 \cite{larsenAse2017,goedecker2004}
 Section~\ref{sec:ase} scores both on the clusters of
 Tables~\ref{tab:ase} and~\ref{tab:ase-morse}.
@@ -503,36 +455,32 @@ A later GOFEE run puts a spectral-graph and Voronoi filter in front of
 the sampling step and includes LJ\(_{55}\) and LJ\(_{75}\) among its
 tests.
 \cite{slavenskyClassifier2024}
-Those curves count local optimisations on LJ\(_{75}\).
+Those curves count local optimizations on LJ\(_{75}\).
 They are not the force-call hits of Section~\ref{sec:ablation}.
 The same group has used a deliberately incomplete machine-learned
 landscape to propose candidates, a universal potential as a Gaussian-process
 prior, fractional existence variables, an on-the-fly potential in a
 grand-canonical search, and a delta model on silver--sulfur systems.
 \cite{slavenskyComplementary2023,lyngbyUniversalPrior2024,larsenFractional2023,quinlivanGrandCanonical2026,pitfieldActiveDelta2026}
-The minima hopping of Krummenacher and co-workers on the Atomic
-Simulation Environment is a separate package from the optimiser of
-Section~\ref{sec:ase}, with a corrigendum and a deposit dated
-7 November 2026.
-\cite{krummenacherMinimaHopping2024,krummenacherAseMh2026,goedecker2004}
+The minima hopping of Krummenacher and co-workers within the Atomic Simulation Environment is a separate implementation from the optimizer of Section~\ref{sec:ase}, with a corrigendum and a deposit dated 7 November 2026 \cite{krummenacherMinimaHopping2024,krummenacherAseMh2026,goedecker2004}.
 None of those searches is given a hit rate in the tables below.
 
 Several 2024--2026 searches recover published Lennard-Jones minima
 inside the sizes used here.
 Durand reports the best-known energies from 6 to 150 atoms.
 \cite{durandLennardJones2026}
-A tabu initialiser in front of a bonobo optimiser is reported to reach
+A tabu initializer in front of a bonobo optimizer is reported to reach
 the LJ\(_{38}\) minimum.
 \cite{chakrabortyBonobo2026}
 A tensor-train encoding is reported on clusters from 5 to 45 atoms,
 and the journal version carries the same Lennard-Jones account.
 \cite{sozykinTensorTrain2026}
-Hyperspatial relaxation and a TETRIS initialiser are reported on
+Hyperspatial relaxation and a TETRIS initializer are reported on
 LJ\(_{37}\), LJ\(_{38}\), LJ\(_{39}\), LJ\(_{47}\), and LJ\(_{55}\).
 \cite{gochitashviliGosh2025}
 Minima-hopping escape directions are benchmarked on 60 to 74 atoms.
 \cite{schaerfMinimaHopping2026}
-A fingerprint bias during local optimisation is reported on LJ\(_{38}\)
+A fingerprint bias during local optimization is reported on LJ\(_{38}\)
 and LJ\(_{75}\).
 \cite{taoFingerprint2024}
 Population annealing has been used to estimate the free energy of
@@ -586,7 +534,7 @@ CREST samples a molecular ensemble by metadynamics.
 \cite{prachtCrestProgramExploration2024}
 The hexamer comparison uses CREST 3.0.2.
 That build exposes no seed.
-GOAT is a global optimisation method for molecules and atomic clusters,
+GOAT is a global optimization method for molecules and atomic clusters,
 and its paper compares it with CREST.
 \cite{deSouzaGoat2025}
 A bio-inspired Goat Optimization Algorithm on analytic test functions
@@ -613,7 +561,7 @@ GFN2-xTB surfaces used here.
 AIMNet2 has been driven by a tabu search and by a genetic algorithm,
 through ten molecules.
 \cite{giriAimnetClusters2025,zhangGmmlp2026}
-An artificial bee colony on TIP4P has been reoptimised at HCTH.
+An artificial bee colony on TIP4P has been reoptimized at HCTH.
 \cite{bhattWaterClusters2024}
 Random-phase-approximation forces reorder larger water clusters.
 The same preprint says the hexamer does not show that reordering.
@@ -624,7 +572,7 @@ topologies on electronic-structure surfaces.
 COMPLAX holds a rigid solute and compares CREST with other microsolvation
 tools.
 \cite{lauriaComplax2026}
-A note on geometry optimisation separates a tighter convergence inside
+A note on geometry optimization separates a tighter convergence inside
 one basin from a jump into another isomer.
 \cite{doustMohammadiBasins2026}
 The hexamer polish below is a local relaxation of a structure already in
@@ -653,7 +601,7 @@ minimum at \(-397.492331\).
 At LJ\(_{98}\) the mapped minima stop \(0.022\) above the published
 tetrahedral minimum at \(-543.665361\).
 Figure~\ref{fig:disconnectivity} joins the LJ\(_{38}\) minima where they
-first meet among their nearest neighbours in the coordination
+first meet among their nearest neighbors in the coordination
 descriptor.
 The search stores no transition states.
 The drawing joins minima by descriptor distance.
@@ -685,10 +633,10 @@ Bottom, a map of the same minima.}
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{disconnectivity.pdf}
-\caption{Nearest-neighbour joining of the LJ\(_{38}\) minima in the
+\caption{Nearest-neighbor joining of the LJ\(_{38}\) minima in the
 coordination descriptor.
 Minima closer than \(0.15\) are merged.
-The stems are coloured by five spectral basins.
+The stems are colored by five spectral basins.
 No join is a barrier.}
 \label{fig:disconnectivity}
 \end{figure}
@@ -704,31 +652,12 @@ minimum is marked.}
 
 \subsection{Depth posterior against a uniform draw}
 \label{sec:ablation}
-Two lists compare the depth posterior with a uniform arm draw.
-Seeds 2000 through 2005 are the first list.
-Seeds 7000 through 7005 are the second, at LJ\(_{75}\), LJ\(_{98}\),
-and LJ\(_{104}\).
-The budgets are \(4\times 10^{5}\) force calls at LJ\(_{38}\),
-\(1\times 10^{6}\) at LJ\(_{55}\), and \(4\times 10^{6}\) at the three
-larger sizes.
-The runs were serial.
-The hit is equation~\ref{eq:hit}.
-The posterior draws equation~\ref{eq:thompson}.
-The uniform arm draws equation~\ref{eq:uniform}.
+We compare the depth-posterior arm selector (equation~\ref{eq:thompson}) against a uniform arm draw (equation~\ref{eq:uniform}) across two serial seed sets under the hit criterion of equation~\ref{eq:hit}: seeds 2000 through 2005 across all five sizes, and seeds 7000 through 7005 at LJ\(_{75}\), LJ\(_{98}\), and LJ\(_{104}\), with force-call budgets of \(4\times 10^{5}\) at LJ\(_{38}\), \(1\times 10^{6}\) at LJ\(_{55}\), and \(4\times 10^{6}\) at the three larger sizes.
 
-On the first list both arms hit LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6
-seeds.
-Pooled over the twelve seeds, the posterior hits LJ\(_{75}\) on 11 of
-12 and the uniform draw hits 12 of 12.
-Both hit LJ\(_{98}\) on 9 of 12.
-The posterior hits LJ\(_{104}\) on 5 of 12 and the uniform draw hits
-6 of 12.
-The arm rule makes no difference beyond the seed-to-seed spread at
-these sizes.
-The two-sided Fisher exact probability is 1 at each size in
-Table~\ref{tab:ablation}.
-\texttt{paper/jctc/scripts/selector\_fisher.py} reads the two result
-files and computes that probability.
+On seeds 2000--2005, both selectors hit LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6 seeds.
+Pooled across all twelve seeds, the posterior hits LJ\(_{75}\) on 11 of 12 seeds versus 12 of 12 for the uniform draw, both hit LJ\(_{98}\) on 9 of 12, and they hit LJ\(_{104}\) on 5 of 12 and 6 of 12, respectively.
+Thus, the selection rule produces no difference beyond seed-to-seed variance at these sizes, with a two-sided Fisher exact probability of 1 at every size in Table~\ref{tab:ablation}.
+\texttt{paper/jctc/scripts/selector\_fisher.py} reads the two result files and computes that probability.
 
 \begin{table}
 \caption{Hits for the depth posterior and a uniform draw.
@@ -754,8 +683,7 @@ LJ\(_{104}\) & \(4\times 10^{6}\) & 5/12 & 6/12 & 1 \\
 On seeds 6400--6405, with the pentagonal retry of
 equation~\ref{eq:hold}, LJ\(_{98}\) hits on 6 of 6 inside
 \(4\times 10^{6}\) calls.
-On those seeds, the run that holds a failed growth and does not take
-the eighth-leave retry hits 5 of 6.
+On those seeds, holding a failed lattice growth without the eighth-leave retry hits 5 of 6.
 Seed 6404 stays at a gap of \(0.022404\) above \(-543.665361\).
 The retry is off below 98 atoms.
 On seeds 6400--6405 that setting hits LJ\(_{38}\), LJ\(_{55}\), and
@@ -988,7 +916,7 @@ Each final is polished with xtb 6.7.1 at GFN2, the vtight setting,
 accuracy \(0.01\), and an iteration limit of 500.
 \cite{bannwarthGfn2xtbanAccurateBroadly2019}
 The same eighteen finals, from CREST, the 4000-call arm, and the
-old-counter arm on seeds 0--5, were optimised again and evaluated as
+old-counter arm on seeds 0--5, were optimized again and evaluated as
 single points with xtb 6.8.0 at GFN2, the same vtight setting, and
 accuracy \(0.01\).
 Seventeen of the eighteen totals moved by \(0.9\times 10^{-8}\) to
@@ -1039,26 +967,12 @@ Table~\ref{tab:hexamer-gaps} gives the polished gap on each seed at
 GFN2-xTB with xtb 6.7.1.
 The gap is the anneal energy minus the CREST energy.
 A negative value means the anneal energy is lower.
-Five seeds lie within \(1\times 10^{-7}\)~Eh on both ledgers.
-Seed 1 lies outside that line, at \(-1.3509\times 10^{-7}\)~Eh on the
-4000-call ledger and \(-1.3505\times 10^{-7}\)~Eh on the ledger whose
-cap equals the old counter.
-The label-free root-mean-square deviation of each polished pair is at
-most \(0.00212\)~\AA.
-On xtb 6.8.0 the gaps hold.
-Both the 4000-call arm and the old-counter arm lie within
-\(1\times 10^{-7}\)~Eh on 6 of 6 seeds.
-Seed 1, outside the line at xtb 6.7.1, lies inside it at
-\(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and
-\(-4.34\times 10^{-8}\)~Eh on the ledger whose cap equals the old
-counter.
-The logs name the processor as Intel Xeon, family 6, model 207.
-Each CREST run used one thread.
-The wall-time medians are \(544.0\)~s for CREST, \(18.8\)~s for the
-4000-call arm, and \(195.5\)~s for the arm whose cap equals the old
-counter.
-The CREST polish converged in one iteration on all 18 finals.
-No CREST structure dissociated.
+Five seeds lie within \(1\times 10^{-7}\)~Eh on both ledgers, while seed 1 lies outside that line, at \(-1.3509\times 10^{-7}\)~Eh on the 4000-call ledger and \(-1.3505\times 10^{-7}\)~Eh on the ledger whose cap equals the old counter.
+The label-free root-mean-square deviation of each polished pair is at most \(0.00212\)~\AA.
+On xtb 6.8.0 both the 4000-call arm and the old-counter arm lie within \(1\times 10^{-7}\)~Eh on 6 of 6 seeds, and seed 1, outside the line at xtb 6.7.1, lies inside it at \(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and \(-4.34\times 10^{-8}\)~Eh on the ledger whose cap equals the old counter.
+The logs name the processor as Intel Xeon, family 6, model 207, and each CREST run used one thread.
+The wall-time medians are \(544.0\)~s for CREST, \(18.8\)~s for the 4000-call arm, and \(195.5\)~s for the arm whose cap equals the old counter.
+The CREST polish converged in one iteration on all 18 finals, and no CREST structure dissociated.
 
 \begin{table}
 \caption{Polished gap and label-free deviation on the water hexamer
@@ -1092,14 +1006,9 @@ $-2.2000\times 10^{-9}$ & 0.000157 & 0.000134 \\
 
 \subsection{Arms that were measured and not kept}
 \label{sec:cross-field}
-The recommended preset was not changed.
-The comparison uses the retry rows of the funnel table and the TIP4P
-rate file, on the same seeds.
-A miss counts as the full budget when a median is taken.
-The runs are serial, on one machine, under hostname bench.
+We kept the recommended preset unchanged and evaluated two alternative mechanisms serially on a single host against the pentagonal-retry baseline and the saved TIP4P benchmark on the same seeds, charging any missed seed with the full force-call budget when computing medians.
 
-The first arm multiplies the all-points step of a failed directed
-leave by a BIPOP schedule.
+The first alternative scales the all-atom step after a failed directed exit attempt using a BIPOP schedule.
 \cite{hansenBipop2009}
 The large regime spends the population ratio as that multiplier,
 because the chain is one walker.
@@ -1110,12 +1019,7 @@ hit on 6 of 6.
 In seed order the calls to the first hit are 242295, 217610, 3911207,
 1878578, 3724410, and 771118.
 The median is 1324848.
-The retry rows also hit on 6 of 6, and their median is 813591.
-LJ\(_{104}\) hit on 2 of 6, seeds 6401 and 6405, at 247319 and
-3034389 calls.
-The retry rows hit on 3 of 6, seeds 6402, 6404, and 6405.
-Seed 6401 is a hit the retry rows miss.
-Seeds 6402 and 6404 are hits the retry rows record and this arm misses.
+By comparison, the pentagonal-retry baseline also hits 6 of 6 on LJ\(_{98}\) with a lower median of 813591 calls, and on LJ\(_{104}\) reaches 3 of 6 seeds (6402, 6404, and 6405) versus 2 of 6 (6401 and 6405, at 247319 and 3034389 calls) for the BIPOP variant.
 
 The second arm, after a rigid stall, chooses a missing-contact site
 by Thompson sampling from a streaming ridge model inside a trust
@@ -1126,9 +1030,7 @@ failure.
 On seeds 0--5, \((\mathrm{H_2O})_{15}\) hit on 0 of 6 at
 \(5\times 10^{5}\) calls, and \((\mathrm{H_2O})_{20}\) hit on 0 of 6
 at \(2\times 10^{6}\) calls.
-The rate file records 1 of 6 at each of those budgets.
-Seed 3 of the fifteen-molecule file, and seed 2 of the
-twenty-molecule file, are the hits this arm misses.
+The saved TIP4P benchmark records 1 of 6 hits at each budget (seed 3 at 15 molecules and seed 2 at 20 molecules), both missed by the trust-region variant.
 The best twenty-molecule energy under the arm is
 \(-869.439249\)~kJ/mol, which is \(3.550\)~kJ/mol above the
 Wales--Hodges reference.
@@ -1183,41 +1085,24 @@ the gold driver of Section~\ref{sec:gmin} and from revision
 depth.
 
 \section{Conclusions}
-One basin-hopping setting, with the moves of Section~\ref{sec:moves}
-and \(T=0.8\), is the search reported here.
+We have evaluated one basin-hopping setting, with the moves of Section~\ref{sec:moves} and \(T=0.8\), across the clusters reported here.
 On seeds 2000--2005 both arms hit LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6.
-Pooled with seeds 7000--7005, LJ\(_{75}\) is 11 of 12 against 12 of 12,
-LJ\(_{98}\) is 9 of 12 on both arms, and LJ\(_{104}\) is 5 of 12
-against 6 of 12.
-The arm rule makes no difference beyond the seed-to-seed spread at
-these sizes.
-Against GMIN on seeds 2000--2011, this setting hits more seeds on 9 of
-13 clusters, and GMIN hits more on LJ\(_{150}\) and on M\(_{80}\) at
-\(\rho=6\), 9 of 12 against 5 of 12 and 12 of 12 against 2 of 12.
-Against the basin hopping and the minima hopping of the Atomic
-Simulation Environment, scored by Fisher's test on hits, this setting
-hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse
-clusters, and no arm hits Au\(_{55}\).
+Pooled with seeds 7000--7005, LJ\(_{75}\) is 11 of 12 against 12 of 12, LJ\(_{98}\) is 9 of 12 on both arms, and LJ\(_{104}\) is 5 of 12 against 6 of 12.
+The arm rule makes no difference beyond the seed-to-seed spread at these sizes.
+Against GMIN on seeds 2000--2011, this setting hits more seeds on 9 of 13 clusters, and GMIN hits more on LJ\(_{150}\) and on M\(_{80}\) at \(\rho=6\), 9 of 12 against 5 of 12 and 12 of 12 against 2 of 12.
+Against the basin hopping and the minima hopping of the Atomic Simulation Environment, scored by Fisher's test on hits, this setting hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse clusters, and no arm hits Au\(_{55}\).
 On Au\(_{55}\) in the GMIN panel it hits 6 of 12 and GMIN 0 of 12.
 The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\).
-Section~\ref{sec:cross-field} rescales that leave on the same seeds.
-It hit 2 of 6 and was not kept.
-On the rate-file seeds a trust region over oxygen-cage sites hit 0 of
-6 for 15 and for 20 molecules, where the file records 1 of 6, and
-that arm was not kept.
+Section~\ref{sec:cross-field} rescales that leave on the same seeds, and the rescaled arm hit 2 of 6 and was not kept.
+On the rate-file seeds a trust region over oxygen-cage sites hit 0 of 6 for 15 and for 20 molecules, where the file records 1 of 6, and that arm was not kept.
+
 On TIP4P, 10 molecules hit on 6 of 6 seeds.
-At \(5\times 10^{5}\) calls the TIP4P subsection hits 15 and 20
-molecules on none, at the tolerance in equation~\ref{eq:tip4p-hit}.
-The rate file records 1 of 6 for 15 molecules at that budget and 1 of
-6 for 20 molecules at \(2\times 10^{6}\) calls.
-At GFN2-xTB the polished hexamer gaps hold on xtb 6.7.1 and on
-xtb 6.8.0.
+At \(5\times 10^{5}\) calls the TIP4P subsection hits 15 and 20 molecules on none, at the tolerance in equation~\ref{eq:tip4p-hit}.
+The rate file records 1 of 6 for 15 molecules at that budget and 1 of 6 for 20 molecules at \(2\times 10^{6}\) calls.
+At GFN2-xTB the polished hexamer gaps hold on xtb 6.7.1 and on xtb 6.8.0.
 On xtb 6.7.1, five of six seeds lie within \(1\times 10^{-7}\)~Eh.
-On xtb 6.8.0 both arms lie within that line on 6 of 6 seeds, and
-seed 1 lies at \(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and
-\(-4.34\times 10^{-8}\)~Eh on the old-counter ledger.
-The motif match remains 121 of 192 for the default hop and 97 of 192
-for CREST, at xtb 6.7.1.
+On xtb 6.8.0 both arms lie within that line on 6 of 6 seeds, and seed 1 lies at \(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and \(-4.34\times 10^{-8}\)~Eh on the old-counter ledger.
+The motif match remains 121 of 192 for the default hop and 97 of 192 for CREST, at xtb 6.7.1.
 
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.
@@ -1238,7 +1123,7 @@ In memoriam Snoopy.
 In memoriam Cosmo.
 He thanks his cactus Ami and his in-laws Nagaselvamani and
 Sankaranarayan.
-Ruhila Goswami set the figure colours.
+Ruhila Goswami set the figure colors.
 The authors reviewed the text and take responsibility for it.
 
 \section*{Funding}
@@ -1256,10 +1141,9 @@ and the maps of the Lennard-Jones minima.
 
 \section*{Data and software availability}
 The source is \url{https://github.com/HaoZeke/anneal} under the
-Massachusetts Institute of Technology licence.
+Massachusetts Institute of Technology license.
 Documentation is at \url{https://anneal.rgoswami.me}.
-The archive of the software line is
-\url{https://doi.org/10.5281/zenodo.10672746}.
+The archive of the software line is \url{https://doi.org/10.5281/zenodo.10672746}.
 \todo{The Zenodo DOI for this submission is not yet assigned.}
 The newest released tag is v0.12.0, which is the crate version.
 
