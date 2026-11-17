@@ -867,14 +867,31 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   Against it CREST hits on none of its six seeds (`gfn2/rescore.csv`,
   from `--rescore si13 -624.70446339`). Anneal's rows are not rescored:
   each stopped at the reference it ran with.
-- Si20 is pending. With the engine reusing the previous wavefunction,
-  the Si13 and Si20 minima had energies a fresh SCC does not reproduce:
-  an Si13 minimum at -601.12421 eV is -593.51232 eV fresh, and Si20 minima
-  near -979 eV are near -868 eV. One Si13 search recorded a planar sheet
-  at -640.659 eV whose SCC does not converge from a fresh start. From a
-  fresh SCC on every call, 74% of anneal's first 3,000 Si20 calls are
-  SCCs that do not converge, nearly all on trials with a pair at
-  0.90-0.92 Å, just past the call floor.
+- Si20 has no panel reference yet. With the engine reusing the previous
+  wavefunction, the Si13 and Si20 minima had energies a fresh SCC does
+  not reproduce: an Si13 minimum at -601.12421 eV is -593.51232 eV fresh,
+  and Si20 minima near -979 eV are near -868 eV. One Si13 search recorded
+  a planar sheet at -640.659 eV whose SCC does not converge from a fresh
+  start. Before the element floor, 74% of anneal's first 3,000 Si20 calls
+  from a fresh SCC were SCCs that do not converge, nearly all on trials
+  with a pair at 0.90-0.92 Å, just past the single floor.
+- Si20 reference search (`gfn2/si20-capped.csv`): the example on
+  `a52726af`, the element floor of the gate below, seeds 3000-3007 at
+  1e5 calls with no target, one seed per core on cores 0-7 at once, each
+  stopped by a four-hour wall cap (`H2H_WALL_S=14400`). It is untimed and
+  not a panel row. Every seed reached the cap, after 4,231 to 14,673
+  calls. The lowest energy, -922.98227162 eV, is reached by seeds 3003
+  and 3006, the same structure to 2.4e-5 Å in every pair distance: a
+  twenty-membered ring, every atom with two neighbours within 2.7 Å and
+  no pair below 2.23 Å. Seeds 3000 and 3007 share the next,
+  -922.64013443 eV, and the other four end between -922.51325303 and
+  -921.99400132 eV. xtb 6.7.1 from a fresh start (`--sp --etemp 3000
+  --acc 0.01`) gives every best geometry its energy to 4.1e-5 eV, the
+  same offset on all eight. The ring is in `gfn2/minima.csv` and
+  `gfn2/minima/si20-ring.xyz`. Two of eight seeds within four hours is
+  not yet a reference the panel can score against. The handle counted
+  32,704 SCCs that do not converge over the eight runs, at a median
+  shortest pair of 2.15 Å, a third of them below 1.6 Å.
 
 ### The element call floor
 
@@ -954,6 +971,8 @@ Three first-parent commits changed it:
 - `c10-96/`: the 96-seed C10 rows.
 - `gfn2/`: per-seed rows and summaries of GFN2-xTB Si10, C10, Si13 and
   C20, anneal against CREST, CREST's rescore against the Si13 ring, the
-  lowest minima with their xtb energies, and the element-floor gate.
+  lowest minima with their xtb energies, the element-floor gate, and
+  the capped Si20 reference search with a fresh xtb single point of each
+  best geometry.
 - `floor-gate/`: the element-floor gate against develop, GFN2 and the
   paper headline panel, with the pins of the floor build.
