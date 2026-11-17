@@ -221,4 +221,4 @@ lj75_landscape.pdf git blob 5a24fbb6f2930e380941f1547ad5274769e1cf25
 lj98_landscape.pdf git blob 263f6336faadc4bf77335629622536b9cb60f549
 
 landfold_maps.pdf keeps six raster panels, (i) to (n).
-Their landscape.ld tables are not in the repository, so only the sealed landscape.png of each exists.
+Their landscape.ld tables and the pinned campaign driver are not in the repository, so only the sealed landscape.png of each exists. `data/landfold_maps_v7/rerun-status.csv` records the failed regeneration attempt by campaign.
