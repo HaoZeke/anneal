@@ -86,6 +86,9 @@ UNPUSHED = {
                                                 "Si10 and C10 floor rows; the fix was pushed on another base",
     "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
                                                 "the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",
+    "ccd69256770d99ae724a723d073736a18f8533ce": "the Si20 panel driver on the element floor rebased on c2de652d, a "
+                                                "local build head of the first Si20 CREST rows; the series was "
+                                                "delivered as patches, which a push rebuilds",
     "b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac": "the build head of the recommended arm of the ASE panel, first cited by "
                                                 "70c0ad6c; no pushed branch holds it",
     "5a7f629d79be88b9d3f0cb2c6665062bda4ac625": "the build head of the cluster-preset and ASE arms of the Lennard-Jones "
@@ -126,7 +129,8 @@ KNOWN_GAPS = {
     "bench/covalent-h2h/v2/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/v3/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/gfn2/seeds.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/covalent-h2h/gfn2/false-hits.csv": "revision recorded; no host column",
+    "bench/covalent-h2h/gfn2/false-hits.csv": "revision recorded; no host column; revision ccd69256 is not in this "
+                                              "repository",
     "bench/covalent-h2h/gfn2/rows.csv": "revision 5351f272 is not in this repository; revision ce1e7a46 is not in "
                                         "this repository",
     "bench/ase-gofee-h2h/results.csv": "revision recorded; no host column; head unrecorded on some rows; revision "
