@@ -3,8 +3,9 @@
 # Copyright 2023--present rgpot developers
 # Compile the hand-written Rust caller against the neighbour archives.
 # Arguments after the build directory link the OpenMP runtime the archives
-# were compiled for. Without them -fopenmp is tried, as GCC and Clang take
-# it; AppleClang does not, so CMake passes the libraries FindOpenMP chose.
+# were compiled for. Without them -fopenmp is used if a test program links
+# with it, as with GCC; AppleClang has no -fopenmp, so CMake passes the
+# libraries FindOpenMP chose.
 set -eu
 root=$1
 build=$2
@@ -30,7 +31,10 @@ if [ -z "$half" ] || [ -z "$mini" ] || [ -z "$fma" ]; then
 fi
 cxx=${CXX:-c++}
 os=$(uname -s)
-if [ "$#" -eq 0 ] && "$cxx" -fopenmp -x c++ -E - >/dev/null 2>&1 <<'EOF'
+dir=$(mktemp -d)
+# Clang takes -fopenmp even when no libomp is on its search path, and then
+# fails the link, so the probe links rather than preprocesses.
+if [ "$#" -eq 0 ] && "$cxx" -fopenmp -x c++ - -o "$dir/omp_probe" >/dev/null 2>&1 <<'EOF'
 int main() { return 0; }
 EOF
 then
@@ -42,7 +46,6 @@ gcov_flag=
 if nm "$half" 2>/dev/null | grep -q __gcov_init; then
   gcov_flag=--coverage
 fi
-dir=$(mktemp -d)
 case "$os" in
   Darwin)
     "$cxx" -shared -o "$dir/libnlist.dylib" \
