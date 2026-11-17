@@ -87,7 +87,9 @@ def write_trace(path: Path, symbols: list[str], frames: list[tuple[np.ndarray, f
     path.write_text("\n".join(lines) + "\n")
 
 
-def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | None = None) -> dict:
+def run_anneal(
+    row: dict, seed: int, budget: int, out: Path, local_step: str | None = None, torsion_walk: bool = False
+) -> dict:
     import anneal
 
     mol = hc.build_mol(row["smiles"])
@@ -111,6 +113,8 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         return g
 
     extra = {} if local_step is None else {"local_step": local_step}
+    if torsion_walk:
+        extra["torsion_walk"] = True
     # A search that raises is a finished run with what it harvested.
     error = None
     result: dict = {}
@@ -153,7 +157,8 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         "local_step": result.get("local_step"),
         "quench_seconds": result.get("quench_seconds"),
         "settings": "cluster_search recommended_molecular, energy scale 1 eV, local step "
-        + (local_step or "preset"),
+        + (local_step or "preset")
+        + (", torsion walk" if torsion_walk else ""),
     }
 
 
@@ -313,6 +318,7 @@ def main() -> int:
     parser.add_argument("--crest", default=os.environ.get("CREST_BIN", "crest"))
     parser.add_argument("--local-step", choices=["lbfgs", "tric", "auto"], help="anneal quench; default the preset's")
     parser.add_argument("--anneal-path", type=Path, help="import anneal from this directory first (the develop arm)")
+    parser.add_argument("--torsion-walk", action="store_true", help="anneal with Config::torsion_walk on")
     args = parser.parse_args()
     row = hc.molecules()[args.molecule]
     args.out.mkdir(parents=True, exist_ok=True)
@@ -323,7 +329,7 @@ def main() -> int:
     if args.arm in ("anneal", "develop"):
         if args.budget < 1:
             raise SystemExit("anneal needs --budget")
-        info = run_anneal(row, args.seed, args.budget, args.out, args.local_step)
+        info = run_anneal(row, args.seed, args.budget, args.out, args.local_step, args.torsion_walk)
         import anneal
 
         info["anneal_module"] = str(Path(anneal.__file__).resolve().parent)
