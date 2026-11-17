@@ -151,7 +151,10 @@ def run_shard(campaign_id: str, seed: int, output: Path, receipt: Path) -> None:
 def fold(binary: Path, books: list[Path], family: str, folder: Path) -> int:
     folder.mkdir(parents=True, exist_ok=True)
     folded = folder / "fold.csv"
-    command = [str(binary), "landfold", "--seed", "0", "--threads", "1", "--out", str(folded)]
+    command = [
+        str(binary), "landfold", "--seed", "0", "--threads",
+        str(max(1, os.cpu_count() or 1)), "--out", str(folded),
+    ]
     descriptor = None
     if family == "tip4p":
         descriptor = folder / "rigid-state.csv"
@@ -177,6 +180,25 @@ def fold(binary: Path, books: list[Path], family: str, folder: Path) -> int:
             handle.write(f"{x:.12e} {y:.12e}\n")
     write_fes(points, folder / "fes.csv")
     return len(points)
+
+
+def validate_book(path: Path, campaign: Campaign) -> tuple[int, int]:
+    expected = campaign.size * (7 if campaign.family == "tip4p" else 3)
+    rows = 0
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        values = [float(value) for value in line.split()]
+        if len(values) != expected + 1:
+            raise SystemExit(
+                f"{path}:{number}: {len(values) - 1} coordinates, expected {expected}"
+            )
+        if not all(math.isfinite(value) for value in values):
+            raise SystemExit(f"{path}:{number}: minimum is not finite")
+        rows += 1
+    if rows == 0:
+        raise SystemExit(f"{path}: source book has no minima")
+    return rows, expected
 
 
 def write_fes(points: list[tuple[float, float]], path: Path, grid: int = 48) -> None:
@@ -214,6 +236,7 @@ def finalize(work: Path, publish: Path) -> None:
     if not landfold.is_file():
         raise SystemExit("the current-code landfold binary is not built")
     records = []
+    panels = {}
     for campaign_id, campaign in CAMPAIGN_IDS.items():
         source = work / "shards" / campaign_id
         books = [source / f"seed-{seed:04d}.min" for seed in range(campaign.first, campaign.last + 1)]
@@ -224,8 +247,12 @@ def finalize(work: Path, publish: Path) -> None:
             raise SystemExit(f"{campaign_id}: receipts are incomplete")
         for book, receipt in zip(books, receipts, strict=True):
             row = json.loads(receipt.read_text())
-            if row["sha256"] != digest(book) or row["minima"] != source_rows(book):
+            rows, dimension = validate_book(book, campaign)
+            if row["sha256"] != digest(book) or row["minima"] != rows:
                 raise SystemExit(f"{receipt}: receipt does not authenticate its source book")
+            if row["charged"] != campaign.budget or not row["code_revision"] or not row["host"]:
+                raise SystemExit(f"{receipt}: incomplete campaign receipt")
+            row["dimension"] = dimension
             records.append(row)
         products = work / campaign.name / "products"
         for panel in campaign.panels:
@@ -233,6 +260,12 @@ def finalize(work: Path, publish: Path) -> None:
             rows = fold(landfold, chosen, campaign.family, products / panel)
             if rows != sum(source_rows(path) for path in chosen):
                 raise SystemExit(f"{campaign.name}/{panel}: fold dropped source rows")
+            folder = products / panel
+            panels[f"{campaign.name}/{panel}"] = {
+                "rows": rows,
+                "landscape_sha256": digest(folder / "landscape.ld"),
+                "fes_sha256": digest(folder / "fes.csv"),
+            }
     publish.mkdir(parents=True, exist_ok=True)
     for campaign in CAMPAIGNS:
         for panel in campaign.panels:
@@ -242,7 +275,7 @@ def finalize(work: Path, publish: Path) -> None:
             for name in ("landscape.ld", "fes.csv"):
                 shutil.copyfile(src / name, dest / name)
     columns = (
-        "campaign", "seed", "budget", "charged", "hops", "minima", "best", "seconds",
+        "campaign", "seed", "budget", "charged", "hops", "minima", "dimension", "best", "seconds",
         "calls_per_second", "sha256", "code_revision", "code_tree", "host",
     )
     with (publish / "campaign-shards.csv").open("w", newline="") as handle:
@@ -257,6 +290,7 @@ def finalize(work: Path, publish: Path) -> None:
         "campaigns": [campaign.__dict__ for campaign in CAMPAIGNS],
         "shards": len(records),
         "minima": sum(row["minima"] for row in records),
+        "panels": panels,
     }
     (publish / "current-rerun.json").write_text(json.dumps(campaign_receipt, indent=2) + "\n")
     (work / "complete.stamp").write_text(f"{commit} {tree} {campaign_receipt['host']}\n")
