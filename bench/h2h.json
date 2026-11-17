@@ -1056,6 +1056,29 @@
       ]
     },
     {
+      "rule": "openconf_h2h_conf_fix8",
+      "competitors": [
+        "openconf"
+      ],
+      "runners": [
+        "scripts/openconf_h2h/run_bench.py",
+        "scripts/openconf_h2h/paired_score.py",
+        "scripts/openconf_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "paired": "each anneal and develop seed gets half of openconf's search calls on the same seed (run_bench.paired)"
+      },
+      "asv": "bench/openconf-h2h/benchmarks/openconf_h2h_n12.py::OpenconfThreeArmSeed",
+      "rows": [
+        {
+          "path": "bench/openconf-h2h/conf-fix8/summary.csv",
+          "key": "molecule",
+          "arm": "arm",
+          "n": "n"
+        }
+      ]
+    },
+    {
       "rule": "tric_quench",
       "competitors": [
         "geomeTRIC"
