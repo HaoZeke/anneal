@@ -5,6 +5,7 @@
 
 ** Constructor
 
+#+attr_rgpot: signature
 #+begin_src python
 FixExternal(
     lmp,
@@ -45,6 +46,7 @@ Any other style raises =ValueError= before the fix is created.
 
 The cell has one vector per row.  For LAMMPS' restricted triclinic box it is
 
+#+attr_rgpot: skip the triclinic cell rows, not code
 #+begin_example
 ((xhi-xlo, 0,       0),
  (xy,       yhi-ylo, 0),
@@ -84,7 +86,10 @@ virial, and scatters forces in each rank's local atom order.
 A Python exception cannot cross LAMMPS' C callback.  The callback stores the
 first exception in =driver.error=, writes zero forces, and sets an internal
 variable watched by =fix halt=.  =driver.run(steps, *keywords)= clears the
-flag and re-raises that exception after LAMMPS stops.  Calling
+flag and re-raises that exception after LAMMPS stops.  On several ranks,
+rank zero re-raises the original exception.  Every other rank raises
+=RuntimeError= with the same message, because the exception object is not
+sent across the communicator.  Calling
 =lmp.command("run ...")= directly instead exposes LAMMPS' halt error; the
 stored Python exception remains in =driver.error=.
 

@@ -10,6 +10,7 @@ neither LAMMPS nor mpi4py, and the potential remains usable without LAMMPS.
 Install LAMMPS' Python module separately, define the box, atoms and masses, and
 pass one element per LAMMPS atom type:
 
+#+attr_rgpot: fragment needs the lammps Python module and an input file
 #+begin_src python
 from lammps import lammps
 
@@ -40,7 +41,7 @@ settings.
 
 The default =virial="auto"= uses the potential's analytic stress.  If the
 potential reports no stress, it takes a central strain difference (twelve
-extra energy evaluations whenever LAMMPS requests a virial), so =fix npt=,
+extra energy evaluations on every force call), so =fix npt=,
 =fix nph= and =fix box/relax= still receive pressure.  Set
 =virial="finite-difference"= to force this check or =virial="none"= when a zero
 virial is intentional.
