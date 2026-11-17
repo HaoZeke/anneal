@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import string
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,23 +24,14 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import figstyle
+import landfold_panels
 from paper_data import fetch_paper_data
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "landfold_maps_v7"
-JOBS = (
-    ("lj_csm/lj38/derived", "LJ\N{SUBSCRIPT THREE}\N{SUBSCRIPT EIGHT} derived"),
-    ("lj_csm/lj38/recommended", "LJ\N{SUBSCRIPT THREE}\N{SUBSCRIPT EIGHT} recommended"),
-    ("lj_csm/lj55/derived", "LJ\N{SUBSCRIPT FIVE}\N{SUBSCRIPT FIVE} derived"),
-    ("lj_csm/lj55/recommended", "LJ\N{SUBSCRIPT FIVE}\N{SUBSCRIPT FIVE} recommended"),
-    ("lj_csm/lj75/derived", "LJ\N{SUBSCRIPT SEVEN}\N{SUBSCRIPT FIVE} derived"),
-    ("lj_csm/lj75/recommended", "LJ\N{SUBSCRIPT SEVEN}\N{SUBSCRIPT FIVE} recommended"),
-    ("lj_csm/lj98/derived", "LJ\N{SUBSCRIPT NINE}\N{SUBSCRIPT EIGHT} derived"),
-    ("lj_csm_c26/lj98/recommended", "LJ\N{SUBSCRIPT NINE}\N{SUBSCRIPT EIGHT} recommended"),
-    ("tip4p/hexamer/for_tip4p", "TIP4P hexamer"),
-)
-KINDS = ("representative", "aggregate")
+JOBS = tuple((job, f"{family}{size} {role}") for job, family, size, role in landfold_panels.JOBS)
+KINDS = landfold_panels.KINDS
 COLUMNS = 4
 KT = 0.2
 
@@ -182,7 +174,6 @@ def draw_panel(ax, entry: Map):
     ld = entry.folder / "landscape.ld"
     fes_path = entry.folder / "fes.csv"
     png = entry.folder / "landscape.png"
-    ax.set_title(f"{entry.name}\n{entry.kind}, {entry.seeds}", fontsize=figstyle.SMALLEST, linespacing=1.1)
     if ld.exists():
         coords = read_landscape(ld)
         if len(coords) != entry.rows:
@@ -205,8 +196,8 @@ def draw_panel(ax, entry: Map):
         ax.set_aspect("equal", adjustable="datalim")
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_xlabel("landfold coordinate 1", fontsize=figstyle.SMALLEST, labelpad=1)
-        ax.set_ylabel("landfold coordinate 2", fontsize=figstyle.SMALLEST, labelpad=1)
+        ax.set_xlabel("landfold coordinate 1 (arb. units)", fontsize=figstyle.SMALLEST, labelpad=1)
+        ax.set_ylabel("landfold coordinate 2 (arb. units)", fontsize=figstyle.SMALLEST, labelpad=1)
         return mesh
     # Sealed campaign PNG for maps whose tables are still on the campaign disk.
     image = plt.imread(png)
@@ -216,8 +207,8 @@ def draw_panel(ax, entry: Map):
     for side in ax.spines.values():
         side.set_visible(True)
         side.set_color(figstyle.GREY)
-    ax.set_xlabel("landfold coordinate 1", fontsize=figstyle.SMALLEST, labelpad=1)
-    ax.set_ylabel("landfold coordinate 2", fontsize=figstyle.SMALLEST, labelpad=1)
+    ax.set_xlabel("landfold coordinate 1 (arb. units)", fontsize=figstyle.SMALLEST, labelpad=1)
+    ax.set_ylabel("landfold coordinate 2 (arb. units)", fontsize=figstyle.SMALLEST, labelpad=1)
     return plt.cm.ScalarMappable(norm=Normalize(0, 1), cmap=figstyle.ramp())
 
 
@@ -234,15 +225,16 @@ def draw(data: Path, out: Path) -> None:
     fig, axes = plt.subplots(rows, COLUMNS, figsize=(figstyle.DOUBLE, 1.62 * rows + 0.55), layout="constrained")
     flat = axes.ravel()
     mappable = None
-    for ax, entry in zip(flat, maps):
+    for ax, entry, letter in zip(flat, maps, string.ascii_lowercase):
         mappable = draw_panel(ax, entry) or mappable
+        figstyle.label(ax, letter)
     for ax in flat[len(maps) :]:
         ax.set_axis_off()
     if mappable is not None:
         bar = fig.colorbar(mappable, ax=list(flat[: len(maps)]), orientation="horizontal", location="bottom", shrink=0.5, aspect=40, pad=0.01)
         bar.solids.set_rasterized(False)
         bar.solids.set_edgecolor("face")
-        bar.set_label("free energy of the map, lowest to highest", fontsize=figstyle.SMALLEST)
+        bar.set_label("relative free energy of the map, lowest to highest (arb. units)", fontsize=figstyle.SMALLEST)
         bar.outline.set_linewidth(0.4)
     figstyle.save(fig, out)
 

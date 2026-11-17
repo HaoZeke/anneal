@@ -830,7 +830,8 @@ def manuscript_ase(audit: Audit) -> None:
                     f"hits it on {au_gmin[0]} and GMIN on {au_gmin[1]}.")
     audit.said(TEX, f"it hits {series(str(n) for n in m)} of 12, and both ASE arms hit {max(morse_ase)} of 12.")
     audit.said(TEX, f"and against the basin hopping and the minima hopping of the Atomic Simulation Environment on "
-                    f"{len(lj)} Lennard-Jones clusters, Gupta {label('au55')}, and {len(MORSE_PANEL)} Morse clusters.")
+                    f"{len(lj)} Lennard-Jones clusters, Gupta {label('au55')}, and {len(MORSE_PANEL)} Morse clusters "
+                    "\\cite{wales1997,larsenAse2017,goedecker2004}.")
     audit.said(TEX, f"Section~\\ref{{sec:results}} runs this setting against GMIN on {len(gmin_panel.PAPER_BUDGETS)} "
                     "Lennard-Jones, Gupta, and Morse clusters,")
     mh_all = all(r["stop"] == "wall" for s in (*ASE_PANEL, *MORSE_PANEL) for r in groups[(s, "ase_mh")])
@@ -1297,17 +1298,23 @@ def manuscript_cross_field(audit: Audit) -> None:
     audit.said(TEX, "In seed order the calls to the first hit are " + ", ".join(calls[:-1]) + f", and {calls[-1]}.")
     audit.said(TEX, f"The median is {median([float(c) for c in calls]):.0f}.")
     retry98 = pick(stalls, phase="retry", n="98")
-    audit.said(TEX, f"The retry rows also hit on {frac(retry98).replace('/', ' of ')}, and their median is {median([float(r['calls_to_hit']) for r in retry98]):.0f}.")
     lj104 = sorted(pick(rows, system="lj", n="104", arm="bipop-leave"), key=lambda r: int(r["seed"]))
     hit104 = [r for r in lj104 if r["hit"] == "1"]
-    audit.said(TEX, f"LJ\\(_{{104}}\\) hit on {len(hit104)} of {len(lj104)}, seeds {hit104[0]['seed']} and {hit104[1]['seed']}, at {hit104[0]['calls_to_first_hit']} and {hit104[1]['calls_to_first_hit']} calls.")
     retry104 = sorted((r["seed"] for r in pick(stalls, phase="retry", n="104") if r["hit"] == "1"), key=int)
-    audit.said(TEX, f"The retry rows hit on {len(retry104)} of 6, seeds {retry104[0]}, {retry104[1]}, and {retry104[2]}.")
+    retry_median = median([float(r["calls_to_hit"]) for r in retry98])
+    arm_median = median([float(c) for c in calls])
+    audit.record(retry_median < arm_median, TEX, "the retry median on LJ98 is lower than the arm median",
+                 "lower", "lower" if retry_median < arm_median else "not lower")
+    audit.said(TEX, f"By comparison, the pentagonal-retry baseline also hits {frac(retry98).replace('/', ' of ')} on "
+                    f"LJ\\(_{{98}}\\) with a lower median of {retry_median:.0f} calls, and on LJ\\(_{{104}}\\) reaches "
+                    f"{len(retry104)} of 6 seeds ({retry104[0]}, {retry104[1]}, and {retry104[2]}) versus "
+                    f"{len(hit104)} of {len(lj104)} ({hit104[0]['seed']} and {hit104[1]['seed']}, at "
+                    f"{hit104[0]['calls_to_first_hit']} and {hit104[1]['calls_to_first_hit']} calls) for the BIPOP variant.")
     only_arm = sorted({r["seed"] for r in hit104} - set(retry104))
     only_retry = sorted(set(retry104) - {r["seed"] for r in hit104})
     audit.cell(TEX, "the hit the retry rows miss", "6401", " ".join(only_arm))
     audit.cell(TEX, "hits the retry rows record and this arm misses", "6402 6404", " ".join(only_retry))
-    audit.said(TEX, f"It hit {len(hit104)} of 6 and was not kept.")
+    audit.said(TEX, f"and the rescaled arm hit {len(hit104)} of 6 and was not kept.")
     for n, budget in (("15", "500000"), ("20", "2000000")):
         trust = pick(rows, system="tip4p", n=n, arm="cage-trust")
         audit.cell(TEX, f"cage-trust ({n}) hits", "0/6", frac(trust))
@@ -2611,10 +2618,19 @@ def manuscript_new(audit: Audit) -> None:
     for path in (TEX, SI, cover):
         found = sorted({m.group(0) for m in british.finditer(audit.text(path))})
         audit.record(not found, path, "American spelling", "none", " ".join(found) or "none")
+    lf = load_script("landfold_panels_tex", "paper/jctc/scripts/landfold_panels.py")
+    audit.said(TEX, lf.caption_tex())
+    raster = lf.raster_letters()
+    audit.said(TEX, f"Panels (a) to ({chr(ord(raster[0]) - 1)}) are drawn as vectors from the landscape tables.")
+    audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) show the sealed raster maps of the campaigns, because "
+                    "their landscape tables are not in the repository.")
+    audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), TEX,
+                 "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
 
 
 RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "6": "the Mackay cap and mackay_cut", "7": "the GFN2 sign and rerun"}
 RERUN_TAG = re.compile(r"\\rerun\{([^}]*)\}")
+
 
 
 def rerun_tags(text: str) -> list[tuple[int, str]]:

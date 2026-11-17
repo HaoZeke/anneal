@@ -73,7 +73,6 @@ def main() -> None:
     axis.set_ylabel("CREST calls")
     axis.set_ylim(0, 250000)
     axis.legend(frameon=False)
-    axis.set_title("Water hexamer, both CREST counters")
     figure.tight_layout()
     dest = Path(__file__).resolve().parents[1] / "figs" / "water_crest_counters.pdf"
     figure.savefig(dest)

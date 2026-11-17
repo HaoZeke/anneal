@@ -203,3 +203,20 @@ landfold_maps.pdf matches main too.
 This tree has no seed table for those two plates.
 The LJ map energies have no seed table.
 No seed table covers the McNemar values.
+
+## Vector replacements of the SI plates
+
+The four PNG plates of the previous section are now vector PDFs from the same generator, fig_si_panels.py, with no title and a unit on each axis and colorbar.
+The PNG hashes above are the superseded files.
+
+lj38_landscape.pdf git blob a251181c9c015ea3cf9d70d2d4ef5a590ebc07d5
+
+lj38_sketchmap.pdf git blob 03681f1b6690073936068177d84fd75865df2d24
+
+lj75_landscape.pdf git blob 5a24fbb6f2930e380941f1547ad5274769e1cf25
+
+lj98_landscape.pdf git blob 263f6336faadc4bf77335629622536b9cb60f549
+
+landfold_maps.pdf keeps six raster panels, (i) to (n).
+Their landscape.ld tables are not in the repository, so only the sealed landscape.png of each exists.
+

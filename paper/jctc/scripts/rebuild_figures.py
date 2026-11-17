@@ -34,10 +34,10 @@ STEPS = (
     (
         "fig_si_panels.py",
         (
-            "lj38_landscape.png",
-            "lj38_sketchmap.png",
-            "lj75_landscape.png",
-            "lj98_landscape.png",
+            "lj38_landscape.pdf",
+            "lj38_sketchmap.pdf",
+            "lj75_landscape.pdf",
+            "lj98_landscape.pdf",
             "occupancy_landfold.pdf",
             "occupancy_landfold_lj38.pdf",
             "occupancy_landfold_lj75.pdf",

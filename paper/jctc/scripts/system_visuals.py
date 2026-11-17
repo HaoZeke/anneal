@@ -783,7 +783,7 @@ def draw_fold(ax, fold: Fold, ylabel: bool = True) -> None:
     low = fold.lowest
     ax.scatter([low.x], [0.0], s=40, facecolors="none", edgecolors=figstyle.BLACK,
                linewidths=0.8, zorder=4)
-    ax.set_xlabel("fold coordinate")
+    ax.set_xlabel("fold coordinate (arb. units)")
     if ylabel:
         ax.set_ylabel("energy above lowest (\N{GREEK SMALL LETTER EPSILON})")
 
