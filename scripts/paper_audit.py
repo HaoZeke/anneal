@@ -1041,16 +1041,42 @@ def covalent_gfn2(audit: Audit) -> None:
 
 GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "Si13": "si13", "C20": "c20"}
 # (system, anneal revision, Fisher p, Mann-Whitney p, its sample, sentence that prints them). The sample is
-# "calls", calls to the hit with a miss ranked after every hit, or "best", the best energies.
+# "calls", calls to the hit with a miss ranked after every hit, or "best", the best energies. The sentence
+# is filled from the rows by gfn2_sentence_fields.
 GFN2_REVISION_TESTS = (
     ("Si10", "ce1e7a46", "1", "3.7e-5", "calls",
-     "CREST on 11 (Fisher p = 1, Mann-Whitney p = 3.7e-5, a miss ranked after every hit)"),
-    ("C10", "ce1e7a46", "0.0013", "2.6e-5", "calls", "CREST on 4 (Fisher p = 0.0013, Mann-Whitney p = 2.6e-5)"),
+     "anneal reaches the minimum on {anneal_hits} of {runs} seeds and CREST on {crest_hits} "
+     "(Fisher p = {fisher_p}, Mann-Whitney p = {mw_p}, a miss ranked after every hit)"),
+    ("C10", "ce1e7a46", "0.0013", "2.6e-5", "calls",
+     "anneal reaches the ring on {anneal_hits} of {runs} seeds and CREST on {crest_hits} "
+     "(Fisher p = {fisher_p}, Mann-Whitney p = {mw_p})"),
     ("C20", "5351f272", "1", "0.0004", "best",
-     "CREST's on 134 of the 144 pairs of seeds (Mann-Whitney p = 0.0004 on the best energies)"),
+     "Anneal's best is lower than CREST's on {below} of the {pairs} pairs of seeds "
+     "(Mann-Whitney p = {mw_p} on the best energies)"),
     ("Si13", "c1c02d16", "0.45", "0.005", "calls",
-     "CREST on four, in 95,213 to 143,630 (Fisher p = 0.45, Mann-Whitney p = 0.005, a miss ranked after every hit)"),
+     "anneal reaches the reference on {anneal_share} seeds, in {anneal_calls} calls, and CREST on "
+     "{crest_hits_word}, in {crest_calls} (Fisher p = {fisher_p}, Mann-Whitney p = {mw_p}, a miss ranked "
+     "after every hit)"),
 )
+NUMBER_WORDS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
+
+
+def gfn2_sentence_fields(a: list[dict[str, str]], c: list[dict[str, str]]) -> dict[str, object]:
+    """The counts a GFN2_REVISION_TESTS sentence prints, from anneal's rows ``a`` and CREST's ``c``."""
+    def span(rows: list[dict[str, str]]) -> str:
+        calls = sorted(int(r["evals_to_hit"]) for r in rows if hits_of([r]))
+        return f"{calls[0]:,} to {calls[-1]:,}" if calls else "no hit"
+
+    def word(count: int) -> str:
+        return NUMBER_WORDS[count] if count < len(NUMBER_WORDS) else str(count)
+
+    hits = hits_of(a)
+    return {
+        "anneal_hits": hits, "runs": len(a), "crest_hits": hits_of(c), "crest_hits_word": word(hits_of(c)),
+        "anneal_share": f"all {word(len(a))}" if hits == len(a) else f"{word(hits)} of {word(len(a))}",
+        "anneal_calls": span(a), "crest_calls": span(c), "pairs": len(a) * len(c),
+        "below": sum(float(x["best"]) < float(y["best"]) for x in a for y in c),
+    }
 
 
 def gfn2_revision_tables(audit: Audit, path: str, header: str, after: int, rows: list[dict[str, str]], crest) -> None:
@@ -1063,6 +1089,7 @@ def gfn2_revision_tables(audit: Audit, path: str, header: str, after: int, rows:
         return [r for r in pick(rows, system=system, code="anneal-general") if r["code_revision"].startswith(revision)]
 
     lines = audit.text(path).splitlines()
+    tabled = set()
     while any(line.startswith("| " + header) for line in lines[after:]):
         table = md_table(audit, path, header, after=after)
         groups = {}
@@ -1073,18 +1100,21 @@ def gfn2_revision_tables(audit: Audit, path: str, header: str, after: int, rows:
             else:
                 revision = re.fullmatch(r"anneal G, `([0-9a-f]{7,40})`", row["code"]).group(1)
                 groups[(row["system"], row["code"])] = anneal(system, revision)
+                tabled.add((row["system"], revision))
         gfn2_table(audit, path, table, groups, "pooled")
         after = table[-1][0] + 1
     for system, revision, fisher_p, mw_p, sample, sentence in GFN2_REVISION_TESTS:
         a, c = anneal(GFN2_SYSTEMS[system], revision), crest(GFN2_SYSTEMS[system])
         where = f"{path} {system} {revision}"
+        # A table whose header no longer matches is not read at all, so its rows are not checked.
+        audit.record((system, revision) in tabled, where, "GFN2 table row", f"anneal G, `{revision}`", "checked")
         audit.cell(where, "GFN2 Fisher p", fisher_p, fisher(hits_of(a), len(a), hits_of(c), len(c)))
         if sample == "best":
             p = mann_whitney([float(r["best"]) for r in a], [float(r["best"]) for r in c], continuity=True)
         else:
             p = mann_whitney(gfn2_ranked(a), gfn2_ranked(c), continuity=True)
         audit.cell(where, "GFN2 Mann-Whitney p", mw_p, p)
-        audit.said(path, sentence)
+        audit.said(path, sentence.format(fisher_p=fisher_p, mw_p=mw_p, **gfn2_sentence_fields(a, c)))
     below = sum(float(x["best"]) < float(y["best"]) for x in anneal("c20", "5351f272") for y in crest("c20"))
     audit.cell(f"{path} C20 5351f272", "anneal below CREST seed pairs", "134", below)
 
