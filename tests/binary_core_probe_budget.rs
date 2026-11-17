@@ -33,10 +33,10 @@ fn quiet(n: usize) -> Config {
     cfg
 }
 
-fn observed_budgets(labelled: bool) -> (Vec<usize>, usize) {
+fn observed_budgets(labeled: bool) -> (Vec<usize>, usize) {
     const BUDGET: usize = 40;
     let mut cfg = quiet(4);
-    if labelled {
+    if labeled {
         cfg.species = Some(vec![29, 29, 79, 79]);
     }
     let mut budgets = Vec::new();
@@ -63,10 +63,10 @@ fn labels_use_only_the_callers_ledger() {
 }
 
 #[test]
-fn one_species_and_labelled_walks_share_the_ledger_contract() {
-    let (labelled, labelled_charged) = observed_budgets(true);
+fn one_species_and_labeled_walks_share_the_ledger_contract() {
+    let (labeled, labeled_charged) = observed_budgets(true);
     let (plain, plain_charged) = observed_budgets(false);
-    assert!(labelled.iter().chain(&plain).all(|budget| *budget == 40));
-    assert!(labelled_charged <= 40);
+    assert!(labeled.iter().chain(&plain).all(|budget| *budget == 40));
+    assert!(labeled_charged <= 40);
     assert!(plain_charged <= 40);
 }

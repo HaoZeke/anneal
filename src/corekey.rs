@@ -466,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn the_key_is_invariant_to_rotation_translation_and_relabelling() {
+    fn the_key_is_invariant_to_rotation_translation_and_relabeling() {
         for name in ["lj38_fcc", "lj38_ico", "lj75_ico", "lj75_marks"] {
             let x = fixture(name);
             let y = rotate_permute(&x);
