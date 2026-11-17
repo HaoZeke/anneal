@@ -41,6 +41,7 @@ SYSTEMS = {
     "m55r14": {"n": 55, "rho": 14.0, "budget": 1_000_000, "reference": -220.646208},
 }
 HIT_TOL = 0.001
+ASE_VERSION = "3.29.0"
 MIN_SEP = 0.85
 DENSITY = 0.7
 MORSE_LENGTH_SCALE = 1.0 / (2.0 ** (1.0 / 6.0))
@@ -78,9 +79,18 @@ def place(n: int, seed: int, length: float) -> np.ndarray:
     return np.vstack(points)
 
 
+def require_ase_version() -> None:
+    import ase
+
+    if ase.__version__ != ASE_VERSION:
+        raise RuntimeError(f"ASE {ASE_VERSION} required, found {ase.__version__}")
+
+
 def verify_agreement(system: str, seed: int) -> tuple[float, float, float, float]:
     from ase import Atoms
     from ase.calculators.morse import MorsePotential
+
+    require_ase_version()
 
     binary = os.environ.get("ASE_NONLJ", "/work/target-panel/release/examples/ase_nonlj")
     spec = SYSTEMS[system]
@@ -174,6 +184,7 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
     from ase.optimize.basin import BasinHopping
     from ase.optimize.minimahopping import MinimaHopping
 
+    require_ase_version()
     verify_agreement(system, seed)
     spec = SYSTEMS[system]
     work.mkdir(parents=True, exist_ok=True)
