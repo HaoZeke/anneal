@@ -3,6 +3,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "rgpot/Models/ModelCapi.h"
 #include "rgpot/Models/ModelPots.hpp"
 #include "rgpot/units.hpp"
 #ifdef RGPOT_HAS_CBE
@@ -261,6 +262,29 @@ TEST_CASE("model capabilities report exact products") {
   const rgpot::MullerBrownPot pot;
   REQUIRE(pot.caps().analyticHvp);
   REQUIRE_FALSE(pot.caps().periodic);
+}
+
+TEST_CASE("built-in C handle dispatches the analytic product hook") {
+  rgpot_builtin_model *model =
+      rgpot_builtin_double_well_new(2, 2.0, 3.0, 1.5, 0.4);
+  REQUIRE(model != nullptr);
+  REQUIRE(rgpot_builtin_model_dimensions(model) == 2);
+  const std::array<double, 2> x{0.7, -0.2};
+  const std::array<double, 2> v{0.3, -0.5};
+  std::array<double, 2> force{}, product{};
+  double energy = 0.0;
+  REQUIRE(rgpot_builtin_model_force(model, 1, x.data(), &energy,
+                                    force.data()) == 0);
+  REQUIRE(rgpot_builtin_model_hvp(model, 1, x.data(), v.data(),
+                                  product.data()) == 0);
+  rgpot::DoubleWellPot direct(2, 2.0, 3.0, 1.5, 0.4);
+  const auto expected = direct.evaluateCoordinates(x, v);
+  close(energy, expected.energy, 8.0);
+  for (std::size_t i = 0; i < x.size(); ++i) {
+    close(force[i], -expected.gradient[i], 8.0);
+    close(product[i], expected.product[i], 8.0);
+  }
+  rgpot_builtin_model_free(model);
 }
 
 TEST_CASE("atom carrier preserves force sign and analytic product") {

@@ -228,6 +228,7 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/LennardJones/LJClusterKernel.cc
       CppCore/rgpot/Morse/MorsePot.cc
       CppCore/rgpot/Models/ModelPots.cc
+      CppCore/rgpot/Models/ModelCapi.cc
       CppCore/rgpot/ZBL/ZBLPot.cc
       CppCore/rgpot/simd/dispatch.cc
       CppCore/rgpot/simd/scalar_kernels.cc
@@ -422,6 +423,7 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
     list(APPEND RGPOT_SOURCES CppCore/rgpot/CBEPot/CBEPot.cc)
   endif()
   add_library(rgpot ${RGPOT_SOURCES})
+  target_compile_definitions(rgpot PRIVATE RGPOT_MODEL_BUILD)
   if(RGPOT_WITH_HIGHWAY)
     target_link_libraries(rgpot PRIVATE hwy)
     target_compile_definitions(rgpot PRIVATE RGPOT_WITH_HIGHWAY)

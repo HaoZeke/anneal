@@ -29,6 +29,10 @@ J. Chem. Phys. 72, 6209 (1980).
 H + CH4 is not duplicated here. CBE is supplied by the external `cbe-pes`
 library and rgpot's optional `CBEPot` linked frontend.
 
+`ModelCapi.h` constructs parameterized built-in handles for linked clients.
+Its force call returns rgpot's force convention; its HVP call dispatches the
+same `PotentialBase::hessianVectorImpl` hook used by the engine and RPC paths.
+
 ## CuH2 and embedded-atom models
 
 The shipped `rgpot_cuh2.f90` is the eOn CuH2 potential and already reads its
