@@ -281,7 +281,7 @@ def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
         "exact test on hits against each ASE arm.}",
         "\\label{tab:ase-morse}",
         "\\centering",
-        "\\small",
+        "\\footnotesize",
         "\\setlength{\\tabcolsep}{3pt}",
         "\\begin{tabular}{@{}lrrrrrrrrrr@{}}",
         "\\toprule",

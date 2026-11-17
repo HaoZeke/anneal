@@ -404,7 +404,7 @@ stands there.
 \subsection{Definitions}
 \label{sec:definitions}
 This subsection defines the operators that the text above names.
-A configuration is \(x=(x_1,\ldots,x_N)\) with \(x_i\in\mathbb{R}^3\), and
+A configuration is \(x=(x_1,\ldots,x_N)\) with \(x_i\in\mathbf{R}^3\), and
 every constant is that of the preset in reduced units.
 
 \emph{Descriptor.}
@@ -1002,7 +1002,7 @@ Each run uses one thread, pinned to core 0 with \texttt{taskset}, and the other
 processes of the session sit on cores 1--7.
 The panel logs name the processor and the compilers and no more.
 The clock and the operating system are read from the receipt of the same host,
-\texttt{paper/jctc/logs/cuh2-hardware-receipt.txt}, and no log records the
+\path{paper/jctc/logs/cuh2-hardware-receipt.txt}, and no log records the
 memory size or the kernel, so neither is given.
 
 The commands that reproduce the three comparisons are these, run from the
@@ -1227,7 +1227,7 @@ a BH or MH run is counted at its wall, which lies at the cap.
 exact test on hits against each ASE arm.}
 \label{tab:ase-morse}
 \centering
-\small
+\footnotesize
 \setlength{\tabcolsep}{3pt}
 \begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
@@ -1264,8 +1264,7 @@ LJ\(_{55}\), and 7203.7~s on LJ\(_{75}\), against 0.081~s, 0.154~s, and
 The rows of this setting are the paper-preset rows of those seeds, and the
 rows of Table~\ref{tab:gofee} were collected at 5 repository heads, which
 \texttt{results.csv} records for each row, with the head unrecorded on 3 rows.
-Table~\ref{tab:gofee-si} of the Supporting Information gives the same ASE and
-GOFEE arms on Au\(_{55}\), Cu\(_{38}\), Cu\(_{12}\)Au\(_{26}\), Si\(_{10}\),
+The Supporting Information gives the same ASE and GOFEE arms on Au\(_{55}\), Cu\(_{38}\), Cu\(_{12}\)Au\(_{26}\), Si\(_{10}\),
 C\(_{10}\), and \((\mathrm{H_2O})_{8}\).
 
 % gofee table: start

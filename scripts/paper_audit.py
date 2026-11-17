@@ -2369,6 +2369,46 @@ def unauditable() -> list[str]:
 
 
 RERUN_FILES = (TEX, SI, "paper/jctc/cover-letter.tex")
+COVER = "paper/jctc/cover-letter.tex"
+COVER_TOC = "paper/jctc/toc-graphic.tex"
+# Sentences of the cover letter that carry a digit and are not abstract sentences.
+COVER_OTHER = ("This submission replaces the preprint arXiv:2302.02811, deposited in 2023 under the title "
+               "``Unified Software Design Patterns for Simulated Annealing.",
+               "A table of contents graphic at 3.25~in by 1.75~in accompanies the submission.")
+
+
+def collapsed(text: str) -> str:
+    """Whitespace collapsed, with the rerun tags dropped so a sentence compares by its words."""
+    return " ".join(re.sub(r"~?\\rerun\{\d\}", "", text).split())
+
+
+def cover_letter(audit: Audit) -> None:
+    """A cover-letter sentence that carries a number is an abstract sentence, word for word."""
+    letter = collapsed(audit.text(COVER))
+    manuscript = collapsed(audit.text(TEX))
+    body = letter.split("Dear Editor,")[1].split("\\vspace{1em} \\noindent Sincerely")[0]
+    sentences = re.split(r"(?<=\.)(?:''|\\\\)?\s+(?=[A-Z`\\])", body)
+    checked = 0
+    for sentence in sentences:
+        bare = re.sub(r"GFN2|TIP4P|CREST|GMIN|\\url\{[^}]*\}|Email", "", sentence)
+        if not re.search(r"\d", bare) or "Telephone" in sentence:
+            continue
+        checked += 1
+        if sentence in COVER_OTHER:
+            audit.record(True, COVER, "the cover-letter sentence is the preprint line", sentence[:60], sentence[:60])
+            continue
+        found = sentence in manuscript
+        audit.record(found, COVER, "a cover-letter sentence with a number is an abstract sentence",
+                     sentence[:70], sentence[:70] if found else "not in the manuscript")
+    audit.record(checked >= 8, COVER, "the cover letter carries the abstract numbers", ">= 8", str(checked))
+    toc = audit.text(COVER_TOC)
+    audit.record("paperwidth=3.25in,paperheight=1.75in" in toc, COVER_TOC, "the graphic slot is 3.25 in by 1.75 in",
+                 "3.25in 1.75in", "3.25in 1.75in")
+    audit.said(COVER, "A table of contents graphic at 3.25~in by 1.75~in accompanies the submission.")
+    for word in ("TODO", "\\todo"):
+        audit.record(word not in audit.text(COVER), COVER, f"the cover letter has no {word}", "none", "none")
+
+
 def manuscript_new(audit: Audit) -> None:
     """The abstract split, the added panels, the definitions, the priors, and the host paragraph."""
     panel, groups = gmin_panel_groups(audit)
@@ -2663,7 +2703,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new):
+                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, cover_letter):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
