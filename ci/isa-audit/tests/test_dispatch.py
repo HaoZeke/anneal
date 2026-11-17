@@ -100,6 +100,12 @@ GCC_OPTIONS = {
     "avx512_4fmaps": ("avx5124fmaps", "AVX5124FMAPS"),
 }
 
+# Before GCC 14 these two enabled only AVX512F.
+GCC13_IMPLIES = {
+    "avx512_vbmi2": frozenset({"avx512f"}),
+    "avx512_bitalg": frozenset({"avx512f"}),
+}
+
 
 def _gcc() -> str | None:
     cc = os.environ.get("CC_X86", "gcc")
@@ -183,7 +189,11 @@ class DispatchTest(unittest.TestCase):
 
     def test_implications_match_gcc(self) -> None:
         macros = {macro: name for name, (_option, macro) in GCC_OPTIONS.items()}
-        for name in sorted(dispatch.IMPLIES):
+        version = subprocess.run([GCC, "-dumpfullversion"], capture_output=True, text=True, check=True).stdout
+        table = dict(dispatch.IMPLIES)
+        if int(version.split(".")[0]) < 14:
+            table.update(GCC13_IMPLIES)
+        for name in sorted(table):
             option, _macro = GCC_OPTIONS[name]
             done = subprocess.run(
                 [GCC, "-march=x86-64", f"-m{option}", "-dM", "-E", "-x", "c", "/dev/null"],
@@ -203,7 +213,7 @@ class DispatchTest(unittest.TestCase):
             implied = set()
             todo = [name]
             while todo:
-                for item in dispatch.IMPLIES.get(todo.pop(), ()):
+                for item in table.get(todo.pop(), ()):
                     if item not in implied:
                         implied.add(item)
                         todo.append(item)

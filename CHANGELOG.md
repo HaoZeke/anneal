@@ -385,6 +385,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Ubuntu 26.04 runner its `__cpu_indicator_init` has two BMI2 `shlx`.
   Clang reads `__cpu_model` PC-relative, so its fixtures keep the copy.
 
+- A clone the ISA audit proves for `avx512_vbmi2` or `avx512_bitalg`
+  may also use AVX512BW, which `-mavx512vbmi2` and `-mavx512bitalg`
+  enable from GCC 14, as in Clang.
+  `test_dispatch.py` still checks the implications exactly against GCC
+  12 and 13, where those options enable only AVX512F.
+
 - The `abi_symbols` test picks the `nm` mode from the library it is
   given: `nm -D --defined-only` for a shared object and
   `nm -g --defined-only` for a static `lib*.a` or `*.lib` archive, which

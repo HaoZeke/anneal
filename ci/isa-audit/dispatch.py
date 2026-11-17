@@ -104,6 +104,7 @@ CPU_MODEL_FEATURES: dict[int, str] = {
 }
 
 # Direct implications of GCC's -m options (gcc -m<isa> -dM -E), as iced names.
+# From GCC 14, as in Clang, -mavx512vbmi2 and -mavx512bitalg enable AVX512BW.
 IMPLIES: dict[str, frozenset[str]] = {
     "ssse3": frozenset({"sse3"}),
     "sse4_1": frozenset({"ssse3"}),
@@ -124,9 +125,9 @@ IMPLIES: dict[str, frozenset[str]] = {
     "avx512pf": frozenset({"avx512f"}),
     "avx512_ifma": frozenset({"avx512f"}),
     "avx512_vpopcntdq": frozenset({"avx512f"}),
-    "avx512_vbmi2": frozenset({"avx512f"}),
+    "avx512_vbmi2": frozenset({"avx512bw"}),
     "avx512_vnni": frozenset({"avx512f"}),
-    "avx512_bitalg": frozenset({"avx512f"}),
+    "avx512_bitalg": frozenset({"avx512bw"}),
     "avx512_4vnniw": frozenset({"avx512f"}),
     "avx512_4fmaps": frozenset({"avx512f"}),
     "avx512_vbmi": frozenset({"avx512bw"}),

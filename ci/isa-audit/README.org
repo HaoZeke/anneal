@@ -109,6 +109,8 @@ The features allowed in the clone are the proven bits closed under
 GCC's =-m= implications (=-mavx2= also enables AVX, SSE3 to SSE4.2,
 POPCNT and XSAVE), plus the VEX FMA and F16C forms GNU as uses inside an
 AVX-512F body.
+From GCC 14, as in Clang, =-mavx512vbmi2= and =-mavx512bitalg= also
+enable AVX512BW.
 A block that no direct edge reaches, such as a landing pad, starts with
 nothing proven.
 A stripped file proves nothing.
