@@ -2355,12 +2355,14 @@ class RevisionIndex:
         asked = sorted({n for n in names + tips + patched if n})
         out = git("cat-file", "--batch-check", stdin="".join(f"{n}^{{commit}}\n" for n in asked)).stdout.splitlines()
         self.commit = {n: line.split()[0] for n, line in zip(asked, out) if line.split()[1:2] == ["commit"]}
+        head = git("rev-parse", "--verify", "HEAD").stdout.split()
+        remote = git("for-each-ref", "--format=%(objectname)", "refs/remotes").stdout.split()
         self.parents: dict[str, list[str]] = {}
-        for line in git("rev-list", "--parents", "--all", *sorted(set(self.commit.values()))).stdout.splitlines():
+        for line in git("rev-list", "--parents", *head, "--remotes", *sorted(set(self.commit.values()))).stdout.splitlines():
             commit, *parents = line.split()
             self.parents[commit] = parents
-        remote = git("for-each-ref", "--format=%(objectname)", "refs/remotes").stdout.split()
         self.remote = self.closure(r for r in remote if r in self.parents)
+        self.present = self.remote | self.closure(r for r in head if r in self.parents)
         self.patch_ids: dict[str, str] = {}
         shown = sorted({self.commit[p] for p in patched if p in self.commit})
         if shown:
@@ -2456,7 +2458,8 @@ class RevisionIndex:
         return self.commit.get(revision) or (revision if revision in self.parents else None)
 
     def exists(self, revision: str) -> bool:
-        return revision in self.commit
+        """The commit is reachable from HEAD or a remote-tracking ref."""
+        return self.resolve(revision) in self.present
 
     def on_remote(self, revision: str) -> bool:
         """The commit is reachable from a ref fetched from the remote."""

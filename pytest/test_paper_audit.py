@@ -382,7 +382,11 @@ def test_the_revision_index_answers_as_one_git_call_per_question(audited):
     batched, single = {}, {}
     for revision in revisions:
         batched[revision, "exists"] = index.exists(revision)
-        single[revision, "exists"] = git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+        single[revision, "exists"] = (
+            git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+            and (git("merge-base", "--is-ancestor", revision, "HEAD").returncode == 0
+                 or bool(git("for-each-ref", "--count=1", "--contains", revision, "refs/remotes").stdout.strip()))
+        )
     for row in table:
         for column in ("pushed_revision", "branch_revision"):
             revision = row[column]
@@ -528,4 +532,30 @@ def test_a_replaced_claim_without_its_tag_is_reported():
 def test_the_british_spelling_of_labeled_is_caught():
     for word in ("labelled", "labelling", "modelled", "travelled"):
         assert audit_mod.BRITISH.search(word)
+
+
+def test_an_unrelated_local_branch_does_not_count_as_present(tmp_path, monkeypatch):
+    def repo(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null", *args],
+            cwd=tmp_path, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+    repo("init", "-q")
+    (tmp_path / "f").write_text("base\n")
+    repo("add", "f")
+    repo("commit", "-q", "-m", "base")
+    base = repo("rev-parse", "HEAD")
+    repo("update-ref", "refs/remotes/origin/develop", base)
+    repo("checkout", "-q", "-b", "stale")
+    (tmp_path / "f").write_text("stale\n")
+    repo("commit", "-q", "-a", "-m", "stale")
+    stale = repo("rev-parse", "HEAD")
+    repo("checkout", "-q", "-b", "work", base)
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    audit_mod.revision_index.cache_clear()
+    index = audit_mod.RevisionIndex((base, stale), (), (), ())
+    assert index.exists(base)
+    assert not index.exists(stale)
+
     assert not audit_mod.BRITISH.search("labeled")
