@@ -584,6 +584,34 @@
       ]
     },
     {
+      "rule": "abcluster_h2h",
+      "competitors": [
+        "ABCluster"
+      ],
+      "runners": [
+        "scripts/abcluster_h2h/run_campaign.py",
+        "scripts/abcluster_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/abcluster_h2h/run_campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/abcluster_h2h/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/abcluster-h2h/benchmarks/abcluster_h2h.py",
+      "rows": [
+        {
+          "path": "bench/abcluster-h2h/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "lj_bonobo_h2h",
       "competitors": [
         "bonobo"

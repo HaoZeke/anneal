@@ -565,6 +565,25 @@ rule growpal_h2h_v2:
         """
 
 
+# anneal (Config::recommended and Config::for_cluster) against ABCluster 3.4
+# on LJ38, LJ55, LJ75, LJ98, LJ104 and Gupta Au55, seeds 2000 to 2011, at the
+# paper call budgets. Rows are appended, never rewritten. Not part of
+# `rule all`:
+#   snakemake -s workflow/Snakefile abcluster_h2h
+rule abcluster_h2h:
+    output:
+        "bench/abcluster-h2h/seeds.csv",
+        "bench/abcluster-h2h/parity.csv",
+        "bench/abcluster-h2h/counter.csv",
+        "bench/abcluster-h2h/pilot.csv",
+        "bench/abcluster-h2h/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/abcluster_h2h/enter_bench.sh
+        """
+
+
 # Calls the deterministic GrowPAL loop needs with no budget, one run per
 # system. A diagnostic beside growpal_h2h_v2, not part of it:
 #   snakemake -s workflow/Snakefile growpal_h2h_v2_uncapped
