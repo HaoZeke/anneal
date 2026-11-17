@@ -352,7 +352,12 @@ def run_one(binary: Path, system: str, seed: int, arm: str) -> dict[str, str]:
     return run_anneal(binary, arm, system, seed)
 
 
-def campaign(binary: Path, seeds_path: Path, only: tuple[str, int, str] | None) -> None:
+def campaign(
+    binary: Path,
+    seeds_path: Path,
+    only: tuple[str, int, str] | None,
+    enabled_arms: set[str],
+) -> None:
     head = anneal_revision()
     host = os.uname().nodename
     jobs = []
@@ -360,6 +365,8 @@ def campaign(binary: Path, seeds_path: Path, only: tuple[str, int, str] | None) 
         for system in SYSTEMS:
             for seed in SEEDS:
                 for arm in ARMS:
+                    if arm not in enabled_arms:
+                        continue
                     jobs.append((system, seed, arm))
     else:
         jobs.append(only)
@@ -383,14 +390,18 @@ def main() -> None:
     parser.add_argument("--seeds-out", type=Path, default=ROOT / "bench" / "cmcts-au" / "seeds.csv")
     parser.add_argument("--summary", type=Path, default=ROOT / "bench" / "cmcts-au" / "summary.csv")
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
+    parser.add_argument("--arms", nargs="+", choices=ARMS, default=list(ARMS))
     args = parser.parse_args()
+    enabled_arms = set(args.arms)
     only = None
     if args.only:
         system, seed_s, arm = args.only
         if system not in SYSTEMS or arm not in ARMS:
             raise SystemExit(f"unknown job {args.only}")
+        if arm not in enabled_arms:
+            raise SystemExit(f"arm {arm} is not in --arms {sorted(enabled_arms)}")
         only = (system, int(seed_s), arm)
-    campaign(args.binary, args.seeds_out, only)
+    campaign(args.binary, args.seeds_out, only, enabled_arms)
     from summarize import write_summary
 
     write_summary(args.seeds_out, args.summary)

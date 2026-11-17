@@ -67,10 +67,22 @@ fn reference(n: usize) -> Option<f64> {
     }
 }
 
+fn without_template_priors(mut cfg: Config) -> Config {
+    // No motif/template priors in this panel: keep both anneal arms on
+    // pure stochastic starts and proposal dynamics.
+    cfg.prior_soap = false;
+    cfg.prior_reseed = false;
+    cfg.prior_growth = false;
+    cfg.prior_core = false;
+    cfg.prior_handover = false;
+    cfg.prior_motif = false;
+    cfg
+}
+
 fn preset(name: &str, n: usize) -> Option<Config> {
     match name {
-        "recommended" => Some(Config::recommended(n)),
-        "for_cluster" => Some(Config::for_cluster(n)),
+        "recommended" => Some(without_template_priors(Config::recommended(n))),
+        "for_cluster" => Some(without_template_priors(Config::for_cluster(n))),
         _ => None,
     }
 }
