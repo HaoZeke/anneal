@@ -1,18 +1,22 @@
 # Copyright (c) anneal developers
-# Same-session gate of plateau_heat. Builds the base revision and the
-# revision that adds the flag in detached worktrees under /work, then runs
-# run_gate.py in one UTS namespace with hostname bench, one process on
-# core 0. sc108-55 loads rgpot's Sutton-Chen library from RGPOT_SC_LIB.
+# Same-session gate of plateau_heat. Builds the base revision, the revision
+# that adds the flag and, when GATE_RECORDS_REV is set, the revision that
+# picks the heat by records per call, in detached worktrees under /work,
+# then runs run_gate.py in one UTS namespace with hostname bench, one
+# process on core 0. sc108-55 loads rgpot's Sutton-Chen library from
+# RGPOT_SC_LIB.
 #
-#   RGPOT_SC_LIB=/path/librgpot.so enter_bench.sh [run_gate.py options]
+#   RGPOT_SC_LIB=/path/librgpot.so GATE_HEAT_REV=... [GATE_RECORDS_REV=...] \
+#     enter_bench.sh [run_gate.py options]
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-BASE_REV=${GATE_BASE_REV:-98dcfb3106f191baf7381fecd5624426831094fe}
+BASE_REV=${GATE_BASE_REV:-24ed9551f2a574622fae77ec5f8a4077e1dfd336}
 HEAT_REV=${GATE_HEAT_REV:?the revision that adds plateau_heat}
-WORK=/work/au55-general/gate
-OUT=$ROOT/bench/au55-general
+RECORDS_REV=${GATE_RECORDS_REV:-}
+WORK=${GATE_WORK:-/work/au55-general2/gate}
+OUT=${GATE_OUT:-$ROOT/bench/au55-general2}
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 : "${RGPOT_SC_LIB:?the rgpot Sutton-Chen library}"
 
@@ -48,7 +52,13 @@ tree "$WORK/base-src" "$BASE_REV"
 tree "$WORK/heat-src" "$HEAT_REV"
 build "$WORK/base-src" "$WORK/target-base" "$WORK/bin-base"
 build "$WORK/heat-src" "$WORK/target-heat" "$WORK/bin-heat"
-sha256sum "$WORK"/bin-base/* "$WORK"/bin-heat/* "$RGPOT_SC_LIB" > "$WORK/bin-sha256.txt"
+records_args=""
+if [ -n "$RECORDS_REV" ]; then
+  tree "$WORK/records-src" "$RECORDS_REV"
+  build "$WORK/records-src" "$WORK/target-records" "$WORK/bin-records"
+  records_args="--records-revision $RECORDS_REV --records-bin $WORK/bin-records --records-tree $WORK/records-src"
+fi
+sha256sum "$WORK"/bin-*/* "$RGPOT_SC_LIB" > "$WORK/bin-sha256.txt"
 cp -f "$HERE/run_gate.py" "$WORK/run_gate.py"
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 lib_dir=$(dirname "$RGPOT_SC_LIB")
@@ -71,6 +81,7 @@ exec taskset -c 0 /usr/bin/python3 -u $WORK/run_gate.py \\
   --heat-bin $WORK/bin-heat \\
   --base-tree $WORK/base-src \\
   --heat-tree $WORK/heat-src \\
+  $records_args \\
   --logs $WORK/logs \\
   --summary $OUT/summary.csv \\
   "\$@"

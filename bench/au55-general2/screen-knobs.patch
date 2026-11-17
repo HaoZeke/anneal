@@ -1,0 +1,93 @@
+diff --git a/src/methods/cluster_hopping.rs b/src/methods/cluster_hopping.rs
+index 0a841bd5..da1668cb 100644
+--- a/src/methods/cluster_hopping.rs
++++ b/src/methods/cluster_hopping.rs
+@@ -4643,6 +4643,14 @@ where
+     // Multiple of the preset temperature the walk hops at. It stays one
+     // unless `plateau_heat` is on.
+     let mut heat = 1.0_f64;
++    let au_v = std::env::var("AU_V").unwrap_or_default();
++    let au_bandit = au_v.starts_with("bandit");
++    let au_return = au_v == "return" || au_v == "bandit_ret";
++    let mut hb_lv = 0usize;
++    let mut hb_calls = [0.0_f64; 3];
++    let mut hb_recs = [0.0_f64; 3];
++    let mut hb_mark = 0usize;
++    let mut hb_started = false;
+     // Minima separated by common-neighbour fractions. A stall in the
+     // icosahedral packing can return to a lower minimum of another packing
+     // the chain already quenched, instead of redrawing inside the same one.
+@@ -5243,7 +5251,13 @@ where
+         if ledger.best < best_seen - new_lowest {
+             best_seen = ledger.best;
+             charged_at_best = ledger.spent();
+-            heat = 1.0;
++            if au_bandit {
++                if hb_started {
++                    hb_recs[hb_lv] += 1.0;
++                }
++            } else {
++                heat = 1.0;
++            }
+             hops_at_lowest = hops;
+             csm_reseed_stamp = hops;
+             cage_edit = false;
+@@ -5864,7 +5878,47 @@ where
+             charged_at_best = ledger.spent();
+             directed_leave = true;
+             if cfg.plateau_heat && n_rep == 1 {
+-                heat = (heat * 2.0).min(PLATEAU_HEAT_CAP);
++                if au_bandit {
++                    let now = ledger.spent();
++                    if hb_started {
++                        hb_calls[hb_lv] += now.saturating_sub(hb_mark) as f64;
++                    }
++                    hb_started = true;
++                    hb_mark = now;
++                    let p = cfg.restart_patience.max(1) as f64;
++                    let score: Vec<f64> = (0..3).map(|i| (hb_recs[i] + 1.0) / (hb_calls[i] / p + 1.0)).collect();
++                    let top = score.iter().cloned().fold(f64::MIN, f64::max);
++                    let next = if (score[hb_lv] - top).abs() < 1e-12 {
++                        hb_lv
++                    } else {
++                        (0..3).find(|&i| (score[i] - top).abs() < 1e-12).unwrap()
++                    };
++                    if std::env::var("AU_HEAT_TRACE").is_ok() {
++                        eprintln!("BANDIT {} {hb_lv}->{next} {:?} {:?}", now, hb_recs, hb_calls);
++                    }
++                    if next < hb_lv && au_return {
++                        if let Some(state) = ledger.best_state.clone() {
++                            internal_action = Some(CheckpointAction::ExternalAdopt {
++                                state,
++                                action: "heat-return".to_owned(),
++                                external_calls: 0,
++                            });
++                        }
++                    }
++                    hb_lv = next;
++                    heat = [1.0, 2.0, 4.0][hb_lv];
++                } else if au_return && heat >= PLATEAU_HEAT_CAP {
++                    heat = 1.0;
++                    if let Some(state) = ledger.best_state.clone() {
++                        internal_action = Some(CheckpointAction::ExternalAdopt {
++                            state,
++                            action: "heat-return".to_owned(),
++                            external_calls: 0,
++                        });
++                    }
++                } else {
++                    heat = (heat * 2.0).min(PLATEAU_HEAT_CAP);
++                }
+             }
+         }
+         let checkpoint_due = matches!(
+@@ -8769,6 +8823,9 @@ where
+         // Every hop, accepted or not, so a basin census can tell a minimum
+         // that was never proposed from one that was proposed and then lost
+         // to the return screen, the record gate or the acceptance test.
++        if std::env::var("AU_HEAT_TRACE").is_ok() {
++            eprintln!("HEAT {hops} {} {heat} {e:.6} {e_new:.6} {:.6} {} {}", ledger.spent(), ledger.best, accept as u8, unquenched as u8);
++        }
+         if std::env::var("ANNEAL_HOP_TRACE").is_ok() {
+             let max_gradient = validation_gradient
+                 .as_ref()

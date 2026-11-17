@@ -1,17 +1,19 @@
 # Copyright (c) anneal developers
 """Same-session gate of ``plateau_heat`` against its base revision.
 
-Two builds made in the same session: ``base`` at the revision the branch
-starts from and ``heat`` at the revision that adds the flag, run with
-``H2H_PLATEAU_HEAT=1``. Au55 runs seeds 2000-2023; LJ38, LJ55, LJ75, LJ98,
-LJ104, LJ150, Morse M80 at rho 6 and 14 and Sutton-Chen sc108-55 run seeds
-2000-2011, all at their example budgets. For each system and seed the base
-run goes first and the heat run second, one process on ``taskset -c 0``,
-one thread. Rows are appended with the code revision and the host after
+Builds made in the same session: ``base`` at the revision the branch starts
+from, ``heat`` at the revision that adds the flag and, when its revision is
+given, ``records`` at the revision that picks the heat by records per call.
+The heated arms run with ``H2H_PLATEAU_HEAT=1``. Au55 runs seeds 2000-2023;
+Morse M80 at rho 14 and Sutton-Chen sc108-55 run seeds 2000-2035; LJ38,
+LJ55, LJ75, LJ98, LJ104, LJ150 and M80 at rho 6 run seeds 2000-2011, all at
+their example budgets. For each system and seed the arms run in turn, base
+first, one process on ``taskset -c 0``, one thread. Rows are appended with the code revision and the host after
 every run and are never rewritten; a row already stored for the same
 system, arm, seed and revision is kept and its run skipped.
 
-``--summarize`` writes, per system, the hits of each arm, Fisher's exact
+``--summarize`` writes, per system and heated arm, the hits of that arm and
+base, Fisher's exact
 test on hits, the tie-corrected Mann-Whitney test (normal approximation,
 continuity correction) on calls to the minimum with misses entered at the
 budget, and the median wall, potential and outside-potential times.
@@ -30,7 +32,9 @@ import sys
 from pathlib import Path
 
 SEEDS_AU55 = tuple(range(2000, 2024))
+SEEDS_WIDE = tuple(range(2000, 2036))
 SEEDS = tuple(range(2000, 2012))
+WIDE = ("m80r14", "sc108-55")
 BUDGETS = {
     "au55": 1_000_000,
     "lj38": 400_000,
@@ -56,7 +60,7 @@ RUNS = (
     ("m80r14", "h2h_morse"),
     ("sc108-55", "h2h_sc"),
 )
-ARMS = ("base", "heat")
+ARMS = ("base", "heat", "records")
 
 ROW_FIELDS = [
     "system",
@@ -81,30 +85,33 @@ SUMMARY_FIELDS = [
     "system",
     "driver",
     "budget",
+    "arm",
     "n",
     "base_hits",
-    "heat_hits",
+    "arm_hits",
     "fisher_p",
     "base_evals_median",
-    "heat_evals_median",
+    "arm_evals_median",
     "mannwhitney_u",
     "mannwhitney_p",
     "base_wall_median_s",
-    "heat_wall_median_s",
+    "arm_wall_median_s",
     "base_pot_median_s",
-    "heat_pot_median_s",
+    "arm_pot_median_s",
     "base_outside_median_s",
-    "heat_outside_median_s",
+    "arm_outside_median_s",
     "same_seeds",
     "base_revision",
-    "heat_revision",
+    "arm_revision",
     "host",
     "seeds",
 ]
 
 
 def seeds_of(system: str) -> tuple[int, ...]:
-    return SEEDS_AU55 if system == "au55" else SEEDS
+    if system == "au55":
+        return SEEDS_AU55
+    return SEEDS_WIDE if system in WIDE else SEEDS
 
 
 def type7(values: list[float], p: float) -> float:
@@ -143,7 +150,7 @@ def arm_env(arm: str) -> dict[str, str]:
     for key in list(env):
         if key.startswith("H2H_") or key.startswith("ANNEAL_"):
             del env[key]
-    if arm == "heat":
+    if arm != "base":
         env["H2H_PLATEAU_HEAT"] = "1"
     return env
 
@@ -223,59 +230,63 @@ def fmt(value: float) -> str:
 def summarise(rows: list[dict[str, str]], revisions: dict[str, str]) -> list[dict[str, str]]:
     out = []
     for system, driver in RUNS:
-        groups = {}
-        for arm in ARMS:
-            by_seed = {
+        groups = {
+            arm: {
                 int(r["seed"]): r
                 for r in rows
-                if r["system"] == system and r["arm"] == arm and r["code_revision"] == revisions[arm]
+                if r["system"] == system and r["arm"] == arm and r["code_revision"] == revision
             }
-            groups[arm] = by_seed
-        seeds = [s for s in seeds_of(system) if s in groups["base"] and s in groups["heat"]]
-        if not seeds:
-            continue
-        base = [groups["base"][s] for s in seeds]
-        heat = [groups["heat"][s] for s in seeds]
-        base_hits = sum(r["hit"] == "1" for r in base)
-        heat_hits = sum(r["hit"] == "1" for r in heat)
-        base_calls = [float(r["evals_to_hit"]) for r in base]
-        heat_calls = [float(r["evals_to_hit"]) for r in heat]
-        u, p = mann_whitney(heat_calls, base_calls)
-        same = sum(
-            1
-            for b, h in zip(base, heat)
-            if b["hit"] == h["hit"] and b["evals_to_hit"] == h["evals_to_hit"] and b["best"] == h["best"]
-        )
+            for arm, revision in revisions.items()
+        }
+        for arm in revisions:
+            if arm == "base":
+                continue
+            seeds = [s for s in seeds_of(system) if s in groups["base"] and s in groups[arm]]
+            if not seeds:
+                continue
+            base = [groups["base"][s] for s in seeds]
+            heat = [groups[arm][s] for s in seeds]
+            base_hits = sum(r["hit"] == "1" for r in base)
+            heat_hits = sum(r["hit"] == "1" for r in heat)
+            base_calls = [float(r["evals_to_hit"]) for r in base]
+            heat_calls = [float(r["evals_to_hit"]) for r in heat]
+            u, p = mann_whitney(heat_calls, base_calls)
+            same = sum(
+                1
+                for b, h in zip(base, heat)
+                if b["hit"] == h["hit"] and b["evals_to_hit"] == h["evals_to_hit"] and b["best"] == h["best"]
+            )
 
-        def med(group: list[dict[str, str]], column: str) -> str:
-            return fmt(type7([float(r[column]) for r in group], 0.5))
+            def med(group: list[dict[str, str]], column: str) -> str:
+                return fmt(type7([float(r[column]) for r in group], 0.5))
 
-        out.append(
-            {
-                "system": system,
-                "driver": driver,
-                "budget": str(BUDGETS[system]),
-                "n": str(len(seeds)),
-                "base_hits": str(base_hits),
-                "heat_hits": str(heat_hits),
-                "fisher_p": f"{fisher(heat_hits, len(seeds), base_hits, len(seeds)):.6g}",
-                "base_evals_median": f"{type7(base_calls, 0.5):.1f}",
-                "heat_evals_median": f"{type7(heat_calls, 0.5):.1f}",
-                "mannwhitney_u": f"{u:.1f}",
-                "mannwhitney_p": f"{p:.6g}",
-                "base_wall_median_s": med(base, "wall_s"),
-                "heat_wall_median_s": med(heat, "wall_s"),
-                "base_pot_median_s": med(base, "pot_s"),
-                "heat_pot_median_s": med(heat, "pot_s"),
-                "base_outside_median_s": med(base, "outside_s"),
-                "heat_outside_median_s": med(heat, "outside_s"),
-                "same_seeds": str(same),
-                "base_revision": revisions["base"],
-                "heat_revision": revisions["heat"],
-                "host": " ".join(sorted({r["host"] for r in base + heat})),
-                "seeds": f"{seeds[0]}-{seeds[-1]}",
-            }
-        )
+            out.append(
+                {
+                    "system": system,
+                    "driver": driver,
+                    "budget": str(BUDGETS[system]),
+                    "arm": arm,
+                    "n": str(len(seeds)),
+                    "base_hits": str(base_hits),
+                    "arm_hits": str(heat_hits),
+                    "fisher_p": f"{fisher(heat_hits, len(seeds), base_hits, len(seeds)):.6g}",
+                    "base_evals_median": f"{type7(base_calls, 0.5):.1f}",
+                    "arm_evals_median": f"{type7(heat_calls, 0.5):.1f}",
+                    "mannwhitney_u": f"{u:.1f}",
+                    "mannwhitney_p": f"{p:.6g}",
+                    "base_wall_median_s": med(base, "wall_s"),
+                    "arm_wall_median_s": med(heat, "wall_s"),
+                    "base_pot_median_s": med(base, "pot_s"),
+                    "arm_pot_median_s": med(heat, "pot_s"),
+                    "base_outside_median_s": med(base, "outside_s"),
+                    "arm_outside_median_s": med(heat, "outside_s"),
+                    "same_seeds": str(same),
+                    "base_revision": revisions["base"],
+                    "arm_revision": revisions[arm],
+                    "host": " ".join(sorted({r["host"] for r in base + heat})),
+                    "seeds": f"{seeds[0]}-{seeds[-1]}",
+                }
+            )
     return out
 
 
@@ -293,9 +304,11 @@ def self_test() -> None:
         raise SystemExit("type 7")
     if {run[0] for run in RUNS} != set(BUDGETS):
         raise SystemExit("every system runs")
-    if len(SEEDS_AU55) != 24 or len(SEEDS) != 12:
+    if len(SEEDS_AU55) != 24 or len(SEEDS) != 12 or len(SEEDS_WIDE) != 36:
         raise SystemExit("seed counts")
-    if "H2H_PLATEAU_HEAT" in arm_env("base") or arm_env("heat").get("H2H_PLATEAU_HEAT") != "1":
+    if [len(seeds_of(system)) for system in ("au55", "lj38", "m80r6", "m80r14", "sc108-55")] != [24, 12, 12, 36, 36]:
+        raise SystemExit("seeds per system")
+    if "H2H_PLATEAU_HEAT" in arm_env("base") or any(arm_env(arm).get("H2H_PLATEAU_HEAT") != "1" for arm in ARMS[1:]):
         raise SystemExit("arm environment")
     text = "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s\n"
     text += "lj38,anneal,2000,400000,true,9000,9100,0.5,-173.92842700,0.25,0.25\n"
@@ -316,25 +329,31 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--base-revision", required=True)
     parser.add_argument("--heat-revision", required=True)
+    parser.add_argument("--records-revision")
     parser.add_argument("--base-bin", type=Path)
     parser.add_argument("--heat-bin", type=Path)
+    parser.add_argument("--records-bin", type=Path)
     parser.add_argument("--base-tree", type=Path)
     parser.add_argument("--heat-tree", type=Path)
+    parser.add_argument("--records-tree", type=Path)
     parser.add_argument("--logs", type=Path)
     parser.add_argument("--system", action="append")
     parser.add_argument("--summary", type=Path)
     parser.add_argument("--summarize", action="store_true")
     args = parser.parse_args(argv[1:])
     revisions = {"base": args.base_revision, "heat": args.heat_revision}
+    if args.records_revision:
+        revisions["records"] = args.records_revision
+    arms = [arm for arm in ARMS if arm in revisions]
     if not args.summarize:
         if socket.gethostname() != "bench":
             print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)
             return 2
-        bins = {"base": args.base_bin, "heat": args.heat_bin}
-        trees = {"base": args.base_tree, "heat": args.heat_tree}
-        if None in bins.values() or None in trees.values() or args.logs is None:
-            parser.error("both bins, both trees and --logs are needed to run")
-        for arm in ARMS:
+        bins = {"base": args.base_bin, "heat": args.heat_bin, "records": args.records_bin}
+        trees = {"base": args.base_tree, "heat": args.heat_tree, "records": args.records_tree}
+        if any(bins[arm] is None or trees[arm] is None for arm in arms) or args.logs is None:
+            parser.error("a bin and a tree for every arm and --logs are needed to run")
+        for arm in arms:
             head = subprocess.run(
                 ["git", "rev-parse", "HEAD"], cwd=trees[arm], capture_output=True, text=True, check=True
             ).stdout.strip()
@@ -347,7 +366,7 @@ def main(argv: list[str]) -> int:
             if args.system and system not in args.system:
                 continue
             for seed in seeds_of(system):
-                for arm in ARMS:
+                for arm in arms:
                     key = (system, arm, str(seed), revisions[arm])
                     if key in done:
                         print(f"skip {system} {arm} {seed}", flush=True)

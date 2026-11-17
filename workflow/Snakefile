@@ -1014,17 +1014,20 @@ rule paper_0120:
         """
 
 
-# Same-session gate of plateau_heat: 98dcfb31 against the revision that
-# adds the flag, run with H2H_PLATEAU_HEAT=1. Au55 seeds 2000-2023; LJ38,
-# LJ55, LJ75, LJ98, LJ104, LJ150, M80 at rho 6 and 14 and sc108-55 seeds
-# 2000-2011; one process on core 0, sudo unshare --uts with hostname
-# bench. Rows are appended to bench/au55-general/rows.csv with
-# code_revision and host. RGPOT_SC_LIB names rgpot's Sutton-Chen library.
-# Not part of `rule all`:
-#   GATE_HEAT_REV=<rev> RGPOT_SC_LIB=<lib> snakemake -s workflow/Snakefile au55_general
+# Same-session gate of plateau_heat: 24ed9551 against the revision that
+# doubles the heat and, with GATE_RECORDS_REV, the revision that picks it
+# by records per call, both run with H2H_PLATEAU_HEAT=1. Au55 seeds
+# 2000-2023; M80 at rho 14 and sc108-55 seeds 2000-2035; LJ38, LJ55, LJ75,
+# LJ98, LJ104, LJ150 and M80 at rho 6 seeds 2000-2011; one process on core
+# 0, sudo unshare --uts with hostname bench. Rows are appended to
+# bench/au55-general2/rows.csv with code_revision and host; the 98dcfb31
+# gate is bench/au55-general. RGPOT_SC_LIB names rgpot's Sutton-Chen
+# library. Not part of `rule all`:
+#   GATE_HEAT_REV=<rev> GATE_RECORDS_REV=<rev> RGPOT_SC_LIB=<lib> \
+#     snakemake -s workflow/Snakefile au55_general
 rule au55_general:
     output:
-        "bench/au55-general/summary.csv",
+        "bench/au55-general2/summary.csv",
     shell:
         """
         set -euo pipefail
