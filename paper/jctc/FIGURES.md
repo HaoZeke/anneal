@@ -219,4 +219,3 @@ lj98_landscape.pdf git blob 263f6336faadc4bf77335629622536b9cb60f549
 
 landfold_maps.pdf keeps six raster panels, (i) to (n).
 Their landscape.ld tables are not in the repository, so only the sealed landscape.png of each exists.
-
