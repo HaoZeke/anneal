@@ -409,6 +409,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   series diff that removes or rewrites an `@N` line or adds an ordinal
   that is not a `local` ledger entry.
 
+- `tests/test_expr_params.py` checks that `PotentialConfig.expr` is the
+  upstream `ExprParams` arm at @16, as `test_rpc_schema_sync.py` does,
+  instead of refusing it.
+
 - `CppCore/tests/registry.txt` lists every test with the features that
   gate it, its kind and its options, and meson and CMake both register
   their tests from it.
