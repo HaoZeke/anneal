@@ -4,6 +4,7 @@
 // on a kernel that refuses mprotect(PROT_EXEC) on the stack).
 // aoti_unpack.hpp applies it to every .so it unpacks.
 
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -138,6 +139,19 @@ inline void publication_backoff(std::chrono::milliseconds &delay) {
   delay = doubled < kPublicationMaxBackoff ? doubled : kPublicationMaxBackoff;
 }
 
+// The last error of a retry loop that gave up, with its code and the attempts
+// the loop made before the deadline.
+inline std::string
+publication_failure(const std::error_code &ec, int attempts,
+                    std::chrono::steady_clock::time_point start) {
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - start);
+  return ec.message() + " (" + ec.category().name() + " error " +
+         std::to_string(ec.value()) + ", " + std::to_string(attempts) +
+         (attempts == 1 ? " attempt in " : " attempts in ") +
+         std::to_string(elapsed.count()) + " ms)";
+}
+
 #ifdef _WIN32
 inline std::error_code win_last_error() {
   return std::error_code(static_cast<int>(GetLastError()),
@@ -250,7 +264,7 @@ inline std::vector<uint8_t> read_all(const std::string &path) {
   const auto start = std::chrono::steady_clock::now();
   auto delay = kPublicationInitialBackoff;
   const std::filesystem::path file(path);
-  for (;;) {
+  for (int attempts = 1;; ++attempts) {
 #ifdef _WIN32
     std::error_code ec;
     auto buf = read_shared(file, ec);
@@ -260,9 +274,10 @@ inline std::vector<uint8_t> read_all(const std::string &path) {
         publication_retryable(ec) || publication_slot_absent(ec);
     if (!again || !publication_time_left(start))
       throw std::runtime_error("UmaPot: cannot read AOTI package " + path +
-                               ": " + ec.message());
+                               ": " + publication_failure(ec, attempts, start));
     publication_backoff(delay);
 #else
+    errno = 0;
     std::ifstream in(path, std::ios::binary);
     if (in) {
       in.seekg(0, std::ios::end);
@@ -274,6 +289,9 @@ inline std::vector<uint8_t> read_all(const std::string &path) {
         throw std::runtime_error("UmaPot: short read of AOTI package " + path);
       return buf;
     }
+    const std::error_code opened =
+        errno ? std::error_code(errno, std::generic_category())
+              : std::make_error_code(std::errc::io_error);
     std::error_code ec;
     const bool present = std::filesystem::exists(file, ec);
     if ((publication_retryable(ec) || present) &&
@@ -281,7 +299,9 @@ inline std::vector<uint8_t> read_all(const std::string &path) {
       publication_backoff(delay);
       continue;
     }
-    throw std::runtime_error("UmaPot: cannot read AOTI package " + path);
+    throw std::runtime_error("UmaPot: cannot read AOTI package " + path +
+                             ": " +
+                             publication_failure(opened, attempts, start));
 #endif
   }
 }
@@ -316,10 +336,12 @@ inline void write_all(const std::string &path,
   // and threads. Only a closed, complete file is renamed to the shared path.
   const auto reserve_start = std::chrono::steady_clock::now();
   auto delay = kPublicationInitialBackoff;
+  int reserve_attempts = 0;
   for (std::size_t slot = 0; !publication.owned;) {
     publication.directory = path + ".tmp." + std::to_string(slot);
     publication.payload = publication.directory / "payload.pt2";
     std::error_code error;
+    ++reserve_attempts;
     publication.owned = fs::create_directory(publication.directory, error);
     if (publication.owned)
       break;
@@ -335,8 +357,9 @@ inline void write_all(const std::string &path,
       publication_backoff(delay);
       continue;
     }
-    throw std::runtime_error("UmaPot: cannot reserve publication for " + path +
-                             ": " + error.message());
+    throw std::runtime_error(
+        "UmaPot: cannot reserve publication for " + path + ": " +
+        publication_failure(error, reserve_attempts, reserve_start));
   }
   const std::string tmp = publication.payload.string();
   {
@@ -352,16 +375,19 @@ inline void write_all(const std::string &path,
   }
   const auto publish_start = std::chrono::steady_clock::now();
   delay = kPublicationInitialBackoff;
+  int publish_attempts = 1;
   std::error_code ec = publish_replace(publication.payload, path);
   while (publication_retryable(ec) && publication_time_left(publish_start)) {
     publication_backoff(delay);
     if (!publication_time_left(publish_start))
       break;
+    ++publish_attempts;
     ec = publish_replace(publication.payload, path);
   }
   if (ec)
-    throw std::runtime_error("UmaPot: cannot publish " + path + ": " +
-                             ec.message());
+    throw std::runtime_error(
+        "UmaPot: cannot publish " + path + ": " +
+        publication_failure(ec, publish_attempts, publish_start));
 }
 
 } // namespace aoti_execstack
