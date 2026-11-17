@@ -158,6 +158,16 @@ RGPOT_ENGINE_API int rgpot_engine_force(
     const double *box, rgpot_engine_coord_transform transform,
     void *transform_user);
 
+/**
+ * Exact energy-Hessian product for one Cartesian direction. positions and
+ * direction hold 3*nAtoms doubles; product receives 3*nAtoms doubles in
+ * eV/Angstrom. Returns 3 when the potential has no analytic product.
+ */
+RGPOT_ENGINE_API int rgpot_engine_hvp(
+    RgpotEnginePot *pot, long nAtoms, const double *positions,
+    const int *atomicNrs, const double *direction, double *product,
+    const double *box);
+
 /* ------------------------------------------------------------------ */
 /* Optional symbols: probe with dlsym; absence means unsupported.     */
 /* ------------------------------------------------------------------ */
@@ -272,6 +282,7 @@ typedef struct {
   int group_collective;    /**< every rank of a group enters each call */
   int orbital_selection;   /**< select_orbitals is supported */
   int orbital_copy;        /**< copy_orbitals is supported */
+  int analytic_hvp;        /**< rgpot_engine_hvp is exact for this potential */
 } RgpotEngineCaps;
 
 RGPOT_ENGINE_API int rgpot_engine_caps(const RgpotEnginePot *pot,

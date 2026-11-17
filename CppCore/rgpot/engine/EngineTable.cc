@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -219,6 +220,34 @@ int rgpot_engine_force(RgpotEnginePot *pot, long nAtoms,
   }
 }
 
+int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
+                     const double *positions, const int *atomicNrs,
+                     const double *direction, double *product,
+                     const double *box) {
+  if (!pot || !pot->backend || !positions || !atomicNrs || !direction ||
+      !product || !box || nAtoms <= 0 ||
+      static_cast<unsigned long>(nAtoms) >
+          std::numeric_limits<size_t>::max() / 3) {
+    return fail(pot, 1, "invalid HVP argument");
+  }
+  if (!pot->caps.analyticHvp) {
+    return fail(pot, 3, "potential has no analytic Hessian-vector product");
+  }
+  try {
+    RgpotEnginePot::CallGuard guard(*pot);
+    SoftGilRelease no_gil;
+    const rgpot::ForceInput in{static_cast<size_t>(nAtoms), positions,
+                               atomicNrs, box};
+    pot->backend->pot->hessianVectorImpl(in, direction, product);
+    pot->clear_error();
+    return 0;
+  } catch (const std::exception &e) {
+    return fail(pot, 2, e.what());
+  } catch (...) {
+    return fail(pot, 2, "unknown exception");
+  }
+}
+
 int rgpot_engine_force_batch(RgpotEnginePot *pot, long nSystems, long nAtoms,
                              const double *positions, const int *atomicNrs,
                              double *forces, double *energies,
@@ -307,6 +336,7 @@ int rgpot_engine_caps(const RgpotEnginePot *pot, RgpotEngineCaps *out) {
   filled.group_collective = pot->caps.groupCollective ? 1 : 0;
   filled.orbital_selection = pot->backend->select_orbitals ? 1 : 0;
   filled.orbital_copy = pot->backend->copy_orbitals ? 1 : 0;
+  filled.analytic_hvp = pot->caps.analyticHvp ? 1 : 0;
   // The host's struct may be older (smaller) than this engine's: write only
   // the bytes it announced room for.
   const unsigned room = out->size < sizeof(filled) ? out->size : sizeof(filled);

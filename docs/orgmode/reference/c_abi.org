@@ -1088,6 +1088,24 @@ enum rgpot_status_t rgpot_rpc_calculate(rgpot_rpc_client_t *client,
   =3 * n_atoms= forces.
   =RGPOT_INTERNAL_ERROR= for a caught panic.
 
+*** =rgpot_rpc_calculate_hvp=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_rpc_calculate_hvp(
+    rgpot_rpc_client_t *client, const struct rgpot_force_input_t *input,
+    const double *direction, double *product);
+#+end_src
+
+- Inputs :: =client= and =input= as for =rgpot_rpc_calculate=; =direction=
+  contains =3 * n_atoms= doubles.
+- Units :: energy Hessian times direction in the remote potential's units.
+- Outputs :: =product= receives =3 * n_atoms= doubles from the server's
+  analytic HVP operation.
+- Errors :: =RGPOT_INVALID_PARAMETER= for a NULL argument or malformed
+  positions tensor. =RGPOT_RPC_ERROR= when capability negotiation, transport,
+  or the remote analytic calculation fails.
+
 *** =rgpot_rpc_client_free=
 
 #+attr_rgpot: signature

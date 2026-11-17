@@ -42,7 +42,7 @@ namespace abi {
 
 inline constexpr const char *kProtocolFamily = "rgpot.potentials";
 inline constexpr uint16_t kProtocolMajor = 1;
-inline constexpr uint16_t kProtocolMinor = 0;
+inline constexpr uint16_t kProtocolMinor = 1;
 inline constexpr const char *kSchemaId = "0xbd1f89fa17369103";
 
 /** What the host requires of a backend. */

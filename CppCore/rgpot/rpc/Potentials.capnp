@@ -102,6 +102,7 @@ struct Capabilities {
     stress         @7;
     optimize       @8;
     frequencies    @9;
+    hessianVector  @10;
   }
 }
 
@@ -2697,6 +2698,10 @@ interface Potential {
   # @brief Compute the periodic stress tensor for this geometry.
   # @return PotentialResult.stress in energyUnit / lengthUnit^3.
   calculateStress @7 (fip :ForceInput) -> (result :PotentialResult);
+
+  # @brief Exact Cartesian energy-Hessian product for one direction.
+  calculateHvp @14 (fip :ForceInput, direction :List(Float64))
+      -> (product :List(Float64));
 
   # @brief Optimize this geometry and return final coordinates.
   # @return PotentialResult.optimizedPos in ForceInput.lengthUnit.

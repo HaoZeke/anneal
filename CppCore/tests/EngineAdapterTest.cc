@@ -35,6 +35,8 @@ struct Stub {
   int (*force)(RgpotEnginePot *, long, const double *, const int *, double *,
                double *, double *, const double *, rgpot_engine_coord_transform,
                void *) = nullptr;
+  int (*hvp)(RgpotEnginePot *, long, const double *, const int *,
+             const double *, double *, const double *) = nullptr;
   int (*force_batch)(RgpotEnginePot *, long, long, const double *, const int *,
                      double *, double *, double *, const double *,
                      rgpot_engine_coord_transform, void *) = nullptr;
@@ -74,6 +76,7 @@ Stub &stub() {
     out.force = sym<decltype(out.force)>(h, "rgpot_engine_force");
     out.force_batch =
         sym<decltype(out.force_batch)>(h, "rgpot_engine_force_batch");
+    out.hvp = sym<decltype(out.hvp)>(h, "rgpot_engine_hvp");
     out.stamp = sym<decltype(out.stamp)>(h, "rgpot_engine_abi_stamp");
     out.caps = sym<decltype(out.caps)>(h, "rgpot_engine_caps");
     out.last_error =
@@ -225,6 +228,22 @@ TEST_CASE("force_batch evaluates strided systems", "[engine][adapter]") {
   REQUIRE(energies[1] == Catch::Approx(4.0));
   REQUIRE(forces[6] == -2.0);
   REQUIRE(variances[1] == 0.25);
+  s.destroy(pot);
+}
+
+TEST_CASE("analytic HVP passes through the engine ABI", "[engine][adapter]") {
+  Stub &s = stub();
+  RgpotEnginePot *pot = make(s, 0);
+  const double pos[6] = {1, 2, 3, 4, 5, 6};
+  const double direction[6] = {0.2, -0.3, 0.4, 0.1, -0.5, 0.7};
+  double product[6] = {};
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), direction, product, kBox.data()) == 0);
+  for (std::size_t i = 0; i < std::size(direction); ++i)
+    REQUIRE(product[i] == Catch::Approx(direction[i]));
+  RgpotEngineCaps caps{};
+  caps.size = sizeof(caps);
+  REQUIRE(s.caps(pot, &caps) == 0);
+  REQUIRE(caps.analytic_hvp == 1);
   s.destroy(pot);
 }
 
