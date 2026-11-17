@@ -1401,3 +1401,67 @@ Darouich, Geisler, Toney, Bien, Kästner, Kulik, and Niepert, arXiv:2609.34592 (
 Checked via HTTP on 17 November 2026: `crest-lab/crest` newest numbered release remains `v3.0.2` (25 August 2024; master tip 16 June 2026, `cfdc301f`); `grimme-lab/xtb` remains `v6.8.0` (5 November 2026); ORCA's newest numbered release on FACCTs remains `ORCA 6.1.1` (9 December 2025; no new GOAT release); `agox/agox` on GitLab and PyPI remains `v3.11.1` (4 February 2026; `dev` tip `22d94a6f`, 5 May 2026; GOFEE remains integrated in `agox.algorithms.gofee` and the 3.11.2 docs banner is untagged); `ase/ase` on GitLab and PyPI remains `3.29.0` (21 June 2026; `master` tip `c879478d`, 14 November 2026); `pele-python/pele` on GitHub and PyPI remains `v0.1.2` (12 October 2026); and the Cambridge GMIN landing page still has `Last-Modified` 17 March 2022 (`software.html` 13 September 2026, daily `svn.tar.bz2` archive 17 November 2026, no new versioned release).
 
 Cite `hueblerCurcumaFilter2026`, `darouichCurvFm2026`, `caiAtomSteer2026`, `hrycCsh2026`, `cinarogluRingConformer2026`, and `damjanovicCyclicPeptide2026`.
+
+## 2026-11-17 — A lattice minimum, site disorder, and planar boron clusters
+
+Luo and Wei, arXiv:2611.19696 (15 November 2026), classify the minimisers of the three-dimensional Lennard--Jones lattice energy at every covolume. As the covolume grows, the minimising lattice changes from face-centred cubic to body-centred tetragonal and then to simple hexagonal. This is an infinite periodic lattice problem. It gives no finite-cluster energy at 38, 55, 75, 98, or 104 atoms, so it does not contradict the Cambridge hit targets and does not warrant a head-to-head on the free-cluster panel.
+
+Petersen, Ren, and Hippalgaonkar, arXiv:2610.41327 (30 October 2026), search orderings of site-disordered crystals with a surrogate that balances exploitation, uncertainty, and novelty. Across fourteen test cases on twelve crystal structures, the abstract reports recovery of the enumerated global minimum in 94 percent of runs, against 55 percent for random walk, Markov-chain Monte Carlo, and a genetic algorithm, with a median 4.3-fold reduction in evaluations relative to the best of those baselines. This is periodic occupancy ordering followed by structural relaxation, not a free Lennard--Jones or water cluster. It contradicts no manuscript count. A head-to-head would require one of those site-disordered cells and the same relaxation ledger, not the sealed cluster maps.
+
+Qiu, Qian, Mu, Liu, Zhang, Kim, and Ding, Physical Review B 114, 254105 (2026), doi:10.1103/x3bz-g9zz, report a machine-learning-force-field-accelerated global structure search for stable planar boron clusters. The Crossref record verifies the DOI, title, authors, volume, and article number but supplies no abstract. That metadata establishes a new cluster-search paper, but not a size, hit rate, energy, or evaluation budget that can be compared with this manuscript. It contradicts no printed claim and does not yet justify a head-to-head.
+
+Cite `luoThreeDimLjLattice2026`, `petersenAgentic2026`, and `qiuBoronClusters2026`.
+
+## 2026-11-17 — Lineage-aware conformational sampling and a water-cluster record
+
+Maity, Majumdar, and Chakrabarty, Journal of Chemical Physics 165, 164137 (2026), doi:10.1063/5.0350663, release TRAILS-MD, an engine-independent adaptive molecular-dynamics framework that preserves trajectory lineage while launching short trajectory ensembles. The abstract applies it to peptide isomerisation, Trp-cage and WW-domain folding, ligand unbinding from HSP90, and adenylate-kinase conformational change. It maps connected pathways and seeds Markov state models; it does not claim a lowest conformer, a Lennard--Jones minimum, or a water-cluster hit rate. It contradicts no manuscript count and does not warrant a head-to-head on the CREST table.
+
+Kirov, Chemical Physics 610, 113289 (2026), doi:10.1016/j.chemphys.2026.113289, is a new record titled “On the surface structure of water clusters.” Crossref verifies the DOI, author, title, volume, and article number but supplies no abstract. The record alone gives no cluster size, potential, global-minimum energy, or search protocol. It therefore cannot be read as contradicting the TIP4P references, the GFN2-xTB motif counts, or the polished gaps, and it does not yet justify a head-to-head.
+
+Cite `maityTrailsMd2026` and `kirovWaterSurface2026`.
+
+## 2026-11-17 — Exact watch queries
+
+The publication window was 18 October through 17 November 2026. Repeated requests after rate limits are listed once. These are the exact search requests:
+
+```text
+https://export.arxiv.org/api/query?search_query=%28all%3a%22global+optimization%22+OR+all%3a%22global+optimisation%22%29+AND+%28all%3acluster+OR+all%3amolecular+OR+all%3aatomistic%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=all%3a%22Lennard-Jones%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=all%3a%22water+cluster%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=all%3a%22water+clusters%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=%28all%3aconformer+OR+all%3aconformational%29+AND+%28all%3asearch+OR+all%3asampling%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=%28all%3a%22conformer+search%22+OR+all%3a%22conformational+search%22+OR+all%3a%22conformer+sampling%22+OR+all%3a%22conformational+sampling%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=ti%3a%22On+the+surface+structure+of+water+clusters%22+OR+ti%3a%22Predicting+stable+planar+boron+clusters%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending
+https://api.crossref.org/works?query.bibliographic=cluster+global+optimization+global+optimisation&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.crossref.org/works?query.bibliographic=Lennard-Jones+cluster+benchmark&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.crossref.org/works?query.bibliographic=water+cluster+global+minimum+structure+search&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.crossref.org/works?query.bibliographic=conformer+search+conformational+sampling&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.crossref.org/works?query.bibliographic=CREST+GOAT+AGOX+GOFEE+ASE+pele+GMIN&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.github.com/search/repositories?q=CREST+conformer+chemistry+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=GOAT+molecular+global+optimization+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=AGOX+atomistic+global+optimization+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=GOFEE+atomistic+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=pele+energy+landscape+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=GMIN+Wales+cluster+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=GOFEE+in%3aname&per_page=20
+https://api.github.com/search/repositories?q=GOAT+%22Bernardo+de+Souza%22&per_page=20
+https://api.github.com/search/repositories?q=GMIN+%22energy+landscape%22&per_page=20
+https://api.github.com/search/repositories?q=AGOX+in%3aname&per_page=20
+https://gitlab.com/api/v4/projects?search=GOFEE&simple=true&per_page=20
+https://gitlab.com/api/v4/projects?search=GOAT+global+optimization&simple=true&per_page=20
+https://gitlab.com/api/v4/projects?search=GMIN&simple=true&per_page=20
+```
+
+The exact release and tag requests were:
+
+```text
+https://api.github.com/repos/crest-lab/crest/releases?per_page=100
+https://api.github.com/repos/pele-python/pele/releases?per_page=100
+https://api.github.com/repos/asm-dtu/GOFEE/releases?per_page=100
+https://api.github.com/repos/wales-group/GMIN/releases?per_page=100
+https://api.github.com/repos/js850/PyGMIN/releases?per_page=100
+https://gitlab.com/api/v4/projects/ase%2Fase/releases?per_page=100
+https://gitlab.com/api/v4/projects/ase%2Fase/repository/tags?per_page=100
+https://gitlab.com/api/v4/projects/agox%2Fagox/releases?per_page=100
+https://gitlab.com/api/v4/projects/agox%2Fagox/repository/tags?per_page=100
+```
