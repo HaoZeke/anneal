@@ -2469,7 +2469,7 @@ mod tests {
         true
     }
 
-    /// Relabelling must not move a vacant site.
+    /// Relabeling must not move a vacant site.
     ///
     /// The base merge keeps the first hollow in atom-index order, so
     /// this assertion fails there. The centroid order passes.
@@ -2513,13 +2513,13 @@ mod tests {
                 let sites_b = lattice.sites(&moved);
                 assert!(
                     same_points(&sites, &sites_b),
-                    "vacant sites moved under a relabelling"
+                    "vacant sites moved under a relabeling"
                 );
             }
         }
     }
 
-    /// Relabelling a minimum must not move a vacant site or a draw.
+    /// Relabeling a minimum must not move a vacant site or a draw.
     #[test]
     fn vacant_sites_and_move_probabilities_ignore_labels() {
         use rand::SeedableRng;
@@ -2568,14 +2568,14 @@ mod tests {
                 let sites_b = lattice.sites(&moved);
                 assert!(
                     same_points(&sites, &sites_b),
-                    "vacant sites moved under a relabelling"
+                    "vacant sites moved under a relabeling"
                 );
                 let law_b = lattice
                     .exchange_probabilities(&moved, 0.8)
-                    .expect("relabelled minimum offers an exchange");
+                    .expect("relabeled minimum offers an exchange");
                 assert!(
                     same_law(&law, &law_b),
-                    "move probabilities moved under a relabelling"
+                    "move probabilities moved under a relabeling"
                 );
             }
         }

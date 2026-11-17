@@ -1,6 +1,6 @@
 # Single-species packing leave
 
-`8e076b7f` against `7b574de5`. A species vector that repeats one element now takes the unlabelled packing-growth leave, the energy-lattice exchange, and the fivefold SOAP hop. Two distinct labels stay a homotop.
+`8e076b7f` against `7b574de5`. A species vector that repeats one element now takes the unlabeled packing-growth leave, the energy-lattice exchange, and the fivefold SOAP hop. Two distinct labels stay a homotop.
 
 Six seeds, 2000–2005. The (system, seed, arm) list is shuffled with schedule seed 20261113. One job at a time, `sudo unshare --uts`, hostname `bench`. `pot_per_eval_s` is potential time per charged call. `outside_per_eval_s` is the rest of the wall on the same denominator.
 

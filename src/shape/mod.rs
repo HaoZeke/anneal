@@ -89,7 +89,7 @@ pub enum ShapeError {
     /// bijection, so the correspondence it reports cannot be used.
     ///
     /// Observed against libira at 3cb0c29: matching a twelve-point structure to
-    /// a relabelled copy of itself returns `cerr = 0`, the correct distance of
+    /// a relabeled copy of itself returns `cerr = 0`, the correct distance of
     /// zero and the correct identity rotation, with the permutation
     /// `[4,5,6,7,8,9,10,0,0,1,2,3]`, where index 0 is assigned twice and index
     /// 11 never. The distance is computed inside the library and is right; the
@@ -268,22 +268,22 @@ impl crate::bias::Fingerprint for CanonicalOrder {
     ///
     /// INHERITED, not reproduced here: a note in this position said that
     /// against libira at 3cb0c29 the permutation comes back non-bijective even
-    /// for a structure matched to a relabelled copy of itself. That claim is
+    /// for a structure matched to a relabeled copy of itself. That claim is
     /// part of why IRA has been treated as unreliable in this crate, so it is
     /// recorded as something once observed rather than deleted.
     ///
     /// MEASURED, on the libira in use now, across two cases that are not the
     /// same question:
     ///
-    /// - A relabelling of the *reference itself*, in
-    ///   `tests::a_canonical_order_absorbs_relabelling`. The easy case: the
+    /// - A relabeling of the *reference itself*, in
+    ///   `tests::a_canonical_order_absorbs_relabeling`. The easy case: the
     ///   structure being matched is the one the order is defined against.
-    /// - A relabelling of a structure that *differs from the reference by a
+    /// - A relabeling of a structure that *differs from the reference by a
     ///   real distortion*, in
-    ///   `tests::canonicalising_a_relabelled_copy_of_a_distorted_structure`.
+    ///   `tests::canonicalising_a_relabeled_copy_of_a_distorted_structure`.
     ///   This is what a search actually produces and the only case that bears
     ///   on whether a coordinate-space model can be trusted. A jittered cluster
-    ///   and a relabelled copy of it canonicalise to the same coordinates at
+    ///   and a relabeled copy of it canonicalise to the same coordinates at
     ///   2.7e-16 root-mean-square on 13 points and 2.9e-16 on 38, costing 2.4
     ///   ms per structure warm.
     ///
@@ -721,18 +721,18 @@ mod tests {
         v
     }
 
-    /// Does canonicalisation undo a relabelling of a structure that is *not*
+    /// Does canonicalisation undo a relabeling of a structure that is *not*
     /// the reference, and what does it cost?
     ///
-    /// [`a_canonical_order_absorbs_relabelling`] already covers the easy case,
-    /// a relabelling of the reference itself. The case that decides whether a
+    /// [`a_canonical_order_absorbs_relabeling`] already covers the easy case,
+    /// a relabeling of the reference itself. The case that decides whether a
     /// coordinate-space kernel is usable for cluster search is the other one: a
     /// structure the search actually produced, which differs from the reference
-    /// by a real distortion, against a relabelled copy of itself.
+    /// by a real distortion, against a relabeled copy of itself.
     ///
     /// It matters because the inverse-distance kernel in `gpr_optim` compares
     /// pair `(i, j)` of one structure with pair `(i, j)` of another, so a
-    /// relabelled copy reads as a different structure. Measured through that
+    /// relabeled copy reads as a different structure. Measured through that
     /// model on 13 points: the posterior mean moved by 218 standard deviations
     /// and the reported standard deviation rose from 1.42e-4 to 9.74e-1, a
     /// factor of 6900. Canonicalising every structure before it enters the
@@ -740,7 +740,7 @@ mod tests {
     /// on structures away from the reference.
     #[cfg(feature = "ira")]
     #[test]
-    fn canonicalising_a_relabelled_copy_of_a_distorted_structure() {
+    fn canonicalising_a_relabeled_copy_of_a_distorted_structure() {
         for n in [13usize, 38] {
             let reference = shell(n, 0.0, 11);
             let canon = CanonicalOrder::new(reference.clone(), 1.8);
@@ -764,12 +764,12 @@ mod tests {
             match (a, b) {
                 (Some(a), Some(b)) => println!(
                     "n={n}: canonicalisation {cost_us:.1} us per structure, rmsd between \
-                     a distorted structure and its relabelled copy {:.4e}",
+                     a distorted structure and its relabeled copy {:.4e}",
                     rms(a.view(), b.view())
                 ),
                 (a, b) => println!(
                     "n={n}: canonicalisation {cost_us:.1} us per structure, refused: \
-                     as labelled {}, relabelled {}",
+                     as labeled {}, relabeled {}",
                     if a.is_some() { "ok" } else { "None" },
                     if b.is_some() { "ok" } else { "None" }
                 ),
@@ -797,10 +797,10 @@ mod tests {
         y
     }
 
-    /// Relabelling the points must not move the descriptor: that is what makes
+    /// Relabeling the points must not move the descriptor: that is what makes
     /// it a basin key at all.
     #[test]
-    fn a_canonical_order_absorbs_relabelling() {
+    fn a_canonical_order_absorbs_relabeling() {
         let r = generic12();
         let c = CanonicalOrder::new(r.clone(), 1.8);
         let a = c
@@ -808,10 +808,10 @@ mod tests {
             .expect("reference did not canonicalise");
         let b = c
             .canonicalise(relabel(r.view(), 5).view())
-            .expect("relabelled copy did not canonicalise");
+            .expect("relabeled copy did not canonicalise");
         assert!(
             rms(a.view(), b.view()) < 1e-6,
-            "relabelling moved the descriptor by {}",
+            "relabeling moved the descriptor by {}",
             rms(a.view(), b.view())
         );
     }
@@ -877,20 +877,20 @@ mod tests {
     /// with an index repeated and another absent, which reads exactly like a
     /// library defect and was very nearly reported as one.
     #[test]
-    fn a_relabelled_copy_returns_the_relabelling() {
+    fn a_relabeled_copy_returns_the_relabeling() {
         let r = generic12();
         let shift = 5usize;
         let q = relabel(r.view(), shift);
         let m = match_shapes(r.view(), q.view(), 1.8).expect("match failed outright");
         assert!(
             m.distance < 1e-9,
-            "a relabelled copy should be at distance zero, got {}",
+            "a relabeled copy should be at distance zero, got {}",
             m.distance
         );
         let perm = m
             .permutation
             .as_ref()
-            .expect("a relabelled copy has a perfectly good correspondence");
+            .expect("a relabeled copy has a perfectly good correspondence");
         let n = 12;
         let mut seen = vec![false; n];
         for &p in perm {
@@ -924,24 +924,24 @@ mod tests {
     }
 
     #[test]
-    fn typed_match_absorbs_only_species_preserving_relabelling() {
+    fn typed_match_absorbs_only_species_preserving_relabeling() {
         let reference = generic12();
         let species = [8_u32, 1, 1, 8, 1, 1, 8, 1, 1, 8, 1, 1];
         let shift = 5usize;
-        let relabelled = relabel(reference.view(), shift);
-        let mut relabelled_species = [0_u32; 12];
+        let relabeled = relabel(reference.view(), shift);
+        let mut relabeled_species = [0_u32; 12];
         for (atom, atomic_number) in species.into_iter().enumerate() {
-            relabelled_species[(atom + shift) % species.len()] = atomic_number;
+            relabeled_species[(atom + shift) % species.len()] = atomic_number;
         }
 
         let matched = match_shapes_typed(
             reference.view(),
             &species,
-            relabelled.view(),
-            &relabelled_species,
+            relabeled.view(),
+            &relabeled_species,
             1.8,
         )
-        .expect("species-preserving relabelling must be matchable");
+        .expect("species-preserving relabeling must be matchable");
         assert!(matched.distance < 1e-9);
 
         let mut exchanged = reference.clone();
@@ -960,7 +960,7 @@ mod tests {
     }
 
     /// A generic structure with no symmetry, where the canonical order is
-    /// unique and relabelling is absorbed exactly.
+    /// unique and relabeling is absorbed exactly.
     fn generic12() -> Array1<f64> {
         let mut x = Array1::<f64>::zeros(36);
         for i in 0..12 {
@@ -973,12 +973,12 @@ mod tests {
         x
     }
 
-    /// Relabelling the points must not move the descriptor: that is what makes
+    /// Relabeling the points must not move the descriptor: that is what makes
     /// it a basin key at all.
     /// The limitation, kept as a test because it decides where this can be
     /// used. A canonical order is canonical only up to the structure's own
     /// symmetry: an icosahedron admits sixty equivalent matchings, all at the
-    /// same distance, and IRA is free to return any of them. Relabelling then
+    /// same distance, and IRA is free to return any of them. Relabeling then
     /// moves the descriptor by a symmetry operation even though the structure
     /// has not changed, which is fatal for keying basins on it, because the
     /// structures this search cares about are exactly the symmetric ones.
@@ -1323,7 +1323,7 @@ impl BasinMetric for IraMetric {
     /// Hausdorff distance under the optimal permutation and rigid motion.
     ///
     /// This is what makes a merge threshold a length rather than a number in
-    /// descriptor space. Two states differing by relabelling or by a rotation
+    /// descriptor space. Two states differing by relabeling or by a rotation
     /// return zero however their coordinates are written, so the threshold does
     /// not have to absorb those symmetries and does not have to be re-found at
     /// every system size.

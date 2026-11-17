@@ -1773,7 +1773,7 @@ mod basin_bias_tests {
         let f = SiteEnergies { n_points: 4 };
         let a = tetra(1.1);
         let mut b = Array1::zeros(12);
-        // Relabelled: 0 -> 2, 1 -> 0, 2 -> 3, 3 -> 1.
+        // Relabeled: 0 -> 2, 1 -> 0, 2 -> 3, 3 -> 1.
         let perm = [2usize, 0, 3, 1];
         for (i, p) in perm.iter().enumerate() {
             for k in 0..3 {

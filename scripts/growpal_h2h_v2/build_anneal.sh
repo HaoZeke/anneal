@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 # Release builds of the Lennard-Jones and Morse head-to-head examples.
 # Their paper_budget maps are the shared call ceilings. Paths in the
-# binaries are remapped so the timed run is not labelled with this checkout.
+# binaries are remapped so the timed run is not labeled with this checkout.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)

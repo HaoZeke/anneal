@@ -1170,7 +1170,7 @@ fn soap_arm(
         rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
         class: cfg.soap_class_residual && packing,
-        // One element takes the unlabelled fivefold hop. The label is
+        // One element takes the unlabeled fivefold hop. The label is
         // not a second species, so it is not a partition of the residual.
         species: if packing { None } else { cfg.species.clone() },
         mobile,
@@ -3626,7 +3626,7 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn one_repeated_label_takes_the_unlabelled_soap_hop() {
+    fn one_repeated_label_takes_the_unlabeled_soap_hop() {
         let pure = Config::recommended(8).with_species(vec![79; 8], None);
         assert!(
             pure.move_library

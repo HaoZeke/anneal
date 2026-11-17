@@ -10,8 +10,8 @@ Usage:
 The hop mode reads the HOPTRACE lines that ANNEAL_HOP_TRACE=1 writes,
 one per hop with the quenched geometry, and says for every hop how far
 the geometry is from the CREST minimum. The distance is the all-atom
-RMSD minimised over rotations, reflections, the 720 relabellings of
-the six molecules and the two labellings of each pair of hydrogens.
+RMSD minimised over rotations, reflections, the 720 relabelings of
+the six molecules and the two labelings of each pair of hydrogens.
 A mirror image is the same minimum on a non-chiral potential.
 
 Two structures are one minimum when they pass the census radius the
