@@ -2,9 +2,13 @@
 # MIT License
 # Copyright 2023--present rgpot developers
 # Compile the hand-written Rust caller against the neighbour archives.
+# Arguments after the build directory link the OpenMP runtime the archives
+# were compiled for. Without them -fopenmp is tried, as GCC and Clang take
+# it; AppleClang does not, so CMake passes the libraries FindOpenMP chose.
 set -eu
 root=$1
 build=$2
+shift 2
 rustc_bin=rustc
 if ! "$rustc_bin" --version >/dev/null 2>&1; then
   rustc_bin=$(find /usr/local/rustup/toolchains "${RUSTUP_HOME:-/usr/local/rustup}/toolchains" \
@@ -26,12 +30,11 @@ if [ -z "$half" ] || [ -z "$mini" ] || [ -z "$fma" ]; then
 fi
 cxx=${CXX:-c++}
 os=$(uname -s)
-omp_flag=
-if "$cxx" -fopenmp -x c++ -E - >/dev/null 2>&1 <<'EOF'
+if [ "$#" -eq 0 ] && "$cxx" -fopenmp -x c++ -E - >/dev/null 2>&1 <<'EOF'
 int main() { return 0; }
 EOF
 then
-  omp_flag=-fopenmp
+  set -- -fopenmp
 fi
 # Coverage builds instrument the archives. The shared library has to pull
 # the gcov runtime or the loader cannot resolve __gcov_init.
@@ -44,7 +47,7 @@ case "$os" in
   Darwin)
     "$cxx" -shared -o "$dir/libnlist.dylib" \
       -Wl,-force_load,"$half" -Wl,-force_load,"$mini" -Wl,-force_load,"$fma" \
-      $omp_flag $gcov_flag
+      "$@" $gcov_flag
     ;;
   MINGW*|MSYS*|CYGWIN*)
     # cl rejects -Wl,--whole-archive. link.exe pulls every object; the
@@ -74,7 +77,7 @@ case "$os" in
     ;;
   *)
     "$cxx" -shared -o "$dir/libnlist.so" -Wl,--whole-archive "$half" "$mini" "$fma" \
-      -Wl,--no-whole-archive $omp_flag $gcov_flag
+      -Wl,--no-whole-archive "$@" $gcov_flag
     ;;
 esac
 out=$(mktemp)
@@ -102,4 +105,4 @@ case "$os" in
     LD_LIBRARY_PATH="$dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$out"
     ;;
 esac
-rm -rf "$dir" "$out"
+rm -rf -- "${dir:?}" "${out:?}"

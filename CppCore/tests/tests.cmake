@@ -281,9 +281,26 @@ if(_on)
 endif()
 rgpot_test_enabled(nlist_rust _on)
 if(_on)
+  # The script links the archives into a shared library outside CMake, so
+  # rgpot_halfshell's OpenMP link interface does not reach it. AppleClang
+  # has no -fopenmp: pass the libraries FindOpenMP chose, and the runtime's
+  # directory as an rpath. SIP drops DYLD_* before sh runs, and conda's
+  # libomp.dylib is an @rpath install name.
+  set(_rgpot_nlist_rust_omp)
+  if(OpenMP_CXX_FOUND)
+    foreach(_rgpot_omp_name IN LISTS OpenMP_CXX_LIB_NAMES)
+      set(_rgpot_omp_lib "${OpenMP_${_rgpot_omp_name}_LIBRARY}")
+      list(APPEND _rgpot_nlist_rust_omp "${_rgpot_omp_lib}")
+      if(_rgpot_omp_name MATCHES "omp" AND IS_ABSOLUTE "${_rgpot_omp_lib}")
+        get_filename_component(_rgpot_omp_dir "${_rgpot_omp_lib}" DIRECTORY)
+        list(APPEND _rgpot_nlist_rust_omp "-Wl,-rpath,${_rgpot_omp_dir}")
+      endif()
+    endforeach()
+  endif()
   rgpot_add_test(nlist_rust
     COMMAND sh "${RGPOT_TEST_ROOT}/CppCore/examples/nlist_rust_test.sh"
-            "${RGPOT_TEST_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}")
+            "${RGPOT_TEST_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}"
+            ${_rgpot_nlist_rust_omp})
 endif()
 
 if(RGPOT_RPC_CLIENT_ONLY)
