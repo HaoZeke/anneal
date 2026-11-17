@@ -118,6 +118,32 @@ def test_a_rank_test_in_the_ase_section_is_reported():
     assert [r[2] for r in audit.drifts()] == ["sec:ase reports Fisher only"]
 
 
+def test_a_drifted_gmin_panel_summary_cell_is_reported():
+    audit = audit_mod.Audit()
+    summary = audit.rows("bench/gmin-panel/summary.csv")
+    au = next(r for r in summary if r["system"] == "au55")
+    au["gmin_hits"] = "0"
+    audit_mod.manuscript_gmin(audit)
+    assert [r[2] for r in audit.drifts()] == ["gmin_hits"]
+
+
+def test_a_censored_gmin_panel_wall_p_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex.replace("& 0.40 & 0.16 & -- \\\\", "& 0.40 & 0.16 & 0.0073 \\\\")
+    audit_mod.manuscript_gmin(audit)
+    assert [r[2] for r in audit.drifts()] == ["MW p wall"]
+
+
+def test_an_uncharged_gmin_panel_miss_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows("bench/gmin-panel/rows.csv")
+    miss = next(r for r in reversed(rows) if r["system"] == "au55" and r["code"] == "gmin" and r["hit"] == "0")
+    miss["charged"] = "50000"
+    audit_mod.manuscript_gmin(audit)
+    assert "row invariants" in {r[2] for r in audit.drifts()}
+
+
 def test_a_drifted_sutton_chen_howto_cell_is_reported():
     audit = audit_mod.Audit()
     path = audit_mod.SC96_78_HOWTO

@@ -1026,7 +1026,8 @@ The commands that reproduce the three comparisons are these, run from the
 repository root.
 \begin{footnotesize}
 \begin{verbatim}
-# GMIN: build the patched program, then run both arms
+# GMIN: LJ/Morse use TEMPERATURE 1.0 and NEWRESTART 40;
+# Au55 Gupta uses TEMPERATURE 0.1, NEWRESTART 40 and scaled RADIUS/STEP/AVOID
 bash scripts/gmin_panel/build_gmin.sh
 snakemake -s workflow/Snakefile gmin_panel
 bash scripts/gmin_panel/enter_bench.sh --summarize --tex
@@ -1054,14 +1055,31 @@ The rows themselves are what this article reports.
 
 \subsection{GMIN on the paper panel}
 \label{sec:gmin}
-Table~\ref{tab:gmin} puts this setting against GMIN on eight
+Table~\ref{tab:gmin} puts this work against GMIN on eight
 Lennard-Jones sizes, Gupta Au\(_{55}\), and Morse M\(_{55}\) and
-M\(_{80}\) at \(\rho=6\) and \(14\), in one session on one core of
-one host.
+M\(_{80}\) at \(\rho=6\) and \(14\), with both arms of each cluster
+in one session on one core of one host.
 Both arms use seeds 2000--2011, the budget in the table and the start
 this code writes for the seed.
-The hit is a quenched energy at most 0.001 above the Cambridge Cluster
-Database minimum.
+On Au\(_{55}\) the preset carries the gold species label and checks
+the basin index every eighth step; on Morse it quenches one Mackay cap
+before the walk when the second neighbor lies below \(-0.05\), as at
+\(\rho=6\), and leaves \(\rho=14\) unchanged.
+GMIN runs the Wales LJ\(_{38}\) introduction block (\(T=1.0\), step
+\(0.40\), target acceptance \(0.51\), sloppy and tight root-mean-square
+force limits \(5\times 10^{-3}\) and \(10^{-3}\), taboo window \(4.0\)
+over \(20\) minima without random reseeding after \(40\) unimproved
+steps) in reduced units on Lennard-Jones and Morse, and on Au\(_{55}\)
+with the Darby gold parameters, GMIN's nearest-neighbor container
+\(11.829521\)~\AA, step and taboo distances scaled by \(r_0/2^{1/6}\)
+(\(r_0=2.884\)~\AA), and \(T=0.1\)~eV from the Wales Gupta example.
+The hit is a quenched energy that differs by less than 0.001 from the
+Cambridge Cluster Database minimum: besides Section~\ref{sec:hit},
+\(-569.363652\) at LJ\(_{102}\), \(-575.766131\) at LJ\(_{103}\),
+\(-893.310258\) at LJ\(_{150}\), \(-191.03085280\)~eV at Au\(_{55}\),
+\(-250.286609\) and \(-220.646208\) at M\(_{55}\) (\(\rho=6,14\)), and
+\(-378.333471\) and \(-340.811371\) at M\(_{80}\) (\(\rho=6,14\)).
+\cite{walesCambridgeClusterDatabase}
 The Lennard-Jones, gold, and Morse rows run the preset through three
 drivers.
 The gold driver gives it the copper--gold species list with no copper
@@ -1078,13 +1096,14 @@ This setting hits more seeds than GMIN on 9 of the 13 clusters.~\rerun{5}
 GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12, and on
 M\(_{80}\) at \(\rho=6\), 12 of 12 against 2 of 12.
 The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\).~\rerun{6}
-Fisher's test on hits is below 0.05 on 7 clusters: 6 for this setting and
+Fisher's test on hits is below 0.05 on 6 clusters: 5 for this work and
 M\(_{80}\) at \(\rho=6\) for GMIN.~\rerun{5}
-The 6 are LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), Au\(_{55}\), and
-M\(_{55}\) and M\(_{80}\) at \(\rho=14\).~\rerun{5}
-The other 3 wins of this setting are LJ\(_{102}\), LJ\(_{103}\), and
-LJ\(_{104}\), at \(p\) of 0.21, 0.100, and 0.40, and the GMIN win on
-LJ\(_{150}\) is not significant either.~\rerun{5}
+The 5 are LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), and M\(_{55}\) and
+M\(_{80}\) at \(\rho=14\).~\rerun{5}
+The other 4 wins of this setting are LJ\(_{102}\), LJ\(_{103}\),
+LJ\(_{104}\), and Au\(_{55}\), at \(p\) of 0.21, 0.10, 0.40, and
+0.069, and the GMIN win on LJ\(_{150}\) is not significant
+either.~\rerun{5}
 The median wall of a run is lower for this setting on 12 of the 13 clusters and
 higher on M\(_{80}\) at \(\rho=6\).
 On M\(_{80}\) at \(\rho=6\) GMIN reaches the minimum in a median of
@@ -1097,23 +1116,34 @@ The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\) and
 They are the baseline in Section~\ref{sec:cross-field}.
 They are not a new comparison with GMIN.
 
-At M\(_{55}\) and \(\rho=6\) the cap is the complete Mackay icosahedron, which is the Cambridge minimum, so the 12 hits of this setting come at 345 to 709 calls, from the cap and not from a move.
+At M\(_{55}\) and \(\rho=6\), one quench of the complete Mackay
+icosahedron seeds the exact Cambridge global minimum, so the 12 hits of
+this setting come at 345 to 709 evaluations from the cap and not from a
+move.
 GMIN hits the same cluster in 4594 to 103829 calls.
 The ASE panel runs another revision, and its 12 hits at the same cluster come at 2266 to 47255 calls.
-At M\(_{80}\) and \(\rho=6\) the cap has no sites, so that row is a search of the moves alone, and this code loses that row.~\rerun{6}
+At M\(_{80}\) and \(\rho=6\) the cap has no sites, so that row is a
+real search of the moves alone, and this code loses that row; at
+\(\rho=14\) the cap is off.~\rerun{6}
 
 GMIN is run here differently from two earlier campaigns.
-The panel runs one input at every size, the Wales-group LJ\(_{38}\) introduction file with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, and no symmetrization keyword, from the start that this code writes for the seed.
+The panel uses three GMIN inputs.
+The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at every Lennard-Jones size, with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, with no symmetrization keyword, from the start that this code writes for the seed.
+The Morse rows add GMIN's native \texttt{MORSE} keyword and \(\rho\) to the same numerical settings.
+The Au\(_{55}\) row instead uses the Darby gold parameters, the \(11.829521\)~\AA\ nearest-neighbor container, \(T=0.1\)~eV, and the LJ step and taboo distances scaled by \(r_0/2^{1/6}\).
 An earlier campaign on seeds 0--63 at a ceiling of \(1\times 10^{6}\) calls has GMIN hit LJ\(_{98}\) on 64 of 64, as the Supporting Information records.
-A separate campaign gave GMIN the published LJ\(_{75}\) input with symmetrization and the OptBench starts, and GMIN hit LJ\(_{75}\) on 200 of 200 seeds in a median of 33122 force calls.
+The committed \path{paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv}
+campaign gave GMIN the published LJ\(_{75}\) input with symmetrization
+and the OptBench starts, and GMIN hit LJ\(_{75}\) on 200 of 200 seeds
+in a median of 33122 force calls.
 In the panel GMIN hits LJ\(_{98}\) and LJ\(_{75}\) on 0 of 12 seeds.
 Eleven of its 12 LJ\(_{98}\) runs end at \(-543.6429\) and one at \(-540.7447\), and all 12 of its LJ\(_{75}\) runs end at \(-396.2822\).
-So the panel measures GMIN under one setting at every size, and not GMIN tuned to each cluster.
-No run of the panel's GMIN with the per-size input exists, so the panel does not say whether the input, the symmetrization, or the start separates the two results.~\rerun{5}
+So the Lennard-Jones rows measure GMIN under one setting at every size, and not GMIN tuned to each cluster.
+No run of the panel's GMIN with a per-size Lennard-Jones input exists, so the panel does not say whether the input, the symmetrization, or the start separates the two results.~\rerun{5}
 
 % gmin-panel table: start
 \begin{table}
-\caption{This work against GMIN on one host in one session.
+\caption{This work against GMIN, both arms of each cluster on one host in one session.
 Revisions: anneal \texttt{c2de652d}, GMIN \texttt{aac1548a}.
 Seeds 2000--2011, one core, budget in force calls.
 Calls and IQR are the median and the interquartile range of the
@@ -1122,43 +1152,49 @@ Wall, In and Out are the median seconds of the run, inside the
 potential and outside it.
 \(p_\mathrm{F}\) is the two-sided Fisher exact test on hits;
 \(p_\mathrm{calls}\) and \(p_\mathrm{wall}\) are the two-sided
-Mann--Whitney test on calls and on wall.}
+Mann--Whitney test on calls and on wall to the minimum (`--' where
+call-capped misses leave cross-arm wall times censored at unequal horizons).
+The tagged M\(_{55}\), \(\rho=6\) row starts from one Mackay-cap quench
+of the exact global minimum (345--709 evaluations); the M\(_{80}\),
+\(\rho=6\) cap is empty, and the cap is off at \(\rho=14\).}
 \label{tab:gmin}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{2pt}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{@{}lrlrrrrrrrrr@{}}
 \toprule
 Cluster & Budget & Arm & Hits & Calls & IQR & Wall & In & Out & \(p_\mathrm{F}\) & \(p_\mathrm{calls}\) & \(p_\mathrm{wall}\) \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 10615.5 & 3591.25 & 0.075 & 0.029 & 0.047 & 0.037 & \(3.4\times 10^{-5}\) & \(3.7\times 10^{-5}\) \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 10615.5 & 3591.25 & 0.075 & 0.029 & 0.047 & 0.037 & \(3.4\times 10^{-5}\) & \(3.4\times 10^{-5}\) \\
  &  & GMIN & 7/12 & 389399 & 173127.75 & 3.658 & 2.673 & 0.979 &  &  &  \\
 LJ\(_{55}\) & \(1\times 10^{6}\) & this work & 12/12 & 12242 & 22988.5 & 0.142 & 0.062 & 0.082 & 1 & 0.75 & 0.31 \\
  &  & GMIN & 12/12 & 12764.5 & 12435.75 & 0.236 & 0.191 & 0.045 &  &  &  \\
-LJ\(_{75}\) & \(4\times 10^{6}\) & this work & 12/12 & 1409229.5 & 983622 & 27.019 & 12.543 & 13.818 & \(7.4\times 10^{-7}\) & \(1.0\times 10^{-5}\) & \(3.7\times 10^{-5}\) \\
- &  & GMIN & 0/12 & 4000000 & 0 & 119.9 & 102.9 & 16.952 &  &  &  \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & this work & 10/12 & 1511030.5 & 1985194.5 & 41.586 & 23.825 & 17.949 & \(6.7\times 10^{-5}\) & \(1.3\times 10^{-4}\) & \(3.7\times 10^{-5}\) \\
- &  & GMIN & 0/12 & 4000000 & 0 & 182.5 & 161.9 & 20.311 &  &  &  \\
-LJ\(_{102}\) & \(4\times 10^{6}\) & this work & 9/12 & 894801 & 3401143.75 & 27.445 & 15.463 & 11.982 & 0.21 & 0.093 & 0.012 \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & this work & 12/12 & 1409229.5 & 983622 & 27.019 & 12.543 & 13.818 & \(7.4\times 10^{-7}\) & \(1.0\times 10^{-5}\) & \(1.0\times 10^{-5}\) \\
+ &  & GMIN & 0/12~\rerun{5} & 4000000 & 0 & 119.9 & 102.9 & 16.952 &  &  &  \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & this work & 10/12 & 1511030.5 & 1985194.5 & 41.586 & 23.825 & 17.949 & \(6.7\times 10^{-5}\) & \(1.3\times 10^{-4}\) & -- \\
+ &  & GMIN & 0/12~\rerun{5} & 4000000 & 0 & 182.5 & 161.9 & 20.311 &  &  &  \\
+LJ\(_{102}\) & \(4\times 10^{6}\) & this work & 9/12 & 894801 & 3401143.75 & 27.445 & 15.463 & 11.982 & 0.21 & 0.093 & -- \\
  &  & GMIN & 5/12 & 4000000 & 2463305.5 & 194.4 & 173.8 & 20.614 &  &  &  \\
-LJ\(_{103}\) & \(4\times 10^{6}\) & this work & 8/12 & 2293133 & 2608443.75 & 66.188 & 39.673 & 26.763 & 0.100 & 0.047 & \(4.8\times 10^{-4}\) \\
+LJ\(_{103}\) & \(4\times 10^{6}\) & this work & 8/12 & 2293133 & 2608443.75 & 66.188 & 39.673 & 26.763 & 0.10 & 0.047 & -- \\
  &  & GMIN & 3/12 & 4000000 & 239453.25 & 204.9 & 183.1 & 21.660 &  &  &  \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 9/12 & 2328723 & 2947098 & 69.306 & 39.241 & 30.064 & 0.40 & 0.16 & \(7.3\times 10^{-3}\) \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 9/12 & 2328723 & 2947098 & 69.306 & 39.241 & 30.064 & 0.40 & 0.16 & -- \\
  &  & GMIN & 6/12 & 3696118 & 1285122.25 & 193.6 & 173.6 & 20.007 &  &  &  \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 1477851 & 237.2 & 139.7 & 96.075 & 0.21 & 0.17 & 0.29 \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 1477851 & 237.2 & 139.7 & 96.075 & 0.21 & 0.17 & -- \\
  &  & GMIN & 9/12 & 3129518.5 & 3240050.5 & 326.1 & 302.1 & 23.955 &  &  &  \\
-Au\(_{55}\) & \(1\times 10^{6}\) & this work & 6/12 & 852736 & 572700.75 & 31.522 & 23.474 & 7.920 & 0.014 & \(7.1\times 10^{-3}\) & \(3.7\times 10^{-5}\) \\
- &  & GMIN & 0/12 & 1000000 & 0 & 62.949 & 59.824 & 3.142 &  &  &  \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 563 & 128.75 & 0.010 & 0.008 & 0.001 & 1 & \(3.7\times 10^{-5}\) & \(3.7\times 10^{-5}\) \\
+Au\(_{55}\) & \(1\times 10^{6}\) & this work & 6/12 & 852736 & 572700.75 & 30.533 & 22.719 & 7.706 & 0.069 & 0.057 & -- \\
+ &  & GMIN & 1/12 & 1000000 & 0 & 59.573 & 56.427 & 3.152 &  &  &  \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12~\rerun{6} & 563 & 128.75 & 0.010 & 0.008 & 0.001 & 1 & \(3.7\times 10^{-5}\) & \(3.7\times 10^{-5}\) \\
  &  & GMIN & 12/12 & 37047.5 & 37358.75 & 0.751 & 0.637 & 0.115 &  &  &  \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 7/12 & 730604 & 623707.5 & 13.593 & 9.672 & 3.921 & \(4.6\times 10^{-3}\) & \(2.9\times 10^{-3}\) & 0.017 \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 7/12 & 730604 & 623707.5 & 13.593 & 9.672 & 3.921 & \(4.6\times 10^{-3}\) & \(2.9\times 10^{-3}\) & -- \\
  &  & GMIN & 0/12 & 1000000 & 0 & 18.898 & 16.322 & 2.577 &  &  &  \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 2/12 & 4000000 & 0 & 168.9 & 111.3 & 57.363 & \(6.7\times 10^{-5}\) & \(3.1\times 10^{-5}\) & \(6.0\times 10^{-5}\) \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 2/12 & 4000000 & 0 & 168.9 & 111.3 & 57.363 & \(6.7\times 10^{-5}\) & \(3.1\times 10^{-5}\) & \(3.1\times 10^{-5}\) \\
  &  & GMIN & 12/12 & 268934 & 268091.5 & 10.691 & 9.582 & 1.109 &  &  &  \\
-M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 9/12 & 1338932.5 & 3064673 & 49.869 & 38.033 & 12.262 & \(3.4\times 10^{-4}\) & \(3.8\times 10^{-4}\) & 0.017 \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 9/12 & 1338932.5 & 3064673 & 49.869 & 38.033 & 12.262 & \(3.4\times 10^{-4}\) & \(3.8\times 10^{-4}\) & -- \\
  &  & GMIN & 0/12 & 4000000 & 0 & 152.7 & 138.3 & 14.430 &  &  &  \\
 \bottomrule
 \end{tabular}
+}
 \end{table}
 % gmin-panel table: end
 
@@ -1619,6 +1655,10 @@ Against GMIN it hits M\(_{55}\) at \(\rho=6\) on 12 of 12,
 M\(_{55}\) at \(\rho=14\) on 7 of 12, and M\(_{80}\) at \(\rho=14\) on
 9 of 12, where GMIN hits 12, 0, and 0, and it hits M\(_{80}\) at
 \(\rho=6\) on 2 of 12, where GMIN hits 12.
+At M\(_{55}\) and \(\rho=6\), one Mackay-cap quench seeds the exact
+global minimum, and the 12 hits take 345--709 evaluations.
+At M\(_{80}\) and \(\rho=6\) the cap is empty and the row is a real
+search.~\rerun{6}
 M\(_{55}\) at \(\rho=14\) is in both panels: 5 of 12 on revision
 \texttt{90b88235} and 7 of 12 on \texttt{c2de652d}.
 The Mackay cap is off at \(\rho=14\), so it does not explain the

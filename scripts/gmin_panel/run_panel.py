@@ -679,7 +679,15 @@ def readme_table(summary: list[dict[str, str]]) -> str:
 
 
 def tex_table(summary: list[dict[str, str]], revision: str) -> str:
-    body = [" & ".join(cells) + " \\\\" for cells in table_lines(summary, tex=True)]
+    lines = table_lines(summary, tex=True)
+    for index, cells in enumerate(lines):
+        system = summary[index // 2]["system"]
+        arm = "anneal" if index % 2 == 0 else "gmin"
+        if arm == "gmin" and system in ("lj75", "lj98"):
+            cells[3] += "~\\rerun{5}"
+        if arm == "anneal" and system == "m55r6":
+            cells[3] += "~\\rerun{6}"
+    body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
@@ -693,11 +701,15 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits;",
             "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided",
             "Mann--Whitney test on calls and on wall to the minimum (`--' where",
-            "call-capped misses leave cross-arm wall times censored at unequal horizons).}",
+            "call-capped misses leave cross-arm wall times censored at unequal horizons).",
+            "The tagged M\\(_{55}\\), \\(\\rho=6\\) row starts from one Mackay-cap quench",
+            "of the exact global minimum (345--709 evaluations); the M\\(_{80}\\),",
+            "\\(\\rho=6\\) cap is empty, and the cap is off at \\(\\rho=14\\).}",
             "\\label{tab:gmin}",
             "\\centering",
             "\\scriptsize",
             "\\setlength{\\tabcolsep}{2pt}",
+            "\\resizebox{\\textwidth}{!}{%",
             "\\begin{tabular}{@{}lrlrrrrrrrrr@{}}",
             "\\toprule",
             "Cluster & Budget & Arm & Hits & Calls & IQR & Wall & In & Out & \\(p_\\mathrm{F}\\) & \\(p_\\mathrm{calls}\\) & \\(p_\\mathrm{wall}\\) \\\\",
@@ -705,6 +717,7 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             *body,
             "\\bottomrule",
             "\\end{tabular}",
+            "}",
             "\\end{table}",
         ]
     )
