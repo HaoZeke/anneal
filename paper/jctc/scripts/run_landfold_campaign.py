@@ -269,6 +269,7 @@ def publish_shard_status(work: Path, publish: Path) -> None:
         "charged": sum(row["charged"] for row in records),
         "minima": sum(row["minima"] for row in records),
         "remaining": [
+            "lj_csm/lj75/recommended/representative",
             "lj_csm/lj75/recommended/aggregate",
             "lj_csm/lj98/derived/representative",
             "lj_csm_c26/lj98/recommended/representative",
