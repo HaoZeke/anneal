@@ -1042,6 +1042,27 @@ rule gmin_panel:
         """
 
 
+# anneal against GMIN aac1548a on the Doye-Meyer binary Lennard-Jones
+# clusters at sigma_BB/sigma_AA of 1.05, 1.15 and 1.30: N=38 and N=55 at
+# each ratio, and N=98 at 1.30. Seeds 2000-2011, the call budgets of the
+# matching sizes on the GMIN panel, both arms in one session, one process
+# on core 0, sudo unshare --uts with hostname bench. Rows are appended to
+# bench/blj-gmin/rows.csv with code_revision and host; that file is not
+# declared as an output because Snakemake removes declared outputs before
+# a job runs. The summary, the README table and tab:blj are rewritten
+# from the rows. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile blj_gmin
+rule blj_gmin:
+    output:
+        "bench/blj-gmin/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/blj_gmin/enter_bench.sh
+        bash scripts/blj_gmin/enter_bench.sh --summarize --tex
+        """
+
+
 # Paired (H2O)16 rows. Not part of `rule all`. The script rewrites the
 # summary from the committed seeds and does not start a search.
 #   snakemake -s workflow/Snakefile h2o16_crest
