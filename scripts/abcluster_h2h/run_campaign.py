@@ -79,6 +79,7 @@ PARITY_TOL = 1e-8
 # The generation limit is never reached; the budget stops the run.
 LJ_SIGMA = 1.4
 GOLD_PARAMETERS = (0.2061, 1.790, 2.884, 10.229, 4.036)
+GOLD_TEXT = "0.2061 1.790 2.884 10.229 4.036"
 ABC_AMPLITUDE = {
     "lj38": 5.00,
     "lj55": 5.66,
@@ -296,7 +297,7 @@ def abc_input(system: str, sn: int, initial: str | None, sigma: float = LJ_SIGMA
     if KERNELS[system] == "lj":
         field, line = "LennardJones", f"{sigma:.8f} 1.0\n"
     else:
-        field, line = "Gupta", " ".join(f"{v:g}" for v in GOLD_PARAMETERS) + "\n"
+        field, line = "Gupta", GOLD_TEXT + "\n"
     inp = (
         f"{atoms:<30}# number of atoms\n"
         f"{initial or '*':<30}# initial guess file;  * - random guess\n"
@@ -309,7 +310,8 @@ def abc_input(system: str, sn: int, initial: str | None, sigma: float = LJ_SIGMA
         f"{'run':<30}# save optimized configuration to .xyz and .gjf\n"
         f"{ABC_SAVES:<30}# number of LMs to be saved\n"
     )
-    return inp, f"{atoms}\n" + line * atoms
+    pairs = atoms if KERNELS[system] == "lj" else atoms * (atoms - 1) // 2
+    return inp, f"{atoms}\n" + line * pairs
 
 
 def parse_shim(text: str) -> dict[str, str]:
@@ -357,7 +359,10 @@ def run_abc(
     if proc.returncode != 0 or not (work / "shim.txt").is_file():
         tail = (work / "run.out").read_text()[-600:]
         raise RuntimeError(f"abcluster {system} seed {seed} exited {proc.returncode}\n{tail}")
-    return parse_shim((work / "shim.txt").read_text()), elapsed
+    row = parse_shim((work / "shim.txt").read_text())
+    if int(row["calls"]) == 0:
+        raise RuntimeError(f"abcluster {system} seed {seed} made no force-field call\n{(work / 'run.out').read_text()[-600:]}")
+    return row, elapsed
 
 
 def best_of(fields: dict[str, str]) -> str:
@@ -689,6 +694,12 @@ def campaign(args, pins: dict[str, str], head: str) -> int:
             raise SystemExit(f"{system} anneal binary has {lines}")
     revision = abc_revision(pins)
     progress = args.runs / "progress.txt"
+    pilot_rows = read_rows(args.pins.parent / "pilot.csv")
+    if not pilot_rows:
+        raise SystemExit("run the pilot first: no pilot.csv")
+    for system in systems:
+        if choose_population(pilot_rows, system) != ABC_SN[system]:
+            raise SystemExit(f"ABC_SN[{system}] is not the pilot choice")
     parity(args, pins, head)
     counter_check(args, pins, head)
     order = schedule(systems, seeds, arms, SCHEDULE_SEED)
@@ -769,7 +780,7 @@ def self_test() -> None:
     if inp.splitlines()[2].split("#")[0].strip() != "LennardJones" or par.count("\n") != 39:
         raise SystemExit("lennard-jones input")
     inp, par = abc_input("au55", 30, "start.xyz")
-    if "Gupta" not in inp or "start.xyz" not in inp or par.splitlines()[1] != "0.2061 1.79 2.884 10.229 4.036":
+    if "Gupta" not in inp or "start.xyz" not in inp or par.splitlines()[1] != "0.2061 1.790 2.884 10.229 4.036" or par.count("\n") != 1486:
         raise SystemExit("gupta input")
     row = parse_shim(
         "hit=1 calls=77 calls_at_hit=70 wall_ns=5000 inside_ns=2000 quenches=3 "
