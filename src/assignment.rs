@@ -195,10 +195,16 @@ unsafe fn scan_avx2(
             if improved & 8 != 0 {
                 *pred_ptr.add(candidate + 3) = column;
             }
-            for offset in 0..4 {
-                if *used_ptr.add(candidate + offset) == 0 && lanes[offset] < delta {
-                    delta = lanes[offset];
-                    next_column = candidate + offset;
+            let promising = _mm256_movemask_pd(_mm256_and_pd(
+                _mm256_cmp_pd(updated, _mm256_set1_pd(delta), _CMP_LT_OQ),
+                open,
+            ));
+            if promising != 0 {
+                for offset in 0..4 {
+                    if promising & (1 << offset) != 0 && lanes[offset] < delta {
+                        delta = lanes[offset];
+                        next_column = candidate + offset;
+                    }
                 }
             }
         }
@@ -725,7 +731,10 @@ unsafe fn phase_delta_avx2(
     rows_seen: &[bool],
     columns_seen: &[bool],
 ) -> f64 {
-    use std::arch::x86_64::{_mm256_add_pd, _mm256_loadu_pd, _mm256_set1_pd, _mm256_storeu_pd};
+    use std::arch::x86_64::{
+        _CMP_LT_OQ, _mm256_add_pd, _mm256_cmp_pd, _mm256_loadu_pd, _mm256_movemask_pd,
+        _mm256_set1_pd, _mm256_storeu_pd,
+    };
     let mut delta = f64::INFINITY;
     let cost_ptr = costs.as_ptr();
     let column_ptr = column_potential.as_ptr();
@@ -751,10 +760,17 @@ unsafe fn phase_delta_avx2(
                 let potential = _mm256_loadu_pd(column_ptr.add(column));
                 let slack = _mm256_add_pd(_mm256_add_pd(dual, potential), cost);
                 _mm256_storeu_pd(lanes.as_mut_ptr(), slack);
-            }
-            for offset in 0..4 {
-                if !columns_seen[column + offset] {
-                    delta = delta.min(lanes[offset]);
+                let promising =
+                    _mm256_movemask_pd(_mm256_cmp_pd(slack, _mm256_set1_pd(delta), _CMP_LT_OQ));
+                if promising != 0 {
+                    for offset in 0..4 {
+                        if promising & (1 << offset) != 0
+                            && !columns_seen[column + offset]
+                            && lanes[offset] < delta
+                        {
+                            delta = lanes[offset];
+                        }
+                    }
                 }
             }
             column += 4;

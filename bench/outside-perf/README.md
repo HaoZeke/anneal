@@ -26,14 +26,15 @@ The final instruction counts were lower on every diagnostic:
 
 | system | base instructions | new instructions | change |
 |---|---:|---:|---:|
-| LJ150 | 3,402,849,428 | 3,401,940,472 | -0.027% |
-| LJ104 | 1,872,317,042 | 1,871,893,455 | -0.023% |
-| M80 rho=6 | 2,525,513,706 | 2,516,263,638 | -0.366% |
-| Au55 | 2,322,867,950 | 2,317,176,056 | -0.245% |
+| LJ150 | 3,402,849,428 | 3,355,184,454 | -1.401% |
+| LJ104 | 1,872,317,042 | 1,839,334,796 | -1.762% |
+| M80 rho=6 | 2,525,513,706 | 2,458,181,555 | -2.666% |
+| Au55 | 2,322,867,950 | 2,291,786,367 | -1.338% |
 
 The optimized assignment code reuses solver storage, avoids materializing a
-negated cost matrix, skips fully used AVX2 lanes, and avoids second scans of
-strict row minima. Orbit completion avoids square roots except at the
+negated cost matrix, skips fully used AVX2 lanes, rejects four-lane blocks
+that cannot lower the current shortest-path minimum, and avoids second scans
+of strict row minima. Orbit completion avoids square roots except at the
 rounding boundary, where it retains the original comparison. The final
 profiles and timings retain the original floating-point operation order at
 all decisions that can affect a trajectory.
