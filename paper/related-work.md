@@ -1336,3 +1336,38 @@ On 17 November 2026 the release tags were unchanged. ASE 3.29.0 is still the new
 
 Cite `tahmassebpurHeat2026` and `shaoHydroxideWater2026`.
 
+## 2026-11-17 — GMIN/OPTIM socket bridge to ASE, and uMLIP topology hallucinations
+
+Park, Pracht, Kavanagh, and Wales, arXiv:2611.19365 (14 November 2026), introduce a persistent socket interface connecting GMIN, OPTIM, and PATHSAMPLE to calculators available through the Atomic Simulation Environment (ASE). Keeping both the calculator and the socket connection active avoids repeated initialisation across landscape searches. They apply the bridge to gallium vacancies in \(\beta\)-Ga\(_2\)O\(_3\) using two NequIP potentials, building kinetic transition networks, disconnectivity visualisations, mean first-passage times, and heat capacities.
+
+The manuscript scores GMIN on native Lennard-Jones 98 and 104, and names ASE's own basin-hopping optimiser as a separate unprinted arm. This persistent socket interface does not fill that ASE basin-hopping arm, and it reports no Lennard-Jones or water-hexamer hit rate, so no printed count is contradicted. A head-to-head using this bridge would share one ASE calculator (such as those NequIP vacancy networks) rather than the native Lennard-Jones preset. The GMIN and OPTIM directory pages remain unchanged since 17 March 2022, while this preprint documents the new ASE coupling.
+
+Liu, Wang, and Shen, arXiv:2611.21489 (16 November 2026), identify local topology hallucinations across MACE-MP-0a, CHGNet, and M3GNet (with SevenNet-Omni tested in a supplementary comparison) against fixed-cell PBE calculations on periodic \(s\)- and \(p\)-block structures. Two-against-one model consensus matched PBE on 55 of 57 positive-curvature directions but on only 5 of 56 negative-curvature directions; even unanimous negative predictions matched PBE in only 5 of 14 cases. In LiGe\(_2\)S, two MACE minima connected by a verified saddle relaxed into one PBE basin, and PBE relaxation returned nine of ten selected model minima to their reference basins. They pair a two-point directional curvature reference test with endpoint relaxation.
+
+The manuscript searches directly on the Lennard-Jones, TIP4P, and GFN2-xTB surfaces without a machine-learned surrogate, so this finding contradicts no printed count. It reinforces the rule that structure-search candidates proposed on universal potentials must be re-evaluated on the target surface.
+
+Cite `parkSocketInterface2026` and `liuTopologyHallucinations2026`.
+
+## 2026-11-17 — Continuous MCTS on Au35, GMSAC, DRL review, and ML-steered generative searches
+
+Banik, Loeffler, Chan, Manna, Yildiz, Peterka, and Sankaranarayanan, arXiv:2601.06444 (10 January 2026), present a continuous Monte Carlo tree search (`c-MCTS`) combining population-level decision trees, directional logistic surrogate sampling, and local LAMMPS relaxations. On the 35-atom Sutton--Chen gold cluster (`Au35`), `c-MCTS` locates the known global minimum in under 12,000 evaluations, compared with the 25,000 local minimisations reported by Doye and Wales for basin hopping, and the same framework is applied to silicene polymorphs, bulk Stillinger--Weber silicon, and Tersoff parameter fitting for Al nanoclusters (5--55 atoms).
+
+This preprint reports no Lennard-Jones 38--104 hit rate and no water-hexamer energy, so it contradicts no Cambridge target or sealed map. It warrants a head-to-head on Sutton--Chen `Au35` at a shared evaluation and relaxation budget if metal-cluster benchmarks are added, while remaining outside the free Lennard-Jones and GFN2-xTB comparisons.
+
+Zhang, Journal of Computational Chemistry 47, e70315 (13 January 2026), doi:10.1002/jcc.70315, releases GMSAC, pairing an improved genetic algorithm (symmetry-aware duplicate removal, adaptive operator probabilities, fitness maximisation) with EAM potentials for bulk alloys (`Al--Ag`, `Al--Cu`, `Au--Cu`, `Au--Pd`, `Pd--Al`, `Pd--Cu`, `Pt--Cu`, `Pt--Pd`). This sits in the same software family as `zhangGmmlp2026`, `zhangSgmsc2026`, and `zhangBhsms2026`, aimed at periodic solids rather than free clusters, and reports no Lennard-Jones or water-hexamer count.
+
+Bin Qamar, Ahmad, Usman, Ahmad, Farooq, and Chen, Computational Materials Today 9, 100048 (March 2026), doi:10.1016/j.commt.2026.100048, review deep reinforcement learning for nanocluster global minimum search (`Deepcluster agent`, TRPO--ACSFs--EMT) against genetic algorithms and basin hopping. This is the survey behind `mubeenDrLClusters2026`, `ahmadPdmo2026`, `usmanPtni2026`, `mubeenAgpd2026`, and `mubeenAg152025`, and it gives no Lennard-Jones or water-hexamer counts.
+
+Agarwal, Wang, Ryczko, and Singh, arXiv:2610.14999 (10 October 2026), release `DiffGA`, steering a frozen diffusion model (`MatterGen`) by evolving partially denoised intermediate states under an on-the-fly Gaussian process surrogate built on `MatterSim` graph embeddings with a prospective rank-correlation gate. Levy, Jain, Akhound-Sadegh, Kaba, and Ravanbakhsh, arXiv:2611.17462 (12 November 2026), introduce `Diffusion Tree Sampling` (`DTS`) with importance-corrected conditional proposals and multi-objective Pareto sampling for crystal generative models. Lo and co-workers, arXiv:2606.03199 (v2, 7 November 2026), release `Clari`, a unit-cell flow matching model for organic crystal structure prediction ranked by `UMA`, noting applicability to molecular crystals containing metal complexes and atom clusters. All three target periodic crystal structures rather than free Lennard-Jones or water clusters and contradict no manuscript number.
+
+Cite `banikMcts2026`, `zhangGmsac2026`, `binQamarDeepcluster2026`, `agarwalDiffga2026`, `levyDiffusionTree2026`, and `loClari2026`.
+
+## 2026-11-17 — Metal nanoclusters, LJ13 entropy, and LJ64 MLIP benchmarks
+
+Tarrat and Loffreda, Small 22, e75018 (12 August 2026), doi:10.1002/smll.75018, survey 500 silver nanoparticles from 18 to 1654 atoms at the ab initio level, showing narrow competition between defective truncated octahedra and Marks decahedra and supporting kinetic trapping as the source of coexisting motifs. Alotaibi, Alruwaythi, and Abdulhussein, Nanoscale Advances 8, 3425--3440 (2026), doi:10.1039/d5na01067e, locate `Cu55` and `Cu13@Ni42` nanocluster structures using `ABCluster` and DFT for CO\(_2\) hydrogenation. Neither gives a Cambridge Lennard-Jones energy or a water-hexamer count.
+
+Rauscher, arXiv:2609.18093 (17 September 2026), estimates Gibbs--Shannon entropy differences via stochastic interpolants without divergence evaluations, using the 13-atom Lennard-Jones cluster (`LJ13`) as a benchmark. Sandberg, Dusson, and Lam, arXiv:2610.14239 (9 October 2026), benchmark linear ACE, Behler--Parrinello HDNNP, and MACE against classical Lennard-Jones, EAM, and Stillinger--Weber potentials, including 64-atom cluster datasets. Neither performs global minimum search at LJ38--104, and neither contradicts the Cambridge hit targets.
+
+Checked on 17 November 2026: ABCluster's newest release is v3.4 (7 January 2026, `isomer` \(I/I_h\) fix); ASE 3.29.0, AGOX v3.11.1, CREST v3.0.2 (master tip 16 June 2026), pele v0.1.2, and xtb v6.8.0 are unchanged, and the Cambridge Cluster Database Lennard-Jones table (`tables.150.html`) retains the same published minima at LJ38, LJ55, LJ75, LJ98, and LJ104.
+
+Cite `tarratSilver2026`, `alotaibiCopperNickel2026`, `rauscherEntropy2026`, and `sandbergMlips2026`.
