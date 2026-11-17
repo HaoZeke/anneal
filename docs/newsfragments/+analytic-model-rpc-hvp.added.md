@@ -1,6 +1,4 @@
-- Added built-in analytic model documentation and clarified the model C API
-  lifecycle, constructors, and evaluation entry points.
-- Added RPC Hessian-vector unit-conversion regression coverage for bohr and nm
-  length requests.
-- Added potserv model registrations for `DoubleWell` and `CoupledProtonWell`
-  with integration smoke coverage.
+- Added user-facing analytic model support end to end: potserv now serves
+  `DoubleWell` and `CoupledProtonWell`, clients can call `calculateHvp` over
+  RPC for their analytic Hessian-vector products, and the C model API
+  documents constructor and evaluation usage.
