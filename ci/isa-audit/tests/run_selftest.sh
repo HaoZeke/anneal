@@ -111,9 +111,13 @@ PY
   fi
   # The baseline pin does not reach libgcc.a, which keeps its toolchain's
   # default (Ubuntu 26.04's amd64v3 GCC has BMI2 in __cpu_indicator_init),
-  # so the fixtures link without it and import __cpu_model, which the
-  # proof reads through its GOT slot.
-  local dso=(-shared -fPIC -nodefaultlibs)
+  # so GCC's fixtures link without it and import __cpu_model, which the
+  # proof reads through its GOT slot. Clang reads __cpu_model PC-relative
+  # and needs libgcc's copy in the library.
+  local dso=(-shared -fPIC)
+  if "$cc" --version | grep -q "Free Software Foundation"; then
+    dso+=(-nodefaultlibs)
+  fi
   "$cc" "${dso[@]}" -O2 "${base[@]}" "$TESTS/dispatch_ok.c" -o "$work/dispatch_ok.so"
   "$cc" "${dso[@]}" -O2 "${base[@]}" "${icf[@]}" "$TESTS/dispatch_bad.c" -o "$work/dispatch_bad.so"
   expect_ok "$work/dispatch_ok.so" --allow "$TESTS/allow-dispatch.toml" --json "$work/dispatch.json"
