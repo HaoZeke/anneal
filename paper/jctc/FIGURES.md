@@ -189,8 +189,11 @@ New hash.
 
 ## What the sealed notes still say
 
-No seed log in this tree records the 192-seed hexamer counts.
-The McNemar values lack that log too.
+The fresh 192-seed hexamer rerun receipts are committed under
+`data/water_v45b/rerun-9a30f319/`: 121/192 anneal hits and 94/192 plain
+CREST hits.  Each arm has one unedited `status.json` receipt per seed, and
+the directory-level `SHA256SUMS` covers all 384 files.
+The earlier McNemar values do not derive from this rerun.
 No separate receipt records the LJ map energies.
 A figure that matches main has no generator in this tree.
 scripts/toc_graphic.py draws toc-graphic.pdf.

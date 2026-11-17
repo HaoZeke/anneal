@@ -1011,9 +1011,11 @@ bash scripts/gmin_panel/enter_bench.sh --summarize --tex
 
 # ASE: rewrite the tables from the committed rows, with no new search
 bash scripts/ase_panel/enter_bench.sh --system lj38
-bash scripts/ase_nonlj/enter_bench.sh
+ASE_NONLJ_REVISION=9a30f3190b3bb7040c675a904f8388eb68224151 \
+  pixi run --locked --frozen bash scripts/ase_nonlj/enter_bench.sh
 
 # CREST: one draw, then the polish, and the anneal arm
+tar -xJf paper/jctc/logs/logs-water.tar.xz -O water/anneal-paper4000-seed0/start.xyz > start.xyz
 crest start.xyz -T 1
 xtb --gfn 2 --opt vtight --acc 0.01 --iterations 500
 gfn2_water_h2h 6 4000 0 anneal-paper4000-seed0
@@ -1252,7 +1254,7 @@ first three and 0.037 on M\(_{55}\) at \(\rho=14\).~\rerun{5}
 \begin{table}
 \caption{This work against the basin hopping (BH) and minima hopping
 (MH) of ASE 3.29.0 on Morse clusters.
-This work is anneal \texttt{90b88235} at the length
+This work is anneal \texttt{9a30f319} at the length
 scale of the Morse pair.
 Seeds 2000--2011, one core, budget in force calls.
 Cap is the wall in seconds at which a BH or MH run stops, three times
@@ -1273,10 +1275,10 @@ exact test on hits against each ASE arm.}
 \cmidrule(lr){4-6}\cmidrule(lr){7-9}
 Cluster & Budget & Cap & This work & BH & MH & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
 \midrule
-M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 9.304 & 12/12 & 0/12 & 0/12 & 0.253 & 9.304 & 9.305 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.162 & 12/12 & 0/12 & 0/12 & 0.187 & 9.163 & 9.163 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 14.661 & 12/12 & 0/12 & 0/12 & 0.248 & 14.662 & 14.809 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 46.786 & 5/12 & 0/12 & 0/12 & 16.007 & 46.786 & 46.983 & 0.037 & 0.037 \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.465 & 12/12 & 0/12 & 0/12 & 0.265 & 10.466 & 10.466 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 11.143 & 12/12 & 0/12 & 0/12 & 0.201 & 11.143 & 11.144 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.804 & 12/12 & 0/12 & 0/12 & 0.286 & 15.805 & 15.806 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 54.130 & 5/12 & 0/12 & 0/12 & 17.183 & 54.132 & 54.135 & 0.037 & 0.037 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1617,7 +1619,7 @@ M\(_{55}\) at \(\rho=14\) on 7 of 12, and M\(_{80}\) at \(\rho=14\) on
 9 of 12, where GMIN hits 12, 0, and 0, and it hits M\(_{80}\) at
 \(\rho=6\) on 2 of 12, where GMIN hits 12.
 M\(_{55}\) at \(\rho=14\) is in both panels: 5 of 12 on revision
-\texttt{90b88235} and 7 of 12 on \texttt{1ce3ab64}.
+\texttt{9a30f319} and 7 of 12 on \texttt{1ce3ab64}.
 The ASE panel scales the preset to the Morse pair, and the driver
 \path{examples/h2h_morse.rs} of this repository runs the preset unscaled.
 The two panels differ in that scaling, and no run separates the two, so

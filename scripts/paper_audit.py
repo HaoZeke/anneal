@@ -75,6 +75,8 @@ UNPUSHED = {
                                                 "pushed branch holds it",
     "fc1af066a915a80eb46a3bc478caaf155cc9b29f": "the build head of the Au55 cluster-preset rerun and its ASE arms, first "
                                                 "cited by 0f69a6b1; no pushed branch holds it",
+    "1ce3ab64493196afd25e8690648e21157d91b882": "the template-free landing head for the GMIN panel and the Au55 ASE "
+                                                "reruns, first cited by 93e17b69; no pushed branch holds it",
     "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
                                                 "branch holds it",
 }
@@ -115,9 +117,11 @@ KNOWN_GAPS = {
     "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
     "bench/nh3-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-au55/rows-for-cluster.csv": "revision fc1af066 is not in this repository",
+    "bench/ase-au55/rows-for-cluster.csv": "revision 1ce3ab64 is not in this repository; revision fc1af066 is not in this "
+                                           "repository",
     "bench/ase-au55/superseded.csv": "revision 33bed75f is not in this repository",
-    "bench/ase-au55/rows.csv": "revision 33bed75f is not in this repository; revision b49341e3 is not in this repository",
+    "bench/ase-au55/rows.csv": "revision 1ce3ab64 is not in this repository; revision 33bed75f is not in this repository; "
+                               "revision b49341e3 is not in this repository",
     "bench/ase-lj104/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-lj150/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-lj38/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
@@ -127,8 +131,12 @@ KNOWN_GAPS = {
     "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
     "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
-    "bench/ase-recommended/summary.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
-                                         "repository; revision b49341e3 is not in this repository",
+    "bench/ase-recommended/summary.csv": "revision 1ce3ab64 is not in this repository; revision 36548663 is not in this "
+                                         "repository; revision 5a7f629d is not in this repository; revision b49341e3 is "
+                                         "not in this repository",
+    "bench/gmin-panel/rows.csv": "revision 1ce3ab64 is not in this repository",
+    "bench/gmin-panel/summary.csv": "revision 1ce3ab64 is not in this repository",
+    "bench/morse-panel/template-free-rows.csv": "revision 1ce3ab64 is not in this repository",
     "paper/jctc/data/lj55_lj98/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "revision and host unrecorded (no revision or host "
@@ -140,7 +148,6 @@ KNOWN_GAPS = {
 }
 
 UNTRACED = [
-    (SI, "-197.7750", "only REPORT.md quotes it; no committed row holds it"),
     ("bench/gad-published/README.md", "seed 2000 at 226282 calls and seed 2006 at 114143 calls",
      "the per-seed GAD rerun rows were not committed"),
     ("bench/gad-published/README.md", "a median of 13 generations on LJ31 (2–20) and 15.5 on LJ38 (12–24)",
@@ -761,6 +768,7 @@ def gmin_panel_drivers(audit: Audit) -> None:
 
 ASE_PANEL = ("lj38", "lj55", "lj98", "lj104", "lj150", "au55")
 MORSE_PANEL = ("m38r6", "m38r14", "m55r6", "m55r14")
+MORSE_REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
 ASE_ARMS = ("ase_bh", "ase_mh")
 PANEL_SEEDS = " ".join(str(s) for s in range(2000, 2012))
 
@@ -802,7 +810,7 @@ def ase_groups(audit: Audit) -> dict[tuple[str, str], list[dict[str, str]]]:
         for arm in ("anneal", "recommended", *ASE_ARMS):
             source = rows if arm == "recommended" else others
             groups[(system, arm)] = campaign(source, system, arm)
-    morse = audit.rows("bench/ase-nonlj/rows.csv")
+    morse = pick(audit.rows("bench/ase-nonlj/rows.csv"), code_revision=MORSE_REVISION)
     for system in MORSE_PANEL:
         for arm in ("for_cluster", "recommended", *ASE_ARMS):
             groups[(system, arm)] = pick(morse, system=system, arm=arm)
@@ -931,7 +939,7 @@ def manuscript_ase(audit: Audit) -> None:
             audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
     audit.cell(TEX, "tab:ase-morse lines", " ".join(shown), " ".join(MORSE_PANEL))
     summary = "bench/ase-nonlj/summary.csv"
-    for line in audit.rows(summary):
+    for line in pick(audit.rows(summary), code_revision=MORSE_REVISION):
         system, arm = line["system"], line["arm"]
         where = f"{summary} {system} {arm}"
         audit.cell(where, "hits", line["hits"], float(hits(system, arm)))

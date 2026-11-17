@@ -44,6 +44,7 @@ TEX_LABELS = {
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 TEX_MARKS = ("% ase-nonlj table: start", "% ase-nonlj table: end")
 ASE_VERSION = "3.29.0"
+REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
 
 
 def type7(ordered: list[float], probability: float) -> float:
@@ -165,7 +166,7 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
             raise SystemExit(f"unexpected row {row}")
         if row["budget"] != SPEC[system][2] or row["host"] != "bench":
             raise SystemExit(f"unexpected budget or host {row}")
-        key = (system, arm, row["seed"])
+        key = (row["code_revision"], system, arm, row["seed"])
         if key in seen:
             raise SystemExit(f"duplicate row {key}")
         seen.add(key)
@@ -192,7 +193,8 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
                 raise SystemExit(f"invalid wall stop {row}")
         else:
             raise SystemExit(f"invalid miss stop {row}")
-        grouped[system][arm].append(row)
+        if row["code_revision"] == REVISION:
+            grouped[system][arm].append(row)
     for system in SYSTEMS:
         for arm in ARMS:
             seeds = tuple(sorted(int(row["seed"]) for row in grouped[system][arm]))
@@ -320,11 +322,22 @@ def main() -> None:
     grouped = load_rows()
     identity = load_identity()
     revisions = sorted({row["code_revision"] for s in SYSTEMS for a in ARMS for row in grouped[s][a]})
-    summary_lines = [
+    summary_header = (
         "system,arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,"
         "fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,"
-        "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s,code_revision,host",
-    ]
+        "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s,code_revision,host"
+    )
+    summary_path = ROOT / "bench" / "ase-nonlj" / "summary.csv"
+    summary_lines = [summary_header]
+    if summary_path.exists():
+        existing = summary_path.read_text().splitlines()
+        if existing and existing[0] != summary_header:
+            raise SystemExit(f"{summary_path}: unexpected columns")
+        summary_lines.extend(
+            line
+            for line in existing[1:]
+            if dict(zip(summary_header.split(","), line.split(",")))["code_revision"] != REVISION
+        )
     readme = [
         "Copyright (c) anneal developers",
         "",
@@ -435,7 +448,7 @@ def main() -> None:
     )
     out = ROOT / "bench" / "ase-nonlj"
     outputs = {
-        out / "summary.csv": "\n".join(summary_lines) + "\n",
+        summary_path: "\n".join(summary_lines) + "\n",
         out / "README.md": "\n".join(readme),
     }
     if "--tex" in flags:

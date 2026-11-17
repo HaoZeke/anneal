@@ -11,6 +11,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/ase-nonlj
+PIXI=${PIXI:-$HOME/.pixi/bin/pixi}
 SYSTEM=""
 ARM=""
 SEED=""
@@ -25,7 +26,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$SYSTEM" && -z "$ARM" && -z "$SEED" ]]; then
-  exec "${PYTHON:-python3}" "$HERE/summarize.py"
+  exec "$PIXI" run --locked --frozen -e chem "${PYTHON:-python3}" "$HERE/summarize.py"
 fi
 
 case "$SYSTEM" in
@@ -41,25 +42,30 @@ case "$SEED" in
   *) echo "seed $SEED is outside 2000-2011" >&2; exit 2 ;;
 esac
 
+BIN=${ASE_NONLJ:-/work/target-panel/release/examples/ase_nonlj}
+REV=${ASE_NONLJ_REVISION:-9a30f3190b3bb7040c675a904f8388eb68224151}
 mkdir -p "$WORK/runs" "$WORK/home" "$WORK/numba"
-ROWS=$ROOT/bench/ase-nonlj/rows.csv
-if [[ -f $ROWS ]] && grep -q "^${SYSTEM},${ARM},${SEED}," "$ROWS"; then
+ROWS=${ASE_NONLJ_ROWS:-$ROOT/bench/ase-nonlj/rows.csv}
+if [[ -f $ROWS ]] && grep -q "^${SYSTEM},${ARM},${SEED},.*,$REV,bench," "$ROWS"; then
   echo "keep existing $SYSTEM $ARM seed $SEED"
   exit 0
 fi
 
 CAP=""
 if [[ $ARM != for_cluster ]]; then
-  CAP=$(python3 - "$ROWS" "$SYSTEM" << 'PY'
+  CAP=$("$PIXI" run --locked --frozen -e chem "${PYTHON:-python3}" - "$ROWS" "$SYSTEM" "$REV" << 'PY'
 import csv
 import sys
 from pathlib import Path
 
-path, system = Path(sys.argv[1]), sys.argv[2]
+path, system, revision = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 rows = list(csv.DictReader(path.open())) if path.exists() else []
 base = [
     row for row in rows
-    if row["arm"] == "for_cluster" and row["system"] == system and row["host"] == "bench"
+    if row["arm"] == "for_cluster"
+    and row["system"] == system
+    and row["host"] == "bench"
+    and row["code_revision"] == revision
 ]
 seeds = tuple(sorted(int(row["seed"]) for row in base))
 if seeds != tuple(range(2000, 2012)):
@@ -69,18 +75,29 @@ PY
 )
 fi
 
-BIN=${ASE_NONLJ:-/work/target-panel/release/examples/ase_nonlj}
-REV=${ASE_NONLJ_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}
-PY=${PYTHON:-python3}
+if [[ ! $REV =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ASE_NONLJ_REVISION must be a full lowercase commit SHA" >&2
+  exit 2
+fi
+if [[ ! -f $ROOT/pixi.lock ]]; then
+  echo "pixi.lock is required" >&2
+  exit 2
+fi
+if ! git -C "$ROOT" cat-file -e "${REV}^{commit}" 2>/dev/null; then
+  echo "revision $REV is not in this checkout; fetch it or set ASE_NONLJ_REVISION to a reachable commit SHA" >&2
+  exit 2
+fi
+PYRUN="$PIXI run --locked --frozen -e chem ${PYTHON:-python3}"
 sudo -n unshare --uts sh -c "hostname bench; \
   export HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba; \
   export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1; \
   export OMP_PROC_BIND=TRUE OMP_PLACES=cores PYTHONUNBUFFERED=1; \
   export ASE_NONLJ_WORK=$WORK/runs ASE_NONLJ=$BIN ASE_NONLJ_WALL_CAP=$CAP ASE_NONLJ_REVISION=$REV; \
-  exec taskset -c 0 $PY $HERE/run_one.py $SYSTEM $ARM $SEED" \
+  exec taskset -c 0 $PYRUN $HERE/run_one.py $SYSTEM $ARM $SEED" \
   > "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" 2> "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stderr"
 
-python3 - "$SYSTEM" "$ARM" "$SEED" "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" "$ROWS" << 'PY'
+$PYRUN - "$SYSTEM" "$ARM" "$SEED" "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" "$ROWS" << 'PY'
+import csv
 import sys
 from pathlib import Path
 
@@ -95,7 +112,14 @@ if len(fields) != 15:
 path = Path(rows_path)
 header = "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,outside_s,code_revision,host,stop,cap_s"
 text = path.read_text() if path.exists() else ""
-if f"{system},{arm},{seed}," in text:
+revision = fields[11]
+if path.exists() and any(
+    old["system"] == system
+    and old["arm"] == arm
+    and old["seed"] == seed
+    and old["code_revision"] == revision
+    for old in csv.DictReader(text.splitlines())
+):
     print(f"keep existing {system} {arm} seed {seed}")
     raise SystemExit(0)
 path.parent.mkdir(parents=True, exist_ok=True)

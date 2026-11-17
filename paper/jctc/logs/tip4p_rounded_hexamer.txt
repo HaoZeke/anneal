@@ -1,0 +1,15 @@
+command=pixi run --locked --frozen -e verify python3 paper/jctc/scripts/tip4p_constants.py --hexamer paper/jctc/data/system_visuals/ccd/TIP4P/xyz/TIP4P-6.xyz
+campaign_base=628773d6837ea2d959a27256ff4163b21162fd4d
+historical_source_revision=e51f38dd1df91f5f153c396349eda1a5009ef3ae
+Jorgensen A = 2510400.0000 kJ A^12/mol, C = 2552.240000 kJ A^6/mol
+exact epsilon = 0.6486943 kJ/mol, sigma = 3.153578 A
+anneal epsilon = 0.6485, sigma = 3.15365: C6 = 2551.8252, C12 = 2510336.2
+GMIN C6 = 2552.24, C12 = 2.5104e+06: equal to Jorgensen C and A: True
+relative epsilon rounding (anneal/exact - 1) = -2.996e-04; sigma (anneal/exact - 1) = 2.285e-05
+source_revision = e51f38dd1df91f5f153c396349eda1a5009ef3ae
+structure = paper/jctc/data/system_visuals/ccd/TIP4P/xyz/TIP4P-6.xyz
+structure_sha256 = ceab821bf48013cb225b4bf65c5733aecb210b1d4d8b309898cab5d9d927cc87
+historical Coulomb prefactor = 1389.35458
+energy = -197.7750083779 kJ/mol
+reported energy = -197.7750 kJ/mol
+exit_code=0
