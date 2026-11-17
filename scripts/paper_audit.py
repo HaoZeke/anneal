@@ -147,15 +147,7 @@ KNOWN_GAPS = {
                                                                       "host column)",
 }
 
-UNTRACED = [
-    ("bench/gad-published/README.md", "seed 2000 at 226282 calls and seed 2006 at 114143 calls",
-     "the per-seed GAD rerun rows were not committed"),
-    ("bench/gad-published/README.md", "a median of 13 generations on LJ31 (2–20) and 15.5 on LJ38 (12–24)",
-     "the per-seed GAD rerun rows were not committed"),
-    ("bench/gad-published/README.md", "| LJ31 | gmin | 12/12 | 47139.5 | 73509.5 |",
-     "Mann-Whitney p needs the per-seed rows, which were not committed"),
-    (SI, "-197.7750", "only REPORT.md quotes it; no committed row holds it"),
-]
+UNTRACED = []
 
 
 class Audit:
@@ -2975,20 +2967,30 @@ def manuscript_new(audit: Audit) -> None:
     raster = lf.raster_letters()
     audit.said(TEX, f"Panels (a) to ({chr(ord(raster[0]) - 1)}) are drawn as vectors from the landscape tables.")
     audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) show the sealed raster maps of the campaigns, because "
-                    "their landscape tables and the campaign driver are not in the repository.")
+                    "the current-code serial regeneration is incomplete.")
     audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), TEX,
                  "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
     blocked = audit.rows("paper/jctc/data/landfold_maps_v7/rerun-status.csv")
-    audit.record("".join(row["panels"] for row in blocked).replace("-", "") == raster,
+    latest = {}
+    for row in blocked:
+        latest[row["campaign"]] = row
+    attempts = list(latest.values())
+    audit.record("".join(row["panels"] for row in attempts).replace("-", "") == raster,
                  "paper/jctc/data/landfold_maps_v7/rerun-status.csv",
                  "every raster panel has a regeneration status", raster,
-                 "".join(row["panels"] for row in blocked).replace("-", ""))
-    for row in blocked:
-        audit.record(row["status"] == "blocked" and row["host"] == "bench"
-                     and set(row["missing"].split(";")) == {"campaign-driver", "campaign-tables"},
+                 "".join(row["panels"] for row in attempts).replace("-", ""))
+    expected = {
+        "lj_csm/lj75/recommended": {"198-seeds", "792000000-potential-calls"},
+        "lj_csm/lj98/derived": {"48-seeds", "192000000-potential-calls"},
+        "lj_csm_c26/lj98/recommended": {"48-seeds", "192000000-potential-calls"},
+        "tip4p/hexamer/for_tip4p": {"4-seeds", "80000-potential-calls"},
+    }
+    for row in attempts:
+        audit.record(row["status"] == "incomplete" and row["host"] == "cloud-run"
+                     and set(row["missing"].split(";")) == expected[row["campaign"]],
                      "paper/jctc/data/landfold_maps_v7/rerun-status.csv",
-                     f"panels {row['panels']} record the missing campaign inputs",
-                     "blocked on bench: driver and tables",
+                     f"panels {row['panels']} record the unfinished current-code campaign",
+                     "incomplete on cloud-run: declared remaining work",
                      f"{row['status']} on {row['host']}: {row['missing']}")
 
 
@@ -3018,8 +3020,8 @@ RERUN_CLAIMS = (
                 "hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse clusters, and no arm hits",
                 "5 are significant by Fisher's test", "6 clusters are significant overall",
                 "This setting hits more seeds than GMIN on 9 of the 13 clusters",
-                "this setting hits it on 6 of 12 and GMIN on 1 of 12", "where GMIN hits 1 of 12 and Fisher's \\(p\\) is 0.069",
-                "it hits 6 of 12 and GMIN 1 of 12, with \\(p=0.069\\)",
+                "this setting hits it on 4 of 12 and GMIN on 1 of 12", "where GMIN hits 1 of 12 and Fisher's \\(p\\) is 0.32",
+                "it hits 4 of 12 and GMIN 1 of 12, with \\(p=0.32\\)",
                 "minima hopping hits none", "Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones clusters",
                 "Both ASE arms hit 0 of 12 on all 4", "ASE minima hopping hits LJ\\(_{38}\\) on 1 of 6, LJ\\(_{55}\\) on 6 of 6",
                 "Wall is the median wall in seconds of all six runs", "Minima hopping reached its cap on every run")),
@@ -3258,8 +3260,8 @@ def manuscript_au55(audit: Audit) -> None:
         return fisher(hits_of(a), len(a), hits_of(g), len(g))
 
     au_a, au_g = groups[("au55", "anneal")], groups[("au55", "gmin")]
-    audit.cell(TEX, "Au55 hits of this setting and GMIN in the GMIN panel", "6 1", f"{hits_of(au_a)} {hits_of(au_g)}")
-    audit.cell(TEX, "Au55 Fisher p of the GMIN panel", "0.069", p_of("au55"))
+    audit.cell(TEX, "Au55 hits of this setting and GMIN in the GMIN panel", "4 1", f"{hits_of(au_a)} {hits_of(au_g)}")
+    audit.cell(TEX, "Au55 Fisher p of the GMIN panel", "0.32", p_of("au55"))
     audit.cell(TEX, "Au55 Fisher p is not below 0.05", "1", float(p_of("au55") >= 0.05))
     ours = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")]) and p_of(s) < 0.05]
     theirs = [s for s in systems if hits_of(groups[(s, "gmin")]) > hits_of(groups[(s, "anneal")]) and p_of(s) < 0.05]
@@ -3271,10 +3273,10 @@ def manuscript_au55(audit: Audit) -> None:
                          "LJ\\(_{75}\\), LJ\\(_{98}\\), and M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\), and "
                          "M\\(_{80}\\) at \\(\\rho=6\\) for GMIN.")
     audit.said(TEX, "It is not below 0.05 on the other 4 wins: LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and "
-                    "Au\\(_{55}\\), where \\(p=0.069\\).")
-    audit.said(TEX, "this setting hits it on 6 of 12 and GMIN on 1 of 12.")
-    audit.said(TEX, "On Au\\(_{55}\\) this setting hits 6 of 12 in the GMIN panel, where GMIN hits 1 of 12 and Fisher's "
-                    "\\(p\\) is 0.069.")
+                    "Au\\(_{55}\\), where \\(p=0.32\\).")
+    audit.said(TEX, "this setting hits it on 4 of 12 and GMIN on 1 of 12.")
+    audit.said(TEX, "On Au\\(_{55}\\) this setting hits 4 of 12 in the GMIN panel, where GMIN hits 1 of 12 and Fisher's "
+                    "\\(p\\) is 0.32.")
     audit.said(TEX, "Of the 9 clusters where this setting hits more seeds than GMIN, 5 are significant by Fisher's test, and "
                     "the 4 that are not are LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and Au\\(_{55}\\).")
     for path in (TEX, SI, COVER):
