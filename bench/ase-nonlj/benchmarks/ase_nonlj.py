@@ -13,10 +13,18 @@ ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "ase_nonlj" / "summarize.py"
 
 PAPER_BUDGETS = {
+    "m38r3": 400_000,
     "m38r6": 400_000,
+    "m38r10": 400_000,
     "m38r14": 400_000,
+    "m55r3": 1_000_000,
     "m55r6": 1_000_000,
+    "m55r10": 1_000_000,
     "m55r14": 1_000_000,
+    "m75r6": 4_000_000,
+    "m75r14": 4_000_000,
+    "m80r6": 4_000_000,
+    "m80r14": 4_000_000,
 }
 
 
@@ -24,7 +32,11 @@ class AseNonLj:
     timeout = 120
 
     def setup(self):
-        if PAPER_BUDGETS["m38r6"] != 400_000 or PAPER_BUDGETS["m55r14"] != 1_000_000:
+        if (
+            PAPER_BUDGETS["m38r6"] != 400_000
+            or PAPER_BUDGETS["m55r14"] != 1_000_000
+            or PAPER_BUDGETS["m80r14"] != 4_000_000
+        ):
             raise RuntimeError("non-LJ budgets drifted")
         if not SCRIPT.is_file():
             raise RuntimeError("missing the non-LJ summary")

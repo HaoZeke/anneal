@@ -29,7 +29,7 @@ if [[ -z "$SYSTEM" && -z "$ARM" && -z "$SEED" ]]; then
 fi
 
 case "$SYSTEM" in
-  m38r6|m38r14|m55r6|m55r14) ;;
+  m38r3|m38r6|m38r10|m38r14|m55r3|m55r6|m55r10|m55r14|m75r6|m75r14|m80r6|m80r14) ;;
   *) echo "unknown system $SYSTEM" >&2; exit 2 ;;
 esac
 case "$ARM" in
