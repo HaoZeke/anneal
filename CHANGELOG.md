@@ -378,6 +378,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   AVX in any other function is still a violation, and the report lists
   each clone with its dispatcher.
 
+- The ISA self-test links its dispatch fixtures with `-nodefaultlibs`,
+  so they import libgcc's CPU model and the proof reads `__cpu_model`
+  through the GOT.
+  The static copy is built for the toolchain's own `-march`, and on the
+  Ubuntu 26.04 runner its `__cpu_indicator_init` has two BMI2 `shlx`.
+  `allow-dispatch.toml` drops its `__cpu_indicator_init` entry.
+
 - The `abi_symbols` test picks the `nm` mode from the library it is
   given: `nm -D --defined-only` for a shared object and
   `nm -g --defined-only` for a static `lib*.a` or `*.lib` archive, which

@@ -109,8 +109,13 @@ PY
   if "$cc" -fno-ipa-icf -x c -c /dev/null -o "$work/icf.o" 2>/dev/null; then
     icf=(-fno-ipa-icf)
   fi
-  "$cc" -shared -fPIC -O2 "${base[@]}" "$TESTS/dispatch_ok.c" -o "$work/dispatch_ok.so"
-  "$cc" -shared -fPIC -O2 "${base[@]}" "${icf[@]}" "$TESTS/dispatch_bad.c" -o "$work/dispatch_bad.so"
+  # The baseline pin does not reach libgcc.a, which keeps its toolchain's
+  # default (Ubuntu 26.04's amd64v3 GCC has BMI2 in __cpu_indicator_init),
+  # so the fixtures link without it and import __cpu_model, which the
+  # proof reads through its GOT slot.
+  local dso=(-shared -fPIC -nodefaultlibs)
+  "$cc" "${dso[@]}" -O2 "${base[@]}" "$TESTS/dispatch_ok.c" -o "$work/dispatch_ok.so"
+  "$cc" "${dso[@]}" -O2 "${base[@]}" "${icf[@]}" "$TESTS/dispatch_bad.c" -o "$work/dispatch_bad.so"
   expect_ok "$work/dispatch_ok.so" --allow "$TESTS/allow-dispatch.toml" --json "$work/dispatch.json"
   python3 - "$work/dispatch.json" <<'PY'
 import json, sys
@@ -130,8 +135,8 @@ PY
   # Clang -O0 keeps the probe result in a stack slot, which the proof does
   # not follow, so its clones stay violations.
   if "$cc" --version | grep -q "Free Software Foundation"; then
-    "$cc" -shared -fPIC -O0 "${base[@]}" "$TESTS/dispatch_ok.c" -o "$work/dispatch_ok0.so"
-    "$cc" -shared -fPIC -O0 "${base[@]}" "${icf[@]}" "$TESTS/dispatch_bad.c" -o "$work/dispatch_bad0.so"
+    "$cc" "${dso[@]}" -O0 "${base[@]}" "$TESTS/dispatch_ok.c" -o "$work/dispatch_ok0.so"
+    "$cc" "${dso[@]}" -O0 "${base[@]}" "${icf[@]}" "$TESTS/dispatch_bad.c" -o "$work/dispatch_bad0.so"
     expect_ok "$work/dispatch_ok0.so" --allow "$TESTS/allow-dispatch.toml"
     for name in unguarded_avx2 wrong_guard_avx2 inverted_guard_avx2 escaped_avx2 \
       partial_guard_avx2 exported_avx2 lying_probe_avx2 weak_probe_avx2; do

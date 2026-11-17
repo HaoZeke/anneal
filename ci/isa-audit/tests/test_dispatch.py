@@ -161,6 +161,10 @@ class DispatchTest(unittest.TestCase):
             return None
         return out
 
+    def _fixture(self, source: str, name: str, *flags: str) -> Path | None:
+        # libgcc.a keeps its toolchain's -march, so the fixtures import the CPU model.
+        return self._build(HERE / source, name, "-nodefaultlibs", *flags)
+
     def test_bits_match_libgcc(self) -> None:
         checked = 0
         for index, builtin in BUILTIN_NAMES.items():
@@ -209,7 +213,7 @@ class DispatchTest(unittest.TestCase):
     def test_fixture_clones_are_proven(self) -> None:
         # At -O0 have_avx2_fma is a call and the resolver branches with jle.
         for level in ("-O2", "-O0"):
-            lib = self._build(HERE / "dispatch_ok.c", f"ok{level}", level)
+            lib = self._fixture("dispatch_ok.c", f"ok{level}", level)
             self.assertIsNotNone(lib)
             stats = _audit(lib)
             names = {item["name"]: item["via"] for item in stats.dispatched}
@@ -223,7 +227,7 @@ class DispatchTest(unittest.TestCase):
 
     def test_lookalikes_are_violations(self) -> None:
         for level in ("-O2", "-O0"):
-            lib = self._build(HERE / "dispatch_bad.c", f"bad{level}", level, "-fno-ipa-icf")
+            lib = self._fixture("dispatch_bad.c", f"bad{level}", level, "-fno-ipa-icf")
             self.assertIsNotNone(lib)
             stats = _audit(lib)
             flagged = {item.symbol for item in stats.violations}
@@ -242,7 +246,7 @@ class DispatchTest(unittest.TestCase):
                     self.assertIn(name, flagged)
 
     def test_planted_avx_outside_a_clone_fails(self) -> None:
-        lib = self._build(HERE / "dispatch_ok.c", "plant")
+        lib = self._fixture("dispatch_ok.c", "plant")
         self.assertIsNotNone(lib)
         blob = lib.read_bytes()
         for symbol, dispatched in (
@@ -268,7 +272,7 @@ class DispatchTest(unittest.TestCase):
                     self.assertEqual(hits[0].feature, "avx")
 
     def test_stripped_library_proves_nothing(self) -> None:
-        lib = self._build(HERE / "dispatch_ok.c", "stripped")
+        lib = self._fixture("dispatch_ok.c", "stripped")
         self.assertIsNotNone(lib)
         subprocess.run(["strip", "--strip-all", str(lib)], check=True)
         stats = _audit(lib)
