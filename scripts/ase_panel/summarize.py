@@ -31,6 +31,17 @@ SYSTEMS = {
     "lj150": (150, 4_000_000, -893.310258, "LJ150"),
     "au55": (55, 1_000_000, -191.03085280, "Au55"),
 }
+TEX_LABELS = {
+    "lj38": "LJ\\(_{38}\\)",
+    "lj55": "LJ\\(_{55}\\)",
+    "lj98": "LJ\\(_{98}\\)",
+    "lj104": "LJ\\(_{104}\\)",
+    "lj150": "LJ\\(_{150}\\)",
+    "au55": "Au\\(_{55}\\)",
+}
+MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
+TEX_MARKS = ("% ase-panel table: start", "% ase-panel table: end")
+ASE_VERSION = "3.29.0"
 HIT_TOL = 0.001
 HEADER = (
     "arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,"
@@ -333,12 +344,109 @@ def aggregate_rows(system: str, summary: str) -> list[str]:
     ]
 
 
+def show_p(p: float) -> str:
+    """Two significant figures; 1 only when p is exactly 1."""
+    if p >= 1.0:
+        return "1"
+    if p >= 0.01:
+        return f"{p:.2f}" if p >= 0.1 else f"{p:.3f}"
+    mantissa, exponent = f"{p:.1e}".split("e")
+    return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
+
+
+def show_budget(budget: int) -> str:
+    mantissa, exponent = f"{budget:.0e}".split("e")
+    return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
+
+
+def show_cap(cap: str) -> str:
+    value = float(cap)
+    return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
+
+
+def tex_table() -> str:
+    """Table tab:ase: recommended against both ASE arms, Fisher on hits only."""
+    body = []
+    revisions = set()
+    for system in SYSTEMS:
+        _, budget, _, _ = SYSTEMS[system]
+        grouped = load(system)
+        revisions |= {row["code_revision"] for row in grouped["recommended"]}
+        if any(row["stop"] == "wall" for row in grouped["recommended"]):
+            raise SystemExit(f"{system}: a recommended row stopped at the wall cap")
+        caps = {row["cap_s"] for arm in ASE_ARMS for row in grouped[arm]}
+        if len(caps) != 1:
+            raise SystemExit(f"{system}: the ASE wall cap is not unique: {sorted(caps)}")
+        slowest = max(float(row["wall_s"]) for row in grouped["anneal"])
+        if abs(float(next(iter(caps))) - 3.0 * slowest) > 1.0e-6:
+            raise SystemExit(f"{system}: the ASE wall cap is not three times the slowest anneal wall")
+
+        def hits(arm: str) -> int:
+            return sum(row["hit"] == "1" for row in grouped[arm])
+
+        def stops(arm: str) -> int:
+            return sum(row["stop"] == "wall" for row in grouped[arm])
+
+        body.append(" & ".join([
+            TEX_LABELS[system], show_budget(budget), show_cap(caps.pop()),
+            f"{hits('recommended')}/12", f"{hits('ase_bh')}/12", f"{hits('ase_mh')}/12",
+            str(stops("ase_bh")), str(stops("ase_mh")),
+            show_p(fisher(hits("recommended"), hits("ase_bh"))),
+            show_p(fisher(hits("recommended"), hits("ase_mh"))),
+        ]) + " \\\\")
+    if len(revisions) != 1:
+        raise SystemExit(f"recommended rows carry more than one revision: {sorted(revisions)}")
+    return "\n".join([
+        "\\begin{table}",
+        "\\caption{This work against the basin hopping (BH) and minima hopping",
+        f"(MH) of ASE {ASE_VERSION} at its constructor defaults.",
+        f"This work is anneal \\texttt{{{revisions.pop()[:8]}}}.",
+        "Seeds 2000--2011, one core, budget in force calls.",
+        "Cap is the wall in seconds at which a BH or MH run stops, three times",
+        "the slowest wall of the cluster-preset arm of the panel.",
+        "Stops counts the BH and MH runs that ended at the cap; those runs",
+        "are misses with fewer calls than the budget.",
+        "No run of this work ended at a cap.",
+        "\\(p_\\mathrm{BH}\\) and \\(p_\\mathrm{MH}\\) are the two-sided Fisher",
+        "exact test on hits against each ASE arm.}",
+        "\\label{tab:ase}",
+        "\\centering",
+        "\\small",
+        "\\setlength{\\tabcolsep}{4pt}",
+        "\\begin{tabular}{@{}lrrrrrrrrr@{}}",
+        "\\toprule",
+        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{2}{c}{Stops} & & \\\\",
+        "\\cmidrule(lr){4-6}\\cmidrule(lr){7-8}",
+        "Cluster & Budget & Cap & This work & BH & MH & BH & MH & "
+        "\\(p_\\mathrm{BH}\\) & \\(p_\\mathrm{MH}\\) \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
+def splice(text: str, block: str) -> str:
+    start, end = TEX_MARKS
+    if text.count(start) != 1 or text.count(end) != 1:
+        raise SystemExit(f"{MANUSCRIPT} needs one '{start}' and one '{end}'")
+    head, rest = text.split(start, 1)
+    _old, tail = rest.split(end, 1)
+    return f"{head}{start}\n{block}\n{end}{tail}"
+
+
 def main() -> None:
-    if len(sys.argv) not in {2, 3} or (len(sys.argv) == 3 and sys.argv[2] != "--check"):
-        raise SystemExit("usage: summarize.py SYSTEM|--all [--check]")
-    selected = list(SYSTEMS) if sys.argv[1] == "--all" else [sys.argv[1]]
+    args = sys.argv[1:]
+    flags = [arg for arg in args if arg.startswith("--") and arg != "--all"]
+    selection = [arg for arg in args if arg not in flags]
+    if len(selection) != 1 or any(flag not in ("--check", "--tex") for flag in flags) or len(set(flags)) != len(flags):
+        raise SystemExit("usage: summarize.py SYSTEM|--all [--check] [--tex]")
+    selected = list(SYSTEMS) if selection[0] == "--all" else [selection[0]]
     if any(system not in SYSTEMS for system in selected):
-        raise SystemExit(f"unknown system {sys.argv[1]}")
+        raise SystemExit(f"unknown system {selection[0]}")
+    if "--tex" in flags and selected != list(SYSTEMS):
+        raise SystemExit("--tex needs --all")
     outputs = {}
     aggregate = [AGGREGATE_HEADER]
     for system in selected:
@@ -351,7 +459,9 @@ def main() -> None:
         outputs[ROOT / "bench" / "ase-recommended" / "summary.csv"] = (
             "\n".join(aggregate) + "\n"
         )
-    if len(sys.argv) == 3:
+    if "--tex" in flags:
+        outputs[MANUSCRIPT] = splice(MANUSCRIPT.read_text(), tex_table())
+    if "--check" in flags:
         stale = [str(path.relative_to(ROOT)) for path, text in outputs.items() if path.read_text() != text]
         if stale:
             raise SystemExit("stale generated report: " + ", ".join(stale))

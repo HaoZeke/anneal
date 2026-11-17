@@ -804,6 +804,122 @@ M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 9/12 & 1338932.5 & 30
 \end{table}
 % gmin-panel table: end
 
+\subsection{The Atomic Simulation Environment}
+\label{sec:ase}
+Tables~\ref{tab:ase} and~\ref{tab:ase-morse} put this setting against
+the basin hopping and the minima hopping of the Atomic Simulation
+Environment 3.29.0 at its constructor defaults, on seeds 2000--2011,
+at \(4\times 10^{5}\) calls for 38 atoms, \(1\times 10^{6}\) for 55,
+and \(4\times 10^{6}\) for 98 atoms and above, on one core of one host.
+\cite{larsenAse2017,goedecker2004}
+On Au\(_{55}\) both codes evaluate the same Gupta routine.
+On the Morse clusters the Atomic Simulation Environment evaluates its
+own Morse calculator, which agrees with this code at the seed-2000
+start to \(6.8\times 10^{-12}\) in energy and \(3.6\times 10^{-12}\)
+in force.
+The two codes draw their starting geometries with different generators,
+so seed labels are not pairs.
+Each run stops at a hit, at the budget, or at a wall cap.
+The cap of the basin-hopping and minima-hopping runs is three times
+the slowest wall of the panel's cluster-preset arm on that cluster.
+That arm is not the setting of this article, and the tables leave it
+out.
+No run of this setting reached its cap.
+A run stopped at the cap is a miss with fewer calls than the budget, so
+its calls to the minimum are censored.
+The tables compare hits with Fisher's exact test and report no rank
+test on calls or on wall.
+
+Minima hopping stopped at the cap on all 72 runs of
+Table~\ref{tab:ase}, and basin hopping on 35: 12 on LJ\(_{38}\), 11 on
+LJ\(_{55}\), and 12 on Au\(_{55}\).
+On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
+full \(4\times 10^{6}\) calls on every seed.
+This setting hits LJ\(_{38}\) and LJ\(_{55}\) on 12 of 12, LJ\(_{98}\)
+on 10 of 12, LJ\(_{104}\) on 9 of 12, and LJ\(_{150}\) on 5 of 12.
+Basin hopping hits LJ\(_{55}\) on 1 of 12 and no other cluster, and
+minima hopping hits none.
+Fisher's test against each ASE arm is below 0.05 on all 5
+Lennard-Jones clusters.
+No arm hits Au\(_{55}\).
+There the median best energy lies 0.048~eV above the reference for this
+setting, 1.210~eV for basin hopping, and 0.737~eV for minima hopping.
+
+% ase-panel table: start
+\begin{table}
+\caption{This work against the basin hopping (BH) and minima hopping
+(MH) of ASE 3.29.0 at its constructor defaults.
+This work is anneal \texttt{b49341e3}.
+Seeds 2000--2011, one core, budget in force calls.
+Cap is the wall in seconds at which a BH or MH run stops, three times
+the slowest wall of the cluster-preset arm of the panel.
+Stops counts the BH and MH runs that ended at the cap; those runs
+are misses with fewer calls than the budget.
+No run of this work ended at a cap.
+\(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
+exact test on hits against each ASE arm.}
+\label{tab:ase}
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrrrrrr@{}}
+\toprule
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & & \\
+\cmidrule(lr){4-6}\cmidrule(lr){7-8}
+Cluster & Budget & Cap & This work & BH & MH & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+\midrule
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.654 & 12/12 & 0/12 & 0/12 & 12 & 12 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.425 & 12/12 & 1/12 & 0/12 & 11 & 12 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 & \(6.7\times 10^{-5}\) & \(6.7\times 10^{-5}\) \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 280.9 & 9/12 & 0/12 & 0/12 & 0 & 12 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & 544.4 & 5/12 & 0/12 & 0/12 & 0 & 12 & 0.037 & 0.037 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 112.4 & 0/12 & 0/12 & 0/12 & 12 & 12 & 1 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% ase-panel table: end
+
+Every basin-hopping and minima-hopping run of
+Table~\ref{tab:ase-morse} stopped at the cap.
+This setting hits M\(_{38}\) at \(\rho=6\) and \(\rho=14\) and
+M\(_{55}\) at \(\rho=6\) on 12 of 12, and M\(_{55}\) at \(\rho=14\) on
+5 of 12.
+Both ASE arms hit 0 of 12 on all 4.
+Fisher's \(p\) against each ASE arm is \(7.4\times 10^{-7}\) on the
+first three and 0.037 on M\(_{55}\) at \(\rho=14\).
+
+% ase-nonlj table: start
+\begin{table}
+\caption{This work against the basin hopping (BH) and minima hopping
+(MH) of ASE 3.29.0 on Morse clusters.
+This work is anneal \texttt{90b88235} at the length
+scale of the Morse pair.
+Seeds 2000--2011, one core, budget in force calls.
+Cap is the wall in seconds at which a BH or MH run stops, three times
+the slowest wall of the cluster-preset arm of the panel.
+Every BH and MH run ended at the cap, as a miss with fewer calls than
+the budget, and no run of this work did.
+\(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
+exact test on hits against each ASE arm.}
+\label{tab:ase-morse}
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+ & & & \multicolumn{3}{c}{Hits} & & \\
+\cmidrule(lr){4-6}
+Cluster & Budget & Cap & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+\midrule
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 9.304 & 12/12 & 0/12 & 0/12 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.162 & 12/12 & 0/12 & 0/12 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 14.661 & 12/12 & 0/12 & 0/12 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 46.786 & 5/12 & 0/12 & 0/12 & 0.037 & 0.037 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% ase-nonlj table: end
+
 \subsection{TIP4P clusters}
 Ten, fifteen, and twenty TIP4P molecules were run for six seeds,
 0 through 5, at \(5\times 10^{5}\) force calls.
