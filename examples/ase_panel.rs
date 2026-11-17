@@ -74,7 +74,12 @@ fn main() {
             Kind::Lj => random_cluster(n, 0.7, cfg.min_separation, &mut rng),
             Kind::Gold => {
                 let reduced = (3.0 * n as f64 / (4.0 * std::f64::consts::PI * 0.7)).cbrt();
-                random_cluster_in_radius(n, reduced * cfg.length_scale, cfg.min_separation, &mut rng)
+                random_cluster_in_radius(
+                    n,
+                    reduced * cfg.length_scale,
+                    cfg.min_separation,
+                    &mut rng,
+                )
             }
         }
     };
