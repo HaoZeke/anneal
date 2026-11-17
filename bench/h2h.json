@@ -1121,6 +1121,36 @@
       ]
     },
     {
+      "rule": "ase_lj150",
+      "competitors": [
+        "ASE basin hopping",
+        "ASE minima hopping"
+      ],
+      "runners": [
+        "scripts/ase_panel/enter_bench.sh",
+        "scripts/ase_lj150/run_one.py"
+      ],
+      "budgets": {
+        "source": "scripts/ase_lj150/run_one.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_lj150/run_one.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-lj150/benchmarks/ase_lj150.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/ase-lj150/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "agox_lj98",
       "competitors": [
         "AGOX"
