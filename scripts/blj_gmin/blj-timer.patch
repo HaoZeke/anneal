@@ -1,0 +1,28 @@
+--- a/source/BLJcluster_nocut.f90
++++ b/source/BLJcluster_nocut.f90
+@@ -30,6 +30,7 @@
+   !
+   USE COMMONS, ONLY : NATOMS,VT,ATOMLISTS, GLJEPS, GLJSIG, NSPECIES
+   USE PREC, ONLY: REAL64
++  USE H2H_CAP, ONLY : H2H_POT_ENTER, H2H_POT_LEAVE
+   IMPLICIT NONE
+   !
+   LOGICAL, INTENT (IN) :: GTEST
+@@ -39,6 +40,9 @@
+   LOGICAL :: SELF
+   INTEGER :: I,J1,J13,J2,J23,T1,T2,G1,G2,G2START,K1,K2,LI1,LI2,UI1,UI2
+   REAL(KIND = REAL64) :: DIST2, DX(3), IR6, IR12, DUMMY, SIG2, EPS4, EPS24
++  INTEGER(KIND=8) :: H2H_TICK
++
++  CALL H2H_POT_ENTER(H2H_TICK)
+   !
+   ! Zero the potential and the gradient
+   VT(1:NATOMS) = 0.0D0
+@@ -157,6 +161,7 @@
+      !
+   ENDIF
+   !
++  CALL H2H_POT_LEAVE(H2H_TICK)
+   RETURN
+   !
+ END SUBROUTINE BLJ_CLUST

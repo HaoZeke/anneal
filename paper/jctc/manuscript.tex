@@ -804,6 +804,26 @@ M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 9/12 & 1338932.5 & 30
 \end{table}
 % gmin-panel table: end
 
+\subsection{Binary Lennard-Jones clusters}
+\label{sec:blj}
+Table~\ref{tab:blj} is the same preset on the Doye--Meyer binary
+Lennard-Jones clusters, against GMIN's \texttt{BLJCLUSTER\_NOCUT}.
+Both arms use seeds 2000--2011, the budget of the matching size in
+Table~\ref{tab:gmin}, and the start this code writes for the seed.
+The two species are labels on the preset, with no diameters, so the
+container and the move scales stay those of the one-component clusters.
+The hit is a quenched energy at most 0.001 above the Cambridge Cluster
+Database structure named in \texttt{bench/blj-gmin/ccd/sources.csv}.
+The potential is the uncutoff binary Lennard-Jones sum, with
+\(\varepsilon=1\), \(\sigma_{AA}=1\) and
+\(\sigma_{AB}=(\sigma_{AA}+\sigma_{BB})/2\).
+
+% blj-gmin prose: start
+% blj-gmin prose: end
+
+% blj-gmin table: start
+% blj-gmin table: end
+
 \subsection{TIP4P clusters}
 Ten, fifteen, and twenty TIP4P molecules were run for six seeds,
 0 through 5, at \(5\times 10^{5}\) force calls.

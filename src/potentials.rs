@@ -43,6 +43,10 @@ pub struct ClusterKernels {
     #[allow(clippy::type_complexity)]
     pub gupta:
         fn(&[f64], &[u8], usize, &[f64], &[f64], &[f64], &[f64], &[f64], &mut f64, &mut [f64]),
+    /// `rgpot_pair::binary_lj`. Species A is the first `n_a` atoms.
+    /// `eps` and `sig` are AA, AB, BB. A cutoff that is not positive keeps
+    /// every pair, which is the Cambridge cluster potential.
+    pub binary_lj: fn(usize, [f64; 3], [f64; 3], f64, &[f64], &mut [f64]) -> f64,
 }
 
 static CLUSTER_KERNELS: OnceLock<ClusterKernels> = OnceLock::new();
@@ -59,6 +63,7 @@ pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
         cluster_lj: rgpot_pair::cluster_lj,
         cambridge_morse: rgpot_pair::cambridge_morse,
         gupta: rgpot_pair::gupta,
+        binary_lj: rgpot_pair::binary_lj,
     });
     CLUSTER_KERNELS.get()
 }
@@ -72,6 +77,7 @@ macro_rules! install_rgpot_kernels {
             cluster_lj: ::rgpot_pair::cluster_lj,
             cambridge_morse: ::rgpot_pair::cambridge_morse,
             gupta: ::rgpot_pair::gupta,
+            binary_lj: ::rgpot_pair::binary_lj,
         })
     };
 }
