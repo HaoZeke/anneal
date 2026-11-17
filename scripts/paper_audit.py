@@ -54,8 +54,6 @@ ALIASES = "bench/revision-aliases.csv"
 # panel from five campaign heads and sits on the last, e09e0487, alone. The
 # pushed history before it has one commit, 57735de1, that adds the two-hour
 # cap, yet three heads ran capped, so the heads are not its commits one to one.
-# 12b980c6 is the harness the sc-omp rows ran from; the commit was rebased
-# before any copy of it was pushed, so until one is it has no alias.
 UNPUSHED = {
     "0f988569b49afe162e2f5ffd71b2ab45d0b3afec": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
     "349523d3f5f42b748f3af1573166fd17155ac461": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
@@ -65,8 +63,6 @@ UNPUSHED = {
                                                 "Si10 and C10 floor rows; the fix was pushed on another base",
     "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
                                                 "the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",
-    "12b980c610e02ec274fab2ba88a1c24f71bdce6d": "the sc-omp harness, a local commit on 75780cd0 of bench/sc-dev2, rebased "
-                                                "with the same patch before it was pushed",
 }
 
 KNOWN_GAPS = {
@@ -103,9 +99,6 @@ KNOWN_GAPS = {
     "bench/growpal-h2h/seeds.csv": "no revision or host column",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "no revision or host column",
     "bench/nh3-octamer/ladder.csv": "no revision or host column",
-    "bench/metal-cluster-h2h/sc-omp/seeds.csv": "revision 12b980c6 is not in this repository",
-    "bench/metal-cluster-h2h/sc-omp/micro.csv": "revision 12b980c6 is not in this repository",
-    "bench/metal-cluster-h2h/sc-omp/bits.csv": "revision 12b980c6 is not in this repository",
 }
 
 UNTRACED = [
@@ -1693,6 +1686,7 @@ def sc_wall2(audit: Audit) -> None:
 
 
 SC_OMP = "bench/metal-cluster-h2h/sc-omp"
+SC_OMP_ROWS = [f"{SC_OMP}/seeds.csv", f"{SC_OMP}/micro.csv", f"{SC_OMP}/bits.csv"]
 
 
 def sc_omp_same(row: dict[str, str], ref: dict[str, str]) -> bool:
@@ -1889,8 +1883,7 @@ def sc_omp_body(audit: Audit) -> str:
              f"`bench`, harness {harness}. The rows are in `seeds.csv` and `micro.csv`, with the OpenMP flag, the "
              "thread count and the cores. `bits.csv` holds `sc_omp_bits`, which compares the build with OpenMP and "
              "the build without on the seed-2000 start of each system and its 63 noisy copies."
-             + "".join(f" Harness {h[:8]} was a local commit, rebased with the same patch before it was pushed; "
-                       "`UNPUSHED` in `scripts/paper_audit.py` lists it." for h in parts["harness"] if h in UNPUSHED),
+             + (f" {aliases}" if (aliases := alias_sentence(audit, SC_OMP_ROWS, "../../revision-aliases.csv")) else ""),
              "",
              "## Calls and energies", "",
              "Each row is matched by seed against `../sc-wall2/seeds.csv` in the hit, calls to the hit, calls charged, "
@@ -1930,6 +1923,8 @@ def sc_omp(audit: Audit) -> None:
     for sentences in sc_omp_prose(parts).values():
         for sentence in sentences:
             audit.said(path, sentence)
+    if sentence := alias_sentence(audit, SC_OMP_ROWS, "../../revision-aliases.csv"):
+        audit.said(path, sentence)
 
 
 def gfn2_ranked(rows: list[dict[str, str]]) -> list[float]:
