@@ -1096,11 +1096,24 @@ rule agox_gofee_lj_large:
 # tables were not deposited. The runner is resumable in /work and publishes
 # landscape.ld and fes.csv only after every declared seed has finished.
 # Not part of `rule all`.
-#   snakemake -s workflow/Snakefile landfold_maps_current --cores 1
+#   snakemake -s workflow/Snakefile landfold_maps_current --cores all
+LANDFOLD_CAMPAIGNS = {
+    "lj75-recommended": range(2000, 2200),
+    "lj98-derived": range(2000, 2048),
+    "lj98-recommended": range(2000, 2048),
+    "tip4p-hexamer": range(0, 4),
+}
+LANDFOLD_SHARDS = [
+    f"/work/anneal-landfold-current/shards/{campaign}/seed-{seed:04d}.{suffix}"
+    for campaign, seeds in LANDFOLD_CAMPAIGNS.items()
+    for seed in seeds
+    for suffix in ("min", "json")
+]
+
+
 rule landfold_maps_current:
     input:
-        "examples/landfold_campaign.rs",
-        "paper/jctc/scripts/run_landfold_campaign.py",
+        LANDFOLD_SHARDS,
     output:
         touch("/work/anneal-landfold-current/complete.stamp"),
     threads: 1
@@ -1111,5 +1124,31 @@ rule landfold_maps_current:
         set -euo pipefail
         python3 paper/jctc/scripts/run_landfold_campaign.py \\
           --work /work/anneal-landfold-current \\
-          --publish paper/jctc/data/landfold_maps_v7
+          --publish paper/jctc/data/landfold_maps_v7 \\
+          --finalize-only
+        """
+
+
+rule landfold_map_shard:
+    input:
+        "examples/landfold_campaign.rs",
+        "paper/jctc/scripts/run_landfold_campaign.py",
+    output:
+        book="/work/anneal-landfold-current/shards/{campaign}/seed-{seed}.min",
+        receipt="/work/anneal-landfold-current/shards/{campaign}/seed-{seed}.json",
+    wildcard_constraints:
+        campaign="lj75-recommended|lj98-derived|lj98-recommended|tip4p-hexamer",
+        seed="[0-9]{4}",
+    threads: 1
+    resources:
+        mem_mb=1000,
+    shell:
+        """
+        set -euo pipefail
+        LANDFOLD_HOST=cloud-run \\
+          python3 paper/jctc/scripts/run_landfold_campaign.py \\
+            --campaign-id {wildcards.campaign} \\
+            --seed {wildcards.seed} \\
+            --output {output.book} \\
+            --receipt {output.receipt}
         """

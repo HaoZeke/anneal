@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
+import re
 import shutil
-import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +47,12 @@ CAMPAIGNS = (
     Campaign("tip4p/hexamer/for_tip4p", "tip4p", 6, "for_tip4p", 20_000, 0, 3,
              ("representative", "aggregate")),
 )
+CAMPAIGN_IDS = {
+    "lj75-recommended": CAMPAIGNS[0],
+    "lj98-derived": CAMPAIGNS[1],
+    "lj98-recommended": CAMPAIGNS[2],
+    "tip4p-hexamer": CAMPAIGNS[3],
+}
 
 
 def run(command: list[str]) -> None:
@@ -53,6 +61,91 @@ def run(command: list[str]) -> None:
 
 def source_rows(path: Path) -> int:
     return sum(1 for line in path.read_text().splitlines() if line.strip())
+
+
+def digest(path: Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            value.update(block)
+    return value.hexdigest()
+
+
+def deduplicate_book(source: Path, output: Path) -> int:
+    energies: list[float] = []
+    kept = []
+    for line in source.read_text().splitlines():
+        if not line.strip():
+            continue
+        energy = float(line.split(maxsplit=1)[0])
+        if any(abs(energy - held) < 1e-6 for held in energies):
+            continue
+        energies.append(energy)
+        kept.append(line)
+    output.write_text("\n".join(kept) + ("\n" if kept else ""))
+    return len(kept)
+
+
+def run_shard(campaign_id: str, seed: int, output: Path, receipt: Path) -> None:
+    campaign = CAMPAIGN_IDS[campaign_id]
+    if seed < campaign.first or seed > campaign.last:
+        raise SystemExit(f"{campaign_id}: seed {seed} is outside {campaign.first}..{campaign.last}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    if output.is_file() and source_rows(output) and receipt.is_file():
+        return
+    legacy = Path("/work/anneal-landfold-current") / campaign.name / "sources" / f"seed-{seed:04d}.min"
+    elapsed = None
+    stderr = ""
+    if legacy.is_file() and source_rows(legacy):
+        if output.exists():
+            output.unlink()
+        rows = deduplicate_book(legacy, output)
+        charged, hops, best = campaign.budget, None, None
+    else:
+        pending = output.with_suffix(".min.tmp")
+        command = [
+            str(ROOT.parent / "tmp/anneal-target/release/examples/landfold_campaign"),
+            campaign.family, str(campaign.size), campaign.config, str(campaign.budget),
+            str(seed), str(pending),
+        ]
+        started = time.monotonic()
+        completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+        elapsed = time.monotonic() - started
+        stderr = completed.stderr.strip()
+        if completed.returncode:
+            raise SystemExit(stderr or f"{campaign_id} seed {seed}: search exited {completed.returncode}")
+        match = re.search(
+            r"charged=(\d+) hops=(\d+) rows=(\d+) best=([-+0-9.eE]+)", stderr
+        )
+        if match is None:
+            raise SystemExit(f"{campaign_id} seed {seed}: cannot parse campaign summary: {stderr}")
+        charged, hops, rows, best = (
+            int(match.group(1)), int(match.group(2)), int(match.group(3)), float(match.group(4))
+        )
+        if charged != campaign.budget:
+            raise SystemExit(f"{campaign_id} seed {seed}: charged {charged}, expected {campaign.budget}")
+        if not pending.is_file() or source_rows(pending) != rows or rows == 0:
+            raise SystemExit(f"{campaign_id} seed {seed}: invalid source book")
+        pending.replace(output)
+    commit, tree = revision()
+    record = {
+        "campaign": campaign.name,
+        "seed": seed,
+        "budget": campaign.budget,
+        "charged": charged,
+        "hops": hops,
+        "minima": rows,
+        "best": best,
+        "seconds": elapsed,
+        "calls_per_second": charged / elapsed if elapsed else None,
+        "sha256": digest(output),
+        "code_revision": commit,
+        "code_tree": tree,
+        "host": os.environ.get("LANDFOLD_HOST", "cloud-run"),
+        "summary": stderr,
+    }
+    receipt.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n")
 
 
 def fold(binary: Path, books: list[Path], family: str, folder: Path) -> int:
@@ -116,14 +209,80 @@ def revision() -> tuple[str, str]:
     return commit, tree
 
 
+def finalize(work: Path, publish: Path) -> None:
+    landfold = ROOT.parent / "tmp/anneal-target/release/anneal"
+    if not landfold.is_file():
+        raise SystemExit("the current-code landfold binary is not built")
+    records = []
+    for campaign_id, campaign in CAMPAIGN_IDS.items():
+        source = work / "shards" / campaign_id
+        books = [source / f"seed-{seed:04d}.min" for seed in range(campaign.first, campaign.last + 1)]
+        receipts = [source / f"seed-{seed:04d}.json" for seed in range(campaign.first, campaign.last + 1)]
+        if not all(path.is_file() and source_rows(path) for path in books):
+            raise SystemExit(f"{campaign_id}: source books are incomplete")
+        if not all(path.is_file() for path in receipts):
+            raise SystemExit(f"{campaign_id}: receipts are incomplete")
+        for book, receipt in zip(books, receipts, strict=True):
+            row = json.loads(receipt.read_text())
+            if row["sha256"] != digest(book) or row["minima"] != source_rows(book):
+                raise SystemExit(f"{receipt}: receipt does not authenticate its source book")
+            records.append(row)
+        products = work / campaign.name / "products"
+        for panel in campaign.panels:
+            chosen = books[:1] if panel == "representative" else books
+            rows = fold(landfold, chosen, campaign.family, products / panel)
+            if rows != sum(source_rows(path) for path in chosen):
+                raise SystemExit(f"{campaign.name}/{panel}: fold dropped source rows")
+    publish.mkdir(parents=True, exist_ok=True)
+    for campaign in CAMPAIGNS:
+        for panel in campaign.panels:
+            src = work / campaign.name / "products" / panel
+            dest = publish / campaign.name / panel
+            dest.mkdir(parents=True, exist_ok=True)
+            for name in ("landscape.ld", "fes.csv"):
+                shutil.copyfile(src / name, dest / name)
+    columns = (
+        "campaign", "seed", "budget", "charged", "hops", "minima", "best", "seconds",
+        "calls_per_second", "sha256", "code_revision", "code_tree", "host",
+    )
+    with (publish / "campaign-shards.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(sorted(records, key=lambda row: (row["campaign"], row["seed"])))
+    commit, tree = revision()
+    campaign_receipt = {
+        "code_revision": commit,
+        "code_tree": tree,
+        "host": os.environ.get("LANDFOLD_HOST", "cloud-run"),
+        "campaigns": [campaign.__dict__ for campaign in CAMPAIGNS],
+        "shards": len(records),
+        "minima": sum(row["minima"] for row in records),
+    }
+    (publish / "current-rerun.json").write_text(json.dumps(campaign_receipt, indent=2) + "\n")
+    (work / "complete.stamp").write_text(f"{commit} {tree} {campaign_receipt['host']}\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work", type=Path, default=Path("/work/anneal-landfold-current"))
     parser.add_argument("--publish", type=Path, default=DEFAULT_DATA)
+    parser.add_argument("--campaign-id", choices=CAMPAIGN_IDS)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--receipt", type=Path)
+    parser.add_argument("--finalize-only", action="store_true")
     parser.add_argument("--limit-seeds", type=int, help="run at most this many seeds per campaign; never publish")
     parser.add_argument("--budget-cap", type=int, help="cap each budget for a smoke run; never publish")
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
+    if args.campaign_id is not None:
+        if args.seed is None or args.output is None or args.receipt is None:
+            parser.error("--campaign-id requires --seed, --output and --receipt")
+        run_shard(args.campaign_id, args.seed, args.output, args.receipt)
+        return
+    if args.finalize_only:
+        finalize(args.work, args.publish)
+        return
     run(["cargo", "build", "--release", "--example", "landfold_campaign", "--bin", "anneal"])
     search = ROOT.parent / "tmp/anneal-target/release/examples/landfold_campaign"
     landfold = ROOT.parent / "tmp/anneal-target/release/anneal"
@@ -168,7 +327,7 @@ def main() -> None:
     receipt = {
         "code_revision": commit,
         "code_tree": tree,
-        "host": socket.gethostname(),
+        "host": os.environ.get("LANDFOLD_HOST", "cloud-run"),
         "campaigns": [campaign.__dict__ for campaign in CAMPAIGNS],
     }
     for campaign in CAMPAIGNS:
@@ -179,7 +338,9 @@ def main() -> None:
             for name in ("landscape.ld", "fes.csv"):
                 shutil.copyfile(src / name, dest / name)
     (args.publish / "current-rerun.json").write_text(json.dumps(receipt, indent=2) + "\n")
-    (args.work / "complete.stamp").write_text(f"{commit} {tree} {socket.gethostname()}\n")
+    (args.work / "complete.stamp").write_text(
+        f"{commit} {tree} {os.environ.get('LANDFOLD_HOST', 'cloud-run')}\n"
+    )
 
 
 if __name__ == "__main__":

@@ -142,11 +142,19 @@ fn main() {
         cfg.bias_gamma,
     );
     let mut written = 0usize;
+    let mut energies = Vec::new();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         for quench in snapshot.quench_boundaries() {
             if quench.status() != QuenchStatus::Validated {
                 continue;
             }
+            if energies
+                .iter()
+                .any(|held: &f64| (*held - quench.energy()).abs() < 1e-6)
+            {
+                continue;
+            }
+            energies.push(quench.energy());
             write!(rows, "{:.12}", quench.energy()).expect("write energy");
             for value in quench.state() {
                 write!(rows, " {:.10}", value).expect("write state");
