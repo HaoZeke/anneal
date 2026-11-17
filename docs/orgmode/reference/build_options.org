@@ -44,6 +44,7 @@ A =feature= option takes =enabled=, =disabled= or =auto=.
 | =with_ipi= | feature | =auto= | i-PI socket server Potential (IPIPot), driver client (IPIDriver) and rgpot-ipi-driver (POSIX sockets). auto is on except on Windows. |
 | =with_water= | boolean | =false= | Flexible TIP4P, SPC/E and TIP4P-Pt kernels. Defaults false, matching the eOn with_water option. |
 | =with_eam_table= | boolean | =false= | EAM and Finnis-Sinclair potentials read from LAMMPS funcfl, setfl and eam/fs tables. |
+| =with_cbe= | feature | =disabled= | Link the external =cbe-pes= C API and build the CBE H + CH4 frontend. |
 | =with_lammps= | feature | =auto= | LAMMPS pair_style rgpot and the lj/cut comparison. Needs the lammps Python module. pair_style rgpot also needs lammps_src. |
 | =lammps_src= | string | =(empty)= | LAMMPS src directory that contains pair.h, matching the liblammps that will load the plugin. |
 | =lammps_exe= | string | =(empty)= | lmp built from lammps_src. When set, the LAMMPS test also runs pair_style rgpot. |
@@ -71,5 +72,6 @@ Pass an option as =-DNAME=ON= or =-DNAME=OFF= to =cmake=.
 | =RGPOT_WITH_HIGHWAY= | BOOL | ON | Google Highway runtime ISA dispatch. |
 | =RGPOT_WITH_IPI= | BOOL | ON (OFF on Windows) | i-PI socket server potential and driver client. Enabling it on Windows is a configure error. |
 | =RGPOT_WITH_EAM_TABLE= | BOOL | OFF | EAM and Finnis-Sinclair potentials read from LAMMPS tables. |
+| =RGPOT_WITH_CBE= | BOOL | OFF | Link the external pkg-config =cbe= library and build the CBE H + CH4 frontend. |
 | =RGPOT_BUILD_TESTS= | BOOL | ON when rgpot is the top-level project, else OFF | Build the tests. |
 | =RGPOT_WITH_CP2K= | BOOL | OFF | =CP2KPot=, the =potserv= CP2K backend and =libcp2kc_rgpot= against libcp2k. |

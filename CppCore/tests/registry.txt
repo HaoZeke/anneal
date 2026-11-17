@@ -126,6 +126,7 @@ MorsePotTest | tests core | unit morse_pot_test MorsePotTest.cc |
 CambridgeMorseTest | tests core | unit cambridge_morse_test CambridgeMorseTest.cc |
 GuptaTest | tests core | unit gupta_test GuptaTest.cc |
 HessianVectorTest | tests core | unit hessian_vector_test HessianVectorTest.cc |
+ModelPotsTest | tests core | unit model_pots_test ModelPotsTest.cc |
 SWSiTest | tests core | unit sw_si_test SWSiTest.cc |
 TersoffSiCTest | tests core | unit tersoff_sic_test TersoffSiCTest.cc fp_contract=off |
 HalfShellScanTest | tests core | unit half_shell_scan_test HalfShellScanTest.cc |

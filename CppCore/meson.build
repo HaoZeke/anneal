@@ -350,6 +350,14 @@ if not get_option('with_rpc_client_only')
     subdir('rgpot/Morse')  # 'morse'
     rgpotentials += [morse]
 
+    subdir('rgpot/Models')
+    rgpotentials += [model_pots]
+
+    if has_cbe
+        subdir('rgpot/CBEPot')
+        rgpotentials += [cbe_pot]
+    endif
+
     subdir('rgpot/Gupta')  # 'gupta'
     rgpotentials += [gupta]
 

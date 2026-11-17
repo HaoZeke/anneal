@@ -81,6 +81,12 @@ option(
     description: 'Fortran-backed potentials (CuH2; grows with the eOn migration). Independent of the RPC options.',
 )
 option(
+    'with_cbe',
+    type: 'feature',
+    value: 'disabled',
+    description: 'linked external cbe-pes H + CH4 frontend',
+)
+option(
     'with_highway',
     type: 'feature',
     value: 'auto',
