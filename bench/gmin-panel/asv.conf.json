@@ -5,6 +5,9 @@
   "repo": "../..",
   "branches": ["develop"],
   "environment_type": "existing",
+  "env_dir": ".asv/env",
+  "results_dir": ".asv/results",
+  "html_dir": ".asv/html",
   "build_command": ["python3", "-c", "import pathlib; pathlib.Path('build').touch()"],
   "benchmarks": "benchmarks"
 }
