@@ -72,7 +72,6 @@ KNOWN_GAPS = {
     "results/size-tiered-selection.csv": "no revision or host column",
     "results/lj-funnel-stalls.csv": "no revision or host column",
     "results/cross-field-hits.csv": "no revision or host column",
-    "bench/gmin-wall-v4/results.csv": "no revision or host column",
     "bench/tip4p-water-rates/rates-a24ba760.csv": "no revision column",
     "bench/tip4p-water-rates/rates.csv": "no revision column",
     "paper/jctc/logs/water/NUMBERS.tsv": "no revision or host column",
@@ -352,28 +351,112 @@ def manuscript_retry(audit: Audit) -> None:
     audit.said(TEX, f"{frac(retry98).replace('/', ' of ')} on LJ\\(_{{98}}\\).")
 
 
+GMIN_PANEL_REVISION = "c2de652dca0bc75e2b0cb4afffac91fd656404e4"
+
+
+def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[dict[str, str]]]]:
+    """The panel rows of each system and arm, one per seed, in seed order."""
+    spec = importlib.util.spec_from_file_location("gmin_panel", ROOT / "scripts/gmin_panel/run_panel.py")
+    panel = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(panel)
+    rows = audit.rows("bench/gmin-panel/rows.csv")
+    groups = {}
+    for system in panel.PAPER_BUDGETS:
+        for code, revision in (("anneal", GMIN_PANEL_REVISION), ("gmin", panel.GMIN_REV)):
+            group = pick(rows, system=system, code=code, code_revision=revision, harness_revision=GMIN_PANEL_REVISION)
+            seeds = [int(r["seed"]) for r in group]
+            where = f"bench/gmin-panel/rows.csv {system} {code}"
+            audit.cell(where, "seeds", " ".join(map(str, sorted(seeds))), " ".join(map(str, panel.SEEDS)))
+            audit.cell(where, "budget", " ".join(sorted({r["budget"] for r in group})), str(panel.PAPER_BUDGETS[system]))
+            groups[(system, code)] = sorted(group, key=lambda r: int(r["seed"]))
+    sessions = {r["session"] for group in groups.values() for r in group}
+    hosts = {r["host"] for group in groups.values() for r in group}
+    audit.cell("bench/gmin-panel/rows.csv", "sessions", str(len(sessions)), "1")
+    audit.cell("bench/gmin-panel/rows.csv", "host", " ".join(sorted(hosts)), "bench")
+    return panel, groups
+
+
+def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
+                    budget: int) -> None:
+    """One table line: Budget, Arm, Hits, Median calls, IQR, Wall, Inside, Outside, Fisher p, MW p calls, MW p wall."""
+    group = groups[(system, arm)]
+    other = groups[(system, "gmin" if arm == "anneal" else "anneal")]
+
+    def col(rows: list[dict[str, str]], key: str) -> list[float]:
+        return [float(r[key]) for r in rows]
+
+    audit.cell(where, "hits", cells[2], frac(group))
+    audit.cell(where, "median calls", cells[3], median(col(group, "evals_to_hit")))
+    audit.cell(where, "IQR calls", cells[4], iqr(col(group, "evals_to_hit")))
+    audit.cell(where, "wall median", cells[5], median(col(group, "wall_s")))
+    audit.cell(where, "inside median", cells[6], median(col(group, "pot_s")))
+    audit.cell(where, "outside median", cells[7], median(col(group, "outside_s")))
+    if arm == "anneal":
+        audit.cell(where, "budget", cells[0], float(budget))
+        audit.cell(where, "Fisher p", cells[8], fisher(hits_of(group), len(group), hits_of(other), len(other)))
+        audit.cell(where, "MW p calls", cells[9],
+                   mann_whitney(col(group, "evals_to_hit"), col(other, "evals_to_hit"), continuity=True))
+        audit.cell(where, "MW p wall", cells[10], mann_whitney(col(group, "wall_s"), col(other, "wall_s"), continuity=True))
+    else:
+        for label, cell in zip(("budget", "Fisher p", "MW p calls", "MW p wall"), (cells[0], *cells[8:])):
+            audit.cell(where, label, cell, None)
+
+
 def manuscript_gmin(audit: Audit) -> None:
-    summary = audit.rows("bench/gmin-h2h/results-05e9ef4d.csv")
-    per_seed = audit.rows("bench/gmin-wall-v4/results.csv")
-    arm_name = {"this work": "anneal", "GMIN": "gmin"}
-    for row in tex_table(audit, TEX, "tab:gmin"):
-        size = CLUSTER[row[0]]
-        arm = arm_name[row[1]]
-        line = pick(summary, system=f"lj{size}", arm=arm)[0]
-        where = f"{TEX} tab:gmin lj{size} {arm}"
-        audit.cell(where, "hits", row[2], line["hits_over_n"])
-        audit.cell(where, "median", row[3], float(line["evals_median"]))
-        audit.cell(where, "IQR", row[4], float(line["evals_iqr"]))
-        if arm == "gmin":
-            seeds = pick(per_seed, system=f"lj{size}", arm="gmin")
-            calls = [float(r["evals_to_hit"]) for r in seeds]
-            audit.cell(where + " from gmin-wall-v4", "hits", row[2], frac(seeds))
-            audit.cell(where + " from gmin-wall-v4", "median", row[3], median(calls))
-            audit.cell(where + " from gmin-wall-v4", "IQR", row[4], iqr(calls))
-    h98a = pick(summary, system="lj98", arm="anneal")[0]["hits"]
-    h98g = pick(summary, system="lj98", arm="gmin")[0]["hits"]
-    audit.said(TEX, f"On LJ\\(_{{98}}\\) this setting hits {h98a} of 6 and GMIN hits {h98g} of 6.")
-    audit.said(TEX, f"the comparison with GMIN is {h98a} of 6 against {h98g} of 6 on LJ\\(_{{98}}\\)")
+    panel, groups = gmin_panel_groups(audit)
+    arms = {"this work": "anneal", "anneal": "anneal", "GMIN": "gmin"}
+    for path, label_index, lines in (
+        (TEX, 1, [(None, row) for row in tex_table(audit, TEX, "tab:gmin")]),
+        ("bench/gmin-panel/README.md", 0,
+         [(n, list(row.values())) for n, row in md_table(audit, "bench/gmin-panel/README.md", "System | Budget | Arm")]),
+    ):
+        by_label = {labels[label_index]: system for system, labels in panel.LABELS.items()}
+        shown = []
+        system = None
+        for line, cells in lines:
+            if cells[0]:
+                system = by_label.get(cells[0])
+            arm = arms.get(cells[2])
+            where = f"{path}:{line} {cells[0] or system} {cells[2]}" if line else f"{path} tab:gmin {system} {cells[2]}"
+            if system is None or arm is None or len(cells) != 12:
+                audit.record(False, where, "table line", " & ".join(cells), "a panel system and arm")
+                continue
+            shown.append((system, arm))
+            gmin_panel_line(audit, where, cells[1:], groups, system, arm, panel.PAPER_BUDGETS[system])
+        want = [(system, arm) for system in panel.PAPER_BUDGETS for arm in ("anneal", "gmin")]
+        audit.cell(path, "gmin panel lines", " ".join(f"{s}/{a}" for s, a in shown), " ".join(f"{s}/{a}" for s, a in want))
+    gmin_panel_prose(audit, panel, groups)
+
+
+def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
+    def name(system: str) -> str:
+        label = panel.LABELS[system][1]
+        return label.replace(", \\(\\rho=", " at \\(\\rho=")
+
+    def of(system: str, arm: str) -> str:
+        return f"{hits_of(groups[(system, arm)])} of {len(groups[(system, arm)])}"
+
+    systems = list(panel.PAPER_BUDGETS)
+    ahead = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")])]
+    behind = [s for s in systems if hits_of(groups[(s, "anneal")]) < hits_of(groups[(s, "gmin")])]
+    tied = [s for s in systems if s not in ahead and s not in behind]
+    significant = [s for s in systems if fisher(hits_of(groups[(s, "anneal")]), len(groups[(s, "anneal")]),
+                                                hits_of(groups[(s, "gmin")]), len(groups[(s, "gmin")])) < 0.05]
+    total = len(systems)
+    against = ", and ".join(f"{name(s)} on {of(s, 'gmin')} against {of(s, 'anneal')}" for s in behind)
+    audit.said(TEX, f"this setting hits more seeds on {len(ahead)} of {total} and GMIN hits more on {len(behind)}.")
+    audit.said(TEX, f"GMIN hits {against}.")
+    audit.said(TEX, f"This setting hits more seeds than GMIN on {len(ahead)} of the {total} clusters.")
+    audit.said(TEX, "GMIN hits more on " + ", and on ".join(f"{name(s)}, {of(s, 'gmin')} against {of(s, 'anneal')}"
+                                                       for s in behind) + ".")
+    audit.said(TEX, f"The two tie on {' and '.join(name(s) for s in tied)}.")
+    ours = [s for s in significant if s in ahead]
+    theirs = [s for s in significant if s in behind]
+    audit.said(TEX, f"Fisher's test on hits is below 0.05 on {len(significant)} clusters: {len(ours)} for this setting "
+                    f"and {' and '.join(name(s) for s in theirs)} for GMIN.")
+    audit.said(TEX, f"this setting hits more seeds on {len(ahead)} of {total} clusters, and GMIN hits more on "
+                    f"{' and on '.join(name(s) for s in behind)}.")
+    audit.said(TEX, "Section~\\ref{sec:gmin} scores it on the clusters of Table~\\ref{tab:gmin}.")
 
 
 def manuscript_tip4p(audit: Audit) -> None:

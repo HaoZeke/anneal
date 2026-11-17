@@ -72,9 +72,9 @@ def test_script_exits_zero():
 def test_a_drifted_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    audit.text_cache[audit_mod.TEX] = tex.replace("& 5/6 & 1801909.5 & 1807535.5", "& 5/6 & 1801910.5 & 1807535.5")
+    audit.text_cache[audit_mod.TEX] = tex.replace("& 12/12 & 10615.5 & 3591.25", "& 12/12 & 10616.5 & 3591.25")
     audit_mod.manuscript_gmin(audit)
-    assert [r[2] for r in audit.drifts()] == ["median"]
+    assert [r[2] for r in audit.drifts()] == ["median calls"]
 
 
 def test_a_drifted_sutton_chen_howto_cell_is_reported():
