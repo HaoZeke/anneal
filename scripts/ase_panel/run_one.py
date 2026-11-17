@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""One seed of the ASE panel against Config::for_cluster.
+"""One seed of the ASE panel.
 
 Usage: run_one.py SYSTEM ARM SEED
 
+`anneal` is Config::for_cluster. `recommended` is Config::recommended.
 ASE basin hopping and minima hopping use the ASE 3.29 constructor defaults.
 Lennard-Jones is the untruncated pair. Au55 is Gupta::copper_gold through
-asg_eval serve, the same potential the anneal arm evaluates.
+asg_eval serve, the same potential the anneal arms evaluate.
 A hit is a quenched energy within 0.001 of the reference. A miss is
 censored at the paper budget. One calculator call is one energy and one
-gradient. An ASE seed also stops at the wall cap. The row records the
-calls, the wall, the best energy, the cap, code_revision and host.
+gradient. An ASE seed, and a recommended seed, stop at the wall cap stored
+on the ASE rows. The row records the calls, the wall, the time inside and
+outside the potential, the cap, code_revision and host.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ MIN_SEP = 0.85
 DENSITY = 0.7
 SEEDS = tuple(range(2000, 2012))
 FMAX = {"ase_bh": 0.1, "ase_mh": 0.05}
-ARMS = ("anneal", "ase_bh", "ase_mh")
+ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
 
 
 def hostname() -> str:
@@ -153,24 +155,23 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
     }
 
 
-def run_anneal(system: str, seed: int) -> dict:
+def run_anneal(system: str, seed: int, preset: str, cap_s: str) -> dict:
     binary = os.environ.get("ASE_PANEL", "/work/target-panel/release/examples/ase_panel")
     spec = SYSTEMS[system]
-    proc = subprocess.run(
-        [binary, system, str(spec["budget"]), str(seed)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    command = [binary, system, str(spec["budget"]), str(seed), preset]
+    if cap_s:
+        command.append(cap_s)
+    proc = subprocess.run(command, check=False, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr[-2000:])
     fields = {}
     for line in proc.stdout.splitlines():
         if line.startswith("system="):
             fields = dict(part.split("=", 1) for part in line.split())
-    if fields.get("system") != system or fields.get("seed") != str(seed):
+    if fields.get("system") != system or fields.get("seed") != str(seed) or fields.get("arm") != preset:
         raise RuntimeError("anneal stdout has no row")
     hit = fields["hit"] == "1"
+    stop = fields.get("stop") or ("hit" if hit else "budget")
     return {
         "hit": int(hit),
         "evals": "" if fields["first_calls"] == "-" else fields["first_calls"],
@@ -179,8 +180,8 @@ def run_anneal(system: str, seed: int) -> dict:
         "wall": float(fields["wall_s"]),
         "inside": float(fields["inside_s"]),
         "outside": float(fields["outside_s"]),
-        "stop": "hit" if hit else "budget",
-        "cap_s": "",
+        "stop": stop,
+        "cap_s": cap_s,
     }
 
 
@@ -210,12 +211,19 @@ def main() -> int:
         return 2
     if SYSTEMS[system]["kind"] == "lj":
         check_lj()
-    revision = os.environ.get(
-        "ASE_PANEL_REVISION", "5a7f629d79be88b9d3f0cb2c6665062bda4ac625"
-    )
+    revision = os.environ.get("ASE_PANEL_REVISION", "")
+    if not revision:
+        print("ASE_PANEL_REVISION is unset", file=sys.stderr)
+        return 2
     spec = SYSTEMS[system]
-    if arm == "anneal":
-        row = run_anneal(system, seed)
+    if arm in ("anneal", "recommended"):
+        cap_text = ""
+        if arm == "recommended":
+            cap_text = os.environ.get("ASE_PANEL_WALL_CAP", "")
+            if not cap_text:
+                print("ASE_PANEL_WALL_CAP is unset", file=sys.stderr)
+                return 2
+        row = run_anneal(system, seed, "for_cluster" if arm == "anneal" else "recommended", cap_text)
     else:
         cap_text = os.environ.get("ASE_PANEL_WALL_CAP", "")
         if not cap_text:

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
-# ASE basin hopping and minima hopping against Config::for_cluster.
-#   enter_bench.sh --system lj38 --arm anneal --seed 2000
+# ASE basin hopping and minima hopping against Config::for_cluster,
+# and the headline Config::recommended arm.
+#   enter_bench.sh --system lj38 --arm recommended --seed 2000
 # No --arm rewrites that system's summary from the committed rows.
-# An existing seed is left untouched. An ASE seed stops at the paper
-# call budget or at three times the slowest anneal wall of that system.
+# An existing seed is left untouched. An ASE seed stops at three times
+# the slowest for_cluster wall. A recommended seed stops at the cap
+# already stored on those ASE rows.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -32,7 +34,7 @@ if [[ -z "$ARM" && -z "$SEED" ]]; then
   exec python3 "$HERE/summarize.py" "$SYSTEM"
 fi
 case "$ARM" in
-  anneal|ase_bh|ase_mh) ;;
+  anneal|recommended|ase_bh|ase_mh) ;;
   *) echo "unknown arm $ARM" >&2; exit 2 ;;
 esac
 case "$SEED" in
@@ -48,7 +50,20 @@ if [[ -f $ROWS ]] && grep -q ",${ARM},${SEED}," "$ROWS"; then
 fi
 
 CAP=""
-if [[ $ARM != anneal ]]; then
+if [[ $ARM == recommended ]]; then
+  CAP=$(python3 - "$ROWS" << 'PY'
+import csv
+import sys
+from pathlib import Path
+
+rows = list(csv.DictReader(Path(sys.argv[1]).open()))
+caps = sorted({row["cap_s"] for row in rows if row["arm"] in ("ase_bh", "ase_mh") and row["cap_s"]})
+if len(caps) != 1:
+    raise SystemExit(f"the stored ASE wall cap is not unique: {caps}")
+print(caps[0])
+PY
+)
+elif [[ $ARM != anneal ]]; then
   CAP=$(python3 - "$ROWS" "$SYSTEM" << 'PY'
 import csv
 import sys
@@ -67,7 +82,7 @@ fi
 
 PANEL=${ASE_PANEL:-/work/target-panel/release/examples/ase_panel}
 ASG=${ASG_EVAL:-/work/target-panel/release/examples/asg_eval}
-REV=${ASE_PANEL_REVISION:-5a7f629d79be88b9d3f0cb2c6665062bda4ac625}
+REV=${ASE_PANEL_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}
 PY=${PYTHON:-python3}
 sudo -n unshare --uts sh -c "hostname bench; \
   export HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba; \
