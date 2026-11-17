@@ -50,7 +50,7 @@ let cmake_build_test =
     -DRGPOT_WITH_CACHE=${{ matrix.cache }} \
     -DRGPOT_PURE_LIB=OFF \
     $CMAKE_EXTRA
-  cmake --build build -j
+  cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
   ctest --test-dir build --output-on-failure
   ccache -s
 "%
@@ -330,7 +330,7 @@ in
                 -DCMAKE_BUILD_TYPE=Release \
                 -DRGPOT_RPC_CLIENT_ONLY=ON \
                 -DRGPOT_BUILD_TESTS=ON
-          cmake --build build_client -j
+          cmake --build build_client --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
         "%,
         S.run_pixi m%"
           echo "--- Starting Server ---"
