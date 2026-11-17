@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "project": "anneal",
+  "project_url": "https://github.com/HaoZeke/anneal",
+  "repo": "../..",
+  "branches": ["develop"],
+  "environment_type": "existing",
+  "build_command": [
+    "cargo build --release --locked --example h2h_gmin_proof --example h2h_morse --example h2h_metal"
+  ],
+  "benchmarks": "benchmarks"
+}

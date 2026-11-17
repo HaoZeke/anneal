@@ -1595,6 +1595,41 @@
       }
     },
     {
+      "rule": "outside_perf",
+      "competitors": [
+        "anneal 0ae5bfe0"
+      ],
+      "runners": [
+        "scripts/outside_perf/run_interleaved.py",
+        "scripts/outside_perf/summarize.py",
+        "scripts/outside_perf/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/gmin_panel/run_panel.py",
+        "name": "PAPER_BUDGETS",
+        "keys": [
+          "lj150",
+          "lj104",
+          "m80r6",
+          "au55"
+        ]
+      },
+      "seeds": {
+        "source": "scripts/outside_perf/run_interleaved.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/outside-perf/benchmarks/outside_perf.py",
+      "rows": [
+        {
+          "path": "bench/outside-perf/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "gmin_panel",
       "competitors": [
         "GMIN"

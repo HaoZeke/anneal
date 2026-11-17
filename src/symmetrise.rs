@@ -967,6 +967,20 @@ fn within_cutoff(d2: f64, pair_cutoff: f64) -> bool {
     d2.sqrt() <= pair_cutoff
 }
 
+/// Preserve the direct square-root comparison while avoiding the root away
+/// from its rounding boundary.
+fn outside_separation(d2: f64, separation: f64) -> bool {
+    let limit = separation * separation;
+    let slack = limit * (64.0 * f64::EPSILON);
+    if d2 > limit + slack {
+        return true;
+    }
+    if d2 < limit - slack {
+        return false;
+    }
+    d2.sqrt() >= separation
+}
+
 /// [`complete_orbits`] with the group acting about `c` rather than the
 /// centroid, for a group read off a core whose centre is not the
 /// centroid of the whole structure.
@@ -984,13 +998,13 @@ pub fn complete_orbits_about(
     let rel =
         |a: usize| -> [f64; 3] { [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]] };
     // Sites: merged images, with their support (images landing on them).
-    let mut sites: Vec<([f64; 3], usize, usize)> = Vec::new();
+    let mut sites: Vec<([f64; 3], usize, usize, f64)> = Vec::with_capacity(n);
     for a in 0..n {
         let r = rel(a);
         for g in group {
             let w = act(g, r);
             let mut hit = None;
-            for (i, (p, _, _)) in sites.iter().enumerate() {
+            for (i, (p, _, _, _)) in sites.iter().enumerate() {
                 let dx = w[0] - p[0];
                 let dy = w[1] - p[1];
                 let dz = w[2] - p[2];
@@ -1002,34 +1016,36 @@ pub fn complete_orbits_about(
             }
             match hit {
                 Some(i) => {
-                    let (p, count, _) = &mut sites[i];
+                    let (p, count, _, _) = &mut sites[i];
                     let m = *count as f64;
                     for k in 0..3 {
                         p[k] = (p[k] * m + w[k]) / (m + 1.0);
                     }
                     *count += 1;
                 }
-                None => sites.push((w, 1, a)),
+                None => sites.push((w, 1, a, 0.0)),
             }
         }
     }
     // Best-supported sites first; ties by distance from the centre so the
     // core is filled before the surface, as the cluster is.
+    for site in &mut sites {
+        site.3 = site.0.iter().map(|v| v * v).sum::<f64>();
+    }
     sites.sort_by(|p, q| {
-        q.1.cmp(&p.1).then_with(|| {
-            let rp = p.0.iter().map(|v| v * v).sum::<f64>();
-            let rq = q.0.iter().map(|v| v * v).sum::<f64>();
-            rp.partial_cmp(&rq).unwrap_or(std::cmp::Ordering::Equal)
-        })
+        q.1.cmp(&p.1)
+            .then_with(|| p.3.partial_cmp(&q.3).unwrap_or(std::cmp::Ordering::Equal))
     });
     let mut chosen: Vec<[f64; 3]> = Vec::with_capacity(n);
-    for (p, _, _) in &sites {
+    for (p, _, _, _) in &sites {
         if chosen.len() == n {
             break;
         }
         let clear = chosen.iter().all(|q| {
-            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
-                >= min_separation
+            let dx = p[0] - q[0];
+            let dy = p[1] - q[1];
+            let dz = p[2] - q[2];
+            outside_separation(dx * dx + dy * dy + dz * dz, min_separation)
         });
         if clear {
             chosen.push(*p);

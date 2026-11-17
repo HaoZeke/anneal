@@ -1034,6 +1034,22 @@ rule gmin_panel:
         """
 
 
+# Base 0ae5bfe0 against the checked-out revision on the four expensive
+# GMIN-panel systems: seeds 2000-2011, base then new for each seed, one
+# process on core 0 under hostname bench. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile outside_perf
+rule outside_perf:
+    output:
+        "bench/outside-perf/rows.csv",
+        "bench/outside-perf/summary.csv",
+        "bench/outside-perf/trajectory-diff.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/outside_perf/enter_bench.sh
+        """
+
+
 # Paired (H2O)16 rows. Not part of `rule all`. The script rewrites the
 # summary from the committed seeds and does not start a search.
 #   snakemake -s workflow/Snakefile h2o16_crest
