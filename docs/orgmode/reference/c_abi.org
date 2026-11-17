@@ -1102,6 +1102,8 @@ enum rgpot_status_t rgpot_rpc_calculate_hvp(
 - Units :: energy Hessian times direction in the remote potential's units.
 - Outputs :: =product= receives =3 * n_atoms= doubles from the server's
   analytic HVP operation.
+  This is the C wrapper of RPC =Potential.calculateHvp=, which is advertised
+  through =Capabilities.hessianVector=.
 - Errors :: =RGPOT_INVALID_PARAMETER= for a NULL argument or malformed
   positions tensor. =RGPOT_RPC_ERROR= when capability negotiation, transport,
   or the remote analytic calculation fails.

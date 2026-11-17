@@ -277,7 +277,7 @@ TEST_CASE("built-in C handle dispatches the analytic product hook") {
   const std::array<double, 2> v{0.3, -0.5};
   std::array<double, 2> force{}, product{};
   double energy = 0.0;
-  REQUIRE(rgpot_builtin_model_force(model, 1, x.data(), &energy,
+  REQUIRE(rgpot_builtin_model_calculate(model, 1, x.data(), &energy,
                                     force.data()) == 0);
   REQUIRE(rgpot_builtin_model_hvp(model, 1, x.data(), v.data(),
                                   product.data()) == 0);

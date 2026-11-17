@@ -49,7 +49,7 @@ rgpot_builtin_model_dimensions(const rgpot_builtin_model *model);
  * Evaluate row-major batches in rgpot native units (eV and angstrom).
  * `forces` is -dE/dx and has count*dimensions entries.
  */
-RGPOT_MODEL_API int rgpot_builtin_model_force(
+RGPOT_MODEL_API int rgpot_builtin_model_calculate(
     rgpot_builtin_model *model, size_t count, const double *coordinates,
     double *energies, double *forces);
 

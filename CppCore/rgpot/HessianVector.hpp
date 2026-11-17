@@ -47,6 +47,7 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -168,18 +169,26 @@ public:
       throw std::invalid_argument("step must be positive and finite, got " +
                                   std::to_string(step));
     }
+    const bool analyticAvailable = [&]() {
+      if constexpr (AnalyticHessianVector<Pot> &&
+                    requires(const Pot &p) {
+                      { p.caps().analyticHvp } -> std::convertible_to<bool>;
+                    }) {
+        return pot.caps().analyticHvp;
+      }
+      return false;
+    }();
     if (scheme == HvpScheme::Auto) {
-      scheme = AnalyticHessianVector<Pot> ? HvpScheme::Analytic
-                                          : HvpScheme::Forward;
+      scheme = analyticAvailable ? HvpScheme::Analytic : HvpScheme::Forward;
     }
     if (scheme != HvpScheme::Forward && scheme != HvpScheme::Central &&
         scheme != HvpScheme::Analytic) {
       throw std::invalid_argument("unknown scheme " +
                                   std::to_string(static_cast<int>(scheme)));
     }
-    if (scheme == HvpScheme::Analytic && !AnalyticHessianVector<Pot>) {
+    if (scheme == HvpScheme::Analytic && !analyticAvailable) {
       throw std::invalid_argument(
-          "HvpScheme::Analytic: the potential has no hessianVectorImpl");
+          "HvpScheme::Analytic: the potential has no analytic Hessian-vector product");
     }
     const double length = norm(v, dim);
     if (length == 0.0) {

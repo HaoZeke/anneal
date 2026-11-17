@@ -110,7 +110,7 @@ def test_auto_is_forward_without_an_analytic_product() -> None:
     for _ in range(3):
         pot.hvp(positions, types, BOX, v)
     assert pot.hvp_counts()["force_calls"] == 4
-    with pytest.raises(ValueError, match="hessianVectorImpl"):
+    with pytest.raises(ValueError, match="analytic Hessian-vector product"):
         pot.hvp(positions, types, BOX, v, scheme="analytic")
 
 

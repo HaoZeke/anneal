@@ -72,7 +72,6 @@ Capabilities.Operation @6 enumerant quadrupole - upstream
 Capabilities.Operation @7 enumerant stress - upstream
 Capabilities.Operation @8 enumerant optimize - upstream
 Capabilities.Operation @9 enumerant frequencies - upstream
-Capabilities.Operation @10 enumerant hessianVector - local
 NWChemDirective @0 field keyword :Text upstream
 NWChemDirective @1 field args :List(Text) upstream
 NWChemGenericStanza @0 field name :Text upstream
@@ -1904,7 +1903,6 @@ Potential @10 method calculatePolarizability (fip:ForceInput)->(result:Potential
 Potential @11 method calculateGradient (fip:ForceInput)->(result:PotentialResult) upstream
 Potential @12 method getCapabilities ()->(capabilities:Capabilities) upstream
 Potential @13 method neighbours (fip:ForceInput,request:NeighborRequest)->(neighbors:NeighborList) local
-Potential @14 method calculateHvp (fip:ForceInput,direction:List(Float64))->(product:List(Float64)) local
 NeighborRequest @0 field cutoff :Float64 local
 NeighborRequest @1 field skin :Float64 local
 NeighborRequest @2 field format :UInt8 local
@@ -1955,3 +1953,5 @@ CP2KParams @21 field extraForceEvalSections :List(Text) upstream
 PotentialSpec @6 arm cp2k :CP2KParams upstream
 PotentialConfig @17 arm cp2k :CP2KParams upstream
 UmaParams @10 field cacheDir :Text local
+Capabilities.Operation @10 enumerant hessianVector - local
+Potential @14 method calculateHvp (fip:ForceInput,direction:List(Float64))->(product:List(Float64)) local

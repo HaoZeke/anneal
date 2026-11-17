@@ -157,7 +157,7 @@ rgpot_builtin_model_dimensions(const rgpot_builtin_model *model) {
   return model->dimensions;
 }
 
-extern "C" int rgpot_builtin_model_force(
+extern "C" int rgpot_builtin_model_calculate(
     rgpot_builtin_model *model, std::size_t count, const double *coordinates,
     double *energies, double *forces) {
   return guardedStatus([=]() {

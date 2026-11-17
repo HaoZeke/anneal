@@ -1,9 +1,25 @@
+#+TITLE: C++ potentials
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* C++ potentials
+
+Every potential derives from =rgpot::Potential<Derived>=, which derives from
+=rgpot::PotentialBase=.
+Energies are eV, lengths are Angstrom and forces are eV/Angstrom unless an entry
+says otherwise.
+This page lists the constructors, their configuration structs and the members
+each class adds.
+The members every potential inherits (=forceImpl=, =forceBatch=, =caps=,
+=setCache=, ...) are on [[file:cpp_api.org][C++ API]].
+How the classes fit together is on [[file:architecture.org][Architecture]].
+
 ** CppCore/rgpot/Models/ModelPots.hpp: analytic models
 
 *** =rgpot::AnalyticModelPot=
 
-The common =rgpot::Potential= implementation for Eckart, Müller--Brown,
-modified Müller--Brown, LEPS H + H2 / H + Cl2 / F + H2, the generic quartic
+The common =rgpot::Potential= implementation for Eckart, Muller-Brown,
+modified Muller-Brown, LEPS H + H2 / H + Cl2 / F + H2, the generic quartic
 double well and the coupled proton well. Forces are minus the energy gradient;
 all models advertise and implement an exact Hessian-vector product.
 
@@ -56,22 +72,6 @@ The optional linked frontend to the external =cbe-pes= H + CH4 library.
 - Errors :: throws for the wrong atom count or a non-success =cbe-pes= status.
   It is built only with =with_cbe= / =RGPOT_WITH_CBE= and does not load a
   local PES library.
-
-#+TITLE: C++ potentials
-#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
-#+STARTUP: content
-
-* C++ potentials
-
-Every potential derives from =rgpot::Potential<Derived>=, which derives from
-=rgpot::PotentialBase=.
-Energies are eV, lengths are Angstrom and forces are eV/Angstrom unless an entry
-says otherwise.
-This page lists the constructors, their configuration structs and the members
-each class adds.
-The members every potential inherits (=forceImpl=, =forceBatch=, =caps=,
-=setCache=, ...) are on [[file:cpp_api.org][C++ API]].
-How the classes fit together is on [[file:architecture.org][Architecture]].
 
 A force call takes a =rgpot::ForceInput=: =nAtoms=, =pos= (3 * nAtoms doubles, x
 y z per atom, Angstrom), =atmnrs= (one atomic number per atom) and =box= (nine

@@ -299,7 +299,7 @@ public:
     rgpot::ForceInput input{n, positions.data(), numbers.data(), box.data()};
     m_potential->hessianVectorImpl(input, vector.data(), product.data());
     auto output = context.getResults().initProduct(3 * n);
-    const double productToCaller = evToCaller / lengthToAngstrom;
+    const double productToCaller = evToCaller * lengthToAngstrom;
     for (std::size_t i = 0; i < 3 * n; ++i)
       output.set(i, product[i] * productToCaller);
     return kj::READY_NOW;
@@ -425,6 +425,7 @@ int runServer(int argc, char *argv[]
 #ifdef RGPOT_HAS_CP2K
               << ", CP2K"
 #endif
+              << ", DoubleWell, CoupledProtonWell"
               << std::endl;
     return 1;
   }
@@ -486,6 +487,12 @@ int runServer(int argc, char *argv[]
   } else if (pot_type == "LEPS-FH2") {
     potential_to_use =
         std::make_unique<rgpot::LepsPot>(rgpot::LepsSystem::FH2);
+  } else if (pot_type == "DoubleWell") {
+    potential_to_use =
+        std::make_unique<rgpot::DoubleWellPot>(2, 1.0, 2.0, 1.0, 0.25);
+  } else if (pot_type == "CoupledProtonWell") {
+    potential_to_use =
+        std::make_unique<rgpot::CoupledProtonWellPot>(1.0, 5.0, 8.0 / 25.0);
 #ifdef RGPOT_HAS_CBE
   } else if (pot_type == "CBE") {
     potential_to_use = std::make_unique<rgpot::CBEPot>();

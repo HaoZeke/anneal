@@ -20,6 +20,7 @@
 #include "rgpot/FusedCache.hpp"
 #include "rgpot/FusedSettings.hpp"
 #include "rgpot/HessianVector.hpp"
+#include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 
 using rgpot::ForceInput;
@@ -232,6 +233,40 @@ TEST_CASE("MorsePot hessianVectorImpl matches the dense Hessian", "[HessianVecto
   pot.hessianVectorImpl(s.input(), v.data(), hv.data());
   const auto want = multiply(denseHessian(config, s.x), v);
   CHECK(relativeError(hv, want) < 1e-12);
+}
+
+TEST_CASE("LJPot auto scheme stays on finite differences", "[HessianVector]") {
+  rgpot::LJPot pot;
+  const std::array<double, 9> position{
+      0.0, 0.0, 0.0, 1.2, 0.1, 0.0, 0.3, 1.1, 0.2};
+  const std::array<int, 3> numbers{1, 1, 1};
+  const auto box = cell();
+  const ForceInput in{
+      .nAtoms = numbers.size(),
+      .pos = position.data(),
+      .atmnrs = numbers.data(),
+      .box = box.data(),
+  };
+  const std::array<double, 9> direction{
+      0.2, -0.1, 0.4, -0.3, 0.5, 0.1, 0.3, -0.2, -0.4};
+  std::array<double, 9> autoProduct{}, forwardProduct{};
+  HessianVectorCache cache;
+  REQUIRE_NOTHROW(cache.apply(pot, in, direction.data(), autoProduct.data(),
+                              0.0, HvpScheme::Auto));
+  cache.invalidate();
+  REQUIRE_NOTHROW(cache.apply(pot, in, direction.data(), forwardProduct.data(),
+                              0.0, HvpScheme::Forward));
+  double scale = 1.0;
+  for (std::size_t i = 0; i < autoProduct.size(); ++i) {
+    scale += std::abs(autoProduct[i]) + std::abs(forwardProduct[i]);
+  }
+  const double bar = 128.0 * std::numeric_limits<double>::epsilon() * scale;
+  for (std::size_t i = 0; i < autoProduct.size(); ++i) {
+    CHECK(std::abs(autoProduct[i] - forwardProduct[i]) <= bar);
+  }
+  CHECK_THROWS_AS(cache.apply(pot, in, direction.data(), autoProduct.data(), 0.0,
+                              HvpScheme::Analytic),
+                  std::invalid_argument);
 }
 
 TEST_CASE("MorsePot hessianVectorImpl differentiates the switch", "[HessianVector]") {
