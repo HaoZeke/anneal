@@ -2340,7 +2340,49 @@ def unauditable() -> list[str]:
     return problems
 
 
-def run(report: bool = False) -> int:
+REVISION_MAP = "bench/unreachable-revisions.csv"
+REVISION_MAP_COLUMNS = ("revision", "why", "row_file", "system", "arm", "revision_column", "rows", "seed_min", "seed_max")
+
+
+def revision_map_rows(audit: Audit) -> list[dict[str, str]]:
+    """Each unreachable revision with the row groups of the files read that cite it."""
+    groups: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
+    for path, rows in audit.read.items():
+        for row in rows:
+            for column in REVISION_COLUMNS:
+                value = row.get(column, "").strip()
+                if value in UNPUSHED:
+                    key = (value, path, row.get("system", row.get("board", "")), row.get("arm", row.get("code", "")), column)
+                    groups[key].append(row)
+    out = []
+    for (revision, path, system, arm, column), rows in sorted(groups.items()):
+        seeds = [int(r["seed"]) for r in rows if r.get("seed", "").strip().lstrip("-").isdigit()]
+        out.append({"revision": revision, "why": UNPUSHED[revision], "row_file": path, "system": system, "arm": arm,
+                    "revision_column": column, "rows": str(len(rows)),
+                    "seed_min": str(min(seeds)) if seeds else "", "seed_max": str(max(seeds)) if seeds else ""})
+    return out
+
+
+def revision_map_text(rows: list[dict[str, str]]) -> str:
+    import io
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, REVISION_MAP_COLUMNS, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
+def revision_map(audit: Audit) -> None:
+    """The committed map from each unreachable revision to its panel rows equals the rows."""
+    rows = revision_map_rows(audit)
+    audit.record((ROOT / REVISION_MAP).read_text() == revision_map_text(rows), REVISION_MAP, "map equals the cited rows",
+                 "committed file", f"{len(rows)} row groups")
+    audit.record({r["revision"] for r in rows} == set(UNPUSHED), REVISION_MAP, "every unreachable revision is mapped",
+                 f"{len(UNPUSHED)} revisions", f"{len({r['revision'] for r in rows})} mapped")
+
+
+def run(report: bool = False, write_map: bool = False) -> int:
     problems = unauditable()
     if problems:
         for problem in problems:
@@ -2352,6 +2394,9 @@ def run(report: bool = False) -> int:
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
                   manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers):
         check(audit)
+    if write_map:
+        (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
+    revision_map(audit)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
     gaps = provenance(audit)
@@ -2377,7 +2422,9 @@ def run(report: bool = False) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--report", action="store_true", help="print every check, not only the drifted ones")
-    return run(parser.parse_args(argv).report)
+    parser.add_argument("--write-revision-map", action="store_true", help=f"rewrite {REVISION_MAP} from the rows")
+    args = parser.parse_args(argv)
+    return run(args.report, args.write_revision_map)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,7 @@ CHECKS = (
     audit_mod.generated_tables,
     audit_mod.supporting_gmin,
     audit_mod.supporting_numbers,
+    audit_mod.revision_map,
 )
 
 
