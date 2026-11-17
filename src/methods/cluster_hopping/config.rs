@@ -1235,6 +1235,14 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Largest Cartesian gradient component at which a full quench stops.
+    ///
+    /// Non-positive values use [`Config::record_gradient`]. Setting this
+    /// tighter than [`Config::record_gradient`] lets a molecular preset
+    /// converge its quenches to a settled gradient while keeping a wider
+    /// record gate for iteration-capped descents.
+    #[serde(skip_serializing_if = "is_non_positive")]
+    pub quench_gradient: f64,
     /// Precondition each molecular quench with the covalent bond graph.
     ///
     /// See [`crate::methods::bond_preconditioner`]. Needs
@@ -2247,6 +2255,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            quench_gradient: 0.0,
             precondition_bonds: false,
             capped_lindh_quench: false,
             local_step: crate::methods::tric_opt::LocalStep::Lbfgs,
@@ -2553,6 +2562,12 @@ impl Config {
         // GFN-class force is eV per angstrom, and an iteration-capped
         // quasi-Newton step leaves a maximum component near 1e-2.
         cfg.record_gradient = 5.0e-2;
+        // Stopping every quench at `record_gradient` (1.15 kcal/(mol·Å))
+        // leaves flexible conformers several kcal/mol above their basin
+        // minima. Converge full quenches to 1e-3 eV/Å while keeping the
+        // 5e-2 gate so a capped descent can still be recorded.
+        cfg.quench_gradient = 1.0e-3;
+        cfg.relax_steps = 500;
         // A TRIC quench takes about half the calls of a Cartesian one, and
         // its steps cost more than a cheap force field's call. The opening
         // quench times both.
