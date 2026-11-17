@@ -28,6 +28,7 @@
 // clang-format on
 
 #include "rgpot/KeptPotential.hpp"
+#include "rgpot/PairEval.hpp"
 #include "rgpot/Slices.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/SuttonChen/detail/SuttonChenWorkspaceSnapshot.hpp"
@@ -422,14 +423,10 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
       cfg.periodic ? std::array<bool, 3>{true, true, true}
                    : std::array<bool, 3>{false, false, false};
 
-  static constexpr double free_box[9] = {1.0e6, 0.0, 0.0, 0.0, 1.0e6,
-                                         0.0,   0.0, 0.0, 1.0e6};
-  const bool box_ok = in.box != nullptr && in.box[0] > 0.0 && in.box[4] > 0.0 &&
-                      in.box[8] > 0.0;
-  if (cfg.periodic && !box_ok) {
+  const double *box_use = freeBoxOrCell(in.box);
+  if (cfg.periodic && box_use != in.box) {
     throw std::invalid_argument("periodic Sutton-Chen needs a real cell");
   }
-  const double *box_use = box_ok ? in.box : free_box;
 
   const double epsilon = cfg.epsilon;
   const double c_coef = cfg.c;

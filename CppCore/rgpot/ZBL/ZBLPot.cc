@@ -19,6 +19,7 @@
 #include <vector>
 // clang-format on
 
+#include "rgpot/PairEval.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/nlist/PairSum.hpp"
@@ -211,11 +212,7 @@ void ZBLPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atom
         static_cast<int>(std::distance(tables->z.begin(), it));
   }
 
-  static constexpr double free_box[9] = {1e6, 0.0, 0.0, 0.0, 1e6,
-                                         0.0, 0.0, 0.0, 1e6};
-  const bool box_ok = in.box != nullptr && in.box[0] > 0.0 && in.box[4] > 0.0 &&
-                      in.box[8] > 0.0;
-  const double *box_use = box_ok ? in.box : free_box;
+  const double *box_use = freeBoxOrCell(in.box);
   // Auto stores below two million atoms. An explicit stream keeps the
   // pruned stencil in the shared cache.
   nlist::Mode mode = mode_;
