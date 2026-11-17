@@ -794,6 +794,7 @@ PANEL_SEEDS = " ".join(str(s) for s in range(2000, 2012))
 def load_script(name: str, path: str) -> object:
     spec = importlib.util.spec_from_file_location(name, ROOT / path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -1512,9 +1513,64 @@ def manuscript_hexamer(audit: Audit) -> None:
                  "\\(1.08\\times 10^{-7}\\)~Eh.", "\\(0.9\\times 10^{-8}\\) to \\(2.0\\times 10^{-8}\\)~Eh"):
         audit.said(TEX, text)
 
-    campaign = audit.rows("paper/jctc/data/water_v45b/water-v45b-perseed.csv")
-    audit.said(TEX, f"hits {hits_of(campaign, 'anneal_hit')} of {len(campaign)} seeds for the default hop and {hits_of(campaign, 'crest_hit')} of {len(campaign)} for CREST")
-    audit.said(TEX, f"The motif match remains {hits_of(campaign, 'anneal_hit')} of {len(campaign)} for the default hop and {hits_of(campaign, 'crest_hit')} of {len(campaign)}")
+    # The opt-in polish arms still come from this sealed four-arm table.
+    audit.rows("paper/jctc/data/water_v45b/water-v45b-perseed.csv")
+    water = load_script("water_results_table_audit", "paper/jctc/scripts/water_results_table.py")
+    receipts = water.rerun_receipts()
+    anneal = receipts["anneal"]
+    crest = receipts["crest"]
+    runs = len(anneal)
+    anneal_hits = sum(row["hit"] for row in anneal)
+    crest_hits = sum(row["hit"] for row in crest)
+    both = sum(a["hit"] and c["hit"] for a, c in zip(anneal, crest, strict=True))
+    only_anneal = sum(a["hit"] and not c["hit"] for a, c in zip(anneal, crest, strict=True))
+    only_crest = sum(not a["hit"] and c["hit"] for a, c in zip(anneal, crest, strict=True))
+    neither = runs - both - only_anneal - only_crest
+    fisher_p = fisher(anneal_hits, runs, crest_hits, runs)
+    ratio = anneal_hits / crest_hits
+    contrast = water.paired_contrast([row["hit"] for row in anneal], [row["hit"] for row in crest],
+                                     difference="anneal minus CREST")
+    audit.said(TEX, f"hits {anneal_hits} of {runs} seeds for the default hop and {crest_hits} of {runs} for plain CREST")
+    audit.said(TEX, f"The motif match remains {anneal_hits} of {runs} for the default hop and {crest_hits} of {runs} for plain CREST")
+    audit.said(TEX, "GFN2-xTB through tblite 0.7.0, with CREST 3.0.2")
+    audit.said(TEX, "\\path{paper/jctc/data/water_v45b/rerun-9a30f319/}")
+    audit.said("paper/jctc/cover-letter.tex",
+               f"hits {anneal_hits} of {runs} seeds for the default hop and {crest_hits} of {runs} for plain CREST")
+    audit.said("paper/jctc/FIGURES.md", "`data/water_v45b/rerun-9a30f319/`")
+    for path in (TEX, SI, "paper/jctc/cover-letter.tex", "paper/jctc/FIGURES.md"):
+        audit.record("97 of 192" not in audit.text(path) and "97/192" not in audit.text(path), path,
+                     "no superseded CREST hexamer count", "none", "none")
+    for path in (TEX, "paper/jctc/cover-letter.tex"):
+        text = collapse(audit.text(path))
+        stale = ("for plain CREST, both at GFN2-xTB with xtb 6.7.1",
+                 "for plain CREST, at xtb 6.7.1")
+        audit.record("tblite 0.7.0" in text and not any(fragment in text for fragment in stale), path,
+                     "the fresh 192-seed count names tblite, not standalone xtb", "tblite 0.7.0",
+                     "standalone xtb" if any(fragment in text for fragment in stale) else "tblite 0.7.0")
+    audit.cell(TEX, "hexamer Fisher p", "0.00744", fisher_p)
+    audit.cell(TEX, "hexamer hit-count difference", "27", float(anneal_hits - crest_hits))
+    audit.cell(TEX, "hexamer hit-rate difference", "0.141", (anneal_hits - crest_hits) / runs)
+    audit.cell(TEX, "hexamer hit-count ratio", "1.29", ratio)
+    first = {row[0]: row for row in tex_table(audit, SI, "tab:hexamer-rerun")}
+    audit.cell(SI, "hexamer SI default hits", first["Default hop"][1], f"{anneal_hits}/{runs}")
+    audit.cell(SI, "hexamer SI CREST hits", first["Plain CREST"][1], f"{crest_hits}/{runs}")
+    audit.cell(SI, "hexamer SI default rate", first["Default hop"][2], anneal_hits / runs)
+    audit.cell(SI, "hexamer SI CREST rate", first["Plain CREST"][2], crest_hits / runs)
+    audit.cell(SI, "hexamer SI default median wall", first["Default hop"][4],
+               median([float(row["wall_seconds"]) for row in anneal]))
+    audit.cell(SI, "hexamer SI CREST median wall", first["Plain CREST"][4],
+               median([float(row["wall_seconds"]) for row in crest]))
+    second = {row[0]: row[1] for row in tex_table(audit, SI, "tab:hexamer-rerun-contrast")}
+    for label, value in (("Both hit", both), ("Only the default hop hit", only_anneal),
+                         ("Only plain CREST hit", only_crest), ("Neither hit", neither),
+                         ("Hit-count difference", anneal_hits - crest_hits),
+                         ("Hit-rate difference", (anneal_hits - crest_hits) / runs),
+                         ("Hit-count ratio", ratio), ("Two-sided Fisher \\(p\\)", fisher_p),
+                         ("Exact McNemar \\(p\\)", contrast["mcnemar_exact_p"])):
+        audit.cell(SI, f"hexamer SI {label}", second[label], float(value))
+    low, high = second["Newcombe 95\\% interval"].split("--")
+    audit.cell(SI, "hexamer SI Newcombe low", low, contrast["newcombe_95"][0])
+    audit.cell(SI, "hexamer SI Newcombe high", high, contrast["newcombe_95"][1])
 
 
 def manuscript_cross_field(audit: Audit) -> None:
@@ -2936,7 +2992,10 @@ def manuscript_new(audit: Audit) -> None:
                      f"{row['status']} on {row['host']}: {row['missing']}")
 
 
-RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "7": "the GFN2 sign and rerun"}
+RERUN_ITEMS = {
+    "5": "GMIN and ASE caps and tuning",
+    "7": "the water hexamer receipts in paper/jctc/data/water_v45b/rerun-9a30f319",
+}
 RERUN_TAG = re.compile(r"\\rerun\{([^}]*)\}")
 
 

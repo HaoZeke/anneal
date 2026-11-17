@@ -90,7 +90,8 @@ hits \((\mathrm{H_2O})_{8}\), \((\mathrm{H_2O})_{15}\), and
 \((\mathrm{H_2O})_{20}\) on 12, 9, and 5 of 12 seeds and GMIN on 8, 0, and 0
 of 12.
 On the water hexamer the motif match hits 121 of 192 seeds for the
-default hop and 97 of 192 for CREST, both at GFN2-xTB with xtb 6.7.1.~\rerun{7}
+default hop and 94 of 192 for plain CREST, both at GFN2-xTB through
+tblite 0.7.0, with CREST 3.0.2; two-sided Fisher's \(p=0.00744\).~\rerun{7}
 The polished gaps on seeds 0--5 hold at GFN2-xTB with xtb 6.7.1 and
 with xtb 6.8.0.~\rerun{7}
 On xtb 6.7.1, five of six gaps lie within \(1\times 10^{-7}\)~Eh, and
@@ -1430,8 +1431,11 @@ The vtight energy threshold is \(1\times 10^{-7}\)~Eh.
 A row is kept when the run exits cleanly, the polished energy is
 finite, and the maximum force is at or below \(0.001\)~Eh/bohr.
 The iterative-rotations-and-assignments match on the 192-seed campaign
-hits 121 of 192 seeds for the default hop and 97 of 192 for CREST, at
-GFN2-xTB with xtb 6.7.1.~\rerun{7}
+hits 121 of 192 seeds for the default hop and 94 of 192 for plain CREST,
+at GFN2-xTB through tblite 0.7.0, with CREST 3.0.2.  The difference is
+27 seeds and the hit-rate difference is 0.141; the hit-count ratio is 1.29 and
+two-sided Fisher's \(p=0.00744\).  The per-seed receipts are in
+\path{paper/jctc/data/water_v45b/rerun-9a30f319/}.~\rerun{7}
 \cite{gundeIraShapeMatching2021}
 The 192-seed geometries were not kept, so those two counts stay at
 that scoring.
@@ -1665,7 +1669,9 @@ The rate file records 1 of 6 for 15 molecules at that budget and 1 of 6 for 20 m
 At GFN2-xTB the polished hexamer gaps hold on xtb 6.7.1 and on xtb 6.8.0.
 On xtb 6.7.1, five of six seeds lie within \(1\times 10^{-7}\)~Eh.
 On xtb 6.8.0 both arms lie within that line on 6 of 6 seeds, and seed 1 lies at \(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and \(-4.34\times 10^{-8}\)~Eh on the old-counter ledger.
-The motif match remains 121 of 192 for the default hop and 97 of 192 for CREST, at xtb 6.7.1.
+The motif match remains 121 of 192 for the default hop and 94 of 192 for
+plain CREST, at GFN2-xTB through tblite 0.7.0 with CREST 3.0.2; two-sided
+Fisher's \(p=0.00744\).
 
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.
