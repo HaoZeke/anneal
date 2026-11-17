@@ -61,7 +61,7 @@ inline void fill_view(CachedPairs &out, const double *R, std::size_t n,
   // and has since moved inside it.
   const double search = opt.cutoff + opt.skin;
   const double cutoff2 = search * search;
-  const int nt = n > 1 ? nlist::threadsRequested() : 1;
+  const int nt = nlist::teamSize(n);
   std::vector<std::int32_t> ij;
   if (nt <= 1) {
     nlist::visitDirected(found, 0, static_cast<std::int64_t>(n),

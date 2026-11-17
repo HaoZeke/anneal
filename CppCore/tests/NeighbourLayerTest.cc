@@ -929,3 +929,61 @@ TEST_CASE("an unbounded periodic search takes the nearest image of every pair",
   REQUIRE(all.allPairs());
   requireSamePairs(walkedPairs(all, n, kInf), direct);
 }
+
+TEST_CASE("a directed walk gives a lower partner the negated vector of the half walk",
+          "[nlist][triclinic][allpairs]") {
+  // A team adds the force of a pair at both of its rows, one thread at
+  // both ends from the half walk, and the bits agree only if the second
+  // row sees the negated vector. Sites without a jitter put pairs on the
+  // half cell, where a sheared cell ties two images.
+  setThreads("1");
+  const double a = 3.6;
+  const double side = 3 * a;
+  const double cubic[9] = {side, 0, 0, 0, side, 0, 0, 0, side};
+  const double sheared[9] = {side, 0, 0, 0.08 * side, side, 0, 0.04 * side, -0.06 * side, side};
+  const auto cube = fcc(3, a);
+  const std::size_t n = cube.size() / 3;
+  const auto rows = static_cast<std::int64_t>(n);
+  for (const double *cell : {cubic, sheared}) {
+    std::vector<double> pos(cube.size());
+    for (std::size_t i = 0; i < n; ++i) {
+      for (std::size_t c = 0; c < 3; ++c) {
+        pos[3 * i + c] = (cube[3 * i] * cell[c] + cube[3 * i + 1] * cell[3 + c] +
+                          cube[3 * i + 2] * cell[6 + c]) /
+                         side;
+      }
+    }
+    for (const auto image : {rgpot::nlist::Image::Round, rgpot::nlist::Image::General}) {
+      for (const double cutoff : {5.0, kInf}) {
+        INFO("sheared " << (cell == sheared) << " image " << static_cast<int>(image)
+                        << " cutoff " << cutoff);
+        rgpot::nlist::Spec spec;
+        spec.cutoff = cutoff;
+        spec.skin = 1.0;
+        spec.image = image;
+        spec.mode = rgpot::nlist::Mode::Stored;
+        rgpot::nlist::Neighbours cells;
+        cells.update(pos.data(), n, cell, spec);
+        std::map<std::pair<std::int32_t, std::int32_t>, std::array<double, 4>> half;
+        cells.forHalf(0, rows,
+                      [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                          double r2) { half[{i, j}] = {dx, dy, dz, r2}; });
+        std::size_t lower = 0;
+        std::size_t apart = 0;
+        cells.forDirected(0, rows, [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                                       double dz, double r2) {
+          if (j > i) {
+            return;
+          }
+          ++lower;
+          const auto &h = half.at({j, i});
+          if (dx != -h[0] || dy != -h[1] || dz != -h[2] || bits(r2) != bits(h[3])) {
+            ++apart;
+          }
+        });
+        REQUIRE(lower == half.size());
+        REQUIRE(apart == 0);
+      }
+    }
+  }
+}

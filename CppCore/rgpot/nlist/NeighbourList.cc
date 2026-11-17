@@ -477,22 +477,6 @@ std::size_t pair_guess(std::size_t natoms, std::size_t nall, const double *box, 
   return static_cast<std::size_t>(per * static_cast<double>(natoms) + 1.0);
 }
 
-// A parallel region costs more than the search itself below this size.
-// 64 atoms on 8 threads was several times the serial search.
-int teamSize(std::size_t n) {
-  int nt = threadsRequested();
-  if (nt < 1) {
-    nt = 1;
-  }
-  if (n < 8192 || nt == 1) {
-    return 1;
-  }
-  if (static_cast<std::size_t>(nt) > n) {
-    return static_cast<int>(n);
-  }
-  return nt;
-}
-
 struct alignas(64) TeamCursor {
   std::size_t count = 0;
 };

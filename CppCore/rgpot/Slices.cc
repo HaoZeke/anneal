@@ -9,6 +9,7 @@ namespace rgpot {
 namespace {
 
 thread_local int t_team_cap = 0;
+thread_local std::uint64_t t_teams_opened = 0;
 
 } // namespace
 
@@ -31,6 +32,19 @@ int threadsRequested() {
   return 1;
 #endif
 }
+
+int teamSize(std::size_t n) {
+  const int nt = threadsRequested();
+  if (n < kTeamMinAtoms || nt <= 1) {
+    return 1;
+  }
+  if (static_cast<std::size_t>(nt) > n) {
+    return static_cast<int>(n);
+  }
+  return nt;
+}
+
+std::uint64_t teamsOpened() noexcept { return t_teams_opened; }
 
 int poolThreads() noexcept {
 #if defined(_OPENMP)
@@ -74,6 +88,8 @@ int teamFor(int wanted) noexcept {
   const int cap = t_team_cap;
   return cap > 0 && cap < wanted ? cap : wanted;
 }
+
+void countTeam() noexcept { ++t_teams_opened; }
 
 } // namespace detail
 

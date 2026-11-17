@@ -17,11 +17,21 @@
 #include <cstdint>
 #include <vector>
 
+#if defined(__GNUC__) || defined(__clang__)
+#define RGPOT_NLIST_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define RGPOT_NLIST_NOINLINE __declspec(noinline)
+#else
+#define RGPOT_NLIST_NOINLINE
+#endif
+
 namespace rgpot::nlist {
 
 using rgpot::forEachSlice;
+using rgpot::kTeamMinAtoms;
 using rgpot::partition;
 using rgpot::Range;
+using rgpot::teamSize;
 using rgpot::threadsRequested;
 
 /// How the minimum image is formed. Round is the orthorhombic truncation
@@ -111,8 +121,12 @@ public:
   /// after the selected image. `r2` is the squared length of that vector.
   /// Candidates lie inside the cutoff plus the skin; the caller drops the
   /// rest. In stored mode the partners of each atom are in increasing
-  /// index order. A walk may copy `fn`, so state the caller reads back is
-  /// captured by reference.
+  /// index order. In stored mode and in an unbounded search a partner
+  /// `j < i` takes the negated vector of `forHalf` from j, so the two
+  /// visits of a pair see opposite vectors and the same `r2`, even where
+  /// two images tie under MinimumImage, which every sheared cell uses. A
+  /// walk may copy `fn`, so state the caller reads back is captured by
+  /// reference.
   template <typename Fn>
   void forDirected(std::int64_t begin, std::int64_t end, Fn &&fn) const {
     if (allPairs()) {
@@ -183,6 +197,48 @@ public:
     }
   }
 
+  /// The directed pairs, each atom's row walked by one of `nthreads`
+  /// slices: `fn(slice, i, j, dx, dy, dz, r2)`. The atoms are split into
+  /// runs, one per slice, and each row is walked as `forDirected` walks it,
+  /// so the slice count changes only which thread walks a row. A stream
+  /// builds its stencil once, and every slice walks the cells for its own
+  /// run. Split by cell instead, the occupied cells of a cluster, or the
+  /// one bin of an open box, can all fall to one slice.
+  template <typename Fn>
+  void forRowTeam(int nthreads, Fn &&fn) const {
+    if (nthreads < 1) {
+      nthreads = 1;
+    }
+    if (streaming_ && !allPairs() &&
+        fastTiles([&](const auto &tile, const auto &neigh, const auto &nneigh,
+                      const std::int32_t *head, std::size_t ncells, bool cell_shift,
+                      double search2, double L0, double L1, double L2, double i0, double i1,
+                      double i2, bool p0, bool p1, bool p2) {
+          forEachSlice(nthreads, [&](int slice) {
+            const auto range = partition(static_cast<std::int64_t>(n_), slice, nthreads);
+            auto accept = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                              double r2) { fn(slice, i, j, dx, dy, dz, r2); };
+            if (head != nullptr) {
+              visitTiles<true>(tile, neigh, nneigh, head, 0, ncells, range.begin,
+                               static_cast<std::size_t>(range.end), false, cell_shift, search2,
+                               L0, L1, L2, i0, i1, i2, p0, p1, p2, accept);
+            } else {
+              visitTiles<false>(tile, neigh, nneigh, head, 0, ncells, range.begin,
+                                static_cast<std::size_t>(range.end), false, cell_shift, search2,
+                                L0, L1, L2, i0, i1, i2, p0, p1, p2, accept);
+            }
+          });
+        })) {
+      return;
+    }
+    forEachSlice(nthreads, [&](int slice) {
+      const auto range = partition(static_cast<std::int64_t>(n_), slice, nthreads);
+      auto adapt = [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                       double r2) { fn(slice, i, j, dx, dy, dz, r2); };
+      forDirected(range.begin, range.end, adapt);
+    });
+  }
+
   /// Neighbours of one atom from the bins already built. Does not allocate
   /// the tile stencil. A three-body stream uses this so the scratch is one
   /// atom, not every bond.
@@ -224,25 +280,45 @@ private:
   template <typename Fn>
   void walkStored(std::int64_t begin, std::int64_t end, Fn &fn,
                   bool half) const {
+    const auto row = nbr_.begin();
+    // Round and Half fold the reverse of a pair to the negated vector; only
+    // the sign of a zero component can differ, and a sum that starts at
+    // zero adds either sign alike. MinimumImage, which General and every
+    // sheared cell use, can tie two images, so there a directed walk takes
+    // the vector of a lower partner from that partner.
+    const bool reverse = !half && use_general_;
     for (std::int64_t i = begin; i < end; ++i) {
       const auto a = static_cast<std::size_t>(i);
-      auto lo = off_[a];
+      const auto self = static_cast<std::int32_t>(i);
+      const auto lo = off_[a];
       const auto hi = off_[a + 1];
-      if (half) {
-        // The partners are sorted, so those after i are a tail of the row.
-        const auto row = nbr_.begin();
-        lo = static_cast<std::int32_t>(
-            std::upper_bound(row + lo, row + hi, static_cast<std::int32_t>(i)) -
-            row);
+      // The partners are sorted, so those after i are a tail of the row.
+      const auto mid =
+          half || reverse
+              ? static_cast<std::int32_t>(std::upper_bound(row + lo, row + hi, self) - row)
+              : lo;
+      if (reverse) {
+        for (std::int32_t p = lo; p < mid; ++p) {
+          const auto j = nbr_[static_cast<std::size_t>(p)];
+          double dx = 0;
+          double dy = 0;
+          double dz = 0;
+          foldPair(j, self, dx, dy, dz);
+          dx = -dx;
+          dy = -dy;
+          dz = -dz;
+          const double r2 = dx * dx + dy * dy + dz * dz;
+          fn(self, j, dx, dy, dz, r2);
+        }
       }
-      for (std::int32_t p = lo; p < hi; ++p) {
+      for (std::int32_t p = mid; p < hi; ++p) {
         const auto j = nbr_[static_cast<std::size_t>(p)];
         double dx = 0;
         double dy = 0;
         double dz = 0;
-        foldPair(static_cast<std::int32_t>(i), j, dx, dy, dz);
+        foldPair(self, j, dx, dy, dz);
         const double r2 = dx * dx + dy * dy + dz * dz;
-        fn(static_cast<std::int32_t>(i), j, dx, dy, dz, r2);
+        fn(self, j, dx, dy, dz, r2);
       }
     }
   }
@@ -262,8 +338,10 @@ private:
 
   /// The rows of walkAll. Each row runs over the partners below i, then
   /// those above it, so `fn` has one call site and no pair tests j == i.
+  /// Inlined into a large potential call, this loop spilled its registers.
   template <bool Fold, typename Fn>
-  void walkAllRows(std::int64_t begin, std::int64_t end, Fn fn, bool half) const {
+  RGPOT_NLIST_NOINLINE void walkAllRows(std::int64_t begin, std::int64_t end, Fn fn,
+                                        bool half) const {
     const auto n = static_cast<std::int64_t>(n_);
     const double search2 = search_ * search_;
     const double *x = xyz_;
@@ -281,11 +359,19 @@ private:
           double dz = 0;
           if constexpr (Fold) {
             // A general cell folds out of line. Its own copies keep the
-            // separations out of memory.
+            // separations out of memory. There a lower partner gives the
+            // vector, as in walkStored.
             double fx = 0;
             double fy = 0;
             double fz = 0;
-            foldPair(a, j, fx, fy, fz);
+            if (run == 0 && use_general_) {
+              foldPair(j, a, fx, fy, fz);
+              fx = -fx;
+              fy = -fy;
+              fz = -fz;
+            } else {
+              foldPair(a, j, fx, fy, fz);
+            }
             dx = fx;
             dy = fy;
             dz = fz;
@@ -938,3 +1024,5 @@ inline int Neighbours::cellId(int ix, int iy, int iz) const {
 }
 
 } // namespace rgpot::nlist
+
+#undef RGPOT_NLIST_NOINLINE

@@ -10,7 +10,11 @@
 // buffer is indexed by its slice, and a sum taken in slice order has the same
 // bits on any team. CppCore/tests/test_openmp_confined.py fails the test
 // suite when OpenMP appears outside Slices.hpp and Slices.cc.
+//
+// A call over atoms takes its slice count from teamSize, so a small system
+// opens no region at all.
 
+#include <cstddef>
 #include <cstdint>
 
 #if defined(_OPENMP)
@@ -44,6 +48,21 @@ struct Range {
 /// threads matches the serial order. One without OpenMP.
 [[nodiscard]] int threadsRequested();
 
+/// Atoms below which a call runs on the calling thread alone. A region
+/// costs more than such a call: on 8 threads a neighbour search of 64
+/// atoms, and a Sutton-Chen call on 55 to 80 atoms, took several times
+/// their one-thread time.
+inline constexpr std::size_t kTeamMinAtoms = 8192;
+
+/// Slices for a call over `n` atoms: one below kTeamMinAtoms or when
+/// threadsRequested() is one, else threadsRequested(), at most `n`.
+[[nodiscard]] int teamSize(std::size_t n);
+
+/// Regions the calling thread has opened through the helpers below, a
+/// region the runtime gave one thread included. A call that leaves the
+/// count unchanged ran on the calling thread alone.
+[[nodiscard]] std::uint64_t teamsOpened() noexcept;
+
 /// The team a region without a thread count would ask for, from
 /// omp_set_num_threads or the first OMP_NUM_THREADS entry. One without
 /// OpenMP. The runtime may still start fewer.
@@ -69,6 +88,8 @@ private:
 namespace detail {
 /// Threads to request for `wanted` slices or ranks under this thread's cap.
 [[nodiscard]] int teamFor(int wanted) noexcept;
+/// Counts a region for teamsOpened.
+void countTeam() noexcept;
 } // namespace detail
 
 /// Runs `body(slice)` once for each slice in `[0, nslices)`, possibly
@@ -81,6 +102,7 @@ void forEachSlice(int nslices, Body &&body) {
 #if defined(_OPENMP)
   const int request = nslices > 1 ? detail::teamFor(nslices) : 1;
   if (request > 1) {
+    detail::countTeam();
 #pragma omp parallel num_threads(request)
     {
       const int team = omp_get_num_threads();
@@ -105,6 +127,7 @@ void forEachSlicePhase(int nphases, int nslices, Body &&body) {
 #if defined(_OPENMP)
   const int request = nslices > 1 && nphases > 0 ? detail::teamFor(nslices) : 1;
   if (request > 1) {
+    detail::countTeam();
 #pragma omp parallel num_threads(request)
     {
       const int team = omp_get_num_threads();
@@ -146,6 +169,7 @@ template <typename Body>
     return false;
   }
   bool full = false;
+  detail::countTeam();
 #pragma omp parallel num_threads(nranks)
   {
     if (omp_get_num_threads() == nranks) {
