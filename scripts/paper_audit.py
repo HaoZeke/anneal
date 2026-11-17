@@ -663,7 +663,7 @@ def manuscript_ase(audit: Audit) -> None:
     for cells in tex_table(audit, TEX, "tab:ase"):
         system = by_label.get(cells[0])
         where = f"{TEX} tab:ase {system}"
-        if system is None or len(cells) != 10:
+        if system is None or len(cells) != 13:
             audit.record(False, where, "table line", " & ".join(cells), "an ASE panel system")
             continue
         shown.append(system)
@@ -673,7 +673,10 @@ def manuscript_ase(audit: Audit) -> None:
             audit.cell(where, f"{arm} hits", cell, frac(groups[(system, arm)]))
         for cell, arm in zip(cells[6:8], ASE_ARMS):
             audit.cell(where, f"{arm} wall stops", cell, float(stops(system, arm)))
-        for cell, arm in zip(cells[8:10], ASE_ARMS):
+        for cell, arm in zip(cells[8:11], ("recommended", *ASE_ARMS)):
+            audit.cell(where, f"{arm} median wall", cell,
+                       median([float(r["wall_s"]) for r in groups[(system, arm)]]))
+        for cell, arm in zip(cells[11:13], ASE_ARMS):
             audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
     audit.cell(TEX, "tab:ase lines", " ".join(shown), " ".join(ASE_PANEL))
     summary = "bench/ase-recommended/summary.csv"
@@ -700,7 +703,7 @@ def manuscript_ase(audit: Audit) -> None:
     for cells in tex_table(audit, TEX, "tab:ase-morse"):
         system = by_label.get(cells[0])
         where = f"{TEX} tab:ase-morse {system}"
-        if system is None or len(cells) != 8:
+        if system is None or len(cells) != 11:
             audit.record(False, where, "table line", " & ".join(cells), "a Morse panel system")
             continue
         shown.append(system)
@@ -708,7 +711,10 @@ def manuscript_ase(audit: Audit) -> None:
         audit.cell(where, "cap", cells[2], ase_cap(audit, groups, system))
         for cell, arm in zip(cells[3:6], ("recommended", *ASE_ARMS)):
             audit.cell(where, f"{arm} hits", cell, frac(groups[(system, arm)]))
-        for cell, arm in zip(cells[6:8], ASE_ARMS):
+        for cell, arm in zip(cells[6:9], ("recommended", *ASE_ARMS)):
+            audit.cell(where, f"{arm} median wall", cell,
+                       median([float(r["wall_s"]) for r in groups[(system, arm)]]))
+        for cell, arm in zip(cells[9:11], ASE_ARMS):
             audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
     audit.cell(TEX, "tab:ase-morse lines", " ".join(shown), " ".join(MORSE_PANEL))
     summary = "bench/ase-nonlj/summary.csv"
@@ -2345,6 +2351,31 @@ def unauditable() -> list[str]:
     return problems
 
 
+RERUN_FILES = (TEX, SI, "paper/jctc/cover-letter.tex")
+RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "6": "the Mackay cap and mackay_cut", "7": "the GFN2 sign and rerun"}
+RERUN_TAG = re.compile(r"\\rerun\{([^}]*)\}")
+
+
+def rerun_tags(text: str) -> list[tuple[int, str]]:
+    """The line number and item of each [RERUN: item N] tag in a source text."""
+    return [(number, found.group(1)) for number, line in enumerate(text.splitlines(), 1)
+            for found in RERUN_TAG.finditer(line) if not line.lstrip().startswith("%")]
+
+
+def rerun_check(audit: Audit, pre_submission: bool = False) -> None:
+    """Every tag names an item that waits on a rerun; under --pre-submission a tag is a failure."""
+    macro = audit.text("paper/jctc/macros.tex")
+    audit.record("\\newcommand{\\rerun}[1]{\\textbf{[RERUN: item #1]}}" in macro, "paper/jctc/macros.tex",
+                 "the rerun tag macro is defined", "defined", "defined")
+    for path in RERUN_FILES:
+        for number, item in rerun_tags(audit.text(path)):
+            audit.record(item in RERUN_ITEMS, f"{path}:{number}", "the tag names an item that waits on a rerun",
+                         " ".join(RERUN_ITEMS), item)
+            if pre_submission:
+                audit.record(False, f"{path}:{number}", f"[RERUN: item {item}] remains ({RERUN_ITEMS.get(item, 'unknown')})",
+                             "no tag", "tag present")
+
+
 REVISION_MAP = "bench/unreachable-revisions.csv"
 REVISION_MAP_COLUMNS = ("revision", "why", "row_file", "system", "arm", "revision_column", "rows", "seed_min", "seed_max")
 
@@ -2401,7 +2432,7 @@ def revision_map(audit: Audit) -> None:
                  f"{len(UNPUSHED)} revisions", f"{len({r['revision'] for r in rows})} mapped")
 
 
-def run(report: bool = False, write_map: bool = False) -> int:
+def run(report: bool = False, write_map: bool = False, pre_submission: bool = False) -> int:
     problems = unauditable()
     if problems:
         for problem in problems:
@@ -2416,6 +2447,7 @@ def run(report: bool = False, write_map: bool = False) -> int:
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
     revision_map(audit)
+    rerun_check(audit, pre_submission)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
     gaps = provenance(audit)
@@ -2442,8 +2474,10 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--report", action="store_true", help="print every check, not only the drifted ones")
     parser.add_argument("--write-revision-map", action="store_true", help=f"rewrite {REVISION_MAP} from the rows")
+    parser.add_argument("--pre-submission", action="store_true",
+                        help="fail while any [RERUN: item N] tag remains in the manuscript, the SI or the cover letter")
     args = parser.parse_args(argv)
-    return run(args.report, args.write_revision_map)
+    return run(args.report, args.write_revision_map, args.pre_submission)
 
 
 if __name__ == "__main__":

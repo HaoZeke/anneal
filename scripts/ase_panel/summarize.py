@@ -369,6 +369,10 @@ def show_budget(budget: int) -> str:
     return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
 
 
+def show_wall(value: float) -> str:
+    return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
+
+
 def show_cap(cap: str) -> str:
     value = float(cap)
     return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
@@ -401,6 +405,9 @@ def tex_table() -> str:
             TEX_LABELS[system], show_budget(budget), show_cap(caps.pop()),
             f"{hits('recommended')}/12", f"{hits('ase_bh')}/12", f"{hits('ase_mh')}/12",
             str(stops("ase_bh")), str(stops("ase_mh")),
+            show_wall(median([float(row["wall_s"]) for row in grouped["recommended"]])),
+            show_wall(median([float(row["wall_s"]) for row in grouped["ase_bh"]])),
+            show_wall(median([float(row["wall_s"]) for row in grouped["ase_mh"]])),
             show_p(fisher(hits("recommended"), hits("ase_bh"))),
             show_p(fisher(hits("recommended"), hits("ase_mh"))),
         ]) + " \\\\")
@@ -417,17 +424,20 @@ def tex_table() -> str:
         "Stops counts the BH and MH runs that ended at the cap; those runs",
         "are misses with fewer calls than the budget.",
         "No run of this work ended at a cap.",
+        "Wall is the median over the 12 runs of the seconds each run took;",
+        "a BH or MH run that ended at the cap is counted at its wall.",
         "\\(p_\\mathrm{BH}\\) and \\(p_\\mathrm{MH}\\) are the two-sided Fisher",
         "exact test on hits against each ASE arm.}",
         "\\label{tab:ase}",
         "\\centering",
-        "\\small",
-        "\\setlength{\\tabcolsep}{4pt}",
-        "\\begin{tabular}{@{}lrrrrrrrrr@{}}",
+        "\\scriptsize",
+        "\\setlength{\\tabcolsep}{3pt}",
+        "\\begin{tabular}{@{}lrrrrrrrrrrrr@{}}",
         "\\toprule",
-        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{2}{c}{Stops} & & \\\\",
-        "\\cmidrule(lr){4-6}\\cmidrule(lr){7-8}",
-        "Cluster & Budget & Cap & This work & BH & MH & BH & MH & "
+        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{2}{c}{Stops} & "
+        "\\multicolumn{3}{c}{Wall (s)} & & \\\\",
+        "\\cmidrule(lr){4-6}\\cmidrule(lr){7-8}\\cmidrule(lr){9-11}",
+        "Cluster & Budget & Cap & This work & BH & MH & BH & MH & This work & BH & MH & "
         "\\(p_\\mathrm{BH}\\) & \\(p_\\mathrm{MH}\\) \\\\",
         "\\midrule",
         *body,

@@ -43,6 +43,7 @@ CHECKS = (
     audit_mod.supporting_gmin,
     audit_mod.supporting_numbers,
     audit_mod.au55_superseded,
+    audit_mod.rerun_check,
     audit_mod.revision_map,
 )
 
@@ -451,3 +452,34 @@ def test_type7_quantiles():
     values = [4e6, 1801909.5, 12.0, 3.0, 99.5, 7.25]
     for p in (0.25, 0.5, 0.75):
         assert math.isclose(audit_mod.type7(values, p), float(np.quantile(values, p)), rel_tol=1e-12)
+
+
+def _audit_with_tags(tex):
+    audit = audit_mod.Audit()
+    for path in audit_mod.RERUN_FILES:
+        audit.text_cache[path] = tex if path == audit_mod.TEX else ""
+    audit.text_cache["paper/jctc/macros.tex"] = "\\newcommand{\\rerun}[1]{\\textbf{[RERUN: item #1]}}\n"
+    return audit
+
+
+def test_a_rerun_tag_passes_the_normal_audit_and_fails_pre_submission():
+    tex = "GMIN hits 9 of 12. \\rerun{5}\n% \\rerun{6} in a comment\n"
+    assert audit_mod.rerun_tags(tex) == [(1, "5")]
+    normal = _audit_with_tags(tex)
+    audit_mod.rerun_check(normal)
+    assert not normal.drifts()
+    strict = _audit_with_tags(tex)
+    audit_mod.rerun_check(strict, pre_submission=True)
+    assert [row[2] for row in strict.drifts()] == ["[RERUN: item 5] remains (GMIN and ASE caps and tuning)"]
+
+
+def test_a_rerun_tag_must_name_a_known_item():
+    audit = _audit_with_tags("a number \\rerun{9}\n")
+    audit_mod.rerun_check(audit)
+    assert len(audit.drifts()) == 1
+
+
+def test_no_tag_passes_pre_submission():
+    audit = _audit_with_tags("clean text\n")
+    audit_mod.rerun_check(audit, pre_submission=True)
+    assert not audit.drifts()

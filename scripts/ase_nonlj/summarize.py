@@ -230,6 +230,10 @@ def show_budget(budget: str) -> str:
     return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
 
 
+def show_wall(value: float) -> str:
+    return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
+
+
 def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
     """Table tab:ase-morse: recommended against both ASE arms, Fisher on hits only."""
     body = []
@@ -254,6 +258,9 @@ def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
         body.append(" & ".join([
             TEX_LABELS[system], show_budget(budget), f"{float(caps.pop()):.3f}",
             f"{hits('recommended')}/12", f"{hits('ase_bh')}/12", f"{hits('ase_mh')}/12",
+            show_wall(median([float(row["wall_s"]) for row in arms["recommended"]])),
+            show_wall(median([float(row["wall_s"]) for row in arms["ase_bh"]])),
+            show_wall(median([float(row["wall_s"]) for row in arms["ase_mh"]])),
             show_p(fisher(hits("recommended"), hits("ase_bh"))),
             show_p(fisher(hits("recommended"), hits("ase_mh"))),
         ]) + " \\\\")
@@ -268,17 +275,19 @@ def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
         "the slowest wall of the cluster-preset arm of the panel.",
         "Every BH and MH run ended at the cap, as a miss with fewer calls than",
         "the budget, and no run of this work did.",
+        "Wall is the median over the 12 runs of the seconds each run took;",
+        "a BH or MH run is counted at its wall, which lies at the cap.",
         "\\(p_\\mathrm{BH}\\) and \\(p_\\mathrm{MH}\\) are the two-sided Fisher",
         "exact test on hits against each ASE arm.}",
         "\\label{tab:ase-morse}",
         "\\centering",
         "\\small",
-        "\\setlength{\\tabcolsep}{4pt}",
-        "\\begin{tabular}{@{}lrrrrrrr@{}}",
+        "\\setlength{\\tabcolsep}{3pt}",
+        "\\begin{tabular}{@{}lrrrrrrrrrr@{}}",
         "\\toprule",
-        " & & & \\multicolumn{3}{c}{Hits} & & \\\\",
-        "\\cmidrule(lr){4-6}",
-        "Cluster & Budget & Cap & This work & BH & MH & "
+        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{3}{c}{Wall (s)} & & \\\\",
+        "\\cmidrule(lr){4-6}\\cmidrule(lr){7-9}",
+        "Cluster & Budget & Cap & This work & BH & MH & This work & BH & MH & "
         "\\(p_\\mathrm{BH}\\) & \\(p_\\mathrm{MH}\\) \\\\",
         "\\midrule",
         *body,

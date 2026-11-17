@@ -829,24 +829,26 @@ the slowest wall of the cluster-preset arm of the panel.
 Stops counts the BH and MH runs that ended at the cap; those runs
 are misses with fewer calls than the budget.
 No run of this work ended at a cap.
+Wall is the median over the 12 runs of the seconds each run took;
+a BH or MH run that ended at the cap is counted at its wall.
 \(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
 exact test on hits against each ASE arm.}
 \label{tab:ase}
 \centering
-\small
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lrrrrrrrrr@{}}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrrrrrrrrr@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & & \\
-\cmidrule(lr){4-6}\cmidrule(lr){7-8}
-Cluster & Budget & Cap & This work & BH & MH & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} & & \\
+\cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
+Cluster & Budget & Cap & This work & BH & MH & BH & MH & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 4.654 & 12/12 & 0/12 & 0/12 & 12 & 12 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 4.425 & 12/12 & 1/12 & 0/12 & 11 & 12 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 & \(6.7\times 10^{-5}\) & \(6.7\times 10^{-5}\) \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 280.9 & 9/12 & 0/12 & 0/12 & 0 & 12 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & 544.4 & 5/12 & 0/12 & 0/12 & 0 & 12 & 0.037 & 0.037 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 112.4 & 0/12 & 0/12 & 0/12 & 12 & 12 & 1 & 1 \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.654 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.067 & 4.654 & 4.864 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.425 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.128 & 4.425 & 4.488 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 & 37.017 & 118.3 & 254.8 & \(6.7\times 10^{-5}\) & \(6.7\times 10^{-5}\) \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 280.9 & 9/12 & 0/12 & 0/12 & 0 & 12 & 65.136 & 127.2 & 287.9 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & 544.4 & 5/12 & 0/12 & 0/12 & 0 & 12 & 216.0 & 213.5 & 571.3 & 0.037 & 0.037 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 112.4 & 0/12 & 0/12 & 0/12 & 12 & 12 & 33.664 & 112.4 & 115.2 & 1 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -872,22 +874,24 @@ Cap is the wall in seconds at which a BH or MH run stops, three times
 the slowest wall of the cluster-preset arm of the panel.
 Every BH and MH run ended at the cap, as a miss with fewer calls than
 the budget, and no run of this work did.
+Wall is the median over the 12 runs of the seconds each run took;
+a BH or MH run is counted at its wall, which lies at the cap.
 \(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
 exact test on hits against each ASE arm.}
 \label{tab:ase-morse}
 \centering
 \small
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lrrrrrrr@{}}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & & \\
-\cmidrule(lr){4-6}
-Cluster & Budget & Cap & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
+ & & & \multicolumn{3}{c}{Hits} & \multicolumn{3}{c}{Wall (s)} & & \\
+\cmidrule(lr){4-6}\cmidrule(lr){7-9}
+Cluster & Budget & Cap & This work & BH & MH & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
 \midrule
-M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 9.304 & 12/12 & 0/12 & 0/12 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.162 & 12/12 & 0/12 & 0/12 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 14.661 & 12/12 & 0/12 & 0/12 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 46.786 & 5/12 & 0/12 & 0/12 & 0.037 & 0.037 \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 9.304 & 12/12 & 0/12 & 0/12 & 0.253 & 9.304 & 9.305 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.162 & 12/12 & 0/12 & 0/12 & 0.187 & 9.163 & 9.163 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 14.661 & 12/12 & 0/12 & 0/12 & 0.248 & 14.662 & 14.809 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 46.786 & 5/12 & 0/12 & 0/12 & 16.007 & 46.786 & 46.983 & 0.037 & 0.037 \\
 \bottomrule
 \end{tabular}
 \end{table}
