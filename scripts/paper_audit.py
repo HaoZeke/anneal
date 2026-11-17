@@ -112,6 +112,7 @@ KNOWN_GAPS = {
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "no revision or host column",
     "bench/nh3-octamer/ladder.csv": "no revision or host column",
     "bench/ase-au55/rows-for-cluster.csv": "revision fc1af066 is not in this repository",
+    "bench/ase-au55/superseded.csv": "revision 33bed75f is not in this repository",
     "bench/ase-au55/rows.csv": "revision 33bed75f is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-lj104/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-lj150/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
@@ -121,8 +122,10 @@ KNOWN_GAPS = {
     "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
     "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
     "bench/ase-nonlj/identity.csv": "no revision or host column",
-    "bench/ase-nonlj/summary.csv": "no revision or host column",
-    "bench/ase-recommended/summary.csv": "no revision or host column",
+    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
+    "bench/ase-recommended/summary.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
+                                         "repository; revision b49341e3 is not in this repository; revision fc1af066 is "
+                                         "not in this repository",
     "paper/jctc/data/lj55_lj98/seeds.csv": "no revision or host column",
     "paper/jctc/data/literature.tsv": "no revision or host column",
     "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "no revision or host column",
@@ -940,7 +943,9 @@ def generated_tables(audit: Audit) -> None:
     want = gmin.tex_table(gmin.summarise(rows, GMIN_PANEL_REVISION), GMIN_PANEL_REVISION)
     panel = load_script("ase_panel_tex", "scripts/ase_panel/summarize.py")
     nonlj = load_script("ase_nonlj_tex", "scripts/ase_nonlj/summarize.py")
-    for label, marks, written in (("tab:gmin", gmin.TEX_MARKS, want),
+    ablation = load_script("ablation_tex", "paper/jctc/scripts/ablation_table.py")
+    for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
+                                  ("tab:gmin", gmin.TEX_MARKS, want),
                                   ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
                                   ("tab:ase-morse", nonlj.TEX_MARKS, nonlj.tex_table(nonlj.load_rows()))):
         ok = block(marks) == written
@@ -2373,6 +2378,20 @@ def revision_map_text(rows: list[dict[str, str]]) -> str:
     return buffer.getvalue()
 
 
+def au55_superseded(audit: Audit) -> None:
+    """Each row of rows.csv that rows-for-cluster.csv replaces is listed, and no other row is."""
+    old = audit.rows("bench/ase-au55/rows.csv")
+    new = {(r["arm"], r["seed"]): r for r in audit.rows("bench/ase-au55/rows-for-cluster.csv")}
+    listed = audit.rows("bench/ase-au55/superseded.csv")
+    want = [(r["system"], r["arm"], r["seed"], r["code_revision"], "bench/ase-au55/rows-for-cluster.csv",
+             new[(r["arm"], r["seed"])]["code_revision"]) for r in old if r["arm"] != "recommended"]
+    got = [(r["system"], r["arm"], r["seed"], r["code_revision"], r["superseded_by_file"], r["superseded_by_revision"])
+           for r in listed if r["host"] == "bench"]
+    audit.record(got == want, "bench/ase-au55/superseded.csv", "the superseded rows are the replaced ones",
+                 f"{len(want)} rows", f"{len(got)} rows")
+    audit.said("bench/ase-au55/README.md", "`superseded.csv` lists each of them.")
+
+
 def revision_map(audit: Audit) -> None:
     """The committed map from each unreachable revision to its panel rows equals the rows."""
     rows = revision_map_rows(audit)
@@ -2392,7 +2411,7 @@ def run(report: bool = False, write_map: bool = False) -> int:
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers):
+                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

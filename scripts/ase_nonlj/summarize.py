@@ -297,6 +297,13 @@ def splice(text: str, block: str) -> str:
     return f"{head}{start}\n{block}\n{end}{tail}"
 
 
+def group_revision(group: list[dict[str, str]]) -> str:
+    found = {row["code_revision"] for row in group}
+    if len(found) != 1:
+        raise SystemExit(f"a summary row needs one code revision, found {sorted(found)}")
+    return found.pop()
+
+
 def main() -> None:
     flags = sys.argv[1:]
     if any(flag not in ("--check", "--tex") for flag in flags) or len(set(flags)) != len(flags):
@@ -307,7 +314,7 @@ def main() -> None:
     summary_lines = [
         "system,arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,"
         "fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,"
-        "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s",
+        "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s,code_revision,host",
     ]
     readme = [
         "Copyright (c) anneal developers",
@@ -383,7 +390,7 @@ def main() -> None:
                 f"{system},{arm},{hits},12,{best:.8f},{best - reference:.8f},"
                 f"{wall:.6f},{inside:.6f},{outside:.6f},"
                 f"{f_bh},{u_bh},{mw_bh},{f_mh},{u_mh},{mw_mh},"
-                f"{w_bh:.6f},{w_mh:.6f},{wall_stops},{arm_cap}"
+                f"{w_bh:.6f},{w_mh:.6f},{wall_stops},{arm_cap},{group_revision(group)},bench"
             )
             readme.append(
                 f"| {system} ({label}, {reference:.6f}) | {LABEL[arm]} | {hits}/12 | {best:.8f} | "

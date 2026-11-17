@@ -6,6 +6,9 @@ Anneal uses the cluster preset. Recommended uses Config::recommended.
 ASE basin hopping and minima hopping use
 the ASE 3.29 constructor defaults.
 Rows carry code_revision fc1af066a915a80eb46a3bc478caaf155cc9b29f, b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac.
+The anneal, basin-hopping and minima-hopping rows of `rows.csv` at 33bed75f are kept
+and superseded by `rows-for-cluster.csv`; `superseded.csv` lists each of them.
+This report reads the recommended rows of `rows.csv` and every row of `rows-for-cluster.csv`.
 The recorded wall caps are recommended 96.650229 s; basin hopping 112.374012 s; minima hopping 112.374012 s. A wall-stopped row did not receive
 the full call budget, so its call count is right-censored at `charged`.
 

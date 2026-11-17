@@ -659,6 +659,7 @@ Pooled across all twelve seeds, the posterior hits LJ\(_{75}\) on 11 of 12 seeds
 Thus, the selection rule produces no difference beyond seed-to-seed variance at these sizes, with a two-sided Fisher exact probability of 1 at every size in Table~\ref{tab:ablation}.
 \texttt{paper/jctc/scripts/selector\_fisher.py} reads the two result files and computes that probability.
 
+% ablation table: start
 \begin{table}
 \caption{Hits for the depth posterior and a uniform draw.
 LJ\(_{38}\) and LJ\(_{55}\) are seeds 2000--2005.
@@ -679,6 +680,7 @@ LJ\(_{104}\) & \(4\times 10^{6}\) & 5/12 & 6/12 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
+% ablation table: end
 
 On seeds 6400--6405, with the pentagonal retry of
 equation~\ref{eq:hold}, LJ\(_{98}\) hits on 6 of 6 inside

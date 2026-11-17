@@ -263,6 +263,12 @@ def render(system: str) -> tuple[str, str]:
         "the ASE 3.29 constructor defaults.",
         "Rows carry code_revision " + ", ".join(revisions) + ".",
     ]
+    if system == "au55":
+        report.extend([
+            "The anneal, basin-hopping and minima-hopping rows of `rows.csv` at 33bed75f are kept",
+            "and superseded by `rows-for-cluster.csv`; `superseded.csv` lists each of them.",
+            "This report reads the recommended rows of `rows.csv` and every row of `rows-for-cluster.csv`.",
+        ])
     if cap_details:
         report.extend([
             f"The recorded wall caps are {'; '.join(cap_details)}. A wall-stopped row did not receive",
@@ -327,7 +333,7 @@ def render(system: str) -> tuple[str, str]:
 AGGREGATE_HEADER = (
     "system,arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,"
     "median_outside_s,fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,"
-    "fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,wall_cap_s"
+    "fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,wall_cap_s,code_revision,host"
 )
 
 
@@ -338,10 +344,14 @@ def aggregate_rows(system: str, summary: str) -> list[str]:
         "mann_whitney_p_bh", "fisher_p_mh", "mann_whitney_U_mh",
         "mann_whitney_p_mh", "wall_cap_s",
     )
-    return [
-        ",".join([system, *(row[field] for field in fields)])
-        for row in csv.DictReader(summary.splitlines())
-    ]
+    revisions = {
+        arm: {row["code_revision"] for row in rows} for arm, rows in load(system).items()
+    }
+    out = []
+    for row in csv.DictReader(summary.splitlines()):
+        found = ";".join(sorted(revisions[row["arm"]]))
+        out.append(",".join([system, *(row[field] for field in fields), found, "bench"]))
+    return out
 
 
 def show_p(p: float) -> str:
