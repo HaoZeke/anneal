@@ -198,8 +198,10 @@ public:
     std::string energyUnit = fip.getEnergyUnit();
     double len_to_angstrom = rgpot::units::unit_conversion_factor(lengthUnit, "angstrom");
     double ev_to_caller = rgpot::units::unit_conversion_factor("eV", energyUnit);
-    // Force unit: energy/length in caller's system
-    double force_to_caller = ev_to_caller / len_to_angstrom;
+    // F_caller = dE_caller/dx_caller
+    //          = (d(E*E_eV)/d(x_A/len_to_angstrom))
+    //          = ev_to_caller * len_to_angstrom * F_A.
+    double force_to_caller = ev_to_caller * len_to_angstrom;
 
     rgpot::types::AtomMatrix nativePositions =
         rgpot::types::adapt::capnp::convertPositionsFromCapnp(fip.getPos(),
@@ -299,6 +301,8 @@ public:
     rgpot::ForceInput input{n, positions.data(), numbers.data(), box.data()};
     m_potential->hessianVectorImpl(input, vector.data(), product.data());
     auto output = context.getResults().initProduct(3 * n);
+    // HVP follows the same chain rule as force once direction has been
+    // converted: (H v)_caller = evToCaller * lengthToAngstrom * (H v)_A.
     const double productToCaller = evToCaller * lengthToAngstrom;
     for (std::size_t i = 0; i < 3 * n; ++i)
       output.set(i, product[i] * productToCaller);

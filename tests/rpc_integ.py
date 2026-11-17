@@ -361,10 +361,10 @@ async def run_hvp_unit_smoke(port):
     pot = client.bootstrap().cast_as(pot_capnp.Potential)
     bohr_to_angstrom = 0.529177210903
     cases = [
-        ("bohr", 0.75 / bohr_to_angstrom, 0.28 / bohr_to_angstrom, bohr_to_angstrom),
-        ("nm", 0.075, 0.028, 10.0),
+        ("bohr", 0.75 / bohr_to_angstrom, 0.28 / bohr_to_angstrom),
+        ("nm", 0.075, 0.028),
     ]
-    for unit, point, direction, length_to_angstrom in cases:
+    for unit, point, direction in cases:
         fip = _force_input(point, unit)
         req = pot.calculateHvp_request()
         req.fip = fip
@@ -385,10 +385,7 @@ async def run_hvp_unit_smoke(port):
             dtype=np.float64,
         )
         fd = -(fp - fm) / (2.0 * delta)
-        # calculate() reports forces in caller units with force_to_caller = eV/len_to_angstrom.
-        # calculateHvp() returns directional products with product_to_caller = eV*len_to_angstrom.
-        # Convert the finite-difference oracle from the force convention into the product convention.
-        fd = fd * (length_to_angstrom * length_to_angstrom)
+        # calculate() and calculateHvp() both return values in caller units.
         scale = np.max(np.abs(np.concatenate([hvp, fd])))
         bar = np.cbrt(np.finfo(np.float64).eps) * (1.0 + scale)
         assert np.max(np.abs(hvp - fd)) <= bar, (
