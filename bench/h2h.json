@@ -1180,6 +1180,71 @@
       ]
     },
     {
+      "rule": "ase_recommended",
+      "competitors": [
+        "ASE basin hopping",
+        "ASE minima hopping"
+      ],
+      "runners": [
+        "scripts/ase_panel/enter_bench.sh",
+        "scripts/ase_recommended/run_one.py"
+      ],
+      "budgets": {
+        "source": "scripts/ase_recommended/run_one.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_recommended/run_one.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-recommended/benchmarks/ase_recommended.py",
+      "prefix": "lj",
+      "rows": [
+        {
+          "path": "bench/ase-lj38/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        },
+        {
+          "path": "bench/ase-lj55/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        },
+        {
+          "path": "bench/ase-lj98/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        },
+        {
+          "path": "bench/ase-lj104/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        },
+        {
+          "path": "bench/ase-lj150/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        },
+        {
+          "path": "bench/ase-au55/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "agox_lj98",
       "competitors": [
         "AGOX"

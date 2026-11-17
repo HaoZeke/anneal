@@ -938,6 +938,28 @@ rule ase_au55:
         """
 
 
+# Config::recommended on the ASE panel: LJ38, LJ55, LJ98, LJ104, LJ150
+# and Au55, seeds 2000-2011, the paper budgets. The ASE rows stay as
+# committed. This rule reprints the summaries and the README tables.
+# Not part of `rule all`.
+#   snakemake -s workflow/Snakefile ase_recommended
+rule ase_recommended:
+    input:
+        "bench/ase-lj38/rows.csv",
+        "bench/ase-lj55/rows.csv",
+        "bench/ase-lj98/rows.csv",
+        "bench/ase-lj104/rows.csv",
+        "bench/ase-lj150/rows.csv",
+        "bench/ase-au55/rows.csv",
+    output:
+        "bench/ase-recommended/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/ase_panel/summarize.py --all
+        """
+
+
 # The paper headline panel on the 0.12.0 release build 07f89cad: LJ38,
 # LJ55, LJ75, LJ98, LJ102, LJ103, LJ104, LJ150, Au55 and M80 at rho 6 and
 # 14, seeds 2000-2011, paper budgets, one process on core 0, sudo unshare
