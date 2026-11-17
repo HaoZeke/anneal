@@ -1248,6 +1248,11 @@ enum rgpot_status_t rgpot_rpc_calculate_hvp(
   =RGPOT_RPC_ERROR= when capability negotiation, transport, or the remote
   analytic calculation fails.
 
+An engine-backed server advertises this same operation only when
+=RgpotEngineCaps.analytic_hvp= is set. A missing engine HVP returns
+=RGPOT_ENGINE_ERR_UNSUPPORTED= at the engine boundary and becomes an RPC error
+here; neither layer substitutes a finite-difference product.
+
 *** =rgpot_rpc_client_free=
 
 #+attr_rgpot: signature

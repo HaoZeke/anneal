@@ -222,29 +222,33 @@ int rgpot_engine_force(RgpotEnginePot *pot, long nAtoms,
 
 int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
                      const double *positions, const int *atomicNrs,
-                     const double *direction, double *product,
+                     const double *direction, double *hv_out,
                      const double *box) {
-  if (!pot || !pot->backend || !positions || !atomicNrs || !direction ||
-      !product || !box || nAtoms <= 0 ||
-      static_cast<unsigned long>(nAtoms) >
-          std::numeric_limits<size_t>::max() / 3) {
-    return fail(pot, 1, "invalid HVP argument");
+  if (!pot || !pot->backend) {
+    return RGPOT_ENGINE_ERR_INVALID;
   }
   if (!pot->caps.analyticHvp) {
-    return fail(pot, 3, "potential has no analytic Hessian-vector product");
+    return fail(pot, RGPOT_ENGINE_ERR_UNSUPPORTED,
+                "potential has no analytic Hessian-vector product");
+  }
+  if (!positions || !atomicNrs || !direction || !hv_out || !box ||
+      nAtoms <= 0 ||
+      static_cast<unsigned long>(nAtoms) >
+          std::numeric_limits<size_t>::max() / 3) {
+    return fail(pot, RGPOT_ENGINE_ERR_INVALID, "invalid HVP argument");
   }
   try {
     RgpotEnginePot::CallGuard guard(*pot);
     SoftGilRelease no_gil;
-    const rgpot::ForceInput in{static_cast<size_t>(nAtoms), positions,
-                               atomicNrs, box};
-    pot->backend->pot->hessianVectorImpl(in, direction, product);
+    const rgpot::ForceInput in{static_cast<size_t>(nAtoms),
+                               positions, atomicNrs, box};
+    pot->backend->pot->hessianVectorImpl(in, direction, hv_out);
     pot->clear_error();
-    return 0;
+    return RGPOT_ENGINE_OK;
   } catch (const std::exception &e) {
-    return fail(pot, 2, e.what());
+    return fail(pot, RGPOT_ENGINE_ERR_EVAL, e.what());
   } catch (...) {
-    return fail(pot, 2, "unknown exception");
+    return fail(pot, RGPOT_ENGINE_ERR_EVAL, "unknown exception");
   }
 }
 

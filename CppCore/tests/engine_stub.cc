@@ -27,13 +27,14 @@ std::atomic<int> g_spin{0};
 
 class StubPot : public rgpot::PotentialBase {
 public:
-  explicit StubPot(rgpot::Reentrancy r)
-      : PotentialBase(rgpot::PotType::UNKNOWN), reentrancy_(r) {}
+  StubPot(rgpot::Reentrancy r, bool analytic_hvp)
+      : PotentialBase(rgpot::PotType::UNKNOWN), reentrancy_(r),
+        analytic_hvp_(analytic_hvp) {}
 
   [[nodiscard]] rgpot::PotCaps caps() const noexcept override {
     return {.reentrancy = reentrancy_,
             .perImageInstances = true,
-            .analyticHvp = true};
+            .analyticHvp = analytic_hvp_};
   }
 
   std::tuple<double, rgpot::types::AtomMatrix, double>
@@ -69,6 +70,7 @@ public:
 
 private:
   rgpot::Reentrancy reentrancy_;
+  bool analytic_hvp_;
 };
 } // namespace
 
@@ -80,7 +82,8 @@ Created create(const void *config, std::size_t) {
   const auto *bytes = static_cast<const unsigned char *>(config);
   Created out;
   auto backend = std::make_unique<Backend>();
-  backend->pot = std::make_unique<StubPot>(static_cast<Reentrancy>(bytes[0]));
+  backend->pot = std::make_unique<StubPot>(static_cast<Reentrancy>(bytes[0]),
+                                           bytes[3] != 0);
   if (bytes[1] == 0) {
     backend->set_charge_spin = [](int charge, int spin) {
       if (charge == 99) {

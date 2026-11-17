@@ -54,8 +54,7 @@ Every library above exports
 =rgpot_engine_force_batch=, =rgpot_engine_abi_stamp=,
 =rgpot_engine_abi_compatible=, =rgpot_engine_name=, =rgpot_engine_version=, =rgpot_engine_model_digest=,
 =rgpot_engine_caps=,
-=rgpot_engine_last_error=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=
-and =rgpot_engine_copy_orbitals=.
+=rgpot_engine_last_error=, =rgpot_engine_set_num_threads= and =rgpot_engine_set_charge_spin=.
 None of them exports =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=,
 =rgpot_engine_hint= or =rgpot_engine_neighbor_options=.
 
@@ -113,9 +112,8 @@ Minor 1 added the stamp, =rgpot_engine_caps=,
 =rgpot_engine_last_error=, =rgpot_engine_set_num_threads= and =rgpot_engine_set_charge_spin=.
 Minor 2 added =rgpot_engine_name=, =rgpot_engine_version=,
 =rgpot_engine_model_digest= and the generic table for every backend.
-Minor 3 added
-=RgpotEngineCaps.orbital_selection=, =RgpotEngineCaps.orbital_copy=,
-=rgpot_engine_select_orbitals= and =rgpot_engine_copy_orbitals=.
+Minor 3 added =rgpot_engine_hvp= and the trailing
+=RgpotEngineCaps.analytic_hvp= field.
 The version does not cover the Cap'n Proto params schema, the tensor runtime the
 engine links, or the model.
 
@@ -252,8 +250,8 @@ Must not run concurrently with another call on the same handle.
   =rgpot_engine_caps=.
 - Units :: none.
 - Outputs :: =size= (bytes the engine wrote), =reentrancy=,
-  =per_image_instances=, =batched=, =periodic=, =stress=,
-  =group_collective=, =orbital_selection= and =orbital_copy=; the flags are 0 or 1.
+  =per_image_instances=, =batched=, =periodic=, =stress= and =group_collective=;
+  the flags are 0 or 1.
 - Errors :: none.
 
 The fields mirror rgpot's =PotCaps=.
@@ -264,8 +262,6 @@ image.
 =stress= means the backend computes cell stress; the engine ABI has no call that
 returns it.
 =group_collective= means every rank of a calculator group enters each call.
-=orbital_selection= means the backend supports =rgpot_engine_select_orbitals=.
-=orbital_copy= means the backend supports =rgpot_engine_copy_orbitals=.
 =analytic_hvp= means =rgpot_engine_hvp= returns an exact directional product.
 
 =reentrancy= decides how the table admits concurrent =rgpot_engine_force= and
@@ -313,7 +309,7 @@ size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len)
 Optional symbol.
 Reading does not clear the message.
 A successful =rgpot_engine_force=,
-=rgpot_engine_force_batch=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=
+=rgpot_engine_force_batch=, =rgpot_engine_hvp=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=
 or =rgpot_engine_copy_orbitals= clears it.
 Errors of =rgpot_engine_create= go to its =errbuf=.
 May run at any time, also during an evaluation on the same handle.
@@ -532,20 +528,25 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long nSystems, long nAtoms,
 #+begin_src c
 int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
                      const double *positions, const int *atomicNrs,
-                     const double *direction, double *product,
+                     const double *direction, double *hv_out,
                      const double *box);
 #+end_src
 
 - Inputs :: the potential and geometry as for =rgpot_engine_force=, plus
   =direction= with =3 * nAtoms= Cartesian entries.
-- Units :: positions and direction in Angstrom; =product= in eV/Angstrom.
-- Outputs :: 0 and the exact energy-Hessian product in =product=.
-- Errors :: returns 1 for a NULL pointer or invalid atom count, 3 when the
-  potential does not advertise =analytic_hvp=, and 2 when the implementation
-  throws.
+- Units :: positions, box and direction in Angstrom; =hv_out= is the energy
+  Hessian (eV/Angstrom squared) times that direction, hence eV/Angstrom.
+- Outputs :: =RGPOT_ENGINE_OK= and the exact energy-Hessian product in
+  =hv_out=.
+- Errors :: returns =RGPOT_ENGINE_ERR_INVALID= for a NULL pointer, invalid atom
+  count;
+  =RGPOT_ENGINE_ERR_UNSUPPORTED= when the potential does not advertise
+  =analytic_hvp=; and =RGPOT_ENGINE_ERR_EVAL= when the implementation throws.
   The reason is available from =rgpot_engine_last_error=.
 
 Optional symbol.
+Absence of the symbol or a false =analytic_hvp= is a hard unsupported result;
+the adapter and Rust loader never approximate it with finite differences.
 For learning engines the call is also an incorporation boundary.
 A variant for groups of different compositions would be a separate symbol.
 
@@ -1145,11 +1146,11 @@ the handle as a =PotentialImpl=.
 - =ENGINE_ABI_VERSION= :: Expected major version (=RGPOT_ENGINE_ABI_VERSION=, 1).
 - =RgpotEnginePot= :: Opaque handle type matching =struct RgpotEnginePot=.
 - =CoordTransformFn=, =AbiVersionFn=, =CreateFn=, =DestroyFn=, =ForceFn=,
-  =ForceBatchFn=, =LastErrorFn= :: =extern "C"= function-pointer types matching
-  the C declarations above.
+  =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn= :: =extern "C"=
+  function-pointer types matching the C declarations above.
 - =EngineSymbols= :: Resolved symbol table holding required (=abi_version=,
-  =create=, =destroy=, =force=) and optional (=force_batch=, =last_error=)
-  function pointers.
+  =create=, =destroy=, =force=) and optional (=force_batch=, =hvp=, =caps=,
+  =last_error=) function pointers.
 - =EngineError= :: Typed error enum covering =Load=, =Missing=, =Abi= (=expected=,
   =found=), =Create=, =Invalid=, =Unsupported=, =Recoverable= (=code=, =message=),
   and =Fatal= (=code=, =message=).
@@ -1168,5 +1169,13 @@ the handle as a =PotentialImpl=.
   =rgpot_engine_force= or =rgpot_engine_force_batch=, and maps positive codes to
   =EngineError::Recoverable= and negative codes to =EngineError::Fatal= using
   =rgpot_engine_last_error= when present.
+- =EnginePotential::caps()= / =EnginePotential::hvp(&request, direction)= ::
+  Reads the size-prefixed engine capability structure and dispatches the exact
+  product. A missing symbol, a false =analytic_hvp= bit, or
+  =RGPOT_ENGINE_ERR_UNSUPPORTED= returns =EngineError::Unsupported= (retaining
+  the engine's last-error message) without a finite-difference fallback.
 - =EnginePotential::into_potential(self)= :: Converts the instance into a
-  =PotentialImpl= callback handle.
+  =PotentialImpl= callback handle, serializes calls to its engine instance,
+  and registers an analytic callback on the underlying =rgpot_potential_t=
+  only when both =rgpot_engine_caps= and =rgpot_engine_hvp= are exported and
+  =analytic_hvp= is true.

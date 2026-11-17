@@ -33,8 +33,8 @@ struct Stub {
   RgpotEnginePot *(*create)(const void *, size_t, char *, size_t) = nullptr;
   void (*destroy)(RgpotEnginePot *) = nullptr;
   int (*force)(RgpotEnginePot *, long, const double *, const int *, double *,
-               double *, double *, const double *, rgpot_engine_coord_transform,
-               void *) = nullptr;
+               double *, double *, const double *,
+               rgpot_engine_coord_transform, void *) = nullptr;
   int (*hvp)(RgpotEnginePot *, long, const double *, const int *,
              const double *, double *, const double *) = nullptr;
   int (*force_batch)(RgpotEnginePot *, long, long, const double *, const int *,
@@ -74,13 +74,11 @@ Stub &stub() {
     out.create = sym<decltype(out.create)>(h, "rgpot_engine_create");
     out.destroy = sym<decltype(out.destroy)>(h, "rgpot_engine_destroy");
     out.force = sym<decltype(out.force)>(h, "rgpot_engine_force");
-    out.force_batch =
-        sym<decltype(out.force_batch)>(h, "rgpot_engine_force_batch");
     out.hvp = sym<decltype(out.hvp)>(h, "rgpot_engine_hvp");
+    out.force_batch = sym<decltype(out.force_batch)>(h, "rgpot_engine_force_batch");
     out.stamp = sym<decltype(out.stamp)>(h, "rgpot_engine_abi_stamp");
     out.caps = sym<decltype(out.caps)>(h, "rgpot_engine_caps");
-    out.last_error =
-        sym<decltype(out.last_error)>(h, "rgpot_engine_last_error");
+    out.last_error = sym<decltype(out.last_error)>(h, "rgpot_engine_last_error");
     out.digest = sym<decltype(out.digest)>(h, "rgpot_engine_model_digest");
     out.set_num_threads =
         sym<decltype(out.set_num_threads)>(h, "rgpot_engine_set_num_threads");
@@ -101,8 +99,9 @@ Stub &stub() {
 
 /// A word-aligned configuration: reentrancy, hooks cleared, model named.
 RgpotEnginePot *make(Stub &s, unsigned char reentrancy,
-                     unsigned char no_hooks = 0, unsigned char model = 0) {
-  alignas(8) unsigned char cfg[8] = {reentrancy, no_hooks, model, 0,
+                     unsigned char no_hooks = 0, unsigned char model = 0,
+                     unsigned char with_hvp = 1) {
+  alignas(8) unsigned char cfg[8] = {reentrancy, no_hooks, model, with_hvp,
                                      0,          0,        0,     0};
   char err[256] = {0};
   RgpotEnginePot *pot = s.create(cfg, sizeof(cfg), err, sizeof(err));
@@ -194,14 +193,14 @@ TEST_CASE("force returns the backend result and leaves the caller's buffers",
     }
     return 0;
   };
-  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr, kBox.data(),
-                  shift, nullptr) == 0);
+  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr,
+                  kBox.data(), shift, nullptr) == 0);
   REQUIRE(energy == Catch::Approx(0.5 * (4 + 9 + 16 + 25 + 36 + 49)));
   REQUIRE(pos[0] == 1.0);
 
   auto reject = [](void *, long, double *, double *) { return 9; };
-  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr, kBox.data(),
-                  reject, nullptr) == 9);
+  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr,
+                  kBox.data(), reject, nullptr) == 9);
   REQUIRE(error_of(s, pot).find("9") != std::string::npos);
 
   REQUIRE(s.force(pot, 0, pos, kZ.data(), forces, &energy, nullptr, kBox.data(),
@@ -237,13 +236,31 @@ TEST_CASE("analytic HVP passes through the engine ABI", "[engine][adapter]") {
   const double pos[6] = {1, 2, 3, 4, 5, 6};
   const double direction[6] = {0.2, -0.3, 0.4, 0.1, -0.5, 0.7};
   double product[6] = {};
-  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), direction, product, kBox.data()) == 0);
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), direction, product, kBox.data()) ==
+          RGPOT_ENGINE_OK);
   for (std::size_t i = 0; i < std::size(direction); ++i)
     REQUIRE(product[i] == Catch::Approx(direction[i]));
   RgpotEngineCaps caps{};
   caps.size = sizeof(caps);
   REQUIRE(s.caps(pot, &caps) == 0);
   REQUIRE(caps.analytic_hvp == 1);
+  s.destroy(pot);
+}
+
+TEST_CASE("analytic HVP is capability-gated", "[engine][adapter]") {
+  Stub &s = stub();
+  RgpotEnginePot *pot = make(s, 0, 0, 0, 0);
+  RgpotEngineCaps caps{};
+  caps.size = sizeof(caps);
+  REQUIRE(s.caps(pot, &caps) == RGPOT_ENGINE_OK);
+  REQUIRE(caps.analytic_hvp == 0);
+  const double pos[6] = {1, 2, 3, 4, 5, 6};
+  const double direction[6] = {0.2, -0.3, 0.4, 0.1, -0.5, 0.7};
+  double product[6] = {};
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), direction, product, kBox.data()) ==
+          RGPOT_ENGINE_ERR_UNSUPPORTED);
+  REQUIRE(error_of(s, pot).find("analytic Hessian-vector") !=
+          std::string::npos);
   s.destroy(pot);
 }
 

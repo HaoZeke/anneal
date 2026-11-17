@@ -3,7 +3,10 @@
 use std::ffi::c_int;
 use std::path::{Path, PathBuf};
 
-use rgpot_core::engine::{EngineError, EnginePotential, EngineRequest, ENGINE_ABI_VERSION};
+use rgpot_core::engine::{
+    EngineError, EnginePotential, EngineRequest, ENGINE_ABI_VERSION, ENGINE_ERR_UNSUPPORTED,
+};
+use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
 use rgpot_core::tensor::{
     rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
@@ -90,6 +93,13 @@ fn destroyed(path: &Path) -> c_int {
     unsafe { count() }
 }
 
+fn unsupported_code(path: &Path) -> c_int {
+    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
+    let value: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { library.get(b"fixture_unsupported_code\0") }.expect("code symbol");
+    unsafe { value() }
+}
+
 #[test]
 fn force_is_the_harmonic_energy_and_minus_the_gradient() {
     let path = build("harmonic", &[]);
@@ -151,7 +161,13 @@ fn batch_without_the_symbol_is_unsupported() {
     let error = engine
         .force_batch(&[1], &[0.0, 0.0, 0.0], &CELL)
         .unwrap_err();
-    assert_eq!(error, EngineError::Unsupported("rgpot_engine_force_batch"));
+    assert!(matches!(
+        error,
+        EngineError::Unsupported {
+            operation: "rgpot_engine_force_batch",
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -280,6 +296,7 @@ fn the_potential_handle_evaluates_and_destroys_the_engine() {
     let path = build("harmonic_handle", &[]);
     let before = destroyed(&path);
     let potential = load(&path).into_potential();
+    assert!(potential.as_handle().has_hessian_vector_callback());
     let mut positions = vec![0.5, -1.0, 2.0, 0.0, 3.0, -0.25];
     let mut numbers = vec![1, 8];
     let mut cell = CELL;
@@ -305,6 +322,25 @@ fn the_potential_handle_evaluates_and_destroys_the_engine() {
         unsafe { std::slice::from_raw_parts(rgpot_tensor_data(output.forces).cast::<f64>(), 6) };
     let expected: Vec<f64> = positions.iter().map(|x| -SPRING * x).collect();
     assert!(all_within_roundoff(forces, &expected));
+    let direction = [1.0, -0.5, 0.25, -2.0, 0.0, 4.0];
+    let mut product = [0.0; 6];
+    unsafe {
+        potential
+            .as_handle()
+            .hessian_vector(
+                &input,
+                &direction,
+                0.0,
+                rgpot_hvp_scheme_t::RGPOT_HVP_ANALYTIC,
+                &mut product,
+            )
+            .expect("analytic HVP through the potential handle");
+    }
+    let expected_product: Vec<f64> = direction.iter().map(|value| SPRING * value).collect();
+    assert!(all_within_roundoff(&product, &expected_product));
+    let counts = potential.as_handle().hvp_counts();
+    assert_eq!(counts.force_calls, 0);
+    assert_eq!(counts.analytic, 1);
     unsafe {
         rgpot_tensor_free(output.forces);
         rgpot_tensor_free(input.positions);
@@ -360,4 +396,198 @@ fn unaligned_config_slice_is_word_aligned_for_create() {
         })
         .expect("force");
     assert!(within_roundoff(answer.energy, 0.5 * SPRING, 3));
+}
+
+#[test]
+fn hvp_returns_the_harmonic_hessian_product() {
+    let path = build("harmonic_hvp", &[]);
+    let mut engine = load(&path);
+    let caps = engine.caps().expect("caps");
+    assert!(caps.analytic_hvp);
+    let positions = [0.5, -1.0, 2.0, 0.0, 3.0, -0.25];
+    let direction = [1.0, -0.5, 0.25, -2.0, 0.0, 4.0];
+    let hv = engine
+        .hvp(
+            &EngineRequest {
+                positions: &positions,
+                atomic_numbers: &[1, 8],
+                box_matrix: &CELL,
+            },
+            &direction,
+        )
+        .expect("hvp");
+    let expected: Vec<f64> = direction.iter().map(|d| SPRING * d).collect();
+    assert!(all_within_roundoff(&hv, &expected));
+}
+
+#[test]
+fn hvp_without_the_symbol_or_capability_is_unsupported() {
+    let no_sym = build("harmonic_nohvp", &["NO_HVP"]);
+    let mut engine = load(&no_sym);
+    assert!(!engine.caps().expect("caps").analytic_hvp);
+    let err = engine
+        .hvp(
+            &EngineRequest {
+                positions: &[0.0; 3],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            &[1.0, 0.0, 0.0],
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::Unsupported {
+            operation: "rgpot_engine_hvp",
+            ..
+        }
+    ));
+    assert_eq!(err.status(), rgpot_status_t::RGPOT_INTERNAL_ERROR);
+    let potential = load(&no_sym).into_potential();
+    assert!(!potential.as_handle().has_hessian_vector_callback());
+
+    let no_cap = build("harmonic_nohvpcap", &["NO_HVP_CAP"]);
+    let mut engine = load(&no_cap);
+    assert!(!engine.caps().expect("caps").analytic_hvp);
+    let err = engine
+        .hvp(
+            &EngineRequest {
+                positions: &[0.0; 3],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            &[1.0, 0.0, 0.0],
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::Unsupported {
+            operation: "rgpot_engine_hvp",
+            ..
+        }
+    ));
+    let potential = load(&no_cap).into_potential();
+    assert!(!potential.as_handle().has_hessian_vector_callback());
+
+    let no_caps = build("harmonic_nocaps", &["NO_CAPS"]);
+    let mut engine = load(&no_caps);
+    assert_eq!(
+        engine.caps().unwrap_err(),
+        EngineError::Unsupported {
+            operation: "rgpot_engine_caps",
+            message: "symbol is not exported".into(),
+        }
+    );
+    let err = engine
+        .hvp(
+            &EngineRequest {
+                positions: &[0.0; 3],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            &[1.0, 0.0, 0.0],
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::Unsupported {
+            operation: "rgpot_engine_hvp",
+            ..
+        }
+    ));
+    let potential = load(&no_caps).into_potential();
+    assert!(!potential.as_handle().has_hessian_vector_callback());
+}
+
+#[test]
+fn unsupported_code_keeps_the_engine_message_and_matches_the_header() {
+    let path = build("harmonic_hvpunsupported", &["HVP_UNSUPPORTED"]);
+    assert_eq!(unsupported_code(&path), ENGINE_ERR_UNSUPPORTED);
+    let mut engine = load(&path);
+    let err = engine
+        .hvp(
+            &EngineRequest {
+                positions: &[0.0; 3],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            &[1.0, 0.0, 0.0],
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        EngineError::Unsupported {
+            operation: "rgpot_engine_hvp",
+            message: "harmonic engine built without analytic HVP".into(),
+        }
+    );
+}
+
+#[test]
+fn hvp_maps_recoverable_and_fatal_codes() {
+    let path = build("harmonic_hvpcodes", &[]);
+    let mut engine = load(&path);
+    let positions = [0.0; 3];
+    let recoverable = EngineRequest {
+        positions: &positions,
+        atomic_numbers: &[0],
+        box_matrix: &CELL,
+    };
+    assert_eq!(
+        engine.hvp(&recoverable, &[1.0, 0.0, 0.0]).unwrap_err(),
+        EngineError::Recoverable {
+            code: 1,
+            message: "atom 0 has atomic number 0".into(),
+        }
+    );
+    let fatal = EngineRequest {
+        positions: &positions,
+        atomic_numbers: &[-1],
+        box_matrix: &CELL,
+    };
+    assert_eq!(
+        engine.hvp(&fatal, &[1.0, 0.0, 0.0]).unwrap_err(),
+        EngineError::Fatal {
+            code: -1,
+            message: "atom 0 has a negative atomic number".into(),
+        }
+    );
+}
+
+#[test]
+fn hvp_rejects_a_non_finite_product() {
+    let path = build("harmonic_hvpnan", &["HVP_NONFINITE"]);
+    let mut engine = load(&path);
+    let err = engine
+        .hvp(
+            &EngineRequest {
+                positions: &[0.0; 3],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            &[1.0, 0.0, 0.0],
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        EngineError::Invalid("the engine Hessian-vector product at element 1 is not finite".into())
+    );
+}
+
+#[test]
+fn hvp_rejects_mismatched_direction_length() {
+    let path = build("harmonic_hvplen", &[]);
+    let mut engine = load(&path);
+    let err = engine
+        .hvp(
+            &EngineRequest {
+                positions: &[0.0; 6],
+                atomic_numbers: &[1, 8],
+                box_matrix: &CELL,
+            },
+            &[1.0, 2.0, 3.0],
+        )
+        .unwrap_err();
+    assert!(matches!(err, EngineError::Invalid(_)), "{err}");
+    assert_eq!(err.status(), rgpot_status_t::RGPOT_INVALID_PARAMETER);
 }

@@ -98,6 +98,11 @@ typedef int (*rgpot_engine_coord_transform)(void *user, long nAtoms,
 #define RGPOT_ENGINE_ABI_MINOR 3
 #define RGPOT_ENGINE_ABI_LAYOUT_REVISION 1
 
+#define RGPOT_ENGINE_OK 0
+#define RGPOT_ENGINE_ERR_INVALID 1
+#define RGPOT_ENGINE_ERR_EVAL 2
+#define RGPOT_ENGINE_ERR_UNSUPPORTED 3
+
 RGPOT_ENGINE_API int rgpot_engine_abi_version(void);
 
 RGPOT_ENGINE_API int rgpot_engine_available(void);
@@ -158,19 +163,21 @@ RGPOT_ENGINE_API int rgpot_engine_force(
     const double *box, rgpot_engine_coord_transform transform,
     void *transform_user);
 
-/**
- * Exact energy-Hessian product for one Cartesian direction. positions and
- * direction hold 3*nAtoms doubles; product receives 3*nAtoms doubles in
- * eV/Angstrom. Returns 3 when the potential has no analytic product.
- */
-RGPOT_ENGINE_API int rgpot_engine_hvp(
-    RgpotEnginePot *pot, long nAtoms, const double *positions,
-    const int *atomicNrs, const double *direction, double *product,
-    const double *box);
-
 /* ------------------------------------------------------------------ */
 /* Optional symbols: probe with dlsym; absence means unsupported.     */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Analytic Hessian-vector product H(positions) * direction, in eV/Angstrom
+ * for a direction in Angstrom. direction and hv_out hold 3*nAtoms doubles.
+ * Returns RGPOT_ENGINE_OK (0) on success and
+ * RGPOT_ENGINE_ERR_UNSUPPORTED (3) when the backend does not support
+ * analytic HVP.
+ */
+RGPOT_ENGINE_API int rgpot_engine_hvp(
+    RgpotEnginePot *pot, long nAtoms, const double *positions,
+    const int *atomicNrs, const double *direction, double *hv_out,
+    const double *box);
 
 /**
  * Strided-uniform batched evaluation: nSystems systems sharing one
