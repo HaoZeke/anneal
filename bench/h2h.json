@@ -1245,6 +1245,35 @@
       ]
     },
     {
+      "rule": "ase_nonlj",
+      "competitors": [
+        "ASE basin hopping",
+        "ASE minima hopping"
+      ],
+      "runners": [
+        "scripts/ase_nonlj/enter_bench.sh",
+        "scripts/ase_nonlj/run_one.py"
+      ],
+      "budgets": {
+        "source": "scripts/ase_nonlj/run_one.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_nonlj/run_one.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-nonlj/benchmarks/ase_nonlj.py",
+      "rows": [
+        {
+          "path": "bench/ase-nonlj/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "agox_lj98",
       "competitors": [
         "AGOX"
