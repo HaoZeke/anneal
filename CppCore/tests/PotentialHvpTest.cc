@@ -123,10 +123,10 @@ TEST_CASE("from_impl registers the analytic product of MorsePot", "[hvp]") {
 TEST_CASE("from_impl keeps LJPot Auto on finite differences", "[hvp]") {
   LJPot lj;
   auto pot = PotentialHandle::from_impl(lj);
-  const std::array<double, 9> pos{
+  std::array<double, 9> pos{
       0.0, 0.0, 0.0, 1.2, 0.1, 0.0, 0.3, 1.1, 0.2};
-  const std::array<int, 3> atmnrs{1, 1, 1};
-  const std::array<double, 9> box{
+  std::array<int, 3> atmnrs{1, 1, 1};
+  std::array<double, 9> box{
       20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0};
   InputSpec input(atmnrs.size(), pos.data(), atmnrs.data(), box.data());
   const std::vector<double> direction{
@@ -158,9 +158,9 @@ TEST_CASE("from_impl keeps LJPot Auto on finite differences", "[hvp]") {
 TEST_CASE("from_impl registers the analytic product of DoubleWellPot", "[hvp]") {
   rgpot::DoubleWellPot model(2, 1.0, 2.0, 1.0, 0.25);
   auto pot = PotentialHandle::from_impl(model);
-  const std::array<double, 3> pos{0.7, -0.2, 0.0};
-  const std::array<int, 1> atmnrs{1};
-  const std::array<double, 9> box{
+  std::array<double, 3> pos{0.7, -0.2, 0.0};
+  std::array<int, 1> atmnrs{1};
+  std::array<double, 9> box{
       40.0, 0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 0.0, 40.0};
   InputSpec input(atmnrs.size(), pos.data(), atmnrs.data(), box.data());
   const std::vector<double> direction{0.3, -0.4, 0.2};
