@@ -100,7 +100,6 @@ ABC_SN = {
     "au55": 30,
 }
 PILOT_SN = (30, 100)
-PILOT_CORES = (1, 2, 3, 4, 5, 6)
 
 # Offsets of the hooked functions in the ABCluster 3.4 Linux ``atom``,
 # the same constants as abc_shim.c, for the debugger cross-check.
@@ -615,7 +614,11 @@ def counter_check(args, pins: dict[str, str], head: str) -> None:
 
 
 def pilot(args, pins: dict[str, str], head: str) -> None:
-    """ABCluster population sizes on seeds the campaign never uses, on spare cores."""
+    """ABCluster population sizes on seeds the campaign never uses.
+
+    Spare cores run in parallel. A one-core host runs them one at a time on
+    core 0, before the campaign, and no pilot timing is used.
+    """
     path = args.out / "pilot.csv"
     done = {(r["system"], r["sn"], r["seed"]) for r in read_rows(path)}
     systems = tuple(args.system) if args.system else tuple(PAPER_BUDGETS)
@@ -627,8 +630,10 @@ def pilot(args, pins: dict[str, str], head: str) -> None:
         if (system, str(sn), str(seed)) not in done
     ]
     jobs.sort(key=lambda job: -PAPER_BUDGETS[job[0]])
+    spare = [core for core in range(os.cpu_count() or 1) if core != 0]
+    pilot_cores = spare[:6] or [0]
     cores: queue.Queue[int] = queue.Queue()
-    for core in PILOT_CORES:
+    for core in pilot_cores:
         cores.put(core)
     revision = abc_revision(pins)
     progress = args.runs / "progress.txt"
@@ -660,7 +665,7 @@ def pilot(args, pins: dict[str, str], head: str) -> None:
         finally:
             cores.put(core)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(PILOT_CORES)) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(pilot_cores)) as pool:
         for row in pool.map(one, jobs):
             append_rows(path, PILOT_FIELDS, [row])
             note(progress, f"pilot {row['system']} sn={row['sn']} {row['seed']} hit={row['hit']} calls={row['charged']} best={row['best']}")
