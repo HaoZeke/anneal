@@ -879,6 +879,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   return a safe value for a NULL tensor.
   Before, these cases were undefined behaviour.
 
+- On Windows, publishing an AOTI package replaces a file that a reader
+  still has open, as the 3.6.0 notes said it did.
+  `MoveFileExW` refuses to replace a file with any open handle, so a
+  reader that kept the package open could make the publish fail with
+  access denied after its two-second deadline.
+  The replace now falls back to POSIX rename semantics (Windows 10 1607
+  or later, NTFS), and the reader keeps the complete package it opened.
+  A read, reservation or publish that gives up reports the error code,
+  the attempts and the elapsed time.
+
 ## [3.6.0] - 2026-11-13
 
 [3.6.0]: https://github.com/OmniPotentRPC/rgpot/tree/v3.6.0
