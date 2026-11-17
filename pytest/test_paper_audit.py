@@ -33,6 +33,7 @@ CHECKS = (
     audit_mod.stale_claims,
     audit_mod.sc_wall,
     audit_mod.sc_wall2,
+    audit_mod.sc_omp,
     audit_mod.tip4p_panel,
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
@@ -250,6 +251,32 @@ def test_a_drifted_efd0750f_inside_time_is_reported():
                                                       "| panel | sc96-80 | 12 | 12 | 29.64 | 29.00 |")
     audit_mod.sc_wall2(audit)
     assert [r[2] for r in audit.drifts()] == ["Inside efd0750f (µs/call)"]
+
+
+def test_a_drifted_sc_omp_wall_cell_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.SC_OMP}/README.md"
+    audit.text_cache[path] = audit.text(path).replace("| 1 | 0 | sc126-55 | a50f4b02 | 13.71 |",
+                                                      "| 1 | 0 | sc126-55 | a50f4b02 | 13.00 |")
+    audit_mod.sc_omp(audit)
+    assert [r[2] for r in audit.drifts()] == ["Anneal inside (µs/call)"]
+
+
+def test_a_one_thread_openmp_row_off_its_14680ddb_path_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(f"{audit_mod.SC_OMP}/seeds.csv")
+    row = next(r for r in rows if r["system"] == "sc96-80" and r["omp_threads"] == "1")
+    row["hops"] = str(int(row["hops"]) + 1)
+    audit_mod.sc_omp(audit)
+    assert {r[2] for r in audit.drifts()} == {"Same as 14680ddb", "Same as efd0750f without OpenMP", "prose"}
+
+
+def test_a_drifted_sc_omp_bits_cell_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.SC_OMP}/README.md"
+    audit.text_cache[path] = audit.text(path).replace("| 8 | 0-7 | sc96-55 | 64 | 7 |", "| 8 | 0-7 | sc96-55 | 64 | 6 |")
+    audit_mod.sc_omp(audit)
+    assert [r[2] for r in audit.drifts()] == ["Energy bits differ"]
 
 
 def test_a_drifted_readme_p_value_is_reported():
