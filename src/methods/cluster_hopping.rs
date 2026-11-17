@@ -4657,6 +4657,7 @@ where
     let mut last_basin_restart = 0usize;
     let mut basin_hold = 0usize;
     let mut plateau = crate::methods::plateau::PlateauSearch::new();
+    let plateau_trace = cfg.plateau_population && std::env::var_os("PLATEAU_TRACE").is_some();
     // Set after a rigid stall when the preset relocates one molecule.
     // Cleared when a new lowest minimum is recorded.
     let mut cage_edit = false;
@@ -5776,18 +5777,34 @@ where
             if let Some(state) = ledger.best_state.as_ref() {
                 plateau.offer(ledger.best, state.view());
             }
-            let due = hops > 0
-                && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
-            if due
-                && let Some((energy, state)) = plateau.leave(e, x.view())
-                && state.len() == x.len()
-            {
-                e = energy;
-                x = state;
-                current_validation_gradient = None;
-                soft_cache = None;
+            let patience = cfg.restart_patience.max(1);
+            let due = hops > 0 && ledger.spent().saturating_sub(charged_at_best) >= patience;
+            if due {
+                // One window of the temperature the chain is already hopping
+                // at. A farther fingerprint above that window is not a funnel
+                // to continue from.
+                let ceiling = ledger.best + plateau.heat() * cfg.temperature.max(0.0);
+                if let Some((energy, state)) = plateau.leave(e, x.view(), ceiling)
+                    && state.len() == x.len()
+                {
+                    if plateau_trace {
+                        eprintln!(
+                            "plateau_leave charged {} best {:.6} from {:.6} to {:.6} step {:.3} heat {:.3}",
+                            ledger.spent(),
+                            ledger.best,
+                            e,
+                            energy,
+                            plateau.step(),
+                            plateau.heat()
+                        );
+                    }
+                    e = energy;
+                    x = state;
+                    current_validation_gradient = None;
+                    soft_cache = None;
+                    plateau.hold_until(ledger.spent().saturating_add(patience));
+                }
                 charged_at_best = ledger.spent();
-                plateau.hold_until(ledger.spent().saturating_add(cfg.restart_patience.max(1)));
             }
         }
         // The reoccupation move runs inside the chain and charges the

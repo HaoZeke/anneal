@@ -320,6 +320,9 @@ fn config(spec: &Spec) -> Config {
     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }
+    if std::env::var("H2H_PLATEAU").is_ok_and(|value| value == "1") {
+        cfg.plateau_population = true;
+    }
     cfg
 }
 

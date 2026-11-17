@@ -113,6 +113,10 @@ impl PlateauSearch {
         } else if rate < 0.25 {
             self.step = (self.step / 1.25).max(STEP_LO);
         }
+        // The kick may grow when acceptance is high. It is capped, and a
+        // leave may not step above the temperature window: that window is
+        // what stopped LJ38 jumping from the fcc funnel into a melt. The
+        // temperature rises when a block accepts and does not improve.
         if gains == 0 && rate > 0.5 {
             self.heat = (self.heat * 1.25).min(HEAT_HI);
         } else if gains > 0 {
@@ -160,11 +164,24 @@ impl PlateauSearch {
         }
     }
 
-    /// The kept structure farthest from `state` that is not the same minimum.
-    pub fn leave(&mut self, energy: f64, state: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+    /// The kept structure farthest from `state` that is not the same minimum
+    /// and is not above `ceiling`.
+    ///
+    /// The ceiling is the incumbent plus the temperature the chain is hopping
+    /// at. Without it the farthest fingerprint is an early hot structure, and
+    /// the leave steps out of a finished funnel into that structure.
+    pub fn leave(
+        &mut self,
+        energy: f64,
+        state: ArrayView1<f64>,
+        ceiling: f64,
+    ) -> Option<(f64, Array1<f64>)> {
         let here = sorted_pairs(state);
         let mut chosen: Option<(f64, usize)> = None;
         for (index, seat) in self.seats.iter().enumerate() {
+            if seat.energy > ceiling {
+                continue;
+            }
             if same_minimum(seat.energy, energy) || same_print(&seat.print, &here) {
                 continue;
             }
@@ -265,13 +282,13 @@ mod tests {
         }
         assert!((search.step() - 1.25).abs() < 1e-12);
         assert!((search.heat() - 1.25).abs() < 1e-12);
-        for _ in 0..BLOCK {
-            search.observe(false, false);
+        for _ in 0..8 * BLOCK {
+            search.observe(true, false);
         }
-        assert!((search.step() - 1.0).abs() < 1e-12);
         assert!(
-            (search.heat() - 1.25).abs() < 1e-12,
-            "a refusal cooled the plateau"
+            (search.step() - STEP_HI).abs() < 1e-12,
+            "the kick grew past one and a half, {}",
+            search.step()
         );
     }
 
@@ -295,11 +312,28 @@ mod tests {
         for k in 0..SEATS {
             search.offer(-2.0 - 0.001 * k as f64, line(5.0 + 0.01 * k as f64).view());
         }
-        let destination = search.leave(-2.004, line(5.04).view()).expect("a leave");
+        let destination = search
+            .leave(-2.004, line(5.04).view(), f64::INFINITY)
+            .expect("a leave");
         assert!(
             (destination.0 + 1.0).abs() < 1e-12,
             "the leave stayed in the crowded well, energy {}",
             destination.0
         );
+    }
+
+    #[test]
+    fn a_leave_does_not_step_above_the_temperature_window() {
+        let mut search = PlateauSearch::new();
+        search.offer(-10.0, line(3.0).view());
+        search.offer(-1.0, line(12.0).view());
+        assert!(
+            search.leave(-10.0, line(3.0).view(), -10.0 + 0.8).is_none(),
+            "the hot seat was inside the window"
+        );
+        let destination = search
+            .leave(-10.0, line(3.0).view(), f64::INFINITY)
+            .expect("the hot seat is eligible once the window is open");
+        assert!((destination.0 + 1.0).abs() < 1e-12);
     }
 }
