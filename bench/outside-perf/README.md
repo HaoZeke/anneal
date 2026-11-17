@@ -28,8 +28,8 @@ The final instruction counts were lower on every diagnostic:
 |---|---:|---:|---:|
 | LJ150 | 3,402,849,428 | 3,401,940,472 | -0.027% |
 | LJ104 | 1,872,317,042 | 1,871,893,455 | -0.023% |
-| M80 rho=6 | 2,525,513,706 | 2,517,623,629 | -0.312% |
-| Au55 | 2,322,867,950 | 2,318,463,289 | -0.190% |
+| M80 rho=6 | 2,525,513,706 | 2,516,263,638 | -0.366% |
+| Au55 | 2,322,867,950 | 2,317,176,056 | -0.245% |
 
 The optimized assignment code reuses solver storage, avoids materializing a
 negated cost matrix, skips fully used AVX2 lanes, and avoids second scans of

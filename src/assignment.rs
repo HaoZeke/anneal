@@ -32,12 +32,15 @@ pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     if n == 0 {
         return costs.is_empty().then(Vec::new);
     }
-    if n.checked_mul(n) != Some(costs.len()) || costs.iter().any(|value| !value.is_finite()) {
+    if n.checked_mul(n) != Some(costs.len()) {
         return None;
     }
     if n < SHORTEST_PATH_FROM {
         kuhn_munkres(costs, n)
     } else {
+        if costs.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
         successive_shortest_paths(costs, n)
     }
 }
@@ -832,15 +835,18 @@ fn kuhn_munkres_in(
     rows_seen: &mut [bool],
     columns_seen: &mut [bool],
 ) -> Option<Vec<usize>> {
-    let scale = costs
-        .iter()
-        .fold(1.0_f64, |largest, value| largest.max(value.abs()));
-    let tight_tolerance = scale * 1e-9;
+    let mut scale = 1.0_f64;
     for row in 0..n {
         for column in 0..n {
-            row_potential[row] = row_potential[row].max(-costs[row * n + column]);
+            let cost = costs[row * n + column];
+            if !cost.is_finite() {
+                return None;
+            }
+            scale = scale.max(cost.abs());
+            row_potential[row] = row_potential[row].max(-cost);
         }
     }
+    let tight_tolerance = scale * 1e-9;
 
     for root in 0..n {
         let mut augmented = false;
