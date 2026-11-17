@@ -42,25 +42,30 @@ case "$SEED" in
   *) echo "seed $SEED is outside 2000-2011" >&2; exit 2 ;;
 esac
 
+BIN=${ASE_NONLJ:-/work/target-panel/release/examples/ase_nonlj}
+REV=${ASE_NONLJ_REVISION:-9a30f3190b3bb7040c675a904f8388eb68224151}
 mkdir -p "$WORK/runs" "$WORK/home" "$WORK/numba"
 ROWS=${ASE_NONLJ_ROWS:-$ROOT/bench/ase-nonlj/rows.csv}
-if [[ -f $ROWS ]] && grep -q "^${SYSTEM},${ARM},${SEED}," "$ROWS"; then
+if [[ -f $ROWS ]] && grep -q "^${SYSTEM},${ARM},${SEED},.*,$REV,bench," "$ROWS"; then
   echo "keep existing $SYSTEM $ARM seed $SEED"
   exit 0
 fi
 
 CAP=""
 if [[ $ARM != for_cluster ]]; then
-  CAP=$("$PIXI" run --locked --frozen -e chem "${PYTHON:-python3}" - "$ROWS" "$SYSTEM" << 'PY'
+  CAP=$("$PIXI" run --locked --frozen -e chem "${PYTHON:-python3}" - "$ROWS" "$SYSTEM" "$REV" << 'PY'
 import csv
 import sys
 from pathlib import Path
 
-path, system = Path(sys.argv[1]), sys.argv[2]
+path, system, revision = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 rows = list(csv.DictReader(path.open())) if path.exists() else []
 base = [
     row for row in rows
-    if row["arm"] == "for_cluster" and row["system"] == system and row["host"] == "bench"
+    if row["arm"] == "for_cluster"
+    and row["system"] == system
+    and row["host"] == "bench"
+    and row["code_revision"] == revision
 ]
 seeds = tuple(sorted(int(row["seed"]) for row in base))
 if seeds != tuple(range(2000, 2012)):
@@ -70,8 +75,6 @@ PY
 )
 fi
 
-BIN=${ASE_NONLJ:-/work/target-panel/release/examples/ase_nonlj}
-REV=${ASE_NONLJ_REVISION:-0582a5b2608ddea3a239c1877008d22df38ae73a}
 if [[ ! $REV =~ ^[0-9a-f]{40}$ ]]; then
   echo "ASE_NONLJ_REVISION must be a full lowercase commit SHA" >&2
   exit 2
@@ -94,6 +97,7 @@ sudo -n unshare --uts sh -c "hostname bench; \
   > "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" 2> "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stderr"
 
 $PYRUN - "$SYSTEM" "$ARM" "$SEED" "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" "$ROWS" << 'PY'
+import csv
 import sys
 from pathlib import Path
 
@@ -108,7 +112,14 @@ if len(fields) != 15:
 path = Path(rows_path)
 header = "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,outside_s,code_revision,host,stop,cap_s"
 text = path.read_text() if path.exists() else ""
-if f"{system},{arm},{seed}," in text:
+revision = fields[11]
+if path.exists() and any(
+    old["system"] == system
+    and old["arm"] == arm
+    and old["seed"] == seed
+    and old["code_revision"] == revision
+    for old in csv.DictReader(text.splitlines())
+):
     print(f"keep existing {system} {arm} seed {seed}")
     raise SystemExit(0)
 path.parent.mkdir(parents=True, exist_ok=True)

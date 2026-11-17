@@ -8,6 +8,15 @@ with a 4000-call budget and the committed `h2o6` configuration.
 
 The rerun produced 121/192 hits for anneal and 94/192 hits for plain CREST.
 The corresponding median walls were 16.9731480 s and 13.8815665 s.
+The repository record revision is
+`9a30f3190b3bb7040c675a904f8388eb68224151`, whose tree is
+`4cf101da6fe8f4d1069f5cb472413bd7e232d69c`.
+
+No standalone xtb executable or libxtb package was used, so this rerun has
+no xtb 6.x software version.  It evaluated GFN2-xTB method 3 through tblite
+0.7.0 (tag `v0.7.0`, commit
+`fa8a4416e8fe093d0075bc10ac875494c2a449a9`).  CREST 3.0.2 was linked to
+that same tblite library.
 
 The workflow used these inputs:
 

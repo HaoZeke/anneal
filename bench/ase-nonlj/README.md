@@ -4,7 +4,7 @@ Copyright (c) anneal developers
 
 Four Cambridge Morse systems across two sizes and two ranges: M38 and M55 at rho = 6 and rho = 14.
 Seeds 2000-2011, host bench, serial one core (`taskset -c 0`).
-code_revision 0582a5b2608ddea3a239c1877008d22df38ae73a.
+code_revision 9a30f3190b3bb7040c675a904f8388eb68224151.
 Potential: untruncated Morse (`epsilon = 1`, `r0 = 1`, `rho0 = rho`).
 Anneal evaluates `PairPotential::morse` (`rgpot_pair::cambridge_morse`).
 ASE evaluates `ase.calculators.morse.MorsePotential` with `rcut1 = 1e6`, `rcut2 = 2e6`.
