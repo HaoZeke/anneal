@@ -54,6 +54,8 @@ ALIASES = "bench/revision-aliases.csv"
 # panel from five campaign heads and sits on the last, e09e0487, alone. The
 # pushed history before it has one commit, 57735de1, that adds the two-hour
 # cap, yet three heads ran capped, so the heads are not its commits one to one.
+# 12b980c6 is the harness the sc-omp rows ran from; the commit was rebased
+# before any copy of it was pushed, so until one is it has no alias.
 UNPUSHED = {
     "0f988569b49afe162e2f5ffd71b2ab45d0b3afec": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
     "349523d3f5f42b748f3af1573166fd17155ac461": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
@@ -63,6 +65,8 @@ UNPUSHED = {
                                                 "Si10 and C10 floor rows; the fix was pushed on another base",
     "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
                                                 "the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",
+    "12b980c610e02ec274fab2ba88a1c24f71bdce6d": "the sc-omp harness, a local commit on 75780cd0 of bench/sc-dev2, rebased "
+                                                "with the same patch before it was pushed",
 }
 
 KNOWN_GAPS = {
@@ -99,6 +103,9 @@ KNOWN_GAPS = {
     "bench/growpal-h2h/seeds.csv": "no revision or host column",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "no revision or host column",
     "bench/nh3-octamer/ladder.csv": "no revision or host column",
+    "bench/metal-cluster-h2h/sc-omp/seeds.csv": "revision 12b980c6 is not in this repository",
+    "bench/metal-cluster-h2h/sc-omp/micro.csv": "revision 12b980c6 is not in this repository",
+    "bench/metal-cluster-h2h/sc-omp/bits.csv": "revision 12b980c6 is not in this repository",
 }
 
 UNTRACED = [
@@ -1685,6 +1692,246 @@ def sc_wall2(audit: Audit) -> None:
         audit.said(path, sentence)
 
 
+SC_OMP = "bench/metal-cluster-h2h/sc-omp"
+
+
+def sc_omp_same(row: dict[str, str], ref: dict[str, str]) -> bool:
+    """The search fields of SC_WALL2_SAME agree, hit read as a hit either way it is written."""
+    return all(hits_of([row]) == hits_of([ref]) if c == "hit" else row[c] == ref[c] for c in SC_WALL2_SAME)
+
+
+def sc_omp_parts(audit: Audit) -> dict[str, object]:
+    rows = audit.rows(f"{SC_OMP}/seeds.csv")
+    micro = audit.rows(f"{SC_OMP}/micro.csv")
+    bits = audit.rows(f"{SC_OMP}/bits.csv")
+    wall2 = audit.rows(f"{SC_WALL2}/seeds.csv")
+    panel = audit.rows(f"{SC_N12}/seeds.csv")
+    _, _, reruns = sc_state(audit.rows(f"{SC_N12}/results.csv"))
+    rgpot = rows[0]["rgpot_revision"]
+    if {r["rgpot_revision"] for r in rows + micro} != {rgpot} or {r["openmp"] for r in rows + micro} != {"1"}:
+        raise SystemExit(f"{SC_OMP}: one rgpot revision built with OpenMP expected")
+    refs = list(dict.fromkeys(r["rgpot_revision"] for r in wall2))
+    if refs[-1] != rgpot:
+        raise SystemExit(f"{SC_OMP}: the last rgpot of {SC_WALL2}/seeds.csv is not {rgpot[:8]}")
+    passes = list(dict.fromkeys((r["omp_threads"], r["cpus"]) for r in rows))
+    out: dict[str, object] = {"rgpot": rgpot, "refs": refs, "passes": passes,
+                              "harness": sorted({r["harness_revision"] for r in rows + micro + bits}),
+                              "same": [], "wall": [], "micro": [], "bits": []}
+    for threads, cpus in passes:
+        mine = pick(rows, omp_threads=threads, cpus=cpus)
+        for system in dict.fromkeys(r["system"] for r in mine):
+            a = pick(mine, system=system)
+            same = {}
+            for ref in refs:
+                by_seed = {r["seed"]: r for r in pick(wall2, system=system, rgpot_revision=ref)}
+                same[ref] = [r["seed"] for r in a if r["seed"] in by_seed and sc_omp_same(r, by_seed[r["seed"]])]
+            out["same"].append({"threads": threads, "cpus": cpus, "system": system, "seeds": len(a), "same": same,
+                                "differ": {ref: [r["seed"] for r in a if r["seed"] not in s] for ref, s in same.items()}})
+            g = sc_group(panel, reruns[system])
+            ap = [float(r["wall_s"]) / float(r["charged"]) * 1e6 for r in a]
+            gp = [float(r["wall_s"]) / float(r["charged"]) * 1e6 for r in g]
+            p = mann_whitney(ap, gp, True)
+            n = {"threads": threads, "cpus": cpus, "system": system, "gmin harness": reruns[system]["harness_revision"],
+                 "inside": per_call(a, "pot_s"), "outside": per_call(a, "outside_s"), "anneal": per_call(a, "wall_s"),
+                 "serial": per_call(pick(wall2, system=system, rgpot_revision=rgpot), "wall_s"),
+                 "gmin": per_call(g, "wall_s"), "p": p, "ahead": lead(ap, gp, p)}
+            n["ratio"] = n["anneal"] / n["gmin"]
+            out["wall"].append(n)
+            if m := pick(micro, system=system, omp_threads=threads, cpus=cpus):
+                out["micro"].append({"threads": threads, "cpus": cpus, "system": system,
+                                     **{c: median([float(r[c]) for r in m]) for c in
+                                        ("entry_us", "kept_us", "kept_stream_us", "plain_us")},
+                                     **{c: max(float(r[c]) for r in m) for c in ("abs_de", "max_abs_df")}})
+    for r in bits:
+        out["bits"].append({"threads": r["omp_threads"], "cpus": r["cpus"], "system": r["system"],
+                            "reference": r["reference_rgpot_revision"], "reference openmp": r["reference_openmp"],
+                            **{c: float(r[c]) for c in ("geometries", "energy_differ", "force_differ", "max_abs_de",
+                                                        "max_abs_df", "max_rel_de")}})
+    return out
+
+
+def sc_omp_tables(parts: dict[str, object]) -> list[tuple[list[str], list[list[object]], list]]:
+    """Each table of the README as its columns, its rows of values and the format of each column."""
+    refs, rgpot = parts["refs"], parts["rgpot"][:8]
+    us, text, count = (lambda v: f"{v:.2f}"), str, (lambda v: f"{v:g}")
+    small = lambda v: f"{v:.3g}"  # noqa: E731
+    same_names = [f"Same as {ref[:8]}" if ref != parts["rgpot"] else f"Same as {rgpot} without OpenMP" for ref in refs]
+    return [
+        (["Threads", "Cores", "System", "Seeds", *same_names],
+         [[s["threads"], s["cpus"], s["system"], float(s["seeds"]), *(float(len(s["same"][ref])) for ref in refs)]
+          for s in parts["same"]],
+         [text, text, text, count, *(count for _ in refs)]),
+        (["Threads", "Cores", "System", "Geometries", "Energy bits differ", "Force bits differ", "Max abs dE",
+          "Max abs dF", "Max dE over E"],
+         [[b["threads"], b["cpus"], b["system"], b["geometries"], b["energy_differ"], b["force_differ"],
+           b["max_abs_de"], b["max_abs_df"], b["max_rel_de"]] for b in parts["bits"]],
+         [text, text, text, count, count, count, small, small, small]),
+        (["Threads", "Cores", "System", "GMIN harness", "Anneal inside (µs/call)", "Anneal outside (µs/call)",
+          "Anneal wall (µs/call)", "Anneal without OpenMP (µs/call)", "GMIN wall (µs/call)", "Wall ratio",
+          "Mann-Whitney p", "Wall ahead"],
+         [[n["threads"], n["cpus"], n["system"], n["gmin harness"][:8], n["inside"], n["outside"], n["anneal"],
+           n["serial"], n["gmin"], n["ratio"], n["p"], n["ahead"]] for n in parts["wall"]],
+         [text, text, text, text, us, us, us, us, us, (lambda v: f"{v:.3f}"), p_text, text]),
+        (["Threads", "Cores", "System", "Entry", "Kept", "Kept, streaming", "Plain", "max abs dE", "max abs dF"],
+         [[m["threads"], m["cpus"], m["system"], m["entry_us"], m["kept_us"], m["kept_stream_us"], m["plain_us"],
+           m["abs_de"], m["max_abs_df"]] for m in parts["micro"]],
+         [text, text, text, us, us, us, us, small, small]),
+    ]
+
+
+def sc_omp_cores(cpus: str) -> str:
+    return f"cores {cpus}" if "-" in cpus or "," in cpus else f"core {cpus}"
+
+
+def sc_omp_prose(parts: dict[str, object]) -> dict[str, list[str]]:
+    rgpot = parts["rgpot"][:8]
+    names = {ref: ref[:8] if ref != parts["rgpot"] else f"{rgpot} without OpenMP" for ref in parts["refs"]}
+    out: dict[str, list[str]] = {"same": [], "bits": [], "cause": [], "leads": [], "team": []}
+    for threads, cpus in parts["passes"]:
+        group = [s for s in parts["same"] if (s["threads"], s["cpus"]) == (threads, cpus)]
+        seeds = sum(s["seeds"] for s in group)
+        off = {ref: [s for s in group if s["differ"][ref]] for ref in parts["refs"]}
+        held = [names[ref] for ref in parts["refs"] if not off[ref]]
+        if held:
+            out["same"].append(f"With OMP_NUM_THREADS={threads} on {sc_omp_cores(cpus)}, each of the {seeds} rows has the hit, "
+                               "calls to the hit, calls charged, best and final energy, hops, escapes, restarts and "
+                               f"paths of its {and_list(held)} rows in `../sc-wall2/seeds.csv`.")
+        moved: dict[tuple[int, tuple[str, ...]], list[str]] = {}
+        for ref in parts["refs"]:
+            if off[ref]:
+                key = (sum(len(s["differ"][ref]) for s in off[ref]), tuple(s["system"] for s in off[ref]))
+                moved.setdefault(key, []).append(names[ref])
+        for (count, systems), refs in moved.items():
+            out["same"].append(f"With OMP_NUM_THREADS={threads} on {sc_omp_cores(cpus)}, {count} of the {seeds} rows "
+                               f"differ from their {and_list(refs)} rows, on {and_list(list(systems))}.")
+    for threads in dict.fromkeys(b["threads"] for b in parts["bits"]):
+        group = [b for b in parts["bits"] if b["threads"] == threads]
+        e, f = sum(b["energy_differ"] for b in group), sum(b["force_differ"] for b in group)
+        total = sum(b["geometries"] for b in group)
+        if not e and not f:
+            out["bits"].append(f"With OMP_NUM_THREADS={threads} the build with OpenMP gives the energy and force bits of "
+                               f"the build without on all {total:g} geometries.")
+        else:
+            out["bits"].append(f"With OMP_NUM_THREADS={threads} the energy bits differ on {e:g} of the {total:g} "
+                               f"geometries and the force bits on {f:g}; the largest energy difference is "
+                               f"{max(b['max_abs_de'] for b in group):.3g}, {max(b['max_rel_de'] for b in group):.3g} "
+                               "of the energy.")
+    if any(b["energy_differ"] or b["force_differ"] for b in parts["bits"]):
+        out["cause"] = [
+            f"In rgpot {rgpot}, `SuttonChenPot::compute` in `CppCore/rgpot/SuttonChen/SuttonChenPot.cc` takes its "
+            "thread count from `nlist::threadsRequested()` (line 178), which in a build with OpenMP returns "
+            "OMP_NUM_THREADS whatever the number of atoms (`CppCore/rgpot/nlist/Neighbours.cc`, lines 46-64).",
+            "With one thread the density pass adds each pair energy to `epair` as the walk visits the pair (line 244).",
+            "With more, `forCellTeam` (`CppCore/rgpot/nlist/Neighbours.hpp`, line 188) cuts the unbinned search into "
+            "contiguous runs of atoms with `partition` (line 212), each slice adds the pair energies of its atoms into "
+            "`thread_e[t]` (line 279), and lines 286-288 add those partial sums to `epair`.",
+            "The pair terms are the same and only their grouping changes, so the last bits of the energy move.",
+            "The unbinned walk takes each atom's partners in index order, so each slice adds the density (line 277) "
+            "and the force (line 383) of its central atom in the order the serial pass adds them, with the sign of "
+            "each pair term flipped exactly, and they keep their bits.",
+            "An energy that differs in its last bit can change which of two minima a step keeps, so from there the "
+            "search runs another way, as the rows with more than one thread show.",
+            "rgpot's `docs/orgmode/reference/sutton_chen.org` states this drift: the energy, summed per run, can move "
+            "in the last bits. It is not the dropped-slice bug that 6917dea3 and efd0750f fix.",
+        ]
+    for threads, cpus in parts["passes"]:
+        group = [n for n in parts["wall"] if (n["threads"], n["cpus"]) == (threads, cpus)]
+        for who, other in (("anneal", "GMIN"), ("GMIN", "anneal")):
+            name = who
+            sig = [n["system"] for n in group if n["ahead"] == who]
+            ns = [n["system"] for n in group if n["ahead"] == f"{who}, n.s."]
+            if sig:
+                out["leads"].append(f"With OMP_NUM_THREADS={threads}, {name} beats {other} on wall per call on "
+                                    f"{and_list(sig)}, at Mann-Whitney p < 0.05.")
+            if ns:
+                out["leads"].append(f"With OMP_NUM_THREADS={threads}, {name}'s lead on wall per call on "
+                                    f"{and_list(ns)} is not significant.")
+        if ties := [n["system"] for n in group if n["ahead"] == "tie"]:
+            out["leads"].append(f"With OMP_NUM_THREADS={threads}, neither code leads on wall per call on {and_list(ties)}.")
+    one = {n["system"]: n for n in parts["wall"] if n["threads"] == "1"}
+    for threads in dict.fromkeys(n["threads"] for n in parts["wall"] if n["threads"] != "1"):
+        group = [n for n in parts["wall"] if n["threads"] == threads and n["system"] in one]
+        if not group:
+            continue
+        times = sorted(n["inside"] / one[n["system"]]["inside"] for n in group)
+        out["team"].append(f"With OMP_NUM_THREADS={threads} a call spends {times[0]:.2f} to {times[-1]:.2f} times as "
+                           "long inside the potential as with one thread.")
+    if out["team"]:
+        out["team"].append("`compute` takes `threadsRequested()` as its team for any number of atoms, while the "
+                           "neighbour-list build asks `teamSize` (`CppCore/rgpot/nlist/NeighbourList.cc`, lines "
+                           "482-494), which keeps fewer than 8192 atoms on the calling thread because, in its own "
+                           "comment, a parallel region costs more than the search below that size. On these 55- and "
+                           "80-atom clusters each call of the potential pays for the team.")
+    return out
+
+
+def sc_omp_body(audit: Audit) -> str:
+    parts = sc_omp_parts(audit)
+    rgpot, harness = parts["rgpot"][:8], and_list([h[:8] for h in parts["harness"]])
+    prose = sc_omp_prose(parts)
+    para = lambda key: " ".join(prose[key])  # noqa: E731
+    tables = sc_omp_tables(parts)
+
+    def table(index: int) -> list[str]:
+        columns, rows, formats = tables[index]
+        return (["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
+                + ["| " + " | ".join(f(v) for f, v in zip(formats, row)) + " |" for row in rows])
+
+    passes = and_list([f"OMP_NUM_THREADS={t} on {sc_omp_cores(c)}" for t, c in parts["passes"]])
+    lines = [f"# Sutton-Chen wall with rgpot {rgpot} built with OpenMP", "",
+             f"rgpot {parts['rgpot']} is the head of rgpot's `feat/sc-call-overhead` branch. Its last two commits run "
+             "the team slices of the potential and of the neighbour walk on whatever threads the OpenMP runtime "
+             f"starts, and `../sc-wall2` ran {rgpot} without OpenMP, so those commits were not exercised there. Here "
+             "`build_rgpot_sc.sh` builds it with `-fopenmp` (`RGPOT_OPENMP=1`). rgpot's develop is still at 251aaade "
+             "and anneal's `Cargo.lock` still pins 8efdd246, so the build is only recorded here and in the rows. "
+             "`scripts/metal_h2h/enter_sc_omp.sh` runs `sc_wall.sh` on the six 55- and 80-atom sc-n12 systems, "
+             f"seeds 2000-2011 at 1000000 calls, with {passes}, one job at a time in a UTS namespace with hostname "
+             f"`bench`, harness {harness}. The rows are in `seeds.csv` and `micro.csv`, with the OpenMP flag, the "
+             "thread count and the cores. `bits.csv` holds `sc_omp_bits`, which compares the build with OpenMP and "
+             "the build without on the seed-2000 start of each system and its 63 noisy copies."
+             + "".join(f" Harness {h[:8]} was a local commit, rebased with the same patch before it was pushed; "
+                       "`UNPUSHED` in `scripts/paper_audit.py` lists it." for h in parts["harness"] if h in UNPUSHED),
+             "",
+             "## Calls and energies", "",
+             "Each row is matched by seed against `../sc-wall2/seeds.csv` in the hit, calls to the hit, calls charged, "
+             "best and final energy, hops, escapes, restarts and paths.", ""]
+    lines += table(0) + ["", para("same"), "", "## Energy and force bits", ""] + table(1) + ["", para("bits"), ""]
+    if prose["cause"]:
+        lines += ["## Where the bits move", "", para("cause"), ""]
+    lines += ["## Wall against GMIN", "",
+              "Wall per call is the total over the twelve seeds divided by charged calls; inside is the time in the "
+              "potential. GMIN's rows are the corrected-file reruns in `../sc-n12/seeds.csv`. Anneal without OpenMP is "
+              f"rgpot {rgpot} in `../sc-wall2/seeds.csv`, an earlier session. The wall ratio is anneal's wall per call "
+              "over GMIN's. Mann-Whitney, two-sided with the tie correction and the continuity correction, compares the "
+              "per-seed wall per call of the two codes, and the code ahead is the one lower in more of the 144 seed "
+              "pairs; n.s. marks p >= 0.05.", ""]
+    lines += table(2) + ["", para("leads")] + (["", para("team")] if prose["team"] else []) + ["", "## sc_wall_micro", "",
+                         "Medians in µs per call over three repeats, as in `../sc-wall/README.md`; dE and dF are "
+                         "against the plain loop, the largest of the repeats.", ""] + table(3) + [""]
+    return "\n".join(lines)
+
+
+def write_sc_omp() -> None:
+    (ROOT / SC_OMP / "README.md").write_text(sc_omp_body(Audit()))
+
+
+def sc_omp(audit: Audit) -> None:
+    path = f"{SC_OMP}/README.md"
+    parts = sc_omp_parts(audit)
+    for columns, expected, _ in sc_omp_tables(parts):
+        shown = md_table(audit, path, " | ".join(columns[:4]))
+        names = lambda rows: " ".join("/".join(str(c) for c in r[:3]) for r in rows)  # noqa: E731
+        audit.cell(path, f"{columns[3]} table rows", names([[r[c] for c in columns[:3]] for _, r in shown]),
+                   names(expected))
+        for (line, row), values in zip(shown, expected):
+            where = f"{path}:{line} {row['Threads']} {row['System']}"
+            for column, value in zip(columns[3:], values[3:]):
+                audit.cell(where, column, row.get(column, ""), value)
+    for sentences in sc_omp_prose(parts).values():
+        for sentence in sentences:
+            audit.said(path, sentence)
+
+
 def gfn2_ranked(rows: list[dict[str, str]]) -> list[float]:
     """Calls to the hit with a miss ranked after every hit, as gfn2_crest.py --summary ranks them."""
     return [float(r["evals_to_hit"]) if hits_of([r]) else math.inf for r in rows]
@@ -2264,7 +2511,7 @@ def run(report: bool = False) -> int:
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, sc96_78_howto, stale_claims, sc_wall, sc_wall2, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
+                  head_to_head, sc96_78_howto, stale_claims, sc_wall, sc_wall2, sc_omp, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, bench_prose):
         check(audit)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)
@@ -2295,11 +2542,15 @@ def main(argv: list[str]) -> int:
                         help=f"write {SC_N12_README} from its rows before the checks")
     parser.add_argument("--write-sc-wall2", action="store_true",
                         help=f"write {SC_WALL2}/README.md from its rows before the checks")
+    parser.add_argument("--write-sc-omp", action="store_true",
+                        help=f"write {SC_OMP}/README.md from its rows before the checks")
     args = parser.parse_args(argv)
     if args.write_sc_n12:
         write_sc_n12()
     if args.write_sc_wall2:
         write_sc_wall2()
+    if args.write_sc_omp:
+        write_sc_omp()
     return run(args.report)
 
 
