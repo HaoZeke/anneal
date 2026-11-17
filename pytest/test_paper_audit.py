@@ -37,6 +37,10 @@ CHECKS = (
     audit_mod.ase_gofee,
     audit_mod.lj_large,
     audit_mod.bench_prose,
+    audit_mod.manuscript_ase,
+    audit_mod.panel_references,
+    audit_mod.generated_tables,
+    audit_mod.supporting_gmin,
 )
 
 
@@ -75,6 +79,35 @@ def test_a_drifted_table_cell_is_reported():
     audit.text_cache[audit_mod.TEX] = tex.replace("& 12/12 & 10615.5 & 3591.25", "& 12/12 & 10616.5 & 3591.25")
     audit_mod.manuscript_gmin(audit)
     assert [r[2] for r in audit.drifts()] == ["median calls"]
+
+
+def test_a_drifted_ase_table_cell_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "& 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 &"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 246.5 & 11/12 & 0/12 & 0/12 & 0 & 12 &")
+    audit_mod.manuscript_ase(audit)
+    audit_mod.generated_tables(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
+
+
+def test_a_drifted_morse_ase_table_cell_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "& 46.786 & 5/12 & 0/12 & 0/12 & 0.037 & 0.037 \\\\"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 46.786 & 5/12 & 0/12 & 0/12 & 0.037 & 0.37 \\\\")
+    audit_mod.manuscript_ase(audit)
+    audit_mod.generated_tables(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["Fisher p against ase_mh", "tab:ase-morse is the summariser's block"]
+
+
+def test_a_rank_test_in_the_ase_section_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Every basin-hopping and minima-hopping run of"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "A Mann--Whitney test is not run. " + old)
+    audit_mod.manuscript_ase(audit)
+    assert [r[2] for r in audit.drifts()] == ["sec:ase reports Fisher only"]
 
 
 def test_a_drifted_sutton_chen_howto_cell_is_reported():
