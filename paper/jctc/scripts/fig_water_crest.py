@@ -2,10 +2,10 @@
 # Copyright (c) anneal developers
 """Draw the water hexamer against CREST from the water_v45b per-seed table.
 
-Reads the four arms through water_results_table.load, which recomputes Wilson, McNemar and
-Newcombe method 10 from data/water_v45b/water-v45b-perseed.csv, so the figure draws what
-tbl:water prints and nothing else. The CSV carries no run-by-run force-call trace beyond
-the sealed totals, so nothing is drawn against force calls to the first hit.
+Reads the four arms through water_results_table.load. The default hop and plain CREST
+come from the authenticated rerun-9a30f319 receipts; the two opt-in polish arms come from
+water-v45b-perseed.csv. The loader recomputes Wilson, McNemar and Newcombe method 10, so
+the figure draws what tbl:water prints and nothing else.
 
   (a) the hits of each arm out of the 192 seeds, with the Wilson interval;
   (b) for each arm of the hop scored against CREST, the hit rate of the hop less that of

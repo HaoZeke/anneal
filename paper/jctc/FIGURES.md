@@ -12,9 +12,16 @@ The hash is unchanged.
 036cb5d0143e305e6139e5305498ede81908f6521851c597b1dcef2d8c9827fe
 
 Row 4 is water_crest.pdf.
-The hash is unchanged.
+It is regenerated from the fresh receipts in
+`data/water_v45b/rerun-9a30f319/`.
 
-467258ab05c77a8fae70f2f583a1cb116c4726fbfcb7f4ef4eee332ab3346855
+Previous hash.
+
+f1cfaa89d3fa135cd7d9215082882f20fc79cfc5c81ef5b950d87d42e1acf5c5
+
+New hash.
+
+6c6be22a8b02c417e9e69e443f2574c211087f7a5016384ecd244e8c1230bcdc
 
 Row 5 is disconnectivity.pdf.
 The hash is unchanged.
@@ -189,20 +196,23 @@ New hash.
 
 ## What the sealed notes still say
 
-No seed log in this tree records the 192-seed hexamer counts.
-The McNemar values lack that log too.
+The fresh 192-seed hexamer receipts are in
+`data/water_v45b/rerun-9a30f319/`: 121/192 default-hop hits and 94/192
+plain-CREST hits. `SHA256SUMS` covers all 384 per-seed JSON files.
 No separate receipt records the LJ map energies.
-A figure that matches main has no generator in this tree.
 scripts/toc_graphic.py draws toc-graphic.pdf.
-water_crest.pdf matches the 192-seed figure on main.
+`scripts/fig_water_crest.py` redraws `water_crest.pdf`; its default-hop and
+plain-CREST rows come from `rerun-9a30f319`, through
+`scripts/water_results_table.py`.
 scripts/water_crest_figure.py draws the six-seed counter chart.
 The chart path is figs/water_crest_counters.pdf.
 That script does not write water_crest.pdf.
 lj75_ecdf.pdf matches main.
 landfold_maps.pdf matches main too.
-This tree has no seed table for those two plates.
+The two receipt-derived tables are in `si.tex` as
+`tab:hexamer-rerun` and `tab:hexamer-rerun-contrast`.
 The LJ map energies have no seed table.
-No seed table covers the McNemar values.
+The paired receipts cover the McNemar and Newcombe values.
 
 ## Vector replacements of the SI plates
 
