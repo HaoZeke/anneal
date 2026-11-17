@@ -1551,6 +1551,34 @@
       ]
     },
     {
+      "rule": "cmcts_au",
+      "competitors": [
+        "PyPhysTree c-MCTS"
+      ],
+      "runners": [
+        "scripts/cmcts_au/run_campaign.py",
+        "scripts/cmcts_au/enter.sh"
+      ],
+      "budgets": {
+        "source": "scripts/cmcts_au/run_campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/cmcts_au/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/cmcts-au/benchmarks/cmcts_au.py",
+      "rows": [
+        {
+          "path": "bench/cmcts-au/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "h2o16_crest",
       "competitors": [
         "CREST"

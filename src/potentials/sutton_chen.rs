@@ -358,6 +358,52 @@ mod tests {
         }
     }
 
+    /// The 10-8 row is the reduced Doye–Wales form of the Todd–Lynden-Bell
+    /// gold parameters: `n = 10`, `m = 8`, `c = 34.408`, `ε = 1`, `a = 1`.
+    /// The second evaluation is an independent transcription of that formula,
+    /// on one shared geometry.
+    #[test]
+    fn the_gold_row_matches_an_independent_evaluation_to_1e_8() {
+        let family = SuttonChenFamily::Sc10_8;
+        assert_eq!(
+            (family.n_exp(), family.m_exp(), family.c()),
+            (10, 8, 34.408)
+        );
+        let dimer = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let closed = 1.0 - 2.0 * 34.408;
+        let pot = SuttonChen::new(2, family);
+        let (dimer_energy, _) = pot.value_and_gradient(Array1::from(dimer.to_vec()).view());
+        assert!((dimer_energy - closed).abs() < 1e-8);
+        assert!((independent_gold(&dimer) - closed).abs() < 1e-8);
+        let tetramer = SuttonChen::new(TETRAMER.len() / 3, family);
+        let (energy, _) = tetramer.value_and_gradient(Array1::from(TETRAMER.to_vec()).view());
+        assert!((energy - independent_gold(&TETRAMER)).abs() < 1e-8);
+    }
+
+    /// `E = Σ_{i<j} r^{-n} − c Σ_i sqrt(Σ_{j≠i} r^{-m})` at `a = 1`.
+    fn independent_gold(x: &[f64]) -> f64 {
+        let n_points = x.len() / 3;
+        let mut rho = vec![0.0; n_points];
+        let mut pair = 0.0;
+        for i in 0..n_points {
+            for j in (i + 1)..n_points {
+                let dx = x[3 * i] - x[3 * j];
+                let dy = x[3 * i + 1] - x[3 * j + 1];
+                let dz = x[3 * i + 2] - x[3 * j + 2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                if r2 <= 1e-24 {
+                    continue;
+                }
+                let r = r2.sqrt();
+                pair += r.powi(-10);
+                let phi = r.powi(-8);
+                rho[i] += phi;
+                rho[j] += phi;
+            }
+        }
+        pair - 34.408 * rho.iter().map(|value| value.sqrt()).sum::<f64>()
+    }
+
     fn gradient_matches(family: SuttonChenFamily) {
         let p = SuttonChen::new(TETRAMER.len() / 3, family);
         let x = Array1::from(TETRAMER.to_vec());
