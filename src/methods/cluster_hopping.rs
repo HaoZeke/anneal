@@ -4223,6 +4223,19 @@ where
         relax_off_call_floor(cfg, &mut *relax, led, x, steps)
     };
     let relax: Relax<'_> = &mut floored;
+    if let Some(floor) = cfg.call_floor {
+        assert!(
+            floor.is_finite() && floor > 0.0,
+            "call floor must be a positive distance, not {floor}"
+        );
+    }
+    if let Some(elements) = cfg.call_floor_elements.as_ref() {
+        assert_eq!(
+            elements.len(),
+            cfg.n_points,
+            "call-floor elements must name every point"
+        );
+    }
     // A target on the configuration is the same stop a caller can raise
     // on the ledger. A ledger target already set is left alone, so an
     // explicit `stop_below` still wins.
@@ -14027,6 +14040,34 @@ mod call_floor_tests {
         assert_eq!(seen[0].0, 5);
         assert!(clears_call_floor(seen[0].1.view(), FLOOR));
         assert_eq!(seen[1], (0, inside));
+    }
+
+    #[test]
+    #[should_panic(expected = "call floor")]
+    fn a_floor_that_is_not_a_positive_distance_is_refused() {
+        let _ = starts_inside_the_floor(Some(f64::NAN));
+    }
+
+    #[test]
+    #[should_panic(expected = "call-floor elements")]
+    fn call_floor_elements_must_name_every_point() {
+        let mut cfg = Config::for_cluster(POINTS);
+        cfg.call_floor = Some(FLOOR);
+        cfg.call_floor_elements = Some(vec![14; POINTS - 1]);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _: usize| {
+            let _ = led.charge();
+            (0.0, x.to_owned())
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        let start =
+            random_cluster_in_radius(POINTS, cfg.start_radius(), cfg.min_separation, &mut rng);
+        let _ = run(
+            &cfg,
+            start.view(),
+            &mut Ledger::new(10),
+            &mut relax,
+            &mut rng,
+        );
     }
 
     #[test]

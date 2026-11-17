@@ -1304,7 +1304,8 @@ pub struct Config {
     /// A trial inside it has each such pair opened just past the floor
     /// before the relaxation sees it, and is dropped uncharged when the
     /// opening fails. A read of zero steps inside it, which asks for the
-    /// energy of that geometry, is refused uncharged. Declared species
+    /// energy of that geometry, is refused uncharged. A floor that is not a
+    /// positive distance is refused when the search starts. Declared species
     /// without a floor keep [`super::OVERLAP_CALL_LIMIT`]. Absent from the
     /// resolved JSON when unset, and unset on every stock preset.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1315,8 +1316,8 @@ pub struct Config {
     /// fraction of its summed covalent radii, and never below
     /// `call_floor`. Nothing else in the search reads these, so a cluster
     /// of one element gets the floor without the moves and gates that
-    /// [`Self::species`] turns on. Absent from the resolved JSON when
-    /// unset.
+    /// [`Self::species`] turns on. One per point; a search started with
+    /// another count is refused. Absent from the resolved JSON when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_floor_elements: Option<Vec<u32>>,
     /// Cut the move library down to the uniform displacement alone: the
