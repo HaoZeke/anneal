@@ -33,7 +33,7 @@ module rgpot_cuh2
    implicit none
    private
 
-   public :: cuh2_params_t, cuh2_energy_forces
+   public :: cuh2_params_t, cuh2_energy_forces, cuh2_hessian_vector
    public :: cuh2_z_cu, cuh2_z_h
 
    !> Atomic numbers this potential covers.
@@ -370,6 +370,120 @@ contains
    end function eam_df_h
 
    ! ------------------------------------------------------------------
+   ! Second derivatives, for the Hessian-vector product. Unlike the first
+   ! derivatives above these are plain `d2/dr2` and `d2/drho2`.
+   ! ------------------------------------------------------------------
+
+   !> Second derivative of `A exp(-a r) + B exp(-b r)`.
+   pure elemental function two_exp_d2(da, alpha_a, db, alpha_b, r) result(d2)
+      real(wp), intent(in) :: da, alpha_a, db, alpha_b, r
+      real(wp) :: d2
+
+      d2 = alpha_a*alpha_a*da*exp(-alpha_a*r) + alpha_b*alpha_b*db*exp(-alpha_b*r)
+   end function two_exp_d2
+
+   !> Cu-Cu pair energy second derivative.
+   pure elemental function eam_d2phi_cucu(par, r) result(d2)
+      type(cuh2_params_t), intent(in) :: par
+      real(wp), intent(in) :: r
+      real(wp) :: d2
+
+      d2 = two_exp_d2(par%da_cucu, par%alpha_a_cucu, par%db_cucu, par%alpha_b_cucu, r)
+   end function eam_d2phi_cucu
+
+   !> H-Cu pair energy second derivative.
+   pure elemental function eam_d2phi_hcu(par, r) result(d2)
+      type(cuh2_params_t), intent(in) :: par
+      real(wp), intent(in) :: r
+      real(wp) :: d2
+
+      d2 = two_exp_d2(par%da_hcu, par%alpha_a_hcu, par%db_hcu, par%alpha_b_hcu, r)
+   end function eam_d2phi_hcu
+
+   !> H-H pair energy second derivative.
+   pure elemental function eam_d2phi_hh(par, r) result(d2)
+      type(cuh2_params_t), intent(in) :: par
+      real(wp), intent(in) :: r
+      real(wp) :: d2
+
+      d2 = two_exp_d2(par%da_hh, par%alpha_a_hh, par%db_hh, par%alpha_b_hh, r)
+   end function eam_d2phi_hh
+
+   !> Second derivative of `scale r^n (exp(-betaA r) + gamma exp(-betaB r))`.
+   !!
+   !! With `g` the bracket, `rho'' = scale r^n (n(n-1) g / r^2 + 2 n g' / r
+   !! + g'')`, written without `r^(n-2)` so that `n = 0` needs no case.
+   pure elemental function power_exp_d2(scale, neta, beta_a, beta_b, gamma, r) &
+      result(d2)
+      real(wp), intent(in) :: scale, beta_a, beta_b, gamma, r
+      integer, intent(in) :: neta
+      real(wp) :: d2
+
+      real(wp) :: ea, eb, g, dg, d2g, rinv, n
+
+      rinv = 1.0_wp/r
+      n = real(neta, wp)
+      ea = exp(-beta_a*r)
+      eb = gamma*exp(-beta_b*r)
+      g = ea + eb
+      dg = -(beta_a*ea + beta_b*eb)
+      d2g = beta_a*beta_a*ea + beta_b*beta_b*eb
+      d2 = scale*r**neta*(n*(n - 1.0_wp)*g*rinv*rinv + 2.0_wp*n*dg*rinv + d2g)
+   end function power_exp_d2
+
+   !> Cu density second derivative.
+   pure elemental function eam_d2rho_cu(par, r) result(d2)
+      type(cuh2_params_t), intent(in) :: par
+      real(wp), intent(in) :: r
+      real(wp) :: d2
+
+      d2 = power_exp_d2(par%scale_cu, par%neta_cu, par%beta_a_cu, par%beta_b_cu, &
+                        par%gamma_cu, r)
+   end function eam_d2rho_cu
+
+   !> H density second derivative.
+   pure elemental function eam_d2rho_h(par, r) result(d2)
+      type(cuh2_params_t), intent(in) :: par
+      real(wp), intent(in) :: r
+      real(wp) :: d2
+
+      d2 = power_exp_d2(par%scale_h, par%neta_h, par%beta_a_h, par%beta_b_h, &
+                        par%gamma_h, r)
+   end function eam_d2rho_h
+
+   !> Second derivative of the polynomial `sum_k coef(k) rho**k`.
+   pure function polynomial_d2(coef, rho) result(d2)
+      real(wp), intent(in) :: coef(:)
+      real(wp), intent(in) :: rho
+      real(wp) :: d2
+
+      integer :: k
+
+      d2 = 0.0_wp
+      do k = size(coef), 2, -1
+         d2 = d2*rho + real(k*(k - 1), wp)*coef(k)
+      end do
+   end function polynomial_d2
+
+   !> Cu embedding second derivative.
+   pure elemental function eam_d2f_cu(par, rho) result(d2)
+      type(cuh2_params_t), intent(in) :: par
+      real(wp), intent(in) :: rho
+      real(wp) :: d2
+
+      d2 = polynomial_d2(par%f_cu, rho)
+   end function eam_d2f_cu
+
+   !> H embedding second derivative.
+   pure elemental function eam_d2f_h(par, rho) result(d2)
+      type(cuh2_params_t), intent(in) :: par
+      real(wp), intent(in) :: rho
+      real(wp) :: d2
+
+      d2 = polynomial_d2(par%f_h, rho)
+   end function eam_d2f_h
+
+   ! ------------------------------------------------------------------
    ! Driver
    ! ------------------------------------------------------------------
 
@@ -391,42 +505,17 @@ contains
       character(len=:), allocatable, intent(out) :: errmsg
 
       type(cuh2_params_t) :: shifted
-      integer(ip) :: natoms, i, nentries
+      integer(ip) :: natoms, i
       integer(ip), allocatable :: species(:)
       real(wp), allocatable :: rho(:), dfdrho(:), e_pair(:), e_embed(:)
 
       energy = 0.0_wp
       forces = 0.0_wp
-      status = 0
-      errmsg = ""
       natoms = int(size(positions, 2), ip)
 
-      if (int(size(atomic_numbers), ip) /= natoms) then
-         status = 1
-         errmsg = "rgpot_cuh2: atomic_numbers holds "// &
-                  count_text(int(size(atomic_numbers), ip))//" entries for "// &
-                  count_text(natoms)//" atoms"
-         return
-      end if
-
-      call classify(atomic_numbers, species, status, errmsg)
+      call prepare(positions, atomic_numbers, cell, par, table, shifted, species, &
+                   status, errmsg)
       if (status /= 0) return
-
-      shifted = par%cut_shifted()
-
-      call table%build(positions, cell, shifted%rcut, status, errmsg)
-      if (status /= 0) return
-
-      ! Every radial term divides by the pair distance, so a coincident
-      ! pair is reported rather than left to seed a NaN in the forces.
-      nentries = table%row(natoms + 1_ip) - 1_ip
-      if (nentries > 0_ip) then
-         if (minval(table%dist(1:nentries)) <= 0.0_wp) then
-            status = 3
-            errmsg = "rgpot_cuh2: two atoms occupy the same position"
-            return
-         end if
-      end if
 
       allocate (rho(natoms), dfdrho(natoms))
       allocate (e_pair(natoms), e_embed(natoms))
@@ -458,6 +547,122 @@ contains
 
       energy = sum(e_pair) + sum(e_embed)
    end subroutine cuh2_energy_forces
+
+   !> Hessian-vector product `H v` for `positions` (3 x natoms) in `cell`.
+   !!
+   !! The second derivatives of the energy of `cuh2_energy_forces`, with
+   !! the same species, cutoff shift, neighbour table and faults. With
+   !! `u_ij = (r_i - r_j)/r` and `K_f = f'' u u^T + (f'/r)(I - u u^T)` for
+   !! a radial function `f`, row `i` of the product is
+   !!
+   !!     sum_j [K_phi + F'_i K_{rho_Zj} + F'_j K_{rho_Zi}] (v_i - v_j)
+   !!     + sum_j u_ij [rho'_Zj F''_i drho_i + rho'_Zi F''_j drho_j],
+   !!     drho_i = sum_j rho'_Zj u_ij . (v_i - v_j),
+   !!
+   !! the second line being the embedding curvature along the density
+   !! change `drho = grad rho . v`. Like the force, each row closes over
+   !! its own neighbours, after a pass for `drho` that needs every row.
+   subroutine cuh2_hessian_vector(positions, atomic_numbers, cell, par, table, &
+                                  direction, product, status, errmsg)
+      real(wp), intent(in), contiguous :: positions(:, :)
+      integer(ip), intent(in), contiguous :: atomic_numbers(:)
+      real(wp), intent(in) :: cell(3, 3)
+      type(cuh2_params_t), intent(in) :: par
+      type(neighbor_table_t), intent(inout) :: table
+      real(wp), intent(in), contiguous :: direction(:, :)
+      real(wp), intent(out), contiguous :: product(:, :)
+      integer, intent(out) :: status
+      character(len=:), allocatable, intent(out) :: errmsg
+
+      type(cuh2_params_t) :: shifted
+      integer(ip) :: natoms, i
+      integer(ip), allocatable :: species(:)
+      real(wp), allocatable :: rho(:), dfdrho(:), d2fdrho(:), drho(:)
+
+      product = 0.0_wp
+      natoms = int(size(positions, 2), ip)
+
+      call prepare(positions, atomic_numbers, cell, par, table, shifted, species, &
+                   status, errmsg)
+      if (status /= 0) return
+      if (any(shape(direction) /= shape(positions))) then
+         status = 4
+         errmsg = "rgpot_cuh2: the direction does not match the positions"
+         return
+      end if
+
+      allocate (rho(natoms), dfdrho(natoms), d2fdrho(natoms), drho(natoms))
+
+      do concurrent(i=1:natoms)
+         rho(i) = atom_density(shifted, table, species, i)
+      end do
+
+      do concurrent(i=1:natoms)
+         if (species(i) == sp_cu) then
+            dfdrho(i) = eam_df_cu(shifted, rho(i))
+            d2fdrho(i) = eam_d2f_cu(shifted, rho(i))
+         else
+            dfdrho(i) = eam_df_h(shifted, rho(i))
+            d2fdrho(i) = eam_d2f_h(shifted, rho(i))
+         end if
+      end do
+
+      do concurrent(i=1:natoms)
+         drho(i) = atom_density_change(shifted, table, species, direction, i)
+      end do
+
+      do concurrent(i=1:natoms)
+         product(:, i) = atom_hessian_vector(shifted, table, species, dfdrho, &
+                                             d2fdrho, drho, direction, i)
+      end do
+   end subroutine cuh2_hessian_vector
+
+   !> Checks and neighbour table shared by the energy and its derivatives.
+   subroutine prepare(positions, atomic_numbers, cell, par, table, shifted, &
+                      species, status, errmsg)
+      real(wp), intent(in), contiguous :: positions(:, :)
+      integer(ip), intent(in), contiguous :: atomic_numbers(:)
+      real(wp), intent(in) :: cell(3, 3)
+      type(cuh2_params_t), intent(in) :: par
+      type(neighbor_table_t), intent(inout) :: table
+      type(cuh2_params_t), intent(out) :: shifted
+      integer(ip), allocatable, intent(out) :: species(:)
+      integer, intent(out) :: status
+      character(len=:), allocatable, intent(out) :: errmsg
+
+      integer(ip) :: natoms, nentries
+
+      status = 0
+      errmsg = ""
+      natoms = int(size(positions, 2), ip)
+
+      if (int(size(atomic_numbers), ip) /= natoms) then
+         status = 1
+         errmsg = "rgpot_cuh2: atomic_numbers holds "// &
+                  count_text(int(size(atomic_numbers), ip))//" entries for "// &
+                  count_text(natoms)//" atoms"
+         return
+      end if
+
+      call classify(atomic_numbers, species, status, errmsg)
+      if (status /= 0) return
+
+      shifted = par%cut_shifted()
+
+      call table%build(positions, cell, shifted%rcut, status, errmsg)
+      if (status /= 0) return
+
+      ! Every radial term divides by the pair distance, so a coincident
+      ! pair is reported rather than left to seed a NaN in the forces.
+      nentries = table%row(natoms + 1_ip) - 1_ip
+      if (nentries > 0_ip) then
+         if (minval(table%dist(1:nentries)) <= 0.0_wp) then
+            status = 3
+            errmsg = "rgpot_cuh2: two atoms occupy the same position"
+            return
+         end if
+      end if
+   end subroutine prepare
 
    !> Map atomic numbers onto the dense species codes.
    subroutine classify(atomic_numbers, species, status, errmsg)
@@ -585,5 +790,94 @@ contains
          f_i = f_i + weight*table%vec(:, s)
       end do
    end subroutine atom_force
+
+   !> Density derivative `sum_j rho'_Zj u_ij . (v_i - v_j)` at atom `i`
+   !! along `direction`. `table%vec` is `r_j - r_i = -r u_ij`.
+   pure function atom_density_change(par, table, species, direction, i) &
+      result(drho_i)
+      type(cuh2_params_t), intent(in) :: par
+      type(neighbor_table_t), intent(in) :: table
+      integer(ip), intent(in) :: species(:)
+      real(wp), intent(in) :: direction(:, :)
+      integer(ip), intent(in) :: i
+      real(wp) :: drho_i
+
+      integer(ip) :: s, j
+      real(wp) :: r, drho_r
+
+      drho_i = 0.0_wp
+      do s = table%row(i), table%row(i + 1_ip) - 1_ip
+         r = table%dist(s)
+         if (r >= par%rcut) cycle
+         j = table%idx(s)
+         if (species(j) == sp_cu) then
+            drho_r = eam_drho_cu(par, r)
+         else
+            drho_r = eam_drho_h(par, r)
+         end if
+         drho_i = drho_i + drho_r*dot_product(table%vec(:, s), &
+                                              direction(:, j) - direction(:, i))
+      end do
+   end function atom_density_change
+
+   !> Row `i` of `H v`; see `cuh2_hessian_vector`.
+   pure function atom_hessian_vector(par, table, species, dfdrho, d2fdrho, drho, &
+                                     direction, i) result(hv_i)
+      type(cuh2_params_t), intent(in) :: par
+      type(neighbor_table_t), intent(in) :: table
+      integer(ip), intent(in) :: species(:)
+      real(wp), intent(in) :: dfdrho(:), d2fdrho(:), drho(:)
+      real(wp), intent(in) :: direction(:, :)
+      integer(ip), intent(in) :: i
+      real(wp) :: hv_i(3)
+
+      integer(ip) :: s, j, zi, zj
+      real(wp) :: r, w(3), d(3)
+      real(wp) :: radial, second, drho_ij, drho_ji, d2rho_ij, d2rho_ji
+
+      hv_i = 0.0_wp
+      zi = species(i)
+      do s = table%row(i), table%row(i + 1_ip) - 1_ip
+         r = table%dist(s)
+         if (r >= par%rcut) cycle
+         j = table%idx(s)
+         zj = species(j)
+         d = table%vec(:, s)
+         w = direction(:, i) - direction(:, j)
+
+         if (zi == sp_cu .and. zj == sp_cu) then
+            radial = eam_dphi_cucu(par, r)
+            second = eam_d2phi_cucu(par, r)
+         else if (zi == sp_h .and. zj == sp_h) then
+            radial = eam_dphi_hh(par, r)
+            second = eam_d2phi_hh(par, r)
+         else
+            radial = eam_dphi_hcu(par, r)
+            second = eam_d2phi_hcu(par, r)
+         end if
+
+         ! `_ij` is the density the neighbour deposits on `i`, `_ji` what
+         ! `i` deposits on the neighbour, as in `atom_force`.
+         if (zj == sp_cu) then
+            drho_ij = eam_drho_cu(par, r)
+            d2rho_ij = eam_d2rho_cu(par, r)
+         else
+            drho_ij = eam_drho_h(par, r)
+            d2rho_ij = eam_d2rho_h(par, r)
+         end if
+         if (zi == sp_cu) then
+            drho_ji = eam_drho_cu(par, r)
+            d2rho_ji = eam_d2rho_cu(par, r)
+         else
+            drho_ji = eam_drho_h(par, r)
+            d2rho_ji = eam_d2rho_h(par, r)
+         end if
+
+         radial = radial + dfdrho(i)*drho_ij + dfdrho(j)*drho_ji
+         second = second + dfdrho(i)*d2rho_ij + dfdrho(j)*d2rho_ji
+         hv_i = hv_i + (second - radial)*dot_product(d, w)/(r*r)*d + radial*w &
+                - (drho_ij*d2fdrho(i)*drho(i) + drho_ji*d2fdrho(j)*drho(j))*d
+      end do
+   end function atom_hessian_vector
 
 end module rgpot_cuh2

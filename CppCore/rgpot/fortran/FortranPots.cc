@@ -46,6 +46,9 @@ int rgpot_fehe_force_ws(void *ws, int32_t natoms, const double *positions,
 int rgpot_cuh2_force_ws(void *ws, int32_t natoms, const double *positions,
                         const int32_t *atomic_numbers, const double *cell,
                         double *forces, double *energy);
+int rgpot_cuh2_hvp_ws(void *ws, int32_t natoms, const double *positions,
+                      const int32_t *atomic_numbers, const double *cell,
+                      const double *direction, double *product);
 int rgpot_water_h_force_ws(void *ws, int32_t natoms, const double *positions,
                            const int32_t *atomic_numbers, const double *cell,
                            double *forces, double *energy);
@@ -212,6 +215,17 @@ RGPOT_FORTRAN_SPECIES_POT_IMPL(CuH2Pot, rgpot_cuh2_force_ws, "CuH2")
 RGPOT_FORTRAN_SPECIES_POT_IMPL(WaterHPot, rgpot_water_h_force_ws, "Water-H")
 
 #undef RGPOT_FORTRAN_SPECIES_POT_IMPL
+
+void CuH2Pot::hessianVectorImpl(const ForceInput &in, const double *v,
+                                double *hv) const {
+  ensure_fortran_params();
+  const int status =
+      rgpot_cuh2_hvp_ws(m_ws.get(), static_cast<int32_t>(in.nAtoms), in.pos,
+                        in.atmnrs, in.box, v, hv);
+  if (status != 0) {
+    raise("CuH2", status, m_ws.get());
+  }
+}
 
 } // namespace fortranpots
 } // namespace rgpot

@@ -637,6 +637,7 @@ rgpot.CuH2Pot()
 - Units :: energy eV, lengths Angstrom.
 - Outputs :: the Fortran copper-hydrogen embedded-atom kernel.
   No stress.
+  It has an analytic Hessian-vector product: =has_analytic_hvp()= is true.
 - Errors :: any other atomic number raises =RuntimeError=
   =CuH2 potential failed (status 2): rgpot_cuh2: atom K has atomic number Z; ...=.
   Two atoms at the same position also raise =RuntimeError=.

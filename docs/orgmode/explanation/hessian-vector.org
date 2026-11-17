@@ -76,7 +76,7 @@ A potential that knows its Hessian registers the product with
 In C++, =rgpot::PotentialHandle::from_impl= registers it for a potential with a
 member
 =void hessianVectorImpl(const ForceInput &, const double *, double *) const=;
-=MorsePot= and =LJPot= have one.
+=MorsePot=, =LJPot= and the Fortran =CuH2Pot= have one.
 
 ** Without the Rust core
 
