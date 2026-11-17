@@ -10,12 +10,16 @@
 //! radii. The primitives are built at the start and rebuilt when an angle
 //! goes linear, a fragment straightens, or a back-transformation misses.
 //! The redundant primitives are spanned by delocalized coordinates, the
-//! left singular vectors of the Wilson matrix `B`, rebuilt at every accepted
-//! point. The rotation of a fragment is measured from its geometry at the
-//! start of the step, so the linear rotation rows of `B` are exact there.
+//! active left singular vectors `U` of the Wilson matrix `B` at the start
+//! of the chart, kept fixed until a primitive goes linear, the local Gram
+//! matrix `U^T B B^T U` loses rank, or a back-transformation misses. The
+//! rotation of a fragment is measured from its geometry at the start of the
+//! step, so the linear rotation rows of `B` are exact there.
 //!
 //! The step is a trust-radius Newton step on a model Hessian (Schlegel-type
-//! constants per primitive class) updated by BFGS in the primitive space.
+//! constants per primitive class) projected into the delocalized chart and
+//! updated there by BFGS. An interior positive-definite step solves by
+//! Cholesky; only an indefinite or trust-capped step diagonalizes `H_d`.
 //! The Cartesian point is recovered by iterating the pseudo-inverse of `B`
 //! at the step start. A step that raises the energy is refused, the trust
 //! radius shrinks, and the solver restarts from the accepted point. The
@@ -35,7 +39,8 @@
 //! at most two fifths of geomeTRIC's (`bench/tric-quench`). It does not
 //! call geomeTRIC.
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::linalg::general_mat_mul;
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
 use crate::methods::cluster_hopping::covalent_radius;
 
@@ -176,13 +181,20 @@ fn centroid(x: &[f64], atoms: &[usize]) -> [f64; 3] {
 /// Householder tridiagonalisation and the implicit QL iteration, after
 /// the EISPACK `tred2` and `tql2` routines as JAMA states them.
 pub fn symmetric_eigen(a: &[f64], n: usize) -> (Vec<f64>, Vec<f64>) {
-    let mut v = a.to_vec();
     let mut d = vec![0.0; n];
     let mut e = vec![0.0; n];
     if n == 0 {
-        return (d, v);
+        return (d, Vec::new());
     }
-    let at = |i: usize, j: usize| i * n + j;
+    // Store `v` column-major (`j * n + i`) so both EISPACK `tred2` and `tql2`
+    // sweep contiguous unit-stride slices on every inner `0..n` / `0..i` loop.
+    let mut v = vec![0.0; n * n];
+    for r in 0..n {
+        for c in 0..n {
+            v[c * n + r] = a[r * n + c];
+        }
+    }
+    let at = |i: usize, j: usize| j * n + i;
     for j in 0..n {
         d[j] = v[at(n - 1, j)];
     }
@@ -303,8 +315,8 @@ pub fn symmetric_eigen(a: &[f64], n: usize) -> (Vec<f64>, Vec<f64>) {
                 d[l + 1] = e[l] * (p + r);
                 let dl1 = d[l + 1];
                 let mut h = g - d[l];
-                for i in (l + 2)..n {
-                    d[i] -= h;
+                for di in d.iter_mut().take(n).skip(l + 2) {
+                    *di -= h;
                 }
                 f += h;
                 p = d[m];
@@ -326,10 +338,13 @@ pub fn symmetric_eigen(a: &[f64], n: usize) -> (Vec<f64>, Vec<f64>) {
                     c = p / r;
                     p = c * d[i] - s * g;
                     d[i + 1] = h + s * (c * g + s * d[i]);
-                    for k in 0..n {
-                        h = v[at(k, i + 1)];
-                        v[at(k, i + 1)] = s * v[at(k, i)] + c * h;
-                        v[at(k, i)] = c * v[at(k, i)] - s * h;
+                    let (head, tail) = v.split_at_mut((i + 1) * n);
+                    let col_i = &mut head[i * n..(i + 1) * n];
+                    let col_next = &mut tail[..n];
+                    for (vi, vn) in col_i.iter_mut().zip(col_next.iter_mut()) {
+                        let hi = *vn;
+                        *vn = s * *vi + c * hi;
+                        *vi = c * *vi - s * hi;
                     }
                 }
                 p = -s * s2 * c3 * el1 * e[l] / dl1;
@@ -346,25 +361,51 @@ pub fn symmetric_eigen(a: &[f64], n: usize) -> (Vec<f64>, Vec<f64>) {
     for i in 0..n.saturating_sub(1) {
         let mut k = i;
         let mut p = d[i];
-        for j in (i + 1)..n {
-            if d[j] < p {
+        for (j, &dj) in d.iter().enumerate().take(n).skip(i + 1) {
+            if dj < p {
                 k = j;
-                p = d[j];
+                p = dj;
             }
         }
         if k != i {
             d[k] = d[i];
             d[i] = p;
-            for j in 0..n {
-                v.swap(at(j, i), at(j, k));
-            }
+            let (head, tail) = v.split_at_mut(k * n);
+            head[i * n..(i + 1) * n].swap_with_slice(&mut tail[..n]);
         }
     }
-    (d, v)
+    let mut out = vec![0.0; n * n];
+    for r in 0..n {
+        for c in 0..n {
+            out[r * n + c] = v[c * n + r];
+        }
+    }
+    (d, out)
 }
 
 /// Rotation vector of the least-squares rotation taking `reference` onto
-/// `current`, both centred (Horn's quaternion).
+/// `current` over `atoms` with centroids `cr` and `cx` (Horn's quaternion).
+fn rotation_vector_atoms(
+    reference: &[f64],
+    cr: [f64; 3],
+    current: &[f64],
+    cx: [f64; 3],
+    atoms: &[usize],
+) -> [f64; 3] {
+    let mut s = [[0.0; 3]; 3];
+    for &a in atoms {
+        let p = sub(point(reference, a), cr);
+        let q = sub(point(current, a), cx);
+        for i in 0..3 {
+            for j in 0..3 {
+                s[i][j] += p[i] * q[j];
+            }
+        }
+    }
+    rotation_from_covariance(s)
+}
+
+#[cfg(test)]
 fn rotation_vector(reference: &[[f64; 3]], current: &[[f64; 3]]) -> [f64; 3] {
     let mut s = [[0.0; 3]; 3];
     for (p, q) in reference.iter().zip(current) {
@@ -374,6 +415,10 @@ fn rotation_vector(reference: &[[f64; 3]], current: &[[f64; 3]]) -> [f64; 3] {
             }
         }
     }
+    rotation_from_covariance(s)
+}
+
+fn rotation_from_covariance(s: [[f64; 3]; 3]) -> [f64; 3] {
     let (sxx, sxy, sxz) = (s[0][0], s[0][1], s[0][2]);
     let (syx, syy, syz) = (s[1][0], s[1][1], s[1][2]);
     let (szx, szy, szz) = (s[2][0], s[2][1], s[2][2]);
@@ -619,63 +664,87 @@ impl Tric {
 
     /// Primitive values at `x`, rotations measured from `reference`.
     fn values(&self, x: &[f64], reference: &[f64]) -> Vec<f64> {
+        let mut out = vec![0.0; self.primitives.len()];
+        self.values_into(x, reference, &mut out);
+        out
+    }
+
+    fn values_into(&self, x: &[f64], reference: &[f64], out: &mut [f64]) {
+        let mut centroids: Vec<Option<[f64; 3]>> = vec![None; self.fragments.len()];
         let mut rotations: Vec<Option<[f64; 3]>> = vec![None; self.fragments.len()];
-        self.primitives
-            .iter()
-            .map(|p| match *p {
+        for (slot, p) in out.iter_mut().zip(&self.primitives) {
+            *slot = match *p {
                 Primitive::Bond(i, j) => norm(sub(point(x, i), point(x, j))),
                 Primitive::Angle(i, j, k) => cos_angle(x, i, j, k).acos(),
                 Primitive::Dihedral(i, j, k, l) => dihedral(x, i, j, k, l),
                 Primitive::Translation { fragment, axis } => {
-                    centroid(x, &self.fragments[fragment].atoms)[axis]
+                    let cx = *centroids[fragment]
+                        .get_or_insert_with(|| centroid(x, &self.fragments[fragment].atoms));
+                    cx[axis]
                 }
                 Primitive::Cartesian { atom, axis } => x[3 * atom + axis],
                 Primitive::Rotation { fragment, axis } => {
                     let frag = &self.fragments[fragment];
                     let theta = *rotations[fragment].get_or_insert_with(|| {
                         let cr = centroid(reference, &frag.atoms);
-                        let cx = centroid(x, &frag.atoms);
-                        let p: Vec<[f64; 3]> = frag
-                            .atoms
-                            .iter()
-                            .map(|&a| sub(point(reference, a), cr))
-                            .collect();
-                        let q: Vec<[f64; 3]> =
-                            frag.atoms.iter().map(|&a| sub(point(x, a), cx)).collect();
+                        let cx =
+                            *centroids[fragment].get_or_insert_with(|| centroid(x, &frag.atoms));
                         if frag.linear {
+                            let p: Vec<[f64; 3]> = frag
+                                .atoms
+                                .iter()
+                                .map(|&a| sub(point(reference, a), cr))
+                                .collect();
+                            let q: Vec<[f64; 3]> =
+                                frag.atoms.iter().map(|&a| sub(point(x, a), cx)).collect();
                             line_rotation(&p, &q)
                         } else {
-                            rotation_vector(&p, &q)
+                            rotation_vector_atoms(reference, cr, x, cx, &frag.atoms)
                         }
                     });
                     frag.radius * theta[axis]
                 }
-            })
-            .collect()
+            };
+        }
     }
 
     fn difference(&self, to: &[f64], from: &[f64]) -> Vec<f64> {
-        self.primitives
-            .iter()
-            .zip(to.iter().zip(from))
-            .map(|(p, (a, b))| match p {
-                Primitive::Dihedral(..) => wrap(a - b),
-                _ => a - b,
-            })
-            .collect()
+        let mut out = vec![0.0; self.primitives.len()];
+        self.difference_into(to, from, &mut out);
+        out
     }
 
-    /// Wilson `B`, row-major, primitives by Cartesian components. A rotation
-    /// row is the derivative at zero rotation from `x` itself.
-    fn wilson(&self, x: &[f64]) -> Vec<f64> {
+    fn difference_into(&self, to: &[f64], from: &[f64], out: &mut [f64]) {
+        for ((slot, p), (&a, &b)) in out
+            .iter_mut()
+            .zip(&self.primitives)
+            .zip(to.iter().zip(from))
+        {
+            *slot = match p {
+                Primitive::Dihedral(..) => wrap(a - b),
+                _ => a - b,
+            };
+        }
+    }
+
+    /// Sparse Wilson `B` in compressed-row form, primitives by Cartesian
+    /// components. A rotation row is the derivative at zero rotation from `x`
+    /// itself.
+    fn wilson_sparse(&self, x: &[f64]) -> SparseWilson {
         let n3 = 3 * self.n_atoms;
-        let mut b = vec![0.0; self.primitives.len() * n3];
+        let rows = self.primitives.len();
+        let mut offsets = Vec::with_capacity(rows + 1);
+        let mut cols = Vec::with_capacity(rows * 9);
+        let mut vals = Vec::with_capacity(rows * 9);
+        offsets.push(0);
         let mut inertia: Vec<Option<[[f64; 3]; 3]>> = vec![None; self.fragments.len()];
-        for (row, p) in self.primitives.iter().enumerate() {
-            let r = &mut b[row * n3..(row + 1) * n3];
+        for p in &self.primitives {
             let mut put = |atom: usize, v: [f64; 3]| {
-                for k in 0..3 {
-                    r[3 * atom + k] += v[k];
+                for (k, &vk) in v.iter().enumerate() {
+                    if vk != 0.0 {
+                        cols.push(3 * atom + k);
+                        vals.push(vk);
+                    }
                 }
             };
             match *p {
@@ -693,17 +762,16 @@ impl Tric {
                     let v = scale(c, 1.0 / lc);
                     let cos = dot(u, v).clamp(-1.0, 1.0);
                     let sin = (1.0 - cos * cos).sqrt();
-                    if sin < 1e-6 {
-                        continue;
+                    if sin >= 1e-6 {
+                        let di = scale(sub(scale(u, cos), v), 1.0 / (la * sin));
+                        let dk = scale(sub(scale(v, cos), u), 1.0 / (lc * sin));
+                        put(i, di);
+                        put(k, dk);
+                        put(
+                            j,
+                            scale([di[0] + dk[0], di[1] + dk[1], di[2] + dk[2]], -1.0),
+                        );
                     }
-                    let di = scale(sub(scale(u, cos), v), 1.0 / (la * sin));
-                    let dk = scale(sub(scale(v, cos), u), 1.0 / (lc * sin));
-                    put(i, di);
-                    put(k, dk);
-                    put(
-                        j,
-                        scale([di[0] + dk[0], di[1] + dk[1], di[2] + dk[2]], -1.0),
-                    );
                 }
                 Primitive::Dihedral(i, j, k, l) => {
                     let f = sub(point(x, i), point(x, j));
@@ -712,31 +780,28 @@ impl Tric {
                     let a = cross(f, g);
                     let bb = cross(h, g);
                     let (aa, b2, lg) = (dot(a, a), dot(bb, bb), norm(g));
-                    if aa < 1e-12 || b2 < 1e-12 || lg < 1e-12 {
-                        continue;
+                    if aa >= 1e-12 && b2 >= 1e-12 && lg >= 1e-12 {
+                        let fg = dot(f, g);
+                        let hg = dot(h, g);
+                        let di = scale(a, -lg / aa);
+                        let dl = scale(bb, lg / b2);
+                        let tj = sub(scale(a, fg / (aa * lg)), scale(bb, hg / (b2 * lg)));
+                        put(i, di);
+                        put(l, dl);
+                        put(j, sub(tj, di));
+                        put(k, sub(scale(tj, -1.0), dl));
                     }
-                    let fg = dot(f, g);
-                    let hg = dot(h, g);
-                    let di = scale(a, -lg / aa);
-                    let dl = scale(bb, lg / b2);
-                    let tj = sub(scale(a, fg / (aa * lg)), scale(bb, hg / (b2 * lg)));
-                    put(i, di);
-                    put(l, dl);
-                    put(j, sub(tj, di));
-                    put(k, sub(scale(tj, -1.0), dl));
                 }
                 Primitive::Cartesian { atom, axis } => {
-                    let mut v = [0.0; 3];
-                    v[axis] = 1.0;
-                    put(atom, v);
+                    cols.push(3 * atom + axis);
+                    vals.push(1.0);
                 }
                 Primitive::Translation { fragment, axis } => {
                     let atoms = &self.fragments[fragment].atoms;
                     let w = 1.0 / atoms.len() as f64;
                     for &a in atoms {
-                        let mut v = [0.0; 3];
-                        v[axis] = w;
-                        put(a, v);
+                        cols.push(3 * a + axis);
+                        vals.push(w);
                     }
                 }
                 Primitive::Rotation { fragment, axis } if self.fragments[fragment].linear => {
@@ -784,8 +849,62 @@ impl Tric {
                     }
                 }
             }
+            offsets.push(cols.len());
         }
-        b
+        SparseWilson {
+            rows,
+            n_cols: n3,
+            offsets,
+            cols,
+            vals,
+        }
+    }
+
+    #[cfg(test)]
+    fn wilson(&self, x: &[f64]) -> Vec<f64> {
+        let sparse = self.wilson_sparse(x);
+        let mut dense = vec![0.0; sparse.rows * sparse.n_cols];
+        for r in 0..sparse.rows {
+            for idx in sparse.offsets[r]..sparse.offsets[r + 1] {
+                dense[r * sparse.n_cols + sparse.cols[idx]] += sparse.vals[idx];
+            }
+        }
+        dense
+    }
+}
+
+struct SparseWilson {
+    rows: usize,
+    n_cols: usize,
+    offsets: Vec<usize>,
+    cols: Vec<usize>,
+    vals: Vec<f64>,
+}
+
+impl SparseWilson {
+    fn mul(&self, x: &[f64]) -> Vec<f64> {
+        let mut out = vec![0.0; self.rows];
+        for (r, slot) in out.iter_mut().enumerate() {
+            let mut sum = 0.0;
+            for idx in self.offsets[r]..self.offsets[r + 1] {
+                sum += self.vals[idx] * x[self.cols[idx]];
+            }
+            *slot = sum;
+        }
+        out
+    }
+
+    fn transpose_mul(&self, y: &[f64]) -> Vec<f64> {
+        let mut out = vec![0.0; self.n_cols];
+        for (r, &yr) in y.iter().enumerate() {
+            if yr == 0.0 {
+                continue;
+            }
+            for idx in self.offsets[r]..self.offsets[r + 1] {
+                out[self.cols[idx]] += self.vals[idx] * yr;
+            }
+        }
+        out
     }
 }
 
@@ -816,26 +935,133 @@ fn pseudo_inverse3(m: &[f64; 9]) -> [[f64; 3]; 3] {
     out
 }
 
-/// Delocalized frame at one point: `B = U S V^T` restricted to the
-/// singular values above the floor.
-struct Frame {
-    u: Vec<f64>,
-    v: Vec<f64>,
-    s: Vec<f64>,
-    m: usize,
+/// Right-looking blocked Cholesky factor `L` of symmetric `a` (`a = L L^T`),
+/// delegating trailing updates to `ndarray`'s GEMM microkernel. `None` when
+/// any pivot falls at or below `floor`.
+fn cholesky_lower(a: &[f64], n: usize, floor: f64) -> Option<Vec<f64>> {
+    const BLOCK: usize = 32;
+    let mut l = Array2::<f64>::zeros((n, n));
+    for r in 0..n {
+        for c in 0..=r {
+            l[(r, c)] = a[r * n + c];
+        }
+    }
+    let mut k = 0;
+    while k < n {
+        let kb = (k + BLOCK).min(n);
+        for i in k..kb {
+            for j in k..i {
+                let mut sum = l[(i, j)];
+                for p in k..j {
+                    sum -= l[(i, p)] * l[(j, p)];
+                }
+                l[(i, j)] = sum / l[(j, j)];
+            }
+            let mut diag = l[(i, i)];
+            for p in k..i {
+                let v = l[(i, p)];
+                diag -= v * v;
+            }
+            if !(diag > floor) {
+                return None;
+            }
+            l[(i, i)] = diag.sqrt();
+        }
+        if kb < n {
+            for i in kb..n {
+                for j in k..kb {
+                    let mut sum = l[(i, j)];
+                    for p in k..j {
+                        sum -= l[(i, p)] * l[(j, p)];
+                    }
+                    l[(i, j)] = sum / l[(j, j)];
+                }
+            }
+            let (_top, bot) = l.view_mut().split_at(ndarray::Axis(0), kb);
+            let (l21_part, mut a22) = bot.split_at(ndarray::Axis(1), kb);
+            let l21 = l21_part.slice(ndarray::s![.., k..kb]);
+            let mut a22_sub = a22.slice_mut(ndarray::s![.., ..]);
+            general_mat_mul(-1.0, &l21, &l21.t(), 1.0, &mut a22_sub);
+            for r in 0..(n - kb) {
+                for c in (r + 1)..(n - kb) {
+                    a22_sub[(r, c)] = 0.0;
+                }
+            }
+        }
+        k = kb;
+    }
+    Some(l.into_raw_vec_and_offset().0)
 }
 
-impl Frame {
-    fn new(b: &[f64], rows: usize, cols: usize) -> Self {
+/// Solves `L L^T x = rhs` from a row-major lower Cholesky factor `l`.
+fn cholesky_solve(l: &[f64], n: usize, rhs: &[f64]) -> Vec<f64> {
+    let mut y = vec![0.0; n];
+    for i in 0..n {
+        let mut sum = rhs[i];
+        let li = &l[i * n..i * n + i];
+        for (&lij, &yj) in li.iter().zip(&y[..i]) {
+            sum -= lij * yj;
+        }
+        y[i] = sum / l[i * n + i];
+    }
+    for j in (0..n).rev() {
+        let xj = y[j] / l[j * n + j];
+        y[j] = xj;
+        for i in 0..j {
+            y[i] -= l[j * n + i] * xj;
+        }
+    }
+    y
+}
+
+/// Delocalized internal coordinate chart built once from `B = U S V^T` at the
+/// chart origin and held until a primitive degenerates, the local Gram matrix
+/// loses rank, or back-transformation misses.
+#[derive(Debug, Clone)]
+struct Chart {
+    rows: usize,
+    cols: usize,
+    m: usize,
+    /// `rows` by `m`, row-major: active left singular vectors `U`.
+    u: Vec<f64>,
+    /// `cols` by `m`, row-major: `(U^T B(x_0))^T = V S` at the chart origin.
+    origin_bd_t: Vec<f64>,
+    /// Active singular values `S` at the chart origin.
+    origin_s: Vec<f64>,
+}
+
+fn invert_spd(a: &[f64], n: usize, floor: f64) -> Option<Vec<f64>> {
+    let l = cholesky_lower(a, n, floor)?;
+    let mut inv = vec![0.0; n * n];
+    let mut rhs = vec![0.0; n];
+    for col in 0..n {
+        rhs[col] = 1.0;
+        let solved = cholesky_solve(&l, n, &rhs);
+        rhs[col] = 0.0;
+        for row in 0..n {
+            inv[row * n + col] = solved[row];
+        }
+    }
+    Some(inv)
+}
+
+impl Chart {
+    fn new(coords: &Tric, x0: &[f64], hessian_scale: f64) -> (Self, Vec<f64>, Vec<f64>) {
+        let b = coords.wilson_sparse(x0);
+        let rows = b.rows;
+        let cols = b.n_cols;
         let mut btb = vec![0.0; cols * cols];
         for r in 0..rows {
-            let row = &b[r * cols..(r + 1) * cols];
-            for (p, &bp) in row.iter().enumerate() {
-                if bp == 0.0 {
-                    continue;
-                }
-                for (q, &bq) in row.iter().enumerate().skip(p) {
-                    btb[p * cols + q] += bp * bq;
+            let start = b.offsets[r];
+            let end = b.offsets[r + 1];
+            for ia in start..end {
+                let p = b.cols[ia];
+                let bp = b.vals[ia];
+                for ib in start..end {
+                    let q = b.cols[ib];
+                    if p <= q {
+                        btb[p * cols + q] += bp * b.vals[ib];
+                    }
                 }
             }
         }
@@ -848,63 +1074,339 @@ impl Frame {
         let keep: Vec<usize> = (0..cols).filter(|&k| w[k] > SINGULAR_FLOOR).collect();
         let m = keep.len();
         let mut v = vec![0.0; cols * m];
+        let mut origin_bd_t = vec![0.0; cols * m];
         let mut s = vec![0.0; m];
         for (c, &k) in keep.iter().enumerate() {
-            s[c] = w[k].sqrt();
+            let sc = w[k].sqrt();
+            s[c] = sc;
             for p in 0..cols {
-                v[p * m + c] = vecs[p * cols + k];
+                let vp = vecs[p * cols + k];
+                v[p * m + c] = vp;
+                origin_bd_t[p * m + c] = vp * sc;
             }
         }
         let mut u = vec![0.0; rows * m];
+        let mut ku = vec![0.0; rows * m];
         for r in 0..rows {
-            let row = &b[r * cols..(r + 1) * cols];
-            for c in 0..m {
-                let mut acc = 0.0;
-                for p in 0..cols {
-                    acc += row[p] * v[p * m + c];
+            let ur = &mut u[r * m..(r + 1) * m];
+            for idx in b.offsets[r]..b.offsets[r + 1] {
+                let vp = &v[b.cols[idx] * m..(b.cols[idx] + 1) * m];
+                let val = b.vals[idx];
+                for (uc, &vc) in ur.iter_mut().zip(vp) {
+                    *uc += val * vc;
                 }
-                u[r * m + c] = acc / s[c];
+            }
+            let k = (coords.stiffness[r] * hessian_scale).max(CURVATURE_FLOOR);
+            let kur = &mut ku[r * m..(r + 1) * m];
+            for ((uc, &sc), kuc) in ur.iter_mut().zip(&s).zip(kur) {
+                *uc /= sc;
+                *kuc = k * *uc;
             }
         }
-        Self { u, v, s, m }
+        let hd = if m > 0 && rows > 0 {
+            let u_mat = ArrayView2::from_shape((rows, m), &u).expect("u shape");
+            let ku_mat = ArrayView2::from_shape((rows, m), &ku).expect("ku shape");
+            let mut hd_mat = u_mat.t().dot(&ku_mat);
+            for a in 0..m {
+                hd_mat[(a, a)] = hd_mat[(a, a)].max(CURVATURE_FLOOR);
+                for c in 0..a {
+                    let avg = 0.5 * (hd_mat[(a, c)] + hd_mat[(c, a)]);
+                    hd_mat[(a, c)] = avg;
+                    hd_mat[(c, a)] = avg;
+                }
+            }
+            hd_mat.into_raw_vec_and_offset().0
+        } else {
+            Vec::new()
+        };
+        let cd = invert_spd(&hd, m, CURVATURE_FLOOR * 0.5).unwrap_or_else(|| {
+            let mut diag = vec![0.0; m * m];
+            for a in 0..m {
+                diag[a * m + a] = 1.0 / hd[a * m + a].max(CURVATURE_FLOOR);
+            }
+            diag
+        });
+        (
+            Self {
+                rows,
+                cols,
+                m,
+                u,
+                origin_bd_t,
+                origin_s: s,
+            },
+            hd,
+            cd,
+        )
     }
 
-    /// Internal gradient in the frame, `S^-1 V^T g`.
-    fn gradient(&self, g: &[f64]) -> Vec<f64> {
-        let cols = g.len();
-        (0..self.m)
-            .map(|c| {
-                (0..cols)
-                    .map(|p| self.v[p * self.m + c] * g[p])
-                    .sum::<f64>()
-                    / self.s[c]
-            })
-            .collect()
+    /// Delocalized vector `U^T dq` of a primitive displacement `dq`.
+    fn project(&self, dq: &[f64]) -> Vec<f64> {
+        if self.m == 0 || self.rows == 0 {
+            return vec![0.0; self.m];
+        }
+        let u_mat = ArrayView2::from_shape((self.rows, self.m), &self.u).expect("u shape");
+        let dq_view = ArrayView1::from(dq);
+        u_mat.t().dot(&dq_view).into_raw_vec_and_offset().0
     }
 
-    /// Primitive vector of a frame vector, `U d`.
+    /// Primitive vector `U d` of a delocalized vector `d`.
     fn primitive(&self, d: &[f64]) -> Vec<f64> {
-        let rows = self.u.len() / self.m.max(1);
-        (0..rows)
-            .map(|r| (0..self.m).map(|c| self.u[r * self.m + c] * d[c]).sum())
+        if self.m == 0 || self.rows == 0 {
+            return vec![0.0; self.rows];
+        }
+        let u_mat = ArrayView2::from_shape((self.rows, self.m), &self.u).expect("u shape");
+        let d_view = ArrayView1::from(d);
+        u_mat.dot(&d_view).into_raw_vec_and_offset().0
+    }
+}
+
+/// Cached factored Gram matrix `L L^T = B_d(x_ref) B_d(x_ref)^T` and Jacobian
+/// `B_d(x_ref)^T`, reused as preconditioner and back-transform map while atoms
+/// stay within `BASIS_DRIFT_A` of `x_ref`.
+#[derive(Debug, Clone)]
+struct CachedGram {
+    at: Vec<f64>,
+    bd_t: Vec<f64>,
+    l: Vec<f64>,
+}
+
+const BASIS_DRIFT_A: f64 = 0.15;
+
+fn max_atom_drift(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len() / 3;
+    let mut best = 0.0_f64;
+    for i in 0..n {
+        let d2 = (a[3 * i] - b[3 * i]).powi(2)
+            + (a[3 * i + 1] - b[3 * i + 1]).powi(2)
+            + (a[3 * i + 2] - b[3 * i + 2]).powi(2);
+        if d2 > best {
+            best = d2;
+        }
+    }
+    best.sqrt()
+}
+
+impl CachedGram {
+    fn build(chart: &Chart, coords: &Tric, x: &[f64]) -> Option<Self> {
+        let m = chart.m;
+        let cols = chart.cols;
+        let b = coords.wilson_sparse(x);
+        let mut bd_t = vec![0.0; cols * m];
+        for r in 0..b.rows {
+            let ur = &chart.u[r * m..(r + 1) * m];
+            for idx in b.offsets[r]..b.offsets[r + 1] {
+                let dst = &mut bd_t[b.cols[idx] * m..(b.cols[idx] + 1) * m];
+                let val = b.vals[idx];
+                for (d, &uc) in dst.iter_mut().zip(ur) {
+                    *d += val * uc;
+                }
+            }
+        }
+        let bd_mat = ArrayView2::from_shape((cols, m), &bd_t).expect("bd_t shape");
+        let gram_mat = bd_mat.t().dot(&bd_mat);
+        let gram = gram_mat.as_slice().expect("contiguous gram");
+        let l = cholesky_lower(gram, m, SINGULAR_FLOOR)?;
+        Some(Self {
+            at: x.to_vec(),
+            bd_t,
+            l,
+        })
+    }
+
+    /// Exact internal gradient at `x` (when `x == self.at`) or PCG-refined
+    /// against `B(x)` using `self.l` as preconditioner.
+    fn gradient(&self, chart: &Chart, coords: &Tric, x: &[f64], g: &[f64]) -> Option<Vec<f64>> {
+        let m = chart.m;
+        if x == self.at.as_slice() {
+            let bd_mat = ArrayView2::from_shape((chart.cols, m), &self.bd_t).expect("bd_t");
+            let bg = bd_mat.t().dot(&ArrayView1::from(g));
+            return Some(cholesky_solve(&self.l, m, bg.as_slice().expect("bg")));
+        }
+        let b = coords.wilson_sparse(x);
+        let rhs = chart.project(&b.mul(g));
+        let rhs_norm = rhs.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if rhs_norm < 1e-30 {
+            return Some(vec![0.0; m]);
+        }
+        let apply = |v: &[f64]| -> Vec<f64> {
+            let uv = chart.primitive(v);
+            let bt_uv = b.transpose_mul(&uv);
+            let b_bt_uv = b.mul(&bt_uv);
+            chart.project(&b_bt_uv)
+        };
+        let mut sol = cholesky_solve(&self.l, m, &rhs);
+        let ax = apply(&sol);
+        let mut r: Vec<f64> = rhs
+            .iter()
+            .zip(&ax)
+            .map(|(rhs_i, a_i)| rhs_i - a_i)
+            .collect();
+        let tol = 1e-5 * rhs_norm;
+        if r.iter().map(|v| v * v).sum::<f64>().sqrt() <= tol {
+            return Some(sol);
+        }
+        let mut z = cholesky_solve(&self.l, m, &r);
+        let mut rz: f64 = r.iter().zip(&z).map(|(a, b)| a * b).sum();
+        let mut p = z.clone();
+        for _ in 0..12 {
+            let ap = apply(&p);
+            let pap: f64 = p.iter().zip(&ap).map(|(pi, api)| pi * api).sum();
+            let pp: f64 = p.iter().map(|pi| pi * pi).sum();
+            if !(pap > SINGULAR_FLOOR * pp) {
+                return None;
+            }
+            let alpha = rz / pap;
+            for (si, &pi) in sol.iter_mut().zip(&p) {
+                *si += alpha * pi;
+            }
+            for (ri, &api) in r.iter_mut().zip(&ap) {
+                *ri -= alpha * api;
+            }
+            if r.iter().map(|v| v * v).sum::<f64>().sqrt() <= tol {
+                return Some(sol);
+            }
+            z = cholesky_solve(&self.l, m, &r);
+            let rz_new: f64 = r.iter().zip(&z).map(|(a, b)| a * b).sum();
+            if rz <= 0.0 {
+                break;
+            }
+            let beta = rz_new / rz;
+            for (pi, &zi) in p.iter_mut().zip(&z) {
+                *pi = zi + beta * *pi;
+            }
+            rz = rz_new;
+        }
+        None
+    }
+
+    fn cartesian(&self, cols: usize, m: usize, dq_d: &[f64]) -> Vec<f64> {
+        let w = cholesky_solve(&self.l, m, dq_d);
+        let bd_mat = ArrayView2::from_shape((cols, m), &self.bd_t).expect("bd_t");
+        bd_mat
+            .dot(&ArrayView1::from(&w))
+            .into_raw_vec_and_offset()
+            .0
+    }
+}
+
+enum StepBasis<'a> {
+    Origin(&'a Chart),
+    Gram(&'a Chart, &'a CachedGram),
+}
+
+impl<'a> StepBasis<'a> {
+    fn origin(chart: &'a Chart) -> Self {
+        Self::Origin(chart)
+    }
+
+    fn origin_gradient(chart: &Chart, g: &[f64]) -> Vec<f64> {
+        let m = chart.m;
+        let bd_mat = ArrayView2::from_shape((chart.cols, m), &chart.origin_bd_t).expect("bd_t");
+        let bg = bd_mat.t().dot(&ArrayView1::from(g));
+        bg.iter()
+            .zip(&chart.origin_s)
+            .map(|(&r, &sc)| r / (sc * sc))
             .collect()
     }
 
-    /// Cartesian step of a primitive displacement, `V S^-1 U^T dq`.
-    fn cartesian(&self, dq: &[f64], cols: usize) -> Vec<f64> {
-        let rows = dq.len();
-        let mut t = vec![0.0; self.m];
-        for (c, tc) in t.iter_mut().enumerate() {
-            let mut acc = 0.0;
-            for r in 0..rows {
-                acc += self.u[r * self.m + c] * dq[r];
+    fn cartesian(&self, dq_d: &[f64]) -> Vec<f64> {
+        match *self {
+            Self::Origin(chart) => {
+                let m = chart.m;
+                let w: Vec<f64> = dq_d
+                    .iter()
+                    .zip(&chart.origin_s)
+                    .map(|(&d, &sc)| d / (sc * sc))
+                    .collect();
+                let bd_mat =
+                    ArrayView2::from_shape((chart.cols, m), &chart.origin_bd_t).expect("bd_t");
+                bd_mat
+                    .dot(&ArrayView1::from(&w))
+                    .into_raw_vec_and_offset()
+                    .0
             }
-            *tc = acc / self.s[c];
+            Self::Gram(chart, gram) => gram.cartesian(chart.cols, chart.m, dq_d),
         }
-        (0..cols)
-            .map(|p| (0..self.m).map(|c| self.v[p * self.m + c] * t[c]).sum())
-            .collect()
     }
+}
+
+/// Powell's dogleg step on positive-definite `hd` and its inverse `cd`, within
+/// `trust`. Avoids `O(m^3)` eigendecompositions on trust-capped steps.
+fn dogleg_step(hd: &[f64], cd: &[f64], gd: &[f64], m: usize, trust: f64) -> (Vec<f64>, f64) {
+    let pb: Vec<f64> = (0..m)
+        .map(|r| {
+            -cd[r * m..(r + 1) * m]
+                .iter()
+                .zip(gd)
+                .map(|(c, g)| c * g)
+                .sum::<f64>()
+        })
+        .collect();
+    let pb_norm = pb.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let step_d = if pb_norm <= trust {
+        pb
+    } else {
+        let gnorm2: f64 = gd.iter().map(|v| v * v).sum();
+        if gnorm2 == 0.0 {
+            vec![0.0; m]
+        } else {
+            let ghg: f64 = (0..m)
+                .map(|r| {
+                    gd[r]
+                        * hd[r * m..(r + 1) * m]
+                            .iter()
+                            .zip(gd)
+                            .map(|(h, g)| h * g)
+                            .sum::<f64>()
+                })
+                .sum();
+            let alpha_u = gnorm2 / ghg.max(CURVATURE_FLOOR * gnorm2);
+            let gnorm = gnorm2.sqrt();
+            if alpha_u * gnorm >= trust {
+                let scale = -trust / gnorm;
+                gd.iter().map(|&g| scale * g).collect()
+            } else {
+                let pu: Vec<f64> = gd.iter().map(|&g| -alpha_u * g).collect();
+                let diff: Vec<f64> = pb.iter().zip(&pu).map(|(b, u)| b - u).collect();
+                let a: f64 = diff.iter().map(|v| v * v).sum();
+                let b: f64 = pu.iter().zip(&diff).map(|(u, d)| u * d).sum();
+                let c: f64 = pu.iter().map(|v| v * v).sum::<f64>() - trust * trust;
+                let tau = if a > 0.0 {
+                    ((-b + (b * b - a * c).max(0.0).sqrt()) / a).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                pu.iter().zip(&diff).map(|(u, d)| u + tau * d).collect()
+            }
+        }
+    };
+    let h_step_dot_step: f64 = (0..m)
+        .map(|r| {
+            step_d[r]
+                * hd[r * m..(r + 1) * m]
+                    .iter()
+                    .zip(&step_d)
+                    .map(|(h, s)| h * s)
+                    .sum::<f64>()
+        })
+        .sum();
+    let g_dot_step: f64 = gd.iter().zip(&step_d).map(|(g, s)| g * s).sum();
+    (step_d, g_dot_step + 0.5 * h_step_dot_step)
+}
+
+#[derive(Debug, Clone)]
+struct TricState {
+    at: Vec<f64>,
+    coords: Tric,
+    chart: Chart,
+    cached_gram: Option<CachedGram>,
+    hd: Vec<f64>,
+    cd: Vec<f64>,
+    trust: f64,
+    previous: Option<(Vec<f64>, Vec<f64>)>,
+    rebuilt: bool,
+    at_origin: bool,
 }
 
 /// Quasi-Newton relaxation in translation-rotation internal coordinates.
@@ -923,6 +1425,7 @@ pub struct TricOpt {
     pub hessian_scale: f64,
     /// Back-transformation iterations per step.
     pub max_backtransform: usize,
+    state: std::cell::RefCell<Option<TricState>>,
 }
 
 impl TricOpt {
@@ -933,10 +1436,16 @@ impl TricOpt {
             gtol: 1e-6,
             trust: 0.1,
             max_trust: 0.3,
-            min_trust: 1e-3,
+            min_trust: 1e-5,
             hessian_scale: 1.0,
             max_backtransform: 50,
+            state: std::cell::RefCell::new(None),
         }
+    }
+
+    /// Discards any chart and Hessian held from an interrupted descent.
+    pub fn forget(&self) {
+        self.state.borrow_mut().take();
     }
 
     /// Atoms the species labels cover.
@@ -944,10 +1453,23 @@ impl TricOpt {
         self.species.len()
     }
 
-    /// Wall seconds one step at `x` spends outside the potential: the
-    /// primitives, the Wilson matrix and its delocalized frame, the Newton
-    /// step and the back-transformation. `energy` and `gradient` stand in
-    /// for the potential, which is not called.
+    /// Expected call-count advantage `(N_LBFGS / N_TRIC - 1)` at `x`:
+    /// dihedral-bearing molecules have torsional modes two decades softer than
+    /// stretches (~16x fewer calls at `1e-3` eV/Å), whereas stretch-and-bend
+    /// clusters without dihedrals save ~4x (`bench/tric-quench`).
+    pub fn call_saving(&self, x: ArrayView1<f64>) -> f64 {
+        let coords = Tric::new(&self.species, x);
+        let has_dihedrals = coords
+            .primitives
+            .iter()
+            .any(|p| matches!(p, Primitive::Dihedral(..)));
+        if has_dihedrals { 16.0 } else { 3.0 }
+    }
+
+    /// Wall seconds one amortized step at `x` spends outside the potential:
+    /// one chart build amortized over a quench plus the per-step Jacobian,
+    /// dogleg and back-transformation, with `energy` and `gradient` standing
+    /// in for the potential, which is not called.
     ///
     /// The least of `STEP_PROBES` probes is kept. A single wall-clock
     /// sample is the cold first step of the process, and one preemption
@@ -958,9 +1480,14 @@ impl TricOpt {
         let answer = (energy, gradient.to_owned());
         (0..STEP_PROBES)
             .map(|_| {
-                let started = std::time::Instant::now();
-                probe.minimize(x, 2, |_| Some(answer.clone()));
-                started.elapsed().as_secs_f64()
+                probe.forget();
+                let t0 = std::time::Instant::now();
+                let (_, x1, _) = probe.minimize(x, 2, |_| Some(answer.clone()));
+                let chart_s = t0.elapsed().as_secs_f64();
+                let t1 = std::time::Instant::now();
+                probe.minimize(x1.view(), 5, |_| Some(answer.clone()));
+                let steps_s = t1.elapsed().as_secs_f64() / 4.0;
+                chart_s / 32.0 + steps_s
             })
             .fold(f64::INFINITY, f64::min)
     }
@@ -993,8 +1520,8 @@ impl TricOpt {
         F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
         W: FnMut(usize, f64) -> bool,
     {
-        let n3 = x0.len();
         let start = x0.to_owned();
+        let saved = self.state.borrow_mut().take();
         // A zero-step quench is the raw energy, as for warm L-BFGS: the
         // driver reads a start and a first-stage screen through it.
         let Some((mut e, mut g)) = fg(x0) else {
@@ -1005,114 +1532,161 @@ impl TricOpt {
         if max_calls == 0 || !e.is_finite() || max_abs(&g) < self.gtol || !watch(calls, e) {
             return (e, x, calls);
         }
-        let mut coords = Tric::new(&self.species, x.view());
-        let mut rows = coords.len();
-        let mut hessian = self.model_hessian(&coords);
-        let mut rebuilt = true;
-        let mut trust = self.trust;
-        let mut previous: Option<(Vec<f64>, Vec<f64>)> = None;
+        let x_slice = x.as_slice().expect("contiguous point");
+        let (
+            mut coords,
+            mut chart,
+            mut cached_gram,
+            mut hd,
+            mut cd,
+            mut trust,
+            mut previous,
+            mut rebuilt,
+            mut at_origin,
+        ) = match saved.filter(|s| s.at == x_slice) {
+            Some(s) => (
+                s.coords,
+                s.chart,
+                s.cached_gram,
+                s.hd,
+                s.cd,
+                s.trust,
+                s.previous,
+                s.rebuilt,
+                s.at_origin,
+            ),
+            None => {
+                let coords = Tric::new(&self.species, x.view());
+                let (chart, hd, cd) = Chart::new(&coords, x_slice, self.hessian_scale);
+                (coords, chart, None, hd, cd, self.trust, None, true, true)
+            }
+        };
         while calls < max_calls {
+            let xs = x.as_slice().expect("contiguous point").to_vec();
             // A linear angle or a straightened fragment has no well-defined
-            // primitive value, so the set is rebuilt from the current point.
-            if !rebuilt && coords.degenerate(x.as_slice().expect("contiguous point")) {
+            // primitive value, so the chart is rebuilt from the current point.
+            if !rebuilt && coords.degenerate(&xs) {
                 coords = Tric::new(&self.species, x.view());
-                rows = coords.len();
-                hessian = self.model_hessian(&coords);
+                (chart, hd, cd) = Chart::new(&coords, &xs, self.hessian_scale);
+                cached_gram = None;
                 previous = None;
                 rebuilt = true;
+                at_origin = true;
             }
-            let xs = x.as_slice().expect("contiguous point").to_vec();
-            let gs = g.to_vec();
-            let b = coords.wilson(&xs);
-            let frame = Frame::new(&b, rows, n3);
-            if frame.m == 0 {
+            if chart.m == 0 {
                 break;
             }
-            let gd = frame.gradient(&gs);
-            let gq = frame.primitive(&gd);
-            if let Some((step, gq_old)) = previous.take() {
-                bfgs(&mut hessian, rows, &step, &gq, &gq_old);
-            }
-            let m = frame.m;
-            let mut hd = vec![0.0; m * m];
-            let mut hu = vec![0.0; rows * m];
-            for r in 0..rows {
-                for c in 0..m {
-                    let mut acc = 0.0;
-                    for t in 0..rows {
-                        let h = hessian[r * rows + t];
-                        if h != 0.0 {
-                            acc += h * frame.u[t * m + c];
+            let gs = g.as_slice().expect("contiguous gradient");
+            if !at_origin {
+                let stale = cached_gram
+                    .as_ref()
+                    .is_none_or(|cg| max_atom_drift(&xs, &cg.at) > BASIS_DRIFT_A);
+                if stale {
+                    cached_gram = CachedGram::build(&chart, &coords, &xs);
+                    if cached_gram.is_none() {
+                        coords = Tric::new(&self.species, x.view());
+                        (chart, hd, cd) = Chart::new(&coords, &xs, self.hessian_scale);
+                        previous = None;
+                        rebuilt = true;
+                        at_origin = true;
+                        if chart.m == 0 {
+                            break;
                         }
                     }
-                    hu[r * m + c] = acc;
                 }
             }
-            for a in 0..m {
-                for c in a..m {
-                    let mut acc = 0.0;
-                    for r in 0..rows {
-                        acc += frame.u[r * m + a] * hu[r * m + c];
+            let gd = if at_origin {
+                StepBasis::origin_gradient(&chart, gs)
+            } else if let Some(gd) = cached_gram
+                .as_ref()
+                .and_then(|cg| cg.gradient(&chart, &coords, &xs, gs))
+            {
+                gd
+            } else {
+                // Refresh `cached_gram` at `xs` before discarding `hd`/`cd`.
+                cached_gram = CachedGram::build(&chart, &coords, &xs);
+                if let Some(gd) = cached_gram
+                    .as_ref()
+                    .and_then(|cg| cg.gradient(&chart, &coords, &xs, gs))
+                {
+                    gd
+                } else {
+                    coords = Tric::new(&self.species, x.view());
+                    (chart, hd, cd) = Chart::new(&coords, &xs, self.hessian_scale);
+                    cached_gram = None;
+                    previous = None;
+                    rebuilt = true;
+                    at_origin = true;
+                    if chart.m == 0 {
+                        break;
                     }
-                    hd[a * m + c] = acc;
-                    hd[c * m + a] = acc;
+                    StepBasis::origin_gradient(&chart, gs)
                 }
-            }
-            let (w, q) = symmetric_eigen(&hd, m);
-            let w: Vec<f64> = w.iter().map(|&value| value.max(CURVATURE_FLOOR)).collect();
-            let along: Vec<f64> = (0..m)
-                .map(|k| (0..m).map(|a| q[a * m + k] * gd[a]).sum())
-                .collect();
-            let length = |shift: f64| -> f64 {
-                along
-                    .iter()
-                    .zip(&w)
-                    .map(|(c, wk)| (c / (wk + shift)).powi(2))
-                    .sum::<f64>()
-                    .sqrt()
             };
-            let mut shift = 0.0;
-            if length(0.0) > trust {
-                let (mut lo, mut hi) = (0.0, 1.0);
-                while length(hi) > trust {
-                    hi *= 2.0;
-                }
-                for _ in 0..100 {
-                    let mid = 0.5 * (lo + hi);
-                    if length(mid) > trust {
-                        lo = mid;
-                    } else {
-                        hi = mid;
+            let basis = if at_origin {
+                StepBasis::origin(&chart)
+            } else {
+                StepBasis::Gram(&chart, cached_gram.as_ref().expect("cached gram"))
+            };
+            let m = chart.m;
+            if let Some((step_taken, gd_old)) = previous.take() {
+                bfgs_pair(&mut hd, &mut cd, m, &step_taken, &gd, &gd_old);
+            }
+            let (step_d, predicted) = dogleg_step(&hd, &cd, &gd, m, trust);
+            let planned = step_d.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let q0 = coords.values(&xs, &xs);
+            let (trial, missed) = self.back_transform(&coords, &chart, &basis, &xs, &q0, &step_d);
+            if !rebuilt && missed > 0.25 * planned {
+                if cached_gram.as_ref().is_some_and(|cg| cg.at != xs)
+                    && let Some(fresh) = CachedGram::build(&chart, &coords, &xs)
+                {
+                    let fresh_basis = StepBasis::Gram(&chart, &fresh);
+                    let (retry_trial, retry_missed) =
+                        self.back_transform(&coords, &chart, &fresh_basis, &xs, &q0, &step_d);
+                    cached_gram = Some(fresh);
+                    if retry_missed <= 0.25 * planned {
+                        let Some((e_new, g_new)) = fg(ArrayView1::from(&retry_trial)) else {
+                            break;
+                        };
+                        calls += 1;
+                        let rise = e_new - e;
+                        if !e_new.is_finite() || rise > 0.0 {
+                            trust = (0.25 * planned.min(trust)).max(0.0);
+                            if trust < self.min_trust {
+                                break;
+                            }
+                            continue;
+                        }
+                        let ratio = if predicted < 0.0 {
+                            rise / predicted
+                        } else {
+                            1.0
+                        };
+                        if ratio > 0.75 && planned > 0.8 * trust {
+                            trust = (2.0 * trust).min(self.max_trust);
+                        } else if ratio < 0.25 {
+                            trust = (0.5 * trust).max(self.min_trust);
+                        }
+                        let q_new = coords.values(&retry_trial, &xs);
+                        let s_d = chart.project(&coords.difference(&q_new, &q0));
+                        previous = Some((s_d, gd));
+                        rebuilt = false;
+                        at_origin = false;
+                        x = Array1::from_vec(retry_trial);
+                        e = e_new;
+                        g = g_new;
+                        if max_abs(&g) < self.gtol || !watch(calls, e) {
+                            break;
+                        }
+                        continue;
                     }
                 }
-                shift = hi;
-            }
-            let coeff: Vec<f64> = along
-                .iter()
-                .zip(&w)
-                .map(|(c, wk)| -c / (wk + shift))
-                .collect();
-            let step_d: Vec<f64> = (0..m)
-                .map(|a| (0..m).map(|k| q[a * m + k] * coeff[k]).sum())
-                .collect();
-            let predicted: f64 = along
-                .iter()
-                .zip(&coeff)
-                .zip(&w)
-                .map(|((c, s), wk)| c * s + 0.5 * wk * s * s)
-                .sum();
-            let planned = step_d.iter().map(|v| v * v).sum::<f64>().sqrt();
-            let dq = frame.primitive(&step_d);
-            let q0 = coords.values(&xs, &xs);
-            let target: Vec<f64> = q0.iter().zip(&dq).map(|(a, b)| a + b).collect();
-            let (trial, missed) = self.back_transform(&coords, &frame, &xs, &target);
-            let moved = dq.iter().map(|v| v * v).sum::<f64>().sqrt();
-            if !rebuilt && missed > 0.25 * moved {
                 coords = Tric::new(&self.species, x.view());
-                rows = coords.len();
-                hessian = self.model_hessian(&coords);
+                (chart, hd, cd) = Chart::new(&coords, &xs, self.hessian_scale);
+                cached_gram = None;
                 previous = None;
                 rebuilt = true;
+                at_origin = true;
                 continue;
             }
             let Some((e_new, g_new)) = fg(ArrayView1::from(&trial)) else {
@@ -1138,8 +1712,10 @@ impl TricOpt {
                 trust = (0.5 * trust).max(self.min_trust);
             }
             let q_new = coords.values(&trial, &xs);
-            previous = Some((coords.difference(&q_new, &q0), gq));
+            let s_d = chart.project(&coords.difference(&q_new, &q0));
+            previous = Some((s_d, gd));
             rebuilt = false;
+            at_origin = false;
             x = Array1::from_vec(trial);
             e = e_new;
             g = g_new;
@@ -1147,41 +1723,56 @@ impl TricOpt {
                 break;
             }
         }
+        *self.state.borrow_mut() = Some(TricState {
+            at: x.as_slice().expect("contiguous point").to_vec(),
+            coords,
+            chart,
+            cached_gram,
+            hd,
+            cd,
+            trust,
+            previous,
+            rebuilt,
+            at_origin,
+        });
         (e, x, calls)
     }
 
-    fn model_hessian(&self, coords: &Tric) -> Vec<f64> {
-        let rows = coords.len();
-        let mut hessian = vec![0.0; rows * rows];
-        for (r, k) in coords.stiffness.iter().enumerate() {
-            hessian[r * rows + r] = k * self.hessian_scale;
-        }
-        hessian
-    }
-
-    /// The Cartesian point nearest `target` and its residual norm.
+    /// The Cartesian point whose delocalized displacement from `x0` matches
+    /// `step_d`, and its active-chart residual norm.
     fn back_transform(
         &self,
         coords: &Tric,
-        frame: &Frame,
+        chart: &Chart,
+        basis: &StepBasis<'_>,
         x0: &[f64],
-        target: &[f64],
+        q0: &[f64],
+        step_d: &[f64],
     ) -> (Vec<f64>, f64) {
-        let n3 = x0.len();
+        let planned = step_d.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let res_tol = (1e-4 * planned).max(1e-10);
         let mut x = x0.to_vec();
         let mut best = (f64::INFINITY, x.clone());
+        let mut q_cur = vec![0.0; q0.len()];
+        let mut diff_q = vec![0.0; q0.len()];
+        let mut res_d = vec![0.0; step_d.len()];
         for _ in 0..self.max_backtransform {
-            let residual = coords.difference(target, &coords.values(&x, x0));
-            let size = residual.iter().map(|v| v * v).sum::<f64>().sqrt();
+            coords.values_into(&x, x0, &mut q_cur);
+            coords.difference_into(&q_cur, q0, &mut diff_q);
+            let got_d = chart.project(&diff_q);
+            for ((slot, &a), &b) in res_d.iter_mut().zip(step_d).zip(&got_d) {
+                *slot = a - b;
+            }
+            let size = res_d.iter().map(|v| v * v).sum::<f64>().sqrt();
             if size < best.0 {
                 best = (size, x.clone());
             } else if size > 2.0 * best.0 {
                 break;
             }
-            if size < 1e-8 {
+            if size < res_tol {
                 break;
             }
-            let dx = frame.cartesian(&residual, n3);
+            let dx = basis.cartesian(&res_d);
             if max_abs(&dx) < 1e-10 {
                 break;
             }
@@ -1197,19 +1788,49 @@ fn max_abs<'a>(values: impl IntoIterator<Item = &'a f64>) -> f64 {
     values.into_iter().fold(0.0_f64, |acc, v| acc.max(v.abs()))
 }
 
-fn bfgs(h: &mut [f64], n: usize, s: &[f64], g_new: &[f64], g_old: &[f64]) {
+fn bfgs_pair(h: &mut [f64], c: &mut [f64], n: usize, s: &[f64], g_new: &[f64], g_old: &[f64]) {
     let y: Vec<f64> = g_new.iter().zip(g_old).map(|(a, b)| a - b).collect();
     let ys: f64 = y.iter().zip(s).map(|(a, b)| a * b).sum();
     let hs: Vec<f64> = (0..n)
-        .map(|r| (0..n).map(|c| h[r * n + c] * s[c]).sum())
+        .map(|r| {
+            h[r * n..(r + 1) * n]
+                .iter()
+                .zip(s)
+                .map(|(hrc, sc)| hrc * sc)
+                .sum()
+        })
         .collect();
     let shs: f64 = hs.iter().zip(s).map(|(a, b)| a * b).sum();
     if ys <= 1e-12 || shs <= 1e-12 {
         return;
     }
+    let inv_ys = 1.0 / ys;
+    let inv_shs = 1.0 / shs;
     for r in 0..n {
-        for c in 0..n {
-            h[r * n + c] += y[r] * y[c] / ys - hs[r] * hs[c] / shs;
+        let yr = y[r] * inv_ys;
+        let hsr = hs[r] * inv_shs;
+        let row = &mut h[r * n..(r + 1) * n];
+        for ((hrc, &yc), &hsc) in row.iter_mut().zip(&y).zip(&hs) {
+            *hrc += yr * yc - hsr * hsc;
+        }
+    }
+    let cy: Vec<f64> = (0..n)
+        .map(|r| {
+            c[r * n..(r + 1) * n]
+                .iter()
+                .zip(&y)
+                .map(|(crc, yc)| crc * yc)
+                .sum()
+        })
+        .collect();
+    let ycy: f64 = y.iter().zip(&cy).map(|(yi, cyi)| yi * cyi).sum();
+    let beta = inv_ys * (1.0 + inv_ys * ycy);
+    for r in 0..n {
+        let sr = s[r];
+        let cyr = cy[r];
+        let row = &mut c[r * n..(r + 1) * n];
+        for ((crc, &sc), &cyc) in row.iter_mut().zip(s).zip(&cy) {
+            *crc += -inv_ys * (sr * cyc + cyr * sc) + beta * sr * sc;
         }
     }
 }
@@ -1370,15 +1991,16 @@ mod tests {
 
     fn back_transform_residual(species: Vec<u32>, x: &[f64]) -> (f64, f64) {
         let tric = Tric::new(&species, ArrayView1::from(x));
-        let b = tric.wilson(x);
-        let frame = Frame::new(&b, tric.len(), x.len());
-        let step: Vec<f64> = (0..frame.m)
+        let (chart, _, _) = Chart::new(&tric, x, 1.0);
+        let basis = StepBasis::origin(&chart);
+        let step: Vec<f64> = (0..chart.m)
             .map(|k| 0.05 * ((k * 7 % 5) as f64 - 2.0))
             .collect();
         let q0 = tric.values(x, x);
-        let dq = frame.primitive(&step);
+        let dq = chart.primitive(&step);
         let target: Vec<f64> = q0.iter().zip(&dq).map(|(a, b)| a + b).collect();
-        let (reached, _) = TricOpt::new(species).back_transform(&tric, &frame, x, &target);
+        let (reached, _) =
+            TricOpt::new(species).back_transform(&tric, &chart, &basis, x, &q0, &step);
         let residual = tric.difference(&target, &tric.values(&reached, x));
         let size = residual.iter().map(|v| v * v).sum::<f64>().sqrt();
         (size, dq.iter().map(|v| v * v).sum::<f64>().sqrt())
@@ -1401,16 +2023,16 @@ mod tests {
     fn a_step_with_a_two_atom_fragment_reaches_its_target() {
         let (species, x) = split_water();
         let tric = Tric::new(&species, ArrayView1::from(&x));
-        let b = tric.wilson(&x);
-        let frame = Frame::new(&b, tric.len(), x.len());
-        let step: Vec<f64> = (0..frame.m)
+        let (chart, _, _) = Chart::new(&tric, &x, 1.0);
+        let basis = StepBasis::origin(&chart);
+        let step: Vec<f64> = (0..chart.m)
             .map(|k| 0.05 * ((k * 7 % 5) as f64 - 2.0))
             .collect();
         let q0 = tric.values(&x, &x);
-        let dq = frame.primitive(&step);
+        let dq = chart.primitive(&step);
         let target: Vec<f64> = q0.iter().zip(&dq).map(|(a, b)| a + b).collect();
         let opt = TricOpt::new(species);
-        let (reached, _) = opt.back_transform(&tric, &frame, &x, &target);
+        let (reached, _) = opt.back_transform(&tric, &chart, &basis, &x, &q0, &step);
         let residual = tric.difference(&target, &tric.values(&reached, &x));
         let size = residual.iter().map(|v| v * v).sum::<f64>().sqrt();
         let planned = dq.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -1516,5 +2138,50 @@ mod tests {
         assert!(max_abs(&g) < 1e-5, "gradient {}", max_abs(&g));
         assert!(e < 1e-8, "energy {e}");
         assert!(calls < 200, "{calls} calls");
+    }
+
+    #[test]
+    fn a_continued_descent_matches_one_unbroken_pass() {
+        let (species, reference) = water_dimer();
+        let x: Vec<f64> = reference
+            .iter()
+            .enumerate()
+            .map(|(i, v)| v + 0.12 * ((i * 37 % 11) as f64 / 11.0 - 0.5))
+            .collect();
+        let fg = |v: ArrayView1<f64>| {
+            let mut e = 0.0;
+            let mut g = Array1::zeros(v.len());
+            for i in 0..6 {
+                for j in (i + 1)..6 {
+                    let d0 = norm(sub(point(&reference, i), point(&reference, j)));
+                    let d = sub(
+                        point(v.as_slice().unwrap(), i),
+                        point(v.as_slice().unwrap(), j),
+                    );
+                    let r = norm(d);
+                    e += (r - d0).powi(2);
+                    let f = 2.0 * (r - d0) / r;
+                    for k in 0..3 {
+                        g[3 * i + k] += f * d[k];
+                        g[3 * j + k] -= f * d[k];
+                    }
+                }
+            }
+            Some((e, g))
+        };
+        let mut unbroken = TricOpt::new(species.clone());
+        unbroken.gtol = 1e-6;
+        let (e_one, x_one, calls_one) = unbroken.minimize(ArrayView1::from(&x), 200, fg);
+
+        let mut split = TricOpt::new(species);
+        split.gtol = 1e-6;
+        let (_, x_mid, calls_a) = split.minimize(ArrayView1::from(&x), 5, fg);
+        assert_eq!(calls_a, 5);
+        let (e_two, x_two, calls_b) = split.minimize(x_mid.view(), 200, fg);
+        // `calls_b` counts the opening evaluation at `x_mid` (which `warm_relax_with`
+        // answers from its paid cache without charging the potential).
+        assert_eq!(calls_a + calls_b - 1, calls_one);
+        assert!((e_one - e_two).abs() < 1e-14);
+        assert_eq!(x_one, x_two);
     }
 }
