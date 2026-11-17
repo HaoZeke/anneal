@@ -35,6 +35,7 @@ import os
 import random
 import re
 import subprocess
+import tarfile
 import sys
 import tempfile
 from collections import defaultdict
@@ -123,6 +124,10 @@ KNOWN_GAPS = {
     "bench/ase-nonlj/summary.csv": "no revision or host column",
     "bench/ase-recommended/summary.csv": "no revision or host column",
     "paper/jctc/data/lj55_lj98/seeds.csv": "no revision or host column",
+    "paper/jctc/data/literature.tsv": "no revision or host column",
+    "paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv": "no revision or host column",
+    "paper/jctc/data/lj75_gmin/lj75-derived-seeds-2000-2199.csv": "no revision or host column",
+    "paper/jctc/data/lj75_gmin/lj75-recommended-seeds-2000-2199.csv": "no revision or host column",
 }
 
 UNTRACED = [
@@ -959,6 +964,228 @@ def supporting_gmin(audit: Audit) -> None:
     audit.said(SI, f"where GMIN hits LJ\\(_{{98}}\\) on {hits_of(g)} of {len(g)} seeds at \\(4\\times 10^{{6}}\\) calls.")
 
 
+SI_TIP = "ce80337b7507ca12a99913da7ee8606184d4a3e1"
+SI_ARCHIVE = "paper/jctc/logs/lj75-source-37535ec1.tar.xz"
+
+
+def plain(value: float) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def numstat(old: bytes, new: bytes) -> tuple[int, int]:
+    """Insertions and deletions that git reports between two versions of a file."""
+    with tempfile.TemporaryDirectory() as scratch:
+        left, right = Path(scratch, "old"), Path(scratch, "new")
+        left.write_bytes(old)
+        right.write_bytes(new)
+        out = subprocess.run(["git", "diff", "--no-index", "--numstat", str(left), str(right)],
+                             capture_output=True, text=True, check=False).stdout.split()
+    return (int(out[0]), int(out[1])) if out else (0, 0)
+
+
+def line_of(audit: Audit, path: str, number: int) -> str:
+    return audit.text(path).splitlines()[number - 1]
+
+
+def supporting_numbers(audit: Audit) -> None:
+    """Every number of the SI, read from the row, log, archive or source file that holds it."""
+    gmin = load_script("gmin_panel_si", "scripts/gmin_panel/run_panel.py")
+    ref = {row[0]: row[3] for row in gmin.SYSTEMS}
+
+    def r6(system: str) -> str:
+        return f"\\({ref[system]:.6f}\\)"
+
+    # Board constants.
+    audit.cell(SI, "hit tolerance of the h2h examples", "0.001", float(re.search(
+        r'"lj38" => \(38, Kind::Lj, -173\.928427, ([\d.]+)\)', audit.text("examples/h2h_arm3.rs")).group(1)))
+    audit.said(SI, "We read a hit as an energy strictly below the reference plus \\(0.001\\),")
+    audit.said(SI, f"The references, in reduced units, are {r6('lj38')} for LJ\\(_{{38}}\\), {r6('lj55')} for "
+                   f"LJ\\(_{{55}}\\), and {r6('lj75')} for LJ\\(_{{75}}\\). LJ\\(_{{98}}\\) uses {r6('lj98')}, "
+                   f"and LJ\\(_{{104}}\\) uses {r6('lj104')}.")
+    preset = "src/methods/cluster_hopping/preset.rs"
+    audit.cell(SI, "temperature at preset.rs:8", "0.8",
+               float(re.fullmatch(r"\s*pub\(super\) const TEMPERATURE: f64 = ([\d.]+);", line_of(audit, preset, 8)).group(1)))
+    audit.said(SI, "The temperature is \\(0.8\\), the value Wales and Doye used for Lennard-Jones basin hopping and the "
+                   "value stored at \\texttt{preset.rs:8}.")
+    audit.said("examples/lj_cluster_search.rs", "random_cluster(n, 0.7, cfg.min_separation, &mut rng)")
+    audit.said(SI, "The start density passed to \\texttt{random\\_cluster} is \\(0.7\\).")
+    audit.said("src/methods/cluster_hopping.rs", "/// Seeds a non-overlapping configuration at liquid-like density.")
+    audit.said(SI, "The function comment calls the draw liquid-like.")
+
+    # Plain walk.
+    log = "paper/jctc/logs/lj38-plain-seed0.log"
+    macros = audit.text("paper/jctc/macros.tex")
+    energy = re.search(r"\\newcommand\{\\PlainEnergy\}\{(-?[\d.]+)\}", macros).group(1)
+    calls = re.search(r"\\newcommand\{\\PlainCalls\}\{(\d+)\}", macros).group(1)
+    arms = [float(m) for m in re.findall(r"^\s+arm \S+\s+draws\s+\d+\s+accepts\s+\d+\s+best\s+(-?[\d.]+)", audit.text(log), re.M)]
+    audit.cell(SI, "plain-walk best energy", energy, min(arms))
+    audit.said(log, f"LJ38, budget {calls} charged evaluations, 1 seeds, reference {ref['lj38']:.6f}")
+    audit.said(log, f"lj_cluster_search 38 {calls} 1 rec,noclimb,nosym")
+    audit.said(log, "SEED_OFFSET=0")
+    audit.said(SI, "with the stall exits and the Bayes screen turned off, seed 0, budget 30000.")
+    search = "examples/lj_cluster_search.rs"
+    audit.said(search, "cfg.escape_on_stall = (cfg.escape_on_stall || climb) && !noclimb;")
+    audit.said(search, "cfg.symmetrise_on_stall = (cfg.symmetrise_on_stall || sym) && !nosym;")
+    audit.said(search, 'cfg.bayes_screen = opts.contains(&"bayes");')
+    audit.cell(SI, "plain-walk budget", "30000", float(calls))
+    audit.said(SI, "The best energy in that log is \\PlainEnergy, after \\PlainCalls{} charged evaluations.")
+
+    # Published symmetrised costs.
+    lit = audit.rows("paper/jctc/data/literature.tsv", "\t")
+    csm = pick(lit, method="GMIN CSM BH", N="38")[0]
+    audit.said(SI, f"The continuous-symmetry basin-hopping mean at 38 atoms is {csm['reported_cost']} evaluations over "
+                   f"{csm['hits']} successful runs.")
+    audit.cell(SI, "successful runs equal runs", csm["runs"], float(csm["hits"]))
+    audit.cell(SI, "cost unit", "energy/gradient evaluations", csm["cost_unit"])
+    ga = sorted(r["N"] for r in lit if r["method"].endswith(" GA") and r["citation"].startswith("Oakley"))
+    audit.said(SI, "quotes Oakley, Johnston and Wales, Table 1.")
+    audit.cell(SI, "genetic-algorithm rows of Table 2", "75 98", " ".join(ga))
+    audit.said(SI, "The Table 2 rows of that source are genetic-algorithm means at 75 and 98 atoms. "
+                   "It has no genetic-algorithm row at 104 atoms.")
+    audit.record("104" not in ga, SI, "no Oakley genetic-algorithm row at 104 atoms", "none", " ".join(ga))
+
+    # TIP4P pair constants.
+    constants = audit.text("paper/jctc/logs/tip4p_constants.txt")
+    a_j, c_j = re.search(r"Jorgensen A = ([\d.]+) kJ A\^12/mol, C = ([\d.]+) kJ A\^6/mol", constants).groups()
+    eps, sigma = (float(v) for v in re.search(r"anneal epsilon = ([\d.]+), sigma = ([\d.]+)", constants).groups())
+    audit.cell(SI, "Jorgensen A", "2510400", float(a_j))
+    audit.cell(SI, "Jorgensen C", "2552.24", float(c_j))
+    audit.said(SI, "records Jorgensen's \\(A = 2510400\\) and \\(C = 2552.24\\).")
+    audit.said("paper/jctc/logs/tip4p_constants.txt", "GMIN C6 = 2552.24, C12 = 2.5104e+06: equal to Jorgensen C and A: True")
+    audit.said(SI, "The Wales-group basin-hopping program (GMIN) matches those two numbers in \\(C_6\\) and \\(C_{12}\\).")
+    audit.cell(SI, "anneal epsilon and sigma", "0.6485 3.15365", f"{eps:g} {sigma:g}")
+    audit.said(SI, f"anneal uses \\(\\varepsilon = {eps:g}\\)~kJ/mol and \\(\\sigma = {sigma:g}\\)~\\AA.")
+    c6, c12 = 4 * eps * sigma**6, 4 * eps * sigma**12
+    audit.said(SI, f"Its C6 is \\({c6:.4f}\\) and its C12 is \\({c12:.1f}\\).")
+    audit.said(SI, f"give the anneal pair \\(C_6 = {c6:.4f}\\) and \\(C_{{12}} = {c12:.1f}\\).")
+    audit.said("paper/jctc/logs/tip4p_constants.txt", f"C6 = {c6:.4f}, C12 = {c12:.1f}")
+    audit.said(SI, f"It uses the Jorgensen TIP4P constants C6 \\(= {float(c_j):g}\\) and C12 \\(= {float(a_j):.0f}\\).")
+    tip4p = audit.text("src/potentials/tip4p.rs")
+    audit.said("src/potentials/tip4p.rs", "the rounded 0.6485 leaves every cluster")
+    audit.record(f"{eps:g}" in tip4p, "src/potentials/tip4p.rs", "epsilon is in the source", f"{eps:g}", "present")
+
+    # Earlier campaign.
+    scores = audit.rows("paper/jctc/data/campaign-scores.csv")
+    counts = defaultdict(set)
+    for r in scores:
+        counts[r["seeds"]].add(r["board"])
+    audit.cell(SI, "campaign seed counts", "16 64", " ".join(sorted(counts, key=int)))
+    audit.cell(SI, "the 16-seed board", "tip4p20", " ".join(sorted(counts["16"])))
+    audit.said(SI, "is an earlier 64-seed campaign, and on TIP4P\\(_{20}\\) a 16-seed campaign.")
+    audit.record(any(r["code"] == "abcluster" for r in scores), SI, "ABCluster is in the campaign file", "present", "present")
+    seeds = audit.rows("paper/jctc/data/lj55_lj98/seeds.csv")
+    lj98 = {arm: sorted(pick(seeds, system="lj98", arm=arm), key=lambda r: int(r["seed"])) for arm in ("full", "gmin")}
+
+    def par2(row: dict[str, str]) -> float:
+        return float(row["hit_call"]) if row["hit"] == "True" else 2.0 * float(row["ceiling"])
+
+    full, gm = ([par2(r) for r in lj98[a]] for a in ("full", "gmin"))
+    for arm, values, sentence in (("full", full, "The full arm hits {h} of {n}."), ("gmin", gm, "The GMIN arm hits {h} of {n}.")):
+        rows = lj98[arm]
+        audit.said(SI, sentence.format(h=hits_of(rows), n=len(rows)))
+        audit.said(SI, f"Its call PAR-2 median is {plain(median(values))} and its type-7 interquartile range is "
+                       f"{plain(type7(values, 0.75) - type7(values, 0.25))}.")
+    rng = random.Random(2)
+    ratios = []
+    for _ in range(2000):
+        pick_ = [rng.randrange(len(full)) for _ in full]
+        ratios.append(median([full[i] for i in pick_]) / median([gm[i] for i in pick_]))
+    bootstrap = "paper/jctc/logs/paired_bootstrap_lj98.txt"
+    audit.said(bootstrap, "resamples=2000")
+    audit.said(bootstrap, "rng=random.Random(2)")
+    audit.cell(SI, "median ratio", "12.62", median(full) / median(gm))
+    audit.cell(SI, "bootstrap lower endpoint", "8.52", type7(ratios, 0.025))
+    audit.cell(SI, "bootstrap upper endpoint", "15.22", type7(ratios, 0.975))
+    audit.said(SI, "interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints 8.52 and 15.22, from 2000 resamples.")
+    lj75 = {name: len(audit.rows(f"paper/jctc/data/lj75_gmin/{name}.csv")) for name in
+            ("gmin-lj75-sym-starts-1-200", "lj75-recommended-seeds-2000-2199", "lj75-derived-seeds-2000-2199")}
+    audit.cell(SI, "the LJ75 campaign has 200 seeds in each arm", "200", float(min(lj75.values())))
+    audit.cell(SI, "campaign-scores LJ75 seeds", "64", float(max(int(r["seeds"]) for r in scores if r["board"] == "lj75")))
+    audit.said(SI, "None of those rows is the LJ\\(_{75}\\) campaign of 200 seeds.")
+
+    # Hardware and reproduction.
+    receipt = audit.text("paper/jctc/logs/lj75-hardware-receipt.txt")
+    tree = re.search(r"^TREE ([0-9a-f]{40})$", receipt, re.M).group(1)
+    audit.said(SI, f"\\texttt{{\\seqsplit{{{tree}}}}}, the tree of the unpublished build commit.")
+    audit.said(SI, f"We keep the source archive at \\path{{logs/lj75-source-{tree[:8]}.tar.xz}}.")
+    with tarfile.open(ROOT / SI_ARCHIVE) as archive:
+        def member(name: str) -> bytes:
+            return archive.extractfile(name).read()
+
+        audit.record(b"Copyright (c) 2023 anneal core developers" in member("LICENSE.txt"), SI,
+                     "the archive notice", "Copyright (c) 2023 anneal core developers", "present")
+        audit.said(SI, "The notice reads Copyright (c) 2023 anneal core developers.")
+        listing = audit.text("paper/jctc/logs/lj75-source-37535ec1.lst")
+        audit.record("\tLICENSE.txt" in listing, SI, "the archive includes LICENSE.txt", "present", "present")
+        want = {"src/methods/cluster_hopping.rs": (218, 2), "src/potentials/tip4p.rs": (93, 15),
+                "src/rigid_body.rs": (52, 14), "examples/molecular_cluster.rs": (1, 0),
+                "Cargo.toml": (4, 1), "Cargo.lock": (0, 55)}
+        for path, shown in want.items():
+            new = git_bytes("show", f"{SI_TIP}:{path}")
+            got = numstat(member(path), new)
+            audit.record(got == shown, SI, f"{path} against {SI_TIP[:8]}", f"+{shown[0]} -{shown[1]}", f"+{got[0]} -{got[1]}")
+    audit.said(SI, "Against commit \\texttt{ce80337b}, \\path{cluster_hopping.rs} differs by 218 insertions and 2 "
+                   "deletions, \\texttt{tip4p.rs} by 93 and 15, \\texttt{rigid\\_body.rs} by 52 and 14, "
+                   "\\path{examples/molecular_cluster.rs} by 1 insertion, \\texttt{Cargo.toml} by 4 insertions and "
+                   "1 deletion, and \\texttt{Cargo.lock} by 55 deletions.")
+    with tarfile.open(ROOT / "paper/jctc/logs/logs-water.tar.xz") as water:
+        versions = water.extractfile("water/VERSIONS").read().decode()
+    digest = re.search(r"^engine_sha256=([0-9a-f]{64})$", versions, re.M).group(1)
+    audit.said(SI, f"\\texttt{{\\seqsplit{{{digest}}}}}.")
+
+    # Landscape and fold captions.
+    directory = "paper/jctc/data/landscapes_7695255"
+    best: dict[str, float] = {}
+    for name in ("lj38_bh_s0", "lj38_rss_s0", "lj38_recommended_s0", "lj75_bh_s0", "lj75_recommended_s0",
+                 "lj98_bh_s0", "lj98_recommended_s0"):
+        energies = [float(line.split()[0]) for line in (ROOT / directory / f"{name}.min").read_text().splitlines()
+                    if line.strip() and not line.startswith("#")]
+        best[name] = min(energies) - ref[name.split("_")[0]]
+    gap = {k: f"{v:.3f}" for k, v in best.items()}
+    audit.record(abs(best["lj38_recommended_s0"]) < 1e-3, SI, "LJ38 recommended reaches the fcc minimum",
+                 "within 0.001", f"{best['lj38_recommended_s0']:.2e}")
+    audit.said(SI, f"Basin hopping sits \\({gap['lj38_bh_s0']}\\) above it. Random structure search sits "
+                   f"\\({gap['lj38_rss_s0']}\\) above it.")
+    audit.said(SI, f"Basin hopping and the recommended hop both sit \\({gap['lj75_bh_s0']}\\) above it.")
+    audit.cell(SI, "LJ75 arms agree", gap["lj75_bh_s0"], best["lj75_recommended_s0"])
+    audit.said(SI, f"The recommended hop sits \\({gap['lj98_recommended_s0']}\\) above it. Basin hopping sits "
+                   f"\\({gap['lj98_bh_s0']}\\) above it.")
+    audit.said(SI, f"basin hopping stops \\({gap['lj38_bh_s0']}\\) above it.")
+    audit.said(SI, f"both arms stop \\({gap['lj75_bh_s0']}\\) above the Marks decahedron.")
+    audit.said(SI, f"the recommended hop stops \\({gap['lj98_recommended_s0']}\\) above the Leary minimum and basin "
+                   f"hopping \\({gap['lj98_bh_s0']}\\) above it.")
+    report = "paper/jctc/REPORT.md"
+    audit.said(report, f"Basin hopping stops {gap['lj38_bh_s0']} above it.")
+
+    # Copper slab.
+    script = "scripts/elja_hq_sci_molslab_bank.sh"
+    audit.cell(SI, "TARGET_ENERGY line", "119", float(next(
+        i for i, text in enumerate(audit.text(script).splitlines(), 1) if text == "export TARGET_ENERGY=-415.971529")))
+    audit.cell(SI, "TARGET_TOL line", "120", float(next(
+        i for i, text in enumerate(audit.text(script).splitlines(), 1) if i > 119 and text == "export TARGET_TOL=1e-3")))
+    audit.said(SI, "Its line 119 sets \\texttt{TARGET\\_ENERGY} to \\(-415.971529\\) and its line 120 sets "
+                   "\\texttt{TARGET\\_TOL} to \\(10^{-3}\\).")
+    tally = "paper/jctc/scripts/hq_sci_tally.py"
+    audit.said(tally, "scripts/elja_hq_sci_molslab_bank.sh line 119 sets it too.")
+    audit.cell(tally, "the jcc script's target line", "80", float(next(
+        i for i, text in enumerate(audit.text("scripts/elja_jcc_molslab_ensemble.sh").splitlines(), 1)
+        if text.strip() == "TARGET=-415.971529")))
+    audit.said(tally, "scripts/elja_jcc_molslab_ensemble.sh line 80 sets that target.")
+    bests = []
+    for index in range(8):
+        found = re.search(r"seed \d+: best (\S+) eV", audit.text(f"paper/jctc/logs/cuh2_fcc_rec_{index}.out"))
+        bests.append(float(found.group(1)))
+    gaps = [b + 415.971529 for b in bests]
+    audit.cell(SI, "smallest copper gap", "8e-6", min(gaps))
+    audit.cell(SI, "largest copper gap", "3.68e-4", max(gaps))
+    audit.cell(SI, "copper seeds inside the tolerance", "8", float(sum(g < 1e-3 for g in gaps)))
+    audit.cell(SI, "copper seeds inside 1e-6 eV", "0", float(sum(g < 1e-6 for g in gaps)))
+    audit.said(SI, "The per-seed gaps run from \\(8\\times 10^{-6}\\)~eV to \\(3.68\\times 10^{-4}\\)~eV above that reference.")
+    audit.said(SI, "No seed reached the reference within \\(10^{-6}\\)~eV.")
+    audit.said(SI, "Eight seeds lie inside the 0.001~eV tolerance.")
+    audit.said(SI, "The hit tolerance is 0.001~eV.")
+
+
 def manuscript_tip4p(audit: Audit) -> None:
     rows = audit.rows("bench/tip4p-water-rates/rates-a24ba760.csv")
     ten = sorted(pick(rows, n="10", budget="500000"), key=lambda r: int(r["seed"]))
@@ -1075,7 +1302,7 @@ def supporting_information(audit: Audit) -> None:
     refs = audit.rows("paper/jctc/data/system_visuals/references.csv")
     hexamer = next(r for r in refs if r.get("label") == "TIP4P-6" or "TIP4P-6" in ",".join(r.values()))
     energy = next(v for v in hexamer.values() if v and re.fullmatch(r"-\d+\.\d+", v))
-    audit.said(SI, f"The (H\\(_2\\)O)\\(_6\\) plate prints \\({float(energy):.4f}\\)~kJ/mol.")
+    audit.said(SI, f"The (H\\(_2\\)O)\\(_6\\) plate prints the energy \\({float(energy):.4f}\\)~kJ/mol.")
 
 
 # --------------------------------------------------------------------------- bench READMEs
@@ -2123,7 +2350,7 @@ def run(report: bool = False) -> int:
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, supporting_gmin):
+                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers):
         check(audit)
     for path, fragment, _why in UNTRACED:
         audit.said(path, fragment)

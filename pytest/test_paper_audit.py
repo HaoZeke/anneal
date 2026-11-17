@@ -41,6 +41,7 @@ CHECKS = (
     audit_mod.panel_references,
     audit_mod.generated_tables,
     audit_mod.supporting_gmin,
+    audit_mod.supporting_numbers,
 )
 
 
