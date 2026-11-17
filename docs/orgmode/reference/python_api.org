@@ -484,6 +484,7 @@ rgpot.LJPot(u0=1.0, cutoff=15.0, psi=1.0, switch_width=0.0)
 - Units :: =u0= eV; =cutoff=, =psi= and =switch_width= Angstrom.
 - Outputs :: a periodic Lennard-Jones potential.
   =evaluate= returns the stress.
+  It has an analytic Hessian-vector product: =has_analytic_hvp()= is true.
 - Errors :: a nonzero =switch_width= outside =0 < switch_width <= cutoff= raises
   =ValueError= =QuinticSwitch: switch width must satisfy 0 < width <= cutoff=.
 
@@ -520,8 +521,7 @@ rgpot.MorsePot(De=0.7102, a=1.6047, re=2.897, cutoff=9.5, switch_width=0.0)
   cell (on a diagonal cell only axes with a positive diagonal entry wrap, and
   each distinct atom pair contributes at most one minimum image).
   =evaluate= returns the stress.
-  It is the only class here with an analytic Hessian-vector product:
-  =has_analytic_hvp()= is true.
+  It has an analytic Hessian-vector product: =has_analytic_hvp()= is true.
 - Errors :: as =rgpot.LJPot=; on a sheared cell a singular or non-finite =box=
   raises =ValueError=.
 

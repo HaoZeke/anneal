@@ -105,7 +105,7 @@ def test_auto_is_forward_without_an_analytic_product() -> None:
     positions = np.ascontiguousarray([[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.3, 1.1, 0.2]])
     types = np.ones(3, dtype=np.int32)
     v = _direction(3)
-    pot = rgpot.LJPot()
+    pot = rgpot.LJClusterPot()
     assert not pot.has_analytic_hvp()
     for _ in range(3):
         pot.hvp(positions, types, BOX, v)

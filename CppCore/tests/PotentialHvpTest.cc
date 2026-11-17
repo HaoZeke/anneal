@@ -15,6 +15,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "rgpot/HessianVector.hpp"
+#include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Models/ModelPots.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
@@ -23,6 +24,7 @@
 using rgpot::ForceInput;
 using rgpot::ForceOut;
 using rgpot::InputSpec;
+using rgpot::LJClusterPot;
 using rgpot::LJPot;
 using rgpot::MorsePot;
 using rgpot::PotentialHandle;
@@ -120,8 +122,8 @@ TEST_CASE("from_impl registers the analytic product of MorsePot", "[hvp]") {
   CHECK(pot.hvp_counts().analytic == 1);
 }
 
-TEST_CASE("from_impl keeps LJPot Auto on finite differences", "[hvp]") {
-  LJPot lj;
+TEST_CASE("from_impl keeps LJClusterPot Auto on finite differences", "[hvp]") {
+  LJClusterPot lj;
   auto pot = PotentialHandle::from_impl(lj);
   std::array<double, 9> pos{
       0.0, 0.0, 0.0, 1.2, 0.1, 0.0, 0.3, 1.1, 0.2};
@@ -155,6 +157,31 @@ TEST_CASE("from_impl keeps LJPot Auto on finite differences", "[hvp]") {
         std::sqrt(std::numeric_limits<double>::epsilon()) * (1.0 + scale);
     CHECK(std::abs(auto_hv[i] - central[i]) <= truncation + roundoff);
   }
+}
+
+TEST_CASE("from_impl registers the analytic product of LJPot", "[hvp]") {
+  LJPot lj;
+  auto pot = PotentialHandle::from_impl(lj);
+  std::array<double, 9> pos{
+      0.0, 0.0, 0.0, 1.2, 0.1, 0.0, 0.3, 1.1, 0.2};
+  std::array<int, 3> atmnrs{1, 1, 1};
+  std::array<double, 9> box{
+      20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0};
+  InputSpec input(atmnrs.size(), pos.data(), atmnrs.data(), box.data());
+  const std::vector<double> direction{
+      0.2, -0.1, 0.4, -0.3, 0.5, 0.1, 0.3, -0.2, -0.4};
+  const auto hv = pot.hvp(input, direction, 0.0, RGPOT_HVP_AUTO);
+  const auto counts = pot.hvp_counts();
+  CHECK(counts.analytic == 1);
+  CHECK(counts.force_calls == 0);
+
+  std::vector<double> want(direction.size());
+  ForceInput legacy{.nAtoms = atmnrs.size(),
+                    .pos = pos.data(),
+                    .atmnrs = atmnrs.data(),
+                    .box = box.data()};
+  lj.hessianVectorImpl(legacy, direction.data(), want.data());
+  CHECK(hv == want);
 }
 
 TEST_CASE("from_impl registers the analytic product of DoubleWellPot", "[hvp]") {

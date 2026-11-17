@@ -2,7 +2,8 @@
 // Copyright 2023--present rgpot developers
 //
 // Hessian-vector products (HessianVector.hpp): the analytic Morse product
-// against a dense Hessian built here, the orders of the finite differences,
+// against a dense Hessian built here, the analytic LJ product against a
+// dense finite-difference Hessian, the orders of the finite differences,
 // the force calls a Lanczos loop makes, and when the cached centre is
 // dropped.
 
@@ -19,6 +20,7 @@
 
 #include "rgpot/FusedCache.hpp"
 #include "rgpot/FusedSettings.hpp"
+#include "DenseHessianOracle.hpp"
 #include "rgpot/HessianVector.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
@@ -235,38 +237,48 @@ TEST_CASE("MorsePot hessianVectorImpl matches the dense Hessian", "[HessianVecto
   CHECK(relativeError(hv, want) < 1e-12);
 }
 
-TEST_CASE("LJPot auto scheme stays on finite differences", "[HessianVector]") {
-  rgpot::LJPot pot;
-  const std::array<double, 9> position{
-      0.0, 0.0, 0.0, 1.2, 0.1, 0.0, 0.3, 1.1, 0.2};
-  const std::array<int, 3> numbers{1, 1, 1};
+TEST_CASE("LJPot hessianVectorImpl matches a dense finite-difference Hessian",
+          "[HessianVector]") {
+  // Four atoms near the 1.12 minimum, every pair inside the cutoff; the
+  // switched config puts most pairs inside the switch region.
+  const std::vector<double> x{10.0, 10.0, 10.0, 11.15, 10.08, 10.02,
+                              10.52, 11.01, 9.93, 10.47, 10.38, 11.06};
+  const std::vector<int> z(4, 1);
   const auto box = cell();
-  const ForceInput in{
-      .nAtoms = numbers.size(),
-      .pos = position.data(),
-      .atmnrs = numbers.data(),
-      .box = box.data(),
-  };
-  const std::array<double, 9> direction{
-      0.2, -0.1, 0.4, -0.3, 0.5, 0.1, 0.3, -0.2, -0.4};
-  std::array<double, 9> autoProduct{}, forwardProduct{};
+  const auto v = direction(x.size());
+  for (const rgpot::LJConfig config :
+       {rgpot::LJConfig{.cutoff = 3.0},
+        rgpot::LJConfig{.cutoff = 2.0, .switch_width = 1.0}}) {
+    rgpot::LJPot pot(config);
+    HessianVectorCache cache;
+    std::vector<double> hv(v.size());
+    cache.apply(pot, {.nAtoms = z.size(), .pos = x.data(), .atmnrs = z.data(),
+                      .box = box.data()},
+                v.data(), hv.data(), 0.0, HvpScheme::Auto);
+    CHECK(cache.counts().analytic == 1);
+    CHECK(cache.counts().forceCalls == 0);
+    const auto oracle = finiteDifferenceOracle(pot, x, z, box, v);
+    for (std::size_t k = 0; k < v.size(); ++k) {
+      CHECK(std::abs(hv[k] - oracle.product[k]) <= oracle.bound[k]);
+    }
+  }
+}
+
+TEST_CASE("LJPot hessianVectorImpl reports coincident atoms", "[HessianVector]") {
+  rgpot::LJPot pot(rgpot::LJConfig{.cutoff = 3.0});
+  const std::array<double, 6> position{10.0, 10.0, 10.0, 10.0, 10.0, 10.0};
+  const std::array<int, 2> numbers{1, 1};
+  const auto box = cell();
+  const std::array<double, 6> v{0.1, 0.2, 0.3, -0.1, 0.0, 0.2};
+  std::array<double, 6> hv{};
   HessianVectorCache cache;
-  REQUIRE_NOTHROW(cache.apply(pot, in, direction.data(), autoProduct.data(),
-                              0.0, HvpScheme::Auto));
-  cache.invalidate();
-  REQUIRE_NOTHROW(cache.apply(pot, in, direction.data(), forwardProduct.data(),
-                              0.0, HvpScheme::Forward));
-  double scale = 1.0;
-  for (std::size_t i = 0; i < autoProduct.size(); ++i) {
-    scale += std::abs(autoProduct[i]) + std::abs(forwardProduct[i]);
-  }
-  const double bar = 128.0 * std::numeric_limits<double>::epsilon() * scale;
-  for (std::size_t i = 0; i < autoProduct.size(); ++i) {
-    CHECK(std::abs(autoProduct[i] - forwardProduct[i]) <= bar);
-  }
-  CHECK_THROWS_AS(cache.apply(pot, in, direction.data(), autoProduct.data(), 0.0,
-                              HvpScheme::Analytic),
-                  std::invalid_argument);
+  CHECK_THROWS_AS(cache.apply(pot,
+                              {.nAtoms = numbers.size(),
+                               .pos = position.data(),
+                               .atmnrs = numbers.data(),
+                               .box = box.data()},
+                              v.data(), hv.data(), 0.0, HvpScheme::Analytic),
+                  std::domain_error);
 }
 
 TEST_CASE("MorsePot hessianVectorImpl differentiates the switch", "[HessianVector]") {

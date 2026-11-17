@@ -10,6 +10,7 @@
  */
 
 // clang-format off
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -107,7 +108,6 @@ void LJPot::forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &
 
 void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const {
   const long N = in.nAtoms;
-  const double *R = in.pos;
   const double *box = in.box;
   double *F = out->F;
   double *U = &out->energy;
@@ -126,13 +126,7 @@ void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms
 
   const simd::LjParams params = lj_params(u0, psi, cuttOffU, m_config, m_switch);
   const auto n_atoms = static_cast<std::size_t>(N);
-  // One angstrom of skin. A stored list keeps pairs out to cutoff + skin
-  // and the kernel below drops those past the cutoff. Stream asks for no
-  // skin: the bins are not reused unless the coordinates match.
-  const double skin = mode_ == nlist::Mode::Stream ? 0.0 : 1.0;
-  const std::array<bool, 3> periodic{{true, true, true}};
-  nlist::updateCells(neighbours_, R, n_atoms, box, cuttOffR, skin, nlist::Image::Round,
-                     mode_, periodic);
+  updateNeighbours(in);
   const double cutoff2 = cuttOffR * cuttOffR;
   // Two different atoms on the same point make the energy NaN. Skipping
   // the pair would report a finite energy of zero and hide the singularity.
@@ -143,6 +137,87 @@ void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms
       },
       F, *U, strain, atoms);
   publishCauchyStress(out, strain, volume);
+}
+
+void LJPot::updateNeighbours(const ForceInput &in) const {
+  // One angstrom of skin. A stored list keeps pairs out to cutoff + skin
+  // and the kernels drop those past the cutoff. Stream asks for no skin:
+  // the bins are not reused unless the coordinates match.
+  const double skin = mode_ == nlist::Mode::Stream ? 0.0 : 1.0;
+  const std::array<bool, 3> periodic{{true, true, true}};
+  nlist::updateCells(neighbours_, in.pos, static_cast<std::size_t>(in.nAtoms), in.box,
+                     cuttOffR, skin, nlist::Image::Round, mode_, periodic);
+}
+
+/**
+ * @details
+ *
+ * With @f$a = (\psi/r)^6@f$ the bare pair term @f$V = 4 u_0 a (a - 1)@f$
+ * has @f$V' = (4 u_0 / r)(6 a - 12 a^2)@f$ and
+ * @f$V'' = (4 u_0 / r^2)(156 a^2 - 42 a)@f$. The shift is a constant and
+ * drops out. The switch multiplies the bare term by @f$S@f$, so
+ * @f$\phi' = V' S + V S'@f$ and @f$\phi'' = V'' S + 2 V' S' + V S''@f$.
+ */
+void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv) const {
+  const auto N = static_cast<long>(in.nAtoms);
+  std::fill_n(hv, 3 * in.nAtoms, 0.0);
+  if (N < 2 || cuttOffR <= 0.0) {
+    return;
+  }
+  updateNeighbours(in);
+  const double cutoff2 = cuttOffR * cuttOffR;
+  const double psi2 = psi * psi;
+  const double fourU0 = 4.0 * u0;
+  const bool switched = m_config.switch_width != 0.0;
+  bool overlap = false;
+  nlist::visitHalf(neighbours_, 0, N,
+                   [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+                       double r2) {
+    if (!(i < j) || r2 > cutoff2) {
+      return;
+    }
+    if (!(r2 > 0.0)) {
+      overlap = true;
+      return;
+    }
+    const double r = std::sqrt(r2);
+    const double inv_r = 1.0 / r;
+    const double sr2 = psi2 / r2;
+    const double a = sr2 * sr2 * sr2;
+    double d1 = fourU0 * inv_r * (6.0 * a - 12.0 * a * a);
+    double d2 = fourU0 * inv_r * inv_r * (156.0 * a * a - 42.0 * a);
+    if (switched) {
+      const double bare = fourU0 * a * (a - 1.0);
+      const auto s = m_switch(r);
+      const double s2 = m_switch.d2sdr2(r);
+      d2 = d2 * s.s + 2.0 * d1 * s.dsdr + bare * s2;
+      d1 = d1 * s.s + bare * s.dsdr;
+    }
+    const double ux = dx * inv_r;
+    const double uy = dy * inv_r;
+    const double uz = dz * inv_r;
+    const double *vi = v + 3 * static_cast<std::size_t>(i);
+    const double *vj = v + 3 * static_cast<std::size_t>(j);
+    const double wx = vi[0] - vj[0];
+    const double wy = vi[1] - vj[1];
+    const double wz = vi[2] - vj[2];
+    const double radial = d1 * inv_r;
+    const double along = (d2 - radial) * (ux * wx + uy * wy + uz * wz);
+    const double kx = along * ux + radial * wx;
+    const double ky = along * uy + radial * wy;
+    const double kz = along * uz + radial * wz;
+    double *hi = hv + 3 * static_cast<std::size_t>(i);
+    double *hj = hv + 3 * static_cast<std::size_t>(j);
+    hi[0] += kx;
+    hi[1] += ky;
+    hi[2] += kz;
+    hj[0] -= kx;
+    hj[1] -= ky;
+    hj[2] -= kz;
+  });
+  if (overlap) {
+    std::fill_n(hv, 3 * in.nAtoms, std::numeric_limits<double>::quiet_NaN());
+  }
 }
 
 void LJPot::forceStage(const HalfList &list, const double *, double *forces,

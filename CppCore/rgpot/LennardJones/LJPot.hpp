@@ -77,7 +77,9 @@ public:
 
   [[nodiscard]] PotCaps caps() const noexcept override {
     // neighbours_ is scratch rewritten by every force call.
-    return {.reentrancy = Reentrancy::PerInstance, .stress = true};
+    return {.reentrancy = Reentrancy::PerInstance,
+            .stress = true,
+            .analyticHvp = true};
   }
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
@@ -96,6 +98,18 @@ public:
    * @return Void.
    */
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
+
+  /**
+   * @brief Analytic Hessian-vector product @f$H v@f$.
+   *
+   * The pairs, minimum image, shift or switch of @c forceImpl, each pair
+   * adding @f$K (v_i - v_j)@f$ to atom @c i and its negative to @c j, with
+   * @f$K = \phi'' \hat d \hat d^T + (\phi' / r)(I - \hat d \hat d^T)@f$.
+   * Two atoms on one point make the product NaN, as they make the energy.
+   * @a v and @a hv hold @c 3*in.nAtoms doubles.
+   */
+  void hessianVectorImpl(const ForceInput &in, const double *v,
+                         double *hv) const override;
 
   /// forceImpl plus each pair energy and virial split half to each atom.
   void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) const;
@@ -124,6 +138,7 @@ private:
   static constexpr uint64_t kKernelVersion = 2;
 
   void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
+  void updateNeighbours(const ForceInput &in) const;
 
   double u0;       //!< Well depth parameter.
   double cuttOffR; //!< Distance beyond which potential is truncated.
