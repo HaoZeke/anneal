@@ -173,6 +173,19 @@ START_FIELDS = [
     "date",
     "xtb_sha256",
 ]
+CENSOR_FIELDS = [
+    "system",
+    "code",
+    "seed",
+    "outcome",
+    "wall_observed_s",
+    "xtb_log_records",
+    "best_eV",
+    "reason",
+    "code_revision",
+    "host",
+    "date",
+]
 SUMMARY_FIELDS = [
     "system",
     "code",
@@ -326,9 +339,14 @@ def first_frame_energy(path: Path) -> float:
     return float(found[0]) * AUTOEV
 
 
+def output_exceeds(path: Path, limit: int) -> bool:
+    """Whether a CREST output has crossed its corruption guard."""
+    return path.is_file() and path.stat().st_size > limit
+
+
 def run_crest(
     crest: Path, xtb: Path, python: str, system: str, seed: int, start: Path, out: Path
-) -> dict:
+) -> tuple[dict | None, dict | None]:
     out.mkdir(parents=True, exist_ok=True)
     log = out / "xtb-calls.log"
     log.write_text("")
@@ -376,7 +394,33 @@ def run_crest(
                 command, cwd=out, stdout=stdout, stderr=stderr, start_new_session=True
             )
             group = crest_run.pid
-            code = crest_run.wait()
+            limit = int(os.environ.get("CREST_MAX_OUTPUT_BYTES", str(1 << 30)))
+            garbage = out / "crest_rotamers_0.xyz"
+            while crest_run.poll() is None:
+                if output_exceeds(garbage, limit):
+                    try:
+                        os.killpg(group, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    crest_run.wait()
+                    wall = time.monotonic() - began
+                    return None, {
+                        "system": system,
+                        "code": "crest",
+                        "seed": seed,
+                        "outcome": "censored",
+                        "wall_observed_s": f"{wall:.6f}",
+                        "xtb_log_records": len(log.read_text().splitlines()),
+                        "best_eV": "",
+                        "reason": (
+                            f"crest_rotamers_0.xyz exceeded {limit} bytes while CREST "
+                            "was still running"
+                        ),
+                    }
+                try:
+                    code = crest_run.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    continue
     wall = time.monotonic() - began
     if group is not None:
         # On Si20 seed 2005 a CREST process outlived the run and wrote 58 GB
@@ -407,7 +451,7 @@ def run_crest(
         "best": best,
         "pot_s": inside,
         "outside_s": max(wall - inside, 0.0),
-    }
+    }, None
 
 
 def sha256(path: Path) -> str:
@@ -462,6 +506,7 @@ def main() -> None:
     ap.add_argument("--rescore", nargs=2, metavar=("SYSTEM", "ENERGY_EV"))
     ap.add_argument("--rescored", type=Path)
     ap.add_argument("--check-starts", type=Path)
+    ap.add_argument("--censoring", type=Path)
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -569,7 +614,7 @@ def main() -> None:
         for seed, code in pairs:
             where = args.out / system / code / str(seed)
             if code == "crest":
-                row = run_crest(
+                row, censored = run_crest(
                     args.crest,
                     args.xtb,
                     python,
@@ -578,6 +623,18 @@ def main() -> None:
                     starts / f"{seed}.xyz",
                     where,
                 )
+                if censored is not None:
+                    if args.censoring is None:
+                        raise SystemExit("a censored CREST run needs --censoring")
+                    censored.update(
+                        code_revision=revision,
+                        host=host,
+                        date=datetime.date.today().isoformat(),
+                    )
+                    append_rows(args.censoring, CENSOR_FIELDS, [censored])
+                    print(",".join(str(censored[k]) for k in CENSOR_FIELDS), flush=True)
+                    continue
+                assert row is not None
             else:
                 if system in WALL_CAP and cap is None:
                     cap = wall_cap(
@@ -813,6 +870,10 @@ def self_test() -> None:
     if two_sided_mw([5.0, 5.0], [5.0, 5.0]) != 1.0:
         raise SystemExit("tied mann-whitney")
     with tempfile.TemporaryDirectory() as scratch:
+        garbage = Path(scratch) / "garbage"
+        garbage.write_bytes(b"12345")
+        if output_exceeds(garbage, 5) or not output_exceeds(garbage, 4):
+            raise SystemExit("CREST output guard")
         path = Path(scratch) / "rows.csv"
         fields = ROW_FIELDS + PROVENANCE_FIELDS
         row = {key: "1" for key in fields}

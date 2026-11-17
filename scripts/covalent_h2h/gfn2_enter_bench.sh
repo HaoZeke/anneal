@@ -22,6 +22,7 @@ TARGET=${CARGO_TARGET_DIR:-/work/pin/tip}
 CODES=${GFN2_CODES:-anneal-general crest}
 ROWS=${GFN2_ROWS:-$OUT/rows.csv}
 SUMMARY=${GFN2_SUMMARY:-$OUT/summaries.csv}
+CENSORING=${GFN2_CENSORING:-$OUT/si20-censoring.csv}
 CORE=${GFN2_CORE:-0}
 PY=${GFN2_PYTHON:-/usr/bin/python3}
 
@@ -55,6 +56,7 @@ exec taskset -c $CORE $PY -u $HERE/gfn2_crest.py \\
   --anneal $WORK/bin/gfn2_covalent_h2h --crest $CREST --xtb $XTB \\
   --engine $ENGINE --head-file $WORK/anneal-head \\
   --out $WORK/runs --rows $ROWS --history $OUT/seeds.csv --summary $SUMMARY \\
+  --censoring $CENSORING \\
   --codes $CODES "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"
