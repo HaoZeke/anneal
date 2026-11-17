@@ -1340,13 +1340,17 @@ Cite `tahmassebpurHeat2026` and `shaoHydroxideWater2026`.
 
 Park, Pracht, Kavanagh, and Wales, arXiv:2611.19365 (14 November 2026), introduce a persistent socket interface connecting GMIN, OPTIM, and PATHSAMPLE to calculators available through the Atomic Simulation Environment (ASE). Keeping both the calculator and the socket connection active avoids repeated initialisation across landscape searches. They apply the bridge to gallium vacancies in \(\beta\)-Ga\(_2\)O\(_3\) using two NequIP potentials, building kinetic transition networks, disconnectivity visualisations, mean first-passage times, and heat capacities.
 
-The manuscript scores GMIN on native Lennard-Jones 98 and 104, and names ASE's own basin-hopping optimiser as a separate unprinted arm. This persistent socket interface does not fill that ASE basin-hopping arm, and it reports no Lennard-Jones or water-hexamer hit rate, so no printed count is contradicted. A head-to-head using this bridge would share one ASE calculator (such as those NequIP vacancy networks) rather than the native Lennard-Jones preset. The GMIN and OPTIM directory pages remain unchanged since 17 March 2022, while this preprint documents the new ASE coupling.
+The manuscript scores GMIN on the paper GMIN panel, and names ASE's own basin-hopping optimiser as a separate unprinted arm. This persistent socket interface does not fill that ASE basin-hopping arm, and it reports no Lennard-Jones or water-hexamer hit rate, so no printed count is contradicted. A head-to-head using this bridge would share one ASE calculator (such as those NequIP vacancy networks) rather than the native Lennard-Jones preset. The GMIN and OPTIM directory pages remain unchanged since 17 March 2022, while this preprint documents the new ASE coupling.
+
+Farris, doi:10.5281/zenodo.20445318 (29 May 2026), releases NanoParticleLibrary (NPL) v2.0.0 on Zenodo, an ASE-wrapped Python library with a compiled Rust extension for chemical-ordering basin hopping, genetic algorithms, and Monte Carlo on bimetallic and trimetallic nanoparticles (`TOP`, `ACT`, and `ETOP` models), updated for ASE \(\ge 3.23\). Jung, Colombi Manzi, Goncalves, Bukas, De, Margraf, Reuter, and Heenen, npj Computational Materials 12, 300 (4 September 2026), doi:10.1038/s41524-026-02298-1, release NEBscape, which generates initial and final surface-adsorbate geometries on OC20NEB using ASE's minima-hopping implementation extended with a shared history of visited minima before running automated nudged elastic band calculations. Marcial, Chaudhary, Gorbunova, and Kolmogorov, Machine Learning: Science and Technology 7, 050501 (9 September 2026), doi:10.1088/2632-2153/ae94e1, evaluate twelve universal machine-learning potentials in unconstrained evolutionary crystal searches. None of the three runs ASE `BasinHopping` on LJ38 through LJ104 or reports a Lennard-Jones or water-hexamer hit rate.
+
+Checked on 17 November 2026, the latest released ORCA version carrying GOAT remains ORCA 6.1.1 (9 December 2025). On 16 November 2026 FACCTs announced GPU-accelerated ORCA 7 with cuEST and a SURFF universal force field for a release event on 8 December 2026; no ORCA 7 binary or new GOAT release has shipped yet. The `martiniani-lab/pele` fork's master tip is dated 28 September 2026, while `pele-python/pele` v0.1.2 (12 October 2026) remains the latest PyPI/GitHub release. No bibliographic entry for the FACCTs announcement or repository tips: neither has a verified DOI or arXiv id.
 
 Liu, Wang, and Shen, arXiv:2611.21489 (16 November 2026), identify local topology hallucinations across MACE-MP-0a, CHGNet, and M3GNet (with SevenNet-Omni tested in a supplementary comparison) against fixed-cell PBE calculations on periodic \(s\)- and \(p\)-block structures. Two-against-one model consensus matched PBE on 55 of 57 positive-curvature directions but on only 5 of 56 negative-curvature directions; even unanimous negative predictions matched PBE in only 5 of 14 cases. In LiGe\(_2\)S, two MACE minima connected by a verified saddle relaxed into one PBE basin, and PBE relaxation returned nine of ten selected model minima to their reference basins. They pair a two-point directional curvature reference test with endpoint relaxation.
 
 The manuscript searches directly on the Lennard-Jones, TIP4P, and GFN2-xTB surfaces without a machine-learned surrogate, so this finding contradicts no printed count. It reinforces the rule that structure-search candidates proposed on universal potentials must be re-evaluated on the target surface.
 
-Cite `parkSocketInterface2026` and `liuTopologyHallucinations2026`.
+Cite `parkSocketInterface2026`, `farrisNpl2026`, `jungNebscape2026`, `marcialUmlpCrystals2026`, and `liuTopologyHallucinations2026`.
 
 ## 2026-11-17 — Continuous MCTS on Au35, GMSAC, DRL review, and ML-steered generative searches
 
@@ -1371,3 +1375,117 @@ Rauscher, arXiv:2609.18093 (17 September 2026), estimates Gibbs--Shannon entropy
 Checked on 17 November 2026: ABCluster's newest release is v3.4 (7 January 2026, `isomer` \(I/I_h\) fix); ASE 3.29.0, AGOX v3.11.1, CREST v3.0.2 (master tip 16 June 2026), pele v0.1.2, and xtb v6.8.0 are unchanged, and the Cambridge Cluster Database Lennard-Jones table (`tables.150.html`) retains the same published minima at LJ38, LJ55, LJ75, LJ98, and LJ104.
 
 Cite `tarratSilver2026`, `alotaibiCopperNickel2026`, `rauscherEntropy2026`, and `sandbergMlips2026`.
+
+## 2026-11-17 — Hybrid GA+SSW, Gen-SSW, and Hiccup global PES searches
+
+Liu, Liu, and Shang, Journal of Chemical Theory and Computation 22, 9847--9856 (7 September 2026), doi:10.1021/acs.jctc.6c01078, combine a genetic algorithm with stochastic surface walking (`GA+SSW`) for global potential-energy-surface discovery and automated long-range pathway mapping across superbasins. The tests include atomic clusters, ligand-protected clusters, molecular clusters, surface-supported clusters, atomic crystals, and molecular crystals, and the abstract reports significant exploration gains over standalone genetic-algorithm and stochastic-surface-walking baselines.
+
+Liang, Guo, Tang, Guan, Tong, Li, and Liu, Journal of Chemical Theory and Computation 22, 11705--11718 (30 October 2026), doi:10.1021/acs.jctc.6c01420, pair an `SE(3)`-equivariant diffusion generator (`LASP-Gen`) with parallel short stochastic-surface-walking trajectories (`Gen-SSW`), finding low-energy polymorphs across `TiO2`, `LiFePO4`, `Ge2Sb2Te5`, boron allotropes, and phenol crystal. Chen, Chen, and Wang, Journal of Chemical Information and Modeling 66, 13284--13293 (13 October 2026), doi:10.1021/acs.jcim.6c02301, release `Hiccup`, combining universal neural-network-potential priors with hierarchical GA--MD sampling for global potential training on `Cu--Y--O`.
+
+None of the three reports a Lennard-Jones 38--104 hit rate or a water-hexamer count, so none contradicts the Cambridge targets, `121` of `192`, or `97` of `192`. Hybrid `GA+SSW` is a competing cluster global-optimisation method outside the ASE, AGOX, and GMIN kit; any head-to-head against it requires a shared cluster potential and evaluation budget.
+
+Cite `liuHybridGaSsw2026`, `liangGenSsw2026`, and `chenHiccup2026`.
+
+## 2026-11-17 — Generative nested sampling on Lennard-Jones, 3D lattice minima, and water cooperativity
+
+Coretti, Unglert, Falkner, Madsen, and Dellago, arXiv:2609.03193 (2 September 2026), introduce `NS-Flows`, replacing Markov-chain decorrelation inside nested sampling with a conditional normalizing flow trained on a sliding window of live sets. They diagnose permutation-induced multimodality on an 8-particle 2D Lennard-Jones system and benchmark periodic Lennard-Jones disks, cutting energy evaluations by two orders of magnitude and wall-clock time by roughly 30 percent. This extends the nested-sampling Lennard-Jones baselines (`maillardNested2025`, `yallupNested2026`) without reporting 3D `LJ38`--`LJ104` global minima or force-call hit rates.
+
+Luo and Wei, arXiv:2611.19696 (15 November 2026), classify exact minimizers of the 3D Lennard-Jones lattice energy across covolume via Epstein zeta functions, proving the phase sequence from face-centered cubic to body-centered tetragonal to simple hexagonal. That proof concerns infinite lattices, leaving the 3D finite-cluster optimality proofs stopped at 7 atoms (`shenSevenParticle2026`) and 38 atoms and larger unproved (`lecomteDiameter2026`).
+
+Zhang, The Journal of Chemical Physics 165, 094305 (1 September 2026), doi:10.1063/5.0345834, decomposes 1,169 `(H2O)4-23` cluster geometries at `B3LYP-D3(BJ)/def2-TZVP` into two-body and three-body terms and fits finite-size scaling models of hydrogen-bond cooperativity. Because it analyzes fixed DFT isomer sets rather than searching TIP4P or GFN2-xTB landscapes, it reports no TIP4P energy, `121` of `192`, or `97` of `192` and contradicts no manuscript claim.
+
+Cite `corettiNsFlows2026`, `luoThreeDimLjLattice2026`, and `zhangWaterCooperativity2026`.
+
+## 2026-11-17 — Conformer filtering, generative steering, and release check
+
+Hübler, ChemRxiv (21 September 2026), doi:10.26434/chemrxiv.15009180/v1, implements a three-phase permutation-invariant conformer filter in `curcuma` using energy windows, rotational constants, and Vietoris--Rips persistence barcodes before `curcuma` or `molalign` permutations. Across 395 conformers, the preprint notes that semiempirical rankings can diverge from higher-level quantum-chemical orderings and that sequential RMSD pruning depends on comparison order, supporting our practice of reporting GFN2-xTB hexamer counts explicitly pinned to `xtb` 6.7.1 and 6.8.0.
+
+Darouich, Geisler, Toney, Bien, Kästner, Kulik, and Niepert, arXiv:2609.34592 (28 September 2026), introduce `CurvFM` with frozen ML Hessian curvature supervision for conformer and transition-state generation on GEOM-QM9, while Cai, Jäger, Utkarsh, Segal, Deng, Subramanian, and Gomez-Bombarelli, arXiv:2610.38517 (28 October 2026), present `AtomSteer` for test-time constraint projection across crystal and conformer generators (`FlowMM`, `ET-Flow`, `Boltz-2`). Hryc, ChemRxiv (v2, 27 October 2026), doi:10.26434/chemrxiv.15001445/v2, proposes the 256-bit `CSH` conformer hash; Cinaroglu, ChemRxiv (29 September 2026), doi:10.26434/chemrxiv.15009672/v1, combines `ACOR` ant-colony docking with ring-conformer ensembles in AutoDock Vina; and Damjanovic and Ochoa, RSC Medicinal Chemistry (8 October 2026), doi:10.1039/d6md00676k, benchmark cyclic-peptide conformer predictors against physics-based simulations. None reports a water-hexamer motif rate or GFN2-xTB energy, and none contradicts `121` of `192`, `97` of `192`, or the polished hexamer gaps.
+
+Checked via HTTP on 17 November 2026: `crest-lab/crest` newest numbered release remains `v3.0.2` (25 August 2024; master tip 16 June 2026, `cfdc301f`); `grimme-lab/xtb` remains `v6.8.0` (5 November 2026); ORCA's newest numbered release on FACCTs remains `ORCA 6.1.1` (9 December 2025; no new GOAT release); `agox/agox` on GitLab and PyPI remains `v3.11.1` (4 February 2026; `dev` tip `22d94a6f`, 5 May 2026; GOFEE remains integrated in `agox.algorithms.gofee` and the 3.11.2 docs banner is untagged); `ase/ase` on GitLab and PyPI remains `3.29.0` (21 June 2026; `master` tip `c879478d`, 14 November 2026); `pele-python/pele` on GitHub and PyPI remains `v0.1.2` (12 October 2026); and the Cambridge GMIN landing page still has `Last-Modified` 17 March 2022 (`software.html` 13 September 2026, daily `svn.tar.bz2` archive 17 November 2026, no new versioned release).
+
+Cite `hueblerCurcumaFilter2026`, `darouichCurvFm2026`, `caiAtomSteer2026`, `hrycCsh2026`, `cinarogluRingConformer2026`, and `damjanovicCyclicPeptide2026`.
+
+## 2026-11-17 — A lattice minimum, site disorder, and planar boron clusters
+
+Luo and Wei, arXiv:2611.19696 (15 November 2026), classify the minimisers of the three-dimensional Lennard--Jones lattice energy at every covolume. As the covolume grows, the minimising lattice changes from face-centred cubic to body-centred tetragonal and then to simple hexagonal. This is an infinite periodic lattice problem. It gives no finite-cluster energy at 38, 55, 75, 98, or 104 atoms, so it does not contradict the Cambridge hit targets and does not warrant a head-to-head on the free-cluster panel.
+
+Petersen, Ren, and Hippalgaonkar, arXiv:2610.41327 (30 October 2026), search orderings of site-disordered crystals with a surrogate that balances exploitation, uncertainty, and novelty. Across fourteen test cases on twelve crystal structures, the abstract reports recovery of the enumerated global minimum in 94 percent of runs, against 55 percent for random walk, Markov-chain Monte Carlo, and a genetic algorithm, with a median 4.3-fold reduction in evaluations relative to the best of those baselines. This is periodic occupancy ordering followed by structural relaxation, not a free Lennard--Jones or water cluster. It contradicts no manuscript count. A head-to-head would require one of those site-disordered cells and the same relaxation ledger, not the sealed cluster maps.
+
+Qiu, Qian, Mu, Liu, Zhang, Kim, and Ding, Physical Review B 114, 254105 (2026), doi:10.1103/x3bz-g9zz, report a machine-learning-force-field-accelerated global structure search for stable planar boron clusters. The Crossref record verifies the DOI, title, authors, volume, and article number but supplies no abstract. That metadata establishes a new cluster-search paper, but not a size, hit rate, energy, or evaluation budget that can be compared with this manuscript. It contradicts no printed claim and does not yet justify a head-to-head.
+
+Cite `luoThreeDimLjLattice2026`, `petersenAgentic2026`, and `qiuBoronClusters2026`.
+
+## 2026-11-17 — Lineage-aware conformational sampling and a water-cluster record
+
+Maity, Majumdar, and Chakrabarty, Journal of Chemical Physics 165, 164137 (2026), doi:10.1063/5.0350663, release TRAILS-MD, an engine-independent adaptive molecular-dynamics framework that preserves trajectory lineage while launching short trajectory ensembles. The abstract applies it to peptide isomerisation, Trp-cage and WW-domain folding, ligand unbinding from HSP90, and adenylate-kinase conformational change. It maps connected pathways and seeds Markov state models; it does not claim a lowest conformer, a Lennard--Jones minimum, or a water-cluster hit rate. It contradicts no manuscript count and does not warrant a head-to-head on the CREST table.
+
+Kirov, Chemical Physics 610, 113289 (2026), doi:10.1016/j.chemphys.2026.113289, is a new record titled “On the surface structure of water clusters.” Crossref verifies the DOI, author, title, volume, and article number but supplies no abstract. The record alone gives no cluster size, potential, global-minimum energy, or search protocol. It therefore cannot be read as contradicting the TIP4P references, the GFN2-xTB motif counts, or the polished gaps, and it does not yet justify a head-to-head.
+
+Cite `maityTrailsMd2026` and `kirovWaterSurface2026`.
+
+## 2026-11-17 — Generative nested sampling on 2D Lennard-Jones, and non-cluster benchmarks
+
+Mei, Huang, and Chen, Engineering Applications of Artificial Intelligence 179, 115183 (September 2026), doi:10.1016/j.engappai.2026.115183, classify crystalline phases of Lennard-Jones--Gauss potentials with an unsupervised Gaussian-mixture framework.
+
+Da Silva, Salah, Machado, Dias, Bastos, Piotrowski, Rego, and Guedes-Sobrinho, The Journal of Physical Chemistry A (27 October 2026), doi:10.1021/acs.jpca.6c05562, construct 300 K probability landscapes of bare Au\(_{13}\) across charge states from 2.16 million density-functional replica-exchange molecular dynamics configurations using sketch-map, t-SNE, and UMAP. The record has no volume or pages yet. Iwai and Tsuji, Inorganica Chimica Acta 602, 123341 (November 2026), doi:10.1016/j.ica.2026.123341, apply Bayesian optimization with a tree-structured Parzen estimator to surface adsorption structures.
+
+Together with the NS-Flows Lennard-Jones benchmark (`corettiNsFlows2026`), none of the four treats three-dimensional free Lennard-Jones clusters at 38, 55, 75, 98, 104, or 150 atoms, and none reports a Cambridge energy, a water-hexamer hit rate, or a force-call budget comparison against basin hopping. Keep all four out of the Lennard-Jones and CREST tables; none warrants a head-to-head on the sealed presets.
+
+Cite `meiLjGauss2026`, `daSilvaGoldMotifs2026`, and `iwaiAdsorptionTpe2026`.
+
+## 2026-11-17 — Neural-network and periodic GFN2-xTB variants, and water-cluster benchmarks
+
+Xia, Thie, Soon, and Barca, Nature Communications 17, 7302 (20 May 2026), doi:10.1038/s41467-026-73184-z, introduce NN-xTB, using an equivariant MACE-based encoder to predict bounded, environment-dependent shifts to GFN2-xTB Hamiltonian parameters solved self-consistently. On GMTKN55 the WTMAD-2 drops from 25.0 kcal/mol for GFN2-xTB (and 9.3 kcal/mol for g-xTB) to 3.78 kcal/mol, while on MACEOFF23/SPICE force benchmarks the paper notes a modest deficit on water clusters relative to MACE-OFF23, attributing it to basis and dispersion limitations inherited from the semiempirical baseline. Wu, ChemRxiv (3 August 2026), doi:10.26434/chemrxiv.15006914/v1, corrects periodic Wigner--Seitz image enumeration and caches the overlap Cholesky factor in GFN2-xTB; both changes target periodic or large-basis SCF speed rather than bare gas-phase cluster minima. Neither reports a water-hexamer motif hit rate or alters unmodified GFN2-xTB in xtb 6.7.1 and 6.8.0.
+
+Shahi, Ruzsinszky, and Perdew, ChemRxiv (22 September 2026), doi:10.26434/chemrxiv.15009326/v1, evaluate the self-consistent meta-GGA bn-r2SCAN on neutral, protonated, and deprotonated water clusters (including BEGDB), reporting mean unsigned binding-energy errors of 0.33 to 1.04 kcal/mol. Liu, Liu, Gong, Cui, Feng, Wang, and Wang, The Journal of Physical Chemistry Letters 17, 12504--12512 (23 October 2026), doi:10.1021/acs.jpclett.6c02457, map five roaming-like rearrangement saddle points in the water dimer and trimer. Ignatov, Marinov, Gluhchev, and Vassileva, Water 18, 1992 (14 August 2026), doi:10.3390/w18161992, define a dimensionless geometric index \(S_n = d/l\) for \((\mathrm{H}_2\mathrm{O})_n\) with \(n = 2\) to 6 without searching for new minima. Kirov, Chemical Physics 610, 113289 (2026), doi:10.1016/j.chemphys.2026.113289, titles a study of the surface structure of water clusters; the Crossref record gives the title, volume, and article number, and no abstract or energy.
+
+None of the six reports a TIP4P energy below the Wales--Hodges references, 121 of 192, 97 of 192, or a shift in the six polished hexamer gaps on xtb 6.7.1 and 6.8.0. Keep TIP4P, unmodified GFN2-xTB, NN-xTB, and meta-GGA surfaces apart; none warrants a head-to-head on the sealed CREST or TIP4P tables.
+
+Cite `xiaNnXtb2026`, `wuPeriodicGfn22026`, `shahiBnr2scan2026`, `liuWaterRoaming2026`, `ignatovWaterIndex2026`, and `kirovWaterSurface2026`.
+
+## 2026-11-17 — Exact watch queries
+
+The publication window was 18 October through 17 November 2026. Repeated requests after rate limits are listed once. These are the exact search requests:
+
+```text
+https://export.arxiv.org/api/query?search_query=%28all%3a%22global+optimization%22+OR+all%3a%22global+optimisation%22%29+AND+%28all%3acluster+OR+all%3amolecular+OR+all%3aatomistic%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=all%3a%22Lennard-Jones%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=all%3a%22water+cluster%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=all%3a%22water+clusters%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=%28all%3aconformer+OR+all%3aconformational%29+AND+%28all%3asearch+OR+all%3asampling%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=%28all%3a%22conformer+search%22+OR+all%3a%22conformational+search%22+OR+all%3a%22conformer+sampling%22+OR+all%3a%22conformational+sampling%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+https://export.arxiv.org/api/query?search_query=ti%3a%22On+the+surface+structure+of+water+clusters%22+OR+ti%3a%22Predicting+stable+planar+boron+clusters%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending
+https://api.crossref.org/works?query.bibliographic=cluster+global+optimization+global+optimisation&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.crossref.org/works?query.bibliographic=Lennard-Jones+cluster+benchmark&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.crossref.org/works?query.bibliographic=water+cluster+global+minimum+structure+search&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.crossref.org/works?query.bibliographic=conformer+search+conformational+sampling&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.crossref.org/works?query.bibliographic=CREST+GOAT+AGOX+GOFEE+ASE+pele+GMIN&filter=from-pub-date%3a2026-10-18%2cuntil-pub-date%3a2026-11-17&rows=100&select=DOI%2ctitle%2cauthor%2cpublished%2ccontainer-title%2ctype%2cURL%2cabstract&mailto=rgoswami%40ieee.org
+https://api.github.com/search/repositories?q=CREST+conformer+chemistry+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=GOAT+molecular+global+optimization+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=AGOX+atomistic+global+optimization+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=GOFEE+atomistic+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=pele+energy+landscape+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=GMIN+Wales+cluster+in%3aname%2cdescription&per_page=10
+https://api.github.com/search/repositories?q=GOFEE+in%3aname&per_page=20
+https://api.github.com/search/repositories?q=GOAT+%22Bernardo+de+Souza%22&per_page=20
+https://api.github.com/search/repositories?q=GMIN+%22energy+landscape%22&per_page=20
+https://api.github.com/search/repositories?q=AGOX+in%3aname&per_page=20
+https://gitlab.com/api/v4/projects?search=GOFEE&simple=true&per_page=20
+https://gitlab.com/api/v4/projects?search=GOAT+global+optimization&simple=true&per_page=20
+https://gitlab.com/api/v4/projects?search=GMIN&simple=true&per_page=20
+```
+
+The exact release and tag requests were:
+
+```text
+https://api.github.com/repos/crest-lab/crest/releases?per_page=100
+https://api.github.com/repos/pele-python/pele/releases?per_page=100
+https://api.github.com/repos/asm-dtu/GOFEE/releases?per_page=100
+https://api.github.com/repos/wales-group/GMIN/releases?per_page=100
+https://api.github.com/repos/js850/PyGMIN/releases?per_page=100
+https://gitlab.com/api/v4/projects/ase%2Fase/releases?per_page=100
+https://gitlab.com/api/v4/projects/ase%2Fase/repository/tags?per_page=100
+https://gitlab.com/api/v4/projects/agox%2Fagox/releases?per_page=100
+https://gitlab.com/api/v4/projects/agox%2Fagox/repository/tags?per_page=100
+```
