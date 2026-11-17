@@ -108,6 +108,8 @@ KNOWN_GAPS = {
     "bench/ase-gofee-h2h/results.csv": "no host column; head empty or unknown on some rows; revision 0f988569 is not in "
                                        "this repository; revision 349523d3 is not in this repository; revision befbc3e8 "
                                        "is not in this repository; revision bf09f7a2 is not in this repository",
+    "bench/ase-gofee-h2h/summary.csv": "no revision or host column",
+    "bench/ase-gofee-h2h/asg2-summary.csv": "no revision or host column",
     "bench/growpal-h2h/seeds.csv": "no revision or host column",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "no revision or host column",
     "bench/nh3-octamer/ladder.csv": "no revision or host column",
@@ -479,7 +481,12 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
     against = ", and ".join(f"{name(s)} on {of(s, 'gmin')} against {of(s, 'anneal')}" for s in behind)
     audit.said(TEX, f"this setting hits more seeds on {len(ahead)} of {total}, the two tie on {len(tied)}, and GMIN hits "
                     f"more on {len(behind)}.")
-    audit.said(TEX, f"GMIN hits {against}.")
+    def ps(system: str) -> str:
+        a, g = groups[(system, "anneal")], groups[(system, "gmin")]
+        return panel.show_p(fisher(hits_of(a), len(a), hits_of(g), len(g)), tex=True).replace("\\(", "").replace("\\)", "")
+
+    audit.said(TEX, "GMIN hits " + ", and ".join(
+        f"{name(s)} on {of(s, 'gmin')} against {of(s, 'anneal')}, with \\(p={ps(s)}\\)" for s in behind) + ".")
     audit.said(TEX, f"This setting hits more seeds than GMIN on {len(ahead)} of the {total} clusters.")
     audit.said(TEX, "GMIN hits more on " + ", and on ".join(f"{name(s)}, {of(s, 'gmin')} against {of(s, 'anneal')}"
                                                        for s in behind) + ".")
@@ -819,7 +826,7 @@ def manuscript_ase(audit: Audit) -> None:
     audit.record(rev_ase not in rev_gmin, TEX, "the two Au55 counts are on different revisions",
                  rev_ase[:8], " ".join(sorted(r[:8] for r in rev_gmin)))
     au_gmin = f"{hits_of(gmin_au[0])} of {len(gmin_au[0])}", f"{hits_of(gmin_au[1])} of {len(gmin_au[1])}"
-    audit.said(TEX, f"No arm of that panel hits {label('au55')}; in the GMIN panel, on another revision, this setting "
+    audit.said(TEX, f"No arm of the ASE panel hits {label('au55')}; in the GMIN panel, on another revision, this setting "
                     f"hits it on {au_gmin[0]} and GMIN on {au_gmin[1]}.")
     audit.said(TEX, f"it hits {series(str(n) for n in m)} of 12, and both ASE arms hit {max(morse_ase)} of 12.")
     audit.said(TEX, f"and against the basin hopping and the minima hopping of the Atomic Simulation Environment on "
@@ -950,6 +957,16 @@ def generated_tables(audit: Audit) -> None:
     panel = load_script("ase_panel_tex", "scripts/ase_panel/summarize.py")
     nonlj = load_script("ase_nonlj_tex", "scripts/ase_nonlj/summarize.py")
     ablation = load_script("ablation_tex", "paper/jctc/scripts/ablation_table.py")
+    h2h = load_script("h2h_tables_tex", "paper/jctc/scripts/h2h_tables.py")
+    si_text = audit.text(SI)
+    for label, marks, written, source in (
+            ("tab:gofee", h2h.MARKS["gofee"], h2h.gofee_block(), text),
+            ("tab:tip4p-gmin", h2h.MARKS["tip4p"], h2h.tip4p_block(), text),
+            ("tab:gofee-si", h2h.MARKS["gofee-si"], h2h.gofee_si_block(), si_text)):
+        found = source.split(marks[0], 1)[1].split(marks[1], 1)[0].strip("\n") if marks[0] in source else ""
+        ok = found == written
+        audit.record(ok, SI if source is si_text else TEX, f"{label} is the generator's block",
+                     "as written" if ok else "edited by hand", "as written")
     for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
                                   ("tab:gmin", gmin.TEX_MARKS, want),
                                   ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
@@ -2352,6 +2369,210 @@ def unauditable() -> list[str]:
 
 
 RERUN_FILES = (TEX, SI, "paper/jctc/cover-letter.tex")
+def manuscript_new(audit: Audit) -> None:
+    """The abstract split, the added panels, the definitions, the priors, and the host paragraph."""
+    panel, groups = gmin_panel_groups(audit)
+    ase = ase_groups(audit)
+
+    def name(system: str) -> str:
+        return panel.LABELS[system][1].replace(", \\(\\rho=", " at \\(\\rho=")
+
+    def of(system: str, arm: str) -> str:
+        return f"{hits_of(groups[(system, arm)])} of {len(groups[(system, arm)])}"
+
+    def p_of(system: str) -> float:
+        a, g = groups[(system, "anneal")], groups[(system, "gmin")]
+        return fisher(hits_of(a), len(a), hits_of(g), len(g))
+
+    def wall(system: str, arm: str) -> float:
+        return median([float(r["wall_s"]) for r in groups[(system, arm)]])
+
+    systems = list(panel.PAPER_BUDGETS)
+    ahead = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")])]
+    ours = [s for s in ahead if p_of(s) < 0.05]
+    rest = [s for s in ahead if s not in ours]
+    audit.cell(TEX, "the significant wins of this setting", "lj38 lj75 lj98 au55 m55r14 m80r14", " ".join(ours))
+    audit.cell(TEX, "the wins that are not significant", "lj102 lj103 lj104", " ".join(rest))
+    audit.said(TEX, f"Fisher's test on hits is below 0.05 on {len(ours)} of the {len(ahead)} wins: ")
+    audit.said(TEX, f"It is not below 0.05 on the other {len(rest)}: ")
+    audit.said(TEX, f"The other {len(rest)} wins of this setting are {name(rest[0])}, {name(rest[1])}, and "
+                    f"{name(rest[2])}, at \\(p\\) of "
+                    + ", ".join(panel.show_p(p_of(s), tex=True) for s in rest[:2]) + f", and "
+                    + panel.show_p(p_of(rest[2]), tex=True) + ", and the GMIN win on "
+                    + f"{name('lj150')} is not significant either.")
+    lower = [s for s in systems if wall(s, "anneal") < wall(s, "gmin")]
+    slower = [s for s in systems if s not in lower]
+    audit.cell(TEX, "the one cluster where this setting is slower", "m80r6", " ".join(slower))
+    audit.said(TEX, f"The median wall of a run is lower for this setting on {len(lower)} of the {len(systems)} "
+                    f"clusters and higher on {name('m80r6')}.")
+    audit.said(TEX, f"Its median wall is lower on {len(lower)} of the {len(systems)} clusters of "
+                    "Table~\\ref{tab:gmin}, and it is higher where GMIN hits 12 of 12.")
+    audit.cell(TEX, "GMIN hits 12 of 12 where it is faster", "12", float(hits_of(groups[("m80r6", "gmin")])))
+    s_ = panel.show_s
+    audit.said(TEX, f"The median wall of a run is {s_(wall('lj38', 'anneal'))}~s for this setting against "
+                    f"{s_(wall('lj38', 'gmin'))}~s for GMIN on LJ\\(_{{38}}\\), and {s_(wall('lj75', 'anneal'))}~s "
+                    f"against {s_(wall('lj75', 'gmin'))}~s on LJ\\(_{{75}}\\).")
+    audit.said(TEX, f"On {name('m80r6')} it is {s_(wall('m80r6', 'anneal'))}~s against {s_(wall('m80r6', 'gmin'))}~s.")
+
+    lj38 = ase[("lj38", "recommended")]
+    cap = ase_cap(audit, ase, "lj38")
+    capped = all(r["stop"] == "wall" for a in ASE_ARMS for r in ase[("lj38", a)])
+    audit.record(capped, TEX, "every ASE run on LJ38 stops at the cap", "every", "every" if capped else "not every")
+    audit.said(TEX, f"On LJ\\(_{{38}}\\) the median wall of this setting is "
+                    f"{s_(median([float(r['wall_s']) for r in lj38]))}~s, and every ASE run stops at the cap of "
+                    f"{s_(cap)}~s.")
+
+    gofee_dir = "bench/ase-gofee-h2h"
+    summary = {(r["system"], r["arm"]): r for r in audit.rows(f"{gofee_dir}/summary.csv")}
+    lj = ("lj38", "lj55", "lj75")
+    audit.cell(TEX, "this setting hits the three clusters on 6 of 6", "6/6 6/6 6/6",
+               " ".join(f"{summary[(s, 'paper')]['hits']}/{summary[(s, 'paper')]['n']}" for s in lj))
+    audit.cell(TEX, "ASE basin hopping and GOFEE hit none of the three", "0 0 0 0 0 0",
+               " ".join(summary[(s, a)]["hits"] for a in ("ase_bh", "agox_gofee") for s in lj))
+    mh = [summary[(s, "ase_mh")]["hits"] for s in lj]
+    audit.said(TEX, "ASE basin hopping hits none of them, and GOFEE hits none.")
+    audit.cell(TEX, "ASE minima hopping hits none of LJ75", "0", float(mh[2]))
+    audit.said(TEX, f"ASE minima hopping hits LJ\\(_{{38}}\\) on {mh[0]} of 6, LJ\\(_{{55}}\\) on {mh[1]} of 6, and "
+                    "LJ\\(_{75}\\) on none.")
+    audit.said(TEX, "This setting hits all three clusters on 6 of 6 seeds.")
+    g = [float(summary[(s, "agox_gofee")]["wall_median_s"]) for s in lj]
+    a = [float(summary[(s, "paper")]["wall_median_s"]) for s in lj]
+    audit.said(TEX, f"The median wall of a GOFEE run is {s_(g[0])}~s on LJ\\(_{{38}}\\), {s_(g[1])}~s on "
+                    f"LJ\\(_{{55}}\\), and {s_(g[2])}~s on LJ\\(_{{75}}\\), against {s_(a[0])}~s, {s_(a[1])}~s, "
+                    f"and {s_(a[2])}~s for this setting.")
+    audit.said(TEX, f"the median wall of a GOFEE run on LJ\\(_{{38}}\\) is {s_(g[0])}~s against {s_(a[0])}~s.")
+    audit.record(all(x > y for x, y in zip(g, a)), TEX, "the GOFEE median wall is higher on all three",
+                 "higher", "higher" if all(x > y for x, y in zip(g, a)) else "not")
+    audit.said(TEX, "its median wall is higher than that of this setting on all three")
+    rows = audit.rows(f"{gofee_dir}/results.csv")
+    heads = {r["head"][:8] for r in rows if r["head"] != "unknown"}
+    unknown = sum(r["head"] == "unknown" for r in rows)
+    audit.said(TEX, f"were collected at {len(heads)} repository heads, which")
+    audit.said(TEX, f"with the head unrecorded on {unknown} rows.")
+    versions = dict(line.split("=", 1) for line in audit.text(f"{gofee_dir}/versions.txt").split() if "=" in line)
+    audit.said(TEX, f"The versions are ASE {versions['ase']} and AGOX {versions['agox']}.")
+    audit.cell(TEX, "the GOFEE and minima-hopping wall cap on LJ75 is 2 hours", "2", float(versions["lj75_mh_gofee_wall_cap_s"]) / 3600)
+    audit.said(TEX, "ASE minima hopping and GOFEE on LJ\\(_{75}\\) also stop at a wall cap of 2 hours")
+    other = [r for r in audit.rows(f"{gofee_dir}/asg2-summary.csv") if r["source"] == "measured"]
+    audit.cell(SI, "the other panel systems of the GOFEE table", "au55 cu38 cu12au26 sw10 tc10 tip4p8",
+               " ".join(dict.fromkeys(r["system"] for r in other)))
+
+    tip = {r["system"]: r for r in audit.rows("bench/tip4p-h2h/h2h-summary.csv")}
+    sizes = ("tip4p8", "tip4p15", "tip4p20")
+    audit.said(TEX, "hits \\((\\mathrm{H_2O})_{8}\\), \\((\\mathrm{H_2O})_{15}\\), and\n\\((\\mathrm{H_2O})_{20}\\) on "
+                    + series(tip[s]["anneal_hits"].split("/")[0] for s in sizes) + " of 12 seeds and GMIN on "
+                    + series(tip[s]["gmin_hits"].split("/")[0] for s in sizes) + "\nof 12.")
+    audit.cell(TEX, "TIP4P against GMIN: seeds and budget", "12 2000000",
+               " ".join(sorted({tip[s]["n"] for s in tip} | {tip[s]["budget"] for s in tip}, key=len)))
+    tp = {s: panel.show_p(float(tip[s]["fisher_p"]), tex=True) for s in tip}
+    audit.said(TEX, f"This setting hits \\((\\mathrm{{H_2O}})_{{8}}\\) on 12 of 12 and GMIN on 8 of 12, with\n\\(p={tp['tip4p8']}\\).")
+    audit.cell(TEX, "TIP4P15 and TIP4P20 p", f"{tp['tip4p15']} {tp['tip4p20']}",
+               "\\(3.4\\times 10^{-4}\\) 0.037")
+    audit.said(TEX, "It hits \\((\\mathrm{H_2O})_{15}\\) on 9 of 12 and \\((\\mathrm{H_2O})_{20}\\) on 5 of\n12, and GMIN hits neither, with \\(p\\) of \\(3.4\\times 10^{-4}\\) and 0.037.")
+    audit.cell(TEX, "GMIN hits neither of TIP4P15 and TIP4P20", "0/12 0/12",
+               f"{tip['tip4p15']['gmin_hits']} {tip['tip4p20']['gmin_hits']}")
+    audit.cell(TEX, "TIP4P21 and TIP4P25 hits", "0/12 0/12 1/12 0/12",
+               f"{tip['tip4p21']['anneal_hits']} {tip['tip4p21']['gmin_hits']} {tip['tip4p25']['anneal_hits']} {tip['tip4p25']['gmin_hits']}")
+    quicker = [s for s in tip if float(tip[s]["anneal_wall_median_s"]) < float(tip[s]["gmin_wall_median_s"])]
+    audit.cell(TEX, "the median wall of this setting is lower on all 5 TIP4P sizes", "5", float(len(quicker)))
+    more = [s for s in tip if int(tip[s]["anneal_hits"].split("/")[0]) > int(tip[s]["gmin_hits"].split("/")[0])]
+    audit.said(TEX, f"Against GMIN on TIP4P, this setting hits more seeds on {len(more)} of the {len(tip)} sizes")
+    audit.said(TEX, "against GMIN on TIP4P this setting hits \\((\\mathrm{H_2O})_{15}\\) on 9 of 12\nand GMIN on 0 of 12.")
+    audit.said("bench/tip4p-h2h/README-h2h.md",
+               "(H₂O)₂₅ is not in the database, so its hit is scored against the lowest energy either arm reached")
+
+    # Constants of the definitions and of the priors, read from the source.
+    preset = "src/methods/cluster_hopping/preset.rs"
+    for fragment in ("TEMPERATURE: f64 = 0.8;", "BIAS_HEIGHT: f64 = 0.25;", "MERGE_RADIUS: f64 = 0.7;",
+                     "NEIGHBOUR_CUTOFF: f64 = 1.6;", "SYMMETRISE_CUTOFF: f64 = 2.5;", "SOAP_RMSD: f64 = 0.35;",
+                     "SOAP_CUTOFF: f64 = 3.5;", "SCREEN_MARGIN: f64 = 2.0;"):
+        audit.said(preset, fragment)
+    config = "src/methods/cluster_hopping/config.rs"
+    for fragment in ("bias_gamma: 5.0,", "tabu_capacity: 8,", "interval: 10,", "reseed_hops: 5,", "prior_soap: true,",
+                     "prior_reseed: true,", "prior_growth: true,", "prior_core: true,", "prior_motif: true,",
+                     "calibrated_screen: true,"):
+        audit.said(config, fragment)
+    audit.said("src/methods/cluster_hopping.rs", "const WINDOW: usize = 256;")
+    audit.said("src/methods/cluster_hopping.rs", "const WARMUP: usize = 8;")
+    audit.said("src/methods/cluster_hopping.rs", "const QUANTILE: f64 = 0.9;")
+    audit.said("src/methods/cluster_hopping.rs", "if frac_421 < 0.20 {")
+    audit.said("src/methods/cluster_hopping.rs", "if frac_422 < 0.15 {")
+    audit.said("src/methods/cluster_hopping.rs", "if frac_555 < 0.20 {")
+    audit.said("src/methods/cluster_hopping.rs", "let motif_gap = ledger.budget() / 2;")
+    audit.said("src/methods/cluster_hopping.rs", "if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {")
+    audit.said("examples/h2h_morse.rs", "cfg.long_ranged = kind.second_neighbour_energy() < -0.05;")
+    audit.said("src/bias.rs", "let w = scale * (self.w0 + entropy) * libm::exp(-self.v[i] / denom);")
+    audit.said("src/bias.rs", "let denom = (self.gamma - 1.0) * temp;")
+    audit.said("src/csm.rs", "Lowest-measure average among `C_i`, `C_5`, and `D_5h`.")
+    audit.said("src/methods/lattice_search.rs", "hollow_cutoff: 1.47 * r,")
+    audit.said("src/methods/lattice_search.rs", "clearance: 0.85 * r,")
+    audit.said("src/methods/lattice_search.rs", "interior_coordination: 12,")
+    for fragment in ("fcc_cut(n_atoms, centre, nearest)", "binary_geometry::mackay_cut(n_atoms, nearest)",
+                     "binary_geometry::polyicosahedral_cut(n_atoms, join, nearest)"):
+        audit.said("src/methods/cluster_hopping.rs", fragment)
+    audit.said("src/methods/cluster_hopping.rs", "&& cfg.prior_core")
+    audit.said("src/methods/cluster_hopping.rs", "&& species.len() >= 2")
+    audit.said("src/methods/cluster_hopping/binary_geometry.rs", "pub(crate) fn mackay_cap(n: usize, nearest: f64)")
+
+    # Host and commands.
+    receipt = "paper/jctc/logs/cuh2-hardware-receipt.txt"
+    audit.said(receipt, "Model name:                              Intel(R) Xeon(R) Processor")
+    audit.said(receipt, "CPU family:                              6")
+    audit.said(receipt, "Model:                                   207")
+    audit.said(receipt, "CPU(s):                                  8")
+    audit.said(receipt, "Hypervisor vendor:                       KVM")
+    audit.said(receipt, "Ubuntu 13.3.0-6ubuntu2~24.04.1")
+    audit.said(receipt, "rustc 1.88.0")
+    audit.said(receipt, "2400.000")
+    audit.said("bench/gmin-panel/gmin-source.txt", "gfortran=13.3.0")
+    audit.said("bench/gmin-panel/gmin-source.txt", "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.12.0")
+    audit.said("bench/gmin-panel/README.md", "(`taskset -c 0`, one thread, every other process moved\nto cores 1-7)")
+    audit.said("paper/jctc/logs/water/HOST-TOPOLOGY", "cpu=Intel Xeon Processor, family 6, model 207")
+    text = audit.text(TEX)
+    for needle in ("host name\n\\texttt{bench}", "8 cores of an Intel Xeon Processor, family 6, model 207",
+                   "2400~MHz under KVM", "Ubuntu 24.04", "Rust 1.88.0 and gfortran 13.3.0",
+                   "reference BLAS and LAPACK 3.12.0", "no log records the\nmemory size or the kernel"):
+        audit.record(needle in text, TEX, "the host paragraph says", needle.replace("\n", " "), "present")
+    commands = {
+        "bash scripts/gmin_panel/build_gmin.sh": "scripts/gmin_panel/build_gmin.sh",
+        "snakemake -s workflow/Snakefile gmin_panel": "workflow/Snakefile",
+        "bash scripts/gmin_panel/enter_bench.sh --summarize --tex": "scripts/gmin_panel/enter_bench.sh",
+        "bash scripts/ase_panel/enter_bench.sh --system lj38 --arm ase_bh --seed 2000": "scripts/ase_panel/enter_bench.sh",
+        "bash scripts/ase_nonlj/enter_bench.sh --system m38r6 --arm ase_bh --seed 2000": "scripts/ase_nonlj/enter_bench.sh",
+        "python3 paper/jctc/scripts/water_h2h.py": "paper/jctc/scripts/water_h2h.py",
+    }
+    for command, path in commands.items():
+        audit.record(command in text and (ROOT / path).exists(), TEX, "the command names a script that exists",
+                     command, path)
+    audit.said("workflow/Snakefile", "rule gmin_panel:")
+    audit.said("scripts/gmin_panel/enter_bench.sh", "--summarize")
+    audit.said("scripts/ase_panel/enter_bench.sh", "lj38|lj55|lj98|lj104|lj150|au55")
+    audit.said("scripts/ase_nonlj/enter_bench.sh", "m38r6")
+    audit.said("paper/jctc/scripts/water_h2h.py", 'command = f"gfn2_water_h2h {MOLECULES} {budget} {seed} {outdir.name}"')
+    audit.said("paper/jctc/logs/water/crest-hexamer-seed0.log", "$ path start.xyz -T 1")
+    audit.said("paper/jctc/logs/water/VERSIONS", "polish=xtb --gfn 2 --opt vtight --acc 0.01 --iterations 500")
+    audit.said(TEX, "crest start.xyz -T 1\nxtb --gfn 2 --opt vtight --acc 0.01 --iterations 500\ngfn2_water_h2h 6 4000 0 anneal-seed0")
+    audit.said(TEX, "\\texttt{paper/jctc/scripts/ablation\\_table.py} writes Table~\\ref{tab:ablation}")
+    audit.record((ROOT / "paper/jctc/scripts/ablation_table.py").exists(), TEX, "ablation_table.py exists", "exists", "exists")
+
+    # Title, affiliation, spelling, and the pending DOI.
+    cover = "paper/jctc/cover-letter.tex"
+    title = "One basin-hopping setting for Lennard-Jones,\nMorse, gold, and water clusters"
+    audit.said(TEX, "\\title{" + title + "}")
+    audit.said(SI, "One basin-hopping setting for Lennard-Jones,\nMorse, gold, and water clusters")
+    for path in (TEX, SI):
+        audit.said(path, "\\affiliation{SURF B.V., Amsterdam}")
+        audit.record("SURF BV" not in audit.text(path), path, "the affiliation is spelled one way", "SURF B.V.", "SURF B.V.")
+    audit.record("\\todo{" not in audit.text(TEX), TEX, "no \\todo remains in the manuscript", "none", "none")
+    audit.said(TEX, "The Zenodo record for this submission is pending, and it has no DOI yet.")
+    british = re.compile(r"\b\w*(?:optimis|neighbour|initialis|symmetris|normalis|minimis|colour|centred|licence|"
+                         r"favour|behaviour|analyse|organis|recognis|characteris|parametris|summaris|catalogue)\w*\b",
+                         re.IGNORECASE)
+    for path in (TEX, SI, cover):
+        found = sorted({m.group(0) for m in british.finditer(audit.text(path))})
+        audit.record(not found, path, "American spelling", "none", " ".join(found) or "none")
+
+
 RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "6": "the Mackay cap and mackay_cut", "7": "the GFN2 sign and rerun"}
 RERUN_TAG = re.compile(r"\\rerun\{([^}]*)\}")
 
@@ -2442,7 +2663,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded):
+                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
