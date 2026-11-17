@@ -14,6 +14,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "TestFixtures.hpp"
 #include "lsan_libomp.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
@@ -30,11 +31,7 @@
 namespace {
 
 void set_omp_threads(const char *value) {
-#if defined(_MSC_VER)
-  _putenv_s("OMP_NUM_THREADS", value);
-#else
-  setenv("OMP_NUM_THREADS", value, 1);
-#endif
+  rgpot::test_fixtures::setOmpThreads(value);
 }
 
 struct Box {

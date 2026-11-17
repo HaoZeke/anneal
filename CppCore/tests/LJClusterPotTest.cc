@@ -11,6 +11,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "TestFixtures.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
@@ -19,40 +20,10 @@
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
+using rgpot::test_fixtures::maxForceNorm;
+using rgpot::test_fixtures::nebMorseCell;
+using rgpot::test_fixtures::nebMorseCluster;
 using rgpot::types::AtomMatrix;
-
-namespace {
-
-/// eOn's neb_morse reactant geometry (13 hydrogens, client/unit_tests/data/
-/// systems/neb_morse/reactant.con), inlined because rgpot reads no .con.
-AtomMatrix nebMorseCluster() {
-  return AtomMatrix{
-      {50.594227, 52.017165, 52.277482}, {51.578540, 52.642148, 51.195222},
-      {51.243758, 52.919086, 52.218383}, {50.490127, 52.736378, 51.417663},
-      {51.522643, 50.884535, 51.656125}, {50.927263, 51.743087, 51.272643},
-      {51.240676, 50.960436, 50.573042}, {51.275727, 52.061877, 50.284160},
-      {50.434110, 50.976423, 51.879062}, {51.695007, 51.919472, 52.038680},
-      {51.363596, 52.199101, 53.064923}, {52.017483, 51.639074, 51.008389},
-      {51.187843, 51.165217, 52.678225}};
-}
-
-/// The cell that ships with the geometry above.
-std::array<std::array<double, 3>, 3> nebMorseCell() {
-  return {
-      {{101.942400, 0.0, 0.0}, {0.0, 103.142600, 0.0}, {0.0, 0.0, 102.605500}}};
-}
-
-double maxForceNorm(const AtomMatrix &forces) {
-  double worst = 0.0;
-  for (size_t i = 0; i < forces.rows(); ++i) {
-    const double n2 = forces(i, 0) * forces(i, 0) +
-                      forces(i, 1) * forces(i, 1) + forces(i, 2) * forces(i, 2);
-    worst = std::max(worst, std::sqrt(n2));
-  }
-  return worst;
-}
-
-} // namespace
 
 TEST_CASE("LJClusterPot energy on the neb_morse cluster", "[LJClusterPot]") {
   rgpot::LJClusterPot pot;

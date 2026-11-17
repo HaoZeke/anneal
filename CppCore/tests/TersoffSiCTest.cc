@@ -21,6 +21,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "TestFixtures.hpp"
 #include "rgpot/Tersoff/TersoffSiC.hpp"
 #include "rgpot/nlist/HalfShell.hpp"
 #include "rgpot/stress.hpp"
@@ -31,6 +32,14 @@ using rgpot::TersoffSiC;
 using rgpot::types::AtomMatrix;
 
 namespace {
+
+auto cubic(double a) { return rgpot::test_fixtures::cubicCell(a); }
+
+std::vector<double> diamond(int nrep, double a0) {
+  std::vector<double> pos;
+  rgpot::test_fixtures::appendDiamond(pos, nrep, a0);
+  return pos;
+}
 
 struct Homo {
   double big_a, big_b, lambda1, lambda2, beta, n, c, d, h;
@@ -58,30 +67,6 @@ double diamondAtom(const Homo &sp, double a0) {
   const double f_r = sp.big_a * std::exp(-sp.lambda1 * r);
   const double f_a = -sp.big_b * std::exp(-sp.lambda2 * r);
   return 2.0 * (f_r + b * f_a);
-}
-
-std::array<std::array<double, 3>, 3> cubic(double a) {
-  return {{{a, 0.0, 0.0}, {0.0, a, 0.0}, {0.0, 0.0, a}}};
-}
-
-std::vector<double> diamond(int nrep, double a0) {
-  const double basis[8][3] = {{0.0, 0.0, 0.0},    {0.5, 0.5, 0.0},
-                              {0.5, 0.0, 0.5},    {0.0, 0.5, 0.5},
-                              {0.25, 0.25, 0.25}, {0.75, 0.75, 0.25},
-                              {0.75, 0.25, 0.75}, {0.25, 0.75, 0.75}};
-  std::vector<double> pos;
-  for (int ix = 0; ix < nrep; ++ix) {
-    for (int iy = 0; iy < nrep; ++iy) {
-      for (int iz = 0; iz < nrep; ++iz) {
-        for (const auto &b : basis) {
-          pos.push_back((ix + b[0]) * a0);
-          pos.push_back((iy + b[1]) * a0);
-          pos.push_back((iz + b[2]) * a0);
-        }
-      }
-    }
-  }
-  return pos;
 }
 
 double energyOf(TersoffSiC &pot, const std::vector<double> &pos, int z,

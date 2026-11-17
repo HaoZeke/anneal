@@ -16,6 +16,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "TestFixtures.hpp"
 #include "rgpot/ExprPot/ExprPot.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
@@ -24,6 +25,8 @@
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
+using rgpot::test_fixtures::nebMorseCell;
+using rgpot::test_fixtures::nebMorseCluster;
 using rgpot::types::AtomMatrix;
 
 namespace {
@@ -36,23 +39,6 @@ std::vector<int> twoAtomTypes() { return {18, 18}; }
 
 std::array<std::array<double, 3>, 3> wideCell() {
   return {{{40.0, 0.0, 0.0}, {0.0, 40.0, 0.0}, {0.0, 0.0, 40.0}}};
-}
-
-/// eOn neb_morse reactant (13 hydrogens). Shared Morse/LJ unit fixture.
-AtomMatrix nebMorseCluster() {
-  return AtomMatrix{
-      {50.594227, 52.017165, 52.277482}, {51.578540, 52.642148, 51.195222},
-      {51.243758, 52.919086, 52.218383}, {50.490127, 52.736378, 51.417663},
-      {51.522643, 50.884535, 51.656125}, {50.927263, 51.743087, 51.272643},
-      {51.240676, 50.960436, 50.573042}, {51.275727, 52.061877, 50.284160},
-      {50.434110, 50.976423, 51.879062}, {51.695007, 51.919472, 52.038680},
-      {51.363596, 52.199101, 53.064923}, {52.017483, 51.639074, 51.008389},
-      {51.187843, 51.165217, 52.678225}};
-}
-
-std::array<std::array<double, 3>, 3> nebMorseCell() {
-  return {
-      {{101.942400, 0.0, 0.0}, {0.0, 103.142600, 0.0}, {0.0, 0.0, 102.605500}}};
 }
 
 std::vector<rgpot::ExprPot::Term> oneLj(const char *name = "lj") {
