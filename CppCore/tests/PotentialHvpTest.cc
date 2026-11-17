@@ -148,7 +148,9 @@ TEST_CASE("from_impl keeps LJPot Auto on finite differences", "[hvp]") {
     const double scale =
         std::max(std::abs(auto_hv[i]),
                  std::max(std::abs(fine_forward[i]), std::abs(central[i])));
-    const double truncation = std::abs(forward_hv[i] - fine_forward[i]);
+    // A first-order rule has F_h - D = a h + O(h^2), so its truncation
+    // error is twice the change from halving h.
+    const double truncation = 2.0 * std::abs(forward_hv[i] - fine_forward[i]);
     const double roundoff =
         std::sqrt(std::numeric_limits<double>::epsilon()) * (1.0 + scale);
     CHECK(std::abs(auto_hv[i] - central[i]) <= truncation + roundoff);
