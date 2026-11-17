@@ -4,8 +4,8 @@
 
 ``run`` takes two ``gfn2_covalent_h2h`` binaries, ``--arm NAME=BINARY@REV``
 each, and runs every (system, seed, arm) at ``--budget`` calls, one job
-per core, the two arms of a seed back to back so both see the same
-machine. The xtb engine comes from the environment
+per core from ``--first-core``, the arms of a seed back to back so all
+see the same machine. The xtb engine comes from the environment
 (``RGPOT_XTB_ENGINE``, ``LD_LIBRARY_PATH``) at ``RGPOT_XTB_ETEMP``. Each
 job appends the example's final row, its arm, the arm's code revision and
 the host to ``--rows``.
@@ -85,7 +85,8 @@ def run(args):
                     [name, *fields, revision, host])
             print(f"{system} {name} {seed}: {','.join(fields)}", flush=True)
 
-    threads = [threading.Thread(target=worker, args=(core,)) for core in range(args.cores)]
+    threads = [threading.Thread(target=worker, args=(core,))
+               for core in range(args.first_core, args.first_core + args.cores)]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -155,6 +156,8 @@ def main():
     go.add_argument("--n", type=int, default=12)
     go.add_argument("--budget", type=int, default=100000)
     go.add_argument("--cores", type=int, default=os.cpu_count())
+    go.add_argument("--first-core", type=int, default=0,
+                    help="jobs run on cores first-core to first-core + cores - 1")
     go.add_argument("--out", type=Path, required=True)
     go.add_argument("--rows", type=Path, required=True)
     report = sub.add_parser("summary")

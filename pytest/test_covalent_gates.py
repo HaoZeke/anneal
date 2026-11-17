@@ -68,6 +68,21 @@ def test_a_floor_gate_run_without_calls_is_summarised(tmp_path, capsys):
     assert out.strip().splitlines()[-1] == "floor loses: nowhere"
 
 
+def test_a_floor_gate_run_takes_the_cores_from_the_first_core(tmp_path, monkeypatch):
+    cores = []
+
+    def run_one(binary, system, seed, budget, core, where):
+        cores.append(core)
+        return None
+
+    monkeypatch.setattr(floor_gate, "run_one", run_one)
+    floor_gate.run(argparse.Namespace(
+        arm=["grad=/bin/true@" + "0" * 40], systems=["si13"], seed0=2000, n=4,
+        budget=1, cores=2, first_core=3, out=tmp_path, rows=tmp_path / "rows.csv"))
+    assert len(cores) == 4
+    assert set(cores) <= {3, 4}
+
+
 def test_the_committed_floor_gate_loses_nowhere(capsys):
     pytest.importorskip("scipy.stats")
     floor_gate.summary(argparse.Namespace(rows=FLOOR_GATE_ROWS, arms=["base", "floor"]))
