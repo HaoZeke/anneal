@@ -44,8 +44,8 @@ The earlier Au55 rows of session `20261117T035457Z` ran the alloy block of
 `scripts/metal_h2h/enter_gold.sh` (`RADIUS 50.0`, `TEMPERATURE 1.0`,
 `STEP 0.40 0.51` and `NEWRESTART 40` without `AVOID ... F`), which left
 `AVOIDRESEEDT` true, reseeded into a 57.7 Å cube after 40 stagnant steps,
-and hit 0/12; those rows stay in `rows.csv`, and session `20261117T152941Z`
-reran both arms of Au55 under the Gupta input above (6/12 against 1/12).
+and hit 0/12; those rows stay in `rows.csv`, and session `20261117T181140Z`
+reran both arms of Au55 under the Gupta input above (4/12 against 1/12).
 
 Wall is the search wall each code reports. Inside is `pot_s`, the time
 inside the potential; outside is the rest of the wall. Medians and
@@ -100,14 +100,14 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
 |  |  | GMIN | 6/12 | 3696118 | 1285122.25 | 193.6 | 173.6 | 20.007 |  |  |  |
 | LJ150 | 4000000 | anneal | 5/12 | 4000000 | 1477851 | 237.2 | 139.7 | 96.075 | 0.21 | 0.17 | - |
 |  |  | GMIN | 9/12 | 3129518.5 | 3240050.5 | 326.1 | 302.1 | 23.955 |  |  |  |
-| Au55 | 1000000 | anneal | 6/12 | 852736 | 572700.75 | 30.533 | 22.719 | 7.706 | 0.069 | 0.057 | - |
+| Au55 | 1000000 | anneal | 4/12 | 1000000 | 736743.75 | 38.043 | 28.083 | 9.966 | 0.32 | 0.21 | - |
 |  |  | GMIN | 1/12 | 1000000 | 0 | 59.573 | 56.427 | 3.152 |  |  |  |
-| M55 ρ=6 | 1000000 | anneal | 12/12 | 563 | 128.75 | 0.010 | 0.008 | 0.001 | 1 | 3.7e-5 | 3.7e-5 |
+| M55 ρ=6 | 1000000 | anneal | 12/12 | 92049.5 | 103998.75 | 1.742 | 1.196 | 0.547 | 1 | 0.069 | 0.078 |
 |  |  | GMIN | 12/12 | 37047.5 | 37358.75 | 0.751 | 0.637 | 0.115 |  |  |  |
-| M55 ρ=14 | 1000000 | anneal | 7/12 | 730604 | 623707.5 | 13.593 | 9.672 | 3.921 | 4.6e-3 | 2.9e-3 | - |
+| M55 ρ=14 | 1000000 | anneal | 7/12 | 730604 | 623707.5 | 12.814 | 9.196 | 3.618 | 4.6e-3 | 2.9e-3 | - |
 |  |  | GMIN | 0/12 | 1000000 | 0 | 18.898 | 16.322 | 2.577 |  |  |  |
-| M80 ρ=6 | 4000000 | anneal | 2/12 | 4000000 | 0 | 168.9 | 111.3 | 57.363 | 6.7e-5 | 3.1e-5 | 3.1e-5 |
+| M80 ρ=6 | 4000000 | anneal | 2/12 | 4000000 | 0 | 161.4 | 107.8 | 53.778 | 6.7e-5 | 3.1e-5 | 3.1e-5 |
 |  |  | GMIN | 12/12 | 268934 | 268091.5 | 10.691 | 9.582 | 1.109 |  |  |  |
-| M80 ρ=14 | 4000000 | anneal | 9/12 | 1338932.5 | 3064673 | 49.869 | 38.033 | 12.262 | 3.4e-4 | 3.8e-4 | - |
+| M80 ρ=14 | 4000000 | anneal | 9/12 | 1338932.5 | 3064673 | 49.325 | 37.783 | 11.542 | 3.4e-4 | 3.8e-4 | - |
 |  |  | GMIN | 0/12 | 4000000 | 0 | 152.7 | 138.3 | 14.430 |  |  |  |
 <!-- gmin-panel table: end -->
