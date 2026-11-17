@@ -63,6 +63,8 @@ def job(arm: str, molecule: str, seed: int, out: Path, args, budget: int = 0) ->
         cmd += ["--budget", str(budget)]
         if args.local_step:
             cmd += ["--local-step", args.local_step]
+    if arm == "anneal" and args.elite_return:
+        cmd.append("--elite-return")
     if arm == "develop":
         cmd += ["--anneal-path", str(args.baseline)]
     out.mkdir(parents=True, exist_ok=True)
@@ -225,6 +227,7 @@ def main() -> int:
     parser.add_argument("--molecules", nargs="*")
     parser.add_argument("--seeds", nargs="+", type=int)
     parser.add_argument("--local-step", choices=["lbfgs", "tric", "auto"], help="anneal quench; default the preset's")
+    parser.add_argument("--elite-return", action="store_true", help="the anneal arm, not develop, with elite_return on")
     parser.add_argument("--only", nargs=3, metavar=("MOLECULE", "SEED", "ARM"))
     parser.add_argument("--pair", nargs=2, metavar=("MOLECULE", "SEED"), help="one paired job into asv-paired")
     parser.add_argument("--any-host", action="store_true", help="allow a hostname other than bench")
