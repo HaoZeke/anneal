@@ -3,11 +3,11 @@
 
 #include "rgpot/MOPACPot/MOPACPot.hpp"
 
-#include "rgpot/MOPACPot/DynLib.hpp"
 #include "rgpot/MOPACPot/mopac_c_abi.h"
+#include "rgpot/abi/DynLib.hpp"
+#include "rgpot/abi/EngineDlopen.hpp"
 #include "rgpot/units.hpp"
 
-#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
@@ -27,23 +27,6 @@ using SetParamsFn = int (*)(const void *, size_t);
 using AbiVersionFn = int (*)(void);
 using AvailableFn = int (*)(void);
 
-std::vector<std::string>
-engine_lib_candidates(const std::string &explicit_path) {
-  std::vector<std::string> out;
-  if (!explicit_path.empty())
-    out.emplace_back(explicit_path);
-  if (const char *e = std::getenv("MOPACC_LIBRARY"); e && *e)
-    out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_MOPACC_ENGINE"); e && *e)
-    out.emplace_back(e);
-  out.emplace_back("libmopacc.so");
-  out.emplace_back("./libmopacc.so");
-  out.emplace_back("libmopacc.dylib");
-  out.emplace_back("./libmopacc.dylib");
-  out.emplace_back("mopacc.dll");
-  return out;
-}
-
 struct EngineBundle {
   DynLib engine_lib;
   EnergyGradientFn energy_gradient = nullptr;
@@ -55,25 +38,12 @@ struct EngineBundle {
 };
 
 bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
-  b.load_error.clear();
-  b.loaded = false;
-  b.energy_gradient = nullptr;
-  b.set_params = nullptr;
-  b.abi_version = nullptr;
-  b.available = nullptr;
-
-  bool eng_ok = false;
+  b = EngineBundle{};
+  const auto cands = abi::engine_candidates(
+      "mopacc", engine_path, {"MOPACC_LIBRARY", "RGPOT_MOPACC_ENGINE"});
+  std::string loaded_path;
   std::string eng_err;
-  for (const auto &cand : engine_lib_candidates(engine_path)) {
-    try {
-      b.engine_lib.open(cand);
-      eng_ok = true;
-      break;
-    } catch (const std::exception &ex) {
-      eng_err = ex.what();
-    }
-  }
-  if (!eng_ok) {
+  if (!abi::open_first_candidate(b.engine_lib, cands, &loaded_path, &eng_err)) {
     b.load_error = "libmopacc not loaded: " + eng_err;
     return false;
   }
@@ -143,32 +113,20 @@ bool MOPACPot::available() const {
 }
 
 bool MOPACPot::probeAvailable() {
-  std::lock_guard<std::mutex> lock(g_probe_mu);
-  if (g_probe_done)
-    return g_probe_ok;
-  EngineBundle &tmp = probe_engine_bundle();
-  if (!tmp.loaded)
-    g_probe_ok = try_load_engine(tmp, "");
-  else
-    g_probe_ok = true;
-  g_probe_done = true;
-  return g_probe_ok;
+  return abi::probe_once(g_probe_mu, g_probe_done, g_probe_ok, [] {
+    EngineBundle &tmp = probe_engine_bundle();
+    return tmp.loaded || try_load_engine(tmp, "");
+  });
 }
 
 bool MOPACPot::abiAvailable() {
-  std::lock_guard<std::mutex> lock(g_probe_mu);
-  if (g_abi_probe_done)
-    return g_abi_probe_ok;
-  EngineBundle &tmp = probe_engine_bundle();
-  if (!tmp.loaded && !try_load_engine(tmp, "")) {
-    g_abi_probe_ok = false;
-  } else if (tmp.available) {
-    g_abi_probe_ok = tmp.available() != 0;
-  } else {
-    g_abi_probe_ok = false;
-  }
-  g_abi_probe_done = true;
-  return g_abi_probe_ok;
+  return abi::probe_once(g_probe_mu, g_abi_probe_done, g_abi_probe_ok, [] {
+    EngineBundle &tmp = probe_engine_bundle();
+    if (!tmp.loaded && !try_load_engine(tmp, "")) {
+      return false;
+    }
+    return tmp.available != nullptr && tmp.available() != 0;
+  });
 }
 
 void MOPACPot::forceImpl(const ForceInput &in, ForceOut *out) const {

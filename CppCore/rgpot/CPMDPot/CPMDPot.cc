@@ -10,8 +10,10 @@
 #include <kj/array.h>
 
 #include "rgpot/CPMDPot/cpmd_c_abi.h"
-#include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/abi/CapnpParamsHelper.hpp"
+#include "rgpot/abi/EngineDlopen.hpp"
+#include "rgpot/abi/ProfileLoader.hpp"
 #include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/units.hpp"
 
@@ -39,13 +41,6 @@ using EnergyGradientFn = CPMDCResult (*)(int, const double *, const int *,
                                          const void *, size_t, double *);
 using SetParamsFn = int (*)(const void *, size_t);
 using SessionCreateFn = CPMDCSession *(*)(const void *, size_t);
-using SessionDestroyFn = void (*)(CPMDCSession *);
-using PotentialResultSizeFn = size_t (*)(const void *, size_t);
-using SessionCalculateResultFn = CPMDCResult (*)(CPMDCSession *, const void *,
-                                                 size_t, void *, size_t,
-                                                 size_t *);
-using VersionFn = const char *(*)(void);
-using AvailableFn = int (*)(void);
 using FeatureCountFn = size_t (*)(void);
 using FeatureTableFn = const CPMDCFeatureEntry *(*)(void);
 using FeatureFindFn = const CPMDCFeatureEntry *(*)(const char *);
@@ -63,30 +58,6 @@ using LastStressFn = int (*)(CPMDCStressTensor *);
 static_assert(offsetof(CPMDCStressTensor, values) == 8,
               "CPMDCStressTensor values follow the valid flag");
 
-struct ParamsView {
-  const void *data = nullptr;
-  size_t size = 0;
-};
-
-std::vector<std::string>
-engine_lib_candidates(const std::string &explicit_path) {
-  std::vector<std::string> out;
-  if (!explicit_path.empty())
-    out.emplace_back(explicit_path);
-  if (const char *e = std::getenv("CPMDC_LIBRARY"); e && *e)
-    out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_CPMDC_ENGINE"); e && *e)
-    out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_CPMD_ENGINE"); e && *e)
-    out.emplace_back(e);
-  out.emplace_back("libcpmdc.so");
-  out.emplace_back("./libcpmdc.so");
-  out.emplace_back("libcpmdc.dylib");
-  out.emplace_back("./libcpmdc.dylib");
-  out.emplace_back("cpmdc.dll");
-  return out;
-}
-
 void apply_env_hints(const std::string &cpmd_root) {
   if (!cpmd_root.empty()) {
 #if !defined(_WIN32)
@@ -96,15 +67,10 @@ void apply_env_hints(const std::string &cpmd_root) {
 }
 
 struct EngineBundle {
-  DynLib engine_lib;
+  abi::ProfileLoader profile;
   EnergyGradientFn energy_gradient = nullptr;
   SetParamsFn set_params = nullptr;
   SessionCreateFn session_create = nullptr;
-  SessionDestroyFn session_destroy = nullptr;
-  PotentialResultSizeFn potential_result_size_for_force_input = nullptr;
-  SessionCalculateResultFn session_calculate_result = nullptr;
-  VersionFn version = nullptr;
-  AvailableFn available = nullptr;
   FeatureCountFn feature_count = nullptr;
   FeatureTableFn feature_table = nullptr;
   FeatureFindFn feature_find = nullptr;
@@ -113,83 +79,39 @@ struct EngineBundle {
   CopyOrbitalsFn copy_orbitals = nullptr;
   LastErrorFn last_error = nullptr;
   AdoptCommFn adopt_comm = nullptr;
-  std::string loaded_path;
   std::string load_error;
   bool loaded = false;
 };
 
 bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
-  b.load_error.clear();
-  b.loaded_path.clear();
-  b.loaded = false;
-  b.energy_gradient = nullptr;
-  b.set_params = nullptr;
-  b.session_create = nullptr;
-  b.session_destroy = nullptr;
-  b.potential_result_size_for_force_input = nullptr;
-  b.session_calculate_result = nullptr;
-  b.version = nullptr;
-  b.available = nullptr;
-  b.feature_count = nullptr;
-  b.feature_table = nullptr;
-  b.feature_find = nullptr;
-  b.last_stress = nullptr;
-  b.select_orbitals = nullptr;
-  b.copy_orbitals = nullptr;
-  b.last_error = nullptr;
-  b.adopt_comm = nullptr;
-
-  bool eng_ok = false;
+  b = EngineBundle{};
+  const auto cands = abi::engine_candidates(
+      "cpmdc", engine_path,
+      {"CPMDC_LIBRARY", "RGPOT_CPMDC_ENGINE", "RGPOT_CPMD_ENGINE"});
   std::string eng_err;
-  for (const auto &cand : engine_lib_candidates(engine_path)) {
-    try {
-      b.engine_lib.open(cand);
-      b.loaded_path = cand;
-      eng_ok = true;
-      break;
-    } catch (const std::exception &ex) {
-      eng_err = ex.what();
-    }
-  }
-  if (!eng_ok) {
+  if (!b.profile.open_candidates("cpmdc", cands, &eng_err)) {
     b.load_error = "libcpmdc not loaded: " + eng_err;
     return false;
   }
 
-  b.energy_gradient =
-      b.engine_lib.sym_optional<EnergyGradientFn>("cpmdc_energy_gradient");
-  b.adopt_comm =
-      b.engine_lib.sym_optional<AdoptCommFn>("cpmdc_adopt_calculator_comm");
-  b.set_params = b.engine_lib.sym_optional<SetParamsFn>("cpmdc_set_params");
-  b.session_create =
-      b.engine_lib.sym_optional<SessionCreateFn>("cpmdc_session_create");
-  b.session_destroy =
-      b.engine_lib.sym_optional<SessionDestroyFn>("cpmdc_session_destroy");
-  b.potential_result_size_for_force_input =
-      b.engine_lib.sym_optional<PotentialResultSizeFn>(
-          "cpmdc_potential_result_size_for_force_input");
-  b.session_calculate_result =
-      b.engine_lib.sym_optional<SessionCalculateResultFn>(
-          "cpmdc_session_calculate_result");
-  b.version = b.engine_lib.sym_optional<VersionFn>("cpmdc_version");
-  b.available = b.engine_lib.sym_optional<AvailableFn>("cpmdc_available");
-  b.feature_count =
-      b.engine_lib.sym_optional<FeatureCountFn>("cpmdc_feature_count");
-  b.feature_table =
-      b.engine_lib.sym_optional<FeatureTableFn>("cpmdc_feature_table");
-  b.feature_find =
-      b.engine_lib.sym_optional<FeatureFindFn>("cpmdc_feature_find");
-  b.last_stress = b.engine_lib.sym_optional<LastStressFn>("cpmdc_last_stress");
-  b.select_orbitals = b.engine_lib.sym_optional<SelectOrbitalsFn>(
-      "cpmdc_session_select_orbitals");
+  auto &lib = b.profile.lib();
+  b.energy_gradient = lib.sym_optional<EnergyGradientFn>("cpmdc_energy_gradient");
+  b.adopt_comm = lib.sym_optional<AdoptCommFn>("cpmdc_adopt_calculator_comm");
+  b.set_params = lib.sym_optional<SetParamsFn>("cpmdc_set_params");
+  b.session_create = lib.sym_optional<SessionCreateFn>("cpmdc_session_create");
+  b.feature_count = lib.sym_optional<FeatureCountFn>("cpmdc_feature_count");
+  b.feature_table = lib.sym_optional<FeatureTableFn>("cpmdc_feature_table");
+  b.feature_find = lib.sym_optional<FeatureFindFn>("cpmdc_feature_find");
+  b.last_stress = lib.sym_optional<LastStressFn>("cpmdc_last_stress");
+  b.select_orbitals =
+      lib.sym_optional<SelectOrbitalsFn>("cpmdc_session_select_orbitals");
   b.copy_orbitals =
-      b.engine_lib.sym_optional<CopyOrbitalsFn>("cpmdc_session_copy_orbitals");
-  b.last_error = b.engine_lib.sym_optional<LastErrorFn>("cpmdc_last_error");
+      lib.sym_optional<CopyOrbitalsFn>("cpmdc_session_copy_orbitals");
+  b.last_error = lib.sym_optional<LastErrorFn>("cpmdc_last_error");
 
   const bool has_one_shot = b.energy_gradient && b.set_params;
-  const bool has_session_result = b.session_create && b.session_destroy &&
-                                  b.potential_result_size_for_force_input &&
-                                  b.session_calculate_result;
+  const bool has_session_result =
+      b.session_create && b.profile.has_session_result_profile();
   const bool has_feature_discovery =
       b.feature_count && b.feature_table && b.feature_find;
   if (!has_feature_discovery) {
@@ -206,70 +128,24 @@ bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
 }
 
 bool register_engine_adopter(const EngineBundle &b) {
-  if (!b.adopt_comm)
-    return true;
-  struct PinnedEngine {
-    DynLib library;
-    AdoptCommFn callback;
-  };
-  // The registry retains one handle per callback through the MPI exit
-  // handler. Availability probes never enter it. Instance destruction
-  // and enginePath changes cannot unload a registered callback.
-  static auto *engines = new std::vector<PinnedEngine>;
-  static std::mutex mutex;
-  std::lock_guard<std::mutex> lock(mutex);
-  for (const auto &engine : *engines) {
-    if (engine.callback == b.adopt_comm)
-      return addCalculatorCommAdopter(engine.callback);
-  }
-  DynLib library(b.loaded_path);
-  if (library.sym_optional<AdoptCommFn>("cpmdc_adopt_calculator_comm") !=
-      b.adopt_comm)
-    throw std::runtime_error(
-        "CPMD communicator callback changed while loading");
-  engines->push_back({std::move(library), b.adopt_comm});
-  return addCalculatorCommAdopter(b.adopt_comm);
+  return abi::register_calculator_adopter(
+      b.profile.loaded_path(), "cpmdc_adopt_calculator_comm", b.adopt_comm,
+      "CPMD communicator callback changed while loading");
 }
 
 bool has_session_result_abi(const EngineBundle &b) {
-  return b.session_create && b.session_destroy &&
-         b.potential_result_size_for_force_input && b.session_calculate_result;
+  return b.session_create && b.profile.has_session_result_profile();
 }
 
 void publishForceError(const std::string &message) {
   publishCalculatorError(message);
 }
 
-std::vector<::capnp::word>
-serialize_params(const ::CPMDParams::Reader &params) {
-  ::capnp::MallocMessageBuilder msg;
-  msg.setRoot(params);
-  auto words = ::capnp::messageToFlatArray(msg);
-  std::vector<::capnp::word> out(words.size());
-  std::memcpy(out.data(), words.begin(), words.size() * sizeof(::capnp::word));
-  return out;
-}
-
-std::vector<::capnp::word> default_params() {
-  ::capnp::MallocMessageBuilder msg;
-  auto params = msg.initRoot<::CPMDParams>();
-  return serialize_params(params.asReader());
-}
-
-ParamsView params_view(const std::vector<::capnp::word> &words) {
-  ParamsView view;
-  if (!words.empty()) {
-    view.data = words.data();
-    view.size = words.size() * sizeof(::capnp::word);
-  }
-  return view;
-}
-
 bool push_params_to_engine(EngineBundle &b,
                            const std::vector<::capnp::word> &params_words) {
   if (!b.set_params)
     return false;
-  const ParamsView view = params_view(params_words);
+  const abi::BytesView view = abi::words_view(params_words);
   return b.set_params(view.data, view.size) == 0;
 }
 
@@ -282,26 +158,6 @@ std::string read_engine_last_error(const EngineBundle &b) {
   return msg;
 }
 
-std::vector<::capnp::word> serialize_force_input(const ForceInput &in) {
-  ::capnp::MallocMessageBuilder msg;
-  auto force_input = msg.initRoot<::ForceInput>();
-  const unsigned int coord_count = static_cast<unsigned int>(in.nAtoms * 3u);
-  auto pos = force_input.initPos(coord_count);
-  auto atmnrs = force_input.initAtmnrs(static_cast<unsigned int>(in.nAtoms));
-  auto box = force_input.initBox(9);
-  for (unsigned int i = 0; i < coord_count; ++i)
-    pos.set(i, in.pos[i]);
-  for (unsigned int i = 0; i < in.nAtoms; ++i)
-    atmnrs.set(i, in.atmnrs[i]);
-  for (unsigned int i = 0; i < 9; ++i)
-    box.set(i, in.box[i]);
-  force_input.setLengthUnit("angstrom");
-  force_input.setEnergyUnit("eV");
-  auto words = ::capnp::messageToFlatArray(msg);
-  std::vector<::capnp::word> out(words.size());
-  std::memcpy(out.data(), words.begin(), words.asBytes().size());
-  return out;
-}
 
 std::string params_summary(const ::CPMDParams::Reader &params) {
   std::string out = "functional=" + std::string(params.getFunctional().cStr()) +
@@ -354,14 +210,14 @@ read_params_words(const std::vector<::capnp::word> &params_words,
 // capnp::word forbids copying, so the params a live session was created
 // from are kept as bytes and compared bytewise.
 std::vector<unsigned char> words_bytes(const std::vector<::capnp::word> &w) {
-  const ParamsView view = params_view(w);
+  const abi::BytesView view = abi::words_view(w);
   const auto *p = static_cast<const unsigned char *>(view.data);
   return std::vector<unsigned char>(p, p + view.size);
 }
 
 bool same_words(const std::vector<::capnp::word> &w,
                 const std::vector<unsigned char> &bytes) {
-  const ParamsView view = params_view(w);
+  const abi::BytesView view = abi::words_view(w);
   return view.size == bytes.size() &&
          (view.size == 0 ||
           std::memcmp(view.data, bytes.data(), view.size) == 0);
@@ -404,15 +260,15 @@ void CPMDPot::Impl::recomputeParamsKey() {
   // hashing its bytes covers every field the engine sees.
   Fnv1a fp;
   fp.u64(CPMDPot::kKernelVersion);
-  const ParamsView view = params_view(params_words);
+  const abi::BytesView view = abi::words_view(params_words);
   fp.u64(view.size);
   fp.bytes(view.data, view.size);
   params_key = fp.h;
 }
 
 void CPMDPot::Impl::destroySession() {
-  if (session && bundle.session_destroy)
-    bundle.session_destroy(session);
+  if (session && bundle.profile.session_destroy)
+    bundle.profile.session_destroy(session);
   session = nullptr;
   session_params.clear();
   session_engine_path.clear();
@@ -434,7 +290,7 @@ bool CPMDPot::Impl::configure() {
         same_words(params_words, session_params))
       return true;
     destroySession();
-    const ParamsView view = params_view(params_words);
+    const abi::BytesView view = abi::words_view(params_words);
     session = bundle.session_create(view.data, view.size);
     if (!session) {
       unavailable_reason = "CPMD engine refused the session create";
@@ -464,7 +320,7 @@ bool CPMDPot::Impl::configure() {
 }
 
 CPMDPot::CPMDPot() : Potential(PotType::CPMD), impl_(new Impl) {
-  impl_->params_words = default_params();
+  impl_->params_words = abi::default_capnp_words<::CPMDParams>();
   impl_->recomputeParamsKey();
   apply_env_hints(impl_->cpmd_root);
   if (try_load_engine(impl_->bundle, impl_->engine_path))
@@ -473,7 +329,7 @@ CPMDPot::CPMDPot() : Potential(PotType::CPMD), impl_(new Impl) {
 
 CPMDPot::CPMDPot(const ::CPMDParams::Reader &params)
     : Potential(PotType::CPMD), impl_(new Impl) {
-  impl_->params_words = serialize_params(params);
+  impl_->params_words = abi::serialize_capnp(params);
   impl_->recomputeParamsKey();
   impl_->engine_path = params.getEnginePath().cStr();
   impl_->cpmd_root = params.getCpmdRoot().cStr();
@@ -529,7 +385,7 @@ bool CPMDPot::setParams(const ::CPMDParams::Reader &params) {
   const bool need_reload =
       !impl_->bundle.loaded || next_engine_path != impl_->engine_path;
 
-  impl_->params_words = serialize_params(params);
+  impl_->params_words = abi::serialize_capnp(params);
   impl_->recomputeParamsKey();
   impl_->engine_path = next_engine_path;
   impl_->cpmd_root = next_cpmd_root;
@@ -607,29 +463,20 @@ int CPMDPot::bindCalculators(int ranks_per_calc) {
 }
 
 bool CPMDPot::probeAvailable() {
-  std::lock_guard<std::mutex> lock(g_probe_mu);
-  if (g_probe_done)
-    return g_probe_ok;
-  EngineBundle tmp;
-  g_probe_ok = try_load_engine(tmp, "");
-  g_probe_done = true;
-  return g_probe_ok;
+  return abi::probe_once(g_probe_mu, g_probe_done, g_probe_ok, [] {
+    EngineBundle tmp;
+    return try_load_engine(tmp, "");
+  });
 }
 
 bool CPMDPot::abiAvailable() {
-  std::lock_guard<std::mutex> lock(g_probe_mu);
-  if (g_abi_probe_done)
-    return g_abi_probe_ok;
-  EngineBundle tmp;
-  if (!try_load_engine(tmp, "")) {
-    g_abi_probe_ok = false;
-  } else if (tmp.available) {
-    g_abi_probe_ok = tmp.available() != 0;
-  } else {
-    g_abi_probe_ok = false;
-  }
-  g_abi_probe_done = true;
-  return g_abi_probe_ok;
+  return abi::probe_once(g_probe_mu, g_abi_probe_done, g_abi_probe_ok, [] {
+    EngineBundle tmp;
+    if (!try_load_engine(tmp, "")) {
+      return false;
+    }
+    return tmp.profile.available != nullptr && tmp.profile.available() != 0;
+  });
 }
 
 void CPMDPot::forceImpl(const ForceInput &in, ForceOut *out) const {
@@ -679,7 +526,7 @@ void CPMDPot::forceImplOrThrow(const ForceInput &in, ForceOut *out) const {
 
   std::vector<double> &grad = impl_->grad_scratch;
   grad.assign(static_cast<size_t>(n) * 3u, 0.0);
-  const ParamsView params = params_view(impl_->params_words);
+  const abi::BytesView params = abi::words_view(impl_->params_words);
   CPMDCResult res = impl_->bundle.energy_gradient(
       n, in.pos, in.atmnrs, params.data, params.size, grad.data());
 
@@ -704,9 +551,9 @@ void CPMDPot::forceImplOrThrow(const ForceInput &in, ForceOut *out) const {
 }
 
 void CPMDPot::Impl::forceSession(const ForceInput &in, ForceOut *out) {
-  const auto force_words = serialize_force_input(in);
-  const ParamsView force_view = params_view(force_words);
-  const size_t required = bundle.potential_result_size_for_force_input(
+  const auto force_words = abi::serialize_force_input_ev(in);
+  const abi::BytesView force_view = abi::words_view(force_words);
+  const size_t required = bundle.profile.potential_result_size_for_force_input(
       force_view.data, force_view.size);
   if (required == 0)
     fail_force("CPMD engine rejected ForceInput sizing");
@@ -714,7 +561,12 @@ void CPMDPot::Impl::forceSession(const ForceInput &in, ForceOut *out) {
   std::vector<::capnp::word> result_words(
       (required + sizeof(::capnp::word) - 1u) / sizeof(::capnp::word));
   size_t written = 0;
-  CPMDCResult res = bundle.session_calculate_result(
+  // The engine keeps converged orbitals per key; naming the key on every
+  // call keeps it right when the session was recreated since.
+  if (has_orbital_key && bundle.select_orbitals &&
+      bundle.select_orbitals(session, static_cast<long long>(orbital_key)) != 0)
+    fail_force("CPMD engine refused the orbital key");
+  abi::ProfileResult res = bundle.profile.session_calculate_result(
       session, force_view.data, force_view.size, result_words.data(),
       result_words.size() * sizeof(::capnp::word), &written);
   if (!res.ok)

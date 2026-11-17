@@ -1,55 +1,17 @@
 // MIT License — dlopen frontend for libxtb_engine.so
 #include "rgpot/XTBPot/XTBDlopen.hpp"
+#include "rgpot/abi/DynLib.hpp"
+#include "rgpot/abi/EngineDlopen.hpp"
 
 #include <array>
-#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
-#include <dlfcn.h>
-#else
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
-
 namespace rgpot {
 
 namespace {
-
-void *open_lib(const char *path) {
-#ifdef _WIN32
-  return reinterpret_cast<void *>(LoadLibraryA(path));
-#else
-  return dlopen(path, RTLD_NOW | RTLD_LOCAL);
-#endif
-}
-
-void close_lib(void *h) {
-  if (!h)
-    return;
-#ifdef _WIN32
-  FreeLibrary(reinterpret_cast<HMODULE>(h));
-#else
-  dlclose(h);
-#endif
-}
-
-void *sym(void *h, const char *name) {
-#ifdef _WIN32
-  return reinterpret_cast<void *>(
-      GetProcAddress(reinterpret_cast<HMODULE>(h), name));
-#else
-  return dlsym(h, name);
-#endif
-}
 
 int method_to_c(GFNMethod m) {
   switch (m) {
@@ -65,76 +27,6 @@ int method_to_c(GFNMethod m) {
   }
 }
 
-// A name with no directory separator is a loader search key, not a file.
-// dlopen / LoadLibraryA would walk LD_LIBRARY_PATH, DYLD_LIBRARY_PATH, PATH,
-// and the ld cache, which can substitute a different libxtb_engine.
-bool has_directory_separator(const std::string &path) {
-  return path.find_first_of("/\\") != std::string::npos;
-}
-
-void append_loader_error(std::string &msg, bool explicit_path) {
-#ifndef _WIN32
-  if (const char *e = dlerror()) {
-    if (*e != '\0') {
-      msg += explicit_path ? "; dlerror: " : "; last dlerror: ";
-      msg += e;
-    }
-  }
-#else
-  (void)explicit_path;
-#endif
-}
-
-std::vector<std::string> candidate_paths(const XTBDlopenConfig &config) {
-  std::vector<std::string> out;
-  // An explicit path is exclusive. The constructor rejects a slash-less
-  // name before this search. Falling through to the bare soname lets the
-  // loader or an env/dir candidate satisfy a request for a different library.
-  if (!config.engine_path.empty()) {
-    out.push_back(config.engine_path);
-    return out;
-  }
-  if (const char *e = std::getenv("RGPOT_XTB_ENGINE"))
-    if (e && *e)
-      out.emplace_back(e);
-  if (const char *e = std::getenv("XTB_ENGINE"))
-    if (e && *e)
-      out.emplace_back(e);
-#ifdef _WIN32
-  out.emplace_back("xtb_engine.dll");
-  out.emplace_back("libxtb_engine.dll");
-#elif defined(__APPLE__)
-  out.emplace_back("libxtb_engine.dylib");
-  out.emplace_back("libxtb_engine.so");
-#else
-  out.emplace_back("libxtb_engine.so");
-#endif
-  auto append_dirs = [&](const char *env) {
-    if (!env || !*env)
-      return;
-    std::string s(env);
-    size_t start = 0;
-    while (start < s.size()) {
-      auto pos = s.find(':', start);
-      if (pos == std::string::npos)
-        pos = s.size();
-      if (pos > start) {
-        std::string dir = s.substr(start, pos - start);
-        if (!dir.empty() && dir.back() != '/')
-          dir += '/';
-#ifdef __APPLE__
-        out.push_back(dir + "libxtb_engine.dylib");
-#endif
-        out.push_back(dir + "libxtb_engine.so");
-      }
-      start = pos + 1;
-    }
-  };
-  append_dirs(std::getenv("EON_POTENTIALS_PATH"));
-  append_dirs(std::getenv("RGPOT_ENGINE_PATH"));
-  return out;
-}
-
 } // namespace
 
 XTBDlopen::XTBDlopen(const XTBConfig &xtb)
@@ -142,18 +34,23 @@ XTBDlopen::XTBDlopen(const XTBConfig &xtb)
 
 XTBDlopen::XTBDlopen(const XTBDlopenConfig &config) : m_config(config.xtb) {
   const bool explicit_path = !config.engine_path.empty();
-  if (explicit_path && !has_directory_separator(config.engine_path)) {
+  if (explicit_path && !abi::has_directory_separator(config.engine_path)) {
     throw std::runtime_error(
         "XTBDlopen: engine_path \"" + config.engine_path +
         "\" has no directory separator; a bare name is resolved through "
         "the loader search path. Pass an absolute or relative path");
   }
-  for (const auto &path : candidate_paths(config)) {
-    m_lib = open_lib(path.c_str());
-    if (m_lib)
-      break;
-  }
-  if (!m_lib) {
+  const auto cands = abi::engine_candidates(
+      "xtb_engine", config.engine_path, {"RGPOT_XTB_ENGINE", "XTB_ENGINE"},
+      abi::CandidateOptions{.include_cwd_dot_slash = false,
+                            .include_dll = false,
+                            .include_dir_envs = true,
+                            .exclusive_explicit = true,
+                            .platform_only_soname = true});
+  DynLib lib;
+  std::string loaded_path;
+  std::string open_err;
+  if (!abi::open_first_candidate(lib, cands, &loaded_path, &open_err, false)) {
     std::string msg;
     if (explicit_path) {
       // Discovery env vars are ignored once engine_path is set, so naming
@@ -163,39 +60,33 @@ XTBDlopen::XTBDlopen(const XTBDlopenConfig &config) : m_config(config.xtb) {
       msg = "XTBDlopen: libxtb_engine.so not found "
             "(set RGPOT_XTB_ENGINE / engine_path / EON_POTENTIALS_PATH)";
     }
-    append_loader_error(msg, explicit_path);
+    if (!open_err.empty()) {
+      msg += explicit_path ? "; dlerror: " : "; last dlerror: ";
+      msg += open_err;
+    }
     throw std::runtime_error(msg);
   }
 
-  auto abi =
-      reinterpret_cast<int (*)(void)>(sym(m_lib, "rgpot_xtb_abi_version"));
-  m_create = reinterpret_cast<create_fn>(sym(m_lib, "rgpot_xtb_create"));
-  m_destroy = reinterpret_cast<destroy_fn>(sym(m_lib, "rgpot_xtb_destroy"));
-  m_force = reinterpret_cast<force_fn>(sym(m_lib, "rgpot_xtb_force"));
-  m_reset = reinterpret_cast<reset_fn>(sym(m_lib, "rgpot_xtb_reset"));
-  m_set_warm =
-      reinterpret_cast<set_warm_fn>(sym(m_lib, "rgpot_xtb_set_warm_move"));
-  m_warm_move =
-      reinterpret_cast<warm_move_fn>(sym(m_lib, "rgpot_xtb_warm_move"));
-  m_set_min_gap =
-      reinterpret_cast<set_warm_fn>(sym(m_lib, "rgpot_xtb_set_warm_min_gap"));
-  m_min_gap =
-      reinterpret_cast<warm_move_fn>(sym(m_lib, "rgpot_xtb_warm_min_gap"));
-  m_reused =
-      reinterpret_cast<reused_fn>(sym(m_lib, "rgpot_xtb_reused_wavefunction"));
-  if (!abi || !m_create || !m_destroy || !m_force || !m_reset || !m_set_warm ||
-      !m_warm_move || !m_set_min_gap || !m_min_gap || !m_reused) {
-    close_lib(m_lib);
-    m_lib = nullptr;
+  auto abi_fn = lib.sym_optional<int (*)(void)>("rgpot_xtb_abi_version");
+  m_create = lib.sym_optional<create_fn>("rgpot_xtb_create");
+  m_destroy = lib.sym_optional<destroy_fn>("rgpot_xtb_destroy");
+  m_force = lib.sym_optional<force_fn>("rgpot_xtb_force");
+  m_reset = lib.sym_optional<reset_fn>("rgpot_xtb_reset");
+  m_set_warm = lib.sym_optional<set_warm_fn>("rgpot_xtb_set_warm_move");
+  m_warm_move = lib.sym_optional<warm_move_fn>("rgpot_xtb_warm_move");
+  m_set_min_gap = lib.sym_optional<set_warm_fn>("rgpot_xtb_set_warm_min_gap");
+  m_min_gap = lib.sym_optional<warm_move_fn>("rgpot_xtb_warm_min_gap");
+  m_reused = lib.sym_optional<reused_fn>("rgpot_xtb_reused_wavefunction");
+  if (!abi_fn || !m_create || !m_destroy || !m_force || !m_reset ||
+      !m_set_warm || !m_warm_move || !m_set_min_gap || !m_min_gap ||
+      !m_reused) {
     // The opened library is the one we selected. Do not resume the
     // candidate list: an explicit path (or the first discovery hit) that
     // lacks the ABI must not silently load a different engine.
     throw std::runtime_error(
         "XTBDlopen: missing C ABI symbols in engine library");
   }
-  if (abi() != RGPOT_XTB_ABI_VERSION) {
-    close_lib(m_lib);
-    m_lib = nullptr;
+  if (abi_fn() != RGPOT_XTB_ABI_VERSION) {
     throw std::runtime_error("XTBDlopen: ABI version mismatch");
   }
   char err[1024]{};
@@ -208,12 +99,12 @@ XTBDlopen::XTBDlopen(const XTBDlopenConfig &config) : m_config(config.xtb) {
   cfg.uhf = config.xtb.uhf;
   m_pot = m_create(&cfg, err, sizeof err);
   if (!m_pot) {
-    close_lib(m_lib);
-    m_lib = nullptr;
     throw std::runtime_error(std::string("XTBDlopen: create failed: ") + err);
   }
   m_set_warm(m_pot, config.xtb.warm_move);
   m_set_min_gap(m_pot, config.xtb.warm_min_gap);
+  m_lib = lib.native_handle();
+  lib.release();
 }
 
 void XTBDlopen::reset() {
@@ -256,8 +147,7 @@ XTBDlopen::~XTBDlopen() {
   if (m_pot && m_destroy)
     m_destroy(m_pot);
   m_pot = nullptr;
-  if (m_lib)
-    close_lib(m_lib);
+  DynLib::close_handle(m_lib);
   m_lib = nullptr;
 }
 

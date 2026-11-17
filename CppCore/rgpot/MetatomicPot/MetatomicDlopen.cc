@@ -1,99 +1,15 @@
 // MIT License — dlopen frontend for libmetatomic_engine.so
 #include "rgpot/MetatomicPot/MetatomicDlopen.hpp"
+#include "rgpot/abi/DynLib.hpp"
+#include "rgpot/abi/EngineDlopen.hpp"
 
-#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
-#include <dlfcn.h>
-#else
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
-
 namespace rgpot {
 
 namespace {
-
-void *open_lib(const char *path) {
-#ifdef _WIN32
-  return reinterpret_cast<void *>(LoadLibraryA(path));
-#else
-  return dlopen(path, RTLD_NOW | RTLD_GLOBAL);
-#endif
-}
-
-void close_lib(void *h) {
-  if (!h)
-    return;
-#ifdef _WIN32
-  FreeLibrary(reinterpret_cast<HMODULE>(h));
-#else
-  dlclose(h);
-#endif
-}
-
-void *sym(void *h, const char *name) {
-#ifdef _WIN32
-  return reinterpret_cast<void *>(
-      GetProcAddress(reinterpret_cast<HMODULE>(h), name));
-#else
-  return dlsym(h, name);
-#endif
-}
-
-std::vector<std::string> candidate_paths(const MetatomicConfig &config) {
-  std::vector<std::string> out;
-  if (!config.engine_path.empty())
-    out.push_back(config.engine_path);
-  if (const char *e = std::getenv("RGPOT_METATOMIC_ENGINE"))
-    if (e && *e)
-      out.emplace_back(e);
-  if (const char *e = std::getenv("METATOMIC_ENGINE"))
-    if (e && *e)
-      out.emplace_back(e);
-#ifdef _WIN32
-  out.emplace_back("metatomic_engine.dll");
-  out.emplace_back("libmetatomic_engine.dll");
-#elif defined(__APPLE__)
-  out.emplace_back("libmetatomic_engine.dylib");
-  out.emplace_back("libmetatomic_engine.so");
-#else
-  out.emplace_back("libmetatomic_engine.so");
-#endif
-  // Directory search via EON_POTENTIALS_PATH / RGPOT_ENGINE_PATH
-  auto append_dirs = [&](const char *env) {
-    if (!env || !*env)
-      return;
-    std::string s(env);
-    size_t start = 0;
-    while (start < s.size()) {
-      auto pos = s.find(':', start);
-      if (pos == std::string::npos)
-        pos = s.size();
-      if (pos > start) {
-        std::string dir = s.substr(start, pos - start);
-        if (!dir.empty() && dir.back() != '/')
-          dir += '/';
-#ifdef __APPLE__
-        out.push_back(dir + "libmetatomic_engine.dylib");
-#endif
-        out.push_back(dir + "libmetatomic_engine.so");
-      }
-      start = pos + 1;
-    }
-  };
-  append_dirs(std::getenv("EON_POTENTIALS_PATH"));
-  append_dirs(std::getenv("RGPOT_ENGINE_PATH"));
-  return out;
-}
 
 RgpotMtaConfig to_c_config(const MetatomicConfig &c) {
   RgpotMtaConfig out{};
@@ -115,48 +31,48 @@ RgpotMtaConfig to_c_config(const MetatomicConfig &c) {
 } // namespace
 
 MetatomicDlopen::MetatomicDlopen(const MetatomicConfig &config) {
-  for (const auto &path : candidate_paths(config)) {
-    m_lib = open_lib(path.c_str());
-    if (m_lib)
-      break;
-  }
-  if (!m_lib) {
+  const auto cands = abi::engine_candidates(
+      "metatomic_engine", config.engine_path,
+      {"RGPOT_METATOMIC_ENGINE", "METATOMIC_ENGINE"},
+      abi::CandidateOptions{.include_cwd_dot_slash = false,
+                            .include_dll = false,
+                            .include_dir_envs = true,
+                            .exclusive_explicit = false,
+                            .platform_only_soname = true});
+  DynLib lib;
+  std::string loaded_path;
+  std::string open_err;
+  if (!abi::open_first_candidate(lib, cands, &loaded_path, &open_err, true)) {
     std::string msg =
         "MetatomicDlopen: libmetatomic_engine.so not found "
         "(set RGPOT_METATOMIC_ENGINE / engine_path / EON_POTENTIALS_PATH)";
-#ifndef _WIN32
-    if (const char *e = dlerror()) {
+    if (!open_err.empty()) {
       msg += "; last dlerror: ";
-      msg += e;
+      msg += open_err;
     }
-#endif
     throw std::runtime_error(msg);
   }
 
-  auto abi = reinterpret_cast<int (*)(void)>(sym(m_lib, "rgpot_mta_abi_version"));
-  m_create = reinterpret_cast<create_fn>(sym(m_lib, "rgpot_mta_create"));
-  m_destroy = reinterpret_cast<destroy_fn>(sym(m_lib, "rgpot_mta_destroy"));
-  m_force = reinterpret_cast<force_fn>(sym(m_lib, "rgpot_mta_force"));
-  if (!abi || !m_create || !m_destroy || !m_force) {
-    close_lib(m_lib);
-    m_lib = nullptr;
+  auto abi_fn = lib.sym_optional<int (*)(void)>("rgpot_mta_abi_version");
+  m_create = lib.sym_optional<create_fn>("rgpot_mta_create");
+  m_destroy = lib.sym_optional<destroy_fn>("rgpot_mta_destroy");
+  m_force = lib.sym_optional<force_fn>("rgpot_mta_force");
+  if (!abi_fn || !m_create || !m_destroy || !m_force) {
     throw std::runtime_error(
         "MetatomicDlopen: missing C ABI symbols in engine library");
   }
-  if (abi() != RGPOT_MTA_ABI_VERSION) {
-    close_lib(m_lib);
-    m_lib = nullptr;
+  if (abi_fn() != RGPOT_MTA_ABI_VERSION) {
     throw std::runtime_error("MetatomicDlopen: ABI version mismatch");
   }
   char err[1024]{};
   auto cfg = to_c_config(config);
   m_pot = m_create(&cfg, err, sizeof err);
   if (!m_pot) {
-    close_lib(m_lib);
-    m_lib = nullptr;
     throw std::runtime_error(std::string("MetatomicDlopen: create failed: ") +
                              err);
   }
+  m_lib = lib.native_handle();
+  lib.release();
 }
 
 MetatomicDlopen::~MetatomicDlopen() {
