@@ -1033,6 +1033,13 @@ anneal with `H2H_WALL_S` at three times CREST's slowest wall
   the old rows out.
 - Seed 2009: no hit after 183,839 calls and 15,311 s, best -922.038 eV,
   above the ring.
+- Seed 2003 is censored, not a miss or a timeout. CREST was still
+  running after 17,402 s, but had made no xtb call for 52 minutes and was
+  using one CPU to write binary process memory to
+  `crest_rotamers_0.xyz`; the file was 174,915,166,208 bytes when the
+  process was stopped to recover the full disk. Its xtb log held 1,356
+  records. No final energy or exit code exists, so
+  `gfn2/si20-censoring.csv` records neither.
 - Seed 2005 records a hit at call 108,256 (13,710 s) at -959.85629642
   eV, 36.9 eV below the ring, on a planar flake with a shortest pair of
   1.846 Å. xtb at 3000 K does not converge that geometry's SCC from a

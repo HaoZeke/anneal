@@ -1,0 +1,2 @@
+system,code,seed,outcome,wall_observed_s,xtb_log_records,best_eV,reason,code_revision,host,date
+si20,crest,2003,censored,17402,1356,,CREST was still running after 52 minutes without an xtb child and had written 174915166208 bytes of binary garbage,35d2292c2b89f1c5269e1f87403539f6c586f166,bench,2026-11-17
