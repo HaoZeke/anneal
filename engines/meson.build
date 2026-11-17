@@ -25,16 +25,25 @@ lj_dep = declare_dependency(
     include_directories: [engines_inc, rgpot_inc],
 )
 
+pot_spec_deps = []
+pot_spec_args = _args
+if _rpc_stack
+    pot_spec_deps += [ptlrpc_hdr_dep]
+    pot_spec_args += ['-DRGPOT_POT_SPEC_HAS_CPMD=1']
+endif
 pot_spec_lib = static_library(
     'rgpot_pot_spec',
     files('pot_spec.cpp'),
     include_directories: [engines_inc, rgpot_inc],
-    cpp_args: _args,
+    dependencies: pot_spec_deps,
+    cpp_args: pot_spec_args,
     pic: true,
 )
 pot_spec_dep = declare_dependency(
     link_with: pot_spec_lib,
+    dependencies: pot_spec_deps,
     include_directories: [engines_inc, rgpot_inc],
+    compile_args: pot_spec_args,
 )
 rgpot_eval = executable(
     'rgpot-eval',

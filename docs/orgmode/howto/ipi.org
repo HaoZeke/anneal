@@ -116,6 +116,9 @@ The species come from =--species= or from a structure file.
 rgpot-ipi-driver --pot "LJ u0 0.0104 psi 3.40 cutoff 8.5" --species 'Ar*108' -u -a rgpot
 rgpot-ipi-driver -m EAMTable -o file=Cu_u3.eam --species-from start.xyz -p 31415
 rgpot-ipi-driver -m EAMAl --species 'Al*108' --cutoff 7.1 --stress-step 1e-5 -u -a al
+CPMDC_LIBRARY=/path/to/libcpmdc.so rgpot-ipi-driver \
+  --pot "CPMD params water.params.bin" --species O,H,H \
+  --preserve-open-cell -u -a water
 #+end_src
 
 The driver retries the connection for =--connect-timeout= seconds.
@@ -135,6 +138,8 @@ The cube is also wider than twice the cluster extent plus the cutoff.
 A periodic cell no wider than twice the cutoff is tiled before evaluation.
 The cutoff is the potential's own (=LJ=, =Morse=, =SuttonChen=) or =--cutoff=.
 RgpotCalculator handles small and open cells the same way.
+=--preserve-open-cell= instead passes a singular cell to the potential.
+Use it with =CPMD= when an isolated CPMD deck must keep its own cell.
 
 *** Virial
 

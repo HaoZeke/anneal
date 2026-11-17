@@ -17,10 +17,17 @@
 #ifdef RGPOT_HAS_FORTRAN_POTS
 #include "rgpot/fortran/FortranPots.hpp"
 #endif
+#ifdef RGPOT_POT_SPEC_HAS_CPMD
+#include "rgpot/CPMDPot/CPMDPot.hpp"
+
+#include <capnp/serialize.h>
+#include <kj/array.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <fstream>
 #include <stdexcept>
 #include <utility>
 
@@ -171,7 +178,52 @@ template <typename P, typename C> Built ownCut(const C &c) {
   return out;
 }
 
+#ifdef RGPOT_POT_SPEC_HAS_CPMD
+Built cpmd(const std::string &path) {
+  if (path.empty()) {
+    throw std::invalid_argument("CPMD needs params <serialized CPMDParams>");
+  }
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input) {
+    throw std::invalid_argument("CPMD cannot open params file " + path);
+  }
+  const std::streamoff bytes = input.tellg();
+  if (bytes <= 0 ||
+      bytes % static_cast<std::streamoff>(sizeof(::capnp::word)) != 0) {
+    throw std::invalid_argument("CPMD params file is not a flat Cap'n Proto message: " +
+                                path);
+  }
+  input.seekg(0);
+  std::vector<::capnp::word> words(
+      static_cast<size_t>(bytes) / sizeof(::capnp::word));
+  input.read(reinterpret_cast<char *>(words.data()),
+             static_cast<std::streamsize>(bytes));
+  if (!input) {
+    throw std::invalid_argument("CPMD cannot read params file " + path);
+  }
+  auto view = kj::arrayPtr<const ::capnp::word>(words.data(), words.size());
+  ::capnp::FlatArrayMessageReader reader(view);
+  auto pot = std::make_unique<CPMDPot>(reader.getRoot<::CPMDParams>());
+  if (!pot->available()) {
+    throw std::invalid_argument(
+        "CPMD could not load libcpmdc; set enginePath in CPMDParams or CPMDC_LIBRARY");
+  }
+  const CPMDPot *kernel = pot.get();
+  Built out;
+  out.eval = [kernel](const ForceInput &in, ForceOut *res) {
+    kernel->forceImpl(in, res);
+  };
+  out.pot = std::move(pot);
+  return out;
+}
+#endif
+
 Built make(const std::string &key, Reader &r, double fallback) {
+#ifdef RGPOT_POT_SPEC_HAS_CPMD
+  if (key == "cpmd") {
+    return cpmd(r.text("params", ""));
+  }
+#endif
   if (key == "lj") {
     LJConfig c;
     c.u0 = r.real("u0", c.u0);
@@ -269,6 +321,9 @@ Built make(const std::string &key, Reader &r, double fallback) {
 
 std::string names() {
   std::string out = "LJ Morse SuttonChen";
+#ifdef RGPOT_POT_SPEC_HAS_CPMD
+  out += " CPMD";
+#endif
 #ifdef RGPOT_HAS_EAM_TABLE
   out += " EAMTable";
 #endif

@@ -23,6 +23,7 @@ Options come as =key value= pairs separated by spaces.
 | =TersoffSi=  | none                                                                     | yes    |
 | =EMT=        | =parameters= (=asap= or =rasmussen=)                                     | no     |
 | =EAMCell=    | none                                                                     | no     |
+| =CPMD=       | =params=, a serialized =CPMDParams= file                                 | engine |
 
 A build with the Fortran potentials also accepts =SWSi= (with a stress), and
 =EDIP=, =LenoskySi=, =EAMAl=, =FeHe= and =CuH2= (without one).
@@ -31,6 +32,8 @@ A build with the Fortran potentials also accepts =SWSi= (with a stress), and
 an all-silicon one.
 =preset= also accepts =pt= and =au=.
 =EAMTable= needs =-Dwith_eam_table=true=.
+=CPMD= is present in RPC-enabled builds and loads =libcpmdc= from
+=CPMDParams.enginePath= or =CPMDC_LIBRARY=.
 Its =format= also accepts =eam=, =alloy=, =eam/alloy= and =eam/fs=.
 Without =format=, the suffix decides: =.eam.alloy= or =.setfl= is =setfl=,
 =.eam.fs= is =fs=, and =.eam= is =funcfl=.

@@ -245,6 +245,19 @@ def test_list_and_help():
     out = subprocess.run([DRIVER, "--help"], capture_output=True, text=True, check=True)
     assert out.stdout.startswith("usage: rgpot-ipi-driver")
 
+def test_cpmd_requires_readable_params(tmp_path):
+    if "CPMD" not in driver_names():
+        pytest.skip("this build has no CPMD frontend")
+    missing = tmp_path / "missing.params"
+    out = subprocess.run(
+        [DRIVER, "--pot", f"CPMD params {missing}", "--species", "H"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert out.returncode == 2
+    assert "cannot open params file" in out.stderr
+
 
 IPI_INPUT = """<simulation verbosity='low' safe_stride='1000'>
   <output prefix='sim'>
