@@ -1,4 +1,4 @@
-# Single PR CI workflow (main and develop) plus pushes to main and feat/**:
+# Single PR CI workflow (main and develop) plus pushes to main and develop:
 # prepare (Nickel plan) → ordered stages.
 # Remaining separate workflows (different triggers/secrets/permissions):
 #   release.yml, release-prepare.yml, ci_docs.yml, ci_doc_commenter.yml, cosmo-potctl.yml
@@ -10,7 +10,7 @@ name: CI (orchestrator)
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main, develop]
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
@@ -20,7 +20,7 @@ on:
 
 concurrency:
   group: ci-orchestrator-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

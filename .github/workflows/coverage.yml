@@ -15,7 +15,7 @@ name: Coverage
 
 on:
   push:
-    branches: [main, ci/coverage]
+    branches: [main, develop]
   pull_request:
   workflow_dispatch:
 

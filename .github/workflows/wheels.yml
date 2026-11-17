@@ -5,7 +5,7 @@ name: Wheels
 # artifact and the tag describing each other.
 concurrency:
   group: wheels-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
   workflow_dispatch:
@@ -24,13 +24,12 @@ on:
   push:
     # v* tags always build. Path filters are not applied to tags.
     # A branch push starts this workflow only when the wheel or audit
-    # files change. feat/** is included so this branch runs the same jobs.
+    # files change. Other branches run these jobs through their pull request.
     tags:
       - "v*"
     branches:
       - main
-      - "ci/**"
-      - "feat/**"
+      - develop
     paths:
       - "pyproject.toml"
       - "meson.build"
