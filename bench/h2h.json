@@ -1183,7 +1183,7 @@
       "asv": "bench/ase-au55/benchmarks/ase_au55.py",
       "rows": [
         {
-          "path": "bench/ase-au55/rows.csv",
+          "path": "bench/ase-au55/rows-for-cluster.csv",
           "key": "system",
           "arm": "arm",
           "budget": "budget",

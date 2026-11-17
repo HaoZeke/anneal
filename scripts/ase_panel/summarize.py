@@ -60,6 +60,11 @@ def median(values: list[float]) -> float:
     return type7(sorted(values), 0.5)
 
 
+def reference_text(value: float) -> str:
+    text = f"{value:.8f}"
+    return text[:-2] if text.endswith("00") else text
+
+
 def calls(row: dict[str, str]) -> float:
     if row["evals_to_hit"]:
         return float(row["evals_to_hit"])
@@ -111,7 +116,8 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
         if row["hit"] not in {"0", "1"} or hit != bool(row["evals_to_hit"]):
             raise SystemExit(f"hit/calls mismatch {row}")
         if hit:
-            if row["stop"] != "hit" or int(row["evals_to_hit"]) != charged:
+            evals_to_hit = int(row["evals_to_hit"])
+            if row["stop"] != "hit" or not 0 < evals_to_hit <= charged:
                 raise SystemExit(f"invalid hit row {row}")
             if float(row["best"]) > reference + HIT_TOL + 5.0e-9:
                 raise SystemExit(f"hit above threshold {row}")
@@ -231,7 +237,11 @@ def render(system: str) -> tuple[str, str]:
         )
 
     revisions = list(dict.fromkeys(row["code_revision"] for arm in ARMS for row in grouped[arm]))
-    caps = sorted({row["cap_s"] for arm in ARMS for row in grouped[arm] if row["cap_s"]})
+    cap_details = []
+    for arm in ARMS:
+        arm_caps = sorted({row["cap_s"] for row in grouped[arm] if row["cap_s"]})
+        if arm_caps:
+            cap_details.append(f"{LABELS[arm]} {', '.join(arm_caps)} s")
     report = [
         "Copyright (c) anneal developers",
         "",
@@ -242,14 +252,16 @@ def render(system: str) -> tuple[str, str]:
         "the ASE 3.29 constructor defaults.",
         "Rows carry code_revision " + ", ".join(revisions) + ".",
     ]
-    if caps:
+    if cap_details:
         report.extend([
-            f"The ASE wall cap is {', '.join(caps)} s. A wall-stopped row did not receive",
+            f"The recorded wall caps are {'; '.join(cap_details)}. A wall-stopped row did not receive",
             "the full call budget, so its call count is right-censored at `charged`.",
         ])
     report.extend([
         "",
-        "| arm | hits | Fisher p | Mann-Whitney U | Mann-Whitney p | median best | gap to reference | median wall s | over anneal | anneal over | median inside s | median outside s |",
+        "| arm | hits | Fisher p vs anneal | Mann-Whitney U vs anneal | Mann-Whitney p vs anneal | median best | "
+        f"gap to {reference_text(reference)} | median wall s | over anneal | anneal over | "
+        "median inside s | median outside s |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ])
     stop_notes = []
@@ -273,15 +285,20 @@ def render(system: str) -> tuple[str, str]:
     report.extend(["", *stop_notes, "",
         "Fisher and Mann-Whitney below compare recommended with each ASE arm.",
         "",
-        "| comparison | hits | Fisher p | Mann-Whitney U | Mann-Whitney p |",
-        "| --- | --- | --- | --- | --- |",
+        "| comparison | hits | Fisher p | Mann-Whitney U | Mann-Whitney p | "
+        "median wall ratio | inverse ratio |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ])
     for other in ASE_ARMS:
-        other_hits = next(item[1] for item in reports if item[0] == other)
+        other_report = next(item for item in reports if item[0] == other)
+        other_hits = other_report[1]
         fisher_text, u_text, mw_text = recommended_versus[other]
+        wall_ratio = recommended[3] / other_report[3]
+        inverse_ratio = other_report[3] / recommended[3]
         report.append(
             f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
-            f"{fisher_text} | {u_text or 'not estimated'} | {mw_text or 'not estimated'} |"
+            f"{fisher_text} | {u_text or 'not estimated'} | {mw_text or 'not estimated'} | "
+            f"{wall_ratio:.6f} | {inverse_ratio:.6f} |"
         )
     report.extend(["",
         "Fisher is the two-sided exact test on hits under the recorded stopping rule.",

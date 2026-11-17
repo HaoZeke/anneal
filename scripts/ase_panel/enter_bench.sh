@@ -43,7 +43,11 @@ case "$SEED" in
 esac
 
 mkdir -p "$WORK/runs" "$WORK/home" "$WORK/numba"
-ROWS=${ASE_PANEL_ROWS:-$ROOT/bench/ase-$SYSTEM/rows.csv}
+DEFAULT_ROWS=$ROOT/bench/ase-$SYSTEM/rows.csv
+if [[ $SYSTEM == au55 ]]; then
+  DEFAULT_ROWS=$ROOT/bench/ase-au55/rows-for-cluster.csv
+fi
+ROWS=${ASE_PANEL_ROWS:-$DEFAULT_ROWS}
 : "${ASE_PANEL_REVISION:?set ASE_PANEL_REVISION to the exact revision used to build the binaries}"
 REV=$ASE_PANEL_REVISION
 if [[ ! $REV =~ ^[0-9a-f]{40}$ ]]; then

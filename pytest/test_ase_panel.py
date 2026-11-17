@@ -58,7 +58,7 @@ def test_wall_censored_arms_have_no_mann_whitney_claim():
     assert rows["recommended"][19:21] == ["", ""]
     assert (
         "| recommended against basin hopping | 12/12 vs 0/12 | "
-        "7.39602e-07 | not estimated | not estimated |"
+        "7.39602e-07 | not estimated | not estimated | "
     ) in report
     assert "manufacture observations that were never run" in report
 

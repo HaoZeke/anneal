@@ -939,6 +939,7 @@ rule ase_lj150:
 rule ase_au55:
     input:
         "bench/ase-au55/rows.csv",
+        "bench/ase-au55/rows-for-cluster.csv",
         "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-au55/summary.csv",
@@ -963,6 +964,7 @@ rule ase_recommended:
         "bench/ase-lj104/rows.csv",
         "bench/ase-lj150/rows.csv",
         "bench/ase-au55/rows.csv",
+        "bench/ase-au55/rows-for-cluster.csv",
         "scripts/ase_panel/summarize.py",
     output:
         "bench/ase-recommended/summary.csv",
