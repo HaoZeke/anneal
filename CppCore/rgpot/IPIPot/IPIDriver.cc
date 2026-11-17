@@ -152,6 +152,41 @@ void check_finite(const double *values, size_t n, const char *what) {
   }
 }
 
+long batch_size(const std::string &init) {
+  size_t start = 0;
+  while (start <= init.size()) {
+    const size_t end = init.find(',', start);
+    const std::string token =
+        init.substr(start, end == std::string::npos ? end : end - start);
+    const size_t colon = token.find(':');
+    if (colon != std::string::npos) {
+      auto trim = [](const std::string &text) {
+        const size_t first = text.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) {
+          return std::string{};
+        }
+        const size_t last = text.find_last_not_of(" \t\r\n");
+        return text.substr(first, last - first + 1);
+      };
+      if (trim(token.substr(0, colon)) == "batch_size") {
+        const std::string value = trim(token.substr(colon + 1));
+        size_t used = 0;
+        try {
+          const long batch = std::stol(value, &used);
+          return used == value.size() ? batch : 1;
+        } catch (const std::exception &) {
+          return 1;
+        }
+      }
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+  return 1;
+}
+
 } // namespace
 
 IPIDriver::IPIDriver(const IPIDriverConfig &config, IPIEvaluator evaluate)
@@ -276,6 +311,11 @@ bool IPIDriver::step() {
       std::string init(static_cast<size_t>(len), '\0');
       if (len > 0) {
         readFull(link, init.data(), init.size(), deadline);
+      }
+      const long batch = batch_size(init);
+      if (batch > 1) {
+        fail("INIT requested batch_size " + std::to_string(batch) +
+             "; IPIDriver evaluates one structure per request");
       }
       m_bead = bead;
       m_init = std::move(init);

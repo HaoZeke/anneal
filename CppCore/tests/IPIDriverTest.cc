@@ -441,6 +441,19 @@ TEST_CASE("IPIDriver connects over TCP and serves repeated steps",
   CHECK(driver.evaluations() == 5);
 }
 
+TEST_CASE("IPIDriver rejects batched INIT requests", "[ipi_driver]") {
+  auto server = FakeServer::unix_at(temp_socket("batch"));
+  Recorder rec;
+  rgpot::IPIDriver driver(config_for(server.address(), {1}), rec.evaluator());
+  DriverThread thread(driver);
+  server.accept();
+
+  REQUIRE(server.status() == "NEEDINIT");
+  server.init(0, "request_id: 7, batch_size: 2");
+  CHECK_THAT(thread.join(), ContainsSubstring("batch_size 2"));
+  CHECK(driver.evaluations() == 0);
+}
+
 TEST_CASE("IPIDriver accepts POSDATA without INIT", "[ipi_driver]") {
   auto server = FakeServer::unix_at(temp_socket("noinit"));
   Recorder rec;
