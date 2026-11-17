@@ -1728,11 +1728,7 @@ impl Config {
     /// core, while changing the characteristic length and energy. It is the
     /// constructor for a non-Lennard-Jones potential benchmarked with the same
     /// search preset.
-    pub fn for_cluster_with_scales(
-        n_points: usize,
-        length_scale: f64,
-        energy_scale: f64,
-    ) -> Self {
+    pub fn for_cluster_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
         // Arm 3: each orbit completion relaxes a shell-core candidate and a
         // fraction-core candidate and offers the lower. Callers that keep the

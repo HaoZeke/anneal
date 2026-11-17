@@ -33,6 +33,8 @@ enum Kind {
     Gold,
 }
 
+type Potential = dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync;
+
 fn main() {
     anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -54,7 +56,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let pot: Box<dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync> = match kind {
+    let pot: Box<Potential> = match kind {
         Kind::Lj => {
             let potential = PairPotential::lennard_jones(n);
             Box::new(move |x| potential.value_and_gradient(x))
