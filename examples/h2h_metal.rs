@@ -263,6 +263,12 @@ fn config(spec: &Spec) -> Config {
         .and_then(|text| text.parse().ok())
         .unwrap_or(8)
         .max(1);
+    if std::env::var("H2H_TEMPLATES").as_deref() == Ok("0") {
+        cfg = cfg.without_structural_templates();
+    }
+    if std::env::var("H2H_MACKAY").as_deref() == Ok("0") {
+        cfg.mackay_priors = false;
+    }
     // Empty leaves every prior on. `0` turns the five priors off.
     // A comma list turns off the named ones: soap, reseed, growth,
     // core, motif. The plane move stays off unless H2H_GENERAL=1.
@@ -320,6 +326,21 @@ fn config(spec: &Spec) -> Config {
     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }
+    // `1` heats the walk on each call plateau.
+    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
+        cfg.plateau_heat = true;
+    }
+    if std::env::var("H2H_ACCEPTANCE_ADAPT").is_ok_and(|value| value == "1") {
+        cfg.adaptive_acceptance = true;
+    }
+    if let Ok(value) = std::env::var("H2H_REPLICAS")
+        && let Ok(replicas) = value.parse::<usize>()
+    {
+        cfg.replicas = replicas.max(1);
+    }
+    if std::env::var("H2H_POPULATION").is_ok_and(|value| value == "1") {
+        cfg.budgeted_population = true;
+    }
     cfg
 }
 
@@ -332,7 +353,10 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     };
     let budget = env_budget().unwrap_or(spec.budget);
-    let cfg = config(&spec);
+    let mut cfg = config(&spec);
+    if cfg.budgeted_population {
+        cfg.population_seed = Some(seed);
+    }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)
         && let Err(err) = write_coords(path, &start)

@@ -1,0 +1,81 @@
+diff --git a/examples/h2h_gmin_proof.rs b/examples/h2h_gmin_proof.rs
+index 2f9e494c..056c1243 100644
+--- a/examples/h2h_gmin_proof.rs
++++ b/examples/h2h_gmin_proof.rs
+@@ -64,6 +64,9 @@ fn cmd_run(args: &[String]) -> i32 {
+     };
+     let budget = env_budget().unwrap_or(spec.budget);
+     let mut cfg = Config::recommended(spec.n);
++    if std::env::var("H2H_TEMPLATES").as_deref() == Ok("0") {
++        cfg = cfg.without_structural_templates();
++    }
+     // Unset leaves the library stride of one.
+     if let Ok(text) = std::env::var("H2H_BASIN_STRIDE")
+         && let Ok(stride) = text.parse::<usize>()
+diff --git a/examples/h2h_metal.rs b/examples/h2h_metal.rs
+index c26533ad..ded077fa 100644
+--- a/examples/h2h_metal.rs
++++ b/examples/h2h_metal.rs
+@@ -263,6 +263,9 @@ fn config(spec: &Spec) -> Config {
+         .and_then(|text| text.parse().ok())
+         .unwrap_or(8)
+         .max(1);
++    if std::env::var("H2H_TEMPLATES").as_deref() == Ok("0") {
++        cfg = cfg.without_structural_templates();
++    }
+     // Empty leaves every prior on. `0` turns the five priors off.
+     // A comma list turns off the named ones: soap, reseed, growth,
+     // core, motif. The plane move stays off unless H2H_GENERAL=1.
+diff --git a/examples/h2h_morse.rs b/examples/h2h_morse.rs
+index dfd32871..8fae0bda 100644
+--- a/examples/h2h_morse.rs
++++ b/examples/h2h_morse.rs
+@@ -146,11 +146,15 @@ fn cmd_run(args: &[String]) -> i32 {
+     };
+     let budget = env_budget().unwrap_or(spec.budget);
+     let mut cfg = Config::recommended(spec.n);
++    let templates = std::env::var("H2H_TEMPLATES").as_deref() != Ok("0");
++    if !templates {
++        cfg = cfg.without_structural_templates();
++    }
+     // A second neighbour in an fcc shell. Bound by more than a twentieth of
+     // the well, one Mackay cap is quenched before the walk. Rho = 14 is
+     // not, and the search is then the recommended one.
+     let kind = PairKind::Morse { rho: spec.rho };
+-    cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
++    cfg.long_ranged = templates && kind.second_neighbour_energy() < -0.05;
+     // Unset leaves the preset's structure priors on. `0` turns off the
+     // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
+     // labelled core, the motif reseed, stall symmetrisation (and its
+diff --git a/src/methods/cluster_hopping/config.rs b/src/methods/cluster_hopping/config.rs
+index 47d7ac99..b9190bcc 100644
+--- a/src/methods/cluster_hopping/config.rs
++++ b/src/methods/cluster_hopping/config.rs
+@@ -1565,6 +1565,26 @@ impl Config {
+         cfg
+     }
+-
++
++    /// Remove named structures and packing-specific builders while retaining
++    /// general hopping, screening and stall logic.
++    pub fn without_structural_templates(mut self) -> Self {
++        self.long_ranged = false;
++        self.prior_soap = false;
++        self.prior_reseed = false;
++        self.prior_growth = false;
++        self.prior_core = false;
++        self.prior_handover = false;
++        self.prior_motif = false;
++        self.symmetrise_on_stall = false;
++        self.continuous_symmetry = ContinuousSymmetry::Off;
++        self.orbit_complete_on_new = false;
++        self.orbit_arm = false;
++        self.energy_lattice = false;
++        self.soap_mode = SoapProposalMode::Off;
++        self.surfaces.clear();
++        self
++    }
++
+     /// Communicating paper arm: orbit kernel plus Recognition.
+     ///
+     /// This is the measured single-chain orbit arm (`for_cluster` plus

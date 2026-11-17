@@ -402,11 +402,25 @@ def gmin_data(system: str, seed: int, lj_data: str, morse_data: str) -> str:
     )
 
 
-def run_anneal(bin_dir: Path, tree: Path, system: str, seed: int, log: Path) -> dict[str, str]:
+def run_anneal(
+    bin_dir: Path,
+    tree: Path,
+    system: str,
+    seed: int,
+    log: Path,
+    *,
+    env_overrides: dict[str, str] | None = None,
+    coords: Path | None = None,
+) -> dict[str, str]:
     _driver, binary = resolve_driver(bin_dir, tree, system)
     budget = PAPER_BUDGETS[system]
     command = ["taskset", "-c", "0", str(bin_dir / binary), "run", system, str(seed)]
-    proc = subprocess.run(command, cwd=tree, env=single_thread_env(), capture_output=True, text=True, check=False)
+    if coords is not None:
+        command.append(str(coords))
+    env = single_thread_env()
+    if env_overrides:
+        env.update(env_overrides)
+    proc = subprocess.run(command, cwd=tree, env=env, capture_output=True, text=True, check=False)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(" ".join(command) + "\n" + proc.stdout + proc.stderr)
     if proc.returncode != 0:

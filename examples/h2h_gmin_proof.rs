@@ -23,7 +23,7 @@ use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use anneal_core::potentials::PairPotential;
+use anneal_core::potentials::{PairKind, PairPotential};
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -63,12 +63,31 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     };
     let budget = env_budget().unwrap_or(spec.budget);
-    let mut cfg = Config::recommended(spec.n);
+    let mut cfg = Config::recommended_for_pair(spec.n, PairKind::LennardJones);
+    if std::env::var("H2H_TEMPLATES").as_deref() == Ok("0") {
+        cfg = cfg.without_structural_templates();
+    }
     // Unset leaves the library stride of one.
     if let Ok(text) = std::env::var("H2H_BASIN_STRIDE")
         && let Ok(stride) = text.parse::<usize>()
     {
         cfg.basin_stride = stride.max(1);
+    }
+    // `1` heats the walk on each call plateau.
+    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
+        cfg.plateau_heat = true;
+    }
+    if std::env::var("H2H_ACCEPTANCE_ADAPT").is_ok_and(|value| value == "1") {
+        cfg.adaptive_acceptance = true;
+    }
+    if let Ok(value) = std::env::var("H2H_REPLICAS")
+        && let Ok(replicas) = value.parse::<usize>()
+    {
+        cfg.replicas = replicas.max(1);
+    }
+    if std::env::var("H2H_POPULATION").is_ok_and(|value| value == "1") {
+        cfg.budgeted_population = true;
+        cfg.population_seed = Some(seed);
     }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)
@@ -119,7 +138,7 @@ fn cmd_coords(args: &[String]) -> i32 {
         eprintln!("unknown system {system}");
         return 2;
     };
-    let cfg = Config::recommended(spec.n);
+    let cfg = Config::recommended_for_pair(spec.n, PairKind::LennardJones);
     let start = start_of(&cfg, spec.n, seed);
     match write_coords(path, &start) {
         Ok(()) => 0,

@@ -2565,6 +2565,10 @@ fn finish_arm(arms: &mut Vec<ArmCount>, name: &str, accepted: bool, improved: bo
 /// the single growth it counts stays single.
 const GROWTH_RETRY_LEAVES: u32 = 8;
 
+/// Largest multiple of the preset temperature [`Config::plateau_heat`]
+/// reaches, after two plateaus without a new lowest minimum.
+const PLATEAU_HEAT_CAP: f64 = 4.0;
+
 /// True while a failed growth should stay idle.
 ///
 /// The energy test is [`stall_growth_waits`]. At 98 atoms and above, after
@@ -2633,8 +2637,9 @@ fn energy_lattice_proposal<R: Rng + ?Sized>(
     ledger: &mut Ledger,
     x: ArrayView1<f64>,
     rng: &mut R,
+    heat: f64,
 ) -> Array1<f64> {
-    let reduced = cfg.temperature / cfg.energy_scale.max(1e-12);
+    let reduced = heat * cfg.temperature / cfg.energy_scale.max(1e-12);
     let lattice = crate::methods::lattice_search::Lattice::default();
     let coords = x.to_vec();
     if let Some(y) = lattice.propose_energy_exchange(&coords, ledger, reduced, rng) {
@@ -2701,6 +2706,9 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
 ) -> Result<Outcome, SearchError> {
+    if cfg.budgeted_population && ledger.remaining() > 1 {
+        return run_budgeted_population(cfg, start, ledger, relax, grad, rng);
+    }
     let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
@@ -2716,6 +2724,104 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         &mut checkpoint,
         rng,
     )
+}
+
+fn run_budgeted_population<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    mut grad: Option<&mut GradFn<'g>>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let room = ledger.remaining();
+    let first_budget = room.div_ceil(2);
+    let target = ledger.target();
+    let mut cold_cfg = cfg.clone();
+    cold_cfg.budgeted_population = false;
+    cold_cfg.plateau_heat = false;
+    cold_cfg.adaptive_acceptance = false;
+    let mut adaptive_cfg = cfg.clone();
+    adaptive_cfg.budgeted_population = false;
+
+    let mut first_ledger = ledger.slice(first_budget);
+    if let Some(target) = target {
+        first_ledger.stop_below(target);
+    }
+    let mut first = run_with_gradient(
+        &cold_cfg,
+        start,
+        &mut first_ledger,
+        relax,
+        grad.as_deref_mut(),
+        rng,
+    )?;
+    ledger.spent = ledger.spent.saturating_add(first.charged);
+    if let Some(state) = first.best_state.as_ref() {
+        ledger.record(first.best, state.view());
+    }
+    if ledger.target_reached() || ledger.remaining() == 0 {
+        first.charged = ledger.spent();
+        return Ok(first);
+    }
+
+    let offset_calls = ledger.spent();
+    let offset_hops = first.hops;
+    let mut second_ledger = ledger.slice(ledger.remaining());
+    if let Some(target) = target {
+        second_ledger.stop_below(target);
+    }
+    let mut second = if let Some(seed) = cfg.population_seed {
+        let mut branch_rng = StdRng::seed_from_u64(seed);
+        run_with_gradient(
+            &adaptive_cfg,
+            start,
+            &mut second_ledger,
+            relax,
+            grad.as_deref_mut(),
+            &mut branch_rng,
+        )?
+    } else {
+        run_with_gradient(
+            &adaptive_cfg,
+            start,
+            &mut second_ledger,
+            relax,
+            grad.as_deref_mut(),
+            rng,
+        )?
+    };
+    ledger.spent = ledger.spent.saturating_add(second.charged);
+    if let Some(state) = second.best_state.as_ref() {
+        ledger.record(second.best, state.view());
+    }
+
+    let mut population_best = first.best;
+    for (hop, spent, basins, energy) in second.improvements.drain(..) {
+        if energy < population_best {
+            population_best = energy;
+            first.improvements.push((
+                hop.saturating_add(offset_hops),
+                spent.saturating_add(offset_calls),
+                basins,
+                energy,
+            ));
+        }
+    }
+    if second.best < first.best {
+        first.best = second.best;
+        first.best_state = second.best_state;
+    }
+    first.final_energy = second.final_energy;
+    first.final_state = second.final_state;
+    first.hops = first.hops.saturating_add(second.hops);
+    first.accepted = first.accepted.saturating_add(second.accepted);
+    first.basins = first.basins.saturating_add(second.basins);
+    first.screened_out = first.screened_out.saturating_add(second.screened_out);
+    first.returned = first.returned.saturating_add(second.returned);
+    first.charged = ledger.spent();
+    first.stop = Some(HopStop::of_closed(ledger));
+    Ok(first)
 }
 
 /// As [`run_with_gradient`], with value and gradient together, which is
@@ -3940,6 +4046,14 @@ impl AcceptDial {
         self
     }
 
+    fn adaptive(mut self, on: bool) -> Self {
+        if on {
+            self.floor = 0.25 * self.temperature;
+            self.cap = 4.0 * self.temperature;
+        }
+        self
+    }
+
     fn temperature(&self) -> f64 {
         self.temperature
     }
@@ -4037,6 +4151,21 @@ mod contact_unit_tests {
             dial.observe(false);
         }
         assert_eq!(dial.temperature(), temperature);
+    }
+
+    #[test]
+    fn an_adaptive_matched_well_moves_temperature_from_acceptance() {
+        let mut cold = AcceptDial::new(0.8, 1.0).adaptive(true);
+        for _ in 0..AcceptDial::BLOCK {
+            cold.observe(false);
+        }
+        assert_eq!(cold.temperature(), 1.0);
+
+        let mut hot = AcceptDial::new(0.8, 1.0).adaptive(true);
+        for _ in 0..AcceptDial::BLOCK {
+            hot.observe(true);
+        }
+        assert!((hot.temperature() - 0.64).abs() < 1e-12);
     }
 
     #[test]
@@ -4369,6 +4498,7 @@ where
     let contact = contact_factor(&scaled, e, x.view());
     apply_contact_convergence(&mut scaled, contact);
     let mut dial = AcceptDial::new(scaled.temperature, contact)
+        .adaptive(scaled.adaptive_acceptance && n_rep == 1)
         .measuring(scaled.measured_energy_scale && n_rep == 1);
     let cfg = &mut scaled;
     if initial_recordable {
@@ -4974,6 +5104,9 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    // Multiple of the preset temperature the walk hops at. It stays one
+    // unless `plateau_heat` is on.
+    let mut heat = 1.0_f64;
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
     // the chain already quenched, instead of redrawing inside the same one.
@@ -5042,12 +5175,9 @@ where
     let mut held_cv: Option<Array1<f64>> = None;
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
-    // A long-ranged well binds the second neighbour, and the Mackay
-    // icosahedron is then the minimum at the complete shell. One quench,
-    // charged like any other. A short-ranged run does not enter. The walk
-    // keeps the start it already has: the cut is only the recorded best
-    // when it is lower, and a target stops the loop before the first hop.
-    if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {
+    // Preserve the paper trajectory unless the caller explicitly excludes
+    // named Mackay constructions for a general-search comparison.
+    if cfg.mackay_priors && cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {
         let mackay = binary_geometry::mackay_cap(n, cfg.length_scale.max(1e-6));
         if mackay.len() == x.len() {
             let (mackay_energy, mackay_state) = relax(ledger, mackay.view(), cfg.relax_steps);
@@ -5373,7 +5503,9 @@ where
             ] {
                 grown.push(binary_geometry::polyicosahedral_cut(n_atoms, join, nearest));
             }
-            grown.push(binary_geometry::mackay_cut(n_atoms, nearest));
+            if cfg.mackay_priors {
+                grown.push(binary_geometry::mackay_cut(n_atoms, nearest));
+            }
             let mut side_rng = StdRng::seed_from_u64(0x0C10_5ED0);
             for source in [
                 crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
@@ -5574,6 +5706,7 @@ where
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
+            heat = 1.0;
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
             cage_edit = false;
@@ -6193,6 +6326,9 @@ where
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
             directed_leave = true;
+            if cfg.plateau_heat {
+                heat = (heat * 2.0).min(PLATEAU_HEAT_CAP);
+            }
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
@@ -7144,6 +7280,7 @@ where
             let cap = 4.0 * cfg.temperature;
             temperature = spread.clamp(floor, cap);
         }
+        temperature *= heat;
         if cfg.move_library.is_rigid_body() {
             // The preset temperature stays in its own energy unit. A rigid
             // water chart is not that unit, so a local factor moves the
@@ -7461,7 +7598,12 @@ where
         } else {
             1.0
         };
-        let proposal_scale = escape * orient_scale;
+        let acceptance_step = if cfg.adaptive_acceptance {
+            (cfg.temperature / dial.temperature().max(1e-12)).sqrt()
+        } else {
+            1.0
+        };
+        let proposal_scale = escape * orient_scale * acceptance_step;
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -7715,7 +7857,7 @@ where
                     let u2: f64 = rng.random::<f64>();
                     portable_sqrt(-2.0 * portable_ln(u1)) * portable_cos(std::f64::consts::TAU * u2)
                 };
-                let c = z * (cfg.temperature / lam.max(0.05)).sqrt() * escape;
+                let c = z * (heat * cfg.temperature / lam.max(0.05)).sqrt() * escape;
                 for i in 0..t.len() {
                     t[i] += c * mode[i];
                 }
@@ -7740,7 +7882,7 @@ where
                 }
                 _ => {
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
-                        energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                        energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
                     } else {
                         kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
@@ -7781,7 +7923,7 @@ where
                     }
                     _ => {
                         if matches!(kernels[k], ClusterMove::EnergyLattice) {
-                            energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                            energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
                         } else {
                             kernels[k].propose_scaled(
                                 x.view(),

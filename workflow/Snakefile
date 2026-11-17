@@ -1042,6 +1042,27 @@ rule gmin_panel:
         """
 
 
+# Stock search against the potential-scaled, acceptance-heated search on the
+# complete GMIN panel, then held-out seeds against GMIN on the two losses.
+# Serial on core 0 under the same hostname-bench UTS namespace. Not part of
+# `rule all`:
+#   snakemake -s workflow/Snakefile gmin_losses
+rule gmin_losses:
+    output:
+        "bench/gmin-losses/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        rev=$(git rev-parse HEAD)
+        export GMIN_PANEL_MODE=fix
+        export GMIN_PANEL_REV=$rev
+        export GMIN_PANEL_WORK=/work/gmin-losses
+        bash scripts/gmin_panel/enter_bench.sh
+        bash scripts/gmin_panel/enter_bench.sh --heldout
+        bash scripts/gmin_panel/enter_bench.sh --summarize
+        """
+
+
 # Paired (H2O)16 rows. Not part of `rule all`. The script rewrites the
 # summary from the committed seeds and does not start a search.
 #   snakemake -s workflow/Snakefile h2o16_crest

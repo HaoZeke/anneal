@@ -145,12 +145,23 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     };
     let budget = env_budget().unwrap_or(spec.budget);
-    let mut cfg = Config::recommended(spec.n);
+    let kind = PairKind::Morse { rho: spec.rho };
+    let mut cfg = if std::env::var("H2H_PAIR_SCALE").is_ok_and(|value| value == "1") {
+        Config::recommended_for_pair(spec.n, kind)
+    } else {
+        Config::recommended(spec.n)
+    };
+    if std::env::var("H2H_TEMPLATES").as_deref() == Ok("0") {
+        cfg = cfg.without_structural_templates();
+    }
     // A second neighbour in an fcc shell. Bound by more than a twentieth of
     // the well, one Mackay cap is quenched before the walk. Rho = 14 is
     // not, and the search is then the recommended one.
-    let kind = PairKind::Morse { rho: spec.rho };
-    cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
+    cfg.long_ranged = std::env::var("H2H_TEMPLATES").as_deref() != Ok("0")
+        && kind.second_neighbour_energy() < -0.05;
+    if std::env::var("H2H_MACKAY").as_deref() == Ok("0") {
+        cfg.mackay_priors = false;
+    }
     // Unset leaves the preset's structure priors on. `0` turns off the
     // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
     // labelled core, the motif reseed, stall symmetrisation (and its
@@ -179,6 +190,22 @@ fn cmd_run(args: &[String]) -> i32 {
             cfg.symmetrise_on_stall = false;
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
         }
+    }
+    // `1` heats the walk on each call plateau.
+    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
+        cfg.plateau_heat = true;
+    }
+    if std::env::var("H2H_ACCEPTANCE_ADAPT").is_ok_and(|value| value == "1") {
+        cfg.adaptive_acceptance = true;
+    }
+    if let Ok(value) = std::env::var("H2H_REPLICAS")
+        && let Ok(replicas) = value.parse::<usize>()
+    {
+        cfg.replicas = replicas.max(1);
+    }
+    if std::env::var("H2H_POPULATION").is_ok_and(|value| value == "1") {
+        cfg.budgeted_population = true;
+        cfg.population_seed = Some(seed);
     }
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {

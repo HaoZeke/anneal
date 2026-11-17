@@ -1,4 +1,7 @@
-use anneal_core::methods::cluster_hopping::{ArmSelection, Config, SoapProposalMode};
+use anneal_core::methods::cluster_hopping::{
+    ArmSelection, Config, ContinuousSymmetry, SoapProposalMode,
+};
+use anneal_core::potentials::PairKind;
 
 #[test]
 fn resolved_configuration_is_stable_and_mode_sensitive() {
@@ -79,7 +82,9 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
 fn a_long_ranged_pair_is_resolved_only_when_set() {
     let cfg = Config::recommended(38);
     assert!(!cfg.long_ranged);
+    assert!(cfg.mackay_priors);
     assert!(!cfg.resolved_json().unwrap().contains("long_ranged"));
+    assert!(!cfg.resolved_json().unwrap().contains("mackay_priors"));
     let mut bound = cfg.clone();
     bound.long_ranged = true;
     assert!(
@@ -92,6 +97,50 @@ fn a_long_ranged_pair_is_resolved_only_when_set() {
         bound.resolved_sha256().unwrap(),
         cfg.resolved_sha256().unwrap()
     );
+
+    let mut general = cfg.clone();
+    general.mackay_priors = false;
+    assert!(
+        general
+            .resolved_json()
+            .unwrap()
+            .contains("\"mackay_priors\":false")
+    );
+}
+
+#[test]
+fn pair_scaling_is_general_and_lennard_jones_is_unchanged() {
+    let stock = Config::recommended(80);
+    let lennard_jones = Config::recommended_for_pair(80, PairKind::LennardJones);
+    assert_eq!(
+        stock.resolved_json().unwrap(),
+        lennard_jones.resolved_json().unwrap()
+    );
+
+    let morse = Config::recommended_for_pair(80, PairKind::Morse { rho: 6.0 });
+    assert_eq!(morse.energy_scale, 1.0);
+    assert!((morse.length_scale - 2.0_f64.powf(-1.0 / 6.0)).abs() < 1e-15);
+    assert!(morse.start_radius() < stock.start_radius());
+}
+
+#[test]
+fn structural_template_ablation_removes_every_named_builder() {
+    let cfg = Config::recommended(80).without_structural_templates();
+    assert!(!cfg.long_ranged);
+    assert!(!cfg.mackay_priors);
+    assert!(!cfg.prior_soap);
+    assert!(!cfg.prior_reseed);
+    assert!(!cfg.prior_growth);
+    assert!(!cfg.prior_core);
+    assert!(!cfg.prior_handover);
+    assert!(!cfg.prior_motif);
+    assert!(!cfg.symmetrise_on_stall);
+    assert!(!cfg.orbit_complete_on_new);
+    assert!(!cfg.orbit_arm);
+    assert!(!cfg.energy_lattice);
+    assert!(cfg.surfaces.is_empty());
+    assert_eq!(cfg.continuous_symmetry, ContinuousSymmetry::Off);
+    assert_eq!(cfg.soap_mode, SoapProposalMode::Off);
 }
 
 #[test]
@@ -126,6 +175,10 @@ fn paper_preset_priors_stay_out_of_the_resolved_hash() {
         "homotop_reorder",
         "prior_motif",
         "general_collective",
+        "plateau_heat",
+        "adaptive_acceptance",
+        "budgeted_population",
+        "population_seed",
     ] {
         assert!(
             !json.contains(name),
@@ -155,5 +208,13 @@ fn paper_preset_priors_stay_out_of_the_resolved_hash() {
     assert_ne!(
         plane.resolved_sha256().unwrap(),
         "a1bd030f28c13e57f6dbaa50302b8f1312139fc1684f2fa24801a361664cf5d2"
+    );
+    let mut heated = plane;
+    heated.plateau_heat = true;
+    assert!(
+        heated
+            .resolved_json()
+            .unwrap()
+            .contains("\"plateau_heat\":true")
     );
 }

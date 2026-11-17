@@ -1003,6 +1003,45 @@ pub struct Config {
     /// The move does not name a packing or a composition.
     #[serde(skip_serializing_if = "is_false")]
     pub general_collective: bool,
+    /// Heat the walk on each call plateau.
+    ///
+    /// The clock that drives the plateau leave doubles the hop
+    /// temperature each time it runs out, up to four times the preset, and
+    /// a new lowest minimum returns it to the preset. The factor multiplies
+    /// the biased Metropolis test, the Boltzmann weights of the exchange
+    /// kernel and the thermal soft-mode amplitude. The leave itself is
+    /// unchanged, and a chain that never reaches a plateau draws the same
+    /// calls. Needs [`Config::escape_on_stall`], which owns that clock.
+    ///
+    /// Off in the paper preset. The factor is a ratio of the preset
+    /// temperature and does not name a potential, a packing or a size.
+    #[serde(skip_serializing_if = "is_false")]
+    pub plateau_heat: bool,
+    /// Adapt temperature and proposal scale toward one-half acceptance.
+    ///
+    /// Every acceptance block changes temperature by a bounded multiplicative
+    /// step when acceptance lies outside 0.25--0.75. The proposal scale moves
+    /// by the inverse square root of the same temperature ratio: a cold,
+    /// rejecting chain takes smaller steps at a higher temperature, while an
+    /// over-accepting chain takes larger steps at a lower temperature.
+    #[serde(skip_serializing_if = "is_false")]
+    pub adaptive_acceptance: bool,
+    /// Split the available calls between complementary cold and adaptive
+    /// controllers.
+    ///
+    /// The cold member keeps the preset trajectory. If it does not reach the
+    /// target in half the remaining calls, an acceptance-adaptive member
+    /// starts from the same unbiased geometry with the rest. Calls, records
+    /// and stopping remain on one parent ledger.
+    #[serde(skip_serializing_if = "is_false")]
+    pub budgeted_population: bool,
+    /// Independent random stream for the adaptive population member.
+    ///
+    /// A driver that has a reproducibility seed can set it when
+    /// [`Config::budgeted_population`] is on. `None` continues the caller's
+    /// stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub population_seed: Option<u64>,
     /// Exchange descent after every full quench of a labelled cluster.
     ///
     /// Unlike pairs are exchanged on the quenched geometry in a drawn
@@ -1173,6 +1212,13 @@ pub struct Config {
     /// short-ranged Morse, which keeps those call counts unchanged.
     #[serde(skip_serializing_if = "is_false")]
     pub long_ranged: bool,
+    /// Allow the named Mackay cap and cut carried by the paper preset.
+    ///
+    /// On preserves the published trajectory. Turning it off removes both
+    /// named constructions without changing any other structure prior, which
+    /// permits a general-search comparison while retaining an exact off-arm.
+    #[serde(skip_serializing_if = "is_true")]
+    pub mackay_priors: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
     /// Screened hopping's economy is that almost no hop is fully relaxed, so
@@ -1497,6 +1543,16 @@ impl Config {
         )
     }
 
+    /// [`Config::recommended`] in the natural length and energy units of a
+    /// unit-depth pair potential.
+    ///
+    /// The same rule is used for every pair form. Lennard-Jones is
+    /// bit-identical to [`Config::recommended`]; Morse rescales every length
+    /// from the Lennard-Jones diameter to its own pair minimum.
+    pub fn recommended_for_pair(n_points: usize, kind: crate::potentials::PairKind) -> Self {
+        Self::recommended_with_scales(n_points, kind.length_scale(), 1.0)
+    }
+
     /// [`Config::recommended`] with every length in `length_scale` and every
     /// energy in `energy_scale`, as [`Config::with_scales`] reads them.
     ///
@@ -1563,6 +1619,30 @@ impl Config {
         // lattice the current structure defines. One arm, at every size.
         cfg.energy_lattice = true;
         cfg
+    }
+
+    /// Remove named structures and packing-specific builders from a cluster
+    /// search while retaining its general hopping, screening and stall logic.
+    ///
+    /// This is an ablation, not a second preset. It applies the same way to
+    /// every size, species and pair potential.
+    pub fn without_structural_templates(mut self) -> Self {
+        self.long_ranged = false;
+        self.mackay_priors = false;
+        self.prior_soap = false;
+        self.prior_reseed = false;
+        self.prior_growth = false;
+        self.prior_core = false;
+        self.prior_handover = false;
+        self.prior_motif = false;
+        self.symmetrise_on_stall = false;
+        self.continuous_symmetry = ContinuousSymmetry::Off;
+        self.orbit_complete_on_new = false;
+        self.orbit_arm = false;
+        self.energy_lattice = false;
+        self.soap_mode = SoapProposalMode::Off;
+        self.surfaces.clear();
+        self
     }
 
     /// Communicating paper arm: orbit kernel plus Recognition.
@@ -1937,6 +2017,10 @@ impl Config {
             prior_handover: true,
             prior_motif: true,
             general_collective: false,
+            plateau_heat: false,
+            adaptive_acceptance: false,
+            budgeted_population: false,
+            population_seed: None,
             homotop_descent: true,
             homotop_ranked: true,
             homotop_window: true,
@@ -1955,6 +2039,7 @@ impl Config {
             answer_gradient: 0.0,
             trace_quenched: false,
             long_ranged: false,
+            mackay_priors: true,
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
