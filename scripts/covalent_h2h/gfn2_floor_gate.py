@@ -10,12 +10,17 @@ machine. The xtb engine comes from the environment
 job appends the example's final row, its arm, the arm's code revision and
 the host to ``--rows``.
 
+``--cores`` names the cores, ``1-7`` or ``1,3,5``, so a timed run can
+keep one to itself.
+
 ``summary`` reads those rows. Per system it reports hits, calls to hit
-(a miss counts its budget), the SCC failure rate (``scc_rejected`` over
+(a miss counts its budget), the SCC failure rate (failed calls over
 ``charged``) and the best energy, with Fisher's exact test on hits and a
-two-sided Mann-Whitney test on the rest. A metric is lost when the second
-arm hits fewer times, or is worse with p below 0.05. A system is lost
-when the two arms do not hold the same seeds.
+two-sided Mann-Whitney test on the rest, of every arm against the first.
+A metric is lost when an arm hits fewer times, or is worse with p below
+0.05. A system is lost when the arms do not hold the same seeds. A build
+before 7136fcc8 ran each failed SCC twice and counted it twice;
+``--doubled`` names those arms, whose counts are halved.
 """
 
 import argparse
@@ -29,7 +34,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-REFERENCE = {"si13": -599.34546694, "c20": -1148.85383633}
+REFERENCE = {"si10": -460.68373809, "si13": -599.34546694, "c20": -1148.85383633}
 EXAMPLE_FIELDS = [
     "system", "code", "seed", "budget", "hit", "evals_to_hit", "charged",
     "probe_calls", "wall_s", "best", "pot_s", "outside_s", "pot_per_eval_s",
@@ -42,6 +47,14 @@ def arm(text):
     name, rest = text.split("=", 1)
     binary, revision = rest.rsplit("@", 1)
     return name, Path(binary).resolve(), revision
+
+
+def cores(text):
+    out = []
+    for part in text.split(","):
+        low, _, high = part.partition("-")
+        out.extend(range(int(low), int(high or low) + 1))
+    return out
 
 
 def run_one(binary, system, seed, budget, core, where):
@@ -85,7 +98,7 @@ def run(args):
                     [name, *fields, revision, host])
             print(f"{system} {name} {seed}: {','.join(fields)}", flush=True)
 
-    threads = [threading.Thread(target=worker, args=(core,)) for core in range(args.cores)]
+    threads = [threading.Thread(target=worker, args=(core,)) for core in args.cores]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -95,27 +108,38 @@ def run(args):
 def summary(args):
     with open(args.rows) as handle:
         rows = list(csv.DictReader(handle))
-    base, other = args.arms
-    lost = []
+    base, others = args.arms[0], args.arms[1:]
+    lost = {other: [] for other in others}
+
+    def failed(row):
+        count = int(row["scc_rejected"])
+        if row["arm"] not in args.doubled:
+            return count
+        if count % 2:
+            raise SystemExit(f"{row['arm']} {row['system']} {row['seed']}: odd doubled count")
+        return count // 2
+
     for system in sorted({r["system"] for r in rows}, reverse=True):
         # A job with no final row appends nothing, so an arm can be short of
         # seeds; a comparison over what is left is not the gate.
         seeds = {name: sorted(int(r["seed"]) for r in rows if r["system"] == system and r["arm"] == name)
-                 for name in (base, other)}
-        if not seeds[base] or seeds[base] != seeds[other]:
-            print(f"{system}: {base} has seeds {seeds[base]}, {other} has {seeds[other]}")
-            lost.append(f"{system} seeds")
+                 for name in args.arms}
+        mismatched = [name for name in others if seeds[name] != seeds[base]]
+        if not seeds[base] or mismatched:
+            print(f"{system}: " + ", ".join(f"{name} has seeds {seeds[name]}" for name in args.arms))
+            for name in mismatched:
+                lost[name].append(f"{system} seeds")
             continue
         metric = {}
-        for name in (base, other):
+        for name in args.arms:
             runs = [r for r in rows if r["system"] == system and r["arm"] == name]
-            scc = sum(int(r["scc_rejected"]) for r in runs)
+            scc = sum(failed(r) for r in runs)
             charged = sum(int(r["charged"]) for r in runs)
             metric[name] = {
                 "n": len(runs),
                 "hits": sum(r["hit"] == "true" for r in runs),
                 "calls": [int(r["evals_to_hit"]) for r in runs],
-                "scc": [int(r["scc_rejected"]) / int(r["charged"]) if int(r["charged"]) else 0.0 for r in runs],
+                "scc": [failed(r) / int(r["charged"]) if int(r["charged"]) else 0.0 for r in runs],
                 "best": [float(r["best"]) for r in runs],
             }
             m = metric[name]
@@ -126,23 +150,26 @@ def summary(args):
                   f"lowest {min(m['best']):.6f} eV")
         from scipy.stats import fisher_exact, mannwhitneyu
 
-        b, o = metric[base], metric[other]
-        p = fisher_exact([[b["hits"], b["n"] - b["hits"]], [o["hits"], o["n"] - o["hits"]]]).pvalue
-        print(f"{system} hits: Fisher p = {p:.4f}")
-        if o["hits"] / o["n"] < b["hits"] / b["n"]:
-            lost.append(f"{system} hits")
-        for key, label in (("calls", "calls to hit"), ("scc", "SCC failure rate"),
-                           ("best", "best energy")):
-            if sorted(b[key]) == sorted(o[key]):
-                print(f"{system} {label}: the same in both arms")
-                continue
-            p = mannwhitneyu(o[key], b[key], alternative="two-sided").pvalue
-            worse = statistics.median(o[key]) > statistics.median(b[key])
-            print(f"{system} {label}: {other} median {'above' if worse else 'at or below'} "
-                  f"{base}, Mann-Whitney p = {p:.4f}")
-            if worse and p < 0.05:
-                lost.append(f"{system} {label}")
-    print(f"{other} loses: {', '.join(lost) if lost else 'nowhere'}")
+        for other in others:
+            b, o = metric[base], metric[other]
+            p = fisher_exact([[b["hits"], b["n"] - b["hits"]],
+                              [o["hits"], o["n"] - o["hits"]]]).pvalue
+            print(f"{system} {other} hits: Fisher p = {p:.4f}")
+            if o["hits"] / o["n"] < b["hits"] / b["n"]:
+                lost[other].append(f"{system} hits")
+            for key, label in (("calls", "calls to hit"), ("scc", "SCC failure rate"),
+                               ("best", "best energy")):
+                if sorted(b[key]) == sorted(o[key]):
+                    print(f"{system} {other} {label}: the same as {base}")
+                    continue
+                p = mannwhitneyu(o[key], b[key], alternative="two-sided").pvalue
+                worse = statistics.median(o[key]) > statistics.median(b[key])
+                print(f"{system} {label}: {other} median {'above' if worse else 'at or below'} "
+                      f"{base}, Mann-Whitney p = {p:.4f}")
+                if worse and p < 0.05:
+                    lost[other].append(f"{system} {label}")
+    for other in others:
+        print(f"{other} loses: {', '.join(lost[other]) if lost[other] else 'nowhere'}")
 
 
 def main():
@@ -154,12 +181,13 @@ def main():
     go.add_argument("--seed0", type=int, default=2000)
     go.add_argument("--n", type=int, default=12)
     go.add_argument("--budget", type=int, default=100000)
-    go.add_argument("--cores", type=int, default=os.cpu_count())
+    go.add_argument("--cores", type=cores, default=list(range(os.cpu_count())))
     go.add_argument("--out", type=Path, required=True)
     go.add_argument("--rows", type=Path, required=True)
     report = sub.add_parser("summary")
     report.add_argument("rows", type=Path)
-    report.add_argument("--arms", nargs=2, default=["base", "floor"])
+    report.add_argument("--arms", nargs="+", default=["base", "floor"])
+    report.add_argument("--doubled", nargs="*", default=[])
     args = parser.parse_args()
     if args.command == "run":
         if not args.rows.exists() or args.rows.stat().st_size == 0:
