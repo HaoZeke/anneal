@@ -1322,3 +1322,17 @@ The sealed hexamer counts are 121 of 192 and 97 of 192. The hexamer sits inside 
 
 No new key. `deSouzaGoat2025` already carries that DOI.
 
+## 2026-11-17 — An effective-atom genetic search, and hydroxide--water minima
+
+Tahmassebpur, Lee, Méndez, Karapetyan, Shi, Muller, and Arias, arXiv:2610.28996 (20 October 2026), introduce hereditary effective-atom theory. A genetic algorithm relaxes positions, species, and population together. The crossover puts two parents on the same site and relaxes the combined structure. The abstract says the search beats conventional genetic-algorithm baselines on a missing 240-atom hydrogen sublattice, a 364-atom edge-dislocation core, and a 1150-atom interior of twisted-bilayer WSe\(_2\) taken from ptychographic constraints.
+
+Larsen and co-workers already relax fractional existence on copper clusters, filed as `larsenFractional2023`. This preprint is a genetic algorithm on a sublattice, a dislocation, and a bilayer. It gives no Cambridge energy and no water energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be one of those three structures on the surface they use. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table. The crystal-structure directory already filed as `huCrystalSurvey2026` is a snapshot of 17 October 2026. This preprint is dated 20 October.
+
+Shao, Jacobson, and McCoy, The Journal of Physical Chemistry A 130, 8850--8857 (27 October 2026), doi:10.1021/acs.jpca.6c05833, rank hydroxide complexes with two to five water molecules at DLPNO-CCSD(T)(-F12). With four water molecules the abstract says the structure that binds three waters to the hydroxide lies roughly 10 cm\(^{-1}\) below the structure that binds four, in line with the photoelectron and infrared spectra. With five waters, four waters in the first shell are lowest, and a structure with three waters on the hydroxide and two in the second shell resembles low-energy isomers of (H\(_2\)O)\(_6\). Harmonic zero-point energy moves those gaps. DLPNO-CCSD(T)/aug-cc-pVTZ reproduces the complete-basis relative energies of these isomers.
+
+The manuscript scores neutral TIP4P clusters and GFN2-xTB hexamer motifs. Five waters around a hydroxide ion is not the neutral hexamer. The abstract gives no TIP4P energy, no GFN2-xTB energy, and no Cambridge energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. The resemblance to (H\(_2\)O)\(_6\) is a shape comparison. It is not a motif hit rate. Keep the 10 cm\(^{-1}\) gap out of the hexamer table. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+On 17 November 2026 the release tags were unchanged. ASE 3.29.0 is still the newest tag on the GitLab tag list and on PyPI, and the master tip is still the 14 November 2026 merge of the MPI hook. AGOX v3.11.1 is still the newest tag, and the dev tip is still the 5 May 2026 import fix. CREST v3.0.2 is still the newest numbered release, and the master tip is still the 16 June 2026 CMake fix. pele v0.1.2 and xtb v6.8.0 are still the newest releases. The GMIN and OPTIM directory pages are still last modified on 17 March 2022.
+
+Cite `tahmassebpurHeat2026` and `shaoHydroxideWater2026`.
+
