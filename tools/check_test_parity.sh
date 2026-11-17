@@ -8,6 +8,11 @@
 # gives them. Each also writes those features and its shared tests, and the
 # two lists must be equal, so a test or a feature that one build system has
 # and the other lacks fails the check.
+#
+# tools/check_fp_parity.py then reads both compile_commands.json files: each
+# source both build systems compile must get the same contraction and
+# fast-math flags from each, or a bit-for-bit test passes in one build and
+# fails in the other on a target with FMA, such as arm64.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,7 +27,7 @@ meson_common=(-Dwith_tests=true -Dwith_examples=false -Dwith_xtensor=false
   -Dwith_eigen=false -Dwith_highway=disabled)
 cmake_common=(-DCMAKE_BUILD_TYPE=Release -DRGPOT_BUILD_TESTS=ON
   -DRGPOT_BUILD_EXAMPLES=OFF -DRGPOT_WITH_XTENSOR=OFF -DRGPOT_WITH_EIGEN=OFF
-  -DRGPOT_WITH_HIGHWAY=OFF)
+  -DRGPOT_WITH_HIGHWAY=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
 
 # meson looks for MPI only when asked to; CMake always does.
 plain_meson=(-Dwith_rpc=false -Dwith_cache=false -Dwith_mpi=auto)
@@ -66,6 +71,13 @@ compare() {
   fi
   echo "$config: meson and CMake register the same" \
     "$(grep -c '^test ' "$dir/cmake.txt") shared tests"
+  if ! python3 tools/check_fp_parity.py "$dir/meson/compile_commands.json" \
+    "$dir/cmake/compile_commands.json" >"$dir/fp.txt"; then
+    echo "$config: meson and CMake compile the sources above with" \
+      "different floating-point flags" >&2
+    return 1
+  fi
+  echo "$config: $(cat "$dir/fp.txt")"
 }
 
 for config in plain rpc_cache client; do
