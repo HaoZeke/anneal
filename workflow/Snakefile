@@ -308,6 +308,47 @@ rule openconf_h2h_conf_fix4_n24:
             --results bench/openconf-h2h/conf-fix4/n24
         """
 
+
+# The anneal arm with elite_return on against develop at 027c9c71, all
+# eight molecules at 24 seeds in one session. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile openconf_h2h_conf_fix9
+rule openconf_h2h_conf_fix9:
+    input:
+        "bench/openconf-h2h/molecules.csv",
+    output:
+        "bench/openconf-h2h/conf-fix9/summary.csv",
+        "bench/openconf-h2h/conf-fix9/stats.csv",
+        "bench/openconf-h2h/conf-fix9/stats-develop.csv",
+        "bench/openconf-h2h/conf-fix9/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=027c9c715564a065d02ae566d845c58e7e6da2a5 \
+            bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix9 \
+            --baseline /work/openconf-h2h/baseline --elite-return --seeds $(seq 2000 2023)
+        OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh paired-score \
+            --tree conf-fix9 --baseline /work/openconf-h2h/baseline \
+            --results bench/openconf-h2h/conf-fix9
+        """
+
+
+# Hop traces of the conf-fix9 pairs at their budgets and of seeds
+# 3000-3119 on the three weakest molecules, with and without elite_return.
+# Not part of `rule all`:
+#   snakemake -s workflow/Snakefile openconf_h2h_conf_fix9_traces
+rule openconf_h2h_conf_fix9_traces:
+    input:
+        "bench/openconf-h2h/conf-fix9/seeds.csv",
+        "bench/openconf-h2h/conf-fix9/references.xyz",
+    output:
+        "bench/openconf-h2h/conf-fix9/traces-gate.csv",
+        "bench/openconf-h2h/conf-fix9/traces-dev.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/openconf_h2h/elite_traces.sh
+        """
+
 # Gradients per GFN2 quench: anneal L-BFGS and TRIC against geomeTRIC.
 # Not part of `rule all`:
 #   snakemake -s workflow/Snakefile tric_quench
