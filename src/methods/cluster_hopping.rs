@@ -2444,7 +2444,7 @@ fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
 /// On Tersoff carbon half the accepted hops of a ten-atom walk held such an
 /// atom. A tail that never reaches zero, as in Lennard-Jones and Morse,
 /// leaves some force on every atom and never meets the test. Rigid bodies
-/// and labelled species keep their own notion of contact and are not judged
+/// and labeled species keep their own notion of contact and are not judged
 /// here.
 fn sheds_free_atom(cfg: &Config, x: ArrayView1<f64>, gradient: Option<ArrayView1<f64>>) -> bool {
     let n = cfg.n_points;
@@ -4757,7 +4757,7 @@ where
     // minimum. The preset temperature is the Metropolis temperature.
     let species_wide = large_diameter_ratio(cfg);
     // A build without the escape stops at the first hop that asks for it.
-    // The labelled side probes would otherwise spend the budget first and
+    // The labeled side probes would otherwise spend the budget first and
     // the run would end without saying so.
     let escape_refused = !cfg!(feature = "rgsaddle")
         && ((species_wide && energy_grad.is_some())
@@ -4990,7 +4990,7 @@ where
     // Cleared when a new lowest minimum is recorded.
     let mut cage_edit = false;
     let mut csm_reseed_stamp = 0usize;
-    // Calls spent when a labelled motif reseed last ran. Half a budget
+    // Calls spent when a labeled motif reseed last ran. Half a budget
     // since the incumbent last improved, so a search that is still
     // descending does not pay for it.
     let mut motif_at_spent = 0usize;
@@ -5088,12 +5088,12 @@ where
         if !hop_room(hops) {
             break HopStop::MaxHops;
         }
-        // A labelled single-species cluster that has settled into a
+        // A labeled single-species cluster that has settled into a
         // close-packed sheet, rather than a fivefold plateau, can still be
         // one lattice step inside that sheet away from the lower packing.
         // The sheet that stands clear of the others is slid once for this
         // incumbent, and a stacking fault in a smaller sheet is slipped in
-        // the plane. Two species, a rigid body, and an unlabelled cluster
+        // the plane. Two species, a rigid body, and an unlabeled cluster
         // do not enter, so their call counts are unchanged.
         if cfg.species.is_some()
             && cfg.monoatomic()
@@ -5323,7 +5323,7 @@ where
         if ledger.target_reached() {
             break HopStop::of_closed(ledger);
         }
-        // Labelled atomic clusters are offered close-packed cuts once:
+        // Labeled atomic clusters are offered close-packed cuts once:
         // the n sites of an fcc lattice nearest an atom, an octahedral
         // hole and a tetrahedral hole, interpenetrating icosahedra, a
         // Mackay icosahedron, and the packings the motif growth already
@@ -5331,7 +5331,7 @@ where
         // ordered by homonuclear distance
         // and by the collective swap ranking. The quenched cut is held
         // and compared with the incumbent the walk actually reaches.
-        // Every evaluation is charged. Unlabelled and rigid runs never enter.
+        // Every evaluation is charged. Unlabeled and rigid runs never enter.
         if !binary_core_offered
             && !escape_refused
             && cfg.prior_core
@@ -5581,7 +5581,7 @@ where
         }
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
-        // unless two labels are present, so an unlabelled chain is unchanged.
+        // unless two labels are present, so an unlabeled chain is unchanged.
         // A frozen atom is the frame: exchanging it moves the substrate.
         let frame_frozen = frame_atoms(cfg, x.view());
         let atom_is_frame = |atom: usize| {
@@ -6852,7 +6852,7 @@ where
             best_seen = ledger.best;
             csm_reseed_stamp = hops;
         }
-        // Unlabelled clusters keep the icosahedral test alone. It counts
+        // Unlabeled clusters keep the icosahedral test alone. It counts
         // common neighbours, so it runs only when a reseed can fire.
         // Counting on every hop was the Au38 slowdown, and with the
         // reseed interval still ahead the result cannot change the branch.
@@ -6946,12 +6946,12 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        // A labelled incumbent whose energy has stood for half the budget
+        // A labeled incumbent whose energy has stood for half the budget
         // is offered the motifs its common-neighbour signature lacks:
         // close packing, a pentagonal (decahedral) seed, and an
         // icosahedron. Smaller atoms take the inner sites, then one
         // unlike-pair quench pass. The chain generator is not drawn.
-        // Unlabelled clusters never enter, so their evaluation counts stay.
+        // Unlabeled clusters never enter, so their evaluation counts stay.
         // A lattice cut replaces every atom, so a molecular or rigid
         // library, which keeps its atoms inside a body, never enters either.
         let motif_gap = ledger.budget() / 2;
@@ -7291,7 +7291,7 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        // The labelled cut wins by handing the quench a compact body and an
+        // The labeled cut wins by handing the quench a compact body and an
         // ordering the energy itself prefers. The same two steps, without a
         // named body: grow onto the holes of the best-coordinated atoms, then
         // put one species on the sites an unrelaxed swap ranks lowest. The
@@ -10796,9 +10796,9 @@ where
             if cfg.superbasin_quotient {
                 #[cfg(feature = "ira")]
                 {
-                    // Zero for a structure against its own relabelling and
+                    // Zero for a structure against its own relabeling and
                     // rotation, order one between different minima: measured
-                    // 2.7e-16 for a relabelled copy at 13 points and 2.9e-16 at
+                    // 2.7e-16 for a relabeled copy at 13 points and 2.9e-16 at
                     // 38, against 1.58 for a different basin. The threshold sits
                     // in a gap of fifteen orders of magnitude, and the report
                     // carries the largest accepted and smallest rejected
@@ -11510,7 +11510,7 @@ mod tests {
         let pure = search_kernels(&Config::recommended(8).with_species(vec![79; 8], None));
         assert!(
             pure.iter().any(|kernel| kernel.name() == "dls-kernel"),
-            "one repeated label lost the unlabelled lattice exchange"
+            "one repeated label lost the unlabeled lattice exchange"
         );
         let mixed = search_kernels(
             &Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None),
@@ -13190,9 +13190,9 @@ mod tests {
         assert!(sheds_free_atom(&cfg, apart.view(), Some(gradient.view())));
         gradient[7] = 1.0e-300;
         assert!(!sheds_free_atom(&cfg, apart.view(), Some(gradient.view())));
-        let mut labelled = cfg.clone();
-        labelled.species = Some(vec![29, 29, 79]);
-        assert!(!sheds_free_atom(&labelled, apart.view(), None));
+        let mut labeled = cfg.clone();
+        labeled.species = Some(vec![29, 29, 79]);
+        assert!(!sheds_free_atom(&labeled, apart.view(), None));
     }
 
     #[test]

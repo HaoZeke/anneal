@@ -1467,16 +1467,16 @@ pub fn fivefold_plateau(x: ArrayView1<f64>) -> bool {
 
 /// True when the nearest neighbour is far outside the Lennard-Jones scale.
 ///
-/// An unlabelled reduced-unit cluster stays at cutoff 1.35, so this is false
-/// there and the caller does not take the labelled reseed.
+/// An unlabeled reduced-unit cluster stays at cutoff 1.35, so this is false
+/// there and the caller does not take the labeled reseed.
 pub fn extended_scale(x: ArrayView1<f64>) -> bool {
     bond_cutoff(x) > 1.35 + 1e-9
 }
 
 /// Fractions of icosahedral `555`, close-packed `421` and decahedral `422`.
 ///
-/// Read when a labelled search has already stalled. Not called on the
-/// unlabelled hop, so a Lennard-Jones chain does not pay for it.
+/// Read when a labeled search has already stalled. Not called on the
+/// unlabeled hop, so a Lennard-Jones chain does not pay for it.
 pub fn motif_fractions(x: ArrayView1<f64>) -> (f64, f64, f64) {
     let n = x.len() / 3;
     if n < 2 {

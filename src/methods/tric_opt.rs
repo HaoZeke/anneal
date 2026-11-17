@@ -58,7 +58,7 @@ pub enum LocalStep {
     /// Cartesian L-BFGS, [`crate::methods::warm_lbfgs::WarmLbfgs`].
     #[default]
     Lbfgs,
-    /// [`TricOpt`] on a species-labelled Cartesian state; L-BFGS elsewhere.
+    /// [`TricOpt`] on a species-labeled Cartesian state; L-BFGS elsewhere.
     Tric,
     /// L-BFGS for the opening quench, then [`TricOpt`] for the rest of the
     /// search when one potential call of that quench took longer than one
@@ -926,7 +926,7 @@ pub struct TricOpt {
 }
 
 impl TricOpt {
-    /// A relaxation over atoms labelled by atomic number.
+    /// A relaxation over atoms labeled by atomic number.
     pub fn new(species: Vec<u32>) -> Self {
         Self {
             species,

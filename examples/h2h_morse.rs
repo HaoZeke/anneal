@@ -153,7 +153,7 @@ fn cmd_run(args: &[String]) -> i32 {
     cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
     // Unset leaves the preset's structure priors on. `0` turns off the
     // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
-    // labelled core, the motif reseed, stall symmetrisation (and its
+    // labeled core, the motif reseed, stall symmetrisation (and its
     // Ih withholding) and the continuous-symmetry reseed.
     if let Ok(text) = std::env::var("H2H_PRIORS") {
         let text = text.trim();

@@ -1,4 +1,4 @@
-//! The labelled binary-core probe leaves the walk its share of the budget.
+//! The labeled binary-core probe leaves the walk its share of the budget.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -75,7 +75,7 @@ fn first_side_ledger(handover: bool) -> (usize, usize) {
     .expect("finite start");
     side.into_inner()
         .unwrap()
-        .expect("the labelled run opens the binary-core probe")
+        .expect("the labeled run opens the binary-core probe")
 }
 
 #[test]

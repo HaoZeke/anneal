@@ -1,4 +1,4 @@
-//! A labelled motif reseed that is not adopted is still paid for.
+//! A labeled motif reseed that is not adopted is still paid for.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -41,9 +41,9 @@ fn tetrahedron() -> Array1<f64> {
     ]
 }
 
-/// Runs a labelled chain on a flat surface and returns the charged count
+/// Runs a labeled chain on a flat surface and returns the charged count
 /// with the number of calls any ledger accepted.
-fn flat_labelled(budget: usize, seed: u64) -> (usize, usize) {
+fn flat_labeled(budget: usize, seed: u64) -> (usize, usize) {
     let mut cfg = quiet(4);
     cfg.species = Some(vec![29, 29, 79, 79]);
     let accepted = AtomicUsize::new(0);
@@ -70,7 +70,7 @@ fn flat_labelled(budget: usize, seed: u64) -> (usize, usize) {
 
 #[test]
 fn a_missed_motif_reseed_is_charged() {
-    let (charged, accepted) = flat_labelled(400, 5);
+    let (charged, accepted) = flat_labeled(400, 5);
     assert_eq!(charged, accepted, "probe calls went uncharged");
     assert!(charged <= 400);
 }
@@ -79,11 +79,11 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(24))]
 
     #[test]
-    fn every_accepted_call_of_a_labelled_run_is_charged(
+    fn every_accepted_call_of_a_labeled_run_is_charged(
         budget in 8usize..600,
         seed in any::<u64>(),
     ) {
-        let (charged, accepted) = flat_labelled(budget, seed);
+        let (charged, accepted) = flat_labeled(budget, seed);
         prop_assert_eq!(charged, accepted);
         prop_assert!(charged <= budget);
     }
