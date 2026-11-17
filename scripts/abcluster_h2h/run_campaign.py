@@ -94,7 +94,7 @@ ABC_SAVES = 30
 # Population size, chosen on the pilot seeds by ``choose_population``.
 ABC_SN = {
     "lj38": 30,
-    "lj55": 30,
+    "lj55": 100,
     "lj75": 30,
     "lj98": 30,
     "lj104": 30,
