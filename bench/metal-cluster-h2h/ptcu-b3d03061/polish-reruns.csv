@@ -1,0 +1,2 @@
+system,method,energy_eV,code_revision,code_tree,host,date,command
+pt6cu17,compact-polyicosahedron-polish,-81.907414107641,be3849e7811634aca67688da70f5413f9d860ec9,93b2b874d245fed5d538386e590c415029243ae5,bench,2026-11-17,cargo-test-a_compact_polyicosahedron_orders_to_the_ptcu_hits
