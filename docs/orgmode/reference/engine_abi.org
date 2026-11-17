@@ -1134,3 +1134,39 @@ int rgpot_mta_force(RgpotMtaPot *pot, long nAtoms,
 A thread that holds the Python GIL releases it for the evaluation, so torch
 autograd can run.
 The engine looks the CPython calls up at run time and does not link libpython.
+
+** Rust loader (=rgpot-core= =engine= feature)
+
+Enable the =engine= feature on =rgpot-core= to expose =rgpot_core::engine=, a
+thin Rust wrapper over the symbols declared in =CppCore/rgpot/engine_c_abi.h=.
+No second engine abstraction is added: =EnginePotential::into_potential= wraps
+the handle as a =PotentialImpl=.
+
+- =ENGINE_ABI_VERSION= :: Expected major version (=RGPOT_ENGINE_ABI_VERSION=, 1).
+- =RgpotEnginePot= :: Opaque handle type matching =struct RgpotEnginePot=.
+- =CoordTransformFn=, =AbiVersionFn=, =CreateFn=, =DestroyFn=, =ForceFn=,
+  =ForceBatchFn=, =LastErrorFn= :: =extern "C"= function-pointer types matching
+  the C declarations above.
+- =EngineSymbols= :: Resolved symbol table holding required (=abi_version=,
+  =create=, =destroy=, =force=) and optional (=force_batch=, =last_error=)
+  function pointers.
+- =EngineError= :: Typed error enum covering =Load=, =Missing=, =Abi= (=expected=,
+  =found=), =Create=, =Invalid=, =Unsupported=, =Recoverable= (=code=, =message=),
+  and =Fatal= (=code=, =message=).
+- =EngineRequest= :: Single-geometry input with =positions= (Angstrom,
+  row-major =[n_atoms, 3]=), =atomic_numbers=, and =box_matrix= (row-major 3x3
+  lattice in Angstrom).
+- =EngineEvaluation= :: Output containing =energy= (eV) and =forces=
+  (eV/Angstrom, row-major =[n_atoms, 3]=).
+- =EnginePotential::load(path, config)= / =EnginePotential::from_symbols(symbols, config)= ::
+  Verifies =rgpot_engine_abi_version() == ENGINE_ABI_VERSION=, copies =config=
+  into an 8-byte-aligned =Vec<u64>= buffer (so engines that cast =config= to
+  =capnp::word= never receive an unaligned pointer), and calls
+  =rgpot_engine_create=.
+- =EnginePotential::force(&request)= and =EnginePotential::force_batch(&atomic_numbers, &positions, &boxes)= ::
+  Validates input lengths and output finiteness, dispatches to
+  =rgpot_engine_force= or =rgpot_engine_force_batch=, and maps positive codes to
+  =EngineError::Recoverable= and negative codes to =EngineError::Fatal= using
+  =rgpot_engine_last_error= when present.
+- =EnginePotential::into_potential(self)= :: Converts the instance into a
+  =PotentialImpl= callback handle.

@@ -136,6 +136,9 @@ fn main() {
         "cargo::rustc-env=RGPOT_SOURCE_REVISION={}",
         source_revision(&crate_dir)
     );
+    if let Ok(target) = env::var("TARGET") {
+        println!("cargo::rustc-env=RGPOT_BUILD_TARGET={target}");
+    }
 
     // eindir-core is a normal Cargo dependency now; its capi #[no_mangle] symbols
     // resolve through the shared crate, so no prebuilt static lib link is needed.
