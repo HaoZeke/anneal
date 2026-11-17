@@ -55,7 +55,7 @@ Created create(const void *config, std::size_t config_len) {
     } else if (n == "double_well") {
       pot = std::make_unique<DoubleWellPot>(1, 1.0, 5.0, 0.0, 0.0);
     } else if (n == "coupled_proton_well") {
-      pot = std::make_unique<CoupledProtonWellPot>(1.0, 5.0, 1.0, 0.32);
+      pot = std::make_unique<CoupledProtonWellPot>(1.0, 5.0, 0.32);
 #ifdef RGPOT_HAS_CBE
     } else if (n == "cbe") {
       pot = std::make_unique<CBEPot>();

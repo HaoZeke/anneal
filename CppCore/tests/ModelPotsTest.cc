@@ -246,13 +246,17 @@ TEST_CASE("Muller variants match analytic dense products") {
 }
 
 TEST_CASE("coupled proton well matches its two-by-two Hessian") {
-  rgpot::CoupledProtonWellPot pot(2.0, 3.0, 1.7, 0.4);
+  rgpot::CoupledProtonWellPot pot(2.0, 3.0, 1.7);
   const std::array<double, 2> x{0.7, -0.2};
   const std::array<double, 2> v{0.3, -0.5};
   const double u = x[0] / 3.0;
+  const double alpha = 1.0 / 3.0;
+  const double transverse = x[1] - alpha * x[0] * x[0];
+  const double slope = -2.0 * alpha * x[0];
   const double hxx =
-      8.0 * (3.0 * u * u - 1.0) / 9.0 + 1.7 * 0.4 * 0.4;
-  const double hxy = -1.7 * 0.4;
+      8.0 * (3.0 * u * u - 1.0) / 9.0 +
+      1.7 * (slope * slope - 2.0 * alpha * transverse);
+  const double hxy = 1.7 * slope;
   const auto got = pot.evaluateCoordinates(x, v);
   close(got.product[0], hxx * v[0] + hxy * v[1], 4.0);
   close(got.product[1], hxy * v[0] + 1.7 * v[1], 4.0);

@@ -10,7 +10,7 @@ the corresponding powers of those units. The quartic and coupled-well formulas
 follow the analytic model definitions in spectral-instanton:
 
 - `V = V0 ((x/x0)² - 1)²`
-- `V = V0 ((x/x0)² - 1)² + ky (y - alpha x)² / 2`
+- `V = V0 ((x/x0)² - 1)² + ky (y - x²/x0)² / 2`
 - bath coordinates add `omega² (qi - coupling q0)² / 2`
 
 The LEPS implementations evaluate their published formulas in hartree and bohr,

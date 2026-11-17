@@ -135,10 +135,10 @@ extern "C" rgpot_builtin_model *rgpot_builtin_double_well_new(
 }
 
 extern "C" rgpot_builtin_model *rgpot_builtin_coupled_proton_well_new(
-    double v0, double x0, double spring, double coupling) {
+    double v0, double x0, double spring) {
   return guardedNew([=]() -> rgpot_builtin_model * {
     auto potential = std::make_unique<rgpot::CoupledProtonWellPot>(
-        v0, x0, spring, coupling);
+        v0, x0, spring);
     return new rgpot_builtin_model{std::move(potential), 2};
   });
 }

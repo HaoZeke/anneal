@@ -71,7 +71,7 @@ public:
 
 class CoupledProtonWellPot final : public AnalyticModelPot {
 public:
-  CoupledProtonWellPot(double v0, double x0, double spring, double coupling);
+  CoupledProtonWellPot(double v0, double x0, double spring);
 };
 
 } // namespace rgpot

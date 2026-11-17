@@ -37,7 +37,7 @@ RGPOT_MODEL_API rgpot_builtin_model *rgpot_builtin_double_well_new(
     size_t dimensions, double v0, double x0, double omega, double coupling);
 
 RGPOT_MODEL_API rgpot_builtin_model *rgpot_builtin_coupled_proton_well_new(
-    double v0, double x0, double spring, double coupling);
+    double v0, double x0, double spring);
 
 RGPOT_MODEL_API void
 rgpot_builtin_model_free(rgpot_builtin_model *model);

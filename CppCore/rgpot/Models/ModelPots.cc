@@ -318,27 +318,30 @@ DoubleWellPot::DoubleWellPot(std::size_t dimensions, double v0, double x0,
               }})) {}
 
 CoupledProtonWellPot::CoupledProtonWellPot(double v0, double x0,
-                                           double spring, double coupling)
+                                           double spring)
     : AnalyticModelPot(
           PotType::CoupledProtonWell,
           std::make_unique<Impl>(Impl{
-              2, [v0, x0, spring, coupling](auto x, auto v) {
+              2, [v0, x0, spring](auto x, auto v) {
                 requireSize(x, v, 2);
                 if (!(std::abs(x0) > 0.0))
                   throw std::invalid_argument("coupled-well width is zero");
                 const double u = x[0] / x0;
-                const double transverse = x[1] - coupling * x[0];
+                const double alpha = 1.0 / x0;
+                const double transverse = x[1] - alpha * x[0] * x[0];
+                const double slope = -2.0 * alpha * x[0];
                 const double quartic =
                     4.0 * v0 * u * (u * u - 1.0) / x0;
                 const double curvature =
                     4.0 * v0 * (3.0 * u * u - 1.0) / (x0 * x0);
                 const double hxx =
-                    curvature + spring * coupling * coupling;
-                const double hxy = -spring * coupling;
+                    curvature +
+                    spring * (slope * slope - 2.0 * alpha * transverse);
+                const double hxy = spring * slope;
                 return ModelEvaluation{
                     v0 * std::pow(u * u - 1.0, 2) +
                         0.5 * spring * transverse * transverse,
-                    {quartic - spring * transverse * coupling,
+                    {quartic + spring * transverse * slope,
                      spring * transverse},
                     {hxx * v[0] + hxy * v[1],
                      hxy * v[0] + spring * v[1]}};
