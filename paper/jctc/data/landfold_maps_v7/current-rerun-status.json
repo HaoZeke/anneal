@@ -1,8 +1,8 @@
 {
   "blocker": "the LJ75 aggregate has 1124747 minima; current landfold descriptor classification remained serial for 68 minutes before this checkpoint",
   "charged": 1184080000,
-  "code_revision": "5598b6c2f6f0b1e41fd910e572bdc31b3034f7c0",
-  "code_tree": "fa3d94397a8395bbb0bb4ecee5dffc2ba4a2f29c",
+  "code_revision": "c3d7c4fec9b915aa5b609f2a9f05003ff5e2ab8f",
+  "code_tree": "3a9e9bf1a7cb3cb5b1344fa0e77fc316ba3e53a1",
   "host": "cloud-run",
   "minima": 2076648,
   "remaining": [
