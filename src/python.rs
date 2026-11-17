@@ -3534,9 +3534,11 @@ fn rigid_probe(
 ///     otherwise.
 ///   elite_return: `Config::elite_return` of a `groups` search, a chain
 ///     without a new best for `elite_patience` hops moves to one of the
-///     lowest distinct minima it has accepted. Unset keeps the preset's.
-///   elite_patience: `Config::elite_patience`, hops without a new best
-///     before `elite_return` moves the walker. Unset keeps 40.
+///     lowest distinct minima it has accepted when it also stands above its
+///     own best by more than its accepted uphill hops predict. Unset keeps
+///     the preset's.
+///   elite_patience: `Config::elite_patience`, minimum hops without a new
+///     best before `elite_return` may move the walker. Unset keeps 40.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is

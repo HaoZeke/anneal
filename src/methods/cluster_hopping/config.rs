@@ -1368,8 +1368,8 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
-    /// Move a chain that has gone [`Config::elite_patience`] hops without a
-    /// new best to one of the lowest distinct minima it has accepted.
+    /// Move a stalled chain to one of the lowest distinct minima it has
+    /// accepted.
     ///
     /// The chain keeps its quenched start, its accepted quenches and the
     /// lowest recorded minimum, eight at most, told apart by the bias
@@ -1377,12 +1377,15 @@ pub struct Config {
     /// [`crate::methods::stall_archive::DescriptorArchive`]). At each stall
     /// the walker moves to the lowest of them that is neither where it
     /// stands nor one of the last four destinations, and continues from
-    /// there with its bias. The choice reads no random number, so a chain
-    /// that keeps improving walks the same hops either way.
+    /// there with its bias. A move is considered only after
+    /// [`Config::elite_patience`] quiet hops and only when the chain stands
+    /// above its best by more than its own accepted uphill hops predict.
+    /// The choice reads no random number, so a chain that keeps improving
+    /// walks the same hops either way.
     #[serde(skip_serializing_if = "is_false")]
     pub elite_return: bool,
-    /// Hops without a new best before [`Config::elite_return`] moves the
-    /// walker, and between moves while the stall lasts.
+    /// Minimum hops without a new best before [`Config::elite_return`] may
+    /// move the walker, and between moves while the stall lasts.
     #[serde(skip_serializing_if = "is_default_elite_patience")]
     pub elite_patience: usize,
 }

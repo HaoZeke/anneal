@@ -343,9 +343,11 @@ def cluster_search(
       elite_return: a ``groups`` search that has gone ``elite_patience`` hops
         without a new best moves its walker to the lowest of the distinct
         minima it has accepted that is neither where it stands nor one of its
-        last four such destinations. ``None`` keeps the preset's.
-      elite_patience: hops without a new best before ``elite_return`` moves
-        the walker. ``None`` keeps 40.
+        last four such destinations when it also stands above its own best by
+        more than its accepted uphill hops predict. ``None`` keeps the
+        preset's.
+      elite_patience: minimum hops without a new best before ``elite_return``
+        may move the walker. ``None`` keeps 40.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.

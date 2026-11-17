@@ -3816,6 +3816,59 @@ fn improvements_from_encounters(
     out
 }
 
+const ELITE_HEIGHT_MEMORY: usize = 64;
+const ELITE_HEIGHT_WARMUP: usize = 12;
+
+/// Plateau height that warrants an elite return, from accepted uphill hops.
+///
+/// A chain that accepted mostly small uphill hops and now stands far above its
+/// own best has likely settled onto a broad shelf. The threshold is learned
+/// from that chain's own accepted uphill move sizes, so one trigger serves
+/// tight molecular wells and broad rigid-body basins alike.
+fn elite_plateau_threshold(samples: &std::collections::VecDeque<f64>) -> Option<f64> {
+    let mut finite: Vec<f64> = samples
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .collect();
+    if finite.len() < ELITE_HEIGHT_WARMUP {
+        return None;
+    }
+    finite.sort_by(|a, b| a.total_cmp(b));
+    let n = finite.len();
+    let median = finite[n / 2];
+    let q90 = finite[(9 * (n - 1)) / 10];
+    Some((q90 + median).max(2.0 * median))
+}
+
+#[cfg(test)]
+mod elite_threshold_tests {
+    use super::{ELITE_HEIGHT_WARMUP, elite_plateau_threshold};
+
+    #[test]
+    fn the_threshold_waits_for_enough_observed_uphill_hops() {
+        let mut samples = std::collections::VecDeque::new();
+        for _ in 0..(ELITE_HEIGHT_WARMUP - 1) {
+            samples.push_back(0.5);
+        }
+        assert!(elite_plateau_threshold(&samples).is_none());
+        samples.push_back(0.5);
+        assert_eq!(elite_plateau_threshold(&samples), Some(1.0));
+    }
+
+    #[test]
+    fn the_threshold_tracks_the_upper_tail_of_uphill_steps() {
+        let mut samples = std::collections::VecDeque::new();
+        for value in [
+            0.1, 0.3, 0.4, 0.2, 0.8, 0.6, 0.5, 0.7, 0.9, 1.1, 1.2, 1.3, 2.2, 2.4,
+        ] {
+            samples.push_back(value);
+        }
+        // median 0.8, q90 1.3 -> max(2.1, 1.6) = 2.1
+        assert_eq!(elite_plateau_threshold(&samples), Some(2.1));
+    }
+}
+
 /// A caller stop during the opening quench is not a refused potential.
 ///
 /// The ledger may hold no finite minimum yet. The search still returns
@@ -4700,6 +4753,7 @@ where
     let mut elites = crate::methods::stall_archive::DescriptorArchive::default();
     let mut elite_quiet = 0usize;
     let mut elite_returns = 0usize;
+    let mut elite_uphill = std::collections::VecDeque::with_capacity(ELITE_HEIGHT_MEMORY);
     if cfg.elite_return {
         elites.offer(e, x.view(), bias.cv(x.view()).view(), bias.merge_radius());
     }
@@ -8826,6 +8880,15 @@ where
                 };
                 elites.offer(e_new, x_new.view(), key.view(), bias.merge_radius());
             }
+            if cfg.elite_return && !unquenched && e_new > e {
+                let rise = e_new - e;
+                if rise.is_finite() && rise > 0.0 {
+                    if elite_uphill.len() == ELITE_HEIGHT_MEMORY {
+                        elite_uphill.pop_front();
+                    }
+                    elite_uphill.push_back(rise);
+                }
+            }
             // An accepted uphill step to a different basin samples the escape
             // distribution, which is the quantity the deposit height has to be
             // commensurate with.
@@ -10311,6 +10374,13 @@ where
         // chain made and not the jump. No charged evaluation but the
         // destination's gradient, no hop and no random number.
         if cfg.elite_return && elite_quiet >= cfg.elite_patience.max(1) && hop_room(hops) {
+            let Some(threshold) = elite_plateau_threshold(&elite_uphill) else {
+                continue;
+            };
+            let above_best = e - ledger.best;
+            if !above_best.is_finite() || above_best <= threshold {
+                continue;
+            }
             elite_quiet = 0;
             if let Some(state) = ledger.best_state.as_ref() {
                 elites.offer(
@@ -10330,8 +10400,8 @@ where
                     .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
                 if std::env::var("ANNEAL_HOP_TRACE").is_ok() {
                     eprintln!(
-                        "ELITETRACE {{\"hop\":{hops},\"spent\":{},\"from\":{e:.8},\"to\":{energy:.8}}}",
-                        ledger.spent()
+                        "ELITETRACE {{\"hop\":{hops},\"spent\":{},\"from\":{e:.8},\"to\":{energy:.8},\"above_best\":{above_best:.8},\"threshold\":{threshold:.8}}}",
+                        ledger.spent(),
                     );
                 }
                 elite_returns += 1;
