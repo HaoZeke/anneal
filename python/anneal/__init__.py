@@ -337,8 +337,7 @@ def cluster_search(
         accepted hop has turned two rotatable bonds or more and the chain has
         gone ``torsion_patience`` hops without a new best, a quarter of the
         bond draws turn every bond of one such hop through fresh uniform
-        angles. ``None`` keeps the preset's: on for ``recommended=True``, off
-        otherwise.
+        angles. ``None`` keeps the preset's, off.
       torsion_patience: hops without a new best before ``torsion_coupling``
         draws coupled. ``None`` keeps 100; 0 draws them from the first
         coupled change.

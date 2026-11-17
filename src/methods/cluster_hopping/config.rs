@@ -1356,13 +1356,15 @@ pub struct Config {
     /// fresh uniform angle (see
     /// [`super::torsion::Topology::propose_coupled`]). Crankshaft draws keep
     /// their share. A library without the torsion arm, and a chain without
-    /// such a change or such a stall, draws the same hops either way. On in
-    /// [`Config::recommended_molecular`].
+    /// such a change or such a stall, draws the same hops either way. Off
+    /// in every preset: on in [`Config::recommended_molecular`] it lost
+    /// lowest conformers the plain search found on the evaluation seeds
+    /// (`bench/openconf-h2h/conf-fix8`).
     #[serde(skip_serializing_if = "is_false")]
     pub torsion_coupling: bool,
     /// Hops without a new best before [`Config::torsion_coupling`] draws
     /// coupled, 100 by default. Zero draws them as soon as a coupled change
-    /// is on file, the move of `bench/openconf-h2h/conf-fix7`.
+    /// is on file.
     #[serde(skip_serializing_if = "is_default_torsion_patience")]
     pub torsion_patience: usize,
     /// Refuse a quench step that turns over a stereocentre of a declared
@@ -1401,10 +1403,10 @@ fn is_default_torsion_patience(value: &usize) -> bool {
 /// A coupled draw spends a random number the plain draw would not, so
 /// every hop after the first one differs from the plain search's. Drawn
 /// from the outset, that cost lopinavir and amprenavir lowest conformers
-/// the plain search found on the 24 evaluation seeds of
-/// `bench/openconf-h2h/conf-fix7`; while the chain still improves, the
-/// plain draw is kept. 100 hops kept the gains on the development seeds
-/// of `bench/openconf-h2h/conf-fix8`, 200 lost most of them.
+/// the plain search found on the 24 evaluation seeds; while the chain
+/// still improves, the plain draw is kept. 100 hops kept the gains on the
+/// development seeds, 200 lost most of them
+/// (`bench/openconf-h2h/conf-fix8`).
 pub const TORSION_PATIENCE: usize = 100;
 
 fn is_false(value: &bool) -> bool {
@@ -2254,9 +2256,6 @@ impl Config {
         // macrocycle backbone. A molecule without a flexible ring draws the
         // same hops either way.
         cfg.ring_moves = true;
-        // A lowest conformer several torsions from the chain's minimum
-        // needs them turned together; a plain draw turns at most three.
-        cfg.torsion_coupling = true;
         // A conformer search keeps the molecule it was given; a centre the
         // quench pushes through its plane is another one.
         cfg.hold_stereocentres = true;
@@ -2443,8 +2442,7 @@ mod coverage_behaviour {
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
-        assert!(recommended.torsion_coupling);
-        assert!(!Config::for_molecular(species.clone(), groups.clone(), 1.0).torsion_coupling);
+        assert!(!recommended.torsion_coupling);
         assert_eq!(recommended.torsion_patience, super::TORSION_PATIENCE);
         assert!(
             !recommended

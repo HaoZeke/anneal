@@ -3527,8 +3527,7 @@ fn rigid_probe(
 ///     `recommended=True`, off otherwise.
 ///   torsion_coupling: `Config::torsion_coupling` of a `groups` search,
 ///     coupled torsion draws from the chain's accepted hops beside the
-///     plain ones. Unset keeps the preset's: on for `recommended=True`, off
-///     otherwise.
+///     plain ones. Unset keeps the preset's, off.
 ///   torsion_patience: `Config::torsion_patience` of a `groups` search,
 ///     hops without a new best before coupled draws begin. Unset keeps 100;
 ///     0 draws them from the first coupled change.

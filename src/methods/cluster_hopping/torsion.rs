@@ -508,7 +508,7 @@ const HISTORY: usize = 32;
 ///
 /// A share adapted from how often each kind of draw moved the chain found
 /// fewer lowest conformers than a fixed quarter on the development seeds
-/// of `bench/openconf-h2h/conf-fix7`.
+/// of the conf-fix7 campaign (`bench/openconf-h2h/conf-fix8`).
 const COUPLED_SHARE: f64 = 0.25;
 
 /// The rotatable-bond changes of a chain's accepted hops.
