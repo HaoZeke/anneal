@@ -1,7 +1,7 @@
 //! Two uses of a structure's symmetry for its curvature.
 //!
 //! Both start from the same fact. A Hessian is a property of the geometry, so
-//! any rigid motion plus relabelling that carries one geometry onto another
+//! any rigid motion plus relabeling that carries one geometry onto another
 //! carries the curvature with it. Where that motion is a symmetry of a single
 //! structure the Hessian commutes with it and block-diagonalises; where it
 //! relates two different structures it transports curvature between them.
@@ -1455,12 +1455,12 @@ mod tests {
         );
     }
 
-    /// Transport onto a rotated and relabelled copy has to reproduce the
+    /// Transport onto a rotated and relabeled copy has to reproduce the
     /// operator exactly. This is the correctness claim for the index
     /// convention, and it is the one that fails silently if the permutation is
     /// read the wrong way round.
     #[test]
-    fn transport_onto_a_relabelled_copy_reproduces_the_operator() {
+    fn transport_onto_a_relabeled_copy_reproduces_the_operator() {
         let n = 9;
         let a = asymmetric(n);
         // A rotation by 0.7 about a fixed axis, and a fixed derangement.
@@ -1487,7 +1487,7 @@ mod tests {
         ];
         // `source[slot]` is the target site holding reference slot `slot`.
         let source: Vec<usize> = (0..n).map(|i| (i * 4 + 3) % n).collect();
-        // Target coordinates: `R^T` applied to the reference, then relabelled,
+        // Target coordinates: `R^T` applied to the reference, then relabeled,
         // so that `R` carries the target back onto the reference and the
         // transport's own convention is the thing under test.
         let mut b = Array1::<f64>::zeros(3 * n);
@@ -1522,7 +1522,7 @@ mod tests {
         let mag = direct.iter().fold(0.0f64, |m, z| m.max(z.abs()));
         assert!(
             err < 1e-12 * mag.max(1.0),
-            "transporting onto a relabelled copy moved the operator by {err} against a \
+            "transporting onto a relabeled copy moved the operator by {err} against a \
              response of size {mag}"
         );
 

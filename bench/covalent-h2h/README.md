@@ -170,7 +170,7 @@ already holds a free atom, which a random start can, it keeps moving
 normally.
 
 Lennard-Jones and Morse tails never reach zero, so no atom meets the test and
-their trajectories are unchanged. Rigid bodies and labelled species are not
+their trajectories are unchanged. Rigid bodies and labeled species are not
 judged. A first version tested geometry alone, and it moved the ρ=14 Morse
 rows at 55 atoms. Testing the force exactly is what keeps that row fixed.
 
@@ -449,7 +449,7 @@ Lennard-Jones, Morse, Gupta and TIP4P pins.
   to 57.
 - P and G complete orbits on every new basin, as R does, and keep the
   allocator's orbit arm (`25838776`). The five prior gates develop added
-  (fivefold SOAP, icosahedral reseed, lattice regrowth, labelled core and
+  (fivefold SOAP, icosahedral reseed, lattice regrowth, labeled core and
   motif reseed) are off in P and G.
 - GMIN on carbon (`9631d65a`). `scripts/covalent_h2h/tersoff_userpot.f90`
   takes the place of GMIN's `dummy_userpot.f90` in a second build

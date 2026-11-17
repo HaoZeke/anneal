@@ -794,7 +794,7 @@ def write_numbers(rows):
         f"# intact=every oxygen keeps two hydrogens within {OH_BOND_A} A and the oxygens form one network under {HBOND_OO_A} A; nearest_oo_A is the farthest nearest-neighbour O...O of the raw final",
         "# confirmed_minimum=intact, polish converged, polished maximum force at or below the bar, no imaginary vibrational mode in xtb --hess",
         "# signed_dE_raw_Eh=anneal minus crest on the unpolished finals; signed_dE_polished_Eh=arm minus reference after the polish",
-        "# rmsd_A=labelled Kabsch of the polished final on the polished reference; rmsd_label_free_A minimises over molecule and hydrogen labels and reflection; the _raw columns are the unpolished finals on crest_best.xyz; no RMSD column is a gate",
+        "# rmsd_A=labeled Kabsch of the polished final on the polished reference; rmsd_label_free_A minimises over molecule and hydrogen labels and reflection; the _raw columns are the unpolished finals on crest_best.xyz; no RMSD column is a gate",
         "# " + "\t".join(HEADER),
     ]
     for row in rows:

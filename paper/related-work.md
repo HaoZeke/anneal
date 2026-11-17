@@ -160,7 +160,7 @@ Cite `vahediahmarGeomDrugs2026` beside the CREST section. Keep the hexamer resul
 
 ## 2026-11-11 — Seven atoms are proved, and the diameter bound is tighter
 
-Shen, arXiv:2611.09925 (23 September 2026), reports a proof that the pentagonal bipyramid is the unique global minimiser of the seven-particle Lennard-Jones energy, up to rigid motion and relabelling. The same letter treats the seven-charge Thomson problem.
+Shen, arXiv:2611.09925 (23 September 2026), reports a proof that the pentagonal bipyramid is the unique global minimiser of the seven-particle Lennard-Jones energy, up to rigid motion and relabeling. The same letter treats the seven-charge Thomson problem.
 
 The manuscript said Kuznetsov and Sahinidis prove optima only for five and six atoms. That "only" does not survive this letter. The proof stops at seven atoms. It gives no energy at 38, 55, 75, 98, or 104, and it does not prove those sizes.
 
@@ -498,7 +498,7 @@ The Wales copy of the table from 3 to 150 atoms, read on 12 November 2026, was l
 
 ## 2026-11-12 — Lennard-Jones coordinates through sixteen atoms, in several dimensions
 
-Varas, Acevedo, Carrasco, Rogan, and Valdivia, doi:10.5281/zenodo.19826810 (27 April 2026), deposit minimum-energy coordinates for the Lennard-Jones potential in more than one dimension. The directories run from 9 to 16 atoms. The files are labelled by dimension, and the highest label in the archive is dimension 15, on the 16-atom set. This note does not recompute the energies.
+Varas, Acevedo, Carrasco, Rogan, and Valdivia, doi:10.5281/zenodo.19826810 (27 April 2026), deposit minimum-energy coordinates for the Lennard-Jones potential in more than one dimension. The directories run from 9 to 16 atoms. The files are labeled by dimension, and the highest label in the archive is dimension 15, on the 16-atom set. This note does not recompute the energies.
 
 The sizes 38, 55, 75, 98, and 104 are absent. The deposit does not contradict the Cambridge hit targets, and it does not warrant a head-to-head at those sizes.
 
@@ -1184,7 +1184,7 @@ Cite `chenGoldChloride2026`.
 
 ## 2026-11-16 — Lower Thomson energies at three Cambridge sizes
 
-Shao, Wang, Liu, and Peng, arXiv:2611.17776 (13 November 2026), report configurations of the Thomson problem at 912, 1382, and 2502 charges. The energies they give lie 0.0036186, 0.0109730, and 0.0614033 below the Cambridge Cluster Database values, and they say exact integer arithmetic certifies the gaps. The abstract says the largest-\(N\) entries in that database were set in October 2026. The search is unconstrained replica-exchange basin hopping, started from the database configurations, with a shared pool of minima, recombination after a geometric relabelling, and gradient-only polishing. Replica-exchange basin hopping alone found the 912-charge and 1382-charge configurations, the former in one of five runs. They say polishing alone lowered two database entries by more than the threshold at which their pipeline reports a candidate, and that those two records were spurious until the candidates were compared with the polished database energies.
+Shao, Wang, Liu, and Peng, arXiv:2611.17776 (13 November 2026), report configurations of the Thomson problem at 912, 1382, and 2502 charges. The energies they give lie 0.0036186, 0.0109730, and 0.0614033 below the Cambridge Cluster Database values, and they say exact integer arithmetic certifies the gaps. The abstract says the largest-\(N\) entries in that database were set in October 2026. The search is unconstrained replica-exchange basin hopping, started from the database configurations, with a shared pool of minima, recombination after a geometric relabeling, and gradient-only polishing. Replica-exchange basin hopping alone found the 912-charge and 1382-charge configurations, the former in one of five runs. They say polishing alone lowered two database entries by more than the threshold at which their pipeline reports a candidate, and that those two records were spurious until the candidates were compared with the polished database energies.
 
 Amore and Wales already search this problem on a sphere, filed as `amoreThomson2026`. Meadows already deposits a 436-charge candidate, filed as `meadowsThomson2026`. Lavrov and Nikonov search the disk, filed as `lavrovThomsonDisk2026`. The sizes 912, 1382, and 2502 are not those records. This note does not recompute the configurations. The energies are Coulomb energies on a sphere. They do not contradict the Cambridge Lennard-Jones energies, 121 of 192, or 97 of 192. The comparison they describe is a polished baseline on the Thomson table. It is not the force-call hit rate. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
 

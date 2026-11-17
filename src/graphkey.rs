@@ -1,4 +1,4 @@
-//! Exact basin identity by canonical contact-graph labelling.
+//! Exact basin identity by canonical contact-graph labeling.
 //!
 //! Measured here, no coordinate radius defines basin identity: at 0.7 the run
 //! registers 365 basins and solves 55 of 72, at 2.0 it registers 7 and solves
@@ -7,7 +7,7 @@
 //! "the same packing, distorted" from "a different packing".
 //!
 //! The contact graph can. Two minima are the same arrangement exactly when
-//! their bond graphs are isomorphic, and a canonical labelling (McKay's nauty,
+//! their bond graphs are isomorphic, and a canonical labeling (McKay's nauty,
 //! doi:10.1016/j.jsc.2013.09.003) turns isomorphism into equality of keys: no
 //! threshold, no reference structure, no morphology. The graph is built from
 //! the structure's own nearest-neighbour scale, so the key transfers across
@@ -21,7 +21,7 @@ use std::hash::{Hash, Hasher};
 ///
 /// Colours are species: a bond network of one arrangement of two species and
 /// the same network with the species swapped are different states, and a
-/// colour-blind key would merge them. nauty's canonical labelling refines the
+/// colour-blind key would merge them. nauty's canonical labeling refines the
 /// initial partition by colour, so equal keys mean isomorphic bond networks
 /// *with matching species everywhere*. The pair cutoff is a callback on the
 /// two species, because contact distances differ by pair in any real system;
@@ -144,7 +144,7 @@ pub fn contact_key(x: ArrayView1<f64>, cutoff: f64) -> u64 {
     use nauty_pet::canon::IntoCanon;
     let canon = g.into_canon();
     // The canonical form is hashed by its sorted edge list, which is a pure
-    // function of the isomorphism class once the labelling is canonical.
+    // function of the isomorphism class once the labeling is canonical.
     let mut edges: Vec<(usize, usize)> = canon
         .edge_indices()
         .map(|e| {
@@ -185,7 +185,7 @@ mod tests {
     }
 
     /// A permutation of the points is the same arrangement, and the key has to
-    /// say so exactly, which is what canonical labelling buys over any
+    /// say so exactly, which is what canonical labeling buys over any
     /// distance in coordinate space.
     #[test]
     fn a_permuted_structure_keeps_its_key() {

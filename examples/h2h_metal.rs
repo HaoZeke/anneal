@@ -287,7 +287,7 @@ fn config(spec: &Spec) -> Config {
             cfg.prior_motif = false;
         }
     }
-    // Empty leaves the labelled-cluster search on. `0` turns its three
+    // Empty leaves the labeled-cluster search on. `0` turns its three
     // parts off. A comma list turns off the named ones: descent, ranked,
     // window. A one-species cluster never uses them.
     if let Ok(text) = std::env::var("H2H_HOMOTOP") {
