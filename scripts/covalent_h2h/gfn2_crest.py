@@ -26,7 +26,9 @@ energy calls it made: the ``max steps`` of an MD, and one
 that log.
 
 Each seed's start is anneal's random start for that seed, written before
-any search. The (seed, code) pairs of a system run in a shuffled order.
+any search. ``--check-starts CSV`` appends instead whether xtb answers each
+start from a fresh SCC, and runs nothing. The (seed, code) pairs of a
+system run in a shuffled order.
 ``--codes``, ``--seeds`` and ``--crest-seeds`` select the arms and the
 seeds, each system's defaults being ``SEEDS`` and ``CREST_SEEDS``; a
 system without a reference is refused.
@@ -85,13 +87,17 @@ SYSTEMS = ("si10", "c10", "si13", "c20", "si20")
 CODES = ("anneal-general", "crest")
 TWELVE = tuple(range(2000, 2012))
 # Si13 runs six seeds in both arms: from a fresh SCC a call costs about
-# 0.1 s. Si20 runs twelve under the wall cap.
+# 0.1 s. Si20 runs twelve under the wall cap, the first twelve from 2000
+# whose start xtb answers from a fresh SCC (``gfn2/si20-starts.csv``, from
+# ``--check-starts``): on the others CREST's first ``--opt`` stops at its
+# first SCC, and on 2000-2011 that is seven of twelve.
+SI20 = (2003, 2005, 2008, 2009, 2010, 2012, 2013, 2014, 2018, 2019, 2020, 2021)
 SEEDS = {
     "si10": TWELVE,
     "c10": TWELVE,
     "si13": TWELVE[:6],
     "c20": TWELVE,
-    "si20": TWELVE,
+    "si20": SI20,
 }
 # CREST's seeds, anneal's unless its wall time does not allow them.
 CREST_SEEDS = dict(SEEDS)
@@ -149,6 +155,18 @@ PROVENANCE_FIELDS = [
 def row_fields(system: str) -> list[str]:
     capped = ["wall_cap_s"] if system in WALL_CAP else []
     return ROW_FIELDS + capped + PROVENANCE_FIELDS
+
+
+START_FIELDS = [
+    "system",
+    "seed",
+    "converged",
+    "xtb_fresh_Eh",
+    "code_revision",
+    "host",
+    "date",
+    "xtb_sha256",
+]
 SUMMARY_FIELDS = [
     "system",
     "code",
@@ -232,6 +250,34 @@ def run_anneal(
         "pot_s": float(row["pot_s"]),
         "outside_s": float(row["outside_s"]),
     }
+
+
+def write_start(binary: Path, system: str, seed: int, path: Path) -> None:
+    subprocess.run(
+        [str(binary), system, str(seed), str(BUDGET), "-", str(path)],
+        env=dict(os.environ, H2H_START_ONLY="1"),
+        capture_output=True,
+        check=True,
+    )
+
+
+def fresh_energy(xtb: Path, start: Path, where: Path) -> float | None:
+    """xtb's GFN2 energy of ``start`` in Hartree from a fresh SCC in an empty
+    directory, or None when that SCC does not converge."""
+    where.mkdir(parents=True, exist_ok=True)
+    for stale in where.iterdir():
+        if stale.is_file():
+            stale.unlink()
+    (where / "start.xyz").write_bytes(start.read_bytes())
+    proc = subprocess.run(
+        [str(xtb), "start.xyz", "--gfn", "2", "--sp", "--etemp", f"{ETEMP}"],
+        cwd=where,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    found = re.findall(r"TOTAL ENERGY\s+([-+]?\d+\.\d+)\s+Eh", proc.stdout)
+    return float(found[-1]) if proc.returncode == 0 and found else None
 
 
 def wall_cap(paths: list[Path], system: str, seeds: list[int]) -> float:
@@ -388,12 +434,13 @@ def main() -> None:
     ap.add_argument("--false-hits", type=Path)
     ap.add_argument("--rescore", nargs=2, metavar=("SYSTEM", "ENERGY_EV"))
     ap.add_argument("--rescored", type=Path)
+    ap.add_argument("--check-starts", type=Path)
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
         self_test()
         return
-    if args.rows is None:
+    if args.rows is None and args.check_starts is None:
         raise SystemExit("--rows is required")
     host = socket.gethostname()
     revision = args.head_file.read_text().strip() if args.head_file else ""
@@ -452,19 +499,27 @@ def main() -> None:
         starts = args.out / system / "starts"
         starts.mkdir(parents=True, exist_ok=True)
         for seed in seeds:
-            subprocess.run(
-                [
-                    str(args.anneal),
-                    system,
-                    str(seed),
-                    str(BUDGET),
-                    "-",
-                    str(starts / f"{seed}.xyz"),
-                ],
-                env=dict(os.environ, H2H_START_ONLY="1"),
-                capture_output=True,
-                check=True,
-            )
+            write_start(args.anneal, system, seed, starts / f"{seed}.xyz")
+        if args.check_starts is not None:
+            rows = []
+            for seed in seeds:
+                energy = fresh_energy(
+                    args.xtb, starts / f"{seed}.xyz", args.out / system / "fresh" / str(seed)
+                )
+                rows.append(
+                    {
+                        "system": system,
+                        "seed": seed,
+                        "converged": "false" if energy is None else "true",
+                        "xtb_fresh_Eh": "" if energy is None else f"{energy:.12f}",
+                        "code_revision": revision,
+                        "host": host,
+                        "date": datetime.date.today().isoformat(),
+                        "xtb_sha256": pins["xtb_sha256"],
+                    }
+                )
+            append_rows(args.check_starts, START_FIELDS, rows)
+            continue
         if args.crest_seeds is not None:
             crest_seeds = set(args.crest_seeds)
         elif args.seeds is not None:
@@ -572,13 +627,20 @@ def summarise(
 
     With ``anneal_revision``, anneal's rows are only those of that
     ``code_revision``. A row named in ``false_hits`` by system, code,
-    revision and seed counts as a miss at its budget.
+    revision and seed counts as a miss at its budget. Rows of a seed outside
+    ``SEEDS``, or ``CREST_SEEDS`` for CREST, are left out.
     """
     table = []
     for path in paths:
         if path.is_file():
             with open(path, newline="") as handle:
                 table.extend(csv.DictReader(handle))
+    table = [
+        row
+        for row in table
+        if int(row["seed"])
+        in (CREST_SEEDS if row["code"] == "crest" else SEEDS)[row["system"]]
+    ]
     if anneal_revision is not None:
         table = [
             row
@@ -744,6 +806,19 @@ def self_test() -> None:
             pass
         else:
             raise SystemExit("wall cap without every CREST seed")
+        panel = Path(scratch) / "panel.csv"
+        for seed in (2003, 2004):
+            append_rows(
+                panel,
+                fields,
+                [dict(row, system="si20", code="crest", seed=str(seed), hit="false")],
+            )
+        lines = Path(scratch) / "summary.csv"
+        summarise([panel], lines, "", "", systems=["si20"])
+        with open(lines, newline="") as handle:
+            runs = {line["code"]: line["runs"] for line in csv.DictReader(handle)}
+        if runs.get("crest") != "1":
+            raise SystemExit(f"a seed outside the panel was summarised: {runs}")
     print("ok")
 
 
