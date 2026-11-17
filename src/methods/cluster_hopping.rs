@@ -3787,6 +3787,17 @@ fn finish_rigid<'g>(
     out
 }
 
+/// Relative energy drop that counts as a lower minimum for
+/// [`Config::branch_on_stall`].
+const BRANCH_LOWER: f64 = 1e-9;
+
+/// Relative energy gap under which a branch's lowest quench is a minimum
+/// the walker holds or an earlier branch stalled in.
+const BRANCH_SAME: f64 = 1e-7;
+
+/// Stalled branch minima kept for [`Config::branch_on_stall`].
+const BRANCH_ENDS: usize = 256;
+
 /// Encounter list scoring reads, one row per incumbent [`Ledger::record`] stored.
 ///
 /// `pushed` carries the hop and basin count the search loop wrote beside a
@@ -4634,6 +4645,19 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    // Fresh-start branches (`Config::branch_on_stall`): calls charged to
+    // them, the walk's own clock at its last lower minimum and the longest
+    // stretch the walk took between two, the walk's clock before which it
+    // does not branch again, the branches drawn, the minima they stalled
+    // in, and the lowest one held for the end of the run.
+    let mut branch_spent = 0usize;
+    let mut branch_seen = ledger.best;
+    let mut branch_low_at = 0usize;
+    let mut branch_gap = 0usize;
+    let mut branch_wait = 0usize;
+    let mut branch_draws = 0u64;
+    let mut branch_ends: Vec<f64> = Vec::new();
+    let mut branch_held: Option<(f64, Array1<f64>, usize)> = None;
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
     // the chain already quenched, instead of redrawing inside the same one.
@@ -5758,6 +5782,148 @@ where
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
                 basin_hold = crate::catalog::molecular::WATER_BASIN_HOLD;
+            }
+        }
+        // A walk that has gone longer without a lower minimum than it took
+        // to reach the one it holds, and longer than twice its longest
+        // productive stretch, is stalled the way a fresh start would not
+        // be. The branch is that fresh start, on its own ledger slice and
+        // generator; the walk does not see it. Its clocks count only its
+        // own calls, so after a branch it continues as if the branch had
+        // not run. A branch at or below the stop target ends the run; a
+        // lower minimum short of it is recorded when the walk ends.
+        if cfg.branch_on_stall
+            && !cfg.move_library.is_rigid_body()
+            && hops > 0
+            && x.len() == 3 * n
+            && ledger.best.is_finite()
+            && !ledger.target_reached()
+        {
+            let walked = ledger.spent().saturating_sub(branch_spent);
+            if ledger.best < branch_seen - BRANCH_LOWER * ledger.best.abs().max(1.0) {
+                branch_gap = branch_gap.max(walked.saturating_sub(branch_low_at));
+                branch_seen = ledger.best;
+                branch_low_at = walked;
+            }
+            let floor = cfg.restart_patience.max(1);
+            let patience = branch_low_at.max(branch_gap.saturating_mul(2)).max(floor);
+            let room = ledger.remaining();
+            if walked.saturating_sub(branch_low_at) > patience
+                && walked >= branch_wait
+                && room > floor
+            {
+                branch_draws += 1;
+                let mut branch_rng = StdRng::seed_from_u64(
+                    branch_draws
+                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        .wrapping_add(ledger.best.to_bits()),
+                );
+                let fresh = random_cluster_in_radius(
+                    n,
+                    cfg.start_radius(),
+                    cfg.min_separation,
+                    &mut branch_rng,
+                );
+                let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let mut branch = Ledger::with_stop(room, flag.clone());
+                if let Some(target) = ledger.target() {
+                    branch.stop_below(target);
+                }
+                // The inner search binds its own flag on this thread, so the
+                // caller's stop is carried in by hand.
+                let outer_stop = crate::caller_stop::bound();
+                let walker_best = ledger.best;
+                let ends = &branch_ends;
+                let mut low = f64::INFINITY;
+                let mut low_at = 0usize;
+                let mut repeated = false;
+                // The branch stops once it has gone longer without a lower
+                // quench than it took to reach its lowest, or as soon as that
+                // lowest is a minimum the walker holds or an earlier branch
+                // stalled in: from there it repeats a descent already paid for.
+                let mut paced = |inner: &mut Ledger, point: ArrayView1<f64>, steps: usize| {
+                    let out = relax(inner, point, steps);
+                    if out.0 < low - BRANCH_LOWER * out.0.abs().max(1.0) {
+                        low = out.0;
+                        low_at = inner.spent();
+                        let same = |end: f64| (low - end).abs() <= BRANCH_SAME * end.abs().max(1.0);
+                        repeated = same(walker_best) || ends.iter().any(|&end| same(end));
+                    }
+                    let quiet = inner.spent().saturating_sub(low_at);
+                    if repeated
+                        || quiet > low_at.max(floor)
+                        || outer_stop
+                            .as_ref()
+                            .is_some_and(|stop| stop.load(std::sync::atomic::Ordering::Relaxed))
+                    {
+                        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    out
+                };
+                let mut inner_cfg = cfg.clone();
+                inner_cfg.branch_on_stall = false;
+                inner_cfg.target_energy = None;
+                let before = ledger.spent();
+                let ran = run_with_gradient(
+                    &inner_cfg,
+                    fresh.view(),
+                    &mut branch,
+                    &mut paced,
+                    grad.as_deref_mut(),
+                    &mut branch_rng,
+                );
+                ledger.charge_many(branch.spent());
+                if branch.best.is_finite() && branch_ends.len() < BRANCH_ENDS {
+                    branch_ends.push(branch.best);
+                }
+                let held_below = branch_held
+                    .as_ref()
+                    .map_or(ledger.best, |(held, _, _)| held.min(ledger.best));
+                if ran.is_ok()
+                    && branch.best < held_below - 1e-10
+                    && let Some(state) = branch.best_state.clone()
+                    && state.len() == x.len()
+                    && quench_is_sane(cfg, branch.best, state.view())
+                {
+                    let energy = branch.best;
+                    let found_at = before
+                        + branch
+                            .encounters()
+                            .iter()
+                            .rev()
+                            .find(|(_, value)| *value == energy)
+                            .map_or(branch.spent(), |(at, _)| *at);
+                    let certified = grad.as_deref_mut().map(|gradient| {
+                        gradient(ledger, state.view()).is_some_and(|values| {
+                            answer_gradient_ok(cfg, values.view(), state.len())
+                        })
+                    });
+                    if certified == Some(false) {
+                        unconverged_records += 1;
+                    } else if ledger.below_target(energy) {
+                        ledger.record(energy, state.view());
+                        ledger.stamp_encounter(energy, found_at);
+                        if improvements.len() < 512 {
+                            improvements.push((hops, found_at, bias.n_basins(), energy));
+                        }
+                    } else {
+                        branch_held = Some((energy, state, found_at));
+                    }
+                }
+                let cost = ledger.spent().saturating_sub(before);
+                branch_spent = branch_spent.saturating_add(cost);
+                charged_at_best = charged_at_best.saturating_add(cost);
+                motif_at_spent = motif_at_spent.saturating_add(cost);
+                last_polish_spent = last_polish_spent.saturating_add(cost);
+                next_reoccupy = next_reoccupy.saturating_add(cost);
+                reorder_wait = reorder_wait.saturating_add(cost);
+                branch_wait = walked.saturating_add(cost);
+                if std::env::var("ANNEAL_BRANCH_TRACE").is_ok() {
+                    eprintln!(
+                        "BRANCH hop {hops} at {before} cost {cost} best {:.6} walker {:.6} aside {branch_spent}",
+                        branch.best, ledger.best
+                    );
+                }
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -10307,6 +10473,16 @@ where
         ledger.stamp_encounter(energy, pending_cut_at);
         if energy <= ledger.best + 1e-12 && improvements.len() < 512 {
             improvements.push((hops, pending_cut_at, bias.n_basins(), energy));
+        }
+    }
+
+    if let Some((energy, state, found_at)) = branch_held
+        && energy < ledger.best - 1e-10
+    {
+        ledger.record(energy, state.view());
+        ledger.stamp_encounter(energy, found_at);
+        if improvements.len() < 512 {
+            improvements.push((hops, found_at, bias.n_basins(), energy));
         }
     }
 

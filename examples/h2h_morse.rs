@@ -180,6 +180,10 @@ fn cmd_run(args: &[String]) -> i32 {
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
         }
     }
+    // `1` turns on the fresh-start branch, `Config::branch_on_stall`.
+    if std::env::var("H2H_BRANCH").is_ok_and(|value| value == "1") {
+        cfg.branch_on_stall = true;
+    }
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {
             Ok(coords) if coords.len() == 3 * spec.n => coords,
