@@ -113,11 +113,23 @@ void setThreads(const char *value) {
 #endif
 }
 
+// IEEE 754 leaves the sign of a NaN result unspecified: an optimiser may
+// swap the operands of an add or a multiply, and given two NaNs the
+// hardware returns the first. A NaN has to match a NaN, and any other
+// value its bits.
+void expectSame(double got, double ref) {
+  if (std::isnan(ref)) {
+    REQUIRE(std::isnan(got));
+  } else {
+    REQUIRE(bitsOf(got) == bitsOf(ref));
+  }
+}
+
 void expectBits(const Outcome &got, const Outcome &ref) {
-  REQUIRE(bitsOf(got.energy) == bitsOf(ref.energy));
+  expectSame(got.energy, ref.energy);
   REQUIRE(got.force.size() == ref.force.size());
   for (std::size_t i = 0; i < got.force.size(); ++i) {
-    REQUIRE(bitsOf(got.force[i]) == bitsOf(ref.force[i]));
+    expectSame(got.force[i], ref.force[i]);
   }
 }
 
