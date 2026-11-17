@@ -15,3 +15,5 @@ a3314ea8b1c0df0b5438749ab946fbf615010e74 paper/jctc/figs/lj75_landscape.png
 54733b5911072b9a931f9c384bc2dcd48d3e534e paper/jctc/logs/lj75-source-37535ec1.tar.xz
 5cd0af45f9ea0dab6cd8dc8a48b2ef4a85cc3fab paper/jctc/logs/lj75-source-37535ec1.tar.xz
 87a275255df79b1cf1a65715246586eaeb9caa3c paper/jctc/logs/lj75-source-37535ec1.tar.xz
+3561c625508f2718145ebd751779ead7189de2ba paper/jctc/figs/landscapes.pdf
+b1f56aabf11bd7f868cfe48ad982bd2a615e6c6c paper/jctc/figs/landfold_maps.pdf
