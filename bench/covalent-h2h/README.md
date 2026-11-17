@@ -1009,6 +1009,43 @@ C20.
 any number of example builds on named cores and summarises every arm
 against the first.
 
+### The Si20 panel
+
+The panel is anneal against CREST on Si20 at the paper budget, 4e5
+calls, serial on core 0 under the `bench` hostname, CREST first, then
+anneal with `H2H_WALL_S` at three times CREST's slowest wall
+(`gfn2/si20-panel.csv`). It is not finished.
+
+- The seeds. On seven of 2000-2011, 2000, 2001, 2002, 2004, 2006, 2007
+  and 2011, xtb 6.7.1 at 3000 K does not converge the start's SCC in its
+  default 250 iterations, and CREST, whose xtb runs with that default,
+  ends with no call. `--check-starts` writes a fresh single point of each
+  start (`gfn2/si20-starts.csv`, seeds 2000-2021), and the panel takes the
+  first twelve seeds whose start converges: 2003, 2005, 2008, 2009, 2010,
+  2012, 2013, 2014, 2018, 2019, 2020 and 2021. The rows of the other
+  seeds stay in the file and the summary leaves them out.
+- CREST stopped seeds 2008 and 2010 after 219 calls and 2012 after 245 on
+  a topology change: a random start is not a bonded molecule, and its
+  first optimisation forms bonds the start did not have. From `d09da9d9`
+  CREST runs with `-noreftopo`, which in CREST 3.0.2 only makes that
+  check adopt the new topology and go on. `gfn2/superseded.csv` names the
+  three rows; they are run again, and the summary and the wall cap leave
+  the old rows out.
+- Seed 2009: no hit after 183,839 calls and 15,311 s, best -922.038 eV,
+  above the ring.
+- Seed 2005 records a hit at call 108,256 (13,710 s) at -959.85629642
+  eV, 36.9 eV below the ring, on a planar flake with a shortest pair of
+  1.846 Å. xtb at 3000 K does not converge that geometry's SCC from a
+  fresh start in 250 or 500 iterations, and with 1,000 its Broyden step
+  fails; at xtb's default 300 K it converges to -31.934707740950 Eh,
+  -868.99 eV. The energy is that of CREST's optimisation, whose SCC
+  starts from the step before. `gfn2/false-hits.csv` names the row, and
+  the summary counts it as a miss at its budget.
+- Both arms stop at the ring, -922.98227162 eV
+  (`gfn2/minima/si20-ring.xyz`). It is the panel's reference only if
+  anneal or CREST reaches it on more seeds than the two of the reference
+  search; otherwise the panel reports best energies, not hits.
+
 ## Pins
 
 `scripts/covalent_h2h/pins.sh` prints, with every clock column removed:
@@ -1047,7 +1084,9 @@ Three first-parent commits changed it:
 - `gfn2/`: per-seed rows and summaries of GFN2-xTB Si10, C10, Si13 and
   C20, anneal against CREST, CREST's rescore against the Si13 ring, the
   lowest minima with their xtb energies, the element-floor gates on
-  `c1c02d16` and `c2de652d`, and the capped Si20 reference search with a
-  fresh xtb single point of each best geometry.
+  `c1c02d16` and `c2de652d`, the capped Si20 reference search with a
+  fresh xtb single point of each best geometry, and the Si20 panel's rows
+  so far, its start check, and the rows it supersedes or counts as false
+  hits.
 - `floor-gate/`: the element-floor gate against develop, GFN2 and the
   paper headline panel, with the pins of the floor build.
