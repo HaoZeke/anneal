@@ -14,3 +14,7 @@ neighbour-chunk.diff
 # uma-cache-dir.diff: UmaParams.cacheDir @10, the root of the persistent
 # cache a UMA .pt2 is unpacked into.
 uma-cache-dir.diff
+#
+# hessian-vector.diff: Capabilities.Operation.hessianVector @10 and
+# Potential.calculateHvp @14.
+hessian-vector.diff
