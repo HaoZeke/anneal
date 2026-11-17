@@ -2804,10 +2804,13 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(TEX, lf.caption_tex())
     raster = lf.raster_letters()
     audit.said(TEX, f"Panels (a) to ({chr(ord(raster[0]) - 1)}) are drawn as vectors from the landscape tables.")
-    audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) show the sealed raster maps of the campaigns, because "
-                    "their landscape tables are not in the repository.")
+    audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) redraw the sealed maps of the campaigns pixel for pixel as "
+                    "vector rectangles, because their landscape tables are not in the repository.")
     audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), TEX,
                  "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
+    figure = (ROOT / "paper/jctc/figs/landfold_maps.pdf").read_bytes()
+    audit.record(b"/Subtype /Image" not in figure, "paper/jctc/figs/landfold_maps.pdf",
+                 "the landfold figure holds no embedded image", "none", "an image" if b"/Subtype /Image" in figure else "none")
 
 
 RERUN_ITEMS = {"5": "GMIN and ASE caps and tuning", "6": "the Mackay cap and mackay_cut", "7": "the GFN2 sign and rerun"}
@@ -2824,21 +2827,23 @@ def rerun_tags(text: str) -> list[tuple[int, str]]:
 # Results that a rerun replaces. Each sentence that holds one of these fragments must end in its tag,
 # so a replaced claim cannot sit in the text without the fence that --pre-submission reads.
 RERUN_CLAIMS = (
-    (TEX, "5", ("Fisher's test on hits is below 0.05 on 6 of the 9 wins", "It is not below 0.05 on the other 3",
+    (TEX, "5", ("Fisher's test on hits is below 0.05 on 6 clusters", "It is not below 0.05 on the other 4 wins",
                 "GMIN hits LJ\\(_{150}\\) on 9 of 12 against 5 of 12, with \\(p=0.21\\)",
                 "The median wall of a run is 0.075~s for this setting", "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s against 10.691~s",
-                "neither ASE arm hits more than 1 of 12 on any of them",
-                "Fisher's test on hits is below 0.05 on 6 clusters", "The 5 are LJ\\(_{38}\\)",
+                "neither ASE arm hits more than 1 of 12 on any of them", "The 5 are LJ\\(_{38}\\)",
                 "The other 4 wins of this setting are", "is not significant either",
                 "9 of 12 against 5 of 12 and 12 of 12 against 2 of 12",
                 "hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse clusters, and no arm hits",
-                "6 are significant by Fisher's test", "This setting hits more seeds than GMIN on 9 of the 13 clusters",
+                "5 are significant by Fisher's test", "6 clusters are significant overall",
+                "This setting hits more seeds than GMIN on 9 of the 13 clusters",
+                "this setting hits it on 6 of 12 and GMIN on 1 of 12", "where GMIN hits 1 of 12 and Fisher's \\(p\\) is 0.069",
+                "it hits 6 of 12 and GMIN 1 of 12, with \\(p=0.069\\)",
                 "minima hopping hits none", "Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones clusters",
                 "Both ASE arms hit 0 of 12 on all 4", "ASE minima hopping hits LJ\\(_{38}\\) on 1 of 6, LJ\\(_{55}\\) on 6 of 6",
                 "Wall is the median wall in seconds of all six runs", "Minima hopping reached its cap on every run")),
     (SI, "5", ("The GMIN arm hits 64 of 64", "where GMIN hits LJ\\(_{98}\\) on 0 of 12 seeds",
                "hit LJ\\(_{75}\\) on 0 of 12 seeds")),
-    ("paper/jctc/cover-letter.tex", "5", ("this setting hits more seeds on 9 of 13", "Fisher's test on hits is below 0.05 on 6 of the 9 wins",
+    ("paper/jctc/cover-letter.tex", "5", ("this setting hits more seeds on 9 of 13", "Fisher's test on hits is below 0.05 on 6 clusters",
                                          "GMIN hits LJ\\(_{150}\\) on 9 of 12", "The median wall of a run is 0.075~s",
                                          "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s")),
 )
@@ -3041,6 +3046,70 @@ def manuscript_followups(audit: Audit) -> None:
     audit.said(TEX, "Derived adds the budget window and the Bayes screen of")
 
 
+STALE_AU55 = (
+    (re.compile(r"0\.014"), "the Au55 p of the earlier GMIN panel"),
+    (re.compile(r"6 of the 9|six of (?:our|the) nine|6 of our 9", re.IGNORECASE), "six significant of the nine wins"),
+)
+
+
+def stale_sentences(text: str) -> list[str]:
+    """The sentences that hold an Au55 count or test from a GMIN panel that the rerun replaced."""
+    prose = re.sub(r"\\begin\{tabular\}.*?\\end\{tabular\}", " ", text, flags=re.DOTALL)
+    flat, found, start = collapse(prose), [], 0
+    for end in [m.end() for m in SENTENCE_END.finditer(flat)] + [len(flat)]:
+        sentence, start = flat[start:end].strip(), end
+        au = "Au\\(_{55}\\)" in sentence
+        if au and "GMIN" in sentence and re.search(r"\b0 of 12\b|\b0/12\b", sentence) and "ASE panel" not in sentence:
+            found.append(sentence)
+        elif au and "significant" in sentence and not re.search(r"\bnot\b|that are not", sentence):
+            found.append(sentence)
+        elif any(pattern.search(sentence) for pattern, _why in STALE_AU55):
+            found.append(sentence)
+    return found
+
+
+def manuscript_au55(audit: Audit) -> None:
+    """The Au55 row of the GMIN panel, the significant clusters, and the absence of the earlier counts."""
+    panel, groups = gmin_panel_groups(audit)
+    systems = list(panel.PAPER_BUDGETS)
+
+    def p_of(system: str) -> float:
+        a, g = groups[(system, "anneal")], groups[(system, "gmin")]
+        return fisher(hits_of(a), len(a), hits_of(g), len(g))
+
+    au_a, au_g = groups[("au55", "anneal")], groups[("au55", "gmin")]
+    audit.cell(TEX, "Au55 hits of this setting and GMIN in the GMIN panel", "6 1", f"{hits_of(au_a)} {hits_of(au_g)}")
+    audit.cell(TEX, "Au55 Fisher p of the GMIN panel", "0.069", p_of("au55"))
+    audit.cell(TEX, "Au55 Fisher p is not below 0.05", "1", float(p_of("au55") >= 0.05))
+    ours = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")]) and p_of(s) < 0.05]
+    theirs = [s for s in systems if hits_of(groups[(s, "gmin")]) > hits_of(groups[(s, "anneal")]) and p_of(s) < 0.05]
+    audit.cell(TEX, "clusters significant for this setting", "5", float(len(ours)))
+    audit.cell(TEX, "clusters significant for GMIN", "m80r6", " ".join(theirs))
+    audit.cell(TEX, "clusters significant overall", "6", float(len(ours) + len(theirs)))
+    for path in (TEX, COVER):
+        audit.said(path, "Fisher's test on hits is below 0.05 on 6 clusters: 5 for this setting, LJ\\(_{38}\\), "
+                         "LJ\\(_{75}\\), LJ\\(_{98}\\), and M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\), and "
+                         "M\\(_{80}\\) at \\(\\rho=6\\) for GMIN.")
+    audit.said(TEX, "It is not below 0.05 on the other 4 wins: LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and "
+                    "Au\\(_{55}\\), where \\(p=0.069\\).")
+    audit.said(TEX, "this setting hits it on 6 of 12 and GMIN on 1 of 12.")
+    audit.said(TEX, "On Au\\(_{55}\\) this setting hits 6 of 12 in the GMIN panel, where GMIN hits 1 of 12 and Fisher's "
+                    "\\(p\\) is 0.069.")
+    audit.said(TEX, "Of the 9 clusters where this setting hits more seeds than GMIN, 5 are significant by Fisher's test, and "
+                    "the 4 that are not are LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and Au\\(_{55}\\).")
+    for path in (TEX, SI, COVER):
+        stale = stale_sentences(audit.text(path))
+        audit.record(not stale, path, "no Au55 count, p, or significance claim of the replaced GMIN panel",
+                     "none", " | ".join(stale) or "none")
+
+
+def untraced_check(audit: Audit) -> None:
+    """A printed number that no committed row backs is quoted as written, and it fails the audit until a row holds it."""
+    for path, fragment, why in UNTRACED:
+        audit.said(path, fragment)
+        audit.record(False, path, f"printed number that no committed row backs: {why}", "a committed row", fragment)
+
+
 def run(report: bool = False, write_map: bool = False, pre_submission: bool = False) -> int:
     problems = unauditable()
     if problems:
@@ -3051,15 +3120,14 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, cover_letter):
+                  manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
     revision_map(audit)
     rerun_claims(audit)
     rerun_check(audit, pre_submission)
-    for path, fragment, _why in UNTRACED:
-        audit.said(path, fragment)
+    untraced_check(audit)
     gaps = provenance(audit)
     cited = {r[c].strip() for rows in audit.read.values() for r in rows for c in REVISION_COLUMNS if c in r}
     for name in sorted(set(UNPUSHED) - cited):
