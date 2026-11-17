@@ -16,7 +16,8 @@ hits and median calls to the minimum (misses at the budget), Fisher's
 exact test on hits and the tie-corrected Mann-Whitney test on calls, and
 the seeds on which the two arms agree in hit, calls to the minimum, calls
 charged and best energy to 1e-8. An arm loses on a system when it hits
-fewer times, or its calls are higher at p below 0.05.
+fewer times, or its calls are higher at p below 0.05. A system that only
+one arm ran, or that the arms ran on different seeds, is lost.
 """
 
 from __future__ import annotations
@@ -148,9 +149,15 @@ def summary(args: argparse.Namespace) -> None:
             name: {int(r["seed"]): r for r in rows if r["arm"] == name and r["system"] == system and r["driver"] == driver}
             for name in (base, other)
         }
-        if not by_arm[base] or not by_arm[other]:
+        if not by_arm[base] and not by_arm[other]:
             continue
-        seeds = sorted(set(by_arm[base]) & set(by_arm[other]))
+        # A failed run appends no row, so an arm can be short of seeds; a
+        # comparison over what is left is not the gate.
+        if set(by_arm[base]) != set(by_arm[other]):
+            print(f"{system} {driver}: {base} has seeds {sorted(by_arm[base])}, {other} has {sorted(by_arm[other])}")
+            lost.append(f"{system} {driver} seeds")
+            continue
+        seeds = sorted(by_arm[base])
         b = [by_arm[base][s] for s in seeds]
         o = [by_arm[other][s] for s in seeds]
         hits_b = sum(r["hit"] == "1" for r in b)

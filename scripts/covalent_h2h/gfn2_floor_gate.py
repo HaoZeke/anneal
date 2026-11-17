@@ -14,7 +14,8 @@ the host to ``--rows``.
 (a miss counts its budget), the SCC failure rate (``scc_rejected`` over
 ``charged``) and the best energy, with Fisher's exact test on hits and a
 two-sided Mann-Whitney test on the rest. A metric is lost when the second
-arm hits fewer times, or is worse with p below 0.05.
+arm hits fewer times, or is worse with p below 0.05. A system is lost
+when the two arms do not hold the same seeds.
 """
 
 import argparse
@@ -27,8 +28,6 @@ import statistics
 import subprocess
 import threading
 from pathlib import Path
-
-from scipy.stats import fisher_exact, mannwhitneyu
 
 REFERENCE = {"si13": -599.34546694, "c20": -1148.85383633}
 EXAMPLE_FIELDS = [
@@ -99,6 +98,14 @@ def summary(args):
     base, other = args.arms
     lost = []
     for system in sorted({r["system"] for r in rows}, reverse=True):
+        # A job with no final row appends nothing, so an arm can be short of
+        # seeds; a comparison over what is left is not the gate.
+        seeds = {name: sorted(int(r["seed"]) for r in rows if r["system"] == system and r["arm"] == name)
+                 for name in (base, other)}
+        if not seeds[base] or seeds[base] != seeds[other]:
+            print(f"{system}: {base} has seeds {seeds[base]}, {other} has {seeds[other]}")
+            lost.append(f"{system} seeds")
+            continue
         metric = {}
         for name in (base, other):
             runs = [r for r in rows if r["system"] == system and r["arm"] == name]
@@ -108,14 +115,17 @@ def summary(args):
                 "n": len(runs),
                 "hits": sum(r["hit"] == "true" for r in runs),
                 "calls": [int(r["evals_to_hit"]) for r in runs],
-                "scc": [int(r["scc_rejected"]) / int(r["charged"]) for r in runs],
+                "scc": [int(r["scc_rejected"]) / int(r["charged"]) if int(r["charged"]) else 0.0 for r in runs],
                 "best": [float(r["best"]) for r in runs],
             }
             m = metric[name]
+            rate = f"{100 * scc / charged:.2f}%" if charged else "no calls"
             print(f"{system} {name}: hits {m['hits']}/{m['n']}, median calls to hit "
                   f"{statistics.median(m['calls'])}, SCC failures {scc}/{charged} "
-                  f"({100 * scc / charged:.2f}%), median best {statistics.median(m['best']):.6f} eV, "
+                  f"({rate}), median best {statistics.median(m['best']):.6f} eV, "
                   f"lowest {min(m['best']):.6f} eV")
+        from scipy.stats import fisher_exact, mannwhitneyu
+
         b, o = metric[base], metric[other]
         p = fisher_exact([[b["hits"], b["n"] - b["hits"]], [o["hits"], o["n"] - o["hits"]]]).pvalue
         print(f"{system} hits: Fisher p = {p:.4f}")
