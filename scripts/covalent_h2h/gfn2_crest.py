@@ -48,6 +48,12 @@ Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
 hit is an energy within ``HIT_TOL`` eV of the reference. This process
 refuses to run unless the UTS hostname is bench.
+
+On a system in ``WALL_CAP`` CREST runs first. Anneal then stops at the
+budget, the reference, or ``WALL_CAP`` times the slowest CREST wall over
+every seed it runs, whichever comes first, through ``H2H_WALL_S``; it is
+refused until CREST has a row for each of those seeds. Those rows carry
+the cap in ``wall_cap_s``, empty for CREST, so they go to their own file.
 """
 
 from __future__ import annotations
@@ -77,14 +83,14 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 SYSTEMS = ("si10", "c10", "si13", "c20", "si20")
 CODES = ("anneal-general", "crest")
 TWELVE = tuple(range(2000, 2012))
-# Si13 and Si20 run six seeds in both arms: from a fresh SCC a call costs
-# about 0.1 s on Si13 and more on Si20.
+# Si13 runs six seeds in both arms: from a fresh SCC a call costs about
+# 0.1 s. Si20 runs twelve under the wall cap.
 SEEDS = {
     "si10": TWELVE,
     "c10": TWELVE,
     "si13": TWELVE[:6],
     "c20": TWELVE,
-    "si20": TWELVE[:6],
+    "si20": TWELVE,
 }
 # CREST's seeds, anneal's unless its wall time does not allow them.
 CREST_SEEDS = dict(SEEDS)
@@ -99,14 +105,21 @@ AUTOEV = 27.21138505
 # bond 1.285 angstrom. C20: the cage, every atom three-coordinated, from
 # one anneal run without the call floor (seed 2006 at 1e5 calls); no
 # other run of either code has reached it. Si13: anneal from a fresh SCC
-# on every call at 30000 calls, reached by seeds 3002-3005. Si20 has none
-# yet.
+# on every call at 30000 calls, reached by seeds 3002-3005. Si20 is
+# provisional: the twenty-membered ring two of eight capped anneal seeds
+# reached (3003 and 3006 on a52726af), which xtb gives the same energy
+# from a fresh start; it is a reference only if the panel reaches it again.
 REFERENCE = {
     "si10": -460.68373809,
     "c10": -571.32273783,
     "si13": -599.34546694,
     "c20": -1148.85383633,
+    "si20": -922.98227162,
 }
+# Anneal's wall cap over the slowest CREST wall, as the LJ75 ASE arms are
+# capped at three anneal walls. Si20 at 1e5 calls from a fresh SCC is days
+# a seed.
+WALL_CAP = {"si20": 3.0}
 SCHEDULE_SEED = 20261114
 
 ROW_FIELDS = [
@@ -130,6 +143,11 @@ PROVENANCE_FIELDS = [
     "xtb_sha256",
     "engine_sha256",
 ]
+
+
+def row_fields(system: str) -> list[str]:
+    capped = ["wall_cap_s"] if system in WALL_CAP else []
+    return ROW_FIELDS + capped + PROVENANCE_FIELDS
 SUMMARY_FIELDS = [
     "system",
     "code",
@@ -179,16 +197,24 @@ exit $rc
 """
 
 
-def run_anneal(binary: Path, system: str, seed: int, out: Path) -> dict:
+def run_anneal(
+    binary: Path, system: str, seed: int, out: Path, wall_cap: float | None = None
+) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     target = f"{REFERENCE[system]:.8f}"
+    env = dict(os.environ)
+    env.pop("H2H_WALL_S", None)
+    if wall_cap is not None:
+        env["H2H_WALL_S"] = f"{wall_cap:.6f}"
     proc = subprocess.run(
         [str(binary), system, str(seed), str(BUDGET), target, str(out / "best.xyz")],
         capture_output=True,
         text=True,
         check=True,
+        env=env,
     )
     (out / "stdout.txt").write_text(proc.stdout)
+    (out / "stderr.txt").write_text(proc.stderr)
     lines = proc.stdout.splitlines()
     head = next(i for i, line in enumerate(lines) if line.startswith("system,code"))
     row = dict(zip(lines[head].split(","), lines[head + 1].split(",")))
@@ -205,6 +231,21 @@ def run_anneal(binary: Path, system: str, seed: int, out: Path) -> dict:
         "pot_s": float(row["pot_s"]),
         "outside_s": float(row["outside_s"]),
     }
+
+
+def wall_cap(paths: list[Path], system: str, seeds: list[int]) -> float:
+    """``WALL_CAP[system]`` times the slowest CREST wall over ``seeds``."""
+    walls = {}
+    for path in paths:
+        if path.is_file():
+            with open(path, newline="") as handle:
+                for row in csv.DictReader(handle):
+                    if row["system"] == system and row["code"] == "crest":
+                        walls[int(row["seed"])] = float(row["wall_s"])
+    missing = sorted(set(seeds) - set(walls))
+    if missing:
+        raise SystemExit(f"{system} anneal is capped by CREST, which has no row on {missing}")
+    return WALL_CAP[system] * max(walls[seed] for seed in seeds)
 
 
 def first_frame_energy(path: Path) -> float:
@@ -294,16 +335,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    new = not path.is_file() or path.stat().st_size == 0
-    if not new:
+def check_header(path: Path, fields: list[str]) -> None:
+    if path.is_file() and path.stat().st_size:
         with open(path, newline="") as handle:
             header = next(csv.reader(handle))
         if header != fields:
             raise SystemExit(
                 f"{path} has another header; rows are appended, never rewritten"
             )
+
+
+def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = not path.is_file() or path.stat().st_size == 0
+    check_header(path, fields)
     with open(path, "a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         if new:
@@ -422,6 +467,11 @@ def main() -> None:
             if code in args.codes and (code != "crest" or seed in crest_seeds)
         ]
         rng.shuffle(pairs)
+        if system in WALL_CAP:
+            pairs.sort(key=lambda pair: pair[1] != "crest")
+        cap = None
+        fields = row_fields(system)
+        check_header(args.rows, fields)
         for seed, code in pairs:
             where = args.out / system / code / str(seed)
             if code == "crest":
@@ -435,13 +485,18 @@ def main() -> None:
                     where,
                 )
             else:
-                row = run_anneal(args.anneal, system, seed, where)
+                if system in WALL_CAP and cap is None:
+                    cap = wall_cap(
+                        [*args.history, args.rows],
+                        system,
+                        sorted(crest_seeds | set(seeds)),
+                    )
+                row = run_anneal(args.anneal, system, seed, where, cap)
+            if system in WALL_CAP:
+                row["wall_cap_s"] = f"{cap:.6f}" if code != "crest" else ""
             row.update(pins, date=datetime.date.today().isoformat())
-            append_rows(args.rows, ROW_FIELDS + PROVENANCE_FIELDS, [row])
-            print(
-                ",".join(str(row[k]) for k in ROW_FIELDS + PROVENANCE_FIELDS),
-                flush=True,
-            )
+            append_rows(args.rows, fields, [row])
+            print(",".join(str(row[k]) for k in fields), flush=True)
     if args.summary is not None:
         summarise([*args.history, args.rows], args.summary, revision, host)
 
@@ -658,6 +713,26 @@ def self_test() -> None:
             pass
         else:
             raise SystemExit("header guard")
+        capped = Path(scratch) / "capped.csv"
+        fields = row_fields("si20")
+        if fields.index("wall_cap_s") != len(ROW_FIELDS) or "wall_cap_s" in row_fields("si13"):
+            raise SystemExit("capped fields")
+        for seed, wall in ((2000, "10.5"), (2001, "40.0"), (2002, "20.0")):
+            append_rows(
+                capped,
+                fields,
+                [dict(row, system="si20", code="crest", seed=str(seed), wall_s=wall)],
+            )
+        if wall_cap([capped], "si20", [2000, 2002]) != 60.0:
+            raise SystemExit("wall cap")
+        if wall_cap([capped], "si20", [2000, 2001]) != 120.0:
+            raise SystemExit("wall cap over the slowest seed")
+        try:
+            wall_cap([capped], "si20", [2000, 2003])
+        except SystemExit:
+            pass
+        else:
+            raise SystemExit("wall cap without every CREST seed")
     print("ok")
 
 
