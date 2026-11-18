@@ -46,7 +46,7 @@ use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 /// The ABI major this loader speaks, `RGPOT_ENGINE_ABI_VERSION` of the header.
 pub const ENGINE_ABI_VERSION: c_int = 1;
 /// The ABI minor this loader requires, `RGPOT_ENGINE_ABI_MINOR` of the header.
-pub const ENGINE_ABI_MINOR: u16 = 3;
+pub const ENGINE_ABI_MINOR: u16 = 4;
 /// The struct layout revision this loader expects, `RGPOT_ENGINE_ABI_LAYOUT_REVISION` of the header.
 pub const ENGINE_ABI_LAYOUT_REVISION: u16 = 1;
 /// Engine code meaning the backend does not support the requested operation.
@@ -176,6 +176,10 @@ pub struct RgpotEngineCaps {
     pub stress: c_int,
     /// Nonzero when every rank of a calculator group enters each call.
     pub group_collective: c_int,
+    /// Nonzero when orbital selection is supported.
+    pub orbital_selection: c_int,
+    /// Nonzero when orbital copying is supported.
+    pub orbital_copy: c_int,
     /// Nonzero when analytic HVP (`rgpot_engine_hvp`) is supported.
     pub analytic_hvp: c_int,
 }

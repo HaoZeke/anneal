@@ -70,7 +70,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * The ABI minor this loader requires, `RGPOT_ENGINE_ABI_MINOR` of the header.
  */
-#define ENGINE_ABI_MINOR 3
+#define ENGINE_ABI_MINOR 4
 
 /**
  * The struct layout revision this loader expects,

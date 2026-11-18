@@ -95,7 +95,7 @@ typedef int (*rgpot_engine_coord_transform)(void *user, long nAtoms,
  * minor 0, layout 1.
  */
 #define RGPOT_ENGINE_ABI_VERSION 1
-#define RGPOT_ENGINE_ABI_MINOR 3
+#define RGPOT_ENGINE_ABI_MINOR 4
 #define RGPOT_ENGINE_ABI_LAYOUT_REVISION 1
 
 #define RGPOT_ENGINE_OK 0

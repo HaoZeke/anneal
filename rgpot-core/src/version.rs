@@ -44,6 +44,7 @@ pub struct rgpot_abi_stamp_t {
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
 pub const RGPOT_ABI_VERSION_MINOR: u16 = 5;
+const RGPOT_ABI_PREVIOUS_MINOR: u16 = RGPOT_ABI_VERSION_MINOR - 1;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -170,10 +171,12 @@ mod tests {
     #[test]
     fn the_minor_counts_the_engine_and_rpc_hvp_exports() {
         assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
-        assert_eq!(RGPOT_ABI_VERSION_MINOR, 5);
-        assert_eq!(rgpot_abi_stamp().abi_minor, 5);
+        assert_eq!(rgpot_abi_stamp().abi_minor, RGPOT_ABI_VERSION_MINOR);
         assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 2, 1)) }, 1);
-        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 6, 1)) }, 0);
+        assert_eq!(
+            unsafe { rgpot_abi_compatible(&stamp(1, RGPOT_ABI_VERSION_MINOR + 1, 1)) },
+            0
+        );
     }
 
     fn stamp(major: u16, minor: u16, layout: u16) -> rgpot_abi_stamp_t {
@@ -290,9 +293,10 @@ mod tests {
         ] {
             assert!(flat.contains(f), "rgpot.h lacks {f}");
         }
+        let engine_minor = format!("#define ENGINE_ABI_MINOR {}", crate::engine::ENGINE_ABI_MINOR);
         for define in [
             "#define ENGINE_ABI_VERSION 1",
-            "#define ENGINE_ABI_MINOR 3",
+            engine_minor.as_str(),
             "#define ENGINE_ABI_LAYOUT_REVISION 1",
             "#define ENGINE_ERR_UNSUPPORTED 3",
         ] {
@@ -301,7 +305,7 @@ mod tests {
         #[cfg(feature = "engine")]
         {
             assert_eq!(crate::engine::ENGINE_ABI_VERSION, 1);
-            assert_eq!(crate::engine::ENGINE_ABI_MINOR, 3);
+            assert_eq!(crate::engine::ENGINE_ABI_MINOR, ENGINE_ABI_PREVIOUS_MINOR + 1);
             assert_eq!(crate::engine::ENGINE_ABI_LAYOUT_REVISION, 1);
             assert_eq!(crate::engine::ENGINE_ERR_UNSUPPORTED, 3);
         }
