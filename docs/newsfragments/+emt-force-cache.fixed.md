@@ -1,0 +1,1 @@
+`EMTPot` no longer recomputes forces for a second `EMT::GetCartesianForces` call on unchanged atoms above `rgpot::kTeamMinAtoms`. The two phase OpenMP force path now records the atoms change counter the way the serial paths do, and the forces are bit-identical to before at every thread count.
