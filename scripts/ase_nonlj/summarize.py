@@ -15,7 +15,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SEEDS = tuple(range(2000, 2012))
-SYSTEMS = ("m38r6", "m38r14", "m55r6", "m55r14")
+SYSTEMS = (
+    "m38r3",
+    "m38r6",
+    "m38r10",
+    "m38r14",
+    "m55r3",
+    "m55r6",
+    "m55r10",
+    "m55r14",
+    "m75r6",
+    "m75r14",
+    "m80r6",
+    "m80r14",
+)
 ARMS = ("for_cluster", "recommended", "ase_bh", "ase_mh")
 ASE_ARMS = ("ase_bh", "ase_mh")
 LABEL = {
@@ -25,10 +38,18 @@ LABEL = {
     "ase_mh": "minima hopping",
 }
 SPEC = {
+    "m38r3": (38, 3.0, "400000", -249.159174, "38A"),
     "m38r6": (38, 6.0, "400000", -157.477108, "38E"),
+    "m38r10": (38, 10.0, "400000", -145.849817, "38D"),
     "m38r14": (38, 14.0, "400000", -144.321054, "38D"),
+    "m55r3": (55, 3.0, "1000000", -417.918562, "55A"),
     "m55r6": (55, 6.0, "1000000", -250.286609, "55B"),
+    "m55r10": (55, 10.0, "1000000", -225.814286, "55B"),
     "m55r14": (55, 14.0, "1000000", -220.646208, "55C"),
+    "m75r6": (75, 6.0, "4000000", -351.472365, "75C"),
+    "m75r14": (75, 14.0, "4000000", -318.407330, "75C"),
+    "m80r6": (80, 6.0, "4000000", -378.333471, "80B"),
+    "m80r14": (80, 14.0, "4000000", -340.811371, "80G"),
 }
 ROW_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
@@ -42,6 +63,7 @@ TEX_LABELS = {
     "m55r14": "M\\(_{55}\\), \\(\\rho=14\\)",
 }
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
+LAND1_SNIPPET = ROOT / "bench" / "ase-nonlj" / "README-land1-snippet.md"
 TEX_MARKS = ("% ase-nonlj table: start", "% ase-nonlj table: end")
 ASE_VERSION = "3.29.0"
 REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
@@ -157,8 +179,7 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
         if tuple(reader.fieldnames or ()) != ROW_FIELDS:
             raise SystemExit(f"{path}: unexpected columns {reader.fieldnames}")
         rows = list(reader)
-    grouped = {system: {arm: [] for arm in ARMS} for system in SYSTEMS}
-    seen = set()
+    slots: dict[tuple[str, str, str], dict[str, str]] = {}
     for row in rows:
         system = row["system"]
         arm = row["arm"]
@@ -166,10 +187,7 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
             raise SystemExit(f"unexpected row {row}")
         if row["budget"] != SPEC[system][2] or row["host"] != "bench":
             raise SystemExit(f"unexpected budget or host {row}")
-        key = (row["code_revision"], system, arm, row["seed"])
-        if key in seen:
-            raise SystemExit(f"duplicate row {key}")
-        seen.add(key)
+        key = (system, arm, row["seed"])
         budget = int(row["budget"])
         charged = int(row["charged"])
         if not 0 < charged <= budget:
@@ -193,8 +211,10 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
                 raise SystemExit(f"invalid wall stop {row}")
         else:
             raise SystemExit(f"invalid miss stop {row}")
-        if row["code_revision"] == REVISION:
-            grouped[system][arm].append(row)
+        slots[key] = row
+    grouped = {system: {arm: [] for arm in ARMS} for system in SYSTEMS}
+    for system, arm, _seed in sorted(slots, key=lambda item: (SYSTEMS.index(item[0]), ARMS.index(item[1]), int(item[2]))):
+        grouped[system][arm].append(slots[(system, arm, _seed)])
     for system in SYSTEMS:
         for arm in ARMS:
             seeds = tuple(sorted(int(row["seed"]) for row in grouped[system][arm]))
@@ -209,12 +229,12 @@ def load_identity() -> list[dict[str, str]]:
     with path.open(newline="") as handle:
         rows = list(csv.DictReader(handle))
     by_sys = {row["system"]: row for row in rows}
-    if tuple(by_sys) != SYSTEMS:
+    if set(by_sys) != set(SYSTEMS):
         raise SystemExit(f"identity systems {tuple(by_sys)}")
     for row in rows:
         if float(row["abs_energy_diff"]) > 1.0e-8 or float(row["max_force_diff"]) > 1.0e-8:
             raise SystemExit(f"identity check exceeded 1e-8: {row}")
-    return rows
+    return [by_sys[system] for system in SYSTEMS]
 
 
 def show_p(p: float) -> str:
@@ -239,10 +259,11 @@ def show_wall(value: float) -> str:
 def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
     """Table tab:ase-morse: recommended against both ASE arms, Fisher on hits only."""
     body = []
-    revisions = {row["code_revision"] for s in SYSTEMS for row in grouped[s]["recommended"]}
+    paper = tuple(TEX_LABELS)
+    revisions = {row["code_revision"] for s in paper for row in grouped[s]["recommended"]}
     if len(revisions) != 1:
         raise SystemExit(f"recommended rows carry more than one revision: {sorted(revisions)}")
-    for system in SYSTEMS:
+    for system in paper:
         _, _, budget, _, _ = SPEC[system]
         arms = grouped[system]
         if any(row["stop"] == "wall" for row in arms["recommended"]):
@@ -315,13 +336,73 @@ def group_revision(group: list[dict[str, str]]) -> str:
     return found.pop()
 
 
+def land1_snippet() -> tuple[list[str], list[str], list[str]]:
+    lines = LAND1_SNIPPET.read_text().splitlines()
+    sum_start = lines.index("## Summary")
+    fisher_start = lines.index("## Fisher and Mann-Whitney against ASE arms")
+    return lines[:sum_start], lines[sum_start:fisher_start], lines[fisher_start:]
+
+
+def merged_readme(
+    grouped: dict[str, dict[str, list[dict[str, str]]]],
+    identity: list[dict[str, str]],
+    panel_summary: list[str],
+    panel_vs: list[str],
+) -> list[str]:
+    land1_intro, land1_summary, land1_fisher = land1_snippet()
+    readme = [
+        "Copyright (c) anneal developers",
+        "",
+        "# Non-LJ ASE head-to-head (Cambridge Morse clusters)",
+        "",
+        *land1_intro,
+        "",
+        "Twelve Cambridge Morse systems: M38 and M55 at rho = 3, 6, 10 and 14, plus M75 and M80 at rho = 6 and 14.",
+        "Anneal `for_cluster` uses `Config::for_cluster_with_scales` at `PairKind::length_scale()` (earlier M38/M55 rho 6 and 14 rows retain their committed runs).",
+        "Hits reach `reference + 0.001`. Misses are censored at the paper budget (400,000 at 38 atoms, 1,000,000 at 55, 4,000,000 at 75 and 80).",
+        "Additional code_revision values 2d0af145a04c19eeed01128ece49576db419e4d8 and 90b88235fe54abace3bde32789582eb6573ed40a cover the widened panel.",
+        "",
+        "## Cross-code potential agreement (seed 2000 start)",
+        "",
+        "| system | N | rho | E anneal | E ASE | |dE| | max |dF| |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in identity:
+        n, rho, _, _, _ = SPEC[row["system"]]
+        readme.append(
+            f"| {row['system']} | {n} | {rho:g} | {float(row['energy_anneal']):.10f} | "
+            f"{float(row['energy_ase']):.10f} | {float(row['abs_energy_diff']):.3e} | "
+            f"{float(row['max_force_diff']):.3e} |"
+        )
+    readme.extend(land1_summary)
+    readme.extend(["", "## Widened twelve-system summary", ""])
+    readme.extend(panel_summary)
+    readme.extend(land1_fisher)
+    readme.extend(["", "## Widened twelve-system Fisher and Mann-Whitney against ASE arms", ""])
+    readme.extend(panel_vs)
+    readme.extend(
+        [
+            "",
+            "Medians are Hyndman-Fan type 7. Wall ratios are ratios of arm medians.",
+            "The Rust and NumPy random generators do not make a shared starting",
+            "geometry from the same numeric seed, so seed labels are not treated as pairs.",
+            "Fisher is two-sided exact. Mann-Whitney is two-sided asymptotic with",
+            "the tie correction and the continuity correction. It is not estimated",
+            "when either arm has wall-censored misses; assigning those misses the",
+            "larger paper budget would manufacture observations that were never run.",
+            "Inside is time in the potential. Outside is the rest of the wall.",
+            "",
+        ]
+    )
+    return readme
+
+
 def main() -> None:
     flags = sys.argv[1:]
     if any(flag not in ("--check", "--tex") for flag in flags) or len(set(flags)) != len(flags):
         raise SystemExit("usage: summarize.py [--check] [--tex]")
     grouped = load_rows()
     identity = load_identity()
-    revisions = sorted({row["code_revision"] for s in SYSTEMS for a in ARMS for row in grouped[s][a]})
     summary_header = (
         "system,arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,"
         "fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,"
@@ -338,50 +419,12 @@ def main() -> None:
             for line in existing[1:]
             if dict(zip(summary_header.split(","), line.split(",")))["code_revision"] != REVISION
         )
-    readme = [
-        "Copyright (c) anneal developers",
-        "",
-        "# Non-LJ ASE head-to-head (Cambridge Morse clusters)",
-        "",
-        "Four Cambridge Morse systems across two sizes and two ranges: M38 and M55 at rho = 6 and rho = 14.",
-        "Seeds 2000-2011, host bench, serial one core (`taskset -c 0`).",
-        f"code_revision {', '.join(revisions)}.",
-        "Potential: untruncated Morse (`epsilon = 1`, `r0 = 1`, `rho0 = rho`).",
-        "Anneal evaluates `PairPotential::morse` (`rgpot_pair::cambridge_morse`).",
-        "ASE evaluates `ase.calculators.morse.MorsePotential` with `rcut1 = 1e6`, `rcut2 = 2e6`.",
-        "Anneal `for_cluster` uses `Config::with_scales` at `PairKind::length_scale()` plus `for_cluster` Bayes screening.",
-        "Anneal `recommended` uses `Config::recommended_with_scales` at `PairKind::length_scale()`.",
-        "ASE basin hopping and minima hopping use the ASE 3.29 constructor defaults (`fmax` 0.1 and 0.05).",
-        "Hits reach `reference + 0.001`. Misses are censored at the paper budget (400,000 at 38 atoms, 1,000,000 at 55).",
-        "The wall cap for `recommended`, `ase_bh` and `ase_mh` is three times the slowest `for_cluster` wall per system.",
-        "",
-        "## Cross-code potential agreement (seed 2000 start)",
-        "",
-        "| system | N | rho | E anneal | E ASE | |dE| | max |dF| |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+    panel_summary = [
+        "| system | arm | hits | median best | gap | median wall s | median inside s | median outside s | "
+        "stops (hit/budget/wall) | cap s |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    for row in identity:
-        n, rho, _, _, _ = SPEC[row["system"]]
-        readme.append(
-            f"| {row['system']} | {n} | {rho:g} | {float(row['energy_anneal']):.10f} | "
-            f"{float(row['energy_ase']):.10f} | {float(row['abs_energy_diff']):.3e} | "
-            f"{float(row['max_force_diff']):.3e} |"
-        )
-
-    readme.extend(
-        [
-            "",
-            "## Summary",
-            "",
-            "| system | arm | hits | median best | gap | median wall s | median inside s | median outside s | "
-            "stops (hit/budget/wall) | cap s |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-        ]
-    )
-    vs_lines = [
-        "",
-        "## Fisher and Mann-Whitney against ASE arms",
-        "",
+    panel_vs = [
         "| system | comparison | hits | Fisher p | U | Mann-Whitney p | wall ratio | inverse ratio |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
@@ -408,44 +451,32 @@ def main() -> None:
             w_bh, inv_bh = wall_ratio(group, grouped[system]["ase_bh"])
             w_mh, inv_mh = wall_ratio(group, grouped[system]["ase_mh"])
             arm_cap = "" if arm == "for_cluster" else cap
-            summary_lines.append(
-                f"{system},{arm},{hits},12,{best:.8f},{best - reference:.8f},"
-                f"{wall:.6f},{inside:.6f},{outside:.6f},"
-                f"{f_bh},{u_bh},{mw_bh},{f_mh},{u_mh},{mw_mh},"
-                f"{w_bh:.6f},{w_mh:.6f},{wall_stops},{arm_cap},{group_revision(group)},bench"
-            )
-            readme.append(
+            revision = group_revision(group)
+            panel_summary.append(
                 f"| {system} ({label}, {reference:.6f}) | {LABEL[arm]} | {hits}/12 | {best:.8f} | "
                 f"{best - reference:.8f} | {wall:.6f} | {inside:.6f} | {outside:.6f} | "
                 f"{hit_stops}/{budget_stops}/{wall_stops} | {arm_cap} |"
             )
+            if revision == REVISION:
+                summary_lines.append(
+                    f"{system},{arm},{hits},12,{best:.8f},{best - reference:.8f},"
+                    f"{wall:.6f},{inside:.6f},{outside:.6f},"
+                    f"{f_bh},{u_bh},{mw_bh},{f_mh},{u_mh},{mw_mh},"
+                    f"{w_bh:.6f},{w_mh:.6f},{wall_stops},{arm_cap},{revision},bench"
+                )
             if arm in ("for_cluster", "recommended"):
                 for other_arm, (fp, u_val, mwp, wr, ir) in (
                     ("ase_bh", (f_bh, u_bh, mw_bh, w_bh, inv_bh)),
                     ("ase_mh", (f_mh, u_mh, mw_mh, w_mh, inv_mh)),
                 ):
                     other_hits = sum(row["hit"] == "1" for row in grouped[system][other_arm])
-                    vs_lines.append(
+                    panel_vs.append(
                         f"| {system} | {LABEL[arm]} vs {LABEL[other_arm]} | {hits}/12 vs {other_hits}/12 | "
                         f"{fp} | {u_val or 'not estimated'} | {mwp or 'not estimated'} | "
                         f"{wr:.6f} | {ir:.6f} |"
                     )
 
-    readme.extend(vs_lines)
-    readme.extend(
-        [
-            "",
-            "Medians are Hyndman-Fan type 7. Wall ratios are ratios of arm medians.",
-            "The Rust and NumPy random generators do not make a shared starting",
-            "geometry from the same numeric seed, so seed labels are not treated as pairs.",
-            "Fisher is two-sided exact. Mann-Whitney is two-sided asymptotic with",
-            "the tie correction and the continuity correction. It is not estimated",
-            "when either arm has wall-censored misses; assigning those misses the",
-            "larger paper budget would manufacture observations that were never run.",
-            "Inside is time in the potential. Outside is the rest of the wall.",
-            "",
-        ]
-    )
+    readme = merged_readme(grouped, identity, panel_summary, panel_vs)
     out = ROOT / "bench" / "ase-nonlj"
     outputs = {
         summary_path: "\n".join(summary_lines) + "\n",
