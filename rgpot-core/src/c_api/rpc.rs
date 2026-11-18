@@ -25,6 +25,11 @@ pub type rgpot_rpc_client_t = RpcClient;
 ///
 /// Returns a heap-allocated handle, or `NULL` on failure.
 /// The caller must eventually call `rgpot_rpc_client_free`.
+///
+/// # Safety
+///
+/// `host` must be null or a valid NUL-terminated string. A non-null return
+/// is owned by the caller and freed with `rgpot_rpc_client_free`.
 #[cfg(feature = "rpc")]
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_rpc_client_new(
@@ -56,6 +61,12 @@ pub unsafe extern "C" fn rgpot_rpc_client_new(
 /// Perform a remote force/energy calculation.
 ///
 /// Returns `RGPOT_SUCCESS` on success, or an error status code.
+///
+/// # Safety
+///
+/// `client` must be null or a pointer from `rgpot_rpc_client_new`. `input`
+/// and `output` must be null or point at live structs whose tensors, when
+/// non-null, stay valid for the call.
 #[cfg(feature = "rpc")]
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_rpc_calculate(
@@ -94,6 +105,11 @@ pub unsafe extern "C" fn rgpot_rpc_calculate(
 /// Free an RPC client handle.
 ///
 /// If `client` is `NULL`, this is a no-op.
+///
+/// # Safety
+///
+/// `client` must be null or a pointer from `rgpot_rpc_client_new` that has
+/// not already been freed.
 #[cfg(feature = "rpc")]
 #[no_mangle]
 pub unsafe extern "C" fn rgpot_rpc_client_free(client: *mut rgpot_rpc_client_t) {

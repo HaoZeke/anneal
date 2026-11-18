@@ -51,6 +51,7 @@ running the tasks that call them.
 | =rust-test= | default | Run Rust unit tests with nextest |
 | =rust-test-all= | default | Run Rust tests with all features enabled (also rewrites the C header) |
 | =gen-header= | default | Regenerate =rgpot-core/include/rgpot.h= from Rust source via cbindgen |
+| =check-header-drift= | default | Fail when =rgpot-core/include/rgpot.h= differs from the cbindgen output |
 | =gen-gha= | =cigen= | Export the Nickel workflows (=release.yml=, =release-prepare.yml=, =ci_docs.yml=, =cosmo-potctl.yml=, =ci_doc_commenter.yml=); =ci-orchestrator.yml= is hand-maintained |
 | =gha-drift= | =cigen= | Fail when =.github/workflows= differs from a fresh =gen-gha= |
 | =towncrier-draft= | default | Preview release notes (dry run) |
@@ -101,6 +102,12 @@ git diff rgpot-core/include/rgpot.h  # review changes
 =gen-header= is an optional Cargo feature of =rgpot-core= and is not in its
 default features, so neither a normal build nor =cargo publish= rewrites the
 header.
+
+cbindgen copies doc comments into the header, so editing the doc comment of an
+=extern "C"= function changes it too.
+The =rust_tests= CI job runs =tools/check_header_drift.sh=, which rebuilds the
+header and fails when git sees a difference.
+Commit the header with the change that caused it.
 
 ** Building Documentation
 

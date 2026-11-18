@@ -24,22 +24,32 @@ python3 CppCore/tests/check_test_registry.py lint
 python3 CppCore/tests/check_test_registry.py selftest
 
 # Highway is fetched at configure time and gates no test.
-meson_common=(-Dwith_tests=true -Dwith_examples=false -Dwith_xtensor=false
-  -Dwith_eigen=false -Dwith_highway=disabled)
+meson_common=(-Dwith_tests=true -Dwith_highway=disabled)
 cmake_common=(-DCMAKE_BUILD_TYPE=Release -DRGPOT_BUILD_TESTS=ON
-  -DRGPOT_BUILD_EXAMPLES=OFF -DRGPOT_WITH_XTENSOR=OFF -DRGPOT_WITH_EIGEN=OFF
   -DRGPOT_WITH_HIGHWAY=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
 
 # meson looks for MPI only when asked to; CMake always does.
-plain_meson=(-Dwith_rpc=false -Dwith_cache=false -Dwith_mpi=auto)
-plain_cmake=(-DRGPOT_WITH_RPC=OFF -DRGPOT_WITH_CACHE=OFF)
-rpc_cache_meson=(-Dwith_rpc=true -Dwith_cache=true -Dwith_mpi=auto)
-rpc_cache_cmake=(-DRGPOT_WITH_RPC=ON -DRGPOT_WITH_CACHE=ON)
+plain_meson=(-Dwith_examples=false -Dwith_eigen=false -Dwith_xtensor=false
+  -Dwith_rpc=false -Dwith_cache=false -Dwith_mpi=auto)
+plain_cmake=(-DRGPOT_BUILD_EXAMPLES=OFF -DRGPOT_WITH_EIGEN=OFF
+  -DRGPOT_WITH_XTENSOR=OFF -DRGPOT_WITH_RPC=OFF -DRGPOT_WITH_CACHE=OFF)
+rpc_cache_meson=(-Dwith_examples=false -Dwith_eigen=false -Dwith_xtensor=false
+  -Dwith_rpc=true -Dwith_cache=true -Dwith_mpi=auto)
+rpc_cache_cmake=(-DRGPOT_BUILD_EXAMPLES=OFF -DRGPOT_WITH_EIGEN=OFF
+  -DRGPOT_WITH_XTENSOR=OFF -DRGPOT_WITH_RPC=ON -DRGPOT_WITH_CACHE=ON)
 # CMake's client-only bridge builds neither the Fortran potentials nor
 # librgpot_mpi.
-client_meson=(-Dwith_rpc_client_only=true -Dwith_fortran_pots=disabled
-  -Dwith_mpi=disabled)
-client_cmake=(-DRGPOT_RPC_CLIENT_ONLY=ON)
+client_meson=(-Dwith_examples=false -Dwith_eigen=false -Dwith_xtensor=false
+  -Dwith_rpc_client_only=true -Dwith_fortran_pots=disabled -Dwith_mpi=disabled)
+client_cmake=(-DRGPOT_BUILD_EXAMPLES=OFF -DRGPOT_WITH_EIGEN=OFF
+  -DRGPOT_WITH_XTENSOR=OFF -DRGPOT_RPC_CLIENT_ONLY=ON)
+# The runnable examples are Meson-only, but still belong in the registry and
+# must carry their options from it. CMake advertises no corresponding tests.
+# MPI is auto, as above: CMake finds it whenever it is installed.
+examples_meson=(-Dwith_examples=true -Dwith_eigen=true -Dwith_xtensor=true
+  -Dwith_expr=true -Dwith_rpc=false -Dwith_cache=false -Dwith_mpi=auto)
+examples_cmake=(-DRGPOT_BUILD_EXAMPLES=ON -DRGPOT_WITH_EIGEN=ON
+  -DRGPOT_WITH_XTENSOR=ON -DRGPOT_WITH_RPC=OFF -DRGPOT_WITH_CACHE=OFF)
 
 quiet() {
   local log=$1
@@ -81,6 +91,6 @@ compare() {
   echo "$config: $(cat "$dir/fp.txt")"
 }
 
-for config in plain rpc_cache client; do
+for config in plain rpc_cache client examples; do
   compare "$config"
 done

@@ -597,6 +597,9 @@ jobs:
       - name: Run Rust doc-tests
         shell: pixi run bash -e {0}
         run: cargo test --doc -p rgpot-core
+      - name: Check rgpot.h is what cbindgen generates
+        shell: pixi run bash -e {0}
+        run: bash tools/check_header_drift.sh
 
   # --- Stage 2c: client bridge ---
   client_bridge_stress:

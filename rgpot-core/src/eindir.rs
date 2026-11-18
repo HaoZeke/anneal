@@ -272,7 +272,7 @@ pub unsafe extern "C" fn rgpot_potential_set_peer_capabilities(
     caps: *const u8,
     size: usize,
 ) -> rgpot_status_t {
-    if pot.is_null() || caps.is_null() || size == 0 || size % 8 != 0 {
+    if pot.is_null() || caps.is_null() || size == 0 || !size.is_multiple_of(8) {
         set_last_error("rgpot_potential_set_peer_capabilities: invalid argument");
         return rgpot_status_t::RGPOT_INVALID_PARAMETER;
     }
@@ -1572,7 +1572,8 @@ mod tests {
         assert_eq!(unsafe { rgpot_eindir_abi_compatible(&stamp) }, 1);
         assert_eq!(unsafe { rgpot_eindir_abi_compatible(std::ptr::null()) }, 0);
 
-        let edits: [(&str, fn(&mut eindir_abi_stamp_t)); 6] = [
+        type StampEdit = fn(&mut eindir_abi_stamp_t);
+        let edits: [(&str, StampEdit); 6] = [
             ("major", |s| s.abi_major += 1),
             ("minor", |s| s.abi_minor += 1),
             ("layout", |s| s.objective_layout += 1),

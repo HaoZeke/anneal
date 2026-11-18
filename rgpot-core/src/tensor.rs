@@ -400,7 +400,7 @@ fn checked_data<T>(
     }
     let ptr = unsafe { base.add(t.byte_offset as usize) }.cast::<T>();
     let align = std::mem::align_of::<T>();
-    if (ptr as usize) % align != 0 {
+    if !(ptr as usize).is_multiple_of(align) {
         return Err(format!("{label}: data is not {align}-byte aligned"));
     }
     Ok(ptr)

@@ -9,5 +9,8 @@ resolver = "2"
 # from it (ci/version/files.txt) and CI fails when one drifts.
 version = "3.7.0"
 edition = "2021"
+# eindir-core 0.6 needs 1.88, and so does slice::as_chunks (profile.rs
+# tests). pixi.toml pins the same floor.
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/OmniPotentRPC/rgpot"

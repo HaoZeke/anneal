@@ -306,6 +306,8 @@ in
           cargo test --doc -p rgpot-core
         "%
         & { name = "Run Rust doc-tests" },
+        S.run_pixi "bash tools/check_header_drift.sh"
+        & { name = "Check rgpot.h is what cbindgen generates" },
       ],
     },
     client_bridge_stress = {

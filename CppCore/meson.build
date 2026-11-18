@@ -35,6 +35,7 @@ _args += _build_identity_args
 # the features only known later (see the end of meson.build).
 _rt_atoms = {
     'tests': get_option('with_tests'),
+    'examples': get_option('with_examples'),
     'core': not get_option('with_rpc_client_only'),
     'client': get_option('with_rpc_client_only'),
     'rpc': rpc_enabled,
@@ -42,6 +43,7 @@ _rt_atoms = {
     'cache': get_option('with_cache'),
     'ipi': has_ipi and not get_option('with_rpc_client_only'),
     'eam_table': has_eam_table,
+    'eigen': has_eigen,
     'xtensor': has_xtensor,
     'python': find_program('python3', required: false).found(),
     'water': has_water,
@@ -758,7 +760,7 @@ if get_option('with_examples') and not get_option('with_rpc_client_only')
     executable(
         'time_pair_scaling',
         sources: ['examples/time_pair_scaling.cc'],
-        dependencies: _deps + [vesin_dep] + fortran_rt_deps,
+        dependencies: _deps + [vesin_dep, fastnlist_dep] + fortran_rt_deps,
         link_with: _linkto,
         cpp_args: _args,
     )
@@ -814,7 +816,7 @@ if get_option('with_examples') and not get_option('with_rpc_client_only')
                 cpp_args: _args,
                 build_rpath: _metatomic_build_rpath,
             ),
-            workdir: meson.source_root() + example.get(3),
+            kwargs: _rt_kw[example.get(0)],
         )
     endforeach
 endif
