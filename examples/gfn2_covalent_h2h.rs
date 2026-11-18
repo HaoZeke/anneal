@@ -436,6 +436,39 @@ mod tests {
         Array1::from(vec![0.0, 0.0, 0.0, r, 0.0, 0.0])
     }
 
+    fn maximum_gradient_error(pot: &Mutex<RgpotObjective>, x: &Array1<f64>) -> f64 {
+        let (_, analytic) = evaluate(&pot.lock().expect("pot"), x.view());
+        let step = 1.0e-5;
+        x.iter()
+            .enumerate()
+            .map(|(coordinate, _)| {
+                let mut plus = x.clone();
+                let mut minus = x.clone();
+                plus[coordinate] += step;
+                minus[coordinate] -= step;
+                let plus_energy = evaluate(&pot.lock().expect("pot"), plus.view()).0;
+                let minus_energy = evaluate(&pot.lock().expect("pot"), minus.view()).0;
+                let finite_difference = (plus_energy - minus_energy) / (2.0 * step);
+                (analytic[coordinate] - finite_difference).abs()
+            })
+            .fold(0.0_f64, f64::max)
+    }
+
+    #[test]
+    fn the_xtb_objective_gradient_matches_three_finite_differences() {
+        let pot = handle(6, 2);
+        let maximum_error = [1.25, 1.40, 1.80]
+            .into_iter()
+            .map(|distance| {
+                maximum_gradient_error(&pot, &Array1::from(vec![0.0, 0.0, 0.0, distance, 0.0, 0.0]))
+            })
+            .fold(0.0_f64, f64::max);
+        assert!(
+            maximum_error < 2.0e-5,
+            "GFN2 objective gradient differs from the central difference by {maximum_error} eV/A"
+        );
+    }
+
     #[test]
     fn the_wrappers_zero_buffer_after_a_failed_call_is_refused_not_answered() {
         let zeros = Array1::<f64>::zeros(6);
