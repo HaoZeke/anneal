@@ -84,6 +84,11 @@ struct MorseWorkspace {
   std::vector<double> pair_hv;
   std::vector<double> row_e;
   std::vector<double> row_s;
+
+  const nlist::Neighbours *scratch_owner = nullptr;
+  std::uint64_t scratch_build_id = 0;
+  std::size_t scratch_slots = 0;
+  std::uint64_t scratch_avail = 0;
 };
 
 struct WorkspaceLease {
@@ -194,7 +199,18 @@ void partitionAtomsByWork(std::size_t n, int slices, std::int64_t total_work, Wo
   splits[static_cast<std::size_t>(slices)] = n;
 }
 
-bool pairScratchFits(std::size_t num_pairs, const PerAtomOut *atoms) {
+std::uint64_t cachedAvailableBytes(MorseWorkspace &ws, const nlist::Neighbours &cells) {
+  if (ws.scratch_owner != &cells || ws.scratch_build_id != cells.builds() ||
+      ws.scratch_slots != cells.slots()) {
+    ws.scratch_owner = &cells;
+    ws.scratch_build_id = cells.builds();
+    ws.scratch_slots = cells.slots();
+    ws.scratch_avail = nlist::availableBytes();
+  }
+  return ws.scratch_avail;
+}
+
+bool pairScratchFits(std::size_t num_pairs, const PerAtomOut *atoms, std::uint64_t avail) {
   std::size_t bytes_per_pair = sizeof(PairForce) + sizeof(std::int32_t) + 1;
   if (atoms != nullptr) {
     if (atoms->energy != nullptr) {
@@ -204,7 +220,6 @@ bool pairScratchFits(std::size_t num_pairs, const PerAtomOut *atoms) {
       bytes_per_pair += 6 * sizeof(double);
     }
   }
-  const std::uint64_t avail = nlist::availableBytes();
   if (avail == 0) {
     return true;
   }
@@ -362,8 +377,9 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
 
   if (!neighbours_.streaming()) {
     const std::size_t est_half_pairs = neighbours_.slots() / 2;
+    const std::uint64_t scratch_avail = cachedAvailableBytes(ws, neighbours_);
     if (slices > 1 && est_half_pairs >= kMinParallelHalfPairs &&
-        pairScratchFits(est_half_pairs, atoms)) {
+        pairScratchFits(est_half_pairs, atoms, scratch_avail)) {
       const bool index_valid = neighbours_.reused() && ws.owner == &neighbours_ &&
                                ws.build_id == neighbours_.builds() && ws.index_atoms == n_atoms &&
                                ws.slots == neighbours_.slots();
