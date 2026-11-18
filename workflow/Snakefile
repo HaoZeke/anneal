@@ -1116,7 +1116,7 @@ rule landfold_maps_current:
         LANDFOLD_SHARDS,
     output:
         touch("/work/anneal-landfold-current/complete.stamp"),
-    threads: 1
+    threads: 8
     resources:
         mem_mb=16000,
     shell:
@@ -1125,6 +1125,7 @@ rule landfold_maps_current:
         python3 paper/jctc/scripts/run_landfold_campaign.py \\
           --work /work/anneal-landfold-current \\
           --publish paper/jctc/data/landfold_maps_v7 \\
+          --threads {threads} \\
           --finalize-only
         """
 

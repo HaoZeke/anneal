@@ -9,6 +9,7 @@ published into the paper data tree.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
 import hashlib
 import json
@@ -60,7 +61,8 @@ def run(command: list[str]) -> None:
 
 
 def source_rows(path: Path) -> int:
-    return sum(1 for line in path.read_text().splitlines() if line.strip())
+    with path.open() as handle:
+        return sum(1 for line in handle if line.strip())
 
 
 def digest(path: Path) -> str:
@@ -148,26 +150,34 @@ def run_shard(campaign_id: str, seed: int, output: Path, receipt: Path) -> None:
     receipt.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n")
 
 
-def fold(binary: Path, books: list[Path], family: str, folder: Path) -> int:
+def fold(
+    binary: Path,
+    books: list[Path],
+    family: str,
+    folder: Path,
+    threads: int | None = None,
+) -> int:
     folder.mkdir(parents=True, exist_ok=True)
     folded = folder / "fold.csv"
-    command = [
-        str(binary), "landfold", "--seed", "0", "--threads",
-        str(max(1, os.cpu_count() or 1)), "--out", str(folded),
-    ]
-    descriptor = None
-    if family == "tip4p":
-        descriptor = folder / "rigid-state.csv"
-        with descriptor.open("w", newline="") as handle:
-            writer = csv.writer(handle)
-            for book in books:
-                for line in book.read_text().splitlines():
-                    if line.strip():
-                        writer.writerow(line.split()[1:])
-        command.extend(["--descriptors", str(descriptor)])
-    else:
-        command.extend(str(book) for book in books)
-    run(command)
+    expected = sum(source_rows(book) for book in books)
+    if not folded.is_file() or source_rows(folded) != expected + 1:
+        command = [
+            str(binary), "landfold", "--seed", "0", "--threads",
+            str(max(1, threads or os.cpu_count() or 1)), "--out", str(folded),
+        ]
+        if family == "tip4p":
+            descriptor = folder / "rigid-state.csv"
+            with descriptor.open("w", newline="") as handle:
+                writer = csv.writer(handle)
+                for book in books:
+                    with book.open() as rows:
+                        for line in rows:
+                            if line.strip():
+                                writer.writerow(line.split()[1:])
+            command.extend(["--descriptors", str(descriptor)])
+        else:
+            command.extend(str(book) for book in books)
+        run(command)
     points = []
     with folded.open(newline="") as handle:
         for row in csv.DictReader(handle):
@@ -179,6 +189,22 @@ def fold(binary: Path, books: list[Path], family: str, folder: Path) -> int:
         for x, y in points:
             handle.write(f"{x:.12e} {y:.12e}\n")
     write_fes(points, folder / "fes.csv")
+    commit, tree = revision()
+    (folder / "receipt.json").write_text(
+        json.dumps(
+            {
+                "rows": len(points),
+                "landscape_sha256": digest(folder / "landscape.ld"),
+                "fes_sha256": digest(folder / "fes.csv"),
+                "code_revision": commit,
+                "code_tree": tree,
+                "host": os.environ.get("LANDFOLD_HOST", "cloud-run"),
+            },
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n"
+    )
     return len(points)
 
 
@@ -288,12 +314,13 @@ def publish_shard_status(work: Path, publish: Path) -> None:
     )
 
 
-def finalize(work: Path, publish: Path) -> None:
+def finalize(work: Path, publish: Path, threads: int | None = None) -> None:
     landfold = ROOT.parent / "tmp/anneal-target/release/anneal"
     if not landfold.is_file():
         raise SystemExit("the current-code landfold binary is not built")
     records = []
     panels = {}
+    panel_jobs = []
     for campaign_id, campaign in CAMPAIGN_IDS.items():
         source = work / "shards" / campaign_id
         books = [source / f"seed-{seed:04d}.min" for seed in range(campaign.first, campaign.last + 1)]
@@ -311,18 +338,38 @@ def finalize(work: Path, publish: Path) -> None:
                 raise SystemExit(f"{receipt}: incomplete campaign receipt")
             row["dimension"] = dimension
             records.append(row)
-        products = work / campaign.name / "products"
         for panel in campaign.panels:
             chosen = books[:1] if panel == "representative" else books
-            rows = fold(landfold, chosen, campaign.family, products / panel)
-            if rows != sum(source_rows(path) for path in chosen):
-                raise SystemExit(f"{campaign.name}/{panel}: fold dropped source rows")
-            folder = products / panel
-            panels[f"{campaign.name}/{panel}"] = {
-                "rows": rows,
-                "landscape_sha256": digest(folder / "landscape.ld"),
-                "fes_sha256": digest(folder / "fes.csv"),
-            }
+            panel_jobs.append(
+                (
+                    sum(source_rows(path) for path in chosen),
+                    campaign,
+                    panel,
+                    chosen,
+                    work / campaign.name / "products" / panel,
+                )
+            )
+    cores = max(1, threads or os.cpu_count() or 1)
+    workers = min(2, len(panel_jobs))
+    per_job_threads = max(1, cores // workers)
+
+    def run_panel(job: tuple[int, Campaign, str, list[Path], Path]):
+        expected, campaign, panel, chosen, folder = job
+        rows = fold(
+            landfold,
+            chosen,
+            campaign.family,
+            folder,
+            threads=per_job_threads,
+        )
+        if rows != expected:
+            raise SystemExit(f"{campaign.name}/{panel}: fold dropped source rows")
+        return campaign, panel, folder, json.loads((folder / "receipt.json").read_text())
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        completed = pool.map(run_panel, sorted(panel_jobs, key=lambda job: -job[0]))
+        for campaign, panel, folder, receipt in completed:
+            panels[f"{campaign.name}/{panel}"] = receipt
     publish.mkdir(parents=True, exist_ok=True)
     for campaign in CAMPAIGNS:
         for panel in campaign.panels:
@@ -365,6 +412,7 @@ def main() -> None:
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--finalize-only", action="store_true")
     parser.add_argument("--status-only", action="store_true")
+    parser.add_argument("--threads", type=int, help="total worker threads for panel folding")
     parser.add_argument("--limit-seeds", type=int, help="run at most this many seeds per campaign; never publish")
     parser.add_argument("--budget-cap", type=int, help="cap each budget for a smoke run; never publish")
     args = parser.parse_args()
@@ -375,7 +423,7 @@ def main() -> None:
         run_shard(args.campaign_id, args.seed, args.output, args.receipt)
         return
     if args.finalize_only:
-        finalize(args.work, args.publish)
+        finalize(args.work, args.publish, args.threads)
         return
     if args.status_only:
         publish_shard_status(args.work, args.publish)
