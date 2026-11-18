@@ -3205,21 +3205,15 @@ where
 /// Drop below another energy that counts as strictly lower, so rounding noise is no improvement.
 const STRICT_IMPROVEMENT: f64 = 1e-10;
 
-/// Body count at and below which the rigid factor may climb to 24.
+/// Size-independent conversion from the preset energy scale to the rigid chart.
 ///
-/// An all-body kick on a ten-water chart still falls into the target
-/// basin at that factor. A larger chart caps the factor at
-/// [`RIGID_FACTOR_CAP_LARGE`] and can still cool when the acceptance
-/// rate is high.
-const RIGID_HOT_BODIES: usize = 10;
-/// Highest rigid factor on a chart with more than [`RIGID_HOT_BODIES`] bodies.
-const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
+/// Acceptance feedback acts on the orientation amplitude below, leaving one
+/// temperature convention for every rigid potential.
+const RIGID_TEMPERATURE_FACTOR: f64 = 4.0;
 /// Metropolis acceptance the orientation amplitude aims at.
 ///
-/// The ratio a Cartesian basin-hopping step is adjusted toward, and the
-/// default of GMIN's acceptance-ratio update. A chart with more than ten
-/// bodies keeps its acceptance temperature at the factor cap and moves this
-/// amplitude instead, so the two controls do not chase the same ratio.
+/// The ratio a Cartesian basin-hopping step is adjusted toward and the default
+/// of GMIN's acceptance-ratio update.
 const RIGID_ACCEPT_TARGET: f64 = 0.5;
 /// Quenched trials between orientation-amplitude updates.
 const RIGID_ACCEPT_BLOCK: usize = 50;
@@ -3401,9 +3395,13 @@ fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
     next.clamp(1.0e-3, 1.0)
 }
 
+fn rigid_same_basin_return(returning: bool, energy_change: f64) -> bool {
+    returning && energy_change.abs() <= 5.0e-2
+}
+
 #[cfg(test)]
 mod rigid_step_tests {
-    use super::rigid_step_scale;
+    use super::{rigid_same_basin_return, rigid_step_scale};
 
     #[test]
     fn a_low_acceptance_shrinks_the_orientation_step_and_a_high_one_grows_it() {
@@ -3426,6 +3424,13 @@ mod rigid_step_tests {
             (rigid_step_scale(0.9, 25, 50) - 0.9).abs() < 1e-12,
             "an acceptance of one half moved the step"
         );
+    }
+
+    #[test]
+    fn same_basin_returns_do_not_enter_rigid_feedback() {
+        assert!(rigid_same_basin_return(true, 0.01));
+        assert!(!rigid_same_basin_return(false, 0.01));
+        assert!(!rigid_same_basin_return(true, 0.2));
     }
 }
 
@@ -3595,14 +3600,6 @@ mod biased_metropolis_tests {
         assert!(stalled(&cfg, patience, 0));
         assert!(!stalled(&cfg, 2 * patience - 1, patience));
         assert!(stalled(&cfg, 2 * patience, patience));
-    }
-}
-
-fn rigid_factor_cap(n_bodies: usize) -> f64 {
-    if n_bodies > RIGID_HOT_BODIES {
-        RIGID_FACTOR_CAP_LARGE
-    } else {
-        24.0
     }
 }
 
@@ -4882,22 +4879,8 @@ where
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
     let mut arm_counts: Vec<ArmCount> = Vec::new();
-    // A rigid chart is not in the preset's reduced energy unit. Charts of
-    // ten bodies or fewer start at the top of the acceptance window and let
-    // the rate pull the factor down. A chart with more bodies stays at the
-    // lower cap: the orientation amplitude, not the temperature, is what
-    // tracks the acceptance ratio. Letting that factor climb back to 24
-    // leaves the hydrogen-bond funnel.
-    let mut rigid_factor: f64 = if cfg.move_library.is_rigid_body() {
-        rigid_factor_cap(cfg.n_points)
-    } else {
-        1.0
-    };
-    let mut rigid_window = 0usize;
-    let mut rigid_hits = 0usize;
-    // Large rigid charts hold the acceptance temperature at the factor cap.
-    // The orientation amplitude is what moves toward a one-half acceptance
-    // ratio. Charts of ten bodies and fewer leave both untouched.
+    // Every rigid chart uses one temperature conversion. Its measured
+    // acceptance adjusts the orientation amplitude, independent of body count.
     let mut orient_scale = 1.0_f64;
     let mut orient_window = 0usize;
     let mut orient_yes = 0usize;
@@ -6297,9 +6280,9 @@ where
         }
         if cfg.move_library.is_rigid_body() {
             // The preset temperature stays in its own energy unit. A rigid
-            // water chart is not that unit, so a local factor moves the
-            // acceptance rate toward one half without editing the preset.
-            temperature *= rigid_factor;
+            // chart is not that unit, so one conversion is applied to every
+            // potential while acceptance adapts the proposal amplitude.
+            temperature *= RIGID_TEMPERATURE_FACTOR;
         }
         // The coldest rung's temperature from the state it holds, which the
         // energy bias is built and filled at. Read here, where that rung's own
@@ -7884,22 +7867,12 @@ where
         };
         let mut accept = accept;
         if cfg.move_library.is_rigid_body() && !unquenched {
-            // Metropolis at the preset temperature. The threshold rule
+            // Metropolis at the converted rigid-chart temperature. The threshold rule
             // collapses under a run of small accepts and then cannot
-            // cross the gap between rigid cages.
-            let rise = (e_new - e) / cfg.temperature.max(1e-12);
+            // cross the gap between rigid cages. `temperature` includes the
+            // size-independent rigid-chart conversion applied to proposals.
+            let rise = (e_new - e) / temperature.max(1e-12);
             accept = rise <= 0.0 || rng.random::<f64>() < (-rise).exp();
-        }
-        if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
-            orient_window += 1;
-            if accept {
-                orient_yes += 1;
-            }
-            if orient_window >= RIGID_ACCEPT_BLOCK {
-                orient_scale = rigid_step_scale(orient_scale, orient_yes, orient_window);
-                orient_window = 0;
-                orient_yes = 0;
-            }
         }
         // AS-KMC (Chatterjee–Voter 2010): after N_f sightings the
         // intra-packing hop is a frequent process. Raise its barrier
@@ -7920,34 +7893,26 @@ where
         // the temperature that produces it is the parameter every other
         // mechanism here sits downstream of; it has never been measured in this
         // driver.
-        if cfg.move_library.is_rigid_body() && returning && (e_new - e).abs() <= 5.0e-2 {
+        let rigid_return =
+            cfg.move_library.is_rigid_body() && rigid_same_basin_return(returning, e_new - e);
+        if rigid_return {
             // Same quenched energy and the same distance key. Adopting it
             // does not leave the basin, so it is not an acceptance the
             // temperature window should see.
             accept = false;
         }
-        if cfg.move_library.is_rigid_body()
-            && cfg.n_points <= RIGID_HOT_BODIES
-            && (!returning || (e_new - e).abs() > 5.0e-2)
-        {
-            // Same-basin accepts have no energy change, and counting them
-            // keeps a rigid chart cold. Only a move that lands on a
-            // different minimum says whether the temperature is high enough.
-            let changed = accept && (e_new - e).abs() > 5.0e-2;
-            rigid_window += 1;
-            if changed {
-                rigid_hits += 1;
+        if cfg.move_library.is_rigid_body() && !rigid_return {
+            // Adapt only from proposals that reached another basin. Counting
+            // a return before the veto makes an identity hop look successful
+            // and drives the orientation step in the wrong direction.
+            orient_window += 1;
+            if accept {
+                orient_yes += 1;
             }
-            if rigid_window >= 8 {
-                let rate = rigid_hits as f64 / rigid_window as f64;
-                let cap = rigid_factor_cap(cfg.n_points);
-                if rate < 0.25 {
-                    rigid_factor = (rigid_factor * 2.0).min(cap);
-                } else if rate > 0.6 {
-                    rigid_factor = (rigid_factor / 1.5).max(1.0);
-                }
-                rigid_window = 0;
-                rigid_hits = 0;
+            if orient_window >= RIGID_ACCEPT_BLOCK {
+                orient_scale = rigid_step_scale(orient_scale, orient_yes, orient_window);
+                orient_window = 0;
+                orient_yes = 0;
             }
         }
         // An uphill step the bare rule accepted is checked with the
@@ -10102,10 +10067,6 @@ mod tests {
         binary.tabu_on_stall = false;
         binary.symmetrise_on_stall = false;
         binary.prior_soap = false;
-        binary.prior_reseed = false;
-        binary.prior_growth = false;
-        binary.prior_core = false;
-        binary.prior_motif = false;
         binary.energy_lattice = false;
         binary.orbit_complete_on_new = false;
         binary.continuous_symmetry = ContinuousSymmetry::Off;
@@ -10333,8 +10294,7 @@ mod tests {
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
         assert!(der.escape_on_stall && der.trail_on_stall && !der.restart_on_stall);
         assert!(rec.escape_on_stall && rec.trail_on_stall && !rec.restart_on_stall);
-        assert!(rec.prior_soap && rec.prior_reseed && rec.prior_growth);
-        assert!(rec.prior_core && rec.prior_motif && !rec.general_collective);
+        assert!(rec.prior_soap && !rec.general_collective);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);
@@ -10414,13 +10374,13 @@ mod tests {
         assert_eq!(comm.surfaces.len(), 1);
         assert!(comm.surfaces[0].is_active());
         assert_eq!(rec.surfaces, comm.surfaces);
-        assert!(Config::communicating(98).surfaces.is_empty());
+        assert_eq!(
+            Config::recommended(98).surfaces,
+            Config::communicating(98).surfaces
+        );
         assert!(matches!(
             rec.continuous_symmetry,
-            ContinuousSymmetry::Measure {
-                interval: 10,
-                reseed_hops: 5
-            }
+            ContinuousSymmetry::Measure { interval: 10 }
         ));
         assert_eq!(rec.continuous_symmetry, comm.continuous_symmetry);
         assert!(matches!(

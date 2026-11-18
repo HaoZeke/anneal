@@ -8,7 +8,8 @@ impl LennardJonesPreset {
     pub(super) const TEMPERATURE: f64 = 0.8;
     pub(super) const BIAS_HEIGHT: f64 = 0.25;
     pub(super) const MERGE_RADIUS: f64 = 0.7;
-    pub(super) const ALL_POINTS_STEP: f64 = 0.38;
+    /// Collective displacement as a fraction of the declared length scale.
+    pub(super) const ALL_POINTS_STEP_RATIO: f64 = 0.38;
     pub(super) const SINGLE_POINT_STEP: f64 = 1.0;
     pub(super) const NEIGHBOUR_CUTOFF: f64 = 1.6;
     pub(super) const SYMMETRISE_CUTOFF: f64 = 2.5;

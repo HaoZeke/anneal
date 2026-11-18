@@ -128,10 +128,7 @@ impl Inner {
                 // Dcut makes every offer novel or every offer a duplicate.
                 #[cfg(feature = "ira")]
                 {
-                    let n = p.len() / 3;
-                    let ira = crate::shape::IraMetric {
-                        kmax_factor: if n >= 55 { 2.5 } else { 1.8 },
-                    };
+                    let ira = crate::shape::IraMetric::default();
                     let ira_d = ira.distance(p, q);
                     if ira_d.is_finite() && ira_d <= IRA_SAME {
                         return 0.0;

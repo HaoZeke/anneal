@@ -30,7 +30,7 @@ use std::cell::{Cell, RefCell};
 
 use ndarray::{Array1, Array2, ArrayView1};
 
-use crate::catalog::packing::{MINIMUM_PACKING_ATOMS, PACKING_SPEC};
+use crate::catalog::packing::{PACKING_SPEC, packing_descriptor_sufficient};
 use crate::movekernel::MoveKernel;
 use crate::soap::{jacobian_nu3, local_nu3_z};
 
@@ -955,8 +955,7 @@ fn householder_cartesian(wells: &[Well], x: ArrayView1<f64>, mut grad: Array1<f6
 
 /// Mean of per-center SOAP+ACE \(\nu=3\) at [`PACKING_SPEC`].
 fn packing_mean(x: ArrayView1<f64>) -> Option<Array1<f64>> {
-    let n_at = x.len() / 3;
-    if n_at < MINIMUM_PACKING_ATOMS {
+    if !packing_descriptor_sufficient(x.as_slice()?, PACKING_SPEC.rcut_nn) {
         return None;
     }
     let loc = local_nu3_z(x, PACKING_SPEC, None);

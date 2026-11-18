@@ -284,10 +284,6 @@ fn without_priors(mut cfg: Config) -> Config {
     cfg.orbit_complete_on_new = true;
     cfg.orbit_arm = true;
     cfg.prior_soap = false;
-    cfg.prior_reseed = false;
-    cfg.prior_growth = false;
-    cfg.prior_core = false;
-    cfg.prior_motif = false;
     cfg.symmetrise_on_stall = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
     cfg.energy_lattice = false;

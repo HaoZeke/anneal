@@ -2710,7 +2710,7 @@ mod tests {
         let cfg = Config::recommended(8);
         assert!(
             !cfg.surfaces.is_empty(),
-            "the preset installs a two-phase surface below 98 points"
+            "the preset installs a measured two-phase surface at every size"
         );
         let objective = PairPotential::lennard_jones(8);
         let mut x = Array1::zeros(24);

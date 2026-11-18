@@ -197,8 +197,12 @@ fn mat_vec(m: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     m.map(|row| dot(row, v))
 }
 
-/// Whether groups are three-atom water: one oxygen and two hydrogens each.
-pub(crate) fn is_water_groups(groups: &[Vec<usize>]) -> bool {
+/// Whether every group supplies one pivot and two directional sites.
+///
+/// Cycle reversal and rewiring only need this three-site chart. Atomic
+/// numbers do not decide whether the arms are available; an incompatible
+/// geometry simply produces no cycle or a rejected proposal.
+pub(crate) fn cycle_compatible_groups(groups: &[Vec<usize>]) -> bool {
     !groups.is_empty() && groups.iter().all(|g| g.len() == 3)
 }
 
@@ -252,7 +256,7 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
     x: &mut ndarray::Array1<f64>,
     rng: &mut R,
 ) -> bool {
-    if !is_water_groups(groups) || groups.len() < 2 {
+    if !cycle_compatible_groups(groups) || groups.len() < 2 {
         return false;
     }
     let sites = cartesian_sites(groups, x);
@@ -346,7 +350,7 @@ pub(crate) fn rewire_cartesian<R: rand::Rng + ?Sized>(
     x: &mut ndarray::Array1<f64>,
     rng: &mut R,
 ) -> bool {
-    if !is_water_groups(groups) || groups.len() < 2 {
+    if !cycle_compatible_groups(groups) || groups.len() < 2 {
         return false;
     }
     let sites = cartesian_sites(groups, x);
@@ -623,10 +627,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_or_short_groups_are_not_water() {
-        assert!(!is_water_groups(&[]));
-        assert!(!is_water_groups(&[vec![0, 1]]));
-        assert!(is_water_groups(&[vec![0, 1, 2], vec![3, 4, 5]]));
+    fn cycle_compatibility_depends_on_the_declared_chart_not_species() {
+        assert!(!cycle_compatible_groups(&[]));
+        assert!(!cycle_compatible_groups(&[vec![0, 1]]));
+        assert!(cycle_compatible_groups(&[vec![0, 1, 2], vec![3, 4, 5]]));
     }
 
     #[test]
