@@ -3529,16 +3529,18 @@ fn quarantine_geometry(
     length: f64,
     capacity: usize,
 ) {
-    if occupied.is_empty()
+    if capacity == 0
+        || occupied.is_empty()
         || !energy.is_finite()
-        || capacity == 0
+        || !(length.is_finite() && length > 0.0)
+        || occupied.iter().any(|value| !value.is_finite())
         || tabu
             .iter()
             .any(|(held, stored)| same_shelf(held.view(), *stored, occupied.view(), energy, length))
     {
         return;
     }
-    if tabu.len() >= capacity {
+    while tabu.len() >= capacity {
         tabu.remove(0);
     }
     tabu.push((occupied, energy));
@@ -3551,15 +3553,17 @@ fn quarantine_fingerprint(
     radius: f64,
     capacity: usize,
 ) {
-    if occupied.is_empty() || tabu_covers(tabu, occupied.view(), radius) {
-        return;
-    }
     // Zero holds nothing. A positive capacity that is already full drops the
     // oldest, so a long run cannot keep every funnel it has failed to leave.
-    if capacity == 0 {
+    if capacity == 0
+        || occupied.is_empty()
+        || !(radius.is_finite() && radius >= 0.0)
+        || occupied.iter().any(|value| !value.is_finite())
+        || tabu_covers(tabu, occupied.view(), radius)
+    {
         return;
     }
-    if tabu.len() >= capacity {
+    while tabu.len() >= capacity {
         tabu.remove(0);
     }
     tabu.push(occupied);
@@ -3576,24 +3580,26 @@ fn same_distance_geometry(left: ArrayView1<f64>, right: ArrayView1<f64>, length:
         return false;
     }
     let limit = 2.0 * length;
-    left.iter()
-        .zip(right.iter())
-        .all(|(p, q)| (p - q).abs() <= limit)
+    limit.is_finite()
+        && left
+            .iter()
+            .zip(right.iter())
+            .all(|(p, q)| p.is_finite() && q.is_finite() && (p - q).abs() <= limit)
 }
 
 /// Whether two quenched energies are one minimum.
 ///
-/// The allowance scales with the energy already in hand: a re-quench of the
-/// occupied minimum stays inside it, and a neighbour on a dense surface does
-/// not. The hexamer family is a few millielectronvolts apart; a Sutton-Chen
-/// shelf near ten thousand is not the next minimum a tenth below it.
-fn same_minimum_energy(stored: f64, landing: f64) -> bool {
+/// Whether two energies agree within a finite, zero-independent allowance.
+fn same_minimum_energy(stored: f64, landing: f64, allowance: f64) -> bool {
     if !(stored.is_finite() && landing.is_finite()) {
         return false;
     }
-    let scale = 1.0 + stored.abs().max(landing.abs());
-    let window = (1.0e-8 * scale).max(STRICT_IMPROVEMENT);
-    (stored - landing).abs() <= window
+    (stored - landing).abs() <= allowance
+}
+
+/// Roundoff carried by comparing two independently converged energies.
+fn converged_energy_roundoff() -> f64 {
+    2.0 * f64::EPSILON.sqrt()
 }
 
 /// Geometry and energy of one quarantined minimum.
@@ -3604,8 +3610,18 @@ fn same_shelf(
     landing_energy: f64,
     length: f64,
 ) -> bool {
+    // Two independently converged geometries can each carry sqrt(epsilon)
+    // numerical error, so their comparison carries the sum. Identical
+    // coordinates have no geometric convergence error and admit one rounding
+    // step only. Both allowances are fixed under shifts of the energy zero.
+    let exact_geometry = held.iter().zip(landing).all(|(left, right)| left == right);
+    let allowance = if exact_geometry {
+        f64::EPSILON
+    } else {
+        converged_energy_roundoff()
+    };
     same_distance_geometry(held, landing, length)
-        && same_minimum_energy(stored_energy, landing_energy)
+        && same_minimum_energy(stored_energy, landing_energy, allowance)
 }
 
 /// Whether `landing` is a minimum the shelf already holds.
@@ -3633,8 +3649,8 @@ fn decay_shelves_above(shelf: &mut Vec<(Array1<f64>, f64)>, best: f64, standing:
     }
     shelf.retain(|(_, stored)| {
         *stored <= best
-            || same_minimum_energy(*stored, best)
-            || same_minimum_energy(*stored, standing)
+            || same_minimum_energy(*stored, best, converged_energy_roundoff())
+            || same_minimum_energy(*stored, standing, converged_energy_roundoff())
     });
 }
 
@@ -6471,29 +6487,13 @@ where
                 if published_prize && !exchange_accept {
                     exchanges_refused += 1;
                 }
-                // The call-plateau redraw. A quench back onto the minimum
-                // just left, or onto one this rung already quarantined, is
-                // the shelf again. Record it and stay.
-                let restart_home = action == "restart"
+                // The call-plateau redraw. Name the plateau being left first,
+                // honouring a zero capacity, then refuse a quench that falls
+                // onto any minimum this rung holds.
+                let restart_home = if action == "restart"
                     && cfg.tabu_on_stall
                     && effective_keying(cfg) == Keying::Distances
-                    && {
-                        let landing = bias.cv(proposal_state.view());
-                        let occupied = bias.cv(from_state.view());
-                        same_shelf(
-                            occupied.view(),
-                            from_energy,
-                            landing.view(),
-                            proposal_energy,
-                            cfg.escape_epsilon,
-                        ) || shelf_holds(
-                            &shelf,
-                            landing.view(),
-                            proposal_energy,
-                            cfg.escape_epsilon,
-                        )
-                    };
-                if restart_home {
+                {
                     quarantine_geometry(
                         &mut shelf,
                         bias.cv(from_state.view()),
@@ -6501,6 +6501,17 @@ where
                         cfg.escape_epsilon,
                         cfg.tabu_capacity,
                     );
+                    !shelf.is_empty()
+                        && shelf_holds(
+                            &shelf,
+                            bias.cv(proposal_state.view()).view(),
+                            proposal_energy,
+                            cfg.escape_epsilon,
+                        )
+                } else {
+                    false
+                };
+                if restart_home {
                     tabu_hits += 1;
                 }
                 let adopt = adopt && exchange_accept && !restart_home;
@@ -8476,11 +8487,7 @@ where
         // Empty shelf: the test is the one the short searches take, and it
         // must not describe the landing. A fresh fingerprint would move the
         // pair cache and the trajectory with it.
-        if accept
-            && !shelf.is_empty()
-            && e_new >= e - STRICT_IMPROVEMENT
-            && effective_keying(cfg) == Keying::Distances
-        {
+        if accept && !shelf.is_empty() && !improved && effective_keying(cfg) == Keying::Distances {
             let veto = if skip_basin {
                 let landing = bias.cv(x_new.view());
                 shelf_holds(&shelf, landing.view(), e_new, cfg.escape_epsilon)
@@ -9070,7 +9077,7 @@ where
         } else {
             quiet += 1;
         }
-        let stuck = stalled(cfg, quiet, longest_quiet);
+        let mut stuck = stalled(cfg, quiet, longest_quiet);
         // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
         // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
         // improvement, take `jump_steps` collective displacements with no
@@ -9117,6 +9124,7 @@ where
                 );
                 longest_quiet = longest_quiet.max(quiet);
                 quiet = 0;
+                stuck = false;
             }
         }
         // Where the chain stands after the acceptance test, computed once for
@@ -9266,6 +9274,8 @@ where
                             Some("stall-symmetrise"),
                             hops
                         );
+                        stuck = false;
+                        directed_leave = false;
                     }
                 }
             }
@@ -11640,11 +11650,9 @@ mod tests {
             shelf.len() < 4,
             "a new best left every higher plateau in place: {shelf:?}"
         );
-        assert!(
-            shelf
-                .iter()
-                .all(|(_, energy)| *energy <= -28.0 || same_minimum_energy(*energy, -28.0))
-        );
+        assert!(shelf.iter().all(|(_, energy)| {
+            *energy <= -28.0 || same_minimum_energy(*energy, -28.0, converged_energy_roundoff())
+        }));
         // The chain is still on a plateau above the new best. That one
         // stays; a different plateau above the best does not.
         let mut occupied = Vec::new();
@@ -11684,18 +11692,18 @@ mod tests {
         );
     }
 
-    /// The same distance geometry at a hexamer-sized gap is a neighbour.
-    /// A re-quench of a Sutton-Chen shelf is not.
+    /// The same distance geometry at a resolved energy gap is a neighbour.
+    /// Only arithmetic roundoff belongs to the occupied minimum.
     #[test]
     fn a_matching_fingerprint_does_not_refuse_a_different_energy() {
         let geometry = Array1::from(vec![1.0, 1.2, 1.4, 1.7]);
         let epsilon = 1.0e-4;
-        let hexamer = -0.3000;
-        let neighbour = hexamer + 4.2e-3;
+        let occupied = -0.3000;
+        let neighbour = occupied + 4.2e-3;
         assert!(
             !same_shelf(
                 geometry.view(),
-                hexamer,
+                occupied,
                 geometry.view(),
                 neighbour,
                 epsilon
@@ -11704,9 +11712,9 @@ mod tests {
         );
         assert!(same_shelf(
             geometry.view(),
-            -10108.559850,
+            occupied,
             geometry.view(),
-            -10108.559851,
+            occupied + f64::EPSILON,
             epsilon
         ));
     }
