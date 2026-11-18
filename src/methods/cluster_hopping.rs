@@ -10163,10 +10163,13 @@ mod tests {
             );
             let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
                 let _ = led.charge();
-                // Each quench is lower than the last, so the acceptance dial
-                // keeps the hop and the trace is not empty. The geometry of
-                // that hop is still the trial.
-                (-(led.spent() as f64), x.to_owned())
+                // The first quenches fall with the calls spent, so a hop is
+                // accepted and the trace is not empty. The energy then floors.
+                // The best stops moving, the call clock runs out, and the chain
+                // takes the directed leave this test guards. A quench that
+                // keeps falling never stalls, so the seeded minimum never
+                // meets that gate.
+                (-(led.spent().min(6) as f64), x.to_owned())
             };
             let mut run_rng = StdRng::seed_from_u64(1234);
             let out =

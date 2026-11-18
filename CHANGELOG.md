@@ -6,12 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
-## [Unreleased]
-
-### Changed
-
-- ``ClusterKernels`` is ``#[non_exhaustive]``. A struct literal or a ``match`` on it outside the crate no longer compiles without ``ClusterKernels::new`` and a wildcard arm. A later kernel is not a further breaking change.
-
 ## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-16
 
 ### Added
