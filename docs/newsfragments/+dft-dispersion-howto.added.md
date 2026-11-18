@@ -1,0 +1,1 @@
+A how-to, "Add dispersion to a DFT engine", walks through running a DFT engine such as cpmdc BLYP with its own dispersion off beside a `d2` or `d4` composite term from Python, `potserv` and `libcomposite_engine`, and through correcting existing CPMD BLYP-D2 data with `d2cpmd` at weight -1.
