@@ -285,20 +285,8 @@ mod tests {
     fn the_keep_fraction_changes_the_proposal() {
         let mut r = StdRng::seed_from_u64(5);
         let p = parent(55);
-        let near = lattice::candidate_keeping(
-            Source::Named(Template::FaceCentredCubic),
-            p.view(),
-            55,
-            0.9,
-            &mut r,
-        );
-        let far = lattice::candidate_keeping(
-            Source::Named(Template::Icosahedral),
-            p.view(),
-            55,
-            0.0,
-            &mut r,
-        );
+        let near = lattice::candidate_keeping(Source::Observed, p.view(), 55, 0.9, &mut r);
+        let far = lattice::candidate_keeping(Source::ObservedSheared, p.view(), 55, 0.0, &mut r);
         let dn = radial_distance(near.view(), p.view());
         let df = radial_distance(far.view(), p.view());
         assert!(

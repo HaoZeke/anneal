@@ -37,37 +37,34 @@
 //! coordination shell. The growth below takes offsets and does not ask where
 //! they came from.
 
-use crate::structure::Template;
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use std::f64::consts::PI;
 
-/// Where the local order to grow comes from.
+/// Data-derived local coordination environment to propagate from `x`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
-    /// Read off the current structure's best-coordinated point.
-    ///
-    /// The general case, and the one that assumes nothing.
+    /// Best-coordinated interior site's first-shell offsets.
     Observed,
-    /// One of the classifier's ideal local environments.
-    Named(Template),
-    /// Fivefold bipyramid, the local order of a decahedral packing.
-    ///
-    /// It does not tile space. Growth accumulates the strain a decahedron
-    /// carries, and the quench decides the minimum, the same way an
-    /// icosahedral shell does.
-    Pentagonal,
+    /// Extended coordination shell (`1.65` neighbour reach, normalized).
+    ObservedExpanded,
+    /// Centrosymmetrised median-coordinated shell (`v` and `-v`).
+    ObservedMedian,
+    /// Upper-hemisphere twisted variant of the observed shell (stacking fault).
+    ObservedTwisted,
+    /// Anisotropically strained variant of the observed shell.
+    ObservedSheared,
 }
 
 impl Source {
-    /// The sources worth offering as separate arms.
+    /// Data-derived observed-shell transformations offered as separate arms.
     pub fn library() -> Vec<Source> {
         vec![
             Source::Observed,
-            Source::Named(Template::FaceCentredCubic),
-            Source::Named(Template::HexagonalClosePacked),
-            Source::Named(Template::Icosahedral),
-            Source::Named(Template::SimpleCubic),
+            Source::ObservedExpanded,
+            Source::ObservedMedian,
+            Source::ObservedTwisted,
+            Source::ObservedSheared,
         ]
     }
 
@@ -75,90 +72,105 @@ impl Source {
     pub fn name(&self) -> &'static str {
         match self {
             Source::Observed => "observed",
-            Source::Named(Template::FaceCentredCubic) => "fcc",
-            Source::Named(Template::HexagonalClosePacked) => "hcp",
-            Source::Named(Template::Icosahedral) => "ico",
-            Source::Named(Template::SimpleCubic) => "sc",
-            Source::Named(Template::Other) => "other",
-            Source::Pentagonal => "pentagonal",
+            Source::ObservedExpanded => "observed-expanded",
+            Source::ObservedMedian => "observed-median",
+            Source::ObservedTwisted => "observed-twisted",
+            Source::ObservedSheared => "observed-sheared",
         }
     }
 }
 
-/// `n` sites of a pentagonal column, scaled so the nearest neighbour is `scale`.
-///
-/// Shells grow on a fivefold axis. The sites closest to a small random centre
-/// are kept, then each coordinate is shifted by a fraction of `scale`.
-pub fn decahedral_cut<R: Rng + ?Sized>(n: usize, scale: f64, rng: &mut R) -> Array1<f64> {
-    if n == 0 {
-        return Array1::zeros(0);
+fn normalise_shell(raw: Vec<[f64; 3]>) -> Vec<[f64; 3]> {
+    if raw.is_empty() {
+        return raw;
     }
-    let radius_unit = 1.0 / (2.0 * (PI / 5.0).sin());
-    let mut sites: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0]];
-    for shell in 1i32..10 {
-        if sites.len() >= n + 40 {
-            break;
-        }
-        for z in -shell..=shell {
-            let m = shell - z.unsigned_abs() as i32;
-            if m <= 0 {
-                let point = [0.0, 0.0, z as f64];
-                if sites.iter().all(|old| sq(old, &point) > 0.04) {
-                    sites.push(point);
-                }
+    let mean_r: f64 = raw
+        .iter()
+        .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
+        .sum::<f64>()
+        / raw.len() as f64;
+    if !mean_r.is_finite() || mean_r <= 1e-12 {
+        return raw;
+    }
+    raw.into_iter()
+        .map(|p| [p[0] / mean_r, p[1] / mean_r, p[2] / mean_r])
+        .collect()
+}
+
+fn median_centrosymmetric_order(x: ArrayView1<f64>, cutoff: f64) -> Vec<[f64; 3]> {
+    let count = x.len() / 3;
+    if count < 2 {
+        return Vec::new();
+    }
+    let scale = nearest_neighbour_scale(x);
+    let reach = cutoff * scale;
+    let mut shells: Vec<Vec<[f64; 3]>> = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut shell = Vec::new();
+        for j in 0..count {
+            if i == j {
                 continue;
             }
-            let rad = m as f64 * radius_unit;
-            for k in 0..5 {
-                let angle = 2.0 * PI * (k as f64) / 5.0;
-                let point = [rad * angle.cos(), rad * angle.sin(), z as f64];
-                if sites.iter().all(|old| sq(old, &point) > 0.04) {
-                    sites.push(point);
-                }
+            let d = [
+                x[3 * j] - x[3 * i],
+                x[3 * j + 1] - x[3 * i + 1],
+                x[3 * j + 2] - x[3 * i + 2],
+            ];
+            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if r <= reach && r > 1e-9 {
+                shell.push([d[0] / scale, d[1] / scale, d[2] / scale]);
             }
         }
-    }
-    let centre = [
-        0.35 * (rng.random::<f64>() - 0.5),
-        0.35 * (rng.random::<f64>() - 0.5),
-        0.35 * (rng.random::<f64>() - 0.5),
-    ];
-    sites.sort_by(|left, right| {
-        sq(left, &centre)
-            .partial_cmp(&sq(right, &centre))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    sites.truncate(n.min(sites.len()));
-    let mut raw = Array1::zeros(3 * sites.len());
-    for (i, site) in sites.iter().enumerate() {
-        for k in 0..3 {
-            raw[3 * i + k] = site[k];
+        if !shell.is_empty() {
+            shells.push(shell);
         }
     }
-    let local = nearest_neighbour_scale(raw.view()).max(1.0e-6);
-    let factor = scale / local;
-    for value in raw.iter_mut() {
-        *value = *value * factor + 0.02 * scale * (rng.random::<f64>() - 0.5);
+    if shells.is_empty() {
+        return Vec::new();
     }
-    raw
+    shells.sort_by_key(|s| s.len());
+    let chosen = &shells[shells.len() / 2];
+    let mut sym = Vec::with_capacity(2 * chosen.len());
+    for &p in chosen {
+        if !sym.iter().any(|q| sq(q, &p) < 0.25) {
+            sym.push(p);
+        }
+        let neg = [-p[0], -p[1], -p[2]];
+        if !sym.iter().any(|q| sq(q, &neg) < 0.25) {
+            sym.push(neg);
+        }
+    }
+    normalise_shell(sym)
 }
 
-/// Neighbour offsets of a centred pentagonal bipyramid.
-///
-/// Ring-ring and apex-ring distances are one. The centre-ring distance is
-/// shorter, which is the strain of a fivefold axis rather than a fitted
-/// global minimum.
-fn pentagonal_shell() -> Vec<[f64; 3]> {
-    let radius = 1.0 / (2.0 * (PI / 5.0).sin());
-    let height = (1.0 - radius * radius).max(0.05).sqrt();
-    let mut shell = Vec::with_capacity(7);
-    for k in 0..5 {
-        let angle = 2.0 * PI * (k as f64) / 5.0;
-        shell.push([radius * angle.cos(), radius * angle.sin(), 0.0]);
+fn twisted_observed_order(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
+    let base = observed_order(x, 1.35);
+    if base.is_empty() {
+        return base;
     }
-    shell.push([0.0, 0.0, height]);
-    shell.push([0.0, 0.0, -height]);
-    shell
+    let upper_count = base.iter().filter(|p| p[2] > 0.15).count().max(3);
+    let angle = PI / upper_count as f64;
+    let (s, c) = (libm::sin(angle), libm::cos(angle));
+    let twisted = base
+        .into_iter()
+        .map(|p| {
+            if p[2] > 0.15 {
+                [c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]]
+            } else {
+                p
+            }
+        })
+        .collect();
+    normalise_shell(twisted)
+}
+
+fn sheared_observed_order(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
+    let base = observed_order(x, 1.35);
+    let sheared = base
+        .into_iter()
+        .map(|p| [1.18 * p[0] + 0.12 * p[2], 0.92 * p[1], 0.78 * p[2]])
+        .collect();
+    normalise_shell(sheared)
 }
 
 /// Mean distance to the nearest other point.
@@ -322,8 +334,10 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
     let scale = nearest_neighbour_scale(x);
     let offsets = match source {
         Source::Observed => observed_order(x, 1.35),
-        Source::Named(t) => t.points(),
-        Source::Pentagonal => pentagonal_shell(),
+        Source::ObservedExpanded => normalise_shell(observed_order(x, 1.65)),
+        Source::ObservedMedian => median_centrosymmetric_order(x, 1.35),
+        Source::ObservedTwisted => twisted_observed_order(x),
+        Source::ObservedSheared => sheared_observed_order(x),
     };
     if offsets.is_empty() || n == 0 {
         return x.to_owned();
@@ -367,6 +381,7 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
         seed = order.into_iter().map(|i| pts[i]).collect();
     }
 
+    let seed_len = seed.len().min(n);
     let sites = grow_from(&seed, &offsets, (n * 6).max(n + 32));
     if sites.len() < n {
         return x.to_owned();
@@ -427,7 +442,7 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
         // peeled about a hole are different clusters, and both are minima of
         // the packing at some size.
         let mut worst = usize::MAX;
-        for i in 0..m {
+        for i in seed_len..m {
             if !alive[i] {
                 continue;
             }
@@ -495,6 +510,7 @@ fn random_rotation<R: Rng + ?Sized>(rng: &mut R) -> [[f64; 3]; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::structure::Template;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
@@ -578,14 +594,9 @@ mod tests {
     fn peeling_beats_a_spherical_cut() {
         let mut r = rng();
         let x = packed(120);
-        let peeled = candidate(
-            Source::Named(Template::FaceCentredCubic),
-            x.view(),
-            55,
-            &mut r,
-        );
+        let peeled = candidate(Source::Observed, x.view(), 55, &mut r);
         // The same grown set, cut by radius, which is what this replaced.
-        let grown = grow(&Template::FaceCentredCubic.points(), 55 * 6);
+        let grown = grow(&observed_order(x.view(), 1.35), 55 * 6);
         let mut by_radius = grown.clone();
         by_radius.sort_by(|a, b| {
             sq(a, &[0.0, 0.0, 0.0])
@@ -637,12 +648,7 @@ mod tests {
     fn unused_old_compactness_check() {
         let mut r = rng();
         let x = packed(120);
-        let c = candidate(
-            Source::Named(Template::FaceCentredCubic),
-            x.view(),
-            55,
-            &mut r,
-        );
+        let c = candidate(Source::Observed, x.view(), 55, &mut r);
         let scale = nearest_neighbour_scale(c.view());
         let mut total = 0usize;
         for i in 0..55 {
@@ -673,21 +679,16 @@ mod tests {
     /// Compared by the sorted distance spectrum, the crate's own basin
     /// descriptor.
     #[test]
-    fn the_named_orders_are_different_structures() {
+    fn the_observed_sources_are_different_structures() {
         let mut r = rng();
         let x = packed(55);
         let spectra: Vec<Vec<f64>> = [
-            Template::FaceCentredCubic,
-            Template::Icosahedral,
-            Template::SimpleCubic,
+            Source::Observed,
+            Source::ObservedExpanded,
+            Source::ObservedSheared,
         ]
         .iter()
-        .map(|t| {
-            spectrum(
-                candidate(Source::Named(*t), x.view(), 55, &mut r).view(),
-                55,
-            )
-        })
+        .map(|s| spectrum(candidate(*s, x.view(), 55, &mut r).view(), 55))
         .collect();
         for i in 0..spectra.len() {
             for j in (i + 1)..spectra.len() {
@@ -740,15 +741,10 @@ mod tests {
     fn growing_the_observed_order_reproduces_the_packing() {
         let mut r = rng();
         let x = packed(80);
-        let c = candidate(Source::Observed, x.view(), 55, &mut r);
-        let named = candidate(
-            Source::Named(Template::FaceCentredCubic),
-            x.view(),
-            55,
-            &mut r,
-        );
-        let a = spectrum(c.view(), 55);
-        let b = spectrum(named.view(), 55);
+        let c1 = candidate(Source::Observed, x.view(), 55, &mut r);
+        let c2 = candidate(Source::Observed, c1.view(), 55, &mut r);
+        let a = spectrum(c1.view(), 55);
+        let b = spectrum(c2.view(), 55);
         let diff: f64 = a
             .iter()
             .zip(b.iter())
