@@ -2015,6 +2015,11 @@ if get_option('with_tests')
         else
             _export_dynamic = false
         endif
+        if _rt[0] == 'ModelPotsTest'
+            # This test links the model C API archive directly. On Windows its
+            # declarations must not name DLL import thunks.
+            case_args += ['-DRGPOT_MODEL_BUILD']
+        endif
         _test_exe = executable(
             _rt[2][0],
             sources: ['tests/' + _rt[2][1]],

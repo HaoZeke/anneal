@@ -1031,9 +1031,9 @@ enum rgpot_status_t rgpot_ch5_2008_taylor_jet(void *user_data,
 ** Built-in analytic model C API
 
 =CppCore/rgpot/Models/ModelCapi.h= declares the C wrapper for built-in analytic
-model potentials exposed by =librgpot=. The API evaluates row-major batches in
-rgpot native units (eV and angstrom) and reports failures as status integers
-plus a thread-local error string.
+model potentials exposed by =librgpot=.
+The API evaluates row-major batches in rgpot native units (eV and angstrom) and
+reports failures as status integers plus a thread-local error string.
 
 *** =rgpot_builtin_model=
 
@@ -1047,10 +1047,9 @@ plus a thread-local error string.
 
 - Inputs :: none; an enum.
 - Units :: none.
-- Outputs :: =RGPOT_BUILTIN_ECKART=, =RGPOT_BUILTIN_MULLER_BROWN=,
-  =RGPOT_BUILTIN_MODIFIED_MULLER_BROWN=, =RGPOT_BUILTIN_LEPS_HH2=,
-  =RGPOT_BUILTIN_LEPS_HCL2=, =RGPOT_BUILTIN_LEPS_FH2= and
-  =RGPOT_BUILTIN_CBE=.
+- Outputs :: =RGPOT_BUILTIN_ECKART=,
+  =RGPOT_BUILTIN_MULLER_BROWN=, =RGPOT_BUILTIN_MODIFIED_MULLER_BROWN=, =RGPOT_BUILTIN_LEPS_HH2=,
+  =RGPOT_BUILTIN_LEPS_HCL2=, =RGPOT_BUILTIN_LEPS_FH2= and =RGPOT_BUILTIN_CBE=.
 - Errors :: none.
 
 *** =rgpot_builtin_model_new=
@@ -1165,8 +1164,8 @@ const char *rgpot_builtin_model_last_error(void);
 - Inputs :: none.
 - Units :: none.
 - Outputs :: thread-local NUL-terminated text of the last model API failure.
-- Errors :: none; the pointer is valid until the next built-in model API call
-  on the same thread.
+- Errors :: none; the pointer is valid until the next built-in model API call on
+  the same thread.
 
 ** RPC
 
@@ -1240,13 +1239,14 @@ enum rgpot_status_t rgpot_rpc_calculate_hvp(
 - Inputs :: =client= and =input= as for =rgpot_rpc_calculate=; =direction=
   contains =3 * n_atoms= doubles.
 - Units :: energy Hessian times direction in the remote potential's units.
-- Outputs :: =product= receives =3 * n_atoms= doubles from the server's
-  analytic HVP operation.
+- Outputs :: =product= receives =3 * n_atoms= doubles from the server's analytic
+  HVP operation.
   This is the C wrapper of RPC =Potential.calculateHvp=, which is advertised
   through =Capabilities.hessianVector=.
-- Errors :: =RGPOT_INVALID_PARAMETER= for a NULL argument or malformed
-  positions tensor. =RGPOT_RPC_ERROR= when capability negotiation, transport,
-  or the remote analytic calculation fails.
+- Errors :: =RGPOT_INVALID_PARAMETER= for a NULL argument or malformed positions
+  tensor.
+  =RGPOT_RPC_ERROR= when capability negotiation, transport, or the remote
+  analytic calculation fails.
 
 *** =rgpot_rpc_client_free=
 

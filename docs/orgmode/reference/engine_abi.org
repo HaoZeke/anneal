@@ -542,7 +542,8 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
 - Outputs :: 0 and the exact energy-Hessian product in =product=.
 - Errors :: returns 1 for a NULL pointer or invalid atom count, 3 when the
   potential does not advertise =analytic_hvp=, and 2 when the implementation
-  throws. The reason is available from =rgpot_engine_last_error=.
+  throws.
+  The reason is available from =rgpot_engine_last_error=.
 
 Optional symbol.
 For learning engines the call is also an incorporation boundary.

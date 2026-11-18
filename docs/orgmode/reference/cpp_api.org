@@ -526,8 +526,8 @@ explicit PotentialBase(PotType inp_type);
 - Inputs :: none.
 - Units :: none.
 - Outputs :: a =PotCaps= with the reentrancy, per-image, batched, periodic,
-  group-collective, stress and analytic-HVP flags; the default is a value-initialised
-  =PotCaps= (=SharedInstance=, periodic, nothing else set).
+  group-collective, stress and analytic-HVP flags; the default is a
+  value-initialised =PotCaps= (=SharedInstance=, periodic, nothing else set).
 - Errors :: none; the method is =noexcept=.
 
 *** =rgpot::PotentialBase::hessianVectorImpl=
@@ -542,8 +542,8 @@ virtual void hessianVectorImpl(const ForceInput &, const double *,
 - Units :: the energy Hessian times a direction, so eV/Angstrom when the
   coordinates and direction are in Angstrom.
 - Outputs :: =product= receives =H direction=.
-- Errors :: the base throws =std::runtime_error=. Potentials whose
-  =caps().analyticHvp= is true override this method.
+- Errors :: the base throws =std::runtime_error=.
+  Potentials whose =caps().analyticHvp= is true override this method.
 
 *** =rgpot::PotentialBase::forceBatch=
 
