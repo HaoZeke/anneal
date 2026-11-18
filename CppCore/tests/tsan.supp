@@ -1,0 +1,12 @@
+# Narrow ThreadSanitizer suppressions for uninstrumented system OpenMP runtimes.
+#
+# Distro OpenMP shared libraries (LLVM libomp / libiomp5 and GNU libgomp) are
+# compiled without -fsanitize=thread. TSan still intercepts pthread_mutex_init
+# and pthread_mutex_lock calls made inside the runtime's worker-pool management
+# without seeing the runtime's internal atomic handshakes between workers.
+#
+# OpenMP fork, barrier and join happens-before edges are bridged explicitly in
+# CppCore/rgpot/Slices.hpp, so data races in rgpot or test code stay active.
+called_from_lib:libomp.so
+called_from_lib:libiomp5.so
+called_from_lib:libgomp.so

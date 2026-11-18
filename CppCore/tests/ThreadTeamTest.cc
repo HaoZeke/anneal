@@ -205,13 +205,27 @@ auto fromOuterTeam(Make &make, Eval &eval, int levels) {
   std::vector<decltype(eval(first))> out(2);
   const int saved = omp_get_max_active_levels();
   omp_set_max_active_levels(levels);
+#if defined(RGPOT_TSAN_ACTIVE)
+  std::atomic<int> tsan_fork{0};
+  std::atomic<int> tsan_join{0};
+  tsan_fork.store(1, std::memory_order_release);
+#endif
 #pragma omp parallel num_threads(2)
   {
+#if defined(RGPOT_TSAN_ACTIVE)
+    (void)tsan_fork.load(std::memory_order_acquire);
+#endif
     const int team = omp_get_num_threads();
     for (int t = omp_get_thread_num(); t < 2; t += team) {
       out[static_cast<std::size_t>(t)] = eval(t == 0 ? first : second);
     }
+#if defined(RGPOT_TSAN_ACTIVE)
+    tsan_join.fetch_add(1, std::memory_order_release);
+#endif
   }
+#if defined(RGPOT_TSAN_ACTIVE)
+  (void)tsan_join.load(std::memory_order_acquire);
+#endif
   omp_set_max_active_levels(saved);
   return out;
 }
@@ -395,8 +409,16 @@ Inside fullTeamInside(int levels) {
   Inside got;
   const int saved = omp_get_max_active_levels();
   omp_set_max_active_levels(levels);
+#if defined(RGPOT_TSAN_ACTIVE)
+  std::atomic<int> tsan_fork{0};
+  std::atomic<int> tsan_join{0};
+  tsan_fork.store(1, std::memory_order_release);
+#endif
 #pragma omp parallel num_threads(2)
   {
+#if defined(RGPOT_TSAN_ACTIVE)
+    (void)tsan_fork.load(std::memory_order_acquire);
+#endif
     if (omp_get_thread_num() == 0) {
       Meeting meet;
       got.outer_team = omp_get_num_threads();
@@ -404,7 +426,13 @@ Inside fullTeamInside(int levels) {
       got.runs = meet.runs.load();
       got.stuck = meet.stuck.load();
     }
+#if defined(RGPOT_TSAN_ACTIVE)
+    tsan_join.fetch_add(1, std::memory_order_release);
+#endif
   }
+#if defined(RGPOT_TSAN_ACTIVE)
+  (void)tsan_join.load(std::memory_order_acquire);
+#endif
   omp_set_max_active_levels(saved);
   return got;
 }

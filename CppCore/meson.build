@@ -54,6 +54,7 @@ _rt_atoms = {
 }
 _rt_tests = []
 _rt_kw = {}
+_tsan_supp = meson.project_source_root() / 'CppCore' / 'tests' / 'tsan.supp'
 foreach _line : _fs.read('tests/registry.txt').split('\n')
     _line = _line.strip()
     if _line == '' or _line.startswith('#') or _line.startswith('@')
@@ -95,6 +96,9 @@ foreach _line : _fs.read('tests/registry.txt').split('\n')
         _kw += {'workdir': meson.project_source_root()}
     elif _workdir != ''
         _kw += {'workdir': meson.project_source_root() / _workdir}
+    endif
+    if 'thread' in get_option('b_sanitize') and _kind != 'custom'
+        _env += {'TSAN_OPTIONS': 'suppressions=' + _tsan_supp}
     endif
     if _env.keys().length() > 0
         _kw += {'env': _env}
@@ -2061,6 +2065,9 @@ if get_option('with_tests')
         _nlist_rust_env = {
             'CXX': _nlist_rust_cxx[_nlist_rust_cxx.length() - 1],
         }
+        if 'thread' in get_option('b_sanitize')
+            _nlist_rust_env += {'TSAN_OPTIONS': 'suppressions=' + _tsan_supp}
+        endif
         test(
             'nlist_rust',
             find_program('sh'),
