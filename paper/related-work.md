@@ -1371,3 +1371,29 @@ Rauscher, arXiv:2609.18093 (17 September 2026), estimates Gibbs--Shannon entropy
 Checked on 17 November 2026: ABCluster's newest release is v3.4 (7 January 2026, `isomer` \(I/I_h\) fix); ASE 3.29.0, AGOX v3.11.1, CREST v3.0.2 (master tip 16 June 2026), pele v0.1.2, and xtb v6.8.0 are unchanged, and the Cambridge Cluster Database Lennard-Jones table (`tables.150.html`) retains the same published minima at LJ38, LJ55, LJ75, LJ98, and LJ104.
 
 Cite `tarratSilver2026`, `alotaibiCopperNickel2026`, `rauscherEntropy2026`, and `sandbergMlips2026`.
+
+## 2026-11-18 — A three-dimensional Lennard--Jones lattice is not a finite cluster
+
+Luo and Wei, arXiv:2611.19696 (15 November 2026), classify the minimising three-dimensional Lennard--Jones lattice at every covolume. Their energy is an Epstein-zeta lattice sum. As the covolume increases, the minimising phase changes from face-centred cubic to body-centred tetragonal and then to simple hexagonal.
+
+This result concerns infinite lattices at fixed covolume, not free finite clusters. It gives no energy at 38, 55, 75, 98, or 104 atoms, so it does not contradict the Cambridge hit targets or any sealed map. It does not warrant a head-to-head on the cluster preset.
+
+Cite `luoLennardJonesLattice2026`. Keep the lattice phase transitions out of the finite-cluster table.
+
+## 2026-11-18 — Carbon and boron structure searches away from the preset
+
+Kuchmina, Tsang, Wei, Lorenz, Santana-Bonilla, and de Tomas, ChemRxiv (17 November 2026), doi:10.26434/chemrxiv.15012403/v1, search carbon clusters from C3 through C20 by particle swarm optimisation with semiempirical methods. They benchmark structures and energies against density-functional theory and GAP-20. The abstract reports chains through C6, rings from C7 through C9, polycyclic structures from C10 through C19, and an unbiased C20 cage.
+
+Qiu, Qian, Mu, Liu, Zhang, Kim, and Ding, Physical Review B (5 November 2026), doi:10.1103/x3bz-g9zz, title a machine-learning-force-field-accelerated global structure search for stable planar boron clusters. The Crossref record supplies the DOI, title, date, and authors, but no abstract, cluster sizes, energies, or hit rates.
+
+Neither record reports a Lennard-Jones cluster, a water cluster, or a conformer comparison with CREST or GOAT. They contradict no manuscript claim and do not warrant a new head-to-head on the sealed maps. A comparison with the carbon search would need one of C3 through C20 on the same potential; the available boron record is too sparse to define a budget-matched comparison.
+
+Cite `kuchminaCarbonClusters2026` and `qiuPlanarBoron2026`.
+
+## 2026-11-18 — Nahual includes molecular conformer search
+
+Cheng and co-workers, arXiv:2611.19072 (14 November 2026), release Nahual, one autoregressive diffusion model for mixed sequences of text and three-dimensional molecules. The abstract names twelve training and evaluation tasks, including microsolvation, molecular conformer search, and adsorption on metal surfaces.
+
+The abstract does not name the water hexamer, CREST, GOAT, or a Lennard-Jones cluster, and it gives no force-call hit rate. It therefore does not contradict 121 of 192, 97 of 192, or the Cambridge targets. The broad conformer task alone does not define a new budget-matched head-to-head on the sealed hexamer table.
+
+Cite `chengNahual2026`.
