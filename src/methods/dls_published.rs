@@ -316,7 +316,7 @@ fn note(
 }
 
 fn hit(target: Option<f64>, energy: f64) -> bool {
-    target.is_some_and(|level| energy <= level)
+    target.is_some_and(|level| crate::energy_hits(energy, level, 0.0))
 }
 
 fn generation<R: Rng + ?Sized>(

@@ -25,6 +25,9 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import BudgetReached, CapReached, HitReached  # noqa: E402
 
@@ -40,7 +43,7 @@ SYSTEMS = {
     "m55r6": {"n": 55, "rho": 6.0, "budget": 1_000_000, "reference": -250.286609},
     "m55r14": {"n": 55, "rho": 14.0, "budget": 1_000_000, "reference": -220.646208},
 }
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 ASE_VERSION = "3.29.0"
 MIN_SEP = 0.85
 DENSITY = 0.7
@@ -171,7 +174,7 @@ def make_morse_calculator(rho: float, budget: int, reference: float, fmax: float
             if (
                 self.hit_calls is None
                 and peak <= self.fmax
-                and energy <= self.reference + self.tol
+                and energy_hits(energy, self.reference, self.tol)
             ):
                 self.hit_calls = self.calls
                 raise HitReached()

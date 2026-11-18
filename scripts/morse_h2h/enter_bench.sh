@@ -18,7 +18,7 @@ fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/starts"
-cp -a "$HERE/run_campaign.py" "$WORK/bin/run_campaign.py"
+cp -a "$HERE/run_campaign.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_morse.data" "$WORK/bin/h2h_gmin_morse.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
 cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"

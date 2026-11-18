@@ -23,7 +23,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::time::Instant;
 
-const HIT_TOL: f64 = 0.001;
+const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 
 struct Spec {
     n: usize,
@@ -188,12 +188,11 @@ fn cmd_run(args: &[String]) -> i32 {
         start_of(&cfg, spec.n, seed)
     };
     let (outcome, wall, pot_s) = search(&cfg, &spec, &start, seed, budget);
-    let level = spec.reference + HIT_TOL;
-    let hit = outcome.best <= level;
+    let hit = anneal_core::energy_hits(outcome.best, spec.reference, HIT_TOL);
     let at_hit = outcome
         .improvements
         .iter()
-        .find(|(_, _, _, energy)| *energy <= level)
+        .find(|(_, _, _, energy)| anneal_core::energy_hits(*energy, spec.reference, HIT_TOL))
         .map(|(_, spent, _, _)| *spent);
     // The hitting quench is sometimes polished into the ledger without a
     // matching improvements row. The run has already stopped, so the

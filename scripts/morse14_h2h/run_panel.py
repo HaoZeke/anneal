@@ -19,12 +19,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 SYSTEMS = {
     "m55r14": {"n": 55, "rho": 14.0, "budget": 1_000_000, "reference": -220.646208},
     "m80r14": {"n": 80, "rho": 14.0, "budget": 4_000_000, "reference": -340.811371},
 }
 SEEDS = list(range(2000, 2012))
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 SEED_FIELDS = [
     "system",
     "code",

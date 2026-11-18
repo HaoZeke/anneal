@@ -31,6 +31,7 @@ from boardlib import (
     Journal,
     Stopwatch,
     WallReached,
+    energy_hits,
     git_lines,
     held_out_seeds,
     host_lines,
@@ -290,7 +291,7 @@ class BoundCalculator:
                     )
                 if (
                     self.hit_calls is None
-                    and energy < self.reference + HIT_TOL
+                    and energy_hits(energy, self.reference, HIT_TOL)
                     and fmax <= FORCE_BAR
                 ):
                     self.hit_calls = self.calls

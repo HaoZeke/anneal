@@ -20,7 +20,7 @@ fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm"
-cp -a "$HERE/run_h2h.py" "$WORK/bin/run_h2h.py"
+cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 # A single-point data file for the reproduction check: no basin hops, and
 # CHECKD prints the energy at the input geometry.

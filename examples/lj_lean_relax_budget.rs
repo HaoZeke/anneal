@@ -22,7 +22,7 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::ArrayView1;
 
-const HIT_TOL: f64 = 1.0e-4;
+const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 
 fn hostname() -> String {
     Command::new("hostname")
@@ -96,12 +96,12 @@ fn main() {
             });
             if counts {
                 full += 1;
-                if hit_at.is_none() && energy < reference + HIT_TOL {
+                if hit_at.is_none() && anneal_core::energy_hits(energy, reference, HIT_TOL) {
                     let (fresh, gradient) = potential.value_and_gradient(state.view());
                     let gmax = gradient
                         .iter()
                         .fold(0.0_f64, |peak, value| peak.max(value.abs()));
-                    if fresh < reference + HIT_TOL && gmax < 1.0e-3 {
+                    if anneal_core::energy_hits(fresh, reference, HIT_TOL) && gmax < 1.0e-3 {
                         hit_at = Some(full);
                         phase = 1;
                     }
@@ -127,7 +127,7 @@ fn main() {
             let gmax = gradient
                 .iter()
                 .fold(0.0_f64, |peak, value| peak.max(value.abs()));
-            let reached = energy < reference + HIT_TOL && gmax < 1.0e-3;
+            let reached = anneal_core::energy_hits(energy, reference, HIT_TOL) && gmax < 1.0e-3;
             (energy, reached)
         }
         None => (f64::INFINITY, false),

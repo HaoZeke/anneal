@@ -63,7 +63,7 @@ fn time_to_target(soap: bool, seed: u64, budget: usize, target: f64) -> RunTime 
             .expect("finite start");
     out.improvements
         .iter()
-        .find(|(_, _, _, energy)| *energy <= target + 1e-4)
+        .find(|(_, _, _, energy)| anneal_core::energy_hits(*energy, target, 1e-4))
         .map(|(_, spent, _, _)| *spent as u64)
 }
 

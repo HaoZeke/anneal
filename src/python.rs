@@ -3994,6 +3994,13 @@ fn quench(
     Ok(out.into())
 }
 
+/// One-sided target-energy hit predicate (`energy <= target + tol`).
+#[pyfunction]
+#[pyo3(signature = (energy, target, tol = crate::DEFAULT_HIT_TOL))]
+fn energy_hits(energy: f64, target: f64, tol: f64) -> bool {
+    crate::energy_hits(energy, target, tol)
+}
+
 // ---------------------------------------------------------------------------
 // Module entry point.
 // ---------------------------------------------------------------------------
@@ -4008,6 +4015,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 /// Fill `anneal._core`. A host crate's module entry calls this.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::version::ANNEAL_VERSION)?;
+    m.add("DEFAULT_HIT_TOL", crate::DEFAULT_HIT_TOL)?;
+    m.add_function(wrap_pyfunction!(energy_hits, m)?)?;
     device::register(m)?;
     landfold::register(m)?;
     m.add_class::<PyBasinBias>()?;

@@ -48,9 +48,15 @@ from condevo.es import CHARLES
 from condevo.es.guidance import Condition, KNNNoveltyCondition
 from condevo.nn import MLP
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 CONDEVO_COMMIT = "ae76bf0462de63fa6bf3bde97df7cc00237b8d1d"
 REFERENCES = {"lj31": -133.586422, "lj38": -173.928427}
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 BUDGET = 400_000
 ORIGIN_SCALE = 3.0512013542537524 / 3.046205997143528
 POPSIZE = 64
@@ -101,7 +107,7 @@ class Tally:
 
     def observe(self, energy: float) -> None:
         self.best = min(self.best, energy)
-        if self.hit_at is None and energy <= self.target:
+        if self.hit_at is None and energy_hits(energy, self.target, 0.0):
             self.hit_at = self.calls
             raise Spent
 

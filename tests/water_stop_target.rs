@@ -141,7 +141,11 @@ fn a_reached_reference_only_ends_the_water_trajectory() {
     let reached = search(&cfg, 200_000, 11000, Some(-305.5098595 + 0.01));
     let unreached = search(&cfg, 200_000, 11000, Some(-305.5098595 - 1.0));
     assert!(reached.charged < 200_000, "the reference was not reached");
-    assert!(f64::from_bits(reached.best) <= -305.5098595 + 0.01);
+    assert!(anneal_core::energy_hits(
+        f64::from_bits(reached.best),
+        -305.5098595,
+        0.01,
+    ));
     assert_eq!(unreached.charged, 200_000);
     assert!(reached.quenches.len() <= unreached.quenches.len());
     assert_eq!(

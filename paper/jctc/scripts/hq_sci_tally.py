@@ -6,8 +6,8 @@ A hexamer hit is a finite best within 0.01 eV of the lowest finite best.
 An inf best is recorded as best=None and is not a hit.
 A copper hit is a finite best below the reference plus its tolerance.
 The reference is -415.971529 eV.
-scripts/elja_jcc_molslab_ensemble.sh line 80 sets that target.
-scripts/elja_hq_sci_molslab_bank.sh line 119 sets it too.
+scripts/elja_jcc_molslab_ensemble.sh line 81 sets that target.
+scripts/elja_hq_sci_molslab_bank.sh line 121 sets it too.
 Commit a8f1092fc8d6937b34e34a18bc50394a559ca9f3 names it the start energy.
 The tolerance is 0.001 eV, from TARGET_TOLERANCE and TARGET_TOL in those scripts.
 The set_relative_0.01 line is the separate 0.01 eV figure.
@@ -15,13 +15,19 @@ The copper block prefers cuh2_fcc_rec_N.out and falls back to .txt.
 """
 from __future__ import annotations
 
+import math
 import re
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 HIT_ABOVE_EV = 0.01
 REFERENCE_EV = -415.971529
-REFERENCE_TOL_EV = 1e-3
+REFERENCE_TOL_EV = DEFAULT_HIT_TOL
 BEST = re.compile(r"seed \d+: best (\S+) eV")
 
 
@@ -44,19 +50,20 @@ def block(directory: Path, stem: str, label: str) -> str:
     tokens = []
     for index in range(8):
         tokens.append(best_token(seed_file(directory, stem, index)))
-    finite = [float(token) for token in tokens if token != "inf"]
+    finite = [float(token) for token in tokens if math.isfinite(float(token))]
     if not finite:
         raise SystemExit("no finite best")
     floor = min(finite)
     lines = [label]
     hits = 0
     for index, token in enumerate(tokens):
-        if token == "inf":
+        value = float(token)
+        if not math.isfinite(value):
             shown = "None"
             hit = False
         else:
             shown = token
-            hit = float(token) - floor <= HIT_ABOVE_EV
+            hit = energy_hits(value, floor, HIT_ABOVE_EV)
         hits += int(hit)
         lines.append(f"  {stem}_{index}.out best={shown} hit={hit}")
     lines.append(f"  {hits}/8={hits}/8")
@@ -71,16 +78,17 @@ def copper_block(directory: Path) -> str:
     hits = 0
     finite = []
     for index, token in enumerate(tokens):
-        if token == "inf":
+        value = float(token)
+        if not math.isfinite(value):
             shown = "None"
             hit = False
+            gap = None
         else:
             shown = token
-            value = float(token)
             finite.append(value)
-            hit = value < REFERENCE_EV + REFERENCE_TOL_EV
+            hit = energy_hits(value, REFERENCE_EV, REFERENCE_TOL_EV)
+            gap = value - REFERENCE_EV
         hits += int(hit)
-        gap = None if token == "inf" else value - REFERENCE_EV
         lines.append(f"  cuh2_fcc_rec_{index}.out best={shown} hit={hit}")
         if gap is not None:
             lines.append(f"  gap_to_reference {index} {gap:.6f}")
@@ -88,7 +96,7 @@ def copper_block(directory: Path) -> str:
     floor = min(finite) if finite else None
     relative = 0
     if floor is not None:
-        relative = sum(item - floor <= HIT_ABOVE_EV for item in finite)
+        relative = sum(energy_hits(item, floor, HIT_ABOVE_EV) for item in finite)
     lines.append(f"  set_relative_0.01 {relative}/8")
     return "\n".join(lines) + "\n"
 

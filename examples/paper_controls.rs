@@ -47,7 +47,7 @@ use rand::{Rng, SeedableRng};
 use sha2::{Digest, Sha256};
 use std::time::Instant;
 
-const HIT: f64 = 0.001;
+const HIT: f64 = anneal_core::DEFAULT_HIT_TOL;
 const SMOKE_CALLS: usize = 200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,7 +162,7 @@ fn main() {
             let (outcome, wall) = run_seed(&cfg, &campaign, seed, budget, start.as_ref());
             let force_to_hit = campaign
                 .reference
-                .filter(|reference| outcome.best <= reference + HIT)
+                .filter(|reference| anneal_core::energy_hits(outcome.best, *reference, HIT))
                 .map(|_| outcome.charged);
             (outcome.charged, outcome.best, wall, force_to_hit, 0)
         };
@@ -332,7 +332,9 @@ fn run_population(
                 }
                 Some(potential.value_and_gradient(v))
             });
-            if first_hit.is_none() && reference.is_some_and(|target| value <= target + HIT) {
+            if first_hit.is_none()
+                && reference.is_some_and(|target| anneal_core::energy_hits(value, target, HIT))
+            {
                 first_hit = Some(led.spent());
             }
             value.is_finite().then_some((value, relaxed))
@@ -588,7 +590,7 @@ mod tests {
                     cluster_search::search(&potential, &preset, &mut ledger, seed).unwrap();
                 assert_eq!(control.best.to_bits(), board.best.to_bits(), "seed {seed}");
                 assert_eq!(control.charged, board.charged, "seed {seed}");
-                hits += usize::from(board.best <= reference + HIT);
+                hits += usize::from(anneal_core::energy_hits(board.best, reference, HIT));
             }
         }
         assert!(

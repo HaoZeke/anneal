@@ -43,6 +43,10 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
 
@@ -460,8 +464,8 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
         evals, charged = int(r["evals_to_hit"]), int(r["charged"])
         wall, pot, outside = float(r["wall_s"]), float(r["pot_s"]), float(r["outside_s"])
         ok = (
-            hit == (best <= ref + panel.HIT_TOL)
-            and (not hit or (abs(best - ref) < panel.HIT_TOL and 0 < evals <= charged <= budget))
+            hit == energy_hits(best, ref, panel.HIT_TOL)
+            and (not hit or 0 < evals <= charged <= budget)
             and (hit or (evals == budget and charged == budget))
             and 0.0 <= pot <= wall + 2e-6
             and outside >= 0.0
@@ -686,7 +690,10 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
                f"\\({references['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), "
                f"\\({references['m55r6']:.6f}\\) and \\({references['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6,14\\)), "
                f"and \\({references['m80r6']:.6f}\\) and \\({references['m80r14']:.6f}\\) at M\\(_{{80}}\\) (\\(\\rho=6,14\\)).")
-    audit.said(TEX, "The hit is a quenched energy that differs by less than 0.001 from the Cambridge Cluster Database minimum:")
+    audit.said(
+        TEX,
+        "The hit is a quenched energy at or below the Cambridge Cluster Database minimum plus 0.001:",
+    )
     audit.said(TEX, "GMIN hits more on " + ", and on ".join(f"{name(s)}, {of(s, 'gmin')} against {of(s, 'anneal')}"
                                                        for s in behind) + ".")
     audit.said(TEX, f"The two tie on {' and '.join(name(s) for s in tied)}.")
@@ -1136,7 +1143,13 @@ def panel_references(audit: Audit) -> None:
                        *((f"bench/ase-{s}/rows.csv", audit.rows(f"bench/ase-{s}/rows.csv")) for s in ASE_PANEL),
                        ("bench/ase-au55/rows-for-cluster.csv", audit.rows("bench/ase-au55/rows-for-cluster.csv"))):
         worst = max((abs(float(r["best"]) - ref[r["system"]]) for r in rows if hits_of([r])), default=0.0)
-        audit.record(worst < 1e-3, path, "every hit within 1e-3 of its reference", f"{worst:.3g}", "below 0.001")
+        audit.record(
+            worst < DEFAULT_HIT_TOL,
+            path,
+            "every hit within 1e-3 of its reference",
+            f"{worst:.3g}",
+            "below 0.001",
+        )
 
     def f6(system: str) -> str:
         return f"\\({ref[system]:.6f}\\)"
@@ -1236,9 +1249,26 @@ def supporting_numbers(audit: Audit) -> None:
         return f"\\({ref[system]:.6f}\\)"
 
     # Board constants.
-    audit.cell(SI, "hit tolerance of the h2h examples", "0.001", float(re.search(
-        r'"lj38" => \(38, Kind::Lj, -173\.928427, ([\d.]+)\)', audit.text("examples/h2h_arm3.rs")).group(1)))
-    audit.said(SI, "We read a hit as an energy strictly below the reference plus \\(0.001\\),")
+    target_tol_py = audit.text("scripts/target_tol.py")
+    target_tol_rs = audit.text("src/target_tol.rs")
+    py_default_hit_tol = float(
+        re.search(r"DEFAULT_HIT_TOL:\s*float\s*=\s*([0-9.eE+-]+)", target_tol_py).group(1)
+    )
+    rs_default_hit_tol = float(
+        re.search(r"pub const DEFAULT_HIT_TOL: f64 = ([0-9.eE+-]+);", target_tol_rs).group(1)
+    )
+    audit.cell(
+        SI,
+        "hit tolerance of the h2h examples",
+        "0.001",
+        py_default_hit_tol,
+    )
+    audit.cell(SI, "python and rust default hit tolerances agree", "1", float(py_default_hit_tol == rs_default_hit_tol))
+    audit.said(
+        SI,
+        "We read a hit as an energy at or below the reference plus \\(0.001\\) "
+        "(inclusive \\(E \\le E_{\\mathrm{ref}} + 10^{-3}\\)),",
+    )
     audit.said(SI, f"The references, in reduced units, are {r6('lj38')} for LJ\\(_{{38}}\\), {r6('lj55')} for "
                    f"LJ\\(_{{55}}\\), and {r6('lj75')} for LJ\\(_{{75}}\\). LJ\\(_{{98}}\\) uses {r6('lj98')}, "
                    f"and LJ\\(_{{104}}\\) uses {r6('lj104')}.")
@@ -1399,18 +1429,41 @@ def supporting_numbers(audit: Audit) -> None:
 
     # Copper slab.
     script = "scripts/elja_hq_sci_molslab_bank.sh"
-    audit.cell(SI, "TARGET_ENERGY line", "119", float(next(
-        i for i, text in enumerate(audit.text(script).splitlines(), 1) if text == "export TARGET_ENERGY=-415.971529")))
-    audit.cell(SI, "TARGET_TOL line", "120", float(next(
-        i for i, text in enumerate(audit.text(script).splitlines(), 1) if i > 119 and text == "export TARGET_TOL=1e-3")))
-    audit.said(SI, "Its line 119 sets \\texttt{TARGET\\_ENERGY} to \\(-415.971529\\) and its line 120 sets "
-                   "\\texttt{TARGET\\_TOL} to \\(10^{-3}\\).")
+    script_lines = audit.text(script).splitlines()
+    energy_line = next(
+        i
+        for i, text in enumerate(script_lines, 1)
+        if text == "export TARGET_ENERGY=-415.971529"
+    )
+    tol_line = next(
+        i
+        for i, text in enumerate(script_lines, 1)
+        if i > energy_line and text == "export TARGET_TOL=${DEFAULT_HIT_TOL}"
+    )
+    target_energy = float(script_lines[energy_line - 1].split("=", 1)[1])
+    target_tol = py_default_hit_tol
+    audit.said(
+        SI,
+        f"Its line {energy_line} sets \\texttt{{TARGET\\_ENERGY}} to \\(-415.971529\\) and its line {tol_line} "
+        "sets \\texttt{TARGET\\_TOL} from \\texttt{DEFAULT\\_HIT\\_TOL} (\\(10^{-3}\\)~eV).",
+    )
     tally = "paper/jctc/scripts/hq_sci_tally.py"
-    audit.said(tally, "scripts/elja_hq_sci_molslab_bank.sh line 119 sets it too.")
-    audit.cell(tally, "the jcc script's target line", "80", float(next(
-        i for i, text in enumerate(audit.text("scripts/elja_jcc_molslab_ensemble.sh").splitlines(), 1)
-        if text.strip() == "TARGET=-415.971529")))
-    audit.said(tally, "scripts/elja_jcc_molslab_ensemble.sh line 80 sets that target.")
+    tally_text = audit.text(tally)
+    tally_reference = float(re.search(r"^REFERENCE_EV = ([-+0-9.eE]+)$", tally_text, re.M).group(1))
+    tally_tolerance = float(DEFAULT_HIT_TOL)
+    assert "REFERENCE_TOL_EV = DEFAULT_HIT_TOL" in tally_text
+    audit.cell(SI, "TARGET_ENERGY value", "-415.971529", target_energy)
+    audit.cell(SI, "TARGET_ENERGY matches tally reference", f"{tally_reference}", target_energy)
+    audit.cell(SI, "TARGET_TOL value", "0.001", target_tol)
+    audit.cell(SI, "TARGET_TOL matches tally tolerance", f"{tally_tolerance:.3f}", target_tol)
+    audit.said(tally, f"scripts/elja_hq_sci_molslab_bank.sh line {energy_line} sets it too.")
+    jcc_target_line = next(
+        i
+        for i, text in enumerate(audit.text("scripts/elja_jcc_molslab_ensemble.sh").splitlines(), 1)
+        if text.strip() == "TARGET=-415.971529"
+    )
+    audit.cell(tally, "the jcc script's target line", str(jcc_target_line), float(jcc_target_line))
+    audit.said(tally, f"scripts/elja_jcc_molslab_ensemble.sh line {jcc_target_line} sets that target.")
     bests = []
     for index in range(8):
         found = re.search(r"seed \d+: best (\S+) eV", audit.text(f"paper/jctc/logs/cuh2_fcc_rec_{index}.out"))
@@ -1418,7 +1471,7 @@ def supporting_numbers(audit: Audit) -> None:
     gaps = [b + 415.971529 for b in bests]
     audit.cell(SI, "smallest copper gap", "8e-6", min(gaps))
     audit.cell(SI, "largest copper gap", "3.68e-4", max(gaps))
-    audit.cell(SI, "copper seeds inside the tolerance", "8", float(sum(g < 1e-3 for g in gaps)))
+    audit.cell(SI, "copper seeds inside the tolerance", "8", float(sum(energy_hits(b, -415.971529, DEFAULT_HIT_TOL) for b in bests)))
     audit.cell(SI, "copper seeds inside 1e-6 eV", "0", float(sum(g < 1e-6 for g in gaps)))
     audit.said(SI, "The per-seed gaps run from \\(8\\times 10^{-6}\\)~eV to \\(3.68\\times 10^{-4}\\)~eV above that reference.")
     audit.said(SI, "No seed reached the reference within \\(10^{-6}\\)~eV.")

@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
-const TOL: f64 = 0.001;
+const TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -207,7 +207,7 @@ fn system(name: &str) -> Option<(usize, Kind, f64)> {
 }
 
 fn is_hit(best: f64, reference: f64) -> bool {
-    best <= reference + TOL
+    anneal_core::energy_hits(best, reference, TOL)
 }
 
 /// Pair minimum over 2^(1/6), and the well depth. Same probe as asg_eval.
@@ -236,6 +236,8 @@ mod tests {
     #[test]
     fn hit_window_includes_its_declared_boundary() {
         assert!(is_hit(-10.0 + 0.001, -10.0));
+        assert!(is_hit(-25.0, -10.0));
         assert!(!is_hit(-10.0 + 0.001_001, -10.0));
+        assert!(!is_hit(f64::NAN, -10.0));
     }
 }

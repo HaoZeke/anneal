@@ -30,8 +30,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 BUDGET = 2_000_000
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = tuple(range(2000, 2012))
 SIZES = (8, 15, 20, 21, 25)
 # Cambridge Cluster Database TIP4P headers (kJ/mol), listed for n <= 21.
@@ -248,13 +254,13 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
         g_best = [float(r["best"]) for r in gmin]
         if n in CAMBRIDGE:
             ref = CAMBRIDGE[n]
-            a_hit = [b <= ref + HIT_TOL for b in a_best]
-            g_hit = [b <= ref + HIT_TOL for b in g_best]
+            a_hit = [energy_hits(b, ref, HIT_TOL) for b in a_best]
+            g_hit = [energy_hits(b, ref, HIT_TOL) for b in g_best]
             ref_s = f"{ref:.10f}"
         else:
             ref = min(a_best + g_best)
-            a_hit = [b <= ref + HIT_TOL for b in a_best]
-            g_hit = [b <= ref + HIT_TOL for b in g_best]
+            a_hit = [energy_hits(b, ref, HIT_TOL) for b in a_best]
+            g_hit = [energy_hits(b, ref, HIT_TOL) for b in g_best]
             ref_s = f"pooled:{ref:.10f}"
         ah, gh = sum(a_hit), sum(g_hit)
 

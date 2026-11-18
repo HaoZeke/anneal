@@ -26,7 +26,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::time::Instant;
 
-const HIT_TOL: f64 = 0.001;
+const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 
 #[repr(C)]
 struct ScConfig {
@@ -421,12 +421,11 @@ fn report(
     pot_s: f64,
     reference: f64,
 ) {
-    let level = reference + HIT_TOL;
-    let hit = outcome.best <= level;
+    let hit = anneal_core::energy_hits(outcome.best, reference, HIT_TOL);
     let at_hit = outcome
         .improvements
         .iter()
-        .find(|(_, _, _, energy)| *energy <= level)
+        .find(|(_, _, _, energy)| anneal_core::energy_hits(*energy, reference, HIT_TOL))
         .map(|(_, spent, _, _)| *spent);
     let evals = if hit {
         at_hit.unwrap_or(budget)

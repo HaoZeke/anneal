@@ -9,6 +9,10 @@ import re
 import statistics
 import sys
 
+if str(pathlib.Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 seed_re = re.compile(
     r"seed (?P<seed>\d+): best (?P<best>[-+0-9.eE]+|[-+]?inf|nan) eV\s+hops (?P<hops>\d+)\s+"
     r"charged (?P<charged>\d+)\s+basins (?P<basins>\d+)",
@@ -116,9 +120,7 @@ def main() -> int:
             hits = [
                 row
                 for row in rows
-                if row["best"] == row["best"]
-                and abs(row["best"]) != float("inf")
-                and abs(row["best"] - global_best) <= 1e-3
+                if energy_hits(row["best"], global_best, DEFAULT_HIT_TOL)
             ]
             charges = [row["charged_to_best"] or row["charged"] for row in hits]
             median = statistics.median(charges) if charges else float("nan")

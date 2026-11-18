@@ -9,7 +9,7 @@
 //! `SIZE` is 38, 55, 75, 98, or 104. `SEED` is 6400 through 6405.
 //! The budget and the reference minimum are the paper values shared
 //! with the ASE and AGOX arms. The search is [`Config::recommended`].
-//! A hit is an energy below the reference plus `1e-4`, a maximum
+//! A hit is an energy at or below the reference plus `DEFAULT_HIT_TOL` (`1e-3`), a maximum
 //! absolute gradient component at or below `0.0514221`, and a call
 //! count inside the budget. The process requires `RAYON_NUM_THREADS=1`.
 
@@ -23,7 +23,7 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
 
-const HIT_TOL: f64 = 1.0e-4;
+const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 const FORCE_BAR: f64 = 0.0514221;
 
 struct Score {
@@ -46,9 +46,8 @@ impl Score {
             self.best = energy;
         }
         if self.hit == 0
-            && energy.is_finite()
             && fmax.is_finite()
-            && energy < self.reference + HIT_TOL
+            && anneal_core::energy_hits(energy, self.reference, HIT_TOL)
             && fmax <= FORCE_BAR
             && calls <= self.budget
         {
@@ -237,7 +236,7 @@ fn main() {
         let fmax = gradient
             .iter()
             .fold(0.0_f64, |acc, value| acc.max(value.abs()));
-        let ok = energy < reference + HIT_TOL
+        let ok = anneal_core::energy_hits(energy, reference, HIT_TOL)
             && fmax <= FORCE_BAR
             && calls <= budget
             && (energy - score.hit_energy).abs() <= 1.0e-6;

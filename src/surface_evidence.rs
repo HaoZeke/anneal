@@ -6,6 +6,7 @@
 //! A perturbed relaxation input is not a source. A checkpoint whose block
 //! interval differs from the held block is not a source. Peer replies keep
 //! the key they were credited under.
+#![allow(clippy::items_after_test_module)]
 
 use std::collections::BTreeMap;
 

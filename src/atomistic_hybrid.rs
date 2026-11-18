@@ -179,8 +179,9 @@ impl AtomisticHybridReport {
 
     /// Charged work at the first encounter with a target energy.
     ///
-    /// A missing encounter remains censored at the campaign's actual charged
-    /// count, so fixed-budget failures participate in Kaplan--Meier summaries.
+    /// An energy at or below `target + tolerance` is a hit. A missing
+    /// encounter remains censored at the campaign's actual charged count, so
+    /// fixed-budget failures participate in Kaplan--Meier summaries.
     pub fn first_encounter(&self, target: f64, tolerance: f64) -> Encounter {
         let total_charged = usize::try_from(self.charged_evaluations).unwrap_or(usize::MAX);
         if !target.is_finite() || !tolerance.is_finite() || tolerance < 0.0 {
@@ -198,7 +199,7 @@ impl AtomisticHybridReport {
             .network
             .minima()
             .first()
-            .is_some_and(|minimum| minimum.energy < target + tolerance)
+            .is_some_and(|minimum| crate::energy_hits(minimum.energy, target, tolerance))
         {
             return Encounter::Found {
                 charged: usize::try_from(charged).unwrap_or(usize::MAX),
@@ -207,7 +208,7 @@ impl AtomisticHybridReport {
         }
         for (hop, event) in self.events.iter().enumerate() {
             charged = charged.saturating_add(event.charged_evaluations);
-            if event.terminal_energy < target + tolerance {
+            if crate::energy_hits(event.terminal_energy, target, tolerance) {
                 return Encounter::Found {
                     charged: usize::try_from(charged).unwrap_or(usize::MAX),
                     hops: hop + 1,
@@ -858,7 +859,104 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::CostPosterior;
+    use super::{
+        AtomisticHybridEvent, AtomisticHybridMechanism, AtomisticHybridPolicy,
+        AtomisticHybridReport, AtomisticHybridTermination, CostPosterior,
+    };
+    use crate::descriptor_space::DescriptorVector;
+    use crate::methods::cluster_search::Encounter;
+    use crate::pes_exploration::{MinimumRecord, PesNetwork, StructureContext};
+    use ndarray::Array1;
+
+    fn report(first: f64, event_energy: Option<f64>) -> AtomisticHybridReport {
+        let minimum = MinimumRecord {
+            id: 0,
+            energy: first,
+            coordinates: Array1::zeros(3),
+            context: StructureContext::default(),
+            max_gradient: 0.0,
+            descriptor: DescriptorVector::from_design(vec![1.0]).expect("descriptor"),
+        };
+        let events = event_energy
+            .into_iter()
+            .map(|terminal_energy| AtomisticHybridEvent {
+                attempt: 1,
+                mechanism: AtomisticHybridMechanism::BasinEscape,
+                source_basin: 0,
+                source_energy: first,
+                terminal_energy,
+                selected_information: 0.0,
+                selected_information_rate: 0.0,
+                representative_atom: None,
+                mode_rank: None,
+                direction: None,
+                escape_scale: None,
+                new_minimum_ids: Vec::new(),
+                new_saddle_ids: Vec::new(),
+                new_unresolved_saddle_ids: Vec::new(),
+                charged_evaluations: 4,
+                converged: true,
+                budget_exhausted: false,
+                error: None,
+            })
+            .collect();
+        AtomisticHybridReport {
+            identity_domain: "boundary".into(),
+            network: PesNetwork::from_records(vec![minimum], Vec::new()),
+            policy: AtomisticHybridPolicy::Adaptive,
+            charged_evaluations: 10,
+            events,
+            mechanism_pulls: [0, 1],
+            expected_mechanism_costs: [1.0, 1.0],
+            termination: AtomisticHybridTermination::BudgetConsumed,
+        }
+    }
+
+    #[test]
+    fn first_encounter_handles_boundary_below_target_and_nan() {
+        let target = -10.0;
+        let tolerance = 0.25;
+        let boundary = target + tolerance;
+        assert_eq!(
+            report(boundary, None).first_encounter(target, tolerance),
+            Encounter::Found {
+                charged: 10,
+                hops: 0,
+            }
+        );
+        assert_eq!(
+            report(boundary + 1.0, Some(boundary)).first_encounter(target, tolerance),
+            Encounter::Found {
+                charged: 10,
+                hops: 1,
+            }
+        );
+        assert!(
+            report(target - 5.0, None)
+                .first_encounter(target, tolerance)
+                .found()
+        );
+        assert!(
+            !report(boundary.next_up(), Some(boundary.next_up()))
+                .first_encounter(target, tolerance)
+                .found()
+        );
+        assert!(
+            !report(f64::NAN, Some(f64::NAN))
+                .first_encounter(target, tolerance)
+                .found()
+        );
+        assert!(
+            !report(target, None)
+                .first_encounter(f64::NAN, tolerance)
+                .found()
+        );
+        assert!(
+            !report(target, None)
+                .first_encounter(target, f64::NAN)
+                .found()
+        );
+    }
 
     #[test]
     fn cost_posterior_updates_from_charged_calls_without_discarding_its_prior() {

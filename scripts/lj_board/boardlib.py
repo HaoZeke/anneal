@@ -12,9 +12,16 @@ import math
 import os
 import platform
 import socket
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 # Set before NumPy or Numba read the variables.
 THREAD_PINS = {
@@ -52,7 +59,7 @@ REFERENCES = {
     98: -543.665361,
     104: -582.086642,
 }
-HIT_TOL = 1.0e-4
+HIT_TOL = DEFAULT_HIT_TOL
 FORCE_BAR = 0.0514221
 # Midpoint of the 0.36 to 0.40 band in Wales and Doye, J. Phys. Chem. A
 # 101, 5111 (1997). The same value is LennardJonesPreset::ALL_POINTS_STEP.
@@ -184,7 +191,7 @@ def bfgs_apply(inv, gradient):
 
 
 def predicate(energy: float, force: float, calls: int, reference: float, budget: int) -> bool:
-    return energy < reference + HIT_TOL and force <= FORCE_BAR and calls <= budget
+    return energy_hits(energy, reference, HIT_TOL) and force <= FORCE_BAR and calls <= budget
 
 
 def random_cluster(n: int, seed: int) -> np.ndarray:

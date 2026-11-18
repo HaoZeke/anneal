@@ -20,6 +20,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 # run_campaign.py scores 15 and 20 at the (H2O)20 paper ceiling. 4 and 8 are
 # not in that map and use the same ceiling; a hit stops the run.
 PAPER_BUDGETS = {4: 2_000_000, 8: 2_000_000, 15: 2_000_000, 20: 2_000_000}
@@ -30,7 +36,7 @@ REFERENCES = {
     20: -872.9887544952,
 }
 RADII = {4: 4.9229, 8: 5.4544, 15: 6.7744, 20: 7.5769}
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 FIELDS = [
     "system",

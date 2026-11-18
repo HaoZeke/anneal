@@ -17,6 +17,13 @@ import csv
 import math
 import sys
 from collections import defaultdict
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SCRIPTS = _REPO_ROOT / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from target_tol import energy_hits  # noqa: E402
 
 DM_TAU = 1e-3
 WIN_ATOL = 1e-9
@@ -84,7 +91,7 @@ def summarize_rows(rows):
         for m, v in cell.items():
             if v <= best + WIN_ATOL + WIN_RTOL * abs(best):
                 wins[m] += 1
-            if v <= target:
+            if energy_hits(v, target, 0.0):
                 solved[m] += 1
         ordered = sorted(cell.items(), key=lambda item: item[1])
         i = 0

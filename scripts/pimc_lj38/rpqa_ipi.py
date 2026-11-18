@@ -11,11 +11,18 @@ afiorent/i-pi ``4e86f5fd``.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import sys
 
 import numpy as np
 
 from meter import Meter
+
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import energy_hits  # noqa: E402
 
 
 def main() -> None:
@@ -34,7 +41,7 @@ def main() -> None:
         pots = dstrip(self.syslist[isys].forces.pots)
         best = float(np.min(pots))
         meter.note_pin(best)
-        if best <= level_ha:
+        if energy_hits(best, level_ha, 0.0):
             meter.mark_hit()
             os._exit(0)
         return nrelax

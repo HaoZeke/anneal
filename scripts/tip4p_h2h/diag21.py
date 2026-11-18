@@ -43,9 +43,15 @@ import networkx as nx
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 SEEDS = tuple(range(2000, 2012))
 BUDGET = 2_000_000
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 CAMBRIDGE = {
     8: -305.5183221676,
     15: -628.3722525077,

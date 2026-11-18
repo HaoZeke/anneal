@@ -11,6 +11,7 @@
 //! The table is exact, not approximate: after any sequence of updates it
 //! equals the table built from scratch, and a test witnesses that on random
 //! configurations and random moves.
+#![allow(clippy::items_after_test_module)]
 
 use ndarray::ArrayView1;
 

@@ -14,6 +14,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
 ASE_ARMS = ("ase_bh", "ase_mh")
@@ -42,7 +46,7 @@ TEX_LABELS = {
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 TEX_MARKS = ("% ase-panel table: start", "% ase-panel table: end")
 ASE_VERSION = "3.29.0"
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 HEADER = (
     "arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,"
     "median_outside_s,median_over_anneal,median_anneal_over,fisher_p,"
@@ -126,7 +130,7 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
             evals_to_hit = int(row["evals_to_hit"])
             if row["stop"] != "hit" or not 0 < evals_to_hit <= charged:
                 raise SystemExit(f"invalid hit row {row}")
-            if float(row["best"]) > reference + HIT_TOL + 5.0e-9:
+            if not energy_hits(float(row["best"]), reference, HIT_TOL + 5.0e-9):
                 raise SystemExit(f"hit above threshold {row}")
         elif row["stop"] == "budget":
             if charged != budget:

@@ -178,6 +178,11 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
         && largest_component(gradient) < threshold
 }
 
+#[inline]
+fn quench_watch_continues(stop_energy: Option<f64>, fv: f64) -> bool {
+    !stop_energy.is_some_and(|target| crate::energy_hits(fv, target, 0.0))
+}
+
 /// The convergence check a relaxation paid for at the point it ended.
 #[derive(Clone)]
 struct Check {
@@ -967,9 +972,9 @@ where
             }
             None => x,
         };
-        let stop_at = led.target();
         // A descent from where the previous one ended, the full pass after
         // a screen among them, opens by asking for an answer already paid.
+        let stop_energy = led.target();
         let mut opening = prior.clone();
         let mut call_seconds = 0.0_f64;
         let mut timed_calls = 0usize;
@@ -1002,7 +1007,7 @@ where
             Some((energy, gradient))
         };
         let mut watch = |_: usize, fv: f64| {
-            if stop_at.is_some_and(|limit| fv <= limit) {
+            if !quench_watch_continues(stop_energy, fv) {
                 return false;
             }
             if screening && probe {
@@ -2587,11 +2592,12 @@ impl Encounter {
 
 /// The first encounter with `target` in a run's improvement trace.
 ///
-/// `target` is compared with a tolerance, since a published minimum is quoted
-/// to six decimals and a relaxation lands near it rather than on it.
+/// `target` is compared under the one-sided rule `energy <= target + tolerance`,
+/// since a published minimum is quoted to six decimals and a relaxation lands
+/// near it rather than on it.
 pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize) -> Encounter {
     for &(hops, charged, _, e) in &out.improvements {
-        if e < target + tolerance {
+        if crate::energy_hits(e, target, tolerance) {
             return Encounter::Found { charged, hops };
         }
     }
@@ -2704,6 +2710,21 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    #[test]
+    fn quench_watch_rejects_negative_infinity() {
+        let mut led = Ledger::new(8);
+        led.stop_below(-1.0);
+        let stop_energy = led.target();
+        assert!(
+            !quench_watch_continues(stop_energy, -1.0),
+            "quench must stop once the target is hit"
+        );
+        assert!(
+            quench_watch_continues(stop_energy, f64::NEG_INFINITY),
+            "non-finite trial energies must not stop the quench watch"
+        );
+    }
 
     #[test]
     fn a_zero_step_read_is_one_physical_energy_and_not_a_screen() {
@@ -3451,7 +3472,7 @@ mod tests {
         cfg.return_screen = true;
         let mut ledger = Ledger::new(150_000);
         let (out, _) = search(&pot, &cfg, &mut ledger, 0).expect("finite start");
-        let e = first_encounter(&out, -44.326801, 1e-4, ledger.spent());
+        let e = first_encounter(&out, -44.326801, crate::DEFAULT_HIT_TOL, ledger.spent());
         match e {
             Encounter::Found { charged, hops } => {
                 assert!(charged > 0 && charged <= ledger.spent());
@@ -3462,12 +3483,44 @@ mod tests {
 
         // A target nothing can reach must censor at the spend, not report a
         // time.
-        let never = first_encounter(&out, -1e9, 1e-4, ledger.spent());
+        let never = first_encounter(&out, -1e9, crate::DEFAULT_HIT_TOL, ledger.spent());
         assert_eq!(
             never,
             Encounter::Censored {
                 charged: ledger.spent()
             }
+        );
+
+        let mut trace = Outcome {
+            best: -10.0,
+            ..out.clone()
+        };
+        let target = -10.0;
+        let tol = crate::DEFAULT_HIT_TOL;
+        let boundary = target + tol;
+        trace.improvements = vec![(1, 5, 1, f64::NAN), (2, 12, 1, boundary)];
+        assert_eq!(
+            first_encounter(&trace, target, tol, 20),
+            Encounter::Found {
+                charged: 12,
+                hops: 2
+            }
+        );
+        trace.improvements = vec![(3, 15, 1, target - 25.0)];
+        assert_eq!(
+            first_encounter(&trace, target, tol, 20),
+            Encounter::Found {
+                charged: 15,
+                hops: 3
+            }
+        );
+        assert_eq!(
+            first_encounter(&trace, f64::NAN, tol, 20),
+            Encounter::Censored { charged: 20 }
+        );
+        assert_eq!(
+            first_encounter(&trace, target, f64::NAN, 20),
+            Encounter::Censored { charged: 20 }
         );
     }
 
@@ -3589,7 +3642,7 @@ mod tests {
             best = best.min(out.best);
         }
         assert!(
-            best < -44.326801 + 1e-4,
+            crate::energy_hits(best, -44.326801, 1e-4),
             "best {best} against the published -44.326801"
         );
     }

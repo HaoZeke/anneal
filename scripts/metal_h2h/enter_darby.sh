@@ -12,7 +12,7 @@ LOGS=$ROOT/bench/metal-cluster-h2h/darby-logs
 bash "$HERE/build_anneal.sh"
 bash "$HERE/build_gmin_darby.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$LOGS" /work
-cp -a "$HERE/run_darby.py" "$WORK/bin/"
+cp -a "$HERE/run_darby.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 cp -a /work/metal-h2h/bin/h2h_metal "$WORK/bin/h2h_metal"
 chmod +x "$WORK/bin/h2h_metal"
 

@@ -94,7 +94,7 @@ fn to_plateau() -> (f64, Array1<f64>) {
     let raw = ico_sites(75);
     let (mut e, mut x) = relax(raw.view(), 2000);
     println!("grow_quench {e:.9}");
-    if e <= PLATEAU + 1e-3 {
+    if anneal_core::energy_hits(e, PLATEAU, anneal_core::DEFAULT_HIT_TOL) {
         return (e, x);
     }
     let mut rng = RngWalk(20260810);
@@ -114,7 +114,7 @@ fn to_plateau() -> (f64, Array1<f64>) {
             bx = x.clone();
             println!("best {be:.9} hop {hop}");
         }
-        if be <= PLATEAU + 1e-3 {
+        if anneal_core::energy_hits(be, PLATEAU, anneal_core::DEFAULT_HIT_TOL) {
             break;
         }
     }

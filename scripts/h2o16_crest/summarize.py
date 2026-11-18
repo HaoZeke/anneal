@@ -6,9 +6,13 @@ The hygienic panel replaces the original seed 15000 row with the rerun.
 The original panel keeps that first row. Neither panel overwrites a row.
 """
 import random
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import energy_hits  # noqa: E402
 SEEDS = ROOT / "bench" / "h2o16-crest" / "seeds.csv"
 SUMMARY = ROOT / "bench" / "h2o16-crest" / "summary.csv"
 REFERENCE = -81.396292669509
@@ -111,8 +115,8 @@ def line(name, rows):
     gaps = [row["anneal"] - row["crest"] for row in rows]
     n, p_value, positive, negative, effect = wilcoxon(gaps)
     low, high = bootstrap(gaps)
-    anneal_hits = sum(row["anneal"] <= REFERENCE + TOLERANCE for row in rows)
-    crest_hits = sum(row["crest"] <= REFERENCE + TOLERANCE for row in rows)
+    anneal_hits = sum(energy_hits(row["anneal"], REFERENCE, TOLERANCE) for row in rows)
+    crest_hits = sum(energy_hits(row["crest"], REFERENCE, TOLERANCE) for row in rows)
     return (
         f"{name},{n},{positive:.1f},{negative:.1f},{p_value:.10g},{effect:.10g},"
         f"{median(gaps):.10g},{low:.10g},{high:.10g},{anneal_hits},{crest_hits}\n"

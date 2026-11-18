@@ -18,6 +18,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 FIRST = ROOT / "bench" / "depth-posterior-ablation" / "results.csv"
 SECOND = ROOT / "results" / "size-tiered-selection.csv"
 
@@ -30,7 +34,7 @@ REFERENCE = {
 }
 POOLED = (75, 98, 104)
 FIRST_ONLY = (38, 55)
-TOL = 0.001
+TOL = DEFAULT_HIT_TOL
 
 
 def fisher_two_sided(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
@@ -97,11 +101,12 @@ def check_hit(size: int, flag: str, best: str) -> int:
     if flag not in ("0", "1"):
         raise SystemExit(f"hit flag {flag!r} is not 0 or 1")
     recorded = int(flag)
-    gap = abs(float(best) - REFERENCE[size])
-    within = gap < TOL
+    value = float(best)
+    within = energy_hits(value, REFERENCE[size], TOL)
     if recorded != int(within):
+        gap = value - REFERENCE[size]
         raise SystemExit(
-            f"LJ{size} hit flag {recorded} disagrees with gap {gap:.8f}"
+            f"LJ{size} hit flag {recorded} disagrees with gap {gap:+.8f}"
         )
     return recorded
 

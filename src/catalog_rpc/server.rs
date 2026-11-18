@@ -1927,7 +1927,7 @@ fn apply_request(
             clock.lap("coverage");
             let novelty = coverage.acquisition;
             let transition_uncertainty =
-                local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
+                local_basin.map_or(1.0, |id| transition_uncertainty(scientific, id));
             clock.lap("transition");
             let basin_unseen_mass_upper = diagnostic_unseen_mass_upper(
                 scientific.census.total_visits(),
@@ -3869,9 +3869,9 @@ const MINIMUM_INFORMATION_SAMPLES: usize = 128;
 
 fn empirical_action_costs(basin: ChargeSummary, ride: ChargeSummary) -> (f64, f64) {
     let basin_observed = (basin.events > 0 && basin.charged_calls > 0)
-        .then(|| basin.charged_calls as f64 / basin.events as f64);
+        .then_some(basin.charged_calls as f64 / basin.events as f64);
     let ride_observed = (ride.events > 0 && ride.charged_calls > 0)
-        .then(|| ride.charged_calls as f64 / ride.events as f64);
+        .then_some(ride.charged_calls as f64 / ride.events as f64);
     (
         basin_observed.or(ride_observed).unwrap_or(1.0),
         ride_observed.or(basin_observed).unwrap_or(1.0),
@@ -4207,15 +4207,12 @@ fn connect_coverage_classes(
 }
 
 fn transition_uncertainty(scientific: &ScientificState, basin: BasinId) -> f64 {
-    scientific.transition_nodes.get(&basin).map_or_else(
-        || 1.0,
-        |node| {
-            scientific
-                .transition_graph
-                .uncertainty("probe", *node, 0.5)
-                .unwrap_or(1.0)
-        },
-    )
+    scientific.transition_nodes.get(&basin).map_or(1.0, |node| {
+        scientific
+            .transition_graph
+            .uncertainty("probe", *node, 0.5)
+            .unwrap_or(1.0)
+    })
 }
 
 /// Build, store, and report the plan for one completed epoch.

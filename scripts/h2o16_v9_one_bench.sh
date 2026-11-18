@@ -5,6 +5,7 @@
 # via -xnam, not to the anneal binary.
 # Seeds 15000-15005, serial, one thread, cap 280305.
 set -u
+SCRIPTS_DIR=$(cd "$(dirname "$0")" && pwd)
 BIN=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 START_ROOT=${2:?start root}
 OUT=${3:?output root}
@@ -168,11 +169,12 @@ judge() {
   fi
   energy=$(last_energy "$dest/opt.out")
   intact=$(monomers_intact "$dest/xtbopt.xyz")
-  hit=$(python3 - "$energy" "$intact" "$REFERENCE" << 'PY'
+  hit=$(PYTHONPATH="$SCRIPTS_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 - "$energy" "$intact" "$REFERENCE" << 'PY'
 import sys
+from target_tol import energy_hits
 energy, intact, reference = sys.argv[1:]
 value = float(energy)
-print("hit" if intact == "intact" and value <= float(reference) + 1e-6 else "no")
+print("hit" if intact == "intact" and energy_hits(value, float(reference), 1e-6) else "no")
 PY
 )
   printf '%s\n' "$energy" > "$dest/energy.txt"
@@ -356,8 +358,9 @@ done
     echo "crest_pid: $(cat "$crest/pid.txt" 2>/dev/null || echo missing)"
     echo "anneal_pid: $(cat "$anneal/pid.txt" 2>/dev/null || echo missing)"
   } > "$base/seed.txt"
-python3 - "$base" "$REFERENCE" << 'PY'
+PYTHONPATH="$SCRIPTS_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 - "$base" "$REFERENCE" << 'PY'
 import glob, os, re, sys
+from target_tol import energy_hits
 base, reference = sys.argv[1:]
 reference = float(reference)
 crest = os.path.join(base, "crest")
@@ -390,7 +393,7 @@ else:
     value, member, intact = chosen
     lines.append("crest_energy: %.12f" % value)
     lines.append("crest_intact: %s" % intact)
-    lines.append("crest_hit: %s" % ("hit" if value <= reference + 1e-6 else "no"))
+    lines.append("crest_hit: %s" % ("hit" if energy_hits(value, reference, 1e-6) else "no"))
     lines.append("crest_member_chosen: %s" % member)
 text = open(os.path.join(crest, "crest.out"), errors="replace").read() if os.path.isfile(os.path.join(crest, "crest.out")) else ""
 found = re.search(

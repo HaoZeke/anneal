@@ -67,7 +67,7 @@ pub struct StockSearch {
 impl StockSearch {
     /// Whether the recorded energy is at or below `target`.
     pub fn success(&self, target: f64) -> bool {
-        self.energy.is_finite() && self.energy <= target
+        crate::energy_hits(self.energy, target, 0.0)
     }
 }
 
@@ -269,6 +269,16 @@ mod tests {
         // stop is the ledger target alone.
         let hit = search_binary(&problem, start.view(), 20_000, -1.0, 11, false);
         assert!(hit.success(-1.0), "energy {}", hit.energy);
+        assert!(hit.success(hit.energy));
+        assert!(!hit.success(hit.energy.next_down()));
+        assert!(!hit.success(f64::NAN));
+        let nan_run = StockSearch {
+            energy: f64::NAN,
+            charged: 0,
+            state: Vec::new(),
+            nve_unavailable: false,
+        };
+        assert!(!nan_run.success(0.0));
         assert!(hit.charged < 20_000, "charged {}", hit.charged);
     }
 

@@ -586,7 +586,7 @@ impl GoodTuringSample {
 
     /// Estimated probability the next draw is a new type.
     pub fn unseen(self) -> Option<f64> {
-        (self.n != 0).then(|| self.n1 as f64 / self.n as f64)
+        (self.n != 0).then_some(self.n1 as f64 / self.n as f64)
     }
 
     /// Chao, A. (1984), *Scand. J. Statist.* 11:265-270: unseen-family

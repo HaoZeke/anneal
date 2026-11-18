@@ -16,6 +16,8 @@ echo "refusing HyperQueue submit: the work directory would be the home filer." >
 echo "scripts/elja_hq_pilot.sh is one Slurm allocation; each task uses /scratch/users." >&2
 exit 2
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
+ANNEAL_SCRIPTS=${JCC_SOURCE_ROOT:-$ROOT}/scripts
+DEFAULT_HIT_TOL=$(PYTHONPATH="$ANNEAL_SCRIPTS${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)')
 RGPOT=${RGPOT_ROOT:-$HOME/rgpot}
 MOL=${MOL_BIN:-$ROOT/target/release/examples/molecular_cluster}
 SLAB=${SLAB_BIN:-$ROOT/target/release/examples/slab_adsorption}
@@ -88,7 +90,7 @@ submit_mol() {
     -- bash -lc "export SEED_OFFSET=\${HQ_TASK_ID:-0}
 export RGPOT_XTB_ENGINE=${ROOT}/engines/libxtb_engine.so
 export TARGET_ENERGY=${target}
-export TARGET_TOL=1e-3
+export TARGET_TOL=${DEFAULT_HIT_TOL}
 export LD_LIBRARY_PATH=${XTBLIB}:${IRA_LIB_DIR}:${GCCLIB}:\${LD_LIBRARY_PATH:-}
 ${rpc}
 exec ${MOL} ${m} ${budget} 1" \
@@ -117,7 +119,7 @@ submit_slab() {
     -- bash -lc "export SEED_OFFSET=\${HQ_TASK_ID:-0}
 export RGPOT_CUH2_LIBRARY=${ROOT}/engines/librgpot_cuh2.so
 export TARGET_ENERGY=-415.971529
-export TARGET_TOL=1e-3
+export TARGET_TOL=${DEFAULT_HIT_TOL}
 export LD_LIBRARY_PATH=${XTBLIB}:${IRA_LIB_DIR}:${GCCLIB}:\${LD_LIBRARY_PATH:-}
 ${rpc}
 exec ${SLAB} ${CON} ${budget} 1" \

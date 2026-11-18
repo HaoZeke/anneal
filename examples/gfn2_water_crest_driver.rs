@@ -37,6 +37,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use anneal_core::energy_hits;
 use eindir_core::gradient::DifferentiableObjective;
 use ndarray::ArrayView1;
 use rgpot_eindir::{OVERLAP_SEPARATION_A, RgpotObjective};
@@ -203,7 +204,7 @@ fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f6
             served.best = total;
             served.best_coords.clone_from(&coords);
         }
-        if served.first_hit_call.is_none() && total <= target {
+        if served.first_hit_call.is_none() && energy_hits(total, target, 0.0) {
             served.first_hit_call = Some(served.calls);
             served.stop_reason = Some("target");
         } else if served.calls >= budget {

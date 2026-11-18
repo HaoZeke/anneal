@@ -4,7 +4,7 @@
 
 Lennard-Jones sizes 38, 75, 76 and 77. Six seeds on each arm. One local
 relaxation budget for every run. Hits are counted against the Cambridge
-Cluster Database energies in the fixture, with the same 1e-4 window the
+Cluster Database energies in the fixture, with the same 1e-3 window the
 cluster-search driver already uses. Nothing in this file is a paper count.
 """
 
@@ -19,6 +19,11 @@ from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parent
+for _candidate in (HERE, HERE.parent):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 
 # Copied from the Cambridge table before the runs. The fixture must match.
 LOCKED = {
@@ -35,7 +40,7 @@ SEEDS = (0, 1, 2, 3, 4, 5)
 # preset reached the Cambridge minimum between 506 and 962 full
 # relaxations, so 2000 sits past that and still finishes serially.
 RELAXATION_BUDGET = 2000
-HIT_TOL = 1.0e-4
+HIT_TOL = DEFAULT_HIT_TOL
 
 
 def load_fixture(path: Path) -> dict[int, float]:

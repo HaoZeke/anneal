@@ -8,6 +8,7 @@ set -euo pipefail
 
 system=${1:?system}
 root=$(cd "$(dirname "$0")/.." && pwd)
+DEFAULT_HIT_TOL=$(PYTHONPATH="$root/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)')
 cd "$root"
 out=${H2H_OUT:-h2h-board}
 binary=${H2H_ANNEAL:-target/release/examples/h2h_gmin_proof}
@@ -97,7 +98,7 @@ run_gmin() {
     echo "tree=$tree_sha"
     echo "host=$host"
     echo "cpu=$cpu"
-    echo "command=taskset -c 0 env H2H_SYSTEM=$system H2H_SEED=$seed H2H_BUDGET=$budget H2H_TARGET=$target H2H_TOL=0.001 GMIN"
+    echo "command=taskset -c 0 env H2H_SYSTEM=$system H2H_SEED=$seed H2H_BUDGET=$budget H2H_TARGET=$target H2H_TOL=$DEFAULT_HIT_TOL GMIN"
     echo "pins=$(taskset -cp $$ | awk '{print $NF}')"
     echo "data=examples/h2h_gmin_lj.data"
   } >"$log"
@@ -109,7 +110,7 @@ run_gmin() {
       H2H_SEED="$seed" \
       H2H_BUDGET="$budget" \
       H2H_TARGET="$target" \
-      H2H_TOL=0.001 \
+      H2H_TOL=$DEFAULT_HIT_TOL \
       H2H_ROW=row.txt \
       OMP_NUM_THREADS=1 \
       "$gmin" >gmin.out 2>gmin.err

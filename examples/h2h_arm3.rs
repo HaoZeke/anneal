@@ -43,14 +43,34 @@ enum Kind {
 /// global minimum; the Deaven icosahedral minimum -543.642957 is above it.
 fn system(name: &str) -> Option<(usize, Kind, f64, f64)> {
     Some(match name {
-        "lj38" => (38, Kind::Lj, -173.928427, 0.001),
-        "lj55" => (55, Kind::Lj, -279.248470, 0.001),
-        "lj75" => (75, Kind::Lj, -397.492331, 0.001),
-        "lj98" => (98, Kind::Lj, -543.665361, 0.001),
-        "m55r6" => (55, Kind::Morse(6.0), -250.286609, 0.001),
-        "m55r14" => (55, Kind::Morse(14.0), -220.646208, 0.001),
-        "m80r6" => (80, Kind::Morse(6.0), -378.333471, 0.001),
-        "m80r14" => (80, Kind::Morse(14.0), -340.811371, 0.001),
+        "lj38" => (38, Kind::Lj, -173.928427, anneal_core::DEFAULT_HIT_TOL),
+        "lj55" => (55, Kind::Lj, -279.248470, anneal_core::DEFAULT_HIT_TOL),
+        "lj75" => (75, Kind::Lj, -397.492331, anneal_core::DEFAULT_HIT_TOL),
+        "lj98" => (98, Kind::Lj, -543.665361, anneal_core::DEFAULT_HIT_TOL),
+        "m55r6" => (
+            55,
+            Kind::Morse(6.0),
+            -250.286609,
+            anneal_core::DEFAULT_HIT_TOL,
+        ),
+        "m55r14" => (
+            55,
+            Kind::Morse(14.0),
+            -220.646208,
+            anneal_core::DEFAULT_HIT_TOL,
+        ),
+        "m80r6" => (
+            80,
+            Kind::Morse(6.0),
+            -378.333471,
+            anneal_core::DEFAULT_HIT_TOL,
+        ),
+        "m80r14" => (
+            80,
+            Kind::Morse(14.0),
+            -340.811371,
+            anneal_core::DEFAULT_HIT_TOL,
+        ),
         "w6" => (6, Kind::Water, -197.78, 0.01),
         "w10" => (10, Kind::Water, -391.02, 0.01),
         "w15" => (15, Kind::Water, -628.37225, 0.01),
@@ -161,11 +181,11 @@ fn main() {
     let wall = started.elapsed().as_secs_f64();
 
     let best = outcome.best;
-    let hit = best < level;
+    let hit = anneal_core::energy_hits(best, reference, tol);
     let trace = outcome
         .improvements
         .iter()
-        .find(|(_, _, _, e)| *e < level)
+        .find(|(_, _, _, e)| anneal_core::energy_hits(*e, reference, tol))
         .map(|(hops, _, _, _)| hops.to_string());
     let seen = first_seen.load(Ordering::Relaxed);
     let (first_calls, first_source) = match (hit, seen) {

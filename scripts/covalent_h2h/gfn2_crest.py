@@ -62,10 +62,17 @@ import random
 import re
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from scipy.stats import fisher_exact, mannwhitneyu
+
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SYSTEMS = ("si10", "c10", "si13", "c20", "si20")
 CODES = ("anneal-general", "crest")
@@ -83,7 +90,7 @@ SEEDS = {
 CREST_SEEDS = dict(SEEDS)
 BUDGET = 100000
 ETEMP = 3000.0
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 # eV per Hartree in xtb 6.7.1.
 AUTOEV = 27.21138505
 # The lowest minimum any run of either code reached at these settings,
@@ -263,7 +270,7 @@ def run_crest(
         calls += int(count)
     best_file = out / "crest_best.xyz"
     best = first_frame_energy(best_file) if best_file.is_file() else float("inf")
-    hit = best <= REFERENCE[system] + HIT_TOL
+    hit = energy_hits(best, REFERENCE[system], HIT_TOL)
     return {
         "system": system,
         "code": "crest",
@@ -620,7 +627,7 @@ def rescore(
         "code": "crest",
         "reference_eV": f"{reference:.8f}",
         "runs": len(runs),
-        "hits": sum(float(row["best"]) <= reference + HIT_TOL for row in runs),
+        "hits": sum(energy_hits(float(row["best"]), reference, HIT_TOL) for row in runs),
         "seeds": " ".join(str(seed) for seed in sorted(int(r["seed"]) for r in runs)),
         "code_revision": revision,
         "host": host,

@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
-const TOL: f64 = 0.001;
+const TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
@@ -151,7 +151,7 @@ fn cmd_run(args: &[String]) {
     let inside_s = inside.load(Ordering::Relaxed) as f64 / 1.0e9;
     let outside_s = (wall - inside_s).max(0.0);
     let best = outcome.best;
-    let hit = best <= level;
+    let hit = anneal_core::energy_hits(best, reference, TOL);
     let seen = first_seen.load(Ordering::Relaxed);
     let first_calls = match (hit, seen) {
         (false, _) => "-".to_string(),

@@ -42,6 +42,12 @@ from pathlib import Path
 
 import numpy as np
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 CONVERGED = 1.0e-3
 PRESETS = ("communicating", "recommended")
 
@@ -203,9 +209,12 @@ def run_start(job: dict) -> dict:
             reason.append("cap")
             raise _Stop() from None
         last.update(x=x.copy(), e=energy, g=chart(gradient))
-        if energy <= target + window and float(np.max(np.abs(gradient))) <= CONVERGED:
+        if energy_hits(energy, target, window) and float(np.max(np.abs(gradient))) <= CONVERGED:
             energy, gradient = python_kernel(harness_x)
-            if not (energy <= target + window and float(np.max(np.abs(gradient))) <= CONVERGED):
+            if not (
+                energy_hits(energy, target, window)
+                and float(np.max(np.abs(gradient))) <= CONVERGED
+            ):
                 return last["e"], last["g"]
             try:
                 budget.note_quench(harness_x, energy, gradient, converged=True)
@@ -278,7 +287,8 @@ def main() -> int:
     layout_of(root, problem)
     kind = kind_of(problem)
     cap = int(problem["convergence"]["max_force_calls"])
-    window = float(problem["convergence"].get("energy_above_minimum") or 0.001)
+    raw = problem["convergence"].get("energy_above_minimum")
+    window = float(raw if raw is not None else DEFAULT_HIT_TOL)
     target = float(problem["convergence"]["energy_minimum"])
     work = (args.work or args.output.parent / "geometries").resolve()
     if kind == "tip4p":

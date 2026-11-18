@@ -5,6 +5,7 @@
 # repack. Scoring is the H2O16 vtight command. A hit is at or below the
 # GFN2 relaxation of the published cyclic tetramer, plus 1e-6 Eh.
 set -u
+SCRIPTS_DIR=$(cd "$(dirname "$0")" && pwd)
 BIN=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 START_ROOT=${2:?start root}
 OUT=${3:?output root}
@@ -128,8 +129,9 @@ score_one() {
     timed "$XTB" in.xyz --gfn 2 --opt vtight --acc 0.01 --iterations 500 > opt.out 2> opt.err
     echo $? > exit.code
   )
-  python3 - "$dest" "$REFERENCE" << 'PY'
+  PYTHONPATH="$SCRIPTS_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 - "$dest" "$REFERENCE" << 'PY'
 import math, os, re, sys
+from target_tol import energy_hits
 dest, reference = sys.argv[1:]
 reference = float(reference)
 text = open(os.path.join(dest, "opt.out"), errors="replace").read()
@@ -165,7 +167,7 @@ if os.path.isfile(xyz):
     intact = "intact" if ok else "broken"
 open(os.path.join(dest, "intact.txt"), "w").write(intact + "\n")
 try:
-    hit = "yes" if float(energy) <= reference + 1e-6 else "no"
+    hit = "yes" if energy_hits(float(energy), reference, 1e-6) else "no"
 except ValueError:
     hit = "no"
 open(os.path.join(dest, "hit.txt"), "w").write(hit + "\n")
@@ -235,8 +237,9 @@ if [[ -f $ensemble ]]; then
   done
 fi
 
-python3 - "$base" "$crest" "$REFERENCE" << 'PY'
+PYTHONPATH="$SCRIPTS_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 - "$base" "$crest" "$REFERENCE" << 'PY'
 import os, re, sys
+from target_tol import energy_hits
 base, crest, reference = sys.argv[1:]
 reference = float(reference)
 
@@ -277,7 +280,7 @@ if best is None:
 else:
     lines.append(f"crest_energy: {best[0]:.12f}")
     lines.append(f"crest_intact: {best[1]}")
-    lines.append("crest_hit: " + ("yes" if best[0] <= reference + 1e-6 else "no"))
+    lines.append("crest_hit: " + ("yes" if energy_hits(best[0], reference, 1e-6) else "no"))
     lines.append(f"crest_member_chosen: {best[2]}")
 text = open(os.path.join(crest, "crest.out"), errors="replace").read() if os.path.isfile(os.path.join(crest, "crest.out")) else ""
 steps = 0

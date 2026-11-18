@@ -1,0 +1,38 @@
+py|        a_hit = [b <= ref + HIT_TOL for b in a_best]
+py|    ah = sum(1 for b in a_best if b <= ref + HIT_TOL)
+py|                and energy <= self.reference + self.tol
+py|            and native_energy <= self.reference + self.tol
+py|            and reduced_energy <= self.reference + self.tol
+py|    anneal_hits = sum(row["anneal"] <= REFERENCE + TOLERANCE for row in rows)
+py|    crest_hits = sum(row["crest"] <= REFERENCE + TOLERANCE for row in rows)
+py|            energy <= published + 1.0e-3,
+py|    hit = best <= target + 0.001
+py|                "hit": int(energy <= STOP),
+py|    hit = lowest <= stop
+py|    hit = best <= reference + HIT_TOL
+py|            g_hit = [b <= ref + HIT_TOL for b in g_best]
+py|    gh = sum(1 for b in g_best if b <= ref + HIT_TOL)
+py|    hit = best <= REFERENCE[system] + HIT_TOL
+py|        hit=$(python3 -c 'import sys; e,r,w=map(float, sys.argv[1:]); print("yes" if e<=r+w else "no")' "$energy" "$REFERENCE" 0.01)
+rs|    best <= reference + TOL
+rs|const HIT_TOL: f64 = 0.001;
+rs|const HIT: f64 = 0.001;
+rs|const TARGET_TOLERANCE: f64 = 1e-3;
+rs|                .filter(|(_, energy, _)| *energy <= target + TARGET_TOLERANCE)
+rs|        .find(|(_, _, _, energy)| *energy <= level)
+rs|    let hit = best <= level;
+rs|            .find(|&&(_, _, _, energy)| energy < reference + HIT)
+rs|        .find(|(_, _, _, energy)| *energy <= target + 1e-4)
+rs|            .find(|(_, _, _, energy)| *energy <= TARGET + HIT)
+rs|                hits += usize::from(board.best <= reference + HIT);
+rs|    let hit = stop_at.is_some_and(|level| seen.lowest <= level);
+rs|    target.is_some_and(|target| energy <= target)
+rs|            if validated && energy <= target && hit_calls_r.load(Ordering::Relaxed) == 0 {
+rs|        self.target.is_some_and(|target| energy <= target)
+rs|            mf_hits += int(bf0 <= thresh)
+sh|      H2H_TARGET=$target H2H_TOL=0.001 \
+sh|        H2H_TOL="0.001",
+sh|DEFAULT_HIT_TOL=1e-3
+py|    return target + tol >= energy
+py|    hit = reference + HIT_TOL >= best
+f90|         IF (ENERGY <= TARGET_ENERGY + TOL) THEN

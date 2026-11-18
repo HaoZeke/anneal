@@ -14,7 +14,14 @@ import statistics
 import sys
 from pathlib import Path
 
-STOP = -582.086641
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import energy_hits  # noqa: E402
+
+REFERENCE = -582.086642
+TOLERANCE = 1.0e-6
+STOP = REFERENCE + TOLERANCE
 
 
 def grab(text, pattern):
@@ -34,7 +41,7 @@ def load(logdir, cut):
         rows.append(
             {
                 "seed": seed,
-                "hit": int(energy <= STOP),
+                "hit": int(energy_hits(energy, REFERENCE, TOLERANCE)),
                 "charged": int(grab(log, r"^charged:\s*(\d+)")),
                 "wall": float(grab(log, r"^wall_seconds:\s*(\S+)")),
                 "energy": energy,

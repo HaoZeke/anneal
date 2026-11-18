@@ -29,7 +29,7 @@ use anneal_core::methods::lattice_search::Quench;
 use anneal_core::potentials::PairKind;
 
 /// Hit window above the reference energy.
-const HIT: f64 = 1e-4;
+const HIT: f64 = anneal_core::DEFAULT_HIT_TOL;
 /// Smallest private bank that has a donor. One slot never splices.
 const PRIVATE_SLOTS: usize = 2;
 /// Normal quantile used for both intervals.
@@ -178,7 +178,7 @@ fn score(run: &lattice_ensemble::Run, reference: f64, budget: usize) -> Trial {
     let hit_at = run
         .trace
         .iter()
-        .find(|record| record.energy < reference + HIT);
+        .find(|record| anneal_core::energy_hits(record.energy, reference, HIT));
     let hit = hit_at.is_some();
     Trial {
         hit,

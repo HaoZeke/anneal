@@ -10,6 +10,8 @@
 # Keywords match GMIN_BEST: temperature 1.5, step 0.40 0.51,
 # NEWRESTART 40, AVOID 4.0 20 F. The cap is H2H_BUDGET.
 set -eu
+root=$(cd "$(dirname "$0")/../../.." && pwd)
+DEFAULT_HIT_TOL=$(PYTHONPATH="$root/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)')
 binary=$1
 writer=$2
 work=$3
@@ -41,7 +43,7 @@ EOF
   cd "$work"
   H2H_BUDGET="$budget" \
   H2H_TARGET=-582.086642 \
-  H2H_TOL=0.001 \
+  H2H_TOL=$DEFAULT_HIT_TOL \
   H2H_SEED="$seed" \
   H2H_SYSTEM=lj104 \
   H2H_ROW="${work}/row.txt" \

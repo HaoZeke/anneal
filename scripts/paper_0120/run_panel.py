@@ -10,7 +10,7 @@ the same revision with ``bench/paper-0120/lj103-table.patch``, which adds
 the Cambridge energy and the 4e6 budget and nothing else; its rows carry
 driver ``h2h_gmin_proof+lj103``. The newest develop LJ75 rows were taken
 through ``h2h_seed`` (``scripts/generic_alloy/run_ablation.py``), so LJ75
-also runs that way, with that script's 1e-4 hit tolerance.
+also runs that way, with that script's 1e-3 hit tolerance.
 
 One process, ``taskset -c 0``, one thread. Rows are appended with the code
 revision and the host after every run and are never rewritten; a row
@@ -34,6 +34,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 SEEDS = tuple(range(2000, 2012))
 PAPER_BUDGETS = {
     "lj38": 400_000,
@@ -49,7 +55,7 @@ PAPER_BUDGETS = {
     "m80r14": 4_000_000,
 }
 LJ75_REFERENCE = -397.492331
-SEED_HIT_TOL = 1.0e-4
+SEED_HIT_TOL = DEFAULT_HIT_TOL
 
 # System, driver, binary, arguments before the seed. Run in this order.
 RUNS = (

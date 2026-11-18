@@ -43,8 +43,8 @@ It has a fixed library of six moves, a reduced temperature of \(0.8\), and a
 depth posterior that chooses the move, and none of the three changes with the
 size of the cluster.
 The preset also carries structure priors that name a close-packed motif.
-A run hits when the quenched energy \(E\) and the published energy
-\(E_{\mathrm{ref}}\) satisfy \(|E-E_{\mathrm{ref}}|<10^{-3}\).
+A run hits when the quenched energy \(E\) satisfies
+\(E \le E_{\mathrm{ref}}+10^{-3}\).
 On seeds 2000--2005 the depth posterior and a uniform draw both hit
 LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6 seeds.
 Pooled with seeds 7000--7005, the posterior hits LJ\(_{75}\) on 11 of
@@ -1050,8 +1050,8 @@ steps) in reduced units on Lennard-Jones and Morse, and on Au\(_{55}\)
 with the Darby gold parameters, GMIN's nearest-neighbor container
 \(11.829521\)~\AA, step and taboo distances scaled by \(r_0/2^{1/6}\)
 (\(r_0=2.884\)~\AA), and \(T=0.1\)~eV from the Wales Gupta example.
-The hit is a quenched energy that differs by less than 0.001 from the
-Cambridge Cluster Database minimum: besides Section~\ref{sec:hit},
+The hit is a quenched energy at or below the Cambridge Cluster Database
+minimum plus 0.001: besides Section~\ref{sec:hit},
 \(-569.363652\) at LJ\(_{102}\), \(-575.766131\) at LJ\(_{103}\),
 \(-893.310258\) at LJ\(_{150}\), \(-191.03085280\)~eV at Au\(_{55}\),
 \(-250.286609\) and \(-220.646208\) at M\(_{55}\) (\(\rho=6,14\)), and

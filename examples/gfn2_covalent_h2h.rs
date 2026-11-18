@@ -52,7 +52,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rgpot_eindir::RgpotObjective;
 
-const HIT_TOL_EV: f64 = 1e-3;
+const HIT_TOL_EV: f64 = anneal_core::DEFAULT_HIT_TOL;
 const FAR_A: f64 = 20.0;
 
 static POTENTIAL_NS: AtomicU64 = AtomicU64::new(0);
@@ -290,13 +290,14 @@ fn main() {
     .expect("finite start");
     let wall = started.elapsed().as_secs_f64();
     let pot_s = POTENTIAL_NS.load(Ordering::Relaxed) as f64 / 1e9;
-    let level = target.map(|t| t + HIT_TOL_EV);
-    let hit = level.is_some_and(|level| outcome.best <= level);
+    let hit = target.is_some_and(|t| anneal_core::energy_hits(outcome.best, t, HIT_TOL_EV));
     let evals = if hit {
         outcome
             .improvements
             .iter()
-            .find(|(_, _, _, e)| level.is_some_and(|level| *e <= level))
+            .find(|(_, _, _, e)| {
+                target.is_some_and(|t| anneal_core::energy_hits(*e, t, HIT_TOL_EV))
+            })
             .map_or(outcome.charged, |(_, spent, _, _)| {
                 (*spent).min(outcome.charged)
             })

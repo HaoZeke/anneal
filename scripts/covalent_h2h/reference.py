@@ -19,6 +19,12 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
 ARMS = ("recommended", "nopriors", "general")
 NO_TARGET = "-1e300"
@@ -50,7 +56,7 @@ def gmin_job(binary: Path, gmin: Path, data: Path, system: str, seed: int, budge
         H2H_SYSTEM=system,
         H2H_SEED=str(seed),
         H2H_TARGET=NO_TARGET,
-        H2H_TOL="0.001",
+        H2H_TOL=f"{DEFAULT_HIT_TOL}",
         H2H_ROW=str(work / "row.txt"),
     )
     with (work / "log").open("w") as handle:

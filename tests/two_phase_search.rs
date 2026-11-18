@@ -68,13 +68,13 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     for seed in 0..SEEDS {
         let (best, _, spent) = run(&compacted, budget, seed);
         assert!(spent <= budget, "the ledger overspent: {spent} of {budget}");
-        if best < LJ38_OCTAHEDRON + 1e-4 {
+        if anneal_core::energy_hits(best, LJ38_OCTAHEDRON, 1e-4) {
             compact_hits += 1;
             compact_mask |= 1 << seed;
         }
         let (plain_best, _, plain_spent) = run(&plain, budget, seed);
         assert!(plain_spent <= budget);
-        if plain_best < LJ38_OCTAHEDRON + 1e-4 {
+        if anneal_core::energy_hits(plain_best, LJ38_OCTAHEDRON, 1e-4) {
             plain_hits += 1;
             plain_mask |= 1 << seed;
         }
@@ -108,5 +108,8 @@ fn a_surface_portfolio_runs_to_the_end_of_its_ledger() {
     let (best, hops, spent) = run(&cfg, 6_000, 3);
     assert!(best.is_finite() && hops > 0);
     assert_eq!(spent, 6_000, "the portfolio walk did not spend its ledger");
-    assert!(best < -44.3268 + 1e-3, "LJ13 icosahedron missed: {best:.6}");
+    assert!(
+        anneal_core::energy_hits(best, -44.3268, anneal_core::DEFAULT_HIT_TOL),
+        "LJ13 icosahedron missed: {best:.6}"
+    );
 }

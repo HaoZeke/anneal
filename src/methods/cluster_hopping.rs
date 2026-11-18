@@ -751,7 +751,8 @@ impl Ledger {
 
     /// Whether `energy` has reached the installed threshold.
     pub fn below_target(&self, energy: f64) -> bool {
-        self.target.is_some_and(|target| energy <= target)
+        self.target
+            .is_some_and(|target| crate::energy_hits(energy, target, 0.0))
     }
 
     /// Whether the incumbent has reached the installed threshold.
@@ -10079,6 +10080,10 @@ mod tests {
         let (_, at, _, energy) = *outcome.improvements.last().expect("an improvement");
         assert_eq!(energy, -2.0);
         assert_eq!(at, outcome.charged);
+        assert!(ledger.below_target(-1.0));
+        assert!(ledger.below_target(-5.0));
+        assert!(!ledger.below_target((-1.0_f64).next_up()));
+        assert!(!ledger.below_target(f64::NAN));
     }
 
     #[test]
@@ -12261,7 +12266,7 @@ mod tests {
 
         const SHELF: f64 = -1.0;
         const TARGET: f64 = -10.0;
-        const HIT: f64 = 0.001;
+        let hit_tol = crate::DEFAULT_HIT_TOL;
         let same = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
             left.len() == right.len()
                 && left
@@ -12324,7 +12329,7 @@ mod tests {
         let force_to_hit = out
             .improvements
             .iter()
-            .find(|(_, _, _, energy)| *energy <= TARGET + HIT)
+            .find(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, hit_tol))
             .map(|(_, charged, _, _)| *charged);
         assert_eq!(force_to_hit, Some(spent));
         assert!(
@@ -12335,7 +12340,7 @@ mod tests {
         assert!(
             out.improvements
                 .iter()
-                .filter(|(_, _, _, energy)| *energy <= TARGET + HIT)
+                .filter(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, hit_tol))
                 .count()
                 == 1
         );
@@ -12345,7 +12350,7 @@ mod tests {
             .find(|(_, _, _, energy)| (*energy - SHELF).abs() <= 1e-12)
             .map(|(_, _, _, energy)| *energy)
             .expect("shelf row");
-        assert!(shelf_energy > TARGET + HIT);
+        assert!(!crate::energy_hits(shelf_energy, TARGET, hit_tol));
     }
 }
 

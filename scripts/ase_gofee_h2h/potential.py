@@ -7,11 +7,19 @@ Energy is ``4 (r^-12 - r^-6)``. The gradient matches
 
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
 from ase.calculators.calculator import Calculator
 from numba import njit
+
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import energy_hits  # noqa: E402
 
 
 class BudgetReached(BaseException):
@@ -108,7 +116,7 @@ class LjCalculator(Calculator):
         if (
             self.hit_calls is None
             and peak <= self.fmax
-            and reduced_energy <= self.reference + self.tol
+            and energy_hits(reduced_energy, self.reference, self.tol)
         ):
             self.hit_calls = self.calls
             raise HitReached()
@@ -226,7 +234,7 @@ class AnnealCalculator(Calculator):
         if (
             self.hit_calls is None
             and peak <= self.fmax
-            and native_energy <= self.reference + self.tol
+            and energy_hits(native_energy, self.reference, self.tol)
         ):
             self.hit_calls = self.calls
             raise HitReached()

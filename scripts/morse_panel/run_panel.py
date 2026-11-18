@@ -17,6 +17,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 SYSTEMS = (
     ("m55r6", 55, 6.0, 1_000_000, -250.286609),
     ("m55r14", 55, 14.0, 1_000_000, -220.646208),
@@ -242,7 +248,7 @@ def run_gmin(
             "H2H_SYSTEM": name,
             "H2H_SEED": str(seed),
             "H2H_TARGET": f"{target:.10f}",
-            "H2H_TOL": "0.001",
+            "H2H_TOL": f"{DEFAULT_HIT_TOL}",
             "H2H_ROW": str(work / "row.txt"),
         }
     )

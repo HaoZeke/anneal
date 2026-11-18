@@ -25,7 +25,7 @@ use ndarray::{Array1, ArrayView1};
 const QUENCH_RMS: f64 = 1.0e-3;
 const QUENCH_ITERS: usize = 500;
 /// A hit is a validated quench at or below the Cambridge energy plus this window.
-const HIT_WINDOW: f64 = 1.0e-3;
+const HIT_WINDOW: f64 = anneal_core::DEFAULT_HIT_TOL;
 /// Lennard-Jones temperature that `Config::with_scales` multiplies by the energy scale.
 const LJ_TEMPERATURE: f64 = 0.8;
 /// Largest difference allowed between the configured and the published temperature.
@@ -92,7 +92,6 @@ fn main() {
     let budget: usize = args[3].parse().expect("budget");
     let seed: u64 = args[4].parse().expect("seed");
     let reference: f64 = args[5].parse().expect("reference energy");
-    let target = reference + HIT_WINDOW;
 
     let potential = SuttonChen::new(n, family);
     let nn = std::f64::consts::FRAC_1_SQRT_2;
@@ -170,7 +169,10 @@ fn main() {
         );
         if full {
             let q = full_quenches_r.fetch_add(1, Ordering::Relaxed) + 1;
-            if validated && energy <= target && hit_calls_r.load(Ordering::Relaxed) == 0 {
+            if validated
+                && anneal_core::energy_hits(energy, reference, HIT_WINDOW)
+                && hit_calls_r.load(Ordering::Relaxed) == 0
+            {
                 led.record(energy, xr.view());
                 hit_calls_r.store(led.spent().max(1), Ordering::Relaxed);
                 hit_quenches_r.store(q, Ordering::Relaxed);

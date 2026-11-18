@@ -46,7 +46,7 @@ const N: usize = 98;
 const K: usize = 40;
 const MAX_STEP: u64 = 1500;
 const TARGET: f64 = -543.665361;
-const HIT: f64 = 1e-3;
+const HIT: f64 = anneal_core::DEFAULT_HIT_TOL;
 const REFERENCE: f64 = -543.665361;
 
 fn pair_unit() -> f64 {
@@ -195,7 +195,7 @@ fn run_one(seed: u64, anneal: bool) -> Run {
         }
         init_calls += 1;
         best = best.min(point.energy);
-        if point.energy <= TARGET + HIT {
+        if anneal_core::energy_hits(point.energy, TARGET, HIT) {
             emit(&format!(
                 "seed {seed} hit 1 calls 0 init {init_calls} energy {:.6}",
                 point.energy
@@ -261,7 +261,7 @@ fn run_one(seed: u64, anneal: bool) -> Run {
             }
             best = best.min(energy);
             let child = Point { energy, x };
-            if energy <= TARGET + HIT {
+            if anneal_core::energy_hits(energy, TARGET, HIT) {
                 hit_at = Some(child);
                 break;
             }

@@ -972,7 +972,11 @@ mod tests {
         assert_eq!(ledger.spent(), 20_000);
         assert_eq!(out.charged, 20_000);
         // Icosahedral Morse 13 at rho 6, Cambridge Cluster Database.
-        assert!(out.best < -42.439 + 1e-3, "best {}", out.best);
+        assert!(
+            crate::energy_hits(out.best, -42.439, crate::DEFAULT_HIT_TOL),
+            "best {}",
+            out.best
+        );
     }
 
     #[test]
@@ -984,6 +988,10 @@ mod tests {
         let start = random_tip4p_cluster(n, &mut rng);
         let mut ledger = Ledger::new(60_000);
         let out = hop(&objective, &cfg, &mut ledger, start.view(), 2);
-        assert!(out.best < -197.7805260034 + 1e-3, "best {}", out.best);
+        assert!(
+            crate::energy_hits(out.best, -197.7805260034, crate::DEFAULT_HIT_TOL),
+            "best {}",
+            out.best
+        );
     }
 }

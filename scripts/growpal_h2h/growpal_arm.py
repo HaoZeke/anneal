@@ -32,7 +32,15 @@ os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 os.environ.setdefault("BLIS_NUM_THREADS", "1")
 
 import gc
+from pathlib import Path
 import random
+import sys
+
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 GROWATOM = "Mo"
 DTOL = 1.2
@@ -40,7 +48,7 @@ REOPT_ROUNDS = 5
 DEDUP_TOLS = 0.99
 DEDUP_TOLE = 0.1
 EARLY_TOL = 0.01
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 SELECTION_FACTOR = 1.8
 
 
@@ -194,7 +202,7 @@ def _optimise(mol_list, meter: Meter, target: int, level: float):
         if len(out) == target:
             if meter.best is None or info["e"] < meter.best:
                 meter.best = info["e"]
-            if info["e"] <= level and meter.hit_at is None:
+            if energy_hits(info["e"], level, 0.0) and meter.hit_at is None:
                 meter.hit_at = meter.evals
                 raise Found()
     elapsed = time.perf_counter() - started
@@ -208,7 +216,7 @@ def _optimise(mol_list, meter: Meter, target: int, level: float):
 def _consider(meter: Meter, energy: float, level: float) -> None:
     if meter.best is None or energy < meter.best:
         meter.best = energy
-    if energy <= level and meter.hit_at is None:
+    if energy_hits(energy, level, 0.0) and meter.hit_at is None:
         meter.hit_at = meter.evals
         raise Found()
 

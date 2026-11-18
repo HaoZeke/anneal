@@ -31,7 +31,7 @@ done
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp"
 cp -a "$TARGET/release/examples/gfn2_water_h2h" "$TARGET/release/examples/gfn2_water_crest_driver" \
   "$WORK/bin/"
-cp -a "$HERE/run_capped.py" "$WORK/bin/"
+cp -a "$HERE/run_capped.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 git -C "$ROOT" rev-parse HEAD > "$WORK/anneal-head"
 
 cat > "$WORK/bin/inside.sh" << EOF

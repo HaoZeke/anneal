@@ -80,7 +80,11 @@ impl Counted {
             seen.lowest = e;
             seen.at = x.to_owned();
         }
-        if seen.calls >= self.budget || self.stop_at.is_some_and(|s| seen.lowest <= s) {
+        if seen.calls >= self.budget
+            || self
+                .stop_at
+                .is_some_and(|s| anneal_core::energy_hits(seen.lowest, s, 0.0))
+        {
             self.stop.store(true, Ordering::Relaxed);
         }
         (e, g)
@@ -326,7 +330,7 @@ fn main() {
     for (name, draws, accepts, best) in &out.arms {
         println!("arm {name} draws {draws} accepts {accepts} best {best:.6}");
     }
-    let hit = stop_at.is_some_and(|level| seen.lowest <= level);
+    let hit = stop_at.is_some_and(|level| anneal_core::energy_hits(seen.lowest, level, 0.0));
     println!(
         "h2h_row system={kind}{n} code=anneal seed={seed} budget={budget} hit={} evals_to_hit={} charged={} best={:.10} wall_s={wall:.6} pot_s={pot_s:.6} outside_s={outside_s:.6} basins={}",
         u8::from(hit),

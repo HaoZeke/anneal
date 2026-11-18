@@ -23,6 +23,7 @@ unset H2H_GENERAL H2H_BASIN_STRIDE H2H_BUDGET H2H_BEST H2H_REFERENCE \
 export OMP_NUM_THREADS=1
 export RAYON_NUM_THREADS=1
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+DEFAULT_HIT_TOL=$(PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)')
 BIN=${BIN:-$ROOT/target/release/examples/h2h_metal}
 GMIN=${GMIN:-/work/metal-darby/bin/GMIN}
 WORK=${WORK:-$ROOT/bench/gold-gupta/work}
@@ -97,7 +98,7 @@ EOF
   (
     cd "$d"
     if [[ -n $target ]]; then
-      H2H_TARGET=$target H2H_TOL=0.001 \
+      H2H_TARGET=$target H2H_TOL=$DEFAULT_HIT_TOL \
         H2H_BUDGET=$budget H2H_SEED=$seed H2H_SYSTEM=$system \
         H2H_ROW=$d/row.txt taskset -c 0 "$GMIN" > stdout.txt
     else

@@ -102,7 +102,12 @@ fn main() {
     let mut ends: Vec<f64> = results.iter().map(|p| p.end).collect();
     ends.sort_by(f64::total_cmp);
     let charged: usize = results.iter().map(|p| p.charged).sum();
-    let hits = reference.map_or(0, |r| results.iter().filter(|p| p.end < r + 1e-4).count());
+    let hits = reference.map_or(0, |r| {
+        results
+            .iter()
+            .filter(|p| anneal_core::energy_hits(p.end, r, 1e-4))
+            .count()
+    });
     let low555 = results.iter().filter(|p| p.f555 < 0.1).count();
     println!(
         "LJ{n}: {probes} probes from seed {seed}, quench step {} tol {} memory {}, density {density}",

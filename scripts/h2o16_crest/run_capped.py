@@ -44,11 +44,18 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 
 from scipy.stats import fisher_exact, mannwhitneyu
+
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 
 MOLECULES = 16
 BUDGET = 280305
@@ -56,7 +63,7 @@ SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "crest")
 # wdbase-1, -81.396292669509 Eh, at xtb 6.7.1's 27.21138505 eV per Hartree.
 REFERENCE_EV = -81.396292669509 * 27.21138505
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 DRIVER_PATH_MAX = 64
 SCHEDULE_SEED = 20261115
 

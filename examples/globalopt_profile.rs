@@ -242,7 +242,10 @@ impl Counted {
             state.0 = Some(x.to_owned());
             state.1 += 1;
             let worst = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
-            if state.2.is_none() && e <= self.target + 1e-3 && worst <= 1e-3 {
+            if state.2.is_none()
+                && anneal_core::energy_hits(e, self.target, anneal_core::DEFAULT_HIT_TOL)
+                && worst <= 1e-3
+            {
                 state.2 = Some(state.1);
                 self.stop.store(true, Ordering::Relaxed);
             }

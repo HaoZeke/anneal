@@ -13,6 +13,7 @@ mod slab;
 
 use anneal_core::methods::cluster_hopping::Ledger;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::{DEFAULT_HIT_TOL, energy_hits};
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::ArrayView1;
 use rgpot_eindir::{RgpotObjective, emit_engine_manifest};
@@ -125,7 +126,14 @@ fn main() {
     }
     let clusters = cluster_energies(&energies);
     let lowest = clusters.first().map(|(e, _)| *e);
-    let hits = clusters.first().map(|(_, n)| *n).unwrap_or(0);
+    let hits = lowest
+        .map(|target| {
+            energies
+                .iter()
+                .filter(|&&energy| energy_hits(energy, target, DEFAULT_HIT_TOL))
+                .count()
+        })
+        .unwrap_or(0);
     println!(
         "distinct_minima {} (tol={ENERGY_TOL} eV)  accepted {}  charged {}",
         clusters.len(),

@@ -428,7 +428,7 @@ where
 }
 
 fn empirical_cost(charged: u64, pulls: usize) -> Option<f64> {
-    (charged > 0 && pulls > 0).then(|| charged as f64 / pulls as f64)
+    (charged > 0 && pulls > 0).then_some(charged as f64 / pulls as f64)
 }
 
 fn expected_cost(charged: u64, pulls: usize, fallback: Option<f64>, maximum: u64) -> f64 {

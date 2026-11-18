@@ -52,9 +52,13 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import NoReturn
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import results_jcc
+from target_tol import energy_hits
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "lj75_gmin"
@@ -267,7 +271,10 @@ def load(data: Path = DATA) -> tuple[dict[str, str], tuple[Arm, ...]]:
                 die(f"{where} exited with {row['return_code']}")
             best = float(row["best"])
             hit = row["hit"] == "1"
-            if abs(best - (reference + tolerance)) > PRINTED and hit != (best <= reference + tolerance):
+            if not math.isfinite(best) or (
+                abs(best - (reference + tolerance)) > PRINTED
+                and hit != energy_hits(best, reference, tolerance)
+            ):
                 die(f"{where} flags hit={row['hit']} at {best}")
             calls = int(row["force_count"])
             if hit and int(row["force_to_hit"]) != calls:

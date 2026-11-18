@@ -46,7 +46,7 @@ use rand::rngs::StdRng;
 const QUENCH_RMS: f64 = 1.0e-3;
 const QUENCH_ITERS: usize = 500;
 /// A hit is a validated quench at or below the Cambridge energy plus this window.
-const HIT_WINDOW: f64 = 1.0e-3;
+const HIT_WINDOW: f64 = anneal_core::DEFAULT_HIT_TOL;
 /// Two quenches are one minimum when their sorted pair distances differ by
 /// less than this in Euclidean norm. The nearest neighbour is `1/sqrt(2)`.
 const IDENTITY_RADIUS: f64 = 1.0e-3;
@@ -419,7 +419,6 @@ fn main() {
     let turn_calls: usize = args
         .get(9)
         .map_or(DEFAULT_TURN_CALLS, |v| v.parse().expect("turn calls"));
-    let target = reference + HIT_WINDOW;
 
     let potential = SuttonChen::new(n, family);
     let nn = std::f64::consts::FRAC_1_SQRT_2;
@@ -548,7 +547,8 @@ fn main() {
                         }
                         if full {
                             let q = full_quenches.fetch_add(1, Ordering::Relaxed) + 1;
-                            if validated && energy <= target {
+                            if validated && anneal_core::energy_hits(energy, reference, HIT_WINDOW)
+                            {
                                 let mut h = hit.lock().expect("hit");
                                 if h.is_none() {
                                     led.record(energy, xr.view());

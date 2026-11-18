@@ -35,11 +35,17 @@ from pathlib import Path
 from lj_potential import EPSILON, SIGMA_ANGSTROM, reduced_pair_energy
 from meter import Meter
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 PAPER_BUDGETS = {38: 400_000}
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "rpqa")
 SCHEDULE_SEED = 20261113
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 REFERENCE = -173.928427
 REFERENCES = {38: REFERENCE, 55: -279.248470, 75: -397.492331}
 PAPER_SIZES = (38, 55, 75)
@@ -513,7 +519,10 @@ def run_rpqa(
     if charged < 1 or (budget > 0 and charged > budget):
         raise RuntimeError(f"RPQA seed {seed} charged {charged} outside 1..{budget}\n{log.read_text()[-800:]}")
     hit = hit_calls > 0
-    if hit and (hit_calls > charged or best_ha > (reference + HIT_TOL) * EPSILON):
+    if hit and (
+        hit_calls > charged
+        or not energy_hits(best_ha, reference * EPSILON, HIT_TOL * EPSILON)
+    ):
         raise RuntimeError(f"RPQA seed {seed} hit record is inconsistent")
     if budget > 0 and not hit and charged != budget:
         raise RuntimeError(
@@ -822,7 +831,7 @@ def self_test() -> None:
         raise SystemExit("median iqr")
     if PAPER_BUDGETS != {38: 400_000}:
         raise SystemExit("paper budget")
-    if abs(HIT_TOL - 0.001) > 1e-15 or abs(REFERENCE + 173.928427) > 1e-12:
+    if abs(HIT_TOL - DEFAULT_HIT_TOL) > 1e-15 or abs(REFERENCE + 173.928427) > 1e-12:
         raise SystemExit("cambridge level")
     inside, outside = per_eval(1.0, 0.25, 1000)
     if abs(inside - 250.0) > 1e-9 or abs(outside - 750.0) > 1e-9:

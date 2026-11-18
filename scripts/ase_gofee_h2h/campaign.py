@@ -48,6 +48,12 @@ import time
 import traceback
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 from potential import (
     BudgetReached,
     CapReached,
@@ -81,7 +87,7 @@ REFERENCES = {
 # ASE minima hopping and AGOX GOFEE on LJ75. The paper budget stays in the
 # budget column. A seed that reaches this wall is a miss marked capped.
 LJ75_WALL_CAP_S = 7200.0
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("paper", "ase_bh", "ase_mh", "agox_gofee")
 ORDER_SEED = 20261111
