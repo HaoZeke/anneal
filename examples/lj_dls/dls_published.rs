@@ -46,13 +46,19 @@
 //! size. A tie inside either selection cut, the `Nmov` atoms or the
 //! greedy site, is broken by the lowest index or by a uniform draw.
 
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::needless_range_loop
+)]
+
 use ndarray::ArrayView1;
 use rand::Rng;
 use rand::seq::SliceRandom;
 
-use crate::methods::cluster_hopping::{Ledger, Outcome, random_cluster_in_radius};
-use crate::methods::lattice_search::{Quench, charge_oracle, merge_toward_centroid};
-use crate::potentials::PairKind;
+use anneal_core::methods::cluster_hopping::{Ledger, Outcome, random_cluster_in_radius};
+use anneal_core::methods::lattice_search::{Quench, charge_oracle, merge_toward_centroid};
+use anneal_core::potentials::PairKind;
 
 /// How a tied selection cut is broken.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,113 +85,67 @@ pub struct Table1 {
     pub n_best: usize,
 }
 
-/// Table 1 row that contains `n`.
+/// The rows of Table 1, read from experiment input.
 ///
-/// Sizes above 309 use the last row of the table. The magic-number
-/// footnote changes `Nruns`, which this budget replaces.
-pub fn table1(n: usize) -> Table1 {
-    const ROWS: &[(usize, Table1)] = &[
-        (
-            49,
-            Table1 {
-                n_mov: 10,
-                n_primary: 92,
-                n_try: 100,
-                n_best: 4,
-            },
-        ),
-        (
-            79,
-            Table1 {
-                n_mov: 15,
-                n_primary: 162,
-                n_try: 200,
-                n_best: 4,
-            },
-        ),
-        (
-            119,
-            Table1 {
-                n_mov: 15,
-                n_primary: 252,
-                n_try: 300,
-                n_best: 5,
-            },
-        ),
-        (
-            149,
-            Table1 {
-                n_mov: 20,
-                n_primary: 362,
-                n_try: 350,
-                n_best: 5,
-            },
-        ),
-        (
-            169,
-            Table1 {
-                n_mov: 20,
-                n_primary: 492,
-                n_try: 400,
-                n_best: 5,
-            },
-        ),
-        (
-            189,
-            Table1 {
-                n_mov: 20,
-                n_primary: 492,
-                n_try: 450,
-                n_best: 8,
-            },
-        ),
-        (
-            199,
-            Table1 {
-                n_mov: 20,
-                n_primary: 492,
-                n_try: 500,
-                n_best: 10,
-            },
-        ),
-        (
-            229,
-            Table1 {
-                n_mov: 20,
-                n_primary: 492,
-                n_try: 550,
-                n_best: 10,
-            },
-        ),
-        (
-            251,
-            Table1 {
-                n_mov: 20,
-                n_primary: 642,
-                n_try: 550,
-                n_best: 10,
-            },
-        ),
-        (
-            309,
-            Table1 {
-                n_mov: 25,
-                n_primary: 642,
-                n_try: 700,
-                n_best: 10,
-            },
-        ),
-    ];
-    for (limit, row) in ROWS {
-        if n <= *limit {
-            return *row;
+/// The published table keys `Nmov`, `Np`, `Ntry` and `Nbest` to cluster-size
+/// breakpoints. The values live in `experiments/dls_published/table1.csv`
+/// and are not compiled in, so no size appears in this source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Table1Rows {
+    rows: Vec<(usize, Table1)>,
+    last: Table1,
+}
+
+impl Table1Rows {
+    /// Parses `max_n,n_mov,n_primary,n_try,n_best` rows.
+    ///
+    /// Blank lines and lines starting with `#` are skipped, as is the header.
+    /// The row whose `max_n` is `inf` covers every larger size; it is the
+    /// last row of the table. Rows are read in file order.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let mut rows = Vec::new();
+        let mut last = None;
+        for (index, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') || line.starts_with("max_n") {
+                continue;
+            }
+            let fields: Vec<&str> = line.split(',').map(str::trim).collect();
+            if fields.len() != 5 {
+                return Err(format!("line {}: expected five fields", index + 1));
+            }
+            let number = |slot: usize| {
+                fields[slot]
+                    .parse::<usize>()
+                    .map_err(|_| format!("line {}: bad field {}", index + 1, fields[slot]))
+            };
+            let row = Table1 {
+                n_mov: number(1)?,
+                n_primary: number(2)?,
+                n_try: number(3)?,
+                n_best: number(4)?,
+            };
+            if fields[0] == "inf" {
+                last = Some(row);
+            } else {
+                rows.push((number(0)?, row));
+            }
         }
+        let last = last.ok_or_else(|| "the table has no `inf` row".to_owned())?;
+        Ok(Self { rows, last })
     }
-    Table1 {
-        n_mov: 40,
-        n_primary: 812,
-        n_try: 1000,
-        n_best: 10,
+
+    /// Table 1 row that contains `n`.
+    ///
+    /// Sizes above the last breakpoint use the `inf` row. The magic-number
+    /// footnote changes `Nruns`, which this budget replaces.
+    pub fn row(&self, n: usize) -> Table1 {
+        for (limit, row) in &self.rows {
+            if n <= *limit {
+                return *row;
+            }
+        }
+        self.last
     }
 }
 
@@ -200,6 +160,7 @@ const TIE_ABS: f64 = 0.0;
 /// sphere of radius `radius`.
 pub fn run<R: Rng + ?Sized>(
     n: usize,
+    params: Table1,
     ledger: &mut Ledger,
     quench: &Quench,
     start: &[f64],
@@ -215,7 +176,7 @@ pub fn run<R: Rng + ?Sized>(
         outcome.charged = ledger.spent();
         return outcome;
     }
-    let params = table1(n);
+    let params = &params;
     let mut restarts = 0usize;
     let mut generations = 0usize;
     let mut improvements = 0usize;
@@ -239,7 +200,7 @@ pub fn run<R: Rng + ?Sized>(
         return finish(outcome, ledger, generations, restarts, improvements);
     }
     while ledger.remaining() > 0 {
-        let improved = generation(n, &params, ledger, quench, &mut current, rng, tie, target);
+        let improved = generation(n, params, ledger, quench, &mut current, rng, tie, target);
         generations += 1;
         note(
             &mut outcome,
@@ -324,7 +285,7 @@ fn generation<R: Rng + ?Sized>(
     params: &Table1,
     ledger: &mut Ledger,
     quench: &Quench,
-    current: &mut crate::methods::lattice_search::Relaxed,
+    current: &mut anneal_core::methods::lattice_search::Relaxed,
     rng: &mut R,
     tie: TieCut,
     target: Option<f64>,
@@ -352,7 +313,7 @@ fn generation<R: Rng + ?Sized>(
         let energy = selection_energy(&edlc, &edl, &chosen);
         consider(&mut ranked, params.n_best, energy, chosen);
     }
-    let mut best_local: Option<crate::methods::lattice_search::Relaxed> = None;
+    let mut best_local: Option<anneal_core::methods::lattice_search::Relaxed> = None;
     for (_, chosen) in &ranked {
         if ledger.remaining() == 0 {
             break;
@@ -962,6 +923,12 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    fn table1(n: usize) -> Table1 {
+        Table1Rows::parse(include_str!("../../experiments/dls_published/table1.csv"))
+            .expect("experiment table parses")
+            .row(n)
+    }
+
     /// One lattice build charges the full atom pair sum.
     ///
     /// Without that charge the spent count is short by one. The
@@ -1019,6 +986,7 @@ mod tests {
         let mut ledger = Ledger::new(80_000);
         let outcome = run(
             n,
+            table1(n),
             &mut ledger,
             &quench,
             start.as_slice().unwrap(),
