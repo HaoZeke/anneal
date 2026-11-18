@@ -2280,7 +2280,10 @@ mod tests {
             let first = unsafe { pot.hvp_centre(&input) }.unwrap_err();
             assert_eq!(
                 first,
-                HvpError::Callback(rgpot_status_t::RGPOT_SCC_NOT_CONVERGED)
+                HvpError::Callback {
+                    status: rgpot_status_t::RGPOT_SCC_NOT_CONVERGED,
+                    message: MESSAGE_SCC.to_owned(),
+                }
             );
             assert_eq!(unsafe { pot.hvp_centre(&input) }.unwrap_err(), first);
             assert_eq!(rig.energy(&X).0, eindir_status_t::EINDIR_INTERNAL_ERROR);
