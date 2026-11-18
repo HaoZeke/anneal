@@ -451,8 +451,8 @@ private:
     // One stencil per thread. The cache is process-wide otherwise, and two
     // evaluations then rewrite the same vectors.
     thread_local Cache cache;
-    // The stored evaluation rebuilds its stencil. A stream keeps one and
-    // reuses it when the coordinates are unchanged.
+    // Only a streaming walk can reuse this stencil cache across calls. A
+    // stored walk has its own pair index and rebuilds tile data per walk.
     const bool same_grid = cache.owner == this && cache.nx == nx_ && cache.ny == ny_ &&
                            cache.nz == nz_ && cache.search == search_ && cache.compact == !dense;
     // update() already compared the coordinates when it reused the bins.
