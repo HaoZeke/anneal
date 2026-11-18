@@ -1,1 +1,4 @@
 system,arm,n,hits,budget,calls_median,calls_iqr,calls_min,calls_max,within_5pct,polished_median_Eh,wall_median_s,pot_median_s,outside_median_s,fisher_p,mannwhitney_calls_p,mannwhitney_inside_p,mannwhitney_outside_p,mannwhitney_wall_p,crest_len_ps,code_revision,host,date
+h2o6,anneal,12,1,4000,3021.000000,0.000000,3021,3021,12,-30.494590791754,11.414635,11.065990,0.190719,,,,,,,723b7c23bbb31a076a559e3ac7f4f91be9e36e1e,bench,2026-11-18
+h2o6,crest,12,4,4000,3055.000000,311.750000,2510,3531,5,-30.492086873996,69.544612,10.832269,57.598823,3.167702e-01,4.779950e-01,1.000000e+00,3.658455e-05,3.658455e-05,0.90,723b7c23bbb31a076a559e3ac7f4f91be9e36e1e,bench,2026-11-18
+h2o6,crest-wall,12,0,4000,916.500000,119.000000,812,1168,0,-30.478510405465,20.314863,3.535306,16.858379,1.000000e+00,1.026892e-05,3.658455e-05,3.658455e-05,3.658455e-05,0.11,723b7c23bbb31a076a559e3ac7f4f91be9e36e1e,bench,2026-11-18
