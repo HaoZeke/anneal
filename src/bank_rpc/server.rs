@@ -17,11 +17,13 @@ use crate::nng_rpc;
 #[cfg(feature = "ira")]
 const IRA_SAME: f64 = 0.05;
 
-#[cfg(feature = "ira")]
+/// Dimensionless IRA search-radius multiplier \(1 + r_{\text{rms}} / d_{\text{nn}}\)
+/// derived from the structure's root-mean-square radius about its centre of mass
+/// and its median nearest-neighbour spacing.
 fn geometric_kmax_factor(coords: ArrayView1<f64>) -> f64 {
     let count = coords.len() / 3;
-    if count < 2 {
-        return 1.8;
+    if count < 2 || !coords.len().is_multiple_of(3) || coords.iter().any(|v| !v.is_finite()) {
+        return 1.0;
     }
     let mut com = [0.0; 3];
     for i in 0..count {
@@ -32,7 +34,7 @@ fn geometric_kmax_factor(coords: ArrayView1<f64>) -> f64 {
     for value in &mut com {
         *value /= count as f64;
     }
-    let mut r_max = 0.0_f64;
+    let mut sum_r2 = 0.0_f64;
     let mut nearest = Vec::with_capacity(count);
     for i in 0..count {
         let mut r2 = 0.0;
@@ -40,7 +42,7 @@ fn geometric_kmax_factor(coords: ArrayView1<f64>) -> f64 {
             let d = coords[3 * i + axis] - com[axis];
             r2 += d * d;
         }
-        r_max = r_max.max(r2.sqrt());
+        sum_r2 += r2;
         let mut best = f64::INFINITY;
         for j in 0..count {
             if i == j {
@@ -58,14 +60,15 @@ fn geometric_kmax_factor(coords: ArrayView1<f64>) -> f64 {
         }
     }
     if nearest.is_empty() {
-        return 1.8;
+        return 1.0;
     }
     nearest.sort_by(|a, b| a.total_cmp(b));
     let bond = nearest[nearest.len() / 2];
+    let r_rms = (sum_r2 / count as f64).sqrt();
     if !bond.is_finite() || bond <= 1e-12 {
-        1.8
+        1.0
     } else {
-        (r_max / bond).clamp(1.8, 2.5)
+        1.0 + r_rms / bond
     }
 }
 /// AS-KMC / MCAMC: well height at which the packing is a raised
@@ -188,7 +191,10 @@ impl Inner {
                         return 0.0;
                     }
                 }
-                let _ = p;
+                #[cfg(not(feature = "ira"))]
+                {
+                    let _ = geometric_kmax_factor(p);
+                }
                 states
                     .iter()
                     .position(|s| s.len() == q.len() && s.iter().zip(q.iter()).all(|(a, b)| a == b))
@@ -538,5 +544,49 @@ mod tests {
     fn an_ephemeral_bank_reports_its_allocated_port() {
         let bound = bind_bank_listener("127.0.0.1:0").unwrap();
         assert_ne!(bound.addr.expect("tcp bind").port(), 0);
+    }
+
+    #[test]
+    fn geometric_kmax_factor_is_scale_invariant_and_grows_with_shell_depth() {
+        assert_eq!(geometric_kmax_factor(Array1::<f64>::zeros(3).view()), 1.0);
+        let dimer = Array1::from_vec(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        assert!((geometric_kmax_factor(dimer.view()) - 1.5).abs() < 1e-12);
+
+        let mut single_shell = vec![0.0, 0.0, 0.0];
+        for &(x, y, z) in &[
+            (1.0, 0.0, 0.0),
+            (-1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, -1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (0.0, 0.0, -1.0),
+        ] {
+            single_shell.extend_from_slice(&[x, y, z]);
+        }
+        let s1 = Array1::from_vec(single_shell.clone());
+        let s1_scaled: Array1<f64> = s1.mapv(|v| 3.7 * v + 1.25);
+        let k1 = geometric_kmax_factor(s1.view());
+        let k1_scaled = geometric_kmax_factor(s1_scaled.view());
+        assert!(
+            (k1 - k1_scaled).abs() < 1e-12,
+            "scale/translation changed kmax: {k1} vs {k1_scaled}"
+        );
+
+        let mut two_shell = single_shell;
+        for ix in [-2i32, -1, 0, 1, 2] {
+            for iy in [-2i32, -1, 0, 1, 2] {
+                for iz in [-2i32, -1, 0, 1, 2] {
+                    if ix.abs().max(iy.abs()).max(iz.abs()) == 2 {
+                        two_shell.extend_from_slice(&[ix as f64, iy as f64, iz as f64]);
+                    }
+                }
+            }
+        }
+        let s2 = Array1::from_vec(two_shell);
+        let k2 = geometric_kmax_factor(s2.view());
+        assert!(
+            k2 > k1 && k1 > 1.5,
+            "multi-shell kmax {k2} must exceed single-shell {k1}"
+        );
     }
 }
