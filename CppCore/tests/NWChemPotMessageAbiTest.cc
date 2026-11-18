@@ -59,6 +59,23 @@ private:
   std::string value_;
 };
 
+struct RejectParamsGuard {
+  using RejectParamsFn = void (*)(int);
+  RejectParamsFn fn = nullptr;
+
+  explicit RejectParamsGuard(RejectParamsFn reject_fn) : fn(reject_fn) {
+    fn(1);
+  }
+
+  ~RejectParamsGuard() {
+    if (fn)
+      fn(0);
+  }
+
+  RejectParamsGuard(const RejectParamsGuard &) = delete;
+  RejectParamsGuard &operator=(const RejectParamsGuard &) = delete;
+};
+
 } // namespace
 
 TEST_CASE("NWChemPot passes serialized NWChemParams to nwchemc engine",
@@ -152,9 +169,8 @@ TEST_CASE("NWChemPot reports a loaded engine configuration refusal",
 
   rgpot::DynLib engine;
   engine.open(path);
-  using RejectParamsFn = void (*)(int);
-  auto reject_params = engine.sym<RejectParamsFn>("nwchemc_fake_reject_params");
-  reject_params(1);
+  auto reject_params = engine.sym<RejectParamsGuard::RejectParamsFn>(
+      "nwchemc_fake_reject_params");
 
   ::capnp::MallocMessageBuilder message;
   auto config = message.initRoot<::PotentialConfig>();
@@ -166,8 +182,10 @@ TEST_CASE("NWChemPot reports a loaded engine configuration refusal",
   params.setMultiplicity(1);
 
   std::string result;
-  REQUIRE_FALSE(pot.setPotentialConfig(config.asReader(), &result));
-  reject_params(0);
+  {
+    RejectParamsGuard reject_guard(reject_params);
+    REQUIRE_FALSE(pot.setPotentialConfig(config.asReader(), &result));
+  }
 
   REQUIRE(pot.available());
   REQUIRE(result == "rgpot params nwchem arm rejected by embed: "
