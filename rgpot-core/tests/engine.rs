@@ -94,6 +94,13 @@ fn destroyed(path: &Path) -> c_int {
     unsafe { count() }
 }
 
+fn native_calls(path: &Path) -> c_int {
+    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
+    let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { library.get(b"fixture_native_call_count\0") }.expect("native call count symbol");
+    unsafe { count() }
+}
+
 fn unsupported_code(path: &Path) -> c_int {
     let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
     let value: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
@@ -216,6 +223,138 @@ fn positive_code_is_recoverable_and_negative_is_fatal() {
             message: "atom 0 has a negative atomic number".into()
         }
     );
+}
+
+#[test]
+fn fatal_status_poisons_the_handle_and_makes_zero_later_native_calls() {
+    let path = build("harmonic_fatal_once", &["FATAL_ONCE"]);
+    let before_destroy = destroyed(&path);
+    let mut engine = load(&path);
+    let expected = EngineError::Fatal {
+        code: -7,
+        message: "fatal once".into(),
+    };
+    let valid = EngineRequest {
+        positions: &[1.0, 0.0, 0.0],
+        atomic_numbers: &[1],
+        box_matrix: &CELL,
+    };
+
+    assert_eq!(engine.force(&valid).unwrap_err(), expected);
+    let after_fatal = native_calls(&path);
+    assert!(after_fatal > 0);
+
+    // The fixture returns -7 only once and 0 thereafter, so an unpoisoned
+    // handle would both increment native_calls and return Ok here.
+    assert_eq!(engine.force(&valid).unwrap_err(), expected);
+    assert_eq!(
+        engine
+            .force(&EngineRequest {
+                positions: &[0.0; 4],
+                atomic_numbers: &[1, 1],
+                box_matrix: &CELL,
+            })
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        engine
+            .force_batch(&[1], &[1.0, 0.0, 0.0], &CELL)
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(engine.hvp(&valid, &[1.0, 0.0, 0.0]).unwrap_err(), expected);
+    assert_eq!(engine.caps().unwrap_err(), expected);
+    assert_eq!(native_calls(&path), after_fatal);
+
+    let potential = engine.into_potential();
+    assert!(!potential.as_handle().has_hessian_vector_callback());
+    assert_eq!(native_calls(&path), after_fatal);
+    let mut positions = vec![1.0, 0.0, 0.0];
+    let mut numbers = vec![1];
+    let mut cell = CELL;
+    let input = rgpot_force_input_t {
+        positions: unsafe { rgpot_tensor_cpu_f64_2d(positions.as_mut_ptr(), 1, 3) },
+        atomic_numbers: unsafe { rgpot_tensor_cpu_i32_1d(numbers.as_mut_ptr(), 1) },
+        box_matrix: unsafe { rgpot_tensor_cpu_f64_matrix3(cell.as_mut_ptr()) },
+    };
+    let mut output = rgpot_force_out_t {
+        forces: std::ptr::null_mut(),
+        energy: 0.0,
+        variance: 0.0,
+    };
+    assert_eq!(
+        unsafe { potential.calculate(&input, &mut output) },
+        rgpot_status_t::RGPOT_INTERNAL_ERROR
+    );
+    assert_eq!(native_calls(&path), after_fatal);
+    unsafe {
+        rgpot_tensor_free(input.positions);
+        rgpot_tensor_free(input.atomic_numbers);
+        rgpot_tensor_free(input.box_matrix);
+    }
+    drop(potential);
+    assert_eq!(destroyed(&path), before_destroy + 1);
+}
+
+#[test]
+fn fatal_hvp_poisons_a_live_potential_handle_without_reentering_native_code() {
+    let path = build("harmonic_fatal_hvp_handle", &["FATAL_ONCE"]);
+    let before_destroy = destroyed(&path);
+    let potential = load(&path).into_potential();
+    assert!(potential.as_handle().has_hessian_vector_callback());
+
+    let mut positions = vec![0.5, -1.0, 2.0];
+    let mut numbers = vec![1];
+    let mut cell = CELL;
+    let input = rgpot_force_input_t {
+        positions: unsafe { rgpot_tensor_cpu_f64_2d(positions.as_mut_ptr(), 1, 3) },
+        atomic_numbers: unsafe { rgpot_tensor_cpu_i32_1d(numbers.as_mut_ptr(), 1) },
+        box_matrix: unsafe { rgpot_tensor_cpu_f64_matrix3(cell.as_mut_ptr()) },
+    };
+    let mut product = [0.0; 3];
+    let err = unsafe {
+        potential.as_handle().hessian_vector(
+            &input,
+            &[1.0, 0.0, 0.0],
+            0.0,
+            rgpot_hvp_scheme_t::RGPOT_HVP_ANALYTIC,
+            &mut product,
+        )
+    }
+    .unwrap_err();
+    assert_eq!(err.status(), rgpot_status_t::RGPOT_INTERNAL_ERROR);
+    let after_fatal = native_calls(&path);
+
+    let err_again = unsafe {
+        potential.as_handle().hessian_vector(
+            &input,
+            &[1.0, 0.0, 0.0],
+            0.0,
+            rgpot_hvp_scheme_t::RGPOT_HVP_ANALYTIC,
+            &mut product,
+        )
+    }
+    .unwrap_err();
+    assert_eq!(err_again.status(), rgpot_status_t::RGPOT_INTERNAL_ERROR);
+    let mut output = rgpot_force_out_t {
+        forces: std::ptr::null_mut(),
+        energy: 0.0,
+        variance: 0.0,
+    };
+    assert_eq!(
+        unsafe { potential.calculate(&input, &mut output) },
+        rgpot_status_t::RGPOT_INTERNAL_ERROR
+    );
+    assert_eq!(native_calls(&path), after_fatal);
+
+    unsafe {
+        rgpot_tensor_free(input.positions);
+        rgpot_tensor_free(input.atomic_numbers);
+        rgpot_tensor_free(input.box_matrix);
+    }
+    drop(potential);
+    assert_eq!(destroyed(&path), before_destroy + 1);
 }
 
 #[test]

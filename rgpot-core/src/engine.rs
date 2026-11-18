@@ -14,9 +14,12 @@
 //!
 //! Return codes follow the header: zero is success, a positive code is an
 //! evaluation that failed at this input ([`EngineError::Recoverable`]), and a
-//! negative code leaves the instance unusable ([`EngineError::Fatal`]). The
-//! message of a failed call is the engine's `rgpot_engine_last_error` when it
-//! exports one.
+//! negative code leaves the instance unusable ([`EngineError::Fatal`]) and
+//! poisons the handle so every later call returns the same [`EngineError::Fatal`]
+//! without re-entering native evaluation or query functions. Dropping a
+//! poisoned handle still calls `rgpot_engine_destroy` once to free the
+//! `RgpotEnginePot` allocation, as required by `engine_c_abi.h`. The message of
+//! a failed call is the engine's `rgpot_engine_last_error` when it exports one.
 //!
 //! [`EnginePotential::into_potential`] wraps the instance as a
 //! [`PotentialImpl`], the handle the rest of the crate evaluates through, so
@@ -31,7 +34,7 @@ use std::fmt;
 use std::mem::ManuallyDrop;
 use std::path::Path;
 use std::ptr::NonNull;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use libloading::Library;
 
@@ -260,7 +263,8 @@ pub enum EngineError {
         /// Error message from `rgpot_engine_last_error`.
         message: String,
     },
-    /// A negative code: the instance is unusable.
+    /// A negative code: the instance is unusable and the handle is poisoned;
+    /// every subsequent call returns this error without calling into the engine.
     Fatal {
         /// Negative error code returned by the engine.
         code: i32,
@@ -331,11 +335,18 @@ pub struct EngineEvaluation {
     pub forces: Vec<f64>,
 }
 
+#[derive(Clone)]
+struct Poisoned {
+    code: i32,
+    message: String,
+}
+
 /// One engine instance behind the generic engine C ABI.
 pub struct EnginePotential {
     symbols: EngineSymbols,
     stamp: RgpotEngineAbiStamp,
     handle: NonNull<RgpotEnginePot>,
+    fatal: OnceLock<Poisoned>,
     _library: Option<ManuallyDrop<Library>>,
 }
 
@@ -414,6 +425,7 @@ impl EnginePotential {
                 symbols,
                 stamp,
                 handle,
+                fatal: OnceLock::new(),
                 _library: None,
             }),
             None => Err(EngineError::Create(text_of(&errbuf))),
@@ -427,6 +439,7 @@ impl EnginePotential {
 
     /// Energy and forces of one geometry.
     pub fn force(&mut self, request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineError> {
+        self.check_alive()?;
         let n_atoms = request.atomic_numbers.len();
         check_lengths(n_atoms, request.positions.len())?;
         let mut forces = vec![0.0; 3 * n_atoms];
@@ -460,6 +473,7 @@ impl EnginePotential {
         positions: &[f64],
         boxes: &[f64],
     ) -> Result<Vec<EngineEvaluation>, EngineError> {
+        self.check_alive()?;
         let batch = self
             .symbols
             .force_batch
@@ -510,6 +524,7 @@ impl EnginePotential {
 
     /// Query the engine's capabilities via `rgpot_engine_caps`.
     pub fn caps(&self) -> Result<EngineCaps, EngineError> {
+        self.check_alive()?;
         let caps_fn = self
             .symbols
             .caps
@@ -543,6 +558,7 @@ impl EnginePotential {
         request: &EngineRequest<'_>,
         direction: &[f64],
     ) -> Result<Vec<f64>, EngineError> {
+        self.check_alive()?;
         let hvp_fn = self
             .symbols
             .hvp
@@ -619,6 +635,16 @@ impl EnginePotential {
         potential
     }
 
+    fn check_alive(&self) -> Result<(), EngineError> {
+        if let Some(poisoned) = self.fatal.get() {
+            return Err(EngineError::Fatal {
+                code: poisoned.code,
+                message: poisoned.message.clone(),
+            });
+        }
+        Ok(())
+    }
+
     fn answer(&self, code: c_int) -> Result<(), EngineError> {
         if code == 0 {
             return Ok(());
@@ -627,7 +653,18 @@ impl EnginePotential {
         if code > 0 {
             Err(EngineError::Recoverable { code, message })
         } else {
-            Err(EngineError::Fatal { code, message })
+            let _ = self.fatal.set(Poisoned {
+                code,
+                message: message.clone(),
+            });
+            let stored = match self.fatal.get() {
+                Some(poisoned) => poisoned.message.clone(),
+                None => message,
+            };
+            Err(EngineError::Fatal {
+                code,
+                message: stored,
+            })
         }
     }
 
@@ -644,6 +681,14 @@ impl EnginePotential {
     }
 }
 
+/// Releases the native handle with `rgpot_engine_destroy`.
+///
+/// In `engine_c_abi.h`, a negative return code means the instance is unusable
+/// for further evaluations, not that it has freed itself (`rgpot_engine_last_error`
+/// still reads from `pot` afterwards, and every handle created by
+/// `rgpot_engine_create` is freed by `rgpot_engine_destroy`). `Drop` therefore
+/// still calls `rgpot_engine_destroy` once on a poisoned handle, serialized by
+/// `&mut self`.
 impl Drop for EnginePotential {
     fn drop(&mut self) {
         unsafe { (self.symbols.destroy)(self.handle.as_ptr()) };
@@ -750,6 +795,10 @@ unsafe extern "C" fn engine_callback(
             return rgpot_status_t::RGPOT_INVALID_PARAMETER;
         }
         let mut engine = lock_engine(user_data);
+        if let Err(why) = engine.check_alive() {
+            set_last_error(&why.to_string());
+            return why.status();
+        }
         let input = unsafe { &*input };
         let Some(n_atoms) = (unsafe { input.n_atoms() }) else {
             set_last_error("engine potential: positions tensor has no shape");
@@ -806,6 +855,11 @@ unsafe extern "C" fn engine_hessian_vector_callback(
             set_last_error("engine HVP: null user data, input, direction or output");
             return rgpot_status_t::RGPOT_INVALID_PARAMETER;
         }
+        let mut engine = lock_engine(user_data);
+        if let Err(why) = engine.check_alive() {
+            set_last_error(&why.to_string());
+            return why.status();
+        }
         let input = unsafe { &*input };
         let Some(n_atoms) = (unsafe { input.n_atoms() }) else {
             set_last_error("engine HVP: positions tensor has no shape");
@@ -829,7 +883,6 @@ unsafe extern "C" fn engine_hessian_vector_callback(
             box_matrix: &matrix,
         };
         let direction = unsafe { std::slice::from_raw_parts(direction, 3 * n_atoms) };
-        let mut engine = lock_engine(user_data);
         match engine.hvp(&request, direction) {
             Ok(product) => {
                 unsafe { std::ptr::copy_nonoverlapping(product.as_ptr(), hv_out, product.len()) };

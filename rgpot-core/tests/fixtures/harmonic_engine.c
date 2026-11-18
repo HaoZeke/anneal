@@ -34,8 +34,13 @@ struct RgpotEnginePot {
 };
 
 static int destroyed = 0;
+static int native_calls = 0;
+#ifdef FATAL_ONCE
+static int fatal_once_fired = 0;
+#endif
 
 int fixture_destroy_count(void) { return destroyed; }
+int fixture_native_call_count(void) { return native_calls; }
 int fixture_unsupported_code(void) { return RGPOT_ENGINE_ERR_UNSUPPORTED; }
 
 int rgpot_engine_abi_version(void) { return FIXTURE_ABI; }
@@ -80,10 +85,18 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
                        rgpot_engine_coord_transform transform, void *user) {
   long i;
   double e = 0.0;
+  native_calls += 1;
   (void)variance;
   (void)box;
   (void)transform;
   (void)user;
+#ifdef FATAL_ONCE
+  if (!fatal_once_fired) {
+    fatal_once_fired = 1;
+    snprintf(pot->error, sizeof pot->error, "fatal once");
+    return -7;
+  }
+#endif
   for (i = 0; i < n; i++) {
     if (atomic_nrs[i] == 0) {
       snprintf(pot->error, sizeof pot->error, "atom %ld has atomic number 0", i);
@@ -112,6 +125,7 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long n_systems, long n,
                              rgpot_engine_coord_transform transform,
                              void *user) {
   long s;
+  native_calls += 1;
   (void)variances;
   for (s = 0; s < n_systems; s++) {
     int rc = rgpot_engine_force(pot, n, positions + 3 * n * s, atomic_nrs,
@@ -126,6 +140,7 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long n_systems, long n,
 #ifndef NO_LAST_ERROR
 size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len) {
   size_t full = strlen(pot->error);
+  native_calls += 1;
   if (len > 0) {
     snprintf(buf, len, "%s", pot->error);
   }
@@ -137,6 +152,7 @@ size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len)
 int rgpot_engine_caps(const RgpotEnginePot *pot, RgpotEngineCaps *out) {
   RgpotEngineCaps filled;
   unsigned room;
+  native_calls += 1;
   (void)pot;
   if (!out || out->size < sizeof(unsigned)) return 1;
   memset(&filled, 0, sizeof filled);
@@ -156,6 +172,7 @@ int rgpot_engine_caps(const RgpotEnginePot *pot, RgpotEngineCaps *out) {
 int rgpot_engine_hvp(RgpotEnginePot *pot, long n, const double *positions,
                      const int *atomic_nrs, const double *direction,
                      double *hv_out, const double *box) {
+  native_calls += 1;
   (void)positions;
   (void)box;
 #if defined(NO_HVP_CAP) || defined(HVP_UNSUPPORTED)
@@ -167,6 +184,13 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long n, const double *positions,
   return RGPOT_ENGINE_ERR_UNSUPPORTED;
 #else
   long i;
+#ifdef FATAL_ONCE
+  if (!fatal_once_fired) {
+    fatal_once_fired = 1;
+    snprintf(pot->error, sizeof pot->error, "fatal once");
+    return -7;
+  }
+#endif
   for (i = 0; i < n; i++) {
     if (atomic_nrs[i] == 0) {
       snprintf(pot->error, sizeof pot->error, "atom %ld has atomic number 0", i);

@@ -1176,9 +1176,14 @@ the handle as a =PotentialImpl=.
 - =EnginePotential::force(&request)= and
   =EnginePotential::force_batch(&atomic_numbers, &positions, &boxes)= ::
   Validates input lengths and output finiteness, dispatches to
-  =rgpot_engine_force= or
-  =rgpot_engine_force_batch=, and maps positive codes to =EngineError::Recoverable= and negative codes to =EngineError::Fatal= using =rgpot_engine_last_error=
-  when present.
+  =rgpot_engine_force= or =rgpot_engine_force_batch=, and maps positive codes to
+  =EngineError::Recoverable= and negative codes to =EngineError::Fatal= using
+  =rgpot_engine_last_error= when present.
+  A negative status poisons the handle: every later call on that
+  =EnginePotential= (or the =PotentialImpl= built from it) returns the same
+  =EngineError::Fatal= without calling into native code, while dropping the
+  handle still calls =rgpot_engine_destroy= once to release the
+  =RgpotEnginePot= allocation.
 - =EnginePotential::caps()= / =EnginePotential::hvp(&request, direction)= ::
   Reads the size-prefixed engine capability structure and dispatches the exact
   product.
