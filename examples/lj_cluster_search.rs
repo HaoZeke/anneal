@@ -5,7 +5,7 @@
 //! close the loop: everything else in this crate is checked against a unit test
 //! or a synthetic spectrum, and none of that says the search finds the answer.
 //!
-//! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
+//! Usage: `cargo run --release --features bank-rpc --example lj_cluster_search -- <n> <budget> <seeds>`
 
 // The driver keeps charged relax/gradient callbacks and complete catalog
 // evidence explicit at their call sites so campaign accounting stays visible.

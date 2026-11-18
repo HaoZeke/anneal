@@ -2995,7 +2995,7 @@ impl PyClusterConfig {
         self.inner.bayes_threshold
     }
 
-    /// Budget-window temperature rather than fixed \(T=0.8\).
+    /// Budget-window temperature rather than fixed ``T = 0.8``.
     #[getter]
     fn budget_window(&self) -> bool {
         self.inner.budget_window

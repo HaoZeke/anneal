@@ -60,13 +60,13 @@ pub mod accept;
 pub mod ace;
 /// Stan-style windowed adaptation: `trait Adapter<T, S>`.
 pub mod adapter;
-/// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
 /// Dense minimum-cost bipartite assignment.
 pub mod assignment;
 /// Same-PES atomistic basin and ridge exploration by joint-optimum information.
 pub mod atomistic_hybrid;
+/// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
 pub mod bias;
 /// Stock-preset searches for binary Lennard-Jones and rigid TIP4P.
 pub mod binary_water;
@@ -92,10 +92,11 @@ pub mod census_bus;
 pub mod compatibility;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod construct;
-/// The cooling-schedule trait: `epoch -> temperature`.
+/// Context-conditioned move selection for basin hopping.
 pub mod contextual;
 /// Continuous-symmetry projections for non-periodic atomic clusters.
 pub mod continuous_symmetry;
+/// The cooling-schedule trait: `epoch -> temperature`.
 pub mod cool;
 pub mod cooperative_search;
 /// Shared core-class table for cooperative cluster chains.
@@ -132,12 +133,13 @@ pub mod first_passage;
 pub mod floors;
 /// Free-energy estimators (Bennett's BAR + descendants).
 pub mod free_energy;
-/// First-derivative interface for HMC-style samplers.
+/// Expected-improvement morphology selection over basin funnels.
 pub mod funnel_bo;
 pub mod funnel_spectral;
 /// The gradient-enhanced Gaussian process of gpr_optim, over its C API.
 #[cfg(feature = "gpr")]
 pub mod gpr;
+/// First-derivative interface (`Gradient`, `DifferentiableObjective`) re-exported from `eindir_core`.
 pub mod grad;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
@@ -197,7 +199,6 @@ pub mod nng_rpc;
 pub mod noise_accept;
 /// Packing mutates: twin a dense plane, or close orbits on a new basin.
 pub mod packing;
-/// The pure-Rust SA driver loop.
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
 /// Durable readcon-db snapshots of exact minimum--saddle networks.
@@ -222,6 +223,7 @@ pub mod ride_ledger;
 pub mod rigid_body;
 /// Deterministic provenance records for engine-backed runs.
 pub mod run_manifest;
+/// The pure-Rust SA driver loop (`run_rs`).
 pub mod runner;
 /// Run-time distributions: what a search's time to target supports.
 pub mod runtime_distribution;
@@ -270,7 +272,7 @@ pub mod xtb_gradient;
 /// C ABI surface (cargo-c builds).
 #[cfg(feature = "capi")]
 pub mod ffi;
-/// pyo3 module entry point exposed as `anneal._core`.
+/// Shape matching and canonical ordering through the IRA library.
 #[cfg(feature = "ira")]
 pub mod shape;
 pub mod shared_bias;
@@ -278,6 +280,7 @@ pub mod shared_bias;
 // eindir-core builds pyo3 with `extension-module`, so no test executable
 // links libpython. The optimizer can inline a Python callback into a native
 // driver that a unit test calls, which then fails to link.
+/// pyo3 module entry point exposed as `anneal._core`.
 #[cfg(all(feature = "python", not(test)))]
 pub mod python;
 

@@ -93,7 +93,7 @@
 //! factor of 6900: the model treats a relabelled copy of a structure it has
 //! effectively been shown as a structure it has never seen.
 //!
-//! Canonicalising with [`crate::shape::CanonicalOrder`] fixes it exactly. A
+//! Canonicalising with `crate::shape::CanonicalOrder` fixes it exactly. A
 //! distorted structure and a relabelled copy of it canonicalise to the same
 //! coordinates at 2.9e-16 root-mean-square, at 38 points, and it costs 2.4 ms
 //! per structure warm. That is 750 gradients, which is real but is one part in
