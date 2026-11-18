@@ -2929,6 +2929,16 @@ fn stall_arms(cfg: &Config) -> Vec<&'static str> {
     .collect()
 }
 
+fn directed_stall_source(
+    align: bool,
+    directed_leave: bool,
+    best_state: Option<&Array1<f64>>,
+) -> Option<Array1<f64>> {
+    (align && directed_leave)
+        .then(|| best_state.cloned())
+        .flatten()
+}
+
 /// Each rung's temperature as a multiple of the one a single chain would hop
 /// at: `ladder_top^(k/(R-1))` for rung `k` of `R`, and exactly one for a
 /// single chain.
@@ -9007,6 +9017,11 @@ where
                     }
                 }
             }
+            let directed_source = directed_stall_source(
+                cfg.align_directed_stall_source,
+                directed_leave,
+                ledger.best_state.as_ref(),
+            );
             if hop_room(hops)
                 && let Some(g) = grad.as_deref_mut()
             {
@@ -9024,7 +9039,8 @@ where
                     ..Activation::default()
                 };
                 let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
-                if let Some(o) = activate(x.view(), |y| g(ledger, y), &act, sign) {
+                let source = directed_source.as_ref().unwrap_or(&x);
+                if let Some(o) = activate(source.view(), |y| g(ledger, y), &act, sign) {
                     soft_escapes += 1;
                     if o.crossed {
                         soft_crossed += 1;
@@ -9048,7 +9064,11 @@ where
                     // cannot improve from where it is, so the value of the new
                     // structure is that it is somewhere else.
                     let local_feedback = if cfg.minima_hopping {
-                        let from = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                        let from = if directed_source.is_some() {
+                            identity.basin_of(source.view())
+                        } else {
+                            here.unwrap_or_else(|| identity.basin_of(x.view()))
+                        };
                         let reached = identity.basin_of(xe.view());
                         Some((Some(from), reached))
                     } else {
@@ -10277,6 +10297,18 @@ mod tests {
             retry_calls >= 4,
             "the opt-in clock must retry no-op leaves (activate_calls={retry_calls})"
         );
+    }
+
+    #[test]
+    fn directed_leave_source_alignment_is_opt_in() {
+        let best = Array1::from_vec(vec![1.0, 2.0, 3.0]);
+        assert_eq!(
+            directed_stall_source(true, true, Some(&best)).as_ref(),
+            Some(&best)
+        );
+        assert!(directed_stall_source(false, true, Some(&best)).is_none());
+        assert!(directed_stall_source(true, false, Some(&best)).is_none());
+        assert!(directed_stall_source(true, true, None).is_none());
     }
 
     #[test]
