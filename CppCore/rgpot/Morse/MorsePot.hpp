@@ -17,7 +17,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 // clang-format on
 #include "rgpot/Locality.hpp"
 #include "rgpot/PairSwitch.hpp"
@@ -172,22 +171,5 @@ private:
   nlist::Mode mode_ = nlist::Mode::Auto;
   mutable nlist::Neighbours neighbours_;
 };
-
-namespace detail {
-
-struct MorseSplitSnapshot {
-  const nlist::Neighbours *owner = nullptr;
-  std::uint64_t build_id = 0;
-  std::size_t atoms = 0;
-  int slices = 0;
-  std::size_t total_up = 0;
-  std::size_t total_inc = 0;
-  std::vector<std::size_t> p0_splits;
-  std::vector<std::size_t> p1_splits;
-};
-
-[[nodiscard]] MorseSplitSnapshot morseStoredSplitSnapshot();
-
-} // namespace detail
 
 } // namespace rgpot

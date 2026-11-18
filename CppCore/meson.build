@@ -2791,7 +2791,7 @@ if not meson.is_subproject()
     install_subdir(
         'rgpot',
         install_dir: get_option('includedir'),
-        exclude_directories: ['__pycache__', 'rpc/local'],
+        exclude_directories: ['__pycache__', 'rpc/local', 'Morse/detail'],
         exclude_files: [
             '*.o',
             '*.a',

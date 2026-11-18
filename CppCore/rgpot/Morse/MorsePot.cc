@@ -21,6 +21,7 @@
 // clang-format on
 
 #include "rgpot/Morse/MorsePot.hpp"
+#include "rgpot/Morse/detail/MorseSplitSnapshot.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Slices.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"

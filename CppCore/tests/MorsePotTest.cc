@@ -18,6 +18,7 @@
 
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
+#include "rgpot/Morse/detail/MorseSplitSnapshot.hpp"
 #include "rgpot/PerAtom.hpp"
 #include "rgpot/Slices.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
