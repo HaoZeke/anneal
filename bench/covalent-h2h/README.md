@@ -873,10 +873,7 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   not reproduce: an Si13 minimum at -601.12421 eV is -593.51232 eV fresh,
   and Si20 minima near -979 eV are near -868 eV. One Si13 search recorded
   a planar sheet at -640.659 eV whose SCC does not converge from a fresh
-  start. Before the element floor, the handle counted as many SCCs that
-  do not converge as 74% of anneal's first 3,000 Si20 calls from a fresh
-  SCC, two for each failed call: 37% of the calls failed, nearly all on
-  trials with a pair at 0.90-0.92 Å, just past the single floor.
+  start.
 - Si20 reference search (`gfn2/si20-capped.csv`): the example on
   `a52726af`, the element floor of the gate below, seeds 3000-3007 at
   1e5 calls with no target, one seed per core on cores 0-7 at once, each
