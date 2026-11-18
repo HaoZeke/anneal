@@ -133,6 +133,7 @@ is not the hash.
 | 3.5.1   | 1, 0, 1         | 4                    |
 | 3.6.0   | 1, 1, 1         | 6                    |
 | 3.7.0   | 1, 2, 1         | 6                    |
+| next    | 1, 3, 1         | 6                    |
 
 3.6.0 raised the minor for =rgpot_eindir_abi_compatible=; a caller built against
 minor 0 still matches it.
@@ -142,6 +143,9 @@ They are additions, and their state lives behind the
 the layout revision stays at 1.
 A 3.7 library still serves a caller built against minor 0 or 1.
 A caller built against minor 2 is refused by a 3.6 library.
+The next release raises the minor to 3 for =RGPOT_SCC_NOT_CONVERGED=,
+=rgpot_set_last_error= and the fused-cache settings and error kind.
+They are additions, no old call changes, and the layout revision stays at 1.
 
 The ledger notes that soversion 3 was the 3.4.0 layout, which 3.5.0 reused after
 the layout changed, and that 4 is the 3.5.0 layout, shipped from 3.5.1.
