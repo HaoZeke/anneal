@@ -1849,7 +1849,7 @@ const TEST_FIXTURE_ALLOW: &[Allow] = &[
         path: "examples/h2h_arm3.rs",
         needle: "lj38",
         count: 2,
-        digest: 0x0a77456ccf10a4f1,
+        digest: 0x2b16c6f66fefcf87,
         reason: "example driver fixture and reporting harness (benchmark size in system name)",
     },
     Allow {
