@@ -30,6 +30,14 @@ int main(void) {
     fprintf(stderr, "cpmdc stub created a session\n");
     return 1;
   }
+  if (cpmdc_session_select_orbitals(NULL, 0) != -1) {
+    fprintf(stderr, "cpmdc stub accepted orbital selection\n");
+    return 1;
+  }
+  if (cpmdc_session_copy_orbitals(NULL, 0, 1) != -1) {
+    fprintf(stderr, "cpmdc stub accepted orbital copy\n");
+    return 1;
+  }
   if (cpmdc_potential_result_size_for_force_input(NULL, 0) != 0) {
     fprintf(stderr, "cpmdc stub reported a result size\n");
     return 1;

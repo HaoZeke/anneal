@@ -331,14 +331,22 @@ RGPOT_ENGINE_API int rgpot_engine_set_charge_spin(RgpotEnginePot *pot,
 
 /**
  * Select the active orbital key for subsequent evaluations.
- * Returns 0 on success and 3 when the backend has no orbital selection.
+ * Returns 0 on success (clearing last_error), 1 when pot is NULL (invalid
+ * argument, leaving last_error unchanged), 2 when the backend's
+ * orbital-selection hook fails with an exception, and 3 when the backend has
+ * no orbital selection or refuses key through Unsupported; codes 2 and 3
+ * record the reason in last_error.
  */
 RGPOT_ENGINE_API int rgpot_engine_select_orbitals(RgpotEnginePot *pot,
                                                   long long key);
 
 /**
  * Copy stored orbitals from one key to another.
- * Returns 0 on success and 3 when the backend has no orbital-copy primitive.
+ * Returns 0 on success (clearing last_error), 1 when pot is NULL (invalid
+ * argument, leaving last_error unchanged), 2 when the backend's orbital-copy
+ * hook fails with an exception, and 3 when the backend has no orbital-copy
+ * primitive or refuses the copy through Unsupported; codes 2 and 3 record
+ * the reason in last_error.
  */
 RGPOT_ENGINE_API int rgpot_engine_copy_orbitals(RgpotEnginePot *pot,
                                                 long long from_key,

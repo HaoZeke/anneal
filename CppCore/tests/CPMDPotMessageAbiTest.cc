@@ -169,12 +169,19 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   lib.open(path);
   using KeyFn = long long (*)(void);
   using OrbitalFn = double (*)(void);
+  using SelectFn = int (*)(void *, long long);
+  using LastErrorFn = const char *(*)(void);
   auto last_key = lib.sym<KeyFn>("cpmdc_fake_last_orbital_key");
   auto last_initial_orbital =
       lib.sym<OrbitalFn>("cpmdc_fake_last_initial_orbital_state");
   auto last_final_orbital =
       lib.sym<OrbitalFn>("cpmdc_fake_last_final_orbital_state");
+  auto raw_select = lib.sym<SelectFn>("cpmdc_session_select_orbitals");
+  auto raw_last_error = lib.sym<LastErrorFn>("cpmdc_last_error");
   constexpr long long kNone = -1000000;
+
+  REQUIRE(raw_select(nullptr, 0) == -1);
+  REQUIRE(std::string(raw_last_error()).empty());
 
   ::capnp::MallocMessageBuilder msg;
   auto p = msg.initRoot<::CPMDParams>();
@@ -192,6 +199,13 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   (void)pot(positions, atmtypes, box);
   REQUIRE(last_key() == kNone);
 
+  // Refusing a key before any key was selected throws and leaves none selected.
+  REQUIRE_THROWS_WITH(pot.selectOrbitals(-99),
+                      "CPMD engine refused the orbital key");
+  positions(0, 0) += 0.01;
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(last_key() == kNone);
+
   for (long long key : {3LL, 0LL, 3LL, 41LL}) {
     pot.selectOrbitals(key);
     positions(0, 0) += 0.01;
@@ -199,9 +213,14 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
     REQUIRE(last_key() == key);
   }
 
-  // A rejected key does not replace the key re-applied to a new session.
+  // A rejected key leaves the live session's active key and the stored key
+  // re-applied to a new session unchanged.
   REQUIRE_THROWS_WITH(pot.selectOrbitals(-99),
                       "CPMD engine refused the orbital key");
+  REQUIRE(std::string(raw_last_error()).empty());
+  positions(0, 0) += 0.01;
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(last_key() == 41);
   p.setCutOffRy(80.0);
   REQUIRE(pot.setParams(p.asReader()));
   positions(0, 0) += 0.01;
