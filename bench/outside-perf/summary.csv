@@ -1,0 +1,5 @@
+system,base_n,new_n,base_inside_median_s,new_inside_median_s,inside_relative_change,inside_mannwhitney_u,inside_mannwhitney_p,base_outside_median_s,new_outside_median_s,outside_relative_change,outside_mannwhitney_u,outside_mannwhitney_p
+lj150,12,12,133.564649,134.050250,0.003636,71.0,0.97697,96.670071,90.856251,-0.060141,81.0,0.623605
+lj104,12,12,37.429798,37.583428,0.004104,64.0,0.665006,28.555626,28.053092,-0.017598,79.0,0.707454
+m80r6,12,12,103.829712,104.005782,0.001696,64.0,0.665006,51.965660,51.652721,-0.006022,82.0,0.58336
+au55,12,12,22.242860,22.282072,0.001763,72.0,1,7.486949,7.479871,-0.000945,79.0,0.707454
