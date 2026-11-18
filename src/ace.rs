@@ -389,7 +389,7 @@ pub fn contract_c(c: &[f64], residual: &[f64], n_max: usize, l_max: usize) -> Ve
                 weights[positive] += adj_re[positive] * sign / SQRT_2;
                 weights[negative] += adj_im[positive] * sign / SQRT_2;
                 weights[positive] += adj_re[negative] / SQRT_2;
-                weights[negative] += adj_im[negative] * -1.0 / SQRT_2;
+                weights[negative] += -adj_im[negative] / SQRT_2;
             }
         }
     }

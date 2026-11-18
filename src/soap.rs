@@ -2805,6 +2805,35 @@ pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -
     }
 }
 
+/// True when the ν=3 leftover is a shell breath, not a local defect.
+///
+/// The largest per-atom leftover is then only a few times the median, so
+/// the residual is the same mode on every mobile atom. Pulling that mode
+/// back does not change the cloud mean, and the caller cap would turn it
+/// into a displacement the descriptor never asked for.
+fn shell_breath(loc: &Array2<f64>, target: &Array1<f64>, d0: usize, keep: &[bool]) -> bool {
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    let mut weight = Vec::new();
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        let mut q = 0.0;
+        for t in d0..dim {
+            let d = target[i * dim + t] - loc[[i, t]];
+            q += d * d;
+        }
+        weight.push(q);
+    }
+    if weight.is_empty() {
+        return true;
+    }
+    weight.sort_by(|a, b| a.total_cmp(b));
+    let median = weight[weight.len() / 2].max(1e-18);
+    weight[weight.len() - 1] < 4.0 * median
+}
+
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
@@ -2902,11 +2931,11 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         }
         let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
         let _ = rng;
-        // A millionth of the Mackay defect is roundoff. Anything larger
-        // is a direction and the caller's cap sets its length. Stretching
-        // a near-closed shell out to a full bond quenched back onto the
-        // same shelf and dropped the hits the short step had found.
-        if nu3_rms < NU3_DEFECT * 1e-6 {
+        // A millionth of the Mackay defect is roundoff. A leftover that
+        // is the same size on every mobile atom is a shell breath: the
+        // cloud mean already contains it, and scaling it to the caller
+        // cap is a kick the residual did not ask for.
+        if nu3_rms < NU3_DEFECT * 1e-6 || shell_breath(&loc, &target, d0, &keep) {
             return x.to_owned();
         }
         let dr = nu3_gradient_pullback(x, target.view(), spec, species, mobile);

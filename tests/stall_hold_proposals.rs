@@ -55,9 +55,12 @@ fn a_flat_stall_uses_only_general_lean_burst_actions() {
         .map(|step| step.action.as_str())
         .collect();
     assert!(
-        actions
-            .iter()
-            .all(|action| matches!(*action, "surface" | "single" | "burst" | "sym" | "soap")),
+        actions.iter().all(|action| {
+            matches!(
+                *action,
+                "surface" | "single" | "burst" | "sym" | "soap" | "twin" | "hollow"
+            )
+        }),
         "{actions:?}"
     );
 }

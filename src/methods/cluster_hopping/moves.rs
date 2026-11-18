@@ -140,6 +140,20 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
+                // Icosahedral and decahedral packings differ by a reflection
+                // in a dense plane of the structure being moved. The arm
+                // reads that plane off the coordinates. It deposits no lattice.
+                // A vacant hollow of that same packing is the other leave
+                // that does not name a lattice.
+                kernels.push(ClusterMove::Twin {
+                    n_points: cfg.n_points,
+                });
+                if matches!(self, Self::LeanBurst) {
+                    kernels.push(ClusterMove::HollowRelocate(HollowRelocate {
+                        n_points: cfg.n_points,
+                        neighbour_cutoff: cfg.neighbour_cutoff,
+                    }));
+                }
                 if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap {
                     kernels.push(soap_arm(cfg, None, None));
                 }
@@ -1709,6 +1723,7 @@ impl ClusterMove {
             n_points: n,
             neighbour_cutoff: LennardJonesPreset::NEIGHBOUR_CUTOFF,
         });
+        v.push(ClusterMove::Twin { n_points: n });
         v.push(ClusterMove::Soap {
             rmsd: LennardJonesPreset::SOAP_RMSD * LennardJonesPreset::REDUCED_SCALE,
             cutoff: LennardJonesPreset::SOAP_CUTOFF * LennardJonesPreset::REDUCED_SCALE,
@@ -3367,8 +3382,10 @@ mod move_scaling_tests {
             mobile: None,
             groups: None,
         };
+        // One atom sits off the other three, so the leftover is local.
+        // A uniform leftover is a shell breath and the arm stands still.
         let x = Array1::from_vec(vec![
-            0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
+            0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 2.40, 0.10, 0.10,
         ]);
         let mut rng = StdRng::seed_from_u64(4);
         let y = mv.propose(x.view(), 0.8, &mut rng);

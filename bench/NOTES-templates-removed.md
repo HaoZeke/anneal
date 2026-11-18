@@ -132,6 +132,15 @@ The 16-seed LJ38 two-phase regression keeps the compacted hit mask
 `0xffff`, while the plain-walk mask changes from `0x91e4` (7/16) to
 `0x240d` (5/16).
 
+The reflection twin and the vacant hollow move those pins again. The
+2,500-call LJ38 regression is now best -173.2523783112709737, 35 hops,
+30 converged and 24 capped quenches. The LJ98 regression is
+-529.2320643925859258, 18 hops, 17 converged and 17 capped quenches.
+The LJ98 seed-2000 trajectory hash is
+`63c8fc15ae7bc20d65e711353b6e2d8ce3562a9a4abaf62ad37e9387fcb4e6f4`.
+The 16-seed LJ38 plain walk at 30,000 calls and a 200-step quench is
+mask `0x0010` (1/16). The relative-cutoff walk stays `0xffff`.
+
 ## Notes on unavailable landed rows
 
 - `bench/abcluster-h2h` is not yet on the landing base, so its data remain in

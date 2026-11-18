@@ -805,12 +805,11 @@ pub fn propose<R: Rng + ?Sized>(x: ArrayView1<f64>, n: usize, rng: &mut R) -> Ar
     }
     let top = planes.len().min(8);
     let p = planes[rng.random_range(0..top)];
-    let mode = if rng.random::<f64>() < 0.5 {
-        Mode::Reflect
-    } else {
-        Mode::Rotate
-    };
-    twin(x.view(), n, &p, mode, 0.25)
+    // A fifth-turn about the plane normal is a disclination. On the draws
+    // that were counted it was accepted far less often than a surface move
+    // and scored level with the control, so the proposal is the reflection
+    // that keeps each half's contacts.
+    twin(x.view(), n, &p, Mode::Reflect, 0.25)
 }
 
 #[cfg(test)]
