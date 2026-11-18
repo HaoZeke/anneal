@@ -5177,23 +5177,26 @@ where
     let mut held_count: usize = 0;
     // Preserve the paper trajectory unless the caller explicitly excludes
     // named Mackay constructions for a general-search comparison.
-    if cfg.mackay_priors && cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {
-        let mackay = binary_geometry::mackay_cap(n, cfg.length_scale.max(1e-6));
-        if mackay.len() == x.len() {
-            let (mackay_energy, mackay_state) = relax(ledger, mackay.view(), cfg.relax_steps);
-            if mackay_energy.is_finite() && quench_is_sane(cfg, mackay_energy, mackay_state.view())
-            {
-                let before = ledger.best;
-                let _gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    mackay_energy,
-                    mackay_state.view(),
-                    &mut unconverged_records,
-                );
-                if ledger.best < before - 1e-12 && improvements.len() < 512 {
-                    improvements.push((0, ledger.spent(), bias.n_basins(), ledger.best));
+    if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {
+        if cfg.mackay_priors {
+            let mackay = binary_geometry::mackay_cap(n, cfg.length_scale.max(1e-6));
+            if mackay.len() == x.len() {
+                let (mackay_energy, mackay_state) = relax(ledger, mackay.view(), cfg.relax_steps);
+                if mackay_energy.is_finite()
+                    && quench_is_sane(cfg, mackay_energy, mackay_state.view())
+                {
+                    let before = ledger.best;
+                    let _gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        mackay_energy,
+                        mackay_state.view(),
+                        &mut unconverged_records,
+                    );
+                    if ledger.best < before - 1e-12 && improvements.len() < 512 {
+                        improvements.push((0, ledger.spent(), bias.n_basins(), ledger.best));
+                    }
                 }
             }
         }

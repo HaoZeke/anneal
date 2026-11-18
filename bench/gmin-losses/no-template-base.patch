@@ -27,10 +27,10 @@ index c26533ad..ded077fa 100644
      // A comma list turns off the named ones: soap, reseed, growth,
      // core, motif. The plane move stays off unless H2H_GENERAL=1.
 diff --git a/examples/h2h_morse.rs b/examples/h2h_morse.rs
-index dfd32871..8fae0bda 100644
+index dfd32871..c362f831 100644
 --- a/examples/h2h_morse.rs
 +++ b/examples/h2h_morse.rs
-@@ -146,11 +146,15 @@ fn cmd_run(args: &[String]) -> i32 {
+@@ -146,11 +146,18 @@ fn cmd_run(args: &[String]) -> i32 {
      };
      let budget = env_budget().unwrap_or(spec.budget);
      let mut cfg = Config::recommended(spec.n);
@@ -42,8 +42,10 @@ index dfd32871..8fae0bda 100644
      // the well, one Mackay cap is quenched before the walk. Rho = 14 is
      // not, and the search is then the recommended one.
      let kind = PairKind::Morse { rho: spec.rho };
--    cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
-+    cfg.long_ranged = templates && kind.second_neighbour_energy() < -0.05;
+     cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
++    if !templates {
++        cfg.long_ranged = false;
++    }
      // Unset leaves the preset's structure priors on. `0` turns off the
      // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
      // labelled core, the motif reseed, stall symmetrisation (and its

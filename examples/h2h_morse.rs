@@ -157,8 +157,10 @@ fn cmd_run(args: &[String]) -> i32 {
     // A second neighbour in an fcc shell. Bound by more than a twentieth of
     // the well, one Mackay cap is quenched before the walk. Rho = 14 is
     // not, and the search is then the recommended one.
-    cfg.long_ranged = std::env::var("H2H_TEMPLATES").as_deref() != Ok("0")
-        && kind.second_neighbour_energy() < -0.05;
+    cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
+    if std::env::var("H2H_TEMPLATES").as_deref() == Ok("0") {
+        cfg.long_ranged = false;
+    }
     if std::env::var("H2H_MACKAY").as_deref() == Ok("0") {
         cfg.mackay_priors = false;
     }
