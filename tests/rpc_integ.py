@@ -243,6 +243,18 @@ async def run_composite_configure(port, schema):
     for a, b in zip(scaled.forces, lj.forces):
         assert math.isclose(a, 2.5 * b, rel_tol=1e-12, abs_tol=1e-14)
 
+    d2 = await configure([("d2", "d2", 1.0, True)])
+    assert d2.energy < 0.0
+    both = await configure([("lj", "lj", 1.0, True), ("d2", "d2", 1.0, True)])
+    assert math.isclose(both.energy, lj.energy + d2.energy, rel_tol=1e-12)
+    undone = await configure(
+        [("lj", "lj", 1.0, True), ("d2", "d2", 1.0, True), ("undo", "d2", -1.0, True)]
+    )
+    assert math.isclose(undone.energy, lj.energy, rel_tol=1e-12)
+    for a, b in zip(undone.forces, lj.forces):
+        assert math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-14)
+    scaled = await configure([("lj", "lj", 2.5, True), ("off", "nonesuch", 1.0, False)])
+
     cfg = schema.PotentialConfig.new_message()
     bad = cfg.init("composite").init("terms", 1)[0]
     bad.name = "bad"
@@ -264,6 +276,64 @@ async def run_composite_configure(port, schema):
         assert not reply.ok, f"Composite accepted configure({name}): {reply.message}"
         assert name in reply.message, reply.message
     print("Composite configure: weights, switches and refusals hold")
+    return True
+
+
+async def run_d2_configure(port, schema):
+    """configure(d2) on a D2 server rebuilds the lattice sum it names."""
+    for _ in range(10):
+        try:
+            connection = await capnp.AsyncIoStream.create_connection(
+                host="localhost", port=port
+            )
+            break
+        except OSError:
+            await asyncio.sleep(0.5)
+    else:
+        print("D2 configure: failed to connect to server.")
+        return False
+
+    client = capnp.TwoPartyClient(connection)
+    pot = client.bootstrap().cast_as(schema.Potential)
+    fip = schema.ForceInput.new_message()
+    pos = [0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 2.9, 0.1, 0.2]
+    fip.init("pos", len(pos))
+    for i, p in enumerate(pos):
+        fip.pos[i] = p
+    fip.init("atmnrs", 4)
+    for i, z in enumerate([8, 1, 1, 8]):
+        fip.atmnrs[i] = z
+    fip.init("box", 9)
+    for i, b in enumerate([9.0, 0.0, 0.0, 1.0, 9.5, 0.0, 0.0, 0.5, 10.0]):
+        fip.box[i] = b
+
+    blyp = (await pot.calculate(fip)).result
+    assert blyp.energy < 0.0, blyp.energy
+    cfg = schema.PotentialConfig.new_message()
+    cfg.init("d2").functional = "pbe"
+    reply = await pot.configure(cfg)
+    print(f"D2 configure(d2): ok={reply.ok} msg={reply.message}")
+    assert reply.ok, reply.message
+    pbe = (await pot.calculate(fip)).result
+    assert math.isclose(pbe.energy, blyp.energy * 0.75 / 1.2, rel_tol=1e-12)
+
+    cfg.d2.functional = "nonesuch"
+    reply = await pot.configure(cfg)
+    assert not reply.ok and "nonesuch" in reply.message, reply.message
+    assert (await pot.calculate(fip)).result.energy == pbe.energy
+    for name in schema.PotentialConfig.schema.union_fields:
+        if name in ("none", "d2"):
+            continue
+        arm = schema.PotentialConfig.new_message()
+        field = schema.PotentialConfig.schema.fields[name]
+        if field.proto.slot.type.which() == "void":
+            setattr(arm, name, None)
+        else:
+            arm.init(name)
+        reply = await pot.configure(arm)
+        assert not reply.ok, f"D2 accepted configure({name}): {reply.message}"
+        assert name in reply.message, reply.message
+    print("D2 configure: functional table and refusals hold")
     return True
 
 
@@ -671,6 +741,32 @@ def main():
     if not composite_ok:
         sys.exit(1)
     print("Composite configure passed.")
+
+    d2_port = args.port + 5
+    print(f"Starting D2 server: {args.server_bin} {d2_port} D2")
+    d2_proc = subprocess.Popen(
+        [args.server_bin, str(d2_port), "D2"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        d2_ok = asyncio.run(
+            capnp.run(run_d2_configure(d2_port, effective_schema(args.server_bin)))
+        )
+    except BaseException as e:
+        print(f"D2 configure exception: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        d2_proc.kill()
+        out, err = d2_proc.communicate(timeout=30)
+        print("Server stdout:", out.decode(errors="replace")[-4000:])
+        print("Server stderr:", err.decode(errors="replace")[-4000:])
+        d2_ok = False
+    finally:
+        d2_proc.kill()
+        d2_proc.wait()
+    if not d2_ok:
+        sys.exit(1)
+    print("D2 configure passed.")
 
     if args.nwchem_smoke:
         nw_port = args.port + 1

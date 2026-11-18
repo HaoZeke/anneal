@@ -1,0 +1,32 @@
+diff --git a/Potentials.capnp b/Potentials.capnp
+--- a/Potentials.capnp
++++ b/Potentials.capnp
+@@ -2658,6 +2658,20 @@
+   terms @0 :List(CompositeTerm);
+ }
+ 
++# @struct D2Params
++# @brief Grimme's DFT-D2 as a lattice sum (rgpot::D2Pot).
++#
++# S. Grimme, J. Comput. Chem. 27, 1787 (2006), doi:10.1002/jcc.20495, with
++# the tables of the dftd3 program. The defaults are BLYP. A non-empty
++# functional takes s6 and d from dftd3's D2 table instead of the fields.
++struct D2Params {
++  s6 @0 :Float64 = 1.2;       # Global scaling.
++  d @1 :Float64 = 20.0;       # Steepness of the damping.
++  sr @2 :Float64 = 1.1;       # Scale on the tabulated R0.
++  cutoff @3 :Float64 = 150.0; # Pair cutoff (Angstrom) over all images.
++  functional @4 :Text;        # dftd3 -func name; empty keeps s6 and d.
++}
++
+ # @struct PotentialConfig
+ # @brief **rgpot user parameters (extensible, in/out via Cap'n Proto only).**
+ #
+@@ -2689,6 +2703,7 @@
+     expr      @16 :ExprParams;
+     cp2k      @17 :CP2KParams;    # CP2KPot / libcp2k shim
+     composite @18 :CompositeParams; # rgpot::SumPot over PotentialSpec terms
++    d2 @19 :D2Params;               # rgpot::D2Pot, Grimme 2006 lattice sum
+   }
+   # Normalized overlay applied BEFORE the native arm; native settings win.
+   common @3 :CommonMethodSpec;

@@ -23,3 +23,7 @@ hessian-vector.diff
 # CompositeTerm structs, a weighted sum of PotentialSpec children that
 # rgpot::SumPot evaluates.
 composite.diff
+#
+# d2.diff: PotentialConfig.d2 @19 and the D2Params struct, the Grimme
+# 2006 lattice sum rgpot::D2Pot evaluates.
+d2.diff

@@ -599,6 +599,36 @@ TEST_CASE("composite engine sums weighted terms and reports each",
   e.destroy(off);
 }
 
+TEST_CASE("composite engine takes D2 terms with their stress", "[engine][composite][d2]") {
+  Engine e;
+  if (!open_engine("COMPOSITE", e)) {
+    SKIP("no composite engine in this build");
+  }
+  std::string error;
+  RgpotEnginePot *pot = create(e,
+                               composite_params({{"lj", "lj", 1.0, true},
+                                                 {"d2", "d2", 1.0, true},
+                                                 {"undo", "d2", -1.0, true}}),
+                               &error);
+  INFO(error);
+  REQUIRE(pot != nullptr);
+  const long n = 5;
+  std::vector<double> forces(3 * n, 0.0);
+  double energy = 0.0;
+  REQUIRE(e.force(pot, n, kCluster.data(), kZ.data(), forces.data(), &energy,
+                  nullptr, kBox.data(), nullptr, nullptr) == 0);
+  std::vector<RgpotEngineComponent> rec(3);
+  REQUIRE(e.last_components(pot, rec.data(), nullptr, 3) == 3);
+  REQUIRE(rec[1].energy < 0.0);
+  REQUIRE(rec[1].energy == rec[2].energy);
+  REQUIRE(rec[1].has_stress == 1);
+  REQUIRE(energy == Catch::Approx(rec[0].energy).margin(1e-12));
+  for (int k = 0; k < 9; ++k) {
+    REQUIRE(rec[1].stress[k] == rec[2].stress[k]);
+  }
+  e.destroy(pot);
+}
+
 TEST_CASE("mopac engine", "[engine][mopac]") {
   check_unavailable_engine("MOPAC", "mopac", builtin_params("mopac"), 2);
 }

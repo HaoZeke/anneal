@@ -158,6 +158,7 @@ LJClusterPotTest | tests core | unit ljcluster_pot_test LJClusterPotTest.cc |
 LJPotThreadsTest | tests core | unit lj_pot_threads_test LJPotThreadsTest.cc timeout=120 |
 ZBLPotTest | tests core | unit zbl_pot_test ZBLPotTest.cc |
 SumPotTest | tests core | unit sum_pot_test SumPotTest.cc |
+D2PotTest | tests core | unit d2_pot_test D2PotTest.cc timeout=300 |
 PerAtomTest | tests core | unit per_atom_test PerAtomTest.cc |
 LocalityTest | tests core | unit locality_test LocalityTest.cc |
 StagedTest | tests core | unit staged_test StagedTest.cc |

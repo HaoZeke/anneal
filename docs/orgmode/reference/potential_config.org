@@ -14,14 +14,14 @@ Backend options for a live =Potential= go in =PotentialConfig=
 It is a union whose arms and ordinals are =none= @0, =nwchem= @1, =cpmd= @2,
 =metatomic= @4, =lammps= @5, =xtb= @6, =tblite= @7, =uma= @8, =lj= @9, =morse=
 @10, =zbl= @11, =d3= @12, =d4= @13, =mopac= @14, =skala= @15, =expr= @16, =cp2k=
-@17 and =composite= @18.
-=composite= is a local addition (=CppCore/rgpot/rpc/local/composite.diff=) to
-the pinned schema.
+@17, =composite= @18 and =d2= @19.
+=composite= and =d2= are local additions
+(=CppCore/rgpot/rpc/local/composite.diff= and =d2.diff=) to the pinned schema.
 Outside the union, =common= @3 is a =CommonMethodSpec= overlay.
 Geometry stays on =ForceInput=; =configure(config)= applies method and backend
 setup only.
-=potserv= applies =nwchem=, =cpmd=, =morse= and =composite= on the matching
-backend, and =cp2k= on a build with CP2K.
+=potserv= applies =nwchem=, =cpmd=, =morse=, =composite= and =d2= on the
+matching backend, and =cp2k= on a build with CP2K.
 =none= is a no-op on every backend.
 Every other arm gets =ok=false= with a message that names the arm.
 An arm from a newer schema is named by its discriminant.
@@ -65,9 +65,9 @@ The server starts with an empty sum, whose energy is 0.
 | =CompositeTerm.weight= | Float64 | 1.0 | multiplies the term's energy, forces and stress; the sign is allowed |
 | =CompositeTerm.pot= | =PotentialSpec= | unset | the child backend |
 
-The =builtin= arm of =PotentialSpec= builds =lj=, =morse= and =zbl= with the
-parameters of its =config= arm (=lj=, =morse=, =zbl=, or =none= for the
-defaults) and =composite= (or =sum=) for a nested sum.
+The =builtin= arm of =PotentialSpec= builds =lj=, =morse=, =zbl= and =d2= with
+the parameters of its =config= arm (=lj=, =morse=, =zbl=, =d2=, or =none= for
+the defaults) and =composite= (or =sum=) for a nested sum.
 The =cpmd= arm builds a =CPMDPot= from its =CPMDParams=, which loads =libcpmdc=.
 Other =PotentialSpec= arms, an unknown builtin name, a builtin config arm that
 belongs to another backend, an enabled term without a =pot= and a weight that is
@@ -76,8 +76,28 @@ previous sum in place.
 =CppCore/rgpot/rpc/CompositeConfigure.hpp= holds the mapping, which
 =libcomposite_engine= also uses.
 =tests/rpc_integ.py= checks that a weight of -1 cancels a term, that a weight
-scales one, that a disabled term with an unknown name is not built, and that
-every other arm is refused.
+scales one, that a disabled term with an unknown name is not built, that an LJ
+plus D2 sum is the sum of the two and loses the D2 again under a second D2 term
+at weight -1, and that every other arm is refused.
+
+** D2 arm (=PotentialConfig.d2= / =D2Params=)
+
+With =potserv <port> D2=, pass =configure= with the =d2= arm set; the same
+struct is the =config= of a =d2= builtin in a composite term.
+The server starts with the BLYP defaults and rebuilds its =D2Pot= from the arm.
+
+| field | type | default | meaning |
+|-------+------+---------+---------|
+| =D2Params.s6= | Float64 | 1.2 | global scaling (BLYP) |
+| =D2Params.d= | Float64 | 20.0 | steepness of the damping |
+| =D2Params.sr= | Float64 | 1.1 | scale on the tabulated R0 |
+| =D2Params.cutoff= | Float64 | 150.0 | pair cutoff over all images, Angstrom |
+| =D2Params.functional= | Text | empty | a dftd3 =-func= name; when set, its =s6= and =d= replace the two fields |
+
+An unknown functional, a cutoff that is not positive and finite, or an =sr= that
+is not positive gets =ok=false= and leaves the pot as it was.
+=tests/rpc_integ.py= switches the functional to PBE and checks that the energy
+scales by the ratio of the two =s6=.
 
 ** CPMD arm (=PotentialConfig.cpmd= / =CPMDParams=)
 

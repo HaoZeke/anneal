@@ -73,7 +73,7 @@ const UPSTREAM_ARMS: [(&str, u16); 17] = [
 ];
 
 /// The arms rgpot adds in CppCore/rgpot/rpc/local, after the upstream ones.
-const LOCAL_ARMS: [(&str, u16); 1] = [("composite", 18)];
+const LOCAL_ARMS: [(&str, u16); 2] = [("composite", 18), ("d2", 19)];
 
 #[test]
 fn union_arms_keep_the_upstream_ordinals() {

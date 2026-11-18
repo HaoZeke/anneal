@@ -42,8 +42,8 @@ and =scripts/rgpot_nwchem_vs_socket.sh= compare =RgpotPot= against eOn's
 * Operator Cheatsheet (rgpot side)
 
 =potserv <port> <PotentialType>= selects the backend.
-Every build accepts =LJ=, =LJCluster=, =Morse=, =ZBL=, =Composite=, =NWChem=,
-=NWChem:basis[:theory[:xc]]= and =CPMD=.
+Every build accepts =LJ=, =LJCluster=, =Morse=, =ZBL=, =Composite=, =D2=,
+=NWChem=, =NWChem:basis[:theory[:xc]]= and =CPMD=.
 A Fortran build also accepts =CuH2=.
 The remaining names are present only when that backend was compiled in:
 =IPI:unix:<path>= and =IPI:tcp:<host>:<port>=; =XTB= (GFN2-xTB), =GFNFF=,

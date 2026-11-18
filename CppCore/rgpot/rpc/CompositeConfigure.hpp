@@ -24,6 +24,7 @@
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
+#include "rgpot/rpc/D2Configure.hpp"
 #include "rgpot/rpc/MorseConfigure.hpp"
 #include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/rpc/Potentials.capnp.h"
@@ -78,6 +79,10 @@ inline std::unique_ptr<PotentialBase> builtinPotential(const ::BuiltinParams::Re
       c.cut_global = cfg.getZbl().getCutGlobal();
     }
     return std::make_unique<ZBLPot>(c);
+  }
+  if (name == "d2") {
+    expectArm(name, cfg, ::PotentialConfig::D2);
+    return std::make_unique<D2Pot>(cfg.isD2() ? d2ConfigFrom(cfg.getD2()) : D2Config{});
   }
   if (name == "composite" || name == "sum") {
     expectArm(name, cfg, ::PotentialConfig::COMPOSITE);

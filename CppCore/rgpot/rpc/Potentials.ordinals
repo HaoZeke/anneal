@@ -1961,3 +1961,9 @@ CompositeTerm @2 field weight :Float64 local
 CompositeTerm @3 field pot :PotentialSpec local
 CompositeParams @0 field terms :List(CompositeTerm) local
 PotentialConfig @18 arm composite :CompositeParams local
+D2Params @0 field s6 :Float64 local
+D2Params @1 field d :Float64 local
+D2Params @2 field sr :Float64 local
+D2Params @3 field cutoff :Float64 local
+D2Params @4 field functional :Text local
+PotentialConfig @19 arm d2 :D2Params local

@@ -41,6 +41,7 @@
 #include "rgpot/Potential.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
+#include "rgpot/D2Pot/D2Pot.hpp"
 #include "rgpot/LongRange/SumPot.hpp"
 #include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/pot_caps.hpp"
@@ -188,6 +189,7 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 1;
 /// 9 stamps `SumPot`, `lr::SumPot` and `PotType::LrSum`. `lr::SumPot`
 /// derives from `SumPot` now: it is 120 bytes where it was 56, and its
 /// old constructor and `add` symbols are gone.
+/// It also stamps `D2Config`, `D2Pot` and `PotType::D2`.
 inline constexpr std::uint32_t kCxxSoversion = 9;
 
 /// One recorded no-cache layout hash. `tag` is `kCxxPlatformTag`.
@@ -201,7 +203,7 @@ struct CxxSoversionEntry {
 /// platform still compiles. How to update the table:
 /// docs/orgmode/contributing/developer/abi-bump.org.
 inline constexpr std::array<CxxSoversionEntry, 1> kCxxSoversionTable{{
-    {"linux-x86_64-libstdc++-lp64", 0x2ef0db3c6916c23aull},
+    {"linux-x86_64-libstdc++-lp64", 0x7612558dc6d1a6c0ull},
 }};
 
 /// This translation unit's platform tag (`os-arch-stdlib-datamodel`).
@@ -346,6 +348,11 @@ constexpr std::uint64_t compute_hash() {
   f.add(offsetof(SuttonChenConfig, cutoff));
   f.add(offsetof(SuttonChenConfig, periodic));
   f.add(offsetof(SuttonChenConfig, stress));
+  f.type<D2Config>();
+  f.add(offsetof(D2Config, s6));
+  f.add(offsetof(D2Config, d));
+  f.add(offsetof(D2Config, sr));
+  f.add(offsetof(D2Config, cutoff));
 
   // Enumerations: underlying width and the values consumers switch on.
   f.type<Reentrancy>();
@@ -370,6 +377,7 @@ constexpr std::uint64_t compute_hash() {
   f.add(static_cast<std::uint64_t>(PotType::DoubleWell));
   f.add(static_cast<std::uint64_t>(PotType::CoupledProtonWell));
   f.add(static_cast<std::uint64_t>(PotType::CBE));
+  f.add(static_cast<std::uint64_t>(PotType::D2));
 
   // Polymorphic classes: size, alignment and the virtual-function counts.
   // offsetof is not defined for them.
@@ -385,6 +393,7 @@ constexpr std::uint64_t compute_hash() {
   f.type<SuttonChenPot>();
   f.type<SumPot>();
   f.type<lr::SumPot>();
+  f.type<D2Pot>();
 #ifdef RGPOT_HAS_CACHE
   f.type<cache::EvalCounts>();
   f.add(offsetof(cache::EvalCounts, computed));

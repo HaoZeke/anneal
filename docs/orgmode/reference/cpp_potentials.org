@@ -222,6 +222,18 @@ class.
   =std::invalid_argument= for an empty =functional=, and =std::runtime_error=
   when s-dftd3 cannot load damping parameters for it.
 
+*** =rgpot::D2Config=
+
+- Inputs :: =s6= (global scaling, default 1.2), =d= (steepness of the damping,
+  default 20.0), =sr= (scale on the tabulated R0, default 1.1), =cutoff= (pair
+  cutoff over all periodic images, default 150.0).
+  The defaults are BLYP; =rgpot::d2_config_for= gives the set of another
+  functional.
+- Units :: =cutoff= in Angstrom; the others are dimensionless.
+- Outputs :: the parameters of =rgpot::D2Pot=.
+- Errors :: the constructor throws =std::invalid_argument= unless =cutoff= is
+  positive and finite, =sr= is positive and finite and =s6= and =d= are finite.
+
 *** =rgpot::D4Config=
 
 - Inputs :: =functional= (the dftd4 method key, default ="pbe"=), =charge=
@@ -297,7 +309,7 @@ A sentence after the fields names a class whose behaviour differs in detail.
 [[nodiscard]] uint64_t paramsKey() const noexcept override;
 #+end_src
 
-- Applies to :: rgpot::EAMPot, rgpot::EAMTablePot, rgpot::EMTPot,
+- Applies to :: rgpot::D2Pot, rgpot::EAMPot, rgpot::EAMTablePot, rgpot::EMTPot,
   rgpot::ExprPot, rgpot::LJClusterPot, rgpot::LJPot, rgpot::MorsePot,
   rgpot::SPCEPot, rgpot::StillingerWeberSi, rgpot::SuttonChenPot,
   rgpot::TIP4PPot, rgpot::TIP4PPtPot, rgpot::TersoffSiC, rgpot::ZBLPot,
@@ -1322,6 +1334,89 @@ explicit TIP4PPtPot(const WaterConfig &config);
 - Errors :: the force call throws =std::invalid_argument= for null atomic
   numbers, when the hydrogen pairs run past the last atom, and when the atom
   count is smaller than the water atoms.
+
+** Grimme D2
+
+=rgpot::D2Pot= is Grimme's DFT-D2
+[[https://doi.org/10.1002/jcc.20495][(J. Comput. Chem. 27, 1787 (2006))]]
+written in rgpot, with no library to link:
+
+\[
+E = -s_6 \sum_{i<j} \sum_{\mathbf T} \frac{C_6^{ij}}{r_{ij,\mathbf T}^6}
+\frac{1}{1 + e^{-d (r_{ij,\mathbf T} / (s_R R_0^{ij}) - 1)}},
+\quad C_6^{ij} = \sqrt{C_6^i C_6^j},\ R_0^{ij} = R_0^i + R_0^j .
+\]
+
+The C6 and R0 tables, the unit conversions and the per-functional s6 and d are
+those of the reference dftd3 program (V3.1, =loadoldpar= and =setfuncpar=),
+which reproduces the paper for H to Xe and extends it to Rn.
+In a cell, \(\mathbf T\) runs over every lattice vector that brings a pair
+within =cutoff=, including the images of an atom with itself at weight one half,
+so the sum is the periodic energy of any cell, sheared or not.
+An all-zero box sums the pairs of the molecule.
+The force call writes the stress, \(\sigma = V^{-1}\,\partial
+E/\partial \varepsilon\) in eV/Angstrom^3.
+
+The pair energy falls as \(r^{-6}\), so the lattice sum beyond \(r_c\) falls as
+\(r_c^{-3}\).
+The default cutoff of 150 Angstrom is where doubling it moves the energy of
+liquid water (the 24-atom cubic and sheared boxes of =D2PotTest=) by less than
+\(\sqrt{\epsilon}\) Hartree per atom, the gradient threshold of the s-dftd3 and
+dftd4 tests:
+
+The images come from the neighbour walk (=nlist::Walk=), which streams every
+image within the cutoff, so no image list is held.
+A cutoff that reaches more than =d2::detail::kMaxImagesPerAxis= (256) lattice
+images along a cell vector throws =std::invalid_argument=: that many images
+along each of three vectors is already of the order of 10^8 per atom pair, and a
+count past the range of an =int= would otherwise wrap.
+| cutoff (Angstrom) | \(\lvert\Delta E\rvert\) per atom (Ha) | max \(\lvert\Delta F\rvert\) (Ha/bohr) |
+|-------------------+---------------------------------+-------------------------------|
+|              37.5 | 5.1e-7                          | 2.7e-10                       |
+|                75 | 6.3e-8                          | 2.0e-12                       |
+|               150 | 7.0e-9                          | 4.3e-14                       |
+
+The differences are against a 300 Angstrom sum.
+The forces converge far sooner than the energy, so a relaxation or dynamics that
+only needs forces can pass a smaller =cutoff=. dftd3's own =-pbc= default
+(\(\sqrt{9000}\) bohr, about 50 Angstrom) leaves an energy error near 2e-7 Ha
+per atom.
+
+*** =rgpot::D2Pot=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+explicit D2Pot(D2Config cfg = {});
+#+end_src
+
+- Inputs :: a =rgpot::D2Config=.
+- Units :: energy in eV, forces in eV/Angstrom, stress in eV/Angstrom^3.
+- Outputs :: the D2 energy, forces and stress, periodic or molecular.
+- Errors :: the errors of =rgpot::D2Config=.
+  The force call throws =std::invalid_argument= when the atomic numbers are
+  missing or one is outside 1 to 86, and when a non-zero cell is singular.
+
+*** =rgpot::D2Pot::config=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const D2Config &config() const noexcept { return cfg_; }
+#+end_src
+
+- Inputs :: none.
+- Units :: as in =rgpot::D2Config=.
+- Outputs :: the =rgpot::D2Config= the instance was built with.
+- Errors :: none.
+
+Two free functions in =rgpot/D2Pot/D2Pot.hpp= expose the parameters.
+=rgpot::d2_config_for(functional)= returns a =rgpot::D2Config= with the =s6= and
+=d= dftd3 uses for a =-func= name (=b-lyp=, =b-p=, =b97-d=, =revpbe=, =pbe=,
+=tpss=, =b3-lyp=, =pbe0=, =pw6b95=, =tpss0=, =b2-plyp=, =b2gp-plyp=, =dsd-blyp=,
+or the aliases =blyp=, =bp86= and =b3lyp=, in any case) and the default =sr= and
+=cutoff=; any other name throws =std::invalid_argument=.
+=rgpot::d2_c6(z)= and =rgpot::d2_r0(z)= return the tabulated C6 (J nm^6 mol^-1)
+and R0 (Angstrom) of atomic number =z= and throw =std::invalid_argument= outside
+1 to 86.
 
 ** Dispersion libraries
 

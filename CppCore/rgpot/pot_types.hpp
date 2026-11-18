@@ -73,7 +73,8 @@ enum class PotType {
   LepsFH2,
   DoubleWell,
   CoupledProtonWell,
-  CBE           //!< External cbe-pes frontend.
+  CBE,          //!< External cbe-pes frontend.
+  D2            //!<  Grimme DFT-D2 lattice sum (rgpot::D2Pot).
 };
 
 } // namespace rgpot

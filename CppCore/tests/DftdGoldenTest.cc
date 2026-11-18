@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "dftd_tolerances.hpp"
 #include "npy_io.hpp"
 #include "rgpot/units.hpp"
 
@@ -38,9 +39,8 @@ namespace {
 
 constexpr const char *kData = "CppCore/tests/data/dftd";
 
-// s-dftd3 test/unit/test_dftd3.f90 and dftd4 test/unit/test_dftd4.f90.
-constexpr double kEnergyThr = 100.0 * std::numeric_limits<double>::epsilon();
-constexpr double kGradThr = 1.4901161193847656e-08; // sqrt(eps)
+using rgpot::testtol::kEnergyThr;
+using rgpot::testtol::kGradThr;
 
 const char *kRequired[] = {
     "CppCore/tests/data/dftd/MANIFEST.json",

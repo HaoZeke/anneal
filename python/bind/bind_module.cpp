@@ -12,6 +12,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -20,6 +21,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
@@ -28,6 +30,7 @@
 
 #include "pot_holder.hpp"
 
+#include "rgpot/D2Pot/D2Pot.hpp"
 #include "rgpot/ExternalPot/ExternalPot.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
@@ -138,6 +141,14 @@ struct ChildSpec {
   double a = 0.0;
   bool has_re = false;
   double re = 0.0;
+  // D2 dict fields; a functional names s6 and d from dftd3's table.
+  bool has_functional = false;
+  bool has_s6 = false;
+  double s6 = 0.0;
+  bool has_d = false;
+  double d = 0.0;
+  bool has_sr = false;
+  double sr = 0.0;
 };
 
 std::string child_kind(nb::handle spec) {
@@ -164,7 +175,20 @@ ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
   if (nb::isinstance<nb::dict>(spec)) {
     auto d = nb::cast<nb::dict>(spec);
     if (d.contains("functional")) {
+      out.has_functional = true;
       out.functional = nb::cast<std::string>(d["functional"]);
+    }
+    if (d.contains("s6")) {
+      out.has_s6 = true;
+      out.s6 = nb::cast<double>(d["s6"]);
+    }
+    if (d.contains("d")) {
+      out.has_d = true;
+      out.d = nb::cast<double>(d["d"]);
+    }
+    if (d.contains("sr")) {
+      out.has_sr = true;
+      out.sr = nb::cast<double>(d["sr"]);
     }
     if (d.contains("atm")) {
       out.atm = nb::cast<bool>(d["atm"]);
@@ -242,6 +266,23 @@ std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
       cfg.switch_width = spec.switch_width;
     }
     return std::make_unique<rgpot::MorsePot>(cfg);
+  }
+  if (spec.kind == "d2") {
+    rgpot::D2Config cfg =
+        spec.has_functional ? rgpot::d2_config_for(spec.functional) : rgpot::D2Config{};
+    if (spec.has_s6) {
+      cfg.s6 = spec.s6;
+    }
+    if (spec.has_d) {
+      cfg.d = spec.d;
+    }
+    if (spec.has_sr) {
+      cfg.sr = spec.sr;
+    }
+    if (spec.has_cutoff) {
+      cfg.cutoff = spec.cutoff;
+    }
+    return std::make_unique<rgpot::D2Pot>(cfg);
   }
 #ifdef RGPOT_HAS_DFTD3
   if (spec.kind == "d3") {
@@ -783,6 +824,39 @@ NB_MODULE(_core, m) {
     return out;
   });
   rgpot::pybind::bind_calls(morse_cls);
+
+  auto d2_cls = nb::class_<PotHolder<rgpot::D2Pot>>(m, "D2Pot");
+  d2_cls.def(
+      "__init__",
+      [](PotHolder<rgpot::D2Pot> *self, double s6, double d, double sr, double cutoff,
+         std::optional<std::string> functional) {
+        rgpot::D2Config cfg =
+            functional ? rgpot::d2_config_for(*functional) : rgpot::D2Config{};
+        if (!functional) {
+          cfg.s6 = s6;
+          cfg.d = d;
+        }
+        cfg.sr = sr;
+        cfg.cutoff = cutoff;
+        new (self) PotHolder<rgpot::D2Pot>(
+            [cfg] { return std::make_unique<rgpot::D2Pot>(cfg); });
+      },
+      nb::arg("s6") = 1.2, nb::arg("d") = 20.0, nb::arg("sr") = 1.1,
+      nb::arg("cutoff") = rgpot::D2Config{}.cutoff, nb::arg("functional") = nb::none(),
+      "Grimme's DFT-D2 (J. Comput. Chem. 27, 1787 (2006)) as a lattice sum "
+      "over every periodic image within cutoff (Angstrom), in eV. The "
+      "defaults are BLYP. A functional takes s6 and d from dftd3's D2 table "
+      "in place of the arguments.");
+  d2_cls.def("config", [](const PotHolder<rgpot::D2Pot> &self) {
+    const rgpot::D2Config &cfg = self.primary().config();
+    nb::dict out;
+    out["s6"] = cfg.s6;
+    out["d"] = cfg.d;
+    out["sr"] = cfg.sr;
+    out["cutoff"] = cfg.cutoff;
+    return out;
+  });
+  rgpot::pybind::bind_calls(d2_cls);
 
 #ifdef RGPOT_HAS_EAM_TABLE
   auto eam_table =

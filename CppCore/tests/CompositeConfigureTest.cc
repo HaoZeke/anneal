@@ -16,6 +16,7 @@
 #include <capnp/serialize.h>
 #include <catch2/catch_all.hpp>
 
+#include "rgpot/D2Pot/D2Pot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/rpc/CompositeConfigure.hpp"
@@ -169,4 +170,67 @@ TEST_CASE("the composite backend refuses what it cannot build", "[composite][rpc
     term.initPot().initBuiltin().setName("lj");
     REQUIRE_FALSE(rgpot::rpc::configureComposite(cfg.asReader()).ok);
   }
+}
+
+TEST_CASE("an LJ plus D2 composite is built from the config path", "[composite][rpc][d2]") {
+  capnp::MallocMessageBuilder builder;
+  auto cfg = builder.initRoot<::PotentialConfig>();
+  auto terms = cfg.initComposite().initTerms(3);
+  setLj(terms[0], "lj", 1.0, 1.0);
+  terms[1].setName("d2");
+  auto d2 = terms[1].initPot().initBuiltin();
+  d2.setName("d2");
+  d2.initConfig().initD2().setCutoff(40.0);
+  terms[2].setName("d2 again");
+  terms[2].setWeight(-1.0);
+  auto again = terms[2].initPot().initBuiltin();
+  again.setName("d2");
+  again.initConfig().initD2().setCutoff(40.0);
+
+  auto result = rgpot::rpc::configureComposite(cfg.asReader());
+  INFO(result.message);
+  REQUIRE(result.ok);
+  rgpot::SumPot &sum = *result.replacement;
+  REQUIRE(sum.caps().stress);
+  auto [e, f, v] = sum(kPositions, kZ, kBox);
+  (void)f;
+  (void)v;
+  REQUIRE(e == Catch::Approx(ljEnergy(1.0)).margin(1e-12));
+
+  rgpot::D2Config dc;
+  dc.cutoff = 40.0;
+  rgpot::D2Pot direct(dc);
+  auto [de, df, dv] = direct(kPositions, kZ, kBox);
+  (void)df;
+  (void)dv;
+  const auto &parts = sum.lastComponents();
+  REQUIRE(de < 0.0);
+  REQUIRE(parts[1].energy == Catch::Approx(de).margin(1e-14));
+  REQUIRE(parts[2].energy == Catch::Approx(de).margin(1e-14));
+}
+
+TEST_CASE("the d2 arm configures a D2 backend", "[rpc][d2]") {
+  REQUIRE(capnp::Schema::from<::PotentialConfig>().getFieldByName("d2").getProto().getOrdinal().getExplicit() == 19);
+  capnp::MallocMessageBuilder builder;
+  auto cfg = builder.initRoot<::PotentialConfig>();
+  auto params = cfg.initD2();
+  REQUIRE(params.getS6() == 1.2);
+  REQUIRE(params.getD() == 20.0);
+  REQUIRE(params.getSr() == 1.1);
+  REQUIRE(params.getCutoff() == rgpot::D2Config{}.cutoff);
+  params.setFunctional("pbe");
+  auto applied = rgpot::rpc::configureD2(cfg.asReader());
+  INFO(applied.message);
+  REQUIRE(applied.ok);
+  REQUIRE(applied.replacement->config().s6 == rgpot::d2_config_for("pbe").s6);
+
+  params.setFunctional("no-such-functional");
+  REQUIRE_FALSE(rgpot::rpc::configureD2(cfg.asReader()).ok);
+  params.setFunctional("");
+  params.setCutoff(-1.0);
+  REQUIRE_FALSE(rgpot::rpc::configureD2(cfg.asReader()).ok);
+  cfg.initMorse();
+  auto refused = rgpot::rpc::configureD2(cfg.asReader());
+  REQUIRE_FALSE(refused.ok);
+  REQUIRE_THAT(refused.message, ContainsSubstring("morse"));
 }

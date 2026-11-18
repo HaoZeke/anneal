@@ -105,11 +105,12 @@ Feature bit 0 is =RGPOT_HAS_CACHE=, which adds the virtual =setCache= to
 Covered types:
 
 - =ForceInput=, =ForceOut=, =ForceBatch=, =PotCaps=, =CalculatorGroup=
-- =LJConfig=, =LJClusterConfig=, =MorseConfig=, =ZBLConfig=, =SuttonChenConfig=
+- =LJConfig=, =LJClusterConfig=, =MorseConfig=, =ZBLConfig=, =SuttonChenConfig=,
+  =D2Config=
 - =Reentrancy= and =PotType=
 - =PotentialBase=, =Potential<Derived>= (through one probe instantiation),
   =LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot=, =SumPot=,
-  =lr::SumPot=
+  =lr::SumPot=, =D2Pot=
 - with the cache: =cache::EvalCounts= and =cache::PotentialCache=
 
 The classes of the optional backends are not covered (xtb, tblite, dftd3, dftd4,
@@ -168,4 +169,5 @@ A program linked against soversion 4 does not load =librgpot.so.6=.
 Soversion 9 stamps =SumPot=, =lr::SumPot= and =PotType::LrSum=.
 =lr::SumPot= derives from =SumPot= now, so it grows from 56 to 120 bytes and its
 old constructor and =add= symbols leave the library.
+It also stamps =D2Config=, =D2Pot= and =PotType::D2=.
 A program linked against soversion 8 does not load =librgpot.so.9=.
