@@ -1,0 +1,4 @@
+panel,system,reason
+morse-panel,m75,unsupported: no M75 entry in notes command list
+surface-slab,surface-slab,unsupported: no bench input and command line in notes
+sutton-chen,all,unsupported: RGPOT_SC_LIB was not provided
