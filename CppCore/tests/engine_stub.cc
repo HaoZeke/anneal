@@ -4,9 +4,10 @@
 // A stand-in backend for the generic engine table: E = 0.5 * sum(p^2) and
 // F = -p. The first byte of the configuration picks the reentrancy the
 // backend reports (0 shared, 1 per instance, 2 process serial), the second
-// byte clears the optional charge/spin and thread hooks, and the third byte
-// names the model file in RGPOT_ENGINE_STUB_MODEL. The library exports how
-// many calls were inside the backend at once.
+// byte clears the optional charge/spin, thread, orbital-selection and
+// orbital-copy hooks, and the third byte names the model file in
+// RGPOT_ENGINE_STUB_MODEL. The library exports how many calls were inside the
+// backend at once.
 
 #include "rgpot/engine/EngineTable.hpp"
 #include "rgpot/engine_c_abi.h"
