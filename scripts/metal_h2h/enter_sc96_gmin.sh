@@ -13,7 +13,7 @@ RUNS=$WORK/runs-sc96-gmin
 LOGS=$WORK/logs-sc96-gmin
 STARTS78=$WORK/sc96-78/starts
 
-harness=(scripts/metal_h2h scripts/sc96_78_common.py
+harness=(scripts/metal_h2h scripts/sc96_78_common.py scripts/target_tol.py
   bench/metal-cluster-h2h/gmin-sc-time.patch bench/lj104-lattice/v2/h2h-gmin.patch)
 if ! git -C "$ROOT" diff --quiet HEAD -- "${harness[@]}" ||
   [[ -n $(git -C "$ROOT" ls-files --others --exclude-standard -- "${harness[@]}") ]]; then
@@ -24,7 +24,7 @@ fi
 bash "$HERE/build_sc.sh"
 bash "$HERE/build_gmin_sc.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$RUNS" "$LOGS" "$STARTS78"
-cp -a "$HERE/run_sc.py" "$HERE/run_sc_n12.py" "$HERE/run_sc96_gmin.py" "$WORK/bin/"
+cp -a "$HERE/run_sc.py" "$HERE/run_sc_n12.py" "$HERE/run_sc96_gmin.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 chmod +x "$WORK/bin/h2h_sc" "$WORK/bin/GMIN" "$WORK/bin/run_sc96_gmin.py"
 
 # The N=78 starts and the Cambridge energy need numpy and the network, so

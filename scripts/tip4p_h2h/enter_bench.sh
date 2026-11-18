@@ -8,7 +8,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/tip4p-h2h
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs"
-cp -a "$HERE/run_campaign.py" "$WORK/bin/run_campaign.py"
+cp -a "$HERE/run_campaign.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
 cp -a /work/tip4p-fix/target/release/examples/h2h_seed "$WORK/bin/h2h_seed"

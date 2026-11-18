@@ -8,7 +8,13 @@ independent proportions, and McNemar's exact test is the one that applies.
 
 import pathlib
 import re
+import sys
 from math import comb
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 BEST = re.compile(r"^\s*seed \d+: best (-?\d+\.\d+)", re.M)
 REF = {75: -397.492331, 98: -543.665361}
@@ -17,7 +23,7 @@ REF = {75: -397.492331, 98: -543.665361}
 def solved(path, ref):
     t = path.read_text(errors="replace")
     b = BEST.findall(t)
-    return bool(b) and float(b[0]) < ref + 1e-4
+    return bool(b) and energy_hits(float(b[0]), ref, DEFAULT_HIT_TOL)
 
 
 root = pathlib.Path("sbasin_logs")

@@ -38,6 +38,7 @@ from run_h2h import (  # noqa: E402
     HIT_TOL,
     SEEDS,
     VERIFY_TOL,
+    energy_hits,
     fisher_exact_two_sided,
     gmin_single_point,
     mann_whitney_u_two_sided,
@@ -150,8 +151,8 @@ def summarise(rows: list[dict[str, str]], anneal_rev: str, gmin_rev: str) -> lis
         if any(len(v) != len(SEEDS) for v in arms.values()):
             continue
         a, g = arms["anneal"], arms["gmin"]
-        a_hit = [float(r["best"]) <= ref + HIT_TOL for r in a]
-        g_hit = [float(r["best"]) <= ref + HIT_TOL for r in g]
+        a_hit = [energy_hits(float(r["best"]), ref, HIT_TOL) for r in a]
+        g_hit = [energy_hits(float(r["best"]), ref, HIT_TOL) for r in g]
         a_calls = [float(r["evals_to_hit"]) for r in a]
         g_calls = [float(r["evals_to_hit"]) for r in g]
         ah, gh = sum(a_hit), sum(g_hit)

@@ -29,15 +29,22 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 import zipfile
 from pathlib import Path
 
 import h5py
 import numpy as np
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 ZENODO_DOI = "10.5281/zenodo.19001618"
 ZENODO_MD5 = "e140fde0c62c71f08b326b12ac50d77e"
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 REFERENCES = {31: -133.586422, 38: -173.928427}
 MEMBERS = {
     31: "lj-31/lj-31_evolution.h5",
@@ -139,7 +146,7 @@ def read_run(handle, n_atoms: int) -> dict:
             if hit_index is None:
                 spent += calls
                 used += 1
-                if generation_best <= level:
+                if energy_hits(generation_best, reference, HIT_TOL):
                     hit_index = index
         if best is None or n_samples is None or step_source is None or used < 1:
             raise ValueError(f"{run_name} has no generations")

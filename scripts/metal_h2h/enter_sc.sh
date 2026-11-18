@@ -13,7 +13,7 @@ LIB=${RGPOT_SC_LIB:-/work/rgpot/bdir-xtb/CppCore/librgpot.so}
 bash "$HERE/build_sc.sh"
 bash "$HERE/build_gmin_sc.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$LOGS" /work
-cp -a "$HERE/run_sc.py" "$WORK/bin/"
+cp -a "$HERE/run_sc.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 chmod +x "$WORK/bin/h2h_sc" "$WORK/bin/GMIN" "$WORK/bin/run_sc.py"
 
 cat > "$WORK/bin/inside.sh" << EOF

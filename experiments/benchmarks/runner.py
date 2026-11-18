@@ -18,12 +18,19 @@ from __future__ import annotations
 
 import csv
 import os
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
 from experiments.benchmarks.catalog import CATALOG, Problem, list_problems
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import energy_hits  # noqa: E402
 
 
 @dataclass
@@ -107,7 +114,7 @@ def _run_anneal(
 
     wall = time.perf_counter() - t0
     tol = _tolerance(p)
-    solved = int(float(best_val) <= p.f_star + tol)
+    solved = int(energy_hits(float(best_val), p.f_star, tol))
     return RunResult(
         problem=p.name,
         dim=p.dim,

@@ -43,6 +43,10 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 TEX = "paper/jctc/manuscript.tex"
 SI = "paper/jctc/si.tex"
 
@@ -460,8 +464,8 @@ def gmin_panel_groups(audit: Audit) -> tuple[object, dict[tuple[str, str], list[
         evals, charged = int(r["evals_to_hit"]), int(r["charged"])
         wall, pot, outside = float(r["wall_s"]), float(r["pot_s"]), float(r["outside_s"])
         ok = (
-            hit == (best <= ref + panel.HIT_TOL)
-            and (not hit or (abs(best - ref) < panel.HIT_TOL and 0 < evals <= charged <= budget))
+            hit == energy_hits(best, ref, panel.HIT_TOL)
+            and (not hit or 0 < evals <= charged <= budget)
             and (hit or (evals == budget and charged == budget))
             and 0.0 <= pot <= wall + 2e-6
             and outside >= 0.0
@@ -1418,7 +1422,7 @@ def supporting_numbers(audit: Audit) -> None:
     gaps = [b + 415.971529 for b in bests]
     audit.cell(SI, "smallest copper gap", "8e-6", min(gaps))
     audit.cell(SI, "largest copper gap", "3.68e-4", max(gaps))
-    audit.cell(SI, "copper seeds inside the tolerance", "8", float(sum(g < 1e-3 for g in gaps)))
+    audit.cell(SI, "copper seeds inside the tolerance", "8", float(sum(energy_hits(b, -415.971529, DEFAULT_HIT_TOL) for b in bests)))
     audit.cell(SI, "copper seeds inside 1e-6 eV", "0", float(sum(g < 1e-6 for g in gaps)))
     audit.said(SI, "The per-seed gaps run from \\(8\\times 10^{-6}\\)~eV to \\(3.68\\times 10^{-4}\\)~eV above that reference.")
     audit.said(SI, "No seed reached the reference within \\(10^{-6}\\)~eV.")

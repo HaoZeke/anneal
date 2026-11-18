@@ -31,7 +31,13 @@ from ase.optimize import BFGS
 
 from gupta_calc import GuptaCalculator
 
-HIT_TOL = 0.001
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
+HIT_TOL = DEFAULT_HIT_TOL
 POPULATION = 8
 FMAX = 1.0e-3
 RELAX_STEPS = 200
@@ -64,7 +70,7 @@ class BudgetCalculator(GuptaCalculator):
     def note_quench(self, energy: float) -> None:
         if energy < self.best:
             self.best = energy
-        if energy <= self.level and self.calls_at_hit is None:
+        if energy_hits(energy, self.level, 0.0) and self.calls_at_hit is None:
             self.calls_at_hit = self.calls
 
 

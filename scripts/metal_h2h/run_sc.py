@@ -27,6 +27,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 # N=38 and N=55 are the LJ paper map. N=80 is not in it.
 PAPER_BUDGETS = {
     "sc126-38": 400_000,
@@ -67,7 +73,7 @@ LJ_STEP = 0.40
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261115
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 
 SUMMARY_FIELDS = (
     "system",

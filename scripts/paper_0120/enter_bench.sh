@@ -53,7 +53,7 @@ git -C "$WORK/lj103-src" apply "$OUT/lj103-table.patch"
 build "$WORK/lj103-src" "$WORK/target-lj103" --example h2h_gmin_proof
 cp -f "$WORK/target-lj103/release/examples/h2h_gmin_proof" "$WORK/bin/h2h_gmin_proof_lj103"
 sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"
-cp -f "$HERE/run_panel.py" "$WORK/run_panel.py"
+cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" "$WORK/"
 # Captured before HOME moves, so the summary can import scipy.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 

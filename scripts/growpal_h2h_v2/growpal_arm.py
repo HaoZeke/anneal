@@ -50,7 +50,14 @@ for _name in (
 
 import gc
 import json
+from pathlib import Path
 import random
+
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 GROWATOM = "Mo"
 DTOL = 1.2
@@ -58,7 +65,7 @@ REOPT_ROUNDS = 5
 DEDUP_TOLS = 0.99
 DEDUP_TOLE = 0.1
 EARLY_TOL = 0.01
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 SELECTION_FACTOR = 1.8
 LJ_PAIR_DISTANCE = 3.0
 MORSE_R0 = 3.0
@@ -112,7 +119,7 @@ class Meter:
             return
         if self.best is None or energy < self.best:
             self.best = energy
-        if energy <= self.level and self.hit_at is None:
+        if energy_hits(energy, self.level, 0.0) and self.hit_at is None:
             self.hit_at = self.evals
             raise Found()
 

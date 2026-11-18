@@ -24,6 +24,9 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import (  # noqa: E402
     BudgetReached,
@@ -38,7 +41,7 @@ N = 75
 PAPER_BUDGETS = {75: 4_000_000}
 BUDGET = PAPER_BUDGETS[75]
 REFERENCE = -397.492331
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 MIN_SEP = 0.85
 DENSITY = 0.7
 SEEDS = tuple(range(2000, 2012))

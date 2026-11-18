@@ -28,6 +28,12 @@ import statistics
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import energy_hits  # noqa: E402
+
 import numpy as np
 from rdkit import Chem
 
@@ -217,7 +223,7 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
                         "e_ref_kcal": _fmt(rows[0]["e_ref_kcal"]),
                         "delta_min_median_kcal": _fmt(med("delta_min_kcal")),
                         "delta_min_best_kcal": _fmt(min(r["delta_min_kcal"] for r in rows)),
-                        "hits_0p1": f"{sum(r['delta_min_kcal'] <= 0.1 for r in rows)}/{len(rows)}",
+                        "hits_0p1": f"{sum(energy_hits(r['delta_min_kcal'], 0.0, 0.1) for r in rows)}/{len(rows)}",
                         "n_3kcal_median": _fmt(med("n_3kcal")),
                         "reference_3kcal": rows[0]["reference_3kcal"],
                         "coverage_median": _fmt(med("coverage")),

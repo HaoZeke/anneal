@@ -22,7 +22,7 @@ bash "$HERE/build_anneal.sh"
 bash "$HERE/install_growpal.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$ROOT/bench/growpal-h2h-v2"
-cp -a "$HERE/run_campaign.py" "$HERE/growpal_arm.py" "$WORK/bin/"
+cp -a "$HERE/run_campaign.py" "$HERE/growpal_arm.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 user=$(id -un)
 
 cat > "$WORK/bin/inside.sh" << EOF

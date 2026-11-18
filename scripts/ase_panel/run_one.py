@@ -27,6 +27,9 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from evaluator import evaluator_spec
 
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
@@ -62,7 +65,7 @@ SYSTEMS = {
         "symbol": "Au",
     },
 }
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 MIN_SEP = 0.85
 DENSITY = 0.7
 SEEDS = tuple(range(2000, 2012))

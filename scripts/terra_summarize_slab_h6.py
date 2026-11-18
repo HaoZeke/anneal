@@ -9,7 +9,12 @@ import re
 import statistics
 import sys
 
+if str(pathlib.Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 ENERGY_TOL = 1e-4
+HIT_TOL = DEFAULT_HIT_TOL
 
 seed_re = re.compile(
     r"seed (?P<seed>\d+): best (?P<best>[-+0-9.eE]+|[-+]?inf|nan) eV\s+"
@@ -80,7 +85,7 @@ def parse_relax(directory: pathlib.Path) -> dict:
     summary = summary_re.search(text)
     basins = [(float(m.group("energy")), int(m.group("count"))) for m in basin_re.finditer(text)]
     lowest = min(energies) if energies else float("nan")
-    hits = sum(1 for energy in energies if finite(lowest) and abs(energy - lowest) <= ENERGY_TOL)
+    hits = sum(1 for energy in energies if energy_hits(energy, lowest, HIT_TOL))
     distinct = len(basins) if basins else len({round(e / ENERGY_TOL) for e in energies})
     if summary:
         distinct = int(summary.group("distinct"))
@@ -97,7 +102,7 @@ def parse_relax(directory: pathlib.Path) -> dict:
         "hit_charges": [
             charge
             for energy, charge in zip(energies, charges)
-            if finite(lowest) and abs(energy - lowest) <= ENERGY_TOL
+            if energy_hits(energy, lowest, HIT_TOL)
         ],
     }
 
@@ -127,13 +132,13 @@ def main() -> int:
     global_best = min(all_bests)
 
     print("=== Cu(111)+H6 cost to solution ===")
-    print(f"lowest_seen {global_best:.6f} eV  (tol {ENERGY_TOL})")
+    print(f"lowest_seen {global_best:.6f} eV  (tol {HIT_TOL})")
     print("arm             seeds_at_lowest  median_evals_to_it  distinct_minima")
     for name, rows in arms.items():
         hits = [
             row
             for row in rows
-            if finite(row["best"]) and abs(row["best"] - global_best) <= ENERGY_TOL
+            if energy_hits(row["best"], global_best, HIT_TOL)
         ]
         charges = [float(row["charged_to_best"] or row["charged"]) for row in hits]
         distinct = sum(row["visited"] for row in rows)
@@ -146,7 +151,7 @@ def main() -> int:
                 f"charged {row['charged']}  basins {row['basins']}"
             )
     if relax:
-        hits = relax["hits"] if abs(relax["lowest"] - global_best) <= ENERGY_TOL else 0
+        hits = relax["hits"] if energy_hits(relax["lowest"], global_best, HIT_TOL) else 0
         print(
             f"{'random_relax':14}  {hits}/{relax['starts']:<14}  "
             f"{median_or_nan([float(c) for c in relax['hit_charges']]):<18}  {relax['distinct']}"

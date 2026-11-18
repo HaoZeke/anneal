@@ -29,6 +29,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 # N=38 is the LJ38 entry of the paper map. N=13 and N=23 are not in it.
 PAPER_BUDGETS = {
     "pt13": 100_000,
@@ -63,7 +69,7 @@ CROSS = (0.1915, 10.786, 3.141, 1.9595, 2.6655)
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261113
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 
 SUMMARY_FIELDS = (
     "system",
@@ -275,7 +281,7 @@ def mark_hits(rows: list[dict]) -> dict[str, float]:
     for row in rows:
         lowest[row["system"]] = min(lowest.get(row["system"], row["best"]), row["best"])
     for row in rows:
-        row["hit"] = row["best"] <= lowest[row["system"]] + HIT_TOL
+        row["hit"] = energy_hits(row["best"], lowest[row["system"]], HIT_TOL)
     return lowest
 
 

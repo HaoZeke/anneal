@@ -26,7 +26,16 @@ import sys
 
 import numpy as np
 
-from wales_doye_bh import Exhausted, Ledger, REFERENCE, contain, lj, quench
+from wales_doye_bh import (
+    DEFAULT_HIT_TOL,
+    Exhausted,
+    Ledger,
+    REFERENCE,
+    contain,
+    energy_hits,
+    lj,
+    quench,
+)
 
 N_WALKERS = 100
 T_HIGH = 0.8
@@ -139,7 +148,7 @@ def main() -> int:
     for seed in range(args.seed0, args.seed0 + args.seeds):
         led, generations, final_t = population_annealing(args.n, args.budget, seed)
         deepest = min(deepest, led.best)
-        ok = ref is not None and led.best < ref + 1e-4
+        ok = ref is not None and energy_hits(led.best, ref, DEFAULT_HIT_TOL)
         solved += bool(ok)
         print(
             f"  seed {seed}: best {led.best:.6f}  generations {generations}  "

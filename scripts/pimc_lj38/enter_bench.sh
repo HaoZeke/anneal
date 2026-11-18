@@ -20,7 +20,7 @@ bash "$HERE/install_rpqa.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" \
   "$ROOT/bench/pimc-lj38/rows"
 cp -a "$HERE/run_campaign.py" "$HERE/rpqa_driver.py" "$HERE/rpqa_ipi.py" \
-  "$HERE/lj_potential.py" "$HERE/meter.py" "$WORK/bin/"
+  "$HERE/lj_potential.py" "$HERE/meter.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 chmod +x "$WORK/bin/h2h_gmin_proof"
 
 cat > "$WORK/bin/inside.sh" << EOF

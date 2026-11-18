@@ -13,12 +13,17 @@ Defaults: LJ75 Marks -397.492331, tolerance 1e-4.
 """
 import glob
 import os
+import pathlib
 import re
 import sys
 
+if str(pathlib.Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 root = sys.argv[1]
 target = float(sys.argv[2]) if len(sys.argv) > 2 else -397.492331
-tol = float(sys.argv[3]) if len(sys.argv) > 3 else 1e-4
+tol = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_HIT_TOL
 best_re = re.compile(r"personal best (-?\d+\.\d+)\s+hops (\d+)")
 final_re = re.compile(r"hops-per-core-hour [0-9.]+\s+hops (\d+)\s+wall ([0-9.]+)s")
 
@@ -34,7 +39,7 @@ for ens in sorted(glob.glob(os.path.join(root, "lj*", "shared", "*"))):
             energy, hops = float(m.group(1)), int(m.group(2))
             if energy < best:
                 best = energy
-            if energy <= target + tol:
+            if energy_hits(energy, target, tol):
                 firsts.append(hops)
         m = None
         for m in final_re.finditer(text):
@@ -46,7 +51,7 @@ for ens in sorted(glob.glob(os.path.join(root, "lj*", "shared", "*"))):
     if os.path.exists(err):
         slow = sum(1 for l in open(err, errors="replace") if "slow request" in l)
     done = os.path.exists(os.path.join(ens, "TERMINAL_OK"))
-    solved = best <= target + tol
+    solved = energy_hits(best, target, tol)
     rows.append((os.path.basename(ens), len(outs), done, solved, best, min(firsts) if firsts else None, max(walls) if walls else None, slow))
 
 print(f"{'ensemble':22s} workers done solved best          first_hops   wall_s slow")

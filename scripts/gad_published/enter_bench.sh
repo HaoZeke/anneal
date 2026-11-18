@@ -24,7 +24,7 @@ cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"
 cp -a "$ROOT/examples/h2h_gmin_lj.data" "$WORK/bin/h2h_gmin_lj.data"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs"
-cp -a "$HERE/run_campaign.py" "$HERE/read_deposit.py" "$HERE/gad_rerun.py" "$WORK/bin/"
+cp -a "$HERE/run_campaign.py" "$HERE/read_deposit.py" "$HERE/gad_rerun.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 chmod +x "$WORK/bin/gad_published" "$WORK/bin/GMIN"
 
 cat > "$WORK/bin/inside.sh" << EOF

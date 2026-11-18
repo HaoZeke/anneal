@@ -49,13 +49,19 @@ from pathlib import Path
 
 from scipy.stats import fisher_exact, mannwhitneyu
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 SEEDS = tuple(range(2000, 2012))
 WIDE_SEEDS = tuple(range(2000, 2024))
 SCHEDULE_SEED = 20261114
 LJ75_REFERENCE = -397.492331
 LJ75_BUDGET = 4_000_000
 MORSE = {"m80r6": (4_000_000, -378.333471)}
-LJ_HIT_TOL = 1.0e-4
+LJ_HIT_TOL = DEFAULT_HIT_TOL
 
 ALLOYS = {
     "cu6au32": (400_000, -130.79994836),

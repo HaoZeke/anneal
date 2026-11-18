@@ -34,6 +34,12 @@ import sys
 import time
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 # (system, binary, budget, Cambridge minimum, GrowPAL length per anneal length)
 SYSTEMS = (
     ("lj38", "h2h_gmin_proof", 400_000, -173.928427, 3.0 / 2.0 ** (1.0 / 6.0)),
@@ -48,7 +54,7 @@ REFERENCES = {name: ref for name, _bin, _budget, ref, _scale in SYSTEMS}
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "growpal")
 SCHEDULE_SEED = 20261113
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 IDENTITY_TOL = 1e-9
 # Ceiling of the uncapped GrowPAL run, one seed per system.
 UNCAPPED_CEILING = 500_000_000

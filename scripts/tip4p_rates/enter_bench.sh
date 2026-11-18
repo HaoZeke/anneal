@@ -125,23 +125,23 @@ for n in "\${sizes[@]}"; do
     hit_calls=
     hit=0
     if [[ -f "\${prefix}.trace.csv" ]]; then
-      hit_calls=\$(python3 -c '
+      hit_calls=\$(PYTHONPATH="$ROOT/scripts\${PYTHONPATH:+:\$PYTHONPATH}" python3 -c '
 import sys
+from target_tol import energy_hits
 ref = float(sys.argv[1])
 tol = float(sys.argv[2])
-limit = ref + tol
 first = ""
 for line in open(sys.argv[3]):
     if line.startswith("calls"):
         continue
     got, energy = line.split(",")
-    if float(energy) <= limit:
+    if energy_hits(float(energy), ref, tol):
         first = got.strip()
         break
 print(first)
 ' "\${ref[\$n]}" "\$tol" "\${prefix}.trace.csv")
     fi
-    if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) <= float(sys.argv[2]) + float(sys.argv[3]) else 1)' "\$lowest" "\${ref[\$n]}" "\$tol"; then
+    if PYTHONPATH="$ROOT/scripts\${PYTHONPATH:+:\$PYTHONPATH}" python3 -c 'import sys; from target_tol import energy_hits; sys.exit(0 if energy_hits(float(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3])) else 1)' "\$lowest" "\${ref[\$n]}" "\$tol"; then
       hit=1
     fi
     if [[ "\$hit" == 1 && -z "\$hit_calls" ]]; then

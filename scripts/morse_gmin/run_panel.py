@@ -25,6 +25,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 # Cambridge Cluster Database, Doye and Wales. The bold entry at that rho.
 # 30B and 30D' are the global minima at rho 6 and 14.
 SYSTEMS = (
@@ -232,7 +238,7 @@ def gmin_line(text: str, name: str, seed: int, budget: int, target: float) -> di
     if "best" not in fields:
         raise RuntimeError(f"no gmin row in {text!r}")
     best = float(fields["best"])
-    hit = best <= target + 0.001
+    hit = energy_hits(best, target, DEFAULT_HIT_TOL)
     charged = int(float(fields.get("charged") or fields.get("evals_to_hit") or budget))
     evals = int(float(fields.get("evals_to_hit") or charged))
     if not hit:

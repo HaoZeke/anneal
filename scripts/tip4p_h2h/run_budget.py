@@ -29,7 +29,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-HIT_TOL = 0.001
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
+HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = tuple(range(2000, 2012))
 BUDGETS = (2_000_000, 4_000_000, 8_000_000)
 SIZE = 21
@@ -194,8 +200,8 @@ def summarise(rows: list[dict[str, str]], budget: int, n: int) -> dict[str, str]
     ref = CAMBRIDGE[n]
     a_best = [float(r["best"]) for r in anneal]
     g_best = [float(r["best"]) for r in gmin]
-    ah = sum(1 for b in a_best if b <= ref + HIT_TOL)
-    gh = sum(1 for b in g_best if b <= ref + HIT_TOL)
+    ah = sum(1 for b in a_best if energy_hits(b, ref, HIT_TOL))
+    gh = sum(1 for b in g_best if energy_hits(b, ref, HIT_TOL))
     return {
         "system": f"tip4p{n}",
         "n": str(len(anneal)),

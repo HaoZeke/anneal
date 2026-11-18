@@ -49,10 +49,16 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
 import math
+import pathlib
 import sys
 
 import numpy as np
 from scipy.optimize import minimize
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 REFERENCE = {13: -44.326801, 38: -173.928427, 55: -279.248470,
              75: -397.492331, 98: -543.665361}
@@ -78,7 +84,11 @@ class Ledger:
         if e < self.best:
             self.best = e
             self.best_x = x.copy()
-            if target is not None and self.first_hit is None and e < target + 1e-4:
+            if (
+                target is not None
+                and self.first_hit is None
+                and energy_hits(e, target, DEFAULT_HIT_TOL)
+            ):
                 self.first_hit = self.spent
 
 
@@ -220,7 +230,7 @@ def main() -> int:
     for s in range(a.seed0, a.seed0 + a.seeds):
         led, hops, acc = basin_hopping(a.n, a.budget, s, a.temperature, ref, a.angular)
         deepest = min(deepest, led.best)
-        ok = ref is not None and led.best < ref + 1e-4
+        ok = ref is not None and energy_hits(led.best, ref, DEFAULT_HIT_TOL)
         solved += bool(ok)
         if led.first_hit is not None:
             hits.append(led.first_hit)

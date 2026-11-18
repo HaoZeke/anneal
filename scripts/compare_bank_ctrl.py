@@ -14,6 +14,10 @@ import re
 import sys
 from pathlib import Path
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 SEED = re.compile(
     r"seed\s+(\d+):\s+best\s+([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s+eV"
     r".*?charged\s+(\d+)"
@@ -49,9 +53,9 @@ def parse_dir(path):
 
 def first_encounter(run, target, tol):
     for _h, charged, _b, e in run["improvements"]:
-        if e < target + tol:
+        if energy_hits(e, target, tol):
             return True, charged
-    if run["best"] < target + tol:
+    if energy_hits(run["best"], target, tol):
         return True, run["charged"]
     return False, run["charged"]
 
@@ -97,7 +101,7 @@ def main():
     ap.add_argument("ctrl", type=Path, help="no-bank output directory")
     ap.add_argument("bank", type=Path, help="bank output directory")
     ap.add_argument("--target", type=float, default=None)
-    ap.add_argument("--tol", type=float, default=1e-3)
+    ap.add_argument("--tol", type=float, default=DEFAULT_HIT_TOL)
     args = ap.parse_args()
     ctrl = parse_dir(args.ctrl)
     bank = parse_dir(args.bank)

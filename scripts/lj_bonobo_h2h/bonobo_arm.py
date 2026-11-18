@@ -39,8 +39,14 @@ import time
 import traceback
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
-HIT_TOL = 1.0e-4
+
+HIT_TOL = DEFAULT_HIT_TOL
 BOX = 3.5
 POPULATION = 20
 
@@ -111,7 +117,7 @@ def run_seed(n: int, seed: int, budget: int, reference: float, work: Path, upstr
         energy = float(energy)
         if energy < state["best"]:
             state["best"] = energy
-        if state["hit"] is None and energy < reference + HIT_TOL:
+        if state["hit"] is None and energy_hits(energy, reference, HIT_TOL):
             state["hit"] = state["n"]
             raise HitReached()
         if state["n"] >= budget:

@@ -21,7 +21,7 @@ fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs-budget"
-cp -a "$HERE/run_budget.py" "$WORK/bin/run_budget.py"
+cp -a "$HERE/run_budget.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
 chmod +x "$WORK/bin/GMIN" "$WORK/bin/h2h_seed" "$WORK/bin/run_budget.py"

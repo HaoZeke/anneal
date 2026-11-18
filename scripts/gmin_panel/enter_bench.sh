@@ -67,7 +67,7 @@ GMIN_PANEL_WORK=$WORK bash "$HERE/build_gmin.sh"
 sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"
 cp -f "$WORK/gmin-source.txt" "$OUT/gmin-source.txt"
 (cd "$WORK/bin" && sha256sum -- *) > "$OUT/bin-sha256.txt"
-cp -f "$HERE/run_panel.py" "$WORK/run_panel.py"
+cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" "$WORK/"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$WORK/"
 # Captured before HOME moves.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
