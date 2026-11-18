@@ -91,6 +91,9 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
     // The fivefold residual uses the built-in assignment on every build,
     // so linking IRA does not change this hash.
-    let expected = "6e277f8611c9988bbb95c72873fb5b044be414e9148ab9571b732f834e3dceb9";
+    // General adaptive search became the recommended default: two diverse
+    // replicas, acceptance adaptation, orbit throttling, and record-quiet
+    // restarts deliberately replace the former single-chain trajectory.
+    let expected = "2ddab586a400b1f82e7b441e469e32e03fa4c7d1e1db90f052bdb9ce83fad89a";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

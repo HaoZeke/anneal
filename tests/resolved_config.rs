@@ -57,7 +57,7 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     );
     assert_eq!(
         cfg.resolved_sha256().unwrap(),
-        "577fbe8078d3218aa947111e965ea8851558293195112af5ebae64e567b84365"
+        "978669328e49488b1a618c9bb1623d83e00404ac890c6bff4da372f937f651a1"
     );
     let mut uniform = cfg;
     uniform.arm_selection = ArmSelection::Uniform;
@@ -114,22 +114,29 @@ fn a_basin_stride_is_resolved_only_off_its_default() {
 }
 
 #[test]
-fn paper_preset_priors_stay_out_of_the_resolved_hash() {
+fn recommended_records_removed_priors_in_the_resolved_hash() {
     let cfg = Config::recommended(38);
     let json = cfg.resolved_json().unwrap();
     for name in [
         "prior_soap",
-        "prior_reseed",
-        "prior_growth",
-        "prior_core",
-        "prior_handover",
         "homotop_reorder",
-        "prior_motif",
         "general_collective",
     ] {
         assert!(
             !json.contains(name),
             "{name} at the paper preset stays out of the resolved JSON"
+        );
+    }
+    for name in [
+        "prior_reseed",
+        "prior_growth",
+        "prior_core",
+        "prior_handover",
+        "prior_motif",
+    ] {
+        assert!(
+            json.contains(&format!("\"{name}\":false")),
+            "{name} removal must be resolved explicitly"
         );
     }
     let mut dropped = cfg.clone();
