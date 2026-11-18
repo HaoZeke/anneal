@@ -61,6 +61,8 @@ UNPUSHED = {
     "349523d3f5f42b748f3af1573166fd17155ac461": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
     "befbc3e8": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own; the row gives eight digits",
     "bf09f7a2b7a6bd6359898db675eeafefcd20548b": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
+    "9a30f3190b3bb7040c675a904f8388eb68224151": "an ASE non-LJ campaign head with no pushed commit of its own",
+    "89de725a337b6e37daef05877796ae8192fbf8e1": "the local harness head of the LJ98-LJ150 AGOX seeds 2006 onward; it was not pushed",
     "ce1e7a46826cf51784ed26587c14b2747f5f48e1": "the GFN2 call-floor fix on f2a628c0, a local build head of the GFN2 "
                                                 "Si10 and C10 floor rows; the fix was pushed on another base",
     "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
@@ -128,9 +130,9 @@ KNOWN_GAPS = {
     "bench/ase-lj55/rows.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                "repository; revision b49341e3 is not in this repository",
     "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
+    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
+    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
     "bench/ase-recommended/summary.csv": "revision 1ce3ab64 is not in this repository; revision 36548663 is not in this "
                                          "repository; revision 5a7f629d is not in this repository; revision b49341e3 is "
                                          "not in this repository",
@@ -2242,6 +2244,7 @@ def release(audit: Audit) -> None:
 
 def lj_large(audit: Audit) -> None:
     audit.rows("bench/ase-gofee-h2h/lj-large.csv")
+    audit.rows("bench/ase-gofee-h2h/lj-large-seeds.csv")
 
 
 def ase_gofee(audit: Audit) -> None:

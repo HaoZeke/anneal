@@ -83,6 +83,7 @@ REFERENCES = {
 LJ75_WALL_CAP_S = 7200.0
 HIT_TOL = 0.001
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
+LARGE_SEEDS = (2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011)
 ARMS = ("paper", "ase_bh", "ase_mh", "agox_gofee")
 ORDER_SEED = 20261111
 FMAX = {"ase_bh": 0.1, "ase_mh": 0.05, "agox_gofee": 0.05}
@@ -119,13 +120,19 @@ def check_type7() -> None:
         raise RuntimeError("iqr drifted")
 
 
-def schedule(comparison: str | None, systems: list[str] | None = None, include_paper: bool = True) -> list[tuple[str, int, str]]:
+def schedule(
+    comparison: str | None,
+    systems: list[str] | None = None,
+    include_paper: bool = True,
+    seeds: tuple[int, ...] | None = None,
+) -> list[tuple[str, int, str]]:
     if comparison:
         arms = ("paper", comparison) if include_paper else (comparison,)
     else:
         arms = ARMS
     chosen = systems if systems else list(PAPER_BUDGETS)
-    jobs = [(system, seed, arm) for system in chosen for seed in SEEDS for arm in arms]
+    chosen_seeds = seeds if seeds is not None else SEEDS
+    jobs = [(system, seed, arm) for system in chosen for seed in chosen_seeds for arm in arms]
     random.Random(ORDER_SEED).shuffle(jobs)
     return jobs
 
@@ -827,6 +834,10 @@ def main() -> int:
         row = run_job(args.binary, args.repo, args.runs, system, args.seed, args.arm, head)
         row["order"] = 0
         print(format_results([row]), end="")
+        if system in LARGE_BUDGETS:
+            from summarize_lj_large import append_rows
+
+            append_rows(args.repo, [row])
         return 0
 
     systems = [item for item in args.systems.split(",") if item] or None
@@ -835,7 +846,8 @@ def main() -> int:
         if unknown:
             print(f"unknown systems {unknown}", file=sys.stderr)
             return 2
-    jobs = schedule(args.comparison, systems, include_paper=not args.no_paper)
+    seed_list = LARGE_SEEDS if systems and set(systems) <= set(LARGE_BUDGETS) else None
+    jobs = schedule(args.comparison, systems, include_paper=not args.no_paper, seeds=seed_list)
     journal_path = args.runs / ("journal.csv" if args.comparison is None else f"journal-{args.comparison}.csv")
     rows = load_journal(journal_path)
     done = {(row["system"], row["seed"], row["arm"]) for row in rows}
@@ -853,7 +865,11 @@ def main() -> int:
         rows.append(row)
         journal_path.parent.mkdir(parents=True, exist_ok=True)
         journal_path.write_text(format_results(rows))
-        if not systems:
+        if systems:
+            from summarize_lj_large import append_rows
+
+            append_rows(args.repo, [row])
+        else:
             write_tables(rows, args.repo, args.comparison)
         inside_text = "" if row["inside_s"] == "" else f"{row['inside_s']:.3f}"
         print(
@@ -864,7 +880,9 @@ def main() -> int:
             flush=True,
         )
     if systems:
-        write_lj_large(rows, args.repo, systems)
+        from summarize_lj_large import rebuild
+
+        rebuild(args.repo)
     else:
         write_tables(rows, args.repo, args.comparison)
     print(summarise(rows), end="", flush=True)
