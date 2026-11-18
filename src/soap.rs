@@ -957,6 +957,139 @@ pub fn pullback_nu3(
     dr
 }
 
+/// Steepest descent of the ν=3 leftover, without the normal matrix.
+///
+/// `pullback_nu3` forms `JᵀJ` on every atom. That matrix is the search
+/// on a large cluster: one proposal spends longer outside the potential
+/// than the quench spends inside it. The residual being pulled is the
+/// ν=3 block, so the direction is `Jᵀ(target − χ)` of that block. The
+/// caller’s RMSD cap fixes the length, which is what the Tikhonov step
+/// was scaled to anyway.
+fn nu3_gradient_pullback(
+    x: ArrayView1<f64>,
+    target: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    let mut dr = Array1::zeros(x.len());
+    if n_at < 2 || dim == 0 || target.len() != n_at * dim {
+        return dr;
+    }
+    let d0 = spec.feat_dim(species);
+    let ace1 = spec.nu3_dim();
+    let channels = neighbor_channels(species);
+    let n_chan = channels.len();
+    let n_coeff = spec.n_max * (spec.l_max + 1) * (spec.l_max + 1);
+    let rcut = spec.rcut_nn;
+    if !(rcut > 0.0) || ace1 == 0 || n_coeff == 0 {
+        return dr;
+    }
+    let keep = mobile_mask(n_at, mobile);
+    let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
+    let mut weights = vec![0.0; n_at * n_chan * n_coeff];
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        let (_, coeffs) = atom_expand(x, i, n_at, rcut, spec, species, &table);
+        for ch in 0..n_chan {
+            let mut residual_norm = 0.0;
+            let mut residual = vec![0.0; ace1];
+            for t in 0..ace1 {
+                let row = d0 + ch * ace1 + t;
+                let value = target[i * dim + row] - loc[[i, row]];
+                residual[t] = value;
+                residual_norm += value * value;
+            }
+            if residual_norm == 0.0 {
+                continue;
+            }
+            let c0 = ch * n_coeff;
+            let db = crate::ace::d_from_c(&coeffs[c0..c0 + n_coeff], spec.n_max, spec.l_max);
+            let w0 = (i * n_chan + ch) * n_coeff;
+            for t in 0..ace1 {
+                let value = residual[t];
+                if value == 0.0 {
+                    continue;
+                }
+                for col in 0..n_coeff {
+                    weights[w0 + col] += db[[t, col]] * value;
+                }
+            }
+        }
+    }
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        let origin = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        for jj in 0..n_at {
+            if jj == i {
+                continue;
+            }
+            let bond = [
+                x[3 * jj] - origin[0],
+                x[3 * jj + 1] - origin[1],
+                x[3 * jj + 2] - origin[2],
+            ];
+            let r = (bond[0] * bond[0] + bond[1] * bond[1] + bond[2] * bond[2]).sqrt();
+            if r >= rcut || r < 1e-12 {
+                continue;
+            }
+            let ch = neighbor_channel(species, jj, &channels);
+            let w0 = (i * n_chan + ch) * n_coeff;
+            let u = [bond[0] / r, bond[1] / r, bond[2] / r];
+            let (ylm, dylm) = tesseral(u, spec.l_max);
+            let fc = fcut(r, rcut);
+            let dfc = dfcut(r, rcut);
+            for n in 0..spec.n_max {
+                let g = radial(n, r, rcut);
+                let dg = dradial(n, r, rcut);
+                let w = g * fc;
+                let dw = dg * fc + g * dfc;
+                for lm in 0..n_lm {
+                    let col = n * n_lm + lm;
+                    let weight = weights[w0 + col];
+                    if weight == 0.0 {
+                        continue;
+                    }
+                    let yv = ylm[lm];
+                    for a in 0..3 {
+                        let mut slope = 0.0;
+                        for b in 0..3 {
+                            let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                            slope += dylm[lm][b] * proj;
+                        }
+                        let dc = dw * u[a] * yv + w * slope / r;
+                        let gain = weight * dc;
+                        if keep[jj] {
+                            dr[3 * jj + a] += gain;
+                        }
+                        dr[3 * i + a] -= gain;
+                    }
+                }
+            }
+        }
+    }
+    if keep.iter().all(|&mobile| mobile) {
+        strip_rigid(x, &mut dr);
+    } else {
+        for i in 0..n_at {
+            if !keep[i] {
+                dr[3 * i] = 0.0;
+                dr[3 * i + 1] = 0.0;
+                dr[3 * i + 2] = 0.0;
+            }
+        }
+    }
+    dr
+}
+
 /// Extra ArchiveHole in the DECAF packing feature, not SOAP leftover.
 ///
 /// Packing identity is per-center [`local_nu3_z`] (SOAP plus ACE
@@ -1626,8 +1759,10 @@ fn scale_support_to_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> A
 
 /// Per-atom RMS of `χ − μ` that counts as a packing defect.
 ///
-/// On a Mackay 13-mer the fivefold core sits well above this. A
-/// regular tetrahedron sits at zero. Below the floor the hop yields.
+/// On a Mackay 13-mer the high-`l` core sits well above this. A
+/// regular tetrahedron sits at zero. The hop yields only far below
+/// this scale, where the leftover is roundoff; a smaller real defect
+/// is still a direction and the caller’s cap sets its length.
 #[cfg_attr(feature = "featomic", allow(dead_code))]
 const NU3_DEFECT: f64 = 0.05;
 
@@ -2770,12 +2905,12 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         }
         let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
         let _ = rng;
-        if nu3_rms < NU3_DEFECT {
+        // A millionth of the Mackay defect is roundoff. Anything larger
+        // is a direction; the cap, not this floor, sets the step.
+        if nu3_rms < NU3_DEFECT * 1e-6 {
             return x.to_owned();
         }
-        // Direction is J⁺ of the observed leftover. Amplitude is the
-        // caller's cap: Tikhonov otherwise leaves a near-identity.
-        let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+        let dr = nu3_gradient_pullback(x, target.view(), spec, species, mobile);
         let y = scale_to_cap(x, dr, rmsd);
         retract_rigid_groups(x, y, groups)
     }
@@ -4091,6 +4226,57 @@ mod tests {
         assert!(
             (atom_rms - 0.4).abs() < 1e-9,
             "gated leftover hop rms {atom_rms}, want the 0.4 cap"
+        );
+    }
+
+    #[test]
+    fn a_regular_tetrahedron_yields_on_the_cloud_pullback() {
+        let spec = SoapSpec {
+            l_max: 6,
+            ..SoapSpec::default()
+        };
+        let x = tetra();
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = step_away_cloud(x.view(), spec, 0.4, None, None, None, &mut rng);
+        for i in 0..x.len() {
+            assert!(
+                (y[i] - x[i]).abs() < 1e-8,
+                "a regular tetrahedron moved at {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_seventy_five_atom_cloud_step_stays_outside_the_normal_matrix() {
+        let spec = SoapSpec {
+            l_max: 6,
+            ..SoapSpec::default()
+        };
+        let mut rng = StdRng::seed_from_u64(75);
+        let mut coords = Vec::with_capacity(75 * 3);
+        for _ in 0..75 {
+            for _ in 0..3 {
+                coords.push(rng.random_range(-2.0..2.0));
+            }
+        }
+        let x = Array1::from_vec(coords);
+        let started = std::time::Instant::now();
+        let y = step_away_cloud(x.view(), spec, 0.35, None, None, None, &mut rng);
+        let elapsed = started.elapsed();
+        let mut d2 = 0.0;
+        for i in 0..x.len() {
+            let d = y[i] - x[i];
+            d2 += d * d;
+        }
+        let atom_rms = (d2 / 75.0).sqrt();
+        assert!(
+            atom_rms > 0.1,
+            "75-atom cloud step did not move, rms {atom_rms}"
+        );
+        assert!(
+            elapsed.as_millis() < 500,
+            "75-atom cloud step took {} ms",
+            elapsed.as_millis()
         );
     }
 
