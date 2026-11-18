@@ -10,11 +10,14 @@
 //! callback each product is a difference of two force evaluations, and one
 //! of them is the centre the search has not moved from.
 //!
-//! A handle keeps the forces of the last centre it evaluated, keyed on the
-//! bits of the positions, the atomic numbers and the cell. `k` forward
-//! products at one centre therefore cost `k + 1` force calls instead of
-//! `2k`. Another geometry, species list or cell is a new centre, and
-//! [`rgpot_potential_t::invalidate_hvp_centre`] drops the cached one when
+//! A handle keeps the forces of the last centre it evaluated in its fused
+//! cache ([`crate::fused`]), keyed on the bits of the positions, the atomic
+//! numbers, the cell and the engine settings. `k` forward products at one
+//! centre therefore cost `k + 1` force calls instead of `2k`. A centre that
+//! failed is stored as well, so asking for it again returns the failure
+//! without a second call. Another geometry, species list, cell or engine
+//! setting is a new centre, and
+//! [`rgpot_potential_t::invalidate_hvp_centre`] makes the next one new when
 //! the potential itself changes. A potential that knows its Hessian
 //! registers a [`HessianVectorCallback`] and the products make no force
 //! call at all.
@@ -36,12 +39,13 @@
 
 use std::os::raw::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
-use crate::eindir::{rgpot_potential_t, validated_result};
+use crate::eindir::rgpot_potential_t;
+use crate::fused::{lock, FusedError, FusedSource};
 use crate::status::rgpot_status_t;
 use crate::tensor::{copy_f64_tensor, copy_i32_tensor, rgpot_tensor_cpu_f64_2d, rgpot_tensor_free};
-use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
+use crate::types::rgpot_force_input_t;
 
 /// Analytic Hessian-vector product of a potential.
 ///
@@ -138,54 +142,32 @@ fn invalid(why: impl Into<String>) -> HvpError {
 }
 
 /// Energy, variance and forces (`3 * n_atoms`, row-major) at a centre.
-#[derive(Debug, Clone, PartialEq)]
-pub struct HvpCentre {
-    pub energy: f64,
-    pub variance: f64,
-    pub forces: Vec<f64>,
-}
-
-/// `f64::to_bits` of every coordinate and cell entry: float equality would
-/// serve the forces of `+0.0` at `-0.0`.
-#[derive(Clone, PartialEq)]
-struct GeometryKey {
-    positions: Vec<u64>,
-    atomic_numbers: Option<Vec<i32>>,
-    box_matrix: Option<Vec<u64>>,
-}
-
-struct CachedCentre {
-    key: GeometryKey,
-    centre: Arc<HvpCentre>,
-}
+pub use crate::fused::FusedValue as HvpCentre;
 
 /// Per-handle Hessian-vector state, kept in the handle's opaque cache.
 #[derive(Default)]
 pub(crate) struct HvpState {
     callback: Mutex<Option<HessianVectorCallback>>,
-    centre: Mutex<Option<CachedCentre>>,
     products: AtomicU64,
     force_calls: AtomicU64,
     centre_reused: AtomicU64,
     analytic: AtomicU64,
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-impl HvpState {
-    pub(crate) fn invalidate(&self) {
-        *lock(&self.centre) = None;
+impl From<FusedError> for HvpError {
+    fn from(error: FusedError) -> Self {
+        match error {
+            FusedError::Invalid { message } => Self::Invalid(message),
+            other => Self::Callback(other.status()),
+        }
     }
 }
 
 struct Geometry {
     n_atoms: usize,
     positions: Vec<f64>,
-    key: GeometryKey,
+    atomic_numbers: Option<Vec<i32>>,
+    cell: Option<Vec<f64>>,
 }
 
 /// Copy the positions, species and cell of `input` after checking them.
@@ -201,21 +183,16 @@ unsafe fn read_geometry(input: &rgpot_force_input_t) -> Result<Geometry, HvpErro
     } else {
         Some(copy_i32_tensor(input.atomic_numbers, "atomic_numbers", n_atoms).map_err(invalid)?)
     };
-    let box_matrix = if input.box_matrix.is_null() {
+    let cell = if input.box_matrix.is_null() {
         None
     } else {
-        let cell = copy_f64_tensor(input.box_matrix, "box_matrix", 9, false).map_err(invalid)?;
-        Some(cell.iter().map(|v| v.to_bits()).collect())
-    };
-    let key = GeometryKey {
-        positions: positions.iter().map(|v| v.to_bits()).collect(),
-        atomic_numbers,
-        box_matrix,
+        Some(copy_f64_tensor(input.box_matrix, "box_matrix", 9, false).map_err(invalid)?)
     };
     Ok(Geometry {
         n_atoms,
         positions,
-        key,
+        atomic_numbers,
+        cell,
     })
 }
 
@@ -249,7 +226,7 @@ impl rgpot_potential_t {
     /// Drop the cached centre. Call it when the potential behind the handle
     /// changes while the geometry does not.
     pub fn invalidate_hvp_centre(&self) {
-        self.hvp_state().invalidate();
+        self.fused().invalidate();
     }
 
     /// The counters of the Hessian-vector entry points.
@@ -423,18 +400,19 @@ impl rgpot_potential_t {
         geometry: &Geometry,
     ) -> Result<Arc<HvpCentre>, HvpError> {
         let state = self.hvp_state();
-        if let Some(cached) = lock(&state.centre).as_ref() {
-            if cached.key == geometry.key {
-                state.centre_reused.fetch_add(1, Ordering::Relaxed);
-                return Ok(Arc::clone(&cached.centre));
-            }
-        }
-        let centre = Arc::new(unsafe { self.evaluate(input, geometry.n_atoms) }?);
-        *lock(&state.centre) = Some(CachedCentre {
-            key: geometry.key.clone(),
-            centre: Arc::clone(&centre),
+        let key = self.fused().key(
+            &geometry.positions,
+            geometry.atomic_numbers.as_deref(),
+            geometry.cell.as_deref(),
+        );
+        let (outcome, source) = self.fused().evaluate(key, || {
+            state.force_calls.fetch_add(1, Ordering::Relaxed);
+            unsafe { self.run_engine(input, geometry.n_atoms) }
         });
-        Ok(centre)
+        if source == FusedSource::Stored {
+            state.centre_reused.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(outcome?)
     }
 
     /// Forces at `positions`, with the species and cell of `input`.
@@ -461,25 +439,8 @@ impl rgpot_potential_t {
         input: &rgpot_force_input_t,
         n_atoms: usize,
     ) -> Result<HvpCentre, HvpError> {
-        let mut output = rgpot_force_out_t {
-            forces: std::ptr::null_mut(),
-            energy: 0.0,
-            variance: 0.0,
-        };
         self.hvp_state().force_calls.fetch_add(1, Ordering::Relaxed);
-        let status = unsafe { (self.callback)(self.pot_user_data, input, &mut output) };
-        let result = if status == rgpot_status_t::RGPOT_SUCCESS {
-            validated_result(&output, 3 * n_atoms)
-                .map(|forces| HvpCentre {
-                    energy: output.energy,
-                    variance: output.variance,
-                    forces,
-                })
-                .map_err(invalid)
-        } else {
-            Err(HvpError::Callback(status))
-        };
-        unsafe { rgpot_tensor_free(output.forces) };
-        result
+        let outcome = unsafe { self.run_engine(input, n_atoms) }?;
+        Ok((*outcome).clone())
     }
 }

@@ -45,6 +45,7 @@
 #include <utility>
 #include <vector>
 
+#include "rgpot/FusedSettings.hpp"
 #include "rgpot/HessianVector.hpp"
 #include "c_api.hpp"
 #include "errors.hpp"
@@ -217,7 +218,8 @@ public:
                                               static_cast<void *>(&impl),
                                               nullptr, 0, nullptr, nullptr,
                                               nullptr, nullptr);
-    return with_analytic_hvp<Impl>(PotentialHandle(handle));
+    return with_analytic_hvp<Impl>(
+        with_fused_settings<Impl>(PotentialHandle(handle), impl));
   }
 
   /**
@@ -237,7 +239,8 @@ public:
     auto *handle = rgpot_potential_new_eindir(
         &trampoline_callback<Impl>, static_cast<void *>(&impl), nullptr,
         n_atoms, atomic_numbers, box_matrix, bounds_low, bounds_high);
-    return with_analytic_hvp<Impl>(PotentialHandle(handle));
+    return with_analytic_hvp<Impl>(
+        with_fused_settings<Impl>(PotentialHandle(handle), impl));
   }
 
   /**
@@ -260,6 +263,43 @@ public:
                 void *user_data, void (*free_fn)(void *) = nullptr) {
     auto *handle = rgpot_potential_new(callback, user_data, free_fn);
     return PotentialHandle(handle);
+  }
+
+  /**
+   * @brief Install the engine settings that key the fused cache.
+   *
+   * @c from_impl does this once for a potential with @c fusedSettings().
+   * Call it again after changing a setting of the potential: the changed
+   * setting is a new key, so the next request runs the engine even at
+   * positions whose outcome, a failure included, is stored. Without the
+   * call the handle keeps answering a stored failure.
+   *
+   * @throws rgpot::Error when the core refuses the settings.
+   */
+  void set_fused_settings(const FusedSettingsSpec &spec) const {
+    rgpot_fused_settings_t c{};
+    rgpot_fused_settings_default(&c);
+    c.periodic = spec.periodic;
+    c.spin = spec.spin;
+    c.scc_max_iterations = spec.sccMaxIterations;
+    c.charge = spec.charge;
+    c.accuracy = spec.accuracy;
+    c.electronic_temperature = spec.electronicTemperature;
+    c.scc_mixer = spec.sccMixer.c_str();
+    c.engine_build = spec.engineBuild.c_str();
+    detail::check_status(rgpot_potential_set_fused_settings(handle_, &c));
+  }
+
+  /// @c set_fused_settings(impl.fusedSettings()).
+  template <ProvidesFusedSettings Impl>
+  void sync_fused_settings(const Impl &impl) const {
+    set_fused_settings(impl.fusedSettings());
+  }
+
+  /// Kind of the failure the fused cache of this handle stores, or
+  /// @c RGPOT_FUSED_OK when it stores none.
+  [[nodiscard]] rgpot_fused_error_kind_t fused_error_kind() const {
+    return rgpot_potential_fused_error_kind(handle_);
   }
 
   /**
@@ -336,7 +376,14 @@ private:
           forces.data(), static_cast<int64_t>(n_atoms), 3);
 
       return RGPOT_SUCCESS;
+    } catch (const ::rgpot::SccNotConverged &e) {
+      rgpot_set_last_error(e.what());
+      return RGPOT_SCC_NOT_CONVERGED;
+    } catch (const std::exception &e) {
+      rgpot_set_last_error(e.what());
+      return RGPOT_INTERNAL_ERROR;
     } catch (...) {
+      rgpot_set_last_error("unknown exception in the potential");
       return RGPOT_INTERNAL_ERROR;
     }
   }
@@ -357,6 +404,18 @@ private:
     } catch (...) {
       return RGPOT_INTERNAL_ERROR;
     }
+  }
+
+  /// Install the settings @a impl reports, when it reports any.
+  template <typename Impl>
+  static PotentialHandle with_fused_settings(PotentialHandle handle,
+                                             const Impl &impl) {
+    if constexpr (::rgpot::ProvidesFusedSettings<Impl>) {
+      if (handle.raw() != nullptr) {
+        handle.set_fused_settings(impl.fusedSettings());
+      }
+    }
+    return handle;
   }
 
   template <typename Impl>

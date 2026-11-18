@@ -32,20 +32,36 @@ eV/Angstrom (=CppCore/rgpot/units.hpp=).
 
 #+attr_rgpot: signature
 #+begin_src cpp
-explicit Error(const std::string &msg);
+explicit Error(const std::string &msg,
+               rgpot_status_t status = RGPOT_INTERNAL_ERROR);
 #+end_src
 
-- Inputs :: =msg=, the text that =what()= returns.
+- Inputs :: =msg=, the text that =what()= returns, and =status=, the code the C
+  API returned (default =RGPOT_INTERNAL_ERROR=).
 - Units :: none.
 - Outputs :: an exception derived from =std::runtime_error=.
 - Errors :: none; the constructor has no failure path.
+
+*** =rgpot::Error::status=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] rgpot_status_t status() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the status the C API returned, so a caller tells
+  =RGPOT_SCC_NOT_CONVERGED= from other failures.
+  An =Error= built without a status holds =RGPOT_INTERNAL_ERROR=.
+- Errors :: none.
 
 The wrappers build =msg= from a category prefix and the =rgpot_last_error()=
 text, or "unknown error" when that pointer is NULL.
 The prefixes are "invalid parameter: " for =RGPOT_INVALID_PARAMETER=, "RPC
 error: " for =RGPOT_RPC_ERROR=, "buffer size error: " for
-=RGPOT_BUFFER_SIZE_ERROR=, and "internal error: " for =RGPOT_INTERNAL_ERROR= and
-any other code.
+=RGPOT_BUFFER_SIZE_ERROR=, "SCC not converged: " for =RGPOT_SCC_NOT_CONVERGED=,
+and "internal error: " for =RGPOT_INTERNAL_ERROR= and any other code.
 Every category throws the same type, =rgpot::Error=.
 
 ** include/rgpot/types.hpp
@@ -236,9 +252,10 @@ static PotentialHandle from_impl(Impl &impl, size_t n_atoms,
   When =n_atoms * 3= overflows, the second overload returns a handle holding
   NULL, and later calls on it throw =rgpot::Error= ("invalid parameter").
   At calculation time an exception from =impl.forceImpl= becomes
-  =RGPOT_INTERNAL_ERROR=, and missing positions become
+  =RGPOT_INTERNAL_ERROR=, or =RGPOT_SCC_NOT_CONVERGED= for
+  =rgpot::SccNotConverged=, and missing positions become
   =RGPOT_INVALID_PARAMETER=; the calling method throws =rgpot::Error=.
-  The exception's own message is dropped.
+  The exception's =what()= text is stored with =rgpot_set_last_error=.
 
 The trampoline copies energy, variance and forces from =ForceOut=; it does not
 pass stress through.
@@ -373,6 +390,65 @@ void reset_hvp_counts() const;
 - Units :: none.
 - Outputs :: none; zeroes the counters and keeps the cached centre.
 - Errors :: none; a NULL handle is a no-op.
+
+*** =rgpot::PotentialHandle::set_fused_settings=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void set_fused_settings(const FusedSettingsSpec &spec) const;
+#+end_src
+
+- Inputs :: =spec=, the settings of the engine that change its answer at a
+  fixed geometry.
+- Units :: =charge= in elementary charges, =electronicTemperature= in kelvin.
+- Outputs :: none; the settings key the fused cache of the handle (see the C
+  ABI reference).
+  A request under other settings runs the engine even at positions whose
+  outcome, a failure included, is stored.
+  A failed energy is not retried at the same bits, so a warm-start retry after
+  a failure needs a changed setting.
+- Errors :: throws =rgpot::Error= when the core refuses the settings.
+
+*** =rgpot::PotentialHandle::sync_fused_settings=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+template <ProvidesFusedSettings Impl>
+void sync_fused_settings(const Impl &impl) const;
+#+end_src
+
+- Inputs :: =impl=, an object whose =fusedSettings()= returns a
+  =FusedSettingsSpec=.
+- Units :: as =set_fused_settings=.
+- Outputs :: none; installs =impl.fusedSettings()=.
+  =from_impl= does this once for an =Impl= that has =fusedSettings()= (=XTBPot=
+  and =XTBDlopen= do).
+  After a setter of the potential, such as =XTBPot::setMaxIterations=, call it:
+  the changed setting is a new key.
+  Without the call the handle keeps returning the stored failure.
+- Errors :: throws =rgpot::Error= when the core refuses the settings.
+
+*** =rgpot::PotentialHandle::fused_error_kind=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] rgpot_fused_error_kind_t fused_error_kind() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the kind of the failure the fused cache stores,
+  =RGPOT_FUSED_SCC_NOT_CONVERGED=, =RGPOT_FUSED_ENGINE_FAILED= or
+  =RGPOT_FUSED_INVALID_RESULT=, or =RGPOT_FUSED_OK= when it stores none.
+- Errors :: none.
+
+An =Impl= whose =forceImpl= throws =rgpot::SccNotConverged= has the failure
+typed: the trampoline stores the message with =rgpot_set_last_error= and returns
+=RGPOT_SCC_NOT_CONVERGED=.
+Another =std::exception= returns =RGPOT_INTERNAL_ERROR= with its =what()=.
+=rgpot::HessianVectorCache= is the same cache for potentials used without the
+Rust core: it stores the exception a force call threw and throws it again,
+the same type and message, for the same bits and settings.
 
 *** =rgpot::PotentialHandle::raw=
 

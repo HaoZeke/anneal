@@ -275,6 +275,7 @@ D4test | tests dftd4 | unit d4_test D4PotTest.cc | @dftd
 DftdGoldens | tests dftd3,dftd4 | custom suite=dftd workdir=. | @dftd
 XcKernelGoldens | tests xckernel | custom suite=xckernel workdir=. | @xckernel
 XTBtest | tests xtb | custom timeout=120 suite=xtb workdir=. | @xtb
+FusedXtbTest | tests core xtb rust_core | custom timeout=120 suite=xtb workdir=. | @rust_core
 LongRangeTest | tests core long_range | unit lr_phys_test lr_phys_test.cc | @long_range
 ExprPotTest | tests core expr | custom suite=expr workdir=. | @expr
 ExprGoldens | tests core expr | custom suite=expr workdir=. | @expr

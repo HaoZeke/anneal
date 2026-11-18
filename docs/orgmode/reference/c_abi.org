@@ -109,15 +109,36 @@ uint32_t rgpot_version_patch(void);
 - Units :: none.
 - Outputs ::
   =RGPOT_SUCCESS= (0), =RGPOT_INVALID_PARAMETER= (1), =RGPOT_INTERNAL_ERROR= (2), =RGPOT_RPC_ERROR= (3), =RGPOT_BUFFER_SIZE_ERROR=
-  (4).
+  (4), =RGPOT_SCC_NOT_CONVERGED= (5).
 - Errors :: none.
   No function of =rgpot-core= returns =RGPOT_BUFFER_SIZE_ERROR= itself; a
   callback may return it and it is passed through.
+  =RGPOT_SCC_NOT_CONVERGED= is the status of a callback whose engine ran its
+  self-consistent field out of iterations; =rgpot_potential_calculate= and the
+  Hessian-vector entry points return it unchanged, and
+  =rgpot_potential_fused_error_kind= reports the same distinction for the
+  eindir path, whose own status type has no such value.
 
 A function wrapped in the crate's panic guard returns =RGPOT_INTERNAL_ERROR= for
 a caught Rust panic and stores the panic message.
 The guarded functions are =rgpot_potential_calculate=, =rgpot_potential_hvp=,
 =rgpot_potential_hvp_centre=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=.
+
+*** =rgpot_set_last_error=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_set_last_error(const char *msg);
+#+end_src
+
+- Inputs :: =msg= a NUL-terminated string, or NULL.
+- Units :: none.
+- Outputs :: the calling thread's =rgpot_last_error()= message is =msg=; NULL
+  clears it.
+  A callback calls this before it returns an error status, so that the text
+  reaches the caller of =rgpot_potential_calculate=, or of the eindir
+  functions, which do not store a message for a failed callback.
+- Errors :: none; bytes that are not valid UTF-8 are replaced.
 
 *** =rgpot_last_error=
 
@@ -405,9 +426,9 @@ undefined behaviour.
 
 - Inputs :: none; an opaque type.
 - Units :: none.
-- Outputs :: none; it holds the last energy and gradient of the eindir path, the
-  evaluation counters, the peer refusal and the Hessian-vector state of one
-  handle.
+- Outputs :: none; it holds the fused cache of one handle (see
+  [[#fused-cache][Fused cache]]), the evaluation counters, the peer refusal and
+  the Hessian-vector state.
   The handle owns it.
 - Errors :: none.
 
@@ -415,12 +436,11 @@ undefined behaviour.
 
 - Inputs :: none; a struct filled by =rgpot_potential_eval_counts=.
 - Units :: none; counts.
-- Outputs :: =computed=, the callback invocations made by
-  =eindir_objective_eval= and =eindir_objective_grad= on the handle, and
-  =served=, the gradients answered from the energy evaluation at the same
-  positions without a callback.
-  =rgpot_potential_calculate= and the Hessian-vector entry points do not change
-  either counter.
+- Outputs :: =computed=, the callback invocations the fused cache made for
+  =eindir_objective_eval=, =eindir_objective_grad= and the Hessian-vector
+  centre, and =served=, the requests answered from the stored outcome without a
+  callback, a stored failure included.
+  =rgpot_potential_calculate= does not change either counter.
 - Errors :: none.
 
 *** =rgpot_potential_new=
@@ -579,15 +599,115 @@ The function is compiled only with the =schema= feature of the crate, which the
 The header declares it only when =RGPOT_HAS_SCHEMA= is defined; the meson build
 defines it, with =RGPOT_HAS_RPC=, when =with_rpc= is on.
 
+** Fused cache
+:PROPERTIES:
+:CUSTOM_ID: fused-cache
+:END:
+
+The energy and gradient of the eindir objective, and the centre of the
+Hessian-vector products, are one fused evaluation: a callback call returns the
+energy and the forces together.
+One cache per handle sits in front of the callback and holds one entry.
+Its key is the position bits of the request (=f64::to_bits=, so =-0.0= and
+=0.0= differ and no tolerance is applied) and a fingerprint of everything else
+that changes the answer: the atomic numbers, the cell, the settings installed by
+=rgpot_potential_set_fused_settings=, and an epoch that
+=rgpot_potential_hvp_invalidate= and a peer refusal advance.
+Its value is the outcome of the callback, which is either the energy and
+forces, or a failure that records its kind and message.
+
+A request whose key equals the stored key returns the stored outcome without a
+callback, whether it is a success or a failure; a request with another key
+calls the engine and replaces the entry.
+=eindir_objective_eval= and =eindir_objective_grad= both go through this one
+path, so a failed energy followed by a gradient at the same positions is one
+callback, and the gradient returns the status and the =rgpot_last_error=
+message of the first failure.
+A failed energy is not retried at the same bits.
+A retry that should run the engine again, for example a warm-start retry after
+an SCC failure, must change a setting: install new settings with
+=rgpot_potential_set_fused_settings=, or call =rgpot_potential_hvp_invalidate=.
+Calling again with the same settings returns the stored failure.
+The entry lock is held while the callback runs, so concurrent requests for one
+key make one callback.
+=rgpot_potential_calculate= does not use the cache.
+
+*** =rgpot_fused_error_kind_t=
+
+- Inputs :: none; an enum.
+- Units :: none.
+- Outputs :: =RGPOT_FUSED_OK= (0), the stored outcome is a success or nothing is
+  stored; =RGPOT_FUSED_SCC_NOT_CONVERGED= (1), the callback returned
+  =RGPOT_SCC_NOT_CONVERGED=; =RGPOT_FUSED_ENGINE_FAILED= (2), the callback
+  returned another error status; =RGPOT_FUSED_INVALID_RESULT= (3),
+  the callback reported success with a malformed or non-finite result.
+- Errors :: none.
+
+*** =rgpot_fused_settings_t=
+
+- Inputs :: none; a struct filled by =rgpot_fused_settings_default=.
+- Units :: =charge= in elementary charges, =electronic_temperature= in kelvin.
+- Outputs :: =struct_size=, =periodic= (bit =i= set when the cell is periodic
+  along vector =i=), =spin= (unpaired electrons), =scc_max_iterations=,
+  =charge=, =accuracy=, =electronic_temperature=, =scc_mixer= and
+  =engine_build= (NUL-terminated strings or NULL).
+  =engine_build= names the engine build or version.
+- Errors :: none.
+
+*** =rgpot_fused_settings_default=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_fused_settings_default(struct rgpot_fused_settings_t *out);
+#+end_src
+
+- Inputs :: =out= NULL or writable.
+- Units :: none.
+- Outputs :: =*out= holds the defaults, with =struct_size= set to the size of
+  this library's struct.
+- Errors :: none; NULL is ignored.
+
+*** =rgpot_potential_set_fused_settings=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_set_fused_settings(const struct rgpot_potential_t *pot,
+                                                       const struct rgpot_fused_settings_t *settings);
+#+end_src
+
+- Inputs :: =pot= a live eindir handle; =settings= the settings of the engine.
+- Units :: see =rgpot_fused_settings_t=.
+- Outputs :: the settings key every later request.
+  The stored outcome stays, and a request under other settings has another key,
+  so it runs the engine even at the stored positions.
+- Errors :: =RGPOT_INVALID_PARAMETER= for a NULL argument, a =struct_size=
+  smaller than this library's struct, or a string that is not UTF-8.
+
+*** =rgpot_potential_fused_error_kind=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_fused_error_kind_t rgpot_potential_fused_error_kind(const struct rgpot_potential_t *pot);
+#+end_src
+
+- Inputs :: =pot= NULL or a live handle.
+- Units :: none.
+- Outputs :: the kind of the failure the cache stores, or =RGPOT_FUSED_OK=.
+  A NULL =pot= gives =RGPOT_FUSED_OK=.
+- Errors :: none.
+
 ** Hessian-vector products
 
 =RGPOT_HVP_DEFAULT_STEP= is 1.0e-3, the step used when a caller passes 0.
-The centre cache keys on the bits of the positions, the atomic numbers and the
-cell, so =-0.0= and =0.0= are different centres.
+The centre is the entry of the [[#fused-cache][fused cache]], so it keys on the
+bits of the positions, the atomic numbers, the cell and the installed settings,
+and =-0.0= and =0.0= are different centres.
 A NULL =atomic_numbers= or =box_matrix= tensor is allowed and is part of the key
 as absent.
-The cache holds one centre per handle and is guarded by a mutex; when two
-threads store centres, the later one stays.
+The cache holds one entry per handle, shared with the eindir energy and
+gradient.
+A failed centre is stored like a result, and is not evaluated again at the same
+bits.
 
 *** =rgpot_hvp_scheme_t=
 
@@ -888,7 +1008,7 @@ enum rgpot_status_t rgpot_rpc_server_start(const struct rgpot_potential_t *pot,
 
 The macros =RGPOT_ABI_VERSION_MAJOR=, =RGPOT_ABI_VERSION_MINOR= and
 =RGPOT_ABI_LAYOUT_REVISION= hold the stamp of the header the caller compiled
-against: 1, 2 and 1.
+against: 1, 3 and 1.
 
 *** =rgpot_abi_stamp_t=
 

@@ -590,9 +590,10 @@ explicit XTBPot(const XTBConfig &config);
 - Outputs :: a potential that calls the linked libxtb C API.
 - Errors :: =std::runtime_error= from the constructor when the xtb environment,
   calculator or results cannot be created.
-  A force throws
+  A force throws =rgpot::SccNotConverged=, a =std::runtime_error=, when the SCC
+  does not converge and the rescue below does not help, and
   =std::runtime_error= when the handles are missing, =xtb_newMolecule= fails,
-  the single point fails, or the energy or gradient is not finite.
+  another single point failure occurs, or the energy or gradient is not finite.
   After such a failure the handles are replaced.
 
 A new composition rebuilds the molecule.
@@ -675,6 +676,73 @@ void setWarmMinGap(double ev);
 - Outputs :: the current gap guard.
 - Errors :: none.
 
+*** =rgpot::XTBPot::setAccuracy=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setAccuracy(double accuracy);
+#+end_src
+
+- Inputs :: =accuracy=, the xtb numerical accuracy level.
+- Units :: none.
+- Outputs :: none; the next force applies it.
+- Errors :: none.
+  The accuracy is part of =fusedSettings()=, so a handle made by
+  =PotentialHandle::from_impl= needs =sync_fused_settings= after the change to
+  evaluate a stored failure again.
+
+*** =rgpot::XTBPot::setElectronicTemperature=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setElectronicTemperature(double kelvin);
+#+end_src
+
+- Inputs :: =kelvin=, the electronic temperature.
+- Units :: kelvin.
+- Outputs :: none; the next force applies it.
+- Errors :: none; part of =fusedSettings()= like =setAccuracy=.
+
+*** =rgpot::XTBPot::setMaxIterations=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setMaxIterations(int iterations);
+#+end_src
+
+- Inputs :: =iterations=, the SCC iteration budget.
+- Units :: iterations.
+- Outputs :: none; the next force applies it.
+- Errors :: none; part of =fusedSettings()= like =setAccuracy=.
+
+*** =rgpot::XTBPot::config=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const XTBConfig &config() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: as =XTBConfig=.
+- Outputs :: the current configuration, with the values the setters wrote.
+- Errors :: none.
+
+*** =rgpot::XTBPot::fusedSettings=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] FusedSettingsSpec fusedSettings() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: =charge= in elementary charges, =electronicTemperature= in kelvin.
+- Outputs :: the number of unpaired electrons, charge, accuracy, electronic
+  temperature, SCC iteration budget and, as the engine build, the libxtb API
+  version and the method.
+  The potential is non-periodic, so =periodic= is 0.
+  =PotentialHandle::from_impl= installs them as the key of the fused cache.
+- Errors :: none.
+
 *** =rgpot::XTBPot::reusedWavefunction=
 
 #+attr_rgpot: signature
@@ -741,8 +809,24 @@ void forceImpl(const ForceInput &in, ForceOut *out) const;
 - Units :: as =XTBPot=.
 - Outputs :: =out->energy=, =out->F= and =out->variance= from =rgpot_xtb_force=.
   =out->has_stress= and =out->stress= are not written.
-- Errors :: =std::runtime_error= with the return code when =rgpot_xtb_force=
-  returns nonzero.
+- Errors :: =rgpot::SccNotConverged= when =rgpot_xtb_force= returns
+  =RGPOT_XTB_RC_SCC_NOT_CONVERGED=, and =std::runtime_error= with the return
+  code for any other nonzero value.
+
+*** =rgpot::XTBDlopen::fusedSettings=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] FusedSettingsSpec fusedSettings() const;
+#+end_src
+
+- Inputs :: none.
+- Units :: as =XTBPot::fusedSettings=.
+- Outputs :: the settings of the configuration the engine was created with, and
+  the engine ABI version and method as the engine build.
+  The engine ABI has no setters for them, so another setting means another
+  =XTBDlopen=.
+- Errors :: none.
 
 *** =rgpot::XTBDlopen::reset=
 

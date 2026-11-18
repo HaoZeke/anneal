@@ -22,6 +22,7 @@
 //! | [`status`] | Status codes, thread-local error message, panic safety |
 //! | [`potential`] | Callback-based potential dispatch (opaque handle) |
 //! | [`hvp`] | Hessian-vector products with a cached centre or an analytic callback |
+//! | [`fused`] | One cache of the outcome of a fused energy-and-gradient evaluation |
 //! | [`c_api`] | `extern "C"` entry points collected by cbindgen |
 //! | [`version`] | Loaded library version, to check against `rgpot.h` |
 //! | [`rpc`] | Cap'n Proto RPC client and server (feature-gated) |
@@ -54,6 +55,7 @@ pub mod tensor;
 pub mod status;
 pub mod potential;
 pub mod hvp;
+pub mod fused;
 pub mod eindir;
 pub mod c_api;
 pub mod version;

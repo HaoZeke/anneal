@@ -770,7 +770,7 @@ unsafe extern "C" fn failing_force(
 }
 
 #[test]
-fn a_failed_force_call_returns_its_status_and_caches_nothing() {
+fn a_failed_force_call_returns_its_status_and_is_stored_as_the_outcome() {
     let mut system = System::octahedron();
     let mut input = system.input();
     let morse = Box::new(Morse::platinum());
@@ -778,26 +778,45 @@ fn a_failed_force_call_returns_its_status_and_caches_nothing() {
         unsafe { rgpot_potential_new(failing_force, &*morse as *const Morse as *mut c_void, None) };
     let v = direction(system.pos.len(), 6);
     let mut hv = vec![7.0; v.len()];
+    let counts = |pot| {
+        let mut counts = rgpot_hvp_counts_t::default();
+        unsafe { rgpot_potential_hvp_counts(pot, &mut counts) };
+        counts
+    };
 
     FAIL_AFTER.store(0, Ordering::SeqCst);
     let status =
         unsafe { rgpot_potential_hvp(pot, &input, v.as_ptr(), 0.0, FORWARD, hv.as_mut_ptr()) };
     assert_eq!(status, rgpot_status_t::RGPOT_RPC_ERROR);
     assert!(hv.iter().all(|&x| x == 7.0));
+    assert_eq!(counts(pot).force_calls, 1);
 
-    // The centre succeeds and the displaced call fails: the centre is kept.
+    // The centre failed and the same bits ask again with a healthy
+    // callback: the stored failure is returned and no callback runs.
+    FAIL_AFTER.store(usize::MAX, Ordering::SeqCst);
+    let status =
+        unsafe { rgpot_potential_hvp(pot, &input, v.as_ptr(), 0.0, FORWARD, hv.as_mut_ptr()) };
+    assert_eq!(status, rgpot_status_t::RGPOT_RPC_ERROR);
+    assert!(hv.iter().all(|&x| x == 7.0));
+    assert_eq!(counts(pot).force_calls, 1);
+    assert_eq!(counts(pot).centre_reused, 1);
+
+    // Only a change of key evaluates the geometry again.
+    unsafe { rgpot_potential_hvp_invalidate(pot) };
     FAIL_AFTER.store(1, Ordering::SeqCst);
     let status =
         unsafe { rgpot_potential_hvp(pot, &input, v.as_ptr(), 0.0, FORWARD, hv.as_mut_ptr()) };
     assert_eq!(status, rgpot_status_t::RGPOT_RPC_ERROR);
+    assert_eq!(counts(pot).force_calls, 3);
+
+    // The centre succeeded and the displaced call failed: the centre is kept.
     FAIL_AFTER.store(usize::MAX, Ordering::SeqCst);
     let status =
         unsafe { rgpot_potential_hvp(pot, &input, v.as_ptr(), 0.0, FORWARD, hv.as_mut_ptr()) };
     assert_eq!(status, rgpot_status_t::RGPOT_SUCCESS);
-    let mut counts = rgpot_hvp_counts_t::default();
-    unsafe { rgpot_potential_hvp_counts(pot, &mut counts) };
+    let counts = counts(pot);
     assert_eq!(counts.products, 1);
-    assert_eq!(counts.centre_reused, 1);
+    assert_eq!(counts.centre_reused, 2);
     assert_eq!(counts.force_calls, 4);
 
     unsafe {

@@ -53,9 +53,20 @@ RGPOT_XTB_API RgpotXtbPot *rgpot_xtb_create(const RgpotXtbConfig *cfg,
 
 RGPOT_XTB_API void rgpot_xtb_destroy(RgpotXtbPot *pot);
 
+/** Return codes of rgpot_xtb_force. A frontend treats an unknown nonzero
+ * code as a failure of unknown kind. */
+enum {
+  RGPOT_XTB_RC_OK = 0,
+  RGPOT_XTB_RC_INVALID_ARGUMENT = -1,
+  RGPOT_XTB_RC_FAILED = -2,
+  RGPOT_XTB_RC_UNKNOWN = -3,
+  /** The self-consistent field did not converge. */
+  RGPOT_XTB_RC_SCC_NOT_CONVERGED = -4
+};
+
 /**
- * Energy + forces. Returns 0 on success.
- * variance may be NULL.
+ * Energy + forces. Returns RGPOT_XTB_RC_OK (0) on success, otherwise one of
+ * the RGPOT_XTB_RC_* codes. variance may be NULL.
  */
 RGPOT_XTB_API int rgpot_xtb_force(RgpotXtbPot *pot, long nAtoms,
                                   const double *positions, const int *atomicNrs,

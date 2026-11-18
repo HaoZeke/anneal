@@ -39,6 +39,9 @@ pub mod rpc;
 #[cfg(feature = "schema")]
 pub use crate::eindir::rgpot_potential_set_peer_capabilities;
 pub use crate::eindir::{
-    rgpot_eval_counts_t, rgpot_potential_eval_counts, rgpot_potential_free_eindir,
+    rgpot_eval_counts_t, rgpot_fused_settings_default, rgpot_fused_settings_t,
+    rgpot_potential_eval_counts, rgpot_potential_free_eindir, rgpot_potential_fused_error_kind,
     rgpot_potential_new_eindir, rgpot_potential_reset_eval_counts,
+    rgpot_potential_set_fused_settings,
 };
+pub use crate::fused::rgpot_fused_error_kind_t;

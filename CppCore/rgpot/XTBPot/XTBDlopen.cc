@@ -140,7 +140,7 @@ std::vector<std::string> candidate_paths(const XTBDlopenConfig &config) {
 XTBDlopen::XTBDlopen(const XTBConfig &xtb)
     : XTBDlopen(XTBDlopenConfig{xtb, {}}) {}
 
-XTBDlopen::XTBDlopen(const XTBDlopenConfig &config) {
+XTBDlopen::XTBDlopen(const XTBDlopenConfig &config) : m_config(config.xtb) {
   const bool explicit_path = !config.engine_path.empty();
   if (explicit_path && !has_directory_separator(config.engine_path)) {
     throw std::runtime_error(
@@ -261,12 +261,28 @@ XTBDlopen::~XTBDlopen() {
   m_lib = nullptr;
 }
 
+FusedSettingsSpec XTBDlopen::fusedSettings() const {
+  FusedSettingsSpec spec;
+  spec.spin = m_config.uhf;
+  spec.sccMaxIterations = static_cast<unsigned>(m_config.max_iterations);
+  spec.charge = m_config.charge;
+  spec.accuracy = m_config.accuracy;
+  spec.electronicTemperature = m_config.electronic_temperature;
+  spec.sccMixer = "xtb";
+  spec.engineBuild = "xtb-engine-abi-" + std::to_string(RGPOT_XTB_ABI_VERSION) +
+                     "-method-" + std::to_string(method_to_c(m_config.method));
+  return spec;
+}
+
 void XTBDlopen::forceImpl(const ForceInput &in, ForceOut *out) const {
   if (!m_force || !m_pot)
     throw std::runtime_error("XTBDlopen: engine not available");
   double var = 0.0;
   int rc = m_force(m_pot, static_cast<long>(in.nAtoms), in.pos, in.atmnrs,
                    out->F, &out->energy, &var, in.box);
+  if (rc == RGPOT_XTB_RC_SCC_NOT_CONVERGED)
+    throw SccNotConverged("XTBDlopen: SCC did not converge (rc=" +
+                          std::to_string(rc) + ")");
   if (rc != 0)
     throw std::runtime_error(
         "XTBDlopen: force evaluation failed (rc=" + std::to_string(rc) + ")");

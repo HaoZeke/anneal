@@ -2499,6 +2499,26 @@ if get_option('with_tests')
             # Hot Si13 frames whose SCC runs out its iterations, twice.
             timeout: 120,
         )
+        if get_option('with_rust_core')
+            test(
+                'FusedXtbTest',
+                executable(
+                    'fused_xtb_test',
+                    sources: ['tests/FusedXtbTest.cc'],
+                    dependencies: test_deps,
+                    include_directories: _incdirs + ['.'],
+                    cpp_args: test_args,
+                    link_with: _linkto,
+                    link_language: 'cpp',
+                    build_rpath: _xtb_test_rpath,
+                ),
+                env: xtb_test_env,
+                depends: [xtb_engine],
+                workdir: meson.source_root(),
+                suite: 'xtb',
+                timeout: 120,
+            )
+        endif
         test(
             'XTBDlopenTest',
             executable(

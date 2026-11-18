@@ -861,9 +861,14 @@ int rgpot_xtb_force(RgpotXtbPot *pot, long nAtoms,
 - Units :: =positions= and =box= in Angstrom, =energy= in eV, =forces= in
   eV/Angstrom.
 - Outputs :: 0, with =*energy=, =forces= and =*variance= (always 0) written.
-- Errors :: -1 for a null handle, a null pointer other than =variance=, or
-  =nAtoms= of zero or less. -2 when =XTBPot= threw a =std::exception=; the
-  message is not kept. -3 for any other exception.
+- Errors :: =RGPOT_XTB_RC_INVALID_ARGUMENT= (-1) for a null handle, a null
+  pointer other than =variance=, or =nAtoms= of zero or less.
+  =RGPOT_XTB_RC_FAILED= (-2) when =XTBPot= threw a =std::exception=; the
+  message is not kept.
+  =RGPOT_XTB_RC_UNKNOWN= (-3) for any other exception.
+  =RGPOT_XTB_RC_SCC_NOT_CONVERGED= (-4) when =XTBPot= threw
+  =rgpot::SccNotConverged=; an engine built before it never returns it, and a
+  frontend that does not know it treats it as a failure of unknown kind.
   Nothing is written on an error.
 
 *** =rgpot_xtb_reset=

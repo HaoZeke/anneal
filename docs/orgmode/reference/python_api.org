@@ -1113,6 +1113,8 @@ hvp_centre(positions, atom_types, box)
 - Outputs :: a tuple =(energy, forces, variance)= at the geometry.
   The geometry becomes the centre that forward =hvp= products reuse; a geometry
   equal to the current centre is served without a force call.
+  A force call that raised is stored like a result: the same bits raise the
+  same error without another call, until =invalidate_hvp= or a new geometry.
 - Errors :: non-finite positions raise =ValueError=; a non-finite energy or
   force raises =rgpot.NumericalError=; the conventions list the other input
   errors.

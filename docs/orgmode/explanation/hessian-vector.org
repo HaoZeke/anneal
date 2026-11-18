@@ -47,8 +47,19 @@ served at =-0.0=.
 Moving one coordinate by one ulp, changing a species or changing the cell is a
 new centre.
 
-The key does not see the state behind the callback's =user_data=.
-A potential whose parameters change at a fixed geometry calls
+The centre is the entry of the handle's fused cache, which the eindir energy
+and gradient share, and it stores the outcome of the force call: the forces, or
+the failure.
+A centre that failed, because the callback returned an error status or an SCC
+did not converge, is returned again for the same bits and settings without
+another call.
+A failed energy is not retried at the same bits: a warm-start retry needs a
+changed setting, installed with =rgpot_potential_set_fused_settings=, or a call
+to =rgpot_potential_hvp_invalidate=.
+
+The key does not see the state behind the callback's =user_data=, apart from
+the settings the potential reports.
+A potential whose other parameters change at a fixed geometry calls
 =rgpot_potential_hvp_invalidate= to drop the centre.
 
 A search usually needs the centre forces as well as the products.
