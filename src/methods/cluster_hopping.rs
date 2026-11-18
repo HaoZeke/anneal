@@ -4909,6 +4909,14 @@ where
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
+    // Adaptation belongs to the replica, not to a configuration carried
+    // through an exchange. Each replica learns from its own return and
+    // acceptance rates, using the same controller for every move library.
+    let mut adaptive_step = vec![1.0_f64; n_rep];
+    let mut adaptive_temperature = vec![1.0_f64; n_rep];
+    let mut adaptive_trials = vec![0usize; n_rep];
+    let mut adaptive_accepts = vec![0usize; n_rep];
+    let mut adaptive_returns = vec![0usize; n_rep];
     // Energy last polished by an unlike-pair quench. `NaN` until the first
     // binary incumbent, so a one-species chain never enters the sweep.
     let mut polished_best = f64::NAN;
@@ -6288,6 +6296,9 @@ where
             ratios[rep]
         };
         let mut temperature = single * scale;
+        if cfg.adaptive_search {
+            temperature *= adaptive_temperature[rep];
+        }
         if cfg.general_collective
             && let Some(spread) = general_taboo.spread()
         {
@@ -6612,7 +6623,13 @@ where
         } else {
             1.0
         };
-        let proposal_scale = escape * orient_scale;
+        let proposal_scale = escape
+            * orient_scale
+            * if cfg.adaptive_search {
+                adaptive_step[rep]
+            } else {
+                1.0
+            };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -7884,10 +7901,20 @@ where
         };
         let mut accept = accept;
         if cfg.move_library.is_rigid_body() && !unquenched {
-            // Metropolis at the preset temperature. The threshold rule
-            // collapses under a run of small accepts and then cannot
-            // cross the gap between rigid cages.
-            let rise = (e_new - e) / cfg.temperature.max(1e-12);
+            // Metropolis at the live temperature. The threshold rule
+            // collapses under a run of small accepts and then cannot cross
+            // the gap between rigid cages. Reading the live value is also
+            // what lets the replica's general acceptance controller act.
+            // `rigid_factor` is the legacy chart correction. The adaptive
+            // controller replaces that correction rather than multiplying it:
+            // otherwise a low-acceptance response heats a large rigid chart
+            // while its own measurements are already asking it to cool.
+            let live = if cfg.adaptive_search {
+                temperature / rigid_factor.max(1.0)
+            } else {
+                cfg.temperature
+            };
+            let rise = (e_new - e) / live.max(1e-12);
             accept = rise <= 0.0 || rng.random::<f64>() < (-rise).exp();
         }
         if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
@@ -7968,6 +7995,41 @@ where
             bias.set_height(height.height());
         }
         dial.observe(accept);
+        if cfg.adaptive_search {
+            adaptive_trials[rep] += 1;
+            adaptive_returns[rep] += usize::from(returning);
+            adaptive_accepts[rep] += usize::from(accept && !returning);
+            if adaptive_trials[rep] >= 50 {
+                let trials = adaptive_trials[rep] as f64;
+                let return_rate = adaptive_returns[rep] as f64 / trials;
+                let nonreturning = adaptive_trials[rep] - adaptive_returns[rep];
+                let acceptance = if nonreturning > 0 {
+                    adaptive_accepts[rep] as f64 / nonreturning as f64
+                } else {
+                    0.0
+                };
+                if return_rate > 0.45 || acceptance > 0.55 {
+                    adaptive_step[rep] = (adaptive_step[rep] * 1.10).min(1.6);
+                } else if acceptance < 0.12 {
+                    adaptive_step[rep] = (adaptive_step[rep] * 0.90).max(0.70);
+                }
+                if acceptance < 0.15 {
+                    adaptive_temperature[rep] = (adaptive_temperature[rep] * 1.10).min(1.5);
+                } else if acceptance > 0.60 {
+                    adaptive_temperature[rep] = (adaptive_temperature[rep] * 0.90).max(0.65);
+                }
+                if std::env::var("ANNEAL_ADAPT_TRACE").is_ok() {
+                    eprintln!(
+                        "ADAPT rep {rep} step {:.6} temperature {:.6} return_rate \
+                         {return_rate:.6} acceptance {acceptance:.6}",
+                        adaptive_step[rep], adaptive_temperature[rep],
+                    );
+                }
+                adaptive_trials[rep] = 0;
+                adaptive_accepts[rep] = 0;
+                adaptive_returns[rep] = 0;
+            }
+        }
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage

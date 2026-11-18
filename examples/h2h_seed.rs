@@ -135,6 +135,7 @@ fn apply_stride(mut cfg: Config) -> Config {
 fn atomic_config(arm: &str, n: usize) -> Config {
     let cfg = match arm {
         "recommended" => Config::recommended(n),
+        "recommended_adaptive" => Config::recommended_adaptive(n),
         "base" => Config::for_cluster(n),
         "temperature-1.5" => {
             let mut cfg = Config::recommended(n);
@@ -154,6 +155,7 @@ fn atomic_config(arm: &str, n: usize) -> Config {
 fn water_config(arm: &str, n: usize) -> Config {
     let mut cfg = match arm {
         "recommended" => Config::recommended_tip4p(n),
+        "recommended_adaptive" => Config::recommended_adaptive_tip4p(n),
         "base" => Config::for_tip4p(n),
         other => panic!("no TIP4P arm {other}"),
     };
@@ -326,6 +328,13 @@ fn main() {
     for (name, draws, accepts, best) in &out.arms {
         println!("arm {name} draws {draws} accepts {accepts} best {best:.6}");
     }
+    for (rung, (temperature, basins, energy)) in out.rungs.iter().enumerate() {
+        println!("rung {rung} temperature {temperature:.6} basins {basins} energy {energy:.6}");
+    }
+    println!(
+        "swaps tried {} accepted {}",
+        out.swaps_tried, out.swaps_accepted
+    );
     let hit = stop_at.is_some_and(|level| seen.lowest <= level);
     println!(
         "h2h_row system={kind}{n} code=anneal seed={seed} budget={budget} hit={} evals_to_hit={} charged={} best={:.10} wall_s={wall:.6} pot_s={pot_s:.6} outside_s={outside_s:.6} basins={}",

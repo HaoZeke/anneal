@@ -1397,6 +1397,13 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
+    /// Acceptance-coupled proposal and temperature scaling on each replica.
+    ///
+    /// The controller reads only basin returns and accepted transitions, so
+    /// the same rule applies to every potential and move library. It is kept
+    /// opt-in because it changes seeded trajectories and replica count.
+    #[serde(skip_serializing_if = "is_false")]
+    pub adaptive_search: bool,
 }
 
 /// Opening hops whose quenched energy changes set
@@ -1491,6 +1498,30 @@ impl Config {
     /// ```
     pub fn recommended(n_points: usize) -> Self {
         Self::recommended_with_scales(
+            n_points,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::REDUCED_SCALE,
+        )
+    }
+
+    /// [`Config::recommended_with_scales`] with a two-member adaptive
+    /// population.
+    pub fn recommended_adaptive_with_scales(
+        n_points: usize,
+        length_scale: f64,
+        energy_scale: f64,
+    ) -> Self {
+        let mut cfg = Self::recommended_with_scales(n_points, length_scale, energy_scale);
+        cfg.adaptive_search = true;
+        cfg.replicas = 2;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.ladder_top = 2.0;
+        cfg
+    }
+
+    /// [`Config::recommended`] with a two-member adaptive population.
+    pub fn recommended_adaptive(n_points: usize) -> Self {
+        Self::recommended_adaptive_with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
@@ -1994,6 +2025,7 @@ impl Config {
             ring_moves: false,
             hold_stereocentres: false,
             measured_energy_scale: false,
+            adaptive_search: false,
         }
     }
 
@@ -2182,6 +2214,17 @@ impl Config {
         cfg.depth_reward = false;
         cfg.tabu_on_stall = false;
         cfg.return_screen = false;
+        cfg
+    }
+
+    /// [`Config::recommended_tip4p`] with the same adaptive population used by
+    /// [`Config::recommended_adaptive`].
+    pub fn recommended_adaptive_tip4p(n_molecules: usize) -> Self {
+        let mut cfg = Self::recommended_tip4p(n_molecules);
+        cfg.adaptive_search = true;
+        cfg.replicas = 2;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.ladder_top = 2.0;
         cfg
     }
 
@@ -2572,6 +2615,20 @@ mod coverage_behaviour {
         let digest = Config::for_tip4p(2).resolved_sha256().expect("json");
         assert_eq!(digest.len(), 64);
         assert!(digest.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn adaptive_population_is_the_same_opt_in_for_atomic_and_rigid_presets() {
+        let atomic = Config::recommended_adaptive(38);
+        let rigid = Config::recommended_adaptive_tip4p(15);
+        for cfg in [&atomic, &rigid] {
+            assert!(cfg.adaptive_search);
+            assert_eq!(cfg.replicas, 2);
+            assert_eq!(cfg.ladder_top, 2.0);
+            assert!(matches!(cfg.ladder_mode, super::LadderMode::NonReversible));
+        }
+        assert!(!Config::recommended(38).adaptive_search);
+        assert!(!Config::recommended_tip4p(15).adaptive_search);
     }
 
     #[test]
