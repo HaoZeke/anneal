@@ -1,0 +1,1 @@
+`tools/check_header_drift.sh`, run by the `rust_tests` job and by `pixi r check-header-drift`, fails when `rgpot-core/include/rgpot.h` differs from the cbindgen output. The `gen-header` build now reruns when the Rust source changes, and the header carries the `# Safety` notes of the RPC client functions.
