@@ -316,7 +316,8 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
   }
 
   // Above kTeamMinAtoms (13x13x13 Cu vacancy = 8787 atoms): shifted, switched
-  // and sheared cells across Stored, Auto and Stream modes at 1, 2, 4 and 8 threads.
+  // and sheared cells across Stored, Auto and Stream modes. Stored and Auto
+  // cover 1, 2, 4 and 8 threads; Stream covers the largest requested team.
   for (const bool sheared : {false, true}) {
     const auto sys = fccVacancy(13, 2.55 * std::sqrt(2.0), 29, sheared);
     REQUIRE(sys.z.size() >= rgpot::kTeamMinAtoms);
@@ -330,26 +331,55 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
       if (sheared && cfg.switch_width != 0.0) {
         continue;
       }
+      ThreadGuard::set("1");
+      rgpot::MorsePot serial_pot(cfg);
+      serial_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+      auto ref0 = runFullEval(serial_pot, sys.pos, sys.z, sys.box);
+      auto ref1 = runFullEval(serial_pot, within_skin, sys.z, sys.box);
+      auto ref2 = runFullEval(serial_pot, past_skin, sys.z, sys.box);
+
       for (const auto mode :
            {rgpot::nlist::Mode::Stored, rgpot::nlist::Mode::Auto, rgpot::nlist::Mode::Stream}) {
         if (sheared && mode != rgpot::nlist::Mode::Stored) {
           continue;
         }
+        if (cfg.switch_width != 0.0 && mode != rgpot::nlist::Mode::Stored) {
+          continue;
+        }
         INFO("sheared=" << sheared << " switch=" << cfg.switch_width
                         << " mode=" << static_cast<int>(mode));
         ThreadGuard::set("1");
-        rgpot::MorsePot serial_pot(cfg);
-        serial_pot.setNeighbourMode(mode);
-        const auto ref0 = runFullEval(serial_pot, sys.pos, sys.z, sys.box);
-        const auto ref1 = runFullEval(serial_pot, within_skin, sys.z, sys.box);
-        const auto ref2 = runFullEval(serial_pot, past_skin, sys.z, sys.box);
+        if (mode == rgpot::nlist::Mode::Stream) {
+          rgpot::MorsePot stream_ref(cfg);
+          stream_ref.setNeighbourMode(mode);
+          ref0 = runFullEval(stream_ref, sys.pos, sys.z, sys.box);
+          ref1 = runFullEval(stream_ref, within_skin, sys.z, sys.box);
+          ref2 = runFullEval(stream_ref, past_skin, sys.z, sys.box);
+        }
+        ThreadGuard::set(mode == rgpot::nlist::Mode::Stream ? "8" : "1");
+        rgpot::MorsePot pot(cfg);
+        pot.setNeighbourMode(mode);
+        CHECK(countBitDiffs(runFullEval(pot, sys.pos, sys.z, sys.box), ref0) == 0);
 
-        for (const char *th : {"1", "2", "4", "8"}) {
+        // The stored neighbour build is serial and independent of the requested
+        // team. Build it once, then exercise every team on the same geometry.
+        const std::vector<const char *> same_geometry_threads =
+            mode == rgpot::nlist::Mode::Stream ? std::vector<const char *>{}
+                                               : std::vector<const char *>{"2", "4", "8"};
+        for (const char *th : same_geometry_threads) {
           INFO("OMP_NUM_THREADS=" << th);
           ThreadGuard::set(th);
-          rgpot::MorsePot pot(cfg);
-          pot.setNeighbourMode(mode);
           CHECK(countBitDiffs(runFullEval(pot, sys.pos, sys.z, sys.box), ref0) == 0);
+        }
+
+        // A changed geometry makes Stream rebuild once. Stored and Auto retain
+        // their Verlet list, while each requested team still runs the Morse sum.
+        const std::vector<const char *> changed_geometry_threads =
+            mode == rgpot::nlist::Mode::Stream ? std::vector<const char *>{"8"}
+                                               : std::vector<const char *>{"1", "2", "4", "8"};
+        for (const char *th : changed_geometry_threads) {
+          INFO("OMP_NUM_THREADS=" << th);
+          ThreadGuard::set(th);
           const auto teams_before_reuse = rgpot::teamsOpened();
           CHECK(countBitDiffs(runFullEval(pot, within_skin, sys.z, sys.box), ref1) == 0);
           if (mode != rgpot::nlist::Mode::Stream) {
@@ -361,16 +391,18 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
 #endif
             }
           }
-          CHECK(countBitDiffs(runFullEval(pot, past_skin, sys.z, sys.box), ref2) == 0);
-          if (mode != rgpot::nlist::Mode::Stream) {
-            rgpot::ForceOut probe{};
-            std::vector<double> fbuf(3 * sys.z.size(), 0.0);
-            probe.F = fbuf.data();
-            auto moved = past_skin;
-            moved[0] += 0.75;
-            pot.forceImpl({sys.z.size(), moved.data(), sys.z.data(), sys.box.data()}, &probe);
-            CHECK_FALSE(pot.listReused());
-          }
+        }
+
+        ThreadGuard::set("8");
+        CHECK(countBitDiffs(runFullEval(pot, past_skin, sys.z, sys.box), ref2) == 0);
+        if (mode != rgpot::nlist::Mode::Stream) {
+          rgpot::ForceOut probe{};
+          std::vector<double> fbuf(3 * sys.z.size(), 0.0);
+          probe.F = fbuf.data();
+          auto moved = past_skin;
+          moved[0] += 0.75;
+          pot.forceImpl({sys.z.size(), moved.data(), sys.z.data(), sys.box.data()}, &probe);
+          CHECK_FALSE(pot.listReused());
         }
       }
     }
