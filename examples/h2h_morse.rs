@@ -146,7 +146,7 @@ fn cmd_run(args: &[String]) -> i32 {
     let mut cfg = Config::recommended(spec.n);
     // Unset leaves the preset's structure priors on. `0` turns off the
     // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
-    // labelled core, the motif reseed, stall symmetrisation (and its
+    // labeled core, the motif reseed, stall symmetrisation (and its
     // Ih withholding) and the continuous-symmetry reseed.
     if let Ok(text) = std::env::var("H2H_PRIORS") {
         let text = text.trim();

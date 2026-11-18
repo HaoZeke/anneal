@@ -1089,7 +1089,7 @@ mod tests {
         (sites, law)
     }
 
-    /// Relabelling a minimum must not move a lattice site or a greedy draw.
+    /// Relabeling a minimum must not move a lattice site or a greedy draw.
     #[test]
     fn lattice_sites_and_move_probabilities_ignore_labels() {
         use rand::seq::SliceRandom;
@@ -1125,11 +1125,11 @@ mod tests {
                     let (sites_b, law_b) = lattice_law(&moved, tie, 1, 2);
                     assert!(
                         same_sites(&sites, &sites_b),
-                        "lattice sites moved under a relabelling"
+                        "lattice sites moved under a relabeling"
                     );
                     assert!(
                         same_law(&law, &law_b),
-                        "move probabilities moved under a relabelling"
+                        "move probabilities moved under a relabeling"
                     );
                 }
             }

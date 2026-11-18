@@ -792,7 +792,7 @@ mod tests {
                 reversed[3 * atom + axis] = x[3 * (6 - atom) + axis];
             }
         }
-        let flipped = propose(reversed.view(), &classes).expect("relabelled");
+        let flipped = propose(reversed.view(), &classes).expect("relabeled");
         assert!((flipped.measure - projection.measure).abs() < 1e-8);
         let mut noisy = x.clone();
         noisy[2] += 0.25;

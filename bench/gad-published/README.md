@@ -38,14 +38,14 @@ Twelve seeds, 2000–2011, for anneal, GMIN and the GAD rerun, all at 400000 cal
 
 | Size | Arm | Hits | Median calls to hit | IQR | Best (median) | Wall (s) | Pot (s) | Outside (s) | Inside µs/call | Outside µs/call | Fisher p | Mann–Whitney p |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LJ31 | anneal | 12/12 | 18666 | 29896.8 | −133.58642192 | 0.104160 | 0.033125 | 0.070942 | 1.6705 | 3.2581 | | |
-| LJ31 | gmin | 12/12 | 47139.5 | 73509.5 | −133.58641000 | 0.193506 | 0.123443 | 0.070063 | 2.6276 | 1.4867 | 1 | 0.0518646 |
-| LJ31 | gad | 2/12 | 400000 | 0 | −133.10462015 | 170.638779 | 22.093089 | 148.483457 | 55.3217 | 371.2086 | 6.73038e-05 | 1.83067e-05 |
+| LJ31 | anneal | 12/12 | 18666 | 29896.8 | −133.58642192 | 0.107647 | 0.032629 | 0.073946 | 1.5603 | 3.4399 | | |
+| LJ31 | gmin | 12/12 | 90210.5 | 102713.8 | −133.58640476 | 0.486330 | 0.307743 | 0.187484 | 3.1514 | 1.7074 | 1 | 0.0172712 |
+| LJ31 | gad | 2/12 | 400000 | 0 | −133.10462015 | 187.522859 | 23.479254 | 163.718770 | 59.3887 | 411.3383 | 6.73038e-05 | 1.83067e-05 |
 | LJ38 | anneal | 12/12 | 10615.5 | 3591.2 | −173.92842659 | 0.069455 | 0.029011 | 0.042200 | 2.4370 | 3.2839 | | |
 | LJ38 | gmin | 7/12 | 329662 | 326680 | −173.92837772 | 1.802020 | 1.276786 | 0.525234 | 3.8734 | 1.5935 | 0.0372671 | 0.000693135 |
-| LJ38 | gad | 0/12 | 400000 | 0 | −171.77778794 | 189.941243 | 29.930673 | 159.742999 | 74.8267 | 399.3575 | 7.39602e-07 | 1.02689e-05 |
+| LJ38 | gad | 0/12 | 400000 | 0 | −171.77778794 | 195.144155 | 31.069388 | 164.491350 | 77.6735 | 411.2284 | 7.39602e-07 | 1.02689e-05 |
 
-The two LJ31 GAD hits are seed 2000 at 226282 calls and seed 2006 at 114143 calls. Within the budget GAD completed a median of 13 generations on LJ31 (2–20) and 15.5 on LJ38 (12–24).
+The per-seed rerun log is `seed-reruns.csv`, recorded at the verified source alias `407731c5c3983cc927966cd308cbf23975bb0ffb` with hostname `bench`. The two LJ31 GAD hits are seed 2000 at 226282 calls and seed 2006 at 114143 calls. Within the budget GAD completed a median of 13 generations on LJ31 (2–20) and 15.5 on LJ38 (12–24).
 
 The deposited run reaches Cambridge at generation 140 for LJ31 (bounds 9024 and 9024000 calls) and generation 482 for LJ38 (bounds 30912 and 30912000 calls).
 

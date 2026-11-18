@@ -981,7 +981,7 @@ pub struct Config {
     /// Stall regrowth from a lattice order. On in the paper preset.
     #[serde(skip_serializing_if = "is_true")]
     pub prior_growth: bool,
-    /// Labelled close-packed core cuts. On in the paper preset.
+    /// Labeled close-packed core cuts. On in the paper preset.
     #[serde(skip_serializing_if = "is_true")]
     pub prior_core: bool,
     /// The core cuts stop once they stall and the walk continues from the
@@ -1003,7 +1003,7 @@ pub struct Config {
     /// The move does not name a packing or a composition.
     #[serde(skip_serializing_if = "is_false")]
     pub general_collective: bool,
-    /// Exchange descent after every full quench of a labelled cluster.
+    /// Exchange descent after every full quench of a labeled cluster.
     ///
     /// Unlike pairs are exchanged on the quenched geometry in a drawn
     /// order, each exchange kept when the unrelaxed energy drops, for at
@@ -1022,15 +1022,15 @@ pub struct Config {
     /// preset.
     #[serde(skip_serializing_if = "is_true")]
     pub homotop_ranked: bool,
-    /// The budget-window law sets the temperature of a labelled cluster.
+    /// The budget-window law sets the temperature of a labeled cluster.
     ///
-    /// The preset temperature is a Lennard-Jones well. A labelled cluster
+    /// The preset temperature is a Lennard-Jones well. A labeled cluster
     /// has an ordering for every geometry, and at that temperature the
     /// chain stands well above its best. Same scope as
     /// [`Config::homotop_descent`]. On in the paper preset.
     #[serde(skip_serializing_if = "is_true")]
     pub homotop_window: bool,
-    /// A stalled labelled incumbent is reordered from its own packing.
+    /// A stalled labeled incumbent is reordered from its own packing.
     ///
     /// The smaller label goes on the innermost sites of the incumbent, or
     /// of a step of the walk's moves relaxed under one pair well, and the
@@ -1059,7 +1059,7 @@ pub struct Config {
     ///
     /// Measured on LJ38 at 400 thousand charged evaluations: keying on the
     /// descriptor solves 1 seed in 8. The threshold there has to absorb
-    /// relabelling and rotation, which is what makes it untransferable between
+    /// relabeling and rotation, which is what makes it untransferable between
     /// sizes and what three separate calibrations failed to pin down.
     pub shape_keyed: bool,
     /// How far above the incumbent a screened trial may land and still be
@@ -1663,7 +1663,7 @@ impl Config {
 
     /// True when every atom is the same element.
     ///
-    /// No species vector is the unlabelled cluster. A vector that repeats
+    /// No species vector is the unlabeled cluster. A vector that repeats
     /// one label is that same cluster. Two distinct labels are a homotop.
     pub fn monoatomic(&self) -> bool {
         match self.species.as_deref() {
@@ -1675,7 +1675,7 @@ impl Config {
     /// CNA 555 / Ih packing diagnostics apply to a monoatomic cluster.
     ///
     /// A molecule, a slab, or two elements are not Honeycutt–Andersen
-    /// environments. One repeated label is the unlabelled cluster.
+    /// environments. One repeated label is the unlabeled cluster.
     pub fn packing_cna_applies(&self) -> bool {
         self.monoatomic()
             && self.active_region.is_none()
@@ -2477,7 +2477,7 @@ mod coverage_behaviour {
     }
 
     #[test]
-    fn one_repeated_label_is_an_unlabelled_packing() {
+    fn one_repeated_label_is_an_unlabeled_packing() {
         let blank = Config::recommended(8);
         assert!(blank.monoatomic());
         assert!(blank.packing_cna_applies());
@@ -2591,10 +2591,10 @@ mod coverage_behaviour {
     #[test]
     fn species_diameters_widen_the_neighbour_shell() {
         let bare = Config::with_scales(2, 1.0, 1.0);
-        let labelled = bare.clone().with_species(vec![1, 8], None);
-        assert_eq!(labelled.species, Some(vec![1, 8]));
-        assert!(labelled.species_sigma.is_none());
-        assert_eq!(labelled.neighbour_cutoff, bare.neighbour_cutoff);
+        let labeled = bare.clone().with_species(vec![1, 8], None);
+        assert_eq!(labeled.species, Some(vec![1, 8]));
+        assert!(labeled.species_sigma.is_none());
+        assert_eq!(labeled.neighbour_cutoff, bare.neighbour_cutoff);
         let wide = Config::with_scales(2, 1.0, 1.0).with_species(vec![1, 8], Some(vec![1.5, 2.5]));
         assert!(wide.neighbour_cutoff > bare.neighbour_cutoff);
         assert!(wide.min_separation > 0.0);

@@ -49,7 +49,7 @@ Seed 1 lies above that line.
 ## Kept
 
 The 192-seed paragraph stays.
-It prints 121/192, 97/192, 148/192, and 114/192.
+It prints 121/192, 94/192, 148/192, and 114/192.
 The six-seed hexamer logs are a separate subsection.
 Open work remains on the water 16-mer.
 And the atomistic global optimization framework (AGOX).

@@ -2337,7 +2337,7 @@ impl SuperbasinEscape {
 /// What quotienting the transition graph by the symmetry orbit does to it.
 ///
 /// The graph's states are descriptor classes, and a sorted distance spectrum
-/// distinguishes a structure from its own relabelling and from its own
+/// distinguishes a structure from its own relabeling and from its own
 /// point-group images. Those are one state. A chain re-entering one minimum
 /// under twenty labels therefore registers as twenty states entered once each,
 /// which is indistinguishable, in the expected-visits statistic, from a chain
@@ -2469,7 +2469,7 @@ impl SuperbasinEscape {
     /// and reports what changes.
     ///
     /// `distance` returns the shape distance between two archived structures,
-    /// which is zero for one structure against its own relabelling and rotation
+    /// which is zero for one structure against its own relabeling and rotation
     /// and order one between different minima. It is only ever asked about
     /// structures whose quenched energies already agree to `energy_tol`, and
     /// that filter is exact rather than heuristic: an orbit is a level set of
@@ -3308,13 +3308,13 @@ mod tests {
     #[test]
     fn the_default_basin_descriptor_is_already_orbit_invariant() {
         // The premise behind quotienting the graph by the symmetry orbit is
-        // that the descriptor splits one minimum across its relabellings and
+        // that the descriptor splits one minimum across its relabelings and
         // its point-group images, so a recurrent chain reads as a sweeping one.
         // For this crate's default keying that premise is false, and it is
         // false exactly rather than approximately.
         //
         // The descriptor is the sorted multiset of all pairwise distances.
-        // Relabelling permutes which pair contributes which distance and leaves
+        // Relabeling permutes which pair contributes which distance and leaves
         // the multiset alone; rotation, reflection and translation leave every
         // distance alone. So every member of an orbit has a bit-comparable
         // descriptor, and no orbit can be split into distinct basins.
@@ -3333,7 +3333,7 @@ mod tests {
         let base = fp.describe(x.view());
 
         // A random rotation from a QR-like construction, a reflection, a
-        // translation, and a random relabelling of the points.
+        // translation, and a random relabeling of the points.
         let (a, b, c) = (
             rng.random::<f64>() * std::f64::consts::TAU,
             rng.random::<f64>() * std::f64::consts::TAU,
@@ -3373,7 +3373,7 @@ mod tests {
         // genuinely different 75-point minima come is 0.9212.
         assert!(
             gap < 1e-9,
-            "an improper, rotated, translated, relabelled copy sits {gap:.3e} from the \
+            "an improper, rotated, translated, relabeled copy sits {gap:.3e} from the \
              original in descriptor space; the orbit is not collapsed"
         );
 

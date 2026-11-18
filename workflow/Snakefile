@@ -1090,3 +1090,26 @@ rule agox_gofee_lj_large:
         bash scripts/ase_gofee_h2h/enter_bench.sh --comparison agox_gofee --no-paper \\
           --systems lj98,lj102,lj103,lj104,lj150
         """
+
+
+# Current-code regeneration of the six landfold panels whose v7 source
+# tables were not deposited. The runner is resumable in /work and publishes
+# landscape.ld and fes.csv only after every declared seed has finished.
+# Not part of `rule all`.
+#   snakemake -s workflow/Snakefile landfold_maps_current --cores 1
+rule landfold_maps_current:
+    input:
+        "examples/landfold_campaign.rs",
+        "paper/jctc/scripts/run_landfold_campaign.py",
+    output:
+        touch("/work/anneal-landfold-current/complete.stamp"),
+    threads: 1
+    resources:
+        mem_mb=16000,
+    shell:
+        """
+        set -euo pipefail
+        python3 paper/jctc/scripts/run_landfold_campaign.py \\
+          --work /work/anneal-landfold-current \\
+          --publish paper/jctc/data/landfold_maps_v7
+        """

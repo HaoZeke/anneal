@@ -22,7 +22,7 @@
 //! structure priors the preset carries for close-packed clusters: stall
 //! symmetrisation, the continuous-symmetry reseed, the Lennard-Jones energy
 //! lattice, the two-phase surface and the five prior gates (fivefold SOAP,
-//! icosahedral reseed, lattice regrowth, labelled core, motif reseed). The
+//! icosahedral reseed, lattice regrowth, labeled core, motif reseed). The
 //! fixed temperature, 0.8 of the Lennard-Jones well, goes with them, and the
 //! budget-window law sets it. Orbit completion stays, on every new basin and
 //! as an allocator arm, and the search keeps parts of the cluster within the
@@ -279,7 +279,7 @@ fn pair_range(
 /// law replaces it. Orbit completion is symmetry the structure itself
 /// carries, so it stays, on every new basin and as an allocator arm. The
 /// five prior gates go: the fivefold SOAP move, the icosahedral reseed,
-/// lattice regrowth, the labelled core and the motif reseed.
+/// lattice regrowth, the labeled core and the motif reseed.
 fn without_priors(mut cfg: Config) -> Config {
     cfg.orbit_complete_on_new = true;
     cfg.orbit_arm = true;

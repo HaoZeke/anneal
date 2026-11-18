@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Serial ablation of the labelled-cluster search on the Gupta alloys.
+"""Serial ablation of the labeled-cluster search on the Gupta alloys.
 
 Two builds take part: ``develop`` and ``branch``. Each arm is one build
 with an environment. With the priors off (``H2H_PRIORS=0``) the arms are

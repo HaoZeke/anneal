@@ -45,6 +45,7 @@ CHECKS = (
     audit_mod.au55_superseded,
     audit_mod.manuscript_new,
     audit_mod.manuscript_followups,
+    audit_mod.manuscript_au55,
     audit_mod.cover_letter,
     audit_mod.rerun_claims,
     audit_mod.rerun_check,
@@ -77,8 +78,18 @@ def test_untraced_numbers_are_still_quoted(audited):
         assert audit_mod.collapse(fragment) in audit_mod.collapse((ROOT / path).read_text()), (path, fragment)
 
 
-def test_script_exits_zero():
+def test_paper_audit_has_no_drift(capsys):
+    assert audit_mod.UNTRACED == []
     assert audit_mod.run() == 0
+    drifted = [line for line in capsys.readouterr().err.splitlines() if line.startswith("DRIFT")]
+    assert drifted == []
+
+
+def test_an_untraced_number_fails_the_audit():
+    audit = audit_mod.Audit()
+    audit_mod.untraced_check(audit)
+    assert [row[1] for row in audit.drifts()] == [path for path, _fragment, _why in audit_mod.UNTRACED]
+    assert not any(row[0] == "DRIFT" for row in audit.results if "no committed row backs" not in row[2])
 
 
 def test_a_drifted_table_cell_is_reported():
@@ -529,3 +540,48 @@ def test_the_british_spelling_of_labeled_is_caught():
     for word in ("labelled", "labelling", "modelled", "travelled"):
         assert audit_mod.BRITISH.search(word)
     assert not audit_mod.BRITISH.search("labeled")
+
+
+@pytest.mark.parametrize("sentence", [
+    "On Au\\(_{55}\\) this setting hits 0 of 12 where GMIN hits 1 of 12.",
+    "Au\\(_{55}\\) is significant by Fisher's test.",
+    "Au\\(_{55}\\) gives \\(p=0.014\\).",
+    "6 of the 9 wins are significant.",
+    "Six of our nine wins are significant.",
+])
+def test_a_stale_au55_claim_is_reported(sentence):
+    assert audit_mod.stale_sentences(f"Intro sentence. {sentence} Closing sentence.") == [sentence]
+
+
+@pytest.mark.parametrize("sentence", [
+    "On Au\\(_{55}\\) the ASE panel hits 0 of 12 where GMIN hits 3 of 12.",
+    "Au\\(_{55}\\) is not significant, with \\(p=0.069\\).",
+    "On Au\\(_{55}\\) this setting hits 6 of 12 where GMIN hits 1 of 12.",
+])
+def test_a_current_au55_claim_is_accepted(sentence):
+    assert audit_mod.stale_sentences(f"Intro sentence. {sentence} Closing sentence.") == []
+
+
+def test_a_table_row_is_not_read_as_a_claim():
+    table = "\\begin{tabular}{ll}\nAu\\(_{55}\\) & GMIN 0 of 12 significant\\\\\n\\end{tabular}\n"
+    assert audit_mod.stale_sentences(table) == []
+
+
+def test_the_au55_claims_hold_in_the_committed_text():
+    audit = audit_mod.Audit()
+    audit_mod.manuscript_au55(audit)
+    assert not audit.drifts()
+    assert any("no Au55 count" in row[2] for row in audit.results)
+
+
+def test_the_obsolete_significance_count_is_not_a_registered_claim():
+    fragments = [fragment for _path, _item, group in audit_mod.RERUN_CLAIMS for fragment in group]
+    assert fragments and not any("6 are significant" in fragment for fragment in fragments)
+
+
+def test_every_raster_landfold_panel_records_the_unfinished_current_campaign():
+    audit = audit_mod.Audit()
+    audit_mod.manuscript_new(audit)
+    rows = [row for row in audit.results if "record the unfinished current-code campaign" in row[2]]
+    assert len(rows) == 4
+    assert all(row[0] == "OK" for row in rows)
