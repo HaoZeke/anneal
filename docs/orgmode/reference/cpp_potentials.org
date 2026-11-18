@@ -403,7 +403,7 @@ void forceStage(const HalfList &list, const double *densities, double *forces,
 #+end_src
 
 - Applies to :: rgpot::EAMPot, rgpot::EAMTablePot, rgpot::LJClusterPot,
-  rgpot::LJPot, rgpot::MorsePot, rgpot::ZBLPot
+  rgpot::LJPot, rgpot::MorsePot, rgpot::TersoffSiC, rgpot::ZBLPot
 - Inputs :: none.
 - Units :: none.
 - Outputs :: true when the last force call kept the Verlet list, because no atom

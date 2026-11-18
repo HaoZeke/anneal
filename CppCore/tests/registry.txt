@@ -140,6 +140,7 @@ NeighbourLayerTest | tests core | unit neighbour_layer_test NeighbourLayerTest.c
 # Eight potentials on 1, 2, 3 and 8 threads, on up to 10648 atoms. Meson
 # scales explicit timeouts by 3 under ASan/UBSan and 8 under TSan.
 ThreadTeamTest | tests core | unit thread_team_test ThreadTeamTest.cc timeout=120 |
+TersoffZblBuildTest | tests core | unit tersoff_zbl_build_test TersoffZblBuildTest.cc fp_contract=off timeout=180 |
 StreamParityTest | tests core | unit stream_parity_test StreamParityTest.cc fp_contract=off timeout=900 |
 NeighbourListTest | tests core | unit neighbour_list_test NeighbourListTest.cc |
 VesinEmptyResetTest | tests core | unit vesin_empty_reset_test VesinEmptyResetTest.cc |

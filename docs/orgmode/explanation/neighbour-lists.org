@@ -29,6 +29,14 @@ has at least 8192 atoms.
 A smaller system stays on the calling thread.
 The work is split into =OMP_NUM_THREADS= slices, and the threads the runtime
 starts take all of them.
+The stored index of the classical potentials is built on the same slices.
+From 8192 atoms, with more than one thread requested, a stencil of at least 4096
+candidates and more candidates than atoms is joined in atom order.
+A shorter list stays on the calling thread.
+Each row is sorted by partner index, so the list matches one thread.
+An open axis whose nominal grid does not fit in reported memory is binned on the
+atom span.
+A periodic axis keeps the cell length.
 A build inside another OpenMP region may get one thread and returns the same
 list.
 There is no mutable global.

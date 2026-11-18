@@ -92,6 +92,13 @@ struct Spec {
 /// update bins nothing and stores nothing, in any mode: each walk takes
 /// the pairs straight from the coordinates, i ascending and then j
 /// ascending, which is the order of the single cell the bins would hold.
+///
+/// From kTeamMinAtoms atoms, with more than one thread requested, the
+/// stored index is gathered on atom slices when the stencil holds at
+/// least 4096 candidates and more candidates than atoms. The slices are
+/// joined in atom order. Each row is sorted by partner index, so the
+/// list matches the one thread build. An open axis whose nominal grid
+/// does not fit in the memory the OS reports is binned on the atom span.
 class Neighbours {
 public:
   void update(const double *xyz, std::size_t n, const double *box9,
@@ -268,7 +275,7 @@ private:
   };
 
   void buildCells(const double *xyz, std::size_t n);
-  void buildStored(const double *xyz, std::size_t n);
+  void buildStored(const double *xyz, std::size_t n, std::uint64_t bound);
   [[nodiscard]] std::uint64_t candidateBound() const;
   /// `wrapped` is set when some atom is within the skin only through
   /// another periodic image of its reference position.

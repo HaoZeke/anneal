@@ -84,6 +84,11 @@ public:
   /// thread agrees with the old ordered walk to within 1e-12.
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 
+  /// True when the last energy or force call kept the Verlet list.
+  [[nodiscard]] bool listReused() const noexcept {
+    return neighbours_.reused();
+  }
+
   /// The list forceImpl keeps. Not built until a call with a positive skin.
   [[nodiscard]] const nlist::NeighborList &heldList() const noexcept {
     return m_held;

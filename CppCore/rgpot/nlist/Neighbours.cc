@@ -116,44 +116,79 @@ bool Neighbours::reusable(const double *xyz, std::size_t n, const double *box9,
 
 void Neighbours::buildCells(const double *xyz, std::size_t n) {
   const double edge = search_ > 0.0 ? search_ : 1.0;
-  nx_ = axisCount(len_[0], edge);
-  ny_ = axisCount(len_[1], edge);
-  nz_ = axisCount(len_[2], edge);
-  const double bytes =
-      static_cast<double>(nx_) * static_cast<double>(ny_) *
-      static_cast<double>(nz_) * static_cast<double>(sizeof(std::int32_t));
+  // A grid that does not fit is one cell. An open axis can instead be
+  // binned on the atom span, which is what a cluster in a huge box needs.
+  // A periodic axis keeps the cell length. One cell remains when the
+  // tight grid does not fit either. A grid that fits is unchanged, so
+  // subtracting a zero origin leaves those bins as they were.
+  double origin[3] = {0.0, 0.0, 0.0};
+  double span[3] = {len_[0], len_[1], len_[2]};
+  auto set_axes = [&]() {
+    nx_ = axisCount(span[0], edge);
+    ny_ = axisCount(span[1], edge);
+    nz_ = axisCount(span[2], edge);
+  };
+  auto bytes_of = [&]() {
+    return static_cast<double>(nx_) * static_cast<double>(ny_) *
+           static_cast<double>(nz_) * static_cast<double>(sizeof(std::int32_t));
+  };
+  set_axes();
   const auto avail = availableBytes();
-  if (avail > 0 && bytes > static_cast<double>(avail)) {
-    nx_ = ny_ = nz_ = 1;
+  if (avail > 0 && bytes_of() > static_cast<double>(avail)) {
+    bool any_open = false;
+    for (int k = 0; k < 3; ++k) {
+      if (periodic_[k] || n == 0) {
+        continue;
+      }
+      any_open = true;
+      double lo = xyz[static_cast<std::size_t>(k)];
+      double hi = lo;
+      for (std::size_t a = 1; a < n; ++a) {
+        const double v = xyz[3 * a + static_cast<std::size_t>(k)];
+        if (v < lo) {
+          lo = v;
+        }
+        if (v > hi) {
+          hi = v;
+        }
+      }
+      const double extent = hi - lo;
+      span[k] = extent > edge ? extent : edge;
+      origin[k] = lo;
+    }
+    if (any_open) {
+      set_axes();
+    }
+    if (bytes_of() > static_cast<double>(avail)) {
+      nx_ = ny_ = nz_ = 1;
+    }
   }
-  const auto ncells = static_cast<std::size_t>(nx_) * static_cast<std::size_t>(ny_) *
+  const auto ncells = static_cast<std::size_t>(nx_) *
+                      static_cast<std::size_t>(ny_) *
                       static_cast<std::size_t>(nz_);
   cell_start_.assign(ncells + 1, 0);
   cell_of_.resize(n);
+  auto bin = [](double x, double length, int naxis) {
+    if (!(length > 0.0) || naxis <= 1) {
+      return 0;
+    }
+    double t = x / length * static_cast<double>(naxis);
+    if (!(t >= 0.0)) {
+      t = 0.0;
+    }
+    auto i = static_cast<int>(t);
+    if (i >= naxis) {
+      i = naxis - 1;
+    }
+    if (i < 0) {
+      i = 0;
+    }
+    return i;
+  };
   for (std::size_t a = 0; a < n; ++a) {
-    int ix = 0;
-    int iy = 0;
-    int iz = 0;
-    auto bin = [](double x, double length, int naxis) {
-      if (!(length > 0.0) || naxis <= 1) {
-        return 0;
-      }
-      double t = x / length * static_cast<double>(naxis);
-      if (!(t >= 0.0)) {
-        t = 0.0;
-      }
-      auto i = static_cast<int>(t);
-      if (i >= naxis) {
-        i = naxis - 1;
-      }
-      if (i < 0) {
-        i = 0;
-      }
-      return i;
-    };
-    ix = bin(xyz[3 * a], len_[0], nx_);
-    iy = bin(xyz[3 * a + 1], len_[1], ny_);
-    iz = bin(xyz[3 * a + 2], len_[2], nz_);
+    const int ix = bin(xyz[3 * a] - origin[0], span[0], nx_);
+    const int iy = bin(xyz[3 * a + 1] - origin[1], span[1], ny_);
+    const int iz = bin(xyz[3 * a + 2] - origin[2], span[2], nz_);
     const int id = (ix * ny_ + iy) * nz_ + iz;
     cell_of_[a] = id;
     ++cell_start_[static_cast<std::size_t>(id) + 1];
@@ -165,11 +200,15 @@ void Neighbours::buildCells(const double *xyz, std::size_t n) {
   std::vector<std::int32_t> fill(cell_start_.begin(), cell_start_.end() - 1);
   for (std::size_t a = 0; a < n; ++a) {
     const auto c = static_cast<std::size_t>(cell_of_[a]);
-    cell_atoms_[static_cast<std::size_t>(fill[c]++)] = static_cast<std::int32_t>(a);
+    cell_atoms_[static_cast<std::size_t>(fill[c]++)] =
+        static_cast<std::int32_t>(a);
   }
 }
 
 std::uint64_t Neighbours::candidateBound() const {
+  // Integer adds over the stencil. A dilute system above kTeamMinAtoms
+  // has almost none, and a region would cost more than the count, so
+  // this stays on the calling thread. The gather below is the build.
   std::uint64_t bound = 0;
   const auto n = n_;
   for (std::size_t a = 0; a < n; ++a) {
@@ -199,7 +238,8 @@ std::uint64_t Neighbours::candidateBound() const {
           }
           seen[nseen++] = id;
           const auto c = static_cast<std::size_t>(id);
-          here += static_cast<std::uint64_t>(cell_start_[c + 1] - cell_start_[c]);
+          here +=
+              static_cast<std::uint64_t>(cell_start_[c + 1] - cell_start_[c]);
         }
       }
     }
@@ -210,22 +250,18 @@ std::uint64_t Neighbours::candidateBound() const {
   return bound;
 }
 
-
-void Neighbours::buildStored(const double *xyz, std::size_t n) {
+void Neighbours::buildStored(const double *xyz, std::size_t n,
+                             std::uint64_t bound) {
   (void)xyz;
-  off_.assign(n + 1, 0);
-  nbr_.clear();
-  std::vector<std::int32_t> gather;
   const double search2 = search_ * search_;
-  for (std::size_t a = 0; a < n; ++a) {
-    off_[a] = static_cast<std::int32_t>(nbr_.size());
+  // Partners of one atom, unsorted. The caller sorts and appends them.
+  auto gather = [&](std::size_t a, std::vector<std::int32_t> &out) {
     const int cell = cell_of_[a];
     int iz = cell % nz_;
     int iy = (cell / nz_) % ny_;
     int ix = cell / (nz_ * ny_);
     int seen[27];
     int nseen = 0;
-    gather.clear();
     for (int ox = -1; ox <= 1; ++ox) {
       for (int oy = -1; oy <= 1; ++oy) {
         for (int oz = -1; oz <= 1; ++oz) {
@@ -259,14 +295,75 @@ void Neighbours::buildStored(const double *xyz, std::size_t n) {
             }
             const double r2 = dx * dx + dy * dy + dz * dz;
             if (r2 <= search2) {
-              gather.push_back(j);
+              out.push_back(j);
             }
           }
         }
       }
     }
-    std::sort(gather.begin(), gather.end());
-    nbr_.insert(nbr_.end(), gather.begin(), gather.end());
+  };
+  // A region costs more than a short gather. The pair kernels use 4096
+  // before they thread a half list. A dilute system can still report
+  // about one stencil candidate per atom, which is the same cheap pass,
+  // so the gather also stays serial unless the stencil holds more
+  // candidates than atoms.
+  constexpr std::uint64_t kMinParallelCandidates = 4096;
+  const bool worth = bound >= kMinParallelCandidates && bound > n;
+  const int nt = worth ? teamSize(n) : 1;
+  if (nt <= 1) {
+    off_.assign(n + 1, 0);
+    nbr_.clear();
+    std::vector<std::int32_t> row;
+    for (std::size_t a = 0; a < n; ++a) {
+      off_[a] = static_cast<std::int32_t>(nbr_.size());
+      row.clear();
+      gather(a, row);
+      std::sort(row.begin(), row.end());
+      nbr_.insert(nbr_.end(), row.begin(), row.end());
+    }
+    off_[n] = static_cast<std::int32_t>(nbr_.size());
+    return;
+  }
+  // One buffer per slice, reserved once, written only by the slice that
+  // owns it. Joining in slice order is the atom order of one thread.
+  struct Part {
+    std::vector<std::int32_t> nbr;
+    std::vector<std::int32_t> count;
+  };
+  std::vector<Part> parts(static_cast<std::size_t>(nt));
+  forEachSlice(nt, [&](int t) {
+    const auto range = partition(static_cast<std::int64_t>(n), t, nt);
+    auto &part = parts[static_cast<std::size_t>(t)];
+    const auto len = static_cast<std::size_t>(range.end - range.begin);
+    part.count.assign(len, 0);
+    part.nbr.reserve(len * 64);
+    std::vector<std::int32_t> row;
+    row.reserve(64);
+    std::size_t k = 0;
+    for (std::int64_t i = range.begin; i < range.end; ++i, ++k) {
+      row.clear();
+      gather(static_cast<std::size_t>(i), row);
+      std::sort(row.begin(), row.end());
+      part.count[k] = static_cast<std::int32_t>(row.size());
+      part.nbr.insert(part.nbr.end(), row.begin(), row.end());
+    }
+  });
+  std::size_t total = 0;
+  for (const Part &part : parts) {
+    total += part.nbr.size();
+  }
+  nbr_.clear();
+  nbr_.reserve(total);
+  off_.assign(n + 1, 0);
+  std::size_t cursor = 0;
+  std::size_t atom = 0;
+  for (const Part &part : parts) {
+    nbr_.insert(nbr_.end(), part.nbr.begin(), part.nbr.end());
+    for (const std::int32_t c : part.count) {
+      off_[atom] = static_cast<std::int32_t>(cursor);
+      cursor += static_cast<std::size_t>(c);
+      ++atom;
+    }
   }
   off_[n] = static_cast<std::int32_t>(nbr_.size());
 }
@@ -351,10 +448,10 @@ void Neighbours::update(const double *xyz, std::size_t n, const double *box9,
   // The stream keeps the bins. The list adds one index per candidate.
   // Auto stores only when that index fits. A short cutoff that does not
   // fit the 27-slot stencil keeps the smaller mask in the same cache.
-  const bool want_store = spec.mode == Mode::Stored ? fits
-                          : spec.mode == Mode::Auto && fits;
+  const bool want_store =
+      spec.mode == Mode::Stored ? fits : spec.mode == Mode::Auto && fits;
   if (want_store) {
-    buildStored(xyz, n);
+    buildStored(xyz, n, bound);
     streaming_ = false;
     mode_ = Mode::Stored;
     ++builds_;
