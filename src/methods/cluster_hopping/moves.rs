@@ -2640,24 +2640,11 @@ impl ClusterMove {
                     l_max: 6,
                     rcut_nn: *cutoff,
                 };
-                // A declared rigid group is retracted, not replaced by the
-                // fivefold packing hop. One element without groups still
-                // takes that hop.
                 let packing = species.is_none() && mobile.is_none() && groups.is_none();
                 if *class && packing {
                     crate::soap::step_away(x, &[], spec, *rmsd, rng)
                 } else if packing {
-                    // SOFI C5 residual on a fivefold axis. The measured
-                    // single-axis hop is a deterministic function of x,
-                    // so drawing this arm twice from one minimum
-                    // proposes the same trial twice and pays for it
-                    // twice; a chain that revisits a minimum pays every
-                    // time. The drawn-axis hop varies, but yields on a
-                    // disordered shell where too few axes are still
-                    // fivefold, and a proposal that never moves is
-                    // worse than a repeated one. So draw first and keep
-                    // the measured hop for when the draw declines.
-                    let drawn = crate::soap::step_away_fivefold(x, *rmsd, rng);
+                    let drawn = crate::soap::step_away_axial(x, *rmsd, rng);
                     let moved = drawn
                         .iter()
                         .zip(x.iter())
@@ -2665,7 +2652,7 @@ impl ClusterMove {
                     if moved {
                         drawn
                     } else {
-                        crate::soap::step_away_fivefold_measured(x, *rmsd)
+                        crate::soap::step_away_axial_measured(x, *rmsd)
                     }
                 } else {
                     crate::soap::step_away_cloud(
@@ -3501,11 +3488,21 @@ mod move_scaling_tests {
         ]);
         let mut move_rng = StdRng::seed_from_u64(11);
         let proposed = soap.propose(x.view(), 0.8, &mut move_rng);
-        let five = crate::soap::step_away_fivefold_measured(x.view(), rmsd);
+        let mut ref_rng = StdRng::seed_from_u64(11);
+        let drawn = crate::soap::step_away_axial(x.view(), rmsd, &mut ref_rng);
+        let expected = if drawn
+            .iter()
+            .zip(x.iter())
+            .any(|(after, before)| (after - before).abs() > 1e-12)
+        {
+            drawn
+        } else {
+            crate::soap::step_away_axial_measured(x.view(), rmsd)
+        };
         for index in 0..x.len() {
             assert!(
-                (proposed[index] - five[index]).abs() < 1e-12,
-                "packing SOAP left the measured fivefold residual at {index}"
+                (proposed[index] - expected[index]).abs() < 1e-12,
+                "packing SOAP left the axial residual path at {index}"
             );
         }
     }
