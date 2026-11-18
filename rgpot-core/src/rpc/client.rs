@@ -279,3 +279,165 @@ unsafe fn extract_cpu_input(input: &rgpot_force_input_t, n: usize) -> Result<Cpu
 
     Ok((positions, atmnrs, box_data))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tensor::{
+        rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
+        rgpot_tensor_free,
+    };
+    use dlpk::sys::DLManagedTensorVersioned;
+
+    struct TestInput {
+        input: rgpot_force_input_t,
+        pos_t: *mut DLManagedTensorVersioned,
+        atm_t: *mut DLManagedTensorVersioned,
+        box_t: *mut DLManagedTensorVersioned,
+        _pos: Vec<f64>,
+        _atm: Vec<i32>,
+        _cell: Vec<f64>,
+    }
+
+    impl Drop for TestInput {
+        fn drop(&mut self) {
+            unsafe {
+                (*self.pos_t).dl_tensor.device.device_type = DLDeviceType::kDLCPU;
+                (*self.atm_t).dl_tensor.device.device_type = DLDeviceType::kDLCPU;
+                (*self.box_t).dl_tensor.device.device_type = DLDeviceType::kDLCPU;
+                rgpot_tensor_free(self.pos_t);
+                rgpot_tensor_free(self.atm_t);
+                rgpot_tensor_free(self.box_t);
+            }
+        }
+    }
+
+    fn make_input(n: usize) -> TestInput {
+        let mut pos: Vec<f64> = (0..n * 3).map(|i| i as f64 * 0.5).collect();
+        let mut atm: Vec<i32> = (0..n).map(|i| i as i32 + 1).collect();
+        let mut cell = vec![10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
+        let pos_t = unsafe { rgpot_tensor_cpu_f64_2d(pos.as_mut_ptr(), n as i64, 3) };
+        let atm_t = unsafe { rgpot_tensor_cpu_i32_1d(atm.as_mut_ptr(), n as i64) };
+        let box_t = unsafe { rgpot_tensor_cpu_f64_matrix3(cell.as_mut_ptr()) };
+        let input = rgpot_force_input_t {
+            positions: pos_t,
+            atomic_numbers: atm_t,
+            box_matrix: box_t,
+        };
+        TestInput {
+            input,
+            pos_t,
+            atm_t,
+            box_t,
+            _pos: pos,
+            _atm: atm,
+            _cell: cell,
+        }
+    }
+
+    #[test]
+    fn extract_cpu_input_rejects_null_positions() {
+        let input = rgpot_force_input_t {
+            positions: std::ptr::null_mut(),
+            atomic_numbers: std::ptr::null_mut(),
+            box_matrix: std::ptr::null_mut(),
+        };
+        let err = unsafe { extract_cpu_input(&input, 1) }.unwrap_err();
+        assert_eq!(err, "positions tensor is NULL");
+    }
+
+    #[test]
+    fn extract_cpu_input_rejects_null_atomic_numbers() {
+        let guard = make_input(1);
+        let input = rgpot_force_input_t {
+            positions: guard.input.positions,
+            atomic_numbers: std::ptr::null_mut(),
+            box_matrix: std::ptr::null_mut(),
+        };
+        let err = unsafe { extract_cpu_input(&input, 1) }.unwrap_err();
+        assert_eq!(err, "atomic_numbers tensor is NULL");
+    }
+
+    #[test]
+    fn extract_cpu_input_rejects_null_box_matrix() {
+        let guard = make_input(1);
+        let input = rgpot_force_input_t {
+            positions: guard.input.positions,
+            atomic_numbers: guard.input.atomic_numbers,
+            box_matrix: std::ptr::null_mut(),
+        };
+        let err = unsafe { extract_cpu_input(&input, 1) }.unwrap_err();
+        assert_eq!(err, "box_matrix tensor is NULL");
+    }
+
+    #[test]
+    fn extract_cpu_input_rejects_non_cpu_positions() {
+        let guard = make_input(1);
+        unsafe {
+            (*guard.input.positions).dl_tensor.device.device_type = DLDeviceType::kDLCUDA;
+        }
+        let err = unsafe { extract_cpu_input(&guard.input, 1) }.unwrap_err();
+        assert_eq!(err, "RPC requires CPU tensors; positions is not on CPU");
+    }
+
+    #[test]
+    fn extract_cpu_input_rejects_non_cpu_atomic_numbers() {
+        let guard = make_input(1);
+        unsafe {
+            (*guard.input.atomic_numbers).dl_tensor.device.device_type = DLDeviceType::kDLCUDA;
+        }
+        let err = unsafe { extract_cpu_input(&guard.input, 1) }.unwrap_err();
+        assert_eq!(
+            err,
+            "RPC requires CPU tensors; atomic_numbers is not on CPU"
+        );
+    }
+
+    #[test]
+    fn extract_cpu_input_rejects_non_cpu_box_matrix() {
+        let guard = make_input(1);
+        unsafe {
+            (*guard.input.box_matrix).dl_tensor.device.device_type = DLDeviceType::kDLCUDA;
+        }
+        let err = unsafe { extract_cpu_input(&guard.input, 1) }.unwrap_err();
+        assert_eq!(err, "RPC requires CPU tensors; box_matrix is not on CPU");
+    }
+
+    #[test]
+    fn extract_cpu_input_succeeds_for_well_formed_tensors() {
+        let guard = make_input(2);
+        let (positions, atmnrs, box_data) = unsafe { extract_cpu_input(&guard.input, 2) }.unwrap();
+        assert_eq!(positions, &[0.0, 0.5, 1.0, 1.5, 2.0, 2.5]);
+        assert_eq!(atmnrs, &[1, 2]);
+        assert_eq!(box_data, &[10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0]);
+    }
+
+    #[test]
+    fn new_defers_port_zero_failure_to_calculate() {
+        // Construction never connects; port 0 fails only on `calculate`.
+        let client = RpcClient::new("127.0.0.1", 0);
+        assert!(client.is_ok());
+        let mut client = client.unwrap();
+        let guard = make_input(1);
+        let mut output = rgpot_force_out_t {
+            forces: std::ptr::null_mut(),
+            energy: 0.0,
+            variance: 0.0,
+        };
+        let err = client.calculate(&guard.input, &mut output).unwrap_err();
+        assert!(err.contains("connection failed"), "{err}");
+    }
+
+    #[test]
+    fn calculate_reports_connection_failure_for_an_unbound_port() {
+        let mut client = RpcClient::new("127.0.0.1", 1).unwrap();
+        let guard = make_input(1);
+        let mut output = rgpot_force_out_t {
+            forces: std::ptr::null_mut(),
+            energy: 0.0,
+            variance: 0.0,
+        };
+        let err = client.calculate(&guard.input, &mut output).unwrap_err();
+        assert!(err.contains("connection failed"), "{err}");
+    }
+}
