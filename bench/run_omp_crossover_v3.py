@@ -561,6 +561,19 @@ def benchmark(args: argparse.Namespace) -> None:
     affinity = {
         "physical_cpus": cpus[: max(THREADS)],
         "policy": "taskset plus OMP_PLACES and GOMP_CPU_AFFINITY; close binding",
+        "environment_by_threads": {
+            str(threads): {
+                key: worker_env(threads, cpus[:threads])[key]
+                for key in (
+                    "OMP_NUM_THREADS",
+                    "OMP_DYNAMIC",
+                    "OMP_PROC_BIND",
+                    "OMP_PLACES",
+                    "GOMP_CPU_AFFINITY",
+                )
+            }
+            for threads in THREADS
+        },
     }
     arm_metadata = []
     for arm in arms:
