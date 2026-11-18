@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import csv
 import importlib.util
 import subprocess
 from pathlib import Path
@@ -156,3 +157,43 @@ def test_an_anneal_row_with_another_budget_than_the_campaign_is_refused(monkeypa
     fake_binary_run(monkeypatch, "1000")
     with pytest.raises(SystemExit):
         CAMPAIGN.run_anneal(Path("cmcts_au"), "recommended", "au35", 2000)
+
+
+def test_every_arm_names_the_anneal_build_that_ran_it(tmp_path, monkeypatch):
+    head = "a" * 40
+    monkeypatch.setattr(CAMPAIGN, "anneal_revision", lambda: head)
+
+    def run_one(binary, system, seed, arm):
+        return {field: "1" for field in CAMPAIGN.ROW_FIELDS} | {
+            "system": system,
+            "arm": arm,
+            "seed": str(seed),
+        }
+
+    monkeypatch.setattr(CAMPAIGN, "run_one", run_one)
+    seeds = tmp_path / "seeds.csv"
+    for arm in ("recommended", "cmcts"):
+        CAMPAIGN.campaign(Path("cmcts_au"), seeds, ("au35", 2000, arm), {arm})
+    stored = {row["arm"]: row for row in CAMPAIGN.read_rows(seeds)}
+    assert stored["recommended"]["code_revision"] == head
+    assert stored["cmcts"]["code_revision"] == CAMPAIGN.PYPHYSTREE_COMMIT
+    for row in stored.values():
+        assert row["harness_revision"] == head
+        assert row["host"]
+
+
+def test_append_gives_an_older_file_the_new_column_and_keeps_every_row(tmp_path):
+    older = [field for field in CAMPAIGN.ROW_FIELDS if field != "harness_revision"]
+    path = tmp_path / "seeds.csv"
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=older, lineterminator="\n")
+        writer.writeheader()
+        for seed in ("2000", "2001"):
+            writer.writerow({field: "old" for field in older} | {"seed": seed})
+    fresh = {field: "new" for field in CAMPAIGN.ROW_FIELDS} | {"seed": "2002"}
+    CAMPAIGN.append_rows(path, [fresh])
+    stored = CAMPAIGN.read_rows(path)
+    assert [row["seed"] for row in stored] == ["2000", "2001", "2002"]
+    assert [row["harness_revision"] for row in stored] == ["", "", "new"]
+    assert all(None not in row for row in stored)
+    assert stored[0]["code_revision"] == "old"
