@@ -1113,3 +1113,17 @@ rule landfold_maps_current:
           --work /work/anneal-landfold-current \\
           --publish paper/jctc/data/landfold_maps_v7
         """
+
+
+# (H2O)6 at GFN2 plus the O-H wall. Anneal at the 4000-call ledger,
+# CREST 3.0.2 at -mquick -len 0.90 ps and at -len 0.11 ps, seeds 2000-2011.
+# Rows are appended under bench/crest-equal. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile crest_equal
+rule crest_equal:
+    output:
+        "bench/crest-equal/panel.stamp",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/crest_equal/enter_bench.sh
+        """

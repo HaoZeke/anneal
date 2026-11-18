@@ -1621,6 +1621,37 @@
           "seed": "seed"
         }
       ]
+    },
+    {
+      "rule": "crest_equal",
+      "competitors": [
+        "CREST"
+      ],
+      "runners": [
+        "scripts/crest_equal/run_panel.py",
+        "scripts/crest_equal/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/crest_equal/run_panel.py",
+        "name": "BUDGET",
+        "keys": [
+          "h2o6"
+        ]
+      },
+      "seeds": {
+        "source": "scripts/crest_equal/run_panel.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/crest-equal/benchmarks/crest_equal.py",
+      "rows": [
+        {
+          "path": "bench/crest-equal/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
     }
   ],
   "not_h2h": {
