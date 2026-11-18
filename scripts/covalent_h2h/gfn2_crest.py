@@ -312,10 +312,24 @@ def named_rows(path: Path | None) -> set[tuple[str, str, str, str]]:
 
 
 def wall_cap(
-    paths: list[Path], system: str, seeds: list[int], superseded: Path | None = None
+    paths: list[Path],
+    system: str,
+    seeds: list[int],
+    superseded: Path | None = None,
+    censoring: Path | None = None,
 ) -> float:
-    """``WALL_CAP[system]`` times the slowest CREST wall over ``seeds``."""
+    """Cap from completed CREST walls, with explicitly censored seeds absent."""
     left_out = named_rows(superseded)
+    censored = set()
+    if censoring is not None:
+        with open(censoring, newline="") as handle:
+            censored = {
+                int(row["seed"])
+                for row in csv.DictReader(handle)
+                if row["system"] == system
+                and row["code"] == "crest"
+                and row["outcome"] == "censored"
+            }
     walls = {}
     for path in paths:
         if path.is_file():
@@ -327,10 +341,13 @@ def wall_cap(
                         and row_key(row) not in left_out
                     ):
                         walls[int(row["seed"])] = float(row["wall_s"])
-    missing = sorted(set(seeds) - set(walls))
+    missing = sorted(set(seeds) - set(walls) - censored)
     if missing:
         raise SystemExit(f"{system} anneal is capped by CREST, which has no row on {missing}")
-    return WALL_CAP[system] * max(walls[seed] for seed in seeds)
+    completed = [walls[seed] for seed in seeds if seed in walls]
+    if not completed:
+        raise SystemExit(f"{system} anneal has no completed CREST wall")
+    return WALL_CAP[system] * max(completed)
 
 
 def first_frame_energy(path: Path) -> float:
@@ -642,6 +659,7 @@ def main() -> None:
                         system,
                         sorted(crest_seeds | set(seeds)),
                         args.superseded,
+                        args.censoring,
                     )
                 row = run_anneal(args.anneal, system, seed, where, cap)
             if system in WALL_CAP:
@@ -908,6 +926,29 @@ def self_test() -> None:
             pass
         else:
             raise SystemExit("wall cap without every CREST seed")
+        censoring = Path(scratch) / "censoring.csv"
+        append_rows(
+            censoring,
+            CENSOR_FIELDS,
+            [
+                {
+                    key: (
+                        "si20"
+                        if key == "system"
+                        else "crest"
+                        if key == "code"
+                        else "2003"
+                        if key == "seed"
+                        else "censored"
+                        if key == "outcome"
+                        else "1"
+                    )
+                    for key in CENSOR_FIELDS
+                }
+            ],
+        )
+        if wall_cap([capped], "si20", [2000, 2003], censoring=censoring) != 31.5:
+            raise SystemExit("wall cap with a censored CREST seed")
         panel = Path(scratch) / "panel.csv"
         for seed in (2003, 2004):
             append_rows(
