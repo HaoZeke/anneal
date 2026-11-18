@@ -1090,3 +1090,27 @@ rule agox_gofee_lj_large:
         bash scripts/ase_gofee_h2h/enter_bench.sh --comparison agox_gofee --no-paper \\
           --systems lj98,lj102,lj103,lj104,lj150
         """
+
+
+# A/B gate on the binary Lennard-Jones patches. Arm A is develop bc16d35c
+# and arm B is that commit with the three patches, built in separate
+# worktrees with one toolchain. Both arms run the binary Lennard-Jones
+# panel, LJ38 to LJ104, Morse M38 and M80 at rho 6 and 14, and the
+# Sutton-Chen n12 panel, seeds 2000-2011, the paper budgets, the recommended
+# preset, one fresh process at a time on core 0, sudo unshare --uts with
+# hostname bench. The arms alternate within each seed and the order flips
+# with the seed. Rows are appended to bench/blj-panel/rows.csv with
+# code_revision and host; that file is not declared as an output because
+# Snakemake removes declared outputs before a job runs. The summary, the
+# pairs and the README tables are rewritten from the rows. Not part of
+# `rule all`; PANEL_B_REV names arm B:
+#   PANEL_B_REV=<commit> snakemake -s workflow/Snakefile blj_panel
+rule blj_panel:
+    output:
+        "bench/blj-panel/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash bench/blj-panel/enter_bench.sh
+        bash bench/blj-panel/enter_bench.sh --summarize
+        """

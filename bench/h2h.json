@@ -432,6 +432,37 @@
       ]
     },
     {
+      "rule": "blj_panel",
+      "competitors": [
+        "develop bc16d35c"
+      ],
+      "runners": [
+        "bench/blj-panel/run_panel.py",
+        "bench/blj-panel/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "bench/blj-panel/run_panel.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "bench/blj-panel/run_panel.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/blj-panel/benchmarks/blj_panel.py",
+      "rows": [
+        {
+          "path": "bench/blj-panel/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ],
+      "missing_outputs": {
+        "bench/blj-panel/summary.csv": "written from rows.csv when the gate has run every seed"
+      }
+    },
+    {
       "rule": "pimc_lj38",
       "competitors": [
         "RPQA"
