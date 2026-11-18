@@ -268,6 +268,8 @@ FusedSettingsSpec XTBDlopen::fusedSettings() const {
   spec.charge = m_config.charge;
   spec.accuracy = m_config.accuracy;
   spec.electronicTemperature = m_config.electronic_temperature;
+  spec.warmMove = warmMove();
+  spec.warmMinGap = warmMinGap();
   spec.sccMixer = "xtb";
   spec.engineBuild = "xtb-engine-abi-" + std::to_string(RGPOT_XTB_ABI_VERSION) +
                      "-method-" + std::to_string(method_to_c(m_config.method));

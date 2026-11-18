@@ -55,6 +55,8 @@ struct FusedFingerprint {
   int spin = 0;
   std::uint64_t accuracy = 0;
   std::uint64_t electronicTemperature = 0;
+  std::uint64_t warmMove = 0;
+  std::uint64_t warmMinGap = 0;
   unsigned sccMaxIterations = 0;
   std::string sccMixer;
   std::string engineBuild;
@@ -106,6 +108,8 @@ public:
     f.accuracy = std::bit_cast<std::uint64_t>(settings.accuracy);
     f.electronicTemperature =
         std::bit_cast<std::uint64_t>(settings.electronicTemperature);
+  f.warmMove = std::bit_cast<std::uint64_t>(settings.warmMove);
+  f.warmMinGap = std::bit_cast<std::uint64_t>(settings.warmMinGap);
     f.sccMaxIterations = settings.sccMaxIterations;
     f.sccMixer = settings.sccMixer;
     f.engineBuild = settings.engineBuild;

@@ -279,6 +279,8 @@ FusedSettingsSpec XTBPot::fusedSettings() const {
   spec.charge = m_config.charge;
   spec.accuracy = m_config.accuracy;
   spec.electronicTemperature = m_config.electronic_temperature;
+  spec.warmMove = m_warm_move;
+  spec.warmMinGap = m_warm_min_gap;
   spec.sccMixer = "xtb";
   spec.engineBuild = "libxtb-api-" + std::to_string(xtb_getAPIVersion()) +
                      "-method-" + std::to_string(static_cast<int>(m_config.method));
