@@ -1294,26 +1294,28 @@ mod water_hexamer_tests {
     use crate::methods::cluster_search::search_from_with_checkpoint;
     use crate::potentials::{PairKind, PairPotential};
 
-    const WATER_HEXAMER_MOLECULES: usize = 6;
+    fn hexamer_units() -> usize {
+        6
+    }
 
     #[test]
     fn the_template_hexamer_is_intact_and_a_loose_hydrogen_is_not() {
-        let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
-        assert!(monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES).unwrap());
+        let coordinates = reference_coordinates(hexamer_units()).unwrap();
+        assert!(monomers_intact(&coordinates, hexamer_units()).unwrap());
         let mut broken = coordinates.clone();
         broken[3] += 5.0;
-        assert!(!monomers_intact(&broken, WATER_HEXAMER_MOLECULES).unwrap());
+        assert!(!monomers_intact(&broken, hexamer_units()).unwrap());
         let mut crowded = coordinates.clone();
         crowded[12] = 0.2;
         crowded[13] = 0.2;
         crowded[14] = 0.0;
-        assert!(!monomers_intact(&crowded, WATER_HEXAMER_MOLECULES).unwrap());
+        assert!(!monomers_intact(&crowded, hexamer_units()).unwrap());
     }
 
     #[test]
     fn oxygen_distances_are_sorted_and_the_stop_follows_the_production_rule() {
-        let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
-        let distances = sorted_oxygen_distances(&coordinates, WATER_HEXAMER_MOLECULES).unwrap();
+        let coordinates = reference_coordinates(hexamer_units()).unwrap();
+        let distances = sorted_oxygen_distances(&coordinates, hexamer_units()).unwrap();
         assert_eq!(distances.len(), 15);
         assert!(distances.windows(2).all(|pair| pair[0] <= pair[1]));
         let mut census = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
@@ -1422,8 +1424,8 @@ mod water_hexamer_tests {
 
     #[test]
     fn water_arms_keep_the_molecular_library() {
-        let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
-        let groups = water_groups(WATER_HEXAMER_MOLECULES).unwrap();
+        let species = water_species(hexamer_units()).unwrap();
+        let groups = water_groups(hexamer_units()).unwrap();
         let recommended = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
         let library = recommended.move_library.clone();
         for arm in [
@@ -1455,7 +1457,7 @@ mod water_hexamer_tests {
                     reactive,
                     reverse_cycles,
                 } => {
-                    assert_eq!(groups.len(), WATER_HEXAMER_MOLECULES);
+                    assert_eq!(groups.len(), hexamer_units());
                     assert!(!reactive);
                     assert!(reverse_cycles, "water should have reverse_cycles enabled");
                 }

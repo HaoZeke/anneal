@@ -63,7 +63,9 @@ use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use eindir_core::{Bounds, Objective};
 use libloading::{Library, Symbol};
 
-const WATER_HEXAMER_MOLECULES: usize = 6;
+fn target_water_units() -> usize {
+    6
+}
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -342,11 +344,11 @@ fn monomer_centred(coordinates: &[f64], molecule: usize) -> [[f64; 3]; 3] {
 }
 
 fn water_template_matches(parsed: &[f64], builtin: &[f64]) -> bool {
-    if parsed.len() != builtin.len() || builtin.len() != 9 * WATER_HEXAMER_MOLECULES {
+    if parsed.len() != builtin.len() || builtin.len() != 9 * target_water_units() {
         return false;
     }
     let reference = monomer_centred(builtin, 0);
-    for molecule in 0..WATER_HEXAMER_MOLECULES {
+    for molecule in 0..target_water_units() {
         let found = monomer_centred(parsed, molecule);
         for atom in 0..3 {
             for axis in 0..3 {
@@ -373,7 +375,7 @@ fn prepared_water_start(
     };
     let mut rng = StdRng::seed_from_u64(seed);
     let packed = repack_rigid_groups(ArrayView1::from(template), groups, length_scale, &mut rng);
-    separate_overlapped_start(packed, WATER_HEXAMER_MOLECULES)
+    separate_overlapped_start(packed, target_water_units())
 }
 
 /// Push overlapped molecules apart without drawing more random numbers.
@@ -447,12 +449,12 @@ fn separate_overlapped_start(mut start: Array1<f64>, n_molecules: usize) -> (Arr
 }
 
 fn covalent_oh_span(coordinates: &[f64]) -> (f64, f64) {
-    if coordinates.len() != 9 * WATER_HEXAMER_MOLECULES {
+    if coordinates.len() != 9 * target_water_units() {
         return (f64::NAN, f64::NAN);
     }
     let mut min = f64::INFINITY;
     let mut max = 0.0_f64;
-    for molecule in 0..WATER_HEXAMER_MOLECULES {
+    for molecule in 0..target_water_units() {
         let oxygen = 9 * molecule;
         for hydrogen in [oxygen + 3, oxygen + 6] {
             let mut square = 0.0;
@@ -474,10 +476,10 @@ fn oh_wall(coordinates: &[f64]) -> (f64, Vec<f64>) {
     // The gradient stays unallocated while every OH bond is inside the
     // onset. The caller adds it only when the energy is nonzero.
     let mut gradient = Vec::new();
-    if coordinates.len() != 9 * WATER_HEXAMER_MOLECULES {
+    if coordinates.len() != 9 * target_water_units() {
         return (0.0, gradient);
     }
-    for molecule in 0..WATER_HEXAMER_MOLECULES {
+    for molecule in 0..target_water_units() {
         let oxygen = 9 * molecule;
         for hydrogen in [oxygen + 3, oxygen + 6] {
             let mut square = 0.0;
@@ -509,14 +511,14 @@ fn write_geometry(seed: u64, coordinates: &[f64], energy: f64) {
     let Ok(dir) = std::env::var("WATER_GEOM_DIR") else {
         return;
     };
-    if coordinates.len() != 9 * WATER_HEXAMER_MOLECULES {
+    if coordinates.len() != 9 * target_water_units() {
         return;
     }
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
     let mut text = format!("18\nseed {seed} energy {energy:.10}\n");
-    for molecule in 0..WATER_HEXAMER_MOLECULES {
+    for molecule in 0..target_water_units() {
         for (offset, symbol) in [(0, "O"), (3, "H"), (6, "H")] {
             let base = 9 * molecule + offset;
             text.push_str(&format!(
@@ -539,10 +541,10 @@ fn incumbent_inside(
     let Some(state) = state else {
         return false;
     };
-    if monomers_intact(state, WATER_HEXAMER_MOLECULES) != Ok(true) {
+    if monomers_intact(state, target_water_units()) != Ok(true) {
         return false;
     }
-    assign_isomer(state, WATER_HEXAMER_MOLECULES, references, gate)
+    assign_isomer(state, target_water_units(), references, gate)
         .ok()
         .is_some_and(|matched| matched.name.is_some())
 }
@@ -588,9 +590,9 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         seed0 + seeds - 1
     ));
     text.push_str(&engine_settings(engine));
-    let n_atoms = 3 * WATER_HEXAMER_MOLECULES;
-    let species = water_species(WATER_HEXAMER_MOLECULES).expect("hexamer species");
-    let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("hexamer groups");
+    let n_atoms = 3 * target_water_units();
+    let species = water_species(target_water_units()).expect("hexamer species");
+    let groups = water_groups(target_water_units()).expect("hexamer groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     configure_water_arm(&mut cfg, arm);
     if witness_ceiling {
@@ -613,7 +615,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         .iter()
         .map(|(name, coordinates)| (name.as_str(), coordinates.as_slice()))
         .collect();
-    let gate_result = isomer_reference_gate(&reference_views, WATER_HEXAMER_MOLECULES);
+    let gate_result = isomer_reference_gate(&reference_views, target_water_units());
     let (gate, gate_text, gate_reason) = match &gate_result {
         Ok(Some(value)) => (
             Some(*value),
@@ -658,7 +660,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         "phase_reference_eval_seconds: {reference_eval_s:.6}\n"
     ));
     text.push_str(&reference_report);
-    let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
+    let template = reference_coordinates(target_water_units()).expect("template");
     let forced_start = match std::env::var("WATER_START_XYZ") {
         Ok(path) => match read_start_xyz(&path) {
             Some(coordinates) => {
@@ -686,7 +688,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             seed,
         );
         let start_slice = start.as_slice().unwrap_or(&[]);
-        let start_intact = monomers_intact(start_slice, WATER_HEXAMER_MOLECULES).unwrap_or(false);
+        let start_intact = monomers_intact(start_slice, target_water_units()).unwrap_or(false);
         let (start_oh_min, start_oh_max) = covalent_oh_span(start_slice);
         if seed == seed0 {
             let started = Instant::now();
@@ -736,14 +738,14 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                     wall: &wall,
                 },
             ) {
-                Ok((outcome, stats, trace, retired, marks)) => {
+                Ok((outcome, stats, trace, retired, stamps)) => {
                     text.push_str(&trace);
                     text.push_str(&format!("good_turing_saturated: {retired}\n"));
-                    first_hit_calls = marks.first_hit_calls;
-                    first_hit_wall = marks.first_hit_wall;
-                    first_hit_isomer = marks.first_hit_isomer;
-                    first_prism_calls = marks.first_prism_calls;
-                    first_prism_wall = marks.first_prism_wall;
+                    first_hit_calls = stamps.first_hit_calls;
+                    first_hit_wall = stamps.first_hit_wall;
+                    first_hit_isomer = stamps.first_hit_isomer;
+                    first_prism_calls = stamps.first_prism_calls;
+                    first_prism_wall = stamps.first_prism_wall;
                     (outcome, stats)
                 }
                 Err(error) => {
@@ -753,7 +755,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             }
         } else if arm == WaterSearchArm::GoodTuring {
             let mut census = BasinCensus::new(
-                sorted_oxygen_distances(&template, WATER_HEXAMER_MOLECULES)
+                sorted_oxygen_distances(&template, target_water_units())
                     .expect("descriptor")
                     .len(),
                 OXYGEN_DISTANCE_CENSUS_RADIUS_A,
@@ -784,14 +786,12 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                         let Some(state) = state.as_slice() else {
                             continue;
                         };
-                        let Ok(descriptor) =
-                            sorted_oxygen_distances(state, WATER_HEXAMER_MOLECULES)
+                        let Ok(descriptor) = sorted_oxygen_distances(state, target_water_units())
                         else {
                             continue;
                         };
                         let matched =
-                            assign_isomer(state, WATER_HEXAMER_MOLECULES, &reference_views, gate)
-                                .ok();
+                            assign_isomer(state, target_water_units(), &reference_views, gate).ok();
                         let witness_name = matched.as_ref().and_then(|item| item.name.clone());
                         // Off-target quenches are not visits of the target census.
                         // A radius ball cannot merge them with the isomer, and
@@ -953,7 +953,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             .as_ref()
             .and_then(|state| state.as_slice());
         let intact = best_slice
-            .and_then(|state| monomers_intact(state, WATER_HEXAMER_MOLECULES).ok())
+            .and_then(|state| monomers_intact(state, target_water_units()).ok())
             .unwrap_or(false);
         let (best_oh_min, best_oh_max) = covalent_oh_span(best_slice.unwrap_or(&[]));
         write_geometry(seed, best_slice.unwrap_or(&[]), best);
@@ -976,7 +976,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                     .as_ref()
                     .and_then(|state| state.as_slice())
                     .unwrap_or(&[]),
-                WATER_HEXAMER_MOLECULES,
+                target_water_units(),
                 &reference_views,
                 gate,
             ) {
@@ -1049,7 +1049,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             .filter(|(name, _)| *name == "prism")
             .collect();
         let prism_rmsd = best_slice.and_then(|state| {
-            assign_isomer(state, WATER_HEXAMER_MOLECULES, &prism_views, None)
+            assign_isomer(state, target_water_units(), &prism_views, None)
                 .ok()
                 .and_then(|matched| matched.rmsd)
         });
@@ -1122,7 +1122,7 @@ fn assign_references(
 ) -> String {
     let mut text = String::new();
     for (name, coordinates) in references {
-        match assign_isomer(coordinates, WATER_HEXAMER_MOLECULES, views, gate) {
+        match assign_isomer(coordinates, target_water_units(), views, gate) {
             Ok(matched) => {
                 let assigned = matched.name.unwrap_or_else(|| "unassigned".to_owned());
                 let rmsd = matched
@@ -1172,7 +1172,7 @@ fn load_deposited(engine: &str, n_atoms: usize) -> Result<ForceObjective, String
         "petmad" => "pet-mad",
         other => return Err(format!("no deposited calculator for {other}")),
     };
-    let symbols = (0..WATER_HEXAMER_MOLECULES)
+    let symbols = (0..target_water_units())
         .flat_map(|_| ["O", "H", "H"])
         .map(str::to_owned)
         .collect();
@@ -1191,9 +1191,7 @@ fn load_engine(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
     if std::env::var_os("ASE_PYTHON").is_some() {
         return load_deposited(engine, n_atoms);
     }
-    let atomic_numbers: Vec<i32> = (0..WATER_HEXAMER_MOLECULES)
-        .flat_map(|_| [8, 1, 1])
-        .collect();
+    let atomic_numbers: Vec<i32> = (0..target_water_units()).flat_map(|_| [8, 1, 1]).collect();
     match engine {
         "gfn2" => load_gfn2(&atomic_numbers, n_atoms),
         "pbe" => load_pbe(atomic_numbers, n_atoms),
@@ -1381,7 +1379,7 @@ fn classify_gofee(references: &[(&str, &[f64])], gate: Option<f64>) -> String {
     let mut unassigned = 0usize;
     let mut lines = String::from("gofee: classified\n");
     for (path, coordinates) in &rows {
-        match classify_geometry(coordinates, WATER_HEXAMER_MOLECULES, references, gate) {
+        match classify_geometry(coordinates, target_water_units(), references, gate) {
             Ok(found) => {
                 if found.name.is_some() {
                     assigned += 1;
@@ -1428,7 +1426,7 @@ fn load_references() -> Vec<(String, Vec<f64>)> {
             continue;
         };
         if let Some(coordinates) = parse_xyz(&text) {
-            if monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES).unwrap_or(false) {
+            if monomers_intact(&coordinates, target_water_units()).unwrap_or(false) {
                 found.push((name.to_owned(), coordinates));
             } else {
                 eprintln!("isomer reference {name} failed the monomer check");
@@ -1441,7 +1439,7 @@ fn load_references() -> Vec<(String, Vec<f64>)> {
 fn parse_xyz(text: &str) -> Option<Vec<f64>> {
     let mut lines = text.lines();
     let count: usize = lines.next()?.trim().parse().ok()?;
-    if count != 3 * WATER_HEXAMER_MOLECULES {
+    if count != 3 * target_water_units() {
         return None;
     }
     let _comment = lines.next()?;
@@ -1456,7 +1454,7 @@ fn parse_xyz(text: &str) -> Option<Vec<f64>> {
             coordinates.push(fields.next()?.parse().ok()?);
         }
     }
-    (coordinates.len() == 9 * WATER_HEXAMER_MOLECULES).then_some(coordinates)
+    (coordinates.len() == 9 * target_water_units()).then_some(coordinates)
 }
 
 /// Deposited isomers and the IRA gate a geometry is matched against.
@@ -1475,7 +1473,7 @@ struct WitnessRule<'a> {
     wall: &'a Instant,
 }
 
-struct HitMarks {
+struct HitStamps {
     first_hit_calls: Option<usize>,
     first_hit_wall: Option<f64>,
     first_hit_isomer: Option<String>,
@@ -1490,7 +1488,7 @@ fn witnessed_good_turing<O>(
     start: ArrayView1<f64>,
     seed: u64,
     rule: WitnessRule<'_>,
-) -> Result<(Outcome, RelaxStats, String, bool, HitMarks), SearchError>
+) -> Result<(Outcome, RelaxStats, String, bool, HitStamps), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -1505,7 +1503,7 @@ where
         wall,
     } = rule;
     let mut census = BasinCensus::new(
-        sorted_oxygen_distances(template, WATER_HEXAMER_MOLECULES)
+        sorted_oxygen_distances(template, target_water_units())
             .expect("descriptor")
             .len(),
         OXYGEN_DISTANCE_CENSUS_RADIUS_A,
@@ -1513,7 +1511,7 @@ where
     .expect("census");
     let mut retired = false;
     let mut trace = String::new();
-    let mut marks = HitMarks {
+    let mut stamps = HitStamps {
         first_hit_calls: None,
         first_hit_wall: None,
         first_hit_isomer: None,
@@ -1536,10 +1534,10 @@ where
             let Some(state) = state.as_slice() else {
                 continue;
             };
-            let Ok(descriptor) = sorted_oxygen_distances(state, WATER_HEXAMER_MOLECULES) else {
+            let Ok(descriptor) = sorted_oxygen_distances(state, target_water_units()) else {
                 continue;
             };
-            let matched = assign_isomer(state, WATER_HEXAMER_MOLECULES, reference_views, gate).ok();
+            let matched = assign_isomer(state, target_water_units(), reference_views, gate).ok();
             let witness_name = matched.as_ref().and_then(|item| item.name.clone());
             let Some(witness) = witness_name.as_deref().and_then(isomer_witness) else {
                 continue;
@@ -1548,16 +1546,16 @@ where
                 continue;
             }
             if let Some(matched) = matched.as_ref() {
-                if marks.first_hit_calls.is_none()
+                if stamps.first_hit_calls.is_none()
                     && let Some(name) = matched.name.clone()
                 {
-                    marks.first_hit_calls = Some(calls);
-                    marks.first_hit_wall = Some(wall.elapsed().as_secs_f64());
-                    marks.first_hit_isomer = Some(name);
+                    stamps.first_hit_calls = Some(calls);
+                    stamps.first_hit_wall = Some(wall.elapsed().as_secs_f64());
+                    stamps.first_hit_isomer = Some(name);
                 }
-                if marks.first_prism_calls.is_none() && matched.name.as_deref() == Some("prism") {
-                    marks.first_prism_calls = Some(calls);
-                    marks.first_prism_wall = Some(wall.elapsed().as_secs_f64());
+                if stamps.first_prism_calls.is_none() && matched.name.as_deref() == Some("prism") {
+                    stamps.first_prism_calls = Some(calls);
+                    stamps.first_prism_wall = Some(wall.elapsed().as_secs_f64());
                 }
             }
             let visits = census.total_visits();
@@ -1602,7 +1600,7 @@ where
         GOOD_TURING_CHECKPOINT_INTERVAL,
         &mut checkpoint,
     )?;
-    Ok((outcome, stats, trace, retired, marks))
+    Ok((outcome, stats, trace, retired, stamps))
 }
 
 fn crest_then_library<O>(
@@ -1698,7 +1696,7 @@ where
     };
     let usable = energy.is_finite()
         && point.iter().all(|value| value.is_finite())
-        && monomers_intact(point.as_slice().unwrap_or(&[]), WATER_HEXAMER_MOLECULES) == Ok(true);
+        && monomers_intact(point.as_slice().unwrap_or(&[]), target_water_units()) == Ok(true);
     if !usable {
         remember_external_phase(phase);
         return (calls, external_wall, "lbfgs");
@@ -1757,7 +1755,7 @@ fn crest_extreme(
     coordinates: &[f64],
 ) -> Option<(Vec<f64>, usize)> {
     let mut text = String::from("18\nwater hexamer polish\n");
-    for molecule in 0..WATER_HEXAMER_MOLECULES {
+    for molecule in 0..target_water_units() {
         for (offset, symbol) in [(0, "O"), (3, "H"), (6, "H")] {
             let base = 9 * molecule + offset;
             text.push_str(&format!(
@@ -1802,7 +1800,7 @@ fn crest_extreme(
 fn read_start_xyz(path: &str) -> Option<Vec<f64>> {
     let text = std::fs::read_to_string(path).ok()?;
     let coordinates = parse_xyz(&text)?;
-    monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES)
+    monomers_intact(&coordinates, target_water_units())
         .ok()
         .filter(|intact| *intact)?;
     Some(coordinates)
@@ -1811,14 +1809,14 @@ fn read_start_xyz(path: &str) -> Option<Vec<f64>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        WATER_HEXAMER_MOLECULES, parse_xyz, prepared_water_start, reference_coordinates,
-        water_groups, water_species,
+        parse_xyz, prepared_water_start, reference_coordinates, target_water_units, water_groups,
+        water_species,
     };
     use anneal_core::methods::cluster_hopping::Config;
 
     fn xyz_roundtrip(coordinates: &[f64]) -> Vec<f64> {
         let mut text = format!("{}\nround trip\n", coordinates.len() / 3);
-        for molecule in 0..WATER_HEXAMER_MOLECULES {
+        for molecule in 0..target_water_units() {
             for (offset, symbol) in [(0, "O"), (3, "H"), (6, "H")] {
                 let base = 9 * molecule + offset;
                 text.push_str(&format!(
@@ -1838,8 +1836,8 @@ mod tests {
             [0.7572, 0.5865, 0.0],
             [-0.7572, 0.5865, 0.0],
         ];
-        let mut coordinates = Vec::with_capacity(9 * WATER_HEXAMER_MOLECULES);
-        for molecule in 0..WATER_HEXAMER_MOLECULES {
+        let mut coordinates = Vec::with_capacity(9 * target_water_units());
+        for molecule in 0..target_water_units() {
             let column = (molecule % 3) as f64;
             let row = (molecule / 3) as f64;
             for atom in &water {
@@ -1855,11 +1853,11 @@ mod tests {
 
     #[test]
     fn parsed_template_prepares_like_the_builtin() {
-        let builtin = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
+        let builtin = reference_coordinates(target_water_units()).expect("template");
         let parsed_line = xyz_roundtrip(&builtin);
         let parsed_grid = xyz_roundtrip(&rough_grid());
-        let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("groups");
-        let species = water_species(WATER_HEXAMER_MOLECULES).expect("species");
+        let groups = water_groups(target_water_units()).expect("groups");
+        let species = water_species(target_water_units()).expect("species");
         let cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
         let mut distorted = parsed_grid.clone();
         distorted[0] += 0.1;

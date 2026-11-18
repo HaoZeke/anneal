@@ -597,20 +597,29 @@ fn stagger_layers(x: ArrayView1<f64>, axis: [f64; 3], angle: f64, contact: f64) 
         rows.push((height, atom, rho, phi));
     }
     rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let mut layer = 0usize;
-    for index in 0..rows.len() {
-        if index > 0 && rows[index].0 - rows[index - 1].0 > contact * 0.15 {
-            layer += 1;
+    let mut layer_starts = vec![0usize];
+    for index in 1..rows.len() {
+        if rows[index].0 - rows[index - 1].0 > contact * 0.15 {
+            layer_starts.push(index);
         }
-        if layer % 2 == 1 && rows[index].2 > 1e-8 {
-            rows[index].3 += angle;
-        }
-        let (_, atom, rho, phi) = rows[index];
-        let (sin, cos) = phi.sin_cos();
-        for coord in 0..3 {
-            y[3 * atom + coord] = com[coord]
-                + rows[index].0 * [ax, ay, az][coord]
-                + rho * (cos * e1[coord] + sin * e2[coord]);
+    }
+    layer_starts.push(rows.len());
+    for (layer, window) in layer_starts.windows(2).enumerate() {
+        let (lo, hi) = (window[0], window[1]);
+        let layer_order = (hi - lo).max(3) as f64;
+        let sector = 2.0 * std::f64::consts::PI / layer_order;
+        let shift = if layer % 2 == 1 { angle * sector } else { 0.0 };
+        for row in &mut rows[lo..hi] {
+            if row.2 > 1e-8 {
+                row.3 += shift;
+            }
+            let (height, atom, rho, phi) = *row;
+            let (sin, cos) = phi.sin_cos();
+            for coord in 0..3 {
+                y[3 * atom + coord] = com[coord]
+                    + height * [ax, ay, az][coord]
+                    + rho * (cos * e1[coord] + sin * e2[coord]);
+            }
         }
     }
     y
@@ -1934,14 +1943,9 @@ pub(crate) fn climb_outer_axes<E, Q>(
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
-    // Half a pentagon sector. The axis is an outermost atom of this
-    // geometry, so the angle is the symmetry of that axis.
-    // A pentagon sector is 2π/5. Half of that puts one ring in the gaps of
-    // the next; a quarter sector is the other symmetry fraction.
-    let sector = 2.0 * std::f64::consts::PI / 5.0;
     for (index, axis) in outer_axes(start, contact).into_iter().enumerate() {
         for fraction in [0.5_f64, 0.25] {
-            let staggered = stagger_layers(start, axis, fraction * sector, contact);
+            let staggered = stagger_layers(start, axis, fraction, contact);
             let held = relax_held_phi(staggered.view(), axis, evaluate);
             let quenched = quench(held.view());
             let _ = note_exit(evaluate, &quenched, hop, best_energy, best);

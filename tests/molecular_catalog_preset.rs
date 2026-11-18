@@ -18,14 +18,16 @@ fn engine_digest(byte: u8) -> [u8; 32] {
     [byte; 32]
 }
 
-const WATER_HEXAMER_MOLECULES: usize = 6;
+fn hexamer_units() -> usize {
+    6
+}
 
 #[test]
 fn hexamer_signature_records_gfn2_kind_and_universal_dim() {
-    let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
-    let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
+    let species = water_species(hexamer_units()).unwrap();
+    let coordinates = reference_coordinates(hexamer_units()).unwrap();
     let leftover_dim = leftover_descriptor_dim(&species).unwrap();
-    let signature = system_signature(WATER_HEXAMER_MOLECULES, engine_digest(0x11)).unwrap();
+    let signature = system_signature(hexamer_units(), engine_digest(0x11)).unwrap();
     let spec = leftover_spec(&species).unwrap();
     let descriptor_dim = descriptor_space(&species)
         .unwrap()
@@ -93,11 +95,8 @@ fn hexamer_signature_records_gfn2_kind_and_universal_dim() {
     };
     assert_eq!(leftover_dim, 18 * leftover_spec.feat_dim(Some(&species)));
     assert_eq!(signature.length_scale, length_scale(&species).unwrap());
-    let molecular = Config::for_molecular(
-        species.clone(),
-        water_groups(WATER_HEXAMER_MOLECULES).unwrap(),
-        1.0,
-    );
+    let molecular =
+        Config::for_molecular(species.clone(), water_groups(hexamer_units()).unwrap(), 1.0);
     assert_eq!(signature.length_scale, molecular.length_scale);
     assert!((spec.rcut_nn - 3.5 * signature.length_scale).abs() < 1e-15);
 }
@@ -208,9 +207,9 @@ fn fresh_evaluation_does_not_invent_an_energy() {
 
 #[test]
 fn leftover_space_remains_a_distinct_proposal_feature() {
-    let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
+    let species = water_species(hexamer_units()).unwrap();
     let space = leftover_space(&species).unwrap();
-    let signature = system_signature(WATER_HEXAMER_MOLECULES, engine_digest(0x11)).unwrap();
+    let signature = system_signature(hexamer_units(), engine_digest(0x11)).unwrap();
     assert_ne!(space.schema().name(), signature.descriptor.schema);
     assert_ne!(space.schema().name(), DESCRIPTOR_SCHEMA);
     assert_eq!(

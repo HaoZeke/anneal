@@ -298,7 +298,7 @@ pub fn twin(x: ArrayView1<f64>, n: usize, plane: &Plane, mode: Mode, layer: f64)
             // while its distance from the boundary is kept.
             Mode::Reflect => [-inplane[0], -inplane[1], -inplane[2]],
             Mode::Rotate => {
-                let a = std::f64::consts::TAU / 5.0;
+                let a = std::f64::consts::TAU / (plane.population.max(3) as f64);
                 let (sa, ca) = a.sin_cos();
                 // Rodrigues about the normal, for a vector already in the
                 // plane, which drops the term along the axis.
