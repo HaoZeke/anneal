@@ -274,6 +274,10 @@ name = "paper_controls"
 test = true
 
 [[example]]
+name = "h2h_morse"
+test = true
+
+[[example]]
 name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 

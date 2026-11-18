@@ -118,6 +118,10 @@ fn cmd_coords(args: &[String]) -> i32 {
         eprintln!("unknown system {system}");
         return 2;
     };
+    if let Err(err) = Config::check_removed_env() {
+        eprintln!("{err}");
+        return 2;
+    }
     let cfg = Config::recommended(spec.n);
     let start = start_of(&cfg, spec.n, seed);
     match write_coords(path, &start) {
@@ -348,5 +352,43 @@ mod tests {
         assert_eq!((m80.n, m80.budget), (80, 4_000_000));
         assert!((m80.reference + 340.811371).abs() < 1e-12);
         assert!(m80.n >= 6);
+    }
+
+    #[test]
+    fn coords_rejects_removed_env_vars() {
+        let path = std::env::temp_dir().join(format!(
+            "h2h-morse-coords-{}-{}.xyz",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("coords")
+        ));
+        let args = vec![
+            "coords".to_string(),
+            "m30r6".to_string(),
+            "7".to_string(),
+            path.display().to_string(),
+        ];
+        let removed = [
+            ("H2H_HANDOVER", "1"),
+            ("PRIOR_RESEED", "0"),
+            ("PRIOR_GROWTH", "0"),
+            ("PRIOR_CORE", "0"),
+            ("PRIOR_HANDOVER", "0"),
+            ("PRIOR_MOTIF", "0"),
+            ("H2H_PRIORS", "motif"),
+        ];
+        for (key, value) in removed {
+            // SAFETY: this test sets one variable, calls the coords path, and
+            // removes it before the next case. The other test in this binary
+            // does not read these names.
+            unsafe { std::env::set_var(key, value) };
+            let status = super::cmd_coords(&args);
+            unsafe { std::env::remove_var(key) };
+            assert_eq!(status, 2, "{key}={value}");
+            assert!(!path.exists(), "{key}={value} must not write coords");
+        }
+        let status = super::cmd_coords(&args);
+        assert_eq!(status, 0);
+        assert!(path.is_file());
+        std::fs::remove_file(&path).unwrap();
     }
 }
