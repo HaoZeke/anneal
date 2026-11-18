@@ -163,6 +163,27 @@ fn edges_of_the_analytic_domain_are_refused() {
     }
 }
 
+#[test]
+fn an_empty_interval_has_no_side() {
+    assert!(matches!(
+        side(Interval::EMPTY, 0.0, "empty"),
+        Err(JetError::Branch { test: "empty", .. })
+    ));
+}
+
+#[test]
+fn division_by_an_empty_interval_is_refused() {
+    let numerator = Taylor::constant(Interval::ONE, 2);
+    let denominator = Taylor::constant(Interval::EMPTY, 2);
+    assert!(matches!(
+        numerator.div(&denominator),
+        Err(JetError::Domain {
+            function: "division",
+            ..
+        })
+    ));
+}
+
 /// `d^k/du^k (1 - T^2)` as integer polynomials in `T = tanh(u)`.
 fn sech_squared_polynomials() -> Vec<Vec<i64>> {
     let mut out = vec![vec![1, 0, -1]];

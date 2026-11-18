@@ -589,8 +589,9 @@ enum rgpot_status_t rgpot_potential_set_peer_capabilities(const struct rgpot_pot
   =RGPOT_SUCCESS=.
   An incompatible one is recorded on the handle: =rgpot_potential_calculate=,
   =rgpot_potential_hvp=,
-  =rgpot_potential_hvp_centre=, =eindir_objective_eval= and =eindir_objective_grad=
-  then fail before the callback runs.
+  =rgpot_potential_hvp_centre=, =rgpot_potential_taylor_jet=,
+  =eindir_objective_eval= and =eindir_objective_grad= then fail before the
+  callback runs.
   Either way the cached eindir result and the Hessian-vector centre are dropped.
 - Errors :: =RGPOT_INVALID_PARAMETER= with
   =rgpot_potential_set_peer_capabilities: invalid argument= for a NULL =pot= or
