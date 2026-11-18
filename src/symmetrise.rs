@@ -4,11 +4,11 @@
 //! the deviation of each candidate operation is the root-mean-square distance
 //! between a point and its matched image, and [`generate_group`] closes a set
 //! of detected operations into the group they generate. Nothing here moves a
-//! point: the routines that pushed a structure onto the symmetry it nearly
-//! has, completed orbits, or built a core out of a detected group are gone
-//! from this crate, because they construct a candidate from a recognised
-//! motif rather than search for one. The block-diagonalisation of the Hessian
-//! in [`crate::sym_hessian`] is the consumer: it needs the group, not a
+//! point. [`crate::detected_symmetry`] is the one place a detected group is
+//! applied: it reads the group of the structure over the rotation orders the
+//! structure can carry, and re-seats atoms on its sites. No group, motif or
+//! order list is named anywhere. The block-diagonalisation of the Hessian in
+//! [`crate::sym_hessian`] is the other consumer: it needs the group, not a
 //! symmetrised structure.
 //!
 //! [`crate::movekernel::Symmetrise`] is a different thing and is unchanged.
@@ -43,7 +43,7 @@ pub struct Candidate {
 }
 
 /// Centroid of a flattened `(n, 3)` point set.
-fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
+pub(crate) fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
     let mut c = [0.0; 3];
     for i in 0..n {
         for k in 0..3 {
@@ -542,7 +542,7 @@ pub fn mirror_matrix(axis: [f64; 3]) -> Rot {
 /// A rotation as a 3x3 matrix, row-major.
 pub type Rot = [[f64; 3]; 3];
 
-fn rot_matrix(axis: [f64; 3], angle: f64) -> Rot {
+pub(crate) fn rot_matrix(axis: [f64; 3], angle: f64) -> Rot {
     let s = libm::sin(angle);
     let c = libm::cos(angle);
     let t = 1.0 - c;
@@ -565,7 +565,7 @@ fn rot_matrix(axis: [f64; 3], angle: f64) -> Rot {
     ]
 }
 
-fn mul(a: &Rot, b: &Rot) -> Rot {
+pub(crate) fn mul(a: &Rot, b: &Rot) -> Rot {
     let mut o = [[0.0_f64; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
