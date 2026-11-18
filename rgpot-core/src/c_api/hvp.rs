@@ -235,6 +235,9 @@ mod tests {
             message: "cached SCC did not converge".to_owned(),
         });
         assert_eq!(status, rgpot_status_t::RGPOT_SCC_NOT_CONVERGED);
-        assert_eq!(crate::status::last_error_message(), "cached SCC did not converge");
+        assert_eq!(
+            crate::status::last_error_message(),
+            "cached SCC did not converge"
+        );
     }
 }
