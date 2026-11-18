@@ -1723,7 +1723,7 @@ void selectOrbitals(int64_t key);
   runs and is re-applied after a session recreation.
   Every rank of a calculator names the same key before the same force.
   An engine without =cpmdc_session_select_orbitals= ignores the key.
-- Errors :: none here; a force throws =std::runtime_error= when the engine
+- Errors :: throws =std::runtime_error= immediately when the live engine session
   refuses the key.
 
 *** =rgpot::CPMDPot::copyOrbitals=
@@ -1739,8 +1739,7 @@ void selectOrbitals(int64_t key);
 - Outputs :: true when the loaded engine supports and accepts
   =cpmdc_session_copy_orbitals=.
   False when that primitive is unavailable or no session is active.
-- Errors :: none here; a later force throws =std::runtime_error= if the engine
-  rejects the selected key.
+- Errors :: none; an engine rejection returns false.
 
 *** =rgpot::CP2KPot::keepsOrbitalsPerKey=
 

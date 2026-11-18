@@ -172,7 +172,8 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   auto last_key = lib.sym<KeyFn>("cpmdc_fake_last_orbital_key");
   auto last_initial_orbital =
       lib.sym<OrbitalFn>("cpmdc_fake_last_initial_orbital_state");
-  auto last_final_orbital = lib.sym<OrbitalFn>("cpmdc_fake_last_final_orbital_state");
+  auto last_final_orbital =
+      lib.sym<OrbitalFn>("cpmdc_fake_last_final_orbital_state");
   constexpr long long kNone = -1000000;
 
   ::capnp::MallocMessageBuilder msg;
@@ -198,7 +199,9 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
     REQUIRE(last_key() == key);
   }
 
-  // The key survives a session recreated by new params.
+  // A rejected key does not replace the key re-applied to a new session.
+  REQUIRE_THROWS_WITH(pot.selectOrbitals(-99),
+                      "CPMD engine refused the orbital key");
   p.setCutOffRy(80.0);
   REQUIRE(pot.setParams(p.asReader()));
   positions(0, 0) += 0.01;
@@ -228,7 +231,8 @@ TEST_CASE("CPMDPot copies orbitals between keys", "[cpmd][abi]") {
   using OrbitalFn = double (*)(void);
   auto last_initial_orbital =
       lib.sym<OrbitalFn>("cpmdc_fake_last_initial_orbital_state");
-  auto last_final_orbital = lib.sym<OrbitalFn>("cpmdc_fake_last_final_orbital_state");
+  auto last_final_orbital =
+      lib.sym<OrbitalFn>("cpmdc_fake_last_final_orbital_state");
 
   ::capnp::MallocMessageBuilder msg;
   auto p = msg.initRoot<::CPMDParams>();
@@ -250,8 +254,15 @@ TEST_CASE("CPMDPot copies orbitals between keys", "[cpmd][abi]") {
   (void)pot(positions, atmtypes, box);
   const double seed_state = last_final_orbital();
 
-  REQUIRE(pot.copyOrbitals(seed, slot));
   pot.selectOrbitals(slot);
+  box[2][2] = 24.0;
+  positions(0, 0) += 0.01;
+  (void)pot(positions, atmtypes, box);
+  REQUIRE(last_final_orbital() != seed_state);
+
+  // Copying into the active slot refreshes the state used by the next force.
+  REQUIRE(pot.copyOrbitals(seed, slot));
+  box[2][2] = 23.0;
   positions(0, 0) += 0.01;
   (void)pot(positions, atmtypes, box);
   REQUIRE_THAT(last_initial_orbital(), WithinAbs(seed_state, 1e-12));

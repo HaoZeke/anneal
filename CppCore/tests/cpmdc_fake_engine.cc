@@ -17,8 +17,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct CPMDCSession {
@@ -184,6 +184,8 @@ void cpmdc_session_destroy(CPMDCSession *session) { delete session; }
 int cpmdc_session_select_orbitals(CPMDCSession *session, long long key) {
   if (session == nullptr)
     return -1;
+  if (key == -99)
+    return -1;
   auto it = session->orbital_store.find(key);
   if (it == session->orbital_store.end()) {
     session->orbital_store.emplace(key, session->orbital_state);
@@ -203,6 +205,8 @@ int cpmdc_session_copy_orbitals(CPMDCSession *session, long long from_key,
   if (it == session->orbital_store.end())
     return -1;
   session->orbital_store[to_key] = it->second;
+  if (session->has_orbital_key && session->orbital_key == to_key)
+    session->orbital_state = it->second;
   return 0;
 }
 

@@ -453,11 +453,13 @@ CPMDPot::CPMDPot(const ::CPMDParams::Reader &params)
 void CPMDPot::selectOrbitals(int64_t key) {
   if (!impl_)
     return;
-  impl_->has_orbital_key = true;
-  impl_->orbital_key = key;
-  if (impl_->session && !impl_->applySelectedOrbitalKey()) {
+  if (impl_->session && impl_->bundle.select_orbitals &&
+      impl_->bundle.select_orbitals(impl_->session,
+                                    static_cast<long long>(key)) != 0) {
     throw std::runtime_error("CPMD engine refused the orbital key");
   }
+  impl_->has_orbital_key = true;
+  impl_->orbital_key = key;
 }
 
 bool CPMDPot::keepsOrbitalsPerKey() const {
@@ -466,8 +468,9 @@ bool CPMDPot::keepsOrbitalsPerKey() const {
 }
 
 bool CPMDPot::copyOrbitals(int64_t from_key, int64_t to_key) {
-  if (!impl_ || !impl_->bundle.loaded || !has_session_result_abi(impl_->bundle) ||
-      !impl_->session || !impl_->bundle.copy_orbitals)
+  if (!impl_ || !impl_->bundle.loaded ||
+      !has_session_result_abi(impl_->bundle) || !impl_->session ||
+      !impl_->bundle.copy_orbitals)
     return false;
   return impl_->bundle.copy_orbitals(impl_->session,
                                      static_cast<long long>(from_key),
