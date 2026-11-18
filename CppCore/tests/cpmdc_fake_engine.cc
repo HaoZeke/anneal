@@ -109,12 +109,14 @@ constexpr long long kNoOrbitalKey = -1000000;
 long long g_last_orbital_key = kNoOrbitalKey;
 double g_last_initial_orbital_state = -1.0;
 double g_last_final_orbital_state = -1.0;
-// Text returned by cpmdc_last_error. A failing select stores its reason
-// and a successful select clears it, so a test can tell this fake from
-// one that ignores the call and always reports an empty string.
+// Text returned by cpmdc_last_error. A failing select or session create
+// stores its reason, and a successful select or session create clears it,
+// so a test can tell this fake from one that ignores the call and always
+// reports an empty string.
 std::string g_last_error;
 bool g_force_session_create_fail = false;
-std::string g_force_session_create_message = "fake refused params";
+constexpr const char *kDefaultSessionCreateMessage = "fake refused params";
+std::string g_force_session_create_message = kDefaultSessionCreateMessage;
 
 bool refused_orbital_key(long long key) { return key == -99; }
 
@@ -437,11 +439,13 @@ RGPOT_FAKE_ONLY const char *cpmdc_last_error(void) {
   return g_last_error.c_str();
 }
 
-RGPOT_FAKE_ONLY void cpmdc_fake_set_session_create_failure(
-    int enabled, const char *message) {
+RGPOT_FAKE_ONLY void
+cpmdc_fake_set_session_create_failure(int enabled, const char *message) {
   g_force_session_create_fail = enabled != 0;
-  if (message && *message)
-    g_force_session_create_message = message;
+  // A null message is the default reason. An empty one is kept as given,
+  // so the next refused create leaves cpmdc_last_error empty.
+  g_force_session_create_message =
+      message ? message : kDefaultSessionCreateMessage;
   if (!g_force_session_create_fail)
     g_last_error.clear();
 }

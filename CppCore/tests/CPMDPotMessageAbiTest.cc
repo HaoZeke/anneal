@@ -499,6 +499,56 @@ TEST_CASE("CPMDPot setPotentialConfig reports a session-create refusal reason",
   set_create_fail(0, nullptr);
 }
 
+TEST_CASE("CPMDPot setPotentialConfig reports a session-create refusal "
+          "with an empty reason",
+          "[cpmd][abi]") {
+  const char *path = std::getenv("RGPOT_CPMD_ENGINE");
+  REQUIRE(path != nullptr);
+
+  rgpot::DynLib lib;
+  lib.open(path);
+  using SetCreateFailFn = void (*)(int, const char *);
+  auto set_create_fail =
+      lib.sym<SetCreateFailFn>("cpmdc_fake_set_session_create_failure");
+  using LastErrorFn = const char *(*)(void);
+  auto last_error = lib.sym<LastErrorFn>("cpmdc_last_error");
+  set_create_fail(0, nullptr);
+
+  ::capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::CPMDParams>();
+  p.setFunctional("BLYP");
+  p.setCutOffRy(70.0);
+  rgpot::CPMDPot pot(p.asReader());
+  REQUIRE(pot.available());
+
+  ::capnp::MallocMessageBuilder cfg_msg;
+  auto cfg = cfg_msg.initRoot<::PotentialConfig>();
+  auto cp = cfg.initCpmd();
+  cp.setFunctional("BLYP");
+  cp.setCutOffRy(80.0);
+  cp.setEnginePath(path);
+
+  // An earlier refusal with a reason must not leak into this one.
+  set_create_fail(1, "fake refused params");
+  std::string message;
+  REQUIRE_FALSE(pot.setPotentialConfig(cfg.asReader(), &message));
+
+  set_create_fail(1, "");
+  message.clear();
+  REQUIRE_FALSE(pot.setPotentialConfig(cfg.asReader(), &message));
+  REQUIRE(std::string(last_error()).empty());
+  REQUIRE(message ==
+          std::string("rgpot params cpmd arm rejected by embed: "
+                      "functional=BLYP cutoffRy=80.000000 charge=0 mult=1 "
+                      "enginePath=") +
+              path + " (CPMD engine refused the session create)");
+  REQUIRE_FALSE(pot.available());
+
+  set_create_fail(0, nullptr);
+  REQUIRE(pot.setPotentialConfig(cfg.asReader(), &message));
+  REQUIRE(pot.available());
+}
+
 TEST_CASE("CPMDPot rejects a copy onto a refused orbital key", "[cpmd][abi]") {
   rgpot::DynLib lib;
   const char *path = std::getenv("RGPOT_CPMD_ENGINE");
