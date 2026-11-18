@@ -90,7 +90,7 @@ const COMPARISONS: &[&str] = &["<=", ">=", "==", "!=", "<", ">"];
 enum Tok {
     Word(String),
     Int(u64),
-    Float,
+    Float(Option<u64>),
     Text(String),
     Op(String),
 }
@@ -496,7 +496,19 @@ fn tokenize(text: &str, python: bool) -> Vec<Tok> {
             }
             run = chars[start..index].iter().collect();
             if float || run.ends_with("f32") || run.ends_with("f64") {
-                tokens.push(Tok::Float);
+                let benchmark = run
+                    .strip_suffix("f32")
+                    .or_else(|| run.strip_suffix("f64"))
+                    .unwrap_or(run.as_str())
+                    .replace('_', "")
+                    .parse::<f64>()
+                    .ok()
+                    .and_then(|value| {
+                        let rounded = value.round();
+                        ((value - rounded).abs() <= f64::EPSILON * 32.0).then_some(rounded as u64)
+                    })
+                    .filter(|value| BENCHMARK_SIZES.contains(value));
+                tokens.push(Tok::Float(benchmark));
             } else {
                 let mut digits = run.replace('_', "");
                 for suffix in INT_TYPES {
@@ -517,7 +529,7 @@ fn tokenize(text: &str, python: bool) -> Vec<Tok> {
                 } else {
                     digits.parse::<u64>().ok()
                 };
-                tokens.push(value.map_or(Tok::Float, Tok::Int));
+                tokens.push(value.map_or(Tok::Float(None), Tok::Int));
             }
         } else if is_ident_start(c) {
             let start = index;
@@ -815,6 +827,71 @@ fn benchmark_literal_context(tokens: &[Tok], index: usize, in_pattern: bool) -> 
         || op_is(previous, &["..", "..="])
         || (op_is(previous, &["="]) && next.is_none())
         || op_is(next, &["..", "..=", "=>"])
+        || matches!(previous, Some(Tok::Word(word)) if word == "return")
+        || benchmark_min_max_call(tokens, index)
+        || benchmark_vec_repeat(tokens, index)
+}
+
+fn benchmark_min_max_call(tokens: &[Tok], index: usize) -> bool {
+    let Some(open) = index.checked_sub(1).and_then(|at| tokens.get(at)) else {
+        return false;
+    };
+    let Some(name) = index.checked_sub(2).and_then(|at| tokens.get(at)) else {
+        return false;
+    };
+    let Some(dot) = index.checked_sub(3).and_then(|at| tokens.get(at)) else {
+        return false;
+    };
+    matches!(open, Tok::Op(open) if open == "(")
+        && matches!(name, Tok::Word(word) if matches!(word.as_str(), "min" | "max"))
+        && matches!(dot, Tok::Op(dot) if dot == ".")
+}
+
+fn benchmark_vec_repeat(tokens: &[Tok], index: usize) -> bool {
+    let Some(previous) = index.checked_sub(1).and_then(|at| tokens.get(at)) else {
+        return false;
+    };
+    if !matches!(previous, Tok::Op(op) if op == ";") {
+        return false;
+    }
+    let mut depth = 0i64;
+    let mut cursor = index as i64 - 1;
+    while cursor >= 0 {
+        match &tokens[cursor as usize] {
+            Tok::Op(op) if op == "]" => depth += 1,
+            Tok::Op(op) if op == "[" => {
+                if depth == 0 {
+                    let Some(bang_index) = (cursor as usize).checked_sub(1) else {
+                        return false;
+                    };
+                    let Some(name_index) = (cursor as usize).checked_sub(2) else {
+                        return false;
+                    };
+                    return matches!(tokens.get(bang_index), Some(Tok::Op(bang)) if bang == "!")
+                        && matches!(tokens.get(name_index), Some(Tok::Word(word)) if word == "vec");
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+        cursor -= 1;
+    }
+    false
+}
+
+fn benchmark_system_name(text: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|piece| !piece.is_empty())
+        .any(|piece| {
+            let lower = piece.to_ascii_lowercase();
+            ["lj", "au", "pt"].iter().any(|prefix| {
+                lower.strip_prefix(prefix).is_some_and(|digits| {
+                    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+                }) && lower[prefix.len()..]
+                    .parse::<u64>()
+                    .is_ok_and(|value| BENCHMARK_SIZES.contains(&value))
+            })
+        })
 }
 
 fn unit_findings(unit: &Unit, python: bool) -> Option<&'static str> {
@@ -852,13 +929,24 @@ fn unit_findings(unit: &Unit, python: bool) -> Option<&'static str> {
                     return Some("benchmark size in identifier");
                 }
             }
-            Tok::Int(value) if BENCHMARK_SIZES.contains(value) => {
-                if constant
-                    || benchmark_sizes >= 2
-                    || benchmark_literal_context(&tokens, index, in_pattern[index])
-                {
-                    return Some("benchmark cluster size literal");
-                }
+            Tok::Int(value)
+                if BENCHMARK_SIZES.contains(value)
+                    && (constant
+                        || benchmark_sizes >= 2
+                        || benchmark_literal_context(&tokens, index, in_pattern[index])) =>
+            {
+                return Some("benchmark cluster size literal");
+            }
+            Tok::Float(Some(value))
+                if BENCHMARK_SIZES.contains(value)
+                    && (constant
+                        || benchmark_sizes >= 2
+                        || benchmark_literal_context(&tokens, index, in_pattern[index])) =>
+            {
+                return Some("benchmark cluster size literal");
+            }
+            Tok::Text(text) if benchmark_system_name(text) => {
+                return Some("benchmark size in system name");
             }
             _ => {}
         }
@@ -881,7 +969,7 @@ fn unit_findings(unit: &Unit, python: bool) -> Option<&'static str> {
     if declared_constant(&tokens).is_some()
         && tokens
             .iter()
-            .filter(|token| matches!(token, Tok::Float | Tok::Int(_)))
+            .filter(|token| matches!(token, Tok::Float(_) | Tok::Int(_)))
             .count()
             >= 40
     {
@@ -1180,6 +1268,9 @@ struct Allow {
 }
 
 fn fnv(lines: &[&str]) -> u64 {
+    // FNV-1a is sufficient here: this digest only guards accidental
+    // statement drift in pinned allowlist entries, not adversarial collision
+    // resistance. Path, needle, and statement count already scope each pin.
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for line in lines {
         for byte in line.bytes().chain(std::iter::once(b'\n')) {
@@ -1676,7 +1767,7 @@ fn collect_files(root: &Path, extension: &str, out: &mut Vec<PathBuf>) {
             .and_then(|name| name.to_str())
             .unwrap_or("");
         if path.is_dir() {
-            if !matches!(name, "tests" | "test" | "__pycache__" | "target" | ".git") {
+            if !matches!(name, "__pycache__" | "target" | ".git") {
                 collect_files(&path, extension, out);
             }
         } else if path.extension().is_some_and(|found| found == extension)
@@ -1752,7 +1843,10 @@ fn scan_rust_tree(root: &Path) -> Vec<(String, Hit)> {
         files_under(&[&root.join("src"), &root.join("crates")], "rs")
             .iter()
             .map(|file| (relative_path(root, file), file))
-            .filter(|(relative, _)| !relative.contains("_capnp.rs"))
+            // Generated Cap'n Proto bindings are machine output and can
+            // contain benchmark identifiers and dense tables unrelated to
+            // search policy logic.
+            .filter(|(relative, _)| !relative.ends_with("_capnp.rs"))
             .map(|(relative, file)| (relative, fs::read_to_string(file).expect("read source")))
             .collect();
     rust_hits(&sources)
@@ -1774,6 +1868,10 @@ fn scan_python_tree(root: &Path) -> Vec<(String, Hit)> {
     ] {
         for file in files_under(&roots, "py") {
             let relative = relative_path(root, &file);
+            // Test fixtures intentionally mirror benchmark labels/literals.
+            if relative.contains("/test/") || relative.contains("/tests/") {
+                continue;
+            }
             let text = fs::read_to_string(&file).expect("read python source");
             hits.extend(
                 python_hits(&text, is_library)
@@ -1868,9 +1966,13 @@ fn benchmark_sizes_are_caught_in_comparisons_ranges_and_match_arms() {
             "if (coordinates.len() / 3) < {size} {{ special(); }}"
         ));
         assert_caught(&format!("let wide = width >= {size};"));
+        assert_caught(&format!("if n_points < count.min({size}) {{ special(); }}"));
         assert_caught(&format!("for index in 0..{size} {{ visit(index); }}"));
         assert_caught(&format!("let range = 0..={size};"));
         assert_caught(&format!("let natoms = {size};"));
+        assert_caught(&format!("let scratch = vec![0usize; {size}];"));
+        assert_caught(&format!("let score = {size}.0;"));
+        assert_caught(&format!("return {size};"));
         assert_caught(&format!("let n_atoms: usize = {size};"));
         assert_caught(&format!(
             "let config = Config {{ n_points: {size}, ..base }};"
@@ -1961,6 +2063,7 @@ fn motif_spellings_are_caught() {
         "fn run_lj_55() {}",
         "let basin = known_ico55();",
         "let label = \"fivefold\";",
+        "let system = \"lj75\";",
     ] {
         assert_caught(spelling);
     }
