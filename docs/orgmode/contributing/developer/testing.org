@@ -149,9 +149,9 @@ suppressed and leak checks remain active for library and test code.
 =rust-test-all= enables every feature of =rgpot-core= (=schema=, =profile=,
 =rpc=, =cache=, =gen-header=).
 =gen-header= makes the build rewrite =rgpot-core/include/rgpot.h=.
-A build rewrites the header without failing, so the =rust_tests= job also runs
-=tools/check_header_drift.sh=, which fails when the rewrite differs from the
-committed header.
+A build rewrites the header without failing, so the
+=rust_tests= job also runs =tools/check_header_drift.sh=, which fails when the
+rewrite differs from the committed header.
 
 #+attr_rgpot: syntax compiles the Rust crate
 #+begin_src bash

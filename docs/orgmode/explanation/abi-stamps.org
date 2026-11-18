@@ -143,8 +143,9 @@ They are additions, and their state lives behind the
 the layout revision stays at 1.
 A 3.7 library still serves a caller built against minor 0 or 1.
 A caller built against minor 2 is refused by a 3.6 library.
-The next release raises the minor to 3 for =RGPOT_SCC_NOT_CONVERGED=,
-=rgpot_set_last_error= and the fused-cache settings and error kind.
+The next release raises the minor to 3 for
+=RGPOT_SCC_NOT_CONVERGED=, =rgpot_set_last_error= and the fused-cache settings
+and error kind.
 They are additions, no old call changes, and the layout revision stays at 1.
 The next release also raises the minor to 4 for the Taylor jet functions and the
 statuses =RGPOT_NO_JET= (6), =RGPOT_JET_BRANCH= (7) and =RGPOT_JET_DOMAIN= (8).

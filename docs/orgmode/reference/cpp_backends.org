@@ -231,8 +231,8 @@ bool setParams(const ::CPMDParams::Reader &params);
 The engine is loaded again when it was not loaded or =enginePath= changed.
 A live session is kept when the engine path and the serialized params are
 unchanged.
-A refused orbital key drops the session just created, so the same params
-are applied again on the next call.
+A refused orbital key drops the session just created, so the same params are
+applied again on the next call.
 
 *** =rgpot::CPMDPot::getParams=
 
@@ -592,10 +592,10 @@ explicit XTBPot(const XTBConfig &config);
 - Outputs :: a potential that calls the linked libxtb C API.
 - Errors :: =std::runtime_error= from the constructor when the xtb environment,
   calculator or results cannot be created.
-  A force throws =rgpot::SccNotConverged=, a =std::runtime_error=, when the SCC
-  does not converge and the rescue below does not help, and
-  =std::runtime_error= when the handles are missing, =xtb_newMolecule= fails,
-  another single point failure occurs, or the energy or gradient is not finite.
+  A force throws =rgpot::SccNotConverged=, a
+  =std::runtime_error=, when the SCC does not converge and the rescue below does not help, and =std::runtime_error=
+  when the handles are missing, =xtb_newMolecule= fails, another single point
+  failure occurs, or the energy or gradient is not finite.
   After such a failure the handles are replaced.
 
 A new composition rebuilds the molecule.
