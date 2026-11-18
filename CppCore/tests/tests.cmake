@@ -223,6 +223,11 @@ foreach(test IN LISTS _rgpot_units)
   endif()
   rgpot_add_test("${test}" COMMAND ${_exe})
 endforeach()
+# FastNlistTest calls rgpot_water_h_force and rgpot_water_h_image directly, and
+# a shared librgpot hides the Fortran kernel archive behind --exclude-libs.
+if(TARGET fast_nlist_test AND TARGET rgpot_fortran_kernels)
+  target_link_libraries(fast_nlist_test PRIVATE rgpot_fortran_kernels)
+endif()
 
 rgpot_registry_tests(rerun _rgpot_reruns)
 foreach(test IN LISTS _rgpot_reruns)
@@ -300,7 +305,8 @@ if(_on)
   rgpot_add_test(nlist_rust
     COMMAND sh "${RGPOT_TEST_ROOT}/CppCore/examples/nlist_rust_test.sh"
             "${RGPOT_TEST_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}"
-            ${_rgpot_nlist_rust_omp})
+            ${_rgpot_nlist_rust_omp}
+    ENVIRONMENT "CXX=${CMAKE_CXX_COMPILER}")
 endif()
 
 if(RGPOT_RPC_CLIENT_ONLY)

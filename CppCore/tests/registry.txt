@@ -93,6 +93,7 @@ CuH2test | tests fortran | unit cuh2_test CuH2PotTest.cc |
 RPCTest | tests rpc | unit test_rpc CapnpAdapterTest.cc |
 RPCClientTest | tests client | unit test_rpc_client BridgeStressTest.cc |
 test_list_parity | tests python | custom |
+test_list_parity_selftest | tests python | py CppCore/tests/check_test_registry.py selftest |
 
 # The library's exported surface.
 FortranSymbolAudit | tests core fortran linux | custom |
@@ -127,7 +128,8 @@ ReducedPairTest | tests core | unit reduced_pair_test ReducedPairTest.cc fp_cont
 EMTPotTest | tests core | unit emt_pot_test EMTPotTest.cc |
 EAMCellPotTest | tests core | unit eam_cell_pot_test EAMCellPotTest.cc |
 NeighbourLayerTest | tests core | unit neighbour_layer_test NeighbourLayerTest.cc fp_contract=off |
-# Eight potentials on 1, 2, 3 and 8 threads, on up to 10648 atoms.
+# Eight potentials on 1, 2, 3 and 8 threads, on up to 10648 atoms. Meson
+# scales explicit timeouts by 3 under ASan/UBSan and 8 under TSan.
 ThreadTeamTest | tests core | unit thread_team_test ThreadTeamTest.cc timeout=120 |
 StreamParityTest | tests core | unit stream_parity_test StreamParityTest.cc fp_contract=off timeout=900 |
 NeighbourListTest | tests core | unit neighbour_list_test NeighbourListTest.cc |

@@ -21,6 +21,7 @@ trap 'rm -rf -- "${scratch:?}"' EXIT
 cd "$ROOT"
 
 python3 CppCore/tests/check_test_registry.py lint
+python3 CppCore/tests/check_test_registry.py selftest
 
 # Highway is fetched at configure time and gates no test.
 meson_common=(-Dwith_tests=true -Dwith_examples=false -Dwith_xtensor=false

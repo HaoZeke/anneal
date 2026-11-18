@@ -54,6 +54,24 @@ _rt_atoms = {
 }
 _rt_tests = []
 _rt_kw = {}
+_tsan_supp = meson.project_source_root() / 'CppCore' / 'tests' / 'tsan.supp'
+_sanitize = get_option('b_sanitize')
+_timeout_scale = 1
+if 'thread' in _sanitize
+    _timeout_scale = 8
+elif _sanitize != 'none'
+    _timeout_scale = 3
+endif
+_tsan_options = run_command(
+    'sh',
+    '-c',
+    'printf %s "$TSAN_OPTIONS"',
+    check: false,
+).stdout()
+if _tsan_options != ''
+    _tsan_options += ':'
+endif
+_tsan_options += 'suppressions=' + _tsan_supp
 foreach _line : _fs.read('tests/registry.txt').split('\n')
     _line = _line.strip()
     if _line == '' or _line.startswith('#') or _line.startswith('@')
@@ -68,12 +86,16 @@ foreach _line : _fs.read('tests/registry.txt').split('\n')
     _workdir = _kind == 'unit' ? '.' : ''
     _env = {}
     _kw = {}
+    _has_timeout = false
     _first = true
     foreach _word : _words
         if _first
             _first = false
         elif _word.startswith('timeout=')
-            _kw += {'timeout': _word.substring(8).to_int()}
+            _has_timeout = true
+            _kw += {
+                'timeout': _word.substring(8).to_int() * _timeout_scale,
+            }
         elif _word.startswith('suite=')
             _kw += {'suite': _word.substring(6)}
         elif _word.startswith('workdir=')
@@ -95,6 +117,12 @@ foreach _line : _fs.read('tests/registry.txt').split('\n')
         _kw += {'workdir': meson.project_source_root()}
     elif _workdir != ''
         _kw += {'workdir': meson.project_source_root() / _workdir}
+    endif
+    if _has_timeout and _timeout_scale != 1
+        _env += {'RGPOT_TEST_TIMEOUT_SCALE': _timeout_scale.to_string()}
+    endif
+    if 'thread' in _sanitize and _kind != 'custom'
+        _env += {'TSAN_OPTIONS': _tsan_options}
     endif
     if _env.keys().length() > 0
         _kw += {'env': _env}
@@ -2046,14 +2074,29 @@ if get_option('with_tests')
     endif
     _rustc = find_program('rustc', required: false)
     if _rustc.found()
+        _nlist_rust_args = [
+            meson.current_source_dir() / 'examples' / 'nlist_rust_test.sh',
+            meson.project_source_root(),
+            meson.current_build_dir(),
+        ]
+        if _cxx_rt_flag != ''
+            _nlist_rust_args += [_cxx_rt_flag]
+        endif
+        if _sanitize != 'none'
+            _nlist_rust_args += ['-fsanitize=' + _sanitize]
+        endif
+        _nlist_rust_cxx = cppc.cmd_array()
+        _nlist_rust_env = {
+            'CXX': _nlist_rust_cxx[_nlist_rust_cxx.length() - 1],
+        }
+        if 'thread' in _sanitize
+            _nlist_rust_env += {'TSAN_OPTIONS': _tsan_options}
+        endif
         test(
             'nlist_rust',
             find_program('sh'),
-            args: [
-                meson.current_source_dir() / 'examples' / 'nlist_rust_test.sh',
-                meson.project_source_root(),
-                meson.current_build_dir(),
-            ],
+            args: _nlist_rust_args,
+            env: _nlist_rust_env,
             depends: _nlist_link,
         )
     endif
