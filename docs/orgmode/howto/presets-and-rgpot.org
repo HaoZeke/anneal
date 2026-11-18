@@ -1,0 +1,279 @@
+#+TITLE: Presets and Potentials through rgpot
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+====================================
+Presets and Potentials through rgpot
+====================================
+#+end_export
+
+This guide covers every preset configuration in =anneal= and every path
+for evaluating physical potentials through =rgpot= and =eindir=.
+
+* Part I: Presets
+
+=anneal= exposes three families of presets, matching the three problem
+geometries: classical box schedules, communicating box/portfolio policies,
+and point-set cluster presets.
+
+** 1. Classical box presets (=Boltzmann=, =Fast=, =Gsa=)
+
+All three implement the five-component tuple (=Obj=, =Cool=, =Neigh=,
+=Move=, =Accept=) and run on the same scalar driver (=run=, =run_qmc=),
+single-chain Array API runner (=run_device=), and batched Array API
+runner (=run_ensemble=):
+
+| Preset | Cooling (=Cool=) | Proposal (=Neigh= + =Move=) | Acceptance (=Accept=) | Key parameters |
+|--------+------------------+-----------------------------+-----------------------+----------------|
+| =Boltzmann= | Logarithmic | Gaussian | Metropolis | =t_init= (1.0), =sigma= (0.5) |
+| =Fast= | Reciprocal | Cauchy | Metropolis | =t_init= (1.0), =gamma= (0.5) |
+| =Gsa= | Tsallis power | Tsallis visiting | Tsallis acceptance | =t_init= (1.0), =q_v= (2.62), =q_a= (1.7) |
+
+#+begin_src python
+import numpy as np
+from anneal import Boltzmann, Fast, Gsa, run
+
+def sphere(x):
+    return float(np.dot(x, x))
+
+low, high = np.full(4, -5.0), np.full(4, 5.0)
+for preset in (
+    Boltzmann(t_init=2.0, sigma=0.5),
+    Fast(t_init=2.0, gamma=0.5),
+    Gsa(t_init=2.0, q_v=2.62, q_a=1.7),
+):
+    hist = run(sphere, low, high, preset, n_epochs=20, steps_per_epoch=50, seed=0)
+    print(type(preset).__name__, round(hist.best_val, 6))
+#+end_src
+
+In Rust, =anneal_core::variant::{boltzmann, fast, gsa}= build the
+corresponding =SaVariant= values for =run_rs_variant= and
+=run_rs_qmc_variant=.
+
+** 2. Box and portfolio presets
+
+For general bound-constrained problems without assuming point-set
+symmetry:
+
+- =global_optimize(..., policy="auto")= (default) :: Routes gradient-free
+  runs to the six-arm values-only loop (=cma=, =qn=, =gsa=, =de=,
+  =surrogate=, =explore=). With =grad_fn=, selects a regime from box
+  dimension, aspect ratio, and budget (=LowDimSmooth=,
+  =HighDimIllConditioned=, =MultimodalGlobal=, =Default=); with
+  =noise_sigma=, enforces sequential OSA acceptance (=StochasticNoise=).
+  =policy="legacy"= disables regime routing for A/B comparison.
+- =BoxEnsembleConfig= + =BoxCoverageConfig= :: Configures communicating
+  box hop chains in Rust (=ensemble_hop_optimize_with_config=), choosing
+  between =BoxEscape::Gaussian= (reflected Gaussian kick) and
+  =BoxEscape::Langevin(GleEscapeConfig)= (colored-noise or white-noise
+  Langevin segments with =GleNoise=). In Python, =ensemble_optimize= and
+  =minimize= select box hops when a gradient is supplied or when
+  =replicas > 1= / explicit =coverage_*= controls are set.
+
+** 3. Cluster presets (=cluster_hopping::Config=)
+
+Every cluster preset builds a =Config= in
+=anneal_core::methods::cluster_hopping=. Python exposes the primary
+constructors on =anneal.Config= and dispatches them through
+=anneal.cluster_search=.
+
+*** Atomic Lennard-Jones and scaled pair presets
+
+- =Config::recommended(n)= :: Measured production preset at reduced
+  Lennard-Jones scales (=length_scale=1.0=, =energy_scale=1.0=):
+  =MoveLibrary::LeanBurst=, discounted Thompson move allocation with
+  depth reward, return screen, stall tabu/trail/escape, flexible SOAP
+  bursts, =OrbitCore::Fraction= completion, =ContinuousSymmetry::Measure=
+  every 10 quenches (reseed after 5 hops), 1000-step quench,
+  =energy_lattice=true=, and the relative 0.7 two-phase surface for
+  =n < 98=.
+- =Config::recommended_with_scales(n, length_scale, energy_scale)= ::
+  Same preset expressed in physical units. Use this for Morse
+  (=PairKind::length_scale()=, ~0.891), Gupta, or any potential whose
+  well depth and equilibrium spacing differ from reduced Lennard-Jones.
+- =Config::communicating(n)= :: Communicating single-chain orbit arm:
+  =for_cluster(n)= plus Thompson allocation, return screen, fraction-core
+  orbit completion, =SharedVisitPolicy::Recognition= with
+  =shared_deposits=0=, continuous symmetry, and two-phase surface below
+  =n = 98=.
+- =Config::packing_superbasin(n)= :: =LeanBurst= stack with adaptive
+  deposit height (=height_revisits=20.0=), =symmetry_tolerance=0.35=, and
+  when built with feature =featomic=, unit high-l mean SOAP superbasin
+  keying (=Keying::SoapPacking=, merge radius 0.10).
+- =Config::derived(n)= :: =recommended(n)= with =budget_window=true=
+  and the cost-asymmetric Bayes screen threshold recomputed from
+  =screen_steps= and =relax_steps=.
+- =Config::for_cluster(n)= :: Screened basin-hopping baseline at
+  reduced Lennard-Jones scales (=bayes_screen=true= and
+  =OrbitCore::Both(ShellCore::scaled(1.0))=).
+- =Config::for_cluster_with_scales(n, length_scale, energy_scale)= ::
+  =for_cluster= at caller-supplied physical scales, preserving the scaled
+  shell/fraction dual orbit core.
+- =Config::for_cluster_dual_core(n)= :: =for_cluster(n)= plus
+  =.with_dual_orbit_core()=: completes orbits on both shell and fraction
+  cores and restarts after 4,000 hops without a new ledger best.
+- =Config::with_scales(n, length_scale, energy_scale)= :: Plain
+  unscreened basin-hopping configuration in declared physical units
+  (the building block for custom presets).
+
+*** Rigid-body and TIP4P water presets
+
+- =Config::for_tip4p(n_molecules)= :: Rigid TIP4P water preset on the
+  =6N= centre-plus-Rodrigues chart with Jorgensen diameter
+  =SIGMA=3.1536= Å, =temperature=2.0= kJ/mol, =bias_height=2.0= kJ/mol,
+  =MoveLibrary::RigidBody= (=rtrans= 0.35 Å, =rrot= 0.40 rad,
+  =reverse_cycles=true=, =relocate=true=), minima-hopping basin return
+  feedback, and Thompson move allocation.
+- =Config::recommended_tip4p(n_molecules)= :: =for_tip4p= with
+  =allocate_moves=true= while keeping atomic depth reward, stall tabu,
+  and return screen off.
+- =Config::communicating_tip4p(n_molecules)= :: =for_tip4p= with
+  =allocate_moves=true=, =return_screen=true=, =shared_deposits=0=, and
+  =SharedVisitPolicy::Recognition=.
+- =Config::with_rigid_bodies(geometry)= :: Method on any =Config= that
+  installs a caller-supplied =RigidBodyGeometry= with local =rorient=
+  moves, scaling the container and minimum separation to the body-frame
+  site reach and clearing atom-only moves and surfaces. In Python, pass
+  =rigid=True= to =cluster_search=.
+
+*** Molecular and grouped presets
+
+- =Config::for_molecular(species, groups, energy_scale)= :: Base preset
+  for grouped molecules (=MoveLibrary::Molecular=). Derives
+  =length_scale= from the largest covalent radius in =species=, sets
+  group cutoffs, and automatically turns =reverse_cycles= on when every
+  group is an O-H-H water triple.
+- =Config::recommended_molecular(species, groups, energy_scale)= ::
+  Production molecular preset built on =for_molecular=: Thompson
+  allocation with depth reward, stall tabu, flexible SOAP moves,
+  adaptive deposit height (=height_revisits=20.0=),
+  =record_gradient=5e-2=, =LocalStep::Auto= (times Cartesian L-BFGS
+  versus TRIC), ring crankshafts (=ring_moves=true=), stereocentre
+  preservation (=hold_stereocentres=true=), and measured energy scaling
+  (=measured_energy_scale=true=). In Python, pass =groups=...= and
+  =species=...= to =cluster_search=.
+
+*** Modifiers and overlap call floors
+
+- =.with_species(species, sigmas)= :: Attaches atomic labels and
+  optional diameters, widening the container, neighbour cutoff, and
+  minimum separation when diameters differ from 1.
+- =.with_flexible_molecules(start)= :: Merges declared groups that are
+  covalently bonded in =start= into whole-molecule torsion groups and
+  widens =bond_tolerance= if needed.
+- =cfg.call_floor= and =cfg.call_floor_elements= :: Opens any atom pair
+  inside the declared minimum separation (or per-element-pair
+  =0.70 * (r_a + r_b)= floored at =call_floor=) before charging an
+  evaluation; zero-step reads inside the floor are refused uncharged.
+
+* Part II: Potentials through =rgpot=
+
+In Rohit's stack, =rgpot= owns physical potential energy surfaces,
+=eindir= owns the typed =Objective= / =Gradient= /
+=DifferentiableObjective= traits and C ABI wrapper
+(=EindirObjectiveWrapper=), and =anneal= optimizes any object satisfying
+those traits without reimplementing potential physics.
+
+#+begin_example
+rgpot (PES / shared libraries / rgpot-pair)
+   |  rgpot_potential_t  [first-member embeds eindir_objective_t]
+   v
+eindir (EindirObjectiveWrapper -> Objective<f64> + Gradient<f64>)
+   |  validate_eindir_objective / EngineDescriptor / AbiStamp
+   v
+anneal (cluster_search, box_ensemble_optimize, run_rs_variant, ...)
+#+end_example
+
+** 1. In-process =rgpot-pair= kernels (=PairPotential= and =Gupta=)
+
+=anneal_core::potentials= exposes =ClusterKernels= and the macro
+=anneal_core::install_rgpot_kernels!()=. When installed,
+=PairPotential::lennard_jones=, =PairPotential::morse=, and =Gupta=
+dispatch directly to =rgpot_pair='s kernels (=cluster_lj=,
+=cambridge_morse=, =gupta=). Without installed kernels, =PairPotential=
+runs its pure-Rust pair loop and =Gupta= refuses to evaluate.
+
+- **Python**: =crates/anneal-python/src/lib.rs= calls
+  =anneal_core::install_rgpot_kernels!()= automatically when
+  =anneal._core= is imported.
+- **Rust**: Call =anneal_core::install_rgpot_kernels!();= at the start
+  of =main()= in binaries and examples that link =rgpot-pair= (enforced
+  across =examples/= by =tests/release_workflow_contract.rs=).
+
+** 2. Generic C / =eindir= force-callback potentials
+
+Any potential implementing the standard =rgpot= C force-callback ABI
+(=rgpot_force_input_t= -> =rgpot_force_out_t=) builds an
+=rgpot_potential_t*= via =rgpot_core::eindir::rgpot_potential_new_eindir=.
+Because =rgpot_potential_t= embeds =eindir_objective_t= as its first
+field, casting =pot as *mut eindir_objective_t= gives a zero-cost
+=EindirObjectiveWrapper= after checking =eindir_core_abi_compatible=
+and =anneal_core::compatibility::validate_eindir_objective=.
+
+Run the self-contained demonstration:
+
+#+begin_src bash
+cargo run --locked --features capi,rgpot-ex --example rgpot_minimize
+#+end_src
+
+** 3. Dynamic-loaded =rgpot= engine libraries (=RgpotObjective=)
+
+=examples/common/rgpot_eindir.rs= constructs in-process =rgpot=
+=eindir= handles by =dlopen=-ing external shared libraries:
+
+- **GFN2-xTB (=RgpotObjective::xtb= / =xtb_fresh=)** :: Loads
+  =libxtb_engine.so= (from =RGPOT_XTB_ENGINE=), forks an isolated worker
+  process, converts xtb's =dE/dx= buffer into the force convention
+  =rgpot= expects via =anneal_core::xtb_gradient::store_as_force=, and
+  refuses stacked geometries inside =0.90= Å (=OVERLAP_CALL_LIMIT_A=, or
+  custom =xtb_with_overlap_limit=). Pair this with
+  =Config::call_floor = Some(0.90)= (and =call_floor_elements= for
+  covalent clusters) so trial steps are opened off the wall before
+  charging. Set =RGPOT_XTB_ETEMP= for electronic temperature and call
+  =RgpotObjective::xtb_fresh= when each call must start from a cold SCC
+  guess. Examples:
+  - =examples/molecular_cluster.rs=:
+    =RGPOT_XTB_ENGINE=/path/to/libxtb_engine.so cargo run --locked --release --features rgpot-ex,featomic,bank-rpc --example molecular_cluster -- 6 1200 8=
+  - =examples/gfn2_water_h2h.rs= (with =examples/common/water_oh_wall.rs=)
+  - =examples/gfn2_covalent_h2h.rs= (accepts =H2H_WALL_S= wall cap)
+  - =examples/gfn2_nh3_h2h.rs= and =examples/gfn2_mol_h2h.rs=
+- **CuH2 slab (=RgpotObjective::cuh2=)** :: Loads =librgpot_cuh2.so=
+  (from =RGPOT_CUH2_LIBRARY=), passing the periodic simulation cell
+  through =rgpot_potential_new_eindir=. Examples:
+  - =examples/slab_adsorption.rs=:
+    =RGPOT_CUH2_LIBRARY=/path/to/librgpot_cuh2.so cargo run --locked --release --features rgpot-ex,featomic,bank-rpc --example slab_adsorption -- examples/fixtures/cuh2_slab.con 200 2=
+  - =examples/slab_random_relax.rs=
+- **Stillinger-Weber Si and Tersoff SiC** :: =examples/h2h_covalent.rs=
+  loads =librgpot_covalent.so= (via =RGPOT_COVALENT_LIB=, built by
+  =scripts/covalent_h2h/build_rgpot_covalent.sh=) and supports
+  =H2H_ARM=recommended|nopriors|general= with dimer-derived length and
+  energy scales plus bisected =PairRange= reach.
+
+For stiff molecular GFN2-xTB systems, =anneal_core::methods::anc_quench=
+(=anc_minimize=) provides a Lindh-preconditioned trust-radius quench,
+and =anneal_core::methods::surrogate_level= (=polish_tip4p_minima=)
+screens rigid water cages on =Tip4pCluster= before polishing the lowest
+structures on the target objective.
+
+** 4. Python =PyObjective= and ASE calculators
+
+In Python:
+
+- Native =eindir= / =rgpot= objective handles can be wrapped as
+  =anneal.PyObjective= and passed directly to
+  =global_optimize_objective=, =qmc_polish_objective=,
+  =gle_langevin_objective=, =gle_langevin_preconditioned_objective=,
+  =qmc_best1bin_scout_objective=, =qmc_gsa_global_search_objective=, and
+  =qmc_trust_region_poll_objective=.
+- Any ASE =Atoms= object with an attached ASE calculator (including
+  =rgpot= ASE calculators or TBLite/PySCF/etc.) can be quenched or
+  basin-hopped using =from anneal.ase import Anneal= (=mode="local"=,
+  ="search"=, or ="auto"=).
+
+* See also
+
+- [[file:choose-driver.org][Choose a driver]]
+- [[file:../reference/presets-and-advanced.org][Presets and advanced drivers]]
+- [[file:../reference/features.org][Cargo features]]
+- [[file:../reference/python-api.org][Python API reference]]
+- [[file:../tutorials/cluster-search.org][Cluster search tutorial]]
