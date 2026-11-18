@@ -50,7 +50,7 @@ fn stalling_config(trail: bool) -> Config {
 }
 
 #[test]
-fn a_stalled_chain_leaves_through_its_recorded_entry() {
+fn a_stalled_chain_does_not_count_a_return_to_its_shelf_as_a_trail_exit() {
     let cfg = stalling_config(true);
     let mut rng = StdRng::seed_from_u64(0x7a11);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
@@ -69,15 +69,16 @@ fn a_stalled_chain_leaves_through_its_recorded_entry() {
     )
     .expect("finite start");
 
+    assert_eq!(
+        outcome.trail_escapes, 0,
+        "the one-well landscape cannot produce a genuine trail exit"
+    );
     assert!(
-        outcome.trail_escapes >= 1,
-        "a chain that stalls with an entry on record must leave through it, \
-         took {} trail exits",
-        outcome.trail_escapes
+        outcome.tabu.1 >= 1,
+        "trail returns to the one well were not refused as shelf hits"
     );
     assert!(outcome.best.is_finite());
-    // Every trail exit is also a stall escape in the shared counter.
-    assert!(outcome.stall_escapes >= outcome.trail_escapes);
+    assert_eq!(outcome.stall_escapes, 0);
 }
 
 #[test]
