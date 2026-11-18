@@ -1,9 +1,5 @@
 //! Thin rustc linker entry (`potctl-cosmo-ld`). rustc passes only link argv.
 
-#[allow(
-    dead_code,
-    reason = "host helpers in this file are called by the potctl bin, not the linker"
-)]
 #[path = "cosmo.rs"]
 mod cosmo;
 
