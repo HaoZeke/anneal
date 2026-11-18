@@ -32,6 +32,12 @@
 //! `H2H_WALL_S` closes the ledger that many seconds after the start, and
 //! the search returns its best so far. `charged` is then the calls made
 //! before it closed.
+//!
+//! `scc_rejected` counts xtb evaluations whose SCC did not converge, and
+//! `scc_failed_calls` the calls, dimer probe included, that had one. A
+//! failed call runs one xtb evaluation, so the two agree. Before that they
+//! did not: the gradient reran xtb after a failed energy, and
+//! `scc_rejected` counted each failed call twice.
 
 #[path = "common/rgpot_eindir.rs"]
 mod rgpot_eindir;
@@ -341,10 +347,10 @@ fn main() {
     let calls = outcome.charged.max(1) as f64;
     let outside = (wall - pot_s).max(0.0);
     println!(
-        "system,code,seed,budget,hit,evals_to_hit,charged,probe_calls,wall_s,best_eV,pot_s,outside_s,pot_per_eval_s,outside_per_eval_s,scc_rejected,geometry_rejected"
+        "system,code,seed,budget,hit,evals_to_hit,charged,probe_calls,wall_s,best_eV,pot_s,outside_s,pot_per_eval_s,outside_per_eval_s,scc_rejected,geometry_rejected,scc_failed_calls"
     );
     println!(
-        "{},anneal-general,{seed},{budget},{hit},{evals},{},{probe_calls},{wall:.6},{:.8},{pot_s:.6},{outside:.6},{:.9},{:.9},{},{}",
+        "{},anneal-general,{seed},{budget},{hit},{evals},{},{probe_calls},{wall:.6},{:.8},{pot_s:.6},{outside:.6},{:.9},{:.9},{},{},{}",
         args[0],
         outcome.charged,
         outcome.best,
@@ -352,6 +358,7 @@ fn main() {
         outside / calls,
         rgpot_eindir::scc_rejected_count(),
         rgpot_eindir::geometry_rejected_count(),
+        rgpot_eindir::scc_failed_call_count(),
     );
     if let (Some(path), Some(best)) = (out, outcome.best_state.as_ref()) {
         write_xyz(
@@ -471,14 +478,16 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_scc_call_runs_xtb_once() {
+    fn a_failed_scc_call_runs_xtb_once_and_counts_once() {
         let _serial = serial();
         let pot = handle(14, 13);
         let x = Array1::from(SI13_SCC_FAILS.to_vec());
         let rejected = rgpot_eindir::scc_rejected_count();
+        let failed = rgpot_eindir::scc_failed_call_count();
         let (energy, _) = evaluate(&pot.lock().expect("pot"), x.view());
         assert!(energy.is_nan());
         assert_eq!(rgpot_eindir::scc_rejected_count() - rejected, 1);
+        assert_eq!(rgpot_eindir::scc_failed_call_count() - failed, 1);
     }
 
     #[test]
@@ -487,6 +496,7 @@ mod tests {
         let pot = handle(14, 2);
         let x = silicon_pair(2.3);
         let rejected = rgpot_eindir::scc_rejected_count();
+        let failed = rgpot_eindir::scc_failed_call_count();
         let guard = pot.lock().expect("pot");
         let (energy, gradient) = evaluate(&guard, x.view());
         let wrapper = guard.wrapper();
@@ -495,6 +505,7 @@ mod tests {
         let bits = |g: &Array1<f64>| g.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&gradient), bits(&split.1));
         assert_eq!(rgpot_eindir::scc_rejected_count(), rejected);
+        assert_eq!(rgpot_eindir::scc_failed_call_count(), failed);
     }
 
     #[test]

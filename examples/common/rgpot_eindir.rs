@@ -34,11 +34,28 @@ pub(crate) const OVERLAP_SEPARATION_A: f64 = 0.35;
 pub(crate) const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
 
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
+static SCC_FAILED_CALLS: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
 
 /// How many xtb calls were rejected because the SCC did not return a finite result.
 pub(crate) fn scc_rejected_count() -> usize {
     SCC_REJECTED.load(Ordering::Relaxed)
+}
+
+/// How many objective calls through [`RgpotObjective::wrapper`] had an SCC
+/// that did not converge, each counted once however many xtb evaluations
+/// it ran.
+pub(crate) fn scc_failed_call_count() -> usize {
+    SCC_FAILED_CALLS.load(Ordering::Relaxed)
+}
+
+fn counting_scc_failure<R>(call: impl FnOnce() -> R) -> R {
+    let before = SCC_REJECTED.load(Ordering::Relaxed);
+    let answer = call();
+    if SCC_REJECTED.load(Ordering::Relaxed) != before {
+        SCC_FAILED_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+    answer
 }
 
 /// How many calls were refused before xtb because two atoms occupied the same place.
@@ -623,13 +640,13 @@ impl Objective<f64> for RgpotWrapper<'_> {
     }
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
-        self.0.eval(x)
+        counting_scc_failure(|| self.0.eval(x))
     }
 }
 
 impl Gradient<f64> for RgpotWrapper<'_> {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        self.0.grad(x)
+        counting_scc_failure(|| self.0.grad(x))
     }
 
     fn dim(&self) -> usize {
@@ -641,12 +658,14 @@ impl DifferentiableObjective<f64> for RgpotWrapper<'_> {
     /// A failed energy answers with the zero gradient eindir's `grad`
     /// writes for a failed call.
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let energy = self.0.eval(x);
-        if energy.is_finite() {
-            (energy, self.0.grad(x))
-        } else {
-            (energy, Array1::zeros(Objective::dim(&self.0)))
-        }
+        counting_scc_failure(|| {
+            let energy = self.0.eval(x);
+            if energy.is_finite() {
+                (energy, self.0.grad(x))
+            } else {
+                (energy, Array1::zeros(Objective::dim(&self.0)))
+            }
+        })
     }
 }
 

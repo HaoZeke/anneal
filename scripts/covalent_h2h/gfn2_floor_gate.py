@@ -8,14 +8,21 @@ per core from ``--first-core``, the arms of a seed back to back so all
 see the same machine. The xtb engine comes from the environment
 (``RGPOT_XTB_ENGINE``, ``LD_LIBRARY_PATH``) at ``RGPOT_XTB_ETEMP``. Each
 job appends the example's final row, its arm, the arm's code revision and
-the host to ``--rows``.
+the host to ``--rows``. A rows file keeps the header it was started with,
+so a row with another column count, or a file with another header, is
+refused rather than appended.
 
-``summary`` reads those rows. Per system it reports hits, calls to hit
-(a miss counts its budget), the SCC failure rate (``scc_rejected`` over
-``charged``) and the best energy, with Fisher's exact test on hits and a
+``summary`` reads those rows, from one file or several. Per system it
+reports hits, calls to hit (a miss counts its budget), the SCC failure
+rate and the best energy, with Fisher's exact test on hits and a
 two-sided Mann-Whitney test on the rest. A metric is lost when the second
 arm hits fewer times, or is worse with p below 0.05. A system is lost
 when the two arms do not hold the same seeds.
+
+The SCC failure rate is ``scc_failed_calls`` over ``charged`` where both
+arms have that column. Rows from before it have only ``scc_rejected``,
+the xtb evaluations whose SCC failed, and those builds ran two for each
+failed call; a comparison that involves them uses ``scc_rejected``.
 """
 
 import argparse
@@ -33,7 +40,7 @@ REFERENCE = {"si13": -599.34546694, "c20": -1148.85383633}
 EXAMPLE_FIELDS = [
     "system", "code", "seed", "budget", "hit", "evals_to_hit", "charged",
     "probe_calls", "wall_s", "best", "pot_s", "outside_s", "pot_per_eval_s",
-    "outside_per_eval_s", "scc_rejected", "geometry_rejected",
+    "outside_per_eval_s", "scc_rejected", "geometry_rejected", "scc_failed_calls",
 ]
 FIELDS = ["arm", *EXAMPLE_FIELDS, "code_revision", "host"]
 
@@ -80,6 +87,10 @@ def run(args):
             if fields is None:
                 print(f"{system} {name} {seed}: no final row", flush=True)
                 continue
+            if len(fields) != len(EXAMPLE_FIELDS):
+                print(f"{system} {name} {seed}: {len(fields)} fields, not "
+                      f"{len(EXAMPLE_FIELDS)}", flush=True)
+                continue
             with lock, open(args.rows, "a", newline="") as handle:
                 csv.writer(handle, lineterminator="\n").writerow(
                     [name, *fields, revision, host])
@@ -94,8 +105,10 @@ def run(args):
 
 
 def summary(args):
-    with open(args.rows) as handle:
-        rows = list(csv.DictReader(handle))
+    rows = []
+    for path in args.rows:
+        with open(path) as handle:
+            rows.extend(csv.DictReader(handle))
     base, other = args.arms
     lost = []
     for system in sorted({r["system"] for r in rows}, reverse=True):
@@ -107,23 +120,35 @@ def summary(args):
             print(f"{system}: {base} has seeds {seeds[base]}, {other} has {seeds[other]}")
             lost.append(f"{system} seeds")
             continue
+        runs = {name: [r for r in rows if r["system"] == system and r["arm"] == name]
+                for name in (base, other)}
+        per_call = all(r.get("scc_failed_calls") for name in runs for r in runs[name])
+        scc_field = "scc_failed_calls" if per_call else "scc_rejected"
         metric = {}
         for name in (base, other):
-            runs = [r for r in rows if r["system"] == system and r["arm"] == name]
-            scc = sum(int(r["scc_rejected"]) for r in runs)
-            charged = sum(int(r["charged"]) for r in runs)
+            arm_runs = runs[name]
+            scc = sum(int(r["scc_rejected"]) for r in arm_runs)
+            charged = sum(int(r["charged"]) for r in arm_runs)
             metric[name] = {
-                "n": len(runs),
-                "hits": sum(r["hit"] == "true" for r in runs),
-                "calls": [int(r["evals_to_hit"]) for r in runs],
-                "scc": [int(r["scc_rejected"]) / int(r["charged"]) if int(r["charged"]) else 0.0 for r in runs],
-                "best": [float(r["best"]) for r in runs],
+                "n": len(arm_runs),
+                "hits": sum(r["hit"] == "true" for r in arm_runs),
+                "calls": [int(r["evals_to_hit"]) for r in arm_runs],
+                "scc": [int(r[scc_field]) / int(r["charged"]) if int(r["charged"]) else 0.0
+                        for r in arm_runs],
+                "best": [float(r["best"]) for r in arm_runs],
             }
             m = metric[name]
             rate = f"{100 * scc / charged:.2f}%" if charged else "no calls"
+            if all(r.get("scc_failed_calls") for r in arm_runs):
+                failed = sum(int(r["scc_failed_calls"]) for r in arm_runs)
+                failed_rate = f"{100 * failed / charged:.2f}%" if charged else "no calls"
+                scc_text = (f"SCC-failed calls {failed}/{charged} ({failed_rate}), "
+                            f"{scc} xtb evaluations")
+            else:
+                scc_text = f"SCC failures {scc}/{charged} ({rate})"
             print(f"{system} {name}: hits {m['hits']}/{m['n']}, median calls to hit "
-                  f"{statistics.median(m['calls'])}, SCC failures {scc}/{charged} "
-                  f"({rate}), median best {statistics.median(m['best']):.6f} eV, "
+                  f"{statistics.median(m['calls'])}, {scc_text}, "
+                  f"median best {statistics.median(m['best']):.6f} eV, "
                   f"lowest {min(m['best']):.6f} eV")
         from scipy.stats import fisher_exact, mannwhitneyu
 
@@ -161,13 +186,18 @@ def main():
     go.add_argument("--out", type=Path, required=True)
     go.add_argument("--rows", type=Path, required=True)
     report = sub.add_parser("summary")
-    report.add_argument("rows", type=Path)
+    report.add_argument("rows", type=Path, nargs="+")
     report.add_argument("--arms", nargs=2, default=["base", "floor"])
     args = parser.parse_args()
     if args.command == "run":
         if not args.rows.exists() or args.rows.stat().st_size == 0:
             with open(args.rows, "a", newline="") as handle:
                 csv.writer(handle, lineterminator="\n").writerow(FIELDS)
+        with open(args.rows, newline="") as handle:
+            header = next(csv.reader(handle))
+        if header != FIELDS:
+            parser.error(f"{args.rows} has the header {','.join(header)}; "
+                         f"start a new rows file for {','.join(FIELDS)}")
         run(args)
     else:
         summary(args)
