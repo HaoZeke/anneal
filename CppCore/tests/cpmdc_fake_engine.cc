@@ -110,6 +110,8 @@ long long g_last_orbital_key = kNoOrbitalKey;
 double g_last_initial_orbital_state = -1.0;
 double g_last_final_orbital_state = -1.0;
 
+bool refused_orbital_key(long long key) { return key == -99; }
+
 } // namespace
 
 extern "C" {
@@ -182,16 +184,14 @@ int cpmdc_session_set_params(CPMDCSession *session, const void *params_capnp,
 void cpmdc_session_destroy(CPMDCSession *session) { delete session; }
 
 int cpmdc_session_select_orbitals(CPMDCSession *session, long long key) {
-  if (session == nullptr)
-    return -1;
-  if (key == -99)
+  if (session == nullptr || refused_orbital_key(key))
     return -1;
   auto it = session->orbital_store.find(key);
-  if (it == session->orbital_store.end()) {
-    session->orbital_store.emplace(key, session->orbital_state);
-  } else {
+  if (it != session->orbital_store.end())
     session->orbital_state = it->second;
-  }
+  // A key with no converged evaluation is not stored yet. The next
+  // evaluation starts from the orbitals already stored, and the result
+  // call records them only after it converges.
   session->orbital_key = key;
   session->has_orbital_key = true;
   return 0;
@@ -199,7 +199,8 @@ int cpmdc_session_select_orbitals(CPMDCSession *session, long long key) {
 
 int cpmdc_session_copy_orbitals(CPMDCSession *session, long long from_key,
                                 long long to_key) {
-  if (session == nullptr)
+  if (session == nullptr || refused_orbital_key(from_key) ||
+      refused_orbital_key(to_key))
     return -1;
   auto it = session->orbital_store.find(from_key);
   if (it == session->orbital_store.end())
