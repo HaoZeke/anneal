@@ -242,9 +242,16 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
   const auto hb = reinterpret_cast<std::uintptr_t>(hv_out);
   const std::uintptr_t bytes =
       static_cast<std::uintptr_t>(nAtoms) * 3 * sizeof(double);
-  if (db < hb + bytes && hb < db + bytes) {
+  const auto overlaps = [hb, bytes](const void *input,
+                                    std::uintptr_t inputBytes) {
+    const auto begin = reinterpret_cast<std::uintptr_t>(input);
+    return hb < begin + inputBytes && begin < hb + bytes;
+  };
+  if (overlaps(direction, bytes) || overlaps(positions, bytes) ||
+      overlaps(atomicNrs, static_cast<std::uintptr_t>(nAtoms) * sizeof(int)) ||
+      overlaps(box, 9 * sizeof(double))) {
     return fail(pot, RGPOT_ENGINE_ERR_INVALID,
-                "direction and hv_out overlap");
+                "HVP output overlaps an input buffer");
   }
   try {
     RgpotEnginePot::CallGuard guard(*pot);

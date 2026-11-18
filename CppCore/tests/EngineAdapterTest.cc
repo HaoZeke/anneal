@@ -267,6 +267,23 @@ TEST_CASE("analytic HVP rejects overlapping direction and output buffers",
   REQUIRE(s.hvp(pot, 2, pos, kZ.data(), buf.data() + 1, buf.data(),
                 kBox.data()) == RGPOT_ENGINE_ERR_INVALID);
   REQUIRE(buf == initial);
+
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), buf.data(),
+                const_cast<double *>(pos), kBox.data()) ==
+          RGPOT_ENGINE_ERR_INVALID);
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), buf.data(),
+                const_cast<double *>(kBox.data())) == RGPOT_ENGINE_ERR_INVALID);
+  REQUIRE(buf == initial);
+  s.destroy(pot);
+}
+
+TEST_CASE("analytic HVP accepts adjacent buffers", "[engine][adapter]") {
+  Stub &s = stub();
+  RgpotEnginePot *pot = make(s, 0);
+  const double pos[6] = {1, 2, 3, 4, 5, 6};
+  std::array<double, 12> buffers = {0.2, -0.3, 0.4, 0.1, -0.5, 0.7};
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), buffers.data(), buffers.data() + 6,
+                kBox.data()) == RGPOT_ENGINE_OK);
   s.destroy(pot);
 }
 
