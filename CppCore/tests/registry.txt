@@ -93,6 +93,7 @@ CuH2test | tests fortran | unit cuh2_test CuH2PotTest.cc |
 RPCTest | tests rpc | unit test_rpc CapnpAdapterTest.cc |
 RPCClientTest | tests client | unit test_rpc_client BridgeStressTest.cc |
 test_list_parity | tests python | custom |
+test_list_parity_selftest | tests python | py CppCore/tests/check_test_registry.py selftest |
 
 # The library's exported surface.
 FortranSymbolAudit | tests core fortran linux | custom |

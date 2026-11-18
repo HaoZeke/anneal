@@ -8,6 +8,7 @@ test_list_parity test and passes the features it was configured with:
   check_test_registry.py meson BUILD_DIR FEATURE=0|1...
   check_test_registry.py cmake BUILD_DIR --ctest CTEST FEATURE=0|1...
   check_test_registry.py lint
+  check_test_registry.py selftest
 
 It fails when a registered test has no entry, when an entry whose gate
 holds was not registered, when a test was registered although its gate
@@ -319,16 +320,152 @@ def parse_features(words: list[str]) -> tuple[dict[str, bool], list[str]]:
     return features, errors
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("system", choices=("meson", "cmake", "lint"))
-    parser.add_argument("build", nargs="?", type=Path)
-    parser.add_argument("features", nargs="*", metavar="FEATURE=0|1")
+    parser.add_argument("system", choices=("meson", "cmake", "lint", "selftest"))
+    parser.add_argument("rest", nargs="*", metavar="FEATURE=0|1")
     parser.add_argument("--ctest", default="ctest")
     parser.add_argument("--list", type=Path, default=os.environ.get("RGPOT_TEST_LIST"))
-    args = parser.parse_args()
-    if args.system != "lint" and args.build is None:
-        parser.error(f"{args.system} needs the build directory")
+    return parser
+
+
+def parse_cli(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = build_parser()
+    args = parser.parse_intermixed_args(argv)
+    if args.system in ("lint", "selftest"):
+        if args.rest:
+            parser.error(f"{args.system} takes no positional arguments: {' '.join(args.rest)}")
+        args.build = None
+        args.features = []
+    else:
+        if not args.rest:
+            parser.error(f"{args.system} needs the build directory")
+        args.build = Path(args.rest[0])
+        args.features = args.rest[1:]
+    del args.rest
+    return args
+
+
+def selftest() -> int:
+    import contextlib
+    import io
+    import stat
+    import tempfile
+    import unittest
+
+    class CliAndParitySelfTest(unittest.TestCase):
+        def test_cmake_accepts_features_after_ctest_flag(self) -> None:
+            args = parse_cli(
+                [
+                    "cmake",
+                    "/tmp/build",
+                    "--ctest",
+                    "/usr/bin/ctest",
+                    "tests=1",
+                    "core=0",
+                    "python=1",
+                ]
+            )
+            self.assertEqual(args.system, "cmake")
+            self.assertEqual(args.build, Path("/tmp/build"))
+            self.assertEqual(args.ctest, "/usr/bin/ctest")
+            self.assertEqual(args.features, ["tests=1", "core=0", "python=1"])
+
+        def test_intermixed_options_anywhere_in_argv(self) -> None:
+            args = parse_cli(
+                [
+                    "meson",
+                    "/tmp/meson-build",
+                    "tests=1",
+                    "--list",
+                    "/tmp/out.txt",
+                    "core=1",
+                ]
+            )
+            self.assertEqual(args.system, "meson")
+            self.assertEqual(args.build, Path("/tmp/meson-build"))
+            self.assertEqual(args.list, Path("/tmp/out.txt"))
+            self.assertEqual(args.features, ["tests=1", "core=1"])
+
+            before = parse_cli(
+                [
+                    "--ctest",
+                    "custom-ctest",
+                    "cmake",
+                    "/tmp/cmake-build",
+                    "tests=0",
+                ]
+            )
+            self.assertEqual(before.ctest, "custom-ctest")
+            self.assertEqual(before.build, Path("/tmp/cmake-build"))
+            self.assertEqual(before.features, ["tests=0"])
+
+        def test_missing_build_or_extra_lint_args_fail(self) -> None:
+            for bad in (
+                ["cmake"],
+                ["cmake", "--ctest", "/usr/bin/ctest"],
+                ["meson"],
+                ["lint", "tests=1"],
+                ["selftest", "extra"],
+            ):
+                with self.subTest(bad=bad):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        with self.assertRaises(SystemExit) as ctx:
+                            parse_cli(bad)
+                    self.assertEqual(ctx.exception.code, 2)
+
+        def test_cmake_main_with_intermixed_ctest_and_features(self) -> None:
+            entries, problems = parse(REGISTRY)
+            self.assertEqual(problems, [])
+            all_atoms = sorted(
+                {a for e in entries.values() for c in e.gate for a in c} - {PROBE}
+            )
+            with tempfile.TemporaryDirectory() as tmp:
+                build = Path(tmp) / "build"
+                build.mkdir()
+                fake_ctest = Path(tmp) / "fake_ctest.py"
+                payload = {
+                    "backtraceGraph": {
+                        "files": [str(ROOT / "CppCore" / "tests" / "tests.cmake")],
+                        "nodes": [{"file": 0}],
+                    },
+                    "tests": [],
+                }
+                fake_ctest.write_text(
+                    f"#!{sys.executable}\n"
+                    "import json, sys\n"
+                    "assert sys.argv[1:] == ['--show-only=json-v1']\n"
+                    f"print(json.dumps({payload!r}))\n"
+                )
+                fake_ctest.chmod(fake_ctest.stat().st_mode | stat.S_IXUSR)
+                out_list = Path(tmp) / "cmake-list.txt"
+                feature_args = [f"{atom}=0" for atom in all_atoms]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rc = main(
+                        [
+                            "cmake",
+                            str(build),
+                            "--ctest",
+                            str(fake_ctest),
+                            *feature_args[:3],
+                            "--list",
+                            str(out_list),
+                            *feature_args[3:],
+                        ]
+                    )
+                self.assertEqual(rc, 0)
+                self.assertTrue(out_list.is_file())
+                self.assertIn("feature tests=0\n", out_list.read_text())
+
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(CliAndParitySelfTest)
+    result = unittest.TextTestRunner(stream=sys.stdout, verbosity=2).run(suite)
+    return 0 if result.wasSuccessful() else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_cli(argv)
+    if args.system == "selftest":
+        return selftest()
 
     entries, problems = parse(REGISTRY)
     features, errors = parse_features(args.features)
