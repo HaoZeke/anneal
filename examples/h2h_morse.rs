@@ -143,32 +143,27 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     };
     let budget = env_budget().unwrap_or(spec.budget);
+    if let Err(err) = Config::check_removed_env() {
+        eprintln!("{err}");
+        return 2;
+    }
     let mut cfg = Config::recommended(spec.n);
-    // Unset leaves the preset's structure priors on. `0` turns off the
-    // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
-    // labelled core, the motif reseed, stall symmetrisation (and its
-    // Ih withholding) and the continuous-symmetry reseed.
+    // Unset leaves the preset's SOAP prior, stall symmetrisation, and
+    // continuous-symmetry proposal on. `0` turns them off; `soap` turns off
+    // only the SOAP proposal. Removed prior names fail fast.
     if let Ok(text) = std::env::var("H2H_PRIORS") {
-        let text = text.trim();
-        let all_off = text == "0" || text == "none";
-        let listed = |name: &str| all_off || text.split(',').any(|token| token.trim() == name);
-        if listed("soap") {
+        let switches = match Config::parse_prior_switches(&text) {
+            Ok(switches) => switches,
+            Err(err) => {
+                eprintln!("{err}");
+                return 2;
+            }
+        };
+        if !switches.soap {
             cfg.prior_soap = false;
             cfg.soap_mode = SoapProposalMode::Off;
         }
-        if listed("reseed") {
-            cfg.prior_reseed = false;
-        }
-        if listed("growth") {
-            cfg.prior_growth = false;
-        }
-        if listed("core") {
-            cfg.prior_core = false;
-        }
-        if listed("motif") {
-            cfg.prior_motif = false;
-        }
-        if all_off {
+        if switches.all_off {
             cfg.symmetrise_on_stall = false;
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
         }

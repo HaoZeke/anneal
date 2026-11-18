@@ -78,6 +78,7 @@ enum Arm {
 
 impl Arm {
     fn from_env() -> Result<Self, String> {
+        Config::check_removed_env().map_err(|err| err.to_string())?;
         let priors = std::env::var("H2H_PRIORS").unwrap_or_else(|_| "1".to_string());
         let arm = std::env::var("H2H_ARM").unwrap_or_else(|_| "recommended".to_string());
         match (arm.as_str(), priors.as_str()) {
@@ -277,17 +278,13 @@ fn pair_range(
 ///
 /// The temperature is a Lennard-Jones calibration too, so the budget-window
 /// law replaces it. Orbit completion is symmetry the structure itself
-/// carries, so it stays, on every new basin and as an allocator arm. The
-/// five prior gates go: the fivefold SOAP move, the icosahedral reseed,
-/// lattice regrowth, the labelled core and the motif reseed.
+/// carries, so it stays, on every new basin and as an allocator arm.
+/// The SOAP prior, stall symmetrisation, continuous-symmetry projection,
+/// energy lattice, and compacted surface are turned off.
 fn without_priors(mut cfg: Config) -> Config {
     cfg.orbit_complete_on_new = true;
     cfg.orbit_arm = true;
     cfg.prior_soap = false;
-    cfg.prior_reseed = false;
-    cfg.prior_growth = false;
-    cfg.prior_core = false;
-    cfg.prior_motif = false;
     cfg.symmetrise_on_stall = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
     cfg.energy_lattice = false;
@@ -316,6 +313,10 @@ fn general(n: usize, length: f64, energy: f64) -> Config {
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
+    if let Err(err) = Config::check_removed_env() {
+        eprintln!("{err}");
+        std::process::exit(2);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("run");
     let status = match cmd {

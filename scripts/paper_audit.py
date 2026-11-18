@@ -2742,10 +2742,14 @@ def manuscript_new(audit: Audit) -> None:
                      "SOAP_CUTOFF: f64 = 3.5;", "SCREEN_MARGIN: f64 = 2.0;"):
         audit.said(preset, fragment)
     config = "src/methods/cluster_hopping/config.rs"
-    for fragment in ("bias_gamma: 5.0,", "tabu_capacity: 8,", "interval: 10,", "reseed_hops: 5,", "prior_soap: true,",
-                     "prior_reseed: true,", "prior_growth: true,", "prior_core: true,", "prior_motif: true,",
-                     "calibrated_screen: true,"):
+    for fragment in ("bias_gamma: 5.0,", "tabu_capacity: 8,", "ContinuousSymmetry::Measure { interval: 10 };",
+                     "prior_soap: true,", "calibrated_screen: true,"):
         audit.said(config, fragment)
+    config_src = audit.text(config)
+    for removed in ("reseed_hops: 5,", "pub prior_reseed:", "pub prior_growth:", "pub prior_core:",
+                    "pub prior_handover:", "pub prior_motif:"):
+        audit.record(removed not in config_src, config, f"inert {removed.rstrip(':,')} is removed",
+                     "absent", "absent" if removed not in config_src else "present")
     audit.said("src/methods/cluster_hopping.rs", "const WINDOW: usize = 256;")
     audit.said("src/methods/cluster_hopping.rs", "const WARMUP: usize = 8;")
     audit.said("src/methods/cluster_hopping.rs", "const QUANTILE: f64 = 0.9;")

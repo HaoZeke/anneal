@@ -126,9 +126,11 @@ pub fn catalog_transport_is_shared(
 impl CampaignConfig {
     /// Parse and validate a campaign file's contents.
     pub fn parse(text: &str) -> Result<Self, CampaignError> {
+        crate::methods::cluster_hopping::Config::validate_toml_keys(text)
+            .map_err(|e| CampaignError(format!("campaign file rejected: {e}")))?;
         let cfg: CampaignConfig = toml::from_str(text)
             .map_err(|e| CampaignError(format!("campaign file rejected: {e}")))?;
-        for key in cfg.extra.keys() {
+        for (key, value) in &cfg.extra {
             let ok = !key.is_empty()
                 && key
                     .chars()
@@ -139,6 +141,11 @@ impl CampaignConfig {
                      (SCREAMING_SNAKE_CASE)"
                 )));
             }
+            crate::methods::cluster_hopping::Config::check_removed_env_vars([(
+                key.as_str(),
+                value.as_str(),
+            )])
+            .map_err(|e| CampaignError(format!("campaign file rejected: {e}")))?;
         }
         if cfg.campaign.is_empty() {
             return Err(CampaignError("campaign name is empty".into()));

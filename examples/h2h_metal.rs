@@ -242,7 +242,10 @@ fn reference_of(spec: &Spec) -> f64 {
         .unwrap_or(spec.reference)
 }
 
-fn config(spec: &Spec) -> Config {
+fn try_config(
+    spec: &Spec,
+) -> Result<Config, anneal_core::methods::cluster_hopping::RemovedConfigKeyError> {
+    Config::check_removed_env()?;
     let mut cfg = match spec.kind {
         Kind::Zinc => Config::recommended(spec.n),
         Kind::CopperGold { n_copper } => {
@@ -263,28 +266,14 @@ fn config(spec: &Spec) -> Config {
         .and_then(|text| text.parse().ok())
         .unwrap_or(8)
         .max(1);
-    // Empty leaves every prior on. `0` turns the five priors off.
-    // A comma list turns off the named ones: soap, reseed, growth,
-    // core, motif. The plane move stays off unless H2H_GENERAL=1.
+    // Empty leaves `prior_soap` on. `0`, `none`, or `soap` turns it off;
+    // removed prior names error rather than being ignored. The plane move
+    // stays off unless H2H_GENERAL=1.
     if let Ok(text) = std::env::var("H2H_PRIORS") {
-        let text = text.trim();
-        let all_off = text == "0" || text == "none";
-        let listed = |name: &str| all_off || text.split(',').any(|token| token.trim() == name);
-        if listed("soap") {
+        let switches = Config::parse_prior_switches(&text)?;
+        if !switches.soap {
             cfg.prior_soap = false;
             cfg.soap_mode = anneal_core::methods::cluster_hopping::SoapProposalMode::Off;
-        }
-        if listed("reseed") {
-            cfg.prior_reseed = false;
-        }
-        if listed("growth") {
-            cfg.prior_growth = false;
-        }
-        if listed("core") {
-            cfg.prior_core = false;
-        }
-        if listed("motif") {
-            cfg.prior_motif = false;
         }
     }
     // Empty leaves the labelled-cluster search on. `0` turns its three
@@ -304,13 +293,6 @@ fn config(spec: &Spec) -> Config {
             cfg.homotop_window = false;
         }
     }
-    // `1` stops the core cuts once they stall and hands their best to the
-    // walk; `0` holds them to the end.
-    match std::env::var("H2H_HANDOVER").as_deref() {
-        Ok("1") => cfg.prior_handover = true,
-        Ok("0") => cfg.prior_handover = false,
-        _ => {}
-    }
     // `1` reorders a stalled incumbent from its own packing; `0` does not.
     match std::env::var("H2H_REORDER").as_deref() {
         Ok("1") => cfg.homotop_reorder = true,
@@ -320,7 +302,12 @@ fn config(spec: &Spec) -> Config {
     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }
-    cfg
+    Ok(cfg)
+}
+
+#[cfg(test)]
+fn config(spec: &Spec) -> Config {
+    try_config(spec).expect("valid environment")
 }
 
 fn cmd_run(args: &[String]) -> i32 {
@@ -332,7 +319,13 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     };
     let budget = env_budget().unwrap_or(spec.budget);
-    let cfg = config(&spec);
+    let cfg = match try_config(&spec) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            eprintln!("{err}");
+            return 2;
+        }
+    };
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)
         && let Err(err) = write_coords(path, &start)
@@ -372,7 +365,13 @@ fn cmd_coords(args: &[String]) -> i32 {
         eprintln!("coords needs a path");
         return 2;
     };
-    let cfg = config(&spec);
+    let cfg = match try_config(&spec) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            eprintln!("{err}");
+            return 2;
+        }
+    };
     let start = start_of(&cfg, spec.n, seed);
     match write_coords(path, &start) {
         Ok(()) => 0,

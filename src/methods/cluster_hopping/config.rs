@@ -162,8 +162,12 @@ pub enum SoapProposalMode {
 }
 
 /// Deterministic continuous-symmetry proposal inserted into basin hopping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
-#[serde(tag = "group", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "group",
+    rename_all = "snake_case",
+    try_from = "WireContinuousSymmetry"
+)]
 pub enum ContinuousSymmetry {
     /// No continuous-symmetry proposal.
     #[default]
@@ -177,16 +181,128 @@ pub enum ContinuousSymmetry {
         interval: usize,
     },
     /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
-    /// symmetry measure. On an icosahedral plateau, `reseed_hops` without a
-    /// new incumbent draws a fresh cluster, closes its core orbits, projects,
-    /// and quenches. Zero disables that reseed. GMIN's `NSYMINTERVAL` default
-    /// is the same ten quenches (`keywords.f90`).
+    /// symmetry measure. GMIN's `NSYMINTERVAL` default is the same ten
+    /// quenches (`keywords.f90`).
     Measure {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
-        /// Hops without a new incumbent before an icosahedral reseed.
-        reseed_hops: usize,
     },
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "group", rename_all = "snake_case", deny_unknown_fields)]
+enum WireContinuousSymmetry {
+    Off,
+    Inversion {
+        interval: usize,
+    },
+    Measure {
+        interval: usize,
+        #[serde(default)]
+        reseed_hops: Option<serde::de::IgnoredAny>,
+    },
+}
+
+impl TryFrom<WireContinuousSymmetry> for ContinuousSymmetry {
+    type Error = RemovedConfigKeyError;
+
+    fn try_from(wire: WireContinuousSymmetry) -> Result<Self, Self::Error> {
+        match wire {
+            WireContinuousSymmetry::Off => Ok(Self::Off),
+            WireContinuousSymmetry::Inversion { interval } => Ok(Self::Inversion { interval }),
+            WireContinuousSymmetry::Measure {
+                interval,
+                reseed_hops,
+            } => {
+                if reseed_hops.is_some() {
+                    return Err(RemovedConfigKeyError::removed_key("reseed_hops"));
+                }
+                Ok(Self::Measure { interval })
+            }
+        }
+    }
+}
+
+/// Inert structure-prior configuration keys removed from [`Config`] and
+/// [`ContinuousSymmetry`].
+pub const REMOVED_PRIOR_KEYS: &[&str] = &[
+    "prior_reseed",
+    "prior_growth",
+    "prior_core",
+    "prior_handover",
+    "prior_motif",
+    "reseed_hops",
+];
+
+/// Error returned when an old configuration or environment sets a removed
+/// structure-prior key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedConfigKeyError {
+    /// Name or path of the rejected key or switch.
+    pub key: String,
+    /// Actionable diagnostic message.
+    pub message: String,
+}
+
+impl RemovedConfigKeyError {
+    pub(crate) fn removed_key(key: &str) -> Self {
+        let message = match key {
+            "reseed_hops" | "continuous_symmetry.reseed_hops" => format!(
+                "config key `{key}` was removed (inert since 1c1b1238); ContinuousSymmetry::Measure takes only `interval`"
+            ),
+            _ => format!(
+                "config key `{key}` was removed (inert since 1c1b1238); remove `{key}` (only `prior_soap` remains)"
+            ),
+        };
+        Self {
+            key: key.to_string(),
+            message,
+        }
+    }
+
+    pub(crate) fn removed_switch(token: &str) -> Self {
+        Self {
+            key: token.to_string(),
+            message: format!(
+                "prior switch `{token}` was removed (inert since 1c1b1238); only `soap` (or `0`, `none`, `1`) is supported"
+            ),
+        }
+    }
+
+    pub(crate) fn unknown_switch(token: &str) -> Self {
+        Self {
+            key: token.to_string(),
+            message: format!(
+                "unknown prior switch `{token}`; expected `soap`, `0`, `none`, or `1`"
+            ),
+        }
+    }
+
+    pub(crate) fn removed_env(var: &str) -> Self {
+        Self {
+            key: var.to_string(),
+            message: format!(
+                "environment variable `{var}` was removed (inert since 1c1b1238); unset `{var}`"
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for RemovedConfigKeyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RemovedConfigKeyError {}
+
+/// Parsed `H2H_PRIORS` setting after rejecting removed prior switches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PriorSwitches {
+    /// Keep [`Config::prior_soap`] enabled.
+    pub soap: bool,
+    /// `0` or `none` was passed, disabling all structure-prior hooks.
+    pub all_off: bool,
 }
 
 /// Which core orbit completion ([`Config::orbit_complete_on_new`]) reads
@@ -555,8 +671,7 @@ pub struct Config {
     /// preset leaves the fraction core; [`Config::with_dual_orbit_core`]
     /// opts in to both. Fraction is omitted from the resolved JSON, so a
     /// config that never sets this resolves as it did before the field.
-    /// Core symmetrisation and the continuous-symmetry reseed keep the
-    /// fraction core whatever this is.
+    /// Core symmetrisation keeps the fraction core whatever this is.
     #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
     pub orbit_core: OrbitCore,
     /// Surface hops from each new lowest structure: every least-bound atom
@@ -975,27 +1090,6 @@ pub struct Config {
     /// Fivefold SOAP proposal. On in the paper preset.
     #[serde(skip_serializing_if = "is_true")]
     pub prior_soap: bool,
-    /// Icosahedral symmetry reseed. On in the paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_reseed: bool,
-    /// Stall regrowth from a lattice order. On in the paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_growth: bool,
-    /// Labelled close-packed core cuts. On in the paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_core: bool,
-    /// The core cuts stop once they stall and the walk continues from the
-    /// best of them.
-    ///
-    /// The cuts get at most half of what is left. Every cut is arranged,
-    /// and before each refinement the cuts stop when the calls since their
-    /// last lower quench exceed the calls it took to reach it. On in the
-    /// paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_handover: bool,
-    /// Half-budget motif reseed. On in the paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_motif: bool,
     /// Plane cap and slab moves, a temperature taken from the
     /// population's energy spread, and a fingerprint taboo.
     ///
@@ -1460,6 +1554,161 @@ impl Config {
         Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
     }
 
+    /// Reject JSON configuration payloads that still set removed inert prior keys.
+    pub fn validate_json_keys(text: &str) -> Result<(), RemovedConfigKeyError> {
+        let value: serde_json::Value =
+            serde_json::from_str(text).map_err(|err| RemovedConfigKeyError {
+                key: "<json>".into(),
+                message: format!("invalid configuration JSON: {err}"),
+            })?;
+        fn visit_json(
+            prefix: &str,
+            value: &serde_json::Value,
+        ) -> Result<(), RemovedConfigKeyError> {
+            match value {
+                serde_json::Value::Object(map) => {
+                    for (key, child) in map {
+                        let path = if prefix.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{prefix}.{key}")
+                        };
+                        if REMOVED_PRIOR_KEYS.contains(&key.as_str()) {
+                            return Err(RemovedConfigKeyError::removed_key(&path));
+                        }
+                        visit_json(&path, child)?;
+                    }
+                    Ok(())
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        visit_json(prefix, item)?;
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        }
+        visit_json("", &value)
+    }
+
+    /// Reject TOML configuration payloads that still set removed inert prior keys.
+    pub fn validate_toml_keys(text: &str) -> Result<(), RemovedConfigKeyError> {
+        let value: toml::Value = toml::from_str(text).map_err(|err| RemovedConfigKeyError {
+            key: "<toml>".into(),
+            message: format!("invalid configuration TOML: {err}"),
+        })?;
+        fn visit_toml(prefix: &str, value: &toml::Value) -> Result<(), RemovedConfigKeyError> {
+            match value {
+                toml::Value::Table(table) => {
+                    for (key, child) in table {
+                        let path = if prefix.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{prefix}.{key}")
+                        };
+                        if REMOVED_PRIOR_KEYS.contains(&key.as_str()) {
+                            return Err(RemovedConfigKeyError::removed_key(&path));
+                        }
+                        visit_toml(&path, child)?;
+                    }
+                    Ok(())
+                }
+                toml::Value::Array(items) => {
+                    for item in items {
+                        visit_toml(prefix, item)?;
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        }
+        visit_toml("", &value)
+    }
+
+    /// Parse a `H2H_PRIORS` specification, rejecting removed prior names
+    /// (`reseed`, `growth`, `core`, `handover`, `motif`) rather than ignoring them.
+    pub fn parse_prior_switches(spec: &str) -> Result<PriorSwitches, RemovedConfigKeyError> {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() || trimmed == "1" {
+            return Ok(PriorSwitches {
+                soap: true,
+                all_off: false,
+            });
+        }
+        if trimmed == "0" || trimmed == "none" {
+            return Ok(PriorSwitches {
+                soap: false,
+                all_off: true,
+            });
+        }
+        let mut soap = true;
+        for raw in trimmed.split(',') {
+            let token = raw.trim();
+            if token.is_empty() {
+                continue;
+            }
+            match token {
+                "soap" => soap = false,
+                "reseed" | "prior_reseed" | "growth" | "prior_growth" | "core" | "prior_core"
+                | "handover" | "prior_handover" | "motif" | "prior_motif" => {
+                    return Err(RemovedConfigKeyError::removed_switch(token));
+                }
+                other => return Err(RemovedConfigKeyError::unknown_switch(other)),
+            }
+        }
+        Ok(PriorSwitches {
+            soap,
+            all_off: false,
+        })
+    }
+
+    /// Reject removed environment-variable toggles when present in `(key, value)` pairs.
+    pub fn check_removed_env_vars<'a, I>(vars: I) -> Result<(), RemovedConfigKeyError>
+    where
+        I: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        for (key, value) in vars {
+            if value.trim().is_empty() {
+                continue;
+            }
+            match key {
+                "H2H_HANDOVER" | "PRIOR_RESEED" | "PRIOR_GROWTH" | "PRIOR_CORE"
+                | "PRIOR_HANDOVER" | "PRIOR_MOTIF" => {
+                    return Err(RemovedConfigKeyError::removed_env(key));
+                }
+                "H2H_PRIORS" => {
+                    Self::parse_prior_switches(value)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Reject removed environment-variable toggles in the current process environment.
+    pub fn check_removed_env() -> Result<(), RemovedConfigKeyError> {
+        const REMOVED_ENV_NAMES: &[&str] = &[
+            "H2H_HANDOVER",
+            "PRIOR_RESEED",
+            "PRIOR_GROWTH",
+            "PRIOR_CORE",
+            "PRIOR_HANDOVER",
+            "PRIOR_MOTIF",
+        ];
+        for &name in REMOVED_ENV_NAMES {
+            if let Ok(val) = std::env::var(name)
+                && !val.trim().is_empty()
+            {
+                return Err(RemovedConfigKeyError::removed_env(name));
+            }
+        }
+        if let Ok(priors) = std::env::var("H2H_PRIORS") {
+            Self::parse_prior_switches(&priors)?;
+        }
+        Ok(())
+    }
+
     /// Settings for `n_points` at the campaign's measured defaults.
     ///
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
@@ -1550,14 +1799,7 @@ impl Config {
         // value.
         cfg.relax_steps = 1000;
         // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
-        // The same paper's LJ75 table used a restart of about five basin
-        // hopping steps once symmetrisation was on. Both run inside this
-        // chain. The reseed fires only on an icosahedral plateau, so a
-        // face-centred construction is not abandoned.
-        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
-            interval: 10,
-            reseed_hops: 5,
-        };
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
         // Shao, Cheng and Cai, J. Comput. Chem. 25, 1693 (2004): the
         // highest-energy occupied site moves onto a vacant site of the
         // lattice the current structure defines. One arm, at every size.
@@ -1593,10 +1835,7 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
-        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
-            interval: 10,
-            reseed_hops: 5,
-        };
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
         cfg
     }
 
@@ -1931,11 +2170,6 @@ impl Config {
             path_images: 9,
             anneal_diversity: false,
             prior_soap: true,
-            prior_reseed: true,
-            prior_growth: true,
-            prior_core: true,
-            prior_handover: true,
-            prior_motif: true,
             general_collective: false,
             homotop_descent: true,
             homotop_ranked: true,
