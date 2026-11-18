@@ -108,7 +108,7 @@ _deps += m_dep
 # Match the active C++ standard library (libc++ or libstdc++) on Unix hosts.
 _cxx_rt_flag = ''
 if host_system != 'windows'
-    if cppc.has_define('_LIBCPP_VERSION', prefix: '#include <version>')
+    if cppc.get_define('_LIBCPP_VERSION', prefix: '#include <version>') != ''
         _cxx_rt_dep = cppc.find_library('c++', required: false)
         if _cxx_rt_dep.found()
             _cxx_rt_flag = '-lc++'
