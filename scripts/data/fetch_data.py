@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Fetch the paper dumps from the Hugging Face dataset anneal-paper-data.
 
-The dataset repository is ``rgoswami/anneal-paper-data`` (repo type
+The dataset repository is ``HaoZeke/anneal-paper-data`` (repo type
 dataset). ``HF_REVISION`` is the pinned dataset commit. Replace
 ``PINNED_REVISION`` after the upload.
 An environment variable of the same name overrides either value, so
@@ -45,8 +45,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "data" / "hf-files.csv"
 
-# Dataset repository rgoswami/anneal-paper-data, repo type dataset.
-HF_REPO = os.environ.get("HF_REPO", "rgoswami/anneal-paper-data")
+# Dataset repository HaoZeke/anneal-paper-data, repo type dataset.
+HF_REPO = os.environ.get("HF_REPO", "HaoZeke/anneal-paper-data")
 # Pin the dataset git revision after upload.
 HF_REVISION = os.environ.get("HF_REVISION", "PINNED_REVISION")
 
