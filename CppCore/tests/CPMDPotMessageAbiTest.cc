@@ -169,12 +169,19 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   lib.open(path);
   using KeyFn = long long (*)(void);
   using OrbitalFn = double (*)(void);
+  using SelectFn = int (*)(void *, long long);
+  using LastErrorFn = const char *(*)(void);
   auto last_key = lib.sym<KeyFn>("cpmdc_fake_last_orbital_key");
   auto last_initial_orbital =
       lib.sym<OrbitalFn>("cpmdc_fake_last_initial_orbital_state");
   auto last_final_orbital =
       lib.sym<OrbitalFn>("cpmdc_fake_last_final_orbital_state");
+  auto raw_select = lib.sym<SelectFn>("cpmdc_session_select_orbitals");
+  auto raw_last_error = lib.sym<LastErrorFn>("cpmdc_last_error");
   constexpr long long kNone = -1000000;
+
+  REQUIRE(raw_select(nullptr, 0) == -1);
+  REQUIRE(std::string(raw_last_error()).empty());
 
   ::capnp::MallocMessageBuilder msg;
   auto p = msg.initRoot<::CPMDParams>();
@@ -202,6 +209,7 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   // A rejected key does not replace the key re-applied to a new session.
   REQUIRE_THROWS_WITH(pot.selectOrbitals(-99),
                       "CPMD engine refused the orbital key");
+  REQUIRE(std::string(raw_last_error()).empty());
   p.setCutOffRy(80.0);
   REQUIRE(pot.setParams(p.asReader()));
   positions(0, 0) += 0.01;
