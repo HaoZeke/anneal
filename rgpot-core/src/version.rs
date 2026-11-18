@@ -172,6 +172,10 @@ mod tests {
     fn the_minor_counts_the_engine_and_rpc_hvp_exports() {
         assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
         assert_eq!(rgpot_abi_stamp().abi_minor, RGPOT_ABI_VERSION_MINOR);
+        assert_eq!(
+            unsafe { rgpot_abi_compatible(&stamp(1, RGPOT_ABI_PREVIOUS_MINOR, 1)) },
+            1
+        );
         assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 2, 1)) }, 1);
         assert_eq!(
             unsafe { rgpot_abi_compatible(&stamp(1, RGPOT_ABI_VERSION_MINOR + 1, 1)) },
@@ -304,8 +308,12 @@ mod tests {
         }
         #[cfg(feature = "engine")]
         {
+            let engine_abi_previous_minor = crate::engine::ENGINE_ABI_MINOR - 1;
             assert_eq!(crate::engine::ENGINE_ABI_VERSION, 1);
-            assert_eq!(crate::engine::ENGINE_ABI_MINOR, ENGINE_ABI_PREVIOUS_MINOR + 1);
+            assert_eq!(
+                crate::engine::ENGINE_ABI_MINOR,
+                engine_abi_previous_minor + 1
+            );
             assert_eq!(crate::engine::ENGINE_ABI_LAYOUT_REVISION, 1);
             assert_eq!(crate::engine::ENGINE_ERR_UNSUPPORTED, 3);
         }
