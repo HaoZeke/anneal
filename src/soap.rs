@@ -2903,21 +2903,14 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
         let _ = rng;
         // A millionth of the Mackay defect is roundoff. Anything larger
-        // is a direction. A leftover below the defect is a near-closed
-        // shell: the caller's short cap quenches back into that shell, so
-        // the length becomes one median bond of this geometry.
+        // is a direction and the caller's cap sets its length. Stretching
+        // a near-closed shell out to a full bond quenched back onto the
+        // same shelf and dropped the hits the short step had found.
         if nu3_rms < NU3_DEFECT * 1e-6 {
             return x.to_owned();
         }
-        let mut cap = rmsd;
-        if nu3_rms < NU3_DEFECT {
-            let bond = crate::structure::median_nearest_neighbour(x, n_at);
-            if bond.is_finite() && bond > cap {
-                cap = bond;
-            }
-        }
         let dr = nu3_gradient_pullback(x, target.view(), spec, species, mobile);
-        let y = scale_to_cap(x, dr, cap);
+        let y = scale_to_cap(x, dr, rmsd);
         retract_rigid_groups(x, y, groups)
     }
 }
