@@ -66,12 +66,16 @@ XTBConfig convergable() {
 }
 
 struct Water {
-  std::vector<double> x{0.0, 0.0, 0.117, 0.0, 0.757, -0.469, 0.0, -0.757, 0.469};
+  std::vector<double> x{0.0,    0.0, 0.117,  0.0,  0.757,
+                        -0.469, 0.0, -0.757, 0.469};
   std::vector<int> z{8, 1, 1};
   std::vector<double> box{20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0};
 
   ForceInput input() const {
-    return {.nAtoms = z.size(), .pos = x.data(), .atmnrs = z.data(), .box = box.data()};
+    return {.nAtoms = z.size(),
+            .pos = x.data(),
+            .atmnrs = z.data(),
+            .box = box.data()};
   }
 };
 
@@ -102,8 +106,8 @@ struct Probe {
     DLManagedTensorVersioned *t =
         rgpot_tensor_cpu_f64_2d(x.data(), static_cast<int64_t>(dim / 3), 3);
     Outcome o{0, "", 0.0, {}};
-    o.status = reinterpret_cast<EvalFn>(objective()->eval_fn)(objective()->user_data,
-                                                              t, &o.value);
+    o.status = reinterpret_cast<EvalFn>(objective()->eval_fn)(
+        objective()->user_data, t, &o.value);
     o.message = lastError();
     rgpot_tensor_free(t);
     return o;
@@ -116,8 +120,8 @@ struct Probe {
     Outcome o{0, "", 0.0, std::vector<double>(dim, 0.0)};
     DLManagedTensorVersioned *g = rgpot_tensor_cpu_f64_2d(
         o.gradient.data(), static_cast<int64_t>(dim / 3), 3);
-    o.status = reinterpret_cast<GradFn>(objective()->grad_fn)(objective()->user_data,
-                                                              t, g);
+    o.status = reinterpret_cast<GradFn>(objective()->grad_fn)(
+        objective()->user_data, t, g);
     o.message = lastError();
     rgpot_tensor_free(g);
     rgpot_tensor_free(t);
@@ -127,11 +131,13 @@ struct Probe {
 
 } // namespace
 
-TEST_CASE("a failed xtb energy then gradient is one libxtb call, with the same failure",
+TEST_CASE("a failed xtb energy then gradient is one libxtb call, with the same "
+          "failure",
           "[fused][xtb]") {
   Water w;
   CountingXtb xtb(unconvergable());
-  auto pot = PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
+  auto pot =
+      PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
   Probe probe{pot, w.x.size()};
 
   const auto first = probe.energy(w.x);
@@ -153,10 +159,12 @@ TEST_CASE("a failed xtb energy then gradient is one libxtb call, with the same f
   CHECK(third.message == first.message);
 }
 
-TEST_CASE("a converged xtb energy then gradient is one libxtb call", "[fused][xtb]") {
+TEST_CASE("a converged xtb energy then gradient is one libxtb call",
+          "[fused][xtb]") {
   Water w;
   CountingXtb xtb(convergable());
-  auto pot = PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
+  auto pot =
+      PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
   Probe probe{pot, w.x.size()};
 
   const auto energy = probe.energy(w.x);
@@ -181,10 +189,12 @@ TEST_CASE("a converged xtb energy then gradient is one libxtb call", "[fused][xt
   CHECK(xtb.calls == 2);
 }
 
-TEST_CASE("an xtb failure is retried only through a changed setting", "[fused][xtb]") {
+TEST_CASE("an xtb failure is retried only through a changed setting",
+          "[fused][xtb]") {
   Water w;
   CountingXtb xtb(unconvergable());
-  auto pot = PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
+  auto pot =
+      PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
   Probe probe{pot, w.x.size()};
 
   const auto failed = probe.energy(w.x);
@@ -209,7 +219,8 @@ TEST_CASE("an xtb failure is retried only through a changed setting", "[fused][x
 TEST_CASE("every fingerprint setting of xtb is a new key", "[fused][xtb]") {
   Water w;
   CountingXtb xtb(convergable());
-  auto pot = PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
+  auto pot =
+      PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
   Probe probe{pot, w.x.size()};
   REQUIRE(probe.energy(w.x).status == 0);
   int expected = 1;
@@ -234,7 +245,8 @@ TEST_CASE("xtb separates an SCC that did not converge from another failure",
   Water w;
   {
     CountingXtb xtb(unconvergable());
-    auto pot = PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
+    auto pot =
+        PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
     Probe probe{pot, w.x.size()};
     REQUIRE(probe.energy(w.x).status != 0);
     CHECK(pot.fused_error_kind() == RGPOT_FUSED_SCC_NOT_CONVERGED);
@@ -242,7 +254,8 @@ TEST_CASE("xtb separates an SCC that did not converge from another failure",
   {
     CountingXtb xtb(convergable());
     xtb.injectFailure = true;
-    auto pot = PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
+    auto pot =
+        PotentialHandle::from_impl(xtb, w.z.size(), w.z.data(), w.box.data());
     Probe probe{pot, w.x.size()};
     const auto first = probe.energy(w.x);
     REQUIRE(first.status != 0);

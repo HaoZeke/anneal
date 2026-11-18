@@ -18,9 +18,9 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "DenseHessianOracle.hpp"
 #include "rgpot/FusedCache.hpp"
 #include "rgpot/FusedSettings.hpp"
-#include "DenseHessianOracle.hpp"
 #include "rgpot/HessianVector.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
@@ -68,7 +68,8 @@ std::vector<double> direction(std::size_t n) {
 
 /// Dense Morse Hessian of a cluster with no periodic neighbours, from the
 /// closed-form pair derivatives.
-std::vector<double> denseHessian(const MorseConfig &c, const std::vector<double> &x) {
+std::vector<double> denseHessian(const MorseConfig &c,
+                                 const std::vector<double> &x) {
   const std::size_t n = x.size() / 3;
   const std::size_t dim = x.size();
   std::vector<double> h(dim * dim, 0.0);
@@ -102,7 +103,8 @@ std::vector<double> denseHessian(const MorseConfig &c, const std::vector<double>
   return h;
 }
 
-std::vector<double> multiply(const std::vector<double> &h, const std::vector<double> &v) {
+std::vector<double> multiply(const std::vector<double> &h,
+                             const std::vector<double> &v) {
   const std::size_t dim = v.size();
   std::vector<double> out(dim, 0.0);
   for (std::size_t r = 0; r < dim; ++r) {
@@ -121,7 +123,8 @@ double norm(const std::vector<double> &v) {
   return std::sqrt(s);
 }
 
-double relativeError(const std::vector<double> &got, const std::vector<double> &want) {
+double relativeError(const std::vector<double> &got,
+                     const std::vector<double> &want) {
   std::vector<double> diff(got.size());
   for (std::size_t k = 0; k < got.size(); ++k) {
     diff[k] = got[k] - want[k];
@@ -149,12 +152,16 @@ struct System {
   std::vector<int> z = std::vector<int>(13, 78);
   std::array<double, 9> box = cell();
   ForceInput input() const {
-    return {.nAtoms = z.size(), .pos = x.data(), .atmnrs = z.data(), .box = box.data()};
+    return {.nAtoms = z.size(),
+            .pos = x.data(),
+            .atmnrs = z.data(),
+            .box = box.data()};
   }
 };
 
 std::vector<double> apply(HessianVectorCache &cache, auto &pot, const System &s,
-                          const std::vector<double> &v, double step, HvpScheme scheme) {
+                          const std::vector<double> &v, double step,
+                          HvpScheme scheme) {
   std::vector<double> hv(v.size());
   cache.apply(pot, s.input(), v.data(), hv.data(), step, scheme);
   return hv;
@@ -162,7 +169,8 @@ std::vector<double> apply(HessianVectorCache &cache, auto &pot, const System &s,
 
 /// Smallest eigenvalue of the symmetric tridiagonal (alpha, beta) by
 /// Sturm-sequence bisection.
-double smallestRitz(const std::vector<double> &alpha, const std::vector<double> &beta) {
+double smallestRitz(const std::vector<double> &alpha,
+                    const std::vector<double> &beta) {
   double lo = 0.0;
   double hi = 0.0;
   for (std::size_t i = 0; i < alpha.size(); ++i) {
@@ -226,7 +234,8 @@ double lanczos(std::size_t k, std::vector<double> q, Product &&product) {
 
 } // namespace
 
-TEST_CASE("MorsePot hessianVectorImpl matches the dense Hessian", "[HessianVector]") {
+TEST_CASE("MorsePot hessianVectorImpl matches the dense Hessian",
+          "[HessianVector]") {
   System s;
   MorseConfig config{};
   MorsePot pot(config);
@@ -241,7 +250,7 @@ TEST_CASE("LJPot hessianVectorImpl matches a dense finite-difference Hessian",
           "[HessianVector]") {
   // Four atoms near the 1.12 minimum, every pair inside the cutoff; the
   // switched config puts most pairs inside the switch region.
-  const std::vector<double> x{10.0, 10.0, 10.0, 11.15, 10.08, 10.02,
+  const std::vector<double> x{10.0,  10.0,  10.0, 11.15, 10.08, 10.02,
                               10.52, 11.01, 9.93, 10.47, 10.38, 11.06};
   const std::vector<int> z(4, 1);
   const auto box = cell();
@@ -252,8 +261,11 @@ TEST_CASE("LJPot hessianVectorImpl matches a dense finite-difference Hessian",
     rgpot::LJPot pot(config);
     HessianVectorCache cache;
     std::vector<double> hv(v.size());
-    cache.apply(pot, {.nAtoms = z.size(), .pos = x.data(), .atmnrs = z.data(),
-                      .box = box.data()},
+    cache.apply(pot,
+                {.nAtoms = z.size(),
+                 .pos = x.data(),
+                 .atmnrs = z.data(),
+                 .box = box.data()},
                 v.data(), hv.data(), 0.0, HvpScheme::Auto);
     CHECK(cache.counts().analytic == 1);
     CHECK(cache.counts().forceCalls == 0);
@@ -264,7 +276,8 @@ TEST_CASE("LJPot hessianVectorImpl matches a dense finite-difference Hessian",
   }
 }
 
-TEST_CASE("LJPot hessianVectorImpl reports coincident atoms", "[HessianVector]") {
+TEST_CASE("LJPot hessianVectorImpl reports coincident atoms",
+          "[HessianVector]") {
   rgpot::LJPot pot(rgpot::LJConfig{.cutoff = 3.0});
   const std::array<double, 6> position{10.0, 10.0, 10.0, 10.0, 10.0, 10.0};
   const std::array<int, 2> numbers{1, 1};
@@ -281,7 +294,8 @@ TEST_CASE("LJPot hessianVectorImpl reports coincident atoms", "[HessianVector]")
                   std::domain_error);
 }
 
-TEST_CASE("MorsePot hessianVectorImpl differentiates the switch", "[HessianVector]") {
+TEST_CASE("MorsePot hessianVectorImpl differentiates the switch",
+          "[HessianVector]") {
   // Most pairs of the cluster fall inside the switch region.
   System s;
   MorseConfig config{.cutoff = 6.0, .switch_width = 3.5};
@@ -294,29 +308,37 @@ TEST_CASE("MorsePot hessianVectorImpl differentiates the switch", "[HessianVecto
   CHECK(relativeError(central, analytic) < 1e-7);
 }
 
-TEST_CASE("Finite differences converge at first and second order", "[HessianVector]") {
+TEST_CASE("Finite differences converge at first and second order",
+          "[HessianVector]") {
   System s;
   CountingMorse fd;
   const auto v = direction(s.x.size());
   const auto want = multiply(denseHessian(MorseConfig{}, s.x), v);
   auto order = [&](HvpScheme scheme, double h) {
     HessianVectorCache cache;
-    const double coarse = relativeError(apply(cache, fd, s, v, h, scheme), want);
-    const double fine = relativeError(apply(cache, fd, s, v, h / 2.0, scheme), want);
+    const double coarse =
+        relativeError(apply(cache, fd, s, v, h, scheme), want);
+    const double fine =
+        relativeError(apply(cache, fd, s, v, h / 2.0, scheme), want);
     return std::log2(coarse / fine);
   };
-  CHECK_THAT(order(HvpScheme::Forward, 4e-3), Catch::Matchers::WithinAbs(1.0, 0.1));
-  CHECK_THAT(order(HvpScheme::Central, 2e-2), Catch::Matchers::WithinAbs(2.0, 0.1));
+  CHECK_THAT(order(HvpScheme::Forward, 4e-3),
+             Catch::Matchers::WithinAbs(1.0, 0.1));
+  CHECK_THAT(order(HvpScheme::Central, 2e-2),
+             Catch::Matchers::WithinAbs(2.0, 0.1));
 
   HessianVectorCache cache;
-  const double forward = relativeError(apply(cache, fd, s, v, 0.0, HvpScheme::Forward), want);
-  const double central = relativeError(apply(cache, fd, s, v, 0.0, HvpScheme::Central), want);
+  const double forward =
+      relativeError(apply(cache, fd, s, v, 0.0, HvpScheme::Forward), want);
+  const double central =
+      relativeError(apply(cache, fd, s, v, 0.0, HvpScheme::Central), want);
   CHECK(forward < 1e-2);
   CHECK(central < 1e-5);
   CHECK(central < 1e-2 * forward);
 }
 
-TEST_CASE("A Lanczos loop of k products costs k + 1 force calls", "[HessianVector]") {
+TEST_CASE("A Lanczos loop of k products costs k + 1 force calls",
+          "[HessianVector]") {
   System s;
   const std::size_t k = 12;
   const auto start = direction(s.x.size());
@@ -349,7 +371,8 @@ TEST_CASE("A Lanczos loop of k products costs k + 1 force calls", "[HessianVecto
   });
   CHECK(exact.counts().forceCalls == 0);
   CHECK(exact.counts().analytic == k);
-  CHECK_THAT(cached, Catch::Matchers::WithinAbs(analytic, 1e-2 * std::abs(analytic)));
+  CHECK_THAT(cached,
+             Catch::Matchers::WithinAbs(analytic, 1e-2 * std::abs(analytic)));
 }
 
 TEST_CASE("The centre call primes the products", "[HessianVector]") {
@@ -365,13 +388,18 @@ TEST_CASE("The centre call primes the products", "[HessianVector]") {
   CHECK(cache.counts().centreReused == 4);
 
   std::vector<double> f(s.x.size());
-  ForceOut out{.F = f.data(), .energy = 0.0, .variance = 0.0, .stress = {}, .has_stress = 0};
+  ForceOut out{.F = f.data(),
+               .energy = 0.0,
+               .variance = 0.0,
+               .stress = {},
+               .has_stress = 0};
   MorsePot(MorseConfig{}).forceImpl(s.input(), &out);
   CHECK(centre.energy == out.energy);
   CHECK(centre.forces == f);
 }
 
-TEST_CASE("A new geometry, cell or species is a new centre", "[HessianVector]") {
+TEST_CASE("A new geometry, cell or species is a new centre",
+          "[HessianVector]") {
   System s;
   CountingMorse fd;
   MorsePot exact;
@@ -416,7 +444,8 @@ TEST_CASE("Signed zero is a different centre", "[HessianVector]") {
   CHECK(fd.calls == 2);
 }
 
-TEST_CASE("Products are linear and refuse malformed requests", "[HessianVector]") {
+TEST_CASE("Products are linear and refuse malformed requests",
+          "[HessianVector]") {
   System s;
   CountingMorse fd;
   HessianVectorCache cache;
@@ -431,16 +460,19 @@ TEST_CASE("Products are linear and refuse malformed requests", "[HessianVector]"
   // Forward displaces along +v/|v| whatever the length, so it scales with
   // a positive factor. A negative one moves the displacement to the other
   // side, where the O(h) term has the same sign; central is odd.
-  auto expectScaled = [](const std::vector<double> &got, const std::vector<double> &base,
-                         double c) {
+  auto expectScaled = [](const std::vector<double> &got,
+                         const std::vector<double> &base, double c) {
     for (std::size_t k = 0; k < got.size(); ++k) {
-      CHECK_THAT(got[k], Catch::Matchers::WithinAbs(c * base[k], 1e-12 * std::abs(c * base[k])));
+      CHECK_THAT(got[k], Catch::Matchers::WithinAbs(
+                             c * base[k], 1e-12 * std::abs(c * base[k])));
     }
   };
   const auto forward = apply(cache, fd, s, v, 0.0, HvpScheme::Forward);
-  expectScaled(apply(cache, fd, s, scaled(3.0), 0.0, HvpScheme::Forward), forward, 3.0);
+  expectScaled(apply(cache, fd, s, scaled(3.0), 0.0, HvpScheme::Forward),
+               forward, 3.0);
   const auto central = apply(cache, fd, s, v, 0.0, HvpScheme::Central);
-  expectScaled(apply(cache, fd, s, scaled(-3.0), 0.0, HvpScheme::Central), central, -3.0);
+  expectScaled(apply(cache, fd, s, scaled(-3.0), 0.0, HvpScheme::Central),
+               central, -3.0);
 
   const std::uint64_t before = fd.calls;
   const std::vector<double> zero(v.size(), 0.0);
@@ -449,14 +481,18 @@ TEST_CASE("Products are linear and refuse malformed requests", "[HessianVector]"
   CHECK(std::all_of(hz.begin(), hz.end(), [](double x) { return x == 0.0; }));
 
   std::vector<double> out(v.size());
-  CHECK_THROWS_AS(cache.apply(fd, s.input(), v.data(), out.data(), -1.0), std::invalid_argument);
-  CHECK_THROWS_AS(cache.apply(fd, s.input(), v.data(), out.data(), 0.0, HvpScheme::Analytic),
+  CHECK_THROWS_AS(cache.apply(fd, s.input(), v.data(), out.data(), -1.0),
                   std::invalid_argument);
-  CHECK_THROWS_AS(cache.apply(fd, s.input(), v.data(), out.data(), 0.0, static_cast<HvpScheme>(7)),
+  CHECK_THROWS_AS(cache.apply(fd, s.input(), v.data(), out.data(), 0.0,
+                              HvpScheme::Analytic),
+                  std::invalid_argument);
+  CHECK_THROWS_AS(cache.apply(fd, s.input(), v.data(), out.data(), 0.0,
+                              static_cast<HvpScheme>(7)),
                   std::invalid_argument);
   auto bad = v;
   bad[2] = std::numeric_limits<double>::quiet_NaN();
-  CHECK_THROWS_AS(cache.apply(fd, s.input(), bad.data(), out.data()), std::invalid_argument);
+  CHECK_THROWS_AS(cache.apply(fd, s.input(), bad.data(), out.data()),
+                  std::invalid_argument);
   auto alias = v;
   CHECK_THROWS_AS(cache.apply(fd, s.input(), alias.data(), alias.data() + 1),
                   std::invalid_argument);
@@ -496,13 +532,17 @@ struct Frame {
   std::vector<int> z{1, 8};
   std::array<double, 9> box = cell();
   ForceInput input() const {
-    return {.nAtoms = z.size(), .pos = x.data(), .atmnrs = z.data(), .box = box.data()};
+    return {.nAtoms = z.size(),
+            .pos = x.data(),
+            .atmnrs = z.data(),
+            .box = box.data()};
   }
 };
 
 } // namespace
 
-TEST_CASE("a failed centre is not evaluated again at the same bits", "[fused]") {
+TEST_CASE("a failed centre is not evaluated again at the same bits",
+          "[fused]") {
   Frame f;
   MockEngine engine;
   engine.mode = MockEngine::Mode::Scc;
@@ -586,10 +626,12 @@ TEST_CASE("a success serves later requests, a changed bit or setting reruns",
   const Change changes[] = {
       {"periodic", [](MockEngine &e) { e.settings.periodic = 7; }},
       {"spin", [](MockEngine &e) { e.settings.spin = 1; }},
-      {"scc iterations", [](MockEngine &e) { e.settings.sccMaxIterations = 9; }},
+      {"scc iterations",
+       [](MockEngine &e) { e.settings.sccMaxIterations = 9; }},
       {"charge", [](MockEngine &e) { e.settings.charge = -1.0; }},
       {"accuracy", [](MockEngine &e) { e.settings.accuracy = 0.5; }},
-      {"electronic temperature", [](MockEngine &e) { e.settings.electronicTemperature = 900.0; }},
+      {"electronic temperature",
+       [](MockEngine &e) { e.settings.electronicTemperature = 900.0; }},
       {"mixer", [](MockEngine &e) { e.settings.sccMixer = "broyden"; }},
       {"engine build", [](MockEngine &e) { e.settings.engineBuild = "other"; }},
   };
@@ -621,7 +663,8 @@ TEST_CASE("a success serves later requests, a changed bit or setting reruns",
   CHECK(e.calls == 3);
 }
 
-TEST_CASE("a failure stored under one setting is rerun under another", "[fused]") {
+TEST_CASE("a failure stored under one setting is rerun under another",
+          "[fused]") {
   Frame f;
   MockEngine engine;
   engine.mode = MockEngine::Mode::Scc;
