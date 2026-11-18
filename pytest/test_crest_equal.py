@@ -9,6 +9,7 @@ agree with the sentence the README quotes.
 
 import csv
 import importlib.util
+import os
 import shutil
 import stat
 import sys
@@ -38,9 +39,15 @@ def test_crest_log_total_is_read_from_its_own_line(tmp_path):
     log = tmp_path / "crest.out"
     log.write_text(" * Total number of energy+grad calls: 151074\n * wall-time: 0 h\n")
     assert panel.crest_log_calls(log) == 151074
+
+
+def test_missing_or_empty_total_in_crest_log_is_refused(tmp_path):
+    log = tmp_path / "crest.out"
     log.write_text("no total here\n")
-    assert panel.crest_log_calls(log) is None
-    assert panel.crest_log_calls(tmp_path / "missing.out") is None
+    with pytest.raises(SystemExit):
+        panel.crest_log_calls(log)
+    with pytest.raises(SystemExit):
+        panel.crest_log_calls(tmp_path / "missing.out")
 
 
 def test_two_totals_in_one_log_are_refused(tmp_path):
@@ -51,13 +58,14 @@ def test_two_totals_in_one_log_are_refused(tmp_path):
 
 
 def test_a_row_is_charged_the_larger_of_the_served_and_the_logged_count():
-    assert panel.charged_calls(3055, None) == 3055
     assert panel.charged_calls(3055, 3055) == 3055
     assert panel.charged_calls(3055, 14210) == 14210
     assert panel.charged_calls(4000, 3900) == 4000
+    with pytest.raises(SystemExit):
+        panel.charged_calls(3055, None)
 
 
-def fake_tools(tmp_path: Path, log_total: int, served: int):
+def fake_tools(tmp_path: Path, log_total: int | None, served: int):
     driver = tmp_path / "driver"
     driver.write_text(
         textwrap.dedent(
@@ -82,12 +90,17 @@ def fake_tools(tmp_path: Path, log_total: int, served: int):
             """
         )
     )
+    crest_line = (
+        f'echo " * Total number of energy+grad calls: {log_total}"'
+        if log_total is not None
+        else 'echo "aborted before summary"'
+    )
     crest = tmp_path / "crest"
     crest.write_text(
         textwrap.dedent(
             f"""\
             #!/bin/sh
-            echo " * Total number of energy+grad calls: {log_total}"
+            {crest_line}
             """
         )
     )
@@ -108,6 +121,15 @@ def test_the_crest_arm_is_served_the_ledger_and_billed_what_the_log_says(tmp_pat
     assert result["driver_calls"] == served
     assert result["crest_log_calls"] == log_total
     assert result["charged"] == charged
+
+
+@pytest.mark.skipif(shutil.which("taskset") is None, reason="needs taskset")
+def test_run_crest_fails_loudly_when_crest_prints_no_total(tmp_path):
+    driver, crest = fake_tools(tmp_path, None, 3050)
+    start = tmp_path / "start.xyz"
+    start.write_text("18\n\n" + "O 0 0 0\n" * 18)
+    with pytest.raises(SystemExit):
+        panel.run_crest(crest, Path("/bin/true"), driver, start, tmp_path / "out", "0", "crest")
 
 
 def test_the_log_is_kept_gzipped_with_its_digest(tmp_path):
@@ -140,6 +162,7 @@ def test_the_readme_quotes_the_sentence_the_summary_gives():
 
 
 def test_the_summary_is_what_the_rows_give():
+    pytest.importorskip("scipy.stats")
     assert panel.summarise(committed("rows.csv")) == committed("summary.csv")
 
 
@@ -166,3 +189,139 @@ def test_a_drifted_sentence_is_reported():
     audit.text_cache[path] = audit.text(path).replace("median 916.5 calls", "median 916 calls")
     audit_mod.crest_equal(audit)
     assert [row[2] for row in audit.drifts()] == ["prose"]
+
+
+def _sample_count_rows():
+    return [
+        {"arm": "anneal", "seed": "2000", "driver_calls": "3021", "crest_log_calls": "", "charged": "3021"},
+        {"arm": "crest", "seed": "2000", "driver_calls": "3050", "crest_log_calls": "3100", "charged": "3100"},
+        {"arm": "crest-wall", "seed": "2000", "driver_calls": "950", "crest_log_calls": "900", "charged": "950"},
+    ]
+
+
+def test_call_counts_rows_match_the_larger_of_driver_and_crest_log():
+    audit = audit_mod.Audit()
+    audit.read["bench/crest-equal/call-counts.csv"] = _sample_count_rows()
+    audit_mod.crest_equal(audit)
+    assert not audit.drifts()
+
+
+def test_a_call_counts_row_undercharged_below_crest_log_is_reported():
+    audit = audit_mod.Audit()
+    counts = _sample_count_rows()
+    counts[1]["charged"] = "3050"
+    audit.read["bench/crest-equal/call-counts.csv"] = counts
+    audit_mod.crest_equal(audit)
+    assert [(row[1], row[2]) for row in audit.drifts()] == [
+        ("bench/crest-equal/call-counts.csv", "row 2 crest seed 2000 charged")
+    ]
+
+
+def test_a_crest_call_counts_row_without_log_total_is_reported():
+    audit = audit_mod.Audit()
+    counts = _sample_count_rows()
+    counts[1]["crest_log_calls"] = ""
+    audit.read["bench/crest-equal/call-counts.csv"] = counts
+    audit_mod.crest_equal(audit)
+    assert [(row[1], row[2]) for row in audit.drifts()] == [
+        ("bench/crest-equal/call-counts.csv", "row 2 crest seed 2000 charged")
+    ]
+
+
+def _sample_record_pair():
+    row = {
+        "system": "h2o6",
+        "arm": "crest",
+        "seed": 2000,
+        "budget": 4000,
+        "hit": "false",
+        "charged": 3100,
+        "polished_Eh": "-30.49",
+        "gap_Eh": "1.0e-03",
+        "engine_eV": "-829.0",
+        "wall_s": "10.0",
+        "pot_s": "2.0",
+        "outside_s": "8.0",
+        "crest_len_ps": "0.90",
+        "crest_exit": "0",
+        "surrogate_calls": "0",
+        "crest_flags": panel.CREST_FLAGS,
+        "code_revision": "0" * 40,
+        "host": "bench",
+        "date": "2026-11-18",
+    }
+    count = {
+        **row,
+        "driver_calls": 3050,
+        "driver_stop": "none",
+        "crest_log_calls": 3100,
+        "crest_out_sha256": "a" * 64,
+    }
+    return count, row
+
+
+def test_record_row_writes_call_counts_before_rows(tmp_path, monkeypatch):
+    counts_path = tmp_path / "call-counts.csv"
+    rows_path = tmp_path / "rows.csv"
+    count, row = _sample_record_pair()
+    seen = []
+    real_replace = os.replace
+
+    def spy_replace(src, dst):
+        real_replace(src, dst)
+        seen.append((Path(dst).name, counts_path.is_file(), rows_path.is_file()))
+
+    monkeypatch.setattr(panel.os, "replace", spy_replace)
+    panel.record_row(counts_path, rows_path, count, row)
+    assert seen == [
+        ("call-counts.csv", True, False),
+        ("rows.csv", True, True),
+    ]
+    assert len(panel.read_csv(counts_path)) == 1
+    assert len(panel.read_csv(rows_path)) == 1
+
+
+def test_record_row_never_writes_a_row_when_call_counts_write_fails(tmp_path, monkeypatch):
+    counts_path = tmp_path / "call-counts.csv"
+    rows_path = tmp_path / "rows.csv"
+    count, row = _sample_record_pair()
+    real_replace = os.replace
+
+    def failing_replace(src, dst):
+        if Path(dst) == counts_path:
+            raise OSError("disk full")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(panel.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="disk full"):
+        panel.record_row(counts_path, rows_path, count, row)
+    assert not counts_path.exists()
+    assert not rows_path.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_record_row_validates_both_headers_before_writing(tmp_path):
+    counts_path = tmp_path / "call-counts.csv"
+    rows_path = tmp_path / "rows.csv"
+    rows_path.write_text("bad,header\n")
+    count, row = _sample_record_pair()
+    with pytest.raises(SystemExit):
+        panel.record_row(counts_path, rows_path, count, row)
+    assert not counts_path.exists()
+    assert rows_path.read_text() == "bad,header\n"
+
+
+def test_append_rows_is_atomic_on_write_failure(tmp_path, monkeypatch):
+    rows_path = tmp_path / "rows.csv"
+    _, row = _sample_record_pair()
+    panel.append_rows(rows_path, panel.ROW_FIELDS, [row])
+    before = rows_path.read_bytes()
+
+    def failing_replace(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(panel.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        panel.append_rows(rows_path, panel.ROW_FIELDS, [{**row, "seed": 2001}])
+    assert rows_path.read_bytes() == before
+    assert [p.name for p in tmp_path.iterdir()] == ["rows.csv"]
