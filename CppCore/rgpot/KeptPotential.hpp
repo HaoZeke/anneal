@@ -37,7 +37,7 @@
 namespace rgpot {
 
 template <typename Pot>
-class RGPOT_KEPT_HIDDEN Kept;
+class Kept;
 
 /// What a kept potential was built for.
 class KeptKey {
@@ -87,7 +87,7 @@ struct KeptCounts {
 
 /// The potential of type @c Pot this thread keeps.
 template <typename Pot>
-class RGPOT_KEPT_HIDDEN Kept {
+class Kept {
 public:
   /// `run(pot)` on the potential kept for @a key. When the key differs, the
   /// kept potential is dropped and `make()`, which returns a
@@ -95,7 +95,8 @@ public:
   /// leaves none kept. A throw from `run` drops the potential, whose
   /// scratch it may have left half written, and passes on.
   template <typename Make, typename Run>
-  static decltype(auto) with(const KeptKey &key, Make &&make, Run &&run) {
+  RGPOT_KEPT_HIDDEN static decltype(auto) with(const KeptKey &key, Make &&make,
+                                               Run &&run) {
     Slot &slot = local();
     if (slot.pot != nullptr && slot.matches(key)) {
       ++slot.counts.reuses;
@@ -114,17 +115,19 @@ public:
     }
   }
 
-  [[nodiscard]] static KeptCounts counts() noexcept { return local().counts; }
+  [[nodiscard]] RGPOT_KEPT_HIDDEN static KeptCounts counts() noexcept {
+    return local().counts;
+  }
 
   /// Drops the potential this thread keeps.
-  static void release() noexcept {
+  RGPOT_KEPT_HIDDEN static void release() noexcept {
     Slot &slot = local();
     slot.pot.reset();
     std::vector<int>().swap(slot.species);
   }
 
 private:
-  struct Slot {
+  struct RGPOT_KEPT_HIDDEN Slot {
     std::unique_ptr<Pot> pot;
     unsigned char params[KeptKey::kBytes] = {};
     std::size_t len = 0;
@@ -160,7 +163,7 @@ private:
     }
   };
 
-  static Slot &local() {
+  RGPOT_KEPT_HIDDEN static Slot &local() {
     thread_local Slot slot;
     return slot;
   }

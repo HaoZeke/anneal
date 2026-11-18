@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <vector>
 // clang-format on
+#include "rgpot/KeptPotential.hpp"
 #include "rgpot/Locality.hpp"
 #include "rgpot/PairTerms.hpp"
 #include "rgpot/ParamHash.hpp"
@@ -170,5 +171,11 @@ private:
   mutable std::vector<double> rho_;
   mutable std::vector<double> weight_;
 };
+
+template <>
+RGPOT_SC_API KeptCounts Kept<SuttonChenPot>::counts() noexcept;
+
+template <>
+RGPOT_SC_API void Kept<SuttonChenPot>::release() noexcept;
 
 } // namespace rgpot
