@@ -1276,8 +1276,15 @@ TEST_CASE("Sutton-Chen matches one-thread bits at 1, 2, 4 and 8 threads across V
     }
   }
 
-  // Dilute stored system above kTeamMinAtoms (< 4096 upper pairs) stays on
-  // one thread without opening an OpenMP region.
+  // Dilute stored system above kTeamMinAtoms (< 4096 upper pairs). The
+  // force kernel stays on the calling thread, as Morse does for a stored
+  // list below kMinParallelHalfPairs. The shared gather may still open
+  // one region: buildStored threads when the 27-cell stencil bound is at
+  // least 4096 and greater than the atom count. Cutoff 5.5 with a skin of
+  // one fifth searches to 6.6, and atoms 12 apart fall in that stencil
+  // even though they fail the cutoff, so the bound exceeds the atom count.
+  // Morse's dilute cutoff of 5.3 does not. A reused call builds no list,
+  // so a team there would be the force kernel.
   {
     const std::size_t n = rgpot::kTeamMinAtoms + 16;
     const double spacing = 12.0;
@@ -1315,7 +1322,12 @@ TEST_CASE("Sutton-Chen matches one-thread bits at 1, 2, 4 and 8 threads across V
       pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
       const auto before = rgpot::teamsOpened();
       CHECK(count_sc_bit_diffs(run_full_sc_eval(pot, pos, box), ref) == 0);
-      CHECK(rgpot::teamsOpened() == before);
+      const auto built = rgpot::teamsOpened();
+      // At most the stored-list gather. The force walk itself is serial.
+      CHECK(built - before <= 1);
+      CHECK(count_sc_bit_diffs(run_full_sc_eval(pot, pos, box), ref) == 0);
+      CHECK(pot.listReused());
+      CHECK(rgpot::teamsOpened() == built);
     }
   }
 }
