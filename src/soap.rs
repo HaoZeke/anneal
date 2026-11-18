@@ -3398,21 +3398,78 @@ fn solve3(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
     ])
 }
 
+/// Nonzero entries of each Jacobian column, in row order.
+///
+/// A local descriptor Jacobian is structurally sparse: a Cartesian coordinate
+/// only changes the rows of centres whose neighbourhood contains that atom,
+/// and species channels add whole zero blocks. Forming `JᵀJ` as dense dot
+/// products therefore spends most of its time multiplying exact zeros.
+fn sparse_columns(j: &Array2<f64>) -> Vec<Vec<(usize, f64)>> {
+    let mut columns = vec![Vec::new(); j.ncols()];
+    for row in 0..j.nrows() {
+        for column in 0..j.ncols() {
+            let value = j[[row, column]];
+            if value != 0.0 {
+                columns[column].push((row, value));
+            }
+        }
+    }
+    columns
+}
+
+/// Dot two row-sorted sparse columns.
+///
+/// Products are accumulated in the same row order as the former dense loop,
+/// so omitting finite `0 * value` terms does not change a result bit.
+fn sparse_dot(left: &[(usize, f64)], right: &[(usize, f64)]) -> f64 {
+    let (mut l, mut r) = (0, 0);
+    let mut sum = 0.0;
+    while l < left.len() && r < right.len() {
+        match left[l].0.cmp(&right[r].0) {
+            std::cmp::Ordering::Less => l += 1,
+            std::cmp::Ordering::Greater => r += 1,
+            std::cmp::Ordering::Equal => {
+                sum += left[l].1 * right[r].1;
+                l += 1;
+                r += 1;
+            }
+        }
+    }
+    sum
+}
+
 /// Solve `(J^T J + λ I) dr = J^T dp`.
 fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
     let nfeat = j.nrows();
     let ncoord = j.ncols();
     let mut a = Array2::<f64>::zeros((ncoord, ncoord));
     let mut rhs = Array1::<f64>::zeros(ncoord);
+    // Zero times a non-finite value is non-finite. Such input is outside the
+    // SOAP path, but retain the dense arithmetic rather than changing its
+    // failure semantics.
+    let finite =
+        dp.iter().all(|value| value.is_finite()) && j.iter().all(|value| value.is_finite());
+    let columns = finite.then(|| sparse_columns(j));
     for c in 0..ncoord {
-        for i in 0..nfeat {
-            rhs[c] += j[[i, c]] * dp[i];
+        if let Some(columns) = &columns {
+            for &(row, value) in &columns[c] {
+                rhs[c] += value * dp[row];
+            }
+        } else {
+            for i in 0..nfeat {
+                rhs[c] += j[[i, c]] * dp[i];
+            }
         }
         for d in 0..=c {
-            let mut s = 0.0;
-            for i in 0..nfeat {
-                s += j[[i, c]] * j[[i, d]];
-            }
+            let s = if let Some(columns) = &columns {
+                sparse_dot(&columns[c], &columns[d])
+            } else {
+                let mut sum = 0.0;
+                for i in 0..nfeat {
+                    sum += j[[i, c]] * j[[i, d]];
+                }
+                sum
+            };
             a[[c, d]] = s;
             a[[d, c]] = s;
         }
@@ -3462,6 +3519,7 @@ fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::methods::cluster_hopping::{Config, random_cluster_in_radius};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
@@ -3490,6 +3548,105 @@ mod tests {
                 assert_eq!(left.to_bits(), right.to_bits(), "n={n} cost {index}");
             }
         }
+    }
+
+    fn dense_tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
+        let nfeat = j.nrows();
+        let ncoord = j.ncols();
+        let mut a = Array2::<f64>::zeros((ncoord, ncoord));
+        let mut rhs = Array1::<f64>::zeros(ncoord);
+        for c in 0..ncoord {
+            for i in 0..nfeat {
+                rhs[c] += j[[i, c]] * dp[i];
+            }
+            for d in 0..=c {
+                let mut sum = 0.0;
+                for i in 0..nfeat {
+                    sum += j[[i, c]] * j[[i, d]];
+                }
+                a[[c, d]] = sum;
+                a[[d, c]] = sum;
+            }
+            a[[c, c]] += lambda.max(1e-12);
+        }
+        chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(ncoord))
+    }
+
+    #[test]
+    fn sparse_species_pullback_is_bit_identical_and_avoids_zero_products() {
+        let n = 55;
+        let cfg = Config::recommended(n);
+        let mut rng = StdRng::seed_from_u64(2000);
+        let x = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+        let species: Vec<u32> = (0..n)
+            .map(|atom| if atom < 19 { 200 } else { 201 })
+            .collect();
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: cfg.neighbour_cutoff,
+        };
+        let loc = local_nu3_z(x.view(), spec, Some(&species));
+        let dim = loc.ncols();
+        let d0 = dim - spec.nu3_feat_dim(Some(&species));
+        let mut means = vec![vec![0.0; dim]; 2];
+        for i in 0..n {
+            let group = usize::from(i >= 19);
+            for t in d0..dim {
+                means[group][t] += loc[[i, t]];
+            }
+        }
+        for (group, mean) in means.iter_mut().enumerate() {
+            let count = if group == 0 { 19.0 } else { 36.0 };
+            for value in &mut mean[d0..] {
+                *value /= count;
+            }
+        }
+        let mut dp = Array1::zeros(n * dim);
+        for i in 0..n {
+            let group = usize::from(i >= 19);
+            for t in d0..dim {
+                dp[i * dim + t] = means[group][t] - loc[[i, t]];
+            }
+        }
+        let j = jacobian_nu3(x.view(), spec, Some(&species));
+        let sparse = tikhonov_jtj(&j, dp.view(), 1e-3);
+        let dense = dense_tikhonov_jtj(&j, dp.view(), 1e-3);
+        assert_eq!(
+            sparse
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            dense
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+
+        let columns = sparse_columns(&j);
+        let sparse_products: usize = (0..j.ncols())
+            .flat_map(|c| (0..=c).map(move |d| (c, d)))
+            .map(|(c, d)| {
+                let (mut left, mut right, mut common) = (0, 0, 0);
+                while left < columns[c].len() && right < columns[d].len() {
+                    match columns[c][left].0.cmp(&columns[d][right].0) {
+                        std::cmp::Ordering::Less => left += 1,
+                        std::cmp::Ordering::Greater => right += 1,
+                        std::cmp::Ordering::Equal => {
+                            common += 1;
+                            left += 1;
+                            right += 1;
+                        }
+                    }
+                }
+                common
+            })
+            .sum();
+        let dense_products = j.nrows() * j.ncols() * (j.ncols() + 1) / 2;
+        assert!(
+            sparse_products * 2 < dense_products,
+            "sparse {sparse_products} dense {dense_products}"
+        );
     }
 
     fn squashed() -> Array1<f64> {
