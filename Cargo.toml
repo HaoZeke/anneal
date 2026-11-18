@@ -224,6 +224,7 @@ required-features = ["rgpot-ex"]
 [[example]]
 name = "gfn2_water_crest_driver"
 required-features = ["rgpot-ex"]
+test = true
 
 [[example]]
 name = "gfn2_covalent_h2h"
