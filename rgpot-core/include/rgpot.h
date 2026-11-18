@@ -63,6 +63,27 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 #endif
 
 /**
+ * The ABI major this loader speaks, `RGPOT_ENGINE_ABI_VERSION` of the header.
+ */
+#define ENGINE_ABI_VERSION 1
+
+/**
+ * The ABI minor this loader requires, `RGPOT_ENGINE_ABI_MINOR` of the header.
+ */
+#define ENGINE_ABI_MINOR 3
+
+/**
+ * The struct layout revision this loader expects,
+ * `RGPOT_ENGINE_ABI_LAYOUT_REVISION` of the header.
+ */
+#define ENGINE_ABI_LAYOUT_REVISION 1
+
+/**
+ * Engine code meaning the backend does not support the requested operation.
+ */
+#define ENGINE_ERR_UNSUPPORTED 3
+
+/**
  * Which kind of failure a fused evaluation ended in.
  */
 typedef enum rgpot_fused_error_kind_t {
@@ -83,26 +104,6 @@ typedef enum rgpot_fused_error_kind_t {
    */
   RGPOT_FUSED_INVALID_RESULT = 3,
 } rgpot_fused_error_kind_t;
-
-/**
- * The ABI major this loader speaks, `RGPOT_ENGINE_ABI_VERSION` of the header.
- */
-#define ENGINE_ABI_VERSION 1
-
-/**
- * The ABI minor this loader requires, `RGPOT_ENGINE_ABI_MINOR` of the header.
- */
-#define ENGINE_ABI_MINOR 3
-
-/**
- * The struct layout revision this loader expects, `RGPOT_ENGINE_ABI_LAYOUT_REVISION` of the header.
- */
-#define ENGINE_ABI_LAYOUT_REVISION 1
-
-/**
- * Engine code meaning the backend does not support the requested operation.
- */
-#define ENGINE_ERR_UNSUPPORTED 3
 
 /**
  * How a Hessian-vector product is computed.

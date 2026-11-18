@@ -33,8 +33,8 @@ Then:
 1. Regenerate the header with =pixi run gen-header= and commit it with the
    change.
    =pixi run header-drift= (=scripts/check_header_drift.sh=) fails when the
-   committed header differs from a fresh regeneration, with the default
-   features and with all of them.
+   committed header differs from a fresh regeneration, with the default features
+   and with all of them.
 2. Append each new exported function to =scripts/abi_core_baseline.txt=.
    The list only grows; it holds the functions of a build with the crate's
    default features.

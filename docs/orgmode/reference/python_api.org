@@ -1048,8 +1048,8 @@ hvp(positions, atom_types, box, direction, step=0.0, scheme='auto')
   order in =step=.
   ="central"= displaces both ways, two force calls a product, second order in
   =step=.
-  ="analytic"= uses the kernel's own product, available for =MorsePot=,
-  =LJPot= and =CuH2Pot=.
+  ="analytic"= uses the kernel's own product, available for =MorsePot=, =LJPot=
+  and =CuH2Pot=.
   ="auto"= is ="analytic"= when =has_analytic_hvp()= is true and ="forward"=
   otherwise.
 - Units :: positions, box and =step= in Angstrom.
