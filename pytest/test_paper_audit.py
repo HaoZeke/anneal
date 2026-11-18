@@ -27,6 +27,7 @@ CHECKS = (
     audit_mod.release,
     audit_mod.paper_0120,
     audit_mod.gad_published,
+    audit_mod.crest_equal,
     audit_mod.openconf,
     audit_mod.head_to_head,
     audit_mod.sc96_78_howto,

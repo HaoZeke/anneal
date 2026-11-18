@@ -1672,6 +1672,51 @@ def paper_0120(audit: Audit) -> None:
         audit.cell(where, "Fisher p", row["Fisher p"], fisher(mine, len(group), dev_hits, dev_n))
 
 
+CREST_EQUAL_README = "bench/crest-equal/README.md"
+
+
+def crest_equal(audit: Audit) -> None:
+    panel = load_script("crest_equal_panel", "scripts/crest_equal/run_panel.py")
+    where = "bench/crest-equal/rows.csv"
+    rows = audit.rows(where)
+    revisions = sorted({r["code_revision"] for r in rows})
+    for revision in revisions:
+        mine = [r for r in rows if r["code_revision"] == revision]
+        for arm in panel.ARMS:
+            seeds = sorted(int(r["seed"]) for r in mine if r["arm"] == arm)
+            audit.record(seeds == list(panel.SEEDS), where, f"{revision[:8]} {arm} seeds",
+                         " ".join(map(str, seeds)), " ".join(map(str, panel.SEEDS)))
+    audit.record({r["budget"] for r in rows} == {str(panel.BUDGET)}, where, "budget",
+                 " ".join(sorted({r["budget"] for r in rows})), panel.BUDGET)
+    over = sorted(int(r["charged"]) for r in rows if int(r["charged"]) > panel.BUDGET)
+    audit.record(not over, where, "no row is charged above the budget", " ".join(map(str, over)) or "none", "none")
+    summary = panel.summarise(rows)
+    committed = audit.rows("bench/crest-equal/summary.csv")
+    audit.record(summary == committed, "bench/crest-equal/summary.csv", "recomputed from rows.csv",
+                 "equal" if summary == committed else "differs", "equal")
+    audit.said(CREST_EQUAL_README, panel.claim_sentence(summary))
+    anneal = [int(r["charged"]) for r in rows if r["arm"] == "anneal"]
+    centre = sorted(anneal)[len(anneal) // 2 - 1: len(anneal) // 2 + 1]
+    centre = sum(centre) / len(centre)
+    for arm in ("crest", "crest-wall"):
+        charged = sorted(int(r["charged"]) for r in rows if r["arm"] == arm)
+        within = sum(abs(value - centre) <= 0.05 * centre for value in charged)
+        row = next(r for r in summary if r["arm"] == arm)
+        audit.cell(where, f"{arm} within 5 percent", row["within_5pct"], within)
+        audit.said(CREST_EQUAL_README, f"{within} of {len(charged)}")
+        audit.said(CREST_EQUAL_README, f"{charged[0]} to {charged[-1]} calls")
+        if arm == "crest":
+            audit.said(CREST_EQUAL_README, f"{charged[0] / centre:.2f} to {charged[-1] / centre:.2f} of anneal's {centre:g}")
+    audit.said(CREST_EQUAL_README, f"The most any CREST row was charged is {max(int(r['charged']) for r in rows if r['arm'] == 'crest')}")
+    walls = {arm: sorted(float(r["wall_s"]) for r in rows if r["arm"] == arm) for arm in panel.ARMS}
+    middle = {arm: (w[len(w) // 2 - 1] + w[len(w) // 2]) / 2 for arm, w in walls.items()}
+    audit.said(CREST_EQUAL_README, f"Median wall is {middle['anneal']:.2f} s for anneal, {middle['crest']:.2f} s at 0.90 ps and "
+                                   f"{middle['crest-wall']:.2f} s at\n0.11 ps.")
+    unconverged = sorted(r["seed"] for r in rows if r["arm"] == "anneal" and not r["gap_Eh"])
+    audit.said(CREST_EQUAL_README, f"Anneal seed {unconverged[0]} polished without converging")
+    audit.record(len(unconverged) == 1, where, "unconverged anneal polishes", " ".join(unconverged), "one")
+
+
 def gad_published(audit: Audit) -> None:
     path = "bench/gad-published/README.md"
     rows = audit.rows("bench/gad-published/rows.csv")
@@ -3308,7 +3353,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         return 2
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
-                  manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
+                  manuscript_cross_field, supporting_information, release, paper_0120, gad_published, crest_equal, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
                   manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter):
         check(audit)
