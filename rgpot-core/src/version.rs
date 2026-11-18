@@ -44,7 +44,6 @@ pub struct rgpot_abi_stamp_t {
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
 pub const RGPOT_ABI_VERSION_MINOR: u16 = 5;
-const RGPOT_ABI_PREVIOUS_MINOR: u16 = RGPOT_ABI_VERSION_MINOR - 1;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -173,7 +172,7 @@ mod tests {
         assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
         assert_eq!(rgpot_abi_stamp().abi_minor, RGPOT_ABI_VERSION_MINOR);
         assert_eq!(
-            unsafe { rgpot_abi_compatible(&stamp(1, RGPOT_ABI_PREVIOUS_MINOR, 1)) },
+            unsafe { rgpot_abi_compatible(&stamp(1, RGPOT_ABI_VERSION_MINOR - 1, 1)) },
             1
         );
         assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 2, 1)) }, 1);
@@ -297,26 +296,12 @@ mod tests {
         ] {
             assert!(flat.contains(f), "rgpot.h lacks {f}");
         }
-        let engine_minor = format!("#define ENGINE_ABI_MINOR {}", crate::engine::ENGINE_ABI_MINOR);
-        for define in [
-            "#define ENGINE_ABI_VERSION 1",
-            engine_minor.as_str(),
-            "#define ENGINE_ABI_LAYOUT_REVISION 1",
-            "#define ENGINE_ERR_UNSUPPORTED 3",
-        ] {
-            assert!(header.contains(define), "rgpot.h lacks {define}");
-        }
+        assert!(
+            header.contains("#define ENGINE_ERR_UNSUPPORTED 3"),
+            "rgpot.h lacks ENGINE_ERR_UNSUPPORTED 3"
+        );
         #[cfg(feature = "engine")]
-        {
-            let engine_abi_previous_minor = crate::engine::ENGINE_ABI_MINOR - 1;
-            assert_eq!(crate::engine::ENGINE_ABI_VERSION, 1);
-            assert_eq!(
-                crate::engine::ENGINE_ABI_MINOR,
-                engine_abi_previous_minor + 1
-            );
-            assert_eq!(crate::engine::ENGINE_ABI_LAYOUT_REVISION, 1);
-            assert_eq!(crate::engine::ENGINE_ERR_UNSUPPORTED, 3);
-        }
+        assert_eq!(crate::engine::ENGINE_ERR_UNSUPPORTED, 3);
         let default_step = format!(
             "#define RGPOT_HVP_DEFAULT_STEP {:.1e}",
             crate::hvp::RGPOT_HVP_DEFAULT_STEP
@@ -325,6 +310,67 @@ mod tests {
             header.contains(&default_step),
             "rgpot.h lacks {default_step}"
         );
+    }
+
+    /// The value of `#define name value` in `header`.
+    fn define_value(header: &str, name: &str) -> u32 {
+        header
+            .lines()
+            .find_map(|line| {
+                let mut words = line.split_whitespace();
+                (words.next() == Some("#define") && words.next() == Some(name))
+                    .then(|| words.next())
+                    .flatten()
+            })
+            .unwrap_or_else(|| panic!("header lacks #define {name}"))
+            .parse()
+            .unwrap_or_else(|why| panic!("#define {name} is not a number: {why}"))
+    }
+
+    /// The engine ABI identity of the loader and of the generated `rgpot.h`
+    /// is the one `engine_c_abi.h` declares. The numbers are read from that
+    /// header, so a bump there that the loader or `rgpot.h` missed fails
+    /// here whichever features this build has.
+    #[test]
+    fn engine_abi_identity_is_the_engine_header_identity() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let Ok(engine_header) =
+            std::fs::read_to_string(format!("{root}/../CppCore/rgpot/engine_c_abi.h"))
+        else {
+            // A packaged crate carries rgpot.h but not the repository headers.
+            return;
+        };
+        let generated = std::fs::read_to_string(format!("{root}/include/rgpot.h")).unwrap();
+        for (declared, mirrored) in [
+            ("RGPOT_ENGINE_ABI_VERSION", "ENGINE_ABI_VERSION"),
+            ("RGPOT_ENGINE_ABI_MINOR", "ENGINE_ABI_MINOR"),
+            (
+                "RGPOT_ENGINE_ABI_LAYOUT_REVISION",
+                "ENGINE_ABI_LAYOUT_REVISION",
+            ),
+        ] {
+            assert_eq!(
+                define_value(&generated, mirrored),
+                define_value(&engine_header, declared),
+                "rgpot.h {mirrored} differs from {declared} of engine_c_abi.h"
+            );
+        }
+        #[cfg(feature = "engine")]
+        {
+            use crate::engine::{ENGINE_ABI_LAYOUT_REVISION, ENGINE_ABI_MINOR, ENGINE_ABI_VERSION};
+            assert_eq!(
+                ENGINE_ABI_VERSION as u32,
+                define_value(&engine_header, "RGPOT_ENGINE_ABI_VERSION")
+            );
+            assert_eq!(
+                u32::from(ENGINE_ABI_MINOR),
+                define_value(&engine_header, "RGPOT_ENGINE_ABI_MINOR")
+            );
+            assert_eq!(
+                u32::from(ENGINE_ABI_LAYOUT_REVISION),
+                define_value(&engine_header, "RGPOT_ENGINE_ABI_LAYOUT_REVISION")
+            );
+        }
     }
 
     /// Every name in the rgpot-core ABI baseline is still declared by the
