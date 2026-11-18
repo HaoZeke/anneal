@@ -7793,16 +7793,22 @@ where
         // 25-step screen. Gating accept on recordable froze that path
         // at fifteen basins.
         let mut trial_local_minimum = here;
+        // `returning` is the bias index's answer. Minima hopping already has
+        // a driver-local identity even when that bias lookup is skipped, so
+        // retain its same-basin answer for the general adaptive controller.
+        let mut adaptive_returning = returning;
         let accept = if cfg.minima_hopping {
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
             if unquenched {
                 feedback.observe_driver_local(Some(from), from);
+                adaptive_returning = true;
                 false
             } else {
                 // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
                 // while still feeling the per-basin deposits. A self-return
                 // updates escape strength but is not an acceptance trial.
                 let reached = identity.basin_of(x_new.view());
+                adaptive_returning = reached == from;
                 let ok = if let Some(report) = history_report {
                     // The population's identity and counts drive the
                     // controller: a minimum first found by another chain is
@@ -7997,8 +8003,8 @@ where
         dial.observe(accept);
         if cfg.adaptive_search {
             adaptive_trials[rep] += 1;
-            adaptive_returns[rep] += usize::from(returning);
-            adaptive_accepts[rep] += usize::from(accept && !returning);
+            adaptive_returns[rep] += usize::from(adaptive_returning);
+            adaptive_accepts[rep] += usize::from(accept && !adaptive_returning);
             if adaptive_trials[rep] >= 50 {
                 let trials = adaptive_trials[rep] as f64;
                 let return_rate = adaptive_returns[rep] as f64 / trials;
@@ -8006,17 +8012,22 @@ where
                 let acceptance = if nonreturning > 0 {
                     adaptive_accepts[rep] as f64 / nonreturning as f64
                 } else {
-                    0.0
+                    f64::NAN
                 };
                 if return_rate > 0.45 || acceptance > 0.55 {
                     adaptive_step[rep] = (adaptive_step[rep] * 1.10).min(1.6);
                 } else if acceptance < 0.12 {
                     adaptive_step[rep] = (adaptive_step[rep] * 0.90).max(0.70);
                 }
-                if acceptance < 0.15 {
-                    adaptive_temperature[rep] = (adaptive_temperature[rep] * 1.10).min(1.5);
-                } else if acceptance > 0.60 {
-                    adaptive_temperature[rep] = (adaptive_temperature[rep] * 0.90).max(0.65);
+                // A block made only of basin returns has no acceptance
+                // information about a crossing. Do not interpret its empty
+                // denominator as zero acceptance and heat the replica.
+                if nonreturning >= 10 {
+                    if acceptance < 0.15 {
+                        adaptive_temperature[rep] = (adaptive_temperature[rep] * 1.10).min(1.5);
+                    } else if acceptance > 0.60 {
+                        adaptive_temperature[rep] = (adaptive_temperature[rep] * 0.90).max(0.65);
+                    }
                 }
                 if std::env::var("ANNEAL_ADAPT_TRACE").is_ok() {
                     eprintln!(
