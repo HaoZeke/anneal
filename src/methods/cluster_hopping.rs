@@ -4795,6 +4795,7 @@ where
     let mut basin_entry: Option<Array1<f64>> = None;
     let stall_arms = stall_arms(cfg);
     let mut stall_allocator = crate::allocate::DepthAllocator::new(stall_arms.len().max(1));
+    let mut stall_home = vec![0usize; stall_arms.len().max(1)];
     let mut last_polish_spent = 0usize;
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
@@ -9108,16 +9109,29 @@ where
         } else if directed_leave {
             stall_arms.iter().position(|arm| *arm == "climb")
         } else if stuck && !stall_arms.is_empty() {
-            Some(if stall_arms.len() > 1 {
-                stall_allocator.select(rng)
+            if stall_arms.len() > 1 {
+                let runnable: Vec<bool> = stall_arms
+                    .iter()
+                    .map(|&arm| match arm {
+                        "trail" => basin_entry.is_some(),
+                        "climb" => grad.is_some(),
+                        _ => true,
+                    })
+                    .collect();
+                if runnable.iter().any(|&ok| ok) {
+                    Some(stall_allocator.select_leaving(&stall_home, &runnable, rng))
+                } else {
+                    None
+                }
             } else {
-                0
-            })
+                Some(0)
+            }
         } else {
             None
         };
         let stalled_from = e;
         let mut stall_outcome: Option<f64> = None;
+        let mut stall_returned = false;
         if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
             let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
                 // Keep each rigid group's internal geometry; only the
@@ -9138,16 +9152,14 @@ where
             hops += 1;
             // A redraw that quenches back onto a shelf this rung has already
             // failed to leave is not a restart. Adopting it would clear the
-            // stall and the next redraw would do the same.
+            // stall and the next redraw would do the same, and scoring zero
+            // depth would outrank an uphill leave whose gain is negative.
             let restart_home = effective_keying(cfg) == Keying::Distances
                 && !shelf.is_empty()
                 && shelf_holds(&shelf, bias.cv(xf.view()).view(), ef, cfg.escape_epsilon);
             if restart_home {
                 tabu_hits += 1;
-                // No depth. Leaving the reward unset keeps this arm looking
-                // untried, and an untried arm wins the later draws against
-                // a climb that does leave.
-                stall_outcome = Some(0.0);
+                stall_returned = true;
             } else {
                 quiet = 0;
                 longest_quiet = 0;
@@ -9260,13 +9272,11 @@ where
                 // quiet count without leaving. A neighbour inside the
                 // escape step is kept when its energy is not that minimum.
                 let climb_home = effective_keying(cfg) == Keying::Distances
+                    && !shelf.is_empty()
                     && shelf_holds(&shelf, bias.cv(xe.view()).view(), ee, cfg.escape_epsilon);
                 if climb_home {
                     tabu_hits += 1;
-                    // Same as a restart that quenched back onto the shelf:
-                    // the arm ran and gained nothing, so the allocator has
-                    // to hear that.
-                    stall_outcome = Some(0.0);
+                    stall_returned = true;
                 } else {
                     quiet = 0;
                     longest_quiet = 0;
@@ -9295,8 +9305,12 @@ where
                 }
             }
         }
-        if let (Some(arm), Some(gain)) = (stall_response, stall_outcome) {
-            stall_allocator.update(arm, gain);
+        if let Some(arm) = stall_response {
+            if let Some(gain) = stall_outcome {
+                stall_allocator.update(arm, gain);
+            } else if stall_returned {
+                stall_home[arm] += 1;
+            }
         }
         // A new best is the one state worth sharing, and the census a shared
         // run identifies basins in was calibrated at the share tolerance,

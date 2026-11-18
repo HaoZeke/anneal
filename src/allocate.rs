@@ -869,6 +869,74 @@ impl DepthAllocator {
         best
     }
 
+    /// Draws an arm by Thompson sampling on the posterior predictive, gating
+    /// out arms that fail to leave a quarantined plateau.
+    ///
+    /// `home[k]` counts attempts where arm `k` returned to a quarantined
+    /// minimum instead of leaving, which carry no leave depth and never enter
+    /// [`Self::update`]. Feeding zero for a non-leave would outrank every
+    /// uphill escape (`gain < 0`). `runnable[k]` marks arms that have the
+    /// prerequisites to execute on this step.
+    pub fn select_leaving<R: Rng + ?Sized>(
+        &self,
+        home: &[usize],
+        runnable: &[bool],
+        rng: &mut R,
+    ) -> usize {
+        if self.mu.is_empty() {
+            return 0;
+        }
+        if home.iter().copied().all(|count| count == 0)
+            && (0..self.mu.len()).all(|k| runnable.get(k).copied().unwrap_or(true))
+        {
+            return self.select(rng);
+        }
+        let mut leave_p = vec![0.0_f64; self.mu.len()];
+        let mut top_leave: Option<(usize, f64)> = None;
+        let mut any_untried = false;
+        for (k, slot) in leave_p.iter_mut().enumerate() {
+            if !runnable.get(k).copied().unwrap_or(true) {
+                continue;
+            }
+            let returned = home.get(k).copied().unwrap_or(0);
+            if self.draws[k] == 0 && returned == 0 {
+                any_untried = true;
+            }
+            let draw = sample_beta(1.0 + self.draws[k] as f64, 1.0 + returned as f64, rng);
+            *slot = draw;
+            if top_leave.is_none_or(|(_, best)| draw > best) {
+                top_leave = Some((k, draw));
+            }
+        }
+        let Some((fallback, _)) = top_leave else {
+            return 0;
+        };
+        if !any_untried && self.draws[fallback] == 0 {
+            return fallback;
+        }
+        let mut best: Option<usize> = None;
+        let mut best_v = f64::NEG_INFINITY;
+        for (k, &prob) in leave_p.iter().enumerate() {
+            if !runnable.get(k).copied().unwrap_or(true) {
+                continue;
+            }
+            let returned = home.get(k).copied().unwrap_or(0);
+            let eligible = (self.draws[k] == 0 && returned == 0)
+                || (self.draws[k] > 0 && rng.random::<f64>() < prob);
+            if !eligible {
+                continue;
+            }
+            let scale =
+                (self.beta[k] * (self.kappa[k] + 1.0) / (self.alpha[k] * self.kappa[k])).sqrt();
+            let v = self.mu[k] + scale * student_t(2.0 * self.alpha[k], rng);
+            if best.is_none() || v > best_v {
+                best_v = v;
+                best = Some(k);
+            }
+        }
+        best.unwrap_or(fallback)
+    }
+
     /// Posterior mean reward per arm, so a run can report what it learned.
     pub fn means(&self) -> Vec<f64> {
         self.mu.clone()
