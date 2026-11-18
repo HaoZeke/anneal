@@ -1,32 +1,39 @@
-verdict: FIX: B loses on time outside the potential (lj55 n=12, Mann-Whitney p=3.65846e-05)
-lj75 seed 2000 noted: outside_s A=35.407035 B=3528.356650; wall_s A=74.802550 B=3563.944804
+verdict: LOSE: B loses on time outside the potential (lj/lj38 n=12 Mann-Whitney p=3.65846e-05, lj/lj55 n=12 Mann-Whitney p=3.65846e-05); wall time (lj/lj38 n=12 Mann-Whitney p=9.73457e-05, lj/lj55 n=12 Mann-Whitney p=3.65846e-05)
+gate loss triggers (alpha=0.05):
+- lj/lj38: time outside the potential (lose_outside_sig=1, Mann-Whitney p=3.65846e-05, n_a=12, n_b=12)
+- lj/lj55: time outside the potential (lose_outside_sig=1, Mann-Whitney p=3.65846e-05, n_a=12, n_b=12)
+- lj/lj38: wall time (lose_wall_sig=1, Mann-Whitney p=9.73457e-05, n_a=12, n_b=12)
+- lj/lj55: wall time (lose_wall_sig=1, Mann-Whitney p=3.65846e-05, n_a=12, n_b=12)
+partial runs noted:
+- lj/lj75 seed 2000: outside_s A=35.407035 B=3528.356650; wall_s A=74.802550 B=3563.944804
 completed systems:
 - lj/lj38: n=12 and n=12
 - lj/lj55: n=12 and n=12
-not run because of outside-potential cost:
-- au/au55: A=0 B=0 declared=12
-- binary-lj/au38: A=0 B=0 declared=12
-- binary-lj/au55: A=0 B=0 declared=12
-- binary-lj/cu19au19: A=0 B=0 declared=12
-- binary-lj/cu27au28: A=0 B=0 declared=12
-- binary-lj/cu6au32: A=0 B=0 declared=12
-- lj/lj103: A=0 B=0 declared=12
-- lj/lj104: A=0 B=0 declared=12
-- lj/lj75: A=1 B=1 declared=12
-- lj/lj98: A=0 B=0 declared=12
-- morse-panel/m55r14: A=0 B=0 declared=12
-- morse-panel/m55r6: A=0 B=0 declared=12
-- morse-panel/m80r14: A=0 B=0 declared=12
-- morse-panel/m80r6: A=0 B=0 declared=12
-- sutton-chen/sc108-38: A=0 B=0 declared=6
-- sutton-chen/sc108-55: A=0 B=0 declared=6
-- sutton-chen/sc108-80: A=0 B=0 declared=6
-- sutton-chen/sc126-38: A=0 B=0 declared=6
-- sutton-chen/sc126-55: A=0 B=0 declared=6
-- sutton-chen/sc126-80: A=0 B=0 declared=6
-- sutton-chen/sc96-38: A=0 B=0 declared=6
-- sutton-chen/sc96-55: A=0 B=0 declared=6
-- sutton-chen/sc96-80: A=0 B=0 declared=6
+not run (never run; unsupported):
+- sutton-chen/sc108-38: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+- sutton-chen/sc108-55: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+- sutton-chen/sc108-80: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+- sutton-chen/sc126-38: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+- sutton-chen/sc126-55: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+- sutton-chen/sc126-80: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+- sutton-chen/sc96-38: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+- sutton-chen/sc96-55: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+- sutton-chen/sc96-80: A=0 B=0 declared=6 — unsupported: RGPOT_SC_LIB was not provided
+not run (skipped or stopped for outside-potential cost):
+- au/au55: A=0 B=0 declared=12 — declared pre-run (notes); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- binary-lj/au38: A=0 B=0 declared=12 — declared pre-run (repo-runner); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- binary-lj/au55: A=0 B=0 declared=12 — declared pre-run (repo-runner); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- binary-lj/cu19au19: A=0 B=0 declared=12 — declared pre-run (repo-runner); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- binary-lj/cu27au28: A=0 B=0 declared=12 — declared pre-run (repo-runner); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- binary-lj/cu6au32: A=0 B=0 declared=12 — declared pre-run (repo-runner); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- lj/lj103: A=0 B=0 declared=12 — declared pre-run (notes); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- lj/lj104: A=0 B=0 declared=12 — declared pre-run (notes); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- lj/lj75: A=1 B=1 declared=12 — declared pre-run (notes); stopped for outside-potential cost (seed 2000: outside_s A=35.407035 B=3528.356650; wall_s A=74.802550 B=3563.944804)
+- lj/lj98: A=0 B=0 declared=12 — declared pre-run (notes); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- morse-panel/m55r14: A=0 B=0 declared=12 — declared pre-run (notes); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- morse-panel/m55r6: A=0 B=0 declared=12 — declared pre-run (notes); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- morse-panel/m80r14: A=0 B=0 declared=12 — declared pre-run (notes); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
+- morse-panel/m80r6: A=0 B=0 declared=12 — declared pre-run (notes); skipped for outside-potential cost (gate loss on lj/lj38, lj/lj55; lj/lj75 seed 2000 outside_s B=3528.356650 vs A=35.407035)
 systems with any hit drop, call increase, or time increase:
 - lj/lj38 hit_drop=0 call_increase=0 outside_increase=1 wall_increase=1
 - lj/lj55 hit_drop=0 call_increase=1 outside_increase=1 wall_increase=1
