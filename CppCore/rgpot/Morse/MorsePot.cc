@@ -84,6 +84,12 @@ struct MorseWorkspace {
   std::vector<double> pair_hv;
   std::vector<double> row_e;
   std::vector<double> row_s;
+  std::vector<std::size_t> p0_splits;
+  std::vector<std::size_t> p1_splits;
+  std::size_t split_atoms = 0;
+  int split_slices = 0;
+  std::size_t split_total_up = 0;
+  std::size_t split_total_inc = 0;
 
   const nlist::Neighbours *scratch_owner = nullptr;
   std::uint64_t scratch_build_id = 0;
@@ -402,20 +408,29 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
         ws.row_e.resize(n_atoms);
         ws.row_s.resize(6 * n_atoms);
 
-        std::vector<std::size_t> p0_splits;
-        std::vector<std::size_t> p1_splits;
-        partitionAtomsByWork(
-            n_atoms, slices, static_cast<std::int64_t>(total_up),
-            [&](std::size_t idx) { return static_cast<std::int64_t>(ws.up_off[idx]); }, p0_splits);
         const std::int64_t total_inc =
             static_cast<std::int64_t>(ws.lo_off[n_atoms]) + static_cast<std::int64_t>(total_up);
-        partitionAtomsByWork(
-            n_atoms, slices, total_inc,
-            [&](std::size_t idx) {
-              return static_cast<std::int64_t>(ws.lo_off[idx]) +
-                     static_cast<std::int64_t>(ws.up_off[idx]);
-            },
-            p1_splits);
+        if (ws.split_atoms != n_atoms || ws.split_slices != slices || ws.split_total_up != total_up ||
+            ws.split_total_inc != static_cast<std::size_t>(total_inc)) {
+          partitionAtomsByWork(n_atoms, slices, static_cast<std::int64_t>(total_up),
+                               [&](std::size_t idx) {
+                                 return static_cast<std::int64_t>(ws.up_off[idx]);
+                               },
+                               ws.p0_splits);
+          partitionAtomsByWork(
+              n_atoms, slices, total_inc,
+              [&](std::size_t idx) {
+                return static_cast<std::int64_t>(ws.lo_off[idx]) +
+                       static_cast<std::int64_t>(ws.up_off[idx]);
+              },
+              ws.p1_splits);
+          ws.split_atoms = n_atoms;
+          ws.split_slices = slices;
+          ws.split_total_up = total_up;
+          ws.split_total_inc = static_cast<std::size_t>(total_inc);
+        }
+        const std::size_t *p0_splits = ws.p0_splits.data();
+        const std::size_t *p1_splits = ws.p1_splits.data();
 
         std::uint64_t *active_bits = ws.active_bits.data();
         PairForce *pair_forces = ws.pair_forces.data();
