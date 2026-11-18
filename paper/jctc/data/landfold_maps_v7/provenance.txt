@@ -1,12 +1,19 @@
-# The seals of the landfold maps of the v7 handoff, with
-# landscape.ld/fes.csv copied from the matching anneal-landfold-maps-v1
-# runs (same landfold_commit and row counts), and sealed landscape.png
-# for maps whose tables remain on the campaign disk (LJ75 recommended,
-# LJ98, TIP4P).
+# The seals and authenticated tables of the landfold map figure.
+# Panels (a)--(h) retain the v7 handoff tables and landfold revision.
+# Panels (i)--(n) are current-code tables authenticated by
+# current-rerun.json and campaign-shards.csv.
 
 handoff_sha256 2133f81b3af14d29e0669255407be2a2db31276684201640c866db0fec7cb2aa
 
 landfold_commit fc7e8654c597478aa89b4abbff1af1072ab87713
+
+current_landfold_revision 0ca101f73b570baa7e00f632953cce0a08fd176e
+
+current_landfold_tree 3d665c5d9250a870763807390ec48563a50df89a
+
+18255bc56a415b497be24f90d4356f7b44e84723aca01b13e1a91138d8c27c61 campaign-shards.csv
+
+3505130ce930e2787fd44493a527d5876462acbb5466c56b527932e83ccb437d current-rerun.json
 
 d6c88d607c1c2b63b3be3ce885fd8138042797f1cc9ba1b2668fb8fbd4f7769d large-tables-manifest.json
 
@@ -76,26 +83,26 @@ ffce15c4cd624f86391fa5ca9a63b5288d0d0f99423bb025ebb3540f7b60634f lj_csm/lj75/der
 
 b6e1a239d26c4fc09997238e5c58b5a0d5bb58d171d63daebb08d1d3233be37e lj_csm/lj75/derived/representative/landscape.png
 
-3f22cef3f25c28895d36d0fcdf33de0bd680382ed54716485923c599fee3037a lj_csm/lj75/recommended/aggregate/fes.png
+2023aa00636b8d699dadc018fea4aedd7104121073d35cbeba8541a5565bc405 lj_csm/lj75/recommended/aggregate/fes.csv
 
-63a555c46732f9185995c728ba5ccd2d489e31a542437cf8a8f30f7c02efbe68 lj_csm/lj75/recommended/aggregate/landscape.png
+0e6f60445b2f795e8546acb7021c7ff55548d9da7be708e2920be79cda9c5d63 lj_csm/lj75/recommended/aggregate/landscape.ld
 
-44d11c4e2af282ad29f807ab9984384622c49017ec2cf560fd40efc3d6fa9178 lj_csm/lj75/recommended/representative/fes.png
+c5ce758b6b1f543c74b4f5579264847949adb49aec634bd335a8ced3eb793f7b lj_csm/lj75/recommended/representative/fes.csv
 
-d3d3852ce24e7e38bf176a861d961b02e70227c27e3874843e230e1d22e1442e lj_csm/lj75/recommended/representative/landscape.png
+cd69d09043c3e3477bdfcf2e3ce2a376014ffbfb376cdb2760c9b597cc9435aa lj_csm/lj75/recommended/representative/landscape.ld
 
-77b1989e14fd89b17a4632e05dfa9107ac33b194e3fad05624095d380c197881 lj_csm/lj98/derived/representative/fes.png
+c607158e6be85296e07c1587f6831d988000ace4acd0d45e9f96a5cbc9641495 lj_csm/lj98/derived/representative/fes.csv
 
-1843f1f7ac6f6e179f5b70f8eff05ae342cf6ebe174c95130ee9b1ffbd4cafc9 lj_csm/lj98/derived/representative/landscape.png
+a6e79d4961f6191d3e6974159b0fdd372a19f7a8e14392c249299e4e665ef536 lj_csm/lj98/derived/representative/landscape.ld
 
-d9cffe58f5f391e2d73161de1ca9489fdfca6f29f955b2715a359efa231cda77 lj_csm_c26/lj98/recommended/representative/fes.png
+52f8d9c2bb541e10859aa44aa152fb0c32504c8b1defc0859d9616c937738c40 lj_csm_c26/lj98/recommended/representative/fes.csv
 
-ae0d665b7a7865a3b9829ffcedd9507e636fc5d2daa221931fbb0e73dd0132a4 lj_csm_c26/lj98/recommended/representative/landscape.png
+ccb93239aa24451e931ce87d5a0d1bdee062835ae0d92ce5b839b0a6e72ea5c8 lj_csm_c26/lj98/recommended/representative/landscape.ld
 
-ea8744b1734f924ecdf840f1876082f6a0b061af51fa026000cf5975bfaa7420 tip4p/hexamer/for_tip4p/aggregate/fes.png
+b1f47469bc0299dbea49b583b22ccae1b01fd22313e2e33d83d5c05a61d14208 tip4p/hexamer/for_tip4p/aggregate/fes.csv
 
-bc3e68043365681cd383bad4957590c1da8356579da8e23c3cec6bbc5c787e21 tip4p/hexamer/for_tip4p/aggregate/landscape.png
+19c3836809eb37227874c2e8cf076e0a4cdf0c22ac2cfc939b42a4e2e5b9dcce tip4p/hexamer/for_tip4p/aggregate/landscape.ld
 
-9cbaf89641b6270f44a9b498aebaca57f078a02da2a4ef6e5387440c266d4781 tip4p/hexamer/for_tip4p/representative/fes.png
+a2c5187a1d9417e23feddaeafc5a3e884211b90ca4cfbe8814778144286df312 tip4p/hexamer/for_tip4p/representative/fes.csv
 
-031922ad8766d2a2ad8416c26f4bcfcee64afef9eddbfde7cc8cd10d0dcb100d tip4p/hexamer/for_tip4p/representative/landscape.png
+aa7f6e28dd6ea9e2feb24f26c95cecd5ce4166f64913fc19d4b7cc978a0dfa7e tip4p/hexamer/for_tip4p/representative/landscape.ld

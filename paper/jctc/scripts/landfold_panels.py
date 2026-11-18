@@ -46,7 +46,7 @@ def panels(data: Path = DATA) -> list[dict[str, str]]:
 
 
 def raster_letters(data: Path = DATA) -> str:
-    """The letters of the panels whose landscape.ld is not committed, so only the sealed raster map exists."""
+    """The letters of panels without an authenticated local landscape table."""
     letters = []
     rows = []
     for job, _family, _size, _role in JOBS:

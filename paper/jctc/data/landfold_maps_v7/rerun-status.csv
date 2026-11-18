@@ -11,3 +11,7 @@ i-j,lj_csm/lj75/recommended,representative;aggregate,ccd1f721216a7492eec3d4aa00d
 k,lj_csm/lj98/derived,representative,ccd1f721216a7492eec3d4aa00d22442d77e3324,2e5e5da570788ac317ab5e13ba43f4e7ef3ff302,cloud-run,2026-11-17,shards-complete,representative-fold
 l,lj_csm_c26/lj98/recommended,representative,ccd1f721216a7492eec3d4aa00d22442d77e3324,2e5e5da570788ac317ab5e13ba43f4e7ef3ff302,cloud-run,2026-11-17,shards-complete,representative-fold
 m-n,tip4p/hexamer/for_tip4p,representative;aggregate,ccd1f721216a7492eec3d4aa00d22442d77e3324,2e5e5da570788ac317ab5e13ba43f4e7ef3ff302,cloud-run,2026-11-17,shards-complete,representative-fold;aggregate-fold
+i-j,lj_csm/lj75/recommended,representative;aggregate,0ca101f73b570baa7e00f632953cce0a08fd176e,3d665c5d9250a870763807390ec48563a50df89a,cloud-run,2026-11-18,complete,none
+k,lj_csm/lj98/derived,representative,0ca101f73b570baa7e00f632953cce0a08fd176e,3d665c5d9250a870763807390ec48563a50df89a,cloud-run,2026-11-18,complete,none
+l,lj_csm_c26/lj98/recommended,representative,0ca101f73b570baa7e00f632953cce0a08fd176e,3d665c5d9250a870763807390ec48563a50df89a,cloud-run,2026-11-18,complete,none
+m-n,tip4p/hexamer/for_tip4p,representative;aggregate,0ca101f73b570baa7e00f632953cce0a08fd176e,3d665c5d9250a870763807390ec48563a50df89a,cloud-run,2026-11-18,complete,none

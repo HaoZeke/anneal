@@ -1,0 +1,123 @@
+{
+  "status": "complete",
+  "code_revision": "0ca101f73b570baa7e00f632953cce0a08fd176e",
+  "code_tree": "3d665c5d9250a870763807390ec48563a50df89a",
+  "host": "cloud-run",
+  "campaigns": [
+    {
+      "name": "lj_csm/lj75/recommended",
+      "family": "lj",
+      "size": 75,
+      "config": "recommended",
+      "budget": 4000000,
+      "first": 2000,
+      "last": 2199,
+      "panels": [
+        "representative",
+        "aggregate"
+      ]
+    },
+    {
+      "name": "lj_csm/lj98/derived",
+      "family": "lj",
+      "size": 98,
+      "config": "derived",
+      "budget": 4000000,
+      "first": 2000,
+      "last": 2047,
+      "panels": [
+        "representative"
+      ]
+    },
+    {
+      "name": "lj_csm_c26/lj98/recommended",
+      "family": "lj",
+      "size": 98,
+      "config": "recommended",
+      "budget": 4000000,
+      "first": 2000,
+      "last": 2047,
+      "panels": [
+        "representative"
+      ]
+    },
+    {
+      "name": "tip4p/hexamer/for_tip4p",
+      "family": "tip4p",
+      "size": 6,
+      "config": "for_tip4p",
+      "budget": 20000,
+      "first": 0,
+      "last": 3,
+      "panels": [
+        "representative",
+        "aggregate"
+      ]
+    }
+  ],
+  "shards": 300,
+  "charged": 1184080000,
+  "minima": 2076648,
+  "panels": {
+    "lj_csm/lj75/recommended/aggregate": {
+      "code_revision": "0ca101f73b570baa7e00f632953cce0a08fd176e",
+      "code_tree": "3d665c5d9250a870763807390ec48563a50df89a",
+      "fes_sha256": "2023aa00636b8d699dadc018fea4aedd7104121073d35cbeba8541a5565bc405",
+      "fit_rows": 6625,
+      "host": "cloud-run",
+      "landscape_sha256": "0e6f60445b2f795e8546acb7021c7ff55548d9da7be708e2920be79cda9c5d63",
+      "mapping": "out-of-sample",
+      "rows": 1124747
+    },
+    "lj_csm_c26/lj98/recommended/representative": {
+      "code_revision": "0ca101f73b570baa7e00f632953cce0a08fd176e",
+      "code_tree": "3d665c5d9250a870763807390ec48563a50df89a",
+      "fes_sha256": "52f8d9c2bb541e10859aa44aa152fb0c32504c8b1defc0859d9616c937738c40",
+      "fit_rows": 10742,
+      "host": "cloud-run",
+      "landscape_sha256": "ccb93239aa24451e931ce87d5a0d1bdee062835ae0d92ce5b839b0a6e72ea5c8",
+      "mapping": "direct",
+      "rows": 10742
+    },
+    "lj_csm/lj98/derived/representative": {
+      "code_revision": "0ca101f73b570baa7e00f632953cce0a08fd176e",
+      "code_tree": "3d665c5d9250a870763807390ec48563a50df89a",
+      "fes_sha256": "c607158e6be85296e07c1587f6831d988000ace4acd0d45e9f96a5cbc9641495",
+      "fit_rows": 9431,
+      "host": "cloud-run",
+      "landscape_sha256": "a6e79d4961f6191d3e6974159b0fdd372a19f7a8e14392c249299e4e665ef536",
+      "mapping": "direct",
+      "rows": 9431
+    },
+    "lj_csm/lj75/recommended/representative": {
+      "code_revision": "0ca101f73b570baa7e00f632953cce0a08fd176e",
+      "code_tree": "3d665c5d9250a870763807390ec48563a50df89a",
+      "fes_sha256": "c5ce758b6b1f543c74b4f5579264847949adb49aec634bd335a8ced3eb793f7b",
+      "fit_rows": 6625,
+      "host": "cloud-run",
+      "landscape_sha256": "cd69d09043c3e3477bdfcf2e3ce2a376014ffbfb376cdb2760c9b597cc9435aa",
+      "mapping": "direct",
+      "rows": 6625
+    },
+    "tip4p/hexamer/for_tip4p/aggregate": {
+      "code_revision": "0ca101f73b570baa7e00f632953cce0a08fd176e",
+      "code_tree": "3d665c5d9250a870763807390ec48563a50df89a",
+      "fes_sha256": "b1f47469bc0299dbea49b583b22ccae1b01fd22313e2e33d83d5c05a61d14208",
+      "fit_rows": 49,
+      "host": "cloud-run",
+      "landscape_sha256": "19c3836809eb37227874c2e8cf076e0a4cdf0c22ac2cfc939b42a4e2e5b9dcce",
+      "mapping": "direct",
+      "rows": 49
+    },
+    "tip4p/hexamer/for_tip4p/representative": {
+      "code_revision": "0ca101f73b570baa7e00f632953cce0a08fd176e",
+      "code_tree": "3d665c5d9250a870763807390ec48563a50df89a",
+      "fes_sha256": "a2c5187a1d9417e23feddaeafc5a3e884211b90ca4cfbe8814778144286df312",
+      "fit_rows": 11,
+      "host": "cloud-run",
+      "landscape_sha256": "aa7f6e28dd6ea9e2feb24f26c95cecd5ce4166f64913fc19d4b7cc978a0dfa7e",
+      "mapping": "direct",
+      "rows": 11
+    }
+  }
+}

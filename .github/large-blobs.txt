@@ -6,6 +6,7 @@ dd77aa9c3add92008d23883049123dd05e5589bb paper/jctc/data/landscapes_7695255/lj75
 21d7ddae8896139c429d242f13dc2e594a7ee084 paper/jctc/data/landscapes_7695255/lj98_bh_s0.min
 a5cb8346544b858382c330f61b7fb56b526dc354 paper/jctc/data/landscapes_7695255/lj98_recommended_s0.min
 a4a50c80e4235c6e4821b345f673770d825acf42 paper/jctc/figs/landscapes.pdf
+9d5a73f869c6781a45c0fdec1e139995dd7ae8d2 paper/jctc/figs/landfold_maps.pdf
 cdce13a04d28d1807fc3228174eaa2e11d7de063 paper/jctc/figs/landscapes.pdf
 2bda13a66daf4db6b2f204107e975b0023fb75bd paper/jctc/figs/lj38_landscape.png
 a3314ea8b1c0df0b5438749ab946fbf615010e74 paper/jctc/figs/lj75_landscape.png

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Draw the landfold maps of the C26 campaigns from sealed landscape.ld / fes.csv.
+"""Draw the landfold maps of the C26 campaigns from authenticated landscape tables.
 
 Reads data/landfold_maps_v7/: PROVENANCE.json of every campaign that wrote a map, held to
-the digests of provenance.txt. When landscape.ld is present it is drawn as a scatter on
-the Ruhi free-energy ramp, recomputed on a uniform grid from the sealed coordinates when
-fes.csv is missing or failed. When only the sealed landscape.png of the handoff is present,
-that PNG is shown. A map the seal skips is no panel.
+the digests of provenance.txt, and current-rerun.json for the current-code replacement
+tables. Every panel is drawn as a scatter on the Ruhi free-energy ramp, recomputed on a
+uniform grid from the authenticated coordinates when fes.csv is missing or failed. A map
+the historical seal skips is no panel.
 
 Usage: fig_landfold_maps.py [--data DIR] OUT.pdf
 """
@@ -75,10 +75,18 @@ def load(data: Path = DATA) -> tuple[dict[str, str], list[Map], list[str]]:
             continue
         if hashlib.sha256(path.read_bytes()).hexdigest() != want:
             die(f"{name} does not match the digest provenance.txt records")
+    current_path = data / "current-rerun.json"
+    current = json.loads(current_path.read_text()) if current_path.is_file() else {}
+    current_panels = current.get("panels", {})
+    if current_panels and (not current.get("code_revision") or not current.get("host")):
+        die("current-rerun.json does not identify its code revision and host")
     maps, skipped = [], []
     for job, name in JOBS:
         seal = json.loads((data / job / "PROVENANCE.json").read_text())
-        if not seal["run"] or seal["landfold_commit"] != keys["landfold_commit"]:
+        current_job = any(f"{job}/{kind}" in current_panels for kind in KINDS)
+        if not current_job and (
+            not seal["run"] or seal["landfold_commit"] != keys["landfold_commit"]
+        ):
             die(f"{job} is not a run of landfold {keys['landfold_commit'][:8]}")
         for kind in KINDS:
             record = seal.get(kind) or {}
@@ -86,7 +94,21 @@ def load(data: Path = DATA) -> tuple[dict[str, str], list[Map], list[str]]:
                 skipped.append(f"{name} {kind}")
                 continue
             folder = data / job / kind
-            if not (folder / "landscape.ld").exists() and not (folder / "landscape.png").exists():
+            current_record = current_panels.get(f"{job}/{kind}")
+            if current_record and not (folder / "landscape.ld").is_file():
+                die(f"{job}/{kind}: current-rerun.json records a missing landscape.ld")
+            if current_record:
+                for filename, field in (
+                    ("landscape.ld", "landscape_sha256"),
+                    ("fes.csv", "fes_sha256"),
+                ):
+                    path = folder / filename
+                    actual = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
+                    if actual != current_record[field]:
+                        die(f"{job}/{kind}: {filename} does not match current-rerun.json")
+            if not current_record and not (
+                (folder / "landscape.ld").exists() or (folder / "landscape.png").exists()
+            ):
                 die(f"{job}/{kind}: neither landscape.ld nor landscape.png is present")
             seeds = f"seed {seal['first_hit_seed']}" if kind == "representative" else f"{seal['seeds_finished']} seeds"
             maps.append(
@@ -95,9 +117,9 @@ def load(data: Path = DATA) -> tuple[dict[str, str], list[Map], list[str]]:
                     name,
                     kind,
                     seeds,
-                    record["rows"],
+                    current_record["rows"] if current_record else record["rows"],
                     record["dimension"],
-                    record["fes_nx"],
+                    48 if current_record else record["fes_nx"],
                     folder,
                 )
             )
