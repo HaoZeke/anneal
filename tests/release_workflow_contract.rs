@@ -79,16 +79,29 @@ fn workflow_job<'a>(workflow: &'a str, name: &str) -> &'a str {
 }
 
 // The default features run once per OS because no matrix Python reaches
-// them. The satisfiable features run on every OS and Python. CI may trim
-// debuginfo, never the optimisation or the checks of the test profile.
+// them. The satisfiable features run on Linux for every change and on
+// macOS when a native/Python build input changes. CI may trim debuginfo,
+// never the optimisation or the checks of the test profile.
 #[test]
-fn ci_runs_the_default_and_feature_suites_on_every_os() {
+fn ci_runs_default_everywhere_and_gates_macos_python() {
     let workflow = include_str!("../.github/workflows/ci.yml");
+    let changes = workflow_job(workflow, "changes");
     let features = workflow_job(workflow, "test");
     let default = workflow_job(workflow, "test-default");
-    for job in [features, default] {
-        assert!(job.contains("os: [ubuntu-latest, macos-15, macos-26]"));
+    assert!(default.contains("os: [ubuntu-latest, macos-15, macos-26]"));
+    assert!(features.contains("needs: changes"));
+    assert!(features.contains("os: ${{ fromJSON(needs.changes.outputs.test-os) }}"));
+    for path in [
+        "src/**",
+        "python/**",
+        "Cargo.*",
+        "pyproject.toml",
+        ".github/workflows/ci.yml",
+    ] {
+        assert!(changes.contains(path), "macOS path filter omits {path}");
     }
+    assert!(changes.contains(r#"test-os=["ubuntu-latest","macos-15","macos-26"]"#));
+    assert!(changes.contains(r#"test-os=["ubuntu-latest"]"#));
     assert!(features.contains("python-version: [\"3.10\", \"3.11\", \"3.12\", \"3.13\"]"));
     assert!(features.contains("cargo test --features \"$CI_FEATURES,lammps\""));
     assert!(features.contains("cargo test --features \"$CI_FEATURES\"\n"));

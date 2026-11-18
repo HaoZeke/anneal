@@ -721,12 +721,26 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut opt = WarmLbfgs::default();
-    // A molecular line search that starts from a huge curvature step needs
-    // more than twenty probes to walk back out of an overlap. Those probes
-    // are geometry checks, not potential calls.
-    // A molecular line search that starts from a huge curvature step needs
-    // more than twenty probes to walk back out of an overlap. Those probes
-    // are geometry checks, not potential calls.
+    // A molecular line search that starts from steepest descent tries a
+    // step of one coordinate unit. That climbs a bond, the Wolfe search
+    // spends the evaluation walking back, and there is no model Hessian
+    // to size the next step. The Lindh-preconditioned quench caps the
+    // atom move first. A rigid chart keeps L-BFGS: that chart's basin
+    // changed under a line-search-free step.
+    let atomic_numbers: Vec<i32> = cfg
+        .species
+        .as_ref()
+        .map(|species| {
+            species
+                .iter()
+                .map(|number| i32::try_from(*number).unwrap_or(0))
+                .collect()
+        })
+        .unwrap_or_default();
+    let molecular_anc = cfg.capped_lindh_quench
+        && cfg.species.is_some()
+        && cfg.move_library.is_molecular()
+        && !cfg.move_library.is_rigid_body();
     if cfg.species.is_some() {
         opt.max_line_evals = 64;
     }
@@ -1021,43 +1035,56 @@ where
         let quench_tric = tric
             .as_mut()
             .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
-        let (f, xr) = match (quench_tric, preconditioner) {
-            (Some(tric), _) => {
-                tric.gtol = opt.gtol;
-                let (f, xr, _) = tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
-                (f, xr)
-            }
-            (None, None) => {
-                let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
-                (f, xr)
-            }
-            (None, Some(pre)) => {
-                // The reduced gradient has other units, so the solver's own
-                // test is off and the stop reads the Cartesian one.
-                let origin = x.to_owned();
-                let gtol = opt.gtol;
-                opt.gtol = 0.0;
-                let (f, zr, _) = opt.minimize_watched(
-                    Array1::zeros(x.len()).view(),
-                    iters,
-                    |z| {
-                        let v = pre.expand(origin.view(), z);
-                        evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
-                    },
-                    |it, fv| {
-                        let settled = last
-                            .borrow()
-                            .as_ref()
-                            .is_some_and(|c| largest_component(c.gradient.view()) <= gtol);
-                        !settled && watch(it, fv)
-                    },
-                );
-                opt.gtol = gtol;
-                (f, pre.expand(origin.view(), zr.view()))
+        let (f, xr) = if molecular_anc {
+            let (f, xr, _) = crate::methods::anc_quench::anc_minimize_watched(
+                x,
+                &atomic_numbers,
+                iters,
+                cfg.record_gradient,
+                &mut evaluate,
+                &mut watch,
+            );
+            (f, xr)
+        } else {
+            match (quench_tric, preconditioner) {
+                (Some(tric), _) => {
+                    tric.gtol = opt.gtol;
+                    let (f, xr, _) = tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                    (f, xr)
+                }
+                (None, None) => {
+                    let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                    (f, xr)
+                }
+                (None, Some(pre)) => {
+                    // The reduced gradient has other units, so the solver's own
+                    // test is off and the stop reads the Cartesian one.
+                    let origin = x.to_owned();
+                    let gtol = opt.gtol;
+                    opt.gtol = 0.0;
+                    let (f, zr, _) = opt.minimize_watched(
+                        Array1::zeros(x.len()).view(),
+                        iters,
+                        |z| {
+                            let v = pre.expand(origin.view(), z);
+                            evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
+                        },
+                        |it, fv| {
+                            let settled = last
+                                .borrow()
+                                .as_ref()
+                                .is_some_and(|c| largest_component(c.gradient.view()) <= gtol);
+                            !settled && watch(it, fv)
+                        },
+                    );
+                    opt.gtol = gtol;
+                    (f, pre.expand(origin.view(), zr.view()))
+                }
             }
         };
         // A quench of a few calls times the start, not the potential.
-        if deciding
+        if !molecular_anc
+            && deciding
             && timed_calls >= 3
             && let Some(tric) = tric.as_ref()
             && let Some(check) = last.borrow().as_ref()
@@ -1188,7 +1215,7 @@ where
         // line search otherwise stops inside an overlap, is continued until
         // the same record gradient is met or the budget ends. Screening
         // passes stay short, and the tolerance is the preset's own.
-        let continuation_rounds = if screening {
+        let continuation_rounds = if screening || molecular_anc {
             0
         } else if cfg.species.is_some() && cfg.species_sigma.is_none() {
             8

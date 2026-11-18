@@ -35,6 +35,16 @@ ROW_FIELDS = (
     "wall_s", "inside_s", "outside_s", "code_revision", "host", "stop", "cap_s",
 )
 HIT_TOL = 0.001
+TEX_LABELS = {
+    "m38r6": "M\\(_{38}\\), \\(\\rho=6\\)",
+    "m38r14": "M\\(_{38}\\), \\(\\rho=14\\)",
+    "m55r6": "M\\(_{55}\\), \\(\\rho=6\\)",
+    "m55r14": "M\\(_{55}\\), \\(\\rho=14\\)",
+}
+MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
+TEX_MARKS = ("% ase-nonlj table: start", "% ase-nonlj table: end")
+ASE_VERSION = "3.29.0"
+REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
 
 
 def type7(ordered: list[float], probability: float) -> float:
@@ -156,7 +166,7 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
             raise SystemExit(f"unexpected row {row}")
         if row["budget"] != SPEC[system][2] or row["host"] != "bench":
             raise SystemExit(f"unexpected budget or host {row}")
-        key = (system, arm, row["seed"])
+        key = (row["code_revision"], system, arm, row["seed"])
         if key in seen:
             raise SystemExit(f"duplicate row {key}")
         seen.add(key)
@@ -183,7 +193,8 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
                 raise SystemExit(f"invalid wall stop {row}")
         else:
             raise SystemExit(f"invalid miss stop {row}")
-        grouped[system][arm].append(row)
+        if row["code_revision"] == REVISION:
+            grouped[system][arm].append(row)
     for system in SYSTEMS:
         for arm in ARMS:
             seeds = tuple(sorted(int(row["seed"]) for row in grouped[system][arm]))
@@ -206,17 +217,127 @@ def load_identity() -> list[dict[str, str]]:
     return rows
 
 
+def show_p(p: float) -> str:
+    """Two significant figures; 1 only when p is exactly 1."""
+    if p >= 1.0:
+        return "1"
+    if p >= 0.01:
+        return f"{p:.2f}" if p >= 0.1 else f"{p:.3f}"
+    mantissa, exponent = f"{p:.1e}".split("e")
+    return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
+
+
+def show_budget(budget: str) -> str:
+    mantissa, exponent = f"{int(budget):.0e}".split("e")
+    return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
+
+
+def show_wall(value: float) -> str:
+    return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
+
+
+def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
+    """Table tab:ase-morse: recommended against both ASE arms, Fisher on hits only."""
+    body = []
+    revisions = {row["code_revision"] for s in SYSTEMS for row in grouped[s]["recommended"]}
+    if len(revisions) != 1:
+        raise SystemExit(f"recommended rows carry more than one revision: {sorted(revisions)}")
+    for system in SYSTEMS:
+        _, _, budget, _, _ = SPEC[system]
+        arms = grouped[system]
+        if any(row["stop"] == "wall" for row in arms["recommended"]):
+            raise SystemExit(f"{system}: a recommended row stopped at the wall cap")
+        if not all(row["stop"] == "wall" for arm in ASE_ARMS for row in arms[arm]):
+            raise SystemExit(f"{system}: an ASE row did not stop at the wall cap")
+        caps = {row["cap_s"] for arm in ASE_ARMS for row in arms[arm]}
+        slowest = max(float(row["wall_s"]) for row in arms["for_cluster"])
+        if len(caps) != 1 or abs(float(next(iter(caps))) - 3.0 * slowest) > 1.0e-6:
+            raise SystemExit(f"{system}: the ASE wall cap is not three times the slowest for_cluster wall")
+
+        def hits(arm: str) -> int:
+            return sum(row["hit"] == "1" for row in arms[arm])
+
+        body.append(" & ".join([
+            TEX_LABELS[system], show_budget(budget), f"{float(caps.pop()):.3f}",
+            f"{hits('recommended')}/12", f"{hits('ase_bh')}/12", f"{hits('ase_mh')}/12",
+            show_wall(median([float(row["wall_s"]) for row in arms["recommended"]])),
+            show_wall(median([float(row["wall_s"]) for row in arms["ase_bh"]])),
+            show_wall(median([float(row["wall_s"]) for row in arms["ase_mh"]])),
+            show_p(fisher(hits("recommended"), hits("ase_bh"))),
+            show_p(fisher(hits("recommended"), hits("ase_mh"))),
+        ]) + " \\\\")
+    return "\n".join([
+        "\\begin{table}",
+        "\\caption{This work against the basin hopping (BH) and minima hopping",
+        f"(MH) of ASE {ASE_VERSION} on Morse clusters.",
+        f"This work is anneal \\texttt{{{revisions.pop()[:8]}}} at the length",
+        "scale of the Morse pair.",
+        "Seeds 2000--2011, one core, budget in force calls.",
+        "Cap is the wall in seconds at which a BH or MH run stops, three times",
+        "the slowest wall of the cluster-preset arm of the panel.",
+        "Every BH and MH run ended at the cap, as a miss with fewer calls than",
+        "the budget, and no run of this work did.",
+        "Wall is the median over the 12 runs of the seconds each run took;",
+        "a BH or MH run is counted at its wall, which lies at the cap.",
+        "\\(p_\\mathrm{BH}\\) and \\(p_\\mathrm{MH}\\) are the two-sided Fisher",
+        "exact test on hits against each ASE arm.}",
+        "\\label{tab:ase-morse}",
+        "\\centering",
+        "\\footnotesize",
+        "\\setlength{\\tabcolsep}{3pt}",
+        "\\begin{tabular}{@{}lrrrrrrrrrr@{}}",
+        "\\toprule",
+        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{3}{c}{Wall (s)} & & \\\\",
+        "\\cmidrule(lr){4-6}\\cmidrule(lr){7-9}",
+        "Cluster & Budget & Cap & This work & BH & MH & This work & BH & MH & "
+        "\\(p_\\mathrm{BH}\\) & \\(p_\\mathrm{MH}\\) \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
+def splice(text: str, block: str) -> str:
+    start, end = TEX_MARKS
+    if text.count(start) != 1 or text.count(end) != 1:
+        raise SystemExit(f"{MANUSCRIPT} needs one '{start}' and one '{end}'")
+    head, rest = text.split(start, 1)
+    _old, tail = rest.split(end, 1)
+    return f"{head}{start}\n{block}\n{end}{tail}"
+
+
+def group_revision(group: list[dict[str, str]]) -> str:
+    found = {row["code_revision"] for row in group}
+    if len(found) != 1:
+        raise SystemExit(f"a summary row needs one code revision, found {sorted(found)}")
+    return found.pop()
+
+
 def main() -> None:
-    if len(sys.argv) > 2 or (len(sys.argv) == 2 and sys.argv[1] != "--check"):
-        raise SystemExit("usage: summarize.py [--check]")
+    flags = sys.argv[1:]
+    if any(flag not in ("--check", "--tex") for flag in flags) or len(set(flags)) != len(flags):
+        raise SystemExit("usage: summarize.py [--check] [--tex]")
     grouped = load_rows()
     identity = load_identity()
     revisions = sorted({row["code_revision"] for s in SYSTEMS for a in ARMS for row in grouped[s][a]})
-    summary_lines = [
+    summary_header = (
         "system,arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,"
         "fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,"
-        "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s",
-    ]
+        "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s,code_revision,host"
+    )
+    summary_path = ROOT / "bench" / "ase-nonlj" / "summary.csv"
+    summary_lines = [summary_header]
+    if summary_path.exists():
+        existing = summary_path.read_text().splitlines()
+        if existing and existing[0] != summary_header:
+            raise SystemExit(f"{summary_path}: unexpected columns")
+        summary_lines.extend(
+            line
+            for line in existing[1:]
+            if dict(zip(summary_header.split(","), line.split(",")))["code_revision"] != REVISION
+        )
     readme = [
         "Copyright (c) anneal developers",
         "",
@@ -291,7 +412,7 @@ def main() -> None:
                 f"{system},{arm},{hits},12,{best:.8f},{best - reference:.8f},"
                 f"{wall:.6f},{inside:.6f},{outside:.6f},"
                 f"{f_bh},{u_bh},{mw_bh},{f_mh},{u_mh},{mw_mh},"
-                f"{w_bh:.6f},{w_mh:.6f},{wall_stops},{arm_cap}"
+                f"{w_bh:.6f},{w_mh:.6f},{wall_stops},{arm_cap},{group_revision(group)},bench"
             )
             readme.append(
                 f"| {system} ({label}, {reference:.6f}) | {LABEL[arm]} | {hits}/12 | {best:.8f} | "
@@ -327,10 +448,12 @@ def main() -> None:
     )
     out = ROOT / "bench" / "ase-nonlj"
     outputs = {
-        out / "summary.csv": "\n".join(summary_lines) + "\n",
+        summary_path: "\n".join(summary_lines) + "\n",
         out / "README.md": "\n".join(readme),
     }
-    if len(sys.argv) == 2:
+    if "--tex" in flags:
+        outputs[MANUSCRIPT] = splice(MANUSCRIPT.read_text(), tex_table(grouped))
+    if "--check" in flags:
         stale = [
             str(path.relative_to(ROOT))
             for path, text in outputs.items()

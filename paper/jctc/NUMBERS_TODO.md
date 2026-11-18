@@ -21,12 +21,12 @@ We record no replacement digest.
 
 ## LJ75
 
-We report no LJ75 hit count in the article.
-Seeds 0 through 199 run at a cap of 4e6 force calls.
-No per-arm hit rate is typed.
+The article reports LJ75 in tab:ablation and tab:gmin.
+In tab:gmin, seeds 2000-2011, the recommended preset hits 12 of 12.
+And the Wales-group basin-hopping program (GMIN) hits 0 of 12.
+The 200-seed campaign on seeds 0 through 199 runs at a cap of 4e6 force calls.
+No per-arm hit rate from that campaign is typed.
 No CSV for that campaign is in the tree.
-The Wales-group basin-hopping program (GMIN) head-to-head is still open.
-This file does not add a count for it.
 
 ## Counters from the conformer-rotamer ensemble sampling tool (CREST)
 
@@ -52,8 +52,9 @@ The 192-seed paragraph stays.
 It prints 121/192, 97/192, 148/192, and 114/192.
 The six-seed hexamer logs are a separate subsection.
 Open work remains on the water 16-mer.
-The Atomic Simulation Environment panel.
-The atomistic global optimization framework (AGOX).
-And the GMIN head-to-head.
+And the atomistic global optimization framework (AGOX).
 The manuscript does not mark those counts with a todo.
+The GMIN panel is tab:gmin.
+The Atomic Simulation Environment panels are tab:ase and tab:ase-morse.
+Their summarisers write those tables from the committed rows.
 No number was invented for them.

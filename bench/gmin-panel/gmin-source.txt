@@ -8,4 +8,4 @@ patch=bench/metal-cluster-h2h/gmin-bgupta.patch 85e41503a1e64c46902ecb5aefc4c60e
 cmake=-DWITH_ALIGN=OFF -DWITH_MPI=OFF -DWITH_OPENMP=OFF -DWITH_SPARSE=OFF -DWITH_PYTHON=OFF -DWITH_MYBLAS=OFF -DWITH_MYLAPACK=OFF
 gfortran=13.3.0
 linked=/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.12.0 /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0
-binary_sha256=4f77231487fe9ffb63dfa94b77022a567d2239fab7e44d9982561a911e52a8ac
+binary_sha256=4665badc28f4d765117771bea47cf1ebcb93c5e7a7456679f17b53aaff15fe69

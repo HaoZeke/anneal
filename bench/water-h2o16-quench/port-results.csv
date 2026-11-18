@@ -1,0 +1,3 @@
+base,measurement_tree,molecules,budget,seed,vtight_Eh,objective_eV,hit,wall_s,potential_s,outside_s,energy_calls,search_calls,polish_calls,quenches_converged,quenches_capped,energy_calls_per_converged,hops,scc_rejected
+0ae5bfe0,f0bac79b,16,28000,16001,-81.387703963668,-2214.6722482295,no,853.065954,808.150336,44.915618,28000,26400,1600,353,13,79.320,337,0
+0ae5bfe0,f0bac79b,16,28000,15000,-81.388961921640,-2214.7064790098,no,861.530585,815.176464,46.354121,28000,26400,1600,315,11,88.889,302,0

@@ -12,7 +12,7 @@ And the bibliography stay.
 The 38-atom and 75-atom Oakley means stay in the data file.
 The preset keeps one move library at every size.
 The hit is read from converged improvements.
-The LJ75 hit count in the article is pending.
+The LJ75 hit counts in the article are those of tab:ablation and tab:gmin.
 The six crest rows are single draws.
 And the draft states no success rate from them.
 The six-seed old-counter arm is called the driver-count budget.

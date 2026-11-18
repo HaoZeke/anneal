@@ -14,7 +14,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 REV=${GMIN_PANEL_REV:-c2de652dca0bc75e2b0cb4afffac91fd656404e4}
 WORK=${GMIN_PANEL_WORK:-/work/gmin-panel}
-OUT=$ROOT/bench/gmin-panel
+OUT=${GMIN_PANEL_OUT:-$ROOT/bench/gmin-panel}
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 
 if [[ ${1:-} == --summarize ]]; then
@@ -53,11 +53,15 @@ for example in h2h_gmin_proof h2h_morse h2h_metal; do
   cp -f "$WORK/target/release/examples/$example" "$WORK/bin/"
 done
 
-tree "$WORK/lj103-src"
-git -C "$WORK/lj103-src" checkout -q -- examples/h2h_gmin_proof.rs
-git -C "$WORK/lj103-src" apply "$ROOT/bench/paper-0120/lj103-table.patch"
-build "$WORK/lj103-src" "$WORK/target-lj103" --example h2h_gmin_proof
-cp -f "$WORK/target-lj103/release/examples/h2h_gmin_proof" "$WORK/bin/h2h_gmin_proof_lj103"
+if "$WORK/bin/h2h_gmin_proof" budget lj103 >/dev/null 2>&1; then
+  cp -f "$WORK/bin/h2h_gmin_proof" "$WORK/bin/h2h_gmin_proof_lj103"
+else
+  tree "$WORK/lj103-src"
+  git -C "$WORK/lj103-src" checkout -q -- examples/h2h_gmin_proof.rs
+  git -C "$WORK/lj103-src" apply "$ROOT/bench/paper-0120/lj103-table.patch"
+  build "$WORK/lj103-src" "$WORK/target-lj103" --example h2h_gmin_proof
+  cp -f "$WORK/target-lj103/release/examples/h2h_gmin_proof" "$WORK/bin/h2h_gmin_proof_lj103"
+fi
 
 GMIN_PANEL_WORK=$WORK bash "$HERE/build_gmin.sh"
 sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"

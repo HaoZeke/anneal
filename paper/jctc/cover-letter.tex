@@ -2,59 +2,66 @@
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{url}
-\newcommand{\todo}[1]{\par\noindent\textbf{[TODO]} #1\par}
+\input{macros}
 
 \begin{document}
-\noindent Rohit Goswami\\ SURF B.V., Amsterdam\\
+\noindent Rohit Goswami\\
+SURF B.V., Amsterdam, The Netherlands\\
+Science Institute, University of Iceland, Reykjavik, Iceland\\
+TurtleTech ehf., Reykjavik, Iceland\\
+Email: \url{rgoswami@ieee.org}
 
-Science Institute, University of Iceland, Reykjavik, Iceland\\.
-TurtleTech ehf., Reykjavik, Iceland\\ Email: \url{rgoswami@ieee.org}\\.
-Telephone: \todo{Rohit}
+\vspace{1em}
+\noindent Journal of Chemical Theory and Computation\\
+American Chemical Society
 
-\vspace{1em} \noindent Journal of Chemical Theory and Computation\\
-American Chemical Society.
+\vspace{1em}
+\noindent Dear Editor,
 
-\vspace{1em} \noindent Dear Editor,
+We ask you to consider the enclosed manuscript, ``One basin-hopping setting for
+Lennard-Jones, Morse, gold, and water clusters,'' as a Full Article.
 
-We ask you to consider the enclosed manuscript, ``Basin hopping on.
-Lennard-Jones clusters with one preset at every size,'' as a Full
-Article.
+This submission replaces the preprint arXiv:2302.02811, deposited in 2023
+under the title ``Unified Software Design Patterns for Simulated Annealing.''
+The title and the content have changed.
+The manuscript now reports one basin-hopping setting and the search machinery
+it runs on, and it compares that setting with GMIN, with the Atomic
+Simulation Environment, with AGOX GOFEE, and with CREST.
 
-This submission replaces the preprint arXiv:2302.02811, deposited in.
-2023 under the title ``Unified Software Design Patterns for Simulated.
-Annealing.''
-The title has changed.
-The manuscript now reports one basin-hopping preset.
-That preset keeps the move library, the temperature, the census.
-And the orbit completion fixed at every size.
-Below 98 atoms it adds a diameter penalty.
-And restart on stall stays off.
-The novelty is that fixed core.
-With the depth posterior choosing the move.
-On the water hexamer.
-The six crest rows are single draws from the conformer-rotamer ensemble.
-Sampling tool (CREST).
-Those rows are not a success rate.
-Five polished gaps lie within \(1\times 10^{-7}\)~Eh.
-And seed 1 lies above that line.
-The comparison sets the 4000-call arm against CREST energy.
-And gradient calls, which run from 142110 to 209931.
+The manuscript reports one basin-hopping setting for atomic and rigid-molecule
+clusters.
+It has a fixed library of six moves, a reduced temperature of \(0.8\), and a
+depth posterior that chooses the move, and none of the three changes with the
+size of the cluster.
+The manuscript does not claim a new move.
+The claim is the combination, in which one normal-gamma posterior per move
+chooses among six moves from the depth each reaches and a stall never restarts
+the walker at random, and the way the combination is tested.
+The preset also carries structure priors.
 
-One constructor states the size switch.
-And the stall rule that the code runs.
-A referee can check each hexamer gap against the force criterion.
-And against the vtight threshold in the text.
-Journal of Chemical Theory and Computation publishes software.
-For molecular simulation.
-This article belongs in that journal.
-The molecular test is a water hexamer at the GFN2-xTB model.
-And the software is the preset a reader can rerun.
+Against the Wales-group program GMIN, on seeds 2000--2011 of thirteen Lennard-Jones, Gupta, and Morse clusters in one session, this setting hits more seeds on 9 of 13, the two tie on 2, and GMIN hits more on 2.~\rerun{5}
+Fisher's test on hits is below 0.05 on 6 of the 9 wins: LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), Au\(_{55}\), and M\(_{55}\) and M\(_{80}\) at \(\rho=14\).~\rerun{5}
+GMIN hits LJ\(_{150}\) on 9 of 12 against 5 of 12, with \(p=0.21\), and M\(_{80}\) at \(\rho=6\) on 12 of 12 against 2 of 12, with \(p=6.7\times 10^{-5}\).~\rerun{5}
+The median wall of a run is 0.075~s for this setting against 3.658~s for GMIN on LJ\(_{38}\), and 27.019~s against 119.9~s on LJ\(_{75}\).~\rerun{5}
+On M\(_{80}\) at \(\rho=6\) it is 168.9~s against 10.691~s.~\rerun{5}
+The losses and the ties stay in the text and in the tables.
 
-A table of contents graphic at 3.25~in by 1.75~in accompanies.
-The submission.
+The molecular test is the water hexamer at the GFN2-xTB model, and the
+manuscript also reports TIP4P clusters against GMIN.
+On the water hexamer the motif match hits 121 of 192 seeds for the default hop and 97 of 192 for CREST, both at GFN2-xTB with xtb 6.7.1.~\rerun{7}
+The six CREST rows are single draws from one start geometry, and the text
+does not read them as a success rate.
 
-Suggested reviewers follow.
-\todo{Rohit} \todo{Rohit} \todo{Rohit}
+Journal of Chemical Theory and Computation publishes software for molecular
+simulation.
+This article belongs in that journal because the tables of the GMIN, ASE, GOFEE, and
+TIP4P comparisons are generated from the committed rows by committed scripts.
+The Zenodo record for the submission is pending and has no DOI yet.
 
-\noindent Sincerely,\\ Rohit Goswami
+A table of contents graphic at 3.25~in by 1.75~in accompanies the submission.
+The suggested reviewers are listed in the submission form.
+
+\vspace{1em}
+\noindent Sincerely,\\
+Rohit Goswami
 \end{document}

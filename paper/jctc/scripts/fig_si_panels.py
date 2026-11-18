@@ -2,8 +2,9 @@
 # Copyright (c) anneal developers
 """Draw the supporting panels from the same sealed inputs as the main figures.
 
-lj38_sketchmap.png is the LJ38 landmark scatter, coloured by energy on the Ruhi ramp.
-lj38_landscape.png, lj75_landscape.png and lj98_landscape.png are the energy surfaces.
+lj38_sketchmap.pdf is the LJ38 landmark scatter, colored by energy on the Ruhi ramp.
+lj38_landscape.pdf, lj75_landscape.pdf and lj98_landscape.pdf are the energy surfaces.
+All are vector PDFs with no title; each axis and colorbar carries its unit.
 occupancy_landfold.pdf collects the three occupancy folds.
 occupancy_landfold_lj38.pdf, occupancy_landfold_lj75.pdf and occupancy_landfold_lj98.pdf
 are those folds one size at a time.
@@ -23,7 +24,7 @@ import figstyle
 import system_visuals
 
 
-def _landscape_png(landscape, published: float, out: Path) -> None:
+def _landscape_pdf(landscape, published: float, out: Path) -> None:
     import matplotlib.pyplot as plt
     import numpy as np
 
@@ -56,16 +57,17 @@ def _landscape_png(landscape, published: float, out: Path) -> None:
             zorder=3,
             label=arm,
         )
-    ax.set_xlabel("sketch-map 1")
-    ax.set_ylabel("sketch-map 2")
+    ax.set_xlabel("sketch-map 1 (arb. units)")
+    ax.set_ylabel("sketch-map 2 (arb. units)")
     bar = fig.colorbar(filled, ax=ax, fraction=0.046, pad=0.04)
-    bar.set_label("energy above the global minimum")
+    bar.solids.set_rasterized(False)
+    bar.solids.set_edgecolor("face")
+    bar.set_label("energy above the global minimum (\N{GREEK SMALL LETTER EPSILON})")
     ax.legend(loc="best", fontsize=figstyle.SMALLEST)
-    fig.savefig(out, format="png", dpi=200)
-    plt.close(fig)
+    figstyle.save(fig, out)
 
 
-def _sketch_png(landscape, out: Path) -> None:
+def _sketch_pdf(landscape, out: Path) -> None:
     import matplotlib.pyplot as plt
     import numpy as np
 
@@ -76,11 +78,12 @@ def _sketch_png(landscape, out: Path) -> None:
     fig, ax = plt.subplots(figsize=(figstyle.SINGLE, 2.4), layout="constrained")
     points = ax.scatter(coords[:, 0], coords[:, 1], c=energies, cmap=figstyle.ramp(), s=12, linewidths=0)
     bar = fig.colorbar(points, ax=ax, fraction=0.046, pad=0.04)
-    bar.set_label("quenched energy")
-    ax.set_xlabel("sketch-map 1")
-    ax.set_ylabel("sketch-map 2")
-    fig.savefig(out, format="png", dpi=200)
-    plt.close(fig)
+    bar.solids.set_rasterized(False)
+    bar.solids.set_edgecolor("face")
+    bar.set_label("quenched energy (\N{GREEK SMALL LETTER EPSILON})")
+    ax.set_xlabel("sketch-map 1 (arb. units)")
+    ax.set_ylabel("sketch-map 2 (arb. units)")
+    figstyle.save(fig, out)
 
 
 def _fold_pdf(fold, out: Path) -> None:
@@ -105,15 +108,15 @@ def draw(data: Path, out_dir: Path) -> None:
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     by_size = {landscape.size: landscape for landscape in landscapes}
-    _sketch_png(by_size[38], out_dir / "lj38_sketchmap.png")
+    _sketch_pdf(by_size[38], out_dir / "lj38_sketchmap.pdf")
     for size in (38, 75, 98):
-        _landscape_png(by_size[size], published[size], out_dir / f"lj{size}_landscape.png")
+        _landscape_pdf(by_size[size], published[size], out_dir / f"lj{size}_landscape.pdf")
         _fold_pdf(folds[size], out_dir / f"occupancy_landfold_lj{size}.pdf")
     figstyle.setup()
     fig, axes = plt.subplots(1, 3, figsize=(figstyle.DOUBLE, 2.15), layout="constrained")
-    for ax, size in zip(axes, (38, 75, 98)):
+    for ax, size, letter in zip(axes, (38, 75, 98), "abc"):
         system_visuals.draw_fold(ax, folds[size], ylabel=size == 38)
-        ax.set_title(folds[size].label, fontsize=figstyle.SMALLEST)
+        figstyle.label(ax, letter)
     figstyle.save(fig, out_dir / "occupancy_landfold.pdf")
 
 

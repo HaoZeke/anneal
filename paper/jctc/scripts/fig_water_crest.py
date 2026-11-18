@@ -39,6 +39,12 @@ SHORT = {
 }
 
 
+def mathp(text: str) -> str:
+    """A three-figure p with its exponent set as a power of ten."""
+    mantissa, _, exponent = text.partition("e")
+    return f"$p={mantissa}\\times 10^{{{int(exponent)}}}$" if exponent else f"$p={mantissa}$"
+
+
 def draw(data: Path, out: Path) -> None:
     import matplotlib.pyplot as plt
 
@@ -57,7 +63,7 @@ def draw(data: Path, out: Path) -> None:
     a.set_yticks(range(len(arms)), [SHORT[arm.folder] for arm in arms])
     a.invert_yaxis()
     a.set_xlim(0, 1.0)
-    a.set_xlabel(f"Share of the {water_results_table.RUNS} seeds that hit")
+    a.set_xlabel(f"Share of the {water_results_table.RUNS} seeds that hit (fraction)")
 
     scored = [arm for arm in arms if arm.contrast]
     for y, arm in enumerate(scored):
@@ -67,13 +73,13 @@ def draw(data: Path, out: Path) -> None:
         b.errorbar(difference, y, xerr=[[difference - low], [high - difference]], fmt="o",
                    color=COLOURS[arm.folder], ecolor=figstyle.BLACK, markeredgecolor=figstyle.BLACK,
                    markeredgewidth=0.5, markersize=5, elinewidth=0.9, capsize=3)
-        b.text(high + 0.015, y, f"p {water_results_table.cells(arm)['p']}", va="center", ha="left",
+        b.text(high + 0.015, y, mathp(water_results_table.cells(arm, table=True)['p']), va="center", ha="left",
                fontsize=figstyle.SMALLEST)
     b.axvline(0, color=figstyle.GREY, linewidth=0.7, linestyle=":")
     b.set_yticks(range(len(scored)), [SHORT[arm.folder] for arm in scored])
     b.set_ylim(len(scored) - 0.5, -0.5)
     b.set_xlim(-0.1, 0.75)
-    b.set_xlabel("Hit rate of the hop less CREST's")
+    b.set_xlabel("Hit rate of the hop less CREST's (fraction)")
     for ax, letter in zip((a, b), "ab"):
         figstyle.label(ax, letter)
     figstyle.save(fig, out)

@@ -1,7 +1,5 @@
 // Copyright (c) anneal developers
-//! A failed stall growth used to quench one extra lattice and leave the
-//! same minimum in place. During that hold every proposal is an all-points
-//! displacement, and growth waits until the incumbent drops.
+//! A flat stall keeps drawing only from the configured general move library.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, run_with_gradient};
 use ndarray::{Array1, ArrayView1};
@@ -17,11 +15,11 @@ fn line(n: usize) -> Array1<f64> {
 }
 
 #[test]
-fn a_held_stall_on_a_line_accepts_an_all_points_step() {
+fn a_flat_stall_uses_only_general_lean_burst_actions() {
     let home = line(13);
     let mut cfg = Config::for_cluster(13);
     cfg.max_hops = Some(5);
-    cfg.escape_on_stall = true;
+    cfg.escape_on_stall = false;
     cfg.restart_on_stall = false;
     cfg.trail_on_stall = false;
     cfg.budget_window = false;
@@ -41,8 +39,6 @@ fn a_held_stall_on_a_line_accepts_an_all_points_step() {
     cfg.point_symmetrise_on_new = false;
     cfg.orbit_complete_on_new = false;
     cfg.allocate_moves = false;
-    // LeanBurst has no all-points kernel. An `all` acceptance can come
-    // only from the stall hold.
     cfg.move_library = MoveLibrary::LeanBurst;
     let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
         let _ = ledger.charge();
@@ -52,14 +48,16 @@ fn a_held_stall_on_a_line_accepts_an_all_points_step() {
     let mut rng = StdRng::seed_from_u64(7);
     let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
         .expect("finite start");
-    let all = outcome
+    assert_eq!(outcome.hops, 5);
+    let actions: Vec<&str> = outcome
         .accepted_transitions
         .iter()
-        .filter(|step| step.action == "all")
-        .count();
+        .map(|step| step.action.as_str())
+        .collect();
     assert!(
-        all >= 1,
-        "the hold never emitted an all-points acceptance ({all} of {})",
-        outcome.accepted_transitions.len()
+        actions
+            .iter()
+            .all(|action| matches!(*action, "surface" | "single" | "burst" | "sym" | "soap")),
+        "{actions:?}"
     );
 }

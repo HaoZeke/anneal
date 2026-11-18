@@ -39,7 +39,7 @@ develop row stores it, the same best energy to 1e-8.
 | LJ150 | 4e6 | 5/12 | 3/12 | `bb486bfd` regress-bb486bfd | 0.67 | 4,000,000 | 4,000,000 | 0.54 | 0 | 239.0 / 135.2 / 102.1 |
 | Au55 | 1e6 | 6/12 | 6/12 | `7192e9f8` g3 priors-on develop arm | 1 | 852,736 | 852,736 | 1 | 12 | 31.03 / 22.95 / 8.05 |
 | M80 ρ=6 | 4e6 | 2/12 | 2/12 | `7192e9f8` g3 priors-on develop arm | 1 | 4,000,000 | 4,000,000 | 1 | 12 | 159.0 / 105.6 / 53.2 |
-| M80 ρ=14 | 4e6 | 9/12 | 10/12 | `76ff29a6` morse-panel | 1 | 1,338,933 | 2,479,560 | 0.34 | 0 | 48.75 / 37.14 / 11.61 |
+| M80 ρ=14 | 4e6 | 9/12 | 9/12 | `76ff29a6` morse-panel | 1 | 1,338,933 | 1,338,933 | 1.0 | 12 | 48.75 / 37.14 / 11.61 |
 
 ## Where 0.12.0 moved
 
@@ -94,8 +94,9 @@ On this build `scripts/covalent_h2h/pins.sh` prints sha1
 `7192e9f8` in `bench/generic-alloy/g3-pins.txt` and for `7d8fa6ea` in
 `bench/openconf-h2h/conf-fix4`. `h2h_metal run au55` on seeds 2000-2002,
 clock columns removed, prints sha1
-`b22e212181eff57e9412f780c40e85208b355d07`, the value recorded in
-`bench/openconf-h2h/conf-fix4`.
+`1213f9cdf92a2dabfc8a51c83522086f8a9d7cdc`; the template-era value recorded
+in `bench/openconf-h2h/conf-fix4` was
+`b22e212181eff57e9412f780c40e85208b355d07`.
 `tests/lj_trajectory_pin.rs` passes. The committed pins files,
 `bench/generic-alloy/g2-pins.txt` and `g3-pins.txt`, are unchanged.
 

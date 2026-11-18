@@ -13,6 +13,8 @@
 
 /// History-conditioned escape feedback, after Goedecker's minima hopping.
 pub mod activation;
+/// Displacement-capped FIRE quench for a stiff Cartesian molecule.
+pub mod anc_quench;
 /// Residual archive search: local events, floors, cheap novelty loop.
 #[cfg(feature = "graphkey")]
 pub mod archive_search;
@@ -54,6 +56,8 @@ pub mod rigid_quench;
 pub mod splice;
 /// Minima a rigid chain has quenched, and where its stall goes.
 pub(crate) mod stall_archive;
+/// Cheap rigid hop, then a charged polish of its lowest minima.
+pub mod surrogate_level;
 pub mod two_phase;
 #[cfg(feature = "graphkey")]
 pub use archive_search::{Archive, ArchiveOutcome, archive_search};

@@ -31,7 +31,7 @@ def test_rows_are_complete_and_reports_are_generated_from_them(system):
 
 
 def test_combined_recommended_summary_is_generated_from_the_same_rows():
-    subprocess.run(["python3", str(SCRIPT), "--all", "--check"], cwd=ROOT, check=True)
+    subprocess.run(["python3", str(SCRIPT), "--all", "--check", "--tex"], cwd=ROOT, check=True)
 
 
 def test_fisher_is_two_sided_exact():

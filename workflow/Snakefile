@@ -953,8 +953,8 @@ rule ase_au55:
 
 # Config::recommended on the ASE panel: LJ38, LJ55, LJ98, LJ104, LJ150
 # and Au55, seeds 2000-2011, the paper budgets. The ASE rows stay as
-# committed. This rule reprints the summaries and the README tables.
-# Not part of `rule all`.
+# committed. This rule reprints the summaries, the README tables and
+# tab:ase in the manuscript. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile ase_recommended
 rule ase_recommended:
     input:
@@ -971,7 +971,7 @@ rule ase_recommended:
     shell:
         """
         set -euo pipefail
-        python3 scripts/ase_panel/summarize.py --all
+        python3 scripts/ase_panel/summarize.py --all --tex
         """
 
 
@@ -992,6 +992,7 @@ rule ase_nonlj:
         """
         set -euo pipefail
         bash scripts/ase_nonlj/enter_bench.sh
+        python3 scripts/ase_nonlj/summarize.py --tex
         """
 
 
@@ -1024,6 +1025,13 @@ rule paper_0120:
 # are rewritten from the rows. Not part of `rule all`:
 #   snakemake -s workflow/Snakefile gmin_panel
 rule gmin_panel:
+    input:
+        "bench/gmin-panel/rows.csv",
+        "scripts/gmin_panel/enter_bench.sh",
+        "scripts/gmin_panel/build_gmin.sh",
+        "scripts/gmin_panel/run_panel.py",
+        "examples/h2h_gmin_lj.data",
+        "examples/h2h_gmin_morse.data",
     output:
         "bench/gmin-panel/summary.csv",
     shell:

@@ -27,7 +27,7 @@ def test_rows_are_complete_and_generated_reports_are_current():
             for rows in grouped[system].values()
         )
         assert all(SUMMARY.wall_censored(grouped[system][arm]) for arm in SUMMARY.ASE_ARMS)
-    subprocess.run(["python3", str(SCRIPT), "--check"], cwd=ROOT, check=True)
+    subprocess.run(["python3", str(SCRIPT), "--check", "--tex"], cwd=ROOT, check=True)
 
 
 def test_wall_censored_ase_comparisons_have_no_rank_estimate():
@@ -56,3 +56,30 @@ def test_wall_ratios_do_not_pair_independent_seed_labels():
     left = [{"wall_s": "1"}, {"wall_s": "100"}, {"wall_s": "101"}]
     right = [{"wall_s": "1"}, {"wall_s": "2"}, {"wall_s": "100"}]
     assert SUMMARY.wall_ratio(left, right) == (50.0, 0.02)
+
+
+def _runner():
+    path = ROOT / "scripts" / "ase_nonlj" / "run_one.py"
+    spec = importlib.util.spec_from_file_location("ase_nonlj_run_one", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_runner_pins_the_ase_version_that_the_summary_reports(monkeypatch):
+    ase = pytest.importorskip("ase")
+    pytest.importorskip("numba")
+    runner = _runner()
+    assert runner.ASE_VERSION == SUMMARY.ASE_VERSION
+    monkeypatch.setattr(ase, "__version__", runner.ASE_VERSION)
+    runner.require_ase_version()
+    monkeypatch.setattr(ase, "__version__", "3.27.0")
+    with pytest.raises(RuntimeError, match="ASE 3.29.0 required, found 3.27.0"):
+        runner.require_ase_version()
+
+
+def test_the_ase_extra_admits_the_version_the_panels_ran():
+    text = (ROOT / "pyproject.toml").read_text()
+    assert 'ase = ["ase>=3.23,<3.30"]' in text
+    assert 'ase = ">=3.23,<3.30"' in (ROOT / "pixi.toml").read_text()
+    assert "ase-3.29.0" in (ROOT / "pixi.lock").read_text()

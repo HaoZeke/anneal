@@ -65,8 +65,7 @@ fn one_surface_hop_takes_the_9_6_78_shelf_to_the_global_minimum() {
     );
 }
 
-/// The hops run only when asked, and asking for them changes the resolved
-/// configuration while leaving it unchanged when they are off.
+/// The legacy flag no longer feeds surface analysis back into the search.
 #[test]
 fn surface_hops_run_from_new_bests_only_when_asked() {
     let shelf = structure(include_str!("fixtures/sc96_78_shelf.xyz"));
@@ -102,14 +101,9 @@ fn surface_hops_run_from_new_bests_only_when_asked() {
     let (off, off_outcome) = search(false);
     let (on, on_outcome) = search(true);
     assert_eq!(off_outcome.surface_hops, (0, 0, 0.0));
-    assert!(
-        on_outcome.surface_hops.0 > 0,
-        "hops {} best {} charged {} surface {:?}",
-        on_outcome.hops,
-        on_outcome.best,
-        on_outcome.charged,
-        on_outcome.surface_hops
-    );
+    assert_eq!(on_outcome.surface_hops, (0, 0, 0.0));
+    assert_eq!(on_outcome.best, off_outcome.best);
+    assert_eq!(on_outcome.charged, off_outcome.charged);
     let plain = Config::with_scales(
         n,
         length,

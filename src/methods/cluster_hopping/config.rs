@@ -1134,6 +1134,14 @@ pub struct Config {
     /// [`Config::species`]; without it the quench is unpreconditioned.
     #[serde(skip_serializing_if = "is_false")]
     pub precondition_bonds: bool,
+    /// Quench Cartesian molecules with capped Lindh-preconditioned steps.
+    ///
+    /// This is an opt-in local solver. It is useful when a cold L-BFGS step
+    /// is much longer than a molecular bond and the line search spends an
+    /// expensive objective call walking that step back. Non-molecular and
+    /// rigid-body coordinate libraries ignore it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub capped_lindh_quench: bool,
     /// Optimizer of every search quench.
     ///
     /// [`LocalStep::Tric`](crate::methods::tric_opt::LocalStep::Tric) and
@@ -1942,6 +1950,7 @@ impl Config {
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             precondition_bonds: false,
+            capped_lindh_quench: false,
             local_step: crate::methods::tric_opt::LocalStep::Lbfgs,
             answer_gradient: 0.0,
             trace_quenched: false,

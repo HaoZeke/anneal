@@ -171,11 +171,11 @@ def main(argv=None) -> int:
         pad = 0.06 * (hi - lo)
         ax.set_xlim(lo[0] - pad[0], hi[0] + pad[0])
         ax.set_ylim(lo[1] - pad[1], hi[1] + pad[1])
-        ax.set_xlabel("sketch-map 1", labelpad=1)
+        ax.set_xlabel("sketch-map 1 (arb. units)", labelpad=1)
         if c == 0:
-            ax.set_ylabel("sketch-map 2", labelpad=1)
+            ax.set_ylabel("sketch-map 2 (arb. units)", labelpad=1)
         ax.tick_params(pad=1.5)
-        ax.text(0.0, 1.03, f"({'abc'[c]}) {landscape.label}", transform=ax.transAxes, ha="left", va="bottom",
+        ax.text(0.0, 1.03, f"({'abc'[c]})", transform=ax.transAxes, ha="left", va="bottom",
                 fontsize=figstyle.BASE)
         bar = box(left + 0.36, height - TOP - MAP - GAP, width - 0.46, BAR)
         colorbar = fig.colorbar(filled, cax=bar, orientation="horizontal")
@@ -213,8 +213,10 @@ def main(argv=None) -> int:
         ax = box(left + 0.42, FOOT, width - 0.52, FOLD)
         system_visuals.draw_fold(ax, fold, ylabel=c == 0)
         ax.tick_params(pad=1.5)
-        ax.set_title(f"{fold.minima} minima, {len(fold.families)} families, {fold.communities} communities",
-                     fontsize=figstyle.SMALLEST, pad=3)
+        low, high = ax.get_ylim()
+        ax.set_ylim(low, high + 0.25 * (high - low))
+        ax.text(0.98, 0.98, f"{fold.minima} minima, {len(fold.families)} families,\n{fold.communities} communities",
+                transform=ax.transAxes, ha="right", va="top", fontsize=figstyle.SMALLEST, linespacing=1.1)
     second = next(landscape for landscape in landscapes if len(landscape.references) > 1)
     handles = [Line2D([], [], linestyle="none", marker=marker, color=face, markeredgecolor=edge,
                       markeredgewidth=0.2 if edge == "white" else 0.4, markersize=3.5, label=arm)

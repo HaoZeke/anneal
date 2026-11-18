@@ -5,26 +5,29 @@ The reference minimum is -191.03085280; a hit is at most 0.001 above it.
 Anneal uses the cluster preset. Recommended uses Config::recommended.
 ASE basin hopping and minima hopping use
 the ASE 3.29 constructor defaults.
-Rows carry code_revision fc1af066a915a80eb46a3bc478caaf155cc9b29f, b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac.
-The recorded wall caps are recommended 96.650229 s; basin hopping 112.374012 s; minima hopping 112.374012 s. A wall-stopped row did not receive
+Rows carry code_revision 1ce3ab64493196afd25e8690648e21157d91b882.
+The anneal, basin-hopping and minima-hopping rows of `rows.csv` at 33bed75f are kept
+and superseded by `rows-for-cluster.csv`; `superseded.csv` lists each of them.
+This report reads the recommended rows of `rows.csv` and every row of `rows-for-cluster.csv`.
+The recorded wall caps are recommended 122.695098 s; basin hopping 122.695098 s; minima hopping 122.695098 s. A wall-stopped row did not receive
 the full call budget, so its call count is right-censored at `charged`.
 
 | arm | hits | Fisher p vs anneal | Mann-Whitney U vs anneal | Mann-Whitney p vs anneal | median best | gap to -191.03085280 | median wall s | over anneal | anneal over | median inside s | median outside s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 34.628695 | 1.000000 | 1.000000 | 28.582308 | 6.172918 |
-| recommended | 0/12 | 1 | 72 | 1 | -190.98331173 | 0.04754107 | 33.663735 | 0.972134 | 1.028665 | 26.379868 | 7.288144 |
-| basin hopping | 0/12 | 1 | not estimated | not estimated | -189.82092796 | 1.20992484 | 112.374357 | 3.245123 | 0.308155 | 16.719311 | 95.655017 |
-| minima hopping | 0/12 | 1 | not estimated | not estimated | -190.29395447 | 0.73689833 | 115.191930 | 3.326488 | 0.300617 | 2.475493 | 112.830887 |
+| anneal | 0/12 | 1 | 72 | 1 | -190.81083051 | 0.22002228 | 36.060303 | 1.000000 | 1.000000 | 29.540093 | 6.382390 |
+| recommended | 0/12 | 1 | 72 | 1 | -190.98001732 | 0.05083548 | 36.069230 | 1.000248 | 0.999753 | 28.296631 | 7.801004 |
+| basin hopping | 0/12 | 1 | not estimated | not estimated | -189.83438389 | 1.19646891 | 122.696096 | 3.402525 | 0.293899 | 18.332622 | 104.363608 |
+| minima hopping | 0/12 | 1 | not estimated | not estimated | -190.29395447 | 0.73689833 | 126.761768 | 3.515272 | 0.284473 | 2.486090 | 124.332869 |
 
-Basin hopping stopped at the wall cap on 12/12 seeds; those rows charged 496,722-609,996 calls.
-Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 72,762-88,823 calls.
+Basin hopping stopped at the wall cap on 12/12 seeds; those rows charged 629,479-665,149 calls.
+Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 80,811-92,960 calls.
 
 Fisher and Mann-Whitney below compare recommended with each ASE arm.
 
 | comparison | hits | Fisher p | Mann-Whitney U | Mann-Whitney p | median wall ratio | inverse ratio |
 | --- | --- | --- | --- | --- | --- | --- |
-| recommended against basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.299568 | 3.338143 |
-| recommended against minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.292240 | 3.421840 |
+| recommended against basin hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.293972 | 3.401683 |
+| recommended against minima hopping | 0/12 vs 0/12 | 1 | not estimated | not estimated | 0.284543 | 3.514402 |
 
 Fisher is the two-sided exact test on hits under the recorded stopping rule.
 Mann-Whitney is two-sided with tie and continuity corrections. It is not

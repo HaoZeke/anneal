@@ -83,7 +83,8 @@ pub const CONTACT_CUTOFF: f64 = 1.35;
 /// Every pair then shares a dense set of common neighbours, and no pair
 /// reads as 555.
 pub fn contact_cutoff(spec: SoapSpec) -> f64 {
-    CONTACT_CUTOFF * (spec.rcut_nn / SoapSpec::default().rcut_nn)
+    let _ = spec;
+    CONTACT_CUTOFF
 }
 
 impl SoapSpec {

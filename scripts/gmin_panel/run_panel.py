@@ -10,29 +10,35 @@ geometry the anneal example's ``coords`` writes for the seed.
 
 anneal runs through the example its head-to-head rule runs:
 ``h2h_gmin_proof`` for Lennard-Jones, ``h2h_metal`` for Au55 and
-``h2h_morse`` for Morse. ``h2h_gmin_proof`` has no LJ103 entry, so LJ103
-runs on a second build of the same revision with
-``bench/paper-0120/lj103-table.patch``, which adds the Cambridge energy
-and the 4e6 budget and nothing else; its rows carry driver
-``h2h_gmin_proof+lj103``. GMIN is one build with the evaluator cap and a
-timer inside the Lennard-Jones, Morse and binary Gupta potentials. Its
-inputs are ``examples/h2h_gmin_lj.data``, ``examples/h2h_gmin_morse.data``
-plus ``MORSE <rho>``, and for Au55 the BGUPTAT gold block of
-``scripts/metal_h2h/enter_gold.sh``.
+``h2h_morse`` for Morse. When the target ``h2h_gmin_proof`` has no LJ103
+entry (as at ``c2de652d``, before ``503470a0``), LJ103 runs on a second
+build of the same revision with ``bench/paper-0120/lj103-table.patch``,
+which adds the Cambridge energy and the 4e6 budget and nothing else; its
+rows carry driver ``h2h_gmin_proof+lj103``. GMIN is one build with the
+evaluator cap and a timer inside the Lennard-Jones, Morse and binary
+Gupta potentials. Its inputs are ``examples/h2h_gmin_lj.data``,
+``examples/h2h_gmin_morse.data`` plus ``MORSE <rho>``, and for Au55 the
+same quench and taboo block on ``BGUPTAT`` with the Darby gold row,
+GMIN's ``io1.f90`` nearest-neighbour container radius, step and avoid
+distances converted from ``sigma`` by ``r0 / 2**(1/6)``, and the 0.1 eV
+temperature of Wales's ``examples/GMIN/MGupta.tar.bz2``.
 
 One process, ``taskset -c 0``, one thread. For each system the seeds run
 in order, anneal then GMIN. Rows are appended after every run and never
-rewritten; a row already stored for the same system, code, seed, code
-revision and harness revision is kept and its run skipped. ``code_revision``
-is the anneal commit on anneal rows and the GMIN SVNREV on GMIN rows;
-``harness_revision`` is the anneal commit whose examples wrote the starts.
+rewritten; without ``--rerun``, a row already stored for the same system,
+code, seed, code revision and harness revision is kept and its run
+skipped, while ``--summarize`` reads the latest stored row of each seed.
+``code_revision`` is the anneal commit on anneal rows and the GMIN SVNREV
+on GMIN rows; ``harness_revision`` is the anneal commit whose examples
+wrote the starts.
 
 ``--summarize`` reads the rows and writes ``summary.csv`` and the table in
 ``bench/gmin-panel/README.md``; with ``--tex`` also table ``tab:gmin``
 in ``paper/jctc/manuscript.tex``. The tables carry Fisher's exact test
 on hits and the two-sided Mann-Whitney test, normal approximation with
-the tie and continuity corrections, on calls to the minimum and on wall
-time.
+the tie and continuity corrections, on calls to the minimum (full-budget
+misses ranked above every hit) and, when call-cap censoring leaves every
+cross-arm pair order observed, on wall time to the minimum.
 Medians and interquartile ranges are Hyndman-Fan type 7.
 
 This process refuses to run unless the UTS hostname is bench and it is
@@ -87,8 +93,16 @@ SYSTEMS = (
     ("m80r6", "morse", 80, -378.333471, 6.0, "h2h_morse", "h2h_morse"),
     ("m80r14", "morse", 80, -340.811371, 14.0, "h2h_morse", "h2h_morse"),
 )
-# A, p, q, xi, r0: the gold row of scripts/metal_h2h/enter_gold.sh.
-GOLD_ROW = "0.2061 10.229 4.036 1.79 2.884"
+# A, p, q, xi, r0: the Darby Cu-Au gold row (J. Chem. Phys. 116, 1536 (2002)).
+GOLD_R0 = 2.884
+GOLD_ROW = f"0.2061 10.229 4.036 1.79 {GOLD_R0}"
+# Wales group public Gupta example (examples/GMIN/MGupta.tar.bz2): 0.1 eV.
+GUPTA_TEMPERATURE_EV = 0.1
+# examples/h2h_gmin_lj.data step and avoid distances in sigma, converted by
+# nearest-neighbour distance r0 / (2**(1/6) sigma), as in scripts/metal_h2h/run_sc.py.
+GOLD_LENGTH_PER_LJ = GOLD_R0 / 2.0 ** (1.0 / 6.0)
+LJ_STEP = 0.40
+LJ_AVOID = 4.0
 LABELS = {
     "lj38": ("LJ38", "LJ\\(_{38}\\)"),
     "lj55": ("LJ55", "LJ\\(_{55}\\)"),
@@ -206,6 +220,8 @@ def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
     """U of ``left`` and the two-sided p, normal approximation with the tie
     and continuity corrections. Every value tied gives p = 1."""
     n1, n2 = len(left), len(right)
+    if n1 < 1 or n2 < 1:
+        raise ValueError("mann-whitney needs two non-empty samples")
     pooled = sorted(left + right)
     n = n1 + n2
     rank: dict[float, float] = {}
@@ -241,15 +257,31 @@ def cpu_model() -> str:
 def single_thread_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in list(env):
-        if key.startswith("H2H_"):
+        if key.startswith(("H2H_", "ANNEAL_")):
             del env[key]
     for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "RAYON_NUM_THREADS"):
         env[key] = "1"
     return env
 
 
+def resolve_driver(bin_dir: Path, tree: Path, system: str) -> tuple[str, str]:
+    _name, _kind, _n, _ref, _rho, driver, binary = spec(system)
+    if system == "lj103" and (bin_dir / "h2h_gmin_proof").is_file():
+        probe = subprocess.run(
+            [str(bin_dir / "h2h_gmin_proof"), "budget", "lj103"],
+            cwd=tree,
+            env=single_thread_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode == 0:
+            return "h2h_gmin_proof", "h2h_gmin_proof"
+    return driver, binary
+
+
 def binary_budget(bin_dir: Path, tree: Path, system: str) -> tuple[int, float]:
-    binary = spec(system)[6]
+    _driver, binary = resolve_driver(bin_dir, tree, system)
     proc = subprocess.run(
         [str(bin_dir / binary), "budget", system],
         cwd=tree,
@@ -260,6 +292,21 @@ def binary_budget(bin_dir: Path, tree: Path, system: str) -> tuple[int, float]:
     )
     lines = [line for line in proc.stdout.splitlines() if line.strip()]
     return int(lines[0]), float(lines[1])
+
+
+def check_run_counts(
+    label: str, hit: bool, best: float, reference: float, evals: int, charged: int, budget: int, wall: float, pot: float
+) -> None:
+    if hit != (best <= reference + HIT_TOL):
+        raise RuntimeError(f"{label}: hit {int(hit)} with best {best} against {reference}")
+    if hit and abs(best - reference) >= HIT_TOL:
+        raise RuntimeError(f"{label}: hit {best} lies outside |E - E_ref| < {HIT_TOL} around {reference}")
+    if hit and not (0 < evals <= charged <= budget):
+        raise RuntimeError(f"{label}: hit reports evals {evals} charged {charged} budget {budget}")
+    if not hit and (evals != budget or charged != budget):
+        raise RuntimeError(f"{label}: miss reports evals {evals} charged {charged} budget {budget}")
+    if wall < 0.0 or pot < 0.0 or pot > wall + 2e-6:
+        raise RuntimeError(f"{label}: wall_s {wall} pot_s {pot}")
 
 
 def anneal_result(text: str, system: str, seed: int, budget: int) -> dict[str, str]:
@@ -275,18 +322,16 @@ def anneal_result(text: str, system: str, seed: int, budget: int) -> dict[str, s
     reference = spec(system)[3]
     best = float(row["best"])
     hit = is_hit(row["hit"])
-    if hit != (best <= reference + HIT_TOL):
-        raise RuntimeError(f"{system} seed {seed}: hit {row['hit']} with best {best}")
     evals = int(row["evals_to_hit"])
-    if not hit and evals != budget:
-        raise RuntimeError(f"{system} seed {seed}: a miss reports {evals} calls")
+    charged = int(row["charged"])
     wall = float(row["wall_s"])
     pot = float(row["pot_s"])
-    outside = float(row["outside_s"]) if "outside_s" in row else wall - pot
+    check_run_counts(f"{system} seed {seed}", hit, best, reference, evals, charged, budget, wall, pot)
+    outside = float(row["outside_s"]) if "outside_s" in row else max(wall - pot, 0.0)
     return {
         "hit": "1" if hit else "0",
         "evals_to_hit": str(evals),
-        "charged": str(int(row["charged"])),
+        "charged": str(charged),
         "wall_s": f"{wall:.6f}",
         "best": row["best"],
         "pot_s": f"{pot:.6f}",
@@ -306,22 +351,25 @@ def gmin_result(text: str, system: str, seed: int, budget: int) -> dict[str, str
     reference = spec(system)[3]
     best = float(fields["best"])
     hit = fields["hit"] == "1"
-    if hit != (best <= reference + HIT_TOL):
-        raise RuntimeError(f"gmin {system} seed {seed}: hit {fields['hit']} with best {best}")
     evals = int(fields["evals_to_hit"])
-    if not hit and evals != budget:
-        raise RuntimeError(f"gmin {system} seed {seed}: a miss reports {evals} calls")
+    charged = int(fields["charged"])
     wall = float(fields["wall_s"])
     pot = float(fields["pot_s"])
+    check_run_counts(f"gmin {system} seed {seed}", hit, best, reference, evals, charged, budget, wall, pot)
     return {
         "hit": "1" if hit else "0",
         "evals_to_hit": str(evals),
-        "charged": str(int(fields["charged"])),
+        "charged": str(charged),
         "wall_s": f"{wall:.6f}",
         "best": fields["best"],
         "pot_s": f"{pot:.6f}",
-        "outside_s": f"{wall - pot:.6f}",
+        "outside_s": f"{max(wall - pot, 0.0):.6f}",
     }
+
+
+def gmin_gupta_radius(n: int, r0: float = GOLD_R0) -> float:
+    """GMIN's io1.f90 container radius in units of nearest-neighbour distance r0."""
+    return (2.0 + (3.0 * n / 17.77153175) ** (1.0 / 3.0)) * r0
 
 
 def gmin_data(system: str, seed: int, lj_data: str, morse_data: str) -> str:
@@ -330,6 +378,9 @@ def gmin_data(system: str, seed: int, lj_data: str, morse_data: str) -> str:
         return lj_data + f"RANSEED {seed}\n"
     if kind == "morse":
         return morse_data + f"MORSE {rho:.1f}\nRANSEED {seed}\n"
+    radius = gmin_gupta_radius(n)
+    step = LJ_STEP * GOLD_LENGTH_PER_LJ
+    avoid = LJ_AVOID * GOLD_LENGTH_PER_LJ
     return (
         f"BGUPTAT {n} {GOLD_ROW}\n"
         f"BGUPTATAB {GOLD_ROW}\n"
@@ -340,17 +391,19 @@ def gmin_data(system: str, seed: int, lj_data: str, morse_data: str) -> str:
         "MAXIT 600 500\n"
         "SAVE 2\n"
         "CENTRE\n"
-        "RADIUS 50.0\n"
-        "TEMPERATURE 1.0\n"
+        "SORT\n"
+        f"RADIUS {radius:.6f}\n"
+        f"TEMPERATURE {GUPTA_TEMPERATURE_EV}\n"
         "STEPS 90000000 1.0\n"
-        "STEP 0.40 0.51\n"
+        f"STEP {step:.6f} 0.51\n"
         "NEWRESTART 40\n"
+        f"AVOID {avoid:.6f} 20 F\n"
         f"RANSEED {seed}\n"
     )
 
 
 def run_anneal(bin_dir: Path, tree: Path, system: str, seed: int, log: Path) -> dict[str, str]:
-    binary = spec(system)[6]
+    _driver, binary = resolve_driver(bin_dir, tree, system)
     budget = PAPER_BUDGETS[system]
     command = ["taskset", "-c", "0", str(bin_dir / binary), "run", system, str(seed)]
     proc = subprocess.run(command, cwd=tree, env=single_thread_env(), capture_output=True, text=True, check=False)
@@ -364,7 +417,7 @@ def run_anneal(bin_dir: Path, tree: Path, system: str, seed: int, log: Path) -> 
 def run_gmin(
     bin_dir: Path, tree: Path, system: str, seed: int, work: Path, log: Path, lj_data: str, morse_data: str
 ) -> dict[str, str]:
-    binary = spec(system)[6]
+    _driver, binary = resolve_driver(bin_dir, tree, system)
     budget = PAPER_BUDGETS[system]
     reference = spec(system)[3]
     work.mkdir(parents=True, exist_ok=True)
@@ -423,18 +476,66 @@ def row_key(row: dict[str, str]) -> tuple[str, str, str, str, str]:
 
 
 def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, str], list[dict[str, str]]]:
-    """The first stored row per seed of each system and code at this revision."""
+    """The latest stored row per seed of each system and code at this revision."""
     wanted = {"anneal": revision, "gmin": GMIN_REV}
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
-        if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
-            continue
-        groups.setdefault((row["system"], row["code"]), {}).setdefault(int(row["seed"]), row)
+        if revision == "latest":
+            if row["code"] == "gmin" and row["code_revision"] != GMIN_REV:
+                continue
+        else:
+            if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
+                continue
+        groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
     return {key: [group[s] for s in sorted(group)] for key, group in groups.items()}
 
 
 def fmt(value: float | None, digits: int = 6) -> str:
     return "" if value is None else f"{value:.{digits}f}"
+
+
+def validate_group(group: list[dict[str, str]], system: str, code: str) -> None:
+    budget = PAPER_BUDGETS[system]
+    reference = spec(system)[3]
+    seeds = [int(r["seed"]) for r in group]
+    if seeds != sorted(seeds):
+        raise RuntimeError(f"{system} {code}: seeds out of order {seeds}")
+    for r in group:
+        if r["hit"] not in ("0", "1") or int(r["budget"]) != budget:
+            raise RuntimeError(f"{system} {code} seed {r['seed']}: invalid row {r}")
+        hit = r["hit"] == "1"
+        best = float(r["best"])
+        evals = int(r["evals_to_hit"])
+        charged = int(r["charged"])
+        wall = float(r["wall_s"])
+        pot = float(r["pot_s"])
+        outside = float(r["outside_s"])
+        check_run_counts(f"{system} {code} seed {r['seed']}", hit, best, reference, evals, charged, budget, wall, pot)
+        if outside < 0.0 or abs(max(wall - pot, 0.0) - outside) > 2e-6:
+            raise RuntimeError(f"{system} {code} seed {r['seed']}: outside_s {outside} != wall_s {wall} - pot_s {pot}")
+
+
+def ranked_calls(group: list[dict[str, str]], budget: int) -> list[float] | None:
+    """Calls to the minimum, ranking full-budget misses above every hit; None if censored early."""
+    if any(r["hit"] == "0" and int(r["charged"]) < budget for r in group):
+        return None
+    return [float(r["evals_to_hit"]) if r["hit"] == "1" else math.inf for r in group]
+
+
+def ranked_wall(left: list[dict[str, str]], right: list[dict[str, str]]) -> tuple[list[float], list[float]] | None:
+    """Wall time to the minimum when call-cap censoring leaves every cross-arm pair order observed."""
+    l_miss = [float(r["wall_s"]) for r in left if r["hit"] == "0"]
+    r_miss = [float(r["wall_s"]) for r in right if r["hit"] == "0"]
+    if l_miss and r_miss:
+        return None
+    l_hit = [float(r["wall_s"]) for r in left if r["hit"] == "1"]
+    r_hit = [float(r["wall_s"]) for r in right if r["hit"] == "1"]
+    if any(m < h for m in l_miss for h in r_hit) or any(m < h for m in r_miss for h in l_hit):
+        return None
+    return (
+        [float(r["wall_s"]) if r["hit"] == "1" else math.inf for r in left],
+        [float(r["wall_s"]) if r["hit"] == "1" else math.inf for r in right],
+    )
 
 
 def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]:
@@ -445,6 +546,11 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
         gmin = groups.get((system, "gmin"), [])
         if not anneal or not gmin:
             continue
+        budget = PAPER_BUDGETS[system]
+        validate_group(anneal, system, "anneal")
+        validate_group(gmin, system, "gmin")
+        if tuple(int(r["seed"]) for r in anneal) != SEEDS or tuple(int(r["seed"]) for r in gmin) != SEEDS:
+            raise RuntimeError(f"{system}: incomplete seed list")
 
         def col(group: list[dict[str, str]], key: str) -> list[float]:
             return [float(r[key]) for r in group]
@@ -455,13 +561,18 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
 
         ah = sum(r["hit"] == "1" for r in anneal)
         gh = sum(r["hit"] == "1" for r in gmin)
-        u_calls, p_calls = mann_whitney(col(anneal, "evals_to_hit"), col(gmin, "evals_to_hit"))
-        u_wall, p_wall = mann_whitney(col(anneal, "wall_s"), col(gmin, "wall_s"))
+        a_calls = ranked_calls(anneal, budget)
+        g_calls = ranked_calls(gmin, budget)
+        calls_mw = mann_whitney(a_calls, g_calls) if a_calls is not None and g_calls is not None else None
+        wall_pair = ranked_wall(anneal, gmin)
+        wall_mw = mann_whitney(*wall_pair) if wall_pair is not None else None
         both = anneal + gmin
+        anneal_revisions = " ".join(sorted({r["code_revision"] for r in anneal}))
+        harness_revisions = " ".join(sorted({r["harness_revision"] for r in both}))
         out.append(
             {
                 "system": system,
-                "budget": str(PAPER_BUDGETS[system]),
+                "budget": str(budget),
                 "reference": f"{reference:.8f}",
                 "anneal_hits": str(ah),
                 "anneal_n": str(len(anneal)),
@@ -474,21 +585,21 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
                 "gmin_evals_iqr": f"{type7(col(gmin, 'evals_to_hit'), 0.75) - type7(col(gmin, 'evals_to_hit'), 0.25):.2f}",
                 "anneal_evals_median_to_hit": to_hit(anneal),
                 "gmin_evals_median_to_hit": to_hit(gmin),
-                "mannwhitney_u_calls": f"{u_calls:.1f}",
-                "mannwhitney_p_calls": f"{p_calls:.6g}",
+                "mannwhitney_u_calls": f"{calls_mw[0]:.1f}" if calls_mw is not None else "",
+                "mannwhitney_p_calls": f"{calls_mw[1]:.6g}" if calls_mw is not None else "",
                 "anneal_wall_median_s": fmt(type7(col(anneal, "wall_s"), 0.5)),
                 "gmin_wall_median_s": fmt(type7(col(gmin, "wall_s"), 0.5)),
-                "mannwhitney_u_wall": f"{u_wall:.1f}",
-                "mannwhitney_p_wall": f"{p_wall:.6g}",
+                "mannwhitney_u_wall": f"{wall_mw[0]:.1f}" if wall_mw is not None else "",
+                "mannwhitney_p_wall": f"{wall_mw[1]:.6g}" if wall_mw is not None else "",
                 "anneal_pot_median_s": fmt(type7(col(anneal, "pot_s"), 0.5)),
                 "anneal_outside_median_s": fmt(type7(col(anneal, "outside_s"), 0.5)),
                 "gmin_pot_median_s": fmt(type7(col(gmin, "pot_s"), 0.5)),
                 "gmin_outside_median_s": fmt(type7(col(gmin, "outside_s"), 0.5)),
                 "anneal_best_min": f"{min(col(anneal, 'best')):.8f}",
                 "gmin_best_min": f"{min(col(gmin, 'best')):.8f}",
-                "anneal_revision": revision,
+                "anneal_revision": anneal_revisions,
                 "gmin_revision": GMIN_REV,
-                "harness_revision": revision,
+                "harness_revision": harness_revisions,
                 "host": " ".join(sorted({r["host"] for r in both})),
                 "sessions": " ".join(sorted({r["session"] for r in both})),
                 "seeds": " ".join(r["seed"] for r in anneal),
@@ -501,13 +612,24 @@ def show_p(p: float, tex: bool) -> str:
     """Two significant figures; 1 only when p is exactly 1."""
     if p >= 1.0:
         return "1"
-    if p >= 0.01:
-        text = f"{p:.2f}" if p >= 0.1 else f"{p:.3f}"
-        return f"{p:.3f}" if text == "1.00" else text
+    rounded = float(f"{p:.2g}")
+    if rounded >= 1.0:
+        digits = 3
+        while f"{p:.{digits}f}".rstrip("0") == "1.":
+            digits += 1
+        return f"{p:.{digits}f}"
+    if rounded >= 0.01:
+        return f"{p:.2f}" if rounded >= 0.1 else f"{p:.3f}"
     mantissa, exponent = f"{p:.1e}".split("e")
     if tex:
         return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
     return f"{mantissa}e{int(exponent)}"
+
+
+def show_opt_p(cell: str, tex: bool) -> str:
+    if not cell:
+        return "--" if tex else "-"
+    return show_p(float(cell), tex)
 
 
 def show_calls(value: float) -> str:
@@ -545,8 +667,8 @@ def table_lines(summary: list[dict[str, str]], tex: bool) -> list[list[str]]:
                     show_s(float(line[f"{arm}_pot_median_s"])),
                     show_s(float(line[f"{arm}_outside_median_s"])),
                     show_p(float(line["fisher_p"]), tex) if first else "",
-                    show_p(float(line["mannwhitney_p_calls"]), tex) if first else "",
-                    show_p(float(line["mannwhitney_p_wall"]), tex) if first else "",
+                    show_opt_p(line["mannwhitney_p_calls"], tex) if first else "",
+                    show_opt_p(line["mannwhitney_p_wall"], tex) if first else "",
                 ]
             )
     return out
@@ -563,12 +685,19 @@ def readme_table(summary: list[dict[str, str]]) -> str:
 
 
 def tex_table(summary: list[dict[str, str]], revision: str) -> str:
-    body = [" & ".join(cells) + " \\\\" for cells in table_lines(summary, tex=True)]
+    lines = table_lines(summary, tex=True)
+    for index, cells in enumerate(lines):
+        system = summary[index // 2]["system"]
+        arm = "anneal" if index % 2 == 0 else "gmin"
+        if arm == "gmin" and system in ("lj75", "lj98"):
+            cells[3] += "~\\rerun{5}"
+    shown_revision = revision[:8] if revision != "latest" else "mixed"
+    body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
-            "\\caption{This work against GMIN on one host in one session.",
-            f"Revisions: anneal \\texttt{{{revision[:8]}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
+            "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
+            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -576,11 +705,13 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             "potential and outside it.",
             "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits;",
             "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided",
-            "Mann--Whitney test on calls and on wall.}",
+            "Mann--Whitney test on calls and on wall to the minimum (`--' where",
+            "call-capped misses leave cross-arm wall times censored at unequal horizons).}",
             "\\label{tab:gmin}",
             "\\centering",
-            "\\footnotesize",
-            "\\setlength{\\tabcolsep}{3pt}",
+            "\\scriptsize",
+            "\\setlength{\\tabcolsep}{2pt}",
+            "\\resizebox{\\textwidth}{!}{%",
             "\\begin{tabular}{@{}lrlrrrrrrrrr@{}}",
             "\\toprule",
             "Cluster & Budget & Arm & Hits & Calls & IQR & Wall & In & Out & \\(p_\\mathrm{F}\\) & \\(p_\\mathrm{calls}\\) & \\(p_\\mathrm{wall}\\) \\\\",
@@ -588,6 +719,7 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             *body,
             "\\bottomrule",
             "\\end{tabular}",
+            "}",
             "\\end{table}",
         ]
     )
@@ -611,9 +743,9 @@ def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
         writer.writerows(rows)
 
 
-def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool) -> None:
+def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool, out: Path | None = None) -> None:
     summary = summarise(rows, revision)
-    write_csv(root / "bench" / "gmin-panel" / "summary.csv", SUMMARY_FIELDS, summary)
+    write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), SUMMARY_FIELDS, summary)
     splice(root / README, README_MARKS, readme_table(summary))
     if tex:
         splice(root / MANUSCRIPT, TEX_MARKS, tex_table(summary, revision))
@@ -659,11 +791,44 @@ def self_test() -> None:
         raise SystemExit(f"gmin row {row}")
     if "MORSE 14.0\nRANSEED 2003\n" not in gmin_data("m80r14", 2003, "", "x\n"):
         raise SystemExit("morse data")
-    if not gmin_data("au55", 2000, "", "").startswith(f"BGUPTAT 55 {GOLD_ROW}\n"):
+    au_data = gmin_data("au55", 2000, "", "")
+    if not au_data.startswith(f"BGUPTAT 55 {GOLD_ROW}\n"):
         raise SystemExit("gupta data")
+    if "RADIUS 11.829521\n" not in au_data or "TEMPERATURE 0.1\n" not in au_data \
+            or "STEP 1.027741 0.51\n" not in au_data or "AVOID 10.277408 20 F\n" not in au_data:
+        raise SystemExit(f"gupta scale {au_data}")
+    try:
+        bad = "h2h_row system=m80r6 code=gmin seed=2001 budget=4000000 hit=0 evals_to_hit=4000000 " \
+              "charged=12000 best=-378.0 wall_s=1.0 pot_s=0.9\n"
+        gmin_result(bad, "m80r6", 2001, 4_000_000)
+    except RuntimeError:
+        pass
+    else:
+        raise SystemExit("accepted truncated miss")
+    if ranked_wall([{"hit": "1", "wall_s": "10"}, {"hit": "0", "wall_s": "120"}],
+                   [{"hit": "0", "wall_s": "200"}, {"hit": "1", "wall_s": "165"}]) is not None:
+        raise SystemExit("ranked wall with cross-censored misses")
+    pair = ranked_wall([{"hit": "1", "wall_s": "1.0"}, {"hit": "1", "wall_s": "2.0"}],
+                       [{"hit": "1", "wall_s": "3.0"}, {"hit": "0", "wall_s": "10.0"}])
+    if pair != ([1.0, 2.0], [3.0, math.inf]):
+        raise SystemExit(f"ranked wall {pair}")
+    kept = panel_groups(
+        [
+            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_REV,
+             "harness_revision": "rev", "best": "-190.4"},
+            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_REV,
+             "harness_revision": "rev", "best": "-191.0308"},
+        ],
+        "rev",
+    )
+    if kept[("au55", "gmin")][0]["best"] != "-191.0308":
+        raise SystemExit("latest row wins")
     if show_p(7.39602e-07, tex=False) != "7.4e-7" or show_p(1.0, tex=True) != "1" or show_p(0.2105, False) != "0.21" \
-            or show_p(0.0341, False) != "0.034":
+            or show_p(0.0341, False) != "0.034" or show_p(0.0995327, False) != "0.10" \
+            or show_p(0.00996, False) != "0.010" or show_p(0.9999, False) != "0.9999":
         raise SystemExit("p format")
+    if show_opt_p("", tex=False) != "-" or show_opt_p("", tex=True) != "--":
+        raise SystemExit("opt p format")
     if show_budget(400_000, tex=True) != "\\(4\\times 10^{5}\\)" or show_budget(1_000_000, tex=False) != "1000000":
         raise SystemExit("budget format")
     print("ok")
@@ -677,6 +842,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--revision", required=True)
+    parser.add_argument("--summary", type=Path)
     parser.add_argument("--bin", type=Path)
     parser.add_argument("--tree", type=Path)
     parser.add_argument("--work", type=Path)
@@ -686,11 +852,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--morse-data", type=Path)
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
+    parser.add_argument("--rerun", action="store_true", help="run requested systems/seeds and append even if stored")
     parser.add_argument("--summarize", action="store_true")
     parser.add_argument("--tex", action="store_true", help="with --summarize, also rewrite tab:gmin")
     args = parser.parse_args(argv[1:])
     if args.summarize:
-        write_tables(args.root, read_rows(args.rows), args.revision, args.tex)
+        write_tables(args.root, read_rows(args.rows), args.revision, args.tex, args.summary)
         return 0
     if socket.gethostname() != "bench":
         print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)
@@ -715,7 +882,7 @@ def main(argv: list[str]) -> int:
     for system in systems:
         budget, reference = binary_budget(args.bin, args.tree, system)
         if budget != PAPER_BUDGETS[system] or abs(reference - spec(system)[3]) > 1e-8:
-            raise SystemExit(f"{spec(system)[6]} {system}: budget {budget} reference {reference}")
+            raise SystemExit(f"{resolve_driver(args.bin, args.tree, system)[1]} {system}: budget {budget} reference {reference}")
     lj_data = args.lj_data.read_text()
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
@@ -723,11 +890,11 @@ def main(argv: list[str]) -> int:
     host = socket.gethostname()
     cpu = cpu_model()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    done = {row_key(r) for r in read_rows(args.rows)}
+    done = set() if args.rerun else {row_key(r) for r in read_rows(args.rows)}
     seeds = tuple(args.seed) if args.seed else SEEDS
     print(f"session {session} revision {args.revision} gmin {GMIN_REV}", flush=True)
     for system in systems:
-        driver = spec(system)[5]
+        driver, _binary = resolve_driver(args.bin, args.tree, system)
         for seed in seeds:
             for code in ("anneal", "gmin"):
                 code_revision = args.revision if code == "anneal" else GMIN_REV

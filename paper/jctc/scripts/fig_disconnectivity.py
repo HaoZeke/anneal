@@ -108,7 +108,7 @@ def main(argv=None) -> int:
         return names[int(np.argmin([np.linalg.norm(matrix[i] - ref) for ref in ref_matrix]))]
 
     fig, ax = plt.subplots(figsize=(figstyle.DOUBLE, HEIGHT))
-    fig.subplots_adjust(left=0.08, right=0.99, top=0.98, bottom=0.03)
+    fig.subplots_adjust(left=0.08, right=0.99, top=0.98, bottom=0.08)
     deepest = {int(b): int(np.where(basins == b)[0][np.argmin(energies[basins == b])]) for b in np.unique(basins)}
     order = sorted(deepest, key=lambda b: energies[deepest[b]])
     colours = [figstyle.GREY] * (int(basins.max()) + 1)
@@ -137,6 +137,7 @@ def main(argv=None) -> int:
     ax.set_yticks(np.arange(np.floor(e0), np.floor(energies.max()) + 1))
     ax.set_xticks([])
     ax.spines["bottom"].set_visible(False)
+    ax.set_xlabel("minima in joining order (no scale)")
     ax.set_ylabel("energy (\N{GREEK SMALL LETTER EPSILON})")
     ax.yaxis.set_major_formatter(lambda v, _: f"{v:g}".replace("-", "\N{MINUS SIGN}"))
     figstyle.save(fig, args.out)

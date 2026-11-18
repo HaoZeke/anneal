@@ -37,6 +37,18 @@ CHECKS = (
     audit_mod.ase_gofee,
     audit_mod.lj_large,
     audit_mod.bench_prose,
+    audit_mod.manuscript_ase,
+    audit_mod.panel_references,
+    audit_mod.generated_tables,
+    audit_mod.supporting_gmin,
+    audit_mod.supporting_numbers,
+    audit_mod.au55_superseded,
+    audit_mod.manuscript_new,
+    audit_mod.manuscript_followups,
+    audit_mod.cover_letter,
+    audit_mod.rerun_claims,
+    audit_mod.rerun_check,
+    audit_mod.revision_map,
 )
 
 
@@ -75,6 +87,61 @@ def test_a_drifted_table_cell_is_reported():
     audit.text_cache[audit_mod.TEX] = tex.replace("& 12/12 & 10615.5 & 3591.25", "& 12/12 & 10616.5 & 3591.25")
     audit_mod.manuscript_gmin(audit)
     assert [r[2] for r in audit.drifts()] == ["median calls"]
+
+
+def test_a_drifted_ase_table_cell_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "& 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 &"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 246.5 & 11/12 & 0/12 & 0/12 & 0 & 12 &")
+    audit_mod.manuscript_ase(audit)
+    audit_mod.generated_tables(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
+
+
+def test_a_drifted_morse_ase_table_cell_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "& 54.135 & 0.037 & 0.037 \\\\"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 54.135 & 0.037 & 0.37 \\\\")
+    audit_mod.manuscript_ase(audit)
+    audit_mod.generated_tables(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["Fisher p against ase_mh", "tab:ase-morse is the summariser's block"]
+
+
+def test_a_rank_test_in_the_ase_section_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Every basin-hopping and minima-hopping run of"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "A Mann--Whitney test is not run. " + old)
+    audit_mod.manuscript_ase(audit)
+    assert [r[2] for r in audit.drifts()] == ["sec:ase reports Fisher only"]
+
+
+def test_a_drifted_gmin_panel_summary_cell_is_reported():
+    audit = audit_mod.Audit()
+    summary = audit.rows("bench/gmin-panel/summary.csv")
+    au = next(r for r in summary if r["system"] == "au55")
+    au["gmin_hits"] = "0"
+    audit_mod.manuscript_gmin(audit)
+    assert [r[2] for r in audit.drifts()] == ["gmin_hits"]
+
+
+def test_a_censored_gmin_panel_wall_p_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex.replace("& 0.40 & 0.16 & -- \\\\", "& 0.40 & 0.16 & 0.0073 \\\\")
+    audit_mod.manuscript_gmin(audit)
+    assert [r[2] for r in audit.drifts()] == ["MW p wall"]
+
+
+def test_an_uncharged_gmin_panel_miss_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows("bench/gmin-panel/rows.csv")
+    miss = next(r for r in reversed(rows) if r["system"] == "au55" and r["code"] == "gmin" and r["hit"] == "0")
+    miss["charged"] = "50000"
+    audit_mod.manuscript_gmin(audit)
+    assert "row invariants" in {r[2] for r in audit.drifts()}
 
 
 def test_a_drifted_sutton_chen_howto_cell_is_reported():
@@ -415,3 +482,50 @@ def test_type7_quantiles():
     values = [4e6, 1801909.5, 12.0, 3.0, 99.5, 7.25]
     for p in (0.25, 0.5, 0.75):
         assert math.isclose(audit_mod.type7(values, p), float(np.quantile(values, p)), rel_tol=1e-12)
+
+
+def _audit_with_tags(tex):
+    audit = audit_mod.Audit()
+    for path in audit_mod.RERUN_FILES:
+        audit.text_cache[path] = tex if path == audit_mod.TEX else ""
+    audit.text_cache["paper/jctc/macros.tex"] = "\\newcommand{\\rerun}[1]{\\textbf{[RERUN: item #1]}}\n"
+    return audit
+
+
+def test_a_rerun_tag_passes_the_normal_audit_and_fails_pre_submission():
+    tex = "GMIN hits 9 of 12. \\rerun{5}\n% \\rerun{6} in a comment\n"
+    assert audit_mod.rerun_tags(tex) == [(1, "5")]
+    normal = _audit_with_tags(tex)
+    audit_mod.rerun_check(normal)
+    assert not normal.drifts()
+    strict = _audit_with_tags(tex)
+    audit_mod.rerun_check(strict, pre_submission=True)
+    assert [row[2] for row in strict.drifts()] == ["[RERUN: item 5] remains (GMIN and ASE caps and tuning)"]
+
+
+def test_a_rerun_tag_must_name_a_known_item():
+    audit = _audit_with_tags("a number \\rerun{9}\n")
+    audit_mod.rerun_check(audit)
+    assert len(audit.drifts()) == 1
+
+
+def test_no_tag_passes_pre_submission():
+    audit = _audit_with_tags("clean text\n")
+    audit_mod.rerun_check(audit, pre_submission=True)
+    assert not audit.drifts()
+
+
+def test_a_replaced_claim_without_its_tag_is_reported():
+    claims = ("GMIN hits 9 of 12",)
+    fenced = "GMIN hits 9 of 12, with p of 0.21.~\\rerun{5}\nNext sentence.\n"
+    assert audit_mod.untagged_claims(fenced, claims[0], "5") == (1, 1)
+    bare = "GMIN hits 9 of 12, with p of 0.21.\nNext sentence.~\\rerun{5}\n"
+    assert audit_mod.untagged_claims(bare, claims[0], "5") == (1, 0)
+    assert audit_mod.untagged_claims(bare, "a missing result", "5") == (0, 0)
+    assert audit_mod.untagged_claims(fenced, claims[0], "6") == (1, 0)
+
+
+def test_the_british_spelling_of_labeled_is_caught():
+    for word in ("labelled", "labelling", "modelled", "travelled"):
+        assert audit_mod.BRITISH.search(word)
+    assert not audit_mod.BRITISH.search("labeled")

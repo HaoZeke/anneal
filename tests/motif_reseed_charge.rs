@@ -1,4 +1,4 @@
-//! A labelled motif reseed that is not adopted is still paid for.
+//! Every objective call in a labelled search is charged to the caller.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -48,7 +48,7 @@ fn flat_labelled(budget: usize, seed: u64) -> (usize, usize) {
     cfg.species = Some(vec![29, 29, 79, 79]);
     let accepted = AtomicUsize::new(0);
     // Nothing quenches below the opening zero, so the incumbent stands for
-    // the whole run and every motif reseed misses.
+    // the whole run.
     let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
         if ledger.charge() {
             accepted.fetch_add(1, Ordering::Relaxed);
@@ -69,7 +69,7 @@ fn flat_labelled(budget: usize, seed: u64) -> (usize, usize) {
 }
 
 #[test]
-fn a_missed_motif_reseed_is_charged() {
+fn every_call_on_a_flat_labelled_surface_is_charged() {
     let (charged, accepted) = flat_labelled(400, 5);
     assert_eq!(charged, accepted, "probe calls went uncharged");
     assert!(charged <= 400);
