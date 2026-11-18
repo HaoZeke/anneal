@@ -149,7 +149,7 @@ fn main() {
             }
             write!(rows, "{:.12}", quench.energy()).expect("write energy");
             for value in quench.state() {
-                write!(rows, " {:.10}", value).expect("write state");
+                write!(rows, " {value:.10}").expect("write state");
             }
             writeln!(rows).expect("finish row");
             written += 1;
