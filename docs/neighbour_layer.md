@@ -198,7 +198,15 @@ the force on an atom has one writer and sums in the order of the
 one-thread walk. In stored mode and in an unbounded search, a partner
 below the atom takes the negated vector of the half walk from that
 partner, so both visits of a pair agree even where two images tie. One
-thread on a stored list or an unbounded search walks the half list. A
+thread on a stored list or an unbounded search walks the half list. On a
+stored list with at least `kTeamMinAtoms` atoms and at least 4096
+candidate upper pairs (`kMinParallelHalfPairs`), `MorsePot` evaluates
+each upper pair once in a two-phase OpenMP region (`forEachSlicePhase`),
+batching `simd::exp_fixed_n` and partitioning atoms by pair count on
+8-atom (64-byte) cache-line boundaries before reducing forces in partner
+index order; sparser stored lists stay on one thread. `fastTiles` runs
+only when `streaming()` holds, so `forCellTeam` on a stored list walks
+`walkStored` instead of rebuilding a 27-cell tile stencil. A
 stream walks whole rows on any thread count, so on one thread a two-body
 potential evaluates each pair twice where a stored list evaluates it
 once. Stillinger-Weber and Tersoff
@@ -560,3 +568,16 @@ done
 the frames whose energy bits differ and the force components whose bits
 differ, and hashes the bits of every energy and force, so two builds can
 be compared.
+
+`morse_omp_bench` (`CppCore/tests/morse_omp_bench.cc`, Meson benchmark
+`morse_omp_bench`) runs a smoke check for `MorsePot` at 1, 2 and 4
+threads on a 6×6×6 Cu vacancy (863 atoms, below `kTeamMinAtoms`), a
+14×14×14 Cu vacancy (10,975 atoms, stored list) and the 10,000-atom Pt
+cluster, checking bit-for-bit agreement against 1 thread. On the 8-core
+Xeon host above (GCC 13.3.0, release build), evaluating each stored
+upper pair once and batching `simd::exp_fixed_n` moves the 14×14×14 Cu
+vacancy median from 10,795 / 11,317 / 5,771 µs at 1 / 2 / 4 threads to
+5,591 / 3,459 / 1,789 µs (1.62× at 2 threads, 3.12× at 4 threads), the
+10,000-atom Pt cluster from 36,007 / 45,698 / 23,290 µs to 25,026 /
+17,672 / 9,185 µs (1.42× at 2 threads, 2.72× at 4 threads), and the
+863-atom Cu vacancy from 805 µs to 457 µs.
