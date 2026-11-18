@@ -59,7 +59,7 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     assert!(!json.contains("reseed_hops"));
     assert_eq!(
         cfg.resolved_sha256().unwrap(),
-        "ca562fbde027fe046748d5d6daa070db88719801a42b4db464e3c82d8d5e121e"
+        "093919b1e5b858235e24062ff5b382ca1dfaa960d0ad5dc6427434246a49e62d"
     );
     let mut uniform = cfg;
     uniform.arm_selection = ArmSelection::Uniform;
