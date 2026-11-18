@@ -2427,7 +2427,9 @@ fn main() {
             }
             if !diagnostic && let Some(portfolio) = surfaces.as_ref() {
                 let mut portfolio = portfolio.lock().expect("surface portfolio");
-                portfolio.observe(screening_pass, boundary_energy, led.best);
+                let charged = led.spent().saturating_sub(charged_before);
+                let charged = u64::try_from(charged).unwrap_or(u64::MAX);
+                portfolio.observe(screening_pass, boundary_energy, led.best, charged);
             }
             led.record_quench_boundary(
                 charged_before,

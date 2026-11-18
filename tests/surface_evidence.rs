@@ -134,7 +134,7 @@ fn imported_rewards_inform_choices_but_never_become_local_observations() {
     let mut learned = 0;
     for _ in 0..40 {
         learned += usize::from(learner.begin(true) == Some(transform));
-        learner.observe(false, -1.0, -1.0);
+        learner.observe(false, -1.0, -1.0, 1);
     }
     assert!(
         learned >= 35,
