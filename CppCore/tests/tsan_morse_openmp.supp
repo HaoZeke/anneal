@@ -1,4 +1,0 @@
-# GCC libgomp reuses worker threads between back-to-back OpenMP regions.
-# Under tsan this can report races between two sequential MorsePot calls
-# even though the OpenMP region has ended before the next call starts.
-race:rgpot::MorsePot::compute

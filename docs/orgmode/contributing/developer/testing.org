@@ -132,6 +132,10 @@ OMP_THREAD_LIMIT=1 meson test -C bbdir --print-errorlogs
 OMP_THREAD_LIMIT=2 meson test -C bbdir --print-errorlogs
 #+end_src
 
+Under ThreadSanitizer, an uninstrumented =libgomp= does not annotate OpenMP
+barriers and reports false races across sequential regions, so link a
+ThreadSanitizer-instrumented =libomp= instead of adding suppressions.
+
 ** Rust Tests
 
 =rust-test-all= enables every feature of =rgpot-core= (=schema=, =profile=,
