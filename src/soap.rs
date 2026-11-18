@@ -2931,11 +2931,13 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         }
         let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
         let _ = rng;
-        // A millionth of the Mackay defect is roundoff. A leftover that
-        // is the same size on every mobile atom is a shell breath: the
-        // cloud mean already contains it, and scaling it to the caller
-        // cap is a kick the residual did not ask for.
-        if nu3_rms < NU3_DEFECT * 1e-6 || shell_breath(&loc, &target, d0, &keep) {
+        // A millionth of the Mackay defect is roundoff. On a frozen
+        // frame the same leftover on every free atom is a shell breath:
+        // the cloud mean already contains it, and scaling it to the
+        // caller cap kicks the adsorbate the residual did not ask for.
+        // A free cluster has no frame, and that kick is the step.
+        let framed = mobile.is_some();
+        if nu3_rms < NU3_DEFECT * 1e-6 || (framed && shell_breath(&loc, &target, d0, &keep)) {
             return x.to_owned();
         }
         let dr = nu3_gradient_pullback(x, target.view(), spec, species, mobile);

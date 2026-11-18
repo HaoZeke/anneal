@@ -120,26 +120,17 @@ removed structure-template path.
 
 The 2,500-call LJ38 short-search regression changes from best
 -170.2604835583855163, 25 hops, 16 converged and 23 capped quenches to
--170.7113081194624442, 21 hops, 14 converged and 19 capped quenches. The
-corresponding LJ98 regression remains bit-identical at
--520.1078794915391654, 10 hops, 9 converged and 9 capped quenches.
+-172.2981287221047921, 38 hops, 33 converged and 26 capped quenches. The
+corresponding LJ98 regression is -520.3133998213386349, 10 hops, 10
+converged and 7 capped quenches.
 The longer LJ98 seed-2000 trajectory hash changes from
 `6e277f8611c9988bbb95c72873fb5b044be414e9148ab9571b732f834e3dceb9`
 to
-`5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c`
+`2f496356ddb82f2745cec803637ef90d415dd8307511834f57074051fedc5e3b`
 because that trajectory used the removed structure-specific proposals.
 The 16-seed LJ38 two-phase regression keeps the compacted hit mask
 `0xffff`, while the plain-walk mask changes from `0x91e4` (7/16) to
-`0x240d` (5/16).
-
-The reflection twin and the vacant hollow move those pins again. The
-2,500-call LJ38 regression is now best -173.2523783112709737, 35 hops,
-30 converged and 24 capped quenches. The LJ98 regression is
--529.2320643925859258, 18 hops, 17 converged and 17 capped quenches.
-The LJ98 seed-2000 trajectory hash is
-`63c8fc15ae7bc20d65e711353b6e2d8ce3562a9a4abaf62ad37e9387fcb4e6f4`.
-The 16-seed LJ38 plain walk at 30,000 calls and a 200-step quench is
-mask `0x0010` (1/16). The relative-cutoff walk stays `0xffff`.
+`0x8505` (5/16).
 
 ## Notes on unavailable landed rows
 
