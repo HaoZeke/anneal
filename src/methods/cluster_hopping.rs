@@ -93,6 +93,7 @@ mod moves;
 mod packing_bank;
 mod preset;
 mod torsion;
+mod walk_control;
 pub(crate) use torsion::HeldHands;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
@@ -4200,6 +4201,148 @@ fn lengths_of_quenched_cluster(cfg: &Config, x: ArrayView1<f64>) -> Option<Confi
     Some(scaled)
 }
 
+/// All-atom hops on the controller's own generator, so a burst that does
+/// not lower the incumbent leaves the library walk's draws where they were.
+fn run_walk_burst<'g>(
+    cfg: &Config,
+    control: &mut walk_control::WalkControl,
+    ledger: &mut Ledger,
+    chain: &mut Array1<f64>,
+    chain_energy: &mut f64,
+    relax: Relax<'_>,
+    grad: &mut Option<&mut GradFn<'g>>,
+    unresolved: &mut usize,
+) -> bool {
+    if cfg.move_library.is_rigid_body()
+        || cfg.move_library.is_molecular()
+        || !ledger.best.is_finite()
+    {
+        return false;
+    }
+    let Some(incumbent) = ledger.best_state.clone() else {
+        return false;
+    };
+    let n = cfg.n_points;
+    if incumbent.len() != 3 * n || ledger.remaining() == 0 || ledger.target_reached() {
+        return false;
+    }
+    let spent_before = ledger.spent();
+    let best_before = ledger.best;
+    let incumbent_fp = walk_control::fingerprint(incumbent.view(), cfg.length_scale);
+    control.begin_burst();
+    let mut side = control.take_rng(best_before.to_bits());
+    let (mut ce, mut cx) = if let Some((energy, coords)) = control.take_carry() {
+        (energy, coords)
+    } else {
+        match control.opening(incumbent_fp) {
+            walk_control::Opening::Incumbent => (ledger.best, incumbent),
+            walk_control::Opening::Stored { energy, coords } if coords.len() == 3 * n => {
+                (energy, coords)
+            }
+            walk_control::Opening::Stored { .. } | walk_control::Opening::Random => {
+                let fresh =
+                    random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut side);
+                let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
+                if !energy.is_finite() || relaxed.len() != 3 * n {
+                    control
+                        .note_failed(ledger.spent(), ledger.spent().saturating_sub(spent_before));
+                    return false;
+                }
+                let _ =
+                    record_quenched_answer(cfg, ledger, grad, energy, relaxed.view(), unresolved);
+                control.observe_best(ledger.spent(), ledger.best);
+                (energy, relaxed)
+            }
+        }
+    };
+    let start_energy = ce;
+    let mut current_fp = walk_control::fingerprint(cx.view(), cfg.length_scale);
+    control.remember(current_fp, ce, cx.view());
+    let mut lowest = ce;
+    let mut accepts = 0usize;
+    for _ in 0..64 {
+        if ledger.remaining() == 0
+            || ledger.target_reached()
+            || ledger.spent().saturating_sub(spent_before) >= control.calls_left()
+        {
+            break;
+        }
+        let mut trial = ClusterMove::AllPoints {
+            step: control.step(),
+        }
+        .propose(cx.view(), control.temperature(), &mut side);
+        recentre(&mut trial, n);
+        contain_trial(cfg, &mut trial, n);
+        let (qe, qx) = relax(ledger, trial.view(), cfg.relax_steps);
+        if !quench_is_sane(cfg, qe, qx.view()) || qx.len() != cx.len() {
+            continue;
+        }
+        let gradient = record_quenched_answer(cfg, ledger, grad, qe, qx.view(), unresolved);
+        if gradient.is_none() && grad.is_some() {
+            control.observe_trial(false);
+            continue;
+        }
+        control.observe_best(ledger.spent(), ledger.best);
+        let fp = walk_control::fingerprint(qx.view(), cfg.length_scale);
+        // A minimum just left is refused unless it is a new incumbent.
+        // The occupied basin is not on that list: quenching back is an
+        // acceptance, and that acceptance is what grows the step.
+        let avoided = fp != current_fp && control.forbids(fp) && qe + 1e-9 >= ledger.best;
+        let rise = qe - ce;
+        let temperature = control.temperature().max(1e-12);
+        let accept =
+            !avoided && (rise <= 0.0 || side.random::<f64>() < portable_exp(-rise / temperature));
+        control.observe_trial(accept);
+        if !accept {
+            continue;
+        }
+        accepts += 1;
+        if qe < lowest {
+            lowest = qe;
+        }
+        if fp != current_fp {
+            control.note_avoid(current_fp);
+        }
+        current_fp = fp;
+        ce = qe;
+        cx = qx;
+        control.remember(current_fp, ce, cx.view());
+    }
+    let calls = ledger.spent().saturating_sub(spent_before);
+    let improved = ledger.best < best_before - 1e-6;
+    // Still on the incumbent: every quench returned to it. Continuing that
+    // chain repeats the same minimum. A chain that has already left keeps
+    // its place and its generator.
+    let still_there = (start_energy - best_before).abs() <= 1e-8
+        && (ce - best_before).abs() <= 1e-8
+        && lowest + 1e-8 >= best_before;
+    if improved {
+        control.note_success(ledger.spent());
+        if let Some(state) = ledger.best_state.clone() {
+            *chain = state;
+            *chain_energy = ledger.best;
+        }
+    } else if still_there {
+        control.drop_chain();
+        control.note_failed(ledger.spent(), calls);
+    } else {
+        control.keep_carry(ce, cx);
+        control.keep_rng(side);
+        control.note_failed(ledger.spent(), calls);
+    }
+    if std::env::var("ANNEAL_WALK_TRACE").is_ok() {
+        eprintln!(
+            "WALK spent {spent_before} calls {calls} best {:.6} carry {:.6} lowest {:.6} accepts {accepts} step {:.4} temperature {:.3} improved {improved}",
+            ledger.best,
+            ce,
+            lowest,
+            control.step(),
+            control.temperature(),
+        );
+    }
+    improved
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -5068,6 +5211,13 @@ where
             }
         }
     }
+    let mut walk = cfg.walk_control.then(|| {
+        walk_control::WalkControl::new(
+            preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale,
+            cfg.length_scale,
+            cfg.temperature,
+        )
+    });
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
@@ -5082,6 +5232,37 @@ where
             || (ledger.remaining() == 0 && !interval_finished)
         {
             break HopStop::of_closed(ledger);
+        }
+        if let Some(control) = walk.as_mut() {
+            control.observe_best(ledger.spent(), ledger.best);
+            if control.due(ledger.spent())
+                && !cfg.move_library.is_rigid_body()
+                && !cfg.move_library.is_molecular()
+            {
+                let before = ledger.spent();
+                let improved = run_walk_burst(
+                    cfg,
+                    control,
+                    ledger,
+                    &mut x,
+                    &mut e,
+                    relax,
+                    &mut grad,
+                    &mut unconverged_records,
+                );
+                if improved {
+                    charged_at_best = ledger.spent();
+                    soft_cache = None;
+                    here = None;
+                    basin_entry = None;
+                    current_validation_gradient = None;
+                } else {
+                    // The burst is not a quiet stretch of this chain. The
+                    // stall clock stays where the walker's own quenches left it.
+                    charged_at_best =
+                        charged_at_best.saturating_add(ledger.spent().saturating_sub(before));
+                }
+            }
         }
         // The cap is read here because every early `continue` returns here,
         // and most of them have just taken a hop.
@@ -9136,6 +9317,13 @@ where
             }
         }
         if accept {
+            if let Some(control) = walk.as_mut()
+                && !unquenched
+                && !cfg.move_library.is_rigid_body()
+                && !cfg.move_library.is_molecular()
+            {
+                control.observe_accept(walk_control::fingerprint(x_new.view(), cfg.length_scale));
+            }
             if !unquenched && cfg.packing_cna_applies() {
                 packing.offer(e_new, x_new.view(), packing_cutoff);
             }

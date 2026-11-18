@@ -1003,6 +1003,16 @@ pub struct Config {
     /// The move does not name a packing or a composition.
     #[serde(skip_serializing_if = "is_false")]
     pub general_collective: bool,
+    /// All-atom basin hop on a quiet incumbent. The hop keeps its chain
+    /// and its generator until it lowers the record, and it stops after
+    /// one quiet stretch so the library keeps the rest of the budget. The
+    /// step tracks the acceptance of that hop toward one half, and the
+    /// temperature moves only when the step is against a bound.
+    ///
+    /// Off in the paper preset. A search that leaves it off draws the same
+    /// numbers and charges the same evaluations.
+    #[serde(skip_serializing_if = "is_false")]
+    pub walk_control: bool,
     /// Exchange descent after every full quench of a labelled cluster.
     ///
     /// Unlike pairs are exchanged on the quenched geometry in a drawn
@@ -1929,6 +1939,7 @@ impl Config {
             prior_handover: true,
             prior_motif: true,
             general_collective: false,
+            walk_control: false,
             homotop_descent: true,
             homotop_ranked: true,
             homotop_window: true,

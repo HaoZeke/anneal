@@ -151,6 +151,13 @@ fn cmd_run(args: &[String]) -> i32 {
     // not, and the search is then the recommended one.
     let kind = PairKind::Morse { rho: spec.rho };
     cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
+    // Unset leaves the preset. `1` runs the acceptance-adapted all-atom
+    // plateau hop; `0` forces it off.
+    match std::env::var("ANNEAL_WALK").as_deref() {
+        Ok("1") => cfg.walk_control = true,
+        Ok("0") => cfg.walk_control = false,
+        _ => {}
+    }
     // Unset leaves the preset's structure priors on. `0` turns off the
     // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
     // labelled core, the motif reseed, stall symmetrisation (and its

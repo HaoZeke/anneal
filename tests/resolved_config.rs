@@ -126,6 +126,7 @@ fn paper_preset_priors_stay_out_of_the_resolved_hash() {
         "homotop_reorder",
         "prior_motif",
         "general_collective",
+        "walk_control",
     ] {
         assert!(
             !json.contains(name),

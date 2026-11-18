@@ -320,6 +320,13 @@ fn config(spec: &Spec) -> Config {
     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }
+    // Unset leaves the preset. `1` runs the acceptance-adapted all-atom
+    // plateau hop; `0` forces it off.
+    match std::env::var("ANNEAL_WALK").as_deref() {
+        Ok("1") => cfg.walk_control = true,
+        Ok("0") => cfg.walk_control = false,
+        _ => {}
+    }
     cfg
 }
 

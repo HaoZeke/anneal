@@ -14,7 +14,8 @@
 //! at or below the published minimum plus 0.001, or when the budget is
 //! spent. A miss is reported as the full budget. `pot_s` is the time
 //! spent inside the potential, summed over the charged evaluations.
-//! The configuration is `Config::recommended` with no further change.
+//! Unset, the configuration is `Config::recommended`. `ANNEAL_WALK=1`
+//! adds the acceptance-adapted all-atom plateau hop.
 //!
 //! `coords` writes the start that `run` quenches, one Cartesian line per
 //! atom, so another code can open the same geometry.
@@ -64,6 +65,13 @@ fn cmd_run(args: &[String]) -> i32 {
     };
     let budget = env_budget().unwrap_or(spec.budget);
     let mut cfg = Config::recommended(spec.n);
+    // Unset leaves the preset. `1` runs the acceptance-adapted all-atom
+    // plateau hop; `0` forces it off.
+    match std::env::var("ANNEAL_WALK").as_deref() {
+        Ok("1") => cfg.walk_control = true,
+        Ok("0") => cfg.walk_control = false,
+        _ => {}
+    }
     // Unset leaves the library stride of one.
     if let Ok(text) = std::env::var("H2H_BASIN_STRIDE")
         && let Ok(stride) = text.parse::<usize>()
