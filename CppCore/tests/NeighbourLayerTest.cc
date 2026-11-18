@@ -731,6 +731,71 @@ TEST_CASE("a stored list survives atoms wrapped through the faces", "[nlist][ski
   check(pos, big, false, 4);
 }
 
+TEST_CASE("forCellTeam on a stored list walks the stored index across threads and Verlet reuse",
+          "[nlist][stored][threads]") {
+  const double a = 3.6;
+  const double side = 8 * a;
+  const double cutoff = 5.0;
+  const double box[9] = {side, 0, 0, 0, side, 0, 0, 0, side};
+  auto pos = fcc(8, a);
+  for (std::size_t k = 0; k < pos.size(); ++k) {
+    pos[k] += 0.04 * std::sin(1.9 * static_cast<double>(k));
+  }
+  wrapInto(pos, side);
+  const std::size_t n = pos.size() / 3;
+
+  rgpot::nlist::Spec spec;
+  spec.cutoff = cutoff;
+  spec.skin = 1.0;
+  spec.image = rgpot::nlist::Image::Round;
+  spec.mode = rgpot::nlist::Mode::Stored;
+  rgpot::nlist::Neighbours stored;
+  stored.update(pos.data(), n, box, spec);
+  REQUIRE_FALSE(stored.streaming());
+
+  for (int step = 0; step < 2; ++step) {
+    if (step == 1) {
+      for (std::size_t k = 0; k < pos.size(); ++k) {
+        pos[k] += 0.12 * std::cos(1.1 * static_cast<double>(k));
+      }
+      stored.update(pos.data(), n, box, spec);
+      REQUIRE(stored.reused());
+    }
+    PairBits want_half;
+    stored.forHalf(0, static_cast<std::int64_t>(n),
+                   [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz, double r2) {
+                     if (r2 <= cutoff * cutoff) {
+                       want_half.push_back({static_cast<std::uint64_t>(i),
+                                            static_cast<std::uint64_t>(j), bits(dx), bits(dy),
+                                            bits(dz)});
+                     }
+                   });
+    want_half = sortedPairs(want_half);
+    REQUIRE_FALSE(want_half.empty());
+
+    for (const int nt : {1, 2, 4}) {
+      std::vector<PairBits> per_slice(static_cast<std::size_t>(nt));
+      stored.forCellTeam(
+          true, nt,
+          [&](int slice, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
+              double r2) {
+            if (r2 <= cutoff * cutoff) {
+              per_slice[static_cast<std::size_t>(slice)].push_back(
+                  {static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j), bits(dx),
+                   bits(dy), bits(dz)});
+            }
+          });
+      PairBits got;
+      for (const auto &part : per_slice) {
+        got.insert(got.end(), part.begin(), part.end());
+      }
+      got = sortedPairs(got);
+      CHECK(got == want_half);
+    }
+  }
+  setThreads("");
+}
+
 namespace {
 
 /// Every visit of a walk in order, with the bits of its image vector.

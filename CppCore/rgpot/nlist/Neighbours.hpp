@@ -408,19 +408,15 @@ private:
   bool fastTiles(Loop &&loop) const {
     // Half is the same orthorhombic minimum image once coordinates sit in
     // the cell. A sheared box stays on the scattered walk. An unbounded
-    // search has no bins to tile.
-    if (allPairs() || use_general_ || (image_ != Image::Round && image_ != Image::Half) ||
-        n_ < 2) {
+    // search has no bins to tile, and a stored list walks its index.
+    if (!streaming_ || allPairs() || use_general_ ||
+        (image_ != Image::Round && image_ != Image::Half) || n_ < 2) {
       return false;
     }
     // One stencil. A 27-slot entry per cell is reused while the coordinates
     // are unchanged. When that array is larger than the pair index, the same
-    // cache keeps only the cells that hold a pair inside the search. A stored
-    // list does not take the compact form; it walks the index.
+    // cache keeps only the cells that hold a pair inside the search.
     const bool dense = tileStencilFits();
-    if (!dense && !streaming_) {
-      return false;
-    }
     const auto ncells = static_cast<std::size_t>(nx_) * static_cast<std::size_t>(ny_) *
                         static_cast<std::size_t>(nz_);
     const bool cell_shift = (!periodic_[0] || nx_ >= 5) && (!periodic_[1] || ny_ >= 5) &&
