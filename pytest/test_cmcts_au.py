@@ -126,3 +126,33 @@ def test_dimer_matches_the_reduced_gold_row_to_1e_8():
     )
     energy = float(proc.stdout.strip())
     assert energy == pytest.approx(1.0 - 2.0 * 34.408, abs=1e-8)
+
+
+def anneal_line(budget: str) -> str:
+    return f"recommended,au35,2000,{budget},true,10,10,0.1,-9276.29272778,0.05,0.05\n"
+
+
+def fake_binary_run(monkeypatch, budget: str) -> dict:
+    seen: dict = {}
+
+    def run(command, **kwargs):
+        seen["command"] = command
+        seen["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(command, 0, stdout=anneal_line(budget), stderr="")
+
+    monkeypatch.setattr(CAMPAIGN.subprocess, "run", run)
+    return seen
+
+
+def test_a_leaked_budget_override_does_not_reach_the_anneal_binary(monkeypatch):
+    monkeypatch.setenv("H2H_BUDGET", "1000")
+    seen = fake_binary_run(monkeypatch, str(CAMPAIGN.PAPER_BUDGETS["au35"]))
+    row = CAMPAIGN.run_anneal(Path("cmcts_au"), "recommended", "au35", 2000)
+    assert "H2H_BUDGET" not in seen["env"]
+    assert row["budget"] == str(CAMPAIGN.PAPER_BUDGETS["au35"])
+
+
+def test_an_anneal_row_with_another_budget_than_the_campaign_is_refused(monkeypatch):
+    fake_binary_run(monkeypatch, "1000")
+    with pytest.raises(SystemExit):
+        CAMPAIGN.run_anneal(Path("cmcts_au"), "recommended", "au35", 2000)

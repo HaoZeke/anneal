@@ -118,6 +118,7 @@ def anchor_fields(system: str) -> dict[str, str]:
 
 def run_anneal(binary: Path, arm: str, system: str, seed: int) -> dict[str, str]:
     env = os.environ.copy()
+    env.pop("H2H_BUDGET", None)
     env["OMP_NUM_THREADS"] = "1"
     env["OPENBLAS_NUM_THREADS"] = "1"
     env["MKL_NUM_THREADS"] = "1"
@@ -143,6 +144,10 @@ def run_anneal(binary: Path, arm: str, system: str, seed: int) -> dict[str, str]
     if proc.returncode != 0 or not text:
         raise SystemExit(proc.stderr[-800:] or proc.stdout[-800:])
     cols = text[-1].split(",")
+    ran = (cols[0], cols[1], cols[2], cols[3])
+    asked = (arm, system, str(seed), str(PAPER_BUDGETS[system]))
+    if ran != asked:
+        raise SystemExit(f"asked for {asked}, the binary ran {ran}")
     hit = cols[4] == "true"
     return {
         "system": cols[1],
