@@ -150,3 +150,42 @@ TEST_CASE("each thread keeps its own object", "[kept]") {
   REQUIRE(Probe::dropped == dropped + 1);
   REQUIRE(KeptProbe::with(k, make, id) != here);
 }
+
+TEST_CASE("multi-slot Kept evicts the least recently used slot and supports peek",
+          "[kept]") {
+  using KeptTwo = rgpot::Kept<Probe, 2>;
+  KeptTwo::release();
+  int built = 0;
+  auto make = [&] { return std::make_unique<Probe>(++built); };
+
+  const int tag_a = 1;
+  const int tag_b = 2;
+  const int tag_c = 3;
+  rgpot::KeptKey ka, kb, kc;
+  ka.ptr(&tag_a).f64(1.0);
+  kb.ptr(&tag_b).f64(1.0);
+  kc.ptr(&tag_c).f64(1.0);
+
+  REQUIRE(KeptTwo::peek(ka) == nullptr);
+  REQUIRE(KeptTwo::with(ka, make, id) == 1);
+  REQUIRE(KeptTwo::with(kb, make, id) == 2);
+  REQUIRE(KeptTwo::peek(ka) != nullptr);
+  REQUIRE(KeptTwo::peek(ka)->id == 1);
+  REQUIRE(KeptTwo::peek(kb) != nullptr);
+  REQUIRE(KeptTwo::peek(kb)->id == 2);
+
+  // Touch ka so kb becomes least recently used; kc then evicts kb.
+  REQUIRE(KeptTwo::with(ka, make, id) == 1);
+  REQUIRE(KeptTwo::with(kc, make, id) == 3);
+  REQUIRE(KeptTwo::peek(ka) != nullptr);
+  REQUIRE(KeptTwo::peek(ka)->id == 1);
+  REQUIRE(KeptTwo::peek(kb) == nullptr);
+  REQUIRE(KeptTwo::peek(kc) != nullptr);
+  REQUIRE(KeptTwo::peek(kc)->id == 3);
+
+  KeptTwo::release(ka);
+  REQUIRE(KeptTwo::peek(ka) == nullptr);
+  REQUIRE(KeptTwo::peek(kc) != nullptr);
+  KeptTwo::release();
+  REQUIRE(KeptTwo::peek(kc) == nullptr);
+}
