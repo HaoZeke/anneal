@@ -613,6 +613,7 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
         return j;
     }
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+    let triples = ace1 / spec.n_max;
     let c_atom = n_chan * spec.n_max * n_lm;
     let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
     let mut c = vec![vec![0.0; c_atom]; n_at];
@@ -668,7 +669,10 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
                         };
                         let dc = dw * u[a] * yv + w * dyv;
                         let col_c = n * n_lm + lm;
-                        for t in 0..ace1 {
+                        // Each ACE invariant uses coefficients from one
+                        // radial channel. Derivatives in every other block
+                        // are exact zeros.
+                        for t in n * triples..(n + 1) * triples {
                             let gij = db[[t, col_c]] * dc;
                             j[[i * d1 + ch * ace1 + t, 3 * jj + a]] += gij;
                             j[[i * d1 + ch * ace1 + t, 3 * i + a]] -= gij;
@@ -795,27 +799,26 @@ fn accumulate_dp(
     col: usize,
 ) {
     // p_{n n' l} = Σ_m c_{n lm} c_{n' lm}. lm here is the packed (l,m) index.
+    // A radial index other than `n` contributes an exact zero, and a
+    // spherical index other than `l` is never written.
     let l = lm_to_l(lm);
-    let mut t = 0usize;
+    let mut pair = 0usize;
     for na in 0..spec.n_max {
         for np in na..spec.n_max {
-            for ll in 0..=spec.l_max {
-                if ll == l {
-                    let c_n = c[na * n_lm + lm];
-                    let c_np = c[np * n_lm + lm];
-                    let d = if na == n && np == n {
-                        2.0 * c_n * dc
-                    } else if na == n {
-                        dc * c_np
-                    } else if np == n {
-                        c_n * dc
-                    } else {
-                        0.0
-                    };
-                    j[[row0 + t, col]] += d;
-                }
-                t += 1;
+            if na == n || np == n {
+                let c_n = c[na * n_lm + lm];
+                let c_np = c[np * n_lm + lm];
+                let d = if na == n && np == n {
+                    2.0 * c_n * dc
+                } else if na == n {
+                    dc * c_np
+                } else {
+                    c_n * dc
+                };
+                let t = pair * (spec.l_max + 1) + l;
+                j[[row0 + t, col]] += d;
             }
+            pair += 1;
         }
     }
 }
@@ -3334,24 +3337,69 @@ fn solve3(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
     ])
 }
 
+/// Nonzero entries of each Jacobian row, in column order.
+///
+/// A local descriptor Jacobian is structurally sparse: a Cartesian coordinate
+/// only changes the rows of centres whose neighbourhood contains that atom,
+/// and species channels add whole zero blocks. Forming `JᵀJ` as dense dot
+/// products therefore spends most of its time multiplying exact zeros.
+fn sparse_rows(j: &Array2<f64>) -> Vec<Vec<(usize, f64)>> {
+    let mut rows = Vec::with_capacity(j.nrows());
+    for row in 0..j.nrows() {
+        let mut entries = Vec::new();
+        for column in 0..j.ncols() {
+            let value = j[[row, column]];
+            if value != 0.0 {
+                entries.push((column, value));
+            }
+        }
+        rows.push(entries);
+    }
+    rows
+}
+
 /// Solve `(J^T J + λ I) dr = J^T dp`.
+///
+/// Nonzero products are added in feature order, which is the order of the
+/// former strided product, so a finite zero that is skipped does not change
+/// a result bit. A non-finite entry keeps the dense arithmetic.
 fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
     let nfeat = j.nrows();
     let ncoord = j.ncols();
     let mut a = Array2::<f64>::zeros((ncoord, ncoord));
     let mut rhs = Array1::<f64>::zeros(ncoord);
-    for c in 0..ncoord {
-        for i in 0..nfeat {
-            rhs[c] += j[[i, c]] * dp[i];
-        }
-        for d in 0..=c {
-            let mut s = 0.0;
-            for i in 0..nfeat {
-                s += j[[i, c]] * j[[i, d]];
+    let finite =
+        dp.iter().all(|value| value.is_finite()) && j.iter().all(|value| value.is_finite());
+    if finite {
+        for (row, entries) in sparse_rows(j).iter().enumerate() {
+            for (c_at, &(c, value_c)) in entries.iter().enumerate() {
+                rhs[c] += value_c * dp[row];
+                for &(d, value_d) in &entries[..=c_at] {
+                    a[[c, d]] += value_c * value_d;
+                }
             }
-            a[[c, d]] = s;
-            a[[d, c]] = s;
         }
+        for c in 0..ncoord {
+            for d in 0..c {
+                a[[d, c]] = a[[c, d]];
+            }
+        }
+    } else {
+        for c in 0..ncoord {
+            for i in 0..nfeat {
+                rhs[c] += j[[i, c]] * dp[i];
+            }
+            for d in 0..=c {
+                let mut sum = 0.0;
+                for i in 0..nfeat {
+                    sum += j[[i, c]] * j[[i, d]];
+                }
+                a[[c, d]] = sum;
+                a[[d, c]] = sum;
+            }
+        }
+    }
+    for c in 0..ncoord {
         a[[c, c]] += lambda.max(1e-12);
     }
     chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(ncoord))
@@ -3398,6 +3446,7 @@ fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::methods::cluster_hopping::{Config, random_cluster_in_radius};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
@@ -3406,6 +3455,223 @@ mod tests {
         Array1::from_vec(vec![
             1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
         ])
+    }
+
+    #[test]
+    fn tikhonov_matches_the_strided_product_bit_for_bit() {
+        let mut state = 0x9e37_79b9_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let nfeat = 48usize;
+        let ncoord = 12usize;
+        let values: Vec<f64> = (0..nfeat * ncoord).map(|_| next()).collect();
+        let j = Array2::from_shape_vec((nfeat, ncoord), values).unwrap();
+        let dp = Array1::from((0..nfeat).map(|_| next()).collect::<Vec<_>>());
+        let lambda = 1e-3;
+        let mut a = Array2::<f64>::zeros((ncoord, ncoord));
+        let mut rhs = Array1::<f64>::zeros(ncoord);
+        for c in 0..ncoord {
+            for i in 0..nfeat {
+                rhs[c] += j[[i, c]] * dp[i];
+            }
+            for d in 0..=c {
+                let mut s = 0.0;
+                for i in 0..nfeat {
+                    s += j[[i, c]] * j[[i, d]];
+                }
+                a[[c, d]] = s;
+                a[[d, c]] = s;
+            }
+            a[[c, c]] += lambda;
+        }
+        let expect = chol_solve(&a, &rhs).unwrap();
+        let got = tikhonov_jtj(&j, dp.view(), lambda);
+        for (index, (left, right)) in got.iter().zip(expect.iter()).enumerate() {
+            assert_eq!(left.to_bits(), right.to_bits(), "coordinate {index}");
+        }
+    }
+
+    fn dense_tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
+        let nfeat = j.nrows();
+        let ncoord = j.ncols();
+        let mut a = Array2::<f64>::zeros((ncoord, ncoord));
+        let mut rhs = Array1::<f64>::zeros(ncoord);
+        for c in 0..ncoord {
+            for i in 0..nfeat {
+                rhs[c] += j[[i, c]] * dp[i];
+            }
+            for d in 0..=c {
+                let mut sum = 0.0;
+                for i in 0..nfeat {
+                    sum += j[[i, c]] * j[[i, d]];
+                }
+                a[[c, d]] = sum;
+                a[[d, c]] = sum;
+            }
+            a[[c, c]] += lambda.max(1e-12);
+        }
+        chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(ncoord))
+    }
+
+    fn dense_accumulate_dp(
+        j: &mut Array2<f64>,
+        row0: usize,
+        spec: SoapSpec,
+        n_lm: usize,
+        c: &[f64],
+        n: usize,
+        lm: usize,
+        dc: f64,
+        col: usize,
+    ) {
+        let l = lm_to_l(lm);
+        let mut t = 0usize;
+        for na in 0..spec.n_max {
+            for np in na..spec.n_max {
+                for ll in 0..=spec.l_max {
+                    if ll == l {
+                        let c_n = c[na * n_lm + lm];
+                        let c_np = c[np * n_lm + lm];
+                        let d = if na == n && np == n {
+                            2.0 * c_n * dc
+                        } else if na == n {
+                            dc * c_np
+                        } else if np == n {
+                            c_n * dc
+                        } else {
+                            0.0
+                        };
+                        j[[row0 + t, col]] += d;
+                    }
+                    t += 1;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn selective_descriptor_jacobian_updates_are_bit_identical() {
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 3.4,
+        };
+        let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+        let c: Vec<f64> = (0..spec.n_max * n_lm)
+            .map(|i| ((i * 19 + 5) % 29) as f64 * 0.017 - 0.2)
+            .collect();
+        let mut selective = Array2::zeros((spec.dim(), 3));
+        let mut dense = Array2::zeros((spec.dim(), 3));
+        for n in 0..spec.n_max {
+            for lm in 0..n_lm {
+                let dc = ((n * n_lm + lm + 3) as f64).sin();
+                accumulate_dp(&mut selective, 0, spec, n_lm, &c, n, lm, dc, 1);
+                dense_accumulate_dp(&mut dense, 0, spec, n_lm, &c, n, lm, dc, 1);
+            }
+        }
+        assert_eq!(
+            selective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            dense
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+
+        let ace1 = spec.nu3_dim();
+        let triples = ace1 / spec.n_max;
+        let db = crate::ace::d_from_c(&c, spec.n_max, spec.l_max);
+        let mut selective = vec![0.0_f64; ace1];
+        let mut dense = vec![0.0_f64; ace1];
+        for n in 0..spec.n_max {
+            for lm in 0..n_lm {
+                let col = n * n_lm + lm;
+                let dc = ((col + 7) as f64).cos();
+                for t in n * triples..(n + 1) * triples {
+                    selective[t] += db[[t, col]] * dc;
+                }
+                for t in 0..ace1 {
+                    dense[t] += db[[t, col]] * dc;
+                }
+            }
+        }
+        assert_eq!(
+            selective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            dense
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert!(triples * spec.n_max < ace1 * spec.n_max);
+    }
+
+    #[test]
+    fn sparse_species_pullback_is_bit_identical_and_avoids_zero_products() {
+        let n = 55;
+        let cfg = Config::recommended(n);
+        let mut rng = StdRng::seed_from_u64(2000);
+        let x = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+        let species: Vec<u32> = (0..n)
+            .map(|atom| if atom < 19 { 200 } else { 201 })
+            .collect();
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: cfg.neighbour_cutoff,
+        };
+        let loc = local_nu3_z(x.view(), spec, Some(&species));
+        let dim = loc.ncols();
+        let d0 = dim - spec.nu3_feat_dim(Some(&species));
+        let mut means = vec![vec![0.0; dim]; 2];
+        for i in 0..n {
+            let group = usize::from(i >= 19);
+            for t in d0..dim {
+                means[group][t] += loc[[i, t]];
+            }
+        }
+        for (group, mean) in means.iter_mut().enumerate() {
+            let count = if group == 0 { 19.0 } else { 36.0 };
+            for value in &mut mean[d0..] {
+                *value /= count;
+            }
+        }
+        let mut dp = Array1::zeros(n * dim);
+        for i in 0..n {
+            let group = usize::from(i >= 19);
+            for t in d0..dim {
+                dp[i * dim + t] = means[group][t] - loc[[i, t]];
+            }
+        }
+        let j = jacobian_nu3(x.view(), spec, Some(&species));
+        let sparse = tikhonov_jtj(&j, dp.view(), 1e-3);
+        let dense = dense_tikhonov_jtj(&j, dp.view(), 1e-3);
+        assert_eq!(
+            sparse
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            dense
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+
+        let sparse_products: usize = sparse_rows(&j)
+            .iter()
+            .map(|row| row.len() * (row.len() + 1) / 2)
+            .sum();
+        let dense_products = j.nrows() * j.ncols() * (j.ncols() + 1) / 2;
+        assert!(
+            sparse_products * 2 < dense_products,
+            "sparse {sparse_products} dense {dense_products}"
+        );
     }
 
     #[test]

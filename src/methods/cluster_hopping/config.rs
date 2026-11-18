@@ -1116,12 +1116,12 @@ pub struct Config {
     /// preset.
     #[serde(skip_serializing_if = "is_true")]
     pub homotop_ranked: bool,
-    /// The budget-window law sets the temperature of a labelled cluster.
+    /// Retained so a saved config still parses.
     ///
-    /// The preset temperature is a Lennard-Jones well. A labelled cluster
-    /// has an ordering for every geometry, and at that temperature the
-    /// chain stands well above its best. Same scope as
-    /// [`Config::homotop_descent`]. On in the paper preset.
+    /// The acceptance dial sets the temperature of a labelled cluster,
+    /// the same rule as a one-species chain. A budget window that ignores
+    /// acceptance leaves the chain in the first deep basin. Same scope as
+    /// [`Config::homotop_descent`]. On in the paper preset, and not read.
     #[serde(skip_serializing_if = "is_true")]
     pub homotop_window: bool,
     /// A stalled labelled incumbent is reordered from its own packing.
@@ -2715,12 +2715,15 @@ mod coverage_behaviour {
         let blank = Config::recommended(8);
         assert!(blank.monoatomic());
         assert!(blank.packing_cna_applies());
+        assert!(!blank.budget_window);
         let pure = Config::recommended(8).with_species(vec![79; 8], None);
         assert!(pure.monoatomic());
         assert!(pure.packing_cna_applies());
+        assert!(!pure.budget_window);
         let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
         assert!(!mixed.monoatomic());
         assert!(!mixed.packing_cna_applies());
+        assert!(!mixed.budget_window);
         assert!(!Config::recommended_tip4p(4).packing_cna_applies());
         assert!(
             !Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)

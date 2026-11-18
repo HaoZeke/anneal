@@ -3,6 +3,11 @@
 //! Pair energy is `4 ε [(σ/r)^12 - (σ/r)^6]`. Atom indices `0..n_a` are
 //! species A and the rest are species B. The arithmetic mean of `σ_AA` and
 //! `σ_BB` is the usual unlike diameter; the caller passes that value in.
+//!
+//! When the process has installed the rgpot kernels, the evaluation is
+//! `rgpot_pair::binary_lj` with a non-positive cutoff, the same dispatch
+//! `PairPotential` uses for the one-component clusters. The pair loop below
+//! is the fallback for a process that has not installed a kernel.
 
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -66,6 +71,22 @@ impl BinaryLennardJones {
         }
     }
 
+    /// Doye-Meyer parameters: every `ε` is 1, `σ_AA` is 1, and
+    /// `σ_AB = (σ_AA + σ_BB) / 2`.
+    #[cfg(test)]
+    pub fn doye_meyer(n_a: usize, n_b: usize, sigma_bb: f64) -> Self {
+        Self::new(
+            n_a,
+            n_b,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.5 * (1.0 + sigma_bb),
+            sigma_bb,
+        )
+    }
+
     /// Atoms in the cluster.
     pub fn n_points(&self) -> usize {
         self.n_a + self.n_b
@@ -89,6 +110,24 @@ impl BinaryLennardJones {
             3 * n,
             "binary Lennard-Jones state is 3 coordinates per atom"
         );
+        if let (Some(kernels), Some(positions)) = (super::cluster_kernels(), x.as_slice()) {
+            let mut gradient = vec![0.0; positions.len()];
+            let energy = (kernels.binary_lj)(
+                self.n_a,
+                [self.epsilon_aa, self.epsilon_ab, self.epsilon_bb],
+                [self.sigma_aa, self.sigma_ab, self.sigma_bb],
+                0.0,
+                positions,
+                &mut gradient,
+            );
+            return (energy, Array1::from(gradient));
+        }
+        self.local_value_and_gradient(x)
+    }
+
+    /// The pair sum used when no kernel is installed.
+    fn local_value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let n = self.n_points();
         let mut energy = 0.0;
         let mut gradient = Array1::zeros(x.len());
         for i in 0..n {
@@ -201,5 +240,95 @@ mod tests {
             (energy + 1.0).abs() < 1e-12,
             "unlike well depth is {energy}"
         );
+    }
+
+    /// Header fields of a Cambridge Cluster Database points file.
+    fn ccd_header(line: &str) -> (f64, usize, f64) {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        let mut energy = None;
+        let mut n_a = None;
+        let mut sigma = None;
+        for (i, token) in tokens.iter().enumerate() {
+            if *token == "1=" {
+                energy = tokens[i + 1].parse().ok();
+            }
+            if *token == "(NA,SIG_BB)" {
+                n_a = tokens[i + 1].parse().ok();
+                sigma = tokens[i + 2].parse().ok();
+            }
+        }
+        (
+            energy.expect("header energy"),
+            n_a.expect("header NA"),
+            sigma.expect("header sigma"),
+        )
+    }
+
+    fn load_ccd(name: &str) -> (f64, usize, f64, Array1<f64>) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/blj-ccd")
+            .join(name);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        let mut lines = text.lines();
+        let n: usize = lines
+            .next()
+            .and_then(|line| line.trim().parse().ok())
+            .unwrap_or_else(|| panic!("{name}: atom count"));
+        let (energy, n_a, sigma) = ccd_header(lines.next().unwrap_or(""));
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        for line in lines {
+            let mut parts = line.split_whitespace();
+            let Some(label) = parts.next() else {
+                continue;
+            };
+            let coords: Vec<f64> = parts
+                .map(|word| word.parse().expect("coordinate"))
+                .collect();
+            assert_eq!(coords.len(), 3, "{name}: {label}");
+            match label {
+                "LA" | "A" => a.extend(coords),
+                "LB" | "B" => b.extend(coords),
+                other => panic!("{name}: unknown label {other}"),
+            }
+        }
+        assert_eq!(a.len() / 3, n_a, "{name}: species A");
+        assert_eq!(a.len() / 3 + b.len() / 3, n, "{name}: atom count");
+        a.extend(b);
+        (energy, n_a, sigma, Array1::from_vec(a))
+    }
+
+    #[test]
+    fn ccd_structures_match_their_headers_and_the_local_loop() {
+        for name in [
+            "blj105n38",
+            "blj105n55",
+            "blj115n38",
+            "blj115n55",
+            "blj130n38",
+            "blj130n55",
+            "blj130n98",
+            "blj130n98-original",
+        ] {
+            let (header, n_a, sigma, coords) = load_ccd(name);
+            let n = coords.len() / 3;
+            let potential = BinaryLennardJones::doye_meyer(n_a, n - n_a, sigma);
+            let (energy, gradient) = potential.value_and_gradient(coords.view());
+            let (local, local_gradient) = potential.local_value_and_gradient(coords.view());
+            assert!(
+                (energy - header).abs() < 1e-9,
+                "{name}: kernel {energy} against header {header}"
+            );
+            assert_eq!(
+                energy.to_bits(),
+                local.to_bits(),
+                "{name}: kernel against the pair loop"
+            );
+            assert_eq!(gradient.len(), local_gradient.len());
+            for (left, right) in gradient.iter().zip(local_gradient.iter()) {
+                assert_eq!(left.to_bits(), right.to_bits(), "{name}");
+            }
+        }
     }
 }

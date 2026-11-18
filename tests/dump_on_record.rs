@@ -10,32 +10,33 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 #[test]
 fn a_recorded_quench_the_chain_rejects_reaches_the_dump() {
-    let path = "dump-on-record.txt";
-    let _ = std::fs::remove_file(path);
+    let dir = tempfile::tempdir().expect("dump directory");
+    let path = dir.path().join("dump-on-record.txt");
+    let missing = dir.path().join("missing").join("nope.txt");
     // The driver reads the path from the environment. This process is the
     // test binary, and the variable is cleared before the test returns.
     // SAFETY: this test is the only thread, and it removes the variable
     // before returning.
     unsafe {
-        std::env::set_var("ANNEAL_MIN_DUMP", "dump-on-record-missing/nope.txt");
+        std::env::set_var("ANNEAL_MIN_DUMP", &missing);
     }
     let mut refused = Ledger::new(1);
     refused.record(-1.0, Array1::zeros(12).view());
     assert!(
-        !std::path::Path::new("dump-on-record-missing/nope.txt").exists(),
+        !missing.exists(),
         "a refused open must not create a minima file"
     );
     unsafe {
-        std::env::set_var("ANNEAL_MIN_DUMP", path);
+        std::env::set_var("ANNEAL_MIN_DUMP", &path);
     }
     let mut nonfinite = Ledger::new(1);
     nonfinite.record(f64::NAN, Array1::zeros(12).view());
-    let nonfinite_text = std::fs::read_to_string(path).unwrap_or_default();
+    let nonfinite_text = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(
         nonfinite_text.lines().all(|line| line.is_empty()),
         "a non-finite record must not be written, saw {nonfinite_text}"
     );
-    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_file(&path);
 
     let mut cfg = Config::for_cluster(4);
     cfg.bayes_screen = false;
@@ -77,7 +78,7 @@ fn a_recorded_quench_the_chain_rejects_reaches_the_dump() {
         outcome.best < -1.5,
         "the search recorded a quench below the stop"
     );
-    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
     let mut rows = Vec::new();
     for line in text.lines().filter(|line| !line.is_empty()) {
         let mut fields = line.split_whitespace();
