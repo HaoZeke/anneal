@@ -13,7 +13,8 @@ so a censored block of misses is one tie, not a run of distinct values.
 A blank time is a GMIN build that does not time the potential (NEWTIP).
 Rows are only ever appended. A (system, arm, seed) run again at a later
 revision is scored from its last row, and each arm lists the revisions
-and hosts its rows ran at.
+and hosts its rows ran at. --seeds keeps only the named seeds, as single
+seeds or inclusive ranges such as 2000-2011.
 """
 
 from __future__ import annotations
@@ -22,6 +23,12 @@ import argparse
 import csv
 from math import comb
 from pathlib import Path
+
+
+def seed_span(text: str) -> tuple[int, ...]:
+    first, _, last = text.partition("-")
+    return tuple(range(int(first), int(last or first) + 1))
+
 
 ORDER = (
     "lj38", "lj75", "lj98", "lj104", "lj150",
@@ -153,9 +160,13 @@ def main() -> int:
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--gmin-rows", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--seeds", nargs="*", type=seed_span)
     args = parser.parse_args()
+    seeds = {str(s) for span in args.seeds for s in span} if args.seeds else None
     latest = {}
     for r in read(args.rows):
+        if seeds is not None and r["seed"] not in seeds:
+            continue
         r["hit"] = r["hit_binary"]
         latest[(r["system"], r["arm"], r["seed"])] = r
     rows = list(latest.values())
