@@ -45,8 +45,9 @@ client_cmake=(-DRGPOT_BUILD_EXAMPLES=OFF -DRGPOT_WITH_EIGEN=OFF
   -DRGPOT_WITH_XTENSOR=OFF -DRGPOT_RPC_CLIENT_ONLY=ON)
 # The runnable examples are Meson-only, but still belong in the registry and
 # must carry their options from it. CMake advertises no corresponding tests.
+# MPI is auto, as above: CMake finds it whenever it is installed.
 examples_meson=(-Dwith_examples=true -Dwith_eigen=true -Dwith_xtensor=true
-  -Dwith_expr=true -Dwith_rpc=false -Dwith_cache=false -Dwith_mpi=disabled)
+  -Dwith_expr=true -Dwith_rpc=false -Dwith_cache=false -Dwith_mpi=auto)
 examples_cmake=(-DRGPOT_BUILD_EXAMPLES=ON -DRGPOT_WITH_EIGEN=ON
   -DRGPOT_WITH_XTENSOR=ON -DRGPOT_WITH_RPC=OFF -DRGPOT_WITH_CACHE=OFF)
 
