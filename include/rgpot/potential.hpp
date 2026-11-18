@@ -221,7 +221,7 @@ public:
         &trampoline_callback<Impl>, static_cast<void *>(&impl), nullptr, 0,
         nullptr, nullptr, nullptr, nullptr);
     return with_analytic_hvp<Impl>(
-        with_fused_settings<Impl>(PotentialHandle(handle), impl));
+        with_fused_settings<Impl>(PotentialHandle(handle), impl), impl);
   }
 
   /**
@@ -241,7 +241,7 @@ public:
         &trampoline_callback<Impl>, static_cast<void *>(&impl), nullptr,
         n_atoms, atomic_numbers, box_matrix, bounds_low, bounds_high);
     return with_analytic_hvp<Impl>(
-        with_fused_settings<Impl>(PotentialHandle(handle), impl));
+        with_fused_settings<Impl>(PotentialHandle(handle), impl), impl);
   }
 
   /**
