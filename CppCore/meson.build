@@ -1978,6 +1978,24 @@ if get_option('with_tests')
                 ['-ffp-contract=off', '/fp:precise'],
             )
         endif
+        # The calculator-group symbol check opens librgpot.so when meson
+        # builds one, and otherwise looks the symbols up in the test
+        # binary, which then has to export them.
+        if _rt[0] == 'CalculatorGroupTest'
+            if get_option('default_library') == 'static'
+                _export_dynamic = true
+            else
+                _export_dynamic = false
+                case_args += [
+                    '-DRGPOT_TEST_SHARED_LIBRARY',
+                    '-DRGPOT_TEST_SHARED_LIBRARY_PATH="@0@"'.format(
+                        rgpot.full_path(),
+                    ),
+                ]
+            endif
+        else
+            _export_dynamic = false
+        endif
         _test_exe = executable(
             _rt[2][0],
             sources: ['tests/' + _rt[2][1]],
@@ -1987,8 +2005,18 @@ if get_option('with_tests')
             link_with: _linkto,
             link_language: 'cpp',
             build_rpath: _metatomic_build_rpath,
+            export_dynamic: _export_dynamic,
         )
-        test(_rt[0], _test_exe, kwargs: _rt_kw[_rt[0]])
+        if _rt[0] == 'CalculatorGroupTest'
+            test(
+                _rt[0],
+                _test_exe,
+                depends: [rgpot],
+                kwargs: _rt_kw[_rt[0]],
+            )
+        else
+            test(_rt[0], _test_exe, kwargs: _rt_kw[_rt[0]])
+        endif
         _rt_exes += {_rt[0]: _test_exe}
         if _rt[0] == 'CalculatorGroupTest'
             calculator_group_test_exe = _test_exe

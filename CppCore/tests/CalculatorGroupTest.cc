@@ -5,8 +5,12 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
 
 #include "rgpot/CalculatorGroup.hpp"
+#include "rgpot/calculator_mpi_abi.h"
 
 // A process started without mpirun is one calculator of one rank, with
 // or without MPI in the build. A second bind with another size is
@@ -82,4 +86,78 @@ TEST_CASE("One process is one calculator", "[CalculatorGroup]") {
       std::fflush(stdout);
     }
   }
+}
+
+// The calculator-group C ABI must be reachable under unmangled names.
+// Where the build produced a shared librgpot (RGPOT_TEST_SHARED_LIBRARY),
+// the library at the build-provided path is opened and must resolve all three
+// symbols. A static build has no shared object to open, so the same names are
+// looked up in the test binary itself, which the build links with exported
+// symbols.
+namespace {
+bool badOwnerRequested() {
+  const char *bad = std::getenv("RGPOT_CALCULATOR_BAD_OWNER");
+  return bad != nullptr && bad[0] == '1' && bad[1] == '\0';
+}
+
+#if !defined(_WIN32)
+constexpr std::array<const char *, 3> kCalculatorAbiSymbols = {
+    "rgpot_mpi_host_abi_version", "rgpot_mpi_bind_calculators",
+    "rgpot_mpi_share_bytes"};
+
+// The first symbol the handle does not resolve, or nullptr if it has all.
+const char *firstMissing(void *handle) {
+  for (const char *name : kCalculatorAbiSymbols) {
+    if (dlsym(handle, name) == nullptr)
+      return name;
+  }
+  return nullptr;
+}
+#endif
+} // namespace
+
+TEST_CASE("calculator-group C ABI exports unmangled symbols",
+          "[CalculatorGroup][abi]") {
+#if defined(_WIN32)
+  SKIP("the symbol probe uses dlsym, which this platform lacks");
+#elif defined(RGPOT_TEST_SHARED_LIBRARY)
+  const char *path = RGPOT_TEST_SHARED_LIBRARY_PATH;
+  void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+  INFO("shared library path: " << path);
+  REQUIRE(lib != nullptr);
+  const char *missing = firstMissing(lib);
+  dlclose(lib);
+  INFO("symbol missing from " << path);
+  REQUIRE(missing == nullptr);
+#else
+  void *self = dlopen(nullptr, RTLD_NOW);
+  const char *missing =
+      self == nullptr ? "dlopen(nullptr)" : firstMissing(self);
+  if (self != nullptr)
+    dlclose(self);
+  INFO("symbol missing from statically linked test binary: " << missing);
+  REQUIRE(missing == nullptr);
+#endif
+}
+
+TEST_CASE("calculator-group C ABI binds and shares through the C symbols",
+          "[CalculatorGroup][abi]") {
+  rgpot_mpi_group_t group{};
+  const int index = rgpot_mpi_bind_calculators(1, &group);
+  REQUIRE(index == group.index);
+  REQUIRE(rgpot_mpi_host_abi_version() == RGPOT_MPI_ABI_VERSION);
+  std::array<double, 4> values{1.0, -2.0, 3.5, 0.25};
+  if (group.world_size > 1 && badOwnerRequested()) {
+    const int shared = rgpot_mpi_share_bytes(99, values.data(), sizeof(values));
+    std::fprintf(stderr, "bad owner returned %d on index %d\n", shared,
+                 group.index);
+    REQUIRE(false);
+  }
+  const int rc = rgpot_mpi_share_bytes(0, values.data(), sizeof(values));
+  if (group.world_size == 1) {
+    REQUIRE((rc == 0 || rc == 1));
+  } else {
+    REQUIRE(rc == 1);
+  }
+  REQUIRE(values == std::array<double, 4>{1.0, -2.0, 3.5, 0.25});
 }

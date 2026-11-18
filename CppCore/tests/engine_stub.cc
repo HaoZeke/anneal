@@ -86,6 +86,18 @@ Created create(const void *config, std::size_t) {
       }
       (void)intra_op;
     };
+    backend->select_orbitals = [](long long key) {
+      if (key == -1)
+        throw rgpot::engine::Unsupported("orbital key refused");
+      if (key == -2)
+        throw std::runtime_error("orbital selection failed");
+    };
+    backend->copy_orbitals = [](long long from_key, long long to_key) {
+      if (from_key == -1)
+        throw rgpot::engine::Unsupported("orbital copy refused");
+      if (to_key == -2)
+        throw std::runtime_error("orbital copy failed");
+    };
   }
   if (bytes[2] != 0) {
     if (const char *path = std::getenv("RGPOT_ENGINE_STUB_MODEL")) {

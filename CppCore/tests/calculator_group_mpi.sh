@@ -53,7 +53,7 @@ if [ "$MODE" = "share" ]; then
   unset RGPOT_CALCULATOR_BAD_OWNER || true
   set +e
   # shellcheck disable=SC2086
-  run_bounded "$LAUNCH" -n 4 $OVER "$EXE" >"$log" 2>&1
+  run_bounded "$LAUNCH" -n 4 $OVER "$EXE" --order decl >"$log" 2>&1
   rc=$?
   set -e
   if [ "$rc" -ne 0 ]; then
@@ -73,7 +73,7 @@ if [ "$MODE" = "bad-owner" ]; then
   export RGPOT_CALCULATOR_BAD_OWNER=1
   set +e
   # shellcheck disable=SC2086
-  run_bounded "$LAUNCH" -n 4 $OVER $TAG "$EXE" >"$log" 2>&1
+  run_bounded "$LAUNCH" -n 4 $OVER $TAG "$EXE" --order decl >"$log" 2>&1
   rc=$?
   set -e
   if [ "$rc" -eq 0 ] || [ "$rc" -eq 124 ]; then

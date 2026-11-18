@@ -50,6 +50,7 @@ using FeatureTableFn = const CPMDCFeatureEntry *(*)(void);
 using FeatureFindFn = const CPMDCFeatureEntry *(*)(const char *);
 using AdoptCommFn = int (*)(const void *, std::size_t, int);
 using SelectOrbitalsFn = int (*)(CPMDCSession *, long long);
+using CopyOrbitalsFn = int (*)(CPMDCSession *, long long, long long);
 
 // Layout matches cpmdc CPMDCStressTensor: int valid, then nine doubles.
 struct CPMDCStressTensor {
@@ -107,6 +108,7 @@ struct EngineBundle {
   FeatureFindFn feature_find = nullptr;
   LastStressFn last_stress = nullptr;
   SelectOrbitalsFn select_orbitals = nullptr;
+  CopyOrbitalsFn copy_orbitals = nullptr;
   AdoptCommFn adopt_comm = nullptr;
   std::string loaded_path;
   std::string load_error;
@@ -130,6 +132,7 @@ bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
   b.feature_find = nullptr;
   b.last_stress = nullptr;
   b.select_orbitals = nullptr;
+  b.copy_orbitals = nullptr;
   b.adopt_comm = nullptr;
 
   bool eng_ok = false;
@@ -175,6 +178,8 @@ bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
   b.last_stress = b.engine_lib.sym_optional<LastStressFn>("cpmdc_last_stress");
   b.select_orbitals = b.engine_lib.sym_optional<SelectOrbitalsFn>(
       "cpmdc_session_select_orbitals");
+  b.copy_orbitals =
+      b.engine_lib.sym_optional<CopyOrbitalsFn>("cpmdc_session_copy_orbitals");
 
   const bool has_one_shot = b.energy_gradient && b.set_params;
   const bool has_session_result = b.session_create && b.session_destroy &&
@@ -375,6 +380,7 @@ struct CPMDPot::Impl {
   bool configure();
   void recomputeParamsKey();
   void forceSession(const ForceInput &in, ForceOut *out);
+  bool applySelectedOrbitalKey();
 };
 
 void CPMDPot::Impl::recomputeParamsKey() {
@@ -417,6 +423,8 @@ bool CPMDPot::Impl::configure() {
       return false;
     session_params = words_bytes(params_words);
     session_engine_path = engine_path;
+    if (!applySelectedOrbitalKey())
+      return false;
     return true;
   }
   destroySession();
@@ -445,6 +453,11 @@ CPMDPot::CPMDPot(const ::CPMDParams::Reader &params)
 void CPMDPot::selectOrbitals(int64_t key) {
   if (!impl_)
     return;
+  if (impl_->session && impl_->bundle.select_orbitals &&
+      impl_->bundle.select_orbitals(impl_->session,
+                                    static_cast<long long>(key)) != 0) {
+    throw std::runtime_error("CPMD engine refused the orbital key");
+  }
   impl_->has_orbital_key = true;
   impl_->orbital_key = key;
 }
@@ -452,6 +465,16 @@ void CPMDPot::selectOrbitals(int64_t key) {
 bool CPMDPot::keepsOrbitalsPerKey() const {
   return impl_ && impl_->bundle.loaded && impl_->bundle.select_orbitals &&
          has_session_result_abi(impl_->bundle);
+}
+
+bool CPMDPot::copyOrbitals(int64_t from_key, int64_t to_key) {
+  if (!impl_ || !impl_->bundle.loaded ||
+      !has_session_result_abi(impl_->bundle) || !impl_->session ||
+      !impl_->bundle.copy_orbitals)
+    return false;
+  return impl_->bundle.copy_orbitals(impl_->session,
+                                     static_cast<long long>(from_key),
+                                     static_cast<long long>(to_key)) == 0;
 }
 
 uint64_t CPMDPot::paramsKey() const noexcept {
@@ -656,11 +679,6 @@ void CPMDPot::Impl::forceSession(const ForceInput &in, ForceOut *out) {
   std::vector<::capnp::word> result_words(
       (required + sizeof(::capnp::word) - 1u) / sizeof(::capnp::word));
   size_t written = 0;
-  // The engine keeps converged orbitals per key; naming the key on every
-  // call keeps it right when the session was recreated since.
-  if (has_orbital_key && bundle.select_orbitals &&
-      bundle.select_orbitals(session, static_cast<long long>(orbital_key)) != 0)
-    fail_force("CPMD engine refused the orbital key");
   CPMDCResult res = bundle.session_calculate_result(
       session, force_view.data, force_view.size, result_words.data(),
       result_words.size() * sizeof(::capnp::word), &written);
@@ -689,6 +707,13 @@ void CPMDPot::Impl::forceSession(const ForceInput &in, ForceOut *out) {
       out->stress[i] = stress[i];
     out->has_stress = 1;
   }
+}
+
+bool CPMDPot::Impl::applySelectedOrbitalKey() {
+  if (!session || !has_orbital_key || !bundle.select_orbitals)
+    return true;
+  return bundle.select_orbitals(session, static_cast<long long>(orbital_key)) ==
+         0;
 }
 
 } // namespace rgpot

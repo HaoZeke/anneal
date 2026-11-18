@@ -305,6 +305,8 @@ int rgpot_engine_caps(const RgpotEnginePot *pot, RgpotEngineCaps *out) {
   filled.periodic = pot->caps.periodic ? 1 : 0;
   filled.stress = pot->caps.stress ? 1 : 0;
   filled.group_collective = pot->caps.groupCollective ? 1 : 0;
+  filled.orbital_selection = pot->backend->select_orbitals ? 1 : 0;
+  filled.orbital_copy = pot->backend->copy_orbitals ? 1 : 0;
   // The host's struct may be older (smaller) than this engine's: write only
   // the bytes it announced room for.
   const unsigned room = out->size < sizeof(filled) ? out->size : sizeof(filled);
@@ -371,6 +373,47 @@ int rgpot_engine_set_charge_spin(RgpotEnginePot *pot, int charge, int spin) {
   }
   try {
     pot->backend->set_charge_spin(charge, spin);
+    pot->clear_error();
+    return 0;
+  } catch (const rgpot::engine::Unsupported &e) {
+    return fail(pot, 3, e.what());
+  } catch (const std::exception &e) {
+    return fail(pot, 2, e.what());
+  } catch (...) {
+    return fail(pot, 2, "unknown exception");
+  }
+}
+
+int rgpot_engine_select_orbitals(RgpotEnginePot *pot, long long key) {
+  if (!pot || !pot->backend) {
+    return 1;
+  }
+  if (!pot->backend->select_orbitals) {
+    return fail(pot, 3, "backend has no orbital selection");
+  }
+  try {
+    pot->backend->select_orbitals(key);
+    pot->clear_error();
+    return 0;
+  } catch (const rgpot::engine::Unsupported &e) {
+    return fail(pot, 3, e.what());
+  } catch (const std::exception &e) {
+    return fail(pot, 2, e.what());
+  } catch (...) {
+    return fail(pot, 2, "unknown exception");
+  }
+}
+
+int rgpot_engine_copy_orbitals(RgpotEnginePot *pot, long long from_key,
+                               long long to_key) {
+  if (!pot || !pot->backend) {
+    return 1;
+  }
+  if (!pot->backend->copy_orbitals) {
+    return fail(pot, 3, "backend has no orbital copy");
+  }
+  try {
+    pot->backend->copy_orbitals(from_key, to_key);
     pot->clear_error();
     return 0;
   } catch (const rgpot::engine::Unsupported &e) {

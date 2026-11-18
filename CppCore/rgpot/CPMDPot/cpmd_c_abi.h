@@ -124,6 +124,15 @@ RGPOT_CPMDC_API void cpmdc_session_destroy(CPMDCSession *session);
 RGPOT_CPMDC_API int cpmdc_session_select_orbitals(CPMDCSession *session,
                                                   long long key);
 
+/**
+ * @brief Copy stored orbitals from one key to another in a live session.
+ *
+ * Returns 0 on success and -1 when either key is invalid or unsupported.
+ */
+RGPOT_CPMDC_API int cpmdc_session_copy_orbitals(CPMDCSession *session,
+                                                long long from_key,
+                                                long long to_key);
+
 RGPOT_CPMDC_API CPMDCResult cpmdc_session_energy_gradient(
     CPMDCSession *session, int n_atoms, const double *positions_ang,
     const int *atomic_numbers, double *grad_h_bohr);
