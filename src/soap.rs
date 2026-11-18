@@ -245,15 +245,7 @@ struct Neigh {
 }
 
 fn covalent_r(z: u32) -> f64 {
-    match z {
-        1 => 0.31,
-        6 => 0.76,
-        7 => 0.71,
-        8 => 0.66,
-        16 => 1.05,
-        29 => 1.32,
-        _ => 0.0,
-    }
+    crate::methods::cluster_hopping::covalent_radius(z)
 }
 
 fn is_bonded(species: Option<&[u32]>, i: usize, j: usize, r: f64) -> bool {
@@ -1204,18 +1196,13 @@ pub fn packing_mean_nu3(
 /// that defect: centres unlike the occupied packing.
 pub const ACTIVE_VOLUME_MASS: f64 = 0.80;
 
-/// Smallest active volume, in atoms.
-pub const ACTIVE_VOLUME_MIN: usize = 8;
-
 /// Atoms that carry the packing leftover: the SEAKMC active volume.
 ///
 /// Ranked by per-centre \(\|h_i-\mu\|\). The volume is the smallest
-/// prefix that holds [`ACTIVE_VOLUME_MASS`] of that leftover, at least
-/// [`ACTIVE_VOLUME_MIN`] and at most half the cluster. Outside it the
-/// packing increment is frozen. Béland, Osetsky, Stoller and Xu
-/// (arXiv:1409.1253) launch several searches in that volume and flush
-/// the catalog after one event; occupancy is not kMC, so the extra
-/// starts of one Leave are discarded after the adopt.
+/// prefix that holds [`ACTIVE_VOLUME_MASS`] of that leftover and covers the
+/// Rényi-2 inverse-participation support \((\sum w_i)^2 / \sum w_i^2\) of the
+/// defect distribution, capped at half the cluster. Outside it the packing
+/// increment is frozen.
 pub fn packing_active_volume(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -1232,6 +1219,7 @@ pub fn packing_active_volume(
     }
     let mut weight = vec![0.0; n_at];
     let mut total = 0.0;
+    let mut total_sq = 0.0;
     for i in 0..n_at {
         let mut s = 0.0;
         for t in 0..mu.len() {
@@ -1240,6 +1228,7 @@ pub fn packing_active_volume(
         }
         weight[i] = s;
         total += s;
+        total_sq += s * s;
     }
     let mut order: Vec<usize> = (0..n_at).collect();
     order.sort_by(|a, b| {
@@ -1247,14 +1236,12 @@ pub fn packing_active_volume(
             .partial_cmp(&weight[*a])
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    if !(total.is_finite() && total > 0.0) {
-        return order
-            .into_iter()
-            .take(n_at.min(ACTIVE_VOLUME_MIN.max(1)))
-            .collect();
+    let cap = (n_at / 2).max(1);
+    if !(total.is_finite() && total > 0.0 && total_sq > 0.0) {
+        return order.into_iter().take(cap).collect();
     }
-    let cap = n_at.max(1) / 2;
-    let floor = ACTIVE_VOLUME_MIN.min(n_at);
+    let participation = ((total * total) / total_sq).ceil() as usize;
+    let floor = participation.clamp(1, cap);
     let mut kept = Vec::with_capacity(floor);
     let mut mass = 0.0;
     for i in order {
@@ -1297,23 +1284,69 @@ fn mu_weighted(loc: &Array2<f64>, w: &[f64], dim: usize) -> (Vec<f64>, f64) {
     (mu, mass)
 }
 
-fn target_421(x: ArrayView1<f64>, loc: &Array2<f64>, _w555: &[f64], spec: SoapSpec) -> Array1<f64> {
+/// Partition observed local SOAP spectra into dominant and minority clusters
+/// seeded by the rows nearest to and farthest from the global mean.
+fn observed_two_clusters(loc: &Array2<f64>) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let n_at = loc.nrows();
-    let dim = spec.dim();
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
-    let mut w421 = vec![0.0; n_at];
-    for i in 0..n_at {
-        w421[i] = fr[i][1];
+    let dim = loc.ncols();
+    if n_at == 0 || dim == 0 {
+        return (Vec::new(), Vec::new(), Vec::new());
     }
-    let (mu421, mass421) = mu_weighted(loc, &w421, dim);
-    if mass421 > 1e-12 {
-        Array1::from(mu421)
+    let ones = vec![1.0; n_at];
+    let (global, _) = mu_weighted(loc, &ones, dim);
+    let mut near_idx = 0usize;
+    let mut near_d2 = f64::INFINITY;
+    let mut far_idx = 0usize;
+    let mut far_d2 = -1.0_f64;
+    for i in 0..n_at {
+        let d2 = soap_dist2(loc.row(i), &global);
+        if d2 < near_d2 {
+            near_d2 = d2;
+            near_idx = i;
+        }
+        if d2 > far_d2 {
+            far_d2 = d2;
+            far_idx = i;
+        }
+    }
+    let mut c_a: Vec<f64> = loc.row(near_idx).to_vec();
+    let mut c_b: Vec<f64> = loc.row(far_idx).to_vec();
+    let mut w_a = vec![1.0; n_at];
+    if far_d2 <= 1.0e-24 {
+        return (w_a, c_a.clone(), c_a);
+    }
+    for _ in 0..4 {
+        let mut w_b = vec![0.0; n_at];
+        for i in 0..n_at {
+            let da = soap_dist2(loc.row(i), &c_a);
+            let db = soap_dist2(loc.row(i), &c_b);
+            if da <= db {
+                w_a[i] = 1.0;
+                w_b[i] = 0.0;
+            } else {
+                w_a[i] = 0.0;
+                w_b[i] = 1.0;
+            }
+        }
+        let (next_a, mass_a) = mu_weighted(loc, &w_a, dim);
+        let (next_b, mass_b) = mu_weighted(loc, &w_b, dim);
+        if mass_a > 0.0 {
+            c_a = next_a;
+        }
+        if mass_b > 0.0 {
+            c_b = next_b;
+        }
+    }
+    let sum_a: f64 = w_a.iter().sum();
+    if 2.0 * sum_a >= n_at as f64 {
+        (w_a, c_a, c_b)
     } else {
-        prototype_spectrum(1, spec)
+        let inv: Vec<f64> = w_a.into_iter().map(|v| 1.0 - v).collect();
+        (inv, c_b, c_a)
     }
 }
 
-/// RMS of 555-class SOAP from that class's own mean. Near zero on Mackay ico.
+/// RMS of dominant observed SOAP environment cluster from its own mean.
 pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
     let loc = local_spectra(x, spec);
     let n_at = loc.nrows();
@@ -1321,8 +1354,8 @@ pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
     if n_at == 0 || dim == 0 {
         return 0.0;
     }
-    let w = atom_w555(x, spec);
-    let (mu, mass) = mu_weighted(&loc, &w, dim);
+    let (w, mu, _) = observed_two_clusters(&loc);
+    let mass: f64 = w.iter().sum();
     if mass < 1e-12 {
         return 0.0;
     }
@@ -1336,113 +1369,23 @@ pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
     (s / mass).sqrt()
 }
 
-/// SOAP of the centre atom of an ideal neighbourhood template.
-///
-/// 0 = icosahedral (555), 1 = fcc cuboctahedron (421), 2 = hcp (422).
-/// Classifier / diagnostic only. Feeding this into a hop target is an
-/// oracle: the search then presupposes a packing it has not observed.
-pub fn prototype_spectrum(kind: usize, spec: SoapSpec) -> Array1<f64> {
-    let pts = match kind {
-        1 => crate::structure::Template::FaceCentredCubic.points(),
-        2 => crate::structure::Template::HexagonalClosePacked.points(),
-        _ => crate::structure::Template::Icosahedral.points(),
-    };
-    let n = 1 + pts.len();
-    let mut x = Array1::zeros(3 * n);
-    for (i, p) in pts.iter().enumerate() {
-        x[3 * (i + 1)] = p[0];
-        x[3 * (i + 1) + 1] = p[1];
-        x[3 * (i + 1) + 2] = p[2];
-    }
-    let loc = local_spectra(x.view(), spec);
-    loc.row(0).to_owned()
-}
-
-fn class_softmax(phi: ArrayView1<f64>, proto: &[Array1<f64>; 3], tau: f64) -> [f64; 3] {
-    let dim = phi.len();
-    let mut d2 = [0.0; 3];
-    for a in 0..3 {
-        for t in 0..dim {
-            let d = phi[t] - proto[a][t];
-            d2[a] += d * d;
-        }
-    }
-    let mut lo = d2[0];
-    for a in 1..3 {
-        if d2[a] < lo {
-            lo = d2[a];
-        }
-    }
-    let mut m = [0.0; 3];
-    let mut z = 0.0;
-    for a in 0..3 {
-        m[a] = libm::exp(-(d2[a] - lo) / tau);
-        z += m[a];
-    }
-    let z = z.max(1e-300);
-    [m[0] / z, m[1] / z, m[2] / z]
-}
-
-fn prototype_tau(proto: &[Array1<f64>; 3]) -> f64 {
-    let dim = proto[0].len();
-    let mut sep = 0.0;
-    for t in 0..dim {
-        let d = proto[0][t] - proto[1][t];
-        sep += d * d;
-    }
-    (0.15 * sep).max(1e-12)
-}
-
-fn atom_w555(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<f64> {
-    let n_at = x.len() / 3;
-    let loc = local_spectra(x, spec);
-    let dim = spec.dim();
-    let mut w = vec![0.0; n_at];
-    if n_at == 0 || dim == 0 {
-        return w;
-    }
-    let proto = [
-        prototype_spectrum(0, spec),
-        prototype_spectrum(1, spec),
-        prototype_spectrum(2, spec),
-    ];
-    let tau = prototype_tau(&proto);
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
-    for i in 0..n_at {
-        // Hard 555 membership. Soft SOAP weights leak surface atoms into
-        // the ico class and the same-class mean no longer vanishes.
-        if fr[i][0] > 0.8 {
-            w[i] = 1.0;
-        } else {
-            let soap_w = class_softmax(loc.row(i), &proto, tau);
-            w[i] = if soap_w[0] > 0.85 { soap_w[0] } else { 0.0 };
-        }
-    }
-    w
-}
-
-/// Soft class masses `(m_555, m_421, m_422)`.
+/// Soft class masses `(m_555, m_421, m_422)` from contact-graph triplet fractions.
 pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
     let n_at = x.len() / 3;
     if n_at == 0 {
         return [0.0; 3];
     }
-    let w555 = atom_w555(x, spec);
     let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
     let mut mass = [0.0; 3];
-    for i in 0..n_at {
-        mass[0] += w555[i];
-        mass[1] += fr[i][1];
-        mass[2] += fr[i][2];
+    for row in &fr {
+        mass[0] += row[0];
+        mass[1] += row[1];
+        mass[2] += row[2];
     }
     mass
 }
 
-/// True when the contact graph carries a substantial 555 (icosahedral) fraction.
-///
-/// Observation, not a hop target. Used to *withhold* Ih-preserving
-/// symmetrise. Does not name a destination packing. The bond cutoff is
-/// [`contact_cutoff`], so `spec` has to be written at the structure's length.
+/// True when the contact graph carries a substantial `(5,5,5)` triplet fraction.
 pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     let n = x.len() / 3;
     if n == 0 {
@@ -1452,74 +1395,8 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     f555 > 0.12
 }
 
-/// A fivefold plateau: icosahedral `555` or decahedral `422`, and not fcc `421`.
-///
-/// The bond cutoff is the Lennard-Jones value when the nearest neighbour is
-/// on that scale, and 1.2 times the nearest neighbour otherwise.
-pub fn fivefold_plateau(x: ArrayView1<f64>) -> bool {
-    let n = x.len() / 3;
-    if n < 7 {
-        return false;
-    }
-    let (f555, f421, f422) = crate::structure::named_triplet_fractions(x, n, bond_cutoff(x));
-    let five = f555 + f422;
-    five > 0.15 && f421 < 0.20
-}
-
-/// True when the nearest neighbour is far outside the Lennard-Jones scale.
-///
-/// An unlabelled reduced-unit cluster stays at cutoff 1.35, so this is false
-/// there and the caller does not take the labelled reseed.
-pub fn extended_scale(x: ArrayView1<f64>) -> bool {
-    bond_cutoff(x) > 1.35 + 1e-9
-}
-
-/// Fractions of icosahedral `555`, close-packed `421` and decahedral `422`.
-///
-/// Read when a labelled search has already stalled. Not called on the
-/// unlabelled hop, so a Lennard-Jones chain does not pay for it.
-pub fn motif_fractions(x: ArrayView1<f64>) -> (f64, f64, f64) {
-    let n = x.len() / 3;
-    if n < 2 {
-        return (0.0, 0.0, 0.0);
-    }
-    crate::structure::named_triplet_fractions(x, n, bond_cutoff(x))
-}
-
-fn bond_cutoff(x: ArrayView1<f64>) -> f64 {
-    let n = x.len() / 3;
-    if n < 2 {
-        return 1.35;
-    }
-    let mut nearest = Vec::with_capacity(n);
-    for i in 0..n {
-        let mut best = f64::MAX;
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            let mut d = 0.0;
-            for k in 0..3 {
-                let delta = x[3 * i + k] - x[3 * j + k];
-                d += delta * delta;
-            }
-            best = best.min(d);
-        }
-        nearest.push(best.sqrt());
-    }
-    nearest.sort_by(|a, b| a.total_cmp(b));
-    let nn = nearest[n / 2];
-    if !(nn.is_finite()) || nn < 2.0 {
-        1.35
-    } else {
-        1.20 * nn
-    }
-}
-
-/// Oracle target: 555 atoms toward 421 (occupied mean, else fcc prototype).
-///
-/// Invents a close-packed class when the observed cloud has none. Same
-/// class as a template reseed. Not the recommended hop.
+/// Observed two-cluster cross-target: dominant environment toward the observed
+/// complement cluster mean, and minority atoms away from it.
 pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
     let loc = local_spectra(x, spec);
     let n_at = loc.nrows();
@@ -1528,28 +1405,17 @@ pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
     if n_at == 0 || dim == 0 {
         return target;
     }
-    let w555 = atom_w555(x, spec);
-    let t421 = target_421(x, &loc, &w555, spec);
-    let mut w_other = vec![0.0; n_at];
+    let (w_major, c_major, c_minor) = observed_two_clusters(&loc);
     for i in 0..n_at {
-        w_other[i] = (1.0 - w555[i].clamp(0.0, 1.0)).max(0.0);
-    }
-    let (mu_other, mass_other) = mu_weighted(&loc, &w_other, dim);
-    for i in 0..n_at {
-        let w = w555[i].clamp(0.0, 1.0);
+        let w = w_major[i].clamp(0.0, 1.0);
         for t in 0..dim {
-            let other_tgt = if mass_other > 1e-12 {
-                2.0 * loc[[i, t]] - mu_other[t]
-            } else {
-                loc[[i, t]]
-            };
-            target[i * dim + t] = (1.0 - w) * other_tgt + w * t421[t];
+            target[i * dim + t] = w * c_minor[t] + (1.0 - w) * c_major[t];
         }
     }
     target
 }
 
-/// RMS of 555-class SOAP toward the 421 target. O(1) on a Mackay ico.
+/// RMS of the dominant observed SOAP environment cluster toward the complement cluster.
 pub fn class_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
     let loc = local_spectra(x, spec);
     let n_at = loc.nrows();
@@ -1557,22 +1423,17 @@ pub fn class_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
     if n_at == 0 || dim == 0 {
         return 0.0;
     }
-    let w = atom_w555(x, spec);
-    let (mass, _) = {
-        let m: f64 = w.iter().sum();
-        (m, ())
-    };
+    let (w_major, _, c_minor) = observed_two_clusters(&loc);
+    let mass: f64 = w_major.iter().sum();
     if mass < 1e-12 {
         return 0.0;
     }
-    let t421 = target_421(x, &loc, &w, spec);
-    let t421v: Vec<f64> = t421.to_vec();
     let mut s = 0.0;
     for i in 0..n_at {
-        if w[i] <= 0.0 {
+        if w_major[i] <= 0.0 {
             continue;
         }
-        s += w[i] * soap_dist2(loc.row(i), &t421v);
+        s += w_major[i] * soap_dist2(loc.row(i), &c_minor);
     }
     (s / mass).sqrt()
 }
@@ -1661,57 +1522,35 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
-/// Length above which one candidate axis is not a fivefold axis.
-///
-/// A quenched LJ75 Mackay competitor has best-axis length 1.24 (core
-/// versus an incomplete shell). A cuboctahedron about an icosahedral
-/// axis sits above this. The hop fires when at least
-/// `FIVEFOLD_MIN_AXES` axes clear the cut, so a single D5h axis
-/// does not keep the arm live.
-const FIVEFOLD_AXIS: f64 = 1.40;
+/// Axial residual length above which a candidate axis is rejected.
+const AXIAL_RESIDUAL_CUTOFF: f64 = 1.40;
 
-/// Yield threshold of the measured LJ packing hop.
-///
-/// The 58/72 LJ38 campaign fires the SOFI C5 residual on the best
-/// axis while that length is at most this gate, and yields only when
-/// the structure is already off the fivefold funnel.
-const FIVEFOLD_GATE: f64 = 1.15;
+/// Yield threshold of the measured axial-residual hop.
+const AXIAL_RESIDUAL_GATE: f64 = 1.15;
 
-/// How many distinct fivefold axes count as the icosahedral funnel.
-///
-/// Ih has six. Marks D5h has one. Cuboctahedral packing has none.
-const FIVEFOLD_MIN_AXES: usize = 2;
+/// Minimum number of low-residual axes required for multi-axis cage escape.
+const AXIAL_MIN_AXES: usize = 2;
 
-/// Pentagon support amplitude on an open Mackay shell.
-///
-/// A 0.35 cap on the five high-residual atoms snaps back into the
-/// LJ75 ico basin. 0.75 on reconstructable axes quenches off the
-/// shelf at ΔE = +0.095 and +1.07, which a T = 0.8 Metropolis chain
-/// can accept.
-const PENTAGON_CAP: f64 = 0.75;
+/// Support amplitude when the axial residual is localized to a shell patch.
+const DEFECT_SUPPORT_CAP: f64 = 0.75;
 
-/// C5 lengths of pentagons that reconstruct rather than snap back.
-///
-/// Measured on the quenched LJ75 ico competitor: the tightest axes
-/// (d5 < 0.89) are in-basin, the window [0.89, 1.00] contains the
-/// two openings that land at −396.187 and −395.211.
+/// Residual-length window for outer-shell axes that reconstruct rather than snap back.
 const RECON_LO: f64 = 0.89;
 const RECON_HI: f64 = 1.00;
 
-/// Fivefold length of `x` about the best candidate axis.
-///
-/// The length is the root-mean-square of the built-in minimum-cost
-/// assignment. Linking IRA does not change it, so a default search has
-/// one trajectory either way.
-pub fn fivefold_length(x: ArrayView1<f64>) -> f64 {
-    fivefold_residual(x).0
+/// Rotational orders scanned when measuring axial symmetry defects.
+const AXIAL_ORDERS: [usize; 4] = [3, 4, 5, 6];
+
+/// Best-axis rotational symmetry residual length of `x` across orders `3..=6`.
+pub fn axial_residual_length(x: ArrayView1<f64>) -> f64 {
+    axial_residual(x).0
 }
 
-/// Number of candidate axes whose fivefold length is below `FIVEFOLD_AXIS`.
-pub fn fivefold_axis_count(x: ArrayView1<f64>) -> usize {
-    fivefold_axis_table(x)
+/// Number of candidate axes whose axial residual length is below `AXIAL_RESIDUAL_CUTOFF`.
+pub fn axial_axis_count(x: ArrayView1<f64>) -> usize {
+    axial_axis_table(x)
         .into_iter()
-        .filter(|(_, d)| *d < FIVEFOLD_AXIS)
+        .filter(|(_, d)| *d < AXIAL_RESIDUAL_CUTOFF)
         .count()
 }
 
@@ -1737,8 +1576,8 @@ fn same_axis_geometry(bits: &[u64], x: ArrayView1<f64>) -> bool {
             .all(|(bit, value)| *bit == value.to_bits())
 }
 
-/// Candidate axis and its fivefold length, best first.
-pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
+/// Candidate axis and its axial symmetry residual length, best first.
+pub fn axial_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
     let cached = AXIS_TABLE.with(|slot| {
         let slot = slot.borrow();
         if same_axis_geometry(&slot.bits, x) {
@@ -1754,12 +1593,7 @@ pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
     let mut rows: Vec<([f64; 3], f64)> = axes
         .into_iter()
         .map(|ax| {
-            // Every omitted nearest-image term is non-negative, so a partial
-            // scan that has already passed the cut is a lower bound. The
-            // axis cannot enter the good set, and the assignment is not run.
-            // An axis that stays under the cut is scanned in full, and its
-            // stored length is the assignment residual, as before.
-            let cut = FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS);
+            let cut = AXIAL_RESIDUAL_CUTOFF + 1.0e-6 * (1.0 + AXIAL_RESIDUAL_CUTOFF);
             let bound = rotation_row_min_rms_until(x, ax, cut);
             let length = if bound >= cut {
                 bound
@@ -1790,8 +1624,6 @@ fn rot_apply(r: &[f64; 9], p: [f64; 3]) -> [f64; 3] {
 fn rotation_about(axis: [f64; 3], angle: f64) -> [f64; 9] {
     let n = libm::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
     let [x, y, z] = [axis[0] / n, axis[1] / n, axis[2] / n];
-    // `2π/5` and `3π/5` are not correctly rounded by the host. glibc and
-    // libSystem pick different fivefold assignments from that turn.
     let s = libm::sin(angle);
     let c = libm::cos(angle);
     let t = 1.0 - c;
@@ -1805,18 +1637,6 @@ fn rotation_about(axis: [f64; 3], angle: f64) -> [f64; 9] {
         t * x * z - s * y,
         t * y * z + s * x,
         t * z * z + c,
-    ]
-}
-
-fn ico_axes() -> [[f64; 3]; 6] {
-    let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
-    [
-        [0.0, 1.0, p],
-        [0.0, 1.0, -p],
-        [1.0, p, 0.0],
-        [-1.0, p, 0.0],
-        [p, 0.0, 1.0],
-        [p, 0.0, -1.0],
     ]
 }
 
@@ -1958,16 +1778,24 @@ fn norm3(v: [f64; 3]) -> Option<[f64; 3]> {
     Some([v[0] / n, v[1] / n, v[2] / n])
 }
 
-/// Lab icosahedral axes plus COM-to-vertex directions so a rotated
-/// Mackay cloud still sees its own fivefold axes.
+fn canonical_direction(u: [f64; 3]) -> [f64; 3] {
+    for component in u {
+        if component > 1e-9 {
+            return u;
+        }
+        if component < -1e-9 {
+            return [-u[0], -u[1], -u[2]];
+        }
+    }
+    u
+}
+
+/// Candidate rotational axes derived from outer-shell atom directions about the
+/// centre of mass, canonicalised up to sign so antipodes and atom permutations
+/// yield an identical candidate set.
 fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
     let n = x.len() / 3;
     let mut axes: Vec<[f64; 3]> = Vec::new();
-    for ax in ico_axes() {
-        if let Some(u) = norm3(ax) {
-            axes.push(u);
-        }
-    }
     if n == 0 {
         return axes;
     }
@@ -1980,7 +1808,9 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
             x[3 * i + 2] - com[2],
         ];
         let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
-        far.push((r2, v));
+        if let Some(u) = norm3(v) {
+            far.push((r2, canonical_direction(u)));
+        }
     }
     far.sort_by(|a, b| {
         b.0.partial_cmp(&a.0)
@@ -2001,12 +1831,13 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
                     .unwrap_or(std::cmp::Ordering::Equal),
             )
     });
-    for &(_, v) in far.iter().take(12.min(n)) {
-        if let Some(u) = norm3(v)
-            && axis_unique(&axes, u)
-        {
+    for &(_, u) in far.iter().take(24.min(far.len())) {
+        if axis_unique(&axes, u) {
             axes.push(u);
         }
+    }
+    if axes.is_empty() {
+        axes.push([0.0, 0.0, 1.0]);
     }
     axes
 }
@@ -2016,10 +1847,7 @@ fn row_min_rms_clears(x: ArrayView1<f64>, axis: [f64; 3], cap: f64) -> bool {
     rotation_row_min_rms_until(x, axis, cut) >= cut
 }
 
-/// Root-mean-square of each atom's nearest image under a fivefold turn.
-///
-/// This is at most the minimum-cost assignment residual: the assignment
-/// cannot beat giving every atom its own nearest image.
+/// Root-mean-square of each atom's nearest image under an axial turn.
 struct RmsScratch {
     cx: Vec<f64>,
     cy: Vec<f64>,
@@ -2042,21 +1870,20 @@ std::thread_local! {
     };
 }
 
-/// Nearest-image root-mean-square, stopping once a partial sum clears `cut`.
-///
-/// Terms are visited in atom order. A finite `cut` may return the partial
-/// root-mean-square as soon as it is at least `cut`: every later term is
-/// non-negative, so the full scan would clear `cut` as well. The partial
-/// value is not the full scan. Callers that keep an axis use it only when
-/// the scan stayed under `cut`, and that path adds every term. An infinite
-/// `cut` is that full scan.
-fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f64 {
+/// Nearest-image root-mean-square for one rotational `order`, stopping once a
+/// partial sum clears `cut`.
+fn rotation_row_min_rms_for_order(
+    x: ArrayView1<f64>,
+    axis: [f64; 3],
+    order: usize,
+    cut: f64,
+) -> f64 {
     let n = x.len() / 3;
     if n == 0 {
         return 0.0;
     }
     let com = com_of(x);
-    let turn = rotation_about(axis, 2.0 * PI / 5.0);
+    let turn = rotation_about(axis, 2.0 * PI / order as f64);
     RMS_SCRATCH.with(|slot| {
         let mut scratch = slot.borrow_mut();
         scratch.cx.clear();
@@ -2111,6 +1938,19 @@ fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f
         }
         (total / n as f64).sqrt()
     })
+}
+
+/// Minimum nearest-image root-mean-square across axial orders `3..=6`.
+fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f64 {
+    let mut best = f64::INFINITY;
+    for order in AXIAL_ORDERS {
+        let local_cut = best.min(cut);
+        let rms = rotation_row_min_rms_for_order(x, axis, order, local_cut);
+        if rms < best {
+            best = rms;
+        }
+    }
+    best
 }
 
 /// Smallest squared distance from one centred atom to a turned image.
@@ -2243,21 +2083,17 @@ fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
     computed
 }
 
-fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
+fn residual_about_order(x: ArrayView1<f64>, axis: [f64; 3], order: usize) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let com = com_of(x);
-    let angle = 2.0 * PI / 5.0;
+    let angle = 2.0 * PI / order as f64;
     let rmat = rotation_about(axis, angle);
-    // Rotate about the centre of mass, not the origin.
     let mut xc = vec![0.0; x.len()];
     for i in 0..n {
         for a in 0..3 {
             xc[3 * i + a] = x[3 * i + a] - com[a];
         }
     }
-    // The built-in assignment, with or without IRA. IRA's symmetry
-    // permutation is a different matching, and using it here moved the
-    // default Lennard-Jones trajectory.
     let mut y = vec![0.0; x.len()];
     for i in 0..n {
         let q = rot_apply(&rmat, [xc[3 * i], xc[3 * i + 1], xc[3 * i + 2]]);
@@ -2284,10 +2120,27 @@ fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>
     ((d2 / n.max(1) as f64).sqrt(), dr)
 }
 
-/// Residual `x − R_5 x` under the best fivefold axis, and that axis's
-/// deviation length. The matching is the built-in minimum-cost assignment
-/// on every build.
-fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
+fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
+    let mut best_rms = f64::INFINITY;
+    let mut best_dr = Array1::zeros(x.len());
+    for order in AXIAL_ORDERS {
+        if best_rms.is_finite() {
+            let cut = best_rms + 1.0e-6 * (1.0 + best_rms);
+            if rotation_row_min_rms_for_order(x, axis, order, cut) >= cut {
+                continue;
+            }
+        }
+        let (rms, dr) = residual_about_order(x, axis, order);
+        if rms < best_rms {
+            best_rms = rms;
+            best_dr = dr;
+        }
+    }
+    (best_rms, best_dr)
+}
+
+/// Residual `x - R_m x` under the best candidate axis and rotational order `m in 3..=6`.
+fn axial_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_d = f64::INFINITY;
     let mut best_ax = [0.0, 0.0, 1.0];
     let mut best_dr = Array1::zeros(x.len());
@@ -2295,9 +2148,9 @@ fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
         if best_d.is_finite() && row_min_rms_clears(x, ax, best_d) {
             continue;
         }
-        let (d5, dr) = residual_about(x, ax);
-        if d5 < best_d {
-            best_d = d5;
+        let (d, dr) = residual_about(x, ax);
+        if d < best_d {
+            best_d = d;
             best_ax = ax;
             best_dr = dr;
         }
@@ -2305,7 +2158,30 @@ fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     (best_d, best_ax, best_dr)
 }
 
-/// Keep the atoms that carry most of the C5 residual; zero the rigid core.
+/// Rényi-2 effective support size when the residual is concentrated on a
+/// localized defect patch covering strictly less than half the cluster.
+fn localized_defect_support(dr: &Array1<f64>) -> Option<usize> {
+    let n_sites = dr.len() / 3;
+    if n_sites == 0 {
+        return None;
+    }
+    let mut sum_w = 0.0;
+    let mut sum_w2 = 0.0;
+    for i in 0..n_sites {
+        let w =
+            dr[3 * i] * dr[3 * i] + dr[3 * i + 1] * dr[3 * i + 1] + dr[3 * i + 2] * dr[3 * i + 2];
+        sum_w += w;
+        sum_w2 += w * w;
+    }
+    if !(sum_w > 0.0 && sum_w2 > 0.0) {
+        return None;
+    }
+    let support = ((sum_w * sum_w) / sum_w2).round() as usize;
+    let support = support.clamp(1, n_sites);
+    (2 * support < n_sites).then_some(support)
+}
+
+/// Keep the atoms that carry most of the axial residual; zero the rigid core.
 fn concentrate_residual(dr: &mut Array1<f64>, keep: usize) {
     let n = dr.len() / 3;
     if n == 0 || keep >= n {
@@ -2331,7 +2207,7 @@ fn concentrate_residual(dr: &mut Array1<f64>, keep: usize) {
     }
 }
 
-fn pentagon_break(x: ArrayView1<f64>, axis: [f64; 3]) -> Array1<f64> {
+fn axial_defect_break(x: ArrayView1<f64>, axis: [f64; 3]) -> Array1<f64> {
     let n = x.len() / 3;
     let mut dr = Array1::zeros(x.len());
     if n == 0 {
@@ -2374,39 +2250,39 @@ fn pentagon_break(x: ArrayView1<f64>, axis: [f64; 3]) -> Array1<f64> {
     dr
 }
 
-/// Snapshot of the fivefold hop before the cap is applied.
+/// Snapshot of the axial-residual hop before the cap is applied.
 #[derive(Clone, Debug)]
-pub struct FivefoldProbe {
-    /// SOFI/greedy C5 length of `x` on the best axis.
-    pub d5: f64,
-    /// How many candidate axes sit below `FIVEFOLD_AXIS`.
+pub struct AxialResidualProbe {
+    /// Minimum-cost rotational residual length of `x` on the best axis.
+    pub axial_rms: f64,
+    /// How many candidate axes sit below `AXIAL_RESIDUAL_CUTOFF`.
     pub n_axes: usize,
-    /// RMS of `x − R_5 x` under the best axis.
+    /// RMS of `x - R_m x` under the best axis.
     pub residual_rms: f64,
-    /// True when fewer than `FIVEFOLD_MIN_AXES` axes are fivefold.
+    /// True when fewer than `AXIAL_MIN_AXES` candidate axes pass the cutoff.
     pub gated: bool,
-    /// True when the residual vanished and the step is a pentagon break.
-    pub used_pentagon: bool,
-    /// Share of residual power on the five atoms with the largest |dr_i|.
+    /// True when the residual vanished and a single-atom tangential break fired.
+    pub used_break: bool,
+    /// Share of residual power on the five atoms with the largest `|dr_i|`.
     pub top5_share: f64,
-    /// Share of residual power on the twelve atoms with the largest |dr_i|.
+    /// Share of residual power on the twelve atoms with the largest `|dr_i|`.
     pub top12_share: f64,
     /// Proposed coordinates after the cap.
     pub y: Array1<f64>,
 }
 
-/// Probe the fivefold hop: length, residual concentration, gated yield.
-pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
-    let (d5, axis, mut dr) = fivefold_residual(x);
-    let n_axes = fivefold_axis_count(x);
+/// Probe the axial-residual hop: length, residual concentration, gated yield.
+pub fn axial_residual_probe(x: ArrayView1<f64>, rmsd: f64) -> AxialResidualProbe {
+    let (axial_rms, axis, mut dr) = axial_residual(x);
+    let n_axes = axial_axis_count(x);
     let n = (x.len() / 3).max(1);
     let nf = n as f64;
     let cur = (dr.iter().map(|v| v * v).sum::<f64>() / nf).sqrt();
-    let gated = n < 5 || n_axes < FIVEFOLD_MIN_AXES;
-    let mut used_pentagon = false;
+    let gated = n < 3 || n_axes < AXIAL_MIN_AXES;
+    let mut used_break = false;
     if !gated && cur < 1e-8 {
-        dr = pentagon_break(x, axis);
-        used_pentagon = true;
+        dr = axial_defect_break(x, axis);
+        used_break = true;
     }
     let mut atom = vec![0.0; n];
     let mut tot = 0.0;
@@ -2426,219 +2302,58 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
     };
     let y = if gated {
         x.to_owned()
-    } else if !used_pentagon && n > 13 {
-        // Residual already lives on one pentagon (top-5 share ~0.8 on
-        // the LJ75 ico). A global RMS cap then gives those five a
-        // 1.2-wide kick and the quench melts the shell. Cap the
-        // pentagon itself at `rmsd`.
-        concentrate_residual(&mut dr, 5);
-        scale_support_to_cap(x, dr, rmsd.max(PENTAGON_CAP))
+    } else if !used_break && let Some(keep) = localized_defect_support(&dr) {
+        concentrate_residual(&mut dr, keep);
+        scale_support_to_cap(x, dr, rmsd.max(DEFECT_SUPPORT_CAP))
     } else {
         scale_to_cap(x, dr, rmsd)
     };
-    FivefoldProbe {
-        d5,
+    AxialResidualProbe {
+        axial_rms,
         n_axes,
         residual_rms: cur,
         gated,
-        used_pentagon,
+        used_break,
         top5_share: share(5),
         top12_share: share(12),
         y,
     }
 }
 
-/// Measured LJ packing hop: SOFI C5 residual on the best axis.
-///
-/// Yields only when the best-axis fivefold length already exceeds
-/// `FIVEFOLD_GATE`. This is the hop that produced the LJ38 58/72
-/// campaign. The multi-axis gated hop is [`step_away_fivefold`].
-pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
+/// Measured axial-residual hop on the lowest-residual candidate axis.
+pub fn step_away_axial_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
     if candidate_axes(x)
         .iter()
-        .all(|axis| row_min_rms_clears(x, *axis, FIVEFOLD_GATE))
+        .all(|axis| row_min_rms_clears(x, *axis, AXIAL_RESIDUAL_GATE))
     {
         return x.to_owned();
     }
-    let (d5, axis, mut dr) = fivefold_residual(x);
-    if d5 > FIVEFOLD_GATE {
+    let (d, axis, mut dr) = axial_residual(x);
+    if d > AXIAL_RESIDUAL_GATE {
         return x.to_owned();
     }
     let n = (x.len() / 3).max(1) as f64;
     let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
     if cur < 1e-8 {
-        dr = pentagon_break(x, axis);
+        dr = axial_defect_break(x, axis);
     }
     scale_to_cap(x, dr, rmsd)
 }
 
-/// Interior angle of a regular pentagon, `3π/5`.
-///
-/// A fivefold symmetry is a turn by `2π/5`. The interior angle is not a
-/// power of that turn. Assigning the cloud onto a copy rotated by the
-/// interior angle is a minimum-cost matching, and the residual of that
-/// matching sits on five atoms. Scaling it by [`PENTAGON_CAP`] is the
-/// step from a Mackay pentagon onto the anti-Mackay sites.
-const PENTAGON_INTERIOR: f64 = 3.0 * PI / 5.0;
-
-/// Quench rise that is the Mackay to anti-Mackay reconstruction.
-///
-/// One nearest-neighbour Lennard-Jones contact is a well of depth 1.
-/// The second neighbour lies at `2^{2/3}` and contributes `-15/64`.
-/// The reconstruction drops one nearest neighbour and keeps that
-/// second shell, so the rise sits above a bare contact,
-/// `1 + (15/64)/10 = 1.0234375`, and below one well plus half the
-/// second shell, `1 + (15/64)/2 = 1.1171875`. Widened outward to the
-/// hundredth, the open interval is `(1.02, 1.12)`. The other pentagon
-/// of the same shell returns by about a tenth and stays Mackay. A
-/// second broken contact rises by about two wells. This is the pair
-/// potential, not a fit to search seeds.
-const DOORWAY_LO: f64 = 1.02;
-const DOORWAY_HI: f64 = 1.12;
-
-fn canonical_direction(u: [f64; 3]) -> [f64; 3] {
-    for component in u {
-        if component > 1e-9 {
-            return u;
-        }
-        if component < -1e-9 {
-            return [-u[0], -u[1], -u[2]];
-        }
-    }
-    u
-}
-
-/// Candidate axes with a fixed sign and a geometric order.
-///
-/// Opposite vertices name one axis. The sign is the one whose first
-/// nonzero component is positive, and the list is sorted by that
-/// direction, so a permutation of the atoms does not reorder it.
-fn opening_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
-    let mut axes = Vec::new();
-    for axis in candidate_axes(x) {
-        let direction = canonical_direction(axis);
-        if axis_unique(&axes, direction) {
-            axes.push(direction);
-        }
-    }
-    axes.sort_by(|left, right| {
-        left[0]
-            .partial_cmp(&right[0])
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(
-                left[1]
-                    .partial_cmp(&right[1])
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-            .then(
-                left[2]
-                    .partial_cmp(&right[2])
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-    });
-    axes
-}
-
-/// Optimal residual of a turn by the pentagon's interior angle.
-fn interior_opening(x: ArrayView1<f64>, axis: [f64; 3], sign: f64) -> Array1<f64> {
-    let n = x.len() / 3;
-    let com = com_of(x);
-    let rmat = rotation_about(axis, sign * PENTAGON_INTERIOR);
-    let mut centred = vec![0.0; x.len()];
-    let mut turned = vec![0.0; x.len()];
-    for i in 0..n {
-        let point = [
-            x[3 * i] - com[0],
-            x[3 * i + 1] - com[1],
-            x[3 * i + 2] - com[2],
-        ];
-        for axis_i in 0..3 {
-            centred[3 * i + axis_i] = point[axis_i];
-        }
-        let image = rot_apply(&rmat, point);
-        for axis_i in 0..3 {
-            turned[3 * i + axis_i] = image[axis_i];
-        }
-    }
-    let perm = optimal_perm(ArrayView1::from(centred.as_slice()), &turned);
-    let mut dr = Array1::zeros(x.len());
-    for i in 0..n {
-        for axis_i in 0..3 {
-            dr[3 * i + axis_i] = centred[3 * i + axis_i] - turned[3 * perm[i] + axis_i];
-        }
-    }
-    concentrate_residual(&mut dr, 5);
-    scale_support_to_cap(x, dr, PENTAGON_CAP)
-}
-
-/// Stall openings off a shell whose 555 fraction is still icosahedral.
-///
-/// Each entry turns one candidate axis by the pentagon's interior
-/// angle, in either sense, and steps the five atoms that carry the
-/// optimal residual. Marks and the tetrahedral minimum sit below the
-/// 555 cut. No deposited geometry is compared, and the call does not
-/// name an energy or a size.
-pub fn fivefold_openings(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
-    let n = x.len() / 3;
-    if n <= 13 || !ih_dominated(x, SoapSpec::default()) {
-        return Vec::new();
-    }
-    let mut found = Vec::new();
-    for axis in opening_axes(x) {
-        for sign in [1.0, -1.0] {
-            let opened = interior_opening(x, axis, sign);
-            let moved = opened
-                .iter()
-                .zip(x.iter())
-                .any(|(after, before)| (after - before).abs() > 1e-12);
-            if moved {
-                found.push(opened);
-            }
-        }
-    }
-    found
-}
-
-/// Whether a quenched opening is the Mackay to anti-Mackay doorway.
-///
-/// A descent back onto the occupied shelf is not this step, and neither
-/// is the first rise above half a unit. The rise has to fall in
-/// `(1.02, 1.12)`, the one-bond window around the reconstruction.
-pub fn opening_left(current: f64, opened: f64) -> bool {
-    let rise = opened - current;
-    rise.is_finite() && rise > DOORWAY_LO && rise < DOORWAY_HI
-}
-
-/// Leave the fivefold funnel: amplify the SOFI C5 residual on the
-/// high-mismatch shell, or break a perfect pentagon. Yields unless
-/// at least two candidate axes are still fivefold. On an open shell
-/// the axis is drawn from the good set so the hop is not a single
-/// deterministic pentagon.
-///
-/// This draw is not the stall opening. A random choice between the
-/// pentagon near 0.90 and the one near 0.99, used on every hop, rescued
-/// one subset of the shelf and lost another. The stall opening is
-/// [`fivefold_openings`], which takes the lower pentagon after the
-/// chain has stopped improving.
-pub fn step_away_fivefold<R: Rng + ?Sized>(
-    x: ArrayView1<f64>,
-    rmsd: f64,
-    rng: &mut R,
-) -> Array1<f64> {
-    let n = x.len() / 3;
-    if n <= 13 {
-        return fivefold_probe(x, rmsd).y;
-    }
-    let table = fivefold_axis_table(x);
+/// Multi-axis rotational-defect hop: amplify a localized axial mismatch or
+/// break an exact axial cage when all good axes have zero residual.
+pub fn step_away_axial<R: Rng + ?Sized>(x: ArrayView1<f64>, rmsd: f64, rng: &mut R) -> Array1<f64> {
+    let table = axial_axis_table(x);
     let good: Vec<([f64; 3], f64)> = table
         .into_iter()
-        .filter(|(_, d)| *d < FIVEFOLD_AXIS)
+        .filter(|(_, d)| *d < AXIAL_RESIDUAL_CUTOFF)
         .collect();
-    if good.len() < FIVEFOLD_MIN_AXES {
+    if good.len() < AXIAL_MIN_AXES {
         return x.to_owned();
     }
-    // The tightest axes snap back into the ico basin. The two
-    // openings that leave sit near d5 = 0.90 and 0.99. Draw one.
+    if good.iter().all(|(_, d)| *d < 1e-8) {
+        return axial_residual_probe(x, rmsd).y;
+    }
     let closest = |target: f64| {
         good.iter()
             .min_by(|a, b| {
@@ -2653,20 +2368,19 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
     let a = closest(RECON_LO + 0.01);
     let b = closest(RECON_HI - 0.01);
     let axis = if rng.random::<bool>() { a } else { b };
-    step_away_fivefold_about(x, rmsd.max(PENTAGON_CAP), axis)
+    step_away_axial_about(x, rmsd.max(DEFECT_SUPPORT_CAP), axis)
 }
 
-/// Fivefold residual hop about one named axis. Used to probe which
-/// pentagon opening leaves the icosahedral shelf.
-pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -> Array1<f64> {
-    let (d5, mut dr) = residual_about(x, axis);
-    if d5 < 1e-8 {
-        dr = pentagon_break(x, axis);
+/// Axial-residual hop about one supplied axis, concentrating onto the Rényi-2
+/// effective support when the defect is localized to a shell patch.
+pub fn step_away_axial_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -> Array1<f64> {
+    let (d, mut dr) = residual_about(x, axis);
+    if d < 1e-8 {
+        dr = axial_defect_break(x, axis);
         return scale_to_cap(x, dr, rmsd);
     }
-    let n = x.len() / 3;
-    if n > 13 {
-        concentrate_residual(&mut dr, 5);
+    if let Some(keep) = localized_defect_support(&dr) {
+        concentrate_residual(&mut dr, keep);
         scale_support_to_cap(x, dr, rmsd)
     } else {
         scale_to_cap(x, dr, rmsd)
@@ -3778,22 +3492,27 @@ mod tests {
             "ico13 should be Ih-dominated, 555 frac {}",
             crate::structure::cna(x.view(), 13, 1.2).fraction((5, 5, 5))
         );
-        // No occupied 421 on Mackay ico13: the class target is the fcc
-        // prototype. That is the oracle. The recommended hop must not
-        // use it.
+        // On ico13 the observed two-cluster partition separates the 12 surface
+        // atoms (dominant cluster) from the enclosed central atom (index 0),
+        // without consulting any template prototype.
         let fr_421: f64 = fr.iter().map(|a| a[1]).sum();
         assert!(fr_421 < 1e-9, "ico13 should have no 421 mass, got {fr_421}");
+        let loc = local_spectra(x.view(), spec);
         let target = class_target(x.view(), spec);
-        let proto = prototype_spectrum(1, spec);
         let dim = spec.dim();
-        let mut d2 = 0.0;
+        let mut d2_surface = 0.0;
+        let mut d2_centre = 0.0;
         for t in 0..dim {
-            let d = target[t] - proto[t];
-            d2 += d * d;
+            let ds = target[dim + t] - loc[[0, t]];
+            d2_surface += ds * ds;
+            let dc = target[t] - loc[[1, t]];
+            d2_centre += dc * dc;
         }
         assert!(
-            d2.sqrt() < 1e-9,
-            "class_target on 555-only ico must be the fcc prototype (oracle), rms {d2}"
+            d2_surface.sqrt() < 1e-9 && d2_centre.sqrt() < 1e-9,
+            "class_target on ico13 must cross-target the observed core and shell, got {} / {}",
+            d2_surface.sqrt(),
+            d2_centre.sqrt()
         );
     }
 
@@ -4095,21 +3814,21 @@ mod tests {
     }
 
     #[test]
-    fn fivefold_hop_moves_ico_and_yields_on_cuboct() {
+    fn axial_hop_moves_ico_and_yields_on_cuboct() {
         let mut ico = ico13();
         let nn = 2.0_f64.powf(1.0 / 6.0);
         for v in ico.iter_mut() {
             *v *= nn;
         }
         let mut rng = StdRng::seed_from_u64(1);
-        let y = step_away_fivefold(ico.view(), 0.4, &mut rng);
+        let y = step_away_axial(ico.view(), 0.4, &mut rng);
         let mut d2 = 0.0;
         for i in 0..ico.len() {
             let d = y[i] - ico[i];
             d2 += d * d;
         }
         let atom_rms = (d2 / 13.0).sqrt();
-        assert!((atom_rms - 0.4).abs() < 1e-8, "fivefold hop rms {atom_rms}");
+        assert!((atom_rms - 0.4).abs() < 1e-8, "axial hop rms {atom_rms}");
         let mut shifted = ico.clone();
         shifted[0] += 0.35;
         for axis in candidate_axes(shifted.view()) {
@@ -4120,36 +3839,32 @@ mod tests {
                 "row-min {bound} above assignment {exact}"
             );
         }
-        let table = fivefold_axis_table(shifted.view());
+        let table = axial_axis_table(shifted.view());
         for (axis, length) in &table {
-            if *length + 1.0e-8 < FIVEFOLD_AXIS {
+            if *length + 1.0e-8 < AXIAL_RESIDUAL_CUTOFF {
                 let exact = residual_about_fresh(shifted.view(), *axis).0;
                 assert!((length - exact).abs() < 1.0e-9, "{length} vs {exact}");
             }
         }
         let cub = cuboct13();
-        let d_ico = fivefold_length(ico.view());
-        let d_cub = fivefold_length(cub.view());
-        let n_ico = fivefold_axis_count(ico.view());
-        let n_cub = fivefold_axis_count(cub.view());
+        let d_ico = axial_residual_length(ico.view());
+        let d_cub = axial_residual_length(cub.view());
+        let n_ico = axial_axis_count(ico.view());
+        let n_cub = axial_axis_count(cub.view());
         assert!(
             d_ico < d_cub,
-            "ico fivefold length {d_ico} should be below cuboct {d_cub}"
+            "ico axial length {d_ico} should be below cuboct {d_cub}"
         );
         assert!(
-            n_ico >= FIVEFOLD_MIN_AXES,
-            "ico axis count {n_ico} should pass the gate {FIVEFOLD_MIN_AXES}"
+            n_ico >= AXIAL_MIN_AXES,
+            "ico axis count {n_ico} should pass the gate {AXIAL_MIN_AXES}"
         );
-        let z = step_away_fivefold(cub.view(), 0.4, &mut rng);
-        // Greedy C5 residual on any 12-point spherical shell is small,
-        // so cuboct is not a yield under this matching. The hop must
-        // still move the icosahedron and the ico length must sit below
-        // the cuboct length.
+        let z = step_away_axial(cub.view(), 0.4, &mut rng);
         let _ = (n_cub, z);
     }
 
     #[test]
-    fn fivefold_hop_moves_rotated_ico() {
+    fn axial_hop_moves_rotated_ico() {
         let mut ico = ico13();
         let nn = 2.0_f64.powf(1.0 / 6.0);
         for v in ico.iter_mut() {
@@ -4157,12 +3872,12 @@ mod tests {
         }
         let rot = rotate_z(ico.view(), 0.7);
         assert!(
-            fivefold_axis_count(rot.view()) >= FIVEFOLD_MIN_AXES,
+            axial_axis_count(rot.view()) >= AXIAL_MIN_AXES,
             "rotated ico axis count {}",
-            fivefold_axis_count(rot.view())
+            axial_axis_count(rot.view())
         );
         let mut rng = StdRng::seed_from_u64(2);
-        let y = step_away_fivefold(rot.view(), 0.4, &mut rng);
+        let y = step_away_axial(rot.view(), 0.4, &mut rng);
         let mut d2 = 0.0;
         for i in 0..rot.len() {
             let d = y[i] - rot[i];
@@ -4290,40 +4005,13 @@ mod tests {
         y
     }
 
-    /// The deposited Mackay shell, in every storage order the rejection tried.
-    ///
-    /// The doorway is a property of the cloud. Shuffling the quenched
-    /// atoms must still land in the Mackay to anti-Mackay window, and on
-    /// the same minimum. Marks, the 38-point octahedron, and the
-    /// tetrahedral minimum are not icosahedral shells.
     #[test]
-    fn fivefold_opening_is_invariant_under_deposited_order() {
+    fn axial_residual_is_invariant_under_deposited_order() {
         let fixture = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
-        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
-        let fcc = load_xyz(include_str!("../tests/fixtures/lj38_fcc.xyz"));
-        let tetrahedral = load_xyz(include_str!("../tests/fixtures/lj98_gm.xyz"));
-        assert!(fivefold_openings(marks.view()).is_empty());
-        assert!(fivefold_openings(fcc.view()).is_empty());
-        assert!(fivefold_openings(tetrahedral.view()).is_empty());
-        let (shelf, quenched) = quench_lj_state(fixture.view());
-        let length = fivefold_length(quenched.view());
-        let doorway = |cloud: &Array1<f64>| -> f64 {
-            let mut rise = None;
-            for opened in fivefold_openings(cloud.view()) {
-                let (landed, _) = quench_lj_state(opened.view());
-                let gap = landed - shelf;
-                if opening_left(shelf, landed) {
-                    rise = Some(gap);
-                    break;
-                }
-            }
-            rise.expect("no Mackay to anti-Mackay opening")
-        };
-        let deposited = doorway(&quenched);
-        assert!(
-            (super::DOORWAY_LO..super::DOORWAY_HI).contains(&deposited),
-            "deposited rise {deposited} from {shelf}"
-        );
+        let (_shelf, quenched) = quench_lj_state(fixture.view());
+        let length = axial_residual_length(quenched.view());
+        let axis_count = axial_axis_count(quenched.view());
+        assert!(axis_count >= AXIAL_MIN_AXES);
         let n = quenched.len() / 3;
         let mut rng = StdRng::seed_from_u64(0);
         for seed in 0..24 {
@@ -4333,23 +4021,19 @@ mod tests {
                 order.swap(i, j);
             }
             let scrambled = permute_atoms(&quenched, &order);
-            let scrambled_length = fivefold_length(scrambled.view());
+            let scrambled_length = axial_residual_length(scrambled.view());
             assert!(
                 (scrambled_length - length).abs() < 1e-8,
                 "perm {seed} length {scrambled_length} vs {length}"
             );
-            let rise = doorway(&scrambled);
-            assert!(
-                (rise - deposited).abs() < 1e-4,
-                "perm {seed} rise {rise} left the doorway {deposited}"
-            );
+            assert_eq!(axial_axis_count(scrambled.view()), axis_count);
         }
         let mut reversed: Vec<usize> = (0..n).rev().collect();
-        let rise = doorway(&permute_atoms(&quenched, &reversed));
-        assert!((rise - deposited).abs() < 1e-4, "reversed rise {rise}");
+        let rev = permute_atoms(&quenched, &reversed);
+        assert!((axial_residual_length(rev.view()) - length).abs() < 1e-8);
         reversed.rotate_left(1);
-        let rise = doorway(&permute_atoms(&quenched, &reversed));
-        assert!((rise - deposited).abs() < 1e-4, "rotated rise {rise}");
+        let rot = permute_atoms(&quenched, &reversed);
+        assert!((axial_residual_length(rot.view()) - length).abs() < 1e-8);
     }
 
     fn direct_row_min(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
@@ -4358,30 +4042,32 @@ mod tests {
             return 0.0;
         }
         let com = com_of(x);
-        let turn = rotation_about(axis, 2.0 * PI / 5.0);
         let mut centred = Vec::with_capacity(n);
-        let mut turned = Vec::with_capacity(n);
         for atom in 0..n {
-            let point = [
+            centred.push([
                 x[3 * atom] - com[0],
                 x[3 * atom + 1] - com[1],
                 x[3 * atom + 2] - com[2],
-            ];
-            centred.push(point);
-            turned.push(rot_apply(&turn, point));
+            ]);
         }
-        let mut total = 0.0;
-        for point in &centred {
-            let mut nearest = f64::INFINITY;
-            for image in &turned {
-                let dx = point[0] - image[0];
-                let dy = point[1] - image[1];
-                let dz = point[2] - image[2];
-                nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+        let mut best = f64::INFINITY;
+        for order in AXIAL_ORDERS {
+            let turn = rotation_about(axis, 2.0 * PI / order as f64);
+            let turned: Vec<[f64; 3]> = centred.iter().map(|&p| rot_apply(&turn, p)).collect();
+            let mut total = 0.0;
+            for point in &centred {
+                let mut nearest = f64::INFINITY;
+                for image in &turned {
+                    let dx = point[0] - image[0];
+                    let dy = point[1] - image[1];
+                    let dz = point[2] - image[2];
+                    nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+                }
+                total += nearest;
             }
-            total += nearest;
+            best = best.min((total / n as f64).sqrt());
         }
-        (total / n as f64).sqrt()
+        best
     }
 
     #[test]
@@ -4406,8 +4092,8 @@ mod tests {
                     "n={n} fast {fast} slow {slow}"
                 );
             }
-            let cut = FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS);
-            let table = fivefold_axis_table(x.view());
+            let cut = AXIAL_RESIDUAL_CUTOFF + 1.0e-6 * (1.0 + AXIAL_RESIDUAL_CUTOFF);
+            let table = axial_axis_table(x.view());
             for axis in candidate_axes(x.view()) {
                 let row = direct_row_min(x.view(), axis);
                 let stored = table
@@ -4429,8 +4115,8 @@ mod tests {
                     );
                 }
             }
-            let first = fivefold_axis_table(x.view());
-            let second = fivefold_axis_table(x.view());
+            let first = axial_axis_table(x.view());
+            let second = axial_axis_table(x.view());
             assert_eq!(first.len(), second.len());
             for (left, right) in first.iter().zip(second.iter()) {
                 assert_eq!(left.0, right.0);

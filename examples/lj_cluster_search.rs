@@ -5820,7 +5820,7 @@ fn run_capnp_catalog(
                             let (atom, class) = queue[(extra_cover - 1) % queue.len()];
                             anneal_core::known_basin::arm_leave_cover(atom);
                             let offered =
-                                if anneal_core::soap::fivefold_axis_count(snapshot.current_state())
+                                if anneal_core::soap::axial_axis_count(snapshot.current_state())
                                     >= 2
                                 {
                                     let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
@@ -5829,7 +5829,7 @@ fn run_capnp_catalog(
                                                 .wrapping_mul(0x9E37_79B9_7F4A_7C15)
                                             ^ extra_cover as u64,
                                     );
-                                    anneal_core::soap::step_away_fivefold(
+                                    anneal_core::soap::step_away_axial(
                                         snapshot.current_state(),
                                         anneal_core::known_basin::LEAVE_RUNG_RMSD,
                                         &mut residual_rng,

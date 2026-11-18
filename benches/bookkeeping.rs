@@ -10,7 +10,7 @@
 use anneal_core::bias::{Fingerprint, SortedPairs};
 use anneal_core::methods::cluster_hopping::Ledger;
 use anneal_core::methods::lattice_search::Lattice;
-use anneal_core::soap::{fivefold_axis_table, step_away_fivefold};
+use anneal_core::soap::{axial_axis_table, step_away_axial};
 use anneal_core::structure::named_triplet_fractions;
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::Array1;
@@ -76,11 +76,11 @@ fn kernels(c: &mut Criterion) {
         });
 
         let mut soap_salt = 30u64;
-        g.bench_function("soap_fivefold_table", |b| {
+        g.bench_function("soap_axial_table", |b| {
             b.iter(|| {
                 soap_salt = soap_salt.wrapping_add(1);
                 let y = cluster(n, soap_salt);
-                black_box(fivefold_axis_table(y.view()))
+                black_box(axial_axis_table(y.view()))
             })
         });
         let mut proposal_salt = 40u64;
@@ -89,7 +89,7 @@ fn kernels(c: &mut Criterion) {
                 proposal_salt = proposal_salt.wrapping_add(1);
                 let y = cluster(n, proposal_salt);
                 let mut rng = StdRng::seed_from_u64(11);
-                black_box(step_away_fivefold(y.view(), 0.2, &mut rng))
+                black_box(step_away_axial(y.view(), 0.2, &mut rng))
             })
         });
 

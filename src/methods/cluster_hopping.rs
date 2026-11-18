@@ -8000,13 +8000,17 @@ where
                 && let (Some(floor_state), Some(trial)) =
                     (channel_floor_state.as_ref(), x_new.as_slice())
             {
-                let share = crate::catalog::icosahedral_share(x_new.view());
-                let floor_share = crate::catalog::icosahedral_share(floor_state.view());
-                if crate::catalog::fivefold_channel(e_new, channel_floor_energy, share, floor_share)
-                    && seam.offer(share, e_new, trial)
+                let cohesion = crate::catalog::local_packing_cohesion(x_new.view());
+                let floor_cohesion = crate::catalog::local_packing_cohesion(floor_state.view());
+                if crate::catalog::packing_doorway_channel(
+                    e_new,
+                    channel_floor_energy,
+                    cohesion,
+                    floor_cohesion,
+                ) && seam.offer(cohesion, e_new, trial)
                     && frontier_exchange
                 {
-                    crate::catalog::offer_frontier_post(share, e_new, trial);
+                    crate::catalog::offer_frontier_post(cohesion, e_new, trial);
                 }
             }
             // One arrival on the packing the chain has just moved onto.

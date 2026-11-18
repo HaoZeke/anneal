@@ -2165,7 +2165,7 @@ where
         return Vec::new();
     };
     let n = crate::catalog::cover_arm_count();
-    let fivefold = crate::catalog::fivefold_arm();
+    let axial_arm = crate::catalog::axial_residual_arm();
     let mut book = crate::catalog::PackingBook::default();
     book.observe(origin_slice);
     let mut seen = std::collections::BTreeSet::new();
@@ -2175,8 +2175,8 @@ where
         if !seen.insert(cover) {
             continue;
         }
-        let start = if cover == fivefold {
-            crate::soap::step_away_fivefold_measured(origin, LEAVE_RUNG_RMSD)
+        let start = if cover == axial_arm {
+            crate::soap::step_away_axial_measured(origin, LEAVE_RUNG_RMSD)
         } else {
             leave_packing_rung_to(
                 origin,

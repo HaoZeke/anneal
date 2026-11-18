@@ -20,13 +20,13 @@ use crate::catalog::archive::Curiosity;
 use crate::funnel_bo::FunnelModel;
 use crate::hypersphere;
 
-/// Covering points plus the fivefold residual as the last arm.
+/// Covering points plus the axial symmetry residual as the last arm.
 pub fn cover_arm_count() -> usize {
     hypersphere::default_cover_size().saturating_add(1)
 }
 
-/// Arm index of the fivefold residual, after the covering points.
-pub fn fivefold_arm() -> usize {
+/// Arm index of the axial symmetry residual, after the covering points.
+pub fn axial_residual_arm() -> usize {
     hypersphere::default_cover_size()
 }
 

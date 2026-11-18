@@ -261,17 +261,14 @@ where
             best = quenched;
         }
     };
-    // Several amplitudes of the pentagonal opening, quenched on their own.
     for amp in [0.35_f64, 0.55, 0.75, 1.0, 1.25] {
         for which in 0..4 {
-            keep(quench(fivefold_opening(origin, amp, which).view()));
+            keep(quench(axial_opening(origin, amp, which).view()));
         }
     }
-    // The same opening stacked, then one quench, so the shell can
-    // reconstruct before it is relaxed.
     let mut chain = origin.to_owned();
     for which in 0..8 {
-        chain = fivefold_opening(chain.view(), 0.75, which);
+        chain = axial_opening(chain.view(), 0.75, which);
     }
     keep(quench(chain.view()));
     let mut here = origin.to_owned();
@@ -279,13 +276,9 @@ where
     let mut rng = rand::rngs::StdRng::seed_from_u64(1 + cover_index as u64);
     let n_cover = crate::hypersphere::default_cover_size();
     let temperature = 8.0_f64;
-    // One kick stays in the icosahedral funnel or lands above it.
-    // Keep walking: a covering displacement, sometimes a pentagonal
-    // opening, a minimum-mode climb when the ridge is real, then a
-    // quench. Uphill quenches are accepted so the walk can leave.
     for hop in 0..16 {
         let point = if hop % 6 == 0 {
-            fivefold_opening(here.view(), rmsd, hop)
+            axial_opening(here.view(), rmsd, hop)
         } else {
             let direction =
                 crate::hypersphere::cover_direction(n_cover, here.len(), hop + cover_index);
@@ -1460,10 +1453,10 @@ fn climb_relaxed_cover<E, Q>(
     }
 }
 
-fn regularize_pentagons(
+fn regularize_axial_rings(
     x: ArrayView1<f64>,
     axis: [f64; 3],
-    extra: f64,
+    stagger_layers: bool,
     contact: f64,
 ) -> Array1<f64> {
     let n_atoms = x.len() / 3;
@@ -1539,14 +1532,20 @@ fn regularize_pentagons(
             .partial_cmp(&z_right)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    let turn = 2.0 * std::f64::consts::PI / 5.0;
     for (layer, ring) in rings.iter().enumerate() {
-        if ring.len() != 5 {
+        let ring_order = ring.len();
+        if ring_order < 3 {
             continue;
         }
         if ring.iter().any(|&atom| rows[atom].1 <= contact * 0.2) {
             continue;
         }
+        let turn = 2.0 * std::f64::consts::PI / ring_order as f64;
+        let extra = if stagger_layers && layer % 2 == 1 {
+            std::f64::consts::PI / ring_order as f64
+        } else {
+            0.0
+        };
         let mut members = ring.clone();
         members.sort_by(|&a, &b| {
             rows[a]
@@ -1554,7 +1553,7 @@ fn regularize_pentagons(
                 .partial_cmp(&rows[b].2)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        let base = rows[members[0]].2 + if layer % 2 == 1 { extra } else { 0.0 };
+        let base = rows[members[0]].2 + extra;
         for (slot, &atom) in members.iter().enumerate() {
             rows[atom].2 = base + turn * slot as f64;
         }
@@ -1570,7 +1569,7 @@ fn regularize_pentagons(
     y
 }
 
-fn quench_regular_pentagons<E, Q>(
+fn quench_axial_rings<E, Q>(
     start: ArrayView1<f64>,
     contact: f64,
     evaluate: &mut E,
@@ -1581,10 +1580,9 @@ fn quench_regular_pentagons<E, Q>(
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
-    let stagger = std::f64::consts::PI / 5.0;
     for axis in outer_axes(start, contact) {
-        for extra in [0.0_f64, stagger] {
-            let turned = regularize_pentagons(start, axis, extra, contact);
+        for stagger_layers in [false, true] {
+            let turned = regularize_axial_rings(start, axis, stagger_layers, contact);
             let held = relax_held_phi(turned.view(), axis, evaluate);
             let quenched = quench(held.view());
             let _ = note_exit(evaluate, &quenched, 0, best_energy, best);
@@ -2579,7 +2577,7 @@ where
     }
     let mut shelf: Option<(f64, Array1<f64>)> = None;
     if contact > 0.95 && n_atoms >= 2 {
-        quench_regular_pentagons(
+        quench_axial_rings(
             origin.view(),
             contact,
             &mut evaluate,
@@ -2787,7 +2785,7 @@ where
             if !distinct || !compact {
                 continue;
             }
-            quench_regular_pentagons(
+            quench_axial_rings(
                 quenched.view(),
                 contact,
                 &mut evaluate,
@@ -2892,10 +2890,10 @@ where
     best
 }
 
-fn fivefold_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<f64> {
-    let good: Vec<([f64; 3], f64)> = crate::soap::fivefold_axis_table(origin)
+fn axial_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<f64> {
+    let good: Vec<([f64; 3], f64)> = crate::soap::axial_axis_table(origin)
         .into_iter()
-        .filter(|(_, d5)| *d5 < 1.40)
+        .filter(|(_, d)| *d < 1.40)
         .collect();
     if good.is_empty() {
         return origin.to_owned();
@@ -2911,7 +2909,7 @@ fn fivefold_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<
         })
         .copied()
         .unwrap_or(good[0]);
-    crate::soap::step_away_fivefold_about(origin, rmsd.max(0.75), axis)
+    crate::soap::step_away_axial_about(origin, rmsd.max(0.75), axis)
 }
 
 /// Climb along `direction` first, then track the minimum mode.
