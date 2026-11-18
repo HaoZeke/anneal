@@ -10,8 +10,10 @@ use anneal_core::catalog::FreshEvaluation;
 use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS, RGPOT_XTB_ENGINE_REV};
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
-use eindir_core::gradient::DifferentiableObjective;
+use eindir_core::gradient::{DifferentiableObjective, Gradient};
+use eindir_core::{Bounds, Objective};
 use libloading::{Library, Symbol};
+use ndarray::{Array1, ArrayView1};
 use rgpot_core::eindir::{
     rgpot_eindir_abi_stamp, rgpot_potential_free_eindir, rgpot_potential_new_eindir,
 };
@@ -601,8 +603,55 @@ impl Drop for RgpotObjective {
     }
 }
 
+/// The eindir objective over an rgpot handle, with a fused call that asks
+/// for the gradient only once the energy is finite.
+///
+/// eindir's default `value_and_gradient` asks for both. rgpot 3.5 drops a
+/// failed energy from its fused cache, so the gradient then reruns the
+/// engine on a geometry already known to fail: two SCCs that do not
+/// converge for one call. On a finite energy the gradient is served from
+/// that cache, so a call that succeeds runs as before.
+pub(crate) struct RgpotWrapper<'a>(EindirObjectiveWrapper<'a>);
+
+impl Objective<f64> for RgpotWrapper<'_> {
+    fn dim(&self) -> usize {
+        Objective::dim(&self.0)
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        self.0.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.0.eval(x)
+    }
+}
+
+impl Gradient<f64> for RgpotWrapper<'_> {
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.0.grad(x)
+    }
+
+    fn dim(&self) -> usize {
+        Objective::dim(&self.0)
+    }
+}
+
+impl DifferentiableObjective<f64> for RgpotWrapper<'_> {
+    /// A failed energy answers with the zero gradient eindir's `grad`
+    /// writes for a failed call.
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let energy = self.0.eval(x);
+        if energy.is_finite() {
+            (energy, self.0.grad(x))
+        } else {
+            (energy, Array1::zeros(Objective::dim(&self.0)))
+        }
+    }
+}
+
 impl RgpotObjective {
-    pub(crate) fn wrapper(&self) -> EindirObjectiveWrapper<'_> {
+    pub(crate) fn wrapper(&self) -> RgpotWrapper<'_> {
         let stamp = rgpot_eindir_abi_stamp();
         assert_eq!(
             unsafe { eindir_core_abi_compatible(&stamp) },
@@ -610,7 +659,7 @@ impl RgpotObjective {
             "rgpot/eindir ABI stamp is incompatible with anneal's eindir boundary"
         );
         let obj = unsafe { &*(self.pot as *const eindir_objective_t) };
-        unsafe { EindirObjectiveWrapper::new(obj) }
+        RgpotWrapper(unsafe { EindirObjectiveWrapper::new(obj) })
     }
 
     pub(crate) fn fresh_evaluation(&self, coordinates: &[f64]) -> Result<FreshEvaluation, String> {
@@ -618,8 +667,7 @@ impl RgpotObjective {
             return Err("rgpot coordinate dimension or values are invalid".into());
         }
         let objective = self.wrapper();
-        let (energy, gradient) =
-            objective.value_and_gradient(ndarray::ArrayView1::from(coordinates));
+        let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
         if !energy.is_finite()
             || gradient.len() != self.dim
             || gradient.iter().any(|value| !value.is_finite())

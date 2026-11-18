@@ -373,6 +373,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eindir_core::Objective;
+    use eindir_core::gradient::Gradient;
 
     const BOX: [f64; 9] = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
 
@@ -420,6 +422,14 @@ mod tests {
         -1.0011518294499242,
     ];
 
+    /// The xtb counters are process-wide, and the test harness runs tests
+    /// on several threads.
+    static XTB: Mutex<()> = Mutex::new(());
+
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        XTB.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn handle(z: i32, n: usize) -> Mutex<RgpotObjective> {
         let mut pot = RgpotObjective::xtb_fresh(&vec![z; n], BOX);
         pot.restart();
@@ -432,6 +442,7 @@ mod tests {
 
     #[test]
     fn a_geometry_refused_before_xtb_has_no_gradient_and_costs_nothing() {
+        let _serial = serial();
         let pot = handle(14, 2);
         let x = silicon_pair(0.5);
         let mut ledger = Ledger::new(10);
@@ -443,6 +454,7 @@ mod tests {
 
     #[test]
     fn an_scc_that_does_not_converge_has_no_gradient() {
+        let _serial = serial();
         let pot = handle(14, 13);
         let x = Array1::from(SI13_SCC_FAILS.to_vec());
         assert!(!rgpot_eindir::refuses_geometry(&SI13_SCC_FAILS));
@@ -459,7 +471,35 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_scc_call_runs_xtb_once() {
+        let _serial = serial();
+        let pot = handle(14, 13);
+        let x = Array1::from(SI13_SCC_FAILS.to_vec());
+        let rejected = rgpot_eindir::scc_rejected_count();
+        let (energy, _) = evaluate(&pot.lock().expect("pot"), x.view());
+        assert!(energy.is_nan());
+        assert_eq!(rgpot_eindir::scc_rejected_count() - rejected, 1);
+    }
+
+    #[test]
+    fn a_converged_call_is_eindirs_energy_then_gradient() {
+        let _serial = serial();
+        let pot = handle(14, 2);
+        let x = silicon_pair(2.3);
+        let rejected = rgpot_eindir::scc_rejected_count();
+        let guard = pot.lock().expect("pot");
+        let (energy, gradient) = evaluate(&guard, x.view());
+        let wrapper = guard.wrapper();
+        let split = (wrapper.eval(x.view()), wrapper.grad(x.view()));
+        assert_eq!(energy.to_bits(), split.0.to_bits());
+        let bits = |g: &Array1<f64>| g.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&gradient), bits(&split.1));
+        assert_eq!(rgpot_eindir::scc_rejected_count(), rejected);
+    }
+
+    #[test]
     fn a_bound_geometry_has_its_gradient() {
+        let _serial = serial();
         let pot = handle(14, 2);
         let x = silicon_pair(2.3);
         let mut ledger = Ledger::new(10);
@@ -474,6 +514,7 @@ mod tests {
 
     #[test]
     fn a_closed_ledger_ends_the_search_rather_than_refuse() {
+        let _serial = serial();
         let pot = handle(14, 2);
         let x = silicon_pair(2.3);
         let mut ledger = Ledger::new(0);
