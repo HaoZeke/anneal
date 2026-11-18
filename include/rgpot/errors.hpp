@@ -39,7 +39,16 @@ public:
    * @brief Constructs an Error with the given message.
    * @param msg Human-readable description of the failure.
    */
-  explicit Error(const std::string &msg) : std::runtime_error(msg) {}
+  explicit Error(const std::string &msg,
+                 rgpot_status_t status = RGPOT_INTERNAL_ERROR)
+      : std::runtime_error(msg), status_(status) {}
+
+  /// The status the C API returned. @c RGPOT_SCC_NOT_CONVERGED marks a
+  /// self-consistent field that did not converge.
+  [[nodiscard]] rgpot_status_t status() const noexcept { return status_; }
+
+private:
+  rgpot_status_t status_;
 };
 
 namespace detail {
@@ -64,14 +73,16 @@ inline void check_status(rgpot_status_t status) {
 
   switch (status) {
   case RGPOT_INVALID_PARAMETER:
-    throw Error("invalid parameter: " + error_msg);
+    throw Error("invalid parameter: " + error_msg, status);
   case RGPOT_RPC_ERROR:
-    throw Error("RPC error: " + error_msg);
+    throw Error("RPC error: " + error_msg, status);
   case RGPOT_BUFFER_SIZE_ERROR:
-    throw Error("buffer size error: " + error_msg);
+    throw Error("buffer size error: " + error_msg, status);
+  case RGPOT_SCC_NOT_CONVERGED:
+    throw Error("SCC not converged: " + error_msg, status);
   case RGPOT_INTERNAL_ERROR:
   default:
-    throw Error("internal error: " + error_msg);
+    throw Error("internal error: " + error_msg, status);
   }
 }
 

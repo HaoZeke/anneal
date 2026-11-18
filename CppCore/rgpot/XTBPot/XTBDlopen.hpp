@@ -2,6 +2,7 @@
 // MIT License — thin XTB frontend: dlopen libxtb_engine.so
 // No libxtb headers; safe for hosts built without -Dwith_xtb.
 #include "rgpot/ForceStructs.hpp"
+#include "rgpot/FusedSettings.hpp"
 #include "rgpot/XTBPot/XTBConfig.hpp"
 #include "rgpot/XTBPot/xtb_c_abi.h"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -46,7 +47,17 @@ public:
 
   [[nodiscard]] bool available() const noexcept { return m_pot != nullptr; }
 
+  /**
+   * @throws SccNotConverged when the engine reports
+   *         @c RGPOT_XTB_RC_SCC_NOT_CONVERGED.
+   * @throws std::runtime_error for every other failure.
+   */
   void forceImpl(const ForceInput &in, ForceOut *out) const;
+
+  /// Settings of the loaded engine that change its answer. They are fixed
+  /// at construction: the engine ABI has no setter, so another setting
+  /// means another @c XTBDlopen.
+  [[nodiscard]] FusedSettingsSpec fusedSettings() const;
 
   /// Drop the stored SCC wavefunction. The calculator stays.
   void reset();
@@ -71,6 +82,7 @@ public:
              const std::array<std::array<double, 3>, 3> &box) const;
 
 private:
+  XTBConfig m_config;
   void *m_lib{nullptr};
   RgpotXtbPot *m_pot{nullptr};
   using create_fn = RgpotXtbPot *(*)(const RgpotXtbConfig *, char *, size_t);

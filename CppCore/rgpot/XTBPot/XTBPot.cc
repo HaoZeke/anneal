@@ -262,6 +262,29 @@ void XTBPot::discardAfterFailure() const {
   }
 }
 
+void XTBPot::setAccuracy(double accuracy) { m_config.accuracy = accuracy; }
+
+void XTBPot::setElectronicTemperature(double kelvin) {
+  m_config.electronic_temperature = kelvin;
+}
+
+void XTBPot::setMaxIterations(int iterations) {
+  m_config.max_iterations = iterations;
+}
+
+FusedSettingsSpec XTBPot::fusedSettings() const {
+  FusedSettingsSpec spec;
+  spec.spin = m_config.uhf;
+  spec.sccMaxIterations = static_cast<unsigned>(m_config.max_iterations);
+  spec.charge = m_config.charge;
+  spec.accuracy = m_config.accuracy;
+  spec.electronicTemperature = m_config.electronic_temperature;
+  spec.sccMixer = "xtb";
+  spec.engineBuild = "libxtb-api-" + std::to_string(xtb_getAPIVersion()) +
+                     "-method-" + std::to_string(static_cast<int>(m_config.method));
+  return spec;
+}
+
 void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   if (!m_env || !m_calc || !m_res)
     throw std::runtime_error("xTB Error: calculator is not initialized");
@@ -323,6 +346,8 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   const int first_pass =
       m_config.max_iterations < 48 ? m_config.max_iterations : 48;
   xtb_setMaxIter(m_env, m_calc, first_pass);
+  xtb_setAccuracy(m_env, m_calc, m_config.accuracy);
+  xtb_setElectronicTemp(m_env, m_calc, m_config.electronic_temperature);
   std::string message;
   bool converged = singlepoint(&message);
   if (reuse && (!converged || frontierGap() < m_warm_min_gap)) {
@@ -331,9 +356,14 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
     freshResults();
     converged = singlepoint(&message);
   }
-  if (!converged && !(sccUnconverged(message) && rescueUnconvergedScc())) {
-    discardAfterFailure();
-    throw std::runtime_error(message);
+  if (!converged) {
+    const bool scc = sccUnconverged(message);
+    if (!(scc && rescueUnconvergedScc())) {
+      discardAfterFailure();
+      if (scc)
+        throw SccNotConverged(message);
+      throw std::runtime_error(message);
+    }
   }
   m_gap = frontierGap();
 

@@ -8,6 +8,7 @@
 
 #include <xtb.h>
 
+#include "rgpot/FusedSettings.hpp"
 #include "rgpot/Potential.hpp"
 #include "rgpot/XTBPot/XTBConfig.hpp"
 
@@ -62,6 +63,33 @@ public:
   /// True when the last successful force reused the previous wavefunction.
   [[nodiscard]] bool reusedWavefunction() const noexcept;
 
+  /// Replace the numerical accuracy level. Applied by the next force.
+  void setAccuracy(double accuracy);
+
+  /// Replace the electronic temperature, in kelvin. Applied by the next
+  /// force.
+  void setElectronicTemperature(double kelvin);
+
+  /// Replace the SCC iteration budget. Applied by the next force.
+  void setMaxIterations(int iterations);
+
+  [[nodiscard]] const XTBConfig &config() const noexcept { return m_config; }
+
+  /**
+   * Settings that change the answer at a fixed geometry: charge, spin,
+   * accuracy, electronic temperature, SCC iteration budget, and the method
+   * and libxtb API version as the engine build. @c PotentialHandle installs
+   * them as the key of its fused cache. After a setter above, call
+   * @c PotentialHandle::sync_fused_settings so a failure stored at the
+   * current positions is evaluated again.
+   */
+  [[nodiscard]] FusedSettingsSpec fusedSettings() const;
+
+  /**
+   * @throws SccNotConverged when the SCC does not converge, the rescue
+   *         included.
+   * @throws std::runtime_error for every other failure.
+   */
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
   /// Native handles are per-instance; concurrent use needs one instance

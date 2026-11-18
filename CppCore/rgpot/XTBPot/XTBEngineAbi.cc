@@ -105,7 +105,7 @@ int rgpot_xtb_force(RgpotXtbPot *pot, long nAtoms, const double *positions,
                     double *variance, const double *box) {
   if (!pot || !pot->pot || !positions || !atomicNrs || !forces || !energy ||
       !box || nAtoms <= 0)
-    return -1;
+    return RGPOT_XTB_RC_INVALID_ARGUMENT;
   try {
     const int n = static_cast<int>(nAtoms);
     rgpot::types::AtomMatrix pos(n, 3);
@@ -125,11 +125,12 @@ int rgpot_xtb_force(RgpotXtbPot *pot, long nAtoms, const double *positions,
       for (int j = 0; j < 3; ++j)
         forces[i * 3 + j] = f(i, j);
     return 0;
-  } catch (const std::exception &ex) {
-    (void)ex;
-    return -2;
+  } catch (const rgpot::SccNotConverged &) {
+    return RGPOT_XTB_RC_SCC_NOT_CONVERGED;
+  } catch (const std::exception &) {
+    return RGPOT_XTB_RC_FAILED;
   } catch (...) {
-    return -3;
+    return RGPOT_XTB_RC_UNKNOWN;
   }
 }
 

@@ -13,7 +13,11 @@
  * step, centre cache and counters.
  *
  * A @c HessianVectorCache keeps the forces of the last centre it
- * evaluated, keyed on the bits of the positions, atomic numbers and cell.
+ * evaluated in a @c FusedCache: keyed on the bits of the positions, the
+ * atomic numbers, the cell and the @c fusedSettings() of the potential, and
+ * holding the outcome of the force call, which is a failure as often as a
+ * result. A failed centre is not evaluated again at the same bits; a changed
+ * setting of the potential, or @c invalidate(), is the way to retry it.
  * @c k forward products at one centre cost @c k+1 force calls instead of
  * @c 2k. A potential with a member
  * @code
@@ -54,6 +58,8 @@
 #include <vector>
 
 #include "rgpot/ForceStructs.hpp"
+#include "rgpot/FusedCache.hpp"
+#include "rgpot/FusedSettings.hpp"
 
 namespace rgpot {
 
@@ -214,15 +220,12 @@ public:
 
   /// Drop the cached centre. Call it when the potential changes while the
   /// geometry does not.
-  void invalidate() {
-    std::lock_guard<std::mutex> lock(mu_);
-    centre_.reset();
-  }
+  void invalidate() { centre_.invalidate(); }
 
   [[nodiscard]] HvpCounts counts() const noexcept {
     return {products_.load(std::memory_order_relaxed),
             forceCalls_.load(std::memory_order_relaxed),
-            centreReused_.load(std::memory_order_relaxed),
+            centre_.served(),
             analytic_.load(std::memory_order_relaxed)};
   }
 
@@ -230,28 +233,13 @@ public:
   void resetCounts() noexcept {
     products_.store(0, std::memory_order_relaxed);
     forceCalls_.store(0, std::memory_order_relaxed);
-    centreReused_.store(0, std::memory_order_relaxed);
+    centre_.resetCounts();
     analytic_.store(0, std::memory_order_relaxed);
   }
 
 private:
-  /// @c std::bit_cast of every coordinate and cell entry: float equality
-  /// would serve the forces of +0.0 at -0.0.
-  struct Key {
-    std::vector<std::uint64_t> positions;
-    std::optional<std::vector<int>> atomicNumbers;
-    std::optional<std::array<std::uint64_t, 9>> box;
-    bool operator==(const Key &) const = default;
-  };
-
   struct Geometry {
     std::vector<double> positions;
-    Key key;
-  };
-
-  struct Cached {
-    Key key;
-    std::shared_ptr<const HvpCentre> centre;
   };
 
   static Geometry readGeometry(const ForceInput &in) {
@@ -261,23 +249,11 @@ private:
     }
     Geometry g;
     g.positions.assign(in.pos, in.pos + dim);
-    g.key.positions.reserve(dim);
     for (std::size_t i = 0; i < dim; ++i) {
       if (!std::isfinite(in.pos[i])) {
         throw std::invalid_argument("positions: non-finite value at element " +
                                     std::to_string(i));
       }
-      g.key.positions.push_back(std::bit_cast<std::uint64_t>(in.pos[i]));
-    }
-    if (in.atmnrs != nullptr) {
-      g.key.atomicNumbers.emplace(in.atmnrs, in.atmnrs + in.nAtoms);
-    }
-    if (in.box != nullptr) {
-      std::array<std::uint64_t, 9> bits{};
-      for (std::size_t i = 0; i < 9; ++i) {
-        bits[i] = std::bit_cast<std::uint64_t>(in.box[i]);
-      }
-      g.key.box = bits;
     }
     return g;
   }
@@ -311,19 +287,25 @@ private:
   }
 
   template <ForceKernel Pot>
+  static FusedSettingsSpec settingsOf(const Pot &pot) {
+    if constexpr (ProvidesFusedSettings<Pot>) {
+      return pot.fusedSettings();
+    } else {
+      return {};
+    }
+  }
+
+  template <ForceKernel Pot>
   std::shared_ptr<const HvpCentre> centreOf(Pot &pot, const ForceInput &in,
                                             const Geometry &g) {
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      if (centre_ && centre_->key == g.key) {
-        centreReused_.fetch_add(1, std::memory_order_relaxed);
-        return centre_->centre;
-      }
-    }
-    auto c = std::make_shared<const HvpCentre>(forcesAt(pot, in, g.positions));
-    std::lock_guard<std::mutex> lock(mu_);
-    centre_ = Cached{g.key, c};
-    return c;
+    const FusedKey key = centre_.key(in, settingsOf(pot));
+    return centre_
+        .evaluate(key,
+                  [&] {
+                    return std::make_shared<const HvpCentre>(
+                        forcesAt(pot, in, g.positions));
+                  })
+        .first;
   }
 
   /// Forces at @a positions, with the species and cell of @a in.
@@ -352,11 +334,9 @@ private:
     return r;
   }
 
-  mutable std::mutex mu_;
-  std::optional<Cached> centre_;
+  FusedCache<std::shared_ptr<const HvpCentre>> centre_;
   std::atomic<std::uint64_t> products_{0};
   std::atomic<std::uint64_t> forceCalls_{0};
-  std::atomic<std::uint64_t> centreReused_{0};
   std::atomic<std::uint64_t> analytic_{0};
 };
 

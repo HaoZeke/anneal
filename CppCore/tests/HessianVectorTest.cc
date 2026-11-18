@@ -17,6 +17,8 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "rgpot/FusedCache.hpp"
+#include "rgpot/FusedSettings.hpp"
 #include "rgpot/HessianVector.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 
@@ -412,4 +414,176 @@ TEST_CASE("Products are linear and refuse malformed requests", "[HessianVector]"
   CHECK_THROWS_AS(cache.apply(fd, s.input(), alias.data(), alias.data() + 1),
                   std::invalid_argument);
   CHECK(fd.calls == before);
+}
+
+namespace {
+
+/// An engine that counts its calls, fails on demand, and reports the
+/// settings its answer depends on.
+struct MockEngine {
+  enum class Mode { Ok, Scc, Other };
+  mutable std::uint64_t calls = 0;
+  Mode mode = Mode::Ok;
+  rgpot::FusedSettingsSpec settings;
+
+  void forceImpl(const ForceInput &in, ForceOut *out) const {
+    ++calls;
+    if (mode == Mode::Scc) {
+      throw rgpot::SccNotConverged("SCC did not converge in the mock");
+    }
+    if (mode == Mode::Other) {
+      throw std::runtime_error("mock engine failure");
+    }
+    out->energy = 1.0 + in.pos[0];
+    out->variance = 0.0;
+    for (std::size_t k = 0; k < 3 * in.nAtoms; ++k) {
+      out->F[k] = -in.pos[k];
+    }
+  }
+
+  rgpot::FusedSettingsSpec fusedSettings() const { return settings; }
+};
+
+struct Frame {
+  std::vector<double> x{0.0, 0.1, 0.2, 1.0, 1.1, 1.2};
+  std::vector<int> z{1, 8};
+  std::array<double, 9> box = cell();
+  ForceInput input() const {
+    return {.nAtoms = z.size(), .pos = x.data(), .atmnrs = z.data(), .box = box.data()};
+  }
+};
+
+} // namespace
+
+TEST_CASE("a failed centre is not evaluated again at the same bits", "[fused]") {
+  Frame f;
+  MockEngine engine;
+  engine.mode = MockEngine::Mode::Scc;
+  HessianVectorCache cache;
+
+  std::string first;
+  try {
+    cache.centre(engine, f.input());
+    FAIL("the centre should fail");
+  } catch (const rgpot::SccNotConverged &e) {
+    first = e.what();
+  }
+  CHECK(engine.calls == 1);
+  for (int i = 0; i < 3; ++i) {
+    try {
+      cache.centre(engine, f.input());
+      FAIL("the stored failure should be thrown again");
+    } catch (const rgpot::SccNotConverged &e) {
+      CHECK(std::string(e.what()) == first);
+    }
+  }
+  CHECK(engine.calls == 1);
+  CHECK(cache.counts().centreReused == 3);
+
+  // Healing the engine does not rerun the geometry: only a changed key does.
+  engine.mode = MockEngine::Mode::Ok;
+  CHECK_THROWS_AS(cache.centre(engine, f.input()), rgpot::SccNotConverged);
+  CHECK(engine.calls == 1);
+  cache.invalidate();
+  CHECK_NOTHROW(cache.centre(engine, f.input()));
+  CHECK(engine.calls == 2);
+}
+
+TEST_CASE("the cache tells an SCC failure from another failure", "[fused]") {
+  Frame f;
+  MockEngine engine;
+  HessianVectorCache cache;
+  engine.mode = MockEngine::Mode::Other;
+  CHECK_THROWS_AS(cache.centre(engine, f.input()), std::runtime_error);
+  try {
+    cache.centre(engine, f.input());
+    FAIL("the stored failure should be thrown again");
+  } catch (const rgpot::SccNotConverged &) {
+    FAIL("an ordinary failure must not turn into an SCC failure");
+  } catch (const std::runtime_error &e) {
+    CHECK(std::string(e.what()) == "mock engine failure");
+  }
+  CHECK(engine.calls == 1);
+}
+
+TEST_CASE("a success serves later requests, a changed bit or setting reruns",
+          "[fused]") {
+  Frame f;
+  MockEngine engine;
+  HessianVectorCache cache;
+  const auto first = cache.centre(engine, f.input());
+  const auto second = cache.centre(engine, f.input());
+  CHECK(engine.calls == 1);
+  CHECK(first.energy == second.energy);
+
+  auto moved = f;
+  moved.x[4] = std::nextafter(moved.x[4], 2.0);
+  cache.centre(engine, moved.input());
+  CHECK(engine.calls == 2);
+  cache.centre(engine, moved.input());
+  CHECK(engine.calls == 2);
+
+  Frame zero = f;
+  zero.x[0] = 0.0;
+  Frame negative = f;
+  negative.x[0] = -0.0;
+  cache.centre(engine, zero.input());
+  const std::uint64_t before = engine.calls;
+  cache.centre(engine, negative.input());
+  CHECK(engine.calls == before + 1);
+
+  struct Change {
+    const char *name;
+    void (*apply)(MockEngine &);
+  };
+  const Change changes[] = {
+      {"periodic", [](MockEngine &e) { e.settings.periodic = 7; }},
+      {"spin", [](MockEngine &e) { e.settings.spin = 1; }},
+      {"scc iterations", [](MockEngine &e) { e.settings.sccMaxIterations = 9; }},
+      {"charge", [](MockEngine &e) { e.settings.charge = -1.0; }},
+      {"accuracy", [](MockEngine &e) { e.settings.accuracy = 0.5; }},
+      {"electronic temperature", [](MockEngine &e) { e.settings.electronicTemperature = 900.0; }},
+      {"mixer", [](MockEngine &e) { e.settings.sccMixer = "broyden"; }},
+      {"engine build", [](MockEngine &e) { e.settings.engineBuild = "other"; }},
+  };
+  for (const Change &c : changes) {
+    DYNAMIC_SECTION(c.name) {
+      MockEngine e;
+      HessianVectorCache fresh;
+      fresh.centre(e, f.input());
+      fresh.centre(e, f.input());
+      REQUIRE(e.calls == 1);
+      c.apply(e);
+      fresh.centre(e, f.input());
+      CHECK(e.calls == 2);
+      fresh.centre(e, f.input());
+      CHECK(e.calls == 2);
+    }
+  }
+
+  Frame species = f;
+  species.z[0] = 6;
+  MockEngine e;
+  HessianVectorCache fresh;
+  fresh.centre(e, f.input());
+  fresh.centre(e, species.input());
+  CHECK(e.calls == 2);
+  Frame box = f;
+  box.box[0] = std::nextafter(box.box[0], 100.0);
+  fresh.centre(e, box.input());
+  CHECK(e.calls == 3);
+}
+
+TEST_CASE("a failure stored under one setting is rerun under another", "[fused]") {
+  Frame f;
+  MockEngine engine;
+  engine.mode = MockEngine::Mode::Scc;
+  HessianVectorCache cache;
+  CHECK_THROWS_AS(cache.centre(engine, f.input()), rgpot::SccNotConverged);
+  CHECK_THROWS_AS(cache.centre(engine, f.input()), rgpot::SccNotConverged);
+  CHECK(engine.calls == 1);
+  engine.mode = MockEngine::Mode::Ok;
+  engine.settings.sccMaxIterations = 500;
+  CHECK_NOTHROW(cache.centre(engine, f.input()));
+  CHECK(engine.calls == 2);
 }
