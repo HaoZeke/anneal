@@ -550,6 +550,30 @@ void rgpot_set_last_error(const char *msg);
 const char *rgpot_last_error(void);
 
 /**
+ * Taylor jet callback of the CH5 2008 surface, for
+ * `rgpot_potential_set_taylor_jet` on a handle that evaluates it.
+ *
+ * Positions are six atoms in Bohr in the order of the source's
+ * `BLOCK DATA`: the fourth methane hydrogen, carbon, the first three
+ * methane hydrogens and the attacking hydrogen. The coefficients are
+ * in Hartree. Atomic numbers, when given, must be 1, 6, 1, 1, 1, 1; the
+ * cell is not read and `user_data` is ignored.
+ *
+ * # Safety
+ *
+ * As for `rgpot_taylor_jet_fn`: NULL pointers and overlapping `lower` and
+ * `upper` return `RGPOT_INVALID_PARAMETER`. Otherwise `input` must point to
+ * a valid `rgpot_force_input_t`, `direction` to 18 readable doubles, and
+ * `lower` and `upper` to `order + 1` writable doubles each.
+ */
+enum rgpot_status_t rgpot_ch5_2008_taylor_jet(void *user_data,
+                                              const struct rgpot_force_input_t *input,
+                                              const double *direction,
+                                              uintptr_t order,
+                                              double *lower,
+                                              double *upper);
+
+/**
  * The eindir ABI stamp of the `eindir_objective_t` base that
  * `rgpot_potential_t` embeds as its first member.
  *

@@ -1,5 +1,6 @@
 rgpot_abi_compatible
 rgpot_abi_stamp
+rgpot_ch5_2008_taylor_jet
 rgpot_eindir_abi_compatible
 rgpot_eindir_abi_stamp
 rgpot_force_input_create

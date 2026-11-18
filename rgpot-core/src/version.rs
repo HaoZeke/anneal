@@ -254,6 +254,7 @@ mod tests {
             "rgpot_potential_set_taylor_jet(const struct rgpot_potential_t *pot,",
             "rgpot_potential_taylor_jet(const struct rgpot_potential_t *pot,",
             "(*rgpot_taylor_jet_fn)(void *user_data,",
+            "rgpot_ch5_2008_taylor_jet(void *user_data,",
             "typedef struct rgpot_interval_t {",
             "RGPOT_NO_JET = 6,",
             "RGPOT_JET_BRANCH = 7,",
@@ -312,6 +313,7 @@ mod tests {
             "rgpot_potential_fused_error_kind",
             "rgpot_potential_set_taylor_jet",
             "rgpot_potential_taylor_jet",
+            "rgpot_ch5_2008_taylor_jet",
         ] {
             assert!(baseline.lines().any(|l| l == name), "baseline lacks {name}");
         }

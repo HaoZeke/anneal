@@ -1,0 +1,2 @@
+`rgpot_ch5_2008_taylor_jet` (`rgpot_core::ch5_2008::Ch52008` in Rust) is the exact Taylor jet of the CH5 2008 surface of Corchado, Bravo and Espinosa-Garcia, in Bohr and Hartree, for registration with `rgpot_potential_set_taylor_jet` on a handle that evaluates that surface.
+Its saturation guards, the `rch < 3.8` switch and the handedness swap are decided on enclosures; an undecided one is `RGPOT_JET_BRANCH`.
