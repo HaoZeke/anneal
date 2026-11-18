@@ -644,6 +644,19 @@ pub struct Config {
     pub symmetry_tolerance: f64,
     /// Coordinate-space radius used to merge points after symmetrisation.
     pub symmetry_merge_radius: f64,
+    /// Symmetry completion of a newly entered basin: when an accepted hop
+    /// lands in a basin the chain was not in, the incumbent is pushed onto
+    /// the point group measured on it ([`crate::detected_symmetry`]),
+    /// quenched, recorded, and offered to the acceptance rule. One attempt
+    /// per new basin, so a chain sitting still never pays twice. The group
+    /// is read from the structure alone; the preset names no group, order,
+    /// size or species.
+    pub symmetry_completion_on_new: bool,
+    /// Fraction of the points, innermost by distance from the centroid,
+    /// whose point group [`Config::symmetry_completion_on_new`] reads. The
+    /// outer points are the last to order, and a disordered surface would
+    /// hide a group the rest of the structure has.
+    pub symmetry_core_fraction: f64,
     /// Wales and Doye's angular move, applied when a point is loose.
     ///
     /// "If the highest pair energy rose above a fraction R of the lowest pair
@@ -1667,6 +1680,7 @@ impl Config {
         cfg.return_screen = true;
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
+        cfg.symmetry_completion_on_new = true;
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
         // Named lattice growth builds the truncated octahedron instead of
@@ -1717,6 +1731,7 @@ impl Config {
         let mut cfg = Self::for_cluster(n_points);
         cfg.allocate_moves = true;
         cfg.return_screen = true;
+        cfg.symmetry_completion_on_new = true;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
         if n_points < 98 {
@@ -1952,6 +1967,8 @@ impl Config {
             continuous_symmetry: ContinuousSymmetry::Off,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
+            symmetry_completion_on_new: false,
+            symmetry_core_fraction: 0.6,
             tabu_on_stall: false,
             tabu_capacity: 8,
             angular_moves: false,
@@ -2173,6 +2190,7 @@ impl Config {
         self.soap_mode = SoapProposalMode::Off;
         self.soap_repel = false;
         self.soap_class_residual = false;
+        self.symmetry_completion_on_new = false;
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
