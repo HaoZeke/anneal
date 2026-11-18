@@ -12,6 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 FLOOR_GATE_ROWS = ROOT / "bench" / "covalent-h2h" / "floor-gate" / "gfn2.csv"
+SCC_ROWS = ROOT / "bench" / "covalent-h2h" / "floor-gate" / "gfn2-scc.csv"
 PANEL_ROWS = ROOT / "bench" / "covalent-h2h" / "floor-gate" / "panel.csv"
 
 
@@ -153,6 +154,25 @@ def test_the_rerun_arms_agree_and_repeat_the_committed_c20_rows():
             assert arms["grad"] == arms["floor"]
         else:
             assert arms["grad"][1] != arms["floor"][1]
+
+
+def test_the_scc_arm_repeats_grad_and_counts_each_failed_call_once(capsys):
+    pytest.importorskip("scipy.stats")
+    rows = read(SCC_ROWS)
+    assert list(rows[0]) == floor_gate.FIELDS
+    grad = {(r["system"], r["seed"]): r for r in read(FLOOR_GATE_ROWS) if r["arm"] == "grad"}
+    assert sorted((r["system"], r["seed"]) for r in rows) == sorted(grad)
+    trajectory = ("hit", "evals_to_hit", "charged", "probe_calls", "best", "geometry_rejected")
+    for row in rows:
+        before = grad[row["system"], row["seed"]]
+        assert (row["arm"], row["host"]) == ("scc", "bench")
+        assert [row[f] for f in trajectory] == [before[f] for f in trajectory]
+        assert 2 * int(row["scc_failed_calls"]) == 2 * int(row["scc_rejected"]) == int(before["scc_rejected"])
+    floor_gate.summary(argparse.Namespace(rows=[FLOOR_GATE_ROWS, SCC_ROWS], arms=["grad", "scc"]))
+    out = capsys.readouterr().out
+    assert "si13 scc: hits 12/12, median calls to hit 1972.5, SCC-failed calls 712/28585 (2.49%), 712 xtb evaluations" in out
+    assert "c20 scc: hits 0/12, median calls to hit 100000.0, SCC-failed calls 0/1200000 (0.00%), 0 xtb evaluations" in out
+    assert out.strip().splitlines()[-1] == "scc loses: nowhere"
 
 
 def test_a_panel_system_one_arm_left_out_or_short_of_a_seed_loses(tmp_path, capsys):

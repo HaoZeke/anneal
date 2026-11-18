@@ -855,9 +855,10 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   `--opt` of the start does not converge in xtb's 250 iterations, and
   their calls are 0. Measured on `c1c02d16`, serial on core 0 with
   nothing else running. An anneal call costs 222 ms inside xtb against
-  CREST's 47 ms: from a fresh SCC, 0.5% to 15% of anneal's calls on these
-  seeds (366 of 2,487 on seed 2001) are SCCs that do not converge in 500
-  iterations, each about 2 s.
+  CREST's 47 ms: from a fresh SCC, 0.3% to 7.4% of anneal's calls on these
+  seeds (183 of 2,487 on seed 2001) have an SCC that does not converge in
+  500 iterations, about 2 s, and that build ran it twice, once for the
+  energy and once for the gradient.
 - Anneal stops at the first energy at or below the reference, and seeds
   2003 and 2005 stop below it, at -624.70446339 and -617.18016907 eV. The
   first is an open ring in which every atom has one or two neighbours,
@@ -872,9 +873,10 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   not reproduce: an Si13 minimum at -601.12421 eV is -593.51232 eV fresh,
   and Si20 minima near -979 eV are near -868 eV. One Si13 search recorded
   a planar sheet at -640.659 eV whose SCC does not converge from a fresh
-  start. Before the element floor, 74% of anneal's first 3,000 Si20 calls
-  from a fresh SCC were SCCs that do not converge, nearly all on trials
-  with a pair at 0.90-0.92 Å, just past the single floor.
+  start. Before the element floor, the handle counted as many SCCs that
+  do not converge as 74% of anneal's first 3,000 Si20 calls from a fresh
+  SCC, two for each failed call: 37% of the calls failed, nearly all on
+  trials with a pair at 0.90-0.92 Å, just past the single floor.
 - Si20 reference search (`gfn2/si20-capped.csv`): the example on
   `a52726af`, the element floor of the gate below, seeds 3000-3007 at
   1e5 calls with no target, one seed per core on cores 0-7 at once, each
@@ -890,8 +892,9 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   same offset on all eight. The ring is in `gfn2/minima.csv` and
   `gfn2/minima/si20-ring.xyz`. Two of eight seeds within four hours is
   not yet a reference the panel can score against. The handle counted
-  32,704 SCCs that do not converge over the eight runs, at a median
-  shortest pair of 2.15 Å, a third of them below 1.6 Å.
+  32,704 SCCs that do not converge over the eight runs, two for each of
+  16,352 failed calls, at a median shortest pair of 2.15 Å, a third of
+  them below 1.6 Å.
 
 ### The element call floor
 
@@ -906,8 +909,10 @@ on `bench/cov-floor2`; this series carries the same change on this base.
 - It was gated against `c1c02d16` on seeds 2000-2011 of Si13 and C20 at
   1e5 calls, both arms in one untimed session with eight runs at a time
   (`gfn2/floor_gate.csv`). On Si13 both arms hit on all twelve seeds.
-  2.89% of the floor arm's calls are SCCs that do not converge, against
-  6.05%. Its median calls to hit is 2,207 against 1,897 (Mann-Whitney
+  1.44% of the floor arm's calls (439 of 30,392) have an SCC that does
+  not converge, against 3.02% (823 of 27,222). Both builds ran xtb twice
+  for a failed call, and the rows' `scc_rejected` counts 878 and 1,646
+  failed SCCs. Its median calls to hit is 2,207 against 1,897 (Mann-Whitney
   p = 0.45). On C20 neither arm reaches the cage, no call fails its SCC
   in either, and the median best is -1146.550 eV in both (p = 0.86). The
   `c1c02d16` arm repeats the timed Si13 calls to hit seed for seed. The
@@ -918,8 +923,8 @@ on `bench/cov-floor2`; this series carries the same change on this base.
   the GFN2 arms are `98a69388`, develop with the series up to the Si13
   rows, and `a52726af`, with the floor (`floor-gate/gfn2.csv`), pushed
   as `51abe20f` and `c3566383` with the same trees. Both arms repeat the
-  `c1c02d16` gate seed for seed: on Si13 12/12 hits in each, SCC failures
-  2.89% of calls against 6.05%, median calls to hit 2,207 against 1,897
+  `c1c02d16` gate seed for seed: on Si13 12/12 hits in each, SCC-failed
+  calls 1.44% against 3.02%, median calls to hit 2,207 against 1,897
   (p = 0.45). The floor arm takes more calls on six seeds, fewer on five
   and the same on one. On C20 the two arms are 0/12 with no SCC failure,
   median best -1146.550 eV (p = 0.86). The paper headline panel
@@ -950,11 +955,25 @@ on `bench/cov-floor2`; this series carries the same change on this base.
 - On C20 the rerun repeats the committed `a52726af` rows seed for seed.
   On Si13 it does not: `c3566383` hits on all twelve seeds, but at
   other calls to hit on every seed, with median calls to hit 1,972.5
-  against 2,206.5 and SCC failures 4.98% of calls against 2.89%. Si13
+  against 2,206.5 and SCC-failed calls 2.49% against 1.44%. Si13
   seed 2006 of the same `c3566383` build takes 620, 673, 683, 696 or
   833 calls to hit as OpenBLAS is held to one kernel or another, so on a
   silicon cluster with no gap the Si13 numbers belong to the machine's
   BLAS. C20, with no SCC failure, does not move.
+- One xtb evaluation for a failed call (`floor-gate/gfn2-scc.csv`, arm
+  `scc`), on the same machine, serial on core 0, hostname bench. Until
+  `scc` the example asked eindir's `value_and_gradient` for both; rgpot
+  3.5 drops a failed energy from its fused cache, so the gradient ran
+  xtb again on the same geometry, and `scc_rejected` counted every
+  failed call twice. `scc` is `eed54eb9` (tree `1fb33b1d`), which asks
+  for the gradient only after a finite energy and adds the column
+  `scc_failed_calls`. On every seed of Si13 and C20 it has `grad`'s hit,
+  calls to hit, calls charged, probe calls and best energy. On Si13 its
+  `scc_failed_calls` and `scc_rejected` are both half of `grad`'s
+  `scc_rejected` on every seed: 712 of 28,585 calls, 2.49%. C20 has no
+  failed call. The per-call rates in this section are those counts
+  halved. `gfn2_floor_gate.py summary floor-gate/gfn2.csv
+  floor-gate/gfn2-scc.csv --arms grad scc` compares the two.
 
 `scripts/covalent_h2h/gfn2_floor_gate.py` runs a same-session gate of
 two example builds and summarises its rows.
@@ -1000,5 +1019,6 @@ Three first-parent commits changed it:
   the capped Si20 reference search with a fresh xtb single point of each
   best geometry.
 - `floor-gate/`: the element-floor gate against develop, GFN2 and the
-  paper headline panel, with the pins of the floor build, and the GFN2
-  rerun on another machine.
+  paper headline panel, with the pins of the floor build, the GFN2
+  rerun on another machine, and its rows counting failed calls
+  (`gfn2-scc.csv`).
