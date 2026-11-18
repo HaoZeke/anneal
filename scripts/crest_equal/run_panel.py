@@ -64,8 +64,6 @@ import tempfile
 import time
 from pathlib import Path
 
-from scipy.stats import fisher_exact, mannwhitneyu
-
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEM = "h2o6"
 MOLECULES = 6
@@ -165,22 +163,24 @@ def read_fields(path: Path) -> dict[str, str]:
     return fields
 
 
-def crest_log_calls(log: Path) -> int | None:
-    """The integer on CREST's own energy+grad total, or None when it prints none."""
+def crest_log_calls(log: Path) -> int:
+    """The integer on CREST's own energy+grad total."""
     if not log.is_file():
-        return None
+        raise SystemExit(f"{log} is missing")
     totals = []
     for line in log.read_text(errors="replace").splitlines():
         if ENGRAD_LINE in line:
             totals.append(int(line.split(ENGRAD_LINE, 1)[1].split()[0]))
-    if len(totals) > 1:
+    if len(totals) != 1:
         raise SystemExit(f"{log} has {len(totals)} energy+grad totals")
-    return totals[0] if totals else None
+    return totals[0]
 
 
-def charged_calls(driver_calls: int, log_calls: int | None) -> int:
+def charged_calls(driver_calls: int, log_calls: int) -> int:
     """Calls billed to a CREST row: never below what CREST says it spent."""
-    return driver_calls if log_calls is None else max(driver_calls, log_calls)
+    if log_calls is None:
+        raise SystemExit("CREST log has no energy+grad total")
+    return max(driver_calls, log_calls)
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -190,19 +190,46 @@ def read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    new_file = not path.is_file()
-    if not new_file:
+def validate_header(path: Path, fields: list[str]) -> None:
+    if path.is_file():
         existing = path.read_text().splitlines()
         if not existing or existing[0] != ",".join(fields):
             raise SystemExit(f"{path} header is not the current one")
-    with path.open("a", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
-        if new_file:
-            writer.writeheader()
-        for row in rows:
-            writer.writerow({key: row.get(key, "") for key in fields})
+
+
+def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    validate_header(path, fields)
+    existing_text = path.read_text() if path.is_file() else ""
+    mode = path.stat().st_mode & 0o777 if path.is_file() else 0o644
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", newline="") as handle:
+            if existing_text:
+                handle.write(existing_text)
+                if not existing_text.endswith("\n"):
+                    handle.write("\n")
+            writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+            if not existing_text:
+                writer.writeheader()
+            for row in rows:
+                writer.writerow({key: row.get(key, "") for key in fields})
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def record_row(counts_path: Path, rows_path: Path, count_row: dict, row: dict) -> None:
+    """Write the call-counts entry atomically before appending the result row."""
+    validate_header(counts_path, COUNT_FIELDS)
+    validate_header(rows_path, ROW_FIELDS)
+    append_rows(counts_path, COUNT_FIELDS, [count_row])
+    append_rows(rows_path, ROW_FIELDS, [row])
 
 
 def quantile(values: list[float], p: float) -> float:
@@ -221,12 +248,16 @@ def mann_whitney(left: list[float], right: list[float]) -> float:
         return float("nan")
     if len(set(left) | set(right)) == 1:
         return 1.0
+    from scipy.stats import mannwhitneyu
+
     return float(
         mannwhitneyu(left, right, alternative="two-sided", method="asymptotic").pvalue
     )
 
 
 def fisher(hits_left: int, n_left: int, hits_right: int, n_right: int) -> float:
+    from scipy.stats import fisher_exact
+
     table = [
         [hits_left, n_left - hits_left],
         [hits_right, n_right - hits_right],
@@ -441,7 +472,7 @@ def run_crest(
         "charged": charged_calls(driver_calls, log_calls),
         "driver_calls": driver_calls,
         "driver_stop": fields.get("stop", "none"),
-        "crest_log_calls": "" if log_calls is None else log_calls,
+        "crest_log_calls": log_calls,
         "crest_out": search / "crest.out",
         "engine_eV": fields.get("best_eV", ""),
         "wall_s": f"{wall:.6f}",
@@ -482,7 +513,16 @@ def score(xtb: Path, result: dict, work: Path) -> dict:
     return result
 
 
-def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+def summarise(
+    rows: list[dict[str, str]],
+    *,
+    fisher_fn=None,
+    mann_whitney_fn=None,
+) -> list[dict[str, str]]:
+    if fisher_fn is None:
+        fisher_fn = fisher
+    if mann_whitney_fn is None:
+        mann_whitney_fn = mann_whitney
     groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for row in rows:
         groups.setdefault((row["system"], row["arm"], row["code_revision"]), []).append(row)
@@ -502,24 +542,24 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             within = str(sum(abs(value - center) <= 0.05 * abs(center) for value in charged))
         fisher_p = calls_p = inside_p = outside_p = wall_p = ""
         if arm != "anneal" and anneal:
-            fisher_p = f"{fisher(sum(r['hit'] == 'true' for r in anneal), len(anneal), hits, len(group)):.6e}"
-            calls_p = fmt(mann_whitney(target, charged), ".6e")
+            fisher_p = f"{fisher_fn(sum(r['hit'] == 'true' for r in anneal), len(anneal), hits, len(group)):.6e}"
+            calls_p = fmt(mann_whitney_fn(target, charged), ".6e")
             inside_p = fmt(
-                mann_whitney(
+                mann_whitney_fn(
                     [float(r["pot_s"]) for r in anneal if r["pot_s"]],
                     pots,
                 ),
                 ".6e",
             )
             outside_p = fmt(
-                mann_whitney(
+                mann_whitney_fn(
                     [float(r["outside_s"]) for r in anneal if r["outside_s"]],
                     outs,
                 ),
                 ".6e",
             )
             wall_p = fmt(
-                mann_whitney(
+                mann_whitney_fn(
                     [float(r["wall_s"]) for r in anneal if r["wall_s"]],
                     walls,
                 ),
@@ -702,8 +742,7 @@ def main() -> None:
                 "date": datetime.datetime.now(datetime.timezone.utc).date().isoformat(),
                 **result,
             }
-            append_rows(args.counts, COUNT_FIELDS, [{**row, **count}])
-            append_rows(args.rows, ROW_FIELDS, [row])
+            record_row(args.counts, args.rows, {**row, **count}, row)
             print(
                 f"done {arm} {seed} hit {row['hit']} calls {row['charged']} "
                 f"wall {row['wall_s']} polished {row['polished_Eh']}",
