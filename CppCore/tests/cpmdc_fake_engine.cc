@@ -113,6 +113,8 @@ double g_last_final_orbital_state = -1.0;
 // and a successful select clears it, so a test can tell this fake from
 // one that ignores the call and always reports an empty string.
 std::string g_last_error;
+bool g_force_session_create_fail = false;
+std::string g_force_session_create_message = "fake refused params";
 
 bool refused_orbital_key(long long key) { return key == -99; }
 
@@ -165,13 +167,20 @@ CPMDCResult cpmdc_energy_forces(int n_atoms, const double *positions_ang,
 
 CPMDCSession *cpmdc_session_create(const void *params_capnp,
                                    size_t params_capnp_size_bytes) {
-  if (!has_flat_message(params_capnp, params_capnp_size_bytes))
+  if (g_force_session_create_fail) {
+    g_last_error = g_force_session_create_message;
     return nullptr;
+  }
+  if (!has_flat_message(params_capnp, params_capnp_size_bytes)) {
+    g_last_error = "invalid fake params";
+    return nullptr;
+  }
   ++g_session_create_count;
   auto *session = new CPMDCSession;
   session->params.resize(params_capnp_size_bytes);
   std::memcpy(session->params.data(), params_capnp, params_capnp_size_bytes);
   session->orbital_state = static_cast<double>(g_session_create_count);
+  g_last_error.clear();
   return session;
 }
 
@@ -426,6 +435,15 @@ RGPOT_FAKE_ONLY double cpmdc_fake_last_final_orbital_state(void) {
 
 RGPOT_FAKE_ONLY const char *cpmdc_last_error(void) {
   return g_last_error.c_str();
+}
+
+RGPOT_FAKE_ONLY void cpmdc_fake_set_session_create_failure(
+    int enabled, const char *message) {
+  g_force_session_create_fail = enabled != 0;
+  if (message && *message)
+    g_force_session_create_message = message;
+  if (!g_force_session_create_fail)
+    g_last_error.clear();
 }
 
 RGPOT_FAKE_ONLY int cpmdc_configure(const void *config_capnp,
