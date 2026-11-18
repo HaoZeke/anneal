@@ -178,6 +178,11 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
         && largest_component(gradient) < threshold
 }
 
+#[inline]
+fn quench_watch_continues(stop_energy: Option<f64>, fv: f64) -> bool {
+    !stop_energy.is_some_and(|target| crate::energy_hits(fv, target, 0.0))
+}
+
 /// The convergence check a relaxation paid for at the point it ended.
 #[derive(Clone)]
 struct Check {
@@ -1002,7 +1007,7 @@ where
             Some((energy, gradient))
         };
         let mut watch = |_: usize, fv: f64| {
-            if stop_energy.is_some_and(|target| crate::energy_hits(fv, target, 0.0)) {
+            if !quench_watch_continues(stop_energy, fv) {
                 return false;
             }
             if screening && probe {
@@ -2711,15 +2716,12 @@ mod tests {
         let mut led = Ledger::new(8);
         led.stop_below(-1.0);
         let stop_energy = led.target();
-        let watch = |_: usize, fv: f64| {
-            if stop_energy.is_some_and(|target| crate::energy_hits(fv, target, 0.0)) {
-                return false;
-            }
-            true
-        };
-        assert!(!watch(0, -1.0), "quench must stop once the target is hit");
         assert!(
-            watch(0, f64::NEG_INFINITY),
+            !quench_watch_continues(stop_energy, -1.0),
+            "quench must stop once the target is hit"
+        );
+        assert!(
+            quench_watch_continues(stop_energy, f64::NEG_INFINITY),
             "non-finite trial energies must not stop the quench watch"
         );
     }
@@ -3640,7 +3642,7 @@ mod tests {
             best = best.min(out.best);
         }
         assert!(
-            crate::energy_hits(best, -44.326801, crate::DEFAULT_HIT_TOL),
+            crate::energy_hits(best, -44.326801, 1e-4),
             "best {best} against the published -44.326801"
         );
     }

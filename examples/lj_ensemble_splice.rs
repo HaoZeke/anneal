@@ -1315,18 +1315,14 @@ fn run_chain(
         outcome
             .improvements
             .iter()
-            .find(|&&(_, _, _, energy)| {
-                anneal_core::energy_hits(energy, reference, anneal_core::DEFAULT_HIT_TOL)
-            })
+            .find(|&&(_, _, _, energy)| anneal_core::energy_hits(energy, reference, 1e-4))
             .map(|&(_, charged, _, _)| charged)
     });
     let hit_by_splice = target.is_some_and(|reference| {
         outcome
             .accepted_transitions
             .iter()
-            .filter(|t| {
-                anneal_core::energy_hits(t.to_energy, reference, anneal_core::DEFAULT_HIT_TOL)
-            })
+            .filter(|t| anneal_core::energy_hits(t.to_energy, reference, 1e-4))
             .min_by_key(|t| t.hop)
             .is_some_and(|t| t.action == "splice" || t.action == "pbh" || t.action == "reoccupy")
     });
@@ -1490,9 +1486,7 @@ fn main() {
             .iter()
             .enumerate()
             .filter(|(_, r)| {
-                target.is_some_and(|t| {
-                    anneal_core::energy_hits(r.outcome.best, t, anneal_core::DEFAULT_HIT_TOL)
-                })
+                target.is_some_and(|t| anneal_core::energy_hits(r.outcome.best, t, 1e-4))
             })
             .map(|(i, _)| i)
             .collect();
@@ -1553,11 +1547,7 @@ fn main() {
                         .improvements
                         .iter()
                         .find(|&&(_, _, _, energy)| {
-                            anneal_core::energy_hits(
-                                energy,
-                                reference,
-                                anneal_core::DEFAULT_HIT_TOL,
-                            )
+                            anneal_core::energy_hits(energy, reference, 1e-4)
                         })
                         .map(|&(hop, _, _, _)| hop)
                 })
@@ -1743,8 +1733,7 @@ fn run_halving(
                 break;
             }
         }
-        let solved = target
-            .is_some_and(|t| anneal_core::energy_hits(deepest, t, anneal_core::DEFAULT_HIT_TOL));
+        let solved = target.is_some_and(|t| anneal_core::energy_hits(deepest, t, 1e-4));
         if solved {
             ensembles_solved += 1;
         }

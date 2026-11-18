@@ -814,7 +814,7 @@ fn main() {
             )
         });
         let hit = reference
-            .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+            .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
             .unwrap_or(false);
         if let Some(tr) = &out.energy_trace {
             // One file per seed, one quenched energy per line, in order. The

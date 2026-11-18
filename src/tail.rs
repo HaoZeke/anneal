@@ -202,7 +202,7 @@ impl Gpd {
 
     /// Mean of the excess, finite only for `xi < 1`.
     pub fn mean(&self) -> Option<f64> {
-        (self.xi < 1.0).then(|| self.sigma / (1.0 - self.xi))
+        (self.xi < 1.0).then_some(self.sigma / (1.0 - self.xi))
     }
 
     /// The same law seen from a higher threshold, `shift` above this one.
@@ -776,7 +776,7 @@ pub fn mean_excess_slope(energies: &[f64], quantiles: &[f64], k_min: usize) -> O
 /// endpoint shallower than an energy the run has reached refutes the model at
 /// the threshold it was fitted at, in one line and without a prior.
 pub fn moment_endpoint(energy_threshold: f64, mean_excess: f64, xi: f64) -> Option<f64> {
-    (xi < 0.0).then(|| energy_threshold - mean_excess * (1.0 - xi) / (-xi))
+    (xi < 0.0).then_some(energy_threshold - mean_excess * (1.0 - xi) / (-xi))
 }
 
 /// One threshold in the stability ladder, with the fit it produced.

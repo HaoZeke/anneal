@@ -23,8 +23,7 @@ SITE_LINE_ALLOWLIST: dict[str, list[tuple[int, re.Pattern[str]]]] = {
         (233, re.compile(r"tol:\s+\.double\s+0\.001", re.IGNORECASE)),
     ],
     "bench/lj104-lattice/v2/h2h_cap.f90": [
-        (17, re.compile(r"TOL\s*=\s*1\.0D-3")),
-        (36, re.compile(r"ENERGY_HITS\s*=\s*ENERGY\s*<=\s*TARGET\s*\+\s*TOL")),
+        (40, re.compile(r"ENERGY_HITS\s*=\s*ENERGY\s*<=\s*TARGET\s*\+\s*TOL")),
     ],
 }
 

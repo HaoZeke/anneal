@@ -29,6 +29,10 @@ CONTAINS
          ENERGY_HITS = .FALSE.
          RETURN
       END IF
+      IF (ABS(ENERGY) > HUGE(ENERGY) .OR. ABS(TARGET) > HUGE(TARGET) .OR. ABS(TOL) > HUGE(TOL)) THEN
+         ENERGY_HITS = .FALSE.
+         RETURN
+      END IF
       IF (TOL < 0.0D0) THEN
          ENERGY_HITS = .FALSE.
          RETURN
@@ -49,14 +53,22 @@ CONTAINS
       CALL GET_ENVIRONMENT_VARIABLE('H2H_TARGET', BUF, LENGTH=N, STATUS=IOS)
       IF (IOS == 0 .AND. N > 0) THEN
          READ(BUF(1:N), *, IOSTAT=IOS) TARGET_ENERGY
-         IF (IOS == 0) HAVE_TARGET = .TRUE.
+         IF (IOS == 0) THEN
+            IF (TARGET_ENERGY /= TARGET_ENERGY) THEN
+               HAVE_TARGET = .FALSE.
+            ELSE IF (ABS(TARGET_ENERGY) > HUGE(TARGET_ENERGY)) THEN
+               HAVE_TARGET = .FALSE.
+            ELSE
+               HAVE_TARGET = .TRUE.
+            END IF
+         END IF
       END IF
       CALL GET_ENVIRONMENT_VARIABLE('H2H_TOL', BUF, LENGTH=N, STATUS=IOS)
       IF (IOS == 0 .AND. N > 0) THEN
          READ(BUF(1:N), *, IOSTAT=IOS) TOL
          IF (IOS /= 0) THEN
             TOL = 1.0D-3
-         ELSE IF (TOL /= TOL .OR. TOL < 0.0D0) THEN
+         ELSE IF (TOL /= TOL .OR. ABS(TOL) > HUGE(TOL) .OR. TOL < 0.0D0) THEN
             HAVE_TARGET = .FALSE.
          END IF
       END IF

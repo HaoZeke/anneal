@@ -1249,14 +1249,21 @@ def supporting_numbers(audit: Audit) -> None:
         return f"\\({ref[system]:.6f}\\)"
 
     # Board constants.
-    arm3 = audit.text("examples/h2h_arm3.rs")
-    assert "DEFAULT_HIT_TOL" in arm3
+    target_tol_py = audit.text("scripts/target_tol.py")
+    target_tol_rs = audit.text("src/target_tol.rs")
+    py_default_hit_tol = float(
+        re.search(r"DEFAULT_HIT_TOL:\s*float\s*=\s*([0-9.eE+-]+)", target_tol_py).group(1)
+    )
+    rs_default_hit_tol = float(
+        re.search(r"pub const DEFAULT_HIT_TOL: f64 = ([0-9.eE+-]+);", target_tol_rs).group(1)
+    )
     audit.cell(
         SI,
         "hit tolerance of the h2h examples",
         "0.001",
-        float(DEFAULT_HIT_TOL),
+        py_default_hit_tol,
     )
+    audit.cell(SI, "python and rust default hit tolerances agree", "1", float(py_default_hit_tol == rs_default_hit_tol))
     audit.said(
         SI,
         "We read a hit as an energy at or below the reference plus \\(0.001\\) "
@@ -1422,24 +1429,33 @@ def supporting_numbers(audit: Audit) -> None:
 
     # Copper slab.
     script = "scripts/elja_hq_sci_molslab_bank.sh"
+    script_lines = audit.text(script).splitlines()
     energy_line = next(
         i
-        for i, text in enumerate(audit.text(script).splitlines(), 1)
+        for i, text in enumerate(script_lines, 1)
         if text == "export TARGET_ENERGY=-415.971529"
     )
     tol_line = next(
         i
-        for i, text in enumerate(audit.text(script).splitlines(), 1)
+        for i, text in enumerate(script_lines, 1)
         if i > energy_line and text == "export TARGET_TOL=${DEFAULT_HIT_TOL}"
     )
-    audit.cell(SI, "TARGET_ENERGY line", str(energy_line), float(energy_line))
-    audit.cell(SI, "TARGET_TOL line", str(tol_line), float(tol_line))
+    target_energy = float(script_lines[energy_line - 1].split("=", 1)[1])
+    target_tol = py_default_hit_tol
     audit.said(
         SI,
         f"Its line {energy_line} sets \\texttt{{TARGET\\_ENERGY}} to \\(-415.971529\\) and its line {tol_line} "
         "sets \\texttt{TARGET\\_TOL} from \\texttt{DEFAULT\\_HIT\\_TOL} (\\(10^{-3}\\)~eV).",
     )
     tally = "paper/jctc/scripts/hq_sci_tally.py"
+    tally_text = audit.text(tally)
+    tally_reference = float(re.search(r"^REFERENCE_EV = ([-+0-9.eE]+)$", tally_text, re.M).group(1))
+    tally_tolerance = float(DEFAULT_HIT_TOL)
+    assert "REFERENCE_TOL_EV = DEFAULT_HIT_TOL" in tally_text
+    audit.cell(SI, "TARGET_ENERGY value", "-415.971529", target_energy)
+    audit.cell(SI, "TARGET_ENERGY matches tally reference", f"{tally_reference}", target_energy)
+    audit.cell(SI, "TARGET_TOL value", "0.001", target_tol)
+    audit.cell(SI, "TARGET_TOL matches tally tolerance", f"{tally_tolerance:.3f}", target_tol)
     audit.said(tally, f"scripts/elja_hq_sci_molslab_bank.sh line {energy_line} sets it too.")
     jcc_target_line = next(
         i

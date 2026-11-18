@@ -105,7 +105,7 @@ fn main() {
     let hits = reference.map_or(0, |r| {
         results
             .iter()
-            .filter(|p| anneal_core::energy_hits(p.end, r, anneal_core::DEFAULT_HIT_TOL))
+            .filter(|p| anneal_core::energy_hits(p.end, r, 1e-4))
             .count()
     });
     let low555 = results.iter().filter(|p| p.f555 < 0.1).count();

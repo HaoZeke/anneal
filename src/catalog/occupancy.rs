@@ -223,7 +223,7 @@ pub fn leftover_esty_var(n: u64, n1: u64, n2: u64) -> Option<f64> {
 
 /// One-sided Esty upper bound \(\hat p_0 + z_{0.95}\sqrt{\mathrm{Var}}\).
 pub fn leftover_esty_upper(n: u64, n1: u64, n2: u64) -> Option<f64> {
-    let p0 = (n != 0).then(|| n1 as f64 / n as f64)?;
+    let p0 = (n != 0).then_some(n1 as f64 / n as f64)?;
     let var = leftover_esty_var(n, n1, n2)?;
     Some(p0 + ESTY_Z95 * var.sqrt())
 }

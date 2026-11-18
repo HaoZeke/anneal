@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import importlib.util
 import math
+import shutil
 import subprocess
 import sys
+import tempfile
+import textwrap
 from pathlib import Path
 
 import numpy as np
@@ -97,6 +100,83 @@ def test_python_and_rust_helpers_agree_bit_for_bit():
     ]
     for e, t, w in cases:
         assert py_target_tol.energy_hits(e, t, w) is anneal.energy_hits(e, t, w)
+
+
+def test_fortran_energy_hits_edge_table_matches_shared_rule():
+    gfortran = shutil.which("gfortran")
+    if gfortran is None:
+        pytest.skip("gfortran not found on PATH; skipping h2h_cap ENERGY_HITS edge-table check")
+
+    h2h_cap = ROOT / "bench/lj104-lattice/v2/h2h_cap.f90"
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "prec_stub.f90").write_text(
+            "MODULE PREC\n"
+            "  IMPLICIT NONE\n"
+            "  INTEGER, PARAMETER :: REAL64 = SELECTED_REAL_KIND(15, 307)\n"
+            "END MODULE PREC\n"
+        )
+        (tmp / "probe.f90").write_text(
+            textwrap.dedent(
+                """
+                PROGRAM probe_h2h_energy_hits
+                  USE PREC, ONLY: REAL64
+                  USE, INTRINSIC :: IEEE_ARITHMETIC
+                  USE H2H_CAP, ONLY: ENERGY_HITS
+                  IMPLICIT NONE
+                  REAL(REAL64) :: target, tol, boundary, inf, ninf, nan
+                  target = -415.971529_REAL64
+                  tol = 1.0D-3
+                  boundary = target + tol
+                  inf = IEEE_VALUE(0.0_REAL64, IEEE_POSITIVE_INF)
+                  ninf = IEEE_VALUE(0.0_REAL64, IEEE_NEGATIVE_INF)
+                  nan = IEEE_VALUE(0.0_REAL64, IEEE_QUIET_NAN)
+                  PRINT '(A,1X,L1)', 'finite_hit', ENERGY_HITS(target, target, tol)
+                  PRINT '(A,1X,L1)', 'boundary_eq', ENERGY_HITS(boundary, target, tol)
+                  PRINT '(A,1X,L1)', 'above_boundary', ENERGY_HITS(boundary + SPACING(boundary), target, tol)
+                  PRINT '(A,1X,L1)', 'energy_neginf', ENERGY_HITS(ninf, target, tol)
+                  PRINT '(A,1X,L1)', 'target_posinf', ENERGY_HITS(target, inf, tol)
+                  PRINT '(A,1X,L1)', 'tol_posinf', ENERGY_HITS(target, target, inf)
+                  PRINT '(A,1X,L1)', 'energy_nan', ENERGY_HITS(nan, target, tol)
+                  PRINT '(A,1X,L1)', 'target_nan', ENERGY_HITS(target, nan, tol)
+                  PRINT '(A,1X,L1)', 'tol_nan', ENERGY_HITS(target, target, nan)
+                  PRINT '(A,1X,L1)', 'neg_tol', ENERGY_HITS(target - 1.0_REAL64, target, -1.0D-6)
+                END PROGRAM probe_h2h_energy_hits
+                """
+            ).strip()
+            + "\n"
+        )
+        exe = tmp / "probe_h2h_energy_hits.x"
+        compile_proc = subprocess.run(
+            [gfortran, str(tmp / "prec_stub.f90"), str(h2h_cap), str(tmp / "probe.f90"), "-o", str(exe)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert compile_proc.returncode == 0, (
+            "gfortran failed to compile h2h_cap edge-table probe:\n"
+            f"stdout:\n{compile_proc.stdout}\n"
+            f"stderr:\n{compile_proc.stderr}"
+        )
+        run_proc = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
+
+    observed: dict[str, bool] = {}
+    for raw in run_proc.stdout.splitlines():
+        name, flag = raw.split()
+        observed[name] = (flag.upper() == "T")
+    expected = {
+        "finite_hit": True,
+        "boundary_eq": True,
+        "above_boundary": False,
+        "energy_neginf": False,
+        "target_posinf": False,
+        "tol_posinf": False,
+        "energy_nan": False,
+        "target_nan": False,
+        "tol_nan": False,
+        "neg_tol": False,
+    }
+    assert observed == expected
 
 
 def test_selector_fisher_one_sided_and_nan():

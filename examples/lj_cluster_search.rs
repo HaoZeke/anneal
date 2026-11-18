@@ -1374,7 +1374,7 @@ fn main() {
                 }
             }
             let hit = reference
-                .map(|r| anneal_core::energy_hits(best, r, anneal_core::DEFAULT_HIT_TOL))
+                .map(|r| anneal_core::energy_hits(best, r, 1e-4))
                 .unwrap_or(false);
             if hit {
                 solved += 1;
@@ -1408,7 +1408,7 @@ fn main() {
             };
             let out = lattice_run(&lcfg, &mut ledger, &mut relax, seed);
             let hit = reference
-                .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+                .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
                 .unwrap_or(false);
             if hit {
                 solved += 1;
@@ -1450,7 +1450,7 @@ fn main() {
             };
             let out = ffs_descent(&fcfg, &mut ledger, &mut relax, seed);
             let hit = reference
-                .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+                .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
                 .unwrap_or(false);
             if hit {
                 solved += 1;
@@ -1493,7 +1493,7 @@ fn main() {
             };
             let out = committor_population(&ccfg, walkers, seg, &mut ledger, &mut relax, seed);
             let hit = reference
-                .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+                .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
                 .unwrap_or(false);
             if hit {
                 solved += 1;
@@ -1530,7 +1530,7 @@ fn main() {
             };
             let out = nested_search(&ncfg, &mut ledger, &mut relax, seed);
             let hit = reference
-                .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+                .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
                 .unwrap_or(false);
             if hit {
                 solved += 1;
@@ -1605,7 +1605,7 @@ fn main() {
                 )
                 .expect("finite start");
                 let hit = reference
-                    .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+                    .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
                     .unwrap_or(false);
                 if hit {
                     rec_solved += 1;
@@ -1615,7 +1615,7 @@ fn main() {
                     .iter()
                     .find(|(_, _, _, e)| {
                         reference
-                            .map(|r| anneal_core::energy_hits(*e, r, anneal_core::DEFAULT_HIT_TOL))
+                            .map(|r| anneal_core::energy_hits(*e, r, 1e-4))
                             .unwrap_or(false)
                     })
                     .map(|(_, sp, _, _)| *sp);
@@ -1655,7 +1655,7 @@ fn main() {
                 &mut rng_ras,
             );
             let hit = reference
-                .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+                .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
                 .unwrap_or(false);
             if hit {
                 ras_solved += 1;
@@ -2721,7 +2721,7 @@ fn main() {
             None => None,
         };
         let hit = reference
-            .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+            .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
             .unwrap_or(false);
         if hit {
             solved += 1;
@@ -2788,7 +2788,7 @@ fn main() {
             if let Some((h, spent, b, e)) = out
                 .improvements
                 .iter()
-                .find(|(_, _, _, e)| anneal_core::energy_hits(*e, r, anneal_core::DEFAULT_HIT_TOL))
+                .find(|(_, _, _, e)| anneal_core::energy_hits(*e, r, 1e-4))
             {
                 println!(
                     "      crossed at hop {h} of {} ({:.1}% in), {spent} charged, {b} basins, {e:.6}",
