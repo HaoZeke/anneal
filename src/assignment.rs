@@ -75,6 +75,14 @@ impl Certificate {
             column_potential: self.row_potential.clone(),
         }
     }
+
+    /// One extra column dual, so a test can hand the checker a vector of the
+    /// wrong length. The stored optimum is unchanged.
+    #[cfg(test)]
+    fn with_an_extra_column_dual(mut self) -> Self {
+        self.column_potential.push(0.0);
+        self
+    }
 }
 
 /// Whether `certificate` forces `assignment` on `costs`, in which case
@@ -1331,6 +1339,111 @@ mod tests {
                 assert_eq!(assignment, slow);
             }
         }
+    }
+
+    /// At 98 atoms the dispatched permutation is the shortest-path scan.
+    /// Integer ties make that permutation differ from the Kuhn-Munkres walk
+    /// while the cost stays the same, so a cost check alone accepts either.
+    #[test]
+    fn the_threshold_permutation_is_the_shortest_path_scan() {
+        let mut state = 0x9e37_79b9_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as u32 % 7) as f64
+        };
+        let n = super::SHORTEST_PATH_FROM;
+        let mut differed = 0;
+        for trial in 0..3 {
+            let costs: Vec<f64> = (0..n * n).map(|_| next()).collect();
+            let dispatched = minimum_cost_assignment(&costs, n).expect("square");
+            let scanned = successive_shortest_paths(&costs, n).expect("scan");
+            let walked = kuhn_munkres(&costs, n).expect("walk");
+            assert_eq!(
+                dispatched, scanned,
+                "trial {trial} must follow the shortest-path permutation"
+            );
+            assert_eq!(
+                cost_of(&costs, n, &dispatched).to_bits(),
+                cost_of(&costs, n, &walked).to_bits(),
+                "trial {trial} cost"
+            );
+            differed += usize::from(dispatched != walked);
+        }
+        assert!(
+            differed > 0,
+            "the walk's tie break matched every shortest-path permutation"
+        );
+    }
+
+    /// Dual noise of one ulp is another optimum; a gap ten times larger is not.
+    #[test]
+    fn a_gap_inside_dual_noise_is_not_a_unique_optimum() {
+        let within = [0.0, 1.0e-8, 1.0e-8, 0.0];
+        let (perm, unique) = successive_shortest_paths_scanned(&within, 2).expect("within");
+        assert_eq!(perm, vec![0, 1]);
+        assert!(!unique, "an edge of 1e-8 sits inside the dual-noise slack");
+        let still = [0.0, 2.0e-8, 2.0e-8, 0.0];
+        let (perm, unique) = successive_shortest_paths_scanned(&still, 2).expect("still");
+        assert_eq!(perm, vec![0, 1]);
+        assert!(
+            !unique,
+            "an edge of 2e-8 is still inside 1e-8 * (1 + scale)"
+        );
+        let outside = [0.0, 1.0e-7, 1.0e-7, 0.0];
+        let (perm, unique) = successive_shortest_paths_scanned(&outside, 2).expect("outside");
+        assert_eq!(perm, vec![0, 1]);
+        assert!(unique, "an edge of 1e-7 is a different optimum");
+        let separated = [0.0, 1.0e-4, 1.0e-4, 0.0];
+        assert!(
+            super::forced_kuhn_munkres(&separated, 2)
+                .expect("separated")
+                .1
+                .is_some(),
+            "a gap of 1e-4 is wider than a Kuhn-Munkres tolerance"
+        );
+    }
+
+    /// A certificate that is long, repeated, or past the shortest-path
+    /// threshold does not prove the assignment.
+    #[test]
+    fn a_certificate_rejects_a_repeated_column_and_the_wrong_length() {
+        let n = 4;
+        let mut costs = vec![10.0; n * n];
+        for row in 0..n {
+            costs[row * n + row] = 0.0;
+        }
+        let (assignment, certificate) = certified_assignment(&costs, n).expect("diagonal");
+        let certificate = certificate.expect("the diagonal is separated");
+        assert_eq!(assignment, vec![0, 1, 2, 3]);
+        assert!(certifies(&costs, n, &assignment, &certificate));
+        assert!(!certifies(
+            &costs,
+            n,
+            &assignment,
+            &certificate.clone().with_an_extra_column_dual()
+        ));
+        let mut repeated = assignment.clone();
+        repeated[1] = repeated[0];
+        assert!(!certifies(&costs, n, &repeated, &certificate));
+        let mut out_of_range = assignment.clone();
+        out_of_range[0] = n;
+        assert!(
+            !certifies(&costs, n, &out_of_range, &certificate),
+            "a column past the matrix is not a permutation"
+        );
+
+        let wide = super::SHORTEST_PATH_FROM;
+        let mut wide_costs = vec![10.0; wide * wide];
+        for row in 0..wide {
+            wide_costs[row * wide + row] = 0.0;
+        }
+        let (wide_assignment, wide_certificate) =
+            super::forced_kuhn_munkres(&wide_costs, wide).expect("wide diagonal");
+        let wide_certificate = wide_certificate.expect("the wide diagonal is separated");
+        assert!(
+            !certifies(&wide_costs, wide, &wide_assignment, &wide_certificate),
+            "a shortest-path problem does not carry a Kuhn-Munkres certificate"
+        );
     }
 
     /// From the threshold up the dispatched solver is the shortest-path scan.
