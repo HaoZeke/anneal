@@ -82,7 +82,7 @@ rule sc_h2h:
 
 # Twelve-seed Sutton–Chen against GMIN. Appends rows. The six-seed
 # table above is left as it is. Not part of `rule all`.
-#   snakemake -s workflow/Snakefile sc_h2h_n12
+#   snakemake -s workflow/Snakefile sc_h2h_n12 --cores 1 --force
 rule sc_h2h_n12:
     output:
         "bench/metal-cluster-h2h/sc-n12/results.csv",
@@ -433,14 +433,14 @@ rule covalent_h2h:
         """
 
 
-# GFN2-xTB Si10, C10 and C20, anneal's general arm against CREST 3.0.2,
-# twelve seeds, 1e5 calls, 3000 K electronic temperature; Si13 and Si20
-# run once they have a reference. Needs xtb 6.7.1, CREST and rgpot's
+# GFN2-xTB Si10 and C10 at twelve seeds, and Si13 and C20 at six seeds:
+# anneal's general arm against CREST 3.0.2, 1e5 calls, 3000 K electronic
+# temperature. Si20 runs once it has a reference. Needs xtb 6.7.1, CREST and rgpot's
 # libxtb_engine.so (paths in the script). Not part of `rule all`.
 # Rows and summaries are appended to bench/covalent-h2h/gfn2/rows.csv and
 # summaries.csv; the output is a stamp under /work, because Snakemake
 # deletes declared outputs before a job and would take the rows with it.
-#   snakemake -s workflow/Snakefile covalent_gfn2_crest
+#   snakemake -s workflow/Snakefile covalent_gfn2_crest --cores 1 --force
 rule covalent_gfn2_crest:
     output:
         touch("/work/covalent-h2h/gfn2/stamps/panel.stamp"),
@@ -448,6 +448,25 @@ rule covalent_gfn2_crest:
         """
         set -euo pipefail
         bash scripts/covalent_h2h/gfn2_enter_bench.sh
+        """
+
+
+# Full 192-seed water-hexamer CREST comparison in the sealed anneal_repro
+# workflow. The runner verifies workflow commit 56160f2d and its tree before
+# invoking its locked Pixi environment. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile water_crest_fair --cores 8 --force --config anneal_repro=/work/anneal_repro
+rule water_crest_fair:
+    output:
+        touch("/work/anneal-repro/stamps/water-crest-fair-n192.stamp"),
+    threads: 8
+    params:
+        repro=config.get("anneal_repro", "/work/anneal_repro"),
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p /work/anneal-repro/stamps
+        ANNEAL_REPRO_ROOT={params.repro:q} WATER_CREST_CORES={threads} \
+          bash scripts/water_crest_fair.sh
         """
 
 
@@ -643,7 +662,7 @@ rule fetch_paper_data:
 # Cambridge sizes (H2O)8, 15, 20, 21 and, scored against the pooled best,
 # (H2O)25. Twelve seeds, 2_000_000 charged evaluations, one serial session,
 # sudo unshare --uts with hostname bench. Not part of `rule all`:
-#   snakemake -s workflow/Snakefile tip4p_h2h
+#   snakemake -s workflow/Snakefile tip4p_h2h --cores 1 --force
 rule tip4p_h2h:
     output:
         "bench/tip4p-h2h/h2h-summary.csv",
@@ -779,7 +798,7 @@ rule occat_h2h:
         """
 
 
-#   snakemake -s workflow/Snakefile agox_gofee_h2h
+#   snakemake -s workflow/Snakefile agox_gofee_h2h --cores 1 --force
 rule agox_gofee_h2h:
     output:
         "bench/ase-gofee-h2h/agox_gofee.csv",

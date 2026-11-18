@@ -1,0 +1,26 @@
+# Cited revisions that no pushed branch contains, that no verified alias in
+# revision-aliases.csv covers, and whose recorded tree no pushed commit has.
+# scripts/paper_audit.py decides which revisions these are by reachability:
+# a cited revision is resolved when a ref fetched from the remote contains it,
+# when its alias verifies, or when the code_tree its rows record is the tree
+# of a commit on the remote. It reads this file only for the reason an
+# unresolved revision stays unresolved, and fails on an unresolved revision
+# that has no line here, on a line whose revision resolves, and on a line no
+# row cites. revision is as the rows write it (forty digits, or the eight
+# digits befbc3e8 gives). Adding a line records a revision that cannot be
+# recovered; it does not make the revision reachable.
+revision,reason
+0f988569b49afe162e2f5ffd71b2ab45d0b3afec,an ASE/GOFEE campaign head before e09e0487; no pushed branch holds it and its rows record no tree; 57735de1 is not its commit
+349523d3f5f42b748f3af1573166fd17155ac461,an ASE/GOFEE campaign head before e09e0487; no pushed branch holds it and its rows record no tree; 57735de1 is not its commit
+befbc3e8,"an ASE/GOFEE campaign head before e09e0487, given as eight digits; no pushed branch holds it and its rows record no tree; 57735de1 is not its commit"
+bf09f7a2b7a6bd6359898db675eeafefcd20548b,an ASE/GOFEE campaign head before e09e0487; no pushed branch holds it and its rows record no tree; 57735de1 is not its commit
+ce1e7a46826cf51784ed26587c14b2747f5f48e1,"the GFN2 call-floor fix on f2a628c0, a local build head of the GFN2 Si10 and C10 floor rows; the fix is pushed only on other bases, none of which is f2a628c0, and it does not apply there, so its tree is unknown"
+5351f272370dc8c0d18b06149753effc99aeabd5,"eae26977 with the call floor and the C20 example, a local build head of the GFN2 C20 rows; 9b84a43f says b4ddad0d on bench/covalent-cov6b has its tree, which its rows do not record and the lost commit cannot confirm"
+b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac,"the build head of the recommended arm of the ASE panel, first cited by 70c0ad6c; no pushed branch holds it and its rows record no tree"
+5a7f629d79be88b9d3f0cb2c6665062bda4ac625,"the build head of the cluster-preset and ASE arms of the Lennard-Jones ASE panel, first cited by b70e3269; no pushed branch holds it and its rows record no tree"
+3654866310baf4ef63853130608ab65392429ff6,"the build head of the LJ55 ASE arms, first cited by 887764a2; no pushed branch holds it and its rows record no tree"
+33bed75ff4e49af3628e7156e31c6e53e2fde32c,"the build head of the first Au55 ASE rows, first cited by edb2a088; no pushed branch holds it and its rows record no tree"
+fc1af066a915a80eb46a3bc478caaf155cc9b29f,"the build head of the Au55 cluster-preset rerun and its ASE arms, first cited by 0f69a6b1; no pushed branch holds it and its rows record no tree"
+1ce3ab64493196afd25e8690648e21157d91b882,"the template-free landing head for the GMIN panel and the Au55 ASE reruns, first cited by 93e17b69; no pushed branch holds it and its rows record no tree"
+90b88235fe54abace3bde32789582eb6573ed40a,"the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed branch holds it and its rows record no tree"
+6d9fbd95826f9c173b8da36d16c471c95c377bbc,"the cloud-run head for the unfinished landfold campaign status rows, first cited by 0a4439cb; its rows record tree fc5f405b, which no pushed commit has"

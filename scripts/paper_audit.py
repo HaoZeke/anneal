@@ -12,10 +12,13 @@ half a unit in the printed number's last digit. A bare integer below 10 is
 read as exact, so a printed p of 1 cannot stand for 0.6.
 
 Every row file read here is checked for a code revision and a host. A file
-without them, or whose revision is not in this repository, must be listed in
-``KNOWN_GAPS``. A revision that was rebuilt on push is read through its alias
-in ``ALIASES`` once the pushed equivalent is verified; one with no pushed
-equivalent is listed in ``UNPUSHED`` with the reason. Printed numbers no
+without them, or whose revision is not on a pushed branch, must be listed in
+``KNOWN_GAPS``. Whether a cited revision is pushed is decided by reachability:
+a ref fetched from the remote contains it; or it was rebuilt on push and its
+alias in ``ALIASES`` verifies; or the ``code_tree`` its rows record is the tree
+of a commit on the remote. A revision none of these resolves is listed in
+``UNPUSHED_FILE`` with the reason, and the list is checked against the
+reachability, not the other way round. Printed numbers no
 committed row backs are listed in ``UNTRACED``; their text must still be where
 the list says. The revision checks need the full history and the remote
 branches; a clone without them is refused, with exit status 2.
@@ -52,38 +55,16 @@ HOST_COLUMNS = ("host",)
 EXTERNAL_REVISIONS = {"aac1548a8aec13b53ad12a8d6904625081685d2e": "GMIN source/SVNREV"}
 # Local revisions that rows cite, each with the pushed commit it was rebuilt as.
 ALIASES = "bench/revision-aliases.csv"
-# Cited revisions with no pushed equivalent. de22f437 records the ASE and GOFEE
-# panel from five campaign heads and sits on the last, e09e0487, alone. The
-# pushed history before it has one commit, 57735de1, that adds the two-hour
-# cap, yet three heads ran capped, so the heads are not its commits one to one.
-UNPUSHED = {
-    "0f988569b49afe162e2f5ffd71b2ab45d0b3afec": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
-    "349523d3f5f42b748f3af1573166fd17155ac461": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
-    "befbc3e8": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own; the row gives eight digits",
-    "bf09f7a2b7a6bd6359898db675eeafefcd20548b": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
-    "ce1e7a46826cf51784ed26587c14b2747f5f48e1": "the GFN2 call-floor fix on f2a628c0, a local build head of the GFN2 "
-                                                "Si10 and C10 floor rows; the fix was pushed on another base",
-    "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
-                                                "the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",
-    "b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac": "the build head of the recommended arm of the ASE panel, first cited by "
-                                                "70c0ad6c; no pushed branch holds it",
-    "5a7f629d79be88b9d3f0cb2c6665062bda4ac625": "the build head of the cluster-preset and ASE arms of the Lennard-Jones "
-                                                "ASE panel, first cited by b70e3269; no pushed branch holds it",
-    "3654866310baf4ef63853130608ab65392429ff6": "the build head of the LJ55 ASE arms, first cited by 887764a2; no pushed "
-                                                "branch holds it",
-    "33bed75ff4e49af3628e7156e31c6e53e2fde32c": "the build head of the first Au55 ASE rows, first cited by edb2a088; no "
-                                                "pushed branch holds it",
-    "fc1af066a915a80eb46a3bc478caaf155cc9b29f": "the build head of the Au55 cluster-preset rerun and its ASE arms, first "
-                                                "cited by 0f69a6b1; no pushed branch holds it",
-    "1ce3ab64493196afd25e8690648e21157d91b882": "the template-free landing head for the GMIN panel and the Au55 ASE "
-                                                "reruns, first cited by 93e17b69; no pushed branch holds it",
-    "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
-                                                "branch holds it",
-    "be3849e7811634aca67688da70f5413f9d860ec9": "the local rerun head for the Pt6Cu17 polish receipt and blocked campaign "
-                                                "status rows, first cited by 0a4439cb; no pushed branch holds it",
-    "6d9fbd95826f9c173b8da36d16c471c95c377bbc": "the cloud-run head for the unfinished landfold campaign status rows, first "
-                                                "cited by 0a4439cb; no pushed branch holds it",
-}
+# Cited revisions that no remote ref contains, no verified alias covers and no
+# recorded code_tree resolves, each with the reason. The file only explains an
+# unresolved revision: reachability decides which revisions are unresolved.
+# de22f437 records the ASE and GOFEE panel from five campaign heads and sits on
+# the last, e09e0487, alone. The pushed history before it has one commit,
+# 57735de1, that adds the two-hour cap, yet three heads ran capped, so the heads
+# are not its commits one to one.
+UNPUSHED_FILE = "bench/unpushed-revisions.csv"
+# The column that holds the tree of the commit a revision column names.
+TREE_COLUMNS = {"code_revision": "code_tree"}
 
 KNOWN_GAPS = {
     "data/sc96_78_hits.csv": "code_revision unrecorded on some rows; harness_revision unrecorded on some rows; host "
@@ -149,10 +130,7 @@ KNOWN_GAPS = {
                                                                   "column)",
     "paper/jctc/data/lj75_gmin/lj75-recommended-seeds-2000-2199.csv": "revision and host unrecorded (no revision or "
                                                                       "host column)",
-    "bench/metal-cluster-h2h/ptcu-b3d03061/polish-reruns.csv": "revision be3849e7 is not in this repository",
-    "bench/water-h2o20-goat/rerun-attempts.csv": "revision be3849e7 is not in this repository",
-    "paper/jctc/data/landfold_maps_v7/rerun-status.csv": "revision 6d9fbd95 is not in this repository; revision be3849e7 is "
-                                                          "not in this repository",
+    "paper/jctc/data/landfold_maps_v7/rerun-status.csv": "revision 6d9fbd95 is not in this repository",
 }
 
 UNTRACED = []
@@ -163,6 +141,8 @@ class Audit:
         self.results: list[tuple[str, str, str, str, str]] = []
         self.read: dict[str, list[dict[str, str]]] = {}
         self.text_cache: dict[str, str] = {}
+        self.revisions: Revisions | None = None
+        self.revisions_key: tuple[str, ...] | None = None
 
     def record(self, ok: bool, where: str, label: str, shown: object, value: object) -> None:
         self.results.append(("OK" if ok else "DRIFT", where, label, str(shown), str(value)))
@@ -2380,6 +2360,46 @@ def tip4p_panel(audit: Audit) -> None:
         audit.cell(where, "p(U) (summary)", row["p(U)"], float(s["mwu_p"]))
 
 
+def reproduction_records(audit: Audit) -> None:
+    """Every requested panel has one forced command and records its execution context."""
+    reproduce = "paper/jctc/REPRODUCE.md"
+    campaigns = (
+        ("sc_h2h_n12", "scripts/metal_h2h/enter_sc_n12.sh", "sutton-chen-n12", 1, ""),
+        ("tip4p_h2h", "scripts/tip4p_h2h/enter_h2h.sh", "tip4p-gmin", 1, ""),
+        ("agox_gofee_h2h", "scripts/ase_gofee_h2h/enter_bench.sh", "agox-gofee", 1, ""),
+        (
+            "water_crest_fair",
+            "scripts/water_crest_fair.sh",
+            "water-crest-fair-n192",
+            8,
+            " --config anneal_repro=/work/anneal_repro",
+        ),
+    )
+    snake = audit.text("workflow/Snakefile")
+    for rule, runner, campaign, cores, suffix in campaigns:
+        command = f"snakemake -s workflow/Snakefile {rule} --cores {cores} --force{suffix}"
+        audit.said(reproduce, command)
+        audit.record(command in snake, "workflow/Snakefile", f"{rule} records the exact forced command",
+                     command, command if command in snake else "missing")
+        text = audit.text(runner)
+        for field in ("sessions.jsonl", "session_metadata.py", campaign):
+            audit.record(field in text, runner, f"{rule} session metadata names {field}",
+                         field, field if field in text else "missing")
+    nested = "pixi run --locked --frozen snakemake water_crest_fair --cores 8 --force"
+    audit.said(reproduce, nested)
+    pinned = all(token in audit.text("scripts/water_crest_fair.sh")
+                 for token in ("pixi run", "--locked", "--frozen", "water_crest_fair"))
+    audit.record(
+        pinned,
+        "scripts/water_crest_fair.sh",
+        "full CREST campaign uses the pinned Pixi workflow",
+        nested,
+        nested if pinned else "missing",
+    )
+    audit.said(reproduce, "The TIP4P/GMIN per-seed logs are not in this repository or in any pushed")
+    audit.said(reproduce, "they are not reconstructed here.")
+
+
 def bench_prose(audit: Audit) -> None:
     fp = audit.rows("bench/fp-fingerprint/rows.csv")
     requench = {r["system"]: r["requenches"] for r in fp}
@@ -2441,9 +2461,47 @@ def bench_prose(audit: Audit) -> None:
     audit.cell(tip, "cage wall ratio at 15 molecules", "5.237", 40.21225 / 7.6787855)
 
 
-def provenance(audit: Audit) -> dict[str, str]:
+def unpushed_reasons() -> dict[str, str]:
+    """Why each listed revision stays unresolved, from ``UNPUSHED_FILE``."""
+    with (ROOT / UNPUSHED_FILE).open(newline="") as handle:
+        return {r["revision"]: r["reason"] for r in csv.DictReader(line for line in handle if not line.startswith("#"))}
+
+
+class Revisions:
+    """What the rows cite, and how each cited revision is reached from a pushed ref.
+
+    ``cited`` maps a revision to the row files that cite it and ``gaps`` holds
+    the column gaps of each file. A cited revision is ``pushed`` when a remote
+    ref contains it, ``aliased`` when a verified alias in ``ALIASES`` stands for
+    it, and ``same_tree`` when every ``code_tree`` its rows record is the tree
+    of one commit on the remote. ``unresolved`` is what none of these reach.
+    """
+
+    def __init__(self, cited: dict[str, set[str]], gaps: dict[str, str], index: RevisionIndex, pushed: set[str],
+                 aliased: dict[str, str], same_tree: dict[str, list[str]], unresolved: set[str]) -> None:
+        self.cited, self.gaps, self.index = cited, gaps, index
+        self.pushed, self.aliased, self.same_tree, self.unresolved = pushed, aliased, same_tree, unresolved
+
+    def how(self, name: str) -> str:
+        """Where the resolved revision ``name`` is reached, for the audit's messages."""
+        if name in self.pushed:
+            where = git("for-each-ref", "--format=%(refname:short)", "--contains", self.index.commit[name], "refs/remotes").stdout.split()
+            return "on " + ", ".join(where[:3])
+        if name in self.aliased:
+            return f"as alias of {self.aliased[name][:8]}"
+        if name in self.same_tree:
+            return "with the tree of " + ", ".join(c[:8] for c in self.same_tree[name][:3])
+        return "unresolved"
+
+
+def resolve_revisions(audit: Audit) -> Revisions:
+    """Reach every revision the files read cite from a pushed ref; the checks are recorded once per set of files read."""
+    key = tuple(sorted(audit.read))
+    if audit.revisions is not None and audit.revisions_key == key:
+        return audit.revisions
     gaps: dict[str, str] = {}
     revisions: dict[str, set[str]] = defaultdict(set)
+    trees: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     for path, rows in audit.read.items():
         columns = set(rows[0]) if rows else set()
         revs = [c for c in REVISION_COLUMNS if c in columns]
@@ -2460,28 +2518,58 @@ def provenance(audit: Audit) -> dict[str, str]:
                 what = "unrecorded" if column in revs else "empty or unknown"
                 problems.append(f"{column} {what} on some rows")
         for column in revs:
+            tree_column = TREE_COLUMNS.get(column)
             for r in rows:
                 value = r[column].strip()
                 if re.fullmatch(r"[0-9a-f]{7,40}", value) and value not in EXTERNAL_REVISIONS:
                     revisions[value].add(path)
+                    if tree_column in r and r[tree_column].strip():
+                        trees[value][r[tree_column].strip()].add(path)
         if problems:
             gaps[path] = "; ".join(problems)
     names = sorted(revisions)
     table = alias_table()
     index = alias_index(names, table)
     aliases = verified_aliases(audit, table, index)
-    unpushed = set()
-    for name in (n for n in names if not index.exists(n)):
-        if any(local.startswith(name) for local in aliases):
+    pushed = {n for n in names if index.on_remote(n)}
+    aliased = {n: aliases[local] for n in names if n not in pushed for local in aliases if local.startswith(n)}
+    same_tree: dict[str, list[str]] = {}
+    for name in names:
+        recorded = trees.get(name, {})
+        if not recorded:
             continue
-        unpushed.add(name)
+        where = ", ".join(sorted({p for paths in recorded.values() for p in paths}))
+        if len(recorded) > 1:
+            audit.record(False, where, f"rows cite revision {name[:8]} with one code_tree",
+                         "one tree", ", ".join(sorted(t[:8] for t in recorded)))
+            continue
+        (tree,) = recorded
+        if name in pushed:
+            audit.record(index.tree_of(name) == tree, where, f"code_tree of revision {name[:8]} is its tree",
+                         tree[:8], (index.tree_of(name) or "no such commit")[:8])
+        elif name not in aliased and index.by_tree.get(tree):
+            same_tree[name] = index.by_tree[tree]
+            audit.record(True, where, f"revision {name[:8]} has the tree of a pushed commit", tree[:8],
+                         ", ".join(c[:8] for c in same_tree[name][:3]))
+    unresolved = {n for n in names if n not in pushed and n not in aliased and n not in same_tree}
+    for name in sorted(unresolved):
         for path in revisions[name]:
-            note = f"revision {name[:8]} is not in this repository"
+            note = f"revision {name[:8]} is not in this repository" if not index.exists(name) \
+                else f"revision {name[:8]} is not on a pushed branch"
             gaps[path] = f"{gaps[path]}; {note}" if path in gaps else note
-    for name in sorted(unpushed | (set(UNPUSHED) & set(names))):
-        audit.record(name in unpushed and name in UNPUSHED, ", ".join(sorted(revisions[name])), f"unpushed revision {name[:8]}",
-                     UNPUSHED.get(name, "not listed"), "no pushed equivalent" if name in unpushed else "resolved")
-    return gaps
+    audit.revisions = Revisions(dict(revisions), gaps, index, pushed, aliased, same_tree, unresolved)
+    audit.revisions_key = key
+    return audit.revisions
+
+
+def provenance(audit: Audit) -> dict[str, str]:
+    found = resolve_revisions(audit)
+    reasons = unpushed_reasons()
+    for name in sorted(found.unresolved | (set(reasons) & set(found.cited))):
+        unresolved = name in found.unresolved
+        audit.record(unresolved and name in reasons, ", ".join(sorted(found.cited[name])), f"unpushed revision {name[:8]}",
+                     reasons.get(name, "not listed"), "no pushed equivalent" if unresolved else f"resolved {found.how(name)}")
+    return found.gaps
 
 
 def git(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
@@ -2514,6 +2602,11 @@ class RevisionIndex:
             self.parents[commit] = parents
         remote = git("for-each-ref", "--format=%(objectname)", "refs/remotes").stdout.split()
         self.remote = self.closure(r for r in remote if r in self.parents)
+        self.by_tree: dict[str, list[str]] = defaultdict(list)
+        for line in git("log", "--remotes", "--format=%T %H").stdout.splitlines():
+            tree, commit = line.split()
+            self.by_tree[tree].append(commit)
+        self.trees: dict[str, str] = {}
         self.patch_ids: dict[str, str] = {}
         shown = sorted({self.commit[p] for p in patched if p in self.commit})
         if shown:
@@ -2610,6 +2703,12 @@ class RevisionIndex:
 
     def exists(self, revision: str) -> bool:
         return revision in self.commit
+
+    def tree_of(self, revision: str) -> str | None:
+        """The tree of the commit ``revision`` names, or None when this repository has no such commit."""
+        if revision not in self.trees and revision in self.commit:
+            self.trees[revision] = git("rev-parse", f"{self.commit[revision]}^{{tree}}").stdout.strip()
+        return self.trees.get(revision)
 
     def on_remote(self, revision: str) -> bool:
         """The commit is reachable from a ref fetched from the remote."""
@@ -2976,6 +3075,12 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(TEX, f"Panels (a) to ({chr(ord(raster[0]) - 1)}) are drawn as vectors from the landscape tables.")
     audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) show the sealed raster maps of the campaigns, because "
                     "the current-code serial regeneration is incomplete.")
+    figure = (ROOT / "paper/jctc/figs/landfold_maps.pdf").read_bytes()
+    audit.record(len(raster) == 6, "paper/jctc/figs/landfold_maps.pdf",
+                 "six source-raster maps are redrawn with vector primitives", "6", str(len(raster)))
+    audit.record(b"/Subtype /Image" not in figure, "paper/jctc/figs/landfold_maps.pdf",
+                 "the landfold PDF embeds no raster image", "none",
+                 "none" if b"/Subtype /Image" not in figure else "image XObject")
     audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), TEX,
                  "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
     blocked = audit.rows("paper/jctc/data/landfold_maps_v7/rerun-status.csv")
@@ -3082,18 +3187,20 @@ REVISION_MAP_COLUMNS = ("revision", "why", "row_file", "system", "arm", "revisio
 
 def revision_map_rows(audit: Audit) -> list[dict[str, str]]:
     """Each unreachable revision with the row groups of the files read that cite it."""
+    unresolved = resolve_revisions(audit).unresolved
+    reasons = unpushed_reasons()
     groups: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
     for path, rows in audit.read.items():
         for row in rows:
             for column in REVISION_COLUMNS:
                 value = row.get(column, "").strip()
-                if value in UNPUSHED:
+                if value in unresolved:
                     key = (value, path, row.get("system", row.get("board", "")), row.get("arm", row.get("code", "")), column)
                     groups[key].append(row)
     out = []
     for (revision, path, system, arm, column), rows in sorted(groups.items()):
         seeds = [int(r["seed"]) for r in rows if r.get("seed", "").strip().lstrip("-").isdigit()]
-        out.append({"revision": revision, "why": UNPUSHED[revision], "row_file": path, "system": system, "arm": arm,
+        out.append({"revision": revision, "why": reasons.get(revision, "not listed"), "row_file": path, "system": system, "arm": arm,
                     "revision_column": column, "rows": str(len(rows)),
                     "seed_min": str(min(seeds)) if seeds else "", "seed_max": str(max(seeds)) if seeds else ""})
     return out
@@ -3133,8 +3240,9 @@ def revision_map(audit: Audit) -> None:
     rows = revision_map_rows(audit)
     audit.record((ROOT / REVISION_MAP).read_text() == revision_map_text(rows), REVISION_MAP, "map equals the cited rows",
                  "committed file", f"{len(rows)} row groups")
-    audit.record({r["revision"] for r in rows} == set(UNPUSHED), REVISION_MAP, "every unreachable revision is mapped",
-                 f"{len(UNPUSHED)} revisions", f"{len({r['revision'] for r in rows})} mapped")
+    unresolved = resolve_revisions(audit).unresolved
+    audit.record({r["revision"] for r in rows} == unresolved, REVISION_MAP, "every unreachable revision is mapped",
+                 f"{len(unresolved)} revisions", f"{len({r['revision'] for r in rows})} mapped")
 
 
 BRITISH = re.compile(r"\b\w*(?:optimis|neighbour|initialis|symmetris|normalis|minimis|colour|centred|licence|"
@@ -3309,7 +3417,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
+                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, reproduction_records, covalent_panels, covalent_gfn2,
+                  ase_gofee, lj_large, bench_prose,
                   manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter):
         check(audit)
     if write_map:
@@ -3320,10 +3429,11 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     untraced_check(audit)
     gaps = provenance(audit)
     cited = {r[c].strip() for rows in audit.read.values() for r in rows for c in REVISION_COLUMNS if c in r}
-    for name in sorted(set(UNPUSHED) - cited):
-        audit.record(False, "UNPUSHED", f"unpushed revision {name[:8]}", UNPUSHED[name], "no row cites it")
+    for name, why in sorted(unpushed_reasons().items()):
+        if name not in cited:
+            audit.record(False, UNPUSHED_FILE, f"unpushed revision {name[:8]}", why, "no row cites it")
     for path, why in sorted(KNOWN_GAPS.items()):
-        audit.record(any(word in why for word in ("unrecorded", "revision recorded", "is not in this repository")), path,
+        audit.record(any(word in why for word in ("unrecorded", "revision recorded", "is not in this repository", "is not on a pushed branch")), path,
                      "a known gap names the revision or says it is unrecorded", "revision or unrecorded", why)
     for path in sorted(set(gaps) | set(KNOWN_GAPS)):
         listed = path in KNOWN_GAPS

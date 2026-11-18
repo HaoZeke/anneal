@@ -34,7 +34,11 @@ export OMP_PROC_BIND=TRUE
 export OMP_PLACES=cores
 export RAYON_NUM_THREADS=1
 cd /work
-exec /usr/bin/python3 -u $WORK/bin/run_sc_n12.py \\
+taskset -c 0 /usr/bin/python3 $ROOT/scripts/session_metadata.py \\
+  --output $ROOT/bench/metal-cluster-h2h/sc-n12/sessions.jsonl \\
+  --campaign sutton-chen-n12 --root $ROOT -- \\
+  snakemake -s workflow/Snakefile sc_h2h_n12 --cores 1 --force
+exec taskset -c 0 /usr/bin/python3 -u $WORK/bin/run_sc_n12.py \\
   --binary $WORK/bin/h2h_sc \\
   --gmin $WORK/bin/GMIN \\
   --runs $RUNS \\
