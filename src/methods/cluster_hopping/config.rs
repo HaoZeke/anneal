@@ -1501,7 +1501,12 @@ impl Config {
         length_scale: f64,
         energy_scale: f64,
     ) -> Self {
-        Self::recommended_with_scales(n_points, length_scale, energy_scale)
+        let mut cfg = Self::recommended_with_scales(n_points, length_scale, energy_scale);
+        cfg.adaptive_search = true;
+        cfg.replicas = 2;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.ladder_top = 2.0;
+        cfg
     }
 
     /// [`Config::recommended`] with [`Config::recommended_adaptive_with_scales`].
@@ -1531,10 +1536,6 @@ impl Config {
     /// ```
     pub fn recommended_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
-        cfg.adaptive_search = true;
-        cfg.replicas = 2;
-        cfg.ladder_mode = LadderMode::NonReversible;
-        cfg.ladder_top = 2.0;
         cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
@@ -2591,17 +2592,17 @@ mod coverage_behaviour {
     }
 
     #[test]
-    fn recommended_adaptive_is_the_default_recommended_search() {
+    fn recommended_adaptive_remains_opt_in_after_the_default_gate_failed() {
         let base = Config::recommended(38);
         let adaptive = Config::recommended_adaptive(38);
-        assert!(base.adaptive_search);
+        assert!(!base.adaptive_search);
         assert!(adaptive.adaptive_search);
         assert_eq!(adaptive.replicas, 2);
         assert!(matches!(
             adaptive.ladder_mode,
             super::LadderMode::NonReversible
         ));
-        assert_eq!(
+        assert_ne!(
             adaptive.resolved_sha256().unwrap(),
             base.resolved_sha256().unwrap()
         );
