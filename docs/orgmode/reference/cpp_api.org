@@ -252,9 +252,9 @@ static PotentialHandle from_impl(Impl &impl, size_t n_atoms,
   When =n_atoms * 3= overflows, the second overload returns a handle holding
   NULL, and later calls on it throw =rgpot::Error= ("invalid parameter").
   At calculation time an exception from =impl.forceImpl= becomes
-  =RGPOT_INTERNAL_ERROR=, or =RGPOT_SCC_NOT_CONVERGED= for
-  =rgpot::SccNotConverged=, and missing positions become
-  =RGPOT_INVALID_PARAMETER=; the calling method throws =rgpot::Error=.
+  =RGPOT_INTERNAL_ERROR=, or
+  =RGPOT_SCC_NOT_CONVERGED= for =rgpot::SccNotConverged=, and missing positions become =RGPOT_INVALID_PARAMETER=;
+  the calling method throws =rgpot::Error=.
   The exception's =what()= text is stored with =rgpot_set_last_error=.
 
 The trampoline copies energy, variance and forces from =ForceOut=; it does not
@@ -398,15 +398,15 @@ void reset_hvp_counts() const;
 void set_fused_settings(const FusedSettingsSpec &spec) const;
 #+end_src
 
-- Inputs :: =spec=, the settings of the engine that change its answer at a
-  fixed geometry.
+- Inputs :: =spec=, the settings of the engine that change its answer at a fixed
+  geometry.
 - Units :: =charge= in elementary charges, =electronicTemperature= in kelvin.
-- Outputs :: none; the settings key the fused cache of the handle (see the C
-  ABI reference).
+- Outputs :: none; the settings key the fused cache of the handle (see the C ABI
+  reference).
   A request under other settings runs the engine even at positions whose
   outcome, a failure included, is stored.
-  A failed energy is not retried at the same bits, so a warm-start retry after
-  a failure needs a changed setting.
+  A failed energy is not retried at the same bits, so a warm-start retry after a
+  failure needs a changed setting.
 - Errors :: throws =rgpot::Error= when the core refuses the settings.
 
 *** =rgpot::PotentialHandle::sync_fused_settings=
@@ -438,17 +438,18 @@ void sync_fused_settings(const Impl &impl) const;
 - Inputs :: none.
 - Units :: none.
 - Outputs :: the kind of the failure the fused cache stores,
-  =RGPOT_FUSED_SCC_NOT_CONVERGED=, =RGPOT_FUSED_ENGINE_FAILED= or
-  =RGPOT_FUSED_INVALID_RESULT=, or =RGPOT_FUSED_OK= when it stores none.
+  =RGPOT_FUSED_SCC_NOT_CONVERGED=,
+  =RGPOT_FUSED_ENGINE_FAILED= or =RGPOT_FUSED_INVALID_RESULT=, or
+  =RGPOT_FUSED_OK= when it stores none.
 - Errors :: none.
 
 An =Impl= whose =forceImpl= throws =rgpot::SccNotConverged= has the failure
-typed: the trampoline stores the message with =rgpot_set_last_error= and returns
-=RGPOT_SCC_NOT_CONVERGED=.
+typed: the trampoline stores the message with
+=rgpot_set_last_error= and returns =RGPOT_SCC_NOT_CONVERGED=.
 Another =std::exception= returns =RGPOT_INTERNAL_ERROR= with its =what()=.
 =rgpot::HessianVectorCache= is the same cache for potentials used without the
-Rust core: it stores the exception a force call threw and throws it again,
-the same type and message, for the same bits and settings.
+Rust core: it stores the exception a force call threw and throws it again, the
+same type and message, for the same bits and settings.
 
 *** =rgpot::PotentialHandle::raw=
 

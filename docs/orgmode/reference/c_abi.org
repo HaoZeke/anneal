@@ -109,24 +109,23 @@ uint32_t rgpot_version_patch(void);
 - Units :: none.
 - Outputs ::
   =RGPOT_SUCCESS= (0), =RGPOT_INVALID_PARAMETER= (1), =RGPOT_INTERNAL_ERROR= (2), =RGPOT_RPC_ERROR= (3), =RGPOT_BUFFER_SIZE_ERROR=
-  (4), =RGPOT_SCC_NOT_CONVERGED= (5), =RGPOT_NO_JET= (6), =RGPOT_JET_BRANCH= (7), =RGPOT_JET_DOMAIN= (8).
+  (4),
+  =RGPOT_SCC_NOT_CONVERGED= (5), =RGPOT_NO_JET= (6), =RGPOT_JET_BRANCH= (7), =RGPOT_JET_DOMAIN=
+  (8).
 - Errors :: none.
-  The only functions of =rgpot-core= that return =RGPOT_BUFFER_SIZE_ERROR=
-  themselves are =rgpot_potential_taylor_jet= and =rgpot_ch5_2008_taylor_jet=,
-  for an =order= whose =order + 1= doubles overflow in bytes; a callback may
-  return it and it is passed through.
-  =RGPOT_SCC_NOT_CONVERGED= is the status of a callback whose engine ran its
-  self-consistent field out of iterations; =rgpot_potential_calculate= and the
-  Hessian-vector entry points return it unchanged, and
-  =rgpot_potential_fused_error_kind= reports the same distinction for the
-  eindir path, whose own status type has no such value.
+  The only functions of =rgpot-core= that return
+  =RGPOT_BUFFER_SIZE_ERROR= themselves are =rgpot_potential_taylor_jet= and
+  =rgpot_ch5_2008_taylor_jet=, for an =order= whose =order + 1= doubles overflow
+  in bytes; a callback may return it and it is passed through.
+  =RGPOT_SCC_NOT_CONVERGED= is the status of a callback whose engine ran its self-consistent field out of iterations; =rgpot_potential_calculate= and the Hessian-vector entry points return it unchanged, and =rgpot_potential_fused_error_kind=
+  reports the same distinction for the eindir path, whose own status type has no
+  such value.
 
 A function wrapped in the crate's panic guard returns =RGPOT_INTERNAL_ERROR= for
 a caught Rust panic and stores the panic message.
 The guarded functions are =rgpot_potential_calculate=, =rgpot_potential_hvp=,
-=rgpot_potential_hvp_centre=, =rgpot_potential_set_taylor_jet=,
-=rgpot_potential_taylor_jet=, =rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate=
-and =rgpot_rpc_server_start=.
+=rgpot_potential_hvp_centre=, =rgpot_potential_set_taylor_jet=, =rgpot_potential_taylor_jet=,
+=rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=.
 
 *** =rgpot_set_last_error=
 
@@ -140,8 +139,8 @@ void rgpot_set_last_error(const char *msg);
 - Outputs :: the calling thread's =rgpot_last_error()= message is =msg=; NULL
   clears it.
   A callback calls this before it returns an error status, so that the text
-  reaches the caller of =rgpot_potential_calculate=, or of the eindir
-  functions, which do not store a message for a failed callback.
+  reaches the caller of =rgpot_potential_calculate=, or of the eindir functions,
+  which do not store a message for a failed callback.
 - Errors :: none; bytes that are not valid UTF-8 are replaced.
 
 *** =rgpot_last_error=
@@ -612,21 +611,19 @@ The energy and gradient of the eindir objective, and the centre of the
 Hessian-vector products, are one fused evaluation: a callback call returns the
 energy and the forces together.
 One cache per handle sits in front of the callback and holds one entry.
-Its key is the position bits of the request (=f64::to_bits=, so =-0.0= and
-=0.0= differ and no tolerance is applied) and a fingerprint of everything else
-that changes the answer: the atomic numbers, the cell, the settings installed by
-=rgpot_potential_set_fused_settings=, and an epoch that
-=rgpot_potential_hvp_invalidate= and a peer refusal advance.
-Its value is the outcome of the callback, which is either the energy and
-forces, or a failure that records its kind and message.
+Its key is the position bits of the request
+(=f64::to_bits=, so =-0.0= and =0.0= differ and no tolerance is applied) and a fingerprint of everything else that changes the answer: the atomic numbers, the cell, the settings installed by =rgpot_potential_set_fused_settings=, and an epoch that =rgpot_potential_hvp_invalidate=
+and a peer refusal advance.
+Its value is the outcome of the callback, which is either the energy and forces,
+or a failure that records its kind and message.
 
 A request whose key equals the stored key returns the stored outcome without a
-callback, whether it is a success or a failure; a request with another key
-calls the engine and replaces the entry.
+callback, whether it is a success or a failure; a request with another key calls
+the engine and replaces the entry.
 =eindir_objective_eval= and =eindir_objective_grad= both go through this one
 path, so a failed energy followed by a gradient at the same positions is one
-callback, and the gradient returns the status and the =rgpot_last_error=
-message of the first failure.
+callback, and the gradient returns the status and the =rgpot_last_error= message
+of the first failure.
 A failed energy is not retried at the same bits.
 A retry that should run the engine again, for example a warm-start retry after
 an SCC failure, must change a setting: install new settings with
@@ -643,18 +640,17 @@ key make one callback.
 - Outputs :: =RGPOT_FUSED_OK= (0), the stored outcome is a success or nothing is
   stored; =RGPOT_FUSED_SCC_NOT_CONVERGED= (1), the callback returned
   =RGPOT_SCC_NOT_CONVERGED=; =RGPOT_FUSED_ENGINE_FAILED= (2), the callback
-  returned another error status; =RGPOT_FUSED_INVALID_RESULT= (3),
-  the callback reported success with a malformed or non-finite result.
+  returned another error status; =RGPOT_FUSED_INVALID_RESULT= (3), the callback
+  reported success with a malformed or non-finite result.
 - Errors :: none.
 
 *** =rgpot_fused_settings_t=
 
 - Inputs :: none; a struct filled by =rgpot_fused_settings_default=.
 - Units :: =charge= in elementary charges, =electronic_temperature= in kelvin.
-- Outputs :: =struct_size=, =periodic= (bit =i= set when the cell is periodic
-  along vector =i=), =spin= (unpaired electrons), =scc_max_iterations=,
-  =charge=, =accuracy=, =electronic_temperature=, =scc_mixer= and
-  =engine_build= (NUL-terminated strings or NULL).
+- Outputs ::
+  =struct_size=, =periodic= (bit =i= set when the cell is periodic along vector =i=), =spin= (unpaired electrons), =scc_max_iterations=, =charge=, =accuracy=, =electronic_temperature=,
+  =scc_mixer= and =engine_build= (NUL-terminated strings or NULL).
   =engine_build= names the engine build or version.
 - Errors :: none.
 
@@ -908,15 +904,14 @@ rgpot_status_t products(const rgpot_potential_t *pot,
 
 ** Taylor jets
 
-A jet is the list of enclosures =lo_k <= D^k V(x)[v, ..., v] / k! <= hi_k=,
-=k = 0..=order=, of the energy along the line =x + t v=.
-The bounds are about the real function the potential's source defines with
-every literal read as its compiler assigns it, not about the floating-point
-program.
+A jet is the list of enclosures =lo_k <= D^k V(x)[v, ..., v] / k!
+<= hi_k=, =k = 0..=order=, of the energy along the line =x + t v=.
+The bounds are about the real function the potential's source defines with every
+literal read as its compiler assigns it, not about the floating-point program.
 A potential with no such enclosure answers =RGPOT_NO_JET= and is never
 differenced in its place.
-Branches of the source are decided on the enclosure of the tested quantity;
-one that contains the threshold is =RGPOT_JET_BRANCH=.
+Branches of the source are decided on the enclosure of the tested quantity; one
+that contains the threshold is =RGPOT_JET_BRANCH=.
 A function or division evaluated outside its domain, or where its recurrence
 divides by an enclosure of zero, is =RGPOT_JET_DOMAIN=.
 The callback lives behind the handle's =fused_cache= pointer, as the
@@ -941,18 +936,19 @@ typedef enum rgpot_status_t (*rgpot_taylor_jet_fn)(void *user_data,
                                                    double *upper);
 #+end_src
 
-- Inputs :: the =user_data= of the handle; the geometry; =direction= with
-  =3 * n_atoms= doubles; =order=; =lower= and =upper= with room for
-  =order + 1= doubles each, which do not overlap.
-- Units :: coefficient =k= in energy times (unit of =direction= / length) to
-  the power =k=; energy when =direction= is a displacement.
+- Inputs :: the
+  =user_data= of the handle; the geometry; =direction= with =3 * n_atoms=
+  doubles; =order=; =lower= and =upper= with room for =order + 1= doubles each,
+  which do not overlap.
+- Units :: coefficient =k= in energy times (unit of =direction= / length) to the
+  power =k=; energy when =direction= is a displacement.
 - Outputs :: the callback writes =order + 1= lower and =order + 1= upper bounds
-  and returns =RGPOT_SUCCESS=, or returns =RGPOT_NO_JET=, =RGPOT_JET_BRANCH=,
-  =RGPOT_JET_DOMAIN= or another error status after setting =rgpot_last_error=.
-- Errors :: =rgpot_potential_taylor_jet= returns the callback's error status
-  unchanged, and =RGPOT_INVALID_PARAMETER= with
-  =jet callback returned [<lo>, <hi>] for coefficient <k>= when a pair is NaN
-  or reversed.
+  and returns
+  =RGPOT_SUCCESS=, or returns =RGPOT_NO_JET=, =RGPOT_JET_BRANCH=, =RGPOT_JET_DOMAIN= or another error status after setting =rgpot_last_error=.
+- Errors ::
+  =rgpot_potential_taylor_jet= returns the callback's error status unchanged, and =RGPOT_INVALID_PARAMETER=
+  with =jet callback returned [<lo>, <hi>] for coefficient <k>= when a pair is
+  NaN or reversed.
 
 *** =rgpot_potential_set_taylor_jet=
 
@@ -967,8 +963,8 @@ enum rgpot_status_t rgpot_potential_set_taylor_jet(const struct rgpot_potential_
                                                                               double *upper));
 #+end_src
 
-- Inputs :: =pot= a live handle; =jet= a =rgpot_taylor_jet_fn=, or NULL to
-  clear the registered one.
+- Inputs :: =pot= a live handle; =jet= a =rgpot_taylor_jet_fn=, or NULL to clear
+  the registered one.
 - Units :: none.
 - Outputs :: the callback is stored on the handle and called with the handle's
   =user_data=.
@@ -997,11 +993,7 @@ enum rgpot_status_t rgpot_potential_taylor_jet(const struct rgpot_potential_t *p
 - Errors :: =RGPOT_NO_JET= when no jet is registered or the jet has none;
   =RGPOT_JET_BRANCH= and =RGPOT_JET_DOMAIN= from the jet, with the test or
   function and its enclosure in =rgpot_last_error=;
-  =RGPOT_BUFFER_SIZE_ERROR= for an =order= whose =order + 1= doubles overflow
-  in bytes;
-  =RGPOT_INVALID_PARAMETER= for a NULL pointer, a non-finite direction, a peer
-  refusal, or a malformed enclosure from the callback, and, before the
-  callback is called, =rgpot_potential_taylor_jet: lower and upper overlap=
+  =RGPOT_BUFFER_SIZE_ERROR= for an =order= whose =order + 1= doubles overflow in bytes; =RGPOT_INVALID_PARAMETER= for a NULL pointer, a non-finite direction, a peer refusal, or a malformed enclosure from the callback, and, before the callback is called, =rgpot_potential_taylor_jet: lower and upper overlap=
   for overlapping =lower= and =upper= (the same pointer included) and
   =rgpot_potential_taylor_jet: lower or upper wraps the address space= for a
   range past the end of the address space.
@@ -1018,26 +1010,22 @@ enum rgpot_status_t rgpot_ch5_2008_taylor_jet(void *user_data,
                                               double *upper);
 #+end_src
 
-- Inputs :: =user_data=, ignored; =input= six atoms in the order of the
-  source's =BLOCK DATA= (the fourth methane hydrogen, carbon, the first three
-  methane hydrogens, the attacking hydrogen), with atomic numbers 1, 6, 1, 1,
-  1, 1 when given; =direction= with 18 doubles; =order=; =lower= and =upper=
-  with room for =order + 1= doubles each, which must not overlap.
+- Inputs :: =user_data=, ignored; =input= six atoms in the order of the source's
+  =BLOCK DATA= (the fourth methane hydrogen, carbon, the first three methane
+  hydrogens, the attacking hydrogen), with atomic numbers 1, 6, 1, 1, 1, 1 when
+  given; =direction= with 18 doubles; =order=; =lower= and =upper= with room for
+  =order + 1= doubles each, which must not overlap.
 - Units :: positions and direction in Bohr; coefficients in Hartree.
 - Outputs :: the jet of =POT= of =ch52008.f= (Corchado, Bravo and
   Espinosa-Garcia, J. Chem. Phys. 130, 184314 (2009)) with every literal as
   gfortran reads it, and =RGPOT_SUCCESS=.
-  Register it with =rgpot_potential_set_taylor_jet= on a handle that
-  evaluates that surface.
-- Errors :: =RGPOT_INVALID_PARAMETER= for a count other than six atoms or
-  other atomic numbers, and with =Taylor jet: lower and upper overlap= for
-  overlapping =lower= and =upper=; =RGPOT_BUFFER_SIZE_ERROR= for an =order=
-  whose =order + 1= doubles overflow in bytes; =RGPOT_JET_BRANCH= when the enclosure of a saturation
-  guard (=arg < 19=), the =rch < 3.8= switch or the handedness test
-  (=argd > 0=) contains its threshold; =RGPOT_JET_DOMAIN= for coincident atoms
-  or a collinear methane frame, where a distance, a quotient or an arc cosine
-  leaves its domain; =RGPOT_INTERNAL_ERROR= with the panic message in
-  =rgpot_last_error= for a caught Rust panic.
+  Register it with =rgpot_potential_set_taylor_jet= on a handle that evaluates
+  that surface.
+- Errors :: =RGPOT_INVALID_PARAMETER= for a count other than six atoms or other
+  atomic numbers, and with =Taylor jet: lower and upper overlap= for overlapping
+  =lower= and =upper=;
+  =RGPOT_BUFFER_SIZE_ERROR= for an =order= whose =order + 1= doubles overflow in bytes; =RGPOT_JET_BRANCH= when the enclosure of a saturation guard (=arg < 19=), the =rch < 3.8= switch or the handedness test (=argd > 0=) contains its threshold; =RGPOT_JET_DOMAIN= for coincident atoms or a collinear methane frame, where a distance, a quotient or an arc cosine leaves its domain; =RGPOT_INTERNAL_ERROR= with the panic message in =rgpot_last_error=
+  for a caught Rust panic.
 
 ** RPC
 
