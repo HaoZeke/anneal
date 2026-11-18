@@ -491,6 +491,46 @@ jobs:
         shell: pixi run bash -e {0}
         run: bash tools/check_cxx_layout_ubsan.sh
 
+  lsan_libomp_18:
+    name: meson / ubuntu [LSan + libomp 18]
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CC: /usr/bin/clang-18
+      CXX: /usr/bin/clang++-18
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: prefix-dev/setup-pixi@a0af7a228712d6121d37aba47adf55c1332c9c2e # v0.9.4
+        with:
+          pixi-version: v0.70.2
+          cache: true
+          activate-environment: true
+      - name: Install LLVM OpenMP 18
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            clang-18 libclang-rt-18-dev libomp-18-dev
+          dpkg-query -W clang-18 libclang-rt-18-dev libomp-18-dev
+      - name: Build and test OpenMP under LeakSanitizer
+        shell: pixi run bash -e {0}
+        run: |
+          export CC=/usr/bin/clang-18
+          export CXX=/usr/bin/clang++-18
+          meson setup bbdir-lsan \
+            -Db_sanitize=address \
+            -Dwith_tests=true \
+            -Dwith_examples=false \
+            -Dwith_fortran_pots=disabled \
+            -Dwith_rpc=false \
+            -Dwith_cache=false \
+            -Dwith_fast_nlist=disabled
+          meson compile -C bbdir-lsan
+          meson test -C bbdir-lsan --print-errorlogs \
+            MorsePotTest ThreadTeamTest
+          bash tools/check_lsan_libomp.sh
+
   # The suite on short OpenMP teams. Under OMP_THREAD_LIMIT every region gets
   # fewer threads than it asks for, and results must keep the bits of their
   # slice count. One build, two test runs. Linux only: the macOS legs build
@@ -962,6 +1002,7 @@ jobs:
       - nodownload_rehearsal
       - build_fast_nlist_off
       - cxx_layout_ubsan
+      - lsan_libomp_18
       - thread_limit
       - test_parity
       - rust_tests
@@ -1001,6 +1042,7 @@ jobs:
             "nodownload_rehearsal:${{ needs.nodownload_rehearsal.result }}" \
             "build_fast_nlist_off:${{ needs.build_fast_nlist_off.result }}" \
             "cxx_layout_ubsan:${{ needs.cxx_layout_ubsan.result }}" \
+            "lsan_libomp_18:${{ needs.lsan_libomp_18.result }}" \
             "thread_limit:${{ needs.thread_limit.result }}" \
             "test_parity:${{ needs.test_parity.result }}" \
             "rust_tests:${{ needs.rust_tests.result }}" \

@@ -8,6 +8,8 @@
 # fast-list baseline only when it links the fast list. Engine and RPC
 # names appear only in the builds that include them. A missing baseline
 # name fails. An extra name does not: it is an addition.
+# Shared libraries may not add C++ names under rgpot::detail; the existing
+# compatibility surface is recorded in abi_detail_baseline.txt.
 # comm needs both lists in one collation. The baselines are sorted here, so
 # their line order in the files does not matter, and C collation keeps the
 # printed list the same on every machine.
@@ -23,20 +25,37 @@ lib=${1:?librgpot.so}
 shift
 found=$(mktemp)
 want=$(mktemp)
-trap 'rm -f "$found" "$want"' EXIT
+symbols=$(mktemp)
+detail=$(mktemp)
+detail_want=$(mktemp)
+trap 'rm -f "$found" "$want" "$symbols" "$detail" "$detail_want"' EXIT
 # Mach-O nm has no -D and prefixes C names with an underscore. A static
 # archive (lib*.a, or *.lib from an MSVC-style toolchain) has no dynamic
 # symbol table, so nm -D finds nothing in it; its defined external
 # symbols are read instead. A shared object keeps nm -D, so hidden
 # symbols stay out.
 if [ "$(uname -s)" = Darwin ]; then
-  nm -gU "$lib" | awk 'NF == 3 {sub(/^_/, "", $3); print $3}'
+  nm -gU "$lib" | awk 'NF == 3 {sub(/^_/, "", $3); print $3}' > "$symbols"
 else
   case $lib in
     *.a | *.lib) nm -g --defined-only "$lib" ;;
     *) nm -D --defined-only "$lib" ;;
-  esac | awk 'NF == 3 {print $3}'
-fi | awk -v pat="$pattern" '$0 ~ pat' | sort -u > "$found"
+  esac | awk 'NF == 3 {print $3}' > "$symbols"
+fi
+case $lib in
+  *.a | *.lib) ;;
+  *)
+    c++filt < "$symbols" | awk '/^rgpot::detail::/' | sort -u > "$detail"
+    sort -u "$(dirname "$0")/abi_detail_baseline.txt" > "$detail_want"
+    added=$(comm -13 "$detail_want" "$detail")
+    if [ -n "$added" ]; then
+      echo "C++ detail symbols added:" >&2
+      echo "$added" >&2
+      exit 1
+    fi
+    ;;
+esac
+awk -v pat="$pattern" '$0 ~ pat' "$symbols" | sort -u > "$found"
 if [ "$#" -eq 0 ]; then
   cat "$found"
   exit 0

@@ -1,0 +1,2 @@
+rgpot::detail::countTeam()
+rgpot::detail::teamFor(int)

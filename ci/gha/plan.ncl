@@ -99,6 +99,12 @@ let P = S.pins in
       role = "ABI layout tests with -Db_sanitize=address,undefined",
     },
     {
+      id = "lsan_libomp_18",
+      runs_on = P.ubuntu,
+      needs = ["prepare"],
+      role = "OpenMP tests and injected-leak proof with ASan and libomp 18",
+    },
+    {
       id = "thread_limit",
       runs_on = P.ubuntu,
       needs = ["prepare"],
@@ -185,6 +191,7 @@ let P = S.pins in
         "nodownload_rehearsal",
         "build_fast_nlist_off",
         "cxx_layout_ubsan",
+        "lsan_libomp_18",
         "thread_limit",
         "test_parity",
         "rust_tests",
