@@ -2244,14 +2244,10 @@ const GROWTH_RETRY_LEAVES: u32 = 8;
 
 /// True while a failed growth should stay idle.
 ///
-/// The energy test is [`stall_growth_waits`]. At 98 atoms and above, after
-/// [`GROWTH_RETRY_LEAVES`] idle leaves the pentagonal order is due again.
-/// That is the leave the plateau was not taking: the live chain's 555
-/// fraction sits near 0.06, under the 0.12 icosahedral cut, so that branch
-/// never opened. Below 98 the displacement library still leaves the floor,
-/// and a retry would move the call clock those hits were measured on.
-fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize) -> bool {
-    stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
+/// The energy test is [`stall_growth_waits`]. A held growth is retried after
+/// [`GROWTH_RETRY_LEAVES`] skipped leaves, independent of system size.
+fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32) -> bool {
+    stall_growth_waits(held, incumbent) && skipped < GROWTH_RETRY_LEAVES
 }
 
 /// The arm a hop plays.
@@ -4749,23 +4745,19 @@ where
             break HopStop::MaxHops;
         }
         // A labelled single-species cluster that has settled into a
-        // close-packed sheet, rather than a fivefold plateau, can still be
-        // one lattice step inside that sheet away from the lower packing.
-        // The sheet that stands clear of the others is slid once for this
-        // incumbent, and a stacking fault in a smaller sheet is slipped in
-        // the plane. Two species, a rigid body, and an unlabelled cluster
-        // do not enter, so their call counts are unchanged.
+        // A labelled single-species cluster can stall on a broad shelf.
+        // When the walk is stalled and local-environment diversity is low,
+        // offer one in-plane slide/slip pass.
         if cfg.species.is_some()
             && cfg.monoatomic()
             && cfg.packing_cna_applies()
             && layer_slide_bits != Some(ledger.best.to_bits())
             && let Some(incumbent) = ledger.best_state.clone()
         {
-            let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(incumbent.view());
-            let close_packed = !crate::soap::fivefold_plateau(incumbent.view())
-                && frac_421 > frac_422
-                && frac_421 > frac_555;
-            if close_packed {
+            let low_diversity = incumbent
+                .as_slice()
+                .is_some_and(|coords| crate::catalog::occupied_unseen_share(coords) <= 0.10);
+            if stalled(cfg, quiet, longest_quiet) && low_diversity {
                 layer_slide_bits = Some(ledger.best.to_bits());
                 for slide in crate::twin::dominant_layer_slides(incumbent.view()) {
                     if ledger.remaining() == 0 || ledger.target_reached() {
@@ -6626,20 +6618,17 @@ where
             && let Some(best_state) = ledger.best_state.clone()
         {
             motif_at_spent = ledger.spent();
-            let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(best_state.view());
             let mut sources = Vec::new();
-            if frac_421 < 0.20 {
-                sources.push(crate::lattice::Source::Named(
-                    crate::structure::Template::FaceCentredCubic,
-                ));
-            }
-            if frac_422 < 0.15 {
-                sources.push(crate::lattice::Source::Pentagonal);
-            }
-            if frac_555 < 0.20 {
-                sources.push(crate::lattice::Source::Named(
-                    crate::structure::Template::Icosahedral,
-                ));
+            let unseen_share = best_state
+                .as_slice()
+                .map(crate::catalog::occupied_unseen_share)
+                .unwrap_or(0.0);
+            if unseen_share <= 0.10 {
+                sources.extend([
+                    crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                    crate::lattice::Source::Pentagonal,
+                    crate::lattice::Source::Named(crate::structure::Template::Icosahedral),
+                ]);
             }
             if !sources.is_empty() {
                 let mut side = StdRng::seed_from_u64(
@@ -6716,11 +6705,9 @@ where
                         best_alt = Some((eq, xq, gradient));
                     }
                 }
-                // A decahedral signature is also offered a stacking twin of
-                // the incumbent. The twin is a reflection in one dense
-                // plane, which is how fivefold packing becomes close
-                // packed. Adopted only when the quench is lower.
-                if frac_422 >= 0.15 && frac_421 < 0.20 {
+                // Low occupied-book novelty also offers stacking twins of the
+                // incumbent: broad shelves can differ only by one twin operation.
+                if unseen_share <= 0.10 {
                     for _ in 0..4 {
                         if probe.remaining() == 0 {
                             break;
@@ -7538,12 +7525,7 @@ where
         // displacement. Other proposals keep the kernel they drew. The test
         // is the incumbent energy, not the atom count.
         let held_displacement = directed_leave
-            && growth_held(
-                stall_growth_hold,
-                ledger.best,
-                stall_growth_skips,
-                cfg.n_points,
-            )
+            && growth_held(stall_growth_hold, ledger.best, stall_growth_skips)
             && cfg.packing_cna_applies();
         if held_displacement {
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
@@ -9517,12 +9499,7 @@ where
                 )
             {
                 let best_before_growth = ledger.best;
-                if growth_held(
-                    stall_growth_hold,
-                    best_before_growth,
-                    stall_growth_skips,
-                    cfg.n_points,
-                ) {
+                if growth_held(stall_growth_hold, best_before_growth, stall_growth_skips) {
                     // The lattice quench already failed at this incumbent.
                     // Further growth waits. This leave's proposal is the
                     // all-points displacement. After several idle leaves the
@@ -9647,12 +9624,7 @@ where
                 )
             {
                 let best_before_growth = ledger.best;
-                if growth_held(
-                    stall_growth_hold,
-                    best_before_growth,
-                    stall_growth_skips,
-                    cfg.n_points,
-                ) {
+                if growth_held(stall_growth_hold, best_before_growth, stall_growth_skips) {
                     // Same wait as the other lattice growth. This leave's
                     // proposal is the all-points displacement.
                     stall_growth_skips = stall_growth_skips.saturating_add(1);
@@ -11306,7 +11278,10 @@ mod tests {
         assert_eq!(comm.surfaces.len(), 1);
         assert!(comm.surfaces[0].is_active());
         assert_eq!(rec.surfaces, comm.surfaces);
-        assert!(Config::communicating(98).surfaces.is_empty());
+        assert_eq!(
+            Config::communicating(98).surfaces,
+            vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)]
+        );
         assert!(matches!(
             rec.continuous_symmetry,
             ContinuousSymmetry::Measure {
