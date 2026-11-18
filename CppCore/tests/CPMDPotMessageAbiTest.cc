@@ -407,6 +407,58 @@ TEST_CASE("CPMDPot force reports an orbital key refused at configure",
       pot(positions, atmtypes, box), "CPMD engine refused the orbital key");
 }
 
+// configure drops the session when the engine refuses the remembered key,
+// but the engine stays loaded. The config message has to say the embed
+// rejected the params, and keep "engine not loaded" for a missing engine.
+TEST_CASE("CPMDPot setPotentialConfig reports an orbital key refusal",
+          "[cpmd][abi]") {
+  const char *raw = std::getenv("RGPOT_CPMD_ENGINE");
+  REQUIRE(raw != nullptr);
+  const std::string engine_path(raw);
+
+  RestoreEnv engine_env("RGPOT_CPMD_ENGINE");
+  RestoreEnv library_env("CPMDC_LIBRARY");
+  RestoreEnv alt_env("RGPOT_CPMDC_ENGINE");
+
+  engine_env.clear();
+  library_env.clear();
+  alt_env.clear();
+
+  ::capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::CPMDParams>();
+  p.setFunctional("BLYP");
+  p.setCutOffRy(70.0);
+  rgpot::CPMDPot pot(p.asReader());
+  REQUIRE_FALSE(pot.available());
+
+  ::capnp::MallocMessageBuilder cfg_msg;
+  auto cfg = cfg_msg.initRoot<::PotentialConfig>();
+  auto cp = cfg.initCpmd();
+  cp.setFunctional("BLYP");
+  cp.setCutOffRy(70.0);
+  cp.setEnginePath("/nonexistent/libcpmdc.so");
+
+  std::string message;
+  REQUIRE_FALSE(pot.setPotentialConfig(cfg.asReader(), &message));
+  REQUIRE(message == "rgpot params cpmd arm failed (engine not loaded): "
+                     "functional=BLYP cutoffRy=70.000000 charge=0 mult=1 "
+                     "enginePath=/nonexistent/libcpmdc.so");
+
+  pot.selectOrbitals(-99);
+  cp.setEnginePath(engine_path);
+  REQUIRE_FALSE(pot.setPotentialConfig(cfg.asReader(), &message));
+  REQUIRE_FALSE(pot.available());
+  const std::string rejected =
+      "rgpot params cpmd arm rejected by embed: functional=BLYP "
+      "cutoffRy=70.000000 charge=0 mult=1 enginePath=" +
+      engine_path + " (CPMD engine refused the orbital key)";
+  REQUIRE(message == rejected);
+
+  pot.selectOrbitals(41);
+  REQUIRE(pot.setPotentialConfig(cfg.asReader(), &message));
+  REQUIRE(pot.available());
+}
+
 TEST_CASE("CPMDPot rejects a copy onto a refused orbital key", "[cpmd][abi]") {
   rgpot::DynLib lib;
   const char *path = std::getenv("RGPOT_CPMD_ENGINE");
