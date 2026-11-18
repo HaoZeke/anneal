@@ -157,8 +157,7 @@ pub fn check_capabilities(caps: Reader<'_>, want: &Expectation) -> Result<(), St
 
 /// Decode a flat `Capabilities` message held as aligned words and check it.
 pub fn check_capabilities_words(words: &[u64], want: &Expectation) -> Result<(), String> {
-    let bytes =
-        unsafe { std::slice::from_raw_parts(words.as_ptr().cast::<u8>(), words.len() * 8) };
+    let bytes = unsafe { std::slice::from_raw_parts(words.as_ptr().cast::<u8>(), words.len() * 8) };
     let mut cursor = bytes;
     let message = capnp::serialize::read_message_from_flat_slice(
         &mut cursor,
@@ -273,15 +272,51 @@ mod tests {
         let want = Expectation::default();
         type Edit = Box<dyn FnOnce(&mut Builder<'_>)>;
         let cases: Vec<(&str, Edit, &str)> = vec![
-            ("family", Box::new(|c| c.set_protocol_family("other.family")), "protocol family"),
-            ("major", Box::new(|c| c.set_protocol_major(2)), "protocol major"),
-            ("schema", Box::new(|c| c.set_schema_id("0xdeadbeef")), "schema id"),
-            ("bridge major", Box::new(|c| c.set_bridge_abi_major(2)), "bridge ABI major"),
-            ("bridge minor", Box::new(|c| c.set_bridge_abi_minor(9)), "bridge ABI minor"),
-            ("layout", Box::new(|c| c.set_bridge_layout(7)), "objective layout"),
-            ("features", Box::new(|c| c.set_bridge_features(1 << 40)), "bridge features"),
-            ("dlpack major", Box::new(|c| c.set_dlpack_major(2)), "DLPack major"),
-            ("dlpack minor", Box::new(|c| c.set_dlpack_minor(9)), "DLPack minor"),
+            (
+                "family",
+                Box::new(|c| c.set_protocol_family("other.family")),
+                "protocol family",
+            ),
+            (
+                "major",
+                Box::new(|c| c.set_protocol_major(2)),
+                "protocol major",
+            ),
+            (
+                "schema",
+                Box::new(|c| c.set_schema_id("0xdeadbeef")),
+                "schema id",
+            ),
+            (
+                "bridge major",
+                Box::new(|c| c.set_bridge_abi_major(2)),
+                "bridge ABI major",
+            ),
+            (
+                "bridge minor",
+                Box::new(|c| c.set_bridge_abi_minor(9)),
+                "bridge ABI minor",
+            ),
+            (
+                "layout",
+                Box::new(|c| c.set_bridge_layout(7)),
+                "objective layout",
+            ),
+            (
+                "features",
+                Box::new(|c| c.set_bridge_features(1 << 40)),
+                "bridge features",
+            ),
+            (
+                "dlpack major",
+                Box::new(|c| c.set_dlpack_major(2)),
+                "DLPack major",
+            ),
+            (
+                "dlpack minor",
+                Box::new(|c| c.set_dlpack_minor(9)),
+                "DLPack minor",
+            ),
             (
                 "operation",
                 Box::new(|c| {
@@ -378,7 +413,9 @@ mod server_tests {
     }
 
     fn verdict<S: potential::Server + 'static>(server: S) -> Result<(), String> {
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async {
             let client: potential::Client = capnp_rpc::new_client(server);

@@ -29,10 +29,10 @@
 //! - [`rpc`] — RPC client functions (feature-gated on `rpc`): connect,
 //!   calculate, disconnect.
 
-pub mod types;
-pub mod potential;
 pub mod hvp;
 pub mod jet;
+pub mod potential;
+pub mod types;
 
 #[cfg(feature = "rpc")]
 pub mod rpc;

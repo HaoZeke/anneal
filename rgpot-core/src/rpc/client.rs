@@ -34,8 +34,7 @@ impl RpcClient {
     ///
     /// The connection is established lazily on the first `calculate` call.
     pub fn new(host: &str, port: u16) -> Result<Self, String> {
-        let runtime =
-            Runtime::new().map_err(|e| format!("failed to create tokio runtime: {e}"))?;
+        let runtime = Runtime::new().map_err(|e| format!("failed to create tokio runtime: {e}"))?;
         Ok(Self {
             runtime,
             addr: format!("{host}:{port}"),
@@ -74,8 +73,7 @@ impl RpcClient {
             .set_nodelay(true)
             .map_err(|e| format!("set_nodelay failed: {e}"))?;
 
-        let (reader, writer) =
-            tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
+        let (reader, writer) = tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
 
         let network = twoparty::VatNetwork::new(
             futures::io::BufReader::new(reader),
@@ -156,10 +154,7 @@ type CpuInput<'a> = (&'a [f64], &'a [i32], &'a [f64]);
 ///
 /// # Safety
 /// All tensor pointers in `input` must be valid DLPack tensors on kDLCPU.
-unsafe fn extract_cpu_input(
-    input: &rgpot_force_input_t,
-    n: usize,
-) -> Result<CpuInput<'_>, String> {
+unsafe fn extract_cpu_input(input: &rgpot_force_input_t, n: usize) -> Result<CpuInput<'_>, String> {
     // Positions
     if input.positions.is_null() {
         return Err("positions tensor is NULL".into());

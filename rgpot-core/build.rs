@@ -21,8 +21,8 @@ fn generate_c_header(crate_dir: &str) {
     let output_dir = PathBuf::from(crate_dir).join("include");
     std::fs::create_dir_all(&output_dir).unwrap();
 
-    let mut config = cbindgen::Config::from_file("cbindgen.toml")
-        .expect("Unable to find cbindgen.toml");
+    let mut config =
+        cbindgen::Config::from_file("cbindgen.toml").expect("Unable to find cbindgen.toml");
 
     let version = env::var("CARGO_PKG_VERSION").unwrap();
     let cargo_core = ["MAJOR", "MINOR", "PATCH"]
@@ -80,7 +80,10 @@ fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
     println!("cargo::rerun-if-env-changed=RGPOT_SOURCE_REVISION");
-    println!("cargo::rustc-env=RGPOT_SOURCE_REVISION={}", source_revision(&crate_dir));
+    println!(
+        "cargo::rustc-env=RGPOT_SOURCE_REVISION={}",
+        source_revision(&crate_dir)
+    );
 
     // eindir-core is a normal Cargo dependency now; its capi #[no_mangle] symbols
     // resolve through the shared crate, so no prebuilt static lib link is needed.

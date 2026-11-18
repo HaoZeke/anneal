@@ -549,7 +549,9 @@ mod tests {
         assert_eq!(LIFECYCLE_STEP.load(Ordering::SeqCst), 2);
     }
 
-    fn flat_words(edit: impl FnOnce(&mut crate::Potentials_capnp::capabilities::Builder<'_>)) -> Vec<u64> {
+    fn flat_words(
+        edit: impl FnOnce(&mut crate::Potentials_capnp::capabilities::Builder<'_>),
+    ) -> Vec<u64> {
         use crate::Potentials_capnp::capabilities::{Builder as Caps, Operation};
         let mut msg = Builder::new_default();
         {

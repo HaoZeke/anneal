@@ -102,12 +102,7 @@ mod tests {
         let mut box_ = [10.0_f64; 9];
 
         let input = unsafe {
-            rgpot_force_input_create(
-                2,
-                pos.as_mut_ptr(),
-                atmnrs.as_mut_ptr(),
-                box_.as_mut_ptr(),
-            )
+            rgpot_force_input_create(2, pos.as_mut_ptr(), atmnrs.as_mut_ptr(), box_.as_mut_ptr())
         };
 
         assert!(!input.positions.is_null());
@@ -150,12 +145,7 @@ mod tests {
         let mut box_ = [0.0_f64; 9];
 
         let input = unsafe {
-            rgpot_force_input_create(
-                3,
-                pos.as_mut_ptr(),
-                atmnrs.as_mut_ptr(),
-                box_.as_mut_ptr(),
-            )
+            rgpot_force_input_create(3, pos.as_mut_ptr(), atmnrs.as_mut_ptr(), box_.as_mut_ptr())
         };
 
         assert_eq!(unsafe { input.n_atoms() }, Some(3));

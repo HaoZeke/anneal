@@ -70,11 +70,7 @@ fn cell_rows(cell9: *const f64) -> Result<[[f64; 3]; 3], i32> {
         return Err(fail("null cell"));
     }
     let s = unsafe { std::slice::from_raw_parts(cell9, 9) };
-    Ok([
-        [s[0], s[1], s[2]],
-        [s[3], s[4], s[5]],
-        [s[6], s[7], s[8]],
-    ])
+    Ok([[s[0], s[1], s[2]], [s[3], s[4], s[5]], [s[6], s[7], s[8]]])
 }
 
 fn periodic3(periodic: *const i32) -> Result<[bool; 3], i32> {
@@ -484,7 +480,12 @@ mod tests {
         (t + 0.5_f64.copysign(t)) as i64 as f64
     }
 
-    fn scalar_pairs(xyz: &[[f64; 3]], box_w: [f64; 3], periodic: [bool; 3], cutoff: f64) -> Vec<(i32, i32)> {
+    fn scalar_pairs(
+        xyz: &[[f64; 3]],
+        box_w: [f64; 3],
+        periodic: [bool; 3],
+        cutoff: f64,
+    ) -> Vec<(i32, i32)> {
         let cut2 = cutoff * cutoff;
         let mut out = Vec::new();
         for i in 0..xyz.len() {
@@ -679,10 +680,16 @@ mod tests {
         assert_eq!(counted, built);
 
         let mut probed = 0;
-        assert_eq!(fast_pairs(&xyz, &cell, BRIDGE_CUTOFF, &mut [], &mut probed), 1);
+        assert_eq!(
+            fast_pairs(&xyz, &cell, BRIDGE_CUTOFF, &mut [], &mut probed),
+            1
+        );
         let mut ij = vec![[-1; 2]; probed];
         let mut filled = 0;
-        assert_eq!(fast_pairs(&xyz, &cell, BRIDGE_CUTOFF, &mut ij, &mut filled), 0);
+        assert_eq!(
+            fast_pairs(&xyz, &cell, BRIDGE_CUTOFF, &mut ij, &mut filled),
+            0
+        );
         let written = ij.iter().take_while(|pair| **pair != [-1, -1]).count();
         assert_eq!(filled, written);
         assert_eq!(probed, written);
