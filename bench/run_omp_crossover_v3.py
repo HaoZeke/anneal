@@ -174,7 +174,7 @@ def prepare_arm(
     worktree = worktree_root / name
     build = build_root / name
     if worktree.exists():
-        shutil.rmtree(worktree)
+        run(["git", "worktree", "remove", "--force", str(worktree)], cwd=repo)
     if build.exists():
         shutil.rmtree(build)
     run(["git", "worktree", "add", "--detach", str(worktree), sha], cwd=repo)
