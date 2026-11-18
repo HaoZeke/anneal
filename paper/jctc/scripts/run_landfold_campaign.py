@@ -390,11 +390,13 @@ def finalize(work: Path, publish: Path, threads: int | None = None) -> None:
         writer.writerows(sorted(records, key=lambda row: (row["campaign"], row["seed"])))
     commit, tree = revision()
     campaign_receipt = {
+        "status": "complete",
         "code_revision": commit,
         "code_tree": tree,
         "host": os.environ.get("LANDFOLD_HOST", "cloud-run"),
         "campaigns": [campaign.__dict__ for campaign in CAMPAIGNS],
         "shards": len(records),
+        "charged": sum(row["charged"] for row in records),
         "minima": sum(row["minima"] for row in records),
         "panels": panels,
     }
