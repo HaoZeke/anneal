@@ -30,6 +30,8 @@ dlpk = { version = "0.1.5" }
 # this one shared crate. Sharing the crate (rlib) with downstream consumers such as
 # anneal-core avoids the two-Rust-runtime conflict a separate libeindir_core.a causes.
 eindir-core = { version = "0.6.0", features = ["capi"] }
+# Outward-rounded IEEE 1788 intervals for the Taylor jet coefficients.
+maryada = "=0.1.2"
 capnp = { version = "0.20", features = ["unaligned"], optional = true }
 libloading = { version = "0.8", optional = true }
 capnp-rpc = { version = "0.20", optional = true }

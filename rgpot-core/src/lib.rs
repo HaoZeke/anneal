@@ -24,6 +24,7 @@
 //! | [`hvp`] | Hessian-vector products with a cached centre or an analytic callback |
 //! | [`fused`] | One cache of the outcome of a fused energy-and-gradient evaluation |
 //! | [`jet`] | Validated Taylor jets along a line, with typed refusals |
+//! | [`taylor`] | Interval Taylor series that implement a jet |
 //! | [`c_api`] | `extern "C"` entry points collected by cbindgen |
 //! | [`version`] | Loaded library version, to check against `rgpot.h` |
 //! | [`rpc`] | Cap'n Proto RPC client and server (feature-gated) |
@@ -58,6 +59,7 @@ pub mod potential;
 pub mod hvp;
 pub mod fused;
 pub mod jet;
+pub mod taylor;
 pub mod eindir;
 pub mod c_api;
 pub mod version;
