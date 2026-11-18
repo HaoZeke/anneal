@@ -4,8 +4,8 @@ use std::ffi::c_int;
 use std::path::{Path, PathBuf};
 
 use rgpot_core::engine::{
-    EngineError, EnginePotential, EngineRequest, RgpotEngineAbiStamp, ENGINE_ABI_LAYOUT_REVISION,
-    ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_UNSUPPORTED,
+    EngineError, EnginePotential, EngineRequest, RgpotEngineAbiStamp, RgpotEngineCaps,
+    ENGINE_ABI_LAYOUT_REVISION, ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_UNSUPPORTED,
 };
 use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
@@ -876,4 +876,59 @@ fn hvp_c_api_rejects_overlapping_direction_and_output() {
         rgpot_tensor_free(input.atomic_numbers);
         rgpot_tensor_free(input.box_matrix);
     }
+}
+
+/// `RgpotEngineCaps` holds the fields of `engine_c_abi.h` in the same order,
+/// each four bytes wide, so every offset an engine writes is the one the
+/// loader reads.
+#[test]
+fn engine_caps_layout_is_the_c_header_layout() {
+    use std::mem::{offset_of, size_of};
+
+    let header = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../CppCore/rgpot/engine_c_abi.h"),
+    )
+    .expect("read engine_c_abi.h");
+    let end = header
+        .find("} RgpotEngineCaps;")
+        .expect("RgpotEngineCaps in engine_c_abi.h");
+    let open = "typedef struct {";
+    let start = header[..end].rfind(open).expect("start of RgpotEngineCaps") + open.len();
+    let declared: Vec<&str> = header[start..end]
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_once(';')?.0.split_whitespace();
+            let (kind, name) = (words.next()?, words.next()?);
+            assert!(matches!(kind, "int" | "unsigned"), "{name} is a {kind}");
+            Some(name)
+        })
+        .collect();
+
+    let loader = [
+        ("size", offset_of!(RgpotEngineCaps, size)),
+        ("reentrancy", offset_of!(RgpotEngineCaps, reentrancy)),
+        (
+            "per_image_instances",
+            offset_of!(RgpotEngineCaps, per_image_instances),
+        ),
+        ("batched", offset_of!(RgpotEngineCaps, batched)),
+        ("periodic", offset_of!(RgpotEngineCaps, periodic)),
+        ("stress", offset_of!(RgpotEngineCaps, stress)),
+        (
+            "group_collective",
+            offset_of!(RgpotEngineCaps, group_collective),
+        ),
+        (
+            "orbital_selection",
+            offset_of!(RgpotEngineCaps, orbital_selection),
+        ),
+        ("orbital_copy", offset_of!(RgpotEngineCaps, orbital_copy)),
+        ("analytic_hvp", offset_of!(RgpotEngineCaps, analytic_hvp)),
+    ];
+    let names: Vec<&str> = loader.iter().map(|(name, _)| *name).collect();
+    assert_eq!(names, declared, "field order differs from engine_c_abi.h");
+    for (index, (name, offset)) in loader.iter().enumerate() {
+        assert_eq!(*offset, 4 * index, "offset of {name}");
+    }
+    assert_eq!(size_of::<RgpotEngineCaps>(), 4 * declared.len());
 }
