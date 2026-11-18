@@ -130,6 +130,115 @@ impl CollectiveShare {
     }
 }
 
+/// How often an unlike-pair exchange is forced onto the chain.
+///
+/// The cadence starts at every fourth hop, which is the fixed share a
+/// binary chain used before the rate was read from the exchanges
+/// themselves. Four attempts is one reading. Acceptance above one half
+/// shortens the stride, acceptance below one in five lengthens it, and
+/// a reading in between leaves the stride. The bounds stay inside a
+/// factor of eight of the start, so the exchange cannot take the chain
+/// and cannot disappear. A one-species library has no exchange to force,
+/// and this share is not consulted.
+#[derive(Clone, Debug)]
+pub struct SwapShare {
+    attempts: u32,
+    accepts: u32,
+    stride: u32,
+}
+
+impl Default for SwapShare {
+    fn default() -> Self {
+        Self {
+            attempts: 0,
+            accepts: 0,
+            stride: 4,
+        }
+    }
+}
+
+impl SwapShare {
+    /// The hop interval on which the exchange is forced.
+    #[cfg(test)]
+    pub fn stride(&self) -> u32 {
+        self.stride
+    }
+
+    /// True on the hops where the exchange takes the proposal.
+    pub fn due(&self, hops: u64) -> bool {
+        self.stride > 0 && hops % u64::from(self.stride) == 0
+    }
+
+    /// One completed exchange. `accepted` beat the chain's Metropolis test.
+    pub fn observe(&mut self, accepted: bool) {
+        self.attempts = self.attempts.saturating_add(1);
+        if accepted {
+            self.accepts = self.accepts.saturating_add(1);
+        }
+        if self.attempts < 4 {
+            return;
+        }
+        let rate = f64::from(self.accepts) / f64::from(self.attempts);
+        if rate > 0.5 {
+            self.stride = (self.stride / 2).max(2);
+        } else if rate < 0.2 {
+            self.stride = self.stride.saturating_mul(2).min(32);
+        }
+        self.attempts = 0;
+        self.accepts = 0;
+    }
+}
+
+/// Lowest stored structure whose fingerprint lies outside `radius` of `here`.
+///
+/// The bank is the chain's own certified quenches, each with the bias key
+/// it was filed under. A seat at the chain's energy, or at an energy in
+/// `barred`, is the seat the chain just left. The lowest remaining seat
+/// whose key is outside `radius` is the destination. Equal energies keep
+/// the earlier seat. Nothing is drawn.
+pub fn diverse_seat(
+    bank: &[(Array1<f64>, f64, Array1<f64>)],
+    here: ArrayView1<f64>,
+    here_energy: f64,
+    radius: f64,
+    barred: &[f64],
+) -> Option<(f64, Array1<f64>)> {
+    let limit = radius * radius;
+    let mut best: Option<(f64, &Array1<f64>)> = None;
+    for (cv, energy, state) in bank {
+        if !energy.is_finite() || cv.len() != here.len() || state.is_empty() {
+            continue;
+        }
+        if crate::methods::stall_archive::same_minimum(*energy, here_energy)
+            || barred
+                .iter()
+                .any(|kept| crate::methods::stall_archive::same_minimum(*energy, *kept))
+        {
+            continue;
+        }
+        let mut dist2 = 0.0;
+        let mut far = false;
+        for (left, right) in cv.iter().zip(here.iter()) {
+            let delta = left - right;
+            dist2 += delta * delta;
+            if dist2 > limit {
+                far = true;
+                break;
+            }
+        }
+        if !far {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|(held, _)| energy.total_cmp(held).is_lt())
+        {
+            best = Some((*energy, state));
+        }
+    }
+    best.map(|(energy, state)| (energy, state.clone()))
+}
+
 /// Acceptance temperature of one family, as a multiple of the configured one.
 ///
 /// A cold family that nothing accepts is heated. A family that accepts
@@ -575,6 +684,51 @@ mod tests {
         taboo.remember(-1.0, coords.view(), &species);
         assert!(taboo.forbids(-0.5, coords.view(), &species));
         assert!(!taboo.forbids(-1.5, coords.view(), &species));
+    }
+
+    #[test]
+    fn swap_share_starts_on_every_fourth_hop_and_follows_acceptance() {
+        let mut share = SwapShare::default();
+        assert_eq!(share.stride(), 4);
+        assert!(share.due(0));
+        assert!(share.due(4));
+        assert!(!share.due(2));
+        for _ in 0..4 {
+            share.observe(false);
+        }
+        assert_eq!(share.stride(), 8);
+        assert!(share.due(0));
+        assert!(!share.due(4));
+        for _ in 0..4 {
+            share.observe(true);
+        }
+        assert_eq!(share.stride(), 4);
+        for _ in 0..3 {
+            share.observe(true);
+        }
+        share.observe(false);
+        assert_eq!(share.stride(), 2);
+        assert!(share.due(2));
+        assert!(!share.due(1));
+    }
+
+    #[test]
+    fn a_plateau_leaves_for_the_lowest_distant_fingerprint() {
+        let here = Array1::from_vec(vec![0.0, 0.0]);
+        let near = Array1::from_vec(vec![0.0, 0.01]);
+        let far_high = Array1::from_vec(vec![2.0, 0.0]);
+        let far_low = Array1::from_vec(vec![0.0, 3.0]);
+        let coords = Array1::from_vec(vec![0.0, 0.0, 0.0]);
+        let bank = vec![
+            (near, -5.0, coords.clone()),
+            (far_high, -1.0, coords.clone()),
+            (far_low, -4.0, coords.clone()),
+        ];
+        let (energy, _) = diverse_seat(&bank, here.view(), -2.0, 0.1, &[]).expect("a distant seat");
+        assert_eq!(energy, -4.0);
+        let barred = diverse_seat(&bank, here.view(), -2.0, 0.1, &[-4.0]);
+        assert_eq!(barred.map(|(energy, _)| energy), Some(-1.0));
+        assert!(diverse_seat(&bank, here.view(), -4.0, 0.1, &[-1.0]).is_none());
     }
 
     #[test]
