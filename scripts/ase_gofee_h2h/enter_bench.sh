@@ -44,31 +44,26 @@ if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
   echo '127.0.0.1 bench' | sudo -n tee -a /etc/hosts >/dev/null
 fi
 
+cat > "$WORK/inside.sh" << EOF
+#!/bin/bash
+set -euo pipefail
+export HOME=$WORK/home TMPDIR=$WORK/tmp
+export MPLBACKEND=Agg MPLCONFIGDIR=$WORK/mpl NUMBA_CACHE_DIR=$WORK/numba
+export XDG_CACHE_HOME=$WORK/cache PYTHONUNBUFFERED=1
+export PYTHONPATH=$ROOT/scripts/ase_gofee_h2h
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1
+export OMP_PROC_BIND=TRUE OMP_PLACES=cores RAYON_NUM_THREADS=1 RAY_AUTH_MODE=disabled
+export RGPOT_COVALENT_LIB=/work/covalent-h2h/lib/librgpot_covalent.so
+export PATH=$VENV/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+taskset -c 0 $VENV/bin/python $ROOT/scripts/session_metadata.py \\
+  --output $ROOT/bench/ase-gofee-h2h/sessions.jsonl \\
+  --campaign agox-gofee --root $ROOT -- \\
+  snakemake -s workflow/Snakefile agox_gofee_h2h --cores 1 --force
+exec taskset -c 0 $VENV/bin/python -u $ROOT/scripts/ase_gofee_h2h/campaign.py \\
+  --binary $BINARY --repo $ROOT --runs $WORK/runs "\$@"
+EOF
+chmod +x "$WORK/inside.sh"
+
 exec sudo -n unshare --uts sh -c \
-  'hostname bench; exec sudo -u ubuntu env \
-    HOME=/work/ase-gofee-h2h/home \
-    TMPDIR=/work/ase-gofee-h2h/tmp \
-    MPLBACKEND=Agg \
-    MPLCONFIGDIR=/work/ase-gofee-h2h/mpl \
-    NUMBA_CACHE_DIR=/work/ase-gofee-h2h/numba \
-    XDG_CACHE_HOME=/work/ase-gofee-h2h/cache \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH='"$ROOT"'/scripts/ase_gofee_h2h \
-    OMP_NUM_THREADS=1 \
-    MKL_NUM_THREADS=1 \
-    OPENBLAS_NUM_THREADS=1 \
-    NUMBA_NUM_THREADS=1 \
-    VECLIB_MAXIMUM_THREADS=1 \
-    BLIS_NUM_THREADS=1 \
-    OMP_PROC_BIND=TRUE \
-    OMP_PLACES=cores \
-    RAYON_NUM_THREADS=1 \
-    RAY_AUTH_MODE=disabled \
-    RGPOT_COVALENT_LIB=/work/covalent-h2h/lib/librgpot_covalent.so \
-    PATH=/work/ase-gofee-h2h/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    taskset -c 0 \
-    /work/ase-gofee-h2h/venv/bin/python -u '"$ROOT"'/scripts/ase_gofee_h2h/campaign.py \
-      --binary '"$BINARY"' \
-      --repo '"$ROOT"' \
-      --runs /work/ase-gofee-h2h/runs \
-      "$@"' _ "$@"
+  'hostname bench; exec sudo -u ubuntu "$0" "$@"' "$WORK/inside.sh" "$@"

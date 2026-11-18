@@ -50,7 +50,11 @@ export OMP_PROC_BIND=TRUE
 export OMP_PLACES=cores
 export RAYON_NUM_THREADS=1
 cd /work
-exec /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
+taskset -c 0 /usr/bin/python3 $ROOT/scripts/session_metadata.py \\
+  --output $ROOT/bench/tip4p-h2h/sessions.jsonl \\
+  --campaign tip4p-gmin --root $ROOT -- \\
+  snakemake -s workflow/Snakefile tip4p_h2h --cores 1 --force
+exec taskset -c 0 /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
   --binary $WORK/bin/h2h_seed \\
   --point $WORK/bin/h2h_tip4p_point \\
   --gmin $WORK/bin/GMIN \\

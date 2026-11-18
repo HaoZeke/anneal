@@ -2360,6 +2360,46 @@ def tip4p_panel(audit: Audit) -> None:
         audit.cell(where, "p(U) (summary)", row["p(U)"], float(s["mwu_p"]))
 
 
+def reproduction_records(audit: Audit) -> None:
+    """Every requested panel has one forced command and records its execution context."""
+    reproduce = "paper/jctc/REPRODUCE.md"
+    campaigns = (
+        ("sc_h2h_n12", "scripts/metal_h2h/enter_sc_n12.sh", "sutton-chen-n12", 1, ""),
+        ("tip4p_h2h", "scripts/tip4p_h2h/enter_h2h.sh", "tip4p-gmin", 1, ""),
+        ("agox_gofee_h2h", "scripts/ase_gofee_h2h/enter_bench.sh", "agox-gofee", 1, ""),
+        (
+            "water_crest_fair",
+            "scripts/water_crest_fair.sh",
+            "water-crest-fair-n192",
+            8,
+            " --config anneal_repro=/work/anneal_repro",
+        ),
+    )
+    snake = audit.text("workflow/Snakefile")
+    for rule, runner, campaign, cores, suffix in campaigns:
+        command = f"snakemake -s workflow/Snakefile {rule} --cores {cores} --force{suffix}"
+        audit.said(reproduce, command)
+        audit.record(command in snake, "workflow/Snakefile", f"{rule} records the exact forced command",
+                     command, command if command in snake else "missing")
+        text = audit.text(runner)
+        for field in ("sessions.jsonl", "session_metadata.py", campaign):
+            audit.record(field in text, runner, f"{rule} session metadata names {field}",
+                         field, field if field in text else "missing")
+    nested = "pixi run --locked --frozen snakemake water_crest_fair --cores 8 --force"
+    audit.said(reproduce, nested)
+    pinned = all(token in audit.text("scripts/water_crest_fair.sh")
+                 for token in ("pixi run", "--locked", "--frozen", "water_crest_fair"))
+    audit.record(
+        pinned,
+        "scripts/water_crest_fair.sh",
+        "full CREST campaign uses the pinned Pixi workflow",
+        nested,
+        nested if pinned else "missing",
+    )
+    audit.said(reproduce, "The TIP4P/GMIN per-seed logs are not in this repository or in any pushed")
+    audit.said(reproduce, "they are not reconstructed here.")
+
+
 def bench_prose(audit: Audit) -> None:
     fp = audit.rows("bench/fp-fingerprint/rows.csv")
     requench = {r["system"]: r["requenches"] for r in fp}
@@ -3035,6 +3075,12 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(TEX, f"Panels (a) to ({chr(ord(raster[0]) - 1)}) are drawn as vectors from the landscape tables.")
     audit.said(TEX, f"Panels ({raster[0]}) to ({raster[-1]}) show the sealed raster maps of the campaigns, because "
                     "the current-code serial regeneration is incomplete.")
+    figure = (ROOT / "paper/jctc/figs/landfold_maps.pdf").read_bytes()
+    audit.record(len(raster) == 6, "paper/jctc/figs/landfold_maps.pdf",
+                 "six source-raster maps are redrawn with vector primitives", "6", str(len(raster)))
+    audit.record(b"/Subtype /Image" not in figure, "paper/jctc/figs/landfold_maps.pdf",
+                 "the landfold PDF embeds no raster image", "none",
+                 "none" if b"/Subtype /Image" not in figure else "image XObject")
     audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), TEX,
                  "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
     blocked = audit.rows("paper/jctc/data/landfold_maps_v7/rerun-status.csv")
@@ -3371,7 +3417,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (manuscript_ablation, selection_tables, manuscript_retry, manuscript_gmin, manuscript_tip4p, manuscript_hexamer,
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
-                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
+                  head_to_head, sc96_78_howto, stale_claims, tip4p_panel, reproduction_records, covalent_panels, covalent_gfn2,
+                  ase_gofee, lj_large, bench_prose,
                   manuscript_ase, panel_references, generated_tables, supporting_gmin, supporting_numbers, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter):
         check(audit)
     if write_map:

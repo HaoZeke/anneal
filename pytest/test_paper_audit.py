@@ -3,6 +3,7 @@
 matches its committed rows, and the audit notices a drifted cell."""
 
 import importlib.util
+import json
 import math
 import re
 import subprocess
@@ -32,6 +33,7 @@ CHECKS = (
     audit_mod.sc96_78_howto,
     audit_mod.stale_claims,
     audit_mod.tip4p_panel,
+    audit_mod.reproduction_records,
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
     audit_mod.ase_gofee,
@@ -83,6 +85,50 @@ def test_paper_audit_has_no_drift(capsys):
     assert audit_mod.run() == 0
     drifted = [line for line in capsys.readouterr().err.splitlines() if line.startswith("DRIFT")]
     assert drifted == []
+
+
+def test_panel_reproduce_commands_and_session_metadata(tmp_path):
+    reproduce = (ROOT / "paper/jctc/REPRODUCE.md").read_text()
+    commands = (
+        ("sutton-chen-n12", "sc_h2h_n12", 1, ""),
+        ("tip4p-gmin", "tip4p_h2h", 1, ""),
+        ("agox-gofee", "agox_gofee_h2h", 1, ""),
+        ("water-crest-fair-n192", "water_crest_fair", 8, " --config anneal_repro=/work/anneal_repro"),
+    )
+    for _campaign, rule, cores, suffix in commands:
+        command = f"snakemake -s workflow/Snakefile {rule} --cores {cores} --force{suffix}"
+        assert reproduce.count(command) == 1
+        assert command in (ROOT / "workflow/Snakefile").read_text()
+    assert "pixi run --locked --frozen snakemake water_crest_fair --cores 8 --force" in reproduce
+
+    out = tmp_path / "sessions.jsonl"
+    command = ["snakemake", "-s", "workflow/Snakefile", "tip4p_h2h", "--cores", "1", "--force"]
+    proc = subprocess.run(
+        [
+            "python3",
+            str(ROOT / "scripts/session_metadata.py"),
+            "--output",
+            str(out),
+            "--campaign",
+            "tip4p-gmin",
+            "--root",
+            str(ROOT),
+            "--",
+            *command,
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    row = json.loads(out.read_text())
+    assert row["schema"] == "anneal-session-v1"
+    assert row["campaign"] == "tip4p-gmin"
+    assert row["command"] == command
+    assert row["boot_id"] == Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    assert row["cpu_affinity"] == sorted(__import__("os").sched_getaffinity(0))
+    assert re.fullmatch(r"[0-9a-f]{40}", row["code_revision"])
 
 
 def test_an_untraced_number_fails_the_audit():
@@ -503,6 +549,32 @@ def test_the_revision_index_answers_as_one_git_call_per_question(audited):
         single[local, rows_commit, "first"] = citing[:1] == [rows_commit]
     assert batched == single
     assert sum(single[k] for k in single if k[-1] == "first") == len(table)
+
+
+def test_revision_reachability_comes_from_remote_refs(tmp_path, monkeypatch):
+    def repo(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null", *args],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    repo("init", "-q")
+    (tmp_path / "row.csv").write_text("revision\none\n")
+    repo("add", "row.csv")
+    repo("commit", "-qm", "pushed")
+    pushed = repo("rev-parse", "HEAD")
+    repo("update-ref", "refs/remotes/origin/main", pushed)
+    (tmp_path / "row.csv").write_text("revision\ntwo\n")
+    repo("commit", "-qam", "local only")
+    local = repo("rev-parse", "HEAD")
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    index = audit_mod.RevisionIndex((pushed, local), (), (), ())
+    assert index.exists(local)
+    assert index.on_remote(pushed)
+    assert not index.on_remote(local)
 
 
 @pytest.mark.parametrize(("driver", "attribute"), [(True, True), (True, False), (False, True)])
