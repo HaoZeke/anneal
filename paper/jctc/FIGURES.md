@@ -229,15 +229,16 @@ lj75_landscape.pdf git blob 5a24fbb6f2930e380941f1547ad5274769e1cf25
 
 lj98_landscape.pdf git blob 263f6336faadc4bf77335629622536b9cb60f549
 
-landfold_maps.pdf keeps six raster panels, (i) to (n).
+landfold_maps.pdf draws every panel as vectors from authenticated
+`landscape.ld` and `fes.csv` tables.
 The current-code driver is `examples/landfold_campaign.rs`, invoked by
 `landfold_maps_current` in `workflow/Snakefile`.  It exports every validated
-minimum and publishes `landscape.ld` and `fes.csv` only after all six panels
-finish.  All 300 one-seed jobs completed in parallel: 1,184,080,000 potential
-calls produced 2,076,648 distinct validated minima.  The LJ75 aggregate alone
-contains 1,124,747 minima.  Current landfold descriptor classification stayed
-serial for 68 minutes before checkpointing, so the tables were not promoted
-and the six sealed `landscape.png` panels remain.
+minimum and publishes the six replacement table pairs only after every panel
+finishes.  All 300 one-seed jobs completed in parallel: 1,184,080,000
+potential calls produced 2,076,648 distinct validated minima.  The LJ75
+aggregate contains 1,124,747 minima.
 `data/landfold_maps_v7/campaign-shards.csv` authenticates every finished shard,
-`current-rerun-status.json` gives the remaining folds, and `rerun-status.csv`
-records the append-only state by campaign.
+`current-rerun.json` authenticates the six computed maps with their code
+revision and host, and `rerun-status.csv` records the append-only completed
+state by campaign.  The large LJ75 aggregate `landscape.ld` is listed in
+`data/hf-files.csv`; the smaller table products stay in Git.
