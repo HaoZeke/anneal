@@ -304,6 +304,7 @@ Temporary Items
 *.egg-info
 /docs/source/api/
 /docs/source/crates/
+/docs/source/notes/
 /docs/source/xml/
 /docs/source/**/*.rst
 /docs/doctrees/
