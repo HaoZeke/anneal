@@ -955,6 +955,15 @@ on `bench/cov-floor2`; this series carries the same change on this base.
   833 calls to hit as OpenBLAS is held to one kernel or another, so on a
   silicon cluster with no gap the Si13 numbers belong to the machine's
   BLAS. C20, with no SCC failure, does not move.
+- None of those three builds carries `acf5f0aa`, which stores xtb's
+  `dE/dx` as the rgpot force, the sign rgpot negates into the objective
+  gradient. Until that commit every gradient the xtb handle published
+  pointed uphill, so the `floor-gate/gfn2.csv` rows of `floor-rerun`,
+  `series` and `grad` were measured with it. Their agreement shows that
+  the three builds do the same thing under that sign. It does not show
+  that the gradient fix leaves the search unchanged under the correct
+  sign, and those rows are not evidence for the merged code until the gate
+  is run again on a build that has `acf5f0aa`.
 
 `scripts/covalent_h2h/gfn2_floor_gate.py` runs a same-session gate of
 two example builds and summarises its rows.
