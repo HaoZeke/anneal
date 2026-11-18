@@ -1673,7 +1673,7 @@ impl ClusterMove {
             ClusterMove::ShellRotate(ShellRotate { n_points: n }),
             ClusterMove::Symmetrise(Symmetrise {
                 n_points: n,
-                orders: vec![2, 3, 4, 5, 6],
+                orders: (2..=n).collect(),
                 pair_cutoff: symmetrise_cutoff,
             }),
         ]
@@ -1739,7 +1739,7 @@ impl ClusterMove {
             }),
             ClusterMove::Symmetrise(Symmetrise {
                 n_points: n,
-                orders: vec![2, 3, 4, 5, 6],
+                orders: (2..=n).collect(),
                 pair_cutoff: symmetrise_cutoff,
             }),
         ]

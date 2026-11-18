@@ -3604,7 +3604,7 @@ fn species_groups(species: &[u32]) -> (Vec<usize>, Vec<usize>) {
     (group_a, group_b)
 }
 
-fn large_diameter_ratio(cfg: &Config) -> bool {
+fn has_diameter_contrast(cfg: &Config) -> bool {
     let Some(sigma) = cfg.species_sigma.as_ref() else {
         return false;
     };
@@ -3619,7 +3619,7 @@ fn large_diameter_ratio(cfg: &Config) -> bool {
             largest = largest.max(*value);
         }
     }
-    smallest.is_finite() && largest / smallest >= 1.2
+    smallest.is_finite() && largest > smallest
 }
 /// How far a partial relaxation still had to descend, over the recent trials
 /// that went on to a full relaxation.
@@ -4624,13 +4624,13 @@ where
     let mut md_steps = 0usize;
     let mut md_failed = 0usize;
     let mut nve_unavailable = false;
-    // Wide size mismatch. Random identity exchange leaves the funnel, so the
+    // A caller-declared size contrast. Random identity exchange leaves the funnel, so the
     // ordinary proposal is a softened microcanonical escape whose total
     // kinetic energy grows when the quench returns and shrinks when the
     // energy falls. Every eighth hop tries one inner-large/outer-small
     // exchange instead, and only if the unrelaxed energy stays near the
     // minimum. The preset temperature is the Metropolis temperature.
-    let species_wide = large_diameter_ratio(cfg);
+    let species_wide = has_diameter_contrast(cfg);
     // A build without the escape stops at the first hop that asks for it.
     // The labelled side probes would otherwise spend the budget first and
     // the run would end without saying so.
@@ -8616,11 +8616,9 @@ where
         if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
             let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();
             if withhold {
-                // Withhold Ih-preserving symmetrise on a packing cluster,
-                // and never run CNA or point-group symmetrise on a slab.
-                // A molecule without a frozen frame still uses the branch
-                // below. The 555 fraction is an observation, not a hop
-                // target.
+                // Never run point-group symmetrisation on a partial active
+                // region or a frozen frame. A molecule without either still
+                // uses the branch below.
                 quiet = 0;
                 longest_quiet = 0;
             } else {

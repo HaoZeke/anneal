@@ -358,6 +358,19 @@ fn atomic_number_chart_hit(code: &str) -> bool {
         || (compact.contains("covalent") && compact.contains("[f64;"))
 }
 
+fn fixed_geometry_threshold_hit(code: &str) -> bool {
+    let compact = code
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    (compact.contains("diameter") || compact.contains("largest/smallest"))
+        && [">=1.2", ">1.2", "<=1.2", "<1.2"]
+            .iter()
+            .any(|threshold| compact.contains(threshold))
+        || compact.contains("orders:vec![2,3,4,5,6]")
+}
+
 fn named_size_constant_hit(code: &str) -> bool {
     let compact: String = code
         .chars()
@@ -490,6 +503,16 @@ fn new_rules_reject_prefix_and_accept_postfix_fixtures() {
             "if residual <= *limit { return row; }",
             size_hit,
         ),
+        (
+            "largest / smallest >= 1.2",
+            "largest > smallest",
+            fixed_geometry_threshold_hit,
+        ),
+        (
+            "orders: vec![2, 3, 4, 5, 6]",
+            "orders: (2..=n).collect()",
+            fixed_geometry_threshold_hit,
+        ),
     ];
     for (prefix, postfix, detector) in fixtures {
         assert!(detector(prefix), "prefix fixture escaped: {prefix}");
@@ -563,6 +586,7 @@ fn search_source_has_no_unreviewed_size_or_motif_branches() {
                 || numeric_match_arm_hit(code)
                 || forbidden_identifier_hit(code)
                 || atomic_number_chart_hit(code)
+                || fixed_geometry_threshold_hit(code)
                 || (!python && motif_hit(code));
             if code.is_empty() || !hit {
                 continue;

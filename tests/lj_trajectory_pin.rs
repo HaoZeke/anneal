@@ -90,6 +90,6 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
     // The general move library is deterministic on every build.
     // Motif-specific proposals were removed, so the deterministic short walk hash moved.
-    let expected = "a5bc154f2d33bed926f5033c7ce8cff4015dc482d15b2600cdb9906e5c8b7879";
+    let expected = "5bf5bda9d348b7424e71ba5b59e7c4c147ccc738f4e0c356b4520af50a480adb";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

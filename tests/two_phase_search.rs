@@ -80,8 +80,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
         }
     }
     // The template-free walk is deterministic: cutoff 0xffff, plain
-    // 0x3008 (3 seeds), with and without IRA.
-    let plain_exact = 0x3008;
+    // 0x0018 (2 seeds), with and without IRA.
+    let plain_exact = 0x0018;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

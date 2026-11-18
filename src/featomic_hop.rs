@@ -6,8 +6,8 @@
 //! a core-versus-surface breath: the quench returns the same packing.
 //! The packing label is the unit species mean `μ` (the bank Dcut).
 //! When leftover is a shell mode the hop places one point of the
-//! Plasencia cover of the displacement sphere. A fivefold residual
-//! is the fallback, then a kick of `μ`. Occupancy archive holes and packing kicks then
+//! Plasencia cover of the displacement sphere. Descriptor outliers
+//! are the fallback, then a kick of `μ`. Occupancy archive holes and packing kicks then
 //! ring-lens that Cartesian step: pentagon atoms when the occupied
 //! profile has 5-rings, triangle atoms when it does not. Champion
 //! leftover SOAP is not that lens. No Marks, fcc, or 421 target.
@@ -79,7 +79,7 @@ const DEFECT: f64 = 1e-4;
 /// First proposal that actually moves, in order.
 ///
 /// A closed shell has no leftover direction. The order is one covering
-/// displacement, then the fivefold residual, then the ordinary kick.
+/// displacement, then descriptor outliers, then the ordinary kick.
 pub fn first_that_moves(origin: ArrayView1<f64>, steps: &[Array1<f64>]) -> Array1<f64> {
     for step in steps {
         if displacement_rms(step, origin) > 1e-6 {
