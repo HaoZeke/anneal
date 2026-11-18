@@ -8741,8 +8741,9 @@ where
                 // tetrahedral. Detecting several axes and closing them into a group
                 // is what makes this the published scheme rather than an axial
                 // constraint wearing its name.
+                let max_order = n.clamp(2, 12);
                 let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-                for order in [2usize, 3, 4, 5, 6] {
+                for order in 2..=max_order {
                     if let Some(c) =
                         crate::symmetrise::detect(x.view(), n, &[order], cfg.symmetry_tolerance)
                     {
@@ -8750,6 +8751,8 @@ where
                     }
                 }
                 let group = crate::symmetrise::generate_group(&cands, 60);
+                let detected_orders: Vec<usize> =
+                    cands.iter().map(|candidate| candidate.order).collect();
                 let symmetrised_state = if group.len() > 1 {
                     Some(match cfg.species.as_deref() {
                         Some(species) if species.len() == n => {
@@ -8772,7 +8775,7 @@ where
                     crate::symmetrise::symmetrise_detected(
                         x.view(),
                         n,
-                        &[2, 3, 4, 5, 6],
+                        &detected_orders,
                         cfg.symmetry_tolerance,
                         cfg.symmetry_merge_radius,
                     )
