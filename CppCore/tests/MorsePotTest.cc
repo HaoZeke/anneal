@@ -435,4 +435,105 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
     CHECK(rgpot::teamsOpened() == before);
     CHECK(countBitDiffs(got, ref) == 0);
   }
+
+  // Stored-half rebuild that preserves n_atoms, slices, total_up and total_inc
+  // while shifting the pair distribution from the low atom indices to the high
+  // atom indices must recompute p0_splits/p1_splits and stay bit-exact.
+  {
+    const std::size_t n = rgpot::kTeamMinAtoms;
+    const auto cluster = fccVacancy(6, 2.55 * std::sqrt(2.0), 29);
+    const std::size_t m = cluster.z.size();
+    REQUIRE(m == 863);
+    const double spacing = 12.0;
+    const int grid = 22;
+    const double side = static_cast<double>(grid) * spacing;
+    const std::array<double, 9> box = {side, 0.0, 0.0, 0.0, side, 0.0, 0.0, 0.0, side};
+
+    std::vector<double> sparse_pos;
+    sparse_pos.reserve(3 * (n - m));
+    for (std::size_t idx = 0; idx < n - m; ++idx) {
+      const std::size_t slot = idx + static_cast<std::size_t>(grid * grid * 4);
+      const std::size_t gx = slot % grid;
+      const std::size_t gy = (slot / grid) % grid;
+      const std::size_t gz =
+          slot / (static_cast<std::size_t>(grid) * static_cast<std::size_t>(grid));
+      sparse_pos.push_back((static_cast<double>(gx) + 0.5) * spacing);
+      sparse_pos.push_back((static_cast<double>(gy) + 0.5) * spacing);
+      sparse_pos.push_back((static_cast<double>(gz) + 0.5) * spacing);
+    }
+
+    std::vector<double> pos_front;
+    pos_front.reserve(3 * n);
+    for (std::size_t i = 0; i < m; ++i) {
+      pos_front.push_back(cluster.pos[3 * i] + 12.0);
+      pos_front.push_back(cluster.pos[3 * i + 1] + 12.0);
+      pos_front.push_back(cluster.pos[3 * i + 2] + 12.0);
+    }
+    pos_front.insert(pos_front.end(), sparse_pos.begin(), sparse_pos.end());
+
+    std::vector<double> pos_back;
+    pos_back.reserve(3 * n);
+    pos_back.insert(pos_back.end(), sparse_pos.begin(), sparse_pos.end());
+    for (std::size_t i = 0; i < m; ++i) {
+      pos_back.push_back(cluster.pos[3 * i] + 12.0);
+      pos_back.push_back(cluster.pos[3 * i + 1] + 12.0);
+      pos_back.push_back(cluster.pos[3 * i + 2] + 12.0);
+    }
+    const std::vector<int> z(n, 29);
+
+    ThreadGuard::set("1");
+    rgpot::MorsePot serial_pot(cu_vacancy);
+    serial_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+    const auto ref_front = runFullEval(serial_pot, pos_front, z, box);
+    const auto ref_back = runFullEval(serial_pot, pos_back, z, box);
+
+    ThreadGuard::set("4");
+    rgpot::MorsePot par_pot(cu_vacancy);
+    par_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+    const auto got_front = runFullEval(par_pot, pos_front, z, box);
+    CHECK(par_pot.listReused());
+    const std::size_t retained_front = par_pot.retainedPairs();
+    const auto snap_front = rgpot::detail::morseStoredSplitSnapshot();
+    REQUIRE(snap_front.atoms == n);
+    REQUIRE(snap_front.slices == 4);
+    REQUIRE(snap_front.total_up >= 4096);
+    REQUIRE(snap_front.total_inc == 2 * snap_front.total_up);
+    REQUIRE(snap_front.p0_splits.size() == 5);
+    REQUIRE(snap_front.p1_splits.size() == 5);
+    for (std::size_t s = 1; s < 4; ++s) {
+      CHECK(snap_front.p0_splits[s] > 0);
+      CHECK(snap_front.p0_splits[s] <= m);
+      CHECK(snap_front.p1_splits[s] > 0);
+      CHECK(snap_front.p1_splits[s] <= m);
+    }
+    CHECK(countBitDiffs(got_front, ref_front) == 0);
+
+    // First call on pos_back forces a Verlet rebuild with identical totals
+    // and the dense cluster moved to [n - m, n).
+    std::vector<double> probe_f(3 * n, 0.0);
+    rgpot::ForceOut probe_out{};
+    probe_out.F = probe_f.data();
+    par_pot.forceImpl({n, pos_back.data(), z.data(), box.data()}, &probe_out);
+    CHECK_FALSE(par_pot.listReused());
+    const auto got_back = runFullEval(par_pot, pos_back, z, box);
+    CHECK(par_pot.listReused());
+    CHECK(par_pot.retainedPairs() == retained_front);
+
+    const auto snap_back = rgpot::detail::morseStoredSplitSnapshot();
+    CHECK(snap_back.owner == snap_front.owner);
+    CHECK(snap_back.build_id == snap_front.build_id + 1);
+    CHECK(snap_back.atoms == snap_front.atoms);
+    CHECK(snap_back.slices == snap_front.slices);
+    CHECK(snap_back.total_up == snap_front.total_up);
+    CHECK(snap_back.total_inc == snap_front.total_inc);
+    CHECK(snap_back.p0_splits != snap_front.p0_splits);
+    CHECK(snap_back.p1_splits != snap_front.p1_splits);
+    for (std::size_t s = 1; s < 4; ++s) {
+      CHECK(snap_back.p0_splits[s] >= n - m);
+      CHECK(snap_back.p0_splits[s] < n);
+      CHECK(snap_back.p1_splits[s] >= n - m);
+      CHECK(snap_back.p1_splits[s] < n);
+    }
+    CHECK(countBitDiffs(got_back, ref_back) == 0);
+  }
 }

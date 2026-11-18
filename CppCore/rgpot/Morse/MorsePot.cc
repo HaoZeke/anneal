@@ -42,10 +42,9 @@ namespace {
 /// exceeds the pair work).
 constexpr std::size_t kMinParallelHalfPairs = 4096;
 
-/// Atom-index alignment for slice boundaries: 8 doubles = 64 bytes (one cache
-/// line in row_e/energy, three in F, six in row_s/virial), preventing false
-/// sharing between slices.
-constexpr std::size_t kCacheLineAtoms = 8;
+/// Atom-index quantum for slice boundaries. The split stays deterministic and
+/// coarse enough to keep adjacent slices from bouncing one atom at a time.
+constexpr std::size_t kSliceAtomQuantum = 8;
 
 /// Stack batch width for vectorised simd::exp_fixed_n evaluation.
 constexpr std::size_t kPairBatch = 64;
@@ -85,6 +84,19 @@ struct MorseWorkspace {
   std::vector<double> pair_hv;
   std::vector<double> row_e;
   std::vector<double> row_s;
+  std::vector<std::size_t> p0_splits;
+  std::vector<std::size_t> p1_splits;
+  const nlist::Neighbours *split_owner = nullptr;
+  std::uint64_t split_build_id = 0;
+  std::size_t split_atoms = 0;
+  int split_slices = 0;
+  std::size_t split_total_up = 0;
+  std::size_t split_total_inc = 0;
+
+  const nlist::Neighbours *scratch_owner = nullptr;
+  std::uint64_t scratch_build_id = 0;
+  std::size_t scratch_slots = 0;
+  std::uint64_t scratch_avail = 0;
 };
 
 struct WorkspaceLease {
@@ -161,6 +173,12 @@ void buildStoredHalfIndex(MorseWorkspace &ws, const nlist::Neighbours &cells, st
   ws.build_id = cells.builds();
   ws.index_atoms = n;
   ws.slots = cells.slots();
+  ws.split_owner = nullptr;
+  ws.split_build_id = 0;
+  ws.split_atoms = 0;
+  ws.split_slices = 0;
+  ws.split_total_up = 0;
+  ws.split_total_inc = 0;
 }
 
 template <typename WorkFn>
@@ -181,7 +199,8 @@ void partitionAtomsByWork(std::size_t n, int slices, std::int64_t total_work, Wo
         hi = mid;
       }
     }
-    std::size_t aligned = ((lo + kCacheLineAtoms / 2) / kCacheLineAtoms) * kCacheLineAtoms;
+    std::size_t aligned =
+        ((lo + kSliceAtomQuantum / 2) / kSliceAtomQuantum) * kSliceAtomQuantum;
     const std::size_t prev = splits[static_cast<std::size_t>(s - 1)];
     if (aligned < prev) {
       aligned = prev;
@@ -194,7 +213,18 @@ void partitionAtomsByWork(std::size_t n, int slices, std::int64_t total_work, Wo
   splits[static_cast<std::size_t>(slices)] = n;
 }
 
-bool pairScratchFits(std::size_t num_pairs, const PerAtomOut *atoms) {
+std::uint64_t cachedAvailableBytes(MorseWorkspace &ws, const nlist::Neighbours &cells) {
+  if (ws.scratch_owner != &cells || ws.scratch_build_id != cells.builds() ||
+      ws.scratch_slots != cells.slots()) {
+    ws.scratch_owner = &cells;
+    ws.scratch_build_id = cells.builds();
+    ws.scratch_slots = cells.slots();
+    ws.scratch_avail = nlist::availableBytes();
+  }
+  return ws.scratch_avail;
+}
+
+bool pairScratchFits(std::size_t num_pairs, const PerAtomOut *atoms, std::uint64_t avail) {
   std::size_t bytes_per_pair = sizeof(PairForce) + sizeof(std::int32_t) + 1;
   if (atoms != nullptr) {
     if (atoms->energy != nullptr) {
@@ -204,7 +234,6 @@ bool pairScratchFits(std::size_t num_pairs, const PerAtomOut *atoms) {
       bytes_per_pair += 6 * sizeof(double);
     }
   }
-  const std::uint64_t avail = nlist::availableBytes();
   if (avail == 0) {
     return true;
   }
@@ -362,8 +391,9 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
 
   if (!neighbours_.streaming()) {
     const std::size_t est_half_pairs = neighbours_.slots() / 2;
+    const std::uint64_t scratch_avail = cachedAvailableBytes(ws, neighbours_);
     if (slices > 1 && est_half_pairs >= kMinParallelHalfPairs &&
-        pairScratchFits(est_half_pairs, atoms)) {
+        pairScratchFits(est_half_pairs, atoms, scratch_avail)) {
       const bool index_valid = neighbours_.reused() && ws.owner == &neighbours_ &&
                                ws.build_id == neighbours_.builds() && ws.index_atoms == n_atoms &&
                                ws.slots == neighbours_.slots();
@@ -386,20 +416,33 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
         ws.row_e.resize(n_atoms);
         ws.row_s.resize(6 * n_atoms);
 
-        std::vector<std::size_t> p0_splits;
-        std::vector<std::size_t> p1_splits;
-        partitionAtomsByWork(
-            n_atoms, slices, static_cast<std::int64_t>(total_up),
-            [&](std::size_t idx) { return static_cast<std::int64_t>(ws.up_off[idx]); }, p0_splits);
         const std::int64_t total_inc =
             static_cast<std::int64_t>(ws.lo_off[n_atoms]) + static_cast<std::int64_t>(total_up);
-        partitionAtomsByWork(
-            n_atoms, slices, total_inc,
-            [&](std::size_t idx) {
-              return static_cast<std::int64_t>(ws.lo_off[idx]) +
-                     static_cast<std::int64_t>(ws.up_off[idx]);
-            },
-            p1_splits);
+        if (ws.split_owner != &neighbours_ || ws.split_build_id != ws.build_id ||
+            ws.split_atoms != n_atoms || ws.split_slices != slices ||
+            ws.split_total_up != total_up ||
+            ws.split_total_inc != static_cast<std::size_t>(total_inc)) {
+          partitionAtomsByWork(n_atoms, slices, static_cast<std::int64_t>(total_up),
+                               [&](std::size_t idx) {
+                                 return static_cast<std::int64_t>(ws.up_off[idx]);
+                               },
+                               ws.p0_splits);
+          partitionAtomsByWork(
+              n_atoms, slices, total_inc,
+              [&](std::size_t idx) {
+                return static_cast<std::int64_t>(ws.lo_off[idx]) +
+                       static_cast<std::int64_t>(ws.up_off[idx]);
+              },
+              ws.p1_splits);
+          ws.split_owner = &neighbours_;
+          ws.split_build_id = ws.build_id;
+          ws.split_atoms = n_atoms;
+          ws.split_slices = slices;
+          ws.split_total_up = total_up;
+          ws.split_total_inc = static_cast<std::size_t>(total_inc);
+        }
+        const std::size_t *p0_splits = ws.p0_splits.data();
+        const std::size_t *p1_splits = ws.p1_splits.data();
 
         std::uint64_t *active_bits = ws.active_bits.data();
         PairForce *pair_forces = ws.pair_forces.data();
@@ -785,6 +828,25 @@ void MorsePot::hessianVectorImpl(const ForceInput &in, const double *v,
     hj[2] -= kz;
   });
 }
+
+namespace detail {
+
+MorseSplitSnapshot morseStoredSplitSnapshot() {
+  WorkspaceLease lease;
+  const MorseWorkspace &ws = *lease.ws;
+  return MorseSplitSnapshot{
+      .owner = ws.split_owner,
+      .build_id = ws.split_build_id,
+      .atoms = ws.split_atoms,
+      .slices = ws.split_slices,
+      .total_up = ws.split_total_up,
+      .total_inc = ws.split_total_inc,
+      .p0_splits = ws.p0_splits,
+      .p1_splits = ws.p1_splits,
+  };
+}
+
+} // namespace detail
 
 } // namespace rgpot
 
