@@ -4285,8 +4285,8 @@ where
         ledger.stop_below(energy);
     }
     let n = cfg.n_points;
-    let (continuous_symmetry_classes, csm_reseed_hops) = match cfg.continuous_symmetry {
-        ContinuousSymmetry::Off => (None, 0),
+    let continuous_symmetry_classes = match cfg.continuous_symmetry {
+        ContinuousSymmetry::Off => None,
         ContinuousSymmetry::Inversion { interval }
         | ContinuousSymmetry::Measure { interval, .. } => {
             assert!(
@@ -4303,11 +4303,7 @@ where
                 n,
                 "continuous-symmetry classes must match n_points"
             );
-            let reseed = match cfg.continuous_symmetry {
-                ContinuousSymmetry::Measure { reseed_hops, .. } => reseed_hops,
-                _ => 0,
-            };
-            (Some(classes), reseed)
+            Some(classes)
         }
     };
     // The descriptor and the metric have to agree. A shape distance is
@@ -5018,7 +5014,10 @@ where
     let mut acc_yes = vec![0usize; n_rep];
     let mut ret_windows = vec![0usize; n_rep];
     let mut ret_yes = vec![0usize; n_rep];
+    let mut revisit_kick = vec![false; n_rep];
+    let initial_record_effort = (ledger.spent() / n_rep).max(1);
     let mut replica_improve_spent = vec![0usize; n_rep];
+    let mut replica_record_quiet = vec![initial_record_effort; n_rep];
     let mut replica_own_spent = vec![0usize; n_rep];
     let mut prev_ledger_spent = ledger.spent();
     let mut orbit_checks = 0usize;
@@ -5051,7 +5050,6 @@ where
     // Set after a rigid stall when the preset relocates one molecule.
     // Cleared when a new lowest minimum is recorded.
     let mut cage_edit = false;
-    let mut csm_reseed_stamp = 0usize;
     // Calls spent when a labelled motif reseed last ran. Half a budget
     // since the incumbent last improved, so a search that is still
     // descending does not pay for it.
@@ -5637,7 +5635,6 @@ where
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
-            csm_reseed_stamp = hops;
             cage_edit = false;
             new_incumbent = true;
         }
@@ -6906,108 +6903,8 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        // A new incumbent, including one just produced by the projection
-        // above, restarts the short clock. The clock is not
-        // `restart_patience`: that one is thousands of force calls and does
-        // not match the five-step restart in the 2013 symmetry paper.
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
-            csm_reseed_stamp = hops;
-        }
-        // Unlabelled clusters keep the icosahedral test alone. It counts
-        // common neighbours, so it runs only when a reseed can fire.
-        // Counting on every hop was the Au38 slowdown, and with the
-        // reseed interval still ahead the result cannot change the branch.
-        if !cfg.adaptive_search
-            && csm_reseed_hops > 0
-            && cfg.prior_reseed
-            && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
-            && cfg.packing_cna_applies()
-            && crate::soap::ih_dominated(
-                x.view(),
-                crate::soap::SoapSpec::at_length(cfg.length_scale),
-            )
-            && ledger.remaining() > 0
-        {
-            csm_reseed_stamp = hops;
-            // Orbit completion stays. The fresh cluster keeps its atom order,
-            // so species labels stay put. Projection is the stall gate below,
-            // not every reseed.
-            let classes = continuous_symmetry_classes
-                .as_deref()
-                .expect("a CSM reseed has equivalence classes");
-            let mut fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
-            if let Some(closed) = crate::packing::on_new_basin(
-                fresh.view(),
-                n,
-                cfg.symmetry_tolerance,
-                cfg.symmetry_merge_radius,
-                cfg.symmetrise_core_fraction,
-                cfg.min_separation,
-            ) {
-                fresh = closed;
-            }
-            // The unprojected reseed is the incumbent path. Projecting every
-            // reseed leaves the LJ75 icosahedral floor and also pulls LJ104
-            // off seeds that already hit. Project only when the best state
-            // is still icosahedral and the plain quench did not beat it.
-            let best_before = ledger.best;
-            let best_ih = ledger.best_state.as_ref().is_some_and(|state| {
-                crate::soap::ih_dominated(
-                    state.view(),
-                    crate::soap::SoapSpec::at_length(cfg.length_scale),
-                )
-            });
-            // Successful LJ104 paths leave an icosahedral best within about
-            // thirty hops. The LJ75 Marks search sits on that best for the
-            // rest of the budget. Project only after the longer stall, and
-            // only when the plain quench did not already beat it.
-            let stalled = hops.saturating_sub(hops_at_lowest) >= csm_reseed_hops.saturating_mul(8);
-            let (plain_energy, plain_state) = relax(ledger, fresh.view(), cfg.relax_steps);
-            let (reseed_energy, reseed_state) = if best_ih
-                && stalled
-                && plain_energy >= best_before - 1e-10
-                && let Some(projected) = crate::csm::propose(fresh.view(), classes)
-            {
-                let (projected_energy, projected_state) =
-                    relax(ledger, projected.coordinates.view(), cfg.relax_steps);
-                if projected_energy < best_before - 1e-10 {
-                    (projected_energy, projected_state)
-                } else {
-                    (plain_energy, plain_state)
-                }
-            } else {
-                (plain_energy, plain_state)
-            };
-            let reseed_gradient = record_quenched_answer(
-                cfg,
-                ledger,
-                &mut grad,
-                reseed_energy,
-                reseed_state.view(),
-                &mut unconverged_records,
-            );
-            let reseed_ok = quench_is_sane(cfg, reseed_energy, reseed_state.view())
-                && (grad.is_none() || reseed_gradient.is_some());
-            if reseed_ok {
-                let reached = identity.basin_of(reseed_state.view());
-                adopt_minimum!(
-                    reseed_energy,
-                    reseed_state,
-                    reseed_gradient,
-                    Some(reached),
-                    AdoptionHistory::Fresh,
-                    Some((here, reached)),
-                    Some("csm-reseed"),
-                    hops
-                );
-                soft_cache = None;
-                basin_entry = None;
-                quiet = 0;
-            }
-            if ledger.remaining() == 0 {
-                break HopStop::of_closed(ledger);
-            }
         }
         // A labelled incumbent whose energy has stood for half the budget
         // is offered the motifs its common-neighbour signature lacks:
@@ -7957,8 +7854,16 @@ where
                 cfg.n_points,
             )
             && cfg.packing_cna_applies();
-        if held_displacement {
-            let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
+        // A completed, accepted return to the incumbent basin is direct
+        // evidence that the current proposal family is cycling. The next hop
+        // moves every free point, with its amplitude still controlled by the
+        // same acceptance-driven scale as the ordinary adaptive moves. Basin
+        // identity is the run's configured fingerprint tolerance; no packing
+        // or named structural motif enters this trigger.
+        let revisit_displacement = cfg.adaptive_search && std::mem::take(&mut revisit_kick[rep]);
+        if held_displacement || revisit_displacement {
+            let step =
+                preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale * step_scales[rep];
             trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
         }
         let editing_cage = cage_edit;
@@ -7974,7 +7879,7 @@ where
             cage_edit = false;
             hops_at_lowest = hops;
         }
-        let proposal_action = if held_displacement {
+        let proposal_action = if held_displacement || revisit_displacement {
             "all".to_owned()
         } else if cov_fire {
             "covariance".to_owned()
@@ -8247,6 +8152,9 @@ where
         let returning = cfg.return_screen && drift < cfg.merge_radius;
         if returning {
             returned += 1;
+            if cfg.adaptive_search {
+                revisit_kick[rep] = true;
+            }
         }
         // Screen under every mode, including minima hopping. Turning the screen
         // off under MH paid full quenches for every scatter: ~228 force per hop
@@ -9669,6 +9577,12 @@ where
                 sb.keep(now, e, x.view());
             }
         }
+        if cfg.adaptive_search
+            && let (Some(previous), Some(now)) = (here_before, landed)
+            && previous == now
+        {
+            revisit_kick[rep] = true;
+        }
         if cfg.track_funnels {
             // Accepted hops only. A rejected proposal says the chain declined
             // to move, which is a statement about the acceptance rule rather
@@ -9710,17 +9624,11 @@ where
             continue;
         }
         if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
-            let soap_spec = crate::soap::SoapSpec::at_length(cfg.length_scale);
-            let withhold = (cfg.packing_cna_applies()
-                && crate::soap::ih_dominated(x.view(), soap_spec))
-                || cfg.active_region.is_some()
-                || cfg.frozen.is_some();
+            let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();
             if withhold {
-                // Withhold Ih-preserving symmetrise on a packing cluster,
-                // and never run CNA or point-group symmetrise on a slab.
-                // A molecule without a frozen frame still uses the branch
-                // below. The 555 fraction is an observation, not a hop
-                // target.
+                // Never run point-group symmetrisation on a slab or frozen
+                // frame. A molecule without a frozen frame still uses the
+                // branch below.
                 quiet = 0;
                 longest_quiet = 0;
             } else {
@@ -9944,7 +9852,8 @@ where
             // no random numbers. A face-centred-cubic plateau does not take
             // it: that is the 38-point minimum, and leaving it is the wrong
             // move.
-            if directed_leave
+            if !cfg.adaptive_search
+                && directed_leave
                 && cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(
                     x.view(),
@@ -10107,7 +10016,8 @@ where
             // quench is kept only when it deepens the incumbent. A growth
             // that fails holds the next one until the incumbent changes.
             // The skipped leave is one all-points displacement.
-            if directed_leave
+            if !cfg.adaptive_search
+                && directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(
@@ -10438,9 +10348,20 @@ where
             prev_ledger_spent = now_spent;
             if ledger.best < adaptive_best_seen - 1e-9 {
                 adaptive_best_seen = ledger.best;
+                let record_span = replica_own_spent[rep]
+                    .saturating_sub(replica_improve_spent[rep])
+                    .max(1);
+                replica_record_quiet[rep] = replica_record_quiet[rep].max(record_span);
                 replica_improve_spent = replica_own_spent.clone();
             }
-            let plateau_calls = (ledger.budget() / (25 * n_rep)).clamp(20_000, 50_000);
+            // Let the run set its own plateau clock. The calls needed to
+            // produce a record are direct evidence for how long a productive
+            // walk can remain quiet; a restart waits for four times the longest
+            // such interval observed on this replica. If that restart does
+            // not improve the record, the quiet interval itself doubles the
+            // next clock instead of repeatedly cutting off the same-length
+            // walk.
+            let plateau_calls = replica_record_quiet[rep].saturating_mul(4);
             let threshold = if n_rep > 1 && rep == 0 {
                 plateau_calls.saturating_mul(2)
             } else {
@@ -10482,7 +10403,8 @@ where
                 acc_yes[rep] = 0;
                 ret_windows[rep] = 0;
                 ret_yes[rep] = 0;
-                replica_improve_spent[rep] = replica_own_spent[rep];
+                replica_record_quiet[rep] = replica_record_quiet[rep]
+                    .max(replica_own_spent[rep].saturating_sub(replica_improve_spent[rep]));
                 if ef.is_finite() && xf.len() == x.len() {
                     let reached = identity.basin_of(xf.view());
                     adopt_minimum!(
@@ -11429,6 +11351,7 @@ mod tests {
         let species = Gupta::copper_gold_species(6, 32);
         let pot = Gupta::copper_gold(6, 32);
         let mut cfg = Config::recommended(38).with_species(species, None);
+        cfg.prior_core = true;
         cfg.prior_handover = handover;
         let mut rng = StdRng::seed_from_u64(2000);
         let start = random_cluster_in_radius(38, cfg.start_radius(), cfg.min_separation, &mut rng);
@@ -11772,8 +11695,10 @@ mod tests {
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
         assert!(der.escape_on_stall && der.trail_on_stall && !der.restart_on_stall);
         assert!(rec.escape_on_stall && rec.trail_on_stall && !rec.restart_on_stall);
-        assert!(rec.prior_soap && rec.prior_reseed && rec.prior_growth);
-        assert!(rec.prior_core && rec.prior_motif && !rec.general_collective);
+        assert!(rec.prior_soap);
+        assert!(!rec.prior_reseed && !rec.prior_growth);
+        assert!(!rec.prior_core && !rec.prior_handover && !rec.prior_motif);
+        assert!(!rec.general_collective);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);
@@ -11858,10 +11783,16 @@ mod tests {
             rec.continuous_symmetry,
             ContinuousSymmetry::Measure {
                 interval: 10,
+                reseed_hops: 0
+            }
+        ));
+        assert!(matches!(
+            comm.continuous_symmetry,
+            ContinuousSymmetry::Measure {
+                interval: 10,
                 reseed_hops: 5
             }
         ));
-        assert_eq!(rec.continuous_symmetry, comm.continuous_symmetry);
         assert!(matches!(
             Config::for_cluster(75).continuous_symmetry,
             ContinuousSymmetry::Off

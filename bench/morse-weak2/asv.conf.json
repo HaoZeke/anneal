@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "project": "anneal morse-weak2",
+  "project_url": "https://github.com/HaoZeke/anneal",
+  "repo": "../..",
+  "branches": ["main"],
+  "environment_type": "existing:/work/anneal/.venv/bin/python3",
+  "benchmark_dir": "benchmarks",
+  "results_dir": "results",
+  "html_dir": "html"
+}

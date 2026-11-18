@@ -1501,12 +1501,7 @@ impl Config {
         length_scale: f64,
         energy_scale: f64,
     ) -> Self {
-        let mut cfg = Self::recommended_with_scales(n_points, length_scale, energy_scale);
-        cfg.adaptive_search = true;
-        cfg.replicas = 2;
-        cfg.ladder_mode = LadderMode::NonReversible;
-        cfg.ladder_top = 2.0;
-        cfg
+        Self::recommended_with_scales(n_points, length_scale, energy_scale)
     }
 
     /// [`Config::recommended`] with [`Config::recommended_adaptive_with_scales`].
@@ -1536,6 +1531,10 @@ impl Config {
     /// ```
     pub fn recommended_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
+        cfg.adaptive_search = true;
+        cfg.replicas = 2;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.ladder_top = 2.0;
         cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
@@ -1570,15 +1569,18 @@ impl Config {
         // 6603 [3344, 16285.25]. The Bayes threshold keeps its 200-step
         // value.
         cfg.relax_steps = 1000;
-        // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
-        // The same paper's LJ75 table used a restart of about five basin
-        // hopping steps once symmetrisation was on. Both run inside this
-        // chain. The reseed fires only on an icosahedral plateau, so a
-        // face-centred construction is not abandoned.
+        // Measure continuous symmetry, but do not steer from a named motif.
+        // The general record-quiet restart below replaces the old
+        // icosahedral five-hop reseed.
         cfg.continuous_symmetry = ContinuousSymmetry::Measure {
             interval: 10,
-            reseed_hops: 5,
+            reseed_hops: 0,
         };
+        cfg.prior_reseed = false;
+        cfg.prior_growth = false;
+        cfg.prior_core = false;
+        cfg.prior_handover = false;
+        cfg.prior_motif = false;
         // Shao, Cheng and Cai, J. Comput. Chem. 25, 1693 (2004): the
         // highest-energy occupied site moves onto a vacant site of the
         // lattice the current structure defines. One arm, at every size.
@@ -2589,18 +2591,17 @@ mod coverage_behaviour {
     }
 
     #[test]
-    fn recommended_adaptive_leaves_recommended_hash_intact() {
+    fn recommended_adaptive_is_the_default_recommended_search() {
         let base = Config::recommended(38);
         let adaptive = Config::recommended_adaptive(38);
-        assert!(!base.adaptive_search);
-        assert!(!base.resolved_json().unwrap().contains("adaptive_search"));
+        assert!(base.adaptive_search);
         assert!(adaptive.adaptive_search);
         assert_eq!(adaptive.replicas, 2);
         assert!(matches!(
             adaptive.ladder_mode,
             super::LadderMode::NonReversible
         ));
-        assert_ne!(
+        assert_eq!(
             adaptive.resolved_sha256().unwrap(),
             base.resolved_sha256().unwrap()
         );

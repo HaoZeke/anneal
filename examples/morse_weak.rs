@@ -1,6 +1,7 @@
 // Copyright (c) anneal developers
 //! One seed of `Config::recommended` or `Config::recommended_adaptive` on
-//! the twelve Cambridge Morse clusters and the five Lennard-Jones clusters.
+//! the twelve Cambridge Morse clusters, eight Lennard-Jones clusters, and
+//! Au55.
 //!
 //! ```text
 //! morse_weak run <system> <budget> <seed> [recommended|recommended_adaptive]
@@ -15,14 +16,23 @@ use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use anneal_core::potentials::{PairKind, PairPotential};
-use ndarray::ArrayView1;
+use anneal_core::potentials::{Gupta, PairKind, PairPotential};
+use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 const TOL: f64 = 0.001;
+
+#[derive(Clone, Copy)]
+enum Kind {
+    LennardJones,
+    Morse(f64),
+    Gold,
+}
+
+type Potential = dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync;
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
@@ -39,26 +49,37 @@ fn cmd_run(args: &[String]) {
     let budget: usize = args.get(1).and_then(|v| v.parse().ok()).expect("budget");
     let seed: u64 = args.get(2).and_then(|v| v.parse().ok()).expect("seed");
     let arm = args.get(3).map(String::as_str).unwrap_or("recommended");
-    let Some((n, rho, reference)) = system(name) else {
+    let Some((n, kind, reference)) = system(name) else {
         eprintln!("unknown system {name}");
         std::process::exit(2);
     };
     let level = reference + TOL;
-    let length = match rho {
-        None => PairKind::LennardJones.length_scale(),
-        Some(value) => PairKind::Morse { rho: value }.length_scale(),
+    let (length, energy_scale) = match kind {
+        Kind::LennardJones => (PairKind::LennardJones.length_scale(), 1.0),
+        Kind::Morse(rho) => (PairKind::Morse { rho }.length_scale(), 1.0),
+        Kind::Gold => gupta_scales(),
     };
     let cfg = match arm {
-        "recommended" => Config::recommended_with_scales(n, length, 1.0),
-        "recommended_adaptive" => Config::recommended_adaptive_with_scales(n, length, 1.0),
+        "recommended" => Config::recommended_with_scales(n, length, energy_scale),
+        "recommended_adaptive" => Config::recommended_adaptive_with_scales(n, length, energy_scale),
         _ => {
             eprintln!("unknown arm {arm}");
             std::process::exit(2);
         }
     };
-    let potential = match rho {
-        None => PairPotential::lennard_jones(n),
-        Some(value) => PairPotential::morse(n, value),
+    let potential: Box<Potential> = match kind {
+        Kind::LennardJones => {
+            let potential = PairPotential::lennard_jones(n);
+            Box::new(move |x| potential.value_and_gradient(x))
+        }
+        Kind::Morse(rho) => {
+            let potential = PairPotential::morse(n, rho);
+            Box::new(move |x| potential.value_and_gradient(x))
+        }
+        Kind::Gold => {
+            let potential = Gupta::copper_gold(0, n);
+            Box::new(move |x| potential.value_and_gradient(x))
+        }
     };
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
@@ -67,7 +88,7 @@ fn cmd_run(args: &[String]) {
     let started = Instant::now();
     let energy = |x: ArrayView1<f64>| {
         let mark = Instant::now();
-        let out = potential.value_and_gradient(x);
+        let out = potential(x);
         inside.fetch_add(mark.elapsed().as_nanos() as u64, Ordering::Relaxed);
         out
     };
@@ -138,32 +159,40 @@ fn is_hit(best: f64, reference: f64) -> bool {
     best <= reference + TOL
 }
 
-fn system(name: &str) -> Option<(usize, Option<f64>, f64)> {
+fn system(name: &str) -> Option<(usize, Kind, f64)> {
     Some(match name {
-        "lj38" => (38, None, -173.928427),
-        "lj55" => (55, None, -279.248470),
-        "lj75" => (75, None, -397.492331),
-        "lj98" => (98, None, -543.665361),
-        "lj104" => (104, None, -582.086642),
-        "m38r3" => (38, Some(3.0), -249.159174),
-        "m38r6" => (38, Some(6.0), -157.477108),
-        "m38r10" => (38, Some(10.0), -145.849817),
-        "m38r14" => (38, Some(14.0), -144.321054),
-        "m55r3" => (55, Some(3.0), -417.918562),
-        "m55r6" => (55, Some(6.0), -250.286609),
-        "m55r10" => (55, Some(10.0), -225.814286),
-        "m55r14" => (55, Some(14.0), -220.646208),
-        "m75r6" => (75, Some(6.0), -351.472365),
-        "m75r14" => (75, Some(14.0), -318.407330),
-        "m80r6" => (80, Some(6.0), -378.333471),
-        "m80r14" => (80, Some(14.0), -340.811371),
+        "lj38" => (38, Kind::LennardJones, -173.928427),
+        "lj55" => (55, Kind::LennardJones, -279.248470),
+        "lj75" => (75, Kind::LennardJones, -397.492331),
+        "lj98" => (98, Kind::LennardJones, -543.665361),
+        "lj102" => (102, Kind::LennardJones, -569.363652),
+        "lj103" => (103, Kind::LennardJones, -575.766131),
+        "lj104" => (104, Kind::LennardJones, -582.086642),
+        "lj150" => (150, Kind::LennardJones, -893.310258),
+        "au55" => (55, Kind::Gold, -191.03085280),
+        "m38r3" => (38, Kind::Morse(3.0), -249.159174),
+        "m38r6" => (38, Kind::Morse(6.0), -157.477108),
+        "m38r10" => (38, Kind::Morse(10.0), -145.849817),
+        "m38r14" => (38, Kind::Morse(14.0), -144.321054),
+        "m55r3" => (55, Kind::Morse(3.0), -417.918562),
+        "m55r6" => (55, Kind::Morse(6.0), -250.286609),
+        "m55r10" => (55, Kind::Morse(10.0), -225.814286),
+        "m55r14" => (55, Kind::Morse(14.0), -220.646208),
+        "m75r6" => (75, Kind::Morse(6.0), -351.472365),
+        "m75r14" => (75, Kind::Morse(14.0), -318.407330),
+        "m80r6" => (80, Kind::Morse(6.0), -378.333471),
+        "m80r14" => (80, Kind::Morse(14.0), -340.811371),
         _ => return None,
     })
 }
 
+fn gupta_scales() -> (f64, f64) {
+    (2.8850, 2.0390)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_hit, system};
+    use super::{Kind, is_hit, system};
     use anneal_core::potentials::PairPotential;
 
     #[test]
@@ -177,8 +206,11 @@ mod tests {
         for name in [
             "m38r6", "m38r10", "m38r14", "m55r3", "m55r6", "m55r10", "m55r14", "m75r6", "m75r14",
         ] {
-            let (n, rho, reference) = system(name).expect("known system");
-            let ccd = PairPotential::ccd_morse_minimum(n, rho.expect("morse")).expect("ccd");
+            let (n, kind, reference) = system(name).expect("known system");
+            let Kind::Morse(rho) = kind else {
+                panic!("morse system had a non-Morse kind")
+            };
+            let ccd = PairPotential::ccd_morse_minimum(n, rho).expect("ccd");
             assert!((reference - ccd).abs() < 1e-12, "{name}");
         }
     }
