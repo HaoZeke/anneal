@@ -204,6 +204,7 @@ void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms
  * @f$V'' = (4 u_0 / r^2)(156 a^2 - 42 a)@f$. The shift is a constant and
  * drops out. The switch multiplies the bare term by @f$S@f$, so
  * @f$\phi' = V' S + V S'@f$ and @f$\phi'' = V'' S + 2 V' S' + V S''@f$.
+ * @a v and @a hv must not overlap (`hv` is zeroed up front).
  */
 void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv) const {
   const auto N = static_cast<long>(in.nAtoms);

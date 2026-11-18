@@ -75,7 +75,9 @@ public:
   [[nodiscard]] virtual PotCaps caps() const noexcept { return {}; }
 
   /// Exact energy-Hessian product. Implementations advertising
-  /// `caps().analyticHvp` override this hook.
+  /// `caps().analyticHvp` override this hook; callers guarantee that the
+  /// direction and output buffers (`3 * in.nAtoms` doubles each) do not
+  /// overlap.
   virtual void hessianVectorImpl(const ForceInput &, const double *,
                                  double *) const {
     throw std::runtime_error("potential has no analytic Hessian-vector product");

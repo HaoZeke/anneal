@@ -6,6 +6,7 @@
 #include "rgpot/engine/EngineTable.hpp"
 #include "rgpot/engine/Sha256.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <exception>
@@ -234,8 +235,16 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
   if (!positions || !atomicNrs || !direction || !hv_out || !box ||
       nAtoms <= 0 ||
       static_cast<unsigned long>(nAtoms) >
-          std::numeric_limits<size_t>::max() / 3) {
+          std::numeric_limits<size_t>::max() / (3 * sizeof(double))) {
     return fail(pot, RGPOT_ENGINE_ERR_INVALID, "invalid HVP argument");
+  }
+  const auto db = reinterpret_cast<std::uintptr_t>(direction);
+  const auto hb = reinterpret_cast<std::uintptr_t>(hv_out);
+  const std::uintptr_t bytes =
+      static_cast<std::uintptr_t>(nAtoms) * 3 * sizeof(double);
+  if (db < hb + bytes && hb < db + bytes) {
+    return fail(pot, RGPOT_ENGINE_ERR_INVALID,
+                "direction and hv_out overlap");
   }
   try {
     RgpotEnginePot::CallGuard guard(*pot);

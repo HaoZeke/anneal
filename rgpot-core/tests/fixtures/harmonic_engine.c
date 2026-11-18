@@ -184,6 +184,9 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long n, const double *positions,
   return RGPOT_ENGINE_ERR_UNSUPPORTED;
 #else
   long i;
+  uintptr_t db;
+  uintptr_t hb;
+  uintptr_t bytes;
 #ifdef FATAL_ONCE
   if (!fatal_once_fired) {
     fatal_once_fired = 1;
@@ -191,6 +194,19 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long n, const double *positions,
     return -7;
   }
 #endif
+  if (!pot || !positions || !atomic_nrs || !direction || !hv_out || !box || n <= 0) {
+    if (pot) {
+      snprintf(pot->error, sizeof pot->error, "invalid HVP argument");
+    }
+    return RGPOT_ENGINE_ERR_INVALID;
+  }
+  db = (uintptr_t)direction;
+  hb = (uintptr_t)hv_out;
+  bytes = (uintptr_t)n * 3u * sizeof(double);
+  if (db < hb + bytes && hb < db + bytes) {
+    snprintf(pot->error, sizeof pot->error, "direction and hv_out overlap");
+    return RGPOT_ENGINE_ERR_INVALID;
+  }
   for (i = 0; i < n; i++) {
     if (atomic_nrs[i] == 0) {
       snprintf(pot->error, sizeof pot->error, "atom %ld has atomic number 0", i);

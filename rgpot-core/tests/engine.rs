@@ -843,3 +843,36 @@ fn hvp_rejects_mismatched_direction_length() {
     assert!(matches!(err, EngineError::Invalid(_)), "{err}");
     assert_eq!(err.status(), rgpot_status_t::RGPOT_INVALID_PARAMETER);
 }
+
+#[test]
+fn hvp_c_api_rejects_overlapping_direction_and_output() {
+    let path = build("harmonic_hvpalias", &[]);
+    let potential = load(&path).into_potential();
+    let mut positions = vec![0.5, -1.0, 2.0];
+    let mut numbers = vec![1];
+    let mut cell = CELL;
+    let input = rgpot_force_input_t {
+        positions: unsafe { rgpot_tensor_cpu_f64_2d(positions.as_mut_ptr(), 1, 3) },
+        atomic_numbers: unsafe { rgpot_tensor_cpu_i32_1d(numbers.as_mut_ptr(), 1) },
+        box_matrix: unsafe { rgpot_tensor_cpu_f64_matrix3(cell.as_mut_ptr()) },
+    };
+    let initial = [1.0, -0.5, 0.25];
+    let mut aliased = initial;
+    let status = unsafe {
+        rgpot_core::c_api::hvp::rgpot_potential_hvp(
+            potential.as_handle() as *const _,
+            &input,
+            aliased.as_ptr(),
+            0.0,
+            rgpot_hvp_scheme_t::RGPOT_HVP_ANALYTIC as c_int,
+            aliased.as_mut_ptr(),
+        )
+    };
+    assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+    assert_eq!(aliased, initial);
+    unsafe {
+        rgpot_tensor_free(input.positions);
+        rgpot_tensor_free(input.atomic_numbers);
+        rgpot_tensor_free(input.box_matrix);
+    }
+}

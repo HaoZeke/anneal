@@ -533,13 +533,14 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
 #+end_src
 
 - Inputs :: the potential and geometry as for =rgpot_engine_force=, plus
-  =direction= with =3 * nAtoms= Cartesian entries.
+  =direction= with =3 * nAtoms= Cartesian entries; =direction= and =hv_out=
+  must not overlap.
 - Units :: positions, box and direction in Angstrom; =hv_out= is the energy
   Hessian (eV/Angstrom squared) times that direction, hence eV/Angstrom.
 - Outputs :: =RGPOT_ENGINE_OK= and the exact energy-Hessian product in =hv_out=.
-- Errors :: returns
-  =RGPOT_ENGINE_ERR_INVALID= for a NULL pointer, invalid atom count; =RGPOT_ENGINE_ERR_UNSUPPORTED=
-  when the potential does not advertise
+- Errors :: returns =RGPOT_ENGINE_ERR_INVALID= for a NULL pointer, an invalid
+  atom count, or overlapping =direction= and =hv_out=;
+  =RGPOT_ENGINE_ERR_UNSUPPORTED= when the potential does not advertise
   =analytic_hvp=; and =RGPOT_ENGINE_ERR_EVAL= when the implementation throws.
   The reason is available from =rgpot_engine_last_error=.
 

@@ -169,8 +169,9 @@ RGPOT_ENGINE_API int rgpot_engine_force(
 
 /**
  * Analytic Hessian-vector product H(positions) * direction, in eV/Angstrom
- * for a direction in Angstrom. direction and hv_out hold 3*nAtoms doubles.
- * Returns RGPOT_ENGINE_OK (0) on success and
+ * for a direction in Angstrom. direction and hv_out hold 3*nAtoms doubles
+ * and must not overlap. Returns RGPOT_ENGINE_OK (0) on success,
+ * RGPOT_ENGINE_ERR_INVALID (1) for invalid or overlapping arguments, and
  * RGPOT_ENGINE_ERR_UNSUPPORTED (3) when the backend does not support
  * analytic HVP.
  */

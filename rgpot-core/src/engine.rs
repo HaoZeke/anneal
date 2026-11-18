@@ -865,7 +865,18 @@ unsafe extern "C" fn engine_hessian_vector_callback(
             set_last_error("engine HVP: positions tensor has no shape");
             return rgpot_status_t::RGPOT_INVALID_PARAMETER;
         };
-        let positions = copy_f64_tensor(input.positions, "positions", 3 * n_atoms, true);
+        let Some(dim) = n_atoms.checked_mul(3) else {
+            set_last_error("engine HVP: atom count overflows coordinate length");
+            return rgpot_status_t::RGPOT_INVALID_PARAMETER;
+        };
+        let bytes = dim.saturating_mul(std::mem::size_of::<f64>());
+        let (d_addr, o_addr) = (direction as usize, hv_out as usize);
+        if dim > 0 && d_addr < o_addr.saturating_add(bytes) && o_addr < d_addr.saturating_add(bytes)
+        {
+            set_last_error("engine HVP: direction and hv_out overlap");
+            return rgpot_status_t::RGPOT_INVALID_PARAMETER;
+        }
+        let positions = copy_f64_tensor(input.positions, "positions", dim, true);
         let numbers = copy_i32_tensor(input.atomic_numbers, "atomic_numbers", n_atoms);
         let cell = copy_f64_tensor(input.box_matrix, "box_matrix", 9, false);
         let (positions, numbers, cell) = match (positions, numbers, cell) {
@@ -882,7 +893,7 @@ unsafe extern "C" fn engine_hessian_vector_callback(
             atomic_numbers: &numbers,
             box_matrix: &matrix,
         };
-        let direction = unsafe { std::slice::from_raw_parts(direction, 3 * n_atoms) };
+        let direction = unsafe { std::slice::from_raw_parts(direction, dim) };
         match engine.hvp(&request, direction) {
             Ok(product) => {
                 unsafe { std::ptr::copy_nonoverlapping(product.as_ptr(), hv_out, product.len()) };

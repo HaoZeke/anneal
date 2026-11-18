@@ -247,6 +247,29 @@ TEST_CASE("analytic HVP passes through the engine ABI", "[engine][adapter]") {
   s.destroy(pot);
 }
 
+TEST_CASE("analytic HVP rejects overlapping direction and output buffers",
+          "[engine][adapter]") {
+  Stub &s = stub();
+  RgpotEnginePot *pot = make(s, 0);
+  const double pos[6] = {1, 2, 3, 4, 5, 6};
+  const std::array<double, 7> initial = {0.2, -0.3, 0.4, 0.1, -0.5, 0.7, 0.9};
+  std::array<double, 7> buf = initial;
+
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), buf.data(), buf.data(), kBox.data()) ==
+          RGPOT_ENGINE_ERR_INVALID);
+  REQUIRE(error_of(s, pot).find("overlap") != std::string::npos);
+  REQUIRE(buf == initial);
+
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), buf.data(), buf.data() + 1,
+                kBox.data()) == RGPOT_ENGINE_ERR_INVALID);
+  REQUIRE(buf == initial);
+
+  REQUIRE(s.hvp(pot, 2, pos, kZ.data(), buf.data() + 1, buf.data(),
+                kBox.data()) == RGPOT_ENGINE_ERR_INVALID);
+  REQUIRE(buf == initial);
+  s.destroy(pot);
+}
+
 TEST_CASE("analytic HVP is capability-gated", "[engine][adapter]") {
   Stub &s = stub();
   RgpotEnginePot *pot = make(s, 0, 0, 0, 0);
