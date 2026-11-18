@@ -283,21 +283,21 @@ pub fn fit_laplace(obs: &[PilotObservation], prior: &PilotPrior) -> LaplacePoste
         .fold(f64::NEG_INFINITY, f64::max);
 
     // Grid search in log space, 3 sd around the prior mean.
-    let n = 11;
+    let grid_points = 11;
     let mut best = (prior.log_t_init_mean, prior.log_sigma_mean, prior.q_v_mean);
     let mut best_nll = neg_log_posterior(best.0, best.1, best.2, obs, prior, best_val_ref);
-    for i in 0..n {
-        for j in 0..n {
-            for k in 0..n {
+    for i in 0..grid_points {
+        for j in 0..grid_points {
+            for k in 0..grid_points {
                 let log_t = prior.log_t_init_mean - 3.0 * prior.log_t_init_sd
-                    + 6.0 * prior.log_t_init_sd * (i as f64) / (n as f64 - 1.0);
+                    + 6.0 * prior.log_t_init_sd * (i as f64) / (grid_points as f64 - 1.0);
                 let log_s = prior.log_sigma_mean - 3.0 * prior.log_sigma_sd
-                    + 6.0 * prior.log_sigma_sd * (j as f64) / (n as f64 - 1.0);
+                    + 6.0 * prior.log_sigma_sd * (j as f64) / (grid_points as f64 - 1.0);
                 let q_v = (prior.q_v_mean - 3.0 * prior.q_v_sd).max(Q_V_MIN + 0.01)
                     + ((prior.q_v_mean + 3.0 * prior.q_v_sd).min(Q_V_MAX - 0.01)
                         - (prior.q_v_mean - 3.0 * prior.q_v_sd).max(Q_V_MIN + 0.01))
                         * (k as f64)
-                        / (n as f64 - 1.0);
+                        / (grid_points as f64 - 1.0);
                 let nll = neg_log_posterior(log_t, log_s, q_v, obs, prior, best_val_ref);
                 if nll < best_nll {
                     best_nll = nll;

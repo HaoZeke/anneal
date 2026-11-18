@@ -708,12 +708,12 @@ pub fn landfold(rows: &[Vec<f64>], config: &LandfoldConfig) -> Result<Landfold, 
     }
     let mut rng = StdRng::seed_from_u64(config.seed);
     let first = rng.random_range(0..n);
-    let marks = farthest_point_landmarks(rows, config.landmarks, first, config.metric);
-    let m = marks.len();
+    let selected = farthest_point_landmarks(rows, config.landmarks, first, config.metric);
+    let m = selected.len();
 
     let mut weights = vec![0.0_f64; m];
     for i in 0..n {
-        let row = marks.row(i);
+        let row = selected.row(i);
         let mut best = 0;
         for k in 1..m {
             if row[k] < row[best] {
@@ -727,8 +727,8 @@ pub fn landfold(rows: &[Vec<f64>], config: &LandfoldConfig) -> Result<Landfold, 
     }
 
     let mut dist_ll = vec![0.0; m * m];
-    for (a, &ia) in marks.indices.iter().enumerate() {
-        dist_ll[a * m..(a + 1) * m].copy_from_slice(marks.row(ia));
+    for (a, &ia) in selected.indices.iter().enumerate() {
+        dist_ll[a * m..(a + 1) * m].copy_from_slice(selected.row(ia));
     }
     let sigma = match config.sigma {
         Some(s) => s,
@@ -772,7 +772,7 @@ pub fn landfold(rows: &[Vec<f64>], config: &LandfoldConfig) -> Result<Landfold, 
     let stress = fit.value(&ys, 0.0);
 
     let map = LandfoldMap {
-        landmark_rows: marks.indices.iter().map(|&i| rows[i].clone()).collect(),
+        landmark_rows: selected.indices.iter().map(|&i| rows[i].clone()).collect(),
         landmark_xy: ys.clone(),
         weights,
         high,
@@ -780,7 +780,7 @@ pub fn landfold(rows: &[Vec<f64>], config: &LandfoldConfig) -> Result<Landfold, 
         metric: config.metric,
     };
     let mut slot = vec![usize::MAX; n];
-    for (k, &i) in marks.indices.iter().enumerate() {
+    for (k, &i) in selected.indices.iter().enumerate() {
         slot[i] = k;
     }
     let xy: Vec<[f64; 2]> = (0..n)
@@ -789,13 +789,13 @@ pub fn landfold(rows: &[Vec<f64>], config: &LandfoldConfig) -> Result<Landfold, 
             if slot[i] != usize::MAX {
                 ys[slot[i]]
             } else {
-                map.project_distances(marks.row(i))
+                map.project_distances(selected.row(i))
             }
         })
         .collect();
     Ok(Landfold {
         xy,
-        landmarks: marks.indices,
+        landmarks: selected.indices,
         map,
         stress,
         spectrum,

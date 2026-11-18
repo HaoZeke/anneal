@@ -98,10 +98,11 @@ impl History {
 pub fn trajectory_stationarity_flags(values: &[f64]) -> Vec<bool> {
     let n = values.len();
     let mut flags = vec![false; n];
-    if n < 6 {
+    let minimum_window = 3;
+    if n < 2 * minimum_window {
         return flags;
     }
-    let window = (n / 10).max(3).min(n / 2);
+    let window = (n / 10).max(minimum_window).min(n / 2);
     for center in window..(n - window) {
         let left = &values[center - window..center];
         let right = &values[center..center + window];

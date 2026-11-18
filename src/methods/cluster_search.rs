@@ -2091,19 +2091,19 @@ fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
 #[cfg(feature = "bank-rpc")]
 pub fn catalog_saturated(wells: &[(Array1<f64>, f64)], w0: f64) -> bool {
     let w0 = w0.max(1e-9);
-    let mut n = 0u32;
-    let mut n1 = 0u32;
+    let mut observations = 0u32;
+    let mut singletons = 0u32;
     for (_, h) in wells {
         let v = (*h / w0).round().max(0.0) as u32;
         if v == 0 {
             continue;
         }
-        n += v;
+        observations += v;
         if v == 1 {
-            n1 += 1;
+            singletons += 1;
         }
     }
-    n >= 12 && (n1 as f64 / n as f64) < 0.20
+    observations >= 12 && (singletons as f64 / observations as f64) < 0.20
 }
 
 #[cfg(feature = "bank-rpc")]

@@ -2483,6 +2483,13 @@ const TEST_FIXTURE_ALLOW: &[Allow] = &[
         reason: "test fixture and reference geometry (size-named constant)",
     },
     Allow {
+        path: "tests/target_tol_lint.rs",
+        needle: "lj104",
+        count: 1,
+        digest: 0xe877e1bfbd9f0c44,
+        reason: "test fixture pins a benchmark artifact path (benchmark size in system name)",
+    },
+    Allow {
         path: "tests/two_phase_search.rs",
         needle: "lj38",
         count: 1,

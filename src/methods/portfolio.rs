@@ -4400,7 +4400,9 @@ fn try_sketchmap_metad_bias(
 
     let inner = ledger.inner.lock().ok()?;
     let n = inner.archive_y.len();
-    if n < 6 {
+    let map_dimension = 2;
+    let minimum_archive = 3 * map_dimension;
+    if n < minimum_archive {
         return None;
     }
     let mut pts: Vec<Array1<f64>> = Vec::with_capacity(n);
@@ -4413,7 +4415,7 @@ fn try_sketchmap_metad_bias(
             pts.push(x);
         }
     }
-    if pts.len() < 6 {
+    if pts.len() < minimum_archive {
         return None;
     }
     let idxs = farthest_point_landmarks(&pts, 24.min(pts.len()));
