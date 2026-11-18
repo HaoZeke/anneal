@@ -72,6 +72,29 @@ std::vector<double> direction(std::size_t n) {
 
 } // namespace
 
+TEST_CASE("LJPot reports coincident atoms through its public APIs", "[hvp][lj]") {
+  LJPot lj;
+  rgpot::types::AtomMatrix positions =
+      rgpot::types::AtomMatrix::Zero(2, 3);
+  const std::vector<int> atoms{1, 1};
+  const std::array<std::array<double, 3>, 3> cell{
+      {{20.0, 0.0, 0.0}, {0.0, 20.0, 0.0}, {0.0, 0.0, 20.0}}};
+  REQUIRE_THROWS_AS(lj(positions, atoms, cell), std::domain_error);
+
+  std::array<double, 6> raw_positions{};
+  std::array<int, 2> raw_atoms{1, 1};
+  std::array<double, 9> raw_cell{
+      20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 20.0};
+  InputSpec input(raw_atoms.size(), raw_positions.data(), raw_atoms.data(),
+                  raw_cell.data());
+  auto handle = PotentialHandle::from_impl(lj);
+  rgpot::CalcResult output;
+  CHECK(rgpot_potential_calculate(handle.raw(), &input.c_struct(),
+                                  &output.c_struct()) ==
+        RGPOT_INTERNAL_ERROR);
+  CHECK_THROWS_AS(handle.calculate(input), rgpot::Error);
+}
+
 TEST_CASE("k forward products through a handle cost k + 1 force calls", "[hvp]") {
   System s;
   CountingMorse fd;

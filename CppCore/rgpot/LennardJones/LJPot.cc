@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <limits>
+#include <stdexcept>
 #include <vector>
 // clang-format on
 
@@ -136,6 +136,9 @@ void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms
         lj_pair(r2, params, pair_e, fscale);
       },
       F, *U, strain, atoms);
+  if (std::isnan(*U)) {
+    throw std::domain_error("LJPot force is undefined for coincident atoms");
+  }
   publishCauchyStress(out, strain, volume);
 }
 
@@ -230,10 +233,7 @@ void LJPot::forceStage(const HalfList &list, const double *, double *forces,
             return;
           }
           if (!(r2 > 0.0)) {
-            if constexpr (decltype(tallied)::value) {
-              tally->energy = std::numeric_limits<double>::quiet_NaN();
-            }
-            return;
+            throw std::domain_error("LJPot force is undefined for coincident atoms");
           }
           double pair_e = 0.0;
           double fscale = 0.0;
