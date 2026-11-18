@@ -12,9 +12,9 @@ TIP4P surrogate. CREST 3.0.2 is
 
 ``--legacy`` sends every energy and gradient to
 ``examples/gfn2_water_crest_driver``. The driver's gradient file is the
-negative of the xtb gradient on the same geometry, so the call script
-negates it before xtb reads it back. ``-mquick`` is CREST's shortest
-documented ensemble. ``-len`` is then the length. ``--noreftopo`` is the
+gradient that xtb expects on the same geometry, so the call script only
+forwards the request. ``-mquick`` is CREST's shortest documented ensemble.
+``-len`` is then the length. ``--noreftopo`` is the
 switch CREST prints when the first optimisation changes a water
 topology. ``-shake 1`` constrains X-H bonds. ``-notopo`` keeps CREGEN
 from dropping a cluster whose contacts differ from the start.
@@ -356,26 +356,9 @@ def run_anneal(binary: Path, seed: int, start: Path, out: Path, core: str) -> di
     }
 
 
-def negate_gradient_script(driver: Path, socket: Path) -> str:
+def driver_call_script(driver: Path, socket: Path) -> str:
     return f"""#!/bin/sh
 "{driver}" call "{socket}"
-rc=$?
-python3 -c '
-from pathlib import Path
-p = Path("gradient")
-if not p.is_file():
-    raise SystemExit(0)
-out = []
-for line in p.read_text().splitlines():
-    parts = line.split()
-    if len(parts) == 3 and ("E" in parts[0] or "e" in parts[0]):
-        vals = [-float(x) for x in parts]
-        out.append("  " + "  ".join(f"{{v:22.13E}}" for v in vals))
-    else:
-        out.append(line)
-p.write_text("\\n".join(out) + "\\n")
-'
-exit $rc
 """
 
 
@@ -400,7 +383,7 @@ def run_crest(
     wrapper = short / "x"
     if len(str(call)) > DRIVER_PATH_MAX:
         raise SystemExit(f"driver path is longer than {DRIVER_PATH_MAX} characters")
-    call.write_text(negate_gradient_script(driver, socket_path))
+    call.write_text(driver_call_script(driver, socket_path))
     call.chmod(0o755)
     wrapper.write_text(f'#!/bin/sh\nexec "{xtb}" "$@" --acc 0.01 --driver "{call}"\n')
     wrapper.chmod(0o755)

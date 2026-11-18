@@ -12,6 +12,7 @@ import importlib.util
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -141,6 +142,37 @@ def test_the_log_is_kept_gzipped_with_its_digest(tmp_path):
     kept = tmp_path / "logs" / "crest-2000-723b7c23.out.gz"
     assert gzip.open(kept, "rt").read() == source.read_text()
     assert digest == panel.sha256(source)
+
+
+def test_the_crest_wrapper_forwards_driver_gradients_without_negating(tmp_path):
+    driver = tmp_path / "driver"
+    driver.write_text(
+        textwrap.dedent(
+            f"""\
+            #!{sys.executable}
+            import sys
+            from pathlib import Path
+            if sys.argv[1] != "call":
+                raise SystemExit(2)
+            Path("gradient").write_text(
+                "gradient\\n"
+                "  1.0000000000000E+00  2.0000000000000E+00  3.0000000000000E+00\\n"
+                " -4.0000000000000E+00 -5.0000000000000E+00 -6.0000000000000E+00\\n"
+            )
+            """
+        )
+    )
+    driver.chmod(driver.stat().st_mode | stat.S_IEXEC)
+    wrapper = tmp_path / "call"
+    wrapper.write_text(panel.driver_call_script(driver, tmp_path / "socket"))
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
+
+    subprocess.run([str(wrapper)], cwd=tmp_path, check=True)
+    assert (tmp_path / "gradient").read_text() == (
+        "gradient\n"
+        "  1.0000000000000E+00  2.0000000000000E+00  3.0000000000000E+00\n"
+        " -4.0000000000000E+00 -5.0000000000000E+00 -6.0000000000000E+00\n"
+    )
 
 
 def test_the_arms_are_paired_seed_for_seed_in_the_committed_rows():

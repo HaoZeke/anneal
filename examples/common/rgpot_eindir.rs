@@ -86,6 +86,27 @@ const GFN2: i32 = 3;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::ArrayView1;
+
+    fn h2o6_numbers() -> Vec<i32> {
+        (0..6).flat_map(|_| [8, 1, 1]).collect()
+    }
+
+    fn h2o6_reference_coordinates() -> Vec<f64> {
+        include_str!("../../bench/crest-equal/reference-prism.xyz")
+            .lines()
+            .skip(2)
+            .flat_map(|line| {
+                let mut parts = line.split_whitespace();
+                let _symbol = parts.next()?;
+                let x = parts.next()?.parse::<f64>().ok()?;
+                let y = parts.next()?.parse::<f64>().ok()?;
+                let z = parts.next()?.parse::<f64>().ok()?;
+                Some([x, y, z])
+            })
+            .flatten()
+            .collect()
+    }
 
     #[test]
     fn descriptor_maps_the_eindir_stamp_and_optional_build_identity() {
@@ -109,6 +130,52 @@ mod tests {
         assert_eq!(descriptor.abi.dlpack_minor, 4);
         assert_eq!(descriptor.abi.features, 0b101);
         assert_eq!(descriptor.build_identity.as_deref(), Some("rgpot@abc123"));
+    }
+
+    #[test]
+    fn xtb_callback_force_matches_minus_central_difference_gradient_for_h2o6() {
+        let engine_present = env_path("RGPOT_XTB_ENGINE")
+            .map(|path| path.exists())
+            .unwrap_or_else(|| PathBuf::from("libxtb_engine.so").exists());
+        if !engine_present {
+            eprintln!("skip: libxtb_engine.so unavailable");
+            return;
+        }
+
+        let numbers = h2o6_numbers();
+        let coordinates = h2o6_reference_coordinates();
+        if coordinates.len() != 54 {
+            panic!("reference prism does not contain 18 atoms");
+        }
+        let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
+        let pot = match std::panic::catch_unwind(|| RgpotObjective::xtb(&numbers, box_)) {
+            Ok(pot) => pot,
+            Err(_) => {
+                eprintln!("skip: xtb engine could not be loaded");
+                return;
+            }
+        };
+        let evaluated = match pot.fresh_evaluation(&coordinates) {
+            Ok(value) => value,
+            Err(error) => panic!("fresh evaluation failed: {error}"),
+        };
+        let step = 1.0e-4_f64;
+        for i in 0..coordinates.len() {
+            let mut plus = coordinates.clone();
+            let mut minus = coordinates.clone();
+            plus[i] += step;
+            minus[i] -= step;
+            let plus_energy = pot.wrapper().value_and_gradient(ArrayView1::from(&plus)).0;
+            let minus_energy = pot.wrapper().value_and_gradient(ArrayView1::from(&minus)).0;
+            let central_gradient = (plus_energy - minus_energy) / (2.0 * step);
+            let expected_force = -central_gradient;
+            let scale = 1.0 + expected_force.abs();
+            assert!(
+                (evaluated.forces[i] - expected_force).abs() / scale < 5.0e-5,
+                "component {i}: force {} expected {expected_force}",
+                evaluated.forces[i]
+            );
+        }
     }
 }
 
@@ -537,8 +604,8 @@ unsafe extern "C" fn xtb_callback(
         };
     out.energy = energy;
     out.variance = var;
-    // The engine buffer is xtb's ∂E/∂x. rgpot negates this tensor.
-    anneal_core::xtb_gradient::store_as_force(&mut kernel.scratch);
+    // rgpot_xtb_force already converts xtb_getGradient to forces (-∂E/∂x in eV/Å)
+    // via NEG_GRAD_TO_FORCE, and rgpot negates out.forces back to ∂E/∂x.
     out.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
     rgpot_status_t::RGPOT_SUCCESS
 }

@@ -3864,6 +3864,7 @@ struct AcceptDial {
     temperature: f64,
     floor: f64,
     cap: f64,
+    measured: bool,
     /// Quenched energy changes of the opening hops while
     /// [`Config::measured_energy_scale`] is still reading them.
     rises: Option<Vec<f64>>,
@@ -3871,6 +3872,7 @@ struct AcceptDial {
 
 impl AcceptDial {
     const BLOCK: usize = 40;
+    const MEASURED_BLOCK: usize = 16;
 
     fn new(temperature: f64, contact: f64) -> Self {
         let floor = temperature;
@@ -3881,6 +3883,7 @@ impl AcceptDial {
             temperature,
             floor,
             cap,
+            measured: false,
             rises: None,
         }
     }
@@ -3915,8 +3918,9 @@ impl AcceptDial {
         }
         let factor = median / energy_scale;
         self.temperature *= factor;
-        self.floor *= factor;
-        self.cap *= factor;
+        self.floor = 0.05 * self.temperature;
+        self.cap = 10.0 * self.temperature;
+        self.measured = true;
         Some(factor)
     }
 
@@ -3928,7 +3932,12 @@ impl AcceptDial {
         if accepted {
             self.yes += 1;
         }
-        if self.window < Self::BLOCK {
+        let block = if self.measured {
+            Self::MEASURED_BLOCK
+        } else {
+            Self::BLOCK
+        };
+        if self.window < block {
             return;
         }
         let rate = self.yes as f64 / self.window as f64;
@@ -3963,6 +3972,32 @@ mod contact_unit_tests {
             assert_eq!(fixed.measure(0.5, 1.0), None);
         }
         assert_eq!(fixed.temperature(), 0.8);
+    }
+
+    #[test]
+    fn a_measured_dial_adapts_temperature_from_acceptance() {
+        let mut dial = AcceptDial::new(0.8, 1.0).measuring(true);
+        for _ in 0..config::MEASURED_SCALE_HOPS {
+            dial.measure(0.05, 1.0);
+        }
+        let measured = dial.temperature();
+        for _ in 0..AcceptDial::MEASURED_BLOCK {
+            dial.observe(true);
+        }
+        assert!(
+            dial.temperature() < measured,
+            "high acceptance should cool: {} vs {measured}",
+            dial.temperature()
+        );
+        let cooled = dial.temperature();
+        for _ in 0..AcceptDial::MEASURED_BLOCK {
+            dial.observe(false);
+        }
+        assert!(
+            dial.temperature() > cooled,
+            "low acceptance should warm: {} vs {cooled}",
+            dial.temperature()
+        );
     }
 
     fn tetrahedron() -> Array1<f64> {
@@ -6900,8 +6935,10 @@ where
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
-        // A cycle reversal that finds no cycle returns the state unchanged too.
-        let may_idle = |name: &str| name == "soap" || name == "rcycle" || name == "hbrewire";
+        // A cycle reversal or torsion that finds no motif returns the state unchanged too.
+        let may_idle = |name: &str| {
+            name == "soap" || name == "rcycle" || name == "hbrewire" || name == "torsion"
+        };
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
@@ -6947,7 +6984,31 @@ where
                 break;
             }
             if !swapped {
-                continue;
+                if let Some(k2) = kernels.iter().position(|kernel| !may_idle(&kernel.name())) {
+                    k = k2;
+                    trial = match (&mut constructor, &kernels[k]) {
+                        (Some(c), ClusterMove::Reseed { n_points, .. }) => {
+                            let (cand, f) = c.propose(x.view(), *n_points, rng);
+                            pending_features = Some(f);
+                            cand
+                        }
+                        _ => {
+                            if matches!(kernels[k], ClusterMove::EnergyLattice) {
+                                energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                            } else {
+                                kernels[k].propose_scaled(
+                                    x.view(),
+                                    cfg.temperature,
+                                    proposal_scale,
+                                    rng,
+                                )
+                            }
+                        }
+                    };
+                } else {
+                    hops += 1;
+                    continue;
+                }
             }
         }
         if cfg.general_collective
@@ -7897,6 +7958,25 @@ where
             }
             if orient_window >= RIGID_ACCEPT_BLOCK {
                 orient_scale = rigid_step_scale(orient_scale, orient_yes, orient_window);
+                orient_window = 0;
+                orient_yes = 0;
+            }
+        } else if cfg.measured_energy_scale
+            && cfg.move_library.is_molecular()
+            && !cfg.move_library.is_rigid_body()
+            && !unquenched
+        {
+            orient_window += 1;
+            if accept {
+                orient_yes += 1;
+            }
+            if orient_window >= AcceptDial::MEASURED_BLOCK {
+                let rate = orient_yes as f64 / orient_window as f64;
+                if rate > 0.70 {
+                    orient_scale = (orient_scale * 1.25).min(2.0);
+                } else if rate < 0.25 {
+                    orient_scale = (orient_scale * 0.8).max(0.4);
+                }
                 orient_window = 0;
                 orient_yes = 0;
             }
