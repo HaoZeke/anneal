@@ -166,7 +166,7 @@ impl SwapShare {
 
     /// True on the hops where the exchange takes the proposal.
     pub fn due(&self, hops: u64) -> bool {
-        self.stride > 0 && hops % u64::from(self.stride) == 0
+        self.stride > 0 && hops.is_multiple_of(u64::from(self.stride))
     }
 
     /// One completed exchange. `accepted` beat the chain's Metropolis test.
@@ -178,6 +178,8 @@ impl SwapShare {
         if self.attempts < 4 {
             return;
         }
+        // Adapt only after a short block of completed exchange attempts so one
+        // lucky (or unlucky) draw does not immediately swing the cadence.
         let rate = f64::from(self.accepts) / f64::from(self.attempts);
         if rate > 0.5 {
             self.stride = (self.stride / 2).max(2);
