@@ -1808,7 +1808,7 @@ void selectOrbitals(int64_t key);
   Every rank of a calculator names the same key before the same force.
   An engine without =cpmdc_session_select_orbitals= ignores the key.
 - Errors :: throws =std::runtime_error= immediately when the live engine session
-  refuses the key.
+  refuses the key, leaving the previous orbital key in place.
 
 *** =rgpot::CPMDPot::copyOrbitals=
 
