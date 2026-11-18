@@ -321,8 +321,12 @@ TEST_CASE("orbital hooks report success and adapter errors",
 
   REQUIRE(s.select_orbitals(pot, -2) == 2);
   REQUIRE(error_of(s, pot).find("failed") != std::string::npos);
+  REQUIRE(s.select_orbitals(pot, 7) == 0);
+  REQUIRE(error_of(s, pot).empty());
   REQUIRE(s.copy_orbitals(pot, 7, -2) == 2);
   REQUIRE(error_of(s, pot).find("failed") != std::string::npos);
+  REQUIRE(s.copy_orbitals(pot, 7, 8) == 0);
+  REQUIRE(error_of(s, pot).empty());
   s.destroy(pot);
 }
 

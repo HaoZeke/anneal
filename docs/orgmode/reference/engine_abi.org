@@ -312,8 +312,8 @@ size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len)
 Optional symbol.
 Reading does not clear the message.
 A successful =rgpot_engine_force=,
-=rgpot_engine_force_batch=, =rgpot_engine_set_num_threads= or =rgpot_engine_set_charge_spin=
-clears it.
+=rgpot_engine_force_batch=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=
+or =rgpot_engine_copy_orbitals= clears it.
 Errors of =rgpot_engine_create= go to its =errbuf=.
 May run at any time, also during an evaluation on the same handle.
 
@@ -406,11 +406,11 @@ int rgpot_engine_select_orbitals(RgpotEnginePot *pot, long long key);
 - Inputs :: =pot=, a handle; =key=, the orbital slot identifier.
 - Units :: none.
 - Outputs :: 0 on success.
-- Errors :: returns 1 for a null =pot=.
+- Errors :: returns 1 for a null =pot= (no message).
   Returns 3 when the backend has no orbital-selection primitive, with
   =backend has no orbital selection= in =rgpot_engine_last_error=.
   Returns 3 when the backend rejects =key= and reports it through an
-  =Unsupported= exception.
+  =Unsupported= exception, with the reason in =rgpot_engine_last_error=.
   Returns 2 for another backend exception, with the reason in
   =rgpot_engine_last_error=.
 
@@ -428,11 +428,11 @@ int rgpot_engine_copy_orbitals(RgpotEnginePot *pot, long long from_key,
   destination orbital slot.
 - Units :: none.
 - Outputs :: 0 on success.
-- Errors :: returns 1 for a null =pot=.
+- Errors :: returns 1 for a null =pot= (no message).
   Returns 3 when the backend has no orbital-copy primitive, with
   =backend has no orbital copy= in =rgpot_engine_last_error=.
   Returns 3 when the backend rejects the copy through an =Unsupported=
-  exception.
+  exception, with the reason in =rgpot_engine_last_error=.
   Returns 2 for another backend exception, with the reason in
   =rgpot_engine_last_error=.
 
