@@ -29,6 +29,9 @@ const REDRAWS: usize = 4;
 /// Largest single repair rotation, in radians.
 const REPAIR_STEP_CAP: f64 = 0.35;
 
+/// Angular displacement used to read local torsional curvature.
+const BARRIER_PROBE_ANGLE: f64 = std::f64::consts::FRAC_PI_6;
+
 /// Rotatable bonds and contact radii of one structure.
 #[derive(Debug, Clone)]
 pub(crate) struct Topology {
@@ -208,6 +211,12 @@ impl Topology {
     fn penalty_gradient(&self, x: ArrayView1<f64>, clashes: &[(usize, usize, f64)]) -> Vec<f64> {
         let mut g = vec![0.0; self.torsions.len()];
         for (t, torsion) in self.torsions.iter().enumerate() {
+            // Contact repair is allowed to rearrange free torsions and ring
+            // arcs, not to ratchet a partial-double bridge through a sequence
+            // of nominally small steps.
+            if torsion.constrained {
+                continue;
+            }
             let (a, b) = (torsion.fixed, torsion.pivot);
             let mut u = [
                 x[3 * b] - x[3 * a],
@@ -293,15 +302,11 @@ impl Topology {
         self.hands.iter().any(|h| hand(x, h) != hand(y, h))
     }
 
-    /// Turns one to three random torsions through uniform angles, then
-    /// repairs any contact it made. The least-clashing of a few draws is
-    /// returned when none comes out clean. No torsion, no draw.
-    ///
-    /// With ring crankshafts a draw turns one of them instead, with the
-    /// probability that ring torsions are among all torsions the molecule
-    /// has, and a draw that inverts a crankshaft end is dropped. Without,
-    /// the random stream is the torsion move's alone.
-    pub(crate) fn propose<R: Rng + ?Sized>(&self, x: ArrayView1<f64>, rng: &mut R) -> Array1<f64> {
+    fn propose_by<R, F>(&self, x: ArrayView1<f64>, rng: &mut R, mut angle: F) -> Array1<f64>
+    where
+        R: Rng + ?Sized,
+        F: FnMut(usize, &RotatableBond, &mut R) -> f64,
+    {
         let start = x.to_owned();
         if self.torsions.is_empty() {
             return start;
@@ -327,8 +332,8 @@ impl Topology {
                 }
                 order.shuffle(rng);
                 for &t in &order[..count] {
-                    let angle = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
-                    turn_bond(&mut y, &self.torsions[t], angle);
+                    let theta = angle(t, &self.torsions[t], rng);
+                    turn_bond(&mut y, &self.torsions[t], theta);
                 }
             }
             let clean = self.repair(&mut y);
@@ -344,6 +349,89 @@ impl Topology {
             }
         }
         best.map(|(_, y)| y).unwrap_or(start)
+    }
+
+    /// Turns one to three random torsions through uniform angles, then
+    /// repairs any contact it made. The least-clashing of a few draws is
+    /// returned when none comes out clean. No torsion, no draw.
+    ///
+    /// With ring crankshafts a draw turns one of them instead, with the
+    /// probability that ring torsions are among all torsions the molecule
+    /// has, and a draw that inverts a crankshaft end is dropped. Without,
+    /// the random stream is the torsion move's alone.
+    pub(crate) fn propose<R: Rng + ?Sized>(&self, x: ArrayView1<f64>, rng: &mut R) -> Array1<f64> {
+        self.propose_by(x, rng, |_, _, rng| {
+            rng.random_range(-std::f64::consts::PI..std::f64::consts::PI)
+        })
+    }
+
+    /// Proposes torsions after asking the potential how strongly each locally
+    /// planar bridge is held.
+    ///
+    /// A constrained bridge is probed at small displacements and at a half
+    /// turn. Only a small displacement or a half turn is offered, with
+    /// Boltzmann weights whose scale is capped by the measured local barrier.
+    /// The cap matters during the opening pilot, before the acceptance
+    /// temperature has learned the potential's units. Thus a trans partial
+    /// double bond stays near trans, while a chain that reached a high cis
+    /// well strongly prefers the downhill flip. Probe calls are supplied by
+    /// the search so they are charged to the same evaluation ledger.
+    pub(crate) fn propose_measured<R, F>(
+        &self,
+        x: ArrayView1<f64>,
+        energy: f64,
+        temperature: f64,
+        rng: &mut R,
+        mut evaluate: F,
+    ) -> Array1<f64>
+    where
+        R: Rng + ?Sized,
+        F: FnMut(ArrayView1<f64>) -> Option<f64>,
+    {
+        let start = x.to_owned();
+        let mut measured = vec![false; self.bonds];
+        let mut profiles = vec![None; self.bonds];
+        self.propose_by(x, rng, |index, torsion, rng| {
+            if !torsion.constrained {
+                return rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+            }
+            if !measured[index] {
+                measured[index] = true;
+                let probe = |theta: f64, evaluate: &mut F| {
+                    let mut y = start.clone();
+                    turn_bond(&mut y, torsion, theta);
+                    evaluate(y.view())
+                };
+                profiles[index] = probe(BARRIER_PROBE_ANGLE, &mut evaluate)
+                    .zip(probe(-BARRIER_PROBE_ANGLE, &mut evaluate))
+                    .zip(probe(std::f64::consts::PI, &mut evaluate))
+                    .map(|((p, m), f)| (p, m, f));
+            }
+            let Some((plus, minus, flip)) = profiles[index] else {
+                return rng.random_range(-BARRIER_PROBE_ANGLE..BARRIER_PROBE_ANGLE);
+            };
+            let local_rise = (0.5 * (plus + minus) - energy).max(0.0);
+            let thermal = temperature
+                .min(local_rise.max(f64::EPSILON))
+                .max(f64::EPSILON);
+            let changes = [plus - energy, minus - energy, flip - energy];
+            let floor = changes.iter().copied().fold(f64::INFINITY, f64::min);
+            let weights = changes.map(|de| (-(de - floor) / thermal).max(-700.0).exp());
+            let draw = rng.random::<f64>() * weights.iter().sum::<f64>();
+            let mut cumulative = 0.0;
+            let action = weights
+                .iter()
+                .position(|w| {
+                    cumulative += *w;
+                    draw <= cumulative
+                })
+                .unwrap_or(2);
+            match action {
+                0 => rng.random_range(0.0..BARRIER_PROBE_ANGLE),
+                1 => rng.random_range(-BARRIER_PROBE_ANGLE..0.0),
+                _ => std::f64::consts::PI,
+            }
+        })
     }
 }
 
@@ -626,6 +714,40 @@ mod tests {
             assert!((distance(x.view(), 0, 1) - distance(y.view(), 0, 1)).abs() < 1e-10);
         }
         assert!(moved > 30);
+    }
+
+    #[test]
+    fn a_stiff_planar_torsion_uses_small_or_downhill_flip_moves() {
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, // C1
+            1.5, 0.0, 0.0, // C2
+            0.0, 1.5, 0.0, // arm on C1
+            1.5, -1.5, 0.0, // arm on C2
+        ]);
+        let mut top = Topology::of(x.view(), &[6; 4], 1.2, None, false);
+        assert_eq!(top.bonds, 1);
+        top.torsions[0].constrained = true;
+        let cosine = |y: &Array1<f64>| -y[3 * 3 + 1] / 1.5;
+
+        let mut calls = 0;
+        let local = top.propose_measured(x.view(), 0.0, 0.1, &mut StdRng::seed_from_u64(4), |_| {
+            calls += 1;
+            Some(if calls < 3 { 2.0 } else { 10.0 })
+        });
+        assert_eq!(calls, 3, "one set of charged barrier probes");
+        assert!(cosine(&local) > BARRIER_PROBE_ANGLE.cos() - 1e-12);
+
+        let mut calls = 0;
+        let flipped =
+            top.propose_measured(x.view(), 0.0, 0.1, &mut StdRng::seed_from_u64(4), |_| {
+                calls += 1;
+                Some(if calls < 3 { 2.0 } else { -1.0 })
+            });
+        assert_eq!(calls, 3);
+        assert!(
+            cosine(&flipped) < -0.99,
+            "downhill half turn was not preferred"
+        );
     }
 
     #[test]

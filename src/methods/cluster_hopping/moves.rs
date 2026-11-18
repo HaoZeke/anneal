@@ -820,12 +820,10 @@ pub enum ClusterMove {
     },
 }
 
-/// Fraction of the covalent-radius sum below which a bond is treated as
-/// multiple or conjugated, and so not turned.
-///
-/// The Cordero radii are single-bond radii, so a single bond sits near the
-/// sum. In GFN2-xTB geometries an sp3 C–C or C–N bond sits at 0.98 to 1.02 of
-/// it, a peptide amide C–N at 0.91 to 0.92 and a carbonyl at 0.85.
+/// Fraction of the covalent-radius sum below which a ring edge is treated as
+/// multiple. Bridge bonds do not use this geometric proxy for bond order:
+/// [`rotatable_bonds`] marks a locally planar bridge as constrained and the
+/// potential measures its torsional barrier before it is turned.
 const SINGLE_BOND_FRACTION: f64 = 0.93;
 
 /// One rotatable covalent bond and the side that turns about it.
@@ -837,21 +835,29 @@ pub struct RotatableBond {
     pub pivot: usize,
     /// Atoms that turn, `pivot` included.
     pub side: Vec<usize>,
+    /// Both ends have planar three-bond neighbourhoods.
+    ///
+    /// This is a geometric indication of partial-double character, not a
+    /// declaration of chemistry. The potential decides how strongly this
+    /// torsion is held when the move is proposed.
+    pub constrained: bool,
 }
 
 /// Rotatable bonds of a covalent structure.
 ///
-/// A bond is rotatable when it is single by `SINGLE_BOND_FRACTION`, is a
-/// bridge of the bond graph (not in a ring), and has at least two atoms on
-/// each side. The smaller side is the one that turns, and of two sides of one
-/// size, one that is not a symmetric top. A bond whose turning side is a
-/// symmetric top, a pivot carrying two or more identical terminal atoms and
-/// nothing else such as a methyl, is left out: turning it maps the group back
-/// onto itself and a quench undoes the rest.
+/// A bond is rotatable when it is a bridge of the bond graph (not in a ring)
+/// and has at least two atoms on each side. A bridge with planar three-bond
+/// neighbourhoods at both ends is retained but marked [`RotatableBond::constrained`];
+/// proposal-time potential calls measure its local and half-turn barriers
+/// instead of inferring them from bond length. The smaller side is the one
+/// that turns, and of two sides of one size, one that is not a symmetric top. A
+/// bond whose turning side is a symmetric top, a pivot carrying two or more
+/// identical terminal atoms and nothing else such as a methyl, is left out:
+/// turning it maps the group back onto itself and a quench undoes the rest.
 pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Vec<RotatableBond> {
     let n = species.len().min(x.len() / 3);
     let mut adj = vec![Vec::<usize>::new(); n];
-    let mut single = Vec::new();
+    let mut bonds = Vec::new();
     for i in 0..n {
         for j in (i + 1)..n {
             let sum = covalent_radius(species[i]) + covalent_radius(species[j]);
@@ -864,9 +870,7 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
             }
             adj[i].push(j);
             adj[j].push(i);
-            if d >= SINGLE_BOND_FRACTION * sum {
-                single.push((i, j));
-            }
+            bonds.push((i, j));
         }
     }
     let reach = |from: usize, across: usize| {
@@ -910,7 +914,7 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
                 .all(|&t| adj[t].len() == 1 && species[t] == species[tips[0]])
     };
     let mut out = Vec::new();
-    for (i, j) in single {
+    for (i, j) in bonds {
         let from_i = reach(i, j);
         if from_i[j] {
             continue;
@@ -931,7 +935,12 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
         if symmetric_top(pivot, &side) {
             continue;
         }
-        out.push(RotatableBond { fixed, pivot, side });
+        out.push(RotatableBond {
+            fixed,
+            pivot,
+            side,
+            constrained: flat_pivot(i) && flat_pivot(j),
+        });
     }
     out
 }
@@ -1114,6 +1123,7 @@ pub fn ring_crankshafts(
                     fixed: a,
                     pivot: b,
                     side,
+                    constrained: false,
                 });
             }
         }
@@ -4301,9 +4311,32 @@ mod torsion_tests {
     }
 
     #[test]
-    fn a_short_conjugated_bond_is_not_turned() {
+    fn bond_length_does_not_declare_partial_double_character() {
         let species = vec![6u32; 4];
-        assert!(rotatable_bonds(chain(1.36).view(), &species, 1.25).is_empty());
+        let bonds = rotatable_bonds(chain(1.36).view(), &species, 1.25);
+        assert_eq!(bonds.len(), 1);
+        assert!(!bonds[0].constrained);
+    }
+
+    #[test]
+    fn planar_three_bond_neighbourhoods_mark_a_bridge_constrained() {
+        // A generic planar X-X bridge. The unlike tips prevent either side
+        // from being discarded as a symmetric top; no element pattern or
+        // bond-length threshold enters the classification.
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, // left centre
+            1.4, 0.0, 0.0, // right centre
+            -0.7, 0.7, 0.0, // left tip
+            -1.3, -0.7, 0.0, // left substituent
+            2.6, 0.0, 0.0, // right tip
+            1.7, 1.45, 0.0, // right substituent
+        ]);
+        let bonds = rotatable_bonds(x.view(), &[7, 6, 1, 6, 8, 6], 1.25);
+        let central = bonds
+            .iter()
+            .find(|bond| (bond.fixed.min(bond.pivot), bond.fixed.max(bond.pivot)) == (0, 1))
+            .expect("the planar bridge is retained");
+        assert!(central.constrained);
     }
 
     #[test]
