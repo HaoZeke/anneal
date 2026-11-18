@@ -10481,10 +10481,6 @@ mod tests {
             cfg.tabu_on_stall = false;
             cfg.symmetrise_on_stall = false;
             cfg.prior_soap = false;
-            cfg.prior_reseed = false;
-            cfg.prior_growth = false;
-            cfg.prior_core = false;
-            cfg.prior_motif = false;
             cfg.energy_lattice = false;
             cfg.orbit_complete_on_new = false;
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
