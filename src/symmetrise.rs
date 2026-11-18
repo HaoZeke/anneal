@@ -4,11 +4,11 @@
 //! the deviation of each candidate operation is the root-mean-square distance
 //! between a point and its matched image, and [`generate_group`] closes a set
 //! of detected operations into the group they generate. Nothing here moves a
-//! point: the routines that pushed a structure onto the symmetry it nearly
-//! has, completed orbits, or built a core out of a detected group are gone
-//! from this crate, because they construct a candidate from a recognised
-//! motif rather than search for one. The block-diagonalisation of the Hessian
-//! in [`crate::sym_hessian`] is the consumer: it needs the group, not a
+//! point. [`crate::detected_symmetry`] is the one place a detected group is
+//! applied: it reads the group of the structure over the rotation orders the
+//! structure can carry, and re-seats atoms on its sites. No group, motif or
+//! order list is named anywhere. The block-diagonalisation of the Hessian in
+//! [`crate::sym_hessian`] is the other consumer: it needs the group, not a
 //! symmetrised structure.
 //!
 //! [`crate::movekernel::Symmetrise`] is a different thing and is unchanged.
