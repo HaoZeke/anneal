@@ -647,28 +647,72 @@ TEST_CASE("LJPot analytic HVP leaves no neighbour state on the instance",
   second->~LJPot();
 }
 
-TEST_CASE("a kept LJPot is destroyed after its neighbour scratch as a thread exits",
+/// A kept LJPot that computes one more force as it is destroyed. Its
+/// destructor body runs before ~LJPot, which is when the thread's neighbour
+/// scratch table is already gone: Kept<SpyLJ> was first used before it.
+class SpyLJ : public rgpot::LJPot {
+public:
+  struct Seen {
+    std::size_t retained_mid_run = 0;
+    std::size_t retained_at_entry = 0;
+    std::size_t retained_after = 0;
+    double energy = 0.0;
+    int destroyed = 0;
+  };
+
+  SpyLJ(const rgpot::LJConfig &cfg, const rgpot::ForceInput &in, Seen &seen)
+      : rgpot::LJPot(cfg), in_(in), seen_(seen) {
+    setNeighbourMode(rgpot::nlist::Mode::Stored);
+  }
+
+  ~SpyLJ() override {
+    seen_.retained_at_entry = retainedPairs();
+    std::vector<double> forces(3 * static_cast<std::size_t>(in_.nAtoms), 0.0);
+    rgpot::ForceOut out{
+        .F = forces.data(),
+        .energy = 0.0,
+        .variance = 0.0,
+        .stress = {},
+        .has_stress = 0,
+    };
+    forceImpl(in_, &out);
+    seen_.energy = out.energy;
+    seen_.retained_after = retainedPairs();
+    ++seen_.destroyed;
+  }
+
+  void force(rgpot::ForceOut *out) {
+    forceImpl(in_, out);
+    seen_.retained_mid_run = retainedPairs();
+  }
+
+private:
+  rgpot::ForceInput in_;
+  Seen &seen_;
+};
+
+TEST_CASE("a kept LJPot forced from its destructor retains nothing once its "
+          "thread's neighbour scratch is gone",
           "[lj][threads][kept]") {
   const double a_lj = std::pow(2.0, 1.0 / 6.0) * std::sqrt(2.0);
   const Frame frame = makeFccFrame(2, 2, 2, a_lj, false, 0.5);
   const rgpot::LJConfig cfg{.u0 = 1.0, .cutoff = 3.0, .psi = 1.0};
+  const rgpot::ForceInput in{
+      .nAtoms = frame.z.size(),
+      .pos = frame.pos.data(),
+      .atmnrs = frame.z.data(),
+      .box = frame.box.data(),
+  };
   const int tag = 1;
   rgpot::KeptKey key;
   key.ptr(&tag).f64(cfg.cutoff);
 
+  SpyLJ::Seen seen;
   std::vector<double> forces(3 * frame.z.size(), 0.0);
-  std::vector<double> hv(3 * frame.z.size(), 0.0);
-  double energy = 0.0;
   std::thread worker([&] {
-    rgpot::Kept<rgpot::LJPot>::with(
-        key, [&] { return std::make_unique<rgpot::LJPot>(cfg); },
-        [&](rgpot::LJPot &pot) {
-          const rgpot::ForceInput in{
-              .nAtoms = frame.z.size(),
-              .pos = frame.pos.data(),
-              .atmnrs = frame.z.data(),
-              .box = frame.box.data(),
-          };
+    rgpot::Kept<SpyLJ>::with(
+        key, [&] { return std::make_unique<SpyLJ>(cfg, in, seen); },
+        [&](SpyLJ &pot) {
           rgpot::ForceOut out{
               .F = forces.data(),
               .energy = 0.0,
@@ -676,11 +720,18 @@ TEST_CASE("a kept LJPot is destroyed after its neighbour scratch as a thread exi
               .stress = {},
               .has_stress = 0,
           };
-          pot.forceImpl(in, &out);
-          pot.hessianVectorImpl(in, frame.direction.data(), hv.data());
-          energy = out.energy;
+          pot.force(&out);
         });
   });
   worker.join();
-  CHECK(std::isfinite(energy));
+
+  REQUIRE(seen.destroyed == 1);
+  // The scratch existed while the thread ran and was freed before the
+  // object was destroyed.
+  REQUIRE(seen.retained_mid_run > 0);
+  REQUIRE(seen.retained_at_entry == 0);
+  CHECK(std::isfinite(seen.energy));
+  // The destructor's own force must not keep scratch in a table that is
+  // gone: nothing would free it.
+  CHECK(seen.retained_after == 0);
 }

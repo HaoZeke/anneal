@@ -27,13 +27,18 @@ struct Probe {
 using KeptProbe = rgpot::Kept<Probe>;
 
 /// A kept object whose destructor uses another table of this thread, as
-/// LJPot does with its neighbour scratch.
+/// LJPot does with its neighbour scratch. The destructor leaves what it
+/// builds in that table alone, so only a retired table frees it.
 struct Owner {
   explicit Owner(const rgpot::KeptKey &inner) : inner_key(inner) {}
   ~Owner();
   rgpot::KeptKey inner_key;
   static inline std::atomic<int> destroyed{0};
+  static inline std::atomic<int> dropped_before{0};
+  static inline std::atomic<int> dropped_at_entry{0};
   static inline std::atomic<bool> found_none{false};
+  static inline std::atomic<std::uint64_t> builds_at_entry{0};
+  static inline std::atomic<std::uint64_t> reuses_at_entry{0};
   static inline std::atomic<int> rebuilt_id{0};
 };
 
@@ -49,11 +54,12 @@ rgpot::KeptKey key(double param, std::size_t n, const int *species) {
 int id(const Probe &probe) { return probe.id; }
 
 Owner::~Owner() {
+  dropped_at_entry = Probe::dropped.load() - dropped_before.load();
   found_none = KeptInner::peek(inner_key) == nullptr;
+  builds_at_entry = KeptInner::counts().builds;
+  reuses_at_entry = KeptInner::counts().reuses;
   rebuilt_id = KeptInner::with(
       inner_key, [] { return std::make_unique<Probe>(41); }, id);
-  KeptInner::release(inner_key);
-  KeptInner::release();
   ++destroyed;
 }
 
@@ -223,6 +229,8 @@ TEST_CASE("a kept object may use another kept table while its thread exits",
   inner_key.ptr(&tag_inner);
 
   const int destroyed = Owner::destroyed;
+  const int dropped = Probe::dropped;
+  Owner::dropped_before = dropped;
   std::thread worker([&] {
     // The owner's table is first used before the inner one, so it is
     // destroyed after it.
@@ -235,6 +243,14 @@ TEST_CASE("a kept object may use another kept table while its thread exits",
   worker.join();
 
   REQUIRE(Owner::destroyed == destroyed + 1);
-  REQUIRE(Owner::found_none.load());
-  REQUIRE(Owner::rebuilt_id.load() == 41);
+  // The inner table was destroyed first, with its probe, so the owner's
+  // destructor runs against a table that is gone.
+  REQUIRE(Owner::dropped_at_entry.load() == 1);
+  CHECK(Owner::found_none.load());
+  CHECK(Owner::builds_at_entry.load() == 0);
+  CHECK(Owner::reuses_at_entry.load() == 0);
+  CHECK(Owner::rebuilt_id.load() == 41);
+  // The probe built there is dropped when the owner's destructor ends. A
+  // table that is gone would keep it, and nothing would ever free it.
+  CHECK(Probe::dropped.load() == dropped + 2);
 }
