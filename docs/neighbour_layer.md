@@ -154,6 +154,8 @@ int main() {
 EAM, EAMTable, Lennard-Jones, LJCluster, Sutton-Chen, Stillinger-Weber,
 Tersoff, Morse and ZBL take candidate pairs from
 `rgpot::nlist::Neighbours`.
+EMT uses the vendored Asap neighbour list and force kernel, not
+`rgpot::nlist::Neighbours`.
 
 The layer bins atoms into cells whose edge is at least the cutoff plus
 the skin.
@@ -240,6 +242,11 @@ distorted 216-atom diamond the largest absolute difference was
 `3.4e-13` for Stillinger-Weber and `3.3e-16` for Tersoff. Morse and ZBL
 use the same half-list. The old `PairListCache` and its private cell
 walk are gone.
+EMT now follows the same OpenMP threshold as this layer: below
+`kTeamMinAtoms` it stays on one thread, and from `kTeamMinAtoms` up it
+evaluates the Asap half list in two phases, one row-owner pass and one
+incoming-partner pass, so energies and forces are bit-identical at 1, 2,
+4 and 8 threads.
 
 A streaming three-body call no longer reserves 32 bonds on every atom.
 The extra memory is the bins, the coordinates, and one scratch row.
