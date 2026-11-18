@@ -1,0 +1,79 @@
+configfile: "bench/no-motif-soap-gate/config.yaml"
+
+A_TREE = config.get("a_tree", "../anneal-arm-a")
+B_TREE = config.get("b_tree", "../anneal-arm-b")
+RGPOT_SC_LIB = config.get("rgpot_sc_lib", "")
+NOTES = config.get("notes", "anneal-no-motif-soap-NOTES.md")
+
+
+rule all:
+    input:
+        "bench/no-motif-soap-gate/rows.csv",
+        "bench/no-motif-soap-gate/unsupported.csv",
+        "bench/no-motif-soap-gate/declared-n.csv",
+        "bench/no-motif-soap-gate/command-source.csv",
+        "bench/no-motif-soap-gate/superseded.csv",
+        "bench/no-motif-soap-gate/summary.csv",
+        "bench/no-motif-soap-gate/seed-identity.csv",
+        "bench/no-motif-soap-gate/deltas.csv",
+        "bench/no-motif-soap-gate/verdict.txt",
+
+
+rule run_gate:
+    output:
+        rows="bench/no-motif-soap-gate/rows.csv",
+        unsupported="bench/no-motif-soap-gate/unsupported.csv",
+        declared="bench/no-motif-soap-gate/declared-n.csv",
+        commands="bench/no-motif-soap-gate/command-source.csv",
+        superseded="bench/no-motif-soap-gate/superseded.csv",
+    params:
+        a_tree=A_TREE,
+        b_tree=B_TREE,
+        notes=NOTES,
+        work="bench/no-motif-soap-gate/work",
+        logs="bench/no-motif-soap-gate/logs",
+        rgpot=(lambda wc: f'--rgpot-sc-lib "{RGPOT_SC_LIB}"' if RGPOT_SC_LIB else ""),
+    shell:
+        """
+        set -euo pipefail
+        python3 bench/no-motif-soap-gate/run_gate.py \
+          --a-tree "{params.a_tree}" \
+          --b-tree "{params.b_tree}" \
+          --work "{params.work}" \
+          --rows "{output.rows}" \
+          --unsupported "{output.unsupported}" \
+          --declared "{output.declared}" \
+          --commands "{output.commands}" \
+          --superseded "{output.superseded}" \
+          --notes "{params.notes}" \
+          --logs "{params.logs}" \
+          --seed0 2000 \
+          --n 12 \
+          {params.rgpot}
+        """
+
+
+rule summarize:
+    input:
+        rows="bench/no-motif-soap-gate/rows.csv",
+        unsupported="bench/no-motif-soap-gate/unsupported.csv",
+        declared="bench/no-motif-soap-gate/declared-n.csv",
+        superseded="bench/no-motif-soap-gate/superseded.csv",
+    output:
+        summary="bench/no-motif-soap-gate/summary.csv",
+        identity="bench/no-motif-soap-gate/seed-identity.csv",
+        deltas="bench/no-motif-soap-gate/deltas.csv",
+        verdict="bench/no-motif-soap-gate/verdict.txt",
+    shell:
+        """
+        set -euo pipefail
+        python3 bench/no-motif-soap-gate/summarize.py \
+          --rows "{input.rows}" \
+          --declared "{input.declared}" \
+          --superseded "{input.superseded}" \
+          --unsupported "{input.unsupported}" \
+          --summary "{output.summary}" \
+          --identity "{output.identity}" \
+          --deltas "{output.deltas}" \
+          --verdict "{output.verdict}"
+        """

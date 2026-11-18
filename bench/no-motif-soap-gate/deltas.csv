@@ -1,0 +1,4 @@
+panel,system,hit_drop,call_increase,outside_increase,wall_increase,fisher_p,mannwhitney_p_calls,mannwhitney_p_outside_s,mannwhitney_p_wall_s
+lj,lj38,0,0,1,1,1,0.0193733,3.65846e-05,9.73457e-05
+lj,lj55,0,1,1,1,1,0.402504,3.65846e-05,3.65846e-05
+lj,lj75,0,0,1,1,1,1,1,1

@@ -1,0 +1,4 @@
+a_tree: ../anneal-arm-a
+b_tree: ../anneal-arm-b
+rgpot_sc_lib: ""
+notes: anneal-no-motif-soap-NOTES.md
