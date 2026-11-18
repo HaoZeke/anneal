@@ -1,3 +1,3 @@
 `MorsePot` on a stored neighbour list no longer evaluates each pair from both ends on an OpenMP team, which made 2 threads slower than 1 thread, and `Neighbours::fastTiles` no longer bypasses `walkStored` on stored lists.
 From `rgpot::kTeamMinAtoms` atoms and 4096 candidate upper pairs up, `MorsePot` evaluates each upper pair once in a single two-phase region with work-balanced atom slices rounded to 8-atom boundaries and vectorised `simd::exp_fixed_n` batches, while keeping the one-thread energy, force, stress and per-atom bits across all thread counts (including 1, 2, 4, 8 and 16 threads).
-The private split-snapshot test hook is no longer exported from `librgpot`, and the installed headers no longer include the `MorsePot` implementation source.
+The private split-snapshot test hook is no longer exported from `librgpot`, and an installed tree no longer includes implementation sources such as `MorsePot.cc`.
