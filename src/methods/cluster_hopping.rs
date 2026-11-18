@@ -9284,6 +9284,7 @@ where
                             let ch = &chains;
                             let bi = &biases;
                             let tp = &temps;
+                            let adaptive_tp = &adaptive_temperature;
                             l.offer(&mut *rng, |k| {
                                 let (ek, xk) = (ch[k].energy, ch[k].coordinates.view());
                                 let (ej, xj) = (ch[k + 1].energy, ch[k + 1].coordinates.view());
@@ -9292,8 +9293,8 @@ where
                                 let vj_xj = bi[k + 1].potential(bi[k + 1].cv(xj).view());
                                 let vj_xk = bi[k + 1].potential(bi[k + 1].cv(xk).view());
                                 let log_a = crate::tempering::biased_swap_log_ratio(
-                                    tp[k],
-                                    tp[k + 1],
+                                    tp[k] * adaptive_tp[k],
+                                    tp[k + 1] * adaptive_tp[k + 1],
                                     ek + vk_xk,
                                     ej + vk_xj,
                                     ej + vj_xj,
@@ -9350,8 +9351,8 @@ where
                         let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
                         let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
                         let log_a = crate::tempering::biased_swap_log_ratio(
-                            temps[k],
-                            temps[j],
+                            temps[k] * adaptive_temperature[k],
+                            temps[j] * adaptive_temperature[j],
                             ek + vk_xk,
                             ej + vk_xj,
                             ej + vj_xj,
