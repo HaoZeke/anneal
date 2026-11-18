@@ -154,11 +154,6 @@ const ALLOW: &[Allow] = &[
         reason: "published TIP4P baseline reproduces GMIN's size table",
     },
     Allow {
-        path: "src/bank_rpc/server.rs",
-        needle: "kmax_factor: if n >= 55",
-        reason: "existing size-tuned IRA admission setting; replacement is audited",
-    },
-    Allow {
         path: "src/methods/dls_published.rs",
         needle: "mackay",
         reason: "published DLS baseline reproduces its named primary-site template",
@@ -213,16 +208,6 @@ const ALLOW: &[Allow] = &[
         path: "src/methods/cluster_hopping/general.rs",
         needle: "if n < 6",
         reason: "generic tetrahedral-hole regrowth needs a seed simplex and later points",
-    },
-    Allow {
-        path: "src/methods/cluster_hopping/moves.rs",
-        needle: "groups[0].len() >= 4",
-        reason: "existing lone-flexible-group size switch; replacement is audited",
-    },
-    Allow {
-        path: "src/methods/cluster_hopping/config.rs",
-        needle: "groups[0].len() >= 4",
-        reason: "existing lone-flexible-group SOAP switch; replacement is audited",
     },
     // Counters and sample counts named `n`, not atom counts.
     Allow {
@@ -323,18 +308,8 @@ const ALLOW: &[Allow] = &[
     },
     Allow {
         path: "src/methods/cluster_hopping.rs",
-        needle: "RIGID_HOT_BODIES",
-        reason: "existing rigid-body count switch; replacement is audited",
-    },
-    Allow {
-        path: "src/methods/cluster_hopping.rs",
         needle: "STALL_POINTS",
         reason: "cfg(test) fixture size, not shipped search behaviour",
-    },
-    Allow {
-        path: "src/catalog/packing.rs",
-        needle: "MINIMUM_PACKING_ATOMS",
-        reason: "existing fixed descriptor-size floor; replacement is audited",
     },
     Allow {
         path: "src/catalog/molecular.rs",

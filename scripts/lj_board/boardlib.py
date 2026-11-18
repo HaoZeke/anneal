@@ -55,7 +55,7 @@ REFERENCES = {
 HIT_TOL = 1.0e-4
 FORCE_BAR = 0.0514221
 # Midpoint of the 0.36 to 0.40 band in Wales and Doye, J. Phys. Chem. A
-# 101, 5111 (1997). The same value is LennardJonesPreset::ALL_POINTS_STEP.
+# 101, 5111 (1997). The same ratio is LennardJonesPreset::ALL_POINTS_STEP_RATIO.
 WALES_STEP = 0.38
 WALES_TEMPERATURE = 0.8
 # Minimum pair distance used when the starting cluster is placed.

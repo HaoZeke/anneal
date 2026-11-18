@@ -175,10 +175,6 @@ fn general(n: usize, length: f64, energy: f64) -> Config {
     cfg.orbit_complete_on_new = true;
     cfg.orbit_arm = true;
     cfg.prior_soap = false;
-    cfg.prior_reseed = false;
-    cfg.prior_growth = false;
-    cfg.prior_core = false;
-    cfg.prior_motif = false;
     cfg.symmetrise_on_stall = false;
     cfg.continuous_symmetry = anneal_core::methods::cluster_hopping::ContinuousSymmetry::Off;
     cfg.energy_lattice = false;

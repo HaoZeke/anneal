@@ -177,15 +177,11 @@ pub enum ContinuousSymmetry {
         interval: usize,
     },
     /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
-    /// symmetry measure. On an icosahedral plateau, `reseed_hops` without a
-    /// new incumbent draws a fresh cluster, closes its core orbits, projects,
-    /// and quenches. Zero disables that reseed. GMIN's `NSYMINTERVAL` default
-    /// is the same ten quenches (`keywords.f90`).
+    /// symmetry measure. GMIN's `NSYMINTERVAL` default is ten quenches
+    /// (`keywords.f90`).
     Measure {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
-        /// Hops without a new incumbent before an icosahedral reseed.
-        reseed_hops: usize,
     },
 }
 
@@ -975,27 +971,6 @@ pub struct Config {
     /// Fivefold SOAP proposal. On in the paper preset.
     #[serde(skip_serializing_if = "is_true")]
     pub prior_soap: bool,
-    /// Icosahedral symmetry reseed. On in the paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_reseed: bool,
-    /// Stall regrowth from a lattice order. On in the paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_growth: bool,
-    /// Labelled close-packed core cuts. On in the paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_core: bool,
-    /// The core cuts stop once they stall and the walk continues from the
-    /// best of them.
-    ///
-    /// The cuts get at most half of what is left. Every cut is arranged,
-    /// and before each refinement the cuts stop when the calls since their
-    /// last lower quench exceed the calls it took to reach it. On in the
-    /// paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_handover: bool,
-    /// Half-budget motif reseed. On in the paper preset.
-    #[serde(skip_serializing_if = "is_true")]
-    pub prior_motif: bool,
     /// Plane cap and slab moves, a temperature taken from the
     /// population's energy spread, and a fingerprint taboo.
     ///
@@ -1550,14 +1525,7 @@ impl Config {
         // value.
         cfg.relax_steps = 1000;
         // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
-        // The same paper's LJ75 table used a restart of about five basin
-        // hopping steps once symmetrisation was on. Both run inside this
-        // chain. The reseed fires only on an icosahedral plateau, so a
-        // face-centred construction is not abandoned.
-        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
-            interval: 10,
-            reseed_hops: 5,
-        };
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
         // Shao, Cheng and Cai, J. Comput. Chem. 25, 1693 (2004): the
         // highest-energy occupied site moves onto a vacant site of the
         // lattice the current structure defines. One arm, at every size.
@@ -1593,10 +1561,7 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
-        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
-            interval: 10,
-            reseed_hops: 5,
-        };
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
         cfg
     }
 
@@ -1890,7 +1855,7 @@ impl Config {
             jump_on_stall: false,
             jump_patience: 5_000,
             jump_steps: 10,
-            jump_step: LennardJonesPreset::ALL_POINTS_STEP * length_scale,
+            jump_step: LennardJonesPreset::ALL_POINTS_STEP_RATIO * length_scale,
             symmetrise_core_fraction: 0.6,
             point_symmetrise_every_accept: false,
             continuous_symmetry: ContinuousSymmetry::Off,
@@ -1931,11 +1896,6 @@ impl Config {
             path_images: 9,
             anneal_diversity: false,
             prior_soap: true,
-            prior_reseed: true,
-            prior_growth: true,
-            prior_core: true,
-            prior_handover: true,
-            prior_motif: true,
             general_collective: false,
             homotop_descent: true,
             homotop_ranked: true,
@@ -2109,7 +2069,7 @@ impl Config {
         let reach = geometry.site_reach().max(1.0e-6);
         self.move_library = MoveLibrary::RigidBody {
             n_molecules: self.n_points,
-            translate_step: LennardJonesPreset::ALL_POINTS_STEP * self.length_scale,
+            translate_step: LennardJonesPreset::ALL_POINTS_STEP_RATIO * self.length_scale,
             rotate_step: super::moves::RIGID_ORIENTATION_CAP,
             local: true,
             reverse_cycles: false,
@@ -2353,17 +2313,6 @@ impl Config {
                 molecule
             })
             .collect();
-        // One free molecule turns its torsions, which check their own
-        // contacts. The SOAP pullback moves atoms along the descriptor
-        // gradient regardless of their bonds, or, retracted onto the one
-        // group, carries the molecule whole, and pays for the expansion
-        // before the overlap gate sees the proposal.
-        if groups.len() == 1
-            && groups[0].len() >= 4
-            && super::moves::mobile_atoms(&cfg, &groups).is_none()
-        {
-            cfg.prior_soap = false;
-        }
         cfg.move_library = MoveLibrary::Molecular {
             groups,
             reactive: false,
@@ -2496,15 +2445,27 @@ mod coverage_behaviour {
 
     #[test]
     fn bonded_groups_search_as_one_molecule() {
-        let cfg = Config::recommended_molecular(vec![6, 6, 6], vec![vec![0], vec![1, 2]], 1.0);
-        let x = ndarray::array![0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 2.2, 1.2, 0.0];
+        let cfg = Config::recommended_molecular(vec![6; 4], vec![vec![0, 1], vec![2, 3]], 1.0);
+        let x = ndarray::array![0.0, 0.0, 0.0, 1.4, 0.0, 0.0, 2.8, 0.0, 0.0, 4.2, 0.0, 0.0];
         let flexible = cfg
             .with_flexible_molecules(x.view())
             .expect("bonded groups");
         assert_eq!(
             flexible.move_library.declared_groups(),
-            Some(&[vec![0usize, 1, 2]][..])
+            Some(&[vec![0usize, 1, 2, 3]][..])
         );
+        let names: Vec<_> = flexible
+            .move_library
+            .kernels(&flexible)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        for measured in ["gshake", "gsurface", "gburst", "soap"] {
+            assert!(
+                names.iter().any(|name| name == measured),
+                "flexible molecule dropped measured arm {measured}: {names:?}"
+            );
+        }
         assert!(flexible.with_flexible_molecules(x.view()).is_none());
         let water = Config::recommended_molecular(
             vec![8, 1, 1, 8, 1, 1],

@@ -114,19 +114,10 @@ fn a_basin_stride_is_resolved_only_off_its_default() {
 }
 
 #[test]
-fn paper_preset_priors_stay_out_of_the_resolved_hash() {
+fn paper_preset_optional_moves_stay_out_of_the_resolved_hash() {
     let cfg = Config::recommended(38);
     let json = cfg.resolved_json().unwrap();
-    for name in [
-        "prior_soap",
-        "prior_reseed",
-        "prior_growth",
-        "prior_core",
-        "prior_handover",
-        "homotop_reorder",
-        "prior_motif",
-        "general_collective",
-    ] {
+    for name in ["prior_soap", "homotop_reorder", "general_collective"] {
         assert!(
             !json.contains(name),
             "{name} at the paper preset stays out of the resolved JSON"

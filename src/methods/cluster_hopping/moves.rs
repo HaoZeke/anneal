@@ -119,7 +119,7 @@ impl MoveLibrary {
         };
         let wales_doye = || {
             vec![ClusterMove::AllPoints {
-                step: LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale,
+                step: LennardJonesPreset::ALL_POINTS_STEP_RATIO * cfg.length_scale,
             }]
         };
         let lean = || {
@@ -219,35 +219,11 @@ impl MoveLibrary {
                     )
                 };
                 let mobile = mobile_atoms(cfg, groups);
-                // One free group: a group shake, relocation or burst carries
-                // it whole, the quench returns the conformer it started from,
-                // and the hop pays a quench for it. A rotatable bond has two
-                // atoms on each side, so a group of three or fewer keeps the
-                // rigid arms. Whether the SOAP arm stays is
-                // [`Config::with_flexible_molecules`]'s call: only it knows
-                // the group is one covalent molecule.
-                let lone_molecule = groups.len() == 1
-                    && groups[0].len() >= 4
-                    && mobile.is_none()
-                    && cfg.species.is_some();
-                if lone_molecule {
-                    kernels.retain(|kernel| {
-                        !matches!(
-                            kernel,
-                            ClusterMove::GroupShake { .. }
-                                | ClusterMove::GroupRelocate { .. }
-                                | ClusterMove::GroupBurst { .. }
-                        )
-                    });
-                }
-                // The flexible SOAP leftover is an atomic packing pullback.
-                // On a water cluster larger than the hexamer it spends the
-                // quench inside the spherical-harmonic expansion and never
-                // calls the potential. The group moves already carry the
-                // search; the hexamer keeps the arm it was measured with.
-                let large_water = groups.len() > crate::catalog::molecular::WATER_HEXAMER_MOLECULES
-                    && super::cycles::is_water_groups(groups);
-                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap && !large_water {
+                // Keep every declared molecular arm available. Recommended
+                // molecular searches allocate them from measured improvement
+                // and acceptance, so an unproductive rigid or descriptor arm
+                // loses draws without a group-cardinality rule.
+                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap {
                     kernels.push(soap_arm(cfg, mobile.clone(), Some(groups.clone())));
                 }
                 if let Some(species) = cfg.species.as_ref() {
@@ -264,14 +240,12 @@ impl MoveLibrary {
                     kernels.push(ClusterMove::GroupCycleReverse {
                         groups: groups.clone(),
                     });
-                    // The hexamer library stays the one its arm was measured
-                    // with. A larger cage needs a turn onto a free oxygen; the
-                    // half-radian shake quenches back into the bond it left.
-                    if large_water {
-                        kernels.push(ClusterMove::GroupRewire {
-                            groups: groups.clone(),
-                        });
-                    }
+                    // Rewiring is another measured arm, not a system-size
+                    // choice. The allocator learns whether it pays on the
+                    // current potential and part of the landscape.
+                    kernels.push(ClusterMove::GroupRewire {
+                        groups: groups.clone(),
+                    });
                 }
                 kernels
             }
@@ -1668,7 +1642,7 @@ impl ClusterMove {
     ) -> Vec<ClusterMove> {
         vec![
             ClusterMove::AllPoints {
-                step: LennardJonesPreset::ALL_POINTS_STEP * length_scale,
+                step: LennardJonesPreset::ALL_POINTS_STEP_RATIO * length_scale,
             },
             ClusterMove::SinglePoint {
                 n_points: n,
@@ -3525,7 +3499,7 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn a_large_water_cluster_does_not_draw_the_atomic_soap_pullback() {
+    fn molecular_arms_do_not_switch_at_a_group_count() {
         let molecules = 20;
         let species: Vec<u32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
         let groups: Vec<Vec<usize>> = (0..molecules)
@@ -3538,11 +3512,8 @@ mod move_scaling_tests {
             .iter()
             .map(|kernel| kernel.name())
             .collect();
-        assert!(
-            !names.iter().any(|name| *name == "soap"),
-            "atomic SOAP pullback is still drawn for (H2O)20: {names:?}"
-        );
-        for required in ["gshake", "gsurface", "gburst", "gcycle", "hbrewire"] {
+        assert!(rec.allocate_moves);
+        for required in ["gshake", "gsurface", "gburst", "soap", "gcycle", "hbrewire"] {
             assert!(
                 names.iter().any(|name| *name == required),
                 "missing {required} on (H2O)20: {names:?}"
@@ -3560,10 +3531,13 @@ mod move_scaling_tests {
             .iter()
             .map(|kernel| kernel.name())
             .collect();
-        assert!(
-            !small_names.iter().any(|name| *name == "hbrewire"),
-            "the hexamer library gained a rewire arm: {small_names:?}"
-        );
+        assert!(small.allocate_moves);
+        for required in ["gshake", "gsurface", "gburst", "soap", "gcycle", "hbrewire"] {
+            assert!(
+                small_names.iter().any(|name| *name == required),
+                "missing measured arm {required}: {small_names:?}"
+            );
+        }
     }
 
     #[test]

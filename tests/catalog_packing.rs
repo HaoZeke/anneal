@@ -87,6 +87,19 @@ fn dimer_coordinates_have_no_packing_fingerprint() {
 }
 
 #[test]
+fn descriptor_availability_follows_local_geometric_rank() {
+    anneal_core::install_rgpot_kernels!();
+    let tetrahedron = [
+        1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0,
+    ];
+    let mut book = PackingBook::default();
+    assert!(
+        book.observe(&tetrahedron).is_some(),
+        "a three-dimensional neighbour cloud supports the descriptor without an atom-count floor"
+    );
+}
+
+#[test]
 fn different_decaf_family_is_ico_versus_marks_not_an_ico_isomer() {
     anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));

@@ -2742,9 +2742,8 @@ def manuscript_new(audit: Audit) -> None:
                      "SOAP_CUTOFF: f64 = 3.5;", "SCREEN_MARGIN: f64 = 2.0;"):
         audit.said(preset, fragment)
     config = "src/methods/cluster_hopping/config.rs"
-    for fragment in ("bias_gamma: 5.0,", "tabu_capacity: 8,", "interval: 10,", "reseed_hops: 5,", "prior_soap: true,",
-                     "prior_reseed: true,", "prior_growth: true,", "prior_core: true,", "prior_motif: true,",
-                     "calibrated_screen: true,"):
+    for fragment in ("bias_gamma: 5.0,", "tabu_capacity: 8,", "interval: 10,",
+                     "prior_soap: true,", "calibrated_screen: true,"):
         audit.said(config, fragment)
     audit.said("src/methods/cluster_hopping.rs", "const WINDOW: usize = 256;")
     audit.said("src/methods/cluster_hopping.rs", "const WARMUP: usize = 8;")

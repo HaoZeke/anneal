@@ -64,12 +64,56 @@ pub const PACKING_SPEC: SoapSpec = SoapSpec {
     rcut_nn: 3.5,
 };
 
-/// A closed-shell class histogram needs a real neighbour cloud.
-pub(crate) const MINIMUM_PACKING_ATOMS: usize = 13;
-
 /// Recompute DECAF only when some atom moved more than this.
 /// Sits well below [`ENVIRONMENT_RADIUS`] and the packing-family grain.
 pub const PACKING_MOVE_EPS: f64 = 0.05;
+
+/// Whether at least one local environment spans the descriptor's three
+/// Cartesian directions.
+///
+/// SOAP rows from collinear or planar neighbour clouds are finite but do not
+/// carry enough angular information to identify a three-dimensional packing.
+/// This measured-rank check replaces a global atom-count floor: any potential
+/// receives the descriptor as soon as its own geometry supports it.
+pub(crate) fn packing_descriptor_sufficient(coordinates: &[f64], cutoff: f64) -> bool {
+    if coordinates.is_empty()
+        || !coordinates.len().is_multiple_of(3)
+        || !cutoff.is_finite()
+        || cutoff <= 0.0
+        || coordinates.iter().any(|value| !value.is_finite())
+    {
+        return false;
+    }
+    let points = coordinates.as_chunks::<3>().0;
+    let cutoff2 = cutoff * cutoff;
+    points.iter().enumerate().any(|(center, origin)| {
+        let mut gram = [[0.0; 3]; 3];
+        for (other, point) in points.iter().enumerate() {
+            if other == center {
+                continue;
+            }
+            let delta = [
+                point[0] - origin[0],
+                point[1] - origin[1],
+                point[2] - origin[2],
+            ];
+            let distance2 = delta.iter().map(|value| value * value).sum::<f64>();
+            if distance2 > cutoff2 {
+                continue;
+            }
+            for row in 0..3 {
+                for column in 0..3 {
+                    gram[row][column] += delta[row] * delta[column];
+                }
+            }
+        }
+        let determinant = gram[0][0] * (gram[1][1] * gram[2][2] - gram[1][2] * gram[2][1])
+            - gram[0][1] * (gram[1][0] * gram[2][2] - gram[1][2] * gram[2][0])
+            + gram[0][2] * (gram[1][0] * gram[2][1] - gram[1][1] * gram[2][0]);
+        let trace = gram[0][0] + gram[1][1] + gram[2][2];
+        determinant > f64::EPSILON * trace.powi(3)
+    })
+}
 
 /// Leader-clustered environment codebook and packing-family visits.
 #[derive(Clone, Debug, Default)]
@@ -476,11 +520,7 @@ impl PackingBook {
     }
 
     fn assign_histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if !coordinates.len().is_multiple_of(3) {
-            return None;
-        }
-        let atoms = coordinates.len() / 3;
-        if atoms < MINIMUM_PACKING_ATOMS {
+        if !packing_descriptor_sufficient(coordinates, self.spec.rcut_nn) {
             return None;
         }
         let loc = self.descriptor_rows(coordinates);
@@ -500,11 +540,7 @@ impl PackingBook {
     }
 
     fn assign_growing(&mut self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if !coordinates.len().is_multiple_of(3) {
-            return None;
-        }
-        let atoms = coordinates.len() / 3;
-        if atoms < MINIMUM_PACKING_ATOMS {
+        if !packing_descriptor_sufficient(coordinates, self.spec.rcut_nn) {
             return None;
         }
         let loc = self.descriptor_rows(coordinates);
@@ -1020,12 +1056,11 @@ fn update_packing_reference(coordinates: &[f64], count_matching_arrival: bool) {
         book.observe(&reference.coordinates);
     }
     if book.observe(coordinates).is_none() {
-        // DECAF starts at [`MINIMUM_PACKING_ATOMS`]. A smaller well still
-        // belongs in the cloud: the Leave repels from positions, and a
-        // numerically identical copy is one well, not a missing one.
+        // A well without enough local angular support still belongs in the
+        // cloud: Leave repels from positions, and a numerically identical copy
+        // is one well, not a missing one.
         if !coordinates.is_empty()
             && coordinates.len().is_multiple_of(3)
-            && coordinates.len() / 3 < MINIMUM_PACKING_ATOMS
             && coordinates.iter().all(|value| value.is_finite())
         {
             record_sub_decaf_reference(held, coordinates, count_matching_arrival);
@@ -1148,19 +1183,14 @@ pub fn nearby_packing(here: &[f64], other: &[f64]) -> bool {
     if here.len() != other.len() || here.is_empty() || !here.len().is_multiple_of(3) {
         return false;
     }
-    // DECAF histograms start at [`MINIMUM_PACKING_ATOMS`]. Below that the
-    // book has no cells, and a 0.01% copy would read as a different
-    // packing. The move epsilon is the displacement the book itself
-    // treats as the same structure.
-    if here.len() / 3 < MINIMUM_PACKING_ATOMS {
-        return !atom_moved(here, other, PACKING_MOVE_EPS);
-    }
     let mut book = PackingBook::default();
-    book.observe(here);
-    book.observe(other);
-    match (book.histogram(here), book.histogram(other)) {
-        (Some(a), Some(b)) => packing_distance(&a, &b) <= PACKING_LINK,
-        _ => false,
+    let described = book.observe(here).is_some() && book.observe(other).is_some();
+    match (described, book.histogram(here), book.histogram(other)) {
+        (true, Some(a), Some(b)) => packing_distance(&a, &b) <= PACKING_LINK,
+        // The descriptor is unavailable when the measured local neighbour
+        // cloud lacks three-dimensional support. In that regime use the same
+        // size-independent Cartesian displacement grain as the row cache.
+        _ => !atom_moved(here, other, PACKING_MOVE_EPS),
     }
 }
 
