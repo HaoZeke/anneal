@@ -4432,7 +4432,7 @@ mod torsion_tests {
     }
 
     #[test]
-    fn a_lone_molecule_keeps_only_its_torsion() {
+    fn a_lone_molecule_keeps_all_measured_arms() {
         use crate::methods::cluster_hopping::search_kernels;
         let names = |cfg: &Config| -> Vec<String> {
             search_kernels(cfg).iter().map(|k| k.name()).collect()
@@ -4445,7 +4445,10 @@ mod torsion_tests {
             Config::recommended_molecular(vec![6; 6], vec![vec![0, 1, 2], vec![3, 4, 5]], 0.05);
         assert!(names(&cut).len() > 1);
         let chain = cut.with_flexible_molecules(x.view()).expect("one chain");
-        assert_eq!(names(&chain), vec!["torsion".to_string()]);
+        assert_eq!(
+            names(&chain),
+            ["gshake", "gsurface", "gburst", "soap", "torsion"].map(str::to_string)
+        );
         let mut held = cut.clone();
         held.frozen = Some(vec![true, false, false, false, false, false]);
         let held = held.with_flexible_molecules(x.view()).expect("one chain");
