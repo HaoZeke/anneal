@@ -223,6 +223,11 @@ foreach(test IN LISTS _rgpot_units)
   endif()
   rgpot_add_test("${test}" COMMAND ${_exe})
 endforeach()
+# FastNlistTest calls rgpot_water_h_force and rgpot_water_h_image directly, and
+# a shared librgpot hides the Fortran kernel archive behind --exclude-libs.
+if(TARGET fast_nlist_test AND TARGET rgpot_fortran_kernels)
+  target_link_libraries(fast_nlist_test PRIVATE rgpot_fortran_kernels)
+endif()
 
 rgpot_registry_tests(rerun _rgpot_reruns)
 foreach(test IN LISTS _rgpot_reruns)
