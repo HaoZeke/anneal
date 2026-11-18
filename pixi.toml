@@ -255,6 +255,7 @@ eon-min-landscape = { cmd = "python tests/eon_min_landscape.py", description = "
 pes-double-well = { cmd = "bash scripts/pes_double_well.sh", description = "Render the rgpot LJ double-well 2D PES: ASE local vs anneal global (run with -e rpctest)" }
 rust-test-all = { cmd = "cargo nextest run --manifest-path rgpot-core/Cargo.toml --all-features", description = "Run Rust core tests with all features enabled" }
 gen-header = { cmd = "cargo build --manifest-path rgpot-core/Cargo.toml --features gen-header", description = "Regenerate C header (rgpot-core/include/rgpot.h) from Rust source" }
+check-header-drift = { cmd = "bash tools/check_header_drift.sh", description = "Fail when rgpot-core/include/rgpot.h differs from the cbindgen output" }
 doccheck = { cmd = "python docs/doccheck.py all", description = "Check reference entries, facts and code blocks in the docs against the source (add --build-dir DIR to run the examples)" }
 towncrier-draft = { cmd = "uvx towncrier build --draft", description = "Preview release notes" }
 towncrier-build = { cmd = "uvx towncrier build", description = "Build release notes into CHANGELOG.md" }

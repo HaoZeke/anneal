@@ -11,6 +11,13 @@ mod version_macros;
 /// Run `cargo build --features gen-header` or `pixi r gen-header` to regenerate.
 #[cfg(feature = "gen-header")]
 fn generate_c_header(crate_dir: &str) {
+    // Once any rerun-if line is printed, cargo stops rescanning the
+    // package, so name every input of the header. Without these a
+    // changed doc comment would not regenerate it.
+    for input in ["src", "cbindgen.toml", "version_macros.rs", "Cargo.toml"] {
+        println!("cargo::rerun-if-changed={input}");
+    }
+
     let output_dir = PathBuf::from(crate_dir).join("include");
     std::fs::create_dir_all(&output_dir).unwrap();
 
