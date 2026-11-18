@@ -120,6 +120,12 @@ fn call(pot: &Mutex<RgpotObjective>, led: &mut Ledger, x: ArrayView1<f64>) -> Ca
         return Call::Spent;
     }
     let (energy, gradient) = evaluate(&pot.lock().expect("pot"), x);
+    classify(energy, gradient)
+}
+
+/// What the handle returned: an answer only when the energy and every
+/// gradient component are finite.
+fn classify(energy: f64, gradient: Array1<f64>) -> Call {
     if energy.is_finite() && gradient.iter().all(|value| value.is_finite()) {
         Call::Answer(energy, gradient)
     } else {
@@ -428,6 +434,37 @@ mod tests {
 
     fn silicon_pair(r: f64) -> Array1<f64> {
         Array1::from(vec![0.0, 0.0, 0.0, r, 0.0, 0.0])
+    }
+
+    #[test]
+    fn the_wrappers_zero_buffer_after_a_failed_call_is_refused_not_answered() {
+        let zeros = Array1::<f64>::zeros(6);
+        assert!(matches!(classify(f64::NAN, zeros.clone()), Call::Refused));
+        assert!(matches!(classify(f64::INFINITY, zeros), Call::Refused));
+    }
+
+    #[test]
+    fn a_nonfinite_gradient_component_is_refused() {
+        let gradient = Array1::from(vec![0.1, f64::NAN, -0.1]);
+        assert!(matches!(classify(-3.0, gradient), Call::Refused));
+        let gradient = Array1::from(vec![0.1, f64::NEG_INFINITY, -0.1]);
+        assert!(matches!(classify(-3.0, gradient), Call::Refused));
+    }
+
+    #[test]
+    fn a_finite_answer_keeps_its_gradient_and_a_zero_one_is_a_real_answer() {
+        let gradient = Array1::from(vec![0.25, -0.5, 0.0]);
+        match classify(-3.0, gradient.clone()) {
+            Call::Answer(energy, returned) => {
+                assert_eq!(energy, -3.0);
+                assert_eq!(returned, gradient);
+            }
+            _ => panic!("a finite energy and gradient is an answer"),
+        }
+        assert!(matches!(
+            classify(-3.0, Array1::zeros(6)),
+            Call::Answer(_, _)
+        ));
     }
 
     #[test]
