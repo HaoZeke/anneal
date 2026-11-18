@@ -995,10 +995,11 @@ jobs:
             lj_eval lj_engine capi_threads abi_symbols \
             lammps_lj plumed_driver plumed_debug_forces plumed_box_derivatives \
             plumed_units plumed_api gromacs_mdrun openmm_lj NullForceAbiTest \
+            BuiltinPluginTest \
             | tee build/engine-tests.txt
           for name in lj_eval lj_engine lammps_lj plumed_driver plumed_debug_forces \
             plumed_box_derivatives plumed_units plumed_api gromacs_mdrun openmm_lj \
-            NullForceAbiTest; do
+            NullForceAbiTest BuiltinPluginTest; do
             if ! grep -E "${name}[[:space:]]+OK" build/engine-tests.txt >/dev/null; then
               echo "${name} did not pass" >&2
               exit 1

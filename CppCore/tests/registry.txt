@@ -166,6 +166,7 @@ D2PotTest | tests core | unit d2_pot_test D2PotTest.cc timeout=300 |
 D2CpmdPotTest | tests core | unit d2_cpmd_pot_test D2CpmdPotTest.cc |
 PerAtomTest | tests core | unit per_atom_test PerAtomTest.cc |
 NullForceAbiTest | tests core | unit null_force_abi_test NullForceAbiTest.cc |
+BuiltinPluginTest | tests core | unit builtin_plugin_test BuiltinPluginTest.cc |
 LocalityTest | tests core | unit locality_test LocalityTest.cc |
 StagedTest | tests core | unit staged_test StagedTest.cc |
 Staged3BodyTest | tests core | unit staged_3body_test Staged3BodyTest.cc timeout=60 |

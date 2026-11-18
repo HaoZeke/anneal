@@ -11,6 +11,8 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -18,9 +20,9 @@
 #include "rgpot/plugin/PluginRegistry.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
-using rgpot::types::AtomMatrix;
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
+using rgpot::types::AtomMatrix;
 
 // Helper: get plugin .so path from RGPOT_TEST_PLUGIN_DIR env var
 static std::string plugin_path(const char *filename) {
@@ -52,7 +54,8 @@ static AtomMatrix make_pos(const double *data, int n) {
 
 // ---- Null plugin ----
 
-TEST_CASE("External null plugin: zero energy and forces", "[plugin][external]") {
+TEST_CASE("External null plugin: zero energy and forces",
+          "[plugin][external]") {
   auto &reg = rgpot::plugin::PluginRegistry::instance();
   reg.load_plugin(plugin_path("librgpot_null.so"));
   const auto *p = reg.find("null");
@@ -92,7 +95,8 @@ TEST_CASE("External Morse plugin: bound pair", "[plugin][external]") {
 
   // Forces should be equal and opposite
   REQUIRE_THAT(forces(0, 0) + forces(1, 0), WithinAbs(0.0, 1e-12));
-  // Force on atom 0 should be positive (attractive, pulling toward atom 1 at +x)
+  // Force on atom 0 should be positive (attractive, pulling toward atom 1 at
+  // +x)
   REQUIRE(forces(0, 0) > 0.0);
 }
 
@@ -144,7 +148,24 @@ TEST_CASE("Plugin registry tracks all loaded plugins", "[plugin][external]") {
     if (n == "morse")
       has_morse = true;
   }
-  REQUIRE(has_lj);   // builtin
+  REQUIRE(has_lj);    // builtin
   REQUIRE(has_null);  // external C
   REQUIRE(has_morse); // external C
+}
+
+TEST_CASE("an external plugin cannot replace a builtin name",
+          "[plugin][external]") {
+  auto &reg = rgpot::plugin::PluginRegistry::instance();
+  std::stringstream captured;
+  const auto old = std::cerr.rdbuf(captured.rdbuf());
+  const bool loaded = reg.load_plugin(plugin_path("librgpot_lj_collision.so"));
+  std::cerr.rdbuf(old);
+  REQUIRE_FALSE(loaded);
+  const auto *lj = reg.find("lennard-jones");
+  REQUIRE(lj != nullptr);
+  REQUIRE(std::string(lj->desc->version) == "1.0.0");
+  REQUIRE(captured.str().find("[rgpot] plugin name collision ") !=
+          std::string::npos);
+  REQUIRE(captured.str().find(": lennard-jones is already registered") !=
+          std::string::npos);
 }
