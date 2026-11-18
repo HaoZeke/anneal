@@ -132,6 +132,8 @@ fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
     println!("cargo::rerun-if-env-changed=RGPOT_SOURCE_REVISION");
+    println!("cargo::rerun-if-changed=src/version.rs");
+    println!("cargo::rerun-if-changed=cbindgen.toml");
     println!(
         "cargo::rustc-env=RGPOT_SOURCE_REVISION={}",
         source_revision(&crate_dir)
