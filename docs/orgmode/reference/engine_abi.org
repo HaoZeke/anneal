@@ -54,9 +54,8 @@ Every library above exports
 =rgpot_engine_force_batch=, =rgpot_engine_abi_stamp=,
 =rgpot_engine_abi_compatible=, =rgpot_engine_name=, =rgpot_engine_version=, =rgpot_engine_model_digest=,
 =rgpot_engine_caps=,
-=rgpot_engine_last_error=, =rgpot_engine_set_num_threads=,
-=rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals= and
-=rgpot_engine_copy_orbitals=.
+=rgpot_engine_last_error=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=
+and =rgpot_engine_copy_orbitals=.
 None of them exports =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=,
 =rgpot_engine_hint= or =rgpot_engine_neighbor_options=.
 
@@ -114,9 +113,9 @@ Minor 1 added the stamp, =rgpot_engine_caps=,
 =rgpot_engine_last_error=, =rgpot_engine_set_num_threads= and =rgpot_engine_set_charge_spin=.
 Minor 2 added =rgpot_engine_name=, =rgpot_engine_version=,
 =rgpot_engine_model_digest= and the generic table for every backend.
-Minor 3 added =RgpotEngineCaps.orbital_selection=,
-=RgpotEngineCaps.orbital_copy=, =rgpot_engine_select_orbitals= and
-=rgpot_engine_copy_orbitals=.
+Minor 3 added
+=RgpotEngineCaps.orbital_selection=, =RgpotEngineCaps.orbital_copy=,
+=rgpot_engine_select_orbitals= and =rgpot_engine_copy_orbitals=.
 The version does not cover the Cap'n Proto params schema, the tensor runtime the
 engine links, or the model.
 
@@ -253,8 +252,8 @@ Must not run concurrently with another call on the same handle.
   =rgpot_engine_caps=.
 - Units :: none.
 - Outputs :: =size= (bytes the engine wrote), =reentrancy=,
-  =per_image_instances=, =batched=, =periodic=, =stress=, =group_collective=,
-  =orbital_selection= and =orbital_copy=; the flags are 0 or 1.
+  =per_image_instances=, =batched=, =periodic=, =stress=,
+  =group_collective=, =orbital_selection= and =orbital_copy=; the flags are 0 or 1.
 - Errors :: none.
 
 The fields mirror rgpot's =PotCaps=.
@@ -425,15 +424,15 @@ int rgpot_engine_copy_orbitals(RgpotEnginePot *pot, long long from_key,
                                long long to_key);
 #+end_src
 
-- Inputs :: =pot=, a handle; =from_key=, source orbital slot;
-  =to_key=, destination orbital slot.
+- Inputs :: =pot=, a handle; =from_key=, source orbital slot; =to_key=,
+  destination orbital slot.
 - Units :: none.
 - Outputs :: 0 on success.
 - Errors :: returns 1 for a null =pot=.
   Returns 3 when the backend has no orbital-copy primitive, with
   =backend has no orbital copy= in =rgpot_engine_last_error=.
-  Returns 3 when the backend rejects the copy through an
-  =Unsupported= exception.
+  Returns 3 when the backend rejects the copy through an =Unsupported=
+  exception.
   Returns 2 for another backend exception, with the reason in
   =rgpot_engine_last_error=.
 
