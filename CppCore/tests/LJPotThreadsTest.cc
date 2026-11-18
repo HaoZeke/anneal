@@ -18,6 +18,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "DenseHessianOracle.hpp"
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/HessianVector.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
@@ -351,6 +352,149 @@ void runConcurrentSharedLj(const rgpot::LJConfig &cfg,
   REQUIRE(mismatches.load() == 0);
 }
 
+struct AnalyticReference {
+  std::vector<double> product;
+  DenseOracle oracle;
+};
+
+AnalyticReference computeAnalyticReference(const rgpot::LJConfig &cfg,
+                                           rgpot::nlist::Mode mode,
+                                           const Frame &frame) {
+  rgpot::LJPot pot_init(cfg);
+  pot_init.setNeighbourMode(mode);
+  const rgpot::LJPot &pot = pot_init;
+  const rgpot::ForceInput in{
+      .nAtoms = frame.z.size(),
+      .pos = frame.pos.data(),
+      .atmnrs = frame.z.data(),
+      .box = frame.box.data(),
+  };
+  AnalyticReference ref;
+  ref.product.assign(3 * frame.z.size(), 0.0);
+  rgpot::HessianVectorCache cache;
+  cache.apply(pot, in, frame.direction.data(), ref.product.data(), 0.0,
+              rgpot::HvpScheme::Analytic);
+  ref.oracle = finiteDifferenceOracle(pot, frame.pos, frame.z, frame.box,
+                                      frame.direction);
+  return ref;
+}
+
+void runConcurrentSharedAnalyticHvp(const rgpot::LJConfig &cfg,
+                                    rgpot::nlist::Mode mode) {
+  constexpr std::size_t kThreads = 8;
+  constexpr int kRounds = 12;
+  const double a_lj = std::pow(2.0, 1.0 / 6.0) * std::sqrt(2.0);
+
+  // Different atom counts, so that a neighbour list shared between threads
+  // would be rebuilt under another thread's walk.
+  const std::vector<Frame> frames = {
+      makeFccFrame(2, 2, 2, a_lj, false, 0.2),
+      makeFccFrame(3, 2, 2, a_lj, false, 0.6),
+      makeFccFrame(3, 3, 2, a_lj, true, 1.0),
+  };
+
+  std::vector<AnalyticReference> refs;
+  refs.reserve(frames.size());
+  for (std::size_t k = 0; k < frames.size(); ++k) {
+    refs.push_back(computeAnalyticReference(cfg, mode, frames[k]));
+    const AnalyticReference &ref = refs.back();
+    for (std::size_t c = 0; c < ref.product.size(); ++c) {
+      INFO("frame " << k << " component " << c);
+      REQUIRE(std::abs(ref.product[c] - ref.oracle.product[c]) <=
+              ref.oracle.bound[c]);
+    }
+  }
+
+  rgpot::LJPot shared_mut(cfg);
+  shared_mut.setNeighbourMode(mode);
+  const rgpot::LJPot &shared = shared_mut;
+  CHECK(shared.caps().analyticHvp);
+  CHECK(shared.caps().reentrancy == rgpot::Reentrancy::SharedInstance);
+
+  std::atomic<std::size_t> ready{0};
+  std::atomic<bool> go{false};
+  std::atomic<std::size_t> mismatches{0};
+  std::atomic<std::size_t> analytic_calls{0};
+
+  std::vector<std::thread> workers;
+  workers.reserve(kThreads);
+  for (std::size_t tid = 0; tid < kThreads; ++tid) {
+    workers.emplace_back([&, tid] {
+      rgpot::HessianVectorCache local_hvp;
+      ready.fetch_add(1, std::memory_order_acq_rel);
+      while (!go.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (int round = 0; round < kRounds; ++round) {
+        const std::size_t idx =
+            (tid + static_cast<std::size_t>(round)) % frames.size();
+        const std::size_t other = (idx + 1) % frames.size();
+        const Frame &frame = frames[idx];
+        const Frame &rival = frames[other];
+        const std::size_t n = frame.z.size();
+
+        const rgpot::ForceInput in{
+            .nAtoms = n,
+            .pos = frame.pos.data(),
+            .atmnrs = frame.z.data(),
+            .box = frame.box.data(),
+        };
+        const rgpot::ForceInput rival_in{
+            .nAtoms = rival.z.size(),
+            .pos = rival.pos.data(),
+            .atmnrs = rival.z.data(),
+            .box = rival.box.data(),
+        };
+
+        // A force call on another system between the products leaves this
+        // thread's kept list built for that system.
+        std::vector<double> rival_forces(3 * rival.z.size(), 0.0);
+        rgpot::ForceOut rival_out{
+            .F = rival_forces.data(),
+            .energy = 0.0,
+            .variance = 0.0,
+            .stress = {},
+            .has_stress = 0,
+        };
+        shared.forceImpl(rival_in, &rival_out);
+
+        std::vector<double> through_cache(3 * n, 0.0);
+        const auto before = local_hvp.counts();
+        local_hvp.invalidate();
+        local_hvp.apply(shared, in, frame.direction.data(), through_cache.data(),
+                        0.0, rgpot::HvpScheme::Auto);
+        const auto after = local_hvp.counts();
+        if (after.analytic != before.analytic + 1 ||
+            after.forceCalls != before.forceCalls) {
+          mismatches.fetch_add(1, std::memory_order_relaxed);
+        }
+        analytic_calls.fetch_add(1, std::memory_order_relaxed);
+        if (!sameVectorBits(through_cache, refs[idx].product)) {
+          mismatches.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        shared.forceImpl(rival_in, &rival_out);
+        std::vector<double> direct(3 * n, 0.0);
+        shared.hessianVectorImpl(in, frame.direction.data(), direct.data());
+        if (!sameVectorBits(direct, refs[idx].product)) {
+          mismatches.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    });
+  }
+
+  while (ready.load(std::memory_order_acquire) < kThreads) {
+    std::this_thread::yield();
+  }
+  go.store(true, std::memory_order_release);
+  for (std::thread &w : workers) {
+    w.join();
+  }
+
+  CHECK(analytic_calls.load() == kThreads * static_cast<std::size_t>(kRounds));
+  REQUIRE(mismatches.load() == 0);
+}
+
 } // namespace
 
 TEST_CASE("shared const LJPot evaluates energy, forces and HVP across 12 threads",
@@ -442,5 +586,61 @@ TEST_CASE("LJPot per-thread scratch isolates instances and releases on destroy",
   REQUIRE(second->retainedPairs() == 0);
   second->forceImpl(in_nudged, &out);
   REQUIRE_FALSE(second->listReused());
+  second->~LJPot();
+}
+
+TEST_CASE("shared const LJPot analytic HVP matches serial and finite differences "
+          "across threads",
+          "[lj][threads][hvp]") {
+  SECTION("shifted truncation, Auto") {
+    runConcurrentSharedAnalyticHvp(
+        rgpot::LJConfig{.u0 = 1.0, .cutoff = 3.2, .psi = 1.0},
+        rgpot::nlist::Mode::Auto);
+  }
+  SECTION("shifted truncation, Stored") {
+    runConcurrentSharedAnalyticHvp(
+        rgpot::LJConfig{.u0 = 1.0, .cutoff = 3.2, .psi = 1.0},
+        rgpot::nlist::Mode::Stored);
+  }
+  SECTION("shifted truncation, Stream") {
+    runConcurrentSharedAnalyticHvp(
+        rgpot::LJConfig{.u0 = 1.0, .cutoff = 3.2, .psi = 1.0},
+        rgpot::nlist::Mode::Stream);
+  }
+  SECTION("quintic switch, Stored") {
+    runConcurrentSharedAnalyticHvp(rgpot::LJConfig{.u0 = 0.85,
+                                                   .cutoff = 3.4,
+                                                   .psi = 1.05,
+                                                   .switch_width = 0.75},
+                                   rgpot::nlist::Mode::Stored);
+  }
+}
+
+TEST_CASE("LJPot analytic HVP leaves no neighbour state on the instance",
+          "[lj][threads][hvp]") {
+  const double a_lj = std::pow(2.0, 1.0 / 6.0) * std::sqrt(2.0);
+  const Frame frame = makeFccFrame(2, 2, 2, a_lj, false, 0.3);
+  const rgpot::ForceInput in{
+      .nAtoms = frame.z.size(),
+      .pos = frame.pos.data(),
+      .atmnrs = frame.z.data(),
+      .box = frame.box.data(),
+  };
+  std::vector<double> hv(3 * frame.z.size(), 0.0);
+
+  alignas(rgpot::LJPot) unsigned char storage[sizeof(rgpot::LJPot)];
+  auto *first = new (storage) rgpot::LJPot(
+      rgpot::LJConfig{.u0 = 1.0, .cutoff = 3.0, .psi = 1.0});
+  first->setNeighbourMode(rgpot::nlist::Mode::Stored);
+  first->hessianVectorImpl(in, frame.direction.data(), hv.data());
+  REQUIRE(first->retainedPairs() > 0);
+  first->~LJPot();
+
+  // A product on an instance at the same address must not find the list the
+  // destroyed instance kept.
+  auto *second = new (storage) rgpot::LJPot(
+      rgpot::LJConfig{.u0 = 1.0, .cutoff = 3.0, .psi = 1.0});
+  second->setNeighbourMode(rgpot::nlist::Mode::Stored);
+  REQUIRE(second->retainedPairs() == 0);
   second->~LJPot();
 }
