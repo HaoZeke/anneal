@@ -214,6 +214,16 @@ const ALLOW: &[Allow] = &[
         needle: "if n < 6",
         reason: "generic tetrahedral-hole regrowth needs a seed simplex and later points",
     },
+    Allow {
+        path: "src/methods/cluster_hopping/moves.rs",
+        needle: "groups[0].len() >= 4",
+        reason: "existing lone-flexible-group size switch; replacement is audited",
+    },
+    Allow {
+        path: "src/methods/cluster_hopping/config.rs",
+        needle: "groups[0].len() >= 4",
+        reason: "existing lone-flexible-group SOAP switch; replacement is audited",
+    },
     // Counters and sample counts named `n`, not atom counts.
     Allow {
         path: "src/history.rs",
@@ -444,6 +454,23 @@ fn named_size_constant_hit(code: &str) -> bool {
     size_name && digits.parse::<usize>().is_ok_and(|number| number >= 5)
 }
 
+fn group_size_hit(code: &str) -> bool {
+    let compact: String = code
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    let Some(rest) = compact.split("groups[0].len()").nth(1) else {
+        return false;
+    };
+    ["<=", "==", "!=", ">=", "<", ">"].iter().any(|comparison| {
+        let Some(rest) = rest.strip_prefix(comparison) else {
+            return false;
+        };
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse::<usize>().is_ok_and(|number| number >= 4)
+    })
+}
+
 #[test]
 fn detectors_cover_size_motif_and_named_count_examples() {
     assert!(size_hit("if n_points == 38 { choose_special_move(); }"));
@@ -452,6 +479,7 @@ fn detectors_cover_size_motif_and_named_count_examples() {
     assert!(named_size_constant_hit(
         "const MINIMUM_PACKING_ATOMS: usize = 13;"
     ));
+    assert!(group_size_hit("groups[0].len() >= 4"));
     assert!(!size_hit("if samples < limit { collect_more(); }"));
 }
 
@@ -478,7 +506,10 @@ fn search_source_has_no_unreviewed_size_or_motif_branches() {
             cfg_test = false;
             let code = source_code(line).trim();
             if code.is_empty()
-                || (!motif_hit(code) && !size_hit(code) && !named_size_constant_hit(code))
+                || (!motif_hit(code)
+                    && !size_hit(code)
+                    && !named_size_constant_hit(code)
+                    && !group_size_hit(code))
             {
                 continue;
             }
