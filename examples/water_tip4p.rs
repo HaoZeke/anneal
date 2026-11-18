@@ -94,14 +94,16 @@ fn main() {
             let e = pot.value_and_gradient(state.view()).0;
             out.best = e;
         }
-        let hit = reference.map(|r| out.best < r + 0.01).unwrap_or(false);
+        let hit = reference
+            .map(|r| anneal_core::energy_hits(out.best, r, 0.01))
+            .unwrap_or(false);
         if hit {
             solved += 1;
         }
         let first_hit = reference.and_then(|r| {
             out.improvements
                 .iter()
-                .find(|(_, _, _, e)| *e < r + 0.01)
+                .find(|(_, _, _, e)| anneal_core::energy_hits(*e, r, 0.01))
                 .map(|(_, spent, _, _)| *spent)
         });
         deepest = deepest.min(out.best);

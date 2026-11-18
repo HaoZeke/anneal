@@ -111,7 +111,7 @@ pub struct EnsembleConfig {
     /// Charged calls between checkpoints, which is the exchange lag and
     /// the resolution of the first-target record.
     pub checkpoint_interval: usize,
-    /// Energy below which a replica has found the target.
+    /// Energy at or below which a replica has found the target.
     pub target: Option<f64>,
 }
 
@@ -251,7 +251,7 @@ pub struct EnsembleReport {
 impl EnsembleReport {
     /// Whether any replica reached the target.
     pub fn solved(&self, target: Option<f64>) -> bool {
-        target.is_some_and(|t| self.best < t)
+        target.is_some_and(|t| crate::energy_hits(self.best, t, 0.0))
     }
 }
 
@@ -636,7 +636,8 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                         let mut action = CheckpointAction::Continue;
                         let mut updates = Vec::new();
                         if first_target_calls.is_none()
-                            && target.is_some_and(|t| snapshot.best_energy() < t)
+                            && target
+                                .is_some_and(|t| crate::energy_hits(snapshot.best_energy(), t, 0.0))
                         {
                             first_target_calls = Some(charged_total.load(Ordering::SeqCst));
                         }
@@ -771,7 +772,9 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                         &mut checkpoint,
                     )
                     .expect("finite start");
-                    if first_target_calls.is_none() && target.is_some_and(|t| outcome.best < t) {
+                    if first_target_calls.is_none()
+                        && target.is_some_and(|t| crate::energy_hits(outcome.best, t, 0.0))
+                    {
                         first_target_calls = Some(charged_total.load(Ordering::SeqCst));
                     }
                     Ok(ReplicaReport {
@@ -959,6 +962,9 @@ mod tests {
         assert_eq!(shared.histories.len(), 1);
         assert!(shared.histories[0].2 > 0);
         assert!(shared.solved(Some(-0.4)));
+        assert!(shared.solved(Some(shared.best)));
+        assert!(!shared.solved(Some(shared.best.next_down())));
+        assert!(!shared.solved(Some(f64::NAN)));
         let private =
             run_ensemble(&cfg, &ensemble(HistoryMode::None, None, None), 3, &problem).unwrap();
         assert!(private.histories.is_empty());

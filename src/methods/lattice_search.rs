@@ -2055,7 +2055,7 @@ mod tests {
         let rebuilt = reoccupy(&cfg, &mut ledger, gm.view());
         let reoccupied = quench(n, rebuilt.view());
         assert!(
-            quench(n, gm.view()) < reference + 1e-3,
+            crate::energy_hits(quench(n, gm.view()), reference, crate::DEFAULT_HIT_TOL),
             "fixture {name} does not quench to {reference}"
         );
         (occupied, reoccupied)
@@ -2064,9 +2064,12 @@ mod tests {
     #[test]
     fn occupation_optimisation_restores_displaced_surface_atoms_of_lj98() {
         let (occupied, reoccupied) = restores("lj98_gm", 98, -543.665361, 1);
-        assert!(occupied < -543.665361 + 1e-3, "occupation gave {occupied}");
         assert!(
-            reoccupied < -543.665361 + 1e-3,
+            crate::energy_hits(occupied, -543.665361, crate::DEFAULT_HIT_TOL),
+            "occupation gave {occupied}"
+        );
+        assert!(
+            crate::energy_hits(reoccupied, -543.665361, crate::DEFAULT_HIT_TOL),
             "reoccupation gave {reoccupied}"
         );
     }
@@ -2074,9 +2077,12 @@ mod tests {
     #[test]
     fn occupation_optimisation_restores_displaced_surface_atoms_of_lj104() {
         let (occupied, reoccupied) = restores("lj104_gm", 104, -582.086642, 1);
-        assert!(occupied < -582.086642 + 1e-3, "occupation gave {occupied}");
         assert!(
-            reoccupied < -582.086642 + 1e-3,
+            crate::energy_hits(occupied, -582.086642, crate::DEFAULT_HIT_TOL),
+            "occupation gave {occupied}"
+        );
+        assert!(
+            crate::energy_hits(reoccupied, -582.086642, crate::DEFAULT_HIT_TOL),
             "reoccupation gave {reoccupied}"
         );
     }
@@ -2130,7 +2136,7 @@ mod tests {
     fn the_search_reaches_the_lj13_icosahedron() {
         let out = search(13, 20_000, 1);
         assert!(
-            out.best < -44.3268 + 1e-3,
+            crate::energy_hits(out.best, -44.3268, crate::DEFAULT_HIT_TOL),
             "LJ13 stopped at {:.6}",
             out.best
         );

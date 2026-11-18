@@ -29,7 +29,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::time::Instant;
 
-const HIT_TOL: f64 = 0.001;
+const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
@@ -78,12 +78,11 @@ fn cmd_run(args: &[String]) -> i32 {
         return 1;
     }
     let (outcome, wall, pot_s) = search(&cfg, spec.n, &start, seed, budget, spec.reference);
-    let level = spec.reference + HIT_TOL;
-    let hit = outcome.best <= level;
+    let hit = anneal_core::energy_hits(outcome.best, spec.reference, HIT_TOL);
     let at_hit = outcome
         .improvements
         .iter()
-        .find(|(_, _, _, energy)| *energy <= level)
+        .find(|(_, _, _, energy)| anneal_core::energy_hits(*energy, spec.reference, HIT_TOL))
         .map(|(_, spent, _, _)| *spent);
     let evals = evals_to_hit(hit, at_hit.or(hit.then_some(outcome.charged)), budget);
     println!(

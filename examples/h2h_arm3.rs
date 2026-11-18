@@ -161,11 +161,11 @@ fn main() {
     let wall = started.elapsed().as_secs_f64();
 
     let best = outcome.best;
-    let hit = best < level;
+    let hit = anneal_core::energy_hits(best, reference, tol);
     let trace = outcome
         .improvements
         .iter()
-        .find(|(_, _, _, e)| *e < level)
+        .find(|(_, _, _, e)| anneal_core::energy_hits(*e, reference, tol))
         .map(|(hops, _, _, _)| hops.to_string());
     let seen = first_seen.load(Ordering::Relaxed);
     let (first_calls, first_source) = match (hit, seen) {

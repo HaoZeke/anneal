@@ -149,7 +149,7 @@ fn main() {
                 be = e;
                 bx = x.clone();
             }
-            if be <= plateau + 1e-3 {
+            if anneal_core::energy_hits(be, plateau, anneal_core::DEFAULT_HIT_TOL) {
                 break;
             }
         }

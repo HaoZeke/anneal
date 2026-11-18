@@ -397,8 +397,10 @@ impl OccupancyCertificate {
 }
 
 /// Published energy match. A score for known hurdles, never a stop.
+///
+/// An energy at or below the published value plus [`crate::DEFAULT_HIT_TOL`] matches.
 pub fn published_energy_score(best: f64, published: Option<f64>) -> bool {
-    published.is_some_and(|target| best < target + 1e-4)
+    published.is_some_and(|target| crate::energy_hits(best, target, crate::DEFAULT_HIT_TOL))
 }
 
 /// Consecutive refused Leaves after which an extra goes back to hopping.
@@ -2343,6 +2345,17 @@ mod tests {
     fn a_published_energy_is_a_score_not_a_certificate() {
         assert!(published_energy_score(-173.928427, Some(-173.928427)));
         assert!(published_energy_score(-397.492331, Some(-397.492331)));
+        assert!(published_energy_score(
+            -397.492331 + crate::DEFAULT_HIT_TOL,
+            Some(-397.492331)
+        ));
+        assert!(published_energy_score(-400.0, Some(-397.492331)));
+        assert!(!published_energy_score(
+            (-397.492331 + crate::DEFAULT_HIT_TOL).next_up(),
+            Some(-397.492331)
+        ));
+        assert!(!published_energy_score(f64::NAN, Some(-397.492331)));
+        assert!(!published_energy_score(-397.492331, Some(f64::NAN)));
         assert!(!published_energy_score(-396.282249, Some(-397.492331)));
         assert!(!published_energy_score(-173.928427, None));
         assert_eq!(occupancy_complete(false, false, 0), None);

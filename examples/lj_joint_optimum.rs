@@ -48,7 +48,7 @@ use ndarray::ArrayView1;
 use rand::{SeedableRng, rngs::StdRng};
 use serde_json::json;
 
-const TARGET_TOLERANCE: f64 = 1e-3;
+const TARGET_TOLERANCE: f64 = anneal_core::DEFAULT_HIT_TOL;
 const MH_SOFTENING_STEPS: usize = 20;
 const MH_SOFTENING_DISPLACEMENT: f64 = 0.1;
 const MH_SOFTENING_MIXING: f64 = 0.15;

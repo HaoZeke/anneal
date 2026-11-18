@@ -247,6 +247,8 @@ pub mod sym_hessian;
 pub mod symmetrise;
 /// Endpoint of the quenched-energy distribution, by peaks over threshold.
 pub mod tail;
+/// Shared one-sided target-energy hit predicate.
+pub mod target_tol;
 /// Replica exchange: the bias-aware swap ratio, the non-reversible sweep, and
 /// a ladder placed by the communication barrier the run measures.
 pub mod tempering;
@@ -326,6 +328,7 @@ pub use runner::{
     run_rs_variant_start,
 };
 pub use sampler::Sampler;
+pub use target_tol::{DEFAULT_HIT_TOL, energy_hits};
 pub use tempering::{
     IndexProcess, Ladder, ReplicaMove, ReplicaTarget, SwapScheme, TARGET_SWAP_ACCEPT,
     beta_step_for_acceptance, biased_swap_log_ratio, swap_log_ratio, swap_probability,

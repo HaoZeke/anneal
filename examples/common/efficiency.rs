@@ -25,7 +25,7 @@ pub fn report_trace(out: &Outcome, spent: usize) {
     let tol = std::env::var("TARGET_TOL")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(1e-3);
+        .unwrap_or(anneal_core::DEFAULT_HIT_TOL);
     match first_encounter(out, target, tol, spent) {
         Encounter::Found { charged, hops } => {
             println!("    encounter target={target:.8} found charged={charged} hops={hops}");

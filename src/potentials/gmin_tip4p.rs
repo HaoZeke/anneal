@@ -668,7 +668,7 @@ mod tests {
                 "rigid energy {rigid_energy} against {published}"
             );
             assert!(
-                rigid_energy <= published + 1.0e-3,
+                crate::energy_hits(rigid_energy, published, crate::DEFAULT_HIT_TOL),
                 "rigid energy {rigid_energy} is above the success threshold"
             );
             assert!(
@@ -762,7 +762,7 @@ mod tests {
             Some(potential.value_and_gradient(point))
         });
         assert!(
-            energy <= published + 1.0e-3,
+            crate::energy_hits(energy, published, crate::DEFAULT_HIT_TOL),
             "quench energy {energy} after {evals} evaluations, reference {published}"
         );
         assert!(

@@ -23,7 +23,7 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
 
-const HIT_TOL: f64 = 1.0e-4;
+const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 const FORCE_BAR: f64 = 0.0514221;
 
 struct Score {
@@ -46,9 +46,8 @@ impl Score {
             self.best = energy;
         }
         if self.hit == 0
-            && energy.is_finite()
             && fmax.is_finite()
-            && energy < self.reference + HIT_TOL
+            && anneal_core::energy_hits(energy, self.reference, HIT_TOL)
             && fmax <= FORCE_BAR
             && calls <= self.budget
         {
@@ -237,7 +236,7 @@ fn main() {
         let fmax = gradient
             .iter()
             .fold(0.0_f64, |acc, value| acc.max(value.abs()));
-        let ok = energy < reference + HIT_TOL
+        let ok = anneal_core::energy_hits(energy, reference, HIT_TOL)
             && fmax <= FORCE_BAR
             && calls <= budget
             && (energy - score.hit_energy).abs() <= 1.0e-6;

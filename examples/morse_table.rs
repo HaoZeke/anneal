@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-const TOLERANCE: f64 = 1.0e-3;
+const TOLERANCE: f64 = anneal_core::DEFAULT_HIT_TOL;
 
 struct Counted {
     pot: PairPotential,
@@ -46,7 +46,7 @@ impl Counted {
             let mut best = self.best.lock().expect("best");
             *best = best.min(e);
         }
-        if converged && e <= self.target + TOLERANCE {
+        if converged && anneal_core::energy_hits(e, self.target, TOLERANCE) {
             let _ = self
                 .hit_at
                 .compare_exchange(0, call, Ordering::Relaxed, Ordering::Relaxed);

@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 
 /// Energy above the reference that still counts as the global minimum, in
 /// the potential's own energy unit.
-const HIT_TOLERANCE: f64 = 1.0e-3;
+const HIT_TOLERANCE: f64 = anneal_core::DEFAULT_HIT_TOL;
 
 /// Cambridge Cluster Database global minimum for the problem.
 fn reference(problem: &Problem) -> f64 {
@@ -110,7 +110,7 @@ impl Counted {
             if e < state.lowest {
                 state.lowest = e;
             }
-            if state.hit_at.is_none() && e <= self.target {
+            if state.hit_at.is_none() && anneal_core::energy_hits(e, self.target, 0.0) {
                 state.hit_at = Some(state.calls);
             }
         }

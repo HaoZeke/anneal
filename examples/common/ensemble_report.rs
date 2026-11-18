@@ -62,7 +62,9 @@ pub fn print_report(
             .best_state
             .as_ref()
             .map(|x| verify(run.replica, x, run.outcome.best));
-        let hit = ens.target.is_some_and(|t| run.outcome.best < t);
+        let hit = ens
+            .target
+            .is_some_and(|t| anneal_core::energy_hits(run.outcome.best, t, 0.0));
         println!(
             "    seed {seed} replica {} (seed {}): best {:.6}{unit}  hops {}  charged {}  basins {}  \
              history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  \

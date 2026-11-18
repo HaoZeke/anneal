@@ -2587,11 +2587,12 @@ impl Encounter {
 
 /// The first encounter with `target` in a run's improvement trace.
 ///
-/// `target` is compared with a tolerance, since a published minimum is quoted
-/// to six decimals and a relaxation lands near it rather than on it.
+/// `target` is compared under the one-sided rule `energy <= target + tolerance`,
+/// since a published minimum is quoted to six decimals and a relaxation lands
+/// near it rather than on it.
 pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize) -> Encounter {
     for &(hops, charged, _, e) in &out.improvements {
-        if e < target + tolerance {
+        if crate::energy_hits(e, target, tolerance) {
             return Encounter::Found { charged, hops };
         }
     }
@@ -3451,7 +3452,7 @@ mod tests {
         cfg.return_screen = true;
         let mut ledger = Ledger::new(150_000);
         let (out, _) = search(&pot, &cfg, &mut ledger, 0).expect("finite start");
-        let e = first_encounter(&out, -44.326801, 1e-4, ledger.spent());
+        let e = first_encounter(&out, -44.326801, crate::DEFAULT_HIT_TOL, ledger.spent());
         match e {
             Encounter::Found { charged, hops } => {
                 assert!(charged > 0 && charged <= ledger.spent());
@@ -3462,12 +3463,44 @@ mod tests {
 
         // A target nothing can reach must censor at the spend, not report a
         // time.
-        let never = first_encounter(&out, -1e9, 1e-4, ledger.spent());
+        let never = first_encounter(&out, -1e9, crate::DEFAULT_HIT_TOL, ledger.spent());
         assert_eq!(
             never,
             Encounter::Censored {
                 charged: ledger.spent()
             }
+        );
+
+        let mut trace = Outcome {
+            best: -10.0,
+            ..out.clone()
+        };
+        let target = -10.0;
+        let tol = crate::DEFAULT_HIT_TOL;
+        let boundary = target + tol;
+        trace.improvements = vec![(1, 5, 1, f64::NAN), (2, 12, 1, boundary)];
+        assert_eq!(
+            first_encounter(&trace, target, tol, 20),
+            Encounter::Found {
+                charged: 12,
+                hops: 2
+            }
+        );
+        trace.improvements = vec![(3, 15, 1, target - 25.0)];
+        assert_eq!(
+            first_encounter(&trace, target, tol, 20),
+            Encounter::Found {
+                charged: 15,
+                hops: 3
+            }
+        );
+        assert_eq!(
+            first_encounter(&trace, f64::NAN, tol, 20),
+            Encounter::Censored { charged: 20 }
+        );
+        assert_eq!(
+            first_encounter(&trace, target, f64::NAN, 20),
+            Encounter::Censored { charged: 20 }
         );
     }
 
@@ -3589,7 +3622,7 @@ mod tests {
             best = best.min(out.best);
         }
         assert!(
-            best < -44.326801 + 1e-4,
+            crate::energy_hits(best, -44.326801, crate::DEFAULT_HIT_TOL),
             "best {best} against the published -44.326801"
         );
     }

@@ -26,7 +26,7 @@ use std::time::Instant;
 
 const N: usize = 55;
 const REFERENCE: f64 = -279.248470;
-const HIT_TOL: f64 = 1.0e-4;
+const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 const FORCE_BAR: f64 = 0.0514221;
 
 fn first_line(path: &str) -> String {
@@ -79,9 +79,7 @@ fn main() {
     });
 
     let mut ledger = Ledger::new(budget);
-    // `stop_below` fires on `energy <= target`. One ulp under the board
-    // level keeps that the same as `energy < reference + HIT_TOL`.
-    ledger.stop_below(level.next_down());
+    ledger.stop_below(level);
     let mut optimiser = WarmLbfgs::default();
     let mut relaxations = 0usize;
     let first_seen = AtomicUsize::new(usize::MAX);
@@ -141,7 +139,7 @@ fn main() {
         }
         None => (f64::INFINITY, false),
     };
-    let energy_ok = best < level;
+    let energy_ok = anneal_core::energy_hits(best, REFERENCE, HIT_TOL);
     let calls_ok = outcome.charged <= budget;
     let board_hit = energy_ok && force_ok && calls_ok;
     let stop = if board_hit {

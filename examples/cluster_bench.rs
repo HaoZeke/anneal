@@ -813,7 +813,9 @@ fn main() {
                 r.get(r.len() / 2).copied().unwrap_or(f64::NAN)
             )
         });
-        let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+        let hit = reference
+            .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::DEFAULT_HIT_TOL))
+            .unwrap_or(false);
         if let Some(tr) = &out.energy_trace {
             // One file per seed, one quenched energy per line, in order. The
             // name carries the outcome because which region a run sat in is the
@@ -845,7 +847,12 @@ fn main() {
         // statistic worth comparing. A run that never reached it contributes a
         // lower bound rather than being dropped.
         if let Some(r) = reference {
-            encounters.push(first_encounter(&out, r, 1e-4, ledger.spent()));
+            encounters.push(first_encounter(
+                &out,
+                r,
+                anneal_core::DEFAULT_HIT_TOL,
+                ledger.spent(),
+            ));
         }
         deepest = deepest.min(out.best);
         total_charged += ledger.spent();
