@@ -1,0 +1,6866 @@
+{
+  "arms": {
+    "A": {
+      "commit": "1648fffefbae2a33d54d3225789447203a28998f",
+      "tree": "db5ad0cf30960b3ecd7bf42a8fb6f11446ba086f"
+    },
+    "B": {
+      "commit": "4fdda42ddd8e312489b38c3e3431bb61e0561e01",
+      "tree": "7fd673e456725d5d676008ec7aed0f80ce265eb2"
+    }
+  },
+  "compiler": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+  "cpu": "Intel(R) Xeon(R) Processor",
+  "declared_seeds": [
+    2000,
+    2001,
+    2002,
+    2003,
+    2004,
+    2005
+  ],
+  "hit_rule": "reference + 0.001",
+  "hit_tolerance": 0.001,
+  "lj102_focus_seeds": {
+    "2004": {
+      "a": {
+        "best": "-569.277723092902",
+        "charged": 4000000,
+        "evals_to_hit": 4000000,
+        "hit": 0,
+        "wall_s": "99.547633"
+      },
+      "b": {
+        "best": "-569.363652496078",
+        "charged": 1725678,
+        "evals_to_hit": 1725678,
+        "hit": 1,
+        "wall_s": "44.453008"
+      },
+      "core": 4,
+      "lost_hit": false,
+      "more_evals": false,
+      "order": "AB",
+      "seed": 2004
+    },
+    "2010": {
+      "a": {
+        "best": "-568.388773259024",
+        "charged": 4000000,
+        "evals_to_hit": 4000000,
+        "hit": 0,
+        "wall_s": "109.512333"
+      },
+      "b": {
+        "best": "-569.363652496080",
+        "charged": 2523548,
+        "evals_to_hit": 2523548,
+        "hit": 1,
+        "wall_s": "69.815441"
+      },
+      "core": 3,
+      "lost_hit": false,
+      "more_evals": false,
+      "order": "AB",
+      "seed": 2010
+    }
+  },
+  "losses": [
+    {
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.04112554112554113,
+      "reasons": [
+        "evals-to-hit increase"
+      ],
+      "system": "lj87"
+    }
+  ],
+  "nonsignificant_drops": [
+    {
+      "drops": [
+        "hit-count drop"
+      ],
+      "fisher_p": 0.4782608695652174,
+      "mannwhitney_p": 0.49650658938584635,
+      "system": "lj38"
+    },
+    {
+      "drops": [
+        "hit-count drop"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.7301587301587301,
+      "system": "lj75"
+    },
+    {
+      "drops": [
+        "hit-count drop"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.6666666666666666,
+      "system": "lj76"
+    },
+    {
+      "drops": [
+        "hit-count drop"
+      ],
+      "fisher_p": 0.5454545454545454,
+      "mannwhitney_p": 1.0,
+      "system": "lj77"
+    },
+    {
+      "drops": [
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.8181818181818182,
+      "system": "lj83"
+    },
+    {
+      "drops": [
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.803030303030303,
+      "system": "lj85"
+    },
+    {
+      "drops": [
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.9372294372294372,
+      "system": "lj89"
+    },
+    {
+      "drops": [
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.1774891774891775,
+      "system": "lj93"
+    },
+    {
+      "drops": [
+        "hit-count drop",
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 0.45454545454545453,
+      "mannwhitney_p": 0.8142857142857143,
+      "system": "lj94"
+    },
+    {
+      "drops": [
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 0.18181818181818182,
+      "mannwhitney_p": 0.9047619047619048,
+      "system": "lj95"
+    },
+    {
+      "drops": [
+        "hit-count drop"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.6623376623376623,
+      "system": "lj96"
+    },
+    {
+      "drops": [
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.9714285714285714,
+      "system": "lj100"
+    },
+    {
+      "drops": [
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.7,
+      "system": "lj101"
+    },
+    {
+      "drops": [
+        "hit-count drop"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.9805194805194806,
+      "system": "lj103"
+    },
+    {
+      "drops": [
+        "evals-to-hit increase"
+      ],
+      "fisher_p": 1.0,
+      "mannwhitney_p": 0.42857142857142855,
+      "system": "lj104"
+    }
+  ],
+  "order": "even seeds run A then B; odd seeds run B then A; both arms of a seed share one core",
+  "paper_seeds": [
+    2000,
+    2001,
+    2002,
+    2003,
+    2004,
+    2005,
+    2006,
+    2007,
+    2008,
+    2009,
+    2010,
+    2011
+  ],
+  "rule": "A loss is a hit-count drop with two-sided Fisher exact p < 0.05, or an increase in the median evaluations to a hit over hitting seeds with two-sided exact Mann-Whitney p < 0.05. PASS requires every system to avoid both.",
+  "systems": [
+    {
+      "budget": 400000,
+      "budget_source": "paper",
+      "evals_hit_a": {
+        "iqr": 139245.25,
+        "median": 127839.5,
+        "n": 12
+      },
+      "evals_hit_b": {
+        "iqr": 108711.0,
+        "median": 127367.5,
+        "n": 10
+      },
+      "fisher_p": 0.4782608695652174,
+      "hits_a": 12,
+      "hits_b": 10,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.49650658938584635,
+      "mannwhitney_u_b": 49.0,
+      "n": 38,
+      "n_seeds": 12,
+      "nonsignificant": [
+        "hit-count drop"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 124155,
+            "evals_to_hit": 124155,
+            "hit": 1,
+            "wall_s": "0.654884"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 33559,
+            "evals_to_hit": 33559,
+            "hit": 1,
+            "wall_s": "0.170255"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 111509,
+            "evals_to_hit": 111509,
+            "hit": 1,
+            "wall_s": "0.599888"
+          },
+          "b": {
+            "best": "-173.252378415650",
+            "charged": 400000,
+            "evals_to_hit": 400000,
+            "hit": 0,
+            "wall_s": "2.264938"
+          },
+          "core": 7,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 293837,
+            "evals_to_hit": 293837,
+            "hit": 1,
+            "wall_s": "1.575805"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 283375,
+            "evals_to_hit": 283375,
+            "hit": 1,
+            "wall_s": "1.625912"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 174442,
+            "evals_to_hit": 174442,
+            "hit": 1,
+            "wall_s": "0.917298"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 16959,
+            "evals_to_hit": 16959,
+            "hit": 1,
+            "wall_s": "0.087881"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 131524,
+            "evals_to_hit": 131524,
+            "hit": 1,
+            "wall_s": "0.684748"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 201001,
+            "evals_to_hit": 201001,
+            "hit": 1,
+            "wall_s": "1.132584"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-173.928426590628",
+            "charged": 69728,
+            "evals_to_hit": 69728,
+            "hit": 1,
+            "wall_s": "0.351013"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 87000,
+            "evals_to_hit": 87000,
+            "hit": 1,
+            "wall_s": "0.450350"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 99994,
+            "evals_to_hit": 99994,
+            "hit": 1,
+            "wall_s": "0.516350"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 123203,
+            "evals_to_hit": 123203,
+            "hit": 1,
+            "wall_s": "0.688815"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2006
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 110660,
+            "evals_to_hit": 110660,
+            "hit": 1,
+            "wall_s": "0.656888"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 188820,
+            "evals_to_hit": 188820,
+            "hit": 1,
+            "wall_s": "1.068610"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2007
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 325364,
+            "evals_to_hit": 325364,
+            "hit": 1,
+            "wall_s": "1.843864"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 95979,
+            "evals_to_hit": 95979,
+            "hit": 1,
+            "wall_s": "0.507021"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2008
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 317864,
+            "evals_to_hit": 317864,
+            "hit": 1,
+            "wall_s": "1.749860"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 201728,
+            "evals_to_hit": 201728,
+            "hit": 1,
+            "wall_s": "1.149500"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2009
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 231706,
+            "evals_to_hit": 231706,
+            "hit": 1,
+            "wall_s": "1.378124"
+          },
+          "b": {
+            "best": "-173.928426590629",
+            "charged": 131532,
+            "evals_to_hit": 131532,
+            "hit": 1,
+            "wall_s": "0.863250"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2010
+        },
+        {
+          "a": {
+            "best": "-173.928426590629",
+            "charged": 49500,
+            "evals_to_hit": 49500,
+            "hit": 1,
+            "wall_s": "0.300194"
+          },
+          "b": {
+            "best": "-173.252378415650",
+            "charged": 400000,
+            "evals_to_hit": 400000,
+            "hit": 0,
+            "wall_s": "2.127424"
+          },
+          "core": 2,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2011
+        }
+      ],
+      "reference": "-173.928427",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-173.928426590629",
+          "best_b": "-173.252378415650",
+          "evals_a": 111509,
+          "evals_b": 400000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-173.928426590629",
+          "best_b": "-173.928426590629",
+          "evals_a": 131524,
+          "evals_b": 201001,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        },
+        {
+          "best_a": "-173.928426590628",
+          "best_b": "-173.928426590629",
+          "evals_a": 69728,
+          "evals_b": 87000,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2005
+        },
+        {
+          "best_a": "-173.928426590629",
+          "best_b": "-173.928426590629",
+          "evals_a": 99994,
+          "evals_b": 123203,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2006
+        },
+        {
+          "best_a": "-173.928426590629",
+          "best_b": "-173.928426590629",
+          "evals_a": 110660,
+          "evals_b": 188820,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2007
+        },
+        {
+          "best_a": "-173.928426590629",
+          "best_b": "-173.252378415650",
+          "evals_a": 49500,
+          "evals_b": 400000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2011
+        }
+      ],
+      "system": "lj38"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper",
+      "evals_hit_a": {
+        "iqr": 2166318.0,
+        "median": 2721351.0,
+        "n": 5
+      },
+      "evals_hit_b": {
+        "iqr": 732512.5,
+        "median": 1523009.5,
+        "n": 4
+      },
+      "fisher_p": 1.0,
+      "hits_a": 5,
+      "hits_b": 4,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.7301587301587301,
+      "mannwhitney_u_b": 8.0,
+      "n": 75,
+      "n_seeds": 12,
+      "nonsignificant": [
+        "hit-count drop"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-396.282248825573",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "70.790192"
+          },
+          "b": {
+            "best": "-396.282248825573",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "61.383725"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-397.492330982876",
+            "charged": 3327845,
+            "evals_to_hit": 3327845,
+            "hit": 1,
+            "wall_s": "59.892139"
+          },
+          "b": {
+            "best": "-397.492330982876",
+            "charged": 336962,
+            "evals_to_hit": 336933,
+            "hit": 1,
+            "wall_s": "5.240651"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-396.282248825572",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "64.255984"
+          },
+          "b": {
+            "best": "-396.282248825573",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "64.174015"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-396.282248825572",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "65.714367"
+          },
+          "b": {
+            "best": "-396.282248825572",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "60.161786"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-396.282248825573",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "58.894409"
+          },
+          "b": {
+            "best": "-397.492330982876",
+            "charged": 1606093,
+            "evals_to_hit": 1606093,
+            "hit": 1,
+            "wall_s": "26.823081"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-397.492330982875",
+            "charged": 2721351,
+            "evals_to_hit": 2721351,
+            "hit": 1,
+            "wall_s": "44.525164"
+          },
+          "b": {
+            "best": "-396.282248825572",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "56.913307"
+          },
+          "core": 0,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        },
+        {
+          "a": {
+            "best": "-396.282248825572",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "57.179286"
+          },
+          "b": {
+            "best": "-397.492330982875",
+            "charged": 2768482,
+            "evals_to_hit": 2768482,
+            "hit": 1,
+            "wall_s": "43.668594"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2006
+        },
+        {
+          "a": {
+            "best": "-396.282248825573",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "64.629761"
+          },
+          "b": {
+            "best": "-396.282248825573",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "58.994720"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2007
+        },
+        {
+          "a": {
+            "best": "-397.492330982876",
+            "charged": 976196,
+            "evals_to_hit": 976196,
+            "hit": 1,
+            "wall_s": "14.801698"
+          },
+          "b": {
+            "best": "-397.492330982874",
+            "charged": 1439926,
+            "evals_to_hit": 1439926,
+            "hit": 1,
+            "wall_s": "20.661397"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2008
+        },
+        {
+          "a": {
+            "best": "-396.282248825572",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "57.305143"
+          },
+          "b": {
+            "best": "-396.282248825572",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "59.841483"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2009
+        },
+        {
+          "a": {
+            "best": "-397.492330982876",
+            "charged": 3142514,
+            "evals_to_hit": 3142514,
+            "hit": 1,
+            "wall_s": "46.018755"
+          },
+          "b": {
+            "best": "-396.282248825573",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "58.432705"
+          },
+          "core": 6,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2010
+        },
+        {
+          "a": {
+            "best": "-397.492330982876",
+            "charged": 290074,
+            "evals_to_hit": 290074,
+            "hit": 1,
+            "wall_s": "4.230749"
+          },
+          "b": {
+            "best": "-396.282248825573",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "59.215199"
+          },
+          "core": 7,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2011
+        }
+      ],
+      "reference": "-397.492331",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-397.492330982875",
+          "best_b": "-396.282248825572",
+          "evals_a": 2721351,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2005
+        },
+        {
+          "best_a": "-397.492330982876",
+          "best_b": "-397.492330982874",
+          "evals_a": 976196,
+          "evals_b": 1439926,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2008
+        },
+        {
+          "best_a": "-397.492330982876",
+          "best_b": "-396.282248825573",
+          "evals_a": 3142514,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2010
+        },
+        {
+          "best_a": "-397.492330982876",
+          "best_b": "-396.282248825573",
+          "evals_a": 290074,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2011
+        }
+      ],
+      "system": "lj75"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 1287891.0,
+        "median": 2697645.0,
+        "n": 2
+      },
+      "evals_hit_b": {
+        "iqr": 0.0,
+        "median": 404195.0,
+        "n": 1
+      },
+      "fisher_p": 1.0,
+      "hits_a": 2,
+      "hits_b": 1,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6666666666666666,
+      "mannwhitney_u_b": 0.0,
+      "n": 76,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "hit-count drop"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-402.894866008766",
+            "charged": 1409754,
+            "evals_to_hit": 1409754,
+            "hit": 1,
+            "wall_s": "20.799838"
+          },
+          "b": {
+            "best": "-402.384579725800",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "60.615103"
+          },
+          "core": 2,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-402.384579725800",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "61.410976"
+          },
+          "b": {
+            "best": "-402.384579725800",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "60.944627"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-402.894866008766",
+            "charged": 3985536,
+            "evals_to_hit": 3985536,
+            "hit": 1,
+            "wall_s": "59.400787"
+          },
+          "b": {
+            "best": "-402.384579725800",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "59.216292"
+          },
+          "core": 3,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-402.384579725800",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "60.162767"
+          },
+          "b": {
+            "best": "-402.384579725800",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "60.527440"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-402.384579725800",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "58.369284"
+          },
+          "b": {
+            "best": "-402.384579725800",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "59.437811"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-402.384579725801",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "59.495349"
+          },
+          "b": {
+            "best": "-402.894866008767",
+            "charged": 404195,
+            "evals_to_hit": 404195,
+            "hit": 1,
+            "wall_s": "6.544411"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-402.894866",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-402.894866008766",
+          "best_b": "-402.384579725800",
+          "evals_a": 1409754,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-402.894866008766",
+          "best_b": "-402.384579725800",
+          "evals_a": 3985536,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2002
+        }
+      ],
+      "system": "lj76"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 790778.5,
+        "median": 3494992.0,
+        "n": 3
+      },
+      "evals_hit_b": {
+        "iqr": 0.0,
+        "median": 2663509.0,
+        "n": 1
+      },
+      "fisher_p": 0.5454545454545454,
+      "hits_a": 3,
+      "hits_b": 1,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 1.0,
+      "n": 77,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "hit-count drop"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-409.083517124516",
+            "charged": 3494992,
+            "evals_to_hit": 3494992,
+            "hit": 1,
+            "wall_s": "53.311777"
+          },
+          "b": {
+            "best": "-408.518265169788",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "61.260815"
+          },
+          "core": 7,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-408.518265169787",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "61.952510"
+          },
+          "b": {
+            "best": "-408.518265169787",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "61.679982"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-409.083517124515",
+            "charged": 3648582,
+            "evals_to_hit": 3648582,
+            "hit": 1,
+            "wall_s": "55.472657"
+          },
+          "b": {
+            "best": "-408.518265169788",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "60.710218"
+          },
+          "core": 2,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-408.518265169787",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "60.468329"
+          },
+          "b": {
+            "best": "-409.083517124516",
+            "charged": 2663509,
+            "evals_to_hit": 2663509,
+            "hit": 1,
+            "wall_s": "41.682412"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-409.083517124515",
+            "charged": 2067025,
+            "evals_to_hit": 2067025,
+            "hit": 1,
+            "wall_s": "31.501764"
+          },
+          "b": {
+            "best": "-408.518265169787",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "61.406791"
+          },
+          "core": 3,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-408.518265169788",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "64.057618"
+          },
+          "b": {
+            "best": "-408.518265169787",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "61.202229"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-409.083517",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-409.083517124516",
+          "best_b": "-408.518265169788",
+          "evals_a": 3494992,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-409.083517124515",
+          "best_b": "-408.518265169788",
+          "evals_a": 3648582,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2002
+        },
+        {
+          "best_a": "-409.083517124515",
+          "best_b": "-408.518265169787",
+          "evals_a": 2067025,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2004
+        }
+      ],
+      "system": "lj77"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 227392.0,
+        "median": 163822.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 144285.5,
+        "median": 122173.0,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8593073593073594,
+      "mannwhitney_u_b": 16.5,
+      "n": 78,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-414.794366808040",
+            "charged": 305972,
+            "evals_to_hit": 305972,
+            "hit": 1,
+            "wall_s": "5.422793"
+          },
+          "b": {
+            "best": "-414.794401362399",
+            "charged": 233920,
+            "evals_to_hit": 233920,
+            "hit": 1,
+            "wall_s": "3.945094"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-414.794397645011",
+            "charged": 489025,
+            "evals_to_hit": 489025,
+            "hit": 1,
+            "wall_s": "8.256455"
+          },
+          "b": {
+            "best": "-414.794383454644",
+            "charged": 48948,
+            "evals_to_hit": 48948,
+            "hit": 1,
+            "wall_s": "0.825376"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-414.794386401836",
+            "charged": 242228,
+            "evals_to_hit": 242228,
+            "hit": 1,
+            "wall_s": "4.128736"
+          },
+          "b": {
+            "best": "-414.794383033383",
+            "charged": 533096,
+            "evals_to_hit": 533096,
+            "hit": 1,
+            "wall_s": "8.822426"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-414.794399453038",
+            "charged": 55053,
+            "evals_to_hit": 55053,
+            "hit": 1,
+            "wall_s": "0.956350"
+          },
+          "b": {
+            "best": "-414.794383542363",
+            "charged": 133286,
+            "evals_to_hit": 133286,
+            "hit": 1,
+            "wall_s": "2.121575"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-414.794385268231",
+            "charged": 85417,
+            "evals_to_hit": 85417,
+            "hit": 1,
+            "wall_s": "1.391784"
+          },
+          "b": {
+            "best": "-414.794384807182",
+            "charged": 111060,
+            "evals_to_hit": 111060,
+            "hit": 1,
+            "wall_s": "1.762989"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-414.794395617085",
+            "charged": 19129,
+            "evals_to_hit": 19129,
+            "hit": 1,
+            "wall_s": "0.353426"
+          },
+          "b": {
+            "best": "-414.794395617085",
+            "charged": 19129,
+            "evals_to_hit": 19129,
+            "hit": 1,
+            "wall_s": "0.361124"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-414.794401",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-414.794386401836",
+          "best_b": "-414.794383033383",
+          "evals_a": 242228,
+          "evals_b": 533096,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        },
+        {
+          "best_a": "-414.794399453038",
+          "best_b": "-414.794383542363",
+          "evals_a": 55053,
+          "evals_b": 133286,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2003
+        },
+        {
+          "best_a": "-414.794385268231",
+          "best_b": "-414.794384807182",
+          "evals_a": 85417,
+          "evals_b": 111060,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        }
+      ],
+      "system": "lj78"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 181194.5,
+        "median": 77456.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 128836.75,
+        "median": 55792.0,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.803030303030303,
+      "mannwhitney_u_b": 16.0,
+      "n": 79,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-421.810897202051",
+            "charged": 244079,
+            "evals_to_hit": 244079,
+            "hit": 1,
+            "wall_s": "4.183123"
+          },
+          "b": {
+            "best": "-421.810881413408",
+            "charged": 178264,
+            "evals_to_hit": 178264,
+            "hit": 1,
+            "wall_s": "3.052216"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-421.810897202050",
+            "charged": 9486,
+            "evals_to_hit": 9486,
+            "hit": 1,
+            "wall_s": "0.229982"
+          },
+          "b": {
+            "best": "-421.810897202050",
+            "charged": 9486,
+            "evals_to_hit": 9486,
+            "hit": 1,
+            "wall_s": "0.230428"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-421.810893814472",
+            "charged": 96876,
+            "evals_to_hit": 96876,
+            "hit": 1,
+            "wall_s": "1.558331"
+          },
+          "b": {
+            "best": "-421.810893226296",
+            "charged": 69219,
+            "evals_to_hit": 69219,
+            "hit": 1,
+            "wall_s": "1.109508"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-421.810895111769",
+            "charged": 304341,
+            "evals_to_hit": 304341,
+            "hit": 1,
+            "wall_s": "5.070210"
+          },
+          "b": {
+            "best": "-421.810854328019",
+            "charged": 290938,
+            "evals_to_hit": 290938,
+            "hit": 1,
+            "wall_s": "5.041701"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-421.810882646818",
+            "charged": 58036,
+            "evals_to_hit": 58036,
+            "hit": 1,
+            "wall_s": "0.922860"
+          },
+          "b": {
+            "best": "-421.810893483681",
+            "charged": 42365,
+            "evals_to_hit": 42365,
+            "hit": 1,
+            "wall_s": "0.729058"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-421.810880264328",
+            "charged": 15433,
+            "evals_to_hit": 15433,
+            "hit": 1,
+            "wall_s": "0.273219"
+          },
+          "b": {
+            "best": "-421.810880264328",
+            "charged": 15433,
+            "evals_to_hit": 15433,
+            "hit": 1,
+            "wall_s": "0.272637"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-421.810897",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [],
+      "system": "lj79"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 51682.0,
+        "median": 28450.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 86124.5,
+        "median": 25173.0,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.987012987012987,
+      "mannwhitney_u_b": 17.5,
+      "n": 80,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-428.083518318593",
+            "charged": 21800,
+            "evals_to_hit": 21800,
+            "hit": 1,
+            "wall_s": "0.375540"
+          },
+          "b": {
+            "best": "-428.083518318593",
+            "charged": 21800,
+            "evals_to_hit": 21800,
+            "hit": 1,
+            "wall_s": "0.378369"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-428.083564134585",
+            "charged": 362380,
+            "evals_to_hit": 362380,
+            "hit": 1,
+            "wall_s": "6.303212"
+          },
+          "b": {
+            "best": "-428.083546748424",
+            "charged": 261279,
+            "evals_to_hit": 261279,
+            "hit": 1,
+            "wall_s": "4.729392"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-428.083545046522",
+            "charged": 77167,
+            "evals_to_hit": 77167,
+            "hit": 1,
+            "wall_s": "1.340728"
+          },
+          "b": {
+            "best": "-428.083564134586",
+            "charged": 125275,
+            "evals_to_hit": 125275,
+            "hit": 1,
+            "wall_s": "2.061099"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-428.083546746112",
+            "charged": 12691,
+            "evals_to_hit": 12691,
+            "hit": 1,
+            "wall_s": "0.262949"
+          },
+          "b": {
+            "best": "-428.083546746112",
+            "charged": 12691,
+            "evals_to_hit": 12691,
+            "hit": 1,
+            "wall_s": "0.262978"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-428.083564134585",
+            "charged": 35100,
+            "evals_to_hit": 35100,
+            "hit": 1,
+            "wall_s": "0.614780"
+          },
+          "b": {
+            "best": "-428.083564134584",
+            "charged": 28546,
+            "evals_to_hit": 28546,
+            "hit": 1,
+            "wall_s": "0.491248"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-428.083522044967",
+            "charged": 8748,
+            "evals_to_hit": 8748,
+            "hit": 1,
+            "wall_s": "0.174217"
+          },
+          "b": {
+            "best": "-428.083522044967",
+            "charged": 8748,
+            "evals_to_hit": 8748,
+            "hit": 1,
+            "wall_s": "0.173833"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-428.083564",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-428.083545046522",
+          "best_b": "-428.083564134586",
+          "evals_a": 77167,
+          "evals_b": 125275,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        }
+      ],
+      "system": "lj80"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 356772.0,
+        "median": 119543.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 310284.5,
+        "median": 118182.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 18.0,
+      "n": 81,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-434.343642832702",
+            "charged": 7530,
+            "evals_to_hit": 7530,
+            "hit": 1,
+            "wall_s": "0.145226"
+          },
+          "b": {
+            "best": "-434.343642832702",
+            "charged": 7530,
+            "evals_to_hit": 7530,
+            "hit": 1,
+            "wall_s": "0.145030"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-434.343642832701",
+            "charged": 103388,
+            "evals_to_hit": 103388,
+            "hit": 1,
+            "wall_s": "1.652238"
+          },
+          "b": {
+            "best": "-434.343642832701",
+            "charged": 1131654,
+            "evals_to_hit": 1131654,
+            "hit": 1,
+            "wall_s": "19.103262"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-434.343642832702",
+            "charged": 135698,
+            "evals_to_hit": 135698,
+            "hit": 1,
+            "wall_s": "2.295530"
+          },
+          "b": {
+            "best": "-434.343642832701",
+            "charged": 86269,
+            "evals_to_hit": 86269,
+            "hit": 1,
+            "wall_s": "1.525175"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-434.343642832701",
+            "charged": 7739,
+            "evals_to_hit": 7739,
+            "hit": 1,
+            "wall_s": "0.142322"
+          },
+          "b": {
+            "best": "-434.343642832701",
+            "charged": 7739,
+            "evals_to_hit": 7739,
+            "hit": 1,
+            "wall_s": "0.142096"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-434.343642832702",
+            "charged": 525155,
+            "evals_to_hit": 525155,
+            "hit": 1,
+            "wall_s": "9.161570"
+          },
+          "b": {
+            "best": "-434.343642832702",
+            "charged": 400176,
+            "evals_to_hit": 400176,
+            "hit": 1,
+            "wall_s": "7.147683"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-434.343642832702",
+            "charged": 472665,
+            "evals_to_hit": 472665,
+            "hit": 1,
+            "wall_s": "7.983738"
+          },
+          "b": {
+            "best": "-434.343642832702",
+            "charged": 150096,
+            "evals_to_hit": 150096,
+            "hit": 1,
+            "wall_s": "2.898972"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-434.343643",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-434.343642832701",
+          "best_b": "-434.343642832701",
+          "evals_a": 103388,
+          "evals_b": 1131654,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        }
+      ],
+      "system": "lj81"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 475848.0,
+        "median": 504425.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 229930.75,
+        "median": 250045.0,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.30952380952380953,
+      "mannwhitney_u_b": 11.0,
+      "n": 82,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-440.550425008940",
+            "charged": 186447,
+            "evals_to_hit": 186447,
+            "hit": 1,
+            "wall_s": "3.283214"
+          },
+          "b": {
+            "best": "-440.550425008941",
+            "charged": 133078,
+            "evals_to_hit": 133078,
+            "hit": 1,
+            "wall_s": "2.219186"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-440.550425008940",
+            "charged": 629789,
+            "evals_to_hit": 629789,
+            "hit": 1,
+            "wall_s": "10.810679"
+          },
+          "b": {
+            "best": "-440.550064514163",
+            "charged": 164904,
+            "evals_to_hit": 164904,
+            "hit": 1,
+            "wall_s": "2.849690"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-440.550425008940",
+            "charged": 379061,
+            "evals_to_hit": 379061,
+            "hit": 1,
+            "wall_s": "6.714090"
+          },
+          "b": {
+            "best": "-440.550425008940",
+            "charged": 195551,
+            "evals_to_hit": 195551,
+            "hit": 1,
+            "wall_s": "3.591876"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-440.550418549486",
+            "charged": 819281,
+            "evals_to_hit": 819281,
+            "hit": 1,
+            "wall_s": "14.373518"
+          },
+          "b": {
+            "best": "-440.550402266562",
+            "charged": 818910,
+            "evals_to_hit": 818910,
+            "hit": 1,
+            "wall_s": "14.228244"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-440.550425008941",
+            "charged": 749491,
+            "evals_to_hit": 749491,
+            "hit": 1,
+            "wall_s": "12.564116"
+          },
+          "b": {
+            "best": "-440.550410405667",
+            "charged": 435149,
+            "evals_to_hit": 435149,
+            "hit": 1,
+            "wall_s": "7.626458"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-440.550425008941",
+            "charged": 198603,
+            "evals_to_hit": 198603,
+            "hit": 1,
+            "wall_s": "3.840443"
+          },
+          "b": {
+            "best": "-440.550425008939",
+            "charged": 304539,
+            "evals_to_hit": 304539,
+            "hit": 1,
+            "wall_s": "5.590071"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-440.550425",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-440.550425008941",
+          "best_b": "-440.550425008939",
+          "evals_a": 198603,
+          "evals_b": 304539,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2005
+        }
+      ],
+      "system": "lj82"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 761118.75,
+        "median": 664985.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 363072.75,
+        "median": 773040.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8181818181818182,
+      "mannwhitney_u_b": 20.0,
+      "n": 83,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-446.924094409402",
+            "charged": 423578,
+            "evals_to_hit": 423578,
+            "hit": 1,
+            "wall_s": "7.750420"
+          },
+          "b": {
+            "best": "-446.924094409402",
+            "charged": 791615,
+            "evals_to_hit": 791615,
+            "hit": 1,
+            "wall_s": "13.991053"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-446.924094409403",
+            "charged": 225007,
+            "evals_to_hit": 225007,
+            "hit": 1,
+            "wall_s": "3.996962"
+          },
+          "b": {
+            "best": "-446.924094409404",
+            "charged": 475981,
+            "evals_to_hit": 475981,
+            "hit": 1,
+            "wall_s": "8.340688"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-446.924053432414",
+            "charged": 1078894,
+            "evals_to_hit": 1078894,
+            "hit": 1,
+            "wall_s": "19.041105"
+          },
+          "b": {
+            "best": "-446.924094409397",
+            "charged": 947695,
+            "evals_to_hit": 947695,
+            "hit": 1,
+            "wall_s": "16.552100"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-446.924094409403",
+            "charged": 2076028,
+            "evals_to_hit": 2076028,
+            "hit": 1,
+            "wall_s": "35.111443"
+          },
+          "b": {
+            "best": "-446.924094409401",
+            "charged": 754466,
+            "evals_to_hit": 754466,
+            "hit": 1,
+            "wall_s": "13.291987"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-446.924094409404",
+            "charged": 906392,
+            "evals_to_hit": 906392,
+            "hit": 1,
+            "wall_s": "16.222687"
+          },
+          "b": {
+            "best": "-446.924094409403",
+            "charged": 1767059,
+            "evals_to_hit": 1767059,
+            "hit": 1,
+            "wall_s": "31.174531"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-446.924094409401",
+            "charged": 183365,
+            "evals_to_hit": 183365,
+            "hit": 1,
+            "wall_s": "3.146494"
+          },
+          "b": {
+            "best": "-446.924094409404",
+            "charged": 343422,
+            "evals_to_hit": 343395,
+            "hit": 1,
+            "wall_s": "6.065433"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-446.924094",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-446.924094409402",
+          "best_b": "-446.924094409402",
+          "evals_a": 423578,
+          "evals_b": 791615,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-446.924094409403",
+          "best_b": "-446.924094409404",
+          "evals_a": 225007,
+          "evals_b": 475981,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-446.924094409404",
+          "best_b": "-446.924094409403",
+          "evals_a": 906392,
+          "evals_b": 1767059,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        },
+        {
+          "best_a": "-446.924094409401",
+          "best_b": "-446.924094409404",
+          "evals_a": 183365,
+          "evals_b": 343395,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2005
+        }
+      ],
+      "system": "lj83"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 682467.5,
+        "median": 1010790.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 612025.5,
+        "median": 661629.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6991341991341992,
+      "mannwhitney_u_b": 15.0,
+      "n": 84,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-452.657206000206",
+            "charged": 1670821,
+            "evals_to_hit": 1670821,
+            "hit": 1,
+            "wall_s": "29.779321"
+          },
+          "b": {
+            "best": "-452.657207946866",
+            "charged": 616397,
+            "evals_to_hit": 616397,
+            "hit": 1,
+            "wall_s": "11.809646"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-452.657214492875",
+            "charged": 155522,
+            "evals_to_hit": 155522,
+            "hit": 1,
+            "wall_s": "2.983667"
+          },
+          "b": {
+            "best": "-452.657214492868",
+            "charged": 543716,
+            "evals_to_hit": 543716,
+            "hit": 1,
+            "wall_s": "10.381397"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-452.657214492875",
+            "charged": 778318,
+            "evals_to_hit": 778318,
+            "hit": 1,
+            "wall_s": "14.126029"
+          },
+          "b": {
+            "best": "-452.657207842056",
+            "charged": 706862,
+            "evals_to_hit": 706862,
+            "hit": 1,
+            "wall_s": "12.910068"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-452.657205856276",
+            "charged": 1243263,
+            "evals_to_hit": 1243263,
+            "hit": 1,
+            "wall_s": "23.340304"
+          },
+          "b": {
+            "best": "-452.657214492874",
+            "charged": 1739479,
+            "evals_to_hit": 1739479,
+            "hit": 1,
+            "wall_s": "32.008521"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-452.657214492875",
+            "charged": 1398794,
+            "evals_to_hit": 1398794,
+            "hit": 1,
+            "wall_s": "25.489661"
+          },
+          "b": {
+            "best": "-452.657214492875",
+            "charged": 1329595,
+            "evals_to_hit": 1329595,
+            "hit": 1,
+            "wall_s": "23.792704"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-452.657214492875",
+            "charged": 643819,
+            "evals_to_hit": 643819,
+            "hit": 1,
+            "wall_s": "11.991913"
+          },
+          "b": {
+            "best": "-452.657214492873",
+            "charged": 245540,
+            "evals_to_hit": 245540,
+            "hit": 1,
+            "wall_s": "4.577749"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-452.657214",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-452.657214492875",
+          "best_b": "-452.657214492868",
+          "evals_a": 155522,
+          "evals_b": 543716,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-452.657205856276",
+          "best_b": "-452.657214492874",
+          "evals_a": 1243263,
+          "evals_b": 1739479,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2003
+        }
+      ],
+      "system": "lj84"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 330560.25,
+        "median": 78817.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 230506.0,
+        "median": 138680.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.803030303030303,
+      "mannwhitney_u_b": 16.0,
+      "n": 85,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-459.055798901088",
+            "charged": 39363,
+            "evals_to_hit": 39363,
+            "hit": 1,
+            "wall_s": "0.773358"
+          },
+          "b": {
+            "best": "-459.055780469520",
+            "charged": 34082,
+            "evals_to_hit": 34082,
+            "hit": 1,
+            "wall_s": "0.701514"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-459.055786229769",
+            "charged": 10239,
+            "evals_to_hit": 10239,
+            "hit": 1,
+            "wall_s": "0.247947"
+          },
+          "b": {
+            "best": "-459.055786229769",
+            "charged": 10239,
+            "evals_to_hit": 10239,
+            "hit": 1,
+            "wall_s": "0.248662"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-459.055798901088",
+            "charged": 14513,
+            "evals_to_hit": 14513,
+            "hit": 1,
+            "wall_s": "0.331898"
+          },
+          "b": {
+            "best": "-459.055798901088",
+            "charged": 14513,
+            "evals_to_hit": 14513,
+            "hit": 1,
+            "wall_s": "0.331711"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-459.055798901089",
+            "charged": 428957,
+            "evals_to_hit": 428957,
+            "hit": 1,
+            "wall_s": "7.741020"
+          },
+          "b": {
+            "best": "-459.055745885932",
+            "charged": 390684,
+            "evals_to_hit": 390684,
+            "hit": 1,
+            "wall_s": "7.315168"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-459.055783322907",
+            "charged": 118272,
+            "evals_to_hit": 118272,
+            "hit": 1,
+            "wall_s": "2.364910"
+          },
+          "b": {
+            "best": "-459.055769614279",
+            "charged": 243279,
+            "evals_to_hit": 243279,
+            "hit": 1,
+            "wall_s": "4.935964"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-459.055780426155",
+            "charged": 596954,
+            "evals_to_hit": 596954,
+            "hit": 1,
+            "wall_s": "11.413706"
+          },
+          "b": {
+            "best": "-459.055776028096",
+            "charged": 252122,
+            "evals_to_hit": 252122,
+            "hit": 1,
+            "wall_s": "4.794724"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-459.055799",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-459.055783322907",
+          "best_b": "-459.055769614279",
+          "evals_a": 118272,
+          "evals_b": 243279,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        }
+      ],
+      "system": "lj85"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 1578577.5,
+        "median": 869498.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 669345.0,
+        "median": 428864.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9372294372294372,
+      "mannwhitney_u_b": 17.0,
+      "n": 86,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-465.384493048908",
+            "charged": 2629301,
+            "evals_to_hit": 2629301,
+            "hit": 1,
+            "wall_s": "48.535690"
+          },
+          "b": {
+            "best": "-465.384469066568",
+            "charged": 1992750,
+            "evals_to_hit": 1992750,
+            "hit": 1,
+            "wall_s": "36.906587"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-465.384493048907",
+            "charged": 91576,
+            "evals_to_hit": 91576,
+            "hit": 1,
+            "wall_s": "1.660171"
+          },
+          "b": {
+            "best": "-465.384493048907",
+            "charged": 484708,
+            "evals_to_hit": 484708,
+            "hit": 1,
+            "wall_s": "8.846021"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-465.384463222386",
+            "charged": 1534523,
+            "evals_to_hit": 1534523,
+            "hit": 1,
+            "wall_s": "28.206313"
+          },
+          "b": {
+            "best": "-465.384330426122",
+            "charged": 373021,
+            "evals_to_hit": 373021,
+            "hit": 1,
+            "wall_s": "7.189923"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-465.384466318941",
+            "charged": 78834,
+            "evals_to_hit": 78834,
+            "hit": 1,
+            "wall_s": "1.492277"
+          },
+          "b": {
+            "best": "-465.384480323242",
+            "charged": 143122,
+            "evals_to_hit": 143122,
+            "hit": 1,
+            "wall_s": "2.670329"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-465.384493048907",
+            "charged": 204473,
+            "evals_to_hit": 204473,
+            "hit": 1,
+            "wall_s": "3.762973"
+          },
+          "b": {
+            "best": "-465.384493048908",
+            "charged": 84338,
+            "evals_to_hit": 84338,
+            "hit": 1,
+            "wall_s": "1.589591"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-465.384493048907",
+            "charged": 1752996,
+            "evals_to_hit": 1752996,
+            "hit": 1,
+            "wall_s": "34.312178"
+          },
+          "b": {
+            "best": "-465.384493048908",
+            "charged": 998353,
+            "evals_to_hit": 998353,
+            "hit": 1,
+            "wall_s": "19.044258"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-465.384493",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-465.384493048907",
+          "best_b": "-465.384493048907",
+          "evals_a": 91576,
+          "evals_b": 484708,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-465.384466318941",
+          "best_b": "-465.384480323242",
+          "evals_a": 78834,
+          "evals_b": 143122,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2003
+        }
+      ],
+      "system": "lj86"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 364753.75,
+        "median": 358621.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 1438682.0,
+        "median": 1638635.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": true,
+      "loss_reasons": [
+        "evals-to-hit increase"
+      ],
+      "mannwhitney_p": 0.04112554112554113,
+      "mannwhitney_u_b": 31.0,
+      "n": 87,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-472.098164519928",
+            "charged": 953571,
+            "evals_to_hit": 953571,
+            "hit": 1,
+            "wall_s": "18.800191"
+          },
+          "b": {
+            "best": "-472.098164519926",
+            "charged": 2787758,
+            "evals_to_hit": 2787758,
+            "hit": 1,
+            "wall_s": "53.604277"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-472.098159345151",
+            "charged": 336274,
+            "evals_to_hit": 336274,
+            "hit": 1,
+            "wall_s": "6.820403"
+          },
+          "b": {
+            "best": "-472.098164519929",
+            "charged": 367931,
+            "evals_to_hit": 367931,
+            "hit": 1,
+            "wall_s": "7.088259"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-472.098158814429",
+            "charged": 234647,
+            "evals_to_hit": 234647,
+            "hit": 1,
+            "wall_s": "4.950271"
+          },
+          "b": {
+            "best": "-472.098164519929",
+            "charged": 1205553,
+            "evals_to_hit": 1205553,
+            "hit": 1,
+            "wall_s": "23.635241"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-472.098154245887",
+            "charged": 380969,
+            "evals_to_hit": 380969,
+            "hit": 1,
+            "wall_s": "7.819147"
+          },
+          "b": {
+            "best": "-472.098164519929",
+            "charged": 486645,
+            "evals_to_hit": 486645,
+            "hit": 1,
+            "wall_s": "9.685208"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-472.098164519927",
+            "charged": 706087,
+            "evals_to_hit": 706087,
+            "hit": 1,
+            "wall_s": "14.262521"
+          },
+          "b": {
+            "best": "-472.098164519929",
+            "charged": 2116166,
+            "evals_to_hit": 2116166,
+            "hit": 1,
+            "wall_s": "39.481400"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-472.098164519928",
+            "charged": 172748,
+            "evals_to_hit": 172748,
+            "hit": 1,
+            "wall_s": "3.700301"
+          },
+          "b": {
+            "best": "-472.098164519925",
+            "charged": 2071718,
+            "evals_to_hit": 2071718,
+            "hit": 1,
+            "wall_s": "38.949196"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-472.098165",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-472.098164519928",
+          "best_b": "-472.098164519926",
+          "evals_a": 953571,
+          "evals_b": 2787758,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-472.098159345151",
+          "best_b": "-472.098164519929",
+          "evals_a": 336274,
+          "evals_b": 367931,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-472.098158814429",
+          "best_b": "-472.098164519929",
+          "evals_a": 234647,
+          "evals_b": 1205553,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        },
+        {
+          "best_a": "-472.098154245887",
+          "best_b": "-472.098164519929",
+          "evals_a": 380969,
+          "evals_b": 486645,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2003
+        },
+        {
+          "best_a": "-472.098164519927",
+          "best_b": "-472.098164519929",
+          "evals_a": 706087,
+          "evals_b": 2116166,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        },
+        {
+          "best_a": "-472.098164519928",
+          "best_b": "-472.098164519925",
+          "evals_a": 172748,
+          "evals_b": 2071718,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2005
+        }
+      ],
+      "system": "lj87"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 325069.0,
+        "median": 391863.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 709821.5,
+        "median": 332204.0,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9372294372294372,
+      "mannwhitney_u_b": 19.0,
+      "n": 88,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-479.032629802556",
+            "charged": 1333663,
+            "evals_to_hit": 1333663,
+            "hit": 1,
+            "wall_s": "26.561424"
+          },
+          "b": {
+            "best": "-479.032629802554",
+            "charged": 1453333,
+            "evals_to_hit": 1453333,
+            "hit": 1,
+            "wall_s": "28.021345"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-479.032629802554",
+            "charged": 497177,
+            "evals_to_hit": 497177,
+            "hit": 1,
+            "wall_s": "10.059592"
+          },
+          "b": {
+            "best": "-479.032629802552",
+            "charged": 91957,
+            "evals_to_hit": 91957,
+            "hit": 1,
+            "wall_s": "1.759755"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-479.032629377120",
+            "charged": 596018,
+            "evals_to_hit": 596018,
+            "hit": 1,
+            "wall_s": "11.363557"
+          },
+          "b": {
+            "best": "-479.032629802555",
+            "charged": 377529,
+            "evals_to_hit": 377529,
+            "hit": 1,
+            "wall_s": "8.056659"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-479.032629802555",
+            "charged": 286549,
+            "evals_to_hit": 286549,
+            "hit": 1,
+            "wall_s": "5.599795"
+          },
+          "b": {
+            "best": "-479.032629802555",
+            "charged": 286879,
+            "evals_to_hit": 286879,
+            "hit": 1,
+            "wall_s": "5.580312"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-479.032629290703",
+            "charged": 27615,
+            "evals_to_hit": 27615,
+            "hit": 1,
+            "wall_s": "0.584773"
+          },
+          "b": {
+            "best": "-479.032629381352",
+            "charged": 57729,
+            "evals_to_hit": 57729,
+            "hit": 1,
+            "wall_s": "1.238551"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-479.032629802554",
+            "charged": 232802,
+            "evals_to_hit": 232802,
+            "hit": 1,
+            "wall_s": "4.594594"
+          },
+          "b": {
+            "best": "-479.032629802554",
+            "charged": 1008169,
+            "evals_to_hit": 1008169,
+            "hit": 1,
+            "wall_s": "19.512954"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-479.032630",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-479.032629802556",
+          "best_b": "-479.032629802554",
+          "evals_a": 1333663,
+          "evals_b": 1453333,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-479.032629802555",
+          "best_b": "-479.032629802555",
+          "evals_a": 286549,
+          "evals_b": 286879,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2003
+        },
+        {
+          "best_a": "-479.032629290703",
+          "best_b": "-479.032629381352",
+          "evals_a": 27615,
+          "evals_b": 57729,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        },
+        {
+          "best_a": "-479.032629802554",
+          "best_b": "-479.032629802554",
+          "evals_a": 232802,
+          "evals_b": 1008169,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2005
+        }
+      ],
+      "system": "lj88"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 285339.5,
+        "median": 959570.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 794900.25,
+        "median": 988990.0,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9372294372294372,
+      "mannwhitney_u_b": 17.0,
+      "n": 89,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-486.053910756020",
+            "charged": 1152359,
+            "evals_to_hit": 1152359,
+            "hit": 1,
+            "wall_s": "25.007125"
+          },
+          "b": {
+            "best": "-486.053910756021",
+            "charged": 2034411,
+            "evals_to_hit": 2034411,
+            "hit": 1,
+            "wall_s": "40.526695"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-486.053910756022",
+            "charged": 309820,
+            "evals_to_hit": 309820,
+            "hit": 1,
+            "wall_s": "6.162691"
+          },
+          "b": {
+            "best": "-486.053910756020",
+            "charged": 1096090,
+            "evals_to_hit": 1096090,
+            "hit": 1,
+            "wall_s": "21.901278"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-486.053910756020",
+            "charged": 858661,
+            "evals_to_hit": 858661,
+            "hit": 1,
+            "wall_s": "17.468543"
+          },
+          "b": {
+            "best": "-486.053910756021",
+            "charged": 119297,
+            "evals_to_hit": 119297,
+            "hit": 1,
+            "wall_s": "2.647577"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-486.053910756020",
+            "charged": 839179,
+            "evals_to_hit": 839179,
+            "hit": 1,
+            "wall_s": "16.695485"
+          },
+          "b": {
+            "best": "-486.053910756020",
+            "charged": 881890,
+            "evals_to_hit": 881890,
+            "hit": 1,
+            "wall_s": "17.419897"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-486.053910756018",
+            "charged": 1851237,
+            "evals_to_hit": 1851237,
+            "hit": 1,
+            "wall_s": "35.641536"
+          },
+          "b": {
+            "best": "-486.053910756020",
+            "charged": 1137974,
+            "evals_to_hit": 1137974,
+            "hit": 1,
+            "wall_s": "22.294366"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-486.053910756020",
+            "charged": 1060479,
+            "evals_to_hit": 1060479,
+            "hit": 1,
+            "wall_s": "20.685308"
+          },
+          "b": {
+            "best": "-486.053910756020",
+            "charged": 149507,
+            "evals_to_hit": 149507,
+            "hit": 1,
+            "wall_s": "3.178549"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-486.053911",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-486.053910756020",
+          "best_b": "-486.053910756021",
+          "evals_a": 1152359,
+          "evals_b": 2034411,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-486.053910756022",
+          "best_b": "-486.053910756020",
+          "evals_a": 309820,
+          "evals_b": 1096090,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-486.053910756020",
+          "best_b": "-486.053910756020",
+          "evals_a": 839179,
+          "evals_b": 881890,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2003
+        }
+      ],
+      "system": "lj89"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 646551.0,
+        "median": 1101593.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 323271.5,
+        "median": 293010.0,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.13203463203463203,
+      "mannwhitney_u_b": 8.0,
+      "n": 90,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-492.433908466384",
+            "charged": 1035289,
+            "evals_to_hit": 1035289,
+            "hit": 1,
+            "wall_s": "21.559200"
+          },
+          "b": {
+            "best": "-492.433908466385",
+            "charged": 322996,
+            "evals_to_hit": 322996,
+            "hit": 1,
+            "wall_s": "6.591185"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-492.433908466384",
+            "charged": 1198923,
+            "evals_to_hit": 1198923,
+            "hit": 1,
+            "wall_s": "25.027699"
+          },
+          "b": {
+            "best": "-492.433908466383",
+            "charged": 498074,
+            "evals_to_hit": 498074,
+            "hit": 1,
+            "wall_s": "10.833212"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-492.433908466383",
+            "charged": 381058,
+            "evals_to_hit": 381058,
+            "hit": 1,
+            "wall_s": "7.780774"
+          },
+          "b": {
+            "best": "-492.433908466384",
+            "charged": 666291,
+            "evals_to_hit": 666291,
+            "hit": 1,
+            "wall_s": "13.252875"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-492.433908466384",
+            "charged": 1167898,
+            "evals_to_hit": 1167898,
+            "hit": 1,
+            "wall_s": "22.894905"
+          },
+          "b": {
+            "best": "-492.433908466385",
+            "charged": 87036,
+            "evals_to_hit": 87036,
+            "hit": 1,
+            "wall_s": "1.869483"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-492.433908466384",
+            "charged": 39007,
+            "evals_to_hit": 39007,
+            "hit": 1,
+            "wall_s": "0.916968"
+          },
+          "b": {
+            "best": "-492.433908466384",
+            "charged": 39386,
+            "evals_to_hit": 39386,
+            "hit": 1,
+            "wall_s": "0.972998"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-492.433908466382",
+            "charged": 1775689,
+            "evals_to_hit": 1775689,
+            "hit": 1,
+            "wall_s": "36.107074"
+          },
+          "b": {
+            "best": "-492.433908466381",
+            "charged": 263024,
+            "evals_to_hit": 263024,
+            "hit": 1,
+            "wall_s": "5.292042"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-492.433908",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-492.433908466383",
+          "best_b": "-492.433908466384",
+          "evals_a": 381058,
+          "evals_b": 666291,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        },
+        {
+          "best_a": "-492.433908466384",
+          "best_b": "-492.433908466384",
+          "evals_a": 39007,
+          "evals_b": 39386,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        }
+      ],
+      "system": "lj90"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 1441277.75,
+        "median": 1285412.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 1722104.0,
+        "median": 932148.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6233766233766234,
+      "mannwhitney_u_b": 14.5,
+      "n": 91,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-498.811060368836",
+            "charged": 31505,
+            "evals_to_hit": 31505,
+            "hit": 1,
+            "wall_s": "0.877188"
+          },
+          "b": {
+            "best": "-498.811060368836",
+            "charged": 31505,
+            "evals_to_hit": 31505,
+            "hit": 1,
+            "wall_s": "0.874512"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-498.811060368838",
+            "charged": 809385,
+            "evals_to_hit": 809385,
+            "hit": 1,
+            "wall_s": "16.396020"
+          },
+          "b": {
+            "best": "-498.811060368837",
+            "charged": 2557598,
+            "evals_to_hit": 2557598,
+            "hit": 1,
+            "wall_s": "51.950173"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-498.811033845426",
+            "charged": 1495073,
+            "evals_to_hit": 1495073,
+            "hit": 1,
+            "wall_s": "31.247148"
+          },
+          "b": {
+            "best": "-498.811060368838",
+            "charged": 791512,
+            "evals_to_hit": 791512,
+            "hit": 1,
+            "wall_s": "16.477382"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-498.811060368838",
+            "charged": 1075752,
+            "evals_to_hit": 1075752,
+            "hit": 1,
+            "wall_s": "23.918498"
+          },
+          "b": {
+            "best": "-498.811060368837",
+            "charged": 1072785,
+            "evals_to_hit": 1072785,
+            "hit": 1,
+            "wall_s": "22.559666"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-498.811060368836",
+            "charged": 2591315,
+            "evals_to_hit": 2591315,
+            "hit": 1,
+            "wall_s": "54.038886"
+          },
+          "b": {
+            "best": "-498.811060368836",
+            "charged": 3786712,
+            "evals_to_hit": 3786712,
+            "hit": 1,
+            "wall_s": "78.795756"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-498.811060368837",
+            "charged": 3409254,
+            "evals_to_hit": 3409254,
+            "hit": 1,
+            "wall_s": "69.150320"
+          },
+          "b": {
+            "best": "-498.811060368836",
+            "charged": 355217,
+            "evals_to_hit": 355217,
+            "hit": 1,
+            "wall_s": "7.281497"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-498.811060",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-498.811060368838",
+          "best_b": "-498.811060368837",
+          "evals_a": 809385,
+          "evals_b": 2557598,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-498.811060368836",
+          "best_b": "-498.811060368836",
+          "evals_a": 2591315,
+          "evals_b": 3786712,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        }
+      ],
+      "system": "lj91"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 749942.25,
+        "median": 811600.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 1146942.75,
+        "median": 316821.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.48484848484848486,
+      "mannwhitney_u_b": 13.0,
+      "n": 92,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-505.185309402201",
+            "charged": 486283,
+            "evals_to_hit": 486283,
+            "hit": 1,
+            "wall_s": "10.115514"
+          },
+          "b": {
+            "best": "-505.185309402202",
+            "charged": 191723,
+            "evals_to_hit": 191723,
+            "hit": 1,
+            "wall_s": "4.074377"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-505.185309402193",
+            "charged": 3300218,
+            "evals_to_hit": 3300218,
+            "hit": 1,
+            "wall_s": "68.586508"
+          },
+          "b": {
+            "best": "-505.185286685905",
+            "charged": 1531342,
+            "evals_to_hit": 1531342,
+            "hit": 1,
+            "wall_s": "31.748816"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-505.185309402198",
+            "charged": 886629,
+            "evals_to_hit": 886629,
+            "hit": 1,
+            "wall_s": "20.051313"
+          },
+          "b": {
+            "best": "-505.185309402199",
+            "charged": 2734193,
+            "evals_to_hit": 2734193,
+            "hit": 1,
+            "wall_s": "56.494634"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-505.185309402201",
+            "charged": 1436187,
+            "evals_to_hit": 1436187,
+            "hit": 1,
+            "wall_s": "30.648135"
+          },
+          "b": {
+            "best": "-505.185309402199",
+            "charged": 85484,
+            "evals_to_hit": 85484,
+            "hit": 1,
+            "wall_s": "1.918346"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-505.185288162139",
+            "charged": 736572,
+            "evals_to_hit": 736572,
+            "hit": 1,
+            "wall_s": "16.074245"
+          },
+          "b": {
+            "best": "-505.185309402200",
+            "charged": 441920,
+            "evals_to_hit": 441920,
+            "hit": 1,
+            "wall_s": "10.330844"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-505.185309402201",
+            "charged": 31874,
+            "evals_to_hit": 31874,
+            "hit": 1,
+            "wall_s": "0.699810"
+          },
+          "b": {
+            "best": "-505.185309402202",
+            "charged": 21094,
+            "evals_to_hit": 21094,
+            "hit": 1,
+            "wall_s": "0.490940"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-505.185309",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-505.185309402198",
+          "best_b": "-505.185309402199",
+          "evals_a": 886629,
+          "evals_b": 2734193,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        }
+      ],
+      "system": "lj92"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 1163488.0,
+        "median": 544518.0,
+        "n": 5
+      },
+      "evals_hit_b": {
+        "iqr": 762221.0,
+        "median": 1425218.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 5,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.1774891774891775,
+      "mannwhitney_u_b": 23.0,
+      "n": 93,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-510.877686529165",
+            "charged": 544518,
+            "evals_to_hit": 544518,
+            "hit": 1,
+            "wall_s": "11.561907"
+          },
+          "b": {
+            "best": "-510.877686529248",
+            "charged": 1435022,
+            "evals_to_hit": 1435022,
+            "hit": 1,
+            "wall_s": "29.774832"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-510.877684405587",
+            "charged": 205775,
+            "evals_to_hit": 205775,
+            "hit": 1,
+            "wall_s": "4.530490"
+          },
+          "b": {
+            "best": "-510.877687045053",
+            "charged": 2172584,
+            "evals_to_hit": 2172584,
+            "hit": 1,
+            "wall_s": "46.974621"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-509.719719909027",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "88.449606"
+          },
+          "b": {
+            "best": "-510.877686882590",
+            "charged": 348102,
+            "evals_to_hit": 348102,
+            "hit": 1,
+            "wall_s": "7.479768"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-510.877686529143",
+            "charged": 1832837,
+            "evals_to_hit": 1832837,
+            "hit": 1,
+            "wall_s": "39.123565"
+          },
+          "b": {
+            "best": "-510.877686055925",
+            "charged": 1162825,
+            "evals_to_hit": 1162825,
+            "hit": 1,
+            "wall_s": "24.209352"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-510.877681074020",
+            "charged": 1369263,
+            "evals_to_hit": 1369263,
+            "hit": 1,
+            "wall_s": "28.578910"
+          },
+          "b": {
+            "best": "-510.877678505441",
+            "charged": 2366364,
+            "evals_to_hit": 2366364,
+            "hit": 1,
+            "wall_s": "51.033719"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-510.877686940350",
+            "charged": 176859,
+            "evals_to_hit": 176859,
+            "hit": 1,
+            "wall_s": "4.246823"
+          },
+          "b": {
+            "best": "-510.877680766578",
+            "charged": 1415415,
+            "evals_to_hit": 1415415,
+            "hit": 1,
+            "wall_s": "30.251613"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-510.877688",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-510.877686529165",
+          "best_b": "-510.877686529248",
+          "evals_a": 544518,
+          "evals_b": 1435022,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-510.877684405587",
+          "best_b": "-510.877687045053",
+          "evals_a": 205775,
+          "evals_b": 2172584,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-510.877681074020",
+          "best_b": "-510.877678505441",
+          "evals_a": 1369263,
+          "evals_b": 2366364,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2004
+        },
+        {
+          "best_a": "-510.877686940350",
+          "best_b": "-510.877680766578",
+          "evals_a": 176859,
+          "evals_b": 1415415,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2005
+        }
+      ],
+      "system": "lj93"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 868386.75,
+        "median": 394782.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 694831.0,
+        "median": 454188.0,
+        "n": 4
+      },
+      "fisher_p": 0.45454545454545453,
+      "hits_a": 6,
+      "hits_b": 4,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8142857142857143,
+      "mannwhitney_u_b": 10.5,
+      "n": 94,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "hit-count drop",
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-517.264128644902",
+            "charged": 220665,
+            "evals_to_hit": 220665,
+            "hit": 1,
+            "wall_s": "5.294916"
+          },
+          "b": {
+            "best": "-516.033384785224",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "92.301090"
+          },
+          "core": 7,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-517.264131141202",
+            "charged": 527160,
+            "evals_to_hit": 527160,
+            "hit": 1,
+            "wall_s": "10.977642"
+          },
+          "b": {
+            "best": "-517.264130302247",
+            "charged": 1378773,
+            "evals_to_hit": 1378773,
+            "hit": 1,
+            "wall_s": "30.203603"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-517.263912116353",
+            "charged": 262404,
+            "evals_to_hit": 262404,
+            "hit": 1,
+            "wall_s": "6.020775"
+          },
+          "b": {
+            "best": "-517.264095349035",
+            "charged": 692316,
+            "evals_to_hit": 692316,
+            "hit": 1,
+            "wall_s": "16.114214"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-517.264119507083",
+            "charged": 28217,
+            "evals_to_hit": 28217,
+            "hit": 1,
+            "wall_s": "0.755821"
+          },
+          "b": {
+            "best": "-517.264119507083",
+            "charged": 28217,
+            "evals_to_hit": 28217,
+            "hit": 1,
+            "wall_s": "0.772642"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-517.264131141201",
+            "charged": 1290262,
+            "evals_to_hit": 1290262,
+            "hit": 1,
+            "wall_s": "28.723946"
+          },
+          "b": {
+            "best": "-515.492113517568",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "87.823108"
+          },
+          "core": 4,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-517.264119520846",
+            "charged": 1848736,
+            "evals_to_hit": 1848736,
+            "hit": 1,
+            "wall_s": "39.423636"
+          },
+          "b": {
+            "best": "-517.264119771546",
+            "charged": 216060,
+            "evals_to_hit": 216060,
+            "hit": 1,
+            "wall_s": "4.551332"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-517.264131",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-517.264128644902",
+          "best_b": "-516.033384785224",
+          "evals_a": 220665,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-517.264131141202",
+          "best_b": "-517.264130302247",
+          "evals_a": 527160,
+          "evals_b": 1378773,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-517.263912116353",
+          "best_b": "-517.264095349035",
+          "evals_a": 262404,
+          "evals_b": 692316,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        },
+        {
+          "best_a": "-517.264131141201",
+          "best_b": "-515.492113517568",
+          "evals_a": 1290262,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2004
+        }
+      ],
+      "system": "lj94"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 1321905.5,
+        "median": 564383.0,
+        "n": 3
+      },
+      "evals_hit_b": {
+        "iqr": 1609363.0,
+        "median": 2405248.0,
+        "n": 6
+      },
+      "fisher_p": 0.18181818181818182,
+      "hits_a": 3,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9047619047619048,
+      "mannwhitney_u_b": 10.0,
+      "n": 95,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-523.640187172832",
+            "charged": 564383,
+            "evals_to_hit": 564383,
+            "hit": 1,
+            "wall_s": "12.827976"
+          },
+          "b": {
+            "best": "-523.640207124537",
+            "charged": 136910,
+            "evals_to_hit": 136910,
+            "hit": 1,
+            "wall_s": "3.107408"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-522.342351796771",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "94.216250"
+          },
+          "b": {
+            "best": "-523.640178526876",
+            "charged": 3000513,
+            "evals_to_hit": 3000513,
+            "hit": 1,
+            "wall_s": "71.463026"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-523.640211330488",
+            "charged": 315223,
+            "evals_to_hit": 315223,
+            "hit": 1,
+            "wall_s": "7.962008"
+          },
+          "b": {
+            "best": "-523.640189219181",
+            "charged": 344475,
+            "evals_to_hit": 344475,
+            "hit": 1,
+            "wall_s": "8.523544"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-522.342351796772",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "93.076330"
+          },
+          "b": {
+            "best": "-523.640195765509",
+            "charged": 2361128,
+            "evals_to_hit": 2361128,
+            "hit": 1,
+            "wall_s": "55.749878"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-522.342351796772",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "95.043631"
+          },
+          "b": {
+            "best": "-523.640211330486",
+            "charged": 2460879,
+            "evals_to_hit": 2460879,
+            "hit": 1,
+            "wall_s": "58.520041"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-523.640211330485",
+            "charged": 2959034,
+            "evals_to_hit": 2959034,
+            "hit": 1,
+            "wall_s": "68.260518"
+          },
+          "b": {
+            "best": "-523.640211330489",
+            "charged": 2449368,
+            "evals_to_hit": 2449368,
+            "hit": 1,
+            "wall_s": "54.914741"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-523.640211",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-523.640211330488",
+          "best_b": "-523.640189219181",
+          "evals_a": 315223,
+          "evals_b": 344475,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        }
+      ],
+      "system": "lj95"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 2223824.75,
+        "median": 2140381.0,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 1823843.0,
+        "median": 1936086.0,
+        "n": 5
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 5,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6623376623376623,
+      "mannwhitney_u_b": 12.0,
+      "n": 96,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "hit-count drop"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-529.879146444059",
+            "charged": 2349509,
+            "evals_to_hit": 2349509,
+            "hit": 1,
+            "wall_s": "54.899871"
+          },
+          "b": {
+            "best": "-529.879146444059",
+            "charged": 1936086,
+            "evals_to_hit": 1936086,
+            "hit": 1,
+            "wall_s": "46.490195"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-529.879141785769",
+            "charged": 49828,
+            "evals_to_hit": 49828,
+            "hit": 1,
+            "wall_s": "1.157045"
+          },
+          "b": {
+            "best": "-529.879146444061",
+            "charged": 128391,
+            "evals_to_hit": 128391,
+            "hit": 1,
+            "wall_s": "2.788636"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-529.879146444059",
+            "charged": 1931253,
+            "evals_to_hit": 1931253,
+            "hit": 1,
+            "wall_s": "47.205151"
+          },
+          "b": {
+            "best": "-529.879146444058",
+            "charged": 2005391,
+            "evals_to_hit": 2005391,
+            "hit": 1,
+            "wall_s": "48.204023"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-529.879146444057",
+            "charged": 167496,
+            "evals_to_hit": 167496,
+            "hit": 1,
+            "wall_s": "4.077928"
+          },
+          "b": {
+            "best": "-529.285220280354",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "99.230410"
+          },
+          "core": 0,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-529.879146444059",
+            "charged": 3117232,
+            "evals_to_hit": 3117232,
+            "hit": 1,
+            "wall_s": "74.859734"
+          },
+          "b": {
+            "best": "-529.879146444060",
+            "charged": 181548,
+            "evals_to_hit": 181548,
+            "hit": 1,
+            "wall_s": "4.673974"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-529.879146444059",
+            "charged": 2993177,
+            "evals_to_hit": 2993177,
+            "hit": 1,
+            "wall_s": "70.080688"
+          },
+          "b": {
+            "best": "-529.879146444060",
+            "charged": 2038274,
+            "evals_to_hit": 2038274,
+            "hit": 1,
+            "wall_s": "46.359475"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-529.879146",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-529.879141785769",
+          "best_b": "-529.879146444061",
+          "evals_a": 49828,
+          "evals_b": 128391,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-529.879146444059",
+          "best_b": "-529.879146444058",
+          "evals_a": 1931253,
+          "evals_b": 2005391,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        },
+        {
+          "best_a": "-529.879146444057",
+          "best_b": "-529.285220280354",
+          "evals_a": 167496,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2003
+        }
+      ],
+      "system": "lj96"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 583118.0,
+        "median": 1037374.0,
+        "n": 5
+      },
+      "evals_hit_b": {
+        "iqr": 393619.0,
+        "median": 947690.0,
+        "n": 5
+      },
+      "fisher_p": 1.0,
+      "hits_a": 5,
+      "hits_b": 5,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 12.0,
+      "n": 97,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-536.681383292443",
+            "charged": 1210572,
+            "evals_to_hit": 1210572,
+            "hit": 1,
+            "wall_s": "27.892604"
+          },
+          "b": {
+            "best": "-536.681383292445",
+            "charged": 947690,
+            "evals_to_hit": 947690,
+            "hit": 1,
+            "wall_s": "22.783580"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-536.681383292444",
+            "charged": 344440,
+            "evals_to_hit": 344440,
+            "hit": 1,
+            "wall_s": "8.576060"
+          },
+          "b": {
+            "best": "-536.681383292444",
+            "charged": 148557,
+            "evals_to_hit": 148557,
+            "hit": 1,
+            "wall_s": "3.652157"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-535.989754051143",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "97.086674"
+          },
+          "b": {
+            "best": "-536.681383292445",
+            "charged": 1371774,
+            "evals_to_hit": 1371774,
+            "hit": 1,
+            "wall_s": "32.706430"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-536.681383292445",
+            "charged": 1186659,
+            "evals_to_hit": 1186659,
+            "hit": 1,
+            "wall_s": "27.962425"
+          },
+          "b": {
+            "best": "-536.681383292446",
+            "charged": 671577,
+            "evals_to_hit": 671577,
+            "hit": 1,
+            "wall_s": "16.460173"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-536.681383292445",
+            "charged": 1037374,
+            "evals_to_hit": 1037374,
+            "hit": 1,
+            "wall_s": "24.338975"
+          },
+          "b": {
+            "best": "-535.989754051143",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "94.862164"
+          },
+          "core": 3,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-536.681382809119",
+            "charged": 603541,
+            "evals_to_hit": 603541,
+            "hit": 1,
+            "wall_s": "13.818458"
+          },
+          "b": {
+            "best": "-536.681375241433",
+            "charged": 1065196,
+            "evals_to_hit": 1065196,
+            "hit": 1,
+            "wall_s": "25.199022"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-536.681383",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-536.681383292445",
+          "best_b": "-535.989754051143",
+          "evals_a": 1037374,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2004
+        },
+        {
+          "best_a": "-536.681382809119",
+          "best_b": "-536.681375241433",
+          "evals_a": 603541,
+          "evals_b": 1065196,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2005
+        }
+      ],
+      "system": "lj97"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper",
+      "evals_hit_a": {
+        "iqr": 1604559.5,
+        "median": 1430688.0,
+        "n": 7
+      },
+      "evals_hit_b": {
+        "iqr": 561156.0,
+        "median": 589403.0,
+        "n": 10
+      },
+      "fisher_p": 0.3707093821510298,
+      "hits_a": 7,
+      "hits_b": 10,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.1932332373508844,
+      "mannwhitney_u_b": 21.0,
+      "n": 98,
+      "n_seeds": 12,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-543.665360770896",
+            "charged": 363251,
+            "evals_to_hit": 363251,
+            "hit": 1,
+            "wall_s": "9.386647"
+          },
+          "b": {
+            "best": "-543.665360770896",
+            "charged": 195164,
+            "evals_to_hit": 195164,
+            "hit": 1,
+            "wall_s": "4.988124"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-543.665360770895",
+            "charged": 801015,
+            "evals_to_hit": 801015,
+            "hit": 1,
+            "wall_s": "19.442534"
+          },
+          "b": {
+            "best": "-543.642957239019",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "91.967634"
+          },
+          "core": 1,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-543.665360770897",
+            "charged": 1889404,
+            "evals_to_hit": 1888987,
+            "hit": 1,
+            "wall_s": "44.997948"
+          },
+          "b": {
+            "best": "-543.665360770894",
+            "charged": 715897,
+            "evals_to_hit": 715897,
+            "hit": 1,
+            "wall_s": "17.000575"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-543.665360770896",
+            "charged": 103862,
+            "evals_to_hit": 103862,
+            "hit": 1,
+            "wall_s": "2.440733"
+          },
+          "b": {
+            "best": "-543.665360770894",
+            "charged": 210087,
+            "evals_to_hit": 210087,
+            "hit": 1,
+            "wall_s": "5.029022"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-543.642957239020",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "93.106266"
+          },
+          "b": {
+            "best": "-543.665360770892",
+            "charged": 798924,
+            "evals_to_hit": 798924,
+            "hit": 1,
+            "wall_s": "20.107063"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-543.665360770897",
+            "charged": 1430688,
+            "evals_to_hit": 1430688,
+            "hit": 1,
+            "wall_s": "33.661442"
+          },
+          "b": {
+            "best": "-543.665360770895",
+            "charged": 237784,
+            "evals_to_hit": 237784,
+            "hit": 1,
+            "wall_s": "5.654975"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        },
+        {
+          "a": {
+            "best": "-543.665360770895",
+            "charged": 3849225,
+            "evals_to_hit": 3849225,
+            "hit": 1,
+            "wall_s": "92.423351"
+          },
+          "b": {
+            "best": "-543.665360770894",
+            "charged": 603355,
+            "evals_to_hit": 603355,
+            "hit": 1,
+            "wall_s": "15.284674"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2006
+        },
+        {
+          "a": {
+            "best": "-543.642957239020",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "94.758164"
+          },
+          "b": {
+            "best": "-543.665360770895",
+            "charged": 3136677,
+            "evals_to_hit": 3136677,
+            "hit": 1,
+            "wall_s": "73.845591"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2007
+        },
+        {
+          "a": {
+            "best": "-543.665360770895",
+            "charged": 2484398,
+            "evals_to_hit": 2484398,
+            "hit": 1,
+            "wall_s": "59.334522"
+          },
+          "b": {
+            "best": "-543.665360770896",
+            "charged": 575451,
+            "evals_to_hit": 575451,
+            "hit": 1,
+            "wall_s": "14.468358"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2008
+        },
+        {
+          "a": {
+            "best": "-543.642957239020",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "91.590344"
+          },
+          "b": {
+            "best": "-543.642957239021",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "93.309325"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2009
+        },
+        {
+          "a": {
+            "best": "-543.642957239020",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "93.110703"
+          },
+          "b": {
+            "best": "-543.665360770895",
+            "charged": 61236,
+            "evals_to_hit": 61236,
+            "hit": 1,
+            "wall_s": "1.412917"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2010
+        },
+        {
+          "a": {
+            "best": "-543.642957239021",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "111.302079"
+          },
+          "b": {
+            "best": "-543.665360770895",
+            "charged": 1622066,
+            "evals_to_hit": 1622066,
+            "hit": 1,
+            "wall_s": "38.498380"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2011
+        }
+      ],
+      "reference": "-543.665361",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-543.665360770895",
+          "best_b": "-543.642957239019",
+          "evals_a": 801015,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-543.665360770896",
+          "best_b": "-543.665360770894",
+          "evals_a": 103862,
+          "evals_b": 210087,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2003
+        }
+      ],
+      "system": "lj98"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 1035061.0,
+        "median": 1012925.0,
+        "n": 5
+      },
+      "evals_hit_b": {
+        "iqr": 1075899.0,
+        "median": 139499.0,
+        "n": 5
+      },
+      "fisher_p": 1.0,
+      "hits_a": 5,
+      "hits_b": 5,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.746031746031746,
+      "mannwhitney_u_b": 10.5,
+      "n": 99,
+      "n_seeds": 6,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-550.666526025501",
+            "charged": 14045,
+            "evals_to_hit": 14045,
+            "hit": 1,
+            "wall_s": "0.375508"
+          },
+          "b": {
+            "best": "-550.666526025501",
+            "charged": 14045,
+            "evals_to_hit": 14045,
+            "hit": 1,
+            "wall_s": "0.374419"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-550.666526025500",
+            "charged": 1195349,
+            "evals_to_hit": 1195349,
+            "hit": 1,
+            "wall_s": "27.860367"
+          },
+          "b": {
+            "best": "-550.666526025499",
+            "charged": 3510294,
+            "evals_to_hit": 3510294,
+            "hit": 1,
+            "wall_s": "87.400230"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-550.666526025499",
+            "charged": 1012925,
+            "evals_to_hit": 1012925,
+            "hit": 1,
+            "wall_s": "25.055362"
+          },
+          "b": {
+            "best": "-550.666526025497",
+            "charged": 1186690,
+            "evals_to_hit": 1186690,
+            "hit": 1,
+            "wall_s": "29.631693"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-550.666526025498",
+            "charged": 3292229,
+            "evals_to_hit": 3292229,
+            "hit": 1,
+            "wall_s": "83.362322"
+          },
+          "b": {
+            "best": "-550.666526025497",
+            "charged": 110791,
+            "evals_to_hit": 110791,
+            "hit": 1,
+            "wall_s": "2.707840"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-550.666526025498",
+            "charged": 160288,
+            "evals_to_hit": 160288,
+            "hit": 1,
+            "wall_s": "3.496464"
+          },
+          "b": {
+            "best": "-550.666526025496",
+            "charged": 139499,
+            "evals_to_hit": 139499,
+            "hit": 1,
+            "wall_s": "3.102207"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-549.080231068172",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "102.434667"
+          },
+          "b": {
+            "best": "-549.080231068172",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "102.747110"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-550.666526",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-550.666526025500",
+          "best_b": "-550.666526025499",
+          "evals_a": 1195349,
+          "evals_b": 3510294,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-550.666526025499",
+          "best_b": "-550.666526025497",
+          "evals_a": 1012925,
+          "evals_b": 1186690,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        }
+      ],
+      "system": "lj99"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 628321.0,
+        "median": 61194.0,
+        "n": 3
+      },
+      "evals_hit_b": {
+        "iqr": 429798.75,
+        "median": 87567.0,
+        "n": 4
+      },
+      "fisher_p": 1.0,
+      "hits_a": 3,
+      "hits_b": 4,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9714285714285714,
+      "mannwhitney_u_b": 6.5,
+      "n": 100,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-557.039819566106",
+            "charged": 61194,
+            "evals_to_hit": 61194,
+            "hit": 1,
+            "wall_s": "1.601658"
+          },
+          "b": {
+            "best": "-557.039819566107",
+            "charged": 57051,
+            "evals_to_hit": 57051,
+            "hit": 1,
+            "wall_s": "1.596067"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-555.251893358896",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "100.849766"
+          },
+          "b": {
+            "best": "-555.251893358896",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "105.056803"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-555.251893358897",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "105.602749"
+          },
+          "b": {
+            "best": "-557.039819566109",
+            "charged": 118083,
+            "evals_to_hit": 118083,
+            "hit": 1,
+            "wall_s": "2.885461"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-555.251893358897",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "102.051312"
+          },
+          "b": {
+            "best": "-557.039819566108",
+            "charged": 1562187,
+            "evals_to_hit": 1562187,
+            "hit": 1,
+            "wall_s": "39.246459"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-557.039819566107",
+            "charged": 26088,
+            "evals_to_hit": 26088,
+            "hit": 1,
+            "wall_s": "0.673014"
+          },
+          "b": {
+            "best": "-557.039819566107",
+            "charged": 26088,
+            "evals_to_hit": 26088,
+            "hit": 1,
+            "wall_s": "0.670866"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-557.039819566108",
+            "charged": 1282730,
+            "evals_to_hit": 1282730,
+            "hit": 1,
+            "wall_s": "34.000308"
+          },
+          "b": {
+            "best": "-556.175522523395",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "104.586629"
+          },
+          "core": 6,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-557.039820",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-557.039819566108",
+          "best_b": "-556.175522523395",
+          "evals_a": 1282730,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2005
+        }
+      ],
+      "system": "lj100"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper-range",
+      "evals_hit_a": {
+        "iqr": 1691919.5,
+        "median": 684236.0,
+        "n": 3
+      },
+      "evals_hit_b": {
+        "iqr": 430803.5,
+        "median": 2145684.0,
+        "n": 3
+      },
+      "fisher_p": 1.0,
+      "hits_a": 3,
+      "hits_b": 3,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.7,
+      "mannwhitney_u_b": 6.0,
+      "n": 101,
+      "n_seeds": 6,
+      "nonsignificant": [
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-563.411307891233",
+            "charged": 684236,
+            "evals_to_hit": 684236,
+            "hit": 1,
+            "wall_s": "17.953958"
+          },
+          "b": {
+            "best": "-562.067771971960",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "100.574382"
+          },
+          "core": 0,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-563.411307891233",
+            "charged": 3545043,
+            "evals_to_hit": 3545043,
+            "hit": 1,
+            "wall_s": "89.646202"
+          },
+          "b": {
+            "best": "-563.411307891229",
+            "charged": 2294797,
+            "evals_to_hit": 2294797,
+            "hit": 1,
+            "wall_s": "56.550054"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-563.411307891235",
+            "charged": 161204,
+            "evals_to_hit": 161204,
+            "hit": 1,
+            "wall_s": "4.012296"
+          },
+          "b": {
+            "best": "-563.411307891233",
+            "charged": 1433190,
+            "evals_to_hit": 1433190,
+            "hit": 1,
+            "wall_s": "35.988041"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-563.329326374113",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "98.340704"
+          },
+          "b": {
+            "best": "-563.411298065651",
+            "charged": 2145684,
+            "evals_to_hit": 2145684,
+            "hit": 1,
+            "wall_s": "55.638081"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-562.067771971960",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "102.334192"
+          },
+          "b": {
+            "best": "-562.067771971960",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "105.751615"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-562.067771971960",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "104.736544"
+          },
+          "b": {
+            "best": "-560.547115737016",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "97.589639"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        }
+      ],
+      "reference": "-563.411308",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-563.411307891233",
+          "best_b": "-562.067771971960",
+          "evals_a": 684236,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-563.411307891235",
+          "best_b": "-563.411307891233",
+          "evals_a": 161204,
+          "evals_b": 1433190,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2002
+        }
+      ],
+      "system": "lj101"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper",
+      "evals_hit_a": {
+        "iqr": 1354346.5,
+        "median": 1816132.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 769974.5,
+        "median": 1725678.0,
+        "n": 7
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 7,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 21.0,
+      "n": 102,
+      "n_seeds": 12,
+      "nonsignificant": [],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-569.363652496079",
+            "charged": 2494294,
+            "evals_to_hit": 2494294,
+            "hit": 1,
+            "wall_s": "63.150962"
+          },
+          "b": {
+            "best": "-568.388773259025",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "109.276473"
+          },
+          "core": 7,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-569.363652496077",
+            "charged": 2512105,
+            "evals_to_hit": 2512105,
+            "hit": 1,
+            "wall_s": "63.089864"
+          },
+          "b": {
+            "best": "-569.363652496078",
+            "charged": 1967037,
+            "evals_to_hit": 1967037,
+            "hit": 1,
+            "wall_s": "56.915022"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-568.388773259025",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "105.292308"
+          },
+          "b": {
+            "best": "-569.363652496078",
+            "charged": 1184144,
+            "evals_to_hit": 1184144,
+            "hit": 1,
+            "wall_s": "30.829268"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-569.363652496077",
+            "charged": 1536052,
+            "evals_to_hit": 1536052,
+            "hit": 1,
+            "wall_s": "39.998868"
+          },
+          "b": {
+            "best": "-569.277723092901",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "103.857310"
+          },
+          "core": 6,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-569.277723092902",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "99.547633"
+          },
+          "b": {
+            "best": "-569.363652496078",
+            "charged": 1725678,
+            "evals_to_hit": 1725678,
+            "hit": 1,
+            "wall_s": "44.453008"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-569.363652496079",
+            "charged": 2096213,
+            "evals_to_hit": 2096213,
+            "hit": 1,
+            "wall_s": "53.566519"
+          },
+          "b": {
+            "best": "-569.363652496076",
+            "charged": 1464244,
+            "evals_to_hit": 1464244,
+            "hit": 1,
+            "wall_s": "37.799658"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        },
+        {
+          "a": {
+            "best": "-569.277723092902",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "101.740565"
+          },
+          "b": {
+            "best": "-568.388773259025",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "108.333639"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2006
+        },
+        {
+          "a": {
+            "best": "-569.363652496080",
+            "charged": 467574,
+            "evals_to_hit": 467574,
+            "hit": 1,
+            "wall_s": "12.164304"
+          },
+          "b": {
+            "best": "-569.363652496074",
+            "charged": 774596,
+            "evals_to_hit": 774596,
+            "hit": 1,
+            "wall_s": "20.098904"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2007
+        },
+        {
+          "a": {
+            "best": "-569.363652496078",
+            "charged": 875219,
+            "evals_to_hit": 875219,
+            "hit": 1,
+            "wall_s": "23.443120"
+          },
+          "b": {
+            "best": "-568.388773259025",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "106.711239"
+          },
+          "core": 5,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2008
+        },
+        {
+          "a": {
+            "best": "-569.277723092902",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "101.352368"
+          },
+          "b": {
+            "best": "-569.363652496077",
+            "charged": 2221300,
+            "evals_to_hit": 2221300,
+            "hit": 1,
+            "wall_s": "56.570019"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2009
+        },
+        {
+          "a": {
+            "best": "-568.388773259024",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "109.512333"
+          },
+          "b": {
+            "best": "-569.363652496080",
+            "charged": 2523548,
+            "evals_to_hit": 2523548,
+            "hit": 1,
+            "wall_s": "69.815441"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2010
+        },
+        {
+          "a": {
+            "best": "-569.277723092900",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "106.949061"
+          },
+          "b": {
+            "best": "-569.277723092902",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "109.425991"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2011
+        }
+      ],
+      "reference": "-569.363652",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-569.363652496079",
+          "best_b": "-568.388773259025",
+          "evals_a": 2494294,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-569.363652496077",
+          "best_b": "-569.277723092901",
+          "evals_a": 1536052,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2003
+        },
+        {
+          "best_a": "-569.363652496080",
+          "best_b": "-569.363652496074",
+          "evals_a": 467574,
+          "evals_b": 774596,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2007
+        },
+        {
+          "best_a": "-569.363652496078",
+          "best_b": "-568.388773259025",
+          "evals_a": 875219,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2008
+        }
+      ],
+      "system": "lj102"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper",
+      "evals_hit_a": {
+        "iqr": 975392.25,
+        "median": 638914.5,
+        "n": 6
+      },
+      "evals_hit_b": {
+        "iqr": 2544144.0,
+        "median": 600131.0,
+        "n": 5
+      },
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 5,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9805194805194806,
+      "mannwhitney_u_b": 14.5,
+      "n": 103,
+      "n_seeds": 12,
+      "nonsignificant": [
+        "hit-count drop"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-575.766130870284",
+            "charged": 1099550,
+            "evals_to_hit": 1099550,
+            "hit": 1,
+            "wall_s": "29.986820"
+          },
+          "b": {
+            "best": "-575.766130870285",
+            "charged": 2603604,
+            "evals_to_hit": 2603604,
+            "hit": 1,
+            "wall_s": "66.731609"
+          },
+          "core": 4,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-575.766130870282",
+            "charged": 238302,
+            "evals_to_hit": 238302,
+            "hit": 1,
+            "wall_s": "6.496786"
+          },
+          "b": {
+            "best": "-575.766130870279",
+            "charged": 2959316,
+            "evals_to_hit": 2959316,
+            "hit": 1,
+            "wall_s": "78.923925"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-575.766130870284",
+            "charged": 1039527,
+            "evals_to_hit": 1039527,
+            "hit": 1,
+            "wall_s": "27.883956"
+          },
+          "b": {
+            "best": "-574.705255947822",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "112.271472"
+          },
+          "core": 2,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-575.766130870284",
+            "charged": 14169,
+            "evals_to_hit": 14169,
+            "hit": 1,
+            "wall_s": "0.450741"
+          },
+          "b": {
+            "best": "-575.766130870284",
+            "charged": 14169,
+            "evals_to_hit": 14169,
+            "hit": 1,
+            "wall_s": "0.457970"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-575.766130870284",
+            "charged": 66102,
+            "evals_to_hit": 66102,
+            "hit": 1,
+            "wall_s": "1.679000"
+          },
+          "b": {
+            "best": "-575.766130870283",
+            "charged": 59460,
+            "evals_to_hit": 59460,
+            "hit": 1,
+            "wall_s": "1.555078"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-574.705255947822",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "111.374079"
+          },
+          "b": {
+            "best": "-574.705255947822",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "104.253336"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2005
+        },
+        {
+          "a": {
+            "best": "-575.658878731051",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "109.106647"
+          },
+          "b": {
+            "best": "-573.292224465251",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "102.970528"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2006
+        },
+        {
+          "a": {
+            "best": "-571.048010259570",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "102.090059"
+          },
+          "b": {
+            "best": "-574.705255947822",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "112.029315"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2007
+        },
+        {
+          "a": {
+            "best": "-575.658878731052",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "108.912463"
+          },
+          "b": {
+            "best": "-575.658878731052",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "106.351169"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2008
+        },
+        {
+          "a": {
+            "best": "-571.048010259569",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "100.446819"
+          },
+          "b": {
+            "best": "-575.658878731051",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "101.791963"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2009
+        },
+        {
+          "a": {
+            "best": "-575.658878731053",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "103.522518"
+          },
+          "b": {
+            "best": "-575.766130870284",
+            "charged": 600131,
+            "evals_to_hit": 600131,
+            "hit": 1,
+            "wall_s": "15.876387"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2010
+        },
+        {
+          "a": {
+            "best": "-575.766130870285",
+            "charged": 3810145,
+            "evals_to_hit": 3810145,
+            "hit": 1,
+            "wall_s": "98.308389"
+          },
+          "b": {
+            "best": "-575.658878731052",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "104.945918"
+          },
+          "core": 4,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2011
+        }
+      ],
+      "reference": "-575.766131",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-575.766130870284",
+          "best_b": "-575.766130870285",
+          "evals_a": 1099550,
+          "evals_b": 2603604,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2000
+        },
+        {
+          "best_a": "-575.766130870282",
+          "best_b": "-575.766130870279",
+          "evals_a": 238302,
+          "evals_b": 2959316,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2001
+        },
+        {
+          "best_a": "-575.766130870284",
+          "best_b": "-574.705255947822",
+          "evals_a": 1039527,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2002
+        },
+        {
+          "best_a": "-575.766130870285",
+          "best_b": "-575.658878731052",
+          "evals_a": 3810145,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2011
+        }
+      ],
+      "system": "lj103"
+    },
+    {
+      "budget": 4000000,
+      "budget_source": "paper",
+      "evals_hit_a": {
+        "iqr": 1233381.0,
+        "median": 1300907.0,
+        "n": 5
+      },
+      "evals_hit_b": {
+        "iqr": 1640564.75,
+        "median": 2186842.5,
+        "n": 6
+      },
+      "fisher_p": 1.0,
+      "hits_a": 5,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.42857142857142855,
+      "mannwhitney_u_b": 20.0,
+      "n": 104,
+      "n_seeds": 12,
+      "nonsignificant": [
+        "evals-to-hit increase"
+      ],
+      "per_seed": [
+        {
+          "a": {
+            "best": "-582.038429062341",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "103.742489"
+          },
+          "b": {
+            "best": "-582.086642067580",
+            "charged": 2435323,
+            "evals_to_hit": 2435323,
+            "hit": 1,
+            "wall_s": "63.095471"
+          },
+          "core": 2,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2000
+        },
+        {
+          "a": {
+            "best": "-581.016676259329",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "106.108491"
+          },
+          "b": {
+            "best": "-582.086634430318",
+            "charged": 2442566,
+            "evals_to_hit": 2442566,
+            "hit": 1,
+            "wall_s": "66.166919"
+          },
+          "core": 6,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2001
+        },
+        {
+          "a": {
+            "best": "-582.038429062342",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "107.001520"
+          },
+          "b": {
+            "best": "-582.086642067579",
+            "charged": 246838,
+            "evals_to_hit": 246838,
+            "hit": 1,
+            "wall_s": "7.060630"
+          },
+          "core": 0,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2002
+        },
+        {
+          "a": {
+            "best": "-577.110860054842",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "103.270064"
+          },
+          "b": {
+            "best": "-582.086642067579",
+            "charged": 420800,
+            "evals_to_hit": 420800,
+            "hit": 1,
+            "wall_s": "11.304825"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "BA",
+          "seed": 2003
+        },
+        {
+          "a": {
+            "best": "-581.016676259330",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "112.004896"
+          },
+          "b": {
+            "best": "-582.038429062340",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "106.827610"
+          },
+          "core": 7,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2004
+        },
+        {
+          "a": {
+            "best": "-582.086642067576",
+            "charged": 637338,
+            "evals_to_hit": 637338,
+            "hit": 1,
+            "wall_s": "18.175930"
+          },
+          "b": {
+            "best": "-582.038429062342",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "107.988706"
+          },
+          "core": 6,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2005
+        },
+        {
+          "a": {
+            "best": "-582.086642067577",
+            "charged": 1870719,
+            "evals_to_hit": 1870719,
+            "hit": 1,
+            "wall_s": "51.291881"
+          },
+          "b": {
+            "best": "-582.086642067578",
+            "charged": 1938362,
+            "evals_to_hit": 1938362,
+            "hit": 1,
+            "wall_s": "52.619020"
+          },
+          "core": 5,
+          "lost_hit": false,
+          "more_evals": true,
+          "order": "AB",
+          "seed": 2006
+        },
+        {
+          "a": {
+            "best": "-582.086642067580",
+            "charged": 2303715,
+            "evals_to_hit": 2303715,
+            "hit": 1,
+            "wall_s": "62.522032"
+          },
+          "b": {
+            "best": "-581.016676259329",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "114.455218"
+          },
+          "core": 4,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2007
+        },
+        {
+          "a": {
+            "best": "-582.038429062341",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "109.900102"
+          },
+          "b": {
+            "best": "-577.110860054841",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "104.585357"
+          },
+          "core": 3,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2008
+        },
+        {
+          "a": {
+            "best": "-582.086642067576",
+            "charged": 1300907,
+            "evals_to_hit": 1300907,
+            "hit": 1,
+            "wall_s": "36.345174"
+          },
+          "b": {
+            "best": "-581.016676259328",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "112.480103"
+          },
+          "core": 2,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2009
+        },
+        {
+          "a": {
+            "best": "-582.038429062340",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "105.286043"
+          },
+          "b": {
+            "best": "-582.086642067579",
+            "charged": 3980589,
+            "evals_to_hit": 3980589,
+            "hit": 1,
+            "wall_s": "101.710512"
+          },
+          "core": 1,
+          "lost_hit": false,
+          "more_evals": false,
+          "order": "AB",
+          "seed": 2010
+        },
+        {
+          "a": {
+            "best": "-582.086642067577",
+            "charged": 416266,
+            "evals_to_hit": 416266,
+            "hit": 1,
+            "wall_s": "10.501005"
+          },
+          "b": {
+            "best": "-578.944798342528",
+            "charged": 4000000,
+            "evals_to_hit": 4000000,
+            "hit": 0,
+            "wall_s": "103.971926"
+          },
+          "core": 0,
+          "lost_hit": true,
+          "more_evals": true,
+          "order": "BA",
+          "seed": 2011
+        }
+      ],
+      "reference": "-582.086642",
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "seeds_where_b_is_worse": [
+        {
+          "best_a": "-582.086642067576",
+          "best_b": "-582.038429062342",
+          "evals_a": 637338,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2005
+        },
+        {
+          "best_a": "-582.086642067577",
+          "best_b": "-582.086642067578",
+          "evals_a": 1870719,
+          "evals_b": 1938362,
+          "lost_hit": false,
+          "more_evals": true,
+          "seed": 2006
+        },
+        {
+          "best_a": "-582.086642067580",
+          "best_b": "-581.016676259329",
+          "evals_a": 2303715,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2007
+        },
+        {
+          "best_a": "-582.086642067576",
+          "best_b": "-581.016676259328",
+          "evals_a": 1300907,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2009
+        },
+        {
+          "best_a": "-582.086642067577",
+          "best_b": "-578.944798342528",
+          "evals_a": 416266,
+          "evals_b": 4000000,
+          "lost_hit": true,
+          "more_evals": true,
+          "seed": 2011
+        }
+      ],
+      "system": "lj104"
+    }
+  ],
+  "verdict": "FAIL"
+}
