@@ -2,15 +2,22 @@
 //! One published dynamic-lattice search at a charged budget.
 //!
 //! Usage:
-//! `lj_dls <n> <budget> <seed> <lowest-index|uniform> <stop> <prefix>`
+//! `lj_dls <n> <budget> <seed> <lowest-index|uniform> <stop> <prefix> [table1.csv]`
+//!
+//! This reproduces the published competitor method; it is not anneal's
+//! search and no preset reaches it. Its size table is experiment input,
+//! read from `table1.csv` (default `experiments/dls_published/table1.csv`
+//! in this tree).
 //!
 //! `stop` is an energy that ends the run, or `-` to spend the budget.
 //! The start is the same sphere draw the head-to-head driver uses.
 //! Each new lowest energy is written to `<prefix>.trace.csv`.
 
+mod dls_published;
+
 use anneal_core::methods::cluster_hopping::{Config, Ledger, random_cluster_in_radius};
-use anneal_core::methods::dls_published::{self, TieCut};
 use anneal_core::methods::lattice_search::Quench;
+use dls_published::{Table1Rows, TieCut};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::fmt::Write as _;
@@ -18,7 +25,10 @@ use std::fmt::Write as _;
 fn main() {
     anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    assert_eq!(args.len(), 6, "see the usage line in the source");
+    assert!(
+        args.len() == 6 || args.len() == 7,
+        "see the usage line in the source"
+    );
     let n: usize = args[0].parse().expect("n");
     let budget: usize = args[1].parse().expect("budget");
     let seed: u64 = args[2].parse().expect("seed");
@@ -33,6 +43,15 @@ fn main() {
         Some(args[4].parse::<f64>().expect("stop"))
     };
     let prefix = &args[5];
+    let table_path = args.get(6).cloned().unwrap_or_else(|| {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/experiments/dls_published/table1.csv"
+        )
+        .to_owned()
+    });
+    let table = Table1Rows::parse(&std::fs::read_to_string(&table_path).expect("table1 file"))
+        .expect("table1 rows");
     let cfg = Config::for_cluster(n);
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
@@ -45,6 +64,7 @@ fn main() {
     let started = std::time::Instant::now();
     let outcome = dls_published::run(
         n,
+        table.row(n),
         &mut ledger,
         &quench,
         start.as_slice().expect("contiguous start"),
