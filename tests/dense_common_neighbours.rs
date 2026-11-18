@@ -9,7 +9,6 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use anneal_core::soap::{SoapSpec, ih_dominated};
 use anneal_core::structure::{TRAIL_BOND_CAP, cna};
 use ndarray::Array1;
 
@@ -48,13 +47,12 @@ fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) 
 }
 
 #[test]
-fn a_compressed_lattice_is_not_icosahedral_and_returns() {
+fn a_compressed_lattice_common_neighbour_analysis_returns() {
     let x = fcc_ball(0.75, 38);
-    let answer = within(30, move || ih_dominated(x.view(), SoapSpec::default()));
-    assert_eq!(
-        answer,
-        Some(false),
-        "ih_dominated did not return a defined answer"
+    let fivefold = within(30, move || cna(x.view(), 38, 1.35).fraction((5, 5, 5)));
+    assert!(
+        fivefold.is_some_and(|fraction| fraction <= 0.12),
+        "compressed fcc was fivefold or common-neighbour analysis did not return: {fivefold:?}"
     );
 }
 

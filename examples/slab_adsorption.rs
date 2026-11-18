@@ -5,7 +5,7 @@
 
 mod common;
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, covalent_radius};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode};
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
@@ -92,13 +92,6 @@ fn main() {
     // added to the move mask; the quench still relaxes free substrate
     // through Mobile.
     cfg.active_region = Some((hop.clone(), 0));
-    if !hop.is_empty() && hop.len() < n {
-        let adsorbate = hop
-            .iter()
-            .map(|&i| covalent_radius(species[i]))
-            .fold(0.0_f64, f64::max);
-        cfg.length_scale = 2.0 * adsorbate;
-    }
     cfg.screen_steps = 10;
     cfg.relax_steps = 150;
     if !free_seeds.is_empty() && free_seeds.len() < n {

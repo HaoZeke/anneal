@@ -349,14 +349,9 @@ fn main() {
     }
 
     if only_ridge {
-        // Directed packing-map walk: 96 covering points on the packing
-        // sphere miss Marks. This arm aims at Marks' mu, then at the
-        // fivefold residual that opened LJ38, then at a covering ridge.
+        // Directed packing-map walk: compare the observed descriptor
+        // direction with the covering-ridge search.
         let mut toward = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut fivefold = Tally {
             best: ico_energy,
             ..Tally::default()
         };
@@ -405,11 +400,6 @@ fn main() {
                 "{{\"kind\":\"leave\",\"generator\":\"toward\",\"index\":0,\"rung\":null,\"refused\":true}}"
             ),
         }
-        for (index, rmsd) in [0.12_f64, 0.35, 0.50].into_iter().enumerate() {
-            let start = anneal_core::soap::step_away_fivefold_measured(ico.view(), rmsd);
-            let trial = quench(&potential, start.view(), steps);
-            classify("fivefold", index, &mut fivefold, &trial, None);
-        }
         for index in 0..leaves {
             let walked = known_basin::leave_packing_ridge(
                 ico.view(),
@@ -435,7 +425,6 @@ fn main() {
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
         report("toward", &toward, known_basin::LEAVE_RUNGS + 1);
-        report("fivefold", &fivefold, 3);
         report("ridge", &cover, leaves);
         return;
     }

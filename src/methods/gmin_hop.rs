@@ -149,8 +149,8 @@ impl Config {
     /// Rigid TIP4P in kJ/mol and angstrom.
     ///
     /// Orientation step 1.4 rad as in the Wales and Hodges runs, with a small
-    /// centre step. The temperature follows GMIN's TIP4P inputs, 2.9 kJ/mol
-    /// below 18 molecules and 2.2 above. Quenches stop at 250 iterations:
+    /// centre step. The temperature is one potential-energy scale at every
+    /// system size. Quenches stop at 250 iterations:
     /// most hops land in a basin the chain rejects, and finishing those
     /// quenches cost more hops than the unfinished ones lose. A chain that
     /// stalls restarts from a fresh random cluster, since at 20 molecules a
@@ -165,7 +165,7 @@ impl Config {
                 surface: 0.15,
                 splice: 0.1,
             },
-            temperature: if n < 18 { 2.9 } else { 2.2 },
+            temperature: 2.2,
             kick: 0.0,
             target_acceptance: 0.5,
             gtol: 1e-3,

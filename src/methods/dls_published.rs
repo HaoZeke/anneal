@@ -5,6 +5,10 @@
 //! doi 10.1002/jcc.20096. The headings and equation numbers below
 //! are those of that paper.
 //!
+//! This is an explicit reproduction API. [`super::cluster_hopping::Config::recommended`]
+//! does not call it; its published size table and named construction are
+//! available only when a caller selects this method directly.
+//!
 //! The outer circulation is the section "Dynamic Lattice Searching
 //! (DLS) Method": a random local minimum, then repeated dynamic-lattice
 //! construction, dynamic-lattice searching, and local minimization.

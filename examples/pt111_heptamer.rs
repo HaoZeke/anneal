@@ -26,7 +26,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "rgsaddle")]
-use anneal_core::methods::cluster_hopping::{Config, Ledger, covalent_radius};
+use anneal_core::methods::cluster_hopping::{Config, Ledger};
 #[cfg(feature = "rgsaddle")]
 use anneal_core::methods::cluster_search::search_from;
 #[cfg(feature = "rgsaddle")]
@@ -467,13 +467,6 @@ fn configure(species: &[u32], island: &[usize], base: &Array1<f64>, arm: &str) -
         Config::recommended_molecular(species.to_vec(), groups, 1.0)
     };
     cfg.active_region = Some((island.to_vec(), 0));
-    if !island.is_empty() {
-        let adsorbate = island
-            .iter()
-            .map(|&i| covalent_radius(species[i]))
-            .fold(0.0_f64, f64::max);
-        cfg.length_scale = 2.0 * adsorbate;
-    }
     cfg.screen_steps = env_usize("SCREEN_STEPS", 10);
     cfg.relax_steps = env_usize("RELAX_STEPS", 150);
     cfg

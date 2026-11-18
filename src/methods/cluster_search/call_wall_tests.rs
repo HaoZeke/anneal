@@ -50,7 +50,7 @@ fn transferred(reach: f64) -> Array1<f64> {
 }
 
 #[test]
-fn a_species_free_search_is_never_walled() {
+fn a_species_free_search_has_no_hidden_call_wall() {
     let cfg = Config::for_cluster(2);
     let wall = CallWall::of(&cfg);
     assert!(matches!(wall, CallWall::Open));
@@ -59,12 +59,12 @@ fn a_species_free_search_is_never_walled() {
 }
 
 #[test]
-fn a_labelled_metal_keeps_the_absolute_floor() {
+fn labels_do_not_create_a_hidden_metal_floor() {
     for species in [vec![29, 29], vec![29, 79], vec![79, 79], vec![78, 29]] {
         let cfg = Config::for_cluster(2).with_species(species.clone(), None);
         let wall = CallWall::of(&cfg);
-        assert!(matches!(wall, CallWall::Absolute), "{species:?}");
-        assert!(wall.refuses(pair(OVERLAP_CALL_LIMIT).view()));
+        assert!(matches!(wall, CallWall::Open), "{species:?}");
+        assert!(!wall.refuses(pair(OVERLAP_CALL_LIMIT).view()));
         assert!(!wall.refuses(pair(OVERLAP_CALL_LIMIT + 1e-9).view()));
         // Bulk copper's nearest neighbour, inside the Cu-Cu covalent sum.
         assert!(!wall.refuses(pair(2.556).view()), "{species:?}");
@@ -83,11 +83,7 @@ fn labelled_metal_dimers_reach_their_gupta_minimum() {
         let (reference, minimum) =
             polish_answer(&gupta, &mut polish, pair(r0).view(), 1e-9, 2_000).expect("a minimum");
         let bond = min_pair_distance(minimum.view());
-        let covalent = crate::methods::cluster_hopping::covalent_radius(species[0])
-            + crate::methods::cluster_hopping::covalent_radius(species[1]);
-        if species == [29, 29] {
-            assert!(bond < covalent, "premise: Cu2 at {bond} inside {covalent}");
-        }
+        assert!(bond > OVERLAP_CALL_LIMIT);
         let cfg = Config::for_cluster(2).with_species(species.clone(), None);
         let mut ledger = Ledger::new(4_000);
         let (out, _) = search(&gupta, &cfg, &mut ledger, 5).expect("finite start");
@@ -105,7 +101,7 @@ fn labelled_metal_dimers_reach_their_gupta_minimum() {
 }
 
 #[test]
-fn a_molecular_library_reads_the_covalent_sums() {
+fn a_molecular_library_keeps_the_objective_floor() {
     let cfg = two_waters(false);
     let wall = CallWall::of(&cfg);
     assert!(matches!(
@@ -115,8 +111,8 @@ fn a_molecular_library_reads_the_covalent_sums() {
             ..
         }
     ));
-    // An O-H contact between rigid waters inside the 0.97 Å sum.
-    assert!(wall.refuses(transferred(0.95).view()));
+    assert!(wall.refuses(transferred(0.85).view()));
+    assert!(!wall.refuses(transferred(0.95).view()));
     assert!(!wall.refuses(transferred(1.30).view()));
 }
 
@@ -133,10 +129,9 @@ fn a_reactive_library_may_form_a_bond_between_groups() {
 
 #[test]
 fn a_non_finite_geometry_is_refused_when_walled() {
-    let labelled = Config::for_cluster(2).with_species(vec![29, 79], None);
     let water = two_waters(false);
     let reactive = two_waters(true);
-    for cfg in [&labelled, &water, &reactive] {
+    for cfg in [&water, &reactive] {
         let wall = CallWall::of(cfg);
         let mut point = if cfg.n_points == 2 {
             pair(2.5)
@@ -216,9 +211,8 @@ proptest! {
         let covalent = CallWall::of(&rigid).refuses(point.view());
         let bonding = CallWall::of(&reactive).refuses(point.view());
 
-        prop_assert_eq!(absolute, min_pair_distance(point.view()) <= OVERLAP_CALL_LIMIT);
-        prop_assert!(!absolute || bonding, "the bond floor is looser than the absolute one");
-        prop_assert!(!bonding || covalent, "a reactive wall refuses more than a rigid one");
+        prop_assert!(!absolute, "opaque labels created a hidden call wall");
+        prop_assert!(!bonding || covalent, "a reactive wall refused more than a rigid one");
 
         let far = &point * stretch;
         for cfg in [&labelled, &rigid, &reactive] {
@@ -273,13 +267,12 @@ fn a_declared_floor_pushes_a_refused_pair_off_itself() {
 }
 
 #[test]
-fn declared_elements_raise_the_floor_to_their_covalent_fraction() {
+fn declared_labels_do_not_raise_the_objective_floor() {
     let mut cfg = Config::for_cluster(2);
     cfg.call_floor = Some(0.9);
     cfg.call_floor_elements = Some(vec![14, 14]);
     let wall = CallWall::of(&cfg);
     let floor = crate::methods::cluster_hopping::element_call_floor(14, 14, 0.9);
-    assert!(wall.refuses(pair(1.2).view()));
     assert!(wall.refuses(pair(floor).view()));
     assert!(!wall.refuses(pair(floor + 1.0e-6).view()));
     assert_eq!(wall.pair_floor(&wall.owners(2), 0, 1), floor);
@@ -335,10 +328,10 @@ fn an_equilibrium_peptide_is_neither_refused_nor_rewritten() {
 }
 
 #[test]
-fn a_compressed_bond_is_restored_to_its_shortest_bond_order() {
+fn a_compressed_bond_is_restored_to_the_objective_floor() {
     let species = [6u32, 8];
     let groups = vec![vec![0usize, 1]];
-    let mut x = pair(0.95);
+    let mut x = pair(0.85);
     assert!(separate_contacts(
         &mut x,
         Some(&groups),

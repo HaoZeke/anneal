@@ -299,45 +299,40 @@ pub fn core_key_nn(x: ArrayView1<f64>, species: &[u32], rule: CoreRule) -> CoreK
     core_key(x, species, contact_cutoff(x), rule)
 }
 
-/// Common-neighbour signature counts of a structure: pairs of contacts whose
-/// common neighbours form a five-ring (555, a local five-fold axis), a
-/// four-chain with two bonds (421, fcc) and with two bonds in a different
-/// arrangement (422, hcp), at the structure's own contact cutoff.
+/// Common-neighbour signature counts of a structure at its own contact cutoff.
+///
+/// The counters are intentionally geometric and unnamed: a ring-like closed
+/// neighbourhood and two open four-neighbour branch topologies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct MotifCounts {
-    /// Contact pairs with five common neighbours bonded in a ring.
-    pub five_fold: usize,
-    /// Contact pairs with four common neighbours and two bonds among them
-    /// that do not share an atom.
-    pub fcc: usize,
-    /// Contact pairs with four common neighbours and two bonds among them
-    /// that share an atom.
-    pub hcp: usize,
+pub struct LocalPairCounts {
+    /// Contact pairs with five common neighbours bonded in one ring.
+    pub ring_like: usize,
+    /// Contact pairs with four common neighbours and two disjoint bonds.
+    pub branch_disjoint: usize,
+    /// Contact pairs with four common neighbours and two bonds sharing an atom.
+    pub branch_shared: usize,
     /// Contact pairs.
     pub contacts: usize,
 }
 
-/// Coarse class of a structure from its five-fold pair density: none (fcc
-/// and hcp packings), sparse (a single five-fold axis, as in a decahedron),
-/// moderate (several local axes, as in the LJ98 tetrahedron) or dense
-/// (icosahedral packing).
+/// Coarse class of a structure from a generic local-descriptor density.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MotifClass {
-    /// No five-fold pairs.
-    None,
-    /// Fewer than [`SPARSE_FIVE_FOLD_PER_ATOM`] five-fold pairs per atom.
+pub enum DescriptorClass {
+    /// Very low local ring-like density.
+    Low,
+    /// Sparse local ring-like density.
     Sparse,
-    /// Fewer than [`DENSE_FIVE_FOLD_PER_ATOM`] five-fold pairs per atom.
+    /// Moderate local ring-like density.
     Moderate,
-    /// Five-fold pairs throughout.
+    /// Dense local ring-like density.
     Dense,
 }
 
-impl MotifClass {
+impl DescriptorClass {
     /// The class as a small integer, for keys.
     pub fn index(self) -> u8 {
         match self {
-            Self::None => 0,
+            Self::Low => 0,
             Self::Sparse => 1,
             Self::Moderate => 2,
             Self::Dense => 3,
@@ -346,10 +341,10 @@ impl MotifClass {
 }
 
 /// Common-neighbour counts of `x` at its contact cutoff.
-pub fn motif_counts(x: ArrayView1<f64>) -> MotifCounts {
+pub fn local_pair_counts(x: ArrayView1<f64>) -> LocalPairCounts {
     let n = x.len() / 3;
     let nb = contact_neighbours(x, n, contact_cutoff(x));
-    let mut counts = MotifCounts::default();
+    let mut counts = LocalPairCounts::default();
     for i in 0..n {
         for &j in &nb[i] {
             if j <= i {
@@ -377,16 +372,16 @@ pub fn motif_counts(x: ArrayView1<f64>) -> MotifCounts {
                         degree[common.iter().position(|&c| c == q).expect("member")] += 1;
                     }
                     if degree.iter().all(|&d| d == 2) {
-                        counts.five_fold += 1;
+                        counts.ring_like += 1;
                     }
                 }
                 (4, 2) => {
                     let (a, b) = (bonds[0], bonds[1]);
                     let shared = a.0 == b.0 || a.0 == b.1 || a.1 == b.0 || a.1 == b.1;
                     if shared {
-                        counts.hcp += 1;
+                        counts.branch_shared += 1;
                     } else {
-                        counts.fcc += 1;
+                        counts.branch_disjoint += 1;
                     }
                 }
                 _ => {}
@@ -396,23 +391,23 @@ pub fn motif_counts(x: ArrayView1<f64>) -> MotifCounts {
     counts
 }
 
-/// Five-fold pairs per atom below which the class is sparse.
-pub const SPARSE_FIVE_FOLD_PER_ATOM: f64 = 0.1;
-/// Five-fold pairs per atom below which the class is moderate.
-pub const DENSE_FIVE_FOLD_PER_ATOM: f64 = 0.25;
+/// Ring-like pairs per atom below which the class is sparse.
+pub const SPARSE_DESCRIPTOR_PER_ATOM: f64 = 0.1;
+/// Ring-like pairs per atom below which the class is moderate.
+pub const DENSE_DESCRIPTOR_PER_ATOM: f64 = 0.25;
 
-/// The coarse five-fold class of `x`.
-pub fn motif_class(x: ArrayView1<f64>) -> MotifClass {
+/// The coarse local-descriptor class of `x`.
+pub fn descriptor_class(x: ArrayView1<f64>) -> DescriptorClass {
     let n = (x.len() / 3).max(1);
-    let density = motif_counts(x).five_fold as f64 / n as f64;
+    let density = local_pair_counts(x).ring_like as f64 / n as f64;
     if density == 0.0 {
-        MotifClass::None
-    } else if density < SPARSE_FIVE_FOLD_PER_ATOM {
-        MotifClass::Sparse
-    } else if density < DENSE_FIVE_FOLD_PER_ATOM {
-        MotifClass::Moderate
+        DescriptorClass::Low
+    } else if density < SPARSE_DESCRIPTOR_PER_ATOM {
+        DescriptorClass::Sparse
+    } else if density < DENSE_DESCRIPTOR_PER_ATOM {
+        DescriptorClass::Moderate
     } else {
-        MotifClass::Dense
+        DescriptorClass::Dense
     }
 }
 
@@ -533,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn motif_counts_separate_the_fixture_packings() {
+    fn descriptor_classes_separate_the_fixture_packings() {
         for name in [
             "lj38_fcc",
             "lj38_ico",
@@ -543,17 +538,35 @@ mod tests {
             "lj104_gm",
         ] {
             let x = fixture(name);
-            let counts = motif_counts(x.view());
-            eprintln!("MOTIF {name}: {counts:?} class {:?}", motif_class(x.view()));
+            let counts = local_pair_counts(x.view());
+            eprintln!(
+                "DESCRIPTOR {name}: {counts:?} class {:?}",
+                descriptor_class(x.view())
+            );
         }
-        assert_eq!(motif_class(fixture("lj38_fcc").view()), MotifClass::None);
-        assert_eq!(motif_class(fixture("lj38_ico").view()), MotifClass::Dense);
-        assert_eq!(motif_class(fixture("lj75_ico").view()), MotifClass::Dense);
         assert_eq!(
-            motif_class(fixture("lj75_marks").view()),
-            MotifClass::Sparse
+            descriptor_class(fixture("lj38_fcc").view()),
+            DescriptorClass::Low
         );
-        assert_eq!(motif_class(fixture("lj104_gm").view()), MotifClass::Sparse);
-        assert_eq!(motif_class(fixture("lj98_gm").view()), MotifClass::Moderate);
+        assert_eq!(
+            descriptor_class(fixture("lj38_ico").view()),
+            DescriptorClass::Dense
+        );
+        assert_eq!(
+            descriptor_class(fixture("lj75_ico").view()),
+            DescriptorClass::Dense
+        );
+        assert_eq!(
+            descriptor_class(fixture("lj75_marks").view()),
+            DescriptorClass::Sparse
+        );
+        assert_eq!(
+            descriptor_class(fixture("lj104_gm").view()),
+            DescriptorClass::Sparse
+        );
+        assert_eq!(
+            descriptor_class(fixture("lj98_gm").view()),
+            DescriptorClass::Moderate
+        );
     }
 }

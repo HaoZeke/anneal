@@ -21,6 +21,7 @@ use crate::methods::cluster_hopping::OVERLAP_CALL_LIMIT;
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::declared_group_lost_a_bond;
 use crate::methods::cluster_hopping::inside_molecular_call_wall;
+#[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
 use crate::methods::cluster_hopping::separate_contacts;
 use crate::methods::cluster_hopping::structure_is_sane;
@@ -430,18 +431,11 @@ where
 /// Which geometries the potential is not asked to evaluate.
 #[derive(Debug, Clone, Copy)]
 enum CallWall<'a> {
-    /// No species. LJ, TIP4P and Gupta stay on the path that never
-    /// consulted a pair distance before the call.
+    /// No objective-specific floor.
     Open,
     /// No species, and the objective declares [`Config::call_floor`],
     /// per pair when [`Config::call_floor_elements`] names the atoms.
     Floor(CallFloor<'a>),
-    /// Labelled atoms with no declared bonds: [`OVERLAP_CALL_LIMIT`].
-    ///
-    /// A metal's nearest neighbour sits inside its covalent sum (Cu–Cu
-    /// 2.55 Å against 2.64 Å), and a binary Lennard-Jones label is not an
-    /// element, so the covalent radii say nothing about these contacts.
-    Absolute,
     /// A molecular library: [`molecular_call_floor`] over the declared groups.
     ///
     /// A reactive library breaks and forms bonds between groups, so every
@@ -470,8 +464,12 @@ impl<'a> CallWall<'a> {
                 reactive: *reactive,
                 bond_tolerance: cfg.bond_tolerance,
             },
-            (Some(_), _) => Self::Absolute,
+            (Some(_), _) => CallFloor::of(cfg).map_or(Self::Open, Self::Floor),
         }
+    }
+
+    fn enforced(&self) -> bool {
+        !matches!(self, Self::Open)
     }
 
     /// Group of each of `n` atoms, `usize::MAX` for an atom in none.
@@ -531,7 +529,6 @@ impl<'a> CallWall<'a> {
             Self::Open => false,
             _ if point.iter().any(|value| !value.is_finite()) => true,
             Self::Floor(floor) => !floor.clears(point),
-            Self::Absolute => min_pair_distance(point) <= OVERLAP_CALL_LIMIT,
             Self::Covalent {
                 species,
                 groups,
@@ -771,11 +768,11 @@ where
         .filter(|z| z.len() == cfg.n_points);
     let mut surfaces = (!cfg.surfaces.is_empty()).then(|| {
         crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed)
-            .with_plain_warmup(cfg.species.is_none())
+            .with_plain_warmup(true)
     });
     let mut anchor: Option<Array1<f64>> = None;
-    let refuse_overlap = cfg.species.is_some();
     let wall = CallWall::of(cfg);
+    let refuse_overlap = wall.enforced();
     let mut failure: Option<FailedPotential> = None;
     use crate::methods::tric_opt::LocalStep;
     let mut tric = match (cfg.local_step, cfg.species.as_ref()) {
@@ -818,7 +815,7 @@ where
                 return (check.energy, x.to_owned());
             }
             let wall = CallWall::of(cfg);
-            let refuse_overlap = cfg.species.is_some();
+            let refuse_overlap = wall.enforced();
             let mut anchor = None;
             let answered = charge_rejecting_repeat_failure(
                 objective,
@@ -1322,11 +1319,9 @@ fn gradient_euclidean_norm(gradient: ArrayView1<f64>) -> f64 {
 
 /// Reoptimize the geometry the hop reports, when a tighter tolerance is set.
 ///
-/// `WATER_POLISH_EXTERNAL=1` leaves this pass to the water driver. That
-/// driver runs it only when the recorded geometry is outside the IRA gate.
-/// Unset, the pass runs only when [`Config::answer_gradient`] is positive
-/// and tighter than the record gate. The default value is zero, so a
-/// default search does not tighten and does not spend extra calls.
+/// The pass runs only when [`Config::answer_gradient`] is positive and tighter
+/// than the record gate. The default value is zero, so a default search does
+/// not tighten and does not spend extra calls.
 fn reoptimize_reported_minimum<O>(
     objective: &O,
     cfg: &Config,
@@ -1336,9 +1331,6 @@ fn reoptimize_reported_minimum<O>(
 ) where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    if std::env::var("WATER_POLISH_EXTERNAL").ok().as_deref() == Some("1") {
-        return;
-    }
     polish_recorded_answer(objective, cfg, ledger, outcome, stats);
 }
 
@@ -3926,6 +3918,7 @@ mod tests {
             [-0.725, 1.256, 0.5],
             [-0.725, -1.256, 0.5],
         ];
+        const HYDROGEN: [f64; 3] = [0.2, 0.74, 0.774_919_350_6];
 
         fn new() -> Self {
             Self {
@@ -3944,7 +3937,7 @@ mod tests {
         fn start() -> Array1<f64> {
             let mut x = vec![0.0; 3];
             x.extend(Self::HALOGENS.iter().flatten());
-            x.extend([0.25, 0.433, -0.97]);
+            x.extend([Self::HYDROGEN[0], Self::HYDROGEN[1], -Self::HYDROGEN[2]]);
             Array1::from_vec(x)
         }
     }
@@ -3988,7 +3981,7 @@ mod tests {
             for (h, at) in Self::HALOGENS.iter().enumerate() {
                 well(h + 1, *at, 5.0, &mut e);
             }
-            well(4, [0.0, 0.0, 1.09], 0.3, &mut e);
+            well(4, Self::HYDROGEN, 0.3, &mut e);
             let bonds = [
                 (1, 0.5, 1.534),
                 (2, 0.5, 1.534),
@@ -4059,10 +4052,10 @@ mod tests {
         let (plain, plain_g) = chain_relax_cost(false);
         let (pre, pre_g) = chain_relax_cost(true);
         assert!(plain_g <= 1e-4 && pre_g <= 1e-4, "{plain_g} {pre_g}");
-        // The molecular call wall and the 64-probe line search close the
-        // gap this chain used to show. Both descents still settle inside
-        // the ledger.
-        assert!(pre < 20_000 && plain < 20_000, "{pre} {plain}");
+        assert!(
+            pre < plain,
+            "{pre} calls with preconditioning, {plain} without"
+        );
     }
 
     #[test]
@@ -4264,6 +4257,7 @@ mod tests {
         };
         let mut cfg = Config::for_cluster(2);
         cfg.species = Some(vec![8, 1]);
+        cfg.call_floor = Some(OVERLAP_CALL_LIMIT);
         cfg.max_hops = Some(0);
         cfg.relax_steps = 8;
         let start = Array1::from_vec(vec![0.0, 0.0, 0.0, OVERLAP_SEPARATION + 1.5e-3, 0.0, 0.0]);
@@ -4282,11 +4276,10 @@ mod tests {
 
     /// An ETKDG start without force-field cleanup held a lorlatinib C–H at
     /// 1.30 of the radii sum. The bond screen called that hydrogen lost,
-    /// refused the caller's start before any call, and every redraw was a
-    /// random cloud: "no finite start after 8 attempts" after the three
-    /// probe calls.
+    /// Opaque labels and observed geometry must not refuse the caller's start
+    /// from an element chart before the potential can quench it.
     #[test]
-    fn a_declared_start_with_a_long_bond_is_quenched() {
+    fn a_declared_start_with_an_observed_long_bond_is_quenched() {
         use eindir_core::gradient::Gradient;
         use eindir_core::{Bounds, Objective};
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -4344,13 +4337,13 @@ mod tests {
         let cfg = Config::recommended_molecular(vec![6, 1, 1], vec![vec![0, 1, 2]], 1.0);
         let start = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, -0.35, 1.355, 0.0]);
         assert!(
-            crate::methods::cluster_hopping::declared_group_lost_a_bond(
+            !crate::methods::cluster_hopping::declared_group_lost_a_bond(
                 start.view(),
                 &[6, 1, 1],
                 Some(&[vec![0, 1, 2]]),
                 cfg.bond_tolerance,
             ),
-            "the start no longer reproduces the refusal"
+            "the observed label-pair scale was replaced by hidden chemistry"
         );
         let mut ledger = Ledger::new(400);
         let (out, _) =
@@ -4444,6 +4437,7 @@ mod tests {
         assert!(min_pair_distance(start.view()) <= OVERLAP_CALL_LIMIT + 0.02);
         let mut cfg = Config::for_cluster(6);
         cfg.species = Some(vec![1; 6]);
+        cfg.call_floor = Some(OVERLAP_CALL_LIMIT);
         cfg.max_hops = Some(0);
         cfg.screen_steps = 5;
         cfg.relax_steps = 80;

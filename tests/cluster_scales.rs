@@ -1,5 +1,5 @@
 use anneal_core::methods::cluster_hopping::{
-    ClusterMove, Config, MoveLibrary, covalent_radius, repack_rigid_groups,
+    ClusterMove, Config, MoveLibrary, repack_rigid_groups,
 };
 use anneal_core::movekernel::MoveKernel;
 use ndarray::Array1;
@@ -33,12 +33,12 @@ fn lj_preset_scales_every_unit_bearing_default() {
 }
 
 #[test]
-fn species_preset_derives_its_length_and_selects_one_library() {
+fn species_preset_uses_the_input_unit_and_selects_one_library() {
     let species: Vec<u32> = (0..6).flat_map(|_| [8, 1, 1]).collect();
     let groups: Vec<Vec<usize>> = (0..6).map(|g| (3 * g..3 * g + 3).collect()).collect();
     let cfg = Config::for_molecular(species.clone(), groups.clone(), 1.0);
 
-    assert!((cfg.length_scale - 2.0 * covalent_radius(8)).abs() < 1e-12);
+    assert_eq!(cfg.length_scale, 1.0);
     assert_eq!(cfg.species.as_deref(), Some(species.as_slice()));
     assert!(matches!(
         cfg.move_library,
@@ -51,14 +51,11 @@ fn species_preset_derives_its_length_and_selects_one_library() {
 }
 
 #[test]
-fn gold_has_cordero_radius_and_molecular_preset_accepts_it() {
-    // Cordero et al., Dalton Trans. 2008, 2832 (doi:10.1039/B801115J).
-    assert!((covalent_radius(79) - 1.36).abs() < 1e-12);
-    assert!((covalent_radius(29) - 1.32).abs() < 1e-12);
+fn molecular_preset_does_not_select_an_element_length_chart() {
     let species = vec![79u32; 4];
     let groups = vec![(0..4).collect()];
     let cfg = Config::for_molecular(species, groups, 1.0);
-    assert!((cfg.length_scale - 2.0 * covalent_radius(79)).abs() < 1e-12);
+    assert_eq!(cfg.length_scale, 1.0);
 }
 
 #[test]

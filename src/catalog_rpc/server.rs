@@ -3650,30 +3650,6 @@ fn exact_basin_for(
     scientific: &ScientificState,
     validated: &ValidatedCandidate,
 ) -> Option<BasinId> {
-    let query = scientific
-        .packing
-        .histogram(&validated.candidate.coordinates);
-    if let Some(query) = query.as_ref() {
-        if let Some(basin) = basin_for_packing_community(scientific, query) {
-            return Some(basin);
-        }
-        if scientific.packing.occupied_packing_count() <= 1 {
-            if let Some((&basin, _)) = scientific.ride_candidates.iter().next() {
-                return Some(BasinId::from_raw(basin));
-            }
-            if let Some(basin) = scientific.last_basin_by_replica.values().next() {
-                return Some(*basin);
-            }
-        }
-        for (&basin, stored) in &scientific.ride_candidates {
-            let Some(stored) = scientific.packing.histogram(&stored.coordinates) else {
-                continue;
-            };
-            if same_packing(&stored, query) {
-                return Some(BasinId::from_raw(basin));
-            }
-        }
-    }
     let mut representatives = scientific
         .ride_candidates
         .iter()
@@ -3737,58 +3713,6 @@ fn query_basin_for_descriptor(
         .map(|(&basin, _)| BasinId::from_raw(basin));
     let basin = matches.next()?;
     matches.next().is_none().then_some(basin)
-}
-
-/// Census basin of a structure that already sits in an occupied packing.
-///
-/// Cell grain (`same_packing`) splits the LJ75 icosahedral shelf into
-/// tens of wells. IRA then compares the new isomer to every stored
-/// minimum. Packing community is the identity the hop path may reuse;
-/// IRA remains the witness only when the book has no community for the
-/// query.
-fn basin_for_packing_community(scientific: &ScientificState, query: &[f64]) -> Option<BasinId> {
-    let same: BTreeSet<usize> = scientific
-        .packing
-        .families_sharing_community(query)
-        .into_iter()
-        .collect();
-    if same.is_empty() {
-        return None;
-    }
-    for (replica, history) in &scientific.family_history {
-        if history
-            .back()
-            .is_some_and(|cell| same.contains(&(*cell as usize)))
-            && let Some(basin) = scientific.last_basin_by_replica.get(replica)
-        {
-            return Some(*basin);
-        }
-    }
-    for (replica, candidate) in &scientific.last_candidate_by_replica {
-        let Some(histogram) = scientific.packing.histogram(&candidate.coordinates) else {
-            continue;
-        };
-        let Some(family) = scientific.packing.family_of(&histogram) else {
-            continue;
-        };
-        if same.contains(&family)
-            && let Some(basin) = scientific.last_basin_by_replica.get(replica)
-        {
-            return Some(*basin);
-        }
-    }
-    for (&basin, stored) in &scientific.ride_candidates {
-        let Some(histogram) = scientific.packing.histogram(&stored.coordinates) else {
-            continue;
-        };
-        let Some(family) = scientific.packing.family_of(&histogram) else {
-            continue;
-        };
-        if same.contains(&family) {
-            return Some(BasinId::from_raw(basin));
-        }
-    }
-    None
 }
 
 fn candidate_from_validated(

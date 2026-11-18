@@ -244,46 +244,21 @@ struct Neigh {
     u: [f64; 3],
 }
 
-fn covalent_r(z: u32) -> f64 {
-    match z {
-        1 => 0.31,
-        6 => 0.76,
-        7 => 0.71,
-        8 => 0.66,
-        16 => 1.05,
-        29 => 1.32,
-        _ => 0.0,
-    }
-}
-
-fn is_bonded(species: Option<&[u32]>, i: usize, j: usize, r: f64) -> bool {
-    let Some(z) = species else {
-        return false;
-    };
-    let ri = covalent_r(z.get(i).copied().unwrap_or(0));
-    let rj = covalent_r(z.get(j).copied().unwrap_or(0));
-    if ri <= 0.0 || rj <= 0.0 {
-        return false;
-    }
-    r < 1.3 * (ri + rj)
-}
-
 fn gather_neigh(
     x: ArrayView1<f64>,
     i: usize,
     n_at: usize,
     rcut: f64,
-    species: Option<&[u32]>,
+    _species: Option<&[u32]>,
 ) -> Vec<Neigh> {
     let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
-    gather_neigh_from_table(x, i, rcut, species, &table)
+    gather_neigh_from_table(x, i, rcut, &table)
 }
 
 fn gather_neigh_from_table(
     x: ArrayView1<f64>,
     i: usize,
     rcut: f64,
-    species: Option<&[u32]>,
     table: &crate::neighbors::NeighborTable,
 ) -> Vec<Neigh> {
     let mut neigh = Vec::new();
@@ -292,9 +267,6 @@ fn gather_neigh_from_table(
         let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
         let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         if r >= rcut || r < 1e-12 {
-            continue;
-        }
-        if is_bonded(species, i, j, r) {
             continue;
         }
         neigh.push(Neigh {
@@ -1204,15 +1176,12 @@ pub fn packing_mean_nu3(
 /// that defect: centres unlike the occupied packing.
 pub const ACTIVE_VOLUME_MASS: f64 = 0.80;
 
-/// Smallest active volume, in atoms.
-pub const ACTIVE_VOLUME_MIN: usize = 8;
-
 /// Atoms that carry the packing leftover: the SEAKMC active volume.
 ///
 /// Ranked by per-centre \(\|h_i-\mu\|\). The volume is the smallest
-/// prefix that holds [`ACTIVE_VOLUME_MASS`] of that leftover, at least
-/// [`ACTIVE_VOLUME_MIN`] and at most half the cluster. Outside it the
-/// packing increment is frozen. Béland, Osetsky, Stoller and Xu
+/// prefix that holds [`ACTIVE_VOLUME_MASS`] of that leftover, capped at half
+/// the cluster. Outside it the packing increment is frozen. Béland, Osetsky,
+/// Stoller and Xu
 /// (arXiv:1409.1253) launch several searches in that volume and flush
 /// the catalog after one event; occupancy is not kMC, so the extra
 /// starts of one Leave are discarded after the adopt.
@@ -1248,335 +1217,346 @@ pub fn packing_active_volume(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     if !(total.is_finite() && total > 0.0) {
-        return order
-            .into_iter()
-            .take(n_at.min(ACTIVE_VOLUME_MIN.max(1)))
-            .collect();
+        return order.into_iter().take(1).collect();
     }
     let cap = n_at.max(1) / 2;
-    let floor = ACTIVE_VOLUME_MIN.min(n_at);
-    let mut kept = Vec::with_capacity(floor);
+    let mut kept = Vec::new();
     let mut mass = 0.0;
     for i in order {
         kept.push(i);
         mass += weight[i];
-        if kept.len() >= floor && (mass >= ACTIVE_VOLUME_MASS * total || kept.len() >= cap) {
+        if mass >= ACTIVE_VOLUME_MASS * total || kept.len() >= cap {
             break;
         }
     }
     kept
 }
 
-fn soap_dist2(a: ArrayView1<f64>, b: &[f64]) -> f64 {
-    let mut s = 0.0;
-    for t in 0..a.len() {
-        let d = a[t] - b[t];
-        s += d * d;
-    }
-    s
-}
+#[allow(dead_code)]
+#[cfg(test)]
+mod class_test_helpers {
+    use super::*;
 
-fn mu_weighted(loc: &Array2<f64>, w: &[f64], dim: usize) -> (Vec<f64>, f64) {
-    let n_at = loc.nrows();
-    let mut mass = 0.0;
-    let mut mu = vec![0.0; dim];
-    for i in 0..n_at {
-        if w[i] <= 0.0 {
-            continue;
+    fn soap_dist2(a: ArrayView1<f64>, b: &[f64]) -> f64 {
+        let mut s = 0.0;
+        for t in 0..a.len() {
+            let d = a[t] - b[t];
+            s += d * d;
         }
-        mass += w[i];
-        for t in 0..dim {
-            mu[t] += w[i] * loc[[i, t]];
-        }
+        s
     }
-    if mass > 1e-12 {
-        for t in 0..dim {
-            mu[t] /= mass;
-        }
-    }
-    (mu, mass)
-}
 
-fn target_421(x: ArrayView1<f64>, loc: &Array2<f64>, _w555: &[f64], spec: SoapSpec) -> Array1<f64> {
-    let n_at = loc.nrows();
-    let dim = spec.dim();
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
-    let mut w421 = vec![0.0; n_at];
-    for i in 0..n_at {
-        w421[i] = fr[i][1];
-    }
-    let (mu421, mass421) = mu_weighted(loc, &w421, dim);
-    if mass421 > 1e-12 {
-        Array1::from(mu421)
-    } else {
-        prototype_spectrum(1, spec)
-    }
-}
-
-/// RMS of 555-class SOAP from that class's own mean. Near zero on Mackay ico.
-pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
-    let loc = local_spectra(x, spec);
-    let n_at = loc.nrows();
-    let dim = spec.dim();
-    if n_at == 0 || dim == 0 {
-        return 0.0;
-    }
-    let w = atom_w555(x, spec);
-    let (mu, mass) = mu_weighted(&loc, &w, dim);
-    if mass < 1e-12 {
-        return 0.0;
-    }
-    let mut s = 0.0;
-    for i in 0..n_at {
-        if w[i] <= 0.0 {
-            continue;
-        }
-        s += w[i] * soap_dist2(loc.row(i), &mu);
-    }
-    (s / mass).sqrt()
-}
-
-/// SOAP of the centre atom of an ideal neighbourhood template.
-///
-/// 0 = icosahedral (555), 1 = fcc cuboctahedron (421), 2 = hcp (422).
-/// Classifier / diagnostic only. Feeding this into a hop target is an
-/// oracle: the search then presupposes a packing it has not observed.
-pub fn prototype_spectrum(kind: usize, spec: SoapSpec) -> Array1<f64> {
-    let pts = match kind {
-        1 => crate::structure::Template::FaceCentredCubic.points(),
-        2 => crate::structure::Template::HexagonalClosePacked.points(),
-        _ => crate::structure::Template::Icosahedral.points(),
-    };
-    let n = 1 + pts.len();
-    let mut x = Array1::zeros(3 * n);
-    for (i, p) in pts.iter().enumerate() {
-        x[3 * (i + 1)] = p[0];
-        x[3 * (i + 1) + 1] = p[1];
-        x[3 * (i + 1) + 2] = p[2];
-    }
-    let loc = local_spectra(x.view(), spec);
-    loc.row(0).to_owned()
-}
-
-fn class_softmax(phi: ArrayView1<f64>, proto: &[Array1<f64>; 3], tau: f64) -> [f64; 3] {
-    let dim = phi.len();
-    let mut d2 = [0.0; 3];
-    for a in 0..3 {
-        for t in 0..dim {
-            let d = phi[t] - proto[a][t];
-            d2[a] += d * d;
-        }
-    }
-    let mut lo = d2[0];
-    for a in 1..3 {
-        if d2[a] < lo {
-            lo = d2[a];
-        }
-    }
-    let mut m = [0.0; 3];
-    let mut z = 0.0;
-    for a in 0..3 {
-        m[a] = libm::exp(-(d2[a] - lo) / tau);
-        z += m[a];
-    }
-    let z = z.max(1e-300);
-    [m[0] / z, m[1] / z, m[2] / z]
-}
-
-fn prototype_tau(proto: &[Array1<f64>; 3]) -> f64 {
-    let dim = proto[0].len();
-    let mut sep = 0.0;
-    for t in 0..dim {
-        let d = proto[0][t] - proto[1][t];
-        sep += d * d;
-    }
-    (0.15 * sep).max(1e-12)
-}
-
-fn atom_w555(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<f64> {
-    let n_at = x.len() / 3;
-    let loc = local_spectra(x, spec);
-    let dim = spec.dim();
-    let mut w = vec![0.0; n_at];
-    if n_at == 0 || dim == 0 {
-        return w;
-    }
-    let proto = [
-        prototype_spectrum(0, spec),
-        prototype_spectrum(1, spec),
-        prototype_spectrum(2, spec),
-    ];
-    let tau = prototype_tau(&proto);
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
-    for i in 0..n_at {
-        // Hard 555 membership. Soft SOAP weights leak surface atoms into
-        // the ico class and the same-class mean no longer vanishes.
-        if fr[i][0] > 0.8 {
-            w[i] = 1.0;
-        } else {
-            let soap_w = class_softmax(loc.row(i), &proto, tau);
-            w[i] = if soap_w[0] > 0.85 { soap_w[0] } else { 0.0 };
-        }
-    }
-    w
-}
-
-/// Soft class masses `(m_555, m_421, m_422)`.
-pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
-    let n_at = x.len() / 3;
-    if n_at == 0 {
-        return [0.0; 3];
-    }
-    let w555 = atom_w555(x, spec);
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
-    let mut mass = [0.0; 3];
-    for i in 0..n_at {
-        mass[0] += w555[i];
-        mass[1] += fr[i][1];
-        mass[2] += fr[i][2];
-    }
-    mass
-}
-
-/// True when the contact graph carries a substantial 555 (icosahedral) fraction.
-///
-/// Observation, not a hop target. Used to *withhold* Ih-preserving
-/// symmetrise. Does not name a destination packing. The bond cutoff is
-/// [`contact_cutoff`], so `spec` has to be written at the structure's length.
-pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
-    let n = x.len() / 3;
-    if n == 0 {
-        return false;
-    }
-    let (f555, _, _) = crate::structure::named_triplet_fractions(x, n, contact_cutoff(spec));
-    f555 > 0.12
-}
-
-/// A fivefold plateau: icosahedral `555` or decahedral `422`, and not fcc `421`.
-///
-/// The bond cutoff is the Lennard-Jones value when the nearest neighbour is
-/// on that scale, and 1.2 times the nearest neighbour otherwise.
-pub fn fivefold_plateau(x: ArrayView1<f64>) -> bool {
-    let n = x.len() / 3;
-    if n < 7 {
-        return false;
-    }
-    let (f555, f421, f422) = crate::structure::named_triplet_fractions(x, n, bond_cutoff(x));
-    let five = f555 + f422;
-    five > 0.15 && f421 < 0.20
-}
-
-/// True when the nearest neighbour is far outside the Lennard-Jones scale.
-///
-/// An unlabelled reduced-unit cluster stays at cutoff 1.35, so this is false
-/// there and the caller does not take the labelled reseed.
-pub fn extended_scale(x: ArrayView1<f64>) -> bool {
-    bond_cutoff(x) > 1.35 + 1e-9
-}
-
-/// Fractions of icosahedral `555`, close-packed `421` and decahedral `422`.
-///
-/// Read when a labelled search has already stalled. Not called on the
-/// unlabelled hop, so a Lennard-Jones chain does not pay for it.
-pub fn motif_fractions(x: ArrayView1<f64>) -> (f64, f64, f64) {
-    let n = x.len() / 3;
-    if n < 2 {
-        return (0.0, 0.0, 0.0);
-    }
-    crate::structure::named_triplet_fractions(x, n, bond_cutoff(x))
-}
-
-fn bond_cutoff(x: ArrayView1<f64>) -> f64 {
-    let n = x.len() / 3;
-    if n < 2 {
-        return 1.35;
-    }
-    let mut nearest = Vec::with_capacity(n);
-    for i in 0..n {
-        let mut best = f64::MAX;
-        for j in 0..n {
-            if i == j {
+    fn mu_weighted(loc: &Array2<f64>, w: &[f64], dim: usize) -> (Vec<f64>, f64) {
+        let n_at = loc.nrows();
+        let mut mass = 0.0;
+        let mut mu = vec![0.0; dim];
+        for i in 0..n_at {
+            if w[i] <= 0.0 {
                 continue;
             }
-            let mut d = 0.0;
-            for k in 0..3 {
-                let delta = x[3 * i + k] - x[3 * j + k];
-                d += delta * delta;
+            mass += w[i];
+            for t in 0..dim {
+                mu[t] += w[i] * loc[[i, t]];
             }
-            best = best.min(d);
         }
-        nearest.push(best.sqrt());
+        if mass > 1e-12 {
+            for t in 0..dim {
+                mu[t] /= mass;
+            }
+        }
+        (mu, mass)
     }
-    nearest.sort_by(|a, b| a.total_cmp(b));
-    let nn = nearest[n / 2];
-    if !(nn.is_finite()) || nn < 2.0 {
-        1.35
-    } else {
-        1.20 * nn
-    }
-}
 
-/// Oracle target: 555 atoms toward 421 (occupied mean, else fcc prototype).
-///
-/// Invents a close-packed class when the observed cloud has none. Same
-/// class as a template reseed. Not the recommended hop.
-pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
-    let loc = local_spectra(x, spec);
-    let n_at = loc.nrows();
-    let dim = spec.dim();
-    let mut target = Array1::zeros(n_at * dim);
-    if n_at == 0 || dim == 0 {
-        return target;
+    fn target_421(
+        x: ArrayView1<f64>,
+        loc: &Array2<f64>,
+        _w555: &[f64],
+        spec: SoapSpec,
+    ) -> Array1<f64> {
+        let n_at = loc.nrows();
+        let dim = spec.dim();
+        let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
+        let mut w421 = vec![0.0; n_at];
+        for i in 0..n_at {
+            w421[i] = fr[i][1];
+        }
+        let (mu421, mass421) = mu_weighted(loc, &w421, dim);
+        if mass421 > 1e-12 {
+            Array1::from(mu421)
+        } else {
+            prototype_spectrum(1, spec)
+        }
     }
-    let w555 = atom_w555(x, spec);
-    let t421 = target_421(x, &loc, &w555, spec);
-    let mut w_other = vec![0.0; n_at];
-    for i in 0..n_at {
-        w_other[i] = (1.0 - w555[i].clamp(0.0, 1.0)).max(0.0);
+
+    /// RMS of 555-class SOAP from that class's own mean. Near zero on Mackay ico.
+    pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
+        let loc = local_spectra(x, spec);
+        let n_at = loc.nrows();
+        let dim = spec.dim();
+        if n_at == 0 || dim == 0 {
+            return 0.0;
+        }
+        let w = atom_w555(x, spec);
+        let (mu, mass) = mu_weighted(&loc, &w, dim);
+        if mass < 1e-12 {
+            return 0.0;
+        }
+        let mut s = 0.0;
+        for i in 0..n_at {
+            if w[i] <= 0.0 {
+                continue;
+            }
+            s += w[i] * soap_dist2(loc.row(i), &mu);
+        }
+        (s / mass).sqrt()
     }
-    let (mu_other, mass_other) = mu_weighted(&loc, &w_other, dim);
-    for i in 0..n_at {
-        let w = w555[i].clamp(0.0, 1.0);
+
+    /// SOAP of the centre atom of an ideal neighbourhood template.
+    ///
+    /// 0 = icosahedral (555), 1 = fcc cuboctahedron (421), 2 = hcp (422).
+    /// Classifier / diagnostic only. Feeding this into a hop target is an
+    /// oracle: the search then presupposes a packing it has not observed.
+    pub fn prototype_spectrum(kind: usize, spec: SoapSpec) -> Array1<f64> {
+        let pts = match kind {
+            1 => crate::structure::Template::FaceCentredCubic.points(),
+            2 => crate::structure::Template::HexagonalClosePacked.points(),
+            _ => crate::structure::Template::Icosahedral.points(),
+        };
+        let n = 1 + pts.len();
+        let mut x = Array1::zeros(3 * n);
+        for (i, p) in pts.iter().enumerate() {
+            x[3 * (i + 1)] = p[0];
+            x[3 * (i + 1) + 1] = p[1];
+            x[3 * (i + 1) + 2] = p[2];
+        }
+        let loc = local_spectra(x.view(), spec);
+        loc.row(0).to_owned()
+    }
+
+    fn class_softmax(phi: ArrayView1<f64>, proto: &[Array1<f64>; 3], tau: f64) -> [f64; 3] {
+        let dim = phi.len();
+        let mut d2 = [0.0; 3];
+        for a in 0..3 {
+            for t in 0..dim {
+                let d = phi[t] - proto[a][t];
+                d2[a] += d * d;
+            }
+        }
+        let mut lo = d2[0];
+        for a in 1..3 {
+            if d2[a] < lo {
+                lo = d2[a];
+            }
+        }
+        let mut m = [0.0; 3];
+        let mut z = 0.0;
+        for a in 0..3 {
+            m[a] = libm::exp(-(d2[a] - lo) / tau);
+            z += m[a];
+        }
+        let z = z.max(1e-300);
+        [m[0] / z, m[1] / z, m[2] / z]
+    }
+
+    fn prototype_tau(proto: &[Array1<f64>; 3]) -> f64 {
+        let dim = proto[0].len();
+        let mut sep = 0.0;
         for t in 0..dim {
-            let other_tgt = if mass_other > 1e-12 {
-                2.0 * loc[[i, t]] - mu_other[t]
+            let d = proto[0][t] - proto[1][t];
+            sep += d * d;
+        }
+        (0.15 * sep).max(1e-12)
+    }
+
+    fn atom_w555(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<f64> {
+        let n_at = x.len() / 3;
+        let loc = local_spectra(x, spec);
+        let dim = spec.dim();
+        let mut w = vec![0.0; n_at];
+        if n_at == 0 || dim == 0 {
+            return w;
+        }
+        let proto = [
+            prototype_spectrum(0, spec),
+            prototype_spectrum(1, spec),
+            prototype_spectrum(2, spec),
+        ];
+        let tau = prototype_tau(&proto);
+        let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
+        for i in 0..n_at {
+            // Hard 555 membership. Soft SOAP weights leak surface atoms into
+            // the ico class and the same-class mean no longer vanishes.
+            if fr[i][0] > 0.8 {
+                w[i] = 1.0;
             } else {
-                loc[[i, t]]
-            };
-            target[i * dim + t] = (1.0 - w) * other_tgt + w * t421[t];
+                let soap_w = class_softmax(loc.row(i), &proto, tau);
+                w[i] = if soap_w[0] > 0.85 { soap_w[0] } else { 0.0 };
+            }
+        }
+        w
+    }
+
+    /// Soft class masses `(m_555, m_421, m_422)`.
+    pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
+        let n_at = x.len() / 3;
+        if n_at == 0 {
+            return [0.0; 3];
+        }
+        let w555 = atom_w555(x, spec);
+        let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
+        let mut mass = [0.0; 3];
+        for i in 0..n_at {
+            mass[0] += w555[i];
+            mass[1] += fr[i][1];
+            mass[2] += fr[i][2];
+        }
+        mass
+    }
+
+    /// True when the contact graph carries a substantial 555 (icosahedral) fraction.
+    ///
+    /// Observation, not a hop target. Used to *withhold* Ih-preserving
+    /// symmetrise. Does not name a destination packing. The bond cutoff is
+    /// [`contact_cutoff`], so `spec` has to be written at the structure's length.
+    pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
+        let n = x.len() / 3;
+        if n == 0 {
+            return false;
+        }
+        let (f555, _, _) = crate::structure::named_triplet_fractions(x, n, contact_cutoff(spec));
+        f555 > 0.12
+    }
+
+    /// A fivefold plateau: icosahedral `555` or decahedral `422`, and not fcc `421`.
+    ///
+    /// The bond cutoff is the Lennard-Jones value when the nearest neighbour is
+    /// on that scale, and 1.2 times the nearest neighbour otherwise.
+    pub fn fivefold_plateau(x: ArrayView1<f64>) -> bool {
+        let n = x.len() / 3;
+        if n < 7 {
+            return false;
+        }
+        let (f555, f421, f422) = crate::structure::named_triplet_fractions(x, n, bond_cutoff(x));
+        let five = f555 + f422;
+        five > 0.15 && f421 < 0.20
+    }
+
+    /// True when the nearest neighbour is far outside the Lennard-Jones scale.
+    ///
+    /// An unlabelled reduced-unit cluster stays at cutoff 1.35, so this is false
+    /// there and the caller does not take the labelled reseed.
+    pub fn extended_scale(x: ArrayView1<f64>) -> bool {
+        bond_cutoff(x) > 1.35 + 1e-9
+    }
+
+    /// Fractions of icosahedral `555`, close-packed `421` and decahedral `422`.
+    ///
+    /// Read when a labelled search has already stalled. Not called on the
+    /// unlabelled hop, so a Lennard-Jones chain does not pay for it.
+    pub fn motif_fractions(x: ArrayView1<f64>) -> (f64, f64, f64) {
+        let n = x.len() / 3;
+        if n < 2 {
+            return (0.0, 0.0, 0.0);
+        }
+        crate::structure::named_triplet_fractions(x, n, bond_cutoff(x))
+    }
+
+    fn bond_cutoff(x: ArrayView1<f64>) -> f64 {
+        let n = x.len() / 3;
+        if n < 2 {
+            return 1.35;
+        }
+        let mut nearest = Vec::with_capacity(n);
+        for i in 0..n {
+            let mut best = f64::MAX;
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                let mut d = 0.0;
+                for k in 0..3 {
+                    let delta = x[3 * i + k] - x[3 * j + k];
+                    d += delta * delta;
+                }
+                best = best.min(d);
+            }
+            nearest.push(best.sqrt());
+        }
+        nearest.sort_by(|a, b| a.total_cmp(b));
+        let nn = nearest[n / 2];
+        if !(nn.is_finite()) || nn < 2.0 {
+            1.35
+        } else {
+            1.20 * nn
         }
     }
-    target
-}
 
-/// RMS of 555-class SOAP toward the 421 target. O(1) on a Mackay ico.
-pub fn class_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
-    let loc = local_spectra(x, spec);
-    let n_at = loc.nrows();
-    let dim = spec.dim();
-    if n_at == 0 || dim == 0 {
-        return 0.0;
-    }
-    let w = atom_w555(x, spec);
-    let (mass, _) = {
-        let m: f64 = w.iter().sum();
-        (m, ())
-    };
-    if mass < 1e-12 {
-        return 0.0;
-    }
-    let t421 = target_421(x, &loc, &w, spec);
-    let t421v: Vec<f64> = t421.to_vec();
-    let mut s = 0.0;
-    for i in 0..n_at {
-        if w[i] <= 0.0 {
-            continue;
+    /// Oracle target: 555 atoms toward 421 (occupied mean, else fcc prototype).
+    ///
+    /// Invents a close-packed class when the observed cloud has none. Same
+    /// class as a template reseed. Not the recommended hop.
+    pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
+        let loc = local_spectra(x, spec);
+        let n_at = loc.nrows();
+        let dim = spec.dim();
+        let mut target = Array1::zeros(n_at * dim);
+        if n_at == 0 || dim == 0 {
+            return target;
         }
-        s += w[i] * soap_dist2(loc.row(i), &t421v);
+        let w555 = atom_w555(x, spec);
+        let t421 = target_421(x, &loc, &w555, spec);
+        let mut w_other = vec![0.0; n_at];
+        for i in 0..n_at {
+            w_other[i] = (1.0 - w555[i].clamp(0.0, 1.0)).max(0.0);
+        }
+        let (mu_other, mass_other) = mu_weighted(&loc, &w_other, dim);
+        for i in 0..n_at {
+            let w = w555[i].clamp(0.0, 1.0);
+            for t in 0..dim {
+                let other_tgt = if mass_other > 1e-12 {
+                    2.0 * loc[[i, t]] - mu_other[t]
+                } else {
+                    loc[[i, t]]
+                };
+                target[i * dim + t] = (1.0 - w) * other_tgt + w * t421[t];
+            }
+        }
+        target
     }
-    (s / mass).sqrt()
+
+    /// RMS of 555-class SOAP toward the 421 target. O(1) on a Mackay ico.
+    pub fn class_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
+        let loc = local_spectra(x, spec);
+        let n_at = loc.nrows();
+        let dim = spec.dim();
+        if n_at == 0 || dim == 0 {
+            return 0.0;
+        }
+        let w = atom_w555(x, spec);
+        let (mass, _) = {
+            let m: f64 = w.iter().sum();
+            (m, ())
+        };
+        if mass < 1e-12 {
+            return 0.0;
+        }
+        let t421 = target_421(x, &loc, &w, spec);
+        let t421v: Vec<f64> = t421.to_vec();
+        let mut s = 0.0;
+        for i in 0..n_at {
+            if w[i] <= 0.0 {
+                continue;
+            }
+            s += w[i] * soap_dist2(loc.row(i), &t421v);
+        }
+        (s / mass).sqrt()
+    }
 }
 
+#[cfg(test)]
+use class_test_helpers::*;
+
+#[cfg(test)]
 fn apply_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f64> {
     let n = (x.len() / 3).max(1) as f64;
     let cap = rmsd.max(1e-6);
@@ -1601,6 +1581,8 @@ fn scale_to_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f6
 }
 
 /// Scale so the RMS over atoms that actually move equals `rmsd`.
+#[cfg(test)]
+#[allow(dead_code)]
 fn scale_support_to_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f64> {
     let n = dr.len() / 3;
     let mut moved = 0.0;
@@ -1631,20 +1613,28 @@ fn scale_support_to_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> A
 #[cfg_attr(feature = "featomic", allow(dead_code))]
 const NU3_DEFECT: f64 = 0.05;
 
-/// Oracle residual: 555 toward 421 / fcc prototype, pulled back by analytic `J`.
-///
-/// Opt-in measurement (`soap_class_residual`). The recommended hop is
-/// [`step_away_mean`].
-pub fn step_away<R: Rng + ?Sized>(
-    x: ArrayView1<f64>,
-    _observed: &[Array1<f64>],
-    spec: SoapSpec,
-    rmsd: f64,
-    _rng: &mut R,
-) -> Array1<f64> {
-    let target = class_target(x, spec);
-    apply_cap(x, pullback(x, target.view(), spec), rmsd)
+#[cfg(test)]
+mod class_step_test_helper {
+    use super::*;
+
+    /// Oracle residual: 555 toward 421 / fcc prototype, pulled back by analytic `J`.
+    ///
+    /// Opt-in measurement (`soap_class_residual`). The recommended hop is
+    /// [`step_away_mean`].
+    pub fn step_away<R: Rng + ?Sized>(
+        x: ArrayView1<f64>,
+        _observed: &[Array1<f64>],
+        spec: SoapSpec,
+        rmsd: f64,
+        _rng: &mut R,
+    ) -> Array1<f64> {
+        let target = class_target(x, spec);
+        apply_cap(x, pullback(x, target.view(), spec), rmsd)
+    }
 }
+
+#[cfg(test)]
+use class_step_test_helper::*;
 
 /// Observed-cloud residual on the stacked SOAP+4-body cloud.
 ///
@@ -1658,1020 +1648,1043 @@ pub fn step_away_mean<R: Rng + ?Sized>(
     step_away_cloud(x, spec, rmsd, None, None, None, _rng)
 }
 
-/// Observed-cloud residual, partitioned by observed atomic number and
-/// restricted to the mobile set. Frozen atoms are neighbours, not movers.
-///
-/// Length above which one candidate axis is not a fivefold axis.
-///
-/// A quenched LJ75 Mackay competitor has best-axis length 1.24 (core
-/// versus an incomplete shell). A cuboctahedron about an icosahedral
-/// axis sits above this. The hop fires when at least
-/// `FIVEFOLD_MIN_AXES` axes clear the cut, so a single D5h axis
-/// does not keep the arm live.
-const FIVEFOLD_AXIS: f64 = 1.40;
+#[allow(dead_code)]
+#[cfg(test)]
+mod symmetry_test_helpers {
+    use super::*;
 
-/// Yield threshold of the measured LJ packing hop.
-///
-/// The 58/72 LJ38 campaign fires the SOFI C5 residual on the best
-/// axis while that length is at most this gate, and yields only when
-/// the structure is already off the fivefold funnel.
-const FIVEFOLD_GATE: f64 = 1.15;
+    /// Observed-cloud residual, partitioned by observed atomic number and
+    /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
+    ///
+    /// Length above which one candidate axis is not a fivefold axis.
+    ///
+    /// A quenched LJ75 Mackay competitor has best-axis length 1.24 (core
+    /// versus an incomplete shell). A cuboctahedron about an icosahedral
+    /// axis sits above this. The hop fires when at least
+    /// `FIVEFOLD_MIN_AXES` axes clear the cut, so a single D5h axis
+    /// does not keep the arm live.
+    pub(super) const FIVEFOLD_AXIS: f64 = 1.40;
 
-/// How many distinct fivefold axes count as the icosahedral funnel.
-///
-/// Ih has six. Marks D5h has one. Cuboctahedral packing has none.
-const FIVEFOLD_MIN_AXES: usize = 2;
+    /// Yield threshold of the measured LJ packing hop.
+    ///
+    /// The 58/72 LJ38 campaign fires the SOFI C5 residual on the best
+    /// axis while that length is at most this gate, and yields only when
+    /// the structure is already off the fivefold funnel.
+    const FIVEFOLD_GATE: f64 = 1.15;
 
-/// Pentagon support amplitude on an open Mackay shell.
-///
-/// A 0.35 cap on the five high-residual atoms snaps back into the
-/// LJ75 ico basin. 0.75 on reconstructable axes quenches off the
-/// shelf at ΔE = +0.095 and +1.07, which a T = 0.8 Metropolis chain
-/// can accept.
-const PENTAGON_CAP: f64 = 0.75;
+    /// How many distinct fivefold axes count as the icosahedral funnel.
+    ///
+    /// Ih has six. Marks D5h has one. Cuboctahedral packing has none.
+    const FIVEFOLD_MIN_AXES: usize = 2;
 
-/// C5 lengths of pentagons that reconstruct rather than snap back.
-///
-/// Measured on the quenched LJ75 ico competitor: the tightest axes
-/// (d5 < 0.89) are in-basin, the window [0.89, 1.00] contains the
-/// two openings that land at −396.187 and −395.211.
-const RECON_LO: f64 = 0.89;
-const RECON_HI: f64 = 1.00;
+    /// Pentagon support amplitude on an open Mackay shell.
+    ///
+    /// A 0.35 cap on the five high-residual atoms snaps back into the
+    /// LJ75 ico basin. 0.75 on reconstructable axes quenches off the
+    /// shelf at ΔE = +0.095 and +1.07, which a T = 0.8 Metropolis chain
+    /// can accept.
+    const PENTAGON_CAP: f64 = 0.75;
 
-/// Fivefold length of `x` about the best candidate axis.
-///
-/// The length is the root-mean-square of the built-in minimum-cost
-/// assignment. Linking IRA does not change it, so a default search has
-/// one trajectory either way.
-pub fn fivefold_length(x: ArrayView1<f64>) -> f64 {
-    fivefold_residual(x).0
-}
+    /// C5 lengths of pentagons that reconstruct rather than snap back.
+    ///
+    /// Measured on the quenched LJ75 ico competitor: the tightest axes
+    /// (d5 < 0.89) are in-basin, the window [0.89, 1.00] contains the
+    /// two openings that land at −396.187 and −395.211.
+    const RECON_LO: f64 = 0.89;
+    const RECON_HI: f64 = 1.00;
 
-/// Number of candidate axes whose fivefold length is below `FIVEFOLD_AXIS`.
-pub fn fivefold_axis_count(x: ArrayView1<f64>) -> usize {
-    fivefold_axis_table(x)
-        .into_iter()
-        .filter(|(_, d)| *d < FIVEFOLD_AXIS)
-        .count()
-}
-
-struct AxisTableCache {
-    bits: Vec<u64>,
-    rows: Vec<([f64; 3], f64)>,
-}
-
-std::thread_local! {
-    static AXIS_TABLE: std::cell::RefCell<AxisTableCache> = const {
-        std::cell::RefCell::new(AxisTableCache {
-            bits: Vec::new(),
-            rows: Vec::new(),
-        })
-    };
-}
-
-fn same_axis_geometry(bits: &[u64], x: ArrayView1<f64>) -> bool {
-    bits.len() == x.len()
-        && bits
-            .iter()
-            .zip(x.iter())
-            .all(|(bit, value)| *bit == value.to_bits())
-}
-
-/// Candidate axis and its fivefold length, best first.
-pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
-    let cached = AXIS_TABLE.with(|slot| {
-        let slot = slot.borrow();
-        if same_axis_geometry(&slot.bits, x) {
-            Some(slot.rows.clone())
-        } else {
-            None
-        }
-    });
-    if let Some(rows) = cached {
-        return rows;
+    /// Fivefold length of `x` about the best candidate axis.
+    ///
+    /// The length is the root-mean-square of the built-in minimum-cost
+    /// assignment. Linking IRA does not change it, so a default search has
+    /// one trajectory either way.
+    pub fn fivefold_length(x: ArrayView1<f64>) -> f64 {
+        fivefold_residual(x).0
     }
-    let axes = candidate_axes(x);
-    let mut rows: Vec<([f64; 3], f64)> = axes
-        .into_iter()
-        .map(|ax| {
-            // Every omitted nearest-image term is non-negative, so a partial
-            // scan that has already passed the cut is a lower bound. The
-            // axis cannot enter the good set, and the assignment is not run.
-            // An axis that stays under the cut is scanned in full, and its
-            // stored length is the assignment residual, as before.
-            let cut = FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS);
-            let bound = rotation_row_min_rms_until(x, ax, cut);
-            let length = if bound >= cut {
-                bound
-            } else {
-                residual_about(x, ax).0
-            };
-            (ax, length)
-        })
-        .collect();
-    rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    AXIS_TABLE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        slot.bits.clear();
-        slot.bits.extend(x.iter().map(|value| value.to_bits()));
-        slot.rows.clone_from(&rows);
-    });
-    rows
-}
 
-fn rot_apply(r: &[f64; 9], p: [f64; 3]) -> [f64; 3] {
-    [
-        r[0] * p[0] + r[1] * p[1] + r[2] * p[2],
-        r[3] * p[0] + r[4] * p[1] + r[5] * p[2],
-        r[6] * p[0] + r[7] * p[1] + r[8] * p[2],
-    ]
-}
-
-fn rotation_about(axis: [f64; 3], angle: f64) -> [f64; 9] {
-    let n = libm::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
-    let [x, y, z] = [axis[0] / n, axis[1] / n, axis[2] / n];
-    // `2π/5` and `3π/5` are not correctly rounded by the host. glibc and
-    // libSystem pick different fivefold assignments from that turn.
-    let s = libm::sin(angle);
-    let c = libm::cos(angle);
-    let t = 1.0 - c;
-    [
-        t * x * x + c,
-        t * x * y - s * z,
-        t * x * z + s * y,
-        t * x * y + s * z,
-        t * y * y + c,
-        t * y * z - s * x,
-        t * x * z - s * y,
-        t * y * z + s * x,
-        t * z * z + c,
-    ]
-}
-
-fn ico_axes() -> [[f64; 3]; 6] {
-    let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
-    [
-        [0.0, 1.0, p],
-        [0.0, 1.0, -p],
-        [1.0, p, 0.0],
-        [-1.0, p, 0.0],
-        [p, 0.0, 1.0],
-        [p, 0.0, -1.0],
-    ]
-}
-
-/// Minimum-cost assignment of a square matrix.
-///
-/// `cost[i * n + j]` is the cost of matching row `i` to column `j`.
-/// The result is `perm[i] = column`. The optimum is a property of the
-/// costs, so a simultaneous permutation of the rows and columns does
-/// not change which points are matched. An index-order greedy pass does.
-fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
-    // Same column scan as the continuous-symmetry assignment. The scratch
-    // lives for the whole matrix instead of being allocated once per row.
-    // The residual uses the permutation only. The uniqueness scan that
-    // the inverse-operation cache reads is a separate pass over the
-    // same optimum and is not part of this matching.
-    crate::assignment::successive_shortest_paths_matching(cost, n)
-        .unwrap_or_else(|| (0..n).collect())
-}
-
-/// Squared distances, `cost[i * n + j] = Σ_a (x[i,a] - y[j,a])²`.
-///
-/// The sum starts at zero and adds one axis at a time, which is the
-/// scalar loop. Four columns share that sum.
-fn fill_squared_cost(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
-    #[cfg(target_arch = "x86_64")]
-    if x.as_slice().is_some() && std::is_x86_feature_detected!("avx2") {
-        unsafe { fill_squared_cost_avx2(x, y, n, cost) };
-        return;
+    /// Number of candidate axes whose fivefold length is below `FIVEFOLD_AXIS`.
+    pub fn fivefold_axis_count(x: ArrayView1<f64>) -> usize {
+        fivefold_axis_table(x)
+            .into_iter()
+            .filter(|(_, d)| *d < FIVEFOLD_AXIS)
+            .count()
     }
-    fill_squared_cost_scalar(x, y, n, cost);
-}
 
-fn fill_squared_cost_scalar(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
-    for i in 0..n {
-        for j in 0..n {
-            let mut distance = 0.0;
-            for axis in 0..3 {
-                let delta = x[3 * i + axis] - y[3 * j + axis];
-                distance += delta * delta;
-            }
-            cost[i * n + j] = distance;
-        }
+    struct AxisTableCache {
+        bits: Vec<u64>,
+        rows: Vec<([f64; 3], f64)>,
     }
-}
 
-/// # Safety
-///
-/// AVX2 must be enabled and `x` is contiguous.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
-unsafe fn fill_squared_cost_avx2(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
-    use std::arch::x86_64::{
-        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
-        _mm256_sub_pd,
-    };
-    let flat = x.as_slice().unwrap_or(&[]);
-    for i in 0..n {
-        let xi = flat[3 * i];
-        let yi = flat[3 * i + 1];
-        let zi = flat[3 * i + 2];
-        let mut j = 0usize;
-        let row = i * n;
-        while j + 4 <= n {
-            let mut xs = [0.0; 4];
-            let mut ys = [0.0; 4];
-            let mut zs = [0.0; 4];
-            for lane in 0..4 {
-                let at = 3 * (j + lane);
-                xs[lane] = y[at];
-                ys[lane] = y[at + 1];
-                zs[lane] = y[at + 2];
-            }
-            let mut packed = [0.0; 4];
-            unsafe {
-                let dx = _mm256_sub_pd(_mm256_set1_pd(xi), _mm256_loadu_pd(xs.as_ptr()));
-                let dy = _mm256_sub_pd(_mm256_set1_pd(yi), _mm256_loadu_pd(ys.as_ptr()));
-                let dz = _mm256_sub_pd(_mm256_set1_pd(zi), _mm256_loadu_pd(zs.as_ptr()));
-                // `((0 + dx²) + dy²) + dz²`, the scalar running sum.
-                let sum = _mm256_add_pd(
-                    _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
-                    _mm256_mul_pd(dz, dz),
-                );
-                _mm256_storeu_pd(packed.as_mut_ptr(), sum);
-            }
-            cost[row + j..row + j + 4].copy_from_slice(&packed);
-            j += 4;
-        }
-        while j < n {
-            let mut distance = 0.0;
-            for axis in 0..3 {
-                let delta = flat[3 * i + axis] - y[3 * j + axis];
-                distance += delta * delta;
-            }
-            cost[row + j] = distance;
-            j += 1;
-        }
-    }
-}
-
-/// Columns matched to each row of `x` under the minimum sum of squared distances.
-fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
-    let n = x.len() / 3;
-    let mut cost = vec![0.0; n * n];
-    fill_squared_cost(x, y, n, &mut cost);
-    // The strict row-minimum matching is the only optimum, so the
-    // shortest-path permutation would be this one.
-    if let Some(perm) = crate::assignment::strict_unique_row_minima(&cost, n) {
-        return perm;
-    }
-    hungarian(&cost, n)
-}
-
-fn com_of(x: ArrayView1<f64>) -> [f64; 3] {
-    let n = (x.len() / 3).max(1) as f64;
-    let mut c = [0.0; 3];
-    for i in 0..x.len() / 3 {
-        for a in 0..3 {
-            c[a] += x[3 * i + a];
-        }
-    }
-    [c[0] / n, c[1] / n, c[2] / n]
-}
-
-fn axis_unique(axes: &[[f64; 3]], ax: [f64; 3]) -> bool {
-    for &b in axes {
-        let dot = (ax[0] * b[0] + ax[1] * b[1] + ax[2] * b[2]).abs();
-        if dot > 0.97 {
-            return false;
-        }
-    }
-    true
-}
-
-fn norm3(v: [f64; 3]) -> Option<[f64; 3]> {
-    let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-    if n < 1e-12 {
-        return None;
-    }
-    Some([v[0] / n, v[1] / n, v[2] / n])
-}
-
-/// Lab icosahedral axes plus COM-to-vertex directions so a rotated
-/// Mackay cloud still sees its own fivefold axes.
-fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
-    let n = x.len() / 3;
-    let mut axes: Vec<[f64; 3]> = Vec::new();
-    for ax in ico_axes() {
-        if let Some(u) = norm3(ax) {
-            axes.push(u);
-        }
-    }
-    if n == 0 {
-        return axes;
-    }
-    let com = com_of(x);
-    let mut far: Vec<(f64, [f64; 3])> = Vec::with_capacity(n);
-    for i in 0..n {
-        let v = [
-            x[3 * i] - com[0],
-            x[3 * i + 1] - com[1],
-            x[3 * i + 2] - com[2],
-        ];
-        let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
-        far.push((r2, v));
-    }
-    far.sort_by(|a, b| {
-        b.0.partial_cmp(&a.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(
-                b.1[2]
-                    .partial_cmp(&a.1[2])
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-            .then(
-                b.1[1]
-                    .partial_cmp(&a.1[1])
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-            .then(
-                b.1[0]
-                    .partial_cmp(&a.1[0])
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-    });
-    for &(_, v) in far.iter().take(12.min(n)) {
-        if let Some(u) = norm3(v)
-            && axis_unique(&axes, u)
-        {
-            axes.push(u);
-        }
-    }
-    axes
-}
-
-fn row_min_rms_clears(x: ArrayView1<f64>, axis: [f64; 3], cap: f64) -> bool {
-    let cut = cap + 1.0e-6 * (1.0 + cap);
-    rotation_row_min_rms_until(x, axis, cut) >= cut
-}
-
-/// Root-mean-square of each atom's nearest image under a fivefold turn.
-///
-/// This is at most the minimum-cost assignment residual: the assignment
-/// cannot beat giving every atom its own nearest image.
-struct RmsScratch {
-    cx: Vec<f64>,
-    cy: Vec<f64>,
-    cz: Vec<f64>,
-    tx: Vec<f64>,
-    ty: Vec<f64>,
-    tz: Vec<f64>,
-}
-
-std::thread_local! {
-    static RMS_SCRATCH: std::cell::RefCell<RmsScratch> = const {
-        std::cell::RefCell::new(RmsScratch {
-            cx: Vec::new(),
-            cy: Vec::new(),
-            cz: Vec::new(),
-            tx: Vec::new(),
-            ty: Vec::new(),
-            tz: Vec::new(),
-        })
-    };
-}
-
-/// Nearest-image root-mean-square, stopping once a partial sum clears `cut`.
-///
-/// Terms are visited in atom order. A finite `cut` may return the partial
-/// root-mean-square as soon as it is at least `cut`: every later term is
-/// non-negative, so the full scan would clear `cut` as well. The partial
-/// value is not the full scan. Callers that keep an axis use it only when
-/// the scan stayed under `cut`, and that path adds every term. An infinite
-/// `cut` is that full scan.
-fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f64 {
-    let n = x.len() / 3;
-    if n == 0 {
-        return 0.0;
-    }
-    let com = com_of(x);
-    let turn = rotation_about(axis, 2.0 * PI / 5.0);
-    RMS_SCRATCH.with(|slot| {
-        let mut scratch = slot.borrow_mut();
-        scratch.cx.clear();
-        scratch.cy.clear();
-        scratch.cz.clear();
-        scratch.tx.clear();
-        scratch.ty.clear();
-        scratch.tz.clear();
-        scratch.cx.reserve(n);
-        scratch.cy.reserve(n);
-        scratch.cz.reserve(n);
-        scratch.tx.reserve(n);
-        scratch.ty.reserve(n);
-        scratch.tz.reserve(n);
-        for atom in 0..n {
-            let point = [
-                x[3 * atom] - com[0],
-                x[3 * atom + 1] - com[1],
-                x[3 * atom + 2] - com[2],
-            ];
-            let image = rot_apply(&turn, point);
-            scratch.cx.push(point[0]);
-            scratch.cy.push(point[1]);
-            scratch.cz.push(point[2]);
-            scratch.tx.push(image[0]);
-            scratch.ty.push(image[1]);
-            scratch.tz.push(image[2]);
-        }
-        let finite = cut.is_finite();
-        let stop = if finite {
-            cut * cut * n as f64
-        } else {
-            f64::INFINITY
+    std::thread_local! {
+        static AXIS_TABLE: std::cell::RefCell<AxisTableCache> = const {
+            std::cell::RefCell::new(AxisTableCache {
+                bits: Vec::new(),
+                rows: Vec::new(),
+            })
         };
-        let mut total = 0.0;
-        for index in 0..n {
-            let nearest = nearest_image(
-                scratch.cx[index],
-                scratch.cy[index],
-                scratch.cz[index],
-                &scratch.tx,
-                &scratch.ty,
-                &scratch.tz,
-            );
-            total += nearest;
-            if finite && total >= stop {
-                let rms = (total / n as f64).sqrt();
-                if rms >= cut {
-                    return rms;
+    }
+
+    fn same_axis_geometry(bits: &[u64], x: ArrayView1<f64>) -> bool {
+        bits.len() == x.len()
+            && bits
+                .iter()
+                .zip(x.iter())
+                .all(|(bit, value)| *bit == value.to_bits())
+    }
+
+    /// Candidate axis and its fivefold length, best first.
+    pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
+        let cached = AXIS_TABLE.with(|slot| {
+            let slot = slot.borrow();
+            if same_axis_geometry(&slot.bits, x) {
+                Some(slot.rows.clone())
+            } else {
+                None
+            }
+        });
+        if let Some(rows) = cached {
+            return rows;
+        }
+        let axes = candidate_axes(x);
+        let mut rows: Vec<([f64; 3], f64)> = axes
+            .into_iter()
+            .map(|ax| {
+                // Every omitted nearest-image term is non-negative, so a partial
+                // scan that has already passed the cut is a lower bound. The
+                // axis cannot enter the good set, and the assignment is not run.
+                // An axis that stays under the cut is scanned in full, and its
+                // stored length is the assignment residual, as before.
+                let cut = FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS);
+                let bound = rotation_row_min_rms_until(x, ax, cut);
+                let length = if bound >= cut {
+                    bound
+                } else {
+                    residual_about(x, ax).0
+                };
+                (ax, length)
+            })
+            .collect();
+        rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        AXIS_TABLE.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            slot.bits.clear();
+            slot.bits.extend(x.iter().map(|value| value.to_bits()));
+            slot.rows.clone_from(&rows);
+        });
+        rows
+    }
+
+    pub(super) fn rot_apply(r: &[f64; 9], p: [f64; 3]) -> [f64; 3] {
+        [
+            r[0] * p[0] + r[1] * p[1] + r[2] * p[2],
+            r[3] * p[0] + r[4] * p[1] + r[5] * p[2],
+            r[6] * p[0] + r[7] * p[1] + r[8] * p[2],
+        ]
+    }
+
+    pub(super) fn rotation_about(axis: [f64; 3], angle: f64) -> [f64; 9] {
+        let n = libm::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+        let [x, y, z] = [axis[0] / n, axis[1] / n, axis[2] / n];
+        // `2π/5` and `3π/5` are not correctly rounded by the host. glibc and
+        // libSystem pick different fivefold assignments from that turn.
+        let s = libm::sin(angle);
+        let c = libm::cos(angle);
+        let t = 1.0 - c;
+        [
+            t * x * x + c,
+            t * x * y - s * z,
+            t * x * z + s * y,
+            t * x * y + s * z,
+            t * y * y + c,
+            t * y * z - s * x,
+            t * x * z - s * y,
+            t * y * z + s * x,
+            t * z * z + c,
+        ]
+    }
+
+    fn ico_axes() -> [[f64; 3]; 6] {
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        [
+            [0.0, 1.0, p],
+            [0.0, 1.0, -p],
+            [1.0, p, 0.0],
+            [-1.0, p, 0.0],
+            [p, 0.0, 1.0],
+            [p, 0.0, -1.0],
+        ]
+    }
+
+    /// Minimum-cost assignment of a square matrix.
+    ///
+    /// `cost[i * n + j]` is the cost of matching row `i` to column `j`.
+    /// The result is `perm[i] = column`. The optimum is a property of the
+    /// costs, so a simultaneous permutation of the rows and columns does
+    /// not change which points are matched. An index-order greedy pass does.
+    fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
+        // Same column scan as the continuous-symmetry assignment. The scratch
+        // lives for the whole matrix instead of being allocated once per row.
+        // The residual uses the permutation only. The uniqueness scan that
+        // the inverse-operation cache reads is a separate pass over the
+        // same optimum and is not part of this matching.
+        crate::assignment::successive_shortest_paths_matching(cost, n)
+            .unwrap_or_else(|| (0..n).collect())
+    }
+
+    /// Squared distances, `cost[i * n + j] = Σ_a (x[i,a] - y[j,a])²`.
+    ///
+    /// The sum starts at zero and adds one axis at a time, which is the
+    /// scalar loop. Four columns share that sum.
+    pub(super) fn fill_squared_cost(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
+        #[cfg(target_arch = "x86_64")]
+        if x.as_slice().is_some() && std::is_x86_feature_detected!("avx2") {
+            unsafe { fill_squared_cost_avx2(x, y, n, cost) };
+            return;
+        }
+        fill_squared_cost_scalar(x, y, n, cost);
+    }
+
+    pub(super) fn fill_squared_cost_scalar(
+        x: ArrayView1<f64>,
+        y: &[f64],
+        n: usize,
+        cost: &mut [f64],
+    ) {
+        for i in 0..n {
+            for j in 0..n {
+                let mut distance = 0.0;
+                for axis in 0..3 {
+                    let delta = x[3 * i + axis] - y[3 * j + axis];
+                    distance += delta * delta;
+                }
+                cost[i * n + j] = distance;
+            }
+        }
+    }
+
+    /// # Safety
+    ///
+    /// AVX2 must be enabled and `x` is contiguous.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn fill_squared_cost_avx2(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
+        use std::arch::x86_64::{
+            _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
+            _mm256_sub_pd,
+        };
+        let flat = x.as_slice().unwrap_or(&[]);
+        for i in 0..n {
+            let xi = flat[3 * i];
+            let yi = flat[3 * i + 1];
+            let zi = flat[3 * i + 2];
+            let mut j = 0usize;
+            let row = i * n;
+            while j + 4 <= n {
+                let mut xs = [0.0; 4];
+                let mut ys = [0.0; 4];
+                let mut zs = [0.0; 4];
+                for lane in 0..4 {
+                    let at = 3 * (j + lane);
+                    xs[lane] = y[at];
+                    ys[lane] = y[at + 1];
+                    zs[lane] = y[at + 2];
+                }
+                let mut packed = [0.0; 4];
+                unsafe {
+                    let dx = _mm256_sub_pd(_mm256_set1_pd(xi), _mm256_loadu_pd(xs.as_ptr()));
+                    let dy = _mm256_sub_pd(_mm256_set1_pd(yi), _mm256_loadu_pd(ys.as_ptr()));
+                    let dz = _mm256_sub_pd(_mm256_set1_pd(zi), _mm256_loadu_pd(zs.as_ptr()));
+                    // `((0 + dx²) + dy²) + dz²`, the scalar running sum.
+                    let sum = _mm256_add_pd(
+                        _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                        _mm256_mul_pd(dz, dz),
+                    );
+                    _mm256_storeu_pd(packed.as_mut_ptr(), sum);
+                }
+                cost[row + j..row + j + 4].copy_from_slice(&packed);
+                j += 4;
+            }
+            while j < n {
+                let mut distance = 0.0;
+                for axis in 0..3 {
+                    let delta = flat[3 * i + axis] - y[3 * j + axis];
+                    distance += delta * delta;
+                }
+                cost[row + j] = distance;
+                j += 1;
+            }
+        }
+    }
+
+    /// Columns matched to each row of `x` under the minimum sum of squared distances.
+    fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
+        let n = x.len() / 3;
+        let mut cost = vec![0.0; n * n];
+        fill_squared_cost(x, y, n, &mut cost);
+        // The strict row-minimum matching is the only optimum, so the
+        // shortest-path permutation would be this one.
+        if let Some(perm) = crate::assignment::strict_unique_row_minima(&cost, n) {
+            return perm;
+        }
+        hungarian(&cost, n)
+    }
+
+    pub(super) fn com_of(x: ArrayView1<f64>) -> [f64; 3] {
+        let n = (x.len() / 3).max(1) as f64;
+        let mut c = [0.0; 3];
+        for i in 0..x.len() / 3 {
+            for a in 0..3 {
+                c[a] += x[3 * i + a];
+            }
+        }
+        [c[0] / n, c[1] / n, c[2] / n]
+    }
+
+    fn axis_unique(axes: &[[f64; 3]], ax: [f64; 3]) -> bool {
+        for &b in axes {
+            let dot = (ax[0] * b[0] + ax[1] * b[1] + ax[2] * b[2]).abs();
+            if dot > 0.97 {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn norm3(v: [f64; 3]) -> Option<[f64; 3]> {
+        let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        if n < 1e-12 {
+            return None;
+        }
+        Some([v[0] / n, v[1] / n, v[2] / n])
+    }
+
+    /// Lab icosahedral axes plus COM-to-vertex directions so a rotated
+    /// Mackay cloud still sees its own fivefold axes.
+    pub(super) fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
+        let n = x.len() / 3;
+        let mut axes: Vec<[f64; 3]> = Vec::new();
+        for ax in ico_axes() {
+            if let Some(u) = norm3(ax) {
+                axes.push(u);
+            }
+        }
+        if n == 0 {
+            return axes;
+        }
+        let com = com_of(x);
+        let mut far: Vec<(f64, [f64; 3])> = Vec::with_capacity(n);
+        for i in 0..n {
+            let v = [
+                x[3 * i] - com[0],
+                x[3 * i + 1] - com[1],
+                x[3 * i + 2] - com[2],
+            ];
+            let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+            far.push((r2, v));
+        }
+        far.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(
+                    b.1[2]
+                        .partial_cmp(&a.1[2])
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+                .then(
+                    b.1[1]
+                        .partial_cmp(&a.1[1])
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+                .then(
+                    b.1[0]
+                        .partial_cmp(&a.1[0])
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+        });
+        for &(_, v) in far.iter().take(12.min(n)) {
+            if let Some(u) = norm3(v)
+                && axis_unique(&axes, u)
+            {
+                axes.push(u);
+            }
+        }
+        axes
+    }
+
+    fn row_min_rms_clears(x: ArrayView1<f64>, axis: [f64; 3], cap: f64) -> bool {
+        let cut = cap + 1.0e-6 * (1.0 + cap);
+        rotation_row_min_rms_until(x, axis, cut) >= cut
+    }
+
+    /// Root-mean-square of each atom's nearest image under a fivefold turn.
+    ///
+    /// This is at most the minimum-cost assignment residual: the assignment
+    /// cannot beat giving every atom its own nearest image.
+    struct RmsScratch {
+        cx: Vec<f64>,
+        cy: Vec<f64>,
+        cz: Vec<f64>,
+        tx: Vec<f64>,
+        ty: Vec<f64>,
+        tz: Vec<f64>,
+    }
+
+    std::thread_local! {
+        static RMS_SCRATCH: std::cell::RefCell<RmsScratch> = const {
+            std::cell::RefCell::new(RmsScratch {
+                cx: Vec::new(),
+                cy: Vec::new(),
+                cz: Vec::new(),
+                tx: Vec::new(),
+                ty: Vec::new(),
+                tz: Vec::new(),
+            })
+        };
+    }
+
+    /// Nearest-image root-mean-square, stopping once a partial sum clears `cut`.
+    ///
+    /// Terms are visited in atom order. A finite `cut` may return the partial
+    /// root-mean-square as soon as it is at least `cut`: every later term is
+    /// non-negative, so the full scan would clear `cut` as well. The partial
+    /// value is not the full scan. Callers that keep an axis use it only when
+    /// the scan stayed under `cut`, and that path adds every term. An infinite
+    /// `cut` is that full scan.
+    pub(super) fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f64 {
+        let n = x.len() / 3;
+        if n == 0 {
+            return 0.0;
+        }
+        let com = com_of(x);
+        let turn = rotation_about(axis, 2.0 * PI / 5.0);
+        RMS_SCRATCH.with(|slot| {
+            let mut scratch = slot.borrow_mut();
+            scratch.cx.clear();
+            scratch.cy.clear();
+            scratch.cz.clear();
+            scratch.tx.clear();
+            scratch.ty.clear();
+            scratch.tz.clear();
+            scratch.cx.reserve(n);
+            scratch.cy.reserve(n);
+            scratch.cz.reserve(n);
+            scratch.tx.reserve(n);
+            scratch.ty.reserve(n);
+            scratch.tz.reserve(n);
+            for atom in 0..n {
+                let point = [
+                    x[3 * atom] - com[0],
+                    x[3 * atom + 1] - com[1],
+                    x[3 * atom + 2] - com[2],
+                ];
+                let image = rot_apply(&turn, point);
+                scratch.cx.push(point[0]);
+                scratch.cy.push(point[1]);
+                scratch.cz.push(point[2]);
+                scratch.tx.push(image[0]);
+                scratch.ty.push(image[1]);
+                scratch.tz.push(image[2]);
+            }
+            let finite = cut.is_finite();
+            let stop = if finite {
+                cut * cut * n as f64
+            } else {
+                f64::INFINITY
+            };
+            let mut total = 0.0;
+            for index in 0..n {
+                let nearest = nearest_image(
+                    scratch.cx[index],
+                    scratch.cy[index],
+                    scratch.cz[index],
+                    &scratch.tx,
+                    &scratch.ty,
+                    &scratch.tz,
+                );
+                total += nearest;
+                if finite && total >= stop {
+                    let rms = (total / n as f64).sqrt();
+                    if rms >= cut {
+                        return rms;
+                    }
                 }
             }
-        }
-        (total / n as f64).sqrt()
-    })
-}
-
-/// Smallest squared distance from one centred atom to a turned image.
-///
-/// Images are visited in atom order. The running minimum is the minimum of
-/// those squared distances, which does not depend on the order the minimum
-/// is taken, so a vector reduction matches the scalar scan bit for bit.
-fn nearest_image(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::arch::is_x86_feature_detected!("avx") {
-            // The host has AVX, and each slice is read for `tx.len()` lanes.
-            return unsafe { nearest_image_avx(px, py, pz, tx, ty, tz) };
-        }
+            (total / n as f64).sqrt()
+        })
     }
-    nearest_image_scalar(px, py, pz, tx, ty, tz)
-}
 
-fn nearest_image_scalar(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
-    let mut nearest = f64::INFINITY;
-    for j in 0..tx.len() {
-        let dx = px - tx[j];
-        let dy = py - ty[j];
-        let dz = pz - tz[j];
-        nearest = nearest.min(dx * dx + dy * dy + dz * dz);
-    }
-    nearest
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx")]
-unsafe fn nearest_image_avx(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
-    use std::arch::x86_64::{
-        _mm256_add_pd, _mm256_loadu_pd, _mm256_min_pd, _mm256_mul_pd, _mm256_set1_pd,
-        _mm256_storeu_pd, _mm256_sub_pd,
-    };
-    unsafe {
-        let n = tx.len();
-        let pxv = _mm256_set1_pd(px);
-        let pyv = _mm256_set1_pd(py);
-        let pzv = _mm256_set1_pd(pz);
-        let mut acc = _mm256_set1_pd(f64::INFINITY);
-        let mut j = 0;
-        while j + 4 <= n {
-            let dx = _mm256_sub_pd(pxv, _mm256_loadu_pd(tx.as_ptr().add(j)));
-            let dy = _mm256_sub_pd(pyv, _mm256_loadu_pd(ty.as_ptr().add(j)));
-            let dz = _mm256_sub_pd(pzv, _mm256_loadu_pd(tz.as_ptr().add(j)));
-            let d2 = _mm256_add_pd(
-                _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
-                _mm256_mul_pd(dz, dz),
-            );
-            acc = _mm256_min_pd(acc, d2);
-            j += 4;
+    /// Smallest squared distance from one centred atom to a turned image.
+    ///
+    /// Images are visited in atom order. The running minimum is the minimum of
+    /// those squared distances, which does not depend on the order the minimum
+    /// is taken, so a vector reduction matches the scalar scan bit for bit.
+    fn nearest_image(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if std::arch::is_x86_feature_detected!("avx") {
+                // The host has AVX, and each slice is read for `tx.len()` lanes.
+                return unsafe { nearest_image_avx(px, py, pz, tx, ty, tz) };
+            }
         }
-        let mut tmp = [0.0_f64; 4];
-        _mm256_storeu_pd(tmp.as_mut_ptr(), acc);
-        let mut nearest = tmp[0].min(tmp[1]).min(tmp[2]).min(tmp[3]);
-        while j < n {
+        nearest_image_scalar(px, py, pz, tx, ty, tz)
+    }
+
+    fn nearest_image_scalar(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
+        let mut nearest = f64::INFINITY;
+        for j in 0..tx.len() {
             let dx = px - tx[j];
             let dy = py - ty[j];
             let dz = pz - tz[j];
             nearest = nearest.min(dx * dx + dy * dy + dz * dz);
-            j += 1;
         }
         nearest
     }
-}
 
-struct ResidualMemo {
-    coordinates: Vec<u64>,
-    entries: Vec<([u64; 3], f64, Vec<f64>)>,
-}
-
-std::thread_local! {
-    static RESIDUAL_MEMO: std::cell::RefCell<ResidualMemo> = const {
-        std::cell::RefCell::new(ResidualMemo {
-            coordinates: Vec::new(),
-            entries: Vec::new(),
-        })
-    };
-}
-
-fn axis_bits(axis: [f64; 3]) -> [u64; 3] {
-    [axis[0].to_bits(), axis[1].to_bits(), axis[2].to_bits()]
-}
-
-fn same_coordinate_bits(cached: &[u64], x: ArrayView1<f64>) -> bool {
-    cached.len() == x.len()
-        && cached
-            .iter()
-            .zip(x.iter())
-            .all(|(bits, value)| *bits == value.to_bits())
-}
-
-fn remembered_residual(x: ArrayView1<f64>, axis: [f64; 3]) -> Option<(f64, Array1<f64>)> {
-    let bits = axis_bits(axis);
-    RESIDUAL_MEMO.with(|slot| {
-        let slot = slot.borrow();
-        if !same_coordinate_bits(&slot.coordinates, x) {
-            return None;
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx")]
+    unsafe fn nearest_image_avx(
+        px: f64,
+        py: f64,
+        pz: f64,
+        tx: &[f64],
+        ty: &[f64],
+        tz: &[f64],
+    ) -> f64 {
+        use std::arch::x86_64::{
+            _mm256_add_pd, _mm256_loadu_pd, _mm256_min_pd, _mm256_mul_pd, _mm256_set1_pd,
+            _mm256_storeu_pd, _mm256_sub_pd,
+        };
+        unsafe {
+            let n = tx.len();
+            let pxv = _mm256_set1_pd(px);
+            let pyv = _mm256_set1_pd(py);
+            let pzv = _mm256_set1_pd(pz);
+            let mut acc = _mm256_set1_pd(f64::INFINITY);
+            let mut j = 0;
+            while j + 4 <= n {
+                let dx = _mm256_sub_pd(pxv, _mm256_loadu_pd(tx.as_ptr().add(j)));
+                let dy = _mm256_sub_pd(pyv, _mm256_loadu_pd(ty.as_ptr().add(j)));
+                let dz = _mm256_sub_pd(pzv, _mm256_loadu_pd(tz.as_ptr().add(j)));
+                let d2 = _mm256_add_pd(
+                    _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                    _mm256_mul_pd(dz, dz),
+                );
+                acc = _mm256_min_pd(acc, d2);
+                j += 4;
+            }
+            let mut tmp = [0.0_f64; 4];
+            _mm256_storeu_pd(tmp.as_mut_ptr(), acc);
+            let mut nearest = tmp[0].min(tmp[1]).min(tmp[2]).min(tmp[3]);
+            while j < n {
+                let dx = px - tx[j];
+                let dy = py - ty[j];
+                let dz = pz - tz[j];
+                nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+                j += 1;
+            }
+            nearest
         }
-        slot.entries
-            .iter()
-            .find(|entry| entry.0 == bits)
-            .map(|entry| (entry.1, Array1::from_vec(entry.2.clone())))
-    })
-}
+    }
 
-fn remember_residual(x: ArrayView1<f64>, axis: [f64; 3], rms: f64, displacement: &Array1<f64>) {
-    RESIDUAL_MEMO.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if !same_coordinate_bits(&slot.coordinates, x) {
-            slot.coordinates = x.iter().map(|value| value.to_bits()).collect();
-            slot.entries.clear();
-        }
+    struct ResidualMemo {
+        coordinates: Vec<u64>,
+        entries: Vec<([u64; 3], f64, Vec<f64>)>,
+    }
+
+    std::thread_local! {
+        static RESIDUAL_MEMO: std::cell::RefCell<ResidualMemo> = const {
+            std::cell::RefCell::new(ResidualMemo {
+                coordinates: Vec::new(),
+                entries: Vec::new(),
+            })
+        };
+    }
+
+    fn axis_bits(axis: [f64; 3]) -> [u64; 3] {
+        [axis[0].to_bits(), axis[1].to_bits(), axis[2].to_bits()]
+    }
+
+    fn same_coordinate_bits(cached: &[u64], x: ArrayView1<f64>) -> bool {
+        cached.len() == x.len()
+            && cached
+                .iter()
+                .zip(x.iter())
+                .all(|(bits, value)| *bits == value.to_bits())
+    }
+
+    fn remembered_residual(x: ArrayView1<f64>, axis: [f64; 3]) -> Option<(f64, Array1<f64>)> {
         let bits = axis_bits(axis);
-        if slot.entries.iter().any(|entry| entry.0 == bits) {
+        RESIDUAL_MEMO.with(|slot| {
+            let slot = slot.borrow();
+            if !same_coordinate_bits(&slot.coordinates, x) {
+                return None;
+            }
+            slot.entries
+                .iter()
+                .find(|entry| entry.0 == bits)
+                .map(|entry| (entry.1, Array1::from_vec(entry.2.clone())))
+        })
+    }
+
+    fn remember_residual(x: ArrayView1<f64>, axis: [f64; 3], rms: f64, displacement: &Array1<f64>) {
+        RESIDUAL_MEMO.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if !same_coordinate_bits(&slot.coordinates, x) {
+                slot.coordinates = x.iter().map(|value| value.to_bits()).collect();
+                slot.entries.clear();
+            }
+            let bits = axis_bits(axis);
+            if slot.entries.iter().any(|entry| entry.0 == bits) {
+                return;
+            }
+            slot.entries.push((bits, rms, displacement.to_vec()));
+        });
+    }
+
+    fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
+        if let Some(saved) = remembered_residual(x, axis) {
+            return saved;
+        }
+        let computed = residual_about_fresh(x, axis);
+        remember_residual(x, axis, computed.0, &computed.1);
+        computed
+    }
+
+    pub(super) fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
+        let n = x.len() / 3;
+        let com = com_of(x);
+        let angle = 2.0 * PI / 5.0;
+        let rmat = rotation_about(axis, angle);
+        // Rotate about the centre of mass, not the origin.
+        let mut xc = vec![0.0; x.len()];
+        for i in 0..n {
+            for a in 0..3 {
+                xc[3 * i + a] = x[3 * i + a] - com[a];
+            }
+        }
+        // The built-in assignment, with or without IRA. IRA's symmetry
+        // permutation is a different matching, and using it here moved the
+        // default Lennard-Jones trajectory.
+        let mut y = vec![0.0; x.len()];
+        for i in 0..n {
+            let q = rot_apply(&rmat, [xc[3 * i], xc[3 * i + 1], xc[3 * i + 2]]);
+            y[3 * i] = q[0];
+            y[3 * i + 1] = q[1];
+            y[3 * i + 2] = q[2];
+        }
+        let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y);
+        let mut y_m = vec![0.0; x.len()];
+        for i in 0..n {
+            for a in 0..3 {
+                y_m[3 * i + a] = y[3 * perm[i] + a] + com[a];
+            }
+        }
+        let mut d2 = 0.0;
+        let mut dr = Array1::zeros(x.len());
+        for i in 0..n {
+            for a in 0..3 {
+                let d = x[3 * i + a] - y_m[3 * i + a];
+                dr[3 * i + a] = d;
+                d2 += d * d;
+            }
+        }
+        ((d2 / n.max(1) as f64).sqrt(), dr)
+    }
+
+    /// Residual `x − R_5 x` under the best fivefold axis, and that axis's
+    /// deviation length. The matching is the built-in minimum-cost assignment
+    /// on every build.
+    fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
+        let mut best_d = f64::INFINITY;
+        let mut best_ax = [0.0, 0.0, 1.0];
+        let mut best_dr = Array1::zeros(x.len());
+        for ax in candidate_axes(x) {
+            if best_d.is_finite() && row_min_rms_clears(x, ax, best_d) {
+                continue;
+            }
+            let (d5, dr) = residual_about(x, ax);
+            if d5 < best_d {
+                best_d = d5;
+                best_ax = ax;
+                best_dr = dr;
+            }
+        }
+        (best_d, best_ax, best_dr)
+    }
+
+    /// Keep the atoms that carry most of the C5 residual; zero the rigid core.
+    fn concentrate_residual(dr: &mut Array1<f64>, keep: usize) {
+        let n = dr.len() / 3;
+        if n == 0 || keep >= n {
             return;
         }
-        slot.entries.push((bits, rms, displacement.to_vec()));
-    });
-}
+        let mut atom = vec![0.0; n];
+        for i in 0..n {
+            atom[i] = dr[3 * i] * dr[3 * i]
+                + dr[3 * i + 1] * dr[3 * i + 1]
+                + dr[3 * i + 2] * dr[3 * i + 2];
+        }
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|a, b| atom[*b].partial_cmp(&atom[*a]).unwrap());
+        let mut keep_set = vec![false; n];
+        for &i in order.iter().take(keep) {
+            keep_set[i] = true;
+        }
+        for i in 0..n {
+            if !keep_set[i] {
+                dr[3 * i] = 0.0;
+                dr[3 * i + 1] = 0.0;
+                dr[3 * i + 2] = 0.0;
+            }
+        }
+    }
 
-fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
-    if let Some(saved) = remembered_residual(x, axis) {
-        return saved;
-    }
-    let computed = residual_about_fresh(x, axis);
-    remember_residual(x, axis, computed.0, &computed.1);
-    computed
-}
-
-fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
-    let n = x.len() / 3;
-    let com = com_of(x);
-    let angle = 2.0 * PI / 5.0;
-    let rmat = rotation_about(axis, angle);
-    // Rotate about the centre of mass, not the origin.
-    let mut xc = vec![0.0; x.len()];
-    for i in 0..n {
-        for a in 0..3 {
-            xc[3 * i + a] = x[3 * i + a] - com[a];
+    fn pentagon_break(x: ArrayView1<f64>, axis: [f64; 3]) -> Array1<f64> {
+        let n = x.len() / 3;
+        let mut dr = Array1::zeros(x.len());
+        if n == 0 {
+            return dr;
         }
-    }
-    // The built-in assignment, with or without IRA. IRA's symmetry
-    // permutation is a different matching, and using it here moved the
-    // default Lennard-Jones trajectory.
-    let mut y = vec![0.0; x.len()];
-    for i in 0..n {
-        let q = rot_apply(&rmat, [xc[3 * i], xc[3 * i + 1], xc[3 * i + 2]]);
-        y[3 * i] = q[0];
-        y[3 * i + 1] = q[1];
-        y[3 * i + 2] = q[2];
-    }
-    let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y);
-    let mut y_m = vec![0.0; x.len()];
-    for i in 0..n {
-        for a in 0..3 {
-            y_m[3 * i + a] = y[3 * perm[i] + a] + com[a];
+        let an = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        let ax = [axis[0] / an, axis[1] / an, axis[2] / an];
+        let mut best_i = 0usize;
+        let mut best_c = -1.0;
+        for i in 0..n {
+            let r = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+            let cross = [
+                ax[1] * r[2] - ax[2] * r[1],
+                ax[2] * r[0] - ax[0] * r[2],
+                ax[0] * r[1] - ax[1] * r[0],
+            ];
+            let c = cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2];
+            if c > best_c {
+                best_c = c;
+                best_i = i;
+            }
         }
-    }
-    let mut d2 = 0.0;
-    let mut dr = Array1::zeros(x.len());
-    for i in 0..n {
-        for a in 0..3 {
-            let d = x[3 * i + a] - y_m[3 * i + a];
-            dr[3 * i + a] = d;
-            d2 += d * d;
-        }
-    }
-    ((d2 / n.max(1) as f64).sqrt(), dr)
-}
-
-/// Residual `x − R_5 x` under the best fivefold axis, and that axis's
-/// deviation length. The matching is the built-in minimum-cost assignment
-/// on every build.
-fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
-    let mut best_d = f64::INFINITY;
-    let mut best_ax = [0.0, 0.0, 1.0];
-    let mut best_dr = Array1::zeros(x.len());
-    for ax in candidate_axes(x) {
-        if best_d.is_finite() && row_min_rms_clears(x, ax, best_d) {
-            continue;
-        }
-        let (d5, dr) = residual_about(x, ax);
-        if d5 < best_d {
-            best_d = d5;
-            best_ax = ax;
-            best_dr = dr;
-        }
-    }
-    (best_d, best_ax, best_dr)
-}
-
-/// Keep the atoms that carry most of the C5 residual; zero the rigid core.
-fn concentrate_residual(dr: &mut Array1<f64>, keep: usize) {
-    let n = dr.len() / 3;
-    if n == 0 || keep >= n {
-        return;
-    }
-    let mut atom = vec![0.0; n];
-    for i in 0..n {
-        atom[i] =
-            dr[3 * i] * dr[3 * i] + dr[3 * i + 1] * dr[3 * i + 1] + dr[3 * i + 2] * dr[3 * i + 2];
-    }
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|a, b| atom[*b].partial_cmp(&atom[*a]).unwrap());
-    let mut keep_set = vec![false; n];
-    for &i in order.iter().take(keep) {
-        keep_set[i] = true;
-    }
-    for i in 0..n {
-        if !keep_set[i] {
-            dr[3 * i] = 0.0;
-            dr[3 * i + 1] = 0.0;
-            dr[3 * i + 2] = 0.0;
-        }
-    }
-}
-
-fn pentagon_break(x: ArrayView1<f64>, axis: [f64; 3]) -> Array1<f64> {
-    let n = x.len() / 3;
-    let mut dr = Array1::zeros(x.len());
-    if n == 0 {
-        return dr;
-    }
-    let an = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
-    let ax = [axis[0] / an, axis[1] / an, axis[2] / an];
-    let mut best_i = 0usize;
-    let mut best_c = -1.0;
-    for i in 0..n {
-        let r = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
-        let cross = [
+        let r = [x[3 * best_i], x[3 * best_i + 1], x[3 * best_i + 2]];
+        let mut u = [
             ax[1] * r[2] - ax[2] * r[1],
             ax[2] * r[0] - ax[0] * r[2],
             ax[0] * r[1] - ax[1] * r[0],
         ];
-        let c = cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2];
-        if c > best_c {
-            best_c = c;
-            best_i = i;
+        let un = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
+        if un < 1e-15 {
+            u = [1.0, 0.0, 0.0];
+        } else {
+            u[0] /= un;
+            u[1] /= un;
+            u[2] /= un;
+        }
+        dr[3 * best_i] = u[0];
+        dr[3 * best_i + 1] = u[1];
+        dr[3 * best_i + 2] = u[2];
+        dr
+    }
+
+    /// Snapshot of the fivefold hop before the cap is applied.
+    #[derive(Clone, Debug)]
+    pub struct FivefoldProbe {
+        /// SOFI/greedy C5 length of `x` on the best axis.
+        pub d5: f64,
+        /// How many candidate axes sit below `FIVEFOLD_AXIS`.
+        pub n_axes: usize,
+        /// RMS of `x − R_5 x` under the best axis.
+        pub residual_rms: f64,
+        /// True when fewer than `FIVEFOLD_MIN_AXES` axes are fivefold.
+        pub gated: bool,
+        /// True when the residual vanished and the step is a pentagon break.
+        pub used_pentagon: bool,
+        /// Share of residual power on the five atoms with the largest |dr_i|.
+        pub top5_share: f64,
+        /// Share of residual power on the twelve atoms with the largest |dr_i|.
+        pub top12_share: f64,
+        /// Proposed coordinates after the cap.
+        pub y: Array1<f64>,
+    }
+
+    /// Probe the fivefold hop: length, residual concentration, gated yield.
+    pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
+        let (d5, axis, mut dr) = fivefold_residual(x);
+        let n_axes = fivefold_axis_count(x);
+        let n = (x.len() / 3).max(1);
+        let nf = n as f64;
+        let cur = (dr.iter().map(|v| v * v).sum::<f64>() / nf).sqrt();
+        let gated = n < 5 || n_axes < FIVEFOLD_MIN_AXES;
+        let mut used_pentagon = false;
+        if !gated && cur < 1e-8 {
+            dr = pentagon_break(x, axis);
+            used_pentagon = true;
+        }
+        let mut atom = vec![0.0; n];
+        let mut tot = 0.0;
+        for i in 0..n {
+            let s = dr[3 * i] * dr[3 * i]
+                + dr[3 * i + 1] * dr[3 * i + 1]
+                + dr[3 * i + 2] * dr[3 * i + 2];
+            atom[i] = s;
+            tot += s;
+        }
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|a, b| atom[*b].partial_cmp(&atom[*a]).unwrap());
+        let share = |k: usize| {
+            if tot <= 0.0 {
+                return 0.0;
+            }
+            order.iter().take(k.min(n)).map(|&i| atom[i]).sum::<f64>() / tot
+        };
+        let y = if gated {
+            x.to_owned()
+        } else if !used_pentagon && n > 13 {
+            // Residual already lives on one pentagon (top-5 share ~0.8 on
+            // the LJ75 ico). A global RMS cap then gives those five a
+            // 1.2-wide kick and the quench melts the shell. Cap the
+            // pentagon itself at `rmsd`.
+            concentrate_residual(&mut dr, 5);
+            scale_support_to_cap(x, dr, rmsd.max(PENTAGON_CAP))
+        } else {
+            scale_to_cap(x, dr, rmsd)
+        };
+        FivefoldProbe {
+            d5,
+            n_axes,
+            residual_rms: cur,
+            gated,
+            used_pentagon,
+            top5_share: share(5),
+            top12_share: share(12),
+            y,
         }
     }
-    let r = [x[3 * best_i], x[3 * best_i + 1], x[3 * best_i + 2]];
-    let mut u = [
-        ax[1] * r[2] - ax[2] * r[1],
-        ax[2] * r[0] - ax[0] * r[2],
-        ax[0] * r[1] - ax[1] * r[0],
-    ];
-    let un = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
-    if un < 1e-15 {
-        u = [1.0, 0.0, 0.0];
-    } else {
-        u[0] /= un;
-        u[1] /= un;
-        u[2] /= un;
-    }
-    dr[3 * best_i] = u[0];
-    dr[3 * best_i + 1] = u[1];
-    dr[3 * best_i + 2] = u[2];
-    dr
-}
 
-/// Snapshot of the fivefold hop before the cap is applied.
-#[derive(Clone, Debug)]
-pub struct FivefoldProbe {
-    /// SOFI/greedy C5 length of `x` on the best axis.
-    pub d5: f64,
-    /// How many candidate axes sit below `FIVEFOLD_AXIS`.
-    pub n_axes: usize,
-    /// RMS of `x − R_5 x` under the best axis.
-    pub residual_rms: f64,
-    /// True when fewer than `FIVEFOLD_MIN_AXES` axes are fivefold.
-    pub gated: bool,
-    /// True when the residual vanished and the step is a pentagon break.
-    pub used_pentagon: bool,
-    /// Share of residual power on the five atoms with the largest |dr_i|.
-    pub top5_share: f64,
-    /// Share of residual power on the twelve atoms with the largest |dr_i|.
-    pub top12_share: f64,
-    /// Proposed coordinates after the cap.
-    pub y: Array1<f64>,
-}
-
-/// Probe the fivefold hop: length, residual concentration, gated yield.
-pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
-    let (d5, axis, mut dr) = fivefold_residual(x);
-    let n_axes = fivefold_axis_count(x);
-    let n = (x.len() / 3).max(1);
-    let nf = n as f64;
-    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / nf).sqrt();
-    let gated = n < 5 || n_axes < FIVEFOLD_MIN_AXES;
-    let mut used_pentagon = false;
-    if !gated && cur < 1e-8 {
-        dr = pentagon_break(x, axis);
-        used_pentagon = true;
-    }
-    let mut atom = vec![0.0; n];
-    let mut tot = 0.0;
-    for i in 0..n {
-        let s =
-            dr[3 * i] * dr[3 * i] + dr[3 * i + 1] * dr[3 * i + 1] + dr[3 * i + 2] * dr[3 * i + 2];
-        atom[i] = s;
-        tot += s;
-    }
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|a, b| atom[*b].partial_cmp(&atom[*a]).unwrap());
-    let share = |k: usize| {
-        if tot <= 0.0 {
-            return 0.0;
+    /// Measured LJ packing hop: SOFI C5 residual on the best axis.
+    ///
+    /// Yields only when the best-axis fivefold length already exceeds
+    /// `FIVEFOLD_GATE`. This is the hop that produced the LJ38 58/72
+    /// campaign. The multi-axis gated hop is [`step_away_fivefold`].
+    pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
+        if candidate_axes(x)
+            .iter()
+            .all(|axis| row_min_rms_clears(x, *axis, FIVEFOLD_GATE))
+        {
+            return x.to_owned();
         }
-        order.iter().take(k.min(n)).map(|&i| atom[i]).sum::<f64>() / tot
-    };
-    let y = if gated {
-        x.to_owned()
-    } else if !used_pentagon && n > 13 {
-        // Residual already lives on one pentagon (top-5 share ~0.8 on
-        // the LJ75 ico). A global RMS cap then gives those five a
-        // 1.2-wide kick and the quench melts the shell. Cap the
-        // pentagon itself at `rmsd`.
-        concentrate_residual(&mut dr, 5);
-        scale_support_to_cap(x, dr, rmsd.max(PENTAGON_CAP))
-    } else {
+        let (d5, axis, mut dr) = fivefold_residual(x);
+        if d5 > FIVEFOLD_GATE {
+            return x.to_owned();
+        }
+        let n = (x.len() / 3).max(1) as f64;
+        let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+        if cur < 1e-8 {
+            dr = pentagon_break(x, axis);
+        }
         scale_to_cap(x, dr, rmsd)
-    };
-    FivefoldProbe {
-        d5,
-        n_axes,
-        residual_rms: cur,
-        gated,
-        used_pentagon,
-        top5_share: share(5),
-        top12_share: share(12),
-        y,
     }
-}
 
-/// Measured LJ packing hop: SOFI C5 residual on the best axis.
-///
-/// Yields only when the best-axis fivefold length already exceeds
-/// `FIVEFOLD_GATE`. This is the hop that produced the LJ38 58/72
-/// campaign. The multi-axis gated hop is [`step_away_fivefold`].
-pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
-    if candidate_axes(x)
-        .iter()
-        .all(|axis| row_min_rms_clears(x, *axis, FIVEFOLD_GATE))
-    {
-        return x.to_owned();
-    }
-    let (d5, axis, mut dr) = fivefold_residual(x);
-    if d5 > FIVEFOLD_GATE {
-        return x.to_owned();
-    }
-    let n = (x.len() / 3).max(1) as f64;
-    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
-    if cur < 1e-8 {
-        dr = pentagon_break(x, axis);
-    }
-    scale_to_cap(x, dr, rmsd)
-}
+    /// Interior angle of a regular pentagon, `3π/5`.
+    ///
+    /// A fivefold symmetry is a turn by `2π/5`. The interior angle is not a
+    /// power of that turn. Assigning the cloud onto a copy rotated by the
+    /// interior angle is a minimum-cost matching, and the residual of that
+    /// matching sits on five atoms. Scaling it by [`PENTAGON_CAP`] is the
+    /// step from a Mackay pentagon onto the anti-Mackay sites.
+    const PENTAGON_INTERIOR: f64 = 3.0 * PI / 5.0;
 
-/// Interior angle of a regular pentagon, `3π/5`.
-///
-/// A fivefold symmetry is a turn by `2π/5`. The interior angle is not a
-/// power of that turn. Assigning the cloud onto a copy rotated by the
-/// interior angle is a minimum-cost matching, and the residual of that
-/// matching sits on five atoms. Scaling it by [`PENTAGON_CAP`] is the
-/// step from a Mackay pentagon onto the anti-Mackay sites.
-const PENTAGON_INTERIOR: f64 = 3.0 * PI / 5.0;
+    /// Quench rise that is the Mackay to anti-Mackay reconstruction.
+    ///
+    /// One nearest-neighbour Lennard-Jones contact is a well of depth 1.
+    /// The second neighbour lies at `2^{2/3}` and contributes `-15/64`.
+    /// The reconstruction drops one nearest neighbour and keeps that
+    /// second shell, so the rise sits above a bare contact,
+    /// `1 + (15/64)/10 = 1.0234375`, and below one well plus half the
+    /// second shell, `1 + (15/64)/2 = 1.1171875`. Widened outward to the
+    /// hundredth, the open interval is `(1.02, 1.12)`. The other pentagon
+    /// of the same shell returns by about a tenth and stays Mackay. A
+    /// second broken contact rises by about two wells. This is the pair
+    /// potential, not a fit to search seeds.
+    const DOORWAY_LO: f64 = 1.02;
+    const DOORWAY_HI: f64 = 1.12;
 
-/// Quench rise that is the Mackay to anti-Mackay reconstruction.
-///
-/// One nearest-neighbour Lennard-Jones contact is a well of depth 1.
-/// The second neighbour lies at `2^{2/3}` and contributes `-15/64`.
-/// The reconstruction drops one nearest neighbour and keeps that
-/// second shell, so the rise sits above a bare contact,
-/// `1 + (15/64)/10 = 1.0234375`, and below one well plus half the
-/// second shell, `1 + (15/64)/2 = 1.1171875`. Widened outward to the
-/// hundredth, the open interval is `(1.02, 1.12)`. The other pentagon
-/// of the same shell returns by about a tenth and stays Mackay. A
-/// second broken contact rises by about two wells. This is the pair
-/// potential, not a fit to search seeds.
-const DOORWAY_LO: f64 = 1.02;
-const DOORWAY_HI: f64 = 1.12;
-
-fn canonical_direction(u: [f64; 3]) -> [f64; 3] {
-    for component in u {
-        if component > 1e-9 {
-            return u;
-        }
-        if component < -1e-9 {
-            return [-u[0], -u[1], -u[2]];
-        }
-    }
-    u
-}
-
-/// Candidate axes with a fixed sign and a geometric order.
-///
-/// Opposite vertices name one axis. The sign is the one whose first
-/// nonzero component is positive, and the list is sorted by that
-/// direction, so a permutation of the atoms does not reorder it.
-fn opening_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
-    let mut axes = Vec::new();
-    for axis in candidate_axes(x) {
-        let direction = canonical_direction(axis);
-        if axis_unique(&axes, direction) {
-            axes.push(direction);
-        }
-    }
-    axes.sort_by(|left, right| {
-        left[0]
-            .partial_cmp(&right[0])
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(
-                left[1]
-                    .partial_cmp(&right[1])
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-            .then(
-                left[2]
-                    .partial_cmp(&right[2])
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-    });
-    axes
-}
-
-/// Optimal residual of a turn by the pentagon's interior angle.
-fn interior_opening(x: ArrayView1<f64>, axis: [f64; 3], sign: f64) -> Array1<f64> {
-    let n = x.len() / 3;
-    let com = com_of(x);
-    let rmat = rotation_about(axis, sign * PENTAGON_INTERIOR);
-    let mut centred = vec![0.0; x.len()];
-    let mut turned = vec![0.0; x.len()];
-    for i in 0..n {
-        let point = [
-            x[3 * i] - com[0],
-            x[3 * i + 1] - com[1],
-            x[3 * i + 2] - com[2],
-        ];
-        for axis_i in 0..3 {
-            centred[3 * i + axis_i] = point[axis_i];
-        }
-        let image = rot_apply(&rmat, point);
-        for axis_i in 0..3 {
-            turned[3 * i + axis_i] = image[axis_i];
-        }
-    }
-    let perm = optimal_perm(ArrayView1::from(centred.as_slice()), &turned);
-    let mut dr = Array1::zeros(x.len());
-    for i in 0..n {
-        for axis_i in 0..3 {
-            dr[3 * i + axis_i] = centred[3 * i + axis_i] - turned[3 * perm[i] + axis_i];
-        }
-    }
-    concentrate_residual(&mut dr, 5);
-    scale_support_to_cap(x, dr, PENTAGON_CAP)
-}
-
-/// Stall openings off a shell whose 555 fraction is still icosahedral.
-///
-/// Each entry turns one candidate axis by the pentagon's interior
-/// angle, in either sense, and steps the five atoms that carry the
-/// optimal residual. Marks and the tetrahedral minimum sit below the
-/// 555 cut. No deposited geometry is compared, and the call does not
-/// name an energy or a size.
-pub fn fivefold_openings(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
-    let n = x.len() / 3;
-    if n <= 13 || !ih_dominated(x, SoapSpec::default()) {
-        return Vec::new();
-    }
-    let mut found = Vec::new();
-    for axis in opening_axes(x) {
-        for sign in [1.0, -1.0] {
-            let opened = interior_opening(x, axis, sign);
-            let moved = opened
-                .iter()
-                .zip(x.iter())
-                .any(|(after, before)| (after - before).abs() > 1e-12);
-            if moved {
-                found.push(opened);
+    fn canonical_direction(u: [f64; 3]) -> [f64; 3] {
+        for component in u {
+            if component > 1e-9 {
+                return u;
+            }
+            if component < -1e-9 {
+                return [-u[0], -u[1], -u[2]];
             }
         }
+        u
     }
-    found
-}
 
-/// Whether a quenched opening is the Mackay to anti-Mackay doorway.
-///
-/// A descent back onto the occupied shelf is not this step, and neither
-/// is the first rise above half a unit. The rise has to fall in
-/// `(1.02, 1.12)`, the one-bond window around the reconstruction.
-pub fn opening_left(current: f64, opened: f64) -> bool {
-    let rise = opened - current;
-    rise.is_finite() && rise > DOORWAY_LO && rise < DOORWAY_HI
-}
+    /// Candidate axes with a fixed sign and a geometric order.
+    ///
+    /// Opposite vertices name one axis. The sign is the one whose first
+    /// nonzero component is positive, and the list is sorted by that
+    /// direction, so a permutation of the atoms does not reorder it.
+    fn opening_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
+        let mut axes = Vec::new();
+        for axis in candidate_axes(x) {
+            let direction = canonical_direction(axis);
+            if axis_unique(&axes, direction) {
+                axes.push(direction);
+            }
+        }
+        axes.sort_by(|left, right| {
+            left[0]
+                .partial_cmp(&right[0])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(
+                    left[1]
+                        .partial_cmp(&right[1])
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+                .then(
+                    left[2]
+                        .partial_cmp(&right[2])
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+        });
+        axes
+    }
 
-/// Leave the fivefold funnel: amplify the SOFI C5 residual on the
-/// high-mismatch shell, or break a perfect pentagon. Yields unless
-/// at least two candidate axes are still fivefold. On an open shell
-/// the axis is drawn from the good set so the hop is not a single
-/// deterministic pentagon.
-///
-/// This draw is not the stall opening. A random choice between the
-/// pentagon near 0.90 and the one near 0.99, used on every hop, rescued
-/// one subset of the shelf and lost another. The stall opening is
-/// [`fivefold_openings`], which takes the lower pentagon after the
-/// chain has stopped improving.
-pub fn step_away_fivefold<R: Rng + ?Sized>(
-    x: ArrayView1<f64>,
-    rmsd: f64,
-    rng: &mut R,
-) -> Array1<f64> {
-    let n = x.len() / 3;
-    if n <= 13 {
-        return fivefold_probe(x, rmsd).y;
-    }
-    let table = fivefold_axis_table(x);
-    let good: Vec<([f64; 3], f64)> = table
-        .into_iter()
-        .filter(|(_, d)| *d < FIVEFOLD_AXIS)
-        .collect();
-    if good.len() < FIVEFOLD_MIN_AXES {
-        return x.to_owned();
-    }
-    // The tightest axes snap back into the ico basin. The two
-    // openings that leave sit near d5 = 0.90 and 0.99. Draw one.
-    let closest = |target: f64| {
-        good.iter()
-            .min_by(|a, b| {
-                (a.1 - target)
-                    .abs()
-                    .partial_cmp(&(b.1 - target).abs())
-                    .unwrap()
-            })
-            .map(|r| r.0)
-            .unwrap_or(good[0].0)
-    };
-    let a = closest(RECON_LO + 0.01);
-    let b = closest(RECON_HI - 0.01);
-    let axis = if rng.random::<bool>() { a } else { b };
-    step_away_fivefold_about(x, rmsd.max(PENTAGON_CAP), axis)
-}
-
-/// Fivefold residual hop about one named axis. Used to probe which
-/// pentagon opening leaves the icosahedral shelf.
-pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -> Array1<f64> {
-    let (d5, mut dr) = residual_about(x, axis);
-    if d5 < 1e-8 {
-        dr = pentagon_break(x, axis);
-        return scale_to_cap(x, dr, rmsd);
-    }
-    let n = x.len() / 3;
-    if n > 13 {
+    /// Optimal residual of a turn by the pentagon's interior angle.
+    fn interior_opening(x: ArrayView1<f64>, axis: [f64; 3], sign: f64) -> Array1<f64> {
+        let n = x.len() / 3;
+        let com = com_of(x);
+        let rmat = rotation_about(axis, sign * PENTAGON_INTERIOR);
+        let mut centred = vec![0.0; x.len()];
+        let mut turned = vec![0.0; x.len()];
+        for i in 0..n {
+            let point = [
+                x[3 * i] - com[0],
+                x[3 * i + 1] - com[1],
+                x[3 * i + 2] - com[2],
+            ];
+            for axis_i in 0..3 {
+                centred[3 * i + axis_i] = point[axis_i];
+            }
+            let image = rot_apply(&rmat, point);
+            for axis_i in 0..3 {
+                turned[3 * i + axis_i] = image[axis_i];
+            }
+        }
+        let perm = optimal_perm(ArrayView1::from(centred.as_slice()), &turned);
+        let mut dr = Array1::zeros(x.len());
+        for i in 0..n {
+            for axis_i in 0..3 {
+                dr[3 * i + axis_i] = centred[3 * i + axis_i] - turned[3 * perm[i] + axis_i];
+            }
+        }
         concentrate_residual(&mut dr, 5);
-        scale_support_to_cap(x, dr, rmsd)
-    } else {
-        scale_to_cap(x, dr, rmsd)
+        scale_support_to_cap(x, dr, PENTAGON_CAP)
+    }
+
+    /// Stall openings off a shell whose 555 fraction is still icosahedral.
+    ///
+    /// Each entry turns one candidate axis by the pentagon's interior
+    /// angle, in either sense, and steps the five atoms that carry the
+    /// optimal residual. Marks and the tetrahedral minimum sit below the
+    /// 555 cut. No deposited geometry is compared, and the call does not
+    /// name an energy or a size.
+    pub fn fivefold_openings(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+        let n = x.len() / 3;
+        if n <= 13 || !ih_dominated(x, SoapSpec::default()) {
+            return Vec::new();
+        }
+        let mut found = Vec::new();
+        for axis in opening_axes(x) {
+            for sign in [1.0, -1.0] {
+                let opened = interior_opening(x, axis, sign);
+                let moved = opened
+                    .iter()
+                    .zip(x.iter())
+                    .any(|(after, before)| (after - before).abs() > 1e-12);
+                if moved {
+                    found.push(opened);
+                }
+            }
+        }
+        found
+    }
+
+    /// Whether a quenched opening is the Mackay to anti-Mackay doorway.
+    ///
+    /// A descent back onto the occupied shelf is not this step, and neither
+    /// is the first rise above half a unit. The rise has to fall in
+    /// `(1.02, 1.12)`, the one-bond window around the reconstruction.
+    pub fn opening_left(current: f64, opened: f64) -> bool {
+        let rise = opened - current;
+        rise.is_finite() && rise > DOORWAY_LO && rise < DOORWAY_HI
+    }
+
+    /// Leave the fivefold funnel: amplify the SOFI C5 residual on the
+    /// high-mismatch shell, or break a perfect pentagon. Yields unless
+    /// at least two candidate axes are still fivefold. On an open shell
+    /// the axis is drawn from the good set so the hop is not a single
+    /// deterministic pentagon.
+    ///
+    /// This draw is not the stall opening. A random choice between the
+    /// pentagon near 0.90 and the one near 0.99, used on every hop, rescued
+    /// one subset of the shelf and lost another. The stall opening is
+    /// [`fivefold_openings`], which takes the lower pentagon after the
+    /// chain has stopped improving.
+    pub fn step_away_fivefold<R: Rng + ?Sized>(
+        x: ArrayView1<f64>,
+        rmsd: f64,
+        rng: &mut R,
+    ) -> Array1<f64> {
+        let n = x.len() / 3;
+        if n <= 13 {
+            return fivefold_probe(x, rmsd).y;
+        }
+        let table = fivefold_axis_table(x);
+        let good: Vec<([f64; 3], f64)> = table
+            .into_iter()
+            .filter(|(_, d)| *d < FIVEFOLD_AXIS)
+            .collect();
+        if good.len() < FIVEFOLD_MIN_AXES {
+            return x.to_owned();
+        }
+        // The tightest axes snap back into the ico basin. The two
+        // openings that leave sit near d5 = 0.90 and 0.99. Draw one.
+        let closest = |target: f64| {
+            good.iter()
+                .min_by(|a, b| {
+                    (a.1 - target)
+                        .abs()
+                        .partial_cmp(&(b.1 - target).abs())
+                        .unwrap()
+                })
+                .map(|r| r.0)
+                .unwrap_or(good[0].0)
+        };
+        let a = closest(RECON_LO + 0.01);
+        let b = closest(RECON_HI - 0.01);
+        let axis = if rng.random::<bool>() { a } else { b };
+        step_away_fivefold_about(x, rmsd.max(PENTAGON_CAP), axis)
+    }
+
+    /// Fivefold residual hop about one named axis. Used to probe which
+    /// pentagon opening leaves the icosahedral shelf.
+    pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -> Array1<f64> {
+        let (d5, mut dr) = residual_about(x, axis);
+        if d5 < 1e-8 {
+            dr = pentagon_break(x, axis);
+            return scale_to_cap(x, dr, rmsd);
+        }
+        let n = x.len() / 3;
+        if n > 13 {
+            concentrate_residual(&mut dr, 5);
+            scale_support_to_cap(x, dr, rmsd)
+        } else {
+            scale_to_cap(x, dr, rmsd)
+        }
     }
 }
+
+#[cfg(test)]
+use symmetry_test_helpers::*;
 
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
@@ -2779,6 +2792,188 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         let y = scale_to_cap(x, dr, rmsd);
         retract_rigid_groups(x, y, groups)
     }
+}
+
+/// SOAP spec written at this structure's own nearest-neighbour length.
+///
+/// The cutoff is three median nearest-neighbour distances, so the same
+/// shells are covered on every potential. `l_max = 6` is the hop
+/// resolution. No species scale and no template.
+pub fn structure_spec(x: ArrayView1<f64>) -> SoapSpec {
+    SoapSpec {
+        n_max: 3,
+        l_max: 6,
+        rcut_nn: 3.0 * median_nearest(x).max(1e-6),
+    }
+}
+
+fn median_nearest(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return 1.0;
+    }
+    let mut nearest = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::MAX;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut d = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                d += delta * delta;
+            }
+            best = best.min(d);
+        }
+        if best.is_finite() {
+            nearest.push(best.sqrt());
+        }
+    }
+    if nearest.is_empty() {
+        return 1.0;
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    nearest[nearest.len() / 2]
+}
+
+fn proposal_moved(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
+    y.len() == x.len()
+        && y.iter()
+            .zip(x.iter())
+            .any(|(after, before)| (after - before).abs() > 1e-12)
+}
+
+/// One covering direction of the displacement sphere, at `rmsd`.
+///
+/// Used when every local fingerprint is the same point, so neither the
+/// leftover nor an outlier has a direction. The cover names no packing.
+fn cover_displacement<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    rmsd: f64,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let Some(slice) = x.as_slice() else {
+        return x.to_owned();
+    };
+    let n_cover = crate::hypersphere::default_cover_size().max(1);
+    let index = rng.random_range(0..n_cover);
+    let direction = crate::hypersphere::cover_direction(n_cover, slice.len(), index);
+    Array1::from(crate::hypersphere::place_around(
+        slice, &direction, rmsd, mobile,
+    ))
+}
+
+/// Move atoms whose local fingerprint sticks out of the observed cloud.
+///
+/// The fingerprint is the stacked SOAP+ν=3 row. An outlier is a mobile
+/// atom farther from the cloud mean than the median atom. Those rows are
+/// pulled to the mean through the analytic Jacobian. A Dirac cloud has
+/// no outlier, and a flat Jacobian has no step: both fall through to one
+/// covering direction. No reference template and no symmetry axis.
+pub fn step_away_outliers<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    if n_at == 0 || dim == 0 {
+        return cover_displacement(x, rmsd, mobile, rng);
+    }
+    let keep = mobile_mask(n_at, mobile);
+    let mut mu = vec![0.0; dim];
+    let mut count = 0.0;
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        count += 1.0;
+        for t in 0..dim {
+            mu[t] += loc[[i, t]];
+        }
+    }
+    if count > 0.0 {
+        for value in &mut mu {
+            *value /= count;
+        }
+    }
+    let mut scores = vec![0.0; n_at];
+    let mut listed = Vec::new();
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        let mut residual = 0.0;
+        for t in 0..dim {
+            let delta = loc[[i, t]] - mu[t];
+            residual += delta * delta;
+        }
+        scores[i] = residual.sqrt();
+        listed.push(scores[i]);
+    }
+    if listed.is_empty() {
+        return cover_displacement(x, rmsd, mobile, rng);
+    }
+    listed.sort_by(|a, b| a.total_cmp(b));
+    let median = listed[listed.len() / 2];
+    let widest = listed[listed.len() - 1];
+    if widest < 1e-8 {
+        return cover_displacement(x, rmsd, mobile, rng);
+    }
+    let mut target = Array1::zeros(n_at * dim);
+    let mut any = false;
+    for i in 0..n_at {
+        let outlier = keep[i] && scores[i] > median;
+        if outlier {
+            any = true;
+        }
+        for t in 0..dim {
+            target[i * dim + t] = if outlier { mu[t] } else { loc[[i, t]] };
+        }
+    }
+    if !any {
+        return cover_displacement(x, rmsd, mobile, rng);
+    }
+    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+    let y = scale_to_cap(x, dr, rmsd);
+    if proposal_moved(x, y.view()) {
+        y
+    } else {
+        let which: Vec<usize> = (0..n_at)
+            .filter(|&i| keep[i] && scores[i] > median)
+            .collect();
+        let subset = (!which.is_empty()).then_some(which.as_slice());
+        cover_displacement(x, rmsd, subset, rng)
+    }
+}
+
+/// Descriptor-gradient hop, then a fingerprint-outlier hop if that residual is flat.
+///
+/// The gradient is [`step_away_cloud`]: the observed leftover, partitioned
+/// by atomic number and by the mobile mask, pulled back through `J`. The
+/// same map runs on every potential. A closed cloud yields the identity,
+/// and [`step_away_outliers`] takes the hop. Neither step names a packing.
+pub fn step_descriptor<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let cloud = step_away_cloud(x, spec, rmsd, species, mobile, groups, rng);
+    if proposal_moved(x, cloud.view()) {
+        return cloud;
+    }
+    let outliers = step_away_outliers(x, spec, rmsd, species, mobile, rng);
+    retract_rigid_groups(x, outliers, groups)
 }
 
 /// Retract an ambient Cartesian proposal onto the product rigid-body manifold.
@@ -3482,8 +3677,8 @@ mod tests {
             };
             let x = Array1::from((0..3 * n).map(|_| next()).collect::<Vec<_>>());
             let y = (0..3 * n).map(|_| next()).collect::<Vec<_>>();
-            let mut scalar = vec![0.0; n * n];
-            let mut wide = vec![0.0; n * n];
+            let mut scalar = vec![0.0_f64; n * n];
+            let mut wide = vec![0.0_f64; n * n];
             fill_squared_cost_scalar(x.view(), &y, n, &mut scalar);
             fill_squared_cost(x.view(), &y, n, &mut wide);
             for (index, (left, right)) in scalar.iter().zip(&wide).enumerate() {
@@ -4094,87 +4289,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn fivefold_hop_moves_ico_and_yields_on_cuboct() {
-        let mut ico = ico13();
-        let nn = 2.0_f64.powf(1.0 / 6.0);
-        for v in ico.iter_mut() {
-            *v *= nn;
-        }
-        let mut rng = StdRng::seed_from_u64(1);
-        let y = step_away_fivefold(ico.view(), 0.4, &mut rng);
-        let mut d2 = 0.0;
-        for i in 0..ico.len() {
-            let d = y[i] - ico[i];
-            d2 += d * d;
-        }
-        let atom_rms = (d2 / 13.0).sqrt();
-        assert!((atom_rms - 0.4).abs() < 1e-8, "fivefold hop rms {atom_rms}");
-        let mut shifted = ico.clone();
-        shifted[0] += 0.35;
-        for axis in candidate_axes(shifted.view()) {
-            let bound = rotation_row_min_rms_until(shifted.view(), axis, f64::INFINITY);
-            let exact = residual_about_fresh(shifted.view(), axis).0;
-            assert!(
-                bound <= exact + 1.0e-8,
-                "row-min {bound} above assignment {exact}"
-            );
-        }
-        let table = fivefold_axis_table(shifted.view());
-        for (axis, length) in &table {
-            if *length + 1.0e-8 < FIVEFOLD_AXIS {
-                let exact = residual_about_fresh(shifted.view(), *axis).0;
-                assert!((length - exact).abs() < 1.0e-9, "{length} vs {exact}");
-            }
-        }
-        let cub = cuboct13();
-        let d_ico = fivefold_length(ico.view());
-        let d_cub = fivefold_length(cub.view());
-        let n_ico = fivefold_axis_count(ico.view());
-        let n_cub = fivefold_axis_count(cub.view());
-        assert!(
-            d_ico < d_cub,
-            "ico fivefold length {d_ico} should be below cuboct {d_cub}"
-        );
-        assert!(
-            n_ico >= FIVEFOLD_MIN_AXES,
-            "ico axis count {n_ico} should pass the gate {FIVEFOLD_MIN_AXES}"
-        );
-        let z = step_away_fivefold(cub.view(), 0.4, &mut rng);
-        // Greedy C5 residual on any 12-point spherical shell is small,
-        // so cuboct is not a yield under this matching. The hop must
-        // still move the icosahedron and the ico length must sit below
-        // the cuboct length.
-        let _ = (n_cub, z);
-    }
-
-    #[test]
-    fn fivefold_hop_moves_rotated_ico() {
-        let mut ico = ico13();
-        let nn = 2.0_f64.powf(1.0 / 6.0);
-        for v in ico.iter_mut() {
-            *v *= nn;
-        }
-        let rot = rotate_z(ico.view(), 0.7);
-        assert!(
-            fivefold_axis_count(rot.view()) >= FIVEFOLD_MIN_AXES,
-            "rotated ico axis count {}",
-            fivefold_axis_count(rot.view())
-        );
-        let mut rng = StdRng::seed_from_u64(2);
-        let y = step_away_fivefold(rot.view(), 0.4, &mut rng);
-        let mut d2 = 0.0;
-        for i in 0..rot.len() {
-            let d = y[i] - rot[i];
-            d2 += d * d;
-        }
-        let atom_rms = (d2 / 13.0).sqrt();
-        assert!(
-            (atom_rms - 0.4).abs() < 1e-8,
-            "rotated ico hop rms {atom_rms}"
-        );
-    }
-
     /// Every atom of a regular tetrahedron has the same environment, so
     /// the descriptor carries no direction to step away in. The native
     /// pullback answers that by standing still. The featomic path reads
@@ -4255,101 +4369,6 @@ mod tests {
             max_d < 1e-4 * max_a.max(1e-6) + 1e-6,
             "nu3 J disagrees with FD: max|Δ|={max_d} max|FD|={max_a}"
         );
-    }
-
-    fn load_xyz(text: &str) -> Array1<f64> {
-        let mut coords = Vec::new();
-        for line in text.lines().skip(2) {
-            let mut parts = line.split_whitespace();
-            if parts.next().is_none() {
-                continue;
-            }
-            for _ in 0..3 {
-                coords.push(parts.next().unwrap().parse::<f64>().unwrap());
-            }
-        }
-        Array1::from_vec(coords)
-    }
-
-    fn quench_lj_state(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let n = x.len() / 3;
-        let potential = crate::potentials::PairPotential::lennard_jones(n);
-        let mut optimiser = crate::methods::warm_lbfgs::WarmLbfgs::default();
-        let (value, relaxed, _) =
-            optimiser.minimize(x, 400, |v| Some(potential.value_and_gradient(v)));
-        (value, relaxed)
-    }
-
-    fn permute_atoms(x: &Array1<f64>, order: &[usize]) -> Array1<f64> {
-        let mut y = Array1::zeros(x.len());
-        for (slot, &src) in order.iter().enumerate() {
-            for axis in 0..3 {
-                y[3 * slot + axis] = x[3 * src + axis];
-            }
-        }
-        y
-    }
-
-    /// The deposited Mackay shell, in every storage order the rejection tried.
-    ///
-    /// The doorway is a property of the cloud. Shuffling the quenched
-    /// atoms must still land in the Mackay to anti-Mackay window, and on
-    /// the same minimum. Marks, the 38-point octahedron, and the
-    /// tetrahedral minimum are not icosahedral shells.
-    #[test]
-    fn fivefold_opening_is_invariant_under_deposited_order() {
-        let fixture = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
-        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
-        let fcc = load_xyz(include_str!("../tests/fixtures/lj38_fcc.xyz"));
-        let tetrahedral = load_xyz(include_str!("../tests/fixtures/lj98_gm.xyz"));
-        assert!(fivefold_openings(marks.view()).is_empty());
-        assert!(fivefold_openings(fcc.view()).is_empty());
-        assert!(fivefold_openings(tetrahedral.view()).is_empty());
-        let (shelf, quenched) = quench_lj_state(fixture.view());
-        let length = fivefold_length(quenched.view());
-        let doorway = |cloud: &Array1<f64>| -> f64 {
-            let mut rise = None;
-            for opened in fivefold_openings(cloud.view()) {
-                let (landed, _) = quench_lj_state(opened.view());
-                let gap = landed - shelf;
-                if opening_left(shelf, landed) {
-                    rise = Some(gap);
-                    break;
-                }
-            }
-            rise.expect("no Mackay to anti-Mackay opening")
-        };
-        let deposited = doorway(&quenched);
-        assert!(
-            (super::DOORWAY_LO..super::DOORWAY_HI).contains(&deposited),
-            "deposited rise {deposited} from {shelf}"
-        );
-        let n = quenched.len() / 3;
-        let mut rng = StdRng::seed_from_u64(0);
-        for seed in 0..24 {
-            let mut order: Vec<usize> = (0..n).collect();
-            for i in (1..n).rev() {
-                let j = rng.random_range(0..=i);
-                order.swap(i, j);
-            }
-            let scrambled = permute_atoms(&quenched, &order);
-            let scrambled_length = fivefold_length(scrambled.view());
-            assert!(
-                (scrambled_length - length).abs() < 1e-8,
-                "perm {seed} length {scrambled_length} vs {length}"
-            );
-            let rise = doorway(&scrambled);
-            assert!(
-                (rise - deposited).abs() < 1e-4,
-                "perm {seed} rise {rise} left the doorway {deposited}"
-            );
-        }
-        let mut reversed: Vec<usize> = (0..n).rev().collect();
-        let rise = doorway(&permute_atoms(&quenched, &reversed));
-        assert!((rise - deposited).abs() < 1e-4, "reversed rise {rise}");
-        reversed.rotate_left(1);
-        let rise = doorway(&permute_atoms(&quenched, &reversed));
-        assert!((rise - deposited).abs() < 1e-4, "rotated rise {rise}");
     }
 
     fn direct_row_min(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {

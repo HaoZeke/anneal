@@ -6,8 +6,8 @@
 //! for each fragment, the translation of its centroid and a rotation vector
 //! scaled by its radius of gyration. A linear fragment rotates as a line,
 //! and the centre of a linear angle carries its Cartesian coordinates.
-//! Covalent bonds are pairs closer than 1.2 times the sum of their Cordero
-//! radii. The primitives are built at the start and rebuilt when an angle
+//! Bond scales are inferred from nearest separations in the current geometry.
+//! The primitives are built at the start and rebuilt when an angle
 //! goes linear, a fragment straightens, or a back-transformation misses.
 //! The redundant primitives are spanned by delocalized coordinates, the
 //! left singular vectors of the Wilson matrix `B`, rebuilt at every accepted
@@ -37,7 +37,7 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::methods::cluster_hopping::covalent_radius;
+use crate::methods::cluster_hopping::geometric_bonds;
 
 const BOND_FACTOR: f64 = 1.2;
 const LINEAR_COS: f64 = -0.996_194_698_091_745_5; // cos 175 degrees
@@ -459,8 +459,9 @@ fn line_rotation(reference: &[[f64; 3]], current: &[[f64; 3]]) -> [f64; 3] {
 }
 
 impl Tric {
-    /// Primitives of `x` under covalent bonds of the labels `species`.
+    /// Primitives of `x` under the geometry-inferred bonds of opaque labels.
     pub fn new(species: &[u32], x: ArrayView1<f64>) -> Self {
+        let bonds = geometric_bonds(x, species, BOND_FACTOR);
         let x = x.to_vec();
         let n = species.len();
         assert_eq!(x.len(), 3 * n, "TRIC needs one species label per atom");
@@ -469,9 +470,7 @@ impl Tric {
         let mut stiffness = Vec::new();
         for i in 0..n {
             for j in (i + 1)..n {
-                let limit =
-                    BOND_FACTOR * (covalent_radius(species[i]) + covalent_radius(species[j]));
-                if limit > 0.0 && norm(sub(point(&x, i), point(&x, j))) < limit {
+                if bonds[i * n + j] {
                     neighbours[i].push(j);
                     neighbours[j].push(i);
                     primitives.push(Primitive::Bond(i, j));

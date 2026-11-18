@@ -2139,8 +2139,8 @@ where
 
 /// Unquenched Leave starts scored by packing histogram, for FunnelModel EI.
 ///
-/// Each probe is one first-rung step or the fivefold residual. The
-/// quench is paid only for the cover EI (or Thompson) then selects.
+/// Each probe is one first-rung step or the fingerprint-outlier residual.
+/// The quench is paid only for the cover EI (or Thompson) then selects.
 pub fn propose_leave_covers<E, R>(
     origin: ArrayView1<f64>,
     references: &[Vec<f64>],
@@ -2158,7 +2158,7 @@ where
         return Vec::new();
     };
     let n = crate::catalog::cover_arm_count();
-    let fivefold = crate::catalog::fivefold_arm();
+    let outlier = crate::catalog::outlier_arm();
     let mut book = crate::catalog::PackingBook::default();
     book.observe(origin_slice);
     let mut seen = std::collections::BTreeSet::new();
@@ -2168,8 +2168,9 @@ where
         if !seen.insert(cover) {
             continue;
         }
-        let start = if cover == fivefold {
-            crate::soap::step_away_fivefold_measured(origin, LEAVE_RUNG_RMSD)
+        let start = if cover == outlier {
+            let spec = crate::soap::structure_spec(origin);
+            crate::soap::step_descriptor(origin, spec, LEAVE_RUNG_RMSD, species, None, None, rng)
         } else {
             leave_packing_rung_to(
                 origin,

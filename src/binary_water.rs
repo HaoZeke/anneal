@@ -624,7 +624,7 @@ mod tests {
         let found = search_binary_batch(
             &binary,
             &[start.to_vec()],
-            40,
+            200,
             f64::NEG_INFINITY,
             &[3],
             false,

@@ -38,7 +38,6 @@ impl LennardJonesPreset {
 pub(super) struct MolecularPreset;
 
 impl MolecularPreset {
-    pub(super) const COVALENT_DIAMETER: f64 = 2.0;
     pub(super) const GROUP_CUTOFF: f64 = 2.5;
     pub(super) const REPACK_RADIUS: f64 = 2.5;
     pub(super) const REPACK_RADIAL_JITTER: f64 = 2.0;

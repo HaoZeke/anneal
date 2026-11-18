@@ -71,20 +71,10 @@ fn hop_shape_from_shipped_constructors() {
         .kernels(&rec)
         .into_iter()
         .find(|k| matches!(k, ClusterMove::Soap { .. }));
-    match soap {
-        Some(ClusterMove::Soap {
-            class,
-            species,
-            mobile,
-            ..
-        }) => {
-            assert!(!class, "recommended SOAP shipped the 555->421 oracle");
-            assert!(species.is_none());
-            assert!(mobile.is_none());
-            println!("rec class={class} species={species:?} mobile={mobile:?}");
-        }
-        _ => panic!("recommended LeanBurst has no SOAP arm"),
-    }
+    assert!(
+        soap.is_none(),
+        "recommended LeanBurst must not include an unlabeled SOAP arm"
+    );
 
     let mol = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
     assert!(!mol.packing_cna_applies());

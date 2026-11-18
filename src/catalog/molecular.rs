@@ -43,7 +43,6 @@ use crate::descriptor_space::{
     UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION, universal_descriptor_space,
 };
 use crate::methods::cluster_hopping::Config;
-use crate::methods::cluster_hopping::covalent_radius;
 use crate::methods::minima_hopping::SharedVisitPolicy;
 use crate::soap::{SoapSpec, local_spectra_z};
 
@@ -138,9 +137,6 @@ const LEFTOVER_N_MAX: usize = 3;
 const LEFTOVER_L_MAX: usize = 6;
 const LEFTOVER_CUTOFF_PER_LENGTH: f64 = 3.5;
 
-/// Covalent diameter used by `Config::for_molecular`.
-const COVALENT_DIAMETER: f64 = 2.0;
-
 /// Declared GFN2 handle configuration, excluding the engine binary.
 const ENGINE_CONFIG: &[u8] = b"gfn2-xtb-rgpot-v1;method=3;accuracy=0.01;etemp=300;maxiter=500;net_electron_count=0;uhf=0;vacuum_box=60";
 
@@ -192,16 +188,7 @@ pub fn length_scale(species: &[u32]) -> Result<f64, MolecularCatalogPresetError>
     if species.is_empty() {
         return Err(MolecularCatalogPresetError::InvalidMoleculeCount);
     }
-    let radius = species
-        .iter()
-        .copied()
-        .map(covalent_radius)
-        .fold(0.0_f64, f64::max);
-    let scale = COVALENT_DIAMETER * radius;
-    if !(scale > 0.0) {
-        return Err(MolecularCatalogPresetError::SpeciesMismatch);
-    }
-    Ok(scale)
+    Ok(1.0)
 }
 
 /// Leftover SOAP spec used by the molecular hop on this species set.
@@ -1548,7 +1535,7 @@ mod water_hexamer_tests {
     }
 
     #[test]
-    fn zero_molecules_and_an_unknown_species_are_refused() {
+    fn zero_molecules_are_refused_and_labels_are_opaque() {
         assert_eq!(
             water_species(0),
             Err(MolecularCatalogPresetError::InvalidMoleculeCount)
@@ -1561,10 +1548,7 @@ mod water_hexamer_tests {
             length_scale(&[]),
             Err(MolecularCatalogPresetError::InvalidMoleculeCount)
         );
-        assert_eq!(
-            length_scale(&[200]),
-            Err(MolecularCatalogPresetError::SpeciesMismatch)
-        );
+        assert_eq!(length_scale(&[200]), Ok(1.0));
         assert_eq!(water_species(2).unwrap(), vec![8, 1, 1, 8, 1, 1]);
         assert_eq!(water_groups(1).unwrap(), vec![vec![0, 1, 2]]);
         assert_eq!(assignment_cutoff(&[]), None);

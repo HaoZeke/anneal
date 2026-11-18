@@ -625,16 +625,11 @@ pub enum ClusterMove {
     },
     /// Exchange coordinates of unlike species.
     ///
-    /// With per-atom diameters, a large atom in the inner shell swaps with
-    /// a small atom outside it. When the largest diameter is at least 1.2
-    /// times the smallest, only the innermost large atom and the outermost
-    /// small atom are exchanged: exchanging every mismatched pair climbs
-    /// out of a partially mixed core-shell minimum. A smaller mismatch
-    /// exchanges every such pair. A segregated cluster has no such pair,
-    /// so one random unlike exchange is drawn instead and the move is not
-    /// the identity. Without diameters, `1 + round(n^(1/3))` random unlike
-    /// pairs are exchanged. Species counts stay on the indices; only
-    /// coordinates move.
+    /// With per-atom diameters, every observed large atom in the inner shell
+    /// swaps with an observed small atom outside it. A segregated cluster has
+    /// no such pair, so one random unlike exchange is drawn instead and the
+    /// move is not the identity. Without diameters, one random unlike pair is
+    /// exchanged. Species counts stay on the indices; only coordinates move.
     SpeciesSwap {
         /// Atoms in the state.
         n_points: usize,
@@ -780,12 +775,12 @@ pub enum ClusterMove {
     ///
     /// Rigid-group moves leave a molecule's internal geometry alone, and the
     /// conformer coordinate of a flexible molecule is its torsions. The bonds
-    /// are read off covalent radii in the current geometry, never off a
-    /// residue table; see [`rotatable_bonds`].
+    /// are inferred from local distances in the current geometry, never from
+    /// an element or residue table; see [`rotatable_bonds`].
     Torsion {
         /// Atomic numbers, one per atom.
         species: Vec<u32>,
-        /// Bond when closer than this factor times the covalent-radius sum.
+        /// Bond when closer than this factor times the inferred local scale.
         tolerance: f64,
         /// Atoms allowed to move. `None` is all atoms.
         mobile: Option<Vec<usize>>,
@@ -793,14 +788,6 @@ pub enum ClusterMove {
         rings: bool,
     },
 }
-
-/// Fraction of the covalent-radius sum below which a bond is treated as
-/// multiple or conjugated, and so not turned.
-///
-/// The Cordero radii are single-bond radii, so a single bond sits near the
-/// sum. In GFN2-xTB geometries an sp3 C–C or C–N bond sits at 0.98 to 1.02 of
-/// it, a peptide amide C–N at 0.91 to 0.92 and a carbonyl at 0.85.
-const SINGLE_BOND_FRACTION: f64 = 0.93;
 
 /// One rotatable covalent bond and the side that turns about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -815,32 +802,26 @@ pub struct RotatableBond {
 
 /// Rotatable bonds of a covalent structure.
 ///
-/// A bond is rotatable when it is single by `SINGLE_BOND_FRACTION`, is a
-/// bridge of the bond graph (not in a ring), and has at least two atoms on
-/// each side. The smaller side is the one that turns, and of two sides of one
-/// size, one that is not a symmetric top. A bond whose turning side is a
-/// symmetric top, a pivot carrying two or more identical terminal atoms and
-/// nothing else such as a methyl, is left out: turning it maps the group back
-/// onto itself and a quench undoes the rest.
+/// A bond is rotatable when it is a bridge of the inferred bond graph (not in
+/// a ring) and has at least two atoms on each side. Bond order is deliberately
+/// not guessed from element labels or fixed chemistry ratios; the potential
+/// decides whether a proposed turn survives its quench. The smaller side is
+/// the one that turns, and of two sides of one size, one that is not a
+/// symmetric top. A pivot carrying two or more identical terminal labels and
+/// nothing else is left out because turning it maps the group back onto itself.
 pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Vec<RotatableBond> {
     let n = species.len().min(x.len() / 3);
+    let bonds = geometric_bonds(x, species, tolerance);
     let mut adj = vec![Vec::<usize>::new(); n];
-    let mut single = Vec::new();
+    let mut candidates = Vec::new();
     for i in 0..n {
         for j in (i + 1)..n {
-            let sum = covalent_radius(species[i]) + covalent_radius(species[j]);
-            if sum <= 0.0 {
-                continue;
-            }
-            let d = atom_distance(x, i, j);
-            if d >= tolerance * sum {
+            if !bonds[i * n + j] {
                 continue;
             }
             adj[i].push(j);
             adj[j].push(i);
-            if d >= SINGLE_BOND_FRACTION * sum {
-                single.push((i, j));
-            }
+            candidates.push((i, j));
         }
     }
     let reach = |from: usize, across: usize| {
@@ -866,7 +847,7 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
                 .all(|&t| adj[t].len() == 1 && species[t] == species[tips[0]])
     };
     let mut out = Vec::new();
-    for (i, j) in single {
+    for (i, j) in candidates {
         let from_i = reach(i, j);
         if from_i[j] {
             continue;
@@ -892,10 +873,6 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
     out
 }
 
-/// Largest triple product of the three unit bonds of a planar atom. An ideal
-/// tetrahedral centre has 0.77, three bonds in a plane 0.
-const PLANAR_VOLUME: f64 = 0.2;
-
 /// Ring crankshafts of a covalent structure, and the ring torsions they span.
 ///
 /// Remove two atoms `a` and `b` from the bond graph. A component that was
@@ -909,65 +886,34 @@ const PLANAR_VOLUME: f64 = 0.2;
 ///
 /// The ends are never bonded: an arc turned about its own ring bond is the
 /// whole ring turned rigidly, which only bends the substituents of the ends.
-/// An arc is offered when it meets each end through exactly one bond and
-/// both bonds are single: as long as `SINGLE_BOND_FRACTION` of the radius
-/// sum, and not between two conjugated atoms. An aromatic ring has no single
-/// bond, and a peptide C–N is no end. The second value counts the
-/// ring torsions those arcs move: the single non-bridge bonds less three per
-/// independent cycle they close, `m - 3` for a saturated ring of `m`.
+/// An arc is offered when it meets each end through exactly one bond. Bond
+/// order is not guessed from labels or fixed chemistry thresholds; proposals
+/// that fight the potential return under relaxation and the allocator observes
+/// their outcome. The second value counts the non-bridge bonds less three per
+/// independent cycle they close, `m - 3` for a ring of `m`.
 pub fn ring_crankshafts(
     x: ArrayView1<f64>,
     species: &[u32],
     tolerance: f64,
 ) -> (Vec<RotatableBond>, usize) {
     let n = species.len().min(x.len() / 3);
+    let bonds = geometric_bonds(x, species, tolerance);
     let mut adj = vec![Vec::<usize>::new(); n];
-    let mut long = Vec::new();
+    let mut candidates = Vec::new();
     for i in 0..n {
         for j in (i + 1)..n {
-            let sum = covalent_radius(species[i]) + covalent_radius(species[j]);
-            if sum <= 0.0 {
-                continue;
-            }
-            let d = atom_distance(x, i, j);
-            if d >= tolerance * sum {
+            if !bonds[i * n + j] {
                 continue;
             }
             adj[i].push(j);
             adj[j].push(i);
-            if d >= SINGLE_BOND_FRACTION * sum {
-                long.push((i, j));
-            }
+            candidates.push((i, j));
         }
     }
-    // A three-bonded atom whose bonds lie in one plane, and a two-bonded atom
-    // between two of those, is conjugated. A bond between two such atoms
-    // stays planar whatever its length, as an aromatic C-N or C-S is.
-    let unit = |i: usize, j: usize| -> [f64; 3] {
-        let v = [0, 1, 2].map(|k| x[3 * j + k] - x[3 * i + k]);
-        let norm = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-12);
-        v.map(|c| c / norm)
-    };
-    let flat: Vec<bool> = (0..n)
-        .map(|i| {
-            let [u, v, w] = match adj[i][..] {
-                [a, b, c] => [unit(i, a), unit(i, b), unit(i, c)],
-                _ => return false,
-            };
-            let volume = u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0])
-                + u[2] * (v[0] * w[1] - v[1] * w[0]);
-            volume.abs() < PLANAR_VOLUME
-        })
-        .collect();
-    let conjugated: Vec<bool> = (0..n)
-        .map(|i| flat[i] || matches!(adj[i][..], [a, b] if flat[a] && flat[b]))
-        .collect();
     let mut single = vec![Vec::<usize>::new(); n];
-    for (i, j) in long {
-        if !(conjugated[i] && conjugated[j]) {
-            single[i].push(j);
-            single[j].push(i);
-        }
+    for (i, j) in candidates {
+        single[i].push(j);
+        single[j].push(i);
     }
     // Components of the graph without the atoms in `cut`.
     let parts = |cut: &[usize]| -> Vec<Vec<usize>> {
@@ -1077,7 +1023,7 @@ pub fn ring_crankshafts(
     (out, dof)
 }
 
-fn atom_distance(x: ArrayView1<f64>, i: usize, j: usize) -> f64 {
+pub(super) fn atom_distance(x: ArrayView1<f64>, i: usize, j: usize) -> f64 {
     (0..3)
         .map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2))
         .sum::<f64>()
@@ -1144,8 +1090,9 @@ fn soap_arm(
         rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
         class: cfg.soap_class_residual && packing,
-        // One element takes the unlabelled fivefold hop. The label is
-        // not a second species, so it is not a partition of the residual.
+        // One repeated label is not a second species, so it does not
+        // partition the residual. The hop is the descriptor gradient
+        // either way.
         species: if packing { None } else { cfg.species.clone() },
         mobile,
         groups: if cfg.soap_mode == SoapProposalMode::Rigid {
@@ -1469,6 +1416,7 @@ pub fn active_mask(
     tolerance: f64,
 ) -> Vec<bool> {
     let n = species.len().min(x.len() / 3);
+    let radii = geometric_radii(x, n);
     let mut active = vec![false; n];
     let mut frontier: Vec<usize> = seeds.iter().copied().filter(|&a| a < n).collect();
     for &a in &frontier {
@@ -1477,12 +1425,12 @@ pub fn active_mask(
     for _ in 0..shells {
         let mut next = Vec::new();
         for &a in &frontier {
-            let ra = covalent_radius(species[a]);
+            let ra = radii[a];
             for b in 0..n {
                 if active[b] {
                     continue;
                 }
-                let cut = tolerance * (ra + covalent_radius(species[b]));
+                let cut = tolerance * (ra + radii[b]);
                 if cut <= 0.0 {
                     continue;
                 }
@@ -1506,64 +1454,134 @@ pub fn active_mask(
     active
 }
 
-/// Covalent radius in Angstrom by atomic number, Cordero and coworkers
-/// (doi:10.1039/B801115J); zero for numbers outside the table, which makes an
-/// unknown species bond to nothing rather than to everything.
-pub fn covalent_radius(z: u32) -> f64 {
-    // Single-bond covalent radii (A), Cordero et al., Dalton Trans. 2008,
-    // 2832-2838 (doi:10.1039/B801115J). Index is Z; 0 is unused. Unknown
-    // species stay 0 so they bond to nothing rather than to everything.
-    const R: [f64; 97] = [
-        0.0, // unused
-        0.31, 0.28, // H He
-        1.28, 0.96, 0.84, 0.76, 0.71, 0.66, 0.57, 0.58, // Li-Ne
-        1.66, 1.41, 1.21, 1.11, 1.07, 1.05, 1.02, 1.06, // Na-Ar
-        2.03, 1.76, 1.70, 1.60, 1.53, 1.39, 1.39, 1.32, 1.26, 1.24, 1.32, 1.22, 1.22, 1.20, 1.19,
-        1.20, 1.20, 1.16, // K-Kr
-        2.20, 1.95, 1.90, 1.75, 1.64, 1.54, 1.47, 1.46, 1.42, 1.39, 1.45, 1.44, 1.42, 1.39, 1.39,
-        1.38, 1.39, 1.40, // Rb-Xe
-        2.44, 2.15, 2.07, 2.04, 2.03, 2.01, 1.99, 1.98, 1.98, 1.96, 1.94, 1.92, 1.92, 1.89, 1.90,
-        1.87, 1.87, // Cs-Lu
-        1.75, 1.70, 1.62, 1.51, 1.44, 1.41, 1.36, 1.36, 1.32, 1.45, 1.46, 1.48, 1.40, 1.50,
-        1.50, // Hf-Rn
-        2.60, 2.21, 2.15, 2.06, 2.00, 1.96, 1.90, 1.87, 1.80, 1.69, // Fr-Cm
-    ];
-    if (z as usize) < R.len() {
-        R[z as usize]
-    } else {
-        0.0
-    }
+/// Per-atom length scales inferred from the incumbent geometry.
+///
+/// Half the nearest finite separation is the additive radius that makes each
+/// atom's closest observed contact sit at one radius sum. The caller's
+/// tolerance then defines the bond graph without an element chart.
+pub(crate) fn geometric_radii(x: ArrayView1<f64>, n: usize) -> Vec<f64> {
+    (0..n)
+        .map(|i| {
+            (0..n)
+                .filter(|&j| j != i)
+                .map(|j| atom_distance(x, i, j))
+                .filter(|distance| distance.is_finite() && *distance > 0.0)
+                .fold(f64::INFINITY, f64::min)
+                * 0.5
+        })
+        .collect()
 }
 
-/// Connected components under the bond-matrix rule: two atoms bond when their
-/// separation is below `tolerance` times the sum of their covalent radii, the
-/// species-aware connectivity of the Berny and reaction-network lineage. A
-/// single length cannot serve a system holding both hydrogen and copper; the
-/// radii sums can.
+/// Shortest observed separation for each pair of input labels.
+///
+/// Labels are opaque equivalence classes: no atomic-number chart is read.
+pub(crate) fn geometric_pair_scales(x: ArrayView1<f64>, species: &[u32]) -> Vec<f64> {
+    let n = species.len().min(x.len() / 3);
+    let mut minima = std::collections::BTreeMap::<(u32, u32), f64>::new();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let distance = atom_distance(x, i, j);
+            if !distance.is_finite() || distance <= 0.0 {
+                continue;
+            }
+            let labels = (species[i].min(species[j]), species[i].max(species[j]));
+            minima
+                .entry(labels)
+                .and_modify(|minimum| *minimum = minimum.min(distance))
+                .or_insert(distance);
+        }
+    }
+    let mut scales = vec![f64::INFINITY; n * n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let labels = (species[i].min(species[j]), species[i].max(species[j]));
+            if let Some(&scale) = minima.get(&labels) {
+                scales[i * n + j] = scale;
+                scales[j * n + i] = scale;
+            }
+        }
+    }
+    scales
+}
+
+/// Geometry-derived bond graph over opaque input labels.
+///
+/// Repeated unlike-label pairs must pass both their observed pair minimum and
+/// local-radius scales. Repeated equal-label pairs may pass either scale. A
+/// unique label pair uses the local scale alone; each inferred radius carries
+/// the input tolerance, hence the squared tolerance only in that ambiguous
+/// fallback. The pair must also be an edge of the relative-neighbourhood graph,
+/// which removes angle diagonals across a central site.
+pub(crate) fn geometric_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Vec<bool> {
+    let n = species.len().min(x.len() / 3);
+    let scales = geometric_pair_scales(x, species);
+    let radii = geometric_radii(x, n);
+    let mut pair_counts = std::collections::BTreeMap::<(u32, u32), usize>::new();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let key = if species[i] <= species[j] {
+                (species[i], species[j])
+            } else {
+                (species[j], species[i])
+            };
+            *pair_counts.entry(key).or_default() += 1;
+        }
+    }
+    let mut bonds = vec![false; n * n];
+    if !(tolerance > 0.0) {
+        return bonds;
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let distance = atom_distance(x, i, j);
+            let scale = scales[i * n + j];
+            let additive = radii[i] + radii[j];
+            let key = if species[i] <= species[j] {
+                (species[i], species[j])
+            } else {
+                (species[j], species[i])
+            };
+            let repeated = pair_counts.get(&key).is_some_and(|count| *count > 1);
+            let pair_scaled = scale.is_finite() && distance <= tolerance * scale;
+            let local = additive.is_finite() && distance <= tolerance * tolerance * additive;
+            let locally_strict = additive.is_finite() && distance <= tolerance * additive;
+            let close = if repeated && species[i] != species[j] {
+                pair_scaled && local
+            } else if repeated {
+                pair_scaled || locally_strict
+            } else {
+                local
+            };
+            if !(distance.is_finite() && close) {
+                continue;
+            }
+            let screened = (0..n).any(|k| {
+                k != i
+                    && k != j
+                    && atom_distance(x, i, k) < distance
+                    && atom_distance(x, j, k) < distance
+            });
+            if !screened {
+                bonds[i * n + j] = true;
+                bonds[j * n + i] = true;
+            }
+        }
+    }
+    bonds
+}
+
+/// Connected components under a geometry-inferred bond-matrix rule.
 pub fn connectivity_groups_z(
     x: ArrayView1<f64>,
     species: &[u32],
     tolerance: f64,
 ) -> Vec<Vec<usize>> {
     let n = species.len().min(x.len() / 3);
+    let bonds = geometric_bonds(x, species, tolerance);
     components(n, |a| {
         let mut nb = Vec::new();
-        let ra = covalent_radius(species[a]);
         for b in 0..n {
-            if b == a {
-                continue;
-            }
-            let cut = tolerance * (ra + covalent_radius(species[b]));
-            if cut <= 0.0 {
-                continue;
-            }
-            let d2: f64 = (0..3)
-                .map(|k| {
-                    let d = x[3 * a + k] - x[3 * b + k];
-                    d * d
-                })
-                .sum();
-            if d2.sqrt() < cut {
+            if bonds[a * n + b] {
                 nb.push(b);
             }
         }
@@ -2594,7 +2612,7 @@ impl ClusterMove {
             ClusterMove::Soap {
                 rmsd,
                 cutoff,
-                class,
+                class: _,
                 species,
                 mobile,
                 groups,
@@ -2604,33 +2622,14 @@ impl ClusterMove {
                     l_max: 6,
                     rcut_nn: *cutoff,
                 };
-                // A declared rigid group is retracted, not replaced by the
-                // fivefold packing hop. One element without groups still
-                // takes that hop.
+                // One element, nothing frozen, no rigid groups: the
+                // descriptor gradient, and a fingerprint-outlier hop when
+                // that residual is flat. A masked or molecular system
+                // follows the gradient only, so a leftover with nothing
+                // local in it declines instead of kicking.
                 let packing = species.is_none() && mobile.is_none() && groups.is_none();
-                if *class && packing {
-                    crate::soap::step_away(x, &[], spec, *rmsd, rng)
-                } else if packing {
-                    // SOFI C5 residual on a fivefold axis. The measured
-                    // single-axis hop is a deterministic function of x,
-                    // so drawing this arm twice from one minimum
-                    // proposes the same trial twice and pays for it
-                    // twice; a chain that revisits a minimum pays every
-                    // time. The drawn-axis hop varies, but yields on a
-                    // disordered shell where too few axes are still
-                    // fivefold, and a proposal that never moves is
-                    // worse than a repeated one. So draw first and keep
-                    // the measured hop for when the draw declines.
-                    let drawn = crate::soap::step_away_fivefold(x, *rmsd, rng);
-                    let moved = drawn
-                        .iter()
-                        .zip(x.iter())
-                        .any(|(after, before)| (after - before).abs() > 1e-12);
-                    if moved {
-                        drawn
-                    } else {
-                        crate::soap::step_away_fivefold_measured(x, *rmsd)
-                    }
+                if packing {
+                    crate::soap::step_descriptor(x, spec, *rmsd, None, None, None, rng)
                 } else {
                     crate::soap::step_away_cloud(
                         x,
@@ -3133,11 +3132,7 @@ fn species_swap<R: Rng + ?Sized>(
             .collect();
         core_large.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]));
         shell_small.sort_by(|&left, &right| radii[right].total_cmp(&radii[left]));
-        let pairs = core_large.len().min(shell_small.len());
-        let max_sigma = sigma.iter().copied().fold(0.0_f64, f64::max);
-        let min_sigma = sigma.iter().copied().fold(f64::INFINITY, f64::min);
-        let wide = min_sigma > 0.0 && max_sigma / min_sigma >= 1.2;
-        let pair_limit = if wide { 1.min(pairs) } else { pairs };
+        let pair_limit = core_large.len().min(shell_small.len());
         for pair in 0..pair_limit {
             swap_atoms(&mut y, core_large[pair], shell_small[pair]);
         }
@@ -3389,8 +3384,9 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn recommended_soap_uses_lmax6() {
-        let rec = Config::recommended(13);
+    fn opt_in_soap_uses_lmax6() {
+        let mut rec = Config::recommended(13);
+        rec.soap_mode = SoapProposalMode::Flexible;
         let soap = rec
             .move_library
             .kernels(&rec)
@@ -3406,12 +3402,12 @@ mod move_scaling_tests {
                 assert_eq!(spec.l_max, 6);
                 assert!(crate::ace::dim(3, 6) > crate::ace::dim(3, 3));
             }
-            _ => panic!("recommended LeanBurst has no SOAP arm"),
+            _ => panic!("opt-in LeanBurst has no SOAP arm"),
         }
     }
 
     #[test]
-    fn recommended_leanburst_offers_soap() {
+    fn recommended_leanburst_excludes_soap() {
         let rec = Config::recommended(13);
         let names: Vec<String> = rec
             .move_library
@@ -3420,19 +3416,13 @@ mod move_scaling_tests {
             .map(|k| k.name())
             .collect();
         assert!(
-            names.iter().any(|n| n == "soap"),
-            "recommended LeanBurst missing soap: {names:?}"
+            names.iter().all(|name| name != "soap"),
+            "recommended LeanBurst contains SOAP: {names:?}"
         );
+        assert_eq!(rec.soap_mode, SoapProposalMode::Off);
         assert!(
             !rec.soap_class_residual,
             "recommended SOAP must not ship the 555→421 / fcc oracle"
-        );
-        assert!(
-            rec.move_library
-                .kernels(&rec)
-                .iter()
-                .any(|k| matches!(k, ClusterMove::Soap { class: false, .. })),
-            "recommended SOAP arm is not the observed-cloud residual"
         );
         assert!(
             !rec.adaptive_height,
@@ -3447,15 +3437,16 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn recommended_packing_soap_is_the_fivefold_residual() {
-        let rec = Config::recommended(13);
+    fn opt_in_packing_soap_follows_the_descriptor_residual() {
+        let mut rec = Config::recommended(13);
+        rec.soap_mode = SoapProposalMode::Flexible;
         let soap = rec
             .move_library
             .kernels(&rec)
             .into_iter()
             .find(|k| matches!(k, ClusterMove::Soap { class: false, .. }))
             .expect("recommended LeanBurst has a packing SOAP arm");
-        let ClusterMove::Soap { rmsd, .. } = soap else {
+        let ClusterMove::Soap { rmsd, cutoff, .. } = soap else {
             panic!("recommended SOAP arm is not Soap");
         };
         let x = Array1::from_vec(vec![
@@ -3465,13 +3456,32 @@ mod move_scaling_tests {
         ]);
         let mut move_rng = StdRng::seed_from_u64(11);
         let proposed = soap.propose(x.view(), 0.8, &mut move_rng);
-        let five = crate::soap::step_away_fivefold_measured(x.view(), rmsd);
+        let spec = crate::soap::SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: cutoff,
+        };
+        let mut descriptor_rng = StdRng::seed_from_u64(11);
+        let descriptor = crate::soap::step_descriptor(
+            x.view(),
+            spec,
+            rmsd,
+            None,
+            None,
+            None,
+            &mut descriptor_rng,
+        );
         for index in 0..x.len() {
             assert!(
-                (proposed[index] - five[index]).abs() < 1e-12,
-                "packing SOAP left the measured fivefold residual at {index}"
+                (proposed[index] - descriptor[index]).abs() < 1e-12,
+                "packing SOAP left the descriptor residual at {index}"
             );
         }
+        let moved = proposed
+            .iter()
+            .zip(x.iter())
+            .any(|(after, before)| (after - before).abs() > 1e-12);
+        assert!(moved, "descriptor SOAP on a mixed shell was the identity");
     }
 
     #[test]
@@ -3572,7 +3582,7 @@ mod move_scaling_tests {
                 .kernels(&cfg)
                 .iter()
                 .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. })),
-            "the fivefold SOAP arm is still built when the prior is off"
+            "the SOAP arm is still built when the prior is off"
         );
         cfg.general_collective = true;
         assert!(
@@ -3623,15 +3633,18 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn one_repeated_label_takes_the_unlabelled_soap_hop() {
-        let pure = Config::recommended(8).with_species(vec![79; 8], None);
+    fn opt_in_repeated_label_takes_the_unlabelled_soap_hop() {
+        let mut pure = Config::recommended(8).with_species(vec![79; 8], None);
+        pure.soap_mode = SoapProposalMode::Flexible;
         assert!(
             pure.move_library
                 .kernels(&pure)
                 .iter()
                 .any(|kernel| matches!(kernel, ClusterMove::Soap { species: None, .. }))
         );
-        let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
+        let mut mixed =
+            Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
+        mixed.soap_mode = SoapProposalMode::Flexible;
         assert!(
             mixed
                 .move_library
@@ -3941,10 +3954,7 @@ mod move_scaling_tests {
             .take(4)
             .filter(|(index, _)| cfg.species.as_ref().unwrap()[*index] == 1)
             .count();
-        assert_eq!(
-            small_in_core, 1,
-            "a wide size ratio exchanges one mismatched pair"
-        );
+        assert_eq!(small_in_core, 4, "every observed core-shell mismatch swaps");
     }
 
     #[test]
@@ -4120,10 +4130,9 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn an_unknown_element_has_no_covalent_radius() {
-        assert_eq!(covalent_radius(0), 0.0);
-        assert_eq!(covalent_radius(200), 0.0);
-        assert!((covalent_radius(1) - 0.31).abs() < 1e-12);
+    fn geometric_radii_follow_the_incumbent_contact() {
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        assert_eq!(geometric_radii(x.view(), 2), vec![1.0, 1.0]);
     }
 
     #[test]
@@ -4220,9 +4229,9 @@ mod torsion_tests {
     }
 
     #[test]
-    fn a_short_conjugated_bond_is_not_turned() {
+    fn a_uniform_short_chain_uses_its_observed_pair_scale() {
         let species = vec![6u32; 4];
-        assert!(rotatable_bonds(chain(1.36).view(), &species, 1.25).is_empty());
+        assert_eq!(rotatable_bonds(chain(1.36).view(), &species, 1.25).len(), 1);
     }
 
     #[test]
@@ -4359,27 +4368,26 @@ mod torsion_tests {
     }
 
     #[test]
-    fn an_aromatic_ring_and_a_chain_offer_no_crankshaft() {
+    fn a_ring_and_a_chain_follow_their_observed_graphs() {
         let n = 6usize;
         let r = 1.39_f64 / (2.0 * (std::f64::consts::PI / n as f64).sin());
         let benzene = Array1::from_iter((0..n).flat_map(|i| {
             let a = i as f64 * std::f64::consts::TAU / n as f64;
             [r * a.cos(), r * a.sin(), 0.0]
         }));
-        assert_eq!(
-            ring_crankshafts(benzene.view(), &[6; 6], 1.25),
-            (Vec::new(), 0)
-        );
+        let (ring, dof) = ring_crankshafts(benzene.view(), &[6; 6], 1.25);
+        assert_eq!(dof, 3);
+        assert!(!ring.is_empty());
         assert_eq!(
             ring_crankshafts(chain(1.52).view(), &[6; 4], 1.25),
             (Vec::new(), 0)
         );
     }
 
-    /// A flat five-ring with a hydrogen on each atom, its ring bonds long
-    /// enough to pass for single, as an indole's C-N bonds can be.
+    /// Planarity and element-like labels do not suppress a topological ring
+    /// move; the potential, not a chemistry chart, decides whether it survives.
     #[test]
-    fn a_flat_ring_of_three_bonded_atoms_offers_no_crankshaft() {
+    fn a_flat_labelled_ring_is_treated_like_any_other_observed_graph() {
         let r = 1.42_f64 / (2.0 * (std::f64::consts::PI / 5.0).sin());
         let mut x = Vec::new();
         for radius in [r, r + 1.08] {
@@ -4388,11 +4396,12 @@ mod torsion_tests {
                 x.extend([radius * a.cos(), radius * a.sin(), 0.0]);
             }
         }
-        let species = [7, 6, 6, 6, 6, 1, 1, 1, 1, 1];
-        assert_eq!(
-            ring_crankshafts(Array1::from_vec(x).view(), &species, 1.25),
-            (Vec::new(), 0)
-        );
+        let x = Array1::from_vec(x);
+        let labelled = ring_crankshafts(x.view(), &[7, 6, 6, 6, 6, 1, 1, 1, 1, 1], 1.25);
+        let opaque = ring_crankshafts(x.view(), &[90, 80, 80, 80, 80, 70, 70, 70, 70, 70], 1.25);
+        assert_eq!(labelled, opaque);
+        assert_eq!(labelled.0.len(), 5);
+        assert_eq!(labelled.1, 2);
     }
 
     #[test]

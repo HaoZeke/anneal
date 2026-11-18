@@ -5,16 +5,12 @@
 //! for one before anything else pays for it, and a contact is repaired in the
 //! same torsion space, without the potential.
 
-use super::moves::{RotatableBond, covalent_radius, ring_crankshafts, rotatable_bonds, turn_bond};
+use super::moves::{
+    RotatableBond, geometric_bonds, geometric_radii, ring_crankshafts, rotatable_bonds, turn_bond,
+};
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use rand::seq::SliceRandom;
-
-/// Added to the covalent radii sum to give the closest non-bonded approach a
-/// proposal may keep. 0.8 Å puts H···H at 1.42 Å, C···C at 2.32 Å and
-/// O···H at 1.77 Å, inside a hydrogen bond's reach and well outside the
-/// 0.90 Å overlap the hop refuses to hand the potential.
-pub(crate) const CLASH_GAP: f64 = 0.8;
 
 /// Atoms closer than this many bonds are held by the bonded geometry and do
 /// not count as a contact: 1-2, 1-3 and 1-4 pairs.
@@ -102,13 +98,13 @@ impl Topology {
         }
         let mut near = vec![false; n * n];
         let mut hands = Vec::new();
+        let radius = geometric_radii(x, n);
+        let bond_graph = geometric_bonds(x, species, tolerance);
         if !torsions.is_empty() {
             let mut nb = vec![Vec::new(); n];
             for i in 0..n {
-                let ri = covalent_radius(species[i]);
                 for j in i + 1..n {
-                    let cut = tolerance * (ri + covalent_radius(species[j]));
-                    if cut > 0.0 && distance(x, i, j) < cut {
+                    if bond_graph[i * n + j] {
                         nb[i].push(j);
                         nb[j].push(i);
                     }
@@ -169,14 +165,14 @@ impl Topology {
             bonds,
             ring_dof,
             near,
-            radius: species[..n].iter().map(|&z| covalent_radius(z)).collect(),
+            radius,
             moves,
             hands,
         }
     }
 
     fn contact(&self, i: usize, j: usize) -> f64 {
-        self.radius[i] + self.radius[j] + CLASH_GAP
+        self.radius[i] + self.radius[j]
     }
 
     /// Non-bonded pairs closer than their contact distance, with the
@@ -369,20 +365,17 @@ impl HeldHands {
         tolerance: f64,
     ) -> Self {
         let n = species.len().min(x.len() / 3);
+        let bonds = geometric_bonds(x, species, tolerance);
         let mut centres = Vec::new();
         for atoms in groups {
             let atoms: Vec<usize> = atoms.iter().copied().filter(|&a| a < n).collect();
             let nb: Vec<Vec<usize>> = atoms
                 .iter()
                 .map(|&a| {
-                    let ra = covalent_radius(species[a]);
                     atoms
                         .iter()
                         .copied()
-                        .filter(|&b| {
-                            let cut = tolerance * (ra + covalent_radius(species[b]));
-                            b != a && cut > 0.0 && distance(x, a, b) < cut
-                        })
+                        .filter(|&b| b != a && bonds[a * n + b])
                         .collect()
                 })
                 .collect();
@@ -446,7 +439,7 @@ mod tests {
             0.0, 1.5, 0.0, // arm on C1
             1.0, 2.6, 0.0, //
             1.5, -1.5, 0.0, // arm on C2
-            1.0, -2.6, 0.0, //
+            0.5, -2.6, 0.0, //
         ]);
         (x, vec![6; 6])
     }
@@ -455,7 +448,7 @@ mod tests {
         top.torsions
             .iter()
             .position(|t| (t.fixed.min(t.pivot), t.fixed.max(t.pivot)) == (0, 1))
-            .expect("the central bond turns")
+            .unwrap_or_else(|| panic!("the central bond turns: {:?}", top.torsions))
     }
 
     /// Chair cyclohexane with a fluorine and a hydrogen on carbon 0 and two
@@ -622,7 +615,13 @@ mod tests {
         for _ in 0..40 {
             let y = top.propose(x.view(), &mut rng);
             assert!(top.clashes(y.view()).is_empty());
-            moved += usize::from((distance(x.view(), 3, 5) - distance(y.view(), 3, 5)).abs() > 0.1);
+            let displacement = x
+                .iter()
+                .zip(y.iter())
+                .map(|(before, after)| (after - before) * (after - before))
+                .sum::<f64>()
+                .sqrt();
+            moved += usize::from(displacement > 0.1);
             assert!((distance(x.view(), 0, 1) - distance(y.view(), 0, 1)).abs() < 1e-10);
         }
         assert!(moved > 30);

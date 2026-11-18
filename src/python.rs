@@ -3481,23 +3481,14 @@ fn rigid_probe(
 ///     Ignored once `species` or `rigid` selects a chart: those keep the
 ///     stock preset and adapt geometry afterwards. Excluded by `water_sites`.
 ///   species: optional label per point. Two or more labels add a swap move.
-///     A wide diameter ratio also tries one downhill unlike-pair exchange
-///     beside the escape.
 ///   sigmas: optional Lennard-Jones diameter per point, same length as
-///     `species`. Large diameters are swapped out of the inner shell.
+///     `species`. The observed diameter ordering moves large particles out of
+///     the inner shell without a fixed ratio threshold.
 ///   rigid: when true, `n` is the number of rigid bodies and the hop state
-///     is centres followed by Rodrigues rotations. More than ten bodies
-///     hold the acceptance factor at 4 and scale the orientation amplitude
-///     toward an acceptance ratio of one half. Ten or fewer do not. The
-///     quench is the same L-BFGS descent, and a rigid record accepts the
-///     root-mean-square force. The chain keeps the eight lowest distinct
-///     minima of its quenched start, accepted quenches and lowest
-///     recorded minimum. Each stall follows 1000 hops with no new
-///     lowest minimum. At each stall the walker moves to the lowest kept
-///     minimum that is neither its own nor one of the last four stall
-///     destinations. When no kept minimum qualifies, the walker stays
-///     put. Nothing is drawn, the target is not read, and the lowest
-///     minimum is kept.
+///     is centres followed by Rodrigues rotations. Move amplitudes and
+///     acceptance adapt from the run's observations, without a body-count
+///     branch. The quench is the same L-BFGS descent, and a rigid record
+///     accepts the root-mean-square force.
 ///   layout: `block` (centres, then rotations) or `interleaved` (GMIN
 ///     centre and angle-axis per body). Both carry the same rotation
 ///     vectors, in the sense GMIN's `NTIP` reads them.

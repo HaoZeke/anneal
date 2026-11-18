@@ -9,12 +9,7 @@
 //! from 200 steps to 1000 (`d756085b`). A frozen frame is not part of
 //! this walk.
 //!
-//! The fivefold residual uses the built-in assignment on every build
-//! (`81d6bffc`). Linking IRA no longer changes this walk, so the
-//! feature build keeps the Hungarian record.
-//!
-//! Removing structure-specific proposals changes the LJ38 pin. The
-//! species-free first-block plain warmup keeps the short LJ98 pin.
+//! Removing structure-specific proposals changes both short trajectory pins.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -25,8 +20,8 @@ fn lj38_and_lj98_short_searches_stay_put() {
     anneal_core::install_rgpot_kernels!();
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
-        (38, 1, 2500, -170.711_308_119_462_44, 21, 14, 19),
-        (98, 7, 2500, -520.107_879_491_539_2, 10, 9, 9),
+        (38, 1, 2500, -170.826_515_772_709_4, 30, 27, 20),
+        (98, 7, 2500, -525.203_519_141_557_9, 25, 9, 25),
     ];
     let mut records = Vec::new();
     for (n, seed, budget, best, hops, converged, capped) in cases {
@@ -61,7 +56,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, *capped);
     }
     let expected = "\
-LJ38 -170.7113081194624442 21 14 19 2500
-LJ98 -520.1078794915391654 10 9 9 2500";
+LJ38 -170.8265157727093992 30 27 20 2500
+LJ98 -525.2035191415578765 25 9 25 2500";
     assert_eq!(records.join("\n"), expected);
 }

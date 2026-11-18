@@ -10,8 +10,8 @@
 //! same replica stops repeating a hole that quenched back to ico.
 //!
 //! Arms of the cover bandit are the SoftSaddle covering points plus one
-//! fivefold residual. Arms of the action bandit are local walk, explore,
-//! and Leave.
+//! fingerprint-outlier residual. Arms of the action bandit are local walk,
+//! explore, and Leave.
 
 use ndarray::Array1;
 use rand::Rng;
@@ -20,13 +20,13 @@ use crate::catalog::archive::Curiosity;
 use crate::funnel_bo::FunnelModel;
 use crate::hypersphere;
 
-/// Covering points plus the fivefold residual as the last arm.
+/// Covering points plus the fingerprint-outlier residual as the last arm.
 pub fn cover_arm_count() -> usize {
     hypersphere::default_cover_size().saturating_add(1)
 }
 
-/// Arm index of the fivefold residual, after the covering points.
-pub fn fivefold_arm() -> usize {
+/// Arm index of the fingerprint-outlier residual, after the covering points.
+pub fn outlier_arm() -> usize {
     hypersphere::default_cover_size()
 }
 
@@ -110,7 +110,7 @@ impl LeaveLearner {
         }
     }
 
-    /// Thompson draw over `n` cover arms (fivefold is `n-1` when
+    /// Thompson draw over `n` cover arms (the outlier residual is `n-1` when
     /// `n == cover_arm_count()`).
     pub fn pick_cover<R: Rng + ?Sized>(&mut self, n: usize, rng: &mut R) -> usize {
         let n = n.max(1);

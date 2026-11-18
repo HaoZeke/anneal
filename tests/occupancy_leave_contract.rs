@@ -295,19 +295,13 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         .nth(1)
         .and_then(|chunk| chunk.split("fn query_basin_for_descriptor(").next())
         .expect("exact_basin_for must exist");
-    let packing = basin
-        .find("basin_for_packing_community")
-        .expect("packing-community short-circuit");
-    let ira = basin
-        .find("equivalent_structures")
-        .expect("IRA remains the novel-packing witness");
     assert!(
-        packing < ira,
-        "same packing reuses the basin; IRA is only for a new family"
+        !basin.contains("basin_for_packing_community"),
+        "a packing descriptor must not bypass the exact structural witness"
     );
     assert!(
-        basin.contains("occupied_packing_count() <= 1"),
-        "a one-packing book does not IRA every icosahedral isomer"
+        basin.contains("equivalent_structures"),
+        "exact basin identity requires the structural witness"
     );
     assert!(
         server.contains("q_ei_family_entry"),
@@ -336,14 +330,9 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         refresh.contains("fold_hold") && refresh.contains("return"),
         "a live fold hold must not start another occupancy fold on admission"
     );
-    let community = server
-        .split("fn basin_for_packing_community(")
-        .nth(1)
-        .and_then(|chunk| chunk.split("fn candidate_from_validated(").next())
-        .expect("basin_for_packing_community must exist");
     assert!(
-        community.contains("families_sharing_community"),
-        "visit identity uses the cached book fold, not a fresh single-linkage"
+        !server.contains("fn basin_for_packing_community("),
+        "packing-community aliases must not replace exact basin identity"
     );
 }
 

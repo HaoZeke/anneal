@@ -1,14 +1,8 @@
-//! Pair spectrum and the fivefold SOAP proposal.
-//!
-//! `sorted_pairs` is the basin fingerprint. `soap_proposal` builds the
-//! squared-distance matching that turns a cluster away from a fivefold
-//! axis. The cluster is fixed outside the timed loop.
+//! Pair-spectrum basin fingerprint.
 
 use anneal_core::bias::{Fingerprint, SortedPairs};
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::Array1;
-use rand::SeedableRng;
-use rand::rngs::StdRng;
 use std::hint::black_box;
 
 fn cluster(n: usize, salt: u64) -> Array1<f64> {
@@ -38,19 +32,6 @@ fn kernels(c: &mut Criterion) {
                 salt = salt.wrapping_add(1);
                 let y = cluster(n, salt);
                 black_box(sorted.describe(black_box(y.view())))
-            })
-        });
-        let mut soap_salt = 10_000u64;
-        group.bench_function("soap_proposal", |b| {
-            b.iter(|| {
-                soap_salt = soap_salt.wrapping_add(1);
-                let y = cluster(n, soap_salt);
-                let mut rng = StdRng::seed_from_u64(11);
-                black_box(anneal_core::soap::step_away_fivefold(
-                    black_box(y.view()),
-                    0.2,
-                    &mut rng,
-                ))
             })
         });
         group.finish();

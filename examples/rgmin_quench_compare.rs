@@ -9,9 +9,8 @@
 //!
 //!     rgmin_quench_compare [RELAX_STEPS]
 //!
-//! Starts: sealed ico, sealed Marks, fivefold residual 0.35 from ico,
-//! and three first-rung packing-map covers. Each start is quenched
-//! with L-BFGS and with FIRE 2.0.
+//! Starts: sealed ico, sealed Marks, and three first-rung packing-map
+//! covers. Each start is quenched with L-BFGS and with FIRE 2.0.
 
 use anneal_core::catalog::{PACKING_LINK, PackingBook, packing_link_labels};
 use anneal_core::known_basin;
@@ -155,12 +154,7 @@ fn main() {
 
     let depth = ico_e.abs() / 75.0;
     let references = vec![ico_slice.clone()];
-    let fivefold = anneal_core::soap::step_away_fivefold_measured(ico.view(), 0.35);
-    let mut starts: Vec<(&str, Array1<f64>)> = vec![
-        ("ico", ico.clone()),
-        ("marks", marks.clone()),
-        ("fivefold_035", fivefold),
-    ];
+    let mut starts: Vec<(&str, Array1<f64>)> = vec![("ico", ico.clone()), ("marks", marks.clone())];
     for cover in 0..3 {
         let start = known_basin::leave_packing_rung_to(
             ico.view(),

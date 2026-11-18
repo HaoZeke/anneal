@@ -375,6 +375,7 @@ fn adjust_one(
 /// row-minimum lower bound, so it is the only optimal assignment and
 /// the same permutation successive shortest paths returns. A tie or a
 /// shared column returns `None` and the solver runs.
+#[cfg(test)]
 pub(crate) fn strict_unique_row_minima(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     if n == 0 || n.checked_mul(n) != Some(costs.len()) {
         return None;
@@ -423,6 +424,7 @@ pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<u
 /// search that feeds the inverse-operation cache does not change it, and
 /// that cache reads the flag only after its own call to
 /// [`minimum_cost_assignment`].
+#[cfg(test)]
 pub(crate) fn successive_shortest_paths_matching(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     solve_shortest_paths(costs, n, false).map(|(assignment, _)| assignment)
 }

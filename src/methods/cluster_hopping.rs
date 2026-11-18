@@ -1540,15 +1540,10 @@ pub fn clears_call_floor(x: ArrayView1<f64>, floor: f64) -> bool {
 /// Distance at or below which a pair of elements `za` and `zb` is not
 /// handed to an objective that refuses every pair at or inside `absolute`.
 ///
-/// [`COVALENT_CALL_FRACTION`] of the summed covalent radii, the floor a
-/// declared bond has in [`molecular_call_floor`], below the shortest bond
-/// of any order, and never below `absolute`: Si–Si 1.55 Å, C–C 1.06 Å, and
-/// any pair with hydrogen stays at `absolute`. A trial that stacks two
-/// heavy atoms at `absolute` is a geometry the potential's SCC cannot
-/// converge, and each line-search probe there is a charged call that fails.
-pub fn element_call_floor(za: u32, zb: u32, absolute: f64) -> f64 {
-    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
-    (COVALENT_CALL_FRACTION * sum).max(absolute)
+/// The objective-supplied absolute floor is used uniformly. Element labels
+/// do not imply a hidden length chart.
+pub fn element_call_floor(_za: u32, _zb: u32, absolute: f64) -> f64 {
+    absolute
 }
 
 /// The pair distances at or below which the objective is not called.
@@ -1829,59 +1824,21 @@ pub const OVERLAP_SEPARATION: f64 = 0.35;
 /// the potential sees is a bond, not a contact xtb cannot converge.
 pub const OVERLAP_CALL_LIMIT: f64 = 0.90;
 
-/// Fraction of the summed Cordero radii inside which a declared bond is not
-/// handed to the potential. One fraction for every element. The radii, not
-/// the species name, set the length. A contact that is not a declared bond
-/// is refused inside the full covalent sum: that sum is a single-bond length.
-///
-/// The radii are single-bond radii, and a multiple bond is shorter: an
-/// aromatic C–C is 0.91 of the sum, C=O 0.86, C≡C and C≡N 0.79. A bonded
-/// floor above those refuses every aromatic molecule as it stands, and the
-/// refusal step pulls its bonds out to single-bond length. 0.70 is below a
-/// triple bond; hydrogen pairs keep [`OVERLAP_CALL_LIMIT`] either way.
-pub const COVALENT_CALL_FRACTION: f64 = 0.70;
-
-/// Fraction of the summed Cordero radii at which a triple bond sits: N≡N
-/// is 0.77 of the sum, C≡C, C≡N and C≡O 0.79 to 0.80. No bond order is
-/// shorter.
-pub const TRIPLE_BOND_FRACTION: f64 = 0.77;
-
 /// Shortest length a covalent bond between `za` and `zb` takes at any
 /// bond order.
 ///
-/// The Cordero radii are single-bond radii, so a double, aromatic or
-/// amide bond is shorter than their sum, and a triple bond shortest, at
-/// [`TRIPLE_BOND_FRACTION`] of it. Hydrogen bonds singly, so a pair with
-/// hydrogen keeps the whole sum. A declared bond shorter than this is
-/// compressed; one at or past it is a bond of some order and is left to
-/// the potential.
-pub fn shortest_bond_length(za: u32, zb: u32) -> f64 {
-    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
-    if za == 1 || zb == 1 {
-        sum
-    } else {
-        TRIPLE_BOND_FRACTION * sum
-    }
+/// Without a potential-provided pair scale, only the objective's absolute
+/// call floor is admissible.
+pub fn shortest_bond_length(_za: u32, _zb: u32) -> f64 {
+    OVERLAP_CALL_LIMIT
 }
 
 /// Distance at or below which a molecular potential is not called.
 ///
-/// Species-free searches keep [`OVERLAP_CALL_LIMIT`]. With species, a
-/// declared bond uses [`COVALENT_CALL_FRACTION`] of the covalent sum, below
-/// the pair's [`shortest_bond_length`], and any
-/// other pair uses the sum itself. The absolute limit remains a floor so a
-/// hydrogen pair is not treated more loosely than before.
-pub fn molecular_call_floor(za: u32, zb: u32, bonded: bool) -> f64 {
-    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
-    if sum <= 0.0 {
-        return OVERLAP_CALL_LIMIT;
-    }
-    let scaled = if bonded {
-        COVALENT_CALL_FRACTION * sum
-    } else {
-        sum
-    };
-    scaled.max(OVERLAP_CALL_LIMIT)
+/// Species labels do not select a distance; every pair keeps the objective's
+/// absolute call floor.
+pub fn molecular_call_floor(_za: u32, _zb: u32, _bonded: bool) -> f64 {
+    OVERLAP_CALL_LIMIT
 }
 
 /// Whether any pair is inside [`molecular_call_floor`].
@@ -1926,15 +1883,15 @@ pub fn inside_molecular_call_wall(
 
 /// A declared group whose atoms no longer share a bond.
 ///
-/// The bond tolerance is the molecular preset's: a pair inside one group
-/// counts when it is within that multiple of the summed covalent radii.
-/// A bare atom, or a fragment that has left its partners, has no such
-/// pair. The potential is not asked to converge a charge on it. Atoms
-/// in different groups are not compared, so an intermolecular contact
+/// Each atom's nearest in-group distance is compared with the group's median
+/// nearest distance. The input tolerance is applied once to each inferred
+/// local radius, hence its square bounds edges of a runtime-derived connected
+/// graph. A fragment that has left its partners is not sent to the potential.
+/// Atoms in different groups are not compared, so an intermolecular contact
 /// is left to the call.
 pub fn declared_group_lost_a_bond(
     x: ArrayView1<f64>,
-    species: &[u32],
+    _species: &[u32],
     groups: Option<&[Vec<usize>]>,
     bond_tolerance: f64,
 ) -> bool {
@@ -1942,39 +1899,48 @@ pub fn declared_group_lost_a_bond(
         return false;
     };
     let n = x.len() / 3;
-    if n < 2 || species.len() < n || !(bond_tolerance > 0.0) {
+    if n < 2 || !(bond_tolerance > 0.0) {
         return false;
     }
     for atoms in groups {
+        let atoms = atoms
+            .iter()
+            .copied()
+            .filter(|atom| *atom < n)
+            .collect::<Vec<_>>();
         if atoms.len() < 2 {
             continue;
         }
-        for &a in atoms {
-            if a >= n {
-                continue;
+        let mut nearest = atoms
+            .iter()
+            .map(|&a| {
+                atoms
+                    .iter()
+                    .copied()
+                    .filter(|&b| a != b)
+                    .map(|b| moves::atom_distance(x, a, b))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .collect::<Vec<_>>();
+        nearest.sort_by(f64::total_cmp);
+        let baseline = nearest[nearest.len() / 2];
+        if !baseline.is_finite() || baseline <= 0.0 {
+            return true;
+        }
+        let threshold = bond_tolerance * bond_tolerance * baseline;
+        let mut seen = vec![false; atoms.len()];
+        seen[0] = true;
+        let mut stack = vec![0usize];
+        while let Some(i) = stack.pop() {
+            for j in 0..atoms.len() {
+                if !seen[j] && moves::atom_distance(x, atoms[i], atoms[j]) <= threshold {
+                    seen[j] = true;
+                    stack.push(j);
+                }
             }
-            let mut bonded = false;
-            for &b in atoms {
-                if a == b || b >= n {
-                    continue;
-                }
-                let sum = moves::covalent_radius(species[a]) + moves::covalent_radius(species[b]);
-                if sum <= 0.0 {
-                    continue;
-                }
-                let mut square = 0.0;
-                for axis in 0..3 {
-                    let delta = x[3 * a + axis] - x[3 * b + axis];
-                    square += delta * delta;
-                }
-                if square.sqrt() <= bond_tolerance * sum {
-                    bonded = true;
-                    break;
-                }
-            }
-            if !bonded {
-                return true;
-            }
+        }
+        if seen.iter().any(|visited| !visited) {
+            return true;
         }
     }
     false
@@ -2050,12 +2016,12 @@ mod call_wall_tests {
     }
 
     #[test]
-    fn hydrogen_pairs_keep_the_absolute_floor() {
+    fn every_label_pair_keeps_the_absolute_floor() {
         assert!((molecular_call_floor(1, 1, false) - 0.90).abs() < 1.0e-12);
         let oh = molecular_call_floor(8, 1, true);
-        let expected = (super::COVALENT_CALL_FRACTION * (0.66 + 0.31)).max(0.90);
+        let expected = super::OVERLAP_CALL_LIMIT;
         assert!((oh - expected).abs() < 1.0e-12);
-        assert!((molecular_call_floor(7, 1, false) - 1.02).abs() < 1.0e-12);
+        assert!((molecular_call_floor(7, 1, false) - 0.90).abs() < 1.0e-12);
     }
 
     #[test]
@@ -2099,31 +2065,6 @@ const OVERLAP_SPIKE: f64 = 1.40;
 ///
 /// Judged on the geometry before any repair. A missing species treats the
 /// whole group as bonded, which is the rigid-body repair.
-fn pair_is_covalent_bond(
-    a: usize,
-    b: usize,
-    distance: f64,
-    left: usize,
-    right: usize,
-    species: Option<&[u32]>,
-    bond_tolerance: f64,
-) -> bool {
-    if left == usize::MAX || left != right {
-        return false;
-    }
-    // No species: a declared group is treated as bonded, which is what the
-    // rigid-body repair has always done.
-    let Some(species) = species else {
-        return true;
-    };
-    let za = species.get(a).copied().unwrap_or(0);
-    let zb = species.get(b).copied().unwrap_or(0);
-    let reach = bond_tolerance
-        * (crate::methods::cluster_hopping::moves::covalent_radius(za)
-            + crate::methods::cluster_hopping::moves::covalent_radius(zb));
-    reach > 0.0 && distance <= reach
-}
-
 fn open_target(
     a: usize,
     b: usize,
@@ -2141,18 +2082,8 @@ fn open_target(
         // A bond at a length some bond order takes is left alone, so a
         // healthy molecule is not rewritten on the way past an unrelated
         // spike, and a double bond is not pulled out to a single one.
-        let Some(species) = species else {
-            return if distance >= bond_target {
-                distance
-            } else {
-                bond_target
-            };
-        };
-        let shortest = shortest_bond_length(
-            species.get(a).copied().unwrap_or(0),
-            species.get(b).copied().unwrap_or(0),
-        );
-        let restore = bond_target.max(shortest);
+        let _ = (a, b, species);
+        let restore = bond_target;
         return if distance + 0.02 >= restore {
             distance
         } else {
@@ -2280,18 +2211,18 @@ pub(crate) fn separate_contacts(
     let clash_target = min_sep + clash_clearance.max(1.0e-8);
     // Bond identity is fixed on the geometry we were handed. Reclassifying
     // after a push turns a stretched O–H into a clash and dissociates it.
+    let inferred_bonds =
+        species.map(|labels| moves::geometric_bonds(x.view(), labels, bond_tolerance));
     let mut bonded = vec![false; n * n];
     for a in 0..n {
         for b in (a + 1)..n {
-            let mut square = 0.0;
-            for axis in 0..3 {
-                let delta = x[3 * a + axis] - x[3 * b + axis];
-                square += delta * delta;
-            }
             let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
             let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
-            bonded[a * n + b] =
-                pair_is_covalent_bond(a, b, square.sqrt(), left, right, species, bond_tolerance);
+            bonded[a * n + b] = left != usize::MAX
+                && left == right
+                && inferred_bonds
+                    .as_ref()
+                    .is_none_or(|matrix| matrix[a * n + b]);
         }
     }
     for _ in 0..64 {
@@ -7510,8 +7441,8 @@ where
                 history_new += 1;
             }
         }
-        // The floor the fivefold channel reads is the incumbent before this
-        // record. Gap and energy are not that comparison.
+        // The floor the packing seam reads is the incumbent before this
+        // record. The gap is the DECAF distance, not a template share.
         let channel_floor_energy = ledger.best;
         let channel_floor_state = seam.as_ref().and_then(|_| ledger.best_state.clone());
         if recordable {
@@ -7971,14 +7902,19 @@ where
                 && recordable
                 && let (Some(floor_state), Some(trial)) =
                     (channel_floor_state.as_ref(), x_new.as_slice())
+                && let Some(floor_slice) = floor_state.as_slice()
             {
-                let share = crate::catalog::icosahedral_share(x_new.view());
-                let floor_share = crate::catalog::icosahedral_share(floor_state.view());
-                if crate::catalog::fivefold_channel(e_new, channel_floor_energy, share, floor_share)
-                    && seam.offer(share, e_new, trial)
+                // Packing-fingerprint gap inside the seam's own energy
+                // window. A template share is not a coordinate of the ladder.
+                let gap = crate::catalog::packing_seam_gap(floor_slice, trial);
+                if e_new.is_finite()
+                    && channel_floor_energy.is_finite()
+                    && e_new <= channel_floor_energy + crate::catalog::SEAM_WINDOW
+                    && gap.is_finite()
+                    && seam.offer(gap, e_new, trial)
                     && frontier_exchange
                 {
-                    crate::catalog::offer_frontier_post(share, e_new, trial);
+                    crate::catalog::offer_frontier_post(gap, e_new, trial);
                 }
             }
             // One arrival on the packing the chain has just moved onto.
@@ -8706,8 +8642,12 @@ where
                 // tetrahedral. Detecting several axes and closing them into a group
                 // is what makes this the published scheme rather than an axial
                 // constraint wearing its name.
+                if n < 2 {
+                    continue;
+                }
+                let max_order = n;
                 let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-                for order in [2usize, 3, 4, 5, 6] {
+                for order in 2..=max_order {
                     if let Some(c) =
                         crate::symmetrise::detect(x.view(), n, &[order], cfg.symmetry_tolerance)
                     {
@@ -8715,6 +8655,8 @@ where
                     }
                 }
                 let group = crate::symmetrise::generate_group(&cands, 60);
+                let detected_orders: Vec<usize> =
+                    cands.iter().map(|candidate| candidate.order).collect();
                 let symmetrised_state = if group.len() > 1 {
                     Some(match cfg.species.as_deref() {
                         Some(species) if species.len() == n => {
@@ -8737,7 +8679,7 @@ where
                     crate::symmetrise::symmetrise_detected(
                         x.view(),
                         n,
-                        &[2, 3, 4, 5, 6],
+                        &detected_orders,
                         cfg.symmetry_tolerance,
                         cfg.symmetry_merge_radius,
                     )
@@ -9794,21 +9736,20 @@ pub fn optimize_with_energy_gradient<'g>(
 mod bond_matrix_tests {
     use super::*;
 
-    /// One length cannot serve hydrogen and copper together; the radii-sum
-    /// rule must bond H-H at 0.75, Cu-Cu at 2.5 and keep a 2.0 separation
-    /// between two hydrogens unbonded, all under one tolerance.
+    /// Repeated opaque labels may carry different local scales without a
+    /// global cutoff swallowing a separated point.
     #[test]
-    fn radii_sums_bond_what_a_single_length_cannot() {
-        // H2 at 0.75, a Cu pair at 2.5, far apart; and a stray H at 2.0 from
-        // the molecule.
+    fn local_scales_bond_what_a_single_length_cannot() {
+        // A short pair, a long pair under another label, and a separated
+        // point carrying the first label.
         let x = Array1::from(vec![
             0.0, 0.0, 0.0, 0.75, 0.0, 0.0, 10.0, 0.0, 0.0, 12.5, 0.0, 0.0, 2.75, 0.0, 0.0,
         ]);
         let z = [1u32, 1, 29, 29, 1];
         let g = connectivity_groups_z(x.view(), &z, 1.25);
         assert_eq!(g, vec![vec![0, 1], vec![2, 3], vec![4]]);
-        // A flat cutoff wide enough for the copper bond swallows the stray
-        // hydrogen into the molecule: the failure the species rule removes.
+        // A flat cutoff wide enough for the long pair swallows the separated
+        // point into the short pair.
         let flat = connectivity_groups(x.view(), 5, 2.6);
         assert_ne!(flat, g);
     }
@@ -12829,19 +12770,11 @@ mod call_floor_tests {
     }
 
     #[test]
-    fn an_element_floor_sits_between_the_absolute_floor_and_any_bond() {
-        assert!((element_call_floor(14, 14, FLOOR) - 0.70 * 2.22).abs() < 1.0e-12);
-        assert!((element_call_floor(6, 6, FLOOR) - 0.70 * 1.52).abs() < 1.0e-12);
-        assert_eq!(element_call_floor(1, 1, FLOOR), FLOOR);
-        assert_eq!(element_call_floor(6, 1, FLOOR), FLOOR);
+    fn labels_do_not_change_the_objective_supplied_floor() {
         for za in 0..=96 {
             for zb in za..=96 {
                 let floor = element_call_floor(za, zb, FLOOR);
-                assert!(floor >= FLOOR, "{za}-{zb}");
-                let shortest = shortest_bond_length(za, zb);
-                if za > 1 && shortest > FLOOR {
-                    assert!(floor < shortest, "{za}-{zb}");
-                }
+                assert_eq!(floor, FLOOR, "{za}-{zb}");
             }
         }
     }
@@ -12870,14 +12803,14 @@ mod call_floor_tests {
     }
 
     #[test]
-    fn a_silicon_pair_is_opened_past_its_element_floor() {
+    fn a_labelled_pair_is_opened_past_the_declared_floor() {
         let elements = [14u32; 3];
         let floor = CallFloor {
             absolute: FLOOR,
             elements: Some(&elements),
         };
-        let mut x = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 2.3, 0.0]);
-        assert!(clears_call_floor(x.view(), FLOOR));
+        let mut x = Array1::from(vec![0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.6, 2.3, 0.0]);
+        assert!(!clears_call_floor(x.view(), FLOOR));
         assert!(!floor.clears(x.view()));
         assert!(floor.open(&mut x, None));
         let target = CALL_FLOOR_OPENING * element_call_floor(14, 14, FLOOR);

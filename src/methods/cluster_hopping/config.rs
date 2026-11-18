@@ -176,9 +176,9 @@ pub enum ContinuousSymmetry {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
-    /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
-    /// symmetry measure. GMIN's `NSYMINTERVAL` default is ten quenches
-    /// (`keywords.f90`).
+    /// Detect point-group operations in the current structure, project onto
+    /// them, and quench the lowest continuous-symmetry measure. GMIN's
+    /// `NSYMINTERVAL` default is ten quenches (`keywords.f90`).
     Measure {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
@@ -601,8 +601,8 @@ pub struct Config {
     /// continuous-symmetry construction solves a global atom assignment for
     /// each group image and quenches the averaged geometry on a fixed
     /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
-    /// is the Oakley, Johnston and Wales continuous symmetry measure over
-    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
+    /// uses the Oakley, Johnston and Wales continuous symmetry measure over
+    /// operations detected from the current coordinates.
     pub continuous_symmetry: ContinuousSymmetry,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
@@ -797,12 +797,11 @@ pub struct Config {
     pub group_cutoff: f64,
     /// Bonding cutoff below which two atoms are one molecule, for deriving
     /// the groups from the structure's own connectivity each hop. Used only
-    /// when no species are declared; with species the bond-matrix rule over
-    /// covalent radii replaces it.
+    /// when no labels are declared; with labels, local scales inferred from
+    /// the current geometry replace the single global length.
     pub covalent_cutoff: f64,
-    /// Atomic numbers, one per point. With these set the connectivity uses
-    /// the species-aware bond matrix, which a single length cannot replace on
-    /// a system holding more than one element.
+    /// Opaque point labels, one per point. Equal labels share an observed
+    /// pair-distance scale; their numeric values have no chemical meaning.
     pub species: Option<Vec<u32>>,
     /// Lennard-Jones diameter of each point, parallel to [`Config::species`].
     ///
@@ -811,7 +810,7 @@ pub struct Config {
     /// uses the diameters to put large atoms outside the small-atom shell.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub species_sigma: Option<Vec<f64>>,
-    /// Bond-matrix tolerance on the covalent radii sum.
+    /// Bond-matrix tolerance on the inferred local distance scale.
     pub bond_tolerance: f64,
     /// Frozen mask, one flag per point. A frozen point is environment: groups
     /// made entirely of frozen points never enter the move library, and the
@@ -932,8 +931,9 @@ pub struct Config {
     /// SOAP hop uses the 555→421 / fcc-prototype oracle. Off (recommended)
     /// is the observed-cloud residual `2p − μ`.
     pub soap_class_residual: bool,
-    /// Molecular constraint mode for the SOAP proposal. Recommended uses the
-    /// flexible Cartesian pullback; `Off` removes the arm for the control.
+    /// Molecular constraint mode for the SOAP proposal. `Off` keeps the arm
+    /// out of the recommended unlabeled search; opt-in presets may use a
+    /// Cartesian or rigid pullback.
     pub soap_mode: SoapProposalMode,
     /// Extra relaxation steps on a returning trial when `return_screen` is on.
     ///
@@ -1293,13 +1293,10 @@ pub struct Config {
     /// resolved JSON when unset, and unset on every stock preset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_floor: Option<f64>,
-    /// Atomic number of each point, read only by [`Self::call_floor`].
+    /// Optional labels of each point, read only by [`Self::call_floor`].
     ///
-    /// Each pair's floor is then [`super::element_call_floor`], a fixed
-    /// fraction of its summed covalent radii, and never below
-    /// `call_floor`. Nothing else in the search reads these, so a cluster
-    /// of one element gets the floor without the moves and gates that
-    /// [`Self::species`] turns on. One per point; a search started with
+    /// Labels do not select hidden element constants; every pair keeps the
+    /// objective-supplied `call_floor`. One per point; a search started with
     /// another count is refused. Absent from the resolved JSON when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_floor_elements: Option<Vec<u32>>,
@@ -1497,7 +1494,7 @@ impl Config {
         cfg.return_screen = true;
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
-        cfg.soap_mode = SoapProposalMode::Flexible;
+        cfg.soap_mode = SoapProposalMode::Off;
         cfg.orbit_complete_on_new = true;
         // `for_cluster` offers both cores. This measured stack keeps the
         // fraction core.
@@ -2154,13 +2151,10 @@ impl Config {
     /// ```
     pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
         assert!(!species.is_empty(), "species must not be empty");
-        let length_scale = MolecularPreset::COVALENT_DIAMETER
-            * species
-                .iter()
-                .copied()
-                .map(covalent_radius)
-                .fold(0.0_f64, f64::max);
-        assert!(length_scale > 0.0, "species must have known covalent radii");
+        // Molecular coordinates are supplied in their potential's native
+        // length unit. Geometry-dependent bond scales are inferred from the
+        // supplied structure rather than from atomic-number tables.
+        let length_scale = 1.0;
         let mut cfg = Self::with_scales(species.len(), length_scale, energy_scale);
         cfg.group_cutoff = MolecularPreset::GROUP_CUTOFF * length_scale;
         let reverse_cycles = super::cycles::cycle_compatible_groups(&groups);
@@ -2328,12 +2322,6 @@ impl Config {
     }
 }
 
-/// Widest bond-matrix tolerance a start may claim for its declared bonds.
-///
-/// A tetrahedral 1-3 C···C contact sits at 1.64 of the summed single-bond
-/// radii, the shortest non-bond the rule must not link; 1.5 stays below it.
-pub const MAX_START_BOND_TOLERANCE: f64 = 1.5;
-
 /// Bond-matrix tolerance that keeps every declared atom of `start` bonded.
 ///
 /// Each atom of a declared group of two or more is bonded to its nearest
@@ -2345,38 +2333,12 @@ pub const MAX_START_BOND_TOLERANCE: f64 = 1.5;
 /// more than [`MAX_START_BOND_TOLERANCE`] is broken as given and keeps
 /// `tolerance`.
 pub fn start_bond_tolerance(
-    start: ArrayView1<f64>,
-    species: &[u32],
-    groups: &[Vec<usize>],
+    _start: ArrayView1<f64>,
+    _species: &[u32],
+    _groups: &[Vec<usize>],
     tolerance: f64,
 ) -> f64 {
-    let n = species.len().min(start.len() / 3);
-    let mut needed = tolerance;
-    for atoms in groups.iter().filter(|atoms| atoms.len() >= 2) {
-        for &a in atoms.iter().filter(|&&a| a < n) {
-            let nearest = atoms
-                .iter()
-                .filter(|&&b| b != a && b < n)
-                .filter_map(|&b| {
-                    let sum = super::moves::covalent_radius(species[a])
-                        + super::moves::covalent_radius(species[b]);
-                    (sum > 0.0).then(|| {
-                        let square: f64 = (0..3)
-                            .map(|k| (start[3 * a + k] - start[3 * b + k]).powi(2))
-                            .sum();
-                        square.sqrt() / sum
-                    })
-                })
-                .fold(f64::INFINITY, f64::min);
-            if nearest.is_finite() && nearest > needed {
-                needed = nearest;
-            }
-        }
-    }
-    if needed <= tolerance || needed > MAX_START_BOND_TOLERANCE {
-        return tolerance;
-    }
-    needed * (1.0 + 1.0e-6)
+    tolerance
 }
 
 #[cfg(test)]
@@ -2476,27 +2438,12 @@ mod coverage_behaviour {
     }
 
     #[test]
-    fn a_long_declared_bond_widens_the_tolerance_up_to_the_cap() {
-        use super::{MAX_START_BOND_TOLERANCE, start_bond_tolerance};
+    fn a_start_does_not_select_a_species_chart() {
+        use super::start_bond_tolerance;
         let groups = vec![vec![0usize, 1, 2], vec![3usize]];
-        // C–H at 1.40 Å, 1.308 of the 1.07 Å radii sum.
         let long = ndarray::array![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, 0.0, 1.40, 0.0, 6.0, 0.0, 0.0];
-        let widened = start_bond_tolerance(long.view(), &[6, 1, 1, 6], &groups, 1.25);
-        assert!((widened - 1.40 / 1.07).abs() < 1.0e-5, "{widened}");
-        let cfg = Config::recommended_molecular(vec![6, 1, 1, 6], groups.clone(), 1.0);
-        let fitted = cfg.with_flexible_molecules(long.view()).expect("widened");
-        assert!((fitted.bond_tolerance - widened).abs() < 1.0e-12);
-        assert_eq!(fitted.move_library.declared_groups(), Some(&groups[..]));
-        let normal = ndarray::array![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, 0.0, 1.09, 0.0, 6.0, 0.0, 0.0];
         assert_eq!(
-            start_bond_tolerance(normal.view(), &[6, 1, 1, 6], &groups, 1.25),
-            1.25
-        );
-        assert!(cfg.with_flexible_molecules(normal.view()).is_none());
-        let far = (MAX_START_BOND_TOLERANCE + 0.1) * 1.07;
-        let broken = ndarray::array![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, 0.0, far, 0.0, 6.0, 0.0, 0.0];
-        assert_eq!(
-            start_bond_tolerance(broken.view(), &[6, 1, 1, 6], &groups, 1.25),
+            start_bond_tolerance(long.view(), &[6, 1, 1, 6], &groups, 1.25),
             1.25
         );
     }

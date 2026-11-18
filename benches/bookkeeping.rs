@@ -1,16 +1,14 @@
 //! Cost of the work outside the potential.
 //!
-//! One reading each for the dynamic-lattice draw, the fivefold SOAP
-//! proposal, the sorted pair spectrum, and the common-neighbour fractions.
+//! One reading each for the dynamic-lattice draw, the sorted pair spectrum,
+//! and the common-neighbour fractions.
 //! `sorted_pairs_cold` changes the geometry every call. `sorted_pairs_hot`
 //! repeats one geometry, which is what a chain does with its incumbent.
-//! The lattice draw and the fivefold table also change geometry every
-//! call: a repeated geometry is served from the basin cache.
+//! The lattice draw also changes geometry every call.
 
 use anneal_core::bias::{Fingerprint, SortedPairs};
 use anneal_core::methods::cluster_hopping::Ledger;
 use anneal_core::methods::lattice_search::Lattice;
-use anneal_core::soap::{fivefold_axis_table, step_away_fivefold};
 use anneal_core::structure::named_triplet_fractions;
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::Array1;
@@ -72,24 +70,6 @@ fn kernels(c: &mut Criterion) {
                     0.8,
                     &mut rng,
                 ))
-            })
-        });
-
-        let mut soap_salt = 30u64;
-        g.bench_function("soap_fivefold_table", |b| {
-            b.iter(|| {
-                soap_salt = soap_salt.wrapping_add(1);
-                let y = cluster(n, soap_salt);
-                black_box(fivefold_axis_table(y.view()))
-            })
-        });
-        let mut proposal_salt = 40u64;
-        g.bench_function("soap_proposal", |b| {
-            b.iter(|| {
-                proposal_salt = proposal_salt.wrapping_add(1);
-                let y = cluster(n, proposal_salt);
-                let mut rng = StdRng::seed_from_u64(11);
-                black_box(step_away_fivefold(y.view(), 0.2, &mut rng))
             })
         });
 

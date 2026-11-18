@@ -13,9 +13,10 @@
 //! \[ w_{ij} = \exp\left(-A\left(\frac{r_{ij}}{r^0_{ij}} - 1\right)\right),
 //!    \quad r_{ij} < c\, r^0_{ij}, \]
 //!
-//! with \(r^0_{ij}\) the sum of Cordero covalent radii, \(A = 3\) and
-//! \(c = 2\). Bonded atoms are coupled at weight about one and distant
-//! atoms not at all, so a preconditioned step moves bonded atoms together.
+//! with \(r^0_{ij}\) the shortest observed separation for the pair's input
+//! labels, \(A = 3\) and \(c = 2\). Relative-neighbourhood edges are coupled
+//! and screened pairs are not, so a preconditioned step moves bonded atoms
+//! together without an element chart.
 //! A small diagonal term keeps rigid translation finite. The matrix acts
 //! on each Cartesian component alike, so its factor is the size of the
 //! atom count, not three times it.
@@ -29,11 +30,11 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::methods::cluster_hopping::covalent_radius;
+use crate::methods::cluster_hopping::{geometric_bonds, geometric_pair_scales};
 
 /// Decay of a pair's weight past its bond length, Packwood's `A`.
 const DECAY: f64 = 3.0;
-/// Pairs farther apart than this multiple of their covalent sum are uncoupled.
+/// Pairs farther apart than this multiple of their inferred scale are uncoupled.
 const CUTOFF: f64 = 2.0;
 /// Each atom's own diagonal weight, a tenth of one bond.
 const STABILISER: f64 = 0.1;
@@ -48,14 +49,15 @@ pub struct BondPreconditioner {
 
 impl BondPreconditioner {
     /// The preconditioner at `x`, or `None` when the coordinates do not
-    /// match the species or no species has a covalent radius.
+    /// match the species or no finite neighbour scale can be inferred.
     pub fn new(x: ArrayView1<f64>, species: &[u32]) -> Option<Self> {
         let atoms = species.len();
         if atoms == 0 || x.len() != 3 * atoms {
             return None;
         }
-        let radii: Vec<f64> = species.iter().map(|&z| covalent_radius(z)).collect();
-        if radii.iter().all(|&r| r <= 0.0) {
+        let scales = geometric_pair_scales(x, species);
+        let bonds = geometric_bonds(x, species, CUTOFF);
+        if scales.iter().all(|scale| !scale.is_finite()) {
             return None;
         }
         let mut p = vec![0.0; atoms * atoms];
@@ -64,8 +66,8 @@ impl BondPreconditioner {
         }
         for i in 0..atoms {
             for j in i + 1..atoms {
-                let bond = radii[i] + radii[j];
-                if radii[i] <= 0.0 || radii[j] <= 0.0 {
+                let bond = scales[i * atoms + j];
+                if !bonds[i * atoms + j] || !bond.is_finite() {
                     continue;
                 }
                 let r = (0..3)
@@ -213,9 +215,9 @@ mod tests {
     }
 
     #[test]
-    fn a_mismatched_geometry_has_no_preconditioner() {
+    fn a_mismatched_geometry_is_refused_and_labels_are_opaque() {
         let (species, x) = ethane();
         assert!(BondPreconditioner::new(x.slice(ndarray::s![..9]), &species).is_none());
-        assert!(BondPreconditioner::new(x.view(), &[0; 8]).is_none());
+        assert!(BondPreconditioner::new(x.view(), &[0; 8]).is_some());
     }
 }
