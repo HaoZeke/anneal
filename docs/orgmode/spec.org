@@ -1,4 +1,5 @@
 #+TITLE: Specification
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 The typed component algebra, the five signatures, L1-L4, the =Sampler= trait, how every advanced driver (additive, gle, mixer, polish, PT, mcmc) still obeys the same surface, and the finite-precision contract (three channels) are now in [[file:explanation/algebra.org][explanation/algebra]].
 

@@ -1,4 +1,5 @@
 #+TITLE: Changelog
 #+AUTHOR: anneal developers
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 #+INCLUDE: "./.changelog-body.rst" export rst

@@ -1,4 +1,5 @@
 #+TITLE: Architecture
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 * Layout
 
@@ -22,12 +23,9 @@ The Rust crate produces three artefacts:
 
 * Bindings
 
-- *Python.
-* =anneal._core= is the Rust extension; the user-facing package =anneal= re-exports both Rust types and pure-Python helpers from a mixed-mode maturin layout.
-- *C.
-* =cargo-c= produces =anneal-core.h= and =libanneal_core.{a,so}= with =pkg-config= integration via =anneal-core.pc=.
-- *C++.
-* The hand-written =include/anneal-core.hpp= wraps the C ABI in =namespace anneal= for ergonomic C++ use.
+- *Python.* =anneal._core= is the Rust extension; the user-facing package =anneal= re-exports both Rust types and pure-Python helpers from a mixed-mode maturin layout.
+- *C.* =cargo-c= produces =anneal-core.h= and =libanneal_core.{a,so}= with =pkg-config= integration via =anneal-core.pc=.
+- *C++.* The hand-written =include/anneal-core.hpp= wraps the C ABI in =namespace anneal= for ergonomic C++ use.
 
 * The five signatures (summary)
 
@@ -184,7 +182,7 @@ Source: =src/soap.rs= and
 Slots: the molecular hop on a *clone* of the caller's config. Turns on
 =return_screen= and =symmetrise_on_stall= on the clone; never writes
 =Config::recommended=. CLI token =ras= / =pair= (not FFS =archive=).
-At =cap >= 50000=, =N >= 70= is one hop that polishes every returning
+At @@rst:``cap >= 50000``@@, @@rst:``N >= 70``@@ is one hop that polishes every returning
 trial (=return_polish = R/4=, =return_polish_after = 0=); smaller =N=
 is 30 percent skip-return then polish from the same start. Under
 =cap < 50000= the molecular and slab examples keep their own walks.

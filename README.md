@@ -277,24 +277,29 @@ This input cannot be combined with `ANNEAL_OPTBENCH_STARTS`: a diagnostic
 shelf structure is not a published random-start archive. The `mh-private-soft`
 and `mh-shared-soft` selectors add velocity softening to the same comparison.
 
-External potentials use the same optimizer driver. The molecular-cluster and
-slab examples share one persistent in-process profile adapter; selecting
-`nwchemc` loads `libnwchemc` once and serves the complete hop loop without an
-RPC server or a result cache. Molecular requests omit a simulation cell, while
-the slab driver sends the periodic cell through the same adapter.
+External potentials use the same optimizer driver through =rgpot= and
+=eindir=. `examples/common/rgpot_eindir.rs` wraps dynamic-loaded `rgpot`
+engine shared libraries (`libxtb_engine.so` via `RGPOT_XTB_ENGINE` for
+GFN2-xTB; `librgpot_cuh2.so` via `RGPOT_CUH2_LIBRARY` for CuH2 slabs) into
+an `eindir_objective_t` handle without an RPC server or a result cache.
+Molecular requests omit a periodic cell, while the slab driver passes the
+periodic simulation cell through the same `rgpot` interface:
 
 ```bash
-POTENTIAL_CONFIG=/path/to/PotentialConfig.bin \
-POTENTIAL_LIBRARY=/path/to/libnwchemc.so \
-cargo run --locked --release --features rgpot-ex \
-  --example molecular_cluster -- 6 1200 8 nwchemc
+RGPOT_XTB_ENGINE=/path/to/libxtb_engine.so \
+cargo run --locked --release --features rgpot-ex,featomic,bank-rpc \
+  --example molecular_cluster -- 6 1200 8
 ```
 
 The shared adapter is
-[`examples/common/profile_engine.rs`](examples/common/profile_engine.rs); the
+[`examples/common/rgpot_eindir.rs`](examples/common/rgpot_eindir.rs); the
 two consumers are
 [`examples/molecular_cluster.rs`](examples/molecular_cluster.rs) and
-[`examples/slab_adsorption.rs`](examples/slab_adsorption.rs).
+[`examples/slab_adsorption.rs`](examples/slab_adsorption.rs). For a
+self-contained `rgpot` callback example that runs without an external
+engine library, see
+[`examples/rgpot_minimize.rs`](examples/rgpot_minimize.rs)
+(`cargo run --locked --features capi,rgpot-ex --example rgpot_minimize`).
 
 Rigid TIP4P water is a first-class objective, not an example-local potential.
 Each molecule is a rigid body (centre of mass plus an exponential-map
@@ -372,7 +377,7 @@ Pass `x0=` (a point inside the box) to start from known parameters; it is the fi
 Runnable copies:
 
 - Script: [`examples/quickstart_portfolio.py`](examples/quickstart_portfolio.py)
-- Notebook: [`examples/notebooks/01_quickstart.ipynb`](examples/notebooks/01_quickstart.ipynb)
+- Notebook: [`examples/notebooks/01_quickstart.md`](examples/notebooks/01_quickstart.md) (Jupytext MyST source; run with `jupytext --to ipynb --execute --output - examples/notebooks/01_quickstart.md`)
 - Website quickstart + four tutorials: https://anneal.rgoswami.me
 
 ## Classical presets (same driver, different slots)

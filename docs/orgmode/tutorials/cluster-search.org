@@ -77,10 +77,36 @@ Nothing is drawn, the run target is not read, and the lowest minimum is kept.
 Preset temperature, screen length, relax length, and record gradient are unchanged.
 
 #+begin_src python
+def rigid_energy(x):
+    n = len(x) // 6
+    centres = x[: 3 * n].reshape(n, 3)
+    rot = x[3 * n :].reshape(n, 3)
+    d = centres[:, None] - centres
+    r2 = (d * d).sum(-1)
+    iu = np.triu_indices(n, 1)
+    inv6 = (1.0 / np.maximum(r2[iu], 0.25)) ** 3
+    return float(4.0 * np.sum(inv6 * inv6 - inv6) + 0.05 * np.sum(rot * rot))
+
+def rigid_grad(x):
+    n = len(x) // 6
+    eps = 1e-6
+    g = np.empty_like(x)
+    for i in range(len(x)):
+        xp, xm = x.copy(), x.copy()
+        xp[i] += eps
+        xm[i] -= eps
+        g[i] = (rigid_energy(xp) - rigid_energy(xm)) / (2.0 * eps)
+    return g
+
+start_rigid = np.concatenate([
+    np.array([[0.0, 0.0, 0.0], [1.2, 0.0, 0.0], [0.0, 1.2, 0.0], [0.0, 0.0, 1.2]]).ravel(),
+    np.full(3 * 4, 0.1),
+])
 water = cluster_search(
-    energy, gradient, 10, 20000, seed=0, recommended=True,
-    rigid=True, layout="block", target=-391.0216842125,
+    rigid_energy, rigid_grad, 4, 200, seed=0, recommended=True,
+    start=start_rigid, rigid=True, layout="block",
 )
+print("rigid best:", round(water["best_energy"], 3))
 #+end_src
 
 A caller body frame is a different chart. =water_sites= is the O, H, H
@@ -94,11 +120,15 @@ centres then exponential-map rotations. The preset is
 sites = np.array(
     [[0.0, 0.0, -0.0656], [0.0, 0.757, 0.5205], [0.0, -0.757, 0.5205]]
 )
-start = np.concatenate([np.zeros(3 * 4), np.full(3 * 4, 0.1)])
+start = np.concatenate([
+    np.array([[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 3.0]]).ravel(),
+    np.full(3 * 4, 0.1),
+])
 placed = cluster_search(
-    energy, gradient, 4, 20000, seed=0, recommended=True,
+    rigid_energy, rigid_grad, 4, 200, seed=0, recommended=True,
     start=start, water_sites=sites,
 )
+print("water_sites best:", round(placed["best_energy"], 3))
 #+end_src
 
 A design box is [[file:box-search.org][box search]], not this page.
@@ -107,23 +137,23 @@ A force-call cap or a target hit should raise =BaseException= rather than
 =Exception=. The search then returns at once with the best geometry found.
 A binary chart, a rigid chart, and a water-site chart do the same.
 
-* Direct quantum-chemistry profiles
+* Direct =rgpot= handles (=RgpotObjective=)
 
-The molecular-cluster and slab examples use the same persistent
-=ProfileEngine=. The adapter loads a conforming potential library once, turns
-each energy-and-force result into the optimizer's value-and-gradient pair, and
-owns the session for the full hop loop. Selecting =nwchemc= calls
-=libnwchemc= in process; no RPC server or result cache participates. Molecular
-requests omit a simulation cell and slab requests carry their periodic cell
-through the same request type.
+The molecular-cluster and slab examples evaluate external engines
+through =RgpotObjective= in =examples/common/rgpot_eindir.rs=, which wraps
+dynamic-loaded =rgpot= shared libraries as =eindir_objective_t= handles.
+No RPC server or result cache participates. Molecular requests omit a
+periodic cell, and slab requests carry their periodic simulation cell
+through the same =rgpot= interface:
 
 #+begin_src bash
-POTENTIAL_CONFIG=/path/to/PotentialConfig.bin \
-POTENTIAL_LIBRARY=/path/to/libnwchemc.so \
-cargo run --locked --release --features rgpot-ex \
-  --example molecular_cluster -- 6 1200 8 nwchemc
+RGPOT_XTB_ENGINE=/path/to/libxtb_engine.so \
+cargo run --locked --release --features rgpot-ex,featomic,bank-rpc \
+  --example molecular_cluster -- 6 1200 8
 #+end_src
 
-The shared adapter is =examples/common/profile_engine.rs=. The molecular and
+The shared adapter is =examples/common/rgpot_eindir.rs=. The molecular and
 periodic consumers are =examples/molecular_cluster.rs= and
-=examples/slab_adsorption.rs=.
+=examples/slab_adsorption.rs=. See [[file:../howto/presets-and-rgpot.org][presets and potentials through rgpot]]
+for all =rgpot= paths, including the self-contained
+=examples/rgpot_minimize.rs= demo.

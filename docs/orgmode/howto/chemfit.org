@@ -101,17 +101,21 @@ the optional NNG minimum-history transport is a separate channel.
 as above and an existing =campaign_dir=:
 
 #+begin_src python
-res = minimize(
-    f_scipy,
-    x0,
-    bounds=bounds,
-    jac=None,
-    budget=8000,
-    seed=0,
-    replicas=4,           # communicating chains
-    history="shared",     # or "private" / "none"
-    store=campaign_dir,   # existing readcon-db root, or fit.h5
-)
+import tempfile
+
+with tempfile.TemporaryDirectory() as campaign_dir:
+    res = minimize(
+        f_scipy,
+        x0,
+        bounds=bounds,
+        jac=None,
+        budget=8000,
+        seed=0,
+        replicas=4,           # communicating chains
+        history="shared",     # or "private" / "none"
+        store=campaign_dir,   # existing readcon-db root, or fit.h5
+    )
+    print("stored fit:", round(res.fun, 6))
 #+end_src
 
 - =store= is a handle to an *existing* archive:

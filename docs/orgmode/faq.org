@@ -1,4 +1,5 @@
 #+TITLE: FAQ
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 * What license is anneal under?
 

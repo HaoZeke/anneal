@@ -1,4 +1,5 @@
 #+TITLE: Bindings
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 * Python (maturin)
 
@@ -42,26 +43,68 @@ pkg_check_modules(ANNEAL_CORE REQUIRED IMPORTED_TARGET anneal-core)
 target_link_libraries(myprog PRIVATE PkgConfig::ANNEAL_CORE)
 #+END_SRC
 
-** Tiny C example (preset + run)
+** Tiny C example (box ensemble + DLPack)
 
 #+BEGIN_SRC c
 #include <anneal-core.h>
+#include <math.h>
 #include <stdio.h>
 
-static double rosen(const double *x, void *user) {
+static anneal_status_t rastrigin_val(void *user, const DLManagedTensorVersioned *x, double *out) {
     (void)user;
-    return (1.0 - x[0])*(1.0 - x[0]) + 100.0*(x[1] - x[0]*x[0])*(x[1] - x[0]*x[0]);
+    const double *xs = (const double *)x->dl_tensor.data;
+    int64_t d = x->dl_tensor.shape[0];
+    double sum = 0.0;
+    for (int64_t i = 0; i < d; ++i) {
+        sum += xs[i] * xs[i] - 10.0 * cos(2.0 * M_PI * xs[i]) + 10.0;
+    }
+    *out = sum;
+    return ANNEAL_SUCCESS;
+}
+
+static anneal_status_t rastrigin_grad(void *user, const DLManagedTensorVersioned *x,
+                                      DLManagedTensorVersioned *grad_out) {
+    (void)user;
+    const double *xs = (const double *)x->dl_tensor.data;
+    double *gs = (double *)grad_out->dl_tensor.data;
+    int64_t d = x->dl_tensor.shape[0];
+    for (int64_t i = 0; i < d; ++i) {
+        gs[i] = 2.0 * xs[i] + 20.0 * M_PI * sin(2.0 * M_PI * xs[i]);
+    }
+    return ANNEAL_SUCCESS;
 }
 
 int main(void) {
-    double low[2] = {-5.0, -5.0};
-    double high[2] = {5.0, 5.0};
-    AnnealHandle *h = anneal_boltzmann(rosen, NULL, low, high, 2, 5.0, 0.5);
-    anneal_run(h, 20, 80, 42);
-    double best[2];
-    double val = anneal_best(h, best, 2);
-    printf("best val %.6f at (%.4f, %.4f)\n", val, best[0], best[1]);
-    anneal_free(h);
+    double coords[2] = {3.0, -2.0};
+    double low[2] = {-5.12, -5.12};
+    double high[2] = {5.12, 5.12};
+    int64_t shape[1] = {2};
+    DLManagedTensorVersioned x = {0};
+    x.version.major = DLPACK_MAJOR_VERSION;
+    x.version.minor = DLPACK_MINOR_VERSION;
+    x.dl_tensor.data = coords;
+    x.dl_tensor.device.device_type = kDLCPU;
+    x.dl_tensor.ndim = 1;
+    x.dl_tensor.dtype.code = kDLFloat;
+    x.dl_tensor.dtype.bits = 64;
+    x.dl_tensor.dtype.lanes = 1;
+    x.dl_tensor.shape = shape;
+
+    anneal_box_config_t cfg = {0};
+    anneal_box_config_default(&cfg);
+    cfg.budget = 600;
+    cfg.seed = 7;
+
+    anneal_box_report_t report = {0};
+    anneal_status_t st = anneal_box_minimize(
+        rastrigin_val, rastrigin_grad, NULL, &x, low, high, &cfg, &report
+    );
+    if (st != ANNEAL_SUCCESS && st != ANNEAL_STOPPED) {
+        fprintf(stderr, "error: %s\n", anneal_last_error());
+        return 1;
+    }
+    printf("best val %.6f at (%.4f, %.4f) in %zu evals + %zu grads\n",
+           report.value, coords[0], coords[1], report.n_evals, report.n_grads);
     return 0;
 }
 #+END_SRC
@@ -72,16 +115,9 @@ int main(void) {
 #include <anneal-core.hpp>
 #include <iostream>
 
-double rosen(const double* x, void*) {
-    return (1.0 - x[0])*(1.0 - x[0]) + 100.0*(x[1]-x[0]*x[0])*(x[1]-x[0]*x[0]);
-}
-
 int main() {
-    std::array<double,2> lo{-5, -5}, hi{5, 5};
-    auto h = anneal::make_boltzmann(rosen, nullptr, lo.data(), hi.data(), 2, 5.0, 0.5);
-    h.run(20, 80, 42);
-    auto [pos, val] = h.best();
-    std::cout << "best " << val << " at " << pos[0] << "," << pos[1] << "\n";
+    std::cout << "anneal-core C ABI version: " << anneal::version() << "\n";
+    return 0;
 }
 #+END_SRC
 

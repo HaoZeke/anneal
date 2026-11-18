@@ -74,7 +74,7 @@ The run also wrote two files.
 Plot the trace against the Cambridge value.
 Save this as =plot_trace.py= and run it.
 
-#+begin_src python
+#+begin_src python :eval no
 import csv
 
 import matplotlib.pyplot as plt

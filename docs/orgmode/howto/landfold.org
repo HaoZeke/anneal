@@ -93,7 +93,7 @@ python docs/figures/landfold/plot_map.py
 
 * Python
 
-#+begin_src python
+#+begin_src python :eval no
 import anneal
 
 fold = anneal.landfold_book("lj38.min", seed=0)

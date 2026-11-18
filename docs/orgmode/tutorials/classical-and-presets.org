@@ -15,7 +15,7 @@ All three occupy the same five component slots; only the concrete =Cool=, =Neigh
 
    The typed component algebra and the reduction of the three
    Generalized-SA families to the five slots are documented in the reference
-   paper (see [[file:../used_by.org][used_by]]) and in the reproducibility package
+   paper (see :doc:`used_by </used_by>`) and in the reproducibility package
    (SymPy witnesses of the four limit cases).
 #+end_export
 
