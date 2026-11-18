@@ -86,6 +86,8 @@ struct MorseWorkspace {
   std::vector<double> row_s;
   std::vector<std::size_t> p0_splits;
   std::vector<std::size_t> p1_splits;
+  const nlist::Neighbours *split_owner = nullptr;
+  std::uint64_t split_build_id = 0;
   std::size_t split_atoms = 0;
   int split_slices = 0;
   std::size_t split_total_up = 0;
@@ -171,6 +173,12 @@ void buildStoredHalfIndex(MorseWorkspace &ws, const nlist::Neighbours &cells, st
   ws.build_id = cells.builds();
   ws.index_atoms = n;
   ws.slots = cells.slots();
+  ws.split_owner = nullptr;
+  ws.split_build_id = 0;
+  ws.split_atoms = 0;
+  ws.split_slices = 0;
+  ws.split_total_up = 0;
+  ws.split_total_inc = 0;
 }
 
 template <typename WorkFn>
@@ -410,7 +418,9 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
 
         const std::int64_t total_inc =
             static_cast<std::int64_t>(ws.lo_off[n_atoms]) + static_cast<std::int64_t>(total_up);
-        if (ws.split_atoms != n_atoms || ws.split_slices != slices || ws.split_total_up != total_up ||
+        if (ws.split_owner != &neighbours_ || ws.split_build_id != ws.build_id ||
+            ws.split_atoms != n_atoms || ws.split_slices != slices ||
+            ws.split_total_up != total_up ||
             ws.split_total_inc != static_cast<std::size_t>(total_inc)) {
           partitionAtomsByWork(n_atoms, slices, static_cast<std::int64_t>(total_up),
                                [&](std::size_t idx) {
@@ -424,6 +434,8 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
                        static_cast<std::int64_t>(ws.up_off[idx]);
               },
               ws.p1_splits);
+          ws.split_owner = &neighbours_;
+          ws.split_build_id = ws.build_id;
           ws.split_atoms = n_atoms;
           ws.split_slices = slices;
           ws.split_total_up = total_up;
@@ -816,6 +828,25 @@ void MorsePot::hessianVectorImpl(const ForceInput &in, const double *v,
     hj[2] -= kz;
   });
 }
+
+namespace detail {
+
+MorseSplitSnapshot morseStoredSplitSnapshot() {
+  WorkspaceLease lease;
+  const MorseWorkspace &ws = *lease.ws;
+  return MorseSplitSnapshot{
+      .owner = ws.split_owner,
+      .build_id = ws.split_build_id,
+      .atoms = ws.split_atoms,
+      .slices = ws.split_slices,
+      .total_up = ws.split_total_up,
+      .total_inc = ws.split_total_inc,
+      .p0_splits = ws.p0_splits,
+      .p1_splits = ws.p1_splits,
+  };
+}
+
+} // namespace detail
 
 } // namespace rgpot
 
