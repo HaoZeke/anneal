@@ -64,8 +64,81 @@ pub const PACKING_SPEC: SoapSpec = SoapSpec {
     rcut_nn: 3.5,
 };
 
-/// A closed-shell class histogram needs a real neighbour cloud.
-pub(crate) const MINIMUM_PACKING_ATOMS: usize = 13;
+/// True when `coordinates` contains at least one site enclosed in 3D by its
+/// first-shell neighbours, so a packing-environment histogram is non-vacuous.
+pub(crate) fn has_enclosed_site(coordinates: &[f64]) -> bool {
+    if coordinates.len() < 12 || !coordinates.len().is_multiple_of(3) {
+        return false;
+    }
+    if coordinates.iter().any(|v| !v.is_finite()) {
+        return false;
+    }
+    let count = coordinates.len() / 3;
+    let mut nearest = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut best = f64::INFINITY;
+        for j in 0..count {
+            if i == j {
+                continue;
+            }
+            let dx = coordinates[3 * j] - coordinates[3 * i];
+            let dy = coordinates[3 * j + 1] - coordinates[3 * i + 1];
+            let dz = coordinates[3 * j + 2] - coordinates[3 * i + 2];
+            best = best.min(dx * dx + dy * dy + dz * dz);
+        }
+        if best.is_finite() && best > 1e-24 {
+            nearest.push(best.sqrt());
+        }
+    }
+    if nearest.is_empty() {
+        return false;
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let bond = nearest[nearest.len() / 2];
+    let cut2 = (1.45 * bond) * (1.45 * bond);
+    for i in 0..count {
+        let mut deg = 0usize;
+        let mut sum = [0.0_f64; 3];
+        let mut cov = [[0.0_f64; 3]; 3];
+        for j in 0..count {
+            if i == j {
+                continue;
+            }
+            let dx = coordinates[3 * j] - coordinates[3 * i];
+            let dy = coordinates[3 * j + 1] - coordinates[3 * i + 1];
+            let dz = coordinates[3 * j + 2] - coordinates[3 * i + 2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+            if d2 <= cut2 && d2 > 1e-24 {
+                let inv = 1.0 / d2.sqrt();
+                let u = [dx * inv, dy * inv, dz * inv];
+                deg += 1;
+                for a in 0..3 {
+                    sum[a] += u[a];
+                    for b in 0..3 {
+                        cov[a][b] += u[a] * u[b];
+                    }
+                }
+            }
+        }
+        if deg < 4 {
+            continue;
+        }
+        let inv_deg = 1.0 / deg as f64;
+        let mean_norm2 = (sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]) * inv_deg * inv_deg;
+        let c00 = cov[0][0] * inv_deg;
+        let c01 = cov[0][1] * inv_deg;
+        let c02 = cov[0][2] * inv_deg;
+        let c11 = cov[1][1] * inv_deg;
+        let c12 = cov[1][2] * inv_deg;
+        let c22 = cov[2][2] * inv_deg;
+        let det = c00 * (c11 * c22 - c12 * c12) - c01 * (c01 * c22 - c12 * c02)
+            + c02 * (c01 * c12 - c11 * c02);
+        if mean_norm2 < 0.1225 && det > 1.0e-3 {
+            return true;
+        }
+    }
+    false
+}
 
 /// Recompute DECAF only when some atom moved more than this.
 /// Sits well below [`ENVIRONMENT_RADIUS`] and the packing-family grain.
@@ -476,11 +549,7 @@ impl PackingBook {
     }
 
     fn assign_histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if !coordinates.len().is_multiple_of(3) {
-            return None;
-        }
-        let atoms = coordinates.len() / 3;
-        if atoms < MINIMUM_PACKING_ATOMS {
+        if !has_enclosed_site(coordinates) {
             return None;
         }
         let loc = self.descriptor_rows(coordinates);
@@ -500,11 +569,7 @@ impl PackingBook {
     }
 
     fn assign_growing(&mut self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if !coordinates.len().is_multiple_of(3) {
-            return None;
-        }
-        let atoms = coordinates.len() / 3;
-        if atoms < MINIMUM_PACKING_ATOMS {
+        if !has_enclosed_site(coordinates) {
             return None;
         }
         let loc = self.descriptor_rows(coordinates);
@@ -1020,12 +1085,11 @@ fn update_packing_reference(coordinates: &[f64], count_matching_arrival: bool) {
         book.observe(&reference.coordinates);
     }
     if book.observe(coordinates).is_none() {
-        // DECAF starts at [`MINIMUM_PACKING_ATOMS`]. A smaller well still
-        // belongs in the cloud: the Leave repels from positions, and a
-        // numerically identical copy is one well, not a missing one.
+        // Without an enclosed interior shell the Leave repels from positions,
+        // and a numerically identical copy is one well, not a missing one.
         if !coordinates.is_empty()
             && coordinates.len().is_multiple_of(3)
-            && coordinates.len() / 3 < MINIMUM_PACKING_ATOMS
+            && !has_enclosed_site(coordinates)
             && coordinates.iter().all(|value| value.is_finite())
         {
             record_sub_decaf_reference(held, coordinates, count_matching_arrival);
@@ -1148,11 +1212,7 @@ pub fn nearby_packing(here: &[f64], other: &[f64]) -> bool {
     if here.len() != other.len() || here.is_empty() || !here.len().is_multiple_of(3) {
         return false;
     }
-    // DECAF histograms start at [`MINIMUM_PACKING_ATOMS`]. Below that the
-    // book has no cells, and a 0.01% copy would read as a different
-    // packing. The move epsilon is the displacement the book itself
-    // treats as the same structure.
-    if here.len() / 3 < MINIMUM_PACKING_ATOMS {
+    if !has_enclosed_site(here) || !has_enclosed_site(other) {
         return !atom_moved(here, other, PACKING_MOVE_EPS);
     }
     let mut book = PackingBook::default();

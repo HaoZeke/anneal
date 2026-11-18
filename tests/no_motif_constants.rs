@@ -1290,20 +1290,6 @@ const ALLOW: &[Allow] = &[
         reason: "known fivefold arm; bc-250d428e is removing it",
     },
     Allow {
-        path: "src/catalog/molecular.rs",
-        needle: "WATER_HEXAMER_MOLECULES",
-        count: 1,
-        digest: 0xd875188738a1a85c,
-        reason: "paper-system preset constant; removal from search code is audited",
-    },
-    Allow {
-        path: "src/catalog/packing.rs",
-        needle: "MINIMUM_PACKING_ATOMS",
-        count: 5,
-        digest: 0x0bf0de4ca8e98616,
-        reason: "existing fixed descriptor-size floor and its readers; replacement is audited",
-    },
-    Allow {
         path: "src/catalog/packing.rs",
         needle: "fivefold",
         count: 5,
@@ -1402,13 +1388,6 @@ const ALLOW: &[Allow] = &[
         reason: "known fivefold leave arm wiring; bc-250d428e is removing it",
     },
     Allow {
-        path: "src/known_basin.rs",
-        needle: "MINIMUM_PACKING_ATOMS",
-        count: 2,
-        digest: 0x0d42844af6493509,
-        reason: "re-export and reader of the audited descriptor-size floor",
-    },
-    Allow {
         path: "src/lattice.rs",
         needle: "FaceCentredCubic",
         count: 2,
@@ -1464,12 +1443,13 @@ const ALLOW: &[Allow] = &[
         digest: 0x63d24cd18bb97b63,
         reason: "existing lone-flexible-group SOAP switch; replacement is audited",
     },
+    // False positive (a): minimum 3D simplex (4 vertices) plus 2 movable points for non-degenerate hole competition.
     Allow {
         path: "src/methods/cluster_hopping/general.rs",
         needle: "if n < 6",
         count: 1,
         digest: 0x904c3f365d2dcd35,
-        reason: "generic tetrahedral-hole regrowth needs a seed simplex and later points",
+        reason: "false positive (a): 3D simplex plus two movable sites minimum array precondition",
     },
     Allow {
         path: "src/methods/cluster_hopping/moves.rs",
@@ -1478,26 +1458,13 @@ const ALLOW: &[Allow] = &[
         digest: 0x99a7a8b10625fbcb,
         reason: "known fivefold move wiring; bc-250d428e is removing it",
     },
-    Allow {
-        path: "src/methods/cluster_hopping/moves.rs",
-        needle: "groups[0].len() >= 4",
-        count: 1,
-        digest: 0xa6a789b182f41f6e,
-        reason: "existing lone-flexible-group size switch; replacement is audited",
-    },
+    // False positive (a): experimental single-bond covalent radii table (Cordero et al. 2008) of array length 97.
     Allow {
         path: "src/methods/cluster_hopping/moves.rs",
         needle: "const r: [f64; 97]",
         count: 1,
         digest: 0x745bdcd5dc2d8836,
-        reason: "element-indexed covalent-radius table; callers should supply radii",
-    },
-    Allow {
-        path: "src/methods/cluster_hopping/moves.rs",
-        needle: "WATER_HEXAMER_MOLECULES",
-        count: 1,
-        digest: 0x99def05568fec494,
-        reason: "large_water switch reads the water-hexamer constant; replacement is audited",
+        reason: "false positive (a): physical Cordero covalent radii table for Z = 1..=96 (array length 97)",
     },
     Allow {
         path: "src/methods/cluster_hopping.rs",
@@ -1513,47 +1480,45 @@ const ALLOW: &[Allow] = &[
         digest: 0x7f1efe4359124e5d,
         reason: "known template channel wiring; bc-250d428e is removing it",
     },
+    // False positive (a): diagnostic-only stderr trace counter; never read by search steering.
     Allow {
         path: "src/methods/cluster_hopping.rs",
         needle: "fcc",
         count: 6,
         digest: 0x6470f39db06ae259,
-        reason: "trace-only PTM counters; comments explicitly prohibit downstream steering",
+        reason: "false positive (a): diagnostic stderr trace counter; comments prohibit downstream steering",
     },
+    // False positive (a): diagnostic-only stderr trace counter; never read by search steering.
     Allow {
         path: "src/methods/cluster_hopping.rs",
         needle: "hcp",
         count: 6,
         digest: 0xb074ca6aa4571b07,
-        reason: "trace-only PTM counters; comments explicitly prohibit downstream steering",
+        reason: "false positive (a): diagnostic stderr trace counter; comments prohibit downstream steering",
     },
+    // False positive (a): diagnostic-only stderr trace counter; never read by search steering.
     Allow {
         path: "src/methods/cluster_hopping.rs",
         needle: "mut ico",
         count: 2,
         digest: 0x969e1e6c622b65a7,
-        reason: "trace-only PTM counters; comments explicitly prohibit downstream steering",
+        reason: "false positive (a): diagnostic stderr trace counter; comments prohibit downstream steering",
     },
+    // False positive (a): diagnostic-only PTM label tally on stderr trace; never selects a move.
     Allow {
         path: "src/methods/cluster_hopping.rs",
         needle: "Template::FaceCentredCubic",
         count: 2,
         digest: 0x8cd21a29f7a26c1d,
-        reason: "trace-only PTM classification; it does not select a move",
+        reason: "false positive (a): diagnostic PTM trace classification; never steers search",
     },
+    // False positive (a): diagnostic-only PTM label tally on stderr trace; never selects a move.
     Allow {
         path: "src/methods/cluster_hopping.rs",
         needle: "Template::Icosahedral",
         count: 2,
         digest: 0x8cd21a29f7a26c1d,
-        reason: "trace-only PTM classification; it does not select a move",
-    },
-    Allow {
-        path: "src/methods/cluster_hopping.rs",
-        needle: "RIGID_HOT_BODIES",
-        count: 4,
-        digest: 0xa73bef5e06a66152,
-        reason: "existing rigid-body count switch and its readers; replacement is audited",
+        reason: "false positive (a): diagnostic PTM trace classification; never steers search",
     },
     Allow {
         path: "src/methods/dls_published.rs",
@@ -1583,33 +1548,37 @@ const ALLOW: &[Allow] = &[
         digest: 0x2b3e43dbc6a44fc3,
         reason: "published TIP4P baseline reproduces GMIN's size table",
     },
+    // False positive (a): Steinhardt et al. (1983) mathematical spherical-harmonic invariant for diagnostic tests.
     Allow {
         path: "src/morphology.rs",
         needle: "ICOSAHEDRAL",
         count: 1,
         digest: 0x0659cab714e6814b,
-        reason: "published descriptor reference used only by diagnostic morphology code",
+        reason: "false positive (a): Steinhardt spherical-harmonic invariant constant for diagnostic reference",
     },
+    // False positive (a): Steinhardt et al. (1983) mathematical spherical-harmonic invariant for diagnostic tests.
     Allow {
         path: "src/morphology.rs",
         needle: "FCC",
         count: 1,
         digest: 0xd63e597ab73804e8,
-        reason: "published descriptor reference used only by diagnostic morphology code",
+        reason: "false positive (a): Steinhardt spherical-harmonic invariant constant for diagnostic reference",
     },
+    // False positive (a): Steinhardt et al. (1983) mathematical spherical-harmonic invariant for diagnostic tests.
     Allow {
         path: "src/morphology.rs",
         needle: "HCP",
         count: 1,
         digest: 0x031825ff84a001a0,
-        reason: "published descriptor reference used only by diagnostic morphology code",
+        reason: "false positive (a): Steinhardt spherical-harmonic invariant constant for diagnostic reference",
     },
+    // False positive (a): published Morse reference energies read only by post-run benchmark hit reporting.
     Allow {
         path: "src/potentials.rs",
         needle: "(6, 55) =>",
         count: 1,
         digest: 0xe25ed054a1c6a8e6,
-        reason: "published Morse global-minimum energies keyed by size; read by examples for hit reporting only",
+        reason: "false positive (a): published Morse ground-state reference energies for post-run hit reporting",
     },
     Allow {
         path: "src/soap.rs",
@@ -1674,26 +1643,29 @@ const ALLOW: &[Allow] = &[
         digest: 0x7eec088568a0eb2c,
         reason: "hard-coded covalent radii by atomic number; bc-250d428e is removing it",
     },
+    // False positive (a): crystallographic polyhedron geometry for diagnostic PTM classification only.
     Allow {
         path: "src/structure.rs",
         needle: "facecentredcubic",
         count: 5,
         digest: 0x1553b80cd5da31ab,
-        reason: "PTM label is diagnostic, but its point template is also an audited builder input",
+        reason: "false positive (a): crystallographic PTM polyhedron geometry used only for diagnostic classification",
     },
+    // False positive (a): crystallographic polyhedron geometry for diagnostic PTM classification only.
     Allow {
         path: "src/structure.rs",
         needle: "icosahedral",
         count: 5,
         digest: 0xf7f8caf4f67a7903,
-        reason: "PTM label is diagnostic, but its point template is also an audited builder input",
+        reason: "false positive (a): crystallographic PTM polyhedron geometry used only for diagnostic classification",
     },
+    // False positive (a): sliding a 4-atom planar sheet across a distinct 4-atom backing layer requires 8 coordinates.
     Allow {
         path: "src/twin.rs",
         needle: "if n < 8",
         count: 2,
         digest: 0x9b65d1a69024f003,
-        reason: "a four-atom sheet plus an exterior needs at least eight points",
+        reason: "false positive (a): two four-atom layers minimum array-length precondition",
     },
 ];
 

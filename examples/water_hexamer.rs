@@ -45,8 +45,8 @@ use anneal_core::catalog::molecular::{
     OXYGEN_DISTANCE_CENSUS_RADIUS_A, PBE_BASIS, PBE_CHARGE, PBE_DISPERSION, PBE_ENGINE_KIND,
     PBE_HEXAMER_BUDGET, PBE_MULTIPLICITY, PBE_TASK, PBE_THEORY, PBE_XC, PETMAD_DEVICE,
     PETMAD_ENGINE_KIND, PETMAD_HEXAMER_BUDGET, PETMAD_MODEL_NAME, RGPOT_REV, RGPOT_VERSION,
-    VACUUM_BOX, WATER_HEXAMER_MOLECULES, WATER_HEXAMER_SEED_COUNT, WATER_HEXAMER_SEED_START,
-    WATER_ISOMER_NAMES, WaterSearchArm, assign_isomer, classify_geometry, configure_water_arm,
+    VACUUM_BOX, WATER_HEXAMER_SEED_COUNT, WATER_HEXAMER_SEED_START, WATER_ISOMER_NAMES,
+    WaterSearchArm, assign_isomer, classify_geometry, configure_water_arm,
     good_turing_target_stop_at, isomer_reference_gate, isomer_witness, monomers_intact,
     reference_coordinates, reference_prism_gradient_ev_per_angstrom, sorted_oxygen_distances,
     water_groups, water_species,
@@ -62,6 +62,8 @@ use anneal_core::methods::cluster_search::{
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use eindir_core::{Bounds, Objective};
 use libloading::{Library, Symbol};
+
+const WATER_HEXAMER_MOLECULES: usize = 6;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
