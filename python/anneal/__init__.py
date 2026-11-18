@@ -260,6 +260,7 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    quench_gradient: float | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -338,6 +339,10 @@ def cluster_search(
         deposit height from the median quenched energy change of its opening
         hops instead of an energy scale of one. ``None`` keeps the preset's:
         on for ``recommended=True``, off otherwise.
+      quench_gradient: largest Cartesian gradient component at which a full
+        quench of a ``groups`` search stops (with at least 500 relaxation
+        steps), while ``record_gradient`` remains the record gate. ``None``
+        keeps the preset's.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
@@ -385,6 +390,8 @@ def cluster_search(
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:
         kwargs["measured_energy_scale"] = bool(measured_energy_scale)
+    if quench_gradient is not None:
+        kwargs["quench_gradient"] = float(quench_gradient)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out

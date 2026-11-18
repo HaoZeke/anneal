@@ -8836,6 +8836,7 @@ where
         // opening energy scale to numerical noise and cools the dial below
         // the real inter-conformer barriers.
         let same_molecular_basin = cfg.measured_energy_scale
+            && cfg.quench_gradient > 0.0
             && !unquenched
             && ((!skip_basin && {
                 let r2 = bias.merge_radius() * bias.merge_radius();

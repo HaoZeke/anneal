@@ -367,3 +367,21 @@ def test_cluster_search_auto_quench_takes_tric_for_a_slow_gradient():
     call, step = out["quench_seconds"]
     assert out["local_step"] == "tric", (call, step)
     assert call > step
+
+
+def test_cluster_search_quench_gradient_is_opt_in_and_needs_groups():
+    def energy(x):
+        return flexible_water(x, 2)[0]
+
+    def grad(x):
+        return flexible_water(x, 2)[1]
+
+    kwargs = dict(start=WATER_DIMER, species=[8, 1, 1] * 2, groups=[[0, 1, 2], [3, 4, 5]], seed=2)
+    stock = cluster_search(energy, grad, 6, 400, **kwargs)
+    tight = cluster_search(energy, grad, 6, 400, quench_gradient=1e-3, **kwargs)
+    assert np.isfinite(stock["best_energy"])
+    assert np.isfinite(tight["best_energy"])
+    with pytest.raises(ValueError, match="groups"):
+        cluster_search(energy, grad, 6, 400, start=WATER_DIMER, species=[8, 1, 1] * 2, quench_gradient=1e-3)
+    with pytest.raises(ValueError, match="positive"):
+        cluster_search(energy, grad, 6, 400, quench_gradient=0.0, **kwargs)

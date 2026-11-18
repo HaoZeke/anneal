@@ -3532,6 +3532,10 @@ fn rigid_probe(
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   quench_gradient: `Config::quench_gradient` of a `groups` search, the
+///     largest Cartesian gradient component at which a full quench stops
+///     (with at least 500 relaxation steps), while `record_gradient` remains
+///     the record gate. Unset keeps the preset's.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3561,6 +3565,7 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    quench_gradient = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3586,6 +3591,7 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    quench_gradient: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
@@ -3615,6 +3621,16 @@ fn cluster_search(
     }
     if measured_energy_scale.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("measured_energy_scale needs groups"));
+    }
+    if let Some(gtol) = quench_gradient {
+        if groups.is_none() {
+            return Err(PyValueError::new_err("quench_gradient needs groups"));
+        }
+        if !gtol.is_finite() || gtol <= 0.0 {
+            return Err(PyValueError::new_err(
+                "quench_gradient must be finite and positive",
+            ));
+        }
     }
     if let Some(groups) = groups.as_ref() {
         if ras || derived || communicating || length_scale.is_some() {
@@ -3741,6 +3757,10 @@ fn cluster_search(
         }
         if let Some(measured) = measured_energy_scale {
             cfg.measured_energy_scale = measured;
+        }
+        if let Some(gtol) = quench_gradient {
+            cfg.quench_gradient = gtol;
+            cfg.relax_steps = cfg.relax_steps.max(500);
         }
         cfg
     } else if let Some(geometry) = water {

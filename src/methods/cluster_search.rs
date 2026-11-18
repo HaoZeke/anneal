@@ -761,8 +761,10 @@ where
     } else {
         cfg.record_gradient
     };
-    let keep_molecular_curvature =
-        cfg.move_library.is_molecular() && !cfg.move_library.is_rigid_body();
+    let converged_molecular = cfg.quench_gradient > 0.0
+        && cfg.move_library.is_molecular()
+        && !cfg.move_library.is_rigid_body();
+    let keep_molecular_curvature = converged_molecular;
     // The driver calls the screening pass with `screen_steps`, the full one
     // with `relax_steps` and a record polish with `polish_records`, so the
     // iteration count identifies which is which.
@@ -796,8 +798,9 @@ where
         }
         _ => None,
     };
-    let mut use_tric =
-        tric.is_some() && matches!(cfg.local_step, LocalStep::Tric | LocalStep::Auto);
+    let mut use_tric = tric.is_some()
+        && (cfg.local_step == LocalStep::Tric
+            || (converged_molecular && cfg.local_step == LocalStep::Auto));
     // Under `Auto` the opening calls are timed and compared once against a
     // TRIC step probe. At `quench_gradient = 1e-3` eV/Å Cartesian L-BFGS
     // spends 12–35 times as many calls per flexible-molecule quench as TRIC,
@@ -1116,7 +1119,11 @@ where
         {
             let per_call = call_seconds / timed_calls as f64;
             let per_step = tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
-            let saving = tric.call_saving(check.at.view());
+            let saving = if converged_molecular {
+                tric.call_saving(check.at.view())
+            } else {
+                1.0
+            };
             use_tric = saving * per_call > per_step;
             deciding = false;
             stats.quench_seconds = Some((per_call, per_step));
@@ -4234,13 +4241,15 @@ mod tests {
             cfg.record_gradient
         );
         assert!((cfg.record_gradient - 5.0e-2).abs() < 1e-15);
-        assert!((cfg.quench_gradient - 1.0e-3).abs() < 1e-15);
+        assert_eq!(cfg.quench_gradient, 0.0);
     }
 
     #[test]
-    fn recommended_molecular_quenches_past_the_record_gate_to_quench_gradient() {
+    fn molecular_quench_gradient_descends_past_the_record_gate() {
         let chain = SpringChain::new(8);
-        let cfg = Config::recommended_molecular(vec![6; 8], vec![(0..8).collect()], 1.0);
+        let mut cfg = Config::recommended_molecular(vec![6; 8], vec![(0..8).collect()], 1.0);
+        cfg.quench_gradient = 1.0e-3;
+        cfg.relax_steps = 500;
         let paid = PaidCheck::default();
         let mut stats = RelaxStats::default();
         let mut led = Ledger::new(5_000);
