@@ -1133,7 +1133,7 @@ rule landfold_maps_current:
 rule landfold_map_shard:
     input:
         "examples/landfold_campaign.rs",
-        "paper/jctc/scripts/run_landfold_campaign.py",
+        ancient("paper/jctc/scripts/run_landfold_campaign.py"),
     output:
         book="/work/anneal-landfold-current/shards/{campaign}/seed-{seed}.min",
         receipt="/work/anneal-landfold-current/shards/{campaign}/seed-{seed}.json",
