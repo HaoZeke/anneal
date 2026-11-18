@@ -894,6 +894,11 @@ void rgpot_potential_reset_hvp_counts(const struct rgpot_potential_t *pot);
  *
  * Returns a heap-allocated handle, or `NULL` on failure.
  * The caller must eventually call `rgpot_rpc_client_free`.
+ *
+ * # Safety
+ *
+ * `host` must be null or a valid NUL-terminated string. A non-null return
+ * is owned by the caller and freed with `rgpot_rpc_client_free`.
  */
 rgpot_rpc_client_t *rgpot_rpc_client_new(const char *host, uint16_t port);
 #endif
@@ -903,6 +908,12 @@ rgpot_rpc_client_t *rgpot_rpc_client_new(const char *host, uint16_t port);
  * Perform a remote force/energy calculation.
  *
  * Returns `RGPOT_SUCCESS` on success, or an error status code.
+ *
+ * # Safety
+ *
+ * `client` must be null or a pointer from `rgpot_rpc_client_new`. `input`
+ * and `output` must be null or point at live structs whose tensors, when
+ * non-null, stay valid for the call.
  */
 enum rgpot_status_t rgpot_rpc_calculate(rgpot_rpc_client_t *client,
                                         const struct rgpot_force_input_t *input,
@@ -914,6 +925,11 @@ enum rgpot_status_t rgpot_rpc_calculate(rgpot_rpc_client_t *client,
  * Free an RPC client handle.
  *
  * If `client` is `NULL`, this is a no-op.
+ *
+ * # Safety
+ *
+ * `client` must be null or a pointer from `rgpot_rpc_client_new` that has
+ * not already been freed.
  */
 void rgpot_rpc_client_free(rgpot_rpc_client_t *client);
 #endif
