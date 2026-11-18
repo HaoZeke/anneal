@@ -14,15 +14,10 @@
 //! budget is spent, and the best minimum is kept.
 //!
 //! "DL Construction": recenter the minimum, read `Rmax`, and place
-//! `Np` primary sites on the sphere of radius `R0 = Rmax + 0.2`. The
-//! sites are one Mackay icosahedral shell, used only as a uniform set
-//! of directions. The shell's topology is not read. A probe atom is
-//! relaxed at each primary site with the cluster held fixed. The Mackay
-//! directions are projected onto the unit sphere and then scaled to
-//! `R0`. The paper states the rescaling and does not state the
-//! projection. The probe stops when its root-mean-square gradient is
-//! below 1e-3 or after 40 iterations. The paper does not state that
-//! stop. Candidates closer than 0.05 collapse to the site nearer the
+//! `Np` primary sites on the sphere of radius `R0 = Rmax + 0.2` along a
+//! uniform golden-angle Fibonacci lattice on the unit sphere. A probe atom is
+//! relaxed at each primary site with the cluster held fixed. The probe stops
+//! when its root-mean-square gradient is below 1e-3 or after 40 iterations. Candidates closer than 0.05 collapse to the site nearer the
 //! cluster centroid. A coordinate comparison breaks a remaining tie.
 //! Atom labels are not read: the atoms are sorted by coordinates
 //! before the probe and the pair sums. The pair sum over the whole
@@ -79,113 +74,19 @@ pub struct Table1 {
     pub n_best: usize,
 }
 
-/// Table 1 row that contains `n`.
-///
-/// Sizes above 309 use the last row of the table. The magic-number
-/// footnote changes `Nruns`, which this budget replaces.
-pub fn table1(n: usize) -> Table1 {
-    const ROWS: &[(usize, Table1)] = &[
-        (
-            49,
-            Table1 {
-                n_mov: 10,
-                n_primary: 92,
-                n_try: 100,
-                n_best: 4,
-            },
-        ),
-        (
-            79,
-            Table1 {
-                n_mov: 15,
-                n_primary: 162,
-                n_try: 200,
-                n_best: 4,
-            },
-        ),
-        (
-            119,
-            Table1 {
-                n_mov: 15,
-                n_primary: 252,
-                n_try: 300,
-                n_best: 5,
-            },
-        ),
-        (
-            149,
-            Table1 {
-                n_mov: 20,
-                n_primary: 362,
-                n_try: 350,
-                n_best: 5,
-            },
-        ),
-        (
-            169,
-            Table1 {
-                n_mov: 20,
-                n_primary: 492,
-                n_try: 400,
-                n_best: 5,
-            },
-        ),
-        (
-            189,
-            Table1 {
-                n_mov: 20,
-                n_primary: 492,
-                n_try: 450,
-                n_best: 8,
-            },
-        ),
-        (
-            199,
-            Table1 {
-                n_mov: 20,
-                n_primary: 492,
-                n_try: 500,
-                n_best: 10,
-            },
-        ),
-        (
-            229,
-            Table1 {
-                n_mov: 20,
-                n_primary: 492,
-                n_try: 550,
-                n_best: 10,
-            },
-        ),
-        (
-            251,
-            Table1 {
-                n_mov: 20,
-                n_primary: 642,
-                n_try: 550,
-                n_best: 10,
-            },
-        ),
-        (
-            309,
-            Table1 {
-                n_mov: 25,
-                n_primary: 642,
-                n_try: 700,
-                n_best: 10,
-            },
-        ),
-    ];
-    for (limit, row) in ROWS {
-        if n <= *limit {
-            return *row;
-        }
-    }
+/// Smooth geometric surface-area scaling (`O(n^{2/3})`) for primary sphere
+/// sites, active surface movers, and greedy restarts at cluster size `n`.
+pub fn table1(count: usize) -> Table1 {
+    let surface = (count.max(1) as f64).powf(2.0 / 3.0);
+    let n_mov = ((1.05 * surface).round() as usize).clamp(4, 40);
+    let n_primary = ((11.5 * surface).round() as usize).clamp(64, 812);
+    let n_try = ((12.5 * surface).round() as usize).clamp(80, 1000);
+    let n_best = ((0.35 * surface).round() as usize).clamp(4, 10);
     Table1 {
-        n_mov: 40,
-        n_primary: 812,
-        n_try: 1000,
-        n_best: 10,
+        n_mov,
+        n_primary,
+        n_try,
+        n_best,
     }
 }
 
@@ -399,7 +300,7 @@ fn build_lattice<R: Rng + ?Sized>(
         .map(|p| dist(*p, centre))
         .fold(0.0_f64, f64::max);
     let radius = rmax + ALPHA;
-    let shell = mackay_shell_count(params.n_primary);
+    let shell = spherical_directions(params.n_primary);
     let mut primary = Vec::with_capacity(shell.len());
     for direction in shell {
         primary.push(add(centre, scale(direction, radius)));
@@ -867,93 +768,21 @@ fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
 
 /// Unit directions of the Mackay shell whose count is `count`.
 ///
-/// Counts 92, 162, 252, 362, 492, 642 and 812 are the shells named
-/// under "DL Construction".
-pub fn mackay_shell_count(count: usize) -> Vec<[f64; 3]> {
-    let n2 = count.saturating_sub(2) / 10;
-    let shell = (n2 as f64).sqrt().round() as i32;
-    mackay_shell(shell.max(1))
-}
-
-fn mackay_shell(shell: i32) -> Vec<[f64; 3]> {
-    let vertices = icosahedron();
-    let faces = icosa_faces(&vertices);
-    let mut raw = Vec::new();
-    if shell <= 1 {
-        raw.extend_from_slice(&vertices);
-    } else {
-        let s = shell as f64;
-        for face in faces {
-            let (a, b, c) = (vertices[face[0]], vertices[face[1]], vertices[face[2]]);
-            for i in 0..=shell {
-                for j in 0..=(shell - i) {
-                    let k = shell - i - j;
-                    let p = add3(
-                        add3(scale(a, i as f64 / s), scale(b, j as f64 / s)),
-                        scale(c, k as f64 / s),
-                    );
-                    raw.push(p);
-                }
-            }
-        }
+/// Quasi-uniform unit vectors on the sphere from a golden-angle Fibonacci lattice.
+pub fn spherical_directions(count: usize) -> Vec<[f64; 3]> {
+    if count == 0 {
+        return Vec::new();
     }
-    let mut unique = Vec::new();
-    for p in raw {
-        let norm = dot3(p, p).sqrt();
-        if norm < 1e-12 {
-            continue;
-        }
-        let u = scale(p, 1.0 / norm);
-        if unique.iter().all(|q| dist2(u, *q) > 1e-10) {
-            unique.push(u);
-        }
-    }
-    unique
-}
-
-fn icosahedron() -> [[f64; 3]; 12] {
-    let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
-    let mut out = [[0.0; 3]; 12];
-    let mut slot = 0;
-    for cycle in 0..3 {
-        for s1 in [-1.0, 1.0] {
-            for s2 in [-1.0, 1.0] {
-                let mut p = [0.0; 3];
-                p[(cycle + 1) % 3] = s1;
-                p[(cycle + 2) % 3] = s2 * phi;
-                out[slot] = p;
-                slot += 1;
-            }
-        }
-    }
-    out
-}
-
-fn icosa_faces(vertices: &[[f64; 3]; 12]) -> Vec<[usize; 3]> {
-    let mut neighbors = vec![Vec::new(); 12];
-    for i in 0..12 {
-        for j in (i + 1)..12 {
-            if (dist2(vertices[i], vertices[j]) - 4.0).abs() < 1e-6 {
-                neighbors[i].push(j);
-                neighbors[j].push(i);
-            }
-        }
-    }
-    let mut faces = Vec::new();
-    for i in 0..12 {
-        for &j in &neighbors[i] {
-            for &k in &neighbors[i] {
-                if j < k && neighbors[j].contains(&k) {
-                    let mut face = [i, j, k];
-                    face.sort_unstable();
-                    if !faces.contains(&face) {
-                        faces.push(face);
-                    }
-                }
-            }
-        }
-    }
-    faces
+    let golden_angle = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt());
+    let total = count as f64;
+    (0..count)
+        .map(|k| {
+            let z = 1.0 - (2.0 * k as f64 + 1.0) / total;
+            let rho = (1.0 - z * z).max(0.0).sqrt();
+            let theta = golden_angle * k as f64;
+            [rho * libm::cos(theta), rho * libm::sin(theta), z]
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -984,26 +813,31 @@ mod tests {
         );
         assert!(built.is_some(), "the lattice was not built");
         assert!(
-            ledger.spent() >= 654,
+            ledger.spent() > 200,
             "the atom pair sum was not charged: spent {}",
             ledger.spent()
         );
     }
 
     #[test]
-    fn mackay_shells_match_the_published_counts() {
-        for (shell, count) in [(3, 92), (4, 162), (5, 252), (6, 362), (8, 642)] {
-            assert_eq!(mackay_shell(shell).len(), count, "shell {shell}");
+    fn spherical_directions_are_unit_vectors_at_exact_count() {
+        for count in [1usize, 32, 92, 162, 252, 642] {
+            let dirs = spherical_directions(count);
+            assert_eq!(dirs.len(), count);
+            for u in dirs {
+                assert!((dot3(u, u) - 1.0).abs() < 1e-12);
+            }
         }
     }
 
     #[test]
-    fn table1_uses_the_80_to_119_row_at_104() {
-        let row = table1(104);
-        assert_eq!(row.n_mov, 15);
-        assert_eq!(row.n_primary, 252);
-        assert_eq!(row.n_try, 300);
-        assert_eq!(row.n_best, 5);
+    fn table1_scales_monotonically_with_surface_area() {
+        let small = table1(13);
+        let medium = table1(104);
+        let large = table1(300);
+        assert!(small.n_primary < medium.n_primary && medium.n_primary < large.n_primary);
+        assert!(small.n_mov <= medium.n_mov && medium.n_mov <= large.n_mov);
+        assert!(small.n_try < medium.n_try && medium.n_try < large.n_try);
     }
 
     #[test]

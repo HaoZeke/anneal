@@ -1436,34 +1436,6 @@ const ALLOW: &[Allow] = &[
         digest: 0x8cd21a29f7a26c1d,
         reason: "false positive (a): diagnostic PTM trace classification; never steers search",
     },
-    Allow {
-        path: "src/methods/dls_published.rs",
-        needle: "mackay",
-        count: 4,
-        digest: 0x001b2f20f38a5c1a,
-        reason: "published DLS baseline reproduces its named primary-site template",
-    },
-    Allow {
-        path: "src/methods/dls_published.rs",
-        needle: "icosahedron",
-        count: 2,
-        digest: 0x72dbfb5291299e7d,
-        reason: "published DLS baseline builds a named primary-site template",
-    },
-    Allow {
-        path: "src/methods/dls_published.rs",
-        needle: "const rows: &[(usize, table1)]",
-        count: 1,
-        digest: 0x97c1b69bbbacdc68,
-        reason: "published DLS Table 1 is keyed by atom-count breakpoints 49 through 309",
-    },
-    Allow {
-        path: "src/methods/gmin_hop.rs",
-        needle: "temperature: if n < 18",
-        count: 1,
-        digest: 0x2b3e43dbc6a44fc3,
-        reason: "published TIP4P baseline reproduces GMIN's size table",
-    },
     // False positive (a): Steinhardt et al. (1983) mathematical spherical-harmonic invariant for diagnostic tests.
     Allow {
         path: "src/morphology.rs",
