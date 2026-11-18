@@ -54,6 +54,12 @@ CAMPAIGN_IDS = {
     "lj98-recommended": CAMPAIGNS[2],
     "tip4p-hexamer": CAMPAIGNS[3],
 }
+CAMPAIGN_PANEL_LETTERS = {
+    "lj_csm/lj75/recommended": "i-j",
+    "lj_csm/lj98/derived": "k",
+    "lj_csm_c26/lj98/recommended": "l",
+    "tip4p/hexamer/for_tip4p": "m-n",
+}
 
 
 def run(command: list[str]) -> None:
@@ -314,6 +320,44 @@ def publish_shard_status(work: Path, publish: Path) -> None:
     )
 
 
+def append_complete_status(
+    publish: Path,
+    commit: str,
+    tree: str,
+    host: str,
+) -> None:
+    path = publish / "rerun-status.csv"
+    columns = (
+        "panels", "campaign", "kinds", "code_revision", "code_tree",
+        "host", "date", "status", "missing",
+    )
+    with path.open(newline="") as handle:
+        held = list(csv.DictReader(handle))
+    existing = {
+        (row["campaign"], row["code_revision"])
+        for row in held
+        if row["status"] == "complete"
+    }
+    with path.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
+        for campaign in CAMPAIGNS:
+            if (campaign.name, commit) in existing:
+                continue
+            writer.writerow(
+                {
+                    "panels": CAMPAIGN_PANEL_LETTERS[campaign.name],
+                    "campaign": campaign.name,
+                    "kinds": ";".join(campaign.panels),
+                    "code_revision": commit,
+                    "code_tree": tree,
+                    "host": host,
+                    "date": time.strftime("%Y-%m-%d", time.gmtime()),
+                    "status": "complete",
+                    "missing": "none",
+                }
+            )
+
+
 def finalize(work: Path, publish: Path, threads: int | None = None) -> None:
     landfold = ROOT.parent / "tmp/anneal-target/release/anneal"
     if not landfold.is_file():
@@ -389,11 +433,12 @@ def finalize(work: Path, publish: Path, threads: int | None = None) -> None:
         writer.writeheader()
         writer.writerows(sorted(records, key=lambda row: (row["campaign"], row["seed"])))
     commit, tree = revision()
+    host = os.environ.get("LANDFOLD_HOST", "cloud-run")
     campaign_receipt = {
         "status": "complete",
         "code_revision": commit,
         "code_tree": tree,
-        "host": os.environ.get("LANDFOLD_HOST", "cloud-run"),
+        "host": host,
         "campaigns": [campaign.__dict__ for campaign in CAMPAIGNS],
         "shards": len(records),
         "charged": sum(row["charged"] for row in records),
@@ -401,6 +446,7 @@ def finalize(work: Path, publish: Path, threads: int | None = None) -> None:
         "panels": panels,
     }
     (publish / "current-rerun.json").write_text(json.dumps(campaign_receipt, indent=2) + "\n")
+    append_complete_status(publish, commit, tree, host)
     (work / "complete.stamp").write_text(f"{commit} {tree} {campaign_receipt['host']}\n")
 
 
