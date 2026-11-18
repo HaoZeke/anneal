@@ -322,6 +322,80 @@ pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     j
 }
 
+/// `residualᵀ ∂B/∂c` in one pass, the row of [`d_from_c`] the pullback uses.
+///
+/// Finite differences rebuild every ν=3 scalar for every coefficient. The
+/// cloud step only needs that Jacobian contracted with the leftover, and
+/// the product rule on the same CG terms gives it directly.
+pub fn contract_c(c: &[f64], residual: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let n_c = n_max * n_lm;
+    let mut weights = vec![0.0; n_c];
+    if n_c == 0 || l_max > CG_CACHE_MAX || residual.is_empty() {
+        return weights;
+    }
+    let mut padded = c.to_vec();
+    if padded.len() < n_c {
+        padded.resize(n_c, 0.0);
+    }
+    let trips = triples_cached(l_max);
+    let terms = nonzero_terms(l_max);
+    let mut re = vec![0.0; n_c];
+    let mut im = vec![0.0; n_c];
+    for n in 0..n_max {
+        for l in 0..=l_max {
+            for m in -(l as i32)..=(l as i32) {
+                let (cr, ci) = coeff(&padded, n, l, m, n_lm);
+                let at = n * n_lm + lm_index(l, m);
+                re[at] = cr;
+                im[at] = ci;
+            }
+        }
+    }
+    let mut adj_re = vec![0.0; n_c];
+    let mut adj_im = vec![0.0; n_c];
+    for n in 0..n_max {
+        let base = n * n_lm;
+        for (k, triple_terms) in terms.iter().enumerate() {
+            let slot = n * trips.len() + k;
+            let adj_b = residual.get(slot).copied().unwrap_or(0.0);
+            if adj_b == 0.0 {
+                continue;
+            }
+            for term in triple_terms {
+                let a = (re[base + term.i1], im[base + term.i1]);
+                let b = (re[base + term.i2], im[base + term.i2]);
+                let d = (re[base + term.i3], im[base + term.i3]);
+                let ab = cmul(a, b);
+                let scale = term.g * adj_b;
+                adj_re[base + term.i1] += scale * (d.0 * b.0 + d.1 * b.1);
+                adj_im[base + term.i1] += scale * (-d.0 * b.1 + d.1 * b.0);
+                adj_re[base + term.i2] += scale * (d.0 * a.0 + d.1 * a.1);
+                adj_im[base + term.i2] += scale * (-d.0 * a.1 + d.1 * a.0);
+                adj_re[base + term.i3] += scale * ab.0;
+                adj_im[base + term.i3] += scale * ab.1;
+            }
+        }
+    }
+    for n in 0..n_max {
+        let base = n * n_lm;
+        for l in 0..=l_max {
+            let at = |m: i32| base + lm_index(l, m);
+            weights[at(0)] += adj_re[at(0)];
+            for m in 1..=l as i32 {
+                let sign = if m % 2 == 0 { 1.0 } else { -1.0 };
+                let positive = at(m);
+                let negative = at(-m);
+                weights[positive] += adj_re[positive] * sign / SQRT_2;
+                weights[negative] += adj_im[positive] * sign / SQRT_2;
+                weights[positive] += adj_re[negative] / SQRT_2;
+                weights[negative] += adj_im[negative] * -1.0 / SQRT_2;
+            }
+        }
+    }
+    weights
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +449,29 @@ mod tests {
             elapsed.as_millis() < 200,
             "ACE derivative took {elapsed:?}; a (H2O)20 pullback would not return"
         );
+    }
+
+    #[test]
+    fn the_contracted_derivative_matches_the_finite_difference() {
+        let n_max = 3;
+        let l_max = 6;
+        let n_c = n_max * (l_max + 1) * (l_max + 1);
+        let c: Vec<f64> = (0..n_c)
+            .map(|i| ((i * 17) % 11) as f64 * 0.01 - 0.05)
+            .collect();
+        let residual: Vec<f64> = (0..dim(n_max, l_max))
+            .map(|i| ((i * 3) % 7) as f64 * 0.02)
+            .collect();
+        let j = d_from_c(&c, n_max, l_max);
+        let mut expected = vec![0.0; n_c];
+        for col in 0..n_c {
+            for (row, value) in residual.iter().enumerate() {
+                expected[col] += j[[row, col]] * value;
+            }
+        }
+        let got = contract_c(&c, &residual, n_max, l_max);
+        for (a, b) in got.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-5, "{a} vs {b}");
+        }
     }
 }

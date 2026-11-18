@@ -1010,17 +1010,14 @@ fn nu3_gradient_pullback(
                 continue;
             }
             let c0 = ch * n_coeff;
-            let db = crate::ace::d_from_c(&coeffs[c0..c0 + n_coeff], spec.n_max, spec.l_max);
+            let contracted = crate::ace::contract_c(
+                &coeffs[c0..c0 + n_coeff],
+                &residual,
+                spec.n_max,
+                spec.l_max,
+            );
             let w0 = (i * n_chan + ch) * n_coeff;
-            for t in 0..ace1 {
-                let value = residual[t];
-                if value == 0.0 {
-                    continue;
-                }
-                for col in 0..n_coeff {
-                    weights[w0 + col] += db[[t, col]] * value;
-                }
-            }
+            weights[w0..w0 + n_coeff].copy_from_slice(&contracted);
         }
     }
     for i in 0..n_at {
