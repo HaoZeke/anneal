@@ -375,6 +375,8 @@ struct CPMDPot::Impl {
   // The calculation the next force belongs to, see selectOrbitals.
   bool has_orbital_key = false;
   int64_t orbital_key = 0;
+  // Set when configure leaves the engine loaded but no live session.
+  std::string unavailable_reason;
 
   void destroySession();
   bool configure();
@@ -403,6 +405,7 @@ void CPMDPot::Impl::destroySession() {
 }
 
 bool CPMDPot::Impl::configure() {
+  unavailable_reason.clear();
   if (!register_engine_adopter(bundle)) {
     bundle.load_error = "engine refused calculator communicator";
     bundle.loaded = false;
@@ -426,6 +429,7 @@ bool CPMDPot::Impl::configure() {
     // session, so a later setParams with the same bytes tries again
     // instead of taking the identical-session return above.
     if (!applySelectedOrbitalKey()) {
+      unavailable_reason = "CPMD engine refused the orbital key";
       destroySession();
       return false;
     }
@@ -630,8 +634,16 @@ void CPMDPot::forceImplOrThrow(const ForceInput &in, ForceOut *out) const {
   if (thisCalculator().index < 0)
     fail_force("CPMDPot: calculator binding was refused");
   if (!available()) {
-    fail_force(std::string("CPMD engine (libcpmdc) not loaded: ") +
-               (impl_ ? impl_->bundle.load_error : "no impl"));
+    if (impl_ && impl_->bundle.loaded) {
+      if (!impl_->unavailable_reason.empty())
+        fail_force(impl_->unavailable_reason);
+      fail_force("CPMD engine session not ready");
+    }
+    const std::string detail =
+        impl_ ? impl_->bundle.load_error : std::string("no impl");
+    if (detail.empty())
+      fail_force("CPMD engine (libcpmdc) not loaded");
+    fail_force(std::string("CPMD engine (libcpmdc) not loaded: ") + detail);
   }
 
   const int n = static_cast<int>(in.nAtoms);
