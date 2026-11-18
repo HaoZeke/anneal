@@ -133,7 +133,9 @@ fn main() {
 
     println!("cargo::rerun-if-env-changed=RGPOT_SOURCE_REVISION");
     println!("cargo::rerun-if-changed=src/version.rs");
+    println!("cargo::rerun-if-changed=src/engine.rs");
     println!("cargo::rerun-if-changed=cbindgen.toml");
+    println!("cargo::rerun-if-changed=../CppCore/rgpot/engine_c_abi.h");
     println!(
         "cargo::rustc-env=RGPOT_SOURCE_REVISION={}",
         source_revision(&crate_dir)
