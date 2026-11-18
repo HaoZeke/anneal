@@ -310,125 +310,46 @@ impl CoreRegion {
     }
 }
 
-/// Online leader-clustering codebook over unnamed local contact-subgraph histograms.
-#[derive(Debug, Clone, Default)]
+/// Per-chain deterministic mapping from interior core topology ([`core_key_nn`])
+/// and chain seed to a compact [`CoreRegion`] identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CoreRegionBook {
-    leaders: Vec<[f64; 64]>,
-    radius: f64,
+    seed: u64,
 }
 
-/// Default L1 radius separating distinct core contact-subgraph distributions.
-pub const CORE_REGION_RADIUS: f64 = 0.18;
+fn fold_region_id(key: u64, seed: u64) -> u8 {
+    let mut z = key ^ seed.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    (z ^ (z >> 31)) as u8
+}
 
 impl CoreRegionBook {
-    /// Empty book with the given L1 leader merge radius.
-    pub fn new(radius: f64) -> Self {
-        Self {
-            leaders: Vec::new(),
-            radius: radius.max(1.0e-6),
-        }
+    /// Construct a deterministic per-chain region book for `seed`.
+    pub const fn new(seed: u64) -> Self {
+        Self { seed }
     }
 
-    /// Observe `x` and return its data-derived [`CoreRegion`].
-    pub fn assign(&mut self, x: ArrayView1<f64>) -> CoreRegion {
-        let feat = core_subgraph_descriptor(x);
-        let mut best: Option<(usize, f64)> = None;
-        for (idx, leader) in self.leaders.iter().enumerate() {
-            let l1: f64 = feat
-                .iter()
-                .zip(leader.iter())
-                .map(|(a, b)| (a - b).abs())
-                .sum();
-            if l1 <= self.radius && best.is_none_or(|(_, d)| l1 < d) {
-                best = Some((idx, l1));
-            }
+    /// Deterministically map `x`'s interior core ring topology and the chain's
+    /// seed to a [`CoreRegion`], independent of arrival order or other chains.
+    pub fn assign(&self, x: ArrayView1<f64>) -> CoreRegion {
+        let count = x.len() / 3;
+        if count < 2 || !x.len().is_multiple_of(3) || x.iter().any(|v| !v.is_finite()) {
+            return CoreRegion(fold_region_id(0, self.seed));
         }
-        if let Some((idx, _)) = best {
-            return CoreRegion(idx as u8);
-        }
-        if self.leaders.len() < u8::MAX as usize {
-            let id = self.leaders.len() as u8;
-            self.leaders.push(feat);
-            CoreRegion(id)
-        } else {
-            let nearest = self
-                .leaders
-                .iter()
-                .enumerate()
-                .map(|(idx, leader)| {
-                    let l1: f64 = feat
-                        .iter()
-                        .zip(leader.iter())
-                        .map(|(a, b)| (a - b).abs())
-                        .sum();
-                    (idx, l1)
-                })
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map_or(0, |(idx, _)| idx);
-            CoreRegion(nearest as u8)
-        }
+        let ck = core_key_nn(x, &[], CoreRule::default());
+        CoreRegion(fold_region_id(ck.key, self.seed))
     }
 }
 
-/// Unnamed 64-bin L1-normalised common-neighbour `(shared, edges)` histogram
-/// over interior core contacts of `x` at its median nearest-neighbour scale.
-pub fn core_subgraph_descriptor(x: ArrayView1<f64>) -> [f64; 64] {
-    let mut hist = [0.0_f64; 64];
-    let count = x.len() / 3;
-    if count < 2 {
-        hist[0] = 1.0;
-        return hist;
-    }
-    let nb = contact_neighbours(x, count, contact_cutoff(x));
-    let core = core_atoms(&nb, CoreRule::default());
-    let mut in_core = vec![false; count];
-    for &idx in &core {
-        in_core[idx] = true;
-    }
-    let mut total = 0.0_f64;
-    for i in 0..count {
-        for &j in &nb[i] {
-            if j <= i || (!in_core[i] && !in_core[j]) {
-                continue;
-            }
-            let common: Vec<usize> = nb[i]
-                .iter()
-                .copied()
-                .filter(|k| nb[j].contains(k))
-                .collect();
-            let mut edges = 0usize;
-            for (a, &p) in common.iter().enumerate() {
-                for &q in &common[a + 1..] {
-                    if nb[p].contains(&q) {
-                        edges += 1;
-                    }
-                }
-            }
-            let c_bin = common.len().min(7);
-            let e_bin = edges.min(7);
-            hist[c_bin * 8 + e_bin] += 1.0;
-            total += 1.0;
-        }
-    }
-    if total > 0.0 {
-        for v in &mut hist {
-            *v /= total;
-        }
-    } else {
-        hist[0] = 1.0;
-    }
-    hist
+/// Deterministic [`CoreRegion`] of `x` under `seed`.
+pub fn core_region_seeded(seed: u64, x: ArrayView1<f64>) -> CoreRegion {
+    CoreRegionBook::new(seed).assign(x)
 }
 
-static GLOBAL_CORE_REGIONS: std::sync::OnceLock<std::sync::Mutex<CoreRegionBook>> =
-    std::sync::OnceLock::new();
-
-/// Assign `x` to an online leader-clustered [`CoreRegion`] from its unnamed
-/// core contact-subgraph distribution.
+/// Deterministic [`CoreRegion`] of `x` in the default shared ensemble namespace (`seed = 0`).
 pub fn core_region(x: ArrayView1<f64>) -> CoreRegion {
-    let mutex = GLOBAL_CORE_REGIONS
-        .get_or_init(|| std::sync::Mutex::new(CoreRegionBook::new(CORE_REGION_RADIUS)));
-    mutex.lock().expect("core region book").assign(x)
+    CoreRegionBook::new(0).assign(x)
 }
 
 #[cfg(test)]
@@ -454,10 +375,11 @@ mod tests {
 
     fn rotate_permute(x: &Array1<f64>) -> Array1<f64> {
         let n = x.len() / 3;
+        let stride = if n.is_multiple_of(7) { 11 } else { 7 };
         let (s, c) = (0.7_f64.sin(), 0.7_f64.cos());
         let mut y = Array1::zeros(x.len());
         for i in 0..n {
-            let j = (i * 7 + 3) % n;
+            let j = (i * stride + 3) % n;
             let (px, py, pz) = (x[3 * i], x[3 * i + 1], x[3 * i + 2]);
             y[3 * j] = c * px - s * py + 1.5;
             y[3 * j + 1] = s * px + c * py - 0.3;
@@ -549,14 +471,20 @@ mod tests {
 
     #[test]
     fn core_regions_separate_distinct_fixture_packings_and_keep_shelf_isomers() {
-        let mut book = CoreRegionBook::new(CORE_REGION_RADIUS);
+        let book = CoreRegionBook::new(0);
         let fcc38 = book.assign(fixture("lj38_fcc").view());
         let ico38 = book.assign(fixture("lj38_ico").view());
-        assert_ne!(fcc38, ico38);
-
         let ico75 = book.assign(fixture("lj75_ico").view());
         let marks75 = book.assign(fixture("lj75_marks").view());
+        let gm98 = book.assign(fixture("lj98_gm").view());
+        let gm104 = book.assign(fixture("lj104_gm").view());
+        assert_ne!(fcc38, ico38);
         assert_ne!(ico75, marks75);
+        assert_ne!(gm98, gm104);
+        assert_ne!(gm98, ico75);
+        assert_ne!(gm98, marks75);
+        assert_ne!(gm104, ico75);
+        assert_ne!(gm104, fcc38);
 
         let x = fixture("lj75_ico");
         let n = x.len() / 3;
@@ -571,5 +499,39 @@ mod tests {
         }
         let shelf = book.assign(Array1::from(trimmed).view());
         assert_eq!(ico75, shelf);
+    }
+
+    #[test]
+    fn two_chains_with_the_same_seed_assign_identical_core_region_ids() {
+        let fixtures: Vec<Array1<f64>> = [
+            "lj38_fcc",
+            "lj38_ico",
+            "lj75_ico",
+            "lj75_marks",
+            "lj98_gm",
+            "lj104_gm",
+        ]
+        .into_iter()
+        .map(fixture)
+        .collect();
+        for seed in [0_u64, 1, 42, 0xdead_beef_cafe_babe] {
+            let chain_a = CoreRegionBook::new(seed);
+            let chain_b = CoreRegionBook::new(seed);
+            let forward: Vec<CoreRegion> =
+                fixtures.iter().map(|x| chain_a.assign(x.view())).collect();
+            let mut reverse: Vec<CoreRegion> = fixtures
+                .iter()
+                .rev()
+                .map(|x| chain_b.assign(rotate_permute(x).view()))
+                .collect();
+            reverse.reverse();
+            assert_eq!(
+                forward, reverse,
+                "seed {seed}: two chains with the same seed must assign identical CoreRegion ids regardless of arrival order or rigid/permutation symmetry"
+            );
+            for (x, &expected) in fixtures.iter().zip(&forward) {
+                assert_eq!(core_region_seeded(seed, x.view()), expected);
+            }
+        }
     }
 }
