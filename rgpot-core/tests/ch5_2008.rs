@@ -366,3 +366,39 @@ fn coincident_atoms_and_short_inputs_are_typed_refusals() {
         Err(JetError::Shape("CH5 2008 takes 6 atoms"))
     );
 }
+
+/// A count of coefficients that fits in doubles but not in intervals panics
+/// inside the jet. The two output addresses are never written: they are only
+/// far enough apart to pass the overlap check.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn a_panic_in_the_jet_is_an_internal_error_with_a_message() {
+    let mut pos = SADDLE.to_vec();
+    let mut z = CH5_2008_ATOMIC_NUMBERS.to_vec();
+    let mut cell = [0.0; 9];
+    let mut input = unsafe {
+        rgpot_force_input_create(z.len(), pos.as_mut_ptr(), z.as_mut_ptr(), cell.as_mut_ptr())
+    };
+    let v = mixed();
+    let count = 3usize << 58;
+    let lower = 8 as *mut f64;
+    let upper = (8 + count * std::mem::size_of::<f64>()) as *mut f64;
+    unsafe { rgpot_core::status::rgpot_set_last_error(std::ptr::null()) };
+    let status = unsafe {
+        rgpot_ch5_2008_taylor_jet(
+            std::ptr::null_mut(),
+            &input,
+            v.as_ptr(),
+            count - 1,
+            lower,
+            upper,
+        )
+    };
+    let message = unsafe { CStr::from_ptr(rgpot_last_error()) }
+        .to_str()
+        .unwrap()
+        .to_owned();
+    unsafe { rgpot_force_input_free(&mut input) };
+    assert_eq!(status, rgpot_status_t::RGPOT_INTERNAL_ERROR, "{message:?}");
+    assert!(message.contains("capacity overflow"), "{message:?}");
+}

@@ -124,7 +124,8 @@ uint32_t rgpot_version_patch(void);
 A function wrapped in the crate's panic guard returns =RGPOT_INTERNAL_ERROR= for
 a caught Rust panic and stores the panic message.
 The guarded functions are =rgpot_potential_calculate=, =rgpot_potential_hvp=,
-=rgpot_potential_hvp_centre=, =rgpot_potential_taylor_jet=, =rgpot_rpc_calculate=
+=rgpot_potential_hvp_centre=, =rgpot_potential_set_taylor_jet=,
+=rgpot_potential_taylor_jet=, =rgpot_ch5_2008_taylor_jet=, =rgpot_rpc_calculate=
 and =rgpot_rpc_server_start=.
 
 *** =rgpot_set_last_error=
@@ -1035,7 +1036,8 @@ enum rgpot_status_t rgpot_ch5_2008_taylor_jet(void *user_data,
   guard (=arg < 19=), the =rch < 3.8= switch or the handedness test
   (=argd > 0=) contains its threshold; =RGPOT_JET_DOMAIN= for coincident atoms
   or a collinear methane frame, where a distance, a quotient or an arc cosine
-  leaves its domain.
+  leaves its domain; =RGPOT_INTERNAL_ERROR= with the panic message in
+  =rgpot_last_error= for a caught Rust panic.
 
 ** RPC
 

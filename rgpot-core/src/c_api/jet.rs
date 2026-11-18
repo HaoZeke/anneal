@@ -49,11 +49,13 @@ pub unsafe extern "C" fn rgpot_potential_set_taylor_jet(
     >,
 ) -> rgpot_status_t {
     let jet: Option<rgpot_taylor_jet_fn> = jet;
-    if pot.is_null() {
-        return refuse("rgpot_potential_set_taylor_jet: pot is NULL");
-    }
-    unsafe { &*pot }.set_taylor_jet(jet);
-    rgpot_status_t::RGPOT_SUCCESS
+    catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if pot.is_null() {
+            return refuse("rgpot_potential_set_taylor_jet: pot is NULL");
+        }
+        unsafe { &*pot }.set_taylor_jet(jet);
+        rgpot_status_t::RGPOT_SUCCESS
+    }))
 }
 
 /// Write the enclosures of the Taylor coefficients `0..=order` of the

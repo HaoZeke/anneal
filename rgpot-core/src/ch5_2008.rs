@@ -20,7 +20,7 @@
 use std::os::raw::c_void;
 
 use crate::jet::{rgpot_interval_t, serve_taylor_jet, JetError, TaylorJet};
-use crate::status::{rgpot_status_t, set_last_error};
+use crate::status::{catch_unwind, rgpot_status_t, set_last_error};
 use crate::taylor::{side, Interval, Side, Taylor};
 use crate::tensor::copy_i32_tensor;
 use crate::types::rgpot_force_input_t;
@@ -386,6 +386,18 @@ pub unsafe extern "C" fn rgpot_ch5_2008_taylor_jet(
     upper: *mut f64,
 ) -> rgpot_status_t {
     let _ = user_data;
+    catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        serve_ch5_2008(input, direction, order, lower, upper)
+    }))
+}
+
+unsafe fn serve_ch5_2008(
+    input: *const rgpot_force_input_t,
+    direction: *const f64,
+    order: usize,
+    lower: *mut f64,
+    upper: *mut f64,
+) -> rgpot_status_t {
     if !input.is_null() {
         let input = unsafe { &*input };
         if unsafe { input.n_atoms() } != Some(6) {
