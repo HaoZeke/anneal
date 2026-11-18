@@ -871,6 +871,8 @@ unsafe extern "C" fn engine_hessian_vector_callback(
         };
         let bytes = dim.saturating_mul(std::mem::size_of::<f64>());
         let (d_addr, o_addr) = (direction as usize, hv_out as usize);
+        // The public HVP entry point rejects this first. Keep this check for
+        // direct engine callbacks, which are also part of the C ABI surface.
         if dim > 0 && d_addr < o_addr.saturating_add(bytes) && o_addr < d_addr.saturating_add(bytes)
         {
             set_last_error("engine HVP: direction and hv_out overlap");
