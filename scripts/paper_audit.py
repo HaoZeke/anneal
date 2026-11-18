@@ -2193,6 +2193,7 @@ def covalent_gfn2(audit: Audit) -> None:
     header = "system | code | hits | median calls | IQR | best / eV"
     seeds = audit.rows("bench/covalent-h2h/gfn2/seeds.csv")
     rows = audit.rows("bench/covalent-h2h/gfn2/rows.csv")
+    audit.rows("bench/covalent-h2h/gfn2/floor-gate-land1.csv")
     audit.rows("bench/covalent-h2h/gfn2/si20-censoring.csv")
     named = {(r["system"], r["code"], r["code_revision"], r["seed"]): r
              for r in audit.rows("bench/covalent-h2h/gfn2/false-hits.csv")}

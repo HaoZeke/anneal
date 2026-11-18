@@ -1009,6 +1009,35 @@ C20.
 any number of example builds on named cores and summarises every arm
 against the first.
 
+### The floor gate on `405aed05`
+
+PR #74's landing base removes the cluster search's structure templates
+and Mackay cap. It also negated `rgpot_xtb_force` before passing it to
+rgpot, which negates its callback force to make the objective gradient:
+the example therefore exposed force as gradient, sent quenches uphill,
+and could not find the bound dimer. `c878bf86` removes the extra
+negation. A direct silicon dimer probe then again has an energy slope
+opposite the engine force, and the GFN2 example runs.
+
+Because the cluster-search code changed, the floor at `c878bf86` and the
+spacing arm were rerun in one session on seeds 2000-2011 at 1e5 calls,
+cores 1-7, with core 0 reserved for CREST
+(`gfn2/floor-gate-land1.csv`). The floor build predates `7136fcc8` and
+counts each failed SCC twice; the numbers below halve that count.
+
+- Si13: both arms hit on 12 of 12. The spacing takes a median 2,176
+  calls against 2,206.5 (Mann-Whitney p = 0.91), and 0.65% of its calls
+  fail their SCC against 1.44% (p = 0.49). The hit Fisher p is 1.
+- Si10: both arms hit on 12 of 12 at the same per-seed calls, median
+  1,094.5, with the same best energies and 0.33% failed SCCs. Fisher and
+  the calls-to-hit p values are 1.
+- C20: both arms hit on 0 of 12, make 100,000 calls on every seed, have
+  no failed SCC, and have the same per-seed best energies, median
+  -1146.550244 eV. Fisher and the calls-to-hit p values are 1.
+
+The spacing loses no metric. The landing change does not reintroduce the
+small-sample Si13 slowdown and does not change Si10 or C20.
+
 ### The Si20 panel
 
 The panel is anneal against CREST on Si20 at the paper budget, 4e5
