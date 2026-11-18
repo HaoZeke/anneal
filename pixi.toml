@@ -308,7 +308,7 @@ patch -p1 -N -s < scripts/patches/doxyrest/enum_class_fix.patch || true
 
 [feature.docs.tasks.mkrst]
 cwd = "docs"
-cmd = "emacs --batch --load export.el"
+cmd = "emacs --batch --load export.el && mkdir -p source/notes && cp eam_cell.md neighbour_layer.md xckernel.md xtb_backends.md neighbour_api_design.md eon_nlist.md eon_pkgconfig.md source/notes/"
 
 [feature.docs.tasks.doxybuild]
 description = "Generates XML via Doxygen and converts it to RST via Doxyrest"

@@ -390,5 +390,18 @@ class PlantedBrokenExamples(unittest.TestCase):
         self.assertEqual([status for _, status, _ in results], ["fail"])
 
 
+class Coverage(unittest.TestCase):
+    def test_tree_is_covered(self):
+        self.assertEqual(doccheck.coverage_errors(ROOT), [])
+
+    def test_missing_marker_is_reported(self):
+        planted = list(doccheck.COVERAGE_MARKERS) + [
+            ("docs/orgmode/reference/gupta.org", "not-a-real-marker")
+        ]
+        with mock.patch.object(doccheck, "COVERAGE_MARKERS", planted):
+            errors = "\n".join(doccheck.coverage_errors(ROOT))
+        self.assertIn("not-a-real-marker", errors)
+
+
 if __name__ == "__main__":
     unittest.main()

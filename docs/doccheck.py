@@ -24,6 +24,11 @@ Three checks, each a subcommand:
     their defaults, ``pixi`` tasks and environments, repository paths, and
     ``RGPOT_*`` identifiers, and the ``&RGPOT`` keys of the GROMACS drop-in.
 
+``coverage``
+    Every org page under ``docs/orgmode`` is reachable from
+    ``docs/orgmode/index.org``, every design note named there exists, and
+    the pinned citations and reference values are still on their pages.
+
 The module uses the standard library only, so meson can run it without
 pytest.  ``tests/docs`` wraps the same functions for pytest.
 """
@@ -404,6 +409,11 @@ C_HEADERS = (
     "rgpot-core/include/rgpot.h",
     "CppCore/rgpot/nlist/rgpot_nlist.h",
     "CppCore/rgpot/nlist/fastnlist.h",
+    "CppCore/rgpot/Gupta/gupta.h",
+    "CppCore/rgpot/Morse/cambridge_morse.h",
+    "CppCore/rgpot/ReducedPair/ReducedPair.hpp",
+    "CppCore/rgpot/SuttonChen/SuttonChenPot.hpp",
+    "CppCore/rgpot/SuttonChen/SuttonChenScales.hpp",
     "include/rgpot/plugin.h",
     "CppCore/rgpot/engine_c_abi.h",
     "CppCore/rgpot/ExternalPot/external_potentials.h",
@@ -2098,11 +2108,159 @@ def execute_blocks(build_dir: Path | None, root: Path = ROOT, blocks=None):
 # ---------------------------------------------------------------- command
 
 
+# (page, text that must remain). Each token is a DOI or a reference value
+# checked while writing the page.
+COVERAGE_MARKERS = (
+    ("docs/orgmode/reference/gupta.org", "10.1103/PhysRevB.23.6265"),
+    ("docs/orgmode/reference/gupta.org", "10.1103/PhysRevB.48.22"),
+    ("docs/orgmode/reference/gupta.org", "-3.1678"),
+    ("docs/orgmode/reference/gupta.org", "10.1021/jp970984n"),
+    ("docs/orgmode/reference/gupta.org", "573.011875"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1098/rspa.1924.0082"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-0.999999648834"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1103/PhysRev.34.57"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1063/1.2841941"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-0.710164462003"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1103/PhysRevB.29.6443"),
+    ("docs/orgmode/reference/cpp_potentials.org", "3.63262"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1103/PhysRevB.35.7423"),
+    ("docs/orgmode/reference/cpp_potentials.org", "5.129167"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1063/1.445869"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1021/j100308a038"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1016/j.chemphys.2004.04.024"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1063/1.467012"),
+    ("docs/orgmode/reference/cpp_potentials.org", "0.141344038570"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1063/1.3382344"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1063/1.5090222"),
+    ("docs/orgmode/reference/sw_si.org", "10.1103/PhysRevB.31.5262"),
+    ("docs/orgmode/reference/tersoff_sic.org", "10.1103/PhysRevB.39.5566"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1103/PhysRevLett.55.2471"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1021/acs.jctc.8b01176"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1063/5.0304911"),
+    ("docs/orgmode/reference/cpp_backends.org", "98374.87753058573"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1016/j.cpc.2004.12.014"),
+    ("docs/orgmode/reference/cpp_backends.org", "50.613487749571874"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1021/ja00299a024"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1007/s00894-007-0233-4"),
+    ("docs/orgmode/reference/cpp_backends.org", "6.802846561497"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1016/j.cpc.2010.04.018"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1063/5.0004997"),
+    ("docs/orgmode/reference/cpp_backends.org", "-2070.0"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.48550/arXiv.2506.14665"),
+    ("docs/orgmode/reference/cpp_backends.org", "2.8 kcal/mol"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1002/wcms.1493"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1021/acs.jctc.7b00118"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1039/c7sc00601b"),
+    ("docs/orgmode/reference/cpp_backends.org", "-137.9"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.26434/chemrxiv.8326202.v1"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1002/anie.202004239"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.52202/085713-4310"),
+    ("docs/orgmode/reference/cpp_backends.org", "-2542.4200323230975"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1016/j.cpc.2013.10.027"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1016/j.cpc.2018.09.020"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1016/j.cpc.2021.108171"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1016/j.softx.2015.06.001"),
+    ("docs/orgmode/reference/cpp_backends.org", "10.1371/journal.pcbi.1005659"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-2.7114096242662238"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-5.217864006173226"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1103/PhysRevB.56.8542"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-18.838135"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1088/0953-8984/16/27/003"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1080/00268978700101941"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-43.959774"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1088/0965-0393/8/6/305"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-17.284558"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1103/PhysRevB.31.5262"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-16.204955"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1103/PhysRevB.39.5566"),
+    ("docs/orgmode/reference/cpp_potentials.org", "-17.440266"),
+    ("docs/orgmode/reference/cpp_potentials.org", "10.1063/1.2162901"),
+    ("docs/xckernel.md", "2608.26440"),
+    ("docs/xckernel.md", "10.1063/5.0358101"),
+    ("docs/orgmode/explanation/global-optimization.org", "10.3389/fchem.2026.1807063"),
+    ("docs/orgmode/explanation/global-optimization.org", "10.1063/5.0283639"),
+)
+
+DESIGN_NOTES = (
+    "eam_cell.md",
+    "neighbour_layer.md",
+    "xckernel.md",
+    "xtb_backends.md",
+    "neighbour_api_design.md",
+    "eon_nlist.md",
+    "eon_pkgconfig.md",
+)
+
+
+def _toctree_targets(text: str) -> list[str]:
+    """Sphinx toctree entries in an org page, in source order."""
+    targets = []
+    active = False
+    for line in text.splitlines():
+        if ".. toctree::" in line:
+            active = True
+            continue
+        if not active:
+            continue
+        if not line.strip():
+            continue
+        if line[:1].strip():
+            active = False
+            if ".. toctree::" in line:
+                active = True
+            continue
+        token = line.strip()
+        if token.startswith(":"):
+            continue
+        targets.append(token.split("#", 1)[0])
+    return targets
+
+
+def org_index_errors(root: Path = ROOT) -> list[str]:
+    """Org pages not reachable by toctree from the manual index."""
+    orgmode = root / "docs/orgmode"
+    pages = {path.resolve() for path in orgmode.rglob("*.org")}
+    start = (orgmode / "index.org").resolve()
+    seen: set[Path] = set()
+    stack = [start]
+    while stack:
+        page = stack.pop()
+        if page in seen or not page.is_file():
+            continue
+        seen.add(page)
+        for token in _toctree_targets(page.read_text(encoding="utf-8")):
+            target = (page.parent / token).resolve()
+            org = target if target.suffix == ".org" else Path(str(target) + ".org")
+            if org.is_file():
+                stack.append(org)
+    return [
+        f"{path.relative_to(root).as_posix()}: not reachable from docs/orgmode/index.org"
+        for path in sorted(pages - seen)
+    ]
+
+
+def coverage_errors(root: Path = ROOT) -> list[str]:
+    """Index reachability and the pinned citations and reference values."""
+    errors = org_index_errors(root)
+    index = (root / "docs/orgmode/index.org").read_text(encoding="utf-8")
+    for name in DESIGN_NOTES:
+        stem = name[: -len(".md")]
+        if f"notes/{stem}" not in index:
+            errors.append(f"docs/orgmode/index.org: design note {name} is not in the index")
+        if not (root / "docs" / name).is_file():
+            errors.append(f"docs/{name}: design note listed in the index is missing")
+    for page, marker in COVERAGE_MARKERS:
+        path = root / page
+        if not path.is_file() or marker not in path.read_text(encoding="utf-8"):
+            errors.append(f"{page}: missing pinned text {marker}")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("check", choices=("blocks", "reference", "facts", "all"))
+    parser.add_argument("check", choices=("blocks", "reference", "facts", "coverage", "all"))
     parser.add_argument("--build-dir", type=Path, default=None)
     parser.add_argument("--root", type=lambda p: Path(p).resolve(), default=ROOT)
     parser.add_argument(
@@ -2129,6 +2287,8 @@ def main(argv: list[str] | None = None) -> int:
         errors.extend(reference_errors(args.root))
     if args.check in ("facts", "all"):
         errors.extend(facts_errors(args.root))
+    if args.check in ("coverage", "all"):
+        errors.extend(coverage_errors(args.root))
     if pages:
         errors = [e for e in errors if wanted(e)]
     for error in errors:

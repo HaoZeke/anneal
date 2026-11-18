@@ -41,8 +41,20 @@ and =scripts/rgpot_nwchem_vs_socket.sh= compare =RgpotPot= against eOn's
 
 * Operator Cheatsheet (rgpot side)
 
-=potserv <port> <PotentialType>= takes =NWChem=, =NWChem:basis[:theory[:xc]]= or
-=CPMD= as the type.
+=potserv <port> <PotentialType>= selects the backend.
+Every build accepts =LJ=, =LJCluster=, =Morse=, =ZBL=, =NWChem=,
+=NWChem:basis[:theory[:xc]]= and =CPMD=.
+A Fortran build also accepts =CuH2=.
+The remaining names are present only when that backend was compiled in:
+=IPI:unix:<path>= and =IPI:tcp:<host>:<port>=; =XTB= (GFN2-xTB), =GFNFF=,
+=GFN0xTB= and =GFN1xTB=; =TBLite= (the same backend as =TBLiteGFN2=),
+=TBLiteGFN1= and =TBLiteIPEA1=; =D3= and =D4=;
+=Metatomic:<model_path>[:<device>]=; =Uma:<model_path>= and
+=Uma:<model_path>:<task>=, with a task of =omol=, =omat=, =oc20=, =oc22=,
+=oc25=, =odac= or =omc=; =Skala= and =Skala:<basis>=; and =CP2K=.
+A missing type prints that list for the binary that is running.
+The =configure= arms are a separate list, on
+[[file:../reference/potential_config.org][PotentialConfig arms]].
 The fake engines and =potserv= are built with
 =-Dwith_rpc=true -Dwith_tests=true=.
 =tests/test_rpc_e2e_c_abi.py= needs =RGPOT_POTSERV= and one engine variable per

@@ -90,9 +90,10 @@ copper set.
   =CppCore/rgpot/ExternalPot/=, as =PotType::Lammps=, =PotType::Gromacs= and =PotType::OpenMM=; =GromacsPot= and =OpenMMPot= store nm and kJ/mol
   parameters.
 - Gupta and reduced cluster pairs :: C kernels
-  (=rgpot_gupta=, =rgpot_lj_gradient=, =rgpot_morse_gradient=) in
-  =CppCore/rgpot/Gupta/= and =CppCore/rgpot/ReducedPair/=, not =Potential=
-  classes.
+  (=rgpot_gupta=, =rgpot_cluster_lj=, =rgpot_cambridge_morse=, =rgpot_lj_gradient=, =rgpot_morse_gradient=) in =CppCore/rgpot/Gupta/=, =CppCore/rgpot/Morse/cambridge_morse.h=
+  and =CppCore/rgpot/ReducedPair/=, not =Potential= classes.
+  [[file:gupta.org][Gupta and reduced cluster kernels]] records the parameters
+  and the checked energies.
 
 *** Fortran Potentials
 

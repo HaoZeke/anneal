@@ -22,6 +22,12 @@ states, conformer search, potential-parameter fitting.
 
 Chain them: an =anneal= search to locate the basin, then a local polish.
 
+Saddle searches on this stack are the enhanced climbing-image method of Goswami,
+Gunde and Jónsson, Front.
+Chem. 14, 1807063 (2026),
+doi:10.3389/fchem.2026.1807063. How those searches are scored is Goswami, AIP Adv. 15, 085210 (2025), doi:10.1063/5.0283639.
+eOn, which runs the bands, is the record doi:10.5281/zenodo.18529495.
+
 ** The eonviz environment
 
 The ``eonviz`` environment is separate from the C++ build env: ``eon`` pins

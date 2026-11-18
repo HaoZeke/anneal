@@ -351,7 +351,10 @@ int runServer(int argc, char *argv[]
 ) {
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0] << " <port> <PotentialType>" << std::endl;
-    std::cerr << "  Available PotentialTypes: CuH2, LJ, LJCluster, Morse, ZBL"
+    std::cerr << "  Available PotentialTypes: LJ, LJCluster, Morse, ZBL"
+#ifdef RGPOT_HAS_FORTRAN_POTS
+              << ", CuH2"
+#endif
 #ifdef RGPOT_HAS_IPI
               << ", IPI:unix:<path>, IPI:tcp:<host>:<port>"
 #endif
@@ -359,7 +362,7 @@ int runServer(int argc, char *argv[]
               << ", XTB, GFNFF, GFN0xTB, GFN1xTB"
 #endif
 #ifdef RGPOT_HAS_TBLITE
-              << ", TBLite, TBLiteGFN1, TBLiteIPEA1"
+              << ", TBLite, TBLiteGFN2, TBLiteGFN1, TBLiteIPEA1"
 #endif
 #ifdef RGPOT_HAS_DFTD3
               << ", D3"
@@ -368,7 +371,7 @@ int runServer(int argc, char *argv[]
               << ", D4"
 #endif
 #ifdef RGPOT_HAS_METATOMIC
-              << ", Metatomic:<model_path>"
+              << ", Metatomic:<model_path>[:<device>]"
 #endif
 #ifdef RGPOT_HAS_UMA
               << ", Uma:<model_path>, Uma:<model_path>:<task>"

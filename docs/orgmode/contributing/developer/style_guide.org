@@ -1,13 +1,19 @@
-* ~rgpot~ Documentation Style Guide
+#+TITLE: Documentation style guide
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
 
-API documentation uses Doxygen. As first demonstrated in [[https://docs.dseams.org][d-SEAMS]] and then for
-the [[https://symengine.org/symengine/md_md_doc_guide.html][Symengine C++ bindings]].
+* Documentation style guide
+
+API documentation uses Doxygen.
+As first demonstrated in [[https://dseams.info/][d-SEAMS]] and then for the
+[[https://symengine.org/symengine/md_md_doc_guide.html][Symengine C++ bindings]].
 
 ** General Conventions
 
 - Language :: English.
 - Dates :: All dates must be formatted as =YYYY-MM-DD=.
-- Symbols :: Avoid Unicode symbols. TeX math mode is permitted for equations.
+- Symbols :: Avoid Unicode symbols.
+  TeX math mode is permitted for equations.
 - Naming :: Variables use =snake_case=.
   Member functions of the potential classes and the =rgpot::lr= summands use
   =camelCase= (=getType=, =setCache=, =probeAvailable=, =setNeighbours=).
@@ -77,10 +83,12 @@ Every file may contain a =@file= block immediately following the license header.
    */
   #+END_SRC
 - Inline :: Use =//!<= for members.
-- Grouping :: Use =@ingroup= in headers (e.g., =rgpot_potentials=, =rgpot_cache=).
+- Grouping :: Use =@ingroup= in headers (e.g.,
+  =rgpot_potentials=, =rgpot_cache=).
 
 *** Header Files (.hpp / .h)
-Keep comments concise. Expand details in the implementation file.
+Keep comments concise.
+Expand details in the implementation file.
 
 Required directives order:
 1. =@brief=

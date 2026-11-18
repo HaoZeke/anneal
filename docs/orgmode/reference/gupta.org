@@ -1,0 +1,326 @@
+#+TITLE: Gupta and reduced cluster kernels
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Gupta and reduced cluster kernels
+
+These are C kernels, not =rgpot::Potential= classes.
+Lengths are the caller's length unit.
+The Gupta arrays and the Sutton-Chen metal rows use Angstrom and eV.
+The reduced Lennard-Jones and Morse kernels use the caller's reduced units,
+where the well depth and the equilibrium distance are 1.
+None of them reads a cell.
+A pair at zero separation is not differentiable.
+
+** Gupta
+
+=rgpot_gupta= (=CppCore/rgpot/Gupta/gupta.h=) is the second-moment form of
+Gupta, Phys.
+Rev. B 23, 6265 (1981),
+doi:10.1103/PhysRevB.23.6265, with the parameters of Cleri and Rosato, Phys. Rev. B 48, 22 (1993), doi:10.1103/PhysRevB.48.22.
+There is no cutoff.
+Every pair =i < j= is visited once, in that order.
+
+For one ordered species pair the repulsive term added to the energy is
+=2 A exp(-p (r/r0 - 1))= and each atom's density gains =xi^2 exp(-2 q (r/r0 - 1))=.
+The energy is that repulsion minus the sum of the square roots of the densities.
+=A=, =xi=, =p=, =q= and =r0= are row-major tables of =n_species * n_species=
+entries.
+=slot[i]= selects the species of atom =i=.
+
+Cabrera-Trujillo et al., arXiv:1007.4009, Table 1, reprint the Cleri-Rosato gold
+column: =p = 10.229=, =q = 4.036=, =A = 0.2061= eV, =xi = 1.790= eV and
+=sqrt(2) r0 = 4.079= Angstrom, so =r0= is 2.884 Angstrom to three decimals.
+Reference value: a dimer at =r = r0= has energy =2 A - 2 xi=.
+For that gold row the value is -3.1678 eV.
+=GuptaTest= checks the same identity to 1e-12.
+
+A coincident pair sets the energy to positive infinity and returns.
+If the scratch allocation fails, the energy is positive infinity and the
+gradient is zero.
+A null pointer is not checked.
+
+** Reduced Lennard-Jones and Morse
+
+=rgpot_cluster_lj= and =rgpot_cambridge_morse= (=cambridge_morse.h=) sum every
+pair.
+=rgpot_lj_gradient= and =rgpot_morse_gradient= (=ReducedPair.hpp=) are the same
+physics with a cutoff: a cutoff of 0 or less keeps every pair, and a positive
+cutoff keeps pairs with =r= strictly below it.
+The gradient is =dE/dx=, not a force.
+
+The 12-6 form is Lennard-Jones, Proc.
+R. Soc.
+A 106, 463 (1924),
+doi:10.1098/rspa.1924.0082. Wales and Doye, J. Phys. Chem. A 101, 5111 (1997), doi:10.1021/jp970984n,
+use it in reduced units for the cluster tables.
+Reference value: =epsilon = 1=, =sigma = 1= and a dimer at =r = 2^(1/6)= have
+energy -1.
+=ReducedPairTest= checks that call to 1e-15, and the gradient to 1e-12.
+The same dimer at =r = 1= has energy 0 and an =x= gradient of 24 and -24, which
+that test checks exactly.
+=rgpot_cluster_lj= checks the minimum to 1e-12.
+
+The Morse form is Morse, Phys.
+Rev. 34, 57 (1929), doi:10.1103/PhysRev.34.57.
+The reduced cluster term is =epsilon exp(rho (1 - r/re)) (exp(...) - 2)=.
+Reference value: =epsilon = 1=, =re = 1= and a dimer at =r = re= have energy -1
+and a zero gradient.
+=ReducedPairTest= checks both exactly, and =rgpot_cambridge_morse= checks the
+unit dimer bit for bit.
+
+=rgpot_tip4p_sites= is the rigid four-site water of Jorgensen et al., J. Chem.
+Phys. 79, 926 (1983), doi:10.1063/1.445869, with the caller's oxygen
+coefficients.
+Sites are molecule-major O, H, H, M. Reference value: two oxygens 2 Angstrom
+apart, charges off, =c6 = 2552.24= and =c12 = 2.5104e6=, give
+=c12/r^12 - c6/r^6 = 573.011875= in the caller's energy unit.
+=ReducedPairTest= requires a bit match to that expression.
+
+** C entry points
+
+*** =rgpot_gupta=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_gupta(const double *x, size_t n, const unsigned char *slot,
+                 size_t n_species, const double *a, const double *xi,
+                 const double *p, const double *q, const double *r0,
+                 double *energy, double *gradient);
+#+end_src
+
+- Inputs :: =x= (3 n coordinates), =n=, =slot= (one species index per atom),
+  =n_species=, and the species-pair tables =a=, =xi=, =p=, =q= and =r0=.
+- Units :: =x= and =r0= in the caller's length; =a= and =xi= in the caller's
+  energy; =p= and =q= dimensionless.
+  The gradient is energy per length.
+- Outputs :: one energy and 3 n gradient components.
+- Errors :: no status code.
+  A coincident pair sets the energy to positive infinity and returns.
+  A failed scratch allocation does that and zeroes the gradient.
+  A null pointer is not checked, and =slot= is not bounds-checked.
+
+*** =rgpot_cambridge_morse=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_cambridge_morse(const double *x, size_t n, double rho,
+                           double *energy, double *gradient);
+#+end_src
+
+- Inputs :: =x= (3 n coordinates), =n= and =rho=.
+  The well depth and the equilibrium distance are 1.
+- Units :: =x= in the reduced length; =rho= is the dimensionless range; energy
+  in the reduced energy; gradient in energy per length.
+- Outputs :: one energy and 3 n gradient components.
+  A coincident pair is skipped.
+- Errors :: no status code.
+  A null pointer is not checked.
+
+*** =rgpot_cluster_lj=
+
+#+attr_rgpot: signature
+#+begin_src c
+void rgpot_cluster_lj(const double *x, size_t n, double *energy,
+                      double *gradient);
+#+end_src
+
+- Inputs :: =x= (3 n coordinates) and =n=.
+  =epsilon= and =sigma= are 1, and there is no cutoff.
+- Units :: reduced length and reduced energy.
+  The gradient is energy per length.
+- Outputs :: one energy and 3 n gradient components.
+  A coincident pair is skipped.
+- Errors :: no status code.
+  A null pointer is not checked.
+
+*** =rgpot_lj_pair=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_lj_pair(double epsilon, double sigma, double r2, double *energy,
+                  double *dvdr_over_r, double *d2vdr2);
+#+end_src
+
+- Inputs :: =epsilon=, =sigma=, the squared distance =r2=, and three output
+  pointers.
+- Units :: =epsilon= in the caller's energy, =sigma= and the distance in the
+  caller's length.
+  =dvdr_over_r= is =(dE/dr) / r=.
+  =d2vdr2= is =d2E/dr2=.
+- Outputs :: the pair energy and the two derivatives.
+  =r2= that is not positive writes zeros.
+- Errors :: returns 1 when any output pointer is null, and 0 otherwise.
+
+*** =rgpot_lj_curvature_pairs=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_lj_curvature_pairs(double epsilon, double sigma, int32_t npairs,
+                             const double *r2, double *energy,
+                             double *dvdr_over_r, double *d2vdr2);
+#+end_src
+
+- Inputs :: =epsilon=, =sigma=, =npairs= squared distances and three output
+  arrays of that length.
+- Units :: as =rgpot_lj_pair=, one entry per pair.
+- Outputs :: energy, =(dE/dr) / r= and =d2E/dr2= for each pair.
+- Errors :: returns 1 when =npairs= is negative, or when =npairs= is positive
+  and any pointer is null, and 0 otherwise.
+
+*** =rgpot_lj_gradient=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_lj_gradient(double epsilon, double sigma, double cutoff,
+                      int32_t natoms, const double *positions,
+                      double *energy, double *gradient);
+#+end_src
+
+- Inputs :: =epsilon=, =sigma=, =cutoff=, =natoms=, 3 =natoms= coordinates, and
+  the energy and gradient pointers.
+- Units :: =epsilon= in energy, =sigma= and =cutoff= and positions in length,
+  gradient in energy per length.
+  A cutoff of 0 or less keeps every pair.
+- Outputs :: one energy and 3 =natoms= gradient components.
+  A coincident pair is skipped.
+- Errors :: returns 1 when =natoms= is negative, =energy= is null, or =natoms=
+  is positive and =positions= or =gradient= is null, and 0 otherwise.
+
+*** =rgpot_lj_atom_energies=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_lj_atom_energies(double epsilon, double sigma, int32_t natoms,
+                           const double *positions, double *atom_energy);
+#+end_src
+
+- Inputs :: =epsilon=, =sigma=, =natoms=, positions and one energy per atom.
+- Units :: as =rgpot_lj_gradient=, with no cutoff.
+- Outputs :: each pair's energy added to both atoms.
+  The total energy is half the sum of =atom_energy=.
+- Errors :: returns 1 when =natoms= is negative, =atom_energy= is null, or
+  =natoms= is positive and =positions= is null, and 0 otherwise.
+
+*** =rgpot_lj_partial_gradient=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_lj_partial_gradient(double epsilon, double sigma, int32_t natoms,
+                              const double *positions, int32_t n_moved,
+                              const int32_t *moved, double *gradient);
+#+end_src
+
+- Inputs :: =epsilon=, =sigma=, =natoms=, positions, =n_moved= atom indices and
+  a gradient of 3 =natoms= components.
+- Units :: as =rgpot_lj_gradient=, with no cutoff.
+- Outputs :: gradient rows of the atoms listed in =moved=.
+  Every other row is zero.
+- Errors :: returns 1 when a count is negative, a pointer the call needs is
+  null, or a moved index is outside =[0, natoms)=, and 0 otherwise.
+
+*** =rgpot_lj_arithmetic_gradient=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_lj_arithmetic_gradient(const double *sigma, double cutoff,
+                                 int32_t natoms, const double *positions,
+                                 double *energy, double *gradient);
+#+end_src
+
+- Inputs :: one =sigma= per atom, =cutoff=, =natoms=, positions, energy and
+  gradient.
+  The pair diameter is the arithmetic mean.
+- Units :: =sigma=, =cutoff= and positions in length.
+  The energy is 4 times the sum of =(s^12 - s^6)= with
+  =s = (sigma_i + sigma_j) / (2 r)=, and the well depth is 1.
+- Outputs :: one energy and the gradient.
+  A cutoff of 0 or less keeps every pair.
+- Errors :: returns 1 when =natoms= is negative, a required pointer is null, or
+  =natoms= is positive and =sigma= is null, and 0 otherwise.
+
+*** =rgpot_morse_pair=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_morse_pair(double epsilon, double rho, double re, double r2,
+                     double *energy, double *dvdr_over_r, double *d2vdr2);
+#+end_src
+
+- Inputs :: =epsilon=, =rho=, =re=, the squared distance and three output
+  pointers.
+- Units :: =epsilon= in energy, =re= and the distance in length, =rho=
+  dimensionless.
+  =dvdr_over_r= is =(dE/dr) / r=.
+- Outputs :: the pair energy and the two derivatives.
+  =r2= that is not positive writes zeros.
+- Errors :: returns 1 when any output pointer is null, and 0 otherwise.
+
+*** =rgpot_morse_gradient=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_morse_gradient(double epsilon, double rho, double re,
+                         double cutoff, int32_t natoms,
+                         const double *positions, double *energy,
+                         double *gradient);
+#+end_src
+
+- Inputs :: =epsilon=, =rho=, =re=, =cutoff=, =natoms=, positions, energy and
+  gradient.
+- Units :: =epsilon= in energy, =re=, =cutoff= and positions in length.
+  A cutoff of 0 or less keeps every pair.
+- Outputs :: one energy and the gradient.
+- Errors :: returns 1 when =natoms= is negative, =energy= is null, or =natoms=
+  is positive and =positions= or =gradient= is null, and 0 otherwise.
+
+*** =rgpot_binary_lj_gradient=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_binary_lj_gradient(int32_t n_a, const double *eps,
+                             const double *sig, double cutoff,
+                             int32_t natoms, const double *positions,
+                             double *energy, double *gradient);
+#+end_src
+
+- Inputs :: =n_a= (atoms of species A; the rest are B), =eps= and =sig= in the
+  order AA, AB, BB, =cutoff=, =natoms=, positions, energy and gradient.
+- Units :: =eps= in energy, =sig=, =cutoff= and positions in length.
+- Outputs :: one energy and the gradient.
+  A cutoff of 0 or less keeps every pair.
+- Errors :: returns 1 when =natoms= is negative, =n_a= is outside =[0, natoms]=,
+  =energy= is null, or a pointer the call needs is null, and 0 otherwise.
+
+*** =rgpot_tip4p_sites_config=
+
+- Inputs :: =c6=, =c12=, =epsilon=, =sigma=,
+  =use_epsilon= (nonzero selects =epsilon= and =sigma=; zero selects =c6= and =c12=), =coulomb=, =q_h=
+  and =q_m=.
+- Units :: the caller chooses the energy unit through =c6=, =c12=, =epsilon= and
+  =coulomb=.
+  =sigma= and the site coordinates share one length.
+  =q_h= and =q_m= are charges in the unit =coulomb= converts.
+- Outputs :: the parameter block of =rgpot_tip4p_sites=.
+- Errors :: none.
+  The struct is not checked until the call.
+
+*** =rgpot_tip4p_sites=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_tip4p_sites(const rgpot_tip4p_sites_config *cfg,
+                      int32_t n_molecules, const double *sites,
+                      double *energy, double *gradient);
+#+end_src
+
+- Inputs :: =cfg=, =n_molecules=, and =sites= laid out O, H, H, M per molecule
+  (12 coordinates).
+  The gradient has the same length.
+- Units :: the length of =sites= and the energy unit of =cfg=.
+- Outputs :: one energy and the gradient.
+  Oxygen-oxygen is the Lennard-Jones term and every other site pair is
+  =coulomb * q_i * q_j / r=.
+- Errors :: returns 1 when =cfg= or =energy= is null,
+  =n_molecules= is negative, or =n_molecules= is positive and =sites= or
+  =gradient= is null, and 0 otherwise.

@@ -127,6 +127,7 @@ meson compile -C bbdir && meson test -C bbdir
    reference/external_abi
    reference/simd_exp
    reference/sutton_chen
+   reference/gupta
    reference/eam_table
    reference/fortran_potentials
    reference/potential_names
@@ -139,6 +140,18 @@ meson compile -C bbdir && meson test -C bbdir
 
    contributing/index
    code_of_conduct
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Notes
+
+   notes/xckernel
+   notes/xtb_backends
+   notes/neighbour_layer
+   notes/eam_cell
+   notes/eon_nlist
+   notes/eon_pkgconfig
+   notes/neighbour_api_design
 #+end_export
 
 * License

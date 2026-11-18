@@ -579,6 +579,14 @@ explicit LJPot(const LJConfig &c);
 - Errors :: the errors of =rgpot::LJConfig=.
   The force call does not check its pointers.
 
+Parameter source: Lennard-Jones, Proc.
+R. Soc.
+A 106, 463 (1924), doi:10.1098/rspa.1924.0082.
+The defaults =u0= 1 and =psi= 1 are reduced units, not a fitted material.
+Reference value: the unshifted pair at =r = 2^(1/6) psi= is =-u0=.
+With the default cutoff of 15 the shifted dimer is -0.999999648834 eV.
+=rgpot_cluster_lj= checks the unshifted minimum to 1e-12.
+
 *** =rgpot::LJPot::config=
 
 #+attr_rgpot: signature
@@ -656,6 +664,13 @@ explicit MorsePot(const MorseConfig &c);
 - Errors :: the errors of =rgpot::MorseConfig=.
   The force call does not check its pointers.
 
+Parameter source: the form is Morse, Phys.
+Rev. 34, 57 (1929),
+doi:10.1103/PhysRev.34.57. The defaults and the 9.5 Angstrom cutoff are the platinum set of Sheppard, Terrell and Henkelman, J. Chem. Phys. 128, 134106 (2008), doi:10.1063/1.2841941:
+=De= 0.7102 eV, =a= 1.6047 per Angstrom, =re= 2.8970 Angstrom.
+Reference value: the unshifted well is -0.7102 eV.
+The shifted kernel at =re= is -0.710164462003 eV.
+
 *** =rgpot::MorsePot::config=
 
 #+attr_rgpot: signature
@@ -716,6 +731,14 @@ explicit ZBLPot(const ZBLConfig &c);
   The force call writes the stress when the cell volume is positive.
 - Errors :: the errors of =rgpot::ZBLConfig=.
 
+Parameter source: Ziegler, Biersack and Littmark, The Stopping and Range of Ions
+in Matter, Pergamon (1985).
+=ZBLPot.cc= uses the LAMMPS metal transcription of the screening weights,
+0.02817, 0.28022, 0.50986 and 0.18175.
+Reference value: those four weights sum to 1, the universal function at zero
+argument.
+The cutoffs are eOn's defaults, 2.0 and 2.5 Angstrom.
+
 *** =rgpot::ZBLPot::config=
 
 #+attr_rgpot: signature
@@ -750,6 +773,13 @@ explicit EAMPot(const EAMCellConfig &);
 - Errors :: the force call throws =std::invalid_argument= when a diagonal entry
   of the box is not positive.
   An atomic number outside the table throws =std::invalid_argument=.
+
+Parameter source: the embedded-atom form is Daw and Baskes, Phys.
+Rev. B 29, 6443 (1984), doi:10.1103/PhysRevB.29.6443.
+The aluminium, palladium and gold rows are the eOn table in
+=CppCore/rgpot/EAM/Parameters.h=, not that paper's fits.
+Reference value: the aluminium row uses =Dm= 3.63262 eV and a cutoff of 5.555
+Angstrom.
 
 *** =rgpot::EAMPot::listBuilds=
 
@@ -921,6 +951,12 @@ explicit EMTPot(const EMTConfig &config);
 - Errors :: an element the provider does not cover throws the Asap =Exception=
   class, which does not derive from =std::exception=.
 
+Parameter source: Jacobsen, Norskov and Puska, Phys.
+Rev. B 35, 7423 (1987), doi:10.1103/PhysRevB.35.7423.
+The numbers are the Asap tables vendored from eOn.
+Reference value: the four-atom copper cluster in =EMTPotTest= is 5.129167 eV
+within 5e-4, the pin from eOn =EMTCuTest=.
+
 *** =rgpot::EMTPot::config=
 
 #+attr_rgpot: signature
@@ -994,6 +1030,18 @@ TersoffSiC();
 - Errors :: none.
 
 ** Water
+
+Parameter source: TIP4P is Jorgensen et al., J. Chem.
+Phys. 79, 926 (1983), doi:10.1063/1.445869. SPC/E is Berendsen, Grigera and
+Straatsma, J. Phys.
+Chem. 91, 6269 (1987),
+doi:10.1021/j100308a038, made flexible by Amira, Spangberg and Hermansson, Chem. Phys. 303, 327 (2004), doi:10.1016/j.chemphys.2004.04.024.
+TIP4P on platinum is Zhu and Philpott, J. Chem.
+Phys. 100, 6961 (1994), doi:10.1063/1.467012.
+The cutoff 8.5 Angstrom and the switching width 1.0 Angstrom are what the eOn
+wrappers pass.
+Reference value: =WaterPotTest= pins one distorted TIP4P molecule at
+0.141344038570 eV.
 
 The three water classes take a =rgpot::WaterConfig=.
 The cell is periodic and only its diagonal is used.
@@ -1074,6 +1122,10 @@ explicit D3Pot(const D3Config &config);
 - Inputs :: a =rgpot::D3Config=.
 - Units :: energy in eV, forces in eV/Angstrom.
 - Outputs :: Grimme DFT-D3 dispersion through the s-dftd3 C API.
+  Parameter source: Grimme, Antony, Ehrlich and Krieg, J. Chem.
+  Phys. 132, 154104 (2010), doi:10.1063/1.3382344.
+  The default is rational damping, the =pbe= parameters and the three-body term.
+  =D3PotTest= checks the energy against the s-dftd3 C API.
 - Errors :: the errors of =rgpot::D3Config=.
   The force call throws =std::runtime_error= with the s-dftd3 message when
   building the structure or model, updating it, or computing the dispersion
@@ -1102,6 +1154,11 @@ explicit D4Pot(const D4Config &config);
 - Inputs :: a =rgpot::D4Config=; the damping is always rational.
 - Units :: energy in eV, forces in eV/Angstrom.
 - Outputs :: Grimme DFT-D4 dispersion through the dftd4 C API.
+  Parameter source: Caldeweyher et al., J. Chem.
+  Phys. 150, 154122 (2019), doi:10.1063/1.5090222.
+  The default is rational damping, the =pbe= parameters, charge 0 and the
+  many-body term.
+  =D4PotTest= checks a fresh call against a reused structure.
 - Errors :: the errors of =rgpot::D4Config=.
   The force call throws =std::runtime_error= with the dftd4 message when
   building the structure or model, updating it, or computing the dispersion
@@ -1371,6 +1428,11 @@ The porting rules are on
 - Errors :: =std::runtime_error= for an atomic number other than 29 or 1, and
   when two atoms occupy the same position.
 
+The form is the embedded-atom method of Daw and Baskes, Physical Review B 29,
+6443 (1984), doi:10.1103/PhysRevB.29.6443.
+The parameters are the eOn set; this tree has no separate paper for that fit.
+CuH2PotTest requires -2.7114096242662238 eV within 1e-6 for its four-atom cell.
+
 *** =rgpot::fortranpots::EAMAlPot=
 
 - Inputs :: none.
@@ -1381,6 +1443,12 @@ The porting rules are on
   The force call does not write a stress.
 - Errors :: =std::runtime_error= when the kernel or the neighbour table reports
   a failure.
+
+The form is Daw and Baskes, Physical Review B 29, 6443 (1984),
+doi:10.1103/PhysRevB.29.6443.
+The parameters are the eOn set.
+The four-atom =al_fcc= cluster in a 20 Angstrom cube is pinned to the EON r2549
+energy -5.217864006173226 eV within 1e-12.
 
 *** =rgpot::fortranpots::EDIPPot=
 
@@ -1393,6 +1461,11 @@ The porting rules are on
 - Errors :: =std::runtime_error= when the cell is thinner than the cutoff, and
   when the neighbour table reports a failure.
 
+The potential is Bazant, Kaxiras and Justo, Physical Review B 56, 8542-8552
+(1997), doi:10.1103/PhysRevB.56.8542.
+Eight silicon atoms in a 20 Angstrom cube give -18.838135 eV within a relative
+1e-4.
+
 *** =rgpot::fortranpots::FeHePot=
 
 - Inputs :: none.
@@ -1404,6 +1477,13 @@ The porting rules are on
   The force call does not write a stress.
 - Errors :: =std::runtime_error= for an atomic number other than 26 or 2.
 
+The iron part is Ackland and coauthors, Journal of Physics: Condensed Matter 16,
+S2629-S2642 (2004), doi:10.1088/0953-8984/16/27/003.
+A pure helium configuration reduces to the HFD-B dimer of Aziz, McCourt and
+Wong, Molecular Physics 61, 1487-1511 (1987), doi:10.1080/00268978700101941.
+Sixteen iron atoms in a 20 Angstrom cube give -43.959774 eV within a relative
+1e-4.
+
 *** =rgpot::fortranpots::LenoskyPot=
 
 - Inputs :: none.
@@ -1413,6 +1493,11 @@ The porting rules are on
   Atomic numbers are not read.
   The force call does not write a stress.
 - Errors :: =std::runtime_error= when the neighbour table reports a failure.
+
+The potential is Lenosky and coauthors, Modelling and Simulation in Materials
+Science and Engineering 8, 825-841 (2000), doi:10.1088/0965-0393/8/6/305.
+Eight silicon atoms in a 20 Angstrom cube give -17.284558 eV within a relative
+1e-4.
 
 *** =rgpot::fortranpots::SWPot=
 
@@ -1427,6 +1512,12 @@ The porting rules are on
 - Errors :: =std::runtime_error= when the kernel or the neighbour table reports
   a failure.
 
+The published potential is Stillinger and Weber, Physical Review B 31, 5262
+(1985), doi:10.1103/PhysRevB.31.5262.
+This class uses eOn's rescaled epsilon.
+Eight silicon atoms in a 20 Angstrom cube give -16.204955 eV within a relative
+1e-4.
+
 *** =rgpot::fortranpots::TersoffPot=
 
 - Inputs :: none.
@@ -1439,6 +1530,11 @@ The porting rules are on
 - Errors ::
   =std::runtime_error= when the Fortran kernel reports a failure, and the =std::invalid_argument=
   cases of =rgpot::TersoffSiC= on the other path.
+
+The potential is Tersoff, Physical Review B 39, 5566 (1989),
+doi:10.1103/PhysRevB.39.5566.
+Eight silicon atoms in a 20 Angstrom cube give -17.440266 eV within a relative
+1e-4.
 
 *** =rgpot::fortranpots::WaterHPot=
 
@@ -1455,3 +1551,7 @@ The porting rules are on
   other than 1 or 8, when the last atom is not hydrogen, for no oxygen, when the
   hydrogens are not two per oxygen plus one, and when an atom coincides with the
   lone H.
+
+The surface is Andersson, Al-Halabi, Kroes and van Dishoeck, Journal of Chemical
+Physics 124, 064715 (2006), doi:10.1063/1.2162901.
+No test in this tree pins an absolute energy for this class.

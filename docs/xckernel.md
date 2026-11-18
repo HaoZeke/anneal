@@ -2,7 +2,9 @@
 
 `rgpot::XcKernel` provides contractions from
 [libxckernel](https://github.com/susilehtola/libxckernel)
-(arXiv:2608.26440, pin `d6a9d57ba3fe0f2763667ce168d0c0ef21cff4a4`).
+(arXiv:2608.26440; Lehtola, Journal of Chemical Physics 165, 174122
+(2026), doi:10.1063/5.0358101; pin
+`d6a9d57ba3fe0f2763667ce168d0c0ef21cff4a4`).
 It is **not** a geometry PES.
 
 ## What it is
