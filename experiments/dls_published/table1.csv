@@ -1,0 +1,16 @@
+# Table 1 of Shao, Cheng and Cai, J. Comput. Chem. 25, 1693 (2004).
+# Experiment input for the published dynamic-lattice baseline, not a
+# setting of the anneal search. Each row applies to sizes up to max_n; the
+# `inf` row applies to every larger size.
+max_n,n_mov,n_primary,n_try,n_best
+49,10,92,100,4
+79,15,162,200,4
+119,15,252,300,5
+149,20,362,350,5
+169,20,492,400,5
+189,20,492,450,8
+199,20,492,500,10
+229,20,492,550,10
+251,20,642,550,10
+309,25,642,700,10
+inf,40,812,1000,10

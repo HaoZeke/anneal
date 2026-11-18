@@ -23,7 +23,6 @@ fn expected_matches(entry: &Allow) -> usize {
         ("src/catalog.rs", "icosahedral") => 2,
         ("src/known_basin.rs", "fivefold") => 3,
         ("src/soap.rs", "n > 13" | "n <= 13") => 2,
-        ("src/methods/dls_published.rs", "mackay") => 4,
         ("src/methods/activation.rs", "pentagon") => 5,
         ("src/methods/activation.rs", "fivefold") => 6,
         ("src/csm.rs", "d5h" | "cyclic_about_z(5)") => 2,
@@ -38,7 +37,6 @@ fn expected_matches(entry: &Allow) -> usize {
             "src/methods/cluster_hopping.rs",
             "Template::FaceCentredCubic" | "Template::Icosahedral",
         ) => 2,
-        ("src/methods/dls_published.rs", "icosahedron") => 2,
         _ => 1,
     }
 }
@@ -151,11 +149,6 @@ const ALLOW: &[Allow] = &[
         path: "src/bank_rpc/server.rs",
         needle: "kmax_factor: if n >= 55",
         reason: "existing size-tuned IRA admission setting; replacement is audited",
-    },
-    Allow {
-        path: "src/methods/dls_published.rs",
-        needle: "mackay",
-        reason: "published DLS baseline reproduces its named primary-site template",
     },
     Allow {
         path: "src/methods/activation.rs",
@@ -289,11 +282,6 @@ const ALLOW: &[Allow] = &[
         path: "src/methods/cluster_hopping/moves.rs",
         needle: "fcc oracle",
         reason: "diagnostic assertion text, not shipped search behaviour",
-    },
-    Allow {
-        path: "src/methods/dls_published.rs",
-        needle: "icosahedron",
-        reason: "published DLS baseline builds a named primary-site template",
     },
     Allow {
         path: "src/methods/cluster_hopping.rs",
