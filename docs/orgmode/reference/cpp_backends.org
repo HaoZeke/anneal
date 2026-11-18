@@ -69,6 +69,14 @@ opens.
 
 ** CP2K
 
+The Quickstep method is VandeVondele and coauthors, Computer Physics
+Communications 167, 103-128 (2005),
+doi:10.1016/j.cpc.2004.12.014. CP2KPotFakeEngineTest does not run Quickstep. Its surface is E = 1/2
+k sum |r_i - r0_i|^2 in Hartree and Bohr with k = 0.5.
+On the water geometry in that test the spring is 1.8600113677425840 Hartree, so
+the host energy is 50.613487749571874 eV, and the test requires a relative
+agreement of 1e-12.
+
 *** =rgpot::CP2KPot=
 
 #+attr_rgpot: signature
@@ -270,6 +278,13 @@ bool available() const;
 
 ** MOPAC
 
+The default model is AM1: Dewar, Zoebisch, Healy and Stewart, Journal of the
+American Chemical Society 107, 3902-3909 (1985),
+doi:10.1021/ja00299a024. PM6 is Stewart, Journal of Molecular Modeling 13, 1173-1213 (2007), doi:10.1007/s00894-007-0233-4.
+MOPACPotTest does not pin an AM1 energy.
+The fake engine returns 0.25 Hartree, and the test requires the host energy to
+equal that times HARTREE_TO_EV (27.211386245988), which is 6.802846561497 eV.
+
 *** =rgpot::MOPACPot=
 
 #+attr_rgpot: signature
@@ -311,6 +326,12 @@ bool available() const;
 - Errors :: none.
 
 ** NWChem
+
+The engine is NWChem: Valiev and coauthors, Computer Physics Communications 181,
+1477-1489 (2010),
+doi:10.1016/j.cpc.2010.04.018, and Aprà and coauthors, Journal of Chemical Physics 152, 184102 (2020), doi:10.1063/5.0004997.
+NWChemPotTest requires a water B3LYP/6-31G* energy below -2070.0 eV and a second
+SCF within 1e-3 eV of the first.
 
 *** =rgpot::NWChemPot=
 
@@ -415,6 +436,13 @@ int main() {
 
 ** Skala
 
+skala-1.1 is the exchange-correlation keyword this class writes into NWChem, not
+a separate energy surface.
+The functional is Luise and coauthors, arXiv:2506.14665,
+doi:10.48550/arXiv.2506.14665. The abstract reports an error of 2.8 kcal/mol on
+GMTKN55.
+SkalaPotTest checks that the keyword is written; it does not pin an energy.
+
 *** =rgpot::SkalaConfig=
 
 - Inputs :: =xc= (exchange-correlation keyword, default =skala-1.1=), =basis=
@@ -506,6 +534,15 @@ void getParams(::NWChemParams::Builder out) const;
 
 ** tblite
 
+The library is the extended tight-binding implementation of Bannwarth and
+coauthors, WIREs Computational Molecular Science 11, e1493,
+doi:10.1002/wcms.1493. GFN1-xTB is the 2017 GFN-xTB method of Grimme, Bannwarth and Shushkov, Journal of Chemical Theory and Computation 13, 1989-2009 (2017), doi:10.1021/acs.jctc.7b00118.
+IPEA1-xTB is the IPEA parametrization of Ásgeirsson, Bauer and Grimme, Chemical
+Science 8, 4879-4895 (2017), doi:10.1039/c7sc00601b.
+GFN2-xTB, the default, is cited under xtb.
+TBLitePotTest requires the GFN2 energy of its three-atom water geometry to lie
+within 1 eV of -137.9 eV.
+
 *** =rgpot::TBLiteConfig=
 
 - Inputs :: =method= (=TBLiteMethod::GFN1=, =GFN2= or =IPEA1=; default =GFN2=),
@@ -548,12 +585,10 @@ The build option is =-Dwith_tblite=true=.
 ** xtb
 
 The default method is GFN2-xTB: Bannwarth, Ehlert and Grimme, J. Chem.
-Theory Comput. 15, 1652 (2019), doi:10.1021/acs.jctc.8b01176.
-Host positions are Angstrom and the host energy is eV.
-=XTBConfig= holds the parameters: the method, accuracy 1, an electronic
-temperature of 300 K, 250 iterations, charge 0 and no unpaired electrons.
-A numerical GFN2 energy needs libxtb, which the default build does not link, so
-this tree does not pin one.
+Theory Comput. 15, 1652 (2019),
+doi:10.1021/acs.jctc.8b01176. Host positions are Angstrom and the host energy is eV. =XTBConfig= holds the parameters: the method, accuracy 1, an electronic temperature of 300 K, 250 iterations, charge 0 and no unpaired electrons. A numerical GFN2 energy needs libxtb, which the default build does not link, so this tree does not pin one. GFN1-xTB is the 2017 GFN-xTB method of Grimme, Bannwarth and Shushkov, Journal of Chemical Theory and Computation 13, 1989-2009 (2017), doi:10.1021/acs.jctc.7b00118.
+GFN0-xTB is Pracht, Caldeweyher, Ehlert and Grimme, ChemRxiv (2019),
+doi:10.26434/chemrxiv.8326202.v1. GFN-FF is Spicher and Grimme, Angewandte Chemie International Edition 59, 15665-15673 (2020), doi:10.1002/anie.202004239.
 
 *** =rgpot::XTBConfig=
 
@@ -1096,6 +1131,12 @@ void forceImpl(const ForceInput &in, ForceOut *out) const;
 
 ** UMA
 
+The model family is Wood and coauthors, Advances in Neural Information
+Processing Systems 38, pages 143528-143564 (2025), doi:10.52202/085713-4310.
+UmaPotTest pins the ASE FAIRChemCalculator energy of HCN, uma-s-1p1 task omol,
+at -2542.4200323230975 eV within 1e-4.
+That figure is the test's parity pin, not a value from the paper.
+
 *** =rgpot::UmaConfig=
 
 - Inputs ::
@@ -1268,6 +1309,14 @@ fromMetadata(const std::unordered_map<std::string, std::string> &meta);
 
 ** i-PI socket
 
+The socket is the i-PI force-engine protocol of Ceriotti, More and Manolopoulos,
+Computer Physics Communications 185, 1019-1026 (2014),
+doi:10.1016/j.cpc.2013.10.027. i-PI 2.0 is Kapil and coauthors, Computer Physics Communications 236, 214-223 (2019), doi:10.1016/j.cpc.2018.09.020.
+IPIPotTest's mock returns 0.25 Hartree.
+The host energy must lie within 1e-12 of 0.25 times HARTREE_TO_EV, which is
+6.802846561497 eV.
+That is a unit conversion, not a path-integral energy.
+
 *** =rgpot::IPIConfig=
 
 - Inputs :: =address= (default empty), =timeout_s= (default 30.0).
@@ -1406,6 +1455,12 @@ These three classes evaluate the shifted 12-6 Lennard-Jones potential described
 by =ExternalLjConfig=.
 The C entry points with the same names as the three factory functions are in
 =CppCore/rgpot/ExternalPot/external_potentials.h=.
+The engines are Thompson and coauthors, Computer Physics Communications 271,
+108171 (2022),
+doi:10.1016/j.cpc.2021.108171, Abraham and coauthors, SoftwareX 1-2, 19-25 (2015), doi:10.1016/j.softx.2015.06.001,
+and Eastman and coauthors, PLOS Computational Biology 13, e1005659 (2017),
+doi:10.1371/journal.pcbi.1005659. The pair form is Lennard-Jones, Proceedings of the Royal Society A 106, 463 (1924), doi:10.1098/rspa.1924.0082.
+No test in this tree pins an energy for these three classes.
 
 *** =rgpot::ExternalLjConfig=
 

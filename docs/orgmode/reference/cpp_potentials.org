@@ -1428,6 +1428,11 @@ The porting rules are on
 - Errors :: =std::runtime_error= for an atomic number other than 29 or 1, and
   when two atoms occupy the same position.
 
+The form is the embedded-atom method of Daw and Baskes, Physical Review B 29,
+6443 (1984), doi:10.1103/PhysRevB.29.6443.
+The parameters are the eOn set; this tree has no separate paper for that fit.
+CuH2PotTest requires -2.7114096242662238 eV within 1e-6 for its four-atom cell.
+
 *** =rgpot::fortranpots::EAMAlPot=
 
 - Inputs :: none.
@@ -1438,6 +1443,12 @@ The porting rules are on
   The force call does not write a stress.
 - Errors :: =std::runtime_error= when the kernel or the neighbour table reports
   a failure.
+
+The form is Daw and Baskes, Physical Review B 29, 6443 (1984),
+doi:10.1103/PhysRevB.29.6443.
+The parameters are the eOn set.
+The four-atom al_fcc cluster in a 20 Angstrom cube is pinned to the EON r2549
+energy -5.217864006173226 eV within 1e-12.
 
 *** =rgpot::fortranpots::EDIPPot=
 
@@ -1450,6 +1461,11 @@ The porting rules are on
 - Errors :: =std::runtime_error= when the cell is thinner than the cutoff, and
   when the neighbour table reports a failure.
 
+The potential is Bazant, Kaxiras and Justo, Physical Review B 56, 8542-8552
+(1997), doi:10.1103/PhysRevB.56.8542.
+Eight silicon atoms in a 20 Angstrom cube give -18.838135 eV within a relative
+1e-4.
+
 *** =rgpot::fortranpots::FeHePot=
 
 - Inputs :: none.
@@ -1461,6 +1477,13 @@ The porting rules are on
   The force call does not write a stress.
 - Errors :: =std::runtime_error= for an atomic number other than 26 or 2.
 
+The iron part is Ackland and coauthors, Journal of Physics: Condensed Matter 16,
+S2629-S2642 (2004), doi:10.1088/0953-8984/16/27/003.
+A pure helium configuration reduces to the HFD-B dimer of Aziz, McCourt and
+Wong, Molecular Physics 61, 1487-1511 (1987), doi:10.1080/00268978700101941.
+Sixteen iron atoms in a 20 Angstrom cube give -43.959774 eV within a relative
+1e-4.
+
 *** =rgpot::fortranpots::LenoskyPot=
 
 - Inputs :: none.
@@ -1470,6 +1493,11 @@ The porting rules are on
   Atomic numbers are not read.
   The force call does not write a stress.
 - Errors :: =std::runtime_error= when the neighbour table reports a failure.
+
+The potential is Lenosky and coauthors, Modelling and Simulation in Materials
+Science and Engineering 8, 825-841 (2000), doi:10.1088/0965-0393/8/6/305.
+Eight silicon atoms in a 20 Angstrom cube give -17.284558 eV within a relative
+1e-4.
 
 *** =rgpot::fortranpots::SWPot=
 
@@ -1484,6 +1512,12 @@ The porting rules are on
 - Errors :: =std::runtime_error= when the kernel or the neighbour table reports
   a failure.
 
+The published potential is Stillinger and Weber, Physical Review B 31, 5262
+(1985), doi:10.1103/PhysRevB.31.5262.
+This class uses eOn's rescaled epsilon.
+Eight silicon atoms in a 20 Angstrom cube give -16.204955 eV within a relative
+1e-4.
+
 *** =rgpot::fortranpots::TersoffPot=
 
 - Inputs :: none.
@@ -1496,6 +1530,11 @@ The porting rules are on
 - Errors ::
   =std::runtime_error= when the Fortran kernel reports a failure, and the =std::invalid_argument=
   cases of =rgpot::TersoffSiC= on the other path.
+
+The potential is Tersoff, Physical Review B 39, 5566 (1989),
+doi:10.1103/PhysRevB.39.5566.
+Eight silicon atoms in a 20 Angstrom cube give -17.440266 eV within a relative
+1e-4.
 
 *** =rgpot::fortranpots::WaterHPot=
 
@@ -1512,3 +1551,7 @@ The porting rules are on
   other than 1 or 8, when the last atom is not hydrogen, for no oxygen, when the
   hydrogens are not two per oxygen plus one, and when an atom coincides with the
   lone H.
+
+The surface is Andersson, Al-Halabi, Kroes and van Dishoeck, Journal of Chemical
+Physics 124, 064715 (2006), doi:10.1063/1.2162901.
+No test in this tree pins an absolute energy for this class.
