@@ -1447,7 +1447,7 @@ CuH2PotTest requires -2.7114096242662238 eV within 1e-6 for its four-atom cell.
 The form is Daw and Baskes, Physical Review B 29, 6443 (1984),
 doi:10.1103/PhysRevB.29.6443.
 The parameters are the eOn set.
-The four-atom al_fcc cluster in a 20 Angstrom cube is pinned to the EON r2549
+The four-atom =al_fcc= cluster in a 20 Angstrom cube is pinned to the EON r2549
 energy -5.217864006173226 eV within 1e-12.
 
 *** =rgpot::fortranpots::EDIPPot=

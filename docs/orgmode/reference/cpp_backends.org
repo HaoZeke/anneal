@@ -70,9 +70,10 @@ opens.
 ** CP2K
 
 The Quickstep method is VandeVondele and coauthors, Computer Physics
-Communications 167, 103-128 (2005),
-doi:10.1016/j.cpc.2004.12.014. CP2KPotFakeEngineTest does not run Quickstep. Its surface is E = 1/2
-k sum |r_i - r0_i|^2 in Hartree and Bohr with k = 0.5.
+Communications 167, 103-128 (2005), doi:10.1016/j.cpc.2004.12.014.
+CP2KPotFakeEngineTest does not run Quickstep.
+Its surface is a spring, half k times the sum of squared displacements, in
+Hartree and Bohr with k = 0.5.
 On the water geometry in that test the spring is 1.8600113677425840 Hartree, so
 the host energy is 50.613487749571874 eV, and the test requires a relative
 agreement of 1e-12.
@@ -283,7 +284,7 @@ American Chemical Society 107, 3902-3909 (1985),
 doi:10.1021/ja00299a024. PM6 is Stewart, Journal of Molecular Modeling 13, 1173-1213 (2007), doi:10.1007/s00894-007-0233-4.
 MOPACPotTest does not pin an AM1 energy.
 The fake engine returns 0.25 Hartree, and the test requires the host energy to
-equal that times HARTREE_TO_EV (27.211386245988), which is 6.802846561497 eV.
+equal that times =HARTREE_TO_EV= (27.211386245988), which is 6.802846561497 eV.
 
 *** =rgpot::MOPACPot=
 
@@ -1313,7 +1314,7 @@ The socket is the i-PI force-engine protocol of Ceriotti, More and Manolopoulos,
 Computer Physics Communications 185, 1019-1026 (2014),
 doi:10.1016/j.cpc.2013.10.027. i-PI 2.0 is Kapil and coauthors, Computer Physics Communications 236, 214-223 (2019), doi:10.1016/j.cpc.2018.09.020.
 IPIPotTest's mock returns 0.25 Hartree.
-The host energy must lie within 1e-12 of 0.25 times HARTREE_TO_EV, which is
+The host energy must lie within 1e-12 of 0.25 times =HARTREE_TO_EV=, which is
 6.802846561497 eV.
 That is a unit conversion, not a path-integral energy.
 
