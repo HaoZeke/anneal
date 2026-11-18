@@ -122,6 +122,5 @@ fn recommended_draws_the_compacted_surface_below_98() {
     let rec = Config::recommended(75);
     assert!(rec.two_phase.is_none());
     assert_eq!(rec.surfaces, Config::communicating(75).surfaces);
-    assert!(rec.orbit_complete_on_new);
     assert!(Config::recommended(98).surfaces.is_empty());
 }

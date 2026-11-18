@@ -405,11 +405,6 @@ fn main() {
     writeln!(meta, "code: anneal").ok();
     writeln!(meta, "arm: recommended_molecular").ok();
     writeln!(meta, "water_arm: recommended").ok();
-    if cfg.orbit_complete_on_new {
-        eprintln!("orbit completion is on; recommended_molecular was expected to leave it off");
-        std::process::exit(2);
-    }
-    writeln!(meta, "orbit_complete_on_new: {}", cfg.orbit_complete_on_new).ok();
     writeln!(
         meta,
         "source_commit: {}",

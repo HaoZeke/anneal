@@ -44,7 +44,6 @@ fn stalling_config(trail: bool) -> Config {
     cfg.escape_stall_factor = 0.0;
     cfg.escape_on_stall = false;
     cfg.restart_on_stall = false;
-    cfg.symmetrise_on_stall = false;
     cfg.trail_on_stall = trail;
     cfg
 }

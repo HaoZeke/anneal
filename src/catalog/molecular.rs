@@ -687,7 +687,6 @@ pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
             cfg.depth_reward = false;
             cfg.allocate_moves = true;
             cfg.return_screen = true;
-            cfg.orbit_complete_on_new = true;
             cfg.shared_deposits = 0;
             cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
             cfg.jump_on_stall = false;
@@ -1467,7 +1466,6 @@ mod water_hexamer_tests {
         configure_water_arm(&mut communicating, WaterSearchArm::Communicating);
         assert!(!communicating.depth_reward);
         assert!(communicating.return_screen);
-        assert!(communicating.orbit_complete_on_new);
         assert_eq!(communicating.shared_deposits, 0);
         assert!(matches!(
             communicating.shared_visit_policy,

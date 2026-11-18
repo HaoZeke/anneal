@@ -90,8 +90,6 @@ pub mod catalog_rpc;
 pub mod census_bus;
 /// Versioned objective bridge compatibility descriptors.
 pub mod compatibility;
-/// Collective variables from the spectrum of the visited-basin graph.
-pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod contextual;
 /// Continuous-symmetry projections for non-periodic atomic clusters.

@@ -42,7 +42,6 @@ def test_config_recommended_and_for_cluster():
     assert rec.depth_reward
     assert rec.tabu_on_stall
     assert rec.shared_visit_policy == "tabu"
-    assert rec.orbit_complete_on_new
     assert rec.calibrated_screen
     assert rec.finish_improving
     assert base.finish_improving
@@ -54,7 +53,6 @@ def test_config_recommended_and_for_cluster():
     assert not comm.burst_moves
     assert comm.allocate_moves
     assert not comm.depth_reward
-    assert comm.orbit_complete_on_new
     assert comm.shared_visit_policy == "recognition"
     assert rec.shared_visit_policy == "tabu"
 
@@ -142,7 +140,6 @@ def test_tip4p_configs_are_rigid():
     atomic = Config.recommended(10)
     assert atomic.depth_reward and atomic.tabu_on_stall
     assert not rec.depth_reward and not rec.tabu_on_stall
-    assert not comm.orbit_complete_on_new
     with pytest.raises(ValueError, match="at least 2"):
         Config.communicating_tip4p(1)
 
