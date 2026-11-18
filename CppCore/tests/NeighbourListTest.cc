@@ -6,8 +6,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <set>
+#include <span>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -485,6 +487,222 @@ TEST_CASE("a positive skin with a strict cut is rejected", "[nlist][api]") {
     rgpot::nlist::build(table, pos, 2, box, query);
   } catch (const rgpot::nlist::Error &err) {
     REQUIRE(err.code() == rgpot::nlist::Code::Skin);
+  }
+}
+
+TEST_CASE("a null positions pointer is rejected when atoms are present",
+          "[nlist][api][edge]") {
+  // check_geometry's Code::Null branch for positions: no existing test
+  // calls build() with a null positions pointer and a nonzero atom count.
+  const double box[9] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
+  rgpot::nlist::Query query;
+  query.cutoff = 2.0;
+  rgpot::nlist::Table table;
+  REQUIRE_THROWS_AS(rgpot::nlist::build(table, nullptr, 2, box, query),
+                    rgpot::nlist::Error);
+  try {
+    rgpot::nlist::build(table, nullptr, 2, box, query);
+  } catch (const rgpot::nlist::Error &err) {
+    REQUIRE(err.code() == rgpot::nlist::Code::Null);
+  }
+  // A null positions pointer with zero atoms is not an error: there is
+  // nothing to read.
+  REQUIRE_NOTHROW(rgpot::nlist::build(table, nullptr, 0, box, query));
+  REQUIRE(table.size() == 0);
+}
+
+TEST_CASE("a null box pointer is rejected", "[nlist][api][edge]") {
+  const double pos[] = {0, 0, 0, 1, 0, 0};
+  rgpot::nlist::Query query;
+  query.cutoff = 2.0;
+  rgpot::nlist::Table table;
+  REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, nullptr, query),
+                    rgpot::nlist::Error);
+  try {
+    rgpot::nlist::build(table, pos, 2, nullptr, query);
+  } catch (const rgpot::nlist::Error &err) {
+    REQUIRE(err.code() == rgpot::nlist::Code::Null);
+  }
+}
+
+TEST_CASE("a periodic box with zero volume is rejected", "[nlist][api][edge]") {
+  // check_geometry's Code::Box branch: a degenerate (singular) periodic
+  // cell, which the minimum image search cannot invert.
+  const double flat[9] = {10, 0, 0, 0, 10, 0, 0, 0, 0};
+  const double pos[] = {0, 0, 0, 1, 0, 0};
+  rgpot::nlist::Query query;
+  query.cutoff = 2.0;
+  query.periodic = {{true, true, true}};
+  rgpot::nlist::Table table;
+  REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, flat, query),
+                    rgpot::nlist::Error);
+  try {
+    rgpot::nlist::build(table, pos, 2, flat, query);
+  } catch (const rgpot::nlist::Error &err) {
+    REQUIRE(err.code() == rgpot::nlist::Code::Box);
+  }
+  // The same cell is fine once no direction is periodic: zero volume
+  // never reaches the minimum image search.
+  query.periodic = {{false, false, false}};
+  REQUIRE_NOTHROW(rgpot::nlist::build(table, pos, 2, flat, query));
+}
+
+TEST_CASE("a negative or non-finite skin is rejected", "[nlist][api][edge]") {
+  // Distinct from "a positive skin with a strict cut is rejected": that
+  // test exercises query.skin > 0 with Cut::Strict (Code::Skin). This one
+  // exercises the skin value itself being out of range (Code::Cutoff),
+  // independent of the cut mode.
+  const double box[9] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
+  const double pos[] = {0, 0, 0, 1, 0, 0};
+  rgpot::nlist::Table table;
+
+  rgpot::nlist::Query negative;
+  negative.cutoff = 2.0;
+  negative.skin = -0.1;
+  REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, box, negative),
+                    rgpot::nlist::Error);
+  try {
+    rgpot::nlist::build(table, pos, 2, box, negative);
+  } catch (const rgpot::nlist::Error &err) {
+    REQUIRE(err.code() == rgpot::nlist::Code::Cutoff);
+  }
+
+  rgpot::nlist::Query non_finite;
+  non_finite.cutoff = 2.0;
+  non_finite.skin = std::numeric_limits<double>::infinity();
+  REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, box, non_finite),
+                    rgpot::nlist::Error);
+}
+
+TEST_CASE("an out-of-range shell or cut mode is rejected", "[nlist][api][edge]") {
+  // The validation checks `pairs->shell != Shell::Half && != Shell::Full`
+  // and `cut != Strict && != Loose`: defensive guards against a Query
+  // built with a value outside the enum's named set, which the type
+  // system does not forbid for an `enum class`.
+  const double box[9] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
+  const double pos[] = {0, 0, 0, 1, 0, 0};
+  rgpot::nlist::Table table;
+
+  rgpot::nlist::Query badShell;
+  badShell.cutoff = 2.0;
+  badShell.shape = rgpot::nlist::Pairs{static_cast<rgpot::nlist::Shell>(7)};
+  REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, box, badShell),
+                    rgpot::nlist::Error);
+  try {
+    rgpot::nlist::build(table, pos, 2, box, badShell);
+  } catch (const rgpot::nlist::Error &err) {
+    REQUIRE(err.code() == rgpot::nlist::Code::Shape);
+  }
+
+  rgpot::nlist::Query badCut;
+  badCut.cutoff = 2.0;
+  badCut.cut = static_cast<rgpot::nlist::Cut>(7);
+  REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, box, badCut),
+                    rgpot::nlist::Error);
+  try {
+    rgpot::nlist::build(table, pos, 2, box, badCut);
+  } catch (const rgpot::nlist::Error &err) {
+    REQUIRE(err.code() == rgpot::nlist::Code::Shape);
+  }
+}
+
+TEST_CASE("a non-finite box element is rejected", "[nlist][api][edge]") {
+  const double nan_box[9] = {10, 0, 0, 0, 10, 0, 0, 0,
+                             std::numeric_limits<double>::quiet_NaN()};
+  const double pos[] = {0, 0, 0, 1, 0, 0};
+  rgpot::nlist::Query query;
+  query.cutoff = 2.0;
+  query.periodic = {{false, false, false}};
+  rgpot::nlist::Table table;
+  REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, nan_box, query),
+                    rgpot::nlist::Error);
+  try {
+    rgpot::nlist::build(table, pos, 2, nan_box, query);
+  } catch (const rgpot::nlist::Error &err) {
+    REQUIRE(err.code() == rgpot::nlist::Code::Box);
+  }
+}
+
+TEST_CASE("a streaming walk rejects buffers too short for the pair cap",
+          "[nlist][api][edge]") {
+  // The chunked-walk test above ("a chunked walk returns the stored
+  // pairs") only ever hands pull() buffers that are long enough. Walk::pull
+  // validates each optional buffer independently (Code::Short); none of
+  // those branches run anywhere else.
+  const double box[9] = {6, 0, 0, 0, 5, 0, 1, 0, 7};
+  const std::vector<double> pos = {0.5, 0.5, 0.5, 2.0, 1.0, 1.0, 4.5, 3.0, 6.0};
+  rgpot::nlist::Query query;
+  query.cutoff = 4.0;
+  query.shape = rgpot::nlist::Pairs{rgpot::nlist::Shell::Full};
+  query.cut = rgpot::nlist::Cut::Strict;
+
+  auto freshWalk = [&] {
+    return rgpot::nlist::Walk(pos.data(), pos.size() / 3, box, query);
+  };
+
+  std::vector<std::int32_t> first(2), second(2), shift(6), bad_shift(2);
+  std::vector<double> vector(6), bad_vector(2), distance(2), bad_distance(1);
+  std::vector<std::uint8_t> mask(2), bad_mask(1);
+
+  {
+    auto walk = freshWalk();
+    rgpot::nlist::Buffers dest;
+    dest.first = first;
+    dest.second = std::span<std::int32_t>(second.data(), 1); // mismatched
+    bool done = false;
+    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+  }
+  {
+    auto walk = freshWalk();
+    rgpot::nlist::Buffers dest;
+    dest.first = first;
+    dest.second = second;
+    dest.shift = bad_shift; // too short: needs 3 * cap
+    bool done = false;
+    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+  }
+  {
+    auto walk = freshWalk();
+    rgpot::nlist::Buffers dest;
+    dest.first = first;
+    dest.second = second;
+    dest.vector = bad_vector; // too short: needs 3 * cap
+    bool done = false;
+    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+  }
+  {
+    auto walk = freshWalk();
+    rgpot::nlist::Buffers dest;
+    dest.first = first;
+    dest.second = second;
+    dest.distance = bad_distance; // too short: needs cap
+    bool done = false;
+    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+  }
+  {
+    // A cluster-of-four query needs a mask byte per pair.
+    rgpot::nlist::Query clusterQuery = query;
+    clusterQuery.shape = rgpot::nlist::Cluster4{};
+    rgpot::nlist::Walk walk(pos.data(), pos.size() / 3, box, clusterQuery);
+    rgpot::nlist::Buffers dest;
+    dest.first = first;
+    dest.second = second;
+    dest.mask = bad_mask; // too short: needs cap
+    bool done = false;
+    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+  }
+  // A well-formed call still succeeds after each of the rejections above.
+  {
+    auto walk = freshWalk();
+    rgpot::nlist::Buffers dest;
+    dest.first = first;
+    dest.second = second;
+    dest.shift = shift;
+    dest.vector = vector;
+    dest.distance = distance;
+    dest.mask = mask;
+    bool done = false;
+    REQUIRE_NOTHROW(walk.pull(dest, done));
   }
 }
 
