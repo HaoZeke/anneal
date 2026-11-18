@@ -7,6 +7,12 @@ import math
 
 DEFAULT_HIT_TOL: float = 1.0e-3
 
+# Cluster-search drivers score a hit inside this window. It is tighter than
+# DEFAULT_HIT_TOL: those drivers were scored at 1e-4, and widening them to
+# the default would count a different set of runs. The solved flag, the
+# first-encounter statistic, and the ensemble discovery level share it.
+SEARCH_HIT_TOL: float = 1.0e-4
+
 
 def energy_hits(energy: float, target: float, tol: float = DEFAULT_HIT_TOL) -> bool:
     """Return whether ``energy`` hits ``target`` under ``energy <= target + tol``.

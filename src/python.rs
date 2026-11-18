@@ -4016,6 +4016,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::version::ANNEAL_VERSION)?;
     m.add("DEFAULT_HIT_TOL", crate::DEFAULT_HIT_TOL)?;
+    m.add("SEARCH_HIT_TOL", crate::SEARCH_HIT_TOL)?;
     m.add_function(wrap_pyfunction!(energy_hits, m)?)?;
     device::register(m)?;
     landfold::register(m)?;

@@ -18,7 +18,7 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// Seeds 0..16 at a budget of 30_000, from `recommended` with the 38-point
 /// reseed and the stall exits off. The `ira` feature replaces the fivefold
 /// permutation in `residual_about`, and the plain walk's hits move with it.
-/// Counted hits of the octahedron, within `1e-4`:
+/// Counted hits of the octahedron, within `SEARCH_HIT_TOL`:
 ///
 /// ```text
 /// matcher   cutoff   plain
@@ -68,13 +68,13 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     for seed in 0..SEEDS {
         let (best, _, spent) = run(&compacted, budget, seed);
         assert!(spent <= budget, "the ledger overspent: {spent} of {budget}");
-        if anneal_core::energy_hits(best, LJ38_OCTAHEDRON, 1e-4) {
+        if anneal_core::energy_hits(best, LJ38_OCTAHEDRON, anneal_core::SEARCH_HIT_TOL) {
             compact_hits += 1;
             compact_mask |= 1 << seed;
         }
         let (plain_best, _, plain_spent) = run(&plain, budget, seed);
         assert!(plain_spent <= budget);
-        if anneal_core::energy_hits(plain_best, LJ38_OCTAHEDRON, 1e-4) {
+        if anneal_core::energy_hits(plain_best, LJ38_OCTAHEDRON, anneal_core::SEARCH_HIT_TOL) {
             plain_hits += 1;
             plain_mask |= 1 << seed;
         }

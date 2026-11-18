@@ -1240,6 +1240,42 @@ def line_of(audit: Audit, path: str, number: int) -> str:
     return audit.text(path).splitlines()[number - 1]
 
 
+def resolve_named_hit_tol(expr: str, names: dict[str, float]) -> float | None:
+    """Resolve a tolerance expression through ``names`` or as a numeric literal.
+
+    ``${DEFAULT_HIT_TOL}`` and ``DEFAULT_HIT_TOL`` both follow ``names``.
+    A bare number is parsed. Anything else is unresolved, so a check that
+    compares the two sides cannot pass by reading the constant twice.
+    """
+    token = expr.strip().strip("\"'")
+    if token.startswith("${") and token.endswith("}"):
+        token = token[2:-1]
+    if token in names:
+        return float(names[token])
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def jcc_target_lines(tally_text: str, script_text: str) -> tuple[int | None, int | None]:
+    """Line the tally names, and the script line that sets the copper target."""
+    claimed = re.search(
+        r"scripts/elja_jcc_molslab_ensemble\.sh line (\d+) sets that target\.",
+        tally_text,
+    )
+    claimed_line = int(claimed.group(1)) if claimed else None
+    actual = next(
+        (
+            index
+            for index, text in enumerate(script_text.splitlines(), 1)
+            if text.strip() == "TARGET=-415.971529"
+        ),
+        None,
+    )
+    return claimed_line, actual
+
+
 def supporting_numbers(audit: Audit) -> None:
     """Every number of the SI, read from the row, log, archive or source file that holds it."""
     gmin = load_script("gmin_panel_si", "scripts/gmin_panel/run_panel.py")
@@ -1438,10 +1474,11 @@ def supporting_numbers(audit: Audit) -> None:
     tol_line = next(
         i
         for i, text in enumerate(script_lines, 1)
-        if i > energy_line and text == "export TARGET_TOL=${DEFAULT_HIT_TOL}"
+        if i > energy_line and text.startswith("export TARGET_TOL=")
     )
     target_energy = float(script_lines[energy_line - 1].split("=", 1)[1])
-    target_tol = py_default_hit_tol
+    names = {"DEFAULT_HIT_TOL": py_default_hit_tol}
+    target_tol = resolve_named_hit_tol(script_lines[tol_line - 1].split("=", 1)[1], names)
     audit.said(
         SI,
         f"Its line {energy_line} sets \\texttt{{TARGET\\_ENERGY}} to \\(-415.971529\\) and its line {tol_line} "
@@ -1450,20 +1487,47 @@ def supporting_numbers(audit: Audit) -> None:
     tally = "paper/jctc/scripts/hq_sci_tally.py"
     tally_text = audit.text(tally)
     tally_reference = float(re.search(r"^REFERENCE_EV = ([-+0-9.eE]+)$", tally_text, re.M).group(1))
-    tally_tolerance = float(DEFAULT_HIT_TOL)
-    assert "REFERENCE_TOL_EV = DEFAULT_HIT_TOL" in tally_text
+    tally_tol_match = re.search(r"^REFERENCE_TOL_EV = (.+)$", tally_text, re.M)
+    tally_tolerance = (
+        resolve_named_hit_tol(tally_tol_match.group(1), names) if tally_tol_match else None
+    )
     audit.cell(SI, "TARGET_ENERGY value", "-415.971529", target_energy)
     audit.cell(SI, "TARGET_ENERGY matches tally reference", f"{tally_reference}", target_energy)
-    audit.cell(SI, "TARGET_TOL value", "0.001", target_tol)
-    audit.cell(SI, "TARGET_TOL matches tally tolerance", f"{tally_tolerance:.3f}", target_tol)
+    if target_tol is None:
+        audit.record(False, SI, "TARGET_TOL value", "unresolved", "0.001")
+    else:
+        audit.cell(SI, "TARGET_TOL value", "0.001", target_tol)
+    if target_tol is None or tally_tolerance is None:
+        audit.record(
+            False,
+            SI,
+            "TARGET_TOL matches tally tolerance",
+            "unresolved",
+            target_tol if target_tol is not None else "unresolved",
+        )
+    else:
+        audit.cell(
+            SI,
+            "TARGET_TOL matches tally tolerance",
+            f"{tally_tolerance:.6g}",
+            target_tol,
+        )
     audit.said(tally, f"scripts/elja_hq_sci_molslab_bank.sh line {energy_line} sets it too.")
-    jcc_target_line = next(
-        i
-        for i, text in enumerate(audit.text("scripts/elja_jcc_molslab_ensemble.sh").splitlines(), 1)
-        if text.strip() == "TARGET=-415.971529"
+    claimed_line, jcc_target_line = jcc_target_lines(
+        tally_text, audit.text("scripts/elja_jcc_molslab_ensemble.sh")
     )
-    audit.cell(tally, "the jcc script's target line", str(jcc_target_line), float(jcc_target_line))
-    audit.said(tally, f"scripts/elja_jcc_molslab_ensemble.sh line {jcc_target_line} sets that target.")
+    if claimed_line is None or jcc_target_line is None:
+        audit.record(
+            False,
+            tally,
+            "the jcc script's target line",
+            "missing" if claimed_line is None else str(claimed_line),
+            jcc_target_line if jcc_target_line is not None else "missing",
+        )
+    else:
+        audit.cell(tally, "the jcc script's target line", str(claimed_line), float(jcc_target_line))
+    if jcc_target_line is not None:
+        audit.said(tally, f"scripts/elja_jcc_molslab_ensemble.sh line {jcc_target_line} sets that target.")
     bests = []
     for index in range(8):
         found = re.search(r"seed \d+: best (\S+) eV", audit.text(f"paper/jctc/logs/cuh2_fcc_rec_{index}.out"))
