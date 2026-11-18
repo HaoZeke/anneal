@@ -12,7 +12,8 @@ E = epsilon * [ 1/2 sum_i sum_{j != i} (a / r_ij)^n
 rho_i = sum_{j != i} (a / r_ij)^m
 #+end_example
 
-The form is Sutton and Chen, Philosophical Magazine Letters 61, 139 (1990).
+The form is Sutton and Chen, Philosophical Magazine Letters 61, 139 (1990),
+doi:10.1080/09500839008206493.
 The default parameters are the reduced gold and platinum set: =n = 10=, =m = 8=,
 =c = 34.408=, =epsilon = 1=, =a = 1=.
 Doye and Wales use that set for the 10-8 cluster tables and write it on the
@@ -182,3 +183,69 @@ without the stress and 930 with it.
 A 4000-atom cell with a cutoff of 19 Angstrom takes about 25800 and 27500.
 With the flag clear, six cases from 108 to 4000 atoms take the same time as
 before the flag existed, to within 4 percent.
+
+** C entry points
+
+=rgpot_sutton_chen_energy_forces= does not carry the stress flag.
+=box= may be null when =periodic= is 0.
+Each thread keeps the potential of its last call when the parameters and the
+atom count match.
+
+*** =rgpot_sc_config=
+
+- Inputs :: =epsilon=, =c=, =a=, =n=, =m=, =cutoff= and =periodic=.
+  Field order is part of the ABI.
+- Units :: =epsilon= sets the energy unit and =a= the length unit.
+  =cutoff= is in the coordinate unit.
+  =c=, =n=, =m= and =periodic= are dimensionless.
+- Outputs :: the parameter block of =rgpot_sutton_chen_energy_forces= and
+  =rgpot_sutton_chen_scales=.
+- Errors :: none.
+  The call that reads the block reports a bad value.
+
+*** =rgpot_sutton_chen_energy_forces=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_sutton_chen_energy_forces(const rgpot_sc_config *cfg,
+                                    int32_t natoms, const double *positions,
+                                    const double *box, double *energy,
+                                    double *forces);
+#+end_src
+
+- Inputs :: =cfg=, =natoms=, positions (3 =natoms= doubles), =box= (nine
+  doubles, one cell vector per row) and the energy and force pointers.
+- Units :: positions, =box= and =cutoff= in the coordinate unit.
+  Energy in the unit of =epsilon=, forces in energy per length.
+- Outputs :: one energy and 3 =natoms= forces, which are minus the gradient.
+  Returns 0 on success.
+- Errors :: returns 1 when =cfg= or =energy= is null, =natoms= is negative,
+  =natoms= is positive and =positions= or =forces= is null, or the config is
+  rejected.
+  A periodic call also returns 1 when the cutoff is not positive or the cell is
+  not usable.
+
+*** =rgpot_sc_scales=
+
+- Inputs :: =nearest_neighbor= and =well_depth=.
+- Units :: =nearest_neighbor= in the coordinate unit.
+  =well_depth= in the energy unit, and it is positive.
+- Outputs :: the bulk scales written by =rgpot_sutton_chen_scales=.
+- Errors :: none.
+
+*** =rgpot_sutton_chen_scales=
+
+#+attr_rgpot: signature
+#+begin_src c
+int rgpot_sutton_chen_scales(const rgpot_sc_config *cfg,
+                             rgpot_sc_scales *out);
+#+end_src
+
+- Inputs :: =cfg= and =out=.
+- Units :: as =rgpot_sc_config= and =rgpot_sc_scales=.
+  The length is the static fcc minimum and the depth is minus the energy per
+  atom there.
+- Outputs :: the two scales.
+  Returns 0 on success.
+- Errors :: returns 1 when =cfg= or =out= is null, or when the config is
+  rejected.
