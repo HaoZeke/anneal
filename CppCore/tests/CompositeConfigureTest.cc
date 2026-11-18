@@ -244,6 +244,17 @@ TEST_CASE("the d2cpmd arm configures CPMD's D2 and a composite term", "[rpc][d2c
   REQUIRE(params.getS6() == rgpot::D2CpmdConfig{}.s6);
   REQUIRE(params.getAlpha() == rgpot::D2CpmdConfig{}.alpha);
   REQUIRE(params.getVdweps() == rgpot::D2CpmdConfig{}.vdweps);
+  REQUIRE(params.getSymmetry() == rgpot::kCpmdInferSymmetry);
+  params.setSymmetry(12);
+  auto monoclinic = rgpot::rpc::configureD2Cpmd(cfg.asReader());
+  INFO(monoclinic.message);
+  REQUIRE(monoclinic.ok);
+  REQUIRE(monoclinic.replacement->config().symmetry == 12);
+  params.setSymmetry(9);
+  auto unknown_symmetry = rgpot::rpc::configureD2Cpmd(cfg.asReader());
+  REQUIRE_FALSE(unknown_symmetry.ok);
+  REQUIRE_THAT(unknown_symmetry.message, ContainsSubstring("symmetry"));
+  params.setSymmetry(rgpot::kCpmdInferSymmetry);
   params.setFunctional("PBE");
   auto applied = rgpot::rpc::configureD2Cpmd(cfg.asReader());
   INFO(applied.message);

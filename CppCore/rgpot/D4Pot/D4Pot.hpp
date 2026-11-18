@@ -41,6 +41,7 @@ public:
             .periodic = m_config.periodic,
             .stress = m_config.periodic};
   }
+  [[nodiscard]] uint64_t paramsKey() const noexcept override;
 
   [[nodiscard]] const D4Config &config() const noexcept { return m_config; }
 

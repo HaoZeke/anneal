@@ -486,7 +486,7 @@ long rgpot_engine_last_components(const RgpotEnginePot *pot,
 - Errors :: returns -1 for a null =pot=.
 
 Optional symbol, minor 5.
-The record of a failed call is that of the terms that ran before the failure.
+The record of a failed call is that of the last successful call.
 The call takes the handle's call lock, so it waits for an evaluation on the same
 handle to finish.
 

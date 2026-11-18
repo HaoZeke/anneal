@@ -156,6 +156,8 @@ struct ChildSpec {
   double alpha = 0.0;
   bool has_vdweps = false;
   double vdweps = 0.0;
+  bool has_symmetry = false;
+  int symmetry = 0;
 };
 
 std::string child_kind(nb::handle spec) {
@@ -204,6 +206,10 @@ ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
     if (d.contains("vdweps")) {
       out.has_vdweps = true;
       out.vdweps = nb::cast<double>(d["vdweps"]);
+    }
+    if (d.contains("symmetry")) {
+      out.has_symmetry = true;
+      out.symmetry = nb::cast<int>(d["symmetry"]);
     }
     if (d.contains("atm")) {
       out.atm = nb::cast<bool>(d["atm"]);
@@ -313,6 +319,9 @@ std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
     }
     if (spec.has_vdweps) {
       cfg.vdweps = spec.vdweps;
+    }
+    if (spec.has_symmetry) {
+      cfg.symmetry = spec.symmetry;
     }
     return std::make_unique<rgpot::D2CpmdPot>(cfg);
   }
@@ -895,7 +904,7 @@ NB_MODULE(_core, m) {
   d2cpmd_cls.def(
       "__init__",
       [](PotHolder<rgpot::D2CpmdPot> *self, double s6, double alpha, double vdweps,
-         std::optional<std::string> functional) {
+         std::optional<std::string> functional, int symmetry) {
         rgpot::D2CpmdConfig cfg =
             functional ? rgpot::d2_cpmd_config_for(*functional) : rgpot::D2CpmdConfig{};
         if (!functional) {
@@ -903,21 +912,26 @@ NB_MODULE(_core, m) {
         }
         cfg.alpha = alpha;
         cfg.vdweps = vdweps;
+        cfg.symmetry = symmetry;
         new (self) PotHolder<rgpot::D2CpmdPot>(
             [cfg] { return std::make_unique<rgpot::D2CpmdPot>(cfg); });
       },
       nb::arg("s6") = rgpot::D2CpmdConfig{}.s6, nb::arg("alpha") = rgpot::D2CpmdConfig{}.alpha,
       nb::arg("vdweps") = rgpot::D2CpmdConfig{}.vdweps, nb::arg("functional") = nb::none(),
+      nb::arg("symmetry") = rgpot::D2CpmdConfig{}.symmetry,
       "OpenCPMD's built-in empirical D2 (EMPIRICAL CORRECTION, ALL DFT-D2) "
       "with its tables, damping, truncation and minimum image, in eV, to "
       "subtract from a CPMD run that had it on. The defaults are CPMD's for "
-      "BLYP; a functional takes s6 from CPMD's set_s6.");
+      "BLYP; a functional takes s6 from CPMD's set_s6. symmetry is the "
+      "run's SYMMETRY code, which picks the branch of CPMD's pbc3 (-1 reads "
+      "it from the box, which cannot name 12).");
   d2cpmd_cls.def("config", [](const PotHolder<rgpot::D2CpmdPot> &self) {
     const rgpot::D2CpmdConfig &cfg = self.primary().config();
     nb::dict out;
     out["s6"] = cfg.s6;
     out["alpha"] = cfg.alpha;
     out["vdweps"] = cfg.vdweps;
+    out["symmetry"] = cfg.symmetry;
     return out;
   });
   rgpot::pybind::bind_calls(d2cpmd_cls);

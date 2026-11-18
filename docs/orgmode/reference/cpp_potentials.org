@@ -241,10 +241,21 @@ class.
   \(\lvert\alpha(r/R_r-1)\rvert\ge\frac{1}{\mathrm{vdweps}}\) is dropped).
   The defaults are CPMD's for BLYP; =rgpot::d2_cpmd_config_for= gives the =s6=
   of another functional.
+  =symmetry= is the =SYMMETRY= code of the CPMD run, which picks the branch of
+  =pbc3=: 1 and 8 fold per axis, 2 is face centred cubic, 4 and 14 with alpha
+  and beta at 90 degrees take the shear branch, 12 the monoclinic branch, and 3,
+  5, 6 and 7 the nearest integer image.
+  The default, =kCpmdInferSymmetry= (-1), reads the branch from the box, which
+  has the shape of 14 for a cell of 12 and cannot name it.
 - Units :: none.
 - Outputs :: the parameters of =rgpot::D2CpmdPot=.
 - Errors :: the constructor throws =std::invalid_argument= unless =s6= and
-  =alpha= are finite and =vdweps= is positive and finite.
+  =alpha= are finite, =vdweps= is positive and finite and =symmetry= is -1, 1 to
+  8, 12 or 14 (9, 10, 11 and 13 are codes =latgen= does not build).
+  A call throws =std::invalid_argument= when the box of a periodic system does
+  not have the shape of the code (a cube for 1, orthogonal vectors for 8,
+  =latgen='s face centred vectors for 2, the hexagonal vectors for 4, a1 along x
+  and a2 in the xy plane for 12).
 
 *** =rgpot::D4Config=
 
@@ -1594,6 +1605,20 @@ explicit D4Pot(const D4Config &config);
 - Outputs :: the =rgpot::D4Config= the instance was built with.
 - Errors :: none.
 
+*** =rgpot::D4Pot::paramsKey=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] uint64_t paramsKey() const noexcept override;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: an FNV-1a digest over the D4 functional key, charge, ATM switch and
+  periodic switch.
+  The result separates cache entries for distinct D4 parameter sets.
+- Errors :: none.
+
 ** Expression of potentials
 
 *** =rgpot::ExprPot=
@@ -1805,7 +1830,7 @@ void setWeight(std::size_t index, double weight);
   from the last force call on this instance: =name=, =weight=, =enabled=,
   =evaluated= (false for a disabled term and before the first call), =energy=,
   =forces= (empty when not evaluated), =variance=, =has_stress= and =stress=.
-  A call that throws leaves the record of the terms that ran before the failure.
+  A call that throws keeps the record of the last successful call.
 - Errors :: none.
 
 *** =rgpot::SumPot::setLogSink=

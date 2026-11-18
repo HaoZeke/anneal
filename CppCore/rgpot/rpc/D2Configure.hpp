@@ -49,6 +49,7 @@ namespace rgpot::rpc {
   }
   c.alpha = params.getAlpha();
   c.vdweps = params.getVdweps();
+  c.symmetry = params.getSymmetry();
   return c;
 }
 
@@ -102,7 +103,8 @@ configureD2Cpmd(const ::PotentialConfig::Reader &cfg) {
       const D2CpmdConfig next = d2CpmdConfigFrom(cfg.getD2cpmd());
       result.replacement = std::make_unique<D2CpmdPot>(next);
       std::ostringstream summary;
-      summary << "s6=" << next.s6 << " alpha=" << next.alpha << " vdweps=" << next.vdweps;
+      summary << "s6=" << next.s6 << " alpha=" << next.alpha << " vdweps=" << next.vdweps
+              << " symmetry=" << next.symmetry;
       result.ok = true;
       result.message = "rgpot params applied (d2cpmd arm): " + summary.str();
     } catch (const std::invalid_argument &error) {

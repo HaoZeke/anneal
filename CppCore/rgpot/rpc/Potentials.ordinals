@@ -1973,3 +1973,4 @@ D2CpmdParams @2 field vdweps :Float64 local
 D2CpmdParams @3 field functional :Text local
 PotentialConfig @20 arm d2cpmd :D2CpmdParams local
 D4Params @3 field periodic :Bool local
+D2CpmdParams @4 field symmetry :Int32 local

@@ -2,6 +2,7 @@
 // Copyright 2023--present rgpot developers
 
 #include "rgpot/D4Pot/D4Pot.hpp"
+#include "rgpot/ParamHash.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
@@ -75,6 +76,16 @@ D4Pot::~D4Pot() {
     dftd4_delete_structure(&m_mol);
   if (m_err)
     dftd4_delete_error(&m_err);
+}
+
+uint64_t D4Pot::paramsKey() const noexcept {
+  Fnv1a h;
+  h.str("rgpot::D4Pot");
+  h.str(m_config.functional);
+  h.f64(m_config.charge);
+  h.b8(m_config.atm);
+  h.b8(m_config.periodic);
+  return h.h;
 }
 
 void D4Pot::forceImpl(const ForceInput &in, ForceOut *out) const {

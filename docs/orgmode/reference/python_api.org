@@ -563,21 +563,25 @@ rgpot.D2Pot(s6=1.2, d=20.0, sr=1.1, cutoff=150.0, functional=None)
 
 #+attr_rgpot: signature
 #+begin_src python
-rgpot.D2CpmdPot(s6=1.2, alpha=20.0, vdweps=0.01, functional=None)
+rgpot.D2CpmdPot(s6=1.2, alpha=20.0, vdweps=0.01, functional=None, symmetry=-1)
 #+end_src
 
 - Inputs :: the parameters of =rgpot::D2CpmdConfig=.
   The defaults are CPMD's for BLYP.
   A =functional= (=BLYP=, =B3LYP=, =BP86=, =TPSS=, =PBE=, =REVPBE= or =PBE0=)
   takes =s6= from CPMD's =set_s6= and ignores the argument.
+  =symmetry= is the =SYMMETRY= code of the run (1 to 8, 12 or 14), which picks
+  the branch of CPMD's =pbc3=; -1 reads the branch from the box, which cannot
+  name 12.
   Atom types are atomic numbers, 1 to 99.
 - Units :: none.
 - Outputs :: OpenCPMD's empirical D2 with its minimum image, as
   =rgpot::D2CpmdPot=, for subtracting it from a CPMD run.
   =evaluate= returns the stress when the box is not all zero.
-- Errors :: =ValueError= for an unknown =functional= or a =vdweps= that is not
-  positive; a call raises =ValueError= for an atomic number outside 1 to 99 or a
-  singular non-zero cell.
+- Errors :: =ValueError= for an unknown =functional=, a =vdweps= that is not
+  positive or a =symmetry= that is not -1, 1 to 8, 12 or 14; a call raises
+  =ValueError= for an atomic number outside 1 to 99, a singular non-zero cell or
+  a box that does not have the shape of =symmetry=.
 
 *** =rgpot.EAMTablePot=
 
@@ -844,8 +848,8 @@ rgpot.ExprPot(expression, terms)
   =switch_width= for ="lj"=; =De=, =a=, =re=, =cutoff=, =switch_width= for
   ="morse"=; =s6=, =d=, =sr=, =cutoff=, =functional= for ="d2"=, where a
   =functional= sets =s6= and =d= first and the other keys then override them;
-  =s6=, =alpha=, =vdweps=, =functional= for ="d2cpmd"=, in the same way;
-  =functional=, =damping=, =atm= for ="d3"=; =functional=, =charge=, =atm=,
+  =s6=, =alpha=, =vdweps=, =functional=, =symmetry= for ="d2cpmd"=, in the same
+  way; =functional=, =damping=, =atm= for ="d3"=; =functional=, =charge=, =atm=,
   =periodic= for ="d4"=.
   A missing field keeps the default of that kind's class.
 - Units :: the fields have the units of =LJPot=, =MorsePot=, =D2Pot=,
@@ -1046,8 +1050,8 @@ config()
   =LJPot= and =LJClusterPot= give =u0=, =cutoff=, =psi=,
   =switch_width=; =MorsePot= gives =De=, =a=, =re=, =cutoff=, =switch_width=;
   =D2Pot= gives =s6=, =d=, =sr=, =cutoff= and =D2CpmdPot= gives =s6=, =alpha=,
-  =vdweps=, after any functional was applied; =D4Pot= gives =functional=,
-  =charge=, =atm=, =periodic=.
+  =vdweps=, =symmetry=, after any functional was applied; =D4Pot= gives
+  =functional=, =charge=, =atm=, =periodic=.
 - Errors :: none.
 
 *** =.evaluate=

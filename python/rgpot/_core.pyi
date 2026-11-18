@@ -238,9 +238,9 @@ class D2Pot:
         """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class D2CpmdPot:
-    def __init__(self, s6: float = 1.2, alpha: float = 20.0, vdweps: float = 0.01, functional: str | None = None) -> None:
+    def __init__(self, s6: float = 1.2, alpha: float = 20.0, vdweps: float = 0.01, functional: str | None = None, symmetry: int = -1) -> None:
         """
-        OpenCPMD's built-in empirical D2 (EMPIRICAL CORRECTION, ALL DFT-D2) with its tables, damping, truncation and minimum image, in eV, to subtract from a CPMD run that had it on. The defaults are CPMD's for BLYP; a functional takes s6 from CPMD's set_s6.
+        OpenCPMD's built-in empirical D2 (EMPIRICAL CORRECTION, ALL DFT-D2) with its tables, damping, truncation and minimum image, in eV, to subtract from a CPMD run that had it on. The defaults are CPMD's for BLYP; a functional takes s6 from CPMD's set_s6. symmetry is the run's SYMMETRY code, which picks the branch of CPMD's pbc3 (-1 reads it from the box, which cannot name 12).
         """
 
     def config(self) -> dict: ...

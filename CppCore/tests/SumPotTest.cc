@@ -78,6 +78,24 @@ private:
   bool fail_;
 };
 
+class ToggleProbe final : public rgpot::Potential<ToggleProbe> {
+public:
+  explicit ToggleProbe(std::shared_ptr<std::atomic<bool>> fail)
+      : rgpot::Potential<ToggleProbe>(rgpot::PotType::UNKNOWN), fail_(std::move(fail)) {}
+  void forceImpl(const rgpot::ForceInput &in, rgpot::ForceOut *out) const override {
+    if (fail_->load()) {
+      throw std::runtime_error("toggle failure");
+    }
+    out->energy = 0.4;
+    for (std::size_t i = 0; i < 3 * in.nAtoms; ++i) {
+      out->F[i] = 0.02 * static_cast<double>(i + 1);
+    }
+  }
+
+private:
+  std::shared_ptr<std::atomic<bool>> fail_;
+};
+
 const std::vector<double> kPos = {0.0, 0.0, 0.0, 1.1, 0.1, 0.0, 0.3, 1.2, 0.2};
 const std::vector<int> kZ = {18, 18, 18};
 const std::array<double, 9> kBox = {9.0, 0.0, 0.0, 0.0, 9.5, 0.0, 0.0, 0.0, 10.0};
@@ -246,6 +264,32 @@ TEST_CASE("SumPot passes a term failure on and logs it", "[SumPot]") {
   REQUIRE_FALSE(lines.empty());
   REQUIRE_THAT(lines.back(), ContainsSubstring("bad failed: probe failure"));
   REQUIRE_FALSE(sum.lastComponents()[1].evaluated);
+}
+
+TEST_CASE("SumPot keeps the last successful component records on failure",
+          "[SumPot]") {
+  auto fail = std::make_shared<std::atomic<bool>>(false);
+  rgpot::SumPot sum;
+  sum.add({.name = "good"}, std::make_unique<rgpot::LJPot>(lj()));
+  sum.add({.name = "toggle"}, std::make_unique<ToggleProbe>(fail));
+  const Eval ok = run(sum, kPos, kZ, kBox);
+  (void)ok;
+  const auto before = sum.lastComponents();
+  REQUIRE(before.size() == 2);
+  REQUIRE(before[0].evaluated);
+  REQUIRE(before[1].evaluated);
+  REQUIRE(before[1].forces.size() == kPos.size());
+
+  fail->store(true);
+  REQUIRE_THROWS_AS(run(sum, kPos, kZ, kBox), std::runtime_error);
+  const auto &after = sum.lastComponents();
+  REQUIRE(after.size() == before.size());
+  for (std::size_t i = 0; i < before.size(); ++i) {
+    REQUIRE(after[i].name == before[i].name);
+    REQUIRE(after[i].evaluated == before[i].evaluated);
+    REQUIRE(after[i].energy == before[i].energy);
+    REQUIRE(after[i].forces == before[i].forces);
+  }
 }
 
 TEST_CASE("SumPot logs each component", "[SumPot]") {

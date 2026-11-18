@@ -175,4 +175,5 @@ It also stamps =D2Config=, =D2Pot= and =PotType::D2=.
 It also stamps =D2CpmdConfig=, =D2CpmdPot= and =PotType::D2Cpmd=.
 =D4Config= gains =periodic= in the padding after =atm=, so it keeps its size and
 only the field offsets show it.
+=D2CpmdConfig= gains =symmetry=.
 A program linked against soversion 8 does not load =librgpot.so.9=.

@@ -250,49 +250,68 @@ public:
           val *= len_to_angstrom;
     }
 
-    // Potential always computes in eV/angstrom
-    auto evaluate = [&]() {
+    // Potential always computes in eV/angstrom.
+    std::vector<double> nativeForces(numAtoms * 3, 0.0);
+    rgpot::ForceInput in_native{numAtoms, nativePositions.data(),
+                                nativeAtomTypes.data(), nativeBoxMatrix[0].data()};
+    rgpot::ForceOut out_native{};
+    out_native.F = nativeForces.data();
+    auto evaluate = [&]() -> rgpot::ForceOut {
 #ifdef RGPOT_POTSERV_MPI
       if (m_pef) {
         try {
-          return m_pef->calculate(nativePositions, nativeAtomTypes, nativeBoxMatrix);
+          auto [energy, forces, variance] =
+              m_pef->calculate(nativePositions, nativeAtomTypes, nativeBoxMatrix);
+          rgpot::ForceOut out{};
+          out.F = nativeForces.data();
+          out.energy = energy;
+          out.variance = variance;
+          std::copy(forces.data(), forces.data() + (3 * numAtoms), out.F);
+          return out;
         } catch (const std::exception &error) {
           throw KJ_EXCEPTION(FAILED, error.what());
         }
       }
 #endif
-      return (*m_potential)(nativePositions, nativeAtomTypes, nativeBoxMatrix);
+      m_potential->forceBatch(rgpot::ForceBatch{.nSystems = 1, .in = &in_native, .out = &out_native});
+      return out_native;
     };
-    auto [energy, forces, variance] = evaluate();
-    (void)variance;
+    out_native = evaluate();
 
     // Convert results to caller's units
     auto result = context.getResults();
     auto pres = result.initResult();
-    pres.setEnergy(energy * ev_to_caller);
+    pres.setEnergy(out_native.energy * ev_to_caller);
 
     auto forcesList = pres.initForces(numAtoms * 3);
     if (force_to_caller != 1.0) {
       for (size_t i = 0; i < numAtoms * 3; ++i) {
-        forces.data()[i] *= force_to_caller;
+        nativeForces[i] *= force_to_caller;
       }
     }
-    rgpot::types::adapt::capnp::populateForcesToCapnp(forcesList, forces);
+    for (size_t i = 0; i < numAtoms * 3; ++i) {
+      forcesList.set(i, nativeForces[i]);
+    }
 
+    bool has_stress = out_native.has_stress != 0;
+    double stress[9] = {};
+    if (has_stress) {
+      std::copy(out_native.stress, out_native.stress + 9, stress);
+    }
 #ifdef RGPOT_HAS_IPI
-    if (m_ipi != nullptr) {
-      double stress[9];
-      if (m_ipi->copyStress(stress)) {
-        // sigma_caller = sigma_eV/A^3 * (eV -> caller) * (A -> caller length)^3
-        const double stress_to_caller = ev_to_caller * len_to_angstrom *
-                                        len_to_angstrom * len_to_angstrom;
-        auto stressList = pres.initStress(9);
-        for (unsigned int i = 0; i < 9; ++i) {
-          stressList.set(i, stress[i] * stress_to_caller);
-        }
-      }
+    if (!has_stress && m_ipi != nullptr) {
+      has_stress = m_ipi->copyStress(stress);
     }
 #endif
+    if (has_stress) {
+      // sigma_caller = sigma_eV/A^3 * (eV -> caller) * (A -> caller length)^3
+      const double stress_to_caller = ev_to_caller * len_to_angstrom *
+                                      len_to_angstrom * len_to_angstrom;
+      auto stressList = pres.initStress(9);
+      for (unsigned int i = 0; i < 9; ++i) {
+        stressList.set(i, stress[i] * stress_to_caller);
+      }
+    }
 
     return kj::READY_NOW;
   }

@@ -1,0 +1,25 @@
+# pbc3_orthorhombic: OpenCPMD 062582b7cfd832d36f88f504cd08e4ead42eb404
+# subroutine pbc3 in src/pbc_utils.mod.F90, called from subroutine vdw
+# in src/vdw_utils.mod.F90 (m = 1, Grimme branch, nxvdw = 0).
+# compiler: GNU Fortran (conda-forge gcc 14.4.0-4) 14.4.0
+# ibrav 8
+# celldm 6 1.2 1.5 0 0 0
+# apbc 3 3.5999999999999996 4.5 0
+# v1crys v2crys v3crys 0 0 0 0 0 0 0 0 0 0 0 0
+# fractional 1.71 -2.3599999999999999 0.82999999999999996
+# positions in bohr, atom 1 at the origin:
+# 10.26 -16.991999999999997 7.4699999999999998
+# euclidean and nearest are the Grimme energies of the Euclidean
+# nearest image and of the nearest integer fractional image, from
+# the same compiled kernel, not from pbc3.
+version 062582b7cfd832d36f88f504cd08e4ead42eb404
+ibrav 8
+differs 0
+box 3.1750632651540003 0 0 0 3.8100759181848001 0 0 0 4.7625948977310006
+atom 8 0 0 0
+atom 8 5.4293581834133402 -8.9917791669161282 3.9529537651167304
+energy -1.5256004039069839e-05
+euclidean -1.5256004039069862e-05
+nearest -1.5256004039069862e-05
+force 1.6874956389845474e-05 2.5137866070390487e-05 1.4838323722105504e-05
+force -1.6874956389845474e-05 -2.5137866070390487e-05 -1.4838323722105504e-05

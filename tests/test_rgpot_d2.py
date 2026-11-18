@@ -143,8 +143,58 @@ def test_d2cpmd_matches_opencpmd(name):
     assert out["stress"] is not None
 
 
+CPMD_PBC3 = [
+    "pbc3_hexagonal",
+    "pbc3_fcc",
+    "pbc3_monoclinic",
+    "pbc3_cubic",
+    "pbc3_orthorhombic",
+    "pbc3_bcc",
+    "pbc3_rhombohedral",
+    "pbc3_tetragonal",
+    "pbc3_body_centred_tetragonal",
+    "pbc3_monoclinic12",
+    "pbc3_monoclinic12_skew",
+]
+
+
+def cpmd_ibrav(name):
+    for line in (CPMD_DATA / f"{name}.txt").read_text().splitlines():
+        if line.startswith("ibrav "):
+            return int(line.split()[1])
+    raise AssertionError(f"{name} has no ibrav")
+
+
+@pytest.mark.parametrize("name", CPMD_PBC3)
+def test_d2cpmd_symmetry_matches_opencpmd(name):
+    pos, z, box, energy, force = cpmd_fixture(name)
+    pot = rgpot.D2CpmdPot(symmetry=cpmd_ibrav(name))
+    out = pot.evaluate(pos, z, box)
+    assert out["energy"] == pytest.approx(energy * HARTREE_TO_EV, rel=0, abs=1e-11)
+    np.testing.assert_allclose(
+        out["forces"], force * HARTREE_TO_EV / BOHR_TO_ANGSTROM, rtol=0, atol=1e-9
+    )
+
+
+def test_d2cpmd_symmetry_is_checked():
+    for symmetry in (0, 9, 10, 11, 13, 15, -2):
+        with pytest.raises(ValueError, match="symmetry"):
+            rgpot.D2CpmdPot(symmetry=symmetry)
+    pos, z, box, *_ = cpmd_fixture("cubic_water")
+    with pytest.raises(ValueError, match="symmetry 2"):
+        rgpot.D2CpmdPot(symmetry=2)(pos, z, box)
+    spec = rgpot.SumPot([{"kind": "d2cpmd", "symmetry": 12}])
+    mono, mz, mbox, *_ = cpmd_fixture("pbc3_monoclinic12")
+    assert spec(mono, mz, mbox)[0] == rgpot.D2CpmdPot(symmetry=12)(mono, mz, mbox)[0]
+
+
 def test_d2cpmd_config_and_swap():
-    assert rgpot.D2CpmdPot().config() == {"s6": 1.2, "alpha": 20.0, "vdweps": 0.01}
+    assert rgpot.D2CpmdPot().config() == {
+        "s6": 1.2,
+        "alpha": 20.0,
+        "vdweps": 0.01,
+        "symmetry": -1,
+    }
     assert rgpot.D2CpmdPot(functional="pbe").config()["s6"] == 0.75
     with pytest.raises(ValueError, match="no s6 for functional"):
         rgpot.D2CpmdPot(functional="b97-d")

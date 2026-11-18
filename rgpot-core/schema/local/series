@@ -36,3 +36,7 @@ d2cpmd.diff
 # d4-periodic.diff: D4Params.periodic @3, which passes the box to dftd4
 # as a 3D lattice so rgpot::D4Pot returns the stress.
 d4-periodic.diff
+#
+# d2cpmd-symmetry.diff: D2CpmdParams.symmetry @4, the CPMD SYMMETRY code
+# that picks the branch of pbc3 for a box that does not name it (12).
+d2cpmd-symmetry.diff

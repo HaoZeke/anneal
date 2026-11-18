@@ -7,7 +7,8 @@
 // either side of CPMD's 6 R0 truncation; finite differences for its forces
 // and stress; the cusp at half the cell that rgpot::D2Pot does not have;
 // and the composite that swaps CPMD's term for the lattice sum.
-// scripts/regen_d2_cpmd_references.py writes CppCore/tests/data/d2cpmd/.
+// scripts/regen_d2_cpmd_references.py writes the water and methane files.
+// scripts/regen_d2_cpmd_pbc3.py writes the pbc3 symmetry-cell files.
 
 #include <algorithm>
 #include <array>
@@ -34,9 +35,10 @@ using rgpot::units::HARTREE_TO_EV;
 
 namespace {
 
-// OpenCPMD's bohr (1 / fbohr). Positions, the cell, the forces and the
-// stress of D2CpmdPot all use it, so the derivatives match the energy.
-constexpr double kCpmdBohr = 0.529177210859;
+// OpenCPMD 062582b7cfd832d36f88f504cd08e4ead42eb404. Positions, the cell,
+// the forces and the stress all use rgpot::kCpmdBohr, so a derivative of
+// the returned energy recovers the force without a second bohr factor.
+constexpr const char *kOpenCpmdPbc3 = "062582b7cfd832d36f88f504cd08e4ead42eb404";
 
 struct Reference {
   std::vector<int> z;
@@ -45,6 +47,11 @@ struct Reference {
   double energy = 0.0;  // Ha
   double printed = 0.0; // Ha, CPMD's VDW ENERGY line
   std::vector<double> force; // Ha/bohr
+  int ibrav = 0;
+  bool differs = false;     // pbc3 energy is not the Euclidean image's
+  double euclidean = 0.0;   // Ha, Grimme energy of that Euclidean image
+  double nearest = 0.0;     // Ha, Grimme energy of the nearest integer image
+  std::string version;
 };
 
 Reference load(const std::string &name) {
@@ -79,6 +86,18 @@ Reference load(const std::string &name) {
       double a = 0, b = 0, c = 0;
       ss >> a >> b >> c;
       r.force.insert(r.force.end(), {a, b, c});
+    } else if (key == "ibrav") {
+      ss >> r.ibrav;
+    } else if (key == "differs") {
+      int flag = 0;
+      ss >> flag;
+      r.differs = flag != 0;
+    } else if (key == "euclidean") {
+      ss >> r.euclidean;
+    } else if (key == "nearest") {
+      ss >> r.nearest;
+    } else if (key == "version") {
+      ss >> r.version;
     }
   }
   REQUIRE(r.force.size() == r.pos.size());
@@ -116,6 +135,32 @@ const char *kSystems[] = {"cubic_water",         "cubic_below_half",
                           "cubic_above_half",    "ortho_water_methane",
                           "triclinic_water_methane", "cubic_truncation"};
 
+// One cell for every code latgen builds that pbc3 handles. The first group
+// can be read from the box; symmetry 12 has the shape of 14 and cannot.
+const char *kPbc3Inferable[] = {"pbc3_hexagonal",
+                                "pbc3_fcc",
+                                "pbc3_monoclinic",
+                                "pbc3_cubic",
+                                "pbc3_orthorhombic",
+                                "pbc3_bcc",
+                                "pbc3_rhombohedral",
+                                "pbc3_tetragonal",
+                                "pbc3_body_centred_tetragonal"};
+
+const char *kPbc3Monoclinic12[] = {"pbc3_monoclinic12", "pbc3_monoclinic12_skew"};
+
+std::vector<const char *> all_pbc3() {
+  std::vector<const char *> names(std::begin(kPbc3Inferable), std::end(kPbc3Inferable));
+  names.insert(names.end(), std::begin(kPbc3Monoclinic12), std::end(kPbc3Monoclinic12));
+  return names;
+}
+
+rgpot::D2CpmdConfig with_symmetry(int symmetry) {
+  rgpot::D2CpmdConfig cfg;
+  cfg.symmetry = symmetry;
+  return cfg;
+}
+
 } // namespace
 
 TEST_CASE("CPMD's D2 matches OpenCPMD's empirical correction", "[d2cpmd][reference]") {
@@ -127,7 +172,7 @@ TEST_CASE("CPMD's D2 matches OpenCPMD's empirical correction", "[d2cpmd][referen
     // CPMD prints eight decimals, rounded.
     REQUIRE(std::abs(ref.printed - ref.energy) <= 0.5e-8);
     REQUIRE(std::abs(r.energy / HARTREE_TO_EV - ref.energy) <= kEnergyThr);
-    const double to_au = kCpmdBohr / HARTREE_TO_EV;
+    const double to_au = rgpot::kCpmdBohr / HARTREE_TO_EV;
     for (std::size_t k = 0; k < ref.pos.size(); ++k) {
       INFO("component " << k);
       REQUIRE(std::abs(r.forces[k] * to_au - ref.force[k]) <= kGradThr);
@@ -280,4 +325,139 @@ TEST_CASE("a composite swaps CPMD's D2 for the lattice sum", "[d2cpmd][composite
             Catch::Approx(l.forces[k] - c.forces[k]).margin(kGradThr * HARTREE_TO_EV));
   }
   REQUIRE(sum.lastComponents()[0].energy == c.energy);
+}
+
+TEST_CASE("CPMD pbc3 matches OpenCPMD on the symmetry cells", "[d2cpmd][pbc3]") {
+  const double to_au = rgpot::kCpmdBohr / HARTREE_TO_EV;
+  bool saw_difference = false;
+  for (const char *name : all_pbc3()) {
+    INFO(name);
+    const Reference ref = load(name);
+    REQUIRE(ref.version == kOpenCpmdPbc3);
+    REQUIRE(ref.ibrav != 0);
+    rgpot::D2CpmdPot pot(with_symmetry(ref.ibrav));
+    const Result got = run(pot, ref.z, ref.pos, ref.box);
+    REQUIRE(std::abs(got.energy / HARTREE_TO_EV - ref.energy) <= kEnergyThr);
+    REQUIRE(got.forces.size() == ref.force.size());
+    for (std::size_t k = 0; k < ref.force.size(); ++k) {
+      INFO("component " << k);
+      REQUIRE(std::abs(got.forces[k] * to_au - ref.force[k]) <= kGradThr);
+    }
+    if (std::string(name) == "pbc3_hexagonal" || std::string(name) == "pbc3_monoclinic") {
+      REQUIRE(ref.differs);
+    }
+    if (ref.differs) {
+      saw_difference = true;
+      REQUIRE(std::abs(ref.energy - ref.euclidean) > kEnergyThr);
+      REQUIRE(std::abs(got.energy / HARTREE_TO_EV - ref.euclidean) > kEnergyThr);
+    }
+  }
+  REQUIRE(saw_difference);
+}
+
+TEST_CASE("CPMD pbc3 is read from the box for every code but 12", "[d2cpmd][pbc3]") {
+  const double to_au = rgpot::kCpmdBohr / HARTREE_TO_EV;
+  rgpot::D2CpmdPot pot;
+  for (const char *name : kPbc3Inferable) {
+    INFO(name);
+    const Reference ref = load(name);
+    const Result got = run(pot, ref.z, ref.pos, ref.box);
+    REQUIRE(std::abs(got.energy / HARTREE_TO_EV - ref.energy) <= kEnergyThr);
+    for (std::size_t k = 0; k < ref.force.size(); ++k) {
+      REQUIRE(std::abs(got.forces[k] * to_au - ref.force[k]) <= kGradThr);
+    }
+  }
+}
+
+TEST_CASE("CPMD symmetry 12 takes pbc3's monoclinic branch", "[d2cpmd][pbc3][symmetry12]") {
+  const double to_au = rgpot::kCpmdBohr / HARTREE_TO_EV;
+  for (const char *name : kPbc3Monoclinic12) {
+    INFO(name);
+    const Reference ref = load(name);
+    REQUIRE(ref.ibrav == 12);
+    // The nearest integer image, which is what any other branch of this box
+    // that is not the monoclinic one amounts to, is a different energy.
+    REQUIRE(std::abs(ref.energy - ref.nearest) > kEnergyThr);
+    rgpot::D2CpmdPot pot(with_symmetry(12));
+    const Result got = run(pot, ref.z, ref.pos, ref.box);
+    REQUIRE(std::abs(got.energy / HARTREE_TO_EV - ref.energy) <= kEnergyThr);
+    REQUIRE(std::abs(got.energy / HARTREE_TO_EV - ref.nearest) > kEnergyThr);
+    for (std::size_t k = 0; k < ref.force.size(); ++k) {
+      INFO("component " << k);
+      REQUIRE(std::abs(got.forces[k] * to_au - ref.force[k]) <= kGradThr);
+    }
+  }
+}
+
+TEST_CASE("CPMD symmetry codes that pbc3 does not handle are refused", "[d2cpmd][pbc3]") {
+  for (int symmetry : {0, 9, 10, 11, 13, 15, -2, -3}) {
+    INFO("symmetry " << symmetry);
+    REQUIRE_THROWS_AS(rgpot::D2CpmdPot(with_symmetry(symmetry)), std::invalid_argument);
+  }
+  for (int symmetry : {rgpot::kCpmdInferSymmetry, 1, 2, 3, 4, 5, 6, 7, 8, 12, 14}) {
+    INFO("symmetry " << symmetry);
+    REQUIRE_NOTHROW(rgpot::D2CpmdPot(with_symmetry(symmetry)));
+  }
+}
+
+TEST_CASE("CPMD refuses a box that does not have the shape of its symmetry",
+          "[d2cpmd][pbc3]") {
+  const Reference water = load("cubic_water");
+  const Reference triclinic = load("triclinic_water_methane");
+  const Reference hex = load("pbc3_hexagonal");
+  const Reference mono = load("pbc3_monoclinic12");
+  const Reference ortho = load("pbc3_orthorhombic");
+  struct Case {
+    int symmetry;
+    const Reference *ref;
+  };
+  const Case wrong[] = {{1, &ortho}, {1, &hex},  {2, &water},     {2, &hex},
+                        {4, &mono},  {4, &water}, {8, &hex},       {8, &triclinic},
+                        {12, &triclinic}};
+  for (const Case &c : wrong) {
+    INFO("symmetry " << c.symmetry << " ref " << c.ref->ibrav);
+    rgpot::D2CpmdPot pot(with_symmetry(c.symmetry));
+    REQUIRE_THROWS_AS(run(pot, c.ref->z, c.ref->pos, c.ref->box), std::invalid_argument);
+  }
+  // An isolated system has no box to check, whatever the code.
+  for (int symmetry : {1, 2, 4, 8, 12, 14}) {
+    rgpot::D2CpmdPot pot(with_symmetry(symmetry));
+    const std::array<double, 9> none{};
+    REQUIRE_NOTHROW(run(pot, water.z, water.pos, none));
+  }
+}
+
+TEST_CASE("CPMD pbc3 folds a displacement of several cells like one inside the cell",
+          "[d2cpmd][pbc3]") {
+  const std::array<std::array<double, 3>, 3> kShifts{{
+      {2.0, -2.0, 2.0},
+      {3.0, -4.0, 2.0},
+      {-7.0, 5.0, -6.0},
+  }};
+  for (const char *name : all_pbc3()) {
+    const Reference ref = load(name);
+    rgpot::D2CpmdPot pot(with_symmetry(ref.ibrav));
+    const Result want = run(pot, ref.z, ref.pos, ref.box);
+    for (const auto &shift : kShifts) {
+      // pbc3's monoclinic branch folds along three lattice directions in
+      // turn and does not always land in the same image for a far
+      // displacement; OpenCPMD's own energy for this cell and this shift
+      // is not the one inside the cell, and the port reproduces it.
+      if (std::string(name) == "pbc3_monoclinic12" && shift[0] == 3.0) {
+        continue;
+      }
+      INFO(name << " shift " << shift[0] << " " << shift[1] << " " << shift[2]);
+      std::vector<double> far = ref.pos;
+      for (int a = 0; a < 3; ++a) {
+        far[3 + a] += shift[0] * ref.box[a] + shift[1] * ref.box[3 + a] + shift[2] * ref.box[6 + a];
+      }
+      const Result got = run(pot, ref.z, far, ref.box);
+      REQUIRE(got.energy == Catch::Approx(want.energy).margin(kEnergyThr * HARTREE_TO_EV));
+      REQUIRE(got.forces.size() == want.forces.size());
+      for (std::size_t k = 0; k < want.forces.size(); ++k) {
+        REQUIRE(got.forces[k] ==
+                Catch::Approx(want.forces[k]).margin(kGradThr * HARTREE_TO_EV / rgpot::kCpmdBohr));
+      }
+    }
+  }
 }

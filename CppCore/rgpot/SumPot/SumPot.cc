@@ -114,13 +114,21 @@ void SumPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   out->variance = 0.0;
   out->has_stress = 0;
   std::fill(out->stress, out->stress + 9, 0.0);
-  resetComponents();
+  std::vector<SumComponent> staged;
+  staged.reserve(terms_.size());
+  for (const auto &t : terms_) {
+    SumComponent c;
+    c.name = t.spec.name;
+    c.weight = t.spec.weight;
+    c.enabled = t.spec.enabled;
+    staged.push_back(std::move(c));
+  }
   const bool logging = sink_ || env_log_;
   bool all_stress = true;
   std::size_t evaluated = 0;
   for (std::size_t t = 0; t < terms_.size(); ++t) {
     const Entry &e = terms_[t];
-    SumComponent &c = components_[t];
+    SumComponent &c = staged[t];
     if (!e.spec.enabled) {
       if (logging) {
         log("rgpot sum: " + e.spec.name + " disabled");
@@ -174,6 +182,7 @@ void SumPot::forceImpl(const ForceInput &in, ForceOut *out) const {
       log("rgpot sum: " + e.spec.name + buf);
     }
   }
+  components_ = std::move(staged);
   if (evaluated > 0 && all_stress) {
     out->has_stress = 1;
   } else {

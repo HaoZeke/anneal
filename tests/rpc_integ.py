@@ -400,6 +400,55 @@ async def run_d4_configure(port, schema):
     return True
 
 
+async def run_rpc_stress_parity(d2_port, composite_port, schema):
+    """Periodic D2 and Composite(D2) return the same stress over RPC."""
+    async def connect(port):
+        for _ in range(10):
+            try:
+                return await capnp.AsyncIoStream.create_connection(
+                    host="localhost", port=port
+                )
+            except OSError:
+                await asyncio.sleep(0.5)
+        raise RuntimeError(f"failed to connect to server on port {port}")
+
+    d2 = capnp.TwoPartyClient(await connect(d2_port)).bootstrap().cast_as(schema.Potential)
+    comp = capnp.TwoPartyClient(await connect(composite_port)).bootstrap().cast_as(schema.Potential)
+
+    cfg = schema.PotentialConfig.new_message()
+    terms = cfg.init("composite").init("terms", 1)
+    terms[0].name = "d2"
+    terms[0].weight = 1.0
+    terms[0].enabled = True
+    terms[0].init("pot").init("builtin").name = "d2"
+    reply = await comp.configure(cfg)
+    assert reply.ok, reply.message
+
+    fip = schema.ForceInput.new_message()
+    pos = [0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 2.9, 0.1, 0.2]
+    fip.init("pos", len(pos))
+    for i, p in enumerate(pos):
+        fip.pos[i] = p
+    fip.init("atmnrs", 4)
+    for i, z in enumerate([8, 1, 1, 8]):
+        fip.atmnrs[i] = z
+    fip.init("box", 9)
+    for i, b in enumerate([9.0, 0.0, 0.0, 1.0, 9.5, 0.0, 0.0, 0.5, 10.0]):
+        fip.box[i] = b
+
+    direct = (await d2.calculate(fip)).result
+    summed = (await comp.calculate(fip)).result
+    assert len(direct.stress) == 9
+    assert len(summed.stress) == 9
+    assert math.isclose(summed.energy, direct.energy, rel_tol=1e-12, abs_tol=1e-14)
+    for a, b in zip(summed.forces, direct.forces):
+        assert math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-14)
+    for a, b in zip(summed.stress, direct.stress):
+        assert math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-14)
+    print("RPC stress parity: Composite(D2) matches D2 direct call")
+    return True
+
+
 async def run_nwchem_smoke(port):
     """Optional smoke: start NWChem server, configure(), skip calculate if no engine."""
     for _ in range(10):
@@ -670,7 +719,8 @@ def main():
         help="Also run CPMD configure() smoke on a separate server port",
     )
     args = parser.parse_args()
-    pot_capnp = load_schema(args.server_bin)
+    # Use the schema that potserv was built with, including local diffs.
+    pot_capnp = effective_schema(args.server_bin)
 
     # 1. Start Server
     print(f"Starting server: {args.server_bin} {args.port} CuH2")
@@ -787,7 +837,7 @@ def main():
     try:
         composite_ok = asyncio.run(
             capnp.run(
-                run_composite_configure(composite_port, effective_schema(args.server_bin))
+                run_composite_configure(composite_port, pot_capnp)
             )
         )
     except BaseException as e:
@@ -816,7 +866,7 @@ def main():
         try:
             d2_ok = asyncio.run(
                 capnp.run(
-                    run_d2_configure(d2_port, effective_schema(args.server_bin), arm)
+                    run_d2_configure(d2_port, pot_capnp, arm)
                 )
             )
         except BaseException as e:
@@ -834,6 +884,49 @@ def main():
             sys.exit(1)
         print(f"{backend} configure passed.")
 
+    stress_d2_port = args.port + 8
+    stress_composite_port = args.port + 9
+    print(f"Starting D2 server for stress parity: {args.server_bin} {stress_d2_port} D2")
+    stress_d2_proc = subprocess.Popen(
+        [args.server_bin, str(stress_d2_port), "D2"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    print(
+        f"Starting Composite server for stress parity: {args.server_bin} {stress_composite_port} Composite"
+    )
+    stress_composite_proc = subprocess.Popen(
+        [args.server_bin, str(stress_composite_port), "Composite"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        stress_ok = asyncio.run(
+            capnp.run(
+                run_rpc_stress_parity(stress_d2_port, stress_composite_port, pot_capnp)
+            )
+        )
+    except BaseException as e:
+        print(f"Stress parity exception: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        stress_d2_proc.kill()
+        stress_composite_proc.kill()
+        d2_out, d2_err = stress_d2_proc.communicate(timeout=30)
+        comp_out, comp_err = stress_composite_proc.communicate(timeout=30)
+        print("D2 server stdout:", d2_out.decode(errors="replace")[-4000:])
+        print("D2 server stderr:", d2_err.decode(errors="replace")[-4000:])
+        print("Composite server stdout:", comp_out.decode(errors="replace")[-4000:])
+        print("Composite server stderr:", comp_err.decode(errors="replace")[-4000:])
+        stress_ok = False
+    finally:
+        stress_d2_proc.kill()
+        stress_d2_proc.wait()
+        stress_composite_proc.kill()
+        stress_composite_proc.wait()
+    if not stress_ok:
+        sys.exit(1)
+    print("RPC stress parity passed.")
+
     if server_lists(args.server_bin, "D4"):
         d4_port = args.port + 7
         print(f"Starting D4 server: {args.server_bin} {d4_port} D4")
@@ -844,7 +937,7 @@ def main():
         )
         try:
             d4_ok = asyncio.run(
-                capnp.run(run_d4_configure(d4_port, effective_schema(args.server_bin)))
+                capnp.run(run_d4_configure(d4_port, pot_capnp))
             )
         except BaseException as e:
             print(f"D4 configure exception: {type(e).__name__}: {e}")
