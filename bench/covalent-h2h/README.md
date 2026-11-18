@@ -846,6 +846,10 @@ as it was. The series on `7192e9f8` gives the same sha1 after each:
   `h2h_seed` declares the Morse pair minimum, and the ρ=14 Morse 38 seed
   2001 trace moves.
 
+Rebased on develop `8e50ff2e`, develop gives `a22093e7…` and the series
+`a98cf10e…` again. The shortest-path assignment `77ca61dc` leaves every
+pin as it was, since it returns the Kuhn-Munkres permutation.
+
 ## Files
 
 - `before/`, `after/`: per-seed rows and summaries of the first panel.
