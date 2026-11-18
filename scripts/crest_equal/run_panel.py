@@ -19,6 +19,15 @@ switch CREST prints when the first optimisation changes a water
 topology. ``-shake 1`` constrains X-H bonds. ``-notopo`` keeps CREGEN
 from dropping a cluster whose contacts differ from the start.
 
+The driver is served with ``BUDGET`` as its budget, so CREST cannot spend
+more than 4000 served calls: after the 4000th the driver writes ``stop`` and
+refuses every later request, and the row records ``budget`` as the stop
+reason. CREST's own ``Total number of energy+grad calls`` line is read from
+``crest.out`` and the row is charged the larger of that total and the served
+count. Both counts, the stop reason and the log digest go to
+``call-counts.csv``. A row is therefore never charged less than CREST says it
+spent.
+
 On this build the 4000-call ledger charges 3021 GFN2 evaluations on
 every seed from 2000 to 2011. A quarter of the ledger is held for a
 final polish and, with no quench inside the record gradient, that
@@ -44,9 +53,11 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime
+import gzip
 import hashlib
 import os
 import random
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -69,11 +80,11 @@ CREST_FLAGS = "mquick,legacy,gfn2,T1,shake1,notopo,noreftopo,acc0.01"
 REFERENCE_EH = -30.496506792187
 HIT_TOL_EH = 1e-7
 AUTOEV = 27.21138505
-DRIVER_CEILING = 50000
 DRIVER_PATH_MAX = 64
 SCHEDULE_SEED = 20261118
 POLISH_ARGS = ["--gfn", "2", "--opt", "vtight", "--acc", "0.01", "--iterations", "500"]
 REFERENCE_XYZ = ROOT / "bench" / "crest-equal" / "reference-prism.xyz"
+ENGRAD_LINE = "Total number of energy+grad calls:"
 
 ROW_FIELDS = [
     "system",
@@ -92,6 +103,20 @@ ROW_FIELDS = [
     "crest_exit",
     "surrogate_calls",
     "crest_flags",
+    "code_revision",
+    "host",
+    "date",
+]
+COUNT_FIELDS = [
+    "system",
+    "arm",
+    "seed",
+    "budget",
+    "driver_calls",
+    "driver_stop",
+    "crest_log_calls",
+    "charged",
+    "crest_out_sha256",
     "code_revision",
     "host",
     "date",
@@ -138,6 +163,24 @@ def read_fields(path: Path) -> dict[str, str]:
         if sep:
             fields[key.strip()] = value.strip()
     return fields
+
+
+def crest_log_calls(log: Path) -> int | None:
+    """The integer on CREST's own energy+grad total, or None when it prints none."""
+    if not log.is_file():
+        return None
+    totals = []
+    for line in log.read_text(errors="replace").splitlines():
+        if ENGRAD_LINE in line:
+            totals.append(int(line.split(ENGRAD_LINE, 1)[1].split()[0]))
+    if len(totals) > 1:
+        raise SystemExit(f"{log} has {len(totals)} energy+grad totals")
+    return totals[0] if totals else None
+
+
+def charged_calls(driver_calls: int, log_calls: int | None) -> int:
+    """Calls billed to a CREST row: never below what CREST says it spent."""
+    return driver_calls if log_calls is None else max(driver_calls, log_calls)
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -341,7 +384,7 @@ def run_crest(
             str(socket_path),
             str(served),
             str(MOLECULES),
-            str(DRIVER_CEILING),
+            str(BUDGET),
             "-1e9",
         ],
         stdout=server_log,
@@ -386,6 +429,8 @@ def run_crest(
     server.wait(timeout=60)
     server_log.close()
     fields = read_fields(served / "driver.txt")
+    driver_calls = int(fields.get("calls", "0"))
+    log_calls = crest_log_calls(search / "crest.out")
     inside = float(fields.get("inside_s", "nan"))
     outside = wall - inside if inside == inside else float("nan")
     best = search / "crest_best.xyz"
@@ -393,7 +438,11 @@ def run_crest(
         best = served / "best.xyz"
     return {
         "arm": arm,
-        "charged": int(fields.get("calls", "0")),
+        "charged": charged_calls(driver_calls, log_calls),
+        "driver_calls": driver_calls,
+        "driver_stop": fields.get("stop", "none"),
+        "crest_log_calls": "" if log_calls is None else log_calls,
+        "crest_out": search / "crest.out",
         "engine_eV": fields.get("best_eV", ""),
         "wall_s": f"{wall:.6f}",
         "pot_s": f"{inside:.6f}" if inside == inside else "",
@@ -404,6 +453,15 @@ def run_crest(
         "crest_flags": CREST_FLAGS,
         "best_xyz": best,
     }
+
+
+def keep_log(source: Path, logs: Path, arm: str, seed: int, revision: str) -> str:
+    """Copy a CREST log gzipped beside the rows and return its sha256."""
+    logs.mkdir(parents=True, exist_ok=True)
+    target = logs / f"{arm}-{seed}-{revision[:8]}.out.gz"
+    with source.open("rb") as raw, gzip.GzipFile(target, "wb", mtime=0) as packed:
+        shutil.copyfileobj(raw, packed)
+    return sha256(source)
 
 
 def score(xtb: Path, result: dict, work: Path) -> dict:
@@ -498,6 +556,23 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return out
 
 
+def claim_sentence(summary: list[dict[str, str]]) -> str:
+    """The sentence the README and the paper quote, built from the summary rows."""
+    by_arm = {row["arm"]: row for row in summary}
+
+    def calls(row: dict[str, str]) -> str:
+        return format(float(row["calls_median"]), "g")
+
+    anneal, crest, wall = by_arm["anneal"], by_arm["crest"], by_arm["crest-wall"]
+    return (
+        f"Anneal charges {calls(anneal)} calls and hits {anneal['hits']} of {anneal['n']}. "
+        f"CREST at {crest['crest_len_ps']} ps has median {calls(crest)} calls and hits "
+        f"{crest['hits']} of {crest['n']}. "
+        f"CREST at {wall['crest_len_ps']} ps has median {calls(wall)} calls and hits "
+        f"{wall['hits']} of {wall['n']}."
+    )
+
+
 def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
     fresh = summarise(rows)
     have = {
@@ -530,6 +605,7 @@ def threads() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--summarize", action="store_true")
+    parser.add_argument("--claim", action="store_true", help="print the sentence built from --summary")
     parser.add_argument("--anneal", type=Path)
     parser.add_argument("--driver", type=Path)
     parser.add_argument("--crest", type=Path)
@@ -537,12 +613,17 @@ def main() -> None:
     parser.add_argument("--engine", type=Path)
     parser.add_argument("--rows", type=Path, default=ROOT / "bench" / "crest-equal" / "rows.csv")
     parser.add_argument("--summary", type=Path, default=ROOT / "bench" / "crest-equal" / "summary.csv")
+    parser.add_argument("--counts", type=Path, default=ROOT / "bench" / "crest-equal" / "call-counts.csv")
+    parser.add_argument("--logs", type=Path, default=ROOT / "bench" / "crest-equal" / "logs")
     parser.add_argument("--stamp", type=Path)
     parser.add_argument("--head-file", type=Path)
     parser.add_argument("--core", default="0")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", action="append", choices=ARMS)
     args = parser.parse_args()
+    if args.claim:
+        print(claim_sentence(read_csv(args.summary)))
+        return
     if args.summarize and args.anneal is None:
         write_summary(args.summary, read_csv(args.rows))
         return
@@ -600,6 +681,17 @@ def main() -> None:
                 result = run_crest(
                     args.crest, args.xtb, args.driver, start, where, args.core, arm
                 )
+            crest_out = result.pop("crest_out", None)
+            count = {
+                "arm": arm,
+                "driver_calls": result.pop("driver_calls", result["charged"]),
+                "driver_stop": result.pop("driver_stop", ""),
+                "crest_log_calls": result.pop("crest_log_calls", ""),
+                "charged": result["charged"],
+                "crest_out_sha256": "",
+            }
+            if crest_out is not None and crest_out.is_file():
+                count["crest_out_sha256"] = keep_log(crest_out, args.logs, arm, seed, revision)
             result = score(args.xtb, result, where / "polish")
             row = {
                 "system": SYSTEM,
@@ -610,6 +702,7 @@ def main() -> None:
                 "date": datetime.datetime.now(datetime.timezone.utc).date().isoformat(),
                 **result,
             }
+            append_rows(args.counts, COUNT_FIELDS, [{**row, **count}])
             append_rows(args.rows, ROW_FIELDS, [row])
             print(
                 f"done {arm} {seed} hit {row['hit']} calls {row['charged']} "
