@@ -352,8 +352,10 @@ def wall_cap(
 
 def first_frame_energy(path: Path) -> float:
     lines = path.read_text().splitlines()
+    if len(lines) < 2 or not lines[0].strip().isdigit() or int(lines[0]) <= 0:
+        return float("inf")
     found = re.findall(r"[-+]?\d+\.\d+", lines[1])
-    return float(found[0]) * AUTOEV
+    return float(found[0]) * AUTOEV if found else float("inf")
 
 
 def output_exceeds(path: Path, limit: int) -> bool:
@@ -892,6 +894,10 @@ def self_test() -> None:
         garbage.write_bytes(b"12345")
         if output_exceeds(garbage, 5) or not output_exceeds(garbage, 4):
             raise SystemExit("CREST output guard")
+        invalid_best = Path(scratch) / "invalid.xyz"
+        invalid_best.write_text("0\n0.00000000\n")
+        if first_frame_energy(invalid_best) != float("inf"):
+            raise SystemExit("zero-atom CREST best")
         path = Path(scratch) / "rows.csv"
         fields = ROW_FIELDS + PROVENANCE_FIELDS
         row = {key: "1" for key in fields}
