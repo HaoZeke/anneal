@@ -34,9 +34,10 @@
 
 use std::fmt;
 use std::os::raw::c_void;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 
 use crate::eindir::rgpot_potential_t;
+use crate::fused::lock;
 use crate::status::{rgpot_last_error, rgpot_status_t, set_last_error};
 use crate::tensor::copy_f64_tensor;
 use crate::types::rgpot_force_input_t;
@@ -160,12 +161,6 @@ impl std::error::Error for JetFailure {}
 #[derive(Default)]
 pub(crate) struct JetState {
     callback: Mutex<Option<rgpot_taylor_jet_fn>>,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The number of coefficients, `order + 1`, once the `lower` and `upper`
