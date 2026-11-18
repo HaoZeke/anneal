@@ -1237,6 +1237,8 @@ pub struct Outcome {
     pub trail_escapes: usize,
     /// Energy gained by those that landed lower than where they left.
     pub stall_escape_gain: f64,
+    #[cfg(test)]
+    pub(crate) stall_non_leaves: Vec<usize>,
     /// Mean softest eigenvalue over those proposals.
     pub soft_lambda: f64,
     /// Per-rung temperature, basin count and the energy the rung ends on.
@@ -3494,8 +3496,15 @@ fn fingerprint_distance(left: ArrayView1<f64>, right: ArrayView1<f64>) -> f64 {
 
 /// Whether `landing` lies within `radius` of a quarantined fingerprint.
 fn tabu_covers(tabu: &[Array1<f64>], landing: ArrayView1<f64>, radius: f64) -> bool {
+    if !(radius.is_finite() && radius >= 0.0) {
+        return false;
+    }
     tabu.iter()
         .any(|held| fingerprint_distance(held.view(), landing) <= radius)
+}
+
+fn valid_shelf_length(length: f64) -> bool {
+    length.is_finite() && length > 0.0 && (2.0 * length).is_finite()
 }
 
 /// Record `(occupied, energy)` unless that minimum is already quarantined.
@@ -3517,7 +3526,7 @@ fn quarantine_geometry(
     if capacity == 0
         || occupied.is_empty()
         || !energy.is_finite()
-        || !(length.is_finite() && length > 0.0)
+        || !valid_shelf_length(length)
         || occupied.iter().any(|value| !value.is_finite())
         || tabu
             .iter()
@@ -3561,15 +3570,13 @@ fn quarantine_fingerprint(
 /// discrepancy is a different structure and a smaller one is the occupied
 /// minimum written down again.
 fn same_distance_geometry(left: ArrayView1<f64>, right: ArrayView1<f64>, length: f64) -> bool {
-    if left.len() != right.len() || left.is_empty() || !(length.is_finite() && length > 0.0) {
+    if left.len() != right.len() || left.is_empty() || !valid_shelf_length(length) {
         return false;
     }
     let limit = 2.0 * length;
-    limit.is_finite()
-        && left
-            .iter()
-            .zip(right.iter())
-            .all(|(p, q)| p.is_finite() && q.is_finite() && (p - q).abs() <= limit)
+    left.iter()
+        .zip(right.iter())
+        .all(|(p, q)| p.is_finite() && q.is_finite() && (p - q).abs() <= limit)
 }
 
 /// Whether two quenched energies are one minimum.
@@ -3609,6 +3616,19 @@ fn shelf_holds(
     shelf
         .iter()
         .any(|(held, stored)| same_shelf(held.view(), *stored, landing, energy, length))
+}
+
+/// Shared refusal gate for every learned stall-response arm.
+fn stall_landing_on_shelf(
+    cfg: &Config,
+    shelf: &[(Array1<f64>, f64)],
+    bias: &BasinBias<ClusterFingerprint>,
+    landing: ArrayView1<f64>,
+    energy: f64,
+) -> bool {
+    effective_keying(cfg) == Keying::Distances
+        && !shelf.is_empty()
+        && shelf_holds(shelf, bias.cv(landing).view(), energy, cfg.escape_epsilon)
 }
 
 /// Drop quarantines that sit strictly above a new lowest minimum.
@@ -4811,7 +4831,7 @@ where
     let mut basin_entry: Option<Array1<f64>> = None;
     let stall_arms = stall_arms(cfg);
     let mut stall_allocator = crate::allocate::DepthAllocator::new(stall_arms.len().max(1));
-    let mut stall_home = vec![0usize; stall_arms.len().max(1)];
+    let mut stall_non_leaves = vec![0usize; stall_arms.len().max(1)];
     let mut last_polish_spent = 0usize;
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
@@ -5017,6 +5037,7 @@ where
                 occupancy_generation,
                 here,
             ) = destination.into_live();
+            decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
         }};
     }
     if let (Some(h), Some(g)) = (history.as_deref_mut(), current_validation_gradient.as_ref()) {
@@ -5104,7 +5125,6 @@ where
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
-    let mut shelf_best = ledger.best;
     // Energy last polished by an unlike-pair quench. `NaN` until the first
     // binary incumbent, so a one-species chain never enters the sweep.
     let mut polished_best = f64::NAN;
@@ -5199,14 +5219,11 @@ where
             cage_edit = false;
             new_incumbent = true;
         }
-        if ledger.best < shelf_best - STRICT_IMPROVEMENT {
-            // The plateau at the old incumbent is no longer the repeated
-            // shelf. Dropping it here across active and parked rungs keeps
-            // each list from filling with basins the search has already
-            // beaten, while preserving the energy each rung still stands on.
-            shelf_best = ledger.best;
-            decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
-        }
+        // Shelf validity depends on both the global best and every rung's
+        // current occupancy. Recheck the invariant even when the best did not
+        // change: a shelf spared while occupied expires as soon as its rung
+        // leaves it.
+        decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
         // unless two labels are present, so an unlabelled chain is unchanged.
@@ -6501,13 +6518,9 @@ where
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
         }
-        if ledger.best < shelf_best - STRICT_IMPROVEMENT {
-            // Improvements recorded before the hop, such as a checkpoint
-            // adoption or a symmetry projection, decay higher shelves before
-            // the next trial consults them.
-            shelf_best = ledger.best;
-            decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
-        }
+        // Improvements recorded before the hop and occupancy changes both
+        // alter which quarantines remain valid.
+        decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
         // Gap to the incumbent, which is what the law scales the window by.
         let gap = (e - ledger.best).abs().max(1e-12);
         let held = if cfg.budget_window {
@@ -9088,10 +9101,7 @@ where
                 }
             }
         }
-        if ledger.best < shelf_best - STRICT_IMPROVEMENT {
-            shelf_best = ledger.best;
-            decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
-        }
+        decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
         if cfg.tabu_on_stall && stuck {
             // The funnel the chain has been unable to leave, named by where it
             // is standing.
@@ -9148,7 +9158,7 @@ where
                     })
                     .collect();
                 if runnable.iter().any(|&ok| ok) {
-                    Some(stall_allocator.select_leaving(&stall_home, &runnable, rng))
+                    Some(stall_allocator.select_leaving(&stall_non_leaves, &runnable, rng))
                 } else {
                     None
                 }
@@ -9160,8 +9170,9 @@ where
         };
         let stalled_from = e;
         let mut stall_outcome: Option<f64> = None;
-        let mut stall_returned = false;
+        let mut stall_attempted = false;
         if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
+            stall_attempted = true;
             let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
                 // Keep each rigid group's internal geometry; only the
                 // packing is redrawn. An atomic redraw overlaps waters.
@@ -9183,12 +9194,9 @@ where
             // failed to leave is not a restart. Adopting it would clear the
             // stall and the next redraw would do the same, and scoring zero
             // depth would outrank an uphill leave whose gain is negative.
-            let restart_home = effective_keying(cfg) == Keying::Distances
-                && !shelf.is_empty()
-                && shelf_holds(&shelf, bias.cv(xf.view()).view(), ef, cfg.escape_epsilon);
+            let restart_home = stall_landing_on_shelf(cfg, &shelf, &bias, xf.view(), ef);
             if restart_home {
                 tabu_hits += 1;
-                stall_returned = true;
             } else {
                 quiet = 0;
                 longest_quiet = 0;
@@ -9209,8 +9217,7 @@ where
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
             && let Some(x_entry) = basin_entry.take()
         {
-            quiet = 0;
-            longest_quiet = 0;
+            stall_attempted = true;
             // Outward is from the minimum toward the entry, continued past it
             // with noise, so the restart leans toward the ridge the chain
             // crossed on the way in rather than back down the funnel.
@@ -9239,25 +9246,31 @@ where
                 &mut unconverged_records,
             );
             hops += 1;
-            stall_escapes += 1;
-            trail_escapes += 1;
-            if ee < e {
-                stall_escape_gain += e - ee;
+            if stall_landing_on_shelf(cfg, &shelf, &bias, xe.view(), ee) {
+                tabu_hits += 1;
+            } else {
+                quiet = 0;
+                longest_quiet = 0;
+                stall_escapes += 1;
+                trail_escapes += 1;
+                if ee < e {
+                    stall_escape_gain += e - ee;
+                }
+                // Taken whatever its energy, exactly as a climb that lands
+                // somewhere else: the chain has shown it cannot improve from
+                // where it stands.
+                adopt_minimum!(
+                    ee,
+                    xe,
+                    trail_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("stall-trail"),
+                    hops
+                );
+                stall_outcome = Some(stalled_from - e);
             }
-            // Taken whatever its energy, exactly as a climb that lands
-            // somewhere else: the chain has shown it cannot improve from
-            // where it stands.
-            adopt_minimum!(
-                ee,
-                xe,
-                trail_gradient,
-                None,
-                AdoptionHistory::Fresh,
-                None,
-                Some("stall-trail"),
-                hops
-            );
-            stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
@@ -9306,41 +9319,81 @@ where
             if hop_room(hops)
                 && let Some(g) = grad.as_deref_mut()
             {
+                stall_attempted = true;
                 let scale = if cfg.minima_hopping {
                     feedback.escape()
                 } else {
-                    quiet = 0;
-                    longest_quiet = 0;
-                    stall_escapes += 1;
-                    if ee < e {
-                        stall_escape_gain += e - ee;
+                    1.0
+                };
+                let act = Activation {
+                    step: cfg.escape_amplitude,
+                    overshoot: cfg.escape_overshoot * scale,
+                    max_steps: cfg.escape_max_climb,
+                    lanczos_steps: cfg.escape_lanczos_steps,
+                    epsilon: cfg.escape_epsilon,
+                    ..Activation::default()
+                };
+                let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
+                if let Some(o) = activate(x.view(), |y| g(ledger, y), &act, sign) {
+                    soft_escapes += 1;
+                    if o.crossed {
+                        soft_crossed += 1;
                     }
-                    let local_feedback = if cfg.minima_hopping {
-                        let from = here.unwrap_or_else(|| identity.basin_of(x.view()));
-                        let reached = identity.basin_of(xe.view());
-                        Some((Some(from), reached))
-                    } else {
-                        None
-                    };
-                    adopt_minimum!(
+                    soft_lambda += o.lambda;
+                    let (ee, xe) = relax(ledger, o.state.view(), cfg.relax_steps);
+                    let escape_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
                         ee,
-                        xe,
-                        escape_gradient,
-                        local_feedback.map(|(_, reached)| reached),
-                        AdoptionHistory::Fresh,
-                        local_feedback,
-                        Some("stall-climb"),
-                        hops
+                        xe.view(),
+                        &mut unconverged_records,
                     );
-                    stall_outcome = Some(stalled_from - e);
+                    hops += 1;
+                    // Taken whatever its energy when the landing is a
+                    // different minimum. The chain has already shown it
+                    // cannot improve from where it is, so the value of the
+                    // new structure is that it is somewhere else. The same
+                    // minimum is the shelf, and adopting it would zero the
+                    // quiet count without leaving. A neighbour inside the
+                    // escape step is kept when its energy is not that minimum.
+                    let climb_home = stall_landing_on_shelf(cfg, &shelf, &bias, xe.view(), ee);
+                    if climb_home {
+                        tabu_hits += 1;
+                    } else {
+                        quiet = 0;
+                        longest_quiet = 0;
+                        stall_escapes += 1;
+                        if ee < e {
+                            stall_escape_gain += e - ee;
+                        }
+                        let local_feedback = if cfg.minima_hopping {
+                            let from = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                            let reached = identity.basin_of(xe.view());
+                            Some((Some(from), reached))
+                        } else {
+                            None
+                        };
+                        adopt_minimum!(
+                            ee,
+                            xe,
+                            escape_gradient,
+                            local_feedback.map(|(_, reached)| reached),
+                            AdoptionHistory::Fresh,
+                            local_feedback,
+                            Some("stall-climb"),
+                            hops
+                        );
+                        stall_outcome = Some(stalled_from - e);
+                    }
                 }
             }
         }
         if let Some(arm) = stall_response {
             if let Some(gain) = stall_outcome {
                 stall_allocator.update(arm, gain);
-            } else if stall_returned {
-                stall_home[arm] += 1;
+            } else if stall_attempted {
+                stall_non_leaves[arm] += 1;
             }
         }
         // A new best is the one state worth sharing, and the census a shared
@@ -9793,9 +9846,7 @@ where
         *slot = bias;
     }
 
-    if ledger.best < shelf_best - STRICT_IMPROVEMENT {
-        decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
-    }
+    decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
     let held_shelves = shelf.len() + parked_shelves.iter().map(Vec::len).sum::<usize>();
 
     Ok(Outcome {
@@ -9853,6 +9904,8 @@ where
         stall_escapes,
         trail_escapes,
         stall_escape_gain,
+        #[cfg(test)]
+        stall_non_leaves,
         soft_lambda: if soft_escapes > 0 {
             soft_lambda / soft_escapes as f64
         } else {
@@ -11439,6 +11492,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn probe_quarantine_geometry_overflow_length_evicts_and_duplicates() {
+        let length = 1.0e-4;
+        let mut shelf = Vec::new();
+        for i in 16..20 {
+            quarantine_geometry(
+                &mut shelf,
+                Array1::from(vec![i as f64, 0.0]),
+                -10.0 - i as f64,
+                length,
+                4,
+            );
+        }
+        quarantine_geometry(
+            &mut shelf,
+            Array1::from(vec![19.0, 0.0]),
+            -29.0,
+            f64::MAX,
+            4,
+        );
+        assert!(
+            shelf_holds(&shelf, Array1::from(vec![16.0, 0.0]).view(), -26.0, length),
+            "2*length overflow in quarantine_geometry evicted oldest valid entry and duplicated 19: {shelf:?}"
+        );
+    }
+
+    #[test]
+    fn tabu_covers_rejects_non_finite_or_negative_radius() {
+        let tabu = vec![Array1::from(vec![1.0, 2.0])];
+        let mismatched = Array1::from(vec![1.0]);
+        assert!(!tabu_covers(&tabu, mismatched.view(), f64::INFINITY));
+        assert!(!tabu_covers(&tabu, mismatched.view(), f64::NAN));
+        assert!(!tabu_covers(&tabu, mismatched.view(), -1.0));
+    }
+
     /// The same distance geometry at a hexamer-sized gap is a neighbour.
     /// A re-quench of a Sutton-Chen shelf is not.
     #[test]
@@ -11616,6 +11704,161 @@ mod tests {
             out.tabu.1 >= 1,
             "the redraw onto the shelf was adopted: {:?}",
             out.tabu
+        );
+    }
+
+    #[test]
+    fn probe_trail_arm_bouncing_onto_shelf_scores_zero_and_adopts() {
+        let n = 4;
+        let start = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
+        ]);
+        let target = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
+        ]);
+        let mut cfg = Config::recommended(n);
+        cfg.restart_patience = 1_000_000;
+        cfg.escape_stall_patience = 2;
+        cfg.escape_stall_factor = 0.0;
+        cfg.escape_on_stall = true;
+        cfg.trail_on_stall = true;
+        cfg.restart_on_stall = false;
+        cfg.relax_steps = 80;
+        cfg.screen_steps = 1;
+        cfg.max_hops = Some(10);
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.orbit_complete_on_new = false;
+        cfg.energy_lattice = false;
+        cfg.surfaces.clear();
+        cfg.symmetrise_on_stall = false;
+        cfg.return_screen = false;
+
+        let mut call = 0usize;
+        let mut rng = StdRng::seed_from_u64(2000);
+        let mut ledger = Ledger::new(20_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let before = led.spent();
+            if steps > 1 {
+                call += 1;
+            }
+            let (well, offset) = if call == 1 && steps > 1 {
+                (&start, -0.5)
+            } else {
+                (&target, -1.0)
+            };
+            let mut cur = x.to_owned();
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                cur = well + &((&cur - well) * 0.85);
+            }
+            let d = &cur - well;
+            let e = offset + d.iter().map(|v| v * v).sum::<f64>();
+            if steps > 1 {
+                led.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
+            }
+            (e, cur)
+        };
+        let out = run_with_gradient(&cfg, start.view(), &mut ledger, &mut relax, None, &mut rng)
+            .expect("finite start");
+        let trail_adoptions: Vec<_> = out
+            .accepted_transitions
+            .iter()
+            .filter(|transition| transition.action == "stall-trail" && transition.adopted)
+            .collect();
+        assert!(
+            trail_adoptions.is_empty(),
+            "stall-trail bounced onto the quarantined shelf and was adopted: {trail_adoptions:?}"
+        );
+        assert_eq!(
+            (out.stall_escapes, out.trail_escapes, out.stall_escape_gain),
+            (0, 0, 0.0),
+            "a shelf return polluted stall escape statistics"
+        );
+        assert!(
+            out.tabu.1 >= 1,
+            "the trail shelf return was not recorded as a tabu hit: {:?}",
+            out.tabu
+        );
+    }
+
+    #[test]
+    fn a_failed_climb_is_accounted_as_a_non_leave() {
+        let n = 4;
+        let shelf = Array1::from(vec![
+            5.0, 0.0, 0.0, 6.2, 0.0, 0.0, 5.6, 1.0, 0.0, 5.6, 0.4, 0.9,
+        ]);
+        let restart = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
+        ]);
+        let mut cfg = Config::recommended(n);
+        cfg.restart_patience = 1_000_000;
+        cfg.escape_stall_patience = 2;
+        cfg.escape_stall_factor = 0.0;
+        cfg.escape_on_stall = true;
+        cfg.trail_on_stall = false;
+        cfg.restart_on_stall = true;
+        cfg.relax_steps = 80;
+        cfg.screen_steps = 1;
+        cfg.max_hops = Some(8);
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.orbit_complete_on_new = false;
+        cfg.energy_lattice = false;
+        cfg.surfaces.clear();
+        cfg.symmetrise_on_stall = false;
+        cfg.return_screen = false;
+
+        let mut rng = StdRng::seed_from_u64(2000);
+        let mut ledger = Ledger::new(20_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let before = led.spent();
+            let (well, offset) = if steps > 1 && x[0] < 2.0 {
+                (&restart, -9.0)
+            } else {
+                (&shelf, -10.0)
+            };
+            let mut cur = x.to_owned();
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                cur = well + &((&cur - well) * 0.85);
+            }
+            let d = &cur - well;
+            let e = offset + d.iter().map(|value| value * value).sum::<f64>();
+            if steps > 1 {
+                led.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
+            }
+            (e, cur)
+        };
+        let mut grad = |led: &mut Ledger, point: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            let near_minimum = [&shelf, &restart].iter().any(|minimum| {
+                point
+                    .iter()
+                    .zip(minimum.iter())
+                    .map(|(left, right)| (left - right) * (left - right))
+                    .sum::<f64>()
+                    .sqrt()
+                    < 1.0e-5
+            });
+            near_minimum.then(|| Array1::zeros(point.len()))
+        };
+        let out = run_with_gradient(
+            &cfg,
+            shelf.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert!(
+            out.stall_non_leaves.first().copied().unwrap_or(0) >= 1,
+            "a failed climb stayed in the allocator's untried state"
         );
     }
 
@@ -11831,6 +12074,87 @@ mod tests {
             after_deep.tabu.0, 0,
             "beaten shelf on a parked rung survived a new lowest minimum: {:?}",
             after_deep.tabu
+        );
+    }
+
+    #[test]
+    fn probe_standing_shelf_survives_after_rung_moves_off_it() {
+        let n = 4;
+        let target = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
+        ]);
+        let mut mid = target.clone();
+        mid[0] += 0.35;
+        let mut deep = target.clone();
+        deep[0] += 0.75;
+
+        let mut cfg = Config::recommended(n);
+        cfg.replicas = 2;
+        cfg.swap_period = 4;
+        cfg.ladder_pilot = 4;
+        cfg.restart_patience = 200;
+        cfg.escape_stall_patience = 1_000_000;
+        cfg.escape_on_stall = true;
+        cfg.restart_on_stall = false;
+        cfg.relax_steps = 80;
+        cfg.screen_steps = 1;
+        cfg.max_hops = Some(9);
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.orbit_complete_on_new = false;
+        cfg.energy_lattice = false;
+        cfg.surfaces.clear();
+        cfg.symmetrise_on_stall = false;
+        cfg.trail_on_stall = false;
+        cfg.return_screen = false;
+        cfg.temperature = 100.0;
+        cfg.bayes_screen = false;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.ladder_mode = crate::methods::cluster_hopping::config::LadderMode::Independent;
+
+        let mut quench_calls = 0usize;
+        let mut rng = StdRng::seed_from_u64(2000);
+        let mut ledger = Ledger::new(40_000);
+        let mut staged_relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let before = led.spent();
+            if steps > 1 {
+                quench_calls += 1;
+            }
+            let (well, offset) = if steps <= 1 {
+                (&target, -1.0)
+            } else {
+                match quench_calls {
+                    1..=7 => (&target, -1.0),
+                    8 => (&deep, -5.0),
+                    _ => (&mid, -0.5),
+                }
+            };
+            let mut cur = x.to_owned();
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                cur = well + &((&cur - well) * 0.85);
+            }
+            let d = &cur - well;
+            let e = offset + d.iter().map(|v| v * v).sum::<f64>();
+            if steps > 1 {
+                led.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
+            }
+            (e, cur)
+        };
+        let out = run_with_gradient(
+            &cfg,
+            target.view(),
+            &mut ledger,
+            &mut staged_relax,
+            None,
+            &mut rng,
+        )
+        .expect("finite start");
+        assert_eq!(
+            out.tabu.0, 0,
+            "beaten -1.0 shelf survived after rung 0 moved off -1.0 to -0.5 (best={}): {:?}",
+            out.best, out.tabu
         );
     }
 

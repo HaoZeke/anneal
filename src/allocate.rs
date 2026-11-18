@@ -872,22 +872,28 @@ impl DepthAllocator {
     /// Draws an arm by Thompson sampling on the posterior predictive, gating
     /// out arms that fail to leave a quarantined plateau.
     ///
-    /// `home[k]` counts attempts where arm `k` returned to a quarantined
-    /// minimum instead of leaving, which carry no leave depth and never enter
-    /// [`Self::update`]. Feeding zero for a non-leave would outrank every
-    /// uphill escape (`gain < 0`). `runnable[k]` marks arms that have the
-    /// prerequisites to execute on this step.
+    /// `non_leaves[k]` counts attempts where arm `k` did not produce a new
+    /// minimum, which carry no leave depth and never enter [`Self::update`].
+    /// Feeding zero for a non-leave would outrank every uphill escape
+    /// (`gain < 0`). `runnable[k]` marks arms that have the prerequisites to
+    /// execute on this step. Both slices must account for every arm.
     pub fn select_leaving<R: Rng + ?Sized>(
         &self,
-        home: &[usize],
+        non_leaves: &[usize],
         runnable: &[bool],
         rng: &mut R,
     ) -> usize {
         if self.mu.is_empty() {
             return 0;
         }
-        if home.iter().copied().all(|count| count == 0)
-            && (0..self.mu.len()).all(|k| runnable.get(k).copied().unwrap_or(true))
+        assert_eq!(
+            non_leaves.len(),
+            self.mu.len(),
+            "one non-leave count per arm"
+        );
+        assert_eq!(runnable.len(), self.mu.len(), "one runnable flag per arm");
+        if non_leaves.iter().copied().all(|count| count == 0)
+            && runnable.iter().copied().all(|available| available)
         {
             return self.select(rng);
         }
@@ -895,14 +901,14 @@ impl DepthAllocator {
         let mut top_leave: Option<(usize, f64)> = None;
         let mut any_untried = false;
         for (k, slot) in leave_p.iter_mut().enumerate() {
-            if !runnable.get(k).copied().unwrap_or(true) {
+            if !runnable[k] {
                 continue;
             }
-            let returned = home.get(k).copied().unwrap_or(0);
-            if self.draws[k] == 0 && returned == 0 {
+            let non_leave = non_leaves[k];
+            if self.draws[k] == 0 && non_leave == 0 {
                 any_untried = true;
             }
-            let draw = sample_beta(1.0 + self.draws[k] as f64, 1.0 + returned as f64, rng);
+            let draw = sample_beta(1.0 + self.draws[k] as f64, 1.0 + non_leave as f64, rng);
             *slot = draw;
             if top_leave.is_none_or(|(_, best)| draw > best) {
                 top_leave = Some((k, draw));
@@ -917,11 +923,11 @@ impl DepthAllocator {
         let mut best: Option<usize> = None;
         let mut best_v = f64::NEG_INFINITY;
         for (k, &prob) in leave_p.iter().enumerate() {
-            if !runnable.get(k).copied().unwrap_or(true) {
+            if !runnable[k] {
                 continue;
             }
-            let returned = home.get(k).copied().unwrap_or(0);
-            let eligible = (self.draws[k] == 0 && returned == 0)
+            let non_leave = non_leaves[k];
+            let eligible = (self.draws[k] == 0 && non_leave == 0)
                 || (self.draws[k] > 0 && rng.random::<f64>() < prob);
             if !eligible {
                 continue;
@@ -1104,16 +1110,16 @@ mod depth_allocator_tests {
         for scale in [1.0e-3_f64, 1.0, 1.0e4] {
             let mut rng = StdRng::seed_from_u64(41);
             let mut allocator = DepthAllocator::new(2);
-            let mut home = [0usize; 2];
+            let mut non_leaves = [0usize; 2];
             let runnable = [true, true];
             let mut picks = [0usize; 2];
             for _ in 0..200 {
-                let arm = allocator.select_leaving(&home, &runnable, &mut rng);
+                let arm = allocator.select_leaving(&non_leaves, &runnable, &mut rng);
                 picks[arm] += 1;
                 if arm == 0 {
                     allocator.update(0, -5.0 * scale);
                 } else {
-                    home[1] += 1;
+                    non_leaves[1] += 1;
                 }
             }
             assert_eq!(allocator.draws[1], 0, "shelf return recorded a leave depth");
@@ -1124,5 +1130,13 @@ mod depth_allocator_tests {
                 picks[1]
             );
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "one non-leave count per arm")]
+    fn select_leaving_rejects_mismatched_accounting_slices() {
+        let allocator = DepthAllocator::new(2);
+        let mut rng = StdRng::seed_from_u64(41);
+        allocator.select_leaving(&[0], &[true, true], &mut rng);
     }
 }
