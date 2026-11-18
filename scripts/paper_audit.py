@@ -79,6 +79,8 @@ UNPUSHED = {
                                                 "reruns, first cited by 93e17b69; no pushed branch holds it",
     "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
                                                 "branch holds it",
+    "9a30f3190b3bb7040c675a904f8388eb68224151": "the build head of the Morse ASE rows in bench/ase-nonlj; no pushed "
+                                                "branch holds it",
 }
 
 KNOWN_GAPS = {
@@ -128,9 +130,9 @@ KNOWN_GAPS = {
     "bench/ase-lj55/rows.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                "repository; revision b49341e3 is not in this repository",
     "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
+    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
+    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
     "bench/ase-recommended/summary.csv": "revision 1ce3ab64 is not in this repository; revision 36548663 is not in this "
                                          "repository; revision 5a7f629d is not in this repository; revision b49341e3 is "
                                          "not in this repository",
@@ -541,6 +543,40 @@ def gmin_panel_summary(audit: Audit, panel: object, groups: dict) -> None:
         audit.cell(where, "host", line["host"], "bench")
         audit.cell(where, "sessions", line["sessions"], " ".join(sorted({r["session"] for r in a + g})))
         audit.cell(where, "seeds", line["seeds"], " ".join(r["seed"] for r in a))
+
+
+def blj_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
+                   budget: int) -> None:
+    """One binary Lennard-Jones table line.
+
+    A miss is entered at the full budget, and the wall test is on the measured
+    seconds. That is the statistic ``scripts/blj_gmin/run_panel.py`` wrote into
+    the table. The censored ranking used for the one-component panel does not
+    apply: both arms run to the same call cap.
+    """
+    group = groups[(system, arm)]
+    other = groups[(system, "gmin" if arm == "anneal" else "anneal")]
+
+    def col(rows: list[dict[str, str]], key: str) -> list[float]:
+        return [float(r[key]) for r in rows]
+
+    shown_hits = re.sub(r"[~\s]*\\rerun\{\d+\}", "", cells[2])
+    audit.cell(where, "hits", shown_hits, frac(group))
+    audit.cell(where, "median calls", cells[3], median(col(group, "evals_to_hit")))
+    audit.cell(where, "IQR calls", cells[4], iqr(col(group, "evals_to_hit")))
+    audit.cell(where, "wall median", cells[5], median(col(group, "wall_s")))
+    audit.cell(where, "inside median", cells[6], median(col(group, "pot_s")))
+    audit.cell(where, "outside median", cells[7], median(col(group, "outside_s")))
+    if arm == "anneal":
+        audit.cell(where, "budget", cells[0], float(budget))
+        audit.cell(where, "Fisher p", cells[8], fisher(hits_of(group), len(group), hits_of(other), len(other)))
+        audit.cell(where, "MW p calls", cells[9],
+                   mann_whitney(col(group, "evals_to_hit"), col(other, "evals_to_hit"), continuity=True))
+        audit.cell(where, "MW p wall", cells[10],
+                   mann_whitney(col(group, "wall_s"), col(other, "wall_s"), continuity=True))
+    else:
+        for label, cell in zip(("budget", "Fisher p", "MW p calls", "MW p wall"), (cells[0], *cells[8:])):
+            audit.cell(where, label, cell, None)
 
 
 def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
@@ -1469,7 +1505,7 @@ def manuscript_blj(audit: Audit) -> None:
                 audit.record(False, where, "table line", " & ".join(cells), "a panel system and arm")
                 continue
             shown.append((system, arm))
-            gmin_panel_line(audit, where, cells[1:], groups, system, arm, panel.PAPER_BUDGETS[system])
+            blj_panel_line(audit, where, cells[1:], groups, system, arm, panel.PAPER_BUDGETS[system])
         want = [(system, arm) for system in panel.PAPER_BUDGETS for arm in ("anneal", "gmin")]
         audit.cell(path, "blj panel lines", " ".join(f"{s}/{a}" for s, a in shown), " ".join(f"{s}/{a}" for s, a in want))
     for path, tex in ((TEX, True), ("bench/blj-gmin/README.md", False)):
