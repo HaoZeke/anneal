@@ -18,9 +18,15 @@
 namespace {
 
 struct Probe {
-  explicit Probe(int built) : id(built) {}
-  ~Probe() { ++dropped; }
+  explicit Probe(int built) : id(built), heap_id(std::make_unique<int>(built)) {}
+  ~Probe() {
+    if (heap_id) {
+      *heap_id = -1;
+    }
+    ++dropped;
+  }
   int id;
+  std::unique_ptr<int> heap_id;
   static inline std::atomic<int> dropped{0};
 };
 
@@ -40,6 +46,7 @@ struct Owner {
   static inline std::atomic<std::uint64_t> builds_at_entry{0};
   static inline std::atomic<std::uint64_t> reuses_at_entry{0};
   static inline std::atomic<int> rebuilt_id{0};
+  static inline std::atomic<int> rebuilt_ref_id{0};
 };
 
 using KeptInner = rgpot::Kept<Probe, 2>;
@@ -52,6 +59,7 @@ rgpot::KeptKey key(double param, std::size_t n, const int *species) {
 }
 
 int id(const Probe &probe) { return probe.id; }
+const int &ref_id(const Probe &probe) { return *probe.heap_id; }
 
 Owner::~Owner() {
   dropped_at_entry = Probe::dropped.load() - dropped_before.load();
@@ -60,6 +68,8 @@ Owner::~Owner() {
   reuses_at_entry = KeptInner::counts().reuses;
   rebuilt_id = KeptInner::with(
       inner_key, [] { return std::make_unique<Probe>(41); }, id);
+  rebuilt_ref_id = KeptInner::with(
+      inner_key, [] { return std::make_unique<Probe>(53); }, ref_id);
   ++destroyed;
 }
 
@@ -250,7 +260,8 @@ TEST_CASE("a kept object may use another kept table while its thread exits",
   CHECK(Owner::builds_at_entry.load() == 0);
   CHECK(Owner::reuses_at_entry.load() == 0);
   CHECK(Owner::rebuilt_id.load() == 41);
-  // The probe built there is dropped when the owner's destructor ends. A
-  // table that is gone would keep it, and nothing would ever free it.
-  CHECK(Probe::dropped.load() == dropped + 2);
+  CHECK(Owner::rebuilt_ref_id.load() == 53);
+  // The probes built there are dropped when the owner's destructor ends. A
+  // table that is gone would keep them, and nothing would ever free them.
+  CHECK(Probe::dropped.load() == dropped + 3);
 }

@@ -93,13 +93,14 @@ class RGPOT_KEPT_HIDDEN Kept {
   static_assert(Slots >= 1, "Kept requires at least one slot");
 
 public:
-  /// `run(pot)` on the object kept for @a key. When no slot matches, the
-  /// least recently used slot (or an empty one) is cleared and `make()`,
-  /// which returns a `std::unique_ptr<Pot>`, builds the next one. A throw
-  /// from `make` leaves that slot empty. A throw from `run` drops the
+  /// `run(pot)` on the object kept for @a key, returned by value (never a
+  /// dangling reference to a temporary or an evictable slot). When no slot
+  /// matches, the least recently used slot (or an empty one) is cleared and
+  /// `make()`, which returns a `std::unique_ptr<Pot>`, builds the next one.
+  /// A throw from `make` leaves that slot empty. A throw from `run` drops the
   /// object, whose scratch it may have left half written, and passes on.
   template <typename Make, typename Run>
-  static decltype(auto) with(const KeptKey &key, Make &&make, Run &&run) {
+  static auto with(const KeptKey &key, Make &&make, Run &&run) {
     if (retired()) {
       const std::unique_ptr<Pot> pot = make();
       return run(*pot);
