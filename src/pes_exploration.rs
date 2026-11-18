@@ -707,7 +707,7 @@ pub fn localized_cartesian_mode(
 
 /// Remove escape directions leading to already certified saddles.
 ///
-/// Every avoided saddle is expressed in the same labelled Cartesian frame as
+/// Every avoided saddle is expressed in the same labeled Cartesian frame as
 /// `coordinates`. Minimum-image displacements are projected onto the live
 /// free-coordinate tangent space and orthonormalized before they are removed
 /// from `mode`. If the supplied mode lies entirely in the known subspace, the

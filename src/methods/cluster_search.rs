@@ -436,7 +436,7 @@ enum CallWall<'a> {
     /// No species, and the objective declares [`Config::call_floor`],
     /// per pair when [`Config::call_floor_elements`] names the atoms.
     Floor(CallFloor<'a>),
-    /// Labelled atoms with no declared bonds: [`OVERLAP_CALL_LIMIT`].
+    /// Labeled atoms with no declared bonds: [`OVERLAP_CALL_LIMIT`].
     ///
     /// A metal's nearest neighbour sits inside its covalent sum (Cu–Cu
     /// 2.55 Å against 2.64 Å), and a binary Lennard-Jones label is not an

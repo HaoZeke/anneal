@@ -53,11 +53,11 @@ Both hit LJ\(_{98}\) on 9 of 12, and at LJ\(_{104}\) the counts are 5 of 12 and 
 Against the Wales-group program GMIN, on seeds 2000--2011 of thirteen
 Lennard-Jones, Gupta, and Morse clusters in one session, this setting
 hits more seeds on 9 of 13, the two tie on 2, and GMIN hits more on 2.~\rerun{5}
-Fisher's test on hits is below 0.05 on 6 of the 9 wins: LJ\(_{38}\),
-LJ\(_{75}\), LJ\(_{98}\), Au\(_{55}\), and M\(_{55}\) and M\(_{80}\) at
-\(\rho=14\).~\rerun{5}
-It is not below 0.05 on the other 3: LJ\(_{102}\), LJ\(_{103}\), and
-LJ\(_{104}\).~\rerun{5}
+Fisher's test on hits is below 0.05 on 6 clusters: 5 for this setting,
+LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), and M\(_{55}\) and M\(_{80}\) at
+\(\rho=14\), and M\(_{80}\) at \(\rho=6\) for GMIN.~\rerun{5}
+It is not below 0.05 on the other 4 wins: LJ\(_{102}\), LJ\(_{103}\),
+LJ\(_{104}\), and Au\(_{55}\), where \(p=0.32\).~\rerun{5}
 GMIN hits LJ\(_{150}\) on 9 of 12 against 5 of 12, with \(p=0.21\), and
 M\(_{80}\) at \(\rho=6\) on 12 of 12 against 2 of 12, with
 \(p=6.7\times 10^{-5}\).~\rerun{5}
@@ -75,7 +75,7 @@ On seeds 2000--2005 against AGOX GOFEE, this setting hits LJ\(_{38}\),
 LJ\(_{55}\), and LJ\(_{75}\) on 6 of 6 and GOFEE hits none of them, and the
 median wall of a GOFEE run on LJ\(_{38}\) is 499.4~s against 0.081~s.
 No arm of the ASE panel hits Au\(_{55}\); in the GMIN panel, on another
-revision, this setting hits it on 4 of 12 and GMIN on 1 of 12.
+revision, this setting hits it on 4 of 12 and GMIN on 1 of 12.~\rerun{5}
 On Morse clusters of 38 and 55 atoms at \(\rho=6\) and \(\rho=14\) it
 hits 12, 12, 12, and 5 of 12, and both ASE arms hit 0 of 12.
 On seeds 6400--6405 the retry rows hit LJ\(_{104}\) on 3 of 6 and
@@ -90,7 +90,8 @@ hits \((\mathrm{H_2O})_{8}\), \((\mathrm{H_2O})_{15}\), and
 \((\mathrm{H_2O})_{20}\) on 12, 9, and 5 of 12 seeds and GMIN on 8, 0, and 0
 of 12.
 On the water hexamer the motif match hits 121 of 192 seeds for the
-default hop and 97 of 192 for CREST, both at GFN2-xTB with xtb 6.7.1.~\rerun{7}
+default hop and 94 of 192 for plain CREST, both at GFN2-xTB through
+tblite 0.7.0, with CREST 3.0.2; two-sided Fisher's \(p=0.00744\).~\rerun{7}
 The polished gaps on seeds 0--5 hold at GFN2-xTB with xtb 6.7.1 and
 with xtb 6.8.0.~\rerun{7}
 On xtb 6.7.1, five of six gaps lie within \(1\times 10^{-7}\)~Eh, and
@@ -928,7 +929,9 @@ equation~\ref{eq:screen} with its cost-asymmetric threshold.
 (a) LJ\(_{38}\) derived, aggregate, 72 seeds; (b) LJ\(_{38}\) recommended, aggregate, 72 seeds; (c) LJ\(_{55}\) derived, representative, seed 2000; (d) LJ\(_{55}\) derived, aggregate, 48 seeds; (e) LJ\(_{55}\) recommended, representative, seed 2000; (f) LJ\(_{55}\) recommended, aggregate, 48 seeds; (g) LJ\(_{75}\) derived, representative, seed 2000; (h) LJ\(_{75}\) derived, aggregate, 200 seeds; (i) LJ\(_{75}\) recommended, representative, seed 2000; (j) LJ\(_{75}\) recommended, aggregate, 200 seeds; (k) LJ\(_{98}\) derived, representative, seed 2000; (l) LJ\(_{98}\) recommended, representative, seed 2000; (m) TIP4P hexamer, representative, seed 0; (n) TIP4P hexamer, aggregate, 4 seeds.
 Panels (a) to (h) are drawn as vectors from the landscape tables.
 Panels (i) to (n) show the sealed raster maps of the campaigns, because
-their landscape tables are not in the repository.}
+the current-code serial regeneration is incomplete.  Its declared 300 seeds
+require \(1{,}184{,}080{,}000\) potential calls; two LJ\(_{75}\) seeds
+finished here, and no partial source book was promoted to a paper table.}
 \label{fig:landfold-maps}
 \end{figure*}
 
@@ -1073,7 +1076,7 @@ The 5 are LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), and M\(_{55}\) and
 M\(_{80}\) at \(\rho=14\).~\rerun{5}
 The other 4 wins of this setting are LJ\(_{102}\), LJ\(_{103}\),
 LJ\(_{104}\), and Au\(_{55}\), at \(p\) of 0.21, 0.10, 0.40, and
-0.069, and the GMIN win on LJ\(_{150}\) is not significant
+0.32, and the GMIN win on LJ\(_{150}\) is not significant
 either.~\rerun{5}
 The median wall of a run is lower for this setting on 12 of the 13 clusters and
 higher on M\(_{80}\) at \(\rho=6\).
@@ -1430,8 +1433,11 @@ The vtight energy threshold is \(1\times 10^{-7}\)~Eh.
 A row is kept when the run exits cleanly, the polished energy is
 finite, and the maximum force is at or below \(0.001\)~Eh/bohr.
 The iterative-rotations-and-assignments match on the 192-seed campaign
-hits 121 of 192 seeds for the default hop and 97 of 192 for CREST, at
-GFN2-xTB with xtb 6.7.1.~\rerun{7}
+hits 121 of 192 seeds for the default hop and 94 of 192 for plain CREST,
+at GFN2-xTB through tblite 0.7.0, with CREST 3.0.2.  The difference is
+27 seeds and the hit-rate difference is 0.141; the hit-count ratio is 1.29 and
+two-sided Fisher's \(p=0.00744\).  The per-seed receipts are in
+\path{paper/jctc/data/water_v45b/rerun-9a30f319/}.~\rerun{7}
 \cite{gundeIraShapeMatching2021}
 The 192-seed geometries were not kept, so those two counts stay at
 that scoring.
@@ -1625,7 +1631,7 @@ The ASE panel scales the preset to the Morse pair, and the driver
 The two panels differ in that scaling, and no run separates the two, so
 we do not assign the difference to it.
 On Au\(_{55}\) this setting hits 4 of 12 in the GMIN panel, where GMIN
-hits 1 of 12 and Fisher's \(p\) is 0.32.
+hits 1 of 12 and Fisher's \(p\) is 0.32.~\rerun{5}
 In the ASE panel it hits 0 of 12, as do both ASE arms, and its median
 best energy lies 0.051~eV above the reference.
 Those two Au\(_{55}\) counts come from revision \texttt{1ce3ab64} with
@@ -1648,10 +1654,13 @@ Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, scored by Fisher's test on hits, this setting
 hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse
 clusters, and no arm hits Au\(_{55}\).~\rerun{5}
-On Au\(_{55}\) in the GMIN panel it hits 4 of 12 and GMIN 1 of 12.
-Of the 9 clusters where this setting hits more seeds than GMIN, 6 are
-significant by Fisher's test, and the 3 that are not are LJ\(_{102}\),
-LJ\(_{103}\), and LJ\(_{104}\).~\rerun{5}
+On Au\(_{55}\) in the GMIN panel it hits 4 of 12 and GMIN 1 of 12, with
+\(p=0.32\).~\rerun{5}
+Of the 9 clusters where this setting hits more seeds than GMIN, 5 are
+significant by Fisher's test, and the 4 that are not are LJ\(_{102}\),
+LJ\(_{103}\), LJ\(_{104}\), and Au\(_{55}\).~\rerun{5}
+With the M\(_{80}\), \(\rho=6\) win of GMIN, 6 clusters are significant
+overall.~\rerun{5}
 AGOX GOFEE hits none of the three Lennard-Jones clusters on 6 seeds, and
 against GMIN on TIP4P this setting hits \((\mathrm{H_2O})_{15}\) on 9 of 12
 and GMIN on 0 of 12.
@@ -1665,7 +1674,9 @@ The rate file records 1 of 6 for 15 molecules at that budget and 1 of 6 for 20 m
 At GFN2-xTB the polished hexamer gaps hold on xtb 6.7.1 and on xtb 6.8.0.
 On xtb 6.7.1, five of six seeds lie within \(1\times 10^{-7}\)~Eh.
 On xtb 6.8.0 both arms lie within that line on 6 of 6 seeds, and seed 1 lies at \(-4.35\times 10^{-8}\)~Eh on the 4000-call ledger and \(-4.34\times 10^{-8}\)~Eh on the old-counter ledger.
-The motif match remains 121 of 192 for the default hop and 97 of 192 for CREST, at xtb 6.7.1.
+The motif match remains 121 of 192 for the default hop and 94 of 192 for
+plain CREST, at GFN2-xTB through tblite 0.7.0 with CREST 3.0.2; two-sided
+Fisher's \(p=0.00744\).
 
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.

@@ -12,9 +12,16 @@ The hash is unchanged.
 036cb5d0143e305e6139e5305498ede81908f6521851c597b1dcef2d8c9827fe
 
 Row 4 is water_crest.pdf.
-The hash is unchanged.
+It is regenerated from the fresh receipts in
+`data/water_v45b/rerun-9a30f319/`.
 
-467258ab05c77a8fae70f2f583a1cb116c4726fbfcb7f4ef4eee332ab3346855
+Previous hash.
+
+f1cfaa89d3fa135cd7d9215082882f20fc79cfc5c81ef5b950d87d42e1acf5c5
+
+New hash.
+
+6c6be22a8b02c417e9e69e443f2574c211087f7a5016384ecd244e8c1230bcdc
 
 Row 5 is disconnectivity.pdf.
 The hash is unchanged.
@@ -195,17 +202,19 @@ CREST hits.  Each arm has one unedited `status.json` receipt per seed, and
 the directory-level `SHA256SUMS` covers all 384 files.
 The earlier McNemar values do not derive from this rerun.
 No separate receipt records the LJ map energies.
-A figure that matches main has no generator in this tree.
 scripts/toc_graphic.py draws toc-graphic.pdf.
-water_crest.pdf matches the 192-seed figure on main.
+`scripts/fig_water_crest.py` redraws `water_crest.pdf`; its default-hop and
+plain-CREST rows come from `rerun-9a30f319`, through
+`scripts/water_results_table.py`.
 scripts/water_crest_figure.py draws the six-seed counter chart.
 The chart path is figs/water_crest_counters.pdf.
 That script does not write water_crest.pdf.
 lj75_ecdf.pdf matches main.
 landfold_maps.pdf matches main too.
-This tree has no seed table for those two plates.
+The two receipt-derived tables are in `si.tex` as
+`tab:hexamer-rerun` and `tab:hexamer-rerun-contrast`.
 The LJ map energies have no seed table.
-No seed table covers the McNemar values.
+The paired receipts cover the McNemar and Newcombe values.
 
 ## Vector replacements of the SI plates
 
@@ -221,4 +230,11 @@ lj75_landscape.pdf git blob 5a24fbb6f2930e380941f1547ad5274769e1cf25
 lj98_landscape.pdf git blob 263f6336faadc4bf77335629622536b9cb60f549
 
 landfold_maps.pdf keeps six raster panels, (i) to (n).
-Their landscape.ld tables are not in the repository, so only the sealed landscape.png of each exists.
+The current-code driver is `examples/landfold_campaign.rs`, invoked by
+`landfold_maps_current` in `workflow/Snakefile`.  It exports every validated
+quench and publishes `landscape.ld` and `fes.csv` only after all 300 declared
+seeds finish.  That serial campaign requires 1,184,080,000 potential calls.
+Two full-budget LJ75 seeds finished in this run; 1,176,080,000 calls remain,
+so no partial table was promoted and the six sealed `landscape.png` panels
+remain. `data/landfold_maps_v7/rerun-status.csv` records the attempt by
+campaign.

@@ -41,7 +41,7 @@ ira = []
 # In-process MD segments through the LAMMPS C library. Needs liblammps on
 # the link path via LAMMPS_LIB_DIR.
 lammps = []
-# Exact basin identity by canonical contact-graph labelling through nauty.
+# Exact basin identity by canonical contact-graph labeling through nauty.
 graphkey = ["dep:petgraph", "dep:nauty-pet"]
 # featomic SOAP power spectrum leftover. Off by default because the
 # metatensor C core is built from source by cmake.
@@ -224,6 +224,7 @@ required-features = ["rgpot-ex"]
 [[example]]
 name = "gfn2_water_crest_driver"
 required-features = ["rgpot-ex"]
+test = true
 
 [[example]]
 name = "gfn2_covalent_h2h"

@@ -40,7 +40,7 @@ the walker at random, and the way the combination is tested.
 The preset also carries structure priors.
 
 Against the Wales-group program GMIN, on seeds 2000--2011 of thirteen Lennard-Jones, Gupta, and Morse clusters in one session, this setting hits more seeds on 9 of 13, the two tie on 2, and GMIN hits more on 2.~\rerun{5}
-Fisher's test on hits is below 0.05 on 6 of the 9 wins: LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), Au\(_{55}\), and M\(_{55}\) and M\(_{80}\) at \(\rho=14\).~\rerun{5}
+Fisher's test on hits is below 0.05 on 6 clusters: 5 for this setting, LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), and M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and M\(_{80}\) at \(\rho=6\) for GMIN.~\rerun{5}
 GMIN hits LJ\(_{150}\) on 9 of 12 against 5 of 12, with \(p=0.21\), and M\(_{80}\) at \(\rho=6\) on 12 of 12 against 2 of 12, with \(p=6.7\times 10^{-5}\).~\rerun{5}
 The median wall of a run is 0.075~s for this setting against 3.658~s for GMIN on LJ\(_{38}\), and 27.019~s against 119.9~s on LJ\(_{75}\).~\rerun{5}
 On M\(_{80}\) at \(\rho=6\) it is 168.9~s against 10.691~s.~\rerun{5}
@@ -48,7 +48,7 @@ The losses and the ties stay in the text and in the tables.
 
 The molecular test is the water hexamer at the GFN2-xTB model, and the
 manuscript also reports TIP4P clusters against GMIN.
-On the water hexamer the motif match hits 121 of 192 seeds for the default hop and 97 of 192 for CREST, both at GFN2-xTB with xtb 6.7.1.~\rerun{7}
+On the water hexamer the motif match hits 121 of 192 seeds for the default hop and 94 of 192 for plain CREST, both at GFN2-xTB through tblite 0.7.0, with CREST 3.0.2; two-sided Fisher's \(p=0.00744\).~\rerun{7}
 The six CREST rows are single draws from one start geometry, and the text
 does not read them as a success rate.
 

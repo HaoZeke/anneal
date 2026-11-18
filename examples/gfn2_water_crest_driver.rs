@@ -148,14 +148,31 @@ struct Served {
 }
 
 fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f64) {
-    fs::create_dir_all(rundir).expect("rundir");
-    let _ = fs::remove_file(socket);
-    let _ = fs::remove_file(rundir.join("stop"));
     let atmnrs: Vec<i32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
     let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
     let mut pot = RgpotObjective::xtb_with_overlap_limit(&atmnrs, box_, OVERLAP_SEPARATION_A);
     pot.restart();
-    let dim = 3 * atmnrs.len();
+    serve_with(socket, rundir, molecules, budget, target, |coords| {
+        let (energy, gradient) = pot.wrapper().value_and_gradient(ArrayView1::from(coords));
+        (energy, gradient.iter().copied().collect())
+    });
+}
+
+fn serve_with<F>(
+    socket: &Path,
+    rundir: &Path,
+    molecules: usize,
+    budget: u64,
+    target: f64,
+    mut eval: F,
+) where
+    F: FnMut(&[f64]) -> (f64, Vec<f64>),
+{
+    fs::create_dir_all(rundir).expect("rundir");
+    let _ = fs::remove_file(socket);
+    let _ = fs::remove_file(rundir.join("stop"));
+    let atom_count = 3 * molecules;
+    let dim = 3 * atom_count;
     let listener = UnixListener::bind(socket).expect("bind socket");
     fs::write(rundir.join("ready"), "ready\n").expect("ready");
     let mut served = Served {
@@ -182,10 +199,9 @@ fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f6
             continue;
         }
         let at = Instant::now();
-        let (energy, gradient) = pot.wrapper().value_and_gradient(ArrayView1::from(&coords));
+        let (energy, mut gradient) = eval(&coords);
         served.inside_ns += at.elapsed().as_nanos();
         served.calls += 1;
-        let mut gradient: Vec<f64> = gradient.iter().copied().collect();
         let finite = energy.is_finite()
             && gradient.len() == dim
             && gradient.iter().all(|value| value.is_finite());
@@ -242,7 +258,7 @@ fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f6
     writeln!(meta, "stop: {}", served.stop_reason.unwrap_or("none")).ok();
     if !served.best_coords.is_empty() {
         let mut xyz = fs::File::create(rundir.join("best.xyz")).expect("best.xyz");
-        writeln!(xyz, "{}", atmnrs.len()).ok();
+        writeln!(xyz, "{atom_count}").ok();
         writeln!(xyz, "objective {:.10} eV", served.best).ok();
         for (index, atom) in served.best_coords.as_chunks::<3>().0.iter().enumerate() {
             let symbol = if index % 3 == 0 { "O" } else { "H" };
@@ -336,5 +352,86 @@ fn main() {
             );
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::thread;
+    use std::time::Duration;
+
+    fn send_eval(socket: &Path, coords: &[f64]) -> u8 {
+        let mut stream = UnixStream::connect(socket).expect("connect");
+        write_u64(&mut stream, coords.len() as u64);
+        write_f64s(&mut stream, coords);
+        let mut status = [0u8; 1];
+        stream.read_exact(&mut status).expect("status read");
+        if status[0] == STATUS_OK {
+            let _energy = read_f64s(&mut stream, 1);
+            let _gradient = read_f64s(&mut stream, coords.len());
+        }
+        status[0]
+    }
+
+    #[test]
+    fn driver_refuses_calls_past_the_4000_cap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("s");
+        let rundir = dir.path().join("run");
+        let evals = Arc::new(AtomicU64::new(0));
+        let server_evals = Arc::clone(&evals);
+        let server_socket = socket.clone();
+        let server_rundir = rundir.clone();
+        let handle = thread::spawn(move || {
+            serve_with(&server_socket, &server_rundir, 6, 4000, -1e9, |coords| {
+                server_evals.fetch_add(1, Ordering::SeqCst);
+                (-800.0, vec![0.0; coords.len()])
+            });
+        });
+
+        for _ in 0..200 {
+            if rundir.join("ready").is_file() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            rundir.join("ready").is_file(),
+            "driver did not become ready"
+        );
+
+        let coords = vec![0.0; 3 * 18];
+        for step in 1..=4000 {
+            assert_eq!(
+                send_eval(&socket, &coords),
+                STATUS_OK,
+                "call {step} within budget must succeed"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(rundir.join("stop")).expect("stop file"),
+            "budget 4000\n"
+        );
+        for extra in 4001..=4005 {
+            assert_eq!(
+                send_eval(&socket, &coords),
+                STATUS_REFUSED,
+                "call {extra} past the 4000 cap must be refused"
+            );
+        }
+
+        let mut stop_stream = UnixStream::connect(&socket).expect("connect stop");
+        write_u64(&mut stop_stream, STOP_REQUEST);
+        handle.join().expect("server thread");
+
+        assert_eq!(evals.load(Ordering::SeqCst), 4000);
+        let meta = fs::read_to_string(rundir.join("driver.txt")).expect("driver.txt");
+        assert!(meta.contains("budget: 4000\n"), "{meta}");
+        assert!(meta.contains("calls: 4000\n"), "{meta}");
+        assert!(meta.contains("refused: 5\n"), "{meta}");
+        assert!(meta.contains("stop: budget\n"), "{meta}");
     }
 }

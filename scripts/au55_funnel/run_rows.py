@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Append-only rows for the labelled funnel leave.
+"""Append-only rows for the labeled funnel leave.
 
 One job at a time. The process refuses to run unless the UTS hostname is
 bench and the working directory is /work. A row already stored for the

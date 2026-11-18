@@ -189,9 +189,47 @@ It uses the Jorgensen TIP4P constants C6 \(= 2552.24\) and C12
 anneal uses \(\varepsilon = 0.6485\)~kJ/mol and
 \(\sigma = 3.15365\)~\AA.
 Its C6 is \(2551.8252\) and its C12 is \(2510336.2\).
-Those constants give the committed \(-197.7750\)~kJ/mol reported here.}
+The implementation constants are listed to distinguish that potential
+from the Cambridge reference plate.}
 \label{fig:si-water}
 \end{figure}
+The per-seed receipts and their hashes are in the
+\texttt{rerun-9a30f319} directory named in the main text.
+\begin{table}
+\caption{The fresh 192-seed water-hexamer rerun.  GFN2-xTB was evaluated
+through tblite 0.7.0; plain CREST was 3.0.2.}
+\label{tab:hexamer-rerun}
+\begin{tabular}{lrrrr}
+\toprule
+Arm & Hits & Rate & Wilson 95\% & Median wall / s \\
+\midrule
+Default hop & 121/192 & 0.630 & 0.560--0.695 & 16.9731480 \\
+Plain CREST & 94/192 & 0.490 & 0.420--0.560 & 13.8815665 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{table}
+\caption{The comparison derived from the same paired receipts.  Fisher's
+test treats the two hit counts as independent; McNemar and Newcombe use
+the paired outcomes at each seed.}
+\label{tab:hexamer-rerun-contrast}
+\begin{tabular}{lr}
+\toprule
+Quantity & Value \\
+\midrule
+Both hit & 59 \\
+Only the default hop hit & 62 \\
+Only plain CREST hit & 35 \\
+Neither hit & 36 \\
+Hit-count difference & 27 \\
+Hit-rate difference & 0.141 \\
+Hit-count ratio & 1.29 \\
+Two-sided Fisher \(p\) & 0.00744 \\
+Exact McNemar \(p\) & 0.00796 \\
+Newcombe 95\% interval & 0.041--0.236 \\
+\bottomrule
+\end{tabular}
+\end{table}
 \begin{figure}
 \centering
 \includegraphics[width=0.48\textwidth]{lj38_sketchmap.pdf}

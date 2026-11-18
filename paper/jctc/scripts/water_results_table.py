@@ -2,11 +2,11 @@
 # Copyright (c) anneal developers
 """Print the water hexamer against CREST from the water_v45b per-seed table.
 
-Reads data/water_v45b/water-v45b-perseed.csv (rule water_crest_fair of anneal_repro
-v4.5b) and recomputes Wilson (z=1.96), exact two-sided McNemar, and Newcombe 1998
-method 10 from the per-seed hits. Four arms on anneal 36086e98, seeds 0 to 191 at a
-budget of 4000 force calls: the default hop, the hop with the budget-fair polish,
-CREST, and CREST plus the polish under the same budget (crest_fair).
+Reads the authenticated status receipts in data/water_v45b/rerun-9a30f319 for
+the default hop and plain CREST, and water-v45b-perseed.csv for the two opt-in
+polish arms. It recomputes Wilson (z=1.96), exact two-sided McNemar, and Newcombe
+1998 method 10 from the per-seed hits. All arms use seeds 0 to 191 and a budget
+of 4000 force calls.
 
 The LJ75 rows of --supplement still come from the sealed results_jcc folders.
 
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import math
 import sys
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ LJ_DATA = results_jcc.DATA
 CSV_NAME = "water-v45b-perseed.csv"
 PROVENANCE_NAME = "provenance.txt"
 EXPECTED_CSV_SHA256 = "d7c661258f757619b86fbf841ff270d7d872b984d306f819efbb3d933c041b7c"
+RERUN = WATER_DATA / "rerun-9a30f319"
 TABLE = "tbl:water"
 SEEDS = "tbl:sealed-rows"
 SEED_SPAN = "0-191"
@@ -89,6 +91,31 @@ def die(message: str) -> NoReturn:
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def rerun_receipts(path: Path = RERUN) -> dict[str, list[dict]]:
+    """Load and authenticate the 192 fresh receipts of each rerun arm."""
+    sums = {}
+    for line in (path / "SHA256SUMS").read_text().splitlines():
+        sha, name = line.split(maxsplit=1)
+        sums[name] = sha
+    expected = {f"{arm}/seed-{seed:04}.json" for arm in ("anneal", "crest") for seed in range(RUNS)}
+    if set(sums) != expected:
+        die(f"{path / 'SHA256SUMS'} does not name the 384 rerun receipts")
+    found = {}
+    for arm in ("anneal", "crest"):
+        rows = []
+        for seed in range(RUNS):
+            name = f"{arm}/seed-{seed:04}.json"
+            receipt = path / name
+            if digest(receipt) != sums[name]:
+                die(f"{receipt} does not match SHA256SUMS")
+            row = json.loads(receipt.read_text())
+            if row["arm"] != arm or row["seed"] != seed or row["budget"] != BUDGET:
+                die(f"{receipt} does not identify the expected arm, seed and budget")
+            rows.append(row)
+        found[arm] = rows
+    return found
 
 
 def wilson(hits: int, n: int, z: float = WILSON_Z) -> tuple[float, float]:
@@ -276,8 +303,11 @@ def load(data: Path = DATA) -> tuple[dict[str, str], tuple[Arm, ...], dict[str, 
     if seeds != list(range(RUNS)):
         die(f"{CSV_NAME} seeds are not {SEED_SPAN}")
 
+    receipts = rerun_receipts()
     hit_cols = {folder: col for folder, col, *_ in ARMS}
     bits = {folder: tuple(int(row[col]) for row in rows) for folder, col in hit_cols.items()}
+    for folder in receipts:
+        bits[folder] = tuple(int(row["hit"]) for row in receipts[folder])
     crest_bits = bits[CREST_FOLDER]
 
     arms: list[Arm] = []
@@ -294,8 +324,12 @@ def load(data: Path = DATA) -> tuple[dict[str, str], tuple[Arm, ...], dict[str, 
             "seeds": SEED_SPAN,
             "wilson_95": [low, high],
         }
-        walls = [row[wall_col] for row in rows]
-        calls = [int(row[calls_col]) for row in rows]
+        if folder in receipts:
+            walls = [row["wall_seconds"] for row in receipts[folder]]
+            calls = [int(row.get("force_count") or row["calls"]) for row in receipts[folder]]
+        else:
+            walls = [row[wall_col] for row in rows]
+            calls = [int(row[calls_col]) for row in rows]
         if cost_kind == "median_wall":
             summary["median_wall_s"] = _median_wall(walls)
         else:
@@ -312,10 +346,11 @@ def load(data: Path = DATA) -> tuple[dict[str, str], tuple[Arm, ...], dict[str, 
                 die(f"{folder}: paired outcomes do not give the hits of the arm")
             if contrast["both_hit"] + contrast["only_crest_hit"] != sum(crest_bits):
                 die(f"{folder}: paired outcomes do not give the hits of CREST")
+        binary = (receipts[folder][0]["binary_sha256"] if folder in receipts else EXPECTED_CSV_SHA256)
         record = {
             "anneal_commit": ANNEAL_COMMIT,
             "arm": folder,
-            "binary_sha256": EXPECTED_CSV_SHA256,
+            "binary_sha256": binary,
             "rule": RULE,
             "hits": f"{hits}/{RUNS}",
         }
