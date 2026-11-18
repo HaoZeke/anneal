@@ -57,11 +57,16 @@ fn fact(n: i32) -> f64 {
         121_645_100_408_832_000.0,
         2_432_902_008_176_640_000.0,
     ];
-    if n < 0 || n as usize >= F.len() {
-        0.0
-    } else {
-        F[n as usize]
+    if n < 0 {
+        return 0.0;
     }
+    let n = n as usize;
+    if n < F.len() {
+        return F[n];
+    }
+    // The cached tables reach l = 8, where the 3j prefactor divides by
+    // (l1 + l2 + l3 + 1)! = 25!.
+    (F.len()..=n).fold(F[F.len() - 1], |product, k| product * k as f64)
 }
 
 fn wigner_3j(l1: i32, l2: i32, l3: i32, m1: i32, m2: i32, m3: i32) -> f64 {
@@ -334,6 +339,69 @@ mod tests {
         assert!((cg(1, 0, 1, 0, 2, 0) - (2.0_f64 / 3.0).sqrt()).abs() < 1e-12);
     }
 
+    /// The cached tables go to l = 8, where l1 + l2 + l3 + 1 reaches 25.
+    #[test]
+    fn cg_stays_normalised_past_twenty_factorial() {
+        for (l1, l2, l3) in [(7, 7, 6), (7, 7, 7), (8, 8, 8)] {
+            let sum: f64 = (-l1..=l1)
+                .map(|m1| cg(l1, m1, l2, -m1, l3, 0).powi(2))
+                .sum();
+            assert!((sum - 1.0).abs() < 1e-10, "({l1} {l2} {l3}): {sum}");
+        }
+        let c: Vec<f64> = (0..3 * 9 * 9)
+            .map(|i| ((i * 17) % 11) as f64 * 0.01)
+            .collect();
+        for l_max in [7usize, 8] {
+            assert!(
+                from_c(&c, 3, l_max).iter().all(|v| v.is_finite()),
+                "l_max {l_max}"
+            );
+        }
+    }
+
+    /// `l = 7` and `l = 8` divide by `21!` through `25!`. The reference is the
+    /// same Racah sum the table implements, with every factorial an integer,
+    /// plus the closed form `⟨l l, l l | 2l 2l⟩ = 1`.
+    #[test]
+    fn l7_and_l8_couplings_match_the_exact_racah_sum() {
+        let facts = factorials_through(33);
+        let near = |got: f64, exact: f64, label: &str| {
+            let tol = 1e-12 * (1.0 + exact.abs());
+            assert!((got - exact).abs() <= tol, "{label}: {got} vs {exact}");
+        };
+        // One stretched state, Condon-Shortley phase positive.
+        near(cg(7, 7, 7, 7, 14, 14), 1.0, "stretched l = 7");
+        near(cg(8, 8, 8, 8, 16, 16), 1.0, "stretched l = 8");
+        let small = exact_cg(&facts, 1, 0, 1, 0, 2, 0);
+        near(small, (2.0_f64 / 3.0).sqrt(), "exact ⟨1 0, 1 0 | 2 0⟩");
+        near(
+            exact_cg(&facts, 1, 1, 1, 1, 2, 2),
+            1.0,
+            "exact ⟨1 1, 1 1 | 2 2⟩",
+        );
+        for l_max in [7usize, 8] {
+            for (l1, l2, l3) in triples(l_max) {
+                if l1 + l2 + l3 < 20 {
+                    continue;
+                }
+                for m1 in -(l1 as i32)..=l1 as i32 {
+                    for m2 in -(l2 as i32)..=l2 as i32 {
+                        let m3 = m1 + m2;
+                        if m3.abs() > l3 as i32 {
+                            continue;
+                        }
+                        let exact = exact_cg(&facts, l1 as i32, m1, l2 as i32, m2, l3 as i32, m3);
+                        near(
+                            cg(l1 as i32, m1, l2 as i32, m2, l3 as i32, m3),
+                            exact,
+                            &format!("({l1} {m1}, {l2} {m2} | {l3} {m3})"),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_cached_contraction_matches_the_direct_one() {
         let c: Vec<f64> = (0..3 * 7 * 7)
@@ -375,5 +443,279 @@ mod tests {
             elapsed.as_millis() < 200,
             "ACE derivative took {elapsed:?}; a (H2O)20 pullback would not return"
         );
+    }
+
+    /// Little-endian base 2^64.
+    #[derive(Clone)]
+    struct Nat {
+        limbs: Vec<u64>,
+    }
+
+    impl Nat {
+        fn zero() -> Self {
+            Self { limbs: vec![0] }
+        }
+
+        fn from_u64(value: u64) -> Self {
+            Self { limbs: vec![value] }
+        }
+
+        fn normalized(mut limbs: Vec<u64>) -> Self {
+            while limbs.len() > 1 && limbs.last() == Some(&0) {
+                limbs.pop();
+            }
+            if limbs.is_empty() {
+                limbs.push(0);
+            }
+            Self { limbs }
+        }
+
+        fn is_zero(&self) -> bool {
+            self.limbs.iter().all(|limb| *limb == 0)
+        }
+
+        fn bits(&self) -> u32 {
+            if self.is_zero() {
+                return 0;
+            }
+            let top = *self.limbs.last().expect("a non-zero integer has a limb");
+            (self.limbs.len() as u32 - 1) * 64 + (64 - top.leading_zeros())
+        }
+
+        fn mul(&self, other: &Self) -> Self {
+            if self.is_zero() || other.is_zero() {
+                return Self::zero();
+            }
+            let mut out = vec![0u64; self.limbs.len() + other.limbs.len()];
+            for (i, &left) in self.limbs.iter().enumerate() {
+                let mut carry = 0u128;
+                for (j, &right) in other.limbs.iter().enumerate() {
+                    carry += u128::from(out[i + j]) + u128::from(left) * u128::from(right);
+                    out[i + j] = carry as u64;
+                    carry >>= 64;
+                }
+                let mut k = i + other.limbs.len();
+                while carry > 0 {
+                    carry += u128::from(out[k]);
+                    out[k] = carry as u64;
+                    carry >>= 64;
+                    k += 1;
+                }
+            }
+            Self::normalized(out)
+        }
+
+        fn mul_u64(&self, factor: u64) -> Self {
+            self.mul(&Self::from_u64(factor))
+        }
+
+        fn add(&self, other: &Self) -> Self {
+            let width = self.limbs.len().max(other.limbs.len());
+            let mut out = Vec::with_capacity(width + 1);
+            let mut carry = 0u128;
+            for i in 0..width {
+                carry += u128::from(self.limbs.get(i).copied().unwrap_or(0))
+                    + u128::from(other.limbs.get(i).copied().unwrap_or(0));
+                out.push(carry as u64);
+                carry >>= 64;
+            }
+            if carry > 0 {
+                out.push(carry as u64);
+            }
+            Self::normalized(out)
+        }
+
+        fn cmp_nat(&self, other: &Self) -> std::cmp::Ordering {
+            // Leading zeros are already stripped, except the zero value's one limb.
+            let a_len = if self.is_zero() { 0 } else { self.limbs.len() };
+            let b_len = if other.is_zero() {
+                0
+            } else {
+                other.limbs.len()
+            };
+            match a_len.cmp(&b_len) {
+                std::cmp::Ordering::Equal => self.limbs[..a_len]
+                    .iter()
+                    .rev()
+                    .cmp(other.limbs[..b_len].iter().rev()),
+                order => order,
+            }
+        }
+
+        fn sub(&self, other: &Self) -> Self {
+            let mut out = Vec::with_capacity(self.limbs.len());
+            let mut borrow = 0i128;
+            for i in 0..self.limbs.len() {
+                let mut difference = self.limbs[i] as i128
+                    - i128::from(other.limbs.get(i).copied().unwrap_or(0))
+                    - borrow;
+                if difference < 0 {
+                    difference += 1i128 << 64;
+                    borrow = 1;
+                } else {
+                    borrow = 0;
+                }
+                out.push(difference as u64);
+            }
+            assert_eq!(borrow, 0, "subtracting a larger integer");
+            Self::normalized(out)
+        }
+
+        /// The integer formed by the bits at and above `shift`, low 64 of them.
+        fn shr_u64(&self, shift: u32) -> u64 {
+            let limb = (shift / 64) as usize;
+            let bit = shift % 64;
+            let low = self.limbs.get(limb).copied().unwrap_or(0);
+            if bit == 0 {
+                return low;
+            }
+            let high = self.limbs.get(limb + 1).copied().unwrap_or(0);
+            (low >> bit) | (high << (64 - bit))
+        }
+    }
+
+    struct Rat {
+        sign: i8,
+        num: Nat,
+        den: Nat,
+    }
+
+    impl Rat {
+        fn zero() -> Self {
+            Self {
+                sign: 0,
+                num: Nat::zero(),
+                den: Nat::from_u64(1),
+            }
+        }
+
+        fn add_recip(&mut self, negative: bool, den_term: Nat) {
+            let term = if negative { -1 } else { 1 };
+            if self.sign == 0 {
+                *self = Self {
+                    sign: term,
+                    num: Nat::from_u64(1),
+                    den: den_term,
+                };
+                return;
+            }
+            let left = self.num.mul(&den_term);
+            let (sign, num) = add_signed(self.sign, &left, term, &self.den);
+            let den = self.den.mul(&den_term);
+            *self = if sign == 0 {
+                Self::zero()
+            } else {
+                Self { sign, num, den }
+            };
+        }
+    }
+
+    fn add_signed(sign_a: i8, a: &Nat, sign_b: i8, b: &Nat) -> (i8, Nat) {
+        if sign_a == sign_b {
+            return (sign_a, a.add(b));
+        }
+        match a.cmp_nat(b) {
+            std::cmp::Ordering::Equal => (0, Nat::zero()),
+            std::cmp::Ordering::Greater => (sign_a, a.sub(b)),
+            std::cmp::Ordering::Less => (sign_b, b.sub(a)),
+        }
+    }
+
+    fn factorials_through(max: u32) -> Vec<Nat> {
+        let mut facts = Vec::with_capacity(max as usize + 1);
+        let mut running = Nat::from_u64(1);
+        facts.push(running.clone());
+        for k in 1..=max {
+            running = running.mul_u64(u64::from(k));
+            facts.push(running.clone());
+        }
+        facts
+    }
+
+    fn product(facts: &[Nat], args: &[i32]) -> Option<Nat> {
+        let mut acc = Nat::from_u64(1);
+        for &arg in args {
+            if arg < 0 {
+                return None;
+            }
+            acc = acc.mul(facts.get(arg as usize)?);
+        }
+        Some(acc)
+    }
+
+    /// Top 53 bits and the power of two they were shifted by.
+    fn mant_exp(value: &Nat) -> (u64, i32) {
+        const KEEP: u32 = 53;
+        let bits = value.bits();
+        if bits <= KEEP {
+            return (value.limbs.first().copied().unwrap_or(0), 0);
+        }
+        (value.shr_u64(bits - KEEP), (bits - KEEP) as i32)
+    }
+
+    fn ratio_f64(num: &Nat, den: &Nat) -> f64 {
+        let (numerator, num_exp) = mant_exp(num);
+        let (denominator, den_exp) = mant_exp(den);
+        (numerator as f64 / denominator as f64) * 2.0f64.powi(num_exp - den_exp)
+    }
+
+    fn exact_wigner(facts: &[Nat], l1: i32, l2: i32, l3: i32, m1: i32, m2: i32, m3: i32) -> f64 {
+        if m1 + m2 + m3 != 0 || l3 < (l1 - l2).abs() || l3 > l1 + l2 {
+            return 0.0;
+        }
+        let tmin = 0.max(l2 - l3 - m1).max(l1 - l3 + m2);
+        let tmax = (l1 + l2 - l3).min(l1 - m1).min(l2 + m2);
+        if tmin > tmax {
+            return 0.0;
+        }
+        let mut sum = Rat::zero();
+        for t in tmin..=tmax {
+            let Some(den) = product(
+                facts,
+                &[
+                    t,
+                    l1 + l2 - l3 - t,
+                    l1 - m1 - t,
+                    l2 + m2 - t,
+                    l3 - l2 + m1 + t,
+                    l3 - l1 - m2 + t,
+                ],
+            ) else {
+                continue;
+            };
+            sum.add_recip(t % 2 != 0, den);
+        }
+        if sum.sign == 0 {
+            return 0.0;
+        }
+        let Some(numerator) = product(
+            facts,
+            &[
+                l1 + l2 - l3,
+                l1 - l2 + l3,
+                -l1 + l2 + l3,
+                l1 - m1,
+                l1 + m1,
+                l2 - m2,
+                l2 + m2,
+                l3 - m3,
+                l3 + m3,
+            ],
+        ) else {
+            return 0.0;
+        };
+        let denominator = facts[(l1 + l2 + l3 + 1) as usize].clone();
+        let square_num = sum.num.mul(&sum.num).mul(&numerator);
+        let square_den = sum.den.mul(&sum.den).mul(&denominator);
+        let phase = if (l1 - l2 - m3) % 2 == 0 { 1.0 } else { -1.0 };
+        phase * f64::from(sum.sign) * ratio_f64(&square_num, &square_den).sqrt()
+    }
+
+    fn exact_cg(facts: &[Nat], l1: i32, m1: i32, l2: i32, m2: i32, l3: i32, m3: i32) -> f64 {
+        if m1 + m2 != m3 {
+            return 0.0;
+        }
+        let phase = if (l1 - l2 + m3) % 2 == 0 { 1.0 } else { -1.0 };
+        phase * ((2 * l3 + 1) as f64).sqrt() * exact_wigner(facts, l1, l2, l3, m1, m2, -m3)
     }
 }
