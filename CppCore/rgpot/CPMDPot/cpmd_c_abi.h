@@ -129,11 +129,11 @@ RGPOT_CPMDC_API void cpmdc_session_destroy(CPMDCSession *session);
  *         Seeding means choosing the next SCF initial guess: the session's
  *         current converged orbitals for a key with no stored copy, or the
  *         orbitals last converged under that key when one exists.
- *         `cpmdc_last_error` is not declared here and `CPMDPot` does not read
- *         it. This note covers only the stub and the reference fake: the stub
- *         does not define `cpmdc_last_error`, and the reference fake stores one
- *         string that a failing select sets and a successful select clears.
- *         Other engines are not described.
+ *         `cpmdc_last_error` is not declared here. This note covers only the
+ *         stub and the reference fake: the stub does not define
+ *         `cpmdc_last_error`, and the reference fake stores one string that a
+ *         failing select sets and a successful select clears. Other engines are
+ *         not described.
  */
 RGPOT_CPMDC_API int cpmdc_session_select_orbitals(CPMDCSession *session,
                                                   long long key);

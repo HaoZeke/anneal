@@ -404,7 +404,8 @@ TEST_CASE("CPMDPot force reports an orbital key refused at configure",
   std::array<std::array<double, 3>, 3> box = {
       {{20.0, 0.0, 0.0}, {0.0, 21.0, 0.0}, {0.0, 0.0, 23.0}}};
   REQUIRE_THROWS_WITH(
-      pot(positions, atmtypes, box), "CPMD engine refused the orbital key");
+      pot(positions, atmtypes, box),
+      "CPMD engine refused the orbital key: orbital key refused");
 }
 
 // configure drops the session when the engine refuses the remembered key,
@@ -451,12 +452,51 @@ TEST_CASE("CPMDPot setPotentialConfig reports an orbital key refusal",
   const std::string rejected =
       "rgpot params cpmd arm rejected by embed: functional=BLYP "
       "cutoffRy=70.000000 charge=0 mult=1 enginePath=" +
-      engine_path + " (CPMD engine refused the orbital key)";
+      engine_path +
+      " (CPMD engine refused the orbital key: orbital key refused)";
   REQUIRE(message == rejected);
 
   pot.selectOrbitals(41);
   REQUIRE(pot.setPotentialConfig(cfg.asReader(), &message));
   REQUIRE(pot.available());
+}
+
+TEST_CASE("CPMDPot setPotentialConfig reports a session-create refusal reason",
+          "[cpmd][abi]") {
+  const char *path = std::getenv("RGPOT_CPMD_ENGINE");
+  REQUIRE(path != nullptr);
+
+  rgpot::DynLib lib;
+  lib.open(path);
+  using SetCreateFailFn = void (*)(int, const char *);
+  auto set_create_fail =
+      lib.sym<SetCreateFailFn>("cpmdc_fake_set_session_create_failure");
+  set_create_fail(0, nullptr);
+
+  ::capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::CPMDParams>();
+  p.setFunctional("BLYP");
+  p.setCutOffRy(70.0);
+  rgpot::CPMDPot pot(p.asReader());
+  REQUIRE(pot.available());
+
+  ::capnp::MallocMessageBuilder cfg_msg;
+  auto cfg = cfg_msg.initRoot<::PotentialConfig>();
+  auto cp = cfg.initCpmd();
+  cp.setFunctional("BLYP");
+  cp.setCutOffRy(80.0);
+  cp.setEnginePath(path);
+
+  set_create_fail(1, "fake refused params");
+  std::string message;
+  REQUIRE_FALSE(pot.setPotentialConfig(cfg.asReader(), &message));
+  REQUIRE(message ==
+          std::string("rgpot params cpmd arm rejected by embed: "
+                      "functional=BLYP cutoffRy=80.000000 charge=0 mult=1 "
+                      "enginePath=") +
+              path +
+              " (CPMD engine refused the session create: fake refused params)");
+  set_create_fail(0, nullptr);
 }
 
 TEST_CASE("CPMDPot rejects a copy onto a refused orbital key", "[cpmd][abi]") {

@@ -2,6 +2,7 @@
 // Copyright 2023--present rgpot developers
 
 #include "rgpot/CPMDPot/CPMDPot.hpp"
+#include "rgpot/CPMDPot/ConfigMessage.hpp"
 #include "rgpot/CalculatorGroup.hpp"
 
 #include <capnp/message.h>
@@ -51,6 +52,7 @@ using FeatureFindFn = const CPMDCFeatureEntry *(*)(const char *);
 using AdoptCommFn = int (*)(const void *, std::size_t, int);
 using SelectOrbitalsFn = int (*)(CPMDCSession *, long long);
 using CopyOrbitalsFn = int (*)(CPMDCSession *, long long, long long);
+using LastErrorFn = const char *(*)(void);
 
 // Layout matches cpmdc CPMDCStressTensor: int valid, then nine doubles.
 struct CPMDCStressTensor {
@@ -109,6 +111,7 @@ struct EngineBundle {
   LastStressFn last_stress = nullptr;
   SelectOrbitalsFn select_orbitals = nullptr;
   CopyOrbitalsFn copy_orbitals = nullptr;
+  LastErrorFn last_error = nullptr;
   AdoptCommFn adopt_comm = nullptr;
   std::string loaded_path;
   std::string load_error;
@@ -133,6 +136,7 @@ bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
   b.last_stress = nullptr;
   b.select_orbitals = nullptr;
   b.copy_orbitals = nullptr;
+  b.last_error = nullptr;
   b.adopt_comm = nullptr;
 
   bool eng_ok = false;
@@ -180,6 +184,7 @@ bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
       "cpmdc_session_select_orbitals");
   b.copy_orbitals =
       b.engine_lib.sym_optional<CopyOrbitalsFn>("cpmdc_session_copy_orbitals");
+  b.last_error = b.engine_lib.sym_optional<LastErrorFn>("cpmdc_last_error");
 
   const bool has_one_shot = b.energy_gradient && b.set_params;
   const bool has_session_result = b.session_create && b.session_destroy &&
@@ -266,6 +271,15 @@ bool push_params_to_engine(EngineBundle &b,
     return false;
   const ParamsView view = params_view(params_words);
   return b.set_params(view.data, view.size) == 0;
+}
+
+std::string read_engine_last_error(const EngineBundle &b) {
+  if (!b.last_error)
+    return "";
+  const char *msg = b.last_error();
+  if (!msg || !*msg)
+    return "";
+  return msg;
 }
 
 std::vector<::capnp::word> serialize_force_input(const ForceInput &in) {
@@ -422,14 +436,22 @@ bool CPMDPot::Impl::configure() {
     destroySession();
     const ParamsView view = params_view(params_words);
     session = bundle.session_create(view.data, view.size);
-    if (!session)
+    if (!session) {
+      unavailable_reason = "CPMD engine refused the session create";
+      const std::string detail = read_engine_last_error(bundle);
+      if (!detail.empty())
+        unavailable_reason += ": " + detail;
       return false;
+    }
     // The params are the identity of this session. Commit them only
     // after the remembered orbital key is on it. A refusal drops the
     // session, so a later setParams with the same bytes tries again
     // instead of taking the identical-session return above.
     if (!applySelectedOrbitalKey()) {
       unavailable_reason = "CPMD engine refused the orbital key";
+      const std::string detail = read_engine_last_error(bundle);
+      if (!detail.empty())
+        unavailable_reason += ": " + detail;
       destroySession();
       return false;
     }
@@ -553,17 +575,9 @@ bool CPMDPot::setPotentialConfig(const ::PotentialConfig::Reader &cfg,
     const auto cp = cfg.getCpmd();
     const bool ok = setParams(cp);
     if (message_out) {
-      const std::string sum = params_summary(cp);
-      if (ok)
-        *message_out = "rgpot params applied (cpmd arm): " + sum;
-      else if (!impl_ || !impl_->bundle.loaded)
-        *message_out =
-            "rgpot params cpmd arm failed (engine not loaded): " + sum;
-      else {
-        *message_out = "rgpot params cpmd arm rejected by embed: " + sum;
-        if (!impl_->unavailable_reason.empty())
-          *message_out += " (" + impl_->unavailable_reason + ")";
-      }
+      *message_out = formatCpmdConfigMessage(
+          params_summary(cp), ok, impl_ && impl_->bundle.loaded,
+          impl_ ? impl_->unavailable_reason : std::string{});
     }
     return ok;
   }
