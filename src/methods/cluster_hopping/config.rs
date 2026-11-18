@@ -660,8 +660,9 @@ pub struct Config {
     /// Symmetry completion of a newly entered basin: when an accepted hop
     /// lands in a basin the chain was not in, the incumbent is pushed onto
     /// the point group measured on it ([`crate::detected_symmetry`]),
-    /// quenched, recorded, and offered to the acceptance rule. One attempt
-    /// per new basin, so a chain sitting still never pays twice. The group
+    /// quenched, recorded, and offered to the chain under the biased test a
+    /// hop faces. One attempt per new basin, so a chain sitting still never
+    /// pays twice. The group
     /// is read from the structure alone; the preset names no group, order,
     /// size or species.
     pub symmetry_completion_on_new: bool,
