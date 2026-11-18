@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use anneal_core::corekey::{MotifClass, motif_class};
+use anneal_core::corekey::{CoreRegion, core_region};
 use anneal_core::methods::cluster_hopping::{Ledger, random_cluster};
 use anneal_core::methods::lattice_search::{LatticeSearchConfig, reoccupy};
 use anneal_core::methods::two_phase::{largest_pair_distance, penalty};
@@ -26,9 +26,9 @@ fn env_f64(key: &str, default: f64) -> f64 {
 }
 
 struct Row {
-    class0: MotifClass,
+    class0: CoreRegion,
     e0: f64,
-    class1: MotifClass,
+    class1: CoreRegion,
     e1: f64,
     evals: usize,
 }
@@ -82,12 +82,12 @@ fn main() {
                     let mut evals = 0usize;
                     let x0 = random_cluster(n, 0.7, 0.5, &mut rng);
                     let (e0, xq) = compaction_quench(&pot, x0.view(), kappa, mu, &mut evals);
-                    let class0 = motif_class(xq.view());
+                    let class0 = core_region(xq.view());
                     let mut ledger = Ledger::new(usize::MAX / 2);
                     let rebuilt = reoccupy(&cfg, &mut ledger, xq.view());
                     evals += ledger.spent();
                     let (e1, xr) = quench(&pot, rebuilt.view(), &mut evals);
-                    let class1 = motif_class(xr.view());
+                    let class1 = core_region(xr.view());
                     rows.lock().expect("rows").push(Row {
                         class0,
                         e0,

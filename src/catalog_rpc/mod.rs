@@ -387,7 +387,7 @@ pub enum CatalogOperation {
     },
     /// Report one chain's motif class and energy to the shared table.
     ReportCoreClass {
-        /// [`crate::corekey::MotifClass::index`] of the live state.
+        /// [`crate::corekey::CoreRegion::index`] of the live state.
         class: u8,
         /// Current energy of the reporting chain.
         energy: f64,
