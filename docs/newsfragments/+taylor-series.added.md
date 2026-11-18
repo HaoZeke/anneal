@@ -1,0 +1,2 @@
+`rgpot_core::taylor` carries truncated Taylor series with outward-rounded interval coefficients (`maryada`): sums, products, quotients, `sqrt`, `exp`, `tanh`, `acos` and integer powers, with branch tests decided on enclosures.
+A potential whose energy is an explicit formula evaluates it on `Taylor::line` coordinates to implement `TaylorJet`; a quotient, root or arc cosine at the edge of its domain is `JetError::Domain`, and an undecided comparison is `JetError::Branch`.

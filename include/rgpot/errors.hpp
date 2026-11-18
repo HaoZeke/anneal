@@ -80,6 +80,12 @@ inline void check_status(rgpot_status_t status) {
     throw Error("buffer size error: " + error_msg, status);
   case RGPOT_SCC_NOT_CONVERGED:
     throw Error("SCC not converged: " + error_msg, status);
+  case RGPOT_NO_JET:
+    throw Error("no Taylor jet: " + error_msg, status);
+  case RGPOT_JET_BRANCH:
+    throw Error("Taylor jet branch: " + error_msg, status);
+  case RGPOT_JET_DOMAIN:
+    throw Error("Taylor jet domain: " + error_msg, status);
   case RGPOT_INTERNAL_ERROR:
   default:
     throw Error("internal error: " + error_msg, status);

@@ -26,6 +26,7 @@ use crate::fused::{
     lock, rgpot_fused_error_kind_t, FusedCache, FusedError, FusedSettings, FusedValue,
 };
 use crate::hvp::HvpState;
+use crate::jet::JetState;
 use crate::potential::PotentialCallback;
 use crate::status::{last_error_message, rgpot_status_t, set_last_error};
 use crate::tensor::{
@@ -205,6 +206,11 @@ impl rgpot_potential_t {
         });
         outcome
     }
+
+    /// The registered Taylor jet callback.
+    pub(crate) fn jet_state(&self) -> &JetState {
+        &self.fused_cache.jet
+    }
 }
 
 /// Opaque cache of the last fused energy and gradient evaluation.
@@ -216,6 +222,7 @@ pub struct rgpot_fused_cache_t {
     /// Lives here, behind the pointer, so `rgpot_potential_t` keeps its C
     /// layout.
     hvp: HvpState,
+    jet: JetState,
 }
 
 impl rgpot_fused_cache_t {
@@ -224,6 +231,7 @@ impl rgpot_fused_cache_t {
             fused: FusedCache::new(),
             peer_refusal: Mutex::new(None),
             hvp: HvpState::default(),
+            jet: JetState::default(),
         }
     }
 

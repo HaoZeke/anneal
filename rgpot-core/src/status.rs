@@ -52,6 +52,12 @@ pub enum rgpot_status_t {
     /// converge. A callback returns it so that the core can tell this
     /// failure from any other; see `rgpot_potential_fused_error_kind`.
     RGPOT_SCC_NOT_CONVERGED = 5,
+    /// The potential has no exact Taylor jet.
+    RGPOT_NO_JET = 6,
+    /// A branch test of a Taylor jet has an enclosure containing its threshold.
+    RGPOT_JET_BRANCH = 7,
+    /// A Taylor jet left the analytic domain of a function or a division.
+    RGPOT_JET_DOMAIN = 8,
 }
 
 thread_local! {

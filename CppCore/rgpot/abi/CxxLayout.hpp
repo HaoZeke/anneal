@@ -164,7 +164,7 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 1;
 /// did not increase.
 ///
 /// This is not `RGPOT_ABI_LAYOUT_REVISION`. The C ABI stamp in `rgpot.h`
-/// is major 1, minor 2, layout revision 1. Minor 1 added
+/// is major 1, minor 4, layout revision 1. Minor 1 added
 /// `rgpot_eindir_abi_compatible`. No exported C struct of that header
 /// changed layout. The neighbour query is `RGPOT_NLIST_ABI` 4.
 /// The C API is exported from librgpot, so it has no shared library of
