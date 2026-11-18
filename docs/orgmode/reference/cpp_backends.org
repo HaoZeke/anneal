@@ -181,6 +181,14 @@ It is removed when the session ends unless =keepWorkDir= is set.
 
 ** CPMD
 
+The method is Car and Parrinello, Phys.
+Rev. Lett. 55, 2471 (1985), doi:10.1103/PhysRevLett.55.2471.
+=CPMDPot= loads =libcpmdc= and does not carry a plane-wave energy of its own.
+Positions are Angstrom and the energy is eV.
+The parameters are the =CPMDParams= arm.
+The tutorial's 0.77 eV is the stand-in engine on a 20 Angstrom cell (0.75 plus
+0.001 times the cell's z length), not a published water energy.
+
 *** =rgpot::CPMDPot=
 
 #+attr_rgpot: signature
@@ -231,8 +239,8 @@ bool setParams(const ::CPMDParams::Reader &params);
 The engine is loaded again when it was not loaded or =enginePath= changed.
 A live session is kept when the engine path and the serialized params are
 unchanged.
-A refused orbital key drops the session just created, so the same params
-are applied again on the next call.
+A refused orbital key drops the session just created, so the same params are
+applied again on the next call.
 
 *** =rgpot::CPMDPot::getParams=
 
@@ -539,6 +547,14 @@ The build option is =-Dwith_tblite=true=.
 
 ** xtb
 
+The default method is GFN2-xTB: Bannwarth, Ehlert and Grimme, J. Chem.
+Theory Comput. 15, 1652 (2019), doi:10.1021/acs.jctc.8b01176.
+Host positions are Angstrom and the host energy is eV.
+=XTBConfig= holds the parameters: the method, accuracy 1, an electronic
+temperature of 300 K, 250 iterations, charge 0 and no unpaired electrons.
+A numerical GFN2 energy needs libxtb, which the default build does not link, so
+this tree does not pin one.
+
 *** =rgpot::XTBConfig=
 
 - Inputs :: =method= (=GFNMethod::GFNFF=, =GFN0xTB=, =GFN1xTB= or =GFN2xTB=;
@@ -592,10 +608,10 @@ explicit XTBPot(const XTBConfig &config);
 - Outputs :: a potential that calls the linked libxtb C API.
 - Errors :: =std::runtime_error= from the constructor when the xtb environment,
   calculator or results cannot be created.
-  A force throws =rgpot::SccNotConverged=, a =std::runtime_error=, when the SCC
-  does not converge and the rescue below does not help, and
-  =std::runtime_error= when the handles are missing, =xtb_newMolecule= fails,
-  another single point failure occurs, or the energy or gradient is not finite.
+  A force throws =rgpot::SccNotConverged=, a
+  =std::runtime_error=, when the SCC does not converge and the rescue below does not help, and =std::runtime_error=
+  when the handles are missing, =xtb_newMolecule= fails, another single point
+  failure occurs, or the energy or gradient is not finite.
   After such a failure the handles are replaced.
 
 A new composition rebuilds the molecule.
@@ -904,6 +920,14 @@ void setWarmMinGap(double ev);
 - Errors :: =std::runtime_error= when the engine is not available.
 
 ** Metatomic
+
+The model container is metatomic: Bigi et al., J. Chem.
+Phys. 164, 064113 (2026), doi:10.1063/5.0304911.
+Positions are Angstrom and the energy is eV.
+The parameters are the exported model plus =MetatomicConfig=.
+Reference value: the 13-atom geometry in =MetatomicPotTest=, on
+=CppCore/tests/data/lj38/lennard-jones.pt=, is 98374.87753058573 eV within 1e-2,
+the pin from eOn =MetatomicTest=.
 
 *** =rgpot::MetatomicConfig=
 
