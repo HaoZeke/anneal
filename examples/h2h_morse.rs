@@ -144,6 +144,9 @@ fn cmd_run(args: &[String]) -> i32 {
     };
     let budget = env_budget().unwrap_or(spec.budget);
     let mut cfg = Config::recommended(spec.n);
+    if std::env::var("H2H_PLATEAU_RESTARTS").is_ok_and(|value| value == "1") {
+        cfg = cfg.with_plateau_restarts();
+    }
     // Unset leaves the preset's structure priors on. `0` turns off the
     // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
     // labelled core, the motif reseed, stall symmetrisation (and its

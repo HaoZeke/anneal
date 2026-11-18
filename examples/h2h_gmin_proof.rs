@@ -70,6 +70,9 @@ fn cmd_run(args: &[String]) -> i32 {
     {
         cfg.basin_stride = stride.max(1);
     }
+    if std::env::var("H2H_PLATEAU_RESTARTS").is_ok_and(|value| value == "1") {
+        cfg = cfg.with_plateau_restarts();
+    }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)
         && let Err(err) = write_coords(path, &start)

@@ -1170,8 +1170,8 @@ fn soap_arm(
         rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
         class: cfg.soap_class_residual && packing,
-        // One element takes the unlabelled fivefold hop. The label is
-        // not a second species, so it is not a partition of the residual.
+        // One element takes the unlabelled cloud hop. The label is not a
+        // second species, so it is not a partition of the residual.
         species: if packing { None } else { cfg.species.clone() },
         mobile,
         groups: if cfg.soap_mode == SoapProposalMode::Rigid {
@@ -2620,7 +2620,7 @@ impl ClusterMove {
             ClusterMove::Soap {
                 rmsd,
                 cutoff,
-                class,
+                class: _,
                 species,
                 mobile,
                 groups,
@@ -2630,44 +2630,17 @@ impl ClusterMove {
                     l_max: 6,
                     rcut_nn: *cutoff,
                 };
-                // A declared rigid group is retracted, not replaced by the
-                // fivefold packing hop. One element without groups still
-                // takes that hop.
-                let packing = species.is_none() && mobile.is_none() && groups.is_none();
-                if *class && packing {
-                    crate::soap::step_away(x, &[], spec, *rmsd, rng)
-                } else if packing {
-                    // SOFI C5 residual on a fivefold axis. The measured
-                    // single-axis hop is a deterministic function of x,
-                    // so drawing this arm twice from one minimum
-                    // proposes the same trial twice and pays for it
-                    // twice; a chain that revisits a minimum pays every
-                    // time. The drawn-axis hop varies, but yields on a
-                    // disordered shell where too few axes are still
-                    // fivefold, and a proposal that never moves is
-                    // worse than a repeated one. So draw first and keep
-                    // the measured hop for when the draw declines.
-                    let drawn = crate::soap::step_away_fivefold(x, *rmsd, rng);
-                    let moved = drawn
-                        .iter()
-                        .zip(x.iter())
-                        .any(|(after, before)| (after - before).abs() > 1e-12);
-                    if moved {
-                        drawn
-                    } else {
-                        crate::soap::step_away_fivefold_measured(x, *rmsd)
-                    }
-                } else {
-                    crate::soap::step_away_cloud(
-                        x,
-                        spec,
-                        *rmsd,
-                        species.as_deref(),
-                        mobile.as_deref(),
-                        groups.as_deref(),
-                        rng,
-                    )
-                }
+                // A declared rigid group is retracted after the same
+                // descriptor-space cloud pullback.
+                crate::soap::step_away_cloud(
+                    x,
+                    spec,
+                    *rmsd,
+                    species.as_deref(),
+                    mobile.as_deref(),
+                    groups.as_deref(),
+                    rng,
+                )
             }
             ClusterMove::Torsion {
                 species,
@@ -3473,7 +3446,7 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn recommended_packing_soap_is_the_fivefold_residual() {
+    fn recommended_packing_soap_is_the_general_cloud_pullback() {
         let rec = Config::recommended(13);
         let soap = rec
             .move_library
@@ -3481,21 +3454,41 @@ mod move_scaling_tests {
             .into_iter()
             .find(|k| matches!(k, ClusterMove::Soap { class: false, .. }))
             .expect("recommended LeanBurst has a packing SOAP arm");
-        let ClusterMove::Soap { rmsd, .. } = soap else {
+        let ClusterMove::Soap {
+            rmsd,
+            cutoff,
+            class,
+            ..
+        } = soap
+        else {
             panic!("recommended SOAP arm is not Soap");
         };
+        assert!(!class);
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28, -0.2, 0.9, -0.1,
             0.4, -1.1, 0.3, -1.0, -0.2, 0.7, 0.6, 0.3, -1.2, -0.7, 0.5, 1.1, 1.2, -0.4, 0.2, -0.3,
             -0.8, -0.9, 0.1, 1.3, -0.6, 0.8, -1.0, 0.4,
         ]);
         let mut move_rng = StdRng::seed_from_u64(11);
+        let mut cloud_rng = StdRng::seed_from_u64(11);
         let proposed = soap.propose(x.view(), 0.8, &mut move_rng);
-        let five = crate::soap::step_away_fivefold_measured(x.view(), rmsd);
+        let general = crate::soap::step_away_cloud(
+            x.view(),
+            crate::soap::SoapSpec {
+                n_max: 3,
+                l_max: 6,
+                rcut_nn: cutoff,
+            },
+            rmsd,
+            None,
+            None,
+            None,
+            &mut cloud_rng,
+        );
         for index in 0..x.len() {
             assert!(
-                (proposed[index] - five[index]).abs() < 1e-12,
-                "packing SOAP left the measured fivefold residual at {index}"
+                (proposed[index] - general[index]).abs() < 1e-12,
+                "packing SOAP left the general cloud pullback at {index}"
             );
         }
     }
@@ -3567,7 +3560,7 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn a_priors_off_library_builds_no_fivefold_soap_arm() {
+    fn a_priors_off_library_builds_no_soap_arm() {
         let mut cfg = Config::recommended(38);
         cfg.prior_soap = false;
         assert!(
@@ -3575,7 +3568,7 @@ mod move_scaling_tests {
                 .kernels(&cfg)
                 .iter()
                 .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. })),
-            "the fivefold SOAP arm is still built when the prior is off"
+            "the SOAP arm is still built when the prior is off"
         );
         cfg.general_collective = true;
         assert!(

@@ -1467,10 +1467,9 @@ impl Config {
     /// screen is on, and a stall takes tabu, symmetrisation, the recorded
     /// basin trail, and the climb. Those two exits are
     /// [`Config::trail_on_stall`] and [`Config::escape_on_stall`].
-    /// [`Config::restart_on_stall`] divides a run into at most four population
-    /// epochs when records stop improving. Each restart uses the same
-    /// potential-independent random-cluster draw as the initial state. Basin
-    /// identity stays the measured pair-spectrum merge at 0.7.
+    /// [`Config::restart_on_stall`] stays off. The measured plateau-restart
+    /// variant is available through [`Config::with_plateau_restarts`].
+    /// Basin identity stays the measured pair-spectrum merge at 0.7.
     /// Orbit completion runs on every new basin, and below 98 points the
     /// relaxation draws between the plain surface and the two-phase
     /// relative 0.7 surface, the same rule as [`Config::communicating`].
@@ -1489,7 +1488,7 @@ impl Config {
     /// assert_eq!(cfg.n_points, 13);
     /// assert_eq!(cfg.relax_steps, 1000);
     /// assert!(cfg.energy_lattice);
-    /// assert!(cfg.restart_on_stall);
+    /// assert!(!cfg.restart_on_stall);
     /// ```
     pub fn recommended(n_points: usize) -> Self {
         Self::recommended_with_scales(
@@ -1531,7 +1530,6 @@ impl Config {
         cfg.orbit_core = OrbitCore::Fraction;
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
-        cfg.restart_on_stall = true;
         // Named lattice growth builds the truncated octahedron instead of
         // searching for it. On seeds 2000-2071 at 4e5 calls that library
         // solves 72 of 72 at 38 points, and at 75 and 98 points, whose
@@ -1566,6 +1564,18 @@ impl Config {
         // lattice the current structure defines. One arm, at every size.
         cfg.energy_lattice = true;
         cfg
+    }
+
+    /// Restart a plateau from fresh random coordinates.
+    ///
+    /// Opt-in only. A restart is due after one quarter of the total call
+    /// budget without a new record or a previous restart, subject to
+    /// [`Config::restart_patience`] as a lower bound. The fresh state uses the
+    /// potential-independent random-cluster generator at
+    /// [`Config::start_radius`].
+    pub fn with_plateau_restarts(mut self) -> Self {
+        self.restart_on_stall = true;
+        self
     }
 
     /// Communicating paper arm: orbit kernel plus Recognition.
