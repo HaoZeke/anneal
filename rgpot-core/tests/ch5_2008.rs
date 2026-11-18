@@ -14,9 +14,10 @@
 //!   binary64 brackets, from partial derivatives of the scalar energy taken
 //!   by `mpmath.diff` on the 18 coordinates.
 //!
-//! An enclosure that misses a bracket excludes the exact value, so every
-//! coefficient must meet its bracket and `c_0`, `c_1` and `2 c_2` must meet
-//! those of `E`, `g . v` and `v . H v`. The widest relative enclosure is
+//! The exact value lies somewhere in its bracket, so an enclosure that only
+//! meets the bracket can still exclude it: every coefficient must contain its
+//! bracket, and `c_0`, `c_1` and `2 c_2` must contain those of `E`, `g . v`
+//! and `v . H v`. The widest relative enclosure is
 //! reported, not bounded.
 //!
 //! The file also holds the energy, gradient and product of the compiled
@@ -167,8 +168,8 @@ fn point(a: f64) -> Interval {
     Interval::new(a, a)
 }
 
-fn meets(got: Interval, (down, up): (f64, f64)) -> bool {
-    got.inf() <= up && down <= got.sup()
+fn contains(got: Interval, (down, up): (f64, f64)) -> bool {
+    got.inf() <= down && up <= got.sup()
 }
 
 #[test]
@@ -189,8 +190,8 @@ fn every_coefficient_encloses_the_independent_reference() {
                 c.hi
             );
             assert!(
-                c.lo <= up && down <= c.hi,
-                "{} c_{k}: [{:.17e}, {:.17e}] misses [{:.17e}, {:.17e}]",
+                c.lo <= down && up <= c.hi,
+                "{} c_{k}: [{:.17e}, {:.17e}] does not contain [{:.17e}, {:.17e}]",
                 case.label,
                 c.lo,
                 c.hi,
@@ -207,7 +208,7 @@ fn every_coefficient_encloses_the_independent_reference() {
 }
 
 #[test]
-fn the_low_orders_meet_the_independent_energy_slope_and_curvature() {
+fn the_low_orders_contain_the_independent_energy_slope_and_curvature() {
     let (_, cases) = reference();
     for case in cases {
         let jet = Ch52008.taylor_jet(&case.x, &case.v, 2).expect("CH5 jet");
@@ -218,8 +219,8 @@ fn the_low_orders_meet_the_independent_energy_slope_and_curvature() {
         ];
         for (name, got, (down, up)) in pairs {
             assert!(
-                meets(got, (down, up)),
-                "{} {name}: [{:.17e}, {:.17e}] misses [{:.17e}, {:.17e}]",
+                contains(got, (down, up)),
+                "{} {name}: [{:.17e}, {:.17e}] does not contain [{:.17e}, {:.17e}]",
                 case.label,
                 got.inf(),
                 got.sup(),
