@@ -1593,11 +1593,24 @@ struct AxisTableCache {
     rows: Vec<([f64; 3], f64)>,
 }
 
+struct AxialSignatureCache {
+    bits: Vec<u64>,
+    order: Option<usize>,
+    axes: Vec<[f64; 3]>,
+}
+
 std::thread_local! {
     static AXIS_TABLE: std::cell::RefCell<AxisTableCache> = const {
         std::cell::RefCell::new(AxisTableCache {
             bits: Vec::new(),
             rows: Vec::new(),
+        })
+    };
+    static AXIAL_SIGNATURE: std::cell::RefCell<AxialSignatureCache> = const {
+        std::cell::RefCell::new(AxialSignatureCache {
+            bits: Vec::new(),
+            order: None,
+            axes: Vec::new(),
         })
     };
 }
@@ -1825,10 +1838,15 @@ fn canonical_direction(u: [f64; 3]) -> [f64; 3] {
     u
 }
 
-/// Candidate rotational axes derived from outer-shell atom directions about the
-/// centre of mass, canonicalised up to sign so antipodes and atom permutations
-/// yield an identical candidate set.
+/// Candidate rotational axes from dominant contact-graph spindle rings. A
+/// graph without such rings falls back to all radial directions. Axes are
+/// canonicalised up to sign so antipodes and atom permutations yield an
+/// identical candidate set.
 fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
+    let (_, graph_axes) = axial_signature(x);
+    if !graph_axes.is_empty() {
+        return graph_axes;
+    }
     let n = x.len() / 3;
     let mut axes: Vec<[f64; 3]> = Vec::new();
     if n == 0 {
@@ -1866,7 +1884,7 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
                     .unwrap_or(std::cmp::Ordering::Equal),
             )
     });
-    for &(_, u) in far.iter().take(24.min(far.len())) {
+    for &(_, u) in &far {
         if axis_unique(&axes, u) {
             axes.push(u);
         }
@@ -1978,7 +1996,7 @@ fn rotation_row_min_rms_for_order(
 /// Minimum nearest-image root-mean-square across candidate axial orders of `x`.
 fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f64 {
     let mut best = f64::INFINITY;
-    for order in axial_order_range(x) {
+    for order in selected_axial_orders(x) {
         let local_cut = best.min(cut);
         let rms = rotation_row_min_rms_for_order(x, axis, order, local_cut);
         if rms < best {
@@ -2158,7 +2176,7 @@ fn residual_about_order(x: ArrayView1<f64>, axis: [f64; 3], order: usize) -> (f6
 fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
     let mut best_rms = f64::INFINITY;
     let mut best_dr = Array1::zeros(x.len());
-    for order in axial_order_range(x) {
+    for order in selected_axial_orders(x) {
         if best_rms.is_finite() {
             let cut = best_rms + 1.0e-6 * (1.0 + best_rms);
             if rotation_row_min_rms_for_order(x, axis, order, cut) >= cut {
@@ -2401,14 +2419,23 @@ pub fn step_away_axial_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
 const DOORWAY_LO: f64 = 1.02;
 const DOORWAY_HI: f64 = 1.12;
 
-fn dominant_spindle_ring_order(x: ArrayView1<f64>) -> Option<usize> {
+/// Most frequent rotational order and its spindle axes, witnessed by simple
+/// common-neighbour cycles in the structure's first-shell contact graph.
+fn axial_signature(x: ArrayView1<f64>) -> (Option<usize>, Vec<[f64; 3]>) {
+    if let Some(cached) = AXIAL_SIGNATURE.with(|slot| {
+        let slot = slot.borrow();
+        same_axis_geometry(&slot.bits, x).then(|| (slot.order, slot.axes.clone()))
+    }) {
+        return cached;
+    }
     let n = x.len() / 3;
     if n < 3 {
-        return None;
+        return (None, Vec::new());
     }
     let nb = crate::corekey::contact_neighbours(x, n, axial_cutoff(x));
     let bounds = axial_order_range(x);
     let mut tally = vec![0usize; *bounds.end() + 1];
+    let mut axes = vec![Vec::<[f64; 3]>::new(); tally.len()];
     for i in 0..n {
         for &j in &nb[i] {
             if j <= i {
@@ -2442,19 +2469,64 @@ fn dominant_spindle_ring_order(x: ArrayView1<f64>) -> Option<usize> {
             }
             if deg_ok && edges == m {
                 tally[m] += 1;
+                let spindle = [
+                    x[3 * j] - x[3 * i],
+                    x[3 * j + 1] - x[3 * i + 1],
+                    x[3 * j + 2] - x[3 * i + 2],
+                ];
+                if let Some(direction) = norm3(spindle) {
+                    axes[m].push(canonical_direction(direction));
+                }
             }
         }
     }
-    tally
+    let order = tally
         .into_iter()
         .enumerate()
         .filter(|(_, count)| *count > 0)
         .max_by_key(|(_, count)| *count)
-        .map(|(order, _)| order)
+        .map(|(order, _)| order);
+    let mut selected = order
+        .and_then(|order| axes.get_mut(order))
+        .map(std::mem::take)
+        .unwrap_or_default();
+    selected.sort_by(|left, right| {
+        left[0]
+            .total_cmp(&right[0])
+            .then(left[1].total_cmp(&right[1]))
+            .then(left[2].total_cmp(&right[2]))
+    });
+    let mut unique = Vec::with_capacity(selected.len());
+    for direction in selected {
+        if axis_unique(&unique, direction) {
+            unique.push(direction);
+        }
+    }
+    let selected = unique;
+    AXIAL_SIGNATURE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        slot.bits.clear();
+        slot.bits.extend(x.iter().map(|value| value.to_bits()));
+        slot.order = order;
+        slot.axes.clone_from(&selected);
+    });
+    (order, selected)
+}
+
+/// Most frequent rotational order witnessed by a simple common-neighbour
+/// cycle in the structure's first-shell contact graph.
+pub(crate) fn dominant_axial_order(x: ArrayView1<f64>) -> Option<usize> {
+    axial_signature(x).0
+}
+
+fn selected_axial_orders(x: ArrayView1<f64>) -> Vec<usize> {
+    dominant_axial_order(x)
+        .map(|order| vec![order])
+        .unwrap_or_else(|| axial_order_range(x).collect())
 }
 
 fn opening_axes(x: ArrayView1<f64>) -> (Vec<[f64; 3]>, Option<usize>) {
-    let order = dominant_spindle_ring_order(x);
+    let order = dominant_axial_order(x);
     let n = x.len() / 3;
     let com = com_of(x);
     let mut directions: Vec<[f64; 3]> = Vec::with_capacity(n);
@@ -4613,7 +4685,7 @@ mod tests {
             ]);
         }
         let mut best = f64::INFINITY;
-        for order in axial_order_range(x) {
+        for order in selected_axial_orders(x) {
             let turn = rotation_about(axis, 2.0 * PI / order as f64);
             let turned: Vec<[f64; 3]> = centred.iter().map(|&p| rot_apply(&turn, p)).collect();
             let mut total = 0.0;

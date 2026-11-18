@@ -5,8 +5,7 @@
 //! so its largest radius is 1. For each operation, a class-blocked assignment
 //! matches the operated image to the original, and the proposed geometry is
 //! the mean of those operated, permuted images. [`crate::csm::propose`] takes its
-//! orientations from the inertia tensor plus one fixed one-fifth turn, and
-//! draws no random number.
+//! orientations from the inertia tensor and draws no random number.
 
 use std::collections::BTreeMap;
 
@@ -117,12 +116,13 @@ pub fn project(
 /// Pair distance below which an average is a coordinate singularity.
 pub const SINGULAR_PAIR: f64 = 1.0e-2;
 
-/// Lowest-measure average among `C_i`, `C_5`, and `D_5h`. Generalised to the
-/// rotational order `order` detected on the incumbent (`C_i`, `C_n`, `D_nh`).
+/// Lowest-measure average among inversion and the cyclic and horizontal
+/// dihedral groups at the rotational order detected on the incumbent.
 ///
-/// The cyclic order is selected from the incumbent's minimum nearest-image
-/// rotational residual across candidate orders `3..=6`, and the measure chooses
-/// among `C_i`, `C_n`, and `D_nh`. An average with a pair closer than
+/// The cyclic order is selected by the minimum nearest-image rotational
+/// residual across orders bounded by the incumbent's equatorial packing
+/// capacity. The measure chooses among `C_i`, `C_n`, and `D_nh`.
+/// An average with a pair closer than
 /// [`SINGULAR_PAIR`] is dropped.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupProjection {
@@ -132,7 +132,7 @@ pub struct GroupProjection {
     pub measure: f64,
     /// `"C_i"`, `"C_n"`, or `"D_nh"`.
     pub group: &'static str,
-    /// Rotational order (`2` for inversion, `3..=6` for axial groups).
+    /// Rotational order (`2` for inversion, otherwise structure-derived).
     pub order: usize,
 }
 
@@ -486,11 +486,10 @@ fn match_operated(
             Some((local, certificate)) => (local, Some(certificate)),
             None => certified_assignment(&costs, width)?,
         };
-        // Below 98 atoms the recorded permutation is Kuhn-Munkres. Its
-        // tie break is not the inverse of the transposed problem, so the
-        // cache reuses an inverse only for a unique dense optimum. A
-        // certificate is checked against the costs it is reused with.
-        unique &= width >= 98 && crate::assignment::last_dense_optimum_was_unique();
+        // A tied Kuhn-Munkres permutation need not be the inverse of the
+        // transposed problem, so inverse reuse still requires a unique optimum.
+        // The certificate is checked against every cost matrix it is reused with.
+        unique &= crate::assignment::last_dense_optimum_was_unique();
         for (row_i, &col_i) in local.iter().enumerate() {
             assignment[atoms[row_i]] = atoms[col_i];
         }
@@ -617,9 +616,9 @@ fn with_phase_orientations(base: &[[[f64; 3]; 3]], order: usize) -> Vec<[[f64; 3
     orientations
 }
 
-/// Selects the incumbent's axial rotational order from its cyclic continuous
-/// symmetry measure around the principal inertia axes, bounded above by the
-/// structure's equatorial packing capacity.
+/// Selects the incumbent's axial rotational order from cyclic
+/// continuous-symmetry measures around the principal inertia axes. The
+/// structure's equatorial packing capacity bounds the candidates.
 fn detect_cyclic_order(
     x: ArrayView1<'_, f64>,
     classes: &[u32],
@@ -663,8 +662,7 @@ fn detect_cyclic_order(
     let max_order = packing_cap.min(centred.len()).max(min_order);
 
     let mut best: Option<(usize, Array1<f64>, f64)> = None;
-    let mut candidate_order = min_order;
-    while candidate_order <= max_order {
+    for candidate_order in min_order..=max_order {
         let orientations = with_phase_orientations(base_orientations, candidate_order);
         if let Some((coordinates, measure)) =
             project(x, classes, &cyclic_about_z(candidate_order), &orientations)
@@ -678,7 +676,6 @@ fn detect_cyclic_order(
                 best = Some((candidate_order, coordinates, measure));
             }
         }
-        candidate_order += 1;
     }
     best
 }
@@ -1044,8 +1041,14 @@ mod tests {
             (bipyramid(), vec![0u32; 7]),
             (near, vec![0u32; 7]),
         ] {
-            let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
-            for ops in [d5h_ops(), cyclic_about_z(5), inversion_ops()] {
+            let (centred, _, _) = centre_and_scale(x.view(), classes.len()).expect("centred");
+            let base = principal_orientations(&centred).expect("axes");
+            let orientations = with_phase_orientations(&base, 5);
+            for ops in [
+                dihedral_horizontal_ops(5),
+                cyclic_about_z(5),
+                inversion_ops(),
+            ] {
                 clear_op_cache();
                 let (coordinates, measure) =
                     project(x.view(), &classes, &ops, &orientations).expect("projection");

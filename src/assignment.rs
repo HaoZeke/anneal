@@ -4,23 +4,10 @@
 
 //! Dense minimum-cost bipartite assignment.
 //!
-//! Below 98 atoms the permutation is the column-first
-//! Kuhn-Munkres matching the measured Lennard-Jones walks at 38,
-//! 55, and 75 atoms (LJ38, LJ55, and LJ75) were generated with.
-//! Two or more optimal permutations can share a
-//! cost, and a different tie break moves those walks.
-//! At 98 atoms and above the same optimum
-//! is computed by successive shortest paths.
-//! A continuous-symmetry projection solves one of these
-//! problems for every group operation and every trial
-//! orientation, and the recursive Kuhn-Munkres walk was
-//! the dominant cost of an energy evaluation at that size.
-
-/// Matrix size at which the flat shortest-path scan replaces Kuhn-Munkres.
-///
-/// 98 is the atom count where one projection of the full point set stopped
-/// being a small fraction of a quench.
-const SHORTEST_PATH_FROM: usize = 98;
+//! Every dimension uses the column-first Kuhn-Munkres permutation. A
+//! successive-shortest-path certificate returns that permutation directly
+//! when the optimum forces it; only an ambiguous optimum runs the walk. This
+//! keeps one deterministic tie break without a matrix-size crossover.
 
 /// Returns the column assigned to each row of a finite `n × n` cost matrix.
 ///
@@ -31,8 +18,7 @@ pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     certified_assignment(costs, n).map(|(assignment, _)| assignment)
 }
 
-/// [`minimum_cost_assignment`] and, below 98 rows, the [`Certificate`]
-/// that forced it, if one did.
+/// [`minimum_cost_assignment`] and the [`Certificate`] that forced it, if one did.
 pub(crate) fn certified_assignment(
     costs: &[f64],
     n: usize,
@@ -44,11 +30,7 @@ pub(crate) fn certified_assignment(
     if !well_formed(costs, n) {
         return None;
     }
-    if n < SHORTEST_PATH_FROM {
-        forced_kuhn_munkres(costs, n)
-    } else {
-        successive_shortest_paths(costs, n).map(|assignment| (assignment, None))
-    }
+    forced_kuhn_munkres(costs, n)
 }
 
 fn well_formed(costs: &[f64], n: usize) -> bool {
@@ -94,7 +76,6 @@ pub(crate) fn certifies(
     certificate: &Certificate,
 ) -> bool {
     if n == 0
-        || n >= SHORTEST_PATH_FROM
         || assignment.len() != n
         || certificate.row_potential.len() != n + 1
         || certificate.column_potential.len() != n + 1
@@ -486,6 +467,7 @@ pub(crate) fn strict_unique_row_minima(costs: &[f64], n: usize) -> Option<Vec<us
     Some(assignment)
 }
 
+#[cfg(test)]
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     successive_shortest_paths_scanned(costs, n).map(|(assignment, unique)| {
         ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(unique));
@@ -495,7 +477,7 @@ pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<u
 
 /// Same permutation as [`successive_shortest_paths`] without the uniqueness scan.
 ///
-/// A fivefold residual only uses the permutation. The alternating-cycle
+/// The symmetry residual only uses the permutation. The alternating-cycle
 /// search that feeds the inverse-operation cache does not change it, and
 /// that cache reads the flag only after its own call to
 /// [`minimum_cost_assignment`].
@@ -516,6 +498,7 @@ fn forced_kuhn_munkres(costs: &[f64], n: usize) -> Option<(Vec<usize>, Option<Ce
     if let Some((assignment, Some(certificate))) =
         solve_shortest_paths(costs, n, Some(Separation::KuhnMunkres))
     {
+        ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(true));
         return Some((assignment, Some(certificate)));
     }
     kuhn_munkres(costs, n).map(|assignment| (assignment, None))
@@ -525,6 +508,7 @@ fn forced_kuhn_munkres(costs: &[f64], n: usize) -> Option<(Vec<usize>, Option<Ce
 #[derive(Clone, Copy)]
 enum Separation {
     /// More than dual noise: no other optimal edge.
+    #[cfg(test)]
     Noise,
     /// More than a Kuhn-Munkres walk can fall short of the optimum.
     KuhnMunkres,
@@ -539,8 +523,8 @@ fn kuhn_munkres_tolerance(costs: &[f64]) -> f64 {
 
 /// Whether the last successful dense scan had no other optimal edge.
 ///
-/// A Kuhn-Munkres result reports false: the smaller walks keep that
-/// solver's own tie break, and an inverse permutation is not reused.
+/// A Kuhn-Munkres fallback reports false: its tied permutation need not be the
+/// inverse selected by the transposed problem.
 pub(crate) fn last_dense_optimum_was_unique() -> bool {
     ASSIGNMENT_IS_UNIQUE.with(|cell| cell.get())
 }
@@ -549,6 +533,7 @@ std::thread_local! {
     static ASSIGNMENT_IS_UNIQUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+#[cfg(test)]
 fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usize>, bool)> {
     solve_shortest_paths(costs, n, Some(Separation::Noise))
         .map(|(assignment, certificate)| (assignment, certificate.is_some()))
@@ -726,6 +711,7 @@ fn optimum_is_unique(
         costs[row * n + column] - row_potential[row + 1] - column_potential[column + 1]
     };
     let slack = match separation {
+        #[cfg(test)]
         Separation::Noise => {
             let mut scale = 1.0_f64;
             for value in costs {
@@ -1103,8 +1089,9 @@ unsafe fn group_ineligible(
 #[cfg(test)]
 mod tests {
     use super::{
-        certified_assignment, certifies, kuhn_munkres, minimum_cost_assignment, phase_delta_scalar,
-        strict_unique_row_minima, successive_shortest_paths, successive_shortest_paths_matching,
+        certified_assignment, certifies, kuhn_munkres, last_dense_optimum_was_unique,
+        minimum_cost_assignment, phase_delta_scalar, strict_unique_row_minima,
+        successive_shortest_paths, successive_shortest_paths_matching,
         successive_shortest_paths_scanned,
     };
     #[cfg(target_arch = "x86_64")]
@@ -1140,13 +1127,13 @@ mod tests {
         );
     }
 
-    /// Below the shortest-path threshold the dispatched permutation is the
-    /// walk's, forced or walked, on random costs, exact ties, a flat matrix,
-    /// and matrices whose optimum is forced to contain named pairs.
+    /// The dispatched permutation is the walk's, forced or walked, on random
+    /// costs, exact ties, a flat matrix, and matrices whose optimum is forced
+    /// to contain named pairs.
     #[test]
     fn a_forced_permutation_is_the_walks() {
         let mut forced = 0;
-        for n in [2usize, 3, 17, 40, 80, 97] {
+        for n in [2usize, 3, 17, 40, 80, 128] {
             for seed in 0..4u64 {
                 let costs = geometry_costs(n, 0x5eed + seed, seed as usize);
                 let (assignment, certificate) = certified_assignment(&costs, n).expect("square");
@@ -1335,44 +1322,21 @@ mod tests {
                     (fast_cost - want).abs() < 1e-8,
                     "n={n} shortest {fast_cost}"
                 );
+                let unique = last_dense_optimum_was_unique();
                 let slow = kuhn_munkres(&costs, n).expect("square");
-                assert_eq!(assignment, slow);
+                let slow_cost = cost_of(&costs, n, &slow);
+                // Integer costs mod 50 produce tied optimal matchings where
+                // successive shortest paths and Kuhn-Munkres break ties in a
+                // different column order; their optimal costs must agree to
+                // 1e-8, and when the optimum is unique the permutations must
+                // also be identical.
+                assert!((got - slow_cost).abs() < 1e-8, "n={n} {got} vs {slow_cost}");
+                assert_eq!(assignment, slow, "n={n} dispatched tie break differed");
+                if unique {
+                    assert_eq!(assignment, fast, "n={n} unique optimum differed");
+                }
             }
         }
-    }
-
-    /// At 98 atoms the dispatched permutation is the shortest-path scan.
-    /// Integer ties make that permutation differ from the Kuhn-Munkres walk
-    /// while the cost stays the same, so a cost check alone accepts either.
-    #[test]
-    fn the_threshold_permutation_is_the_shortest_path_scan() {
-        let mut state = 0x9e37_79b9_u64;
-        let mut next = || {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-            ((state >> 33) as u32 % 7) as f64
-        };
-        let n = super::SHORTEST_PATH_FROM;
-        let mut differed = 0;
-        for trial in 0..3 {
-            let costs: Vec<f64> = (0..n * n).map(|_| next()).collect();
-            let dispatched = minimum_cost_assignment(&costs, n).expect("square");
-            let scanned = successive_shortest_paths(&costs, n).expect("scan");
-            let walked = kuhn_munkres(&costs, n).expect("walk");
-            assert_eq!(
-                dispatched, scanned,
-                "trial {trial} must follow the shortest-path permutation"
-            );
-            assert_eq!(
-                cost_of(&costs, n, &dispatched).to_bits(),
-                cost_of(&costs, n, &walked).to_bits(),
-                "trial {trial} cost"
-            );
-            differed += usize::from(dispatched != walked);
-        }
-        assert!(
-            differed > 0,
-            "the walk's tie break matched every shortest-path permutation"
-        );
     }
 
     /// Dual noise of one ulp is another optimum; a gap ten times larger is not.
@@ -1403,8 +1367,8 @@ mod tests {
         );
     }
 
-    /// A certificate that is long, repeated, or past the shortest-path
-    /// threshold does not prove the assignment.
+    /// A certificate that is long, repeated, or out of range does not prove
+    /// the assignment.
     #[test]
     fn a_certificate_rejects_a_repeated_column_and_the_wrong_length() {
         let n = 4;
@@ -1432,30 +1396,18 @@ mod tests {
             "a column past the matrix is not a permutation"
         );
 
-        let wide = super::SHORTEST_PATH_FROM;
-        let mut wide_costs = vec![10.0; wide * wide];
-        for row in 0..wide {
-            wide_costs[row * wide + row] = 0.0;
-        }
-        let (wide_assignment, wide_certificate) =
-            super::forced_kuhn_munkres(&wide_costs, wide).expect("wide diagonal");
-        let wide_certificate = wide_certificate.expect("the wide diagonal is separated");
-        assert!(
-            !certifies(&wide_costs, wide, &wide_assignment, &wide_certificate),
-            "a shortest-path problem does not carry a Kuhn-Munkres certificate"
-        );
     }
 
-    /// From the threshold up the dispatched solver is the shortest-path scan.
-    /// Integer costs force ties, so only the cost has to agree.
+    /// Large tied matrices retain the same deterministic walk permutation.
     #[test]
-    fn shortest_paths_match_kuhn_munkres_cost_at_the_threshold() {
+    fn large_matrices_keep_the_kuhn_munkres_tie_break() {
         let mut state = 0x9e37_79b9_u64;
         let mut next = || {
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
             ((state >> 33) as u32 % 7) as f64
         };
-        for n in [super::SHORTEST_PATH_FROM, super::SHORTEST_PATH_FROM + 6] {
+        for exponent in 5..=7 {
+            let n = 1usize << exponent;
             for _ in 0..3 {
                 let costs: Vec<f64> = (0..n * n).map(|_| next()).collect();
                 let assignment = minimum_cost_assignment(&costs, n).expect("square");
@@ -1465,6 +1417,7 @@ mod tests {
                     seen[column] = true;
                 }
                 let slow = kuhn_munkres(&costs, n).expect("square");
+                assert_eq!(assignment, slow, "n={n} tie break");
                 let got = cost_of(&costs, n, &assignment);
                 let want = cost_of(&costs, n, &slow);
                 assert!((got - want).abs() < 1e-8, "n={n} {got} vs {want}");
