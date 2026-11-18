@@ -262,7 +262,13 @@ bool pairScratchFits(std::size_t num_pairs, const PerAtomOut *atoms, std::uint64
  * The pair term is ``simd::exp_fixed``, so a per-pair accumulation and this
  * row return the same bits. Cauchy stress is the derivative of that energy.
  *
- * @warning The box is assumed to be orthogonal.
+ * @note Orthogonal and sheared cells are supported: a diagonal box wraps each
+ * axis with a positive diagonal entry (``box[0]``, ``box[4]``, ``box[8]``) via
+ * ``nlist::Image::Round`` and leaves non-positive axes free, while any
+ * non-zero off-diagonal entry switches ``nlist::Neighbours`` to
+ * ``nlist::MinimumImage`` across the full 3x3 cell (which must be finite and
+ * non-singular). Each distinct atom pair contributes at most one minimum image,
+ * and cell binning divides Cartesian coordinates by the diagonal lengths.
  */
 void MorsePot::forceImpl(const ForceInput &in, ForceOut *out) const {
   compute(in, out, nullptr);

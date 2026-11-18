@@ -516,11 +516,14 @@ rgpot.MorsePot(De=0.7102, a=1.6047, re=2.897, cutoff=9.5, switch_width=0.0)
   =switch_width= works as for =rgpot.LJPot=.
   Atom types are not used by the kernel.
 - Units :: =De= eV; =a= 1/Angstrom; =re=, =cutoff= and =switch_width= Angstrom.
-- Outputs :: a periodic shifted Morse pair potential.
+- Outputs :: a periodic shifted Morse pair potential on an orthogonal or sheared
+  cell (on a diagonal cell only axes with a positive diagonal entry wrap, and
+  each distinct atom pair contributes at most one minimum image).
   =evaluate= returns the stress.
   It is the only class here with an analytic Hessian-vector product:
   =has_analytic_hvp()= is true.
-- Errors :: as =rgpot.LJPot=.
+- Errors :: as =rgpot.LJPot=; on a sheared cell a singular or non-finite =box=
+  raises =ValueError=.
 
 *** =rgpot.SWPot=
 
