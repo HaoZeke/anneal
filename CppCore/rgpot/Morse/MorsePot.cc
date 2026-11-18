@@ -42,10 +42,9 @@ namespace {
 /// exceeds the pair work).
 constexpr std::size_t kMinParallelHalfPairs = 4096;
 
-/// Atom-index alignment for slice boundaries: 8 doubles = 64 bytes (one cache
-/// line in row_e/energy, three in F, six in row_s/virial), preventing false
-/// sharing between slices.
-constexpr std::size_t kCacheLineAtoms = 8;
+/// Atom-index quantum for slice boundaries. The split stays deterministic and
+/// coarse enough to keep adjacent slices from bouncing one atom at a time.
+constexpr std::size_t kSliceAtomQuantum = 8;
 
 /// Stack batch width for vectorised simd::exp_fixed_n evaluation.
 constexpr std::size_t kPairBatch = 64;
@@ -181,7 +180,8 @@ void partitionAtomsByWork(std::size_t n, int slices, std::int64_t total_work, Wo
         hi = mid;
       }
     }
-    std::size_t aligned = ((lo + kCacheLineAtoms / 2) / kCacheLineAtoms) * kCacheLineAtoms;
+    std::size_t aligned =
+        ((lo + kSliceAtomQuantum / 2) / kSliceAtomQuantum) * kSliceAtomQuantum;
     const std::size_t prev = splits[static_cast<std::size_t>(s - 1)];
     if (aligned < prev) {
       aligned = prev;
