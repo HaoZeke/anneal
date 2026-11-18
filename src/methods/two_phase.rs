@@ -899,7 +899,8 @@ impl SurfacePortfolio {
                 && self.block_lowest.is_finite()
             {
                 self.arm_blocks[arm] = self.arm_blocks[arm].saturating_add(1);
-                self.arm_reward_sum[arm] += reward;
+                let reward_per_call = reward / self.block_work.max(1) as f64;
+                self.arm_reward_sum[arm] += reward_per_call;
                 if reward <= 0.0 {
                     self.arm_stall_blocks[arm] = self.arm_stall_blocks[arm].saturating_add(1);
                 } else {
@@ -1225,6 +1226,25 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn plain_warmup_and_work_normalized_retirement_are_history_driven() {
+        let transformed = TwoPhase::diameter(2.0, 1.0);
+        let mut warmup = SurfacePortfolio::with_block(&[transformed], 3, 2).with_plain_warmup(true);
+        assert_eq!(warmup.begin(true), None);
+
+        let mut portfolio = SurfacePortfolio::with_block(&[transformed], 3, 2);
+        for block in 0..6 {
+            portfolio.held = Some(1);
+            portfolio.block_start_best = 0.0;
+            portfolio.block_lowest = 2.0;
+            portfolio.block_work = 4;
+            portfolio.settle_block();
+            assert_eq!(portfolio.arm_reward_sum[1], -0.5 * f64::from(block + 1));
+        }
+        assert!(portfolio.retired[1]);
+        assert_eq!(portfolio.begin(true), None);
     }
 
     fn rigid_water() -> Array1<f64> {
