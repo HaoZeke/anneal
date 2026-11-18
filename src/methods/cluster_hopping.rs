@@ -3493,6 +3493,102 @@ fn returns_to_best<F: Fingerprint>(
     }
 }
 
+/// Euclidean length of the difference of two fingerprints.
+///
+/// An empty descriptor, or two of different length, is not a match.
+fn fingerprint_distance(left: ArrayView1<f64>, right: ArrayView1<f64>) -> f64 {
+    if left.len() != right.len() || left.is_empty() {
+        return f64::INFINITY;
+    }
+    left.iter()
+        .zip(right.iter())
+        .map(|(p, q)| (p - q) * (p - q))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// Whether `landing` lies within `radius` of a quarantined fingerprint.
+fn tabu_covers(tabu: &[Array1<f64>], landing: ArrayView1<f64>, radius: f64) -> bool {
+    tabu.iter()
+        .any(|held| fingerprint_distance(held.view(), landing) <= radius)
+}
+
+/// Record `occupied` unless the same geometry is already quarantined.
+///
+/// The comparison is the escape step, not the merge radius: the merge ball
+/// of a distance fingerprint contains neighbouring minima, and refusing
+/// those refuses the walk that leaves a shelf.
+fn quarantine_geometry(
+    tabu: &mut Vec<Array1<f64>>,
+    occupied: Array1<f64>,
+    length: f64,
+    capacity: usize,
+) {
+    if occupied.is_empty()
+        || tabu
+            .iter()
+            .any(|held| same_distance_geometry(held.view(), occupied.view(), length))
+    {
+        return;
+    }
+    if capacity > 0 && tabu.len() >= capacity {
+        tabu.remove(0);
+    }
+    tabu.push(occupied);
+}
+
+/// Record `occupied` unless a quarantine already covers it.
+fn quarantine_fingerprint(
+    tabu: &mut Vec<Array1<f64>>,
+    occupied: Array1<f64>,
+    radius: f64,
+    capacity: usize,
+) {
+    if occupied.is_empty() || tabu_covers(tabu, occupied.view(), radius) {
+        return;
+    }
+    if capacity > 0 && tabu.len() >= capacity {
+        tabu.remove(0);
+    }
+    tabu.push(occupied);
+}
+
+/// Whether two distance fingerprints are one geometry.
+///
+/// A point that moves by `length` changes a pair distance by at most twice
+/// that. `length` is the escape finite-difference step, so a larger
+/// discrepancy is a different structure and a smaller one is the occupied
+/// minimum written down again.
+fn same_distance_geometry(left: ArrayView1<f64>, right: ArrayView1<f64>, length: f64) -> bool {
+    if left.len() != right.len() || left.is_empty() || !(length.is_finite() && length > 0.0) {
+        return false;
+    }
+    let limit = 2.0 * length;
+    left.iter()
+        .zip(right.iter())
+        .all(|(p, q)| (p - q).abs() <= limit)
+}
+
+/// The quenched `landing` is the geometry the chain already occupies.
+///
+/// Only the distance fingerprint has components in length units, and only a
+/// search that asked for the stall tabu treats a repeat of that geometry as
+/// a quarantine rather than as a hop.
+fn returned_to_occupied<F: Fingerprint>(
+    cfg: &Config,
+    bias: &BasinBias<F>,
+    occupied: ArrayView1<f64>,
+    landing: ArrayView1<f64>,
+) -> bool {
+    cfg.tabu_on_stall
+        && effective_keying(cfg) == Keying::Distances
+        && same_distance_geometry(
+            bias.cv(occupied).view(),
+            bias.cv(landing).view(),
+            cfg.escape_epsilon,
+        )
+}
+
 /// Stuck means stuck for longer than this chain has ever been stuck before,
 /// not stuck for some number someone chose. On a 75-point trace, a
 /// successful run goes tens of thousands of hops between improvements on its
@@ -4558,6 +4654,10 @@ where
         cfg.bayes_threshold,
     );
     let mut tabu: Vec<Array1<f64>> = Vec::new();
+    // Exact geometries the call plateau has already failed to leave.
+    // Held apart from [`tabu`]: a neighbouring minimum can sit inside the
+    // merge ball of a distance fingerprint.
+    let mut shelf: Vec<Array1<f64>> = Vec::new();
     let mut tabu_hits = 0usize;
     let mut funnels = crate::funnel_spectral::FunnelSpectrum::new();
     let mut funnel_split: Option<crate::funnel_spectral::Partition> = None;
@@ -8270,20 +8370,25 @@ where
         // A quarantined funnel is refused whatever the energy. Checked after
         // the acceptance test rather than instead of it, so the veto is
         // visible as a veto rather than folded into the rule.
-        if !tabu.is_empty() && accept {
-            let d = s_new.view();
-            if tabu.iter().any(|t| {
-                t.len() == d.len()
-                    && t.iter()
-                        .zip(d.iter())
-                        .map(|(p, q)| (p - q) * (p - q))
-                        .sum::<f64>()
-                        .sqrt()
-                        <= bias.merge_radius()
-            }) {
+        // A full quench can fall back onto a geometry the call plateau has
+        // already named. The partial-relaxation screen misses it when the
+        // screened point is still outside the merge radius, the energy
+        // change is then zero, and the hop is accepted. Refusing that
+        // geometry before a plateau has named it would move the short
+        // searches that never reach the plateau.
+        if accept && e_new >= e - STRICT_IMPROVEMENT && effective_keying(cfg) == Keying::Distances {
+            let landing = bias.cv(x_new.view());
+            if shelf
+                .iter()
+                .any(|held| same_distance_geometry(held.view(), landing.view(), cfg.escape_epsilon))
+            {
                 accept = false;
                 tabu_hits += 1;
             }
+        }
+        if !tabu.is_empty() && accept && tabu_covers(&tabu, s_new.view(), bias.merge_radius()) {
+            accept = false;
+            tabu_hits += 1;
         }
         finish_arm(&mut arm_counts, &proposal_action, accept, improved);
         // The quench was recorded before this test. The minima file already
@@ -8434,7 +8539,23 @@ where
                 // How close the move brought the chain to the best it knows.
                 // Dense, because every hop produces one, and informative,
                 // because its size says how deep rather than merely whether.
-                depth_allocator.update(k, -(e_new - ledger.best));
+                // A quench back onto a geometry the plateau has already
+                // named scores zero, and zero is the best an arm can earn
+                // without beating the record, so the arm that falls onto
+                // that shelf takes the later draws. That landing is not a
+                // depth. Before a plateau has named anything, every hop
+                // still scores, which is what the short pinned searches do.
+                let home = effective_keying(cfg) == Keying::Distances
+                    && shelf.iter().any(|held| {
+                        same_distance_geometry(
+                            held.view(),
+                            bias.cv(x_new.view()).view(),
+                            cfg.escape_epsilon,
+                        )
+                    });
+                if !home || improved {
+                    depth_allocator.update(k, -(e_new - ledger.best));
+                }
             }
             // A rigid accept that only moves centres, or only turns a
             // hydrogen-bond cycle, is not evidence the arm is useful.
@@ -9046,21 +9167,32 @@ where
         if cfg.tabu_on_stall && stuck {
             // The funnel the chain has been unable to leave, named by where it
             // is standing.
-            let d = bias.cv(x.view());
-            if !tabu.iter().any(|t| {
-                t.len() == d.len()
-                    && t.iter()
-                        .zip(d.iter())
-                        .map(|(p, q)| (p - q) * (p - q))
-                        .sum::<f64>()
-                        .sqrt()
-                        <= bias.merge_radius()
-            }) {
-                if tabu.len() >= cfg.tabu_capacity {
-                    tabu.remove(0);
-                }
-                tabu.push(d);
-            }
+            quarantine_fingerprint(
+                &mut tabu,
+                bias.cv(x.view()),
+                bias.merge_radius(),
+                cfg.tabu_capacity,
+            );
+        }
+        if cfg.tabu_on_stall
+            && (stuck || directed_leave)
+            && effective_keying(cfg) == Keying::Distances
+        {
+            // The hop counter the funnel list waits on does not fall inside
+            // a paper budget: the call plateau above is the leave that runs.
+            // That leave used to clear the quiet count before the landing
+            // was known, so the funnel list stayed empty and a quench back
+            // onto this same geometry was accepted again after every
+            // restart. The merge ball is the wrong width for that refusal.
+            // A neighbouring minimum can sit inside that merge ball, so
+            // refusing the ball can stop a walk that still reaches a new
+            // minimum.
+            quarantine_geometry(
+                &mut shelf,
+                bias.cv(x.view()),
+                cfg.escape_epsilon,
+                cfg.tabu_capacity,
+            );
         }
         // Tabu names the basin. It does not redraw the cluster.
         // Coupling the two sampled Doye's wide icosahedral funnel
@@ -9157,8 +9289,9 @@ where
             if ee < e {
                 stall_escape_gain += e - ee;
             }
-            // Taken whatever its energy, exactly as the climb below: the
-            // chain has shown it cannot improve from where it stands.
+            // Taken whatever its energy, exactly as a climb that lands
+            // somewhere else: the chain has shown it cannot improve from
+            // where it stands.
             adopt_minimum!(
                 ee,
                 xe,
@@ -9254,35 +9387,39 @@ where
                         &mut unconverged_records,
                     );
                     hops += 1;
-                    stall_escapes += 1;
-                    if ee < e {
-                        stall_escape_gain += e - ee;
-                    }
-                    // Taken whatever its energy. The chain has already shown it
-                    // cannot improve from where it is, so the value of the new
-                    // structure is that it is somewhere else.
-                    let local_feedback = if cfg.minima_hopping {
-                        let from = if directed_source.is_some() {
-                            identity.basin_of(source.view())
-                        } else {
-                            here.unwrap_or_else(|| identity.basin_of(x.view()))
-                        };
-                        let reached = identity.basin_of(xe.view());
-                        Some((Some(from), reached))
+                    // A climb back onto the geometry the plateau recorded is
+                    // not a leave. Adopting it would clear the stall.
+                    let climb_home = returned_to_occupied(cfg, &bias, x.view(), xe.view());
+                    if climb_home {
+                        tabu_hits += 1;
                     } else {
-                        None
-                    };
-                    adopt_minimum!(
-                        ee,
-                        xe,
-                        escape_gradient,
-                        local_feedback.map(|(_, reached)| reached),
-                        AdoptionHistory::Fresh,
-                        local_feedback,
-                        Some("stall-climb"),
-                        hops
-                    );
-                    stall_outcome = Some(stalled_from - e);
+                        stall_escapes += 1;
+                        if ee < e {
+                            stall_escape_gain += e - ee;
+                        }
+                        let local_feedback = if cfg.minima_hopping {
+                            let from = if directed_source.is_some() {
+                                identity.basin_of(source.view())
+                            } else {
+                                here.unwrap_or_else(|| identity.basin_of(x.view()))
+                            };
+                            let reached = identity.basin_of(xe.view());
+                            Some((Some(from), reached))
+                        } else {
+                            None
+                        };
+                        adopt_minimum!(
+                            ee,
+                            xe,
+                            escape_gradient,
+                            local_feedback.map(|(_, reached)| reached),
+                            AdoptionHistory::Fresh,
+                            local_feedback,
+                            Some("stall-climb"),
+                            hops
+                        );
+                        stall_outcome = Some(stalled_from - e);
+                    }
                 }
             }
         }
@@ -9775,7 +9912,7 @@ where
             screen.observations(),
         ),
         hmc: hmc_diag,
-        tabu: (tabu.len(), tabu_hits),
+        tabu: (tabu.len() + shelf.len(), tabu_hits),
         funnel: funnel_split.as_ref().map(|p| {
             let (a, b) = p.sizes();
             (a, b, p.connectivity)
@@ -11280,6 +11417,57 @@ mod tests {
             ledger.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
         }
         (e, cur)
+    }
+
+    /// The hop stall that used to fill the fingerprint tabu does not fall
+    /// inside this run: its patience stays past the last hop. Every quench
+    /// falls back onto one well. The call plateau is what names that well,
+    /// and a later proposal of the same geometry is refused.
+    #[test]
+    fn a_call_plateau_quarantines_a_repeated_shelf() {
+        let n = 4;
+        let mut cfg = Config::recommended(n);
+        cfg.restart_patience = 40;
+        cfg.escape_stall_patience = 1_000_000;
+        cfg.relax_steps = 80;
+        cfg.screen_steps = 1;
+        cfg.max_hops = Some(30);
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.orbit_complete_on_new = false;
+        cfg.energy_lattice = false;
+        cfg.surfaces.clear();
+        cfg.symmetrise_on_stall = false;
+        cfg.trail_on_stall = false;
+        cfg.return_screen = false;
+        let target = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
+        ]);
+        let mut rng = StdRng::seed_from_u64(2000);
+        let mut ledger = Ledger::new(8_000);
+        let mut relax =
+            |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| well_relax(&target, led, x, steps);
+        let out = run_with_gradient(&cfg, target.view(), &mut ledger, &mut relax, None, &mut rng)
+            .expect("finite start");
+        assert!(
+            out.tabu.0 >= 1,
+            "the call plateau never quarantined the occupied well: {:?}",
+            out.tabu
+        );
+        assert!(
+            out.tabu.1 >= 1,
+            "a return to the quarantined well was never refused: {:?}",
+            out.tabu
+        );
+        let shelf_accepts = out
+            .accepted_transitions
+            .iter()
+            .filter(|step| step.to_energy < 1e-8)
+            .count();
+        assert!(
+            shelf_accepts < out.hops,
+            "the well was accepted on {shelf_accepts} of {} hops",
+            out.hops
+        );
     }
 
     /// Two chains over one history: the second pays deposits for the visits
