@@ -737,10 +737,8 @@ fn identifier_words(text: &str) -> Vec<String> {
     for c in text.chars().chain(std::iter::once(' ')) {
         if is_ident_char(c) {
             run.push(c);
-        } else {
-            if !run.is_empty() {
-                found.push(std::mem::take(&mut run));
-            }
+        } else if !run.is_empty() {
+            found.push(std::mem::take(&mut run));
         }
     }
     found
