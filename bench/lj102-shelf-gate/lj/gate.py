@@ -637,7 +637,13 @@ def markdown(report: dict) -> str:
                 f"| {item['system']} | {', '.join(item['drops'])} | {fmt(item['fisher_p'])} | {fmt(item['mannwhitney_p'])} |"
             )
     lines.extend(["", "## LJ102 seeds 2004 and 2010", ""])
-    lines.append("Arm A is expected to finish on the icosahedral shelf at -569.27772309 for these two seeds when the leave clock is consumed on a no-op. The global minimum used as the hit level is -569.363652.")
+    lines.append(
+        "The hit level is -569.363652. The icosahedral shelf is -569.27772309. "
+        + " ".join(
+            f"Seed {seed} arm A finishes at {report['lj102_focus_seeds'][str(seed)]['a']['best']}."
+            for seed in SHELF_SEEDS
+        )
+    )
     lines.append("")
     lines.append("| seed | A hit | A evals | A best | B hit | B evals | B best |")
     lines.append("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
