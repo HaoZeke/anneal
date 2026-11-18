@@ -50,7 +50,7 @@ use std::time::Instant;
 const HIT: f64 = 0.001;
 const SMOKE_CALLS: usize = 200;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Arm {
     Recommended,
     ForCluster,
@@ -536,6 +536,37 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
     }
 
+    /// A driver that bypassed `warm_relax` would ignore `Config::surfaces` and
+    /// walk the plain surface on the same seed and budget.
+    #[test]
+    fn recommended_hop_arms_read_surface_presets() {
+        anneal_core::install_rgpot_kernels!();
+        const BUDGET: usize = 80_000;
+        const SEED: u64 = 2000;
+        let lj75 = campaign("lj75").unwrap();
+        let cfg = apply_arm(75, Arm::Recommended);
+        assert!(
+            !cfg.surfaces.is_empty(),
+            "fixture needs a surface portfolio"
+        );
+        let (with, _) = run_seed(&cfg, &lj75, SEED, BUDGET, None);
+        let mut plain = cfg;
+        plain.surfaces.clear();
+        let (without, _) = run_seed(&plain, &lj75, SEED, BUDGET, None);
+        assert_ne!(
+            with.charged, without.charged,
+            "with surfaces {} without {}",
+            with.charged, without.charged
+        );
+        assert_ne!(
+            with.best.to_bits(),
+            without.best.to_bits(),
+            "best with surfaces {} without {}",
+            with.best,
+            without.best
+        );
+    }
+
     /// `lj_board` scores a seed with `cluster_search::search` on a ledger that
     /// stops at the reference plus `HIT`. A control arm walks the same chain.
     #[test]
@@ -564,6 +595,33 @@ mod tests {
             hits > 0,
             "no seed reached the stop, so the stop went untested"
         );
+    }
+
+    #[test]
+    fn screened_controls_match_the_board() {
+        const BUDGET: usize = 50_000;
+        let lj38 = campaign("lj38").unwrap();
+        let reference = lj38.reference.unwrap();
+        let potential = PairPotential::lennard_jones(38);
+        for (arm, preset) in [
+            (Arm::ForCluster, Config::for_cluster(38)),
+            (Arm::SoapOn, apply_arm(38, Arm::SoapOn)),
+            (Arm::SoapOff, apply_arm(38, Arm::SoapOff)),
+        ] {
+            for seed in 2000..2002 {
+                let (control, _) = run_seed(&apply_arm(38, arm), &lj38, seed, BUDGET, None);
+                let mut ledger = Ledger::new(BUDGET);
+                ledger.stop_below(reference + HIT);
+                let (board, _) =
+                    cluster_search::search(&potential, &preset, &mut ledger, seed).unwrap();
+                assert_eq!(
+                    control.best.to_bits(),
+                    board.best.to_bits(),
+                    "{arm:?} seed {seed}"
+                );
+                assert_eq!(control.charged, board.charged, "{arm:?} seed {seed}");
+            }
+        }
     }
 
     #[test]
