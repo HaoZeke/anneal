@@ -3628,6 +3628,25 @@ fn decay_shelves_above(shelf: &mut Vec<(Array1<f64>, f64)>, best: f64, standing:
     });
 }
 
+/// Decay both the active rung's shelf and every parked rung's shelf against
+/// `best`, keeping each rung's own standing energy.
+fn decay_all_shelves(
+    shelf: &mut Vec<(Array1<f64>, f64)>,
+    parked_shelves: &mut [Vec<(Array1<f64>, f64)>],
+    chains: &[OccupiedMinimum],
+    best: f64,
+    standing: f64,
+) {
+    if !shelf.is_empty() {
+        decay_shelves_above(shelf, best, standing);
+    }
+    for (parked_shelf, parked_chain) in parked_shelves.iter_mut().zip(chains.iter()) {
+        if !parked_shelf.is_empty() {
+            decay_shelves_above(parked_shelf, best, parked_chain.energy);
+        }
+    }
+}
+
 /// Stuck means stuck for longer than this chain has ever been stuck before,
 /// not stuck for some number someone chose. On a 75-point trace, a
 /// successful run goes tens of thousands of hops between improvements on its
@@ -5068,6 +5087,7 @@ where
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
+    let mut shelf_best = ledger.best;
     // Energy last polished by an unlike-pair quench. `NaN` until the first
     // binary incumbent, so a one-species chain never enters the sweep.
     let mut polished_best = f64::NAN;
@@ -5161,12 +5181,14 @@ where
             hops_at_lowest = hops;
             cage_edit = false;
             new_incumbent = true;
+        }
+        if ledger.best < shelf_best - STRICT_IMPROVEMENT {
             // The plateau at the old incumbent is no longer the repeated
-            // shelf. Dropping it here is what keeps the list from filling
-            // with every basin a long run has already beaten. The energy
-            // the chain is standing on stays: a better minimum recorded
-            // on the ledger is not the same as having left.
-            decay_shelves_above(&mut shelf, ledger.best, e);
+            // shelf. Dropping it here across active and parked rungs keeps
+            // each list from filling with basins the search has already
+            // beaten, while preserving the energy each rung still stands on.
+            shelf_best = ledger.best;
+            decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
         }
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
@@ -5768,10 +5790,6 @@ where
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
-            if ledger.best < best_seen {
-                decay_shelves_above(&mut shelf, ledger.best, e);
-            }
-            best_seen = ledger.best;
             if energy.is_finite() && relaxed.len() == x.len() {
                 internal_action = Some(CheckpointAction::ExternalAdopt {
                     state: relaxed,
@@ -6464,11 +6482,14 @@ where
             }
         }
         if ledger.best < best_seen - 1e-9 {
-            // Improvements recorded before the hop, such as a symmetry
-            // projection, never reach the check at the top of the next
-            // pass: this assignment would have consumed them first.
-            decay_shelves_above(&mut shelf, ledger.best, e);
             best_seen = ledger.best;
+        }
+        if ledger.best < shelf_best - STRICT_IMPROVEMENT {
+            // Improvements recorded before the hop, such as a checkpoint
+            // adoption or a symmetry projection, decay higher shelves before
+            // the next trial consults them.
+            shelf_best = ledger.best;
+            decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
         }
         // Gap to the incumbent, which is what the law scales the window by.
         let gap = (e - ledger.best).abs().max(1e-12);
@@ -9037,6 +9058,10 @@ where
                 }
             }
         }
+        if ledger.best < shelf_best - STRICT_IMPROVEMENT {
+            shelf_best = ledger.best;
+            decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
+        }
         if cfg.tabu_on_stall && stuck {
             // The funnel the chain has been unable to leave, named by where it
             // is standing.
@@ -9591,9 +9616,7 @@ where
                     occupancy_generation,
                     here,
                 ) = next.into_live();
-                if !shelf.is_empty() {
-                    decay_shelves_above(&mut shelf, ledger.best, e);
-                }
+                decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
                 bias = biases.remove(rep);
                 if cfg.hmc.is_some() && rep < hop_parked.len() {
                     hop = Some(hop_parked.remove(rep));
@@ -9725,6 +9748,11 @@ where
         *slot = bias;
     }
 
+    if ledger.best < shelf_best - STRICT_IMPROVEMENT {
+        decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
+    }
+    let held_shelves = shelf.len() + parked_shelves.iter().map(Vec::len).sum::<usize>();
+
     Ok(Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
@@ -9755,7 +9783,7 @@ where
             screen.observations(),
         ),
         hmc: hmc_diag,
-        tabu: (tabu.len() + shelf.len(), tabu_hits),
+        tabu: (tabu.len() + held_shelves, tabu_hits),
         funnel: funnel_split.as_ref().map(|p| {
             let (a, b) = p.sizes();
             (a, b, p.connectivity)
