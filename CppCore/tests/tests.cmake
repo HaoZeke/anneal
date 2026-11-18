@@ -224,7 +224,9 @@ foreach(test IN LISTS _rgpot_units)
   if(test STREQUAL "CalculatorGroupTest" AND TARGET rgpot)
     get_target_property(_rgpot_lib_type rgpot TYPE)
     if(_rgpot_lib_type STREQUAL "SHARED_LIBRARY")
-      target_compile_definitions(${_exe} PRIVATE RGPOT_TEST_SHARED_LIBRARY)
+      target_compile_definitions(
+        ${_exe} PRIVATE RGPOT_TEST_SHARED_LIBRARY
+                        "RGPOT_TEST_SHARED_LIBRARY_PATH=\"$<TARGET_FILE:rgpot>\"")
     else()
       # No shared object to open: export the linked archive's symbols so
       # the test can find them with dlsym.

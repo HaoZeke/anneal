@@ -318,7 +318,7 @@ jobs:
           fi
       - if: matrix.sys == 'meson' && matrix.os == 'ubuntu-latest'
         name: mpirun calculator_group_test
-        run: pixi run -e mpibld mpirun --oversubscribe -n 4 ./bbdir/CppCore/calculator_group_test
+        run: pixi run -e mpibld mpirun --oversubscribe -n 4 ./bbdir/CppCore/calculator_group_test --order decl
       - if: matrix.sys == 'cmake'
         name: Build & Test (CMake)
         shell: pixi run bash -e {0}

@@ -1958,7 +1958,12 @@ if get_option('with_tests')
                 _export_dynamic = true
             else
                 _export_dynamic = false
-                case_args += ['-DRGPOT_TEST_SHARED_LIBRARY']
+                case_args += [
+                    '-DRGPOT_TEST_SHARED_LIBRARY',
+                    '-DRGPOT_TEST_SHARED_LIBRARY_PATH="@0@"'.format(
+                        rgpot.full_path(),
+                    ),
+                ]
             endif
         else
             _export_dynamic = false
@@ -1974,7 +1979,16 @@ if get_option('with_tests')
             build_rpath: _metatomic_build_rpath,
             export_dynamic: _export_dynamic,
         )
-        test(_rt[0], _test_exe, kwargs: _rt_kw[_rt[0]])
+        if _rt[0] == 'CalculatorGroupTest'
+            test(
+                _rt[0],
+                _test_exe,
+                depends: [rgpot],
+                kwargs: _rt_kw[_rt[0]],
+            )
+        else
+            test(_rt[0], _test_exe, kwargs: _rt_kw[_rt[0]])
+        endif
         _rt_exes += {_rt[0]: _test_exe}
         if _rt[0] == 'CalculatorGroupTest'
             calculator_group_test_exe = _test_exe
