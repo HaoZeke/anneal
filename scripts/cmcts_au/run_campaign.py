@@ -13,6 +13,11 @@ PyPhysTree commit d6eb071a7404550487654a28ec6181a60af44f05. The crystal
 driver hyperparameters are the ones in examples/02_Crystal_Structure/codes/Crystal_search.py.
 The box is the supplementary Au cell, 20 Å, divided by the Todd–Lynden-Bell
 gold lattice parameter 4.08 Å. The search itself is their MCTSBatch.
+
+``code_revision`` is the anneal commit on anneal rows and the PyPhysTree
+commit on c-MCTS rows; ``harness_revision`` is the anneal commit whose
+binary ran the search or served the potential, on every row. Rows stored
+before that column existed read empty in it.
 """
 
 from __future__ import annotations
@@ -66,6 +71,7 @@ ROW_FIELDS = [
     "calls_per_minimisation",
     "paper_anchor_calls",
     "bh_anchor_calls",
+    "harness_revision",
 ]
 
 
@@ -86,6 +92,12 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 
 
 def append_rows(path: Path, rows: list[dict[str, str]]) -> None:
+    """Append rows the file does not hold, and never rewrite one.
+
+    A file written before a column existed gets the column added as it
+    is first appended to: each stored row keeps every value it had and
+    reads empty in the new column, which says the value was not recorded.
+    """
     existing = read_rows(path)
     seen = {
         (row["system"], row["arm"], row["seed"], row["code_revision"]) for row in existing
@@ -98,6 +110,12 @@ def append_rows(path: Path, rows: list[dict[str, str]]) -> None:
     if not fresh:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    if existing and list(existing[0]) != ROW_FIELDS:
+        with path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
+            writer.writeheader()
+            for row in existing:
+                writer.writerow({field: row.get(field, "") for field in ROW_FIELDS})
     write_header = not path.is_file() or path.stat().st_size == 0
     with path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
@@ -380,6 +398,7 @@ def campaign(
         row = run_one(binary, system, seed, arm)
         row["code_revision"] = head if arm != "cmcts" else PYPHYSTREE_COMMIT
         row["host"] = host
+        row["harness_revision"] = head
         append_rows(seeds_path, [row])
         print(
             f"done {system} {arm} {seed} hit={row['hit']} calls={row['evals_to_hit']} "
