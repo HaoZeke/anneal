@@ -612,12 +612,11 @@ fn main() {
         opt.settle
     );
     println!(
-        "arm {}  depth_reward {}  return_screen {}  orbit_complete_on_new {}  \
+        "arm {}  depth_reward {}  return_screen {}  \
          shared_visit_policy {:?}  superbasin {}  superbasin_period {}",
         opt.arm_name(),
         cfg.depth_reward,
         cfg.return_screen,
-        cfg.orbit_complete_on_new,
         cfg.shared_visit_policy,
         if opt.superbasin { "on" } else { "off" },
         cfg.superbasin_period

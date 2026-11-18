@@ -385,9 +385,29 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
     );
 }
 
+/// Sites of the icosahedral start recorded in `tests/fixtures/ico_growth_<n>.xyz`.
+/// The crate no longer builds them; the file is experiment input.
+fn ico_growth_sites(n: usize) -> Vec<[f64; 3]> {
+    let path = format!(
+        "{}/tests/fixtures/ico_growth_{n}.xyz",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    text.lines()
+        .skip(2)
+        .filter_map(|line| {
+            let v: Vec<f64> = line
+                .split_whitespace()
+                .skip(1)
+                .map(|t| t.parse().expect("coordinate"))
+                .collect();
+            (v.len() == 3).then(|| [v[0], v[1], v[2]])
+        })
+        .collect()
+}
+
 fn ico_cluster(n: usize, seed: u64) -> Array1<f64> {
-    let sites =
-        anneal_core::lattice::grow(&anneal_core::structure::Template::Icosahedral.points(), n);
+    let sites = ico_growth_sites(n);
     let nn = 2.0_f64.powf(1.0 / 6.0);
     let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x51ED));
     let mut x = Array1::zeros(3 * n);
