@@ -360,10 +360,11 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
             }
         }
         let local = minimum_cost_assignment(&costs, width)?;
-        // Below 98 atoms the recorded permutation is Kuhn-Munkres. Its
-        // tie break is not the inverse of the transposed problem, so an
-        // inverse is reused only for a unique dense optimum.
-        unique &= width >= 98 && crate::assignment::last_dense_optimum_was_unique();
+        // Where the recorded permutation is Kuhn-Munkres its tie break is not
+        // the inverse of the transposed problem, so an inverse is reused only
+        // for a unique dense optimum.
+        unique &= crate::assignment::uses_shortest_path(width)
+            && crate::assignment::last_dense_optimum_was_unique();
         for (row_i, &col_i) in local.iter().enumerate() {
             assignment[atoms[row_i]] = atoms[col_i];
         }
