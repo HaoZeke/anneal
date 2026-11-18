@@ -107,6 +107,10 @@ program test_eam_al
    call require(worst < tol_force, "forces disagree with finite differences", &
                 failed)
 
+   call table%release()
+   deallocate (positions, forces, moved, base_forces)
+   if (allocated(errmsg)) deallocate (errmsg)
+
    if (failed) then
       error stop "test_eam_al: failures above"
    end if

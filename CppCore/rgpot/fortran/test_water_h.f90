@@ -123,6 +123,8 @@ program test_water_h
                               status, errmsg)
    call require(status /= 0, "a carbon atom was accepted", failed)
 
+   if (allocated(errmsg)) deallocate (errmsg)
+
    if (failed) then
       error stop "test_water_h: failures above"
    end if

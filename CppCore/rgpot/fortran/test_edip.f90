@@ -81,6 +81,10 @@ program test_edip
    call require(worst < tol_force, "forces disagree with finite differences", &
                 failed)
 
+   call table%release()
+   deallocate (positions, forces, moved)
+   if (allocated(errmsg)) deallocate (errmsg)
+
    if (failed) then
       error stop "test_edip: failures above"
    end if

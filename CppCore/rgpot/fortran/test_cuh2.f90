@@ -136,6 +136,11 @@ program test_cuh2
    call require(status /= 0, "a foreign species was accepted", failed)
    call require(len(errmsg) > 0, "a foreign species carried no message", failed)
 
+   call table%release()
+   deallocate (positions, forces, f0, moved, reversed, f_reversed)
+   deallocate (znum, znum_reversed, znum_foreign)
+   if (allocated(errmsg)) deallocate (errmsg)
+
    if (failed) then
       error stop "test_cuh2: failures above"
    end if

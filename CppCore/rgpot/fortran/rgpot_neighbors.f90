@@ -246,6 +246,11 @@ contains
 
       if (c_associated(self%builder)) call rgpot_nlist_fortran_close(self%builder)
       self%builder = c_null_ptr
+      if (allocated(self%row)) deallocate (self%row)
+      if (allocated(self%idx)) deallocate (self%idx)
+      if (allocated(self%vec)) deallocate (self%vec)
+      if (allocated(self%dist)) deallocate (self%dist)
+      self%natoms = 0_ip
       self%cutoff = -1.0_wp
       self%skin = -1.0_wp
    end subroutine neighbor_table_release
