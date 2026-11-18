@@ -27,3 +27,8 @@ composite.diff
 # d2.diff: PotentialConfig.d2 @19 and the D2Params struct, the Grimme
 # 2006 lattice sum rgpot::D2Pot evaluates.
 d2.diff
+#
+# d2cpmd.diff: PotentialConfig.d2cpmd @20 and the D2CpmdParams struct,
+# the minimum-image empirical D2 of OpenCPMD that rgpot::D2CpmdPot
+# reproduces.
+d2cpmd.diff

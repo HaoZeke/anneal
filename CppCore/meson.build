@@ -201,7 +201,7 @@ endif
 _rgpot_srcs += files('rgpot/PotHelpers.cc')
 _rgpot_srcs += files('rgpot/units.cc')
 _rgpot_srcs += files('rgpot/SumPot/SumPot.cc')
-_rgpot_srcs += files('rgpot/D2Pot/D2Pot.cc')
+_rgpot_srcs += files('rgpot/D2Pot/D2CpmdPot.cc', 'rgpot/D2Pot/D2Pot.cc')
 _rgpot_srcs += files('rgpot/abi/CxxLayout.cc')
 _rgpot_srcs += files(
     'rgpot/simd/dispatch.cc',

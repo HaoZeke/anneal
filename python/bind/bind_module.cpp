@@ -30,6 +30,7 @@
 
 #include "pot_holder.hpp"
 
+#include "rgpot/D2Pot/D2CpmdPot.hpp"
 #include "rgpot/D2Pot/D2Pot.hpp"
 #include "rgpot/ExternalPot/ExternalPot.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
@@ -149,6 +150,11 @@ struct ChildSpec {
   double d = 0.0;
   bool has_sr = false;
   double sr = 0.0;
+  // d2cpmd dict fields, beside s6 and functional.
+  bool has_alpha = false;
+  double alpha = 0.0;
+  bool has_vdweps = false;
+  double vdweps = 0.0;
 };
 
 std::string child_kind(nb::handle spec) {
@@ -189,6 +195,14 @@ ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
     if (d.contains("sr")) {
       out.has_sr = true;
       out.sr = nb::cast<double>(d["sr"]);
+    }
+    if (d.contains("alpha")) {
+      out.has_alpha = true;
+      out.alpha = nb::cast<double>(d["alpha"]);
+    }
+    if (d.contains("vdweps")) {
+      out.has_vdweps = true;
+      out.vdweps = nb::cast<double>(d["vdweps"]);
     }
     if (d.contains("atm")) {
       out.atm = nb::cast<bool>(d["atm"]);
@@ -283,6 +297,20 @@ std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
       cfg.cutoff = spec.cutoff;
     }
     return std::make_unique<rgpot::D2Pot>(cfg);
+  }
+  if (spec.kind == "d2cpmd") {
+    rgpot::D2CpmdConfig cfg = spec.has_functional ? rgpot::d2_cpmd_config_for(spec.functional)
+                                                  : rgpot::D2CpmdConfig{};
+    if (spec.has_s6) {
+      cfg.s6 = spec.s6;
+    }
+    if (spec.has_alpha) {
+      cfg.alpha = spec.alpha;
+    }
+    if (spec.has_vdweps) {
+      cfg.vdweps = spec.vdweps;
+    }
+    return std::make_unique<rgpot::D2CpmdPot>(cfg);
   }
 #ifdef RGPOT_HAS_DFTD3
   if (spec.kind == "d3") {
@@ -857,6 +885,37 @@ NB_MODULE(_core, m) {
     return out;
   });
   rgpot::pybind::bind_calls(d2_cls);
+
+  auto d2cpmd_cls = nb::class_<PotHolder<rgpot::D2CpmdPot>>(m, "D2CpmdPot");
+  d2cpmd_cls.def(
+      "__init__",
+      [](PotHolder<rgpot::D2CpmdPot> *self, double s6, double alpha, double vdweps,
+         std::optional<std::string> functional) {
+        rgpot::D2CpmdConfig cfg =
+            functional ? rgpot::d2_cpmd_config_for(*functional) : rgpot::D2CpmdConfig{};
+        if (!functional) {
+          cfg.s6 = s6;
+        }
+        cfg.alpha = alpha;
+        cfg.vdweps = vdweps;
+        new (self) PotHolder<rgpot::D2CpmdPot>(
+            [cfg] { return std::make_unique<rgpot::D2CpmdPot>(cfg); });
+      },
+      nb::arg("s6") = rgpot::D2CpmdConfig{}.s6, nb::arg("alpha") = rgpot::D2CpmdConfig{}.alpha,
+      nb::arg("vdweps") = rgpot::D2CpmdConfig{}.vdweps, nb::arg("functional") = nb::none(),
+      "OpenCPMD's built-in empirical D2 (EMPIRICAL CORRECTION, ALL DFT-D2) "
+      "with its tables, damping, truncation and minimum image, in eV, to "
+      "subtract from a CPMD run that had it on. The defaults are CPMD's for "
+      "BLYP; a functional takes s6 from CPMD's set_s6.");
+  d2cpmd_cls.def("config", [](const PotHolder<rgpot::D2CpmdPot> &self) {
+    const rgpot::D2CpmdConfig &cfg = self.primary().config();
+    nb::dict out;
+    out["s6"] = cfg.s6;
+    out["alpha"] = cfg.alpha;
+    out["vdweps"] = cfg.vdweps;
+    return out;
+  });
+  rgpot::pybind::bind_calls(d2cpmd_cls);
 
 #ifdef RGPOT_HAS_EAM_TABLE
   auto eam_table =

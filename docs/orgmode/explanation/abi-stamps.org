@@ -106,11 +106,11 @@ Covered types:
 
 - =ForceInput=, =ForceOut=, =ForceBatch=, =PotCaps=, =CalculatorGroup=
 - =LJConfig=, =LJClusterConfig=, =MorseConfig=, =ZBLConfig=, =SuttonChenConfig=,
-  =D2Config=
+  =D2Config=, =D2CpmdConfig=
 - =Reentrancy= and =PotType=
 - =PotentialBase=, =Potential<Derived>= (through one probe instantiation),
   =LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot=, =SumPot=,
-  =lr::SumPot=, =D2Pot=
+  =lr::SumPot=, =D2Pot=, =D2CpmdPot=
 - with the cache: =cache::EvalCounts= and =cache::PotentialCache=
 
 The classes of the optional backends are not covered (xtb, tblite, dftd3, dftd4,
@@ -170,4 +170,5 @@ Soversion 9 stamps =SumPot=, =lr::SumPot= and =PotType::LrSum=.
 =lr::SumPot= derives from =SumPot= now, so it grows from 56 to 120 bytes and its
 old constructor and =add= symbols leave the library.
 It also stamps =D2Config=, =D2Pot= and =PotType::D2=.
+It also stamps =D2CpmdConfig=, =D2CpmdPot= and =PotType::D2Cpmd=.
 A program linked against soversion 8 does not load =librgpot.so.9=.

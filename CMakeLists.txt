@@ -242,6 +242,7 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/PotHelpers.cc
       CppCore/rgpot/units.cc
       CppCore/rgpot/SumPot/SumPot.cc
+      CppCore/rgpot/D2Pot/D2CpmdPot.cc
       CppCore/rgpot/D2Pot/D2Pot.cc
       CppCore/rgpot/abi/CxxLayout.cc
       CppCore/rgpot/plugin/PluginRegistry.cc
@@ -390,6 +391,7 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/PotentialCache.cc
       CppCore/rgpot/units.cc
       CppCore/rgpot/SumPot/SumPot.cc
+      CppCore/rgpot/D2Pot/D2CpmdPot.cc
       CppCore/rgpot/D2Pot/D2Pot.cc
       CppCore/rgpot/abi/CxxLayout.cc
       CppCore/rgpot/plugin/PluginRegistry.cc

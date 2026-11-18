@@ -16,6 +16,7 @@
 #include <capnp/serialize.h>
 #include <catch2/catch_all.hpp>
 
+#include "rgpot/D2Pot/D2CpmdPot.hpp"
 #include "rgpot/D2Pot/D2Pot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
@@ -233,4 +234,45 @@ TEST_CASE("the d2 arm configures a D2 backend", "[rpc][d2]") {
   auto refused = rgpot::rpc::configureD2(cfg.asReader());
   REQUIRE_FALSE(refused.ok);
   REQUIRE_THAT(refused.message, ContainsSubstring("morse"));
+}
+
+TEST_CASE("the d2cpmd arm configures CPMD's D2 and a composite term", "[rpc][d2cpmd]") {
+  REQUIRE(capnp::Schema::from<::PotentialConfig>().getFieldByName("d2cpmd").getProto().getOrdinal().getExplicit() == 20);
+  capnp::MallocMessageBuilder builder;
+  auto cfg = builder.initRoot<::PotentialConfig>();
+  auto params = cfg.initD2cpmd();
+  REQUIRE(params.getS6() == rgpot::D2CpmdConfig{}.s6);
+  REQUIRE(params.getAlpha() == rgpot::D2CpmdConfig{}.alpha);
+  REQUIRE(params.getVdweps() == rgpot::D2CpmdConfig{}.vdweps);
+  params.setFunctional("PBE");
+  auto applied = rgpot::rpc::configureD2Cpmd(cfg.asReader());
+  INFO(applied.message);
+  REQUIRE(applied.ok);
+  REQUIRE(applied.replacement->config().s6 == 0.75);
+  params.setFunctional("b97-d");
+  REQUIRE_FALSE(rgpot::rpc::configureD2Cpmd(cfg.asReader()).ok);
+  cfg.initD2();
+  auto refused = rgpot::rpc::configureD2Cpmd(cfg.asReader());
+  REQUIRE_FALSE(refused.ok);
+  REQUIRE_THAT(refused.message, ContainsSubstring("d2"));
+
+  capnp::MallocMessageBuilder sum_builder;
+  auto sum_cfg = sum_builder.initRoot<::PotentialConfig>();
+  auto terms = sum_cfg.initComposite().initTerms(2);
+  terms[0].setName("undo cpmd");
+  terms[0].setWeight(-1.0);
+  terms[0].initPot().initBuiltin().setName("d2cpmd");
+  terms[1].setName("d2");
+  terms[1].initPot().initBuiltin().setName("d2");
+  auto result = rgpot::rpc::configureComposite(sum_cfg.asReader());
+  INFO(result.message);
+  REQUIRE(result.ok);
+  auto [e, f, v] = (*result.replacement)(kPositions, kZ, kBox);
+  (void)f;
+  (void)v;
+  rgpot::D2Pot lattice;
+  rgpot::D2CpmdPot cpmd;
+  const double expected = std::get<0>(lattice(kPositions, kZ, kBox)) -
+                          std::get<0>(cpmd(kPositions, kZ, kBox));
+  REQUIRE(e == Catch::Approx(expected).margin(1e-14));
 }

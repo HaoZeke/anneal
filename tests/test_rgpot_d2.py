@@ -100,3 +100,59 @@ def test_d2_term_cancels_in_a_sum():
     assert not parts[3]["evaluated"]
     tuned = rgpot.SumPot([{"kind": "d2", "functional": "pbe", "cutoff": 40.0}])
     assert tuned(pos, z, box)[0] == pytest.approx(e_d2 * 0.75 / 1.2, rel=1e-12)
+
+
+CPMD_DATA = DATA.parent / "d2cpmd"
+CPMD_SYSTEMS = [
+    "cubic_water",
+    "cubic_below_half",
+    "cubic_above_half",
+    "ortho_water_methane",
+    "triclinic_water_methane",
+    "cubic_truncation",
+]
+
+
+def cpmd_fixture(name):
+    z, pos, force = [], [], []
+    box = energy = None
+    for line in (CPMD_DATA / f"{name}.txt").read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        key, *rest = line.split()
+        if key == "box":
+            box = np.array(rest, dtype=np.float64).reshape(3, 3)
+        elif key == "atom":
+            z.append(int(rest[0]))
+            pos.append([float(v) for v in rest[1:]])
+        elif key == "energy":
+            energy = float(rest[0])
+        elif key == "force":
+            force.append([float(v) for v in rest])
+    return np.array(pos), np.array(z, dtype=np.int32), box, energy, np.array(force)
+
+
+@pytest.mark.parametrize("name", CPMD_SYSTEMS)
+def test_d2cpmd_matches_opencpmd(name):
+    pos, z, box, energy, force = cpmd_fixture(name)
+    out = rgpot.D2CpmdPot().evaluate(pos, z, box)
+    assert out["energy"] == pytest.approx(energy * HARTREE_TO_EV, rel=0, abs=1e-11)
+    np.testing.assert_allclose(
+        out["forces"], force * HARTREE_TO_EV / BOHR_TO_ANGSTROM, rtol=0, atol=1e-9
+    )
+    assert out["stress"] is not None
+
+
+def test_d2cpmd_config_and_swap():
+    assert rgpot.D2CpmdPot().config() == {"s6": 1.2, "alpha": 20.0, "vdweps": 0.01}
+    assert rgpot.D2CpmdPot(functional="pbe").config()["s6"] == 0.75
+    with pytest.raises(ValueError, match="no s6 for functional"):
+        rgpot.D2CpmdPot(functional="b97-d")
+    pos, z, box, *_ = cpmd_fixture("cubic_water")
+    e_cpmd = rgpot.D2CpmdPot()(pos, z, box)[0]
+    e_d2 = rgpot.D2Pot()(pos, z, box)[0]
+    swap = rgpot.SumPot(
+        [{"kind": "d2cpmd", "name": "undo", "weight": -1.0}, {"kind": "d2", "name": "d2"}]
+    )
+    assert swap(pos, z, box)[0] == pytest.approx(e_d2 - e_cpmd, rel=1e-12)
+    assert swap.components()[0]["energy"] == pytest.approx(e_cpmd, rel=1e-15)

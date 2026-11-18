@@ -1967,3 +1967,8 @@ D2Params @2 field sr :Float64 local
 D2Params @3 field cutoff :Float64 local
 D2Params @4 field functional :Text local
 PotentialConfig @19 arm d2 :D2Params local
+D2CpmdParams @0 field s6 :Float64 local
+D2CpmdParams @1 field alpha :Float64 local
+D2CpmdParams @2 field vdweps :Float64 local
+D2CpmdParams @3 field functional :Text local
+PotentialConfig @20 arm d2cpmd :D2CpmdParams local

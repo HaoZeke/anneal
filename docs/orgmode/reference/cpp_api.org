@@ -785,7 +785,9 @@ The systems are independent: each has its own atom count, cell and species.
   =TersoffSi=, =EAMAl=, =FeHe=, =WaterH=, =D3=, =D4=, =Expr=, =Uma=, =Skala=,
   =MOPAC=, =EMT=, =EAMCell=, =TIP4P=, =SPCE=, =TIP4PPt=, =IPI=, =SuttonChen=,
   =SWSi1985=, =EAMTable=, =Lammps=, =Gromacs=, =OpenMM=, =CP2K=, =LrCoulomb=,
-  =LrDispersion=, =LrNlh=, =LrSum=, =D2=, numbered in that order.
+  =LrDispersion=, =LrNlh=, =LrSum=, =Eckart=, =MullerBrown=,
+  =ModifiedMullerBrown=, =LepsHH2=, =LepsHCl2=, =LepsFH2=, =DoubleWell=,
+  =CoupledProtonWell=, =CBE=, =D2=, =D2Cpmd=, numbered in that order.
 - Errors :: none.
 
 Every enumerator is declared in every build; whether the potential behind it is

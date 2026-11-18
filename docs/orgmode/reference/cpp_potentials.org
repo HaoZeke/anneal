@@ -234,6 +234,18 @@ class.
 - Errors :: the constructor throws =std::invalid_argument= unless =cutoff= is
   positive and finite, =sr= is positive and finite and =s6= and =d= are finite.
 
+*** =rgpot::D2CpmdConfig=
+
+- Inputs :: =s6= (CPMD's =S6GRIMME=, default 1.2), =alpha= (the damping
+  exponent, default 20.0), =vdweps= (default 0.01; a pair with
+  \(\lvert\alpha(r/R_r-1)\rvert\ge\frac{1}{\mathrm{vdweps}}\) is dropped).
+  The defaults are CPMD's for BLYP; =rgpot::d2_cpmd_config_for= gives the =s6=
+  of another functional.
+- Units :: none.
+- Outputs :: the parameters of =rgpot::D2CpmdPot=.
+- Errors :: the constructor throws =std::invalid_argument= unless =s6= and
+  =alpha= are finite and =vdweps= is positive and finite.
+
 *** =rgpot::D4Config=
 
 - Inputs :: =functional= (the dftd4 method key, default ="pbe"=), =charge=
@@ -309,11 +321,12 @@ A sentence after the fields names a class whose behaviour differs in detail.
 [[nodiscard]] uint64_t paramsKey() const noexcept override;
 #+end_src
 
-- Applies to :: rgpot::D2Pot, rgpot::EAMPot, rgpot::EAMTablePot, rgpot::EMTPot,
-  rgpot::ExprPot, rgpot::LJClusterPot, rgpot::LJPot, rgpot::MorsePot,
-  rgpot::SPCEPot, rgpot::StillingerWeberSi, rgpot::SuttonChenPot,
-  rgpot::TIP4PPot, rgpot::TIP4PPtPot, rgpot::TersoffSiC, rgpot::ZBLPot,
-  rgpot::lr::CoulombPot, rgpot::lr::DispersionPot, rgpot::lr::NlhPot
+- Applies to :: rgpot::D2CpmdPot, rgpot::D2Pot, rgpot::EAMPot,
+  rgpot::EAMTablePot, rgpot::EMTPot, rgpot::ExprPot, rgpot::LJClusterPot,
+  rgpot::LJPot, rgpot::MorsePot, rgpot::SPCEPot, rgpot::StillingerWeberSi,
+  rgpot::SuttonChenPot, rgpot::TIP4PPot, rgpot::TIP4PPtPot, rgpot::TersoffSiC,
+  rgpot::ZBLPot, rgpot::lr::CoulombPot, rgpot::lr::DispersionPot,
+  rgpot::lr::NlhPot
 - Inputs :: none.
 - Units :: none.
 - Outputs :: a 64-bit FNV-1a hash of the parameters and a kernel version,
@@ -1417,6 +1430,75 @@ or the aliases =blyp=, =bp86= and =b3lyp=, in any case) and the default =sr= and
 =rgpot::d2_c6(z)= and =rgpot::d2_r0(z)= return the tabulated C6 (J nm^6 mol^-1)
 and R0 (Angstrom) of atomic number =z= and throw =std::invalid_argument= outside
 1 to 86.
+
+** CPMD's empirical D2
+
+=rgpot::D2CpmdPot= is the D2 term OpenCPMD adds with =VDW CORRECTION ON= and
+=EMPIRICAL CORRECTION= / =ALL DFT-D2=, reproduced from the source cpmdc builds
+against (OpenCPMD 062582b, =vdw= in
+=src/vdw_utils.mod.F90=, the tables of =empvdwin= in =src/vdwin_utils.mod.F90= and =pbc3= in =src/pbc_utils.mod.F90=).
+It exists to subtract that term from a CPMD BLYP-D2 run, for example to put
+=rgpot::D2Pot= or =rgpot::D4Pot= in its place, so it keeps every CPMD detail:
+
+- CPMD's own C6 and R0 tables (Grimme 2006, Table 1, as CPMD types them, boron's
+  C6 of 3.31 included), =convfac= 17.33979 for the C6 and CPMD's bohr,
+  0.529177210859, for R0, positions and cell, as cpmdc converts them.
+- \(R_r = R_0^i + R_0^j\) with the paper's radii, the damping
+  \(1/(1 + e^{-\alpha (r/R_r - 1)})\) with \(\alpha = 20\), and the =S6GRIMME= of CPMD's =set_s6=
+  (BLYP 1.2, B3LYP 1.05, BP86 1.05, TPSS 1.0, PBE 0.75, REVPBE 1.25, PBE0 0.6).
+- One image per pair, the one =pbc3= picks: per axis in an orthorhombic cell
+  (off-diagonal box entries exactly zero), the nearest integer fractional shift
+  otherwise, none for an all-zero box.
+  This is CPMD's default single cell
+  (=VAN DER WAALS SUM IN REAL SPACE OVER 1* 1* 1 CELLS=).
+- A pair is dropped when
+  \(\lvert\alpha(r/R_r-1)\rvert\ge\frac{1}{\mathrm{vdweps}}\), so at \(r \ge 6 R_r\)
+  by default, and below 0.01 bohr; elements 87 to 99 give nothing.
+
+The results go back to eV with rgpot's units, as cpmdc and =rgpot::CPMDPot=
+convert CPMD's, so the term cancels a CPMD run's to the last bits;
+=D2CpmdPotTest= matches OpenCPMD's own D2 energy and forces to 100 eps Ha and
+sqrt(eps) Ha/bohr on water and methane in cubic, orthorhombic and triclinic
+cells.
+
+The minimum image has a cusp.
+When a pair crosses half a cell the image on the other side takes over: the
+energy is continuous, but the force on the pair changes sign, and the 6 \(R_r\)
+truncation adds a step in the energy wherever a pair crosses it.
+A geometry optimisation or dynamics in a cell under twice the truncation radius
+sees both.
+=rgpot::D2Pot= sums every image within its cutoff and has neither, so for
+anything but undoing CPMD's term use it instead.
+
+*** =rgpot::D2CpmdPot=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+explicit D2CpmdPot(D2CpmdConfig cfg = {});
+#+end_src
+
+- Inputs :: a =rgpot::D2CpmdConfig=.
+- Units :: energy in eV, forces in eV/Angstrom, stress in eV/Angstrom^3.
+- Outputs :: CPMD's empirical D2 energy, forces and stress.
+- Errors :: the errors of =rgpot::D2CpmdConfig=.
+  The force call throws =std::invalid_argument= when the atomic numbers are
+  missing or one is outside 1 to 99, and when a non-zero cell is singular.
+
+*** =rgpot::D2CpmdPot::config=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const D2CpmdConfig &config() const noexcept { return cfg_; }
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the =rgpot::D2CpmdConfig= the instance was built with.
+- Errors :: none.
+
+=rgpot::d2_cpmd_config_for(functional)= returns a =rgpot::D2CpmdConfig= with the =s6= CPMD's =set_s6=
+gives one of the seven names above, in any case, and throws
+=std::invalid_argument= for any other.
 
 ** Dispersion libraries
 

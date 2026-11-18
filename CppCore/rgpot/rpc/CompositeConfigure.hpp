@@ -84,6 +84,11 @@ inline std::unique_ptr<PotentialBase> builtinPotential(const ::BuiltinParams::Re
     expectArm(name, cfg, ::PotentialConfig::D2);
     return std::make_unique<D2Pot>(cfg.isD2() ? d2ConfigFrom(cfg.getD2()) : D2Config{});
   }
+  if (name == "d2cpmd") {
+    expectArm(name, cfg, ::PotentialConfig::D2CPMD);
+    return std::make_unique<D2CpmdPot>(cfg.isD2cpmd() ? d2CpmdConfigFrom(cfg.getD2cpmd())
+                                                      : D2CpmdConfig{});
+  }
   if (name == "composite" || name == "sum") {
     expectArm(name, cfg, ::PotentialConfig::COMPOSITE);
     if (!cfg.isComposite()) {
