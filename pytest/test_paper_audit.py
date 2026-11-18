@@ -341,16 +341,103 @@ def test_an_alias_off_the_rows_commit_parent_must_be_its_ancestor(tmp_path, monk
             "d9935407 differs from the rows commit's parent only in workflow/Snakefile"} <= {r[2] for r in audit.drifts()}
 
 
+def listed_audit(tmp_path, monkeypatch, edit, paths):
+    table = (ROOT / audit_mod.UNPUSHED_FILE).read_text()
+    edited = tmp_path / "unpushed-revisions.csv"
+    edited.write_text(edit(table))
+    monkeypatch.setattr(audit_mod, "UNPUSHED_FILE", str(edited))
+    audit = audit_mod.Audit()
+    for path in paths:
+        audit.rows(path)
+    return audit, audit_mod.provenance(audit)
+
+
 def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
-    unpushed = dict(audit_mod.UNPUSHED)
-    del unpushed["bf09f7a2b7a6bd6359898db675eeafefcd20548b"]
-    unpushed["e09e0487c52b7f4789bc556ee7fe07ead4999824"] = "listed although its alias holds"
-    monkeypatch.setattr(audit_mod, "UNPUSHED", unpushed)
-    audit, _ = aliased_audit(tmp_path, monkeypatch, lambda table: table, (ASE_GOFEE,))
+    def edit(table):
+        lines = [line for line in table.splitlines() if not line.startswith("bf09f7a2b7a6bd6c")]
+        lines = [line for line in lines if not line.startswith("bf09f7a2b7a6bd6359898db675eeafefcd20548b")]
+        return "\n".join(lines + ["e09e0487c52b7f4789bc556ee7fe07ead4999824,listed although its alias holds"]) + "\n"
+
+    audit, _ = listed_audit(tmp_path, monkeypatch, edit, (ASE_GOFEE,))
     assert [(r[2], r[3], r[4]) for r in audit.drifts()] == [
         ("unpushed revision bf09f7a2", "not listed", "no pushed equivalent"),
-        ("unpushed revision e09e0487", "listed although its alias holds", "resolved"),
+        ("unpushed revision e09e0487", "listed although its alias holds", "resolved as alias of 57735de1"),
     ]
+
+
+def remote_tip():
+    return git("for-each-ref", "--count=1", "--format=%(objectname)", "refs/remotes").stdout.strip()
+
+
+def synthetic_audit(*rows, revisions=("code_revision", "code_tree")):
+    audit = audit_mod.Audit()
+    audit.read["synthetic.csv"] = [dict(zip(revisions, row), host="bench") for row in rows]
+    return audit
+
+
+LOST = "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_a_cited_revision_on_a_remote_ref_is_not_unresolved(audited):
+    found = audit_mod.resolve_revisions(audited)
+    assert found.unresolved == set(audit_mod.unpushed_reasons())
+    assert found.unresolved.isdisjoint(found.pushed | set(found.aliased) | set(found.same_tree))
+    assert found.pushed and all(found.index.on_remote(name) for name in found.pushed)
+
+
+def test_a_listed_revision_that_a_remote_ref_contains_is_reported(tmp_path, monkeypatch):
+    tip = remote_tip()
+    monkeypatch.setattr(audit_mod, "unpushed_reasons", lambda: {tip: "listed although a remote ref holds it"})
+    audit = synthetic_audit((tip, ""))
+    assert audit_mod.provenance(audit) == {}
+    assert [(r[2], r[3]) for r in audit.drifts()] == [(f"unpushed revision {tip[:8]}", "listed although a remote ref holds it")]
+    assert audit.drifts()[0][4].startswith("resolved on ")
+
+
+def test_a_commit_no_remote_ref_contains_is_unpushed_although_it_exists(monkeypatch):
+    for who in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{who}_NAME", "t")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "t@example.org")
+        monkeypatch.setenv(f"GIT_{who}_DATE", "@86400 +0000")
+    tree = git("rev-parse", f"{remote_tip()}^{{tree}}").stdout.strip()
+    local = git("commit-tree", tree, "-m", "a commit no ref points at").stdout.strip()
+    assert local and git("for-each-ref", "--contains", local, "refs/remotes").stdout == ""
+    audit = synthetic_audit((local, ""))
+    assert audit_mod.provenance(audit) == {"synthetic.csv": f"revision {local[:8]} is not on a pushed branch"}
+    assert [(r[2], r[3], r[4]) for r in audit.drifts()] == [(f"unpushed revision {local[:8]}", "not listed", "no pushed equivalent")]
+
+
+def test_the_recorded_tree_of_a_pushed_commit_resolves_a_lost_revision():
+    tree = git("rev-parse", f"{remote_tip()}^{{tree}}").stdout.strip()
+    audit = synthetic_audit((LOST, tree))
+    assert audit_mod.provenance(audit) == {}
+    assert not audit.drifts()
+    assert any(r[2] == f"revision {LOST[:8]} has the tree of a pushed commit" for r in audit.results)
+    assert audit_mod.resolve_revisions(audit).same_tree[LOST]
+
+
+def test_a_recorded_tree_no_pushed_commit_has_resolves_nothing():
+    audit = synthetic_audit((LOST, "f" * 40))
+    assert audit_mod.provenance(audit) == {"synthetic.csv": f"revision {LOST[:8]} is not in this repository"}
+    assert [r[2] for r in audit.drifts()] == [f"unpushed revision {LOST[:8]}"]
+
+
+def test_one_revision_with_two_recorded_trees_is_reported():
+    tree = git("rev-parse", f"{remote_tip()}^{{tree}}").stdout.strip()
+    audit = synthetic_audit((LOST, tree), (LOST, "f" * 40))
+    audit_mod.provenance(audit)
+    assert f"rows cite revision {LOST[:8]} with one code_tree" in {r[2] for r in audit.drifts()}
+
+
+def test_the_recorded_tree_of_a_pushed_revision_must_be_its_tree():
+    tip = remote_tip()
+    tree = git("rev-parse", f"{tip}^{{tree}}").stdout.strip()
+    audit = synthetic_audit((tip, tree))
+    audit_mod.provenance(audit)
+    assert not audit.drifts()
+    audit = synthetic_audit((tip, "f" * 40))
+    audit_mod.provenance(audit)
+    assert [r[2] for r in audit.drifts()] == [f"code_tree of revision {tip[:8]} is its tree"]
 
 
 def test_an_alias_with_another_patch_id_is_reported(tmp_path, monkeypatch):
