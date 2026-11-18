@@ -29,6 +29,14 @@ namespace detail {
 
 /// One centre into the totals: its energy, its strain, then the force of
 /// each row, the centre's own first.
+///
+/// Hidden so a debug build's out-of-line copy is not a dynamic export.
+/// At -O0 the compiler keeps this inline function as a weak symbol, and
+/// default visibility would put rgpot::detail::addCentre in the shared
+/// library's dynamic table.
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(_WIN32) && !defined(__CYGWIN__)
+__attribute__((visibility("hidden")))
+#endif
 inline void addCentre(double *force, double &energy, double *strain, double e, const double *s,
                       std::size_t rows, const std::int32_t *atoms, const double *f) {
   energy += e;
