@@ -372,6 +372,39 @@ TEST_CASE("CPMDPot retries a refused orbital key on the same params",
   REQUIRE(last_key() == 41);
 }
 
+TEST_CASE("CPMDPot force reports an orbital key refused at configure",
+          "[cpmd][abi]") {
+  const char *raw = std::getenv("RGPOT_CPMD_ENGINE");
+  REQUIRE(raw != nullptr);
+  const std::string engine_path(raw);
+
+  RestoreEnv engine_env("RGPOT_CPMD_ENGINE");
+  RestoreEnv library_env("CPMDC_LIBRARY");
+  RestoreEnv alt_env("RGPOT_CPMDC_ENGINE");
+
+  engine_env.clear();
+  library_env.clear();
+  alt_env.clear();
+
+  ::capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::CPMDParams>();
+  p.setFunctional("BLYP");
+  p.setCutOffRy(70.0);
+  rgpot::CPMDPot pot(p.asReader());
+
+  pot.selectOrbitals(-99);
+  p.setEnginePath(engine_path);
+  REQUIRE_FALSE(pot.setParams(p.asReader()));
+  REQUIRE_FALSE(pot.available());
+
+  rgpot::types::AtomMatrix positions = rgpot::types::AtomMatrix::Zero(1, 3);
+  std::vector<int> atmtypes{8};
+  std::array<std::array<double, 3>, 3> box = {
+      {{20.0, 0.0, 0.0}, {0.0, 21.0, 0.0}, {0.0, 0.0, 23.0}}};
+  REQUIRE_THROWS_WITH(
+      pot(positions, atmtypes, box), "CPMD engine refused the orbital key");
+}
+
 TEST_CASE("CPMDPot rejects a copy onto a refused orbital key", "[cpmd][abi]") {
   rgpot::DynLib lib;
   const char *path = std::getenv("RGPOT_CPMD_ENGINE");
