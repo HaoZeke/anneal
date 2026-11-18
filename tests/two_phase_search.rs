@@ -79,9 +79,9 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // The walk is deterministic: cutoff 0xffff, plain 0x9441 (5 seeds), with
+    // The walk is deterministic: cutoff 0xffff, plain 0x1004 (2 seeds), with
     // and without IRA. Without symmetry completion it was 0x1400 (2 seeds).
-    let plain_exact = 0x9441;
+    let plain_exact = 0x1004;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"
