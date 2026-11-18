@@ -64,7 +64,8 @@ Every exported struct is =#[repr(C)]= and every exported function is
   doubles.
   DLPack keeps the structs independent of the device that holds the data.
 - =rgpot_status_t= :: the status codes
-  =RGPOT_SUCCESS=, =RGPOT_INVALID_PARAMETER=, =RGPOT_INTERNAL_ERROR=, =RGPOT_RPC_ERROR= and =RGPOT_BUFFER_SIZE_ERROR=.
+  =RGPOT_SUCCESS=, =RGPOT_INVALID_PARAMETER=, =RGPOT_INTERNAL_ERROR=, =RGPOT_RPC_ERROR=, =RGPOT_BUFFER_SIZE_ERROR=,
+  =RGPOT_NO_JET=, =RGPOT_JET_BRANCH= and =RGPOT_JET_DOMAIN=.
   Calls that can fail return one of them.
   Constructors such as =rgpot_potential_new_eindir= and =rgpot_rpc_client_new=
   return a pointer instead, and NULL on failure.

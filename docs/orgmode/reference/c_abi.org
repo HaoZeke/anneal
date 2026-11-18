@@ -109,10 +109,12 @@ uint32_t rgpot_version_patch(void);
 - Units :: none.
 - Outputs ::
   =RGPOT_SUCCESS= (0), =RGPOT_INVALID_PARAMETER= (1), =RGPOT_INTERNAL_ERROR= (2), =RGPOT_RPC_ERROR= (3), =RGPOT_BUFFER_SIZE_ERROR=
-  (4), =RGPOT_SCC_NOT_CONVERGED= (5).
+  (4), =RGPOT_SCC_NOT_CONVERGED= (5), =RGPOT_NO_JET= (6), =RGPOT_JET_BRANCH= (7), =RGPOT_JET_DOMAIN= (8).
 - Errors :: none.
-  No function of =rgpot-core= returns =RGPOT_BUFFER_SIZE_ERROR= itself; a
-  callback may return it and it is passed through.
+  The only function of =rgpot-core= that returns =RGPOT_BUFFER_SIZE_ERROR=
+  itself is =rgpot_potential_taylor_jet=, for an =order= whose =order + 1=
+  doubles overflow in bytes; a callback may return it and it is passed
+  through.
   =RGPOT_SCC_NOT_CONVERGED= is the status of a callback whose engine ran its
   self-consistent field out of iterations; =rgpot_potential_calculate= and the
   Hessian-vector entry points return it unchanged, and
@@ -122,7 +124,8 @@ uint32_t rgpot_version_patch(void);
 A function wrapped in the crate's panic guard returns =RGPOT_INTERNAL_ERROR= for
 a caught Rust panic and stores the panic message.
 The guarded functions are =rgpot_potential_calculate=, =rgpot_potential_hvp=,
-=rgpot_potential_hvp_centre=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=.
+=rgpot_potential_hvp_centre=, =rgpot_potential_taylor_jet=, =rgpot_rpc_calculate=
+and =rgpot_rpc_server_start=.
 
 *** =rgpot_set_last_error=
 
@@ -902,6 +905,106 @@ rgpot_status_t products(const rgpot_potential_t *pot,
 }
 #+end_src
 
+** Taylor jets
+
+A jet is the list of enclosures =lo_k <= D^k V(x)[v, ..., v] / k! <= hi_k=,
+=k = 0..=order=, of the energy along the line =x + t v=.
+The bounds are about the real function the potential's source defines with
+every literal read as its compiler assigns it, not about the floating-point
+program.
+A potential with no such enclosure answers =RGPOT_NO_JET= and is never
+differenced in its place.
+Branches of the source are decided on the enclosure of the tested quantity;
+one that contains the threshold is =RGPOT_JET_BRANCH=.
+A function or division evaluated outside its domain, or where its recurrence
+divides by an enclosure of zero, is =RGPOT_JET_DOMAIN=.
+The callback lives behind the handle's =fused_cache= pointer, as the
+Hessian-vector callback does.
+
+*** =rgpot_interval_t=
+
+- Inputs :: none; a struct.
+- Units :: those of the coefficient it encloses.
+- Outputs :: =lo= and =hi=, with =lo <= hi=.
+- Errors :: none.
+
+*** =rgpot_taylor_jet_fn=
+
+#+attr_rgpot: signature
+#+begin_src c
+typedef enum rgpot_status_t (*rgpot_taylor_jet_fn)(void *user_data,
+                                                   const struct rgpot_force_input_t *input,
+                                                   const double *direction,
+                                                   uintptr_t order,
+                                                   double *lower,
+                                                   double *upper);
+#+end_src
+
+- Inputs :: the =user_data= of the handle; the geometry; =direction= with
+  =3 * n_atoms= doubles; =order=; =lower= and =upper= with room for
+  =order + 1= doubles each, which do not overlap.
+- Units :: coefficient =k= in energy times (unit of =direction= / length) to
+  the power =k=; energy when =direction= is a displacement.
+- Outputs :: the callback writes =order + 1= lower and =order + 1= upper bounds
+  and returns =RGPOT_SUCCESS=, or returns =RGPOT_NO_JET=, =RGPOT_JET_BRANCH=,
+  =RGPOT_JET_DOMAIN= or another error status after setting =rgpot_last_error=.
+- Errors :: =rgpot_potential_taylor_jet= returns the callback's error status
+  unchanged, and =RGPOT_INVALID_PARAMETER= with
+  =jet callback returned [<lo>, <hi>] for coefficient <k>= when a pair is NaN
+  or reversed.
+
+*** =rgpot_potential_set_taylor_jet=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_set_taylor_jet(const struct rgpot_potential_t *pot,
+                                                   enum rgpot_status_t (*jet)(void *user_data,
+                                                                              const struct rgpot_force_input_t *input,
+                                                                              const double *direction,
+                                                                              uintptr_t order,
+                                                                              double *lower,
+                                                                              double *upper));
+#+end_src
+
+- Inputs :: =pot= a live handle; =jet= a =rgpot_taylor_jet_fn=, or NULL to
+  clear the registered one.
+- Units :: none.
+- Outputs :: the callback is stored on the handle and called with the handle's
+  =user_data=.
+- Errors :: =RGPOT_INVALID_PARAMETER= with
+  =rgpot_potential_set_taylor_jet: pot is NULL= for a NULL =pot=.
+
+*** =rgpot_potential_taylor_jet=
+
+#+attr_rgpot: signature
+#+begin_src c
+enum rgpot_status_t rgpot_potential_taylor_jet(const struct rgpot_potential_t *pot,
+                                               const struct rgpot_force_input_t *input,
+                                               const double *direction,
+                                               uintptr_t order,
+                                               double *lower,
+                                               double *upper);
+#+end_src
+
+- Inputs :: =pot= a live handle; =input= the geometry; =direction= with
+  =3 * n_atoms= finite doubles; =order=; =lower= and =upper= with room for
+  =order + 1= doubles each, which must not overlap: both are written through
+  Rust mutable slices, and overlapping ones would alias.
+- Units :: as for =rgpot_taylor_jet_fn=.
+- Outputs :: =RGPOT_SUCCESS= with the bounds written; nothing is written on
+  failure.
+- Errors :: =RGPOT_NO_JET= when no jet is registered or the jet has none;
+  =RGPOT_JET_BRANCH= and =RGPOT_JET_DOMAIN= from the jet, with the test or
+  function and its enclosure in =rgpot_last_error=;
+  =RGPOT_BUFFER_SIZE_ERROR= for an =order= whose =order + 1= doubles overflow
+  in bytes;
+  =RGPOT_INVALID_PARAMETER= for a NULL pointer, a non-finite direction, a peer
+  refusal, or a malformed enclosure from the callback, and, before the
+  callback is called, =rgpot_potential_taylor_jet: lower and upper overlap=
+  for overlapping =lower= and =upper= (the same pointer included) and
+  =rgpot_potential_taylor_jet: lower or upper wraps the address space= for a
+  range past the end of the address space.
+
 ** RPC
 
 These names are declared when =RGPOT_HAS_RPC= is defined and exported when the
@@ -1008,7 +1111,7 @@ enum rgpot_status_t rgpot_rpc_server_start(const struct rgpot_potential_t *pot,
 
 The macros =RGPOT_ABI_VERSION_MAJOR=, =RGPOT_ABI_VERSION_MINOR= and
 =RGPOT_ABI_LAYOUT_REVISION= hold the stamp of the header the caller compiled
-against: 1, 3 and 1.
+against: 1, 4 and 1.
 
 *** =rgpot_abi_stamp_t=
 

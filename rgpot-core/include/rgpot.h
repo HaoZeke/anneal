@@ -41,7 +41,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 3
+#define RGPOT_ABI_VERSION_MINOR 4
 
 /**
  * Layout revision of this build.
@@ -136,6 +136,18 @@ typedef enum rgpot_status_t {
    * failure from any other; see `rgpot_potential_fused_error_kind`.
    */
   RGPOT_SCC_NOT_CONVERGED = 5,
+  /**
+   * The potential has no exact Taylor jet.
+   */
+  RGPOT_NO_JET = 6,
+  /**
+   * A branch test of a Taylor jet has an enclosure containing its threshold.
+   */
+  RGPOT_JET_BRANCH = 7,
+  /**
+   * A Taylor jet left the analytic domain of a function or a division.
+   */
+  RGPOT_JET_DOMAIN = 8,
 } rgpot_status_t;
 
 #if defined(RGPOT_HAS_RPC)
@@ -398,6 +410,31 @@ typedef enum rgpot_status_t (*HessianVectorCallback)(void *user_data,
                                                      const struct rgpot_force_input_t *input,
                                                      const double *direction,
                                                      double *hv_out);
+
+/**
+ * Taylor jet callback of a potential handle.
+ *
+ * It receives the handle's `user_data`, the geometry, a direction of
+ * `3 * n_atoms` doubles and room for `order + 1` lower and `order + 1`
+ * upper bounds; `lower` and `upper` do not overlap. It writes the
+ * enclosures and returns `RGPOT_SUCCESS`, or returns `RGPOT_NO_JET`,
+ * `RGPOT_JET_BRANCH`, `RGPOT_JET_DOMAIN` or another error status after
+ * describing the failure in `rgpot_last_error`.
+ */
+typedef enum rgpot_status_t (*rgpot_taylor_jet_fn)(void *user_data,
+                                                   const struct rgpot_force_input_t *input,
+                                                   const double *direction,
+                                                   uintptr_t order,
+                                                   double *lower,
+                                                   double *upper);
+
+/**
+ * One coefficient enclosure, `lo <= c_k <= hi`.
+ */
+typedef struct rgpot_interval_t {
+  double lo;
+  double hi;
+} rgpot_interval_t;
 
 /**
  * Create a non-owning 2-D f64 tensor on CPU wrapping an existing buffer.
@@ -887,6 +924,53 @@ enum rgpot_status_t rgpot_potential_hvp_counts(const struct rgpot_potential_t *p
  * `pot` must be NULL or a live handle. NULL is a no-op.
  */
 void rgpot_potential_reset_hvp_counts(const struct rgpot_potential_t *pot);
+
+/**
+ * Register `jet` as the Taylor jet of `pot`, or clear it with NULL.
+ *
+ * The callback receives the `user_data` the handle was created with.
+ *
+ * # Safety
+ *
+ * `pot` must be NULL or a live handle. A NULL `pot` returns
+ * `RGPOT_INVALID_PARAMETER`. `jet` must be safe to call with the handle's
+ * `user_data` for as long as it stays registered.
+ */
+enum rgpot_status_t rgpot_potential_set_taylor_jet(const struct rgpot_potential_t *pot,
+                                                   enum rgpot_status_t (*jet)(void *user_data,
+                                                                              const struct rgpot_force_input_t *input,
+                                                                              const double *direction,
+                                                                              uintptr_t order,
+                                                                              double *lower,
+                                                                              double *upper));
+
+/**
+ * Write the enclosures of the Taylor coefficients `0..=order` of the
+ * energy along `x + t direction` to `lower` and `upper`.
+ *
+ * `direction` holds `3 * n_atoms` doubles laid out like the positions;
+ * `lower` and `upper` hold `order + 1` doubles each, must not overlap, and
+ * are written only on success. Without a registered jet the status is
+ * `RGPOT_NO_JET`; a branch or domain failure of the jet is
+ * `RGPOT_JET_BRANCH` or `RGPOT_JET_DOMAIN`, with the test or function and
+ * its enclosure in `rgpot_last_error`. An `order` whose `order + 1`
+ * doubles overflow in bytes is `RGPOT_BUFFER_SIZE_ERROR`.
+ *
+ * # Safety
+ *
+ * NULL pointers and overlapping `lower` and `upper` return
+ * `RGPOT_INVALID_PARAMETER` before the registered callback is called.
+ * Otherwise `pot` must be a live handle, `input` must point to a valid
+ * `rgpot_force_input_t` whose tensors stay alive for the call, `direction`
+ * to `3 * n_atoms` readable doubles, and `lower` and `upper` to
+ * `order + 1` writable doubles each.
+ */
+enum rgpot_status_t rgpot_potential_taylor_jet(const struct rgpot_potential_t *pot,
+                                               const struct rgpot_force_input_t *input,
+                                               const double *direction,
+                                               uintptr_t order,
+                                               double *lower,
+                                               double *upper);
 
 #if (defined(RGPOT_HAS_RPC) && defined(RGPOT_HAS_RPC))
 /**

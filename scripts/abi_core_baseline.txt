@@ -19,6 +19,8 @@ rgpot_potential_new_eindir
 rgpot_potential_reset_eval_counts
 rgpot_potential_reset_hvp_counts
 rgpot_potential_set_hvp_callback
+rgpot_potential_set_taylor_jet
+rgpot_potential_taylor_jet
 rgpot_source_revision
 rgpot_tensor_cpu_f64_2d
 rgpot_tensor_cpu_f64_matrix3

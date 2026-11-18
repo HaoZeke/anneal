@@ -25,12 +25,14 @@
 //!   calculate, free.
 //! - [`hvp`] — Hessian-vector products of a potential handle: the product,
 //!   the cached centre, the analytic callback and the counters.
+//! - [`jet`] — Validated Taylor jets of a potential handle and their callback.
 //! - [`rpc`] — RPC client functions (feature-gated on `rpc`): connect,
 //!   calculate, disconnect.
 
 pub mod types;
 pub mod potential;
 pub mod hvp;
+pub mod jet;
 
 #[cfg(feature = "rpc")]
 pub mod rpc;
