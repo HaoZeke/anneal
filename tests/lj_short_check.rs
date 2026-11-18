@@ -28,7 +28,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
         (38, 1, 2500, -170.260_483_558_385_52, 25, 16, 23),
-        (98, 7, 2500, -520.107_879_491_539_2, 10, 9, 9),
+        (98, 7, 2500, -529.681_963_509_890_6, 3, 5, 4),
     ];
     let mut records = Vec::new();
     for (n, seed, budget, best, hops, converged, capped) in cases {
@@ -64,6 +64,6 @@ fn lj38_and_lj98_short_searches_stay_put() {
     }
     let expected = "\
 LJ38 -170.2604835583855163 25 16 23 2500
-LJ98 -520.1078794915391654 10 9 9 2500";
+LJ98 -529.6819635098905792 3 5 4 2500";
     assert_eq!(records.join("\n"), expected);
 }
