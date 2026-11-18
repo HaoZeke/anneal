@@ -328,7 +328,7 @@ pub use runner::{
     run_rs_variant_start,
 };
 pub use sampler::Sampler;
-pub use target_tol::{DEFAULT_HIT_TOL, energy_hits};
+pub use target_tol::{DEFAULT_HIT_TOL, SEARCH_HIT_TOL, energy_hits};
 pub use tempering::{
     IndexProcess, Ladder, ReplicaMove, ReplicaTarget, SwapScheme, TARGET_SWAP_ACCEPT,
     beta_step_for_acceptance, biased_swap_log_ratio, swap_log_ratio, swap_probability,

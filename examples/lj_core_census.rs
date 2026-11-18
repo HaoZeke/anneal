@@ -104,7 +104,7 @@ fn main() {
     let mut by_class: BTreeMap<u8, (usize, usize, f64, f64, usize)> = BTreeMap::new();
     let mut hits_by_class1: BTreeMap<u8, usize> = BTreeMap::new();
     for r in &rows {
-        let hit = anneal_core::energy_hits(r.e1, target, 1e-4);
+        let hit = anneal_core::energy_hits(r.e1, target, anneal_core::SEARCH_HIT_TOL);
         let entry = by_class
             .entry(r.class0.index())
             .or_insert((0, 0, f64::INFINITY, 0.0, 0));

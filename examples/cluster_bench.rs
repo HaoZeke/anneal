@@ -814,7 +814,7 @@ fn main() {
             )
         });
         let hit = reference
-            .map(|r| anneal_core::energy_hits(out.best, r, 1e-4))
+            .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::SEARCH_HIT_TOL))
             .unwrap_or(false);
         if let Some(tr) = &out.energy_trace {
             // One file per seed, one quenched energy per line, in order. The
@@ -847,10 +847,12 @@ fn main() {
         // statistic worth comparing. A run that never reached it contributes a
         // lower bound rather than being dropped.
         if let Some(r) = reference {
+            // Same window as `hit`. The default is wider and would record an
+            // encounter the solved flag misses.
             encounters.push(first_encounter(
                 &out,
                 r,
-                anneal_core::DEFAULT_HIT_TOL,
+                anneal_core::SEARCH_HIT_TOL,
                 ledger.spent(),
             ));
         }

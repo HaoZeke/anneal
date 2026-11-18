@@ -6,8 +6,8 @@ temperature step used by Machta, Phys. Rev. E 82, 026704 (2010): the next
 inverse temperature is the one that puts the effective sample size at half
 the population. One independent population is one seed. Every energy or
 gradient call is charged, including the final quenches. An unquenched
-energy is not a hit. A hit is a quenched energy within 1e-4 of the
-Cambridge reference.
+energy is not a hit. A hit is a quenched energy within ``SEARCH_HIT_TOL``
+of the Cambridge reference.
 
 The population is 100. Each generation gives every walker one Metropolis
 trial that displaces every coordinate by at most 0.38, the Wales--Doye
@@ -30,6 +30,7 @@ from wales_doye_bh import (
     Exhausted,
     Ledger,
     REFERENCE,
+    SEARCH_HIT_TOL,
     contain,
     energy_hits,
     lj,
@@ -147,7 +148,7 @@ def main() -> int:
     for seed in range(args.seed0, args.seed0 + args.seeds):
         led, generations, final_t = population_annealing(args.n, args.budget, seed)
         deepest = min(deepest, led.best)
-        ok = ref is not None and energy_hits(led.best, ref, 1e-4)
+        ok = ref is not None and energy_hits(led.best, ref, SEARCH_HIT_TOL)
         solved += bool(ok)
         print(
             f"  seed {seed}: best {led.best:.6f}  generations {generations}  "

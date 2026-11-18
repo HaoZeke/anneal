@@ -3642,7 +3642,7 @@ mod tests {
             best = best.min(out.best);
         }
         assert!(
-            crate::energy_hits(best, -44.326801, 1e-4),
+            crate::energy_hits(best, -44.326801, crate::SEARCH_HIT_TOL),
             "best {best} against the published -44.326801"
         );
     }

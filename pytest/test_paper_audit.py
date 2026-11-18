@@ -525,6 +525,77 @@ def test_a_replaced_claim_without_its_tag_is_reported():
     assert audit_mod.untagged_claims(fenced, claims[0], "6") == (1, 0)
 
 
+def test_copper_tolerance_and_jcc_line_link_the_sources():
+    audit = audit_mod.Audit()
+    audit_mod.supporting_numbers(audit)
+    tolerance = [row for row in audit.results if row[2] == "TARGET_TOL matches tally tolerance"]
+    jcc = [row for row in audit.results if row[2] == "the jcc script's target line"]
+    assert tolerance == [("OK", audit_mod.SI, "TARGET_TOL matches tally tolerance", "0.001", "0.001")]
+    assert jcc and jcc[0][0] == "OK"
+    claimed, actual = audit_mod.jcc_target_lines(
+        (ROOT / "paper/jctc/scripts/hq_sci_tally.py").read_text(),
+        (ROOT / "scripts/elja_jcc_molslab_ensemble.sh").read_text(),
+    )
+    assert claimed == actual
+    assert jcc[0][3] == str(claimed)
+    assert float(jcc[0][4]) == actual
+
+
+def test_a_tally_tolerance_literal_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/scripts/hq_sci_tally.py"
+    audit.text_cache[path] = audit.text(path).replace(
+        "REFERENCE_TOL_EV = DEFAULT_HIT_TOL",
+        "REFERENCE_TOL_EV = 1e-4",
+    )
+    audit_mod.supporting_numbers(audit)
+    drift = [row for row in audit.drifts() if row[2] == "TARGET_TOL matches tally tolerance"]
+    assert len(drift) == 1
+    assert drift[0][3] == "0.0001"
+
+
+def test_a_shell_target_tol_literal_is_reported():
+    audit = audit_mod.Audit()
+    path = "scripts/elja_hq_sci_molslab_bank.sh"
+    text = audit.text(path)
+    assert text.count("export TARGET_TOL=${DEFAULT_HIT_TOL}") == 2
+    audit.text_cache[path] = text.replace(
+        "export TARGET_TOL=${DEFAULT_HIT_TOL}",
+        "export TARGET_TOL=1e-4",
+    )
+    audit_mod.supporting_numbers(audit)
+    labels = {row[2] for row in audit.drifts()}
+    assert "TARGET_TOL value" in labels
+    assert "TARGET_TOL matches tally tolerance" in labels
+
+
+def test_a_shifted_jcc_claim_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/scripts/hq_sci_tally.py"
+    text = audit.text(path)
+    match = re.search(r"elja_jcc_molslab_ensemble\.sh line (\d+) sets that target\.", text)
+    assert match
+    claimed = int(match.group(1))
+    audit.text_cache[path] = text.replace(
+        f"line {claimed} sets that target.",
+        f"line {claimed + 1} sets that target.",
+        1,
+    )
+    audit_mod.supporting_numbers(audit)
+    drift = [row for row in audit.drifts() if row[2] == "the jcc script's target line"]
+    assert len(drift) == 1
+    assert drift[0][3] == str(claimed + 1)
+    assert float(drift[0][4]) == claimed
+
+
+def test_resolved_hit_tolerances_follow_the_expression():
+    names = {"DEFAULT_HIT_TOL": 1.0e-3}
+    assert audit_mod.resolve_named_hit_tol("${DEFAULT_HIT_TOL}", names) == 1.0e-3
+    assert audit_mod.resolve_named_hit_tol("DEFAULT_HIT_TOL", names) == 1.0e-3
+    assert audit_mod.resolve_named_hit_tol("1e-4", names) == 1.0e-4
+    assert audit_mod.resolve_named_hit_tol("not-a-tolerance", names) is None
+
+
 def test_the_british_spelling_of_labeled_is_caught():
     for word in ("labelled", "labelling", "modelled", "travelled"):
         assert audit_mod.BRITISH.search(word)

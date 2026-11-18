@@ -78,6 +78,18 @@ def test_shared_helpers_handle_boundary_below_target_and_nonfinite(fn, default_t
     assert fn(target - 10.0, target, -1.0e-9) is False
 
 
+def test_search_hit_tol_is_one_source_across_python_and_rust():
+    assert py_target_tol.SEARCH_HIT_TOL == 1.0e-4
+    assert anneal.SEARCH_HIT_TOL == py_target_tol.SEARCH_HIT_TOL
+    assert py_target_tol.SEARCH_HIT_TOL < py_target_tol.DEFAULT_HIT_TOL
+    target = -173.928427
+    between = target + (py_target_tol.SEARCH_HIT_TOL + py_target_tol.DEFAULT_HIT_TOL) / 2.0
+    assert py_target_tol.energy_hits(between, target, py_target_tol.SEARCH_HIT_TOL) is False
+    assert py_target_tol.energy_hits(between, target, py_target_tol.DEFAULT_HIT_TOL) is True
+    assert anneal.energy_hits(between, target + anneal.SEARCH_HIT_TOL, 0.0) is False
+    assert anneal.energy_hits(between, target + anneal.DEFAULT_HIT_TOL, 0.0) is True
+
+
 def test_python_and_rust_helpers_agree_bit_for_bit():
     target = -173.928427
     tol = py_target_tol.DEFAULT_HIT_TOL
