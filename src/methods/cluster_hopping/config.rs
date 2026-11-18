@@ -972,6 +972,7 @@ pub struct Config {
     /// the search nothing it had already found.
     pub tabu_on_stall: bool,
     /// Quarantined structures held at once, oldest dropped first.
+    /// Zero holds none.
     pub tabu_capacity: usize,
     /// Restart the walker from a fresh configuration on a stall, keeping the
     /// bias.
