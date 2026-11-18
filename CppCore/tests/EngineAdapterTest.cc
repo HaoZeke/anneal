@@ -33,8 +33,8 @@ struct Stub {
   RgpotEnginePot *(*create)(const void *, size_t, char *, size_t) = nullptr;
   void (*destroy)(RgpotEnginePot *) = nullptr;
   int (*force)(RgpotEnginePot *, long, const double *, const int *, double *,
-               double *, double *, const double *,
-               rgpot_engine_coord_transform, void *) = nullptr;
+               double *, double *, const double *, rgpot_engine_coord_transform,
+               void *) = nullptr;
   int (*force_batch)(RgpotEnginePot *, long, long, const double *, const int *,
                      double *, double *, double *, const double *,
                      rgpot_engine_coord_transform, void *) = nullptr;
@@ -72,10 +72,12 @@ Stub &stub() {
     out.create = sym<decltype(out.create)>(h, "rgpot_engine_create");
     out.destroy = sym<decltype(out.destroy)>(h, "rgpot_engine_destroy");
     out.force = sym<decltype(out.force)>(h, "rgpot_engine_force");
-    out.force_batch = sym<decltype(out.force_batch)>(h, "rgpot_engine_force_batch");
+    out.force_batch =
+        sym<decltype(out.force_batch)>(h, "rgpot_engine_force_batch");
     out.stamp = sym<decltype(out.stamp)>(h, "rgpot_engine_abi_stamp");
     out.caps = sym<decltype(out.caps)>(h, "rgpot_engine_caps");
-    out.last_error = sym<decltype(out.last_error)>(h, "rgpot_engine_last_error");
+    out.last_error =
+        sym<decltype(out.last_error)>(h, "rgpot_engine_last_error");
     out.digest = sym<decltype(out.digest)>(h, "rgpot_engine_model_digest");
     out.set_num_threads =
         sym<decltype(out.set_num_threads)>(h, "rgpot_engine_set_num_threads");
@@ -97,7 +99,8 @@ Stub &stub() {
 /// A word-aligned configuration: reentrancy, hooks cleared, model named.
 RgpotEnginePot *make(Stub &s, unsigned char reentrancy,
                      unsigned char no_hooks = 0, unsigned char model = 0) {
-  alignas(8) unsigned char cfg[8] = {reentrancy, no_hooks, model, 0, 0, 0, 0, 0};
+  alignas(8) unsigned char cfg[8] = {reentrancy, no_hooks, model, 0,
+                                     0,          0,        0,     0};
   char err[256] = {0};
   RgpotEnginePot *pot = s.create(cfg, sizeof(cfg), err, sizeof(err));
   INFO(err);
@@ -188,14 +191,14 @@ TEST_CASE("force returns the backend result and leaves the caller's buffers",
     }
     return 0;
   };
-  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr,
-                  kBox.data(), shift, nullptr) == 0);
+  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr, kBox.data(),
+                  shift, nullptr) == 0);
   REQUIRE(energy == Catch::Approx(0.5 * (4 + 9 + 16 + 25 + 36 + 49)));
   REQUIRE(pos[0] == 1.0);
 
   auto reject = [](void *, long, double *, double *) { return 9; };
-  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr,
-                  kBox.data(), reject, nullptr) == 9);
+  REQUIRE(s.force(pot, 2, pos, kZ.data(), forces, &energy, nullptr, kBox.data(),
+                  reject, nullptr) == 9);
   REQUIRE(error_of(s, pot).find("9") != std::string::npos);
 
   REQUIRE(s.force(pot, 0, pos, kZ.data(), forces, &energy, nullptr, kBox.data(),
@@ -234,8 +237,8 @@ TEST_CASE("the capabilities come from the backend", "[engine][adapter]") {
     REQUIRE(s.caps(pot, &caps) == 0);
     REQUIRE(caps.reentrancy == r);
     REQUIRE(caps.per_image_instances == 1);
-    REQUIRE(caps.orbital_selection == 0);
-    REQUIRE(caps.orbital_copy == 0);
+    REQUIRE(caps.orbital_selection == 1);
+    REQUIRE(caps.orbital_copy == 1);
     s.destroy(pot);
   }
 }
@@ -301,7 +304,30 @@ TEST_CASE("charge, spin and thread settings reach the backend",
   s.destroy(bare);
 }
 
-TEST_CASE("a shared instance runs calls concurrently", "[engine][adapter][threads]") {
+TEST_CASE("orbital hooks report success and adapter errors",
+          "[engine][adapter]") {
+  Stub &s = stub();
+  RgpotEnginePot *pot = make(s, 0);
+
+  REQUIRE(s.select_orbitals(pot, 7) == 0);
+  REQUIRE(s.copy_orbitals(pot, 7, 8) == 0);
+  REQUIRE(s.select_orbitals(nullptr, 7) == 1);
+  REQUIRE(s.copy_orbitals(nullptr, 7, 8) == 1);
+
+  REQUIRE(s.select_orbitals(pot, -1) == 3);
+  REQUIRE(error_of(s, pot).find("refused") != std::string::npos);
+  REQUIRE(s.copy_orbitals(pot, -1, 8) == 3);
+  REQUIRE(error_of(s, pot).find("refused") != std::string::npos);
+
+  REQUIRE(s.select_orbitals(pot, -2) == 2);
+  REQUIRE(error_of(s, pot).find("failed") != std::string::npos);
+  REQUIRE(s.copy_orbitals(pot, 7, -2) == 2);
+  REQUIRE(error_of(s, pot).find("failed") != std::string::npos);
+  s.destroy(pot);
+}
+
+TEST_CASE("a shared instance runs calls concurrently",
+          "[engine][adapter][threads]") {
   Stub &s = stub();
   s.reset();
   RgpotEnginePot *pot = make(s, 0);
