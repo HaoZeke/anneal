@@ -3454,24 +3454,13 @@ fn biased_metropolis<R: Rng + ?Sized>(
     d < 0.0 || rng.random::<f64>() < portable_exp(-d)
 }
 
-/// Whether `state` lies in a basin the history has deposited on, by the
-/// bias's own fingerprint and merge radius.
-fn returns_to_deposit<F: Fingerprint>(bias: &BasinBias<F>, state: ArrayView1<f64>) -> bool {
-    bias.potential(bias.cv(state).view()) > 0.0
-}
-
-/// Whether `state` lies in the same deposited basin as `best`, the lowest
-/// structure the run has seen, by the bias's own lookup.
-fn returns_to_best<F: Fingerprint>(
-    bias: &BasinBias<F>,
-    best: Option<&Array1<f64>>,
-    state: ArrayView1<f64>,
-) -> bool {
-    let well = |x: ArrayView1<f64>| bias.index().lookup(bias.cv(x).view());
-    match (well(state), best) {
-        (Some(here), Some(b)) => well(b.view()) == Some(here),
-        _ => false,
-    }
+/// The biases a completion of the incumbent is tested under: the basin
+/// bias, and the spectral one when the run keeps it. The same ones a hop is
+/// tested under, whether or not the chain is stuck.
+fn completion_biases<'a>(bias: &'a dyn Bias, spectral: Option<&'a dyn Bias>) -> Vec<&'a dyn Bias> {
+    let mut biases = vec![bias];
+    biases.extend(spectral);
+    biases
 }
 
 /// Stuck means stuck for longer than this chain has ever been stuck before,
@@ -3488,7 +3477,7 @@ fn stalled(cfg: &Config, quiet: usize, longest_quiet: usize) -> bool {
 
 #[cfg(test)]
 mod biased_metropolis_tests {
-    use super::{Config, biased_metropolis, returns_to_best, returns_to_deposit, stalled};
+    use super::{Config, biased_metropolis, completion_biases, stalled};
     use crate::bias::{BasinBias, Bias, SortedPairs};
     use ndarray::Array1;
     use rand::SeedableRng;
@@ -3557,31 +3546,47 @@ mod biased_metropolis_tests {
         assert_eq!(taken(&filled), 0);
     }
 
+    /// The completion of a chain that is not stuck is refused the drop into
+    /// a basin it already paid for, the case the earlier stall-only test let
+    /// through, and takes the drop into a basin with no deposits.
     #[test]
-    fn only_a_deposited_basin_is_a_return() {
+    fn a_completion_is_tested_under_the_deposits_stuck_or_not() {
         let here = Array1::from(HERE.to_vec());
         let offer = Array1::from(OFFER.to_vec());
-        let mut bias = bias();
-        assert!(!returns_to_deposit(&bias, offer.view()));
-        let s = bias.cv(offer.view());
-        bias.deposit(s.view(), TEMPERATURE);
-        assert!(returns_to_deposit(&bias, offer.view()));
-        assert!(!returns_to_deposit(&bias, here.view()));
+        let mut filled = bias();
+        let s = filled.cv(offer.view());
+        filled.deposit(s.view(), TEMPERATURE);
+        let empty = bias();
+        let mut rng = StdRng::seed_from_u64(TRACE_SEED);
+        let mut taken = |bias: &BasinBias<SortedPairs>| {
+            let biases = completion_biases(bias, None);
+            (0..TRIALS)
+                .filter(|_| {
+                    biased_metropolis(
+                        &biases,
+                        (0.0, here.view()),
+                        (-DROP, offer.view()),
+                        TEMPERATURE,
+                        &mut rng,
+                    )
+                })
+                .count()
+        };
+        assert_eq!(taken(&empty), TRIALS);
+        assert_eq!(taken(&filled), 0);
     }
 
+    /// A run that keeps the spectral bias tests the completion under it as
+    /// well, after the basin bias.
     #[test]
-    fn only_the_basin_of_the_best_is_a_return_to_it() {
-        let here = Array1::from(HERE.to_vec());
-        let offer = Array1::from(OFFER.to_vec());
-        let mut bias = bias();
-        assert!(!returns_to_best(&bias, Some(&offer), offer.view()));
-        for x in [&here, &offer] {
-            let s = bias.cv(x.view());
-            bias.deposit(s.view(), TEMPERATURE);
-        }
-        assert!(returns_to_best(&bias, Some(&offer), offer.view()));
-        assert!(!returns_to_best(&bias, Some(&here), offer.view()));
-        assert!(!returns_to_best(&bias, None, offer.view()));
+    fn the_spectral_bias_follows_the_basin_bias() {
+        let basin = bias();
+        let spectral = bias();
+        let with = completion_biases(&basin, Some(&spectral as &dyn Bias));
+        assert_eq!(with.len(), 2);
+        assert!(std::ptr::addr_eq(with[0], &basin as &dyn Bias));
+        assert!(std::ptr::addr_eq(with[1], &spectral as &dyn Bias));
+        assert_eq!(completion_biases(&basin, None).len(), 1);
     }
 
     #[test]
@@ -8321,13 +8326,16 @@ where
         }
         // Symmetry completion of a newly entered basin: the incumbent pushed
         // onto the point group measured on it, quenched and recorded, and
-        // offered to the raw Metropolis test. Once per new basin, so a
-        // chain sitting still never pays twice. When the chain is stuck and
-        // the completion ends in the filled basin of the lowest structure
-        // seen, it faces the biased test a hop faces instead: on raw energy
-        // alone it carries the chain back to the shelf it is stuck on.
-        // Under a shared history each minimum is completed by one chain
-        // only, and the product is reported, so other chains recognise it.
+        // offered to the chain. Once per new basin, so a chain sitting
+        // still never pays twice. The offer faces the biased test a hop
+        // faces, always. On raw energy a completion is taken whenever it
+        // is lower, and a completion lands in the symmetric structure its
+        // basin leads to however the chain left it, so a chain that took
+        // every one was carried back to the funnel it had been pushed out
+        // of. Deposits in the basin it lands in are what the chain has
+        // already paid for. Under a shared history each minimum is completed
+        // by one chain only, and the product is reported, so other chains
+        // recognise it.
         let mut completion_offer = None;
         if cfg.symmetry_completion_on_new
             && accept
@@ -8372,16 +8380,7 @@ where
             }
         }
         if let Some((es, xs, completion_gradient, product_report)) = completion_offer {
-            let mut biases: Vec<&dyn Bias> = Vec::new();
-            if stalled(cfg, quiet, longest_quiet)
-                && returns_to_deposit(&bias, xs.view())
-                && returns_to_best(&bias, ledger.best_state.as_ref(), xs.view())
-            {
-                biases.push(&bias);
-                if let Some(sp) = spectral.as_ref() {
-                    biases.push(sp);
-                }
-            }
+            let biases = completion_biases(&bias, spectral.as_ref().map(|sp| sp as &dyn Bias));
             if biased_metropolis(&biases, (e, x.view()), (es, xs.view()), temperature, rng) {
                 if es < e {
                     completion_gain += e - es;
