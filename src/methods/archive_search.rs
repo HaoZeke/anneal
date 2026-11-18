@@ -87,7 +87,7 @@ pub struct ArchiveOutcome {
     pub floors: usize,
     /// Distinct local-topology events at the end.
     pub events: usize,
-    /// ARTn / stall-symmetry escapes attempted.
+    /// ARTn escapes attempted.
     pub artn: usize,
     /// Charged evaluations spent (copied from the ledger).
     pub charged: usize,
@@ -123,41 +123,6 @@ struct HopAcc {
 
 fn paid_full_quenches(cfg: &Config, allocated: usize, hops: usize) -> usize {
     hops + usize::from(allocated >= cfg.relax_steps.max(1))
-}
-
-/// Push a near-miss onto its approximate point group and quench.
-#[cfg(test)]
-fn symmetry_polish(
-    cfg: &Config,
-    x: ArrayView1<f64>,
-    ledger: &mut Ledger,
-    relax: Relax<'_>,
-) -> Option<(f64, Array1<f64>)> {
-    if ledger.remaining() < cfg.relax_steps {
-        return None;
-    }
-    let n = x.len() / 3;
-    let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-    for order in [2usize, 3, 4, 5, 6] {
-        if let Some(c) = crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance) {
-            cands.push(c);
-        }
-    }
-    let group = crate::symmetrise::generate_group(&cands, 60);
-    let y = if group.len() > 1 {
-        crate::symmetrise::symmetrise_group(x, n, &group, cfg.merge_radius.max(0.5))
-    } else {
-        crate::symmetrise::symmetrise_detected(
-            x,
-            n,
-            &[2, 3, 4, 5, 6],
-            cfg.symmetry_tolerance,
-            cfg.merge_radius.max(0.5),
-        )
-        .map(|(s, _)| s)?
-    };
-    let (e, xs) = relax(ledger, y.view(), cfg.relax_steps);
-    if e.is_finite() { Some((e, xs)) } else { None }
 }
 
 /// A later hop's start: redraw the adsorbate, or re-place rigid groups.
@@ -254,7 +219,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         acc.full += paid_full_quenches(cfg, take, hop.hops);
         acc.returned += hop.returned;
         acc.nve_unavailable |= hop.nve_unavailable;
-        acc.artn += hop.symmetrised.0 + hop.stall_escapes;
+        acc.artn += hop.stall_escapes;
         acc.basins = acc.basins.max(hop.basins);
         if hop.best.is_finite() {
             let at = spent_before.saturating_add(hop_best_at(&hop, used));
@@ -409,7 +374,7 @@ fn fold_hop(
     acc.full += paid_full_quenches(cfg, allocated, hop.hops);
     acc.returned += hop.returned;
     acc.nve_unavailable |= hop.nve_unavailable;
-    acc.artn += hop.symmetrised.0 + hop.stall_escapes;
+    acc.artn += hop.stall_escapes;
     acc.basins = acc.basins.max(hop.basins);
     if hop.best.is_finite() && hop.best < acc.best - 1e-12 {
         acc.best = hop.best;
@@ -465,7 +430,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.angular_moves = true;
                 c2.escape_stall_patience = 8;
                 c2.escape_stall_factor = 1.0;
-                c2.symmetrise_on_stall = true;
                 let hunt = 850.min(rest);
                 let x2 = residual_start(start, cfg, rng);
                 let mut led2 = ledger.slice(hunt);
@@ -526,10 +490,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                                 + paid_full_quenches(cfg, hunt, hop2.hops)
                                 + paid_full_quenches(cfg, rest3, hop3.hops),
                             hop1.returned + hop2.returned + hop3.returned,
-                            hop1.symmetrised.0
-                                + hop2.symmetrised.0
-                                + hop3.symmetrised.0
-                                + hop1.stall_escapes
+                            hop1.stall_escapes
                                 + hop2.stall_escapes
                                 + hop3.stall_escapes
                                 + hop1.restarts
@@ -546,12 +507,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                             paid_full_quenches(cfg, p1, hop1.hops)
                                 + paid_full_quenches(cfg, hunt, hop2.hops),
                             hop1.returned + hop2.returned,
-                            hop1.symmetrised.0
-                                + hop2.symmetrised.0
-                                + hop1.stall_escapes
-                                + hop2.stall_escapes
-                                + hop1.restarts
-                                + hop2.restarts,
+                            hop1.stall_escapes + hop2.stall_escapes + hop1.restarts + hop2.restarts,
                         )
                     } else {
                         (
@@ -563,12 +519,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                             paid_full_quenches(cfg, p1, hop1.hops)
                                 + paid_full_quenches(cfg, hunt, hop2.hops),
                             hop1.returned + hop2.returned,
-                            hop1.symmetrised.0
-                                + hop2.symmetrised.0
-                                + hop1.stall_escapes
-                                + hop2.stall_escapes
-                                + hop1.restarts
-                                + hop2.restarts,
+                            hop1.stall_escapes + hop2.stall_escapes + hop1.restarts + hop2.restarts,
                         )
                     };
                 HopAcc {
@@ -590,7 +541,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     screens: hop1.screened_out,
                     full: paid_full_quenches(cfg, p1, hop1.hops),
                     returned: hop1.returned,
-                    artn: hop1.symmetrised.0 + hop1.stall_escapes + hop1.restarts,
+                    artn: hop1.stall_escapes + hop1.restarts,
                     basins: hop1.basins,
                     nve_unavailable: hop1.nve_unavailable,
                 }
@@ -616,7 +567,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             };
         }
         let mut c = cfg.clone();
-        c.symmetrise_on_stall = true;
         c.return_polish = 0;
         let slices: Vec<usize> = if slab {
             // Four skip-return walks; CuH2 seed 2's deeper well is a
@@ -665,7 +615,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     let mut c_fast = cfg.clone();
     c_fast.return_screen = true;
     c_fast.return_polish = 0;
-    c_fast.symmetrise_on_stall = true;
     let mut led1 = ledger.slice(explore);
     let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng)
         .expect("finite start");
@@ -693,7 +642,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         screens: hop1.screened_out,
         full: paid_full_quenches(cfg, explore, hop1.hops),
         returned: hop1.returned,
-        artn: hop1.symmetrised.0 + hop1.stall_escapes,
+        artn: hop1.stall_escapes,
         basins: hop1.basins,
         nve_unavailable: hop1.nve_unavailable,
     };
@@ -701,7 +650,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_res.return_screen = true;
     c_res.return_polish = (cfg.relax_steps / 4).max(1);
     c_res.return_polish_after = 0;
-    c_res.symmetrise_on_stall = true;
     let mut spent = used1;
     let mut same_floor = 0usize;
     while ledger.remaining() >= cfg.relax_steps.max(1) {
@@ -914,7 +862,6 @@ mod tests {
             rec.return_screen,
             "recommended is the scientific hop; return_screen is on"
         );
-        assert!(rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
         assert_eq!(rec.relax_steps, 1000);
         let rec2 = Config::recommended(75);
@@ -946,7 +893,6 @@ mod tests {
         assert!(rec.return_screen);
         assert_eq!(rec.return_polish, 0);
         assert_eq!(rec.return_polish_after, 0);
-        assert!(rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
         assert_eq!(rec.relax_steps, 1000);
     }
@@ -986,7 +932,6 @@ mod tests {
         assert!(!rec.return_screen);
         assert_eq!(rec.return_polish, 0);
         assert_eq!(rec.escape_stall_patience, 5_000);
-        assert!(!rec.symmetrise_on_stall);
 
         // The preset keeps the start's covalent graph, so the start is a
         // water molecule whose two O-H bonds the surrogate quench keeps.
@@ -1015,22 +960,6 @@ mod tests {
         assert_eq!(rec.escape_stall_patience, 5_000);
         assert!(out.charged <= 200);
         assert!(out.best.is_finite());
-    }
-
-    #[test]
-    fn symmetry_polish_does_not_mutate_the_caller_config() {
-        let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
-        let before = format!("{rec:?}");
-        let mut rng = StdRng::seed_from_u64(4);
-        let start = random_cluster(3, 0.7, rec.min_separation, &mut rng);
-        let mut ledger = Ledger::new(rec.relax_steps + 8);
-        let mut relax =
-            |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
-        let _ = symmetry_polish(&rec, start.view(), &mut ledger, &mut relax);
-        assert_eq!(format!("{rec:?}"), before);
-        assert!(!rec.return_screen);
-        assert_eq!(rec.return_polish, 0);
-        assert!(ledger.spent() <= rec.relax_steps + 8);
     }
 
     #[test]

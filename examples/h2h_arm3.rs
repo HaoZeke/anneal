@@ -1,25 +1,23 @@
-//! One seed of the ABCluster head-to-head, on the default or the dual-core arm.
+//! One seed of the ABCluster head-to-head on the default arm.
 //!
 //! ```text
-//! h2h_arm3 <system> <default|arm3> <budget> <seed>
+//! h2h_arm3 <system> default <budget> <seed>
 //! ```
 //!
 //! `system` is one of `lj38 lj55 lj75 lj98 m55r6 m55r14 m80r6 m80r14 w6 w10
-//! w15 w20`. Atomic clusters run [`Config::for_cluster`], or
-//! [`Config::for_cluster_dual_core`] on `arm3`, from `random_cluster` at
-//! density 0.7. Morse then scales the minimum separation and the container
-//! by `r_min / 2^(1/6)`, as `cluster_bench` does. Water runs
-//! [`Config::for_tip4p`] on both arms: a rigid-body chain has no orbit
-//! completion, so the two arms are one configuration there.
+//! w15 w20`. Atomic clusters run [`Config::for_cluster`] from
+//! `random_cluster` at density 0.7. Morse then scales the minimum separation
+//! and the container by `r_min / 2^(1/6)`, as `cluster_bench` does. Water
+//! runs [`Config::for_tip4p`]. The arm argument stays so that deposited
+//! command lines still parse; the two-core `arm3` it once named is gone.
 //!
 //! The ledger stops at the first recorded minimum below the reference plus
 //! the tolerance. `first_calls` is the charged count at that record, read on
 //! the first closure entry or charge after it, or the final count when the
 //! driver returns first. `first_relax` counts the relaxation calls before
 //! it and `first_hops` is the hop counter on the improvement record, when the
-//! trace holds one (an orbit completion records without it). `relaxations`
-//! counts every call of the relaxation closure, screens included. One
-//! `system=` line is printed per run.
+//! trace holds one. `relaxations` counts every call of the relaxation
+//! closure, screens included. One `system=` line is printed per run.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster, run_with_gradient,
@@ -70,14 +68,10 @@ fn main() {
         eprintln!("unknown system {name}");
         std::process::exit(2);
     };
-    let dual = match arm {
-        "default" => false,
-        "arm3" => true,
-        _ => {
-            eprintln!("unknown arm {arm}; expected default or arm3");
-            std::process::exit(2);
-        }
-    };
+    if arm != "default" {
+        eprintln!("unknown arm {arm}; expected default (the two-core arm3 was removed)");
+        std::process::exit(2);
+    }
     let level = reference + tol;
 
     type Energy = Box<dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync>;
@@ -94,11 +88,7 @@ fn main() {
                 Kind::Morse(rho) => (PairPotential::morse(n, rho), PairKind::Morse { rho }),
                 _ => (PairPotential::lennard_jones(n), PairKind::LennardJones),
             };
-            let mut cfg = if dual {
-                Config::for_cluster_dual_core(n)
-            } else {
-                Config::for_cluster(n)
-            };
+            let mut cfg = Config::for_cluster(n);
             let scale = pair.r_min() / 2.0_f64.powf(1.0 / 6.0);
             cfg.min_separation *= scale;
             cfg.container *= scale;

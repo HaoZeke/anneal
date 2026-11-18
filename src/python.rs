@@ -2968,12 +2968,6 @@ impl PyClusterConfig {
         self.inner.depth_reward
     }
 
-    /// Orbit completion once per newly entered basin.
-    #[getter]
-    fn orbit_complete_on_new(&self) -> bool {
-        self.inner.orbit_complete_on_new
-    }
-
     /// Shared-history visit policy: `tabu` or `recognition`.
     #[getter]
     fn shared_visit_policy(&self) -> &'static str {
@@ -3005,7 +2999,6 @@ impl PyClusterConfig {
         if self.inner.bayes_screen && self.inner.budget_window {
             format!("Config.derived({})", self.inner.n_points)
         } else if !self.inner.surfaces.is_empty()
-            && self.inner.orbit_complete_on_new
             && matches!(
                 self.inner.shared_visit_policy,
                 crate::methods::minima_hopping::SharedVisitPolicy::Recognition
@@ -3267,7 +3260,6 @@ fn recommended_with_scale(n: usize, length_scale: f64) -> crate::methods::cluste
     let mut cfg = crate::methods::cluster_hopping::Config::with_scales(n, length_scale, 1.0);
     cfg.allocate_moves = true;
     cfg.return_screen = true;
-    cfg.orbit_complete_on_new = true;
     cfg
 }
 

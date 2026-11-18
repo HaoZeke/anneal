@@ -69,7 +69,7 @@ It also names the five files it changes.
 The hit flag is the energy test.
 
 Copyright.
-The developer line is on dls_published.rs and lj_dls.rs.
+The developer line is on examples/lj_dls/dls_published.rs and examples/lj_dls/main.rs.
 It is also on gmin_run.sh, gmin_sha.sh, and h2h_cap.f90.
 
 Prose.

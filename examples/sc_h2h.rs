@@ -25,7 +25,7 @@ use std::time::Instant;
 
 use anneal_core::descriptor_space::DescriptorVector;
 use anneal_core::methods::cluster_hopping::{
-    CheckpointAction, Config, Ledger, OrbitCore, Outcome, QuenchBoundary, QuenchStatus,
+    CheckpointAction, Config, Ledger, Outcome, QuenchBoundary, QuenchStatus,
     run_with_history_at_checkpoints,
 };
 use anneal_core::methods::minima_hopping::{
@@ -36,7 +36,6 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::minima_db::{MinimaCorpus, MinimaSet, MinimaUnits};
 use anneal_core::pes_exploration::{ExactStructureWitness, StructureContext};
 use anneal_core::potentials::{SuttonChen, SuttonChenFamily};
-use anneal_core::symmetrise::ShellCore;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -433,8 +432,6 @@ fn main() {
     cfg.relax_steps = QUENCH_ITERS;
     cfg.bayes_threshold =
         anneal_core::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
-    cfg.orbit_complete_on_new = true;
-    cfg.orbit_core = OrbitCore::Both(ShellCore::scaled(cfg.length_scale));
     cfg.surface_hop_on_best = surface_hop;
 
     println!("code: anneal");
@@ -667,21 +664,17 @@ fn main() {
 
     let mut spent = 0;
     let mut best = f64::INFINITY;
-    let mut orbit_duplicates = 0;
     let mut surface = (0, 0, 0.0);
     for (r, rseed, charged, outcome, cost) in &outcomes {
         spent += charged;
         best = best.min(outcome.best);
-        orbit_duplicates += outcome.orbit_duplicates;
         surface.0 += outcome.surface_hops.0;
         surface.1 += outcome.surface_hops.1;
         surface.2 += outcome.surface_hops.2;
         println!(
-            "replica_{r}: seed={rseed} spent={charged} best={:.10} hops={} orbits={} orbit_duplicates={} surface_hops={}/{}/{:.6} restarts={} stall_escapes={} history_visits={}/{} history_cost={}/{}/{:.3}",
+            "replica_{r}: seed={rseed} spent={charged} best={:.10} hops={} surface_hops={}/{}/{:.6} restarts={} stall_escapes={} history_visits={}/{} history_cost={}/{}/{:.3}",
             outcome.best,
             outcome.hops,
-            outcome.orbits.0,
-            outcome.orbit_duplicates,
             outcome.surface_hops.0,
             outcome.surface_hops.1,
             outcome.surface_hops.2,
@@ -705,7 +698,6 @@ fn main() {
     println!("best: {best:.10}");
     println!("full_quenches: {}", full_quenches.load(Ordering::Relaxed));
     calls.print();
-    println!("orbit_duplicates: {orbit_duplicates}");
     println!("surface_hops: {}", surface.0);
     println!("surface_descents: {}", surface.1);
     println!("surface_gain: {:.6}", surface.2);

@@ -169,7 +169,6 @@ fn cmd_run(args: &[String]) -> i32 {
             cfg.prior_motif = false;
         }
         if all_off {
-            cfg.symmetrise_on_stall = false;
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
         }
     }

@@ -347,7 +347,6 @@ mod tests {
         assert!(recommended.allocate_moves && water.allocate_moves);
         assert!(water.surfaces.is_empty());
         assert!(water.move_library.is_rigid_body());
-        assert!(!water.orbit_complete_on_new);
 
         let communicating = Config::communicating(10);
         assert_eq!(communicating.surfaces.len(), 1);

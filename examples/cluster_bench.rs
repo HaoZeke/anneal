@@ -488,14 +488,10 @@ fn main() {
         cfg.superbasin_report = true;
     }
     cfg.delayed_acceptance = opts.contains(&"da");
-    let selected: Vec<MoveLibrary> = [
-        ("reseed", MoveLibrary::Reseed),
-        ("twin", MoveLibrary::Twin),
-        ("learn", MoveLibrary::LearnedReseed),
-    ]
-    .into_iter()
-    .filter_map(|(name, library)| opts.contains(&name).then_some(library))
-    .collect();
+    let selected: Vec<MoveLibrary> = [("twin", MoveLibrary::Twin)]
+        .into_iter()
+        .filter_map(|(name, library)| opts.contains(&name).then_some(library))
+        .collect();
     assert!(selected.len() <= 1, "select at most one move library");
     if let Some(library) = selected.into_iter().next() {
         cfg.move_library = library;
@@ -527,8 +523,6 @@ fn main() {
     cfg.contextual_moves = opts.contains(&"ctx");
     cfg.bayes_screen = opts.contains(&"bayes");
     cfg.angular_moves = opts.contains(&"angular");
-    // Symmetrise onto the structure's own approximate symmetry when stuck.
-    cfg.symmetrise_on_stall = opts.contains(&"sym");
     cfg.budget_window = opts.contains(&"bfwt");
     // The like-for-like control for the Hamiltonian arms: the kick alone,
     // without the three packing-changing kernels the default library carries.
@@ -969,15 +963,13 @@ fn main() {
             }
         }
         println!(
-            "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  sym {}/{:.2}  \
+            "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  \
              charged screen {} full {} check {} ({:.0}% screen)  accept {:.3}  qsteps {:.1}  probe {} at {:.1} err {:.4}  verified {}{}",
             out.best,
             out.hops,
             out.basins,
             stats.converged,
             stats.total(),
-            out.symmetrised.0,
-            out.symmetrised.1,
             stats.screen_charged,
             stats.full_charged,
             stats.check_charged,

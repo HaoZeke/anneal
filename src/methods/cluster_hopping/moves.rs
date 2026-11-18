@@ -28,14 +28,6 @@ pub enum MoveLibrary {
     Visit,
     /// Atomic moves plus twinning.
     Twin,
-    /// Regrow from the incumbent's observed local order.
-    SelfReseed,
-    /// Let a posterior choose the observed-order construction.
-    LearnedReseed,
-    /// Offer every named and observed construction source.
-    Reseed,
-    /// Couple posterior-selected growth to twinning.
-    GrowthAndTwin,
     /// Rigid molecular moves, optionally combined with atomic reactive moves.
     Molecular {
         /// Atom indices belonging to each declared rigid group.
@@ -165,35 +157,6 @@ impl MoveLibrary {
             }
             Self::Twin => {
                 let mut kernels = atomic();
-                kernels.push(ClusterMove::Twin {
-                    n_points: cfg.n_points,
-                });
-                kernels
-            }
-            Self::SelfReseed | Self::LearnedReseed => {
-                let mut kernels = atomic();
-                kernels.push(ClusterMove::Reseed {
-                    n_points: cfg.n_points,
-                    source: crate::lattice::Source::Observed,
-                });
-                kernels
-            }
-            Self::Reseed => {
-                let mut kernels = atomic();
-                for source in crate::lattice::Source::library() {
-                    kernels.push(ClusterMove::Reseed {
-                        n_points: cfg.n_points,
-                        source,
-                    });
-                }
-                kernels
-            }
-            Self::GrowthAndTwin => {
-                let mut kernels = atomic();
-                kernels.push(ClusterMove::Reseed {
-                    n_points: cfg.n_points,
-                    source: crate::lattice::Source::Observed,
-                });
                 kernels.push(ClusterMove::Twin {
                     n_points: cfg.n_points,
                 });
@@ -361,36 +324,7 @@ impl MoveLibrary {
                 cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
             });
         }
-        // A configuration that completes orbits on every new basin already
-        // runs the operator, so the arm is offered only to one that does not.
-        if cfg.orbit_arm
-            && !cfg.orbit_complete_on_new
-            && !self.is_rigid_body()
-            && !self.is_molecular()
-        {
-            kernels.push(ClusterMove::OrbitComplete {
-                n_points: cfg.n_points,
-                tolerance: cfg.symmetry_tolerance,
-                merge_radius: cfg.symmetry_merge_radius,
-                core_fraction: cfg.symmetrise_core_fraction,
-                min_separation: cfg.min_separation,
-                fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
-            });
-        }
-        if cfg.point_symmetrise {
-            kernels.push(ClusterMove::PointSymmetrise {
-                n_points: cfg.n_points,
-                tolerance: cfg.symmetry_tolerance,
-                pair_cutoff: cfg.symmetry_merge_radius,
-                fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
-            });
-        }
         kernels
-    }
-
-    /// Whether the library asks the construction posterior to select growth.
-    pub fn learns_construction(&self) -> bool {
-        matches!(self, Self::LearnedReseed | Self::GrowthAndTwin)
     }
 
     /// Whether the library contains rigid molecular proposal arms.
@@ -530,49 +464,6 @@ pub enum ClusterMove {
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
     Symmetrise(Symmetrise),
-    /// Orbit completion of the incumbent, as a proposal.
-    ///
-    /// The completion [`Config::orbit_complete_on_new`] runs once per new
-    /// basin: the point group of the core is applied to the whole cluster
-    /// and the surface points move onto the empty orbit positions
-    /// ([`crate::packing::on_new_basin`]). Here the allocator draws it like
-    /// any other arm and pays for it only when the depth it reaches earns
-    /// the draws. A structure whose core has no group that moves anyone
-    /// falls back to a single-point displacement.
-    OrbitComplete {
-        /// Points in a state.
-        n_points: usize,
-        /// Largest RMS deviation at which an operation counts as approximate.
-        tolerance: f64,
-        /// Largest separation at which a point and an image are partners.
-        merge_radius: f64,
-        /// Fraction of points, by distance from the centroid, in the core.
-        core_fraction: f64,
-        /// Closest approach of a point placed on an orbit.
-        min_separation: f64,
-        /// Half-width of the fallback single-point displacement.
-        fallback_step: f64,
-    },
-    /// Push the structure onto the point group it nearly has, as a proposal.
-    ///
-    /// Oakley, Johnston and Wales, Phys. Chem. Chem. Phys. 15, 3965 (2013):
-    /// the approximate symmetries of the current minimum are measured, closed
-    /// into a group, and the structure is made exactly symmetric under that
-    /// group before the quench. Unlike [`ClusterMove::Symmetrise`] nothing is
-    /// random about the axis, and unlike the stall-gated symmetrisation this
-    /// is an ordinary arm drawn every hop the allocator chooses it, on any
-    /// packing. A structure with no approximate symmetry falls back to a
-    /// single-point displacement so the arm is never a no-op.
-    PointSymmetrise {
-        /// Points in a state.
-        n_points: usize,
-        /// Largest RMS deviation at which an operation counts as approximate.
-        tolerance: f64,
-        /// Largest separation at which a point and an image are partners.
-        pair_cutoff: f64,
-        /// Half-width of the fallback single-point displacement.
-        fallback_step: f64,
-    },
     /// Step away, in descriptor space, from the packings the population
     /// occupies, pulled back to Cartesian displacements through the SOAP
     /// Jacobian.
@@ -603,31 +494,6 @@ pub enum ClusterMove {
     Twin {
         /// Points in a state.
         n_points: usize,
-    },
-    /// Rebuild the structure by growing a local order, and quench into it.
-    ///
-    /// The only move here that crosses a funnel boundary in one step. Every
-    /// other proposal displaces points and relies on the quench to find a
-    /// nearby minimum, so the basins a chain can reach from where it stands are
-    /// the ones a displacement reaches, and no displacement of an icosahedral
-    /// 98-point structure lands in the tetrahedral funnel with usable
-    /// probability. A template is not reached, it is written down: the points
-    /// are indistinguishable, so the family's sites *are* the proposal.
-    ///
-    /// Nothing about it is specific to one potential. The order to grow is
-    /// read off the structure the chain stands on, by taking the neighbour
-    /// offsets of its best-coordinated point, and the alternatives come from
-    /// the classifier's template library rather than from a list of packings
-    /// someone chose for this problem. Which is worth proposing is left to the
-    /// allocator; nothing here knows that 38 points want a truncated
-    /// octahedron.
-    ///
-    /// See [`crate::lattice`].
-    Reseed {
-        /// Points in a state.
-        n_points: usize,
-        /// Where the local order to grow comes from.
-        source: crate::lattice::Source,
     },
     /// Wales and Doye's angular move on the worst-bound point.
     ///
@@ -1840,85 +1706,6 @@ impl ClusterMove {
         v
     }
 
-    /// The library with the reseeding moves added.
-    ///
-    /// Separate because these are the only proposals that discard the current
-    /// structure rather than perturb it, so a caller comparing against the
-    /// displacement-only search needs to be able to ask for one or the other.
-    /// Every source is offered; which is worth drawing is the allocator's
-    /// question, not this function's.
-    pub fn library_with_reseed(n: usize) -> Vec<ClusterMove> {
-        let mut v = Self::library(n);
-        for source in crate::lattice::Source::library() {
-            v.push(ClusterMove::Reseed {
-                n_points: n,
-                source,
-            });
-        }
-        v
-    }
-
-    /// The library with one growth arm that regrows the structure from the
-    /// local order it already has.
-    ///
-    /// The full reseeding library carries four named packings alongside this
-    /// one, and on a system whose global minimum is one of those packings the
-    /// move can build the answer rather than search for it: at 38 points the
-    /// full library solves 72 of 72, and on 75 and 98 points, whose
-    /// morphologies it does not carry, it is worse than no reseeding at all.
-    ///
-    /// This arm carries no packing. [`crate::lattice::Source::Observed`] reads
-    /// the local order out of the structure the chain is standing on and
-    /// regrows from that, so nothing external enters and no answer can be
-    /// encoded. It isolates whether the effect belongs to rebuilding
-    /// coherently or to holding the right template.
-    pub fn library_with_self_reseed(n: usize) -> Vec<ClusterMove> {
-        let mut v = Self::library(n);
-        v.push(ClusterMove::Reseed {
-            n_points: n,
-            source: crate::lattice::Source::Observed,
-        });
-        v
-    }
-
-    /// Growth arms and a twin arm together, with the source chosen by a
-    /// posterior.
-    ///
-    /// Growth from a local order reaches a morphology whose defining order sits
-    /// in the first coordination shell, which is what face-centred cubic and
-    /// icosahedral packings are. It cannot reach one defined by a global
-    /// arrangement: a Marks decahedron is face-centred cubic tetrahedra joined
-    /// across twin planes, locally close packed everywhere, with the five-fold
-    /// character living in the joins. No local template expresses that, and
-    /// measurement says so -- every growth-only arm scores far above the
-    /// control at 38 points, whose answer is a face-centred cubic truncated
-    /// octahedron, and below it at 75 points, whose answer is decahedral.
-    ///
-    /// The twin move supplies the missing kind of order. The two together span
-    /// the morphologies clusters actually adopt, and the posterior decides
-    /// which the system in front of it wants rather than the caller.
-    pub fn library_with_growth_and_twin(n: usize) -> Vec<ClusterMove> {
-        let mut v = Self::library_with_learned_reseed(n);
-        v.push(ClusterMove::Twin { n_points: n });
-        v
-    }
-
-    /// The library with a single growth arm, for when a posterior picks the
-    /// construction.
-    ///
-    /// Five arms are five arms only while the arm decides what is built. Once
-    /// the constructor chooses the source itself, the labels no longer describe
-    /// the proposals, and the allocator is estimating five accept rates for one
-    /// move from evidence that has been shuffled between them.
-    pub fn library_with_learned_reseed(n: usize) -> Vec<ClusterMove> {
-        let mut v = Self::library(n);
-        v.push(ClusterMove::Reseed {
-            n_points: n,
-            source: crate::lattice::Source::Observed,
-        });
-        v
-    }
-
     /// Short name, for per-arm reporting.
     pub fn name(&self) -> String {
         match self {
@@ -1934,8 +1721,6 @@ impl ClusterMove {
             ClusterMove::Burst { .. } => "burst".into(),
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
-            ClusterMove::PointSymmetrise { .. } => "psym".into(),
-            ClusterMove::OrbitComplete { .. } => "orbit".into(),
             ClusterMove::SoapRepel { .. } => "repel".into(),
             ClusterMove::Visit { .. } => "visit".into(),
             ClusterMove::Angular { .. } => "angular".into(),
@@ -1943,7 +1728,6 @@ impl ClusterMove {
             ClusterMove::Plane { .. } => "plane".into(),
             ClusterMove::Soap { .. } => "soap".into(),
             ClusterMove::Torsion { .. } => "torsion".into(),
-            ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
             ClusterMove::SpeciesSwap { .. } => "swap".into(),
             ClusterMove::RigidTranslate { .. } => "rtrans".into(),
             ClusterMove::RigidKick { .. } => "rkick".into(),
@@ -2041,12 +1825,6 @@ impl ClusterMove {
                     }
                 }
                 crate::soap::step_away_cloud(x, spec, *rmsd, None, None, None, rng)
-            }
-            ClusterMove::Reseed { n_points, source } => {
-                // Both the order and the length scale are read off the current
-                // structure, so the move carries no knowledge of the potential
-                // and none of the objective it is proposing against.
-                crate::lattice::candidate(*source, x, *n_points, rng)
             }
             ClusterMove::Angular {
                 n_points,
@@ -2198,91 +1976,6 @@ impl ClusterMove {
             }
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
-            ClusterMove::OrbitComplete {
-                n_points,
-                tolerance,
-                merge_radius,
-                core_fraction,
-                min_separation,
-                fallback_step,
-            } => {
-                let n = *n_points;
-                if let Some(y) = crate::packing::on_new_basin(
-                    x,
-                    n,
-                    *tolerance,
-                    *merge_radius,
-                    *core_fraction,
-                    *min_separation,
-                ) && y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-9)
-                {
-                    return y;
-                }
-                let mut y = x.to_owned();
-                if n > 0 {
-                    let i = rng.random_range(0..n);
-                    let h = fallback_step * scale;
-                    for k in 0..3 {
-                        y[3 * i + k] += rng.random_range(-h..h);
-                    }
-                }
-                y
-            }
-            ClusterMove::PointSymmetrise {
-                n_points,
-                tolerance,
-                pair_cutoff,
-                fallback_step,
-            } => {
-                let n = *n_points;
-                if n >= 3 {
-                    let cands = crate::symmetrise::detect_all(x, n, &[2, 3, 4, 5, 6], *tolerance);
-                    if !cands.is_empty() {
-                        // One generator per distinct axis, lowest deviation
-                        // first, at most three: two generate every axial and
-                        // cubic group the hard minima carry, and more only
-                        // manufactures a spurious closure the pair cutoff then
-                        // has to reject.
-                        let mut gens: Vec<crate::symmetrise::Candidate> = Vec::new();
-                        for c in &cands {
-                            let seen = gens.iter().any(|g| {
-                                let dot = g.axis[0] * c.axis[0]
-                                    + g.axis[1] * c.axis[1]
-                                    + g.axis[2] * c.axis[2];
-                                dot.abs() > 0.995 && g.improper == c.improper
-                            });
-                            if !seen {
-                                gens.push(*c);
-                            }
-                            if gens.len() >= 3 {
-                                break;
-                            }
-                        }
-                        let group = crate::symmetrise::generate_group(&gens, 48);
-                        let y = if group.len() > 1 {
-                            crate::symmetrise::symmetrise_group(x, n, &group, *pair_cutoff)
-                        } else {
-                            crate::symmetrise::symmetrise(x, n, &cands[0], *pair_cutoff)
-                        };
-                        // An exactly symmetric structure comes back as itself;
-                        // proposing the incumbent wastes a quench, so fall
-                        // through to the displacement.
-                        let moved = y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-9);
-                        if moved {
-                            return y;
-                        }
-                    }
-                }
-                let mut y = x.to_owned();
-                if n > 0 {
-                    let i = rng.random_range(0..n);
-                    let h = fallback_step * scale;
-                    for k in 0..3 {
-                        y[3 * i + k] += rng.random_range(-h..h);
-                    }
-                }
-                y
-            }
             ClusterMove::RigidTranslate { n_molecules, step } => {
                 let mut y = x.to_owned();
                 let h = step * scale;
@@ -3605,7 +3298,6 @@ mod move_scaling_tests {
             !rec.packing_cna_applies(),
             "CNA 555 must not apply to a molecule"
         );
-        assert!(!rec.symmetrise_on_stall);
         assert!(
             rec.move_library.kernels(&rec).iter().any(|k| matches!(
                 k,

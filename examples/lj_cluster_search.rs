@@ -83,11 +83,8 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "noheight"
                     | "climb"
                     | "noclimb"
-                    | "sym"
-                    | "nosym"
                     | "csa"
                     | "corekey"
-                    | "reocc"
                     | "coreclass"
                     | "twophase"
                     | "aniso"
@@ -99,35 +96,27 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "soapmean"
                     | "mh"
                     | "mhmd"
-                    | "orbit"
                     | "recognition"
                     | "comm"
                     | "communicating"
                     | "calib"
                     | "restart"
                     | "angular"
-                    | "psym"
-                    | "psymnew"
                     | "novel"
                     | "sbkey"
                     | "repel"
                     | "jump"
-                    | "psymall"
                     | "tabu"
                     | "bayes"
                     | "flat"
                     | "stemp"
                     | "ebias"
                     | "visit"
-                    | "reseed"
-                    | "selfseed"
-                    | "learncon"
                     | "lean"
                     | "burst"
                     | "hollow"
                     | "fill"
                     | "twin"
-                    | "gtwin"
                     | "depth"
                     | "softsub"
                     | "covper"
@@ -161,11 +150,6 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     let noclimb = opts.contains(&"noclimb");
     assert!(!(climb && noclimb), "climb and noclimb are contradictory");
     cfg.escape_on_stall = (cfg.escape_on_stall || climb) && !noclimb;
-
-    let sym = opts.contains(&"sym");
-    let nosym = opts.contains(&"nosym");
-    assert!(!(sym && nosym), "sym and nosym are contradictory");
-    cfg.symmetrise_on_stall = (cfg.symmetrise_on_stall || sym) && !nosym;
 }
 
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
@@ -331,10 +315,9 @@ mod option_tests {
     #[test]
     fn explicit_negative_options_disable_default_true_mechanisms() {
         let mut cfg = Config::recommended(75);
-        apply_boolean_options(&mut cfg, &["rec", "noheight", "noclimb", "nosym"]);
+        apply_boolean_options(&mut cfg, &["rec", "noheight", "noclimb"]);
         assert!(!cfg.adaptive_height);
         assert!(!cfg.escape_on_stall);
-        assert!(!cfg.symmetrise_on_stall);
     }
 
     #[test]
@@ -1385,46 +1368,6 @@ fn main() {
         println!("{solved}/{seeds} solved (rss)");
         return;
     }
-    // Dynamic lattice search: construct from the structure's own hollow
-    // sites, relax, restart on stall. The evaluation-matched published
-    // baseline for the hard sizes, run under the same ledger.
-    if std::env::args()
-        .nth(4)
-        .map(|v| v.split(',').any(|t| t == "dls"))
-        .unwrap_or(false)
-    {
-        use anneal_core::methods::lattice_search::{LatticeSearchConfig, run as lattice_run};
-        let lcfg = LatticeSearchConfig::lennard_jones(n);
-        let mut solved = 0usize;
-        for seed in seed0..(seed0 + seeds) {
-            let mut ledger = Ledger::new(budget);
-            let mut opt = WarmLbfgs::default();
-            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-                opt.forget();
-                let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
-                (f, xr)
-            };
-            let out = lattice_run(&lcfg, &mut ledger, &mut relax, seed);
-            let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
-            if hit {
-                solved += 1;
-            }
-            println!(
-                "  seed {seed}: best {:.6}  constructions {}  restarts {}  improvements {}  charged {}{}",
-                out.best,
-                out.hops,
-                out.basins,
-                out.returned,
-                out.charged,
-                if hit { "  SOLVED" } else { "" }
-            );
-            if let Some((_, spent, _, e)) = out.improvements.first() {
-                println!("      best {e:.6} reached at charged {spent}");
-            }
-        }
-        println!("{solved}/{seeds} solved (dls)");
-        return;
-    }
     // Archive-ratchet mode: the minima network explored from a permanent
     // keyed archive, launches by discovery posterior.
     #[cfg(feature = "graphkey")]
@@ -1738,17 +1681,6 @@ fn main() {
         cfg.merge_radius = 0.5;
         println!("  keying on the core ring-graph key, merge radius 0.5");
     }
-    // Reoccupation move on the lattice grown from the interior;
-    // REOCCUPY_INTERVAL sets the charged calls between moves.
-    if opts.contains(&"reocc") {
-        cfg.reoccupy =
-            Some(anneal_core::methods::lattice_search::LatticeSearchConfig::lennard_jones(n));
-        cfg.reoccupy_interval = anneal_core::env::parsed("REOCCUPY_INTERVAL").unwrap_or(5_000);
-        println!(
-            "  reoccupation move every {} charged calls",
-            cfg.reoccupy_interval
-        );
-    }
     let coreclass = opts.contains(&"coreclass");
     let core_patience = anneal_core::env::parsed("CORE_PATIENCE").unwrap_or(10_000);
     let core_trial = anneal_core::env::parsed("CORE_TRIAL").unwrap_or(2_000);
@@ -1862,7 +1794,6 @@ fn main() {
     // Goedecker's MD escape under the controller; MD_DT and MD_KINETIC
     // set the time step and the kinetic energy per unit escape scale.
     cfg.md_escape = opts.contains(&"mhmd");
-    cfg.orbit_complete_on_new = cfg.orbit_complete_on_new || opts.contains(&"orbit");
     if opts.contains(&"recognition") {
         cfg.shared_visit_policy =
             anneal_core::methods::minima_hopping::SharedVisitPolicy::Recognition;
@@ -1900,10 +1831,6 @@ fn main() {
     }
     // Wales and Doye's angular move on the worst-bound point.
     cfg.angular_moves = opts.contains(&"angular");
-    // Oakley-Johnston-Wales point-group symmetrisation as a proposal arm.
-    cfg.point_symmetrise = opts.contains(&"psym");
-    // Core symmetrisation once per new basin (Oakley-Johnston-Wales), quenched.
-    cfg.point_symmetrise_on_new = opts.contains(&"psymnew");
     // Population repulsion in SOAP space, pulled back through the Jacobian.
     cfg.soap_repel = opts.contains(&"repel");
     // Occasional jumping on stagnation (Iwamatsu-Okabe).
@@ -1930,17 +1857,9 @@ fn main() {
         cfg.bias_gamma = g;
         println!("  bias gamma {g}");
     }
-    if let Some(frac) = anneal_core::env::parsed::<f64>("PSYM_CORE") {
-        cfg.symmetrise_core_fraction = frac;
-        println!("  symmetrise core fraction {frac}");
-    }
     if let Some(tol) = anneal_core::env::parsed::<f64>("SYM_TOL") {
         cfg.symmetry_tolerance = tol * cfg.length_scale;
         println!("  symmetry tolerance {tol}");
-    }
-    cfg.point_symmetrise_every_accept = opts.contains(&"psymall");
-    if cfg.point_symmetrise_every_accept {
-        cfg.point_symmetrise_on_new = true;
     }
     // Allocator rewarded by accepted new basins rather than by acceptance.
     cfg.novel_reward = opts.contains(&"novel");
@@ -1973,15 +1892,11 @@ fn main() {
     cfg.energy_bias = opts.contains(&"ebias");
     let requested_libraries = [
         ("visit", MoveLibrary::Visit),
-        ("reseed", MoveLibrary::Reseed),
-        ("selfseed", MoveLibrary::SelfReseed),
-        ("learncon", MoveLibrary::LearnedReseed),
         ("lean", MoveLibrary::Lean),
         ("burst", MoveLibrary::LeanBurst),
         ("hollow", MoveLibrary::LeanBurstHollow),
         ("fill", MoveLibrary::LeanBurstFill),
         ("twin", MoveLibrary::Twin),
-        ("gtwin", MoveLibrary::GrowthAndTwin),
     ];
     let selected: Vec<MoveLibrary> = requested_libraries
         .into_iter()
@@ -1989,7 +1904,7 @@ fn main() {
         .collect();
     assert!(
         selected.len() <= 1,
-        "select at most one move library: visit,reseed,selfseed,learncon,lean,burst,twin,gtwin"
+        "select at most one move library: visit,lean,burst,hollow,fill,twin"
     );
     if let Some(library) = selected.into_iter().next() {
         cfg.move_library = library;
@@ -2825,7 +2740,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} xrefused {} jumps {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?} sym {}/{:.2} orbits {}/{:.2}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} xrefused {} jumps {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
              relaxed {converged}/{} converged  early {early_stopped} saved {early_saved}  \
              verified {}{}",
             out.best,
@@ -2867,10 +2782,6 @@ fn main() {
             out.screen.2,
             out.screen.3,
             out.contextual.0,
-            out.symmetrised.0,
-            out.symmetrised.1,
-            out.orbits.0,
-            out.orbits.1,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
