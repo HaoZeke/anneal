@@ -30,6 +30,10 @@ use std::time::Instant;
 
 const HIT_TOL: f64 = 1e-3;
 const FAMILY: SuttonChenFamily = SuttonChenFamily::Sc10_8;
+/// Lennard-Jones temperature that `Config::with_scales` multiplies by the energy scale.
+const LJ_TEMPERATURE: f64 = 0.8;
+/// Largest difference allowed between the configured and the published temperature.
+const TEMPERATURE_MATCH: f64 = 1e-9;
 
 struct Quenched {
     energy: f64,
@@ -80,11 +84,20 @@ fn without_template_priors(mut cfg: Config) -> Config {
 }
 
 fn preset(name: &str, n: usize) -> Option<Config> {
-    match name {
-        "recommended" => Some(without_template_priors(Config::recommended(n))),
-        "for_cluster" => Some(without_template_priors(Config::for_cluster(n))),
-        _ => None,
-    }
+    let nn = std::f64::consts::FRAC_1_SQRT_2;
+    let length_scale = nn / 2.0_f64.powf(1.0 / 6.0);
+    let temperature = FAMILY.basin_hopping_temperature();
+    // `*_with_scales` multiplies the Lennard-Jones temperature 0.8 by the
+    // energy scale, so this scale makes the Metropolis temperature the
+    // published T*.
+    let energy_scale = temperature / LJ_TEMPERATURE;
+    let cfg = match name {
+        "recommended" => Config::recommended_with_scales(n, length_scale, energy_scale),
+        "for_cluster" => Config::for_cluster_with_scales(n, length_scale, energy_scale),
+        _ => return None,
+    };
+    assert!((cfg.temperature - temperature).abs() < TEMPERATURE_MATCH);
+    Some(without_template_priors(cfg))
 }
 
 fn budget_from(args: Option<&String>) -> Option<usize> {
@@ -432,7 +445,10 @@ fn cmd_calibrate(args: &[String]) -> i32 {
         eprintln!("calibrate needs seeds");
         return 2;
     }
-    let cfg = Config::recommended(n);
+    let Some(cfg) = preset("recommended", n) else {
+        eprintln!("no preset for N={n}");
+        return 2;
+    };
     let pot = SuttonChen::new(n, FAMILY);
     for text in &args[3..] {
         let Some(seed) = text.parse::<u64>().ok() else {
@@ -444,4 +460,39 @@ fn cmd_calibrate(args: &[String]) -> i32 {
         println!("{seed} {} {:.8}", quenched.calls, quenched.energy);
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FAMILY, LJ_TEMPERATURE, preset};
+    use anneal_core::methods::cluster_hopping::{Config, OrbitCore};
+
+    #[test]
+    fn presets_use_sutton_chen_gold_scales_without_template_priors() {
+        let length_scale = std::f64::consts::FRAC_1_SQRT_2 / 2.0_f64.powf(1.0 / 6.0);
+        let temperature = FAMILY.basin_hopping_temperature();
+        let energy_scale = temperature / LJ_TEMPERATURE;
+
+        let recommended = preset("recommended", 38).expect("recommended preset");
+        let expected_recommended = Config::recommended_with_scales(38, length_scale, energy_scale);
+        assert!((recommended.length_scale - length_scale).abs() < 1e-12);
+        assert!((recommended.temperature - temperature).abs() < 1e-9);
+        assert_eq!(recommended.energy_scale, expected_recommended.energy_scale);
+        assert!(!recommended.prior_soap);
+        assert!(!recommended.prior_reseed);
+        assert!(!recommended.prior_growth);
+        assert!(!recommended.prior_core);
+        assert!(!recommended.prior_handover);
+        assert!(!recommended.prior_motif);
+        assert!(matches!(recommended.orbit_core, OrbitCore::Fraction));
+
+        let for_cluster = preset("for_cluster", 38).expect("for_cluster preset");
+        assert!((for_cluster.length_scale - length_scale).abs() < 1e-12);
+        assert!((for_cluster.temperature - temperature).abs() < 1e-9);
+        assert!(!for_cluster.prior_soap);
+        assert!(!for_cluster.prior_motif);
+        assert!(matches!(for_cluster.orbit_core, OrbitCore::Both(_)));
+
+        assert!(preset("unknown", 38).is_none());
+    }
 }
