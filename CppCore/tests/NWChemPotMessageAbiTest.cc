@@ -20,6 +20,47 @@
 
 using Catch::Matchers::WithinAbs;
 
+namespace {
+
+class RestoreEnv {
+public:
+  explicit RestoreEnv(const char *name) : name_(name) {
+    if (const char *value = std::getenv(name)) {
+      had_ = true;
+      value_ = value;
+    }
+  }
+
+  void clear() const {
+#ifdef _WIN32
+    _putenv_s(name_, "");
+#else
+    unsetenv(name_);
+#endif
+  }
+
+  ~RestoreEnv() {
+#ifdef _WIN32
+    _putenv_s(name_, had_ ? value_.c_str() : "");
+#else
+    if (had_)
+      setenv(name_, value_.c_str(), 1);
+    else
+      unsetenv(name_);
+#endif
+  }
+
+  RestoreEnv(const RestoreEnv &) = delete;
+  RestoreEnv &operator=(const RestoreEnv &) = delete;
+
+private:
+  const char *name_;
+  bool had_ = false;
+  std::string value_;
+};
+
+} // namespace
+
 TEST_CASE("NWChemPot passes serialized NWChemParams to nwchemc engine",
           "[nwchem][abi]") {
   if (!rgpot::NWChemPot::probeAvailable()) {
@@ -131,4 +172,34 @@ TEST_CASE("NWChemPot reports a loaded engine configuration refusal",
   REQUIRE(pot.available());
   REQUIRE(result == "rgpot params nwchem arm rejected by embed: "
                     "basis=6-31g theory=dft scfType=rhf charge=0 mult=1");
+}
+
+TEST_CASE("NWChemPot reports a missing engine in setPotentialConfig",
+          "[nwchem][abi]") {
+  RestoreEnv nwchem_library("NWCHEMC_LIBRARY");
+  RestoreEnv nwchemc_engine("RGPOT_NWCHEMC_ENGINE");
+  RestoreEnv nwchem_engine("RGPOT_NWCHEM_ENGINE");
+  nwchem_library.clear();
+  nwchemc_engine.clear();
+  nwchem_engine.clear();
+
+  rgpot::NWChemPot pot;
+  REQUIRE_FALSE(pot.available());
+
+  ::capnp::MallocMessageBuilder message;
+  auto config = message.initRoot<::PotentialConfig>();
+  auto params = config.initNwchem();
+  params.setBasis("6-31g");
+  params.setTheory("dft");
+  params.setScfType("rhf");
+  params.setCharge(0);
+  params.setMultiplicity(1);
+  params.setEnginePath("/nonexistent/libnwchemc.so");
+
+  std::string result;
+  REQUIRE_FALSE(pot.setPotentialConfig(config.asReader(), &result));
+  REQUIRE_FALSE(pot.available());
+  REQUIRE(result == "rgpot params nwchem arm failed (engine not loaded): "
+                    "basis=6-31g theory=dft scfType=rhf charge=0 mult=1 "
+                    "enginePath=/nonexistent/libnwchemc.so");
 }
