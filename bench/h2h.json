@@ -662,6 +662,34 @@
       ]
     },
     {
+      "rule": "water_hexamer_192",
+      "competitors": [
+        "CREST"
+      ],
+      "runners": [
+        "scripts/water_hexamer_192/run_campaign.py",
+        "scripts/water_hexamer_192/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/water_hexamer_192/run_campaign.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/water_hexamer_192/run_campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/water-hexamer-192/benchmarks/water_hexamer_192.py",
+      "rows": [
+        {
+          "path": "bench/water-hexamer-192/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "tip4p_h2h",
       "competitors": [
         "GMIN"

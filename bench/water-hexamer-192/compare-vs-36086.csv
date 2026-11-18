@@ -1,0 +1,5 @@
+system,arm,n_new,n_old,new_hits,old_hits,fisher_hits_p,new_calls_median,old_calls_median,mwu_calls_p,new_wall_median_s,old_wall_median_s,mwu_wall_p,changed_hits,changed_calls,changed_time
+h2o6,anneal,192,192,185,121,2.51979e-17,4000.000,4000.000,0.317311,16.599084,16.909285,0.0899642,1,0,0
+h2o6,polish_fair,192,192,185,148,1.61112e-08,4000.000,4000.000,7.34328e-07,16.705064,16.498275,0.166398,1,1,0
+h2o6,crest,192,192,26,97,4.93458e-15,4000.000,4000.000,1,15.261291,14.056681,1.78567e-22,1,0,1
+h2o6,crest_fair,192,192,26,114,2.52301e-21,3382.000,3549.000,1.48555e-66,12.537471,12.054369,5.49093e-09,1,1,1

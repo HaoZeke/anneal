@@ -1,0 +1,10 @@
+first_arm,second_arm,metric,old_direction,new_direction,old_significant,new_significant,changed
+polish_fair,anneal,hits,first,tie,1,0,1
+polish_fair,anneal,calls,tie,tie,1,0,1
+polish_fair,anneal,time,first,second,1,0,1
+crest_fair,crest,hits,first,tie,0,0,1
+crest_fair,crest,calls,first,first,1,1,0
+crest_fair,crest,time,first,first,1,1,0
+anneal,crest,hits,first,first,1,1,0
+anneal,crest,calls,tie,tie,0,0,0
+anneal,crest,time,second,second,1,1,0
