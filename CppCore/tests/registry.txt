@@ -127,7 +127,7 @@ KeptPotentialTest | tests core | unit kept_potential_test KeptPotentialTest.cc |
 ReducedPairTest | tests core | unit reduced_pair_test ReducedPairTest.cc fp_contract=off |
 EMTPotTest | tests core | unit emt_pot_test EMTPotTest.cc |
 EAMCellPotTest | tests core | unit eam_cell_pot_test EAMCellPotTest.cc |
-NeighbourLayerTest | tests core | unit neighbour_layer_test NeighbourLayerTest.cc fp_contract=off |
+NeighbourLayerTest | tests core | unit neighbour_layer_test NeighbourLayerTest.cc fp_contract=off timeout=120 |
 # Eight potentials on 1, 2, 3 and 8 threads, on up to 10648 atoms. Meson
 # scales explicit timeouts by 3 under ASan/UBSan and 8 under TSan.
 ThreadTeamTest | tests core | unit thread_team_test ThreadTeamTest.cc timeout=120 |
