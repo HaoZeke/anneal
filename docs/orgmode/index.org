@@ -126,6 +126,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    :caption: Reference
 
    spec
+   reference/python-api
    reference/rust-api
    reference/glossary
    reference/presets-and-advanced

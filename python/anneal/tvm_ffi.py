@@ -25,6 +25,8 @@ _HISTORY_TENSOR_FIELDS = (
 
 @dataclass(frozen=True)
 class TvmFfiTensorMetadata:
+    """Shape, dtype, and DLPack device metadata for a tensor."""
+
     shape: tuple[int, ...]
     dtype: str
     device: Any
@@ -63,6 +65,7 @@ def _tvm_ffi_module(tvm_ffi: Any | None) -> Any:
 
 
 def tvm_ffi_tensor(array: Any, *, tvm_ffi: Any | None = None) -> Any:
+    """Wrap a DLPack-compatible array through ``tvm_ffi.from_dlpack``."""
     _require_dlpack(array)
     module = _tvm_ffi_module(tvm_ffi)
     from_dlpack = getattr(module, "from_dlpack", None)
@@ -72,6 +75,7 @@ def tvm_ffi_tensor(array: Any, *, tvm_ffi: Any | None = None) -> Any:
 
 
 def tvm_ffi_tensor_metadata(array: Any) -> TvmFfiTensorMetadata:
+    """Return :class:`TvmFfiTensorMetadata` for a DLPack-compatible array."""
     _require_dlpack(array)
     return TvmFfiTensorMetadata(
         shape=tuple(int(dim) for dim in getattr(array, "shape", ())),
@@ -84,6 +88,7 @@ def tvm_ffi_tensor_metadata(array: Any) -> TvmFfiTensorMetadata:
 def tvm_ffi_tensors_from_history(
     history: DeviceHistory, *, tvm_ffi: Any | None = None
 ) -> dict[str, Any]:
+    """Export all tensor fields of a :class:`~anneal.device.DeviceHistory` via TVM FFI."""
     return {
         field: tvm_ffi_tensor(getattr(history, field), tvm_ffi=tvm_ffi)
         for field in _HISTORY_TENSOR_FIELDS

@@ -28,6 +28,7 @@ class DeviceHistory:
 
     @property
     def total_accepted(self) -> Any:
+        """Total accepted proposals summed across epochs on the target device."""
         return _asarray(
             self.namespace.sum(self.accepted),
             xp=self.namespace,
@@ -37,6 +38,7 @@ class DeviceHistory:
 
     @property
     def total_rejected(self) -> Any:
+        """Total rejected proposals summed across epochs on the target device."""
         return _asarray(
             self.namespace.sum(self.rejected),
             xp=self.namespace,
