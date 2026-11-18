@@ -10125,7 +10125,7 @@ mod tests {
 
     #[test]
     fn single_species_frozen_runs_ignore_plateau_population_returns() {
-        fn run_once(seed_known_minimum: bool) -> (u64, Vec<(usize, String, u64, u64)>) {
+        fn run_once(seed_known_minimum: bool) -> (u64, Vec<(usize, String, u64, u64, u64)>) {
             for _ in crate::catalog::take_known_minima() {}
             let mut cfg = Config::recommended(6).with_species(vec![79; 6], None);
             cfg.frozen = Some(vec![true, false, false, false, false, false]);
@@ -10163,15 +10163,15 @@ mod tests {
             );
             let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
                 let _ = led.charge();
-                (
-                    x.iter().map(|value| value * value).sum::<f64>(),
-                    x.to_owned(),
-                )
+                // Each quench is lower than the last, so the acceptance dial
+                // keeps the hop and the trace is not empty. The geometry of
+                // that hop is still the trial.
+                (-(led.spent() as f64), x.to_owned())
             };
             let mut run_rng = StdRng::seed_from_u64(1234);
             let out =
                 run(&cfg, start.view(), &mut ledger, &mut relax, &mut run_rng).expect("search");
-            let trace = out
+            let trace: Vec<(usize, String, u64, u64, u64)> = out
                 .accepted_transitions
                 .iter()
                 .map(|step| {
@@ -10180,15 +10180,23 @@ mod tests {
                         step.action.clone(),
                         step.from_energy.to_bits(),
                         step.to_energy.to_bits(),
+                        step.to_state
+                            .iter()
+                            .fold(0_u64, |acc, value| acc ^ value.to_bits()),
                     )
                 })
                 .collect();
             (out.final_energy.to_bits(), trace)
         }
 
-        let baseline = run_once(false);
-        let seeded = run_once(true);
-        assert_eq!(seeded, baseline);
+        let (baseline_energy, baseline_trace) = run_once(false);
+        let (seeded_energy, seeded_trace) = run_once(true);
+        assert!(
+            !baseline_trace.is_empty(),
+            "the hop trace has to record an accepted move"
+        );
+        assert_eq!(seeded_trace, baseline_trace);
+        assert_eq!(seeded_energy, baseline_energy);
     }
 
     #[test]

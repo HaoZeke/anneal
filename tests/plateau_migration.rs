@@ -73,6 +73,10 @@ fn a_recommended_binary_plateau_migrates_to_the_stored_lower_seat() {
     );
     assert!(cfg.escape_on_stall);
     assert!(!cfg.packing_cna_applies());
+    assert!(
+        !cfg.budget_window,
+        "two labels keep the recommended acceptance dial"
+    );
     assert!(apart > cfg.merge_radius, "the two wells must not merge");
     // The patience is the only clock change. The visit policy and the climb
     // stay the recommended ones; a short patience reaches that clock inside
@@ -96,9 +100,10 @@ fn a_recommended_binary_plateau_migrates_to_the_stored_lower_seat() {
     cfg.bayes_screen = false;
     cfg.screen_margin = 1.0e9;
     cfg.soap_mode = SoapProposalMode::Off;
-    // This fixture pins the call ordering around the plateau branch itself,
-    // independent of the budget-window temperature law.
-    cfg.budget_window = false;
+    // The recommended temperature law is the acceptance dial. Attaching two
+    // labels does not turn the budget window on, and this fixture does not
+    // pin the flag either, so the climb runs under that law.
+    assert!(!cfg.budget_window);
 
     let worse_energy = -1.0;
     let lower_energy = -3.0;

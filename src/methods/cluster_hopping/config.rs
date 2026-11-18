@@ -2049,10 +2049,7 @@ impl Config {
 
     /// Attach species labels, and optional per-atom diameters, to a preset.
     ///
-    /// Allocation and the other preset flags stay as they were.
-    /// Two or more distinct labels force the budget-window temperature so a
-    /// labelled atomic chain keeps the same temperature law the homotop
-    /// controls were tuned under.
+    /// Temperature, allocation, and the other preset flags stay as they were.
     /// Diameters, when present, widen the container and the neighbour cutoff
     /// by the largest one and set the minimum separation from the smallest,
     /// because a reduced-unit sphere built for `σ = 1` clips a larger species.
@@ -2088,12 +2085,6 @@ impl Config {
             if contact.is_finite() && contact > 0.0 {
                 self.min_separation = contact;
             }
-        }
-        let mut labels = species.clone();
-        labels.sort_unstable();
-        labels.dedup();
-        if labels.len() >= 2 {
-            self.budget_window = true;
         }
         self.species = Some(species);
         self.species_sigma = sigma;
@@ -2498,7 +2489,7 @@ mod coverage_behaviour {
         let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
         assert!(!mixed.monoatomic());
         assert!(!mixed.packing_cna_applies());
-        assert!(mixed.budget_window);
+        assert!(!mixed.budget_window);
         assert!(!Config::recommended_tip4p(4).packing_cna_applies());
         assert!(
             !Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)

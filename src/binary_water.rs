@@ -80,6 +80,20 @@ pub fn stock_preset(n_points: usize, communicating: bool) -> Config {
     }
 }
 
+/// Stock preset plus the two species labels and the per-atom diameters.
+///
+/// [`search_binary`] runs this configuration. Diameters scale the neighbour
+/// shell, the container and the minimum separation. The temperature law,
+/// including [`Config::budget_window`], stays on the preset.
+fn binary_config(problem: &BinaryLennardJonesProblem, communicating: bool) -> Config {
+    let n = problem.n_a + problem.n_b;
+    let mut species = vec![1u32; problem.n_a];
+    species.extend(std::iter::repeat_n(2u32, problem.n_b));
+    let mut sigma = vec![problem.sigma_aa; problem.n_a];
+    sigma.extend(std::iter::repeat_n(problem.sigma_bb, problem.n_b));
+    stock_preset(n, communicating).with_species(species, Some(sigma))
+}
+
 /// Binary Lennard-Jones from `start` (`3 n` Cartesian coordinates).
 ///
 /// `target` stops the hop once a recorded energy reaches it. The preset is
@@ -97,11 +111,7 @@ pub fn search_binary(
 ) -> StockSearch {
     let n = problem.n_a + problem.n_b;
     assert_eq!(start.len(), 3 * n, "binary start is 3 coordinates per atom");
-    let mut species = vec![1u32; problem.n_a];
-    species.extend(std::iter::repeat_n(2u32, problem.n_b));
-    let mut sigma = vec![problem.sigma_aa; problem.n_a];
-    sigma.extend(std::iter::repeat_n(problem.sigma_bb, problem.n_b));
-    let cfg = stock_preset(n, communicating).with_species(species, Some(sigma));
+    let cfg = binary_config(problem, communicating);
     let potential = BinaryLennardJones::new(
         problem.n_a,
         problem.n_b,
@@ -336,6 +346,59 @@ mod tests {
                 "the refusal came after {} charged calls",
                 found.charged
             );
+        }
+    }
+
+    #[test]
+    fn search_binary_resolves_the_stock_temperature_law() {
+        let problem = BinaryLennardJonesProblem {
+            n_a: 5,
+            n_b: 3,
+            epsilon_aa: 1.0,
+            epsilon_ab: 1.2,
+            epsilon_bb: 0.5,
+            sigma_aa: 1.0,
+            sigma_ab: 1.05,
+            sigma_bb: 1.3,
+        };
+        for communicating in [false, true] {
+            let n = problem.n_a + problem.n_b;
+            let stock = stock_preset(n, communicating);
+            let cfg = binary_config(&problem, communicating);
+            assert_eq!(cfg.budget_window, stock.budget_window);
+            assert!(!cfg.budget_window);
+            assert_eq!(cfg.temperature, stock.temperature);
+            assert_eq!(cfg.theta, stock.theta);
+            assert_eq!(cfg.statistical_temperature, stock.statistical_temperature);
+            assert_eq!(cfg.homotop_descent, stock.homotop_descent);
+            assert_eq!(cfg.homotop_ranked, stock.homotop_ranked);
+            assert_eq!(cfg.homotop_window, stock.homotop_window);
+            assert_eq!(cfg.homotop_reorder, stock.homotop_reorder);
+            assert_eq!(cfg.allocate_moves, stock.allocate_moves);
+            assert_eq!(cfg.move_library, stock.move_library);
+            assert_eq!(cfg.species.as_deref(), Some(&[1, 1, 1, 1, 1, 2, 2, 2][..]));
+            assert_eq!(
+                cfg.species_sigma.as_deref(),
+                Some(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.3, 1.3, 1.3][..])
+            );
+            let max_sigma = 1.3;
+            assert_eq!(cfg.neighbour_cutoff, stock.neighbour_cutoff * max_sigma);
+            assert!(cfg.container > stock.container);
+            assert_eq!(cfg.min_separation, stock.min_separation);
+            let mut restored = cfg.clone();
+            restored.species = stock.species.clone();
+            restored.species_sigma = stock.species_sigma.clone();
+            restored.neighbour_cutoff = stock.neighbour_cutoff;
+            restored.container = stock.container;
+            restored.min_separation = stock.min_separation;
+            assert_eq!(
+                restored.resolved_json().expect("restored binary config"),
+                stock.resolved_json().expect("stock preset"),
+                "search_binary changed a resolved field outside labels and diameters"
+            );
+            let json = cfg.resolved_json().expect("binary config");
+            assert!(json.contains("\"budget_window\":false"));
+            assert!(!json.contains("\"budget_window\":true"));
         }
     }
 
