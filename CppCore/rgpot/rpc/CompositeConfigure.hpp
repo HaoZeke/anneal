@@ -25,6 +25,9 @@
 #include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
 #include "rgpot/rpc/D2Configure.hpp"
+#ifdef RGPOT_HAS_DFTD4
+#include "rgpot/rpc/D4Configure.hpp"
+#endif
 #include "rgpot/rpc/MorseConfigure.hpp"
 #include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/rpc/Potentials.capnp.h"
@@ -89,6 +92,12 @@ inline std::unique_ptr<PotentialBase> builtinPotential(const ::BuiltinParams::Re
     return std::make_unique<D2CpmdPot>(cfg.isD2cpmd() ? d2CpmdConfigFrom(cfg.getD2cpmd())
                                                       : D2CpmdConfig{});
   }
+#ifdef RGPOT_HAS_DFTD4
+  if (name == "d4") {
+    expectArm(name, cfg, ::PotentialConfig::D4);
+    return std::make_unique<D4Pot>(cfg.isD4() ? d4ConfigFrom(cfg.getD4()) : D4Config{});
+  }
+#endif
   if (name == "composite" || name == "sum") {
     expectArm(name, cfg, ::PotentialConfig::COMPOSITE);
     if (!cfg.isComposite()) {

@@ -106,7 +106,7 @@ Covered types:
 
 - =ForceInput=, =ForceOut=, =ForceBatch=, =PotCaps=, =CalculatorGroup=
 - =LJConfig=, =LJClusterConfig=, =MorseConfig=, =ZBLConfig=, =SuttonChenConfig=,
-  =D2Config=, =D2CpmdConfig=
+  =D2Config=, =D2CpmdConfig=, =D4Config=
 - =Reentrancy= and =PotType=
 - =PotentialBase=, =Potential<Derived>= (through one probe instantiation),
   =LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot=, =SumPot=,
@@ -116,6 +116,8 @@ Covered types:
 The classes of the optional backends are not covered (xtb, tblite, dftd3, dftd4,
 ExprPot, XcKernel, Metatomic, UMA, NWChem, CPMD, MOPAC, Skala, the Fortran
 potentials).
+=D4Config= is covered, because it sits in a header of its own that does not
+include dftd4; =D4Pot= is not.
 Their headers and features differ between builds, so a stamp over them would
 refuse libraries that agree on everything a consumer uses.
 
@@ -171,4 +173,6 @@ Soversion 9 stamps =SumPot=, =lr::SumPot= and =PotType::LrSum=.
 old constructor and =add= symbols leave the library.
 It also stamps =D2Config=, =D2Pot= and =PotType::D2=.
 It also stamps =D2CpmdConfig=, =D2CpmdPot= and =PotType::D2Cpmd=.
+=D4Config= gains =periodic= in the padding after =atm=, so it keeps its size and
+only the field offsets show it.
 A program linked against soversion 8 does not load =librgpot.so.9=.

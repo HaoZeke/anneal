@@ -629,6 +629,33 @@ TEST_CASE("composite engine takes D2 terms with their stress", "[engine][composi
   e.destroy(pot);
 }
 
+#ifdef RGPOT_HAS_DFTD4
+TEST_CASE("composite engine takes a D4 term", "[engine][composite][d4]") {
+  Engine e;
+  if (!open_engine("COMPOSITE", e)) {
+    SKIP("no composite engine in this build");
+  }
+  std::string error;
+  RgpotEnginePot *pot =
+      create(e, composite_params({{"d4", "d4", 1.0, true}, {"d2", "d2", 0.0, false}}), &error);
+  INFO(error);
+  REQUIRE(pot != nullptr);
+  const long n = 5;
+  std::vector<double> forces(3 * n, 0.0);
+  double energy = 0.0;
+  REQUIRE(e.force(pot, n, kCluster.data(), kZ.data(), forces.data(), &energy,
+                  nullptr, kBox.data(), nullptr, nullptr) == 0);
+  std::vector<RgpotEngineComponent> rec(2);
+  REQUIRE(e.last_components(pot, rec.data(), nullptr, 2) == 2);
+  REQUIRE(rec[0].evaluated == 1);
+  REQUIRE(rec[0].energy < 0.0);
+  REQUIRE(rec[0].has_stress == 0);
+  REQUIRE(rec[1].evaluated == 0);
+  REQUIRE(energy == rec[0].energy);
+  e.destroy(pot);
+}
+#endif
+
 TEST_CASE("mopac engine", "[engine][mopac]") {
   check_unavailable_engine("MOPAC", "mopac", builtin_params("mopac"), 2);
 }

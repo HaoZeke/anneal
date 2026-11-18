@@ -812,16 +812,18 @@ rgpot.D3Pot(damping='bj', functional='pbe', atm=True)
 
 #+attr_rgpot: signature
 #+begin_src python
-rgpot.D4Pot(functional='pbe', charge=0.0, atm=True)
+rgpot.D4Pot(functional='pbe', charge=0.0, atm=True, periodic=False)
 #+end_src
 
-- Inputs :: =functional= is the dftd4 method key for rational damping; =charge=
-  is the total charge of the system; =atm= switches the many-body term.
+- Inputs :: =functional= is the dftd4 method key for rational damping (="blyp"=
+  for BLYP); =charge= is the total charge of the system; =atm= switches the
+  many-body term; =periodic= passes the box as a 3D lattice.
   =atom_types= are atomic numbers.
 - Units :: =charge= in elementary charges; positions in Angstrom, converted to
-  bohr; energy eV; forces eV/Angstrom.
-- Outputs :: Grimme DFT-D4 dispersion, non-periodic as for =rgpot.D3Pot=.
-  No stress.
+  bohr; energy eV; forces eV/Angstrom; stress eV/Angstrom^3.
+- Outputs :: Grimme DFT-D4 dispersion.
+  Without =periodic= the box is ignored, as for =rgpot.D3Pot=, and there is no
+  stress; with it =evaluate= returns the stress from dftd4's virial.
   =None= when =rgpot.has_dftd4= is false.
 - Errors :: an empty =functional= raises =ValueError=; dftd4 errors raise
   =RuntimeError=.
@@ -843,8 +845,8 @@ rgpot.ExprPot(expression, terms)
   ="morse"=; =s6=, =d=, =sr=, =cutoff=, =functional= for ="d2"=, where a
   =functional= sets =s6= and =d= first and the other keys then override them;
   =s6=, =alpha=, =vdweps=, =functional= for ="d2cpmd"=, in the same way;
-  =functional=, =damping=, =atm= for ="d3"=; =functional=, =charge=, =atm= for
-  ="d4"=.
+  =functional=, =damping=, =atm= for ="d3"=; =functional=, =charge=, =atm=,
+  =periodic= for ="d4"=.
   A missing field keeps the default of that kind's class.
 - Units :: the fields have the units of =LJPot=, =MorsePot=, =D2Pot=,
   =D2CpmdPot=, =D3Pot= and =D4Pot=; the expression combines child energies in
@@ -1036,7 +1038,7 @@ config()
 #+end_src
 
 - Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.D2Pot,
-  rgpot.D2CpmdPot
+  rgpot.D2CpmdPot, rgpot.D4Pot
 - Inputs :: none.
 - Units :: as the constructor: eV for =u0= and =De=, 1/Angstrom for =a=,
   Angstrom for the lengths.
@@ -1044,7 +1046,8 @@ config()
   =LJPot= and =LJClusterPot= give =u0=, =cutoff=, =psi=,
   =switch_width=; =MorsePot= gives =De=, =a=, =re=, =cutoff=, =switch_width=;
   =D2Pot= gives =s6=, =d=, =sr=, =cutoff= and =D2CpmdPot= gives =s6=, =alpha=,
-  =vdweps=, after any functional was applied.
+  =vdweps=, after any functional was applied; =D4Pot= gives =functional=,
+  =charge=, =atm=, =periodic=.
 - Errors :: none.
 
 *** =.evaluate=

@@ -607,6 +607,10 @@ rgpot_test_executable(cpmd_pot_gradient_stress_test
                       CppCore/tests/CPMDPotGradientStressTest.cc)
 rgpot_add_test(CPMDPotGradientStressTest COMMAND cpmd_pot_gradient_stress_test
   ENVIRONMENT "RGPOT_CPMD_ENGINE=$<TARGET_FILE:cpmdc_gradient_engine>")
+rgpot_test_executable(composite_cpmd_dispersion_test
+                      CppCore/tests/CompositeCpmdDispersionTest.cc)
+rgpot_add_test(CompositeCpmdDispersionTest COMMAND composite_cpmd_dispersion_test
+  ENVIRONMENT "RGPOT_CPMD_ENGINE=$<TARGET_FILE:cpmdc_gradient_engine>")
 rgpot_test_executable(cpmd_pot_message_abi_test
                       CppCore/tests/CPMDPotMessageAbiTest.cc)
 rgpot_add_test(CPMDPotMessageAbiTest COMMAND cpmd_pot_message_abi_test

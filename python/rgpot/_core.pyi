@@ -745,7 +745,12 @@ class D3Pot:
         """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class D4Pot:
-    def __init__(self, functional: str = 'pbe', charge: float = 0.0, atm: bool = True) -> None: ...
+    def __init__(self, functional: str = 'pbe', charge: float = 0.0, atm: bool = True, periodic: bool = False) -> None:
+        """
+        Grimme D4 through dftd4, in eV. functional is a dftd4 method key whose rational damping parameters dftd4 supplies. periodic passes the box as a 3D lattice and returns the stress; off, the box is ignored.
+        """
+
+    def config(self) -> dict: ...
 
     def caps(self) -> dict: ...
 

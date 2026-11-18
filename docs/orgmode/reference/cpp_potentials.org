@@ -248,8 +248,10 @@ class.
 
 *** =rgpot::D4Config=
 
-- Inputs :: =functional= (the dftd4 method key, default ="pbe"=), =charge=
-  (total charge, default 0.0), =atm= (the many-body term, default true).
+- Inputs :: =functional= (the dftd4 method key, default ="pbe"=, ="blyp"= for
+  BLYP), =charge= (total charge, default 0.0), =atm= (the many-body term,
+  default true), =periodic= (pass the box as a lattice periodic along all three
+  vectors, default false).
 - Units :: =charge= in elementary charges.
 - Outputs :: the parameters of =rgpot::D4Pot=.
 - Errors :: the constructor throws
@@ -1506,8 +1508,14 @@ gives one of the seven names above, in any case, and throws
 =-Dwith_dftd3=true= and =rgpot::D4Pot= needs =-Dwith_dftd4=true=.
 Both convert positions to bohr for the library and convert the result back to eV
 and eV/Angstrom.
-Both evaluate the molecule without periodicity, need a non-null cell, and write
-no stress.
+=D3Pot= needs a non-null cell and evaluates the molecule without periodicity and
+writes no stress.
+=D4Pot= reads the box only when =D4Config::periodic= is set, so a molecule may
+come with a null box; then dftd4 gets the box as a 3D lattice and returns its
+virial, which =D4Pot= divides by the cell volume for the stress, and a null box
+throws =std::invalid_argument=. dftd4 cuts the pair, three-body and coordination
+sums off at 60, 40 and 30 bohr without smoothing, so a periodic energy steps
+when a strain carries an image pair across one of them.
 The structure is built on the first call and rebuilt when the atom count or any
 atomic number changes; other calls only update the positions and the cell.
 
@@ -1551,18 +1559,28 @@ D4Pot();
 explicit D4Pot(const D4Config &config);
 #+end_src
 
-- Inputs :: a =rgpot::D4Config=; the damping is always rational.
-- Units :: energy in eV, forces in eV/Angstrom.
-- Outputs :: Grimme DFT-D4 dispersion through the dftd4 C API.
+- Inputs :: a =rgpot::D4Config=; the damping is always rational, with the
+  parameters dftd4 tabulates for the functional.
+- Units :: energy in eV, forces in eV/Angstrom, stress in eV/Angstrom^3.
+- Outputs :: Grimme DFT-D4 dispersion through the dftd4 C API, and the stress
+  when =periodic= is set; =caps()= then reports =periodic= and =stress=.
   Parameter source: Caldeweyher et al., J. Chem.
   Phys. 150, 154122 (2019), doi:10.1063/1.5090222.
-  The default is rational damping, the =pbe= parameters, charge 0 and the
-  many-body term.
+  The default is rational damping, the =pbe= parameters, charge 0, the many-body
+  term and a molecule without periodicity.
   =D4PotTest= checks a fresh call against a reused structure.
 - Errors :: the errors of =rgpot::D4Config=.
+  A periodic force call throws =std::invalid_argument= for a null box or a box
+  of zero volume.
   The force call throws =std::runtime_error= with the dftd4 message when
   building the structure or model, updating it, or computing the dispersion
   fails.
+- Tests :: =CppCore/tests/D4BlypTest.cc= compares BLYP against the dftd4 program
+  (4.2.0, =dftd4 coord --func blyp --grad=) on a water dimer, benzene and an
+  eight-water box in a cubic and a sheared cell: energies within 100 eps Ha,
+  gradients within sqrt(eps) Ha/bohr and virials within sqrt(eps) Ha/bohr times
+  the cube root of the cell volume.
+  =scripts/regen_d4_references.py= writes the references.
 
 *** =rgpot::D4Pot::config=
 

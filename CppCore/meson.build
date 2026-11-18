@@ -603,6 +603,10 @@ if not get_option('with_rpc_client_only')
             gnu_symbol_visibility: 'default',
             install: not meson.is_subproject(),
         )
+        _composite_whole = [lennard_jones, morse, zbl, cpmdpot]
+        if has_dftd4
+            _composite_whole += [d4pot]
+        endif
         composite_engine = shared_library(
             'composite_engine',
             [_engine_common, files('rgpot/engine/CompositeEngine.cc')],
@@ -613,7 +617,7 @@ if not get_option('with_rpc_client_only')
                 rgpot_minimage,
                 rgpot_exact_fma,
             ],
-            link_whole: [lennard_jones, morse, zbl, cpmdpot],
+            link_whole: _composite_whole,
             cpp_args: _engine_args,
             include_directories: _incdirs,
             gnu_symbol_visibility: 'default',
@@ -1525,6 +1529,22 @@ if get_option('with_tests')
             env: cpmdc_gradient_env,
             depends: cpmdc_gradient_engine,
             kwargs: _rt_kw['CPMDPotGradientStressTest'],
+        )
+        test(
+            'CompositeCpmdDispersionTest',
+            executable(
+                'composite_cpmd_dispersion_test',
+                sources: ['tests/CompositeCpmdDispersionTest.cc'],
+                dependencies: test_deps + [ptlrpc_dep],
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+            ),
+            env: cpmdc_gradient_env,
+            depends: cpmdc_gradient_engine,
+            kwargs: _rt_kw['CompositeCpmdDispersionTest'],
         )
         test(
             'CPMDPotMessageAbiTest',

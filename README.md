@@ -244,7 +244,7 @@ ctest --test-dir build_client --output-on-failure
 <tr>
 <td class="org-left"><code>D4Pot</code></td>
 <td class="org-left"><code>D4</code></td>
-<td class="org-left">In-process Potential summand. Enable with <code>-Dwith_dftd4=true</code>; use pixi env <code>dftd4</code> or <code>dftd</code>. Functional key, charge, explicit ATM/many-body flag. <code>PotentialConfig.d4</code> is not applied; every <code>potserv</code> backend refuses it. Goldens: <code>meson test --suite dftd</code></td>
+<td class="org-left">In-process Potential summand. Enable with <code>-Dwith_dftd4=true</code>; use pixi env <code>dftd4</code> or <code>dftd</code>. Functional key, charge, explicit ATM/many-body flag. <code>PotentialConfig.d4</code> configures <code>potserv &lt;port&gt; D4</code> and a <code>d4</code> composite term, including the periodic box. Goldens: <code>meson test --suite dftd</code></td>
 </tr>
 
 <tr>

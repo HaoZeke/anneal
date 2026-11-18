@@ -126,6 +126,7 @@ struct ChildSpec {
   std::string damping = "bj";
   bool atm = true;
   double charge = 0.0;
+  bool periodic = false; // d4: the box as a 3D lattice, with the stress.
   // LJ and Morse dict fields. Absent keys keep the C++ config defaults,
   // which differ (LJ cutoff is 15 A, Morse cutoff is 9.5 A).
   bool has_u0 = false;
@@ -212,6 +213,9 @@ ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
     }
     if (d.contains("charge")) {
       out.charge = nb::cast<double>(d["charge"]);
+    }
+    if (d.contains("periodic")) {
+      out.periodic = nb::cast<bool>(d["periodic"]);
     }
     if (d.contains("u0")) {
       out.has_u0 = true;
@@ -327,6 +331,7 @@ std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
     cfg.functional = spec.functional;
     cfg.charge = spec.charge;
     cfg.atm = spec.atm;
+    cfg.periodic = spec.periodic;
     return std::make_unique<rgpot::D4Pot>(cfg);
   }
 #endif
@@ -1052,17 +1057,31 @@ NB_MODULE(_core, m) {
   d4.def(
       "__init__",
       [](PotHolder<rgpot::D4Pot> *self, const std::string &functional,
-         double charge, bool atm) {
+         double charge, bool atm, bool periodic) {
         new (self) PotHolder<rgpot::D4Pot>([=] {
           rgpot::D4Config cfg;
           cfg.functional = functional;
           cfg.charge = charge;
           cfg.atm = atm;
+          cfg.periodic = periodic;
           return std::make_unique<rgpot::D4Pot>(cfg);
         });
       },
       nb::arg("functional") = "pbe", nb::arg("charge") = 0.0,
-      nb::arg("atm") = true);
+      nb::arg("atm") = true, nb::arg("periodic") = false,
+      "Grimme D4 through dftd4, in eV. functional is a dftd4 method key "
+      "whose rational damping parameters dftd4 supplies. periodic passes "
+      "the box as a 3D lattice and returns the stress; off, the box is "
+      "ignored.");
+  d4.def("config", [](const PotHolder<rgpot::D4Pot> &self) {
+    const rgpot::D4Config &cfg = self.primary().config();
+    nb::dict out;
+    out["functional"] = cfg.functional;
+    out["charge"] = cfg.charge;
+    out["atm"] = cfg.atm;
+    out["periodic"] = cfg.periodic;
+    return out;
+  });
   rgpot::pybind::bind_calls(d4);
 #endif
 

@@ -341,6 +341,65 @@ async def run_d2_configure(port, schema, arm="d2"):
     return True
 
 
+def server_lists(server_bin, backend):
+    """True when potserv's usage line names @p backend."""
+    done = subprocess.run([server_bin], capture_output=True, text=True)
+    usage = done.stderr.split("Available PotentialTypes:", 1)[-1].splitlines()[0]
+    return backend in [name.strip() for name in usage.split(",")]
+
+
+async def run_d4_configure(port, schema):
+    """configure(d4) on a D4 server switches functional and periodicity."""
+    for _ in range(10):
+        try:
+            connection = await capnp.AsyncIoStream.create_connection(
+                host="localhost", port=port
+            )
+            break
+        except OSError:
+            await asyncio.sleep(0.5)
+    else:
+        print("D4 configure: failed to connect to server.")
+        return False
+
+    client = capnp.TwoPartyClient(connection)
+    pot = client.bootstrap().cast_as(schema.Potential)
+    fip = schema.ForceInput.new_message()
+    pos = [0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 2.9, 0.1, 0.2]
+    fip.init("pos", len(pos))
+    for i, p in enumerate(pos):
+        fip.pos[i] = p
+    fip.init("atmnrs", 4)
+    for i, z in enumerate([8, 1, 1, 8]):
+        fip.atmnrs[i] = z
+    fip.init("box", 9)
+    for i, b in enumerate([40.0, 0.0, 0.0, 5.0, 38.0, 0.0, -3.0, 4.0, 39.0]):
+        fip.box[i] = b
+
+    pbe = (await pot.calculate(fip)).result
+    assert pbe.energy < 0.0, pbe.energy
+    cfg = schema.PotentialConfig.new_message()
+    d4 = cfg.init("d4")
+    d4.functional = "blyp"
+    d4.periodic = True
+    reply = await pot.configure(cfg)
+    print(f"D4 configure(d4): ok={reply.ok} msg={reply.message}")
+    assert reply.ok, reply.message
+    blyp = (await pot.calculate(fip)).result
+    assert blyp.energy < 0.0 and blyp.energy != pbe.energy, (blyp.energy, pbe.energy)
+
+    cfg.d4.functional = "nonesuch"
+    reply = await pot.configure(cfg)
+    assert not reply.ok and "d4 arm rejected" in reply.message, reply.message
+    assert (await pot.calculate(fip)).result.energy == blyp.energy
+    other = schema.PotentialConfig.new_message()
+    other.init("d2")
+    reply = await pot.configure(other)
+    assert not reply.ok and "d2" in reply.message, reply.message
+    print("D4 configure: functional, periodicity and refusals hold")
+    return True
+
+
 async def run_nwchem_smoke(port):
     """Optional smoke: start NWChem server, configure(), skip calculate if no engine."""
     for _ in range(10):
@@ -774,6 +833,35 @@ def main():
         if not d2_ok:
             sys.exit(1)
         print(f"{backend} configure passed.")
+
+    if server_lists(args.server_bin, "D4"):
+        d4_port = args.port + 7
+        print(f"Starting D4 server: {args.server_bin} {d4_port} D4")
+        d4_proc = subprocess.Popen(
+            [args.server_bin, str(d4_port), "D4"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            d4_ok = asyncio.run(
+                capnp.run(run_d4_configure(d4_port, effective_schema(args.server_bin)))
+            )
+        except BaseException as e:
+            print(f"D4 configure exception: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            d4_proc.kill()
+            out, err = d4_proc.communicate(timeout=30)
+            print("Server stdout:", out.decode(errors="replace")[-4000:])
+            print("Server stderr:", err.decode(errors="replace")[-4000:])
+            d4_ok = False
+        finally:
+            d4_proc.kill()
+            d4_proc.wait()
+        if not d4_ok:
+            sys.exit(1)
+        print("D4 configure passed.")
+    else:
+        print("D4 configure skipped: potserv built without dftd4.")
 
     if args.nwchem_smoke:
         nw_port = args.port + 1

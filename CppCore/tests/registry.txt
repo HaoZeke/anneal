@@ -251,6 +251,7 @@ test_nwchem_abi | tests core rpc | custom suite=nwchem |
 NWChemDlopenContract | tests core rpc | py CppCore/tests/test_nwchem_dlopen_contract.py @root@ suite=nwchem |
 CPMDPotGradientStressTest | tests core rpc | custom suite=cpmd workdir=. |
 CPMDPotMessageAbiTest | tests core rpc | custom suite=cpmd workdir=. |
+CompositeCpmdDispersionTest | tests core rpc | custom suite=cpmd workdir=. |
 test_cpmd_abi | tests core rpc | custom suite=cpmd |
 CPMDDlopenContract | tests core rpc | py CppCore/tests/test_cpmd_dlopen_contract.py @root@ suite=cpmd |
 CP2KPotFakeEngineTest | tests core rpc cp2k | custom suite=cp2k workdir=. |
@@ -299,6 +300,7 @@ WaterPotTest | tests core water | unit water_pot_test WaterPotTest.cc | @water
 TBLitetest | tests tblite | unit tblite_test TBLitePotTest.cc env=OMP_NUM_THREADS=1 | @tblite
 D3test | tests dftd3 | unit d3_test D3PotTest.cc | @dftd
 D4test | tests dftd4 | unit d4_test D4PotTest.cc | @dftd
+D4BlypTest | tests dftd4 | unit d4_blyp_test D4BlypTest.cc env=OMP_NUM_THREADS=1 | @dftd
 DftdGoldens | tests dftd3,dftd4 | custom suite=dftd workdir=. | @dftd
 XcKernelGoldens | tests xckernel | custom suite=xckernel workdir=. | @xckernel
 XTBtest | tests xtb | custom timeout=120 suite=xtb workdir=. | @xtb

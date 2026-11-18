@@ -1,0 +1,11 @@
+diff --git a/Potentials.capnp b/Potentials.capnp
+--- a/Potentials.capnp
++++ b/Potentials.capnp
+@@ -2599,6 +2599,7 @@
+   functional @0 :Text = "pbe";
+   charge @1 :Float64 = 0.0;
+   atm @2 :Bool = true;
++  periodic @3 :Bool = false; # Box as a 3D lattice; dftd4 adds the virial.
+ }
+ 
+ struct MOPACParams {

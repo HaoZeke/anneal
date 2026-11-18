@@ -276,3 +276,50 @@ TEST_CASE("the d2cpmd arm configures CPMD's D2 and a composite term", "[rpc][d2c
                           std::get<0>(cpmd(kPositions, kZ, kBox));
   REQUIRE(e == Catch::Approx(expected).margin(1e-14));
 }
+
+#ifdef RGPOT_HAS_DFTD4
+TEST_CASE("the d4 arm configures a D4 backend and a composite term", "[rpc][d4]") {
+  capnp::MallocMessageBuilder builder;
+  auto cfg = builder.initRoot<::PotentialConfig>();
+  auto params = cfg.initD4();
+  REQUIRE_FALSE(params.getPeriodic());
+  params.setFunctional("blyp");
+  params.setPeriodic(true);
+  auto applied = rgpot::rpc::configureD4(cfg.asReader());
+  INFO(applied.message);
+  REQUIRE(applied.ok);
+  REQUIRE(applied.replacement->config().functional == "blyp");
+  REQUIRE(applied.replacement->caps().stress);
+  params.setFunctional("nonesuch");
+  auto unknown = rgpot::rpc::configureD4(cfg.asReader());
+  REQUIRE_FALSE(unknown.ok);
+  REQUIRE_THAT(unknown.message, ContainsSubstring("d4 arm rejected"));
+  cfg.initD2();
+  REQUIRE_FALSE(rgpot::rpc::configureD4(cfg.asReader()).ok);
+
+  capnp::MallocMessageBuilder sum_builder;
+  auto sum_cfg = sum_builder.initRoot<::PotentialConfig>();
+  auto terms = sum_cfg.initComposite().initTerms(2);
+  terms[0].setName("d2");
+  terms[0].setWeight(-1.0);
+  terms[0].initPot().initBuiltin().setName("d2");
+  terms[1].setName("d4");
+  auto d4 = terms[1].initPot().initBuiltin();
+  d4.setName("d4");
+  auto d4p = d4.initConfig().initD4();
+  d4p.setFunctional("blyp");
+  d4p.setPeriodic(true);
+  auto result = rgpot::rpc::configureComposite(sum_cfg.asReader());
+  INFO(result.message);
+  REQUIRE(result.ok);
+  REQUIRE(result.replacement->caps().stress);
+  auto [e, f, v] = (*result.replacement)(kPositions, kZ, kBox);
+  (void)f;
+  (void)v;
+  rgpot::D2Pot lattice;
+  rgpot::D4Pot direct(rgpot::D4Config{.functional = "blyp", .periodic = true});
+  const double expected = std::get<0>(direct(kPositions, kZ, kBox)) -
+                          std::get<0>(lattice(kPositions, kZ, kBox));
+  REQUIRE(e == Catch::Approx(expected).margin(1e-14));
+}
+#endif

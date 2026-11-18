@@ -42,6 +42,7 @@ class MpiPefSession;
 
 #ifdef RGPOT_HAS_DFTD4
 #include "rgpot/D4Pot/D4Pot.hpp"
+#include "rgpot/rpc/D4Configure.hpp"
 #endif // RGPOT_HAS_DFTD4
 
 #ifdef RGPOT_HAS_METATOMIC
@@ -80,11 +81,17 @@ class MpiPefSession;
 #include "rgpot/types/adapters/capnp/capnp_adapter.hpp"
 #include "rgpot/units.hpp"
 
-#ifdef RGPOT_HAS_CP2K
-constexpr const char *kOwnArmBackends = "NWChem, CPMD, CP2K, Morse, Composite, D2 and D2Cpmd";
+#ifdef RGPOT_HAS_DFTD4
+#define RGPOT_OWN_ARM_TAIL "D2, D2Cpmd and D4"
 #else
-constexpr const char *kOwnArmBackends = "NWChem, CPMD, Morse, Composite, D2 and D2Cpmd";
+#define RGPOT_OWN_ARM_TAIL "D2 and D2Cpmd"
 #endif
+#ifdef RGPOT_HAS_CP2K
+constexpr const char *kOwnArmBackends = "NWChem, CPMD, CP2K, Morse, Composite, " RGPOT_OWN_ARM_TAIL;
+#else
+constexpr const char *kOwnArmBackends = "NWChem, CPMD, Morse, Composite, " RGPOT_OWN_ARM_TAIL;
+#endif
+#undef RGPOT_OWN_ARM_TAIL
 #ifdef RGPOT_POTSERV_MPI
 #ifdef RGPOT_HAS_CP2K
 constexpr const char *kCollectiveBackends = "NWChem, CPMD or CP2K";
@@ -116,6 +123,10 @@ private:
   rgpot::D2Pot *m_d2 = nullptr;
   /// Set when the backend is D2Cpmd; configure() replaces the pot.
   rgpot::D2CpmdPot *m_d2cpmd = nullptr;
+#ifdef RGPOT_HAS_DFTD4
+  /// Set when the backend is D4; configure() replaces the pot.
+  rgpot::D4Pot *m_d4 = nullptr;
+#endif
 #ifdef RGPOT_HAS_IPI
   /// Set when the backend is the i-PI socket server. calculate copies the
   /// Cauchy stress stashed by the last force call.
@@ -138,6 +149,10 @@ public:
         m_sum(dynamic_cast<rgpot::SumPot *>(m_potential.get())),
         m_d2(dynamic_cast<rgpot::D2Pot *>(m_potential.get())),
         m_d2cpmd(dynamic_cast<rgpot::D2CpmdPot *>(m_potential.get()))
+#ifdef RGPOT_HAS_DFTD4
+        ,
+        m_d4(dynamic_cast<rgpot::D4Pot *>(m_potential.get()))
+#endif
 #ifdef RGPOT_HAS_IPI
         ,
         m_ipi(dynamic_cast<rgpot::IPIPot *>(m_potential.get()))
@@ -370,6 +385,18 @@ public:
       results.setMessage(applied.message);
       return kj::READY_NOW;
     }
+#ifdef RGPOT_HAS_DFTD4
+    if (m_d4) {
+      auto applied = rgpot::rpc::configureD4(cfg);
+      if (applied.replacement) {
+        m_d4 = applied.replacement.get();
+        m_potential = std::move(applied.replacement);
+      }
+      results.setOk(applied.ok);
+      results.setMessage(applied.message);
+      return kj::READY_NOW;
+    }
+#endif
     if (m_sum) {
       auto applied = rgpot::rpc::configureComposite(cfg);
       if (applied.replacement) {
@@ -607,7 +634,9 @@ int runServer(int argc, char *argv[]
 #endif // RGPOT_HAS_DFTD3
 #ifdef RGPOT_HAS_DFTD4
   } else if (pot_type == "D4") {
-    std::cout << "Loading D4 potential (PBE ATM charge 0)..." << std::endl;
+    std::cout << "Loading D4 potential (PBE ATM charge 0, molecular; configure() takes "
+                 "the d4 arm)..."
+              << std::endl;
     potential_to_use = std::make_unique<rgpot::D4Pot>();
 #endif // RGPOT_HAS_DFTD4
 #ifdef RGPOT_HAS_METATOMIC
