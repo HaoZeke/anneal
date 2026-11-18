@@ -110,6 +110,8 @@ pub mod decree_bus;
 pub mod delayed;
 /// Versioned multiscale invariant coordinates for basin catalogs.
 pub mod descriptor_space;
+/// A structure pushed onto the point group measured on itself.
+pub mod detected_symmetry;
 /// Same-PES basin/ridge assignment by minimum-value information.
 pub mod discovery_roster;
 /// Annealing the distance at which two solutions count as one.
