@@ -46,7 +46,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
-from target_tol import energy_hits  # noqa: E402
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 CONVERGED = 1.0e-3
 PRESETS = ("communicating", "recommended")
@@ -287,7 +287,8 @@ def main() -> int:
     layout_of(root, problem)
     kind = kind_of(problem)
     cap = int(problem["convergence"]["max_force_calls"])
-    window = float(problem["convergence"].get("energy_above_minimum") or 0.001)
+    raw = problem["convergence"].get("energy_above_minimum")
+    window = float(raw if raw is not None else DEFAULT_HIT_TOL)
     target = float(problem["convergence"]["energy_minimum"])
     work = (args.work or args.output.parent / "geometries").resolve()
     if kind == "tip4p":

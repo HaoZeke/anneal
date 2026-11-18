@@ -9,7 +9,7 @@ reads every workers/replica-*.out, takes the deepest personal best energy
 and the smallest hop count at which a replica reached the target, and counts the ensemble solved
 when any replica reached the target within the tolerance. It also counts
 coordinator watchdog lines (slow requests) and whether TERMINAL_OK exists.
-Defaults: LJ75 Marks -397.492331, tolerance 1e-4.
+Defaults: LJ75 Marks -397.492331, tolerance 1e-3.
 """
 import glob
 import os

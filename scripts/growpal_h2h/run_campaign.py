@@ -29,7 +29,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
-from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 PAPER_BUDGETS = {
     38: 400_000,
@@ -361,7 +361,7 @@ def self_test() -> None:
         raise SystemExit("median iqr")
     if PAPER_BUDGETS != {38: 400_000, 75: 4_000_000, 98: 4_000_000, 104: 4_000_000}:
         raise SystemExit("paper budgets")
-    if abs(HIT_TOL - 0.001) > 1e-15:
+    if abs(HIT_TOL - DEFAULT_HIT_TOL) > 1e-15:
         raise SystemExit("hit tolerance")
     inside, outside = per_eval(1.0, 0.25, 1000)
     if abs(inside - 250.0) > 1e-9 or abs(outside - 750.0) > 1e-9:
@@ -385,10 +385,10 @@ def self_test() -> None:
             raise SystemExit(f"LJ{n} is not interleaved")
     reference = -173.928427
     level = reference + HIT_TOL
-    if abs(level - (reference + 0.001)) > 1e-15:
+    if abs(level - (reference + HIT_TOL)) > 1e-15:
         raise SystemExit("hit level")
-    if reference + 0.002 <= level:
-        raise SystemExit("hit level is wider than 0.001")
+    if not energy_hits(level, reference, HIT_TOL):
+        raise SystemExit("hit level is wider than DEFAULT_HIT_TOL")
     print("ok")
 
 

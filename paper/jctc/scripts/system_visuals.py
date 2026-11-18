@@ -59,6 +59,11 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paper_data import fetch_paper_data
 
+_SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "system_visuals"
 XYZRENDER = "0.3.8"
@@ -387,7 +392,7 @@ def _reference(data, digests, row: dict[str, str]) -> Structure:
         energy = tip4p_energy(symbols, coords)
         if len(symbols) != 3 * size or abs(stated - published) > 5e-6:
             die(f"{name} is not the (H2O){size} at the {row['energy']} kJ/mol of {REFERENCES}")
-        if abs(energy - published) >= 5e-3 or energy > published + 1e-3:
+        if abs(energy - published) >= 5e-3 or not energy_hits(energy, published, DEFAULT_HIT_TOL):
             die(f"{name} is at {energy:.5f} kJ/mol, not the {row['energy']} of {REFERENCES}")
         key, label, unit = f"tip4p-{size}", f"(H2O){size}".translate(SUBSCRIPT), "kJ/mol"
     else:

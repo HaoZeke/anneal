@@ -4,7 +4,7 @@
 
 Lennard-Jones sizes 38, 75, 76 and 77. Six seeds on each arm. One local
 relaxation budget for every run. Hits are counted against the Cambridge
-Cluster Database energies in the fixture, with the same 1e-4 window the
+Cluster Database energies in the fixture, with the same 1e-3 window the
 cluster-search driver already uses. Nothing in this file is a paper count.
 """
 

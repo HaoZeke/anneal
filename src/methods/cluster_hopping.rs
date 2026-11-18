@@ -12128,7 +12128,7 @@ mod tests {
 
         const SHELF: f64 = -1.0;
         const TARGET: f64 = -10.0;
-        const HIT: f64 = 0.001;
+        let hit_tol = crate::DEFAULT_HIT_TOL;
         let same = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
             left.len() == right.len()
                 && left
@@ -12191,7 +12191,7 @@ mod tests {
         let force_to_hit = out
             .improvements
             .iter()
-            .find(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, HIT))
+            .find(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, hit_tol))
             .map(|(_, charged, _, _)| *charged);
         assert_eq!(force_to_hit, Some(spent));
         assert!(
@@ -12202,7 +12202,7 @@ mod tests {
         assert!(
             out.improvements
                 .iter()
-                .filter(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, HIT))
+                .filter(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, hit_tol))
                 .count()
                 == 1
         );
@@ -12212,7 +12212,7 @@ mod tests {
             .find(|(_, _, _, energy)| (*energy - SHELF).abs() <= 1e-12)
             .map(|(_, _, _, energy)| *energy)
             .expect("shelf row");
-        assert!(shelf_energy > TARGET + HIT);
+        assert!(!crate::energy_hits(shelf_energy, TARGET, hit_tol));
     }
 }
 

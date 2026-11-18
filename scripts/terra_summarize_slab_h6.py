@@ -85,12 +85,17 @@ def parse_relax(directory: pathlib.Path) -> dict:
     summary = summary_re.search(text)
     basins = [(float(m.group("energy")), int(m.group("count"))) for m in basin_re.finditer(text)]
     lowest = min(energies) if energies else float("nan")
-    hits = sum(1 for energy in energies if energy_hits(energy, lowest, HIT_TOL))
-    distinct = len(basins) if basins else len({round(e / ENERGY_TOL) for e in energies})
     if summary:
         distinct = int(summary.group("distinct"))
-        lowest = float(summary.group("lowest"))
-        hits = int(summary.group("hits"))
+        summary_lowest = float(summary.group("lowest"))
+        if finite(summary_lowest):
+            lowest = summary_lowest
+    hits = sum(
+        1
+        for energy in energies
+        if finite(energy) and energy_hits(energy, lowest, HIT_TOL)
+    )
+    distinct = len(basins) if basins else len({round(e / ENERGY_TOL) for e in energies})
     return {
         "energies": energies,
         "charges": charges,

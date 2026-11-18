@@ -23,11 +23,19 @@ numpy only; run `python experiments/tensor_surrogate.py` for the self-test.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
 from experiments.surrogate import fit_reduced_surrogate
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_SCRIPTS = _REPO_ROOT / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from target_tol import energy_hits  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -530,17 +538,17 @@ def _self_test() -> int:
         mf_best, tt_best, rwm_best = [], [], []
         # "solved" tolerates both scales: within 1% of the optimum, or an
         # absolute 1.0 when the optimum is zero (rastrigin).
-        thresh = fstar + max(0.01 * abs(fstar), 1.0)
+        hit_tol = max(0.01 * abs(fstar), 1.0)
         for seed in range(20):
             bf0, _ = additive_independence_sa(toy, seed, budget, degree=8)
             mf_best.append(bf0)
-            mf_hits += int(bf0 <= thresh)
+            mf_hits += int(energy_hits(bf0, fstar, hit_tol))
             bf1, _ = tt_independence_sa(toy, seed, budget, k=3, degree=6, grid_m=17)
             tt_best.append(bf1)
-            tt_hits += int(bf1 <= thresh)
+            tt_hits += int(energy_hits(bf1, fstar, hit_tol))
             bf2, _ = _rwm_sa(toy, seed, budget)
             rwm_best.append(bf2)
-            rwm_hits += int(bf2 <= thresh)
+            rwm_hits += int(energy_hits(bf2, fstar, hit_tol))
         print(
             f"    {name:14s} {budget:6d} {mf_hits:4d}/20 {tt_hits:4d}/20 "
             f"{rwm_hits:3d}/20   "

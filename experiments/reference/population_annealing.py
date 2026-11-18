@@ -6,7 +6,7 @@ temperature step used by Machta, Phys. Rev. E 82, 026704 (2010): the next
 inverse temperature is the one that puts the effective sample size at half
 the population. One independent population is one seed. Every energy or
 gradient call is charged, including the final quenches. An unquenched
-energy is not a hit. A hit is a quenched energy within 1e-4 of the
+energy is not a hit. A hit is a quenched energy within 1e-3 of the
 Cambridge reference.
 
 The population is 100. Each generation gives every walker one Metropolis

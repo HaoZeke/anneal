@@ -14,7 +14,6 @@
 # Each row carries the anneal revision it was measured on. A re-run
 # replaces rows of that revision and leaves the others in seeds.csv.
 set -euo pipefail
-DEFAULT_HIT_TOL=1e-3
 if [[ $(hostname) != bench ]]; then
   echo "uts hostname is $(hostname), expected bench" >&2
   exit 2
@@ -24,6 +23,7 @@ unset H2H_GENERAL H2H_BASIN_STRIDE H2H_BUDGET H2H_BEST H2H_REFERENCE \
 export OMP_NUM_THREADS=1
 export RAYON_NUM_THREADS=1
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+DEFAULT_HIT_TOL=$(PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)')
 BIN=${BIN:-$ROOT/target/release/examples/h2h_metal}
 GMIN=${GMIN:-/work/metal-darby/bin/GMIN}
 WORK=${WORK:-$ROOT/bench/gold-gupta/work}

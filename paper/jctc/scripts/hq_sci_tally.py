@@ -7,7 +7,7 @@ An inf best is recorded as best=None and is not a hit.
 A copper hit is a finite best below the reference plus its tolerance.
 The reference is -415.971529 eV.
 scripts/elja_jcc_molslab_ensemble.sh line 81 sets that target.
-scripts/elja_hq_sci_molslab_bank.sh line 120 sets it too.
+scripts/elja_hq_sci_molslab_bank.sh line 121 sets it too.
 Commit a8f1092fc8d6937b34e34a18bc50394a559ca9f3 names it the start energy.
 The tolerance is 0.001 eV, from TARGET_TOLERANCE and TARGET_TOL in those scripts.
 The set_relative_0.01 line is the separate 0.01 eV figure.

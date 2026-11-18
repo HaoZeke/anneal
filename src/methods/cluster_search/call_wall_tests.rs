@@ -92,7 +92,7 @@ fn labelled_metal_dimers_reach_their_gupta_minimum() {
         let mut ledger = Ledger::new(4_000);
         let (out, _) = search(&gupta, &cfg, &mut ledger, 5).expect("finite start");
         assert!(
-            out.best <= reference + 1e-6,
+            crate::energy_hits(out.best, reference, 1e-6),
             "{species:?}: best {} against the dimer minimum {reference} at {bond}",
             out.best
         );

@@ -34,7 +34,8 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \begin{document}
 
 \section{Board constants}
-We read a hit as an energy strictly below the reference plus \(0.001\),
+We read a hit as an energy at or below the reference plus \(0.001\)
+(inclusive \(E \le E_{\mathrm{ref}} + 10^{-3}\)),
 taken from a converged improvement.
 The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\),
 \(-279.248470\) for LJ\(_{55}\), and \(-397.492331\) for LJ\(_{75}\).
@@ -320,8 +321,8 @@ C\(_{10}\) & ASE BH & \(1\times 10^{5}\) & 0/6 & 0 & -- & 6.483 \\
 \section{Copper slab}
 The hit tolerance is 0.001~eV.
 The script is \path{scripts/elja_hq_sci_molslab_bank.sh}.
-Its line 120 sets \texttt{TARGET\_ENERGY} to \(-415.971529\) and its line 121
-sets \texttt{TARGET\_TOL} to \(10^{-3}\).
+Its line 121 sets \texttt{TARGET\_ENERGY} to \(-415.971529\) and its line 122
+sets \texttt{TARGET\_TOL} from \texttt{DEFAULT\_HIT\_TOL} (\(10^{-3}\)~eV).
 The reference is that energy, in eV.
 The per-seed gaps run from \(8\times 10^{-6}\)~eV to
 \(3.68\times 10^{-4}\)~eV above that reference.

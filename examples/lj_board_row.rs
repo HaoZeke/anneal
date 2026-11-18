@@ -9,7 +9,7 @@
 //! `SIZE` is 38, 55, 75, 98, or 104. `SEED` is 6400 through 6405.
 //! The budget and the reference minimum are the paper values shared
 //! with the ASE and AGOX arms. The search is [`Config::recommended`].
-//! A hit is an energy below the reference plus `1e-4`, a maximum
+//! A hit is an energy at or below the reference plus `DEFAULT_HIT_TOL` (`1e-3`), a maximum
 //! absolute gradient component at or below `0.0514221`, and a call
 //! count inside the budget. The process requires `RAYON_NUM_THREADS=1`.
 

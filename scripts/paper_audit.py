@@ -690,7 +690,10 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
                f"\\({references['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), "
                f"\\({references['m55r6']:.6f}\\) and \\({references['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6,14\\)), "
                f"and \\({references['m80r6']:.6f}\\) and \\({references['m80r14']:.6f}\\) at M\\(_{{80}}\\) (\\(\\rho=6,14\\)).")
-    audit.said(TEX, "The hit is a quenched energy that differs by less than 0.001 from the Cambridge Cluster Database minimum:")
+    audit.said(
+        TEX,
+        "The hit is a quenched energy at or below the Cambridge Cluster Database minimum plus 0.001:",
+    )
     audit.said(TEX, "GMIN hits more on " + ", and on ".join(f"{name(s)}, {of(s, 'gmin')} against {of(s, 'anneal')}"
                                                        for s in behind) + ".")
     audit.said(TEX, f"The two tie on {' and '.join(name(s) for s in tied)}.")
@@ -1246,13 +1249,19 @@ def supporting_numbers(audit: Audit) -> None:
         return f"\\({ref[system]:.6f}\\)"
 
     # Board constants.
+    arm3 = audit.text("examples/h2h_arm3.rs")
+    assert "DEFAULT_HIT_TOL" in arm3
     audit.cell(
         SI,
         "hit tolerance of the h2h examples",
         "0.001",
         float(DEFAULT_HIT_TOL),
     )
-    audit.said(SI, "We read a hit as an energy strictly below the reference plus \\(0.001\\),")
+    audit.said(
+        SI,
+        "We read a hit as an energy at or below the reference plus \\(0.001\\) "
+        "(inclusive \\(E \\le E_{\\mathrm{ref}} + 10^{-3}\\)),",
+    )
     audit.said(SI, f"The references, in reduced units, are {r6('lj38')} for LJ\\(_{{38}}\\), {r6('lj55')} for "
                    f"LJ\\(_{{55}}\\), and {r6('lj75')} for LJ\\(_{{75}}\\). LJ\\(_{{98}}\\) uses {r6('lj98')}, "
                    f"and LJ\\(_{{104}}\\) uses {r6('lj104')}.")
@@ -1427,8 +1436,8 @@ def supporting_numbers(audit: Audit) -> None:
     audit.cell(SI, "TARGET_TOL line", str(tol_line), float(tol_line))
     audit.said(
         SI,
-        f"Its line {energy_line} sets \\texttt{{TARGET\\_ENERGY}} to \\(-415.971529\\) and its line {tol_line} sets "
-        "\\texttt{TARGET\\_TOL} to \\(10^{-3}\\).",
+        f"Its line {energy_line} sets \\texttt{{TARGET\\_ENERGY}} to \\(-415.971529\\) and its line {tol_line} "
+        "sets \\texttt{TARGET\\_TOL} from \\texttt{DEFAULT\\_HIT\\_TOL} (\\(10^{-3}\\)~eV).",
     )
     tally = "paper/jctc/scripts/hq_sci_tally.py"
     audit.said(tally, f"scripts/elja_hq_sci_molslab_bank.sh line {energy_line} sets it too.")

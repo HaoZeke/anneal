@@ -5,10 +5,10 @@
 # Usage: scripts/h2h_gmin_board.sh <system>
 # Systems: lj38 lj55 lj75 lj98 lj104
 set -euo pipefail
-DEFAULT_HIT_TOL=1e-3
 
 system=${1:?system}
 root=$(cd "$(dirname "$0")/.." && pwd)
+DEFAULT_HIT_TOL=$(PYTHONPATH="$root/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)')
 cd "$root"
 out=${H2H_OUT:-h2h-board}
 binary=${H2H_ANNEAL:-target/release/examples/h2h_gmin_proof}

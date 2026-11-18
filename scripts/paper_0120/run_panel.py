@@ -10,7 +10,7 @@ the same revision with ``bench/paper-0120/lj103-table.patch``, which adds
 the Cambridge energy and the 4e6 budget and nothing else; its rows carry
 driver ``h2h_gmin_proof+lj103``. The newest develop LJ75 rows were taken
 through ``h2h_seed`` (``scripts/generic_alloy/run_ablation.py``), so LJ75
-also runs that way, with that script's 1e-4 hit tolerance.
+also runs that way, with that script's 1e-3 hit tolerance.
 
 One process, ``taskset -c 0``, one thread. Rows are appended with the code
 revision and the host after every run and are never rewritten; a row

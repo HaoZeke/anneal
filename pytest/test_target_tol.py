@@ -300,118 +300,47 @@ def test_ase_summarizers_reject_nan_hit_rows(tmp_path: Path, monkeypatch):
         ase_nonlj.load_rows()
 
 
-ALLOWED_HIT_LINT = {
-    "src/target_tol.rs",
-    "src/python.rs",
-    "scripts/target_tol.py",
-    "pytest/test_target_tol.py",
-    "scripts/growpal_h2h/run_campaign.py",
-    "scripts/growpal_h2h_v2/run_campaign.py",
-    "scripts/gad_published/run_campaign.py",
-    "scripts/pimc_lj38/run_campaign.py",
-    "scripts/ase_nonlj/summarize.py",
-}
-
-SKIP_HIT_LINT = {"vendor", "target", ".git", "crates/anneal-python/target"}
-
-
-def _raw_target_leq(code: str) -> bool:
-    lower = code.lower()
-    start = 0
-    while True:
-        pos = lower.find("<= target", start)
-        if pos < 0:
-            return False
-        after = pos + len("<= target")
-        if after >= len(lower) or lower[after] in " +);,":
-            return True
-        start = after
-
-
-def _python_code_line(line: str) -> str:
-    out = []
-    in_string = False
-    quote = ""
-    escape = False
-    for ch in line:
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == quote:
-                in_string = False
-            continue
-        if ch in "\"'":
-            in_string = True
-            quote = ch
-            continue
-        if ch == "#":
-            break
-        out.append(ch)
-    return "".join(out)
-
-
-def _py_hit_violation(line: str) -> bool:
-    if "energy_hits" in line:
-        return False
-    code = _python_code_line(line)
-    lower = code.lower()
-    if (
-        _raw_target_leq(code)
-        or "<= self.target" in lower
-        or "<= reference" in lower
-        or "best <= target" in lower
-    ):
-        return True
-    for token in ('"h2h_tol": "0.001"', "h2h_tol=\"0.001\"", "h2h_tol='0.001'"):
-        if token in lower:
-            return True
-    return False
+from target_tol_lint_rules import (  # noqa: E402
+    RUNTIME_LITERAL_ALLOWLIST,
+    fixture_must_violate,
+    scan_repository,
+)
 
 
 def test_no_raw_hit_comparisons_outside_energy_hits():
-    violations: list[str] = []
-    for tree in (ROOT / "scripts",):
-        for path in tree.rglob("*"):
-            if not path.is_file():
-                continue
-            if any(part in SKIP_HIT_LINT for part in path.parts):
-                continue
-            rel = path.relative_to(ROOT).as_posix()
-            if rel in ALLOWED_HIT_LINT:
-                continue
-            if path.suffix == ".py":
-                text = path.read_text()
-                for index, line in enumerate(text.splitlines(), 1):
-                    if _py_hit_violation(line):
-                        violations.append(f"{rel}:{index}: {line.strip()}")
-            elif path.suffix == ".sh":
-                for index, line in enumerate(path.read_text().splitlines(), 1):
-                    chunk = line.split("#", 1)[0]
-                    if "H2H_TOL=0.001" in chunk:
-                        violations.append(f"{rel}:{index}: {line.strip()}")
-    for tree in (ROOT / "src", ROOT / "examples"):
-        for path in tree.rglob("*.rs"):
-            if any(part in SKIP_HIT_LINT for part in path.parts):
-                continue
-            rel = path.relative_to(ROOT).as_posix()
-            if rel in ALLOWED_HIT_LINT:
-                continue
-            for index, line in enumerate(path.read_text().splitlines(), 1):
-                stripped = line.split("//", 1)[0].strip()
-                if not stripped or stripped.lstrip().startswith(("///", "//!", "*")):
-                    continue
-                if "energy_hits" in stripped:
-                    continue
-                lower = stripped.lower()
-                if (
-                    "energy_hits" not in stripped
-                    and "stop_below" not in stripped
-                    and (
-                        _raw_target_leq(stripped)
-                        or "<= self.target" in lower
-                    )
-                ):
-                    violations.append(f"{rel}:{index}: {stripped}")
+    violations = scan_repository(ROOT)
     assert not violations, "raw hit comparisons must use energy_hits:\n" + "\n".join(violations)
+
+
+def test_prefix_fixtures_must_fail_lint_rules():
+    fixtures = ROOT / "tests/target_tol_prefix_fixtures.txt"
+    failures = [
+        line
+        for line in fixtures.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+        if not fixture_must_violate(line)
+    ]
+    assert not failures, "expected fixtures to violate lint:\n" + "\n".join(failures)
+
+
+def test_shell_hit_tol_tokens_detected_on_raw_line():
+    from target_tol_lint_rules import classify_line
+
+    raw = 'echo H2H_TOL="0.001" # not a real assignment'
+    assert classify_line("scripts/example.sh", raw, "sh") is not None
+
+
+def test_runtime_allowlisted_literals_still_present():
+    stub = (ROOT / "scripts/occat_h2h/stub.S").read_text()
+    cap = (ROOT / "bench/lj104-lattice/v2/h2h_cap.f90").read_text()
+    assert "tol:         .double 0.001" in stub
+    assert "H2H_TOL" in cap
+    for rel in RUNTIME_LITERAL_ALLOWLIST:
+        assert (ROOT / rel).is_file()
+
+
+def test_lint_detects_injected_experiments_probe():
+    from target_tol_lint_rules import classify_line
+
+    line = "    return x <= thresh\n"
+    assert classify_line("experiments/_target_tol_lint_probe.py", line, "py") is not None

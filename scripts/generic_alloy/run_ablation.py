@@ -9,7 +9,7 @@ descent and the ranked polish, and the full branch. With the priors on the
 arms are develop and the full branch, and LJ75 runs through ``h2h_seed``.
 
 A Gupta hit is a finished relaxation within 0.001 eV of the reference. An
-LJ75 hit is a call below the Cambridge energy plus 1e-4. A miss is stored
+LJ75 hit is a call at or below the Cambridge energy plus 1e-3. A miss is stored
 as the full budget. Within a system the (seed, arm) pairs are shuffled,
 so a slow stretch of the host falls on every arm. One core.
 

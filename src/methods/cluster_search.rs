@@ -967,9 +967,9 @@ where
             }
             None => x,
         };
-        let stop_at = led.target();
         // A descent from where the previous one ended, the full pass after
         // a screen among them, opens by asking for an answer already paid.
+        let stop_energy = led.target();
         let mut opening = prior.clone();
         let mut call_seconds = 0.0_f64;
         let mut timed_calls = 0usize;
@@ -1002,7 +1002,7 @@ where
             Some((energy, gradient))
         };
         let mut watch = |_: usize, fv: f64| {
-            if stop_at.is_some_and(|limit| fv <= limit) {
+            if stop_energy.is_some_and(|target| crate::energy_hits(fv, target, 0.0)) {
                 return false;
             }
             if screening && probe {
@@ -2705,6 +2705,14 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    #[test]
+    fn quench_watch_rejects_negative_infinity() {
+        let mut led = Ledger::new(8);
+        led.stop_below(-1.0);
+        assert!(!led.below_target(f64::NEG_INFINITY));
+        assert!(led.below_target(-1.0));
+    }
 
     #[test]
     fn a_zero_step_read_is_one_physical_energy_and_not_a_screen() {

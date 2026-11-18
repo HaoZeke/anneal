@@ -12,11 +12,12 @@
 #
 # Does not cancel running HQ jobs.
 set -euo pipefail
-DEFAULT_HIT_TOL=1e-3
 echo "refusing HyperQueue submit: the work directory would be the home filer." >&2
 echo "scripts/elja_hq_pilot.sh is one Slurm allocation; each task uses /scratch/users." >&2
 exit 2
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
+ANNEAL_SCRIPTS=${JCC_SOURCE_ROOT:-$ROOT}/scripts
+DEFAULT_HIT_TOL=$(PYTHONPATH="$ANNEAL_SCRIPTS${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)')
 RGPOT=${RGPOT_ROOT:-$HOME/rgpot}
 MOL=${MOL_BIN:-$ROOT/target/release/examples/molecular_cluster}
 SLAB=${SLAB_BIN:-$ROOT/target/release/examples/slab_adsorption}

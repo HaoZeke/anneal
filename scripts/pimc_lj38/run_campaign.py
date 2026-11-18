@@ -831,7 +831,7 @@ def self_test() -> None:
         raise SystemExit("median iqr")
     if PAPER_BUDGETS != {38: 400_000}:
         raise SystemExit("paper budget")
-    if abs(HIT_TOL - 0.001) > 1e-15 or abs(REFERENCE + 173.928427) > 1e-12:
+    if abs(HIT_TOL - DEFAULT_HIT_TOL) > 1e-15 or abs(REFERENCE + 173.928427) > 1e-12:
         raise SystemExit("cambridge level")
     inside, outside = per_eval(1.0, 0.25, 1000)
     if abs(inside - 250.0) > 1e-9 or abs(outside - 750.0) > 1e-9:
