@@ -168,7 +168,7 @@ fn main() {
             let points: Vec<(f64, [f64; 2])> = chunk
                 .par_iter()
                 .zip(rows.par_iter())
-                .map(|((energy, _), row)| (*energy, fold.map.project(row)))
+                .map(|((energy, _), row)| (*energy, fold.map.project_histogram(row)))
                 .collect();
             for (energy, xy) in points {
                 writeln!(

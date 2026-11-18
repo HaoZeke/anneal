@@ -239,6 +239,36 @@ fn out_of_sample_placement_is_consistent_with_the_fit() {
     );
 }
 
+#[test]
+fn sparse_histogram_projection_matches_dense_l1_projection() {
+    let rows: Vec<Vec<f64>> = (0..80)
+        .map(|i| {
+            let mut row = vec![0.0; 4096];
+            row[i % 37] = 0.5;
+            row[(17 * i + 3) % 4096] += 0.3;
+            row[(29 * i + 11) % 4096] += 0.2;
+            row
+        })
+        .collect();
+    let fold = landfold(
+        &rows,
+        &LandfoldConfig {
+            landmarks: 40,
+            grid: 0,
+            iterations: 20,
+            mix: vec![0.0],
+            ..LandfoldConfig::default()
+        },
+    )
+    .unwrap();
+    for row in &rows {
+        let dense = fold.map.project(row);
+        let sparse = fold.map.project_histogram(row);
+        let drift = ((dense[0] - sparse[0]).powi(2) + (dense[1] - sparse[1]).powi(2)).sqrt();
+        assert!(drift < 1e-10, "sparse projection drifted by {drift}");
+    }
+}
+
 fn quench(pot: &PairPotential, x: Array1<f64>) -> (f64, Vec<f64>) {
     let mut opt = WarmLbfgs::default();
     let (e, x, _) = opt.minimize(x.view(), 4000, |v| Some(pot.value_and_gradient(v)));

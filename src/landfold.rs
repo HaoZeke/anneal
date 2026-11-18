@@ -513,6 +513,7 @@ fn orthonormalize(q: &mut Array2<f64>) {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LandfoldMap {
     landmark_rows: Vec<Vec<f64>>,
+    landmark_l1: Vec<f64>,
     landmark_xy: Vec<[f64; 2]>,
     weights: Vec<f64>,
     high: Switch,
@@ -547,6 +548,40 @@ impl LandfoldMap {
             .landmark_rows
             .iter()
             .map(|landmark| self.metric.distance(row, landmark))
+            .collect();
+        self.project_distances(&distances)
+    }
+
+    /// Place one non-negative histogram without scanning its zero bins.
+    ///
+    /// For histograms, \(\lVert a-b\rVert_1 = \sum a + \sum b -
+    /// 2\sum_i\min(a_i,b_i)\). The overlap only needs the non-zero bins of
+    /// `row`, which keeps out-of-sample projection bounded by the atom count
+    /// rather than by the size of a large shared environment codebook.
+    pub fn project_histogram(&self, row: &[f64]) -> [f64; 2] {
+        if self.metric != LandfoldMetric::L1 || row.iter().any(|&value| value < 0.0) {
+            return self.project(row);
+        }
+        let nonzero: Vec<(usize, f64)> = row
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, value)| *value != 0.0)
+            .collect();
+        let total = nonzero.iter().map(|(_, value)| value).sum::<f64>();
+        let distances: Vec<f64> = self
+            .landmark_rows
+            .iter()
+            .zip(&self.landmark_l1)
+            .map(|(landmark, &landmark_total)| {
+                let overlap = nonzero
+                    .iter()
+                    .filter_map(|&(index, value)| {
+                        landmark.get(index).map(|&other| value.min(other))
+                    })
+                    .sum::<f64>();
+                total + landmark_total - 2.0 * overlap
+            })
             .collect();
         self.project_distances(&distances)
     }
@@ -771,8 +806,13 @@ pub fn landfold(rows: &[Vec<f64>], config: &LandfoldConfig) -> Result<Landfold, 
     center(&mut ys);
     let stress = fit.value(&ys, 0.0);
 
+    let landmark_rows: Vec<Vec<f64>> = marks.indices.iter().map(|&i| rows[i].clone()).collect();
     let map = LandfoldMap {
-        landmark_rows: marks.indices.iter().map(|&i| rows[i].clone()).collect(),
+        landmark_l1: landmark_rows
+            .iter()
+            .map(|row| row.iter().map(|value| value.abs()).sum())
+            .collect(),
+        landmark_rows,
         landmark_xy: ys.clone(),
         weights,
         high,

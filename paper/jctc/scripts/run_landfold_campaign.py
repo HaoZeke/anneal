@@ -179,18 +179,19 @@ def fold(
                 str(binary), "landfold", "--seed", "0", "--threads",
                 str(max(1, threads or os.cpu_count() or 1)), "--out", str(folded),
             ]
-        if family == "tip4p":
-            descriptor = folder / "rigid-state.csv"
-            with descriptor.open("w", newline="") as handle:
-                writer = csv.writer(handle)
-                for book in books:
-                    with book.open() as rows:
-                        for line in rows:
-                            if line.strip():
-                                writer.writerow(line.split()[1:])
-            command.extend(["--descriptors", str(descriptor)])
-        else:
-            command.extend(str(book) for book in books)
+        if not streamed:
+            if family == "tip4p":
+                descriptor = folder / "rigid-state.csv"
+                with descriptor.open("w", newline="") as handle:
+                    writer = csv.writer(handle)
+                    for book in books:
+                        with book.open() as rows:
+                            for line in rows:
+                                if line.strip():
+                                    writer.writerow(line.split()[1:])
+                command.extend(["--descriptors", str(descriptor)])
+            else:
+                command.extend(str(book) for book in books)
         run(command)
     points = []
     with folded.open(newline="") as handle:
