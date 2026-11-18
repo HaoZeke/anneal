@@ -140,6 +140,11 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
+                if cfg.adaptive_search {
+                    kernels.push(ClusterMove::Twin {
+                        n_points: cfg.n_points,
+                    });
+                }
                 if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap {
                     kernels.push(soap_arm(cfg, None, None));
                 }
@@ -3654,6 +3659,26 @@ mod move_scaling_tests {
                 .kernels(&binary)
                 .iter()
                 .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. }))
+        );
+    }
+
+    #[test]
+    fn twin_is_an_adaptive_only_general_arm() {
+        let plain = Config::recommended(38);
+        assert!(
+            plain
+                .move_library
+                .kernels(&plain)
+                .iter()
+                .all(|kernel| !matches!(kernel, ClusterMove::Twin { .. }))
+        );
+        let adaptive = Config::recommended_adaptive(38);
+        assert!(
+            adaptive
+                .move_library
+                .kernels(&adaptive)
+                .iter()
+                .any(|kernel| matches!(kernel, ClusterMove::Twin { .. }))
         );
     }
 

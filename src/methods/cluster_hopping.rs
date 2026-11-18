@@ -7946,17 +7946,20 @@ where
                 cfg.n_points,
             )
             && cfg.packing_cna_applies();
-        // A completed, accepted return to the incumbent basin is direct
-        // evidence that the current proposal family is cycling. The next hop
-        // moves every free point, with its amplitude still controlled by the
-        // same acceptance-driven scale as the ordinary adaptive moves. Basin
-        // identity is the run's configured fingerprint tolerance; no packing
-        // or named structural motif enters this trigger.
-        let revisit_displacement = cfg.adaptive_search && std::mem::take(&mut revisit_kick[rep]);
-        if held_displacement || revisit_displacement {
+        // One accepted return to the same fingerprint schedules one general
+        // stacking-changing response. A forced response cannot schedule
+        // itself, which prevents a return/Twin feedback loop.
+        let forced_return_twin =
+            cfg.adaptive_search && !held_displacement && std::mem::take(&mut revisit_kick[rep]);
+        if held_displacement {
             let step =
                 preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale * step_scales[rep];
             trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
+        } else if forced_return_twin {
+            trial = ClusterMove::Twin {
+                n_points: cfg.n_points,
+            }
+            .propose(x.view(), cfg.temperature, rng);
         }
         let editing_cage = cage_edit;
         if editing_cage {
@@ -7971,8 +7974,10 @@ where
             cage_edit = false;
             hops_at_lowest = hops;
         }
-        let proposal_action = if held_displacement || revisit_displacement {
+        let proposal_action = if held_displacement {
             "all".to_owned()
+        } else if forced_return_twin {
+            "twin".to_owned()
         } else if cov_fire {
             "covariance".to_owned()
         } else if soft_fire && soft_cache.is_some() {
@@ -8244,9 +8249,6 @@ where
         let returning = cfg.return_screen && drift < cfg.merge_radius;
         if returning {
             returned += 1;
-            if cfg.adaptive_search {
-                revisit_kick[rep] = true;
-            }
         }
         // Screen under every mode, including minima hopping. Turning the screen
         // off under MH paid full quenches for every scatter: ~228 force per hop
@@ -9131,7 +9133,12 @@ where
                 }
             }
         }
-        if angular {
+        if forced_return_twin {
+            // The allocator selected `k`, but the measured return response
+            // replaced that proposal. Do not train the selected arm on
+            // another move's outcome.
+            pending_features = None;
+        } else if angular {
             if accept {
                 angular_accepted += 1;
             }
@@ -9670,6 +9677,7 @@ where
             }
         }
         if cfg.adaptive_search
+            && !forced_return_twin
             && let (Some(previous), Some(now)) = (here_before, landed)
             && previous == now
         {
