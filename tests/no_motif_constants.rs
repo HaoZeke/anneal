@@ -28,7 +28,6 @@ fn expected_matches(entry: &Allow) -> usize {
         ("src/twin.rs", "if n < 8") => 2,
         ("src/structure.rs", "Template::Icosahedral" | "Template::FaceCentredCubic") => 4,
         ("src/structure.rs", "FaceCentredCubic," | "Icosahedral,") => 2,
-        ("src/landfold.rs", "marks") => 9,
         ("src/methods/cluster_hopping.rs", "fcc") => 6,
         (
             "src/methods/cluster_hopping.rs",
@@ -194,22 +193,6 @@ const ALLOW: &[Allow] = &[
         needle: "groups[0].len() >= 4",
         reason: "existing lone-flexible-group SOAP switch; replacement is audited",
     },
-    // Counters and sample counts named `n`, not atom counts.
-    Allow {
-        path: "src/history.rs",
-        needle: "if n < 6",
-        reason: "trajectory sample-count guard, not a system-size branch",
-    },
-    Allow {
-        path: "src/methods/portfolio.rs",
-        needle: "if n < 6",
-        reason: "archive sample-count guard, not a system-size branch",
-    },
-    Allow {
-        path: "src/methods/cluster_search.rs",
-        needle: "n >= 12",
-        reason: "Good-Turing observation-count guard, not an atom count",
-    },
     // Diagnostic-only morphology labels.
     Allow {
         path: "src/structure.rs",
@@ -240,11 +223,6 @@ const ALLOW: &[Allow] = &[
         path: "src/morphology.rs",
         needle: "FCC",
         reason: "published descriptor reference used only by diagnostic morphology code",
-    },
-    Allow {
-        path: "src/landfold.rs",
-        needle: "marks",
-        reason: "local variable abbreviates landmarks and is unrelated to Marks motifs",
     },
     Allow {
         path: "src/methods/cluster_hopping.rs",
