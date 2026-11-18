@@ -6,7 +6,7 @@
 # session. Rows are appended as they finish, each with the code revision and
 # the host.
 #
-#   gate.py run --out rows.csv \
+#   gate.py run --out rows.csv --host anneal-ci \
 #       --base-bin DIR --base-tree DIR --new-bin DIR --new-tree DIR
 #   gate.py summarize rows.csv
 #
@@ -19,7 +19,6 @@ import csv
 import io
 import math
 import os
-import socket
 import subprocess
 import sys
 
@@ -77,14 +76,24 @@ def run_one(bin_dir, tree, system, seed):
 def append_row(path, row):
     new_file = not os.path.exists(path) or os.path.getsize(path) == 0
     with open(path, "a", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n")
         if new_file:
             writer.writeheader()
         writer.writerow(row)
 
 
+def tree_identity(tree):
+    def git(*rest):
+        done = subprocess.run(
+            ["git", "-C", tree, *rest], capture_output=True, text=True, check=True
+        )
+        return done.stdout.strip()
+
+    return git("rev-parse", "HEAD"), git("rev-parse", "HEAD^{tree}")
+
+
 def run(args):
-    host = args.host or socket.gethostname()
+    host = args.host
     builds = (("base", args.base_bin, args.base_tree), ("new", args.new_bin, args.new_tree))
     systems = args.systems.split(",") if args.systems else SYSTEMS
     for system in systems:
@@ -92,6 +101,11 @@ def run(args):
             for label, bin_dir, tree in builds:
                 got = run_one(bin_dir, tree, system, seed)
                 head = got.get("head") or got.get("code_revision") or ""
+                tree_id = got.get("tree", "")
+                if not head or not tree_id:
+                    git_head, git_tree = tree_identity(tree)
+                    head = head or git_head
+                    tree_id = tree_id or git_tree
                 row = {
                     "system": system,
                     "build": label,
@@ -104,7 +118,7 @@ def run(args):
                     "best": got["best"],
                     "pot_s": got.get("pot_s", ""),
                     "code_revision": head,
-                    "tree": got.get("tree", ""),
+                    "tree": tree_id,
                     "host": host,
                 }
                 append_row(args.out, row)
@@ -244,7 +258,7 @@ def main():
     runner.add_argument("--new-tree", required=True)
     runner.add_argument("--seeds", default="2000-2011")
     runner.add_argument("--systems", default="")
-    runner.add_argument("--host", default="")
+    runner.add_argument("--host", required=True)
     summary = sub.add_parser("summarize")
     summary.add_argument("path")
     args = parser.parse_args()
