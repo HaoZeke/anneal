@@ -51,10 +51,20 @@ thread whatever =OMP_NUM_THREADS= asks for, since starting a team costs more
 than such a call.
 From 8192 atoms up each atom keeps the energy and strain of its pairs with
 higher-index partners, and the atoms are added in index order.
-A team of =OMP_NUM_THREADS= threads splits the atoms into as many runs and walks
-each atom's whole row on the run that owns it, so the energy, the forces, the
-stress and the per-atom terms have the bits of one thread on any thread count,
-also when the runtime starts fewer threads.
+On a stored neighbour list with at least 8192 atoms and at least 4096 candidate
+upper pairs, a team of =OMP_NUM_THREADS= threads runs one three-phase OpenMP
+region over an upper-pair index when =total_up <= term_limit=: phase 0 evaluates
+each upper pair once across work-balanced atom slices rounded to 8-atom
+boundaries, phase 1 accumulates per-atom densities and embedding weights in
+pair-index order, and phase 2 sums forces, stress, and per-atom virials from
+the stored pair terms.
+When =total_up > term_limit= the call skips that three-phase path and falls
+back to the threaded two-pass row walk.
+Sparser stored lists stay on one thread, and streaming or unbounded walks still
+evaluate each atom's row on its owning slice.
+The energy, the forces, the stress and the per-atom terms therefore keep the
+bits of one thread on any thread count, also when the runtime starts fewer
+threads.
 One pass builds the densities and a second pass writes the forces.
 The density pass keeps the powers and =1/r^2= that the force of each pair takes,
 and the force pass reads them back instead of raising the distance to =n= and
@@ -62,8 +72,14 @@ and the force pass reads them back instead of raising the distance to =n= and
 With =a = 1= those are the density's own powers; otherwise the force's powers of
 =a^2 (1/r^2)= are kept, since they can differ from those of =a^2 / r^2= in the
 last bit.
-=SuttonChenPot::setPairTermLimit= bounds the store, 32 MiB by default, and the
-force pass computes the pairs past it again, with the same bits.
+=SuttonChenPot::setPairTermLimit= bounds the three-phase scratch, 32 MiB by
+default.
+The candidate-slot cost from the code's allocations is 69 bytes, or 77 bytes
+when per-atom energies are requested:
+=active= 1 byte + =pair_phi= 8 + =pair_force= 48 + =up_j= 4 + =lo_refs= 8, and
+=pair_he= adds 8 when =atoms.energy= is non-null.
+The force pass computes any pair terms outside the kept room again, with the
+same bits.
 
 =rgpot_sutton_chen_energy_forces= is the C entry point.
 It takes an =rgpot_sc_config= and writes one energy and one force array.
