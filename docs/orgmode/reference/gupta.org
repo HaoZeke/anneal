@@ -35,10 +35,20 @@ Reference value: a dimer at =r = r0= has energy =2 A - 2 xi=.
 For that gold row the value is -3.1678 eV.
 =GuptaTest= checks the same identity to 1e-12.
 
-A coincident pair sets the energy to positive infinity and returns.
+The gradient is zeroed before any pair is visited.
+The first pair with =r2 <= 0.0= sets the energy to positive infinity and
+returns, so later pairs are not visited and the gradient stays zero.
+Atoms 0 and 1 coincident and atom 2 =NaN= therefore give positive infinity and a
+zero gradient.
+For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
+zero.
 If the scratch allocation fails, the energy is positive infinity and the
 gradient is zero.
-A null pointer is not checked.
+=NaN= is not =<= 0.0=.
+A pair that is reached with a =NaN= coordinate is evaluated, and the energy and
+the gradient become =NaN=.
+Null pointers, =slot= entries at or above =n_species=, and =r0= entries that are
+not positive are not checked.
 
 ** Reduced Lennard-Jones and Morse
 
@@ -95,10 +105,20 @@ void rgpot_gupta(const double *x, size_t n, const unsigned char *slot,
   energy; =p= and =q= dimensionless.
   The gradient is energy per length.
 - Outputs :: one energy and 3 n gradient components.
-- Errors :: no status code.
-  A coincident pair sets the energy to positive infinity and returns.
-  A failed scratch allocation does that and zeroes the gradient.
-  A null pointer is not checked, and =slot= is not bounds-checked.
+  For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
+  zero.
+- Errors :: no status code and no error message.
+  A failed scratch allocation (=realloc= returning null) sets =*energy= to
+  =+INFINITY=, zeroes the 3 n entries of =gradient= and returns.
+  The first pair with =r2 <= 0.0= sets =*energy= to =+INFINITY= and returns.
+  The gradient is left at the zeros written before that pair, and later pairs
+  are not visited.
+  Atoms 0 and 1 coincident and atom 2 =NaN= therefore give =+INFINITY= and a
+  zero gradient.
+  =NaN= is not =<= 0.0=, so a pair that is reached with a =NaN= coordinate is
+  evaluated and the energy and the gradient become =NaN=.
+  Null pointers, =slot= entries at or above =n_species=, and =r0= entries that
+  are not positive are not checked.
 
 *** =rgpot_cambridge_morse=
 
@@ -113,9 +133,13 @@ void rgpot_cambridge_morse(const double *x, size_t n, double rho,
 - Units :: =x= in the reduced length; =rho= is the dimensionless range; energy
   in the reduced energy; gradient in energy per length.
 - Outputs :: one energy and 3 n gradient components.
-  A coincident pair is skipped.
-- Errors :: no status code.
-  A null pointer is not checked.
+  For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
+  zero.
+  For =n >= 2= a coincident pair (=r2 <= 0.0=) is skipped, and a =NaN=
+  coordinate does not satisfy =r2 <= 0.0=, so =NaN= propagates into the energy
+  and the gradient.
+- Errors :: no status code and no error message.
+  Null pointers are not checked.
 
 *** =rgpot_cluster_lj=
 
@@ -130,9 +154,13 @@ void rgpot_cluster_lj(const double *x, size_t n, double *energy,
 - Units :: reduced length and reduced energy.
   The gradient is energy per length.
 - Outputs :: one energy and 3 n gradient components.
-  A coincident pair is skipped.
-- Errors :: no status code.
-  A null pointer is not checked.
+  For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
+  zero.
+  For =n >= 2= a coincident pair (=r2 <= 0.0=) is skipped, and a =NaN=
+  coordinate does not satisfy =r2 <= 0.0=, so =NaN= propagates into the energy
+  and the gradient.
+- Errors :: no status code and no error message.
+  Null pointers are not checked.
 
 *** =rgpot_lj_pair=
 
@@ -149,8 +177,10 @@ int rgpot_lj_pair(double epsilon, double sigma, double r2, double *energy,
   =dvdr_over_r= is =(dE/dr) / r=.
   =d2vdr2= is =d2E/dr2=.
 - Outputs :: the pair energy and the two derivatives.
-  =r2= that is not positive writes zeros.
-- Errors :: returns 1 when any output pointer is null, and 0 otherwise.
+  When =!(r2 > 0.0)= or =r2= is not finite, writes zeros to all three outputs
+  and returns 0.
+- Errors :: returns 1 when =energy=, =dvdr_over_r= or =d2vdr2= is null, and 0
+  otherwise, with no error message.
 
 *** =rgpot_lj_curvature_pairs=
 
@@ -164,9 +194,11 @@ int rgpot_lj_curvature_pairs(double epsilon, double sigma, int32_t npairs,
 - Inputs :: =epsilon=, =sigma=, =npairs= squared distances and three output
   arrays of that length.
 - Units :: as =rgpot_lj_pair=, one entry per pair.
-- Outputs :: energy, =(dE/dr) / r= and =d2E/dr2= for each pair.
-- Errors :: returns 1 when =npairs= is negative, or when =npairs= is positive
-  and any pointer is null, and 0 otherwise.
+- Outputs :: energy, =(dE/dr) / r= and =d2E/dr2= for each pair; entries where
+  =!(r2[i] > 0.0)= or =r2[i]= is not finite write zeros.
+- Errors :: returns 1 when =npairs < 0=, or when =npairs > 0= and =r2=,
+  =energy=, =dvdr_over_r= or =d2vdr2= is null, and 0 otherwise, with no error
+  message.
 
 *** =rgpot_lj_gradient=
 
@@ -183,9 +215,9 @@ int rgpot_lj_gradient(double epsilon, double sigma, double cutoff,
   gradient in energy per length.
   A cutoff of 0 or less keeps every pair.
 - Outputs :: one energy and 3 =natoms= gradient components.
-  A coincident pair is skipped.
-- Errors :: returns 1 when =natoms= is negative, =energy= is null, or =natoms=
-  is positive and =positions= or =gradient= is null, and 0 otherwise.
+  A pair with =!(r2 > 0.0)= is skipped.
+- Errors :: returns 1 when =natoms < 0=, =energy= is null, or =natoms > 0= and
+  =positions= or =gradient= is null, and 0 otherwise, with no error message.
 
 *** =rgpot_lj_atom_energies=
 
@@ -199,8 +231,9 @@ int rgpot_lj_atom_energies(double epsilon, double sigma, int32_t natoms,
 - Units :: as =rgpot_lj_gradient=, with no cutoff.
 - Outputs :: each pair's energy added to both atoms.
   The total energy is half the sum of =atom_energy=.
-- Errors :: returns 1 when =natoms= is negative, =atom_energy= is null, or
-  =natoms= is positive and =positions= is null, and 0 otherwise.
+  A pair with =!(r2 > 0.0)= is skipped.
+- Errors :: returns 1 when =natoms < 0=, =atom_energy= is null, or =natoms > 0=
+  and =positions= is null, and 0 otherwise, with no error message.
 
 *** =rgpot_lj_partial_gradient=
 
@@ -215,9 +248,17 @@ int rgpot_lj_partial_gradient(double epsilon, double sigma, int32_t natoms,
   a gradient of 3 =natoms= components.
 - Units :: as =rgpot_lj_gradient=, with no cutoff.
 - Outputs :: gradient rows of the atoms listed in =moved=.
-  Every other row is zero.
-- Errors :: returns 1 when a count is negative, a pointer the call needs is
-  null, or a moved index is outside =[0, natoms)=, and 0 otherwise.
+  Every other row is zero, and pairs with =!(r2 > 0.0)= are skipped.
+- Errors :: returns 1 when =natoms < 0=,
+  =n_moved < 0=, =gradient= is null, =natoms > 0= and =positions= is null, =n_moved > 0=
+  and =moved= is null, or =moved[m] < 0= or =moved[m] >= natoms=, and 0
+  otherwise, with no error message.
+  An index outside =[0, natoms)= is checked after =gradient= is zeroed and after
+  the earlier =moved= rows have been accumulated, so the gradient is partial on
+  that error.
+  The unit dimer at =r = 1= with =epsilon = 1=, =sigma = 1=, =natoms = 2= and
+  =moved = {0, 5}= returns 1 and leaves =gradient[0] = 24=, with every other
+  component still zero.
 
 *** =rgpot_lj_arithmetic_gradient=
 
@@ -235,9 +276,11 @@ int rgpot_lj_arithmetic_gradient(const double *sigma, double cutoff,
   The energy is 4 times the sum of =(s^12 - s^6)= with
   =s = (sigma_i + sigma_j) / (2 r)=, and the well depth is 1.
 - Outputs :: one energy and the gradient.
-  A cutoff of 0 or less keeps every pair.
-- Errors :: returns 1 when =natoms= is negative, a required pointer is null, or
-  =natoms= is positive and =sigma= is null, and 0 otherwise.
+  A cutoff of 0 or less keeps every pair, and a pair with =!(r2 > 0.0)= is
+  skipped.
+- Errors :: returns 1 when =natoms < 0=, =energy= is null, or =natoms > 0= and
+  =sigma=, =positions= or =gradient= is null, and 0 otherwise, with no error
+  message.
 
 *** =rgpot_morse_pair=
 
@@ -253,8 +296,10 @@ int rgpot_morse_pair(double epsilon, double rho, double re, double r2,
   dimensionless.
   =dvdr_over_r= is =(dE/dr) / r=.
 - Outputs :: the pair energy and the two derivatives.
-  =r2= that is not positive writes zeros.
-- Errors :: returns 1 when any output pointer is null, and 0 otherwise.
+  When =!(r2 > 0.0)= or =!(re > 0.0)= (zero, negative or =NaN=), writes zeros to
+  all three outputs and returns 0.
+- Errors :: returns 1 when =energy=, =dvdr_over_r= or =d2vdr2= is null, and 0
+  otherwise, with no error message.
 
 *** =rgpot_morse_gradient=
 
@@ -271,8 +316,10 @@ int rgpot_morse_gradient(double epsilon, double rho, double re,
 - Units :: =epsilon= in energy, =re=, =cutoff= and positions in length.
   A cutoff of 0 or less keeps every pair.
 - Outputs :: one energy and the gradient.
-- Errors :: returns 1 when =natoms= is negative, =energy= is null, or =natoms=
-  is positive and =positions= or =gradient= is null, and 0 otherwise.
+  A pair with =!(r2 > 0.0)= is skipped.
+- Errors :: returns 1 when =!(re > 0.0)= (=re= is zero, negative or =NaN=),
+  =natoms < 0=, =energy= is null, or =natoms > 0= and =positions= or =gradient=
+  is null, and 0 otherwise, with no error message.
 
 *** =rgpot_binary_lj_gradient=
 
@@ -288,9 +335,11 @@ int rgpot_binary_lj_gradient(int32_t n_a, const double *eps,
   order AA, AB, BB, =cutoff=, =natoms=, positions, energy and gradient.
 - Units :: =eps= in energy, =sig=, =cutoff= and positions in length.
 - Outputs :: one energy and the gradient.
-  A cutoff of 0 or less keeps every pair.
-- Errors :: returns 1 when =natoms= is negative, =n_a= is outside =[0, natoms]=,
-  =energy= is null, or a pointer the call needs is null, and 0 otherwise.
+  A cutoff of 0 or less keeps every pair, and a pair with =!(r2 > 0.0)= is
+  skipped.
+- Errors :: returns 1 when =natoms < 0=, =n_a < 0= or =n_a > natoms=, =energy=,
+  =eps= or =sig= is null, or =natoms > 0= and =positions= or =gradient= is null,
+  and 0 otherwise, with no error message.
 
 *** =rgpot_tip4p_sites_config=
 
@@ -322,5 +371,5 @@ int rgpot_tip4p_sites(const rgpot_tip4p_sites_config *cfg,
   Oxygen-oxygen is the Lennard-Jones term and every other site pair is
   =coulomb * q_i * q_j / r=.
 - Errors :: returns 1 when =cfg= or =energy= is null,
-  =n_molecules= is negative, or =n_molecules= is positive and =sites= or
-  =gradient= is null, and 0 otherwise.
+  =n_molecules < 0=, or =n_molecules > 0= and =sites= or =gradient= is null, and
+  0 otherwise, with no error message.
