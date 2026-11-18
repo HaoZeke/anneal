@@ -202,19 +202,115 @@ pub fn local_nu3(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
     local_nu3_z(x, spec, None)
 }
 
+struct Nu3Cache {
+    local: Array2<f64>,
+    coefficients: Vec<Vec<f64>>,
+}
+
+#[cfg(not(feature = "featomic"))]
+struct DescriptorCloudCache {
+    coordinates: Vec<f64>,
+    spec: SoapSpec,
+    rmsd: u64,
+    species: Option<Vec<u32>>,
+    mobile: Option<Vec<usize>>,
+    groups: Option<Vec<Vec<usize>>>,
+    proposal: Array1<f64>,
+}
+
+#[cfg(not(feature = "featomic"))]
+impl DescriptorCloudCache {
+    fn matches(
+        &self,
+        x: ArrayView1<f64>,
+        spec: SoapSpec,
+        rmsd: f64,
+        species: Option<&[u32]>,
+        mobile: Option<&[usize]>,
+        groups: Option<&[Vec<usize>]>,
+    ) -> bool {
+        x.as_slice() == Some(self.coordinates.as_slice())
+            && self.spec == spec
+            && self.rmsd == rmsd.to_bits()
+            && self.species.as_deref() == species
+            && self.mobile.as_deref() == mobile
+            && self.groups.as_deref() == groups
+    }
+}
+
+#[cfg(not(feature = "featomic"))]
+thread_local! {
+    static DESCRIPTOR_CLOUD_CACHE: std::cell::RefCell<Option<DescriptorCloudCache>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+struct PairDerivative {
+    neighbor: usize,
+    r: f64,
+    u: [f64; 3],
+    ylm: Vec<f64>,
+    dy_cartesian: Vec<[f64; 3]>,
+    fc: f64,
+    dfc: f64,
+}
+
+fn pair_derivative_cache(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<Vec<PairDerivative>> {
+    let n_at = x.len() / 3;
+    let mut pairs = Vec::with_capacity(n_at);
+    for i in 0..n_at {
+        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        let mut local = Vec::new();
+        for neighbor in 0..n_at {
+            if neighbor == i {
+                continue;
+            }
+            let d = [
+                x[3 * neighbor] - xi[0],
+                x[3 * neighbor + 1] - xi[1],
+                x[3 * neighbor + 2] - xi[2],
+            ];
+            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if r >= spec.rcut_nn || r < 1e-12 {
+                continue;
+            }
+            let u = [d[0] / r, d[1] / r, d[2] / r];
+            let (ylm, dy_cartesian) = tesseral_cartesian(u, spec.l_max, r);
+            local.push(PairDerivative {
+                neighbor,
+                r,
+                u,
+                ylm,
+                dy_cartesian,
+                fc: fcut(r, spec.rcut_nn),
+                dfc: dfcut(r, spec.rcut_nn),
+            });
+        }
+        pairs.push(local);
+    }
+    pairs
+}
+
 /// Species-aware SOAP plus the same 4-body scalars (all neighbors).
 ///
 /// The power spectrum and the ν=3 contraction share one spherical
 /// expansion per atom. A second expansion would repeat the same
 /// harmonics and return the same coefficients.
 pub fn local_nu3_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
+    nu3_cache(x, spec, species).local
+}
+
+fn nu3_cache(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Nu3Cache {
     let n_at = x.len() / 3;
     let d0 = spec.feat_dim(species);
     let d1 = spec.nu3_feat_dim(species);
     let mut out = Array2::<f64>::zeros((n_at, d0 + d1));
+    let mut coefficients = Vec::with_capacity(n_at);
     let rcut = spec.rcut_nn;
     if n_at < 2 || !(rcut > 0.0) {
-        return out;
+        return Nu3Cache {
+            local: out,
+            coefficients,
+        };
     }
     let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
@@ -234,8 +330,12 @@ pub fn local_nu3_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) 
                 out[[i, d0 + ch * ace1 + t]] = b[t];
             }
         }
+        coefficients.push(c);
     }
-    out
+    Nu3Cache {
+        local: out,
+        coefficients,
+    }
 }
 
 struct Neigh {
@@ -599,6 +699,16 @@ fn accum_four(
 
 /// Analytic Jacobian of the ACE ν=3 block, shape `(N · nu3_feat, 3N)`.
 pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
+    jacobian_ace_with_cache(x, spec, species, None, None)
+}
+
+fn jacobian_ace_with_cache(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    cached_coefficients: Option<&[Vec<f64>]>,
+    cached_pairs: Option<&[Vec<PairDerivative>]>,
+) -> Array2<f64> {
     let n_at = x.len() / 3;
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
@@ -613,13 +723,30 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
         return j;
     }
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
-    let c_atom = n_chan * spec.n_max * n_lm;
-    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
-    let mut c = vec![vec![0.0; c_atom]; n_at];
+    let n_coefficients = spec.n_max * n_lm;
+    let triples = ace1 / spec.n_max;
+    let ace_triples = crate::ace::triples(spec.l_max);
+    let rows_by_l: Vec<Vec<usize>> = (0..=spec.l_max)
+        .map(|l| {
+            ace_triples
+                .iter()
+                .enumerate()
+                .filter_map(|(row, &(l1, l2, l3))| (l == l1 || l == l2 || l == l3).then_some(row))
+                .collect()
+        })
+        .collect();
+    let computed;
+    let c = if let Some(coefficients) = cached_coefficients {
+        coefficients
+    } else {
+        let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
+        computed = (0..n_at)
+            .map(|i| atom_expand(x, i, n_at, rcut, spec, species, &table).1)
+            .collect::<Vec<_>>();
+        &computed
+    };
     let mut dbdc = Vec::with_capacity(n_at * n_chan);
     for i in 0..n_at {
-        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
-        c[i] = ci;
         for ch in 0..n_chan {
             let c0 = ch * spec.n_max * n_lm;
             dbdc.push(crate::ace::d_from_c(
@@ -629,27 +756,28 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
             ));
         }
     }
+    let ncoord = n_at * 3;
+    let values = j.as_slice_mut().expect("SOAP Jacobian is contiguous");
+    let computed_pairs;
+    let pairs = if let Some(pairs) = cached_pairs {
+        pairs
+    } else {
+        computed_pairs = pair_derivative_cache(x, spec);
+        &computed_pairs
+    };
     for i in 0..n_at {
-        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
-        for jj in 0..n_at {
-            if jj == i {
-                continue;
-            }
-            let d = [
-                x[3 * jj] - xi[0],
-                x[3 * jj + 1] - xi[1],
-                x[3 * jj + 2] - xi[2],
-            ];
-            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            if r >= rcut || r < 1e-12 {
-                continue;
-            }
+        for pair in &pairs[i] {
+            let jj = pair.neighbor;
+            let r = pair.r;
             let ch = neighbor_channel(species, jj, &channels);
-            let u = [d[0] / r, d[1] / r, d[2] / r];
-            let (ylm, dylm) = tesseral(u, spec.l_max);
-            let fc = fcut(r, rcut);
-            let dfc = dfcut(r, rcut);
-            let db = &dbdc[i * n_chan + ch];
+            let u = pair.u;
+            let ylm = &pair.ylm;
+            let dy_cartesian = &pair.dy_cartesian;
+            let fc = pair.fc;
+            let dfc = pair.dfc;
+            let db = dbdc[i * n_chan + ch]
+                .as_slice()
+                .expect("ACE coefficient Jacobian is contiguous");
             for n in 0..spec.n_max {
                 let g = radial(n, r, rcut);
                 let dg = dradial(n, r, rcut);
@@ -657,21 +785,17 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
                 let dw = dg * fc + g * dfc;
                 for lm in 0..n_lm {
                     let yv = ylm[lm];
+                    let l = lm_to_l(lm);
                     for a in 0..3 {
-                        let dyv = {
-                            let mut s = 0.0;
-                            for b in 0..3 {
-                                let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
-                                s += dylm[lm][b] * proj;
-                            }
-                            s / r
-                        };
+                        let dyv = dy_cartesian[lm][a];
                         let dc = dw * u[a] * yv + w * dyv;
                         let col_c = n * n_lm + lm;
-                        for t in 0..ace1 {
-                            let gij = db[[t, col_c]] * dc;
-                            j[[i * d1 + ch * ace1 + t, 3 * jj + a]] += gij;
-                            j[[i * d1 + ch * ace1 + t, 3 * i + a]] -= gij;
+                        for &triple in &rows_by_l[l] {
+                            let t = n * triples + triple;
+                            let gij = db[t * n_coefficients + col_c] * dc;
+                            let row = i * d1 + ch * ace1 + t;
+                            values[row * ncoord + 3 * jj + a] += gij;
+                            values[row * ncoord + 3 * i + a] -= gij;
                         }
                     }
                 }
@@ -683,24 +807,35 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
 
 /// Stacked Jacobian of SOAP power spectrum and ACE ν=3 scalars.
 pub fn jacobian_nu3(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
-    let js = jacobian_z(x, spec, species);
-    let ja = jacobian_ace(x, spec, species);
+    jacobian_nu3_with_cache(x, spec, species, None)
+}
+
+fn jacobian_nu3_with_cache(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    cached_coefficients: Option<&[Vec<f64>]>,
+) -> Array2<f64> {
+    let pairs = pair_derivative_cache(x, spec);
+    let js = jacobian_z_with_cache(x, spec, species, cached_coefficients, Some(&pairs));
+    let ja = jacobian_ace_with_cache(x, spec, species, cached_coefficients, Some(&pairs));
     let n_at = x.len() / 3;
     let d0 = spec.feat_dim(species);
     let d1 = spec.nu3_feat_dim(species);
     let dim = d0 + d1;
     let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3));
+    let ncoord = n_at * 3;
+    let soap = js.as_slice().expect("SOAP Jacobian is contiguous");
+    let ace = ja.as_slice().expect("ACE Jacobian is contiguous");
+    let stacked = j.as_slice_mut().expect("stacked Jacobian is contiguous");
     for i in 0..n_at {
-        for t in 0..d0 {
-            for k in 0..n_at * 3 {
-                j[[i * dim + t, k]] = js[[i * d0 + t, k]];
-            }
-        }
-        for t in 0..d1 {
-            for k in 0..n_at * 3 {
-                j[[i * dim + d0 + t, k]] = ja[[i * d1 + t, k]];
-            }
-        }
+        let destination = i * dim * ncoord;
+        let soap_start = i * d0 * ncoord;
+        stacked[destination..destination + d0 * ncoord]
+            .copy_from_slice(&soap[soap_start..soap_start + d0 * ncoord]);
+        let ace_start = i * d1 * ncoord;
+        stacked[destination + d0 * ncoord..destination + dim * ncoord]
+            .copy_from_slice(&ace[ace_start..ace_start + d1 * ncoord]);
     }
     j
 }
@@ -712,6 +847,16 @@ pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 
 /// Analytic Jacobian of stacked local spectra, species channels included.
 pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
+    jacobian_z_with_cache(x, spec, species, None, None)
+}
+
+fn jacobian_z_with_cache(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    cached_coefficients: Option<&[Vec<f64>]>,
+    cached_pairs: Option<&[Vec<PairDerivative>]>,
+) -> Array2<f64> {
     let n_at = x.len() / 3;
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
@@ -726,36 +871,38 @@ pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -
         return j;
     }
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
-    let c_atom = n_chan * spec.n_max * n_lm;
-    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
-    let mut c = vec![vec![0.0; c_atom]; n_at];
+    let computed;
+    let c = if let Some(coefficients) = cached_coefficients {
+        coefficients
+    } else {
+        let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
+        computed = (0..n_at)
+            .map(|i| atom_expand(x, i, n_at, rcut, spec, species, &table).1)
+            .collect::<Vec<_>>();
+        &computed
+    };
+    let ncoord = n_at * 3;
+    let values = j.as_slice_mut().expect("SOAP Jacobian is contiguous");
+    let computed_pairs;
+    let pairs = if let Some(pairs) = cached_pairs {
+        pairs
+    } else {
+        computed_pairs = pair_derivative_cache(x, spec);
+        &computed_pairs
+    };
     for i in 0..n_at {
-        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
-        c[i] = ci;
-    }
-    for i in 0..n_at {
-        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
-        for jj in 0..n_at {
-            if jj == i {
-                continue;
-            }
-            let d = [
-                x[3 * jj] - xi[0],
-                x[3 * jj + 1] - xi[1],
-                x[3 * jj + 2] - xi[2],
-            ];
-            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            if r >= rcut || r < 1e-12 {
-                continue;
-            }
+        for pair in &pairs[i] {
+            let jj = pair.neighbor;
+            let r = pair.r;
             let ch = neighbor_channel(species, jj, &channels);
             let c_off = ch * spec.n_max * n_lm;
             let row0 = i * dim + ch * dim1;
             let c_ch = &c[i][c_off..c_off + spec.n_max * n_lm];
-            let u = [d[0] / r, d[1] / r, d[2] / r];
-            let (ylm, dylm) = tesseral(u, spec.l_max);
-            let fc = fcut(r, rcut);
-            let dfc = dfcut(r, rcut);
+            let u = pair.u;
+            let ylm = &pair.ylm;
+            let dy_cartesian = &pair.dy_cartesian;
+            let fc = pair.fc;
+            let dfc = pair.dfc;
             for n in 0..spec.n_max {
                 let g = radial(n, r, rcut);
                 let dg = dradial(n, r, rcut);
@@ -764,17 +911,32 @@ pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -
                 for lm in 0..n_lm {
                     let y = ylm[lm];
                     for a in 0..3 {
-                        let dy = {
-                            let mut s = 0.0;
-                            for b in 0..3 {
-                                let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
-                                s += dylm[lm][b] * proj;
-                            }
-                            s / r
-                        };
+                        let dy = dy_cartesian[lm][a];
                         let dc_j = dw * u[a] * y + w * dy;
-                        accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, dc_j, 3 * jj + a);
-                        accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, -dc_j, 3 * i + a);
+                        accumulate_dp(
+                            values,
+                            ncoord,
+                            row0,
+                            spec,
+                            n_lm,
+                            c_ch,
+                            n,
+                            lm,
+                            dc_j,
+                            3 * jj + a,
+                        );
+                        accumulate_dp(
+                            values,
+                            ncoord,
+                            row0,
+                            spec,
+                            n_lm,
+                            c_ch,
+                            n,
+                            lm,
+                            -dc_j,
+                            3 * i + a,
+                        );
                     }
                 }
             }
@@ -783,8 +945,10 @@ pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -
     j
 }
 
+#[inline(always)]
 fn accumulate_dp(
-    j: &mut Array2<f64>,
+    j: &mut [f64],
+    ncoord: usize,
     row0: usize,
     spec: SoapSpec,
     n_lm: usize,
@@ -796,27 +960,21 @@ fn accumulate_dp(
 ) {
     // p_{n n' l} = Σ_m c_{n lm} c_{n' lm}. lm here is the packed (l,m) index.
     let l = lm_to_l(lm);
-    let mut t = 0usize;
-    for na in 0..spec.n_max {
-        for np in na..spec.n_max {
-            for ll in 0..=spec.l_max {
-                if ll == l {
-                    let c_n = c[na * n_lm + lm];
-                    let c_np = c[np * n_lm + lm];
-                    let d = if na == n && np == n {
-                        2.0 * c_n * dc
-                    } else if na == n {
-                        dc * c_np
-                    } else if np == n {
-                        c_n * dc
-                    } else {
-                        0.0
-                    };
-                    j[[row0 + t, col]] += d;
-                }
-                t += 1;
-            }
-        }
+    let angular = spec.l_max + 1;
+    let pair_index =
+        |na: usize, np: usize| na * spec.n_max - na * na.saturating_sub(1) / 2 + np - na;
+    for na in 0..n {
+        let t = pair_index(na, n) * angular + l;
+        j[(row0 + t) * ncoord + col] += c[na * n_lm + lm] * dc;
+    }
+    for np in n..spec.n_max {
+        let t = pair_index(n, np) * angular + l;
+        let value = if np == n {
+            2.0 * c[n * n_lm + lm] * dc
+        } else {
+            dc * c[np * n_lm + lm]
+        };
+        j[(row0 + t) * ncoord + col] += value;
     }
 }
 
@@ -913,7 +1071,19 @@ pub fn pullback_nu3(
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
 ) -> Array1<f64> {
-    let loc = local_nu3_z(x, spec, species);
+    let cache = nu3_cache(x, spec, species);
+    pullback_nu3_with_cache(x, target, spec, species, mobile, &cache)
+}
+
+fn pullback_nu3_with_cache(
+    x: ArrayView1<f64>,
+    target: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    cache: &Nu3Cache,
+) -> Array1<f64> {
+    let loc = &cache.local;
     let n_at = loc.nrows();
     let dim = loc.ncols();
     let mut dp = Array1::zeros(n_at * dim);
@@ -925,7 +1095,8 @@ pub fn pullback_nu3(
             dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
         }
     }
-    let mut j = jacobian_nu3(x, spec, species);
+    let coefficients = (cache.coefficients.len() == n_at).then_some(cache.coefficients.as_slice());
+    let mut j = jacobian_nu3_with_cache(x, spec, species, coefficients);
     let keep = mobile_mask(n_at, mobile);
     let all_mobile = keep.iter().all(|&b| b);
     if !all_mobile {
@@ -977,7 +1148,20 @@ pub fn kick_packing_nu3<R: Rng + ?Sized>(
     mobile: Option<&[usize]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let loc = local_nu3_z(x, spec, species);
+    let cache = nu3_cache(x, spec, species);
+    step_away_outliers_with_cache(x, spec, rmsd, species, mobile, rng, &cache)
+}
+
+fn step_away_outliers_with_cache<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+    cache: &Nu3Cache,
+) -> Array1<f64> {
+    let loc = &cache.local;
     let n_at = loc.nrows();
     let dim = loc.ncols();
     if n_at == 0 || dim == 0 {
@@ -1027,7 +1211,7 @@ pub fn kick_packing_nu3<R: Rng + ?Sized>(
             target[i * dim + t] = loc[[i, t]] + u[t];
         }
     }
-    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+    let dr = pullback_nu3_with_cache(x, target.view(), spec, species, mobile, cache);
     scale_to_cap(x, dr, rmsd)
 }
 
@@ -2699,86 +2883,96 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     }
     #[cfg(not(feature = "featomic"))]
     {
-        let loc = local_nu3_z(x, spec, species);
-        let n_at = loc.nrows();
-        let dim = loc.ncols();
-        if n_at == 0 || dim == 0 {
-            return x.to_owned();
-        }
-        let keep = mobile_mask(n_at, mobile);
-        let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
-        let mut labels: Vec<u32> = Vec::new();
-        for i in 0..n_at {
-            if keep[i] {
-                let z = zi(i);
-                if !labels.contains(&z) {
-                    labels.push(z);
-                }
+        let cache = nu3_cache(x, spec, species);
+        let _ = rng;
+        step_away_cloud_with_cache(x, spec, rmsd, species, mobile, groups, &cache)
+    }
+}
+
+#[cfg(not(feature = "featomic"))]
+fn step_away_cloud_with_cache(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    groups: Option<&[Vec<usize>]>,
+    cache: &Nu3Cache,
+) -> Array1<f64> {
+    let loc = &cache.local;
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    if n_at == 0 || dim == 0 {
+        return x.to_owned();
+    }
+    let keep = mobile_mask(n_at, mobile);
+    let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
+    let mut labels: Vec<u32> = Vec::new();
+    for i in 0..n_at {
+        if keep[i] {
+            let z = zi(i);
+            if !labels.contains(&z) {
+                labels.push(z);
             }
         }
-        let nlab = labels.len();
-        let mut mu = vec![vec![0.0; dim]; nlab];
-        let mut cnt = vec![0.0; nlab];
-        for i in 0..n_at {
-            if !keep[i] {
-                continue;
-            }
-            let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
-            cnt[k] += 1.0;
+    }
+    let nlab = labels.len();
+    let mut mu = vec![vec![0.0; dim]; nlab];
+    let mut cnt = vec![0.0; nlab];
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+        cnt[k] += 1.0;
+        for t in 0..dim {
+            mu[k][t] += loc[[i, t]];
+        }
+    }
+    for k in 0..nlab {
+        if cnt[k] > 0.0 {
             for t in 0..dim {
-                mu[k][t] += loc[[i, t]];
+                mu[k][t] /= cnt[k];
             }
         }
-        for k in 0..nlab {
-            if cnt[k] > 0.0 {
-                for t in 0..dim {
-                    mu[k][t] /= cnt[k];
-                }
-            }
-        }
-        let mut target = Array1::zeros(n_at * dim);
-        for i in 0..n_at {
-            if !keep[i] {
-                for t in 0..dim {
-                    target[i * dim + t] = loc[[i, t]];
-                }
-                continue;
-            }
-            let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
-            // SOAP l ≤ 3 is isotropic on a closed shell. Leftover is the
-            // ACE ν=3 / high-l block: pull those channels to the cloud mean.
+    }
+    let mut target = Array1::zeros(n_at * dim);
+    for i in 0..n_at {
+        if !keep[i] {
             for t in 0..dim {
                 target[i * dim + t] = loc[[i, t]];
             }
-            let d0 = dim - spec.nu3_feat_dim(species);
-            for t in d0..dim {
-                target[i * dim + t] = mu[k][t];
-            }
+            continue;
+        }
+        let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+        for t in 0..dim {
+            target[i * dim + t] = loc[[i, t]];
         }
         let d0 = dim - spec.nu3_feat_dim(species);
-        let mut nu32 = 0.0;
-        let mut nnu = 0.0;
-        for i in 0..n_at {
-            if !keep[i] {
-                continue;
-            }
-            for t in d0..dim {
-                let d = target[i * dim + t] - loc[[i, t]];
-                nu32 += d * d;
-                nnu += 1.0;
-            }
+        for t in d0..dim {
+            target[i * dim + t] = mu[k][t];
         }
-        let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
-        let _ = rng;
-        if nu3_rms < NU3_DEFECT {
-            return x.to_owned();
-        }
-        // Direction is J⁺ of the observed leftover. Amplitude is the
-        // caller's cap: Tikhonov otherwise leaves a near-identity.
-        let dr = pullback_nu3(x, target.view(), spec, species, mobile);
-        let y = scale_to_cap(x, dr, rmsd);
-        retract_rigid_groups(x, y, groups)
     }
+    let d0 = dim - spec.nu3_feat_dim(species);
+    let mut nu32 = 0.0;
+    let mut nnu = 0.0;
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        for t in d0..dim {
+            let d = target[i * dim + t] - loc[[i, t]];
+            nu32 += d * d;
+            nnu += 1.0;
+        }
+    }
+    let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
+    if nu3_rms < NU3_DEFECT {
+        return x.to_owned();
+    }
+    let dr = pullback_nu3_with_cache(x, target.view(), spec, species, mobile, cache);
+    let y = scale_to_cap(x, dr, rmsd);
+    retract_rigid_groups(x, y, groups)
 }
 
 /// SOAP spec written at this structure's own nearest-neighbour length.
@@ -2955,12 +3149,44 @@ pub fn step_descriptor<R: Rng + ?Sized>(
     groups: Option<&[Vec<usize>]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let cloud = step_away_cloud(x, spec, rmsd, species, mobile, groups, rng);
-    if proposal_moved(x, cloud.view()) {
-        return cloud;
+    #[cfg(feature = "featomic")]
+    {
+        let cloud = step_away_cloud(x, spec, rmsd, species, mobile, groups, rng);
+        if proposal_moved(x, cloud.view()) {
+            return cloud;
+        }
+        let outliers = step_away_outliers(x, spec, rmsd, species, mobile, rng);
+        retract_rigid_groups(x, outliers, groups)
     }
-    let outliers = step_away_outliers(x, spec, rmsd, species, mobile, rng);
-    retract_rigid_groups(x, outliers, groups)
+    #[cfg(not(feature = "featomic"))]
+    {
+        if let Some(proposal) = DESCRIPTOR_CLOUD_CACHE.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .filter(|cached| cached.matches(x, spec, rmsd, species, mobile, groups))
+                .map(|cached| cached.proposal.clone())
+        }) {
+            return proposal;
+        }
+        let cache = nu3_cache(x, spec, species);
+        let cloud = step_away_cloud_with_cache(x, spec, rmsd, species, mobile, groups, &cache);
+        if proposal_moved(x, cloud.view()) {
+            DESCRIPTOR_CLOUD_CACHE.with(|slot| {
+                *slot.borrow_mut() = Some(DescriptorCloudCache {
+                    coordinates: x.to_vec(),
+                    spec,
+                    rmsd: rmsd.to_bits(),
+                    species: species.map(<[u32]>::to_vec),
+                    mobile: mobile.map(<[usize]>::to_vec),
+                    groups: groups.map(<[Vec<usize>]>::to_vec),
+                    proposal: cloud.clone(),
+                });
+            });
+            return cloud;
+        }
+        let outliers = step_away_outliers_with_cache(x, spec, rmsd, species, mobile, rng, &cache);
+        retract_rigid_groups(x, outliers, groups)
+    }
 }
 
 /// Retract an ambient Cartesian proposal onto the product rigid-body manifold.
@@ -3314,6 +3540,22 @@ fn lm_index(l: usize, m: i32) -> usize {
     l * l + (m + l as i32) as usize
 }
 
+fn tesseral_cartesian(u: [f64; 3], l_max: usize, r: f64) -> (Vec<f64>, Vec<[f64; 3]>) {
+    let (y, dy_du) = tesseral(u, l_max);
+    let mut dy = vec![[0.0; 3]; y.len()];
+    for lm in 0..y.len() {
+        for a in 0..3 {
+            let mut sum = 0.0;
+            for b in 0..3 {
+                let projection = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                sum += dy_du[lm][b] * projection;
+            }
+            dy[lm][a] = sum / r;
+        }
+    }
+    (y, dy)
+}
+
 /// Real tesseral Y_lm(u) and ∂Y/∂u of the harmonic polynomial, |u|=1.
 fn tesseral(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     let n_lm = (l_max + 1) * (l_max + 1);
@@ -3584,20 +3826,54 @@ fn solve3(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
 fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
     let nfeat = j.nrows();
     let ncoord = j.ncols();
-    let mut a = Array2::<f64>::zeros((ncoord, ncoord));
-    let mut rhs = Array1::<f64>::zeros(ncoord);
-    for c in 0..ncoord {
+    let finite =
+        dp.iter().all(|value| value.is_finite()) && j.iter().all(|value| value.is_finite());
+    let (mut a, rhs) = if finite {
+        let mut a = Array2::<f64>::zeros((ncoord, ncoord));
+        let mut rhs = Array1::<f64>::zeros(ncoord);
+        let mut nonzero = Vec::with_capacity(ncoord);
         for i in 0..nfeat {
-            rhs[c] += j[[i, c]] * dp[i];
-        }
-        for d in 0..=c {
-            let mut s = 0.0;
-            for i in 0..nfeat {
-                s += j[[i, c]] * j[[i, d]];
+            nonzero.clear();
+            for c in 0..ncoord {
+                let value = j[[i, c]];
+                if value != 0.0 {
+                    nonzero.push((c, value));
+                    if dp[i] != 0.0 {
+                        rhs[c] += value * dp[i];
+                    }
+                }
             }
-            a[[c, d]] = s;
-            a[[d, c]] = s;
+            for (position, &(c, jc)) in nonzero.iter().enumerate() {
+                for &(d, jd) in &nonzero[..=position] {
+                    a[[c, d]] += jc * jd;
+                }
+            }
         }
+        for c in 0..ncoord {
+            for d in 0..c {
+                a[[d, c]] = a[[c, d]];
+            }
+        }
+        (a, rhs)
+    } else {
+        let mut a = Array2::<f64>::zeros((ncoord, ncoord));
+        let mut rhs = Array1::<f64>::zeros(ncoord);
+        for c in 0..ncoord {
+            for i in 0..nfeat {
+                rhs[c] += j[[i, c]] * dp[i];
+            }
+            for d in 0..=c {
+                let mut sum = 0.0;
+                for i in 0..nfeat {
+                    sum += j[[i, c]] * j[[i, d]];
+                }
+                a[[c, d]] = sum;
+                a[[d, c]] = sum;
+            }
+        }
+        (a, rhs)
+    };
+    for c in 0..ncoord {
         a[[c, c]] += lambda.max(1e-12);
     }
     chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(ncoord))
@@ -3647,11 +3923,78 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    fn pullback_nu3_uncached(
+        x: ArrayView1<f64>,
+        target: ArrayView1<f64>,
+        spec: SoapSpec,
+    ) -> Array1<f64> {
+        let loc = local_nu3_z(x, spec, None);
+        let n_at = loc.nrows();
+        let dim = loc.ncols();
+        let mut dp = Array1::zeros(n_at * dim);
+        for i in 0..n_at {
+            for t in 0..dim {
+                dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
+            }
+        }
+        let j = jacobian_nu3(x, spec, None);
+        let mut dr = tikhonov_jtj(&j, dp.view(), 1e-3);
+        strip_rigid(x, &mut dr);
+        dr
+    }
+
     fn tetra() -> Array1<f64> {
         // Regular tetrahedron, edge ~√8.
         Array1::from_vec(vec![
             1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
         ])
+    }
+
+    #[test]
+    fn proposal_local_cache_matches_independent_recomputation_bit_for_bit() {
+        let x = squashed();
+        let spec = structure_spec(x.view());
+        let local = local_nu3_z(x.view(), spec, None);
+        let mut target = Array1::from_iter(local.iter().copied());
+        for (index, value) in target.iter_mut().enumerate() {
+            *value += ((index + 1) as f64).sin() * 1e-4;
+        }
+        let cached = pullback_nu3(x.view(), target.view(), spec, None, None);
+        let uncached = pullback_nu3_uncached(x.view(), target.view(), spec);
+        assert_eq!(
+            cached
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            uncached
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[cfg(not(feature = "featomic"))]
+    #[test]
+    fn repeated_descriptor_step_matches_uncached_step_bit_for_bit() {
+        let x = squashed();
+        let spec = structure_spec(x.view());
+        DESCRIPTOR_CLOUD_CACHE.with(|slot| *slot.borrow_mut() = None);
+        let mut first_rng = StdRng::seed_from_u64(37);
+        let uncached = step_descriptor(x.view(), spec, 0.4, None, None, None, &mut first_rng);
+        assert!(proposal_moved(x.view(), uncached.view()));
+        let mut second_rng = StdRng::seed_from_u64(37);
+        let cached = step_descriptor(x.view(), spec, 0.4, None, None, None, &mut second_rng);
+        assert_eq!(
+            cached
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            uncached
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        DESCRIPTOR_CLOUD_CACHE.with(|slot| *slot.borrow_mut() = None);
     }
 
     #[test]

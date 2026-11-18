@@ -294,6 +294,73 @@ fn triples_cached(l_max: usize) -> &'static [(usize, usize, usize)] {
 
 /// `∂B/∂c` for one centre, shape `(ace_dim, n_max n_lm)`.
 pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
+    if l_max <= CG_CACHE_MAX {
+        d_from_c_cached(c, n_max, l_max)
+    } else {
+        d_from_c_general(c, n_max, l_max)
+    }
+}
+
+fn fill_radial_coefficients(
+    c: &[f64],
+    n: usize,
+    l_max: usize,
+    n_lm: usize,
+    re: &mut [f64],
+    im: &mut [f64],
+) {
+    for l in 0..=l_max {
+        for m in -(l as i32)..=(l as i32) {
+            let (cr, ci) = coeff(c, n, l, m, n_lm);
+            let at = lm_index(l, m);
+            re[at] = cr;
+            im[at] = ci;
+        }
+    }
+}
+
+fn contract_terms(re: &[f64], im: &[f64], terms: &[CgTerm]) -> f64 {
+    let mut acc = 0.0;
+    for term in terms {
+        let a = (re[term.i1], im[term.i1]);
+        let b = (re[term.i2], im[term.i2]);
+        let d = (re[term.i3], im[term.i3]);
+        let p = cmul(cmul(a, b), (d.0, -d.1));
+        acc += term.g * p.0;
+    }
+    acc
+}
+
+fn update_perturbed_coefficient(
+    c: &[f64],
+    n: usize,
+    lm: usize,
+    n_lm: usize,
+    re: &mut [f64],
+    im: &mut [f64],
+) {
+    let mut l = 0;
+    while (l + 1) * (l + 1) <= lm {
+        l += 1;
+    }
+    let m = lm as i32 - (l * l + l) as i32;
+    let abs_m = m.abs();
+    for changed_m in [-abs_m, abs_m] {
+        let (cr, ci) = coeff(c, n, l, changed_m, n_lm);
+        let at = lm_index(l, changed_m);
+        re[at] = cr;
+        im[at] = ci;
+        if abs_m == 0 {
+            break;
+        }
+    }
+}
+
+fn triple_uses_l((l1, l2, l3): (usize, usize, usize), l: usize) -> bool {
+    l == l1 || l == l2 || l == l3
+}
+
+fn d_from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let n_c = n_max * n_lm;
     let n_b = dim(n_max, l_max);
@@ -306,14 +373,99 @@ pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     if cp.len() < n_c {
         cp.resize(n_c, 0.0);
     }
-    let b0 = from_c(&cp, n_max, l_max);
-    let _ = b0;
+    let trips = triples_cached(l_max);
+    let terms = nonzero_terms(l_max);
+    let mut base_re = vec![0.0; n_max * n_lm];
+    let mut base_im = vec![0.0; n_max * n_lm];
+    for n in 0..n_max {
+        let start = n * n_lm;
+        fill_radial_coefficients(
+            &cp,
+            n,
+            l_max,
+            n_lm,
+            &mut base_re[start..start + n_lm],
+            &mut base_im[start..start + n_lm],
+        );
+    }
+    let mut plus_re = vec![0.0; n_lm];
+    let mut plus_im = vec![0.0; n_lm];
+    let mut minus_re = vec![0.0; n_lm];
+    let mut minus_im = vec![0.0; n_lm];
+    for k in 0..n_c {
+        let n = k / n_lm;
+        let lm = k % n_lm;
+        let mut l = 0;
+        while (l + 1) * (l + 1) <= lm {
+            l += 1;
+        }
+        let old = cp[k];
+        let start = n * n_lm;
+        plus_re.copy_from_slice(&base_re[start..start + n_lm]);
+        plus_im.copy_from_slice(&base_im[start..start + n_lm]);
+        minus_re.copy_from_slice(&base_re[start..start + n_lm]);
+        minus_im.copy_from_slice(&base_im[start..start + n_lm]);
+        cp[k] = old + eps;
+        update_perturbed_coefficient(&cp, n, lm, n_lm, &mut plus_re, &mut plus_im);
+        cp[k] = old - eps;
+        update_perturbed_coefficient(&cp, n, lm, n_lm, &mut minus_re, &mut minus_im);
+        cp[k] = old;
+        for (triple, (&(l1, l2, l3), triple_terms)) in trips.iter().zip(terms).enumerate() {
+            if !triple_uses_l((l1, l2, l3), l) {
+                continue;
+            }
+            let bp = contract_terms(&plus_re, &plus_im, triple_terms);
+            let bm = contract_terms(&minus_re, &minus_im, triple_terms);
+            j[[n * trips.len() + triple, k]] = (bp - bm) / (2.0 * eps);
+        }
+    }
+    j
+}
+
+#[cfg(test)]
+fn d_from_c_cached_full_finite_difference(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let n_c = n_max * n_lm;
+    let n_b = dim(n_max, l_max);
+    let mut j = Array2::<f64>::zeros((n_b, n_c));
+    let eps = 1e-7;
+    let mut cp = c.to_vec();
+    if cp.len() < n_c {
+        cp.resize(n_c, 0.0);
+    }
     for k in 0..n_c {
         let old = cp[k];
         cp[k] = old + eps;
-        let bp = from_c(&cp, n_max, l_max);
+        let bp = from_c_cached(&cp, n_max, l_max);
         cp[k] = old - eps;
-        let bm = from_c(&cp, n_max, l_max);
+        let bm = from_c_cached(&cp, n_max, l_max);
+        cp[k] = old;
+        for r in 0..n_b {
+            j[[r, k]] = (bp[r] - bm[r]) / (2.0 * eps);
+        }
+    }
+    j
+}
+
+fn d_from_c_general(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let n_c = n_max * n_lm;
+    let n_b = dim(n_max, l_max);
+    let mut j = Array2::<f64>::zeros((n_b, n_c));
+    if n_c == 0 {
+        return j;
+    }
+    let eps = 1e-7;
+    let mut cp = c.to_vec();
+    if cp.len() < n_c {
+        cp.resize(n_c, 0.0);
+    }
+    for k in 0..n_c {
+        let old = cp[k];
+        cp[k] = old + eps;
+        let bp = from_c_general(&cp, n_max, l_max);
+        cp[k] = old - eps;
+        let bm = from_c_general(&cp, n_max, l_max);
         cp[k] = old;
         for r in 0..n_b {
             j[[r, k]] = (bp[r] - bm[r]) / (2.0 * eps);
@@ -345,6 +497,26 @@ mod tests {
             assert_eq!(cached.len(), direct.len());
             for (a, b) in cached.iter().zip(direct.iter()) {
                 assert!((a - b).abs() <= 1e-12, "{a} vs {b} at l_max {l_max}");
+            }
+        }
+    }
+
+    #[test]
+    fn selective_derivative_is_bit_identical_to_full_finite_difference() {
+        let n_max = 3;
+        for l_max in [3usize, 6] {
+            let n_c = n_max * (l_max + 1) * (l_max + 1);
+            let c: Vec<f64> = (0..n_c)
+                .map(|i| ((i * 17 + 3) % 23) as f64 * 0.013 - 0.11)
+                .collect();
+            let selective = d_from_c_cached(&c, n_max, l_max);
+            let full = d_from_c_cached_full_finite_difference(&c, n_max, l_max);
+            for (index, (&actual, &expected)) in selective.iter().zip(full.iter()).enumerate() {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "derivative differs at flat index {index}, l_max {l_max}"
+                );
             }
         }
     }
