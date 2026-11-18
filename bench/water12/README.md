@@ -41,8 +41,21 @@ Hostname `bench`, one thread, `H2H_PLATEAU=1`. Δ is the new energy minus the pr
 | 12 | 4 | 291306 | −1660.934286 | −1660.934286 | 0.000 | 53 |
 | 12 | 5 | 151471 | −1660.934286 | −1660.718036 | −216.250 | 26 |
 
-All six (H2O)12 seeds finish on the minimum seeds 0, 3 and 4 already had. Seeds 2 and 5 are 216.250 meV lower than before. Seed 1 is 91.642 meV lower. Seeds 0, 3 and 4 are unchanged at the recorded precision. Seeds 6–11 were not given new CREST runs.
+All six (H2O)12 seeds finish on the minimum seeds 0, 3 and 4 already had. Seeds 2 and 5 are 216.250 meV lower than before. Seed 1 is 91.642 meV lower. Seeds 0, 3 and 4 are unchanged at the recorded precision.
+
+Seeds 6–11 repeat that protocol on new CREST runs. Hostname `bench`, one thread, revision `fd9ae0db`. Each seed is capped at its own CREST count, the plain arm runs, then the plateau arm. Both arms finish at −1660.934286 eV on every seed. Each row carries the wall, the time inside the potential, and the time outside it.
+
+| Seed | Calls | CREST eV | Both arms eV | Leaves |
+| --- | --- | --- | --- | --- |
+| 6 | 266635 | −1660.842606 | −1660.934286 | 48 |
+| 7 | 275307 | −1660.787639 | −1660.934286 | 48 |
+| 8 | 464542 | −1660.842606 | −1660.934286 | 88 |
+| 9 | 301046 | −1660.934308 | −1660.934286 | 57 |
+| 10 | 180088 | −1660.931043 | −1660.934286 | 34 |
+| 11 | 285089 | −1660.934308 | −1660.934286 | 52 |
+
+CREST on seeds 9 and 11 prints −61.03821 Eh. At 27.211386245988 eV per Eh that is −1660.934308 eV, the same minimum once the Hartree figure is read to five decimals. Seeds 6 and 8 stop 91.680 meV higher. Seed 7 stops 146.647 meV higher. Seed 10 stops 3.243 meV higher. The plain arm still reaches −1660.934286 eV on those four seeds.
 
 (H2O)6, six seeds, ends at −829.852228 eV on every seed. The previous energies agree to better than 0.001 meV. (H2O)8 ends at −1106.995547 eV on every seed, the same minimum as before.
 
-The rows are `bench/water12/water.csv`. The Lennard-Jones seeds are `bench/water12/lj.csv`.
+The rows are `bench/water12/water.csv`. Seeds 6–11 are `bench/water12/panel.csv`. The Lennard-Jones seeds are `bench/water12/lj.csv`.
