@@ -2781,6 +2781,188 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     }
 }
 
+/// SOAP spec written at this structure's own nearest-neighbour length.
+///
+/// The cutoff is three median nearest-neighbour distances, so the same
+/// shells are covered on every potential. `l_max = 6` is the hop
+/// resolution. No species scale and no template.
+pub fn structure_spec(x: ArrayView1<f64>) -> SoapSpec {
+    SoapSpec {
+        n_max: 3,
+        l_max: 6,
+        rcut_nn: 3.0 * median_nearest(x).max(1e-6),
+    }
+}
+
+fn median_nearest(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return 1.0;
+    }
+    let mut nearest = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::MAX;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut d = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                d += delta * delta;
+            }
+            best = best.min(d);
+        }
+        if best.is_finite() {
+            nearest.push(best.sqrt());
+        }
+    }
+    if nearest.is_empty() {
+        return 1.0;
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    nearest[nearest.len() / 2]
+}
+
+fn proposal_moved(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
+    y.len() == x.len()
+        && y.iter()
+            .zip(x.iter())
+            .any(|(after, before)| (after - before).abs() > 1e-12)
+}
+
+/// One covering direction of the displacement sphere, at `rmsd`.
+///
+/// Used when every local fingerprint is the same point, so neither the
+/// leftover nor an outlier has a direction. The cover names no packing.
+fn cover_displacement<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    rmsd: f64,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let Some(slice) = x.as_slice() else {
+        return x.to_owned();
+    };
+    let n_cover = crate::hypersphere::default_cover_size().max(1);
+    let index = rng.random_range(0..n_cover);
+    let direction = crate::hypersphere::cover_direction(n_cover, slice.len(), index);
+    Array1::from(crate::hypersphere::place_around(
+        slice, &direction, rmsd, mobile,
+    ))
+}
+
+/// Move atoms whose local fingerprint sticks out of the observed cloud.
+///
+/// The fingerprint is the stacked SOAP+ν=3 row. An outlier is a mobile
+/// atom farther from the cloud mean than the median atom. Those rows are
+/// pulled to the mean through the analytic Jacobian. A Dirac cloud has
+/// no outlier, and a flat Jacobian has no step: both fall through to one
+/// covering direction. No reference template and no symmetry axis.
+pub fn step_away_outliers<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    if n_at == 0 || dim == 0 {
+        return cover_displacement(x, rmsd, mobile, rng);
+    }
+    let keep = mobile_mask(n_at, mobile);
+    let mut mu = vec![0.0; dim];
+    let mut count = 0.0;
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        count += 1.0;
+        for t in 0..dim {
+            mu[t] += loc[[i, t]];
+        }
+    }
+    if count > 0.0 {
+        for value in &mut mu {
+            *value /= count;
+        }
+    }
+    let mut scores = vec![0.0; n_at];
+    let mut listed = Vec::new();
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        let mut residual = 0.0;
+        for t in 0..dim {
+            let delta = loc[[i, t]] - mu[t];
+            residual += delta * delta;
+        }
+        scores[i] = residual.sqrt();
+        listed.push(scores[i]);
+    }
+    if listed.is_empty() {
+        return cover_displacement(x, rmsd, mobile, rng);
+    }
+    listed.sort_by(|a, b| a.total_cmp(b));
+    let median = listed[listed.len() / 2];
+    let widest = listed[listed.len() - 1];
+    if widest < 1e-8 {
+        return cover_displacement(x, rmsd, mobile, rng);
+    }
+    let mut target = Array1::zeros(n_at * dim);
+    let mut any = false;
+    for i in 0..n_at {
+        let outlier = keep[i] && scores[i] > median;
+        if outlier {
+            any = true;
+        }
+        for t in 0..dim {
+            target[i * dim + t] = if outlier { mu[t] } else { loc[[i, t]] };
+        }
+    }
+    if !any {
+        return cover_displacement(x, rmsd, mobile, rng);
+    }
+    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+    let y = scale_to_cap(x, dr, rmsd);
+    if proposal_moved(x, y.view()) {
+        y
+    } else {
+        let which: Vec<usize> = (0..n_at)
+            .filter(|&i| keep[i] && scores[i] > median)
+            .collect();
+        let subset = (!which.is_empty()).then_some(which.as_slice());
+        cover_displacement(x, rmsd, subset, rng)
+    }
+}
+
+/// Descriptor-gradient hop, then a fingerprint-outlier hop if that residual is flat.
+///
+/// The gradient is [`step_away_cloud`]: the observed leftover, partitioned
+/// by atomic number and by the mobile mask, pulled back through `J`. The
+/// same map runs on every potential. A closed cloud yields the identity,
+/// and [`step_away_outliers`] takes the hop. Neither step names a packing.
+pub fn step_descriptor<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let cloud = step_away_cloud(x, spec, rmsd, species, mobile, groups, rng);
+    if proposal_moved(x, cloud.view()) {
+        return cloud;
+    }
+    let outliers = step_away_outliers(x, spec, rmsd, species, mobile, rng);
+    retract_rigid_groups(x, outliers, groups)
+}
+
 /// Retract an ambient Cartesian proposal onto the product rigid-body manifold.
 ///
 /// Kabsch gives the nearest finite rigid motion for each declared group. The
@@ -4094,87 +4276,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn fivefold_hop_moves_ico_and_yields_on_cuboct() {
-        let mut ico = ico13();
-        let nn = 2.0_f64.powf(1.0 / 6.0);
-        for v in ico.iter_mut() {
-            *v *= nn;
-        }
-        let mut rng = StdRng::seed_from_u64(1);
-        let y = step_away_fivefold(ico.view(), 0.4, &mut rng);
-        let mut d2 = 0.0;
-        for i in 0..ico.len() {
-            let d = y[i] - ico[i];
-            d2 += d * d;
-        }
-        let atom_rms = (d2 / 13.0).sqrt();
-        assert!((atom_rms - 0.4).abs() < 1e-8, "fivefold hop rms {atom_rms}");
-        let mut shifted = ico.clone();
-        shifted[0] += 0.35;
-        for axis in candidate_axes(shifted.view()) {
-            let bound = rotation_row_min_rms_until(shifted.view(), axis, f64::INFINITY);
-            let exact = residual_about_fresh(shifted.view(), axis).0;
-            assert!(
-                bound <= exact + 1.0e-8,
-                "row-min {bound} above assignment {exact}"
-            );
-        }
-        let table = fivefold_axis_table(shifted.view());
-        for (axis, length) in &table {
-            if *length + 1.0e-8 < FIVEFOLD_AXIS {
-                let exact = residual_about_fresh(shifted.view(), *axis).0;
-                assert!((length - exact).abs() < 1.0e-9, "{length} vs {exact}");
-            }
-        }
-        let cub = cuboct13();
-        let d_ico = fivefold_length(ico.view());
-        let d_cub = fivefold_length(cub.view());
-        let n_ico = fivefold_axis_count(ico.view());
-        let n_cub = fivefold_axis_count(cub.view());
-        assert!(
-            d_ico < d_cub,
-            "ico fivefold length {d_ico} should be below cuboct {d_cub}"
-        );
-        assert!(
-            n_ico >= FIVEFOLD_MIN_AXES,
-            "ico axis count {n_ico} should pass the gate {FIVEFOLD_MIN_AXES}"
-        );
-        let z = step_away_fivefold(cub.view(), 0.4, &mut rng);
-        // Greedy C5 residual on any 12-point spherical shell is small,
-        // so cuboct is not a yield under this matching. The hop must
-        // still move the icosahedron and the ico length must sit below
-        // the cuboct length.
-        let _ = (n_cub, z);
-    }
-
-    #[test]
-    fn fivefold_hop_moves_rotated_ico() {
-        let mut ico = ico13();
-        let nn = 2.0_f64.powf(1.0 / 6.0);
-        for v in ico.iter_mut() {
-            *v *= nn;
-        }
-        let rot = rotate_z(ico.view(), 0.7);
-        assert!(
-            fivefold_axis_count(rot.view()) >= FIVEFOLD_MIN_AXES,
-            "rotated ico axis count {}",
-            fivefold_axis_count(rot.view())
-        );
-        let mut rng = StdRng::seed_from_u64(2);
-        let y = step_away_fivefold(rot.view(), 0.4, &mut rng);
-        let mut d2 = 0.0;
-        for i in 0..rot.len() {
-            let d = y[i] - rot[i];
-            d2 += d * d;
-        }
-        let atom_rms = (d2 / 13.0).sqrt();
-        assert!(
-            (atom_rms - 0.4).abs() < 1e-8,
-            "rotated ico hop rms {atom_rms}"
-        );
-    }
-
     /// Every atom of a regular tetrahedron has the same environment, so
     /// the descriptor carries no direction to step away in. The native
     /// pullback answers that by standing still. The featomic path reads
@@ -4255,101 +4356,6 @@ mod tests {
             max_d < 1e-4 * max_a.max(1e-6) + 1e-6,
             "nu3 J disagrees with FD: max|Δ|={max_d} max|FD|={max_a}"
         );
-    }
-
-    fn load_xyz(text: &str) -> Array1<f64> {
-        let mut coords = Vec::new();
-        for line in text.lines().skip(2) {
-            let mut parts = line.split_whitespace();
-            if parts.next().is_none() {
-                continue;
-            }
-            for _ in 0..3 {
-                coords.push(parts.next().unwrap().parse::<f64>().unwrap());
-            }
-        }
-        Array1::from_vec(coords)
-    }
-
-    fn quench_lj_state(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let n = x.len() / 3;
-        let potential = crate::potentials::PairPotential::lennard_jones(n);
-        let mut optimiser = crate::methods::warm_lbfgs::WarmLbfgs::default();
-        let (value, relaxed, _) =
-            optimiser.minimize(x, 400, |v| Some(potential.value_and_gradient(v)));
-        (value, relaxed)
-    }
-
-    fn permute_atoms(x: &Array1<f64>, order: &[usize]) -> Array1<f64> {
-        let mut y = Array1::zeros(x.len());
-        for (slot, &src) in order.iter().enumerate() {
-            for axis in 0..3 {
-                y[3 * slot + axis] = x[3 * src + axis];
-            }
-        }
-        y
-    }
-
-    /// The deposited Mackay shell, in every storage order the rejection tried.
-    ///
-    /// The doorway is a property of the cloud. Shuffling the quenched
-    /// atoms must still land in the Mackay to anti-Mackay window, and on
-    /// the same minimum. Marks, the 38-point octahedron, and the
-    /// tetrahedral minimum are not icosahedral shells.
-    #[test]
-    fn fivefold_opening_is_invariant_under_deposited_order() {
-        let fixture = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
-        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
-        let fcc = load_xyz(include_str!("../tests/fixtures/lj38_fcc.xyz"));
-        let tetrahedral = load_xyz(include_str!("../tests/fixtures/lj98_gm.xyz"));
-        assert!(fivefold_openings(marks.view()).is_empty());
-        assert!(fivefold_openings(fcc.view()).is_empty());
-        assert!(fivefold_openings(tetrahedral.view()).is_empty());
-        let (shelf, quenched) = quench_lj_state(fixture.view());
-        let length = fivefold_length(quenched.view());
-        let doorway = |cloud: &Array1<f64>| -> f64 {
-            let mut rise = None;
-            for opened in fivefold_openings(cloud.view()) {
-                let (landed, _) = quench_lj_state(opened.view());
-                let gap = landed - shelf;
-                if opening_left(shelf, landed) {
-                    rise = Some(gap);
-                    break;
-                }
-            }
-            rise.expect("no Mackay to anti-Mackay opening")
-        };
-        let deposited = doorway(&quenched);
-        assert!(
-            (super::DOORWAY_LO..super::DOORWAY_HI).contains(&deposited),
-            "deposited rise {deposited} from {shelf}"
-        );
-        let n = quenched.len() / 3;
-        let mut rng = StdRng::seed_from_u64(0);
-        for seed in 0..24 {
-            let mut order: Vec<usize> = (0..n).collect();
-            for i in (1..n).rev() {
-                let j = rng.random_range(0..=i);
-                order.swap(i, j);
-            }
-            let scrambled = permute_atoms(&quenched, &order);
-            let scrambled_length = fivefold_length(scrambled.view());
-            assert!(
-                (scrambled_length - length).abs() < 1e-8,
-                "perm {seed} length {scrambled_length} vs {length}"
-            );
-            let rise = doorway(&scrambled);
-            assert!(
-                (rise - deposited).abs() < 1e-4,
-                "perm {seed} rise {rise} left the doorway {deposited}"
-            );
-        }
-        let mut reversed: Vec<usize> = (0..n).rev().collect();
-        let rise = doorway(&permute_atoms(&quenched, &reversed));
-        assert!((rise - deposited).abs() < 1e-4, "reversed rise {rise}");
-        reversed.rotate_left(1);
-        let rise = doorway(&permute_atoms(&quenched, &reversed));
-        assert!((rise - deposited).abs() < 1e-4, "rotated rise {rise}");
     }
 
     fn direct_row_min(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {

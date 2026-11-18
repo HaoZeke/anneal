@@ -1304,23 +1304,29 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         }
         // SOAP has no direction. One point of the Plasencia cover of
         // the displacement sphere is the generic rearrangement. The
-        // fivefold residual is the fallback when that placement does
-        // not move, and the kick remains only if that residual is flat.
-        // The kick's Jacobian is not read when an earlier step moves.
-        // Its two uniform draws per mean component still are, so the
-        // stream stays the one the gradient path would have left.
+        // fingerprint-outlier residual is the fallback when that
+        // placement does not move, and the kick remains only if that
+        // residual is flat. The kick's Jacobian is not read when an
+        // earlier step moves. Its two uniform draws per mean component
+        // still are, so the stream stays the one the gradient path
+        // would have left.
         let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
-        let five = crate::soap::step_away_fivefold_measured(x, rmsd);
-        if displacement_rms(&covered, x) > 1e-6 || displacement_rms(&five, x) > 1e-6 {
+        let spec = crate::soap::SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: rcut,
+        };
+        let outliers = crate::soap::step_away_outliers(x, spec, rmsd, species, mobile, rng);
+        if displacement_rms(&covered, x) > 1e-6 || displacement_rms(&outliers, x) > 1e-6 {
             for _ in 0..values.cloud_mean.len() {
                 let _: f64 = rng.random();
                 let _: f64 = rng.random();
             }
-            return first_that_moves(x, &[covered, five]);
+            return first_that_moves(x, &[covered, outliers]);
         }
         let s = spectrum(x, rcut, species, mobile);
         let kick = packing_kick(x, &s, rmsd, mobile, rng);
-        return first_that_moves(x, &[covered, five, kick]);
+        return first_that_moves(x, &[covered, outliers, kick]);
     }
     let mut s = spectrum(x, rcut, species, mobile);
     focus_patch(&mut s, x, rcut, rng);
@@ -1465,9 +1471,14 @@ mod tests {
                 return x.to_owned();
             }
             let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
-            let five = crate::soap::step_away_fivefold_measured(x, rmsd);
+            let spec = crate::soap::SoapSpec {
+                n_max: 3,
+                l_max: 6,
+                rcut_nn: rcut,
+            };
+            let outliers = crate::soap::step_away_outliers(x, spec, rmsd, species, mobile, rng);
             let kick = packing_kick(x, &s, rmsd, mobile, rng);
-            return first_that_moves(x, &[covered, five, kick]);
+            return first_that_moves(x, &[covered, outliers, kick]);
         }
         focus_patch(&mut s, x, rcut, rng);
         let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
