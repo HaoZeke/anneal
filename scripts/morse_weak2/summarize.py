@@ -71,15 +71,27 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
         for arm in ARMS:
             rows = grouped[system][arm]
             rows.sort(key=lambda row: int(row["seed"]))
-            if tuple(int(row["seed"]) for row in rows) != SEEDS:
-                raise SystemExit(f"{system} {arm} has incomplete seeds")
+            seeds = tuple(int(row["seed"]) for row in rows)
+            if seeds != SEEDS[: len(seeds)]:
+                raise SystemExit(f"{system} {arm} seeds are not an ordered prefix")
     return grouped
+
+
+def complete_systems(
+    grouped: dict[str, dict[str, list[dict[str, str]]]],
+) -> tuple[str, ...]:
+    return tuple(
+        system
+        for system in SYSTEMS
+        if all(len(grouped[system][arm]) == len(SEEDS) for arm in ARMS)
+    )
 
 
 def main() -> None:
     if len(sys.argv) > 2 or (len(sys.argv) == 2 and sys.argv[1] != "--check"):
         raise SystemExit("usage: summarize.py [--check]")
     grouped = load_rows()
+    complete = complete_systems(grouped)
     revisions = sorted({row["code_revision"] for s in SYSTEMS for a in ARMS for row in grouped[s][a]})
     summary = [
         "system,base_hits,fix_hits,n,base_median_calls,fix_median_calls,"
@@ -87,16 +99,19 @@ def main() -> None:
     ]
     readme = [
         "Copyright (c) anneal developers", "",
-        "# Default adaptive-search gate", "",
+        "# Rejected adaptive-default gate", "",
         "Same-session current `Config::recommended` against the proposed adaptive default.",
         "Seeds 2000-2011, host `bench`, serial `taskset -c 0`, paper call budgets, no wall cap.",
         f"code_revision {', '.join(revisions)}.",
-        "Misses are censored at their call budget.", "",
+        "Misses are censored at their call budget.",
+        "The gate stopped after the first exact hit-count regressions; later systems are therefore",
+        "intentionally incomplete append-only evidence, not an asserted full-panel result.",
+        "The adaptive machinery remains opt-in.", "",
         "| system | budget | base hits | fix hits | base med calls | fix med calls | "
         "base wall s | fix wall s | Fisher p | U | MW p | wall ratio |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    for system in SYSTEMS:
+    for system in complete:
         base = grouped[system][ARMS[0]]
         fix = grouped[system][ARMS[1]]
         base_hits = sum(row["hit"] == "1" for row in base)
