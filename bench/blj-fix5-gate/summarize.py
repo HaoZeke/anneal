@@ -232,7 +232,9 @@ def render_verdict_block(summary: list[dict[str, str]]) -> str:
     hit_drops = [r for r in summary if r["hit_drop"] == "yes"]
     call_incs = [r for r in summary if r["call_increase"] == "yes"]
 
-    lines = [f"**Verdict: {overall}**"]
+    lines = [
+        f"**Verdict: {overall}** (Arm B: `cb8ee65b`, tree `208b1b1d`)",
+    ]
     if loses:
         reasons = []
         for r in loses:

@@ -3,7 +3,7 @@
 Paired serial benchmark comparing:
 
 - **Arm A**: `develop` (`21cd57b6eb0b4d79ff86a5769632b65f3e6ccd82`)
-- **Arm B**: `15f38ac242101fa9c5ffa528566cfd485af0f157` + `anneal-blj-fix5.mbox` (tree `208b1b1d3e8ec79a40d8fdea069a4871fbb1d821`)
+- **Arm B**: `cb8ee65b` (tree `208b1b1d`; `cb8ee65bcc52a19b30be286ad1333fd2e4b2945f` on `fix/blj-fix3`, identical tree `208b1b1d3e8ec79a40d8fdea069a4871fbb1d821` to `15f38ac242101fa9c5ffa528566cfd485af0f157` + `anneal-blj-fix5.mbox`)
 
 ## Panels and sample sizes
 
@@ -17,6 +17,11 @@ Paired serial benchmark comparing:
 - Serial execution in one session under `unshare --uts` with hostname `bench`, `taskset -c 0`, and `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `RAYON_NUM_THREADS=1`.
 - Arms A and B are interleaved per seed, flipping order (`A, B` vs `B, A`) on alternating seeds, with a fresh process per run and append-only rows in `rows.csv`.
 - Two-sided Fisher exact test on hits and two-sided tie-corrected Mann--Whitney U test on all-seed `evals_to_hit` (misses entered at budget). Medians are Hyndman--Fan type 7.
+
+## CSV notes
+
+- `rows.csv` keeps the recorded `code_revision` strings unchanged: `21cd57b6eb0b4d79ff86a5769632b65f3e6ccd82` on Arm A rows and the local `git am` commit `94ae35afbde33925affdb41e9e47afb8730ebc2d` on Arm B rows.
+- Arm B (`94ae35af`) has tree `208b1b1d3e8ec79a40d8fdea069a4871fbb1d821`, which equals `cb8ee65bcc52a19b30be286ad1333fd2e4b2945f^{tree}`; Arm B in `rows.csv` and `summary.csv` corresponds to `cb8ee65b (tree 208b1b1d)`.
 
 ## Results
 
@@ -41,7 +46,7 @@ Paired serial benchmark comparing:
 ## Verdict
 
 <!-- gate verdict: start -->
-**Verdict: PASS**
+**Verdict: PASS** (Arm B: `cb8ee65b`, tree `208b1b1d`)
 
 Hit drops: none.
 
