@@ -293,10 +293,6 @@ fn apply_overrides(cfg: &mut Config) {
         let real = || value.parse::<f64>().expect("number");
         let count = || value.parse::<usize>().expect("integer");
         match key {
-            "orbit_complete_on_new" => cfg.orbit_complete_on_new = flag(),
-            "point_symmetrise_on_new" => cfg.point_symmetrise_on_new = flag(),
-            "symmetrise_on_stall" => cfg.symmetrise_on_stall = flag(),
-            "symmetrise_patience" => cfg.symmetrise_patience = count(),
             "return_screen" => cfg.return_screen = flag(),
             "allocate_moves" => cfg.allocate_moves = flag(),
             "depth_reward" => cfg.depth_reward = flag(),

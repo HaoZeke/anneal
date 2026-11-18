@@ -18,9 +18,6 @@ fn a_short_molecular_rebuild_does_not_index_past_the_arm_list() {
     cfg.restart_on_stall = false;
     cfg.trail_on_stall = false;
     cfg.jump_on_stall = false;
-    cfg.symmetrise_on_stall = false;
-    cfg.point_symmetrise_on_new = false;
-    cfg.orbit_complete_on_new = false;
     cfg.bayes_screen = false;
     cfg.calibrated_screen = false;
     cfg.finish_improving = false;

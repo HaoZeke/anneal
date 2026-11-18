@@ -186,7 +186,6 @@ fn cmd_run(args: &[String]) -> i32 {
             cfg.soap_mode = SoapProposalMode::Off;
         }
         if switches.all_off {
-            cfg.symmetrise_on_stall = false;
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
         }
     }
