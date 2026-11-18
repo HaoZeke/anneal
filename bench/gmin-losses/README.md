@@ -58,3 +58,17 @@ It remains off.
 `scripts/gmin_panel/run_fix_gate.py`. The fix is eligible to become the
 default only when all thirteen baseline/fix pairs have no lost seed. Held-out
 rows use seeds 3000--3011 for M80 rho=6 and LJ150 and include GMIN.
+
+The full gate on reviewed base `628773d6` and candidate `2b987493` was
+negative. Both arms used the same template ablation, whose patched base tree
+is `a9cef902826cc328e28dd77d2fd95689686c4697`. M80 rho=6 improved from
+0/12 to 6/12 (`p=0.01373`), but LJ150 remained 0/12. The candidate also lost
+seeds on LJ75 (9/12 to 6/12), LJ98 (3/12 to 1/12), LJ103 (2/12 to 0/12),
+and Au55 (3/12 to 2/12). It therefore remains opt-in.
+
+The zero LJ150 baseline is itself material: removing all named builders and
+template paths is substantially harder than merely removing the historical
+Mackay cap. The adaptive population does not recover that loss at the paper
+budget. `summary.csv` contains Fisher exact and tie-corrected Mann--Whitney
+statistics plus median wall, potential, and outside-potential times for every
+system. No manuscript claim was changed.
