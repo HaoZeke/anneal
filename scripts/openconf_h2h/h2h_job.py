@@ -87,7 +87,14 @@ def write_trace(path: Path, symbols: list[str], frames: list[tuple[np.ndarray, f
     path.write_text("\n".join(lines) + "\n")
 
 
-def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | None = None) -> dict:
+def run_anneal(
+    row: dict,
+    seed: int,
+    budget: int,
+    out: Path,
+    local_step: str | None = None,
+    quench_gradient: float | None = None,
+) -> dict:
     import anneal
 
     mol = hc.build_mol(row["smiles"])
@@ -110,7 +117,9 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         harvest.gradient(x, g)
         return g
 
-    extra = {} if local_step is None else {"local_step": local_step}
+    extra: dict = {} if local_step is None else {"local_step": local_step}
+    if quench_gradient is not None:
+        extra["quench_gradient"] = quench_gradient
     # A search that raises is a finished run with what it harvested.
     error = None
     result: dict = {}
@@ -153,7 +162,8 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         "local_step": result.get("local_step"),
         "quench_seconds": result.get("quench_seconds"),
         "settings": "cluster_search recommended_molecular, energy scale 1 eV, local step "
-        + (local_step or "preset"),
+        + (local_step or "preset")
+        + (f", quench gradient {quench_gradient:g}" if quench_gradient is not None else ""),
     }
 
 
@@ -312,6 +322,7 @@ def main() -> int:
     parser.add_argument("--budget", type=int, default=0)
     parser.add_argument("--crest", default=os.environ.get("CREST_BIN", "crest"))
     parser.add_argument("--local-step", choices=["lbfgs", "tric", "auto"], help="anneal quench; default the preset's")
+    parser.add_argument("--quench-gradient", type=float, help="anneal full-quench gtol (eV/A); default the preset's")
     parser.add_argument("--anneal-path", type=Path, help="import anneal from this directory first (the develop arm)")
     args = parser.parse_args()
     row = hc.molecules()[args.molecule]
@@ -323,7 +334,7 @@ def main() -> int:
     if args.arm in ("anneal", "develop"):
         if args.budget < 1:
             raise SystemExit("anneal needs --budget")
-        info = run_anneal(row, args.seed, args.budget, args.out, args.local_step)
+        info = run_anneal(row, args.seed, args.budget, args.out, args.local_step, args.quench_gradient)
         import anneal
 
         info["anneal_module"] = str(Path(anneal.__file__).resolve().parent)
