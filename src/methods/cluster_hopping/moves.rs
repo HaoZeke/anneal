@@ -944,6 +944,14 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
                 })
             })
     };
+    let terminal_tip = |i: usize, across: usize| {
+        adj[i].len() == 2
+            && adj[i]
+                .iter()
+                .copied()
+                .find(|&a| a != across)
+                .is_some_and(|a| adj[a].len() == 1)
+    };
     // Three or more identical terminal tips (such as a methyl) map onto
     // themselves under rotation; two identical tips do so only when the
     // pivot is planar (such as -NO2 or an sp2 -NH2), whereas a pyramidal
@@ -981,7 +989,10 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
             fixed,
             pivot,
             side,
-            constrained: planar_neighbourhood(i, j) && (flat_pivot(i) || flat_pivot(j)),
+            constrained: planar_neighbourhood(i, j)
+                && ((flat_pivot(i) && flat_pivot(j))
+                    || (flat_pivot(i) && terminal_tip(j, i))
+                    || (flat_pivot(j) && terminal_tip(i, j))),
         });
     }
     out
