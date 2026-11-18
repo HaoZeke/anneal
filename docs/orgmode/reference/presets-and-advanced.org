@@ -37,13 +37,14 @@ The block under the constructor is the example =cargo test --doc= runs.
   assert_eq!(cfg.relax_steps, 1000);
   #+end_src
 
-- =communicating(n)= :: Thompson allocation, the return screen, and Recognition.
+- =communicating(n)= :: symmetry completion of new basins, Thompson allocation, the return screen, and Recognition.
 
   #+begin_src rust
   use anneal_core::methods::cluster_hopping::Config;
   let cfg = Config::communicating(38);
   assert!(cfg.allocate_moves && cfg.return_screen);
   assert_eq!(cfg.shared_deposits, 0);
+  assert!(cfg.symmetry_completion_on_new);
   #+end_src
 
 - =packing_superbasin(n)= :: the LeanBurst stack with adaptive height.
