@@ -144,10 +144,8 @@ fn cmd_run(args: &[String]) -> i32 {
     };
     let budget = env_budget().unwrap_or(spec.budget);
     let mut cfg = Config::recommended(spec.n);
-    // Unset leaves the preset's structure priors on. `0` turns off the
-    // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
-    // labelled core, the motif reseed, stall symmetrisation (and its
-    // Ih withholding) and the continuous-symmetry reseed.
+    // Unset leaves the preset's optional SOAP and symmetry moves on. `0`
+    // turns off SOAP, stall symmetrisation, and continuous symmetry.
     if let Ok(text) = std::env::var("H2H_PRIORS") {
         let text = text.trim();
         let all_off = text == "0" || text == "none";
@@ -155,18 +153,6 @@ fn cmd_run(args: &[String]) -> i32 {
         if listed("soap") {
             cfg.prior_soap = false;
             cfg.soap_mode = SoapProposalMode::Off;
-        }
-        if listed("reseed") {
-            cfg.prior_reseed = false;
-        }
-        if listed("growth") {
-            cfg.prior_growth = false;
-        }
-        if listed("core") {
-            cfg.prior_core = false;
-        }
-        if listed("motif") {
-            cfg.prior_motif = false;
         }
         if all_off {
             cfg.symmetrise_on_stall = false;

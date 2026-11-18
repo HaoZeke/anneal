@@ -13,8 +13,8 @@
 //! (`81d6bffc`). Linking IRA no longer changes this walk, so the
 //! feature build keeps the Hungarian record.
 //!
-//! Removing structure-specific proposals changes the LJ38 pin. LJ98's
-//! short trajectory is unchanged.
+//! Removing structure-specific proposals changes the LJ38 pin. The
+//! species-free first-block plain warmup keeps the short LJ98 pin.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;

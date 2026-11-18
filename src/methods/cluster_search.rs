@@ -769,8 +769,10 @@ where
         .as_deref()
         .filter(|_| cfg.precondition_bonds)
         .filter(|z| z.len() == cfg.n_points);
-    let mut surfaces = (!cfg.surfaces.is_empty())
-        .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
+    let mut surfaces = (!cfg.surfaces.is_empty()).then(|| {
+        crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed)
+            .with_plain_warmup(cfg.species.is_none())
+    });
     let mut anchor: Option<Array1<f64>> = None;
     let refuse_overlap = cfg.species.is_some();
     let wall = CallWall::of(cfg);
@@ -1149,7 +1151,9 @@ where
             (f, xr)
         };
         if let Some(portfolio) = surfaces.as_mut() {
-            portfolio.observe(screening, f, target);
+            let charged = led.spent().saturating_sub(before);
+            let charged = u64::try_from(charged).unwrap_or(u64::MAX);
+            portfolio.observe(screening, f, target, charged);
         }
         // A descent stopped on a verdict is known not to be converged, so
         // asking is spending an evaluation on an answer already in hand. The
@@ -2710,7 +2714,7 @@ mod tests {
         let cfg = Config::recommended(8);
         assert!(
             !cfg.surfaces.is_empty(),
-            "the preset installs a two-phase surface below 98 points"
+            "the preset installs a measured two-phase surface at every size"
         );
         let objective = PairPotential::lennard_jones(8);
         let mut x = Array1::zeros(24);

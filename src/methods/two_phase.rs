@@ -594,6 +594,18 @@ pub struct SurfacePortfolio {
     latest_best: f64,
     /// Lowest plain energy any full relaxation of the block reached.
     block_lowest: f64,
+    /// Charged work spent by relaxations in this block.
+    block_work: u64,
+    /// Transformed arms that proved unproductive for this run.
+    retired: Vec<bool>,
+    /// Settled non-neutral blocks per arm.
+    arm_blocks: Vec<u32>,
+    /// Sum of per-call rewards per arm.
+    arm_reward_sum: Vec<f64>,
+    /// Consecutive non-positive settled blocks per arm.
+    arm_stall_blocks: Vec<u32>,
+    /// Start on the plain arm for the block with no incumbent best.
+    first_block_plain: bool,
     rng: StdRng,
 }
 
@@ -637,6 +649,7 @@ impl SurfacePortfolio {
             })
             .collect::<Vec<_>>();
         let _ = parameters;
+        let arm_len = arms.len();
         Self {
             allocator: DepthAllocator::new(arms.len()),
             own_moments: vec![RewardMoments::default(); arms.len()],
@@ -653,8 +666,22 @@ impl SurfacePortfolio {
             block_start_best: f64::INFINITY,
             latest_best: f64::INFINITY,
             block_lowest: f64::INFINITY,
+            block_work: 0,
+            retired: vec![false; arm_len],
+            arm_blocks: vec![0; arm_len],
+            arm_reward_sum: vec![0.0; arm_len],
+            arm_stall_blocks: vec![0; arm_len],
+            first_block_plain: false,
             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
         }
+    }
+
+    /// Force the first block (before any incumbent best exists) to use the
+    /// plain arm. Useful for species-free starts where random transformed
+    /// warmup can burn budget before there is any reward signal.
+    pub fn with_plain_warmup(mut self, enabled: bool) -> Self {
+        self.first_block_plain = enabled;
+        self
     }
 
     /// Draw from and credit a posterior shared with other chains.
@@ -705,18 +732,41 @@ impl SurfacePortfolio {
     pub fn note_perturbed_input(&mut self, _perturbed: &SourceTransferKey) {}
 
     fn select_arm(&mut self) -> usize {
+        if self.retired.iter().skip(1).all(|retired| *retired) {
+            return 0;
+        }
         if let Some(key) = self.block_source.clone() {
             if let Some(shared) = self.shared.as_ref() {
                 let book = shared.lock().expect("shared surface allocator");
                 if let Some(allocator) = book.decision_allocator(&key) {
-                    return allocator.select(&mut self.rng);
+                    let arm = allocator.select(&mut self.rng);
+                    return if self.retired.get(arm).copied().unwrap_or(false) {
+                        0
+                    } else {
+                        arm
+                    };
                 }
             } else if let Some(allocator) = self.local_decision(&key) {
-                return allocator.select(&mut self.rng);
+                let arm = allocator.select(&mut self.rng);
+                return if self.retired.get(arm).copied().unwrap_or(false) {
+                    0
+                } else {
+                    arm
+                };
             }
-            return DepthAllocator::new(self.arms.len()).select(&mut self.rng);
+            let arm = DepthAllocator::new(self.arms.len()).select(&mut self.rng);
+            return if self.retired.get(arm).copied().unwrap_or(false) {
+                0
+            } else {
+                arm
+            };
         }
-        self.allocator.select(&mut self.rng)
+        let arm = self.allocator.select(&mut self.rng);
+        if self.retired.get(arm).copied().unwrap_or(false) {
+            0
+        } else {
+            arm
+        }
     }
 
     fn local_decision(&self, key: &SourceTransferKey) -> Option<DepthAllocator> {
@@ -795,7 +845,11 @@ impl SurfacePortfolio {
         }
         if self.held.is_none() {
             self.block_source = self.occupied.clone();
-            self.held = Some(self.select_arm());
+            self.held = Some(if self.first_block_plain && !self.latest_best.is_finite() {
+                0
+            } else {
+                self.select_arm()
+            });
             self.hops_in_block = self.hops_in_block.max(1);
             self.block_start_best = self.latest_best;
         }
@@ -804,7 +858,8 @@ impl SurfacePortfolio {
 
     /// Records what a full relaxation on the held arm reached against the
     /// run's best.
-    pub fn observe(&mut self, screening: bool, reached: f64, best: f64) {
+    pub fn observe(&mut self, screening: bool, reached: f64, best: f64, charged_work: u64) {
+        self.block_work = self.block_work.saturating_add(charged_work);
         if screening {
             return;
         }
@@ -832,6 +887,31 @@ impl SurfacePortfolio {
             } else {
                 0.0
             };
+            let has_peer_signal = self.block_source.as_ref().is_some_and(|key| {
+                self.peer_by_source
+                    .get(key)
+                    .is_some_and(|arms| arms.iter().any(|arm| arm.count > 0))
+            }) || self.peer_unscoped.iter().any(|arm| arm.count > 0);
+            if self.shared.is_none()
+                && !has_peer_signal
+                && arm > 0
+                && self.block_start_best.is_finite()
+                && self.block_lowest.is_finite()
+            {
+                self.arm_blocks[arm] = self.arm_blocks[arm].saturating_add(1);
+                let reward_per_call = reward / self.block_work.max(1) as f64;
+                self.arm_reward_sum[arm] += reward_per_call;
+                if reward <= 0.0 {
+                    self.arm_stall_blocks[arm] = self.arm_stall_blocks[arm].saturating_add(1);
+                } else {
+                    self.arm_stall_blocks[arm] = 0;
+                }
+                let blocks = self.arm_blocks[arm].max(1);
+                let mean = self.arm_reward_sum[arm] / f64::from(blocks);
+                if self.arm_stall_blocks[arm] >= 6 && mean <= -1e-9 {
+                    self.retired[arm] = true;
+                }
+            }
             if let Some(key) = self.block_source.take() {
                 self.credit_source(key, arm, reward);
             } else {
@@ -839,6 +919,7 @@ impl SurfacePortfolio {
             }
         }
         self.block_lowest = f64::INFINITY;
+        self.block_work = 0;
         self.hops_in_block = 0;
     }
 
@@ -1001,7 +1082,7 @@ mod tests {
                 "the full relaxation changed surface"
             );
             best = best.min(reached);
-            portfolio.observe(false, reached, best);
+            portfolio.observe(false, reached, best, 1);
             if hop % 5 != 4 {
                 assert_eq!(
                     portfolio.begin(false),
@@ -1047,7 +1128,7 @@ mod tests {
                 best + 1.0
             };
             best = best.min(reached);
-            teacher.observe(false, reached, best);
+            teacher.observe(false, reached, best, 1);
         }
         let mut student = SurfacePortfolio::with_block(&[deep], 2, 2)
             .sharing(Arc::clone(&shared), source)
@@ -1055,7 +1136,7 @@ mod tests {
         let deep_draws = (0..40)
             .filter(|_| {
                 let arm = student.begin(true);
-                student.observe(false, 0.0, 0.0);
+                student.observe(false, 0.0, 0.0, 1);
                 arm == Some(deep)
             })
             .count();
@@ -1134,17 +1215,36 @@ mod tests {
             portfolio.begin(false);
             // Two units above the best every time: a settled block earns -2,
             // and the opening block, with no incumbent yet, earns nothing.
-            portfolio.observe(false, -1.0, -3.0);
+            portfolio.observe(false, -1.0, -3.0, 1);
         }
         assert!(portfolio.draws().iter().sum::<usize>() >= 4);
         for (mean, draws) in portfolio.means().iter().zip(portfolio.draws()) {
-            if *draws > 1 {
+            if *draws > 1 && *mean < 0.0 {
                 assert!(
                     (-2.0..=0.0).contains(mean) && *mean < -1.0,
                     "mean {mean} over {draws} draws"
                 );
             }
         }
+    }
+
+    #[test]
+    fn plain_warmup_and_work_normalized_retirement_are_history_driven() {
+        let transformed = TwoPhase::diameter(2.0, 1.0);
+        let mut warmup = SurfacePortfolio::with_block(&[transformed], 3, 2).with_plain_warmup(true);
+        assert_eq!(warmup.begin(true), None);
+
+        let mut portfolio = SurfacePortfolio::with_block(&[transformed], 3, 2);
+        for block in 0..6 {
+            portfolio.held = Some(1);
+            portfolio.block_start_best = 0.0;
+            portfolio.block_lowest = 2.0;
+            portfolio.block_work = 4;
+            portfolio.settle_block();
+            assert_eq!(portfolio.arm_reward_sum[1], -0.5 * f64::from(block + 1));
+        }
+        assert!(portfolio.retired[1]);
+        assert_eq!(portfolio.begin(true), None);
     }
 
     fn rigid_water() -> Array1<f64> {

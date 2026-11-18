@@ -197,9 +197,14 @@ fn mat_vec(m: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     m.map(|row| dot(row, v))
 }
 
-/// Whether groups are three-atom water: one oxygen and two hydrogens each.
-pub(crate) fn is_water_groups(groups: &[Vec<usize>]) -> bool {
-    !groups.is_empty() && groups.iter().all(|g| g.len() == 3)
+/// Whether the chart supplies interacting groups with one pivot and two
+/// directional sites each.
+///
+/// Cycle reversal needs at least two groups to form an edge. Atomic numbers
+/// do not decide whether the arms are available; contact and donation are
+/// inferred from current geometry without a species-specific length.
+pub(crate) fn cycle_compatible_groups(groups: &[Vec<usize>]) -> bool {
+    groups.len() >= 2 && groups.iter().all(|g| g.len() == 3)
 }
 
 /// Lab-frame atom positions of each molecule from Cartesian coordinates.
@@ -215,20 +220,23 @@ fn cartesian_sites(groups: &[Vec<usize>], x: &ndarray::Array1<f64>) -> Vec<[[f64
         .collect()
 }
 
-/// H-bond donations in Cartesian water: for each molecule, the acceptor index
-/// and which hydrogen (0 or 1) donates.
+/// Directed contacts: for each group, the target pivot and directional site.
+///
+/// A directional site points at another group when it is closer to that
+/// group's pivot than its own pivot is. This comparison is scale-free and
+/// makes no assumption about the species occupying any site.
 fn cartesian_donations(sites: &[[[f64; 3]; 3]]) -> Vec<Vec<(usize, usize)>> {
     let n = sites.len();
     (0..n)
         .map(|i| {
-            let _oxygen_i = sites[i][0];
+            let pivot_i = sites[i][0];
             (0..n)
                 .filter(|&j| j != i)
                 .flat_map(|j| {
-                    let oxygen_j = sites[j][0];
-                    [1, 2].iter().enumerate().filter_map(move |(which, &h)| {
-                        let hydrogen = sites[i][h];
-                        if norm(sub(hydrogen, oxygen_j)) < BOND {
+                    let pivot_j = sites[j][0];
+                    let pivot_distance = norm(sub(pivot_i, pivot_j));
+                    [1, 2].iter().enumerate().filter_map(move |(which, &site)| {
+                        if norm(sub(sites[i][site], pivot_j)) < pivot_distance {
                             Some((j, which))
                         } else {
                             None
@@ -240,11 +248,11 @@ fn cartesian_donations(sites: &[[[f64; 3]; 3]]) -> Vec<Vec<(usize, usize)>> {
         .collect()
 }
 
-/// Reverses a directed H-bond cycle in Cartesian water coordinates.
+/// Reverses a directed-contact cycle in Cartesian molecular coordinates.
 ///
-/// Each group must be `[O, H, H]` in that order. The function finds a directed
-/// cycle of H-bonds and rotates each molecule on the cycle about its oxygen
-/// so the donations point the other way. The quench settles each molecule.
+/// Each group contains a pivot followed by two directional sites. The function
+/// finds a directed cycle and rotates each group about its pivot so the
+/// contacts point the other way. The quench settles each molecule.
 ///
 /// Returns `true` when a cycle was reversed, `false` otherwise.
 pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
@@ -252,7 +260,7 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
     x: &mut ndarray::Array1<f64>,
     rng: &mut R,
 ) -> bool {
-    if !is_water_groups(groups) || groups.len() < 2 {
+    if !cycle_compatible_groups(groups) {
         return false;
     }
     let sites = cartesian_sites(groups, x);
@@ -288,25 +296,25 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
     let mut turns: Vec<(usize, [f64; 3], [[f64; 3]; 3])> = Vec::with_capacity(cycle.len());
     for (s, &(k, which)) in cycle.iter().enumerate() {
         let prev = cycle[(s + cycle.len() - 1) % cycle.len()].0;
-        let oxygen = sites[k][0];
-        let h_donating = sites[k][1 + which];
-        let h_other = sites[k][1 + (1 - which)];
-        let bonded = unit(sub(h_donating, oxygen));
-        let other = unit(sub(h_other, oxygen));
-        let target = unit(sub(sites[prev][0], oxygen));
+        let pivot = sites[k][0];
+        let donating = sites[k][1 + which];
+        let other_site = sites[k][1 + (1 - which)];
+        let bonded = unit(sub(donating, pivot));
+        let other = unit(sub(other_site, pivot));
+        let target = unit(sub(sites[prev][0], pivot));
         if norm(cross(target, other)) < 1e-6 {
             return false;
         }
-        turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
+        turns.push((k, pivot, frame_rotation((bonded, other), (target, other))));
     }
-    for (k, oxygen, turn) in turns {
+    for (k, pivot, turn) in turns {
         let atoms = &groups[k];
         for (s, &a) in atoms.iter().enumerate() {
             let old = std::array::from_fn(|axis| x[3 * a + axis]);
             let new = if s == 0 {
                 old
             } else {
-                add(oxygen, mat_vec(turn, sub(old, oxygen)))
+                add(pivot, mat_vec(turn, sub(old, pivot)))
             };
             for axis in 0..3 {
                 x[3 * a + axis] = new[axis];
@@ -316,60 +324,56 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
     true
 }
 
-/// Oxygen–oxygen distances that can still become a hydrogen bond.
-///
-/// The first peak of the water O–O distribution is near 2.8 Å and the first
-/// minimum is near 3.5 Å (Soper, *Chem. Phys.* **2000**, *258*, 121). A
-/// neighbour inside that window is an acceptor a hydrogen can be turned onto.
-const REWIRE_OO_MIN: f64 = 2.4;
-const REWIRE_OO_MAX: f64 = 3.5;
-
 /// Smallest turn, in radians, that is not the half-radian group shake.
 ///
 /// The shake draws its angle from `(-1/2, 1/2)`. A turn inside that interval
 /// quenches back into the hydrogen bond it left.
 const SHAKE_CEILING: f64 = 0.5;
 
-/// Point one hydrogen at a different oxygen, or turn the molecule over.
+/// Point one directional site at a different nearby pivot, or turn the group
+/// over.
 ///
-/// A directed-cycle reversal needs a cycle. A cage of three-coordinate waters
-/// often has none, and the half-radian shake then falls back into the bond it
-/// left. This move turns one water about its oxygen so a hydrogen that was
-/// not donating points at a neighbouring oxygen. The turn is larger than the
-/// shake. When no such neighbour exists, both hydrogens turn by half a
-/// revolution about the normal of their plane, which exchanges the two sides
-/// of the molecule. Oxygen–hydrogen distances are unchanged. Returns false,
-/// with `x` unchanged, when the geometry is not water or every candidate
-/// would stack two atoms.
+/// A directed-cycle reversal needs a cycle. This move instead turns one group
+/// about its pivot so a directional site points at its nearest neighbouring
+/// pivot. The turn is larger than the shake. When no such neighbour exists,
+/// both directional sites turn by half a revolution about the normal of their
+/// plane. Intragroup distances are unchanged. Returns false, with `x`
+/// unchanged, when the chart is incompatible or every candidate would stack
+/// two atoms.
 pub(crate) fn rewire_cartesian<R: rand::Rng + ?Sized>(
     groups: &[Vec<usize>],
     x: &mut ndarray::Array1<f64>,
     rng: &mut R,
 ) -> bool {
-    if !is_water_groups(groups) || groups.len() < 2 {
+    if !cycle_compatible_groups(groups) {
         return false;
     }
     let sites = cartesian_sites(groups, x);
     let mut options = Vec::new();
     for i in 0..groups.len() {
-        let oxygen = sites[i][0];
+        let pivot = sites[i][0];
+        let nearest = (0..groups.len())
+            .filter(|&j| j != i)
+            .map(|j| norm(sub(sites[j][0], pivot)))
+            .fold(f64::INFINITY, f64::min);
         for j in 0..groups.len() {
             if i == j {
                 continue;
             }
-            let toward_v = sub(sites[j][0], oxygen);
-            let oo = norm(toward_v);
-            if !(oo > REWIRE_OO_MIN && oo < REWIRE_OO_MAX) {
+            let toward_v = sub(sites[j][0], pivot);
+            let pivot_distance = norm(toward_v);
+            if pivot_distance > nearest * (1.0 + 1e-12) {
                 continue;
             }
             let toward = unit(toward_v);
-            let already = (0..2).any(|which| norm(sub(sites[i][1 + which], sites[j][0])) < BOND);
+            let already =
+                (0..2).any(|which| norm(sub(sites[i][1 + which], sites[j][0])) < pivot_distance);
             if already {
                 continue;
             }
             for which in 0..2 {
-                let hdir = unit(sub(sites[i][1 + which], oxygen));
-                let angle = dot(hdir, toward).clamp(-1.0, 1.0).acos();
+                let direction = unit(sub(sites[i][1 + which], pivot));
+                let angle = dot(direction, toward).clamp(-1.0, 1.0).acos();
                 if angle > SHAKE_CEILING {
                     options.push((i, j, which));
                 }
@@ -623,10 +627,22 @@ mod tests {
     }
 
     #[test]
-    fn empty_or_short_groups_are_not_water() {
-        assert!(!is_water_groups(&[]));
-        assert!(!is_water_groups(&[vec![0, 1]]));
-        assert!(is_water_groups(&[vec![0, 1, 2], vec![3, 4, 5]]));
+    fn cycle_compatibility_depends_on_the_declared_chart_not_species() {
+        assert!(!cycle_compatible_groups(&[]));
+        assert!(!cycle_compatible_groups(&[vec![0, 1]]));
+        assert!(!cycle_compatible_groups(&[vec![0, 1, 2]]));
+        assert!(cycle_compatible_groups(&[vec![0, 1, 2], vec![3, 4, 5]]));
+    }
+
+    #[test]
+    fn cartesian_contacts_are_scale_free() {
+        let sites = [
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[3.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 1.0, 0.0]],
+        ];
+        let scaled = sites.map(|group| group.map(|site| site.map(|value| value * 10.0)));
+        assert_eq!(cartesian_donations(&sites), cartesian_donations(&scaled));
+        assert!(!cartesian_donations(&sites)[0].is_empty());
     }
 
     #[test]

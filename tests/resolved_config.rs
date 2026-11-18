@@ -57,7 +57,7 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     );
     assert_eq!(
         cfg.resolved_sha256().unwrap(),
-        "577fbe8078d3218aa947111e965ea8851558293195112af5ebae64e567b84365"
+        "32e59764f29aea5583d64df9975c1c1418616d61298f5846c50e5f56666712d6"
     );
     let mut uniform = cfg;
     uniform.arm_selection = ArmSelection::Uniform;
@@ -73,6 +73,33 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
         uniform.resolved_sha256().unwrap(),
         "a1bd030f28c13e57f6dbaa50302b8f1312139fc1684f2fa24801a361664cf5d2"
     );
+}
+
+#[test]
+fn retired_non_decisions_leave_live_allocation_controls_explicit() {
+    let cfg = Config::recommended_molecular(vec![6; 4], vec![vec![0, 1, 2, 3]], 1.0);
+    let json = cfg.resolved_json().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["allocate_moves"], true);
+    assert_eq!(value["depth_reward"], true);
+    for retired in [
+        "prior_reseed",
+        "prior_growth",
+        "prior_core",
+        "prior_handover",
+        "prior_motif",
+        "reseed_hops",
+    ] {
+        assert!(
+            !json.contains(retired),
+            "retired non-decision {retired} leaked into the resolved config"
+        );
+    }
+
+    let atomic = Config::recommended(38);
+    let value: serde_json::Value = serde_json::from_str(&atomic.resolved_json().unwrap()).unwrap();
+    assert_eq!(value["continuous_symmetry"]["group"], "measure");
+    assert_eq!(value["continuous_symmetry"]["interval"], 10);
 }
 
 #[test]
@@ -114,19 +141,10 @@ fn a_basin_stride_is_resolved_only_off_its_default() {
 }
 
 #[test]
-fn paper_preset_priors_stay_out_of_the_resolved_hash() {
+fn paper_preset_optional_moves_stay_out_of_the_resolved_hash() {
     let cfg = Config::recommended(38);
     let json = cfg.resolved_json().unwrap();
-    for name in [
-        "prior_soap",
-        "prior_reseed",
-        "prior_growth",
-        "prior_core",
-        "prior_handover",
-        "homotop_reorder",
-        "prior_motif",
-        "general_collective",
-    ] {
+    for name in ["prior_soap", "homotop_reorder", "general_collective"] {
         assert!(
             !json.contains(name),
             "{name} at the paper preset stays out of the resolved JSON"

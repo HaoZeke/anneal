@@ -263,9 +263,8 @@ fn config(spec: &Spec) -> Config {
         .and_then(|text| text.parse().ok())
         .unwrap_or(8)
         .max(1);
-    // Empty leaves every prior on. `0` turns the five priors off.
-    // A comma list turns off the named ones: soap, reseed, growth,
-    // core, motif. The plane move stays off unless H2H_GENERAL=1.
+    // Empty leaves the optional SOAP arm on. `0`, `none`, or `soap` turns it
+    // off. The plane move stays off unless H2H_GENERAL=1.
     if let Ok(text) = std::env::var("H2H_PRIORS") {
         let text = text.trim();
         let all_off = text == "0" || text == "none";
@@ -273,18 +272,6 @@ fn config(spec: &Spec) -> Config {
         if listed("soap") {
             cfg.prior_soap = false;
             cfg.soap_mode = anneal_core::methods::cluster_hopping::SoapProposalMode::Off;
-        }
-        if listed("reseed") {
-            cfg.prior_reseed = false;
-        }
-        if listed("growth") {
-            cfg.prior_growth = false;
-        }
-        if listed("core") {
-            cfg.prior_core = false;
-        }
-        if listed("motif") {
-            cfg.prior_motif = false;
         }
     }
     // Empty leaves the labelled-cluster search on. `0` turns its three
@@ -303,13 +290,6 @@ fn config(spec: &Spec) -> Config {
         if listed("window") {
             cfg.homotop_window = false;
         }
-    }
-    // `1` stops the core cuts once they stall and hands their best to the
-    // walk; `0` holds them to the end.
-    match std::env::var("H2H_HANDOVER").as_deref() {
-        Ok("1") => cfg.prior_handover = true,
-        Ok("0") => cfg.prior_handover = false,
-        _ => {}
     }
     // `1` reorders a stalled incumbent from its own packing; `0` does not.
     match std::env::var("H2H_REORDER").as_deref() {
