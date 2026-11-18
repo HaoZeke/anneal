@@ -4285,8 +4285,8 @@ where
         ledger.stop_below(energy);
     }
     let n = cfg.n_points;
-    let continuous_symmetry_classes = match cfg.continuous_symmetry {
-        ContinuousSymmetry::Off => None,
+    let (continuous_symmetry_classes, csm_reseed_hops) = match cfg.continuous_symmetry {
+        ContinuousSymmetry::Off => (None, 0),
         ContinuousSymmetry::Inversion { interval }
         | ContinuousSymmetry::Measure { interval, .. } => {
             assert!(
@@ -4303,7 +4303,11 @@ where
                 n,
                 "continuous-symmetry classes must match n_points"
             );
-            Some(classes)
+            let reseed = match cfg.continuous_symmetry {
+                ContinuousSymmetry::Measure { reseed_hops, .. } => reseed_hops,
+                _ => 0,
+            };
+            (Some(classes), reseed)
         }
     };
     // The descriptor and the metric have to agree. A shape distance is
@@ -5047,6 +5051,9 @@ where
     // stays there for a few hops before the incumbent gap applies.
     let mut last_basin_restart = 0usize;
     let mut basin_hold = 0usize;
+    // Opt-in clock for the legacy motif-aware CSM reseed. Recommended sets
+    // `reseed_hops` to zero and never enters this path.
+    let mut csm_reseed_stamp = 0usize;
     // Set after a rigid stall when the preset relocates one molecule.
     // Cleared when a new lowest minimum is recorded.
     let mut cage_edit = false;
@@ -5633,6 +5640,7 @@ where
         };
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
+            csm_reseed_stamp = hops;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
             cage_edit = false;
@@ -6905,6 +6913,90 @@ where
         }
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
+            csm_reseed_stamp = hops;
+        }
+        // Preserve the explicitly configured legacy CSM reseed without
+        // exposing it through the recommended preset. The default's zero
+        // `reseed_hops` makes the motif test unreachable.
+        if !cfg.adaptive_search
+            && csm_reseed_hops > 0
+            && cfg.prior_reseed
+            && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
+            && cfg.packing_cna_applies()
+            && crate::soap::ih_dominated(
+                x.view(),
+                crate::soap::SoapSpec::at_length(cfg.length_scale),
+            )
+            && ledger.remaining() > 0
+        {
+            csm_reseed_stamp = hops;
+            let classes = continuous_symmetry_classes
+                .as_deref()
+                .expect("a CSM reseed has equivalence classes");
+            let mut fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
+            if let Some(closed) = crate::packing::on_new_basin(
+                fresh.view(),
+                n,
+                cfg.symmetry_tolerance,
+                cfg.symmetry_merge_radius,
+                cfg.symmetrise_core_fraction,
+                cfg.min_separation,
+            ) {
+                fresh = closed;
+            }
+            let best_before = ledger.best;
+            let best_ih = ledger.best_state.as_ref().is_some_and(|state| {
+                crate::soap::ih_dominated(
+                    state.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
+            });
+            let stalled = hops.saturating_sub(hops_at_lowest) >= csm_reseed_hops.saturating_mul(8);
+            let (plain_energy, plain_state) = relax(ledger, fresh.view(), cfg.relax_steps);
+            let (reseed_energy, reseed_state) = if best_ih
+                && stalled
+                && plain_energy >= best_before - 1e-10
+                && let Some(projected) = crate::csm::propose(fresh.view(), classes)
+            {
+                let (projected_energy, projected_state) =
+                    relax(ledger, projected.coordinates.view(), cfg.relax_steps);
+                if projected_energy < best_before - 1e-10 {
+                    (projected_energy, projected_state)
+                } else {
+                    (plain_energy, plain_state)
+                }
+            } else {
+                (plain_energy, plain_state)
+            };
+            let reseed_gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                reseed_energy,
+                reseed_state.view(),
+                &mut unconverged_records,
+            );
+            let reseed_ok = quench_is_sane(cfg, reseed_energy, reseed_state.view())
+                && (grad.is_none() || reseed_gradient.is_some());
+            if reseed_ok {
+                let reached = identity.basin_of(reseed_state.view());
+                adopt_minimum!(
+                    reseed_energy,
+                    reseed_state,
+                    reseed_gradient,
+                    Some(reached),
+                    AdoptionHistory::Fresh,
+                    Some((here, reached)),
+                    Some("csm-reseed"),
+                    hops
+                );
+                soft_cache = None;
+                basin_entry = None;
+                quiet = 0;
+            }
+            if ledger.remaining() == 0 {
+                break HopStop::of_closed(ledger);
+            }
         }
         // A labelled incumbent whose energy has stood for half the budget
         // is offered the motifs its common-neighbour signature lacks:
