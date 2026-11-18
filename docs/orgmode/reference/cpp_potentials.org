@@ -658,10 +658,18 @@ explicit MorsePot(const MorseConfig &c);
   at =cutoff=.
   A non-zero =switch_width= replaces the shift by the quintic switch, as in
   =rgpot::LJPot=.
-  Pairs use the minimum image in every direction.
+  Pairs use the minimum image in every direction on an orthogonal or sheared
+  cell: a diagonal cell wraps each axis whose diagonal entry (=box[0]=,
+  =box[4]=, =box[8]=) is positive and leaves non-positive axes free, while any
+  non-zero off-diagonal entry uses =nlist::MinimumImage= across the 3x3 cell.
+  Each distinct atom pair contributes at most one minimum image, and a cutoff of
+  0 or less gives zero energy and forces.
   Atomic numbers are not read.
   The force call writes the stress.
 - Errors :: the errors of =rgpot::MorseConfig=.
+  On a sheared cell =nlist::MinimumImage= throws
+  =std::invalid_argument= when the cell is singular or not finite and =std::overflow_error=
+  when its inverse is not finite or the periodic image search bound overflows.
   The force call does not check its pointers.
 
 Parameter source: the form is Morse, Phys.
