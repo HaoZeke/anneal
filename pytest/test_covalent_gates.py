@@ -92,6 +92,20 @@ def test_the_committed_floor_gate_loses_nowhere(capsys):
     assert out.strip().splitlines()[-1] == "floor loses: nowhere"
 
 
+def test_the_rerun_arms_agree_and_repeat_the_committed_c20_rows():
+    fields = ("hit", "evals_to_hit", "charged", "best", "scc_rejected", "geometry_rejected")
+    seen = {}
+    for row in read(FLOOR_GATE_ROWS):
+        seen.setdefault((row["system"], row["seed"]), {})[row["arm"]] = tuple(row[f] for f in fields)
+    assert len(seen) == 24
+    for (system, _), arms in seen.items():
+        assert arms["floor-rerun"] == arms["series"] == arms["grad"]
+        if system == "c20":
+            assert arms["grad"] == arms["floor"]
+        else:
+            assert arms["grad"][1] != arms["floor"][1]
+
+
 def test_a_panel_system_one_arm_left_out_or_short_of_a_seed_loses(tmp_path, capsys):
     rows = [r for r in read(PANEL_ROWS) if r["system"] in ("lj38", "lj55")]
     rows = [r for r in rows if not (r["arm"] == "floor" and r["system"] == "lj38")]
