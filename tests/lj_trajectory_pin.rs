@@ -7,13 +7,13 @@
 //!
 //! The hash is the scalar walk through one `libm`. Host `exp`, `sin`,
 //! and `cos`, and the NEON dot product, are a different trajectory.
-//! Proposals, the acceptance test, the SOAP cutoff, the fivefold turn,
-//! the continuous-symmetry orientation, the energy-lattice softmax, the
-//! depth-rewarded arm, and the pair force go through that `libm`, and
-//! this test forces rgmin's scalar dots.
+//! Proposals, the acceptance test, the SOAP cutoff, the descriptor
+//! residual, the continuous-symmetry orientation, the energy-lattice
+//! softmax, the depth-rewarded arm, and the pair force go through that
+//! `libm`, and this test forces rgmin's scalar dots.
 //!
-//! The fivefold assignment is the built-in one on every build, so the
-//! hash is `6e277f86…` with and without IRA.
+//! The descriptor residual replaced the fivefold turn. The hash is
+//! `dc0a5a30…` with and without IRA.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -90,6 +90,6 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library is deterministic on every build.
-    let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
+    let expected = "dc0a5a307d93411cfeb6e91ceefbdb06424089e47d5b6d67763bcb56ebc6dbe3";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

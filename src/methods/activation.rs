@@ -228,13 +228,12 @@ where
     quench(start.view())
 }
 
-/// Covering displacement, fivefold openings of the same shell, a
+/// Covering displacement, descriptor-gradient openings of the same shell, a
 /// minimum-mode climb, then a quench. The lowest minimum is kept.
 ///
-/// The hypersphere cover picks a direction. On a shell that still has
-/// pentagonal axes, those axes are further covering directions: they
-/// are read off the coordinates, not off a target minimum. No target
-/// energy is supplied.
+/// The hypersphere cover picks a direction. A flat descriptor cloud moves
+/// the local fingerprints that stick out of the observed mean. No target
+/// energy and no symmetry axis are supplied.
 pub fn cover_climb_quench_min<G, Q, E>(
     origin: ArrayView1<f64>,
     rmsd: f64,
@@ -261,17 +260,21 @@ where
             best = quenched;
         }
     };
-    // Several amplitudes of the pentagonal opening, quenched on their own.
+    // Several amplitudes of the descriptor opening, quenched on their own.
     for amp in [0.35_f64, 0.55, 0.75, 1.0, 1.25] {
         for which in 0..4 {
-            keep(quench(fivefold_opening(origin, amp, which).view()));
+            let mut opening_rng = rand::rngs::StdRng::seed_from_u64(which as u64);
+            keep(quench(
+                descriptor_opening(origin, amp, &mut opening_rng).view(),
+            ));
         }
     }
     // The same opening stacked, then one quench, so the shell can
     // reconstruct before it is relaxed.
     let mut chain = origin.to_owned();
-    for which in 0..8 {
-        chain = fivefold_opening(chain.view(), 0.75, which);
+    let mut chain_rng = rand::rngs::StdRng::seed_from_u64(cover_index as u64);
+    for _ in 0..8 {
+        chain = descriptor_opening(chain.view(), 0.75, &mut chain_rng);
     }
     keep(quench(chain.view()));
     let mut here = origin.to_owned();
@@ -279,13 +282,12 @@ where
     let mut rng = rand::rngs::StdRng::seed_from_u64(1 + cover_index as u64);
     let n_cover = crate::hypersphere::default_cover_size();
     let temperature = 8.0_f64;
-    // One kick stays in the icosahedral funnel or lands above it.
-    // Keep walking: a covering displacement, sometimes a pentagonal
+    // Keep walking: a covering displacement, sometimes a descriptor
     // opening, a minimum-mode climb when the ridge is real, then a
     // quench. Uphill quenches are accepted so the walk can leave.
     for hop in 0..16 {
         let point = if hop % 6 == 0 {
-            fivefold_opening(here.view(), rmsd, hop)
+            descriptor_opening(here.view(), rmsd, &mut rng)
         } else {
             let direction =
                 crate::hypersphere::cover_direction(n_cover, here.len(), hop + cover_index);
@@ -2892,26 +2894,13 @@ where
     best
 }
 
-fn fivefold_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<f64> {
-    let good: Vec<([f64; 3], f64)> = crate::soap::fivefold_axis_table(origin)
-        .into_iter()
-        .filter(|(_, d5)| *d5 < 1.40)
-        .collect();
-    if good.is_empty() {
-        return origin.to_owned();
-    }
-    let target = if which.is_multiple_of(2) { 0.90 } else { 0.99 };
-    let (axis, _) = good
-        .iter()
-        .min_by(|a, b| {
-            (a.1 - target)
-                .abs()
-                .partial_cmp(&(b.1 - target).abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .copied()
-        .unwrap_or(good[0]);
-    crate::soap::step_away_fivefold_about(origin, rmsd.max(0.75), axis)
+fn descriptor_opening<R: rand::Rng + ?Sized>(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let spec = crate::soap::structure_spec(origin);
+    crate::soap::step_descriptor(origin, spec, rmsd.max(0.75), None, None, None, rng)
 }
 
 /// Climb along `direction` first, then track the minimum mode.

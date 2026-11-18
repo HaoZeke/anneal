@@ -1266,39 +1266,88 @@ pub fn ring_novelty(origin: (usize, usize, usize), trial: (usize, usize, usize))
 
 /// Atom weight when leaving `origin`.
 ///
-/// Five-rings, when the occupied packing has them, are the Franzblau
-/// fivefold signature: extras move those atoms. Otherwise extras move
-/// three-rings. Uniform incidence is a global scale and does not steer.
-pub fn ring_leave_weight(origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
-    if origin.2 > 0 {
-        1.0 + f64::from(atom[2])
-    } else {
-        1.0 + f64::from(atom[0])
-    }
+/// Every ring size counts the same. An atom that sits in more rings is a
+/// more constrained local environment and moves more. No ring size is a
+/// signature. Uniform incidence is a global scale and does not steer.
+/// `origin` is the structure's ring profile; the weight does not read it.
+pub fn ring_leave_weight(_origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
+    1.0 + f64::from(atom[0]) + f64::from(atom[1]) + f64::from(atom[2])
 }
 
-/// Scale a Cartesian increment so leave-ring atoms move more.
+/// Scale a Cartesian increment so fingerprint outliers move more.
 ///
-/// Champion leftover SOAP does not call this. Occupancy archive
-/// holes and packing kicks do. A uniform ring support is a global
-/// scale; the hop's RMS cap removes it.
+/// The fingerprint is the sorted list of distances from each atom to
+/// the others. Atoms farther from the mean shell move more. A uniform
+/// shell is a global scale and is left alone. Champion leftover SOAP
+/// does not call this. Occupancy archive holes and packing kicks do.
+/// No ring size and no template selects the atoms.
 pub fn lens_ring_displacement(coordinates: &[f64], dr: &mut [f64]) {
     if coordinates.len() != dr.len() {
         return;
     }
-    let Some(census) = occupancy_ring_census(coordinates) else {
-        return;
-    };
-    let n = census.atom.len();
-    if dr.len() != 3 * n {
+    let scores = shell_outlier_scores(coordinates);
+    let n = coordinates.len() / 3;
+    if scores.len() != n || dr.len() != 3 * n {
         return;
     }
-    for (i, &incidence) in census.atom.iter().enumerate() {
-        let weight = ring_leave_weight(census.profile, incidence);
+    let widest = scores.iter().copied().fold(0.0_f64, f64::max);
+    if widest < 1e-12 {
+        return;
+    }
+    for (i, score) in scores.iter().copied().enumerate() {
+        let weight = 1.0 + score / widest;
         dr[3 * i] *= weight;
         dr[3 * i + 1] *= weight;
         dr[3 * i + 2] *= weight;
     }
+}
+
+/// Distance of each atom's sorted neighbour shell from the mean shell.
+fn shell_outlier_scores(coordinates: &[f64]) -> Vec<f64> {
+    let n = coordinates.len() / 3;
+    if n < 2 || coordinates.len() != 3 * n {
+        return Vec::new();
+    }
+    let width = n - 1;
+    let mut rows = vec![vec![0.0; width]; n];
+    for i in 0..n {
+        let mut distances = Vec::with_capacity(width);
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = coordinates[3 * i + k] - coordinates[3 * j + k];
+                d2 += d * d;
+            }
+            distances.push(d2.sqrt());
+        }
+        distances.sort_by(|a, b| a.total_cmp(b));
+        rows[i] = distances;
+    }
+    let mut mean = vec![0.0; width];
+    for row in &rows {
+        for (slot, value) in row.iter().enumerate() {
+            mean[slot] += value;
+        }
+    }
+    let scale = 1.0 / n as f64;
+    for value in &mut mean {
+        *value *= scale;
+    }
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .zip(mean.iter())
+                .map(|(value, centre)| {
+                    let d = value - centre;
+                    d * d
+                })
+                .sum::<f64>()
+                .sqrt()
+        })
+        .collect()
 }
 
 fn side_spread(histograms: &[Vec<f64>], members: &[usize]) -> f64 {
@@ -3051,13 +3100,19 @@ mod tests {
     }
 
     #[test]
-    fn ring_leave_weight_breaks_pentagons_on_ico_and_triangles_on_oh() {
-        let ico = (165, 17, 6);
-        let oh = (152, 22, 0);
-        assert!(ring_leave_weight(ico, [0, 0, 3]) > ring_leave_weight(ico, [10, 0, 0]));
-        assert!(ring_leave_weight(oh, [4, 0, 0]) > ring_leave_weight(oh, [0, 2, 0]));
-        assert_eq!(ring_novelty(ico, ico), 0);
-        assert!(ring_novelty(ico, oh) > 0);
+    fn ring_leave_weight_does_not_prefer_a_ring_size() {
+        let profile = (10, 4, 6);
+        assert_eq!(
+            ring_leave_weight(profile, [3, 0, 0]),
+            ring_leave_weight(profile, [0, 3, 0])
+        );
+        assert_eq!(
+            ring_leave_weight(profile, [0, 3, 0]),
+            ring_leave_weight(profile, [0, 0, 3])
+        );
+        assert!(ring_leave_weight(profile, [2, 0, 0]) > ring_leave_weight(profile, [0, 0, 0]));
+        assert_eq!(ring_novelty((1, 0, 0), (1, 0, 0)), 0);
+        assert!(ring_novelty((1, 0, 0), (0, 1, 0)) > 0);
     }
 
     #[test]
