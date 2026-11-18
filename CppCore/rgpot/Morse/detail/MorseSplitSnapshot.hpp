@@ -10,6 +10,13 @@
 #include <cstdint>
 #include <vector>
 
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(_WIN32) &&           \
+    !defined(__CYGWIN__)
+#define RGPOT_MORSE_TEST_HIDDEN __attribute__((visibility("hidden")))
+#else
+#define RGPOT_MORSE_TEST_HIDDEN
+#endif
+
 namespace rgpot {
 
 namespace nlist {
@@ -29,8 +36,11 @@ struct MorseSplitSnapshot {
   std::vector<std::size_t> p1_splits;
 };
 
-[[nodiscard]] MorseSplitSnapshot morseStoredSplitSnapshot();
+[[nodiscard]] RGPOT_MORSE_TEST_HIDDEN MorseSplitSnapshot
+morseStoredSplitSnapshot();
 
 } // namespace detail
 
 } // namespace rgpot
+
+#undef RGPOT_MORSE_TEST_HIDDEN

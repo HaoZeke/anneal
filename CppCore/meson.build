@@ -2881,24 +2881,50 @@ endif
 if not meson.is_subproject()
     install_headers('../include/rgpot/plugin.h', subdir: 'rgpot')
     # Headers: #include "rgpot/NWChemPot/..." with -I${prefix}/include
+    # install_subdir matches exclude_files against each file's path
+    # relative to rgpot/. A glob is not such a path, so '*.cc' drops
+    # nothing and PotHelpers.cc, EMT/EMTPot.cc and the other
+    # implementation files are installed. Pass every implementation path
+    # literally. rpc/Potentials.capnp stays out because rpc/meson.build
+    # installs the effective schema in its place.
+    _install_py = find_program('python3', required: false)
+    if not _install_py.found()
+        error('installing headers needs python3 to list implementation sources')
+    endif
+    _install_impl = run_command(
+        _install_py,
+        meson.current_source_dir() / 'tests' / 'check_installed_sources.py',
+        '--list',
+        meson.current_source_dir() / 'rgpot',
+        check: true,
+    ).stdout().strip().split('\n')
+    _install_exclude = ['rpc/Potentials.capnp']
+    foreach _rel : _install_impl
+        if _rel != ''
+            _install_exclude += [_rel]
+        endif
+    endforeach
     install_subdir(
         'rgpot',
         install_dir: get_option('includedir'),
         exclude_directories: ['__pycache__', 'rpc/local', 'Morse/detail'],
-        exclude_files: [
-            '*.o',
-            '*.a',
-            '*.so',
-            '*.cc',
-            '*.c',
-            '*.cpp',
-            '*.f90',
-            '*.F',
-            '*.py',
-            # rpc/meson.build installs the effective schema in its place.
-            'rpc/Potentials.capnp',
-        ],
+        exclude_files: _install_exclude,
     )
+    if get_option('with_tests')
+        _install_meson = find_program('meson', required: false)
+        if _install_meson.found()
+            test(
+                'installed_sources',
+                _install_py,
+                args: [
+                    meson.current_source_dir() / 'tests' / 'check_installed_sources.py',
+                    meson.project_build_root(),
+                    _install_meson.full_path(),
+                ],
+                kwargs: _rt_kw['installed_sources'],
+            )
+        endif
+    endif
 
     # The .pc always ships: consumers discover whatever this build enabled
     # through the RGPOT_HAS_* cflags rather than by the file's absence.

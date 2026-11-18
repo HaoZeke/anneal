@@ -489,53 +489,58 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
     const auto ref_front = runFullEval(serial_pot, pos_front, z, box);
     const auto ref_back = runFullEval(serial_pot, pos_back, z, box);
 
-    ThreadGuard::set("4");
-    rgpot::MorsePot par_pot(cu_vacancy);
-    par_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
-    const auto got_front = runFullEval(par_pot, pos_front, z, box);
-    CHECK(par_pot.listReused());
-    const std::size_t retained_front = par_pot.retainedPairs();
-    const auto snap_front = rgpot::detail::morseStoredSplitSnapshot();
-    REQUIRE(snap_front.atoms == n);
-    REQUIRE(snap_front.slices == 4);
-    REQUIRE(snap_front.total_up >= 4096);
-    REQUIRE(snap_front.total_inc == 2 * snap_front.total_up);
-    REQUIRE(snap_front.p0_splits.size() == 5);
-    REQUIRE(snap_front.p1_splits.size() == 5);
-    for (std::size_t s = 1; s < 4; ++s) {
-      CHECK(snap_front.p0_splits[s] > 0);
-      CHECK(snap_front.p0_splits[s] <= m);
-      CHECK(snap_front.p1_splits[s] > 0);
-      CHECK(snap_front.p1_splits[s] <= m);
-    }
-    CHECK(countBitDiffs(got_front, ref_front) == 0);
+    for (const int slices : {4, 16}) {
+      INFO("slices = " << slices);
+      ThreadGuard::set(std::to_string(slices).c_str());
+      rgpot::MorsePot par_pot(cu_vacancy);
+      par_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+      const auto got_front = runFullEval(par_pot, pos_front, z, box);
+      CHECK(par_pot.listReused());
+      const std::size_t retained_front = par_pot.retainedPairs();
+      const auto snap_front = rgpot::detail::morseStoredSplitSnapshot();
+      REQUIRE(snap_front.atoms == n);
+      REQUIRE(snap_front.slices == slices);
+      REQUIRE(snap_front.total_up >= 4096);
+      REQUIRE(snap_front.total_inc == 2 * snap_front.total_up);
+      REQUIRE(snap_front.p0_splits.size() ==
+              static_cast<std::size_t>(slices + 1));
+      REQUIRE(snap_front.p1_splits.size() ==
+              static_cast<std::size_t>(slices + 1));
+      for (std::size_t s = 1; s < static_cast<std::size_t>(slices); ++s) {
+        CHECK(snap_front.p0_splits[s] > 0);
+        CHECK(snap_front.p0_splits[s] <= m);
+        CHECK(snap_front.p1_splits[s] > 0);
+        CHECK(snap_front.p1_splits[s] <= m);
+      }
+      CHECK(countBitDiffs(got_front, ref_front) == 0);
 
-    // First call on pos_back forces a Verlet rebuild with identical totals
-    // and the dense cluster moved to [n - m, n).
-    std::vector<double> probe_f(3 * n, 0.0);
-    rgpot::ForceOut probe_out{};
-    probe_out.F = probe_f.data();
-    par_pot.forceImpl({n, pos_back.data(), z.data(), box.data()}, &probe_out);
-    CHECK_FALSE(par_pot.listReused());
-    const auto got_back = runFullEval(par_pot, pos_back, z, box);
-    CHECK(par_pot.listReused());
-    CHECK(par_pot.retainedPairs() == retained_front);
+      // First call on pos_back forces a Verlet rebuild with identical totals
+      // and the dense cluster moved to [n - m, n).
+      std::vector<double> probe_f(3 * n, 0.0);
+      rgpot::ForceOut probe_out{};
+      probe_out.F = probe_f.data();
+      par_pot.forceImpl({n, pos_back.data(), z.data(), box.data()}, &probe_out);
+      CHECK_FALSE(par_pot.listReused());
+      const auto got_back = runFullEval(par_pot, pos_back, z, box);
+      CHECK(par_pot.listReused());
+      CHECK(par_pot.retainedPairs() == retained_front);
 
-    const auto snap_back = rgpot::detail::morseStoredSplitSnapshot();
-    CHECK(snap_back.owner == snap_front.owner);
-    CHECK(snap_back.build_id == snap_front.build_id + 1);
-    CHECK(snap_back.atoms == snap_front.atoms);
-    CHECK(snap_back.slices == snap_front.slices);
-    CHECK(snap_back.total_up == snap_front.total_up);
-    CHECK(snap_back.total_inc == snap_front.total_inc);
-    CHECK(snap_back.p0_splits != snap_front.p0_splits);
-    CHECK(snap_back.p1_splits != snap_front.p1_splits);
-    for (std::size_t s = 1; s < 4; ++s) {
-      CHECK(snap_back.p0_splits[s] >= n - m);
-      CHECK(snap_back.p0_splits[s] < n);
-      CHECK(snap_back.p1_splits[s] >= n - m);
-      CHECK(snap_back.p1_splits[s] < n);
+      const auto snap_back = rgpot::detail::morseStoredSplitSnapshot();
+      CHECK(snap_back.owner == snap_front.owner);
+      CHECK(snap_back.build_id == snap_front.build_id + 1);
+      CHECK(snap_back.atoms == snap_front.atoms);
+      CHECK(snap_back.slices == snap_front.slices);
+      CHECK(snap_back.total_up == snap_front.total_up);
+      CHECK(snap_back.total_inc == snap_front.total_inc);
+      CHECK(snap_back.p0_splits != snap_front.p0_splits);
+      CHECK(snap_back.p1_splits != snap_front.p1_splits);
+      for (std::size_t s = 1; s < static_cast<std::size_t>(slices); ++s) {
+        CHECK(snap_back.p0_splits[s] >= n - m);
+        CHECK(snap_back.p0_splits[s] < n);
+        CHECK(snap_back.p1_splits[s] >= n - m);
+        CHECK(snap_back.p1_splits[s] < n);
+      }
+      CHECK(countBitDiffs(got_back, ref_back) == 0);
     }
-    CHECK(countBitDiffs(got_back, ref_back) == 0);
   }
 }
