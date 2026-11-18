@@ -52,6 +52,10 @@ pub fn cluster_lj(positions: &[f64], energy: &mut f64, gradient: &mut [f64]) {
 ///
 /// `slot` is one species index per atom. The parameter tables are
 /// row-major `n_species * n_species`, indexed as `slot[i] * n_species + slot[j]`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each C parameter table is its own pointer"
+)]
 pub fn gupta(
     positions: &[f64],
     slot: &[u8],

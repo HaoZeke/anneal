@@ -409,7 +409,8 @@ impl ProfileSession {
                 self.prefix
             )));
         }
-        if written == 0 || written > capacity || written % std::mem::size_of::<u64>() != 0 {
+        if written == 0 || written > capacity || !written.is_multiple_of(std::mem::size_of::<u64>())
+        {
             return Err(ProfileError::new(format!(
                 "{}_session_calculate_result wrote invalid size {written} for capacity {capacity}",
                 self.prefix
@@ -428,7 +429,7 @@ impl ProfileSession {
 fn read_capabilities(prefix: &str, f: CapabilitiesResultFn) -> ProfileResult<Vec<u64>> {
     let mut required = 0usize;
     unsafe { f(std::ptr::null_mut(), 0, &mut required) };
-    if required == 0 || required % std::mem::size_of::<u64>() != 0 {
+    if required == 0 || !required.is_multiple_of(std::mem::size_of::<u64>()) {
         return Err(ProfileError::new(format!(
             "{prefix}_capabilities_result reported invalid size {required}"
         )));
@@ -516,9 +517,9 @@ mod tests {
     #[test]
     fn process_lifetime_handle_keeps_library_mapping() {
         let dropped = Arc::new(AtomicBool::new(false));
-        let handle = ProcessLifetime::new(DropProbe(Arc::clone(&dropped)));
-
-        drop(handle);
+        {
+            let _handle = ProcessLifetime::new(DropProbe(Arc::clone(&dropped)));
+        }
 
         assert!(!dropped.load(Ordering::SeqCst));
     }
@@ -561,8 +562,10 @@ mod tests {
         }
         let bytes = serialize::write_message_to_words(&msg);
         bytes
-            .chunks_exact(8)
-            .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| u64::from_le_bytes(*c))
             .collect()
     }
 

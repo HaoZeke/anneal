@@ -374,6 +374,13 @@ pub enum TowncrierInvoke {
 }
 
 /// Pure: prefer direct `towncrier` on PATH, else python -m if pip installed it.
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the unit tests call this selector; the bin uses ensure_towncrier_available"
+    )
+)]
 pub fn select_towncrier_invoke(has_towncrier_bin: bool, has_python: bool) -> Option<TowncrierInvoke> {
     if has_towncrier_bin {
         Some(TowncrierInvoke::Bin)

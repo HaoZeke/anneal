@@ -482,7 +482,7 @@ fn write_minimal_aarch64_pad_o(path: &Path) -> Result<(), String> {
     b[0x40..0x44].copy_from_slice(&0xd503201fu32.to_le_bytes());
     let shstr: &[u8] = b"\0.text\0.shstrtab\0.strtab\0";
     b[0x48..0x48 + shstr.len()].copy_from_slice(shstr);
-    let strtab: &[u8] = b"\0";
+    // .strtab at 0x60 is one NUL. The buffer is already zero there.
     b[0x60] = 0;
     let sh_off = 0x80usize;
     let write_sh = |b: &mut [u8], idx: usize, name: u32, sh_type: u32, flags: u64, off: u64, size: u64| {

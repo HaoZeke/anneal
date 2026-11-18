@@ -2,6 +2,10 @@
 
 mod ci;
 #[cfg(feature = "cosmo-host")]
+#[allow(
+    dead_code,
+    reason = "this module is also the potctl-cosmo-ld crate, which calls the other half"
+)]
 mod cosmo;
 mod lockstep;
 
