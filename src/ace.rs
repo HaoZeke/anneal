@@ -158,6 +158,7 @@ const CG_CACHE_MAX: usize = 8;
 
 /// One nonzero CG term. `i1`, `i2`, `i3` are `lm_index` offsets, so the
 /// contraction adds the same products in the same order as the `m` loops.
+#[derive(Clone, Copy)]
 struct CgTerm {
     i1: usize,
     i2: usize,
@@ -293,33 +294,137 @@ fn triples_cached(l_max: usize) -> &'static [(usize, usize, usize)] {
 }
 
 /// `∂B/∂c` for one centre, shape `(ace_dim, n_max n_lm)`.
+///
+/// The contraction is multilinear in the three complex channels, so each
+/// CG term contributes to the three tesseral coefficients it reads. A
+/// central difference repeats the whole contraction twice per coefficient:
+/// at `l_max = 6` that is a few hundred contractions per atom, and a
+/// second species doubles the atoms' channels. The products below are the
+/// derivative of `Re(a b conj(d))`.
 pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let n_c = n_max * n_lm;
-    let n_b = dim(n_max, l_max);
+    let trips = triples(l_max);
+    let n_b = n_max * trips.len();
     let mut j = Array2::<f64>::zeros((n_b, n_c));
-    if n_c == 0 {
+    if n_c == 0 || n_max == 0 || trips.is_empty() {
         return j;
     }
-    let eps = 1e-7;
     let mut cp = c.to_vec();
     if cp.len() < n_c {
         cp.resize(n_c, 0.0);
     }
-    let b0 = from_c(&cp, n_max, l_max);
-    let _ = b0;
-    for k in 0..n_c {
-        let old = cp[k];
-        cp[k] = old + eps;
-        let bp = from_c(&cp, n_max, l_max);
-        cp[k] = old - eps;
-        let bm = from_c(&cp, n_max, l_max);
-        cp[k] = old;
-        for r in 0..n_b {
-            j[[r, k]] = (bp[r] - bm[r]) / (2.0 * eps);
+    let terms: Vec<Vec<CgTerm>> = if l_max <= CG_CACHE_MAX {
+        nonzero_terms(l_max).to_vec()
+    } else {
+        trips
+            .iter()
+            .map(|&(l1, l2, l3)| finite_terms(l1, l2, l3))
+            .collect()
+    };
+    let mut re = vec![0.0; n_c];
+    let mut im = vec![0.0; n_c];
+    for n in 0..n_max {
+        for l in 0..=l_max {
+            for m in -(l as i32)..=(l as i32) {
+                let (cr, ci) = coeff(&cp, n, l, m, n_lm);
+                let at = n * n_lm + lm_index(l, m);
+                re[at] = cr;
+                im[at] = ci;
+            }
+        }
+    }
+    for n in 0..n_max {
+        let base = n * n_lm;
+        for (k, triple_terms) in terms.iter().enumerate() {
+            let row = n * trips.len() + k;
+            let (l1, l2, l3) = trips[k];
+            for term in triple_terms {
+                let ar = re[base + term.i1];
+                let ai = im[base + term.i1];
+                let br = re[base + term.i2];
+                let bi = im[base + term.i2];
+                let dr = re[base + term.i3];
+                let di = im[base + term.i3];
+                let g = term.g;
+                // ∂Re(a b conj(d)) / ∂(re, im) of each factor.
+                scatter(
+                    &mut j,
+                    row,
+                    base,
+                    l1,
+                    m_of(l1, term.i1),
+                    g * (br * dr + bi * di),
+                    g * (-bi * dr + br * di),
+                );
+                scatter(
+                    &mut j,
+                    row,
+                    base,
+                    l2,
+                    m_of(l2, term.i2),
+                    g * (ar * dr + ai * di),
+                    g * (-ai * dr + ar * di),
+                );
+                scatter(
+                    &mut j,
+                    row,
+                    base,
+                    l3,
+                    m_of(l3, term.i3),
+                    g * (ar * br - ai * bi),
+                    g * (ar * bi + ai * br),
+                );
+            }
         }
     }
     j
+}
+
+fn m_of(l: usize, index: usize) -> i32 {
+    index as i32 - (l * l + l) as i32
+}
+
+fn finite_terms(l1: usize, l2: usize, l3: usize) -> Vec<CgTerm> {
+    let mut terms = Vec::new();
+    for m1 in -(l1 as i32)..=(l1 as i32) {
+        for m2 in -(l2 as i32)..=(l2 as i32) {
+            let m3 = m1 + m2;
+            if m3.abs() > l3 as i32 {
+                continue;
+            }
+            let g = cg(l1 as i32, m1, l2 as i32, m2, l3 as i32, m3);
+            if g == 0.0 {
+                continue;
+            }
+            terms.push(CgTerm {
+                i1: lm_index(l1, m1),
+                i2: lm_index(l2, m2),
+                i3: lm_index(l3, m3),
+                g,
+            });
+        }
+    }
+    terms
+}
+
+/// Add `∂p/∂re * dre_scale` and `∂p/∂im * dim_scale` into the tesseral row.
+fn scatter(j: &mut Array2<f64>, row: usize, base: usize, l: usize, m: i32, d_re: f64, d_im: f64) {
+    if m == 0 {
+        j[[row, base + lm_index(l, 0)]] += d_re;
+        return;
+    }
+    let am = m.abs();
+    let sign = if am % 2 == 0 { 1.0 } else { -1.0 };
+    let pos = base + lm_index(l, am);
+    let neg = base + lm_index(l, -am);
+    if m > 0 {
+        j[[row, pos]] += d_re * sign / SQRT_2;
+        j[[row, neg]] += d_im * sign / SQRT_2;
+    } else {
+        j[[row, pos]] += d_re / SQRT_2;
+        j[[row, neg]] += d_im * (-1.0 / SQRT_2);
+    }
 }
 
 #[cfg(test)]
@@ -355,6 +460,34 @@ mod tests {
         assert!(t.contains(&(1, 1, 2)));
         assert!(t.contains(&(0, 0, 0)));
         assert!(!t.contains(&(1, 1, 1)));
+    }
+
+    #[test]
+    fn the_analytic_derivative_matches_a_central_difference() {
+        let n_max = 2usize;
+        let l_max = 3usize;
+        let n_c = n_max * (l_max + 1) * (l_max + 1);
+        let c: Vec<f64> = (0..n_c)
+            .map(|i| ((i * 17) % 11) as f64 * 0.01 - 0.05)
+            .collect();
+        let got = d_from_c(&c, n_max, l_max);
+        let eps = 1e-6;
+        for k in 0..n_c {
+            let mut cp = c.clone();
+            cp[k] += eps;
+            let bp = from_c(&cp, n_max, l_max);
+            cp[k] -= 2.0 * eps;
+            let bm = from_c(&cp, n_max, l_max);
+            for r in 0..bp.len() {
+                let expect = (bp[r] - bm[r]) / (2.0 * eps);
+                let delta = (got[[r, k]] - expect).abs();
+                assert!(
+                    delta < 1e-6,
+                    "row {r} col {k}: {} vs {expect} (delta {delta})",
+                    got[[r, k]]
+                );
+            }
+        }
     }
 
     /// The water SOAP pullback asks for this derivative once per atom per

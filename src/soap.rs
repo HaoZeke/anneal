@@ -3399,19 +3399,37 @@ fn solve3(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
 }
 
 /// Solve `(J^T J + λ I) dr = J^T dp`.
+///
+/// The product walks features in index order, once per coordinate pair.
+/// A species channel doubles the feature count and the Jacobian is stored
+/// one feature per row, so that walk was a strided load of length `3N`
+/// on every multiply. The columns are copied once and the same products
+/// are then contiguous. The add order is the feature index, which is the
+/// order of the strided product.
 fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
     let nfeat = j.nrows();
     let ncoord = j.ncols();
+    let mut cols = vec![0.0; nfeat.saturating_mul(ncoord)];
+    for c in 0..ncoord {
+        let column = &mut cols[c * nfeat..(c + 1) * nfeat];
+        for (i, slot) in column.iter_mut().enumerate() {
+            *slot = j[[i, c]];
+        }
+    }
     let mut a = Array2::<f64>::zeros((ncoord, ncoord));
     let mut rhs = Array1::<f64>::zeros(ncoord);
     for c in 0..ncoord {
+        let col_c = &cols[c * nfeat..(c + 1) * nfeat];
+        let mut rc = 0.0;
         for i in 0..nfeat {
-            rhs[c] += j[[i, c]] * dp[i];
+            rc += col_c[i] * dp[i];
         }
+        rhs[c] = rc;
         for d in 0..=c {
+            let col_d = &cols[d * nfeat..(d + 1) * nfeat];
             let mut s = 0.0;
             for i in 0..nfeat {
-                s += j[[i, c]] * j[[i, d]];
+                s += col_c[i] * col_d[i];
             }
             a[[c, d]] = s;
             a[[d, c]] = s;
@@ -3470,6 +3488,42 @@ mod tests {
         Array1::from_vec(vec![
             1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
         ])
+    }
+
+    #[test]
+    fn tikhonov_matches_the_strided_product_bit_for_bit() {
+        let mut state = 0x9e37_79b9_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let nfeat = 48usize;
+        let ncoord = 12usize;
+        let values: Vec<f64> = (0..nfeat * ncoord).map(|_| next()).collect();
+        let j = Array2::from_shape_vec((nfeat, ncoord), values).unwrap();
+        let dp = Array1::from((0..nfeat).map(|_| next()).collect::<Vec<_>>());
+        let lambda = 1e-3;
+        let mut a = Array2::<f64>::zeros((ncoord, ncoord));
+        let mut rhs = Array1::<f64>::zeros(ncoord);
+        for c in 0..ncoord {
+            for i in 0..nfeat {
+                rhs[c] += j[[i, c]] * dp[i];
+            }
+            for d in 0..=c {
+                let mut s = 0.0;
+                for i in 0..nfeat {
+                    s += j[[i, c]] * j[[i, d]];
+                }
+                a[[c, d]] = s;
+                a[[d, c]] = s;
+            }
+            a[[c, c]] += lambda;
+        }
+        let expect = chol_solve(&a, &rhs).unwrap();
+        let got = tikhonov_jtj(&j, dp.view(), lambda);
+        for (index, (left, right)) in got.iter().zip(expect.iter()).enumerate() {
+            assert_eq!(left.to_bits(), right.to_bits(), "coordinate {index}");
+        }
     }
 
     #[test]

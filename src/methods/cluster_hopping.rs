@@ -4310,9 +4310,13 @@ where
     // the preset and moves only while acceptance is outside a quarter of
     // one half, and never above one contact.
     let mut scaled = cfg.clone();
-    if scaled.homotop_window && polishes_unlike_pairs(&scaled) {
-        scaled.budget_window = true;
-    }
+    // The budget-window law is not forced on for a labelled cluster.
+    // It cools from the gap and the calls still left, and it does not
+    // read acceptance, so a binary chain sat in the first deep basin for
+    // the rest of the budget. The acceptance dial is the temperature, as
+    // it is for a one-species chain: it heats when fewer than a quarter
+    // of moves are accepted and cools when more than three quarters are.
+    // The proposal length stays the configured step.
     let contact = contact_factor(&scaled, e, x.view());
     apply_contact_convergence(&mut scaled, contact);
     let mut dial = AcceptDial::new(scaled.temperature, contact)
@@ -4426,6 +4430,9 @@ where
     // Rewarded by the depth a move reaches rather than by whether it was
     // accepted. See [`crate::allocate::DepthAllocator`].
     let mut depth_allocator = crate::allocate::DepthAllocator::new(kernels.len());
+    // Unlike-pair exchanges start on the fixed fourth-hop cadence and then
+    // follow their own acceptance. A one-species library never reads it.
+    let mut swap_share = general::SwapShare::default();
     // Per-arm draws and accepts. The crate's own methods note says a solve
     // count cannot tell a mechanism that works poorly from one that does not
     // run, and a move set is exactly where that applies: an arm the allocator
@@ -4593,6 +4600,9 @@ where
     let frontier_exchange =
         std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|value| value == "1");
     let mut screen_bank: Vec<(Array1<f64>, f64, Array1<f64>)> = Vec::new();
+    // Destinations a binary plateau has already taken. The population step
+    // skips these so two seats do not trade places on every patience window.
+    let mut diverse_bar: std::collections::VecDeque<f64> = std::collections::VecDeque::new();
     // The run's own environment codebook, grown from every accepted
     // recordable structure, so the trace can report each arrival's
     // unseen-environment share before the arrival is added.
@@ -6543,12 +6553,15 @@ where
             kernels.len(),
             rng,
         );
-        // One unlike-pair exchange on a fixed cadence. The depth allocator
-        // drops the homotop once geometry moves pay more, and a binary
-        // minimum is a chemical ordering as well as a geometry. Absent on a
-        // one-species library, so a monoatomic chain draws exactly as before.
+        // One unlike-pair exchange on a cadence read from its acceptance.
+        // The depth allocator drops the homotop once geometry moves pay
+        // more, and a binary minimum is a chemical ordering as well as a
+        // geometry. The share starts at every fourth hop. Acceptance above
+        // one half shortens that, acceptance below one in five lengthens
+        // it. Absent on a one-species library, so a monoatomic chain draws
+        // exactly as before.
         if let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
-            && hops.is_multiple_of(4)
+            && swap_share.due(hops as u64)
         {
             k = swap_at;
         }
@@ -8216,6 +8229,9 @@ where
             if accept {
                 arm_accepts[k] += 1;
             }
+            if proposal_action == "swap" {
+                swap_share.observe(accept);
+            }
             arm_best[k] = arm_best[k].min(e_new);
             // The quench the construction actually reached, which is the only
             // feedback the posterior gets and the reason it costs nothing
@@ -8937,6 +8953,46 @@ where
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
             longest_quiet = 0;
+            // A two-species plateau has no Honeycutt–Andersen packing to
+            // grow. The chain's certified quenches are a population keyed
+            // by the bias fingerprint. A seat lower than the incumbent,
+            // and outside the merge radius, is taken. A monoatomic chain
+            // keeps the activation below and does not enter here.
+            if directed_leave && !cfg.packing_cna_applies() {
+                let here_key = bias.cv(x.view());
+                let barred: Vec<f64> = diverse_bar.iter().copied().collect();
+                let seat = general::diverse_seat(
+                    &screen_bank,
+                    here_key.view(),
+                    e,
+                    bias.merge_radius(),
+                    &barred,
+                );
+                if let Some((other_energy, other_state)) = seat
+                    && other_energy < ledger.best - 1e-6
+                {
+                    let other_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        other_energy,
+                        other_state.view(),
+                        &mut unconverged_records,
+                    );
+                    if grad.is_none() || other_gradient.is_some() {
+                        diverse_bar.push_back(other_energy);
+                        while diverse_bar.len() > crate::methods::stall_archive::MEMORY {
+                            diverse_bar.pop_front();
+                        }
+                        e = other_energy;
+                        x = other_state;
+                        current_validation_gradient = other_gradient;
+                        here = None;
+                        soft_cache = None;
+                        basin_entry = None;
+                    }
+                }
+            }
             if hop_room(hops)
                 && let Some(g) = grad.as_deref_mut()
             {
