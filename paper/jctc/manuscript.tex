@@ -1229,6 +1229,32 @@ BLJ\(_{98}\) at \(\sigma_{BB}=1.30\) & \(4\times 10^{6}\) & this work & 0/12 & 4
 \end{table}
 % blj-gmin table: end
 
+The comparison above stands. A later revision of the same preset
+changes the bookkeeping a labeled chain spent outside the potential,
+and the temperature law. The species SOAP step formed its normal
+matrix by a strided walk and differentiated the contraction by finite
+differences. The products now read contiguous columns in the same
+order, and the contraction derivative is the analytic one. A labeled
+chain was cooled by the budget window, which does not read acceptance.
+The temperature is the acceptance dial already used for a one-species
+chain. Unlike-pair exchanges follow their own acceptance, and a
+two-species plateau moves to a lower seat whose fingerprint lies
+outside the merge radius. The proposal step is unchanged.
+Seeds 2000--2011 of \texttt{174203a9} were run in one session against
+the parent \texttt{4881fe3f}, one core, host bench. The rows are
+\texttt{bench/blj-fix/rows.csv}. No system loses on the two-sided
+Fisher test or the tie-corrected Mann--Whitney test. On the misses
+that spend the full budget, the median time outside the potential
+falls from 28.8~s to 12.8~s at BLJ\(_{38}\), \(\sigma_{BB}=1.05\),
+from 270.8~s to 86.2~s at BLJ\(_{55}\), \(\sigma_{BB}=1.15\), from
+116.6~s to 46.1~s at BLJ\(_{55}\), \(\sigma_{BB}=1.30\), and from
+1627~s to 224~s at BLJ\(_{98}\), \(\sigma_{BB}=1.30\). The median
+time inside the potential on those four stays 1.64~s, 8.56~s, 8.51~s
+and 108~s. BLJ\(_{55}\) at \(\sigma_{BB}=1.30\) stays at 4 of 12.
+BLJ\(_{38}\) at \(\sigma_{BB}=1.15\) moves from 9 of 12 to 6 of 12,
+Fisher \(p=0.40\). Lennard-Jones 38, 55, 75, 98 and 104 keep the same
+calls, the same quenched energies and the same traces on every seed.
+
 \subsection{The Atomic Simulation Environment}
 \label{sec:ase}
 Tables~\ref{tab:ase} and~\ref{tab:ase-morse} put this setting against
