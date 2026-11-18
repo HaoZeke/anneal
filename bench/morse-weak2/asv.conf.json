@@ -5,7 +5,7 @@
   "repo": "../..",
   "branches": ["main"],
   "environment_type": "existing:/work/anneal/.venv/bin/python3",
-  "benchmark_dir": "benchmarks",
+  "benchmarks": "benchmarks",
   "results_dir": "results",
   "html_dir": "html"
 }

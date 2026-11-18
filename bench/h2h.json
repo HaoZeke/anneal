@@ -1339,6 +1339,20 @@
           "budget": "budget",
           "seed": "seed"
         }
+      ],
+      "short": [
+        {
+          "key": "lj38",
+          "arm": "current_recommended",
+          "n": 1,
+          "reason": "the rejected-default gate stopped after exact m38 hit regressions; this already-started baseline row remains append-only"
+        },
+        {
+          "key": "m75r6",
+          "arm": "current_recommended",
+          "n": 5,
+          "reason": "the rejected-default gate stopped after exact m38 hit regressions; these already-started baseline rows remain append-only"
+        }
       ]
     },
     {
