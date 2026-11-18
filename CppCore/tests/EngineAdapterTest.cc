@@ -300,7 +300,9 @@ TEST_CASE("charge, spin and thread settings reach the backend",
   REQUIRE(s.set_num_threads(bare, 1, 1) == 3);
   REQUIRE(!error_of(s, bare).empty());
   REQUIRE(s.select_orbitals(bare, 1) == 3);
+  REQUIRE(error_of(s, bare) == "backend has no orbital selection");
   REQUIRE(s.copy_orbitals(bare, 1, 2) == 3);
+  REQUIRE(error_of(s, bare) == "backend has no orbital copy");
   s.destroy(bare);
 }
 
