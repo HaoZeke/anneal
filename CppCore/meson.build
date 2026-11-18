@@ -760,7 +760,7 @@ if get_option('with_examples') and not get_option('with_rpc_client_only')
     executable(
         'time_pair_scaling',
         sources: ['examples/time_pair_scaling.cc'],
-        dependencies: _deps + [vesin_dep] + fortran_rt_deps,
+        dependencies: _deps + [vesin_dep, fastnlist_dep] + fortran_rt_deps,
         link_with: _linkto,
         cpp_args: _args,
     )
