@@ -9,6 +9,13 @@ option('with_cache', type: 'boolean', value: false)
 option('pure_lib', type: 'boolean', value: true)
 option('with_rust_core', type: 'boolean', value: false)
 option(
+    'team_min_atoms',
+    type: 'integer',
+    value: 8192,
+    min: 1,
+    description: 'Minimum atom count for opening an OpenMP team',
+)
+option(
     'with_fast_nlist',
     type: 'feature',
     value: 'auto',
