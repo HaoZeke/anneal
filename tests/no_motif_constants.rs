@@ -1283,27 +1283,6 @@ fn fnv(lines: &[&str]) -> u64 {
 
 const ALLOW: &[Allow] = &[
     Allow {
-        path: "src/assignment.rs",
-        needle: "shortest_path_from: usize = 98",
-        count: 1,
-        digest: 0x9bfa9ca0635ddf05,
-        reason: "fixed 98-point crossover picks the assignment solver; replace with a solver choice timed on the first projection",
-    },
-    Allow {
-        path: "src/assignment.rs",
-        needle: "n >= shortest_path_from",
-        count: 1,
-        digest: 0xacc9d40664aa641b,
-        reason: "reads the fixed 98-point solver crossover declared above",
-    },
-    Allow {
-        path: "src/bank_rpc/server.rs",
-        needle: "kmax_factor: if n >= 55",
-        count: 1,
-        digest: 0x8cd2cfbb992a636e,
-        reason: "existing size-tuned IRA admission setting; replacement is audited",
-    },
-    Allow {
         path: "src/catalog/leave_learn.rs",
         needle: "fivefold",
         count: 1,

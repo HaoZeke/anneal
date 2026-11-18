@@ -4,28 +4,8 @@
 
 //! Dense minimum-cost bipartite assignment.
 //!
-//! Below 98 atoms the permutation is the column-first
-//! Kuhn-Munkres matching the measured Lennard-Jones walks at 38,
-//! 55, and 75 atoms (LJ38, LJ55, and LJ75) were generated with.
-//! Two or more optimal permutations can share a
-//! cost, and a different tie break moves those walks.
-//! At 98 atoms and above the same optimum
-//! is computed by successive shortest paths.
-//! A continuous-symmetry projection solves one of these
-//! problems for every group operation and every trial
-//! orientation, and the recursive Kuhn-Munkres walk was
-//! the dominant cost of an energy evaluation at that size.
-
-/// Matrix size at which the flat shortest-path scan replaces Kuhn-Munkres.
-///
-/// 98 is the atom count where one projection of the full point set stopped
-/// being a small fraction of a quench.
-const SHORTEST_PATH_FROM: usize = 98;
-
-/// Whether a matrix of this size is solved by the flat shortest-path scan.
-pub(crate) const fn uses_shortest_path(n: usize) -> bool {
-    n >= SHORTEST_PATH_FROM
-}
+//! Solved across all matrix dimensions by the reusable-scratch successive
+//! shortest-path scan, with AVX2 reduced-cost updates where available.
 
 /// Returns the column assigned to each row of a finite `n × n` cost matrix.
 ///
@@ -40,11 +20,7 @@ pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     if n.checked_mul(n) != Some(costs.len()) || costs.iter().any(|value| !value.is_finite()) {
         return None;
     }
-    if uses_shortest_path(n) {
-        successive_shortest_paths(costs, n)
-    } else {
-        kuhn_munkres(costs, n)
-    }
+    successive_shortest_paths(costs, n)
 }
 
 /// # Safety
@@ -656,6 +632,7 @@ fn optimum_is_unique(
 /// `delta.min(slack)` keeps the bits of a scalar scan: each slack is
 /// `(row potential + column potential) - weight`, and a later equal
 /// value does not replace an earlier one.
+#[cfg(test)]
 fn phase_delta(
     n: usize,
     weights: &[f64],
@@ -687,6 +664,7 @@ fn phase_delta(
     )
 }
 
+#[cfg(test)]
 fn phase_delta_scalar(
     n: usize,
     weights: &[f64],
@@ -716,7 +694,7 @@ fn phase_delta_scalar(
 ///
 /// AVX2 must be enabled. `weights` holds `n * n` entries and both
 /// potential slices hold `n`.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(test, target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 unsafe fn phase_delta_avx2(
     n: usize,
@@ -771,6 +749,7 @@ unsafe fn phase_delta_avx2(
 ///
 /// The numerical scheme follows the Kuhn-Munkres implementation
 /// used by gpr_optim's MIT-licensed `Distance.cpp`.
+#[cfg(test)]
 fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     let scale = costs
         .iter()
@@ -845,6 +824,7 @@ fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     Some(row_match)
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn augment_tight(
     row: usize,
@@ -921,7 +901,7 @@ fn augment_tight(
 /// # Safety
 ///
 /// AVX2 must be enabled. `start + 4 <= n`, and the slices cover the row.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(test, target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 unsafe fn group_ineligible(
     row: usize,
@@ -1042,21 +1022,21 @@ mod tests {
                     "n={n} shortest {fast_cost}"
                 );
                 let slow = kuhn_munkres(&costs, n).expect("square");
-                assert_eq!(assignment, slow);
+                let slow_cost = cost_of(&costs, n, &slow);
+                assert!((got - slow_cost).abs() < 1e-8, "n={n} {got} vs {slow_cost}");
             }
         }
     }
 
-    /// From the threshold up the dispatched solver is the shortest-path scan.
-    /// Integer costs force ties, so only the cost has to agree.
+    /// Integer costs force ties, so only the optimal cost has to agree.
     #[test]
-    fn shortest_paths_match_kuhn_munkres_cost_at_the_threshold() {
+    fn shortest_paths_match_kuhn_munkres_cost_across_scales() {
         let mut state = 0x9e37_79b9_u64;
         let mut next = || {
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
             ((state >> 33) as u32 % 7) as f64
         };
-        for n in [super::SHORTEST_PATH_FROM, super::SHORTEST_PATH_FROM + 6] {
+        for n in [12usize, 36, 64, 100] {
             for _ in 0..3 {
                 let costs: Vec<f64> = (0..n * n).map(|_| next()).collect();
                 let assignment = minimum_cost_assignment(&costs, n).expect("square");
