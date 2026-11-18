@@ -509,8 +509,7 @@ jobs:
           activate-environment: true
       - name: Install LLVM OpenMP 18
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends \
+          bash ci/gha/apt-install.sh --no-install-recommends \
             clang-18 libclang-rt-18-dev libomp-18-dev
           dpkg-query -W clang-18 libclang-rt-18-dev libomp-18-dev
       - name: Build and test OpenMP under LeakSanitizer
@@ -518,8 +517,12 @@ jobs:
         run: |
           export CC=/usr/bin/clang-18
           export CXX=/usr/bin/clang++-18
+          # Clang leaves __asan_* unresolved in librgpot.so. Meson's
+          # default -Wl,--no-undefined then fails the link. The layout
+          # sanitizer script sets the same option for Clang.
           meson setup bbdir-lsan \
             -Db_sanitize=address \
+            -Db_lundef=false \
             -Dwith_tests=true \
             -Dwith_examples=false \
             -Dwith_fortran_pots=disabled \
