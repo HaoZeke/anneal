@@ -117,11 +117,7 @@ fn a_basin_stride_is_resolved_only_off_its_default() {
 fn recommended_records_removed_priors_in_the_resolved_hash() {
     let cfg = Config::recommended(38);
     let json = cfg.resolved_json().unwrap();
-    for name in [
-        "prior_soap",
-        "homotop_reorder",
-        "general_collective",
-    ] {
+    for name in ["prior_soap", "homotop_reorder", "general_collective"] {
         assert!(
             !json.contains(name),
             "{name} at the paper preset stays out of the resolved JSON"
