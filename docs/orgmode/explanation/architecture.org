@@ -169,8 +169,9 @@ convention and unwinding across a C boundary is not allowed.
    and stores a message that =rgpot_last_error= returns.
    No exception or panic crosses the boundary.
    =rgpot_potential_calculate=, =rgpot_potential_hvp=,
-   =rgpot_potential_hvp_centre=, =rgpot_rpc_calculate= and =rgpot_rpc_server_start=
-   run their body inside
+   =rgpot_potential_hvp_centre=, =rgpot_potential_set_taylor_jet=,
+   =rgpot_potential_taylor_jet=, =rgpot_ch5_2008_taylor_jet=,
+   =rgpot_rpc_calculate= and =rgpot_rpc_server_start= run their body inside
    =catch_unwind=, which turns a panic into =RGPOT_INTERNAL_ERROR= with the
    panic message.
    These are the entry points that run a user callback or the RPC runtime.

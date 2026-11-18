@@ -61,7 +61,9 @@ text, or "unknown error" when that pointer is NULL.
 The prefixes are "invalid parameter: " for =RGPOT_INVALID_PARAMETER=, "RPC
 error: " for =RGPOT_RPC_ERROR=, "buffer size error: " for
 =RGPOT_BUFFER_SIZE_ERROR=, "SCC not converged: " for =RGPOT_SCC_NOT_CONVERGED=,
-and "internal error: " for =RGPOT_INTERNAL_ERROR= and any other code.
+"no Taylor jet: " for =RGPOT_NO_JET=, "Taylor jet branch: " for
+=RGPOT_JET_BRANCH=, "Taylor jet domain: " for =RGPOT_JET_DOMAIN=, and
+"internal error: " for =RGPOT_INTERNAL_ERROR= and any other code.
 Every category throws the same type, =rgpot::Error=.
 
 ** include/rgpot/types.hpp

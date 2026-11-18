@@ -337,6 +337,12 @@ pub unsafe fn serve_taylor_jet<J: TaylorJet>(
         }
     };
     let direction = unsafe { std::slice::from_raw_parts(direction, dim) };
+    if let Some(i) = direction.iter().position(|v| !v.is_finite()) {
+        set_last_error(&format!(
+            "Taylor jet: direction: non-finite value at element {i}"
+        ));
+        return rgpot_status_t::RGPOT_INVALID_PARAMETER;
+    }
     match jet.taylor_jet(&positions, direction, order) {
         Ok(coefficients) if coefficients.len() == count => {
             let lower = unsafe { std::slice::from_raw_parts_mut(lower, coefficients.len()) };

@@ -37,6 +37,12 @@ use rgpot_core::status::{rgpot_last_error, rgpot_status_t};
 use rgpot_core::taylor::Interval;
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 
+fn last_error() -> String {
+    unsafe { CStr::from_ptr(rgpot_last_error()) }
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// The H + CH4 saddle of the surface, Bohr.
 const SADDLE: [f64; 18] = [
     2.5078986937601746,
@@ -328,6 +334,56 @@ fn the_c_callback_serves_the_same_jet() {
     for (k, c) in direct.iter().enumerate() {
         assert_eq!((lower[k], upper[k]), (c.lo, c.hi), "c_{k}");
     }
+}
+
+fn assert_non_finite_direction_is_refused(value: f64) {
+    let mut direction = mixed();
+    direction[7] = value;
+    let (status, ..) = through_handle(
+        SADDLE.to_vec(),
+        CH5_2008_ATOMIC_NUMBERS.to_vec(),
+        &direction,
+        2,
+    );
+    assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+    assert_eq!(last_error(), "direction: non-finite value at element 7");
+
+    let mut pos = SADDLE.to_vec();
+    let mut z = CH5_2008_ATOMIC_NUMBERS.to_vec();
+    let mut cell = [0.0; 9];
+    let mut input = unsafe {
+        rgpot_force_input_create(z.len(), pos.as_mut_ptr(), z.as_mut_ptr(), cell.as_mut_ptr())
+    };
+    let mut lower = [9.0; 3];
+    let mut upper = [9.0; 3];
+    let status = unsafe {
+        rgpot_ch5_2008_taylor_jet(
+            std::ptr::null_mut(),
+            &input,
+            direction.as_ptr(),
+            2,
+            lower.as_mut_ptr(),
+            upper.as_mut_ptr(),
+        )
+    };
+    unsafe { rgpot_force_input_free(&mut input) };
+    assert_eq!(status, rgpot_status_t::RGPOT_INVALID_PARAMETER);
+    assert_eq!(
+        last_error(),
+        "Taylor jet: direction: non-finite value at element 7"
+    );
+    assert_eq!(lower, [9.0; 3]);
+    assert_eq!(upper, [9.0; 3]);
+}
+
+#[test]
+fn c_jet_entry_points_refuse_nan_directions() {
+    assert_non_finite_direction_is_refused(f64::NAN);
+}
+
+#[test]
+fn c_jet_entry_points_refuse_infinite_directions() {
+    assert_non_finite_direction_is_refused(f64::INFINITY);
 }
 
 #[test]

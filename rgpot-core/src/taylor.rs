@@ -37,7 +37,13 @@ pub enum Side {
 
 /// The side of `threshold` on which all of `value` lies.
 pub fn side(value: Interval, threshold: f64, test: &'static str) -> Result<Side, JetError> {
-    if value.sup() < threshold {
+    if value.is_empty() {
+        Err(JetError::Branch {
+            test,
+            lo: value.inf(),
+            hi: value.sup(),
+        })
+    } else if value.sup() < threshold {
         Ok(Side::Below)
     } else if value.inf() > threshold {
         Ok(Side::Above)
@@ -142,7 +148,7 @@ impl Taylor {
     pub fn div(&self, other: &Taylor) -> Result<Taylor, JetError> {
         self.same_order(other);
         let v0 = other.c[0];
-        if v0.contains(0.0) {
+        if v0.is_empty() || v0.contains(0.0) {
             return Err(domain("division", v0));
         }
         let mut w = vec![Interval::ZERO; self.c.len()];
