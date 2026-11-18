@@ -1095,4 +1095,34 @@ mod depth_allocator_tests {
             "scale changed the winner: {small:?} against {large:?}"
         );
     }
+
+    /// An escape out of a local minimum lands uphill (`gain < 0`), while an
+    /// arm that quenches back onto the quarantined shelf carries no leave
+    /// depth at all. Across energy scales the leaving arm must take the draws.
+    #[test]
+    fn an_uphill_leave_beats_an_arm_that_returns_to_the_shelf() {
+        for scale in [1.0e-3_f64, 1.0, 1.0e4] {
+            let mut rng = StdRng::seed_from_u64(41);
+            let mut allocator = DepthAllocator::new(2);
+            let mut home = [0usize; 2];
+            let runnable = [true, true];
+            let mut picks = [0usize; 2];
+            for _ in 0..200 {
+                let arm = allocator.select_leaving(&home, &runnable, &mut rng);
+                picks[arm] += 1;
+                if arm == 0 {
+                    allocator.update(0, -5.0 * scale);
+                } else {
+                    home[1] += 1;
+                }
+            }
+            assert_eq!(allocator.draws[1], 0, "shelf return recorded a leave depth");
+            assert!(
+                picks[0] > 170,
+                "scale {scale}: uphill leave took {} of 200 draws against {} shelf returns",
+                picks[0],
+                picks[1]
+            );
+        }
+    }
 }
