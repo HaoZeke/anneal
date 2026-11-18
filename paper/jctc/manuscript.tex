@@ -1233,8 +1233,10 @@ The comparison above stands. A later revision of the same preset
 changes the bookkeeping a labeled chain spent outside the potential,
 and the temperature law. The species SOAP step formed its normal
 matrix by a strided walk and differentiated the contraction by finite
-differences. The products now read contiguous columns in the same
-order, and the contraction derivative is the analytic one. A labeled
+differences. The products now skip exact zeros and add the rest in
+feature order, which is the order of that walk, so a result bit does
+not move. The timed runs accumulated the same products from contiguous
+columns. The contraction derivative is the analytic one. A labeled
 chain was cooled by the budget window, which does not read acceptance.
 The temperature is the acceptance dial already used for a one-species
 chain. Unlike-pair exchanges follow their own acceptance, and a
