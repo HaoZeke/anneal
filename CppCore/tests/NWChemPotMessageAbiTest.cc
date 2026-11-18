@@ -8,8 +8,11 @@
 
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
+#include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/NWChemPot/NWChemPot.hpp"
 #include "rgpot/rpc/Potentials.capnp.h"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -96,4 +99,36 @@ TEST_CASE("NWChemPot preserves typed DFT convergence parameters",
           "hyb_gga_xc_wb97x_v");
   REQUIRE_THAT(restored_stanzas[0].getDft().getEnergyConv(),
                WithinAbs(1.0e-6, 1.0e-15));
+}
+
+TEST_CASE("NWChemPot reports a loaded engine configuration refusal",
+          "[nwchem][abi]") {
+  const char *path = std::getenv("RGPOT_NWCHEM_ENGINE");
+  REQUIRE(path != nullptr);
+
+  rgpot::NWChemPot pot;
+  REQUIRE(pot.available());
+
+  rgpot::DynLib engine;
+  engine.open(path);
+  using RejectParamsFn = void (*)(int);
+  auto reject_params = engine.sym<RejectParamsFn>("nwchemc_fake_reject_params");
+  reject_params(1);
+
+  ::capnp::MallocMessageBuilder message;
+  auto config = message.initRoot<::PotentialConfig>();
+  auto params = config.initNwchem();
+  params.setBasis("6-31g");
+  params.setTheory("dft");
+  params.setScfType("rhf");
+  params.setCharge(0);
+  params.setMultiplicity(1);
+
+  std::string result;
+  REQUIRE_FALSE(pot.setPotentialConfig(config.asReader(), &result));
+  reject_params(0);
+
+  REQUIRE(pot.available());
+  REQUIRE(result == "rgpot params nwchem arm rejected by embed: "
+                    "basis=6-31g theory=dft scfType=rhf charge=0 mult=1");
 }
