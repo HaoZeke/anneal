@@ -137,8 +137,7 @@ annotates OpenMP barriers, so both report false races across sequential regions;
 an Archer-enabled =libomp= built with ThreadSanitizer support is needed instead
 of adding suppressions.
 Under AddressSanitizer and LeakSanitizer, =libomp= retains a known 128-byte
-process-lifetime allocation in
-=___kmp_allocate_align=.
+process-lifetime allocation in =___kmp_allocate_align=.
 The OpenMP test binaries compile the suppression from
 =CppCore/tests/lsan_libomp.hpp=, so only that runtime allocation is suppressed
 and leak checks remain active for library and test code.
@@ -148,9 +147,9 @@ and leak checks remain active for library and test code.
 =rust-test-all= enables every feature of =rgpot-core= (=schema=, =profile=,
 =rpc=, =cache=, =gen-header=).
 =gen-header= makes the build rewrite =rgpot-core/include/rgpot.h=.
-A build rewrites the header without failing, so the =rust_tests= job also runs
-=tools/check_header_drift.sh=, which fails when the rewrite differs from the
-committed header.
+A build rewrites the header without failing, so the
+=rust_tests= job also runs =tools/check_header_drift.sh=, which fails when the
+rewrite differs from the committed header.
 
 #+attr_rgpot: syntax compiles the Rust crate
 #+begin_src bash
