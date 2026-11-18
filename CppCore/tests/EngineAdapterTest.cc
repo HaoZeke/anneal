@@ -272,7 +272,8 @@ TEST_CASE("analytic HVP rejects overlapping direction and output buffers",
                 const_cast<double *>(pos), kBox.data()) ==
           RGPOT_ENGINE_ERR_INVALID);
   REQUIRE(s.hvp(pot, 2, pos, kZ.data(), buf.data(),
-                const_cast<double *>(kBox.data())) == RGPOT_ENGINE_ERR_INVALID);
+                const_cast<double *>(kBox.data()),
+                kBox.data()) == RGPOT_ENGINE_ERR_INVALID);
   REQUIRE(buf == initial);
   s.destroy(pot);
 }
