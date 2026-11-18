@@ -68,25 +68,53 @@ Classifications:
 | `src/binary_water.rs:33-136` | Species IDs, pair scales, and rigid geometry are supplied from the selected binary/TIP4P problem to generic configuration. | **Problem adapter**, not a hidden species branch. | Keep values caller/problem supplied; avoid moving them into generic moves. |
 | `src/methods/cluster_hopping/config.rs:187-188`, `:978-998`, `:1557-1560`, `:1596-1599`, `:1934-1938` | `prior_reseed`, `prior_growth`, `prior_core`, `prior_handover`, `prior_motif`, and `ContinuousSymmetry::Measure::reseed_hops` are motif-named/defaulted configuration debt with no hop-loop reads; only the interval is consumed. | **Inert configuration / documentation drift**. | Remove unused fields or wire a replacement only to generic measured stall evidence. |
 
+## Added by the review of the lint
+
+| Location | Hit | Classification | Proposed general replacement |
+| --- | --- | --- | --- |
+| `src/assignment.rs:23`, `:38`; `src/csm.rs:366` | `SHORTEST_PATH_FROM = 98` picks the assignment solver by matrix size, and the continuous-symmetry projection repeated the literal `98`. The constant has no size word in its name, so the first scanner missed both. | **Behaviour** (solver crossover, size-keyed). The duplicated literal in `csm.rs` is removed: it now asks `assignment::uses_shortest_path`. | Time both solvers on the first projection and choose by measured cost. |
+| `src/potentials.rs:247-256` | `ccd_morse_minimum` keys published Morse minima by `(rho, n_points)` match arms over 38, 55, 75. Only examples read it, for hit reporting. | **Diagnostic only** (reference data). | Move the table to the benchmark input. |
+| `src/methods/dls_published.rs:87` | `ROWS` is a table keyed by atom-count breakpoints; the first scanner saw no comparison against a literal. | **Behaviour** (published-baseline reproduction), as the DLS row above. | As above. |
+| `src/methods/cluster_hopping/moves.rs:248`; `src/methods/cluster_hopping.rs:3602`, `:7893`, `:7929`; `src/catalog/packing.rs:483`, `:507`, `:1026`, `:1155`; `src/known_basin.rs:959`; `src/soap.rs:1251`, `:1257` | Readers of `WATER_HEXAMER_MOLECULES`, `RIGID_HOT_BODIES`, `MINIMUM_PACKING_ATOMS` and `ACTIVE_VOLUME_MIN` compare an atom count with the constant, so they carry the same size switch. | **Behaviour**, as the declarations above. | As above. |
+| `src/methods/cluster_hopping/moves.rs:1542`; `src/soap.rs:249` | A 97-entry covalent-radius table and a six-arm match on atomic number. | **Species behaviour**, as the table row above. | Require caller-supplied radii. |
+| `src/history.rs:101`, `src/methods/portfolio.rs:4403`, `src/methods/cluster_search.rs:2101`, `src/methods/bayesian_pilot.rs:286` | Counters named `n` compared with or fixed to a literal of five or more. | **Lookalike**, not a violation. The variables are renamed (`samples`, `archived`, `observations`, `grid`) so they no longer need an allowlist entry. | None needed. |
+
 ## Scanner policy
 
-`tests/no_motif_constants.rs` scans production `src/**/*.rs` lines for:
+`tests/no_motif_constants.rs` lexes production Rust under `src/` and
+`crates/` and drops comments. Items under `#[cfg(test)]`, `#[test]` and
+`#![cfg(test)]` are skipped by brace matching, so code after a test module is
+still scanned. The remaining code is cut into statements at `;`, `{` and `}`
+outside brackets, so a constant, comparison or match arm split over several
+lines is one statement. A statement is a hit when it:
 
-1. named motif identifiers (including fivefold, icosahedral, decahedral,
-   Mackay, Marks, Leary, FCC, pentagon, and motif-class spellings);
-2. direct comparisons of `n`, `n_points`, `n_atoms`, `atom_count`, or `natoms`
-   against integer thresholds of five or more; and
-3. integer constants of five or more whose names identify atom, point,
-   molecule, rigid-body, or SOAP active-volume counts.
+1. names a motif (fivefold, icosahedral, decahedral, Mackay, Marks, Leary,
+   FCC, HCP, BCC, pentagon, `d5h`, motif classes), including camel-case and
+   snake-case spellings;
+2. embeds a benchmark size in an identifier (`lj38`, `ico55`, `known_n104`);
+3. spells a benchmark cluster size (13, 38, 55, 75, 98, 104, 147, 150) beside
+   a comparison, a range, a match arm, an assignment, in a constant, or twice
+   in one list, in any integer form (`0x26`, `38usize`, `3_8`);
+4. compares an atom, point, molecule or body count with a literal of five or
+   more, on either side, or fixes such a variable to one;
+5. declares an integer constant whose name carries a size word, a table of
+   integer-keyed rows, or a table of forty or more numbers;
+6. is a match arm keyed by an integer when the scrutinee is a size or an
+   atomic number; or
+7. reads a constant that rules 3 or 5 flagged, wherever it is declared.
 
-Every existing match is tied to a path, source needle, and one-line reason.
-The expected match count for each exception is locked: another occurrence of
-an already allowed needle also fails. The test likewise fails when an
-allowlist entry becomes stale, so the two in-flight removals must delete their
-corresponding exceptions when they land.
+Python is scanned under `python/` with all of these rules, and under
+`scripts/`, `experiments/` and `bench/` for benchmark-size defaults and
+comparisons (`n=38`, `n == 98`, `N = 75`). Test files are not scanned.
+
+Every hit must be claimed by an entry that names a path, a needle, a statement
+count and a digest of the claimed statements. Editing, adding or removing a
+claimed statement changes the digest and fails the test, so a broad needle
+cannot hide a swap. An entry that claims nothing is stale. The two in-flight
+removals must delete their entries when they land.
 
 The following lookalikes were deliberately excluded: dimension and empty-input
-checks; two-/three-/four-point geometric validity checks; sample, visit,
-optimizer, and archive counters named `n`; physical-potential constants; and
-motif words confined to comments or `#[cfg(test)]` fixture modules. No source
-path owned by `bc-250d428e` or `bc-a84a44f0` was edited.
+checks; two-/three-/four-point geometric validity checks; shift amounts such
+as `s << 13`; physical-potential constants; and motif words confined to
+comments or test-only items. Counters that were named `n` were renamed
+instead of allowlisted.
