@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 
@@ -114,10 +115,30 @@ def test_summary_uses_the_latest_revision():
     assert lines[0]["cmcts_hits"] == "0"
 
 
+def built_binary() -> Path | None:
+    targets = [os.environ.get("CARGO_TARGET_DIR"), ROOT / "target"]
+    for target in targets:
+        if not target:
+            continue
+        for profile in ("release", "debug"):
+            candidate = Path(target) / profile / "examples" / "cmcts_au"
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def test_the_binary_is_found_under_the_cargo_target_dir(tmp_path, monkeypatch):
+    binary = tmp_path / "debug" / "examples" / "cmcts_au"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("")
+    monkeypatch.setenv("CARGO_TARGET_DIR", str(tmp_path))
+    assert built_binary() == binary
+
+
 def test_dimer_matches_the_reduced_gold_row_to_1e_8():
-    binary = ROOT.parent / "tmp" / "anneal-target" / "release" / "examples" / "cmcts_au"
-    if not binary.is_file():
-        pytest.skip("cmcts_au is not built")
+    binary = built_binary()
+    if binary is None:
+        pytest.skip("cmcts_au is not built under CARGO_TARGET_DIR or target/")
     proc = subprocess.run(
         [str(binary), "energy", "2"],
         input="0 0 0 1 0 0\n",
