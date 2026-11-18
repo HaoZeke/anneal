@@ -1,7 +1,7 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 //
-// Smoke timing for MorsePot across OMP_NUM_THREADS = 1, 2, 4 on:
+// Smoke timing for MorsePot across OMP_NUM_THREADS = 1, 2, 4, 8 on:
 //   1. 6x6x6 FCC Cu vacancy (863 atoms, Makri/Ortner/Kermode NEB parameters:
 //      De = 1.0, a = 4.0 / 2.55, re = 2.55, cutoff = 5.3, below kTeamMinAtoms)
 //   2. 14x14x14 FCC Cu vacancy (10975 atoms, same parameters, stored list)
@@ -11,7 +11,7 @@
 // Cycles across perturbed Verlet-reused frames and checks bit-for-bit
 // agreement of energies and forces against the 1-thread reference.
 //
-// morse_omp_bench [--threads 1,2,4] [--runs 5] [--seconds 0.15]
+// morse_omp_bench [--threads 1,2,4,8] [--runs 5] [--seconds 0.15]
 
 #include <algorithm>
 #include <array>
@@ -33,7 +33,7 @@
 namespace {
 
 struct Opts {
-  std::vector<int> threads{1, 2, 4};
+  std::vector<int> threads{1, 2, 4, 8};
   int runs = 5;
   double seconds = 0.15;
   int frames = 16;

@@ -770,27 +770,72 @@ TEST_CASE("forCellTeam on a stored list walks the stored index across threads an
                                             bits(dz)});
                      }
                    });
-    want_half = sortedPairs(want_half);
+    // forHalf walks rows in atom-index order. A stored forCellTeam gives
+    // slice s only the central atoms in partition(n, s, nt) and walks those
+    // rows the same way, so the slices joined in order are the half walk.
+    // Sorting that join compared the pairs as a set and let a tile walk,
+    // which owns cells rather than those atom runs, pass.
     REQUIRE_FALSE(want_half.empty());
 
+    struct TeamWalk {
+      int nt = 0;
+      std::vector<char> owns;
+      PairBits got;
+    };
+    std::vector<TeamWalk> walks;
     for (const int nt : {1, 2, 4}) {
+      TeamWalk walk;
+      walk.nt = nt;
       std::vector<PairBits> per_slice(static_cast<std::size_t>(nt));
+      // One byte per slice. forEachSlice may run the slices on different
+      // threads, and each slice is written by only one of them.
+      walk.owns.assign(static_cast<std::size_t>(nt), 1);
       stored.forCellTeam(
           true, nt,
           [&](int slice, std::int32_t i, std::int32_t j, double dx, double dy, double dz,
               double r2) {
+            const auto run =
+                rgpot::nlist::partition(static_cast<std::int64_t>(n), slice, nt);
+            const auto s = static_cast<std::size_t>(slice);
+            if (static_cast<std::int64_t>(i) < run.begin ||
+                static_cast<std::int64_t>(i) >= run.end) {
+              walk.owns[s] = 0;
+            }
             if (r2 <= cutoff * cutoff) {
-              per_slice[static_cast<std::size_t>(slice)].push_back(
-                  {static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j), bits(dx),
-                   bits(dy), bits(dz)});
+              per_slice[s].push_back({static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(j),
+                                      bits(dx), bits(dy), bits(dz)});
             }
           });
-      PairBits got;
       for (const auto &part : per_slice) {
-        got.insert(got.end(), part.begin(), part.end());
+        walk.got.insert(walk.got.end(), part.begin(), part.end());
       }
-      got = sortedPairs(got);
-      CHECK(got == want_half);
+      walks.push_back(std::move(walk));
+    }
+    // Ownership first. One slice owns every atom, so a cell walk and a row
+    // walk agree there, and the split is what a tile stencil changes.
+    for (const TeamWalk &walk : walks) {
+      for (int slice = 0; slice < walk.nt; ++slice) {
+        INFO("step=" << step << " nt=" << walk.nt << " slice=" << slice);
+        REQUIRE(walk.owns[static_cast<std::size_t>(slice)] != 0);
+      }
+    }
+    for (const TeamWalk &walk : walks) {
+      // Report the first row that disagrees. Catch would otherwise print
+      // both walks.
+      std::size_t mismatch = walk.got.size();
+      const bool same_length = walk.got.size() == want_half.size();
+      if (same_length) {
+        for (std::size_t k = 0; k < walk.got.size(); ++k) {
+          if (walk.got[k] != want_half[k]) {
+            mismatch = k;
+            break;
+          }
+        }
+      }
+      INFO("step=" << step << " nt=" << walk.nt << " got=" << walk.got.size()
+                   << " want=" << want_half.size() << " first_mismatch=" << mismatch);
+      REQUIRE(same_length);
+      REQUIRE(mismatch == walk.got.size());
     }
   }
   setThreads("");

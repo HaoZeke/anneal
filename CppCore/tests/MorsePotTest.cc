@@ -304,7 +304,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
     const auto ref2 = runFullEval(ref_pot, step2, sys.z, sys.box);
     REQUIRE(ref_pot.listReused());
 
-    for (const char *th : {"2", "4"}) {
+    for (const char *th : {"2", "4", "8"}) {
       ThreadGuard::set(th);
       const auto before_teams = rgpot::teamsOpened();
       rgpot::MorsePot pot(cu_vacancy);
@@ -316,7 +316,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
   }
 
   // Above kTeamMinAtoms (13x13x13 Cu vacancy = 8787 atoms): shifted, switched
-  // and sheared cells across Stored, Auto and Stream modes at 1, 2 and 4 threads.
+  // and sheared cells across Stored, Auto and Stream modes at 1, 2, 4 and 8 threads.
   for (const bool sheared : {false, true}) {
     const auto sys = fccVacancy(13, 2.55 * std::sqrt(2.0), 29, sheared);
     REQUIRE(sys.z.size() >= rgpot::kTeamMinAtoms);
@@ -344,7 +344,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
         const auto ref1 = runFullEval(serial_pot, within_skin, sys.z, sys.box);
         const auto ref2 = runFullEval(serial_pot, past_skin, sys.z, sys.box);
 
-        for (const char *th : {"1", "2", "4"}) {
+        for (const char *th : {"1", "2", "4", "8"}) {
           INFO("OMP_NUM_THREADS=" << th);
           ThreadGuard::set(th);
           rgpot::MorsePot pot(cfg);
