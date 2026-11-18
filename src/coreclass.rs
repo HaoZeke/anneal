@@ -1,7 +1,7 @@
 //! Shared core-class table for cooperative cluster chains.
 //!
-//! Chains report the coarse five-fold class of their live state
-//! ([`crate::corekey::motif_class`]) together with the energy and charged
+//! Chains report the data-derived core region of their live state
+//! ([`crate::corekey::core_region`]) together with the energy and charged
 //! work at that checkpoint. The table keeps one [`crate::coreclass::CoreClassStat`] per
 //! class and one private record per chain. A chain restarts when its own
 //! best inside its class has not improved for `core_patience` charged
@@ -67,7 +67,7 @@ impl Default for ChainState {
     }
 }
 
-/// Cores visited by an ensemble, keyed by [`crate::corekey::MotifClass::index`].
+/// Cores visited by an ensemble, keyed by [`crate::corekey::CoreRegion::index`].
 #[derive(Debug, Clone)]
 pub struct CoreClassTable {
     patience: usize,
