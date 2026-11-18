@@ -54,7 +54,7 @@ pub fn cluster_lj(positions: &[f64], energy: &mut f64, gradient: &mut [f64]) {
 /// row-major `n_species * n_species`, indexed as `slot[i] * n_species + slot[j]`.
 #[allow(
     clippy::too_many_arguments,
-    reason = "each C parameter table is its own pointer"
+    reason = "public rgpot-pair API; its parameters mirror the rgpot_gupta C tables"
 )]
 pub fn gupta(
     positions: &[f64],

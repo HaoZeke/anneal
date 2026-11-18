@@ -313,7 +313,7 @@ pub fn binary_lj(n_a: usize, eps: [f64; 3], sig: [f64; 3], cutoff: f64, position
 #[inline(always)]
 #[allow(
     clippy::too_many_arguments,
-    reason = "LJ coefficients and the two site charges stay separate inputs"
+    reason = "public rgpot-pair API; a new signature would break Rust callers that inline it"
 )]
 pub fn tip4p_sites(use_epsilon: bool, c6: f64, c12: f64, epsilon: f64, sigma: f64, coulomb: f64, q_h: f64, q_m: f64, sites: &[f64], gradient: &mut [f64]) -> f64 {
     let n_molecules = sites.len() / 12;
