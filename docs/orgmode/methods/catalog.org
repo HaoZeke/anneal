@@ -198,9 +198,9 @@ with the SOAP arm and Thompson allocation over the arms. Like
 =Config::communicating=, it completes the core's orbit on every new basin
 and, below 98 points, draws between the plain and the two-phase relative
 0.7 surface.
-A stuck chain can complete into the deposited basin of the lowest structure seen (=stalled=, =returns_to_deposit= and =returns_to_best= in src/methods/cluster_hopping.rs).
-The deposits can then refuse the completion, because it faces the same biased Metropolis test as a hop (=biased_metropolis=).
-Any other completed structure faces the raw energy test.
+A completion is offered to the chain under the basin bias, and the spectral bias when the run keeps one, whether or not the chain is stuck (=completion_biases= and =biased_metropolis= in src/methods/cluster_hopping.rs).
+It is the test a hop faces, so deposits in the basin the completion lands in count against it.
+On raw energy a completion is taken whenever it is lower, and it lands in the symmetric structure its basin leads to, so a chain that took every one was carried back down the funnel it had been pushed out of.
 Under a shared minimum history each minimum is completed once, by the chain that claims it first (=claim_completion= in src/methods/minima_hopping/history.rs, asked for by the hop loop in src/methods/cluster_hopping.rs).
 Every completion product is reported to the history, and a completion skips a candidate that repeats an earlier one.
 
