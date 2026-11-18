@@ -1114,6 +1114,7 @@ LANDFOLD_SHARDS = [
 rule landfold_maps_current:
     input:
         LANDFOLD_SHARDS,
+        "examples/landfold_stream.rs",
     output:
         touch("/work/anneal-landfold-current/complete.stamp"),
     threads: 8
@@ -1122,6 +1123,7 @@ rule landfold_maps_current:
     shell:
         """
         set -euo pipefail
+        cargo build --release --example landfold_stream --bin anneal
         python3 paper/jctc/scripts/run_landfold_campaign.py \\
           --work /work/anneal-landfold-current \\
           --publish paper/jctc/data/landfold_maps_v7 \\

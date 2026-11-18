@@ -166,11 +166,19 @@ def fold(
     folder.mkdir(parents=True, exist_ok=True)
     folded = folder / "fold.csv"
     expected = sum(source_rows(book) for book in books)
+    streamed = family == "lj" and len(books) > 1
     if not folded.is_file() or source_rows(folded) != expected + 1:
-        command = [
-            str(binary), "landfold", "--seed", "0", "--threads",
-            str(max(1, threads or os.cpu_count() or 1)), "--out", str(folded),
-        ]
+        if streamed:
+            stream = binary.parent / "examples/landfold_stream"
+            if not stream.is_file():
+                raise SystemExit("the current-code streaming landfold binary is not built")
+            command = [str(stream), str(books[0]), str(folded)]
+            command.extend(str(book) for book in books)
+        else:
+            command = [
+                str(binary), "landfold", "--seed", "0", "--threads",
+                str(max(1, threads or os.cpu_count() or 1)), "--out", str(folded),
+            ]
         if family == "tip4p":
             descriptor = folder / "rigid-state.csv"
             with descriptor.open("w", newline="") as handle:
@@ -205,6 +213,8 @@ def fold(
                 "code_revision": commit,
                 "code_tree": tree,
                 "host": os.environ.get("LANDFOLD_HOST", "cloud-run"),
+                "fit_rows": source_rows(books[0]) if streamed else len(points),
+                "mapping": "out-of-sample" if streamed else "direct",
             },
             sort_keys=True,
             indent=2,
@@ -476,7 +486,10 @@ def main() -> None:
     if args.status_only:
         publish_shard_status(args.work, args.publish)
         return
-    run(["cargo", "build", "--release", "--example", "landfold_campaign", "--bin", "anneal"])
+    run([
+        "cargo", "build", "--release", "--example", "landfold_campaign",
+        "--example", "landfold_stream", "--bin", "anneal",
+    ])
     search = ROOT.parent / "tmp/anneal-target/release/examples/landfold_campaign"
     landfold = ROOT.parent / "tmp/anneal-target/release/anneal"
     if not search.is_file() or not landfold.is_file():
