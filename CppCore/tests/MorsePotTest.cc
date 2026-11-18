@@ -305,7 +305,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
     const auto ref2 = runFullEval(ref_pot, step2, sys.z, sys.box);
     REQUIRE(ref_pot.listReused());
 
-    for (const char *th : {"2", "4", "8"}) {
+    for (const char *th : {"2", "4", "8", "16"}) {
       ThreadGuard::set(th);
       const auto before_teams = rgpot::teamsOpened();
       rgpot::MorsePot pot(cu_vacancy);
@@ -318,7 +318,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
 
   // Above kTeamMinAtoms (13x13x13 Cu vacancy = 8787 atoms): shifted, switched
   // and sheared cells across Stored, Auto and Stream modes. Stored and Auto
-  // cover 1, 2, 4 and 8 threads; Stream covers the largest requested team.
+  // cover 1, 2, 4, 8 and 16 threads; Stream covers the largest requested team.
   for (const bool sheared : {false, true}) {
     const auto sys = fccVacancy(13, 2.55 * std::sqrt(2.0), 29, sheared);
     REQUIRE(sys.z.size() >= rgpot::kTeamMinAtoms);
@@ -350,7 +350,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
         serial_pot.setNeighbourMode(mode);
         const auto ref0 = runFullEval(serial_pot, sys.pos, sys.z, sys.box);
 
-        ThreadGuard::set(full_matrix ? "1" : "8");
+        ThreadGuard::set(full_matrix ? "1" : "16");
         rgpot::MorsePot pot(cfg);
         pot.setNeighbourMode(mode);
         CHECK(countBitDiffs(runFullEval(pot, sys.pos, sys.z, sys.box), ref0) == 0);
@@ -360,7 +360,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
 
         // The stored neighbour build is serial and independent of the requested
         // team. Build it once, then exercise every team on the same geometry.
-        for (const char *th : {"2", "4", "8"}) {
+        for (const char *th : {"2", "4", "8", "16"}) {
           INFO("OMP_NUM_THREADS=" << th);
           ThreadGuard::set(th);
           CHECK(countBitDiffs(runFullEval(pot, sys.pos, sys.z, sys.box), ref0) == 0);
@@ -369,7 +369,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
         ThreadGuard::set("1");
         const auto ref1 = runFullEval(serial_pot, within_skin, sys.z, sys.box);
         const auto ref2 = runFullEval(serial_pot, past_skin, sys.z, sys.box);
-        for (const char *th : {"1", "2", "4", "8"}) {
+        for (const char *th : {"1", "2", "4", "8", "16"}) {
           INFO("OMP_NUM_THREADS=" << th);
           ThreadGuard::set(th);
           const auto teams_before_reuse = rgpot::teamsOpened();
@@ -383,7 +383,7 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
           }
         }
 
-        ThreadGuard::set("8");
+        ThreadGuard::set("16");
         CHECK(countBitDiffs(runFullEval(pot, past_skin, sys.z, sys.box), ref2) == 0);
         rgpot::ForceOut probe{};
         std::vector<double> fbuf(3 * sys.z.size(), 0.0);

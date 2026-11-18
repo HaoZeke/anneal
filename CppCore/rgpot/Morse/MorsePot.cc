@@ -43,8 +43,10 @@ namespace {
 /// exceeds the pair work).
 constexpr std::size_t kMinParallelHalfPairs = 4096;
 
-/// Atom-index quantum for slice boundaries. The split stays deterministic and
-/// coarse enough to keep adjacent slices from bouncing one atom at a time.
+/// Interior atom split indices in partitionAtomsByWork are rounded to the
+/// nearest multiple of 8 atoms (bounded to [prev, n]). Non-empty interior
+/// slices are therefore at least 8 atoms wide, without assuming that the
+/// std::vector or caller output buffers are aligned to cache lines.
 constexpr std::size_t kSliceAtomQuantum = 8;
 
 /// Stack batch width for vectorised simd::exp_fixed_n evaluation.
@@ -200,16 +202,16 @@ void partitionAtomsByWork(std::size_t n, int slices, std::int64_t total_work, Wo
         hi = mid;
       }
     }
-    std::size_t aligned =
+    std::size_t rounded =
         ((lo + kSliceAtomQuantum / 2) / kSliceAtomQuantum) * kSliceAtomQuantum;
     const std::size_t prev = splits[static_cast<std::size_t>(s - 1)];
-    if (aligned < prev) {
-      aligned = prev;
+    if (rounded < prev) {
+      rounded = prev;
     }
-    if (aligned > n) {
-      aligned = n;
+    if (rounded > n) {
+      rounded = n;
     }
-    splits[static_cast<std::size_t>(s)] = aligned;
+    splits[static_cast<std::size_t>(s)] = rounded;
   }
   splits[static_cast<std::size_t>(slices)] = n;
 }

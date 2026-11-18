@@ -203,8 +203,8 @@ stored list with at least `kTeamMinAtoms` atoms and at least 4096
 candidate upper pairs (`kMinParallelHalfPairs`), `MorsePot` evaluates
 each upper pair once in a two-phase OpenMP region (`forEachSlicePhase`),
 batching `simd::exp_fixed_n` and partitioning atoms by pair count on
-8-atom (64-byte) cache-line boundaries before reducing forces in partner
-index order; sparser stored lists stay on one thread. `fastTiles` runs
+8-atom boundaries before reducing forces in partner index order; sparser
+stored lists stay on one thread. `fastTiles` runs
 only when `streaming()` holds, so `forCellTeam` on a stored list walks
 `walkStored` instead of rebuilding a 27-cell tile stencil. A
 stream walks whole rows on any thread count, so on one thread a two-body
@@ -570,8 +570,8 @@ differ, and hashes the bits of every energy and force, so two builds can
 be compared.
 
 `morse_omp_bench` (`CppCore/tests/morse_omp_bench.cc`, Meson benchmark
-`morse_omp_bench`) runs a smoke check for `MorsePot` at 1, 2 and 4
-threads on a 6×6×6 Cu vacancy (863 atoms, below `kTeamMinAtoms`), a
+`morse_omp_bench`) runs a smoke check for `MorsePot` at 1, 2, 4, 8 and
+16 threads on a 6×6×6 Cu vacancy (863 atoms, below `kTeamMinAtoms`), a
 14×14×14 Cu vacancy (10,975 atoms, stored list) and the 10,000-atom Pt
 cluster, checking bit-for-bit agreement against 1 thread. On the 8-core
 Xeon host above (GCC 13.3.0, release build), evaluating each stored
