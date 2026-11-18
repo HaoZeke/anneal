@@ -87,11 +87,6 @@ fn a_recommended_binary_plateau_migrates_to_the_stored_lower_seat() {
     cfg.quench_once = true;
     cfg.temperature = 1.0e6;
     cfg.prior_soap = false;
-    cfg.prior_reseed = false;
-    cfg.prior_growth = false;
-    cfg.prior_core = false;
-    cfg.prior_handover = false;
-    cfg.prior_motif = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
     cfg.energy_lattice = false;
     cfg.surfaces.clear();
