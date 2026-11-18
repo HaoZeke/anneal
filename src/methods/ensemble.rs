@@ -270,6 +270,18 @@ fn charge_callbacks(led: &mut Ledger, n: usize) -> bool {
     true
 }
 
+/// The gradient of one objective answer, or nothing when the answer is not
+/// one.
+///
+/// A handle that fails leaves its gradient buffer at zero, and a zero
+/// gradient reads as a stationary point. The energy is the witness that the
+/// call returned: without a finite energy and a finite gradient there is no
+/// gradient to climb from.
+fn answered_gradient(answer: (f64, Array1<f64>)) -> Option<Array1<f64>> {
+    let (energy, gradient) = answer;
+    (energy.is_finite() && gradient.iter().all(|value| value.is_finite())).then_some(gradient)
+}
+
 /// Warm L-BFGS relaxation with the fresh certificate and the boundary on
 /// the ledger.
 ///
@@ -608,7 +620,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                             return None;
                         }
                         charged_total.fetch_add(callbacks, Ordering::SeqCst);
-                        Some((objective.lock().expect("replica objective"))(x).1)
+                        answered_gradient((objective.lock().expect("replica objective"))(x))
                     };
                     let mut hook = history.map(|history| {
                         SharedMinimumHistory::new(
@@ -839,6 +851,32 @@ mod tests {
     use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
     use crate::methods::cluster_hopping::random_cluster_in_radius;
     use crate::methods::minima_hopping::SerializedWitness;
+
+    /// An objective that fails the way the xtb handle does: no energy, and
+    /// the wrapper's zero-initialised gradient buffer left as it was.
+    fn failed_call(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        (f64::NAN, Array1::zeros(x.len()))
+    }
+
+    #[test]
+    fn a_failed_call_yields_no_gradient_for_the_climb() {
+        let x = Array1::from(vec![0.5; 6]);
+        assert!(answered_gradient(failed_call(x.view())).is_none());
+    }
+
+    #[test]
+    fn a_nonfinite_gradient_yields_no_gradient() {
+        let gradient = Array1::from(vec![0.0, f64::NAN, 0.0]);
+        assert!(answered_gradient((-1.0, gradient)).is_none());
+    }
+
+    #[test]
+    fn an_answered_call_keeps_its_gradient_even_when_it_is_exactly_zero() {
+        let zero = Array1::<f64>::zeros(3);
+        assert_eq!(answered_gradient((-1.0, zero.clone())), Some(zero));
+        let gradient = Array1::from(vec![0.25, -0.5, 1.0]);
+        assert_eq!(answered_gradient((2.0, gradient.clone())), Some(gradient));
+    }
 
     /// Two wells: a tetrahedron and its mirror scaled by 1.7, so chains have
     /// somewhere to go and something to disagree about.
