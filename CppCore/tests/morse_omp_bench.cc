@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "lsan_libomp.hpp"
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/Slices.hpp"

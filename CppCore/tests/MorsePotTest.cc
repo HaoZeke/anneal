@@ -16,6 +16,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "lsan_libomp.hpp"
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/Morse/detail/MorseSplitSnapshot.hpp"

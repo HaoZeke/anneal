@@ -1,0 +1,3 @@
+# LLVM libomp (including conda-forge's libgomp.so.1 -> libomp.so symlink)
+# retains a 128-byte process-lifetime allocation from ___kmp_allocate_align.
+leak:___kmp_allocate_align

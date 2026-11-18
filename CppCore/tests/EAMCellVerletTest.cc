@@ -17,6 +17,7 @@
 #ifndef EAM_STANDALONE
 #define EAM_STANDALONE
 #endif
+#include "lsan_libomp.hpp"
 #include "rgpot/EAM/EAM.h"
 #include "rgpot/EAM/EAMPot.hpp"
 

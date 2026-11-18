@@ -14,6 +14,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "lsan_libomp.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/nlist/rgpot_nlist.h"
 
