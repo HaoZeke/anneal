@@ -996,6 +996,24 @@ rule ase_nonlj:
         """
 
 
+# Same-session baseline (Config::recommended) vs Config::recommended_adaptive
+# across the 12 Cambridge Morse clusters and 5 Lennard-Jones clusters,
+# seeds 2000-2011, paper budgets, one core, host bench. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile morse_weak
+rule morse_weak:
+    input:
+        "bench/morse-weak/rows.csv",
+        "scripts/morse_weak/summarize.py",
+    output:
+        "bench/morse-weak/summary.csv",
+        "bench/morse-weak/README.md",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/morse_weak/enter_bench.sh
+        """
+
+
 # The paper headline panel on the 0.12.0 release build 07f89cad: LJ38,
 # LJ55, LJ75, LJ98, LJ102, LJ103, LJ104, LJ150, Au55 and M80 at rho 6 and
 # 14, seeds 2000-2011, paper budgets, one process on core 0, sudo unshare

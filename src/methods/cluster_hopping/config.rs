@@ -1389,6 +1389,10 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
+    /// Adaptive orbit throttling, acceptance-coupled step and temperature
+    /// scaling, and fingerprint-diverse plateau restarts.
+    #[serde(skip_serializing_if = "is_false")]
+    pub adaptive_search: bool,
 }
 
 /// Opening hops whose quenched energy changes set
@@ -1483,6 +1487,31 @@ impl Config {
     /// ```
     pub fn recommended(n_points: usize) -> Self {
         Self::recommended_with_scales(
+            n_points,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::REDUCED_SCALE,
+        )
+    }
+
+    /// [`Config::recommended_with_scales`] with adaptive move gating,
+    /// acceptance-driven step and temperature scaling, and a
+    /// fingerprint-diverse replica population with plateau restarts.
+    pub fn recommended_adaptive_with_scales(
+        n_points: usize,
+        length_scale: f64,
+        energy_scale: f64,
+    ) -> Self {
+        let mut cfg = Self::recommended_with_scales(n_points, length_scale, energy_scale);
+        cfg.adaptive_search = true;
+        cfg.replicas = 2;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.ladder_top = 2.0;
+        cfg
+    }
+
+    /// [`Config::recommended`] with [`Config::recommended_adaptive_with_scales`].
+    pub fn recommended_adaptive(n_points: usize) -> Self {
+        Self::recommended_adaptive_with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
@@ -1985,6 +2014,7 @@ impl Config {
             ring_moves: false,
             hold_stereocentres: false,
             measured_energy_scale: false,
+            adaptive_search: false,
         }
     }
 
@@ -2556,6 +2586,24 @@ mod coverage_behaviour {
         assert!(matches!(physical.orbit_core, OrbitCore::Both(_)));
         assert_eq!(physical.length_scale, 2.0);
         assert_eq!(physical.energy_scale, 3.0);
+    }
+
+    #[test]
+    fn recommended_adaptive_leaves_recommended_hash_intact() {
+        let base = Config::recommended(38);
+        let adaptive = Config::recommended_adaptive(38);
+        assert!(!base.adaptive_search);
+        assert!(!base.resolved_json().unwrap().contains("adaptive_search"));
+        assert!(adaptive.adaptive_search);
+        assert_eq!(adaptive.replicas, 2);
+        assert!(matches!(
+            adaptive.ladder_mode,
+            super::LadderMode::NonReversible
+        ));
+        assert_ne!(
+            adaptive.resolved_sha256().unwrap(),
+            base.resolved_sha256().unwrap()
+        );
     }
 
     #[test]

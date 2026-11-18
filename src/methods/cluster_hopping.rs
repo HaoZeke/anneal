@@ -2647,6 +2647,46 @@ fn energy_lattice_proposal<R: Rng + ?Sized>(
     .propose(x, cfg.temperature, rng)
 }
 
+fn diverse_cluster_start<R: Rng + ?Sized>(
+    cfg: &Config,
+    bias: &BasinBias<ClusterFingerprint>,
+    anchors: &[Array1<f64>],
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = cfg.n_points;
+    let first = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+    if anchors.is_empty() {
+        return first;
+    }
+    let min_dist = |cv: &Array1<f64>| -> f64 {
+        anchors
+            .iter()
+            .map(|anchor| {
+                anchor
+                    .iter()
+                    .zip(cv.iter())
+                    .map(|(p, q)| (p - q) * (p - q))
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let mut best = first;
+    let mut best_dist = min_dist(&bias.cv(best.view()));
+    for _ in 1..8 {
+        let cand = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+        if cand.len() != 3 * n {
+            continue;
+        }
+        let dist = min_dist(&bias.cv(cand.view()));
+        if dist > best_dist {
+            best = cand;
+            best_dist = dist;
+        }
+    }
+    best
+}
+
 /// Runs the driver until the ledger is spent.
 ///
 /// `start` is a starting configuration and `relax` performs a relaxation of the
@@ -4902,12 +4942,21 @@ where
     // Every rung's start is held to the first one's contract before it is
     // recorded, and keeps its validation gradient for the first step the rung
     // takes from it.
+    let mut initial_anchors: Vec<Array1<f64>> = if cfg.adaptive_search && n_rep > 1 {
+        vec![bias.cv(x.view())]
+    } else {
+        Vec::new()
+    };
     for _ in 1..n_rep {
         // A rigid chart holds six coordinates per body, not the three a plain
         // centre draw gives; its rungs start from a fresh rigid cluster, or the
         // six-per-body potential rejects the three-per-body length.
         let s0 = if cfg.move_library.is_rigid_body() {
             random_rigid_cluster(n, cfg.min_separation, rng)
+        } else if cfg.adaptive_search {
+            let picked = diverse_cluster_start(cfg, &bias, &initial_anchors, rng);
+            initial_anchors.push(bias.cv(picked.view()));
+            picked
         } else {
             random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
         };
@@ -4962,6 +5011,19 @@ where
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
+    let mut adaptive_best_seen = ledger.best;
+    let mut step_scales = vec![1.0_f64; n_rep];
+    let mut temp_scales = vec![1.0_f64; n_rep];
+    let mut acc_windows = vec![0usize; n_rep];
+    let mut acc_yes = vec![0usize; n_rep];
+    let mut ret_windows = vec![0usize; n_rep];
+    let mut ret_yes = vec![0usize; n_rep];
+    let mut replica_improve_spent = vec![0usize; n_rep];
+    let mut replica_own_spent = vec![0usize; n_rep];
+    let mut prev_ledger_spent = ledger.spent();
+    let mut orbit_checks = 0usize;
+    let mut orbit_misses = 0usize;
+    let mut orbit_skip_mod = 1usize;
     // Energy last polished by an unlike-pair quench. `NaN` until the first
     // binary incumbent, so a one-species chain never enters the sweep.
     let mut polished_best = f64::NAN;
@@ -6856,7 +6918,8 @@ where
         // common neighbours, so it runs only when a reseed can fire.
         // Counting on every hop was the Au38 slowdown, and with the
         // reseed interval still ahead the result cannot change the branch.
-        if csm_reseed_hops > 0
+        if !cfg.adaptive_search
+            && csm_reseed_hops > 0
             && cfg.prior_reseed
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
             && cfg.packing_cna_applies()
@@ -7137,6 +7200,9 @@ where
             ratios[rep]
         };
         let mut temperature = single * scale;
+        if cfg.adaptive_search {
+            temperature *= temp_scales[rep];
+        }
         if cfg.general_collective
             && let Some(spread) = general_taboo.spread()
         {
@@ -7461,7 +7527,13 @@ where
         } else {
             1.0
         };
-        let proposal_scale = escape * orient_scale;
+        let proposal_scale = escape
+            * orient_scale
+            * if cfg.adaptive_search {
+                step_scales[rep]
+            } else {
+                1.0
+            };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -8835,6 +8907,35 @@ where
             bias.set_height(height.height());
         }
         dial.observe(accept);
+        if cfg.adaptive_search {
+            ret_windows[rep] += 1;
+            if returning {
+                ret_yes[rep] += 1;
+            } else {
+                acc_windows[rep] += 1;
+                if accept {
+                    acc_yes[rep] += 1;
+                }
+            }
+            if ret_windows[rep] >= 40 && acc_windows[rep] >= 20 {
+                let ret_rate = ret_yes[rep] as f64 / ret_windows[rep] as f64;
+                let acc_rate = acc_yes[rep] as f64 / acc_windows[rep] as f64;
+                ret_windows[rep] = 0;
+                ret_yes[rep] = 0;
+                acc_windows[rep] = 0;
+                acc_yes[rep] = 0;
+                if ret_rate > 0.45 || acc_rate > 0.55 {
+                    step_scales[rep] = (step_scales[rep] * 1.10).min(1.6);
+                } else if acc_rate < 0.12 {
+                    step_scales[rep] = (step_scales[rep] * 0.90).max(0.70);
+                }
+                if acc_rate < 0.15 {
+                    temp_scales[rep] = (temp_scales[rep] * 1.10).min(1.5);
+                } else if acc_rate > 0.60 {
+                    temp_scales[rep] = (temp_scales[rep] * 0.90).max(0.65);
+                }
+            }
+        }
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage
@@ -9366,7 +9467,23 @@ where
         // Under a shared history each minimum is completed by one chain only,
         // and every product is reported, so other chains recognise it.
         let mut orbit_offer = None;
-        if cfg.packing_surface().orbit_on_new
+        let run_orbit_now = if cfg.adaptive_search {
+            if cfg.packing_surface().orbit_on_new
+                && accept
+                && hop_room(hops)
+                && (moved_basin || cfg.point_symmetrise_every_accept)
+            {
+                orbit_checks += 1;
+                orbit_checks.is_multiple_of(orbit_skip_mod.min(8))
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+        let orbit_best_before = ledger.best;
+        if run_orbit_now
+            && cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
@@ -9424,6 +9541,19 @@ where
             }
         }
         if let Some((es, xs, sym_gradient, product_report)) = orbit_offer {
+            let orbit_improved_best = ledger.best < orbit_best_before - STRICT_IMPROVEMENT;
+            if cfg.adaptive_search {
+                if orbit_improved_best {
+                    orbit_misses = 0;
+                    orbit_skip_mod = 1;
+                } else {
+                    orbit_misses += 1;
+                    if orbit_misses >= 8 {
+                        orbit_skip_mod = (orbit_skip_mod * 2).min(8);
+                        orbit_misses = 0;
+                    }
+                }
+            }
             let mut biases: Vec<&dyn Bias> = Vec::new();
             if stalled(cfg, quiet, longest_quiet)
                 && returns_to_deposit(&bias, xs.view())
@@ -10302,6 +10432,84 @@ where
             }
         }
 
+        if cfg.adaptive_search {
+            let now_spent = ledger.spent();
+            replica_own_spent[rep] += now_spent.saturating_sub(prev_ledger_spent);
+            prev_ledger_spent = now_spent;
+            if ledger.best < adaptive_best_seen - 1e-9 {
+                adaptive_best_seen = ledger.best;
+                replica_improve_spent = replica_own_spent.clone();
+            }
+            let plateau_calls = (ledger.budget() / (25 * n_rep)).clamp(20_000, 50_000);
+            let threshold = if n_rep > 1 && rep == 0 {
+                plateau_calls.saturating_mul(2)
+            } else {
+                plateau_calls
+            };
+            if hops > 0
+                && !cfg.move_library.is_rigid_body()
+                && replica_own_spent[rep].saturating_sub(replica_improve_spent[rep]) >= threshold
+                && ledger.remaining() > cfg.relax_steps
+                && hop_room(hops)
+            {
+                let mut anchors: Vec<Array1<f64>> = chains
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, _)| *idx != rep)
+                    .map(|(_, ch)| bias.cv(ch.coordinates.view()))
+                    .collect();
+                anchors.extend(tabu.iter().cloned());
+                let fresh = diverse_cluster_start(cfg, &bias, &anchors, rng);
+                let (ef, xf) = relax(ledger, fresh.view(), cfg.relax_steps);
+                let restart_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    ef,
+                    xf.view(),
+                    &mut unconverged_records,
+                );
+                let after_spent = ledger.spent();
+                replica_own_spent[rep] += after_spent.saturating_sub(prev_ledger_spent);
+                prev_ledger_spent = after_spent;
+                hops += 1;
+                restarts += 1;
+                quiet = 0;
+                longest_quiet = 0;
+                step_scales[rep] = 1.0;
+                temp_scales[rep] = 1.0;
+                acc_windows[rep] = 0;
+                acc_yes[rep] = 0;
+                ret_windows[rep] = 0;
+                ret_yes[rep] = 0;
+                replica_improve_spent[rep] = replica_own_spent[rep];
+                if ef.is_finite() && xf.len() == x.len() {
+                    let reached = identity.basin_of(xf.view());
+                    adopt_minimum!(
+                        ef,
+                        xf,
+                        restart_gradient,
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        Some((here, reached)),
+                        Some("plateau-restart"),
+                        hops
+                    );
+                    soft_cache = None;
+                    basin_entry = None;
+                }
+                if ledger.best < adaptive_best_seen - 1e-9 {
+                    adaptive_best_seen = ledger.best;
+                    replica_improve_spent = replica_own_spent.clone();
+                }
+                if ledger.target_reached() {
+                    break HopStop::Target;
+                }
+                if ledger.remaining() == 0 {
+                    break HopStop::of_closed(ledger);
+                }
+            }
+        }
         if n_rep > 1 {
             if !ladder_built && rep == 0 {
                 // Welford over the cold rung's energies. This is the whole

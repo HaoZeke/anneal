@@ -1286,6 +1286,34 @@
       ]
     },
     {
+      "rule": "morse_weak",
+      "competitors": [
+        "anneal recommended"
+      ],
+      "runners": [
+        "scripts/morse_weak/enter_bench.sh",
+        "scripts/morse_weak/run_one.py"
+      ],
+      "budgets": {
+        "source": "scripts/morse_weak/run_one.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/morse_weak/run_one.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/morse-weak/benchmarks/morse_weak.py",
+      "rows": [
+        {
+          "path": "bench/morse-weak/rows.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
+    },
+    {
       "rule": "agox_lj98",
       "competitors": [
         "AGOX"
