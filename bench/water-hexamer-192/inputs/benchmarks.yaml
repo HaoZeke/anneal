@@ -1,0 +1,7 @@
+paper_budgets:
+  h2o6: 4000
+old_rows: paper/jctc/data/water_v45b/water-v45b-perseed.csv
+old_revision: 36086e988c5a71c156ffcbde152bf321a6f5ef25
+rows_file: bench/water-hexamer-192/rows.csv
+summary_file: bench/water-hexamer-192/summary.csv
+compare_file: bench/water-hexamer-192/compare-vs-36086.csv

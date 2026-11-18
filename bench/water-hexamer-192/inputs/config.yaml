@@ -1,0 +1,17 @@
+system: h2o6-tip4p
+engine: gfn2
+budget: 4000
+seeds:
+  first: 0
+  count: 192
+arms:
+  - anneal
+  - polish_fair
+  - crest
+  - crest_fair
+threads:
+  omp: 1
+  openblas: 1
+  mkl: 1
+  rayon: 1
+core: 0

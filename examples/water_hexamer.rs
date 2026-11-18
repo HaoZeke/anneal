@@ -33,6 +33,7 @@ mod rgpot_eindir;
 use std::ffi::{CString, c_char, c_void};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use anneal_core::catalog::census::{
@@ -76,6 +77,20 @@ const OH_WALL_ONSET_A: f64 = 1.15;
 
 /// Stiffness of that wall, in eV per square angstrom.
 const OH_WALL_EV_PER_A2: f64 = 200.0;
+static POTENTIAL_MICROS: AtomicU64 = AtomicU64::new(0);
+
+fn reset_potential_timer() {
+    POTENTIAL_MICROS.store(0, Ordering::Relaxed);
+}
+
+fn potential_seconds() -> f64 {
+    POTENTIAL_MICROS.load(Ordering::Relaxed) as f64 / 1_000_000.0
+}
+
+fn add_potential_time(elapsed: std::time::Duration) {
+    let micros = elapsed.as_micros().min(u64::MAX as u128) as u64;
+    POTENTIAL_MICROS.fetch_add(micros, Ordering::Relaxed);
+}
 
 fn external_polish_on() -> bool {
     std::env::var("WATER_POLISH_EXTERNAL").ok().as_deref() == Some("1")
@@ -132,6 +147,7 @@ impl ForceObjective {
     }
 
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let started = Instant::now();
         let owned;
         let coordinates: &[f64] = if let Some(slice) = x.as_slice() {
             slice
@@ -140,16 +156,19 @@ impl ForceObjective {
             &owned
         };
         let (energy, mut gradient) = (self.eval.lock().expect("engine lock").as_mut())(coordinates);
-        if gradient.len() != self.dim || !energy.is_finite() {
-            return (f64::NAN, Array1::from_elem(self.dim, f64::NAN));
-        }
-        let (wall, wall_gradient) = oh_wall(coordinates);
-        if wall != 0.0 {
-            for (component, extra) in gradient.iter_mut().zip(wall_gradient) {
-                *component += extra;
+        let result = if gradient.len() != self.dim || !energy.is_finite() {
+            (f64::NAN, Array1::from_elem(self.dim, f64::NAN))
+        } else {
+            let (wall, wall_gradient) = oh_wall(coordinates);
+            if wall != 0.0 {
+                for (component, extra) in gradient.iter_mut().zip(wall_gradient) {
+                    *component += extra;
+                }
             }
-        }
-        (energy + wall, Array1::from_vec(gradient))
+            (energy + wall, Array1::from_vec(gradient))
+        };
+        add_potential_time(started.elapsed());
+        result
     }
 }
 
@@ -704,6 +723,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         }
         let mut ledger = Ledger::new(budget);
         remember_external_phase(ExternalPhase::default());
+        reset_potential_timer();
         let before_wall_s = arm_started.elapsed().as_secs_f64();
         let wall = Instant::now();
         let mut first_hit_calls: Option<usize> = None;
@@ -942,6 +962,8 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 (0, 0.0, "none")
             };
         let wall_s = wall.elapsed().as_secs_f64();
+        let potential_s = potential_seconds();
+        let outside_s = (wall_s - potential_s).max(0.0);
         let after_wall = Instant::now();
         let search_phase = last_search_phase();
         let external_phase = last_external_phase();
@@ -1033,7 +1055,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             .map(|value| format!("{value:.6}"))
             .unwrap_or_else(|| "none".to_owned());
         text.push_str(&format!(
-            "seed: {seed}\nstart_monomers_intact: {start_intact}\nstart_spread_steps: {spread_steps}\nstart_oh_min_A: {start_oh_min:.6}\nstart_oh_max_A: {start_oh_max:.6}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nbest_oh_min_A: {best_oh_min:.6}\nbest_oh_max_A: {best_oh_max:.6}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nfirst_hit_calls: {first_hit_calls_text}\nfirst_hit_wall_seconds: {first_hit_wall_text}\nfirst_hit_isomer: {first_hit_isomer_text}\nfirst_prism_calls: {first_prism_calls_text}\nfirst_prism_wall_seconds: {first_prism_wall_text}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nhop_stop: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhit: {hit}\n",
+            "seed: {seed}\nstart_monomers_intact: {start_intact}\nstart_spread_steps: {spread_steps}\nstart_oh_min_A: {start_oh_min:.6}\nstart_oh_max_A: {start_oh_max:.6}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nbest_oh_min_A: {best_oh_min:.6}\nbest_oh_max_A: {best_oh_max:.6}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nfirst_hit_calls: {first_hit_calls_text}\nfirst_hit_wall_seconds: {first_hit_wall_text}\nfirst_hit_isomer: {first_hit_isomer_text}\nfirst_prism_calls: {first_prism_calls_text}\nfirst_prism_wall_seconds: {first_prism_wall_text}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\npotential_seconds: {potential_s:.6}\noutside_seconds: {outside_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nhop_stop: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhit: {hit}\n",
             ledger.spent(),
             outcome.hops,
             outcome.stop.as_ref().map_or("none", |stop| stop.code()),

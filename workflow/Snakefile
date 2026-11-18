@@ -622,6 +622,20 @@ rule water_h2o20_goat:
         """
 
 
+# Water-hexamer panel rebuild from committed inputs, 192 seeds, paper budget.
+# Not part of `rule all`:
+#   snakemake -s workflow/Snakefile water_hexamer_192
+rule water_hexamer_192:
+    output:
+        "bench/water-hexamer-192/summary.csv",
+        "bench/water-hexamer-192/compare-vs-36086.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/water_hexamer_192/enter_bench.sh
+        """
+
+
 # Paper minima dumps, xyz dumps, and raw runs listed in data/hf-files.csv.
 # Dataset: rgoswami/anneal-paper-data (repo type dataset).
 # Not part of `rule all`. Scripts that read those files call the same
