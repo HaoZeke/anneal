@@ -20,6 +20,7 @@
  * as a file it reads, needs that in the key as well.
  */
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -36,8 +37,8 @@
 
 namespace rgpot {
 
-template <typename Pot>
-class Kept;
+template <typename Pot, std::size_t Slots = 1>
+class RGPOT_KEPT_HIDDEN Kept;
 
 /// What a kept potential was built for.
 class KeptKey {
@@ -48,6 +49,7 @@ public:
 
   KeptKey &f64(double v) noexcept { return raw(&v, sizeof(v)); }
   KeptKey &i64(std::int64_t v) noexcept { return raw(&v, sizeof(v)); }
+  KeptKey &ptr(const void *v) noexcept { return raw(&v, sizeof(v)); }
 
   /// The atom count, and the species of each atom, or null for a call
   /// without species. The species are read, not copied, until the key is
@@ -59,7 +61,7 @@ public:
   }
 
 private:
-  template <typename Pot>
+  template <typename Pot, std::size_t Slots>
   friend class Kept;
 
   KeptKey &raw(const void *v, std::size_t size) noexcept {
@@ -85,56 +87,75 @@ struct KeptCounts {
   std::uint64_t reuses = 0;
 };
 
-/// The potential of type @c Pot this thread keeps.
-template <typename Pot>
-class Kept {
+/// The object(s) of type @c Pot this thread keeps (up to @c Slots, LRU).
+template <typename Pot, std::size_t Slots>
+class RGPOT_KEPT_HIDDEN Kept {
+  static_assert(Slots >= 1, "Kept requires at least one slot");
+
 public:
-  /// `run(pot)` on the potential kept for @a key. When the key differs, the
-  /// kept potential is dropped and `make()`, which returns a
-  /// `std::unique_ptr<Pot>`, builds the next one. A throw from `make`
-  /// leaves none kept. A throw from `run` drops the potential, whose
-  /// scratch it may have left half written, and passes on.
+  /// `run(pot)` on the object kept for @a key. When no slot matches, the
+  /// least recently used slot (or an empty one) is cleared and `make()`,
+  /// which returns a `std::unique_ptr<Pot>`, builds the next one. A throw
+  /// from `make` leaves that slot empty. A throw from `run` drops the
+  /// object, whose scratch it may have left half written, and passes on.
   template <typename Make, typename Run>
-  RGPOT_KEPT_HIDDEN static decltype(auto) with(const KeptKey &key, Make &&make,
-                                               Run &&run) {
-    Slot &slot = local();
-    if (slot.pot != nullptr && slot.matches(key)) {
-      ++slot.counts.reuses;
+  static decltype(auto) with(const KeptKey &key, Make &&make, Run &&run) {
+    Table &table = local();
+    Slot *slot = table.find(key);
+    if (slot != nullptr) {
+      slot->stamp = ++table.clock;
+      ++table.counts.reuses;
     } else {
-      slot.pot.reset();
+      slot = &table.victim();
+      slot->clear();
       std::unique_ptr<Pot> pot = make();
-      slot.keep(key);
-      slot.pot = std::move(pot);
-      ++slot.counts.builds;
+      slot->keep(key);
+      slot->pot = std::move(pot);
+      slot->stamp = ++table.clock;
+      ++table.counts.builds;
     }
     try {
-      return run(*slot.pot);
+      return run(*slot->pot);
     } catch (...) {
-      slot.pot.reset();
+      slot->clear();
       throw;
     }
   }
 
-  [[nodiscard]] RGPOT_KEPT_HIDDEN static KeptCounts counts() noexcept {
-    return local().counts;
+  /// The object this thread currently keeps for @a key, or null when no
+  /// slot matches. Leaves the slots and counts unchanged.
+  [[nodiscard]] static const Pot *peek(const KeptKey &key) noexcept {
+    const Slot *slot = local().find(key);
+    return slot != nullptr ? slot->pot.get() : nullptr;
   }
 
-  /// Drops the potential this thread keeps.
-  RGPOT_KEPT_HIDDEN static void release() noexcept {
-    Slot &slot = local();
-    slot.pot.reset();
-    std::vector<int>().swap(slot.species);
+  [[nodiscard]] static KeptCounts counts() noexcept { return local().counts; }
+
+  /// Drops every object this thread keeps.
+  static void release() noexcept {
+    Table &table = local();
+    for (Slot &slot : table.slots) {
+      slot.clear();
+    }
+  }
+
+  /// Drops the object this thread keeps for @a key, if any.
+  static void release(const KeptKey &key) noexcept {
+    Slot *slot = local().find(key);
+    if (slot != nullptr) {
+      slot->clear();
+    }
   }
 
 private:
-  struct RGPOT_KEPT_HIDDEN Slot {
+  struct Slot {
     std::unique_ptr<Pot> pot;
     unsigned char params[KeptKey::kBytes] = {};
     std::size_t len = 0;
     std::size_t n = 0;
     bool has_species = false;
     std::vector<int> species;
-    KeptCounts counts;
+    std::uint64_t stamp = 0;
 
     [[nodiscard]] bool matches(const KeptKey &key) const noexcept {
       if (key.overflow_ || key.len_ != len || key.n_ != n ||
@@ -161,11 +182,57 @@ private:
       n = key.n_;
       has_species = key.species_ != nullptr;
     }
+
+    void clear() noexcept {
+      pot.reset();
+      std::vector<int>().swap(species);
+      len = 0;
+      n = 0;
+      has_species = false;
+      stamp = 0;
+    }
   };
 
-  RGPOT_KEPT_HIDDEN static Slot &local() {
-    thread_local Slot slot;
-    return slot;
+  struct Table {
+    std::array<Slot, Slots> slots{};
+    KeptCounts counts{};
+    std::uint64_t clock = 0;
+
+    [[nodiscard]] Slot *find(const KeptKey &key) noexcept {
+      for (Slot &slot : slots) {
+        if (slot.pot != nullptr && slot.matches(key)) {
+          return &slot;
+        }
+      }
+      return nullptr;
+    }
+
+    [[nodiscard]] const Slot *find(const KeptKey &key) const noexcept {
+      for (const Slot &slot : slots) {
+        if (slot.pot != nullptr && slot.matches(key)) {
+          return &slot;
+        }
+      }
+      return nullptr;
+    }
+
+    [[nodiscard]] Slot &victim() noexcept {
+      Slot *oldest = &slots[0];
+      for (Slot &slot : slots) {
+        if (slot.pot == nullptr) {
+          return slot;
+        }
+        if (slot.stamp < oldest->stamp) {
+          oldest = &slot;
+        }
+      }
+      return *oldest;
+    }
+  };
+
+  static Table &local() {
+    thread_local Table table;
+    return table;
   }
 };
 
