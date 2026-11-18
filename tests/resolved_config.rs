@@ -289,6 +289,46 @@ fn prior_switch_and_env_parsers_reject_removed_switches() {
 }
 
 #[test]
+fn a_removed_key_nested_in_a_list_is_rejected() {
+    let json = r#"{"passes":[{"prior_reseed":false}]}"#;
+    let err = Config::validate_json_keys(json).unwrap_err();
+    assert_eq!(err.key, "passes.prior_reseed");
+    assert!(
+        err.to_string().contains("was removed"),
+        "unexpected json error: {err}"
+    );
+
+    let toml = "passes = [{ prior_motif = true }]\n";
+    let err = Config::validate_toml_keys(toml).unwrap_err();
+    assert_eq!(err.key, "passes.prior_motif");
+    assert!(
+        err.to_string().contains("was removed"),
+        "unexpected toml error: {err}"
+    );
+}
+
+#[test]
+fn reseed_hops_names_the_interval_and_other_keys_name_prior_soap() {
+    let reseed = Config::validate_json_keys(
+        r#"{"continuous_symmetry":{"group":"measure","interval":10,"reseed_hops":5}}"#,
+    )
+    .unwrap_err();
+    assert_eq!(reseed.key, "continuous_symmetry.reseed_hops");
+    let text = reseed.to_string();
+    assert!(
+        text.contains("takes only") && text.contains("interval"),
+        "reseed_hops should say the measure group takes only interval, got: {text}"
+    );
+
+    let prior = Config::validate_json_keys(r#"{"prior_reseed":false}"#).unwrap_err();
+    let text = prior.to_string();
+    assert!(
+        text.contains("prior_soap"),
+        "a removed prior key should name prior_soap, got: {text}"
+    );
+}
+
+#[test]
 fn campaign_toml_rejects_removed_prior_keys_and_extra_switches() {
     use anneal_core::campaign::CampaignConfig;
 
