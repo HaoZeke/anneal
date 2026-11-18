@@ -2,6 +2,7 @@
 name = "rgpot-pair"
 version.workspace = true
 edition = "2021"
+rust-version.workspace = true
 description = "Inlinable unshifted cluster pair kernels for rgpot"
 license = "MIT"
 repository = "https://github.com/OmniPotentRPC/rgpot"

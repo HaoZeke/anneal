@@ -2,6 +2,7 @@
 name = "rgpot-core"
 version.workspace = true
 edition = "2021"
+rust-version.workspace = true
 description = "Core Rust library for rgpot: RPC-based potential energy surface calculations"
 license = "MIT"
 repository = "https://github.com/OmniPotentRPC/rgpot"
