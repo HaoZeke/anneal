@@ -1690,7 +1690,30 @@ def crest_equal(audit: Audit) -> None:
                  " ".join(sorted({r["budget"] for r in rows})), panel.BUDGET)
     over = sorted(int(r["charged"]) for r in rows if int(r["charged"]) > panel.BUDGET)
     audit.record(not over, where, "no row is charged above the budget", " ".join(map(str, over)) or "none", "none")
-    summary = panel.summarise(rows)
+    counts_path = "bench/crest-equal/call-counts.csv"
+    if counts_path in audit.read or (ROOT / counts_path).is_file():
+        for index, row in enumerate(audit.rows(counts_path), start=1):
+            label = f"row {index} {row.get('arm', '')} seed {row.get('seed', '')} charged"
+            try:
+                driver_calls = int(row["driver_calls"])
+                charged = int(row["charged"])
+                if row["arm"] == "anneal" and not row.get("crest_log_calls"):
+                    expected: object = driver_calls
+                else:
+                    expected = max(driver_calls, int(row["crest_log_calls"]))
+                ok = charged == expected
+            except (KeyError, ValueError):
+                ok = False
+                expected = "valid driver_calls and crest_log_calls"
+            audit.record(ok, counts_path, label, row.get("charged", ""), expected)
+
+    def mw(left: list[float], right: list[float]) -> float:
+        if not left or not right:
+            return float("nan")
+        result = mann_whitney(left, right, continuity=True, degenerate=1.0)
+        return float("nan") if result is None else result
+
+    summary = panel.summarise(rows, fisher_fn=fisher, mann_whitney_fn=mw)
     committed = audit.rows("bench/crest-equal/summary.csv")
     audit.record(summary == committed, "bench/crest-equal/summary.csv", "recomputed from rows.csv",
                  "equal" if summary == committed else "differs", "equal")
