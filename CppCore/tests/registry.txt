@@ -37,7 +37,8 @@
 #   tsan          -fsanitize=thread compiles and no sanitizer is configured
 #   isa_variants  at least one MinimumImage ISA variant builds
 #   toplevel      the build is not a subproject
-#   water xtb tblite dftd3 dftd4 xckernel long_range expr metatomic skala
+#   examples eigen water xtb tblite dftd3 dftd4 xckernel long_range expr
+#   metatomic skala
 #   rust_core     meson-only features (meson options of the same name)
 #   probe         an optional program or module the build looks for: the
 #                 test may be absent even when the rest of the gate holds
@@ -71,6 +72,7 @@
 
 @engines CMake does not build engines/: the drivers, engine plugins and the LAMMPS, PLUMED, GROMACS, OpenMM and i-PI harnesses these tests run.
 @engine_plugins CMake does not build the rgpot_engine_* plugins (classical, MOPAC, NWChem) this test loads.
+@examples CMake does not build the example executables.
 @meson The test configures meson, reads meson's build directory, or reads a subproject only a meson wrap resolves.
 @water CMake has no option for the water potentials.
 @xtb CMake has no option for xtb.
@@ -94,6 +96,13 @@ RPCTest | tests rpc | unit test_rpc CapnpAdapterTest.cc |
 RPCClientTest | tests client | unit test_rpc_client BridgeStressTest.cc |
 test_list_parity | tests python | custom |
 test_list_parity_selftest | tests python | py CppCore/tests/check_test_registry.py selftest |
+
+# Runnable examples.
+CallCuH2Pot | tests core examples fortran | custom workdir=. | @examples
+EigenCallLJPot | tests core examples eigen | custom workdir=. | @examples
+EigenCallCuH2Pot | tests core examples eigen fortran | custom workdir=. | @examples
+XtCallCuH2Pot | tests core examples xtensor fortran | custom workdir=. | @examples
+CallExprPot | tests core examples expr | custom workdir=. | @examples
 
 # The library's exported surface.
 FortranSymbolAudit | tests core fortran linux | custom |
