@@ -405,7 +405,9 @@ int rgpot_engine_select_orbitals(RgpotEnginePot *pot, long long key);
 
 - Inputs :: =pot=, a handle; =key=, the orbital slot identifier.
 - Units :: none.
-- Outputs :: 0 on success.
+- Outputs :: 0 on success. On CPMD backends, seeding a key means choosing the
+  next SCF initial guess from the session's current converged orbitals or
+  from the orbitals last converged under that key.
 - Errors :: returns 1 for a null =pot= (no message).
   Returns 3 when the backend has no orbital-selection primitive, with
   =backend has no orbital selection= in =rgpot_engine_last_error=.

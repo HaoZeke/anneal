@@ -126,6 +126,9 @@ RGPOT_CPMDC_API void cpmdc_session_destroy(CPMDCSession *session);
  *         previously stored key's orbitals), and -1 when `session` is NULL,
  *         `key` is refused, or the library is the stub without an embedded
  *         runtime (leaving the session's active key and orbitals unchanged).
+ *         Seeding means choosing the next SCF initial guess: the session's
+ *         current converged orbitals for a key with no stored copy, or the
+ *         orbitals last converged under that key when one exists.
  *         Neither outcome sets or clears `cpmdc_last_error` (which this header
  *         does not declare and `CPMDPot` does not read).
  */

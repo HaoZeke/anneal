@@ -331,6 +331,8 @@ RGPOT_ENGINE_API int rgpot_engine_set_charge_spin(RgpotEnginePot *pot,
 
 /**
  * Select the active orbital key for subsequent evaluations.
+ * On CPMD backends, accepting a key seeds the next SCF from the session's
+ * current converged orbitals or from the orbitals stored for that key.
  * Returns 0 on success (clearing last_error), 1 when pot is NULL (invalid
  * argument, leaving last_error unchanged), 2 when the backend's
  * orbital-selection hook fails with an exception, and 3 when the backend has
