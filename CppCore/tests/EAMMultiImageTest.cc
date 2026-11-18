@@ -322,3 +322,12 @@ TEST_CASE("EAM minimum-image cells keep the develop bits", "[EAMTable][nlist]") 
   CAPTURE(hash);
   REQUIRE(hash == 17112356085923370801ull);
 }
+
+TEST_CASE("EAM multi-image rejects unbounded image extent", "[EAMTable][nlist]") {
+  const rgpot::EAMTablePot pot = pair_only();
+  const std::vector<double> pos{0.4, 0.5, 0.6};
+  const std::vector<int> z{29};
+  const double bad_box[9] = {1.0e-6, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0};
+  REQUIRE_THROWS_WITH(eval_full(pot, pos, z, bad_box),
+                      Catch::Matchers::ContainsSubstring("image extent on axis"));
+}

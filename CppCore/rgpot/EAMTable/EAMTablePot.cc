@@ -27,6 +27,7 @@
 // clang-format on
 
 #include "rgpot/EAMTable/EAMTablePot.hpp"
+#include "rgpot/nlist/MultiImage.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
 
@@ -402,26 +403,20 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
     if (!(vol > 0.0)) {
       bad("periodic evaluation needs a cell");
     }
-    // The pair list folds to one image per partner.
-    for (int k = 0; k < 3; ++k) {
-      const double *u = box + 3 * ((k + 1) % 3);
-      const double *v = box + 3 * ((k + 2) % 3);
-      const double cx = u[1] * v[2] - u[2] * v[1];
-      const double cy = u[2] * v[0] - u[0] * v[2];
-      const double cz = u[0] * v[1] - u[1] * v[0];
-      if (!(2.0 * t.cutoff < vol / std::sqrt(cx * cx + cy * cy + cz * cz))) {
-        bad("cutoff exceeds half a face spacing");
-      }
-    }
   } else {
     box = free_box;
   }
+  const std::array<bool, 3> periodic{m_periodic, m_periodic, m_periodic};
+  // One minimum image is the whole shell only under half of every face.
+  // Past that, visitHalfImages sums every image inside the cutoff.
+  const bool multi =
+      m_periodic && nlist::cutoffExceedsHalfFace(box, t.cutoff, periodic);
   nlist::Neighbours &cells = m_neighbours;
   const double cut2 = t.cutoff * t.cutoff;
   const Terms terms{t, m_frho, m_rhor, m_z2r};
 
-  const bool pairs = n_size >= 2;
-  if (pairs) {
+  const bool pairs = n_size >= 2 || (multi && n_size >= 1);
+  if (pairs && !multi) {
     // A stored list keeps the pairs out to cutoff + skin and the sums
     // below drop those past the cutoff. A stream reuses nothing unless
     // the coordinates match, so it takes no skin.
@@ -431,20 +426,34 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
                        {m_periodic, m_periodic, m_periodic});
   }
 
+  auto visit = [&](auto &&fn) {
+    if (!pairs) {
+      return;
+    }
+    if (multi) {
+      nlist::visitHalfImages(in.pos, n_size, box, periodic, t.cutoff, fn);
+    } else {
+      nlist::visitHalf(cells, 0, static_cast<std::int64_t>(n_size), fn);
+    }
+  };
+
   std::vector<double> rho(n_size, 0.0);
-  if (pairs) {
-    nlist::visitHalf(cells, 0, static_cast<std::int64_t>(n_size),
-                  [&](int32_t i, int32_t j, double, double, double, double r2) {
-                    if (!(r2 > 0.0) || !(r2 < cut2)) {
-                      return;
-                    }
-                    const Couple &c = terms.couple(el[static_cast<std::size_t>(i)],
-                                                   el[static_cast<std::size_t>(j)]);
-                    const Place k = terms.radial(std::sqrt(r2));
-                    rho[static_cast<std::size_t>(i)] += Knot(c.atI, k).value();
-                    rho[static_cast<std::size_t>(j)] += Knot(c.atJ, k).value();
-                  });
-  }
+  visit([&](int32_t i, int32_t j, double, double, double, double r2) {
+    if (!(r2 > 0.0) || !(r2 < cut2)) {
+      return;
+    }
+    const Couple &c = terms.couple(el[static_cast<std::size_t>(i)],
+                                   el[static_cast<std::size_t>(j)]);
+    const Place k = terms.radial(std::sqrt(r2));
+    const double rhoi = Knot(c.atI, k).value();
+    if (i == j) {
+      // i's own ± lattice images both contribute to rho_i.
+      rho[static_cast<std::size_t>(i)] += 2.0 * rhoi;
+    } else {
+      rho[static_cast<std::size_t>(i)] += rhoi;
+      rho[static_cast<std::size_t>(j)] += Knot(c.atJ, k).value();
+    }
+  });
 
   std::vector<double> fprime(n_size, 0.0);
   double energy = 0.0;
@@ -457,33 +466,29 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
   }
 
   double strain[6] = {};
-  if (pairs) {
-    nlist::visitHalf(
-        cells, 0, static_cast<std::int64_t>(n_size),
-        [&](int32_t i, int32_t j, double dx, double dy, double dz, double r2) {
-          if (!(r2 > 0.0) || !(r2 < cut2)) {
-            return;
-          }
-          const auto ui = static_cast<std::size_t>(i);
-          const auto uj = static_cast<std::size_t>(j);
-          double phi = 0.0;
-          const double fscale = terms.pair(terms.couple(el[ui], el[uj]), std::sqrt(r2),
-                                           fprime[ui], fprime[uj], phi);
-          energy += phi;
-          F[3 * ui] += fscale * dx;
-          F[3 * ui + 1] += fscale * dy;
-          F[3 * ui + 2] += fscale * dz;
-          F[3 * uj] -= fscale * dx;
-          F[3 * uj + 1] -= fscale * dy;
-          F[3 * uj + 2] -= fscale * dz;
-          if (m_stress) {
-            accumulatePairStrain(strain, fscale, dx, dy, dz);
-          }
-          if (atoms != nullptr) {
-            tallyPair(*atoms, ui, uj, phi, fscale, dx, dy, dz);
-          }
-        });
-  }
+  visit([&](int32_t i, int32_t j, double dx, double dy, double dz, double r2) {
+    if (!(r2 > 0.0) || !(r2 < cut2)) {
+      return;
+    }
+    const auto ui = static_cast<std::size_t>(i);
+    const auto uj = static_cast<std::size_t>(j);
+    double phi = 0.0;
+    const double fscale = terms.pair(terms.couple(el[ui], el[uj]), std::sqrt(r2),
+                                     fprime[ui], fprime[uj], phi);
+    energy += phi;
+    F[3 * ui] += fscale * dx;
+    F[3 * ui + 1] += fscale * dy;
+    F[3 * ui + 2] += fscale * dz;
+    F[3 * uj] -= fscale * dx;
+    F[3 * uj + 1] -= fscale * dy;
+    F[3 * uj + 2] -= fscale * dz;
+    if (m_stress) {
+      accumulatePairStrain(strain, fscale, dx, dy, dz);
+    }
+    if (atoms != nullptr) {
+      tallyPair(*atoms, ui, uj, phi, fscale, dx, dy, dz);
+    }
+  });
 
   out->energy = energy;
   if (m_stress) {

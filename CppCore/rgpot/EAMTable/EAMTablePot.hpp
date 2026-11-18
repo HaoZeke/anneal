@@ -75,8 +75,8 @@ EAMTable read_eam_table(std::istream &in, EAMTableFormat format);
 struct EAMTableConfig {
   std::string path; //!< Table file.
   EAMTableFormat format = EAMTableFormat::Setfl;
-  /// Minimum image convention. The cutoff must sit under half of every
-  /// face spacing of the cell.
+  /// Periodic boundaries. A cutoff past half a face spacing sums every
+  /// image inside the cutoff, not only the minimum image.
   bool periodic = true;
   /// Write the Cauchy stress of stress.hpp when the cell volume is positive.
   bool stress = false;
