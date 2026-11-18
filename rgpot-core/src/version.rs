@@ -290,6 +290,17 @@ mod tests {
         ] {
             assert!(flat.contains(f), "rgpot.h lacks {f}");
         }
+        for define in [
+            "#define ENGINE_ABI_VERSION 1",
+            "#define ENGINE_ERR_UNSUPPORTED 3",
+        ] {
+            assert!(header.contains(define), "rgpot.h lacks {define}");
+        }
+        #[cfg(feature = "engine")]
+        {
+            assert_eq!(crate::engine::ENGINE_ABI_VERSION, 1);
+            assert_eq!(crate::engine::ENGINE_ERR_UNSUPPORTED, 3);
+        }
         let default_step = format!(
             "#define RGPOT_HVP_DEFAULT_STEP {:.1e}",
             crate::hvp::RGPOT_HVP_DEFAULT_STEP
