@@ -36,11 +36,11 @@ mod tests {
     }
 
     #[test]
-    fn the_gfn2_callback_stores_the_xtb_gradient_as_a_force() {
+    fn the_gfn2_callback_publishes_rgpot_forces_without_double_negation() {
         let source = include_str!("../examples/common/rgpot_eindir.rs");
         assert!(
-            source.contains("xtb_gradient::store_as_force"),
-            "the callback publishes the xtb gradient without converting it to a force"
+            !source.contains("xtb_gradient::store_as_force"),
+            "rgpot_xtb_force already returns forces (-dE/dx); negating again inverts the gradient"
         );
     }
 }
