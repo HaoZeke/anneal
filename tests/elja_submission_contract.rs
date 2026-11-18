@@ -2,6 +2,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[test]
 fn hard_lj_arrays_default_to_the_partition_limit() {
@@ -525,7 +526,7 @@ fn molecular_ensembles_are_isolated_paired_slurm_runs() {
         r#"engine_sha256=%s\n"#,
         r#"ANNEAL_SOAP_MODE=$SOAP_MODE"#,
         r#"ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json"#,
-        r#"DEFAULT_HIT_TOL=1e-3"#,
+        r#"from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)"#,
         r#"TARGET_TOLERANCE=$DEFAULT_HIT_TOL"#,
         r#"export TARGET_TOL=$TARGET_TOLERANCE"#,
         r#"target_tolerance=%s\n"#,
@@ -540,6 +541,33 @@ fn molecular_ensembles_are_isolated_paired_slurm_runs() {
             "molecule/slab ensemble runner is missing contract {required}"
         );
     }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scripts = root.join("scripts");
+    let output = Command::new("python3")
+        .env(
+            "PYTHONPATH",
+            format!("{}{}", scripts.display(), {
+                std::env::var("PYTHONPATH")
+                    .map(|path| format!(":{path}"))
+                    .unwrap_or_default()
+            }),
+        )
+        .args([
+            "-c",
+            "from target_tol import DEFAULT_HIT_TOL; print(DEFAULT_HIT_TOL)",
+        ])
+        .output()
+        .expect("python3 must resolve DEFAULT_HIT_TOL");
+    assert!(
+        output.status.success(),
+        "DEFAULT_HIT_TOL probe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let resolved = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    assert_eq!(
+        resolved, "0.001",
+        "ensemble runner must use target_tol.DEFAULT_HIT_TOL (got {resolved})"
+    );
 }
 
 #[test]

@@ -8,7 +8,7 @@ const ALLOWED_RUNTIME_LITERALS: &[(&str, &str)] = &[
     ("scripts/occat_h2h/stub.S", "tol:         .double 0.001"),
     (
         "bench/lj104-lattice/v2/h2h_cap.f90",
-        "CALL GET_ENVIRONMENT_VARIABLE('H2H_TOL'",
+        "LOGICAL FUNCTION ENERGY_HITS",
     ),
 ];
 
@@ -94,12 +94,12 @@ fn runtime_allowlisted_literals_match_default_hit_tol() {
         r#"
 import sys
 from pathlib import Path
-ROOT = Path({:?})
+ROOT = Path("{root}")
 sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL
 assert float(DEFAULT_HIT_TOL) == 1e-3
 "#,
-        root,
+        root = root.display()
     );
     let status = Command::new("python3")
         .arg("-c")

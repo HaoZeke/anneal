@@ -39,6 +39,12 @@ def finite(value: float) -> bool:
     return value == value and abs(value) != float("inf")
 
 
+def count_hits(energies: list[float], reference: float, tol: float) -> int:
+    return sum(
+        1 for energy in energies if finite(energy) and energy_hits(energy, reference, tol)
+    )
+
+
 def parse_hop(directory: pathlib.Path) -> list[dict]:
     rows: list[dict] = []
     for path in sorted(directory.glob("seed_*.out")):
@@ -90,25 +96,17 @@ def parse_relax(directory: pathlib.Path) -> dict:
         summary_lowest = float(summary.group("lowest"))
         if finite(summary_lowest):
             lowest = summary_lowest
-    hits = sum(
-        1
-        for energy in energies
-        if finite(energy) and energy_hits(energy, lowest, HIT_TOL)
-    )
-    distinct = len(basins) if basins else len({round(e / ENERGY_TOL) for e in energies})
+    elif basins:
+        distinct = len(basins)
+    else:
+        distinct = len({round(e / ENERGY_TOL) for e in energies})
     return {
         "energies": energies,
         "charges": charges,
         "lowest": lowest,
-        "hits": hits,
         "starts": len(energies),
         "distinct": distinct,
         "charged": int(summary.group("charged")) if summary else sum(charges),
-        "hit_charges": [
-            charge
-            for energy, charge in zip(energies, charges)
-            if energy_hits(energy, lowest, HIT_TOL)
-        ],
     }
 
 
@@ -156,10 +154,15 @@ def main() -> int:
                 f"charged {row['charged']}  basins {row['basins']}"
             )
     if relax:
-        hits = relax["hits"] if energy_hits(relax["lowest"], global_best, HIT_TOL) else 0
+        hits = count_hits(relax["energies"], global_best, HIT_TOL)
+        hit_charges = [
+            charge
+            for energy, charge in zip(relax["energies"], relax["charges"])
+            if energy_hits(energy, global_best, HIT_TOL)
+        ]
         print(
             f"{'random_relax':14}  {hits}/{relax['starts']:<14}  "
-            f"{median_or_nan([float(c) for c in relax['hit_charges']]):<18}  {relax['distinct']}"
+            f"{median_or_nan([float(c) for c in hit_charges]):<18}  {relax['distinct']}"
         )
         print(
             f"  starts {relax['starts']}  charged {relax['charged']}  "

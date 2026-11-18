@@ -1,0 +1,7 @@
+# Each pair: must_fail snippet then must_pass snippet (lang|body).
+fail|py|    return target + tol >= energy
+pass|py|    return energy_hits(energy, target, tol)
+fail|py|    hit = reference + HIT_TOL >= best
+pass|py|    hit = energy_hits(best, reference, HIT_TOL)
+fail|f90|         IF (ENERGY <= TARGET_ENERGY + TOL) THEN
+pass|f90|         IF (ENERGY_HITS(ENERGY, TARGET_ENERGY, TOL)) THEN

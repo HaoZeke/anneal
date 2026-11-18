@@ -301,7 +301,8 @@ def test_ase_summarizers_reject_nan_hit_rows(tmp_path: Path, monkeypatch):
 
 
 from target_tol_lint_rules import (  # noqa: E402
-    RUNTIME_LITERAL_ALLOWLIST,
+    SITE_LINE_ALLOWLIST,
+    classify_line,
     fixture_must_violate,
     scan_repository,
 )
@@ -334,9 +335,69 @@ def test_runtime_allowlisted_literals_still_present():
     stub = (ROOT / "scripts/occat_h2h/stub.S").read_text()
     cap = (ROOT / "bench/lj104-lattice/v2/h2h_cap.f90").read_text()
     assert "tol:         .double 0.001" in stub
-    assert "H2H_TOL" in cap
-    for rel in RUNTIME_LITERAL_ALLOWLIST:
+    assert "FUNCTION ENERGY_HITS" in cap
+    for rel in SITE_LINE_ALLOWLIST:
         assert (ROOT / rel).is_file()
+
+
+def test_fixture_pairs_match_lint_expectations():
+    pairs_path = ROOT / "tests/target_tol_fixture_pairs.txt"
+    entries: list[tuple[str, str, str]] = []
+    for line in pairs_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("|", 2)
+        assert len(parts) == 3, line
+        entries.append((parts[0], parts[1], parts[2]))
+    assert len(entries) % 2 == 0
+    for index in range(0, len(entries), 2):
+        fail_kind, lang, fail_body = entries[index]
+        pass_kind, pass_lang, pass_body = entries[index + 1]
+        assert fail_kind == "fail" and pass_kind == "pass"
+        ext = {"py": "py", "rs": "rs", "sh": "sh", "f90": "f90"}[lang]
+        assert fixture_must_violate(f"{lang}|{fail_body}")
+        assert classify_line(f"fixture/{lang}_ok", pass_body, ext, line_no=1) is None
+
+
+def test_hit_tolerance_is_not_transitive():
+    tol = py_target_tol.DEFAULT_HIT_TOL
+    ref = -20.0
+    a = -19.989
+    b = -19.9886
+    c = -19.988
+    assert py_target_tol.energy_hits(a, ref, tol) is False
+    assert py_target_tol.energy_hits(b, a, tol) is True
+    assert py_target_tol.energy_hits(c, b, tol) is True
+    assert py_target_tol.energy_hits(c, ref, tol) is False
+
+
+def test_terra_slab_h6_counts_hits_against_global_reference(tmp_path: Path):
+    slab = tmp_path / "slab"
+    (slab / "cuh2_h6_plain").mkdir(parents=True)
+    (slab / "cuh2_h6_recommended").mkdir(parents=True)
+    (slab / "cuh2_h6_random_relax").mkdir(parents=True)
+    (slab / "cuh2_h6_plain" / "seed_0.out").write_text(
+        "seed 0: best -20.0 eV hops 3 charged 50 basins 1\n"
+    )
+    chain = (
+        "relax 0: e=-19.989 charged=10 accepted\n"
+        "relax 1: e=-19.9886 charged=20 accepted\n"
+        "relax 2: e=-19.988 charged=30 accepted\n"
+        "SUMMARY distinct=7 lowest=-19.989 hits=0/3 charged=60\n"
+    )
+    (slab / "cuh2_h6_random_relax" / "seed_0.out").write_text(chain)
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "terra_summarize_slab_h6.py"), str(slab)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    relax_line = next(
+        line for line in proc.stdout.splitlines() if line.startswith("random_relax")
+    )
+    assert "0/3" in relax_line
+    assert relax_line.rstrip().endswith("7")
 
 
 def test_lint_detects_injected_experiments_probe():

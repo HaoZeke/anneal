@@ -33,3 +33,6 @@ rs|            mf_hits += int(bf0 <= thresh)
 sh|      H2H_TARGET=$target H2H_TOL=0.001 \
 sh|        H2H_TOL="0.001",
 sh|DEFAULT_HIT_TOL=1e-3
+py|    return target + tol >= energy
+py|    hit = reference + HIT_TOL >= best
+f90|         IF (ENERGY <= TARGET_ENERGY + TOL) THEN

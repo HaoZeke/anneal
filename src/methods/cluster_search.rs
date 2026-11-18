@@ -2710,8 +2710,18 @@ mod tests {
     fn quench_watch_rejects_negative_infinity() {
         let mut led = Ledger::new(8);
         led.stop_below(-1.0);
-        assert!(!led.below_target(f64::NEG_INFINITY));
-        assert!(led.below_target(-1.0));
+        let stop_energy = led.target();
+        let watch = |_: usize, fv: f64| {
+            if stop_energy.is_some_and(|target| crate::energy_hits(fv, target, 0.0)) {
+                return false;
+            }
+            true
+        };
+        assert!(!watch(0, -1.0), "quench must stop once the target is hit");
+        assert!(
+            watch(0, f64::NEG_INFINITY),
+            "non-finite trial energies must not stop the quench watch"
+        );
     }
 
     #[test]

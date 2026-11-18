@@ -18,12 +18,25 @@ ALLOWED_FILES = frozenset(
     }
 )
 
-RUNTIME_LITERAL_ALLOWLIST = frozenset(
-    {
-        "scripts/occat_h2h/stub.S",
-        "bench/lj104-lattice/v2/h2h_cap.f90",
-    }
-)
+SITE_LINE_ALLOWLIST: dict[str, list[tuple[int, re.Pattern[str]]]] = {
+    "scripts/occat_h2h/stub.S": [
+        (233, re.compile(r"tol:\s+\.double\s+0\.001", re.IGNORECASE)),
+    ],
+    "bench/lj104-lattice/v2/h2h_cap.f90": [
+        (17, re.compile(r"TOL\s*=\s*1\.0D-3")),
+        (36, re.compile(r"ENERGY_HITS\s*=\s*ENERGY\s*<=\s*TARGET\s*\+\s*TOL")),
+    ],
+}
+
+
+def is_allowlisted_runtime_line(rel: str, line_no: int, stripped: str) -> bool:
+    rules = SITE_LINE_ALLOWLIST.get(rel)
+    if not rules:
+        return False
+    for allowed_no, pattern in rules:
+        if line_no == allowed_no and pattern.search(stripped):
+            return True
+    return False
 
 SKIP_PARTS = frozenset(
     {"vendor", "target", ".git", ".ci", ".venv", "crates/anneal-python/target"}
@@ -327,6 +340,34 @@ SKIP_LINE_FRAGMENTS = (
 )
 
 
+def _mirrored_hit_comparison(before: str, after: str) -> bool:
+    if not _energy_like(after):
+        return False
+    lower_before = before.lower()
+    if any(
+        fragment in lower_before
+        for fragment in (
+            "+ tol",
+            "+ hit_tol",
+            "+ hit",
+            "+ target",
+            "+ reference",
+            "+ r ",
+            "+ w ",
+            "+ t ",
+        )
+    ):
+        return True
+    if re.search(
+        r"(target|reference|thresh|level|stop|published|global_best)\s*\+",
+        lower_before,
+    ):
+        return True
+    if re.search(r"\+\s*(tol|hit_tol|hit|target|reference)\b", lower_before):
+        return True
+    return False
+
+
 def has_raw_energy_comparison(stripped: str) -> bool:
     lower = stripped.lower()
     if not stripped or line_has_exemption(stripped):
@@ -421,11 +462,25 @@ def has_raw_energy_comparison(stripped: str) -> bool:
         "thresh" in lower or "target" in lower
     ):
         return True
+    for op in (">=", ">"):
+        rest = lower
+        while op in rest:
+            pos = rest.find(op)
+            before = rest[:pos].strip()
+            after = rest[pos + len(op) :].strip()
+            if any(skip in before for skip in NON_ENERGY_BEFORE):
+                rest = rest[pos + len(op) :]
+                continue
+            if _mirrored_hit_comparison(before, after):
+                return True
+            rest = rest[pos + len(op) :]
     return False
 
 
-def has_hit_literal(raw_line: str, stripped: str, *, rel: str) -> bool:
-    if rel in RUNTIME_LITERAL_ALLOWLIST:
+def has_hit_literal(
+    raw_line: str, stripped: str, *, rel: str, line_no: int = 0
+) -> bool:
+    if line_no and is_allowlisted_runtime_line(rel, line_no, stripped):
         return False
     if any(
         token in raw_line
@@ -446,14 +501,16 @@ def has_hit_literal(raw_line: str, stripped: str, *, rel: str) -> bool:
     return False
 
 
-def classify_line(rel: str, line: str, ext: str) -> str | None:
-    if rel in ALLOWED_FILES or rel in RUNTIME_LITERAL_ALLOWLIST:
+def classify_line(rel: str, line: str, ext: str, *, line_no: int = 0) -> str | None:
+    if rel in ALLOWED_FILES:
         return None
     stripped = strip_comments(line, ext)
     if not stripped:
         return None
+    if line_no and is_allowlisted_runtime_line(rel, line_no, stripped):
+        return None
     raw = line.rstrip("\n")
-    if has_hit_literal(raw, stripped, rel=rel):
+    if has_hit_literal(raw, stripped, rel=rel, line_no=line_no):
         return stripped
     if has_raw_energy_comparison(stripped):
         return stripped
@@ -483,7 +540,7 @@ def scan_repository(root: Path) -> list[str]:
             except OSError:
                 continue
             for index, line in enumerate(text.splitlines(), 1):
-                hit = classify_line(rel, line, ext)
+                hit = classify_line(rel, line, ext, line_no=index)
                 if hit:
                     violations.append(f"{rel}:{index}: {line.strip()}")
     return violations
@@ -500,7 +557,7 @@ def fixture_must_violate(fixture_line: str) -> bool:
     stripped = body.split("#", 1)[0].strip() if ext in {"sh", "f90"} else body.strip()
     if line_has_exemption(stripped):
         return False
-    if has_hit_literal(body, stripped, rel=f"fixture/{lang}_snippet"):
+    if has_hit_literal(body, stripped, rel=f"fixture/{lang}_snippet", line_no=1):
         return True
     compact = stripped.replace(" ", "")
     if "e<=r+w" in compact:
