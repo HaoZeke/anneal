@@ -231,6 +231,8 @@ bool setParams(const ::CPMDParams::Reader &params);
 The engine is loaded again when it was not loaded or =enginePath= changed.
 A live session is kept when the engine path and the serialized params are
 unchanged.
+A refused orbital key drops the session just created, so the same params
+are applied again on the next call.
 
 *** =rgpot::CPMDPot::getParams=
 

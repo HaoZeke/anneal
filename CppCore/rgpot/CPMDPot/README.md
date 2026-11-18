@@ -78,7 +78,9 @@ call time and re-applies it after session recreation. A caller can therefore
 issue `selectOrbitals` calls before the next force without ambiguity. When the
 engine exports `cpmdc_session_select_orbitals`, it keeps converged orbitals per
 key, so each SCF starts from that key's own previous orbitals. Every rank of a
-calculator names the same key before the same force.
+calculator names the same key before the same force. If the engine refuses the
+key while a session is being created, that session is dropped, and the next
+`setParams` with the same parameters creates another and applies the key again.
 
 `CPMDPot::copyOrbitals(from, to)` requests an explicit copy from one key to
 another through `cpmdc_session_copy_orbitals` and returns false when the engine

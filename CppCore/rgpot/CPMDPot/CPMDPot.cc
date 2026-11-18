@@ -421,10 +421,16 @@ bool CPMDPot::Impl::configure() {
     session = bundle.session_create(view.data, view.size);
     if (!session)
       return false;
+    // The params are the identity of this session. Commit them only
+    // after the remembered orbital key is on it. A refusal drops the
+    // session, so a later setParams with the same bytes tries again
+    // instead of taking the identical-session return above.
+    if (!applySelectedOrbitalKey()) {
+      destroySession();
+      return false;
+    }
     session_params = words_bytes(params_words);
     session_engine_path = engine_path;
-    if (!applySelectedOrbitalKey())
-      return false;
     return true;
   }
   destroySession();
