@@ -207,7 +207,7 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   constexpr long long kNone = -1000000;
 
   REQUIRE(raw_select(nullptr, 0) == -1);
-  REQUIRE(std::string(raw_last_error()).empty());
+  REQUIRE(std::string(raw_last_error()) == "null session");
 
   ::capnp::MallocMessageBuilder msg;
   auto p = msg.initRoot<::CPMDParams>();
@@ -228,12 +228,14 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   // Refusing a key before any key was selected throws and leaves none selected.
   REQUIRE_THROWS_WITH(pot.selectOrbitals(-99),
                       "CPMD engine refused the orbital key");
+  REQUIRE(std::string(raw_last_error()) == "orbital key refused");
   positions(0, 0) += 0.01;
   (void)pot(positions, atmtypes, box);
   REQUIRE(last_key() == kNone);
 
   for (long long key : {3LL, 0LL, 3LL, 41LL}) {
     pot.selectOrbitals(key);
+    REQUIRE(std::string(raw_last_error()).empty());
     positions(0, 0) += 0.01;
     (void)pot(positions, atmtypes, box);
     REQUIRE(last_key() == key);
@@ -243,7 +245,7 @@ TEST_CASE("CPMDPot applies orbital selection eagerly", "[cpmd][abi]") {
   // re-applied to a new session unchanged.
   REQUIRE_THROWS_WITH(pot.selectOrbitals(-99),
                       "CPMD engine refused the orbital key");
-  REQUIRE(std::string(raw_last_error()).empty());
+  REQUIRE(std::string(raw_last_error()) == "orbital key refused");
   positions(0, 0) += 0.01;
   (void)pot(positions, atmtypes, box);
   REQUIRE(last_key() == 41);
