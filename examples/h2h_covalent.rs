@@ -18,15 +18,13 @@
 //! literature tables. Tersoff carbon runs in Angstrom and eV.
 //!
 //! `H2H_ARM` picks the search. `recommended` is `Config::recommended`.
-//! `H2H_PRIORS=0` with it, or `H2H_ARM=nopriors`, switches off the
-//! structure priors the preset carries for close-packed clusters: stall
-//! symmetrisation, the continuous-symmetry reseed, the Lennard-Jones energy
-//! lattice, the two-phase surface and the five prior gates (fivefold SOAP,
-//! icosahedral reseed, lattice regrowth, labelled core, motif reseed). The
-//! fixed temperature, 0.8 of the Lennard-Jones well, goes with them, and the
-//! budget-window law sets it. Orbit completion stays, on every new basin and
-//! as an allocator arm, and the search keeps parts of the cluster within the
-//! pair's measured reach of each other in place of the container sphere.
+//! `H2H_PRIORS=0` with it, or `H2H_ARM=nopriors`, turns off the SOAP prior,
+//! stall symmetrisation, continuous-symmetry projection, the energy lattice,
+//! and the compacted surface. The temperature is a Lennard-Jones calibration,
+//! so the budget-window law replaces it. Orbit completion stays, on every new
+//! basin and as an allocator arm, and the search keeps parts of the cluster
+//! within the pair's measured reach of each other in place of the container
+//! sphere.
 //! `general` is the same search on scales measured from the potential's own
 //! dimer, the bond length over 2^(1/6) and the well depth, so the reduced
 //! constants mean what they mean for Lennard-Jones. The dimer and reach
