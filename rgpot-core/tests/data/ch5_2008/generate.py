@@ -185,6 +185,11 @@ class Margins:
         setattr(self, kind, min(getattr(self, kind), abs(gap)))
         return gap > 0
 
+    def above(self, value, threshold, kind):
+        gap = value - threshold
+        setattr(self, kind, min(getattr(self, kind), abs(gap)))
+        return gap > 0
+
 
 def energy(x, ops, margins):
     """POT of ch52008.f at Bohr positions x (18 entries), in Hartree."""
@@ -284,7 +289,7 @@ def energy(x, ops, margins):
         j, k, l = (i + 1) % 4, (i + 2) % 4, (i + 3) % 4
         axb, size = normal(j, k, l)
         for m in (j, k, l):
-            if not margins.below(value(dot(axb, unit_bond(m)) / size), 0, "handedness"):
+            if margins.above(value(dot(axb, unit_bond(m)) / size), 0, "handedness"):
                 k, l = l, k
         axb, size = normal(j, k, l)
         sum2 = sum4 = 0
