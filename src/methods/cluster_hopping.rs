@@ -5629,9 +5629,9 @@ where
         }
         let leave_due = internal_action.is_none() && cfg.escape_on_stall && call_due;
         if leave_due {
-            // The leave clock is consumed only when an actual leave runs.
-            // Resetting it on a no-op (for example, no activation candidate)
-            // can postpone the next real leave by a full patience window.
+            if !cfg.retry_noop_stall_leave {
+                charged_at_best = ledger.spent();
+            }
             directed_leave = true;
         }
         let checkpoint_due = matches!(
@@ -9068,7 +9068,7 @@ where
                 }
             }
         }
-        if leave_due && stall_outcome.is_some() {
+        if cfg.retry_noop_stall_leave && leave_due && stall_outcome.is_some() {
             charged_at_best = ledger.spent();
         }
         if let (Some(arm), Some(gain)) = (stall_response, stall_outcome) {
@@ -10204,67 +10204,78 @@ mod tests {
 
     #[test]
     fn a_noop_leave_does_not_consume_the_plateau_clock() {
-        let mut cfg = Config::recommended(6);
-        cfg.escape_on_stall = true;
-        cfg.trail_on_stall = false;
-        cfg.restart_on_stall = false;
-        cfg.symmetrise_on_stall = false;
-        cfg.tabu_on_stall = false;
-        cfg.return_screen = false;
-        cfg.bayes_screen = false;
-        cfg.energy_lattice = false;
-        cfg.orbit_complete_on_new = false;
-        cfg.continuous_symmetry = ContinuousSymmetry::Off;
-        cfg.soap_mode = SoapProposalMode::Off;
-        cfg.prior_soap = false;
-        cfg.restart_patience = 20;
-        cfg.max_hops = Some(80);
-        cfg.relax_steps = 1;
-        cfg.screen_steps = 1;
-        cfg.escape_max_climb = 8;
-        cfg.escape_lanczos_steps = 8;
-        cfg.surfaces.clear();
+        fn activation_calls(retry_noop: bool) -> usize {
+            let mut cfg = Config::recommended(6);
+            cfg.escape_on_stall = true;
+            cfg.retry_noop_stall_leave = retry_noop;
+            cfg.trail_on_stall = false;
+            cfg.restart_on_stall = false;
+            cfg.symmetrise_on_stall = false;
+            cfg.tabu_on_stall = false;
+            cfg.return_screen = false;
+            cfg.bayes_screen = false;
+            cfg.energy_lattice = false;
+            cfg.orbit_complete_on_new = false;
+            cfg.continuous_symmetry = ContinuousSymmetry::Off;
+            cfg.soap_mode = SoapProposalMode::Off;
+            cfg.prior_soap = false;
+            cfg.restart_patience = 20;
+            cfg.max_hops = Some(80);
+            cfg.relax_steps = 1;
+            cfg.screen_steps = 1;
+            cfg.escape_max_climb = 8;
+            cfg.escape_lanczos_steps = 8;
+            cfg.surfaces.clear();
 
-        let mut rng = StdRng::seed_from_u64(9);
-        let start = random_cluster(
-            cfg.n_points,
-            cfg.start_radius(),
-            cfg.min_separation,
-            &mut rng,
+            let mut rng = StdRng::seed_from_u64(9);
+            let start = random_cluster(
+                cfg.n_points,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut rng,
+            );
+            let mut ledger = Ledger::new(55);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                if !led.charge() {
+                    return (f64::NAN, x.to_owned());
+                }
+                (0.0, Array1::zeros(x.len()))
+            };
+            let mut activate_calls = 0usize;
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+                if !led.charge() {
+                    return None;
+                }
+                let norm2 = x.iter().map(|v| v * v).sum::<f64>();
+                if norm2 > 1.0e-12 {
+                    activate_calls += 1;
+                    None
+                } else {
+                    Some(Array1::from_elem(x.len(), 1.0))
+                }
+            };
+            let mut run_rng = StdRng::seed_from_u64(9);
+            run_with_gradient(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut run_rng,
+            )
+            .expect("search");
+            activate_calls
+        }
+
+        let original_calls = activation_calls(false);
+        let retry_calls = activation_calls(true);
+        assert_eq!(
+            original_calls, 2,
+            "the default must retain the original one-attempt-per-window clock"
         );
-        let mut ledger = Ledger::new(55);
-        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
-            if !led.charge() {
-                return (f64::NAN, x.to_owned());
-            }
-            (0.0, Array1::zeros(x.len()))
-        };
-        let mut activate_calls = 0usize;
-        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
-            if !led.charge() {
-                return None;
-            }
-            let norm2 = x.iter().map(|v| v * v).sum::<f64>();
-            if norm2 > 1.0e-12 {
-                activate_calls += 1;
-                None
-            } else {
-                Some(Array1::from_elem(x.len(), 1.0))
-            }
-        };
-        let mut run_rng = StdRng::seed_from_u64(9);
-        run_with_gradient(
-            &cfg,
-            start.view(),
-            &mut ledger,
-            &mut relax,
-            Some(&mut grad),
-            &mut run_rng,
-        )
-        .expect("search");
         assert!(
-            activate_calls >= 4,
-            "a no-op leave must not postpone every retry by a full restart_patience window (activate_calls={activate_calls})"
+            retry_calls >= 4,
+            "the opt-in clock must retry no-op leaves (activate_calls={retry_calls})"
         );
     }
 

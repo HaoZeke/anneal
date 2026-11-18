@@ -572,6 +572,11 @@ pub struct Config {
     /// improving costs a few per cent and supplies the one thing a biased
     /// random walk has no mechanism for: leaving a funnel on purpose.
     pub escape_on_stall: bool,
+    /// Retry a call-clock leave immediately when no escape candidate exists.
+    ///
+    /// Off preserves the original clock: an attempted leave consumes its
+    /// plateau window. On, only a leave that actually runs consumes it.
+    pub retry_noop_stall_leave: bool,
     /// Leave a stalled basin back through the door the chain came in.
     ///
     /// The screen state of the accepted trial that entered the current basin
@@ -2152,6 +2157,7 @@ impl Config {
             escape_overshoot: 1.5,
             escape_max_climb: 24,
             escape_on_stall: false,
+            retry_noop_stall_leave: false,
             trail_on_stall: false,
             escape_stall_patience: 5_000,
             escape_stall_factor: 2.0,
