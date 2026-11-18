@@ -1142,28 +1142,37 @@ Enable the =engine= feature on =rgpot-core= to expose
 No second engine abstraction is added: =EnginePotential::into_potential= wraps
 the handle as a =PotentialImpl=.
 
-- =ENGINE_ABI_VERSION= :: Expected major version (=RGPOT_ENGINE_ABI_VERSION=,
-  1).
+- =ENGINE_ABI_VERSION=, =ENGINE_ABI_MINOR=, =ENGINE_ABI_LAYOUT_REVISION= ::
+  Host ABI identity (=1=, =3=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
+  =RGPOT_ENGINE_ABI_MINOR= and =RGPOT_ENGINE_ABI_LAYOUT_REVISION=.
+- =RgpotEngineAbiStamp= :: Compatibility stamp (=abi_major=, =abi_minor=,
+  =layout_revision=) with =RgpotEngineAbiStamp::HOST= and =serves(host)=
+  implementing the =rgpot_engine_abi_compatible= rule.
 - =RgpotEnginePot= :: Opaque handle type matching =struct RgpotEnginePot=.
-- =CoordTransformFn=, =AbiVersionFn=, =CreateFn=, =DestroyFn=, =ForceFn=,
-  =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn= :: =extern "C"=
+- =CoordTransformFn=, =AbiVersionFn=, =AbiStampFn=, =CreateFn=, =DestroyFn=,
+  =ForceFn=, =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn= :: =extern "C"=
   function-pointer types matching the C declarations above.
 - =EngineSymbols= :: Resolved symbol table holding required
-  (=abi_version=, =create=, =destroy=, =force=) and optional (=force_batch=,
-  =hvp=, =caps=, =last_error=) function pointers.
+  (=abi_version=, =create=, =destroy=, =force=) and optional (=abi_stamp=,
+  =force_batch=, =hvp=, =caps=, =last_error=) function pointers.
 - =EngineError= :: Typed error enum covering =Load=, =Missing=, =Abi=
-  (=expected=, =found=), =Create=, =Invalid=, =Unsupported=, =Recoverable=
-  (=code=, =message=), and =Fatal= (=code=, =message=).
+  (=expected=, =found=), =AbiStamp= (=expected=, =found=), =Create=,
+  =Invalid=, =Unsupported=, =Recoverable= (=code=, =message=), and =Fatal=
+  (=code=, =message=).
 - =EngineRequest= :: Single-geometry input with =positions= (Angstrom, row-major
   =[n_atoms, 3]=), =atomic_numbers=, and =box_matrix= (row-major 3x3 lattice in
   Angstrom).
 - =EngineEvaluation= :: Output containing =energy= (eV) and =forces=
   (eV/Angstrom, row-major =[n_atoms, 3]=).
 - =EnginePotential::load(path, config)= /
-  =EnginePotential::from_symbols(symbols, config)= :: Verifies =rgpot_engine_abi_version() ==
-  ENGINE_ABI_VERSION=, copies =config= into an 8-byte-aligned =Vec<u64>= buffer
-  (so engines that cast =config= to =capnp::word= never receive an unaligned
-  pointer), and calls =rgpot_engine_create=.
+  =EnginePotential::from_symbols(symbols, config)= :: Verifies
+  =rgpot_engine_abi_version() == ENGINE_ABI_VERSION=, resolves the optional
+  =rgpot_engine_abi_stamp= (treating an engine without it as minor 0, layout 1)
+  and requires =stamp.serves(RgpotEngineAbiStamp::HOST)=, copies =config= into an
+  8-byte-aligned =Vec<u64>= buffer (so engines that cast =config= to
+  =capnp::word= never receive an unaligned pointer), and calls
+  =rgpot_engine_create=.
+  =EnginePotential::abi_stamp()= returns the resolved stamp.
 - =EnginePotential::force(&request)= and
   =EnginePotential::force_batch(&atomic_numbers, &positions, &boxes)= ::
   Validates input lengths and output finiteness, dispatches to

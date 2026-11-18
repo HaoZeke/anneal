@@ -6,10 +6,11 @@
 //! An engine shared library (`libcpmd_engine.so`, `libuma_engine.so`, ...)
 //! exports one symbol set. Which backend runs is which library is loaded, and
 //! the backend's configuration is the opaque message the library's create
-//! call reads. [`EnginePotential::load`] resolves that symbol set, refuses a
-//! library whose ABI major differs from [`ENGINE_ABI_VERSION`], and keeps one
-//! engine instance. [`EnginePotential::force`] is one geometry in Angstrom
-//! and one answer in eV and eV/Angstrom, the units the header fixes.
+//! call reads. [`EnginePotential::load`] resolves that symbol set, checks both
+//! [`ENGINE_ABI_VERSION`] and [`RgpotEngineAbiStamp::HOST`] against the
+//! library's ABI identity, and keeps one engine instance. [`EnginePotential::force`] is one
+//! geometry in Angstrom and one answer in eV and eV/Angstrom, the units the
+//! header fixes.
 //!
 //! Return codes follow the header: zero is success, a positive code is an
 //! evaluation that failed at this input ([`EngineError::Recoverable`]), and a
@@ -25,7 +26,7 @@
 //! [`crate::profile`]: a backend may own threads or MPI state that does not
 //! survive `dlclose`.
 
-use std::ffi::{c_char, c_int, c_long, c_uint, c_void};
+use std::ffi::{c_char, c_int, c_long, c_uint, c_ushort, c_void};
 use std::fmt;
 use std::mem::ManuallyDrop;
 use std::path::Path;
@@ -41,6 +42,10 @@ use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 
 /// The ABI major this loader speaks, `RGPOT_ENGINE_ABI_VERSION` of the header.
 pub const ENGINE_ABI_VERSION: c_int = 1;
+/// The ABI minor this loader requires, `RGPOT_ENGINE_ABI_MINOR` of the header.
+pub const ENGINE_ABI_MINOR: u16 = 3;
+/// The struct layout revision this loader expects, `RGPOT_ENGINE_ABI_LAYOUT_REVISION` of the header.
+pub const ENGINE_ABI_LAYOUT_REVISION: u16 = 1;
 /// Engine code meaning the backend does not support the requested operation.
 pub const ENGINE_ERR_UNSUPPORTED: c_int = 3;
 
@@ -60,8 +65,49 @@ pub type CoordTransformFn = unsafe extern "C" fn(
     box_: *mut f64,
 ) -> c_int;
 
+/// Compatibility identity of a loaded engine, `RgpotEngineAbiStamp` of the header.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RgpotEngineAbiStamp {
+    /// Incompatible ABI version (`RGPOT_ENGINE_ABI_VERSION`).
+    pub abi_major: c_ushort,
+    /// Additive compatible minor version (`RGPOT_ENGINE_ABI_MINOR`).
+    pub abi_minor: c_ushort,
+    /// Struct size and field-order revision (`RGPOT_ENGINE_ABI_LAYOUT_REVISION`).
+    pub layout_revision: c_ushort,
+}
+
+impl RgpotEngineAbiStamp {
+    /// The ABI stamp this loader was built against.
+    pub const HOST: Self = Self {
+        abi_major: ENGINE_ABI_VERSION as c_ushort,
+        abi_minor: ENGINE_ABI_MINOR,
+        layout_revision: ENGINE_ABI_LAYOUT_REVISION,
+    };
+
+    /// Compatibility rule of `rgpot_engine_abi_compatible` in `engine_c_abi.h`:
+    /// equal major, equal layout revision, and an engine minor at least `host`'s.
+    pub const fn serves(self, host: Self) -> bool {
+        self.abi_major == host.abi_major
+            && self.layout_revision == host.layout_revision
+            && self.abi_minor >= host.abi_minor
+    }
+}
+
+impl fmt::Display for RgpotEngineAbiStamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{} (layout {})",
+            self.abi_major, self.abi_minor, self.layout_revision
+        )
+    }
+}
+
 /// `rgpot_engine_abi_version`.
 pub type AbiVersionFn = unsafe extern "C" fn() -> c_int;
+/// `rgpot_engine_abi_stamp`.
+pub type AbiStampFn = unsafe extern "C" fn() -> RgpotEngineAbiStamp;
 /// `rgpot_engine_create`.
 pub type CreateFn =
     unsafe extern "C" fn(*const c_void, usize, *mut c_char, usize) -> *mut RgpotEnginePot;
@@ -150,12 +196,15 @@ pub struct EngineCaps {
     pub analytic_hvp: bool,
 }
 
-/// The symbols of one engine library. The first four are required by the
-/// header; the optional entries are probed and may be absent.
+/// The symbols of one engine library. `abi_version`, `create`, `destroy` and
+/// `force` are required by the header; the optional entries are probed and may
+/// be absent.
 #[derive(Clone, Copy)]
 pub struct EngineSymbols {
     /// Required symbol `rgpot_engine_abi_version`.
     pub abi_version: AbiVersionFn,
+    /// Optional symbol `rgpot_engine_abi_stamp`.
+    pub abi_stamp: Option<AbiStampFn>,
     /// Required symbol `rgpot_engine_create`.
     pub create: CreateFn,
     /// Required symbol `rgpot_engine_destroy`.
@@ -185,6 +234,13 @@ pub enum EngineError {
         expected: i32,
         /// The ABI major returned by `rgpot_engine_abi_version`.
         found: i32,
+    },
+    /// The library's ABI stamp does not serve this loader's stamp.
+    AbiStamp {
+        /// The ABI stamp this loader was built against.
+        expected: RgpotEngineAbiStamp,
+        /// The ABI stamp reported (or implied) by the loaded engine.
+        found: RgpotEngineAbiStamp,
     },
     /// `rgpot_engine_create` returned no instance; the text is its error buffer.
     Create(String),
@@ -220,6 +276,12 @@ impl fmt::Display for EngineError {
             Self::Missing(name) => write!(f, "engine library does not export {name}"),
             Self::Abi { expected, found } => {
                 write!(f, "engine ABI major {found}, this loader speaks {expected}")
+            }
+            Self::AbiStamp { expected, found } => {
+                write!(
+                    f,
+                    "engine ABI stamp {found} cannot serve host stamp {expected}"
+                )
             }
             Self::Create(why) => write!(f, "rgpot_engine_create failed: {why}"),
             Self::Invalid(why) => write!(f, "invalid engine request: {why}"),
@@ -272,6 +334,7 @@ pub struct EngineEvaluation {
 /// One engine instance behind the generic engine C ABI.
 pub struct EnginePotential {
     symbols: EngineSymbols,
+    stamp: RgpotEngineAbiStamp,
     handle: NonNull<RgpotEnginePot>,
     _library: Option<ManuallyDrop<Library>>,
 }
@@ -313,6 +376,22 @@ impl EnginePotential {
                 found,
             });
         }
+        // `rgpot_engine_abi_stamp` is optional; per `engine_c_abi.h`, an engine
+        // without it is minor 0, layout 1.
+        let stamp = match symbols.abi_stamp {
+            Some(abi_stamp) => unsafe { abi_stamp() },
+            None => RgpotEngineAbiStamp {
+                abi_major: ENGINE_ABI_VERSION as c_ushort,
+                abi_minor: 0,
+                layout_revision: 1,
+            },
+        };
+        if !stamp.serves(RgpotEngineAbiStamp::HOST) {
+            return Err(EngineError::AbiStamp {
+                expected: RgpotEngineAbiStamp::HOST,
+                found: stamp,
+            });
+        }
         // In-tree engines cast `config` to `capnp::word`, which requires
         // 8-byte alignment even when the caller passes an unaligned `&[u8]`.
         let mut aligned = vec![0_u64; config.len().div_ceil(8)];
@@ -333,11 +412,17 @@ impl EnginePotential {
         match NonNull::new(raw) {
             Some(handle) => Ok(Self {
                 symbols,
+                stamp,
                 handle,
                 _library: None,
             }),
             None => Err(EngineError::Create(text_of(&errbuf))),
         }
+    }
+
+    /// The compatibility identity reported (or implied) by the loaded engine.
+    pub fn abi_stamp(&self) -> RgpotEngineAbiStamp {
+        self.stamp
     }
 
     /// Energy and forces of one geometry.
@@ -632,6 +717,7 @@ unsafe fn resolve(library: &Library) -> Result<EngineSymbols, EngineError> {
     }
     Ok(EngineSymbols {
         abi_version: unsafe { required(library, "rgpot_engine_abi_version")? },
+        abi_stamp: unsafe { optional(library, "rgpot_engine_abi_stamp") },
         create: unsafe { required(library, "rgpot_engine_create")? },
         destroy: unsafe { required(library, "rgpot_engine_destroy")? },
         force: unsafe { required(library, "rgpot_engine_force")? },

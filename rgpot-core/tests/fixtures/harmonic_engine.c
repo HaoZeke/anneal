@@ -16,6 +16,18 @@
 #define FIXTURE_ABI 1
 #endif
 
+#ifndef FIXTURE_STAMP_MAJOR
+#define FIXTURE_STAMP_MAJOR FIXTURE_ABI
+#endif
+
+#ifndef FIXTURE_ABI_MINOR
+#define FIXTURE_ABI_MINOR RGPOT_ENGINE_ABI_MINOR
+#endif
+
+#ifndef FIXTURE_ABI_LAYOUT
+#define FIXTURE_ABI_LAYOUT RGPOT_ENGINE_ABI_LAYOUT_REVISION
+#endif
+
 struct RgpotEnginePot {
   double k;
   char error[128];
@@ -27,6 +39,16 @@ int fixture_destroy_count(void) { return destroyed; }
 int fixture_unsupported_code(void) { return RGPOT_ENGINE_ERR_UNSUPPORTED; }
 
 int rgpot_engine_abi_version(void) { return FIXTURE_ABI; }
+
+#ifndef NO_STAMP
+RgpotEngineAbiStamp rgpot_engine_abi_stamp(void) {
+  RgpotEngineAbiStamp stamp;
+  stamp.abi_major = (unsigned short)FIXTURE_STAMP_MAJOR;
+  stamp.abi_minor = (unsigned short)FIXTURE_ABI_MINOR;
+  stamp.layout_revision = (unsigned short)FIXTURE_ABI_LAYOUT;
+  return stamp;
+}
+#endif
 
 RgpotEnginePot *rgpot_engine_create(const void *config, size_t config_len,
                                     char *errbuf, size_t errlen) {

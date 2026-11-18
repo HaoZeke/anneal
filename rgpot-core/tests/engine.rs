@@ -4,7 +4,8 @@ use std::ffi::c_int;
 use std::path::{Path, PathBuf};
 
 use rgpot_core::engine::{
-    EngineError, EnginePotential, EngineRequest, ENGINE_ABI_VERSION, ENGINE_ERR_UNSUPPORTED,
+    EngineError, EnginePotential, EngineRequest, RgpotEngineAbiStamp, ENGINE_ABI_LAYOUT_REVISION,
+    ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_UNSUPPORTED,
 };
 use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
@@ -250,6 +251,118 @@ fn an_abi_major_other_than_the_loader_is_refused() {
             found: 2
         }
     );
+}
+
+#[test]
+fn an_incompatible_abi_stamp_is_refused_and_names_both_stamps() {
+    for (name, define, found) in [
+        (
+            "harmonic_layout2",
+            "FIXTURE_ABI_LAYOUT=2",
+            RgpotEngineAbiStamp {
+                abi_major: ENGINE_ABI_VERSION as u16,
+                abi_minor: ENGINE_ABI_MINOR,
+                layout_revision: 2,
+            },
+        ),
+        (
+            "harmonic_layout0",
+            "FIXTURE_ABI_LAYOUT=0",
+            RgpotEngineAbiStamp {
+                abi_major: ENGINE_ABI_VERSION as u16,
+                abi_minor: ENGINE_ABI_MINOR,
+                layout_revision: 0,
+            },
+        ),
+        (
+            "harmonic_minor2",
+            "FIXTURE_ABI_MINOR=2",
+            RgpotEngineAbiStamp {
+                abi_major: ENGINE_ABI_VERSION as u16,
+                abi_minor: 2,
+                layout_revision: ENGINE_ABI_LAYOUT_REVISION,
+            },
+        ),
+        (
+            "harmonic_stamp_major2",
+            "FIXTURE_STAMP_MAJOR=2",
+            RgpotEngineAbiStamp {
+                abi_major: 2,
+                abi_minor: ENGINE_ABI_MINOR,
+                layout_revision: ENGINE_ABI_LAYOUT_REVISION,
+            },
+        ),
+    ] {
+        let path = build(name, &[define]);
+        let error = unsafe { EnginePotential::load(&path, &config()) }
+            .err()
+            .expect("incompatible ABI stamp must be refused");
+        assert_eq!(
+            error,
+            EngineError::AbiStamp {
+                expected: RgpotEngineAbiStamp::HOST,
+                found,
+            }
+        );
+        let text = error.to_string();
+        assert!(
+            text.contains(&RgpotEngineAbiStamp::HOST.to_string()),
+            "{text}"
+        );
+        assert!(text.contains(&found.to_string()), "{text}");
+    }
+}
+
+#[test]
+fn a_missing_abi_stamp_symbol_is_refused_as_minor_zero() {
+    let path = build("harmonic_nostamp", &["NO_STAMP"]);
+    let error = unsafe { EnginePotential::load(&path, &config()) }
+        .err()
+        .expect("missing rgpot_engine_abi_stamp must be refused for minor 3 host");
+    let found = RgpotEngineAbiStamp {
+        abi_major: ENGINE_ABI_VERSION as u16,
+        abi_minor: 0,
+        layout_revision: 1,
+    };
+    assert_eq!(
+        error,
+        EngineError::AbiStamp {
+            expected: RgpotEngineAbiStamp::HOST,
+            found,
+        }
+    );
+    let text = error.to_string();
+    assert!(
+        text.contains(&RgpotEngineAbiStamp::HOST.to_string()),
+        "{text}"
+    );
+    assert!(text.contains(&found.to_string()), "{text}");
+}
+
+#[test]
+fn a_compatible_abi_stamp_loads_at_equal_or_higher_minor() {
+    let equal = build("harmonic_stamp_equal", &[]);
+    let engine = load(&equal);
+    assert_eq!(engine.abi_stamp(), RgpotEngineAbiStamp::HOST);
+
+    let newer = build("harmonic_stamp_minor4", &["FIXTURE_ABI_MINOR=4"]);
+    let mut engine = load(&newer);
+    assert_eq!(
+        engine.abi_stamp(),
+        RgpotEngineAbiStamp {
+            abi_major: ENGINE_ABI_VERSION as u16,
+            abi_minor: 4,
+            layout_revision: ENGINE_ABI_LAYOUT_REVISION,
+        }
+    );
+    let answer = engine
+        .force(&EngineRequest {
+            positions: &[1.0, 0.0, 0.0],
+            atomic_numbers: &[1],
+            box_matrix: &CELL,
+        })
+        .expect("force on compatible minor-4 engine");
+    assert!(within_roundoff(answer.energy, 0.5 * SPRING, 3));
 }
 
 #[test]

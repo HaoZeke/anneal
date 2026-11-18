@@ -292,6 +292,8 @@ mod tests {
         }
         for define in [
             "#define ENGINE_ABI_VERSION 1",
+            "#define ENGINE_ABI_MINOR 3",
+            "#define ENGINE_ABI_LAYOUT_REVISION 1",
             "#define ENGINE_ERR_UNSUPPORTED 3",
         ] {
             assert!(header.contains(define), "rgpot.h lacks {define}");
@@ -299,6 +301,8 @@ mod tests {
         #[cfg(feature = "engine")]
         {
             assert_eq!(crate::engine::ENGINE_ABI_VERSION, 1);
+            assert_eq!(crate::engine::ENGINE_ABI_MINOR, 3);
+            assert_eq!(crate::engine::ENGINE_ABI_LAYOUT_REVISION, 1);
             assert_eq!(crate::engine::ENGINE_ERR_UNSUPPORTED, 3);
         }
         let default_step = format!(
