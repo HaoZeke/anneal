@@ -364,9 +364,9 @@ def selftest() -> int:
                 [
                     "cmake",
                     "/tmp/build",
+                    "tests=1",
                     "--ctest",
                     "/usr/bin/ctest",
-                    "tests=1",
                     "core=0",
                     "python=1",
                 ]
