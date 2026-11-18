@@ -155,11 +155,11 @@ fn main() {
 
     let depth = ico_e.abs() / 75.0;
     let references = vec![ico_slice.clone()];
-    let fivefold = anneal_core::soap::step_away_fivefold_measured(ico.view(), 0.35);
+    let axial = anneal_core::soap::step_away_axial_measured(ico.view(), 0.35);
     let mut starts: Vec<(&str, Array1<f64>)> = vec![
         ("ico", ico.clone()),
         ("marks", marks.clone()),
-        ("fivefold_035", fivefold),
+        ("axial_035", axial),
     ];
     for cover in 0..3 {
         let start = known_basin::leave_packing_rung_to(

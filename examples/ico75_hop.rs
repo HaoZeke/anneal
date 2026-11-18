@@ -8,8 +8,8 @@
 
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::soap::{
-    fivefold_axis_table, fivefold_length, fivefold_probe, step_away_fivefold,
-    step_away_fivefold_about,
+    axial_axis_table, axial_residual_length, axial_residual_probe, step_away_axial,
+    step_away_axial_about,
 };
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
@@ -124,9 +124,9 @@ fn to_plateau() -> (f64, Array1<f64>) {
 fn report(tag: &str, start_e: f64, start: ArrayView1<f64>, y: ArrayView1<f64>) {
     let rms = hop_rms(start, y);
     let ident = rms < 1e-8;
-    let d5_y = fivefold_length(y);
+    let d5_y = axial_residual_length(y);
     let (eq, xq) = relax(y, 400);
-    let d5_q = fivefold_length(xq.view());
+    let d5_q = axial_residual_length(xq.view());
     let on_shelf = (eq - PLATEAU).abs() < 1e-4;
     println!(
         "{tag} hop_rms {rms:.8} identity {ident} d5_hop {d5_y:.6} quench {eq:.9} d5_q {d5_q:.6} on_shelf {on_shelf} delta_e {:+.6}",
@@ -245,16 +245,16 @@ fn main() {
         to_plateau()
     };
     println!("plateau {e0:.9} target {PLATEAU}");
-    for (i, (ax, d)) in fivefold_axis_table(x0.view()).iter().enumerate() {
+    for (i, (ax, d)) in axial_axis_table(x0.view()).iter().enumerate() {
         println!(
             "axis {i} d5 {d:.6} n {:.3} {:.3} {:.3}",
             ax[0], ax[1], ax[2]
         );
     }
-    let p = fivefold_probe(x0.view(), RMSD);
+    let p = axial_residual_probe(x0.view(), RMSD);
     println!(
         "probe d5 {:.6} n_axes {} residual_rms {:.6} gated {} pentagon {} top5 {:.3} top12 {:.3}",
-        p.d5, p.n_axes, p.residual_rms, p.gated, p.used_pentagon, p.top5_share, p.top12_share
+        p.axial_rms, p.n_axes, p.residual_rms, p.gated, p.used_break, p.top5_share, p.top12_share
     );
     #[cfg(feature = "featomic")]
     {
@@ -312,15 +312,15 @@ fn main() {
     }
     println!("trial 1");
     let mut rng1 = StdRng::seed_from_u64(1);
-    let y1 = step_away_fivefold(x0.view(), RMSD, &mut rng1);
+    let y1 = step_away_axial(x0.view(), RMSD, &mut rng1);
     report("trial1", e0, x0.view(), y1.view());
     println!("trial 2");
     let mut rng2 = StdRng::seed_from_u64(2);
-    let y2 = step_away_fivefold(x0.view(), RMSD, &mut rng2);
+    let y2 = step_away_axial(x0.view(), RMSD, &mut rng2);
     report("trial2", e0, x0.view(), y2.view());
     for cap in [0.35_f64, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 1.20] {
         let mut rng = StdRng::seed_from_u64(3);
-        let y = step_away_fivefold(x0.view(), cap, &mut rng);
+        let y = step_away_axial(x0.view(), cap, &mut rng);
         let rms = hop_rms(x0.view(), y.view());
         let (eq, _) = relax(y.view(), 400);
         println!(
@@ -329,9 +329,9 @@ fn main() {
             eq - e0
         );
     }
-    let axes = fivefold_axis_table(x0.view());
+    let axes = axial_axis_table(x0.view());
     for (i, (ax, d5)) in axes.iter().enumerate() {
-        let y = step_away_fivefold_about(x0.view(), 0.75, *ax);
+        let y = step_away_axial_about(x0.view(), 0.75, *ax);
         let (eq, _) = relax(y.view(), 400);
         println!(
             "ax {i} d5 {d5:.3} cap 0.75 quench {eq:.9} dE {:+.4} on_shelf {}",
@@ -346,7 +346,7 @@ fn main() {
     let mut xw = x0.clone();
     let mut below = 0usize;
     for hop in 0..12 {
-        let y = step_away_fivefold(xw.view(), RMSD, &mut rngw);
+        let y = step_away_axial(xw.view(), RMSD, &mut rngw);
         let (e2, x2) = relax(y.view(), 400);
         ew = e2;
         xw = x2;
@@ -367,7 +367,7 @@ fn main() {
     let mut best = e0;
     let mut off = 0usize;
     for hop in 0..40 {
-        let y = step_away_fivefold(x.view(), RMSD, &mut rng);
+        let y = step_away_axial(x.view(), RMSD, &mut rng);
         let (e2, x2) = relax(y.view(), 400);
         let acc = e2 < e || rng.random::<f64>() < ((e - e2) / 0.8).exp();
         if acc {

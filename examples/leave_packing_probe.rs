@@ -406,7 +406,7 @@ fn main() {
             ),
         }
         for (index, rmsd) in [0.12_f64, 0.35, 0.50].into_iter().enumerate() {
-            let start = anneal_core::soap::step_away_fivefold_measured(ico.view(), rmsd);
+            let start = anneal_core::soap::step_away_axial_measured(ico.view(), rmsd);
             let trial = quench(&potential, start.view(), steps);
             classify("fivefold", index, &mut fivefold, &trial, None);
         }

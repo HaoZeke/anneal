@@ -113,9 +113,6 @@ pub fn reference_prism_gradient_ev_per_angstrom() -> f64 {
 /// Vacuum box edge used by `molecular_cluster` (A).
 pub const VACUUM_BOX: f64 = 60.0;
 
-/// Paper water-hexamer molecule count.
-pub const WATER_HEXAMER_MOLECULES: usize = 6;
-
 /// Componentwise solver tolerance that guarantees [`MAX_GRADIENT_NORM`].
 pub fn component_gradient_tolerance(
     coordinate_dim: usize,
@@ -1296,6 +1293,8 @@ mod water_hexamer_tests {
     };
     use crate::methods::cluster_search::search_from_with_checkpoint;
     use crate::potentials::{PairKind, PairPotential};
+
+    const WATER_HEXAMER_MOLECULES: usize = 6;
 
     #[test]
     fn the_template_hexamer_is_intact_and_a_loose_hydrogen_is_not() {

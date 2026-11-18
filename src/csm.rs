@@ -84,11 +84,12 @@ pub fn project(
 /// Pair distance below which an average is a coordinate singularity.
 pub const SINGULAR_PAIR: f64 = 1.0e-2;
 
-/// Lowest-measure average among `C_i`, `C_5`, and `D_5h`.
+/// Lowest-measure average among `C_i`, `C_5`, and `D_5h`. Generalised to the
+/// rotational order `order` detected on the incumbent (`C_i`, `C_n`, `D_nh`).
 ///
-/// `C_i` is the group of the published LJ38 continuous-symmetry benchmark.
-/// `C_5` and `D_5h` are the fivefold groups of the decahedral minima. The
-/// measure chooses, not the atom count. An average with a pair closer than
+/// The cyclic order is selected from the incumbent's minimum nearest-image
+/// rotational residual across candidate orders `3..=6`, and the measure chooses
+/// among `C_i`, `C_n`, and `D_nh`. An average with a pair closer than
 /// [`SINGULAR_PAIR`] is dropped.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupProjection {
@@ -96,64 +97,83 @@ pub struct GroupProjection {
     pub coordinates: Array1<f64>,
     /// Normalised squared distance to the average. Zero is exact symmetry.
     pub measure: f64,
-    /// `C_i`, `C_5`, or `D_5h`.
+    /// `"C_i"`, `"C_n"`, or `"D_nh"`.
     pub group: &'static str,
+    /// Rotational order (`2` for inversion, `3..=6` for axial groups).
+    pub order: usize,
 }
 
-/// Projects onto the library group with the lowest measure.
+/// Projects onto the symmetry group (`C_i`, `C_n`, or `D_nh` for `n` in `3..=6`)
+/// with the lowest continuous symmetry measure on `x`.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
     if let Some(cached) = cached_propose(x, classes) {
         return cached;
     }
-    let orientations = inertia_orientations(x, classes.len())?;
-    // D_5h contains every C_5 turn, so it is solved first and those
-    // permutations are reused. Equal measures keep the earlier group
-    // in the published order C_i, C_5, D_5h.
+    let (centred, _, _) = centre_and_scale(x, classes.len())?;
+    let base_orientations = principal_orientations(&centred)?;
     clear_op_cache();
     let mut best: Option<(usize, GroupProjection)> = None;
-    for (rank, name, ops) in [
-        (2, "D_5h", d5h_ops()),
-        (1, "C_5", cyclic_about_z(5)),
-        (0, "C_i", inversion_ops()),
-    ] {
-        // Inversion is not a fivefold operation, so its permutations are
-        // not in the D_5h cache. The nearest-image residual is a lower
-        // bound on the assigned measure: the average of a point and its
-        // matched inverse sits halfway between them. A margin keeps a
-        // one-ulp overestimate from skipping a tie, which would prefer
-        // inversion. Above the margin, inversion cannot win the group.
-        if name == "C_i"
-            && let Some((_, incumbent)) = &best
-            && let Some((centred, _, _)) = centre_and_scale(x, classes.len())
-        {
-            let bound = inversion_lower_measure(&centred, &orientations);
-            let margin = 1.0e-6 * (1.0 + incumbent.measure);
-            if bound > incumbent.measure + margin {
+    for order in 3..=6 {
+        let orientations = with_phase_orientations(&base_orientations, order);
+        for (rank, name, ops) in [
+            (2usize, "D_nh", dihedral_horizontal_ops(order)),
+            (1usize, "C_n", cyclic_about_z(order)),
+        ] {
+            let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
+                continue;
+            };
+            if closest_pair(&coordinates) < SINGULAR_PAIR {
                 continue;
             }
-        }
-        let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
-            continue;
-        };
-        if closest_pair(&coordinates) < SINGULAR_PAIR {
-            continue;
-        }
-        let replace = match &best {
-            None => true,
-            Some((incumbent_rank, incumbent)) => {
-                measure < incumbent.measure
-                    || (measure == incumbent.measure && rank < *incumbent_rank)
+            let replace = match &best {
+                None => true,
+                Some((incumbent_rank, incumbent)) => {
+                    let tied = (measure - incumbent.measure).abs() <= 1.0e-12;
+                    (measure < incumbent.measure && !tied) || (tied && rank < *incumbent_rank)
+                }
+            };
+            if replace {
+                best = Some((
+                    rank,
+                    GroupProjection {
+                        coordinates,
+                        measure,
+                        group: name,
+                        order,
+                    },
+                ));
             }
-        };
-        if replace {
-            best = Some((
-                rank,
-                GroupProjection {
-                    coordinates,
-                    measure,
-                    group: name,
-                },
-            ));
+        }
+    }
+    {
+        let skip_inversion = best.as_ref().is_some_and(|(_, incumbent)| {
+            let bound = inversion_lower_measure(&centred, &base_orientations);
+            let margin = 1.0e-6 * (1.0 + incumbent.measure);
+            bound > incumbent.measure + margin
+        });
+        if !skip_inversion
+            && let Some((coordinates, measure)) =
+                project(x, classes, &inversion_ops(), &base_orientations)
+            && closest_pair(&coordinates) >= SINGULAR_PAIR
+        {
+            let replace = match &best {
+                None => true,
+                Some((_, incumbent)) => {
+                    let tied = (measure - incumbent.measure).abs() <= 1.0e-12;
+                    measure < incumbent.measure || tied
+                }
+            };
+            if replace {
+                best = Some((
+                    0,
+                    GroupProjection {
+                        coordinates,
+                        measure,
+                        group: "C_i",
+                        order: 2,
+                    },
+                ));
+            }
         }
     }
     let best = best.map(|(_, projection)| projection);
@@ -360,11 +380,7 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
             }
         }
         let local = minimum_cost_assignment(&costs, width)?;
-        // Where the recorded permutation is Kuhn-Munkres its tie break is not
-        // the inverse of the transposed problem, so an inverse is reused only
-        // for a unique dense optimum.
-        unique &= crate::assignment::uses_shortest_path(width)
-            && crate::assignment::last_dense_optimum_was_unique();
+        unique &= crate::assignment::last_dense_optimum_was_unique();
         for (row_i, &col_i) in local.iter().enumerate() {
             assignment[atoms[row_i]] = atoms[col_i];
         }
@@ -438,16 +454,17 @@ fn inversion_lower_measure(centred: &[[f64; 3]], orientations: &[[[f64; 3]; 3]])
 }
 
 fn cyclic_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
+    let order = order.max(1);
     (0..order)
         .map(|step| rot_z(std::f64::consts::TAU * step as f64 / order as f64))
         .collect()
 }
 
-fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
-    let turns = cyclic_about_z(5);
+fn dihedral_horizontal_ops(order: usize) -> Vec<[[f64; 3]; 3]> {
+    let turns = cyclic_about_z(order);
     let twofold = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
     let mirror = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
-    let mut ops = Vec::with_capacity(20);
+    let mut ops = Vec::with_capacity(4 * turns.len());
     for turn in &turns {
         ops.push(*turn);
         ops.push(matmul(twofold, *turn));
@@ -459,10 +476,9 @@ fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
     ops
 }
 
-fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
-    let (centred, _, _) = centre_and_scale(x, n)?;
-    let axes = jacobi(inertia(&centred));
-    let mut orientations = Vec::with_capacity(6);
+fn principal_orientations(centred: &[[f64; 3]]) -> Option<Vec<[[f64; 3]; 3]>> {
+    let axes = jacobi(inertia(centred));
+    let mut orientations = Vec::with_capacity(3);
     for axis in 0..3 {
         let z_axis = normalize(column(axes, axis))?;
         let mut x_axis = reject(column(axes, (axis + 1) % 3), z_axis);
@@ -471,11 +487,19 @@ fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3
         }
         let x_axis = normalize(x_axis)?;
         let y_axis = normalize(cross(z_axis, x_axis))?;
-        let aligned = [x_axis, y_axis, z_axis];
-        orientations.push(aligned);
-        orientations.push(matmul(rot_z(std::f64::consts::TAU / 5.0), aligned));
+        orientations.push([x_axis, y_axis, z_axis]);
     }
     Some(orientations)
+}
+
+fn with_phase_orientations(base: &[[[f64; 3]; 3]], order: usize) -> Vec<[[f64; 3]; 3]> {
+    let step = rot_z(std::f64::consts::TAU / order.max(2) as f64);
+    let mut orientations = Vec::with_capacity(2 * base.len());
+    for aligned in base {
+        orientations.push(*aligned);
+        orientations.push(matmul(step, *aligned));
+    }
+    orientations
 }
 
 fn closest_pair(x: &Array1<f64>) -> f64 {
@@ -673,34 +697,60 @@ mod tests {
     }
 
     fn ungated_projection(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
-        let orientations = inertia_orientations(x, classes.len())?;
+        let (centred, _, _) = centre_and_scale(x, classes.len())?;
+        let base = principal_orientations(&centred)?;
         clear_op_cache();
         let mut best: Option<(usize, GroupProjection)> = None;
-        for (rank, name, ops) in [
-            (2, "D_5h", d5h_ops()),
-            (1, "C_5", cyclic_about_z(5)),
-            (0, "C_i", inversion_ops()),
-        ] {
-            let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
-                continue;
-            };
-            if closest_pair(&coordinates) < SINGULAR_PAIR {
-                continue;
+        for order in 3..=6 {
+            let orientations = with_phase_orientations(&base, order);
+            for (rank, name, ops) in [
+                (2usize, "D_nh", dihedral_horizontal_ops(order)),
+                (1usize, "C_n", cyclic_about_z(order)),
+            ] {
+                let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
+                    continue;
+                };
+                if closest_pair(&coordinates) < SINGULAR_PAIR {
+                    continue;
+                }
+                let replace = match &best {
+                    None => true,
+                    Some((incumbent_rank, incumbent)) => {
+                        let tied = (measure - incumbent.measure).abs() <= 1.0e-12;
+                        (measure < incumbent.measure && !tied) || (tied && rank < *incumbent_rank)
+                    }
+                };
+                if replace {
+                    best = Some((
+                        rank,
+                        GroupProjection {
+                            coordinates,
+                            measure,
+                            group: name,
+                            order,
+                        },
+                    ));
+                }
             }
+        }
+        if let Some((coordinates, measure)) = project(x, classes, &inversion_ops(), &base)
+            && closest_pair(&coordinates) >= SINGULAR_PAIR
+        {
             let replace = match &best {
                 None => true,
-                Some((incumbent_rank, incumbent)) => {
-                    measure < incumbent.measure
-                        || (measure == incumbent.measure && rank < *incumbent_rank)
+                Some((_, incumbent)) => {
+                    let tied = (measure - incumbent.measure).abs() <= 1.0e-12;
+                    measure < incumbent.measure || tied
                 }
             };
             if replace {
                 best = Some((
-                    rank,
+                    0,
                     GroupProjection {
                         coordinates,
                         measure,
-                        group: name,
+                        group: "C_i",
+                        order: 2,
                     },
                 ));
             }
@@ -710,6 +760,7 @@ mod tests {
 
     fn assert_same_projection(gated: &GroupProjection, full: &GroupProjection) {
         assert_eq!(gated.group, full.group);
+        assert_eq!(gated.order, full.order);
         assert_eq!(gated.measure.to_bits(), full.measure.to_bits());
         assert_eq!(gated.coordinates.len(), full.coordinates.len());
         for (left, right) in gated.coordinates.iter().zip(full.coordinates.iter()) {
@@ -738,11 +789,11 @@ mod tests {
             clear_op_cache();
             let gated = propose(x.view(), &classes).expect("gated");
             assert_same_projection(&gated, &full);
-            let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
             let (centred, _, _) = centre_and_scale(x.view(), classes.len()).expect("centre");
-            let bound = inversion_lower_measure(&centred, &orientations);
+            let base = principal_orientations(&centred).expect("axes");
+            let bound = inversion_lower_measure(&centred, &base);
             let (_, solved) =
-                project(x.view(), &classes, &inversion_ops(), &orientations).expect("inversion");
+                project(x.view(), &classes, &inversion_ops(), &base).expect("inversion");
             assert!(
                 bound <= solved + 1.0e-9 * (1.0 + solved),
                 "bound {bound} exceeds the solved inversion measure {solved}"
@@ -751,15 +802,23 @@ mod tests {
         let mut noisy = bipyramid();
         noisy[2] += 0.25;
         let classes = vec![0; 7];
-        let orientations = inertia_orientations(noisy.view(), 7).expect("axes");
+        let chosen = propose(noisy.view(), &classes).expect("noisy bipyramid");
+        assert_eq!(chosen.order, 5);
         let (centred, _, _) = centre_and_scale(noisy.view(), 7).expect("centre");
-        let bound = inversion_lower_measure(&centred, &orientations);
-        let (_, fivefold) =
-            project(noisy.view(), &classes, &d5h_ops(), &orientations).expect("d5h");
-        let margin = 1.0e-6 * (1.0 + fivefold);
+        let base = principal_orientations(&centred).expect("axes");
+        let orientations = with_phase_orientations(&base, 5);
+        let bound = inversion_lower_measure(&centred, &base);
+        let (_, dihedral) = project(
+            noisy.view(),
+            &classes,
+            &dihedral_horizontal_ops(5),
+            &orientations,
+        )
+        .expect("dihedral");
+        let margin = 1.0e-6 * (1.0 + dihedral);
         assert!(
-            bound > fivefold + margin,
-            "the noisy bipyramid should settle inversion without the assignment, bound {bound} fivefold {fivefold}"
+            bound > dihedral + margin,
+            "the noisy bipyramid should settle inversion without the assignment, bound {bound} dihedral {dihedral}"
         );
     }
 
@@ -774,19 +833,24 @@ mod tests {
     }
 
     #[test]
-    fn pentagonal_bipyramid_selects_d5h_and_ignores_labels() {
+    fn bipyramid_detects_order_and_ignores_labels() {
         let x = bipyramid();
         let classes = vec![0; 7];
         let projection = propose(x.view(), &classes).expect("projection");
+        assert!(matches!(projection.group, "C_n" | "D_nh"));
+        assert_eq!(projection.order, 5);
         assert!(projection.measure < 1e-8, "{}", projection.measure);
-        let (_, d5h) = project(
+        let (centred, _, _) = centre_and_scale(x.view(), 7).expect("centre");
+        let base = principal_orientations(&centred).expect("axes");
+        let orientations = with_phase_orientations(&base, 5);
+        let (_, dihedral) = project(
             x.view(),
             &classes,
-            &d5h_ops(),
-            &inertia_orientations(x.view(), 7).expect("axes"),
+            &dihedral_horizontal_ops(5),
+            &orientations,
         )
-        .expect("d5h");
-        assert!(d5h < 1e-8, "{d5h}");
+        .expect("dihedral");
+        assert!(dihedral < 1e-8, "{dihedral}");
         let mut reversed = Array1::zeros(x.len());
         for atom in 0..7 {
             for axis in 0..3 {
@@ -836,15 +900,17 @@ mod tests {
     }
 
     #[test]
-    fn d5h_has_twenty_orthogonal_operations() {
-        let ops = d5h_ops();
-        assert_eq!(ops.len(), 20);
-        for op in ops {
-            let gram = matmul(op, transpose(op));
-            for row in 0..3 {
-                for col in 0..3 {
-                    let want = if row == col { 1.0 } else { 0.0 };
-                    assert!((gram[row][col] - want).abs() < 1e-10);
+    fn dihedral_horizontal_has_four_m_orthogonal_operations() {
+        for order in 3..=6 {
+            let ops = dihedral_horizontal_ops(order);
+            assert_eq!(ops.len(), 4 * order);
+            for op in ops {
+                let gram = matmul(op, transpose(op));
+                for row in 0..3 {
+                    for col in 0..3 {
+                        let want = if row == col { 1.0 } else { 0.0 };
+                        assert!((gram[row][col] - want).abs() < 1e-10);
+                    }
                 }
             }
         }

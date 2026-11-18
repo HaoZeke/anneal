@@ -64,8 +64,81 @@ pub const PACKING_SPEC: SoapSpec = SoapSpec {
     rcut_nn: 3.5,
 };
 
-/// A closed-shell class histogram needs a real neighbour cloud.
-pub(crate) const MINIMUM_PACKING_ATOMS: usize = 13;
+/// True when `coordinates` contains at least one site enclosed in 3D by its
+/// first-shell neighbours, so a packing-environment histogram is non-vacuous.
+pub(crate) fn has_enclosed_site(coordinates: &[f64]) -> bool {
+    if coordinates.len() < 12 || !coordinates.len().is_multiple_of(3) {
+        return false;
+    }
+    if coordinates.iter().any(|v| !v.is_finite()) {
+        return false;
+    }
+    let count = coordinates.len() / 3;
+    let mut nearest = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut best = f64::INFINITY;
+        for j in 0..count {
+            if i == j {
+                continue;
+            }
+            let dx = coordinates[3 * j] - coordinates[3 * i];
+            let dy = coordinates[3 * j + 1] - coordinates[3 * i + 1];
+            let dz = coordinates[3 * j + 2] - coordinates[3 * i + 2];
+            best = best.min(dx * dx + dy * dy + dz * dz);
+        }
+        if best.is_finite() && best > 1e-24 {
+            nearest.push(best.sqrt());
+        }
+    }
+    if nearest.is_empty() {
+        return false;
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let bond = nearest[nearest.len() / 2];
+    let cut2 = (1.45 * bond) * (1.45 * bond);
+    for i in 0..count {
+        let mut deg = 0usize;
+        let mut sum = [0.0_f64; 3];
+        let mut cov = [[0.0_f64; 3]; 3];
+        for j in 0..count {
+            if i == j {
+                continue;
+            }
+            let dx = coordinates[3 * j] - coordinates[3 * i];
+            let dy = coordinates[3 * j + 1] - coordinates[3 * i + 1];
+            let dz = coordinates[3 * j + 2] - coordinates[3 * i + 2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+            if d2 <= cut2 && d2 > 1e-24 {
+                let inv = 1.0 / d2.sqrt();
+                let u = [dx * inv, dy * inv, dz * inv];
+                deg += 1;
+                for a in 0..3 {
+                    sum[a] += u[a];
+                    for b in 0..3 {
+                        cov[a][b] += u[a] * u[b];
+                    }
+                }
+            }
+        }
+        if deg < 4 {
+            continue;
+        }
+        let inv_deg = 1.0 / deg as f64;
+        let mean_norm2 = (sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]) * inv_deg * inv_deg;
+        let c00 = cov[0][0] * inv_deg;
+        let c01 = cov[0][1] * inv_deg;
+        let c02 = cov[0][2] * inv_deg;
+        let c11 = cov[1][1] * inv_deg;
+        let c12 = cov[1][2] * inv_deg;
+        let c22 = cov[2][2] * inv_deg;
+        let det = c00 * (c11 * c22 - c12 * c12) - c01 * (c01 * c22 - c12 * c02)
+            + c02 * (c01 * c12 - c11 * c02);
+        if mean_norm2 < 0.1225 && det > 1.0e-3 {
+            return true;
+        }
+    }
+    false
+}
 
 /// Recompute DECAF only when some atom moved more than this.
 /// Sits well below [`ENVIRONMENT_RADIUS`] and the packing-family grain.
@@ -476,11 +549,7 @@ impl PackingBook {
     }
 
     fn assign_histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if !coordinates.len().is_multiple_of(3) {
-            return None;
-        }
-        let atoms = coordinates.len() / 3;
-        if atoms < MINIMUM_PACKING_ATOMS {
+        if !has_enclosed_site(coordinates) {
             return None;
         }
         let loc = self.descriptor_rows(coordinates);
@@ -500,11 +569,7 @@ impl PackingBook {
     }
 
     fn assign_growing(&mut self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if !coordinates.len().is_multiple_of(3) {
-            return None;
-        }
-        let atoms = coordinates.len() / 3;
-        if atoms < MINIMUM_PACKING_ATOMS {
+        if !has_enclosed_site(coordinates) {
             return None;
         }
         let loc = self.descriptor_rows(coordinates);
@@ -1020,12 +1085,11 @@ fn update_packing_reference(coordinates: &[f64], count_matching_arrival: bool) {
         book.observe(&reference.coordinates);
     }
     if book.observe(coordinates).is_none() {
-        // DECAF starts at [`MINIMUM_PACKING_ATOMS`]. A smaller well still
-        // belongs in the cloud: the Leave repels from positions, and a
-        // numerically identical copy is one well, not a missing one.
+        // Without an enclosed interior shell the Leave repels from positions,
+        // and a numerically identical copy is one well, not a missing one.
         if !coordinates.is_empty()
             && coordinates.len().is_multiple_of(3)
-            && coordinates.len() / 3 < MINIMUM_PACKING_ATOMS
+            && !has_enclosed_site(coordinates)
             && coordinates.iter().all(|value| value.is_finite())
         {
             record_sub_decaf_reference(held, coordinates, count_matching_arrival);
@@ -1148,11 +1212,7 @@ pub fn nearby_packing(here: &[f64], other: &[f64]) -> bool {
     if here.len() != other.len() || here.is_empty() || !here.len().is_multiple_of(3) {
         return false;
     }
-    // DECAF histograms start at [`MINIMUM_PACKING_ATOMS`]. Below that the
-    // book has no cells, and a 0.01% copy would read as a different
-    // packing. The move epsilon is the displacement the book itself
-    // treats as the same structure.
-    if here.len() / 3 < MINIMUM_PACKING_ATOMS {
+    if !has_enclosed_site(here) || !has_enclosed_site(other) {
         return !atom_moved(here, other, PACKING_MOVE_EPS);
     }
     let mut book = PackingBook::default();
@@ -1363,42 +1423,75 @@ pub const SEAM_BINS: usize = 12;
 /// Cartesian kick produced at +30 and worse.
 pub const SEAM_WINDOW: f64 = 12.0;
 
-/// Energy window of the fivefold channel, in the potential's own unit.
-///
-/// `SharedChannel.lean` states the fire as within two epsilon of the floor.
-/// The seam ladder's twelve-epsilon doorway window is not this cut.
-pub const FIVEFOLD_FLOOR_WINDOW: f64 = 2.0;
+/// Energy window of the packing doorway channel, in the potential's own unit.
+pub const DOORWAY_FLOOR_WINDOW: f64 = 2.0;
 
-/// Icosahedral slot of [`crate::structure::ptm_fractions`].
-pub const ICOSAHEDRAL_TEMPLATE: usize = 2;
-
-/// Neighbour cutoff for the sealed Lennard-Jones template shares.
-///
-/// The pair quoted on the hop trace is FCC 0.013 against 0.120 and
-/// icosahedral 0.307 against 0.120. That reading uses this cutoff.
-pub const FIVEFOLD_TEMPLATE_CUTOFF: f64 = 1.6;
-
-/// The fivefold channel.
-///
-/// True when `energy` is within [`FIVEFOLD_FLOOR_WINDOW`] of the floor
-/// and the icosahedral template share is strictly below the floor's share.
-/// A DECAF gap and an energy doorway are not inputs.
-pub fn fivefold_channel(energy: f64, floor_energy: f64, ico_share: f64, floor_share: f64) -> bool {
+/// Packing doorway channel: fires within [`DOORWAY_FLOOR_WINDOW`] of the floor
+/// when local environment cohesion drops strictly below the floor's cohesion.
+pub fn packing_doorway_channel(
+    energy: f64,
+    floor_energy: f64,
+    cohesion: f64,
+    floor_cohesion: f64,
+) -> bool {
     energy.is_finite()
         && floor_energy.is_finite()
-        && ico_share.is_finite()
-        && floor_share.is_finite()
-        && energy <= floor_energy + FIVEFOLD_FLOOR_WINDOW
-        && ico_share < floor_share
+        && cohesion.is_finite()
+        && floor_cohesion.is_finite()
+        && energy <= floor_energy + DOORWAY_FLOOR_WINDOW
+        && cohesion < floor_cohesion
 }
 
-/// Icosahedral template share of one structure.
-pub fn icosahedral_share(x: ArrayView1<f64>) -> f64 {
+/// Simpson concentration \(\sum_c p_c^2 \in (0, 1]\) of per-atom SOAP
+/// environments leader-clustered at [`ENVIRONMENT_RADIUS`].
+///
+/// A uniform shell packing concentrates atoms into few local environment
+/// classes; a broken-symmetry doorway splits them across more classes without
+/// referencing any crystallographic template.
+pub fn local_packing_cohesion(x: ArrayView1<f64>) -> f64 {
     let n = x.len() / 3;
-    if n == 0 || x.len() != 3 * n {
+    if n == 0 || x.len() != 3 * n || x.iter().any(|v| !v.is_finite()) {
         return f64::NAN;
     }
-    crate::structure::ptm_fractions(x, n, FIVEFOLD_TEMPLATE_CUTOFF)[ICOSAHEDRAL_TEMPLATE]
+    let Some(slice) = x.as_slice() else {
+        return f64::NAN;
+    };
+    let rows = packing_rows(slice);
+    let count = rows.nrows();
+    if count == 0 {
+        return f64::NAN;
+    }
+    let rad2 = ENVIRONMENT_RADIUS * ENVIRONMENT_RADIUS;
+    let mut leaders: Vec<usize> = Vec::new();
+    let mut counts: Vec<usize> = Vec::new();
+    for i in 0..count {
+        let mut matched = None;
+        for (slot, &lead) in leaders.iter().enumerate() {
+            let mut d2 = 0.0;
+            for col in 0..rows.ncols() {
+                let d = rows[[i, col]] - rows[[lead, col]];
+                d2 += d * d;
+            }
+            if d2 <= rad2 {
+                matched = Some(slot);
+                break;
+            }
+        }
+        if let Some(slot) = matched {
+            counts[slot] += 1;
+        } else {
+            leaders.push(i);
+            counts.push(1);
+        }
+    }
+    let inv = 1.0 / count as f64;
+    counts
+        .into_iter()
+        .map(|c| {
+            let p = c as f64 * inv;
+            p * p
+        })
+        .sum()
 }
 
 impl SeamBank {

@@ -2559,7 +2559,7 @@ fn main() {
             }
         } else if let Some(table) = core_table.as_ref() {
             use anneal_core::coreclass::CoreVerdict;
-            use anneal_core::corekey::motif_class;
+            use anneal_core::corekey::core_region;
             use rand::SeedableRng;
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
@@ -2573,7 +2573,7 @@ fn main() {
             let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xC0A1);
             let interval = anneal_core::env::parsed("CHECKPOINT").unwrap_or(500).max(1);
             let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
-                let class = motif_class(snapshot.current_state()).index();
+                let class = core_region(snapshot.current_state()).index();
                 let mut table = table.lock().expect("core-class table");
                 match table.report(
                     seed as usize,
@@ -5204,7 +5204,7 @@ fn run_capnp_catalog(
                 }
 
                 if core_class.is_some() {
-                    let class = anneal_core::corekey::motif_class(snapshot.current_state()).index();
+                    let class = anneal_core::corekey::core_region(snapshot.current_state()).index();
                     let verdict = cooperative
                         .report_core_class(
                             replica,
@@ -5820,7 +5820,7 @@ fn run_capnp_catalog(
                             let (atom, class) = queue[(extra_cover - 1) % queue.len()];
                             anneal_core::known_basin::arm_leave_cover(atom);
                             let offered =
-                                if anneal_core::soap::fivefold_axis_count(snapshot.current_state())
+                                if anneal_core::soap::axial_axis_count(snapshot.current_state())
                                     >= 2
                                 {
                                     let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
@@ -5829,7 +5829,7 @@ fn run_capnp_catalog(
                                                 .wrapping_mul(0x9E37_79B9_7F4A_7C15)
                                             ^ extra_cover as u64,
                                     );
-                                    anneal_core::soap::step_away_fivefold(
+                                    anneal_core::soap::step_away_axial(
                                         snapshot.current_state(),
                                         anneal_core::known_basin::LEAVE_RUNG_RMSD,
                                         &mut residual_rng,

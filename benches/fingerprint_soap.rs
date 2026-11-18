@@ -46,7 +46,7 @@ fn kernels(c: &mut Criterion) {
                 soap_salt = soap_salt.wrapping_add(1);
                 let y = cluster(n, soap_salt);
                 let mut rng = StdRng::seed_from_u64(11);
-                black_box(anneal_core::soap::step_away_fivefold(
+                black_box(anneal_core::soap::step_away_axial(
                     black_box(y.view()),
                     0.2,
                     &mut rng,

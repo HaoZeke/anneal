@@ -30,7 +30,7 @@ use std::cell::{Cell, RefCell};
 
 use ndarray::{Array1, Array2, ArrayView1};
 
-use crate::catalog::packing::{MINIMUM_PACKING_ATOMS, PACKING_SPEC};
+use crate::catalog::packing::{PACKING_SPEC, has_enclosed_site};
 use crate::movekernel::MoveKernel;
 use crate::soap::{jacobian_nu3, local_nu3_z};
 
@@ -955,8 +955,14 @@ fn householder_cartesian(wells: &[Well], x: ArrayView1<f64>, mut grad: Array1<f6
 
 /// Mean of per-center SOAP+ACE \(\nu=3\) at [`PACKING_SPEC`].
 fn packing_mean(x: ArrayView1<f64>) -> Option<Array1<f64>> {
-    let n_at = x.len() / 3;
-    if n_at < MINIMUM_PACKING_ATOMS {
+    let owned;
+    let slice = if let Some(s) = x.as_slice() {
+        s
+    } else {
+        owned = x.to_vec();
+        &owned
+    };
+    if !has_enclosed_site(slice) {
         return None;
     }
     let loc = local_nu3_z(x, PACKING_SPEC, None);
@@ -2159,7 +2165,7 @@ where
         return Vec::new();
     };
     let n = crate::catalog::cover_arm_count();
-    let fivefold = crate::catalog::fivefold_arm();
+    let axial_arm = crate::catalog::axial_residual_arm();
     let mut book = crate::catalog::PackingBook::default();
     book.observe(origin_slice);
     let mut seen = std::collections::BTreeSet::new();
@@ -2169,8 +2175,8 @@ where
         if !seen.insert(cover) {
             continue;
         }
-        let start = if cover == fivefold {
-            crate::soap::step_away_fivefold_measured(origin, LEAVE_RUNG_RMSD)
+        let start = if cover == axial_arm {
+            crate::soap::step_away_axial_measured(origin, LEAVE_RUNG_RMSD)
         } else {
             leave_packing_rung_to(
                 origin,
