@@ -96,13 +96,13 @@ impl History {
 /// A three-standard-deviation threshold suppresses ordinary stationary noise,
 /// while a nonzero shift in constant data remains detectable.
 pub fn trajectory_stationarity_flags(values: &[f64]) -> Vec<bool> {
-    let n = values.len();
-    let mut flags = vec![false; n];
-    if n < 6 {
+    let samples = values.len();
+    let mut flags = vec![false; samples];
+    if samples < 6 {
         return flags;
     }
-    let window = (n / 10).max(3).min(n / 2);
-    for center in window..(n - window) {
+    let window = (samples / 10).max(3).min(samples / 2);
+    for center in window..(samples - window) {
         let left = &values[center - window..center];
         let right = &values[center..center + window];
         if left

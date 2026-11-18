@@ -22,6 +22,11 @@
 /// being a small fraction of a quench.
 const SHORTEST_PATH_FROM: usize = 98;
 
+/// Whether a matrix of this size is solved by the flat shortest-path scan.
+pub(crate) const fn uses_shortest_path(n: usize) -> bool {
+    n >= SHORTEST_PATH_FROM
+}
+
 /// Returns the column assigned to each row of a finite `n × n` cost matrix.
 ///
 /// `costs` is row-major. The result is a permutation: every row and every
@@ -35,10 +40,10 @@ pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     if n.checked_mul(n) != Some(costs.len()) || costs.iter().any(|value| !value.is_finite()) {
         return None;
     }
-    if n < SHORTEST_PATH_FROM {
-        kuhn_munkres(costs, n)
-    } else {
+    if uses_shortest_path(n) {
         successive_shortest_paths(costs, n)
+    } else {
+        kuhn_munkres(costs, n)
     }
 }
 

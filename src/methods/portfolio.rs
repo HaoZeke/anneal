@@ -4399,12 +4399,12 @@ fn try_sketchmap_metad_bias(
     use ndarray::Array2;
 
     let inner = ledger.inner.lock().ok()?;
-    let n = inner.archive_y.len();
-    if n < 6 {
+    let archived = inner.archive_y.len();
+    if archived < 6 {
         return None;
     }
-    let mut pts: Vec<Array1<f64>> = Vec::with_capacity(n);
-    for i in 0..n {
+    let mut pts: Vec<Array1<f64>> = Vec::with_capacity(archived);
+    for i in 0..archived {
         if !inner.archive_y[i].is_finite() {
             continue;
         }
