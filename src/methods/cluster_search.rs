@@ -973,69 +973,53 @@ where
         let mut opening = prior.clone();
         let mut call_seconds = 0.0_f64;
         let mut timed_calls = 0usize;
-        let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-            if let Some(check) = opening.take_if(|check| check.at == v) {
-                let answer = (check.energy, check.gradient.clone());
-                *last.borrow_mut() = Some(check);
-                return Some(answer);
-            }
-            let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
-            let answered = charge_rejecting_repeat_failure(
-                objective,
-                led,
-                stats,
-                v,
-                &mut anchor,
-                refuse_overlap,
-                wall,
-                &held,
-                &mut failure,
-            );
-            if let Some((spent, started)) = clock
-                && led.spent() > spent
-            {
-                call_seconds += started.elapsed().as_secs_f64();
-                timed_calls += led.spent() - spent;
-            }
-            let (energy, gradient, physical) = answered?;
-            remember(v, energy, &gradient, physical);
-            Some((energy, gradient))
-        };
-        let mut watch = |_: usize, fv: f64| {
-            if stop_at.is_some_and(|limit| fv <= limit) {
-                return false;
-            }
-            if screening && probe {
-                // Never stops. Records where a stop would have happened and
-                // what it would have claimed, so the claim can be scored
-                // against the value the full pass actually reaches.
-                pred.observe(fv);
-                if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
-                    probe_at = pred.predict().map(|p| (pred.len(), p.limit));
-                }
-                return true;
-            }
-            if !(screening && adaptive) {
-                return true;
-            }
-            pred.observe(fv);
-            // Only the hopeless verdict stops the descent. A promising one
-            // is followed by the full relaxation anyway, so cutting its
-            // screen short saves at most the tail of a pass that 2 per cent
-            // of trials reach, and it hands the return screen an
-            // extrapolated energy below the incumbent attached to a
-            // structure that was never relaxed.
-            if pred.verdict(target) != Verdict::Hopeless {
-                return true;
-            }
-            early = true;
-            false
-        };
         let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
         let quench_tric = tric
             .as_mut()
             .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
         let (f, xr) = if molecular_anc {
+            let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if let Some(check) = opening.take_if(|check| check.at == v) {
+                    let answer = (check.energy, check.gradient.clone());
+                    *last.borrow_mut() = Some(check);
+                    return Some(answer);
+                }
+                let answered = charge_rejecting_repeat_failure(
+                    objective,
+                    led,
+                    stats,
+                    v,
+                    &mut anchor,
+                    refuse_overlap,
+                    wall,
+                    &held,
+                    &mut failure,
+                );
+                let (energy, gradient, physical) = answered?;
+                remember(v, energy, &gradient, physical);
+                Some((energy, gradient))
+            };
+            let mut watch = |_: usize, fv: f64| {
+                if stop_at.is_some_and(|limit| fv <= limit) {
+                    return false;
+                }
+                if screening && probe {
+                    pred.observe(fv);
+                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                    }
+                    return true;
+                }
+                if !(screening && adaptive) {
+                    return true;
+                }
+                pred.observe(fv);
+                if pred.verdict(target) != Verdict::Hopeless {
+                    return true;
+                }
+                early = true;
+                false
+            };
             let (f, xr, _) = crate::methods::anc_quench::anc_minimize_watched(
                 x,
                 &atomic_numbers,
@@ -1045,7 +1029,226 @@ where
                 &mut watch,
             );
             (f, xr)
+        } else if deciding && quench_tric.is_none() && preconditioner.is_none() {
+            // Run at most three L-BFGS steps to time the potential, then
+            // immediately hand the remaining budget of this same opening
+            // quench to TRIC when potential calls dominate TRIC step time.
+            let probe_iters = iters.min(3);
+            let (f0, xr0, _) = {
+                let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                    if let Some(check) = opening.take_if(|check| check.at == v) {
+                        let answer = (check.energy, check.gradient.clone());
+                        *last.borrow_mut() = Some(check);
+                        return Some(answer);
+                    }
+                    let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+                    let answered = charge_rejecting_repeat_failure(
+                        objective,
+                        led,
+                        stats,
+                        v,
+                        &mut anchor,
+                        refuse_overlap,
+                        wall,
+                        &held,
+                        &mut failure,
+                    );
+                    if let Some((spent, started)) = clock
+                        && led.spent() > spent
+                    {
+                        call_seconds += started.elapsed().as_secs_f64();
+                        timed_calls += led.spent() - spent;
+                    }
+                    let (energy, gradient, physical) = answered?;
+                    remember(v, energy, &gradient, physical);
+                    Some((energy, gradient))
+                };
+                let mut watch = |_: usize, fv: f64| {
+                    if stop_at.is_some_and(|limit| fv <= limit) {
+                        return false;
+                    }
+                    if screening && probe {
+                        pred.observe(fv);
+                        if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                            probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                        }
+                        return true;
+                    }
+                    if !(screening && adaptive) {
+                        return true;
+                    }
+                    pred.observe(fv);
+                    if pred.verdict(target) != Verdict::Hopeless {
+                        return true;
+                    }
+                    early = true;
+                    false
+                };
+                opt.minimize_watched(x, probe_iters, &mut evaluate, &mut watch)
+            };
+            if deciding
+                && timed_calls >= 3
+                && let Some(tric_ref) = tric.as_ref()
+                && let Some(check) = last.borrow().as_ref()
+                && check.at.len() == 3 * tric_ref.atoms()
+            {
+                let per_call = call_seconds / timed_calls as f64;
+                let per_step =
+                    tric_ref.step_seconds(check.at.view(), check.energy, check.gradient.view());
+                use_tric = per_call > per_step;
+                deciding = false;
+                stats.quench_seconds = Some((per_call, per_step));
+                stats.local_step = if use_tric {
+                    LocalStep::Tric
+                } else {
+                    LocalStep::Lbfgs
+                };
+            }
+            let already_settled = last.borrow().as_ref().is_some_and(|check| {
+                check.at == xr0 && gradient_is_converged(check.gradient.view(), opt.gtol)
+            });
+            let remaining_iters = iters.saturating_sub(probe_iters);
+            let hit_target = stop_at.is_some_and(|limit| f0 <= limit);
+            if early
+                || already_settled
+                || hit_target
+                || remaining_iters == 0
+                || led.remaining() == 0
+                || !f0.is_finite()
+                || failure.as_ref().is_some_and(|failed| failed.closed)
+            {
+                (f0, xr0)
+            } else {
+                opening = last.borrow().clone().filter(|check| check.at == xr0);
+                let used = led.spent().saturating_sub(before);
+                let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                    if let Some(check) = opening.take_if(|check| check.at == v) {
+                        let answer = (check.energy, check.gradient.clone());
+                        *last.borrow_mut() = Some(check);
+                        return Some(answer);
+                    }
+                    let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+                    let answered = charge_rejecting_repeat_failure(
+                        objective,
+                        led,
+                        stats,
+                        v,
+                        &mut anchor,
+                        refuse_overlap,
+                        wall,
+                        &held,
+                        &mut failure,
+                    );
+                    if let Some((spent, started)) = clock
+                        && led.spent() > spent
+                    {
+                        call_seconds += started.elapsed().as_secs_f64();
+                        timed_calls += led.spent() - spent;
+                    }
+                    let (energy, gradient, physical) = answered?;
+                    remember(v, energy, &gradient, physical);
+                    Some((energy, gradient))
+                };
+                let mut watch = |_: usize, fv: f64| {
+                    if stop_at.is_some_and(|limit| fv <= limit) {
+                        return false;
+                    }
+                    if screening && probe {
+                        pred.observe(fv);
+                        if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                            probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                        }
+                        return true;
+                    }
+                    if !(screening && adaptive) {
+                        return true;
+                    }
+                    pred.observe(fv);
+                    if pred.verdict(target) != Verdict::Hopeless {
+                        return true;
+                    }
+                    early = true;
+                    false
+                };
+                if use_tric {
+                    if let Some(tric_mut) = tric.as_mut().filter(|t| t.atoms() * 3 == xr0.len()) {
+                        tric_mut.gtol = opt.gtol;
+                        let (f1, xr1, _) = tric_mut.minimize_watched(
+                            xr0.view(),
+                            iters.saturating_sub(used),
+                            &mut evaluate,
+                            &mut watch,
+                        );
+                        (f1, xr1)
+                    } else {
+                        let (f1, xr1, _) = opt.minimize_watched(
+                            xr0.view(),
+                            remaining_iters,
+                            &mut evaluate,
+                            &mut watch,
+                        );
+                        (f1, xr1)
+                    }
+                } else {
+                    let (f1, xr1, _) = opt.minimize_watched(
+                        xr0.view(),
+                        remaining_iters,
+                        &mut evaluate,
+                        &mut watch,
+                    );
+                    (f1, xr1)
+                }
+            }
         } else {
+            let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if let Some(check) = opening.take_if(|check| check.at == v) {
+                    let answer = (check.energy, check.gradient.clone());
+                    *last.borrow_mut() = Some(check);
+                    return Some(answer);
+                }
+                let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+                let answered = charge_rejecting_repeat_failure(
+                    objective,
+                    led,
+                    stats,
+                    v,
+                    &mut anchor,
+                    refuse_overlap,
+                    wall,
+                    &held,
+                    &mut failure,
+                );
+                if let Some((spent, started)) = clock
+                    && led.spent() > spent
+                {
+                    call_seconds += started.elapsed().as_secs_f64();
+                    timed_calls += led.spent() - spent;
+                }
+                let (energy, gradient, physical) = answered?;
+                remember(v, energy, &gradient, physical);
+                Some((energy, gradient))
+            };
+            let mut watch = |_: usize, fv: f64| {
+                if stop_at.is_some_and(|limit| fv <= limit) {
+                    return false;
+                }
+                if screening && probe {
+                    pred.observe(fv);
+                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                    }
+                    return true;
+                }
+                if !(screening && adaptive) {
+                    return true;
+                }
+                pred.observe(fv);
+                if pred.verdict(target) != Verdict::Hopeless {
+                    return true;
+                }
+                early = true;
+                false
+            };
             match (quench_tric, preconditioner) {
                 (Some(tric), _) => {
                     tric.gtol = opt.gtol;
@@ -1057,8 +1260,6 @@ where
                     (f, xr)
                 }
                 (None, Some(pre)) => {
-                    // The reduced gradient has other units, so the solver's own
-                    // test is off and the stop reads the Cartesian one.
                     let origin = x.to_owned();
                     let gtol = opt.gtol;
                     opt.gtol = 0.0;
@@ -1528,6 +1729,54 @@ where
     let mut out = searched?;
     if reserve > 0 {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
+        if ledger.remaining() > 32 && !ledger.target_reached() && !ledger.stopped() {
+            let next_reserve = ledger
+                .answer_polish_calls()
+                .max(32)
+                .min(ledger.remaining() / 4);
+            if next_reserve > 0 && ledger.remaining() > next_reserve {
+                let start_next = out.best_state.clone().or_else(|| out.final_state.clone());
+                if let Some(next_start) = start_next {
+                    let prev_polish = ledger.answer_polish_calls();
+                    ledger.hold_tail(next_reserve);
+                    let mut cont_rng = rand::rngs::StdRng::seed_from_u64(
+                        seed ^ (ledger.spent() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+                    );
+                    let paid = PaidCheck::default();
+                    let cont = {
+                        let mut relax =
+                            warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
+                        let mut grad = gated_grad(objective, &paid);
+                        let mut energy_anchor = None;
+                        let mut energy_grad =
+                            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                                if CallWall::of(cfg).refuses(x) || !led.charge() {
+                                    return None;
+                                }
+                                evaluated_pair(objective, x, &mut energy_anchor)
+                                    .map(|(energy, gradient, _)| (energy, gradient))
+                            };
+                        crate::methods::cluster_hopping::run_with_energy_gradient(
+                            cfg,
+                            next_start.view(),
+                            ledger,
+                            &mut relax,
+                            Some(&mut grad),
+                            Some(&mut energy_grad),
+                            &mut cont_rng,
+                        )
+                    };
+                    ledger.release_tail();
+                    if let Ok(extra) = cont {
+                        merge_outcome(&mut out, extra);
+                        finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
+                        ledger.set_answer_polish_calls(
+                            prev_polish.saturating_add(ledger.answer_polish_calls()),
+                        );
+                    }
+                }
+            }
+        }
     }
     Ok(finish_search(
         objective,
@@ -1612,6 +1861,52 @@ where
     let mut out = searched?;
     if reserve > 0 {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
+        if ledger.remaining() > 32 && !ledger.target_reached() && !ledger.stopped() {
+            let next_reserve = ledger
+                .answer_polish_calls()
+                .max(32)
+                .min(ledger.remaining() / 4);
+            if next_reserve > 0 && ledger.remaining() > next_reserve {
+                let start_next = out
+                    .best_state
+                    .clone()
+                    .or_else(|| out.final_state.clone())
+                    .unwrap_or_else(|| start.to_owned());
+                let prev_polish = ledger.answer_polish_calls();
+                ledger.hold_tail(next_reserve);
+                let paid = PaidCheck::default();
+                let cont = {
+                    let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
+                    let mut grad = gated_grad(objective, &paid);
+                    let mut energy_anchor = None;
+                    let mut energy_grad =
+                        |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                            if !led.charge() {
+                                return None;
+                            }
+                            evaluated_pair(objective, x, &mut energy_anchor)
+                                .map(|(energy, gradient, _)| (energy, gradient))
+                        };
+                    crate::methods::cluster_hopping::run_with_energy_gradient(
+                        cfg,
+                        start_next.view(),
+                        ledger,
+                        &mut relax,
+                        Some(&mut grad),
+                        Some(&mut energy_grad),
+                        &mut rng,
+                    )
+                };
+                ledger.release_tail();
+                if let Ok(extra) = cont {
+                    merge_outcome(&mut out, extra);
+                    finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
+                    ledger.set_answer_polish_calls(
+                        prev_polish.saturating_add(ledger.answer_polish_calls()),
+                    );
+                }
+            }
+        }
     }
     Ok(finish_search(
         objective,
@@ -1642,6 +1937,89 @@ fn molecular_answer_reserve(cfg: &Config, ledger: &Ledger) -> usize {
         .min(ledger.remaining() / 4)
 }
 
+fn sorted_pair_distances(x: ArrayView1<f64>) -> Vec<f64> {
+    let n = x.len() / 3;
+    let mut distances = Vec::with_capacity(n * n.saturating_sub(1) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d2 = 0.0;
+            for axis in 0..3 {
+                let d = x[3 * i + axis] - x[3 * j + axis];
+                d2 += d * d;
+            }
+            distances.push(d2.sqrt());
+        }
+    }
+    distances.sort_by(f64::total_cmp);
+    distances
+}
+
+fn distance_spectrum_rmsd(left: &[f64], right: &[f64]) -> f64 {
+    if left.len() != right.len() || left.is_empty() {
+        return f64::INFINITY;
+    }
+    let acc: f64 = left
+        .iter()
+        .zip(right)
+        .map(|(a, b)| {
+            let d = a - b;
+            d * d
+        })
+        .sum();
+    (acc / left.len() as f64).sqrt()
+}
+
+fn merge_outcome(base: &mut Outcome, extra: Outcome) {
+    base.hops = base.hops.saturating_add(extra.hops);
+    base.basins = base.basins.saturating_add(extra.basins);
+    base.accepted = base.accepted.saturating_add(extra.accepted);
+    base.unconverged_records = base
+        .unconverged_records
+        .saturating_add(extra.unconverged_records);
+    base.overlap_rejected = base.overlap_rejected.saturating_add(extra.overlap_rejected);
+    base.charged = base.charged.max(extra.charged);
+    if extra.best < base.best && extra.best_state.is_some() {
+        base.best = extra.best;
+        base.best_state = extra.best_state;
+    }
+    if extra.final_state.is_some() {
+        base.final_energy = extra.final_energy;
+        base.final_state = extra.final_state;
+    }
+    for row in extra.improvements {
+        if !base
+            .improvements
+            .iter()
+            .any(|existing| existing.1 == row.1 && (existing.3 - row.3).abs() <= 1.0e-12)
+        {
+            base.improvements.push(row);
+        }
+    }
+    base.accepted_transitions.extend(extra.accepted_transitions);
+    for (name, draws, accepts, arm_best) in extra.arms {
+        if let Some(row) = base.arms.iter_mut().find(|r| r.0 == name) {
+            row.1 = row.1.saturating_add(draws);
+            row.2 = row.2.saturating_add(accepts);
+            row.3 = row.3.min(arm_best);
+        } else {
+            base.arms.push((name, draws, accepts, arm_best));
+        }
+    }
+    for row in extra.proposal_counts {
+        if let Some(existing) = base
+            .proposal_counts
+            .iter_mut()
+            .find(|r| r.move_type == row.move_type)
+        {
+            existing.proposed = existing.proposed.saturating_add(row.proposed);
+            existing.accepted = existing.accepted.saturating_add(row.accepted);
+            existing.improved = existing.improved.saturating_add(row.improved);
+        } else {
+            base.proposal_counts.push(row);
+        }
+    }
+}
+
 /// Tighten every recorded seat and keep the lowest stationary energy.
 fn finish_molecular_answers<O>(
     objective: &O,
@@ -1658,14 +2036,47 @@ fn finish_molecular_answers<O>(
     }
     let tolerance = crate::catalog::molecular::component_gradient_tolerance(cfg.n_points * 3)
         .unwrap_or(cfg.record_gradient);
-    let each = (ledger.remaining() / seats.len()).max(1);
+    let use_tric = (stats.local_step == crate::methods::tric_opt::LocalStep::Tric
+        || cfg.local_step == crate::methods::tric_opt::LocalStep::Tric)
+        && !cfg.capped_lindh_quench
+        && !cfg.move_library.is_rigid_body();
+    let mut tric_species = use_tric
+        .then_some(cfg.species.as_ref())
+        .flatten()
+        .filter(|species| species.len() == cfg.n_points)
+        .cloned();
+    let dup_tol = 0.05 * cfg.length_scale.max(1.0e-6);
+    let mut seen_spectra: Vec<Vec<f64>> = Vec::new();
+    let mut unique_seats: Vec<(Array1<f64>, Vec<f64>)> = Vec::new();
+    for (_loose, state) in seats {
+        let spec = sorted_pair_distances(state.view());
+        if seen_spectra
+            .iter()
+            .any(|known| distance_spectrum_rmsd(known, &spec) < dup_tol)
+        {
+            continue;
+        }
+        seen_spectra.push(spec.clone());
+        unique_seats.push((state, spec));
+    }
+    if unique_seats.is_empty() {
+        return;
+    }
+    let each = (ledger.remaining() / unique_seats.len()).max(1);
     let before = ledger.spent();
     let mut best_energy = outcome.best;
     let mut best_state = outcome.best_state.clone();
     let wall = CallWall::of(cfg);
-    for (_loose, state) in seats {
+    let mut polished_spectra: Vec<Vec<f64>> = Vec::new();
+    for (state, spec) in unique_seats {
         if ledger.remaining() == 0 {
             break;
+        }
+        if polished_spectra
+            .iter()
+            .any(|known| distance_spectrum_rmsd(known, &spec) < dup_tol)
+        {
+            continue;
         }
         let steps = each.min(ledger.remaining());
         if let Some((energy, polished)) = polish_answer_walled(
@@ -1676,11 +2087,13 @@ fn finish_molecular_answers<O>(
             tolerance,
             steps,
             wall,
-        ) && energy < best_energy
-            && polished.iter().all(|value| value.is_finite())
-        {
-            best_energy = energy;
-            best_state = Some(polished);
+            tric_species.as_deref_mut(),
+        ) {
+            polished_spectra.push(sorted_pair_distances(polished.view()));
+            if energy < best_energy && polished.iter().all(|value| value.is_finite()) {
+                best_energy = energy;
+                best_state = Some(polished);
+            }
         }
     }
     ledger.set_answer_polish_calls(ledger.spent().saturating_sub(before));
@@ -1702,30 +2115,56 @@ fn polish_answer_walled<O>(
     tolerance: f64,
     max_iter: usize,
     wall: CallWall<'_>,
+    tric_species: Option<&mut [u32]>,
 ) -> Option<(f64, Array1<f64>)>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let mut opt = WarmLbfgs::default();
-    opt.gtol = tolerance;
     let mut anchor = None;
     let mut failure = None;
     let mut evaluated = false;
-    let (energy, state, _) = opt.minimize(start, max_iter, |point| {
-        let answered = charge_rejecting_repeat_failure(
-            objective,
-            ledger,
-            stats,
-            point,
-            &mut anchor,
-            true,
-            wall,
-            &HeldHands::default(),
-            &mut failure,
-        )?;
-        evaluated = true;
-        Some((answered.0, answered.1))
-    });
+    let (energy, state) = if let Some(species) = tric_species
+        && species.len() * 3 == start.len()
+    {
+        let mut tric = crate::methods::tric_opt::TricOpt::new(species.to_vec());
+        tric.gtol = tolerance;
+        tric.min_trust = 1.0e-4;
+        let (e_t, x_t, _) = tric.minimize(start, max_iter, |point| {
+            let answered = charge_rejecting_repeat_failure(
+                objective,
+                ledger,
+                stats,
+                point,
+                &mut anchor,
+                true,
+                wall,
+                &HeldHands::default(),
+                &mut failure,
+            )?;
+            evaluated = true;
+            Some((answered.0, answered.1))
+        });
+        (e_t, x_t)
+    } else {
+        let mut opt = WarmLbfgs::default();
+        opt.gtol = tolerance;
+        let (e_l, x_l, _) = opt.minimize(start, max_iter, |point| {
+            let answered = charge_rejecting_repeat_failure(
+                objective,
+                ledger,
+                stats,
+                point,
+                &mut anchor,
+                true,
+                wall,
+                &HeldHands::default(),
+                &mut failure,
+            )?;
+            evaluated = true;
+            Some((answered.0, answered.1))
+        });
+        (e_l, x_l)
+    };
     (evaluated && energy.is_finite()).then_some((energy, state))
 }
 

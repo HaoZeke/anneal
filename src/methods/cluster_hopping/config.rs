@@ -2245,6 +2245,12 @@ impl Config {
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
+        cfg.return_screen = true;
+        cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg.screen_steps = 8;
+        cfg.bayes_screen = true;
+        cfg.bayes_threshold =
+            crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
         cfg.adaptive_height = true;

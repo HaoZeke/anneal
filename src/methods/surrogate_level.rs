@@ -12,8 +12,8 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use super::anc_quench::anc_minimize;
 use super::cluster_hopping::Ledger;
+use super::tric_opt::TricOpt;
 use super::warm_lbfgs::WarmLbfgs;
 use crate::potentials::Tip4pCluster;
 use eindir_core::gradient::DifferentiableObjective;
@@ -56,15 +56,17 @@ where
     let surrogate_wall = wall.elapsed().as_secs_f64();
     pool.sort_by(|left, right| left.0.total_cmp(&right.0));
     pool.truncate(keep.max(1));
-    let z: Vec<i32> = (0..n_molecules).flat_map(|_| [8, 1, 1]).collect();
+    let z: Vec<u32> = (0..n_molecules).flat_map(|_| [8, 1, 1]).collect();
     let mut best_energy = f64::INFINITY;
     let mut best_state = None;
     let mut polished = 0usize;
+    let mut tric = TricOpt::new(z);
+    tric.gtol = gtol;
     for (_, cartesian) in pool {
         if ledger.remaining() == 0 {
             break;
         }
-        let (energy, state, _) = anc_minimize(cartesian.view(), &z, polish_steps, gtol, |point| {
+        let (energy, state, _) = tric.minimize(cartesian.view(), polish_steps, |point| {
             if !ledger.charge() {
                 return None;
             }
