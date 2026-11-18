@@ -373,29 +373,52 @@ pub enum TowncrierInvoke {
     PythonModule,
 }
 
-/// Pure: prefer direct `towncrier` on PATH, else python -m if pip installed it.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "the unit tests call this selector; the bin uses ensure_towncrier_available"
-    )
-)]
-pub fn select_towncrier_invoke(has_towncrier_bin: bool, has_python: bool) -> Option<TowncrierInvoke> {
+/// Pure: prefer a direct `towncrier` binary, else a module runner
+/// (`python -m towncrier`, or `uvx`) when one exists.
+pub fn select_towncrier_invoke(
+    has_towncrier_bin: bool,
+    has_module_runner: bool,
+) -> Option<TowncrierInvoke> {
     if has_towncrier_bin {
         Some(TowncrierInvoke::Bin)
-    } else if has_python {
+    } else if has_module_runner {
         Some(TowncrierInvoke::PythonModule)
     } else {
         None
     }
 }
 
+fn towncrier_on_path() -> bool {
+    which_bin("towncrier").is_some()
+}
+
+/// `~/.local/bin` holds the script after `pip install --user` or `pipx
+/// install`, but it is often not on PATH. Prepend it when the script is
+/// there, and report whether `towncrier` now resolves.
+fn adopt_user_local_towncrier() -> bool {
+    let Ok(home) = env::var("HOME") else {
+        return false;
+    };
+    let local = PathBuf::from(home).join(".local/bin");
+    if !local.join("towncrier").is_file() {
+        return false;
+    }
+    let mut paths = vec![local];
+    if let Some(cur) = env::var_os("PATH") {
+        paths.extend(env::split_paths(&cur));
+    }
+    if let Ok(joined) = env::join_paths(paths) {
+        env::set_var("PATH", joined);
+    }
+    towncrier_on_path()
+}
+
 /// Install/locate towncrier for CI runners that only have potctl (no uvx/pipx preinstalled).
 /// Order: existing `towncrier` → `pipx install` → `python3 -m pip install --user` → `uvx` last.
+/// Every stage reports what it found to `select_towncrier_invoke`.
 fn ensure_towncrier_available() -> Result<TowncrierInvoke> {
-    if which_bin("towncrier").is_some() {
-        return Ok(TowncrierInvoke::Bin);
+    if let Some(invoke) = select_towncrier_invoke(towncrier_on_path(), false) {
+        return Ok(invoke);
     }
     if which_bin("pipx").is_some() {
         println!("potctl: installing towncrier via pipx");
@@ -403,15 +426,9 @@ fn ensure_towncrier_available() -> Result<TowncrierInvoke> {
             .args(["install", "towncrier"])
             .status()
             .map_err(|e| format!("pipx install towncrier: {e}"))?;
-        if st.success() && which_bin("towncrier").is_some() {
-            return Ok(TowncrierInvoke::Bin);
-        }
-        // pipx may install but PATH not refreshed in same process; try common pipx bin dir.
-        if let Ok(home) = env::var("HOME") {
-            let cand = PathBuf::from(home).join(".local/bin/towncrier");
-            if cand.is_file() {
-                return Ok(TowncrierInvoke::Bin);
-            }
+        let found = (st.success() && towncrier_on_path()) || adopt_user_local_towncrier();
+        if let Some(invoke) = select_towncrier_invoke(found, false) {
+            return Ok(invoke);
         }
     }
     let py = which_bin("python3").or_else(|| which_bin("python"));
@@ -425,35 +442,15 @@ fn ensure_towncrier_available() -> Result<TowncrierInvoke> {
             .status()
             .map_err(|e| format!("pip install towncrier: {e}"))?;
         if st.success() {
-            if which_bin("towncrier").is_some() {
-                return Ok(TowncrierInvoke::Bin);
+            let found = towncrier_on_path() || adopt_user_local_towncrier();
+            if let Some(invoke) = select_towncrier_invoke(found, true) {
+                return Ok(invoke);
             }
-            // scripts may land in ~/.local/bin not on PATH
-            if let Ok(home) = env::var("HOME") {
-                let cand = PathBuf::from(&home).join(".local/bin/towncrier");
-                if cand.is_file() {
-                    // Prepend to PATH for subsequent Command::new("towncrier")
-                    let local = PathBuf::from(&home).join(".local/bin");
-                    let mut paths = vec![local];
-                    if let Ok(cur) = env::var("PATH") {
-                        for p in env::split_paths(&cur) {
-                            paths.push(p);
-                        }
-                    }
-                    if let Ok(joined) = env::join_paths(paths) {
-                        env::set_var("PATH", joined);
-                    }
-                    if which_bin("towncrier").is_some() {
-                        return Ok(TowncrierInvoke::Bin);
-                    }
-                }
-            }
-            return Ok(TowncrierInvoke::PythonModule);
         }
     }
-    if which_bin("uvx").is_some() {
-        // uvx runs without install; treated as module-like at call site
-        return Ok(TowncrierInvoke::PythonModule);
+    // uvx runs without an install, so it counts as a module runner.
+    if let Some(invoke) = select_towncrier_invoke(false, which_bin("uvx").is_some()) {
+        return Ok(invoke);
     }
     Err(
         "towncrier not available: install with `pipx install towncrier` or `pip install --user towncrier` (or provide uvx)"
@@ -1823,6 +1820,73 @@ Options:
             select_towncrier_invoke(true, true),
             Some(TowncrierInvoke::Bin)
         );
+    }
+
+    /// Serializes tests that replace PATH and HOME, and restores both.
+    struct FakeToolPath {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        path: Option<std::ffi::OsString>,
+        home: Option<std::ffi::OsString>,
+        dir: PathBuf,
+    }
+
+    impl FakeToolPath {
+        fn with_tools(tag: &str, tools: &[&str]) -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = env::temp_dir().join(format!("potctl-towncrier-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("bin")).unwrap();
+            for tool in tools {
+                std::fs::write(dir.join("bin").join(tool), "").unwrap();
+            }
+            let guard = FakeToolPath {
+                _lock: lock,
+                path: env::var_os("PATH"),
+                home: env::var_os("HOME"),
+                dir,
+            };
+            env::set_var("PATH", guard.dir.join("bin"));
+            env::set_var("HOME", guard.dir.join("home"));
+            guard
+        }
+    }
+
+    impl Drop for FakeToolPath {
+        fn drop(&mut self) {
+            for (key, val) in [("PATH", &self.path), ("HOME", &self.home)] {
+                match val {
+                    Some(v) => env::set_var(key, v),
+                    None => env::remove_var(key),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn ensure_towncrier_uses_the_binary_on_path() {
+        let _env = FakeToolPath::with_tools("bin", &["towncrier", "uvx"]);
+        assert_eq!(
+            ensure_towncrier_available().unwrap(),
+            TowncrierInvoke::Bin
+        );
+    }
+
+    #[test]
+    fn ensure_towncrier_treats_uvx_as_a_module_runner() {
+        let _env = FakeToolPath::with_tools("uvx", &["uvx"]);
+        assert_eq!(
+            ensure_towncrier_available().unwrap(),
+            TowncrierInvoke::PythonModule
+        );
+    }
+
+    #[test]
+    fn ensure_towncrier_errors_when_nothing_can_run_it() {
+        let _env = FakeToolPath::with_tools("none", &[]);
+        let err = ensure_towncrier_available().unwrap_err();
+        assert!(err.contains("towncrier not available"), "{err}");
     }
 
     #[test]
