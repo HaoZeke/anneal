@@ -116,10 +116,7 @@ fn climb_run(
     cfg.escape_max_climb = 1;
     cfg.escape_lanczos_steps = 4;
     cfg.polish_records = 0;
-    cfg.symmetrise_on_stall = false;
     cfg.jump_on_stall = false;
-    cfg.point_symmetrise_on_new = false;
-    cfg.orbit_complete_on_new = false;
     cfg.allocate_moves = false;
     let mut grad = |_: &mut Ledger, x: ArrayView1<f64>| Some(Array1::zeros(x.len()));
     let mut ledger = Ledger::new(100_000);

@@ -172,10 +172,7 @@ fn general(n: usize, length: f64, energy: f64) -> Config {
     cfg.soap_mode = SoapProposalMode::Flexible;
     cfg.trail_on_stall = true;
     cfg.escape_on_stall = true;
-    cfg.orbit_complete_on_new = true;
-    cfg.orbit_arm = true;
     cfg.prior_soap = false;
-    cfg.symmetrise_on_stall = false;
     cfg.continuous_symmetry = anneal_core::methods::cluster_hopping::ContinuousSymmetry::Off;
     cfg.energy_lattice = false;
     cfg.surfaces.clear();

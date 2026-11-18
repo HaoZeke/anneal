@@ -816,17 +816,30 @@ pub fn propose<R: Rng + ?Sized>(x: ArrayView1<f64>, n: usize, rng: &mut R) -> Ar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lattice;
-    use crate::structure::Template;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    /// The `n` sites of a close-packed fixture nearest its centre, at a
+    /// nearest-neighbour distance of 1.12. Test data only: no search code
+    /// builds a packing.
     fn packed(n: usize) -> Array1<f64> {
-        let sites = lattice::grow(&Template::FaceCentredCubic.points(), n);
+        let half = 1.12 / std::f64::consts::SQRT_2;
+        let mut sites: Vec<[f64; 3]> = Vec::new();
+        for i in -8i32..=8 {
+            for j in -8i32..=8 {
+                for k in -8i32..=8 {
+                    if (i + j + k).rem_euclid(2) == 0 {
+                        sites.push([i as f64 * half, j as f64 * half, k as f64 * half]);
+                    }
+                }
+            }
+        }
+        let norm = |s: &[f64; 3]| s[0] * s[0] + s[1] * s[1] + s[2] * s[2];
+        sites.sort_by(|a, b| norm(a).total_cmp(&norm(b)));
         let mut x = Array1::zeros(3 * n);
         for (i, s) in sites.iter().take(n).enumerate() {
             for k in 0..3 {
-                x[3 * i + k] = 1.12 * s[k];
+                x[3 * i + k] = s[k];
             }
         }
         x

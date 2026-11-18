@@ -27,7 +27,6 @@ fn expected_matches(entry: &Allow) -> usize {
         ("src/methods/activation.rs", "pentagon") => 5,
         ("src/methods/activation.rs", "fivefold") => 6,
         ("src/csm.rs", "d5h" | "cyclic_about_z(5)") => 2,
-        ("src/lattice.rs", "FaceCentredCubic" | "Icosahedral") => 2,
         ("src/twin.rs", "if n < 8") => 2,
         ("src/structure.rs", "Template::Icosahedral" | "Template::FaceCentredCubic") => 4,
         ("src/structure.rs", "FaceCentredCubic," | "Icosahedral,") => 2,
@@ -183,31 +182,11 @@ const ALLOW: &[Allow] = &[
         needle: "cyclic_about_z(5)",
         reason: "existing fixed C5 group projector; replacement is audited",
     },
-    Allow {
-        path: "src/lattice.rs",
-        needle: "FaceCentredCubic",
-        reason: "existing named lattice constructor; replacement is audited",
-    },
-    Allow {
-        path: "src/lattice.rs",
-        needle: "Icosahedral",
-        reason: "existing named lattice constructor; replacement is audited",
-    },
-    Allow {
-        path: "src/lattice.rs",
-        needle: "decahedral",
-        reason: "existing named lattice constructor; replacement is audited",
-    },
     // General geometric cardinality guards, not per-system tuning.
     Allow {
         path: "src/twin.rs",
         needle: "if n < 8",
         reason: "a four-atom sheet plus an exterior needs at least eight points",
-    },
-    Allow {
-        path: "src/methods/cluster_hopping/general.rs",
-        needle: "if n < 6",
-        reason: "generic tetrahedral-hole regrowth needs a seed simplex and later points",
     },
     Allow {
         path: "src/methods/cluster_hopping/moves.rs",
@@ -239,22 +218,22 @@ const ALLOW: &[Allow] = &[
     Allow {
         path: "src/structure.rs",
         needle: "Template::Icosahedral",
-        reason: "PTM label is diagnostic, but its point template is also an audited builder input",
+        reason: "PTM label is diagnostic; its point template is read only by the matcher, no builder consumes it",
     },
     Allow {
         path: "src/structure.rs",
         needle: "Template::FaceCentredCubic",
-        reason: "PTM label is diagnostic, but its point template is also an audited builder input",
+        reason: "PTM label is diagnostic; its point template is read only by the matcher, no builder consumes it",
     },
     Allow {
         path: "src/structure.rs",
         needle: "FaceCentredCubic,",
-        reason: "PTM enum label is diagnostic, but its point template is an audited builder input",
+        reason: "PTM enum label is diagnostic; its point template is read only by the matcher, no builder consumes it",
     },
     Allow {
         path: "src/structure.rs",
         needle: "Icosahedral,",
-        reason: "PTM enum label is diagnostic, but its point template is an audited builder input",
+        reason: "PTM enum label is diagnostic; its point template is read only by the matcher, no builder consumes it",
     },
     Allow {
         path: "src/morphology.rs",

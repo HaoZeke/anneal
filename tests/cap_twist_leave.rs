@@ -115,7 +115,6 @@ fn cap_only_config(n: usize) -> Config {
     cfg.trail_on_stall = false;
     cfg.escape_on_stall = false;
     cfg.restart_on_stall = false;
-    cfg.symmetrise_on_stall = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
     cfg.tabu_on_stall = false;
     cfg.cap_twist = true;

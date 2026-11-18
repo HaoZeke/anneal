@@ -94,9 +94,9 @@ fn metropolis_heat_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0xc4478737103e3145, "preset walk");
+    assert_eq!(cold_fp, 0x8b789f0315c5c3cd, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0xcc74d55e4c74ed2f, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0x55fe439f5a3e1199, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -104,25 +104,31 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0xfb5afaab4e40a443, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x2da1f0e16fc27ab8, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0xb2078435e4bed155,
+        0x727d36d910edde76,
         "heat * cfg.temperature"
     );
 }
 
+/// Seed 5 reaches a new lowest while the heat is above 1, and the walk
+/// differs when that reset is left out. Seeds where the reset never fires
+/// pass whether or not it exists.
 #[test]
 fn a_new_lowest_returns_the_walk_to_the_preset() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 80;
     cfg.relax_steps = 20;
     cfg.energy_lattice = false;
-    let (cold, hot) = pair(&cfg, 8_000, 2000);
-    assert_eq!(fingerprint(&cold), 0xa78c62458720b961, "preset walk");
-    assert_eq!(fingerprint(&hot), 0x450bbb59809a8da0, "heat = 1.0");
+    let (cold, hot) = pair(&cfg, 8_000, 5);
+    assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
+    assert_eq!(fingerprint(&cold), 0xc58520ff3f4e2821, "preset walk");
+    assert_eq!(fingerprint(&hot), 0x0569d577ef222a0f, "heat = 1.0");
 }
 
+/// Seed 76 lowers the best from a quench after the loop head, with the heat
+/// above 1, and the walk differs when that reset is left out.
 #[test]
 fn a_same_iteration_record_returns_to_the_preset() {
     let mut cfg = Config::recommended(ATOMS);
@@ -130,11 +136,12 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.relax_steps = 40;
     cfg.general_collective = true;
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
-    let (cold, hot) = pair(&cfg, 6_000, 10);
-    assert_eq!(fingerprint(&cold), 0x23f3b06070c576a8, "preset walk");
+    let (cold, hot) = pair(&cfg, 6_000, 76);
+    assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
+    assert_eq!(fingerprint(&cold), 0x46a5c7a48102f029, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0xc711fc71269b412d,
+        0x16e375f012558c31,
         "same-iteration heat = 1.0"
     );
 }

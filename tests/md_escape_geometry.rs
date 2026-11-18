@@ -117,9 +117,6 @@ fn hopping_nve_keeps_frozen_coordinates_fixed_at_every_force_evaluation() {
     cfg.trail_on_stall = false;
     cfg.jump_on_stall = false;
     cfg.path_on_stall = false;
-    cfg.symmetrise_on_stall = false;
-    cfg.point_symmetrise_on_new = false;
-    cfg.orbit_complete_on_new = false;
     cfg.superbasin_escape = false;
 
     let mut raw_states = Vec::new();

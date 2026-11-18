@@ -44,7 +44,6 @@ fn stalling_config(trail: bool) -> Config {
     cfg.escape_stall_factor = 0.0;
     cfg.escape_on_stall = false;
     cfg.restart_on_stall = false;
-    cfg.symmetrise_on_stall = false;
     cfg.trail_on_stall = trail;
     cfg
 }
@@ -94,9 +93,7 @@ fn a_trail_without_an_entry_never_serves_the_stall() {
     cfg.calibrated_screen = false;
     cfg.screen_steps = 1;
     cfg.relax_steps = 1;
-    cfg.symmetrise_on_stall = false;
     cfg.tabu_on_stall = false;
-    cfg.orbit_complete_on_new = false;
     cfg.energy_lattice = false;
     cfg.prior_soap = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
@@ -152,9 +149,7 @@ fn a_redrawn_stall_that_exhausts_budget_keeps_finite_final_energy() {
     cfg.calibrated_screen = false;
     cfg.screen_steps = 1;
     cfg.relax_steps = 1;
-    cfg.symmetrise_on_stall = false;
     cfg.tabu_on_stall = false;
-    cfg.orbit_complete_on_new = false;
     cfg.energy_lattice = false;
     cfg.prior_soap = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;

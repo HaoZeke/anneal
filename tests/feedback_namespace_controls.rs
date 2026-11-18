@@ -107,9 +107,6 @@ fn run_trace(
     cfg.trail_on_stall = false;
     cfg.jump_on_stall = false;
     cfg.path_on_stall = false;
-    cfg.symmetrise_on_stall = false;
-    cfg.point_symmetrise_on_new = false;
-    cfg.orbit_complete_on_new = false;
     cfg.superbasin_escape = false;
     cfg.finish_improving = false;
 

@@ -169,7 +169,7 @@ fn main() {
     let pot_ms = timed.pot_ns.load(Ordering::Relaxed) as f64 / 1e6;
     let outside_ms = wall_ms - pot_ms;
     println!(
-        "PROBE kind={kind} n={n} seed={seed} arm={arm} budget={budget} charged={} pot_calls={} hops={} best={:.6} final={:.6} best_bits={:016x} final_bits={:016x} trail_escapes={} stall_escapes={} restarts={} sym={} returned={} wall_ms={wall_ms:.3} pot_ms={pot_ms:.3} outside_ms={outside_ms:.3} stop={:?}",
+        "PROBE kind={kind} n={n} seed={seed} arm={arm} budget={budget} charged={} pot_calls={} hops={} best={:.6} final={:.6} best_bits={:016x} final_bits={:016x} trail_escapes={} stall_escapes={} restarts={} returned={} wall_ms={wall_ms:.3} pot_ms={pot_ms:.3} outside_ms={outside_ms:.3} stop={:?}",
         ledger.spent(),
         timed.calls.load(Ordering::Relaxed),
         out.hops,
@@ -180,7 +180,6 @@ fn main() {
         out.trail_escapes,
         out.stall_escapes,
         out.restarts,
-        out.symmetrised.0,
         out.returned,
         out.stop,
     );
