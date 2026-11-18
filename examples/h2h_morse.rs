@@ -48,6 +48,7 @@ fn system_spec(name: &str) -> Option<Spec> {
         "m70r6" => (70, 6.0, -325.887749),
         "m70r10" => (70, 10.0, -296.412149),
         "m70r14" => (70, 14.0, -292.462856),
+        "m75r14" => (75, 14.0, -318.407330),
         "m80r3" => (80, 3.0, -690.577890),
         "m80r6" => (80, 6.0, -378.333471),
         "m80r10" => (80, 10.0, -344.911381),
@@ -311,7 +312,7 @@ fn read_coords(path: &str) -> std::io::Result<Array1<f64>> {
 
 #[cfg(test)]
 mod tests {
-    use super::system_spec;
+    use super::{PairPotential, system_spec};
 
     #[test]
     fn the_cambridge_morse_table_is_the_hit_target() {
@@ -341,6 +342,13 @@ mod tests {
         assert!((m70_10.reference + 296.412149).abs() < 1e-12);
         let m70_14 = system_spec("m70r14").unwrap();
         assert!((m70_14.reference + 292.462856).abs() < 1e-12);
+        let m75_14 = system_spec("m75r14").unwrap();
+        assert_eq!((m75_14.n, m75_14.budget), (75, 4_000_000));
+        assert!((m75_14.rho - 14.0).abs() < 1e-12);
+        assert_eq!(
+            PairPotential::ccd_morse_minimum(75, 14.0),
+            Some(m75_14.reference)
+        );
         let m80_3 = system_spec("m80r3").unwrap();
         assert_eq!((m80_3.n, m80_3.budget), (80, 4_000_000));
         assert!((m80_3.reference + 690.577890).abs() < 1e-12);
