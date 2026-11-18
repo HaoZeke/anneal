@@ -381,9 +381,8 @@ rgpot::ExternalLjConfig lj_config(const char *engine_path, double u0,
 template <typename Make>
 rgpot_external_potential *adopt(Make &&make, char *err, size_t err_len) {
   try {
-    auto *out = new rgpot_external_potential;
-    out->pot = make();
-    return out;
+    std::unique_ptr<rgpot::PotentialBase> pot = make();
+    return new rgpot_external_potential{std::move(pot)};
   } catch (const std::exception &ex) {
     write_err(err, err_len, ex.what());
     return nullptr;
