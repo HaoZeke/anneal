@@ -6,6 +6,7 @@
 // the potential.
 
 #include "lj_eval.hpp"
+#include "rgpot/engine_c_abi.h"
 
 #include <cstdio>
 #include <cstring>
@@ -13,11 +14,11 @@
 
 namespace {
 
-using CreateFn = void *(*)(const void *, size_t, char *, size_t);
-using ForceFn = int (*)(void *, long, const double *, const int *, double *, double *,
-                        double *, const double *, void *, void *);
-using LastErrorFn = size_t (*)(const void *, char *, size_t);
-using DestroyFn = void (*)(void *);
+using CreateFn = RgpotEnginePot *(*)(const void *, size_t, char *, size_t);
+using ForceFn = int (*)(RgpotEnginePot *, long, const double *, const int *, double *, double *,
+                        double *, const double *, rgpot_engine_coord_transform, void *);
+using LastErrorFn = size_t (*)(const RgpotEnginePot *, char *, size_t);
+using DestroyFn = void (*)(RgpotEnginePot *);
 
 // A failed force call leaves a message. rgpot_engine_last_error
 // NUL-terminates every buffer it is given, including one of a single byte.
@@ -37,7 +38,7 @@ int check_last_error(const char *library) {
   }
   const double bad[3] = {1.0, -1.0, 1.0};
   char err[256] = {};
-  void *pot = create(bad, sizeof(bad), err, sizeof(err));
+  RgpotEnginePot *pot = create(bad, sizeof(bad), err, sizeof(err));
   if (pot == nullptr) {
     std::fprintf(stderr, "create: %s\n", err);
     return 1;
