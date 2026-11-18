@@ -450,6 +450,33 @@ def add_crossovers(payload: dict[str, Any]) -> None:
     payload["crossovers"] = crossovers
 
 
+def add_recommendation(payload: dict[str, Any]) -> None:
+    metadata = payload["metadata"]
+    crossovers = payload["crossovers"]
+    candidates = []
+    for arm in metadata["arms"]:
+        if arm["name"] == "stock":
+            continue
+        rows = [row for row in crossovers if row["arm"] == arm["name"]]
+        if rows and all(row["atoms"] is not None for row in rows):
+            candidates.append(arm)
+    if candidates:
+        selected = max(candidates, key=lambda arm: arm["threshold"])
+        metadata["recommendation"] = (
+            f"Set kTeamMinAtoms to {selected['threshold']}: this is the largest measured candidate "
+            "whose team arm satisfies the declared persistent crossover rule for every measured "
+            "potential, stage, and thread count."
+        )
+        metadata["recommended_team_min_atoms"] = selected["threshold"]
+    else:
+        stock = next(arm for arm in metadata["arms"] if arm["name"] == "stock")
+        metadata["recommendation"] = (
+            f"Keep kTeamMinAtoms at {stock['threshold']}: no candidate team arm satisfies the "
+            "declared persistent crossover rule for every measured potential, stage, and thread count."
+        )
+        metadata["recommended_team_min_atoms"] = stock["threshold"]
+
+
 def format_p(value: float, n: int) -> str:
     rendered = f"{value:.3g}"
     if n == 12 and math.isclose(value, P_FLOOR_N12):
@@ -621,15 +648,12 @@ def benchmark(args: argparse.Namespace) -> None:
             "affinity": affinity,
             "machine": machine_metadata(args.cxx, stock.worker, affinity),
             "arms": arm_metadata,
-            "recommendation": (
-                "Keep the current default unless one candidate satisfies the declared persistent "
-                "crossover rule for every measured potential, stage, and requested thread count."
-            ),
         },
         "measurements": measurements,
         "skipped_cells": skipped_cells,
     }
     add_crossovers(payload)
+    add_recommendation(payload)
     args.output_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     args.output_report.write_text(render_report(payload), encoding="utf-8")
 
