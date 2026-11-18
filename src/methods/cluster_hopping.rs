@@ -2583,15 +2583,20 @@ fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize)
 /// the paper preset does not build one. [`ArmSelection::Uniform`] replaces
 /// the depth posterior and the floored Thompson draw with one uniform index
 /// and consumes nothing else from the generator.
-fn choose_arm<R: Rng + ?Sized>(
+fn choose_arm<R, F>(
     cfg: &Config,
     context: Option<ArrayView1<f64>>,
     contextual: &mut ContextualAllocator,
     depth_allocator: &crate::allocate::DepthAllocator,
     allocator: &mut FlooredThompson,
     n_arms: usize,
+    open: F,
     rng: &mut R,
-) -> usize {
+) -> usize
+where
+    R: Rng + ?Sized,
+    F: Fn(usize) -> bool,
+{
     if let Some(features) = context {
         return contextual.select(features, rng);
     }
@@ -2599,7 +2604,7 @@ fn choose_arm<R: Rng + ?Sized>(
         return rng.random_range(0..n_arms);
     }
     if cfg.allocate_moves && cfg.depth_reward {
-        return depth_allocator.select(rng);
+        return depth_allocator.select_where(rng, open);
     }
     if cfg.allocate_moves {
         return allocator.select(rng);
@@ -2691,7 +2696,7 @@ fn diverse_cluster_start<R: Rng + ?Sized>(
 ///
 /// `start` is a starting configuration and `relax` performs a relaxation of the
 /// requested number of steps, charging the ledger.
-pub fn run<R: Rng + ?Sized>(
+pub fn run<R: Rng + Clone>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
@@ -2706,7 +2711,7 @@ pub fn run<R: Rng + ?Sized>(
 /// Without one, [`Config::minima_hopping`] falls back to scaling the ordinary
 /// displacement, which carries the same feedback law and is what Goedecker
 /// reports as strictly weaker.
-pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
+pub fn run_with_gradient_settle<'g, R: Rng + Clone>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
@@ -2733,7 +2738,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
 }
 
 /// Runs from `start` with an optional charged gradient.
-pub fn run_with_gradient<'g, R: Rng + ?Sized>(
+pub fn run_with_gradient<'g, R: Rng + Clone>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
@@ -2760,7 +2765,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
 
 /// As [`run_with_gradient`], with value and gradient together, which is
 /// what [`Config::hmc`] needs: one charge per leapfrog leaf.
-pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
+pub fn run_with_energy_gradient<'g, R: Rng + Clone>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
@@ -2802,7 +2807,7 @@ pub fn run_with_energy_gradient_at_checkpoints<'g, R, H>(
     checkpoint: &mut H,
 ) -> Result<Outcome, SearchError>
 where
-    R: Rng + ?Sized,
+    R: Rng + Clone,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     assert!(
@@ -2838,7 +2843,7 @@ where
 ///
 /// Only for a single-rung run. Replica exchange gives each rung its own bias by
 /// construction and there is nothing for one external bias to be.
-pub fn run_with_bias<'g, R: Rng + ?Sized>(
+pub fn run_with_bias<'g, R: Rng + Clone>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
@@ -2883,7 +2888,7 @@ pub fn run_with_bias_at_checkpoints<'g, R, H>(
     checkpoint: &mut H,
 ) -> Result<Outcome, SearchError>
 where
-    R: Rng + ?Sized,
+    R: Rng + Clone,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     assert!(
@@ -2916,7 +2921,7 @@ where
 ///
 /// [`run_with_history_at_checkpoints`] without the observations, for a
 /// chain whose only channel to its peers is the history itself.
-pub fn run_with_history<'g, R: Rng + ?Sized>(
+pub fn run_with_history<'g, R: Rng + Clone>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
@@ -2964,7 +2969,7 @@ pub fn run_with_history_at_checkpoints<'g, R, H>(
     checkpoint: &mut H,
 ) -> Result<Outcome, SearchError>
 where
-    R: Rng + ?Sized,
+    R: Rng + Clone,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     assert!(
@@ -4255,10 +4260,26 @@ fn run_full<'g, R, H>(
     rng: &mut R,
 ) -> Result<Outcome, SearchError>
 where
-    R: Rng + ?Sized,
+    R: Rng + Clone,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let _caller_stop = ledger.bind_stop();
+    // Charges before this call belong to an outer walk. The plateau clock
+    // is this walk's own records, not that earlier spend.
+    let walk_origin = ledger.spent();
+    // The held chain keeps the caller's stream. The copy is taken before
+    // either walk draws, so the unheld walk is the adaptive search that
+    // stream would have been. It receives only the calls the held chain
+    // has not spent after 2^19 of them. A shorter budget never forks.
+    let mut forked = (cfg.adaptive_search && cfg.stream_hold).then(|| rng.clone());
+    let escape_tail = if forked.is_some() {
+        let room = ledger.remaining();
+        let tail = room.saturating_sub((1usize << 19).min(room));
+        ledger.hold_tail(tail);
+        tail
+    } else {
+        0
+    };
     let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
         relax_off_call_floor(cfg, &mut *relax, led, x, steps)
     };
@@ -4947,37 +4968,43 @@ where
     } else {
         Vec::new()
     };
-    for _ in 1..n_rep {
-        // A rigid chart holds six coordinates per body, not the three a plain
-        // centre draw gives; its rungs start from a fresh rigid cluster, or the
-        // six-per-body potential rejects the three-per-body length.
-        let s0 = if cfg.move_library.is_rigid_body() {
-            random_rigid_cluster(n, cfg.min_separation, rng)
-        } else if cfg.adaptive_search {
-            let picked = diverse_cluster_start(cfg, &bias, &initial_anchors, rng);
-            initial_anchors.push(bias.cv(picked.view()));
-            picked
-        } else {
-            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
-        };
-        let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
-        let gradient = record_quenched_answer(
-            cfg,
-            ledger,
-            &mut grad,
-            e0,
-            x0.view(),
-            &mut unconverged_records,
-        );
-        chains.push(OccupiedMinimum {
-            energy: e0,
-            coordinates: x0,
-            gradient,
-            history_minimum: None,
-            local_minimum: None,
-            generation: 0,
-            pending_initial: true,
-        });
+    // The second replica is quenched when the incumbent's record clock
+    // opens the escape. Quenching it first records a minimum the incumbent
+    // has not reached and changes which of its own moves count as improvements.
+    let population_now = !cfg.adaptive_search || !cfg.stream_hold;
+    if population_now {
+        for _ in 1..n_rep {
+            // A rigid chart holds six coordinates per body, not the three a plain
+            // centre draw gives; its rungs start from a fresh rigid cluster, or the
+            // six-per-body potential rejects the three-per-body length.
+            let s0 = if cfg.move_library.is_rigid_body() {
+                random_rigid_cluster(n, cfg.min_separation, rng)
+            } else if cfg.adaptive_search {
+                let picked = diverse_cluster_start(cfg, &bias, &initial_anchors, rng);
+                initial_anchors.push(bias.cv(picked.view()));
+                picked
+            } else {
+                random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
+            };
+            let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
+            let gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                e0,
+                x0.view(),
+                &mut unconverged_records,
+            );
+            chains.push(OccupiedMinimum {
+                energy: e0,
+                coordinates: x0,
+                gradient,
+                history_minimum: None,
+                local_minimum: None,
+                generation: 0,
+                pending_initial: true,
+            });
+        }
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
@@ -5019,7 +5046,16 @@ where
     let mut ret_windows = vec![0usize; n_rep];
     let mut ret_yes = vec![0usize; n_rep];
     let mut revisit_kick = vec![false; n_rep];
-    let initial_record_effort = (ledger.spent() / n_rep).max(1);
+    // Set once the incumbent's own record has been quiet for the plateau
+    // clock. Until then its proposals stay on the single-chain stream.
+    let mut record_escape = false;
+    let effort_divisor = if cfg.adaptive_search && chains.is_empty() {
+        1
+    } else {
+        n_rep
+    };
+    let initial_record_effort =
+        (ledger.spent().saturating_sub(walk_origin) / effort_divisor).max(1);
     let mut replica_improve_spent = vec![0usize; n_rep];
     let mut replica_record_quiet = vec![initial_record_effort; n_rep];
     let mut replica_own_spent = vec![0usize; n_rep];
@@ -5135,7 +5171,15 @@ where
             }
         }
     }
-    let stop = loop {
+    let mut stop = loop {
+        // An untried escape arm has a wide posterior, so the depth draw
+        // selects it at once or, when it loses, still spends the random
+        // sample and shifts every later arm. Either way the first hops
+        // leave the orbit completion the single chain uses. The same is
+        // true of acceptance scaling and a forced return move. They stay
+        // parked for this walk. The forked walk is a later call with the
+        // hold off, so it draws them on its own stream.
+        let hold_stream = cfg.adaptive_search && cfg.stream_hold && !record_escape;
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
         // charge, and the callback that the last hop completed never runs.
@@ -7189,7 +7233,7 @@ where
             ratios[rep]
         };
         let mut temperature = single * scale;
-        if cfg.adaptive_search {
+        if cfg.adaptive_search && !hold_stream {
             temperature *= temp_scales[rep];
         }
         if cfg.general_collective
@@ -7445,6 +7489,7 @@ where
             &depth_allocator,
             &mut allocator,
             kernels.len(),
+            |arm| !(hold_stream && matches!(kernels.get(arm), Some(ClusterMove::Twin { .. }))),
             rng,
         );
         // One unlike-pair exchange on a fixed cadence. The depth allocator
@@ -7518,7 +7563,7 @@ where
         };
         let proposal_scale = escape
             * orient_scale
-            * if cfg.adaptive_search {
+            * if cfg.adaptive_search && !hold_stream {
                 step_scales[rep]
             } else {
                 1.0
@@ -7828,6 +7873,9 @@ where
                     &depth_allocator,
                     &mut allocator,
                     kernels.len(),
+                    |arm| {
+                        !(hold_stream && matches!(kernels.get(arm), Some(ClusterMove::Twin { .. })))
+                    },
                     rng,
                 );
                 if may_idle(&kernels[k2].name()) {
@@ -7949,8 +7997,10 @@ where
         // One accepted return to the same fingerprint schedules one general
         // stacking-changing response. A forced response cannot schedule
         // itself, which prevents a return/Twin feedback loop.
-        let forced_return_twin =
-            cfg.adaptive_search && !held_displacement && std::mem::take(&mut revisit_kick[rep]);
+        let forced_return_twin = cfg.adaptive_search
+            && !hold_stream
+            && !held_displacement
+            && std::mem::take(&mut revisit_kick[rep]);
         if held_displacement {
             let step =
                 preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale * step_scales[rep];
@@ -8909,7 +8959,7 @@ where
             bias.set_height(height.height());
         }
         dial.observe(accept);
-        if cfg.adaptive_search {
+        if cfg.adaptive_search && !hold_stream {
             ret_windows[rep] += 1;
             if returning {
                 ret_yes[rep] += 1;
@@ -9474,7 +9524,7 @@ where
         // Under a shared history each minimum is completed by one chain only,
         // and every product is reported, so other chains recognise it.
         let mut orbit_offer = None;
-        let run_orbit_now = if cfg.adaptive_search {
+        let run_orbit_now = if cfg.adaptive_search && !hold_stream {
             if cfg.packing_surface().orbit_on_new
                 && accept
                 && hop_room(hops)
@@ -9677,6 +9727,7 @@ where
             }
         }
         if cfg.adaptive_search
+            && !hold_stream
             && !forced_return_twin
             && let (Some(previous), Some(now)) = (here_before, landed)
             && previous == now
@@ -9952,7 +10003,7 @@ where
             // no random numbers. A face-centred-cubic plateau does not take
             // it: that is the 38-point minimum, and leaving it is the wrong
             // move.
-            if !cfg.adaptive_search
+            if (!cfg.adaptive_search || cfg.stream_hold)
                 && directed_leave
                 && cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(
@@ -10116,7 +10167,7 @@ where
             // quench is kept only when it deepens the incumbent. A growth
             // that fails holds the next one until the incumbent changes.
             // The skipped leave is one all-points displacement.
-            if !cfg.adaptive_search
+            if (!cfg.adaptive_search || cfg.stream_hold)
                 && directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
@@ -10467,7 +10518,8 @@ where
             } else {
                 plateau_calls
             };
-            if hops > 0
+            if !hold_stream
+                && hops > 0
                 && !cfg.move_library.is_rigid_body()
                 && replica_own_spent[rep].saturating_sub(replica_improve_spent[rep]) >= threshold
                 && ledger.remaining() > cfg.relax_steps
@@ -10506,6 +10558,7 @@ where
                 replica_record_quiet[rep] = replica_record_quiet[rep]
                     .max(replica_own_spent[rep].saturating_sub(replica_improve_spent[rep]));
                 if ef.is_finite() && xf.len() == x.len() {
+                    record_escape = true;
                     let reached = identity.basin_of(xf.view());
                     adopt_minimum!(
                         ef,
@@ -10532,7 +10585,7 @@ where
                 }
             }
         }
-        if n_rep > 1 {
+        if n_rep > 1 && (!cfg.adaptive_search || !cfg.stream_hold || record_escape) {
             if !ladder_built && rep == 0 {
                 // Welford over the cold rung's energies. This is the whole
                 // input to the first ladder: a spread in the units of the
@@ -10900,6 +10953,41 @@ where
         *slot = bias;
     }
 
+    if escape_tail > 0 {
+        ledger.release_tail();
+        if !ledger.target_reached()
+            && let Some(forked) = forked.as_mut()
+        {
+            // The forked walk ranks against its own records. Leaving the
+            // held chain's incumbent in place changes which moves count as
+            // improvements, so the fork is not the unheld search.
+            let saved_best = ledger.best;
+            let saved_state = ledger.best_state.clone();
+            ledger.best = f64::INFINITY;
+            ledger.best_state = None;
+            // A leftover partial charge belongs to the held chain. Carrying
+            // it into the fork settles one call early and shifts the record.
+            ledger.fract = 0.0;
+            let mut escape_cfg = cfg.clone();
+            escape_cfg.stream_hold = false;
+            match run_with_gradient(&escape_cfg, start, ledger, relax, grad, forked) {
+                Ok(escape) => {
+                    hops += escape.hops;
+                    orbits_completed += escape.orbits.0;
+                    restarts += escape.restarts;
+                    if !ledger.best.is_finite() || ledger.best > saved_best {
+                        ledger.best = saved_best;
+                        ledger.best_state = saved_state;
+                    }
+                }
+                Err(_) => {
+                    ledger.best = saved_best;
+                    ledger.best_state = saved_state;
+                }
+            }
+            stop = HopStop::of_closed(ledger);
+        }
+    }
     Ok(Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
@@ -11673,6 +11761,7 @@ mod tests {
                 &depth,
                 &mut thompson,
                 n_arms,
+                |_| true,
                 &mut rng,
             );
             let expect = twin.random_range(0..n_arms);
@@ -11699,6 +11788,7 @@ mod tests {
                 &depth,
                 &mut thompson,
                 n_arms,
+                |_| true,
                 &mut posterior_rng,
             );
             let via_posterior = depth.select(&mut direct_rng);
@@ -11721,6 +11811,7 @@ mod tests {
                 &depth,
                 &mut thompson,
                 n_arms,
+                |_| true,
                 &mut left,
             ));
             posterior_seq.push(depth.select(&mut right));

@@ -1393,6 +1393,12 @@ pub struct Config {
     /// scaling, and fingerprint-diverse plateau restarts.
     #[serde(skip_serializing_if = "is_false")]
     pub adaptive_search: bool,
+    /// Keep the incumbent on the single-chain proposal stream for an opening
+    /// run of calls, then give a forked copy of that stream the calls still
+    /// left. The forked walk leaves this off, so its own draws are not held
+    /// a second time.
+    #[serde(skip_serializing_if = "is_false")]
+    pub stream_hold: bool,
 }
 
 /// Opening hops whose quenched energy changes set
@@ -1503,6 +1509,7 @@ impl Config {
     ) -> Self {
         let mut cfg = Self::recommended_with_scales(n_points, length_scale, energy_scale);
         cfg.adaptive_search = true;
+        cfg.stream_hold = true;
         cfg.replicas = 2;
         cfg.ladder_mode = LadderMode::NonReversible;
         cfg.ladder_top = 2.0;
@@ -2018,6 +2025,7 @@ impl Config {
             hold_stereocentres: false,
             measured_energy_scale: false,
             adaptive_search: false,
+            stream_hold: false,
         }
     }
 
@@ -2596,7 +2604,9 @@ mod coverage_behaviour {
         let base = Config::recommended(38);
         let adaptive = Config::recommended_adaptive(38);
         assert!(!base.adaptive_search);
+        assert!(!base.stream_hold);
         assert!(adaptive.adaptive_search);
+        assert!(adaptive.stream_hold);
         assert_eq!(adaptive.replicas, 2);
         assert!(matches!(
             adaptive.ladder_mode,
