@@ -3216,15 +3216,10 @@ where
 /// Drop below another energy that counts as strictly lower, so rounding noise is no improvement.
 const STRICT_IMPROVEMENT: f64 = 1e-10;
 
-/// Body count at and below which the rigid factor may climb to 24.
-///
-/// An all-body kick on a ten-water chart still falls into the target
-/// basin at that factor. A larger chart caps the factor at
-/// [`RIGID_FACTOR_CAP_LARGE`] and can still cool when the acceptance
-/// rate is high.
-const RIGID_HOT_BODIES: usize = 10;
-/// Highest rigid factor on a chart with more than [`RIGID_HOT_BODIES`] bodies.
-const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
+/// Initial and damped rigid-temperature factor cap when orientation amplitude shrinks.
+const RIGID_FACTOR_CAP_DAMPED: f64 = 4.0;
+/// Upper rigid-temperature factor ceiling when full-amplitude kicks remain inside the cage.
+const RIGID_FACTOR_CAP_FULL: f64 = 24.0;
 /// Metropolis acceptance the orientation amplitude aims at.
 ///
 /// The ratio a Cartesian basin-hopping step is adjusted toward, and the
@@ -3609,11 +3604,11 @@ mod biased_metropolis_tests {
     }
 }
 
-fn rigid_factor_cap(n_bodies: usize) -> f64 {
-    if n_bodies > RIGID_HOT_BODIES {
-        RIGID_FACTOR_CAP_LARGE
+fn rigid_factor_cap(orient_scale: f64) -> f64 {
+    if orient_scale < 1.0 - 1.0e-9 {
+        RIGID_FACTOR_CAP_DAMPED
     } else {
-        24.0
+        RIGID_FACTOR_CAP_FULL
     }
 }
 
@@ -4915,7 +4910,7 @@ where
     // tracks the acceptance ratio. Letting that factor climb back to 24
     // leaves the hydrogen-bond funnel.
     let mut rigid_factor: f64 = if cfg.move_library.is_rigid_body() {
-        rigid_factor_cap(cfg.n_points)
+        RIGID_FACTOR_CAP_DAMPED
     } else {
         1.0
     };
@@ -7927,13 +7922,14 @@ where
             let rise = (e_new - e) / cfg.temperature.max(1e-12);
             accept = rise <= 0.0 || rng.random::<f64>() < (-rise).exp();
         }
-        if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
+        if cfg.move_library.is_rigid_body() && rigid_factor >= RIGID_FACTOR_CAP_DAMPED {
             orient_window += 1;
             if accept {
                 orient_yes += 1;
             }
             if orient_window >= RIGID_ACCEPT_BLOCK {
                 orient_scale = rigid_step_scale(orient_scale, orient_yes, orient_window);
+                rigid_factor = rigid_factor.min(rigid_factor_cap(orient_scale));
                 orient_window = 0;
                 orient_yes = 0;
             }
@@ -7963,10 +7959,7 @@ where
             // temperature window should see.
             accept = false;
         }
-        if cfg.move_library.is_rigid_body()
-            && cfg.n_points <= RIGID_HOT_BODIES
-            && (!returning || (e_new - e).abs() > 5.0e-2)
-        {
+        if cfg.move_library.is_rigid_body() && (!returning || (e_new - e).abs() > 5.0e-2) {
             // Same-basin accepts have no energy change, and counting them
             // keeps a rigid chart cold. Only a move that lands on a
             // different minimum says whether the temperature is high enough.
@@ -7977,7 +7970,7 @@ where
             }
             if rigid_window >= 8 {
                 let rate = rigid_hits as f64 / rigid_window as f64;
-                let cap = rigid_factor_cap(cfg.n_points);
+                let cap = rigid_factor_cap(orient_scale);
                 if rate < 0.25 {
                     rigid_factor = (rigid_factor * 2.0).min(cap);
                 } else if rate > 0.6 {
