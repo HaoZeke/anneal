@@ -783,14 +783,23 @@ Feeds/consumes: an alternative =Fingerprint= for =BasinBias= (config
 is enabled, transferring a =Dcut= threshold between cluster sizes in a
 way a descriptor-space threshold cannot.
 
-** Symmetry detection and symmetrisation
+** Symmetry detection and symmetry completion
 
-Covered under [[file:catalog.org::*Stall escapes][stall escapes]]
-(=crate::symmetrise=); listed here as an identity mechanism because
-=detect=/=detect_all= (src/symmetrise.rs:202/226) and =mirror_matrix=
-(src/symmetrise.rs:263) also underlie the point-group diagnostics used
-in the archive search's near-miss push
-(src/methods/archive_search.rs:122).
+=crate::symmetrise= measures: =detect=, =detect_all= and =mirror_matrix=
+also underlie the point-group diagnostics used in the archive search's
+near-miss push (src/methods/archive_search.rs). It moves nothing.
+
+=crate::detected_symmetry= is the one place a measured group is applied.
+On entering a new basin (=Config::symmetry_completion_on_new=) the
+innermost =symmetry_core_fraction= of the points are read for operations
+over every rotation order the structure can carry (=order_bound=: the
+largest order whose rotation still moves a point at the structure's radius
+by a nearest-neighbour distance), the operations are closed into a group
+that must be one of the finite subgroups of O(3), and every atom is
+re-seated on the group's site set. The result is quenched, recorded and
+offered to the acceptance rule like any hop. No group, order, size or
+species is named: a structure with no approximate symmetry gives no
+candidate. The mechanism is the incumbent's own symmetry, not a target.
 
 ** Census calibration
 
