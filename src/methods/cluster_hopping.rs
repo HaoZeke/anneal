@@ -2782,14 +2782,7 @@ fn run_budgeted_population<'g, R: Rng + ?Sized>(
             &mut branch_rng,
         )?
     } else {
-        run_with_gradient(
-            &adaptive_cfg,
-            start,
-            &mut second_ledger,
-            relax,
-            grad.as_deref_mut(),
-            rng,
-        )?
+        run_with_gradient(&adaptive_cfg, start, &mut second_ledger, relax, grad, rng)?
     };
     ledger.spent = ledger.spent.saturating_add(second.charged);
     if let Some(state) = second.best_state.as_ref() {
@@ -5177,6 +5170,8 @@ where
     let mut held_count: usize = 0;
     // Preserve the paper trajectory unless the caller explicitly excludes
     // named Mackay constructions for a general-search comparison.
+    // Keep the outer condition verbatim with the audited paper excerpt.
+    #[allow(clippy::collapsible_if)]
     if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {
         if cfg.mackay_priors {
             let mackay = binary_geometry::mackay_cap(n, cfg.length_scale.max(1e-6));
