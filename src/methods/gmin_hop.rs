@@ -146,26 +146,20 @@ impl Config {
         }
     }
 
-    /// Rigid TIP4P in kJ/mol and angstrom.
-    ///
-    /// Orientation step 1.4 rad as in the Wales and Hodges runs, with a small
-    /// centre step. Temperature starts at 2.9 kJ/mol and adapts online toward
-    /// [`Config::target_acceptance`]. Quenches stop at 250 iterations:
-    /// most hops land in a basin the chain rejects, and finishing those
-    /// quenches cost more hops than the unfinished ones lose. A chain that
-    /// stalls restarts from a fresh random cluster, since at 20 molecules a
-    /// splice of minima from one wide funnel stays in it.
-    pub fn water(n: usize) -> Self {
+    /// Rigid TIP4P in kJ/mol and angstrom with an explicit Metropolis temperature.
+    pub fn water_with_temperature(n: usize, temperature: f64) -> Self {
+        let (_, orient_step, translate_step, single, surface, splice) =
+            published_tip4p_row(PUBLISHED_TIP4P_CSV, n);
         Self {
             n,
             moves: Moves::Water {
-                orient_step: 1.4,
-                translate_step: 0.2,
-                single: 0.25,
-                surface: 0.15,
-                splice: 0.1,
+                orient_step,
+                translate_step,
+                single,
+                surface,
+                splice,
             },
-            temperature: 2.9,
+            temperature,
             kick: 0.0,
             target_acceptance: 0.5,
             gtol: 1e-3,
@@ -178,6 +172,55 @@ impl Config {
             min_sep: 2.4,
         }
     }
+
+    /// Rigid TIP4P in kJ/mol and angstrom using the published GMIN input baseline
+    /// loaded from `src/methods/baselines/gmin_tip4p.txt`.
+    pub fn water(n: usize) -> Self {
+        let (temperature, _, _, _, _, _) = published_tip4p_row(PUBLISHED_TIP4P_CSV, n);
+        Self::water_with_temperature(n, temperature)
+    }
+}
+
+const PUBLISHED_TIP4P_CSV: &str = include_str!("baselines/gmin_tip4p.txt");
+
+fn published_tip4p_row(csv: &str, n: usize) -> (f64, f64, f64, f64, f64, f64) {
+    let mut fallback = (2.2, 1.4, 0.2, 0.25, 0.15, 0.1);
+    for raw in csv.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut cols = line.split(',');
+        let Some(bound_col) = cols.next() else {
+            continue;
+        };
+        let Some(temp) = cols.next().and_then(|v| v.trim().parse::<f64>().ok()) else {
+            continue;
+        };
+        let Some(orient) = cols.next().and_then(|v| v.trim().parse::<f64>().ok()) else {
+            continue;
+        };
+        let Some(trans) = cols.next().and_then(|v| v.trim().parse::<f64>().ok()) else {
+            continue;
+        };
+        let Some(single) = cols.next().and_then(|v| v.trim().parse::<f64>().ok()) else {
+            continue;
+        };
+        let Some(surface) = cols.next().and_then(|v| v.trim().parse::<f64>().ok()) else {
+            continue;
+        };
+        let Some(splice) = cols.next().and_then(|v| v.trim().parse::<f64>().ok()) else {
+            continue;
+        };
+        let row = (temp, orient, trans, single, surface, splice);
+        fallback = row;
+        if let Ok(limit) = bound_col.trim().parse::<usize>()
+            && n <= limit
+        {
+            return row;
+        }
+    }
+    fallback
 }
 
 /// Radius of a close-packed sphere of `n` unit-diameter atoms.
@@ -302,7 +345,6 @@ where
     pool.offer(energy, &x);
 
     let mut kick = cfg.kick;
-    let mut temperature = cfg.temperature;
     let mut kick_window = (0usize, 0usize);
     let mut chain_best = energy;
     let mut stale = 0usize;
@@ -347,27 +389,18 @@ where
         }
         let accept = inside
             && (e_new <= energy
-                || rng.random::<f64>() < (-(e_new - energy) / temperature.max(1e-6)).exp());
+                || rng.random::<f64>() < (-(e_new - energy) / cfg.temperature).exp());
         if proposal == Proposal::Kick {
             kick_window.0 += 1;
             kick_window.1 += usize::from(accept);
             if kick_window.0 == 50 {
                 let rate = kick_window.1 as f64 / 50.0;
-                if matches!(cfg.moves, Moves::Water { .. }) {
-                    temperature *= if rate < cfg.target_acceptance {
-                        1.05
-                    } else {
-                        1.0 / 1.05
-                    };
-                    temperature = temperature.clamp(1.0, 5.0);
+                kick *= if rate > cfg.target_acceptance {
+                    1.05
                 } else {
-                    kick *= if rate > cfg.target_acceptance {
-                        1.05
-                    } else {
-                        1.0 / 1.05
-                    };
-                    kick = kick.clamp(0.05, 1.2);
-                }
+                    1.0 / 1.05
+                };
+                kick = kick.clamp(0.05, 1.2);
                 kick_window = (0, 0);
             }
         }
@@ -994,6 +1027,9 @@ mod tests {
         let n = 6;
         let objective = GminTip4p::new(n);
         let cfg = Config::water(n);
+        assert!((cfg.temperature - 2.9).abs() < 1e-12);
+        assert!((Config::water(20).temperature - 2.2).abs() < 1e-12);
+        assert!((Config::water_with_temperature(20, 3.1).temperature - 3.1).abs() < 1e-12);
         let mut rng = StdRng::seed_from_u64(2);
         let start = random_tip4p_cluster(n, &mut rng);
         let mut ledger = Ledger::new(60_000);

@@ -74,20 +74,58 @@ pub struct Table1 {
     pub n_best: usize,
 }
 
-/// Smooth geometric surface-area scaling (`O(n^{2/3})`) for primary sphere
-/// sites, active surface movers, and greedy restarts at cluster size `n`.
-pub fn table1(count: usize) -> Table1 {
-    let surface = (count.max(1) as f64).powf(2.0 / 3.0);
-    let n_mov = ((1.05 * surface).round() as usize).clamp(4, 40);
-    let n_primary = ((11.5 * surface).round() as usize).clamp(64, 812);
-    let n_try = ((12.5 * surface).round() as usize).clamp(80, 1000);
-    let n_best = ((0.35 * surface).round() as usize).clamp(4, 10);
-    Table1 {
-        n_mov,
-        n_primary,
-        n_try,
-        n_best,
+const PUBLISHED_TABLE1_CSV: &str = include_str!("baselines/dls_table1.txt");
+
+impl Table1 {
+    /// Parse the published Table 1 schedule from CSV data and select the row for `n`.
+    pub fn from_published_csv(csv: &str, n: usize) -> Self {
+        let mut fallback = Self {
+            n_mov: 10,
+            n_primary: 92,
+            n_try: 100,
+            n_best: 4,
+        };
+        for raw in csv.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut cols = line.split(',');
+            let Some(bound_col) = cols.next() else {
+                continue;
+            };
+            let Some(n_mov) = cols.next().and_then(|v| v.trim().parse::<usize>().ok()) else {
+                continue;
+            };
+            let Some(n_primary) = cols.next().and_then(|v| v.trim().parse::<usize>().ok()) else {
+                continue;
+            };
+            let Some(n_try) = cols.next().and_then(|v| v.trim().parse::<usize>().ok()) else {
+                continue;
+            };
+            let Some(n_best) = cols.next().and_then(|v| v.trim().parse::<usize>().ok()) else {
+                continue;
+            };
+            let row = Self {
+                n_mov,
+                n_primary,
+                n_try,
+                n_best,
+            };
+            fallback = row;
+            if let Ok(limit) = bound_col.trim().parse::<usize>()
+                && n <= limit
+            {
+                return row;
+            }
+        }
+        fallback
     }
+}
+
+/// Published Table 1 row that contains `n`, loaded from `src/methods/baselines/dls_table1.txt`.
+pub fn table1(n: usize) -> Table1 {
+    Table1::from_published_csv(PUBLISHED_TABLE1_CSV, n)
 }
 
 const ALPHA: f64 = 0.2;
@@ -110,13 +148,42 @@ pub fn run<R: Rng + ?Sized>(
     tie: TieCut,
     target: Option<f64>,
 ) -> Outcome {
+    let params = table1(n);
+    run_with_table(
+        n,
+        &params,
+        ledger,
+        quench,
+        start,
+        radius,
+        min_separation,
+        rng,
+        tie,
+        target,
+    )
+}
+
+/// One published search with an explicit [`Table1`] parameter row.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_table<R: Rng + ?Sized>(
+    n: usize,
+    params: &Table1,
+    ledger: &mut Ledger,
+    quench: &Quench,
+    start: &[f64],
+    radius: f64,
+    min_separation: f64,
+    rng: &mut R,
+    tie: TieCut,
+    target: Option<f64>,
+) -> Outcome {
     let mut outcome = Outcome::default();
     if n < 2 || start.len() != 3 * n {
         outcome.best = ledger.best;
         outcome.charged = ledger.spent();
         return outcome;
     }
-    let params = table1(n);
+    let params = *params;
     let mut restarts = 0usize;
     let mut generations = 0usize;
     let mut improvements = 0usize;
@@ -766,23 +833,95 @@ fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// Unit directions of the Mackay shell whose count is `count`.
+/// Unit directions of the triangulated geodesic shell whose vertex count is `count`.
 ///
-/// Quasi-uniform unit vectors on the sphere from a golden-angle Fibonacci lattice.
+/// Counts 92, 162, 252, 362, 492, 642 and 812 are the shells named
+/// under "DL Construction".
 pub fn spherical_directions(count: usize) -> Vec<[f64; 3]> {
-    if count == 0 {
-        return Vec::new();
+    let n2 = count.saturating_sub(2) / 10;
+    let shell = (n2 as f64).sqrt().round() as i32;
+    geodesic_shell(shell.max(1))
+}
+
+fn geodesic_shell(shell: i32) -> Vec<[f64; 3]> {
+    let vertices = base_polyhedron();
+    let faces = polyhedron_faces(&vertices);
+    let mut raw = Vec::new();
+    if shell <= 1 {
+        raw.extend_from_slice(&vertices);
+    } else {
+        let s = shell as f64;
+        for face in faces {
+            let (a, b, c) = (vertices[face[0]], vertices[face[1]], vertices[face[2]]);
+            for i in 0..=shell {
+                for j in 0..=(shell - i) {
+                    let k = shell - i - j;
+                    let p = add3(
+                        add3(scale(a, i as f64 / s), scale(b, j as f64 / s)),
+                        scale(c, k as f64 / s),
+                    );
+                    raw.push(p);
+                }
+            }
+        }
     }
-    let golden_angle = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt());
-    let total = count as f64;
-    (0..count)
-        .map(|k| {
-            let z = 1.0 - (2.0 * k as f64 + 1.0) / total;
-            let rho = (1.0 - z * z).max(0.0).sqrt();
-            let theta = golden_angle * k as f64;
-            [rho * libm::cos(theta), rho * libm::sin(theta), z]
-        })
-        .collect()
+    let mut unique = Vec::new();
+    for p in raw {
+        let norm = dot3(p, p).sqrt();
+        if norm < 1e-12 {
+            continue;
+        }
+        let u = scale(p, 1.0 / norm);
+        if unique.iter().all(|q| dist2(u, *q) > 1e-10) {
+            unique.push(u);
+        }
+    }
+    unique
+}
+
+fn base_polyhedron() -> [[f64; 3]; 12] {
+    let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    let mut out = [[0.0; 3]; 12];
+    let mut slot = 0;
+    for cycle in 0..3 {
+        for s1 in [-1.0, 1.0] {
+            for s2 in [-1.0, 1.0] {
+                let mut p = [0.0; 3];
+                p[(cycle + 1) % 3] = s1;
+                p[(cycle + 2) % 3] = s2 * phi;
+                out[slot] = p;
+                slot += 1;
+            }
+        }
+    }
+    out
+}
+
+fn polyhedron_faces(vertices: &[[f64; 3]; 12]) -> Vec<[usize; 3]> {
+    let mut neighbors = vec![Vec::new(); 12];
+    for i in 0..12 {
+        for j in (i + 1)..12 {
+            if (dist2(vertices[i], vertices[j]) - 4.0).abs() < 1e-6 {
+                neighbors[i].push(j);
+                neighbors[j].push(i);
+            }
+        }
+    }
+    let mut faces = Vec::new();
+    for i in 0..12 {
+        for &j in &neighbors[i] {
+            for &k in &neighbors[i] {
+                if j < k && neighbors[j].contains(&k) {
+                    let mut face = [i, j, k];
+                    face.sort_unstable();
+                    if !faces.contains(&face) {
+                        faces.push(face);
+                    }
+                }
+            }
+        }
+    }
+    faces
 }
 
 #[cfg(test)]
@@ -813,31 +952,26 @@ mod tests {
         );
         assert!(built.is_some(), "the lattice was not built");
         assert!(
-            ledger.spent() > 200,
+            ledger.spent() >= 654,
             "the atom pair sum was not charged: spent {}",
             ledger.spent()
         );
     }
 
     #[test]
-    fn spherical_directions_are_unit_vectors_at_exact_count() {
-        for count in [1usize, 32, 92, 162, 252, 642] {
-            let dirs = spherical_directions(count);
-            assert_eq!(dirs.len(), count);
-            for u in dirs {
-                assert!((dot3(u, u) - 1.0).abs() < 1e-12);
-            }
+    fn geodesic_shells_match_the_published_counts() {
+        for (shell, count) in [(3, 92), (4, 162), (5, 252), (6, 362), (8, 642)] {
+            assert_eq!(geodesic_shell(shell).len(), count, "shell {shell}");
         }
     }
 
     #[test]
-    fn table1_scales_monotonically_with_surface_area() {
-        let small = table1(13);
-        let medium = table1(104);
-        let large = table1(300);
-        assert!(small.n_primary < medium.n_primary && medium.n_primary < large.n_primary);
-        assert!(small.n_mov <= medium.n_mov && medium.n_mov <= large.n_mov);
-        assert!(small.n_try < medium.n_try && medium.n_try < large.n_try);
+    fn table1_uses_the_80_to_119_row_at_104() {
+        let row = table1(104);
+        assert_eq!(row.n_mov, 15);
+        assert_eq!(row.n_primary, 252);
+        assert_eq!(row.n_try, 300);
+        assert_eq!(row.n_best, 5);
     }
 
     #[test]

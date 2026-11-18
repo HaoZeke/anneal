@@ -1,0 +1,4 @@
+# Wales and Hodges, Chem. Phys. Lett. 286, 65 (1998) / GMIN TIP4P input baseline.
+# max_molecules,temperature_kj_mol,orient_step_rad,translate_step_a,single_prob,surface_prob,splice_prob
+17,2.9,1.4,0.2,0.25,0.15,0.1
+*,2.2,1.4,0.2,0.25,0.15,0.1
