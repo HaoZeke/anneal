@@ -280,10 +280,7 @@ fn pair_range(
 /// The SOAP prior, stall symmetrisation, continuous-symmetry projection,
 /// energy lattice, and compacted surface are turned off.
 fn without_priors(mut cfg: Config) -> Config {
-    cfg.orbit_complete_on_new = true;
-    cfg.orbit_arm = true;
     cfg.prior_soap = false;
-    cfg.symmetrise_on_stall = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
     cfg.energy_lattice = false;
     cfg.surfaces.clear();

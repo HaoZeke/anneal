@@ -42,10 +42,8 @@ fn a_recorded_quench_the_chain_rejects_reaches_the_dump() {
     cfg.bayes_screen = false;
     cfg.return_screen = false;
     cfg.escape_on_stall = false;
-    cfg.symmetrise_on_stall = false;
     cfg.trail_on_stall = false;
     cfg.restart_on_stall = false;
-    cfg.orbit_complete_on_new = false;
     cfg.tabu_on_stall = false;
     cfg.allocate_moves = false;
     cfg.minima_hopping = false;

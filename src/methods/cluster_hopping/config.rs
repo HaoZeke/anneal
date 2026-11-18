@@ -305,31 +305,6 @@ pub struct PriorSwitches {
     pub all_off: bool,
 }
 
-/// Which core orbit completion ([`Config::orbit_complete_on_new`]) reads
-/// its point group from.
-#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OrbitCore {
-    /// The innermost [`Config::symmetrise_core_fraction`] of the points by
-    /// distance from the centroid, up to three of its operations closed
-    /// exactly ([`crate::symmetrise::orbit_complete_core`]).
-    #[default]
-    Fraction,
-    /// The innermost shells about a weighted centre, every operation
-    /// refined and closed tolerantly
-    /// ([`crate::symmetrise::orbit_complete_shells`]).
-    Shells(crate::symmetrise::ShellCore),
-    /// Both completions, shells first, each quenched and recorded; the
-    /// lower quench is offered to the acceptance rule.
-    Both(crate::symmetrise::ShellCore),
-}
-
-impl OrbitCore {
-    fn is_fraction(&self) -> bool {
-        matches!(self, Self::Fraction)
-    }
-}
-
 /// How far a pair force reaches, measured on the potential's own dimer.
 ///
 /// A potential with a cutoff has exactly zero energy and force beyond some
@@ -622,58 +597,6 @@ pub struct Config {
     pub track_funnels: bool,
     /// Accepted hops between Laplacian refits / Fiedler updates.
     pub funnel_period: usize,
-    /// Symmetrise onto the symmetry the structure nearly has, on a stall.
-    ///
-    /// Oakley, Johnston and Wales report the mean first encounter time for the
-    /// 98-point cluster, whose global minimum is tetrahedral, improving by more
-    /// than seventyfold under a scheme of this kind. That is the case this
-    /// driver is weakest on: 3 seeds in 8 at twelve million evaluations against
-    /// 8 in 8 at 75 points.
-    ///
-    /// Applied when the chain is stuck rather than as an allocator arm, because
-    /// it is not a perturbation competing with the others. It either finds an
-    /// approximate symmetry and lands the structure on it, or finds none and
-    /// leaves the chain alone. See [`crate::symmetrise`].
-    pub symmetrise_on_stall: bool,
-    /// Add the detected point-group symmetrisation as an ordinary proposal
-    /// arm ([`ClusterMove::PointSymmetrise`]) to whatever move library is
-    /// selected.
-    ///
-    /// The published scheme runs on every step, not on a stall: a nearly
-    /// symmetric minimum met anywhere in the walk is pushed onto its symmetry
-    /// and quenched while the chain is still there.
-    pub point_symmetrise: bool,
-    /// Core symmetrisation once per newly entered basin, after Oakley,
-    /// Johnston and Wales: when an accepted hop lands in a basin the chain
-    /// was not in, the innermost [`Config::symmetrise_core_fraction`] of the
-    /// points is pushed onto its approximate point group, the result is
-    /// quenched, and the quench is offered to the acceptance rule. One
-    /// attempt per new basin, so a chain sitting still never pays twice.
-    pub point_symmetrise_on_new: bool,
-    /// Whole-cluster orbit completion under the core's point group on
-    /// entering a new basin (Oakley, Johnston and Wales 2013, the scheme
-    /// they report as productive on 98 points): every atom is placed on
-    /// the group's site set, surface atoms onto empty orbit positions, then
-    /// quenched and offered to the acceptance rule. With
-    /// [`Config::point_symmetrise_on_new`] both are attempted, core first.
-    pub orbit_complete_on_new: bool,
-    /// Offer orbit completion as an allocator arm
-    /// ([`ClusterMove::OrbitComplete`]) when
-    /// [`Config::orbit_complete_on_new`] is off.
-    ///
-    /// The event form completes every new basin and pays for every
-    /// completion. The arm is drawn by the move allocator and keeps its
-    /// share only while the depth it reaches pays for it. Absent from the
-    /// resolved JSON while off.
-    #[serde(skip_serializing_if = "is_false")]
-    pub orbit_arm: bool,
-    /// Which core an orbit completion reads its point group from. No
-    /// preset leaves the fraction core; [`Config::with_dual_orbit_core`]
-    /// opts in to both. Fraction is omitted from the resolved JSON, so a
-    /// config that never sets this resolves as it did before the field.
-    /// Core symmetrisation keeps the fraction core whatever this is.
-    #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
-    pub orbit_core: OrbitCore,
     /// Surface hops from each new lowest structure: every least-bound atom
     /// is tried on every vacant hollow site where it keeps its neighbour
     /// count ([`crate::packing::surface_hops`]), and each is quenched. The
@@ -709,15 +632,9 @@ pub struct Config {
     pub jump_steps: usize,
     /// Half-width of each displacement, in length units.
     pub jump_step: f64,
-    /// Fraction of points, by distance from the centroid, that count as the
-    /// core for [`Config::point_symmetrise_on_new`].
-    pub symmetrise_core_fraction: f64,
-    /// Symmetrise after every accepted hop, not only on entering a new basin.
-    pub point_symmetrise_every_accept: bool,
     /// Published continuous-symmetry move, independent of stall detection.
     ///
-    /// This is distinct from [`Config::symmetrise_on_stall`]. The
-    /// continuous-symmetry construction solves a global atom assignment for
+    /// The continuous-symmetry construction solves a global atom assignment for
     /// each group image and quenches the averaged geometry on a fixed
     /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
     /// is the Oakley, Johnston and Wales continuous symmetry measure over
@@ -727,13 +644,6 @@ pub struct Config {
     pub symmetry_tolerance: f64,
     /// Coordinate-space radius used to merge points after symmetrisation.
     pub symmetry_merge_radius: f64,
-    /// Hops without improvement before a symmetrisation is considered.
-    ///
-    /// Separate from the escape patience because the two answer different
-    /// questions: an escape is for a chain that cannot leave, this is for a
-    /// chain that has stopped finding anything and may be near a symmetric
-    /// answer without being on it.
-    pub symmetrise_patience: usize,
     /// Wales and Doye's angular move, applied when a point is loose.
     ///
     /// "If the highest pair energy rose above a fraction R of the lowest pair
@@ -1300,10 +1210,6 @@ pub struct Config {
     /// biases. A rung under it therefore hops by no one weight, and no swap
     /// factor can balance an exchange between two such rungs.
     pub delayed_acceptance: bool,
-    /// Candidates built and scored per growth proposal.
-    ///
-    /// Costs no charged evaluations, since scoring is structural.
-    pub construct_width: usize,
     /// Whether to score the quench extrapolation without acting on it.
     ///
     /// Runs the screening pass to its full length and records what an adaptive
@@ -1362,16 +1268,6 @@ pub struct Config {
     /// surface first, then on the plain potential from that minimum, judging
     /// the plain energy. `None` relaxes on the plain potential only.
     pub two_phase: Option<crate::methods::two_phase::TwoPhase>,
-    /// Reoccupation move: every `reoccupy_interval` charged calls the chain
-    /// rebuilds its surface on the lattice grown from its interior with
-    /// [`crate::methods::lattice_search::reoccupy`], relaxes the result and
-    /// adopts it when it is lower than the current minimum. `None` disables
-    /// the move; the lattice settings name the pair form the site energies
-    /// are read from.
-    #[serde(skip)]
-    pub reoccupy: Option<crate::methods::lattice_search::LatticeSearchConfig>,
-    /// Charged calls between reoccupation moves.
-    pub reoccupy_interval: usize,
     /// Energy-ranked dynamic-lattice exchange as one more proposal arm.
     ///
     /// Off on [`Config::for_cluster`]. [`Config::recommended`] turns it on
@@ -1713,15 +1609,15 @@ impl Config {
     ///
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
     /// allocates that arm with surface, single, burst, and sym. The return
-    /// screen is on, and a stall takes tabu, symmetrisation, the recorded
+    /// screen is on, and a stall takes tabu, the recorded
     /// basin trail, and the climb. Those two exits are
     /// [`Config::trail_on_stall`] and [`Config::escape_on_stall`].
     /// [`Config::restart_on_stall`] stays off, so a stalled walker is never
     /// redrawn from random coordinates. Basin identity stays the measured
     /// pair-spectrum merge at 0.7.
-    /// Orbit completion runs on every new basin, and below 98 points the
-    /// relaxation draws between the plain surface and the two-phase
-    /// relative 0.7 surface, the same rule as [`Config::communicating`].
+    /// Below 98 points the relaxation draws between the plain surface and
+    /// the two-phase relative 0.7 surface, the same rule as
+    /// [`Config::communicating`].
     /// A full quench runs up to 1000 steps, against 200 in
     /// [`Config::for_cluster`].
     /// On optbench archive starts at development seeds, without them this
@@ -1769,13 +1665,8 @@ impl Config {
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
         cfg.return_screen = true;
-        cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
-        cfg.orbit_complete_on_new = true;
-        // `for_cluster` offers both cores. This measured stack keeps the
-        // fraction core.
-        cfg.orbit_core = OrbitCore::Fraction;
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
         // Named lattice growth builds the truncated octahedron instead of
@@ -1807,11 +1698,10 @@ impl Config {
         cfg
     }
 
-    /// Communicating paper arm: orbit kernel plus Recognition.
+    /// Communicating paper arm: `for_cluster` plus Recognition.
     ///
-    /// This is the measured single-chain orbit arm (`for_cluster` plus
-    /// Thompson, the return screen, and orbit completion: 31/48 Marks,
-    /// 30/48 Leary), not [`Self::recommended`] (LeanBurst, SOAP leftover
+    /// This is `for_cluster` with Thompson allocation and the return
+    /// screen, not [`Self::recommended`] (LeanBurst, SOAP leftover
     /// as a burst library, tabu-on-stall, stall jump). Peer visit counts
     /// stay off the escape controller. Two-phase relative 0.7 stays on
     /// below 98 (occupancy-measured on 38 and 75; 18/48 Leary when left
@@ -1822,14 +1712,11 @@ impl Config {
     /// let cfg = Config::communicating(38);
     /// assert!(cfg.allocate_moves && cfg.return_screen);
     /// assert_eq!(cfg.shared_deposits, 0);
-    /// assert!(cfg.orbit_complete_on_new);
     /// ```
     pub fn communicating(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.allocate_moves = true;
         cfg.return_screen = true;
-        cfg.orbit_complete_on_new = true;
-        cfg.orbit_core = OrbitCore::Fraction;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
         if n_points < 98 {
@@ -1837,22 +1724,6 @@ impl Config {
         }
         cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
         cfg
-    }
-
-    /// The packing-mutate flags as one record. Twin is a library arm;
-    /// orbit and psym fire after a new basin; angular is the Wales--Doye
-    /// worst-bound relocation.
-    pub fn packing_surface(&self) -> crate::packing::PackingSurface {
-        let twin_as_move = matches!(
-            self.move_library,
-            super::MoveLibrary::Twin | super::MoveLibrary::GrowthAndTwin
-        );
-        crate::packing::PackingSurface::from_hop_flags(
-            twin_as_move,
-            self.orbit_complete_on_new,
-            self.angular_moves,
-            self.point_symmetrise_on_new,
-        )
     }
 
     /// Unmeasured SOAP-packing superbasin on the LeanBurst stack.
@@ -1877,7 +1748,6 @@ impl Config {
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
         cfg.return_screen = true;
-        cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
         // The occupancy deposits were measured before the preset tolerance
@@ -1971,18 +1841,12 @@ impl Config {
 
     /// [`Config::for_cluster`] expressed at caller-supplied physical scales.
     ///
-    /// This preserves the complete cluster preset, including its scaled shell
-    /// core, while changing the characteristic length and energy. It is the
+    /// This preserves the complete cluster preset while changing the
+    /// characteristic length and energy. It is the
     /// constructor for a non-Lennard-Jones potential benchmarked with the same
     /// search preset.
     pub fn for_cluster_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
-        let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
-        // Arm 3: each orbit completion relaxes a shell-core candidate and a
-        // fraction-core candidate and offers the lower. Callers that keep the
-        // fraction core set it back after this preset. `derived` does not:
-        // it is `recommended`, which keeps the fraction core.
-        cfg.orbit_core = OrbitCore::Both(crate::symmetrise::ShellCore::scaled(cfg.length_scale));
-        cfg
+        Self::screened_with_scales(n_points, length_scale, energy_scale)
     }
 
     fn screened_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
@@ -1991,45 +1855,6 @@ impl Config {
         cfg.bayes_threshold =
             crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
         cfg
-    }
-
-    /// [`Config::for_cluster`] with [`Config::with_dual_orbit_core`].
-    ///
-    /// Opt-in only: no other preset builds on this one, and
-    /// [`Config::for_cluster`] itself completes no orbits.
-    ///
-    /// ```
-    /// use anneal_core::methods::cluster_hopping::Config;
-    /// let cfg = Config::for_cluster_dual_core(13);
-    /// assert!(cfg.orbit_complete_on_new && cfg.restart_on_stall);
-    /// assert_eq!(cfg.restart_patience, 4_000);
-    /// ```
-    pub fn for_cluster_dual_core(n_points: usize) -> Self {
-        Self::for_cluster(n_points).with_dual_orbit_core()
-    }
-
-    /// Orbit completion on two cores, with a random restart on a stall.
-    ///
-    /// Every newly entered basin is completed twice, once with the point
-    /// group of the innermost shells about a weighted centre
-    /// ([`crate::symmetrise::ShellCore::scaled`] at this config's
-    /// [`Config::length_scale`]) and once with the fraction core. Each is
-    /// quenched and recorded, and the lower is offered to the acceptance
-    /// rule ([`OrbitCore::Both`]). A chain without a new ledger best for
-    /// 4000 charged calls restarts from a random cluster
-    /// ([`Config::restart_on_stall`]), and the climb
-    /// ([`Config::escape_on_stall`]) is off.
-    ///
-    /// Call it after the length scale is final. A rigid-body chain has no
-    /// orbit completion: [`Config::with_rigid_bodies`] clears both the
-    /// completion and the core.
-    pub fn with_dual_orbit_core(mut self) -> Self {
-        self.orbit_complete_on_new = true;
-        self.orbit_core = OrbitCore::Both(crate::symmetrise::ShellCore::scaled(self.length_scale));
-        self.restart_on_stall = true;
-        self.escape_on_stall = false;
-        self.restart_patience = 4_000;
-        self
     }
 
     /// Lennard-Jones preset expressed against declared physical scales.
@@ -2109,12 +1934,6 @@ impl Config {
             bayes_warmup: 300,
             track_funnels: false,
             funnel_period: 20_000,
-            symmetrise_on_stall: false,
-            point_symmetrise: false,
-            point_symmetrise_on_new: false,
-            orbit_complete_on_new: false,
-            orbit_arm: false,
-            orbit_core: OrbitCore::Fraction,
             surface_hop_on_best: false,
             soap_repel: false,
             exchange_metropolis: false,
@@ -2130,12 +1949,9 @@ impl Config {
             jump_patience: 5_000,
             jump_steps: 10,
             jump_step: LennardJonesPreset::ALL_POINTS_STEP * length_scale,
-            symmetrise_core_fraction: 0.6,
-            point_symmetrise_every_accept: false,
             continuous_symmetry: ContinuousSymmetry::Off,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
-            symmetrise_patience: 2_000,
             tabu_on_stall: false,
             tabu_capacity: 8,
             angular_moves: false,
@@ -2192,7 +2008,6 @@ impl Config {
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
-            construct_width: 4,
             probe_screen: false,
             quench_warmup: 4,
             quench_confidence: 2.0,
@@ -2202,8 +2017,6 @@ impl Config {
             incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,
-            reoccupy: None,
-            reoccupy_interval: 5_000,
             energy_lattice: false,
             surfaces: Vec::new(),
             // Calibrated against published minima: the largest atomic distance
@@ -2360,12 +2173,6 @@ impl Config {
         self.soap_mode = SoapProposalMode::Off;
         self.soap_repel = false;
         self.soap_class_residual = false;
-        self.symmetrise_on_stall = false;
-        self.point_symmetrise = false;
-        self.point_symmetrise_on_new = false;
-        self.orbit_complete_on_new = false;
-        self.orbit_arm = false;
-        self.orbit_core = OrbitCore::Fraction;
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
@@ -2670,7 +2477,7 @@ pub fn start_bond_tolerance(
 
 #[cfg(test)]
 mod coverage_behaviour {
-    use super::{ArmSelection, Config, Keying, OrbitCore};
+    use super::{ArmSelection, Config, Keying};
 
     #[test]
     fn the_recommended_molecular_preset_chooses_its_quench() {
@@ -2799,7 +2606,6 @@ mod coverage_behaviour {
 
         let physical = Config::for_cluster_with_scales(13, 2.0, 3.0);
         assert!(physical.bayes_screen);
-        assert!(matches!(physical.orbit_core, OrbitCore::Both(_)));
         assert_eq!(physical.length_scale, 2.0);
         assert_eq!(physical.energy_scale, 3.0);
     }

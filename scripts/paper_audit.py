@@ -1295,7 +1295,6 @@ def supporting_numbers(audit: Audit) -> None:
     audit.said(SI, "with the stall exits and the Bayes screen turned off, seed 0, budget 30000.")
     search = "examples/lj_cluster_search.rs"
     audit.said(search, "cfg.escape_on_stall = (cfg.escape_on_stall || climb) && !noclimb;")
-    audit.said(search, "cfg.symmetrise_on_stall = (cfg.symmetrise_on_stall || sym) && !nosym;")
     audit.said(search, 'cfg.bayes_screen = opts.contains(&"bayes");')
     audit.cell(SI, "plain-walk budget", "30000", float(calls))
     audit.said(SI, "The best energy in that log is \\PlainEnergy, after \\PlainCalls{} charged evaluations.")

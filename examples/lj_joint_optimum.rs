@@ -8,7 +8,7 @@
 //! coordinates, seeds, target, and charged-call ceiling.
 //!
 //! Usage:
-//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-sym|bh-csm-ci|mh|mh-soft|mh-bounded|mh-bounded-soft|mh-communication|feedback] [gs2|morokuma|both] [seed0]`
+//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-csm-ci|mh|mh-soft|mh-bounded|mh-bounded-soft|mh-communication|feedback] [gs2|morokuma|both] [seed0]`
 //!
 //! `mh-communication` pairs private and shared minimum histories at one total
 //! budget, divided among `ANNEAL_MH_REPLICAS` replicas (default four). History
@@ -60,7 +60,6 @@ enum Arm {
     Ridge(IrcKind),
     Basin,
     BasinHopping,
-    BasinHoppingSymmetry,
     BasinHoppingCsmCi,
     MinimaHopping,
     MinimaHoppingSoftened,
@@ -87,7 +86,6 @@ impl Arm {
             Self::Ridge(kind) => format!("ridge-{}", irc_name(kind)),
             Self::Basin => "basin-ablation".into(),
             Self::BasinHopping => "basin-hopping".into(),
-            Self::BasinHoppingSymmetry => "basin-hopping-stall-symmetry".into(),
             Self::BasinHoppingCsmCi => "basin-hopping-csm-ci".into(),
             Self::MinimaHopping => "minima-hopping".into(),
             Self::MinimaHoppingSoftened => "minima-hopping-softened".into(),
@@ -185,7 +183,6 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
             arms.extend([
                 Arm::Basin,
                 Arm::BasinHopping,
-                Arm::BasinHoppingSymmetry,
                 Arm::BasinHoppingCsmCi,
                 Arm::MinimaHopping,
                 Arm::MinimaHoppingSoftened,
@@ -198,7 +195,6 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "ridge" => arms.extend(irc.iter().copied().map(Arm::Ridge)),
         "basin" => arms.push(Arm::Basin),
         "bh" => arms.push(Arm::BasinHopping),
-        "bh-sym" => arms.push(Arm::BasinHoppingSymmetry),
         "bh-csm-ci" => arms.push(Arm::BasinHoppingCsmCi),
         "mh" => arms.push(Arm::MinimaHopping),
         "mh-soft" => arms.push(Arm::MinimaHoppingSoftened),
@@ -223,7 +219,7 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "feedback" => arms.push(Arm::MinimaFeedback),
         _ => {
             return Err(
-                "arm must be all, adaptive, ridge, basin, bh, bh-sym, bh-csm-ci, mh, mh-soft, mh-bounded, mh-bounded-soft, mh-communication, mh-private[-soft], mh-shared[-soft], or feedback"
+                "arm must be all, adaptive, ridge, basin, bh, bh-csm-ci, mh, mh-soft, mh-bounded, mh-bounded-soft, mh-communication, mh-private[-soft], mh-shared[-soft], or feedback"
                     .into(),
             );
         }
@@ -280,7 +276,6 @@ fn hybrid_config(n: usize, budget: u64, irc_kind: IrcKind) -> AtomisticHybridCon
 
 struct HoppingMoves {
     minima_hopping: bool,
-    symmetrise_on_stall: bool,
     continuous_symmetry: ContinuousSymmetry,
 }
 
@@ -296,7 +291,6 @@ fn run_hopping(
     config.bias_height = 0.0;
     config.move_library = MoveLibrary::WalesDoye;
     config.minima_hopping = moves.minima_hopping;
-    config.symmetrise_on_stall = moves.symmetrise_on_stall;
     config.continuous_symmetry = moves.continuous_symmetry;
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
@@ -1376,7 +1370,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     );
                 }
                 Arm::BasinHopping
-                | Arm::BasinHoppingSymmetry
                 | Arm::BasinHoppingCsmCi
                 | Arm::MinimaHopping
                 | Arm::MinimaHoppingSoftened
@@ -1432,7 +1425,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 seed,
                                 HoppingMoves {
                                     minima_hopping: matches!(arm, Arm::MinimaFeedback),
-                                    symmetrise_on_stall: matches!(arm, Arm::BasinHoppingSymmetry),
                                     continuous_symmetry: if matches!(arm, Arm::BasinHoppingCsmCi) {
                                         ContinuousSymmetry::Inversion {
                                             interval: CSM_INTERVAL,
@@ -1593,11 +1585,20 @@ mod tests {
     }
 
     #[test]
-    fn symmetry_selector_names_the_existing_stall_projection_arm() {
-        let arms = selected_arms("bh-sym", &[]).unwrap();
+    fn the_removed_stall_symmetry_selector_is_rejected() {
+        let err = selected_arms("bh-sym", &[]).unwrap_err();
+        assert!(err.starts_with("arm must be"), "{err}");
+        assert!(!err.contains("bh-sym"), "{err}");
+    }
 
-        assert!(matches!(arms.as_slice(), [Arm::BasinHoppingSymmetry]));
-        assert_eq!(arms[0].label(), "basin-hopping-stall-symmetry");
+    #[test]
+    fn the_all_selector_no_longer_lists_a_stall_symmetry_arm() {
+        let arms = selected_arms("all", &[]).unwrap();
+        assert!(arms.iter().any(|arm| arm.label() == "basin-hopping"));
+        assert!(
+            arms.iter()
+                .all(|arm| !arm.label().contains("stall-symmetry"))
+        );
     }
 
     #[test]

@@ -34,10 +34,7 @@ fn a_flat_stall_uses_only_general_lean_burst_actions() {
     cfg.temperature = 1.0e-4;
     cfg.escape_max_climb = 1;
     cfg.polish_records = 0;
-    cfg.symmetrise_on_stall = false;
     cfg.jump_on_stall = false;
-    cfg.point_symmetrise_on_new = false;
-    cfg.orbit_complete_on_new = false;
     cfg.allocate_moves = false;
     cfg.move_library = MoveLibrary::LeanBurst;
     let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
