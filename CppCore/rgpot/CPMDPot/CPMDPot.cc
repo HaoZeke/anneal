@@ -556,11 +556,14 @@ bool CPMDPot::setPotentialConfig(const ::PotentialConfig::Reader &cfg,
       const std::string sum = params_summary(cp);
       if (ok)
         *message_out = "rgpot params applied (cpmd arm): " + sum;
-      else if (!available())
+      else if (!impl_ || !impl_->bundle.loaded)
         *message_out =
             "rgpot params cpmd arm failed (engine not loaded): " + sum;
-      else
+      else {
         *message_out = "rgpot params cpmd arm rejected by embed: " + sum;
+        if (!impl_->unavailable_reason.empty())
+          *message_out += " (" + impl_->unavailable_reason + ")";
+      }
     }
     return ok;
   }

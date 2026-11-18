@@ -1,0 +1,1 @@
+CPMDPot::setPotentialConfig reports a config rejected by embed, with the orbital key refusal, when configure drops the session after the engine refuses a key, instead of saying the engine is not loaded.
