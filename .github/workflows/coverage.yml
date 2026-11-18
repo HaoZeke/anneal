@@ -111,7 +111,8 @@ jobs:
         env:
           RGPOT_COV_BUILDDIR: bbdir-cov
         run: |
-          bash scripts/run_coverage_cpp.sh cpp_lcov.info
+          RGPOT_COV_TIMEOUT_MULTIPLIER=4 \
+            bash scripts/run_coverage_cpp.sh cpp_lcov.info
           test -s cpp_lcov.info
           # Fortran kernel hits from the same tree (the pot tests drive them)
           bash scripts/run_coverage_fortran.sh fortran_lcov.info
