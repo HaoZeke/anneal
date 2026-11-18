@@ -296,8 +296,15 @@ bench/gmin-h2h/runs/
 bench/gmin-h2h/.asv/
 
 # Depth-posterior ablation scratch. results.csv is the committed record.
-bench/depth-posterior-ablation/logs/
+# The directory is kept so the regeneration note can be committed.
+bench/depth-posterior-ablation/logs/*
+!bench/depth-posterior-ablation/logs/README.md
 bench/depth-posterior-ablation/.asv/
+
+# Metal and Darby head-to-head logs. The summary CSVs are the record.
+bench/metal-cluster-h2h/logs/*
+!bench/metal-cluster-h2h/logs/README.md
+bench/metal-cluster-h2h/darby-logs/**/*.log
 
 # GrowPAL v2 head-to-head scratch. The appended CSVs and row files are the record.
 bench/growpal-h2h-v2/.asv/

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Fetch rgoswami/anneal-paper-data once before a script reads the dumps."""
+"""Fetch HaoZeke/anneal-paper-data once before a script reads the dumps."""
 
 from __future__ import annotations
 

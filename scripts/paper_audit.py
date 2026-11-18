@@ -79,6 +79,11 @@ UNPUSHED = {
                                                 "reruns, first cited by 93e17b69; no pushed branch holds it",
     "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
                                                 "branch holds it",
+    "6d9fbd95826f9c173b8da36d16c471c95c377bbc": "the cloud-run head of the unfinished landfold campaign, first cited by "
+                                                "0a4439cb; no pushed commit has its tree",
+    "be3849e7811634aca67688da70f5413f9d860ec9": "the bench head of the blocked landfold campaigns, the Pt6Cu17 polish, "
+                                                "and the water dependency block, first cited by f718ed79; 75ebbb59 on "
+                                                "docs/paper-sync6 has its tree",
 }
 
 KNOWN_GAPS = {
@@ -145,6 +150,10 @@ KNOWN_GAPS = {
                                                                   "column)",
     "paper/jctc/data/lj75_gmin/lj75-recommended-seeds-2000-2199.csv": "revision and host unrecorded (no revision or "
                                                                       "host column)",
+    "paper/jctc/data/landfold_maps_v7/rerun-status.csv": "revision 6d9fbd95 is not in this repository; revision "
+                                                         "be3849e7 is not in this repository",
+    "bench/metal-cluster-h2h/ptcu-b3d03061/polish-reruns.csv": "revision be3849e7 is not in this repository",
+    "bench/water-h2o20-goat/rerun-attempts.csv": "revision be3849e7 is not in this repository",
 }
 
 UNTRACED = []
