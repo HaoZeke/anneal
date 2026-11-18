@@ -133,7 +133,7 @@ is not the hash.
 | 3.5.1   | 1, 0, 1         | 4                    |
 | 3.6.0   | 1, 1, 1         | 6                    |
 | 3.7.0   | 1, 2, 1         | 6                    |
-| next    | 1, 4, 1         | 6                    |
+| next    | 1, 5, 1         | 7                    |
 
 3.6.0 raised the minor for =rgpot_eindir_abi_compatible=; a caller built against
 minor 0 still matches it.
@@ -151,6 +151,8 @@ The next release also raises the minor to 4 for the Taylor jet functions and the
 statuses =RGPOT_NO_JET= (6), =RGPOT_JET_BRANCH= (7) and =RGPOT_JET_DOMAIN= (8).
 The jet callback also lives behind =fused_cache=, so the layout revision stays
 at 1.
+It also raises the minor to 5 for the engine and RPC Hessian-vector
+interfaces.
 
 The ledger notes that soversion 3 was the 3.4.0 layout, which 3.5.0 reused after
 the layout changed, and that 4 is the 3.5.0 layout, shipped from 3.5.1.

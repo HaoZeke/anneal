@@ -41,7 +41,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 4
+#define RGPOT_ABI_VERSION_MINOR 5
 
 /**
  * Layout revision of this build.
@@ -83,6 +83,16 @@ typedef enum rgpot_fused_error_kind_t {
    */
   RGPOT_FUSED_INVALID_RESULT = 3,
 } rgpot_fused_error_kind_t;
+
+/**
+ * The ABI major this loader speaks, `RGPOT_ENGINE_ABI_VERSION` of the header.
+ */
+#define ENGINE_ABI_VERSION 1
+
+/**
+ * Engine code meaning the backend does not support the requested operation.
+ */
+#define ENGINE_ERR_UNSUPPORTED 3
 
 /**
  * How a Hessian-vector product is computed.

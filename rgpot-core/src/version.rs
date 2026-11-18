@@ -43,7 +43,7 @@ pub struct rgpot_abi_stamp_t {
 /// ABI major of this build.
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
-pub const RGPOT_ABI_VERSION_MINOR: u16 = 4;
+pub const RGPOT_ABI_VERSION_MINOR: u16 = 5;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -163,6 +163,17 @@ mod tests {
         );
         let stamp = rgpot_abi_stamp();
         assert_eq!(unsafe { rgpot_abi_compatible(&stamp) }, 1);
+    }
+
+    /// The engine and RPC Hessian-vector exports are additive, so the
+    /// minor moves to 5 after the Taylor jet exports.
+    #[test]
+    fn the_minor_counts_the_engine_and_rpc_hvp_exports() {
+        assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
+        assert_eq!(RGPOT_ABI_VERSION_MINOR, 5);
+        assert_eq!(rgpot_abi_stamp().abi_minor, 5);
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 2, 1)) }, 1);
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 6, 1)) }, 0);
     }
 
     fn stamp(major: u16, minor: u16, layout: u16) -> rgpot_abi_stamp_t {
