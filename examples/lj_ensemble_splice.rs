@@ -877,7 +877,9 @@ fn run_chain(
             Some(surface_kind.energy(v))
         });
         if let Some(portfolio) = portfolio.as_mut() {
-            portfolio.observe(screening, f, led.best);
+            let charged = led.spent().saturating_sub(before);
+            let charged = u64::try_from(charged).unwrap_or(u64::MAX);
+            portfolio.observe(screening, f, led.best, charged);
         }
         led.record_quench_boundary(before, f, xr.clone(), None);
         (f, xr)

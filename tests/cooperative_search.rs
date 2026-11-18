@@ -223,7 +223,7 @@ fn asynchronous_surface_exchange_preserves_private_history_and_work() {
     for _ in 0..20 {
         let mut portfolio = teacher.lock().unwrap();
         portfolio.begin(true);
-        portfolio.observe(false, -1.0, -1.0);
+        portfolio.observe(false, -1.0, -1.0, 1);
     }
     let learner = Arc::new(Mutex::new(SurfacePortfolio::with_block(
         &[transform],
