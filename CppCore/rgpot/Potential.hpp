@@ -223,6 +223,7 @@ public:
                 .variance = 0.0,
                 .stress = {},
                 .has_stress = 0};
+    guardForceCall(fi, &fo, caps().periodic);
 
 #ifdef RGPOT_HAS_CACHE
     rgpot::cache::KeyHash key = cacheKey(fi);
@@ -326,6 +327,15 @@ public:
   void forceBatch(const ForceBatch &batch) override {
     if (batch.nSystems == 0) {
       return;
+    }
+    // Before any element is read. A positive count with a null array
+    // used to crash in the zeroing loop below.
+    if (batch.in == nullptr || batch.out == nullptr) {
+      throw std::invalid_argument(
+          "invalid parameter: batch input or output is null");
+    }
+    for (size_t i = 0; i < batch.nSystems; ++i) {
+      guardForceCall(batch.in[i], &batch.out[i], caps().periodic);
     }
     for (size_t i = 0; i < batch.nSystems; ++i) {
       ForceOut &out = batch.out[i];

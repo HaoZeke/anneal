@@ -248,6 +248,7 @@ FullResult run_force(Pot &pot, const Geom &g) {
                 .pos = g.pos.data(),
                 .atmnrs = g.types.data(),
                 .box = flat.data()};
+  guardForceCall(in, &fo, kernelPeriodic(pot));
   pot.forceImpl(in, &fo);
   if (!std::isfinite(fo.energy)) {
     throw rgbind::NumericalError("energy is not finite");
@@ -285,8 +286,8 @@ PerAtomResult run_force_per_atom(Pot &pot, const Geom &g) {
                 .pos = g.pos.data(),
                 .atmnrs = g.types.data(),
                 .box = flat.data()};
-  pot.forcePerAtom(in, &fo,
-                   PerAtomOut{result.energies.data(), result.virials.data()});
+  invokeForcePerAtom(pot, in, &fo,
+                     PerAtomOut{result.energies.data(), result.virials.data()});
   if (!std::isfinite(fo.energy)) {
     throw rgbind::NumericalError("energy is not finite");
   }

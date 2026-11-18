@@ -756,6 +756,7 @@ endif
 # on, and the continuation after it builds it otherwise.
 
 if get_option('with_rust_core')
+    _args += ['-DRGPOT_HAS_RUST_CORE']
     cargo = find_program('cargo', required: true)
 
     # Cargo build profile; the script that runs cargo takes it by name.

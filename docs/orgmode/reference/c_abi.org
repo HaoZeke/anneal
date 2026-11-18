@@ -580,8 +580,18 @@ enum rgpot_status_t rgpot_potential_calculate(const struct rgpot_potential_t *po
   =RGPOT_INVALID_PARAMETER= with =peer refused: <first mismatch>= when
   =rgpot_potential_set_peer_capabilities= refused the peer; the callback is not
   called.
+  =RGPOT_INVALID_PARAMETER= when the positions tensor, its shape or its data is
+  missing (=invalid parameter: positions is null=), the position row count is
+  not positive (=invalid parameter: nAtoms must be positive=), the species
+  tensor or its data is missing (=invalid parameter: atomic numbers are null=),
+  or the cell tensor or its data is missing (=invalid parameter: box is null=).
+  The callback is not called.
+  A zero-atom geometry is named as such even when no force tensor is present.
   Otherwise the callback's status, unchanged.
   =RGPOT_INTERNAL_ERROR= for a caught panic.
+  A successful call does not clear =rgpot_last_error=.
+  The pointer stays the message of the last failure until a later call stores
+  a new one.
 
 *** =rgpot_potential_free=
 

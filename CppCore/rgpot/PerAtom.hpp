@@ -25,6 +25,7 @@
  */
 
 #include "rgpot/ForceStructs.hpp"
+#include "rgpot/PotHelpers.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -42,6 +43,15 @@ concept PerAtomPotential = requires(const P &pot, const ForceInput &in, ForceOut
                                     const PerAtomOut &atoms) {
   pot.forcePerAtom(in, out, atoms);
 };
+
+/// @c forcePerAtom after the same null-buffer check as @c forceImpl.
+/// The concept above only detects the member; this is the call.
+template <PerAtomPotential P>
+void invokeForcePerAtom(const P &pot, const ForceInput &in, ForceOut *out,
+                        const PerAtomOut &atoms) {
+  guardForceCall(in, out, kernelPeriodic(pot));
+  pot.forcePerAtom(in, out, atoms);
+}
 
 /// Zero the arrays of @p atoms for @p n atoms.
 inline void clearPerAtom(const PerAtomOut &atoms, std::size_t n) {

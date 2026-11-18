@@ -1,0 +1,1 @@
+Force and energy calls now reject a missing coordinate, species or force buffer, a missing cell on a periodic potential, and a system with no atoms. A system with no atoms is reported on its own, including when the force buffer is also absent.
