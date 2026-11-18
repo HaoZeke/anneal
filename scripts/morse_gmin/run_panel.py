@@ -407,7 +407,7 @@ def run_gmin(
             "H2H_SYSTEM": name,
             "H2H_SEED": str(seed),
             "H2H_TARGET": f"{target:.10f}",
-            "H2H_TOL": "0.001",
+            "H2H_TOL": f"{DEFAULT_HIT_TOL}",
             "H2H_ROW": str(work / "row.txt"),
         }
     )

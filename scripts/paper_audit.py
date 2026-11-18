@@ -1140,7 +1140,13 @@ def panel_references(audit: Audit) -> None:
                        *((f"bench/ase-{s}/rows.csv", audit.rows(f"bench/ase-{s}/rows.csv")) for s in ASE_PANEL),
                        ("bench/ase-au55/rows-for-cluster.csv", audit.rows("bench/ase-au55/rows-for-cluster.csv"))):
         worst = max((abs(float(r["best"]) - ref[r["system"]]) for r in rows if hits_of([r])), default=0.0)
-        audit.record(worst < 1e-3, path, "every hit within 1e-3 of its reference", f"{worst:.3g}", "below 0.001")
+        audit.record(
+            worst < DEFAULT_HIT_TOL,
+            path,
+            "every hit within 1e-3 of its reference",
+            f"{worst:.3g}",
+            "below 0.001",
+        )
 
     def f6(system: str) -> str:
         return f"\\({ref[system]:.6f}\\)"
@@ -1240,8 +1246,12 @@ def supporting_numbers(audit: Audit) -> None:
         return f"\\({ref[system]:.6f}\\)"
 
     # Board constants.
-    audit.cell(SI, "hit tolerance of the h2h examples", "0.001", float(re.search(
-        r'"lj38" => \(38, Kind::Lj, -173\.928427, ([\d.]+)\)', audit.text("examples/h2h_arm3.rs")).group(1)))
+    audit.cell(
+        SI,
+        "hit tolerance of the h2h examples",
+        "0.001",
+        float(DEFAULT_HIT_TOL),
+    )
     audit.said(SI, "We read a hit as an energy strictly below the reference plus \\(0.001\\),")
     audit.said(SI, f"The references, in reduced units, are {r6('lj38')} for LJ\\(_{{38}}\\), {r6('lj55')} for "
                    f"LJ\\(_{{55}}\\), and {r6('lj75')} for LJ\\(_{{75}}\\). LJ\\(_{{98}}\\) uses {r6('lj98')}, "
@@ -1403,18 +1413,32 @@ def supporting_numbers(audit: Audit) -> None:
 
     # Copper slab.
     script = "scripts/elja_hq_sci_molslab_bank.sh"
-    audit.cell(SI, "TARGET_ENERGY line", "119", float(next(
-        i for i, text in enumerate(audit.text(script).splitlines(), 1) if text == "export TARGET_ENERGY=-415.971529")))
-    audit.cell(SI, "TARGET_TOL line", "120", float(next(
-        i for i, text in enumerate(audit.text(script).splitlines(), 1) if i > 119 and text == "export TARGET_TOL=1e-3")))
-    audit.said(SI, "Its line 119 sets \\texttt{TARGET\\_ENERGY} to \\(-415.971529\\) and its line 120 sets "
-                   "\\texttt{TARGET\\_TOL} to \\(10^{-3}\\).")
+    energy_line = next(
+        i
+        for i, text in enumerate(audit.text(script).splitlines(), 1)
+        if text == "export TARGET_ENERGY=-415.971529"
+    )
+    tol_line = next(
+        i
+        for i, text in enumerate(audit.text(script).splitlines(), 1)
+        if i > energy_line and text == "export TARGET_TOL=${DEFAULT_HIT_TOL}"
+    )
+    audit.cell(SI, "TARGET_ENERGY line", str(energy_line), float(energy_line))
+    audit.cell(SI, "TARGET_TOL line", str(tol_line), float(tol_line))
+    audit.said(
+        SI,
+        f"Its line {energy_line} sets \\texttt{{TARGET\\_ENERGY}} to \\(-415.971529\\) and its line {tol_line} sets "
+        "\\texttt{TARGET\\_TOL} to \\(10^{-3}\\).",
+    )
     tally = "paper/jctc/scripts/hq_sci_tally.py"
-    audit.said(tally, "scripts/elja_hq_sci_molslab_bank.sh line 119 sets it too.")
-    audit.cell(tally, "the jcc script's target line", "80", float(next(
-        i for i, text in enumerate(audit.text("scripts/elja_jcc_molslab_ensemble.sh").splitlines(), 1)
-        if text.strip() == "TARGET=-415.971529")))
-    audit.said(tally, "scripts/elja_jcc_molslab_ensemble.sh line 80 sets that target.")
+    audit.said(tally, f"scripts/elja_hq_sci_molslab_bank.sh line {energy_line} sets it too.")
+    jcc_target_line = next(
+        i
+        for i, text in enumerate(audit.text("scripts/elja_jcc_molslab_ensemble.sh").splitlines(), 1)
+        if text.strip() == "TARGET=-415.971529"
+    )
+    audit.cell(tally, "the jcc script's target line", str(jcc_target_line), float(jcc_target_line))
+    audit.said(tally, f"scripts/elja_jcc_molslab_ensemble.sh line {jcc_target_line} sets that target.")
     bests = []
     for index in range(8):
         found = re.search(r"seed \d+: best (\S+) eV", audit.text(f"paper/jctc/logs/cuh2_fcc_rec_{index}.out"))

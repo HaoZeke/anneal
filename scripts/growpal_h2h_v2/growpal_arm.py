@@ -263,7 +263,7 @@ class LjRelax:
 
     def score(self, mol, energy: float) -> None:
         """A candidate hit is scored on the full pair sum."""
-        if len(mol) == self.meter.target and energy <= self.meter.level + EARLY_TOL:
+        if len(mol) == self.meter.target and energy_hits(energy, self.meter.level, EARLY_TOL):
             energy = lj_exact(mol.get_positions())
         self.meter.consider(len(mol), energy)
 

@@ -14,6 +14,7 @@
 # Each row carries the anneal revision it was measured on. A re-run
 # replaces rows of that revision and leaves the others in seeds.csv.
 set -euo pipefail
+DEFAULT_HIT_TOL=1e-3
 if [[ $(hostname) != bench ]]; then
   echo "uts hostname is $(hostname), expected bench" >&2
   exit 2
@@ -97,7 +98,7 @@ EOF
   (
     cd "$d"
     if [[ -n $target ]]; then
-      H2H_TARGET=$target H2H_TOL=0.001 \
+      H2H_TARGET=$target H2H_TOL=$DEFAULT_HIT_TOL \
         H2H_BUDGET=$budget H2H_SEED=$seed H2H_SYSTEM=$system \
         H2H_ROW=$d/row.txt taskset -c 0 "$GMIN" > stdout.txt
     else

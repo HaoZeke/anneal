@@ -20,6 +20,12 @@ import sys
 import time
 from pathlib import Path
 
+for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
+        break
+from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 STUB_S = HERE / "stub.S"
 PTRACE_TRACEME = 0
@@ -369,7 +375,7 @@ if __name__ == "__main__":
     seed = int(sys.argv[3])
     budget = int(sys.argv[4])
     reference = float(sys.argv[5])
-    row = run(config, account, seed, budget, reference, 0.001)
+    row = run(config, account, seed, budget, reference, DEFAULT_HIT_TOL)
     print(
         "occat_row "
         + " ".join(f"{key}={value}" for key, value in row.items()),

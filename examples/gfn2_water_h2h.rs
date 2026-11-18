@@ -107,7 +107,10 @@ impl ForceObjective {
             }
         }
         let call = OBJECTIVE_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
-        if self.target.is_some_and(|target| energy + wall <= target) {
+        if self
+            .target
+            .is_some_and(|target| anneal_core::energy_hits(energy + wall, target, 0.0))
+        {
             let _ = FIRST_HIT_CALL.compare_exchange(0, call, Ordering::Relaxed, Ordering::Relaxed);
         }
         (energy + wall, Array1::from_vec(gradient))

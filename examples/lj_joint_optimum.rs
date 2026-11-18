@@ -1211,7 +1211,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     (*charged, *energy, *hops)
                                 })
                         })
-                        .filter(|(_, energy, _)| *energy <= target + TARGET_TOLERANCE)
+                        .filter(|(_, energy, _)| {
+                            anneal_core::energy_hits(*energy, target, TARGET_TOLERANCE)
+                        })
                         .min_by_key(|(charged, _, _)| *charged);
                     let encounter = first.map_or(
                         Encounter::Censored {

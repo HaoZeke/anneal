@@ -12191,7 +12191,7 @@ mod tests {
         let force_to_hit = out
             .improvements
             .iter()
-            .find(|(_, _, _, energy)| *energy <= TARGET + HIT)
+            .find(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, HIT))
             .map(|(_, charged, _, _)| *charged);
         assert_eq!(force_to_hit, Some(spent));
         assert!(
@@ -12202,7 +12202,7 @@ mod tests {
         assert!(
             out.improvements
                 .iter()
-                .filter(|(_, _, _, energy)| *energy <= TARGET + HIT)
+                .filter(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, HIT))
                 .count()
                 == 1
         );
