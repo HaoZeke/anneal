@@ -71,7 +71,6 @@ fn main() {
     if named.iter().any(|o| *o == "comm" || *o == "communicating") {
         // Channel only: orbit plus Recognition. Keep the molecular library.
         cfg.depth_reward = false;
-        cfg.orbit_complete_on_new = true;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy =
             anneal_core::methods::minima_hopping::SharedVisitPolicy::Recognition;

@@ -1,10 +1,9 @@
 // Copyright (c) anneal developers
 
-//! Symmetrise, the largest outside-potential cost after assignment on LJ150.
+//! Symmetry detection on LJ150.
 //!
-//! `deviation` is the nearest-image residual of one fivefold turn.
-//! `orbit_completion` places every atom on the core's orbits. Both see a
-//! fresh cluster each call. The geometry is built outside the timed loop.
+//! `deviation` is the nearest-image residual of one fivefold turn. The
+//! geometry is built outside the timed loop.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::Array1;
@@ -38,18 +37,6 @@ fn kernels(c: &mut Criterion) {
                     n,
                     [0.0, 0.0, 1.0],
                     5,
-                ))
-            })
-        });
-        group.bench_function("orbit_completion", |b| {
-            b.iter(|| {
-                black_box(anneal_core::symmetrise::orbit_complete_core(
-                    black_box(x.view()),
-                    n,
-                    0.15,
-                    0.4,
-                    0.5,
-                    0.5,
                 ))
             })
         });

@@ -568,7 +568,11 @@ impl Template {
     }
 
     /// The ideal neighbour positions, scaled so the mean distance is one.
-    pub fn points(&self) -> Vec<[f64; 3]> {
+    ///
+    /// Only the matcher in this module reads them, to label a neighbourhood
+    /// for diagnostics. No move, proposal or constructor builds a structure
+    /// from them.
+    pub(crate) fn points(&self) -> Vec<[f64; 3]> {
         let raw: Vec<[f64; 3]> = match self {
             Template::FaceCentredCubic => vec![
                 [0.0, 1.0, 1.0],

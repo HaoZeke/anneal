@@ -95,8 +95,8 @@ pub(crate) use torsion::HeldHands;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
-    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, PairRange,
-    PriorSwitches, REMOVED_PRIOR_KEYS, RemovedConfigKeyError, SoapProposalMode,
+    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, PairRange, PriorSwitches,
+    REMOVED_PRIOR_KEYS, RemovedConfigKeyError, SoapProposalMode,
 };
 pub use moves::*;
 
@@ -1192,13 +1192,6 @@ pub struct Outcome {
     /// nearly disconnected sets, which is what a funnel boundary looks like
     /// from the inside.
     pub funnel: Option<(usize, usize, f64)>,
-    /// Symmetrisations attempted, and the energy they gained.
-    pub symmetrised: (usize, f64),
-    /// Orbit completions attempted, and the energy they gained.
-    pub orbits: (usize, f64),
-    /// Orbit candidates skipped unquenched because an earlier candidate of
-    /// the same completion was the identical structure.
-    pub orbit_duplicates: usize,
     /// Surface hops quenched, how many of their sweeps went below the
     /// structure they started from, and the energy those sweeps gained.
     pub surface_hops: (usize, usize, f64),
@@ -3445,54 +3438,6 @@ mod rigid_step_tests {
     }
 }
 
-/// Lowest temperature [`biased_metropolis`] divides by, so a zero temperature refuses every rise.
-const METROPOLIS_TEMPERATURE_FLOOR: f64 = 1e-12;
-
-/// Metropolis on the rise in energy plus deposits from `here` to `offer`,
-/// each an energy and a state, the test an ordinary hop faces at
-/// `temperature`.
-fn biased_metropolis<R: Rng + ?Sized>(
-    biases: &[&dyn Bias],
-    here: (f64, ArrayView1<f64>),
-    offer: (f64, ArrayView1<f64>),
-    temperature: f64,
-    rng: &mut R,
-) -> bool {
-    let deposits = |state: ArrayView1<f64>| {
-        biases
-            .iter()
-            .map(|b| b.potential(b.cv(state).view()))
-            .sum::<f64>()
-    };
-    // The energies are differenced before the deposits are added. A deposit
-    // added to a Sutton-Chen total near 7e4 first loses its low bits, and an
-    // offer at the chain's own energy in its own basin then rounds to either
-    // side of zero, which decides whether a random number is drawn.
-    let rise = offer.0 - here.0 + deposits(offer.1) - deposits(here.1);
-    let d = rise / temperature.max(METROPOLIS_TEMPERATURE_FLOOR);
-    d < 0.0 || rng.random::<f64>() < portable_exp(-d)
-}
-
-/// Whether `state` lies in a basin the history has deposited on, by the
-/// bias's own fingerprint and merge radius.
-fn returns_to_deposit<F: Fingerprint>(bias: &BasinBias<F>, state: ArrayView1<f64>) -> bool {
-    bias.potential(bias.cv(state).view()) > 0.0
-}
-
-/// Whether `state` lies in the same deposited basin as `best`, the lowest
-/// structure the run has seen, by the bias's own lookup.
-fn returns_to_best<F: Fingerprint>(
-    bias: &BasinBias<F>,
-    best: Option<&Array1<f64>>,
-    state: ArrayView1<f64>,
-) -> bool {
-    let well = |x: ArrayView1<f64>| bias.index().lookup(bias.cv(x).view());
-    match (well(state), best) {
-        (Some(here), Some(b)) => well(b.view()) == Some(here),
-        _ => false,
-    }
-}
-
 /// Stuck means stuck for longer than this chain has ever been stuck before,
 /// not stuck for some number someone chose. On a 75-point trace, a
 /// successful run goes tens of thousands of hops between improvements on its
@@ -3506,102 +3451,11 @@ fn stalled(cfg: &Config, quiet: usize, longest_quiet: usize) -> bool {
 }
 
 #[cfg(test)]
-mod biased_metropolis_tests {
-    use super::{Config, biased_metropolis, returns_to_best, returns_to_deposit, stalled};
-    use crate::bias::{BasinBias, Bias, SortedPairs};
-    use ndarray::Array1;
-    use rand::SeedableRng;
-    use rand::rngs::StdRng;
+mod stall_tests {
+    use super::{Config, stalled};
 
-    /// Flat coordinates of the chain's three-point structure.
-    const HERE: [f64; 3 * POINTS] = [0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
-    /// Flat coordinates of the offered three-point structure, a different basin from [`HERE`].
-    const OFFER: [f64; 3 * POINTS] = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
-    /// Points in [`HERE`] and [`OFFER`].
-    const POINTS: usize = 3;
-    /// Bias merge radius, small enough that [`HERE`] and [`OFFER`] are two basins.
-    const MERGE_RADIUS: f64 = 0.05;
-    /// Fixed deposit height, the 511 of the traced basin's deposits.
-    const DEPOSIT: f64 = 511.0;
-    /// Well-tempered factor of the bias.
-    const GAMMA: f64 = 5.0;
-    /// Search temperature of the trace.
-    const TEMPERATURE: f64 = 30.0;
-    /// Energy of [`OFFER`] below [`HERE`] in the trace.
-    const DROP: f64 = 200.0;
-    /// Seed of the traced run, reused for the acceptance draws.
-    const TRACE_SEED: u64 = 14100;
-    /// Acceptance tests drawn per bias, enough that a nonzero rate would show.
-    const TRIALS: usize = 1000;
     /// Points of the configuration the stall test reads its patience from.
     const STALL_POINTS: usize = 13;
-
-    fn bias() -> BasinBias<SortedPairs> {
-        BasinBias::new(
-            SortedPairs { n_points: POINTS },
-            MERGE_RADIUS,
-            DEPOSIT,
-            GAMMA,
-        )
-    }
-
-    /// The seed 14100 trace on Sutton-Chen 12-6 at 73 points: a completion
-    /// 200 below the chain at temperature 30, into a basin 511 deeper in
-    /// deposits. On raw energy it is always taken; with the deposits it
-    /// is a rise of 311, and refused.
-    #[test]
-    fn deposits_at_the_offer_refuse_a_drop_in_energy() {
-        let here = Array1::from(HERE.to_vec());
-        let offer = Array1::from(OFFER.to_vec());
-        let empty = bias();
-        let mut filled = bias();
-        let s = filled.cv(offer.view());
-        filled.deposit(s.view(), TEMPERATURE);
-        assert_eq!(filled.potential(s.view()), DEPOSIT);
-        let mut rng = StdRng::seed_from_u64(TRACE_SEED);
-        let mut taken = |bias: &dyn Bias| {
-            (0..TRIALS)
-                .filter(|_| {
-                    biased_metropolis(
-                        &[bias],
-                        (0.0, here.view()),
-                        (-DROP, offer.view()),
-                        TEMPERATURE,
-                        &mut rng,
-                    )
-                })
-                .count()
-        };
-        assert_eq!(taken(&empty), TRIALS);
-        assert_eq!(taken(&filled), 0);
-    }
-
-    #[test]
-    fn only_a_deposited_basin_is_a_return() {
-        let here = Array1::from(HERE.to_vec());
-        let offer = Array1::from(OFFER.to_vec());
-        let mut bias = bias();
-        assert!(!returns_to_deposit(&bias, offer.view()));
-        let s = bias.cv(offer.view());
-        bias.deposit(s.view(), TEMPERATURE);
-        assert!(returns_to_deposit(&bias, offer.view()));
-        assert!(!returns_to_deposit(&bias, here.view()));
-    }
-
-    #[test]
-    fn only_the_basin_of_the_best_is_a_return_to_it() {
-        let here = Array1::from(HERE.to_vec());
-        let offer = Array1::from(OFFER.to_vec());
-        let mut bias = bias();
-        assert!(!returns_to_best(&bias, Some(&offer), offer.view()));
-        for x in [&here, &offer] {
-            let s = bias.cv(x.view());
-            bias.deposit(s.view(), TEMPERATURE);
-        }
-        assert!(returns_to_best(&bias, Some(&offer), offer.view()));
-        assert!(!returns_to_best(&bias, Some(&here), offer.view()));
-        assert!(!returns_to_best(&bias, None, offer.view()));
-    }
 
     #[test]
     fn a_chain_is_stalled_past_twice_its_longest_quiet_stretch() {
@@ -4443,8 +4297,6 @@ where
     let mut kernels = search_kernels(cfg);
     let mut general_taboo = general::FingerprintTaboo::default();
     let mut collective = general::CollectiveShare::default();
-    let mut regrow_share = general::CollectiveShare::patient();
-    let mut regrow_temperature = general::MoveTemperature::default();
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
@@ -4485,17 +4337,6 @@ where
     let mut unconverged_records = usize::from(!initial_recordable);
     let mut pending_raw: Option<(f64, f64)> = None;
     let mut pending_design: Option<Array1<f64>> = None;
-    // A posterior over what to build, consulted when a growth move is drawn.
-    // The allocator decides which move; this decides the move's parameters,
-    // which is the one place a model can change what a hop reaches rather than
-    // where it goes. Costs no charged evaluations: candidates are built and
-    // featured without calling the objective.
-    let mut constructor = if cfg.move_library.learns_construction() {
-        Some(crate::construct::Constructor::new(cfg.construct_width))
-    } else {
-        None
-    };
-    let mut pending_features: Option<Array1<f64>> = None;
     // The temperature is the law rather than a setting: the design point
     // clamped between the sphere-model descent ceiling and the birth-death
     // escape floor, with the barrier estimated from the uphill steps the chain
@@ -4642,8 +4483,6 @@ where
     let mut restarts = 0usize;
     let mut exchanges_refused = 0usize;
     let mut jumps = 0usize;
-    let mut symmetrised = 0usize;
-    let mut symmetry_gain = 0.0_f64;
     let mut continuous_symmetry_attempts = 0usize;
     // Project when the interval is due and the ledger has a new lowest
     // energy. Repeating the projection on a basin that is not the
@@ -4754,9 +4593,6 @@ where
     let mut species_kinetic = (16.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
     let species_kinetic_floor = (4.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
     let species_kinetic_cap = (1.5 * n as f64 * cfg.energy_scale).max(species_kinetic);
-    let mut orbits_completed = 0usize;
-    let mut orbit_duplicates = 0usize;
-    let mut orbit_gain = 0.0_f64;
     let surface_hops = (0usize, 0usize, 0.0_f64);
     let mut accepted_transitions = Vec::new();
     // All live-state replacement consumes one complete destination record.
@@ -4949,7 +4785,6 @@ where
     let mut checkpoint_quench_start = 0usize;
     let mut checkpoint_transition_start = 0usize;
     let mut next_checkpoint = checkpoint_interval;
-    let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
     // Energy last polished by an unlike-pair quench. `NaN` until the first
     // binary incumbent, so a one-species chain never enters the sweep.
@@ -5727,7 +5562,6 @@ where
                 branch_spent = branch_spent.saturating_add(cost);
                 charged_at_best = charged_at_best.saturating_add(cost);
                 last_polish_spent = last_polish_spent.saturating_add(cost);
-                next_reoccupy = next_reoccupy.saturating_add(cost);
                 reorder_wait = reorder_wait.saturating_add(cost);
                 branch_wait = walked.saturating_add(cost);
                 if std::env::var("ANNEAL_BRANCH_TRACE").is_ok() {
@@ -5738,25 +5572,7 @@ where
                 }
             }
         }
-        // The reoccupation move runs inside the chain and charges the
-        // ledger directly; its result enters the same adoption path as an
-        // external proposal.
         let mut internal_action: Option<CheckpointAction> = None;
-        if let Some(lattice) = cfg.reoccupy.as_ref()
-            && hops > 0
-            && ledger.spent() >= next_reoccupy
-        {
-            next_reoccupy = ledger.spent().saturating_add(cfg.reoccupy_interval.max(1));
-            let rebuilt = crate::methods::lattice_search::reoccupy(lattice, ledger, x.view());
-            let (energy, relaxed) = relax(ledger, rebuilt.view(), cfg.relax_steps);
-            if energy.is_finite() && energy < e - 1e-9 && relaxed.len() == x.len() {
-                internal_action = Some(CheckpointAction::ExternalAdopt {
-                    state: relaxed,
-                    action: "reoccupy".to_owned(),
-                    external_calls: 0,
-                });
-            }
-        }
         // A fresh cluster on this clock returns to the Mackay icosahedron
         // (Doye, J. Chem. Phys. 111, 8417 (1999)). When the climb is on,
         // the same clock is one directed leave, not that redraw. The hop
@@ -6666,86 +6482,6 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        // The labelled cut wins by handing the quench a compact body and an
-        // ordering the energy itself prefers. The same two steps, without a
-        // named body: grow onto the holes of the best-coordinated atoms, then
-        // put one species on the sites an unrelaxed swap ranks lowest. The
-        // family waits, and a miss widens the wait, so a search that was
-        // already descending is not spent on it.
-        if cfg.general_collective
-            && !cfg.move_library.is_rigid_body()
-            && !cfg.move_library.is_molecular()
-            && hops as u64 >= u64::from(regrow_share.stride())
-            && regrow_share.due(hops as u64)
-            && ledger.remaining() > 32
-        {
-            let species = cfg.species.clone().unwrap_or_else(|| vec![0; n]);
-            let mut score = |point: ArrayView1<f64>| -> Option<f64> {
-                if ledger.remaining() == 0 {
-                    return None;
-                }
-                let (value, _) = relax(ledger, point, 0);
-                value.is_finite().then_some(value)
-            };
-            if let Some(grown) = general::regrow_by_energy(x.view(), &mut score) {
-                let (group_a, group_b) = species_groups(&species);
-                let ordered = if group_a.len().saturating_mul(group_b.len()) > 1
-                    && group_a.len() * group_b.len() <= 320
-                {
-                    binary_geometry::reassign_by_site_energy(
-                        grown.view(),
-                        &group_a,
-                        &group_b,
-                        &mut score,
-                    )
-                    .unwrap_or(grown)
-                } else {
-                    let mut best = grown.clone();
-                    let mut best_value = score(best.view()).unwrap_or(f64::INFINITY);
-                    for candidate in general::homotop_candidates(grown.view(), &species) {
-                        let Some(value) = score(candidate.view()) else {
-                            break;
-                        };
-                        if value < best_value {
-                            best_value = value;
-                            best = candidate;
-                        }
-                    }
-                    best
-                };
-                if ledger.remaining() > 0 {
-                    let (energy, state) = relax(ledger, ordered.view(), cfg.relax_steps);
-                    if energy.is_finite()
-                        && state.len() == x.len()
-                        && quench_is_sane(cfg, energy, state.view())
-                    {
-                        let recorded = energy < ledger.best - 1e-6;
-                        if recorded {
-                            ledger.record(energy, state.view());
-                        }
-                        let temperature = regrow_temperature.value(cfg.temperature);
-                        let draw = rng.random::<f64>();
-                        let accepted = regrow_temperature.accept(energy - e, temperature, draw);
-                        if recorded || (accepted && energy < e) {
-                            general_taboo.remember(energy, state.view(), &species);
-                            x = state;
-                            e = energy;
-                            here = None;
-                            soft_cache = None;
-                            current_validation_gradient = None;
-                        }
-                        regrow_share.observe(energy < e, recorded);
-                    } else {
-                        regrow_share.observe(false, false);
-                    }
-                }
-            } else {
-                regrow_share.observe(false, false);
-            }
-            if ledger.remaining() == 0 || ledger.target_reached() {
-                break HopStop::of_closed(ledger);
-            }
-        }
         if cfg.general_collective
             && call_due
             && let Some((energy, state)) = general_taboo.lowest()
@@ -7110,19 +6846,10 @@ where
             }
             .propose(x.view(), cfg.temperature, rng)
         } else {
-            match (&mut constructor, &kernels[k]) {
-                (Some(c), ClusterMove::Reseed { n_points, .. }) => {
-                    let (cand, f) = c.propose(x.view(), *n_points, rng);
-                    pending_features = Some(f);
-                    cand
-                }
-                _ => {
-                    if matches!(kernels[k], ClusterMove::EnergyLattice) {
-                        energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
-                    } else {
-                        kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
-                    }
-                }
+            if matches!(kernels[k], ClusterMove::EnergyLattice) {
+                energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
+            } else {
+                kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
             }
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
@@ -7151,24 +6878,10 @@ where
                     continue;
                 }
                 k = k2;
-                trial = match (&mut constructor, &kernels[k]) {
-                    (Some(c), ClusterMove::Reseed { n_points, .. }) => {
-                        let (cand, f) = c.propose(x.view(), *n_points, rng);
-                        pending_features = Some(f);
-                        cand
-                    }
-                    _ => {
-                        if matches!(kernels[k], ClusterMove::EnergyLattice) {
-                            energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
-                        } else {
-                            kernels[k].propose_scaled(
-                                x.view(),
-                                cfg.temperature,
-                                proposal_scale,
-                                rng,
-                            )
-                        }
-                    }
+                trial = if matches!(kernels[k], ClusterMove::EnergyLattice) {
+                    energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
+                } else {
+                    kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                 };
                 swapped = true;
                 break;
@@ -8454,12 +8167,6 @@ where
                 swap_share.observe(accept);
             }
             arm_best[k] = arm_best[k].min(e_new);
-            // The quench the construction actually reached, which is the only
-            // feedback the posterior gets and the reason it costs nothing
-            // extra: this relaxation was paid for by the move regardless.
-            if let (Some(c), Some(f)) = (&mut constructor, pending_features.take()) {
-                c.observe(f.view(), e_new, e);
-            }
         }
         // Every hop, accepted or not, so a basin census can tell a minimum
         // that was never proposed from one that was proposed and then lost
@@ -8675,155 +8382,6 @@ where
                 *seen = 1;
             }
         }
-        // Core symmetrisation of a newly entered basin (Oakley, Johnston,
-        // Wales 2013), quenched and offered to the same acceptance rule as a
-        // hop. Once per new basin: the arm form of this move was measured to
-        // take half of all draws at 83 per cent acceptance on 75 points,
-        // because a symmetric minimum re-symmetrises to itself and an
-        // accepted return is still an accept.
-        if cfg.point_symmetrise_on_new
-            && accept
-            && hop_room(hops)
-            && (moved_basin || cfg.point_symmetrise_every_accept)
-            && let Some(y) = crate::symmetrise::symmetrise_core(
-                x.view(),
-                n,
-                cfg.symmetry_tolerance,
-                cfg.symmetry_merge_radius,
-                cfg.symmetrise_core_fraction,
-            )
-        {
-            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-            if es.is_finite() && xs.len() == x.len() {
-                let sym_gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    es,
-                    xs.view(),
-                    &mut unconverged_records,
-                );
-                hops += 1;
-                symmetrised += 1;
-                let d = (es - e) / temperature.max(1e-12);
-                if d < 0.0 || rng.random::<f64>() < portable_exp(-d) {
-                    if es < e {
-                        symmetry_gain += e - es;
-                    }
-                    adopt_minimum!(
-                        es,
-                        xs,
-                        sym_gradient,
-                        None,
-                        AdoptionHistory::Fresh,
-                        None,
-                        Some("point-symmetrise"),
-                        hops
-                    );
-                }
-            }
-        }
-        // Orbit completion of a newly entered basin: the core's point group
-        // applied to the whole cluster, so surface atoms move onto the empty
-        // orbit positions the core implies. Once per new basin, every
-        // candidate the core asks for is quenched and recorded, and the
-        // lowest is offered to the raw Metropolis test. When the chain is
-        // stuck and the completion ends in the filled basin of the lowest
-        // structure seen, it faces the biased test a hop faces instead: on
-        // raw energy alone it carries the chain back to the shelf it is
-        // stuck on. A filled basin above that shelf is often where the
-        // chain goes on to the minimum, so a return there stays raw.
-        // Under a shared history each minimum is completed by one chain only,
-        // and every product is reported, so other chains recognise it.
-        let mut orbit_offer = None;
-        if cfg.packing_surface().orbit_on_new
-            && accept
-            && hop_room(hops)
-            && (moved_basin || cfg.point_symmetrise_every_accept)
-            && history_here
-                .zip(history.as_deref_mut())
-                .is_none_or(|(m, h)| h.claim_completion(m))
-        {
-            let candidates = crate::packing::orbit_candidates(
-                x.view(),
-                n,
-                cfg.orbit_core,
-                cfg.symmetry_tolerance,
-                cfg.symmetry_merge_radius,
-                cfg.symmetrise_core_fraction,
-                cfg.min_separation,
-            );
-            for (k, y) in candidates.iter().enumerate() {
-                if candidates[..k]
-                    .iter()
-                    .any(|earlier| hop_is_identity(earlier.view(), y.view()))
-                {
-                    orbit_duplicates += 1;
-                    continue;
-                }
-                let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-                if es.is_finite() && xs.len() == x.len() {
-                    let sym_gradient = record_quenched_answer(
-                        cfg,
-                        ledger,
-                        &mut grad,
-                        es,
-                        xs.view(),
-                        &mut unconverged_records,
-                    );
-                    hops += 1;
-                    orbits_completed += 1;
-                    let product_report = match (history.as_deref_mut(), sym_gradient.as_ref()) {
-                        (Some(h), Some(g)) => {
-                            let report = h.observe(es, xs.view(), g.view());
-                            if let Some(r) = report {
-                                history_observations += 1;
-                                history_new += usize::from(r.is_new);
-                            }
-                            report
-                        }
-                        _ => None,
-                    };
-                    if orbit_offer
-                        .as_ref()
-                        .is_none_or(|(lowest, _, _, _)| es < *lowest)
-                    {
-                        orbit_offer = Some((es, xs, sym_gradient, product_report));
-                    }
-                }
-            }
-        }
-        if let Some((es, xs, sym_gradient, product_report)) = orbit_offer {
-            let mut biases: Vec<&dyn Bias> = Vec::new();
-            if stalled(cfg, quiet, longest_quiet)
-                && returns_to_deposit(&bias, xs.view())
-                && returns_to_best(&bias, ledger.best_state.as_ref(), xs.view())
-            {
-                biases.push(&bias);
-                if let Some(sp) = spectral.as_ref() {
-                    biases.push(sp);
-                }
-            }
-            if biased_metropolis(&biases, (e, x.view()), (es, xs.view()), temperature, rng) {
-                if es < e {
-                    orbit_gain += e - es;
-                }
-                let evidence = match product_report {
-                    Some(report) => AdoptionHistory::Observed(Some(report)),
-                    None => AdoptionHistory::Fresh,
-                };
-                adopt_minimum!(
-                    es,
-                    xs,
-                    sym_gradient,
-                    None,
-                    evidence,
-                    None,
-                    Some("orbit-completion"),
-                    hops
-                );
-            }
-        }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
         // every hop (accepted or not) so the coordinate tracks occupation;
         // only accepted moves grow the graph (visit records last→current).
@@ -8948,100 +8506,6 @@ where
             longest_quiet = 0;
             restarts += 1;
             continue;
-        }
-        if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
-            let withhold = cfg.active_region.is_some() || cfg.frozen.is_some();
-            if withhold {
-                // Withhold Ih-preserving symmetrise on a packing cluster,
-                // and never run CNA or point-group symmetrise on a slab.
-                // A molecule without a frozen frame still uses the branch
-                // below. The 555 fraction is an observation, not a hop
-                // target.
-                quiet = 0;
-                longest_quiet = 0;
-            } else {
-                // The stall counter is cleared here, not only in the escape
-                // branches below. Without it a stuck chain satisfies the condition
-                // on every subsequent hop and symmetrises on every one: measured at
-                // 98 points, 57989 firings in a single run, about one hop in seven,
-                // and the seed came back at -539.81 against a target of -543.67.
-                quiet = 0;
-                longest_quiet = 0;
-                // The structure is pushed onto whatever approximate symmetry it
-                // has and quenched. Taken only when it improves: unlike a funnel
-                // escape, this is a guess about where the answer is, not a way out
-                // of where the chain is.
-                // The whole point group, not one axis. A tetrahedral structure is
-                // not produced by averaging orbits under a single three-fold
-                // rotation; the tetrahedral group is generated by a three-fold and
-                // a two-fold together, and the 98-point global minimum is
-                // tetrahedral. Detecting several axes and closing them into a group
-                // is what makes this the published scheme rather than an axial
-                // constraint wearing its name.
-                let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-                for order in [2usize, 3, 4, 5, 6] {
-                    if let Some(c) =
-                        crate::symmetrise::detect(x.view(), n, &[order], cfg.symmetry_tolerance)
-                    {
-                        cands.push(c);
-                    }
-                }
-                let group = crate::symmetrise::generate_group(&cands, 60);
-                let symmetrised_state = if group.len() > 1 {
-                    Some(match cfg.species.as_deref() {
-                        Some(species) if species.len() == n => {
-                            crate::symmetrise::symmetrise_group_within(
-                                x.view(),
-                                n,
-                                &group,
-                                cfg.symmetry_merge_radius,
-                                species,
-                            )
-                        }
-                        _ => crate::symmetrise::symmetrise_group(
-                            x.view(),
-                            n,
-                            &group,
-                            cfg.symmetry_merge_radius,
-                        ),
-                    })
-                } else {
-                    crate::symmetrise::symmetrise_detected(
-                        x.view(),
-                        n,
-                        &[2, 3, 4, 5, 6],
-                        cfg.symmetry_tolerance,
-                        cfg.symmetry_merge_radius,
-                    )
-                    .map(|(y, _)| y)
-                };
-                if let Some(y) = symmetrised_state {
-                    let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-                    let sym_gradient = record_quenched_answer(
-                        cfg,
-                        ledger,
-                        &mut grad,
-                        es,
-                        xs.view(),
-                        &mut unconverged_records,
-                    );
-                    hops += 1;
-                    symmetrised += 1;
-                    if es < e {
-                        symmetry_gain += e - es;
-                        adopt_minimum!(
-                            es,
-                            xs,
-                            sym_gradient,
-                            None,
-                            AdoptionHistory::Fresh,
-                            None,
-                            Some("stall-symmetrise"),
-                            hops
-                        );
-                    }
-                }
-            }
         }
         if cfg.tabu_on_stall && stuck {
             // The funnel the chain has been unable to leave, named by where it
@@ -9780,9 +9244,6 @@ where
             let (a, b) = p.sizes();
             (a, b, p.connectivity)
         }),
-        symmetrised: (symmetrised, symmetry_gain),
-        orbits: (orbits_completed, orbit_gain),
-        orbit_duplicates,
         surface_hops,
         continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
@@ -10289,6 +9750,124 @@ mod group_move_tests {
 mod tests {
     use super::*;
 
+    /// Smallest distance between two points of a proposal below which they
+    /// count as coincident: a quench from there has a pair force that is
+    /// either infinite or lost in rounding.
+    const COINCIDENT: f64 = 1e-2;
+
+    fn closest_pair(x: ArrayView1<f64>) -> f64 {
+        let n = x.len() / 3;
+        let mut closest = f64::INFINITY;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d: f64 = (0..3)
+                    .map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                closest = closest.min(d);
+            }
+        }
+        closest
+    }
+
+    /// A proposal has to be a structure of the right size, with finite and
+    /// distinct points, from a cold start, before the chain has seen a
+    /// basin. This is what the removed library reseeds were checked for,
+    /// now asked of the move kernels that remain.
+    #[test]
+    fn stock_kernels_propose_the_right_size_from_a_cold_start() {
+        for n in [13_usize, 38, 55, 98] {
+            let cfg = Config::recommended(n);
+            let mut rng = StdRng::seed_from_u64(3);
+            let x = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+            let libraries = [
+                ClusterMove::library(n),
+                ClusterMove::library_lean(n),
+                ClusterMove::library_lean_burst(n),
+            ];
+            for kernel in libraries.iter().flatten() {
+                for _ in 0..8 {
+                    let proposal = kernel.propose(x.view(), 1.0, &mut rng);
+                    assert_eq!(proposal.len(), 3 * n, "{} at n = {n}", kernel.name());
+                    assert!(
+                        proposal.iter().all(|v| v.is_finite()),
+                        "{} at n = {n}",
+                        kernel.name()
+                    );
+                    let closest = closest_pair(proposal.view());
+                    assert!(
+                        closest > COINCIDENT,
+                        "{} at n = {n}: two points {closest} apart",
+                        kernel.name()
+                    );
+                }
+            }
+        }
+    }
+
+    /// A single point has nothing to be coincident with, and a proposal for
+    /// it still has the right size.
+    #[test]
+    fn stock_kernels_keep_a_single_point_a_single_point() {
+        let cfg = Config::recommended(1);
+        let mut rng = StdRng::seed_from_u64(3);
+        let x = Array1::zeros(3);
+        let libraries = [
+            ClusterMove::library(1),
+            ClusterMove::library_lean(1),
+            ClusterMove::library_lean_burst(1),
+        ];
+        assert!(cfg.min_separation > 0.0);
+        for kernel in libraries.iter().flatten() {
+            let proposal = kernel.propose(x.view(), 1.0, &mut rng);
+            assert_eq!(proposal.len(), 3, "{}", kernel.name());
+            assert!(proposal.iter().all(|v| v.is_finite()), "{}", kernel.name());
+        }
+    }
+
+    /// A trial whose quench is not finite is not a minimum. It is not
+    /// adopted, not reported as an improvement, and does not replace the
+    /// best the walk holds. The constructor that used to be checked for
+    /// this is gone; the walk's own handling of a failed quench is what
+    /// remains to guard.
+    #[test]
+    fn a_non_finite_trial_quench_is_not_recorded_or_adopted() {
+        let n = 13;
+        let mut cfg = Config::recommended(n);
+        cfg.max_hops = Some(40);
+        cfg.replicas = 1;
+        let mut rng = StdRng::seed_from_u64(13);
+        let start = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(4_000);
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            if calls == 1 {
+                (-1.0, x.to_owned())
+            } else {
+                (f64::NAN, x.to_owned())
+            }
+        };
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        assert!(calls > 1, "the walk never tried a trial");
+        assert_eq!(out.best, -1.0);
+        assert!(ledger.best.is_finite());
+        assert!(out.best_state.iter().flatten().all(|v| v.is_finite()));
+        assert!(
+            out.improvements.iter().all(|(_, _, _, e)| e.is_finite()),
+            "a non-finite quench was reported as an improvement"
+        );
+        assert!(
+            out.accepted_transitions
+                .iter()
+                .all(|t| t.to_energy.is_finite()),
+            "a non-finite quench was adopted"
+        );
+    }
+
     #[test]
     fn an_ordinary_target_improvement_uses_the_completed_quench_clock() {
         let mut cfg = Config::for_cluster(1);
@@ -10374,10 +9953,8 @@ mod tests {
             cfg.screen_steps = 1;
             cfg.trail_on_stall = false;
             cfg.tabu_on_stall = false;
-            cfg.symmetrise_on_stall = false;
             cfg.prior_soap = false;
             cfg.energy_lattice = false;
-            cfg.orbit_complete_on_new = false;
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
             cfg.soap_mode = SoapProposalMode::Off;
             if seed_known_minimum {
@@ -10441,12 +10018,10 @@ mod tests {
             cfg.retry_noop_stall_leave = retry_noop;
             cfg.trail_on_stall = false;
             cfg.restart_on_stall = false;
-            cfg.symmetrise_on_stall = false;
             cfg.tabu_on_stall = false;
             cfg.return_screen = false;
             cfg.bayes_screen = false;
             cfg.energy_lattice = false;
-            cfg.orbit_complete_on_new = false;
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
             cfg.soap_mode = SoapProposalMode::Off;
             cfg.prior_soap = false;
@@ -10567,10 +10142,8 @@ mod tests {
         binary.escape_on_stall = false;
         binary.trail_on_stall = false;
         binary.tabu_on_stall = false;
-        binary.symmetrise_on_stall = false;
         binary.prior_soap = false;
         binary.energy_lattice = false;
-        binary.orbit_complete_on_new = false;
         binary.continuous_symmetry = ContinuousSymmetry::Off;
         binary.soap_mode = SoapProposalMode::Off;
         let with_descent = count_raw_reads(&binary);
@@ -10853,18 +10426,16 @@ mod tests {
             )]
         );
         assert!(matches!(morse.move_library, MoveLibrary::LeanBurst));
-        assert!(morse.return_screen && morse.orbit_complete_on_new && morse.bayes_screen);
+        assert!(morse.return_screen && morse.bayes_screen);
     }
 
     #[test]
-    fn communicating_is_orbit_without_depth_reward() {
+    fn communicating_is_recognition_without_depth_reward() {
         let rec = Config::recommended(75);
         let comm = Config::communicating(75);
         assert!(rec.depth_reward);
-        assert!(rec.orbit_complete_on_new);
         assert_eq!(rec.shared_visit_policy, SharedVisitPolicy::Tabu);
         assert!(!comm.depth_reward);
-        assert!(comm.orbit_complete_on_new);
         assert_eq!(comm.shared_deposits, 0);
         assert_eq!(comm.shared_visit_policy, SharedVisitPolicy::Recognition);
         assert!(comm.allocate_moves && comm.return_screen);
@@ -10899,57 +10470,6 @@ mod tests {
         let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(rigid.restart_on_stall);
         assert!(!stall_arms(&rigid).contains(&"restart"));
-    }
-
-    #[test]
-    fn packing_surface_names_twin_and_orbit_together() {
-        let mut cfg = Config::for_cluster(13);
-        assert!(!cfg.packing_surface().orbit_on_new);
-        assert!(!cfg.packing_surface().twin_as_move);
-        cfg.orbit_complete_on_new = true;
-        cfg.move_library = MoveLibrary::Twin;
-        let surface = cfg.packing_surface();
-        assert!(surface.orbit_on_new);
-        assert!(surface.twin_as_move);
-    }
-
-    #[test]
-    fn the_dual_orbit_core_is_opt_in() {
-        let plain = Config::for_cluster(13);
-        assert!(
-            matches!(plain.orbit_core, OrbitCore::Both(_)),
-            "for_cluster offers both cores: {:?}",
-            plain.orbit_core
-        );
-        assert!(!plain.orbit_complete_on_new);
-        assert!(plain.resolved_json().unwrap().contains("orbit_core"));
-        let recommended = Config::recommended(13);
-        assert_eq!(recommended.orbit_core, OrbitCore::Fraction);
-        assert!(!recommended.resolved_json().unwrap().contains("orbit_core"));
-        let dual = Config::for_cluster_dual_core(13);
-        assert!(dual.packing_surface().orbit_on_new);
-        assert_eq!(
-            dual.orbit_core,
-            OrbitCore::Both(crate::symmetrise::ShellCore::scaled(dual.length_scale))
-        );
-        assert!(dual.restart_on_stall);
-        assert!(!dual.escape_on_stall);
-        assert_eq!(dual.restart_patience, 4_000);
-        assert!(
-            dual.resolved_json()
-                .unwrap()
-                .contains(r#""orbit_core":{"both":"#)
-        );
-        assert_eq!(
-            dual.resolved_json().unwrap(),
-            Config::for_cluster(13)
-                .with_dual_orbit_core()
-                .resolved_json()
-                .unwrap()
-        );
-        let rigid = dual.with_rigid_bodies(crate::potentials::gmin_water_geometry());
-        assert!(!rigid.orbit_complete_on_new);
-        assert_eq!(rigid.orbit_core, OrbitCore::Fraction);
     }
 
     /// The claim the bank rests on: a bias handed to one chain and then to the
@@ -12423,52 +11943,6 @@ mod tests {
     }
 
     #[test]
-    fn orbit_arm_is_offered_only_without_completion_on_new_basins() {
-        let names = |cfg: &Config| -> Vec<String> {
-            search_kernels(cfg)
-                .iter()
-                .map(|kernel| kernel.name())
-                .collect()
-        };
-        let recommended = Config::recommended(13);
-        let mut armed = recommended.clone();
-        armed.orbit_arm = true;
-        assert_eq!(names(&recommended), names(&armed));
-        assert!(
-            armed
-                .resolved_json()
-                .unwrap()
-                .contains("\"orbit_arm\":true")
-        );
-        assert!(!recommended.resolved_json().unwrap().contains("orbit_arm"));
-        armed.orbit_complete_on_new = false;
-        let offered = names(&armed);
-        assert_eq!(offered.iter().filter(|name| *name == "orbit").count(), 1);
-        armed.orbit_arm = false;
-        assert!(!names(&armed).iter().any(|name| name == "orbit"));
-    }
-
-    #[test]
-    fn the_orbit_arm_steps_one_point_when_no_group_moves_anyone() {
-        let cfg = Config::for_cluster(3);
-        let kernel = ClusterMove::OrbitComplete {
-            n_points: 3,
-            tolerance: cfg.symmetry_tolerance,
-            merge_radius: cfg.symmetry_merge_radius,
-            core_fraction: cfg.symmetrise_core_fraction,
-            min_separation: cfg.min_separation,
-            fallback_step: 0.1,
-        };
-        let x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
-        let mut rng = StdRng::seed_from_u64(7);
-        let y = kernel.propose(x.view(), cfg.temperature, &mut rng);
-        let moved: Vec<usize> = (0..3)
-            .filter(|&i| (0..3).any(|k| y[3 * i + k] != x[3 * i + k]))
-            .collect();
-        assert_eq!(moved.len(), 1);
-    }
-
-    #[test]
     fn a_part_out_of_reach_comes_back_to_one_bond() {
         let start = Array1::from(vec![
             0.0, 0.0, 0.0, 1.4, 0.0, 0.0, 0.0, 1.4, 0.0, 9.0, 0.0, 0.0, 9.0, 1.4, 0.0,
@@ -12531,141 +12005,6 @@ mod tests {
         repair(&mut x, n, 0.85);
         let d = ((x[0] - x[3]).powi(2) + (x[1] - x[4]).powi(2) + (x[2] - x[5]).powi(2)).sqrt();
         assert!(d >= 0.85 - 1e-6, "overlap survived repair at {d}");
-    }
-
-    /// Orbit completion is the only quench that stores the target. Scoring
-    /// reads the encounter list the way `paper_controls` does: the first row
-    /// at or below the reference plus the hit tolerance, and the charged
-    /// count on that row. The count is the ledger's spent when the row was
-    /// recorded, which is earlier than the run's final spent.
-    #[test]
-    fn orbit_completion_improvement_is_scored_at_its_record() {
-        let n = 6;
-        let mut shelf_state = Array1::from(vec![
-            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
-            -1.0,
-        ]);
-        for (i, value) in shelf_state.iter_mut().enumerate() {
-            *value += 0.08 * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
-        }
-        let mut cfg = Config::for_cluster(n);
-        // The cap is read after the proposal hop has been counted, and
-        // again before orbit completion. One leaves no room for the orbit.
-        // `for_cluster` offers both cores; this census scores one completion.
-        cfg.orbit_core = OrbitCore::Fraction;
-        cfg.max_hops = Some(2);
-        cfg.bayes_screen = false;
-        cfg.calibrated_screen = false;
-        cfg.finish_improving = false;
-        cfg.return_screen = false;
-        cfg.screen_margin = f64::INFINITY;
-        cfg.screen_steps = 1;
-        cfg.relax_steps = 1;
-        cfg.polish_records = 3;
-        cfg.orbit_complete_on_new = true;
-        cfg.point_symmetrise_on_new = false;
-        let orbit_state = crate::packing::on_new_basin(
-            shelf_state.view(),
-            n,
-            cfg.symmetry_tolerance,
-            cfg.symmetry_merge_radius,
-            cfg.symmetrise_core_fraction,
-            cfg.min_separation,
-        )
-        .expect("jittered octahedron completes an orbit");
-        let moved = orbit_state
-            .iter()
-            .zip(shelf_state.iter())
-            .any(|(a, b)| (a - b).abs() > 1e-8);
-        assert!(moved, "orbit completion returned the input");
-
-        const SHELF: f64 = -1.0;
-        const TARGET: f64 = -10.0;
-        let hit_tol = crate::DEFAULT_HIT_TOL;
-        let same = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
-            left.len() == right.len()
-                && left
-                    .iter()
-                    .zip(right.iter())
-                    .all(|(a, b)| (a - b).abs() <= 1e-8)
-        };
-        let found_at = std::sync::atomic::AtomicUsize::new(usize::MAX);
-        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize| {
-            assert!(ledger.charge());
-            if steps == cfg.polish_records {
-                (TARGET, orbit_state.clone())
-            } else if same(state, orbit_state.view()) {
-                found_at.store(ledger.spent(), std::sync::atomic::Ordering::Relaxed);
-                (TARGET, orbit_state.clone())
-            } else {
-                (SHELF, shelf_state.clone())
-            }
-        };
-        let mut gradient = |ledger: &mut Ledger, state: ArrayView1<f64>| {
-            assert!(ledger.charge());
-            let marked = found_at.load(std::sync::atomic::Ordering::Relaxed);
-            if same(state, orbit_state.view())
-                && marked != usize::MAX
-                && ledger
-                    .encounters()
-                    .iter()
-                    .all(|(_, energy)| *energy != TARGET)
-            {
-                // The validating gradient is charged before the record.
-                // Later calls on this geometry are not the discovery.
-                found_at.store(ledger.spent(), std::sync::atomic::Ordering::Relaxed);
-            }
-            Some(Array1::zeros(state.len()))
-        };
-        let mut ledger = Ledger::new(10_000);
-        let mut rng = StdRng::seed_from_u64(11);
-        let out = run_with_gradient(
-            &cfg,
-            shelf_state.view(),
-            &mut ledger,
-            &mut relax,
-            Some(&mut gradient),
-            &mut rng,
-        )
-        .expect("finite start");
-
-        let spent = found_at.load(std::sync::atomic::Ordering::Relaxed);
-        assert_ne!(spent, usize::MAX, "orbit quench ran");
-        assert_eq!(out.orbits.0, 1, "orbit completion did not run once");
-        assert_eq!(out.best, TARGET);
-        assert!(
-            ledger
-                .encounters()
-                .iter()
-                .any(|(at, energy)| *at == spent && *energy == TARGET),
-            "ledger encounters {:?}, record at {spent}",
-            ledger.encounters()
-        );
-        let force_to_hit = out
-            .improvements
-            .iter()
-            .find(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, hit_tol))
-            .map(|(_, charged, _, _)| *charged);
-        assert_eq!(force_to_hit, Some(spent));
-        assert!(
-            out.charged > spent,
-            "final spent {} is not after the record at {spent}",
-            out.charged
-        );
-        assert!(
-            out.improvements
-                .iter()
-                .filter(|(_, _, _, energy)| crate::energy_hits(*energy, TARGET, hit_tol))
-                .count()
-                == 1
-        );
-        let shelf_energy = out
-            .improvements
-            .iter()
-            .find(|(_, _, _, energy)| (*energy - SHELF).abs() <= 1e-12)
-            .map(|(_, _, _, energy)| *energy)
-            .expect("shelf row");
-        assert!(!crate::energy_hits(shelf_energy, TARGET, hit_tol));
     }
 }
 

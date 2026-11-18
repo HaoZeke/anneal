@@ -351,11 +351,6 @@ fn main() {
     writeln!(meta, "arm: recommended_molecular").ok();
     writeln!(meta, "system: (NH3){m}").ok();
     writeln!(meta, "wall: none").ok();
-    if cfg.orbit_complete_on_new {
-        eprintln!("orbit completion is on; recommended_molecular was expected to leave it off");
-        std::process::exit(2);
-    }
-    writeln!(meta, "orbit_complete_on_new: {}", cfg.orbit_complete_on_new).ok();
     writeln!(
         meta,
         "source_commit: {}",
