@@ -41,7 +41,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 2
+#define RGPOT_ABI_VERSION_MINOR 3
 
 /**
  * Layout revision of this build.
@@ -61,6 +61,28 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
  */
 #define PROTOCOL_MINOR 0
 #endif
+
+/**
+ * Which kind of failure a fused evaluation ended in.
+ */
+typedef enum rgpot_fused_error_kind_t {
+  /**
+   * The stored outcome is a success, or nothing is stored.
+   */
+  RGPOT_FUSED_OK = 0,
+  /**
+   * The engine's self-consistent field did not converge.
+   */
+  RGPOT_FUSED_SCC_NOT_CONVERGED = 1,
+  /**
+   * The engine reported another failure.
+   */
+  RGPOT_FUSED_ENGINE_FAILED = 2,
+  /**
+   * The engine reported success with a malformed or non-finite result.
+   */
+  RGPOT_FUSED_INVALID_RESULT = 3,
+} rgpot_fused_error_kind_t;
 
 /**
  * How a Hessian-vector product is computed.
@@ -108,6 +130,12 @@ typedef enum rgpot_status_t {
    * A buffer was too small for the requested operation.
    */
   RGPOT_BUFFER_SIZE_ERROR = 4,
+  /**
+   * The self-consistent field of an electronic-structure engine did not
+   * converge. A callback returns it so that the core can tell this
+   * failure from any other; see `rgpot_potential_fused_error_kind`.
+   */
+  RGPOT_SCC_NOT_CONVERGED = 5,
 } rgpot_status_t;
 
 #if defined(RGPOT_HAS_RPC)
@@ -236,8 +264,9 @@ typedef struct rgpot_potential_t {
    */
   double box_matrix[9];
   /**
-   * Energy/gradient result shared by a matching eval-then-grad request.
-   * Held behind a pointer so the C view of the struct stays plain C.
+   * Outcome of the last fused evaluation, shared by every request with
+   * the same key. Held behind a pointer so the C view of the struct stays
+   * plain C.
    */
   struct rgpot_fused_cache_t *fused_cache;
 } rgpot_potential_t;
@@ -245,14 +274,66 @@ typedef struct rgpot_potential_t {
 /**
  * Evaluations a potential handle has answered, split by origin.
  *
- * `computed` counts callback invocations; `served` counts gradients
- * answered from the fused energy-and-gradient result without invoking the
- * callback. A caller that charges evaluations chooses which field to bill.
+ * `computed` counts callback invocations made through the fused cache;
+ * `served` counts requests, energy or gradient, success or failure, answered
+ * from the stored outcome without invoking the callback. A caller that
+ * charges evaluations chooses which field to bill.
  */
 typedef struct rgpot_eval_counts_t {
   uint64_t computed;
   uint64_t served;
 } rgpot_eval_counts_t;
+
+/**
+ * Engine settings that change the answer of a fused evaluation, for the C
+ * ABI.
+ *
+ * Fill it with [`rgpot_fused_settings_default`], set the fields that
+ * differ, and install it with [`rgpot_potential_set_fused_settings`]. Two
+ * requests at the same positions share an outcome only when these fields,
+ * the species and the cell are equal, so changing one is how a failed
+ * geometry is evaluated again. `struct_size` is the size of the caller's
+ * struct; a library that grows the struct reads only the fields the caller's
+ * size covers.
+ */
+typedef struct rgpot_fused_settings_t {
+  /**
+   * `sizeof` of the struct the caller compiled against.
+   */
+  uintptr_t struct_size;
+  /**
+   * Bit `i` is set when the cell is periodic along vector `i`.
+   */
+  uint32_t periodic;
+  /**
+   * Number of unpaired electrons.
+   */
+  int32_t spin;
+  /**
+   * SCC iteration budget.
+   */
+  uint32_t scc_max_iterations;
+  /**
+   * Total charge, in elementary charges.
+   */
+  double charge;
+  /**
+   * Numerical accuracy level of the engine.
+   */
+  double accuracy;
+  /**
+   * Electronic temperature, in kelvin.
+   */
+  double electronic_temperature;
+  /**
+   * NUL-terminated name of the SCC mixer, or NULL.
+   */
+  const char *scc_mixer;
+  /**
+   * NUL-terminated build or version string of the engine, or NULL.
+   */
+  const char *engine_build;
+} rgpot_fused_settings_t;
 
 /**
  * Work done by the Hessian-vector entry points of one handle.
@@ -407,6 +488,19 @@ const void *rgpot_tensor_data(const DLManagedTensorVersioned *tensor);
 const int64_t *rgpot_tensor_shape(const DLManagedTensorVersioned *tensor, int32_t *ndim_out);
 
 /**
+ * Set the error message of the current thread from C or C++.
+ *
+ * A potential callback calls this before it returns a failure status, so
+ * that the message travels with the failure. A NULL `msg` clears the
+ * message.
+ *
+ * # Safety
+ *
+ * `msg` must be NULL or point to a NUL-terminated string.
+ */
+void rgpot_set_last_error(const char *msg);
+
+/**
  * Retrieve a pointer to the last error message for the current thread.
  *
  * The pointer is valid until the next call to any `rgpot_*` function
@@ -489,6 +583,51 @@ enum rgpot_status_t rgpot_potential_eval_counts(const struct rgpot_potential_t *
  * `pot` must be NULL or a live pointer from [`rgpot_potential_new_eindir`].
  */
 void rgpot_potential_reset_eval_counts(const struct rgpot_potential_t *pot);
+
+/**
+ * Fill `out` with the default settings and the size of this library's
+ * struct.
+ *
+ * # Safety
+ *
+ * `out` must be NULL or writable. NULL is ignored.
+ */
+void rgpot_fused_settings_default(struct rgpot_fused_settings_t *out);
+
+/**
+ * Install the engine settings that key the fused cache of `pot`.
+ *
+ * The stored outcome stays, and a request made under other settings has
+ * another key, so it runs the engine even at the stored positions. A request
+ * under the same settings returns the stored outcome, a failure included.
+ *
+ * Returns `RGPOT_INVALID_PARAMETER` for a NULL argument, a `struct_size`
+ * smaller than this library's struct, or a string that is not UTF-8.
+ *
+ * # Safety
+ *
+ * `pot` must be NULL or a live handle, `settings` NULL or readable, and its
+ * strings NULL or NUL-terminated.
+ */
+enum rgpot_status_t rgpot_potential_set_fused_settings(const struct rgpot_potential_t *pot,
+                                                       const struct rgpot_fused_settings_t *settings);
+
+/**
+ * The kind of failure stored for the last geometry `pot` evaluated through
+ * its fused cache: `RGPOT_FUSED_SCC_NOT_CONVERGED` for an SCC that did not
+ * converge, `RGPOT_FUSED_ENGINE_FAILED` or `RGPOT_FUSED_INVALID_RESULT` for
+ * another failure, and `RGPOT_FUSED_OK` for a success, an empty cache or a
+ * NULL `pot`.
+ *
+ * Both the energy and the gradient request that find the failure return the
+ * same status, and `rgpot_last_error` carries the message of the first
+ * failure. Query the kind after either to tell the failures apart.
+ *
+ * # Safety
+ *
+ * `pot` must be NULL or a live handle.
+ */
+enum rgpot_fused_error_kind_t rgpot_potential_fused_error_kind(const struct rgpot_potential_t *pot);
 
 /**
  * Create a potential that is ALSO a valid eindir objective.

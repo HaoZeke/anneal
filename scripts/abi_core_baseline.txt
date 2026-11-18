@@ -32,3 +32,7 @@ rgpot_version
 rgpot_version_major
 rgpot_version_minor
 rgpot_version_patch
+rgpot_set_last_error
+rgpot_fused_settings_default
+rgpot_potential_set_fused_settings
+rgpot_potential_fused_error_kind

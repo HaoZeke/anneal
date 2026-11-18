@@ -43,7 +43,7 @@ pub struct rgpot_abi_stamp_t {
 /// ABI major of this build.
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
-pub const RGPOT_ABI_VERSION_MINOR: u16 = 2;
+pub const RGPOT_ABI_VERSION_MINOR: u16 = 3;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -227,11 +227,9 @@ mod tests {
 
     #[test]
     fn committed_header_matches_the_crate() {
-        let header = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/include/rgpot.h"
-        ))
-        .unwrap();
+        let header =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/include/rgpot.h"))
+                .unwrap();
         let want = format!("#define RGPOT_VERSION \"{}\"", env!("CARGO_PKG_VERSION"));
         assert!(header.contains(&want), "rgpot.h lacks {want}");
         for (name, value) in [
@@ -258,6 +256,13 @@ mod tests {
             "(*HessianVectorCallback)(void *user_data,",
             "typedef enum rgpot_hvp_scheme_t {",
             "typedef struct rgpot_hvp_counts_t {",
+            "typedef enum rgpot_fused_error_kind_t {",
+            "typedef struct rgpot_fused_settings_t {",
+            "rgpot_fused_settings_default(struct rgpot_fused_settings_t *out)",
+            "rgpot_potential_set_fused_settings(",
+            "rgpot_potential_fused_error_kind(const struct rgpot_potential_t *pot)",
+            "rgpot_set_last_error(const char *msg)",
+            "RGPOT_SCC_NOT_CONVERGED = 5",
         ] {
             assert!(header.contains(f), "rgpot.h lacks {f}");
         }
@@ -265,7 +270,10 @@ mod tests {
             "#define RGPOT_HVP_DEFAULT_STEP {:.1e}",
             crate::hvp::RGPOT_HVP_DEFAULT_STEP
         );
-        assert!(header.contains(&default_step), "rgpot.h lacks {default_step}");
+        assert!(
+            header.contains(&default_step),
+            "rgpot.h lacks {default_step}"
+        );
     }
 
     /// Every name in the rgpot-core ABI baseline is still declared by the
@@ -291,6 +299,10 @@ mod tests {
             "rgpot_potential_hvp_invalidate",
             "rgpot_potential_hvp_counts",
             "rgpot_potential_reset_hvp_counts",
+            "rgpot_set_last_error",
+            "rgpot_fused_settings_default",
+            "rgpot_potential_set_fused_settings",
+            "rgpot_potential_fused_error_kind",
         ] {
             assert!(baseline.lines().any(|l| l == name), "baseline lacks {name}");
         }
