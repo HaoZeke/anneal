@@ -2891,14 +2891,21 @@ where
 }
 
 fn axial_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<f64> {
+    let cutoff = crate::soap::axial_cutoff(origin);
     let good: Vec<([f64; 3], f64)> = crate::soap::axial_axis_table(origin)
         .into_iter()
-        .filter(|(_, d)| *d < 1.40)
+        .filter(|(_, d)| *d < cutoff)
         .collect();
     if good.is_empty() {
         return origin.to_owned();
     }
-    let target = if which.is_multiple_of(2) { 0.90 } else { 0.99 };
+    let count = (origin.len() / 3).max(2);
+    let bond = crate::structure::median_nearest_neighbour(origin, count);
+    let target = if which.is_multiple_of(2) {
+        bond * (2.0 / 3.0_f64).sqrt()
+    } else {
+        bond * (5.0 / 6.0_f64).sqrt()
+    };
     let (axis, _) = good
         .iter()
         .min_by(|a, b| {
@@ -2909,7 +2916,7 @@ fn axial_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<f64
         })
         .copied()
         .unwrap_or(good[0]);
-    crate::soap::step_away_axial_about(origin, rmsd.max(0.75), axis)
+    crate::soap::step_away_axial_about(origin, crate::soap::defect_support_step(origin, rmsd), axis)
 }
 
 /// Climb along `direction` first, then track the minimum mode.

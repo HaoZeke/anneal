@@ -144,17 +144,30 @@ fn median_centrosymmetric_order(x: ArrayView1<f64>, cutoff: f64) -> Vec<[f64; 3]
 }
 
 fn twisted_observed_order(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
-    let base = observed_order(x, 1.35);
+    let base = observed_order(x, crate::structure::RING_CUTOFF_SCALE);
     if base.is_empty() {
         return base;
     }
-    let upper_count = base.iter().filter(|p| p[2] > 0.15).count().max(3);
+    let mut pos_sum = 0.0;
+    let mut pos_cnt = 0usize;
+    for p in &base {
+        if p[2] > 0.0 {
+            pos_sum += p[2];
+            pos_cnt += 1;
+        }
+    }
+    let cap_floor = if pos_cnt > 0 {
+        0.5 * (pos_sum / pos_cnt as f64)
+    } else {
+        0.0
+    };
+    let upper_count = base.iter().filter(|p| p[2] > cap_floor).count().max(3);
     let angle = PI / upper_count as f64;
     let (s, c) = (libm::sin(angle), libm::cos(angle));
     let twisted = base
         .into_iter()
         .map(|p| {
-            if p[2] > 0.15 {
+            if p[2] > cap_floor {
                 [c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]]
             } else {
                 p
@@ -164,11 +177,16 @@ fn twisted_observed_order(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
     normalise_shell(twisted)
 }
 
+/// Unimodular 3D Bain transformation (\(\operatorname{diag}(2^{1/4}, 2^{-1/4}, 2^{-1/2})\)
+/// with close-packed plane slip \(2^{-1/2}\)) applied to the observed shell.
 fn sheared_observed_order(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
-    let base = observed_order(x, 1.35);
+    let base = observed_order(x, crate::structure::RING_CUTOFF_SCALE);
+    let stretch = 2.0_f64.powf(0.25);
+    let shrink = 2.0_f64.powf(-0.25);
+    let slip = std::f64::consts::FRAC_1_SQRT_2;
     let sheared = base
         .into_iter()
-        .map(|p| [1.18 * p[0] + 0.12 * p[2], 0.92 * p[1], 0.78 * p[2]])
+        .map(|p| [stretch * p[0] + slip * p[2], shrink * p[1], slip * p[2]])
         .collect();
     normalise_shell(sheared)
 }
@@ -331,14 +349,26 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
     keep: f64,
     rng: &mut R,
 ) -> Array1<f64> {
-    let scale = nearest_neighbour_scale(x);
+    let first_shell = crate::structure::RING_CUTOFF_SCALE;
+    let second_shell = std::f64::consts::SQRT_2 * first_shell;
     let offsets = match source {
-        Source::Observed => observed_order(x, 1.35),
-        Source::ObservedExpanded => normalise_shell(observed_order(x, 1.65)),
-        Source::ObservedMedian => median_centrosymmetric_order(x, 1.35),
+        Source::Observed => observed_order(x, first_shell),
+        Source::ObservedExpanded => normalise_shell(observed_order(x, second_shell)),
+        Source::ObservedMedian => median_centrosymmetric_order(x, first_shell),
         Source::ObservedTwisted => twisted_observed_order(x),
         Source::ObservedSheared => sheared_observed_order(x),
     };
+    candidate_from_offsets(&offsets, x, n, keep, rng)
+}
+
+fn candidate_from_offsets<R: Rng + ?Sized>(
+    offsets: &[[f64; 3]],
+    x: ArrayView1<f64>,
+    n: usize,
+    keep: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let scale = nearest_neighbour_scale(x);
     if offsets.is_empty() || n == 0 {
         return x.to_owned();
     }
@@ -382,7 +412,7 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
     }
 
     let seed_len = seed.len().min(n);
-    let sites = grow_from(&seed, &offsets, (n * 6).max(n + 32));
+    let sites = grow_from(&seed, offsets, (n * 6).max(n + 32));
     if sites.len() < n {
         return x.to_owned();
     }
@@ -594,9 +624,16 @@ mod tests {
     fn peeling_beats_a_spherical_cut() {
         let mut r = rng();
         let x = packed(120);
-        let peeled = candidate(Source::Observed, x.view(), 55, &mut r);
+        let peeled = candidate_from_offsets(
+            &Template::FaceCentredCubic.points(),
+            x.view(),
+            55,
+            0.0,
+            &mut r,
+        );
+        let observed_peeled = candidate(Source::Observed, x.view(), 55, &mut r);
         // The same grown set, cut by radius, which is what this replaced.
-        let grown = grow(&observed_order(x.view(), 1.35), 55 * 6);
+        let grown = grow(&Template::FaceCentredCubic.points(), 55 * 6);
         let mut by_radius = grown.clone();
         by_radius.sort_by(|a, b| {
             sq(a, &[0.0, 0.0, 0.0])
@@ -614,10 +651,11 @@ mod tests {
             v
         };
         let a = mean_coordination(peeled.view(), 55);
+        let a_obs = mean_coordination(observed_peeled.view(), 55);
         let b = mean_coordination(sphere.view(), 55);
         assert!(
-            a > b,
-            "peeled body averages {a} neighbours, spherical cut {b}"
+            a > b && a_obs > b,
+            "peeled bodies average {a} / {a_obs} neighbours, spherical cut {b}"
         );
     }
 
@@ -682,6 +720,33 @@ mod tests {
     fn the_observed_sources_are_different_structures() {
         let mut r = rng();
         let x = packed(55);
+        let template_spectra: Vec<Vec<f64>> = [
+            Template::FaceCentredCubic,
+            Template::Icosahedral,
+            Template::SimpleCubic,
+        ]
+        .iter()
+        .map(|t| {
+            spectrum(
+                candidate_from_offsets(&t.points(), x.view(), 55, 0.0, &mut r).view(),
+                55,
+            )
+        })
+        .collect();
+        for i in 0..template_spectra.len() {
+            for j in (i + 1)..template_spectra.len() {
+                let diff: f64 = template_spectra[i]
+                    .iter()
+                    .zip(template_spectra[j].iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt();
+                assert!(
+                    diff > 1.0,
+                    "template orders {i} and {j} differ by only {diff}"
+                );
+            }
+        }
         let spectra: Vec<Vec<f64>> = [
             Source::Observed,
             Source::ObservedExpanded,
@@ -741,10 +806,16 @@ mod tests {
     fn growing_the_observed_order_reproduces_the_packing() {
         let mut r = rng();
         let x = packed(80);
-        let c1 = candidate(Source::Observed, x.view(), 55, &mut r);
-        let c2 = candidate(Source::Observed, c1.view(), 55, &mut r);
-        let a = spectrum(c1.view(), 55);
-        let b = spectrum(c2.view(), 55);
+        let c = candidate(Source::Observed, x.view(), 55, &mut r);
+        let named = candidate_from_offsets(
+            &Template::FaceCentredCubic.points(),
+            x.view(),
+            55,
+            0.0,
+            &mut r,
+        );
+        let a = spectrum(c.view(), 55);
+        let b = spectrum(named.view(), 55);
         let diff: f64 = a
             .iter()
             .zip(b.iter())

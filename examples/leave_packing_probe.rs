@@ -356,7 +356,7 @@ fn main() {
             best: ico_energy,
             ..Tally::default()
         };
-        let mut fivefold = Tally {
+        let mut axial_tally = Tally {
             best: ico_energy,
             ..Tally::default()
         };
@@ -408,7 +408,7 @@ fn main() {
         for (index, rmsd) in [0.12_f64, 0.35, 0.50].into_iter().enumerate() {
             let start = anneal_core::soap::step_away_axial_measured(ico.view(), rmsd);
             let trial = quench(&potential, start.view(), steps);
-            classify("fivefold", index, &mut fivefold, &trial, None);
+            classify("axial", index, &mut axial_tally, &trial, None);
         }
         for index in 0..leaves {
             let walked = known_basin::leave_packing_ridge(
@@ -435,7 +435,7 @@ fn main() {
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
         report("toward", &toward, known_basin::LEAVE_RUNGS + 1);
-        report("fivefold", &fivefold, 3);
+        report("axial", &axial_tally, 3);
         report("ridge", &cover, leaves);
         return;
     }

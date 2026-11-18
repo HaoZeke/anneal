@@ -124,12 +124,12 @@ fn to_plateau() -> (f64, Array1<f64>) {
 fn report(tag: &str, start_e: f64, start: ArrayView1<f64>, y: ArrayView1<f64>) {
     let rms = hop_rms(start, y);
     let ident = rms < 1e-8;
-    let d5_y = axial_residual_length(y);
+    let axial_y = axial_residual_length(y);
     let (eq, xq) = relax(y, 400);
-    let d5_q = axial_residual_length(xq.view());
+    let axial_q = axial_residual_length(xq.view());
     let on_shelf = (eq - PLATEAU).abs() < 1e-4;
     println!(
-        "{tag} hop_rms {rms:.8} identity {ident} d5_hop {d5_y:.6} quench {eq:.9} d5_q {d5_q:.6} on_shelf {on_shelf} delta_e {:+.6}",
+        "{tag} hop_rms {rms:.8} identity {ident} axial_hop {axial_y:.6} quench {eq:.9} axial_q {axial_q:.6} on_shelf {on_shelf} delta_e {:+.6}",
         eq - start_e
     );
 }
@@ -247,13 +247,13 @@ fn main() {
     println!("plateau {e0:.9} target {PLATEAU}");
     for (i, (ax, d)) in axial_axis_table(x0.view()).iter().enumerate() {
         println!(
-            "axis {i} d5 {d:.6} n {:.3} {:.3} {:.3}",
+            "axis {i} axial_rms {d:.6} n {:.3} {:.3} {:.3}",
             ax[0], ax[1], ax[2]
         );
     }
     let p = axial_residual_probe(x0.view(), RMSD);
     println!(
-        "probe d5 {:.6} n_axes {} residual_rms {:.6} gated {} pentagon {} top5 {:.3} top12 {:.3}",
+        "probe axial_rms {:.6} n_axes {} residual_rms {:.6} gated {} used_break {} top5 {:.3} top12 {:.3}",
         p.axial_rms, p.n_axes, p.residual_rms, p.gated, p.used_break, p.top5_share, p.top12_share
     );
     #[cfg(feature = "featomic")]
@@ -330,11 +330,11 @@ fn main() {
         );
     }
     let axes = axial_axis_table(x0.view());
-    for (i, (ax, d5)) in axes.iter().enumerate() {
+    for (i, (ax, axial_len)) in axes.iter().enumerate() {
         let y = step_away_axial_about(x0.view(), 0.75, *ax);
         let (eq, _) = relax(y.view(), 400);
         println!(
-            "ax {i} d5 {d5:.3} cap 0.75 quench {eq:.9} dE {:+.4} on_shelf {}",
+            "ax {i} axial_rms {axial_len:.3} cap 0.75 quench {eq:.9} dE {:+.4} on_shelf {}",
             eq - e0,
             (eq - PLATEAU).abs() < 1e-4
         );

@@ -136,8 +136,8 @@ pub struct GroupProjection {
     pub order: usize,
 }
 
-/// Projects onto the symmetry group (`C_i`, `C_n`, or `D_nh` for `n` in `3..=6`)
-/// with the lowest continuous symmetry measure on `x`.
+/// Projects onto the symmetry group (`C_i`, `C_n`, or `D_nh` for the axial
+/// order `n` detected on `x`) with the lowest continuous symmetry measure.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
     if let Some(cached) = cached_propose(x, classes) {
         return cached;
@@ -146,36 +146,41 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     let base_orientations = principal_orientations(&centred)?;
     clear_op_cache();
     let mut best: Option<(usize, GroupProjection)> = None;
-    for order in 3..=6 {
+    if let Some((order, cyclic_coords, cyclic_measure)) =
+        detect_cyclic_order(x, classes, &centred, &base_orientations)
+    {
         let orientations = with_phase_orientations(&base_orientations, order);
-        for (rank, name, ops) in [
-            (2usize, "D_nh", dihedral_horizontal_ops(order)),
-            (1usize, "C_n", cyclic_about_z(order)),
-        ] {
-            let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
-                continue;
-            };
-            if closest_pair(&coordinates) < SINGULAR_PAIR {
-                continue;
+        if let Some((coordinates, measure)) =
+            project(x, classes, &dihedral_horizontal_ops(order), &orientations)
+            && closest_pair(&coordinates) >= SINGULAR_PAIR
+        {
+            best = Some((
+                2,
+                GroupProjection {
+                    coordinates,
+                    measure,
+                    group: "D_nh",
+                    order,
+                },
+            ));
+        }
+        let replace_cyclic = match &best {
+            None => true,
+            Some((incumbent_rank, incumbent)) => {
+                let tied = (cyclic_measure - incumbent.measure).abs() <= 1.0e-12;
+                (cyclic_measure < incumbent.measure && !tied) || (tied && 1 < *incumbent_rank)
             }
-            let replace = match &best {
-                None => true,
-                Some((incumbent_rank, incumbent)) => {
-                    let tied = (measure - incumbent.measure).abs() <= 1.0e-12;
-                    (measure < incumbent.measure && !tied) || (tied && rank < *incumbent_rank)
-                }
-            };
-            if replace {
-                best = Some((
-                    rank,
-                    GroupProjection {
-                        coordinates,
-                        measure,
-                        group: name,
-                        order,
-                    },
-                ));
-            }
+        };
+        if replace_cyclic {
+            best = Some((
+                1,
+                GroupProjection {
+                    coordinates: cyclic_coords,
+                    measure: cyclic_measure,
+                    group: "C_n",
+                    order,
+                },
+            ));
         }
     }
     {
@@ -612,6 +617,72 @@ fn with_phase_orientations(base: &[[[f64; 3]; 3]], order: usize) -> Vec<[[f64; 3
     orientations
 }
 
+/// Selects the incumbent's axial rotational order from its cyclic continuous
+/// symmetry measure around the principal inertia axes, bounded above by the
+/// structure's equatorial packing capacity.
+fn detect_cyclic_order(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    centred: &[[f64; 3]],
+    base_orientations: &[[[f64; 3]; 3]],
+) -> Option<(usize, Array1<f64>, f64)> {
+    let min_order = 3usize;
+    if centred.len() < min_order || base_orientations.is_empty() {
+        return None;
+    }
+    let sq3 = |a: [f64; 3], b: [f64; 3]| -> f64 {
+        let dx = a[0] - b[0];
+        let dy = a[1] - b[1];
+        let dz = a[2] - b[2];
+        dx * dx + dy * dy + dz * dz
+    };
+    let mut nearest = Vec::with_capacity(centred.len());
+    for (i, a) in centred.iter().enumerate() {
+        let mut best = f64::INFINITY;
+        for (j, b) in centred.iter().enumerate() {
+            if i != j {
+                best = best.min(sq3(*a, *b));
+            }
+        }
+        if best.is_finite() && best > 0.0 {
+            nearest.push(best.sqrt());
+        }
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let bond = nearest.get(nearest.len() / 2).copied().unwrap_or(1.0);
+    let mut max_rho = 0.0_f64;
+    for orientation in base_orientations {
+        for point in centred {
+            let rotated = mul_vec(orientation, *point);
+            let rho = (rotated[0] * rotated[0] + rotated[1] * rotated[1]).sqrt();
+            max_rho = max_rho.max(rho);
+        }
+    }
+    let half_chord_ratio = (0.5 * bond / max_rho.max(0.5 * bond)).clamp(0.5, 1.0);
+    let packing_cap = (std::f64::consts::PI / half_chord_ratio.asin()).round() as usize;
+    let max_order = packing_cap.min(centred.len()).max(min_order);
+
+    let mut best: Option<(usize, Array1<f64>, f64)> = None;
+    let mut candidate_order = min_order;
+    while candidate_order <= max_order {
+        let orientations = with_phase_orientations(base_orientations, candidate_order);
+        if let Some((coordinates, measure)) =
+            project(x, classes, &cyclic_about_z(candidate_order), &orientations)
+            && closest_pair(&coordinates) >= SINGULAR_PAIR
+        {
+            let replace = match &best {
+                None => true,
+                Some((_, _, incumbent_measure)) => measure + 1.0e-12 < *incumbent_measure,
+            };
+            if replace {
+                best = Some((candidate_order, coordinates, measure));
+            }
+        }
+        candidate_order += 1;
+    }
+    best
+}
+
 fn closest_pair(x: &Array1<f64>) -> f64 {
     let n = x.len() / 3;
     let mut best = f64::INFINITY;
@@ -811,36 +882,41 @@ mod tests {
         let base = principal_orientations(&centred)?;
         clear_op_cache();
         let mut best: Option<(usize, GroupProjection)> = None;
-        for order in 3..=6 {
+        if let Some((order, cyclic_coords, cyclic_measure)) =
+            detect_cyclic_order(x, classes, &centred, &base)
+        {
             let orientations = with_phase_orientations(&base, order);
-            for (rank, name, ops) in [
-                (2usize, "D_nh", dihedral_horizontal_ops(order)),
-                (1usize, "C_n", cyclic_about_z(order)),
-            ] {
-                let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
-                    continue;
-                };
-                if closest_pair(&coordinates) < SINGULAR_PAIR {
-                    continue;
+            if let Some((coordinates, measure)) =
+                project(x, classes, &dihedral_horizontal_ops(order), &orientations)
+                && closest_pair(&coordinates) >= SINGULAR_PAIR
+            {
+                best = Some((
+                    2,
+                    GroupProjection {
+                        coordinates,
+                        measure,
+                        group: "D_nh",
+                        order,
+                    },
+                ));
+            }
+            let replace_cyclic = match &best {
+                None => true,
+                Some((incumbent_rank, incumbent)) => {
+                    let tied = (cyclic_measure - incumbent.measure).abs() <= 1.0e-12;
+                    (cyclic_measure < incumbent.measure && !tied) || (tied && 1 < *incumbent_rank)
                 }
-                let replace = match &best {
-                    None => true,
-                    Some((incumbent_rank, incumbent)) => {
-                        let tied = (measure - incumbent.measure).abs() <= 1.0e-12;
-                        (measure < incumbent.measure && !tied) || (tied && rank < *incumbent_rank)
-                    }
-                };
-                if replace {
-                    best = Some((
-                        rank,
-                        GroupProjection {
-                            coordinates,
-                            measure,
-                            group: name,
-                            order,
-                        },
-                    ));
-                }
+            };
+            if replace_cyclic {
+                best = Some((
+                    1,
+                    GroupProjection {
+                        coordinates: cyclic_coords,
+                        measure: cyclic_measure,
+                        group: "C_n",
+                        order,
+                    },
+                ));
             }
         }
         if let Some((coordinates, measure)) = project(x, classes, &inversion_ops(), &base)
@@ -1126,7 +1202,8 @@ mod tests {
 
     #[test]
     fn dihedral_horizontal_has_four_m_orthogonal_operations() {
-        for order in 3..=6 {
+        let mut order = 3usize;
+        while order <= 6 {
             let ops = dihedral_horizontal_ops(order);
             assert_eq!(ops.len(), 4 * order);
             for op in ops {
@@ -1138,6 +1215,7 @@ mod tests {
                     }
                 }
             }
+            order += 1;
         }
     }
 }

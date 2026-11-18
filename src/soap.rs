@@ -1525,35 +1525,66 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
-/// Axial residual length above which a candidate axis is rejected.
-const AXIAL_RESIDUAL_CUTOFF: f64 = 1.40;
-
-/// Yield threshold of the measured axial-residual hop.
-const AXIAL_RESIDUAL_GATE: f64 = 1.15;
-
 /// Minimum number of low-residual axes required for multi-axis cage escape.
 const AXIAL_MIN_AXES: usize = 2;
 
-/// Support amplitude when the axial residual is localized to a shell patch.
-const DEFECT_SUPPORT_CAP: f64 = 0.75;
+/// First-shell coordination cutoff of `x` from its median nearest-neighbour scale.
+pub fn axial_cutoff(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return crate::structure::RING_CUTOFF_SCALE;
+    }
+    crate::structure::RING_CUTOFF_SCALE * crate::structure::median_nearest_neighbour(x, n)
+}
 
-/// Residual-length window for outer-shell axes that reconstruct rather than snap back.
-const RECON_LO: f64 = 0.89;
-const RECON_HI: f64 = 1.00;
+/// Single-bond axial-residual gate of `x` (one median nearest-neighbour spacing).
+fn axial_gate(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return 1.0;
+    }
+    crate::structure::median_nearest_neighbour(x, n)
+}
 
-/// Rotational orders scanned when measuring axial symmetry defects.
-const AXIAL_ORDERS: [usize; 4] = [3, 4, 5, 6];
+/// Support displacement floor for a localized shell-patch step: the octahedral
+/// half-diagonal \(d_{\text{nn}} / \sqrt{2}\) of the structure's nearest-neighbour scale.
+pub fn defect_support_step(x: ArrayView1<f64>, rmsd: f64) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return rmsd;
+    }
+    let hollow_shift =
+        crate::structure::median_nearest_neighbour(x, n) * std::f64::consts::FRAC_1_SQRT_2;
+    rmsd.max(hollow_shift)
+}
 
-/// Best-axis rotational symmetry residual length of `x` across orders `3..=6`.
+/// Candidate rotational symmetry orders derived from the structure's coordination geometry.
+fn axial_order_range(x: ArrayView1<f64>) -> std::ops::RangeInclusive<usize> {
+    let min_order = 3usize;
+    let count = x.len() / 3;
+    if count < min_order {
+        return min_order..=min_order;
+    }
+    let bond = crate::structure::median_nearest_neighbour(x, count).max(1.0e-12);
+    let cutoff = axial_cutoff(x).max(bond);
+    let half_chord_ratio = (0.5 * bond / cutoff.min(bond)).clamp(0.5, 1.0);
+    let max_order = (PI / half_chord_ratio.asin())
+        .round()
+        .clamp(min_order as f64, count as f64) as usize;
+    min_order..=max_order
+}
+
+/// Best-axis rotational symmetry residual length of `x`.
 pub fn axial_residual_length(x: ArrayView1<f64>) -> f64 {
     axial_residual(x).0
 }
 
-/// Number of candidate axes whose axial residual length is below `AXIAL_RESIDUAL_CUTOFF`.
+/// Number of candidate axes whose axial residual length is below [`axial_cutoff`].
 pub fn axial_axis_count(x: ArrayView1<f64>) -> usize {
+    let cutoff = axial_cutoff(x);
     axial_axis_table(x)
         .into_iter()
-        .filter(|(_, d)| *d < AXIAL_RESIDUAL_CUTOFF)
+        .filter(|(_, d)| *d < cutoff)
         .count()
 }
 
@@ -1593,10 +1624,11 @@ pub fn axial_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
         return rows;
     }
     let axes = candidate_axes(x);
+    let cutoff = axial_cutoff(x);
     let mut rows: Vec<([f64; 3], f64)> = axes
         .into_iter()
         .map(|ax| {
-            let cut = AXIAL_RESIDUAL_CUTOFF + 1.0e-6 * (1.0 + AXIAL_RESIDUAL_CUTOFF);
+            let cut = cutoff + 1.0e-6 * (1.0 + cutoff);
             let bound = rotation_row_min_rms_until(x, ax, cut);
             let length = if bound >= cut {
                 bound
@@ -1943,10 +1975,10 @@ fn rotation_row_min_rms_for_order(
     })
 }
 
-/// Minimum nearest-image root-mean-square across axial orders `3..=6`.
+/// Minimum nearest-image root-mean-square across candidate axial orders of `x`.
 fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f64 {
     let mut best = f64::INFINITY;
-    for order in AXIAL_ORDERS {
+    for order in axial_order_range(x) {
         let local_cut = best.min(cut);
         let rms = rotation_row_min_rms_for_order(x, axis, order, local_cut);
         if rms < best {
@@ -2126,7 +2158,7 @@ fn residual_about_order(x: ArrayView1<f64>, axis: [f64; 3], order: usize) -> (f6
 fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
     let mut best_rms = f64::INFINITY;
     let mut best_dr = Array1::zeros(x.len());
-    for order in AXIAL_ORDERS {
+    for order in axial_order_range(x) {
         if best_rms.is_finite() {
             let cut = best_rms + 1.0e-6 * (1.0 + best_rms);
             if rotation_row_min_rms_for_order(x, axis, order, cut) >= cut {
@@ -2142,7 +2174,7 @@ fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>
     (best_rms, best_dr)
 }
 
-/// Residual `x - R_m x` under the best candidate axis and rotational order `m in 3..=6`.
+/// Residual `x - R_m x` under the best candidate axis and rotational order of `x`.
 fn axial_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_d = f64::INFINITY;
     let mut best_ax = [0.0, 0.0, 1.0];
@@ -2161,25 +2193,41 @@ fn axial_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     (best_d, best_ax, best_dr)
 }
 
-/// Rényi-2 effective support size when the residual is concentrated on a
-/// localized defect patch covering strictly less than half the cluster.
-fn localized_defect_support(dr: &Array1<f64>) -> Option<usize> {
+/// Rényi-2 effective support size of the excess squared residual above one
+/// standard deviation over the cluster mean, when localized to less than half
+/// the cluster.
+pub(crate) fn localized_defect_support(dr: &Array1<f64>) -> Option<usize> {
     let n_sites = dr.len() / 3;
     if n_sites == 0 {
         return None;
     }
+    let mut weights = Vec::with_capacity(n_sites);
     let mut sum_w = 0.0;
-    let mut sum_w2 = 0.0;
     for i in 0..n_sites {
         let w =
             dr[3 * i] * dr[3 * i] + dr[3 * i + 1] * dr[3 * i + 1] + dr[3 * i + 2] * dr[3 * i + 2];
+        weights.push(w);
         sum_w += w;
-        sum_w2 += w * w;
     }
-    if !(sum_w > 0.0 && sum_w2 > 0.0) {
+    let mean = sum_w / n_sites as f64;
+    let var = weights
+        .iter()
+        .map(|&w| (w - mean) * (w - mean))
+        .sum::<f64>()
+        / n_sites as f64;
+    let floor = mean + var.sqrt();
+    let mut sum_q = 0.0;
+    let mut sum_q2 = 0.0;
+    for w in weights {
+        let excess = (w - floor).max(0.0);
+        let q = excess * excess;
+        sum_q += q;
+        sum_q2 += q * q;
+    }
+    if !(sum_q > 0.0 && sum_q2 > 0.0) {
         return None;
     }
-    let support = ((sum_w * sum_w) / sum_w2).round() as usize;
+    let support = (((sum_q * sum_q) / sum_q2) - 1.0e-9).ceil() as usize;
     let support = support.clamp(1, n_sites);
     (2 * support < n_sites).then_some(support)
 }
@@ -2305,9 +2353,12 @@ pub fn axial_residual_probe(x: ArrayView1<f64>, rmsd: f64) -> AxialResidualProbe
     };
     let y = if gated {
         x.to_owned()
-    } else if !used_break && let Some(keep) = localized_defect_support(&dr) {
+    } else if !used_break
+        && has_multi_atom_interior(x)
+        && let Some(keep) = localized_defect_support(&dr)
+    {
         concentrate_residual(&mut dr, keep);
-        scale_support_to_cap(x, dr, rmsd.max(DEFECT_SUPPORT_CAP))
+        scale_support_to_cap(x, dr, defect_support_step(x, rmsd))
     } else {
         scale_to_cap(x, dr, rmsd)
     };
@@ -2325,14 +2376,15 @@ pub fn axial_residual_probe(x: ArrayView1<f64>, rmsd: f64) -> AxialResidualProbe
 
 /// Measured axial-residual hop on the lowest-residual candidate axis.
 pub fn step_away_axial_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
+    let gate = axial_gate(x);
     if candidate_axes(x)
         .iter()
-        .all(|axis| row_min_rms_clears(x, *axis, AXIAL_RESIDUAL_GATE))
+        .all(|axis| row_min_rms_clears(x, *axis, gate))
     {
         return x.to_owned();
     }
     let (d, axis, mut dr) = axial_residual(x);
-    if d > AXIAL_RESIDUAL_GATE {
+    if d > gate {
         return x.to_owned();
     }
     let n = (x.len() / 3).max(1) as f64;
@@ -2343,20 +2395,193 @@ pub fn step_away_axial_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
     scale_to_cap(x, dr, rmsd)
 }
 
+/// Quench rise that is a single-contact outer-shell reconstruction:
+/// one Lennard-Jones nearest-neighbour contact well of depth 1 plus between
+/// one tenth and one half of a second-shell pair at \(2^{2/3}\) (\(-15/64\)).
+const DOORWAY_LO: f64 = 1.02;
+const DOORWAY_HI: f64 = 1.12;
+
+fn dominant_spindle_ring_order(x: ArrayView1<f64>) -> Option<usize> {
+    let n = x.len() / 3;
+    if n < 3 {
+        return None;
+    }
+    let nb = crate::corekey::contact_neighbours(x, n, axial_cutoff(x));
+    let bounds = axial_order_range(x);
+    let mut tally = vec![0usize; *bounds.end() + 1];
+    for i in 0..n {
+        for &j in &nb[i] {
+            if j <= i {
+                continue;
+            }
+            let common: Vec<usize> = nb[i]
+                .iter()
+                .copied()
+                .filter(|k| nb[j].contains(k))
+                .collect();
+            let m = common.len();
+            if !bounds.contains(&m) {
+                continue;
+            }
+            let mut deg_ok = true;
+            let mut edges = 0usize;
+            for (idx_a, &a) in common.iter().enumerate() {
+                let mut deg = 0usize;
+                for (idx_b, &b) in common.iter().enumerate() {
+                    if idx_a != idx_b && nb[a].contains(&b) {
+                        deg += 1;
+                        if idx_a < idx_b {
+                            edges += 1;
+                        }
+                    }
+                }
+                if deg != 2 {
+                    deg_ok = false;
+                    break;
+                }
+            }
+            if deg_ok && edges == m {
+                tally[m] += 1;
+            }
+        }
+    }
+    tally
+        .into_iter()
+        .enumerate()
+        .filter(|(_, count)| *count > 0)
+        .max_by_key(|(_, count)| *count)
+        .map(|(order, _)| order)
+}
+
+fn opening_axes(x: ArrayView1<f64>) -> (Vec<[f64; 3]>, Option<usize>) {
+    let order = dominant_spindle_ring_order(x);
+    let n = x.len() / 3;
+    let com = com_of(x);
+    let mut directions: Vec<[f64; 3]> = Vec::with_capacity(n);
+    for i in 0..n {
+        let v = [
+            x[3 * i] - com[0],
+            x[3 * i + 1] - com[1],
+            x[3 * i + 2] - com[2],
+        ];
+        if let Some(u) = norm3(v) {
+            directions.push(canonical_direction(u));
+        }
+    }
+    directions.sort_by(|left, right| {
+        left[0]
+            .total_cmp(&right[0])
+            .then(left[1].total_cmp(&right[1]))
+            .then(left[2].total_cmp(&right[2]))
+    });
+    let mut axes: Vec<[f64; 3]> = Vec::with_capacity(directions.len());
+    for direction in directions {
+        let duplicate = axes.iter().any(|&existing| {
+            (existing[0] * direction[0] + existing[1] * direction[1] + existing[2] * direction[2])
+                .abs()
+                > 1.0 - 1.0e-4
+        });
+        if !duplicate {
+            axes.push(direction);
+        }
+    }
+    (axes, order)
+}
+
+fn interior_opening(
+    x: ArrayView1<f64>,
+    axis: [f64; 3],
+    sign: f64,
+    ring_order: usize,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    let com = com_of(x);
+    let interior_angle = (ring_order.saturating_sub(2) as f64) * PI / (ring_order as f64);
+    let rmat = rotation_about(axis, sign * interior_angle);
+    let mut centred = vec![0.0; x.len()];
+    let mut turned = vec![0.0; x.len()];
+    for i in 0..n {
+        let point = [
+            x[3 * i] - com[0],
+            x[3 * i + 1] - com[1],
+            x[3 * i + 2] - com[2],
+        ];
+        for axis_i in 0..3 {
+            centred[3 * i + axis_i] = point[axis_i];
+        }
+        let image = rot_apply(&rmat, point);
+        for axis_i in 0..3 {
+            turned[3 * i + axis_i] = image[axis_i];
+        }
+    }
+    let perm = optimal_perm(ArrayView1::from(centred.as_slice()), &turned);
+    let mut dr = Array1::zeros(x.len());
+    for i in 0..n {
+        for axis_i in 0..3 {
+            dr[3 * i + axis_i] = centred[3 * i + axis_i] - turned[3 * perm[i] + axis_i];
+        }
+    }
+    concentrate_residual(&mut dr, ring_order);
+    scale_support_to_cap(x, dr, defect_support_step(x, 0.0))
+}
+
+fn has_multi_atom_interior(x: ArrayView1<f64>) -> bool {
+    let count = x.len() / 3;
+    if count < 2 {
+        return false;
+    }
+    let cutoff = axial_cutoff(x);
+    let nb = crate::corekey::contact_neighbours(x, count, cutoff);
+    let core = crate::corekey::core_atoms(&nb, crate::corekey::CoreRule::default());
+    core.len() > 1 && core.len() < count
+}
+
+/// Stall openings off a multi-shell structure whose contact graph is dominated
+/// by `(5,5,5)` triplets.
+pub fn axial_openings(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    if !has_multi_atom_interior(x) || !ih_dominated(x, SoapSpec::default()) {
+        return Vec::new();
+    }
+    let (axes, Some(ring_order)) = opening_axes(x) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for axis in axes {
+        for sign in [1.0, -1.0] {
+            let opened = interior_opening(x, axis, sign, ring_order);
+            let moved = opened
+                .iter()
+                .zip(x.iter())
+                .any(|(after, before)| (after - before).abs() > 1e-12);
+            if moved {
+                found.push(opened);
+            }
+        }
+    }
+    found
+}
+
+/// Whether a quenched opening lands in the single-contact reconstruction window.
+pub fn opening_left(current: f64, opened: f64) -> bool {
+    let rise = opened - current;
+    rise.is_finite() && rise > DOORWAY_LO && rise < DOORWAY_HI
+}
+
 /// Multi-axis rotational-defect hop: amplify a localized axial mismatch or
 /// break an exact axial cage when all good axes have zero residual.
 pub fn step_away_axial<R: Rng + ?Sized>(x: ArrayView1<f64>, rmsd: f64, rng: &mut R) -> Array1<f64> {
+    let cutoff = axial_cutoff(x);
     let table = axial_axis_table(x);
-    let good: Vec<([f64; 3], f64)> = table
-        .into_iter()
-        .filter(|(_, d)| *d < AXIAL_RESIDUAL_CUTOFF)
-        .collect();
+    let good: Vec<([f64; 3], f64)> = table.into_iter().filter(|(_, d)| *d < cutoff).collect();
     if good.len() < AXIAL_MIN_AXES {
         return x.to_owned();
     }
     if good.iter().all(|(_, d)| *d < 1e-8) {
         return axial_residual_probe(x, rmsd).y;
     }
+    let bond = axial_gate(x);
+    let recon_lo = bond * (2.0 / 3.0_f64).sqrt();
+    let recon_hi = bond * (5.0 / 6.0_f64).sqrt();
     let closest = |target: f64| {
         good.iter()
             .min_by(|a, b| {
@@ -2368,10 +2593,10 @@ pub fn step_away_axial<R: Rng + ?Sized>(x: ArrayView1<f64>, rmsd: f64, rng: &mut
             .map(|r| r.0)
             .unwrap_or(good[0].0)
     };
-    let a = closest(RECON_LO + 0.01);
-    let b = closest(RECON_HI - 0.01);
+    let a = closest(recon_lo);
+    let b = closest(recon_hi);
     let axis = if rng.random::<bool>() { a } else { b };
-    step_away_axial_about(x, rmsd.max(DEFECT_SUPPORT_CAP), axis)
+    step_away_axial_about(x, defect_support_step(x, rmsd), axis)
 }
 
 /// Axial-residual hop about one supplied axis, concentrating onto the Rényi-2
@@ -2382,7 +2607,9 @@ pub fn step_away_axial_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -> A
         dr = axial_defect_break(x, axis);
         return scale_to_cap(x, dr, rmsd);
     }
-    if let Some(keep) = localized_defect_support(&dr) {
+    if has_multi_atom_interior(x)
+        && let Some(keep) = localized_defect_support(&dr)
+    {
         concentrate_residual(&mut dr, keep);
         scale_support_to_cap(x, dr, rmsd)
     } else {
@@ -3780,6 +4007,25 @@ mod tests {
             d2_surface.sqrt(),
             d2_centre.sqrt()
         );
+        for site in 1..13 {
+            let mut gap2 = 0.0;
+            for t in 0..dim {
+                let d = target[site * dim + t] - loc[[site, t]];
+                gap2 += d * d;
+            }
+            assert!(
+                (gap2.sqrt() - class).abs() < 1e-9,
+                "surface site {site} target gap {} must equal class_residual_rms {class}",
+                gap2.sqrt()
+            );
+        }
+        let mut rng = StdRng::seed_from_u64(4);
+        let stepped = step_away(x.view(), &[], spec, 0.4, &mut rng);
+        let stepped_class = class_residual_rms(stepped.view(), spec);
+        assert!(
+            (stepped_class - class).abs() > 1e-4,
+            "class_target pullback must alter the core-shell SOAP separation: {class} -> {stepped_class}"
+        );
     }
 
     #[test]
@@ -4106,8 +4352,9 @@ mod tests {
             );
         }
         let table = axial_axis_table(shifted.view());
+        let shifted_cutoff = axial_cutoff(shifted.view());
         for (axis, length) in &table {
-            if *length + 1.0e-8 < AXIAL_RESIDUAL_CUTOFF {
+            if *length + 1.0e-8 < shifted_cutoff {
                 let exact = residual_about_fresh(shifted.view(), *axis).0;
                 assert!((length - exact).abs() < 1.0e-9, "{length} vs {exact}");
             }
@@ -4274,10 +4521,33 @@ mod tests {
     #[test]
     fn axial_residual_is_invariant_under_deposited_order() {
         let fixture = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
-        let (_shelf, quenched) = quench_lj_state(fixture.view());
+        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let fcc = load_xyz(include_str!("../tests/fixtures/lj38_fcc.xyz"));
+        let tetrahedral = load_xyz(include_str!("../tests/fixtures/lj98_gm.xyz"));
+        assert!(axial_openings(marks.view()).is_empty());
+        assert!(axial_openings(fcc.view()).is_empty());
+        assert!(axial_openings(tetrahedral.view()).is_empty());
+        let (shelf, quenched) = quench_lj_state(fixture.view());
         let length = axial_residual_length(quenched.view());
         let axis_count = axial_axis_count(quenched.view());
         assert!(axis_count >= AXIAL_MIN_AXES);
+        let doorway = |cloud: &Array1<f64>| -> f64 {
+            let mut rise = None;
+            for opened in axial_openings(cloud.view()) {
+                let (landed, _) = quench_lj_state(opened.view());
+                let gap = landed - shelf;
+                if opening_left(shelf, landed) {
+                    rise = Some(gap);
+                    break;
+                }
+            }
+            rise.expect("no Mackay to anti-Mackay opening")
+        };
+        let deposited = doorway(&quenched);
+        assert!(
+            (super::DOORWAY_LO..super::DOORWAY_HI).contains(&deposited),
+            "deposited rise {deposited} from {shelf}"
+        );
         let n = quenched.len() / 3;
         let mut rng = StdRng::seed_from_u64(0);
         for seed in 0..24 {
@@ -4293,13 +4563,39 @@ mod tests {
                 "perm {seed} length {scrambled_length} vs {length}"
             );
             assert_eq!(axial_axis_count(scrambled.view()), axis_count);
+            let rise = doorway(&scrambled);
+            assert!(
+                (rise - deposited).abs() < 1e-4,
+                "perm {seed} rise {rise} left the doorway {deposited}"
+            );
         }
         let mut reversed: Vec<usize> = (0..n).rev().collect();
         let rev = permute_atoms(&quenched, &reversed);
         assert!((axial_residual_length(rev.view()) - length).abs() < 1e-8);
+        let rise = doorway(&rev);
+        assert!((rise - deposited).abs() < 1e-4, "reversed rise {rise}");
         reversed.rotate_left(1);
         let rot = permute_atoms(&quenched, &reversed);
         assert!((axial_residual_length(rot.view()) - length).abs() < 1e-8);
+        let rise = doorway(&rot);
+        assert!((rise - deposited).abs() < 1e-4, "rotated rise {rise}");
+    }
+
+    #[test]
+    fn localized_defect_support_recovers_the_outlier_patch_count() {
+        assert!(localized_defect_support(&Array1::zeros(0)).is_none());
+        let uniform = Array1::from_vec(vec![1.0; 30]);
+        assert!(
+            localized_defect_support(&uniform).is_none(),
+            "a uniform displacement across all sites has no localized defect patch"
+        );
+        let mut patch = Array1::from_elem(60, 0.05);
+        for site in 0..5 {
+            patch[3 * site] = 1.0;
+            patch[3 * site + 1] = 0.0;
+            patch[3 * site + 2] = 0.0;
+        }
+        assert_eq!(localized_defect_support(&patch), Some(5));
     }
 
     fn direct_row_min(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
@@ -4317,7 +4613,7 @@ mod tests {
             ]);
         }
         let mut best = f64::INFINITY;
-        for order in AXIAL_ORDERS {
+        for order in axial_order_range(x) {
             let turn = rotation_about(axis, 2.0 * PI / order as f64);
             let turned: Vec<[f64; 3]> = centred.iter().map(|&p| rot_apply(&turn, p)).collect();
             let mut total = 0.0;
@@ -4358,7 +4654,8 @@ mod tests {
                     "n={n} fast {fast} slow {slow}"
                 );
             }
-            let cut = AXIAL_RESIDUAL_CUTOFF + 1.0e-6 * (1.0 + AXIAL_RESIDUAL_CUTOFF);
+            let cutoff = axial_cutoff(x.view());
+            let cut = cutoff + 1.0e-6 * (1.0 + cutoff);
             let table = axial_axis_table(x.view());
             for axis in candidate_axes(x.view()) {
                 let row = direct_row_min(x.view(), axis);
