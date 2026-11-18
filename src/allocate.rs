@@ -851,9 +851,24 @@ impl DepthAllocator {
 
     /// Draws an arm by Thompson sampling on the posterior predictive.
     pub fn select<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
+        self.select_where(rng, |_| true)
+    }
+
+    /// As [`Self::select`], drawing only arms for which `open` is true.
+    ///
+    /// A parked arm is not sampled, so the random stream of the arms that
+    /// remain is the stream those arms would have drawn on their own.
+    pub fn select_where<R, F>(&self, rng: &mut R, open: F) -> usize
+    where
+        R: Rng + ?Sized,
+        F: Fn(usize) -> bool,
+    {
         let mut best = 0usize;
         let mut best_v = f64::NEG_INFINITY;
         for k in 0..self.mu.len() {
+            if !open(k) {
+                continue;
+            }
             // Predictive is Student-t with 2 alpha degrees of freedom, centred
             // at mu, scaled by beta (kappa + 1) / (alpha kappa). An arm with no
             // evidence has a very small kappa and so an enormous spread, which
