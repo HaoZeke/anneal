@@ -79,8 +79,6 @@ UNPUSHED = {
                                                 "reruns, first cited by 93e17b69; no pushed branch holds it",
     "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
                                                 "branch holds it",
-    "9a30f3190b3bb7040c675a904f8388eb68224151": "the build head of the water-v45b rerun and the refreshed Morse ASE panel, "
-                                                "first cited by 0a4439cb; no pushed branch holds it",
     "be3849e7811634aca67688da70f5413f9d860ec9": "the local rerun head for the Pt6Cu17 polish receipt and blocked campaign "
                                                 "status rows, first cited by 0a4439cb; no pushed branch holds it",
     "6d9fbd95826f9c173b8da36d16c471c95c377bbc": "the cloud-run head for the unfinished landfold campaign status rows, first "
@@ -134,9 +132,9 @@ KNOWN_GAPS = {
     "bench/ase-lj55/rows.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                "repository; revision b49341e3 is not in this repository",
     "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
+    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
+    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
     "bench/ase-recommended/summary.csv": "revision 1ce3ab64 is not in this repository; revision 36548663 is not in this "
                                          "repository; revision 5a7f629d is not in this repository; revision b49341e3 is "
                                          "not in this repository",
@@ -3030,8 +3028,8 @@ RERUN_CLAIMS = (
                 "hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse clusters, and no arm hits",
                 "5 are significant by Fisher's test", "6 clusters are significant overall",
                 "This setting hits more seeds than GMIN on 9 of the 13 clusters",
-                "this setting hits it on 6 of 12 and GMIN on 1 of 12", "where GMIN hits 1 of 12 and Fisher's \\(p\\) is 0.069",
-                "it hits 6 of 12 and GMIN 1 of 12, with \\(p=0.069\\)",
+                "this setting hits it on 4 of 12 and GMIN on 1 of 12", "where GMIN hits 1 of 12 and Fisher's \\(p\\) is 0.32",
+                "it hits 4 of 12 and GMIN 1 of 12, with \\(p=0.32\\)",
                 "minima hopping hits none", "Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones clusters",
                 "Both ASE arms hit 0 of 12 on all 4", "ASE minima hopping hits LJ\\(_{38}\\) on 1 of 6, LJ\\(_{55}\\) on 6 of 6",
                 "Wall is the median wall in seconds of all six runs", "Minima hopping reached its cap on every run")),
@@ -3270,8 +3268,8 @@ def manuscript_au55(audit: Audit) -> None:
         return fisher(hits_of(a), len(a), hits_of(g), len(g))
 
     au_a, au_g = groups[("au55", "anneal")], groups[("au55", "gmin")]
-    audit.cell(TEX, "Au55 hits of this setting and GMIN in the GMIN panel", "6 1", f"{hits_of(au_a)} {hits_of(au_g)}")
-    audit.cell(TEX, "Au55 Fisher p of the GMIN panel", "0.069", p_of("au55"))
+    audit.cell(TEX, "Au55 hits of this setting and GMIN in the GMIN panel", "4 1", f"{hits_of(au_a)} {hits_of(au_g)}")
+    audit.cell(TEX, "Au55 Fisher p of the GMIN panel", "0.32", p_of("au55"))
     audit.cell(TEX, "Au55 Fisher p is not below 0.05", "1", float(p_of("au55") >= 0.05))
     ours = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")]) and p_of(s) < 0.05]
     theirs = [s for s in systems if hits_of(groups[(s, "gmin")]) > hits_of(groups[(s, "anneal")]) and p_of(s) < 0.05]
@@ -3283,10 +3281,10 @@ def manuscript_au55(audit: Audit) -> None:
                          "LJ\\(_{75}\\), LJ\\(_{98}\\), and M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\), and "
                          "M\\(_{80}\\) at \\(\\rho=6\\) for GMIN.")
     audit.said(TEX, "It is not below 0.05 on the other 4 wins: LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and "
-                    "Au\\(_{55}\\), where \\(p=0.069\\).")
-    audit.said(TEX, "this setting hits it on 6 of 12 and GMIN on 1 of 12.")
-    audit.said(TEX, "On Au\\(_{55}\\) this setting hits 6 of 12 in the GMIN panel, where GMIN hits 1 of 12 and Fisher's "
-                    "\\(p\\) is 0.069.")
+                    "Au\\(_{55}\\), where \\(p=0.32\\).")
+    audit.said(TEX, "this setting hits it on 4 of 12 and GMIN on 1 of 12.")
+    audit.said(TEX, "On Au\\(_{55}\\) this setting hits 4 of 12 in the GMIN panel, where GMIN hits 1 of 12 and Fisher's "
+                    "\\(p\\) is 0.32.")
     audit.said(TEX, "Of the 9 clusters where this setting hits more seeds than GMIN, 5 are significant by Fisher's test, and "
                     "the 4 that are not are LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and Au\\(_{55}\\).")
     for path in (TEX, SI, COVER):
