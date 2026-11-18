@@ -2608,7 +2608,7 @@ impl Config {
         // group, carries the molecule whole, and pays for the expansion
         // before the overlap gate sees the proposal.
         if groups.len() == 1
-            && groups[0].len() >= 4
+            && super::moves::group_has_dihedral_dof(&groups[0], cfg.species.as_deref())
             && super::moves::mobile_atoms(&cfg, &groups).is_none()
         {
             cfg.prior_soap = false;

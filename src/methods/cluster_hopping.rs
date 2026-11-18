@@ -3604,8 +3604,20 @@ mod biased_metropolis_tests {
     }
 }
 
-fn rigid_factor_cap(orient_scale: f64) -> f64 {
-    if orient_scale < 1.0 - 1.0e-9 {
+fn rigid_has_enclosed_body(coords: ArrayView1<f64>, n_bodies: usize) -> bool {
+    let centre_len = (3 * n_bodies).min(coords.len());
+    let owned;
+    let slice = if let Some(s) = coords.as_slice() {
+        &s[..centre_len]
+    } else {
+        owned = coords.iter().take(centre_len).copied().collect::<Vec<_>>();
+        &owned[..]
+    };
+    crate::catalog::packing::has_enclosed_site(slice)
+}
+
+fn rigid_factor_cap(multi_shell: bool) -> f64 {
+    if multi_shell {
         RIGID_FACTOR_CAP_DAMPED
     } else {
         RIGID_FACTOR_CAP_FULL
@@ -4909,8 +4921,10 @@ where
     // lower cap: the orientation amplitude, not the temperature, is what
     // tracks the acceptance ratio. Letting that factor climb back to 24
     // leaves the hydrogen-bond funnel.
+    let multi_shell_rigid =
+        cfg.move_library.is_rigid_body() && rigid_has_enclosed_body(x.view(), n);
     let mut rigid_factor: f64 = if cfg.move_library.is_rigid_body() {
-        RIGID_FACTOR_CAP_DAMPED
+        rigid_factor_cap(multi_shell_rigid)
     } else {
         1.0
     };
@@ -7922,14 +7936,13 @@ where
             let rise = (e_new - e) / cfg.temperature.max(1e-12);
             accept = rise <= 0.0 || rng.random::<f64>() < (-rise).exp();
         }
-        if cfg.move_library.is_rigid_body() && rigid_factor >= RIGID_FACTOR_CAP_DAMPED {
+        if cfg.move_library.is_rigid_body() && multi_shell_rigid {
             orient_window += 1;
             if accept {
                 orient_yes += 1;
             }
             if orient_window >= RIGID_ACCEPT_BLOCK {
                 orient_scale = rigid_step_scale(orient_scale, orient_yes, orient_window);
-                rigid_factor = rigid_factor.min(rigid_factor_cap(orient_scale));
                 orient_window = 0;
                 orient_yes = 0;
             }
@@ -7959,7 +7972,10 @@ where
             // temperature window should see.
             accept = false;
         }
-        if cfg.move_library.is_rigid_body() && (!returning || (e_new - e).abs() > 5.0e-2) {
+        if cfg.move_library.is_rigid_body()
+            && !multi_shell_rigid
+            && (!returning || (e_new - e).abs() > 5.0e-2)
+        {
             // Same-basin accepts have no energy change, and counting them
             // keeps a rigid chart cold. Only a move that lands on a
             // different minimum says whether the temperature is high enough.
@@ -7970,7 +7986,7 @@ where
             }
             if rigid_window >= 8 {
                 let rate = rigid_hits as f64 / rigid_window as f64;
-                let cap = rigid_factor_cap(orient_scale);
+                let cap = rigid_factor_cap(multi_shell_rigid);
                 if rate < 0.25 {
                     rigid_factor = (rigid_factor * 2.0).min(cap);
                 } else if rate > 0.6 {

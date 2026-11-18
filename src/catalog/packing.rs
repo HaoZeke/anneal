@@ -64,42 +64,25 @@ pub const PACKING_SPEC: SoapSpec = SoapSpec {
     rcut_nn: 3.5,
 };
 
-/// True when `coordinates` contains at least one site enclosed in 3D by its
-/// first-shell neighbours, so a packing-environment histogram is non-vacuous.
+/// True when `coordinates` contains at least one site strictly enclosed in 3D
+/// inside a tetrahedron of its first-shell neighbours (Carathéodory's theorem).
 pub(crate) fn has_enclosed_site(coordinates: &[f64]) -> bool {
-    if coordinates.len() < 12 || !coordinates.len().is_multiple_of(3) {
-        return false;
-    }
-    if coordinates.iter().any(|v| !v.is_finite()) {
+    if coordinates.is_empty()
+        || !coordinates.len().is_multiple_of(3)
+        || coordinates.iter().any(|v| !v.is_finite())
+    {
         return false;
     }
     let count = coordinates.len() / 3;
-    let mut nearest = Vec::with_capacity(count);
+    let cutoff = crate::structure::contact_cutoff_from_gr(ArrayView1::from(coordinates), count);
+    let cut2 = cutoff * cutoff;
+    let det3 = |a: [f64; 3], b: [f64; 3], c: [f64; 3]| -> f64 {
+        a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+            + a[2] * (b[0] * c[1] - b[1] * c[0])
+    };
+    let eps = f64::EPSILON.sqrt();
     for i in 0..count {
-        let mut best = f64::INFINITY;
-        for j in 0..count {
-            if i == j {
-                continue;
-            }
-            let dx = coordinates[3 * j] - coordinates[3 * i];
-            let dy = coordinates[3 * j + 1] - coordinates[3 * i + 1];
-            let dz = coordinates[3 * j + 2] - coordinates[3 * i + 2];
-            best = best.min(dx * dx + dy * dy + dz * dz);
-        }
-        if best.is_finite() && best > 1e-24 {
-            nearest.push(best.sqrt());
-        }
-    }
-    if nearest.is_empty() {
-        return false;
-    }
-    nearest.sort_by(|a, b| a.total_cmp(b));
-    let bond = nearest[nearest.len() / 2];
-    let cut2 = (1.45 * bond) * (1.45 * bond);
-    for i in 0..count {
-        let mut deg = 0usize;
-        let mut sum = [0.0_f64; 3];
-        let mut cov = [[0.0_f64; 3]; 3];
+        let mut dirs: Vec<[f64; 3]> = Vec::new();
         for j in 0..count {
             if i == j {
                 continue;
@@ -110,31 +93,36 @@ pub(crate) fn has_enclosed_site(coordinates: &[f64]) -> bool {
             let d2 = dx * dx + dy * dy + dz * dz;
             if d2 <= cut2 && d2 > 1e-24 {
                 let inv = 1.0 / d2.sqrt();
-                let u = [dx * inv, dy * inv, dz * inv];
-                deg += 1;
-                for a in 0..3 {
-                    sum[a] += u[a];
-                    for b in 0..3 {
-                        cov[a][b] += u[a] * u[b];
+                dirs.push([dx * inv, dy * inv, dz * inv]);
+            }
+        }
+        let deg = dirs.len();
+        for a in 0..deg {
+            let ua = dirs[a];
+            for b in (a + 1)..deg {
+                let ub = dirs[b];
+                for c in (b + 1)..deg {
+                    let uc = dirs[c];
+                    let sd = det3(ua, ub, uc);
+                    if sd.abs() <= eps {
+                        continue;
+                    }
+                    for &ud in &dirs[(c + 1)..deg] {
+                        let sc = -det3(ua, ub, ud);
+                        if sc * sd <= 0.0 || sc.abs() <= eps {
+                            continue;
+                        }
+                        let sb = det3(ua, uc, ud);
+                        if sb * sd <= 0.0 || sb.abs() <= eps {
+                            continue;
+                        }
+                        let sa = -det3(ub, uc, ud);
+                        if sa * sd > 0.0 && sa.abs() > eps {
+                            return true;
+                        }
                     }
                 }
             }
-        }
-        if deg < 4 {
-            continue;
-        }
-        let inv_deg = 1.0 / deg as f64;
-        let mean_norm2 = (sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]) * inv_deg * inv_deg;
-        let c00 = cov[0][0] * inv_deg;
-        let c01 = cov[0][1] * inv_deg;
-        let c02 = cov[0][2] * inv_deg;
-        let c11 = cov[1][1] * inv_deg;
-        let c12 = cov[1][2] * inv_deg;
-        let c22 = cov[2][2] * inv_deg;
-        let det = c00 * (c11 * c22 - c12 * c12) - c01 * (c01 * c22 - c12 * c02)
-            + c02 * (c01 * c12 - c11 * c02);
-        if mean_norm2 < 0.1225 && det > 1.0e-3 {
-            return true;
         }
     }
     false
@@ -1666,4 +1654,42 @@ pub fn offer_known_minimum(energy: f64, coordinates: &[f64]) {
 /// fold into its screen bank at its own cadence.
 pub fn take_known_minima() -> Vec<(f64, Vec<f64>)> {
     SCREEN_KNOWN.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_enclosed_site;
+
+    #[test]
+    fn has_enclosed_site_distinguishes_surface_polyhedra_from_interior_shells() {
+        assert!(!has_enclosed_site(&[]));
+        assert!(!has_enclosed_site(&[0.0, 0.0]));
+        assert!(!has_enclosed_site(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]));
+        let tetra = [
+            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ];
+        assert!(
+            !has_enclosed_site(&tetra),
+            "a 4-vertex surface simplex has no interior site"
+        );
+        let hollow_octahedron = [
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ];
+        assert!(
+            !has_enclosed_site(&hollow_octahedron),
+            "a hollow 6-vertex octahedron has no enclosed interior site"
+        );
+        let mut centred_tetra = vec![0.0, 0.0, 0.0];
+        centred_tetra.extend_from_slice(&tetra);
+        assert!(
+            has_enclosed_site(&centred_tetra),
+            "a 4-vertex tetrahedron enclosing its centroid must be detected"
+        );
+        let scaled: Vec<f64> = centred_tetra.iter().map(|v| 2.75 * v - 0.9).collect();
+        assert!(
+            has_enclosed_site(&scaled),
+            "enclosure detection must be scale and translation invariant"
+        );
+    }
 }

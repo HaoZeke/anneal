@@ -227,7 +227,7 @@ impl MoveLibrary {
                 // [`Config::with_flexible_molecules`]'s call: only it knows
                 // the group is one covalent molecule.
                 let lone_molecule = groups.len() == 1
-                    && has_rotatable_valence(&groups[0], cfg.species.as_deref())
+                    && group_has_dihedral_dof(&groups[0], cfg.species.as_deref())
                     && mobile.is_none();
                 if lone_molecule {
                     kernels.retain(|kernel| {
@@ -239,7 +239,15 @@ impl MoveLibrary {
                         )
                     });
                 }
-                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap {
+                // When the container radius exceeds the group-contact cutoff,
+                // the water network spans multiple group shells: the atomic
+                // SOAP pullback spends the quench inside the spherical-harmonic
+                // expansion, whereas a single-cutoff cage keeps the arm it was
+                // measured with and a multi-shell cage adds hydrogen-bond rewiring.
+                let beyond_group_cutoff =
+                    cfg.container > cfg.group_cutoff && super::cycles::is_water_groups(groups);
+                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap && !beyond_group_cutoff
+                {
                     kernels.push(soap_arm(cfg, mobile.clone(), Some(groups.clone())));
                 }
                 if let Some(species) = cfg.species.as_ref() {
@@ -256,9 +264,11 @@ impl MoveLibrary {
                     kernels.push(ClusterMove::GroupCycleReverse {
                         groups: groups.clone(),
                     });
-                    kernels.push(ClusterMove::GroupRewire {
-                        groups: groups.clone(),
-                    });
+                    if beyond_group_cutoff {
+                        kernels.push(ClusterMove::GroupRewire {
+                            groups: groups.clone(),
+                        });
+                    }
                 }
                 kernels
             }
@@ -1547,28 +1557,22 @@ pub fn covalent_radius(z: u32) -> f64 {
     }
 }
 
-/// True when `group` contains at least two multivalent covalent bridge centres
-/// plus at least two substituent atoms, the chemical prerequisite for an
-/// internal dihedral torsion or conformational ring.
-fn has_rotatable_valence(group: &[usize], species: Option<&[u32]>) -> bool {
+/// True when `group` has at least one internal dihedral degree of freedom in 3D
+/// after subtracting the 6 rigid-body modes, \(N - 1\) tree bond stretches, and
+/// \(N - 2\) tree bond bends from \(3N\) Cartesian coordinates of covalently
+/// bonded centres.
+pub(super) fn group_has_dihedral_dof(group: &[usize], species: Option<&[u32]>) -> bool {
     let Some(labels) = species else {
         return false;
     };
-    let mut multivalent = 0usize;
-    let mut bonded_total = 0usize;
-    for &idx in group {
-        let Some(&z) = labels.get(idx) else {
-            continue;
-        };
-        if covalent_radius(z) <= 0.0 || matches!(z, 2 | 10 | 18 | 36 | 54 | 86) {
-            continue;
-        }
-        bonded_total += 1;
-        if !matches!(z, 1 | 9 | 17 | 35 | 53 | 85) {
-            multivalent += 1;
-        }
-    }
-    multivalent >= 2 && bonded_total.saturating_sub(2) >= 2
+    let bonded = group
+        .iter()
+        .filter(|&&idx| labels.get(idx).is_some_and(|&z| covalent_radius(z) > 0.0))
+        .count();
+    let internal_dof = (3 * bonded).saturating_sub(6);
+    let stretches = bonded.saturating_sub(1);
+    let bends = bonded.saturating_sub(2);
+    internal_dof.saturating_sub(stretches + bends) > 0
 }
 
 /// Connected components under the bond-matrix rule: two atoms bond when their
@@ -3532,31 +3536,59 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn water_clusters_share_one_size_independent_move_library() {
-        let arms_for = |molecules: usize| -> Vec<String> {
-            let species: Vec<u32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
-            let groups: Vec<Vec<usize>> = (0..molecules)
-                .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
-                .collect();
-            let rec = Config::recommended_molecular(species, groups, 1.0);
-            rec.move_library
-                .kernels(&rec)
-                .iter()
-                .map(ClusterMove::name)
-                .collect()
-        };
-        let large_names = arms_for(20);
-        let small_names = arms_for(6);
-        assert_eq!(
-            small_names, large_names,
-            "water move library must not branch on molecule count"
+    fn a_large_water_cluster_does_not_draw_the_atomic_soap_pullback() {
+        let molecules = 20;
+        let species: Vec<u32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
+        let groups: Vec<Vec<usize>> = (0..molecules)
+            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
+            .collect();
+        let rec = Config::recommended_molecular(species, groups, 1.0);
+        let names: Vec<_> = rec
+            .move_library
+            .kernels(&rec)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(
+            !names.iter().any(|name| *name == "soap"),
+            "atomic SOAP pullback is still drawn for (H2O)20: {names:?}"
         );
-        for required in ["gshake", "gsurface", "gburst", "soap", "gcycle", "hbrewire"] {
+        for required in ["gshake", "gsurface", "gburst", "gcycle", "hbrewire"] {
             assert!(
-                large_names.iter().any(|name| name == required),
-                "missing {required} on water library: {large_names:?}"
+                names.iter().any(|name| *name == required),
+                "missing {required} on (H2O)20: {names:?}"
             );
         }
+        let hexamer = 6;
+        let species: Vec<u32> = (0..hexamer).flat_map(|_| [8, 1, 1]).collect();
+        let groups: Vec<Vec<usize>> = (0..hexamer)
+            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
+            .collect();
+        let small = Config::recommended_molecular(species, groups, 1.0);
+        let small_names: Vec<_> = small
+            .move_library
+            .kernels(&small)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(
+            !small_names.iter().any(|name| *name == "hbrewire"),
+            "the hexamer library gained a rewire arm: {small_names:?}"
+        );
+    }
+
+    #[test]
+    fn group_has_dihedral_dof_requires_a_four_centre_covalent_chain() {
+        assert!(!super::group_has_dihedral_dof(&[0, 1, 2, 3], None));
+        assert!(!super::group_has_dihedral_dof(&[0, 1, 2], Some(&[8, 1, 1])));
+        assert!(!super::group_has_dihedral_dof(
+            &[0, 1, 2, 3],
+            Some(&[8, 1, 1, 0])
+        ));
+        assert!(super::group_has_dihedral_dof(
+            &[0, 1, 2, 3],
+            Some(&[6, 8, 8, 1])
+        ));
     }
 
     #[test]
