@@ -156,14 +156,8 @@ pub fn cmake_configure_core_args(rpc: bool, cache: bool) -> Vec<String> {
         "-DRGPOT_BUILD_EXAMPLES=False".into(),
         "-DRGPOT_WITH_XTENSOR=OFF".into(),
         "-DRGPOT_WITH_EIGEN=OFF".into(),
-        format!(
-            "-DRGPOT_WITH_RPC={}",
-            if rpc { "ON" } else { "OFF" }
-        ),
-        format!(
-            "-DRGPOT_WITH_CACHE={}",
-            if cache { "ON" } else { "OFF" }
-        ),
+        format!("-DRGPOT_WITH_RPC={}", if rpc { "ON" } else { "OFF" }),
+        format!("-DRGPOT_WITH_CACHE={}", if cache { "ON" } else { "OFF" }),
         "-DRGPOT_PURE_LIB=OFF".into(),
     ]
 }
@@ -207,10 +201,7 @@ fn run_cmd(bin: &str, args: &[&str], cwd: &Path) -> Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "{bin} {} failed with {status}",
-            args.join(" ")
-        ))
+        Err(format!("{bin} {} failed with {status}", args.join(" ")))
     }
 }
 
@@ -329,7 +320,10 @@ pub fn preflight(root: &Path, lockstep_check: bool) -> Result<()> {
         }
     }
     if !missing.is_empty() {
-        return Err(format!("missing required files:\n  {}", missing.join("\n  ")));
+        return Err(format!(
+            "missing required files:\n  {}",
+            missing.join("\n  ")
+        ));
     }
 
     if lockstep_check {
@@ -348,8 +342,7 @@ pub fn preflight(root: &Path, lockstep_check: bool) -> Result<()> {
 pub fn run_release_assert(root: &Path) -> Result<()> {
     lockstep::assert_lockstep(root, None, false)?;
     let cog_toml = root.join("cog.toml");
-    let text = std::fs::read_to_string(&cog_toml)
-        .map_err(|e| format!("read cog.toml: {e}"))?;
+    let text = std::fs::read_to_string(&cog_toml).map_err(|e| format!("read cog.toml: {e}"))?;
     // Minimal TOML presence check (full schema is cog's concern).
     if !text.contains('[') {
         return Err("cog.toml looks empty or invalid".into());
@@ -433,7 +426,10 @@ fn ensure_towncrier_available() -> Result<TowncrierInvoke> {
     }
     let py = which_bin("python3").or_else(|| which_bin("python"));
     if let Some(ref py) = py {
-        println!("potctl: installing towncrier via {} -m pip --user", py.display());
+        println!(
+            "potctl: installing towncrier via {} -m pip --user",
+            py.display()
+        );
         let _ = Command::new(py)
             .args(["-m", "ensurepip", "--upgrade"])
             .status();
@@ -463,8 +459,7 @@ fn run_towncrier_argv(root: &Path, invoke: TowncrierInvoke, args: &[&str]) -> Re
         TowncrierInvoke::Bin => {
             let mut cmd = Command::new("towncrier");
             cmd.args(args).current_dir(root);
-            cmd.status()
-                .map_err(|e| format!("spawn towncrier: {e}"))?
+            cmd.status().map_err(|e| format!("spawn towncrier: {e}"))?
         }
         TowncrierInvoke::PythonModule => {
             // Prefer python -m towncrier; if only uvx works, use that as last resort.
@@ -478,7 +473,10 @@ fn run_towncrier_argv(root: &Path, invoke: TowncrierInvoke, args: &[&str]) -> Re
                     if st.success() {
                         return Ok(());
                     }
-                    return Err(format!("python -m towncrier {} failed with {st}", args.join(" ")));
+                    return Err(format!(
+                        "python -m towncrier {} failed with {st}",
+                        args.join(" ")
+                    ));
                 }
             }
             if which_bin("uvx").is_some() {
@@ -581,11 +579,7 @@ fn run_cmd_status_ok(bin: &str, args: &[&str], cwd: &Path) -> Result<()> {
 /// and then invokes a flag the binary rejects.
 pub fn cog_help_has_flag(help: &str, flag: &str) -> bool {
     help.split(|c: char| {
-        c.is_whitespace()
-            || matches!(
-                c,
-                ',' | '[' | ']' | '(' | ')' | '|' | '=' | '{' | '}'
-            )
+        c.is_whitespace() || matches!(c, ',' | '[' | ']' | '(' | ')' | '|' | '=' | '{' | '}')
     })
     .any(|tok| tok == flag)
 }
@@ -759,11 +753,7 @@ fn reinstall_torch_cpu(py: &Path) -> Result<()> {
     println!("Reinstalling CPU torch wheel (libtorch missing or CUDA build detected)");
     if which_bin("uv").is_some() {
         let st = Command::new("uv")
-            .args([
-                "pip",
-                "install",
-                "--python",
-            ])
+            .args(["pip", "install", "--python"])
             .arg(py)
             .args([
                 "--reinstall",
@@ -810,7 +800,8 @@ fn read_torch_version_file(purelib: &Path) -> Option<String> {
         if let Some(rest) = t.strip_prefix("__version__") {
             let rest = rest.trim().trim_start_matches('=').trim();
             let q = rest.trim_matches(|c| c == '"' || c == '\'');
-            if !q.is_empty() && q != rest.trim() || rest.starts_with('"') || rest.starts_with('\'') {
+            if !q.is_empty() && q != rest.trim() || rest.starts_with('"') || rest.starts_with('\'')
+            {
                 let s = rest.trim_matches(|c| c == '"' || c == '\'');
                 if !s.is_empty() {
                     return Some(s.to_string());
@@ -855,14 +846,15 @@ fn append_github_env(lines: &[(&str, String)]) -> Result<()> {
 /// Writes TORCH_LIB / TORCH_CMAKE / PURELIB / LD_LIBRARY_PATH / CMAKE_PREFIX_PATH to GITHUB_ENV when set.
 pub fn run_ensure_torch_metatomic(_root: &Path) -> Result<()> {
     let py = python_bin()?;
-    let purelib_s = py_eval(&py, "import sysconfig; print(sysconfig.get_paths()['purelib'])")?;
+    let purelib_s = py_eval(
+        &py,
+        "import sysconfig; print(sysconfig.get_paths()['purelib'])",
+    )?;
     let mut purelib = PathBuf::from(&purelib_s);
 
     let torch_ver = read_torch_version_file(&purelib).unwrap_or_default();
     let libtorch = purelib.join("torch/lib/libtorch_global_deps.so");
-    let need_cpu = !libtorch.is_file()
-        || torch_ver.contains("+cu")
-        || torch_ver.contains("+cuda");
+    let need_cpu = !libtorch.is_file() || torch_ver.contains("+cu") || torch_ver.contains("+cuda");
     if need_cpu {
         println!(
             "Forcing CPU torch (current version: '{}')",
@@ -925,7 +917,10 @@ pub fn run_ensure_torch_metatomic(_root: &Path) -> Result<()> {
         py_eval(&py, "import sys; print(sys.version.split()[0])").unwrap_or_default()
     );
     println!("torch cmake {}", torch_share.display());
-    println!("vesin.h {}", purelib.join("vesin/include/vesin.h").display());
+    println!(
+        "vesin.h {}",
+        purelib.join("vesin/include/vesin.h").display()
+    );
 
     let torch_lib = purelib.join("torch/lib");
     let ld = match env::var("LD_LIBRARY_PATH") {
@@ -1062,7 +1057,14 @@ pub fn run_plugin_test(root: &Path, build_dir: &str, apply_darwin: bool) -> Resu
     run_cmd("meson", &named_refs, root)?;
     run_cmd(
         "meson",
-        &["test", "-C", build_dir, "--print-errorlogs", "--suite", "plugin"],
+        &[
+            "test",
+            "-C",
+            build_dir,
+            "--print-errorlogs",
+            "--suite",
+            "plugin",
+        ],
         root,
     )?;
     maybe_ccache_stats();
@@ -1147,11 +1149,7 @@ pub fn run_xckernel_test(root: &Path, build_dir: &str) -> Result<()> {
         ],
         root,
     )?;
-    let listed = command_stdout(
-        "meson",
-        &["introspect", "--tests", build_dir],
-        root,
-    )?;
+    let listed = command_stdout("meson", &["introspect", "--tests", build_dir], root)?;
     if !listed.contains("XcKernelGoldens") {
         return Err(
             "meson tests are missing XcKernelGoldens; -Dwith_xckernel did not register the golden suite"
@@ -1199,8 +1197,7 @@ pub fn bridge_client_cmake_configure_args(build_dir: &str) -> Vec<String> {
 
 /// Pure: default potserv path under meson server build dir.
 pub fn bridge_potserv_path(server_build_dir: &str) -> PathBuf {
-    PathBuf::from(server_build_dir)
-        .join("CppCore/potserv")
+    PathBuf::from(server_build_dir).join("CppCore/potserv")
 }
 
 /// `potctl ci bridge-server-build` — meson RPC server (no tests).
@@ -1443,10 +1440,7 @@ pub fn plan_darwin_env(
         ));
         exports.push((
             "PKG_CONFIG_PATH".into(),
-            prepend_path_var(
-                env::var_os("PKG_CONFIG_PATH"),
-                &pc.to_string_lossy(),
-            ),
+            prepend_path_var(env::var_os("PKG_CONFIG_PATH"), &pc.to_string_lossy()),
         ));
         exports.push((
             "LIBRARY_PATH".into(),
@@ -1566,11 +1560,13 @@ pub fn print_darwin_env(
     let prefix = conda_prefix
         .map(str::to_string)
         .or_else(|| env::var("CONDA_PREFIX").ok())
-        .or_else(|| env::var("PIXI_PROJECT_ROOT").ok().and_then(|_| env::var("CONDA_PREFIX").ok()));
+        .or_else(|| {
+            env::var("PIXI_PROJECT_ROOT")
+                .ok()
+                .and_then(|_| env::var("CONDA_PREFIX").ok())
+        });
 
-    let sdk = sdkroot
-        .map(str::to_string)
-        .or_else(resolve_sdkroot_hint);
+    let sdk = sdkroot.map(str::to_string).or_else(resolve_sdkroot_hint);
 
     let plan = if force {
         plan_darwin_env("macOS", prefix.as_deref(), sdk.as_deref())
@@ -1613,13 +1609,25 @@ mod tests {
     #[test]
     fn darwin_plan_sets_clang_and_unsets_conda_cross() {
         let p = plan_darwin_env("macOS", Some("/opt/conda"), Some("/SDKs/MacOSX.sdk")).unwrap();
-        assert!(p.exports.iter().any(|(k, v)| k == "CC" && v == "/usr/bin/clang"));
-        assert!(p.exports.iter().any(|(k, v)| k == "SDKROOT" && v.contains("MacOSX")));
+        assert!(p
+            .exports
+            .iter()
+            .any(|(k, v)| k == "CC" && v == "/usr/bin/clang"));
+        assert!(p
+            .exports
+            .iter()
+            .any(|(k, v)| k == "SDKROOT" && v.contains("MacOSX")));
         assert!(p.unsets.contains(&"LDFLAGS".to_string()));
         assert!(p.unsets.contains(&"CONDA_BUILD_SYSROOT".to_string()));
         assert_eq!(p.meson_extra, "-Ddefault_library=static");
-        assert!(p.exports.iter().any(|(k, v)| k == "LIBRARY_PATH" && v.starts_with("/opt/conda/lib")));
-        assert!(p.exports.iter().any(|(k, v)| k == "CPATH" && v.starts_with("/opt/conda/include")));
+        assert!(p
+            .exports
+            .iter()
+            .any(|(k, v)| k == "LIBRARY_PATH" && v.starts_with("/opt/conda/lib")));
+        assert!(p
+            .exports
+            .iter()
+            .any(|(k, v)| k == "CPATH" && v.starts_with("/opt/conda/include")));
     }
 
     #[test]
@@ -1627,7 +1635,10 @@ mod tests {
         env::set_var("POTCTL_TEST_GFORTRAN", "1");
         let p = plan_darwin_env("macOS", Some("/opt/conda"), None).unwrap();
         env::remove_var("POTCTL_TEST_GFORTRAN");
-        assert!(p.exports.iter().any(|(k, v)| k == "FC" && v.ends_with("gfortran")));
+        assert!(p
+            .exports
+            .iter()
+            .any(|(k, v)| k == "FC" && v.ends_with("gfortran")));
     }
 
     #[test]
@@ -1713,11 +1724,20 @@ mod tests {
 
     #[test]
     fn cmake_macos_extra_has_clang_and_prefix() {
-        let a = cmake_macos_extra_args(true, Some("/SDKs/X.sdk"), Some("/opt/conda"), Some("/opt/conda/bin/gfortran"));
+        let a = cmake_macos_extra_args(
+            true,
+            Some("/SDKs/X.sdk"),
+            Some("/opt/conda"),
+            Some("/opt/conda/bin/gfortran"),
+        );
         assert!(a.iter().any(|x| x == "-DCMAKE_C_COMPILER=/usr/bin/clang"));
-        assert!(a.iter().any(|x| x.contains("CMAKE_OSX_SYSROOT=/SDKs/X.sdk")));
+        assert!(a
+            .iter()
+            .any(|x| x.contains("CMAKE_OSX_SYSROOT=/SDKs/X.sdk")));
         assert!(a.iter().any(|x| x.contains("CMAKE_PREFIX_PATH=/opt/conda")));
-        assert!(a.iter().any(|x| x.contains("CMAKE_Fortran_COMPILER=/opt/conda/bin/gfortran")));
+        assert!(a
+            .iter()
+            .any(|x| x.contains("CMAKE_Fortran_COMPILER=/opt/conda/bin/gfortran")));
     }
 
     #[test]
@@ -1726,8 +1746,12 @@ mod tests {
         assert!(is_conventional_commit_subject("fix: waitid stub"));
         assert!(is_conventional_commit_subject("chore: bump"));
         assert!(is_conventional_commit_subject("bench: time one force call"));
-        assert!(is_conventional_commit_subject("pot(sw): add the pair kernel"));
-        assert!(is_conventional_commit_subject("python(sw): bind the energy"));
+        assert!(is_conventional_commit_subject(
+            "pot(sw): add the pair kernel"
+        ));
+        assert!(is_conventional_commit_subject(
+            "python(sw): bind the energy"
+        ));
         assert!(is_conventional_commit_subject(
             "nlist: bin atoms on a cutoff-sized cell grid"
         ));
@@ -1771,11 +1795,7 @@ Options:
         assert!(cog_help_has_flag(legacy, "--from"));
         assert_eq!(
             cog_check_argv(legacy, "abc"),
-            vec![
-                "check".to_string(),
-                "--from".to_string(),
-                "abc".to_string(),
-            ]
+            vec!["check".to_string(), "--from".to_string(), "abc".to_string(),]
         );
         assert!(cog_failure_is_only_merge_types(
             "Error: \nFound 4 non compliant commits in abc..HEAD:\n\tError:Commit type `merge` not allowed\n"
@@ -1793,10 +1813,7 @@ Options:
 
     #[test]
     fn torch_mm_and_layout_paths() {
-        assert_eq!(
-            torch_mm_from_version("2.10.1+cpu").as_deref(),
-            Some("2.10")
-        );
+        assert_eq!(torch_mm_from_version("2.10.1+cpu").as_deref(), Some("2.10"));
         assert_eq!(torch_mm_from_version("2.9.0").as_deref(), Some("2.9"));
         let paths = metatomic_layout_paths(Path::new("/p"), "2.10");
         assert!(paths.iter().any(|p| p.ends_with("vesin/include/vesin.h")));
@@ -1834,7 +1851,8 @@ Options:
         fn with_tools(tag: &str, tools: &[&str]) -> Self {
             static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
             let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-            let dir = env::temp_dir().join(format!("potctl-towncrier-{tag}-{}", std::process::id()));
+            let dir =
+                env::temp_dir().join(format!("potctl-towncrier-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(dir.join("bin")).unwrap();
             for tool in tools {
@@ -1867,10 +1885,7 @@ Options:
     #[test]
     fn ensure_towncrier_uses_the_binary_on_path() {
         let _env = FakeToolPath::with_tools("bin", &["towncrier", "uvx"]);
-        assert_eq!(
-            ensure_towncrier_available().unwrap(),
-            TowncrierInvoke::Bin
-        );
+        assert_eq!(ensure_towncrier_available().unwrap(), TowncrierInvoke::Bin);
     }
 
     #[test]
@@ -1941,15 +1956,8 @@ Options:
 
     #[test]
     fn run_build_test_rejects_bad_sys() {
-        let err = run_build_test(
-            Path::new("/tmp/nope"),
-            "make",
-            "true",
-            "false",
-            None,
-            true,
-        )
-        .unwrap_err();
+        let err = run_build_test(Path::new("/tmp/nope"), "make", "true", "false", None, true)
+            .unwrap_err();
         assert!(err.contains("unknown build sys") || err.contains("make"));
     }
 }

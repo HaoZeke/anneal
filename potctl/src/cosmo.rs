@@ -380,7 +380,7 @@ fn write_minimal_aarch64_main_o(path: &Path) -> Result<(), String> {
     b[4] = 2; // ELFCLASS64
     b[5] = 1; // ELFDATA2LSB
     b[6] = 1; // EV_CURRENT
-    // e_type ET_REL
+              // e_type ET_REL
     b[16] = 1;
     b[17] = 0;
     // e_machine EM_AARCH64 = 183
@@ -426,7 +426,18 @@ fn write_minimal_aarch64_main_o(path: &Path) -> Result<(), String> {
 
     // Section headers at 0xB8 (5 entries)
     let sh_off = 0xB8usize;
-    let write_sh = |b: &mut [u8], idx: usize, name: u32, sh_type: u32, flags: u64, addr: u64, off: u64, size: u64, link: u32, info: u32, addralign: u64, entsize: u64| {
+    let write_sh = |b: &mut [u8],
+                    idx: usize,
+                    name: u32,
+                    sh_type: u32,
+                    flags: u64,
+                    addr: u64,
+                    off: u64,
+                    size: u64,
+                    link: u32,
+                    info: u32,
+                    addralign: u64,
+                    entsize: u64| {
         let o = sh_off + idx * 64;
         b[o..o + 4].copy_from_slice(&name.to_le_bytes());
         b[o + 4..o + 8].copy_from_slice(&sh_type.to_le_bytes());
@@ -444,20 +455,7 @@ fn write_minimal_aarch64_main_o(path: &Path) -> Result<(), String> {
     // 1 .text PROGBITS AX off=0x40 size=8
     write_sh(&mut b, 1, 1, 1, 6, 0, 0x40, 8, 0, 0, 4, 0);
     // 2 .shstrtab STRTAB off=0x48 size=shstr.len
-    write_sh(
-        &mut b,
-        2,
-        7,
-        3,
-        0,
-        0,
-        0x48,
-        shstr.len() as u64,
-        0,
-        0,
-        1,
-        0,
-    );
+    write_sh(&mut b, 2, 7, 3, 0, 0, 0x48, shstr.len() as u64, 0, 0, 1, 0);
     // 3 .strtab STRTAB off=0x68
     write_sh(
         &mut b,
@@ -496,26 +494,27 @@ fn write_minimal_aarch64_pad_o(path: &Path) -> Result<(), String> {
     b[60] = 4; // shnum
     b[62] = 2; // shstrndx
     b[40] = 0x80; // shoff
-    // .text: one nop
+                  // .text: one nop
     b[0x40..0x44].copy_from_slice(&0xd503201fu32.to_le_bytes());
     let shstr: &[u8] = b"\0.text\0.shstrtab\0.strtab\0";
     b[0x48..0x48 + shstr.len()].copy_from_slice(shstr);
     // .strtab at 0x60 is one NUL. The buffer is already zero there.
     b[0x60] = 0;
     let sh_off = 0x80usize;
-    let write_sh = |b: &mut [u8], idx: usize, name: u32, sh_type: u32, flags: u64, off: u64, size: u64| {
-        let o = sh_off + idx * 64;
-        b[o..o + 4].copy_from_slice(&name.to_le_bytes());
-        b[o + 4..o + 8].copy_from_slice(&sh_type.to_le_bytes());
-        b[o + 8..o + 16].copy_from_slice(&flags.to_le_bytes());
-        b[o + 24..o + 32].copy_from_slice(&off.to_le_bytes());
-        b[o + 32..o + 40].copy_from_slice(&size.to_le_bytes());
-        if sh_type == 1 {
-            b[o + 48..o + 56].copy_from_slice(&4u64.to_le_bytes());
-        } else {
-            b[o + 48..o + 56].copy_from_slice(&1u64.to_le_bytes());
-        }
-    };
+    let write_sh =
+        |b: &mut [u8], idx: usize, name: u32, sh_type: u32, flags: u64, off: u64, size: u64| {
+            let o = sh_off + idx * 64;
+            b[o..o + 4].copy_from_slice(&name.to_le_bytes());
+            b[o + 4..o + 8].copy_from_slice(&sh_type.to_le_bytes());
+            b[o + 8..o + 16].copy_from_slice(&flags.to_le_bytes());
+            b[o + 24..o + 32].copy_from_slice(&off.to_le_bytes());
+            b[o + 32..o + 40].copy_from_slice(&size.to_le_bytes());
+            if sh_type == 1 {
+                b[o + 48..o + 56].copy_from_slice(&4u64.to_le_bytes());
+            } else {
+                b[o + 48..o + 56].copy_from_slice(&1u64.to_le_bytes());
+            }
+        };
     write_sh(&mut b, 0, 0, 0, 0, 0, 0);
     write_sh(&mut b, 1, 1, 1, 6, 0x40, 4);
     write_sh(&mut b, 2, 7, 3, 0, 0x48, shstr.len() as u64);
@@ -531,7 +530,13 @@ fn compile_aarch64_main_via_stdin(a64_cc: &Path, outo: &Path, work: &Path) -> bo
     let root = cosmo_toolchain_root(a64_cc);
     let a64lib = root.join("aarch64-linux-cosmo/lib");
     let mut tries: Vec<Vec<String>> = vec![
-        vec!["-x".into(), "c".into(), "-c".into(), "-".into(), "-o".into()],
+        vec![
+            "-x".into(),
+            "c".into(),
+            "-c".into(),
+            "-".into(),
+            "-o".into(),
+        ],
         vec![
             "-nostdinc".into(),
             "-ffreestanding".into(),
@@ -746,10 +751,7 @@ fn inject_cosmo_lib_paths(cosmo: &Path, cc: &Path, out: &mut Vec<String>) {
                 if p.is_dir() {
                     stack.push(p);
                 } else if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-                    if matches!(
-                        name,
-                        "libc.a" | "crt1.o" | "crt.o" | "crtbeginT.o"
-                    ) {
+                    if matches!(name, "libc.a" | "crt1.o" | "crt.o" | "crtbeginT.o") {
                         if let Some(parent) = p.parent() {
                             add_lib_dir(parent);
                             n += 1;
@@ -765,7 +767,9 @@ fn inject_cosmo_lib_paths(cosmo: &Path, cc: &Path, out: &mut Vec<String>) {
 fn cosmocc_wants_aarch64_companions() -> bool {
     // cosmocc multi-arch fat pass needs aarch64 companions unless restricted to x86_64 only.
     let arches = env::var("COSMOCC_ARCHES").unwrap_or_else(|_| "x86_64".into());
-    arches.split_whitespace().any(|a| a == "aarch64" || a == "arm64")
+    arches
+        .split_whitespace()
+        .any(|a| a == "aarch64" || a == "arm64")
         || arches.trim().is_empty()
         || arches == "all"
 }
@@ -1184,21 +1188,15 @@ pub fn build_ape(repo_root: &Path) -> Result<(), String> {
             )
             .env("CARGO_TARGET_DIR", &target_dir)
             // Ensure linker is on PATH when target JSON uses bare name "potctl-cosmo-ld".
-            .env(
-                "PATH",
-                {
-                    let mut paths = vec![linker
-                        .parent()
-                        .unwrap_or(Path::new("."))
-                        .to_path_buf()];
-                    if let Ok(cur) = env::var("PATH") {
-                        for p in env::split_paths(&cur) {
-                            paths.push(p);
-                        }
+            .env("PATH", {
+                let mut paths = vec![linker.parent().unwrap_or(Path::new(".")).to_path_buf()];
+                if let Ok(cur) = env::var("PATH") {
+                    for p in env::split_paths(&cur) {
+                        paths.push(p);
                     }
-                    env::join_paths(paths).unwrap_or_default()
-                },
-            )
+                }
+                env::join_paths(paths).unwrap_or_default()
+            })
             .status()
             .map_err(|e| err(format!("cargo: {e}")))?;
         if !status.success() {
@@ -1234,7 +1232,11 @@ pub fn build_ape(repo_root: &Path) -> Result<(), String> {
     } else {
         let mut linked = false;
         if let (Some(apelink), Some(ape_elf)) = (find_apelink(&cosmo), find_ape_elf(&cosmo)) {
-            eprintln!("==> apelink ({}) -> {}", apelink.display(), ape_out.display());
+            eprintln!(
+                "==> apelink ({}) -> {}",
+                apelink.display(),
+                ape_out.display()
+            );
             let mut cmd = Command::new(&apelink);
             cmd.arg("-l").arg(&ape_elf).arg("-o").arg(&ape_out);
             for d in &dbg_bins {
@@ -1329,7 +1331,14 @@ fn ensure_host_cosmo_ld(repo_root: &Path, potctl_exe: &Path) -> Result<PathBuf, 
     }
     eprintln!("==> building host potctl-cosmo-ld (rustc cosmo linker)");
     let status = Command::new("cargo")
-        .args(["build", "--release", "-p", "potctl", "--bin", "potctl-cosmo-ld"])
+        .args([
+            "build",
+            "--release",
+            "-p",
+            "potctl",
+            "--bin",
+            "potctl-cosmo-ld",
+        ])
         .current_dir(repo_root)
         .status()
         .map_err(|e| err(format!("cargo build potctl-cosmo-ld: {e}")))?;

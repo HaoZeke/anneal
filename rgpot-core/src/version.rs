@@ -230,6 +230,11 @@ mod tests {
         let header =
             std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/include/rgpot.h"))
                 .unwrap();
+        let flat = header
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace("( ", "(");
         let want = format!("#define RGPOT_VERSION \"{}\"", env!("CARGO_PKG_VERSION"));
         assert!(header.contains(&want), "rgpot.h lacks {want}");
         for (name, value) in [
@@ -272,7 +277,7 @@ mod tests {
             "rgpot_set_last_error(const char *msg)",
             "RGPOT_SCC_NOT_CONVERGED = 5",
         ] {
-            assert!(header.contains(f), "rgpot.h lacks {f}");
+            assert!(flat.contains(f), "rgpot.h lacks {f}");
         }
         let default_step = format!(
             "#define RGPOT_HVP_DEFAULT_STEP {:.1e}",

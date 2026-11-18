@@ -20,4 +20,7 @@ if ! git diff --exit-code -- "$header"; then
   echo "fix: pixi run gen-header, then commit $header" >&2
   exit 1
 fi
+if command -v clang-format >/dev/null 2>&1; then
+  clang-format --dry-run --Werror --style=file:CppCore/.clang-format "$header"
+fi
 echo "OK: $header matches the cbindgen output"

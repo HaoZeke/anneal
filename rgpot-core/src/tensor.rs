@@ -246,9 +246,7 @@ pub(crate) fn create_owned_i32_tensor(
 
 /// Validate a positions tensor: f64, 2-D, shape [n, 3].  Returns n_atoms.
 #[allow(dead_code)]
-pub(crate) fn validate_positions(
-    tensor: *const DLManagedTensorVersioned,
-) -> Result<usize, String> {
+pub(crate) fn validate_positions(tensor: *const DLManagedTensorVersioned) -> Result<usize, String> {
     if tensor.is_null() {
         return Err("positions tensor is NULL".into());
     }
@@ -280,10 +278,7 @@ pub(crate) fn validate_atomic_numbers(
         return Err(format!("atomic_numbers: expected i32, got {:?}", t.dtype));
     }
     if t.ndim != 1 {
-        return Err(format!(
-            "atomic_numbers: expected ndim=1, got {}",
-            t.ndim
-        ));
+        return Err(format!("atomic_numbers: expected ndim=1, got {}", t.ndim));
     }
     let shape = unsafe { std::slice::from_raw_parts(t.shape, 1) };
     if shape[0] as usize != expected_n {
@@ -297,9 +292,7 @@ pub(crate) fn validate_atomic_numbers(
 
 /// Validate a box matrix tensor: f64, 2-D, shape [3, 3].
 #[allow(dead_code)]
-pub(crate) fn validate_box_matrix(
-    tensor: *const DLManagedTensorVersioned,
-) -> Result<(), String> {
+pub(crate) fn validate_box_matrix(tensor: *const DLManagedTensorVersioned) -> Result<(), String> {
     if tensor.is_null() {
         return Err("box_matrix tensor is NULL".into());
     }
@@ -372,8 +365,8 @@ fn checked_data<T>(
     let shape = unsafe { std::slice::from_raw_parts(t.shape, ndim) };
     let mut count: usize = 1;
     for &extent in shape {
-        let extent = usize::try_from(extent)
-            .map_err(|_| format!("{label}: negative extent {extent}"))?;
+        let extent =
+            usize::try_from(extent).map_err(|_| format!("{label}: negative extent {extent}"))?;
         count = count
             .checked_mul(extent)
             .ok_or_else(|| format!("{label}: element count overflows"))?;
@@ -538,9 +531,7 @@ pub unsafe extern "C" fn rgpot_tensor_free(tensor: *mut DLManagedTensorVersioned
 /// # Safety
 /// `tensor` must be NULL or a valid `DLManagedTensorVersioned*`.
 #[no_mangle]
-pub unsafe extern "C" fn rgpot_tensor_device(
-    tensor: *const DLManagedTensorVersioned,
-) -> DLDevice {
+pub unsafe extern "C" fn rgpot_tensor_device(tensor: *const DLManagedTensorVersioned) -> DLDevice {
     if tensor.is_null() {
         return DLDevice {
             device_type: DLDeviceType::kDLCPU,
@@ -659,8 +650,7 @@ mod tests {
         };
         // Source vec is dropped, but the tensor still has valid data.
         let t = unsafe { &(*tensor) };
-        let slice =
-            unsafe { std::slice::from_raw_parts(t.dl_tensor.data as *const f64, 6) };
+        let slice = unsafe { std::slice::from_raw_parts(t.dl_tensor.data as *const f64, 6) };
         assert_eq!(slice, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         assert!(t.flags & DLPACK_FLAG_BITMASK_IS_COPIED != 0);
         unsafe { rgpot_tensor_free(tensor) };
@@ -673,8 +663,7 @@ mod tests {
             create_owned_i32_tensor(data, vec![3])
         };
         let t = unsafe { &(*tensor) };
-        let slice =
-            unsafe { std::slice::from_raw_parts(t.dl_tensor.data as *const i32, 3) };
+        let slice = unsafe { std::slice::from_raw_parts(t.dl_tensor.data as *const i32, 3) };
         assert_eq!(slice, &[1, 8, 6]);
         unsafe { rgpot_tensor_free(tensor) };
     }
@@ -686,8 +675,7 @@ mod tests {
         let t = unsafe { &(*tensor) };
         // Data pointer should NOT be source.as_ptr() (it was copied).
         assert_ne!(t.dl_tensor.data as *const f64, source.as_ptr());
-        let slice =
-            unsafe { std::slice::from_raw_parts(t.dl_tensor.data as *const f64, 6) };
+        let slice = unsafe { std::slice::from_raw_parts(t.dl_tensor.data as *const f64, 6) };
         assert_eq!(slice, &source);
         unsafe { rgpot_tensor_free(tensor) };
     }

@@ -21,8 +21,8 @@ fn generate_c_header(crate_dir: &str) {
     let output_dir = PathBuf::from(crate_dir).join("include");
     std::fs::create_dir_all(&output_dir).unwrap();
 
-    let mut config = cbindgen::Config::from_file("cbindgen.toml")
-        .expect("Unable to find cbindgen.toml");
+    let mut config =
+        cbindgen::Config::from_file("cbindgen.toml").expect("Unable to find cbindgen.toml");
 
     let version = env::var("CARGO_PKG_VERSION").unwrap();
     let cargo_core = ["MAJOR", "MINOR", "PATCH"]
@@ -54,10 +54,62 @@ fn generate_c_header(crate_dir: &str) {
         .expect("Unable to generate C bindings")
         .write_to_file(output_dir.join("rgpot.h"));
 
-    // Ensure the file ends with exactly one newline (keeps end-of-file-fixer happy).
     let path = output_dir.join("rgpot.h");
+    format_c_header(crate_dir, &path);
+
+    // Ensure the file ends with exactly one newline (keeps end-of-file-fixer happy).
     let content = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, format!("{}\n", content.trim_end())).unwrap();
+}
+
+#[cfg(feature = "gen-header")]
+fn format_c_header(crate_dir: &str, header: &std::path::Path) {
+    let repo_root = PathBuf::from(crate_dir).join("..");
+    let style_file = repo_root.join("CppCore").join(".clang-format");
+    let style_arg = if style_file.is_file() {
+        println!("cargo::rerun-if-changed={}", style_file.display());
+        format!("--style=file:{}", style_file.display())
+    } else {
+        "--style=LLVM".to_owned()
+    };
+
+    let pixi_cf = repo_root
+        .join(".pixi")
+        .join("envs")
+        .join("devbld")
+        .join("bin")
+        .join("clang-format");
+    let mut candidates: Vec<PathBuf> = vec![PathBuf::from("clang-format")];
+    if pixi_cf.is_file() {
+        candidates.push(pixi_cf);
+    }
+    candidates.push(PathBuf::from("clang-format-19"));
+    candidates.push(PathBuf::from("clang-format-16"));
+
+    for bin in candidates {
+        match std::process::Command::new(&bin)
+            .args([&style_arg, "-i"])
+            .arg(header)
+            .status()
+        {
+            Ok(status) if status.success() => return,
+            Ok(status) => panic!(
+                "{} failed while formatting {} with status {status}",
+                bin.display(),
+                header.display()
+            ),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => panic!(
+                "failed to invoke {} on {}: {err}",
+                bin.display(),
+                header.display()
+            ),
+        }
+    }
+    println!(
+        "cargo::warning=clang-format not found; {} left unformatted",
+        header.display()
+    );
 }
 
 /// Source revision of the build: `RGPOT_SOURCE_REVISION`, else the git
@@ -80,7 +132,10 @@ fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
     println!("cargo::rerun-if-env-changed=RGPOT_SOURCE_REVISION");
-    println!("cargo::rustc-env=RGPOT_SOURCE_REVISION={}", source_revision(&crate_dir));
+    println!(
+        "cargo::rustc-env=RGPOT_SOURCE_REVISION={}",
+        source_revision(&crate_dir)
+    );
 
     // eindir-core is a normal Cargo dependency now; its capi #[no_mangle] symbols
     // resolve through the shared crate, so no prebuilt static lib link is needed.

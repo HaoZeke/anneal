@@ -17,7 +17,7 @@ use futures::AsyncReadExt;
 use std::os::raw::c_void;
 use tokio::runtime::Runtime;
 
-use crate::potential::{PotentialCallback, rgpot_potential_t};
+use crate::potential::{rgpot_potential_t, PotentialCallback};
 use crate::rpc::schema::potential;
 use crate::status::rgpot_status_t;
 use crate::tensor::{
@@ -81,8 +81,7 @@ impl potential::Server for PotentialServer {
         // Create non-owning DLPack tensors wrapping the owned buffers
         let pos_tensor =
             unsafe { rgpot_tensor_cpu_f64_2d(pos_vec.as_mut_ptr(), n_atoms as i64, 3) };
-        let atm_tensor =
-            unsafe { rgpot_tensor_cpu_i32_1d(atm_vec.as_mut_ptr(), n_atoms as i64) };
+        let atm_tensor = unsafe { rgpot_tensor_cpu_i32_1d(atm_vec.as_mut_ptr(), n_atoms as i64) };
         let box_tensor = unsafe { rgpot_tensor_cpu_f64_matrix3(box_vec.as_mut_ptr()) };
 
         let input = rgpot_force_input_t {
@@ -209,8 +208,7 @@ pub unsafe extern "C" fn rgpot_rpc_server_start(
                     user_data: pot_ref.pot_user_data,
                 };
 
-                let potential_client =
-                    capnp_rpc::new_client::<potential::Client, _>(server_impl);
+                let potential_client = capnp_rpc::new_client::<potential::Client, _>(server_impl);
 
                 let (reader, writer) =
                     tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
@@ -222,8 +220,7 @@ pub unsafe extern "C" fn rgpot_rpc_server_start(
                     Default::default(),
                 );
 
-                let rpc_system =
-                    RpcSystem::new(Box::new(network), Some(potential_client.client));
+                let rpc_system = RpcSystem::new(Box::new(network), Some(potential_client.client));
 
                 tokio::task::spawn_local(rpc_system);
             }
@@ -301,7 +298,10 @@ mod tests {
     }
 
     fn probe(short_forces: bool) -> Probe {
-        Probe { calls: AtomicUsize::new(0), short_forces }
+        Probe {
+            calls: AtomicUsize::new(0),
+            short_forces,
+        }
     }
 
     const CELL: [f64; 9] = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];

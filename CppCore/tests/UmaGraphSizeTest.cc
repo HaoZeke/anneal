@@ -125,10 +125,11 @@ TEST_CASE("dynamic gather matches eager forces when the neighbour list changes",
 
 TEST_CASE("a molecular box rejects a periodic image", "[uma][graph]") {
   // After recentering, these three atoms span more than the 6 angstrom
-  // cutoff and less than the 15 angstrom box, so the missing pair comes
-  // back as a periodic image.
+  // cutoff and less than the 15 angstrom box, so the missing pairs come
+  // back as periodic images. Keep every minimum-image distance away from
+  // exactly 6 angstroms: cutoff-boundary rounding is platform-dependent.
   rgpot::UmaPot pot = open_pot(package_path("UMA_MOLECULAR_BOX_PT2"));
-  const std::vector<double> pos = {0, 0, 0, 0, 0, 1, 0, 0, 10};
+  const std::vector<double> pos = {0, 0, 0, 0, 0, 1, 0, 0, 10.1};
   const std::vector<int> z = {6, 7, 1};
   const double box[9] = {15, 0, 0, 0, 15, 0, 0, 0, 15};
   std::vector<double> force(9, 0.0);

@@ -272,63 +272,35 @@ fn run() -> Result<(), String> {
                 cache,
                 build_dir,
                 no_darwin,
-            } => ci::run_build_test(
-                &root,
-                "meson",
-                &rpc,
-                &cache,
-                Some(&build_dir),
-                no_darwin,
-            ),
+            } => ci::run_build_test(&root, "meson", &rpc, &cache, Some(&build_dir), no_darwin),
             CiCmd::CmakeTest {
                 rpc,
                 cache,
                 build_dir,
                 no_darwin,
-            } => ci::run_build_test(
-                &root,
-                "cmake",
-                &rpc,
-                &cache,
-                Some(&build_dir),
-                no_darwin,
-            ),
+            } => ci::run_build_test(&root, "cmake", &rpc, &cache, Some(&build_dir), no_darwin),
             CiCmd::BuildTest {
                 sys,
                 rpc,
                 cache,
                 build_dir,
                 no_darwin,
-            } => ci::run_build_test(
-                &root,
-                &sys,
-                &rpc,
-                &cache,
-                build_dir.as_deref(),
-                no_darwin,
-            ),
+            } => ci::run_build_test(&root, &sys, &rpc, &cache, build_dir.as_deref(), no_darwin),
             CiCmd::ReleaseAssert => ci::run_release_assert(&root),
             CiCmd::TowncrierDraft => ci::run_towncrier_draft(&root),
-            CiCmd::CogBumpDryRun { bump } => {
-                ci::run_cog_bump_dry_run(&root, bump.as_deref())
-            }
+            CiCmd::CogBumpDryRun { bump } => ci::run_cog_bump_dry_run(&root, bump.as_deref()),
             CiCmd::CogCheck { from } => ci::run_cog_check(&root, from.as_deref()),
-            CiCmd::TowncrierCheck { compare_with } => {
-                ci::run_towncrier_check(&root, &compare_with)
-            }
+            CiCmd::TowncrierCheck { compare_with } => ci::run_towncrier_check(&root, &compare_with),
             CiCmd::EnsureTorchMetatomic => ci::run_ensure_torch_metatomic(&root),
             CiCmd::MetatomicTest { build_dir, rpc } => {
                 ci::run_metatomic_test(&root, &build_dir, rpc)
             }
-            CiCmd::PluginTest { build_dir, no_darwin } => {
-                ci::run_plugin_test(&root, &build_dir, !no_darwin)
-            }
-            CiCmd::XtbTbliteTest { build_dir } => {
-                ci::run_xtb_tblite_test(&root, &build_dir)
-            }
-            CiCmd::XckernelTest { build_dir } => {
-                ci::run_xckernel_test(&root, &build_dir)
-            }
+            CiCmd::PluginTest {
+                build_dir,
+                no_darwin,
+            } => ci::run_plugin_test(&root, &build_dir, !no_darwin),
+            CiCmd::XtbTbliteTest { build_dir } => ci::run_xtb_tblite_test(&root, &build_dir),
+            CiCmd::XckernelTest { build_dir } => ci::run_xckernel_test(&root, &build_dir),
             CiCmd::RpcInteg { server_bin } => ci::run_rpc_integ(&root, &server_bin),
             CiCmd::BridgeServerBuild { build_dir } => {
                 ci::run_bridge_server_build(&root, &build_dir)

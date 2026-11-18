@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-if(POLICY CMP0110)
-  cmake_policy(SET CMP0110 NEW)
-endif()
-
 project(
   rgpot
   # [[[cog import rgpot_version as v; cog.outl(f"  VERSION {v.VERSION}")]]]

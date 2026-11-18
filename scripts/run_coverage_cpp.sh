@@ -29,7 +29,8 @@ meson setup "$BUILD" \
   --buildtype=debug
 
 meson compile -C "$BUILD"
-meson test -C "$BUILD" --print-errorlogs
+meson test -C "$BUILD" --print-errorlogs \
+  --timeout-multiplier "${RGPOT_COV_TIMEOUT_MULTIPLIER:-1}"
 
 # lcov 2 renamed the branch-coverage rc option and rejects the old name. It
 # also checks gcov data against source lines and reports template instances in

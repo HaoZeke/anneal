@@ -131,15 +131,11 @@ mod tests {
         fn make_input(&mut self) -> rgpot_force_input_t {
             let n = self.atmnrs.len();
             rgpot_force_input_t {
-                positions: unsafe {
-                    rgpot_tensor_cpu_f64_2d(self.pos.as_mut_ptr(), n as i64, 3)
-                },
+                positions: unsafe { rgpot_tensor_cpu_f64_2d(self.pos.as_mut_ptr(), n as i64, 3) },
                 atomic_numbers: unsafe {
                     rgpot_tensor_cpu_i32_1d(self.atmnrs.as_mut_ptr(), n as i64)
                 },
-                box_matrix: unsafe {
-                    rgpot_tensor_cpu_f64_matrix3(self.box_.as_mut_ptr())
-                },
+                box_matrix: unsafe { rgpot_tensor_cpu_f64_matrix3(self.box_.as_mut_ptr()) },
             }
         }
 
@@ -304,11 +300,7 @@ mod tests {
         }
 
         CALL_COUNT.store(0, Ordering::SeqCst);
-        let pot = PotentialImpl::new(
-            count_cb,
-            &CALL_COUNT as *const _ as *mut c_void,
-            None,
-        );
+        let pot = PotentialImpl::new(count_cb, &CALL_COUNT as *const _ as *mut c_void, None);
 
         let mut io = TestIO::new(1);
         let input = io.make_input();
