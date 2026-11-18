@@ -1,10 +1,11 @@
 # Search-code motif, size, and species audit
 
-Scope: every Rust source file under `src/` at
-`bc16d35cf13e71c2edaf343b80fd8c41368631d4`. I searched identifiers, comments,
-numeric comparisons, named constants, preset tables, move selection, catalog
-admission, candidate construction, and descriptor consumers. Test-only
-fixtures were checked but are not search behaviour.
+Baseline audited: every Rust source file under `src/` at
+`bc16d35cf13e71c2edaf343b80fd8c41368631d4`. Resolution annotations reflect
+the no-size-constants series applied above that baseline. I searched
+identifiers, comments, numeric comparisons, named constants, preset tables,
+move selection, catalog admission, candidate construction, and descriptor
+consumers. Test-only fixtures were checked but are not search behaviour.
 
 Classifications:
 

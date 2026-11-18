@@ -3395,8 +3395,8 @@ fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
     next.clamp(1.0e-3, 1.0)
 }
 
-fn rigid_same_basin_return(returning: bool, energy_change: f64) -> bool {
-    returning && energy_change.abs() <= 5.0e-2
+fn rigid_same_basin_return(drift: f64, merge_radius: f64, energy_change: f64) -> bool {
+    drift < merge_radius && energy_change.abs() <= 5.0e-2
 }
 
 #[cfg(test)]
@@ -3428,9 +3428,9 @@ mod rigid_step_tests {
 
     #[test]
     fn same_basin_returns_do_not_enter_rigid_feedback() {
-        assert!(rigid_same_basin_return(true, 0.01));
-        assert!(!rigid_same_basin_return(false, 0.01));
-        assert!(!rigid_same_basin_return(true, 0.2));
+        assert!(rigid_same_basin_return(0.01, 0.1, 0.01));
+        assert!(!rigid_same_basin_return(0.2, 0.1, 0.01));
+        assert!(!rigid_same_basin_return(0.01, 0.1, 0.2));
     }
 }
 
@@ -7893,8 +7893,8 @@ where
         // the temperature that produces it is the parameter every other
         // mechanism here sits downstream of; it has never been measured in this
         // driver.
-        let rigid_return =
-            cfg.move_library.is_rigid_body() && rigid_same_basin_return(returning, e_new - e);
+        let rigid_return = cfg.move_library.is_rigid_body()
+            && rigid_same_basin_return(drift, cfg.merge_radius, e_new - e);
         if rigid_return {
             // Same quenched energy and the same distance key. Adopting it
             // does not leave the basin, so it is not an acceptance the

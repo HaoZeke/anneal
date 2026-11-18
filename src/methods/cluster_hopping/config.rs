@@ -2558,8 +2558,26 @@ mod coverage_behaviour {
     }
 
     #[test]
-    fn a_three_site_chart_selects_measured_cycle_arms_without_a_species_test() {
-        let cfg = Config::for_molecular(vec![6, 6, 6], vec![vec![0, 1, 2]], 1.0);
+    fn interacting_three_site_charts_select_measured_cycle_arms_without_a_species_test() {
+        let singleton = Config::for_molecular(vec![6, 6, 6], vec![vec![0, 1, 2]], 1.0);
+        match &singleton.move_library {
+            super::MoveLibrary::Molecular { reverse_cycles, .. } => assert!(!*reverse_cycles),
+            other => panic!("molecular library, got {other:?}"),
+        }
+        let singleton_names: Vec<_> = singleton
+            .move_library
+            .kernels(&singleton)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(!singleton_names.iter().any(|name| name == "gcycle"));
+        assert!(!singleton_names.iter().any(|name| name == "hbrewire"));
+
+        let cfg = Config::for_molecular(
+            vec![6, 6, 6, 6, 6, 6],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
         assert!(cfg.allocate_moves && cfg.depth_reward);
         match &cfg.move_library {
             super::MoveLibrary::Molecular { reverse_cycles, .. } => assert!(*reverse_cycles),
