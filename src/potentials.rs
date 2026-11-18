@@ -34,6 +34,7 @@ use std::sync::OnceLock;
 /// Morse run the pair loop in [`PairPotential::value_and_gradient`] and
 /// [`gupta::Gupta`] refuses to evaluate.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct ClusterKernels {
     /// `rgpot_pair::cluster_lj`.
     pub cluster_lj: fn(&[f64], &mut f64, &mut [f64]),
@@ -49,6 +50,34 @@ pub struct ClusterKernels {
     pub binary_lj: fn(usize, [f64; 3], [f64; 3], f64, &[f64], &mut [f64]) -> f64,
 }
 
+impl ClusterKernels {
+    /// Builds one installable kernel table.
+    pub const fn new(
+        cluster_lj: fn(&[f64], &mut f64, &mut [f64]),
+        cambridge_morse: fn(&[f64], f64, &mut f64, &mut [f64]),
+        #[allow(clippy::type_complexity)] gupta: fn(
+            &[f64],
+            &[u8],
+            usize,
+            &[f64],
+            &[f64],
+            &[f64],
+            &[f64],
+            &[f64],
+            &mut f64,
+            &mut [f64],
+        ),
+        binary_lj: fn(usize, [f64; 3], [f64; 3], f64, &[f64], &mut [f64]) -> f64,
+    ) -> Self {
+        Self {
+            cluster_lj,
+            cambridge_morse,
+            gupta,
+            binary_lj,
+        }
+    }
+}
+
 static CLUSTER_KERNELS: OnceLock<ClusterKernels> = OnceLock::new();
 
 /// Install the kernels for this process. The first installation wins.
@@ -59,12 +88,12 @@ pub fn install_cluster_kernels(kernels: ClusterKernels) {
 /// The installed kernels, if any. The crate's own tests take `rgpot_pair`.
 pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
     #[cfg(test)]
-    install_cluster_kernels(ClusterKernels {
-        cluster_lj: rgpot_pair::cluster_lj,
-        cambridge_morse: rgpot_pair::cambridge_morse,
-        gupta: rgpot_pair::gupta,
-        binary_lj: rgpot_pair::binary_lj,
-    });
+    install_cluster_kernels(ClusterKernels::new(
+        rgpot_pair::cluster_lj,
+        rgpot_pair::cambridge_morse,
+        rgpot_pair::gupta,
+        rgpot_pair::binary_lj,
+    ));
     CLUSTER_KERNELS.get()
 }
 
@@ -73,12 +102,12 @@ pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
 #[macro_export]
 macro_rules! install_rgpot_kernels {
     () => {
-        $crate::potentials::install_cluster_kernels($crate::potentials::ClusterKernels {
-            cluster_lj: ::rgpot_pair::cluster_lj,
-            cambridge_morse: ::rgpot_pair::cambridge_morse,
-            gupta: ::rgpot_pair::gupta,
-            binary_lj: ::rgpot_pair::binary_lj,
-        })
+        $crate::potentials::install_cluster_kernels($crate::potentials::ClusterKernels::new(
+            ::rgpot_pair::cluster_lj,
+            ::rgpot_pair::cambridge_morse,
+            ::rgpot_pair::gupta,
+            ::rgpot_pair::binary_lj,
+        ))
     };
 }
 
