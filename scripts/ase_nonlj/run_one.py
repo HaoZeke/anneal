@@ -29,16 +29,32 @@ sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import BudgetReached, CapReached, HitReached  # noqa: E402
 
 PAPER_BUDGETS = {
+    "m38r3": 400_000,
     "m38r6": 400_000,
+    "m38r10": 400_000,
     "m38r14": 400_000,
+    "m55r3": 1_000_000,
     "m55r6": 1_000_000,
+    "m55r10": 1_000_000,
     "m55r14": 1_000_000,
+    "m75r6": 4_000_000,
+    "m75r14": 4_000_000,
+    "m80r6": 4_000_000,
+    "m80r14": 4_000_000,
 }
 SYSTEMS = {
+    "m38r3": {"n": 38, "rho": 3.0, "budget": 400_000, "reference": -249.159174},
     "m38r6": {"n": 38, "rho": 6.0, "budget": 400_000, "reference": -157.477108},
+    "m38r10": {"n": 38, "rho": 10.0, "budget": 400_000, "reference": -145.849817},
     "m38r14": {"n": 38, "rho": 14.0, "budget": 400_000, "reference": -144.321054},
+    "m55r3": {"n": 55, "rho": 3.0, "budget": 1_000_000, "reference": -417.918562},
     "m55r6": {"n": 55, "rho": 6.0, "budget": 1_000_000, "reference": -250.286609},
+    "m55r10": {"n": 55, "rho": 10.0, "budget": 1_000_000, "reference": -225.814286},
     "m55r14": {"n": 55, "rho": 14.0, "budget": 1_000_000, "reference": -220.646208},
+    "m75r6": {"n": 75, "rho": 6.0, "budget": 4_000_000, "reference": -351.472365},
+    "m75r14": {"n": 75, "rho": 14.0, "budget": 4_000_000, "reference": -318.407330},
+    "m80r6": {"n": 80, "rho": 6.0, "budget": 4_000_000, "reference": -378.333471},
+    "m80r14": {"n": 80, "rho": 14.0, "budget": 4_000_000, "reference": -340.811371},
 }
 HIT_TOL = 0.001
 ASE_VERSION = "3.29.0"

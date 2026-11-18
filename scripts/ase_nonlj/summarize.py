@@ -15,7 +15,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SEEDS = tuple(range(2000, 2012))
-SYSTEMS = ("m38r6", "m38r14", "m55r6", "m55r14")
+SYSTEMS = (
+    "m38r3",
+    "m38r6",
+    "m38r10",
+    "m38r14",
+    "m55r3",
+    "m55r6",
+    "m55r10",
+    "m55r14",
+    "m75r6",
+    "m75r14",
+    "m80r6",
+    "m80r14",
+)
 ARMS = ("for_cluster", "recommended", "ase_bh", "ase_mh")
 ASE_ARMS = ("ase_bh", "ase_mh")
 LABEL = {
@@ -25,10 +38,18 @@ LABEL = {
     "ase_mh": "minima hopping",
 }
 SPEC = {
+    "m38r3": (38, 3.0, "400000", -249.159174, "38A"),
     "m38r6": (38, 6.0, "400000", -157.477108, "38E"),
+    "m38r10": (38, 10.0, "400000", -145.849817, "38D"),
     "m38r14": (38, 14.0, "400000", -144.321054, "38D"),
+    "m55r3": (55, 3.0, "1000000", -417.918562, "55A"),
     "m55r6": (55, 6.0, "1000000", -250.286609, "55B"),
+    "m55r10": (55, 10.0, "1000000", -225.814286, "55B"),
     "m55r14": (55, 14.0, "1000000", -220.646208, "55C"),
+    "m75r6": (75, 6.0, "4000000", -351.472365, "75C"),
+    "m75r14": (75, 14.0, "4000000", -318.407330, "75C"),
+    "m80r6": (80, 6.0, "4000000", -378.333471, "80B"),
+    "m80r14": (80, 14.0, "4000000", -340.811371, "80G"),
 }
 ROW_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
@@ -209,12 +230,12 @@ def load_identity() -> list[dict[str, str]]:
     with path.open(newline="") as handle:
         rows = list(csv.DictReader(handle))
     by_sys = {row["system"]: row for row in rows}
-    if tuple(by_sys) != SYSTEMS:
+    if set(by_sys) != set(SYSTEMS):
         raise SystemExit(f"identity systems {tuple(by_sys)}")
     for row in rows:
         if float(row["abs_energy_diff"]) > 1.0e-8 or float(row["max_force_diff"]) > 1.0e-8:
             raise SystemExit(f"identity check exceeded 1e-8: {row}")
-    return rows
+    return [by_sys[system] for system in SYSTEMS]
 
 
 def show_p(p: float) -> str:
@@ -343,16 +364,16 @@ def main() -> None:
         "",
         "# Non-LJ ASE head-to-head (Cambridge Morse clusters)",
         "",
-        "Four Cambridge Morse systems across two sizes and two ranges: M38 and M55 at rho = 6 and rho = 14.",
+        "Twelve Cambridge Morse systems: M38 and M55 at rho = 3, 6, 10 and 14, plus M75 and M80 at rho = 6 and 14.",
         "Seeds 2000-2011, host bench, serial one core (`taskset -c 0`).",
         f"code_revision {', '.join(revisions)}.",
         "Potential: untruncated Morse (`epsilon = 1`, `r0 = 1`, `rho0 = rho`).",
         "Anneal evaluates `PairPotential::morse` (`rgpot_pair::cambridge_morse`).",
         "ASE evaluates `ase.calculators.morse.MorsePotential` with `rcut1 = 1e6`, `rcut2 = 2e6`.",
-        "Anneal `for_cluster` uses `Config::with_scales` at `PairKind::length_scale()` plus `for_cluster` Bayes screening.",
+        "Anneal `for_cluster` uses `Config::for_cluster_with_scales` at `PairKind::length_scale()` (earlier M38/M55 rho 6 and 14 rows retain their committed runs).",
         "Anneal `recommended` uses `Config::recommended_with_scales` at `PairKind::length_scale()`.",
         "ASE basin hopping and minima hopping use the ASE 3.29 constructor defaults (`fmax` 0.1 and 0.05).",
-        "Hits reach `reference + 0.001`. Misses are censored at the paper budget (400,000 at 38 atoms, 1,000,000 at 55).",
+        "Hits reach `reference + 0.001`. Misses are censored at the paper budget (400,000 at 38 atoms, 1,000,000 at 55, 4,000,000 at 75 and 80).",
         "The wall cap for `recommended`, `ase_bh` and `ase_mh` is three times the slowest `for_cluster` wall per system.",
         "",
         "## Cross-code potential agreement (seed 2000 start)",

@@ -6,8 +6,9 @@
 //! ase_nonlj eval <system> <seed>
 //! ```
 //!
-//! `system` is `m38r6`, `m38r14`, `m55r6` or `m55r14`. The potential is
-//! `PairPotential::morse`, which installs `rgpot_pair::cambridge_morse`. Both
+//! `system` is `m38r3`, `m38r6`, `m38r10`, `m38r14`, `m55r3`, `m55r6`,
+//! `m55r10`, `m55r14`, `m75r6`, `m75r14`, `m80r6` or `m80r14`. The potential
+//! is `PairPotential::morse`, which installs `rgpot_pair::cambridge_morse`. Both
 //! presets scale lengths by `PairKind::length_scale()` so steps, neighbour
 //! cutoffs and starting sphere match the Morse pair minimum `r0 = 1`.
 
@@ -70,7 +71,7 @@ fn cmd_run(args: &[String]) {
     let level = reference + TOL;
     let length = PairKind::Morse { rho }.length_scale();
     let cfg = match preset {
-        "for_cluster" => for_cluster_cfg(n, length),
+        "for_cluster" => Config::for_cluster_with_scales(n, length, 1.0),
         "recommended" => Config::recommended_with_scales(n, length, 1.0),
         _ => {
             eprintln!("unknown preset {preset}");
@@ -151,7 +152,7 @@ fn cmd_run(args: &[String]) {
     let inside_s = inside.load(Ordering::Relaxed) as f64 / 1.0e9;
     let outside_s = (wall - inside_s).max(0.0);
     let best = outcome.best;
-    let hit = best <= level;
+    let hit = is_hit(best, reference);
     let seen = first_seen.load(Ordering::Relaxed);
     let first_calls = match (hit, seen) {
         (false, _) => "-".to_string(),
@@ -174,22 +175,47 @@ fn cmd_run(args: &[String]) {
     );
 }
 
-fn for_cluster_cfg(n: usize, length: f64) -> Config {
-    let mut cfg = Config::with_scales(n, length, 1.0);
-    let proto = Config::for_cluster(n);
-    cfg.bayes_screen = proto.bayes_screen;
-    cfg.bayes_threshold = proto.bayes_threshold;
-    cfg.bayes_exploration = proto.bayes_exploration;
-    cfg.bayes_warmup = proto.bayes_warmup;
-    cfg
+fn is_hit(best: f64, reference: f64) -> bool {
+    best <= reference + TOL
 }
 
 fn system(name: &str) -> Option<(usize, f64, f64)> {
     Some(match name {
+        "m38r3" => (38, 3.0, -249.159174),
         "m38r6" => (38, 6.0, -157.477108),
+        "m38r10" => (38, 10.0, -145.849817),
         "m38r14" => (38, 14.0, -144.321054),
+        "m55r3" => (55, 3.0, -417.918562),
         "m55r6" => (55, 6.0, -250.286609),
+        "m55r10" => (55, 10.0, -225.814286),
         "m55r14" => (55, 14.0, -220.646208),
+        "m75r6" => (75, 6.0, -351.472365),
+        "m75r14" => (75, 14.0, -318.407330),
+        "m80r6" => (80, 6.0, -378.333471),
+        "m80r14" => (80, 14.0, -340.811371),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_hit, system};
+    use anneal_core::potentials::PairPotential;
+
+    #[test]
+    fn hit_window_includes_its_declared_boundary() {
+        assert!(is_hit(-10.0 + 0.001, -10.0));
+        assert!(!is_hit(-10.0 + 0.001_001, -10.0));
+    }
+
+    #[test]
+    fn tabulated_minima_match_ccd() {
+        for name in [
+            "m38r6", "m38r10", "m38r14", "m55r3", "m55r6", "m55r10", "m55r14", "m75r6", "m75r14",
+        ] {
+            let (n, rho, reference) = system(name).expect("known system");
+            let ccd = PairPotential::ccd_morse_minimum(n, rho).expect("ccd entry");
+            assert!((reference - ccd).abs() < 1e-12, "{name}");
+        }
+    }
 }
