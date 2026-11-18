@@ -2046,14 +2046,26 @@ if get_option('with_tests')
     endif
     _rustc = find_program('rustc', required: false)
     if _rustc.found()
+        _nlist_rust_args = [
+            meson.current_source_dir() / 'examples' / 'nlist_rust_test.sh',
+            meson.project_source_root(),
+            meson.current_build_dir(),
+        ]
+        if _cxx_rt_flag != ''
+            _nlist_rust_args += [_cxx_rt_flag]
+        endif
+        if get_option('b_sanitize') != 'none'
+            _nlist_rust_args += ['-fsanitize=' + get_option('b_sanitize')]
+        endif
+        _nlist_rust_cxx = cppc.cmd_array()
+        _nlist_rust_env = {
+            'CXX': _nlist_rust_cxx[_nlist_rust_cxx.length() - 1],
+        }
         test(
             'nlist_rust',
             find_program('sh'),
-            args: [
-                meson.current_source_dir() / 'examples' / 'nlist_rust_test.sh',
-                meson.project_source_root(),
-                meson.current_build_dir(),
-            ],
+            args: _nlist_rust_args,
+            env: _nlist_rust_env,
             depends: _nlist_link,
         )
     endif

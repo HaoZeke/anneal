@@ -105,9 +105,23 @@ cppc = meson.get_compiler('cpp')
 # libm for Unix systems
 m_dep = cppc.find_library('m', required: false)
 _deps += m_dep
-# libstdc++ only on Linux/GCC; Darwin/clang uses libc++ via the driver.
-if host_system == 'linux'
-    _deps += [declare_dependency(link_args: '-lstdc++')]
+# Match the active C++ standard library (libc++ or libstdc++) on Unix hosts.
+_cxx_rt_flag = ''
+if host_system != 'windows'
+    if cppc.has_define('_LIBCPP_VERSION', prefix: '#include <version>')
+        _cxx_rt_dep = cppc.find_library('c++', required: false)
+        if _cxx_rt_dep.found()
+            _cxx_rt_flag = '-lc++'
+        endif
+    else
+        _cxx_rt_dep = cppc.find_library('stdc++', required: false)
+        if _cxx_rt_dep.found()
+            _cxx_rt_flag = '-lstdc++'
+        endif
+    endif
+    if _cxx_rt_dep.found()
+        _deps += [_cxx_rt_dep]
+    endif
 endif
 
 # ------------------------ vesin (neighbour lists)

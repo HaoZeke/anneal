@@ -305,7 +305,8 @@ if(_on)
   rgpot_add_test(nlist_rust
     COMMAND sh "${RGPOT_TEST_ROOT}/CppCore/examples/nlist_rust_test.sh"
             "${RGPOT_TEST_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}"
-            ${_rgpot_nlist_rust_omp})
+            ${_rgpot_nlist_rust_omp}
+    ENVIRONMENT "CXX=${CMAKE_CXX_COMPILER}")
 endif()
 
 if(RGPOT_RPC_CLIENT_ONLY)
