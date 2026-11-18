@@ -73,6 +73,7 @@ impl BinaryLennardJones {
 
     /// Doye-Meyer parameters: every `ε` is 1, `σ_AA` is 1, and
     /// `σ_AB = (σ_AA + σ_BB) / 2`.
+    #[cfg(test)]
     pub fn doye_meyer(n_a: usize, n_b: usize, sigma_bb: f64) -> Self {
         Self::new(
             n_a,
@@ -265,7 +266,7 @@ mod tests {
 
     fn load_ccd(name: &str) -> (f64, usize, f64, Array1<f64>) {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("bench/blj-gmin/ccd")
+            .join("tests/fixtures/blj-ccd")
             .join(name);
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
