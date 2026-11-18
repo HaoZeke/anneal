@@ -96,7 +96,7 @@ pub(crate) use torsion::HeldHands;
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
     ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, PairRange,
-    SoapProposalMode,
+    PriorSwitches, REMOVED_PRIOR_KEYS, RemovedConfigKeyError, SoapProposalMode,
 };
 pub use moves::*;
 
@@ -10102,10 +10102,6 @@ mod tests {
         binary.tabu_on_stall = false;
         binary.symmetrise_on_stall = false;
         binary.prior_soap = false;
-        binary.prior_reseed = false;
-        binary.prior_growth = false;
-        binary.prior_core = false;
-        binary.prior_motif = false;
         binary.energy_lattice = false;
         binary.orbit_complete_on_new = false;
         binary.continuous_symmetry = ContinuousSymmetry::Off;
@@ -10333,8 +10329,7 @@ mod tests {
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
         assert!(der.escape_on_stall && der.trail_on_stall && !der.restart_on_stall);
         assert!(rec.escape_on_stall && rec.trail_on_stall && !rec.restart_on_stall);
-        assert!(rec.prior_soap && rec.prior_reseed && rec.prior_growth);
-        assert!(rec.prior_core && rec.prior_motif && !rec.general_collective);
+        assert!(rec.prior_soap && !rec.general_collective);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);
@@ -10417,10 +10412,7 @@ mod tests {
         assert!(Config::communicating(98).surfaces.is_empty());
         assert!(matches!(
             rec.continuous_symmetry,
-            ContinuousSymmetry::Measure {
-                interval: 10,
-                reseed_hops: 5
-            }
+            ContinuousSymmetry::Measure { interval: 10 }
         ));
         assert_eq!(rec.continuous_symmetry, comm.continuous_symmetry);
         assert!(matches!(

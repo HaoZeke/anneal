@@ -3001,6 +3001,20 @@ impl PyClusterConfig {
         self.inner.budget_window
     }
 
+    /// Reject JSON configurations that set removed structure-prior keys.
+    #[staticmethod]
+    fn validate_json(text: &str) -> PyResult<()> {
+        crate::methods::cluster_hopping::Config::validate_json_keys(text)
+            .map_err(|err| PyValueError::new_err(err.to_string()))
+    }
+
+    /// Reject TOML configurations that set removed structure-prior keys.
+    #[staticmethod]
+    fn validate_toml(text: &str) -> PyResult<()> {
+        crate::methods::cluster_hopping::Config::validate_toml_keys(text)
+            .map_err(|err| PyValueError::new_err(err.to_string()))
+    }
+
     fn __repr__(&self) -> String {
         if self.inner.bayes_screen && self.inner.budget_window {
             format!("Config.derived({})", self.inner.n_points)
