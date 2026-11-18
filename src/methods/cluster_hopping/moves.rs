@@ -835,7 +835,7 @@ pub struct RotatableBond {
     pub pivot: usize,
     /// Atoms that turn, `pivot` included.
     pub side: Vec<usize>,
-    /// Both ends have planar three-bond neighbourhoods.
+    /// The substituents on both sides share the bond's local plane.
     ///
     /// This is a geometric indication of partial-double character, not a
     /// declaration of chemistry. The potential decides how strongly this
@@ -847,7 +847,8 @@ pub struct RotatableBond {
 ///
 /// A bond is rotatable when it is a bridge of the bond graph (not in a ring)
 /// and has at least two atoms on each side. A bridge with planar three-bond
-/// neighbourhoods at both ends is retained but marked [`RotatableBond::constrained`];
+/// four-atom neighbourhood is planar is retained but marked
+/// [`RotatableBond::constrained`];
 /// proposal-time potential calls measure its local and half-turn barriers
 /// instead of inferring them from bond length. The smaller side is the one
 /// that turns, and of two sides of one size, one that is not a symmetric top. A
@@ -902,6 +903,47 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
             + u[2] * (v[0] * w[1] - v[1] * w[0]);
         volume.abs() < PLANAR_VOLUME
     };
+    let planar_neighbourhood = |i: usize, j: usize| -> bool {
+        let axis = unit(i, j);
+        let radial = |centre: usize, atom: usize| {
+            let bond = unit(centre, atom);
+            let along = bond
+                .iter()
+                .zip(axis.iter())
+                .map(|(a, b)| a * b)
+                .sum::<f64>();
+            let mut out = [0, 1, 2].map(|k| bond[k] - along * axis[k]);
+            let norm = out.iter().map(|c| c * c).sum::<f64>().sqrt();
+            if norm > 1.0e-12 {
+                out.iter_mut().for_each(|c| *c /= norm);
+            }
+            (out, norm)
+        };
+        let left: Vec<usize> = adj[i].iter().copied().filter(|&a| a != j).collect();
+        let right: Vec<usize> = adj[j].iter().copied().filter(|&a| a != i).collect();
+        !left.is_empty()
+            && !right.is_empty()
+            && left.iter().all(|&a| {
+                right.iter().all(|&b| {
+                    let (u, un) = radial(i, a);
+                    let (v, vn) = radial(j, b);
+                    if un <= 1.0e-12 || vn <= 1.0e-12 {
+                        return true;
+                    }
+                    let cross = [
+                        u[1] * v[2] - u[2] * v[1],
+                        u[2] * v[0] - u[0] * v[2],
+                        u[0] * v[1] - u[1] * v[0],
+                    ];
+                    axis.iter()
+                        .zip(cross.iter())
+                        .map(|(a, b)| a * b)
+                        .sum::<f64>()
+                        .abs()
+                        < PLANAR_VOLUME
+                })
+            })
+    };
     // Three or more identical terminal tips (such as a methyl) map onto
     // themselves under rotation; two identical tips do so only when the
     // pivot is planar (such as -NO2 or an sp2 -NH2), whereas a pyramidal
@@ -939,7 +981,7 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
             fixed,
             pivot,
             side,
-            constrained: flat_pivot(i) && flat_pivot(j),
+            constrained: planar_neighbourhood(i, j) && (flat_pivot(i) || flat_pivot(j)),
         });
     }
     out
@@ -4313,13 +4355,14 @@ mod torsion_tests {
     #[test]
     fn bond_length_does_not_declare_partial_double_character() {
         let species = vec![6u32; 4];
-        let bonds = rotatable_bonds(chain(1.36).view(), &species, 1.25);
-        assert_eq!(bonds.len(), 1);
-        assert!(!bonds[0].constrained);
+        let short = rotatable_bonds(chain(1.36).view(), &species, 1.25);
+        let long = rotatable_bonds(chain(1.52).view(), &species, 1.25);
+        assert_eq!(short.len(), 1);
+        assert_eq!(short[0].constrained, long[0].constrained);
     }
 
     #[test]
-    fn planar_three_bond_neighbourhoods_mark_a_bridge_constrained() {
+    fn a_planar_four_atom_neighbourhood_marks_a_bridge_constrained() {
         // A generic planar X-X bridge. The unlike tips prevent either side
         // from being discarded as a symmetric top; no element pattern or
         // bond-length threshold enters the classification.
@@ -4327,11 +4370,10 @@ mod torsion_tests {
             0.0, 0.0, 0.0, // left centre
             1.4, 0.0, 0.0, // right centre
             -0.7, 0.7, 0.0, // left tip
-            -1.3, -0.7, 0.0, // left substituent
             2.6, 0.0, 0.0, // right tip
-            1.7, 1.45, 0.0, // right substituent
+            1.7, 1.6, 0.0, // right substituent
         ]);
-        let bonds = rotatable_bonds(x.view(), &[7, 6, 1, 6, 8, 6], 1.25);
+        let bonds = rotatable_bonds(x.view(), &[7, 6, 1, 8, 6], 1.25);
         let central = bonds
             .iter()
             .find(|bond| (bond.fixed.min(bond.pivot), bond.fixed.max(bond.pivot)) == (0, 1))
