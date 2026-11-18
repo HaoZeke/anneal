@@ -2,7 +2,8 @@
 //!
 //! Usage: `h2h_seed <lj|morse|tip4p> <n> <rho> <budget> <seed> <arm> <stop> <prefix>`
 //!
-//! `arm` is `recommended` or `base` for the `cluster_hopping` presets.
+//! `arm` is `recommended`, `recommended_adaptive`, or `base` for the
+//! `cluster_hopping` presets.
 //! `stop` is an energy at which the run ends early, or `-` to spend the
 //! whole budget.
 //!

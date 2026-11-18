@@ -65,6 +65,38 @@ pub(crate) fn portable_cbrt(x: f64) -> f64 {
     libm::cbrt(x)
 }
 
+fn adapt_search_window(
+    step: &mut f64,
+    temperature: &mut f64,
+    trials: usize,
+    returns: usize,
+    accepts: usize,
+) -> (f64, f64) {
+    let return_rate = returns as f64 / trials as f64;
+    let nonreturning = trials - returns;
+    let acceptance = if nonreturning > 0 {
+        accepts as f64 / nonreturning as f64
+    } else {
+        f64::NAN
+    };
+    if return_rate > 0.45 || acceptance > 0.55 {
+        *step = (*step * 1.10).min(1.6);
+    } else if acceptance < 0.12 {
+        *step = (*step * 0.90).max(0.70);
+    }
+    // A block made only of basin returns has no acceptance information about
+    // a crossing. Do not interpret its empty denominator as zero acceptance
+    // and heat the replica.
+    if nonreturning >= 10 {
+        if acceptance < 0.15 {
+            *temperature = (*temperature * 1.10).min(1.5);
+        } else if acceptance > 0.60 {
+            *temperature = (*temperature * 0.90).max(0.65);
+        }
+    }
+    (return_rate, acceptance)
+}
+
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{
     AdaptiveHeight, BasinBias, BasinIndex, Bias, Fingerprint, SiteEnergies, SortedPairs,
@@ -8006,29 +8038,13 @@ where
             adaptive_returns[rep] += usize::from(adaptive_returning);
             adaptive_accepts[rep] += usize::from(accept && !adaptive_returning);
             if adaptive_trials[rep] >= 50 {
-                let trials = adaptive_trials[rep] as f64;
-                let return_rate = adaptive_returns[rep] as f64 / trials;
-                let nonreturning = adaptive_trials[rep] - adaptive_returns[rep];
-                let acceptance = if nonreturning > 0 {
-                    adaptive_accepts[rep] as f64 / nonreturning as f64
-                } else {
-                    f64::NAN
-                };
-                if return_rate > 0.45 || acceptance > 0.55 {
-                    adaptive_step[rep] = (adaptive_step[rep] * 1.10).min(1.6);
-                } else if acceptance < 0.12 {
-                    adaptive_step[rep] = (adaptive_step[rep] * 0.90).max(0.70);
-                }
-                // A block made only of basin returns has no acceptance
-                // information about a crossing. Do not interpret its empty
-                // denominator as zero acceptance and heat the replica.
-                if nonreturning >= 10 {
-                    if acceptance < 0.15 {
-                        adaptive_temperature[rep] = (adaptive_temperature[rep] * 1.10).min(1.5);
-                    } else if acceptance > 0.60 {
-                        adaptive_temperature[rep] = (adaptive_temperature[rep] * 0.90).max(0.65);
-                    }
-                }
+                let (return_rate, acceptance) = adapt_search_window(
+                    &mut adaptive_step[rep],
+                    &mut adaptive_temperature[rep],
+                    adaptive_trials[rep],
+                    adaptive_returns[rep],
+                    adaptive_accepts[rep],
+                );
                 if std::env::var("ANNEAL_ADAPT_TRACE").is_ok() {
                     eprintln!(
                         "ADAPT rep {rep} step {:.6} temperature {:.6} return_rate \
@@ -10061,6 +10077,30 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adaptive_window_does_not_heat_without_crossing_evidence() {
+        let mut step = 1.0;
+        let mut temperature = 1.0;
+        let (return_rate, acceptance) = adapt_search_window(&mut step, &mut temperature, 50, 50, 0);
+        assert_eq!(return_rate, 1.0);
+        assert!(acceptance.is_nan());
+        assert!((step - 1.1).abs() < 1e-12);
+        assert_eq!(temperature, 1.0);
+    }
+
+    #[test]
+    fn adaptive_window_responds_to_low_and_high_crossing_acceptance() {
+        let (mut step, mut temperature) = (1.0, 1.0);
+        adapt_search_window(&mut step, &mut temperature, 50, 0, 5);
+        assert!((step - 0.9).abs() < 1e-12);
+        assert!((temperature - 1.1).abs() < 1e-12);
+
+        let (mut step, mut temperature) = (1.0, 1.0);
+        adapt_search_window(&mut step, &mut temperature, 50, 0, 35);
+        assert!((step - 1.1).abs() < 1e-12);
+        assert!((temperature - 0.9).abs() < 1e-12);
+    }
 
     #[test]
     fn an_ordinary_target_improvement_uses_the_completed_quench_clock() {
