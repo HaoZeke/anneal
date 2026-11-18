@@ -16,6 +16,58 @@ use crate::nng_rpc;
 /// Hausdorff length below which two members are the same geometry.
 #[cfg(feature = "ira")]
 const IRA_SAME: f64 = 0.05;
+
+#[cfg(feature = "ira")]
+fn geometric_kmax_factor(coords: ArrayView1<f64>) -> f64 {
+    let count = coords.len() / 3;
+    if count < 2 {
+        return 1.8;
+    }
+    let mut com = [0.0; 3];
+    for i in 0..count {
+        for axis in 0..3 {
+            com[axis] += coords[3 * i + axis];
+        }
+    }
+    for value in &mut com {
+        *value /= count as f64;
+    }
+    let mut r_max = 0.0_f64;
+    let mut nearest = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut r2 = 0.0;
+        for axis in 0..3 {
+            let d = coords[3 * i + axis] - com[axis];
+            r2 += d * d;
+        }
+        r_max = r_max.max(r2.sqrt());
+        let mut best = f64::INFINITY;
+        for j in 0..count {
+            if i == j {
+                continue;
+            }
+            let mut d2 = 0.0;
+            for axis in 0..3 {
+                let d = coords[3 * i + axis] - coords[3 * j + axis];
+                d2 += d * d;
+            }
+            best = best.min(d2);
+        }
+        if best.is_finite() && best > 0.0 {
+            nearest.push(best.sqrt());
+        }
+    }
+    if nearest.is_empty() {
+        return 1.8;
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let bond = nearest[nearest.len() / 2];
+    if !bond.is_finite() || bond <= 1e-12 {
+        1.8
+    } else {
+        (r_max / bond).clamp(1.8, 2.5)
+    }
+}
 /// AS-KMC / MCAMC: well height at which the packing is a raised
 /// superbasin (N_f = 20 deposits of 0.25). Intra-well hops are then
 /// rate-scaled and the well is absorbing: sample will not start there.
@@ -128,9 +180,8 @@ impl Inner {
                 // Dcut makes every offer novel or every offer a duplicate.
                 #[cfg(feature = "ira")]
                 {
-                    let n = p.len() / 3;
                     let ira = crate::shape::IraMetric {
-                        kmax_factor: if n >= 55 { 2.5 } else { 1.8 },
+                        kmax_factor: geometric_kmax_factor(p),
                     };
                     let ira_d = ira.distance(p, q);
                     if ira_d.is_finite() && ira_d <= IRA_SAME {
