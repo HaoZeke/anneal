@@ -3,9 +3,13 @@
 
 /// Fixed-order dot product. The sum walks indices 0..n, so the result
 /// does not depend on a thread count. Panic is caught at the ABI edge.
+///
+/// # Safety
+///
+/// `a` and `b` must each be null or point at `n` readable `f64` values.
 #[no_mangle]
-pub extern "C" fn rust_core_demo_dot(a: *const f64, b: *const f64, n: usize) -> f64 {
-    match std::panic::catch_unwind(|| unsafe {
+pub unsafe extern "C" fn rust_core_demo_dot(a: *const f64, b: *const f64, n: usize) -> f64 {
+    let caught = std::panic::catch_unwind(|| unsafe {
         if a.is_null() || b.is_null() {
             return f64::NAN;
         }
@@ -16,8 +20,15 @@ pub extern "C" fn rust_core_demo_dot(a: *const f64, b: *const f64, n: usize) -> 
             acc += left[i] * right[i];
         }
         acc
-    }) {
-        Ok(value) => value,
-        Err(_) => f64::NAN,
+    });
+    // Panic at this ABI edge becomes NaN. unwrap_or is not used here.
+    #[allow(
+        clippy::manual_unwrap_or,
+        reason = "panic at this ABI edge becomes NaN"
+    )]
+    if let Ok(value) = caught {
+        value
+    } else {
+        f64::NAN
     }
 }

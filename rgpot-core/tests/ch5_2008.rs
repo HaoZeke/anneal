@@ -437,7 +437,7 @@ fn a_panic_in_the_jet_is_an_internal_error_with_a_message() {
     };
     let v = mixed();
     let count = 3usize << 58;
-    let lower = 8 as *mut f64;
+    let lower = std::ptr::dangling_mut::<f64>();
     let upper = (8 + count * std::mem::size_of::<f64>()) as *mut f64;
     unsafe { rgpot_core::status::rgpot_set_last_error(std::ptr::null()) };
     let status = unsafe {
