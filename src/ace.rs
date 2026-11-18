@@ -163,6 +163,9 @@ struct CgTerm {
     i2: usize,
     i3: usize,
     g: f64,
+    /// Bits set at `i1`, `i2` and `i3`, so a perturbed coefficient can tell
+    /// which products it reaches.
+    mask: u128,
 }
 
 fn nonzero_terms(l_max: usize) -> &'static [Vec<CgTerm>] {
@@ -184,11 +187,13 @@ fn nonzero_terms(l_max: usize) -> &'static [Vec<CgTerm>] {
                         if g == 0.0 {
                             continue;
                         }
+                        let (i1, i2, i3) = (lm_index(l1, m1), lm_index(l2, m2), lm_index(l3, m3));
                         terms.push(CgTerm {
-                            i1: lm_index(l1, m1),
-                            i2: lm_index(l2, m2),
-                            i3: lm_index(l3, m3),
+                            i1,
+                            i2,
+                            i3,
                             g,
+                            mask: (1u128 << i1) | (1u128 << i2) | (1u128 << i3),
                         });
                     }
                 }
@@ -319,6 +324,7 @@ fn fill_radial_coefficients(
     }
 }
 
+#[cfg(test)]
 fn contract_terms(re: &[f64], im: &[f64], terms: &[CgTerm]) -> f64 {
     let mut acc = 0.0;
     for term in terms {
@@ -360,7 +366,9 @@ fn triple_uses_l((l1, l2, l3): (usize, usize, usize), l: usize) -> bool {
     l == l1 || l == l2 || l == l3
 }
 
-fn d_from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
+/// The per-coefficient finite difference with every product recomputed.
+#[cfg(test)]
+fn d_from_c_recomputed(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let n_c = n_max * n_lm;
     let n_b = dim(n_max, l_max);
@@ -420,6 +428,114 @@ fn d_from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
         }
     }
     j
+}
+
+/// Selective finite difference of the contraction in `c`.
+///
+/// A perturbed coefficient changes the products that name its `(l, ±|m|)`
+/// entries and no others. Every other product is the unperturbed one, so
+/// its contribution `g · Re(p)` is computed once per radial channel and the
+/// sum over terms adds that stored value in the original term order. The
+/// result is bit-identical to recomputing each product.
+fn d_from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
+    d_from_c_stored(c, n_max, l_max)
+}
+
+fn d_from_c_stored(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let n_c = n_max * n_lm;
+    let n_b = dim(n_max, l_max);
+    let mut j = Array2::<f64>::zeros((n_b, n_c));
+    if n_c == 0 {
+        return j;
+    }
+    let eps = 1e-7;
+    let mut cp = c.to_vec();
+    if cp.len() < n_c {
+        cp.resize(n_c, 0.0);
+    }
+    let trips = triples_cached(l_max);
+    let terms = nonzero_terms(l_max);
+    let mut offsets = Vec::with_capacity(terms.len() + 1);
+    offsets.push(0usize);
+    for triple_terms in terms {
+        offsets.push(offsets[offsets.len() - 1] + triple_terms.len());
+    }
+    let mut base_re = vec![0.0; n_lm];
+    let mut base_im = vec![0.0; n_lm];
+    let mut base_products = vec![0.0; offsets[terms.len()]];
+    // Plus and minus displacements of the `+|m|` and `-|m|` coefficients.
+    let mut lane_re = vec![vec![0.0; n_lm]; 4];
+    let mut lane_im = vec![vec![0.0; n_lm]; 4];
+    for n in 0..n_max {
+        fill_radial_coefficients(&cp, n, l_max, n_lm, &mut base_re, &mut base_im);
+        for (triple, triple_terms) in terms.iter().enumerate() {
+            for (at, term) in triple_terms.iter().enumerate() {
+                base_products[offsets[triple] + at] = term_product(&base_re, &base_im, term);
+            }
+        }
+        for l in 0..=l_max {
+            for abs_m in 0..=l {
+                let signed = [abs_m as i32, -(abs_m as i32)];
+                let touched = (1u128 << lm_index(l, signed[0])) | (1u128 << lm_index(l, signed[1]));
+                let sides = if abs_m == 0 { 1 } else { 2 };
+                for side in 0..2 {
+                    // A zero order has one coefficient; the unused lanes repeat it.
+                    let lm = lm_index(l, signed[side.min(sides - 1)]);
+                    let k = n * n_lm + lm;
+                    let old = cp[k];
+                    for sign in 0..2 {
+                        let lane = 2 * side + sign;
+                        lane_re[lane].copy_from_slice(&base_re);
+                        lane_im[lane].copy_from_slice(&base_im);
+                        cp[k] = if sign == 0 { old + eps } else { old - eps };
+                        update_perturbed_coefficient(
+                            &cp,
+                            n,
+                            lm,
+                            n_lm,
+                            &mut lane_re[lane],
+                            &mut lane_im[lane],
+                        );
+                    }
+                    cp[k] = old;
+                }
+                for (triple, (&(l1, l2, l3), triple_terms)) in trips.iter().zip(terms).enumerate() {
+                    if !triple_uses_l((l1, l2, l3), l) {
+                        continue;
+                    }
+                    let stored = &base_products[offsets[triple]..offsets[triple + 1]];
+                    let mut acc = [0.0f64; 4];
+                    for (term, &unperturbed) in triple_terms.iter().zip(stored) {
+                        if term.mask & touched == 0 {
+                            for lane in &mut acc {
+                                *lane += unperturbed;
+                            }
+                        } else {
+                            for (lane, value) in acc.iter_mut().enumerate() {
+                                *value += term_product(&lane_re[lane], &lane_im[lane], term);
+                            }
+                        }
+                    }
+                    for side in 0..sides {
+                        let k = n * n_lm + lm_index(l, signed[side]);
+                        j[[n * trips.len() + triple, k]] =
+                            (acc[2 * side] - acc[2 * side + 1]) / (2.0 * eps);
+                    }
+                }
+            }
+        }
+    }
+    j
+}
+
+#[inline(always)]
+fn term_product(re: &[f64], im: &[f64], term: &CgTerm) -> f64 {
+    let a = (re[term.i1], im[term.i1]);
+    let b = (re[term.i2], im[term.i2]);
+    let d = (re[term.i3], im[term.i3]);
+    let p = cmul(cmul(a, b), (d.0, -d.1));
+    term.g * p.0
 }
 
 #[cfg(test)]
@@ -517,6 +633,28 @@ mod tests {
                     expected.to_bits(),
                     "derivative differs at flat index {index}, l_max {l_max}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn stored_products_reproduce_the_recomputed_derivative_bit_for_bit() {
+        for (n_max, l_max) in [(2usize, 3usize), (3, 6), (4, 5)] {
+            let n_c = n_max * (l_max + 1) * (l_max + 1);
+            for seed in 0..4usize {
+                let c: Vec<f64> = (0..n_c)
+                    .map(|i| (((i + 5 * seed) * 29 + 7) % 37) as f64 * 0.021 - 0.37)
+                    .collect();
+                let stored = d_from_c_cached(&c, n_max, l_max);
+                let recomputed = d_from_c_recomputed(&c, n_max, l_max);
+                assert_eq!(stored.dim(), recomputed.dim());
+                for (index, (&a, &b)) in stored.iter().zip(recomputed.iter()).enumerate() {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "derivative differs at flat index {index}, n_max {n_max}, l_max {l_max}"
+                    );
+                }
             }
         }
     }

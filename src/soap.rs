@@ -202,6 +202,8 @@ pub fn local_nu3(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
     local_nu3_z(x, spec, None)
 }
 
+mod pullback;
+
 struct Nu3Cache {
     local: Array2<f64>,
     coefficients: Vec<Vec<f64>>,
@@ -252,6 +254,10 @@ struct PairDerivative {
     dy_cartesian: Vec<[f64; 3]>,
     fc: f64,
     dfc: f64,
+    /// Radial weight `g_n(r) f_c(r)` per radial channel.
+    weight: Vec<f64>,
+    /// Its radial derivative `g_n' f_c + g_n f_c'`.
+    dweight: Vec<f64>,
 }
 
 fn pair_derivative_cache(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<Vec<PairDerivative>> {
@@ -275,14 +281,26 @@ fn pair_derivative_cache(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<Vec<PairDeri
             }
             let u = [d[0] / r, d[1] / r, d[2] / r];
             let (ylm, dy_cartesian) = tesseral_cartesian(u, spec.l_max, r);
+            let fc = fcut(r, spec.rcut_nn);
+            let dfc = dfcut(r, spec.rcut_nn);
+            let mut weight = Vec::with_capacity(spec.n_max);
+            let mut dweight = Vec::with_capacity(spec.n_max);
+            for n in 0..spec.n_max {
+                let g = radial(n, r, spec.rcut_nn);
+                let dg = dradial(n, r, spec.rcut_nn);
+                weight.push(g * fc);
+                dweight.push(dg * fc + g * dfc);
+            }
             local.push(PairDerivative {
                 neighbor,
                 r,
                 u,
                 ylm,
                 dy_cartesian,
-                fc: fcut(r, spec.rcut_nn),
-                dfc: dfcut(r, spec.rcut_nn),
+                fc,
+                dfc,
+                weight,
+                dweight,
             });
         }
         pairs.push(local);
@@ -1096,9 +1114,19 @@ fn pullback_nu3_with_cache(
         }
     }
     let coefficients = (cache.coefficients.len() == n_at).then_some(cache.coefficients.as_slice());
-    let mut j = jacobian_nu3_with_cache(x, spec, species, coefficients);
     let keep = mobile_mask(n_at, mobile);
     let all_mobile = keep.iter().all(|&b| b);
+    if all_mobile {
+        if let Some(coefficients) = coefficients {
+            if let Some(mut dr) =
+                pullback_nu3_blocks(x, spec, species, coefficients, dp.as_slice().unwrap_or(&[]))
+            {
+                strip_rigid(x, &mut dr);
+                return dr;
+            }
+        }
+    }
+    let mut j = jacobian_nu3_with_cache(x, spec, species, coefficients);
     if !all_mobile {
         for i in 0..n_at {
             if !keep[i] {
@@ -1126,6 +1154,25 @@ fn pullback_nu3_with_cache(
         }
     }
     dr
+}
+
+/// The all-mobile pullback from per-centre blocks of the Jacobian, the same
+/// step the dense route returns.
+fn pullback_nu3_blocks(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    coefficients: &[Vec<f64>],
+    dp: &[f64],
+) -> Option<Array1<f64>> {
+    let equations = pullback::normal_equations(x, spec, species, coefficients, dp)?;
+    let n = equations.rhs.len();
+    let mut gram = equations.gram;
+    for c in 0..n {
+        gram[c * n + c] += 1e-3_f64.max(1e-12);
+    }
+    let dr = pullback::cholesky_solve(gram, n, &equations.rhs).unwrap_or_else(|| vec![0.0; n]);
+    Some(Array1::from(dr))
 }
 
 /// Extra ArchiveHole in the DECAF packing feature, not SOAP leftover.
@@ -3648,6 +3695,8 @@ fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     let n_lm = y.len();
     let mut dy = vec![[0.0; 3]; n_lm];
     let eps = 1e-7;
+    let mut yp = vec![0.0; n_lm];
+    let mut ym = vec![0.0; n_lm];
     for a in 0..3 {
         let mut up = u;
         up[a] += eps;
@@ -3657,7 +3706,7 @@ fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
             up[1] /= np;
             up[2] /= np;
         }
-        let yp = ylm_real(up, l_max);
+        ylm_real_into(up, l_max, &mut yp);
         let mut um = u;
         um[a] -= eps;
         let nm = (um[0] * um[0] + um[1] * um[1] + um[2] * um[2]).sqrt();
@@ -3666,7 +3715,7 @@ fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
             um[1] /= nm;
             um[2] /= nm;
         }
-        let ym = ylm_real(um, l_max);
+        ylm_real_into(um, l_max, &mut ym);
         for i in 0..n_lm {
             dy[i][a] = (yp[i] - ym[i]) / (2.0 * eps);
         }
@@ -3675,6 +3724,88 @@ fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
 }
 
 fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
+    let mut y = vec![0.0; (l_max + 1) * (l_max + 1)];
+    ylm_real_into(u, l_max, &mut y);
+    y
+}
+
+/// Largest `l_max` whose Legendre table lives on the stack.
+const YLM_STACK_L_MAX: usize = 12;
+
+/// Normalisations of the real harmonics, `n0[l]` and `nlm[l][m]`, built from
+/// the expressions the harmonic evaluation used per call.
+struct YlmNorms {
+    n0: [f64; YLM_STACK_L_MAX + 1],
+    nlm: [[f64; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1],
+}
+
+fn ylm_norms() -> &'static YlmNorms {
+    use std::sync::OnceLock;
+    static NORMS: OnceLock<YlmNorms> = OnceLock::new();
+    NORMS.get_or_init(|| {
+        let mut norms = YlmNorms {
+            n0: [0.0; YLM_STACK_L_MAX + 1],
+            nlm: [[0.0; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1],
+        };
+        for l in 0..=YLM_STACK_L_MAX {
+            let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
+            norms.n0[l] = n0;
+            for m in 1..=l {
+                let nf = fact_ratio(l - m, l + m);
+                norms.nlm[l][m] = n0 * (nf * 2.0).sqrt();
+            }
+        }
+        norms
+    })
+}
+
+fn ylm_real_into(u: [f64; 3], l_max: usize, y: &mut [f64]) {
+    if l_max > YLM_STACK_L_MAX {
+        y.copy_from_slice(&ylm_real_general(u, l_max));
+        return;
+    }
+    let norms = ylm_norms();
+    let (x, yy, z) = (u[0], u[1], u[2]);
+    let rho2 = x * x + yy * yy;
+    let rho = rho2.sqrt();
+    let mut p = [[0.0f64; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1];
+    p[0][0] = 1.0;
+    for m in 1..=l_max {
+        p[m][m] = -(2.0 * m as f64 - 1.0) * rho * p[m - 1][m - 1];
+    }
+    for m in 0..l_max {
+        p[m + 1][m] = z * (2.0 * m as f64 + 1.0) * p[m][m];
+    }
+    for l in 2..=l_max {
+        for m in 0..=l - 2 {
+            let a = 2.0 * l as f64 - 1.0;
+            let b = (l + m - 1) as f64;
+            let d = (l - m) as f64;
+            p[l][m] = (a * z * p[l - 1][m] - b * p[l - 2][m]) / d;
+        }
+    }
+    let mut cosph = [1.0f64; YLM_STACK_L_MAX + 1];
+    let mut sinph = [0.0f64; YLM_STACK_L_MAX + 1];
+    if rho > 1e-14 {
+        cosph[1] = x / rho;
+        sinph[1] = yy / rho;
+        for m in 2..=l_max {
+            cosph[m] = cosph[1] * cosph[m - 1] - sinph[1] * sinph[m - 1];
+            sinph[m] = sinph[1] * cosph[m - 1] + cosph[1] * sinph[m - 1];
+        }
+    }
+    for l in 0..=l_max {
+        y[lm_index(l, 0)] = norms.n0[l] * p[l][0];
+        for m in 1..=l {
+            let nlm = norms.nlm[l][m];
+            y[lm_index(l, m as i32)] = nlm * p[l][m] * cosph[m];
+            y[lm_index(l, -(m as i32))] = nlm * p[l][m] * sinph[m];
+        }
+    }
+}
+
+/// The harmonic evaluation for any `l_max`, with a heap Legendre table.
+fn ylm_real_general(u: [f64; 3], l_max: usize) -> Vec<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let mut y = vec![0.0; n_lm];
     let (x, yy, z) = (u[0], u[1], u[2]);
@@ -3824,11 +3955,21 @@ fn solve3(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
 
 /// Solve `(J^T J + λ I) dr = J^T dp`.
 fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
+    let ncoord = j.ncols();
+    let (mut a, rhs) = dense_normal_equations(j, dp);
+    for c in 0..ncoord {
+        a[[c, c]] += lambda.max(1e-12);
+    }
+    chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(ncoord))
+}
+
+/// `JᵀJ` and `Jᵀ dp` from a dense Jacobian.
+fn dense_normal_equations(j: &Array2<f64>, dp: ArrayView1<f64>) -> (Array2<f64>, Array1<f64>) {
     let nfeat = j.nrows();
     let ncoord = j.ncols();
     let finite =
         dp.iter().all(|value| value.is_finite()) && j.iter().all(|value| value.is_finite());
-    let (mut a, rhs) = if finite {
+    if finite {
         let mut a = Array2::<f64>::zeros((ncoord, ncoord));
         let mut rhs = Array1::<f64>::zeros(ncoord);
         let mut nonzero = Vec::with_capacity(ncoord);
@@ -3872,11 +4013,7 @@ fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64
             }
         }
         (a, rhs)
-    };
-    for c in 0..ncoord {
-        a[[c, c]] += lambda.max(1e-12);
     }
-    chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(ncoord))
 }
 
 fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
@@ -3971,6 +4108,192 @@ mod tests {
                 .map(|value| value.to_bits())
                 .collect::<Vec<_>>()
         );
+    }
+
+    fn jittered_cluster(n: usize, seed: u64) -> Array1<f64> {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64 ^ seed.wrapping_mul(0x2545_f491_4f6c_dd1d);
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let mut sites = Vec::new();
+        for i in -3i32..=3 {
+            for j in -3i32..=3 {
+                for k in -3i32..=3 {
+                    let at = [
+                        i as f64 + 0.3 * next(),
+                        j as f64 + 0.3 * next(),
+                        k as f64 + 0.3 * next(),
+                    ];
+                    sites.push(at);
+                }
+            }
+        }
+        sites.sort_by(|a, b| {
+            let ra = a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
+            let rb = b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
+            ra.total_cmp(&rb)
+        });
+        Array1::from_iter(sites.into_iter().take(n).flatten())
+    }
+
+    fn bits(values: impl Iterator<Item = f64>) -> Vec<u64> {
+        values.map(f64::to_bits).collect()
+    }
+
+    #[test]
+    fn centre_blocks_reproduce_the_dense_normal_equations_bit_for_bit() {
+        let two_species = |n: usize| (0..n).map(|i| (i % 3 == 0) as u32 + 1).collect::<Vec<_>>();
+        for (n, species_mode, seed, stray) in [
+            (9usize, 0u8, 1u64, false),
+            (13, 0, 2, false),
+            (31, 0, 3, false),
+            (26, 1, 4, false),
+            (44, 0, 5, false),
+            (23, 0, 6, true),
+            (21, 1, 7, true),
+        ] {
+            let mut x = jittered_cluster(n, seed);
+            if stray {
+                // An atom beyond every cutoff owns no pairs and no rows.
+                x[3 * (n - 1)] += 60.0;
+            }
+            let spec = structure_spec(x.view());
+            let labels = two_species(n);
+            let species = (species_mode == 1).then_some(labels.as_slice());
+            let cache = nu3_cache(x.view(), spec, species);
+            let loc = &cache.local;
+            let dim = loc.ncols();
+            let mut target = loc.iter().copied().collect::<Array1<f64>>();
+            for i in 0..n {
+                for t in 0..dim {
+                    let wobble = ((i * dim + t + 1) as f64).sin();
+                    if (i + t) % 7 != 0 {
+                        target[i * dim + t] += 0.03 * wobble;
+                    }
+                }
+            }
+            let mut dp = Array1::<f64>::zeros(n * dim);
+            for i in 0..n {
+                for t in 0..dim {
+                    dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
+                }
+            }
+            let j = jacobian_nu3_with_cache(x.view(), spec, species, Some(&cache.coefficients));
+            let (dense_gram, dense_rhs) = dense_normal_equations(&j, dp.view());
+            let blocks = pullback::normal_equations(
+                x.view(),
+                spec,
+                species,
+                &cache.coefficients,
+                dp.as_slice().unwrap(),
+            )
+            .expect("blocks apply to finite all-mobile input");
+            let portable = pullback::normal_equations_portable(
+                x.view(),
+                spec,
+                species,
+                &cache.coefficients,
+                dp.as_slice().unwrap(),
+            )
+            .expect("the portable build applies to the same input");
+            assert_eq!(
+                bits(blocks.gram.iter().copied()),
+                bits(portable.gram.iter().copied()),
+                "vector and portable JᵀJ differ for {n} atoms"
+            );
+            assert_eq!(
+                bits(blocks.rhs.iter().copied()),
+                bits(portable.rhs.iter().copied()),
+                "vector and portable Jᵀdp differ for {n} atoms"
+            );
+            assert_eq!(
+                bits(dense_gram.iter().copied()),
+                bits(blocks.gram.iter().copied()),
+                "JᵀJ differs for {n} atoms, mode {species_mode}"
+            );
+            assert_eq!(
+                bits(dense_rhs.iter().copied()),
+                bits(blocks.rhs.iter().copied()),
+                "Jᵀdp differs for {n} atoms, mode {species_mode}"
+            );
+            let fast = pullback_nu3(x.view(), target.view(), spec, species, None);
+            let mut dense = tikhonov_jtj(&j, dp.view(), 1e-3);
+            strip_rigid(x.view(), &mut dense);
+            assert_eq!(
+                bits(fast.iter().copied()),
+                bits(dense.iter().copied()),
+                "pullback differs for {n} atoms, mode {species_mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn right_looking_cholesky_matches_the_left_looking_solve_bit_for_bit() {
+        for n in [1usize, 2, 7, 33, 90] {
+            let mut state = 0x51ed_270b_u64.wrapping_mul(n as u64 + 3);
+            let mut next = || {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+            };
+            let g: Vec<f64> = (0..n * n).map(|_| next()).collect();
+            let mut a = Array2::<f64>::zeros((n, n));
+            for i in 0..n {
+                for j in 0..n {
+                    let mut s = 0.0;
+                    for k in 0..n {
+                        s += g[k * n + i] * g[k * n + j];
+                    }
+                    a[[i, j]] = s;
+                }
+                a[[i, i]] += 1e-3;
+            }
+            let b = Array1::from_iter((0..n).map(|_| next()));
+            let expected = chol_solve(&a, &b).expect("positive definite");
+            let flat: Vec<f64> = a.iter().copied().collect();
+            let actual = pullback::cholesky_solve(flat, n, b.as_slice().unwrap()).unwrap();
+            assert_eq!(
+                bits(expected.iter().copied()),
+                bits(actual.into_iter()),
+                "solution differs at n={n}"
+            );
+            let mut indefinite = a.clone();
+            indefinite[[n - 1, n - 1]] = -1.0;
+            let flat: Vec<f64> = indefinite.iter().copied().collect();
+            assert!(chol_solve(&indefinite, &b).is_none());
+            assert!(pullback::cholesky_solve(flat, n, b.as_slice().unwrap()).is_none());
+        }
+    }
+
+    #[test]
+    fn stack_harmonics_match_the_heap_evaluation_bit_for_bit() {
+        let mut state = 0xdead_beef_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) * 2.0 - 1.0
+        };
+        let mut directions = vec![[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]];
+        while directions.len() < 60 {
+            let v = [next(), next(), next()];
+            let norm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            if norm > 0.1 {
+                directions.push([v[0] / norm, v[1] / norm, v[2] / norm]);
+            }
+        }
+        for l_max in 1..=YLM_STACK_L_MAX {
+            let mut stack = vec![0.0; (l_max + 1) * (l_max + 1)];
+            for u in &directions {
+                ylm_real_into(*u, l_max, &mut stack);
+                let heap = ylm_real_general(*u, l_max);
+                assert_eq!(
+                    bits(stack.iter().copied()),
+                    bits(heap.iter().copied()),
+                    "l_max {l_max}"
+                );
+            }
+        }
     }
 
     #[cfg(not(feature = "featomic"))]
