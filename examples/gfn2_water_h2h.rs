@@ -365,8 +365,8 @@ fn main() {
     let species = water_species(m).expect("species");
     let groups = water_groups(m).expect("groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
-    cfg.capped_lindh_quench = true;
     configure_water_arm(&mut cfg, WaterSearchArm::Recommended);
+    cfg.quench_once = false;
     cfg.target_energy = target_energy;
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
