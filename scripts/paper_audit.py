@@ -1611,6 +1611,7 @@ def openconf(audit: Audit) -> None:
         ("conf-fix3/README.md", 0, "conf-fix3/seeds.csv"),
         ("conf-fix4/README.md", 0, "conf-fix4/seeds.csv"),
         ("conf-fix4/README.md", 85, "conf-fix4/n24/seeds.csv"),
+        ("conf-fix12/README.md", 0, "conf-fix12/seeds.csv"),
     ]
     for readme, after, source in tables:
         path = f"{base}/{readme}"

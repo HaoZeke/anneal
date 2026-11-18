@@ -308,6 +308,30 @@ rule openconf_h2h_conf_fix4_n24:
             --results bench/openconf-h2h/conf-fix4/n24
         """
 
+
+# Converged TRIC molecular quenches (quench_gradient = 1e-3 eV/A) against
+# develop at 628773d6 and openconf, fresh seeds 2048-2071, all eight
+# molecules. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile openconf_h2h_conf_fix12
+rule openconf_h2h_conf_fix12:
+    input:
+        "bench/openconf-h2h/molecules.csv",
+    output:
+        "bench/openconf-h2h/conf-fix12/summary.csv",
+        "bench/openconf-h2h/conf-fix12/stats.csv",
+        "bench/openconf-h2h/conf-fix12/stats-develop.csv",
+    shell:
+        """
+        set -euo pipefail
+        OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=628773d6837ea2d959a27256ff4163b21162fd4d \
+            bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix12 \
+            --baseline /work/openconf-h2h/baseline --quench-gradient 1e-3 \
+            --seeds $(seq 2048 2071)
+        OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh paired-score \
+            --tree conf-fix12 --baseline /work/openconf-h2h/baseline \
+            --results bench/openconf-h2h/conf-fix12
+        """
+
 # Gradients per GFN2 quench: anneal L-BFGS and TRIC against geomeTRIC.
 # Not part of `rule all`:
 #   snakemake -s workflow/Snakefile tric_quench
