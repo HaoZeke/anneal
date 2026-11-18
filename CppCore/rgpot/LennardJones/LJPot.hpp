@@ -110,7 +110,7 @@ public:
    * The pairs, minimum image, shift or switch of @c forceImpl, each pair
    * adding @f$K (v_i - v_j)@f$ to atom @c i and its negative to @c j, with
    * @f$K = \phi'' \hat d \hat d^T + (\phi' / r)(I - \hat d \hat d^T)@f$.
-   * Two atoms on one point make the product NaN, as they make the energy.
+   * Two atoms on one point throw @c std::domain_error, as the energy does.
    * @a v and @a hv hold @c 3*in.nAtoms doubles. The pairs come from the
    * calling thread's kept neighbour list, as in @c forceImpl, so one
    * instance may serve any number of threads.
