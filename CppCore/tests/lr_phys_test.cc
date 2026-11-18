@@ -384,8 +384,11 @@ public:
     for (std::size_t i = 0; i < in.nAtoms; ++i) {
       out->F[3 * i] += 0.2;
     }
-    out->has_stress = 0;
+    out->has_stress = 1;
     out->variance = 0.1;
+  }
+  [[nodiscard]] rgpot::PotCaps caps() const noexcept override {
+    return {.stress = true};
   }
 };
 

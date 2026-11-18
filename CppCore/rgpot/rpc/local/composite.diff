@@ -1,0 +1,38 @@
+diff --git a/Potentials.capnp b/Potentials.capnp
+--- a/Potentials.capnp
++++ b/Potentials.capnp
+@@ -2638,6 +2638,26 @@
+   }
+ }
+ 
++# @struct CompositeTerm
++# @brief One child of a composite potential: a weighted, switchable
++# PotentialSpec.
++struct CompositeTerm {
++  name @0 :Text;            # Label in the component record and the log.
++  enabled @1 :Bool = true;  # A disabled term is recorded and never evaluated.
++  weight @2 :Float64 = 1.0; # Any finite value; -1 subtracts the term.
++  pot @3 :PotentialSpec;    # The child backend and its settings.
++}
++
++# @struct CompositeParams
++# @brief A weighted sum of child potentials (rgpot::SumPot).
++#
++# Energy, forces and stress are sum_i weight_i * term_i over the enabled
++# terms. A DFT engine with its own dispersion off plus a dispersion term
++# is one use; subtracting an engine's built-in correction is another.
++struct CompositeParams {
++  terms @0 :List(CompositeTerm);
++}
++
+ # @struct PotentialConfig
+ # @brief **rgpot user parameters (extensible, in/out via Cap'n Proto only).**
+ #
+@@ -2668,6 +2688,7 @@
+     skala     @15 :SkalaParams;
+     expr      @16 :ExprParams;
+     cp2k      @17 :CP2KParams;    # CP2KPot / libcp2k shim
++    composite @18 :CompositeParams; # rgpot::SumPot over PotentialSpec terms
+   }
+   # Normalized overlay applied BEFORE the native arm; native settings win.
+   common @3 :CommonMethodSpec;

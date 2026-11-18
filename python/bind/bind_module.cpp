@@ -33,6 +33,7 @@
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/StillingerWeber/SWSi.hpp"
+#include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/Tersoff/TersoffSiC.hpp"
 #include "rgpot/XcKernel/XcKernel.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
@@ -114,7 +115,6 @@ rgpot::D3Damping d3_damping(const std::string &name) {
 }
 #endif
 
-#ifdef RGPOT_HAS_EXPR
 struct ChildSpec {
   std::string name;
   std::string kind;
@@ -154,7 +154,7 @@ std::string child_kind(nb::handle spec) {
     }
   }
   throw nb::value_error(
-      "ExprPot child spec must be a kind string or a dict with 'kind'");
+      "a child spec must be a kind string or a dict with 'kind'");
 }
 
 ChildSpec child_spec_from(const std::string &name, nb::handle spec) {
@@ -261,9 +261,72 @@ std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
     return std::make_unique<rgpot::D4Pot>(cfg);
   }
 #endif
-  throw std::invalid_argument("unknown ExprPot child kind: " + spec.kind);
+  throw std::invalid_argument("unknown child kind: " + spec.kind);
 }
 
+/// SumPot terms: a list of child specs, each with an optional name (term<i>
+/// by default), weight (1) and enabled (true).
+struct SumSpec {
+  rgpot::SumTerm term;
+  ChildSpec child;
+};
+
+std::vector<SumSpec> sum_specs_from(const nb::list &terms) {
+  std::vector<SumSpec> out;
+  out.reserve(terms.size());
+  for (std::size_t i = 0; i < terms.size(); ++i) {
+    nb::handle item = terms[i];
+    SumSpec spec;
+    spec.term.name = "term" + std::to_string(i);
+    if (nb::isinstance<nb::dict>(item)) {
+      auto d = nb::cast<nb::dict>(item);
+      if (d.contains("name")) {
+        spec.term.name = nb::cast<std::string>(d["name"]);
+      }
+      if (d.contains("weight")) {
+        spec.term.weight = nb::cast<double>(d["weight"]);
+      }
+      if (d.contains("enabled")) {
+        spec.term.enabled = nb::cast<bool>(d["enabled"]);
+      }
+    }
+    spec.child = child_spec_from(spec.term.name, item);
+    out.push_back(std::move(spec));
+  }
+  return out;
+}
+
+std::unique_ptr<rgpot::SumPot> sum_from_specs(const std::vector<SumSpec> &specs) {
+  auto sum = std::make_unique<rgpot::SumPot>();
+  for (const SumSpec &spec : specs) {
+    sum->add(spec.term,
+             spec.term.enabled ? child_from_spec(spec.child) : nullptr);
+  }
+  return sum;
+}
+
+nb::list sum_components(const rgpot::SumPot &pot) {
+  nb::list out;
+  for (const rgpot::SumComponent &c : pot.lastComponents()) {
+    nb::dict d;
+    d["name"] = c.name;
+    d["weight"] = c.weight;
+    d["enabled"] = c.enabled;
+    d["evaluated"] = c.evaluated;
+    d["energy"] = c.energy;
+    d["variance"] = c.variance;
+    d["forces"] = rgpot::pybind::vector_to_numpy(c.forces, {c.forces.size() / 3, 3});
+    if (c.has_stress) {
+      d["stress"] = rgpot::pybind::stress_to_numpy(c.stress.data());
+    } else {
+      d["stress"] = nb::none();
+    }
+    out.append(d);
+  }
+  return out;
+}
+
+#ifdef RGPOT_HAS_EXPR
 std::unique_ptr<rgpot::ExprPot>
 expr_from_specs(const std::string &expression,
                 const std::vector<ChildSpec> &specs) {
@@ -869,6 +932,26 @@ NB_MODULE(_core, m) {
       nb::arg("atm") = true);
   rgpot::pybind::bind_calls(d4);
 #endif
+
+  auto sum = nb::class_<PotHolder<rgpot::SumPot>>(m, "SumPot");
+  sum.def(
+      "__init__",
+      [](PotHolder<rgpot::SumPot> *self, const nb::list &terms) {
+        const std::vector<SumSpec> specs = sum_specs_from(terms);
+        new (self) PotHolder<rgpot::SumPot>([=] { return sum_from_specs(specs); });
+      },
+      nb::arg("terms"),
+      "Weighted sum of child potentials. terms is a list of kind strings or "
+      "dicts with kind, name (term<i>), weight (1.0, sign allowed), enabled "
+      "(True) and the kind's fields as for ExprPot. A disabled term is "
+      "never built or evaluated.");
+  sum.def(
+      "components",
+      [](PotHolder<rgpot::SumPot> &self) { return sum_components(self.slot()); },
+      "Per-term record of this thread's last call: name, weight, enabled, "
+      "evaluated, energy (eV, before the weight), forces (N, 3), variance and "
+      "stress (3, 3, or None).");
+  rgpot::pybind::bind_calls(sum);
 
 #ifdef RGPOT_HAS_EXPR
   auto expr = nb::class_<PotHolder<rgpot::ExprPot>>(m, "ExprPot");

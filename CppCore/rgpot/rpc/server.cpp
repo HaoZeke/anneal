@@ -73,6 +73,7 @@ class MpiPefSession;
 #ifdef RGPOT_HAS_IPI
 #include "rgpot/IPIPot/IPIPot.hpp"
 #endif
+#include "rgpot/rpc/CompositeConfigure.hpp"
 #include "rgpot/rpc/MorseConfigure.hpp"
 #include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -80,9 +81,9 @@ class MpiPefSession;
 #include "rgpot/units.hpp"
 
 #ifdef RGPOT_HAS_CP2K
-constexpr const char *kOwnArmBackends = "NWChem, CPMD, CP2K and Morse";
+constexpr const char *kOwnArmBackends = "NWChem, CPMD, CP2K, Morse and Composite";
 #else
-constexpr const char *kOwnArmBackends = "NWChem, CPMD and Morse";
+constexpr const char *kOwnArmBackends = "NWChem, CPMD, Morse and Composite";
 #endif
 #ifdef RGPOT_POTSERV_MPI
 #ifdef RGPOT_HAS_CP2K
@@ -109,6 +110,8 @@ private:
   rgpot::CPMDPot *m_cpmd = nullptr;
   /// Set when the backend is Morse; configure() replaces the pot it names.
   rgpot::MorsePot *m_morse = nullptr;
+  /// Set when the backend is Composite; configure() replaces the sum.
+  rgpot::SumPot *m_sum = nullptr;
 #ifdef RGPOT_HAS_IPI
   /// Set when the backend is the i-PI socket server. calculate copies the
   /// Cauchy stress stashed by the last force call.
@@ -127,7 +130,8 @@ public:
    */
   GenericPotImpl(std::unique_ptr<rgpot::PotentialBase> pot)
       : m_potential(std::move(pot)),
-        m_morse(dynamic_cast<rgpot::MorsePot *>(m_potential.get()))
+        m_morse(dynamic_cast<rgpot::MorsePot *>(m_potential.get())),
+        m_sum(dynamic_cast<rgpot::SumPot *>(m_potential.get()))
 #ifdef RGPOT_HAS_IPI
         ,
         m_ipi(dynamic_cast<rgpot::IPIPot *>(m_potential.get()))
@@ -340,6 +344,16 @@ public:
       results.setMessage(applied.message);
       return kj::READY_NOW;
     }
+    if (m_sum) {
+      auto applied = rgpot::rpc::configureComposite(cfg);
+      if (applied.replacement) {
+        m_sum = applied.replacement.get();
+        m_potential = std::move(applied.replacement);
+      }
+      results.setOk(applied.ok);
+      results.setMessage(applied.message);
+      return kj::READY_NOW;
+    }
     if (!appliesOwnArm()) {
       if (cfg.which() == ::PotentialConfig::NONE) {
         results.setOk(true);
@@ -396,7 +410,7 @@ int runServer(int argc, char *argv[]
 ) {
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0] << " <port> <PotentialType>" << std::endl;
-    std::cerr << "  Available PotentialTypes: LJ, LJCluster, Morse, ZBL"
+    std::cerr << "  Available PotentialTypes: LJ, LJCluster, Morse, ZBL, Composite"
 #ifdef RGPOT_HAS_FORTRAN_POTS
               << ", CuH2"
 #endif
@@ -501,6 +515,10 @@ int runServer(int argc, char *argv[]
   } else if (pot_type == "CBE") {
     potential_to_use = std::make_unique<rgpot::CBEPot>();
 #endif
+  } else if (pot_type == "Composite") {
+    std::cout << "Loading an empty composite (configure() with the composite arm sets its terms)..."
+              << std::endl;
+    potential_to_use = std::make_unique<rgpot::SumPot>();
 #ifdef RGPOT_HAS_IPI
   } else if (pot_type == "IPI" || pot_type.rfind("IPI:", 0) == 0) {
     if (pot_type.size() < 5) {

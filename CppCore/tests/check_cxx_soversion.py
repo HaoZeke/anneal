@@ -60,6 +60,7 @@ CLASSES = (
     ("CppCore/rgpot/Morse/MorsePot.hpp", "MorsePot"),
     ("CppCore/rgpot/ZBL/ZBLPot.hpp", "ZBLPot"),
     ("CppCore/rgpot/SuttonChen/SuttonChenPot.hpp", "SuttonChenPot"),
+    ("CppCore/rgpot/SumPot/SumPot.hpp", "SumPot"),
     ("CppCore/rgpot/nlist/Neighbours.hpp", "Neighbours"),
     ("CppCore/rgpot/simd/from_cache.hpp", "CachedPairs"),
 )

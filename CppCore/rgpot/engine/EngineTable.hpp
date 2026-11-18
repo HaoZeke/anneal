@@ -30,8 +30,10 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "rgpot/Potential.hpp"
+#include "rgpot/SumPot/SumPot.hpp"
 
 namespace rgpot::engine {
 
@@ -56,6 +58,9 @@ struct Backend {
   std::function<void(long long key)> select_orbitals;
   /// Empty when the backend cannot copy orbitals between keys.
   std::function<void(long long from_key, long long to_key)> copy_orbitals;
+  /// Empty when the backend is not a sum; otherwise the per-term record of
+  /// its last force call (rgpot::SumPot::lastComponents).
+  std::function<const std::vector<SumComponent> &()> components;
 };
 
 struct Created {

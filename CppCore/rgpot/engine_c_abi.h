@@ -95,7 +95,7 @@ typedef int (*rgpot_engine_coord_transform)(void *user, long nAtoms,
  * minor 0, layout 1.
  */
 #define RGPOT_ENGINE_ABI_VERSION 1
-#define RGPOT_ENGINE_ABI_MINOR 4
+#define RGPOT_ENGINE_ABI_MINOR 5
 #define RGPOT_ENGINE_ABI_LAYOUT_REVISION 1
 
 #define RGPOT_ENGINE_OK 0
@@ -393,6 +393,42 @@ typedef struct {
 RGPOT_ENGINE_API long rgpot_engine_neighbor_options(
     const RgpotEnginePot *pot, RgpotEngineNeighborOptions *opts,
     long capacity);
+
+/**
+ * One term of a composite engine (a weighted sum of child potentials) as the
+ * last successful force call on the handle left it. energy and stress are the
+ * term's own values before its weight: eV and eV/Angstrom^3.
+ */
+typedef struct {
+  double weight;
+  double energy;
+  double stress[9];
+  int enabled;    /**< 0: switched off, never evaluated */
+  int evaluated;  /**< 0 for a disabled term and before the first call */
+  int has_stress; /**< stress holds the term's stress */
+} RgpotEngineComponent;
+
+/**
+ * Per-term record of the last successful force call. Writes up to capacity
+ * entries into out and returns the total count (call with capacity 0 to
+ * size); returns 0 for a backend that is not a sum and -1 for a NULL pot.
+ * forces, when not NULL, receives capacity blocks of 3*nAtoms doubles
+ * (nAtoms of the last call, eV/Angstrom), term-major, zero for a term that
+ * was not evaluated. With rgpot_engine_force_batch the record is the last
+ * system of the batch.
+ */
+RGPOT_ENGINE_API long rgpot_engine_last_components(
+    const RgpotEnginePot *pot, RgpotEngineComponent *out, double *forces,
+    long capacity);
+
+/**
+ * Name of term index of a composite engine. Copies at most `len - 1` bytes
+ * and NUL-terminates; returns the full name length, 0 for an index out of
+ * range or a backend that is not a sum.
+ */
+RGPOT_ENGINE_API size_t rgpot_engine_component_name(const RgpotEnginePot *pot,
+                                                    long index, char *buf,
+                                                    size_t len);
 
 #ifdef __cplusplus
 }

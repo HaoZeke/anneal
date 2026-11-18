@@ -1479,6 +1479,172 @@ The constructor throws =std::invalid_argument= before any force call when:
 
 Python raises =ValueError= with the same message.
 
+** Weighted sums
+
+*** =rgpot::SumPot=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+SumPot();
+#+end_src
+
+- Inputs :: none; terms are added with =add=.
+  Each term is a =rgpot::SumTerm=: =name= (the label in the record and the log),
+  =weight= (any finite value, the sign allowed, default 1) and =enabled=
+  (default true).
+- Units :: the sum keeps the units of its terms: eV,
+  eV/Angstrom and eV/Angstrom^3.
+- Outputs :: E = sum of weight times energy over the enabled terms, and the same
+  weights on the forces and the stress; the variance takes the square of each
+  weight.
+  A disabled term is not evaluated.
+  The stress is the weighted sum when every evaluated term reports one, and
+  =has_stress= is 0 otherwise or when no term ran.
+  An empty sum, or one whose terms are all disabled, gives zero energy and
+  forces.
+  =caps()= intersects the enabled terms: periodic only when every one has it,
+  stress only when at least one term is enabled and every one has it, per-image
+  instances and group collectives when any one needs them, never batched, and a
+  reentrancy that is the weakest of the terms and =PerInstance=, because the
+  component record belongs to the instance.
+  Setting =RGPOT_SUM_LOG= to anything but empty or =0= writes one line per term
+  and call, and a total, to standard error.
+- Errors :: a term that throws stops the call; the exception reaches the caller
+  unchanged after a line naming the term is logged, so a failing child's status
+  (a NumericalError, a refused geometry) is the sum's status.
+
+*** =rgpot::SumPot::add=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void add(std::unique_ptr<PotentialBase> term);
+void add(SumTerm spec, std::unique_ptr<PotentialBase> term);
+#+end_src
+
+- Inputs :: =term=, a potential the sum takes ownership of; =spec=, its name,
+  weight and switch.
+  The first form names the term =term<i>= with weight 1, enabled.
+- Units :: =weight= has no unit.
+- Outputs :: appends the term.
+  A disabled =spec= may come with a null =term=: the term is recorded, shows in
+  the component record, and is never built, so switching off a DFT engine term
+  does not load the engine.
+- Errors :: throws =std::invalid_argument= for a null =term= on an enabled term
+  and for a weight that is not finite.
+
+*** =rgpot::SumPot::setEnabled=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setEnabled(std::size_t index, bool enabled);
+#+end_src
+
+- Inputs :: =index=, a term index; =enabled=, its new switch.
+- Units :: none.
+- Outputs :: switches the term on or off for the following calls.
+- Errors :: throws =std::out_of_range= for an index past the last term and
+  =std::logic_error= when enabling a term that was added without a potential.
+
+*** =rgpot::SumPot::setWeight=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setWeight(std::size_t index, double weight);
+#+end_src
+
+- Inputs :: =index=, a term index; =weight=, its new weight.
+- Units :: none.
+- Outputs :: the weight of the following calls.
+- Errors :: throws =std::out_of_range= for an index past the last term and
+  =std::invalid_argument= for a weight that is not finite.
+
+*** =rgpot::SumPot::size=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] std::size_t size() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the number of terms, enabled or not.
+- Errors :: none.
+
+*** =rgpot::SumPot::term=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const SumTerm &term(std::size_t index) const;
+#+end_src
+
+- Inputs :: =index=, a term index.
+- Units :: none.
+- Outputs :: the name, weight and switch of that term.
+- Errors :: throws =std::out_of_range= for an index past the last term.
+
+*** =rgpot::SumPot::child=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] PotentialBase *child(std::size_t index) const;
+#+end_src
+
+- Inputs :: =index=, a term index.
+- Units :: none.
+- Outputs :: the potential of that term, owned by the sum, or null for a term
+  added disabled without one.
+- Errors :: throws =std::out_of_range= for an index past the last term.
+
+*** =rgpot::SumPot::lastComponents=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] const std::vector<SumComponent> &lastComponents() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: =energy= in eV, =forces= in
+  eV/Angstrom (3 per atom), =stress= in eV/Angstrom^3 row-major, each the term's
+  own value before its weight.
+- Outputs :: one =rgpot::SumComponent= per term in the order they were added,
+  from the last force call on this instance: =name=, =weight=, =enabled=,
+  =evaluated= (false for a disabled term and before the first call), =energy=,
+  =forces= (empty when not evaluated), =variance=, =has_stress= and =stress=.
+  A call that throws leaves the record of the terms that ran before the failure.
+- Errors :: none.
+
+*** =rgpot::SumPot::setLogSink=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void setLogSink(LogSink sink);
+#+end_src
+
+- Inputs :: =sink=, a =std::function<void(std::string_view)>=.
+- Units :: the lines give energies in eV and the largest force component in
+  eV/Angstrom.
+- Outputs :: the per-term lines go to =sink= instead of standard error, whether
+  or not =RGPOT_SUM_LOG= is set:
+  =rgpot sum: NAME weight=W energy=E eV fmax=F eV/A stress=0|1=,
+  =rgpot sum: NAME disabled=, =rgpot sum: NAME failed: WHAT= and
+  =rgpot sum: total energy=E eV=.
+  An empty sink restores the default.
+- Errors :: none.
+
+*** =rgpot::SumPot::paramsKey=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] uint64_t paramsKey() const noexcept override;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: a hash of every term's name, weight, switch, and its potential's
+  type and =paramsKey=, so a cache entry is not reused across a change of any of
+  them.
+- Errors :: none.
+
 ** Long-range summands
 
 These classes are in namespace =rgpot::lr= and are built with
@@ -1571,59 +1737,17 @@ explicit NlhPot(NlhConfig cfg = {});
   The force call throws =std::invalid_argument= for null atomic numbers and for
   an atomic number outside 1 to 92.
 
-*** =rgpot::lr::SumPot=
+*** Shared pair list for summands
 
-#+attr_rgpot: signature
-#+begin_src cpp
-SumPot();
-#+end_src
-
-- Inputs :: none; terms are added with =add=.
-- Units :: the sum keeps the units of its terms: eV,
-  eV/Angstrom and eV/Angstrom^3.
-- Outputs :: the sum of the energies, forces and variances of every term.
-  The stress is the sum over the terms that report one, and =has_stress= is 1
-  when any term reports one.
-  An empty sum gives zero energy and forces.
-- Errors :: the force call passes on the exceptions of its terms.
-
-*** =rgpot::lr::SumPot::add=
-
-#+attr_rgpot: signature
-#+begin_src cpp
-void add(std::unique_ptr<PotentialBase> term);
-#+end_src
-
-- Inputs :: =term=, a potential the sum takes ownership of.
-- Units :: none.
-- Outputs :: appends =term=.
-- Errors :: throws =std::invalid_argument= for a null =term=.
-
-*** =rgpot::lr::SumPot::shareNeighbours=
-
-#+attr_rgpot: signature
-#+begin_src cpp
-void shareNeighbours(std::shared_ptr<DualList> lists);
-#+end_src
-
-- Inputs :: =lists=, one pair list.
-- Units :: none.
-- Outputs :: calls =setNeighbours(lists)= on every term added so far that is a
-  =rgpot::lr::CoulombPot=, =rgpot::lr::DispersionPot= or =rgpot::lr::NlhPot=.
-  Other terms and terms added later keep their own lists.
-- Errors :: none.
-
-*** =rgpot::lr::SumPot::size=
-
-#+attr_rgpot: signature
-#+begin_src cpp
-[[nodiscard]] std::size_t size() const noexcept;
-#+end_src
-
-- Inputs :: none.
-- Units :: none.
-- Outputs :: the number of terms.
-- Errors :: none.
+=rgpot::lr::SumPot= is the weighted sum =rgpot::SumPot= with one more member,
+=void shareNeighbours(std::shared_ptr<DualList> lists)=.
+It calls =setNeighbours(lists)= on every term added so far that is a
+=rgpot::lr::CoulombPot=, =rgpot::lr::DispersionPot= or =rgpot::lr::NlhPot=, so
+they share one pair list.
+Other terms, disabled terms added without a potential, and terms added later
+keep their own lists.
+Everything else, the weights, switches, component record, capabilities and
+errors, is that of =rgpot::SumPot=.
 
 ** Fortran kernels
 

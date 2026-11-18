@@ -182,6 +182,91 @@ async def run_morse_configure(port):
     return True
 
 
+def effective_schema(server_bin):
+    """The schema potserv was built from: vendored plus the local diffs."""
+    path = os.path.join(os.path.dirname(server_bin), "rgpot", "rpc", "Potentials.capnp")
+    return capnp.SchemaParser().load(path)
+
+
+async def run_composite_configure(port, schema):
+    """configure(composite) on a Composite server sums the terms it names."""
+    for _ in range(10):
+        try:
+            connection = await capnp.AsyncIoStream.create_connection(
+                host="localhost", port=port
+            )
+            break
+        except OSError:
+            await asyncio.sleep(0.5)
+    else:
+        print("Composite configure: failed to connect to server.")
+        return False
+
+    client = capnp.TwoPartyClient(connection)
+    pot = client.bootstrap().cast_as(schema.Potential)
+
+    fip = schema.ForceInput.new_message()
+    pos = [0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.2, 0.0]
+    fip.init("pos", len(pos))
+    for i, p in enumerate(pos):
+        fip.pos[i] = p
+    fip.init("atmnrs", 3)
+    for i in range(3):
+        fip.atmnrs[i] = 1
+    fip.init("box", 9)
+    for i, b in enumerate([20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0]):
+        fip.box[i] = b
+
+    empty = (await pot.calculate(fip)).result
+    assert empty.energy == 0.0, empty.energy
+
+    async def configure(terms):
+        cfg = schema.PotentialConfig.new_message()
+        built = cfg.init("composite").init("terms", len(terms))
+        for slot, (name, backend, weight, enabled) in zip(built, terms):
+            slot.name = name
+            slot.weight = weight
+            slot.enabled = enabled
+            slot.init("pot").init("builtin").name = backend
+        reply = await pot.configure(cfg)
+        print(f"Composite configure(composite): ok={reply.ok} msg={reply.message}")
+        assert reply.ok, reply.message
+        return (await pot.calculate(fip)).result
+
+    lj = await configure([("lj", "lj", 1.0, True)])
+    assert lj.energy != 0.0
+    cancel = await configure([("lj", "lj", 1.0, True), ("minus", "lj", -1.0, True)])
+    assert abs(cancel.energy) <= 1e-12 * abs(lj.energy), cancel.energy
+    assert max(abs(f) for f in cancel.forces) <= 1e-12 * max(abs(f) for f in lj.forces)
+    scaled = await configure([("lj", "lj", 2.5, True), ("off", "nonesuch", 1.0, False)])
+    assert math.isclose(scaled.energy, 2.5 * lj.energy, rel_tol=1e-12)
+    for a, b in zip(scaled.forces, lj.forces):
+        assert math.isclose(a, 2.5 * b, rel_tol=1e-12, abs_tol=1e-14)
+
+    cfg = schema.PotentialConfig.new_message()
+    bad = cfg.init("composite").init("terms", 1)[0]
+    bad.name = "bad"
+    bad.init("pot").init("builtin").name = "nonesuch"
+    reply = await pot.configure(cfg)
+    assert not reply.ok and "'bad'" in reply.message, reply.message
+    assert (await pot.calculate(fip)).result.energy == scaled.energy
+
+    for name in schema.PotentialConfig.schema.union_fields:
+        if name in ("none", "composite"):
+            continue
+        arm = schema.PotentialConfig.new_message()
+        field = schema.PotentialConfig.schema.fields[name]
+        if field.proto.slot.type.which() == "void":
+            setattr(arm, name, None)
+        else:
+            arm.init(name)
+        reply = await pot.configure(arm)
+        assert not reply.ok, f"Composite accepted configure({name}): {reply.message}"
+        assert name in reply.message, reply.message
+    print("Composite configure: weights, switches and refusals hold")
+    return True
+
+
 async def run_nwchem_smoke(port):
     """Optional smoke: start NWChem server, configure(), skip calculate if no engine."""
     for _ in range(10):
@@ -558,6 +643,34 @@ def main():
         hvp_proc.wait()
     if not hvp_ok:
         sys.exit(1)
+
+    composite_port = args.port + 4
+    print(f"Starting Composite server: {args.server_bin} {composite_port} Composite")
+    composite_proc = subprocess.Popen(
+        [args.server_bin, str(composite_port), "Composite"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        composite_ok = asyncio.run(
+            capnp.run(
+                run_composite_configure(composite_port, effective_schema(args.server_bin))
+            )
+        )
+    except BaseException as e:
+        print(f"Composite configure exception: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        composite_proc.kill()
+        out, err = composite_proc.communicate(timeout=30)
+        print("Server stdout:", out.decode(errors="replace")[-4000:])
+        print("Server stderr:", err.decode(errors="replace")[-4000:])
+        composite_ok = False
+    finally:
+        composite_proc.kill()
+        composite_proc.wait()
+    if not composite_ok:
+        sys.exit(1)
+    print("Composite configure passed.")
 
     if args.nwchem_smoke:
         nw_port = args.port + 1

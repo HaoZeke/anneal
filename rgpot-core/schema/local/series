@@ -18,3 +18,8 @@ uma-cache-dir.diff
 # hessian-vector.diff: Capabilities.Operation.hessianVector @10 and
 # Potential.calculateHvp @14.
 hessian-vector.diff
+#
+# composite.diff: PotentialConfig.composite @18 and the CompositeParams and
+# CompositeTerm structs, a weighted sum of PotentialSpec children that
+# rgpot::SumPot evaluates.
+composite.diff

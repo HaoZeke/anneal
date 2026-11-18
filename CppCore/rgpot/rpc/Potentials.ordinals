@@ -1955,3 +1955,9 @@ PotentialConfig @17 arm cp2k :CP2KParams upstream
 UmaParams @10 field cacheDir :Text local
 Capabilities.Operation @10 enumerant hessianVector - local
 Potential @14 method calculateHvp (fip:ForceInput,direction:List(Float64))->(product:List(Float64)) local
+CompositeTerm @0 field name :Text local
+CompositeTerm @1 field enabled :Bool local
+CompositeTerm @2 field weight :Float64 local
+CompositeTerm @3 field pot :PotentialSpec local
+CompositeParams @0 field terms :List(CompositeTerm) local
+PotentialConfig @18 arm composite :CompositeParams local

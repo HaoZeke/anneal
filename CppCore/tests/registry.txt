@@ -157,6 +157,7 @@ CalculatorAbortFlagTest | tests core | unit calculator_abort_flag_test Calculato
 LJClusterPotTest | tests core | unit ljcluster_pot_test LJClusterPotTest.cc |
 LJPotThreadsTest | tests core | unit lj_pot_threads_test LJPotThreadsTest.cc timeout=120 |
 ZBLPotTest | tests core | unit zbl_pot_test ZBLPotTest.cc |
+SumPotTest | tests core | unit sum_pot_test SumPotTest.cc |
 PerAtomTest | tests core | unit per_atom_test PerAtomTest.cc |
 LocalityTest | tests core | unit locality_test LocalityTest.cc |
 StagedTest | tests core | unit staged_test StagedTest.cc |
@@ -238,6 +239,7 @@ schema-ordinal-ledger | rpc probe | custom suite=schema | @meson
 RPCSchemaSync | tests core rpc | custom suite=rpc |
 CapabilitiesWire | tests core rpc | py CppCore/tests/test_capabilities_wire.py @root@ @capnp@ suite=rpc |
 MorseConfigureTest | tests core rpc | unit morse_configure_test MorseConfigureTest.cc |
+CompositeConfigureTest | tests core rpc | unit composite_configure_test CompositeConfigureTest.cc |
 ProfileLoaderTest | tests core rpc | custom suite=abi workdir=. |
 NWChemPotLifetime-ordinary | tests core rpc | custom suite=nwchem |
 NWChemPotLifetime-probe | tests core rpc | custom suite=nwchem |

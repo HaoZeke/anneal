@@ -42,6 +42,7 @@ potential from the params message) and =rgpot::engine::backend_name=.
 | =libmetatomic_engine= | =MetatomicParams= | =metatomic= | the metatomic model at =modelPath= |
 | =libxtb_engine= | =BuiltinParams= | =xtb= | GFN2-xTB with the =XTBConfig= defaults; =name= is empty or =xtb= |
 | =libclassical_engine= | =BuiltinParams= | =classical= | =name= =lj=, =ljcluster=, =morse=, =zbl=, =eckart=, =muller_brown=, =modified_muller_brown=, =leps_hh2=, =leps_hcl2=, =leps_fh2=, =double_well=, =coupled_proton_well= and (when built with CBE) =cbe=; with the water kernels =tip4p=, =spce=, =tip4p_pt=; with the Fortran kernels =sw=, =edip=, =lenosky=, =tersoff=, =eamal=, =fehe=, =cuh2=, =waterh=; all with default parameters |
+| =libcomposite_engine= | =CompositeParams= | =composite= | a weighted sum: each =CompositeTerm= names its child with a =PotentialSpec=, the =builtin= arm for =lj=, =morse=, =zbl= and a nested =composite= (with their config arms) or the =cpmd= arm; a disabled term is not built |
 | =libmopac_engine= | =BuiltinParams= | =mopac= | MOPAC; =name= is empty or =mopac=, =library= is the path of =libmopacc= |
 | =libnwchem_engine= | =NWChemParams= | =nwchem= | NWChem through =libnwchemc= |
 | =libskala_engine= | =NWChemParams= | =skala= | Skala XC on NWChem; reads =basis=, =charge=, =multiplicity=, =enginePath= and =nwchemRoot= |
@@ -58,8 +59,10 @@ Every library above exports
 =rgpot_engine_force_batch=, =rgpot_engine_hvp=, =rgpot_engine_abi_stamp=,
 =rgpot_engine_abi_compatible=, =rgpot_engine_name=, =rgpot_engine_version=, =rgpot_engine_model_digest=,
 =rgpot_engine_caps=,
-=rgpot_engine_last_error=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=
-and =rgpot_engine_copy_orbitals=.
+=rgpot_engine_last_error=, =rgpot_engine_set_num_threads=, =rgpot_engine_set_charge_spin=, =rgpot_engine_select_orbitals=,
+=rgpot_engine_copy_orbitals=, =rgpot_engine_last_components= and
+=rgpot_engine_component_name=.
+Only =libcomposite_engine= has components; the others report none.
 None of them exports =rgpot_engine_model_state=, =rgpot_engine_set_callbacks=,
 =rgpot_engine_hint= or =rgpot_engine_neighbor_options=.
 
@@ -101,7 +104,7 @@ Required symbol.
 - Units :: none.
 - Outputs :: three =unsigned short= fields:
   =abi_major= (=RGPOT_ENGINE_ABI_VERSION=, 1),
-  =abi_minor= (=RGPOT_ENGINE_ABI_MINOR=, 4) and
+  =abi_minor= (=RGPOT_ENGINE_ABI_MINOR=, 5) and
   =layout_revision= (=RGPOT_ENGINE_ABI_LAYOUT_REVISION=, 1).
 - Errors :: none.
 
@@ -122,6 +125,8 @@ Minor 3 added
 =rgpot_engine_select_orbitals= and =rgpot_engine_copy_orbitals=.
 Minor 4 added =rgpot_engine_hvp= and the trailing =RgpotEngineCaps.analytic_hvp=
 field.
+Minor 5 added =RgpotEngineComponent=,
+=rgpot_engine_last_components= and =rgpot_engine_component_name=.
 The version does not cover the Cap'n Proto params schema, the tensor runtime the
 engine links, or the model.
 
@@ -448,6 +453,60 @@ int rgpot_engine_copy_orbitals(RgpotEnginePot *pot, long long from_key,
   =rgpot_engine_last_error=.
 
 Optional symbol.
+
+*** =RgpotEngineComponent=
+
+- Inputs :: none; a value type filled by =rgpot_engine_last_components=.
+- Units :: =energy= eV and =stress= eV/Angstrom^3 row-major, the term's own
+  values before its =weight=.
+- Outputs :: =double weight=, =double energy=, =double stress[9]=, =int enabled=
+  (0 for a term switched off), =int evaluated= (0 for a disabled term and before
+  the first call) and =int has_stress=.
+- Errors :: none.
+
+*** =rgpot_engine_last_components=
+
+#+attr_rgpot: signature
+#+begin_src c
+long rgpot_engine_last_components(const RgpotEnginePot *pot,
+                                  RgpotEngineComponent *out, double *forces,
+                                  long capacity);
+#+end_src
+
+- Inputs :: =pot=, a handle; =out=, room for =capacity= records (may be null
+  with =capacity= 0 to query the count); =forces=, null or room for =capacity=
+  blocks of =3 * nAtoms= doubles, =nAtoms= of the last successful call.
+- Units :: =forces= in eV/Angstrom, each term's own forces before its weight.
+- Outputs :: the number of terms of a composite engine, whatever =capacity=; the
+  first =capacity= records are written in term order from the last successful
+  =rgpot_engine_force= on the handle, or the last system of the last
+  =rgpot_engine_force_batch=.
+  The force blocks are term-major and zero for a term that was not evaluated.
+  An engine that is not a sum returns 0 and writes nothing.
+- Errors :: returns -1 for a null =pot=.
+
+Optional symbol, minor 5.
+The record of a failed call is that of the terms that ran before the failure.
+The call takes the handle's call lock, so it waits for an evaluation on the same
+handle to finish.
+
+*** =rgpot_engine_component_name=
+
+#+attr_rgpot: signature
+#+begin_src c
+size_t rgpot_engine_component_name(const RgpotEnginePot *pot, long index,
+                                   char *buf, size_t len);
+#+end_src
+
+- Inputs :: =pot=, a handle; =index=, a term index; =buf= and =len=, the
+  destination (may be null or 0 to query the length).
+- Units :: none.
+- Outputs :: the full length of the term's name; at most =len - 1= bytes are
+  copied to =buf= and NUL-terminated.
+- Errors :: returns 0, with =buf= set to the empty string when it has room, for
+  a null =pot=, an engine that is not a sum, and an index outside the terms.
+
+Optional symbol, minor 5.
 
 ** Evaluation
 
@@ -1155,7 +1214,7 @@ No second engine abstraction is added: =EnginePotential::into_potential= wraps
 the handle as a =PotentialImpl=.
 
 - =ENGINE_ABI_VERSION=, =ENGINE_ABI_MINOR=,
-  =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =4=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
+  =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =5=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
   =RGPOT_ENGINE_ABI_MINOR= and =RGPOT_ENGINE_ABI_LAYOUT_REVISION=.
 - =RgpotEngineAbiStamp= :: Compatibility stamp (=abi_major=, =abi_minor=,
   =layout_revision=) with =RgpotEngineAbiStamp::HOST= and =serves(host)= implementing the =rgpot_engine_abi_compatible=

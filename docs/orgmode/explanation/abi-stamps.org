@@ -108,7 +108,8 @@ Covered types:
 - =LJConfig=, =LJClusterConfig=, =MorseConfig=, =ZBLConfig=, =SuttonChenConfig=
 - =Reentrancy= and =PotType=
 - =PotentialBase=, =Potential<Derived>= (through one probe instantiation),
-  =LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot=
+  =LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot=, =SumPot=,
+  =lr::SumPot=
 - with the cache: =cache::EvalCounts= and =cache::PotentialCache=
 
 The classes of the optional backends are not covered (xtb, tblite, dftd3, dftd4,
@@ -133,7 +134,7 @@ is not the hash.
 | 3.5.1   | 1, 0, 1         | 4                    |
 | 3.6.0   | 1, 1, 1         | 6                    |
 | 3.7.0   | 1, 2, 1         | 6                    |
-| next    | 1, 6, 1         | 8                    |
+| next    | 1, 6, 1         | 9                    |
 
 3.6.0 raised the minor for =rgpot_eindir_abi_compatible=; a caller built against
 minor 0 still matches it.
@@ -163,3 +164,8 @@ cached pair table.
 Soversion 6 drops the copied half-list from LJ and Morse and gives ZBL and the
 open Lennard-Jones cluster a neighbour list.
 A program linked against soversion 4 does not load =librgpot.so.6=.
+
+Soversion 9 stamps =SumPot=, =lr::SumPot= and =PotType::LrSum=.
+=lr::SumPot= derives from =SumPot= now, so it grows from 56 to 120 bytes and its
+old constructor and =add= symbols leave the library.
+A program linked against soversion 8 does not load =librgpot.so.9=.

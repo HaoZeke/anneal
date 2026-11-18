@@ -64,7 +64,7 @@ enum class PotType {
   LrCoulomb,   //!<  Ewald, smooth PME, or damped shifted force.
   LrDispersion, //!<  D3(BJ), D4, MBD, or SO3LR QDO dispersion.
   LrNlh,       //!<  SO3LR NLH short-range repulsion.
-  LrSum,       //!<  Sum of potential summands.
+  LrSum,       //!<  Weighted sum of child potentials (rgpot::SumPot).
   Eckart,
   MullerBrown,
   ModifiedMullerBrown,

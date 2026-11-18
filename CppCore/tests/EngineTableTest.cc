@@ -29,6 +29,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "rgpot/LennardJones/LJPot.hpp"
+#include "rgpot/ZBL/ZBLPot.hpp"
 #ifdef RGPOT_HAS_WATER
 #include "rgpot/Water/WaterPots.hpp"
 #endif
@@ -61,6 +62,10 @@ struct Engine {
   int (*set_charge_spin)(RgpotEnginePot *, int, int) = nullptr;
   int (*select_orbitals)(RgpotEnginePot *, long long) = nullptr;
   int (*copy_orbitals)(RgpotEnginePot *, long long, long long) = nullptr;
+  long (*last_components)(const RgpotEnginePot *, RgpotEngineComponent *,
+                          double *, long) = nullptr;
+  size_t (*component_name)(const RgpotEnginePot *, long, char *,
+                           size_t) = nullptr;
 };
 
 template <typename Fn> Fn sym(void *h, const char *name) {
@@ -110,6 +115,11 @@ bool open_engine(const std::string &key, Engine &out) {
       sym<decltype(out.select_orbitals)>(h, "rgpot_engine_select_orbitals");
   out.copy_orbitals =
       sym<decltype(out.copy_orbitals)>(h, "rgpot_engine_copy_orbitals");
+  // Minor 5 symbols are optional: a host finds them with dlsym.
+  out.last_components = reinterpret_cast<decltype(out.last_components)>(
+      dlsym(h, "rgpot_engine_last_components"));
+  out.component_name = reinterpret_cast<decltype(out.component_name)>(
+      dlsym(h, "rgpot_engine_component_name"));
   return true;
 }
 
@@ -471,6 +481,123 @@ void check_unavailable_engine(const std::string &key, const std::string &name,
 }
 
 } // namespace
+
+namespace {
+
+struct TermSpec {
+  std::string name;
+  std::string builtin;
+  double weight;
+  bool enabled;
+};
+
+kj::Array<capnp::word> composite_params(const std::vector<TermSpec> &specs) {
+  capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::CompositeParams>();
+  auto terms = p.initTerms(static_cast<unsigned>(specs.size()));
+  for (unsigned i = 0; i < specs.size(); ++i) {
+    terms[i].setName(specs[i].name);
+    terms[i].setWeight(specs[i].weight);
+    terms[i].setEnabled(specs[i].enabled);
+    terms[i].initPot().initBuiltin().setName(specs[i].builtin);
+  }
+  return capnp::messageToFlatArray(msg);
+}
+
+} // namespace
+
+TEST_CASE("composite engine sums weighted terms and reports each",
+          "[engine][composite]") {
+  Engine e;
+  if (!open_engine("COMPOSITE", e)) {
+    SKIP("no composite engine in this build");
+  }
+  check_identity(e, "composite");
+  REQUIRE(e.last_components != nullptr);
+  REQUIRE(e.component_name != nullptr);
+  std::string error;
+  RgpotEnginePot *pot = create(e,
+                               composite_params({{"lj", "lj", 2.0, true},
+                                                 {"morse", "morse", 1.0, false},
+                                                 {"zbl", "zbl", -0.5, true}}),
+                               &error);
+  INFO(error);
+  REQUIRE(pot != nullptr);
+  RgpotEngineCaps caps;
+  caps.size = sizeof(caps);
+  REQUIRE(e.caps(pot, &caps) == 0);
+  REQUIRE(caps.reentrancy >= 1);
+
+  const long n = 5;
+  REQUIRE(e.last_components(pot, nullptr, nullptr, 0) == 3);
+  std::vector<double> forces(3 * n, 0.0);
+  double energy = 0.0;
+  REQUIRE(e.force(pot, n, kCluster.data(), kZ.data(), forces.data(), &energy,
+                  nullptr, kBox.data(), nullptr, nullptr) == 0);
+
+  rgpot::LJPot lj;
+  rgpot::ZBLPot zbl;
+  rgpot::types::AtomMatrix positions(n, 3);
+  for (long i = 0; i < n; ++i) {
+    for (int d = 0; d < 3; ++d) {
+      positions(i, d) = kCluster[3 * i + d];
+    }
+  }
+  const std::array<std::array<double, 3>, 3> box = {
+      {{40, 0, 0}, {0, 40, 0}, {0, 0, 40}}};
+  auto [lj_e, lj_f, lj_v] = lj(positions, kZ, box);
+  auto [zbl_e, zbl_f, zbl_v] = zbl(positions, kZ, box);
+  (void)lj_v;
+  (void)zbl_v;
+  const double tol = 1e-12 * (std::abs(lj_e) + std::abs(zbl_e) + 1.0);
+  REQUIRE(energy == Catch::Approx(2.0 * lj_e - 0.5 * zbl_e).margin(tol));
+
+  std::vector<RgpotEngineComponent> rec(3);
+  std::vector<double> term_forces(3 * 3 * n, -1.0);
+  REQUIRE(e.last_components(pot, rec.data(), term_forces.data(), 3) == 3);
+  REQUIRE(rec[0].energy == Catch::Approx(lj_e).margin(tol));
+  REQUIRE(rec[0].weight == 2.0);
+  REQUIRE(rec[0].evaluated == 1);
+  REQUIRE(rec[1].enabled == 0);
+  REQUIRE(rec[1].evaluated == 0);
+  REQUIRE(rec[1].energy == 0.0);
+  REQUIRE(rec[2].energy == Catch::Approx(zbl_e).margin(tol));
+  REQUIRE(rec[2].weight == -0.5);
+  for (long i = 0; i < n; ++i) {
+    for (int d = 0; d < 3; ++d) {
+      const std::size_t k = static_cast<std::size_t>(3 * i + d);
+      REQUIRE(term_forces[k] == Catch::Approx(lj_f(i, d)).margin(tol));
+      REQUIRE(term_forces[3 * n + k] == 0.0);
+      REQUIRE(term_forces[6 * n + k] == Catch::Approx(zbl_f(i, d)).margin(tol));
+      REQUIRE(forces[k] ==
+              Catch::Approx(2.0 * lj_f(i, d) - 0.5 * zbl_f(i, d)).margin(tol));
+    }
+  }
+  // A short buffer gets the leading terms and the full count.
+  RgpotEngineComponent first;
+  REQUIRE(e.last_components(pot, &first, nullptr, 1) == 3);
+  REQUIRE(first.energy == rec[0].energy);
+
+  char name[4] = {0};
+  REQUIRE(e.component_name(pot, 1, name, sizeof(name)) == 5);
+  REQUIRE(std::string(name) == "mor");
+  REQUIRE(e.component_name(pot, 3, name, sizeof(name)) == 0);
+  REQUIRE(e.component_name(pot, -1, name, sizeof(name)) == 0);
+  e.destroy(pot);
+
+  REQUIRE(create(e, composite_params({{"x", "nonesuch", 1.0, true}}), &error) ==
+          nullptr);
+  REQUIRE(error.find("'x'") != std::string::npos);
+  REQUIRE(error.find("nonesuch") != std::string::npos);
+  // A disabled term is never built, so its backend need not exist.
+  RgpotEnginePot *off =
+      create(e, composite_params({{"lj", "lj", 1.0, true},
+                                  {"x", "nonesuch", 1.0, false}}),
+             &error);
+  INFO(error);
+  REQUIRE(off != nullptr);
+  e.destroy(off);
+}
 
 TEST_CASE("mopac engine", "[engine][mopac]") {
   check_unavailable_engine("MOPAC", "mopac", builtin_params("mopac"), 2);

@@ -13,13 +13,15 @@ Backend options for a live =Potential= go in =PotentialConfig=
 (=CppCore/rgpot/rpc/Potentials.capnp=, a copy of the pinned potentials-schema).
 It is a union whose arms and ordinals are =none= @0, =nwchem= @1, =cpmd= @2,
 =metatomic= @4, =lammps= @5, =xtb= @6, =tblite= @7, =uma= @8, =lj= @9, =morse=
-@10, =zbl= @11, =d3= @12, =d4= @13, =mopac= @14, =skala= @15, =expr= @16 and
-=cp2k= @17.
+@10, =zbl= @11, =d3= @12, =d4= @13, =mopac= @14, =skala= @15, =expr= @16, =cp2k=
+@17 and =composite= @18.
+=composite= is a local addition (=CppCore/rgpot/rpc/local/composite.diff=) to
+the pinned schema.
 Outside the union, =common= @3 is a =CommonMethodSpec= overlay.
 Geometry stays on =ForceInput=; =configure(config)= applies method and backend
 setup only.
-=potserv= applies =nwchem=, =cpmd= and =morse= on the matching backend, and
-=cp2k= on a build with CP2K.
+=potserv= applies =nwchem=, =cpmd=, =morse= and =composite= on the matching
+backend, and =cp2k= on a build with CP2K.
 =none= is a no-op on every backend.
 Every other arm gets =ok=false= with a message that names the arm.
 An arm from a newer schema is named by its discriminant.
@@ -49,6 +51,33 @@ so the next =calculate= uses them.
 A non-finite value, a cutoff that is not positive, or a cutoff below the switch
 width gets =ok=false= and leaves the pot as it was.
 =tests/rpc_integ.py= doubles =de= and checks that the energy at =re= doubles.
+
+** Composite arm (=PotentialConfig.composite= / =CompositeParams=)
+
+With =potserv <port> Composite=, pass =configure= with the =composite= arm set.
+The server starts with an empty sum, whose energy is 0.
+=CompositeParams.terms= is a list of =CompositeTerm=, summed in order:
+
+| field | type | default | meaning |
+|-------+------+---------+---------|
+| =CompositeTerm.name= | Text | empty | label in the component record and the log; empty becomes =term<i>= |
+| =CompositeTerm.enabled= | Bool | true | a disabled term is recorded and never built or evaluated |
+| =CompositeTerm.weight= | Float64 | 1.0 | multiplies the term's energy, forces and stress; the sign is allowed |
+| =CompositeTerm.pot= | =PotentialSpec= | unset | the child backend |
+
+The =builtin= arm of =PotentialSpec= builds =lj=, =morse= and =zbl= with the
+parameters of its =config= arm (=lj=, =morse=, =zbl=, or =none= for the
+defaults) and =composite= (or =sum=) for a nested sum.
+The =cpmd= arm builds a =CPMDPot= from its =CPMDParams=, which loads =libcpmdc=.
+Other =PotentialSpec= arms, an unknown builtin name, a builtin config arm that
+belongs to another backend, an enabled term without a =pot= and a weight that is
+not finite get =ok=false= with a message that names the term, and leave the
+previous sum in place.
+=CppCore/rgpot/rpc/CompositeConfigure.hpp= holds the mapping, which
+=libcomposite_engine= also uses.
+=tests/rpc_integ.py= checks that a weight of -1 cancels a term, that a weight
+scales one, that a disabled term with an unknown name is not built, and that
+every other arm is refused.
 
 ** CPMD arm (=PotentialConfig.cpmd= / =CPMDParams=)
 

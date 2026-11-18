@@ -72,6 +72,9 @@ const UPSTREAM_ARMS: [(&str, u16); 17] = [
     ("cp2k", 17),
 ];
 
+/// The arms rgpot adds in CppCore/rgpot/rpc/local, after the upstream ones.
+const LOCAL_ARMS: [(&str, u16); 1] = [("composite", 18)];
+
 #[test]
 fn union_arms_keep_the_upstream_ordinals() {
     use capnp::introspect::{Introspect, TypeVariant};
@@ -94,6 +97,7 @@ fn union_arms_keep_the_upstream_ordinals() {
     }
     let want: Vec<(String, u16)> = UPSTREAM_ARMS
         .iter()
+        .chain(LOCAL_ARMS.iter())
         .map(|(name, ordinal)| ((*name).to_owned(), *ordinal))
         .collect();
     assert_eq!(seen, want);
