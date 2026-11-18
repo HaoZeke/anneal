@@ -457,7 +457,7 @@ fn a_missing_abi_stamp_symbol_is_refused_as_minor_zero() {
     let path = build("harmonic_nostamp", &["NO_STAMP"]);
     let error = unsafe { EnginePotential::load(&path, &config()) }
         .err()
-        .expect("missing rgpot_engine_abi_stamp must be refused for minor 3 host");
+        .expect("missing rgpot_engine_abi_stamp must be refused by the current host");
     let found = RgpotEngineAbiStamp {
         abi_major: ENGINE_ABI_VERSION as u16,
         abi_minor: 0,
@@ -484,13 +484,14 @@ fn a_compatible_abi_stamp_loads_at_equal_or_higher_minor() {
     let engine = load(&equal);
     assert_eq!(engine.abi_stamp(), RgpotEngineAbiStamp::HOST);
 
-    let newer = build("harmonic_stamp_minor4", &["FIXTURE_ABI_MINOR=4"]);
+    let fixture_minor = format!("FIXTURE_ABI_MINOR={}", ENGINE_ABI_MINOR + 1);
+    let newer = build("harmonic_stamp_newer", &[&fixture_minor]);
     let mut engine = load(&newer);
     assert_eq!(
         engine.abi_stamp(),
         RgpotEngineAbiStamp {
             abi_major: ENGINE_ABI_VERSION as u16,
-            abi_minor: 4,
+            abi_minor: ENGINE_ABI_MINOR + 1,
             layout_revision: ENGINE_ABI_LAYOUT_REVISION,
         }
     );
