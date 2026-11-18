@@ -27,8 +27,8 @@ fn lj38_and_lj98_short_searches_stay_put() {
     anneal_core::install_rgpot_kernels!();
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
-        (38, 1, 2500, -171.499_842_453_860_65, 46, 27, 46),
-        (98, 7, 2500, -531.623_165_861_692_3, 20, 13, 21),
+        (38, 1, 2500, -172.237_562_693_841_7, 37, 31, 29),
+        (98, 7, 2500, -521.699_583_466_621_7, 19, 10, 18),
     ];
     let mut records = Vec::new();
     for (n, seed, budget, best, hops, converged, capped) in cases {
@@ -63,7 +63,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, *capped);
     }
     let expected = "\
-LJ38 -171.4998424538606514 46 27 46 2500
-LJ98 -531.6231658616923141 20 13 21 2500";
+LJ38 -172.2375626938417099 37 31 29 2500
+LJ98 -521.6995834666216751 19 10 18 2500";
     assert_eq!(records.join("\n"), expected);
 }

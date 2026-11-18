@@ -94,9 +94,9 @@ fn metropolis_heat_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0x8b789f0315c5c3cd, "preset walk");
+    assert_eq!(cold_fp, 0x71dcd1698b6fc8a1, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0x55fe439f5a3e1199, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0x44613af4b905c101, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -104,15 +104,15 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x2da1f0e16fc27ab8, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x0bba78446e643271, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x727d36d910edde76,
+        0x48f5ad9ba4ae30d4,
         "heat * cfg.temperature"
     );
 }
 
-/// Seed 5 reaches a new lowest while the heat is above 1, and the walk
+/// Seed 2 reaches a new lowest while the heat is above 1, and the walk
 /// differs when that reset is left out. Seeds where the reset never fires
 /// pass whether or not it exists.
 #[test]
@@ -121,10 +121,10 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     cfg.restart_patience = 80;
     cfg.relax_steps = 20;
     cfg.energy_lattice = false;
-    let (cold, hot) = pair(&cfg, 8_000, 5);
+    let (cold, hot) = pair(&cfg, 8_000, 2);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
-    assert_eq!(fingerprint(&cold), 0xc58520ff3f4e2821, "preset walk");
-    assert_eq!(fingerprint(&hot), 0x0569d577ef222a0f, "heat = 1.0");
+    assert_eq!(fingerprint(&cold), 0x60e003c4fc37cc0b, "preset walk");
+    assert_eq!(fingerprint(&hot), 0xe05cb70a40973091, "heat = 1.0");
 }
 
 /// Seed 76 lowers the best from a quench after the loop head, with the heat
@@ -138,10 +138,10 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
     let (cold, hot) = pair(&cfg, 6_000, 76);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
-    assert_eq!(fingerprint(&cold), 0x46a5c7a48102f029, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x4e21f286e8d17063, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x16e375f012558c31,
+        0x3ae26ce650b0fc5c,
         "same-iteration heat = 1.0"
     );
 }
