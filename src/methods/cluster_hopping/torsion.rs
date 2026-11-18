@@ -368,9 +368,10 @@ impl Topology {
     /// Proposes torsions after asking the potential how strongly each locally
     /// planar bridge is held.
     ///
-    /// A constrained bridge is probed at small displacements and at a half
-    /// turn. Only a small displacement or a half turn is offered, with
-    /// Boltzmann weights whose scale is capped by the measured local barrier.
+    /// A constrained bridge is probed at small displacements, the midpoint of
+    /// a half turn, and the half-turn endpoint. Only a small displacement or a
+    /// half turn is offered, with Boltzmann weights whose scale is capped by
+    /// the measured local barrier.
     /// The cap matters during the opening pilot, before the acceptance
     /// temperature has learned the potential's units. Thus a trans partial
     /// double bond stays near trans, while a chain that reached a high cis
@@ -404,17 +405,24 @@ impl Topology {
                 };
                 profiles[index] = probe(BARRIER_PROBE_ANGLE, &mut evaluate)
                     .zip(probe(-BARRIER_PROBE_ANGLE, &mut evaluate))
+                    .zip(probe(std::f64::consts::FRAC_PI_2, &mut evaluate))
                     .zip(probe(std::f64::consts::PI, &mut evaluate))
-                    .map(|((p, m), f)| (p, m, f));
+                    .map(|(((p, m), barrier), f)| (p, m, barrier, f));
             }
-            let Some((plus, minus, flip)) = profiles[index] else {
+            let Some((plus, minus, barrier, flip)) = profiles[index] else {
                 return rng.random_range(-BARRIER_PROBE_ANGLE..BARRIER_PROBE_ANGLE);
             };
             let local_rise = (0.5 * (plus + minus) - energy).max(0.0);
             let thermal = temperature
                 .min(local_rise.max(f64::EPSILON))
                 .max(f64::EPSILON);
-            let changes = [plus - energy, minus - energy, flip - energy];
+            // The endpoint cannot measure a rotational barrier: a true
+            // double bond can have two low E/Z endpoints separated by a very
+            // high transition state. Price the half turn by the highest
+            // sampled energy along its path, while retaining the endpoint so
+            // a downhill flip is not mistaken for a barrierless one.
+            let flip_barrier = barrier.max(flip) - energy;
+            let changes = [plus - energy, minus - energy, flip_barrier];
             let floor = changes.iter().copied().fold(f64::INFINITY, f64::min);
             let weights = changes.map(|de| (-(de - floor) / thermal).max(-700.0).exp());
             let draw = rng.random::<f64>() * weights.iter().sum::<f64>();
@@ -734,8 +742,23 @@ mod tests {
             calls += 1;
             Some(if calls < 3 { 2.0 } else { 10.0 })
         });
-        assert_eq!(calls, 3, "one set of charged barrier probes");
+        assert_eq!(calls, 4, "one set of charged barrier probes");
         assert!(cosine(&local) > BARRIER_PROBE_ANGLE.cos() - 1e-12);
+
+        let mut calls = 0;
+        let held = top.propose_measured(x.view(), 0.0, 0.1, &mut StdRng::seed_from_u64(4), |_| {
+            calls += 1;
+            Some(match calls {
+                1 | 2 => 2.0,
+                3 => 10.0,
+                _ => -1.0,
+            })
+        });
+        assert_eq!(calls, 4);
+        assert!(
+            cosine(&held) > BARRIER_PROBE_ANGLE.cos() - 1e-12,
+            "a low endpoint bypassed its rotational barrier"
+        );
 
         let mut calls = 0;
         let flipped =
@@ -743,7 +766,7 @@ mod tests {
                 calls += 1;
                 Some(if calls < 3 { 2.0 } else { -1.0 })
             });
-        assert_eq!(calls, 3);
+        assert_eq!(calls, 4);
         assert!(
             cosine(&flipped) < -0.99,
             "downhill half turn was not preferred"
