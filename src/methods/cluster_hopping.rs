@@ -3957,6 +3957,22 @@ impl AcceptDial {
     }
 }
 
+fn molecular_plateau_restart(
+    cfg: &Config,
+    hops: usize,
+    hops_at_lowest: usize,
+    last_restart: usize,
+    energy: f64,
+    best: f64,
+) -> bool {
+    cfg.move_library.is_molecular()
+        && cfg.quench_gradient > 0.0
+        && !cfg.improvement_rewards
+        && hops.saturating_sub(hops_at_lowest) >= AcceptDial::BLOCK
+        && hops.saturating_sub(last_restart) >= AcceptDial::BLOCK
+        && energy > best + cfg.quench_gradient * cfg.length_scale
+}
+
 #[cfg(test)]
 mod contact_unit_tests {
     use super::*;
@@ -4029,6 +4045,44 @@ mod contact_unit_tests {
             even.observe(i % 2 == 0);
         }
         assert_eq!(even.temperature(), temperature);
+    }
+
+    #[test]
+    fn a_high_molecular_plateau_restarts_once_per_acceptance_block() {
+        let mut cfg = Config::recommended_molecular(vec![6; 4], vec![(0..4).collect()], 1.0);
+        cfg.quench_gradient = 1.0e-3;
+        assert!(!molecular_plateau_restart(
+            &cfg,
+            AcceptDial::BLOCK - 1,
+            0,
+            0,
+            1.0,
+            0.0
+        ));
+        assert!(molecular_plateau_restart(
+            &cfg,
+            AcceptDial::BLOCK,
+            0,
+            0,
+            1.0,
+            0.0
+        ));
+        assert!(!molecular_plateau_restart(
+            &cfg,
+            AcceptDial::BLOCK + 1,
+            0,
+            AcceptDial::BLOCK,
+            1.0,
+            0.0
+        ));
+        assert!(!molecular_plateau_restart(
+            &cfg,
+            2 * AcceptDial::BLOCK,
+            0,
+            0,
+            cfg.quench_gradient / 2.0,
+            0.0
+        ));
     }
 }
 
@@ -5730,6 +5784,27 @@ where
                 }
             }
         }
+        if molecular_plateau_restart(
+            cfg,
+            hops,
+            hops_at_lowest,
+            last_basin_restart,
+            e,
+            ledger.best,
+        ) && let Some(state) = ledger.best_state.clone()
+            && state.len() == x.len()
+        {
+            // A molecular chain can accept one uphill conformer and then
+            // spend almost the whole budget revisiting that plateau. The
+            // acceptance dial heats such a chain, which makes escape still
+            // less likely. A block with no new incumbent is enough evidence:
+            // relaunch from the certified best, while retaining every bias
+            // deposit and allocator observation learned on the plateau.
+            last_basin_restart = hops;
+            x = state;
+            e = ledger.best;
+            current_validation_gradient = None;
+        }
         // The reoccupation move runs inside the chain and charges the
         // ledger directly; its result enters the same adoption path as an
         // external proposal.
@@ -7102,6 +7177,31 @@ where
                 _ => {
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
                         energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                    } else if cfg.quench_gradient > 0.0
+                        && let ClusterMove::Torsion {
+                            species,
+                            tolerance,
+                            mobile,
+                            rings,
+                        } = &kernels[k]
+                    {
+                        torsion::Topology::of(
+                            x.view(),
+                            species,
+                            *tolerance,
+                            mobile.as_deref(),
+                            *rings,
+                        )
+                        .propose_measured(
+                            x.view(),
+                            e,
+                            dial.temperature(),
+                            rng,
+                            |candidate| {
+                                let (energy, _) = relax(ledger, candidate, 0);
+                                energy.is_finite().then_some(energy)
+                            },
+                        )
                     } else {
                         kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
@@ -7143,6 +7243,31 @@ where
                     _ => {
                         if matches!(kernels[k], ClusterMove::EnergyLattice) {
                             energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                        } else if cfg.quench_gradient > 0.0
+                            && let ClusterMove::Torsion {
+                                species,
+                                tolerance,
+                                mobile,
+                                rings,
+                            } = &kernels[k]
+                        {
+                            torsion::Topology::of(
+                                x.view(),
+                                species,
+                                *tolerance,
+                                mobile.as_deref(),
+                                *rings,
+                            )
+                            .propose_measured(
+                                x.view(),
+                                e,
+                                dial.temperature(),
+                                rng,
+                                |candidate| {
+                                    let (energy, _) = relax(ledger, candidate, 0);
+                                    energy.is_finite().then_some(energy)
+                                },
+                            )
                         } else {
                             kernels[k].propose_scaled(
                                 x.view(),
