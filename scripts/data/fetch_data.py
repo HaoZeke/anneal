@@ -3,8 +3,8 @@
 """Fetch the paper dumps from the Hugging Face dataset anneal-paper-data.
 
 The dataset repository is ``HaoZeke/anneal-paper-data`` (repo type
-dataset). ``HF_REVISION`` is the pinned dataset commit. Replace
-``REVISION_AFTER_UPLOAD`` after the upload.
+dataset). ``HF_REVISION`` is the pinned dataset commit, which holds every
+manifest file.
 An environment variable of the same name overrides either value, so
 another machine can point at the uploaded snapshot without editing
 this file.
@@ -47,8 +47,10 @@ MANIFEST = ROOT / "data" / "hf-files.csv"
 
 # Dataset repository HaoZeke/anneal-paper-data, repo type dataset.
 HF_REPO = os.environ.get("HF_REPO", "HaoZeke/anneal-paper-data")
-# Pin the dataset git revision after upload.
-HF_REVISION = os.environ.get("HF_REVISION", "REVISION_AFTER_UPLOAD")
+# Dataset commit that holds every file in data/hf-files.csv.
+HF_REVISION = os.environ.get(
+    "HF_REVISION", "7d72d0c8cfb7d61889a7dd45211bb22d13bab36f"
+)
 
 CACHE = Path(
     os.environ.get(
@@ -107,14 +109,6 @@ def ensure(root: Path = ROOT) -> None:
     ]
     if not missing:
         return
-    if HF_REVISION == "REVISION_AFTER_UPLOAD":
-        sample = missing[0]["path"]
-        raise SystemExit(
-            f"{len(missing)} file(s) do not match {MANIFEST.name}, "
-            f"including {sample}. HF_REPO is {HF_REPO} and HF_REVISION is "
-            f"{HF_REVISION}. Set HF_REVISION to the uploaded dataset commit "
-            "before downloading."
-        )
     try:
         from huggingface_hub import snapshot_download
     except ImportError as exc:
