@@ -117,11 +117,14 @@ fn recommended_differs_from_for_cluster() {
 }
 
 #[test]
-fn recommended_draws_the_compacted_surface_below_98() {
+fn recommended_draws_the_compacted_surface_at_all_sizes() {
     anneal_core::install_rgpot_kernels!();
     let rec = Config::recommended(75);
     assert!(rec.two_phase.is_none());
     assert_eq!(rec.surfaces, Config::communicating(75).surfaces);
     assert!(rec.orbit_complete_on_new);
-    assert!(Config::recommended(98).surfaces.is_empty());
+    assert_eq!(
+        Config::recommended(98).surfaces,
+        Config::communicating(98).surfaces
+    );
 }

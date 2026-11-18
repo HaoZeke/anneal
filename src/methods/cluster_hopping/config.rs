@@ -1534,12 +1534,12 @@ impl Config {
         // solves 72 of 72 at 38 points, and at 75 and 98 points, whose
         // global minima are not those packings, it is worse than none.
         // Installing it only at 38 atoms was per-system tuning, so the
-        // preset keeps LeanBurst at every size.
-        if n_points < 98 {
-            // The quartic penalty is an energy per length^4.
-            let beta = energy_scale / length_scale.powi(4);
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, beta)];
-        }
+        // preset keeps LeanBurst at every size. The compacted-surface arm is
+        // likewise one stack at every size: adaptation is by acceptance and
+        // stall history, never by a size branch.
+        // The quartic penalty is an energy per length^4.
+        let beta = energy_scale / length_scale.powi(4);
+        cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, beta)];
         // At 200 steps at least 27 per cent of the full quenches of LJ98
         // runs stop above the record gradient, and the chain accepts on
         // their energies. GMIN's LJ98 deck sets MAXIT 1000 1000. At 1000,
@@ -1571,9 +1571,9 @@ impl Config {
     /// Thompson, the return screen, and orbit completion: 31/48 Marks,
     /// 30/48 Leary), not [`Self::recommended`] (LeanBurst, SOAP leftover
     /// as a burst library, tabu-on-stall, stall jump). Peer visit counts
-    /// stay off the escape controller. Two-phase relative 0.7 stays on
-    /// below 98 (occupancy-measured on 38 and 75; 18/48 Leary when left
-    /// on at 98). Grosso replacement is not installed.
+    /// stay off the escape controller. Two-phase relative 0.7 stays on at
+    /// every size, with acceptance and restart machinery deciding whether it
+    /// pays on a given run. Grosso replacement is not installed.
     ///
     /// ```
     /// use anneal_core::methods::cluster_hopping::Config;
@@ -1590,9 +1590,7 @@ impl Config {
         cfg.orbit_core = OrbitCore::Fraction;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
-        if n_points < 98 {
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
-        }
+        cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         cfg.continuous_symmetry = ContinuousSymmetry::Measure {
             interval: 10,
             reseed_hops: 5,

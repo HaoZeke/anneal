@@ -10414,7 +10414,10 @@ mod tests {
         assert_eq!(comm.surfaces.len(), 1);
         assert!(comm.surfaces[0].is_active());
         assert_eq!(rec.surfaces, comm.surfaces);
-        assert!(Config::communicating(98).surfaces.is_empty());
+        assert_eq!(
+            Config::communicating(98).surfaces,
+            vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)]
+        );
         assert!(matches!(
             rec.continuous_symmetry,
             ContinuousSymmetry::Measure {
