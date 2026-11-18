@@ -249,8 +249,13 @@ def cmake_tests(build: Path, ctest: str) -> list[Test]:
 
 def compare_options(entry: Entry, test: Test, build: Path) -> list[str]:
     problems = []
-    if test.timeout is None or float(test.timeout) != entry.timeout:
-        problems.append(f"timeout {test.timeout}, the registry says {entry.timeout}")
+    timeout_scale = int(test.env.get("RGPOT_TEST_TIMEOUT_SCALE", "1"))
+    expected_timeout = entry.timeout * timeout_scale
+    if test.timeout is None or float(test.timeout) != expected_timeout:
+        problems.append(
+            f"timeout {test.timeout}, the registry says {entry.timeout}"
+            f" times sanitizer scale {timeout_scale}"
+        )
     suites = {entry.suite} if entry.suite else set()
     if test.suites != suites:
         problems.append(f"suite {sorted(test.suites)}, the registry says {sorted(suites)}")

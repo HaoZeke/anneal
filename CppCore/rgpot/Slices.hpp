@@ -32,6 +32,14 @@
 #if defined(RGPOT_TSAN_ACTIVE)
 #include <atomic>
 #include <memory>
+#include <type_traits>
+#include <utility>
+#endif
+
+#if defined(RGPOT_TSAN_ACTIVE) && defined(_OPENMP) && defined(__GNUC__) && \
+    !defined(__clang__)
+#define RGPOT_GOMP_TSAN 1
+extern "C" void GOMP_parallel(void (*)(void *), void *, unsigned, unsigned);
 #endif
 
 namespace rgpot {
@@ -103,6 +111,45 @@ namespace detail {
 [[nodiscard]] int teamFor(int wanted) noexcept;
 /// Counts a region for teamsOpened.
 void countTeam() noexcept;
+
+#if defined(RGPOT_GOMP_TSAN)
+/// libgomp's uninstrumented fork does not give TSan a happens-before edge.
+/// Passing our own final state to GOMP_parallel lets the caller release after
+/// initialization and every worker acquire that exact address before reading.
+template <typename Function>
+void gompParallel(int threads, Function &&function) {
+  using Fn = std::remove_reference_t<Function>;
+  struct State {
+    Fn *function;
+    std::unique_ptr<std::atomic<int>[]> joined;
+    std::atomic<int> fork{0};
+    std::atomic<int> actual{0};
+  };
+  State state{
+      std::addressof(function),
+      std::make_unique<std::atomic<int>[]>(static_cast<std::size_t>(threads)),
+  };
+  state.fork.store(1, std::memory_order_release);
+  GOMP_parallel(
+      [](void *opaque) {
+        auto &shared = *static_cast<State *>(opaque);
+        (void)shared.fork.load(std::memory_order_acquire);
+        const int thread = omp_get_thread_num();
+        if (thread == 0) {
+          shared.actual.store(omp_get_num_threads(), std::memory_order_release);
+        }
+        (*shared.function)();
+        shared.joined[static_cast<std::size_t>(thread)].store(
+            1, std::memory_order_release);
+      },
+      &state, static_cast<unsigned>(threads), 0);
+  const int actual = state.actual.load(std::memory_order_acquire);
+  for (int thread = 0; thread < actual; ++thread) {
+    (void)state.joined[static_cast<std::size_t>(thread)].load(
+        std::memory_order_acquire);
+  }
+}
+#endif
 } // namespace detail
 
 /// Runs `body(slice)` once for each slice in `[0, nslices)`, possibly
@@ -116,29 +163,45 @@ void forEachSlice(int nslices, Body &&body) {
   const int request = nslices > 1 ? detail::teamFor(nslices) : 1;
   if (request > 1) {
     detail::countTeam();
+#if defined(RGPOT_GOMP_TSAN)
+    detail::gompParallel(request, [&] {
+      const int team = omp_get_num_threads();
+      for (int slice = omp_get_thread_num(); slice < nslices; slice += team) {
+        body(slice);
+      }
+    });
+#else
 #if defined(RGPOT_TSAN_ACTIVE)
     // Distro OpenMP runtimes (libomp, libgomp) are built without TSan, so
     // their fork/join barriers are invisible to TSan without an explicit
     // release/acquire pair. Concurrent slices still race if they share writes.
-    std::atomic<int> tsan_fork{0};
-    std::atomic<int> tsan_join{0};
-    tsan_fork.store(1, std::memory_order_release);
+    static std::atomic<std::uint64_t> tsan_fork_epoch{0};
+    auto tsan_join =
+        std::make_unique<std::atomic<int>[]>(static_cast<std::size_t>(request));
 #endif
 #pragma omp parallel num_threads(request)
     {
 #if defined(RGPOT_TSAN_ACTIVE)
-      (void)tsan_fork.load(std::memory_order_acquire);
+#pragma omp master
+      tsan_fork_epoch.fetch_add(1, std::memory_order_acq_rel);
+#pragma omp barrier
+      (void)tsan_fork_epoch.load(std::memory_order_acquire);
 #endif
       const int team = omp_get_num_threads();
       for (int slice = omp_get_thread_num(); slice < nslices; slice += team) {
         body(slice);
       }
 #if defined(RGPOT_TSAN_ACTIVE)
-      tsan_join.fetch_add(1, std::memory_order_release);
+      tsan_join[static_cast<std::size_t>(omp_get_thread_num())].store(
+          1, std::memory_order_release);
 #endif
     }
 #if defined(RGPOT_TSAN_ACTIVE)
-    (void)tsan_join.load(std::memory_order_acquire);
+    for (int thread = 0; thread < request; ++thread) {
+      (void)tsan_join[static_cast<std::size_t>(thread)].load(
+          std::memory_order_acquire);
+    }
+#endif
 #endif
     return;
   }
@@ -158,17 +221,40 @@ void forEachSlicePhase(int nphases, int nslices, Body &&body) {
   const int request = nslices > 1 && nphases > 0 ? detail::teamFor(nslices) : 1;
   if (request > 1) {
     detail::countTeam();
-#if defined(RGPOT_TSAN_ACTIVE)
-    std::atomic<int> tsan_fork{0};
-    std::atomic<int> tsan_join{0};
+#if defined(RGPOT_GOMP_TSAN)
     auto tsan_phase =
         std::make_unique<std::atomic<int>[]>(static_cast<std::size_t>(nphases));
-    tsan_fork.store(1, std::memory_order_release);
+    detail::gompParallel(request, [&] {
+      const int team = omp_get_num_threads();
+      const int first = omp_get_thread_num();
+      for (int phase = 0; phase < nphases; ++phase) {
+        if (phase > 0) {
+          tsan_phase[static_cast<std::size_t>(phase)].fetch_add(
+              1, std::memory_order_release);
+#pragma omp barrier
+          (void)tsan_phase[static_cast<std::size_t>(phase)].load(
+              std::memory_order_acquire);
+        }
+        for (int slice = first; slice < nslices; slice += team) {
+          body(phase, slice);
+        }
+      }
+    });
+#else
+#if defined(RGPOT_TSAN_ACTIVE)
+    static std::atomic<std::uint64_t> tsan_fork_epoch{0};
+    auto tsan_join =
+        std::make_unique<std::atomic<int>[]>(static_cast<std::size_t>(request));
+    auto tsan_phase =
+        std::make_unique<std::atomic<int>[]>(static_cast<std::size_t>(nphases));
 #endif
 #pragma omp parallel num_threads(request)
     {
 #if defined(RGPOT_TSAN_ACTIVE)
-      (void)tsan_fork.load(std::memory_order_acquire);
+#pragma omp master
+      tsan_fork_epoch.fetch_add(1, std::memory_order_acq_rel);
+#pragma omp barrier
+      (void)tsan_fork_epoch.load(std::memory_order_acquire);
 #endif
       const int team = omp_get_num_threads();
       const int first = omp_get_thread_num();
@@ -189,11 +275,16 @@ void forEachSlicePhase(int nphases, int nslices, Body &&body) {
         }
       }
 #if defined(RGPOT_TSAN_ACTIVE)
-      tsan_join.fetch_add(1, std::memory_order_release);
+      tsan_join[static_cast<std::size_t>(omp_get_thread_num())].store(
+          1, std::memory_order_release);
 #endif
     }
 #if defined(RGPOT_TSAN_ACTIVE)
-    (void)tsan_join.load(std::memory_order_acquire);
+    for (int thread = 0; thread < request; ++thread) {
+      (void)tsan_join[static_cast<std::size_t>(thread)].load(
+          std::memory_order_acquire);
+    }
+#endif
 #endif
     return;
   }
@@ -224,15 +315,29 @@ template <typename Body>
   }
   bool full = false;
   detail::countTeam();
+#if defined(RGPOT_GOMP_TSAN)
+  detail::gompParallel(nranks, [&] {
+    if (omp_get_num_threads() == nranks) {
+      const int rank = omp_get_thread_num();
+      if (rank == 0) {
+        full = true;
+      }
+      body(rank);
+    }
+  });
+#else
 #if defined(RGPOT_TSAN_ACTIVE)
-  std::atomic<int> tsan_fork{0};
-  std::atomic<int> tsan_join{0};
-  tsan_fork.store(1, std::memory_order_release);
+  static std::atomic<std::uint64_t> tsan_fork_epoch{0};
+  auto tsan_join =
+      std::make_unique<std::atomic<int>[]>(static_cast<std::size_t>(nranks));
 #endif
 #pragma omp parallel num_threads(nranks)
   {
 #if defined(RGPOT_TSAN_ACTIVE)
-    (void)tsan_fork.load(std::memory_order_acquire);
+#pragma omp master
+    tsan_fork_epoch.fetch_add(1, std::memory_order_acq_rel);
+#pragma omp barrier
+    (void)tsan_fork_epoch.load(std::memory_order_acquire);
 #endif
     if (omp_get_num_threads() == nranks) {
       const int rank = omp_get_thread_num();
@@ -242,11 +347,16 @@ template <typename Body>
       body(rank);
     }
 #if defined(RGPOT_TSAN_ACTIVE)
-    tsan_join.fetch_add(1, std::memory_order_release);
+    tsan_join[static_cast<std::size_t>(omp_get_thread_num())].store(
+        1, std::memory_order_release);
 #endif
   }
 #if defined(RGPOT_TSAN_ACTIVE)
-  (void)tsan_join.load(std::memory_order_acquire);
+  for (int thread = 0; thread < nranks; ++thread) {
+    (void)tsan_join[static_cast<std::size_t>(thread)].load(
+        std::memory_order_acquire);
+  }
+#endif
 #endif
   return full;
 #else

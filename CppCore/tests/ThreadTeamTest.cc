@@ -205,26 +205,41 @@ auto fromOuterTeam(Make &make, Eval &eval, int levels) {
   std::vector<decltype(eval(first))> out(2);
   const int saved = omp_get_max_active_levels();
   omp_set_max_active_levels(levels);
+#if defined(RGPOT_GOMP_TSAN)
+  rgpot::detail::gompParallel(2, [&] {
+    const int team = omp_get_num_threads();
+    for (int t = omp_get_thread_num(); t < 2; t += team) {
+      out[static_cast<std::size_t>(t)] = eval(t == 0 ? first : second);
+    }
+  });
+#else
 #if defined(RGPOT_TSAN_ACTIVE)
-  std::atomic<int> tsan_fork{0};
-  std::atomic<int> tsan_join{0};
-  tsan_fork.store(1, std::memory_order_release);
+  static std::atomic<std::uint64_t> tsan_fork_epoch{0};
+  auto tsan_join = std::make_unique<std::atomic<int>[]>(2);
 #endif
 #pragma omp parallel num_threads(2)
   {
 #if defined(RGPOT_TSAN_ACTIVE)
-    (void)tsan_fork.load(std::memory_order_acquire);
+#pragma omp master
+    tsan_fork_epoch.fetch_add(1, std::memory_order_acq_rel);
+#pragma omp barrier
+    (void)tsan_fork_epoch.load(std::memory_order_acquire);
 #endif
     const int team = omp_get_num_threads();
     for (int t = omp_get_thread_num(); t < 2; t += team) {
       out[static_cast<std::size_t>(t)] = eval(t == 0 ? first : second);
     }
 #if defined(RGPOT_TSAN_ACTIVE)
-    tsan_join.fetch_add(1, std::memory_order_release);
+    tsan_join[static_cast<std::size_t>(omp_get_thread_num())].store(
+        1, std::memory_order_release);
 #endif
   }
 #if defined(RGPOT_TSAN_ACTIVE)
-  (void)tsan_join.load(std::memory_order_acquire);
+  for (int thread = 0; thread < 2; ++thread) {
+    (void)tsan_join[static_cast<std::size_t>(thread)].load(
+        std::memory_order_acquire);
+  }
+#endif
 #endif
   omp_set_max_active_levels(saved);
   return out;
@@ -409,15 +424,28 @@ Inside fullTeamInside(int levels) {
   Inside got;
   const int saved = omp_get_max_active_levels();
   omp_set_max_active_levels(levels);
+#if defined(RGPOT_GOMP_TSAN)
+  rgpot::detail::gompParallel(2, [&] {
+    if (omp_get_thread_num() == 0) {
+      Meeting meet;
+      got.outer_team = omp_get_num_threads();
+      got.together = rgpot::onFullTeam(2, [&meet](int rank) { meet(rank); });
+      got.runs = meet.runs.load();
+      got.stuck = meet.stuck.load();
+    }
+  });
+#else
 #if defined(RGPOT_TSAN_ACTIVE)
-  std::atomic<int> tsan_fork{0};
-  std::atomic<int> tsan_join{0};
-  tsan_fork.store(1, std::memory_order_release);
+  static std::atomic<std::uint64_t> tsan_fork_epoch{0};
+  auto tsan_join = std::make_unique<std::atomic<int>[]>(2);
 #endif
 #pragma omp parallel num_threads(2)
   {
 #if defined(RGPOT_TSAN_ACTIVE)
-    (void)tsan_fork.load(std::memory_order_acquire);
+#pragma omp master
+    tsan_fork_epoch.fetch_add(1, std::memory_order_acq_rel);
+#pragma omp barrier
+    (void)tsan_fork_epoch.load(std::memory_order_acquire);
 #endif
     if (omp_get_thread_num() == 0) {
       Meeting meet;
@@ -427,11 +455,16 @@ Inside fullTeamInside(int levels) {
       got.stuck = meet.stuck.load();
     }
 #if defined(RGPOT_TSAN_ACTIVE)
-    tsan_join.fetch_add(1, std::memory_order_release);
+    tsan_join[static_cast<std::size_t>(omp_get_thread_num())].store(
+        1, std::memory_order_release);
 #endif
   }
 #if defined(RGPOT_TSAN_ACTIVE)
-  (void)tsan_join.load(std::memory_order_acquire);
+  for (int thread = 0; thread < 2; ++thread) {
+    (void)tsan_join[static_cast<std::size_t>(thread)].load(
+        std::memory_order_acquire);
+  }
+#endif
 #endif
   omp_set_max_active_levels(saved);
   return got;

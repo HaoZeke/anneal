@@ -128,8 +128,9 @@ ReducedPairTest | tests core | unit reduced_pair_test ReducedPairTest.cc fp_cont
 EMTPotTest | tests core | unit emt_pot_test EMTPotTest.cc |
 EAMCellPotTest | tests core | unit eam_cell_pot_test EAMCellPotTest.cc |
 NeighbourLayerTest | tests core | unit neighbour_layer_test NeighbourLayerTest.cc fp_contract=off |
-# Eight potentials on 1, 2, 3 and 8 threads, on up to 10648 atoms.
-ThreadTeamTest | tests core | unit thread_team_test ThreadTeamTest.cc timeout=900 |
+# Eight potentials on 1, 2, 3 and 8 threads, on up to 10648 atoms. Meson
+# scales explicit timeouts by 3 under ASan/UBSan and 8 under TSan.
+ThreadTeamTest | tests core | unit thread_team_test ThreadTeamTest.cc timeout=120 |
 StreamParityTest | tests core | unit stream_parity_test StreamParityTest.cc fp_contract=off timeout=900 |
 NeighbourListTest | tests core | unit neighbour_list_test NeighbourListTest.cc |
 VesinEmptyResetTest | tests core | unit vesin_empty_reset_test VesinEmptyResetTest.cc |
@@ -158,8 +159,8 @@ CacheTest | tests cache | unit cache_test CacheTest.cc |
 InvarianceTest | tests cache | unit invariance_test InvarianceTest.cc |
 XTBDlopenTest | tests core,xtb | custom suite=xtb workdir=. |
 # Under a thread limit every region gets fewer threads than it asks for.
-ThreadTeamTest_limit1 | tests core | rerun ThreadTeamTest env=OMP_THREAD_LIMIT=1 timeout=900 |
-ThreadTeamTest_limit2 | tests core | rerun ThreadTeamTest env=OMP_THREAD_LIMIT=2 timeout=900 |
+ThreadTeamTest_limit1 | tests core | rerun ThreadTeamTest env=OMP_THREAD_LIMIT=1 timeout=120 |
+ThreadTeamTest_limit2 | tests core | rerun ThreadTeamTest env=OMP_THREAD_LIMIT=2 timeout=120 |
 openmp_confined | tests python | py CppCore/tests/test_openmp_confined.py @root@ |
 MinImageIsaVariants | tests core isa_variants | custom |
 ExactFmaEq | tests core | custom |

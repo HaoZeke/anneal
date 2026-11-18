@@ -55,7 +55,7 @@ san_flag=
 has_san=0
 for arg in "$@"; do
   case "$arg" in
-    *-fopenmp*|*omp*) has_omp=1 ;;
+    -fopenmp|-fopenmp=*|-lomp|-lgomp|*/libomp.*|*/libgomp.*) has_omp=1 ;;
   esac
   case "$arg" in
     -lstdc++|-lc++)
