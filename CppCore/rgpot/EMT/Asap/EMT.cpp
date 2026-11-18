@@ -10,10 +10,12 @@
 #include "NeighborList.h"
 #include "SuperCell.h"
 #include "Vec.h"
+#include "rgpot/Slices.hpp"
 #include "vectools.h"
 // #include "Timing.h"
 #include "mass.h"
 #include <assert.h>
+#include <cstdint>
 #include <cmath>
 #include <set>
 #include <stdlib.h>
@@ -228,7 +230,166 @@ const Vec *EMT::GetCartesianForces() {
     double (*str)[6] = 0;
     if (stress.size())
       str = (double (*)[6]) & (stress[0]);
-    if (nelements > 1)
+    const int slices = rgpot::teamSize(static_cast<std::size_t>(nAtoms));
+    if (str == 0 &&
+        nAtoms >= static_cast<int>(rgpot::kTeamMinAtoms)) {
+      const int maxnblen = nblist->MaxNeighborListLength();
+      std::vector<int> other_buf(static_cast<std::size_t>(maxnblen));
+      std::vector<Vec> rnb_buf(static_cast<std::size_t>(maxnblen));
+      std::vector<double> sqdist_buf(static_cast<std::size_t>(maxnblen));
+      std::vector<std::int32_t> up_off(static_cast<std::size_t>(nAtoms + 1), 0);
+      std::vector<std::int32_t> lo_count(static_cast<std::size_t>(nAtoms), 0);
+      std::vector<std::int32_t> pair_other;
+      std::vector<Vec> pair_rnb;
+      std::vector<double> pair_sqdist;
+
+      for (int atom = 0; atom < nAtoms; ++atom) {
+        up_off[static_cast<std::size_t>(atom)] =
+            static_cast<std::int32_t>(pair_other.size());
+        int size = maxnblen;
+        const int n = nblist->GetNeighbors(atom, other_buf.data(), rnb_buf.data(),
+                                           sqdist_buf.data(), size);
+        for (int p = 0; p < n; ++p) {
+          const int o = other_buf[static_cast<std::size_t>(p)];
+          pair_other.push_back(static_cast<std::int32_t>(o));
+          pair_rnb.push_back(rnb_buf[static_cast<std::size_t>(p)]);
+          pair_sqdist.push_back(sqdist_buf[static_cast<std::size_t>(p)]);
+          if (o < nAtoms) {
+            ++lo_count[static_cast<std::size_t>(o)];
+          }
+        }
+      }
+      up_off[static_cast<std::size_t>(nAtoms)] =
+          static_cast<std::int32_t>(pair_other.size());
+      const std::size_t total_up = pair_other.size();
+      std::vector<std::int32_t> lo_off(static_cast<std::size_t>(nAtoms + 1), 0);
+      std::int32_t acc = 0;
+      for (int atom = 0; atom < nAtoms; ++atom) {
+        lo_off[static_cast<std::size_t>(atom)] = acc;
+        acc += lo_count[static_cast<std::size_t>(atom)];
+        lo_count[static_cast<std::size_t>(atom)] =
+            lo_off[static_cast<std::size_t>(atom)];
+      }
+      lo_off[static_cast<std::size_t>(nAtoms)] = acc;
+      std::vector<std::int32_t> lo_u(total_up, 0);
+      for (int atom = 0; atom < nAtoms; ++atom) {
+        const std::int32_t u0 = up_off[static_cast<std::size_t>(atom)];
+        const std::int32_t u1 = up_off[static_cast<std::size_t>(atom + 1)];
+        for (std::int32_t up = u0; up < u1; ++up) {
+          const auto u = static_cast<std::size_t>(up);
+          const int o = pair_other[u];
+          if (o < nAtoms) {
+            const std::size_t oi = static_cast<std::size_t>(o);
+            lo_u[static_cast<std::size_t>(lo_count[oi]++)] = up;
+          }
+        }
+      }
+
+      std::vector<Vec> row_self(static_cast<std::size_t>(nAtoms));
+      std::vector<Vec> pair_force(total_up);
+      const double cutslopecutdist = cutoffslope * rFermi;
+      rgpot::forEachSlicePhase(2, slices, [&](int phase, int slice) {
+        const auto part =
+            rgpot::partition(static_cast<std::int64_t>(nAtoms), slice, slices);
+        const int begin = static_cast<int>(part.begin);
+        const int end = static_cast<int>(part.end);
+        if (phase == 0) {
+          for (int atom = begin; atom < end; ++atom) {
+            const int zs = id[atom];
+            const double dEdss = dEds[atom];
+            const std::int32_t u0 = up_off[static_cast<std::size_t>(atom)];
+            const std::int32_t u1 = up_off[static_cast<std::size_t>(atom + 1)];
+            double row_fx = 0.0;
+            double row_fy = 0.0;
+            double row_fz = 0.0;
+            for (std::int32_t up = u0; up < u1; ++up) {
+              const std::size_t u = static_cast<std::size_t>(up);
+              const int o = pair_other[u];
+              const int zo = id[static_cast<std::size_t>(o)];
+              const double dEdso = dEds[static_cast<std::size_t>(o)];
+              const emt_parameters *emtself = parameters[zs];
+              const emt_parameters *emtother = parameters[zo];
+              const double dist = std::sqrt(pair_sqdist[u]);
+              const double inv_dist = 1.0 / dist;
+              const double wght =
+                  1.0 / (1.0 + std::exp(cutoffslope * dist - cutslopecutdist));
+              const double dwdr = -cutoffslope * wght * (1.0 - wght);
+              const double other_eta2 = emtother->eta2;
+              const double other_eta2betaseq = emtother->eta2 * Beta * emtother->seq;
+              const double other_kappaoverbeta = emtother->kappa / Beta;
+              const double other_kappaseq = emtother->kappa * emtother->seq;
+              const double self_eta2 = emtself->eta2;
+              const double self_eta2betaseq = emtself->eta2 * Beta * emtself->seq;
+              const double self_kappaoverbeta = emtself->kappa / Beta;
+              const double self_kappaseq = emtself->kappa * emtself->seq;
+              const double chi_zs_zo = (*chi)[zs][zo];
+              const double chi_zo_zs = (*chi)[zo][zs];
+              const double cnst_s = -0.5 * emtself->V0 * chi_zs_zo / emtself->gamma2;
+              const double cnst_o = -0.5 * emtother->V0 * chi_zo_zs / emtother->gamma2;
+              double df = 0.0;
+              if (zs == zo) {
+                const double dsigma1dr =
+                    (dwdr - wght * other_eta2) *
+                    std::exp(-other_eta2 * dist + other_eta2betaseq);
+                const double dsigma2dr =
+                    (dwdr + wght * -other_kappaoverbeta) *
+                    std::exp(-other_kappaoverbeta * dist + other_kappaseq);
+                df = inv_dist * (dsigma1dr * dEdss * chi_zs_zo + cnst_s * dsigma2dr +
+                                 dsigma1dr * dEdso * chi_zo_zs + cnst_o * dsigma2dr);
+              } else {
+                const double dsigma1dr_o =
+                    (dwdr - wght * other_eta2) *
+                    std::exp(-other_eta2 * dist + other_eta2betaseq);
+                const double dsigma2dr_o =
+                    (dwdr + wght * -other_kappaoverbeta) *
+                    std::exp(-other_kappaoverbeta * dist + other_kappaseq);
+                const double dsigma1dr_s =
+                    (dwdr - wght * self_eta2) *
+                    std::exp(-self_eta2 * dist + self_eta2betaseq);
+                const double dsigma2dr_s =
+                    (dwdr + wght * -self_kappaoverbeta) *
+                    std::exp(-self_kappaoverbeta * dist + self_kappaseq);
+                df = inv_dist *
+                     (dsigma1dr_o * dEdss * chi_zs_zo + cnst_s * dsigma2dr_o +
+                      dsigma1dr_s * dEdso * chi_zo_zs + cnst_o * dsigma2dr_s);
+              }
+              Vec pf;
+              pf[0] = df * pair_rnb[u][0];
+              pf[1] = df * pair_rnb[u][1];
+              pf[2] = df * pair_rnb[u][2];
+              pair_force[u] = pf;
+              row_fx += pf[0];
+              row_fy += pf[1];
+              row_fz += pf[2];
+            }
+            row_self[static_cast<std::size_t>(atom)][0] = row_fx;
+            row_self[static_cast<std::size_t>(atom)][1] = row_fy;
+            row_self[static_cast<std::size_t>(atom)][2] = row_fz;
+          }
+          return;
+        }
+
+        for (int atom = begin; atom < end; ++atom) {
+          const Vec &self_f = row_self[static_cast<std::size_t>(atom)];
+          double fx = self_f[0];
+          double fy = self_f[1];
+          double fz = self_f[2];
+          const std::int32_t l0 = lo_off[static_cast<std::size_t>(atom)];
+          const std::int32_t l1 = lo_off[static_cast<std::size_t>(atom + 1)];
+          for (std::int32_t li = l0; li < l1; ++li) {
+            const std::size_t u = static_cast<std::size_t>(
+                lo_u[static_cast<std::size_t>(li)]);
+            const Vec &pf = pair_force[u];
+            fx -= pf[0];
+            fy -= pf[1];
+            fz -= pf[2];
+          }
+          force[static_cast<std::size_t>(atom)][0] = fx;
+          force[static_cast<std::size_t>(atom)][1] = fy;
+          force[static_cast<std::size_t>(atom)][2] = fz;
+        }
+      });
+    } else if (nelements > 1)
       CalculateForcesAfterEnergies(&(force[0]), str);
     else
       CalculateForcesAfterEnergiesSingle(&(force[0]), str);
