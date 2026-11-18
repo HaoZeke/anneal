@@ -1,5 +1,5 @@
 #+TITLE: Communication and search-state contracts
-#+OPTIONS: toc:2 num:nil author:nil
+#+OPTIONS: toc:2 num:nil author:nil ^:nil
 
 Communication changes what a search knows, what it penalizes, or where it
 searches. These are separate operations. Sharing a minimum's identity does not
@@ -388,6 +388,13 @@ The common Python entries expose this distinction directly. For a supplied
 scalar =loss=, parameter vector =x0= and finite =bounds=:
 
 #+begin_src python
+import anneal
+import numpy as np
+
+loss = lambda x: float(np.sum((x - 0.25) ** 2))
+x0 = np.zeros(4)
+bounds = [(-2.0, 2.0)] * 4
+
 result = anneal.minimize(
     loss, x0, bounds,
     jac=None, replicas=4, budget=8000,

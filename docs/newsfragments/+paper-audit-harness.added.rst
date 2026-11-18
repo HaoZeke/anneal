@@ -1,0 +1,1 @@
+Added ``scripts/paper_audit.py`` and ``pytest/test_paper_audit.py`` (backed by ``bench/revision-aliases.csv`` and ``bench/unreachable-revisions.csv``) to recompute manuscript and benchmark tables from committed CSV rows and verify commit provenance.

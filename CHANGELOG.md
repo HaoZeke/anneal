@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [Unreleased](https://github.com/HaoZeke/anneal/compare/v0.12.0...HEAD)
+
+### Removed
+
+- Removed structure templates (``MackayCap``, named lattice growth, and motif/icosahedral reseeding templates) from ``cluster_hopping`` and ``soap`` along with template-era benchmarks and regressions, keeping cluster search template-free (see ``bench/NOTES-templates-removed.md``).
+
+### Added
+
+- Added ``Config::call_floor`` and ``Config::call_floor_elements`` (``COVALENT_CALL_FRACTION = 0.70`` of summed covalent radii, floored at ``call_floor``) so trials open stacked atom pairs to ``1.05`` times the pair floor before charging evaluations and refuse zero-step reads inside the floor uncharged.
+- Added ``methods::anc_quench`` (``anc_minimize``, ``anc_minimize_watched``: Lindh-preconditioned trust-radius molecular quench) and ``methods::surrogate_level`` (``polish_tip4p_minima``: cheap rigid ``Tip4pCluster`` screening before charged high-level polish).
+- Added ``scripts/paper_audit.py`` and ``pytest/test_paper_audit.py`` (backed by ``bench/revision-aliases.csv`` and ``bench/unreachable-revisions.csv``) to recompute manuscript and benchmark tables from committed CSV rows and verify commit provenance.
+- Added ``xtb_gradient::store_as_force`` to convert ``xtb``'s ``dE/dx`` buffer into the force convention ``rgpot`` expects, ``examples/common/water_oh_wall.rs`` for the shared O-H wall, ``examples/gfn2_water_crest_driver.rs`` to serve ``gfn2_water_h2h``'s objective to ``xtb --driver`` over a Unix socket, ``first_hit_call`` reporting in ``gfn2_water_h2h``, ``Si13``/``Si20``/``C20`` and ``H2H_WALL_S`` wall-cap support in ``gfn2_covalent_h2h``, and ``RgpotObjective::xtb_fresh`` / ``xtb_with_overlap_limit``.
+- Added head-to-head panels, harnesses, and summary scripts for ``paper_0120``, ``gmin_panel``, ``ase_panel`` (including ``Config::recommended`` and ``Au55``), ``ase_nonlj`` (Morse), ``agox_lj75`` and LJ98/LJ102/LJ103/LJ104/LJ150 GOFEE, ``occat_h2h``, capped ``(H2O)16`` CREST (``h2o16_crest``), GFN2 ``Si13``/``C20``/``Si20`` CREST + element-floor gates, and ``sc96`` GMIN OpenBLAS reruns (``N = 38, 55, 78, 80``).
+- Added the Python API reference (``docs/orgmode/reference/python-api.org``) wired to Sphinx ``autodoc`` and ``napoleon``, a comprehensive user guide covering every preset and ``rgpot`` potential path (``docs/orgmode/howto/presets-and-rgpot.org``), and doctests for ``Config::for_cluster_with_scales``, ``Config::with_species``, and ``Config::with_rigid_bodies``.
+
+### Developer
+
+- Updated CI to run ``scripts/paper_audit.py`` on full-history checkouts with ``textconv``-aware batched revision indexing, split ``test-default`` per OS, cached third-party crates with ``Swatinem/rust-cache``, trimmed test debuginfo to ``line-tables-only`` with ``CARGO_INCREMENTAL=0``, gated macOS Python cells on relevant paths, updated ``.github/large-blobs.txt`` for regenerated vector PDFs, and increased the Python ``auto``-quench test budget.
+
+### Changed
+
+- Regenerated manuscript and SI tables (``tab:gmin``, ``tab:ase``, ``tab:ase-morse``, and ablation tables) and titleless vector PDF figures from committed benchmark rows, and updated the abstract, GOFEE/TIP4P-GMIN/hardware sections, related-work watch notes, and benchmark READMEs.
+- Widened the optional ``ase`` dependency bound in ``pyproject.toml`` and ``pixi.toml`` to ``>=3.23,<3.30`` to admit ASE 3.29.0, and checked ``ASE_VERSION`` in ``scripts/ase_nonlj/run_one.py``.
+
+### Fixed
+
+- Fixed GMIN Sutton-Chen and Gupta Au55 container, temperature, step, and OpenBLAS linkage; pinned Mann-Whitney U tests across ``openconf_h2h``, ``covalent_h2h``, ``morse_h2h``, ``morse_panel``, and ``generic_alloy`` to the tie-corrected normal approximation; started ``gfn2_covalent_h2h`` from fresh SCC guesses; fixed ``gfn2_water_crest_driver`` close-pair threshold, ``/proc/uptime`` timing, short socket paths, and ``as_chunks`` decoding; and fixed wall-censored gate scoring and CSV provenance headers.
+- Fixed broken rustdoc intra-doc links (``anc_quench``, ``cluster_hopping``, ``gpr``, ``python``), misplaced module doc comments in ``src/lib.rs``, stale ``ProfileEngine``/``nwchemc``, Cargo feature, and C/C++ ABI examples across ``README.md``, ``docs/orgmode/``, and ``examples/``, broken ``01_quickstart.ipynb`` and ``docs/derivations/`` references, Sphinx ``:doc:`` link rewriting and ``^:nil`` options in ``docs/export.el``, and non-runnable Python snippets in ``polish-device-scale.org``, ``howto/chemfit.org``, ``cluster-search.org``, and ``communication.org``.
+- Fixed molecular contact repair (``shortest_bond_length`` keeps double, aromatic, and amide bonds without stretching them to single-bond sums), opened pairs off declared and element-pair call floors before charging, refused zero-step reads inside the call floor uncharged, and rejected non-positive or incomplete call-floor configurations.
+- Preserved complete ``for_cluster`` and ``recommended`` preset settings (including scaled shell cores) in ``for_cluster_with_scales`` and ``recommended_with_scales``, and fixed Gupta dimer probing and Au55 sphere placement on Gupta length scales.
+
 ## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-16
 
 ### Added

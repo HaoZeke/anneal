@@ -1,4 +1,5 @@
 #+TITLE: Method Catalog
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 Every algorithmic mechanism in =anneal-core=, grouped by role. Each entry
 gives what the mechanism does, its key types and functions with
@@ -2200,8 +2201,8 @@ exposed through =src/python.rs=.
 ** Gap-proportional Metropolis descent (=gpmd=)
 
 What it is: a local-descent arm and standalone helper, explicitly not
-a new global solver (=docs/derivations/gpmd_algorithm.org= states it
-is not dual-annealing, CMA-ES, or field SOTA). Temperature
+a new global solver (=docs/derivations/descriptor_catalog_geometry.org= D6
+shows the sphere-limit window; it is not dual-annealing, CMA-ES, or field SOTA). Temperature
 \(T = \theta^* \max(f-f_{best},\epsilon)/d\) from the D6 sphere-limit
 window using the best-so-far gap as a proxy, Haario-style scatter with
 Robbins-Monro scale control toward \(\alpha^* \approx 0.32\), and a

@@ -1,5 +1,5 @@
 #+TITLE: Presets and Advanced Drivers
-#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil ^:nil
 
 * Rust cluster presets
 
@@ -59,6 +59,15 @@ The block under the constructor is the example =cargo test --doc= runs.
   use anneal_core::methods::cluster_hopping::Config;
   let cfg = Config::for_cluster(13);
   assert_eq!(cfg.n_points, 13);
+  assert!(cfg.bayes_screen);
+  #+end_src
+
+- =for_cluster_with_scales(n, length, energy)= :: =for_cluster= in declared physical units, keeping the scaled shell and fraction dual orbit core.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::Config;
+  let cfg = Config::for_cluster_with_scales(13, 1.5, 0.5);
+  assert_eq!((cfg.length_scale, cfg.energy_scale), (1.5, 0.5));
   assert!(cfg.bayes_screen);
   #+end_src
 
@@ -125,6 +134,26 @@ The block under the constructor is the example =cargo test --doc= runs.
   assert!(cfg.ring_moves && cfg.hold_stereocentres && cfg.measured_energy_scale);
   assert_eq!(cfg.local_step, LocalStep::Auto);
   #+end_src
+
+- =with_species(species, sigma)= :: attach atomic labels and optional diameters to any preset.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::Config;
+  let cfg = Config::recommended(4).with_species(vec![1, 1, 2, 2], Some(vec![1.0, 1.0, 1.3, 1.3]));
+  assert_eq!(cfg.species.as_deref(), Some(&[1, 1, 2, 2][..]));
+  #+end_src
+
+- =with_rigid_bodies(geometry)= :: install a rigid centre-and-Rodrigues chart on any preset.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::Config;
+  use anneal_core::rigid_body::RigidBodyGeometry;
+  let geom = RigidBodyGeometry::new(vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], vec![1, 1]).unwrap();
+  let cfg = Config::recommended(3).with_rigid_bodies(geom);
+  assert!(cfg.rigid_body_geometry.is_some());
+  #+end_src
+
+See [[file:../howto/presets-and-rgpot.org][presets and potentials through rgpot]] for the full preset matrix and =rgpot= integration paths.
 
 * Search surfaces
 

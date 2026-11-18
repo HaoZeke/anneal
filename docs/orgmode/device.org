@@ -1,5 +1,6 @@
 #+TITLE: Device backend, ensembles, and noise-aware acceptance
 #+AUTHOR: anneal developers
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 This page covers the parts of =anneal= that exploit the typed component algebra to share one implementation across every variant: the GPU-resident device path, the batched ensemble runner, the dimension-collapse surrogate, and the noise-aware acceptance rule.
 Each is a single change at one of the five component slots (=Obj=, =Cool=, =Neigh=, =Move=, =Accept=) that serves Boltzmann, Fast, and Generalized SA alike.
@@ -13,7 +14,7 @@ The returned =DeviceHistory= keeps every field in the same namespace and on the 
 The transition kernel that executes on the device (or in the batched ensemble) is exactly the same five-component object (Obj + Cool + Neigh + Move + Accept) that the classical presets and the advanced drivers construct.
 The algebra is what makes one kernel serve every driver on every backend.
 
-#+begin_src python
+#+begin_src python :eval no
 import cupy as cp
 from anneal import Boltzmann, run_device
 
@@ -30,7 +31,7 @@ A single chain underuses a GPU: one vector per step is kernel-launch bound.
 =anneal.run_ensemble= runs ``n_chains`` independent chains as one batched kernel, with state shape ``(n_chains, dim)`` and the objective evaluated over the whole batch, so the ensemble width saturates the device.
 The transition kernel is the same as =run_device=; only a leading batch axis is added, and the same call drives every preset.
 
-#+begin_src python
+#+begin_src python :eval no
 from anneal import Fast, run_ensemble
 
 history = run_ensemble(batched_objective, low, high, Fast(t_init=5.0, gamma=0.5),

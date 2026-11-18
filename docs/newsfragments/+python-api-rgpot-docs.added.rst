@@ -1,0 +1,1 @@
+Added the Python API reference (``docs/orgmode/reference/python-api.org``) wired to Sphinx ``autodoc`` and ``napoleon``, a comprehensive user guide covering every preset and ``rgpot`` potential path (``docs/orgmode/howto/presets-and-rgpot.org``), and doctests for ``Config::for_cluster_with_scales``, ``Config::with_species``, and ``Config::with_rigid_bodies``.

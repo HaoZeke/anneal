@@ -17,4 +17,4 @@ The implementation contributions -- shifted-QMC replicated polish, the tensor/ad
 
 * Foundations
 
-- ~anneal~ is built on [[https://haozeke.github.io/eindir][eindir]], which provides the typed primitives (the =Objective= trait, =Bounds=, and the dimension-collapse, Chebyshev surrogate, low-discrepancy point-set, and GLE thermostat primitives).
+- ~anneal~ is built on [[https://eindir.rgoswami.me][eindir]], which provides the typed primitives (the =Objective= trait, =Bounds=, and the dimension-collapse, Chebyshev surrogate, low-discrepancy point-set, and GLE thermostat primitives).

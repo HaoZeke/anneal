@@ -1,4 +1,5 @@
 #+TITLE: Method Composition
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 One narrative walk of a cooperative Lennard-Jones cluster run, naming
 each mechanism from [[file:catalog.org][catalog.org]] as it appears. The walk follows
@@ -293,7 +294,7 @@ digraph composition {
 * Corrections and precise terminology
 
 Three points in the narrative above use looser language than the code
-supports. Stated precisely, with the file:line evidence.
+supports. Stated precisely, with the =file:line= evidence.
 
 ** The five-fold typed design
 

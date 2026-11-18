@@ -19,6 +19,7 @@ html_logo = "../../branding/logo/anneal_logo.png"
 extensions = [
     "myst_parser",
     "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
     "sphinx_sitemap",
     "sphinxcontrib_rust",
@@ -26,6 +27,26 @@ extensions = [
     "anneal_docutils",
     "sphinx.ext.mathjax",
 ]
+
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+autodoc_member_order = "bysource"
+
+try:
+    import anneal._core  # noqa: F401
+except ImportError:
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "python")))
+    autodoc_mock_imports = [
+        "anneal._core",
+        "numpy",
+        "array_api_compat",
+        "cupy",
+        "ase",
+        "h5py",
+        "tvm_ffi",
+    ]
+else:
+    autodoc_mock_imports = ["cupy", "ase", "h5py", "tvm_ffi"]
 
 templates_path = ["_templates"]
 exclude_patterns = []

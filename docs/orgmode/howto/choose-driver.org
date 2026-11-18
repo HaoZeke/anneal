@@ -50,6 +50,8 @@ Do not pad a design vector to \(3N\) to reuse cluster moves.
 Do not call =Config.recommended= on a box.
 
 The exposed high-level functions already encode the common good choices.
+See [[file:presets-and-rgpot.org][presets and potentials through rgpot]] for every preset constructor and
+=rgpot= / =eindir= potential path.
 The Bayesian mixer (one =max_proposals=, Thompson across families)
 still lives in =experiments/scripts/demo_bgsa.py= and the
 [[file:../tutorials/bayesian-pilot-mixer.org][Bayesian tutorial]].

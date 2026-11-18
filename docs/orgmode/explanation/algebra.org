@@ -7,9 +7,9 @@
    The five signatures, L1-L4, the Temporal Logic of Actions (TLA+) invariants
    (TypeOK, BestMonotone, SymmetricNeighbors, MonotoneCooling), and the
    liveness properties are specified in the reference paper
-   (see [[file:../used_by.org][used_by]]). TLA+ sources live in =tla/=; the
+   (see :doc:`used_by </used_by>`). TLA+ sources live in ``tla/``; the
    SymPy witnesses that the four classical families are limit cases live in
-   =proofs/=.
+   ``proofs/``.
 #+end_export
 
 * The five components (signatures)

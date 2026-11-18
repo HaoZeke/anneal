@@ -1,4 +1,5 @@
 #+TITLE: Release process
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 A PyPI, crates.io, or GitHub Release upload happens only when a
 =vX.Y.Z= tag is pushed. That is the entire publish gate.

@@ -1,0 +1,1 @@
+Added ``Config::call_floor`` and ``Config::call_floor_elements`` (``COVALENT_CALL_FRACTION = 0.70`` of summed covalent radii, floored at ``call_floor``) so trials open stacked atom pairs to ``1.05`` times the pair floor before charging evaluations and refuse zero-step reads inside the floor uncharged.

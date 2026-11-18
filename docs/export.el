@@ -39,6 +39,44 @@ block, which ox-rst copies through."
                                  "-t" "rst" markdown "-o" body))
       (error "pandoc could not convert %s" markdown))))
 
+(defun anneal-rewrite-rst-links (rst-file rst-dir repo-root)
+  "Rewrite ox-rst external .rst and repo-relative source links in RST-FILE.
+Links to sibling .rst files under RST-DIR become Sphinx :doc: roles;
+links that walk above RST-DIR into src/, examples/, or tests/ become
+GitHub blob links."
+  (let ((rst-parent (file-name-directory rst-file))
+        (repo-root-dir (file-name-as-directory (expand-file-name repo-root))))
+    (with-temp-buffer
+      (insert-file-contents rst-file)
+      (goto-char (point-min))
+      (while (re-search-forward
+              "`\\([^`\n]+?\\) <\\([^>\n]+\\)>`__?" nil t)
+        (let* ((start (match-beginning 0))
+               (end (match-end 0))
+               (label (match-string 1))
+               (target (match-string 2))
+               (replacement
+                (cond
+                 ((string-match-p "^\\(https?://\\|mailto:\\|#\\)" target)
+                  nil)
+                 ((string-match "^\\([^#]+\\)\\.rst\\(#.*\\)?$" target)
+                  (let* ((path-part (match-string 1 target))
+                         (resolved (expand-file-name (concat path-part ".rst") rst-parent))
+                         (rel (file-relative-name resolved rst-dir)))
+                    (unless (string-prefix-p ".." rel)
+                      (format ":doc:`%s </%s>`" label (file-name-sans-extension rel)))))
+                 ((string-match "^\\.\\./\\.\\./\\.\\./\\(.+\\)$" target)
+                  (let* ((resolved (expand-file-name target rst-parent))
+                         (repo-rel (file-relative-name resolved repo-root-dir)))
+                    (unless (string-prefix-p ".." repo-rel)
+                      (format "`%s <https://github.com/HaoZeke/anneal/blob/main/%s>`__"
+                              label repo-rel)))))))
+          (when replacement
+            (goto-char start)
+            (delete-region start end)
+            (insert replacement))))
+      (write-region (point-min) (point-max) rst-file nil 'quiet))))
+
 (defun radsex-export-all ()
   "Export all orgmode files under docs/orgmode/ to RST under docs/source/.
 Recursive by construction (directory-files-recursively). Matches the
@@ -46,6 +84,7 @@ Diataxis layout (index, quickstart, tutorials/*, howto/*, explanation/*,
 reference/*, dev/*) and preserves existing publish :recursive t behaviour
 while providing explicit per-file messages."
   (let* ((script-dir (file-name-directory (or load-file-name buffer-file-name)))
+         (repo-root (expand-file-name ".." script-dir))
          (org-dir (expand-file-name "orgmode" script-dir))
          (rst-dir (expand-file-name "source" script-dir)))
     (radsex-changelog-body org-dir)
@@ -63,5 +102,6 @@ while providing explicit per-file messages."
           (with-current-buffer (find-file-noselect org-file)
             (org-export-to-file 'rst rst-file nil nil nil nil)
             (kill-buffer))
+          (anneal-rewrite-rst-links rst-file rst-dir repo-root)
           (message "Exported %s -> %s" org-file rst-file))))))
 (radsex-export-all)

@@ -899,7 +899,7 @@ def gpmd_optimize(
     """Local Metropolis with T = ½ · (f − f_best) / d (D6 packaging).
 
     Implementation helper / portfolio arm material — not a global SOTA
-    solver. See docs/derivations/gpmd_algorithm.org.
+    solver. See ``docs/derivations/descriptor_catalog_geometry.org`` (D6).
     """
     low_arr = _flat(low)
     high_arr = _flat(high)
@@ -1320,7 +1320,7 @@ def bfwt_optimize(
 
     Clamps design T into the D6∩D7 window. Standalone is not the SOTA
     driver; competitive wins use ``global_optimize`` (portfolio). See
-    docs/derivations/bfwt_d11.md.
+    ``docs/derivations/descriptor_catalog_geometry.org`` (D11).
     """
     low_arr = _flat(low)
     high_arr = _flat(high)

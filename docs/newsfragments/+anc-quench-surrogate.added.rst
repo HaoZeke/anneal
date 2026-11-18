@@ -1,0 +1,1 @@
+Added ``methods::anc_quench`` (``anc_minimize``, ``anc_minimize_watched``: Lindh-preconditioned trust-radius molecular quench) and ``methods::surrogate_level`` (``polish_tip4p_minima``: cheap rigid ``Tip4pCluster`` screening before charged high-level polish).

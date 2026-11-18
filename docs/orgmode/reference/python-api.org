@@ -1,0 +1,129 @@
+#+TITLE: Python API Reference
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+=============================
+Python API (``anneal``)
+=============================
+#+end_export
+
+The Python package ``anneal`` exposes the Rust drivers from ``anneal._core`` alongside pure-Python adapters for device arrays, landscape maps, ChemFit sessions, ASE atoms, and TVM FFI tensors.
+
+* Top-level drivers and core types
+
+#+begin_export rst
+.. automodule:: anneal
+   :no-index:
+
+.. rubric:: Primary search and optimization entry points
+
+.. autofunction:: anneal.global_optimize
+.. autofunction:: anneal.global_optimize_objective
+.. autofunction:: anneal.ensemble_optimize
+.. autofunction:: anneal.box_ensemble_optimize
+.. autofunction:: anneal.minimize
+.. autoclass:: anneal.MinimizeResult
+   :members:
+.. autofunction:: anneal.cluster_search
+.. autofunction:: anneal.quench
+.. autofunction:: anneal.run
+.. autofunction:: anneal.run_qmc
+.. autofunction:: anneal.run_hmc
+
+.. rubric:: Core presets, configurations, and objective types
+
+.. autoclass:: anneal.Boltzmann
+   :members:
+.. autoclass:: anneal.Fast
+   :members:
+.. autoclass:: anneal.Gsa
+   :members:
+.. autoclass:: anneal.Config
+   :members:
+.. autoclass:: anneal.Ledger
+   :members:
+.. autoclass:: anneal.BasinBias
+   :members:
+.. autoclass:: anneal.Bounds
+   :members:
+.. autoclass:: anneal.EpochLine
+   :members:
+.. autoclass:: anneal.History
+   :members:
+.. autoclass:: anneal.PyObjective
+   :members:
+
+.. rubric:: Specialized, pilot, and polish drivers
+
+.. autofunction:: anneal.polish
+.. autofunction:: anneal.qmc_polish
+.. autofunction:: anneal.qmc_polish_objective
+.. autofunction:: anneal.shifted_qmc_polish
+.. autofunction:: anneal.qmc_best1bin_scout
+.. autofunction:: anneal.qmc_best1bin_scout_objective
+.. autofunction:: anneal.qmc_gsa_global_search
+.. autofunction:: anneal.qmc_gsa_global_search_objective
+.. autofunction:: anneal.qmc_trust_region_poll
+.. autofunction:: anneal.qmc_trust_region_poll_objective
+.. autofunction:: anneal.additive_independence
+.. autofunction:: anneal.estimate_gle_omega0
+.. autofunction:: anneal.gle_langevin
+.. autofunction:: anneal.gle_langevin_objective
+.. autofunction:: anneal.gle_langevin_preconditioned
+.. autofunction:: anneal.gle_langevin_preconditioned_objective
+.. autofunction:: anneal.dmc_population_optimize
+.. autofunction:: anneal.gpmd_optimize
+.. autofunction:: anneal.amsa_optimize
+.. autofunction:: anneal.bfwt_optimize
+.. autofunction:: anneal.low_discrepancy_points
+.. autofunction:: anneal.pilot_draws_qmc
+#+end_export
+
+* Device and ensemble runners
+
+#+begin_export rst
+.. automodule:: anneal.device
+   :members:
+   :undoc-members:
+#+end_export
+
+* Landscape sketch-map (=landfold=)
+
+#+begin_export rst
+.. automodule:: anneal._landfold
+   :members:
+   :undoc-members:
+#+end_export
+
+* Parameter archives and ChemFit bridges
+
+#+begin_export rst
+.. autofunction:: anneal.open_parameter_store
+.. autoclass:: anneal.Hdf5ParameterStore
+   :members:
+.. autoclass:: anneal.JsonlParameterStore
+   :members:
+
+.. automodule:: anneal.chemfit
+   :members:
+#+end_export
+
+* ASE optimizer (=anneal.ase=)
+
+#+begin_export rst
+.. automodule:: anneal.ase
+   :members:
+#+end_export
+
+* TVM FFI / DLPack helpers (=anneal.tvm_ffi=)
+
+#+begin_export rst
+.. automodule:: anneal.tvm_ffi
+   :members:
+#+end_export
+
+* See also
+
+- [[file:presets-and-advanced.org][Presets and Advanced Drivers]]
+- [[file:../howto/presets-and-rgpot.org][Presets and Potentials through rgpot]]
+- [[file:rust-api.org][Rust API Reference]]

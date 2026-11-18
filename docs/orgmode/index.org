@@ -84,6 +84,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    howto/install
    howto/choose-driver
+   howto/presets-and-rgpot
    howto/sutton-chen-head-to-head
    howto/box-langevin-escape
    howto/chemfit
@@ -126,6 +127,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    :caption: Reference
 
    spec
+   reference/python-api
    reference/rust-api
    reference/glossary
    reference/presets-and-advanced

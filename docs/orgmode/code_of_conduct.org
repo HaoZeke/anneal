@@ -1,7 +1,7 @@
 #+TITLE: Code of Conduct
 #+AUTHOR: [[https://rgoswami.me][Rohit Goswami]]
 #+EMAIL: rgoswami@ieee.org
-#+OPTIONS: toc:nil num:nil
+#+OPTIONS: toc:nil num:nil ^:nil
 
 * Code of Conduct
 

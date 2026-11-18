@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
 # SPDX-License-Identifier: MIT
-"""Placeholder: extract and execute Python code blocks from org-mode files.
+"""Extract and execute Python code blocks from org-mode documentation files.
 
-Modeled on rgpycrumbs/scripts/run_org_doctests.py .
-To be wired into pixi [feature.docs.tasks] and CI once tutorials land.
-Extracts #+begin_src python ... #+end_src (skipping :eval no or SKIP-DOCTEST),
-runs in shared namespace for basic smoke of stable API examples.
+Extracts ``#+begin_src python ... #+end_src`` (skipping ``:eval no`` or
+``SKIP-DOCTEST``) and runs them sequentially in a shared per-file namespace.
 """
 
 import re

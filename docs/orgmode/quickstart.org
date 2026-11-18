@@ -304,7 +304,7 @@ h_ens = run_ensemble(rastrigin_rows, low, high, Boltzmann(t_init=10.0, sigma=1.0
 print("Ensemble global best:", h_ens.global_best_val)
 #+end_src
 
-Pass CuPy arrays instead of NumPy and the kernels stay on GPU (see device.org).
+Pass CuPy arrays instead of NumPy and the kernels stay on GPU (see [[file:device.org][device]]).
 
 * Next steps
 

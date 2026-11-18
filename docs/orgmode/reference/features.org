@@ -101,8 +101,9 @@ cargo check --locked --features python-host
 
 * =rgpot-ex=
 
-Examples that use an in-process rgpot eindir handle. The library does not link rgpot. The molecular-cluster example is the consumer.
+Examples that use an in-process =rgpot= =eindir= handle. The library does not link =rgpot=. The self-contained callback example and the molecular-cluster example are consumers.
 
 #+begin_src sh
-cargo check --locked --features rgpot-ex --example molecular_cluster
+cargo check --locked --features capi,rgpot-ex --example rgpot_minimize
+cargo check --locked --features rgpot-ex,featomic,bank-rpc --example molecular_cluster
 #+end_src
