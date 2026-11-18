@@ -11,7 +11,7 @@ option('with_rust_core', type: 'boolean', value: false)
 option(
     'team_min_atoms',
     type: 'integer',
-    value: 1024,
+    value: 4096,
     min: 1,
     description: 'Minimum atom count for opening an OpenMP team',
 )
