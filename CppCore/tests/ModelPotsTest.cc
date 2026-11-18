@@ -12,8 +12,10 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <numbers>
+#include <random>
 #include <vector>
 
 namespace {
@@ -312,6 +314,32 @@ TEST_CASE("atom carrier preserves force sign and analytic product") {
 }
 
 #ifdef RGPOT_HAS_CBE
+namespace {
+// For binary64 forces, central differencing H v ~ -(F(x + h v) - F(x - h v)) /
+// (2 h) balances O(h^2) third-derivative truncation against O(eps / h) force
+// cancellation near h ~ cbrt(eps) ~ 6e-6 A. At kCbeFdStep = 1e-5 A, truncation
+// (~h^2 / 6) and roundoff (~eps / h) are both below 1e-8 eV/A, so
+// kCbeFdTolerance = 1e-6 eV/A accommodates the finite-difference error while
+// rejecting a kCbePerturbation = 1e-3 eV/A perturbation of the analytic HVP.
+constexpr double kCbeFdStep = 1e-5;
+constexpr double kCbeFdTolerance = 1e-6;
+constexpr double kCbePerturbation = 1e-3;
+constexpr std::size_t kCbeDirections = 5;
+constexpr std::uint64_t kCbeRngSeed = 0xCBE0214ULL;
+
+bool matchesCentralDifference(const std::array<double, 18> &analytic,
+                              const std::array<double, 18> &central) {
+  for (std::size_t i = 0; i < analytic.size(); ++i) {
+    if (!std::isfinite(analytic[i]) || !std::isfinite(central[i]))
+      return false;
+    const double scale = 1.0 + std::abs(central[i]);
+    if (std::abs(analytic[i] - central[i]) > kCbeFdTolerance * scale)
+      return false;
+  }
+  return true;
+}
+} // namespace
+
 TEST_CASE("external CBE frontend evaluates force and analytic product") {
   rgpot::CBEPot pot;
   const std::array<double, 18> x{
@@ -319,17 +347,45 @@ TEST_CASE("external CBE frontend evaluates force and analytic product") {
       -0.629, 0.629, -0.629, 0.629, -0.629, -0.629, 2.5, 0.0, 0.0};
   const std::array<int, 6> z{6, 1, 1, 1, 1, 1};
   const std::array<double, 9> box{};
-  std::array<double, 18> force{}, direction{}, product{};
-  direction[0] = 0.2;
-  direction[15] = -0.2;
+  std::array<double, 18> force{};
   const rgpot::ForceInput in{6, x.data(), z.data(), box.data()};
   rgpot::ForceOut out{force.data(), 0.0, 0.0, {}, 0};
   pot.forceImpl(in, &out);
-  pot.hessianVectorImpl(in, direction.data(), product.data());
   REQUIRE(std::isfinite(out.energy));
-  for (std::size_t i = 0; i < force.size(); ++i) {
-    REQUIRE(std::isfinite(force[i]));
-    REQUIRE(std::isfinite(product[i]));
+  for (double component : force)
+    REQUIRE(std::isfinite(component));
+
+  std::mt19937_64 rng(kCbeRngSeed);
+  std::uniform_real_distribution<double> dist(-1.0, 1.0);
+  for (std::size_t dir = 0; dir < kCbeDirections; ++dir) {
+    std::array<double, 18> direction{}, product{}, central{};
+    std::array<double, 18> xPlus{}, xMinus{}, forcePlus{}, forceMinus{};
+    for (std::size_t i = 0; i < direction.size(); ++i) {
+      direction[i] = dist(rng);
+      xPlus[i] = x[i] + kCbeFdStep * direction[i];
+      xMinus[i] = x[i] - kCbeFdStep * direction[i];
+    }
+    pot.hessianVectorImpl(in, direction.data(), product.data());
+
+    const rgpot::ForceInput inPlus{6, xPlus.data(), z.data(), box.data()};
+    const rgpot::ForceInput inMinus{6, xMinus.data(), z.data(), box.data()};
+    rgpot::ForceOut outPlus{forcePlus.data(), 0.0, 0.0, {}, 0};
+    rgpot::ForceOut outMinus{forceMinus.data(), 0.0, 0.0, {}, 0};
+    pot.forceImpl(inPlus, &outPlus);
+    pot.forceImpl(inMinus, &outMinus);
+
+    for (std::size_t i = 0; i < central.size(); ++i) {
+      central[i] = -(forcePlus[i] - forceMinus[i]) / (2.0 * kCbeFdStep);
+      REQUIRE(std::isfinite(product[i]));
+      REQUIRE(std::abs(product[i] - central[i]) <=
+              kCbeFdTolerance * (1.0 + std::abs(central[i])));
+    }
+    REQUIRE(matchesCentralDifference(product, central));
+
+    std::array<double, 18> perturbed = product;
+    perturbed[dir % perturbed.size()] +=
+        kCbePerturbation * (1.0 + std::abs(central[dir % central.size()]));
+    REQUIRE_FALSE(matchesCentralDifference(perturbed, central));
   }
 }
 #endif
