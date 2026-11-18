@@ -576,12 +576,14 @@ pub struct Config {
     ///
     /// Off preserves the original clock: an attempted leave consumes its
     /// plateau window. On, only a leave that actually runs consumes it.
+    #[serde(skip_serializing_if = "is_false")]
     pub retry_noop_stall_leave: bool,
     /// Start call-clock leaves from the recorded best instead of the walker.
     ///
     /// The call clock is armed by that record, while the live walker may have
     /// accepted an uphill hop into another basin. Off preserves the original
     /// live-state activation target.
+    #[serde(skip_serializing_if = "is_false")]
     pub align_directed_stall_source: bool,
     /// Leave a stalled basin back through the door the chain came in.
     ///
