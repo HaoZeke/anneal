@@ -2559,7 +2559,7 @@ fn main() {
             }
         } else if let Some(table) = core_table.as_ref() {
             use anneal_core::coreclass::CoreVerdict;
-            use anneal_core::corekey::motif_class;
+            use anneal_core::corekey::descriptor_class;
             use rand::SeedableRng;
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
@@ -2573,7 +2573,7 @@ fn main() {
             let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xC0A1);
             let interval = anneal_core::env::parsed("CHECKPOINT").unwrap_or(500).max(1);
             let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
-                let class = motif_class(snapshot.current_state()).index();
+                let class = descriptor_class(snapshot.current_state()).index();
                 let mut table = table.lock().expect("core-class table");
                 match table.report(
                     seed as usize,
@@ -5204,7 +5204,8 @@ fn run_capnp_catalog(
                 }
 
                 if core_class.is_some() {
-                    let class = anneal_core::corekey::motif_class(snapshot.current_state()).index();
+                    let class =
+                        anneal_core::corekey::descriptor_class(snapshot.current_state()).index();
                     let verdict = cooperative
                         .report_core_class(
                             replica,
