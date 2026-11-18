@@ -1371,3 +1371,13 @@ Rauscher, arXiv:2609.18093 (17 September 2026), estimates Gibbs--Shannon entropy
 Checked on 17 November 2026: ABCluster's newest release is v3.4 (7 January 2026, `isomer` \(I/I_h\) fix); ASE 3.29.0, AGOX v3.11.1, CREST v3.0.2 (master tip 16 June 2026), pele v0.1.2, and xtb v6.8.0 are unchanged, and the Cambridge Cluster Database Lennard-Jones table (`tables.150.html`) retains the same published minima at LJ38, LJ55, LJ75, LJ98, and LJ104.
 
 Cite `tarratSilver2026`, `alotaibiCopperNickel2026`, `rauscherEntropy2026`, and `sandbergMlips2026`.
+
+## 2026-11-18 — Particle-swarm search of carbon clusters through C20
+
+Kuchmina, Tsang, Wei, Lorenz, Santana-Bonilla, and de Tomas, ChemRxiv (17 November 2026), doi:10.26434/chemrxiv.15012403/v1, map carbon clusters from C3 through C20 with particle swarm optimisation coupled to semiempirical methods. They compare the structures and energies with density-functional theory and GAP-20, test initialisation and sampling choices, and add a self-consistent-field restart for failed electronic calculations. The abstract says the unbiased search follows the change from chains through rings and polycyclic structures to the canonical C20 cage.
+
+These are carbon clusters on semiempirical, density-functional, and GAP-20 surfaces. The abstract gives no Cambridge Lennard-Jones energy and no water-hexamer count, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be one of C3--C20 on a shared Hamiltonian and search budget. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST table.
+
+On 18 November 2026 the release APIs and tag lists were unchanged: CREST v3.0.2, AGOX v3.11.1, ASE 3.29.0, GOFEE v0.1.0, and pele v0.1.2 remain the newest numbered tags. The GitHub and GitLab repository searches found no official release repository for de Souza's GOAT or for GMIN.
+
+Cite `kuchminaCarbon2026`.
