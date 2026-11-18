@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Run the current-code searches needed to replace the six sealed raster panels.
+"""Run the current-code searches and publish the six replacement vector panels.
 
 The run is resumable under ``--work``. Source books are kept outside Git until
 every declared seed has finished; only then are landscape.ld and fes.csv
