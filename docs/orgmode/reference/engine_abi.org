@@ -112,8 +112,8 @@ Minor 1 added the stamp, =rgpot_engine_caps=,
 =rgpot_engine_last_error=, =rgpot_engine_set_num_threads= and =rgpot_engine_set_charge_spin=.
 Minor 2 added =rgpot_engine_name=, =rgpot_engine_version=,
 =rgpot_engine_model_digest= and the generic table for every backend.
-Minor 3 added =rgpot_engine_hvp= and the trailing
-=RgpotEngineCaps.analytic_hvp= field.
+Minor 3 added =rgpot_engine_hvp= and the trailing =RgpotEngineCaps.analytic_hvp=
+field.
 The version does not cover the Cap'n Proto params schema, the tensor runtime the
 engine links, or the model.
 
@@ -536,11 +536,10 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
   =direction= with =3 * nAtoms= Cartesian entries.
 - Units :: positions, box and direction in Angstrom; =hv_out= is the energy
   Hessian (eV/Angstrom squared) times that direction, hence eV/Angstrom.
-- Outputs :: =RGPOT_ENGINE_OK= and the exact energy-Hessian product in
-  =hv_out=.
-- Errors :: returns =RGPOT_ENGINE_ERR_INVALID= for a NULL pointer, invalid atom
-  count;
-  =RGPOT_ENGINE_ERR_UNSUPPORTED= when the potential does not advertise
+- Outputs :: =RGPOT_ENGINE_OK= and the exact energy-Hessian product in =hv_out=.
+- Errors :: returns
+  =RGPOT_ENGINE_ERR_INVALID= for a NULL pointer, invalid atom count; =RGPOT_ENGINE_ERR_UNSUPPORTED=
+  when the potential does not advertise
   =analytic_hvp=; and =RGPOT_ENGINE_ERR_EVAL= when the implementation throws.
   The reason is available from =rgpot_engine_last_error=.
 
@@ -1138,44 +1137,45 @@ The engine looks the CPython calls up at run time and does not link libpython.
 
 ** Rust loader (=rgpot-core= =engine= feature)
 
-Enable the =engine= feature on =rgpot-core= to expose =rgpot_core::engine=, a
-thin Rust wrapper over the symbols declared in =CppCore/rgpot/engine_c_abi.h=.
+Enable the =engine= feature on =rgpot-core= to expose
+=rgpot_core::engine=, a thin Rust wrapper over the symbols declared in =CppCore/rgpot/engine_c_abi.h=.
 No second engine abstraction is added: =EnginePotential::into_potential= wraps
 the handle as a =PotentialImpl=.
 
-- =ENGINE_ABI_VERSION= :: Expected major version (=RGPOT_ENGINE_ABI_VERSION=, 1).
+- =ENGINE_ABI_VERSION= :: Expected major version (=RGPOT_ENGINE_ABI_VERSION=,
+  1).
 - =RgpotEnginePot= :: Opaque handle type matching =struct RgpotEnginePot=.
 - =CoordTransformFn=, =AbiVersionFn=, =CreateFn=, =DestroyFn=, =ForceFn=,
   =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn= :: =extern "C"=
   function-pointer types matching the C declarations above.
-- =EngineSymbols= :: Resolved symbol table holding required (=abi_version=,
-  =create=, =destroy=, =force=) and optional (=force_batch=, =hvp=, =caps=,
-  =last_error=) function pointers.
-- =EngineError= :: Typed error enum covering =Load=, =Missing=, =Abi= (=expected=,
-  =found=), =Create=, =Invalid=, =Unsupported=, =Recoverable= (=code=, =message=),
-  and =Fatal= (=code=, =message=).
-- =EngineRequest= :: Single-geometry input with =positions= (Angstrom,
-  row-major =[n_atoms, 3]=), =atomic_numbers=, and =box_matrix= (row-major 3x3
-  lattice in Angstrom).
+- =EngineSymbols= :: Resolved symbol table holding required
+  (=abi_version=, =create=, =destroy=, =force=) and optional (=force_batch=,
+  =hvp=, =caps=, =last_error=) function pointers.
+- =EngineError= :: Typed error enum covering =Load=, =Missing=, =Abi=
+  (=expected=, =found=), =Create=, =Invalid=, =Unsupported=, =Recoverable=
+  (=code=, =message=), and =Fatal= (=code=, =message=).
+- =EngineRequest= :: Single-geometry input with =positions= (Angstrom, row-major
+  =[n_atoms, 3]=), =atomic_numbers=, and =box_matrix= (row-major 3x3 lattice in
+  Angstrom).
 - =EngineEvaluation= :: Output containing =energy= (eV) and =forces=
   (eV/Angstrom, row-major =[n_atoms, 3]=).
-- =EnginePotential::load(path, config)= / =EnginePotential::from_symbols(symbols, config)= ::
-  Verifies =rgpot_engine_abi_version() == ENGINE_ABI_VERSION=, copies =config=
-  into an 8-byte-aligned =Vec<u64>= buffer (so engines that cast =config= to
-  =capnp::word= never receive an unaligned pointer), and calls
-  =rgpot_engine_create=.
-- =EnginePotential::force(&request)= and =EnginePotential::force_batch(&atomic_numbers, &positions, &boxes)= ::
+- =EnginePotential::load(path, config)= /
+  =EnginePotential::from_symbols(symbols, config)= :: Verifies =rgpot_engine_abi_version() ==
+  ENGINE_ABI_VERSION=, copies =config= into an 8-byte-aligned =Vec<u64>= buffer
+  (so engines that cast =config= to =capnp::word= never receive an unaligned
+  pointer), and calls =rgpot_engine_create=.
+- =EnginePotential::force(&request)= and
+  =EnginePotential::force_batch(&atomic_numbers, &positions, &boxes)= ::
   Validates input lengths and output finiteness, dispatches to
-  =rgpot_engine_force= or =rgpot_engine_force_batch=, and maps positive codes to
-  =EngineError::Recoverable= and negative codes to =EngineError::Fatal= using
-  =rgpot_engine_last_error= when present.
+  =rgpot_engine_force= or
+  =rgpot_engine_force_batch=, and maps positive codes to =EngineError::Recoverable= and negative codes to =EngineError::Fatal= using =rgpot_engine_last_error=
+  when present.
 - =EnginePotential::caps()= / =EnginePotential::hvp(&request, direction)= ::
   Reads the size-prefixed engine capability structure and dispatches the exact
-  product. A missing symbol, a false =analytic_hvp= bit, or
-  =RGPOT_ENGINE_ERR_UNSUPPORTED= returns =EngineError::Unsupported= (retaining
-  the engine's last-error message) without a finite-difference fallback.
-- =EnginePotential::into_potential(self)= :: Converts the instance into a
-  =PotentialImpl= callback handle, serializes calls to its engine instance,
-  and registers an analytic callback on the underlying =rgpot_potential_t=
-  only when both =rgpot_engine_caps= and =rgpot_engine_hvp= are exported and
-  =analytic_hvp= is true.
+  product.
+  A missing symbol, a false
+  =analytic_hvp= bit, or =RGPOT_ENGINE_ERR_UNSUPPORTED= returns
+  =EngineError::Unsupported= (retaining the engine's last-error message) without
+  a finite-difference fallback.
+- =EnginePotential::into_potential(self)= :: Converts the instance into a =PotentialImpl= callback handle, serializes calls to its engine instance, and registers an analytic callback on the underlying =rgpot_potential_t= only when both =rgpot_engine_caps= and =rgpot_engine_hvp= are exported and =analytic_hvp=
+  is true.

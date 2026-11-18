@@ -647,9 +647,10 @@ unsafe extern "C" fn drop_engine(user_data: *mut c_void) {
 }
 
 fn lock_engine(user_data: *mut c_void) -> MutexGuard<'static, EnginePotential> {
-    unsafe { &*user_data.cast::<Mutex<EnginePotential>>() }
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    match unsafe { &*user_data.cast::<Mutex<EnginePotential>>() }.lock() {
+        Ok(engine) => engine,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
 unsafe extern "C" fn engine_callback(
