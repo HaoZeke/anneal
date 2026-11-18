@@ -169,7 +169,6 @@ void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv)
   const double psi2 = psi * psi;
   const double fourU0 = 4.0 * u0;
   const bool switched = m_config.switch_width != 0.0;
-  bool overlap = false;
   nlist::visitHalf(neighbours_, 0, N,
                    [&](std::int32_t i, std::int32_t j, double dx, double dy, double dz,
                        double r2) {
@@ -177,8 +176,8 @@ void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv)
       return;
     }
     if (!(r2 > 0.0)) {
-      overlap = true;
-      return;
+      throw std::domain_error(
+          "LJPot Hessian-vector product is undefined for coincident atoms");
     }
     const double r = std::sqrt(r2);
     const double inv_r = 1.0 / r;
@@ -215,9 +214,6 @@ void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv)
     hj[1] -= ky;
     hj[2] -= kz;
   });
-  if (overlap) {
-    std::fill_n(hv, 3 * in.nAtoms, std::numeric_limits<double>::quiet_NaN());
-  }
 }
 
 void LJPot::forceStage(const HalfList &list, const double *, double *forces,
