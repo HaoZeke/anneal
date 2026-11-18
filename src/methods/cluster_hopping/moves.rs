@@ -250,7 +250,9 @@ impl MoveLibrary {
                 if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap && !large_water {
                     kernels.push(soap_arm(cfg, mobile.clone(), Some(groups.clone())));
                 }
-                if let Some(species) = cfg.species.as_ref() {
+                if let Some(species) = cfg.species.as_ref()
+                    && groups.iter().any(|group| group.len() >= 4)
+                {
                     kernels.push(ClusterMove::Torsion {
                         species: species.clone(),
                         tolerance: cfg.bond_tolerance,
@@ -2112,11 +2114,12 @@ impl ClusterMove {
                 let g = rng.random_range(0..groups.len());
                 let atoms = &groups[g];
                 let gc = group_centroid(x, atoms);
+                let step = amplitude * scale;
                 let mut shift = [0.0_f64; 3];
                 for v in shift.iter_mut() {
                     let u1: f64 = rng.random::<f64>().max(1e-12);
                     let u2: f64 = rng.random::<f64>();
-                    *v = amplitude
+                    *v = step
                         * super::portable_sqrt(-2.0 * super::portable_ln(u1))
                         * super::portable_cos(std::f64::consts::TAU * u2);
                 }
@@ -2139,7 +2142,7 @@ impl ClusterMove {
                 };
                 // A modest rotation, half a radian at most, so the shake stays
                 // a shake rather than a relocation.
-                let angle = rng.random::<f64>() - 0.5;
+                let angle = (rng.random::<f64>() - 0.5) * scale.clamp(0.25, 2.0);
                 let (sa, ca) = angle.sin_cos();
                 let n = x.len() / 3;
                 for &a in atoms {
@@ -4478,5 +4481,24 @@ mod torsion_tests {
         assert!(names(&held).iter().any(|name| name == "soap"));
         let declared = Config::recommended_molecular(vec![6; 6], vec![(0..6).collect()], 0.05);
         assert!(names(&declared).iter().any(|name| name == "soap"));
+    }
+
+    #[test]
+    fn triatomic_groups_do_not_offer_a_torsion_arm() {
+        let cfg = Config::recommended_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|k| k.name())
+            .collect();
+        assert!(
+            !names.iter().any(|n| n == "torsion"),
+            "triatomic groups have no internal torsions: {names:?}"
+        );
     }
 }
