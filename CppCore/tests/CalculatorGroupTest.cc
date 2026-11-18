@@ -91,11 +91,35 @@ TEST_CASE("One process is one calculator", "[CalculatorGroup]") {
   }
 }
 
+// The calculator-group C ABI must be reachable under unmangled names.
+// Where the build produced a shared librgpot (RGPOT_TEST_SHARED_LIBRARY),
+// the library next to this binary is opened and must resolve all three
+// symbols. A static build has no shared object to open, so the same
+// names are looked up in the test binary itself, which the build links
+// with exported symbols. If that binary does not export them either, the
+// check is skipped with the reason instead of passing.
+#if !defined(_WIN32)
+namespace {
+constexpr std::array<const char *, 3> kCalculatorAbiSymbols = {
+    "rgpot_mpi_host_abi_version", "rgpot_mpi_bind_calculators",
+    "rgpot_mpi_share_bytes"};
+
+// The first symbol the handle does not resolve, or nullptr if it has all.
+const char *firstMissing(void *handle) {
+  for (const char *name : kCalculatorAbiSymbols) {
+    if (dlsym(handle, name) == nullptr)
+      return name;
+  }
+  return nullptr;
+}
+} // namespace
+#endif
+
 TEST_CASE("calculator-group C ABI exports unmangled symbols",
           "[CalculatorGroup][abi]") {
 #if defined(_WIN32)
-  SUCCEED("symbol probe uses dlsym");
-#else
+  SKIP("the symbol probe uses dlsym, which this platform lacks");
+#elif defined(RGPOT_TEST_SHARED_LIBRARY)
   char exe[PATH_MAX] = {0};
   const ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
   REQUIRE(n > 0);
@@ -109,13 +133,29 @@ TEST_CASE("calculator-group C ABI exports unmangled symbols",
     path = libdir + "librgpot.so";
     lib = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
   }
+  INFO("shared library searched in " << libdir);
   REQUIRE(lib != nullptr);
-  REQUIRE(dlsym(lib, "rgpot_mpi_host_abi_version") != nullptr);
-  REQUIRE(dlsym(lib, "rgpot_mpi_bind_calculators") != nullptr);
-  REQUIRE(dlsym(lib, "rgpot_mpi_share_bytes") != nullptr);
+  const char *missing = firstMissing(lib);
   dlclose(lib);
+  INFO("symbol missing from " << path);
+  REQUIRE(missing == nullptr);
+#else
+  void *self = dlopen(nullptr, RTLD_NOW);
+  const char *missing =
+      self == nullptr ? "dlopen(nullptr)" : firstMissing(self);
+  if (self != nullptr)
+    dlclose(self);
+  if (missing != nullptr) {
+    SKIP("librgpot is static in this build, so there is no shared object "
+         "to open, and the test binary does not export "
+         << missing << " to dlsym");
+  }
+  REQUIRE(missing == nullptr);
 #endif
+}
 
+TEST_CASE("calculator-group C ABI binds and shares through the C symbols",
+          "[CalculatorGroup][abi]") {
   rgpot_mpi_group_t group{};
   const int index = rgpot_mpi_bind_calculators(1, &group);
   REQUIRE(index == group.index);
