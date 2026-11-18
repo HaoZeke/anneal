@@ -1,0 +1,50 @@
+# Gate workflow for fix/blj-fix3 (with_species budget_window fix).
+# Usage from repo root:
+#   snakemake -s bench/blj-fix5-gate/Snakefile --cores 1
+
+WORK = "/work/blj-fix5-gate"
+
+
+rule all:
+    input:
+        "bench/blj-fix5-gate/summary.csv",
+
+
+rule build_gate:
+    input:
+        "bench/blj-fix5-gate/driver/Cargo.toml",
+        "bench/blj-fix5-gate/driver/src/main.rs",
+    output:
+        f"{WORK}/stamps/build.stamp",
+    shell:
+        """
+        set -euo pipefail
+        bash bench/blj-fix5-gate/enter_gate.sh --build-only
+        """
+
+
+rule run_gate:
+    input:
+        f"{WORK}/stamps/build.stamp",
+        "bench/blj-fix5-gate/run_gate.py",
+    output:
+        f"{WORK}/stamps/run.stamp",
+    shell:
+        """
+        set -euo pipefail
+        BLJ_GATE_SKIP_BUILD=1 bash bench/blj-fix5-gate/enter_gate.sh
+        touch {output}
+        """
+
+
+rule summarize_gate:
+    input:
+        f"{WORK}/stamps/run.stamp",
+        "bench/blj-fix5-gate/summarize.py",
+    output:
+        "bench/blj-fix5-gate/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash bench/blj-fix5-gate/enter_gate.sh --summarize
+        """
