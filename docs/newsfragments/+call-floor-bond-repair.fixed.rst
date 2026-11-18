@@ -1,0 +1,1 @@
+Fixed molecular contact repair (``shortest_bond_length`` keeps double, aromatic, and amide bonds without stretching them to single-bond sums), opened pairs off declared and element-pair call floors before charging, refused zero-step reads inside the call floor uncharged, and rejected non-positive or incomplete call-floor configurations.

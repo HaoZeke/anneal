@@ -1,0 +1,1 @@
+Regenerated manuscript and SI tables (``tab:gmin``, ``tab:ase``, ``tab:ase-morse``, and ablation tables) and titleless vector PDF figures from committed benchmark rows, and updated the abstract, GOFEE/TIP4P-GMIN/hardware sections, related-work watch notes, and benchmark READMEs.

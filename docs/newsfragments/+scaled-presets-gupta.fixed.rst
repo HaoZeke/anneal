@@ -1,0 +1,1 @@
+Preserved complete ``for_cluster`` and ``recommended`` preset settings (including scaled shell cores) in ``for_cluster_with_scales`` and ``recommended_with_scales``, and fixed Gupta dimer probing and Au55 sphere placement on Gupta length scales.

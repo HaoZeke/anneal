@@ -1,0 +1,1 @@
+Removed structure templates (``MackayCap``, named lattice growth, and motif/icosahedral reseeding templates) from ``cluster_hopping`` and ``soap`` along with template-era benchmarks and regressions, keeping cluster search template-free (see ``bench/NOTES-templates-removed.md``).
