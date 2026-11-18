@@ -2782,6 +2782,23 @@ if get_option('with_tests')
             workdir: meson.source_root(),
             timeout: 0,
         )
+        morse_omp_bench = executable(
+            'morse_omp_bench',
+            sources: ['tests/morse_omp_bench.cc'],
+            dependencies: test_deps,
+            include_directories: _incdirs + ['.'],
+            cpp_args: test_args,
+            link_with: _linkto,
+            link_language: 'cpp',
+            build_rpath: _metatomic_build_rpath,
+            install: false,
+        )
+        benchmark(
+            'morse_omp_bench',
+            morse_omp_bench,
+            workdir: meson.project_source_root(),
+            timeout: 0,
+        )
         # tools/lr_physics drives these. The bench pins workers with
         # sched_setaffinity, which only Linux has.
         if has_long_range and host_machine.system() == 'linux'
@@ -2865,7 +2882,7 @@ if not meson.is_subproject()
     install_subdir(
         'rgpot',
         install_dir: get_option('includedir'),
-        exclude_directories: ['__pycache__', 'rpc/local'],
+        exclude_directories: ['__pycache__', 'rpc/local', 'Morse/detail'],
         exclude_files: [
             '*.o',
             '*.a',

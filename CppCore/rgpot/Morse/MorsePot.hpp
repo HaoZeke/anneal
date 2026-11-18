@@ -15,6 +15,7 @@
 
 // clang-format off
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 // clang-format on
 #include "rgpot/Locality.hpp"

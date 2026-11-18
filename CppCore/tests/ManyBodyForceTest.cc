@@ -13,6 +13,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "lsan_libomp.hpp"
 #include "rgpot/EAM/EAMPot.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/types/AtomMatrix.hpp"

@@ -132,6 +132,18 @@ OMP_THREAD_LIMIT=1 meson test -C bbdir --print-errorlogs
 OMP_THREAD_LIMIT=2 meson test -C bbdir --print-errorlogs
 #+end_src
 
+Under ThreadSanitizer, neither an uninstrumented =libgomp= nor a stock =libomp=
+annotates OpenMP barriers, so both report false races across sequential regions;
+an Archer-enabled =libomp= built with ThreadSanitizer support is needed instead
+of adding suppressions (the temporary =.supp= file mentioned in an earlier
+commit message on this branch was removed while the cached slice split vectors
+remain).
+Under AddressSanitizer and LeakSanitizer, =libomp= retains a known 128-byte
+process-lifetime allocation in
+=___kmp_allocate_align=; the OpenMP tests load =CppCore/tests/lsan_libomp.supp=
+(and =CppCore/tests/lsan_libomp.hpp=) so only that runtime allocation is
+suppressed and leak checks remain active for library and test code.
+
 ** Rust Tests
 
 =rust-test-all= enables every feature of =rgpot-core= (=schema=, =profile=,

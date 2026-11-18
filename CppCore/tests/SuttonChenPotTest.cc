@@ -18,6 +18,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "lsan_libomp.hpp"
 #include "rgpot/KeptPotential.hpp"
 #include "rgpot/PairTerms.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"

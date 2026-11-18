@@ -26,6 +26,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include "lsan_libomp.hpp"
 #include "rgpot/EAM/EAMPot.hpp"
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
