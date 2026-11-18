@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <new>
 #include <thread>
 #include <vector>
@@ -21,6 +22,7 @@
 #include "DenseHessianOracle.hpp"
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/HessianVector.hpp"
+#include "rgpot/KeptPotential.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/PerAtom.hpp"
 
@@ -643,4 +645,42 @@ TEST_CASE("LJPot analytic HVP leaves no neighbour state on the instance",
   second->setNeighbourMode(rgpot::nlist::Mode::Stored);
   REQUIRE(second->retainedPairs() == 0);
   second->~LJPot();
+}
+
+TEST_CASE("a kept LJPot is destroyed after its neighbour scratch as a thread exits",
+          "[lj][threads][kept]") {
+  const double a_lj = std::pow(2.0, 1.0 / 6.0) * std::sqrt(2.0);
+  const Frame frame = makeFccFrame(2, 2, 2, a_lj, false, 0.5);
+  const rgpot::LJConfig cfg{.u0 = 1.0, .cutoff = 3.0, .psi = 1.0};
+  const int tag = 1;
+  rgpot::KeptKey key;
+  key.ptr(&tag).f64(cfg.cutoff);
+
+  std::vector<double> forces(3 * frame.z.size(), 0.0);
+  std::vector<double> hv(3 * frame.z.size(), 0.0);
+  double energy = 0.0;
+  std::thread worker([&] {
+    rgpot::Kept<rgpot::LJPot>::with(
+        key, [&] { return std::make_unique<rgpot::LJPot>(cfg); },
+        [&](rgpot::LJPot &pot) {
+          const rgpot::ForceInput in{
+              .nAtoms = frame.z.size(),
+              .pos = frame.pos.data(),
+              .atmnrs = frame.z.data(),
+              .box = frame.box.data(),
+          };
+          rgpot::ForceOut out{
+              .F = forces.data(),
+              .energy = 0.0,
+              .variance = 0.0,
+              .stress = {},
+              .has_stress = 0,
+          };
+          pot.forceImpl(in, &out);
+          pot.hessianVectorImpl(in, frame.direction.data(), hv.data());
+          energy = out.energy;
+        });
+  });
+  worker.join();
+  CHECK(std::isfinite(energy));
 }

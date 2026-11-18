@@ -100,6 +100,10 @@ public:
   /// object, whose scratch it may have left half written, and passes on.
   template <typename Make, typename Run>
   static decltype(auto) with(const KeptKey &key, Make &&make, Run &&run) {
+    if (retired()) {
+      const std::unique_ptr<Pot> pot = make();
+      return run(*pot);
+    }
     Table &table = local();
     Slot *slot = table.find(key);
     if (slot != nullptr) {
@@ -125,14 +129,22 @@ public:
   /// The object this thread currently keeps for @a key, or null when no
   /// slot matches. Leaves the slots and counts unchanged.
   [[nodiscard]] static const Pot *peek(const KeptKey &key) noexcept {
+    if (retired()) {
+      return nullptr;
+    }
     const Slot *slot = local().find(key);
     return slot != nullptr ? slot->pot.get() : nullptr;
   }
 
-  [[nodiscard]] static KeptCounts counts() noexcept { return local().counts; }
+  [[nodiscard]] static KeptCounts counts() noexcept {
+    return retired() ? KeptCounts{} : local().counts;
+  }
 
   /// Drops every object this thread keeps.
   static void release() noexcept {
+    if (retired()) {
+      return;
+    }
     Table &table = local();
     for (Slot &slot : table.slots) {
       slot.clear();
@@ -141,6 +153,9 @@ public:
 
   /// Drops the object this thread keeps for @a key, if any.
   static void release(const KeptKey &key) noexcept {
+    if (retired()) {
+      return;
+    }
     Slot *slot = local().find(key);
     if (slot != nullptr) {
       slot->clear();
@@ -198,6 +213,11 @@ private:
     KeptCounts counts{};
     std::uint64_t clock = 0;
 
+    Table() = default;
+    Table(const Table &) = delete;
+    Table &operator=(const Table &) = delete;
+    ~Table() { retired() = true; }
+
     [[nodiscard]] Slot *find(const KeptKey &key) noexcept {
       for (Slot &slot : slots) {
         if (slot.pot != nullptr && slot.matches(key)) {
@@ -229,6 +249,16 @@ private:
       return *oldest;
     }
   };
+
+  /// True once this thread's table is gone. Thread-local objects are
+  /// destroyed in the reverse of the order they were first used, so an
+  /// object kept in one table can be destroyed after another table has
+  /// been, and its destructor may then release a slot of that table. The
+  /// flag needs no destructor, so it can be read all through thread exit.
+  static bool &retired() noexcept {
+    thread_local bool gone = false;
+    return gone;
+  }
 
   static Table &local() {
     thread_local Table table;

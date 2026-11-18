@@ -26,6 +26,20 @@ struct Probe {
 
 using KeptProbe = rgpot::Kept<Probe>;
 
+/// A kept object whose destructor uses another table of this thread, as
+/// LJPot does with its neighbour scratch.
+struct Owner {
+  explicit Owner(const rgpot::KeptKey &inner) : inner_key(inner) {}
+  ~Owner();
+  rgpot::KeptKey inner_key;
+  static inline std::atomic<int> destroyed{0};
+  static inline std::atomic<bool> found_none{false};
+  static inline std::atomic<int> rebuilt_id{0};
+};
+
+using KeptInner = rgpot::Kept<Probe, 2>;
+using KeptOwner = rgpot::Kept<Owner>;
+
 rgpot::KeptKey key(double param, std::size_t n, const int *species) {
   rgpot::KeptKey k;
   k.f64(param).i64(7).atoms(n, species);
@@ -33,6 +47,15 @@ rgpot::KeptKey key(double param, std::size_t n, const int *species) {
 }
 
 int id(const Probe &probe) { return probe.id; }
+
+Owner::~Owner() {
+  found_none = KeptInner::peek(inner_key) == nullptr;
+  rebuilt_id = KeptInner::with(
+      inner_key, [] { return std::make_unique<Probe>(41); }, id);
+  KeptInner::release(inner_key);
+  KeptInner::release();
+  ++destroyed;
+}
 
 } // namespace
 
@@ -188,4 +211,30 @@ TEST_CASE("multi-slot Kept evicts the least recently used slot and supports peek
   REQUIRE(KeptTwo::peek(kc) != nullptr);
   KeptTwo::release();
   REQUIRE(KeptTwo::peek(kc) == nullptr);
+}
+
+TEST_CASE("a kept object may use another kept table while its thread exits",
+          "[kept][threads]") {
+  const int tag_owner = 1;
+  const int tag_inner = 2;
+  rgpot::KeptKey owner_key;
+  rgpot::KeptKey inner_key;
+  owner_key.ptr(&tag_owner);
+  inner_key.ptr(&tag_inner);
+
+  const int destroyed = Owner::destroyed;
+  std::thread worker([&] {
+    // The owner's table is first used before the inner one, so it is
+    // destroyed after it.
+    KeptOwner::with(
+        owner_key, [&] { return std::make_unique<Owner>(inner_key); },
+        [](Owner &) {});
+    KeptInner::with(
+        inner_key, [] { return std::make_unique<Probe>(7); }, id);
+  });
+  worker.join();
+
+  REQUIRE(Owner::destroyed == destroyed + 1);
+  REQUIRE(Owner::found_none.load());
+  REQUIRE(Owner::rebuilt_id.load() == 41);
 }
