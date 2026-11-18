@@ -51,3 +51,6 @@ limitation.
 row. `step0`/`temp_scale0` and `step1`/`temp_scale1` are the final adaptive
 controller multipliers; blank second-replica fields denote the one-chain
 baseline.
+The trailing `7554f672...` rows preserve the earlier adaptive implementation as
+exploratory evidence; the comparison above uses the final `aa55e8aa...`
+implementation.
