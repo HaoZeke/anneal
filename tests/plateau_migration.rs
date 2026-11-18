@@ -96,6 +96,9 @@ fn a_recommended_binary_plateau_migrates_to_the_stored_lower_seat() {
     cfg.bayes_screen = false;
     cfg.screen_margin = 1.0e9;
     cfg.soap_mode = SoapProposalMode::Off;
+    // This fixture pins the call ordering around the plateau branch itself,
+    // independent of the budget-window temperature law.
+    cfg.budget_window = false;
 
     let worse_energy = -1.0;
     let lower_energy = -3.0;

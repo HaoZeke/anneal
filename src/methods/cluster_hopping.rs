@@ -3620,6 +3620,12 @@ fn species_count(species: &[u32]) -> usize {
     labels.len()
 }
 
+fn has_multiple_species_labels(cfg: &Config) -> bool {
+    cfg.species
+        .as_deref()
+        .is_some_and(|species| species_count(species) >= 2)
+}
+
 /// The all-pairs quench is an atomic binary homotop.
 ///
 /// Water carries oxygen and hydrogen labels too, and so does a rigid
@@ -3629,9 +3635,7 @@ fn polishes_unlike_pairs(cfg: &Config) -> bool {
     if cfg.move_library.is_molecular() || cfg.move_library.is_rigid_body() {
         return false;
     }
-    cfg.species
-        .as_deref()
-        .is_some_and(|species| species_count(species) >= 2)
+    has_multiple_species_labels(cfg)
 }
 
 /// Atoms an exchange must not move: the inactive part of an active region,
@@ -4593,6 +4597,7 @@ where
     let recognition_skip = matches!(cfg.shared_visit_policy, SharedVisitPolicy::Recognition);
     let shared_screen =
         recognition_skip || std::env::var("CATALOG_SHARED_SCREEN").is_ok_and(|value| value == "1");
+    let multi_species = has_multiple_species_labels(cfg);
     // The ensemble frontier ladder: raw doorway states ship out to the
     // coordinator, and other chains' posts fold into this chain's seam
     // bank, so the ladder holds population at every occupied stage of
@@ -7561,7 +7566,9 @@ where
             // plateau still has to be able to move to one that was stored.
             // The record above already updated the ledger, so a seat is
             // never below that best; the climb compares it with the chain.
-            if (recognition_skip || polishes_unlike_pairs(cfg)) && screen_bank.len() < 512 {
+            if (recognition_skip || (multi_species && polishes_unlike_pairs(cfg)))
+                && screen_bank.len() < 512
+            {
                 screen_bank.push((bias.cv(x_new.view()), e_new, x_new.clone()));
                 if recognition_skip && let Some(coords) = x_new.as_slice() {
                     crate::catalog::offer_known_minimum(e_new, coords);
@@ -8958,12 +8965,10 @@ where
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
             longest_quiet = 0;
-            // A two-species plateau has no Honeycutt–Andersen packing to
-            // grow. The chain's certified quenches are a population keyed
-            // by the bias fingerprint. A seat lower than the incumbent,
-            // and outside the merge radius, is taken. A monoatomic chain
-            // keeps the activation below and does not enter here.
-            if directed_leave && !cfg.packing_cna_applies() {
+            // A plateau return through the screen bank is only for a true
+            // multi-label chain. A one-label run, even with frozen atoms or an
+            // active region, stays on the ordinary activation path below.
+            if directed_leave && multi_species {
                 let here_key = bias.cv(x.view());
                 let barred: Vec<f64> = diverse_bar.iter().copied().collect();
                 let seat = general::diverse_seat(
@@ -10119,6 +10124,74 @@ mod tests {
     }
 
     #[test]
+    fn single_species_frozen_runs_ignore_plateau_population_returns() {
+        fn run_once(seed_known_minimum: bool) -> (u64, Vec<(usize, String, u64, u64)>) {
+            for _ in crate::catalog::take_known_minima() {}
+            let mut cfg = Config::recommended(6).with_species(vec![79; 6], None);
+            cfg.frozen = Some(vec![true, false, false, false, false, false]);
+            cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+            cfg.escape_on_stall = true;
+            cfg.restart_patience = 1;
+            cfg.max_hops = Some(4);
+            cfg.return_screen = false;
+            cfg.bayes_screen = false;
+            cfg.relax_steps = 2;
+            cfg.screen_steps = 1;
+            cfg.trail_on_stall = false;
+            cfg.tabu_on_stall = false;
+            cfg.symmetrise_on_stall = false;
+            cfg.prior_soap = false;
+            cfg.prior_reseed = false;
+            cfg.prior_growth = false;
+            cfg.prior_core = false;
+            cfg.prior_motif = false;
+            cfg.energy_lattice = false;
+            cfg.orbit_complete_on_new = false;
+            cfg.continuous_symmetry = ContinuousSymmetry::Off;
+            cfg.soap_mode = SoapProposalMode::Off;
+            if seed_known_minimum {
+                let known = vec![50.0; 3 * cfg.n_points];
+                crate::catalog::offer_known_minimum(-100.0, &known);
+            }
+            let mut ledger = Ledger::new(80);
+            let mut rng = StdRng::seed_from_u64(1234);
+            let start = random_cluster(
+                cfg.n_points,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut rng,
+            );
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                let _ = led.charge();
+                (
+                    x.iter().map(|value| value * value).sum::<f64>(),
+                    x.to_owned(),
+                )
+            };
+            let mut run_rng = StdRng::seed_from_u64(1234);
+            let out =
+                run(&cfg, start.view(), &mut ledger, &mut relax, &mut run_rng).expect("search");
+            let trace = out
+                .accepted_transitions
+                .iter()
+                .map(|step| {
+                    (
+                        step.hop,
+                        step.action.clone(),
+                        step.from_energy.to_bits(),
+                        step.to_energy.to_bits(),
+                    )
+                })
+                .collect();
+            (out.final_energy.to_bits(), trace)
+        }
+
+        let baseline = run_once(false);
+        let seeded = run_once(true);
+        assert_eq!(seeded, baseline);
+    }
+
+    #[test]
     fn exchange_scans_read_raw_energies_only_for_two_labels() {
         // A zero-step call is not charged, so it does not move the budget.
         // Sum of squares is unchanged by a permutation, so a scan that only
@@ -10155,7 +10228,6 @@ mod tests {
 
         let mut binary = Config::recommended(6).with_species(vec![29, 29, 29, 79, 79, 79], None);
         binary.homotop_ranked = false;
-        binary.homotop_window = false;
         binary.return_screen = false;
         binary.bayes_screen = false;
         binary.screen_margin = 1.0e9;
@@ -10192,7 +10264,6 @@ mod tests {
 
         let mut plain = Config::recommended(6);
         plain.homotop_ranked = false;
-        plain.homotop_window = false;
         plain.return_screen = false;
         plain.bayes_screen = false;
         plain.screen_margin = 1.0e9;
