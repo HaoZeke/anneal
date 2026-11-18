@@ -541,9 +541,20 @@ def benchmark(args: argparse.Namespace) -> None:
     if sizes[0] > 64 or sizes[-1] < 16384:
         raise RuntimeError("sizes must span 64 through at least 16384")
     measurements = []
+    skipped_cells = []
     for team in teams:
         for potential in potentials:
             for atoms in sizes:
+                if potential == "emt" and atoms < 256:
+                    skipped_cells.append(
+                        {
+                            "arm": team.name,
+                            "potential": potential,
+                            "atoms": atoms,
+                            "reason": "EMT rejects this periodic cell size",
+                        }
+                    )
+                    continue
                 for threads in THREADS:
                     measurements.extend(
                         summarize_cell(
@@ -616,6 +627,7 @@ def benchmark(args: argparse.Namespace) -> None:
             ),
         },
         "measurements": measurements,
+        "skipped_cells": skipped_cells,
     }
     add_crossovers(payload)
     args.output_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
