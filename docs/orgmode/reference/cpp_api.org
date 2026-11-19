@@ -279,6 +279,32 @@ static PotentialHandle from_callback(rgpot_status_t (*callback)(void *, const rg
   A non-success status from =callback= is thrown as =rgpot::Error= by the method
   that called it.
 
+*** =rgpot::PotentialHandle::eam_table=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+static PotentialHandle eam_table(const std::string &path, int format = RGPOT_EAM_TABLE_AUTO,
+                                 bool periodic = true);
+#+end_src
+
+- Inputs :: =path=, a funcfl, setfl or Finnis-Sinclair table; =format=, one of
+  =RGPOT_EAM_TABLE_AUTO=, =RGPOT_EAM_TABLE_FUNCFL=,
+  =RGPOT_EAM_TABLE_SETFL= and =RGPOT_EAM_TABLE_FINNIS_SINCLAIR=; =periodic=,
+  nearest image on the cell or a free cluster.
+- Units :: positions and cell in Angstrom, energy in eV, forces in eV per
+  Angstrom.
+- Outputs :: a handle from =rgpot_potential_new_eam_table=: the tabulated EAM
+  potential of the Rust core, evaluated in process with no C++ kernel and no
+  engine plugin.
+  The handle needs a build with =with_rust_core=.
+  See [[file:c_abi.org][C ABI of rgpot-core]] for what it evaluates.
+- Errors :: throws =rgpot::Error= with status =RGPOT_INVALID_PARAMETER= and a
+  message starting =invalid parameter: EAM table:= when the core returns NULL:
+  an empty =path=, an unknown =format=, a file that cannot be opened or is not a
+  table of that format.
+  A calculation on a cell whose face spacing is not above twice the cutoff
+  throws the same status from =calculate=.
+
 *** =rgpot::PotentialHandle::calculate=
 
 #+attr_rgpot: signature

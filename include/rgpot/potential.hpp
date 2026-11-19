@@ -43,6 +43,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -263,6 +264,36 @@ public:
                                            rgpot_force_out_t *),
                 void *user_data, void (*free_fn)(void *) = nullptr) {
     auto *handle = rgpot_potential_new(callback, user_data, free_fn);
+    return PotentialHandle(handle);
+  }
+
+  /**
+   * @brief Build the tabulated EAM potential of the Rust core.
+   *
+   * Reads a LAMMPS funcfl, setfl or Finnis-Sinclair file in process, with
+   * no C++ kernel and no engine plugin. See
+   * @c rgpot_potential_new_eam_table for the grid, the cutoff and the
+   * cells it refuses.
+   *
+   * @param path     Table file.
+   * @param format   One of @c RGPOT_EAM_TABLE_AUTO (the suffix chooses),
+   *                 @c RGPOT_EAM_TABLE_FUNCFL, @c RGPOT_EAM_TABLE_SETFL and
+   *                 @c RGPOT_EAM_TABLE_FINNIS_SINCLAIR.
+   * @param periodic Minimum image on the cell, or a free cluster.
+   * @throws rgpot::Error when the path is empty, the file is missing or
+   *         malformed, or the format code is unknown.
+   */
+  static PotentialHandle eam_table(const std::string &path,
+                                   int format = RGPOT_EAM_TABLE_AUTO,
+                                   bool periodic = true) {
+    auto *handle =
+        rgpot_potential_new_eam_table(path.c_str(), format, periodic);
+    if (handle == nullptr) {
+      const char *msg = rgpot_last_error();
+      throw Error(std::string("invalid parameter: ") +
+                      (msg != nullptr ? msg : "EAM table refused"),
+                  RGPOT_INVALID_PARAMETER);
+    }
     return PotentialHandle(handle);
   }
 

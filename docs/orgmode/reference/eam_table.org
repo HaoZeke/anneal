@@ -49,7 +49,7 @@ rgpot::EAMTablePot pot({.path = "CuNi.eam.alloy",
 =read_eam_table= parses a stream into an =EAMTable=, and a second constructor
 takes that table directly.
 
-* From the C ABI and Rust
+* From the C ABI, Rust and C++
 
 A host that links =rgpot-core= and no C++ kernel builds the same potential with
 =rgpot_potential_new_eam_table=, declared in =rgpot.h= since C ABI 1.6.
@@ -60,6 +60,8 @@ The format codes are
 =RGPOT_EAM_TABLE_AUTO= (the suffix chooses), =RGPOT_EAM_TABLE_FUNCFL=,
 =RGPOT_EAM_TABLE_SETFL= and =RGPOT_EAM_TABLE_FINNIS_SINCLAIR=, the rows of the
 table above.
+C++ calls =rgpot::PotentialHandle::eam_table=, which throws =rgpot::Error=
+instead of returning NULL.
 
 The Rust crate holds its own evaluation of the table, in
 =rgpot_core::eam_table=, because =rgpot-core= links no C++ kernel and the handle
@@ -198,7 +200,7 @@ at least one of them.
 
 * The copper vacancy
 
-=rgpot-core/tests/eam_table.rs= and =rgpot-core/tests/c/eam_table_capi.c= evaluate 107 copper atoms around one vacancy through the Rust wrapper and the C ABI, and compare with LAMMPS version 22 Jul 2025 (20250722), =pair_style eam=
+=rgpot-core/tests/eam_table.rs=, =rgpot-core/tests/c/eam_table_capi.c= and =EAMTableHandleTest= evaluate 107 copper atoms around one vacancy through the Rust wrapper, the C ABI and the C++ handle, and compare with LAMMPS version 22 Jul 2025 (20250722), =pair_style eam=
 with =pair_coeff * * Cu_u3.eam=.
 =CppCore/tests/data/eam_table/make_vacancy_ref.py= writes =cu_u3_vacancy.ref=.
 The script takes the 108 sites of a 3 x 3 x 3 fcc cell with a = 3.615 Angstrom,
