@@ -83,6 +83,7 @@ UNPUSHED = {
                                                 "reruns, first cited by 93e17b69; no pushed branch holds it",
     "90b88235fe54abace3bde32789582eb6573ed40a": "the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed "
                                                 "branch holds it",
+    "9a30f3190b3bb7040c675a904f8388eb68224151": "the Morse ASE campaign head cited by the non-LJ rows; no pushed branch holds it",
 }
 
 KNOWN_GAPS = {
@@ -132,9 +133,9 @@ KNOWN_GAPS = {
     "bench/ase-lj55/rows.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                "repository; revision b49341e3 is not in this repository",
     "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
-    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository",
+    "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
-    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository",
+    "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
     "bench/ase-recommended/summary.csv": "revision 1ce3ab64 is not in this repository; revision 36548663 is not in this "
                                          "repository; revision 5a7f629d is not in this repository; revision b49341e3 is "
                                          "not in this repository",
