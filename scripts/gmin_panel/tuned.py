@@ -136,6 +136,36 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def rows_file(args: argparse.Namespace) -> Path:
+    if args.rows is not None:
+        return args.rows
+    return args.root / "bench" / "gmin-tuned" / "rows.csv"
+
+
+def derived_pair(rows_path: Path) -> tuple[Path, Path]:
+    name = rows_path.name
+    if name == "rows.csv":
+        return rows_path.with_name("summary.csv"), rows_path.with_name("aa.csv")
+    marker = "rows-"
+    if name.startswith(marker) and name.endswith(".csv"):
+        tag = name[len(marker):-len(".csv")]
+        return rows_path.with_name(f"summary-{tag}.csv"), rows_path.with_name(f"aa-{tag}.csv")
+    raise SystemExit(f"rows file must be rows.csv or rows-<name>.csv, got {name}")
+
+
+def aa_cell_name(args: argparse.Namespace) -> str:
+    if args.system:
+        return args.system[0]
+    return "lj38"
+
+
+def aa_title(system: str) -> str:
+    cell = system[:-2] if system.endswith("aa") else system
+    if cell == "lj38":
+        return "LJ38 same-binary noise"
+    return f"{cell} same-binary noise"
+
+
 def tip4p_references(root: Path) -> dict[int, float]:
     refs: dict[int, float] = {}
     with (root / "data" / "tip4p_ccd.csv").open(newline="") as handle:
@@ -688,7 +718,7 @@ def data_blob(root: Path, name: str) -> str:
 
 
 def evaluate(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, str]) -> None:
-    rows_path = args.root / "bench" / "gmin-tuned" / "rows.csv"
+    rows_path = rows_file(args)
     stored = read_rows(rows_path)
     done = {(row["system"], row["code"], row["seed"]) for row in stored}
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
@@ -701,12 +731,15 @@ def evaluate(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, 
         cell = table[name]
         for job in abba(EVAL_SEEDS, "anneal", "gmin"):
             plan.append((name, cell, job, cell.name))
+    aa_system = None
     if args.aa:
-        cell = table["lj38"]
+        aa_cell = aa_cell_name(args)
+        cell = table[aa_cell]
+        aa_system = f"{aa_cell}aa"
         for job in abba(EVAL_SEEDS, "gmin_a", "gmin_b"):
-            plan.append(("lj38aa", cell, job, "lj38"))
-    counts = balance([job for name, _cell, job, _data in plan if name != "lj38aa"])
-    aa_counts = balance([job for name, _cell, job, _data in plan if name == "lj38aa"])
+            plan.append((aa_system, cell, job, aa_cell))
+    counts = balance([job for name, _cell, job, _data in plan if name != aa_system])
+    aa_counts = balance([job for name, _cell, job, _data in plan if name == aa_system])
     per_slot = len(EVAL_SEEDS) // 4
     if names and (len(counts) != 8 or set(counts.values()) != {len(names) * per_slot}):
         raise SystemExit(f"ABBA counts {counts}")
@@ -866,40 +899,53 @@ def summarise(rows: list[dict[str, str]], names: list[str]) -> list[dict[str, st
     return out
 
 
+def aa_labels(rows: list[dict[str, str]]) -> list[str]:
+    found: list[str] = []
+    for row in rows:
+        system = row["system"]
+        if system.endswith("aa") and system not in found:
+            found.append(system)
+    return found
+
+
 def aa_summary(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    left = latest(rows, "lj38aa", "gmin_a")
-    right = latest(rows, "lj38aa", "gmin_b")
-    if len(left) != len(EVAL_SEEDS) or len(right) != len(EVAL_SEEDS):
-        return []
-    check_balance(left, right, "lj38aa")
-    by_seed = {row["seed"]: row for row in right}
-    deltas = []
-    for row in left:
-        other = by_seed[row["seed"]]
-        deltas.append(
+    out = []
+    for system in aa_labels(rows):
+        left = latest(rows, system, "gmin_a")
+        right = latest(rows, system, "gmin_b")
+        if len(left) != len(EVAL_SEEDS) or len(right) != len(EVAL_SEEDS):
+            continue
+        check_balance(left, right, system)
+        by_seed = {row["seed"]: row for row in right}
+        deltas = []
+        for row in left:
+            other = by_seed[row["seed"]]
+            deltas.append(
+                {
+                    "calls": abs(float(row["calls"]) - float(other["calls"])),
+                    "calls_to_hit": abs(float(row["calls_to_hit"]) - float(other["calls_to_hit"])),
+                    "best": abs(float(row["best"]) - float(other["best"])),
+                    "wall_s": abs(float(row["wall_s"]) - float(other["wall_s"])),
+                    "outside_per_call_s": abs(float(row["outside_per_call_s"]) - float(other["outside_per_call_s"])),
+                }
+            )
+
+        def pack(key: str) -> str:
+            values = [item[key] for item in deltas]
+            return f"{type7(values, 0.5):.6g} {iqr(values):.6g} {max(values):.6g}"
+
+        out.append(
             {
-                "calls": abs(float(row["calls"]) - float(other["calls"])),
-                "calls_to_hit": abs(float(row["calls_to_hit"]) - float(other["calls_to_hit"])),
-                "best": abs(float(row["best"]) - float(other["best"])),
-                "wall_s": abs(float(row["wall_s"]) - float(other["wall_s"])),
-                "outside_per_call_s": abs(float(row["outside_per_call_s"]) - float(other["outside_per_call_s"])),
+                "system": system,
+                "n": str(len(EVAL_SEEDS)),
+                "median_iqr_max_calls": pack("calls"),
+                "median_iqr_max_calls_to_hit": pack("calls_to_hit"),
+                "median_iqr_max_best": pack("best"),
+                "median_iqr_max_wall_s": pack("wall_s"),
+                "median_iqr_max_outside_per_call_s": pack("outside_per_call_s"),
             }
         )
-    def pack(key: str) -> str:
-        values = [item[key] for item in deltas]
-        return f"{type7(values, 0.5):.6g} {iqr(values):.6g} {max(values):.6g}"
-
-    return [
-        {
-            "system": "lj38aa",
-            "n": str(len(EVAL_SEEDS)),
-            "median_iqr_max_calls": pack("calls"),
-            "median_iqr_max_calls_to_hit": pack("calls_to_hit"),
-            "median_iqr_max_best": pack("best"),
-            "median_iqr_max_wall_s": pack("wall_s"),
-            "median_iqr_max_outside_per_call_s": pack("outside_per_call_s"),
-        }
-    ]
+    return out
 
 
 def show(value: str, digits: int = 4) -> str:
@@ -941,8 +987,8 @@ def results_block(summary: list[dict[str, str]], choices: list[dict[str, str]], 
     else:
         header = [
             "Cell", "Arm", "Hits", "Calls", "IQR", "To hit", "IQR", "Wall", "IQR",
-            "Inside", "Outside", "Out/call", "Fisher", "Bonferroni", "MW calls", "Bonferroni",
-            "MW wall", "Bonferroni",
+            "Inside", "Outside", "Out/call", "Best", "Fisher", "Bonferroni", "MW calls",
+            "Bonferroni", "MW wall", "Bonferroni",
         ]
         lines.append("| " + " | ".join(header) + " |")
         lines.append("| " + " | ".join("---" for _ in header) + " |")
@@ -965,6 +1011,7 @@ def results_block(summary: list[dict[str, str]], choices: list[dict[str, str]], 
                             show(row[f"{arm}_inside_median_s"]),
                             show(row[f"{arm}_outside_median_s"]),
                             show(row[f"{arm}_outside_per_call_median_s"]),
+                            row[f"{arm}_best_median"],
                             row["fisher_p"] if first else "",
                             row["fisher_p_bonferroni"] if first else "",
                             (row["mannwhitney_p_calls"] or "-") if first else "",
@@ -977,12 +1024,11 @@ def results_block(summary: list[dict[str, str]], choices: list[dict[str, str]], 
                 )
         lines.append("")
         lines.append(f"Bonferroni uses m = {summary[0]['m_cells']} cells in this table.")
-    if aa_rows:
-        band = aa_rows[0]
+    for band in aa_rows:
         lines.extend(
             [
                 "",
-                "## LJ38 same-binary noise",
+                f"## {aa_title(band['system'])}",
                 "",
                 "Absolute difference of the two GMIN arms, median, IQR and maximum.",
                 "",
@@ -1009,19 +1055,21 @@ def splice(path: Path, block: str) -> None:
 def report(args: argparse.Namespace, table: dict[str, Cell]) -> None:
     root = args.root
     choices = read_rows(root / "bench" / "gmin-tuned" / "tuning-choice.csv")
-    rows = read_rows(root / "bench" / "gmin-tuned" / "rows.csv")
+    rows_path = rows_file(args)
+    summary_path, aa_path = derived_pair(rows_path)
+    rows = read_rows(rows_path)
     names = [cell.name for cell in cells_of(root)]
     summary = summarise(rows, names)
     aa_rows = aa_summary(rows)
-    write_csv(root / "bench" / "gmin-tuned" / "summary.csv", SUMMARY_FIELDS, summary)
+    write_csv(summary_path, SUMMARY_FIELDS, summary)
     if aa_rows:
-        write_csv(
-            root / "bench" / "gmin-tuned" / "aa.csv",
-            list(aa_rows[0].keys()),
-            aa_rows,
-        )
+        write_csv(aa_path, list(aa_rows[0].keys()), aa_rows)
     splice(root / README, results_block(summary, choices, aa_rows))
-    print(f"summary cells {len(summary)} choices {len(choices)} aa {len(aa_rows)}", flush=True)
+    print(
+        f"summary cells {len(summary)} choices {len(choices)} aa {len(aa_rows)} "
+        f"rows {rows_path.name}",
+        flush=True,
+    )
 
 
 def verify(args: argparse.Namespace, table: dict[str, Cell]) -> None:
@@ -1130,6 +1178,25 @@ def self_test() -> None:
             raise SystemExit(sample)
     if abs(fisher(12, 12, 0, 12) - 2.0 / math.comb(24, 12)) > 1e-15:
         raise SystemExit("fisher")
+    bare = argparse.Namespace(rows=None, root=root, system=None, aa=True, eval=False)
+    if rows_file(bare) != root / "bench" / "gmin-tuned" / "rows.csv":
+        raise SystemExit("default rows")
+    if aa_cell_name(bare) != "lj38":
+        raise SystemExit("default aa cell")
+    shard = argparse.Namespace(
+        rows=root / "bench" / "gmin-tuned" / "rows-shard3.csv",
+        root=root,
+        system=["tip4p8", "tip4p9"],
+        aa=True,
+        eval=True,
+    )
+    summary_path, aa_path = derived_pair(rows_file(shard))
+    if summary_path.name != "summary-shard3.csv" or aa_path.name != "aa-shard3.csv":
+        raise SystemExit(f"shard names {summary_path.name} {aa_path.name}")
+    if aa_cell_name(shard) != "tip4p8":
+        raise SystemExit("shard aa cell")
+    if aa_title("lj38aa") != "LJ38 same-binary noise" or aa_title("tip4p8aa") != "tip4p8 same-binary noise":
+        raise SystemExit("aa title")
     if abs(type7([1, 2, 3, 4, 5, 6], 0.25) - 2.25) > 1e-12:
         raise SystemExit("type7")
     fake_a = [{"hit": "1", "calls": "10", "calls_to_hit": "10", "wall_s": "1", "slot": "0", "code": "anneal", "seed": str(s)} for s in EVAL_SEEDS]
