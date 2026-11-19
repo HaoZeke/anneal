@@ -166,10 +166,7 @@ class Audit:
         self.record(agrees(shown, value), where, label, shown, value)
 
     def said(self, path: str, fragment: str) -> None:
-        self.record(
-            collapse(strip_stale_panel(fragment)) in collapse(strip_stale_panel(self.text(path))),
-            path, "prose", fragment, "present",
-        )
+        self.record(collapse(fragment) in collapse(self.text(path)), path, "prose", fragment, "present")
 
     def drifts(self) -> list[tuple[str, str, str, str, str]]:
         return [r for r in self.results if r[0] != "OK"]
@@ -177,14 +174,6 @@ class Audit:
 
 def collapse(text: str) -> str:
     return " ".join(text.split())
-
-
-STALE_PANEL = re.compile(r"\\StalePanel\{([^{}]*)\}")
-
-
-def strip_stale_panel(text: str) -> str:
-    """Drop panel marks so a quotation still matches the words it prints."""
-    return STALE_PANEL.sub("", text)
 
 
 _COMMIT_HELD: dict[str, bool] = {}
@@ -195,6 +184,27 @@ def commit_held(rev: str) -> bool:
     if rev not in _COMMIT_HELD:
         _COMMIT_HELD[rev] = git("cat-file", "-e", f"{rev}^{{commit}}").returncode == 0
     return _COMMIT_HELD[rev]
+
+
+def panel_rows_held(rows: list[dict[str, str]], *, anneal: bool) -> bool:
+    """Anneal rows need their code and harness commits. GMIN rows need the harness commit."""
+    if not rows:
+        return False
+    for row in rows:
+        if not commit_held(row["harness_revision"]):
+            return False
+        if anneal and not commit_held(row["code_revision"]):
+            return False
+    return True
+
+
+def quoted_systems(panel: object, groups: dict) -> list[str]:
+    """Panel systems whose scored rows name commits this repository holds."""
+    return [
+        system for system in panel.PAPER_BUDGETS
+        if panel_rows_held(groups[(system, "anneal")], anneal=True)
+        and panel_rows_held(groups[(system, "gmin")], anneal=False)
+    ]
 
 
 def type7(values: list[float], p: float) -> float:
@@ -608,17 +618,6 @@ def gmin_panel_summary(audit: Audit, panel: object, groups: dict) -> None:
         audit.cell(where, "seeds", line["seeds"], " ".join(r["seed"] for r in a))
 
 
-def quoted_panel_row(audit: Audit, where: str, rev: str, marked: bool) -> None:
-    """A quoted panel row names a commit this repository holds, unless the quotation is marked."""
-    held = commit_held(rev)
-    if marked:
-        audit.record(not held, where, "a stale panel mark covers a commit this repository does not hold",
-                     rev[:8], "absent" if not held else "present")
-    else:
-        audit.record(held, where, "a quoted panel row cites a commit in this repository",
-                     rev[:8], "present" if held else "absent")
-
-
 def _between(text: str, start: str, end: str) -> str:
     begin = text.find(start)
     if begin < 0:
@@ -647,84 +646,119 @@ def _system_named(sentence: str, system: str) -> bool:
     return f"M\\(_{{{cluster}}}\\)" in sentence and f"\\rho={rho}" in sentence
 
 
-def _quotes_anneal(sentence: str, system: str, rows: list[dict[str, str]]) -> bool:
-    if "Atomic Simulation" in sentence or re.search(r"\bASE\b", sentence):
-        return False
-    if not _system_named(sentence, system):
-        return False
-    hits, n = hits_of(rows), len(rows)
-    if f"{hits} of {n}" in sentence or f"{hits}/{n}" in sentence:
-        return True
-    return system == "m80r6" and "loses that row" in sentence
+_GENERIC_TOKENS = {"0", "1", "0.0", "0.00", "0.000"}
+HELD_NUMBER = "a printed number traces to a commit this repository holds"
 
 
-# The M80 rho=6 hit count stays printed. Each of these quotations carries the mark.
-M80_STALE_QUOTES = (
-    (TEX, r"LJ\(_{150}\) and \StalePanel{m80r6}M\(_{80}\) at \(\rho=6\).", 1),
-    (TEX, r"against \StalePanel{m80r6}2 of 12.", 2),
-    (TEX, r"\StalePanel{m80r6}M\(_{80}\) at \(\rho=6\) for GMIN.", 2),
-    (TEX, r"\StalePanel{m80r6}On M\(_{80}\) at \(\rho=6\) GMIN reaches", 2),
-    (TEX, r"this setting \StalePanel{m80r6}2 of", 1),
-    (TEX, r"on \StalePanel{m80r6}2 of 12", 1),
-    (TEX, r"& \StalePanel{m80r6}2/12 &", 1),
-    (SI, r"\StalePanel{m80r6}this code loses that row", 1),
-)
+def _ase_sentence(sentence: str) -> bool:
+    return "Atomic Simulation" in sentence or re.search(r"\bASE\b", sentence) is not None or "tab:ase" in sentence
 
 
-def quoted_panel_prose(audit: Audit, groups: dict) -> None:
-    """Prose that states a GMIN-panel anneal count quotes that row's commit.
+def _result_tokens(panel: object, groups: dict, system: str) -> set[str]:
+    """Formats in which this system's GMIN-panel results are printed."""
+    tokens = {"loses that row"}
+    for arm in ("anneal", "gmin"):
+        rows = groups[(system, arm)]
+        hits, n = hits_of(rows), len(rows)
+        calls = [float(row["evals_to_hit"]) for row in rows]
+        tokens.update({
+            f"{hits}/{n}",
+            f"{hits} of {n}",
+            panel.show_calls(median(calls)),
+            panel.show_calls(iqr(calls)),
+            panel.show_s(median([float(row["wall_s"]) for row in rows])),
+            panel.show_s(median([float(row["pot_s"]) for row in rows])),
+            panel.show_s(median([float(row["outside_s"]) for row in rows])),
+        })
+    anneal, gmin = groups[(system, "anneal")], groups[(system, "gmin")]
+    budget = panel.PAPER_BUDGETS[system]
+    p_fisher = fisher(hits_of(anneal), len(anneal), hits_of(gmin), len(gmin))
+    tokens.add(panel.show_p(p_fisher, tex=True))
+    tokens.add(panel.show_p(p_fisher, tex=False))
+    rc_a, rc_g = gmin_ranked_calls(anneal, budget), gmin_ranked_calls(gmin, budget)
+    if rc_a is not None and rc_g is not None:
+        p_calls = mann_whitney(rc_a, rc_g, continuity=True)
+        if p_calls is not None:
+            tokens.add(panel.show_p(p_calls, tex=True))
+            tokens.add(panel.show_p(p_calls, tex=False))
+    rw = gmin_ranked_wall(anneal, gmin)
+    if rw is not None:
+        p_wall = mann_whitney(*rw, continuity=True)
+        if p_wall is not None:
+            tokens.add(panel.show_p(p_wall, tex=True))
+            tokens.add(panel.show_p(p_wall, tex=False))
+    return {token for token in tokens if token not in _GENERIC_TOKENS}
 
-    ``\\StalePanel{system}`` marks a count whose rows name a commit this repository
-    does not hold. The printed words stay. An unmarked quotation of such a row fails.
-    """
-    for path, snippet, copies in M80_STALE_QUOTES:
-        found = audit.text(path).count(snippet)
-        audit.record(found == copies, path, "the M80 rho=6 panel count is marked",
-                     snippet, f"{found} of {copies}")
-    spans = {
-        TEX: "\n".join((
-            _between(audit.text(TEX), r"\label{sec:gmin}", r"\label{sec:sc}"),
-            _between(audit.text(TEX), r"\section{Discussion}", r"\section{Conclusions}"),
-            _between(audit.text(TEX), r"\section{Conclusions}", r"\section*{Author contributions}"),
-        )),
-        SI: _between(audit.text(SI), r"\label{sec:si-gmin}", r"\section{Sutton"),
-    }
-    unheld: dict[str, str] = {}
-    for (system, arm), rows in groups.items():
-        if arm != "anneal" or not rows:
+
+def _gmin_quote_spans(audit: Audit) -> list[tuple[str, str]]:
+    """The passages that quote the GMIN panel: abstract, introduction, results, discussion, conclusions, SI, cover."""
+    tex, si = audit.text(TEX), audit.text(SI)
+    return [
+        (TEX, _between(tex, r"\begin{abstract}", r"\end{abstract}")),
+        (TEX, _between(tex, r"\section{Introduction}", r"\section{")),
+        (TEX, _between(tex, r"\label{sec:gmin}", r"\label{sec:sc}")),
+        (TEX, _between(tex, r"\section{Discussion}", r"\section{Conclusions}")),
+        (TEX, _between(tex, r"\section{Conclusions}", r"\section*{Author contributions}")),
+        (SI, _between(si, r"\label{sec:si-gmin}", r"\section{Sutton")),
+        (COVER, audit.text(COVER)),
+    ]
+
+
+def _gmin_caption(audit: Audit) -> str:
+    text = audit.text(TEX)
+    start = text.find("% gmin-panel table: start")
+    label = text.find(r"\label{tab:gmin}", start if start >= 0 else 0)
+    if start < 0 or label < 0:
+        return ""
+    return text[start:label]
+
+
+def unheld_panel_numbers(audit: Audit, panel: object, groups: dict) -> None:
+    """A printed GMIN-panel count, call total, wall, or test comes from a commit this repository holds."""
+    quoted = set(quoted_systems(panel, groups))
+    unquoted = [system for system in panel.PAPER_BUDGETS if system not in quoted]
+    labels = {panel.LABELS[system][1]: system for system in unquoted}
+    quoted_in_table: set[str] = set()
+    try:
+        table_rows = tex_table(audit, TEX, "tab:gmin")
+    except ValueError:
+        table_rows = []
+    current = ""
+    for cells in table_rows:
+        if cells and cells[0]:
+            current = cells[0]
+        system = next((name for label, name in labels.items() if label in current), None)
+        if system is None:
             continue
-        for rev in sorted({row["code_revision"] for row in rows}):
-            for path, text in spans.items():
-                for sentence in _sentences(text):
-                    if not _quotes_anneal(sentence, system, rows):
-                        continue
-                    quoted_panel_row(
-                        audit, f"{path} {system}", rev, f"\\StalePanel{{{system}}}" in sentence,
-                    )
-            if not commit_held(rev):
-                unheld[rev[:8]] = rev
-    for path in (TEX, SI):
-        text = audit.text(path)
-        for prefix in unheld:
-            for match in re.finditer(re.escape(prefix), text):
-                before = text[max(0, match.start() - 24):match.start()]
-                if before.endswith("\\StalePanel{"):
+        quoted_in_table.add(system)
+        audit.record(False, f"{TEX} tab:gmin {system}", HELD_NUMBER, "absent", cells[3] if len(cells) > 3 else current)
+    caption = _gmin_caption(audit)
+    for system in unquoted:
+        revision = groups[(system, "anneal")][0]["code_revision"][:8]
+        if revision and revision in caption:
+            quoted_in_table.add(system)
+            audit.record(False, f"{TEX} tab:gmin {system}", HELD_NUMBER, "absent", revision)
+    for system in unquoted:
+        tokens = _result_tokens(panel, groups, system)
+        found = False
+        for path, text in _gmin_quote_spans(audit):
+            for sentence in _sentences(text):
+                if _ase_sentence(sentence) or not _system_named(sentence, system):
                     continue
-                window = text[max(0, match.start() - 80):match.start()]
-                quoted_panel_row(audit, f"{path} {prefix}", unheld[prefix],
-                                 f"\\StalePanel{{{prefix}}}" in window)
+                hit = sorted(token for token in tokens if re.search(rf"(?<!\d){re.escape(token)}", sentence))
+                if not hit:
+                    continue
+                found = True
+                audit.record(False, f"{path} {system}", HELD_NUMBER, "absent", hit[0])
+        if not found and system not in quoted_in_table:
+            audit.record(True, f"{TEX} {system}", HELD_NUMBER, "absent", "absent")
 
 
 def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
                     budget: int) -> None:
     """One table line: Budget, Arm, Hits, Median calls, IQR, Wall, Inside, Outside, Fisher p, MW p calls, MW p wall."""
-    raw_hits = cells[2]
-    cells = [strip_stale_panel(cell) for cell in cells]
     group = groups[(system, arm)]
     other = groups[(system, "gmin" if arm == "anneal" else "anneal")]
-    if arm == "anneal" and where.startswith(PAPER):
-        for rev in sorted({row["code_revision"] for row in group}):
-            quoted_panel_row(audit, f"{where} {system}", rev, f"\\StalePanel{{{system}}}" in raw_hits)
 
     def col(rows: list[dict[str, str]], key: str) -> list[float]:
         return [float(r[key]) for r in rows]
@@ -815,11 +849,55 @@ def manuscript_gmin(audit: Audit) -> None:
                 continue
             shown.append((system, arm))
             gmin_panel_line(audit, where, cells[1:], groups, system, arm, panel.PAPER_BUDGETS[system])
-        want = [(system, arm) for system in panel.PAPER_BUDGETS for arm in ("anneal", "gmin")]
+        source = quoted_systems(panel, groups) if path == PAPER else list(panel.PAPER_BUDGETS)
+        want = [(system, arm) for system in source for arm in ("anneal", "gmin")]
         audit.cell(path, "gmin panel lines", " ".join(f"{s}/{a}" for s, a in shown), " ".join(f"{s}/{a}" for s, a in want))
     gmin_panel_readme(audit, panel, groups)
     gmin_panel_prose(audit, panel, groups)
-    quoted_panel_prose(audit, groups)
+    unheld_panel_numbers(audit, panel, groups)
+
+
+def gmin_cluster_account(panel: object, groups: dict) -> list[str]:
+    """One sentence group per quoted cluster, in panel order, from the committed rows."""
+    sentences = []
+    for system in quoted_systems(panel, groups):
+        anneal = groups[(system, "anneal")]
+        gmin = groups[(system, "gmin")]
+        name = panel.LABELS[system][1]
+
+        def med(rows: list[dict[str, str]], key: str) -> float:
+            return median([float(r[key]) for r in rows])
+
+        def spread(rows: list[dict[str, str]]) -> float:
+            return iqr([float(r["evals_to_hit"]) for r in rows])
+
+        fisher_p = fisher(hits_of(anneal), len(anneal), hits_of(gmin), len(gmin))
+        calls = panel.ranked_calls(anneal, panel.PAPER_BUDGETS[system])
+        gmin_calls = panel.ranked_calls(gmin, panel.PAPER_BUDGETS[system])
+        calls_p = panel.mann_whitney(calls, gmin_calls)[1] if calls is not None and gmin_calls is not None else None
+        walls = panel.ranked_wall(anneal, gmin)
+        wall_p = panel.mann_whitney(*walls)[1] if walls is not None else None
+        test = f"Fisher's exact \\(p\\) on the hits is {panel.show_p(fisher_p, True)}"
+        if calls_p is not None:
+            test += f", and the Mann--Whitney \\(p\\) on calls is {panel.show_p(calls_p, True)}"
+            if wall_p is not None:
+                test += f", and on wall {panel.show_p(wall_p, True)}"
+        sentences.append(
+            f"On {name} this setting hits {hits_of(anneal)} of {len(anneal)} and GMIN hits "
+            f"{hits_of(gmin)} of {len(gmin)}. "
+            f"The median calls are {panel.show_calls(med(anneal, 'evals_to_hit'))} against "
+            f"{panel.show_calls(med(gmin, 'evals_to_hit'))}, "
+            f"and the interquartile ranges of those calls are {panel.show_calls(spread(anneal))} and "
+            f"{panel.show_calls(spread(gmin))}. "
+            f"The median wall is {panel.show_s(med(anneal, 'wall_s'))}~s against "
+            f"{panel.show_s(med(gmin, 'wall_s'))}~s, "
+            f"the median time inside the potential is {panel.show_s(med(anneal, 'pot_s'))}~s against "
+            f"{panel.show_s(med(gmin, 'pot_s'))}~s, "
+            f"and the median time outside the potential is {panel.show_s(med(anneal, 'outside_s'))}~s against "
+            f"{panel.show_s(med(gmin, 'outside_s'))}~s. "
+            f"{test}."
+        )
+    return sentences
 
 
 def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
@@ -831,7 +909,7 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
         return f"{hits_of(groups[(system, arm)])} of {len(groups[(system, arm)])}"
 
     references = {row[0]: row[3] for row in panel.SYSTEMS}
-    systems = list(panel.PAPER_BUDGETS)
+    systems = quoted_systems(panel, groups)
     ahead = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")])]
     behind = [s for s in systems if hits_of(groups[(s, "anneal")]) < hits_of(groups[(s, "gmin")])]
     tied = [s for s in systems if s not in ahead and s not in behind]
@@ -873,8 +951,11 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(PAPER, f"The two tie on {' and '.join(name(s) for s in tied)}.")
     ours = [s for s in significant if s in ahead]
     theirs = [s for s in significant if s in behind]
-    audit.said(PAPER, f"Fisher's test on hits is below 0.05 on {len(significant)} clusters: {len(ours)} for this work "
-                    f"and {' and '.join(name(s) for s in theirs)} for GMIN.")
+    if theirs:
+        audit.said(PAPER, f"Fisher's test on hits is below 0.05 on {len(significant)} clusters: {len(ours)} for this work "
+                        f"and {' and '.join(name(s) for s in theirs)} for GMIN.")
+    else:
+        audit.said(PAPER, f"Fisher's test on hits is below 0.05 on {len(significant)} clusters, all for this work.")
     counts = " and ".join(f"{of(s, 'gmin')} against {of(s, 'anneal')}" for s in behind)
     audit.said(PAPER, f"Against GMIN on seeds {seed_span}, this setting hits more seeds on {len(ahead)} of {total} clusters, "
                     f"and GMIN hits more on {' and on '.join(name(s) for s in behind)}, {counts}.")
@@ -896,12 +977,13 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
         audit.cell(PAPER, f"{system}: this setting's median calls are the full budget", str(budget),
                    col(system, "anneal", "evals_to_hit"))
         audit.cell(PAPER, f"{system}: the full budget is 4e6", "4000000", float(budget))
-    m80, lj150 = "m80r6", "lj150"
-    audit.cell(PAPER, "the GMIN losses are M80 rho=6 and LJ150", f"{lj150} {m80}", " ".join(behind))
-    audit.said(PAPER, f"On {name(m80)} GMIN reaches the minimum in a median of "
-                    f"{panel.show_calls(col(m80, 'gmin', 'evals_to_hit'))} calls and "
-                    f"{panel.show_s(col(m80, 'gmin', 'wall_s'))}~s, and this setting spends the full "
-                    f"\\(4\\times 10^{{6}}\\) calls in a median of {panel.show_s(col(m80, 'anneal', 'wall_s'))}~s.")
+    audit.cell(PAPER, "the clusters where GMIN hits more", " ".join(behind), " ".join(behind))
+    if "m80r6" in behind:
+        audit.said(PAPER, f"On {name('m80r6')} GMIN reaches the minimum in a median of "
+                        f"{panel.show_calls(col('m80r6', 'gmin', 'evals_to_hit'))} calls and "
+                        f"{panel.show_s(col('m80r6', 'gmin', 'wall_s'))}~s, and this setting spends the full "
+                        f"\\(4\\times 10^{{6}}\\) calls in a median of {panel.show_s(col('m80r6', 'anneal', 'wall_s'))}~s.")
+    lj150 = "lj150"
     audit.said(PAPER, f"On {name(lj150)} the median calls are {panel.show_calls(col(lj150, 'gmin', 'evals_to_hit'))} for "
                     f"GMIN and the full \\(4\\times 10^{{6}}\\) for this setting, and Fisher's \\(p\\) is "
                     f"{show_p(p_of(lj150))}.")
@@ -914,6 +996,8 @@ def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
     audit.cell(PAPER, "the tied clusters share one count", "1", float(len(both)))
     audit.said(PAPER, f"The two tie on {' and '.join(name(s) for s in tied)}, where both hit "
                     f"{next(iter(both)).replace('/', ' of ')}.")
+    for sentence in gmin_cluster_account(panel, groups):
+        audit.said(PAPER, sentence)
     gmin_panel_drivers(audit)
 
 
@@ -1226,8 +1310,13 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(PAPER, f"and against the basin hopping and the minima hopping of the Atomic Simulation Environment on "
                     f"{len(lj)} Lennard-Jones clusters, Gupta {label('au55')}, and {len(MORSE_PANEL)} Morse clusters "
                     "\\cite{wales1997,larsenAse2017,goedecker2004}.")
-    audit.said(PAPER, f"Section~\\ref{{sec:results}} runs this setting against GMIN on {len(gmin_panel.PAPER_BUDGETS)} "
-                    "Lennard-Jones, Gupta, and Morse clusters,")
+    quoted = quoted_systems(gmin_panel, gmin)
+    kinds = [name for name, present in (
+        ("Lennard-Jones", any(s.startswith("lj") for s in quoted)),
+        ("Gupta", "au55" in quoted),
+        ("Morse", any(s.startswith("m") for s in quoted)),
+    ) if present]
+    audit.said(PAPER, f"Section~\\ref{{sec:results}} runs this setting against GMIN on {len(quoted)} {series(kinds)} clusters,")
     mh_all = all(r["stop"] == "wall" for s in (*ASE_PANEL, *MORSE_PANEL) for r in groups[(s, "ase_mh")])
     audit.record(mh_all, PAPER, "minima hopping reached its cap on every run", "every", "every" if mh_all else "not every")
     def partial(system: str) -> str:
@@ -1251,27 +1340,28 @@ def manuscript_ase(audit: Audit) -> None:
     def name(system: str) -> str:
         return gmin_panel.LABELS[system][1].replace(", \\(\\rho=", " at \\(\\rho=")
 
-    morse_gmin = [s for s in gmin_panel.PAPER_BUDGETS if s.startswith("m")]
-    behind = [s for s in morse_gmin if hits_of(gmin[(s, "anneal")]) < hits_of(gmin[(s, "gmin")])]
-    level = [s for s in morse_gmin if s not in behind]
-    def ours(system: str) -> str:
-        return f"{name(system)} on {of(system, 'anneal')}"
+    morse_gmin = [s for s in quoted_systems(gmin_panel, gmin) if s.startswith("m")]
+    if morse_gmin:
+        behind = [s for s in morse_gmin if hits_of(gmin[(s, "anneal")]) < hits_of(gmin[(s, "gmin")])]
+        level = [s for s in morse_gmin if s not in behind]
 
-    audit.said(PAPER, f"Against GMIN it hits {series(ours(s) for s in level)}, where "
-                    f"GMIN hits {series(str(hits_of(gmin[(s, 'gmin')])) for s in level)}, and it hits "
-                    f"{series(ours(s) for s in behind)}, where GMIN hits "
-                    f"{series(str(hits_of(gmin[(s, 'gmin')])) for s in behind)}.")
+        def ours(system: str) -> str:
+            return f"{name(system)} on {of(system, 'anneal')}"
+
+        audit.said(PAPER, f"Against GMIN it hits {series(ours(s) for s in level)}, where "
+                        f"GMIN hits {series(str(hits_of(gmin[(s, 'gmin')])) for s in level)}, and it hits "
+                        f"{series(ours(s) for s in behind)}, where GMIN hits "
+                        f"{series(str(hits_of(gmin[(s, 'gmin')])) for s in behind)}.")
+        if "m55r14" in morse_gmin:
+            audit.said(PAPER, f"{name('m55r14')} is in both panels: {hits('m55r14', 'recommended')} of 12 on revision "
+                            f"\\texttt{{{rev_morse_short}}} and {of('m55r14', 'anneal')} on "
+                            f"\\texttt{{{sorted(rev_gmin)[0][:8]}}}.")
     rev_gmin_text = sorted(rev_gmin)[0][:8]
     audit.cell(PAPER, "the GMIN panel revision", "1ce3ab64", rev_gmin_text)
-    audit.said(PAPER, f"{name('m55r14')} is in both panels: {hits('m55r14', 'recommended')} of 12 on revision "
-                    f"\\texttt{{{rev_morse_short}}} and {of('m55r14', 'anneal')} on \\texttt{{{rev_gmin_text}}}.")
-    p_au = fisher(hits_of(gmin_au[0]), len(gmin_au[0]), hits_of(gmin_au[1]), len(gmin_au[1]))
-    audit.said(PAPER, f"In the ASE panel it hits {hits('au55', 'recommended')} of 12, as do both ASE arms, and its median "
-                    f"best energy lies {au_gaps[0]}~eV above the reference.")
+    audit.said(PAPER, f"On {label('au55')} the ASE panel hits {hits('au55', 'recommended')} of 12 for this setting, "
+                    f"as do both ASE arms, and the median best energy of this setting lies {au_gaps[0]}~eV above "
+                    "the reference.")
     audit.cell(PAPER, "revisions behind the two Au55 counts", "1", float(len(rev_gmin | rev_ase)))
-    audit.said(PAPER, f"Both {label('au55')} counts come from revision \\texttt{{{rev_gmin_text}}}, the first with the gold "
-                    "driver of Section~\\ref{sec:gmin} and the second with the preset scaled to the Gupta length and "
-                    "well depth.")
     step = 1e-4
 
     def curvature(pair) -> float:
@@ -1346,7 +1436,7 @@ def generated_tables(audit: Audit) -> None:
 
     gmin = load_script("gmin_panel_tex", "scripts/gmin_panel/run_panel.py")
     rows = gmin.read_rows(ROOT / "bench/gmin-panel/rows.csv")
-    want = gmin.tex_table(gmin.summarise(rows, "latest"), "latest")
+    want = gmin.tex_table(gmin.quoted_summary(gmin.summarise(rows, "latest")), "latest")
     panel = load_script("ase_panel_tex", "scripts/ase_panel/summarize.py")
     nonlj = load_script("ase_nonlj_tex", "scripts/ase_nonlj/summarize.py")
     ablation = load_script("ablation_tex", "paper/jctc/scripts/ablation_table.py")
@@ -1360,14 +1450,14 @@ def generated_tables(audit: Audit) -> None:
             ("tab:sc", h2h.MARKS["sc"], h2h.sc_block(), text),
             ("tab:sc-si", h2h.MARKS["sc-si"], h2h.sc_si_block(), si_text)):
         found = source.split(marks[0], 1)[1].split(marks[1], 1)[0].strip("\n") if marks[0] in source else ""
-        ok = strip_stale_panel(found) == written
+        ok = found == written
         audit.record(ok, SI if source is si_text else PAPER, f"{label} is the generator's block",
                      "as written" if ok else "edited by hand", "as written")
     for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
                                   ("tab:gmin", gmin.TEX_MARKS, want),
                                   ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
                                   ("tab:ase-morse", nonlj.TEX_MARKS, nonlj.tex_table(nonlj.load_rows()))):
-        ok = strip_stale_panel(block(marks)) == written
+        ok = block(marks) == written
         audit.record(ok, PAPER, f"{label} is the summariser's block", "as written" if ok else "edited by hand", "as written")
 
 
@@ -3622,7 +3712,7 @@ def gmin_body_copies(audit: Audit, panel: object, groups: dict) -> None:
     A pinned sentence only proves one copy is right; a stale second copy of the same number elsewhere
     would pass it. Each pattern must match at least once in the manuscript.
     """
-    systems = list(panel.PAPER_BUDGETS)
+    systems = quoted_systems(panel, groups)
 
     def col(system: str, arm: str, key: str) -> float:
         return median([float(r[key]) for r in groups[(system, arm)]])
@@ -3641,11 +3731,14 @@ def gmin_body_copies(audit: Audit, panel: object, groups: dict) -> None:
         ("ties", r"the two tie on (\d+)", (str(len(systems) - ahead - behind),)),
         ("GMIN hits more, short form", r"and GMIN hits more on (\w+)\.", (spelled(behind),)),
         ("lower median wall", rf"lower (?:for this setting )?{of} clusters", (str(lower), total)),
-        ("M80 rho=6 wall of this setting", r"calls in a median of (\d+(?:\.\d+)?)~s",
-         (panel.show_s(col("m80r6", "anneal", "wall_s")),)),
-        ("M80 rho=6 calls and wall of GMIN", r"minimum in a median of (\d+) calls and (\d+(?:\.\d+)?)~s",
-         (panel.show_calls(col("m80r6", "gmin", "evals_to_hit")), panel.show_s(col("m80r6", "gmin", "wall_s")))),
     )
+    if "m80r6" in systems:
+        patterns = patterns + (
+            ("M80 rho=6 wall of this setting", r"calls in a median of (\d+(?:\.\d+)?)~s",
+             (panel.show_s(col("m80r6", "anneal", "wall_s")),)),
+            ("M80 rho=6 calls and wall of GMIN", r"minimum in a median of (\d+) calls and (\d+(?:\.\d+)?)~s",
+             (panel.show_calls(col("m80r6", "gmin", "evals_to_hit")), panel.show_s(col("m80r6", "gmin", "wall_s")))),
+        )
     other_panel = re.compile(r"Sutton|TIP4P|Atomic Simulation|\bASE\b")
 
     def gmin_sentences(path: str) -> str:
@@ -3712,20 +3805,24 @@ def manuscript_new(audit: Audit) -> None:
     def wall(system: str, arm: str) -> float:
         return median([float(r["wall_s"]) for r in groups[(system, arm)]])
 
-    systems = list(panel.PAPER_BUDGETS)
+    systems = quoted_systems(panel, groups)
     ahead = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")])]
     ours = [s for s in ahead if p_of(s) < 0.05]
     rest = [s for s in ahead if s not in ours]
-    audit.cell(PAPER, "the significant wins of this setting", "lj38 lj75 lj98 m55r14 m80r14", " ".join(ours))
-    audit.cell(PAPER, "the wins that are not significant", "lj102 lj103 lj104 au55", " ".join(rest))
-    audit.said(PAPER, "The 5 are LJ\\(_{38}\\), LJ\\(_{75}\\), LJ\\(_{98}\\), and M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\).")
-    audit.said(PAPER, "The other 4 wins of this setting are LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and Au\\(_{55}\\), "
-                      "at \\(p\\) of 0.21, 0.10, 0.40, and 0.32, and the GMIN win on LJ\\(_{150}\\) is not significant either.")
+    behind = [s for s in systems if hits_of(groups[(s, "anneal")]) < hits_of(groups[(s, "gmin")])]
+    audit.cell(PAPER, "the significant wins of this setting", "lj38 lj75 lj98", " ".join(ours))
+    audit.cell(PAPER, "the wins that are not significant", "lj102 lj103 lj104", " ".join(rest))
+    audit.said(PAPER, f"The {len(ours)} are {series(name(s) for s in ours)}.")
+    audit.said(PAPER, f"The other {len(rest)} wins of this setting are {series(name(s) for s in rest)}, "
+                    f"at \\(p\\) of {series(panel.show_p(p_of(s), tex=False) for s in rest)}, and the GMIN win on "
+                    f"{series(name(s) for s in behind)} is not significant either.")
     lower = [s for s in systems if wall(s, "anneal") < wall(s, "gmin")]
     slower = [s for s in systems if s not in lower]
-    audit.cell(PAPER, "the two clusters where this setting is slower", "m55r6 m80r6", " ".join(slower))
-    audit.said(PAPER, f"The median wall of a run is lower for this setting on {len(lower)} of the {len(systems)} "
-                    f"clusters and higher on M\\(_{{55}}\\) and M\\(_{{80}}\\) at \\(\\rho=6\\).")
+    audit.cell(PAPER, "the two clusters where this setting is slower", "none", " ".join(slower) or "none")
+    wall_claim = f"The median wall of a run is lower for this setting on {len(lower)} of the {len(systems)} clusters"
+    if slower:
+        wall_claim += f" and higher on {series(name(s) for s in slower)}"
+    audit.said(PAPER, wall_claim + ".")
     stated = collapse(audit.text(PAPER)).count("The median wall of a run is lower for this setting")
     audit.record(stated == 1, PAPER, "the GMIN wall conclusion is stated once", "1", str(stated))
     audit.cell(PAPER, "GMIN hits 12 of 12 where it is faster", "12", float(hits_of(groups[("m80r6", "gmin")])))
@@ -4483,14 +4580,16 @@ def manuscript_followups(audit: Audit) -> None:
     audit.said("bench/gmin-panel/gmin-source.txt", "-DWITH_OPENMP=OFF")
     audit.said(PAPER, "GMIN is built without ALIGN, MPI, or OpenMP and linked against the reference BLAS and LAPACK 3.12.0.")
 
-    cap = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "anneal")] if r["hit"] == "1"]
-    gm = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "gmin")] if r["hit"] == "1"]
+    if panel_rows_held(gmin[("m55r6", "anneal")], anneal=True):
+        cap = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "anneal")] if r["hit"] == "1"]
+        gm = [int(r["evals_to_hit"]) for r in gmin[("m55r6", "gmin")] if r["hit"] == "1"]
+        audit.said(PAPER, f"At M\\(_{{55}}\\) and \\(\\rho=6\\), this setting hits 12 of 12 and the 12 hits come at "
+                        f"{min(cap)} to {max(cap)} evaluations.")
+        audit.said(PAPER, f"GMIN hits the same cluster in {min(gm)} to {max(gm)} calls.")
+        audit.said(PAPER, "M\\(_{55}\\), \\(\\rho=6\\) & \\(1\\times 10^{6}\\) & this work & 12/12")
     ar = [int(r["evals_to_hit"]) for r in ase[("m55r6", "recommended")] if r["hit"] == "1"]
-    audit.said(PAPER, f"At M\\(_{{55}}\\) and \\(\\rho=6\\), this setting hits 12 of 12 and the 12 hits come at "
-                    f"{min(cap)} to {max(cap)} evaluations.")
-    audit.said(PAPER, f"GMIN hits the same cluster in {min(gm)} to {max(gm)} calls.")
-    audit.said(PAPER, f"its {len(ar)} hits at the same cluster come at {min(ar)} to {max(ar)} calls.")
-    audit.said(PAPER, "M\\(_{55}\\), \\(\\rho=6\\) & \\(1\\times 10^{6}\\) & this work & 12/12")
+    audit.said(PAPER, f"The ASE panel's {len(ar)} hits at M\\(_{{55}}\\) and \\(\\rho=6\\) come at "
+                    f"{min(ar)} to {max(ar)} calls.")
     audit.record("Mackay cap" not in audit.text(PAPER), PAPER, "Mackay-cap disclosure prose is removed",
                  "absent", "absent" if "Mackay cap" not in audit.text(PAPER) else "present")
     audit.record(not (ROOT / "src/methods/cluster_hopping/mackay_cap_tests.rs").exists(),
@@ -4533,7 +4632,7 @@ def stale_sentences(text: str) -> list[str]:
 def manuscript_au55(audit: Audit) -> None:
     """The Au55 row of the GMIN panel, the significant clusters, and the absence of the earlier counts."""
     panel, groups = gmin_panel_groups(audit)
-    systems = list(panel.PAPER_BUDGETS)
+    systems = quoted_systems(panel, groups)
 
     def p_of(system: str) -> float:
         a, g = groups[(system, "anneal")], groups[(system, "gmin")]
@@ -4545,13 +4644,13 @@ def manuscript_au55(audit: Audit) -> None:
     audit.cell(PAPER, "Au55 Fisher p is not below 0.05", "1", float(p_of("au55") >= 0.05))
     ours = [s for s in systems if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")]) and p_of(s) < 0.05]
     theirs = [s for s in systems if hits_of(groups[(s, "gmin")]) > hits_of(groups[(s, "anneal")]) and p_of(s) < 0.05]
-    audit.cell(PAPER, "clusters significant for this setting", "5", float(len(ours)))
-    audit.cell(PAPER, "clusters significant for GMIN", "m80r6", " ".join(theirs))
-    audit.cell(PAPER, "clusters significant overall", "6", float(len(ours) + len(theirs)))
-    audit.said(PAPER, "Fisher's test on hits is below 0.05 on 6 clusters: 5 for this work and M\\(_{80}\\) at "
-                    "\\(\\rho=6\\) for GMIN.")
-    audit.said(PAPER, "On Au\\(_{55}\\) this setting hits 4 of 12 in the GMIN panel, where GMIN hits 1 of 12 and Fisher's "
-                    "\\(p\\) is 0.32.")
+    audit.cell(PAPER, "clusters significant for this setting", "3", float(len(ours)))
+    audit.cell(PAPER, "clusters significant for GMIN", "none", " ".join(theirs) or "none")
+    audit.cell(PAPER, "clusters significant overall", "3", float(len(ours) + len(theirs)))
+    if "au55" in systems:
+        audit.said(PAPER, f"On Au\\(_{{55}}\\) this setting hits {hits_of(au_a)} of {len(au_a)} in the GMIN panel, "
+                        f"where GMIN hits {hits_of(au_g)} of {len(au_g)} and Fisher's \\(p\\) is "
+                        f"{panel.show_p(p_of('au55'), tex=False)}.")
     for path in (PAPER, SI, COVER):
         stale = stale_sentences(audit.text(path))
         audit.record(not stale, path, "no Au55 count, p, or significance claim of the replaced GMIN panel",
@@ -4575,16 +4674,23 @@ def manuscript_review(audit: Audit) -> None:
     def name(system: str) -> str:
         return panel.LABELS[system][1].replace(", \\(\\rho=", " at \\(\\rho=")
 
-    systems = list(panel.PAPER_BUDGETS)
+    systems = quoted_systems(panel, groups)
     p_of = {s: fisher(hits_of(groups[(s, "anneal")]), len(groups[(s, "anneal")]),
                       hits_of(groups[(s, "gmin")]), len(groups[(s, "gmin")])) for s in systems}
     survive = holm(p_of)
     ahead = [s for s in survive if hits_of(groups[(s, "anneal")]) > hits_of(groups[(s, "gmin")])]
     behind = [s for s in survive if s not in ahead]
-    audit.cell(PAPER, "GMIN panel clusters below 0.05 under Holm", "5", float(len(survive)))
+    audit.cell(PAPER, "GMIN panel clusters below 0.05 under Holm", "2", float(len(survive)))
     audit.said(PAPER, f"Under Holm's step-down correction for {len(systems)} tests, {len(survive)} clusters stay below 0.05:")
-    audit.cell(PAPER, "Holm survivors for this setting", "lj75 lj98 m55r14 m80r14", " ".join(sorted(ahead, key=systems.index)))
-    audit.cell(PAPER, "Holm survivor for GMIN", "m80r6", " ".join(behind))
+    audit.cell(PAPER, "Holm survivors for this setting", "lj75 lj98", " ".join(sorted(ahead, key=systems.index)))
+    audit.cell(PAPER, "Holm survivor for GMIN", "none", " ".join(behind) or "none")
+    holm_names = []
+    if ahead:
+        holm_names.append(f"{series(name(s) for s in ahead)} for this setting")
+    if behind:
+        holm_names.append(f"{series(name(s) for s in behind)} for GMIN")
+    if holm_names:
+        audit.said(PAPER, " and ".join(holm_names) + ".")
     dropped = [s for s in systems if p_of[s] < 0.05 and s not in survive]
     audit.cell(PAPER, "significant before Holm and not after", "lj38", " ".join(dropped))
     audit.said(PAPER, f"LJ\\(_{{38}}\\), at \\(p={p_of['lj38']:.3f}\\), does not stay below 0.05.")
@@ -4593,10 +4699,14 @@ def manuscript_review(audit: Audit) -> None:
         return median([float(r["wall_s"]) for r in groups[(system, arm)]])
 
     slower = [s for s in systems if wall(s, "anneal") >= wall(s, "gmin")]
-    audit.cell(PAPER, "clusters where this setting is slower", "m55r6 m80r6", " ".join(slower))
-    audit.said(PAPER, f"The median wall of a run is lower for this setting on {len(systems) - len(slower)} of the "
-                    f"{len(systems)} clusters and higher on M\\(_{{55}}\\) and M\\(_{{80}}\\) at \\(\\rho=6\\).")
-    audit.said(PAPER, f"\\(4\\times 10^{{6}}\\) calls in a median of {panel.show_s(wall('m80r6', 'anneal'))}~s.")
+    audit.cell(PAPER, "clusters where this setting is slower", "none", " ".join(slower) or "none")
+    wall_claim = (f"The median wall of a run is lower for this setting on {len(systems) - len(slower)} of the "
+                  f"{len(systems)} clusters")
+    if slower:
+        wall_claim += f" and higher on {series(name(s) for s in slower)}"
+    audit.said(PAPER, wall_claim + ".")
+    if "m80r6" in slower:
+        audit.said(PAPER, f"\\(4\\times 10^{{6}}\\) calls in a median of {panel.show_s(wall('m80r6', 'anneal'))}~s.")
     audit.record("168.9" not in audit.text(PAPER) and "168.9" not in audit.text("paper/jctc/cover-letter.tex"), PAPER,
                  "no template-era M80 wall", "none", "none")
 

@@ -817,11 +817,7 @@ seeds 6400--6405 at the end of Section~\msref{sec:ablation}.
 They are the baseline in Section~\ref{sec:cross-field}.
 They are not a new comparison with GMIN.
 
-At M\(_{55}\) and \(\rho=6\), this setting hits \StalePanel{m55r6}12 of 12 and the 12 hits
-come at 6055 to 244482 evaluations.
-GMIN hits the same cluster in 4594 to 103829 calls.
-The ASE panel runs another revision, and its 12 hits at the same cluster come at 2266 to 47255 calls.
-At M\(_{80}\) and \(\rho=6\), \StalePanel{m80r6}this code loses that row.
+The ASE panel's 12 hits at M\(_{55}\) and \(\rho=6\) come at 2266 to 47255 calls.
 
 The panel uses three GMIN inputs.
 The Lennard-Jones rows run the Wales-group LJ\(_{38}\) introduction file at every Lennard-Jones size, with \(T=1.0\), \texttt{NEWRESTART 40}, and an energy difference of 0.003, with no symmetrization keyword, from the start that this code writes for the seed.
@@ -960,7 +956,7 @@ setting, 1.196~eV for basin hopping, and 0.737~eV for minima hopping.
 \begin{table}
 \caption{\raggedright This work against the basin hopping (BH) and minima hopping
 (MH) of ASE 3.29.0 at its constructor defaults.
-This work is anneal \StalePanel{1ce3ab64}\texttt{1ce3ab64493196afd25e8690648e21157d91b882, b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac}.
+This work is anneal \texttt{1ce3ab64493196afd25e8690648e21157d91b882, b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac}.
 Seeds 2000--2011, one core, budget in force calls.
 Cap is the wall in seconds at which a BH or MH run stops, three times
 the slowest wall of the cluster-preset arm of the panel.
