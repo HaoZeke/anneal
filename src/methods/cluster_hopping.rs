@@ -9044,7 +9044,10 @@ where
                 // tetrahedral. Detecting several axes and closing them into a group
                 // is what makes this the published scheme rather than an axial
                 // constraint wearing its name.
-                let max_order = n.clamp(2, 12);
+                if n < 2 {
+                    continue;
+                }
+                let max_order = n;
                 let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
                 for order in 2..=max_order {
                     if let Some(c) =
