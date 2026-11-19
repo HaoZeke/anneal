@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -335,6 +337,7 @@ namespace {
 constexpr double kEnergyTol = 1e-9;
 constexpr double kForceTol = 1e-9;
 constexpr double kStressTol = 1e-9;
+constexpr double kGeometryTol = 1e-8;
 constexpr double kMinSignal = 1e-3;
 
 using Vec3 = std::array<double, 3>;
@@ -740,6 +743,117 @@ TEST_CASE("EAM neighbour lists match a brute force sum over every image",
     REQUIRE(std::abs(want.energy) > kMinSignal);
     expect_same_eval(got, want);
   }
+}
+
+namespace {
+
+constexpr int kSweepCells = 240;
+constexpr int kSweepPotentialCells = 24;
+constexpr double kSweepMinSpacing = 2.5;
+constexpr double kSweepMaxLength = 13.0;
+constexpr double kUnitInterval = 0x1p-53;
+
+class Sweep {
+public:
+  explicit Sweep(std::uint64_t seed) : gen_(seed) {}
+
+  double uniform(double lo, double hi) {
+    return lo + (hi - lo) * static_cast<double>(gen_() >> 11) * kUnitInterval;
+  }
+
+private:
+  std::mt19937_64 gen_;
+};
+
+std::array<double, 9> sweep_cell(Sweep &rng, double cutoff) {
+  for (;;) {
+    const double ax = rng.uniform(3.0, kSweepMaxLength);
+    const double by = rng.uniform(3.0, kSweepMaxLength);
+    const double cz = rng.uniform(3.0, kSweepMaxLength);
+    const std::array<double, 9> box{ax,
+                                    0.0,
+                                    0.0,
+                                    rng.uniform(-0.5 * ax, 0.5 * ax),
+                                    by,
+                                    0.0,
+                                    rng.uniform(-0.5 * ax, 0.5 * ax),
+                                    rng.uniform(-0.5 * by, 0.5 * by),
+                                    cz};
+    const std::array<Vec3, 3> rec = reciprocal(box.data());
+    double narrowest = reciprocal_spacing(rec, 0);
+    for (int axis = 1; axis < 3; ++axis) {
+      narrowest = std::min(narrowest, reciprocal_spacing(rec, axis));
+    }
+    if (narrowest >= kSweepMinSpacing && short_axes(box.data(), cutoff) > 0) {
+      return box;
+    }
+  }
+}
+
+} // namespace
+
+TEST_CASE("EAM image walk agrees with a brute force sweep of short cells",
+          "[EAMTable][nlist]") {
+  const rgpot::EAMTable cu = cu_table();
+  const double cutoff = cu.cutoff;
+  const rgpot::EAMTablePot pot(cu, true, true);
+  Sweep rng(20260301);
+  std::size_t crowded = 0;
+  for (int cell = 0; cell < kSweepCells; ++cell) {
+    CAPTURE(cell);
+    const std::array<double, 9> box = sweep_cell(rng, cutoff);
+    const std::size_t n = 1 + static_cast<std::size_t>(cell % 3);
+    std::vector<double> pos(3 * n);
+    for (std::size_t i = 0; i < n; ++i) {
+      const double fa = rng.uniform(-1.5, 2.5);
+      const double fb = rng.uniform(-1.5, 2.5);
+      const double fc = rng.uniform(-1.5, 2.5);
+      for (std::size_t c = 0; c < 3; ++c) {
+        pos[3 * i + c] = fa * box[c] + fb * box[3 + c] + fc * box[6 + c];
+      }
+    }
+    const std::vector<Image> all = brute_images(pos, box.data(), cutoff);
+    crowded += multi_image_pairs(all, n);
+
+    std::vector<std::size_t> want_count(n * n, 0);
+    std::vector<double> want_sum(n * n, 0.0);
+    for (const Image &im : all) {
+      if (im.j < im.i) {
+        continue;
+      }
+      ++want_count[im.i * n + im.j];
+      want_sum[im.i * n + im.j] += im.r * im.r;
+    }
+    // An atom's own image pairs as +S and -S; the walk keeps one of them.
+    for (std::size_t i = 0; i < n; ++i) {
+      want_count[i * n + i] /= 2;
+      want_sum[i * n + i] *= 0.5;
+    }
+
+    std::vector<std::size_t> got_count(n * n, 0);
+    std::vector<double> got_sum(n * n, 0.0);
+    rgpot::nlist::visitHalfImages(
+        pos.data(), n, box.data(), {true, true, true}, cutoff,
+        [&](int i, int j, double, double, double, double r2) {
+          ++got_count[static_cast<std::size_t>(i) * n +
+                      static_cast<std::size_t>(j)];
+          got_sum[static_cast<std::size_t>(i) * n +
+                  static_cast<std::size_t>(j)] += r2;
+        });
+    for (std::size_t p = 0; p < n * n; ++p) {
+      CAPTURE(p);
+      REQUIRE(got_count[p] == want_count[p]);
+      REQUIRE_THAT(got_sum[p], WithinAbs(want_sum[p], kGeometryTol));
+    }
+
+    if (cell < kSweepPotentialCells) {
+      const std::vector<int> z(n, cu.z[0]);
+      const Eval got = eval_full(pot, pos, z, box.data());
+      const Eval want = BruteForceEam(cu).evaluate(pos, box.data());
+      expect_same_eval(got, want);
+    }
+  }
+  REQUIRE(crowded > 0);
 }
 
 TEST_CASE(
