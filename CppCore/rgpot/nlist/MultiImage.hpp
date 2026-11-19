@@ -21,7 +21,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -103,18 +102,19 @@ inline int extentForAxis(double cutoff, double spacing, int axis) {
   if (!(shells >= 0.0) || !std::isfinite(shells)) {
     throw std::invalid_argument("EAM table: invalid image-extent shell count");
   }
-  if (shells > static_cast<double>(kMaxImageExtent - 1)) {
+  if (shells > static_cast<double>(kMaxImageExtent)) {
     throw std::invalid_argument("EAM table: image extent on axis " +
                                 std::to_string(axis) + " exceeds cap " +
                                 std::to_string(kMaxImageExtent) +
                                 " (cutoff=" + std::to_string(cutoff) +
                                 ", spacing=" + std::to_string(spacing) + ")");
   }
-  const double extent = shells + 1.0;
-  if (extent > static_cast<double>(std::numeric_limits<int>::max())) {
-    throw std::invalid_argument("EAM table: image extent overflows int");
-  }
-  return static_cast<int>(extent);
+  // An image inside the cutoff has |h - f| < cutoff / spacing along the
+  // axis, where f is the fractional separation and h the lattice shift,
+  // because the face normal component of a vector is at most its length.
+  // The walk is centred on lround(f), so |h - lround(f)| is below
+  // cutoff / spacing + 1/2, which is at most ceil(cutoff / spacing).
+  return static_cast<int>(shells);
 }
 
 } // namespace detail

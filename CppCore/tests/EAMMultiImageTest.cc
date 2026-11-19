@@ -920,13 +920,13 @@ TEST_CASE("EAM multi-image rejects unbounded image extent",
 TEST_CASE("EAM multi-image rejects a large image count", "[EAMTable][nlist]") {
   const rgpot::EAMTablePot pot = pair_only();
   const double cutoff = pot.locality().cutoff;
-  // extent = ceil(cutoff / spacing) + 1. Stay under the per-axis cap and
+  // extent = ceil(cutoff / spacing). Stay under the per-axis cap and
   // over the product of the shift counts (2 * extent + 1).
   constexpr int extent = 40;
   REQUIRE(extent < rgpot::nlist::detail::kMaxImageExtent);
   const auto span = static_cast<std::int64_t>(2 * extent + 1);
   REQUIRE(span * span * span > rgpot::nlist::detail::kMaxImageCount);
-  const double spacing = cutoff / (static_cast<double>(extent - 1) - 0.25);
+  const double spacing = cutoff / (static_cast<double>(extent) - 0.25);
   const double box[9] = {spacing, 0.0, 0.0, 0.0,    spacing,
                          0.0,     0.0, 0.0, spacing};
   const std::vector<double> pos{0.2 * spacing, 0.3 * spacing, 0.4 * spacing};
