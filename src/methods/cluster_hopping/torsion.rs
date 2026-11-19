@@ -32,6 +32,14 @@ const REPAIR_STEP_CAP: f64 = 0.35;
 /// Angular displacement used to read local torsional curvature.
 const BARRIER_PROBE_ANGLE: f64 = std::f64::consts::FRAC_PI_6;
 
+/// Fraction of the covalent-radius sum below which a planar bridge is a
+/// double bond. C=C, C=N and N=N sit at 0.87-0.89 of the sum; the partial
+/// double bonds of amides, amidines, vinylogous systems and aryl-N sit at
+/// 0.92 and above. Bridges whose planar neighbourhood is shorter than this
+/// keep their E/Z isomer through a proposal, since a half turn about a true
+/// double bond is a different stereoisomer, not a different conformer.
+const DOUBLE_BOND_FRACTION: f64 = 0.90;
+
 /// Rotatable bonds and contact radii of one structure.
 #[derive(Debug, Clone)]
 pub(crate) struct Topology {
@@ -52,6 +60,31 @@ pub(crate) struct Topology {
     /// carry it through the plane of the other three; a turn about a
     /// rotatable bond cannot.
     hands: Vec<[usize; 5]>,
+    /// Per rotatable bond, the four atoms whose dihedral is the E/Z label of
+    /// a planar double bond; `None` for every other bridge.
+    isomers: Vec<Option<[usize; 4]>>,
+}
+
+/// Dihedral angle of `q` about its middle bond, in radians.
+fn dihedral(x: ArrayView1<f64>, q: &[usize; 4]) -> f64 {
+    let p = |a: usize| [x[3 * a], x[3 * a + 1], x[3 * a + 2]];
+    let sub = |u: [f64; 3], v: [f64; 3]| [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
+    let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let cross = |u: [f64; 3], v: [f64; 3]| {
+        [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ]
+    };
+    let b0 = sub(p(q[0]), p(q[1]));
+    let b1 = sub(p(q[2]), p(q[1]));
+    let b2 = sub(p(q[3]), p(q[2]));
+    let norm = dot(b1, b1).sqrt().max(1e-12);
+    let b1 = b1.map(|c| c / norm);
+    let v = sub(b0, b1.map(|c| c * dot(b0, b1)));
+    let w = sub(b2, b1.map(|c| c * dot(b2, b1)));
+    dot(cross(b1, v), w).atan2(dot(v, w))
 }
 
 /// Signs of the volumes spanned by the bonds from `h[0]` to each three of
@@ -105,6 +138,7 @@ impl Topology {
         }
         let mut near = vec![false; n * n];
         let mut hands = Vec::new();
+        let mut isomers = vec![None; bonds];
         if !torsions.is_empty() {
             let mut nb = vec![Vec::new(); n];
             for i in 0..n {
@@ -135,6 +169,18 @@ impl Topology {
                 }
                 for j in 0..n {
                     near[i * n + j] = depth[j] != usize::MAX;
+                }
+            }
+            for (t, torsion) in torsions[..bonds].iter().enumerate() {
+                let (f, p) = (torsion.fixed, torsion.pivot);
+                let sum = covalent_radius(species[f]) + covalent_radius(species[p]);
+                if !torsion.constrained || distance(x, f, p) >= DOUBLE_BOND_FRACTION * sum {
+                    continue;
+                }
+                let first =
+                    |end: usize, other: usize| nb[end].iter().copied().find(|&a| a != other);
+                if let (Some(a), Some(b)) = (first(f, p), first(p, f)) {
+                    isomers[t] = Some([a, f, p, b]);
                 }
             }
             // Two lone atoms of one element on a centre swap places under
@@ -175,6 +221,7 @@ impl Topology {
             radius: species[..n].iter().map(|&z| covalent_radius(z)).collect(),
             moves,
             hands,
+            isomers,
         }
     }
 
@@ -297,9 +344,15 @@ impl Topology {
         clashes.is_empty()
     }
 
-    /// Whether `y` holds a crankshaft end in the other hand from `x`.
+    /// Whether `y` holds a crankshaft end in the other hand from `x`, or a
+    /// planar double bond in the other E/Z isomer.
     fn inverts(&self, x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
         self.hands.iter().any(|h| hand(x, h) != hand(y, h))
+            || self
+                .isomers
+                .iter()
+                .flatten()
+                .any(|q| (dihedral(y, q) - dihedral(x, q)).cos() < 0.0)
     }
 
     fn propose_by<R, F>(&self, x: ArrayView1<f64>, rng: &mut R, mut angle: F) -> Array1<f64>
@@ -396,6 +449,7 @@ impl Topology {
             if !torsion.constrained {
                 return rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
             }
+            let held = self.isomers[index].is_some();
             if !measured[index] {
                 measured[index] = true;
                 let probe = |theta: f64, evaluate: &mut F| {
@@ -403,11 +457,16 @@ impl Topology {
                     turn_bond(&mut y, torsion, theta);
                     evaluate(y.view())
                 };
-                profiles[index] = probe(BARRIER_PROBE_ANGLE, &mut evaluate)
-                    .zip(probe(-BARRIER_PROBE_ANGLE, &mut evaluate))
-                    .zip(probe(std::f64::consts::FRAC_PI_2, &mut evaluate))
-                    .zip(probe(std::f64::consts::PI, &mut evaluate))
-                    .map(|(((p, m), barrier), f)| (p, m, barrier, f));
+                let small = probe(BARRIER_PROBE_ANGLE, &mut evaluate)
+                    .zip(probe(-BARRIER_PROBE_ANGLE, &mut evaluate));
+                profiles[index] = if held {
+                    small.map(|(p, m)| (p, m, f64::INFINITY, f64::INFINITY))
+                } else {
+                    small
+                        .zip(probe(std::f64::consts::FRAC_PI_2, &mut evaluate))
+                        .zip(probe(std::f64::consts::PI, &mut evaluate))
+                        .map(|(((p, m), barrier), f)| (p, m, barrier, f))
+                };
             }
             let Some((plus, minus, barrier, flip)) = profiles[index] else {
                 return rng.random_range(-BARRIER_PROBE_ANGLE..BARRIER_PROBE_ANGLE);
@@ -433,7 +492,7 @@ impl Topology {
                     cumulative += *w;
                     draw <= cumulative
                 })
-                .unwrap_or(2);
+                .unwrap_or(if held { 1 } else { 2 });
             match action {
                 0 => rng.random_range(0.0..BARRIER_PROBE_ANGLE),
                 1 => rng.random_range(-BARRIER_PROBE_ANGLE..0.0),
@@ -664,6 +723,108 @@ mod tests {
         for _ in 0..100 {
             assert!(!top.inverts(x.view(), top.propose(x.view(), &mut rng).view()));
         }
+    }
+
+    /// A planar acetamidine, HN=C(NH2)CH3, with the C=N bond `bond` long. The
+    /// atoms are C2, N1, H on N1, N3, C4, two H on N3 and three H on C4.
+    fn amidine(bond: f64) -> (Array1<f64>, Vec<u32>) {
+        let deg = std::f64::consts::PI / 180.0;
+        let polar = |r: f64, a: f64| [r * (a * deg).cos(), r * (a * deg).sin(), 0.0];
+        let n1 = [bond, 0.0, 0.0];
+        let on = |from: [f64; 3], d: [f64; 3]| [0, 1, 2].map(|k| from[k] + d[k]);
+        let n3 = polar(1.35, 120.0);
+        let c4 = polar(1.50, -120.0);
+        let mut atoms = vec![
+            ([0.0; 3], 6),
+            (n1, 7),
+            (on(n1, polar(1.01, 70.0)), 1),
+            (n3, 7),
+            (c4, 6),
+            (on(n3, polar(1.01, 60.0)), 1),
+            (on(n3, polar(1.01, 180.0)), 1),
+        ];
+        let toward = polar(1.0, 60.0);
+        let side = polar(1.0, 150.0);
+        for phi in [0.0_f64, 120.0, 240.0] {
+            let (c, s) = ((phi * deg).cos(), (phi * deg).sin());
+            let d = [0, 1, 2].map(|k| {
+                let ez = if k == 2 { 1.0 } else { 0.0 };
+                1.09 * (-0.334 * toward[k] + 0.943 * (c * ez + s * side[k]))
+            });
+            atoms.push((on(c4, d), 1));
+        }
+        (
+            Array1::from_iter(atoms.iter().flat_map(|(p, _)| *p)),
+            atoms.iter().map(|&(_, z)| z).collect(),
+        )
+    }
+
+    /// H-N1=C2-N3 in the amidine, computed apart from the code under test.
+    fn imine_dihedral(x: &Array1<f64>) -> f64 {
+        let p = |i: usize| [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        let (h, n, c, m) = (p(2), p(1), p(0), p(3));
+        let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let (b0, b1, b2) = (sub(h, n), sub(c, n), sub(m, c));
+        let axis = b1.map(|v| v / dot(b1, b1).sqrt());
+        let v = sub(b0, axis.map(|a| a * dot(b0, axis)));
+        let w = sub(b2, axis.map(|a| a * dot(b2, axis)));
+        dot(cross(axis, v), w).atan2(dot(v, w))
+    }
+
+    fn flipped(x: &Array1<f64>, y: &Array1<f64>) -> bool {
+        (imine_dihedral(y) - imine_dihedral(x)).cos() < 0.0
+    }
+
+    #[test]
+    fn a_planar_double_bond_keeps_its_isomer_through_a_proposal() {
+        let (x, z) = amidine(1.28);
+        let top = Topology::of(x.view(), &z, 1.25, None, false);
+        assert_eq!(top.torsions.len(), 1, "only the C=N turns");
+        assert!(top.torsions[0].constrained);
+        let mut rng = StdRng::seed_from_u64(5);
+        for _ in 0..400 {
+            let y = top.propose(x.view(), &mut rng);
+            assert!(!flipped(&x, &y), "a half turn changed the E/Z isomer");
+        }
+        let barrier = |y: ArrayView1<f64>| {
+            let phi = imine_dihedral(&y.to_owned()) - imine_dihedral(&x);
+            Some(0.5 * (1.0 - (2.0 * phi).cos()))
+        };
+        let mut measured = 0;
+        for _ in 0..400 {
+            let y = top.propose_measured(x.view(), 0.0, 50.0, &mut rng, |p| {
+                measured += 1;
+                barrier(p)
+            });
+            assert!(!flipped(&x, &y), "a priced half turn changed the isomer");
+        }
+        assert!(
+            measured <= 800,
+            "{measured} probes: only the small turns are priced"
+        );
+    }
+
+    #[test]
+    fn a_partial_double_bond_still_turns_over() {
+        let (x, z) = amidine(1.38);
+        let top = Topology::of(x.view(), &z, 1.25, None, false);
+        assert_eq!(top.torsions.len(), 1);
+        let mut rng = StdRng::seed_from_u64(5);
+        let turned = (0..400)
+            .filter(|_| flipped(&x, &top.propose(x.view(), &mut rng)))
+            .count();
+        assert!(
+            turned > 100,
+            "{turned} of 400 draws turned the long C-N over"
+        );
     }
 
     #[test]
