@@ -1777,6 +1777,28 @@ def test_rewriting_or_truncating_a_record_line_fails_the_audit(target):
     assert any(r[1] == target and "truncated" in r[4] for r in truncated.drifts())
 
 
+def test_a_removed_row_of_a_record_absent_at_head_fails_the_audit(monkeypatch):
+    real_git = audit_mod.git
+
+    def history_names_a_deleted_record(*args, **kwargs):
+        result = real_git(*args, **kwargs)
+        if args[:2] == ("log", "--name-only"):
+            return subprocess.CompletedProcess(
+                result.args, 0, result.stdout + "bench/deleted-campaign.csv\n", ""
+            )
+        if args[:2] == ("log", "-p") and "bench/deleted-campaign.csv" in args:
+            return subprocess.CompletedProcess(
+                result.args, 0, result.stdout + "-old record\n", ""
+            )
+        return result
+
+    monkeypatch.setattr(audit_mod, "git", history_names_a_deleted_record)
+    audit = audit_mod.Audit()
+    audit_mod.append_only_rows(audit)
+    assert any(row[1] == "record-file history" and row[4] == "1 removed lines"
+               for row in audit.drifts())
+
+
 def test_removing_a_record_line_in_an_intermediate_commit_fails_the_audit(monkeypatch):
     real_git = audit_mod.git
 
