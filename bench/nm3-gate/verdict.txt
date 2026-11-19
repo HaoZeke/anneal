@@ -1,0 +1,9 @@
+PASS
+hit drops:
+lj38 hits 11/12 against 12/12 Fisher p 1
+lj103 hits 5/12 against 6/12 Fisher p 1
+call increases:
+lj38 median calls 162770 against 127840 Mann-Whitney p 0.885234
+lj55 median calls 7533 against 5722 Mann-Whitney p 0.340569
+lj103 median calls 4e+06 against 3.90507e+06 Mann-Whitney p 0.549957
+m80r6 median calls 97451 against 62677 Mann-Whitney p 0.885234

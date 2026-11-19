@@ -1,0 +1,18 @@
+# Copyright (c) anneal developers
+# Serial motif-removal gate. Not part of workflow/Snakefile rule all.
+# Rows are appended to bench/nm3-gate/rows.csv and are not an output,
+# because Snakemake removes declared outputs before a job runs.
+#
+#   NM3_A_BIN=... NM3_B_BIN=... NM3_A_CWD=... NM3_B_CWD=... \
+#     snakemake -s bench/nm3-gate/Snakefile nm3_gate
+
+rule nm3_gate:
+    output:
+        "bench/nm3-gate/summary.csv",
+        "bench/nm3-gate/identity.csv",
+        "bench/nm3-gate/verdict.txt",
+    shell:
+        """
+        set -euo pipefail
+        bash bench/nm3-gate/enter.sh
+        """
