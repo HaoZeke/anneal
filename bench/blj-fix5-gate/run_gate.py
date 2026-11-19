@@ -14,10 +14,8 @@ from pathlib import Path
 
 HIT_TOL = 0.001
 SEEDS_12 = tuple(range(2000, 2012))
-SEEDS_6 = tuple(range(2000, 2006))
 
-# Order puts shorter n=12 panels before blj130n98 (which drops to n=6 because
-# prior BLJ98 runs at 4M calls take ~1735 s + 333 s per seed, exceeding ~6 h wall at n=12).
+# Order keeps shorter panels before blj130n98.
 SYSTEMS = (
     # panel, system, driver, budget, reference, seeds
     ("blj", "blj105n38", "h2h_blj", 400_000, -177.2090846748, SEEDS_12),
@@ -32,7 +30,7 @@ SYSTEMS = (
     ("water_gmin", "tip4p16", "h2h_seed", 2_000_000, -681.1925945898, SEEDS_12),
     ("water_gmin", "tip4p20", "h2h_seed", 2_000_000, -872.9887544952, SEEDS_12),
     ("water_gmin", "tip4p21", "h2h_seed", 2_000_000, -916.7074302940, SEEDS_12),
-    ("blj", "blj130n98", "h2h_blj", 4_000_000, -590.7874132760, SEEDS_6),
+    ("blj", "blj130n98", "h2h_blj", 4_000_000, -590.7874132760, SEEDS_12),
 )
 
 ROW_FIELDS = [
@@ -257,6 +255,9 @@ def main() -> int:
     parser.add_argument("--logs", type=Path, required=True)
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--system", action="append")
+    parser.add_argument("--seed", type=int, action="append")
+    parser.add_argument("--allow-rerun-seed", type=int, action="append")
+    parser.add_argument("--session")
     args = parser.parse_args()
 
     host = socket.gethostname()
@@ -282,10 +283,9 @@ def main() -> int:
     }
 
     stored = read_rows(args.rows)
-    sessions = {row["session"] for row in stored}
-    if len(sessions) > 1:
-        raise SystemExit(f"rows already hold sessions {sorted(sessions)}")
-    session = sessions.pop() if sessions else time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    session = args.session or time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    only_seeds = set(args.seed or [])
+    rerun_seeds = set(args.allow_rerun_seed or [])
     done = {(row["panel"], row["system"], row["arm"], row["seed"], row["code_revision"]) for row in stored}
     cpu = cpu_model()
 
@@ -297,11 +297,13 @@ def main() -> int:
     selected = [row for row in SYSTEMS if not args.system or row[1] in args.system]
     for panel, system, driver, budget, ref, seeds in selected:
         for seed in seeds:
+            if only_seeds and seed not in only_seeds:
+                continue
             order = ("A", "B") if (seed - seeds[0]) % 2 == 0 else ("B", "A")
             for order_pos, arm in enumerate(order):
                 bin_dir, tree, revision = arms[arm]
                 key = (panel, system, arm, str(seed), revision)
-                if key in done:
+                if key in done and seed not in rerun_seeds:
                     print(f"skip {panel}/{system} arm={arm} seed={seed}", flush=True)
                     continue
                 print(f"start {panel}/{system} arm={arm} seed={seed} order={order_pos}", flush=True)
