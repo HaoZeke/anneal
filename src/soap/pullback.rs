@@ -24,6 +24,48 @@
 
 use super::*;
 
+/// `Σ a[n,lm] (g'ₙ û Yₗₘ + gₙ ∇Yₗₘ)` for one neighbour.
+///
+/// The harmonic axis is contiguous, so this is a dot product and a
+/// scaled add.
+#[inline(always)]
+fn pair_push(
+    a: &[f64],
+    ylm: &[f64],
+    dy: &[[f64; 3]],
+    weight: &[f64],
+    dweight: &[f64],
+    scaled: &mut [f64],
+    n_max: usize,
+    n_lm: usize,
+    u: [f64; 3],
+) -> [f64; 3] {
+    scaled[..n_lm].fill(0.0);
+    let mut along = 0.0;
+    for n in 0..n_max {
+        let a_n = &a[n * n_lm..n * n_lm + n_lm];
+        let mut projected = 0.0;
+        let w = weight[n];
+        for lm in 0..n_lm {
+            projected += a_n[lm] * ylm[lm];
+            scaled[lm] += w * a_n[lm];
+        }
+        along += dweight[n] * projected;
+    }
+    let mut push = [along * u[0], along * u[1], along * u[2]];
+    for lm in 0..n_lm {
+        let s = scaled[lm];
+        let g = dy[lm];
+        push[0] += s * g[0];
+        push[1] += s * g[1];
+        push[2] += s * g[2];
+    }
+    push
+}
+
+/// # Safety
+///
+/// The current thread must be running on an AVX2 and FMA machine.
 /// `JᵀJ` and `Jᵀ dp`, with `JᵀJ` filled on both triangles.
 pub(super) struct NormalEquations {
     pub(super) gram: Vec<f64>,
@@ -94,11 +136,10 @@ fn tables(spec: SoapSpec) -> Tables {
 ///
 /// A centre's rows reach only its own neighbourhood, and `dp` enters through
 /// the chain rule alone. The adjoint of a centre's coefficients,
-/// `aᵢ = (∂ rows / ∂ cᵢ)ᵀ dpᵢ`, is formed once, and each pair then needs one
-/// contraction with the derivative of its coefficients. No row of `J` and no
-/// entry of `JᵀJ` is built, so the cost is a pass over the pairs and one
-/// coefficient Jacobian per centre. A centre whose `dp` row is zero costs
-/// nothing, which is how fixed atoms drop out.
+/// `aᵢ = (∂ rows / ∂ cᵢ)ᵀ dpᵢ`, is formed once. Each pair forms its
+/// harmonics once; the opposite centre reuses them through `Y(-u)`. No row
+/// of `J` and no entry of `JᵀJ` is built. A centre whose `dp` row is zero
+/// costs nothing, which is how fixed atoms drop out.
 ///
 /// Returns `None` for a shape mismatch or a non-finite result, so the caller
 /// can fall back to the full solve.
@@ -125,20 +166,20 @@ pub(super) fn descent_direction(
     if dp.len() != n_at * dim || !dp.iter().all(|value| value.is_finite()) {
         return None;
     }
-    let triples = ace1 / n_max;
     let tab = tables(spec);
     let mut grad = vec![0.0; 3 * n_at];
-    let mut adjoint = vec![0.0; n_chan * n_c];
-    let mut scaled = vec![0.0; n_lm];
+    let stride = n_chan * n_c;
+    let mut adjoint = vec![0.0; n_at * stride];
+    let mut live = vec![false; n_at];
     for i in 0..n_at {
         let row = &dp[i * dim..(i + 1) * dim];
         if row.iter().all(|&value| value == 0.0) {
             continue;
         }
-        adjoint.fill(0.0);
+        live[i] = true;
         for ch in 0..n_chan {
             let c_ch = &coefficients[i][ch * n_c..(ch + 1) * n_c];
-            let a = &mut adjoint[ch * n_c..(ch + 1) * n_c];
+            let a = &mut adjoint[i * stride + ch * n_c..i * stride + (ch + 1) * n_c];
             let soap = &row[ch * dim1..(ch + 1) * dim1];
             if soap.iter().any(|&value| value != 0.0) {
                 for n in 0..n_max {
@@ -158,50 +199,57 @@ pub(super) fn descent_direction(
             }
             let ace = &row[d0 + ch * ace1..d0 + (ch + 1) * ace1];
             if ace.iter().any(|&value| value != 0.0) {
-                let db = crate::ace::d_from_c(c_ch, n_max, spec.l_max);
-                let db = db
-                    .as_slice()
-                    .expect("ACE coefficient Jacobian is contiguous");
-                for (t, &weight) in ace.iter().enumerate() {
-                    if weight == 0.0 {
-                        continue;
-                    }
-                    let n = t / triples;
-                    let base = t * n_c + n * n_lm;
-                    for &lm in &tab.lms_of_triple[t % triples] {
-                        a[n * n_lm + lm] += weight * db[base + lm];
-                    }
-                }
-            }
-        }
-        for pair in pair_derivatives_of(x, spec, i) {
-            let ch = neighbor_channel(species, pair.neighbor, &channels);
-            let a = &adjoint[ch * n_c..(ch + 1) * n_c];
-            // push = Σ a[n,lm] (g'ₙ u Yₗₘ + gₙ ∇Yₗₘ), grouped so each
-            // harmonic is visited once per radial channel.
-            let mut along = 0.0;
-            scaled.fill(0.0);
-            for n in 0..n_max {
-                let mut projected = 0.0;
-                for lm in 0..n_lm {
-                    projected += a[n * n_lm + lm] * pair.ylm[lm];
-                    scaled[lm] += pair.weight[n] * a[n * n_lm + lm];
-                }
-                along += pair.dweight[n] * projected;
-            }
-            let mut push = [along * pair.u[0], along * pair.u[1], along * pair.u[2]];
-            for lm in 0..n_lm {
-                let dy = pair.dy_cartesian[lm];
-                for k in 0..3 {
-                    push[k] += scaled[lm] * dy[k];
-                }
-            }
-            for k in 0..3 {
-                grad[3 * pair.neighbor + k] += push[k];
-                grad[3 * i + k] -= push[k];
+                // The ACE rows only need (∂B/∂c)ᵀ dp. Forming ∂B/∂c and
+                // then multiplying stores a matrix this product never reads
+                // twice.
+                crate::ace::adjoint_from_c(c_ch, n_max, spec.l_max, ace, a);
             }
         }
     }
+    // One harmonic table per pair. The opposite centre reuses it through
+    // Y(-u) = (-1)^l Y(u), instead of a second Legendre recursion.
+    let mut scaled = vec![0.0; n_lm];
+    visit_unordered_pairs(x, spec, &live, |pair| {
+        if live[pair.i] {
+            let ch = neighbor_channel(species, pair.j, &channels);
+            let a = &adjoint[pair.i * stride + ch * n_c..pair.i * stride + (ch + 1) * n_c];
+            let push = pair_push(
+                a,
+                pair.ylm,
+                pair.dy,
+                pair.weight,
+                pair.dweight,
+                &mut scaled,
+                n_max,
+                n_lm,
+                pair.u,
+            );
+            for k in 0..3 {
+                grad[3 * pair.j + k] += push[k];
+                grad[3 * pair.i + k] -= push[k];
+            }
+        }
+        if live[pair.j] {
+            let ch = neighbor_channel(species, pair.i, &channels);
+            let a = &adjoint[pair.j * stride + ch * n_c..pair.j * stride + (ch + 1) * n_c];
+            let u_neg = [-pair.u[0], -pair.u[1], -pair.u[2]];
+            let push = pair_push(
+                a,
+                pair.ylm_neg,
+                pair.dy_neg,
+                pair.weight,
+                pair.dweight,
+                &mut scaled,
+                n_max,
+                n_lm,
+                u_neg,
+            );
+            for k in 0..3 {
+                grad[3 * pair.i + k] += push[k];
+                grad[3 * pair.j + k] -= push[k];
+            }
+        }
+    });
     grad.iter().all(|value| value.is_finite()).then_some(grad)
 }
 

@@ -38,6 +38,7 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// stall-growth hold moves it to `0x91e4` (7 seeds). The packing SOAP
 /// hop is the descriptor residual. On this base the ACE derivative is
 /// the analytic contraction, and the plain walk is `0x8411` (4 seeds).
+/// Forming each pair's harmonics once moves it to `0x8421` (4 seeds).
 /// The cutoff walk stays `0xffff`.
 ///
 /// Those masks were measured at a 200-step quench. `recommended` now
@@ -81,8 +82,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
         }
     }
     // The template-free walk is deterministic: cutoff 0xffff, plain
-    // 0x8411 (4 seeds), with and without IRA.
-    let plain_exact = 0x8411;
+    // 0x8421 (4 seeds), with and without IRA.
+    let plain_exact = 0x8421;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

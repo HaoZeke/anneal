@@ -12,9 +12,10 @@
 //! softmax, the depth-rewarded arm, and the pair force go through that
 //! `libm`, and this test forces rgmin's scalar dots.
 //!
-//! The descriptor residual replaced the fivefold turn. On this base the
-//! ACE derivative is the analytic contraction, so the walk was recorded
-//! again. The hash is `f9f763c6…` with and without IRA.
+//! The descriptor residual replaced the fivefold turn. Forming each
+//! pair's harmonics once, and contracting the ACE derivative in the
+//! complex basis, moved the recorded walk. The hash is `2a9cce01…`
+//! with and without IRA.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -91,6 +92,6 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library is deterministic on every build.
-    let expected = "f9f763c65c98f8e46e100f8f00d6e365ec5b76361d5df6d022d09a71445f9adf";
+    let expected = "2a9cce0155f55b6458e422a158e4d6449af993d610c62a2e093b216f04dc513d";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

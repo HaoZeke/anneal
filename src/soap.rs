@@ -312,6 +312,125 @@ fn pair_derivatives_of(x: ArrayView1<f64>, spec: SoapSpec, i: usize) -> Vec<Pair
     local
 }
 
+/// One unordered pair, with both orientations of the same harmonics.
+///
+/// `u` points from `i` to `j`. The opposite direction is `(-1)^l` on each
+/// harmonic and the same factor with a minus on the Cartesian derivative,
+/// which is the parity of `Y(v/|v|)` at `-u`.
+pub(super) struct PairEnds<'a> {
+    pub i: usize,
+    pub j: usize,
+    pub u: [f64; 3],
+    pub ylm: &'a [f64],
+    pub dy: &'a [[f64; 3]],
+    pub ylm_neg: &'a [f64],
+    pub dy_neg: &'a [[f64; 3]],
+    pub weight: &'a [f64],
+    pub dweight: &'a [f64],
+}
+
+/// Each neighbour pair inside the cutoff, harmonics formed once.
+///
+/// A centre that is not `live` has nothing to push, so a pair of two quiet
+/// centres is skipped. The visitor must not hold the borrows past the call.
+pub(super) fn visit_unordered_pairs(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    live: &[bool],
+    mut visit: impl FnMut(PairEnds<'_>),
+) {
+    let n_at = x.len() / 3;
+    let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+    let stacked = spec.l_max <= YLM_STACK_L_MAX;
+    let mut y_stack = [0.0; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
+    let mut dy_stack = [[0.0; 3]; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
+    let mut yn_stack = [0.0; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
+    let mut dyn_stack = [[0.0; 3]; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
+    let mut y_heap = Vec::new();
+    let mut dy_heap = Vec::new();
+    let mut yn_heap = Vec::new();
+    let mut dyn_heap = Vec::new();
+    let mut parity = vec![1.0; n_lm];
+    for lm in 0..n_lm {
+        if lm_to_l(lm) % 2 == 1 {
+            parity[lm] = -1.0;
+        }
+    }
+    let mut weight = vec![0.0; spec.n_max];
+    let mut dweight = vec![0.0; spec.n_max];
+    for i in 0..n_at {
+        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        for j in (i + 1)..n_at {
+            if !live[i] && !live[j] {
+                continue;
+            }
+            let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
+            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if r >= spec.rcut_nn || r < 1e-12 {
+                continue;
+            }
+            let u = [d[0] / r, d[1] / r, d[2] / r];
+            if stacked {
+                cartesian_into(
+                    u,
+                    spec.l_max,
+                    r,
+                    &mut y_stack[..n_lm],
+                    &mut dy_stack[..n_lm],
+                );
+                for lm in 0..n_lm {
+                    let p = parity[lm];
+                    yn_stack[lm] = p * y_stack[lm];
+                    let g = dy_stack[lm];
+                    dyn_stack[lm] = [-p * g[0], -p * g[1], -p * g[2]];
+                }
+            } else {
+                let (y, dy) = tesseral_cartesian(u, spec.l_max, r);
+                yn_heap = vec![0.0; n_lm];
+                dyn_heap = vec![[0.0; 3]; n_lm];
+                for lm in 0..n_lm {
+                    let p = parity[lm];
+                    yn_heap[lm] = p * y[lm];
+                    let g = dy[lm];
+                    dyn_heap[lm] = [-p * g[0], -p * g[1], -p * g[2]];
+                }
+                y_heap = y;
+                dy_heap = dy;
+            }
+            let fc = fcut(r, spec.rcut_nn);
+            let dfc = dfcut(r, spec.rcut_nn);
+            for n in 0..spec.n_max {
+                let g = radial(n, r, spec.rcut_nn);
+                let dg = dradial(n, r, spec.rcut_nn);
+                weight[n] = g * fc;
+                dweight[n] = dg * fc + g * dfc;
+            }
+            let (ylm, dy, ylm_neg, dy_neg): (&[f64], &[[f64; 3]], &[f64], &[[f64; 3]]) = if stacked
+            {
+                (
+                    &y_stack[..n_lm],
+                    &dy_stack[..n_lm],
+                    &yn_stack[..n_lm],
+                    &dyn_stack[..n_lm],
+                )
+            } else {
+                (&y_heap, &dy_heap, &yn_heap, &dyn_heap)
+            };
+            visit(PairEnds {
+                i,
+                j,
+                u,
+                ylm,
+                dy,
+                ylm_neg,
+                dy_neg,
+                weight: &weight,
+                dweight: &dweight,
+            });
+        }
+    }
+}
+
 /// Species-aware SOAP plus the same 4-body scalars (all neighbors).
 ///
 /// The power spectrum and the ν=3 contraction share one spherical
@@ -339,18 +458,19 @@ fn nu3_cache(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Nu3
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
     let ace1 = spec.nu3_dim();
+    let mut invariants = vec![0.0; ace1];
+    let flat = out.as_slice_mut().expect("local rows are contiguous");
+    let stride = d0 + d1;
     for i in 0..n_at {
         let (p, c) = atom_expand(x, i, n_at, rcut, spec, species, &table);
-        for t in 0..d0 {
-            out[[i, t]] = p[t];
-        }
+        let row = &mut flat[i * stride..(i + 1) * stride];
+        row[..d0].copy_from_slice(p.as_slice().unwrap_or(&[]));
         for ch in 0..n_chan {
             let c0 = ch * spec.n_max * n_lm;
             let sl = &c[c0..c0 + spec.n_max * n_lm];
-            let b = crate::ace::from_c(sl, spec.n_max, spec.l_max);
-            for t in 0..ace1 {
-                out[[i, d0 + ch * ace1 + t]] = b[t];
-            }
+            crate::ace::from_c_into(sl, spec.n_max, spec.l_max, &mut invariants);
+            let at = d0 + ch * ace1;
+            row[at..at + ace1].copy_from_slice(&invariants);
         }
         coefficients.push(c);
     }
@@ -1120,14 +1240,18 @@ fn pullback_nu3_with_cache(
     let loc = &cache.local;
     let n_at = loc.nrows();
     let dim = loc.ncols();
-    let mut dp = Array1::zeros(n_at * dim);
     if target.len() != n_at * dim {
         return Array1::zeros(x.len());
     }
-    for i in 0..n_at {
-        for t in 0..dim {
-            dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
-        }
+    let Some(loc_s) = loc.as_slice() else {
+        return Array1::zeros(x.len());
+    };
+    let Some(target_s) = target.as_slice() else {
+        return Array1::zeros(x.len());
+    };
+    let mut dp_raw = vec![0.0; n_at * dim];
+    for i in 0..n_at * dim {
+        dp_raw[i] = target_s[i] - loc_s[i];
     }
     let coefficients = (cache.coefficients.len() == n_at).then_some(cache.coefficients.as_slice());
     let keep = mobile_mask(n_at, mobile);
@@ -1136,16 +1260,11 @@ fn pullback_nu3_with_cache(
         if let Some(coefficients) = coefficients {
             for i in (0..n_at).filter(|&i| !keep[i]) {
                 for t in 0..dim {
-                    dp[i * dim + t] = 0.0;
+                    dp_raw[i * dim + t] = 0.0;
                 }
             }
-            if let Some(grad) = pullback::descent_direction(
-                x,
-                spec,
-                species,
-                coefficients,
-                dp.as_slice().unwrap_or(&[]),
-            ) {
+            if let Some(grad) = pullback::descent_direction(x, spec, species, coefficients, &dp_raw)
+            {
                 let mut dr = Array1::from(grad);
                 if all_mobile {
                     strip_rigid(x, &mut dr);
@@ -1162,15 +1281,14 @@ fn pullback_nu3_with_cache(
     }
     if all_mobile {
         if let Some(coefficients) = coefficients {
-            if let Some(mut dr) =
-                pullback_nu3_blocks(x, spec, species, coefficients, dp.as_slice().unwrap_or(&[]))
-            {
+            if let Some(mut dr) = pullback_nu3_blocks(x, spec, species, coefficients, &dp_raw) {
                 strip_rigid(x, &mut dr);
                 return dr;
             }
         }
     }
     let mut j = jacobian_nu3_with_cache(x, spec, species, coefficients);
+    let mut dp = Array1::from(dp_raw);
     if !all_mobile {
         for i in 0..n_at {
             if !keep[i] {
@@ -1514,7 +1632,6 @@ pub fn packing_active_volume(
         return (0..n_at).collect();
     }
     let mut weight = vec![0.0; n_at];
-    let mut total = 0.0;
     for i in 0..n_at {
         let mut s = 0.0;
         for t in 0..mu.len() {
@@ -1522,8 +1639,14 @@ pub fn packing_active_volume(
             s += d * d;
         }
         weight[i] = s;
-        total += s;
     }
+    active_prefix(&weight)
+}
+
+/// Centres that hold the packing leftover, ranked by squared weight.
+fn active_prefix(weight: &[f64]) -> Vec<usize> {
+    let n_at = weight.len();
+    let total: f64 = weight.iter().sum();
     let mut order: Vec<usize> = (0..n_at).collect();
     order.sort_by(|a, b| {
         weight[*b]
@@ -3508,6 +3631,8 @@ fn atom_expand(
     let c_atom = n_chan * n_max * n_lm;
     let mut c = vec![0.0; c_atom];
     let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+    let mut y_stack = [0.0; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
+    let mut y_heap = Vec::new();
     for &j in table.neighbors(i) {
         let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
         let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
@@ -3518,12 +3643,17 @@ fn atom_expand(
         let u = [d[0] / r, d[1] / r, d[2] / r];
         // Values only. The Cartesian derivatives in `tesseral` are for the
         // pullback, and for `l > 3` they are six extra harmonic evaluations
-        // that this contraction discards.
-        let ylm = if l_max <= 3 {
-            tesseral(u, l_max).0
+        // that this contraction discards. The buffer is one harmonic table,
+        // reused for every neighbour of this centre.
+        let stacked = l_max <= YLM_STACK_L_MAX;
+        if stacked && l_max <= 3 {
+            y_stack[..n_lm].copy_from_slice(&tesseral(u, l_max).0);
+        } else if stacked {
+            ylm_real_into(u, l_max, &mut y_stack[..n_lm]);
         } else {
-            ylm_real(u, l_max)
-        };
+            y_heap = ylm_real(u, l_max);
+        }
+        let ylm: &[f64] = if stacked { &y_stack[..n_lm] } else { &y_heap };
         let fc = fcut(r, rcut);
         for n in 0..n_max {
             let w = radial(n, r, rcut) * fc;
@@ -3648,19 +3778,49 @@ fn lm_index(l: usize, m: i32) -> usize {
 }
 
 fn tesseral_cartesian(u: [f64; 3], l_max: usize, r: f64) -> (Vec<f64>, Vec<[f64; 3]>) {
-    let (y, dy_du) = tesseral(u, l_max);
-    let mut dy = vec![[0.0; 3]; y.len()];
-    for lm in 0..y.len() {
-        for a in 0..3 {
-            let mut sum = 0.0;
-            for b in 0..3 {
-                let projection = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
-                sum += dy_du[lm][b] * projection;
-            }
-            dy[lm][a] = sum / r;
-        }
-    }
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let mut y = vec![0.0; n_lm];
+    let mut dy = vec![[0.0; 3]; n_lm];
+    cartesian_into(u, l_max, r, &mut y, &mut dy);
     (y, dy)
+}
+
+/// [`tesseral_cartesian`] into caller buffers of length `(l_max + 1)²`.
+fn cartesian_into(u: [f64; 3], l_max: usize, r: f64, y: &mut [f64], dy: &mut [[f64; 3]]) {
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let project = |src: &[[f64; 3]], dy: &mut [[f64; 3]]| {
+        for lm in 0..n_lm {
+            let g = src[lm];
+            for a in 0..3 {
+                let mut sum = 0.0;
+                for b in 0..3 {
+                    let projection = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                    sum += g[b] * projection;
+                }
+                dy[lm][a] = sum / r;
+            }
+        }
+    };
+    if l_max <= 3 {
+        let (values, dy_du) = tesseral(u, l_max);
+        y[..n_lm].copy_from_slice(&values);
+        project(&dy_du, dy);
+        return;
+    }
+    let rho2 = u[0] * u[0] + u[1] * u[1];
+    if l_max > YLM_STACK_L_MAX || rho2 < 1e-16 {
+        let (values, dy_du) = tesseral_al_finite(u, l_max);
+        y[..n_lm].copy_from_slice(&values);
+        project(&dy_du, dy);
+        return;
+    }
+    ylm_gradient_into(u, l_max, y, dy);
+    // Same projector the polynomial branch applies, including to a
+    // gradient that is already tangential. The division by r is the
+    // chain rule through the unit vector.
+    let mut held = [[0.0; 3]; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
+    held[..n_lm].copy_from_slice(&dy[..n_lm]);
+    project(&held[..n_lm], dy);
 }
 
 /// Real tesseral Y_lm(u) and ∂Y/∂u of the harmonic polynomial, |u|=1.
@@ -3749,8 +3909,26 @@ fn tesseral(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     tesseral_al(u, l_max)
 }
 
-/// Associated-Legendre tesseral Y_lm and Cartesian derivatives, any `l_max`.
+/// Associated-Legendre tesseral Y_lm and ∂Y/∂v of `Y(v/|v|)`.
+///
+/// For `l > 3` this used to be a central difference: six extra harmonic
+/// evaluations per direction, plus the value. The Legendre recursion
+/// differentiates in the same pass. A direction on the z axis has no
+/// azimuth, so that case keeps the difference.
 fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
+    let rho2 = u[0] * u[0] + u[1] * u[1];
+    if l_max > YLM_STACK_L_MAX || rho2 < 1e-16 {
+        return tesseral_al_finite(u, l_max);
+    }
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let mut y = vec![0.0; n_lm];
+    let mut dy = vec![[0.0; 3]; n_lm];
+    ylm_gradient_into(u, l_max, &mut y, &mut dy);
+    (y, dy)
+}
+
+/// The central difference [`tesseral_al`] used for every direction.
+fn tesseral_al_finite(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     let y = ylm_real(u, l_max);
     let n_lm = y.len();
     let mut dy = vec![[0.0; 3]; n_lm];
@@ -3781,6 +3959,91 @@ fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
         }
     }
     (y, dy)
+}
+
+/// Values and ∂/∂v of `Y(v/|v|)` from one differentiated Legendre recursion.
+fn ylm_gradient_into(u: [f64; 3], l_max: usize, y: &mut [f64], dy: &mut [[f64; 3]]) {
+    let norms = ylm_norms();
+    let (x, yy, z) = (u[0], u[1], u[2]);
+    let rho2 = x * x + yy * yy;
+    let rho = rho2.sqrt();
+    let mut p = [[0.0f64; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1];
+    let mut d_rho = [[0.0f64; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1];
+    let mut d_z = [[0.0f64; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1];
+    p[0][0] = 1.0;
+    for m in 1..=l_max {
+        let factor = -(2.0 * m as f64 - 1.0);
+        p[m][m] = factor * rho * p[m - 1][m - 1];
+        d_rho[m][m] = factor * (p[m - 1][m - 1] + rho * d_rho[m - 1][m - 1]);
+        d_z[m][m] = factor * rho * d_z[m - 1][m - 1];
+    }
+    for m in 0..l_max {
+        let factor = 2.0 * m as f64 + 1.0;
+        p[m + 1][m] = z * factor * p[m][m];
+        d_rho[m + 1][m] = z * factor * d_rho[m][m];
+        d_z[m + 1][m] = factor * (p[m][m] + z * d_z[m][m]);
+    }
+    for l in 2..=l_max {
+        for m in 0..=l - 2 {
+            let a = 2.0 * l as f64 - 1.0;
+            let b = (l + m - 1) as f64;
+            let d = (l - m) as f64;
+            p[l][m] = (a * z * p[l - 1][m] - b * p[l - 2][m]) / d;
+            d_rho[l][m] = (a * z * d_rho[l - 1][m] - b * d_rho[l - 2][m]) / d;
+            d_z[l][m] = (a * (p[l - 1][m] + z * d_z[l - 1][m]) - b * d_z[l - 2][m]) / d;
+        }
+    }
+    let mut cosph = [1.0f64; YLM_STACK_L_MAX + 1];
+    let mut sinph = [0.0f64; YLM_STACK_L_MAX + 1];
+    cosph[1] = x / rho;
+    sinph[1] = yy / rho;
+    for m in 2..=l_max {
+        cosph[m] = cosph[1] * cosph[m - 1] - sinph[1] * sinph[m - 1];
+        sinph[m] = sinph[1] * cosph[m - 1] + cosph[1] * sinph[m - 1];
+    }
+    let inv_rho = 1.0 / rho;
+    let inv_rho2 = 1.0 / rho2;
+    let project = |g: [f64; 3]| {
+        let radial = g[0] * x + g[1] * yy + g[2] * z;
+        [g[0] - x * radial, g[1] - yy * radial, g[2] - z * radial]
+    };
+    for l in 0..=l_max {
+        let n0 = norms.n0[l];
+        y[lm_index(l, 0)] = n0 * p[l][0];
+        dy[lm_index(l, 0)] = project([
+            n0 * d_rho[l][0] * x * inv_rho,
+            n0 * d_rho[l][0] * yy * inv_rho,
+            n0 * d_z[l][0],
+        ]);
+        for m in 1..=l {
+            let nlm = norms.nlm[l][m];
+            let pm = p[l][m];
+            let c = cosph[m];
+            let s = sinph[m];
+            let mf = m as f64;
+            y[lm_index(l, m as i32)] = nlm * pm * c;
+            y[lm_index(l, -(m as i32))] = nlm * pm * s;
+            let p_x = d_rho[l][m] * x * inv_rho;
+            let p_y = d_rho[l][m] * yy * inv_rho;
+            let p_z = d_z[l][m];
+            let phi_x = -yy * inv_rho2;
+            let phi_y = x * inv_rho2;
+            let dc_x = -mf * s * phi_x;
+            let dc_y = -mf * s * phi_y;
+            let ds_x = mf * c * phi_x;
+            let ds_y = mf * c * phi_y;
+            dy[lm_index(l, m as i32)] = project([
+                nlm * (p_x * c + pm * dc_x),
+                nlm * (p_y * c + pm * dc_y),
+                nlm * (p_z * c),
+            ]);
+            dy[lm_index(l, -(m as i32))] = project([
+                nlm * (p_x * s + pm * ds_x),
+                nlm * (p_y * s + pm * ds_y),
+                nlm * (p_z * s),
+            ]);
+        }
+    }
 }
 
 fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
@@ -4464,6 +4727,50 @@ mod tests {
                     bits(heap.iter().copied()),
                     "l_max {l_max}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn analytic_harmonics_match_the_central_difference() {
+        let mut state = 0x51ed_270b_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) * 2.0 - 1.0
+        };
+        let mut directions = Vec::new();
+        while directions.len() < 40 {
+            let v = [next(), next(), next()];
+            let norm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            if norm > 0.2 {
+                directions.push([v[0] / norm, v[1] / norm, v[2] / norm]);
+            }
+        }
+        directions.push([1e-9, 0.0, 1.0]);
+        for l_max in [4usize, 6, 8] {
+            for u in &directions {
+                let (y, dy) = tesseral_al(*u, l_max);
+                let reference = ylm_real(*u, l_max);
+                assert_eq!(
+                    bits(y.iter().copied()),
+                    bits(reference.iter().copied()),
+                    "values differ at l_max {l_max}"
+                );
+                let rho2 = u[0] * u[0] + u[1] * u[1];
+                if rho2 < 1e-16 {
+                    continue;
+                }
+                let (_, finite) = tesseral_al_finite(*u, l_max);
+                for (got, want) in dy.iter().zip(&finite) {
+                    for a in 0..3 {
+                        let scale = want[a].abs().max(1.0);
+                        assert!(
+                            (got[a] - want[a]).abs() <= 1e-4 * scale,
+                            "dY/dv_{a} off by {} at l_max {l_max}",
+                            (got[a] - want[a]).abs()
+                        );
+                    }
+                }
             }
         }
     }

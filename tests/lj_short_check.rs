@@ -11,8 +11,8 @@
 //!
 //! The packing SOAP hop follows the observed descriptor residual on
 //! every build. These pins were remeasured when that residual replaced
-//! the fivefold template, and again when the ACE derivative became the
-//! analytic contraction. Both trajectories stay exact.
+//! the fivefold template, and again when each pair's harmonics are
+//! formed once. Both trajectories stay exact.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -60,6 +60,6 @@ fn lj38_and_lj98_short_searches_stay_put() {
     }
     let expected = "\
 LJ38 -172.2981287221047921 38 33 26 2500
-LJ98 -520.3133998213405675 10 10 7 2500";
+LJ98 -520.3133998215349720 10 10 7 2500";
     assert_eq!(records.join("\n"), expected);
 }

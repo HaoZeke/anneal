@@ -7,6 +7,7 @@
 //! Surface coordination is not this map: SOFI/IRA already return a length.
 
 use ndarray::Array2;
+use std::cell::RefCell;
 use std::f64::consts::SQRT_2;
 
 /// Allowed `(l1, l2, l3)` with `l1 ≤ l2 ≤ l3`, triangle, and even parity.
@@ -152,10 +153,30 @@ fn cmul(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
 
 /// ACE ν=3 scalars, length [`dim`].
 pub fn from_c(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
-    if l_max <= CG_CACHE_MAX {
-        from_c_cached(c, n_max, l_max)
+    let n = if l_max <= CG_CACHE_MAX {
+        n_max * triples_cached(l_max).len()
     } else {
-        from_c_general(c, n_max, l_max)
+        dim(n_max, l_max)
+    };
+    let mut out = vec![0.0; n];
+    from_c_into(c, n_max, l_max, &mut out);
+    out
+}
+
+/// [`from_c`] writing into `out`, which must hold [`dim`] entries.
+pub fn from_c_into(c: &[f64], n_max: usize, l_max: usize, out: &mut [f64]) {
+    if l_max <= CG_CACHE_MAX {
+        let n = n_max * triples_cached(l_max).len();
+        if out.len() < n {
+            return;
+        }
+        from_c_cached(c, n_max, l_max, out);
+    } else {
+        let owned = from_c_general(c, n_max, l_max);
+        if out.len() < owned.len() {
+            return;
+        }
+        out[..owned.len()].copy_from_slice(&owned);
     }
 }
 
@@ -204,40 +225,50 @@ fn nonzero_terms(l_max: usize) -> &'static [Vec<CgTerm>] {
     })
 }
 
-fn from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
+fn from_c_cached(c: &[f64], n_max: usize, l_max: usize, out: &mut [f64]) {
     let n_lm = (l_max + 1) * (l_max + 1);
+    let n_c = n_max * n_lm;
     let trips = triples_cached(l_max);
     let terms = nonzero_terms(l_max);
     // Complex coefficients once per radial channel. The `m` loops used to
-    // rebuild each one for every triple that touches it.
-    let mut re = vec![0.0; n_max * n_lm];
-    let mut im = vec![0.0; n_max * n_lm];
-    for n in 0..n_max {
-        for l in 0..=l_max {
-            for m in -(l as i32)..=(l as i32) {
-                let (cr, ci) = coeff(c, n, l, m, n_lm);
-                let at = n * n_lm + lm_index(l, m);
-                re[at] = cr;
-                im[at] = ci;
+    // rebuild each one for every triple that touches it. The buffers are
+    // reused across centres; each call overwrites the prefix it reads.
+    ACE_SCRATCH.with(|slot| {
+        let mut scratch = slot.borrow_mut();
+        scratch.ensure(n_c);
+        for n in 0..n_max {
+            for l in 0..=l_max {
+                for m in -(l as i32)..=(l as i32) {
+                    let (cr, ci) = coeff(c, n, l, m, n_lm);
+                    let at = n * n_lm + lm_index(l, m);
+                    scratch.re[at] = cr;
+                    scratch.im[at] = ci;
+                }
             }
         }
-    }
-    let mut out = vec![0.0; n_max * trips.len()];
-    for n in 0..n_max {
-        let base = n * n_lm;
-        for (k, triple_terms) in terms.iter().enumerate() {
-            let mut acc = 0.0;
-            for term in triple_terms {
-                let a = (re[base + term.i1], im[base + term.i1]);
-                let b = (re[base + term.i2], im[base + term.i2]);
-                let d = (re[base + term.i3], im[base + term.i3]);
-                let p = cmul(cmul(a, b), (d.0, -d.1));
-                acc += term.g * p.0;
+        for n in 0..n_max {
+            let base = n * n_lm;
+            for (k, triple_terms) in terms.iter().enumerate() {
+                let mut acc = 0.0;
+                // SAFETY: same index bound as the adjoint. Each radial
+                // channel owns `n_lm` coefficients and the scratch holds
+                // `n_c` of them.
+                debug_assert!(base + n_lm <= scratch.re.len());
+                unsafe {
+                    let re = scratch.re.as_ptr();
+                    let im = scratch.im.as_ptr();
+                    for term in triple_terms {
+                        let a = (*re.add(base + term.i1), *im.add(base + term.i1));
+                        let b = (*re.add(base + term.i2), *im.add(base + term.i2));
+                        let d = (*re.add(base + term.i3), *im.add(base + term.i3));
+                        let p = cmul(cmul(a, b), (d.0, -d.1));
+                        acc += term.g * p.0;
+                    }
+                }
+                out[n * trips.len() + k] = acc;
             }
-            out[n * trips.len() + k] = acc;
         }
-    }
-    out
+    });
 }
 
 fn from_c_general(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
@@ -386,6 +417,152 @@ pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     j
 }
 
+/// `(∂B/∂c)ᵀ w` for one centre, added into `out`.
+///
+/// Same products as [`d_from_c`], contracted with `w` while the term is in
+/// hand, so the Jacobian matrix is never stored. `w` is one weight per
+/// invariant, in the order [`from_c`] returns, and `out` is one entry per
+/// tesseral coefficient.
+pub fn adjoint_from_c(c: &[f64], n_max: usize, l_max: usize, weights: &[f64], out: &mut [f64]) {
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let n_c = n_max * n_lm;
+    if n_c == 0 || n_max == 0 || out.len() < n_c {
+        return;
+    }
+    let trips_owned = (l_max > CG_CACHE_MAX).then(|| triples(l_max));
+    let trips: &[(usize, usize, usize)] = match trips_owned.as_deref() {
+        Some(owned) => owned,
+        None => triples_cached(l_max),
+    };
+    if trips.is_empty() || weights.len() != n_max * trips.len() {
+        return;
+    }
+    let terms_owned = (l_max > CG_CACHE_MAX).then(|| {
+        trips
+            .iter()
+            .map(|&(l1, l2, l3)| finite_terms(l1, l2, l3))
+            .collect::<Vec<_>>()
+    });
+    let terms: &[Vec<CgTerm>] = match terms_owned.as_deref() {
+        Some(owned) => owned,
+        None => nonzero_terms(l_max),
+    };
+    // Pad a short coefficient vector the way the matrix derivative does.
+    let padded;
+    let cp: &[f64] = if c.len() >= n_c {
+        c
+    } else {
+        let mut grown = c.to_vec();
+        grown.resize(n_c, 0.0);
+        padded = grown;
+        &padded
+    };
+    // Sum ∂B/∂C in the complex basis, then map each `(l, m)` once.
+    // Scatter is linear, so this is `(∂B/∂c)ᵀ w` without a stored row
+    // and without a tesseral branch on every CG term.
+    ACE_SCRATCH.with(|slot| {
+        let mut scratch = slot.borrow_mut();
+        scratch.ensure(n_c.max(n_lm));
+        for n in 0..n_max {
+            for l in 0..=l_max {
+                for m in -(l as i32)..=(l as i32) {
+                    let (cr, ci) = coeff(cp, n, l, m, n_lm);
+                    let at = n * n_lm + lm_index(l, m);
+                    scratch.re[at] = cr;
+                    scratch.im[at] = ci;
+                }
+            }
+        }
+        for n in 0..n_max {
+            let base = n * n_lm;
+            for (k, triple_terms) in terms.iter().enumerate() {
+                let weight = weights[n * trips.len() + k];
+                if weight == 0.0 {
+                    continue;
+                }
+                let (l1, l2, l3) = trips[k];
+                scratch.dre[..n_lm].fill(0.0);
+                scratch.dim[..n_lm].fill(0.0);
+                // SAFETY: CgTerm indices are `lm_index` values, and each
+                // radial channel owns `n_lm` coefficients. The checks above
+                // sized the buffers, so the inner products skip per-term checks.
+                debug_assert!(base + n_lm <= scratch.re.len());
+                debug_assert!(scratch.dre.len() >= n_lm);
+                unsafe {
+                    let re = scratch.re.as_ptr();
+                    let im = scratch.im.as_ptr();
+                    let dre = scratch.dre.as_mut_ptr();
+                    let dim_p = scratch.dim.as_mut_ptr();
+                    for term in triple_terms {
+                        let i1 = term.i1;
+                        let i2 = term.i2;
+                        let i3 = term.i3;
+                        let ar = *re.add(base + i1);
+                        let ai = *im.add(base + i1);
+                        let br = *re.add(base + i2);
+                        let bi = *im.add(base + i2);
+                        let dr = *re.add(base + i3);
+                        let di = *im.add(base + i3);
+                        let g = term.g;
+                        *dre.add(i1) += g * (br * dr + bi * di);
+                        *dim_p.add(i1) += g * (-bi * dr + br * di);
+                        *dre.add(i2) += g * (ar * dr + ai * di);
+                        *dim_p.add(i2) += g * (-ai * dr + ar * di);
+                        *dre.add(i3) += g * (ar * br - ai * bi);
+                        *dim_p.add(i3) += g * (ar * bi + ai * br);
+                    }
+                }
+                let ls = [l1, l2, l3];
+                for (slot_l, &l) in ls.iter().enumerate() {
+                    if ls[..slot_l].contains(&l) {
+                        continue;
+                    }
+                    for m in -(l as i32)..=(l as i32) {
+                        let at = lm_index(l, m);
+                        let d_re = scratch.dre[at];
+                        let d_im = scratch.dim[at];
+                        if d_re == 0.0 && d_im == 0.0 {
+                            continue;
+                        }
+                        scatter_weighted(out, base, l, m, weight * d_re, weight * d_im);
+                    }
+                }
+            }
+        }
+    });
+}
+
+struct AceScratch {
+    re: Vec<f64>,
+    im: Vec<f64>,
+    dre: Vec<f64>,
+    dim: Vec<f64>,
+}
+
+impl AceScratch {
+    fn ensure(&mut self, n: usize) {
+        if self.re.len() < n {
+            self.re.resize(n, 0.0);
+            self.im.resize(n, 0.0);
+        }
+        if self.dre.len() < n {
+            self.dre.resize(n, 0.0);
+            self.dim.resize(n, 0.0);
+        }
+    }
+}
+
+thread_local! {
+    static ACE_SCRATCH: RefCell<AceScratch> = const {
+        RefCell::new(AceScratch {
+            re: Vec::new(),
+            im: Vec::new(),
+            dre: Vec::new(),
+            dim: Vec::new(),
+        })
+    };
+}
+
 fn m_of(l: usize, index: usize) -> i32 {
     index as i32 - (l * l + l) as i32
 }
@@ -429,6 +606,25 @@ fn scatter(j: &mut Array2<f64>, row: usize, base: usize, l: usize, m: i32, d_re:
     } else {
         j[[row, pos]] += d_re / SQRT_2;
         j[[row, neg]] += d_im * (-1.0 / SQRT_2);
+    }
+}
+
+/// [`scatter`] with the row weight already multiplied in, added into `out`.
+fn scatter_weighted(out: &mut [f64], base: usize, l: usize, m: i32, d_re: f64, d_im: f64) {
+    if m == 0 {
+        out[base + lm_index(l, 0)] += d_re;
+        return;
+    }
+    let am = m.abs();
+    let sign = if am % 2 == 0 { 1.0 } else { -1.0 };
+    let pos = base + lm_index(l, am);
+    let neg = base + lm_index(l, -am);
+    if m > 0 {
+        out[pos] += d_re * sign / SQRT_2;
+        out[neg] += d_im * sign / SQRT_2;
+    } else {
+        out[pos] += d_re / SQRT_2;
+        out[neg] += d_im * (-1.0 / SQRT_2);
     }
 }
 
@@ -576,6 +772,45 @@ mod tests {
             elapsed.as_millis() < 200,
             "ACE derivative took {elapsed:?}; a (H2O)20 pullback would not return"
         );
+    }
+
+    #[test]
+    fn the_adjoint_matches_the_transposed_derivative() {
+        for (n_max, l_max) in [(1usize, 1usize), (3, 6), (2, 8), (1, 9)] {
+            let n_c = n_max * (l_max + 1) * (l_max + 1);
+            let n_b = dim(n_max, l_max);
+            let c: Vec<f64> = (0..n_c)
+                .map(|i| ((i * 17 + 3) % 13) as f64 * 0.07 - 0.2)
+                .collect();
+            let weights: Vec<f64> = (0..n_b)
+                .map(|i| {
+                    if i % 5 == 0 {
+                        0.0
+                    } else {
+                        ((i % 9) as f64) - 4.0
+                    }
+                })
+                .collect();
+            let j = d_from_c(&c, n_max, l_max);
+            let mut expect = vec![0.0; n_c];
+            for row in 0..n_b {
+                for col in 0..n_c {
+                    expect[col] += j[[row, col]] * weights[row];
+                }
+            }
+            let mut got = vec![0.0; n_c];
+            adjoint_from_c(&c, n_max, l_max, &weights, &mut got);
+            let scale = expect.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+            let worst = got
+                .iter()
+                .zip(&expect)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f64, f64::max);
+            assert!(
+                worst <= 1e-9 * scale.max(1.0),
+                "adjoint off by {worst:e} at n_max {n_max} l_max {l_max}"
+            );
+        }
     }
 
     /// Little-endian base 2^64.
