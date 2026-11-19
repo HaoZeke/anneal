@@ -107,6 +107,22 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
       return -1;
     }
   }
+#ifdef REJECT_COINCIDENT
+  {
+    long j;
+    for (i = 0; i < n; i++) {
+      for (j = i + 1; j < n; j++) {
+        double dx = positions[3 * i] - positions[3 * j];
+        double dy = positions[3 * i + 1] - positions[3 * j + 1];
+        double dz = positions[3 * i + 2] - positions[3 * j + 2];
+        if (!(dx * dx + dy * dy + dz * dz > 0.0)) {
+          snprintf(pot->error, sizeof pot->error, "coincident atoms");
+          return RGPOT_ENGINE_ERR_EVAL;
+        }
+      }
+    }
+  }
+#endif
   for (i = 0; i < 3 * n; i++) {
     e += 0.5 * pot->k * positions[i] * positions[i];
     forces[i] = -pot->k * positions[i];
@@ -217,6 +233,22 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long n, const double *positions,
       return -1;
     }
   }
+#ifdef REJECT_COINCIDENT
+  {
+    long j;
+    for (i = 0; i < n; i++) {
+      for (j = i + 1; j < n; j++) {
+        double dx = positions[3 * i] - positions[3 * j];
+        double dy = positions[3 * i + 1] - positions[3 * j + 1];
+        double dz = positions[3 * i + 2] - positions[3 * j + 2];
+        if (!(dx * dx + dy * dy + dz * dz > 0.0)) {
+          snprintf(pot->error, sizeof pot->error, "coincident atoms");
+          return RGPOT_ENGINE_ERR_EVAL;
+        }
+      }
+    }
+  }
+#endif
   for (i = 0; i < 3 * n; i++) {
 #ifdef HVP_NONFINITE
     hv_out[i] = i == 1 ? NAN : pot->k * direction[i];

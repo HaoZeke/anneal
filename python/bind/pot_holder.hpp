@@ -422,9 +422,10 @@ inline HvpScheme parse_hvp_scheme(const std::string &name) {
   throw nb::value_error(msg.c_str());
 }
 
-/// HessianVectorCache::apply or centre while the caller is detached (F4).
-/// A non-finite kernel value is a NumericalError, as for evaluate().
-template <typename Fn> auto detached_hvp(Fn &&fn) {
+/// Run a potential call while the caller is detached (F4). A domain_error
+/// from the kernel or HessianVectorCache is a NumericalError, as for an
+/// energy that is not finite.
+template <typename Fn> auto run_detached(Fn &&fn) {
   nb::gil_scoped_release release;
   try {
     return fn();
@@ -437,13 +438,8 @@ template <typename Fn> auto detached_hvp(Fn &&fn) {
 /// detached (F4). A non-finite energy is a NumericalError, as for the
 /// PotHolder __call__.
 template <typename Pot> nb::tuple call_detached(Pot &pot, const Geom &geom) {
-  double energy = 0.0;
-  double variance = 0.0;
-  AtomMatrix forces;
-  {
-    nb::gil_scoped_release release;
-    std::tie(energy, forces, variance) = pot(geom.pos, geom.types, geom.box);
-  }
+  auto [energy, forces, variance] =
+      run_detached([&] { return pot(geom.pos, geom.types, geom.box); });
   if (!std::isfinite(energy)) {
     throw rgbind::NumericalError("energy is not finite");
   }
@@ -460,15 +456,10 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
          const F64 &box) {
         Geom geom = read_geom(positions, atom_types, box);
-        double energy = 0.0;
-        double variance = 0.0;
-        AtomMatrix forces;
-        {
-          nb::gil_scoped_release release;
+        auto [energy, forces, variance] = run_detached([&] {
           Pot &pot = self.slot();
-          std::tie(energy, forces, variance) =
-              pot(geom.pos, geom.types, geom.box);
-        }
+          return pot(geom.pos, geom.types, geom.box);
+        });
         if (!std::isfinite(energy)) {
           throw rgbind::NumericalError("energy is not finite");
         }
@@ -481,11 +472,8 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
          const F64 &box) {
         Geom geom = read_geom(positions, atom_types, box);
-        FullResult result;
-        {
-          nb::gil_scoped_release release;
-          result = run_force(self.slot(), geom);
-        }
+        FullResult result =
+            run_detached([&] { return run_force(self.slot(), geom); });
         return result_dict(result);
       },
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
@@ -498,11 +486,8 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
         [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
            const F64 &box) {
           Geom geom = read_geom(positions, atom_types, box);
-          PerAtomResult result;
-          {
-            nb::gil_scoped_release release;
-            result = run_force_per_atom(self.slot(), geom);
-          }
+          PerAtomResult result = run_detached(
+              [&] { return run_force_per_atom(self.slot(), geom); });
           const auto n = static_cast<size_t>(geom.pos.rows());
           nb::dict out = result_dict(result.total);
           out["energies"] = vector_to_numpy(result.energies, {n});
@@ -553,8 +538,7 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
           item.box = geom.box;
           inputs.push_back(std::move(item));
         }
-        std::vector<BatchResult> results;
-        {
+        std::vector<BatchResult> results = run_detached([&] {
           // F4. One BatchEvaluator call. Each worker owns one instance.
           // Do not construct more instances than there are configurations:
           // a single large cell would otherwise pay for unused workspaces.
@@ -564,10 +548,9 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
           if (width > inputs.size()) {
             width = static_cast<unsigned>(inputs.size());
           }
-          nb::gil_scoped_release release;
           BatchEvaluator eval([&] { return self.make(); }, width);
-          results = eval.evaluate(inputs);
-        }
+          return eval.evaluate(inputs);
+        });
         nb::list out;
         for (const BatchResult &item : results) {
           if (!std::isfinite(item.energy)) {
@@ -597,7 +580,7 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
         const HvpScheme parsed = parse_hvp_scheme(scheme);
         std::vector<double> v(direction.data(), direction.data() + 3 * n);
         AtomMatrix hv = AtomMatrix::Zero(geom.pos.rows(), 3);
-        detached_hvp([&] {
+        run_detached([&] {
           const std::array<double, 9> flat = flat_box(geom);
           const ForceInput in{.nAtoms = n,
                               .pos = geom.pos.data(),
@@ -623,7 +606,7 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
          const F64 &box) {
         Geom geom = read_geom(positions, atom_types, box);
-        const HvpCentre centre = detached_hvp([&] {
+        const HvpCentre centre = run_detached([&] {
           const std::array<double, 9> flat = flat_box(geom);
           const ForceInput in{.nAtoms = static_cast<size_t>(geom.pos.rows()),
                               .pos = geom.pos.data(),

@@ -64,8 +64,8 @@ The checks run in this order and raise these exceptions:
   =std::invalid_argument= raises =ValueError=; a kernel that fails with =std::runtime_error=
   raises =RuntimeError=.
   The message is the kernel's own text.
-- A non-finite energy raises =rgpot.NumericalError=, except where an entry says
-  otherwise.
+- A non-finite energy or a kernel =std::domain_error= raises
+  =rgpot.NumericalError=, except where an entry says otherwise.
 
 #+attr_rgpot: run
 #+begin_src python
@@ -117,7 +117,7 @@ except rgpot.NumericalError as err:
 TypeError
 positions: expected shape (N, 3), got (2, 2)
 atom_types: expected shape (2,), got (1,)
-energy is not finite
+LJPot force is undefined for coincident atoms
 #+end_example
 
 ** Module attributes
@@ -220,7 +220,8 @@ energy is not finite
 - Inputs :: the message string.
 - Units :: none.
 - Outputs :: an exception class, a subclass of =ArithmeticError=.
-  Potential calls raise it when the energy is not finite.
+  Potential calls raise it when the energy is not finite or a kernel rejects a
+  singular geometry with =std::domain_error=.
   =hvp= and =hvp_centre= also raise it when a force or a product is not finite.
 - Errors :: none.
 
@@ -487,6 +488,7 @@ rgpot.LJPot(u0=1.0, cutoff=15.0, psi=1.0, switch_width=0.0)
   It has an analytic Hessian-vector product: =has_analytic_hvp()= is true.
 - Errors :: a nonzero =switch_width= outside =0 < switch_width <= cutoff= raises
   =ValueError= =QuinticSwitch: switch width must satisfy 0 < width <= cutoff=.
+  Coincident atoms raise =rgpot.NumericalError=.
 
 *** =rgpot.LJClusterPot=
 

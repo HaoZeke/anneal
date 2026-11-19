@@ -258,6 +258,43 @@ TEST_CASE("classical engine LJPot analytic HVP rejects in-place aliasing",
   e.destroy(pot);
 }
 
+TEST_CASE("classical engine LJPot reports coincident atoms as evaluation errors",
+          "[engine][classical][lj]") {
+  Engine e;
+  if (!open_engine("CLASSICAL", e)) {
+    SKIP("no classical engine in this build");
+  }
+  RgpotEnginePot *pot = create(e, builtin_params("lj"));
+  REQUIRE(pot != nullptr);
+
+  const std::array<double, 6> coincident{};
+  const std::array<int, 2> z{1, 1};
+  const std::array<double, 6> direction{0.2, -0.3, 0.4, -0.1, 0.5, -0.2};
+  std::array<double, 6> forces{};
+  std::array<double, 6> product{};
+  double energy = 0.0;
+
+  REQUIRE(e.force(pot, 2, coincident.data(), z.data(), forces.data(), &energy,
+                  nullptr, kBox.data(), nullptr, nullptr) ==
+          RGPOT_ENGINE_ERR_EVAL);
+  REQUIRE(error_of(e, pot).find("coincident atoms") != std::string::npos);
+
+  REQUIRE(e.force_batch(pot, 1, 2, coincident.data(), z.data(), forces.data(),
+                        &energy, nullptr, kBox.data(), nullptr, nullptr) ==
+          RGPOT_ENGINE_ERR_EVAL);
+  REQUIRE(error_of(e, pot).find("coincident atoms") != std::string::npos);
+
+  REQUIRE(e.hvp(pot, 2, coincident.data(), z.data(), direction.data(),
+                product.data(), kBox.data()) == RGPOT_ENGINE_ERR_EVAL);
+  REQUIRE(error_of(e, pot).find("coincident atoms") != std::string::npos);
+
+  const std::array<double, 6> separated{0.0, 0.0, 0.0, 1.5, 0.0, 0.0};
+  REQUIRE(e.force(pot, 2, separated.data(), z.data(), forces.data(), &energy,
+                  nullptr, kBox.data(), nullptr, nullptr) == RGPOT_ENGINE_OK);
+  REQUIRE(error_of(e, pot).empty());
+  e.destroy(pot);
+}
+
 TEST_CASE("one classical handle serves many threads", "[engine][classical][threads]") {
   Engine e;
   if (!open_engine("CLASSICAL", e)) {

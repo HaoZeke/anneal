@@ -58,3 +58,48 @@ def test_d3_documented_damping_spellings(damping: str) -> None:
 def test_d3_unknown_damping_is_value_error(damping: str) -> None:
     with pytest.raises(ValueError, match="D3 damping"):
         rgpot.D3Pot(damping=damping)
+
+
+def test_lj_coincident_atoms_raise_numerical_error_everywhere() -> None:
+    from ase import Atoms
+    from rgpot.ase import RgpotCalculator
+
+    coincident = np.zeros((2, 3), dtype=np.float64)
+    direction = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]], dtype=np.float64)
+    pot = rgpot.LJPot()
+
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        pot(coincident, [1, 1], BOX)
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        pot.evaluate(coincident, [1, 1], BOX)
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        pot.evaluate_per_atom(coincident, [1, 1], BOX)
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        pot.evaluate_batch([coincident], [[1, 1]], [BOX])
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        pot.hvp(coincident, [1, 1], BOX, direction, scheme="analytic")
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        pot.hvp(coincident, [1, 1], BOX, direction, scheme="forward")
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        pot.hvp_centre(coincident, [1, 1], BOX)
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        rgpot.evaluate_lj(coincident, [1, 1], BOX)
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        rgpot.rgpot_gromacs_potential()(coincident, [1, 1], BOX)
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        rgpot.rgpot_openmm_potential()(coincident, [1, 1], BOX)
+
+    calc = RgpotCalculator("lj")
+    atoms = Atoms("H2", positions=coincident, cell=BOX, pbc=True)
+    atoms.calc = calc
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        atoms.get_potential_energy()
+    with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+        calc.calculate_many([atoms])
+
+    if rgpot.has_expr:
+        expr = rgpot.ExprPot("a", {"a": "lj"})
+        with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+            expr(coincident, [1, 1], BOX)
+        with pytest.raises(rgpot.NumericalError, match="coincident atoms"):
+            expr.evaluate(coincident, [1, 1], BOX)

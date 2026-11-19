@@ -42,23 +42,27 @@ int rgpot_lj_eval(const double *xyz, const int *atomic_numbers, size_t n,
   // atom count and atomic numbers.
   rgpot::KeptKey key;
   key.f64(u0).f64(cutoff).f64(psi).atoms(n, n > 0 ? atomic_numbers : nullptr);
-  rgpot::Kept<rgpot::LJPot>::with(
-      key,
-      [&] {
-        rgpot::LJConfig config;
-        config.u0 = u0;
-        config.cutoff = cutoff;
-        config.psi = psi;
-        return std::make_unique<rgpot::LJPot>(config);
-      },
-      [&](const rgpot::LJPot &pot) {
-        rgpot::ForceOut out{forces, 0.0, 0.0, {}, 0};
-        const rgpot::ForceInput in{n, xyz, atomic_numbers, box9};
-        pot.forceImpl(in, &out);
-        *energy = out.energy;
-        *has_stress = out.has_stress;
-        std::memcpy(stress, out.stress, 9 * sizeof(double));
-      });
+  try {
+    rgpot::Kept<rgpot::LJPot>::with(
+        key,
+        [&] {
+          rgpot::LJConfig config;
+          config.u0 = u0;
+          config.cutoff = cutoff;
+          config.psi = psi;
+          return std::make_unique<rgpot::LJPot>(config);
+        },
+        [&](const rgpot::LJPot &pot) {
+          rgpot::ForceOut out{forces, 0.0, 0.0, {}, 0};
+          const rgpot::ForceInput in{n, xyz, atomic_numbers, box9};
+          pot.forceImpl(in, &out);
+          *energy = out.energy;
+          *has_stress = out.has_stress;
+          std::memcpy(stress, out.stress, 9 * sizeof(double));
+        });
+  } catch (...) {
+    return 1;
+  }
   return 0;
 }
 
