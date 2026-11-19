@@ -2578,6 +2578,10 @@ fn search_kernels(cfg: &Config) -> Vec<ClusterMove> {
     kernels
 }
 
+/// Largest multiple of the preset temperature [`Config::plateau_heat`]
+/// reaches, after two plateaus without a new lowest minimum.
+const PLATEAU_HEAT_CAP: f64 = 4.0;
+
 /// One charged dynamic-lattice exchange, or a single-point step when the
 /// lattice has nothing to offer.
 fn energy_lattice_proposal<R: Rng + ?Sized>(
@@ -2585,8 +2589,9 @@ fn energy_lattice_proposal<R: Rng + ?Sized>(
     ledger: &mut Ledger,
     x: ArrayView1<f64>,
     rng: &mut R,
+    heat: f64,
 ) -> Array1<f64> {
-    let reduced = cfg.temperature / cfg.energy_scale.max(1e-12);
+    let reduced = heat * cfg.temperature / cfg.energy_scale.max(1e-12);
     let lattice = crate::methods::lattice_search::Lattice::default();
     let coords = x.to_vec();
     if let Some(y) = lattice.propose_energy_exchange(&coords, ledger, reduced, rng) {
@@ -4958,6 +4963,9 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    // Multiple of the preset temperature the walk hops at. It stays one
+    // unless `plateau_heat` is on.
+    let mut heat = 1.0_f64;
     // Fresh-start branches (`Config::branch_on_stall`): calls charged to
     // them, the walk's own clock at its last lower minimum and the longest
     // stretch the walk took between two, the walk's clock before which it
@@ -5050,6 +5058,7 @@ where
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
+            heat = 1.0;
             hops_at_lowest = hops;
             cage_edit = false;
             new_incumbent = true;
@@ -5823,6 +5832,9 @@ where
                 charged_at_best = ledger.spent();
             }
             directed_leave = true;
+            if cfg.plateau_heat {
+                heat = (heat * 2.0).min(PLATEAU_HEAT_CAP);
+            }
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
@@ -6474,8 +6486,11 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
+        // A leave or a symmetry quench can lower the best after the loop
+        // head has passed. The proposal below then uses the preset.
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
+            heat = 1.0;
         }
         // Gap to the incumbent, which is what the law scales the window by.
         let gap = (e - ledger.best).abs().max(1e-12);
@@ -6507,6 +6522,9 @@ where
             // acceptance rate toward one half without editing the preset.
             temperature *= rigid_factor;
         }
+        // `plateau_heat` is an acceptance temperature. The proposal step
+        // stays on `cfg.temperature`.
+        temperature *= heat;
         // The coldest rung's temperature from the state it holds, which the
         // energy bias is built and filled at. Read here, where that rung's own
         // hop reads its temperature, so the reading is the same whichever rung
@@ -7100,7 +7118,7 @@ where
                 }
                 _ => {
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
-                        energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                        energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
                     } else {
                         kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
@@ -7141,7 +7159,7 @@ where
                     }
                     _ => {
                         if matches!(kernels[k], ClusterMove::EnergyLattice) {
-                            energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                            energy_lattice_proposal(cfg, ledger, x.view(), rng, heat)
                         } else {
                             kernels[k].propose_scaled(
                                 x.view(),

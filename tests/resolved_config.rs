@@ -1,4 +1,5 @@
 use anneal_core::methods::cluster_hopping::{ArmSelection, Config, SoapProposalMode};
+use anneal_core::potentials::PairKind;
 
 #[test]
 fn resolved_configuration_is_stable_and_mode_sensitive() {
@@ -364,4 +365,19 @@ population_interval = 50\n";
             "expected clear removal error, got: {err}"
         );
     }
+}
+
+#[test]
+fn pair_scaling_is_general_and_lennard_jones_is_unchanged() {
+    let stock = Config::recommended(80);
+    let lennard_jones = Config::recommended_for_pair(80, PairKind::LennardJones);
+    assert_eq!(
+        stock.resolved_json().unwrap(),
+        lennard_jones.resolved_json().unwrap()
+    );
+
+    let morse = Config::recommended_for_pair(80, PairKind::Morse { rho: 6.0 });
+    assert_eq!(morse.energy_scale, 1.0);
+    assert!((morse.length_scale - 2.0_f64.powf(-1.0 / 6.0)).abs() < 1e-15);
+    assert!(morse.start_radius() < stock.start_radius());
 }

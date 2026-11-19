@@ -1280,6 +1280,14 @@ pub struct Config {
     /// short-ranged Morse, which keeps those call counts unchanged.
     #[serde(skip_serializing_if = "is_false")]
     pub long_ranged: bool,
+    /// Double the Metropolis temperature, and the lattice-exchange
+    /// temperature, on each escape plateau. The multiple stops at four.
+    /// A new lowest minimum returns it to the preset. The proposal step
+    /// stays on [`Config::temperature`].
+    ///
+    /// Off leaves the walk on the preset trajectory.
+    #[serde(skip_serializing_if = "is_false")]
+    pub plateau_heat: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
     /// Screened hopping's economy is that almost no hop is fully relaxed, so
@@ -1783,6 +1791,23 @@ impl Config {
         )
     }
 
+    /// [`Config::recommended`] in the natural length and energy units of a
+    /// unit-depth pair potential.
+    ///
+    /// The same rule is used for every pair form. Lennard-Jones is
+    /// bit-identical to [`Config::recommended`]; Morse rescales every length
+    /// from the Lennard-Jones diameter to its own pair minimum.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// use anneal_core::potentials::PairKind;
+    /// let lj = Config::recommended_for_pair(13, PairKind::LennardJones);
+    /// assert_eq!(lj.length_scale, Config::recommended(13).length_scale);
+    /// ```
+    pub fn recommended_for_pair(n_points: usize, kind: crate::potentials::PairKind) -> Self {
+        Self::recommended_with_scales(n_points, kind.length_scale(), 1.0)
+    }
+
     /// [`Config::recommended`] with every length in `length_scale` and every
     /// energy in `energy_scale`, as [`Config::with_scales`] reads them.
     ///
@@ -2228,6 +2253,7 @@ impl Config {
             answer_gradient: 0.0,
             trace_quenched: false,
             long_ranged: false,
+            plateau_heat: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,

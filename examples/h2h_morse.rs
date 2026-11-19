@@ -2,10 +2,15 @@
 //! One seed of `Config::recommended` on a Cambridge Morse cluster.
 //!
 //! ```text
-//! h2h_morse run <system> <seed>
+//! h2h_morse run <system> <seed> [coords]
 //! h2h_morse coords <system> <seed> <path>
 //! h2h_morse budget <system>
 //! ```
+//!
+//! `[coords]` is an optional start, one Cartesian line per atom. Without
+//! it, `run` draws the start. `H2H_PAIR_SCALE=1` uses
+//! `Config::recommended_for_pair` in place of `Config::recommended`.
+//! `H2H_PLATEAU_HEAT=1` heats a stalled walk. Unset, both leave the preset.
 //!
 //! The potential is the in-tree Morse pair, Doye and Wales' form with
 //! `epsilon = 1` and `r_0 = 1`. `rho` is the range. A hit is a quenched energy at
@@ -152,6 +157,15 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     }
     let mut cfg = Config::recommended(spec.n);
+    // `1` rescales preset lengths to this pair's minimum. Unset keeps the
+    // Lennard-Jones diameter the preset was measured in. Lennard-Jones
+    // itself is unchanged by that rescaling; Morse is not.
+    if std::env::var("H2H_PAIR_SCALE").is_ok_and(|value| value == "1") {
+        cfg = Config::recommended_for_pair(
+            spec.n,
+            anneal_core::potentials::PairKind::Morse { rho: spec.rho },
+        );
+    }
     // Unset leaves the preset's SOAP prior, stall symmetrisation, and
     // continuous-symmetry proposal on. `0` turns them off; `soap` turns off
     // only the SOAP proposal. Removed prior names fail fast.
@@ -175,6 +189,10 @@ fn cmd_run(args: &[String]) -> i32 {
     // `1` turns on the fresh-start branch, `Config::branch_on_stall`.
     if std::env::var("H2H_BRANCH").is_ok_and(|value| value == "1") {
         cfg.branch_on_stall = true;
+    }
+    // `1` heats the walk on each call plateau. Unset leaves the preset.
+    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
+        cfg.plateau_heat = true;
     }
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {

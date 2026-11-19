@@ -2,7 +2,7 @@
 //! One seed of `Config::recommended` on a paper Lennard-Jones size.
 //!
 //! ```text
-//! h2h_gmin_proof run <system> <seed>
+//! h2h_gmin_proof run <system> <seed> [coords]
 //! h2h_gmin_proof coords <system> <seed> <path>
 //! h2h_gmin_proof energy <system> <path>
 //! h2h_gmin_proof summarize <rows.csv> <summary.csv>
@@ -14,7 +14,9 @@
 //! at or below the published minimum plus 0.001, or when the budget is
 //! spent. A miss is reported as the full budget. `pot_s` is the time
 //! spent inside the potential, summed over the charged evaluations.
-//! The configuration is `Config::recommended` with no further change.
+//! The configuration is `Config::recommended`. `H2H_PLATEAU_HEAT=1` heats
+//! a stalled walk; unset, the temperature stays on the preset. `[coords]`
+//! receives the start `run` quenches, one Cartesian line per atom.
 //!
 //! `coords` writes the start that `run` quenches, one Cartesian line per
 //! atom, so another code can open the same geometry.
@@ -73,6 +75,10 @@ fn cmd_run(args: &[String]) -> i32 {
     // `1` turns on the fresh-start branch, `Config::branch_on_stall`.
     if std::env::var("H2H_BRANCH").is_ok_and(|value| value == "1") {
         cfg.branch_on_stall = true;
+    }
+    // `1` heats the walk on each call plateau. Unset leaves the preset.
+    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
+        cfg.plateau_heat = true;
     }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)
