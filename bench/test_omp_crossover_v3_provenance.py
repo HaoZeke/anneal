@@ -108,6 +108,8 @@ def main() -> None:
         json_path = json_path / args.json_relative
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     report_path = args.report or json_path.with_name(REPORT_NAME)
+    if not report_path.is_absolute():
+        report_path = args.repo / report_path
     if not report_path.is_file():
         raise SystemExit(f"report is missing: {report_path.name}")
     check_provenance(args.repo, payload, report_path.read_text(encoding="utf-8"))
