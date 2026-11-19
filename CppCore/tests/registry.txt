@@ -160,6 +160,7 @@ ZBLPotTest | tests core | unit zbl_pot_test ZBLPotTest.cc |
 PerAtomTest | tests core | unit per_atom_test PerAtomTest.cc |
 LocalityTest | tests core | unit locality_test LocalityTest.cc |
 StagedTest | tests core | unit staged_test StagedTest.cc |
+Staged3BodyTest | tests core | unit staged_3body_test Staged3BodyTest.cc timeout=60 |
 FastNlistTest | tests core | unit fast_nlist_test FastNlistTest.cc fp_contract=off |
 IsaDispatchTest | tests core | unit isa_dispatch_test IsaDispatchTest.cc |
 FmaExactTest | tests core | unit fma_exact_test FmaExactTest.cc |

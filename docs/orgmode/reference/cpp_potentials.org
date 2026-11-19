@@ -368,22 +368,30 @@ void forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &atoms) 
 #+end_src
 
 - Applies to :: rgpot::EAMTablePot, rgpot::LJPot, rgpot::MorsePot,
-  rgpot::SuttonChenPot
+  rgpot::StillingerWeberSi, rgpot::SuttonChenPot, rgpot::TersoffSiC
 - Inputs :: none.
 - Units :: =cutoff= in the length unit of the potential: Angstrom for
-  =rgpot::LJPot= and =rgpot::MorsePot=, the unit of =a= for
-  =rgpot::SuttonChenPot= and the unit of the table for =rgpot::EAMTablePot=.
+  =rgpot::LJPot=, =rgpot::MorsePot=, =rgpot::StillingerWeberSi= and
+  =rgpot::TersoffSiC=, the unit of =a= for =rgpot::SuttonChenPot= and the unit
+  of the table for =rgpot::EAMTablePot=.
 - Outputs :: a =rgpot::Locality= from =CppCore/rgpot/Locality.hpp=.
   =cutoff= is the range of each site energy, =pairwise= is true when every
   energy term is a function of one pair distance, and =densities= is the number
   of values per atom that =densityStage= sums and =forceStage= reads.
+  =full= asks for the full neighbour list, and =reach= is how many cutoffs of
+  copies the host holds.
+  =ghostReach()= is =reach= times =cutoff=, or 0 when there is no finite range.
   =forceRange()= is =cutoff= for a pairwise potential and twice =cutoff=
   otherwise; the atoms within it of an atom set the force on that atom.
   A host that evaluates its own atoms with every atom within =forceRange()= of
   them, free of periodic images, gets the forces, site energies and per-atom
   virials those atoms have in the whole system.
-  With =densityStage= and =forceStage= it needs only the atoms within =cutoff=,
-  and exchanges =densities= values per atom between the two stages.
+  With =densityStage= and =forceStage= the copies reach =ghostReach()=.
+  A pair potential and a density potential set =reach= to 1 and leave =full=
+  unset: the exchange of =densities= values per atom carries the second shell,
+  so the copies stop at one cutoff.
+  A three-body kernel sets =full= and =reach= 2, so the copies reach twice the
+  cutoff and each neighbour's list can be filled.
   A =cutoff= of 0 declares no finite range.
 - Errors :: none.
 
@@ -393,6 +401,11 @@ and 0 when the cutoff is 0 or less.
 many-body range with =densities= 1.
 =rgpot::SuttonChenPot= returns 0 when its cutoff is 0 or less, since it then
 keeps every pair.
+=rgpot::StillingerWeberSi= returns =kCut * kSigma= with =full= set and =reach=
+2.
+=rgpot::TersoffSiC= returns the silicon outer cutoff, 3 Angstrom, with =full=
+set and =reach= 2.
+Both have =densities= 0, and =ghostReach()= is twice the cutoff.
 
 *** =.densityStage=
 
@@ -1100,11 +1113,60 @@ StillingerWeberSi();
   Atomic numbers are not read.
   The cell is periodic in every direction.
   The force call writes the stress.
+  =locality=, =densityStage= and =forceStage= evaluate one host's owned atoms
+  on a full neighbour list; see those entries.
   This is not the kernel behind =PotType::SWSi=; see =rgpot::fortranpots::SWPot=
   and [[file:sw_si.org][Stillinger-Weber silicon (1985)]].
 - Errors :: the force call throws =std::invalid_argument= for a null =ForceOut=,
   for a null position, cell or force buffer when =nAtoms= > 0, and for a
   non-finite position.
+
+*** =rgpot::StillingerWeberSi::densityStage=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void densityStage(const HalfList &list, double *densities) const;
+#+end_src
+
+- Inputs :: =list= and =densities=, as for =.densityStage=.
+- Units :: none.
+- Outputs :: none.
+  A three-body kernel has no densities: =locality().densities= is 0, and the
+  call writes nothing.
+- Errors :: none.
+
+*** =rgpot::StillingerWeberSi::forceStage=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void forceStage(const HalfList &list, const double *densities, double *forces,
+                StageTally *tally) const;
+#+end_src
+
+- Inputs :: =list= with =full= and =newton= set, =densities= (not read),
+  =forces= of length 3 * nAtoms, and =tally= or null.
+  The rows are the owned centres.
+  A copy's row, when the host fills it, is that neighbour's full list and is
+  not a centre.
+- Units :: the units of =forceImpl=.
+- Outputs :: adds the forces of each owned centre.
+  A two-body term on the full list is counted from the atom whose partner sits
+  strictly above it in z, then y, then x, the tie break =pair_sw= uses when two
+  tags match, so exactly one host counts the pair.
+  A three-body term is counted at each owned centre.
+  Pairs at or beyond =kCut * kSigma= are skipped, so a list built out to
+  =ghostReach()= works.
+  With a tally the host's energy is added, and the virial W = -dE/dε is added
+  in the order xx, yy, zz, yz, xz, xy.
+  Forces written on copies are for the host to add back to their owners.
+  =Staged3BodyTest= splits a periodic silicon cell into 2, 4 and 8 slabs, and
+  repeats the check on a triclinic cell and on a slab thinner than two cutoffs.
+  The owned energies, the forces after that reverse sum, and the virial match
+  =forceImpl= to a relative tolerance of 1e-10.
+- Errors :: throws =std::invalid_argument= when the list is not full, when
+  =newton= is off, when a buffer or a neighbour row is null and the host has
+  atoms, and when a position is not finite.
+  An empty host returns without reading the buffers.
 
 *** =rgpot::TersoffSiC=
 
@@ -1122,6 +1184,8 @@ TersoffSiC();
   Angstrom for carbon; a mixed pair takes the geometric mean of each.
   The cell is periodic in every direction.
   The force call writes the stress.
+  =locality=, =densityStage= and =forceStage= evaluate one host's owned atoms
+  on a full neighbour list; see those entries.
   See [[file:tersoff_sic.org][Tersoff Si-C]].
 - Errors :: the force call throws =std::invalid_argument= for a null =ForceOut=,
   for a null position, atomic number, cell or force buffer when =nAtoms= > 0,
@@ -1140,6 +1204,53 @@ TersoffSiC();
   positive skin.
   It is not built until such a call.
 - Errors :: none.
+
+*** =rgpot::TersoffSiC::densityStage=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void densityStage(const HalfList &list, double *densities) const;
+#+end_src
+
+- Inputs :: =list= and =densities=, as for =.densityStage=.
+- Units :: none.
+- Outputs :: none.
+  A three-body kernel has no densities: =locality().densities= is 0, and the
+  call writes nothing.
+- Errors :: none.
+
+*** =rgpot::TersoffSiC::forceStage=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+void forceStage(const HalfList &list, const double *densities, double *forces,
+                StageTally *tally) const;
+#+end_src
+
+- Inputs :: =list= with =full= and =newton= set, =densities= (not read),
+  =forces= of length 3 * nAtoms, and =tally= or null.
+  The rows are the owned centres.
+  A copy's row, when the host fills it, is that neighbour's full list and is
+  not a centre.
+  Atomic numbers are read for every atom, copies included.
+- Units :: the units of =forceImpl=.
+- Outputs :: adds the forces of each owned centre.
+  Every directed bond is kept: the 1989 sum already carries the one half, and
+  the partner's owner counts the bond that leaves the partner.
+  Pairs at or beyond the silicon outer cutoff, and pairs beyond a pair's own
+  outer cutoff, are skipped, so a list built out to =ghostReach()= works.
+  With a tally the host's energy is added, and the virial W = -dE/dε is added
+  in the order xx, yy, zz, yz, xz, xy.
+  Forces written on copies are for the host to add back to their owners.
+  =Staged3BodyTest= splits a periodic silicon carbide cell into 2, 4 and 8
+  slabs, and repeats the check on a triclinic cell and on a slab thinner than
+  two cutoffs.
+  The owned energies, the forces after that reverse sum, and the virial match
+  =forceImpl= to a relative tolerance of 1e-10.
+- Errors :: throws =std::invalid_argument= when the list is not full, when
+  =newton= is off, when a buffer or a neighbour row is null and the host has
+  atoms, and when an atomic number is other than 14 or 6.
+  An empty host returns without reading the buffers.
 
 ** Water
 

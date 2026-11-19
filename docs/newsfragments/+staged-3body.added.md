@@ -1,0 +1,1 @@
+`StillingerWeberSi` and `TersoffSiC` can be evaluated on a local region plus ghost atoms. Each declares a full neighbour list and a ghost reach of twice its cutoff. A driver sums the energy of the owned atoms and adds the forces written on ghost atoms back to their owners. Results for a whole cell are unchanged.

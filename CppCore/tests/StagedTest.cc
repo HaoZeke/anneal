@@ -388,9 +388,17 @@ TEST_CASE("Potentials with stages declare what they exchange", "[Staged]") {
   };
   STATIC_REQUIRE(rgpot::LocalPotential<Local>);
   STATIC_REQUIRE_FALSE(rgpot::StagedPotential<Local>);
-  CHECK(rgpot::LJPot({.u0 = 0.0104, .cutoff = 8.5, .psi = 3.40}).locality().densities == 0);
+  const rgpot::Locality lj = rgpot::LJPot({.u0 = 0.0104, .cutoff = 8.5, .psi = 3.40}).locality();
+  CHECK(lj.densities == 0);
+  CHECK_FALSE(lj.full);
+  CHECK(lj.reach == 1);
   CHECK(rgpot::MorsePot({.cutoff = 7.0}).locality().densities == 0);
-  CHECK(sutton_chen().locality().densities == 1);
+  const rgpot::Locality sc = sutton_chen().locality();
+  CHECK(sc.densities == 1);
+  CHECK_FALSE(sc.full);
+  CHECK(sc.reach == 1);
+  CHECK(sc.ghostReach() == 7.0);
+  CHECK(sc.forceRange() == 14.0);
 #ifdef RGPOT_HAS_EAM_TABLE
   STATIC_REQUIRE(rgpot::StagedPotential<rgpot::EAMTablePot>);
   CHECK(cu_ni().locality().densities == 1);

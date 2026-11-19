@@ -122,6 +122,23 @@ its stress.
 Every =TersoffPot= call leaves =has_stress= at 0 and the nine entries at zero,
 so a reused output keeps no tensor from an earlier call.
 
+** Domain decomposition
+
+=locality= returns the silicon outer cutoff, 3 Angstrom, with a full neighbour
+list and a reach of 2, so the copies a host must hold go out to twice that
+cutoff.
+=densityStage= writes nothing.
+=forceStage= evaluates owned centres on that full list.
+Every directed bond is kept, because the 1989 sum already carries the one half,
+and the partner's owner counts the bond that leaves the partner.
+Pairs beyond a pair's own outer cutoff are skipped.
+With newton on, the host adds the forces written on copies back to their owners
+and sums the owned energies.
+=Staged3BodyTest= checks a periodic silicon carbide cell, split into 2, 4 and 8
+slabs, against =forceImpl= to a relative tolerance of 1e-10, including a
+triclinic cell and a slab thinner than two cutoffs.
+The whole-cell call is unchanged.
+
 ** Diamond energies
 
 At a0 = 5.432 Angstrom the silicon diamond energy is -4.629595

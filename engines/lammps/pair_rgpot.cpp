@@ -29,19 +29,24 @@
 //
 // Domain: for a potential with a finite range (rgpot/Locality.hpp) and
 // the staged evaluation of rgpot/Staged.hpp, each rank evaluates its
-// owned atoms on the LAMMPS half neighbour list, the scheme of pair_style
-// eam. init_one returns the potential's cutoff, so the ghosts reach one
-// cutoff plus the skin past the subdomain and LAMMPS rebuilds the list
-// only when atoms have moved half the skin. The density stage sums each
-// atom's densities (the electron density of EAM and Sutton-Chen; a
-// pairwise potential has none) over the list. Under newton_pair on, the
-// entries it wrote to ghosts go back to their owners by reverse
-// communication. Forward communication then gives every ghost its
-// owner's completed densities, and the force stage adds the pair forces
-// into the LAMMPS force array: to ghosts as well under newton_pair on,
-// for LAMMPS to return to their owners as it does for any pair style.
-// Every rank tallies its share of the energy and virial and LAMMPS sums
-// them over ranks.
+// owned atoms on the LAMMPS neighbour list. A pair potential and a
+// density potential (EAM, Sutton-Chen) use a half list. init_one returns
+// Locality::ghostReach(), one cutoff for those potentials, so the ghosts
+// reach one cutoff plus the skin past the subdomain and LAMMPS rebuilds
+// the list only when atoms have moved half the skin. The density stage
+// sums each atom's densities (the electron density of EAM and
+// Sutton-Chen; a pairwise potential has none) over the list. Under
+// newton_pair on, the entries it wrote to ghosts go back to their owners
+// by reverse communication. Forward communication then gives every ghost
+// its owner's completed densities, and the force stage adds the pair
+// forces into the LAMMPS force array: to ghosts as well under newton_pair
+// on, for LAMMPS to return to their owners as it does for any pair style.
+// A three body kernel declares a full list and a reach of two cutoffs.
+// init_one returns that reach, the list is the full list pair_sw and
+// pair_tersoff request, and newton_pair must be on so LAMMPS reverse
+// communicates the forces written on ghosts. The kernel keeps pairs
+// inside its own cutoff. Every rank tallies its share of the energy and
+// virial and LAMMPS sums them over ranks.
 //
 // mode auto takes the domain path on more than one rank when the
 // potential allows it and the virial is not the strain difference; mode
@@ -76,6 +81,7 @@
 #include "lammpsplugin.h"
 #include "memory.h"
 #include "neigh_list.h"
+#include "neigh_request.h"
 #include "neighbor.h"
 #include "update.h"
 #include "utils.h"
@@ -362,13 +368,22 @@ void PairRgpot::init_style() {
     error->all(FLERR, "pair_style rgpot: too many atoms");
   }
   comm_forward = comm_reverse = use_domain ? built.locality.densities : 0;
+  if (use_domain && built.locality.full && force->newton_pair == 0) {
+    error->all(FLERR, "pair_style rgpot: {} needs newton on for its full neighbour list", pot_name);
+  }
   if (use_domain) {
-    neighbor->add_request(this);
+    if (built.locality.full) {
+      neighbor->add_request(this, NeighConst::REQ_FULL);
+    } else {
+      neighbor->add_request(this);
+    }
   }
   if (comm->me == 0) {
     if (use_domain) {
-      utils::logmesg(lmp, "pair_style rgpot: domain decomposition, cutoff {:.8g}, densities {}\n",
-                     built.locality.cutoff, built.locality.densities);
+      utils::logmesg(lmp,
+                     "pair_style rgpot: domain decomposition, cutoff {:.8g}, densities {}, "
+                     "reach {}\n",
+                     built.locality.cutoff, built.locality.densities, built.locality.reach);
     } else {
       const std::string why =
           !refusal.empty() ? refusal : (mode == Mode::Auto ? "one rank" : "");
@@ -379,10 +394,15 @@ void PairRgpot::init_style() {
 }
 
 double PairRgpot::init_one(int, int) {
-  // The neighbour list of the domain path, and its ghosts, reach the
-  // cutoff plus the skin; the density exchange stands in for the second
-  // cutoff that a many-body force needs.
-  return use_domain ? built.locality.cutoff : cut_global;
+  // The neighbour list of the domain path, and its ghosts, reach
+  // ghostReach() plus the skin. A density exchange stands in for the
+  // second cutoff. A three body kernel sets ghostReach() to twice its
+  // cutoff and keeps only pairs inside the cutoff.
+  if (!use_domain) {
+    return cut_global;
+  }
+  const double reach = built.locality.ghostReach();
+  return reach > 0.0 ? reach : cut_global;
 }
 
 int PairRgpot::evaluate(std::size_t n, const double *xyz, const int *z, const double *box,
@@ -489,6 +509,7 @@ void PairRgpot::compute_domain() {
   half.neighbours = list->firstneigh;
   half.indexMask = NEIGHMASK;
   half.newton = force->newton_pair != 0;
+  half.full = built.locality.full;
 
   const bool want_e = eflag_global || eflag_atom;
   const bool want_v = vflag_global || vflag_atom;

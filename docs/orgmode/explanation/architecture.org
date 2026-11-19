@@ -158,6 +158,25 @@ implements =forceImpl(const ForceInput&, ForceOut*) const=.
 without copying it.
 The caller keeps the object alive for as long as the handle exists.
 
+A potential with a finite range can also declare how a domain-decomposed host
+should evaluate it.
+=locality()= returns the cutoff, whether the neighbour list is full, how many
+cutoffs of ghost atoms the host must hold, and how many density values to
+exchange.
+=densityStage= and =forceStage= then run on the host's own atoms plus those
+ghosts.
+A pair potential and a density potential (EAM, Sutton-Chen) use a half list and
+one cutoff of ghosts: the density exchange carries what the neighbours of the
+neighbours contribute.
+=StillingerWeberSi= and =TersoffSiC= declare a full list and a ghost reach of
+twice the cutoff, because a three-body term on a local atom needs each
+neighbour's list.
+The host sums the energy of its owned atoms and adds the forces written on
+ghosts back to their owners.
+The kernels do not decompose the cell themselves.
+Neighbour lists stay in the stack libraries (linkcell, vesin, minimage) and in
+=nlist::build=.
+
 ** Error handling
 
 Errors change form at each boundary, because each language has its own
