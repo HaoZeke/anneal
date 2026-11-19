@@ -346,6 +346,14 @@ def cluster_search(
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
     The best geometry found is kept, and the exception is re-raised here.
 
+    The result also carries ``ledger``, a dict that splits the evaluations the
+    search charged by where they went: ``spent`` in all, ``screen``, ``full``
+    and ``check`` inside quenches, the ``quenches`` that ``converged`` or were
+    ``capped``, the trials the screen dropped (``screened_out``) or the return
+    test sent home (``returned``), the proposals refused for overlap, and the
+    ``basins`` registered. What is spent and not in a quench is the proposal
+    probes and the answer polish.
+
     Returns a dict with ``best`` (flat coordinates in the state layout),
     ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``,
     ``local_step`` and ``quench_seconds``. ``accepted`` counts the hops the

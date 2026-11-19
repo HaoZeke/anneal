@@ -147,6 +147,7 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         "budget": budget,
         "hops": result.get("hops"),
         "accepted": result.get("accepted"),
+        "ledger": result.get("ledger"),
         "best_kcal": float(result["best_energy"]) * hc.KCAL_PER_EV if error is None else None,
         "candidates": len(frames),
         "groups": len(groups),
