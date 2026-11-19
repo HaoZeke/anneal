@@ -1,0 +1,55 @@
+# Copyright (c) anneal developers
+# Recommended Morse A/B gate. One core. The shell recipes pin the process
+# tree themselves; pass --cores 1.
+
+rule all:
+    input:
+        "bench/recommended-morse-gate/rows.csv",
+        "bench/recommended-morse-gate/summary.csv",
+        "bench/recommended-morse-gate/hosts.csv",
+        "bench/recommended-morse-gate/verdict.txt",
+
+
+rule gate:
+    output:
+        rows="bench/recommended-morse-gate/rows.csv",
+        hosts="bench/recommended-morse-gate/hosts.csv",
+    threads: 1
+    shell:
+        """
+        set -euo pipefail
+        export LJOS_SEAT=benchbot
+        export OMP_NUM_THREADS=1 OMP_THREAD_LIMIT=1 OMP_DYNAMIC=FALSE
+        export OMP_PROC_BIND=TRUE OMP_PLACES=cores
+        export MKL_NUM_THREADS=1 MKL_DOMAIN_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+        export BLIS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMBA_NUM_THREADS=1
+        export NUMEXPR_NUM_THREADS=1 RAYON_NUM_THREADS=1 GOTO_NUM_THREADS=1
+        export TBB_NUM_THREADS=1 POLARS_MAX_THREADS=1 JULIA_NUM_THREADS=1
+        taskset -c 0 python3 bench/recommended-morse-gate/run_gate.py \
+          --rows {output.rows} \
+          --hosts {output.hosts} \
+          --logs bench/recommended-morse-gate/logs \
+          --a-bin "$GATE_A_BIN" --a-rev "$GATE_A_REV" --a-tree "$GATE_A_TREE" --a-worktree "$GATE_A_WORKTREE" \
+          --b-bin "$GATE_B_BIN" --b-rev "$GATE_B_REV" --b-tree "$GATE_B_TREE" --b-worktree "$GATE_B_WORKTREE" \
+          --b2-bin "$GATE_B2_BIN" --b2-worktree "$GATE_B2_WORKTREE" \
+          --layout-bin "end64=$GATE_L1_BIN" --layout-worktree "end64=$GATE_L1_WORKTREE" \
+          --layout-bin "start256=$GATE_L2_BIN" --layout-worktree "start256=$GATE_L2_WORKTREE" \
+          --layout-bin "align1024=$GATE_L3_BIN" --layout-worktree "align1024=$GATE_L3_WORKTREE"
+        """
+
+
+rule summarize:
+    input:
+        rows="bench/recommended-morse-gate/rows.csv",
+    output:
+        summary="bench/recommended-morse-gate/summary.csv",
+        verdict="bench/recommended-morse-gate/verdict.txt",
+    threads: 1
+    shell:
+        """
+        set -euo pipefail
+        python3 bench/recommended-morse-gate/summarize.py \
+          --rows {input.rows} \
+          --summary {output.summary} \
+          --verdict {output.verdict}
+        """
