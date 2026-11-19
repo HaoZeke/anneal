@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -37,9 +36,9 @@ class FakePotential:
         return Result()
 
 
-def test_make_nwchem_params_fields() -> None:
-    os.environ["RGPOT_NWCHEM_ENGINE"] = "/env/libnwchemc.so"
-    os.environ["NWCHEM_TOP"] = "/env/nwchem"
+def test_make_nwchem_params_fields(monkeypatch) -> None:
+    monkeypatch.setenv("RGPOT_NWCHEM_ENGINE", "/env/libnwchemc.so")
+    monkeypatch.setenv("NWCHEM_TOP", "/env/nwchem")
     params = make_nwchem_params(
         pot_capnp,
         basis="6-31g*",
@@ -133,7 +132,10 @@ def test_nwchem_params_flat_serialize_round_trip() -> None:
 
 
 if __name__ == "__main__":
-    test_make_nwchem_params_fields()
+    import pytest
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        test_make_nwchem_params_fields(monkeypatch)
     test_make_potential_config_nwchem_arm()
     test_make_potential_config_none_arm()
     test_configure_nwchem_async_round_trip()
