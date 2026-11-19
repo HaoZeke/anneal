@@ -154,6 +154,9 @@ maturin = ">=1.5,<2"
 [feature.itests.pypi-dependencies]
 pytest = ">=9.2.0, <10"
 
+[feature.itests.tasks]
+rpctest = { cmd = "bash scripts/run_rpctest.sh", description = "Build potserv and the fake engines, export their paths, and run the RPC Python tests" }
+
 # Dedicated environment for the eOn minimization landscape visualization. eon
 # pins fmt>=12, which conflicts with rgpot's C++ fmt<12, so this env carries no
 # default feature and shares nothing with the C++ build deps.

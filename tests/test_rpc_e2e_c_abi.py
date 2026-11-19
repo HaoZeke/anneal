@@ -6,7 +6,9 @@ Needs:
   RGPOT_NWCHEM_ENGINE / NWCHEMC_LIBRARY  path to libnwchemc (fake or real)
   RGPOT_CPMD_ENGINE  / CPMDC_LIBRARY     path to libcpmdc (fake or real)
 
-Skips when potserv or the named engine library is absent.
+The rpctest task and `potctl ci rpc-integ` export the paths and set
+`RGPOT_RPC_E2E_REQUIRED`, so the tests run there. Outside that task a
+missing binary skips and the reason is printed.
 """
 
 from __future__ import annotations
@@ -31,10 +33,23 @@ from cpmd_params import configure_cpmd  # noqa: E402
 from nwchem_params import configure_nwchem, make_potential_config_none  # noqa: E402
 
 
+_OUTSIDE_TASK = "Outside the rpctest task this case is skipped."
+
+
+def _missing(reason: str) -> None:
+    message = (
+        f"{reason} The rpctest task and potctl ci rpc-integ export "
+        f"RGPOT_POTSERV and the fake engine libraries. {_OUTSIDE_TASK}"
+    )
+    if os.environ.get("RGPOT_RPC_E2E_REQUIRED", "").strip() == "1":
+        raise RuntimeError(message)
+    pytest.skip(message)
+
+
 def _require_env(name: str) -> str:
     val = os.environ.get(name, "").strip()
     if not val or not Path(val).exists():
-        pytest.skip(f"optional potserv binary is absent ({name})")
+        _missing(f"{name} is unset or is not a potserv binary.")
     return val
 
 
@@ -44,7 +59,7 @@ def _pick_engine(missing: str, *names: str) -> str:
         if v and Path(v).exists():
             return v
     joined = ", ".join(names)
-    pytest.skip(f"optional {missing} engine library is absent ({joined})")
+    _missing(f"the {missing} engine library is absent ({joined}).")
 
 
 async def _connect(port: int, retries: int = 20):
@@ -192,7 +207,23 @@ def test_cpmd_rpc_configure_and_calculate() -> None:
     print(f"CPMD E2E energy={energy} forces0={forces[0]}")
 
 
-if __name__ == "__main__":
-    test_nwchem_rpc_configure_and_calculate()
-    test_cpmd_rpc_configure_and_calculate()
+def _main() -> int:
+    failed = False
+    for test in (
+        test_nwchem_rpc_configure_and_calculate,
+        test_cpmd_rpc_configure_and_calculate,
+    ):
+        try:
+            test()
+        except pytest.skip.Exception as skipped:
+            reason = getattr(skipped, "msg", None) or str(skipped)
+            print(reason, file=sys.stderr)
+            failed = True
+    if failed:
+        return 1
     print("test_rpc_e2e_c_abi: all ok")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

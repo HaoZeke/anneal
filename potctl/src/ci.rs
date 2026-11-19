@@ -1269,30 +1269,137 @@ pub fn run_bridge_stress_full(
     run_bridge_stress(root, server_build_dir, client_build_dir, port, potential, 2)
 }
 
-/// `potctl ci rpc-integ` — run tests/rpc_integ.py against potserv in bbdir.
-pub fn run_rpc_integ(root: &Path, server_bin: &str) -> Result<()> {
-    let script = root.join("tests/rpc_integ.py");
-    if !script.is_file() {
-        return Err(format!("missing {}", script.display()));
+struct RpcIntegPlan {
+    env: Vec<(String, String)>,
+    rpc_args: Vec<String>,
+    e2e_args: Vec<String>,
+}
+
+fn resolve_under_root(root: &Path, path: &str) -> PathBuf {
+    let candidate = PathBuf::from(path);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        root.join(candidate)
     }
-    let st = Command::new("python")
-        .arg(&script)
-        .args(["--server-bin", server_bin])
-        .current_dir(root)
+}
+
+/// File name Meson gives a `shared_library` on this host.
+fn engine_library_name(stem: &str) -> String {
+    match std::env::consts::OS {
+        "windows" => format!("{stem}.dll"),
+        "macos" => format!("lib{stem}.dylib"),
+        _ => format!("lib{stem}.so"),
+    }
+}
+
+fn python_program() -> Result<String> {
+    for name in ["python", "python3"] {
+        match Command::new(name)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            Ok(status) if status.success() => return Ok(name.to_string()),
+            _ => {}
+        }
+    }
+    Err("python was not found on PATH".into())
+}
+
+/// Paths and arguments for `potctl ci rpc-integ`.
+///
+/// `RGPOT_POTSERV` and the fake NWChem and CPMD engines are exported, and
+/// `RGPOT_RPC_E2E_REQUIRED` is set so a missing binary fails instead of skipping.
+fn plan_rpc_integ(root: &Path, server_bin: &str) -> Result<RpcIntegPlan> {
+    let potserv = resolve_under_root(root, server_bin);
+    let directory = potserv
+        .parent()
+        .ok_or_else(|| format!("potserv path {} has no directory", potserv.display()))?;
+    let nwchem = directory.join(engine_library_name("nwchemc_fake_engine"));
+    let cpmd = directory.join(engine_library_name("cpmdc_fake_engine"));
+    let potserv_s = potserv.to_string_lossy().into_owned();
+    let nwchem_s = nwchem.to_string_lossy().into_owned();
+    let cpmd_s = cpmd.to_string_lossy().into_owned();
+    let mut env = Vec::new();
+    env.push(("RGPOT_POTSERV".to_string(), potserv_s.clone()));
+    for key in [
+        "NWCHEMC_LIBRARY",
+        "RGPOT_NWCHEMC_ENGINE",
+        "RGPOT_NWCHEM_ENGINE",
+    ] {
+        env.push((key.to_string(), nwchem_s.clone()));
+    }
+    for key in ["CPMDC_LIBRARY", "RGPOT_CPMDC_ENGINE", "RGPOT_CPMD_ENGINE"] {
+        env.push((key.to_string(), cpmd_s.clone()));
+    }
+    env.push(("RGPOT_RPC_E2E_REQUIRED".to_string(), "1".to_string()));
+    let rpc_args = vec![
+        root.join("tests/rpc_integ.py")
+            .to_string_lossy()
+            .into_owned(),
+        "--server-bin".to_string(),
+        potserv_s,
+    ];
+    let e2e_args = vec![
+        "-m".to_string(),
+        "pytest".to_string(),
+        "-q".to_string(),
+        "--tb=short".to_string(),
+        "-rs".to_string(),
+        root.join("tests/test_rpc_e2e_c_abi.py")
+            .to_string_lossy()
+            .into_owned(),
+    ];
+    Ok(RpcIntegPlan {
+        env,
+        rpc_args,
+        e2e_args,
+    })
+}
+
+fn run_python(root: &Path, args: &[String], env_pairs: &[(String, String)]) -> Result<()> {
+    let program = python_program()?;
+    let mut cmd = Command::new(&program);
+    cmd.args(args).current_dir(root);
+    for (key, value) in env_pairs {
+        cmd.env(key, value);
+    }
+    let status = cmd
         .status()
-        .or_else(|_| {
-            Command::new("python3")
-                .arg(&script)
-                .args(["--server-bin", server_bin])
-                .current_dir(root)
-                .status()
-        })
-        .map_err(|e| format!("rpc_integ: {e}"))?;
-    if st.success() {
+        .map_err(|err| format!("spawn {program}: {err}"))?;
+    if status.success() {
         Ok(())
     } else {
-        Err(format!("rpc_integ failed with {st}"))
+        Err(format!("{program} {} failed with {status}", args.join(" ")))
     }
+}
+
+/// `potctl ci rpc-integ` — `rpc_integ.py`, then the end to end tests.
+///
+/// Exports `RGPOT_POTSERV` and the fake engine libraries before either run.
+pub fn run_rpc_integ(root: &Path, server_bin: &str) -> Result<()> {
+    let plan = plan_rpc_integ(root, server_bin)?;
+    let rpc_script = root.join("tests/rpc_integ.py");
+    if !rpc_script.is_file() {
+        return Err(format!("missing {}", rpc_script.display()));
+    }
+    for (key, value) in &plan.env {
+        if key == "RGPOT_RPC_E2E_REQUIRED" {
+            continue;
+        }
+        if !Path::new(value).is_file() {
+            return Err(format!(
+                "{key}={value} is not a file. Build potserv and the fake engines with -Dwith_rpc=true -Dwith_tests=true"
+            ));
+        }
+    }
+    for (key, value) in &plan.env {
+        eprintln!("export {key}={value}");
+    }
+    run_python(root, &plan.rpc_args, &plan.env)?;
+    run_python(root, &plan.e2e_args, &plan.env)
 }
 
 fn enforce_pr_commit_subjects(root: &Path, base: &str) -> Result<()> {
@@ -1959,5 +2066,33 @@ Options:
         let err = run_build_test(Path::new("/tmp/nope"), "make", "true", "false", None, true)
             .unwrap_err();
         assert!(err.contains("unknown build sys") || err.contains("make"));
+    }
+
+    #[test]
+    fn rpc_integ_plan_exports_potserv_and_runs_the_e2e_tests() {
+        let plan = plan_rpc_integ(Path::new("/repo"), "bbdir/CppCore/potserv").unwrap();
+        let value = |key: &str| -> String {
+            for (name, path) in &plan.env {
+                if name == key {
+                    return path.clone();
+                }
+            }
+            String::new()
+        };
+        assert!(value("RGPOT_POTSERV").ends_with("bbdir/CppCore/potserv"));
+        assert!(value("NWCHEMC_LIBRARY").ends_with("libnwchemc_fake_engine.so"));
+        assert!(value("RGPOT_NWCHEM_ENGINE").ends_with("libnwchemc_fake_engine.so"));
+        assert!(value("CPMDC_LIBRARY").ends_with("libcpmdc_fake_engine.so"));
+        assert!(value("RGPOT_CPMD_ENGINE").ends_with("libcpmdc_fake_engine.so"));
+        assert_eq!(value("RGPOT_RPC_E2E_REQUIRED"), "1");
+        let joined = plan
+            .e2e_args
+            .iter()
+            .chain(plan.rpc_args.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(joined.contains("tests/rpc_integ.py"), "{joined}");
+        assert!(joined.contains("tests/test_rpc_e2e_c_abi.py"), "{joined}");
     }
 }
