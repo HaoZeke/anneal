@@ -266,6 +266,8 @@ pub mod universal_coverage;
 pub mod variant;
 /// Package version metadata.
 pub mod version;
+/// Sign between an xtb energy gradient and the rgpot force buffer.
+pub mod xtb_gradient;
 
 /// C ABI surface (cargo-c builds).
 #[cfg(feature = "capi")]

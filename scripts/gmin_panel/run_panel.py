@@ -64,20 +64,14 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from gmin_pin import TARBALL_SHA256, read_built_revision, read_svnrev  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    aggregate_machine_columns,
-    gmin_row_key,
-    machine_columns,
-    machine_fieldnames,
-    read_built_gmin_provenance,
-    require_csv_schema,
-    validate_gmin_group_provenance,
-    validate_saved_gmin_provenance,
-)
 
 SEEDS = tuple(range(2000, 2012))
 HIT_TOL = DEFAULT_HIT_TOL
+# SVNREV of the rows behind bench/gmin-panel/rows.csv and the paper table.
+GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+# 2026-11-19 snapshot pinned by scripts/gmin_panel/build_gmin.sh.
+GMIN_PIN = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 PAPER_BUDGETS = {
     "lj38": 400_000,
     "lj55": 1_000_000,
@@ -155,11 +149,9 @@ ROW_FIELDS = [
     "pot_s",
     "outside_s",
     "code_revision",
-    "gmin_build_key",
     "harness_revision",
     "host",
-    "machine_id",
-    "cpu_model",
+    "cpu",
     "session",
     "utc",
 ]
@@ -265,6 +257,13 @@ def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
 
 def is_hit(text: str) -> bool:
     return text.strip().lower() in ("1", "true")
+
+
+def cpu_model() -> str:
+    for line in Path("/proc/cpuinfo").read_text().splitlines():
+        if line.startswith("model name"):
+            return line.split(":", 1)[1].strip().replace(",", " ")
+    return ""
 
 
 def single_thread_env() -> dict[str, str]:
@@ -485,22 +484,8 @@ def read_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def validate_row_schema(row: dict[str, str]) -> None:
-    missing = [field for field in ROW_FIELDS if field not in row]
-    extra = [field for field in row if field not in ROW_FIELDS]
-    if missing or extra:
-        raise ValueError(f"row schema mismatch: missing={missing} extra={extra}")
-    for required in ("host", "machine_id", "cpu_model", "code_revision", "harness_revision"):
-        if not str(row.get(required, "")).strip():
-            raise ValueError(f"row is missing non-empty {required}")
-    gmin_row_key(row)
-
-
 def append_row(path: Path, row: dict[str, str]) -> None:
-    validate_row_schema(row)
-    require_csv_schema(path, ROW_FIELDS)
     fresh = not path.is_file() or path.stat().st_size == 0
-    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         if fresh:
@@ -510,43 +495,23 @@ def append_row(path: Path, row: dict[str, str]) -> None:
         os.fsync(handle.fileno())
 
 
-def row_key(row: dict[str, str]) -> tuple[str, str, str, str, str, str]:
-    code_rev, build_key = gmin_row_key(row)
-    return (
-        row["system"],
-        row["code"],
-        row["seed"],
-        code_rev,
-        build_key,
-        row["harness_revision"],
-    )
+def row_key(row: dict[str, str]) -> tuple[str, str, str, str, str]:
+    return (row["system"], row["code"], row["seed"], row["code_revision"], row["harness_revision"])
 
 
 def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, str], list[dict[str, str]]]:
     """The latest stored row per seed of each system and code at this revision."""
+    wanted = {"anneal": revision, "gmin": GMIN_REV}
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
-        if revision != "latest" and row["harness_revision"] != revision:
-            continue
-        if row["code"] == "anneal" and revision != "latest" and row["code_revision"] != revision:
-            continue
+        if revision == "latest":
+            if row["code"] == "gmin" and row["code_revision"] != GMIN_REV:
+                continue
+        else:
+            if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
+                continue
         groups.setdefault((row["system"], row["code"]), {})[int(row["seed"])] = row
-    out: dict[tuple[str, str], list[dict[str, str]]] = {}
-    for key, group in groups.items():
-        ordered = [group[s] for s in sorted(group)]
-        system, code = key
-        revisions = {r["code_revision"] for r in ordered}
-        if len(revisions) > 1:
-            raise RuntimeError(
-                f"{system} {code}: mixed code_revision values {sorted(revisions)}"
-            )
-        if code == "gmin":
-            try:
-                validate_gmin_group_provenance(ordered, label=f"{system} {code}")
-            except ValueError as error:
-                raise RuntimeError(str(error)) from error
-        out[key] = ordered
-    return out
+    return {key: [group[s] for s in sorted(group)] for key, group in groups.items()}
 
 
 def fmt(value: float | None, digits: int = 6) -> str:
@@ -556,16 +521,6 @@ def fmt(value: float | None, digits: int = 6) -> str:
 def validate_group(group: list[dict[str, str]], system: str, code: str) -> None:
     budget = PAPER_BUDGETS[system]
     reference = spec(system)[3]
-    revisions = {r["code_revision"] for r in group}
-    if len(revisions) > 1:
-        raise RuntimeError(
-            f"{system} {code}: mixed code_revision values {sorted(revisions)}"
-        )
-    if code == "gmin":
-        try:
-            validate_gmin_group_provenance(group, label=f"{system} {code}")
-        except ValueError as error:
-            raise RuntimeError(str(error)) from error
     seeds = [int(r["seed"]) for r in group]
     if seeds != sorted(seeds):
         raise RuntimeError(f"{system} {code}: seeds out of order {seeds}")
@@ -637,7 +592,6 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
         wall_mw = mann_whitney(*wall_pair) if wall_pair is not None else None
         both = anneal + gmin
         anneal_revisions = " ".join(sorted({r["code_revision"] for r in anneal}))
-        gmin_revisions = " ".join(sorted({r["code_revision"] for r in gmin}))
         harness_revisions = " ".join(sorted({r["harness_revision"] for r in both}))
         out.append(
             {
@@ -668,10 +622,9 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
                 "anneal_best_min": f"{min(col(anneal, 'best')):.8f}",
                 "gmin_best_min": f"{min(col(gmin, 'best')):.8f}",
                 "anneal_revision": anneal_revisions,
-                "gmin_revision": gmin_revisions,
+                "gmin_revision": GMIN_REV,
                 "harness_revision": harness_revisions,
                 "host": " ".join(sorted({r["host"] for r in both})),
-                **aggregate_machine_columns(both),
                 "sessions": " ".join(sorted({r["session"] for r in both})),
                 "seeds": " ".join(r["seed"] for r in anneal),
             }
@@ -763,16 +716,12 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
         if arm == "gmin" and system in ("lj75", "lj98"):
             cells[3] += "~\\rerun{5}"
     shown_revision = revision[:8] if revision != "latest" else "mixed"
-    gmin_revisions = sorted(
-        {value for row in summary for value in row["gmin_revision"].split()}
-    )
-    shown_gmin = " ".join(value[:8] for value in gmin_revisions) or "unknown"
     body = [" & ".join(cells) + " \\\\" for cells in lines]
     return "\n".join(
         [
             "\\begin{table}",
             "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{shown_gmin}}}.",
+            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -820,12 +769,7 @@ def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
 
 def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool, out: Path | None = None) -> None:
     summary = summarise(rows, revision)
-    fields = (
-        machine_fieldnames(SUMMARY_FIELDS)
-        if summary and "machine_id" in summary[0]
-        else SUMMARY_FIELDS
-    )
-    write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), fields, summary)
+    write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), SUMMARY_FIELDS, summary)
     splice(root / README, README_MARKS, readme_table(summary))
     if tex:
         splice(root / MANUSCRIPT, TEX_MARKS, tex_table(summary, revision))
@@ -894,10 +838,10 @@ def self_test() -> None:
         raise SystemExit(f"ranked wall {pair}")
     kept = panel_groups(
         [
-            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": "gmin-rev",
-             "gmin_build_key": "a" * 64, "harness_revision": "rev", "best": "-190.4"},
-            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": "gmin-rev",
-             "gmin_build_key": "a" * 64, "harness_revision": "rev", "best": "-191.0308"},
+            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_REV,
+             "harness_revision": "rev", "best": "-190.4"},
+            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_REV,
+             "harness_revision": "rev", "best": "-191.0308"},
         ],
         "rev",
     )
@@ -959,7 +903,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--work", type=Path)
     parser.add_argument("--logs", type=Path)
     parser.add_argument("--gmin-source", type=Path)
-    parser.add_argument("--svnrev", type=Path)
     parser.add_argument("--lj-data", type=Path)
     parser.add_argument("--morse-data", type=Path)
     parser.add_argument("--system", action="append")
@@ -983,73 +926,44 @@ def main(argv: list[str]) -> int:
     if os.sched_getaffinity(0) != {0}:
         print(f"pinned to {sorted(os.sched_getaffinity(0))}, expected core 0", file=sys.stderr)
         return 2
-    needed = (
-        args.bin,
-        args.tree,
-        args.work,
-        args.logs,
-        args.gmin_source,
-        args.svnrev,
-        args.lj_data,
-        args.morse_data,
-    )
+    needed = (args.bin, args.tree, args.work, args.logs, args.gmin_source, args.lj_data, args.morse_data)
     if any(value is None for value in needed):
-        parser.error(
-            "--bin, --tree, --work, --logs, --gmin-source, --svnrev, "
-            "--lj-data and --morse-data are needed to run"
-        )
+        parser.error("--bin, --tree, --work, --logs, --gmin-source, --lj-data and --morse-data are needed to run")
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=args.tree, capture_output=True, text=True, check=True
     ).stdout.strip()
     if head != args.revision:
         raise SystemExit(f"{args.tree} is at {head}, not {args.revision}")
-    gmin_revision, gmin_build_key = read_built_gmin_provenance(
-        args.svnrev, args.gmin_source
+    source = dict(
+        line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line
     )
+    if source.get("svnrev") != GMIN_PIN:
+        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {GMIN_PIN}")
+    if source.get("tarball_sha256") != GMIN_TARBALL_SHA256:
+        raise SystemExit(
+            f"GMIN tarball sha256 {source.get('tarball_sha256')} is not {GMIN_TARBALL_SHA256}"
+        )
     systems = [row[0] for row in SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
         budget, reference = binary_budget(args.bin, args.tree, system)
         if budget != PAPER_BUDGETS[system] or abs(reference - spec(system)[3]) > 1e-8:
             raise SystemExit(f"{resolve_driver(args.bin, args.tree, system)[1]} {system}: budget {budget} reference {reference}")
-    require_csv_schema(args.rows, ROW_FIELDS)
     lj_data = args.lj_data.read_text()
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
     morse_data += "" if morse_data.endswith("\n") else "\n"
     host = socket.gethostname()
-    machine = machine_columns()
+    cpu = cpu_model()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    done = set() if args.rerun else {row_key(r) for r in read_rows(args.rows)}
     seeds = tuple(args.seed) if args.seed else SEEDS
-    existing_rows = read_rows(args.rows)
-    if not args.rerun:
-        wanted_systems = set(systems)
-        wanted_seeds = {str(s) for s in seeds}
-        for stored_row in existing_rows:
-            if (
-                stored_row.get("code") == "gmin"
-                and stored_row.get("harness_revision") == args.revision
-                and stored_row.get("system") in wanted_systems
-                and stored_row.get("seed") in wanted_seeds
-            ):
-                validate_saved_gmin_provenance(
-                    stored_row,
-                    path=args.rows,
-                    revision=gmin_revision,
-                    build_key=gmin_build_key,
-                )
-    done = set() if args.rerun else {row_key(r) for r in existing_rows}
-    print(
-        f"session {session} revision {args.revision} "
-        f"gmin {gmin_revision} order {args.order}",
-        flush=True,
-    )
+    print(f"session {session} revision {args.revision} gmin {GMIN_PIN} order {args.order}", flush=True)
     for system in systems:
         driver, _binary = resolve_driver(args.bin, args.tree, system)
         for seed in seeds:
             for slot, code in enumerate(arm_sequence(args.order, seed)):
-                code_revision = args.revision if code == "anneal" else gmin_revision
-                arm_build_key = gmin_build_key if code == "gmin" else ""
-                key = (system, code, str(seed), code_revision, arm_build_key, args.revision)
+                code_revision = args.revision if code == "anneal" else GMIN_PIN
+                key = (system, code, str(seed), code_revision, args.revision)
                 if key in done:
                     print(f"skip {system} {code} {seed}", flush=True)
                     continue
@@ -1071,10 +985,9 @@ def main(argv: list[str]) -> int:
                     "budget": str(PAPER_BUDGETS[system]),
                     **result,
                     "code_revision": code_revision,
-                    "gmin_build_key": arm_build_key,
                     "harness_revision": args.revision,
                     "host": host,
-                    **machine,
+                    "cpu": cpu,
                     "session": session,
                     "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 }

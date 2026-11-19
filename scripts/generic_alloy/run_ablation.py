@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import math
 import os
 import random
 import subprocess
@@ -48,12 +47,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+from scipy.stats import fisher_exact, mannwhitneyu
+
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 WIDE_SEEDS = tuple(range(2000, 2024))
@@ -208,8 +208,6 @@ ROW_FIELDS = [
     "code_revision",
     "host",
     "cpu",
-    "machine_id",
-    "cpu_model",
 ]
 
 SUMMARY_FIELDS = [
@@ -233,8 +231,6 @@ SUMMARY_FIELDS = [
     "mannwhitney_p_outside",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
     "seeds",
     "schedule_seed",
 ]
@@ -397,7 +393,6 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 
 def append_row(path: Path, row: dict) -> None:
     fresh = not path.is_file() or path.stat().st_size == 0
-    require_csv_schema(path, ROW_FIELDS)
     with path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         if fresh:
@@ -407,66 +402,6 @@ def append_row(path: Path, row: dict) -> None:
 
 def fmt_p(value: float) -> str:
     return f"{value:.6g}"
-
-
-def _fisher_two_sided(h1: int, n1: int, h2: int, n2: int) -> float:
-    try:
-        from scipy.stats import fisher_exact
-    except ModuleNotFoundError:
-        fisher_exact = None
-    if fisher_exact is not None:
-        return float(
-            fisher_exact([[h1, n1 - h1], [h2, n2 - h2]], alternative="two-sided")[1]
-        )
-    hits = h1 + h2
-    ways = math.comb(n1 + n2, hits)
-
-    def prob(k: int) -> float:
-        return math.comb(n1, k) * math.comb(n2, hits - k) / ways
-
-    observed = prob(h1)
-    lo, hi = max(0, hits - n2), min(n1, hits)
-    return min(
-        1.0,
-        sum(prob(k) for k in range(lo, hi + 1) if prob(k) <= observed * (1 + 1e-7)),
-    )
-
-
-def _mannwhitney_two_sided(left: list[float], right: list[float]) -> float:
-    try:
-        from scipy.stats import mannwhitneyu
-    except ModuleNotFoundError:
-        mannwhitneyu = None
-    if mannwhitneyu is not None:
-        return float(
-            mannwhitneyu(
-                left,
-                right,
-                alternative="two-sided",
-                method="asymptotic",
-                use_continuity=True,
-            ).pvalue
-        )
-    n1, n2 = len(left), len(right)
-    pooled = sorted(left + right)
-    n = n1 + n2
-    rank: dict[float, float] = {}
-    ties = 0.0
-    i = 0
-    while i < n:
-        j = i
-        while j + 1 < n and pooled[j + 1] == pooled[i]:
-            j += 1
-        rank[pooled[i]] = (i + j + 2) / 2.0
-        t = j - i + 1
-        ties += t**3 - t
-        i = j + 1
-    u = sum(rank[v] for v in left) - n1 * (n1 + 1) / 2.0
-    var = n1 * n2 / 12.0 * ((n + 1) - ties / (n * (n - 1)))
-    if var <= 0.0:
-        return 1.0
-    dev = max(abs(u - n1 * n2 / 2.0) - 0.5, 0.0)
-    return min(1.0, math.erfc(dev / math.sqrt(var) / math.sqrt(2.0)))
 
 
 def summarise(campaign: str, rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -493,9 +428,11 @@ def summarise(campaign: str, rows: list[dict[str, str]]) -> list[dict[str, str]]
             tests = {key: "" for key in SUMMARY_FIELDS if key.startswith(("fisher", "mann"))}
             if arm != control:
                 base_hits = sum(row["hit"] == "1" for row in base)
-                tests["fisher_p"] = fmt_p(
-                    _fisher_two_sided(len(hits), len(group), base_hits, len(base))
-                )
+                table = [
+                    [len(hits), len(group) - len(hits)],
+                    [base_hits, len(base) - base_hits],
+                ]
+                tests["fisher_p"] = fmt_p(fisher_exact(table)[1])
                 for key, column in (
                     ("evals", "evals_to_hit"),
                     ("wall", "wall_s"),
@@ -505,7 +442,7 @@ def summarise(campaign: str, rows: list[dict[str, str]]) -> list[dict[str, str]]
                     left = [float(row[column]) for row in group]
                     right = [float(row[column]) for row in base]
                     if len(set(left + right)) > 1:
-                        p = _mannwhitney_two_sided(left, right)
+                        p = mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue
                         tests[f"mannwhitney_p_{key}"] = fmt_p(p)
                     else:
                         tests[f"mannwhitney_p_{key}"] = "1"
@@ -531,12 +468,6 @@ def summarise(campaign: str, rows: list[dict[str, str]]) -> list[dict[str, str]]
                     **tests,
                     "code_revision": " ".join(sorted({row["code_revision"] for row in group})),
                     "host": " ".join(sorted({row["host"] for row in group})),
-                    "machine_id": ";".join(
-                        sorted({row.get("machine_id", "") for row in group})
-                    ),
-                    "cpu_model": ";".join(
-                        sorted({row.get("cpu_model", "") for row in group})
-                    ),
                     "seeds": " ".join(sorted({row["seed"] for row in group}, key=int)),
                     "schedule_seed": str(SCHEDULE_SEED),
                 }
@@ -630,7 +561,6 @@ def main(argv: list[str]) -> int:
     }
     host = os.uname().nodename
     cpu = cpu_model()
-    machine = machine_columns()
     args.rows.parent.mkdir(parents=True, exist_ok=True)
     args.logs.mkdir(parents=True, exist_ok=True)
     done = {
@@ -675,7 +605,6 @@ def main(argv: list[str]) -> int:
             "code_revision": revision,
             "host": host,
             "cpu": cpu,
-            **machine,
         }
         append_row(args.rows, row)
         print(

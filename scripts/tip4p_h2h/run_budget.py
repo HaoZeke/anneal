@@ -34,14 +34,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    aggregate_machine_columns,
-    machine_columns,
-    read_built_gmin_provenance,
-    require_csv_schema,
-    require_gmin_build_key,
-    validate_saved_gmin_provenance,
-)
 
 HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = tuple(range(2000, 2012))
@@ -186,13 +178,8 @@ def run_gmin(gmin: Path, data: Path, n: int, seed: int, budget: int, start: Path
     return parse_kv(row_path.read_text(), "h2h_row ")
 
 
-def load_reuse(
-    path: Path | None,
-    revision: str,
-    gmin_build_key: str,
-) -> dict[tuple[int, int], dict[str, str]]:
+def load_reuse(path: Path | None) -> dict[tuple[int, int], dict[str, str]]:
     """Map (budget, seed) to a stored GMIN row, from one or more CSVs."""
-    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
     out: dict[tuple[int, int], dict[str, str]] = {}
     if path is None:
         return out
@@ -200,100 +187,10 @@ def load_reuse(
         p = Path(piece)
         if not p.is_file():
             continue
-        with p.open(newline="") as handle:
-            for row in csv.DictReader(handle):
-                if row.get("code") != "gmin":
-                    continue
-                validate_saved_gmin_provenance(
-                    row,
-                    path=p,
-                    revision=revision,
-                    build_key=expected_key,
-                )
-                out[(int(row["budget"]), int(row["seed"]))] = row
-    return out
-
-
-def build_budget_row(
-    code: str,
-    row: dict[str, str],
-    *,
-    n: int,
-    budget: int,
-    seed: int,
-    head: str,
-    revision: str,
-    gmin_build_key: str = "",
-    host: str,
-    machine: dict[str, str],
-    reused: bool = False,
-) -> dict[str, str]:
-    """Assemble one budget-sweep row without overwriting reused provenance."""
-    if reused:
-        if code != "gmin":
-            raise ValueError(f"only gmin rows may be reused, got {code!r}")
-        carried_rev, stamped_build_key = validate_saved_gmin_provenance(
-            row,
-            revision=revision,
-            build_key=gmin_build_key,
-        )
-        row_host = row.get("host", "").strip()
-        row_machine = {
-            "machine_id": row.get("machine_id", "").strip(),
-            "cpu_model": row.get("cpu_model", "").strip(),
-        }
-        if not row_host or not row_machine["machine_id"] or not row_machine["cpu_model"]:
-            raise RuntimeError("refusing a reused row without machine provenance")
-        code_revision = carried_rev
-    else:
-        code_revision = head if code == "anneal" else revision
-        stamped_build_key = (
-            require_gmin_build_key(gmin_build_key, "gmin_build_key")
-            if code == "gmin"
-            else ""
-        )
-        row_host = host
-        row_machine = {
-            "machine_id": machine["machine_id"],
-            "cpu_model": machine["cpu_model"],
-        }
-        if not row_machine["machine_id"] or not row_machine["cpu_model"]:
-            raise RuntimeError("missing current machine provenance")
-    return {
-        "system": f"tip4p{n}",
-        "code": code,
-        "budget": str(budget),
-        "seed": str(seed),
-        "hit": row["hit"],
-        "evals_to_hit": row["evals_to_hit"],
-        "charged": row["charged"],
-        "best": row["best"],
-        "wall_s": row["wall_s"],
-        "pot_s": row["pot_s"],
-        "outside_s": f"{outside_of(row):.6f}",
-        "basins": row.get("basins", ""),
-        "code_revision": code_revision,
-        "gmin_build_key": stamped_build_key,
-        "host": row_host,
-        **row_machine,
-    }
-
-
-def summarise_budgets(
-    rows: list[dict[str, str]],
-    budgets: tuple[int, ...],
-    n: int,
-) -> list[dict[str, str]]:
-    """Summarise each budget using aggregated provenance across its source rows."""
-    out: list[dict[str, str]] = []
-    for budget in budgets:
-        budget_rows = [r for r in rows if int(r["budget"]) == budget]
-        out.append(
-            {
-                **summarise(rows, budget, n),
-                **aggregate_machine_columns(budget_rows),
-            }
-        )
+        for row in csv.DictReader(p.open()):
+            if row.get("code") != "gmin":
+                continue
+            out[(int(row["budget"]), int(row["seed"]))] = row
     return out
 
 
@@ -355,7 +252,6 @@ def main() -> int:
     parser.add_argument("--seed", type=int, help="one seed instead of all twelve")
     parser.add_argument("--head-file", type=Path)
     parser.add_argument("--gmin-source", type=Path)
-    parser.add_argument("--svnrev", type=Path, required=True)
     args = parser.parse_args()
     if socket.gethostname() != "bench":
         print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
@@ -364,23 +260,15 @@ def main() -> int:
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
         return 2
     args.work.mkdir(parents=True, exist_ok=True)
-    head, _recorded_revision = read_provenance(
-        args.head_file,
-        args.gmin_source,
-    )
-    source_path = args.gmin_source or (args.svnrev.parents[3] / "gmin-source.txt")
-    revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, source_path)
+    head, revision = read_provenance(args.head_file, args.gmin_source)
     host = os.uname().nodename
-    machine = machine_columns()
-    reuse = load_reuse(args.gmin_rows, revision, gmin_build_key)
+    reuse = load_reuse(args.gmin_rows)
     n = args.size
     budgets = (args.budget,) if args.budget else BUDGETS
     seeds = (args.seed,) if args.seed is not None else SEEDS
     whole = args.budget is None and args.seed is None
     fields = ["system", "code", "budget", "seed", "hit", "evals_to_hit", "charged",
-              "best", "wall_s", "pot_s", "outside_s", "basins", "code_revision",
-              "gmin_build_key", "host", "machine_id", "cpu_model"]
-    require_csv_schema(args.rows, fields)
+              "best", "wall_s", "pot_s", "outside_s", "basins", "code_revision", "host"]
     rows: list[dict[str, str]] = []
     with args.rows.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
@@ -398,26 +286,18 @@ def main() -> int:
                     print(f"gmin n={n} seed={seed} budget={budget}", flush=True)
                     gmin = run_gmin(args.gmin, args.data, n, seed, budget, start, args.work)
                 for code, row in (("anneal", anneal), ("gmin", gmin)):
-                    out = build_budget_row(
-                        code,
-                        row,
-                        n=n,
-                        budget=budget,
-                        seed=seed,
-                        head=head,
-                        revision=revision,
-                        gmin_build_key=gmin_build_key,
-                        host=host,
-                        machine=machine,
-                        reused=(code == "gmin" and carried is not None),
-                    )
+                    out = {"system": f"tip4p{n}", "code": code, "budget": str(budget), "seed": str(seed),
+                           "hit": row["hit"], "evals_to_hit": row["evals_to_hit"], "charged": row["charged"],
+                           "best": row["best"], "wall_s": row["wall_s"], "pot_s": row["pot_s"],
+                           "outside_s": f"{outside_of(row):.6f}", "basins": row.get("basins", ""),
+                           "code_revision": head if code == "anneal" else row.get("code_revision") or revision,
+                           "host": host if code == "anneal" or carried is None else row.get("host", "")}
                     rows.append(out)
                     writer.writerow(out)
                     handle.flush()
     if not whole:
         return 0
-    summary = summarise_budgets(rows, budgets, n)
-    require_csv_schema(args.summary, list(summary[0].keys()))
+    summary = [summarise(rows, budget, n) for budget in budgets]
     with args.summary.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(summary[0].keys()))
         writer.writeheader()

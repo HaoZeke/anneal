@@ -22,17 +22,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from gmin_pin import read_svnrev  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    aggregate_machine_columns,
-    gmin_row_key,
-    machine_columns,
-    machine_fieldnames,
-    read_built_gmin_provenance,
-    require_csv_schema,
-    require_gmin_build_key,
-    validate_saved_gmin_provenance,
-)
 
 SYSTEMS = (
     ("m55r6", 55, 6.0, 1_000_000, -250.286609),
@@ -60,13 +49,8 @@ FIELDS = [
     "pot_s",
     "outside_s",
 ]
-ROW_FIELDS = FIELDS + [
-    "code_revision",
-    "gmin_build_key",
-    "host",
-    "machine_id",
-    "cpu_model",
-]
+ROW_FIELDS = FIELDS + ["code_revision", "host"]
+GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 SUMMARY_FIELDS = [
     "system",
     "anneal_hits",
@@ -87,7 +71,6 @@ SUMMARY_FIELDS = [
     "anneal_outside_median_s",
     "gmin_outside_median_s",
     "gmin_reused",
-    "host",
 ]
 
 
@@ -106,114 +89,39 @@ def type7(values: list[float]) -> float:
 
 
 def fisher(h1: int, n1: int, h2: int, n2: int) -> float:
-    try:
-        from scipy.stats import fisher_exact
-    except ModuleNotFoundError:
-        fisher_exact = None
-    if fisher_exact is not None:
-        table = [[h1, n1 - h1], [h2, n2 - h2]]
-        return float(fisher_exact(table, alternative="two-sided").pvalue)
-    hits = h1 + h2
-    ways = math.comb(n1 + n2, hits)
+    from scipy.stats import fisher_exact
 
-    def prob(k: int) -> float:
-        return math.comb(n1, k) * math.comb(n2, hits - k) / ways
-
-    observed = prob(h1)
-    lo, hi = max(0, hits - n2), min(n1, hits)
-    return min(
-        1.0,
-        sum(prob(k) for k in range(lo, hi + 1) if prob(k) <= observed * (1 + 1e-7)),
-    )
+    table = [[h1, n1 - h1], [h2, n2 - h2]]
+    return float(fisher_exact(table, alternative="two-sided").pvalue)
 
 
 def mannwhitney(left: list[float], right: list[float]) -> float:
+    from scipy.stats import mannwhitneyu
+
     if not left or not right:
         return float("nan")
-    try:
-        from scipy.stats import mannwhitneyu
-    except ModuleNotFoundError:
-        mannwhitneyu = None
-    if mannwhitneyu is not None:
-        return float(
-            mannwhitneyu(
-                left,
-                right,
-                alternative="two-sided",
-                method="asymptotic",
-                use_continuity=True,
-            ).pvalue
-        )
-    n1, n2 = len(left), len(right)
-    pooled = sorted(left + right)
-    n = n1 + n2
-    rank: dict[float, float] = {}
-    ties = 0.0
-    i = 0
-    while i < n:
-        j = i
-        while j + 1 < n and pooled[j + 1] == pooled[i]:
-            j += 1
-        rank[pooled[i]] = (i + j + 2) / 2.0
-        t = j - i + 1
-        ties += t**3 - t
-        i = j + 1
-    u = sum(rank[v] for v in left) - n1 * (n1 + 1) / 2.0
-    var = n1 * n2 / 12.0 * ((n + 1) - ties / (n * (n - 1)))
-    if var <= 0.0:
-        return 1.0
-    dev = max(abs(u - n1 * n2 / 2.0) - 0.5, 0.0)
-    return min(1.0, math.erfc(dev / math.sqrt(var) / math.sqrt(2.0)))
+    return float(mannwhitneyu(left, right, alternative="two-sided", method="asymptotic", use_continuity=True).pvalue)
 
 
-def load_rows(path: Path, *, strict_schema: bool = True) -> list[dict[str, str]]:
-    if not path.is_file() or path.stat().st_size == 0:
+def load_rows(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
         return []
-    if strict_schema:
-        require_csv_schema(path, ROW_FIELDS)
-    with path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    if strict_schema:
-        for row in rows:
-            if not (row.get("machine_id") or "").strip() or not (row.get("cpu_model") or "").strip():
-                raise RuntimeError(f"{path} has a row missing machine_id or cpu_model")
-    return rows
+    with path.open() as handle:
+        return list(csv.DictReader(handle))
 
 
-def have(
-    rows: list[dict[str, str]],
-    system: str,
-    code: str,
-    seed: int,
-    revision: str | None = None,
-    gmin_build_key: str | None = None,
-) -> bool:
+def have(rows: list[dict[str, str]], system: str, code: str, seed: int) -> bool:
     return any(
-        row["system"] == system
-        and row["code"] == code
-        and int(row["seed"]) == seed
-        and (revision is None or row.get("code_revision") == revision)
-        and (
-            gmin_build_key is None
-            or (row.get("gmin_build_key") or "").strip() == gmin_build_key
-        )
+        row["system"] == system and row["code"] == code and int(row["seed"]) == seed
         for row in rows
     )
 
 
 def canonical(row: dict[str, str]) -> dict[str, str]:
-    machine_id = str(row.get("machine_id", "")).strip()
-    cpu_model = str(row.get("cpu_model", "")).strip()
-    if not machine_id or not cpu_model:
-        raise ValueError("row is missing machine_id or cpu_model")
-    code_rev, build_key = gmin_row_key(row)
     out = {key: row[key] for key in FIELDS}
     out["hit"] = "1" if str(row["hit"]) in ("1", "true") else "0"
-    out["code_revision"] = code_rev
-    out["gmin_build_key"] = build_key
+    out["code_revision"] = row.get("code_revision", "")
     out["host"] = row.get("host", "")
-    out["machine_id"] = machine_id
-    out["cpu_model"] = cpu_model
     return out
 
 
@@ -224,46 +132,27 @@ def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
         key=lambda row: (row["system"], row["code"], int(row["seed"])),
     )
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS)
         writer.writeheader()
         writer.writerows(ordered)
 
 
-def reuse_gmin(
-    root: Path,
-    revision: str,
-    gmin_build_key: str,
-) -> list[dict[str, str]]:
-    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
+def reuse_gmin(root: Path) -> list[dict[str, str]]:
     wanted = {name: budget for name, _n, _rho, budget, _ref in SYSTEMS}
     found = []
     for path in (
         root / "bench/morse14-h2h/seeds.csv",
         root / "bench/morse-h2h/seeds.csv",
     ):
-        for row in load_rows(path, strict_schema=False):
+        for row in load_rows(path):
             if row.get("code") != "gmin":
-                continue
-            if not (row.get("machine_id") or "").strip() or not (row.get("cpu_model") or "").strip():
                 continue
             budget = wanted.get(row["system"])
             if budget is None or int(row["budget"]) != budget:
                 continue
             if int(row["seed"]) not in SEEDS:
                 continue
-            validate_saved_gmin_provenance(
-                row,
-                path=path,
-                revision=revision,
-                build_key=expected_key,
-            )
-            found.append(
-                {
-                    **{key: row[key] for key in ROW_FIELDS if key in row},
-                    "code_revision": revision,
-                    "gmin_build_key": expected_key,
-                }
-            )
+            found.append({key: row[key] for key in ROW_FIELDS if key in row})
     # First file wins on a duplicate.
     kept = []
     seen = set()
@@ -397,8 +286,6 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
         ah = sum(row["hit"] in ("1", "true") for row in anneal)
         gh = sum(row["hit"] in ("1", "true") for row in gmin)
         reused_seeds = " ".join(str(seed) for seed in SEEDS if (name, seed) in reused)
-        both = anneal + gmin
-        hosts = sorted({row.get("host", "") for row in both if row.get("host", "")})
         out.append(
             {
                 "system": name,
@@ -420,8 +307,6 @@ def summarise(rows: list[dict[str, str]], reused: set[tuple[str, int]]) -> list[
                 "anneal_outside_median_s": f"{type7(col(anneal, 'outside_s')):.6f}",
                 "gmin_outside_median_s": f"{type7(col(gmin, 'outside_s')):.6f}",
                 "gmin_reused": reused_seeds,
-                "host": " ".join(hosts),
-                **aggregate_machine_columns(both),
             }
         )
     return out
@@ -434,16 +319,6 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--work", type=Path, default=Path("/work/morse-panel"))
     parser.add_argument("--gmin", type=Path, default=Path("/work/morse-h2h/bin/GMIN"))
-    parser.add_argument(
-        "--svnrev",
-        type=Path,
-        default=Path("/work/gmin-h2h/src/wales/GMIN/source/SVNREV"),
-    )
-    parser.add_argument(
-        "--gmin-source",
-        type=Path,
-        default=Path(os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")),
-    )
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("anneal", "gmin", "both"), default="both")
@@ -455,28 +330,10 @@ def main() -> None:
     work.mkdir(parents=True, exist_ok=True)
     seeds_path = work / "seeds.csv"
     rows = load_rows(seeds_path)
-    gmin_revision, gmin_build_key = read_built_gmin_provenance(
-        args.svnrev, args.gmin_source
-    )
-    for existing in rows:
-        if existing.get("code") == "gmin":
-            validate_saved_gmin_provenance(
-                existing,
-                path=seeds_path,
-                revision=gmin_revision,
-                build_key=gmin_build_key,
-            )
-    reused_gmin = reuse_gmin(root, gmin_revision, gmin_build_key)
+    reused_gmin = reuse_gmin(root)
     reused_keys = {(row["system"], int(row["seed"])) for row in reused_gmin}
     for row in reused_gmin:
-        if not have(
-            rows,
-            row["system"],
-            "gmin",
-            int(row["seed"]),
-            gmin_revision,
-            gmin_build_key,
-        ):
+        if not have(rows, row["system"], "gmin", int(row["seed"])):
             rows.append(row)
     write_rows(seeds_path, rows)
 
@@ -514,24 +371,17 @@ def main() -> None:
         ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip()
     host = socket.gethostname()
-    machine = machine_columns()
     for name, _n, rho, budget, ref in systems:
         for seed in seeds:
             if args.arm in ("anneal", "both") and not have(rows, name, "anneal", seed):
                 print(f"anneal {name} {seed}", file=sys.stderr, flush=True)
                 rows.append(
-                    {
-                        **run_anneal(binary, name, seed, budget),
-                        "code_revision": head,
-                        "gmin_build_key": "",
-                        "host": host,
-                        **machine,
-                    }
+                    {**run_anneal(binary, name, seed, budget), "code_revision": head, "host": host}
                 )
                 write_rows(seeds_path, rows)
             if args.arm == "anneal":
                 continue
-            if not have(rows, name, "gmin", seed, gmin_revision, gmin_build_key):
+            if not have(rows, name, "gmin", seed):
                 print(f"gmin {name} {seed}", file=sys.stderr, flush=True)
                 rows.append(
                     {
@@ -546,10 +396,8 @@ def main() -> None:
                             ref,
                             work / "gmin" / name / str(seed),
                         ),
-                        "code_revision": gmin_revision,
-                        "gmin_build_key": gmin_build_key,
+                        "code_revision": GMIN_REV,
                         "host": host,
-                        **machine,
                     }
                 )
                 write_rows(seeds_path, rows)
@@ -570,16 +418,9 @@ def main() -> None:
         return
     out_dir = root / "bench/morse-panel"
     out_dir.mkdir(parents=True, exist_ok=True)
-    require_csv_schema(out_dir / "seeds.csv", ROW_FIELDS)
-    summary_fields = (
-        machine_fieldnames(SUMMARY_FIELDS)
-        if not summary or "machine_id" in summary[0]
-        else SUMMARY_FIELDS
-    )
-    require_csv_schema(out_dir / "summary.csv", summary_fields)
     write_rows(out_dir / "seeds.csv", rows)
     with (out_dir / "summary.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=summary_fields, lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
         writer.writeheader()
         writer.writerows(summary)
     print(f"wrote {out_dir / 'summary.csv'}", file=sys.stderr)

@@ -16,7 +16,6 @@ on the exact same geometry to within 1e-8 on energy and forces.
 
 from __future__ import annotations
 
-import csv
 import os
 import subprocess
 import sys
@@ -29,7 +28,6 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import machine_columns  # noqa: E402
 sys.path.insert(0, str(ROOT / "scripts" / "ase_gofee_h2h"))
 from potential import BudgetReached, CapReached, HitReached  # noqa: E402
 
@@ -317,9 +315,9 @@ def main() -> int:
             float(cap_text),
         )
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
-    machine = machine_columns()
-    csv.writer(sys.stdout, lineterminator="\n").writerow(
-        [
+    print(
+        ",".join(
+            [
                 system,
                 arm,
                 str(seed),
@@ -335,11 +333,10 @@ def main() -> int:
                 hostname(),
                 row["stop"],
                 cap,
-                machine["machine_id"],
-                machine["cpu_model"],
-        ]
+            ]
+        ),
+        flush=True,
     )
-    sys.stdout.flush()
     print(f"boot_id={boot_id()}", flush=True)
     return 0
 

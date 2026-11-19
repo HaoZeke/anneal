@@ -30,15 +30,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    aggregate_machine_columns,
-    machine_columns,
-    read_built_gmin_source,
-    require_csv_schema,
-    require_gmin_build_key,
-    validate_saved_gmin_provenance,
-    validate_saved_row_identity,
-)
 
 # (name, n, rho, budget, cambridge energy)
 SYSTEMS = (
@@ -78,29 +69,6 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
-]
-PER_SEED_FIELDS = [
-    "system",
-    "code",
-    "seed",
-    "budget",
-    "hit",
-    "evals_to_hit",
-    "charged",
-    "wall_s",
-    "best",
-    "pot_s",
-    "outside_s",
-    "gmin_url",
-    "gmin_revision",
-    "gmin_build_key",
-    "anneal_head",
-    "code_revision",
-    "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 
@@ -181,11 +149,7 @@ def write_start(binary: Path, name: str, seed: int, path: Path) -> None:
 
 
 def parse_anneal(text: str) -> dict[str, str]:
-    lines = [line for line in text.splitlines() if line.strip()]
-    for index, line in enumerate(lines[:-1]):
-        if line.startswith("system,code,seed,budget,") and "machine_id" in line:
-            return next(csv.DictReader(lines[index : index + 2]))
-    data = [line for line in lines if ",anneal," in line]
+    data = [line for line in text.splitlines() if ",anneal," in line]
     if len(data) != 1:
         raise ValueError(f"expected one anneal row, saw {len(data)}")
     header = (
@@ -195,9 +159,6 @@ def parse_anneal(text: str) -> dict[str, str]:
 
 
 def parse_gmin(text: str) -> dict[str, str]:
-    lines = [line for line in text.splitlines() if line.strip()]
-    if len(lines) >= 2 and lines[0].startswith("system,code,seed,budget,"):
-        return next(csv.DictReader(lines[:2]))
     fields = {}
     for part in text.split()[1:]:
         key, value = part.split("=", 1)
@@ -211,51 +172,6 @@ def parse_gmin(text: str) -> dict[str, str]:
     return fields
 
 
-def write_per_seed_row(
-    path: Path,
-    arm: str,
-    row: dict[str, str],
-    *,
-    machine: dict[str, str],
-    url: str = "",
-    revision: str = "",
-    gmin_build_key: str = "",
-    head: str = "",
-    host: str | None = None,
-) -> dict[str, str]:
-    code_revision = head if arm == "anneal" else revision
-    stamped_build_key = (
-        require_gmin_build_key(gmin_build_key, "gmin_build_key")
-        if arm == "gmin"
-        else ""
-    )
-    values = {
-        "system": row["system"],
-        "code": arm,
-        "seed": str(int(row["seed"])),
-        "budget": str(int(row["budget"])),
-        "hit": "1" if row["hit"] in ("1", "true") else "0",
-        "evals_to_hit": str(row["evals_to_hit"]),
-        "charged": str(row.get("charged") or row["evals_to_hit"]),
-        "wall_s": f"{float(row['wall_s']):.6f}",
-        "best": str(row["best"]),
-        "pot_s": f"{float(row.get('pot_s') or 0.0):.6f}",
-        "outside_s": f"{float(row.get('outside_s') or max(float(row['wall_s']) - float(row.get('pot_s') or 0.0), 0.0)):.6f}",
-        "gmin_url": url if arm == "gmin" else "",
-        "gmin_revision": revision if arm == "gmin" else "",
-        "gmin_build_key": stamped_build_key,
-        "anneal_head": head if arm == "anneal" else "",
-        "code_revision": code_revision,
-        "host": os.uname().nodename if host is None else host,
-        **machine,
-    }
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=PER_SEED_FIELDS, lineterminator="\n")
-        writer.writeheader()
-        writer.writerow(values)
-    return values
-
-
 def _env(budget: int) -> dict[str, str]:
     env = os.environ.copy()
     env["H2H_BUDGET"] = str(budget)
@@ -266,19 +182,7 @@ def _env(budget: int) -> dict[str, str]:
     return env
 
 
-def run_anneal(
-    binary,
-    name,
-    seed,
-    budget,
-    coords,
-    log,
-    saved,
-    *,
-    machine: dict[str, str] | None = None,
-    head: str = "",
-) -> dict[str, str]:
-    stamped_machine = dict(machine) if machine is not None else machine_columns()
+def run_anneal(binary, name, seed, budget, coords, log, saved) -> dict[str, str]:
     with log.open("w") as handle:
         proc = subprocess.run(
             ["taskset", "-c", "0", str(binary), "run", name, str(seed), str(coords)],
@@ -292,28 +196,11 @@ def run_anneal(
     if proc.returncode != 0:
         raise RuntimeError(f"anneal {name} seed {seed} exited {proc.returncode}\n{text[-400:]}")
     row = parse_anneal(text)
-    return write_per_seed_row(saved, "anneal", row, machine=stamped_machine, head=head)
+    saved.write_text(text)
+    return row
 
 
-def run_gmin(
-    gmin,
-    data,
-    name,
-    rho,
-    seed,
-    budget,
-    target,
-    coords,
-    work,
-    log,
-    saved,
-    *,
-    machine: dict[str, str] | None = None,
-    url: str = "",
-    revision: str = "",
-    gmin_build_key: str = "",
-):
-    stamped_machine = dict(machine) if machine is not None else machine_columns()
+def run_gmin(gmin, data, name, rho, seed, budget, target, coords, work, log, saved):
     work.mkdir(parents=True, exist_ok=True)
     (work / "data").write_text(data.read_text() + f"MORSE {rho:.1f}\nRANSEED {seed}\n")
     (work / "coords").write_bytes(coords.read_bytes())
@@ -342,15 +229,8 @@ def run_gmin(
         raise RuntimeError(f"gmin {name} seed {seed} exited {proc.returncode} with no row\n{log.read_text()[-400:]}")
     text = row_path.read_text()
     row = parse_gmin(text)
-    return write_per_seed_row(
-        saved,
-        "gmin",
-        row,
-        machine=stamped_machine,
-        url=url,
-        revision=revision,
-        gmin_build_key=gmin_build_key,
-    )
+    saved.write_text(text)
+    return row
 
 
 def as_result(name, arm, row):
@@ -374,19 +254,10 @@ def as_result(name, arm, row):
         "pot_s": pot,
         "outside_s": outside,
         "best": float(row["best"]),
-        "gmin_url": row.get("gmin_url", ""),
-        "gmin_revision": row.get("gmin_revision", ""),
-        "gmin_build_key": row.get("gmin_build_key", ""),
-        "anneal_head": row.get("anneal_head", ""),
-        "code_revision": row.get("code_revision", ""),
-        "host": row.get("host", ""),
-        "machine_id": row.get("machine_id", ""),
-        "cpu_model": row.get("cpu_model", ""),
     }
 
 
-def summarise(rows, seeds, url, revision, head, machine: dict[str, str] | None = None):
-    current_machine = dict(machine) if machine is not None else machine_columns()
+def summarise(rows, seeds, url, revision, head):
     by_name = {}
     for row in rows:
         by_name.setdefault(row["system"], {}).setdefault(row["arm"], []).append(row)
@@ -419,21 +290,6 @@ def summarise(rows, seeds, url, revision, head, machine: dict[str, str] | None =
                 pot_per = f"{sum(item['pot_s'] for item in group) / sum(item['charged'] for item in group):.9f}"
                 outside_per = f"{sum(item['outside_s'] for item in group) / sum(item['charged'] for item in group):.9f}"
             hits = sum(bool(item["hit"]) for item in group)
-            group_machine = aggregate_machine_columns(group) or current_machine
-            hosts = sorted({item.get("host", "") for item in group if item.get("host", "")})
-            expected_revision = head if arm == "anneal" else revision
-            recorded_revisions = {
-                item.get("code_revision", "") for item in group if item.get("code_revision", "")
-            }
-            if len(recorded_revisions) > 1:
-                raise ValueError(
-                    f"{name} {arm} mixes code_revision values: {sorted(recorded_revisions)}"
-                )
-            code_revision = next(iter(recorded_revisions), expected_revision)
-            if expected_revision and code_revision and code_revision != expected_revision:
-                raise ValueError(
-                    f"{name} {arm} rows have code_revision={code_revision!r}, not {expected_revision!r}"
-                )
             out.append(
                 {
                     "system": name,
@@ -457,9 +313,8 @@ def summarise(rows, seeds, url, revision, head, machine: dict[str, str] | None =
                     "gmin_url": url,
                     "gmin_revision": revision,
                     "anneal_head": head,
-                    "code_revision": code_revision,
-                    "host": " ".join(hosts) if hosts else os.uname().nodename,
-                    **group_machine,
+                    "code_revision": head if arm == "anneal" else revision,
+                    "host": os.uname().nodename,
                 }
             )
     return out
@@ -467,11 +322,8 @@ def summarise(rows, seeds, url, revision, head, machine: dict[str, str] | None =
 
 def write_summary(path: Path, rows) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    for row in rows:
-        if not str(row.get("machine_id", "")).strip() or not str(row.get("cpu_model", "")).strip():
-            raise ValueError("summary row is missing machine_id or cpu_model")
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
 
@@ -481,79 +333,11 @@ def job_paths(runs: Path, name: str, seed: int, arm: str):
     return directory / f"{arm}-{seed}.row", directory / f"{arm}-{seed}.log"
 
 
-def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
-    lines = [line for line in text.splitlines() if line.strip()]
-    for index, line in enumerate(lines[:-1]):
-        cols = next(csv.reader([line]), [])
-        if "system" in cols and ("code" in cols or "arm" in cols) and "seed" in cols:
-            return next(csv.DictReader(lines[index : index + 2]))
-    if any(line.startswith("h2h_row ") for line in lines):
-        return parse_gmin(text)
-    if any(",anneal," in line for line in lines):
-        return parse_anneal(text)
-    anneal_header = (
-        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s"
-    )
-    anneal_cols = anneal_header.split(",")
-    candidates = [
-        line
-        for line in lines
-        if len(next(csv.reader([line]), [])) == len(anneal_cols)
-    ]
-    if len(candidates) == 1:
-        return next(csv.DictReader([anneal_header, candidates[0]]))
-    return parse_anneal(text) if arm == "anneal" else parse_gmin(text)
-
-
-def load_saved(
-    path: Path,
-    name: str,
-    seed: int,
-    arm: str,
-    budget: int,
-    *,
-    machine: dict[str, str] | None = None,
-    url: str = "",
-    revision: str = "",
-    gmin_build_key: str = "",
-    head: str = "",
-):
+def load_saved(path: Path, name: str, arm: str):
     if not path.is_file() or not path.read_text().strip():
-        if arm == "gmin":
-            require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
         return None
-    expected_machine = dict(machine) if machine is not None else machine_columns()
     text = path.read_text()
-    row = _parse_saved_row(text, arm)
-    validate_saved_row_identity(
-        row,
-        path=path,
-        system=name,
-        arm=arm,
-        seed=seed,
-        budget=budget,
-    )
-    if arm == "gmin":
-        validate_saved_gmin_provenance(
-            row,
-            path=path,
-            revision=revision,
-            build_key=gmin_build_key,
-            url=url,
-            revision_fields=("code_revision", "gmin_revision"),
-        )
-    if (
-        row.get("machine_id") != expected_machine["machine_id"]
-        or row.get("cpu_model") != expected_machine["cpu_model"]
-    ):
-        return None
-    if arm == "gmin":
-        return as_result(name, arm, row)
-    code_revision = (row.get("code_revision") or "").strip()
-    if not code_revision:
-        return None
-    if head and code_revision != head:
-        return None
+    row = parse_anneal(text) if arm == "anneal" else parse_gmin(text)
     return as_result(name, arm, row)
 
 
@@ -596,7 +380,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--gmin", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--starts", type=Path, required=True)
@@ -611,12 +394,8 @@ def main(argv: list[str]) -> int:
     for name in names:
         if name not in PAPER_BUDGETS:
             raise SystemExit(f"no paper budget for {name}")
-    load_source(args.source)
-    url, revision, gmin_build_key = read_built_gmin_source(args.source, args.svnrev)
+    url, revision = load_source(args.source)
     head = args.head_file.read_text().strip()
-    machine = machine_columns()
-    if args.summary:
-        require_csv_schema(args.summary, SUMMARY_FIELDS)
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)
     order = schedule(names, seeds, arms, SCHEDULE_SEED)
@@ -631,35 +410,14 @@ def main(argv: list[str]) -> int:
         write_start(args.binary, name, seed, coords)
         saved, log = job_paths(args.runs, name, seed, arm)
         saved.parent.mkdir(parents=True, exist_ok=True)
-        existing = load_saved(
-            saved,
-            name,
-            seed,
-            arm,
-            budget,
-            machine=machine,
-            url=url,
-            revision=revision,
-            gmin_build_key=gmin_build_key,
-            head=head,
-        )
+        existing = load_saved(saved, name, arm)
         if existing is not None:
             rows.append(existing)
             note(progress, f"skip {name} arm={arm} seed={seed} hit={int(existing['hit'])}")
             continue
         note(progress, f"start {name} arm={arm} seed={seed} budget={budget}")
         if arm == "anneal":
-            raw = run_anneal(
-                args.binary,
-                name,
-                seed,
-                budget,
-                coords,
-                log,
-                saved,
-                machine=machine,
-                head=head,
-            )
+            raw = run_anneal(args.binary, name, seed, budget, coords, log, saved)
         else:
             raw = run_gmin(
                 args.gmin,
@@ -673,10 +431,6 @@ def main(argv: list[str]) -> int:
                 args.runs / name / f"gmin-{seed}",
                 log,
                 saved,
-                machine=machine,
-                url=url,
-                revision=revision,
-                gmin_build_key=gmin_build_key,
             )
         result = as_result(name, arm, raw)
         rows.append(result)
@@ -687,8 +441,8 @@ def main(argv: list[str]) -> int:
             f"pot_s={result['pot_s']:.3f} outside_s={result['outside_s']:.3f}",
         )
         if args.summary:
-            write_summary(args.summary, summarise(rows, seeds, url, revision, head, machine))
-    text_rows = summarise(rows, seeds, url, revision, head, machine)
+            write_summary(args.summary, summarise(rows, seeds, url, revision, head))
+    text_rows = summarise(rows, seeds, url, revision, head)
     if args.summary:
         write_summary(args.summary, text_rows)
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)

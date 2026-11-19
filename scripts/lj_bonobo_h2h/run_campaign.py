@@ -24,7 +24,6 @@ for _candidate in (HERE, HERE.parent):
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns  # noqa: E402
 
 # Copied from the Cambridge table before the runs. The fixture must match.
 LOCKED = {
@@ -145,8 +144,7 @@ def fmt(value: float | None, digits: int = 6) -> str:
 
 def summarise(rows: list[dict], budget: int) -> str:
     lines = [
-        "n\tarm\thits\truns\tmedian_relaxations_to_hit\tmedian_wall_s\twall_ratio_bonobo_over_lean"
-        "\tmachine_id\tcpu_model",
+        "n\tarm\thits\truns\tmedian_relaxations_to_hit\tmedian_wall_s\twall_ratio_bonobo_over_lean",
         f"# budget_relaxations\t{budget}",
         f"# hit_window\t{HIT_TOL}",
         "# wall_ratio is the median bonobo wall divided by the median lean wall",
@@ -175,8 +173,6 @@ def summarise(rows: list[dict], budget: int) -> str:
                         fmt(median(hits), 1),
                         fmt(walls.get(arm), 6),
                         fmt(ratio, 3),
-                        ";".join(sorted({item["machine_id"] for item in group})),
-                        ";".join(sorted({item["cpu_model"] for item in group})),
                     ]
                 )
             )
@@ -185,7 +181,7 @@ def summarise(rows: list[dict], budget: int) -> str:
 
 def seed_table(rows: list[dict]) -> str:
     header = ("n", "arm", "seed", "hit", "relaxations", "relaxations_to_hit", "wall_s", "best",
-              "screens", "code_revision", "host", "machine_id", "cpu_model")
+              "screens", "code_revision", "host")
     lines = ["\t".join(header)]
     for row in rows:
         lines.append(
@@ -202,8 +198,6 @@ def seed_table(rows: list[dict]) -> str:
                     str(row.get("screens", "")),
                     row.get("code_revision", ""),
                     row.get("host", ""),
-                    row["machine_id"],
-                    row["cpu_model"],
                 ]
             )
         )
@@ -238,7 +232,6 @@ def main() -> int:
         if n not in targets:
             raise SystemExit(f"no Cambridge energy for LJ{n}")
     rows = []
-    machine = machine_columns()
     full = sizes == SIZES and seeds == SEEDS and arms == ("lean", "bonobo")
     for n in sizes:
         reference = targets[n]
@@ -264,7 +257,6 @@ def main() -> int:
                     )
                 row["code_revision"] = args.anneal_revision if arm == "lean" else args.bonobo_revision
                 row["host"] = os.uname().nodename
-                row.update(machine)
                 rows.append(row)
                 print(
                     f"done n={n} arm={arm} seed={seed} hit={row['hit']} "

@@ -33,6 +33,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+import h5py
 import numpy as np
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
@@ -203,8 +204,6 @@ def lj_xyz_has_step_counts(archive: zipfile.ZipFile) -> bool:
 
 
 def read_zip(path: Path) -> list[dict]:
-    import h5py
-
     digest = md5_file(path)
     if digest != ZENODO_MD5:
         raise SystemExit(f"{path} md5 {digest} is not {ZENODO_MD5}")

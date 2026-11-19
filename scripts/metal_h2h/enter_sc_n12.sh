@@ -16,9 +16,7 @@ bash "$HERE/build_sc.sh"
 bash "$HERE/build_gmin_sc.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$RUNS" "$LOGS" /work \
   "$ROOT/bench/metal-cluster-h2h/sc-n12"
-cp -a "$HERE/run_sc.py" "$HERE/run_sc_n12.py" \
-  "$ROOT/scripts/target_tol.py" "$ROOT/scripts/gmin_pin.py" \
-  "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+cp -a "$HERE/run_sc.py" "$HERE/run_sc_n12.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 chmod +x "$WORK/bin/h2h_sc" "$WORK/bin/GMIN" "$WORK/bin/run_sc.py" "$WORK/bin/run_sc_n12.py"
 
 cat > "$WORK/bin/inside-n12.sh" << EOF
@@ -44,7 +42,6 @@ exec /usr/bin/python3 -u $WORK/bin/run_sc_n12.py \\
   --summary $ROOT/bench/metal-cluster-h2h/sc-n12/results.csv \\
   --seeds-out $ROOT/bench/metal-cluster-h2h/sc-n12/seeds.csv \\
   --source $WORK/gmin-source.txt \\
-  --svnrev /work/metal-darby/src/wales/GMIN/source/SVNREV \\
   --head-file $WORK/anneal-head \\
   "\$@"
 EOF

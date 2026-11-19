@@ -26,61 +26,11 @@ import sys
 import time
 from pathlib import Path
 
-import importlib.util
-
-for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
-    if (_candidate / "machine_provenance.py").is_file() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
-        break
-_panel_path = (Path(__file__).resolve().parent / "run_panel.py").resolve()
-_existing_panel = sys.modules.get("run_panel")
-if (
-    _existing_panel is not None
-    and getattr(_existing_panel, "__file__", None) is not None
-    and Path(_existing_panel.__file__).resolve() == _panel_path
-):
-    panel = _existing_panel
-else:
-    _panel_spec = importlib.util.spec_from_file_location(
-        "gmin_panel_run_panel", _panel_path
-    )
-    panel = importlib.util.module_from_spec(_panel_spec)
-    _panel_spec.loader.exec_module(panel)
-from machine_provenance import (  # noqa: E402
-    aggregate_machine_columns,
-    machine_columns,
-    machine_fieldnames,
-    read_built_gmin_provenance,
-    require_csv_schema,
-    validate_gmin_group_provenance,
-    validate_saved_gmin_provenance,
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_panel as panel  # noqa: E402
 
 PAIR_ENV = {"H2H_PAIR_SCALE": "1"}
 CODES = ("baseline", "fix2", "gmin")
-SUMMARY_FIELDS = [
-    "system",
-    "budget",
-    "left",
-    "right",
-    "left_hits",
-    "left_n",
-    "right_hits",
-    "right_n",
-    "fisher_p",
-    "left_evals_median",
-    "right_evals_median",
-    "mannwhitney_p_calls",
-    "left_wall_median_s",
-    "right_wall_median_s",
-    "left_pot_median_s",
-    "right_pot_median_s",
-    "left_outside_median_s",
-    "right_outside_median_s",
-    "base_revision",
-    "code_revision",
-    "host",
-]
 
 
 def output_dir(path: Path, root: Path) -> Path:
@@ -109,29 +59,18 @@ def write_start(bin_dir: Path, tree: Path, system: str, seed: int, path: Path) -
 
 
 def selected(rows: list[dict[str, str]], system: str, code: str, revision: str, base: str) -> list[dict[str, str]]:
-    wanted = base if code == "baseline" else revision
+    wanted = base if code == "baseline" else panel.GMIN_REV if code == "gmin" else revision
     found: dict[int, dict[str, str]] = {}
     for row in rows:
         if (
             row["system"] == system
             and row["code"] == code
-            and (code == "gmin" or row["code_revision"] == wanted)
+            and row["code_revision"] == wanted
             and row["harness_revision"] == revision
             and int(row["seed"]) in panel.SEEDS
         ):
             found[int(row["seed"])] = row
-    ordered = [found[seed] for seed in sorted(found)]
-    revisions = {row["code_revision"] for row in ordered}
-    if len(revisions) > 1:
-        raise RuntimeError(
-            f"{system} {code}: mixed code_revision values {sorted(revisions)}"
-        )
-    if code == "gmin":
-        try:
-            validate_gmin_group_provenance(ordered, label=f"{system} {code}")
-        except ValueError as error:
-            raise RuntimeError(str(error)) from error
-    return ordered
+    return [found[seed] for seed in sorted(found)]
 
 
 def comparison(system: str, left_name: str, right_name: str, left: list[dict[str, str]], right: list[dict[str, str]],
@@ -142,7 +81,6 @@ def comparison(system: str, left_name: str, right_name: str, left: list[dict[str
     left_hits = sum(row["hit"] == "1" for row in left)
     right_hits = sum(row["hit"] == "1" for row in right)
     _u, p_calls = panel.mann_whitney(nums(left, "evals_to_hit"), nums(right, "evals_to_hit"))
-    both = left + right
     return {
         "system": system,
         "budget": str(panel.PAPER_BUDGETS[system]),
@@ -164,8 +102,7 @@ def comparison(system: str, left_name: str, right_name: str, left: list[dict[str
         "right_outside_median_s": f"{panel.type7(nums(right, 'outside_s'), 0.5):.6f}",
         "base_revision": base,
         "code_revision": revision,
-        "host": " ".join(sorted({row["host"] for row in both})),
-        **aggregate_machine_columns(both),
+        "host": " ".join(sorted({row["host"] for row in left + right})),
     }
 
 
@@ -184,17 +121,7 @@ def summarise(rows: list[dict[str, str]], revision: str, base: str) -> list[dict
 
 def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fields = (
-        machine_fieldnames(SUMMARY_FIELDS)
-        if not rows or "machine_id" in rows[0]
-        else SUMMARY_FIELDS
-    )
-    for row in rows:
-        if "machine_id" in fields and (
-            not str(row.get("machine_id", "")).strip()
-            or not str(row.get("cpu_model", "")).strip()
-        ):
-            raise ValueError("summary row is missing machine_id or cpu_model")
+    fields = list(rows[0]) if rows else ["system"]
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
@@ -237,7 +164,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--work", type=Path)
     parser.add_argument("--logs", type=Path)
     parser.add_argument("--gmin-source", type=Path)
-    parser.add_argument("--svnrev", type=Path)
     parser.add_argument("--lj-data", type=Path)
     parser.add_argument("--morse-data", type=Path)
     parser.add_argument("--system", action="append")
@@ -258,7 +184,7 @@ def main(argv: list[str]) -> int:
         print(f"pinned to {sorted(os.sched_getaffinity(0))}, expected core 0", file=sys.stderr)
         return 2
     needed = (args.base_bin, args.base_tree, args.head_bin, args.head_tree, args.work, args.logs,
-              args.gmin_source, args.svnrev, args.lj_data, args.morse_data)
+              args.gmin_source, args.lj_data, args.morse_data)
     if any(value is None for value in needed):
         parser.error("run needs both binaries, their trees, work, logs, the GMIN source note and both data files")
     for tree, revision in ((args.base_tree, args.base_revision), (args.head_tree, args.revision)):
@@ -267,41 +193,24 @@ def main(argv: list[str]) -> int:
         ).stdout.strip()
         if head != revision:
             raise SystemExit(f"{tree} is at {head}, not {revision}")
-    gmin_revision, gmin_build_key = read_built_gmin_provenance(
-        args.svnrev, args.gmin_source
-    )
+    source = dict(line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line)
+    if source.get("svnrev") != panel.GMIN_REV:
+        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {panel.GMIN_REV}")
     systems = [row[0] for row in panel.SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
         for bin_dir, tree in ((args.base_bin, args.base_tree), (args.head_bin, args.head_tree)):
             budget, reference = panel.binary_budget(bin_dir, tree, system)
             if budget != panel.PAPER_BUDGETS[system] or abs(reference - panel.spec(system)[3]) > 1e-8:
                 raise SystemExit(f"{system}: budget {budget} reference {reference}")
-    require_csv_schema(rows_path, panel.ROW_FIELDS)
     lj_data = args.lj_data.read_text()
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
     morse_data += "" if morse_data.endswith("\n") else "\n"
     host = socket.gethostname()
-    machine = machine_columns()
+    cpu = panel.cpu_model()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    done = {panel.row_key(row) for row in panel.read_rows(rows_path)}
     seeds = tuple(args.seed) if args.seed else panel.SEEDS
-    existing_rows = panel.read_rows(rows_path)
-    wanted_systems = set(systems)
-    wanted_seeds = {str(s) for s in seeds}
-    for stored_row in existing_rows:
-        if (
-            stored_row.get("code") == "gmin"
-            and stored_row.get("harness_revision") == args.revision
-            and stored_row.get("system") in wanted_systems
-            and stored_row.get("seed") in wanted_seeds
-        ):
-            validate_saved_gmin_provenance(
-                stored_row,
-                path=rows_path,
-                revision=gmin_revision,
-                build_key=gmin_build_key,
-            )
-    done = {panel.row_key(row) for row in existing_rows}
     print(f"session {session} revision {args.revision} base {args.base_revision}", flush=True)
     for system in systems:
         morse = panel.spec(system)[1] == "morse"
@@ -315,10 +224,9 @@ def main(argv: list[str]) -> int:
                 code_revision = {
                     "baseline": args.base_revision,
                     "fix2": args.revision,
-                    "gmin": gmin_revision,
+                    "gmin": panel.GMIN_REV,
                 }[code]
-                arm_build_key = gmin_build_key if code == "gmin" else ""
-                key = (system, code, str(seed), code_revision, arm_build_key, args.revision)
+                key = (system, code, str(seed), code_revision, args.revision)
                 if key in done:
                     print(f"skip {system} {code} {seed}", flush=True)
                     continue
@@ -347,10 +255,9 @@ def main(argv: list[str]) -> int:
                     "budget": str(panel.PAPER_BUDGETS[system]),
                     **result,
                     "code_revision": code_revision,
-                    "gmin_build_key": arm_build_key,
                     "harness_revision": args.revision,
                     "host": host,
-                    **machine,
+                    "cpu": cpu,
                     "session": session,
                     "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 }

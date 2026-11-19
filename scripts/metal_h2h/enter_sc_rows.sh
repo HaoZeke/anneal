@@ -17,7 +17,7 @@ fi
 
 bash "$HERE/build_sc.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" /work
-cp -a "$HERE/run_sc_rows.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+cp -a "$HERE/run_sc_rows.py" "$WORK/bin/run_sc_rows.py"
 chmod +x "$WORK/bin/h2h_sc" "$WORK/bin/run_sc_rows.py"
 
 cat > "$WORK/bin/inside-rows.sh" << EOF

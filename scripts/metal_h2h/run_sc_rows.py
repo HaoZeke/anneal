@@ -18,15 +18,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-for _candidate in (
-    Path(__file__).resolve().parent,
-    Path(__file__).resolve().parents[1],
-    ROOT / "scripts",
-):
-    if (_candidate / "machine_provenance.py").is_file() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
-        break
-from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
 SYSTEMS = ("sc126-80", "sc96-80", "sc108-80", "sc108-55")
 SEEDS = tuple(range(2000, 2012))
 PROBE_SEEDS = (2000, 2007, 2003)
@@ -42,8 +33,6 @@ RESTART_FIELDS = (
     "outside_s",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 )
 POP_FIELDS = (
     "system",
@@ -59,8 +48,6 @@ POP_FIELDS = (
     "outside_s",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 )
 
 
@@ -128,7 +115,6 @@ def parse_stdout(text: str, system: str) -> dict[str, str]:
 
 def append_row(path: Path, fields: tuple[str, ...], row: dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    require_csv_schema(path, fields)
     new = not path.exists()
     with path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fields, lineterminator="\n", extrasaction="ignore")
@@ -206,7 +192,6 @@ def main(argv: list[str]) -> int:
             "hit": hit,
             "code_revision": revision,
             "host": host,
-            **machine_columns(),
         }
         append_row(path, fields, row)
         done.add(key)

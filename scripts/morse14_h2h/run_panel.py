@@ -24,11 +24,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    read_built_gmin_provenance,
-    require_gmin_build_key,
-    validate_saved_gmin_provenance,
-)
 
 SYSTEMS = {
     "m55r14": {"n": 55, "rho": 14.0, "budget": 1_000_000, "reference": -220.646208},
@@ -49,7 +44,7 @@ SEED_FIELDS = [
     "pot_s",
     "outside_s",
 ]
-ROW_FIELDS = SEED_FIELDS + ["code_revision", "gmin_build_key", "host"]
+ROW_FIELDS = SEED_FIELDS + ["code_revision", "host"]
 
 
 def type7(ordered: list[float], p: float) -> float:
@@ -116,43 +111,7 @@ def binary_path(root: Path) -> Path:
     raise SystemExit("h2h_morse release binary is not built")
 
 
-def _resolve_gmin_provenance(
-    svnrev: Path | None = None, gmin_source: Path | None = None
-) -> tuple[str, str]:
-    svnrev_path = svnrev or Path(
-        os.environ.get(
-            "GMIN_SVNREV_FILE", "/work/gmin-h2h/src/wales/GMIN/source/SVNREV"
-        )
-    )
-    source_path = gmin_source or Path(
-        os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")
-    )
-    return read_built_gmin_provenance(svnrev_path, source_path)
-
-
-def _validate_caller_gmin_provenance(
-    gmin_revision: str | None, gmin_build_key: str | None
-) -> tuple[str, str]:
-    if not isinstance(gmin_revision, str) or not gmin_revision.strip():
-        raise ValueError("missing expected GMIN revision")
-    return (
-        gmin_revision.strip(),
-        require_gmin_build_key(gmin_build_key, "expected gmin_build_key"),
-    )
-
-
-def load_gmin(
-    archive: Path,
-    *,
-    gmin_revision: str | None = None,
-    gmin_build_key: str | None = None,
-) -> dict[tuple[str, int], dict[str, str]]:
-    if gmin_revision is None and gmin_build_key is None:
-        gmin_revision, gmin_build_key = _resolve_gmin_provenance()
-    else:
-        gmin_revision, gmin_build_key = _validate_caller_gmin_provenance(
-            gmin_revision, gmin_build_key
-        )
+def load_gmin(archive: Path) -> dict[tuple[str, int], dict[str, str]]:
     rows = {}
     with archive.open() as handle:
         for row in csv.DictReader(handle):
@@ -163,12 +122,6 @@ def load_gmin(
                 continue
             if int(row["budget"]) != SYSTEMS[system]["budget"]:
                 continue
-            validate_saved_gmin_provenance(
-                row,
-                path=archive,
-                revision=gmin_revision,
-                build_key=gmin_build_key,
-            )
             rows[(system, int(row["seed"]))] = row
     return rows
 
@@ -294,18 +247,8 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
         writer.writerows(lines)
 
 
-def panel(
-    root: Path,
-    *,
-    svnrev: Path | None = None,
-    gmin_source: Path | None = None,
-) -> list[dict[str, str]]:
-    gmin_revision, gmin_build_key = _resolve_gmin_provenance(svnrev, gmin_source)
-    archive = load_gmin(
-        root / "bench" / "morse-h2h" / "seeds.csv",
-        gmin_revision=gmin_revision,
-        gmin_build_key=gmin_build_key,
-    )
+def panel(root: Path) -> list[dict[str, str]]:
+    archive = load_gmin(root / "bench" / "morse-h2h" / "seeds.csv")
     binary = binary_path(root)
     head = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
@@ -314,7 +257,7 @@ def panel(
     for system in SYSTEMS:
         for seed in SEEDS:
             anneal = run_anneal(binary, system, seed)
-            anneal.update({"code_revision": head, "gmin_build_key": "", "host": os.uname().nodename})
+            anneal.update({"code_revision": head, "host": os.uname().nodename})
             print(",".join(anneal[field] for field in SEED_FIELDS), flush=True)
             rows.append(anneal)
             stored = archive.get((system, seed))
@@ -325,22 +268,9 @@ def panel(
     return rows
 
 
-def one(
-    root: Path,
-    system: str,
-    seed: int,
-    arm: str,
-    *,
-    svnrev: Path | None = None,
-    gmin_source: Path | None = None,
-) -> None:
+def one(root: Path, system: str, seed: int, arm: str) -> None:
     if arm == "gmin":
-        gmin_revision, gmin_build_key = _resolve_gmin_provenance(svnrev, gmin_source)
-        stored = load_gmin(
-            root / "bench" / "morse-h2h" / "seeds.csv",
-            gmin_revision=gmin_revision,
-            gmin_build_key=gmin_build_key,
-        ).get((system, seed))
+        stored = load_gmin(root / "bench" / "morse-h2h" / "seeds.csv").get((system, seed))
         if stored is None:
             raise SystemExit(
                 f"no stored GMIN row for {system} seed {seed} at budget {SYSTEMS[system]['budget']}"
@@ -358,24 +288,15 @@ def main() -> int:
     parser.add_argument("--system")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--arm")
-    parser.add_argument("--svnrev", type=Path)
-    parser.add_argument("--gmin-source", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
     if args.system or args.seed or args.arm:
         if not (args.system and args.seed is not None and args.arm):
             raise SystemExit("one job needs --system, --seed and --arm")
-        one(
-            root,
-            args.system,
-            args.seed,
-            args.arm,
-            svnrev=args.svnrev,
-            gmin_source=args.gmin_source,
-        )
+        one(root, args.system, args.seed, args.arm)
         return 0
     out = root / "bench" / "morse14-h2h"
-    rows = panel(root, svnrev=args.svnrev, gmin_source=args.gmin_source)
+    rows = panel(root)
     write_rows(out / "seeds.csv", rows)
     summarise(rows, out / "summary.csv")
     return 0

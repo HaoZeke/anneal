@@ -30,10 +30,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    machine_columns,
-    validate_saved_row_identity,
-)
 
 PAPER_BUDGETS = {
     38: 400_000,
@@ -70,8 +66,6 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 SEED_FIELDS = [
@@ -91,8 +85,6 @@ SEED_FIELDS = [
     "reached",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 
@@ -332,12 +324,6 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                     "anneal_head": head,
                     "code_revision": head if arm == "anneal" else source["growpal_version"],
                     "host": os.uname().nodename,
-                    "machine_id": ";".join(
-                        sorted({item["machine_id"] for item in group})
-                    ),
-                    "cpu_model": ";".join(
-                        sorted({item["cpu_model"] for item in group})
-                    ),
                 }
             )
     return out
@@ -410,35 +396,6 @@ def seed_path(rows: Path, n: int, seed: int, arm: str) -> Path:
     return rows / system_name(n) / f"{arm}-{seed}.row"
 
 
-def load_saved(
-    path: Path,
-    system: str,
-    seed: int,
-    arm: str,
-    budget: int,
-    *,
-    machine: dict[str, str] | None = None,
-) -> dict[str, str] | None:
-    existing = load_seed(path)
-    if existing is None:
-        return None
-    expected_machine = dict(machine) if machine is not None else machine_columns()
-    validate_saved_row_identity(
-        existing,
-        path=path,
-        system=system,
-        arm=arm,
-        seed=seed,
-        budget=budget,
-    )
-    if (
-        existing.get("machine_id") != expected_machine["machine_id"]
-        or existing.get("cpu_model") != expected_machine["cpu_model"]
-    ):
-        raise RuntimeError(f"{path} is a legacy or different-machine row")
-    return existing
-
-
 def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
@@ -472,7 +429,6 @@ def main(argv: list[str]) -> int:
             )
     source = load_source(args.source)
     head = args.head_file.read_text().strip()
-    machine = machine_columns()
     here = Path(__file__).resolve().parent
     if str(here) not in sys.path:
         sys.path.insert(0, str(here))
@@ -491,14 +447,7 @@ def main(argv: list[str]) -> int:
             raise SystemExit(f"binary budget {binary_calls} != paper budget {budget}")
         saved = seed_path(args.rows, n, seed, arm)
         log = args.runs / system_name(n) / f"{arm}-{seed}.log"
-        existing = load_saved(
-            saved,
-            system_name(n),
-            seed,
-            arm,
-            budget,
-            machine=machine,
-        )
+        existing = load_seed(saved)
         if existing is not None:
             rows.append(existing)
             note(
@@ -516,7 +465,6 @@ def main(argv: list[str]) -> int:
             **row,
             "code_revision": head if arm == "anneal" else source["growpal_version"],
             "host": os.uname().nodename,
-            **machine,
         }
         write_seed(saved, row)
         produced = True

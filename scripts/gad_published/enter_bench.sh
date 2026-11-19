@@ -24,9 +24,7 @@ cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"
 cp -a "$ROOT/examples/h2h_gmin_lj.data" "$WORK/bin/h2h_gmin_lj.data"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs"
-cp -a "$HERE/run_campaign.py" "$HERE/read_deposit.py" \
-  "$HERE/gad_rerun.py" "$ROOT/scripts/target_tol.py" \
-  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+cp -a "$HERE/run_campaign.py" "$HERE/read_deposit.py" "$HERE/gad_rerun.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 chmod +x "$WORK/bin/gad_published" "$WORK/bin/GMIN"
 
 cat > "$WORK/bin/inside.sh" << EOF
@@ -58,7 +56,6 @@ exec taskset -c $CORE $WORK/venv/bin/python -u $WORK/bin/run_campaign.py \\
   --data $WORK/bin/h2h_gmin_lj.data \\
   --zip $ZIP \\
   --source $WORK/gmin-source.txt \\
-  --svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\
   --head-file $WORK/anneal-head \\
   --runs $WORK/runs/\$HEAD \\
   --core $CORE \\

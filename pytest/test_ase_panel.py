@@ -34,15 +34,6 @@ def test_combined_recommended_summary_is_generated_from_the_same_rows():
     subprocess.run(["python3", str(SCRIPT), "--all", "--check", "--tex"], cwd=ROOT, check=True)
 
 
-def test_aggregate_header_parses_quoted_cpu_model():
-    values = [""] * len(SUMMARY.CURRENT_AGGREGATE_HEADER.split(","))
-    values[-2] = "a" * 64
-    values[-1] = "Example CPU, revision 2"
-    row = SUMMARY.csv_fields(values)
-
-    assert SUMMARY.aggregate_header([row]) == SUMMARY.CURRENT_AGGREGATE_HEADER
-
-
 def test_fisher_is_two_sided_exact():
     assert SUMMARY.fisher(0, 10) == pytest.approx(6.730380752335834e-05)
     assert SUMMARY.fisher(1, 12) == pytest.approx(9.614829913579703e-06)

@@ -32,8 +32,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns, read_built_gmin_provenance  # noqa: E402
-from gmin_pin import read_built_revision  # noqa: E402
 
 # N=38 and N=55 are the LJ paper map. N=80 is not in it.
 PAPER_BUDGETS = {
@@ -97,8 +95,6 @@ SUMMARY_FIELDS = (
     "gmin_revision",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 )
 SEED_FIELDS = (
     "system",
@@ -113,10 +109,7 @@ SEED_FIELDS = (
     "pot_per_eval_s",
     "outside_per_eval_s",
     "code_revision",
-    "gmin_build_key",
     "host",
-    "machine_id",
-    "cpu_model",
 )
 
 
@@ -319,7 +312,6 @@ def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]
                     "gmin_revision": revision,
                     "code_revision": head if arm == "anneal" else revision,
                     "host": os.uname().nodename,
-                    **machine_columns(),
                 }
             )
     return out
@@ -368,7 +360,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--seeds-out", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
@@ -381,7 +372,7 @@ def main(argv: list[str]) -> int:
     if set(PAPER_BUDGETS) != set(REFERENCES):
         raise SystemExit("budgets and references differ")
     head = args.head_file.read_text().strip()
-    revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, args.source)
+    revision = load_source(args.source)
     if args.only:
         system, seed_text, arm = args.only
         if system not in PAPER_BUDGETS or arm not in ARMS:
@@ -419,9 +410,7 @@ def main(argv: list[str]) -> int:
                     "pot_per_eval_s": f"{row['pot_per']:.9f}",
                     "outside_per_eval_s": f"{row['out_per']:.9f}",
                     "code_revision": head if row["arm"] == "anneal" else revision,
-                    "gmin_build_key": "" if row["arm"] == "anneal" else gmin_build_key,
                     "host": os.uname().nodename,
-                    **machine_columns(),
                 }
             )
     print(f"wrote {args.summary}", flush=True)

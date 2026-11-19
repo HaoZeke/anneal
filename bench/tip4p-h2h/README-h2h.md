@@ -15,14 +15,8 @@ Snakemake rule is `tip4p_h2h`, and the asv suite is
 `bench/tip4p-h2h/benchmarks/tip4p_h2h.py`.
 
 Both arms open the same molecular centres: `h2h_seed` writes the start it
-draws for a seed and GMIN reads it as its `coords`. In the pre-correction
-session recorded below, the GMIN cap counted every entry to `POTENTIAL`
-(`GRADT=true` and `GRADT=false` alike); in the current `h2h_cap.f90` used by
-`scripts/tip4p_h2h/run_h2h.py`, `charged` caps `GRADT=true` combined energy
-and gradient passes (`gradient_passes`, matching anneal's
-`value_and_gradient`) while `GRADT=false` energy-only entries are recorded
-separately in `energy_only_entries` without consuming the cap. A hit is a
-quenched energy at or
+draws for a seed and GMIN reads it as its `coords`. One charged evaluation is
+one entry to the potential on either side. A hit is a quenched energy at or
 below the reference plus 0.001 kJ/mol. The references are the Cambridge
 Cluster Database TIP4P headers, which the database lists for n ≤ 21; (H₂O)₂₅
 is not in the database, so its hit is scored against the lowest energy either

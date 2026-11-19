@@ -10,9 +10,7 @@ LOGS=$ROOT/bench/metal-cluster-h2h/logs
 
 bash "$HERE/build_anneal.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$LOGS"
-cp -a "$HERE/run_campaign.py" "$HERE/ase_ga.py" "$HERE/gupta_calc.py" \
-  "$HERE/check_match.py" "$ROOT/scripts/target_tol.py" \
-  "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+cp -a "$HERE/run_campaign.py" "$HERE/ase_ga.py" "$HERE/gupta_calc.py" "$HERE/check_match.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 chmod +x "$WORK/bin/h2h_metal"
 
 cat > "$WORK/bin/inside.sh" << EOF

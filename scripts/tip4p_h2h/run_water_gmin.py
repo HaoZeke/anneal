@@ -25,22 +25,13 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
-import os
 import socket
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from machine_provenance import (  # noqa: E402
-    machine_columns,
-    read_built_gmin_provenance,
-    require_csv_schema,
-    validate_gmin_group_provenance,
-    validate_saved_gmin_provenance,
-)
 from gm_radius import gmin_block, read_minimum  # noqa: E402
 from run_h2h import (  # noqa: E402
     BUDGET,
@@ -70,7 +61,7 @@ CAMBRIDGE = {
 FIELDS = [
     "system", "code", "seed", "budget", "hit", "evals_to_hit", "charged",
     "best", "wall_s", "pot_s", "outside_s", "basins", "start_sha1",
-    "code_revision", "gmin_build_key", "host", "cpu", "machine_id", "cpu_model",
+    "code_revision", "host", "cpu",
 ]
 
 
@@ -101,7 +92,6 @@ def write_gm_blocks(repo: Path, gm_dir: Path) -> None:
 
 def verify(point: Path, gmin: Path, verify_data: Path, gm_dir: Path, out: Path, work: Path) -> None:
     rows = []
-    machine = machine_columns()
     run = work / "verify"
     run.mkdir(parents=True, exist_ok=True)
     for n, (ref, _) in CAMBRIDGE.items():
@@ -115,7 +105,7 @@ def verify(point: Path, gmin: Path, verify_data: Path, gm_dir: Path, out: Path, 
                      "anneal_kj": f"{anneal_e:.10f}", "gmin_kj": f"{gmin_e:.10f}",
                      "anneal_minus_ref": f"{anneal_e - ref:.2e}",
                      "gmin_minus_ref": f"{gmin_e - ref:.2e}",
-                     "reproduced": int(ok), **machine})
+                     "reproduced": int(ok)})
         print(f"verify n={n} ref={ref:.6f} anneal={anneal_e:.6f} gmin={gmin_e:.6f} ok={ok}", flush=True)
         if not ok:
             raise RuntimeError(f"n={n} not reproduced: anneal {anneal_e}, gmin {gmin_e}, ref {ref}")
@@ -134,7 +124,6 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 
 def append_row(path: Path, row: dict[str, str]) -> None:
     fresh = not path.is_file() or path.stat().st_size == 0
-    require_csv_schema(path, FIELDS)
     with path.open("a") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n")
         if fresh:
@@ -149,30 +138,19 @@ def find(rows: list[dict[str, str]], **match: str) -> dict[str, str] | None:
     return None
 
 
-def summarise(
-    rows: list[dict[str, str]],
-    anneal_rev: str,
-    gmin_rev: str,
-    gmin_build_key: str,
-) -> list[dict[str, str]]:
+def summarise(rows: list[dict[str, str]], anneal_rev: str, gmin_rev: str) -> list[dict[str, str]]:
     out = []
     for n in SIZES:
         ref = CAMBRIDGE[n][0]
         arms = {}
         for code, rev in (("anneal", anneal_rev), ("gmin", gmin_rev)):
-            by_seed = {
-                r["seed"]: r
-                for r in rows
-                if r["system"] == f"tip4p{n}"
-                and r["code"] == code
-                and r["code_revision"] == rev
-                and (code != "gmin" or r.get("gmin_build_key") == gmin_build_key)
-            }
+            by_seed = {r["seed"]: r for r in rows
+                       if r["system"] == f"tip4p{n}" and r["code"] == code
+                       and r["code_revision"] == rev}
             arms[code] = [by_seed[str(s)] for s in SEEDS if str(s) in by_seed]
         if any(len(v) != len(SEEDS) for v in arms.values()):
             continue
         a, g = arms["anneal"], arms["gmin"]
-        validate_gmin_group_provenance(g, label=f"tip4p{n} gmin")
         a_hit = [energy_hits(float(r["best"]), ref, HIT_TOL) for r in a]
         g_hit = [energy_hits(float(r["best"]), ref, HIT_TOL) for r in g]
         a_calls = [float(r["evals_to_hit"]) for r in a]
@@ -212,7 +190,6 @@ def summarise(
             "mwu_calls_p": f"{mann_whitney_u_two_sided(a_calls, g_calls):.6f}",
             "anneal_revision": anneal_rev,
             "gmin_revision": gmin_rev,
-            "gmin_build_key": gmin_build_key,
         })
     return out
 
@@ -224,8 +201,7 @@ def main() -> int:
     parser.add_argument("--point", type=Path, required=True)
     parser.add_argument("--anneal-revision", required=True)
     parser.add_argument("--gmin", type=Path, required=True)
-    parser.add_argument("--gmin-svnrev", type=Path, required=True)
-    parser.add_argument("--gmin-source", type=Path)
+    parser.add_argument("--gmin-revision", required=True)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--verify-data", type=Path, required=True)
     parser.add_argument("--gm-dir", type=Path, required=True)
@@ -243,22 +219,11 @@ def main() -> int:
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
         return 2
     run_h2h.CAMBRIDGE = {n: ref for n, (ref, _) in CAMBRIDGE.items()}
-    env_source = os.environ.get("GMIN_SOURCE_FILE", "").strip()
-    gmin_source = args.gmin_source or (
-        Path(env_source)
-        if env_source
-        else args.gmin_svnrev.parents[3] / "gmin-source.txt"
-    )
-    gmin_revision, gmin_build_key = read_built_gmin_provenance(
-        args.gmin_svnrev, gmin_source
-    )
     args.work.mkdir(parents=True, exist_ok=True)
     write_gm_blocks(args.repo, args.gm_dir)
     verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
 
     host, cpu = socket.gethostname(), cpu_model()
-    machine = machine_columns()
-    require_csv_schema(args.rows, FIELDS)
     stored = read_rows(args.rows)
     sizes = (args.size,) if args.size else SIZES
     seeds = (args.seed,) if args.seed is not None else SEEDS
@@ -267,55 +232,31 @@ def main() -> int:
             system = f"tip4p{n}"
             start = args.work / f"tip4p{n}-s{seed}.start.gmin"
             anneal = find(stored, system=system, code="anneal", seed=str(seed),
-                          code_revision=args.anneal_revision,
-                          machine_id=machine["machine_id"])
+                          code_revision=args.anneal_revision)
             if anneal is None or not start.is_file() or sha1(start) != anneal["start_sha1"]:
                 print(f"anneal n={n} seed={seed}", flush=True)
                 anneal = run_anneal(args.binary, n, seed, args.work)
                 anneal.update(start_sha1=sha1(start), code_revision=args.anneal_revision,
-                              gmin_build_key="", host=host, cpu=cpu, **machine)
+                              host=host, cpu=cpu)
                 append_row(args.rows, anneal)
                 stored.append({k: str(v) for k, v in anneal.items()})
             else:
                 print(f"anneal n={n} seed={seed} reused", flush=True)
             start_sha = sha1(start)
-            gmin_candidates = [
-                row
-                for row in stored
-                if row.get("system") == system
-                and row.get("code") == "gmin"
-                and row.get("seed") == str(seed)
-                and row.get("start_sha1") == start_sha
-                and row.get("machine_id") == machine["machine_id"]
-            ]
-            for cand in gmin_candidates:
-                validate_saved_gmin_provenance(
-                    cand,
-                    path=args.rows,
-                    revision=gmin_revision,
-                    build_key=gmin_build_key,
-                )
-            gmin = gmin_candidates[0] if gmin_candidates else None
+            gmin = find(stored, system=system, code="gmin", seed=str(seed),
+                        code_revision=args.gmin_revision, start_sha1=start_sha)
             if gmin is None:
                 print(f"gmin n={n} seed={seed}", flush=True)
                 gmin = run_gmin(args.gmin, args.data, n, seed, start, args.work)
                 gmin["outside_s"] = f"{max(0.0, float(gmin['wall_s']) - float(gmin['pot_s'])):.6f}"
-                gmin.update(start_sha1=start_sha, code_revision=gmin_revision,
-                            gmin_build_key=gmin_build_key, host=host, cpu=cpu, **machine)
+                gmin.update(start_sha1=start_sha, code_revision=args.gmin_revision,
+                            host=host, cpu=cpu)
                 append_row(args.rows, gmin)
                 stored.append({k: str(v) for k, v in gmin.items()})
             else:
                 print(f"gmin n={n} seed={seed} reused", flush=True)
 
-    summary = [
-        {**row, **machine}
-        for row in summarise(
-            read_rows(args.rows),
-            args.anneal_revision,
-            gmin_revision,
-            gmin_build_key,
-        )
-    ]
+    summary = summarise(read_rows(args.rows), args.anneal_revision, args.gmin_revision)
     if summary:
         with args.summary.open("w") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(summary[0].keys()), lineterminator="\n")

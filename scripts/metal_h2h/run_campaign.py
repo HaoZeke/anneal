@@ -27,10 +27,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    machine_columns,
-    validate_saved_row_identity,
-)
 
 SYSTEMS = ("zn38", "zn55", "zn75", "zn80", "cu19au19")
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -57,8 +53,6 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 ROW_FIELDS = [
@@ -133,45 +127,6 @@ def parse_row(text: str) -> dict[str, str]:
     if len(data) != 1:
         raise ValueError(f"expected one result row, saw {len(data)} in {text!r}")
     return next(csv.DictReader([",".join(ROW_FIELDS), data[0]]))
-
-
-def _parse_saved_row(text: str) -> dict[str, str]:
-    lines = [line for line in text.splitlines() if line.strip()]
-    for index, line in enumerate(lines[:-1]):
-        cols = next(csv.reader([line]), [])
-        if "system" in cols and ("code" in cols or "arm" in cols) and "seed" in cols:
-            return next(csv.DictReader(lines[index : index + 2]))
-    if any(",anneal," in line or ",ase," in line for line in lines):
-        return parse_row(text)
-    candidates = [
-        line
-        for line in lines
-        if len(next(csv.reader([line]), [])) == len(ROW_FIELDS)
-    ]
-    if len(candidates) == 1:
-        return next(csv.DictReader([",".join(ROW_FIELDS), candidates[0]]))
-    return parse_row(text)
-
-
-def load_saved(
-    path: Path,
-    system: str,
-    seed: int,
-    arm: str,
-    budget: int,
-) -> dict | None:
-    if not path.is_file() or path.stat().st_size == 0:
-        return None
-    row = _parse_saved_row(path.read_text())
-    validate_saved_row_identity(
-        row,
-        path=path,
-        system=system,
-        arm=arm,
-        seed=seed,
-        budget=budget,
-    )
-    return as_result(row)
 
 
 def _env(budget: int) -> dict[str, str]:
@@ -305,7 +260,6 @@ def summarise(rows: list[dict], seeds: tuple[int, ...], head: str) -> list[dict[
                     "anneal_head": head,
                     "code_revision": head,
                     "host": os.uname().nodename,
-                    **machine_columns(),
                 }
             )
     return out
@@ -429,8 +383,9 @@ def main(argv: list[str]) -> int:
         log = args.logs / f"{index:02d}-{system}-seed{seed}-{arm}.log"
         saved = args.runs / system / f"{arm}-{seed}.row"
         saved.parent.mkdir(parents=True, exist_ok=True)
-        result = load_saved(saved, system, seed, arm, budget)
-        if result is not None:
+        if saved.is_file() and saved.stat().st_size > 0:
+            row = parse_row(saved.read_text())
+            result = as_result(row)
             rows.append(result)
             note(progress, f"skip {system} {arm} seed {seed} hit {int(result['hit'])}")
             continue

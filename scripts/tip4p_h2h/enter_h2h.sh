@@ -12,11 +12,15 @@ bash "$HERE/build_anneal.sh"
 
 # Time NEWTIP the way the Lennard-Jones kernel is timed. The public GMIN
 # build only brackets LJ, so pot_s would be empty for the water arm.
-bash "$ROOT/scripts/gmin_h2h/build_gmin.sh" --extra-patch "$HERE/newtip-timer.patch"
+GMIN_SRC=/work/gmin-h2h/src/wales/GMIN/source/newtip.f90
+if [[ -f $GMIN_SRC ]] && ! grep -q H2H_POT_ENTER "$GMIN_SRC"; then
+  patch -p1 --forward --batch -d /work/gmin-h2h/src/wales/GMIN < "$HERE/newtip-timer.patch"
+  rm -f /work/gmin-h2h/bin/GMIN
+fi
+bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm"
-cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" \
-  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 # A single-point data file for the reproduction check: no basin hops, and
 # CHECKD prints the energy at the input geometry.
@@ -59,7 +63,6 @@ exec /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
   --summary $ROOT/bench/tip4p-h2h/h2h-summary.csv \\
   --head-file $WORK/anneal-head \\
   --gmin-source $WORK/gmin-source.txt \\
-  --svnrev /work/gmin-h2h/src/wales/GMIN/source/SVNREV \\
   "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"

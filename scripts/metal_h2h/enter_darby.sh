@@ -12,8 +12,7 @@ LOGS=$ROOT/bench/metal-cluster-h2h/darby-logs
 bash "$HERE/build_anneal.sh"
 bash "$HERE/build_gmin_darby.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$LOGS" /work
-cp -a "$HERE/run_darby.py" "$ROOT/scripts/target_tol.py" \
-  "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+cp -a "$HERE/run_darby.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 cp -a /work/metal-h2h/bin/h2h_metal "$WORK/bin/h2h_metal"
 chmod +x "$WORK/bin/h2h_metal"
 
@@ -38,7 +37,6 @@ exec /usr/bin/python3 -u $WORK/bin/run_darby.py \\
   --logs $LOGS \\
   --summary $ROOT/bench/metal-cluster-h2h/darby.csv \\
   --source $WORK/gmin-source.txt \\
-  --svnrev $WORK/src/wales/GMIN/source/SVNREV \\
   --head-file /work/metal-h2h/anneal-head \\
   "\$@"
 EOF

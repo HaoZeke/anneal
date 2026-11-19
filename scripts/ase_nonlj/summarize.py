@@ -17,7 +17,6 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import csv_fields  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 SYSTEMS = ("m38r6", "m38r14", "m55r6", "m55r14")
@@ -39,7 +38,6 @@ ROW_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
     "wall_s", "inside_s", "outside_s", "code_revision", "host", "stop", "cap_s",
 )
-CURRENT_ROW_FIELDS = (*ROW_FIELDS, "machine_id", "cpu_model")
 HIT_TOL = DEFAULT_HIT_TOL
 TEX_LABELS = {
     "m38r6": "M\\(_{38}\\), \\(\\rho=6\\)",
@@ -160,7 +158,7 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
     path = ROOT / "bench" / "ase-nonlj" / "rows.csv"
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
-        if tuple(reader.fieldnames or ()) not in (ROW_FIELDS, CURRENT_ROW_FIELDS):
+        if tuple(reader.fieldnames or ()) != ROW_FIELDS:
             raise SystemExit(f"{path}: unexpected columns {reader.fieldnames}")
         rows = list(reader)
     grouped = {system: {arm: [] for arm in ARMS} for system in SYSTEMS}
@@ -321,20 +319,6 @@ def group_revision(group: list[dict[str, str]]) -> str:
     return found.pop()
 
 
-def retained_summary_lines(
-    existing: list[str], summary_header: str, revision: str
-) -> list[str]:
-    """Keep prior revisions while parsing quoted CSV fields correctly."""
-    if existing and existing[0] != summary_header:
-        raise SystemExit("summary has unexpected columns")
-    parsed = list(csv.DictReader(existing))
-    return [
-        line
-        for line, row in zip(existing[1:], parsed)
-        if row["code_revision"] != revision
-    ]
-
-
 def main() -> None:
     flags = sys.argv[1:]
     if any(flag not in ("--check", "--tex") for flag in flags) or len(set(flags)) != len(flags):
@@ -342,29 +326,22 @@ def main() -> None:
     grouped = load_rows()
     identity = load_identity()
     revisions = sorted({row["code_revision"] for s in SYSTEMS for a in ARMS for row in grouped[s][a]})
-    current_schema = all(
-        row.get("machine_id") and row.get("cpu_model")
-        for system in SYSTEMS
-        for arm in ARMS
-        for row in grouped[system][arm]
-    )
     summary_header = (
         "system,arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,"
         "fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,"
         "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s,code_revision,host"
     )
-    if current_schema:
-        summary_header += ",machine_id,cpu_model"
     summary_path = ROOT / "bench" / "ase-nonlj" / "summary.csv"
     summary_lines = [summary_header]
     if summary_path.exists():
         existing = summary_path.read_text().splitlines()
-        try:
-            summary_lines.extend(
-                retained_summary_lines(existing, summary_header, REVISION)
-            )
-        except SystemExit as error:
-            raise SystemExit(f"{summary_path}: unexpected columns") from error
+        if existing and existing[0] != summary_header:
+            raise SystemExit(f"{summary_path}: unexpected columns")
+        summary_lines.extend(
+            line
+            for line in existing[1:]
+            if dict(zip(summary_header.split(","), line.split(",")))["code_revision"] != REVISION
+        )
     readme = [
         "Copyright (c) anneal developers",
         "",
@@ -440,17 +417,6 @@ def main() -> None:
                 f"{wall:.6f},{inside:.6f},{outside:.6f},"
                 f"{f_bh},{u_bh},{mw_bh},{f_mh},{u_mh},{mw_mh},"
                 f"{w_bh:.6f},{w_mh:.6f},{wall_stops},{arm_cap},{group_revision(group)},bench"
-                + (
-                    ","
-                    + csv_fields(
-                        (
-                            ";".join(sorted({row["machine_id"] for row in group})),
-                            ";".join(sorted({row["cpu_model"] for row in group})),
-                        )
-                    )
-                    if current_schema
-                    else ""
-                )
             )
             readme.append(
                 f"| {system} ({label}, {reference:.6f}) | {LABEL[arm]} | {hits}/12 | {best:.8f} | "

@@ -18,16 +18,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
-    if (_candidate / "machine_provenance.py").is_file() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
-        break
-from machine_provenance import (  # noqa: E402
-    read_built_gmin_provenance,
-    require_gmin_build_key,
-    validate_saved_gmin_provenance,
-)
-
 SYSTEM = "au55"
 BUDGET = 1_000_000
 REFERENCE = -191.03085280
@@ -133,62 +123,17 @@ def run_anneal(binary: Path, seed: int) -> dict[str, str]:
     return parse_row(text)
 
 
-DEFAULT_GMIN_SVNREV = Path("/work/metal-darby/src/wales/GMIN/source/SVNREV")
-DEFAULT_GMIN_SOURCE = Path("/work/metal-darby/gmin-source.txt")
-
-
-def _resolve_gmin_provenance(
-    svnrev: Path | None = None, gmin_source: Path | None = None
-) -> tuple[str, str]:
-    svnrev_path = svnrev or Path(
-        os.environ.get("GMIN_SVNREV_FILE", str(DEFAULT_GMIN_SVNREV))
-    )
-    source_path = gmin_source or Path(
-        os.environ.get("GMIN_SOURCE_FILE", str(DEFAULT_GMIN_SOURCE))
-    )
-    return read_built_gmin_provenance(svnrev_path, source_path)
-
-
-def _validate_caller_gmin_provenance(
-    gmin_revision: str | None, gmin_build_key: str | None
-) -> tuple[str, str]:
-    if not isinstance(gmin_revision, str) or not gmin_revision.strip():
-        raise ValueError("missing expected GMIN revision")
-    return (
-        gmin_revision.strip(),
-        require_gmin_build_key(gmin_build_key, "expected gmin_build_key"),
-    )
-
-
-def stored_gmin(
-    root: Path,
-    *,
-    gmin_revision: str | None = None,
-    gmin_build_key: str | None = None,
-) -> list[dict[str, str]]:
-    if gmin_revision is not None or gmin_build_key is not None:
-        gmin_revision, gmin_build_key = _validate_caller_gmin_provenance(
-            gmin_revision, gmin_build_key
-        )
+def stored_gmin(root: Path) -> list[dict[str, str]]:
     path = root / "bench" / "au55-gupta" / "seeds.csv"
     if not path.is_file():
         return []
-    if gmin_revision is None and gmin_build_key is None:
-        gmin_revision, gmin_build_key = _resolve_gmin_provenance()
     rows = []
-    with path.open() as handle:
-        for row in csv.DictReader(handle):
-            if row["code"] != "gmin" or int(row["budget"]) != BUDGET:
-                continue
-            validate_saved_gmin_provenance(
-                row,
-                path=path,
-                revision=gmin_revision,
-                build_key=gmin_build_key,
-            )
-            cleaned = {field: row[field] for field in SEED_FIELDS}
-            cleaned["hit"] = "1" if row["hit"] in ("1", "true") else "0"
-            rows.append(cleaned)
+    for row in csv.DictReader(path.open()):
+        if row["code"] != "gmin" or int(row["budget"]) != BUDGET:
+            continue
+        row = {field: row[field] for field in SEED_FIELDS}
+        row["hit"] = "1" if row["hit"] in ("1", "true") else "0"
+        rows.append(row)
     return rows
 
 
@@ -250,8 +195,6 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--svnrev", type=Path)
-    parser.add_argument("--gmin-source", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
     binary = binary_path(root)
@@ -259,13 +202,8 @@ def main() -> int:
         row = run_anneal(binary, args.seed)
         print(",".join(row[field] for field in SEED_FIELDS), flush=True)
         return 0
-    gmin_revision, gmin_build_key = _resolve_gmin_provenance(
-        args.svnrev, args.gmin_source
-    )
     anneal = [run_anneal(binary, seed) for seed in SEEDS]
-    gmin = stored_gmin(
-        root, gmin_revision=gmin_revision, gmin_build_key=gmin_build_key
-    )
+    gmin = stored_gmin(root)
     rows = []
     for seed in SEEDS:
         rows.extend(row for row in anneal if int(row["seed"]) == seed)

@@ -39,11 +39,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    aggregate_machine_columns,
-    machine_columns,
-    validate_saved_row_identity,
-)
 
 # (system, binary, budget, Cambridge minimum, GrowPAL length per anneal length)
 SYSTEMS = (
@@ -83,8 +78,6 @@ SEED_FIELDS = [
     "reached",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 SUMMARY_FIELDS = [
@@ -121,8 +114,6 @@ SUMMARY_FIELDS = [
     "cpu",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 IDENTITY_FIELDS = [
@@ -319,7 +310,9 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 def append_rows(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
     """Append under the existing header. Never rewrites a stored value.
 
-    Legacy headers are refused so stored rows are never relabelled.
+    A header whose columns are all in ``fields`` is widened once to
+    ``fields``; the stored rows keep their values and leave the new
+    columns empty.
     """
     if not rows:
         return
@@ -328,8 +321,16 @@ def append_rows(path: Path, fields: list[str], rows: list[dict[str, str]]) -> No
     if not fresh:
         with path.open(newline="") as handle:
             header = next(csv.reader(handle))
+        if header != fields and set(header) <= set(fields):
+            stored = read_rows(path)
+            with path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                for row in stored:
+                    writer.writerow({key: row.get(key, "") for key in fields})
+            header = fields
         if header != fields:
-            raise RuntimeError(f"{path} has a legacy schema; use a new campaign table")
+            raise RuntimeError(f"{path} header {header} != {fields}")
     with path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         if fresh:
@@ -398,7 +399,6 @@ def summarise(
                 "cpu": cpu,
                 "code_revision": head if arm == "anneal" else source["growpal_commit"],
                 "host": os.uname().nodename,
-                **aggregate_machine_columns(group),
             }
         )
     return out
@@ -538,7 +538,6 @@ def uncapped(args) -> int:
                 "cpu": cpu,
                 "code_revision": source["growpal_commit"],
                 "host": os.uname().nodename,
-                **machine_columns(),
             }
         )
         write_once(args.out / "rows" / system / f"growpal-uncapped-{seed}.row", UNCAPPED_FIELDS, row)
@@ -550,32 +549,6 @@ def uncapped(args) -> int:
             f"reached={row['reached']} best={row['best']}",
         )
     return 0
-
-
-def load_saved(
-    path: Path,
-    system: str,
-    seed: int,
-    arm: str,
-    budget: int,
-) -> dict[str, str] | None:
-    existing = read_rows(path)
-    if not existing:
-        return None
-    if len(existing) != 1:
-        raise RuntimeError(f"{path} has {len(existing)} rows")
-    row = existing[0]
-    validate_saved_row_identity(
-        row,
-        path=path,
-        system=system,
-        arm=arm,
-        seed=seed,
-        budget=budget,
-    )
-    if not row.get("machine_id") or not row.get("cpu_model"):
-        raise RuntimeError(f"{path} is a legacy row; use a new campaign directory")
-    return row
 
 
 def main(argv: list[str]) -> int:
@@ -639,8 +612,9 @@ def main(argv: list[str]) -> int:
     for system, seed, arm in order:
         budget = PAPER_BUDGETS[system]
         saved = args.out / "rows" / system / f"{arm}-{seed}.row"
-        row = load_saved(saved, system, seed, arm, budget)
-        if row is not None:
+        existing = read_rows(saved)
+        if existing:
+            row = existing[0]
             note(progress, f"skip {system} {arm} {seed} hit={row['hit']} evals={row['evals_to_hit']}")
         else:
             note(progress, f"start {system} {arm} {seed} budget={budget}")
@@ -651,7 +625,6 @@ def main(argv: list[str]) -> int:
                 row = run_growpal(args.python, arm_script, system, seed, budget, args.seeds_xyz, log)
             row["code_revision"] = head if arm == "anneal" else source["growpal_commit"]
             row["host"] = os.uname().nodename
-            row.update(machine_columns())
             write_once(saved, SEED_FIELDS, row)
             note(
                 progress,

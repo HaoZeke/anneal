@@ -36,15 +36,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    machine_columns,
-    read_built_gmin_provenance,
-    require_csv_schema,
-    require_gmin_build_key,
-    validate_gmin_group_provenance,
-    validate_saved_gmin_provenance,
-    validate_saved_row_identity,
-)
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
 SEEDS = tuple(range(2000, 2012))
@@ -89,10 +80,7 @@ ROW_FIELDS = [
     "pot_s",
     "outside_s",
     "code_revision",
-    "gmin_build_key",
     "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 SUMMARY_FIELDS = [
@@ -118,8 +106,6 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 
@@ -340,8 +326,6 @@ def summarise(rows, references, revision, heads):
             group = [row for row in rows if row["system"] == name and row["code"] == code]
             if not group:
                 continue
-            if code in GMIN:
-                validate_gmin_group_provenance(group, label=f"{name} {code}")
             seed_text = " ".join(sorted({row["seed"] for row in group}, key=int))
             evals = median_iqr([float(row["evals_to_hit"]) for row in group])
             charged = [float(row["charged"]) for row in group]
@@ -373,12 +357,6 @@ def summarise(rows, references, revision, heads):
                     "anneal_head": heads[ANNEAL.get(code, ("binary",))[0]],
                     "code_revision": heads[ANNEAL[code][0]] if code in ANNEAL else revision if code in GMIN else heads["binary"],
                     "host": os.uname().nodename,
-                    "machine_id": ";".join(
-                        sorted({row["machine_id"] for row in group})
-                    ),
-                    "cpu_model": ";".join(
-                        sorted({row["cpu_model"] for row in group})
-                    ),
                 }
             )
     return out
@@ -416,51 +394,6 @@ def self_test() -> None:
     print("ok")
 
 
-def load_saved(
-    path: Path,
-    system: str,
-    seed: int,
-    code: str,
-    budget: int,
-    *,
-    machine: dict[str, str] | None = None,
-    code_revision: str = "",
-    gmin_build_key: str = "",
-) -> dict[str, str] | None:
-    if not path.is_file() or not path.read_text().strip():
-        if code in GMIN:
-            require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
-        return None
-    expected_machine = dict(machine) if machine is not None else machine_columns()
-    row = next(csv.DictReader(path.read_text().splitlines()))
-    validate_saved_row_identity(
-        row,
-        path=path,
-        system=system,
-        arm=code,
-        seed=seed,
-        budget=budget,
-    )
-    if (
-        row.get("machine_id") != expected_machine["machine_id"]
-        or row.get("cpu_model") != expected_machine["cpu_model"]
-    ):
-        raise RuntimeError(f"{path} is a legacy or different-machine row")
-    if code in GMIN:
-        validate_saved_gmin_provenance(
-            row,
-            path=path,
-            revision=code_revision,
-            build_key=gmin_build_key,
-        )
-    elif code_revision and (row.get("code_revision") or "").strip() != code_revision:
-        raise ValueError(
-            f"{path}: saved row code_revision mismatch: "
-            f"got {row.get('code_revision')!r}, expected {code_revision!r}"
-        )
-    return row
-
-
 def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
@@ -478,8 +411,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--carbon-data", type=Path, required=True)
     parser.add_argument("--ase", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--tersoff-source", type=Path)
-    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--before-head-file", type=Path)
     parser.add_argument("--runs", type=Path, required=True)
@@ -492,35 +423,13 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv[1:])
     names = tuple(args.system) if args.system else SYSTEMS
     wanted = set(args.code) if args.code else None
-    revision, sw_build_key = read_built_gmin_provenance(args.svnrev, args.source)
-    tc_build_key = ""
-    if args.tersoff_source is not None or any(
-        name.startswith("tc") for name in names
-    ):
-        tersoff_source = (
-            args.tersoff_source
-            if args.tersoff_source is not None
-            else args.source.with_name("gmin-tersoff-source.txt")
-        )
-        if not tersoff_source.is_file():
-            raise FileNotFoundError(
-                f"missing GMIN-tersoff source metadata: {tersoff_source}"
-            )
-        tersoff_revision, tc_build_key = read_built_gmin_provenance(
-            args.svnrev, tersoff_source
-        )
-        if tersoff_revision != revision:
-            raise SystemExit(
-                f"GMIN-tersoff revision {tersoff_revision} != GMIN revision {revision}"
-            )
+    revision = load_source(args.source)
     head = args.head_file.read_text().strip()
-    machine = machine_columns()
     heads = {"binary": head, "before_binary": ""}
     if args.before_head_file:
         heads["before_binary"] = args.before_head_file.read_text().strip()
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)
-    require_csv_schema(args.rows, ROW_FIELDS)
 
     def codes_of(name):
         return tuple(
@@ -532,11 +441,10 @@ def main(argv: list[str]) -> int:
 
     if args.summarise_only:
         rows = [normalise(row) for row in csv.DictReader(args.rows.read_text().splitlines())]
-        if any(not row.get("machine_id") or not row.get("cpu_model") for row in rows):
-            raise RuntimeError("legacy rows need a new campaign table")
         references = {
             name: float(binary_lines(args.binary, "budget", name)[1]) for name in SYSTEMS
         }
+        write_csv(args.rows, ROW_FIELDS, rows)
         write_csv(args.summary, SUMMARY_FIELDS, summarise(rows, references, revision, heads))
         return 0
     for name in names:
@@ -559,31 +467,10 @@ def main(argv: list[str]) -> int:
         saved = args.runs / name / f"{code}-{seed}.row"
         log = args.runs / name / f"{code}-{seed}.log"
         saved.parent.mkdir(parents=True, exist_ok=True)
-        expected_rev = (
-            heads[ANNEAL[code][0]]
-            if code in ANNEAL
-            else revision
-            if code in GMIN
-            else head
-        )
-        expected_build_key = (
-            (tc_build_key if name.startswith("tc") else sw_build_key)
-            if code in GMIN
-            else ""
-        )
-        existing = load_saved(
-            saved,
-            name,
-            seed,
-            code,
-            budget,
-            machine=machine,
-            code_revision=expected_rev,
-            gmin_build_key=expected_build_key,
-        )
-        if existing is not None:
-            rows.append(existing)
-            note(progress, f"skip {name} code={code} seed={seed} hit={existing['hit']}")
+        if saved.is_file() and saved.read_text().strip():
+            row = next(csv.DictReader(saved.read_text().splitlines()))
+            rows.append(row)
+            note(progress, f"skip {name} code={code} seed={seed} hit={row['hit']}")
             continue
         note(progress, f"start {name} code={code} seed={seed} budget={budget}")
         if code in ANNEAL:
@@ -593,10 +480,10 @@ def main(argv: list[str]) -> int:
         else:
             raw = run_gmin(args, name, seed, code, budget, references[name], radius, start, log)
         row = normalise(raw)
-        row["code_revision"] = expected_rev
-        row["gmin_build_key"] = expected_build_key
+        row["code_revision"] = (
+            heads[ANNEAL[code][0]] if code in ANNEAL else revision if code in GMIN else head
+        )
         row["host"] = os.uname().nodename
-        row.update(machine)
         write_csv(saved, ROW_FIELDS, [row])
         rows.append(row)
         note(

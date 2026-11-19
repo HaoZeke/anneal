@@ -74,10 +74,6 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
   `host` is the UTS hostname and `session` the start of the runner process.
 - `gmin-source.txt`: the GMIN tarball, SVNREV, patches, CMake flags,
   compiler, linked BLAS and LAPACK and binary hash.
-  This committed file is historical evidence for the provisional rows and
-  retains their `aac1548a` label and old tarball digest. Current builders
-  share the verified `9cbec1a4` pin in `scripts/gmin_pin.py`; new source
-  notes and rows record the built `SVNREV` instead of rewriting this data.
   `bin-sha256.txt`: the five binaries (`4f772314...` for GMIN in session
   `20261117T035457Z`, `4665badc...` in `20261117T152941Z`; the four Rust
   binaries are bit-identical across both sessions).

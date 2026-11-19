@@ -30,13 +30,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    machine_columns,
-    read_built_gmin_provenance,
-    require_gmin_build_key,
-    validate_saved_gmin_provenance,
-    validate_saved_row_identity,
-)
 
 PAPER_BUDGETS = {
     "au38": 400_000,
@@ -104,8 +97,6 @@ SUMMARY_FIELDS = (
     "gmin_revision",
     "code_revision",
     "host",
-    "machine_id",
-    "cpu_model",
 )
 
 
@@ -327,139 +318,6 @@ def parse_gmin(text: str) -> dict[str, str]:
     return fields
 
 
-def _parse_saved_row(text: str, arm: str) -> dict[str, str]:
-    lines = [line for line in text.splitlines() if line.strip()]
-    for index, line in enumerate(lines[:-1]):
-        cols = next(csv.reader([line]), [])
-        if "system" in cols and ("code" in cols or "arm" in cols) and "seed" in cols:
-            return next(csv.DictReader(lines[index : index + 2]))
-    if any(line.startswith("h2h_row ") for line in lines):
-        return parse_gmin(text)
-    if any(",anneal," in line for line in lines):
-        return parse_anneal(text)
-    anneal_header = (
-        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,"
-        "pot_s,outside_s,pot_per_eval_s,outside_per_eval_s"
-    )
-    anneal_cols = anneal_header.split(",")
-    candidates = [
-        line
-        for line in lines
-        if len(next(csv.reader([line]), [])) == len(anneal_cols)
-    ]
-    if len(candidates) == 1:
-        return next(csv.DictReader([anneal_header, candidates[0]]))
-    return parse_gmin(text) if arm == "gmin" else parse_anneal(text)
-
-
-PER_SEED_FIELDS = (
-    "system",
-    "code",
-    "seed",
-    "budget",
-    "hit",
-    "evals_to_hit",
-    "charged",
-    "wall_s",
-    "best",
-    "pot_s",
-    "outside_s",
-    "code_revision",
-    "gmin_build_key",
-    "host",
-    "machine_id",
-    "cpu_model",
-)
-
-
-def write_saved_row(
-    path: Path,
-    arm: str,
-    row: dict[str, str],
-    *,
-    code_revision: str,
-    gmin_build_key: str = "",
-    host: str,
-    machine: dict[str, str],
-) -> dict[str, str]:
-    wall_s = float(row["wall_s"])
-    pot_s = float(row["pot_s"])
-    stamped_key = (
-        require_gmin_build_key(gmin_build_key, "gmin_build_key")
-        if arm == "gmin"
-        else ""
-    )
-    persisted = {
-        "system": row["system"],
-        "code": arm,
-        "seed": str(int(float(row["seed"]))),
-        "budget": str(int(float(row["budget"]))),
-        "hit": "1" if row["hit"] in ("1", "true", "True") else "0",
-        "evals_to_hit": str(row["evals_to_hit"]),
-        "charged": str(row["charged"]),
-        "wall_s": f"{wall_s:.6f}",
-        "best": str(row["best"]),
-        "pot_s": f"{pot_s:.6f}",
-        "outside_s": row.get("outside_s") or f"{max(wall_s - pot_s, 0.0):.6f}",
-        "code_revision": code_revision,
-        "gmin_build_key": stamped_key,
-        "host": host,
-        **machine,
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(
-            handle, fieldnames=PER_SEED_FIELDS, lineterminator="\n"
-        )
-        writer.writeheader()
-        writer.writerow(persisted)
-    return persisted
-
-
-def load_saved(
-    path: Path,
-    system: str,
-    seed: int,
-    arm: str,
-    budget: int,
-    *,
-    code_revision: str = "",
-    gmin_build_key: str = "",
-    machine: dict[str, str] | None = None,
-) -> dict[str, str] | None:
-    if not path.is_file() or path.stat().st_size == 0:
-        if arm == "gmin":
-            require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
-        return None
-    row = _parse_saved_row(path.read_text(), arm)
-    validate_saved_row_identity(
-        row,
-        path=path,
-        system=system,
-        arm=arm,
-        seed=seed,
-        budget=budget,
-    )
-    if arm == "gmin":
-        validate_saved_gmin_provenance(
-            row,
-            path=path,
-            revision=code_revision,
-            build_key=gmin_build_key,
-        )
-    elif code_revision and (row.get("code_revision") or "").strip() != code_revision:
-        raise ValueError(
-            f"{path}: saved row code_revision mismatch: "
-            f"got {row.get('code_revision')!r}, expected {code_revision!r}"
-        )
-    if machine is not None and (
-        row.get("machine_id") != machine["machine_id"]
-        or row.get("cpu_model") != machine["cpu_model"]
-    ):
-        raise RuntimeError(f"{path} is a legacy or different-machine row")
-    return row
-
-
 def as_result(system: str, arm: str, row: dict[str, str]) -> dict:
     charged = max(int(float(row["charged"])), 1)
     wall = float(row["wall_s"])
@@ -516,7 +374,6 @@ def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]
                     "gmin_revision": revision,
                     "code_revision": head if arm == "anneal" else revision,
                     "host": os.uname().nodename,
-                    **machine_columns(),
                 }
             )
     return out
@@ -538,7 +395,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--logs", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--svnrev", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
@@ -551,9 +407,7 @@ def main(argv: list[str]) -> int:
     if set(PAPER_BUDGETS) != set(REFERENCES):
         raise SystemExit("budgets and references differ")
     head = args.head_file.read_text().strip()
-    revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, args.source)
-    host = os.uname().nodename
-    machine = machine_columns()
+    revision = load_source(args.source)
     check_potentials(args.binary, args.gmin, args.fixtures, args.runs)
     jobs = schedule()
     if args.only:
@@ -574,26 +428,16 @@ def main(argv: list[str]) -> int:
                 [str(args.binary), "coords", system, str(seed), str(coords)],
                 check=True,
             )
-        arm_revision = head if arm == "anneal" else revision
-        arm_build_key = gmin_build_key if arm == "gmin" else ""
-        saved_row = load_saved(
-            saved,
-            system,
-            seed,
-            arm,
-            budget,
-            code_revision=arm_revision,
-            gmin_build_key=arm_build_key,
-            machine=machine,
-        )
-        if saved_row is not None:
-            row = saved_row
+        if saved.is_file() and saved.stat().st_size > 0:
+            text = saved.read_text()
+            row = parse_gmin(text) if arm == "gmin" else parse_anneal(text)
         else:
             print(f"run {system} {arm} seed {seed}", flush=True)
             if arm == "anneal":
-                raw = run_anneal(args.binary, system, seed, budget, coords, log)
+                row = run_anneal(args.binary, system, seed, budget, coords, log)
+                saved.write_text(log.read_text())
             else:
-                raw = run_gmin(
+                row = run_gmin(
                     args.gmin,
                     system,
                     seed,
@@ -605,15 +449,7 @@ def main(argv: list[str]) -> int:
                     steps=90_000_000,
                     swaps=0 < COPPER_COUNT[system] < N_ATOMS[system],
                 )
-            row = write_saved_row(
-                saved,
-                arm,
-                raw,
-                code_revision=arm_revision,
-                gmin_build_key=arm_build_key,
-                host=host,
-                machine=machine,
-            )
+                saved.write_text((args.runs / system / f"gmin-{seed}" / "row.txt").read_text())
         result = as_result(system, arm, row)
         if result["budget"] != budget:
             raise RuntimeError(f"{system} {arm} budget {result['budget']} != {budget}")

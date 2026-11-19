@@ -23,7 +23,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
-from machine_provenance import machine_columns  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
@@ -91,14 +90,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--gmin-budget", type=int, default=2_000_000)
     parser.add_argument("--ase-budget", type=int, default=400_000)
     args = parser.parse_args(argv[1:])
-    if args.csv.is_file() and args.csv.stat().st_size:
-        raise RuntimeError(f"refusing to overwrite existing rows in {args.csv}")
     args.out.mkdir(parents=True, exist_ok=True)
-    revision = subprocess.check_output(
-        ["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"],
-        text=True,
-    ).strip()
-    machine = machine_columns()
     script = Path(__file__).with_name("ase_bh.py")
     seeds = range(9000, 9000 + args.seeds)
     jobs = []
@@ -118,33 +110,9 @@ def main(argv: list[str]) -> int:
     rows.sort()
     with args.csv.open("w", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(
-            [
-                "system",
-                "code",
-                "seed",
-                "budget",
-                "best",
-                "code_revision",
-                "host",
-                "machine_id",
-                "cpu_model",
-            ]
-        )
+        writer.writerow(["system", "code", "seed", "budget", "best"])
         for system, code, seed, budget, best in rows:
-            writer.writerow(
-                [
-                    system,
-                    code,
-                    seed,
-                    budget,
-                    f"{best:.8f}",
-                    revision,
-                    os.uname().nodename,
-                    machine["machine_id"],
-                    machine["cpu_model"],
-                ]
-            )
+            writer.writerow([system, code, seed, budget, f"{best:.8f}"])
     for system in SYSTEMS:
         mine = [row for row in rows if row[0] == system]
         low = min(mine, key=lambda row: row[4])

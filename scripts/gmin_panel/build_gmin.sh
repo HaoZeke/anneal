@@ -13,31 +13,18 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-PIN=$ROOT/scripts/gmin_pin.py
-eval "$(python3 "$PIN" shell)"
 WORK=${GMIN_PANEL_WORK:-/work/gmin-panel}
 SRC=$WORK/gmin-src
 TARBALL=$WORK/svn.tar.bz2
-URL=$GMIN_PIN_URL
-SNAPSHOT=$GMIN_PIN_SNAPSHOT
-REV=$GMIN_PIN_REVISION
-TARBALL_SHA256=$GMIN_PIN_TARBALL_SHA256
-CAP_SOURCE=$ROOT/bench/lj104-lattice/v2/h2h_cap.f90
+URL=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
+SNAPSHOT=2026-11-19
+REV=9cbec1a446352bc9ef064bd2b1a5767194655919
+TARBALL_SHA256=ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776
 PATCHES=(
   "$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch"
   "$ROOT/scripts/morse_h2h/morse-timer.patch"
   "$ROOT/bench/metal-cluster-h2h/gmin-bgupta.patch"
 )
-CMAKE_FLAGS=(
-  -DWITH_ALIGN=OFF
-  -DWITH_MPI=OFF
-  -DWITH_OPENMP=OFF
-  -DWITH_SPARSE=OFF
-  -DWITH_PYTHON=OFF
-  -DWITH_MYBLAS=OFF
-  -DWITH_MYLAPACK=OFF
-)
-BUILD_KEY_FILE=$WORK/gmin-build-key
 
 LOCAL=${GMIN_TARBALL:-}
 while [[ $# -gt 0 ]]; do
@@ -63,11 +50,16 @@ tarball_sha256() {
 
 refuse_sha_mismatch() {
   local path=$1
-  python3 "$PIN" verify-tarball "$path" >/dev/null
+  local got
+  got=$(tarball_sha256 "$path")
+  if [[ $got != "$TARBALL_SHA256" ]]; then
+    echo "tarball sha256 mismatch: got ${got}, expected ${TARBALL_SHA256}" >&2
+    exit 1
+  fi
 }
 
 sha_matches() {
-  [[ -s $1 ]] && python3 "$PIN" verify-tarball "$1" >/dev/null 2>&1
+  [[ -s $1 ]] && [[ $(tarball_sha256 "$1") == "$TARBALL_SHA256" ]]
 }
 
 # A caller-supplied file is checked before any cache, download, or extract.
@@ -102,46 +94,6 @@ else
   mv "$tmp" "$TARBALL"
 fi
 
-FC_BIN=${FC:-gfortran}
-CC_BIN=${CC:-gcc}
-CXX_BIN=${CXX:-g++}
-FFLAGS_VAL=${FFLAGS:-}
-FCFLAGS_VAL=${FCFLAGS:-}
-CFLAGS_VAL=${CFLAGS:-}
-CXXFLAGS_VAL=${CXXFLAGS:-}
-CPPFLAGS_VAL=${CPPFLAGS:-}
-LDFLAGS_VAL=${LDFLAGS:-}
-GFORTRAN_VER=$("$FC_BIN" -dumpfullversion)
-KEY_ARGS=(
-  --revision "$REV"
-  --tarball "$TARBALL"
-  --input "$CAP_SOURCE"
-)
-for patch in "${PATCHES[@]}"; do
-  KEY_ARGS+=(--input "$patch")
-done
-KEY_ARGS+=(
-  "--option=FC=$FC_BIN"
-  "--option=CC=$CC_BIN"
-  "--option=CXX=$CXX_BIN"
-  "--option=gfortran=$GFORTRAN_VER"
-  "--option=FFLAGS=$FFLAGS_VAL"
-  "--option=FCFLAGS=$FCFLAGS_VAL"
-  "--option=CFLAGS=$CFLAGS_VAL"
-  "--option=CXXFLAGS=$CXXFLAGS_VAL"
-  "--option=CPPFLAGS=$CPPFLAGS_VAL"
-  "--option=LDFLAGS=$LDFLAGS_VAL"
-)
-for flag in "${CMAKE_FLAGS[@]}"; do
-  KEY_ARGS+=("--option=$flag")
-done
-BUILD_KEY=$(python3 "$PIN" build-key "${KEY_ARGS[@]}")
-OLD_BUILD_KEY=$(
-  python3 "$PIN" read-build-key \
-    --metadata "$WORK/gmin-source.txt" \
-    --key-file "$BUILD_KEY_FILE"
-)
-
 extract_tree() {
   mkdir -p "$SRC"
   tar -xjf "$TARBALL" -C "$SRC" \
@@ -152,38 +104,44 @@ extract_tree() {
     ./wales/HiRE
 }
 
-need_rebuild=0
-if [[ $OLD_BUILD_KEY != "$BUILD_KEY" || ! -x $WORK/bin/GMIN || ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
-  need_rebuild=1
+if [[ ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
+  extract_tree
 fi
-got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV" 2>/dev/null || true)
+got=$(tr -d '[:space:]' < "$SRC/wales/GMIN/source/SVNREV")
 if [[ $got != "$REV" ]]; then
-  need_rebuild=1
+  rm -rf "$SRC"
+  rm -f "$WORK/bin/GMIN"
+  extract_tree
+  got=$(tr -d '[:space:]' < "$SRC/wales/GMIN/source/SVNREV")
+fi
+if [[ $got != "$REV" ]]; then
+  echo "GMIN SVNREV is $got, expected $REV" >&2
+  exit 1
 fi
 
-if (( need_rebuild )); then
-  rm -rf "$SRC"
-  rm -f "$WORK/bin/GMIN" "$BUILD_KEY_FILE"
-  extract_tree
-  got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV")
+if [[ ! -f $SRC/wales/GMIN/source/h2h_cap.f90 ]]; then
   for patch in "${PATCHES[@]}"; do
     patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$patch"
   done
-  cp "$CAP_SOURCE" "$SRC/wales/GMIN/source/h2h_cap.f90"
+fi
+
+if [[ ! -x $WORK/bin/GMIN ]]; then
   build=$SRC/wales/GMIN/build/gfortran
   mkdir -p "$build"
   (
     cd "$build"
-    FC=$FC_BIN CC=$CC_BIN CXX=$CXX_BIN \
-      FFLAGS=$FFLAGS_VAL FCFLAGS=$FCFLAGS_VAL \
-      CFLAGS=$CFLAGS_VAL CXXFLAGS=$CXXFLAGS_VAL \
-      CPPFLAGS=$CPPFLAGS_VAL LDFLAGS=$LDFLAGS_VAL \
-      cmake ../../source "${CMAKE_FLAGS[@]}"
+    FC=gfortran CC=gcc CXX=g++ cmake ../../source \
+      -DWITH_ALIGN=OFF \
+      -DWITH_MPI=OFF \
+      -DWITH_OPENMP=OFF \
+      -DWITH_SPARSE=OFF \
+      -DWITH_PYTHON=OFF \
+      -DWITH_MYBLAS=OFF \
+      -DWITH_MYLAPACK=OFF
     make -j"$(nproc)" GMIN
   )
   cp -a "$build/GMIN" "$WORK/bin/GMIN"
   chmod +x "$WORK/bin/GMIN"
-  printf '%s\n' "$BUILD_KEY" > "$BUILD_KEY_FILE"
 fi
 
 {
@@ -191,19 +149,13 @@ fi
   echo "url=$URL"
   echo "revision=$REV"
   echo "svnrev=$got"
-  echo "tarball_sha256=$(python3 "$PIN" verify-tarball "$TARBALL")"
-  echo "build_key=$BUILD_KEY"
-  echo "cap=${CAP_SOURCE#"$ROOT"/} $(sha256sum "$CAP_SOURCE" | awk '{print $1}')"
+  echo "tarball_sha256=$(tarball_sha256 "$TARBALL")"
   for patch in "${PATCHES[@]}"; do
     echo "patch=${patch#"$ROOT"/} $(sha256sum "$patch" | awk '{print $1}')"
   done
-  echo "cmake=${CMAKE_FLAGS[*]}"
-  echo "gfortran=$GFORTRAN_VER"
-  echo "fflags=$FFLAGS_VAL"
-  echo "cflags=$CFLAGS_VAL"
-  echo "cxxflags=$CXXFLAGS_VAL"
-  echo "ldflags=$LDFLAGS_VAL"
-  echo "linked=$(ldd "$WORK/bin/GMIN" 2>/dev/null | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' - || true)"
+  echo "cmake=-DWITH_ALIGN=OFF -DWITH_MPI=OFF -DWITH_OPENMP=OFF -DWITH_SPARSE=OFF -DWITH_PYTHON=OFF -DWITH_MYBLAS=OFF -DWITH_MYLAPACK=OFF"
+  echo "gfortran=$(gfortran -dumpfullversion)"
+  echo "linked=$(ldd "$WORK/bin/GMIN" | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' -)"
   echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | awk '{print $1}')"
 } > "$WORK/gmin-source.txt"
-echo "gmin snapshot=$SNAPSHOT revision=$REV build_key=$BUILD_KEY binary=$WORK/bin/GMIN"
+echo "gmin snapshot=$SNAPSHOT revision=$REV binary=$WORK/bin/GMIN"

@@ -27,15 +27,6 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import (  # noqa: E402
-    aggregate_machine_columns,
-    gmin_row_key,
-    machine_columns,
-    read_built_gmin_provenance,
-    require_csv_schema,
-    require_gmin_build_key,
-    validate_saved_gmin_provenance,
-)
 
 HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -97,10 +88,7 @@ SEED_FIELDS = [
     "pot_s",
     "outside_s",
     "code_revision",
-    "gmin_build_key",
     "host",
-    "machine_id",
-    "cpu_model",
 ]
 
 GMIN_SOURCES = [
@@ -199,13 +187,7 @@ def truthy(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "t", "yes"}
 
 
-def load_gmin(
-    gmin_revision: str,
-    gmin_build_key: str,
-    *,
-    machine: dict[str, str] | None = None,
-) -> dict[tuple[str, int], dict[str, str]]:
-    expected_key = require_gmin_build_key(gmin_build_key, "expected gmin_build_key")
+def load_gmin() -> dict[tuple[str, int], dict[str, str]]:
     found: dict[tuple[str, int], dict[str, str]] = {}
     for path in GMIN_SOURCES:
         if not path.is_file():
@@ -214,15 +196,6 @@ def load_gmin(
             for row in csv.DictReader(handle):
                 code = row.get("code") or row.get("arm") or ""
                 if code != "gmin":
-                    continue
-                row_mid = (row.get("machine_id") or "").strip()
-                row_cpu = (row.get("cpu_model") or "").strip()
-                if not row_mid or not row_cpu:
-                    continue
-                if machine is not None and (
-                    row_mid != machine["machine_id"]
-                    or row_cpu != machine["cpu_model"]
-                ):
                     continue
                 system = row["system"]
                 if system not in SYSTEMS:
@@ -245,12 +218,6 @@ def load_gmin(
                     wall = float(row["wall_s"])
                 else:
                     continue
-                validate_saved_gmin_provenance(
-                    row,
-                    path=path,
-                    revision=gmin_revision,
-                    build_key=expected_key,
-                )
                 hit = truthy(row["hit"])
                 if row.get("evals_to_hit"):
                     evals = int(float(row["evals_to_hit"]))
@@ -270,11 +237,6 @@ def load_gmin(
                     "best": best,
                     "pot_s": f"{pot:.6f}",
                     "outside_s": f"{outside:.6f}",
-                    "code_revision": gmin_revision,
-                    "gmin_build_key": expected_key,
-                    "host": (row.get("host") or "").strip(),
-                    "machine_id": row_mid,
-                    "cpu_model": row_cpu,
                 }
     return found
 
@@ -610,10 +572,6 @@ def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
         "pot_median_s",
         "outside_median_s",
         "wall_ratio",
-        "code_revision",
-        "host",
-        "machine_id",
-        "cpu_model",
     ]
     test_fields = [
         "system",
@@ -631,10 +589,6 @@ def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
         "mannwhitney_wall_gmin",
         "mannwhitney_pot_gmin",
         "mannwhitney_outside_gmin",
-        "code_revision",
-        "host",
-        "machine_id",
-        "cpu_model",
     ]
     summary_rows = []
     test_rows = []
@@ -662,11 +616,6 @@ def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
                     "pot_median_s": f"{median([float(row['pot_s']) for row in group]):.6f}",
                     "outside_median_s": f"{median([float(row['outside_s']) for row in group]):.6f}",
                     "wall_ratio": f"{(wall / anneal_wall) if anneal_wall else float('nan'):.6f}",
-                    "code_revision": ";".join(
-                        sorted({row["code_revision"] for row in group})
-                    ),
-                    "host": ";".join(sorted({row["host"] for row in group})),
-                    **aggregate_machine_columns(group),
                 }
             )
         common = None
@@ -703,27 +652,6 @@ def summarise(rows: list[dict[str, str]], out: Path, tests: Path) -> None:
                     "mannwhitney_wall_gmin": f"{mann_whitney(col('anneal','wall_s'), col('gmin','wall_s')):.6g}",
                     "mannwhitney_pot_gmin": f"{mann_whitney(col('anneal','pot_s'), col('gmin','pot_s')):.6g}",
                     "mannwhitney_outside_gmin": f"{mann_whitney(col('anneal','outside_s'), col('gmin','outside_s')):.6g}",
-                    "code_revision": ";".join(
-                        sorted(
-                            {
-                                row["code_revision"]
-                                for group in matched.values()
-                                for row in group
-                            }
-                        )
-                    ),
-                    "host": ";".join(
-                        sorted(
-                            {
-                                row["host"]
-                                for group in matched.values()
-                                for row in group
-                            }
-                        )
-                    ),
-                    **aggregate_machine_columns(
-                        [row for group in matched.values() for row in group]
-                    ),
                 }
             )
     write_csv(out, summary_fields, summary_rows)
@@ -754,72 +682,30 @@ def one(
     return run_gmin(system, seed, work)
 
 
-def campaign(
-    seeds_path: Path,
-    summary_path: Path,
-    tests_path: Path,
-    work_root: Path,
-    *,
-    svnrev_path: Path | None = None,
-    gmin_source_path: Path | None = None,
-) -> None:
+def campaign(seeds_path: Path, summary_path: Path, tests_path: Path, work_root: Path) -> None:
     if socket.gethostname() != "bench":
         raise SystemExit("refusing to run unless the hostname is bench")
-    resolved_svnrev = svnrev_path or Path(
-        os.environ.get("GMIN_SVNREV_FILE", "/work/gmin-h2h/src/wales/GMIN/source/SVNREV")
-    )
-    resolved_source = gmin_source_path or Path(
-        os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")
-    )
-    gmin_revision, gmin_build_key = read_built_gmin_provenance(
-        resolved_svnrev, resolved_source
-    )
-    machine = machine_columns()
-    stored = load_gmin(gmin_revision, gmin_build_key, machine=machine)
+    stored = load_gmin()
     revision = subprocess.check_output(
         ["git", "-C", str(ROOT), "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
         text=True,
     ).strip()
     host = socket.gethostname()
     rows: list[dict[str, str]] = []
-    require_csv_schema(seeds_path, SEED_FIELDS)
     if seeds_path.is_file():
         with seeds_path.open() as handle:
-            for existing in csv.DictReader(handle):
-                if existing.get("code") == "gmin":
-                    validate_saved_gmin_provenance(
-                        existing,
-                        path=seeds_path,
-                        revision=gmin_revision,
-                        build_key=gmin_build_key,
-                    )
-                gmin_row_key(existing)
-                rows.append(existing)
-    done = {
-        (
-            row["system"],
-            row["code"],
-            int(row["seed"]),
-            *gmin_row_key(row),
-        )
-        for row in rows
-    }
+            rows.extend(csv.DictReader(handle))
+    done = {(row["system"], row["code"], int(row["seed"])) for row in rows}
     for system in SYSTEMS:
         for seed in seeds_for(system):
             for code in ("anneal", "occat", "gmin"):
-                arm_rev = gmin_revision if code == "gmin" else revision
-                arm_key = gmin_build_key if code == "gmin" else ""
-                key = (system, code, seed, arm_rev, arm_key)
-                if key in done:
+                if (system, code, seed) in done:
                     continue
                 row = one(system, seed, code, stored, work_root)
-                row["code_revision"] = arm_rev
-                row["gmin_build_key"] = arm_key
-                row["host"] = row.get("host") or host
-                if not row.get("machine_id") or not row.get("cpu_model"):
-                    row.update(machine)
+                row["code_revision"] = revision
+                row["host"] = host
                 rows.append(row)
-                done.add(key)
+                done.add((system, code, seed))
                 write_seeds(seeds_path, rows)
                 print(
                     f"{system} {code} {seed} hit={row['hit']} evals={row['evals_to_hit']} "
@@ -830,19 +716,13 @@ def campaign(
             print(f"wall allows {system}, extending to {EXTRA_SEEDS[-1]}", flush=True)
             for seed in EXTRA_SEEDS:
                 for code in ("anneal", "occat", "gmin"):
-                    arm_rev = gmin_revision if code == "gmin" else revision
-                    arm_key = gmin_build_key if code == "gmin" else ""
-                    key = (system, code, seed, arm_rev, arm_key)
-                    if key in done:
+                    if (system, code, seed) in done:
                         continue
                     row = one(system, seed, code, stored, work_root)
-                    row["code_revision"] = arm_rev
-                    row["gmin_build_key"] = arm_key
-                    row["host"] = row.get("host") or host
-                    if not row.get("machine_id") or not row.get("cpu_model"):
-                        row.update(machine)
+                    row["code_revision"] = revision
+                    row["host"] = host
                     rows.append(row)
-                    done.add(key)
+                    done.add((system, code, seed))
                     write_seeds(seeds_path, rows)
                     print(
                         f"{system} {code} {seed} hit={row['hit']} evals={row['evals_to_hit']} "
@@ -906,25 +786,8 @@ def main() -> None:
     parser.add_argument("--summary", type=Path, default=ROOT / "bench" / "occat-h2h" / "summary.csv")
     parser.add_argument("--tests", type=Path, default=ROOT / "bench" / "occat-h2h" / "tests.csv")
     parser.add_argument("--work", type=Path, default=Path("/work/occat-h2h/runs"))
-    parser.add_argument(
-        "--svnrev",
-        type=Path,
-        default=Path(os.environ.get("GMIN_SVNREV_FILE", "/work/gmin-h2h/src/wales/GMIN/source/SVNREV")),
-    )
-    parser.add_argument(
-        "--gmin-source",
-        type=Path,
-        default=Path(os.environ.get("GMIN_SOURCE_FILE", "/work/gmin-h2h/gmin-source.txt")),
-    )
     args = parser.parse_args()
-    campaign(
-        args.seeds,
-        args.summary,
-        args.tests,
-        args.work,
-        svnrev_path=args.svnrev,
-        gmin_source_path=args.gmin_source,
-    )
+    campaign(args.seeds, args.summary, args.tests, args.work)
 
 
 if __name__ == "__main__":
