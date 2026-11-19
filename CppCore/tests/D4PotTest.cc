@@ -10,7 +10,9 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <regex>
@@ -269,6 +271,36 @@ TEST_CASE("D4Pot of a molecule reads no box", "[d4][box]") {
   REQUIRE(first.second == with_box.second);
   REQUIRE(warm.first == with_box.first);
   REQUIRE(warm.second == with_box.second);
+
+#ifdef RGPOT_HAS_CACHE
+  const std::string db_path =
+      (std::filesystem::temp_directory_path() /
+       ("rgpot_d4_null_box_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count())))
+          .string();
+  {
+    rgpot::cache::PotentialCache cache(db_path);
+    open.setCache(&cache);
+    const auto cached_cold = run(open, nullptr);
+    const auto cached_warm = run(open, nullptr);
+    REQUIRE(cache.counts().computed == 1);
+    REQUIRE(cache.counts().served == 1);
+    REQUIRE(cached_cold.first == with_box.first);
+    REQUIRE(cached_cold.second == with_box.second);
+    REQUIRE(cached_warm.first == with_box.first);
+    REQUIRE(cached_warm.second == with_box.second);
+    const double zero_box[9] = {};
+    (void)run(open, zero_box);
+    REQUIRE(cache.counts().computed == 2);
+    REQUIRE(cache.counts().served == 1);
+    (void)run(open, wide);
+    REQUIRE(cache.counts().computed == 3);
+    REQUIRE(cache.counts().served == 1);
+    open.setCache(nullptr);
+  }
+  REQUIRE(rocksdb::DestroyDB(db_path, rocksdb::Options()).ok());
+#endif
 
   rgpot::D4Config lattice_config;
   lattice_config.periodic = true;

@@ -382,14 +382,21 @@ private:
    *
    * Shared by the single and batched entry points so the two can never
    * disagree about what identifies a result. Mixes the geometry, the
-   * species, the cell, the potential type and the parameter fingerprint,
-   * so neither a different config nor a different kernel can collide.
+   * species, the cell (with a null box hashed as a non-periodic marker
+   * distinct from any 9-double box), the potential type and the parameter
+   * fingerprint, so neither a different config nor a different kernel can
+   * collide.
    */
   [[nodiscard]] rgpot::cache::KeyHash cacheKey(const ForceInput &fi) const {
     size_t hash_val = 0;
     hash_val ^= XXH3_64bits(fi.pos, fi.nAtoms * 3 * sizeof(double));
     hash_val ^= XXH3_64bits(fi.atmnrs, fi.nAtoms * sizeof(int));
-    hash_val ^= XXH3_64bits(fi.box, 9 * sizeof(double));
+    if (fi.box != nullptr) {
+      hash_val ^= XXH3_64bits(fi.box, 9 * sizeof(double));
+    } else {
+      static constexpr char kNonPeriodic[] = "rgpot::non-periodic";
+      hash_val ^= XXH3_64bits(kNonPeriodic, sizeof(kNonPeriodic));
+    }
     size_t type_val = static_cast<size_t>(m_type);
     hash_val ^= XXH3_64bits(&type_val, sizeof(size_t));
     // Parameter fingerprint: two instances of one PotType with different

@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -25,6 +27,10 @@
 #include "dftd_tolerances.hpp"
 #include "rgpot/D2Pot/D2CpmdPot.hpp"
 #include "rgpot/D2Pot/D2Pot.hpp"
+#ifdef RGPOT_HAS_CACHE
+#include "rgpot/PotentialCache.hpp"
+#include <rocksdb/options.h>
+#endif
 #include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/units.hpp"
 
@@ -295,6 +301,52 @@ TEST_CASE("CPMD's D2 tables, functionals and limits", "[d2cpmd]") {
   REQUIRE(mol.energy < 0.0);
   REQUIRE_FALSE(mol.has_stress);
   REQUIRE(mol.energy == run(pot, std::vector<int>{8, 8}, pos, box).energy);
+
+  const std::vector<int> z_pair{8, 8};
+  auto run_ptr = [&](rgpot::D2CpmdPot &p, const double *b) {
+    Result r;
+    r.forces.assign(pos.size(), 0.0);
+    const rgpot::ForceInput in{z_pair.size(), pos.data(), z_pair.data(), b};
+    rgpot::ForceOut out{};
+    out.F = r.forces.data();
+    p.forceBatch(rgpot::ForceBatch{.nSystems = 1, .in = &in, .out = &out});
+    r.energy = out.energy;
+    r.has_stress = out.has_stress != 0;
+    return r;
+  };
+  const Result null_box = run_ptr(pot, nullptr);
+  REQUIRE_FALSE(null_box.has_stress);
+  REQUIRE(null_box.energy == mol.energy);
+  REQUIRE(null_box.forces == mol.forces);
+#ifdef RGPOT_HAS_CACHE
+  const std::string db_path =
+      (std::filesystem::temp_directory_path() /
+       ("rgpot_d2cpmd_null_box_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count())))
+          .string();
+  {
+    rgpot::cache::PotentialCache cache(db_path);
+    pot.setCache(&cache);
+    const Result cold = run_ptr(pot, nullptr);
+    const Result warm = run_ptr(pot, nullptr);
+    REQUIRE(cache.counts().computed == 1);
+    REQUIRE(cache.counts().served == 1);
+    REQUIRE(cold.energy == mol.energy);
+    REQUIRE(warm.energy == mol.energy);
+    REQUIRE(warm.forces == mol.forces);
+    REQUIRE_FALSE(warm.has_stress);
+    (void)run_ptr(pot, none.data());
+    REQUIRE(cache.counts().computed == 2);
+    REQUIRE(cache.counts().served == 1);
+    const Result cached_box = run_ptr(pot, box.data());
+    REQUIRE(cache.counts().computed == 3);
+    REQUIRE(cache.counts().served == 1);
+    REQUIRE(cached_box.has_stress);
+    pot.setCache(nullptr);
+  }
+  REQUIRE(rocksdb::DestroyDB(db_path, rocksdb::Options()).ok());
+#endif
 
   // The 6 R0 truncation: the O-O sum radius is 2 x 1.342 Angstrom.
   const double cut = 6.0 * 2.684;

@@ -10,7 +10,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -24,6 +26,10 @@
 #include "rgpot/D2Pot/D2Cell.hpp"
 #include "rgpot/D2Pot/D2Pot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
+#ifdef RGPOT_HAS_CACHE
+#include "rgpot/PotentialCache.hpp"
+#include <rocksdb/options.h>
+#endif
 #include "rgpot/SumPot/SumPot.hpp"
 #include "rgpot/units.hpp"
 
@@ -393,6 +399,52 @@ TEST_CASE("D2 of a molecule needs no cell", "[d2]") {
   std::vector<int> bad = ref.z;
   bad[0] = 87;
   REQUIRE_THROWS_AS(run(pot, bad, ref.pos, ref.box), std::invalid_argument);
+
+  auto run_ptr = [&](rgpot::D2Pot &p, const double *box) {
+    Result r;
+    r.forces.assign(ref.pos.size(), 0.0);
+    const rgpot::ForceInput in{ref.z.size(), ref.pos.data(), ref.z.data(), box};
+    rgpot::ForceOut out{};
+    out.F = r.forces.data();
+    p.forceBatch(rgpot::ForceBatch{.nSystems = 1, .in = &in, .out = &out});
+    r.energy = out.energy;
+    r.has_stress = out.has_stress != 0;
+    return r;
+  };
+  const Result null_box = run_ptr(pot, nullptr);
+  REQUIRE_FALSE(null_box.has_stress);
+  REQUIRE(null_box.energy == open.energy);
+  REQUIRE(null_box.forces == open.forces);
+#ifdef RGPOT_HAS_CACHE
+  const std::string db_path =
+      (std::filesystem::temp_directory_path() /
+       ("rgpot_d2_null_box_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count())))
+          .string();
+  {
+    rgpot::cache::PotentialCache cache(db_path);
+    pot.setCache(&cache);
+    const Result cold = run_ptr(pot, nullptr);
+    const Result warm = run_ptr(pot, nullptr);
+    REQUIRE(cache.counts().computed == 1);
+    REQUIRE(cache.counts().served == 1);
+    REQUIRE(cold.energy == open.energy);
+    REQUIRE(warm.energy == open.energy);
+    REQUIRE(warm.forces == open.forces);
+    REQUIRE_FALSE(warm.has_stress);
+    // Distinct from a real box, including an all-zero one and a periodic cell.
+    (void)run_ptr(pot, ref.box.data());
+    REQUIRE(cache.counts().computed == 2);
+    REQUIRE(cache.counts().served == 1);
+    const Result cached_big = run_ptr(pot, big.data());
+    REQUIRE(cache.counts().computed == 3);
+    REQUIRE(cache.counts().served == 1);
+    REQUIRE(cached_big.has_stress);
+    pot.setCache(nullptr);
+  }
+  REQUIRE(rocksdb::DestroyDB(db_path, rocksdb::Options()).ok());
+#endif
 }
 
 TEST_CASE("a composite with D2 at weight -1 cancels a D2-only run", "[d2][composite]") {
