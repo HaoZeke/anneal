@@ -94,7 +94,12 @@ class Labels:
         if binary and real.is_file():
             item["binary_sha256"] = _sha256_file(real)
         self.entries.append(item)
-        self._roots.append((str(real), label))
+        seen = {root for root, _label in self._roots}
+        for candidate in (path, path.absolute(), real):
+            text = str(candidate)
+            if text and text not in seen:
+                self._roots.append((text, label))
+                seen.add(text)
         self._roots.sort(key=lambda pair: len(pair[0]), reverse=True)
 
     def rewrite(self, value: str) -> str:
@@ -326,12 +331,20 @@ def _tool_block(labels: Labels, build: dict, key: str, fallback: str) -> dict:
     }
 
 
+def _eonclient_calls(invocations: list[dict], *, version: bool) -> list[dict]:
+    rows = []
+    for item in invocations:
+        argv = [str(part) for part in item.get("argv") or []]
+        if not argv or Path(argv[-1]).name != "eonclient":
+            continue
+        if ("--version" in argv) != version:
+            continue
+        rows.append(item)
+    return rows
+
+
 def _pair_walls(records: list[dict], invocations: list[dict]) -> list[dict]:
-    clients = [
-        item
-        for item in invocations
-        if Path(str(item.get("argv", [""])[-1])).name == "eonclient"
-    ]
+    clients = _eonclient_calls(invocations, version=False)
     paired = [dict(record) for record in records]
     offset = 0
     if len(clients) == len(records) + 1:
@@ -476,11 +489,18 @@ def _provenance(
     ninja = _tool_block(labels, build, "ninja", "ninja")
     rustc = _tool_block(labels, build, "rustc", "rustc")
     commands = labels.rewrite_obj(list(build.get("commands") or []))
-    client_invocations = []
-    for index, item in enumerate(invocations, start=1):
+    version_probes = []
+    for item in _eonclient_calls(invocations, version=True):
         argv = [str(part) for part in item.get("argv") or []]
-        if not argv or Path(argv[-1]).name != "eonclient":
-            continue
+        version_probes.append(
+            {
+                "argv": [labels.rewrite(part) for part in argv],
+                "returncode": item.get("returncode"),
+            }
+        )
+    client_invocations = []
+    for index, item in enumerate(_eonclient_calls(invocations, version=False), start=1):
+        argv = [str(part) for part in item.get("argv") or []]
         client_invocations.append(
             {
                 "index": index,
@@ -540,6 +560,7 @@ def _provenance(
             "prefix": "<eon-prefix>",
             "source": "<eon-src>" if source else "",
             "builddir": "<eon-build>" if builddir else "",
+            "cwd": "<eon-src>" if source else "",
         },
         "rgsaddle": {
             "repository": "https://github.com/OmniPotentRPC/rgsaddle",
@@ -573,6 +594,7 @@ def _provenance(
             "wall_seconds": wall,
             "error": error.splitlines()[0] if error else "",
             "config_ini": labels.rewrite(config_text),
+            "version_probes": version_probes,
             "client_commands": client_invocations,
         },
         "budgets": {
@@ -588,6 +610,17 @@ def _provenance(
             "force_call_median_connected": _median(connected_calls),
             "wall_median": _median(walls),
             "wall_seconds": wall,
+        },
+        "prior_arm": {
+            "total_searches": 16972,
+            "connected": 27,
+            "force_calls": 7967178,
+            "seed": 20261016,
+            "note": (
+                "Those counts are from the earlier eon-classic arm. "
+                "Force-call counts, convergence, and saddle energies are the "
+                "quantities to set beside that arm. Wall time is cross-session context only."
+            ),
         },
         "hardware": measured,
         "hardware_comparison": _hardware_comparison(measured),
@@ -660,6 +693,10 @@ def run(client: Path, build_record: Path | None, cpu: int) -> None:
     segments = _load_segments()
     if segments and "wall_seconds" not in segments[-1]:
         segments[-1]["interrupted"] = True
+        started_unix = segments[-1].get("started_unix")
+        if isinstance(started_unix, (int, float)):
+            segments[-1]["wall_seconds"] = time.time() - float(started_unix)
+            segments[-1]["wall_until_resume"] = True
     segment = {
         "started_unix": time.time(),
         "resumed": resumed,
