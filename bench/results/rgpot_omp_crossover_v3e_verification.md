@@ -56,8 +56,9 @@ meson test \
   --print-errorlogs
 ```
 
-Resolved features are parsed from the setup log and the
-host system. Configured is the option value.
+Resolved features other than with_ipi are parsed from the
+setup log. with_ipi is parsed from the pkg-config Cflags
+the build wrote. Configured is the option value.
 
 |Option|Configured|Resolved|
 |---|---|---|
@@ -102,8 +103,9 @@ meson test \
   --print-errorlogs
 ```
 
-Resolved features are parsed from the setup log and the
-host system. Configured is the option value.
+Resolved features other than with_ipi are parsed from the
+setup log. with_ipi is parsed from the pkg-config Cflags
+the build wrote. Configured is the option value.
 
 |Option|Configured|Resolved|
 |---|---|---|
@@ -149,8 +151,9 @@ meson test \
   --print-errorlogs
 ```
 
-Resolved features are parsed from the setup log and the
-host system. Configured is the option value.
+Resolved features other than with_ipi are parsed from the
+setup log. with_ipi is parsed from the pkg-config Cflags
+the build wrote. Configured is the option value.
 
 |Option|Configured|Resolved|
 |---|---|---|

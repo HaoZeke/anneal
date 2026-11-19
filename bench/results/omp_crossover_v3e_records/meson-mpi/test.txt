@@ -1,0 +1,174 @@
+ninja: Entering directory `build/verify-meson-mpi'
+ninja: no work to do.
+  1/166 schema - rgpot:schema-sync-canonical-rpc      OK                0.03s
+  2/166 schema - rgpot:schema-sync-canonical-core     OK                0.02s
+  3/166 rgpot:FortranSWGather                         OK                0.02s
+  4/166 rgpot:FortranCuH2Gather                       OK                0.01s
+  5/166 rgpot:FortranEAMAlGather                      OK                0.01s
+  6/166 rgpot:FortranWaterHGather                     OK                0.01s
+  7/166 rgpot:FortranFeHeGather                       OK                0.02s
+  8/166 rgpot:FortranTersoffGather                    OK                0.02s
+  9/166 rgpot:FortranEDIPGather                       OK                0.02s
+ 10/166 rgpot:CoreLinksNoMpi                          OK                0.01s
+ 11/166 rgpot:FortranSymbolAudit                      OK                0.03s
+ 12/166 rgpot:MolecularFrameTest                      OK                0.03s
+ 13/166 plugin - rgpot:PluginTest                     OK                0.02s
+ 14/166 expr - rgpot:ExprLeptonSymbols                OK                0.05s
+ 15/166 rgpot:FortranLenoskyGather                    OK                0.06s
+ 16/166 plugin - rgpot:PluginContractTest             OK                0.01s
+ 17/166 plugin - rgpot:ExternalPluginTest             OK                0.02s
+ 18/166 plugin - rgpot:ExternalFortranPluginTest      OK                0.02s
+ 19/166 rgpot:AotiUnpackTest                          OK                0.06s
+ 20/166 nwchem - rgpot:NWChemPotTest                  OK                0.02s
+ 21/166 plugin - rgpot:PluginLifetimeTest             OK                0.03s
+ 22/166 nwchem - rgpot:NWChemPotMessageAbiTest        OK                0.01s
+ 23/166 nwchem - rgpot:test_nwchem_abi                OK                0.01s
+ 24/166 nwchem - rgpot:NWChemPotLifetime-ordinary     OK                0.04s
+ 25/166 cpmd - rgpot:CPMDPotGradientStressTest        OK                0.02s
+ 26/166 nwchem - rgpot:NWChemPotLifetime-probe        OK                0.05s
+ 27/166 cpmd - rgpot:CPMDPotMessageAbiTest            OK                0.02s
+ 28/166 schema - rgpot:schema-ordinal-ledger          OK                0.19s
+ 29/166 rgpot:AotiPublicationTest                     OK                0.53s
+ 30/166 mpi-host - rgpot:CollectiveRPC-NWChem-serial  OK                0.51s
+ 31/166 mpi-host - rgpot:CollectiveRPC-CPMD-serial    OK                0.52s
+ 32/166 mpi-host - rgpot:MpiHost-borrowed             OK                1.65s
+ 33/166 mpi-host - rgpot:MpiHost-owned                OK                1.65s
+ 34/166 mpi-host - rgpot:CollectiveRPC-NWChem-mpi     OK                1.88s
+ 35/166 mpi-host - rgpot:CollectiveRPC-CPMD-mpi       OK                1.89s
+ 36/166 mpi-host - rgpot:NWChemMpiForceHost           OK                5.00s
+ 37/166 rgpot:AotiPublicationStressTest               OK                7.12s
+ 38/166 cpmd - rgpot:RankExceptionAbort               OK                1.52s
+ 39/166 cpmd - rgpot:CalculatorUnevenBatch            OK                1.57s
+ 40/166 cpmd - rgpot:RankExceptionFinalizeOwner       OK                1.56s
+ 41/166 cpmd - rgpot:RankExceptionFinalizeGuest       OK                1.56s
+ 42/166 cpmd - rgpot:ShareBroadcastMismatch           OK                1.52s
+ 43/166 cpmd - rgpot:ShareBroadcastMatch              OK                1.56s
+ 44/166 cpmd - rgpot:RefusedSplit                     OK                1.62s
+ 45/166 cpmd - rgpot:AdoptCommMissing                 OK                1.57s
+ 46/166 cpmd - rgpot:AdoptCommSplit                   OK                1.56s
+ 47/166 cpmd - rgpot:AdoptCommRefusedHook             OK                1.56s
+ 48/166 cpmd - rgpot:AdoptCommProbe                   OK                1.56s
+ 49/166 cpmd - rgpot:AdoptCommInstanceFirst           OK                1.56s
+ 50/166 cpmd - rgpot:AdoptCommBoundStatic             OK                1.56s
+ 51/166 cpmd - rgpot:AdoptCommBoundInstance           OK                1.57s
+ 52/166 cpmd - rgpot:AdoptCommRefusedForce            OK                1.52s
+ 53/166 cpmd - rgpot:CollectiveCache                  OK                1.58s
+ 54/166 abi - rgpot:ProfileLoaderTest                 OK                0.03s
+ 55/166 cpmd - rgpot:test_cpmd_abi                    OK                0.02s
+ 56/166 mopac - rgpot:MOPACPotTest                    OK                0.02s
+ 57/166 mopac - rgpot:MOPACPotEmptyVariable           OK                0.01s
+ 58/166 mopac - rgpot:test_mopac_abi                  OK                0.01s
+ 59/166 rgpot:UnitsTest                               OK                0.01s
+ 60/166 rgpot:CuH2test                                OK                0.03s
+ 61/166 rgpot:RPCTest                                 OK                0.02s
+ 62/166 cpmd - rgpot:CPMDPotConfigMessageTest         OK                0.01s
+ 63/166 rgpot:CambridgeMorseTest                      OK                0.01s
+ 64/166 rgpot:GuptaTest                               OK                0.01s
+ 65/166 rgpot:HessianVectorTest                       OK                0.02s
+ 66/166 rgpot:ModelPotsTest                           OK                0.02s
+ 67/166 rgpot:HalfShellScanTest                       OK                0.01s
+ 68/166 rgpot:HalfShellTest                           OK                0.01s
+ 69/166 rgpot:KeptPotentialTest                       OK                0.01s
+ 70/166 rgpot:ReducedPairTest                         OK                0.01s
+ 71/166 rgpot:EAMCellPotTest                          OK                0.01s
+ 72/166 rgpot:SWSiTest                                OK                0.05s
+ 73/166 rgpot:TersoffSiCTest                          OK                0.17s
+ 74/166 rpc - rgpot:RPCSchemaSync                     OK                0.54s
+ 75/166 rgpot:SuttonChenPotTest                       OK                0.66s
+ 76/166 rgpot:FortranPotsTest                         OK                1.17s
+ 77/166 rgpot:VesinEmptyResetTest                     OK                0.01s
+ 78/166 rgpot:TersoffZblBuildTest                     OK                0.99s
+ 79/166 rgpot:ManyBodyForceTest                       OK                0.04s
+ 80/166 rgpot:SkinPairTest                            OK                0.02s
+ 81/166 rgpot:MinImageIsaHash                         OK                0.01s
+ 82/166 rgpot:BatchEvaluatorTest                      OK                0.01s
+ 83/166 rgpot:NeighbourLayerTest                      OK                1.28s
+ 84/166 rgpot:CalculatorAbortFlagTest                 OK                0.01s
+ 85/166 rgpot:LJClusterPotTest                        OK                0.01s
+ 86/166 rgpot:MorsePotTest                            OK                1.87s
+ 87/166 rgpot:ZBLPotTest                              OK                0.03s
+ 88/166 rgpot:NeighbourListTest                       OK                1.22s
+ 89/166 rgpot:PerAtomTest                             OK                0.07s
+ 90/166 rgpot:EAMCellVerletTest                       OK                0.80s
+ 91/166 rgpot:LocalityTest                            OK                0.19s
+ 92/166 rgpot:EMTPotTest                              OK                2.07s
+ 93/166 rgpot:IsaDispatchTest                         OK                0.02s
+ 94/166 rgpot:FmaExactTest                            OK                0.08s
+ 95/166 rgpot:FoldDegenerateTest                      OK                0.02s
+ 96/166 rgpot:StagedTest                              OK                0.29s
+ 97/166 rgpot:MinimumImageTest                        OK                0.23s
+ 98/166 rgpot:CacheTest                               OK                0.12s
+ 99/166 rgpot:InvarianceTest                          OK                0.02s
+100/166 rgpot:MorseConfigureTest                      OK                0.01s
+101/166 rgpot:FastNlistTest                           OK                0.55s
+102/166 rgpot:CalculatorGroupTest                     OK                1.56s
+103/166 rgpot:nlist_lj                                OK                0.00s
+104/166 rgpot:nlist_threebody                         OK                0.00s
+105/166 rgpot:nlist_metatomic                         OK                0.00s
+106/166 rgpot:nlist_batch                             OK                0.00s
+107/166 rgpot:nlist_c                                 OK                0.00s
+108/166 rgpot:nlist_verlet                            OK                0.00s
+109/166 rgpot:nlist_stream                            OK                0.02s
+110/166 rgpot:nlist_capnp_roundtrip                   OK                0.12s
+111/166 rgpot:nlist_rust                              OK                0.36s
+112/166 rgpot:MinImageIsaVariants                     OK                0.01s
+113/166 rgpot:LJPotThreadsTest                        OK                2.11s
+114/166 rgpot:IPIPotTest                              OK                1.26s
+115/166 rgpot:ExactFmaEq                              OK                0.15s
+116/166 rgpot:CxxLayoutTest                           OK                0.00s
+117/166 rgpot:simd-env-scalar                         OK                0.00s
+118/166 rgpot:simd-env-unknown                        OK                0.00s
+119/166 rgpot:simd-env-rvv                            OK                0.01s
+120/166 rgpot:IPIDriverTest                           OK                1.25s
+121/166 rgpot:simd-env-avx2                           OK                0.01s
+122/166 rgpot:EngineTableTest                         OK                0.02s
+123/166 rgpot:ExpFixedEq                              OK                0.10s
+124/166 rgpot:CxxSoversion                            OK                0.07s
+125/166 rgpot:FmaPathEq                               OK                0.19s
+126/166 rgpot:EngineAdapterTest                       OK                0.96s
+127/166 rgpot:StreamParityTest                        OK                6.85s
+128/166 rgpot:ThreadTeamTest                          OK                9.15s
+129/166 rgpot:ThreadTeamTest_limit2                   OK                9.24s
+130/166 rgpot:ThreadTeamTest_limit1                   OK               13.57s
+131/166 cpmd - rgpot:CalculatorGroupShare             OK                1.57s
+132/166 cpmd - rgpot:CalculatorGroupBadOwner          OK                1.52s
+133/166 xtb - rgpot:XTBDlopenTest                     OK                0.03s
+134/166 rgpot:lj_eval                                 OK                0.02s
+135/166 rgpot:lj_engine                               OK                0.02s
+136/166 rgpot:capi_threads                            OK                0.01s
+137/166 rgpot:capi_threads_tsan                       OK                0.03s
+138/166 rgpot:abi_symbols                             OK                0.04s
+139/166 rgpot:abi_symbols_fixture_archive_a           OK                0.04s
+140/166 rgpot:abi_symbols_fixture_shared              OK                0.05s
+141/166 rgpot:abi_symbols_fixture_archive_lib         OK                0.05s
+142/166 rgpot:abi_symbols_fixture_archive_missing     EXPECTEDFAIL      0.04s   exit status 1
+143/166 rgpot:external_potentials                     OK                0.01s
+144/166 rgpot:abi_symbols_fixture_shared_hidden       EXPECTEDFAIL      0.05s   exit status 1
+145/166 rgpot:CxxLayoutVirtualCounts                  OK                0.03s
+146/166 rgpot:test_list_parity_selftest               OK                0.08s
+147/166 rgpot:omp_crossover_v3_provenance             OK                0.08s
+148/166 rgpot:openmp_confined                         OK                0.24s
+149/166 rgpot:installed_sources                       OK                0.38s
+150/166 rgpot:omp_crossover_v3_analysis               OK                0.05s
+151/166 mopac - rgpot:MOPACDlopenContract             OK                0.02s
+152/166 rgpot:omp_crossover_v3_report                 OK                0.29s
+153/166 schema - rgpot:schema-ordinal-ledger-vendored OK                0.15s
+154/166 rpc - rgpot:CapabilitiesWire                  OK                0.08s
+155/166 nwchem - rgpot:NWChemDlopenContract           OK                0.02s
+156/166 rgpot:omp_crossover_v3_verification           OK                0.33s
+157/166 cpmd - rgpot:CPMDDlopenContract               OK                0.03s
+158/166 rgpot:test_list_parity                        OK                0.05s
+159/166 schema - rgpot:schema-ordinal-ledger-selftest OK                0.48s
+160/166 rgpot:omp_crossover_v3_provenance_cases       OK                1.21s
+161/166 rgpot:gromacs_include_prefix                  OK                1.79s
+162/166 rgpot:fortran_sw_module_order                 OK                2.72s
+163/166 rgpot:eigen_subproject_fallback               OK                2.91s
+164/166 docs - rgpot:doccheck_static                  OK                3.01s
+165/166 rgpot:optional_engine_install                 OK               11.49s
+166/166 docs - rgpot:doccheck_examples                OK               26.04s
+
+Ok:                164 
+Expected Fail:     2   
+Fail:              0   
+
+Full log written to build/verify-meson-mpi/meson-logs/testlog.txt

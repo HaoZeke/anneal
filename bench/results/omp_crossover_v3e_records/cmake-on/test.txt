@@ -1,0 +1,325 @@
+Internal ctest changing into directory: build/verify-cmake-on
+Test project build/verify-cmake-on
+        Start   1: AotiPublicationTest
+  1/153 Test   #1: AotiPublicationTest ...................   Passed    0.20 sec
+        Start   2: AotiPublicationStressTest
+  2/153 Test   #2: AotiPublicationStressTest .............   Passed    6.21 sec
+        Start   3: MolecularFrameTest
+  3/153 Test   #3: MolecularFrameTest ....................   Passed    0.00 sec
+        Start   4: AotiUnpackTest
+  4/153 Test   #4: AotiUnpackTest ........................   Passed    0.04 sec
+        Start   5: test_list_parity
+  5/153 Test   #5: test_list_parity ......................   Passed    0.07 sec
+        Start   6: UnitsTest
+  6/153 Test   #6: UnitsTest .............................   Passed    0.00 sec
+        Start   7: CuH2test
+  7/153 Test   #7: CuH2test ..............................   Passed    0.01 sec
+        Start   8: RPCTest
+  8/153 Test   #8: RPCTest ...............................   Passed    0.00 sec
+        Start   9: FortranPotsTest
+  9/153 Test   #9: FortranPotsTest .......................   Passed    0.53 sec
+        Start  10: MorsePotTest
+ 10/153 Test  #10: MorsePotTest ..........................   Passed    0.90 sec
+        Start  11: CPMDPotConfigMessageTest
+ 11/153 Test  #11: CPMDPotConfigMessageTest ..............   Passed    0.00 sec
+        Start  12: CambridgeMorseTest
+ 12/153 Test  #12: CambridgeMorseTest ....................   Passed    0.00 sec
+        Start  13: GuptaTest
+ 13/153 Test  #13: GuptaTest .............................   Passed    0.00 sec
+        Start  14: HessianVectorTest
+ 14/153 Test  #14: HessianVectorTest .....................   Passed    0.01 sec
+        Start  15: ModelPotsTest
+ 15/153 Test  #15: ModelPotsTest .........................   Passed    0.01 sec
+        Start  16: SWSiTest
+ 16/153 Test  #16: SWSiTest ..............................   Passed    0.04 sec
+        Start  17: TersoffSiCTest
+ 17/153 Test  #17: TersoffSiCTest ........................   Passed    0.16 sec
+        Start  18: HalfShellScanTest
+ 18/153 Test  #18: HalfShellScanTest .....................   Passed    0.00 sec
+        Start  19: HalfShellTest
+ 19/153 Test  #19: HalfShellTest .........................   Passed    0.00 sec
+        Start  20: SuttonChenPotTest
+ 20/153 Test  #20: SuttonChenPotTest .....................   Passed    0.50 sec
+        Start  21: KeptPotentialTest
+ 21/153 Test  #21: KeptPotentialTest .....................   Passed    0.00 sec
+        Start  22: ReducedPairTest
+ 22/153 Test  #22: ReducedPairTest .......................   Passed    0.00 sec
+        Start  23: EMTPotTest
+ 23/153 Test  #23: EMTPotTest ............................   Passed    1.30 sec
+        Start  24: EAMCellPotTest
+ 24/153 Test  #24: EAMCellPotTest ........................   Passed    0.01 sec
+        Start  25: NeighbourLayerTest
+ 25/153 Test  #25: NeighbourLayerTest ....................   Passed    0.84 sec
+        Start  26: ThreadTeamTest
+ 26/153 Test  #26: ThreadTeamTest ........................   Passed    6.63 sec
+        Start  27: TersoffZblBuildTest
+ 27/153 Test  #27: TersoffZblBuildTest ...................   Passed    0.40 sec
+        Start  28: StreamParityTest
+ 28/153 Test  #28: StreamParityTest ......................   Passed    5.66 sec
+        Start  29: NeighbourListTest
+ 29/153 Test  #29: NeighbourListTest .....................   Passed    0.46 sec
+        Start  30: VesinEmptyResetTest
+ 30/153 Test  #30: VesinEmptyResetTest ...................   Passed    0.00 sec
+        Start  31: EAMCellVerletTest
+ 31/153 Test  #31: EAMCellVerletTest .....................   Passed    0.36 sec
+        Start  32: ManyBodyForceTest
+ 32/153 Test  #32: ManyBodyForceTest .....................   Passed    0.03 sec
+        Start  33: SkinPairTest
+ 33/153 Test  #33: SkinPairTest ..........................   Passed    0.01 sec
+        Start  34: MinImageIsaHash
+ 34/153 Test  #34: MinImageIsaHash .......................   Passed    0.00 sec
+        Start  35: BatchEvaluatorTest
+ 35/153 Test  #35: BatchEvaluatorTest ....................   Passed    0.01 sec
+        Start  36: CalculatorGroupTest
+ 36/153 Test  #36: CalculatorGroupTest ...................   Passed    1.48 sec
+        Start  37: CalculatorAbortFlagTest
+ 37/153 Test  #37: CalculatorAbortFlagTest ...............   Passed    0.00 sec
+        Start  38: LJClusterPotTest
+ 38/153 Test  #38: LJClusterPotTest ......................   Passed    0.01 sec
+        Start  39: LJPotThreadsTest
+ 39/153 Test  #39: LJPotThreadsTest ......................   Passed    1.70 sec
+        Start  40: ZBLPotTest
+ 40/153 Test  #40: ZBLPotTest ............................   Passed    0.01 sec
+        Start  41: PerAtomTest
+ 41/153 Test  #41: PerAtomTest ...........................   Passed    0.05 sec
+        Start  42: LocalityTest
+ 42/153 Test  #42: LocalityTest ..........................   Passed    0.15 sec
+        Start  43: StagedTest
+ 43/153 Test  #43: StagedTest ............................   Passed    0.26 sec
+        Start  44: FastNlistTest
+ 44/153 Test  #44: FastNlistTest .........................   Passed    0.02 sec
+        Start  45: IsaDispatchTest
+ 45/153 Test  #45: IsaDispatchTest .......................   Passed    0.01 sec
+        Start  46: FmaExactTest
+ 46/153 Test  #46: FmaExactTest ..........................   Passed    0.04 sec
+        Start  47: MinimumImageTest
+ 47/153 Test  #47: MinimumImageTest ......................   Passed    0.10 sec
+        Start  48: FoldDegenerateTest
+ 48/153 Test  #48: FoldDegenerateTest ....................   Passed    0.01 sec
+        Start  49: IPIPotTest
+ 49/153 Test  #49: IPIPotTest ............................   Passed    1.26 sec
+        Start  50: IPIDriverTest
+ 50/153 Test  #50: IPIDriverTest .........................   Passed    1.18 sec
+        Start  51: CacheTest
+ 51/153 Test  #51: CacheTest .............................   Passed    0.07 sec
+        Start  52: InvarianceTest
+ 52/153 Test  #52: InvarianceTest ........................   Passed    0.02 sec
+        Start  53: MorseConfigureTest
+ 53/153 Test  #53: MorseConfigureTest ....................   Passed    0.01 sec
+        Start  54: ThreadTeamTest_limit1
+ 54/153 Test  #54: ThreadTeamTest_limit1 .................   Passed   12.84 sec
+        Start  55: ThreadTeamTest_limit2
+ 55/153 Test  #55: ThreadTeamTest_limit2 .................   Passed    8.37 sec
+        Start  56: FortranSWGather
+ 56/153 Test  #56: FortranSWGather .......................   Passed    0.00 sec
+        Start  57: FortranCuH2Gather
+ 57/153 Test  #57: FortranCuH2Gather .....................   Passed    0.01 sec
+        Start  58: FortranEAMAlGather
+ 58/153 Test  #58: FortranEAMAlGather ....................   Passed    0.00 sec
+        Start  59: FortranWaterHGather
+ 59/153 Test  #59: FortranWaterHGather ...................   Passed    0.00 sec
+        Start  60: FortranFeHeGather
+ 60/153 Test  #60: FortranFeHeGather .....................   Passed    0.01 sec
+        Start  61: FortranTersoffGather
+ 61/153 Test  #61: FortranTersoffGather ..................   Passed    0.01 sec
+        Start  62: FortranEDIPGather
+ 62/153 Test  #62: FortranEDIPGather .....................   Passed    0.00 sec
+        Start  63: FortranLenoskyGather
+ 63/153 Test  #63: FortranLenoskyGather ..................   Passed    0.04 sec
+        Start  64: nlist_lj
+ 64/153 Test  #64: nlist_lj ..............................   Passed    0.00 sec
+        Start  65: nlist_threebody
+ 65/153 Test  #65: nlist_threebody .......................   Passed    0.00 sec
+        Start  66: nlist_metatomic
+ 66/153 Test  #66: nlist_metatomic .......................   Passed    0.00 sec
+        Start  67: nlist_batch
+ 67/153 Test  #67: nlist_batch ...........................   Passed    0.00 sec
+        Start  68: nlist_c
+ 68/153 Test  #68: nlist_c ...............................   Passed    0.00 sec
+        Start  69: nlist_verlet
+ 69/153 Test  #69: nlist_verlet ..........................   Passed    0.00 sec
+        Start  70: test_list_parity_selftest
+ 70/153 Test  #70: test_list_parity_selftest .............   Passed    0.07 sec
+        Start  71: CxxLayoutVirtualCounts
+ 71/153 Test  #71: CxxLayoutVirtualCounts ................   Passed    0.02 sec
+        Start  72: openmp_confined
+ 72/153 Test  #72: openmp_confined .......................   Passed    0.23 sec
+        Start  73: omp_crossover_v3_provenance
+ 73/153 Test  #73: omp_crossover_v3_provenance ...........   Passed    0.07 sec
+        Start  74: omp_crossover_v3_provenance_cases
+ 74/153 Test  #74: omp_crossover_v3_provenance_cases .....   Passed    1.08 sec
+        Start  75: omp_crossover_v3_report
+ 75/153 Test  #75: omp_crossover_v3_report ...............   Passed    0.25 sec
+        Start  76: omp_crossover_v3_analysis
+ 76/153 Test  #76: omp_crossover_v3_analysis .............   Passed    0.04 sec
+        Start  77: omp_crossover_v3_verification
+ 77/153 Test  #77: omp_crossover_v3_verification .........   Passed    0.30 sec
+        Start  78: MOPACDlopenContract
+ 78/153 Test  #78: MOPACDlopenContract ...................   Passed    0.02 sec
+        Start  79: schema-ordinal-ledger-vendored
+ 79/153 Test  #79: schema-ordinal-ledger-vendored ........   Passed    0.15 sec
+        Start  80: schema-ordinal-ledger-selftest
+ 80/153 Test  #80: schema-ordinal-ledger-selftest ........   Passed    0.44 sec
+        Start  81: CapabilitiesWire
+ 81/153 Test  #81: CapabilitiesWire ......................   Passed    0.07 sec
+        Start  82: NWChemDlopenContract
+ 82/153 Test  #82: NWChemDlopenContract ..................   Passed    0.02 sec
+        Start  83: CPMDDlopenContract
+ 83/153 Test  #83: CPMDDlopenContract ....................   Passed    0.02 sec
+        Start  84: doccheck_static
+ 84/153 Test  #84: doccheck_static .......................   Passed    2.91 sec
+        Start  85: nlist_stream
+ 85/153 Test  #85: nlist_stream ..........................   Passed    0.01 sec
+        Start  86: nlist_capnp_roundtrip
+ 86/153 Test  #86: nlist_capnp_roundtrip .................   Passed    0.10 sec
+        Start  87: nlist_rust
+ 87/153 Test  #87: nlist_rust ............................   Passed    0.14 sec
+        Start  88: CalculatorGroupShare
+ 88/153 Test  #88: CalculatorGroupShare ..................   Passed    1.56 sec
+        Start  89: CalculatorGroupBadOwner
+ 89/153 Test  #89: CalculatorGroupBadOwner ...............   Passed    1.51 sec
+        Start  90: FortranSymbolAudit
+ 90/153 Test  #90: FortranSymbolAudit ....................   Passed    0.01 sec
+        Start  91: CoreLinksNoMpi
+ 91/153 Test  #91: CoreLinksNoMpi ........................   Passed    0.00 sec
+        Start  92: ExprLeptonSymbols
+ 92/153 Test  #92: ExprLeptonSymbols .....................   Passed    0.02 sec
+        Start  93: CxxLayoutTest
+ 93/153 Test  #93: CxxLayoutTest .........................   Passed    0.00 sec
+        Start  94: CxxSoversion
+ 94/153 Test  #94: CxxSoversion ..........................   Passed    0.04 sec
+        Start  95: abi_symbols
+ 95/153 Test  #95: abi_symbols ...........................   Passed    0.01 sec
+        Start  96: abi_symbols_fixture_shared
+ 96/153 Test  #96: abi_symbols_fixture_shared ............   Passed    0.01 sec
+        Start  97: abi_symbols_fixture_archive_a
+ 97/153 Test  #97: abi_symbols_fixture_archive_a .........   Passed    0.01 sec
+        Start  98: abi_symbols_fixture_archive_lib
+ 98/153 Test  #98: abi_symbols_fixture_archive_lib .......   Passed    0.01 sec
+        Start  99: abi_symbols_fixture_shared_hidden
+ 99/153 Test  #99: abi_symbols_fixture_shared_hidden .....   Passed    0.01 sec
+        Start 100: abi_symbols_fixture_archive_missing
+100/153 Test #100: abi_symbols_fixture_archive_missing ...   Passed    0.01 sec
+        Start 101: capi_threads
+101/153 Test #101: capi_threads ..........................   Passed    0.00 sec
+        Start 102: capi_threads_tsan
+102/153 Test #102: capi_threads_tsan .....................   Passed    0.01 sec
+        Start 103: XTBDlopenTest
+103/153 Test #103: XTBDlopenTest .........................   Passed    0.00 sec
+        Start 104: MinImageIsaVariants
+104/153 Test #104: MinImageIsaVariants ...................   Passed    0.01 sec
+        Start 105: ExactFmaEq
+105/153 Test #105: ExactFmaEq ............................   Passed    0.09 sec
+        Start 106: ExpFixedEq
+106/153 Test #106: ExpFixedEq ............................   Passed    0.09 sec
+        Start 107: FmaPathEq
+107/153 Test #107: FmaPathEq .............................   Passed    0.11 sec
+        Start 108: simd-env-scalar
+108/153 Test #108: simd-env-scalar .......................   Passed    0.00 sec
+        Start 109: simd-env-unknown
+109/153 Test #109: simd-env-unknown ......................   Passed    0.00 sec
+        Start 110: simd-env-rvv
+110/153 Test #110: simd-env-rvv ..........................   Passed    0.00 sec
+        Start 111: simd-env-avx2
+111/153 Test #111: simd-env-avx2 .........................   Passed    0.00 sec
+        Start 112: EngineAdapterTest
+112/153 Test #112: EngineAdapterTest .....................   Passed    0.89 sec
+        Start 113: MOPACPotTest
+113/153 Test #113: MOPACPotTest ..........................   Passed    0.00 sec
+        Start 114: MOPACPotEmptyVariable
+114/153 Test #114: MOPACPotEmptyVariable .................   Passed    0.00 sec
+        Start 115: test_mopac_abi
+115/153 Test #115: test_mopac_abi ........................   Passed    0.00 sec
+        Start 116: test_nwchem_abi
+116/153 Test #116: test_nwchem_abi .......................   Passed    0.00 sec
+        Start 117: test_cpmd_abi
+117/153 Test #117: test_cpmd_abi .........................   Passed    0.00 sec
+        Start 118: RPCSchemaSync
+118/153 Test #118: RPCSchemaSync .........................   Passed    0.38 sec
+        Start 119: NWChemPotLifetime-ordinary
+119/153 Test #119: NWChemPotLifetime-ordinary ............   Passed    0.03 sec
+        Start 120: NWChemPotLifetime-probe
+120/153 Test #120: NWChemPotLifetime-probe ...............   Passed    0.03 sec
+        Start 121: NWChemPotTest
+121/153 Test #121: NWChemPotTest .........................   Passed    0.01 sec
+        Start 122: NWChemPotMessageAbiTest
+122/153 Test #122: NWChemPotMessageAbiTest ...............   Passed    0.01 sec
+        Start 123: CPMDPotGradientStressTest
+123/153 Test #123: CPMDPotGradientStressTest .............   Passed    0.01 sec
+        Start 124: CPMDPotMessageAbiTest
+124/153 Test #124: CPMDPotMessageAbiTest .................   Passed    0.01 sec
+        Start 125: ProfileLoaderTest
+125/153 Test #125: ProfileLoaderTest .....................   Passed    0.00 sec
+        Start 126: MpiHost-owned
+126/153 Test #126: MpiHost-owned .........................   Passed    1.57 sec
+        Start 127: MpiHost-borrowed
+127/153 Test #127: MpiHost-borrowed ......................   Passed    1.57 sec
+        Start 128: NWChemMpiForceHost
+128/153 Test #128: NWChemMpiForceHost ....................   Passed    4.66 sec
+        Start 129: CollectiveRPC-NWChem-serial
+129/153 Test #129: CollectiveRPC-NWChem-serial ...........   Passed    0.49 sec
+        Start 130: CollectiveRPC-NWChem-mpi
+130/153 Test #130: CollectiveRPC-NWChem-mpi ..............   Passed    1.82 sec
+        Start 131: CollectiveRPC-CPMD-serial
+131/153 Test #131: CollectiveRPC-CPMD-serial .............   Passed    0.49 sec
+        Start 132: CollectiveRPC-CPMD-mpi
+132/153 Test #132: CollectiveRPC-CPMD-mpi ................   Passed    1.82 sec
+        Start 133: RankExceptionAbort
+133/153 Test #133: RankExceptionAbort ....................   Passed    1.52 sec
+        Start 134: CalculatorUnevenBatch
+134/153 Test #134: CalculatorUnevenBatch .................   Passed    1.56 sec
+        Start 135: RankExceptionFinalizeOwner
+135/153 Test #135: RankExceptionFinalizeOwner ............   Passed    1.55 sec
+        Start 136: RankExceptionFinalizeGuest
+136/153 Test #136: RankExceptionFinalizeGuest ............   Passed    1.55 sec
+        Start 137: ShareBroadcastMismatch
+137/153 Test #137: ShareBroadcastMismatch ................   Passed    1.76 sec
+        Start 138: ShareBroadcastMatch
+138/153 Test #138: ShareBroadcastMatch ...................   Passed    1.55 sec
+        Start 139: RefusedSplit
+139/153 Test #139: RefusedSplit ..........................   Passed    1.61 sec
+        Start 140: AdoptCommMissing
+140/153 Test #140: AdoptCommMissing ......................   Passed    1.56 sec
+        Start 141: AdoptCommSplit
+141/153 Test #141: AdoptCommSplit ........................   Passed    1.56 sec
+        Start 142: AdoptCommRefusedHook
+142/153 Test #142: AdoptCommRefusedHook ..................   Passed    1.55 sec
+        Start 143: AdoptCommProbe
+143/153 Test #143: AdoptCommProbe ........................   Passed    1.56 sec
+        Start 144: AdoptCommInstanceFirst
+144/153 Test #144: AdoptCommInstanceFirst ................   Passed    1.56 sec
+        Start 145: AdoptCommBoundStatic
+145/153 Test #145: AdoptCommBoundStatic ..................   Passed    1.56 sec
+        Start 146: AdoptCommBoundInstance
+146/153 Test #146: AdoptCommBoundInstance ................   Passed    1.55 sec
+        Start 147: AdoptCommRefusedForce
+147/153 Test #147: AdoptCommRefusedForce .................   Passed    1.51 sec
+        Start 148: CollectiveCache
+148/153 Test #148: CollectiveCache .......................   Passed    1.57 sec
+        Start 149: PluginTest
+149/153 Test #149: PluginTest ............................   Passed    0.01 sec
+        Start 150: PluginContractTest
+150/153 Test #150: PluginContractTest ....................   Passed    0.01 sec
+        Start 151: ExternalPluginTest
+151/153 Test #151: ExternalPluginTest ....................   Passed    0.01 sec
+        Start 152: ExternalFortranPluginTest
+152/153 Test #152: ExternalFortranPluginTest .............   Passed    0.01 sec
+        Start 153: PluginLifetimeTest
+153/153 Test #153: PluginLifetimeTest ....................   Passed    0.02 sec
+
+100% tests passed, 0 tests failed out of 153
+
+Label Time Summary:
+abi         =   0.00 sec*proc (1 test)
+cpmd        =  28.18 sec*proc (23 tests)
+docs        =   2.91 sec*proc (1 test)
+expr        =   0.02 sec*proc (1 test)
+mopac       =   0.03 sec*proc (4 tests)
+mpi-host    =  31.14 sec*proc (7 tests)
+nwchem      =   0.09 sec*proc (6 tests)
+plugin      =   0.05 sec*proc (5 tests)
+rpc         =   0.45 sec*proc (2 tests)
+schema      =   0.59 sec*proc (2 tests)
+xtb         =   0.00 sec*proc (1 test)
+
+Total Test time (real) = 100.47 sec
