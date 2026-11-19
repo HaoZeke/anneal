@@ -45,16 +45,28 @@ Atoms 0 and 1 coincident and atom 2 =NaN= therefore give positive infinity and a
 zero gradient.
 For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
 zero.
-The call keeps thread local scratch that only grows.
-It holds one double per atom for the density and 6 doubles per pair, which is
-8 bytes per atom and 48 bytes per pair, with =n (n - 1) / 2= pairs.
-When =realloc= returns null for either buffer, the call sets the energy to
-positive infinity, zeroes the 3 n gradient entries and returns before it reads
-a coordinate.
-There is no status code, so the caller sees the same outputs as for a
-coincident pair and cannot tell the two apart from the outputs alone.
-The buffers keep their earlier size, so a later call that fits them still
-works.
+The call keeps thread local scratch and never shrinks it.
+The density buffer is grown first.
+It holds one double per atom (8 bytes) and is grown only when its capacity is
+below =n=.
+=realloc= asks for =n= doubles, and a successful return stores the new pointer
+and that capacity before the pair buffer is considered.
+A null return leaves the density buffer and its capacity unchanged and does not
+allocate the pair buffer.
+The pair buffer holds 6 doubles per pair (48 bytes).
+The pair count is =n (n - 1) / 2= when ~n >= 2~, and 0 otherwise, so ~n < 2~
+does not grow the pair buffer.
+It is grown only when its capacity is below 6 doubles for each pair.
+A null return from that =realloc= leaves the pair buffer and its capacity
+unchanged.
+The density buffer keeps the capacity already stored, which is the new one when
+this call grew it.
+On either failure the energy is positive infinity, the 3 n gradient entries are
+zero, and the call returns before it reads a coordinate.
+There is no status code, so the caller sees the same outputs as for a coincident
+pair and cannot tell the two apart from the outputs alone.
+A later call that fits the stored capacities still works, and a later call whose
+pair capacity is still short tries that allocation again.
 =NaN= is not ~<= 0.0~.
 A pair that is reached with a =NaN= coordinate is evaluated, and the energy and
 the gradient become =NaN=.
@@ -119,10 +131,21 @@ void rgpot_gupta(const double *x, size_t n, const unsigned char *slot,
   For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
   zero.
 - Errors :: no status code and no error message.
-  A failed scratch allocation (=realloc= returning null for the density or the
-  pair buffer) sets =*energy= to =+INFINITY=, zeroes the 3 n entries of
-  =gradient= and returns.
-  The outputs are those of a coincident pair, and no coordinate is read.
+  The density scratch is grown first, and only when its capacity is below =n=.
+  =realloc= asks for =n= doubles.
+  On success the new pointer and capacity are stored before the pair buffer is
+  considered.
+  A null return leaves both buffers and both capacities unchanged, and the pair
+  buffer is not allocated.
+  The pair scratch is grown next, only when its capacity is below 6 doubles for
+  each pair.
+  The pair count is =n (n - 1) / 2= when ~n >= 2~, and 0 otherwise.
+  A null return from that =realloc= leaves the pair buffer and its capacity
+  unchanged and keeps the density capacity already stored, including a growth
+  from this call.
+  Either failure sets =*energy= to =+INFINITY=, zeroes the 3 n entries of
+  =gradient= and returns before a coordinate is read.
+  The outputs are those of a coincident pair.
   The first pair with ~r2 <= 0.0~ sets =*energy= to =+INFINITY= and returns.
   The gradient is left at the zeros written before that pair, and later pairs
   are not visited.

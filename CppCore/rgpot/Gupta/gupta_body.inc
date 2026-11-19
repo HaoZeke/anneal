@@ -8,12 +8,19 @@
   if (n >= 2) {
     pairs = n * (n - 1) / 2;
   }
-  /* rgpot_gupta_ensure grows the thread local scratch: one double per atom
-   * for the density and 6 doubles per pair. It returns 1 only when realloc
-   * returns null. There is no status return, so the caller sees an infinite
-   * energy and a zero gradient, the outputs of a coincident pair, and no
-   * coordinate is read. The old buffers stay valid, so a later call that
-   * fits them still works. */
+  /* rgpot_gupta_ensure grows the thread local scratch with realloc and
+   * returns 1 when realloc returns null. The density buffer is grown first,
+   * to one double per atom, and only when its capacity is below n. The new
+   * pointer and capacity are stored before the pair buffer is considered. A
+   * null return there leaves both buffers unchanged and does not allocate
+   * the pair buffer. The pair buffer is then grown to 6 doubles per pair,
+   * n * (n - 1) / 2 pairs when n >= 2 and none otherwise, and only when its
+   * capacity is short of that. A null return there leaves the pair buffer
+   * unchanged and keeps the density capacity already stored, including a
+   * growth from this call. Capacities are never reduced. The caller sees an
+   * infinite energy and a zero gradient, the outputs of a coincident pair,
+   * and no coordinate is read. A later call that fits the stored capacities
+   * still works. */
   if (rgpot_gupta_ensure(n, pairs) != 0) {
     *energy = INFINITY;
     for (size_t k = 0; k < 3 * n; k++) {

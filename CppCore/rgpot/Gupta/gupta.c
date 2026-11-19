@@ -23,6 +23,14 @@ static RGPOT_THREAD_LOCAL size_t rho_cap;
 static RGPOT_THREAD_LOCAL double *pack_buf;
 static RGPOT_THREAD_LOCAL size_t pack_cap;
 
+// Density first. When rho_cap < n, realloc the density buffer to n doubles
+// and store rho_buf and rho_cap before the pair buffer is considered. A null
+// return leaves both buffers and both capacities unchanged and does not
+// allocate the pair buffer. When pack_cap < pairs * 6, realloc the pair
+// buffer to that many doubles. A null return there leaves pack_buf and
+// pack_cap unchanged and keeps the density pointer and capacity already
+// stored, including a growth from this call. A capacity is replaced only by
+// a larger count.
 static int rgpot_gupta_ensure(size_t n, size_t pairs) {
   if (rho_cap < n) {
     double *next = (double *)realloc(rho_buf, n * sizeof(double));
