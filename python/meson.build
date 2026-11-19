@@ -233,3 +233,49 @@ if is_variable('metatomic_engine')
         'metatomic_engine installs into the wheel; multi-ABI pack via scripts/rgpot_pack_multi_abi_engines.sh',
     )
 endif
+
+# The extension NEEDs the librgpot SONAME. Meson installs the versioned
+# library and a SONAME symlink. meson-python records the versioned file,
+# and a wheel has no symlink, so a direct wheel or an sdist install cannot
+# open the SONAME. Copy the library this build linked to a regular file in
+# the build directory and install that file on the Python platlib. The
+# directory is the one meson-python already uses for vendored libraries.
+# The name is kCxxSoversion, checked against the built library. The source
+# tree is not written.
+if host_machine.system() == 'linux'
+    _readelf = find_program('readelf', required: true)
+    _librgpot_soname = 'librgpot.so.' + rgpot_cxx_soversion
+    custom_target(
+        'librgpot_soname',
+        input: rgpot,
+        output: _librgpot_soname,
+        command: [
+            py,
+            '-c',
+            '''
+import pathlib, shutil, subprocess, sys
+readelf, src_arg, dst_arg = sys.argv[1:4]
+src = pathlib.Path(src_arg).resolve()
+dst = pathlib.Path(dst_arg)
+text = subprocess.check_output([readelf, "-d", str(src)], text=True)
+soname = ""
+for line in text.splitlines():
+    if "(SONAME)" in line and "[" in line:
+        soname = line.split("[", 1)[1].split("]", 1)[0]
+        break
+if soname != dst.name:
+    raise SystemExit("SONAME is %r, expected %r" % (soname, dst.name))
+shutil.copyfile(src, dst)
+''',
+            _readelf.full_path(),
+            '@INPUT@',
+            '@OUTPUT@',
+        ],
+        install: true,
+        install_dir: py.get_install_dir(
+            pure: false,
+            subdir: '.rgpot.mesonpy.libs',
+        ),
+        build_by_default: true,
+    )
+endif
