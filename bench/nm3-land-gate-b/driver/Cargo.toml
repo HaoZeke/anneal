@@ -1,0 +1,13 @@
+[workspace]
+
+[package]
+name = "nm3-gate-driver"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anneal-core = { path = "../../.." }
+ndarray = "0.17"
+rand = "0.9"
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
