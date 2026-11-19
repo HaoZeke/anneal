@@ -5,6 +5,10 @@ import pytest
 
 import rgpot
 
+pytestmark = pytest.mark.skipif(
+    not rgpot.has_xckernel, reason="built without -Dwith_xckernel"
+)
+
 
 def fixture():
     chi = np.array([[0.5, 0.25, -0.5], [0.25, -0.5, 0.75]])
