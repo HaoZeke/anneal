@@ -340,6 +340,7 @@ rm -rf doctrees
 rm -rf source/xml
 rm -rf source/api
 rm -rf source/crates
+rm -rf source/notes
 rm -rf source/contributing
 rm -rf source/tutorials
 rm -rf source/howto
