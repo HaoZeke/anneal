@@ -3,8 +3,10 @@
 //
 // Multi-image EAM checks against an independent supercell reference.
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -330,69 +332,310 @@ TEST_CASE("EAM multi-image matches an independent supercell reference",
 
 namespace {
 
-void expect_pin(const Eval &got, double energy,
-                const std::vector<double> &forces,
-                const std::vector<double> &stress, double tol) {
+constexpr double kEnergyTol = 1e-9;
+constexpr double kForceTol = 1e-9;
+constexpr double kStressTol = 1e-9;
+constexpr double kMinSignal = 1e-3;
+
+using Vec3 = std::array<double, 3>;
+
+Vec3 cross(const Vec3 &u, const Vec3 &v) {
+  return {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2],
+          u[0] * v[1] - u[1] * v[0]};
+}
+
+double dot(const Vec3 &u, const Vec3 &v) {
+  return u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+}
+
+/// One tabulated function: the cubic Hermite interpolant on each knot
+/// interval, with the derivative estimates the table format fixes (a
+/// five point rule inside, one and two point rules at the ends). Written
+/// as a Hermite basis, not as the stored coefficient layout.
+class Knots {
+public:
+  Knots(const std::vector<double> &f, double delta) : f_(f), delta_(delta) {
+    const std::size_t n = f.size();
+    REQUIRE(n >= 5);
+    d_.assign(n, 0.0);
+    d_[0] = f[1] - f[0];
+    d_[1] = 0.5 * (f[2] - f[0]);
+    d_[n - 2] = 0.5 * (f[n - 1] - f[n - 3]);
+    d_[n - 1] = f[n - 1] - f[n - 2];
+    for (std::size_t m = 2; m + 2 < n; ++m) {
+      d_[m] = ((f[m - 2] - f[m + 2]) + 8.0 * (f[m + 1] - f[m - 1])) / 12.0;
+    }
+  }
+
+  [[nodiscard]] double value(double x) const {
+    const Spot s = locate(x);
+    const double p = s.p;
+    const double p2 = p * p;
+    const double p3 = p2 * p;
+    return (2.0 * p3 - 3.0 * p2 + 1.0) * f_[s.k] +
+           (p3 - 2.0 * p2 + p) * d_[s.k] +
+           (-2.0 * p3 + 3.0 * p2) * f_[s.k + 1] + (p3 - p2) * d_[s.k + 1];
+  }
+
+  [[nodiscard]] double slope(double x) const {
+    const Spot s = locate(x);
+    const double p = s.p;
+    const double p2 = p * p;
+    return ((6.0 * p2 - 6.0 * p) * f_[s.k] +
+            (3.0 * p2 - 4.0 * p + 1.0) * d_[s.k] +
+            (-6.0 * p2 + 6.0 * p) * f_[s.k + 1] +
+            (3.0 * p2 - 2.0 * p) * d_[s.k + 1]) /
+           delta_;
+  }
+
+private:
+  struct Spot {
+    std::size_t k;
+    double p;
+  };
+
+  [[nodiscard]] Spot locate(double x) const {
+    const double s = x / delta_;
+    const std::size_t last = f_.size() - 2;
+    std::size_t k = s < 0.0 ? 0 : static_cast<std::size_t>(s);
+    if (k > last) {
+      k = last;
+    }
+    double p = s - static_cast<double>(k);
+    if (p > 1.0) {
+      p = 1.0;
+    }
+    return {k, p};
+  }
+
+  std::vector<double> f_;
+  std::vector<double> d_;
+  double delta_;
+};
+
+/// A periodic image of atom j seen from atom i: d = x_i - x_j - S.
+struct Image {
+  std::size_t i;
+  std::size_t j;
+  Vec3 d;
+  double r;
+};
+
+Vec3 lattice(const double *box, int axis) {
+  return {box[3 * axis], box[3 * axis + 1], box[3 * axis + 2]};
+}
+
+/// Reciprocal lattice vectors, so rec[a] . x is the fractional
+/// coordinate of x along axis a and 1 / |rec[a]| is the face spacing.
+std::array<Vec3, 3> reciprocal(const double *box) {
+  const Vec3 a = lattice(box, 0);
+  const Vec3 b = lattice(box, 1);
+  const Vec3 c = lattice(box, 2);
+  const double vol = dot(a, cross(b, c));
+  REQUIRE(std::abs(vol) > 0.0);
+  std::array<Vec3, 3> rec{cross(b, c), cross(c, a), cross(a, b)};
+  for (Vec3 &v : rec) {
+    for (double &x : v) {
+      x /= vol;
+    }
+  }
+  return rec;
+}
+
+double reciprocal_spacing(const std::array<Vec3, 3> &rec, int axis) {
+  return 1.0 / std::sqrt(dot(rec[static_cast<std::size_t>(axis)],
+                             rec[static_cast<std::size_t>(axis)]));
+}
+
+int short_axes(const double *box, double cutoff) {
+  const std::array<Vec3, 3> rec = reciprocal(box);
+  int count = 0;
+  for (int axis = 0; axis < 3; ++axis) {
+    if (!(2.0 * cutoff < reciprocal_spacing(rec, axis))) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+/// Every ordered (i, j, S) with 0 < |d| < cutoff. Atoms are folded into
+/// the home cell and a generous cube of shifts is scanned around it, so
+/// nothing here depends on the production image extent.
+std::vector<Image> brute_images(const std::vector<double> &pos,
+                                const double *box, double cutoff) {
+  const std::array<Vec3, 3> rec = reciprocal(box);
+  const std::size_t n = pos.size() / 3;
+  const Vec3 lat[3] = {lattice(box, 0), lattice(box, 1), lattice(box, 2)};
+  std::vector<Vec3> home(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    const Vec3 x{pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]};
+    Vec3 w{0.0, 0.0, 0.0};
+    for (std::size_t a = 0; a < 3; ++a) {
+      const double f = dot(rec[a], x);
+      const double frac = f - std::floor(f);
+      for (std::size_t c = 0; c < 3; ++c) {
+        w[c] += frac * lat[a][c];
+      }
+    }
+    home[i] = w;
+  }
+  int reach[3];
+  for (int a = 0; a < 3; ++a) {
+    reach[a] =
+        static_cast<int>(std::ceil(cutoff / reciprocal_spacing(rec, a))) + 2;
+  }
+  std::vector<Image> out;
+  for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t j = 0; j < n; ++j) {
+      for (int h = -reach[0]; h <= reach[0]; ++h) {
+        for (int k = -reach[1]; k <= reach[1]; ++k) {
+          for (int l = -reach[2]; l <= reach[2]; ++l) {
+            Vec3 d;
+            for (std::size_t c = 0; c < 3; ++c) {
+              d[c] = home[i][c] - home[j][c] - h * lat[0][c] - k * lat[1][c] -
+                     l * lat[2][c];
+            }
+            const double r = std::sqrt(dot(d, d));
+            if (r > 0.0 && r < cutoff) {
+              out.push_back({i, j, d, r});
+            }
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/// A single element table evaluated by summing brute_images.
+class BruteForceEam {
+public:
+  explicit BruteForceEam(const rgpot::EAMTable &t)
+      : frho_(single(t).frho[0], t.drho), rhor_(t.rhor[0], t.dr),
+        z2r_(t.z2r[0], t.dr), cutoff_(t.cutoff), rhomax_(t.rhomax) {}
+
+  [[nodiscard]] double cutoff() const { return cutoff_; }
+
+  [[nodiscard]] Eval evaluate(const std::vector<double> &pos,
+                              const double *box) const {
+    const std::vector<Image> images = brute_images(pos, box, cutoff_);
+    const std::size_t n = pos.size() / 3;
+    const double volume =
+        std::abs(dot(lattice(box, 0), cross(lattice(box, 1), lattice(box, 2))));
+    std::vector<double> rho(n, 0.0);
+    for (const Image &im : images) {
+      rho[im.i] += rhor_.value(im.r);
+    }
+    Eval e;
+    e.eatom.assign(n, 0.0);
+    e.forces.assign(3 * n, 0.0);
+    std::vector<double> slope(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i) {
+      slope[i] = frho_.slope(rho[i]);
+      double embed = frho_.value(rho[i]);
+      if (rho[i] > rhomax_) {
+        embed += slope[i] * (rho[i] - rhomax_);
+      }
+      e.eatom[i] = embed;
+    }
+    for (const Image &im : images) {
+      const double phi = z2r_.value(im.r) / im.r;
+      const double dphi = z2r_.slope(im.r) / im.r - phi / im.r;
+      e.eatom[im.i] += 0.5 * phi;
+      const double scale =
+          -((slope[im.i] + slope[im.j]) * rhor_.slope(im.r) + dphi) / im.r;
+      for (std::size_t c = 0; c < 3; ++c) {
+        e.forces[3 * im.i + c] += scale * im.d[c];
+        for (std::size_t b = 0; b < 3; ++b) {
+          e.stress[3 * c + b] -= 0.5 * scale * im.d[c] * im.d[b] / volume;
+        }
+      }
+    }
+    e.has_stress = 1;
+    for (const double v : e.eatom) {
+      e.energy += v;
+    }
+    return e;
+  }
+
+private:
+  static const rgpot::EAMTable &single(const rgpot::EAMTable &t) {
+    REQUIRE(t.z.size() == 1);
+    REQUIRE(t.frho.size() == 1);
+    REQUIRE(t.rhor.size() == 1);
+    REQUIRE(t.z2r.size() == 1);
+    return t;
+  }
+
+  Knots frho_;
+  Knots rhor_;
+  Knots z2r_;
+  double cutoff_;
+  double rhomax_;
+};
+
+rgpot::EAMTable cu_table() {
+  std::ifstream in(kData + "eam_table/Cu_u3.eam");
+  REQUIRE(in.good());
+  return rgpot::read_eam_table(in, EAMTableFormat::Funcfl);
+}
+
+void expect_same_eval(const Eval &got, const Eval &want) {
+  REQUIRE_THAT(got.energy, WithinAbs(want.energy, kEnergyTol));
+  REQUIRE(got.forces.size() == want.forces.size());
+  for (std::size_t c = 0; c < got.forces.size(); ++c) {
+    REQUIRE_THAT(got.forces[c], WithinAbs(want.forces[c], kForceTol));
+  }
   REQUIRE(got.has_stress == 1);
-  REQUIRE(got.forces.size() == forces.size());
-  REQUIRE(stress.size() == 9);
-  REQUIRE_THAT(got.energy, WithinAbs(energy, tol));
-  for (std::size_t i = 0; i < forces.size(); ++i) {
-    REQUIRE_THAT(got.forces[i], WithinAbs(forces[i], tol));
+  REQUIRE(want.has_stress == 1);
+  for (std::size_t c = 0; c < got.stress.size(); ++c) {
+    REQUIRE_THAT(got.stress[c], WithinAbs(want.stress[c], kStressTol));
   }
-  for (std::size_t i = 0; i < stress.size(); ++i) {
-    REQUIRE_THAT(got.stress[i], WithinAbs(stress[i], tol));
+  REQUIRE(got.eatom.size() == want.eatom.size());
+  for (std::size_t i = 0; i < got.eatom.size(); ++i) {
+    REQUIRE_THAT(got.eatom[i], WithinAbs(want.eatom[i], kEnergyTol));
   }
+}
+
+void expect_matches_brute_force(const rgpot::EAMTable &table,
+                                const std::vector<double> &pos,
+                                const double *box) {
+  const rgpot::EAMTablePot pot(table, true, true);
+  const std::vector<int> z(pos.size() / 3, table.z[0]);
+  const Eval got = eval_full(pot, pos, z, box);
+  const Eval want = BruteForceEam(table).evaluate(pos, box);
+  REQUIRE(std::abs(want.energy) > kMinSignal);
+  if (z.size() > 1) {
+    double largest = 0.0;
+    for (const double f : want.forces) {
+      largest = std::max(largest, std::abs(f));
+    }
+    REQUIRE(largest > kMinSignal);
+  }
+  expect_same_eval(got, want);
 }
 
 } // namespace
 
-TEST_CASE("EAM minimum-image cells match the stored neighbour values",
+TEST_CASE("EAM neighbour lists match a brute force sum over every image",
           "[EAMTable][nlist]") {
-  // Face spacing above twice the cutoff, so the image walk is not entered.
-  // The literals are the stored neighbour walk on these cells.
-  const rgpot::EAMTablePot pot = cu_u3();
-  const double cutoff = pot.locality().cutoff;
-  const std::vector<int> z{29, 29, 29, 29};
+  const rgpot::EAMTable cu = cu_table();
+  const double cutoff = cu.cutoff;
 
-  SECTION("orthogonal 12A cell") {
+  SECTION("control: orthogonal 12A cell, minimum image only") {
     const double box[9] = {12.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 0.0, 12.0};
-    REQUIRE(face_spacing(box, 0) > 2.0 * cutoff);
+    REQUIRE(short_axes(box, cutoff) == 0);
     const std::vector<double> pos{1.0, 2.0, 3.0, 3.2, 2.4, 3.5,
                                   2.2, 4.5, 3.2, 4.0, 3.5, 5.0};
-    const Eval got = eval_full(pot, pos, z, box);
-    expect_pin(got, -6.4302145542936842,
-               {0.4875496499688981, 0.76465695323661698, 0.13023723466897327,
-                -1.0982647766643991, -1.2376673869681145, -1.8736236435097737,
-                0.18288849580104144, -1.0908290140632739, 0.4250492434355394,
-                0.42782663089445966, 1.5638394477947717, 1.3183371654052611},
-               {0.00052849329919968152, -0.0003817449509135031,
-                -0.00019855241470887036, -0.0003817449509135031,
-                0.00050716453602619993, -0.0013256246523685362,
-                -0.00019855241470887036, -0.0013256246523685362,
-                -0.0010329122440640875},
-               1e-12);
+    expect_matches_brute_force(cu, pos, box);
   }
 
-  SECTION("triclinic cell") {
+  SECTION("control: triclinic 12A cell, minimum image only") {
     const double box[9] = {12.0, 0.0, 0.0, 0.5, 12.4, 0.0, -0.4, 0.6, 13.0};
-    for (int axis = 0; axis < 3; ++axis) {
-      REQUIRE(face_spacing(box, axis) > 2.0 * cutoff);
-    }
+    REQUIRE(short_axes(box, cutoff) == 0);
     const std::vector<double> pos{1.0, 1.5, 2.0, 3.4, 1.8, 2.6,
                                   1.6, 3.6, 2.4, 3.0, 3.2, 4.2};
-    const Eval got = eval_full(pot, pos, z, box);
-    expect_pin(
-        got, -7.1238524269291768,
-        {0.57276282635237352, -0.13871962187670273, 0.23900655285138978,
-         -0.68106950559316604, -0.28231772988798709, -0.78836734278112719,
-         0.418382145660189, 0.012399136073383834, 0.092924877428047101,
-         -0.31007546641939648, 0.40863821569130593, 0.45643591250169036},
-        {0.001035819095774544, -7.607183689799067e-05, 0.0004773856861117124,
-         -7.607183689799067e-05, -0.00032879850778687444,
-         -0.00037974208592712698, 0.0004773856861117124,
-         -0.00037974208592712698, -0.00029379060835724836},
-        1e-12);
+    expect_matches_brute_force(cu, pos, box);
   }
 }
 
