@@ -25,7 +25,7 @@ Commit SHAs are pre-landing identifiers. Tree SHAs are landing-invariant and ide
 |team-1024|`f86bdf80c8e8466dffc6038a7c431f26f5708536`|`102018297727e18c2e43ffeb7575768efa353995`|test(bench): define 1024-atom team arm|1024|1024|`6aa3f0e384325a93329e9e9de56b492761e03169618098fc9bff44c90398166a`|``|
 |team-4096|`1ed94957c6b64016d077d4fb5e4220265cdc320c`|`42a386d9aa0c8bf863ccdc49e3d8646a9c9e134a`|test(bench): define 4096-atom team arm|4096|4096|`aed6d92072c5d3cddc9def57983f4a2044b86e07abb5cdbc90e7b0f93bec0675`|``|
 
-The team-1 activation value is derived by the harness from the configured minimum of 1 and the runtime identity check. The slice count is capped at the atom count, so one atom remains one slice and two atoms are the first multi-slice activation.
+The team-1 activation value comes from the worker --identity probe. The slice count is capped at the atom count, so one atom remains one slice and two atoms are the first multi-slice activation.
 
 ## Crossovers
 

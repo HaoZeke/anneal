@@ -609,9 +609,9 @@ def render_report(
     if explain_team_one_activation:
         lines += [
             "",
-            "The team-1 activation value is derived by the harness from the configured minimum "
-            "of 1 and the runtime identity check. The slice count is capped at the atom count, "
-            "so one atom remains one slice and two atoms are the first multi-slice activation.",
+            "The team-1 activation value comes from the worker --identity probe. "
+            "The slice count is capped at the atom count, so one atom remains one "
+            "slice and two atoms are the first multi-slice activation.",
         ]
     lines += [
         "",
