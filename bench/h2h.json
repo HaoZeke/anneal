@@ -856,7 +856,7 @@
       },
       "seeds": {
         "source": "scripts/ase_gofee_h2h/campaign.py",
-        "name": "SEEDS"
+        "name": "LARGE_SEEDS"
       },
       "asv": "bench/ase-gofee-h2h/benchmarks/ase_gofee_h2h.py::AgoxGofeeLarge",
       "prefix": "lj",
@@ -867,6 +867,13 @@
           "arm": "arm",
           "budget": "budget",
           "n": "n"
+        },
+        {
+          "path": "bench/ase-gofee-h2h/lj-large-seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "seed": "seed"
         }
       ],
       "missing_outputs": {
