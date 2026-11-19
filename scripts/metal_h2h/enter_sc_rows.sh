@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
 # Build the Sutton-Chen binary and append raw rows on hostname bench.
-# One campaign per argument: restart, pop, or chain. Finished seeds
-# already in the table are kept.
+# One campaign per argument: restart, pop, chain, or portfolio.
+# Finished seeds already in the table are kept.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -11,7 +11,7 @@ WORK=/work/metal-sc
 LIB=${RGPOT_SC_LIB:-/work/rgpot/bdir-xtb/CppCore/librgpot.so}
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: enter_sc_rows.sh restart|pop|chain ..." >&2
+  echo "usage: enter_sc_rows.sh restart|pop|chain|portfolio ..." >&2
   exit 2
 fi
 
