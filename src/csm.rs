@@ -5,7 +5,7 @@
 //! so its largest radius is 1. For each operation, a class-blocked assignment
 //! matches the operated image to the original, and the proposed geometry is
 //! the mean of those operated, permuted images. [`crate::csm::propose`] takes its
-//! orientations from the inertia tensor plus one fixed one-fifth turn, and
+//! orientations from the inertia tensor plus one fixed half turn, and
 //! draws no random number.
 
 use std::collections::BTreeMap;
@@ -117,81 +117,56 @@ pub fn project(
 /// Pair distance below which an average is a coordinate singularity.
 pub const SINGULAR_PAIR: f64 = 1.0e-2;
 
-/// Lowest-measure average among `C_i`, `C_5`, and `D_5h`.
+/// Lowest-measure average from symmetry operations detected on the incumbent.
 ///
-/// `C_i` is the group of the published LJ38 continuous-symmetry benchmark.
-/// `C_5` and `D_5h` are the fivefold groups of the decahedral minima. The
-/// measure chooses, not the atom count. An average with a pair closer than
-/// [`SINGULAR_PAIR`] is dropped.
+/// The detector proposes approximate operations from the current coordinates.
+/// Those generators are closed into a finite operation set and projected by
+/// [`project`]. An average with a pair closer than [`SINGULAR_PAIR`] is dropped.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupProjection {
     /// Cartesian coordinates in the input atom order.
     pub coordinates: Array1<f64>,
     /// Normalised squared distance to the average. Zero is exact symmetry.
     pub measure: f64,
-    /// `C_i`, `C_5`, or `D_5h`.
+    /// Projection family label.
     pub group: &'static str,
 }
 
-/// Projects onto the library group with the lowest measure.
+/// Projects onto a detected operation set with the lowest measure.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
     if let Some(cached) = cached_propose(x, classes) {
         return cached;
     }
     let orientations = inertia_orientations(x, classes.len())?;
-    // D_5h contains every C_5 turn, so it is solved first and those
-    // permutations are reused. Equal measures keep the earlier group
-    // in the published order C_i, C_5, D_5h.
     clear_op_cache();
-    let mut best: Option<(usize, GroupProjection)> = None;
-    for (rank, name, ops) in [
-        (2, "D_5h", d5h_ops()),
-        (1, "C_5", cyclic_about_z(5)),
-        (0, "C_i", inversion_ops()),
-    ] {
-        // Inversion is not a fivefold operation, so its permutations are
-        // not in the D_5h cache. The nearest-image residual is a lower
-        // bound on the assigned measure: the average of a point and its
-        // matched inverse sits halfway between them. A margin keeps a
-        // one-ulp overestimate from skipping a tie, which would prefer
-        // inversion. Above the margin, inversion cannot win the group.
-        if name == "C_i"
-            && let Some((_, incumbent)) = &best
-            && let Some((centred, _, _)) = centre_and_scale(x, classes.len())
-        {
-            let bound = inversion_lower_measure(&centred, &orientations);
-            let margin = 1.0e-6 * (1.0 + incumbent.measure);
-            if bound > incumbent.measure + margin {
-                continue;
-            }
-        }
-        let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
-            continue;
-        };
-        if closest_pair(&coordinates) < SINGULAR_PAIR {
-            continue;
-        }
-        let replace = match &best {
-            None => true,
-            Some((incumbent_rank, incumbent)) => {
-                measure < incumbent.measure
-                    || (measure == incumbent.measure && rank < *incumbent_rank)
-            }
-        };
-        if replace {
-            best = Some((
-                rank,
-                GroupProjection {
-                    coordinates,
-                    measure,
-                    group: name,
-                },
-            ));
-        }
-    }
-    let best = best.map(|(_, projection)| projection);
+    let ops = detected_ops(x);
+    let best = project(x, classes, &ops, &orientations).and_then(|(coordinates, measure)| {
+        (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
+            coordinates,
+            measure,
+            group: "detected",
+        })
+    });
     store_propose(x, classes, best.as_ref());
     best
+}
+
+fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
+    let n = x.len() / 3;
+    let max_order = n.clamp(2, 12);
+    let orders: Vec<usize> = (2..=max_order).collect();
+    let mut candidates = crate::symmetrise::detect_all(x, n, &orders, 0.25);
+    if candidates.is_empty()
+        && let Some(candidate) = crate::symmetrise::detect(x, n, &orders, f64::INFINITY)
+    {
+        candidates.push(candidate);
+    }
+    let group = crate::symmetrise::generate_group(&candidates, 64);
+    if group.is_empty() {
+        vec![identity()]
+    } else {
+        group
+    }
 }
 
 struct ProposeCache {
@@ -231,7 +206,8 @@ fn store_propose(x: ArrayView1<'_, f64>, classes: &[u32], value: Option<&GroupPr
     });
 }
 
-pub(crate) fn inversion_ops() -> Vec<[[f64; 3]; 3]> {
+#[cfg(test)]
+fn inversion_ops() -> Vec<[[f64; 3]; 3]> {
     vec![
         identity(),
         [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
@@ -506,65 +482,6 @@ fn apply_all(matrix: &[[f64; 3]; 3], points: &[[f64; 3]]) -> Vec<[f64; 3]> {
     points.iter().map(|point| mul_vec(matrix, *point)).collect()
 }
 
-/// Lower bound on the inversion measure in every orientation.
-///
-/// The group is the identity and the central inversion. The residual is
-/// half the matched distance, so the measure is the assignment cost
-/// divided by four times the squared norm. Each atom's nearest inverse
-/// image is at most that assignment cost, whether or not the nearest
-/// images form a bijection.
-fn inversion_lower_measure(centred: &[[f64; 3]], orientations: &[[[f64; 3]; 3]]) -> f64 {
-    let mut best = f64::INFINITY;
-    for rotation in orientations {
-        let y = apply_all(rotation, centred);
-        let n = y.len();
-        let mut nearest = 0.0;
-        let mut norm = 0.0;
-        for atom in 0..n {
-            let mut closest = f64::INFINITY;
-            for image in 0..n {
-                let mut squared = 0.0;
-                for axis in 0..3 {
-                    let delta = y[atom][axis] + y[image][axis];
-                    squared += delta * delta;
-                }
-                closest = closest.min(squared);
-            }
-            nearest += closest;
-            for axis in 0..3 {
-                norm += y[atom][axis] * y[atom][axis];
-            }
-        }
-        if norm < 1e-18 {
-            continue;
-        }
-        best = best.min(nearest / (4.0 * norm));
-    }
-    best
-}
-
-fn cyclic_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
-    (0..order)
-        .map(|step| rot_z(std::f64::consts::TAU * step as f64 / order as f64))
-        .collect()
-}
-
-fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
-    let turns = cyclic_about_z(5);
-    let twofold = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
-    let mirror = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
-    let mut ops = Vec::with_capacity(20);
-    for turn in &turns {
-        ops.push(*turn);
-        ops.push(matmul(twofold, *turn));
-    }
-    let rotations = ops.clone();
-    for rotation in rotations {
-        ops.push(matmul(mirror, rotation));
-    }
-    ops
-}
-
 fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
     let (centred, _, _) = centre_and_scale(x, n)?;
     let axes = jacobi(inertia(&centred));
@@ -579,7 +496,7 @@ fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3
         let y_axis = normalize(cross(z_axis, x_axis))?;
         let aligned = [x_axis, y_axis, z_axis];
         orientations.push(aligned);
-        orientations.push(matmul(rot_z(std::f64::consts::TAU / 5.0), aligned));
+        orientations.push(matmul(rot_z(std::f64::consts::PI), aligned));
     }
     Some(orientations)
 }
@@ -669,9 +586,9 @@ fn jacobi(mut tensor: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
 }
 
 fn rot_z(angle: f64) -> [[f64; 3]; 3] {
-    // The extra orientation is a turn by `τ/5`. Host `sin` and `cos` of
-    // that angle are not the same function on glibc and libSystem, and
-    // the continuous-symmetry proposal is built from this matrix.
+    // One orientation is a half turn. Host `sin` and `cos` of that angle
+    // are not the same function on glibc and libSystem, and the
+    // continuous-symmetry proposal is built from this matrix.
     let sine = libm::sin(angle);
     let cosine = libm::cos(angle);
     [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
@@ -746,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn octahedron_measure_is_zero_and_a_shift_is_not() {
+    fn a_detected_projection_is_reported_with_its_generic_label() {
         let octahedron = Array1::from_vec(vec![
             1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
             -1.0,
@@ -760,9 +677,34 @@ mod tests {
         let (_, noisy) =
             project(shifted.view(), &classes, &inversion_ops(), &[identity()]).unwrap();
         assert!(noisy > 1e-3, "{noisy}");
-        let chosen = propose(octahedron.view(), &classes).expect("library");
-        assert_eq!(chosen.group, "C_i");
+        let chosen = propose(octahedron.view(), &classes).expect("projection");
+        assert_eq!(chosen.group, "detected");
         assert!(chosen.measure < 1e-8, "{}", chosen.measure);
+    }
+
+    #[test]
+    fn propose_ignores_label_order_and_rises_when_a_point_moves() {
+        let mut coords = Vec::with_capacity(21);
+        for step in 0..5 {
+            let angle = std::f64::consts::TAU * step as f64 / 5.0;
+            coords.extend([angle.cos(), angle.sin(), 0.0]);
+        }
+        coords.extend([0.0, 0.0, 1.2, 0.0, 0.0, -1.2]);
+        let x = Array1::from_vec(coords);
+        let classes = vec![0; 7];
+        let projection = propose(x.view(), &classes).expect("projection");
+        let mut reversed = Array1::zeros(x.len());
+        for atom in 0..7 {
+            for axis in 0..3 {
+                reversed[3 * atom + axis] = x[3 * (6 - atom) + axis];
+            }
+        }
+        let flipped = propose(reversed.view(), &classes).expect("relabelled");
+        assert!((flipped.measure - projection.measure).abs() < 1e-8);
+        let mut noisy = x.clone();
+        noisy[2] += 0.25;
+        let shifted = propose(noisy.view(), &classes).expect("noisy");
+        assert!(shifted.measure > 1e-3, "{}", shifted.measure);
     }
 
     #[test]
@@ -776,42 +718,6 @@ mod tests {
             )
             .is_none()
         );
-    }
-
-    fn ungated_projection(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
-        let orientations = inertia_orientations(x, classes.len())?;
-        clear_op_cache();
-        let mut best: Option<(usize, GroupProjection)> = None;
-        for (rank, name, ops) in [
-            (2, "D_5h", d5h_ops()),
-            (1, "C_5", cyclic_about_z(5)),
-            (0, "C_i", inversion_ops()),
-        ] {
-            let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
-                continue;
-            };
-            if closest_pair(&coordinates) < SINGULAR_PAIR {
-                continue;
-            }
-            let replace = match &best {
-                None => true,
-                Some((incumbent_rank, incumbent)) => {
-                    measure < incumbent.measure
-                        || (measure == incumbent.measure && rank < *incumbent_rank)
-                }
-            };
-            if replace {
-                best = Some((
-                    rank,
-                    GroupProjection {
-                        coordinates,
-                        measure,
-                        group: name,
-                    },
-                ));
-            }
-        }
-        best.map(|(_, projection)| projection)
     }
 
     /// `project` with every operation solved by the Kuhn-Munkres walk.
@@ -915,7 +821,7 @@ mod tests {
             (near, vec![0u32; 7]),
         ] {
             let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
-            for ops in [d5h_ops(), cyclic_about_z(5), inversion_ops()] {
+            for ops in [turns_about_z(4), turns_about_z(3), inversion_ops()] {
                 clear_op_cache();
                 let (coordinates, measure) =
                     project(x.view(), &classes, &ops, &orientations).expect("projection");
@@ -929,59 +835,10 @@ mod tests {
         }
     }
 
-    fn assert_same_projection(gated: &GroupProjection, full: &GroupProjection) {
-        assert_eq!(gated.group, full.group);
-        assert_eq!(gated.measure.to_bits(), full.measure.to_bits());
-        assert_eq!(gated.coordinates.len(), full.coordinates.len());
-        for (left, right) in gated.coordinates.iter().zip(full.coordinates.iter()) {
-            assert_eq!(left.to_bits(), right.to_bits(), "{left} vs {right}");
-        }
-    }
-
-    #[test]
-    fn inversion_is_skipped_only_when_it_cannot_change_the_group() {
-        let octahedron = Array1::from_vec(vec![
-            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
-            -1.0,
-        ]);
-        let mut noisy = bipyramid();
-        noisy[2] += 0.25;
-        let mut chiral = Array1::zeros(36);
-        for atom in 0..12 {
-            let angle = 0.47 * atom as f64;
-            chiral[3 * atom] = (0.4 + 0.05 * atom as f64) * angle.cos();
-            chiral[3 * atom + 1] = (0.35 + 0.04 * atom as f64) * angle.sin();
-            chiral[3 * atom + 2] = 0.15 * atom as f64 - 0.8;
-        }
-        for x in [octahedron, noisy, chiral] {
-            let classes = vec![0; x.len() / 3];
-            let full = ungated_projection(x.view(), &classes).expect("full");
-            clear_op_cache();
-            let gated = propose(x.view(), &classes).expect("gated");
-            assert_same_projection(&gated, &full);
-            let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
-            let (centred, _, _) = centre_and_scale(x.view(), classes.len()).expect("centre");
-            let bound = inversion_lower_measure(&centred, &orientations);
-            let (_, solved) =
-                project(x.view(), &classes, &inversion_ops(), &orientations).expect("inversion");
-            assert!(
-                bound <= solved + 1.0e-9 * (1.0 + solved),
-                "bound {bound} exceeds the solved inversion measure {solved}"
-            );
-        }
-        let mut noisy = bipyramid();
-        noisy[2] += 0.25;
-        let classes = vec![0; 7];
-        let orientations = inertia_orientations(noisy.view(), 7).expect("axes");
-        let (centred, _, _) = centre_and_scale(noisy.view(), 7).expect("centre");
-        let bound = inversion_lower_measure(&centred, &orientations);
-        let (_, fivefold) =
-            project(noisy.view(), &classes, &d5h_ops(), &orientations).expect("d5h");
-        let margin = 1.0e-6 * (1.0 + fivefold);
-        assert!(
-            bound > fivefold + margin,
-            "the noisy bipyramid should settle inversion without the assignment, bound {bound} fivefold {fivefold}"
-        );
+    fn turns_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
+        (0..order)
+            .map(|step| rot_z(std::f64::consts::TAU * step as f64 / order as f64))
+            .collect()
     }
 
     fn bipyramid() -> Array1<f64> {
@@ -992,34 +849,6 @@ mod tests {
         }
         coords.extend([0.0, 0.0, 1.2, 0.0, 0.0, -1.2]);
         Array1::from_vec(coords)
-    }
-
-    #[test]
-    fn pentagonal_bipyramid_selects_d5h_and_ignores_labels() {
-        let x = bipyramid();
-        let classes = vec![0; 7];
-        let projection = propose(x.view(), &classes).expect("projection");
-        assert!(projection.measure < 1e-8, "{}", projection.measure);
-        let (_, d5h) = project(
-            x.view(),
-            &classes,
-            &d5h_ops(),
-            &inertia_orientations(x.view(), 7).expect("axes"),
-        )
-        .expect("d5h");
-        assert!(d5h < 1e-8, "{d5h}");
-        let mut reversed = Array1::zeros(x.len());
-        for atom in 0..7 {
-            for axis in 0..3 {
-                reversed[3 * atom + axis] = x[3 * (6 - atom) + axis];
-            }
-        }
-        let flipped = propose(reversed.view(), &classes).expect("relabelled");
-        assert!((flipped.measure - projection.measure).abs() < 1e-8);
-        let mut noisy = x.clone();
-        noisy[2] += 0.25;
-        let shifted = propose(noisy.view(), &classes).expect("noisy");
-        assert!(shifted.measure > 1e-3, "{}", shifted.measure);
     }
 
     #[test]
@@ -1054,20 +883,5 @@ mod tests {
         assert!(along_x[0].abs() < 1e-12);
         let along_z = perpendicular([0.0, 0.0, 1.0]);
         assert!(along_z[2].abs() < 1e-12);
-    }
-
-    #[test]
-    fn d5h_has_twenty_orthogonal_operations() {
-        let ops = d5h_ops();
-        assert_eq!(ops.len(), 20);
-        for op in ops {
-            let gram = matmul(op, transpose(op));
-            for row in 0..3 {
-                for col in 0..3 {
-                    let want = if row == col { 1.0 } else { 0.0 };
-                    assert!((gram[row][col] - want).abs() < 1e-10);
-                }
-            }
-        }
     }
 }

@@ -2927,7 +2927,7 @@ def manuscript_new(audit: Audit) -> None:
                  "absent" if "cfg.long_ranged = kind.second_neighbour_energy() < -0.05;" not in morse_driver else "present")
     audit.said("src/bias.rs", "let w = scale * (self.w0 + entropy) * libm::exp(-self.v[i] / denom);")
     audit.said("src/bias.rs", "let denom = (self.gamma - 1.0) * temp;")
-    audit.said("src/csm.rs", "Lowest-measure average among `C_i`, `C_5`, and `D_5h`.")
+    audit.said("src/csm.rs", "Lowest-measure average from symmetry operations detected on the incumbent.")
     audit.said("src/methods/lattice_search.rs", "hollow_cutoff: 1.47 * r,")
     audit.said("src/methods/lattice_search.rs", "clearance: 0.85 * r,")
     audit.said("src/methods/lattice_search.rs", "interior_coordination: 12,")

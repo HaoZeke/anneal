@@ -2,10 +2,9 @@
 //!
 //! A continuous-symmetry move applies every operation of a point group, finds
 //! the minimum-distance atom permutation for each image, and averages the
-//! aligned images. This module implements the inversion group `C_i`, the
-//! point group used by the published LJ38 continuous-symmetry benchmark.
-//! Inversion commutes with every rotation, so its orientation subproblem is
-//! constant and requires no stochastic orientation search.
+//! aligned images. This module provides a generic antipodal pairing projection
+//! (identity plus central inversion) that can be used as a symmetry-residual
+//! direction without a system-specific template.
 //!
 //! The projection is defined for non-periodic Cartesian point sets. Assignment
 //! is block diagonal in the supplied equivalence classes, preventing an
@@ -17,7 +16,7 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::assignment::minimum_cost_assignment;
 
-/// Result of projecting a point set onto the inversion-group average.
+/// Result of projecting a point set onto an antipodal-group average.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InversionProjection {
     /// Projected Cartesian coordinates in the input atom order.
@@ -29,12 +28,12 @@ pub struct InversionProjection {
     pub residual_rms: f64,
 }
 
-/// Computes the minimum-permutation inversion residual without changing `x`.
+/// Computes the minimum-permutation antipodal residual without changing `x`.
 pub fn inversion_rms(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<f64> {
     match_inversion(x, classes).map(|matched| matched.residual_rms)
 }
 
-/// Projects a non-periodic Cartesian point set onto the `C_i` group average.
+/// Projects a non-periodic Cartesian point set onto the antipodal-group average.
 ///
 /// The point set is centred, the minimum-cost class-preserving bijection
 /// `p` is found for the cost `||x_i + x_p(i)||²`, and the two group images
