@@ -807,11 +807,13 @@ where
         && (cfg.local_step == LocalStep::Tric
             || (converged_molecular && cfg.local_step == LocalStep::Auto));
     // Under `Auto` the opening calls are timed and compared once against a
-    // TRIC step. TRIC is kept when one potential call took longer than one
-    // TRIC step outside the potential. A frozen atom stays on L-BFGS:
-    // TRIC does not honour a frozen mask.
+    // TRIC step. TRIC is kept when the least potential call took longer
+    // than one TRIC step outside the potential. The least call is the one
+    // that is compared, as for the step probe: the opening sample times
+    // the start, and one preemption there can exceed the step. A frozen
+    // atom stays on L-BFGS: TRIC does not honour a frozen mask.
     let mut deciding = tric.is_some() && cfg.local_step == LocalStep::Auto;
-    let mut call_seconds = 0.0_f64;
+    let mut quiet_call = f64::INFINITY;
     let mut timed_calls = 0usize;
     if use_tric {
         stats.local_step = LocalStep::Tric;
@@ -1026,8 +1028,12 @@ where
             if let Some((spent, started)) = clock
                 && led.spent() > spent
             {
-                call_seconds += started.elapsed().as_secs_f64();
-                timed_calls += led.spent() - spent;
+                let n = led.spent() - spent;
+                let each = started.elapsed().as_secs_f64() / n as f64;
+                timed_calls += n;
+                if each < quiet_call {
+                    quiet_call = each;
+                }
             }
             let (energy, gradient, physical) = answered?;
             remember(v, energy, &gradient, physical);
@@ -1114,15 +1120,16 @@ where
                 }
             }
         };
-        // A quench of a few calls times the start, not the potential.
+        // The decision waits for a few calls, then keeps the least of them.
         if !molecular_anc
             && deciding
             && timed_calls >= 3
+            && quiet_call.is_finite()
             && let Some(tric) = tric.as_ref()
             && let Some(check) = last.borrow().as_ref()
             && check.at.len() == 3 * tric.atoms()
         {
-            let per_call = call_seconds / timed_calls as f64;
+            let per_call = quiet_call;
             let per_step = tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
             use_tric = per_call > per_step;
             deciding = false;
