@@ -57,6 +57,21 @@ def output(command: list[str], *, cwd: Path | None = None) -> str:
     return run(command, cwd=cwd, capture=True).stdout.strip()
 
 
+def commit_provenance(repo: Path, sha: str) -> dict[str, str]:
+    tree = output(["git", "rev-parse", sha + "^{tree}"], cwd=repo)
+    subject = output(["git", "show", "-s", "--format=%s", sha], cwd=repo)
+    if output(["git", "cat-file", "-t", tree], cwd=repo) != "tree":
+        raise RuntimeError(f"arm tree does not resolve: {tree}")
+    if not subject:
+        raise RuntimeError(f"arm commit has no subject: {sha}")
+    return {"tree": tree, "subject": subject}
+
+
+def add_arm_provenance(payload: dict[str, Any], repo: Path) -> None:
+    for arm in payload["metadata"]["arms"]:
+        arm.update(commit_provenance(repo, arm["sha"]))
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -506,12 +521,14 @@ def render_report(payload: dict[str, Any]) -> str:
         f"- Pinning: `{json.dumps(metadata['affinity'], sort_keys=True)}`",
         f"- Inherited OMP/GOMP variables: `{json.dumps(metadata['machine']['inherited_openmp_environment'], sort_keys=True)}`",
         "",
-        "|Arm|Commit|Parameter|Observed activation|Library SHA-256|Clean status|",
-        "|---|---|---:|---:|---|---|",
+        "Commit SHAs are pre-landing identifiers. Tree SHAs are landing-invariant and identify the applied arm contents.",
+        "",
+        "|Arm|Pre-landing commit|Landing-invariant tree|Commit subject|Parameter|Observed activation|Library SHA-256|Clean status|",
+        "|---|---|---|---|---:|---:|---|---|",
     ]
     for arm in metadata["arms"]:
         lines.append(
-            f"|{arm['name']}|`{arm['sha']}`|{arm['threshold']}|"
+            f"|{arm['name']}|`{arm['sha']}`|`{arm['tree']}`|{arm['subject']}|{arm['threshold']}|"
             f"{arm['identity']['observed_team_activation_atoms']}|`{arm['library_sha256']}`|"
             f"`{arm['git_status_porcelain']}`|"
         )
@@ -652,6 +669,7 @@ def benchmark(args: argparse.Namespace) -> None:
         "measurements": measurements,
         "skipped_cells": skipped_cells,
     }
+    add_arm_provenance(payload, repo)
     add_crossovers(payload)
     add_recommendation(payload)
     args.output_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -679,10 +697,22 @@ def main() -> None:
     render_parser = subparsers.add_parser("render")
     render_parser.add_argument("--input-json", type=Path, required=True)
     render_parser.add_argument("--output-report", type=Path, required=True)
+    provenance_parser = subparsers.add_parser("provenance")
+    provenance_parser.add_argument("--repo", type=Path, required=True)
+    provenance_parser.add_argument("--input-json", type=Path, required=True)
+    provenance_parser.add_argument("--output-json", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "render":
         payload = json.loads(args.input_json.read_text(encoding="utf-8"))
         args.output_report.write_text(render_report(payload), encoding="utf-8")
+        return
+    if args.command == "provenance":
+        payload = json.loads(args.input_json.read_text(encoding="utf-8"))
+        add_arm_provenance(payload, args.repo.resolve())
+        args.output_json.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         return
     if args.rounds < 12:
         raise RuntimeError("at least 12 ABBA rounds are required")
