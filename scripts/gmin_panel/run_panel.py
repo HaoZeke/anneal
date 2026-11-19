@@ -499,13 +499,17 @@ def row_key(row: dict[str, str]) -> tuple[str, str, str, str, str]:
     return (row["system"], row["code"], row["seed"], row["code_revision"], row["harness_revision"])
 
 
-def panel_groups(rows: list[dict[str, str]], revision: str) -> dict[tuple[str, str], list[dict[str, str]]]:
+def panel_groups(
+    rows: list[dict[str, str]],
+    revision: str,
+    gmin_revision: str = GMIN_PIN,
+) -> dict[tuple[str, str], list[dict[str, str]]]:
     """The latest stored row per seed of each system and code at this revision."""
-    wanted = {"anneal": revision, "gmin": GMIN_REV}
+    wanted = {"anneal": revision, "gmin": gmin_revision}
     groups: dict[tuple[str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
         if revision == "latest":
-            if row["code"] == "gmin" and row["code_revision"] != GMIN_REV:
+            if row["code"] == "gmin" and row["code_revision"] != gmin_revision:
                 continue
         else:
             if row["harness_revision"] != revision or wanted.get(row["code"]) != row["code_revision"]:
@@ -562,9 +566,13 @@ def ranked_wall(left: list[dict[str, str]], right: list[dict[str, str]]) -> tupl
     )
 
 
-def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]:
+def summarise(
+    rows: list[dict[str, str]],
+    revision: str,
+    gmin_revision: str = GMIN_PIN,
+) -> list[dict[str, str]]:
     out = []
-    groups = panel_groups(rows, revision)
+    groups = panel_groups(rows, revision, gmin_revision)
     for system, _kind, _n, reference, _rho, _driver, _binary in SYSTEMS:
         anneal = groups.get((system, "anneal"), [])
         gmin = groups.get((system, "gmin"), [])
@@ -622,7 +630,7 @@ def summarise(rows: list[dict[str, str]], revision: str) -> list[dict[str, str]]
                 "anneal_best_min": f"{min(col(anneal, 'best')):.8f}",
                 "gmin_best_min": f"{min(col(gmin, 'best')):.8f}",
                 "anneal_revision": anneal_revisions,
-                "gmin_revision": GMIN_REV,
+                "gmin_revision": gmin_revision,
                 "harness_revision": harness_revisions,
                 "host": " ".join(sorted({r["host"] for r in both})),
                 "sessions": " ".join(sorted({r["session"] for r in both})),
@@ -708,7 +716,11 @@ def readme_table(summary: list[dict[str, str]]) -> str:
     return "\n".join(rows)
 
 
-def tex_table(summary: list[dict[str, str]], revision: str) -> str:
+def tex_table(
+    summary: list[dict[str, str]],
+    revision: str,
+    gmin_revision: str = GMIN_PIN,
+) -> str:
     lines = table_lines(summary, tex=True)
     for index, cells in enumerate(lines):
         system = summary[index // 2]["system"]
@@ -721,7 +733,7 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
         [
             "\\begin{table}",
             "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
+            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{gmin_revision[:8]}}}.",
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -838,9 +850,9 @@ def self_test() -> None:
         raise SystemExit(f"ranked wall {pair}")
     kept = panel_groups(
         [
-            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_REV,
+            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_PIN,
              "harness_revision": "rev", "best": "-190.4"},
-            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_REV,
+            {"system": "au55", "code": "gmin", "seed": "2000", "code_revision": GMIN_PIN,
              "harness_revision": "rev", "best": "-191.0308"},
         ],
         "rev",
