@@ -1,0 +1,7 @@
+panel,systems,runs_a,runs_b,hits_a,hits_b,p_hits,p_calls,calls_direction,wall_a,wall_b,wall_ratio,inside_a,inside_b,inside_ratio,outside_a,outside_b,outside_ratio,identical_runs,failed_a,failed_b,lost_systems,loss_hits,loss_calls,verdict
+BLJ,7,84,84,30,25,0.328033,0.550291,B more calls,26010.586,24322.018,0.9351,1322.509,1323.438,1.0007,24688.077,22998.580,0.9316,29,0,0,,0,0,PASS
+Morse M75 rho14,1,12,12,9,8,1,0.230822,B more calls,617.745,1287.279,2.0838,441.943,691.706,1.5651,175.802,595.573,3.3877,0,0,0,,0,0,PASS
+Morse M80 rho14,1,12,12,6,5,1,0.974899,B more calls,1495.969,1864.591,1.2464,1089.918,1043.505,0.9574,406.051,821.087,2.0221,1,0,0,,0,0,PASS
+Morse M80 rho6,1,12,12,12,11,1,0.795012,B fewer calls,212.722,316.905,1.4898,142.527,217.069,1.5230,70.195,99.835,1.4223,0,0,0,,0,0,PASS
+Sutton-Chen,9,108,108,75,78,0.696168,0.219666,B more calls,1658.427,1991.495,1.2008,1231.416,1270.479,1.0317,427.012,721.016,1.6885,6,0,0,sc126-55:calls,0,0,FIX
+water/TIP4P rigid,6,72,72,39,39,1,0.734469,B more calls,823.373,861.086,1.0458,621.538,652.481,1.0498,201.835,208.605,1.0335,33,0,0,,0,0,PASS
