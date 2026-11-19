@@ -13,7 +13,8 @@
  * This header walks those images directly. The walk is a plain O(N^2) pair
  * scan and, for each pair, a cube of lattice shifts O((2e + 1)^3), where e is
  * the per-axis image extent. For short-face slabs this is intentionally slow;
- * a cell-list acceleration for this path is left out of scope.
+ * a cell-list acceleration for this path is left out of scope. The product of
+ * the per-axis shift counts is bounded, so three thin faces are refused.
  */
 
 #include <array>
@@ -37,15 +38,17 @@ inline double faceSpacing(const double *box, int axis) noexcept {
   const double vol = std::abs(box[0] * (box[4] * box[8] - box[5] * box[7]) -
                               box[1] * (box[3] * box[8] - box[5] * box[6]) +
                               box[2] * (box[3] * box[7] - box[4] * box[6]));
-  if (!(area > 0.0) || !(vol > 0.0) || !std::isfinite(area) || !std::isfinite(vol)) {
+  if (!(area > 0.0) || !(vol > 0.0) || !std::isfinite(area) ||
+      !std::isfinite(vol)) {
     return 0.0;
   }
   return vol / area;
 }
 
 /// True when one minimum image is not the whole shell on a periodic side.
-inline bool cutoffExceedsHalfFace(const double *box, double cutoff,
-                                  const std::array<bool, 3> &periodic) noexcept {
+inline bool
+cutoffExceedsHalfFace(const double *box, double cutoff,
+                      const std::array<bool, 3> &periodic) noexcept {
   for (int axis = 0; axis < 3; ++axis) {
     if (!periodic[static_cast<std::size_t>(axis)]) {
       continue;
@@ -86,17 +89,24 @@ inline bool positiveHalfSpace(int h, int k, int l) noexcept {
 
 constexpr int kMaxImageExtent = 1024;
 
+/// Lattice shifts one pair may visit: the product over the three axes of
+/// `2 * extent + 1`. One thin face may still reach the per-axis cap when the
+/// other faces are wide. Three thin faces are refused here. 64 cubed.
+constexpr std::int64_t kMaxImageCount = 64 * 64 * 64;
+
 inline int extentForAxis(double cutoff, double spacing, int axis) {
   if (!(spacing > 0.0) || !std::isfinite(spacing)) {
-    throw std::invalid_argument("EAM table: non-positive periodic face spacing");
+    throw std::invalid_argument(
+        "EAM table: non-positive periodic face spacing");
   }
   const double shells = std::ceil(cutoff / spacing);
   if (!(shells >= 0.0) || !std::isfinite(shells)) {
     throw std::invalid_argument("EAM table: invalid image-extent shell count");
   }
   if (shells > static_cast<double>(kMaxImageExtent - 1)) {
-    throw std::invalid_argument("EAM table: image extent on axis " + std::to_string(axis) +
-                                " exceeds cap " + std::to_string(kMaxImageExtent) +
+    throw std::invalid_argument("EAM table: image extent on axis " +
+                                std::to_string(axis) + " exceeds cap " +
+                                std::to_string(kMaxImageExtent) +
                                 " (cutoff=" + std::to_string(cutoff) +
                                 ", spacing=" + std::to_string(spacing) + ")");
   }
@@ -113,7 +123,8 @@ inline int extentForAxis(double cutoff, double spacing, int axis) {
 /// cutoff. `fn` is `fn(i, j, dx, dy, dz, r2)`.
 template <typename Fn>
 void visitHalfImages(const double *pos, std::size_t n, const double *box,
-                     const std::array<bool, 3> &periodic, double cutoff, Fn &&fn) {
+                     const std::array<bool, 3> &periodic, double cutoff,
+                     Fn &&fn) {
   if (n < 1 || !(cutoff > 0.0) || !std::isfinite(cutoff)) {
     return;
   }
@@ -131,6 +142,18 @@ void visitHalfImages(const double *pos, std::size_t n, const double *box,
       continue;
     }
     extent[axis] = detail::extentForAxis(cutoff, faceSpacing(box, axis), axis);
+  }
+  std::int64_t image_count = 1;
+  for (int axis = 0; axis < 3; ++axis) {
+    const std::int64_t span = 2 * static_cast<std::int64_t>(extent[axis]) + 1;
+    if (span < 1 || image_count > detail::kMaxImageCount / span) {
+      throw std::invalid_argument("EAM table: image count exceeds cap " +
+                                  std::to_string(detail::kMaxImageCount) +
+                                  " (extents " + std::to_string(extent[0]) +
+                                  " " + std::to_string(extent[1]) + " " +
+                                  std::to_string(extent[2]) + ")");
+    }
+    image_count *= span;
   }
   const double cut2 = cutoff * cutoff;
   for (std::size_t i = 0; i < n; ++i) {
@@ -177,8 +200,8 @@ void visitHalfImages(const double *pos, std::size_t n, const double *box,
             if (!(r2 > 0.0) || !(r2 < cut2)) {
               continue;
             }
-            fn(static_cast<std::int32_t>(i), static_cast<std::int32_t>(j), dx, dy, dz,
-               r2);
+            fn(static_cast<std::int32_t>(i), static_cast<std::int32_t>(j), dx,
+               dy, dz, r2);
           }
         }
       }
