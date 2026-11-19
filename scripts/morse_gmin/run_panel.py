@@ -190,7 +190,6 @@ def run_env(budget: int) -> dict[str, str]:
     env["RAYON_NUM_THREADS"] = "1"
     env["MKL_NUM_THREADS"] = "1"
     env["OPENBLAS_NUM_THREADS"] = "1"
-    env["LJOS_SEAT"] = "anneal-paper"
     return env
 
 
