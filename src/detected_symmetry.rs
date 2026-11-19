@@ -318,9 +318,11 @@ pub fn complete_orbits(
 /// The innermost `core_fraction` of the points by distance from the centroid
 /// are the part of a structure that is ordered first; a disordered surface
 /// would otherwise hide a group the rest of the structure has. The group is
-/// [`detected_group`] of that core at `tolerance`, and it is applied to every
-/// atom by [`complete_orbits`] about the centroid. The fraction is of the
-/// points, not a count.
+/// [`detected_group`] of that core at `tolerance`, a group about the centre
+/// of the core, and it is applied to every atom by [`complete_orbits`]
+/// about that centre, the centroid of the core, which a surface on one side
+/// moves away from the centroid of the whole. The fraction is of the points,
+/// not a count.
 pub fn complete_detected(
     x: ArrayView1<f64>,
     n: usize,
@@ -350,13 +352,18 @@ pub fn complete_detected(
     radii.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
     let m = (((n as f64) * core_fraction.clamp(0.0, 1.0)).round() as usize).clamp(4, n);
     let mut core = Array1::<f64>::zeros(3 * m);
+    let mut centre = [0.0; 3];
     for (k, &(_, a)) in radii[..m].iter().enumerate() {
         for d in 0..3 {
             core[3 * k + d] = x[3 * a + d];
+            centre[d] += x[3 * a + d];
         }
     }
+    for v in &mut centre {
+        *v /= m as f64;
+    }
     let group = detected_group(core.view(), m, tolerance)?;
-    complete_orbits(x, n, &group, c, merge_radius, min_separation)
+    complete_orbits(x, n, &group, centre, merge_radius, min_separation)
 }
 
 #[cfg(test)]
@@ -551,7 +558,8 @@ mod tests {
         }
     }
 
-    /// Completion about the centroid leaves the centroid where it was.
+    /// Completion of a core that is the whole structure is about the
+    /// centroid, and leaves it where it was.
     #[test]
     fn completion_keeps_the_centroid() {
         let x = jitter(&icosahedron(1.05), 0.03);
@@ -586,6 +594,48 @@ mod tests {
         }
         let n = ICOSAHEDRON_POINTS + SURFACE_POINTS;
         let x = Array1::from(x);
+        let core = ICOSAHEDRON_POINTS as f64 / n as f64;
+        let y = complete_detected(x.view(), n, 0.5, 0.3, core, 0.5).expect("the core moves");
+        let spread = |v: ArrayView1<f64>| {
+            let radii: Vec<f64> = (1..ICOSAHEDRON_POINTS)
+                .map(|i| {
+                    (0..3)
+                        .map(|k| (v[3 * i + k] - v[k]).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                })
+                .collect();
+            radii.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                - radii.iter().copied().fold(f64::INFINITY, f64::min)
+        };
+        assert!(spread(y.view()) < 0.1 * spread(x.view()));
+    }
+
+    /// A disordered surface on one side moves the centroid of the whole
+    /// off the centre of the core. The core is still read about its own
+    /// centre and the completion closes it onto its orbit.
+    #[test]
+    fn the_core_group_is_read_through_a_one_sided_surface() {
+        const SURFACE_POINTS: usize = 10;
+        let mut x = icosahedron(1.0).to_vec();
+        for (i, v) in x.iter_mut().enumerate() {
+            *v += 0.003 * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
+        }
+        for i in 0..SURFACE_POINTS {
+            let a = 2.0 * std::f64::consts::PI * (i as f64) * 0.618_034;
+            let r = 1.9 + 0.05 * ((i % 3) as f64);
+            let z = 0.35 + 0.6 * ((i * 7 % SURFACE_POINTS) as f64) / SURFACE_POINTS as f64;
+            let rho = (1.0 - z * z).sqrt();
+            x.extend([r * rho * a.cos(), r * rho * a.sin(), r * z]);
+        }
+        let n = ICOSAHEDRON_POINTS + SURFACE_POINTS;
+        let x = Array1::from(x);
+        let offset = (0..3)
+            .map(|k| (0..n).map(|i| x[3 * i + k]).sum::<f64>() / n as f64 - x[k])
+            .map(|d| d * d)
+            .sum::<f64>()
+            .sqrt();
+        assert!(offset > 0.3, "the surface must pull the centroid, {offset}");
         let core = ICOSAHEDRON_POINTS as f64 / n as f64;
         let y = complete_detected(x.view(), n, 0.5, 0.3, core, 0.5).expect("the core moves");
         let spread = |v: ArrayView1<f64>| {
