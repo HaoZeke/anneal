@@ -180,14 +180,19 @@ TEST_CASE("GMIN TIP4P oxygen pair matches C12 r^-12 - C6 r^-6",
 
 TEST_CASE("an out of range moved index leaves a partial gradient",
           "[ReducedPair]") {
-  // zero_gradient runs, atom 0 is accumulated, then moved[1] == 5 returns 1.
+  // zero_gradient runs, atom 0 is accumulated, then moved[1] out of [0, natoms)
+  // returns 1: above natoms (5), at the upper boundary (natoms == 2), and
+  // negative (-1).
   const double pos[6] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
-  double gradient[6] = {9.0, 9.0, 9.0, 9.0, 9.0, 9.0};
-  const int32_t moved[2] = {0, 5};
-  REQUIRE(rgpot_lj_partial_gradient(1.0, 1.0, 2, pos, 2, moved, gradient) == 1);
-  REQUIRE_THAT(gradient[0], WithinAbs(24.0, 0.0));
-  for (int i = 1; i < 6; ++i) {
-    REQUIRE_THAT(gradient[static_cast<std::size_t>(i)], WithinAbs(0.0, 0.0));
+  for (const int32_t bad : {5, 2, -1}) {
+    double gradient[6] = {9.0, 9.0, 9.0, 9.0, 9.0, 9.0};
+    const int32_t moved[2] = {0, bad};
+    REQUIRE(rgpot_lj_partial_gradient(1.0, 1.0, 2, pos, 2, moved, gradient) ==
+            1);
+    REQUIRE_THAT(gradient[0], WithinAbs(24.0, 0.0));
+    for (int i = 1; i < 6; ++i) {
+      REQUIRE_THAT(gradient[static_cast<std::size_t>(i)], WithinAbs(0.0, 0.0));
+    }
   }
 }
 
