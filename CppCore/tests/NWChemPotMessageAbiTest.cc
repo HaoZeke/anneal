@@ -3,12 +3,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <capnp/message.h>
 
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -19,11 +21,38 @@
 #include "rgpot/types/AtomMatrix.hpp"
 #include "rgpot/units.hpp"
 
+using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinAbs;
 
 namespace {
 
 using rgpot::test_support::RestoreEnv;
+
+class ScopedTempCurrentDir {
+public:
+  ScopedTempCurrentDir()
+      : original_(std::filesystem::current_path()),
+        temp_(std::filesystem::temp_directory_path() /
+              ("rgpot-nwchem-missing-" + std::to_string(std::rand()))) {
+    std::filesystem::create_directories(temp_);
+    std::filesystem::current_path(temp_);
+  }
+
+  const std::filesystem::path &path() const { return temp_; }
+
+  ~ScopedTempCurrentDir() {
+    std::error_code ec;
+    std::filesystem::current_path(original_, ec);
+    std::filesystem::remove_all(temp_, ec);
+  }
+
+  ScopedTempCurrentDir(const ScopedTempCurrentDir &) = delete;
+  ScopedTempCurrentDir &operator=(const ScopedTempCurrentDir &) = delete;
+
+private:
+  std::filesystem::path original_;
+  std::filesystem::path temp_;
+};
 
 struct RejectParamsGuard {
   using RejectParamsFn = void (*)(int);
@@ -160,15 +189,37 @@ TEST_CASE("NWChemPot reports a loaded engine configuration refusal",
 
 TEST_CASE("NWChemPot reports a missing engine in setPotentialConfig",
           "[nwchem][abi]") {
+  const char *raw_live = std::getenv("RGPOT_NWCHEM_ENGINE");
+  REQUIRE(raw_live != nullptr);
+  const std::filesystem::path live_engine = std::filesystem::absolute(raw_live);
+
   RestoreEnv nwchem_library("NWCHEMC_LIBRARY");
   RestoreEnv nwchemc_engine("RGPOT_NWCHEMC_ENGINE");
   RestoreEnv nwchem_engine("RGPOT_NWCHEM_ENGINE");
   nwchem_library.clear();
   nwchemc_engine.clear();
-  nwchem_engine.clear();
+  nwchem_engine.set("/nonexistent/env-libnwchemc.so");
+
+  ScopedTempCurrentDir workdir;
+#ifndef _WIN32
+  std::filesystem::create_symlink(live_engine,
+                                  workdir.path() / "libnwchemc.so");
+  std::filesystem::create_symlink(live_engine,
+                                  workdir.path() / "libnwchemc.dylib");
+#endif
 
   rgpot::NWChemPot pot;
-  REQUIRE_FALSE(pot.available());
+  rgpot::types::AtomMatrix positions = rgpot::types::AtomMatrix::Zero(1, 3);
+  std::vector<int> atmtypes{8};
+  std::array<std::array<double, 3>, 3> box = {
+      {{20.0, 0.0, 0.0}, {0.0, 20.0, 0.0}, {0.0, 0.0, 20.0}}};
+  REQUIRE_THROWS_WITH(
+      pot(positions, atmtypes, box),
+      ContainsSubstring("NWChem engine (libnwchemc) not loaded") &&
+          ContainsSubstring("/nonexistent/env-libnwchemc.so"));
+
+  nwchem_engine.set(live_engine.string().c_str());
+  REQUIRE(rgpot::NWChemPot().available());
 
   ::capnp::MallocMessageBuilder message;
   auto config = message.initRoot<::PotentialConfig>();
@@ -186,4 +237,11 @@ TEST_CASE("NWChemPot reports a missing engine in setPotentialConfig",
   REQUIRE(result == "rgpot params nwchem arm failed (engine not loaded): "
                     "basis=6-31g theory=dft scfType=rhf charge=0 mult=1 "
                     "enginePath=/nonexistent/libnwchemc.so");
+
+  ::capnp::MallocMessageBuilder stored_message;
+  auto stored = stored_message.initRoot<::NWChemParams>();
+  pot.getParams(stored);
+  REQUIRE(stored.asReader().getBasis() == "6-31g");
+  REQUIRE(stored.asReader().getTheory() == "dft");
+  REQUIRE(stored.asReader().getEnginePath() == "/nonexistent/libnwchemc.so");
 }
