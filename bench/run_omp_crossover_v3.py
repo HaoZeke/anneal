@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import math
@@ -23,6 +24,8 @@ STAGES = ("build", "force")
 P_FLOOR_N12 = 1.0 / math.comb(24, 12)
 CROSSOVER_MIN_SPEEDUP = {2: 1.2, 8: 2.0}
 CROSSOVER_P_LIMIT = 0.01
+DEFAULT_BOOTSTRAP_SEED = 173
+SAMPLES_NAME = "rgpot_omp_crossover_v3_samples.json.gz"
 
 
 @dataclass(frozen=True)
@@ -289,6 +292,24 @@ def percentile(values: list[float], fraction: float) -> float:
 def speedup_ci(stock: list[float], team: list[float], seed: int) -> tuple[float, float, float]:
     estimate = statistics.median(stock) / statistics.median(team)
     rng = random.Random(seed)
+    if len(stock) == 24 and len(team) == 24:
+        getrandbits = rng.getrandbits
+        samples = []
+        for _ in range(2000):
+            left = []
+            for _ in range(24):
+                while (index := getrandbits(5)) >= 24:
+                    pass
+                left.append(stock[index])
+            right = []
+            for _ in range(24):
+                while (index := getrandbits(5)) >= 24:
+                    pass
+                right.append(team[index])
+            left.sort()
+            right.sort()
+            samples.append((left[11] + left[12]) / (right[11] + right[12]))
+        return estimate, percentile(samples, 0.025), percentile(samples, 0.975)
     samples = []
     for _ in range(2000):
         left = [stock[rng.randrange(len(stock))] for _ in stock]
@@ -653,6 +674,60 @@ def render_report(
     return "\n".join(lines)
 
 
+def default_samples_path(output_json: Path) -> Path:
+    if output_json.name.endswith("_results.json"):
+        stem = output_json.name[: -len("_results.json")]
+        return output_json.with_name(f"{stem}_samples.json.gz")
+    return output_json.with_name(SAMPLES_NAME)
+
+
+def sample_measurement_key(row: dict[str, Any]) -> tuple[str, str, str, int, int, str]:
+    return (
+        str(row["arm"]),
+        str(row["potential"]),
+        str(row["stage"]),
+        int(row["atoms"]),
+        int(row["threads"]),
+        str(row["order"]),
+    )
+
+
+def split_samples(
+    payload: dict[str, Any], *, seed: int = DEFAULT_BOOTSTRAP_SEED
+) -> dict[str, Any]:
+    sample_rows = []
+    for index, row in enumerate(payload["measurements"]):
+        stock_ns = [float(value) for value in row.pop("stock_ns")]
+        team_ns = [float(value) for value in row.pop("team_ns")]
+        sample_rows.append(
+            {
+                "arm": row["arm"],
+                "potential": row["potential"],
+                "stage": row["stage"],
+                "atoms": row["atoms"],
+                "threads": row["threads"],
+                "order": row["order"],
+                "seed": int(row.get("seed", seed + (index // len(STAGES)) * len(STAGES))),
+                "stock_ns": stock_ns,
+                "team_ns": team_ns,
+            }
+        )
+    return {
+        "seed": seed,
+        "measurements": sample_rows,
+    }
+
+
+def write_samples_gzip(path: Path, samples_payload: dict[str, Any]) -> None:
+    encoded = (json.dumps(samples_payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    path.write_bytes(gzip.compress(encoded, compresslevel=9, mtime=0))
+
+
+def read_samples_gzip(path: Path) -> dict[str, Any]:
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def benchmark(args: argparse.Namespace) -> None:
     repo = args.repo.resolve()
     if output(["git", "rev-parse", args.base_sha + "^{commit}"], cwd=repo) != args.base_sha:
@@ -763,6 +838,9 @@ def benchmark(args: argparse.Namespace) -> None:
     }
     add_arm_provenance(payload, repo)
     corrected_analysis(payload)
+    samples_payload = split_samples(payload, seed=args.seed)
+    samples_path = args.output_samples or default_samples_path(args.output_json)
+    write_samples_gzip(samples_path, samples_payload)
     args.output_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     args.output_report.write_text(render_report(payload), encoding="utf-8")
 
@@ -776,6 +854,7 @@ def main() -> None:
     measure_parser.add_argument("--build-root", type=Path, required=True)
     measure_parser.add_argument("--worker-source", type=Path, required=True)
     measure_parser.add_argument("--output-json", type=Path, required=True)
+    measure_parser.add_argument("--output-samples", type=Path)
     measure_parser.add_argument("--output-report", type=Path, required=True)
     measure_parser.add_argument("--base-sha", required=True)
     measure_parser.add_argument("--arm", action="append", type=parse_arm, required=True)
@@ -798,7 +877,22 @@ def main() -> None:
     provenance_parser.add_argument("--repo", type=Path, required=True)
     provenance_parser.add_argument("--input-json", type=Path, required=True)
     provenance_parser.add_argument("--output-json", type=Path, required=True)
+    split_parser = subparsers.add_parser("split-samples")
+    split_parser.add_argument("--input-json", type=Path, required=True)
+    split_parser.add_argument("--output-json", type=Path, required=True)
+    split_parser.add_argument("--output-samples", type=Path)
+    split_parser.add_argument("--seed", type=int, default=DEFAULT_BOOTSTRAP_SEED)
     args = parser.parse_args()
+    if args.command == "split-samples":
+        payload = json.loads(args.input_json.read_text(encoding="utf-8"))
+        samples_payload = split_samples(payload, seed=args.seed)
+        samples_path = args.output_samples or default_samples_path(args.output_json)
+        write_samples_gzip(samples_path, samples_payload)
+        args.output_json.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return
     if args.command == "render":
         payload = json.loads(args.input_json.read_text(encoding="utf-8"))
         args.output_report.write_text(render_report(payload), encoding="utf-8")

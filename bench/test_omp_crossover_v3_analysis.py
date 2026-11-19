@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Corrected crossover analysis ignores equivalent stock-team sizes."""
+"""Corrected crossover analysis and sidecar sample audit."""
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = ROOT / "bench" / "run_omp_crossover_v3.py"
+RESULTS_JSON = ROOT / "bench" / "results" / "rgpot_omp_crossover_v3_results.json"
+SAMPLES_GZ = ROOT / "bench" / "results" / "rgpot_omp_crossover_v3_samples.json.gz"
 
 
 def load_harness():
@@ -33,8 +36,6 @@ def row(atoms: int, threads: int, speedup: float, p_value: float) -> dict:
         "mw_p_team_faster": p_value,
         "aa_band": [0.95, 1.05],
         "n_per_binary": 12,
-        "stock_ns": [1.0],
-        "team_ns": [1.0 / speedup],
         "order": "ABBA/BAAB",
     }
 
@@ -67,6 +68,48 @@ def payload(one_thread_speedup: float = 1.0) -> dict:
     }
 
 
+def check_sidecar_samples(harness) -> None:
+    results = json.loads(RESULTS_JSON.read_text(encoding="utf-8"))
+    samples = harness.read_samples_gzip(SAMPLES_GZ)
+    main_rows = results["measurements"]
+    sample_rows = samples["measurements"]
+    if len(sample_rows) != len(main_rows):
+        raise SystemExit(
+            f"sample row count {len(sample_rows)} != main row count {len(main_rows)}"
+        )
+    by_key = {harness.sample_measurement_key(item): item for item in sample_rows}
+    if len(by_key) != len(sample_rows):
+        raise SystemExit("duplicate measurement keys in sidecar samples")
+    base_seed = int(samples.get("seed", harness.DEFAULT_BOOTSTRAP_SEED))
+    stages = len(harness.STAGES)
+    for index, expected in enumerate(main_rows):
+        if "stock_ns" in expected or "team_ns" in expected:
+            raise SystemExit(f"row {index} in main JSON still contains raw timing arrays")
+        key = harness.sample_measurement_key(expected)
+        sample = by_key.get(key)
+        if sample is None:
+            raise SystemExit(f"missing sample entry for {key}")
+        stock_ns = [float(value) for value in sample["stock_ns"]]
+        team_ns = [float(value) for value in sample["team_ns"]]
+        if len(stock_ns) != expected["n_per_binary"] or len(team_ns) != expected["n_per_binary"]:
+            raise SystemExit(f"sample count mismatch for {key}")
+        cell_seed = int(sample.get("seed", base_seed + (index // stages) * stages))
+        speedup, ci_low, ci_high = harness.speedup_ci(stock_ns, team_ns, cell_seed)
+        mw_p = harness.mw_less(team_ns, stock_ns)
+        if speedup != expected["speedup"]:
+            raise SystemExit(
+                f"{key}: recomputed speedup {speedup} != {expected['speedup']}"
+            )
+        if [ci_low, ci_high] != expected["speedup_ci95"]:
+            raise SystemExit(
+                f"{key}: recomputed speedup_ci95 {[ci_low, ci_high]} != {expected['speedup_ci95']}"
+            )
+        if mw_p != expected["mw_p_team_faster"]:
+            raise SystemExit(
+                f"{key}: recomputed mw_p_team_faster {mw_p} != {expected['mw_p_team_faster']}"
+            )
+
+
 def main() -> None:
     harness = load_harness()
     result = payload()
@@ -96,6 +139,8 @@ def main() -> None:
     harness.add_recommendation(regressed)
     if regressed["recommendations"][0]["team_min_atoms"] != 8192:
         raise SystemExit("one-thread regression did not retain the stock threshold")
+
+    check_sidecar_samples(harness)
 
 
 if __name__ == "__main__":
