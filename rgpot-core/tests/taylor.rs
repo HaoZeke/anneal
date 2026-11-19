@@ -66,16 +66,16 @@ fn incremental_exp_and_supplied_coefficients_use_the_same_recurrences() {
     recurrence.push(Interval::ZERO);
     let incremental = recurrence.into_coefficients();
     let supplied = Taylor::from_coefficients(vec![Interval::ZERO, Interval::ONE, Interval::ZERO])
-        .expect("nonempty supplied series")
+        .unwrap()
         .exp();
     assert_eq!(incremental, supplied.coefficients());
 
     let reciprocal = Taylor::constant(Interval::ONE, 2)
         .div(
             &Taylor::from_coefficients(vec![Interval::ONE, -Interval::ONE, Interval::ZERO])
-                .expect("nonempty denominator"),
+                .unwrap(),
         )
-        .expect("nonzero constant coefficient");
+        .unwrap();
     assert_eq!(
         reciprocal
             .coefficients()
