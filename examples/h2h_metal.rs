@@ -306,6 +306,10 @@ fn try_config(
     if std::env::var("H2H_BRANCH").is_ok_and(|value| value == "1") {
         cfg.branch_on_stall = true;
     }
+    // `1` heats the walk on each call plateau. Unset leaves the preset.
+    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
+        cfg.plateau_heat = true;
+    }
     Ok(cfg)
 }
 

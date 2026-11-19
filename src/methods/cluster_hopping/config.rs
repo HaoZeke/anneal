@@ -1280,6 +1280,13 @@ pub struct Config {
     /// short-ranged Morse, which keeps those call counts unchanged.
     #[serde(skip_serializing_if = "is_false")]
     pub long_ranged: bool,
+    /// Double the hop temperature on each escape plateau, up to four times,
+    /// and return to the preset when a new lowest minimum is recorded.
+    ///
+    /// Heated accepts are not fed to the acceptance dial. Off leaves the
+    /// temperature and the dial on the preset trajectory.
+    #[serde(skip_serializing_if = "is_false")]
+    pub plateau_heat: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
     /// Screened hopping's economy is that almost no hop is fully relaxed, so
@@ -2245,6 +2252,7 @@ impl Config {
             answer_gradient: 0.0,
             trace_quenched: false,
             long_ranged: false,
+            plateau_heat: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
