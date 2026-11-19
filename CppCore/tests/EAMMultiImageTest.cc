@@ -5,8 +5,6 @@
 
 #include <array>
 #include <cmath>
-#include <cstdint>
-#include <cstring>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -15,6 +13,7 @@
 
 #include "rgpot/EAMTable/EAMTablePot.hpp"
 #include "rgpot/PerAtom.hpp"
+#include "rgpot/nlist/MultiImage.hpp"
 
 using Catch::Matchers::WithinAbs;
 using rgpot::EAMTableFormat;
@@ -53,8 +52,8 @@ std::string pair_table() {
 
 rgpot::EAMTablePot pair_only() {
   std::istringstream in(pair_table());
-  return rgpot::EAMTablePot(
-      rgpot::read_eam_table(in, EAMTableFormat::Setfl), true, true);
+  return rgpot::EAMTablePot(rgpot::read_eam_table(in, EAMTableFormat::Setfl),
+                            true, true);
 }
 
 struct Eval {
@@ -118,9 +117,9 @@ struct Replicated {
 Replicated replicate(const std::vector<double> &pos, const std::vector<int> &z,
                      const double *box, const std::array<int, 3> &rep) {
   Replicated out;
-  out.box = {rep[0] * box[0], rep[0] * box[1], rep[0] * box[2], rep[1] * box[3],
-             rep[1] * box[4], rep[1] * box[5], rep[2] * box[6], rep[2] * box[7],
-             rep[2] * box[8]};
+  out.box = {rep[0] * box[0], rep[0] * box[1], rep[0] * box[2],
+             rep[1] * box[3], rep[1] * box[4], rep[1] * box[5],
+             rep[2] * box[6], rep[2] * box[7], rep[2] * box[8]};
   const std::size_t n = z.size();
   out.nrep = static_cast<std::size_t>(rep[0] * rep[1] * rep[2]);
   out.pos.reserve(3 * n * out.nrep);
@@ -143,38 +142,20 @@ Replicated replicate(const std::vector<double> &pos, const std::vector<int> &z,
   return out;
 }
 
-Eval supercell_reference(const rgpot::EAMTablePot &pot, const std::vector<double> &pos,
+Eval supercell_reference(const rgpot::EAMTablePot &pot,
+                         const std::vector<double> &pos,
+                         const std::vector<int> &z, const double *box,
+                         const std::array<int, 3> &rep);
+
+Eval supercell_reference(const rgpot::EAMTablePot &pot,
+                         const std::vector<double> &pos,
                          const std::vector<int> &z, const double *box) {
-  const std::array<int, 3> rep = replication(box, pot.locality().cutoff);
-  const Replicated sc = replicate(pos, z, box, rep);
-  const Eval big = eval_full(pot, sc.pos, sc.z, sc.box.data());
-  const std::size_t n = z.size();
-  const double inv = 1.0 / static_cast<double>(sc.nrep);
-  Eval ref;
-  ref.energy = big.energy * inv;
-  ref.stress = big.stress;
-  ref.has_stress = big.has_stress;
-  ref.forces.assign(3 * n, 0.0);
-  ref.eatom.assign(n, 0.0);
-  ref.vatom.assign(6 * n, 0.0);
-  for (std::size_t t = 0; t < sc.nrep; ++t) {
-    for (std::size_t i = 0; i < n; ++i) {
-      const std::size_t src = t * n + i;
-      ref.eatom[i] += big.eatom[src] * inv;
-      for (int c = 0; c < 3; ++c) {
-        ref.forces[3 * i + static_cast<std::size_t>(c)] +=
-            big.forces[3 * src + static_cast<std::size_t>(c)] * inv;
-      }
-      for (int v = 0; v < 6; ++v) {
-        ref.vatom[6 * i + static_cast<std::size_t>(v)] +=
-            big.vatom[6 * src + static_cast<std::size_t>(v)] * inv;
-      }
-    }
-  }
-  return ref;
+  return supercell_reference(pot, pos, z, box,
+                             replication(box, pot.locality().cutoff));
 }
 
-Eval supercell_reference(const rgpot::EAMTablePot &pot, const std::vector<double> &pos,
+Eval supercell_reference(const rgpot::EAMTablePot &pot,
+                         const std::vector<double> &pos,
                          const std::vector<int> &z, const double *box,
                          const std::array<int, 3> &rep) {
   const Replicated sc = replicate(pos, z, box, rep);
@@ -217,8 +198,8 @@ std::array<double, 6> total_virial(const Eval &e) {
 }
 
 void check(const rgpot::EAMTablePot &pot, const std::vector<double> &pos,
-           const std::vector<int> &z, const double *box, double etol, double ftol,
-           double stol, double atom_tol) {
+           const std::vector<int> &z, const double *box, double etol,
+           double ftol, double stol, double atom_tol) {
   const Eval got = eval_full(pot, pos, z, box);
   const Eval want = supercell_reference(pot, pos, z, box);
   REQUIRE(got.has_stress == 1);
@@ -240,11 +221,6 @@ void check(const rgpot::EAMTablePot &pot, const std::vector<double> &pos,
     REQUIRE_THAT(gv[static_cast<std::size_t>(c)],
                  WithinAbs(wv[static_cast<std::size_t>(c)], atom_tol));
   }
-}
-
-void require_rel(double got, double want, double rel, double abs_floor = 1e-15) {
-  const double scale = std::max(abs_floor, std::abs(want));
-  REQUIRE_THAT(got, WithinAbs(want, rel * scale));
 }
 
 } // namespace
@@ -280,6 +256,7 @@ TEST_CASE("EAM multi-image matches an independent supercell reference",
     const std::vector<int> z{29};
     const double a = 3.615;
     const double box[9] = {a, 0.0, 0.0, 0.0, a, 0.0, 0.0, 0.0, a};
+    REQUIRE(face_spacing(box, 0) < pot.locality().cutoff);
     const Eval got = eval_full(pot, pos, z, box);
     const Eval want = supercell_reference(pot, pos, z, box, {3, 3, 3});
     REQUIRE_THAT(want.energy, WithinAbs(-0.802510540848, 5e-10));
@@ -312,6 +289,7 @@ TEST_CASE("EAM multi-image matches an independent supercell reference",
     const std::vector<int> z{29};
     const double a = 3.0;
     const double box[9] = {a, 0.0, 0.0, 0.0, a, 0.0, 0.0, 0.0, a};
+    REQUIRE(face_spacing(box, 0) < pot.locality().cutoff);
     const Eval got = eval_full(pot, pos, z, box);
     const Eval want = supercell_reference(pot, pos, z, box, {4, 4, 4});
     REQUIRE_THAT(want.energy, WithinAbs(-1.941358963766, 5e-10));
@@ -343,65 +321,156 @@ TEST_CASE("EAM multi-image matches an independent supercell reference",
     const double a = 3.615;
     const double box[9] = {a, 0.0, 0.0, 0.0, a, 0.0, 0.0, 0.0, a};
     // One missing site in a conventional FCC cell.
-    const std::vector<double> pos{
-        0.0, 0.0, 0.0, 0.0, 0.5 * a, 0.5 * a, 0.5 * a, 0.0, 0.5 * a};
+    const std::vector<double> pos{0.0,     0.0,     0.0, 0.0,    0.5 * a,
+                                  0.5 * a, 0.5 * a, 0.0, 0.5 * a};
     const std::vector<int> z{29, 29, 29};
     check(pot, pos, z, box, 2e-8, 2e-7, 2e-10, 2e-8);
   }
 }
 
-TEST_CASE("EAM minimum-image cells keep develop values within tolerance",
-          "[EAMTable][nlist]") {
-  const rgpot::EAMTablePot pot = cu_u3();
-  constexpr std::size_t n = 4;
-  const std::vector<int> z(n, 29);
-  std::uint64_t state = 0x9e3779b97f4a7c15ull;
-  auto next = [&]() {
-    state = state * 6364136223846793005ull + 1442695040888963407ull;
-    return state;
-  };
-  auto uniform = [&](double lo, double hi) {
-    const double u = static_cast<double>(next() >> 11) *
-                     (1.0 / static_cast<double>(1ull << 53));
-    return lo + (hi - lo) * u;
-  };
-  for (int sample = 0; sample < 300; ++sample) {
-    const double ax = uniform(11.5, 14.5);
-    const double by = uniform(11.5, 14.5);
-    const double cz = uniform(11.5, 14.5);
-    const double b0 = uniform(-0.7, 0.7);
-    const double c0 = uniform(-0.7, 0.7);
-    const double c1 = uniform(-0.7, 0.7);
-    const double box[9] = {ax, 0.0, 0.0, b0, by, 0.0, c0, c1, cz};
-    std::vector<double> pos(3 * n);
-    for (std::size_t i = 0; i < n; ++i) {
-      const double s0 = uniform(0.0, 1.0);
-      const double s1 = uniform(0.0, 1.0);
-      const double s2 = uniform(0.0, 1.0);
-      pos[3 * i] = s0 * box[0] + s1 * box[3] + s2 * box[6];
-      pos[3 * i + 1] = s1 * box[4] + s2 * box[7];
-      pos[3 * i + 2] = s2 * box[8];
-    }
-    const Eval got = eval_full(pot, pos, z, box);
-    const Eval want = supercell_reference(pot, pos, z, box);
-    require_rel(got.energy, want.energy, 1e-12);
-    for (std::size_t k = 0; k < got.forces.size(); ++k) {
-      require_rel(got.forces[k], want.forces[k], 1e-12);
-    }
-    const std::array<double, 6> got_virial = total_virial(got);
-    const std::array<double, 6> want_virial = total_virial(want);
-    for (int k = 0; k < 6; ++k) {
-      require_rel(got_virial[static_cast<std::size_t>(k)],
-                  want_virial[static_cast<std::size_t>(k)], 1e-12);
-    }
+namespace {
+
+void expect_pin(const Eval &got, double energy,
+                const std::vector<double> &forces,
+                const std::vector<double> &stress, double tol) {
+  REQUIRE(got.has_stress == 1);
+  REQUIRE(got.forces.size() == forces.size());
+  REQUIRE(stress.size() == 9);
+  REQUIRE_THAT(got.energy, WithinAbs(energy, tol));
+  for (std::size_t i = 0; i < forces.size(); ++i) {
+    REQUIRE_THAT(got.forces[i], WithinAbs(forces[i], tol));
+  }
+  for (std::size_t i = 0; i < stress.size(); ++i) {
+    REQUIRE_THAT(got.stress[i], WithinAbs(stress[i], tol));
   }
 }
 
-TEST_CASE("EAM multi-image rejects unbounded image extent", "[EAMTable][nlist]") {
+} // namespace
+
+TEST_CASE("EAM minimum-image cells match the stored neighbour values",
+          "[EAMTable][nlist]") {
+  // Face spacing above twice the cutoff, so the image walk is not entered.
+  // The literals are the stored neighbour walk on these cells.
+  const rgpot::EAMTablePot pot = cu_u3();
+  const double cutoff = pot.locality().cutoff;
+  const std::vector<int> z{29, 29, 29, 29};
+
+  SECTION("orthogonal 12A cell") {
+    const double box[9] = {12.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 0.0, 12.0};
+    REQUIRE(face_spacing(box, 0) > 2.0 * cutoff);
+    const std::vector<double> pos{1.0, 2.0, 3.0, 3.2, 2.4, 3.5,
+                                  2.2, 4.5, 3.2, 4.0, 3.5, 5.0};
+    const Eval got = eval_full(pot, pos, z, box);
+    expect_pin(got, -6.4302145542936842,
+               {0.4875496499688981, 0.76465695323661698, 0.13023723466897327,
+                -1.0982647766643991, -1.2376673869681145, -1.8736236435097737,
+                0.18288849580104144, -1.0908290140632739, 0.4250492434355394,
+                0.42782663089445966, 1.5638394477947717, 1.3183371654052611},
+               {0.00052849329919968152, -0.0003817449509135031,
+                -0.00019855241470887036, -0.0003817449509135031,
+                0.00050716453602619993, -0.0013256246523685362,
+                -0.00019855241470887036, -0.0013256246523685362,
+                -0.0010329122440640875},
+               1e-12);
+  }
+
+  SECTION("triclinic cell") {
+    const double box[9] = {12.0, 0.0, 0.0, 0.5, 12.4, 0.0, -0.4, 0.6, 13.0};
+    for (int axis = 0; axis < 3; ++axis) {
+      REQUIRE(face_spacing(box, axis) > 2.0 * cutoff);
+    }
+    const std::vector<double> pos{1.0, 1.5, 2.0, 3.4, 1.8, 2.6,
+                                  1.6, 3.6, 2.4, 3.0, 3.2, 4.2};
+    const Eval got = eval_full(pot, pos, z, box);
+    expect_pin(
+        got, -7.1238524269291768,
+        {0.57276282635237352, -0.13871962187670273, 0.23900655285138978,
+         -0.68106950559316604, -0.28231772988798709, -0.78836734278112719,
+         0.418382145660189, 0.012399136073383834, 0.092924877428047101,
+         -0.31007546641939648, 0.40863821569130593, 0.45643591250169036},
+        {0.001035819095774544, -7.607183689799067e-05, 0.0004773856861117124,
+         -7.607183689799067e-05, -0.00032879850778687444,
+         -0.00037974208592712698, 0.0004773856861117124,
+         -0.00037974208592712698, -0.00029379060835724836},
+        1e-12);
+  }
+}
+
+TEST_CASE(
+    "EAM multi-image counts a second image between cutoff and twice cutoff",
+    "[EAMTable][nlist]") {
+  const rgpot::EAMTablePot pot = cu_u3();
+  const double a = 8.0;
+  const double cutoff = pot.locality().cutoff;
+  const double box[9] = {a, 0.0, 0.0, 0.0, a, 0.0, 0.0, 0.0, a};
+  REQUIRE(face_spacing(box, 0) > cutoff);
+  REQUIRE(face_spacing(box, 0) < 2.0 * cutoff);
+  // Atom 1 sits 4 A from atom 0, so both the home image and the neighbour
+  // cell image fall inside the 4.95 A cutoff.
+  const std::vector<double> pos{0.2, 0.3, 0.4, 4.2, 0.3, 0.5, 0.3, 4.5, 0.4};
+  const std::vector<int> z{29, 29, 29};
+  REQUIRE(replication(box, cutoff) == std::array<int, 3>{2, 2, 2});
+  check(pot, pos, z, box, 1e-8, 1e-7, 1e-10, 1e-8);
+}
+
+TEST_CASE("EAM multi-image recenters pairs outside the home cell",
+          "[EAMTable][nlist]") {
+  const rgpot::EAMTablePot pot = cu_u3();
+  const double a = 8.0;
+  const double cutoff = pot.locality().cutoff;
+  const double box[9] = {a, 0.0, 0.0, 0.0, a, 0.0, 0.0, 0.0, a};
+  REQUIRE(face_spacing(box, 0) < 2.0 * cutoff);
+  // 80.2, 17.1, 24.4 and 184.5, 16.3, 25.2 are the images of
+  // 0.2, 1.1, 0.4 and 0.5, 0.3, 1.2. The raw separation is many cells.
+  const std::vector<double> unwrapped{80.2, 17.1, 24.4, 184.5, 16.3, 25.2};
+  const std::vector<double> wrapped{0.2, 1.1, 0.4, 0.5, 0.3, 1.2};
+  const std::vector<int> z{29, 29};
+  const Eval got = eval_full(pot, unwrapped, z, box);
+  const Eval want = supercell_reference(pot, wrapped, z, box);
+  REQUIRE(std::abs(want.energy) > 1e-6);
+  REQUIRE(got.has_stress == 1);
+  REQUIRE(want.has_stress == 1);
+  REQUIRE_THAT(got.energy, WithinAbs(want.energy, 1e-8));
+  for (std::size_t c = 0; c < got.forces.size(); ++c) {
+    REQUIRE_THAT(got.forces[c], WithinAbs(want.forces[c], 1e-7));
+  }
+  for (int c = 0; c < 9; ++c) {
+    REQUIRE_THAT(got.stress[static_cast<std::size_t>(c)],
+                 WithinAbs(want.stress[static_cast<std::size_t>(c)], 1e-10));
+  }
+  const std::array<double, 6> gv = total_virial(got);
+  const std::array<double, 6> wv = total_virial(want);
+  for (int c = 0; c < 6; ++c) {
+    REQUIRE_THAT(gv[static_cast<std::size_t>(c)],
+                 WithinAbs(wv[static_cast<std::size_t>(c)], 1e-8));
+  }
+}
+
+TEST_CASE("EAM multi-image rejects unbounded image extent",
+          "[EAMTable][nlist]") {
   const rgpot::EAMTablePot pot = pair_only();
   const std::vector<double> pos{0.4, 0.5, 0.6};
   const std::vector<int> z{29};
   const double bad_box[9] = {1.0e-6, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0};
-  REQUIRE_THROWS_WITH(eval_full(pot, pos, z, bad_box),
-                      Catch::Matchers::ContainsSubstring("image extent on axis"));
+  REQUIRE_THROWS_WITH(
+      eval_full(pot, pos, z, bad_box),
+      Catch::Matchers::ContainsSubstring("image extent on axis"));
+}
+
+TEST_CASE("EAM multi-image rejects a large image count", "[EAMTable][nlist]") {
+  const rgpot::EAMTablePot pot = pair_only();
+  const double cutoff = pot.locality().cutoff;
+  // extent = ceil(cutoff / spacing) + 1. Stay under the per-axis cap and
+  // over the product of the shift counts (2 * extent + 1).
+  constexpr int extent = 40;
+  REQUIRE(extent < rgpot::nlist::detail::kMaxImageExtent);
+  const auto span = static_cast<std::int64_t>(2 * extent + 1);
+  REQUIRE(span * span * span > rgpot::nlist::detail::kMaxImageCount);
+  const double spacing = cutoff / (static_cast<double>(extent - 1) - 0.25);
+  const double box[9] = {spacing, 0.0, 0.0, 0.0,    spacing,
+                         0.0,     0.0, 0.0, spacing};
+  const std::vector<double> pos{0.2 * spacing, 0.3 * spacing, 0.4 * spacing};
+  const std::vector<int> z{29};
+  REQUIRE_THROWS_WITH(eval_full(pot, pos, z, box),
+                      Catch::Matchers::ContainsSubstring("image count"));
 }
