@@ -531,11 +531,23 @@ def _provenance(
                 "results/campaign/eon-3.5.0-d9cc6c5be-saddle-pt-classic-aa6dd937.starts.jsonl",
                 "results/campaign/rgsaddle-develop-aa6dd937-eon-provenance.json",
             ],
+            "kit": {
+                "name": "optbench v5 kit",
+                "mbox": "optbench-v5.mbox",
+                "sha256": "d1c2d7f2b644c61683c447bc4ab91085bdb73c2c8628365fd601fd88bf8c841a",
+                "apply": "git am --keep-cr",
+                "applied_on": "9cd4ea7b3e7c11591bede7aabb1e3c1a5406f0e8",
+                "tree": "2b18de49245acfdfc7a53b8373b749e3cc2664ad",
+                "owner_reference_head": "8d7da1b5",
+                "owner_reference_note": "Ids differ only by committer date.",
+            },
             "prior_v2": "The aa6dd937 eon-classic arm has no v2 file.",
             "prior_ref": (
-                "No optbench branch or pull request at this fetch contains the aa6dd937 campaign. "
-                "The protocol files are the eon-classic products of the patch titled "
-                "feat: record the aa6dd937 pt-island catalog."
+                "The aa6dd937 eon-classic spec is the optbench v5 kit, file optbench-v5.mbox, "
+                "sha256 d1c2d7f2b644c61683c447bc4ab91085bdb73c2c8628365fd601fd88bf8c841a, "
+                "applied with git am --keep-cr on 9cd4ea7b. The applied tree is "
+                "2b18de49245acfdfc7a53b8373b749e3cc2664ad. The kit owner's reference HEAD is "
+                "8d7da1b5. Ids differ only by committer date."
             ),
         },
         "prefixes": labels.entries,
@@ -618,8 +630,7 @@ def _provenance(
             "seed": 20261016,
             "note": (
                 "Those counts are from the earlier eon-classic arm. "
-                "Force-call counts, convergence, and saddle energies are the "
-                "quantities to set beside that arm. Wall time is cross-session context only."
+                "Force-call counts are the comparison. Wall times are context only."
             ),
         },
         "hardware": measured,
