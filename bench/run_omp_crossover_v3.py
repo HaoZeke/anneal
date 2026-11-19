@@ -62,14 +62,46 @@ def output(command: list[str], *, cwd: Path | None = None) -> str:
     return run(command, cwd=cwd, capture=True).stdout.strip()
 
 
-def commit_provenance(repo: Path, sha: str) -> dict[str, str]:
+def commit_provenance(repo: Path, sha: str) -> dict[str, Any]:
     tree = output(["git", "rev-parse", sha + "^{tree}"], cwd=repo)
     subject = output(["git", "show", "-s", "--format=%s", sha], cwd=repo)
     if output(["git", "cat-file", "-t", tree], cwd=repo) != "tree":
         raise RuntimeError(f"arm tree does not resolve: {tree}")
     if not subject:
         raise RuntimeError(f"arm commit has no subject: {sha}")
-    return {"tree": tree, "subject": subject}
+    threshold = tree_threshold_from_git(repo, tree)
+    return {
+        "commit_sha": sha,
+        "tree": tree,
+        "commit_tree": tree,
+        "tree_threshold": threshold,
+        "subject": subject,
+    }
+
+
+def tree_file_from_git(repo: Path, tree: str, path: str) -> str:
+    result = subprocess.run(
+        ["git", "show", f"{tree}:{path}"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def tree_threshold_from_git(repo: Path, tree: str) -> int:
+    options = tree_file_from_git(repo, tree, "meson_options.txt")
+    match = re.search(
+        r"option\(\s*'team_min_atoms'.*?value:\s*([0-9]+)",
+        options,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        slices = tree_file_from_git(repo, tree, "CppCore/rgpot/Slices.hpp")
+        match = re.search(r"kTeamMinAtoms\s*=\s*([0-9]+)", slices)
+    if match is None:
+        raise RuntimeError(f"tree {tree} has no kTeamMinAtoms value")
+    return int(match.group(1))
 
 
 def add_arm_provenance(payload: dict[str, Any], repo: Path) -> None:

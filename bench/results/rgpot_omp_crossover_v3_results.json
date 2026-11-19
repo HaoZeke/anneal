@@ -20497,6 +20497,8 @@
     },
     "arms": [
       {
+        "commit_sha": "32e8fb1bba2b0f92d60603722a2f5e12636d5e66",
+        "commit_tree": "c16effc9194d2c8f0e3f3b60121d00e8df230769",
         "git_status_porcelain": "",
         "identity": {
           "configured_team_min_atoms": 8192,
@@ -20507,9 +20509,12 @@
         "sha": "32e8fb1bba2b0f92d60603722a2f5e12636d5e66",
         "subject": "Merge pull request #242 from OmniPotentRPC/fix/morse-omp-followups-r2",
         "threshold": 8192,
-        "tree": "c16effc9194d2c8f0e3f3b60121d00e8df230769"
+        "tree": "c16effc9194d2c8f0e3f3b60121d00e8df230769",
+        "tree_threshold": 8192
       },
       {
+        "commit_sha": "e06abcefc2c023fe7e049fae64be52cdf48b5fa7",
+        "commit_tree": "9ed37e2f439d8726cd1a926d1afa2155f003de55",
         "git_status_porcelain": "",
         "identity": {
           "configured_team_min_atoms": 1,
@@ -20520,9 +20525,12 @@
         "sha": "e06abcefc2c023fe7e049fae64be52cdf48b5fa7",
         "subject": "test(bench): define one-atom team arm",
         "threshold": 1,
-        "tree": "9ed37e2f439d8726cd1a926d1afa2155f003de55"
+        "tree": "9ed37e2f439d8726cd1a926d1afa2155f003de55",
+        "tree_threshold": 1
       },
       {
+        "commit_sha": "f86bdf80c8e8466dffc6038a7c431f26f5708536",
+        "commit_tree": "102018297727e18c2e43ffeb7575768efa353995",
         "git_status_porcelain": "",
         "identity": {
           "configured_team_min_atoms": 1024,
@@ -20533,9 +20541,12 @@
         "sha": "f86bdf80c8e8466dffc6038a7c431f26f5708536",
         "subject": "test(bench): define 1024-atom team arm",
         "threshold": 1024,
-        "tree": "102018297727e18c2e43ffeb7575768efa353995"
+        "tree": "102018297727e18c2e43ffeb7575768efa353995",
+        "tree_threshold": 1024
       },
       {
+        "commit_sha": "1ed94957c6b64016d077d4fb5e4220265cdc320c",
+        "commit_tree": "42a386d9aa0c8bf863ccdc49e3d8646a9c9e134a",
         "git_status_porcelain": "",
         "identity": {
           "configured_team_min_atoms": 4096,
@@ -20546,7 +20557,8 @@
         "sha": "1ed94957c6b64016d077d4fb5e4220265cdc320c",
         "subject": "test(bench): define 4096-atom team arm",
         "threshold": 4096,
-        "tree": "42a386d9aa0c8bf863ccdc49e3d8646a9c9e134a"
+        "tree": "42a386d9aa0c8bf863ccdc49e3d8646a9c9e134a",
+        "tree_threshold": 4096
       }
     ],
     "base_sha": "32e8fb1bba2b0f92d60603722a2f5e12636d5e66",
