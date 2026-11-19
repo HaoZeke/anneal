@@ -351,9 +351,12 @@ impl<'a> Scanner<'a> {
             self.rest = text;
             return None;
         }
-        let end = text.find(char::is_whitespace).unwrap_or(text.len());
-        self.rest = &text[end..];
-        Some(&text[..end])
+        let (token, rest) = match text.find(char::is_whitespace) {
+            Some(end) => text.split_at(end),
+            None => (text, ""),
+        };
+        self.rest = rest;
+        Some(token)
     }
 
     fn number<T: std::str::FromStr>(&mut self, what: &str) -> Result<T, EamTableError> {
