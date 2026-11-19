@@ -1,0 +1,73 @@
+from pathlib import Path
+from shlex import quote
+
+
+GATE = Path("bench/sc-shelf2-gate")
+
+
+def arm_args():
+    values = []
+    for name in ("A", "B", "C"):
+        arm = config["arms"][name]
+        values.extend(
+            [
+                "--arm",
+                name,
+                arm["revision"],
+                arm["tree"],
+                arm["atomic_binary"],
+                arm["binary_lj_binary"],
+            ]
+        )
+    return " ".join(quote(str(value)) for value in values)
+
+
+rule all:
+    input:
+        GATE / "rows.csv",
+        GATE / "summary.csv",
+        GATE / "comparisons.csv",
+        GATE / "verdict.txt",
+        GATE / "README.md",
+
+
+rule run_sc_shelf2_gate:
+    output:
+        touch(str(Path(config["work"]) / "complete")),
+    params:
+        arms=lambda wildcards: arm_args(),
+        logs=lambda wildcards: quote(str(Path(config["work"]) / "logs")),
+        runs=lambda wildcards: quote(str(Path(config["work"]) / "runs")),
+        inputs=lambda wildcards: quote(config["binary_inputs"]),
+    shell:
+        """
+        python3 {GATE}/run.py \
+          --rows {GATE}/rows.csv \
+          --logs {params.logs} \
+          --runs {params.runs} \
+          --binary-inputs {params.inputs} \
+          {params.arms}
+        """
+
+
+rule summarize_sc_shelf2_gate:
+    input:
+        rules.run_sc_shelf2_gate.output,
+    output:
+        GATE / "rows.csv",
+        GATE / "summary.csv",
+        GATE / "comparisons.csv",
+        GATE / "verdict.txt",
+        GATE / "README.md",
+    params:
+        c_tree=lambda wildcards: quote(config["c_tree"]),
+    shell:
+        """
+        python3 {GATE}/summarize.py \
+          --rows {GATE}/rows.csv \
+          --summary {GATE}/summary.csv \
+          --comparisons {GATE}/comparisons.csv \
+          --verdict {GATE}/verdict.txt \
+          --readme {GATE}/README.md \
+          --c-tree {params.c_tree}
+        """
