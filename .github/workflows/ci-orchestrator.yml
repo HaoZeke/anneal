@@ -462,6 +462,7 @@ jobs:
         run: |
           meson setup bbdir \
             -Dwith_tests=true \
+            -Dwith_eam_table=true \
             -Dwith_examples=false \
             -Dwith_xtensor=false \
             -Dwith_eigen=false \

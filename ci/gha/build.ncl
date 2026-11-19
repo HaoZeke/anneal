@@ -129,6 +129,7 @@ let fast_nlist_off_build_test =
   S.run_pixi m%"
   meson setup bbdir \
     -Dwith_tests=true \
+    -Dwith_eam_table=true \
     -Dwith_examples=false \
     -Dwith_xtensor=false \
     -Dwith_eigen=false \
