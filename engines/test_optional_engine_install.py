@@ -33,24 +33,41 @@ def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _meson_argv(argv: list[str]) -> list[str]:
+    if len(argv) == 1 and Path(argv[0]).name.lower().startswith("python"):
+        return [argv[0], "-m", "mesonbuild.mesonmain"]
+    return argv
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 3:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
     root = Path(sys.argv[1]).resolve()
-    meson = sys.argv[2]
+    meson = _meson_argv(sys.argv[2:])
     with tempfile.TemporaryDirectory(prefix="rgpot-parent-") as work:
         parent = Path(work)
         (parent / "subprojects").mkdir()
         (parent / "subprojects" / "rgpot").symlink_to(root, target_is_directory=True)
         (parent / "meson.build").write_text(PARENT)
         build = parent / "build"
-        setup = run([meson, "setup", str(build)], parent)
+        setup = run([*meson, "setup", str(build)], parent)
         if setup.returncode != 0:
             print(setup.stdout, file=sys.stderr)
-            print("parent project did not configure", file=sys.stderr)
+            if "Could not detect Ninja" in setup.stdout:
+                print(
+                    "optional_engine_install requires ninja on PATH or in NINJA",
+                    file=sys.stderr,
+                )
+            elif "Unknown compiler(s)" in setup.stdout:
+                print(
+                    "optional_engine_install requires C and C++ compilers on PATH or in CC/CXX",
+                    file=sys.stderr,
+                )
+            else:
+                print("parent project did not configure", file=sys.stderr)
             return 1
-        listed = run([meson, "introspect", str(build), "--installed"], parent)
+        listed = run([*meson, "introspect", str(build), "--installed"], parent)
         if listed.returncode != 0:
             print(listed.stdout, file=sys.stderr)
             return 1
@@ -62,7 +79,7 @@ def main() -> int:
         )
         install = run(
             [
-                meson,
+                *meson,
                 "install",
                 "-C",
                 str(build),

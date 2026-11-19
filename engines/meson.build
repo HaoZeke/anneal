@@ -433,6 +433,46 @@ if (
     and python3_engines.found()
     and meson_prog.found()
 )
+    nested_meson_env = environment()
+    _nested_cc = cc.cmd_array()
+    _nested_cxx = cppc.cmd_array()
+    nested_meson_env.set('CC', _nested_cc[_nested_cc.length() - 1])
+    nested_meson_env.set('CXX', _nested_cxx[_nested_cxx.length() - 1])
+    _nested_bins = [
+        _nested_cc[0],
+        _nested_cc[_nested_cc.length() - 1],
+        _nested_cxx[0],
+        _nested_cxx[_nested_cxx.length() - 1],
+        python3_engines.full_path(),
+    ]
+    if has_fortran
+        _nested_fc = fc.cmd_array()
+        nested_meson_env.set('FC', _nested_fc[_nested_fc.length() - 1])
+        _nested_bins += [_nested_fc[0], _nested_fc[_nested_fc.length() - 1]]
+    endif
+    _nested_ninja = find_program('ninja', 'ninja-build', required: false)
+    if _nested_ninja.found()
+        nested_meson_env.set('NINJA', _nested_ninja.full_path())
+        _nested_bins += [_nested_ninja.full_path()]
+    endif
+    foreach _tool_name : ['pkg-config', 'pkgconf', 'cmake', 'cargo', 'rustc']
+        _tool_prog = find_program(_tool_name, required: false)
+        if _tool_prog.found()
+            _nested_bins += [_tool_prog.full_path()]
+        endif
+    endforeach
+    _nested_dirs = []
+    foreach _bin : _nested_bins
+        if fs.is_absolute(_bin)
+            _dir = fs.parent(_bin)
+            if not (_dir in _nested_dirs)
+                _nested_dirs += [_dir]
+            endif
+        endif
+    endforeach
+    if _nested_dirs.length() > 0
+        nested_meson_env.prepend('PATH', _nested_dirs)
+    endif
     test(
         'optional_engine_install',
         python3_engines,
@@ -441,6 +481,7 @@ if (
             meson.project_source_root(),
             meson_prog.full_path(),
         ],
+        env: nested_meson_env,
         timeout: 300,
     )
     test(
@@ -451,6 +492,7 @@ if (
             meson.project_source_root(),
             meson_prog.full_path(),
         ],
+        env: nested_meson_env,
         timeout: 300,
     )
     test(
@@ -461,6 +503,7 @@ if (
             meson.project_source_root(),
             meson_prog.full_path(),
         ],
+        env: nested_meson_env,
         timeout: 300,
     )
     test(
@@ -471,6 +514,7 @@ if (
             meson.project_source_root(),
             meson_prog.full_path(),
         ],
+        env: nested_meson_env,
         timeout: 600,
     )
 endif
