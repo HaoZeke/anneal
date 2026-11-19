@@ -1,0 +1,67 @@
+# Snakemake rules for the no-size-constants-r3 regression gate.
+#
+# Run the full gate (requires arm A and arm B builds, the UTS sentinel,
+# and CPU core 0 pinning):
+#   snakemake -s bench/no-size-constants-r3-gate/Snakefile --cores 1 gate
+#
+# Recompute summary, per-seed identity, and the report from rows.csv:
+#   snakemake -s bench/no-size-constants-r3-gate/Snakefile --cores 1
+
+import os
+import sys
+
+PYTHON = sys.executable
+GATE_DIR = "bench/no-size-constants-r3-gate"
+GATE_WORK = os.environ.get("GATE_WORK", "build/no-size-constants-r3-gate")
+
+
+rule all:
+    input:
+        f"{GATE_DIR}/summary.csv",
+        f"{GATE_DIR}/identity.csv",
+        f"{GATE_DIR}/README.md",
+
+
+rule summarize:
+    input:
+        f"{GATE_DIR}/rows.csv",
+        f"{GATE_DIR}/summarize.py",
+    output:
+        f"{GATE_DIR}/summary.csv",
+        f"{GATE_DIR}/identity.csv",
+        f"{GATE_DIR}/README.md",
+    shell:
+        """
+        set -euo pipefail
+        "{PYTHON}" {GATE_DIR}/summarize.py \
+          --rows {GATE_DIR}/rows.csv \
+          --summary {GATE_DIR}/summary.csv \
+          --identity {GATE_DIR}/identity.csv \
+          --report {GATE_DIR}/README.md
+        """
+
+
+rule gate:
+    input:
+        f"{GATE_DIR}/run_gate.py",
+    output:
+        touch(f"{GATE_WORK}/gate.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        "{PYTHON}" -u {GATE_DIR}/run_gate.py \
+          --rows {GATE_DIR}/rows.csv \
+          --work {GATE_WORK} \
+          --python "{PYTHON}" \
+          --arm-a-bin "${{GATE_ARM_A_BIN:?set GATE_ARM_A_BIN}}" \
+          --arm-b-bin "${{GATE_ARM_B_BIN:?set GATE_ARM_B_BIN}}" \
+          --arm-a-py "${{GATE_ARM_A_PY:?set GATE_ARM_A_PY}}" \
+          --arm-b-py "${{GATE_ARM_B_PY:?set GATE_ARM_B_PY}}" \
+          --arm-a-rev "${{GATE_ARM_A_REV:?set GATE_ARM_A_REV}}" \
+          --arm-b-rev "${{GATE_ARM_B_REV:?set GATE_ARM_B_REV}}" \
+          --arm-a-tree "${{GATE_ARM_A_TREE:?set GATE_ARM_A_TREE}}" \
+          --arm-b-tree "${{GATE_ARM_B_TREE:?set GATE_ARM_B_TREE}}" \
+          --cuh2-timed-lib "${{GATE_CUH2_TIMED_LIB:?set GATE_CUH2_TIMED_LIB}}" \
+          --cuh2-real-lib "${{GATE_CUH2_REAL_LIB:?set GATE_CUH2_REAL_LIB}}" \
+          --rdff-lib "${{GATE_RDFF_LIB:?set GATE_RDFF_LIB}}"
+        """
