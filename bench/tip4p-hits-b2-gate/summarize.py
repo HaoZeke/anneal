@@ -336,7 +336,14 @@ def abba_problems(rows: list[dict[str, str]]) -> list[str]:
     return problems
 
 
-def summarize(rows: list[dict[str, str]], tests_path: Path | None = None, kit: dict[str, str] | None = None) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str]:
+def load_breakdown(path: Path | None) -> list[dict[str, str]]:
+    if path is None or not path.is_file():
+        return []
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def summarize(rows: list[dict[str, str]], tests_path: Path | None = None, kit: dict[str, str] | None = None, breakdown_path: Path | None = None) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str]:
     by_key: dict[tuple[str, str, str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
         band = row["band"]
@@ -693,6 +700,7 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None, kit: d
 
     order_problems = abba_problems(rows)
     gate_failures.extend(order_problems)
+    breakdown_rows = load_breakdown(breakdown_path)
 
     if gate_failures:
         verdict = "FAIL"
@@ -775,6 +783,18 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None, kit: d
                 f"tip4p15_prior_gain_holds: {int(hits_a == 7 and hits_b == 12 and n_hits == 12)}",
             ]
         )
+    if breakdown_rows:
+        v_lines.append("hop_phase_source: instrumented_build_not_used_for_verdict")
+        for arm_name in ("A", "B"):
+            group = [r for r in breakdown_rows if r["arm"] == arm_name]
+            if not group:
+                continue
+            def mean_of(key: str, group: list[dict[str, str]] = group) -> float:
+                return sum(float(r[key]) for r in group) / len(group)
+            v_lines.append(
+                f"hop_phase_{arm_name}: n={len(group)} tric_s={mean_of('tric_s'):.6f} book_s={mean_of('book_s'):.6f} "
+                f"accept_s={mean_of('accept_s'):.6f} bookkeep_s={mean_of('bookkeep_s'):.6f} pot_s={mean_of('pot_s'):.6f}"
+            )
     if gate_failures:
         v_lines.append("failures:")
         v_lines.extend(f"- {msg}" for msg in gate_failures)
@@ -877,6 +897,36 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None, kit: d
                 f"- Variant and A/A trajectories match arm A: `{int(bool(placement['within_ok']) and bool(placement['cross_ok']))}`",
             ]
         )
+    if breakdown_rows:
+        rep.extend(
+            [
+                "",
+                "## Hexamer hop-phase breakdown",
+                "",
+                "A separate instrumented build times each water_hexamer search. "
+                "The TRIC step is `TricOpt::minimize_watched` outside the potential. "
+                "Book handling is the stall archive and, on arm B, the stalled-walk book. "
+                "Acceptance is the decision that adopts or declines the quenched trial. "
+                "Bookkeeping is the rest of the search outside the potential. "
+                "Potential time is recorded beside those phases. "
+                "These times are not the gate verdict.",
+                "",
+                "| Arm | Seeds | Tric step (s) | Book (s) | Accept (s) | Bookkeeping (s) | Potential (s) | Calls |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for arm_name in ("A", "B"):
+            group = [r for r in breakdown_rows if r["arm"] == arm_name]
+            if not group:
+                continue
+            n_group = len(group)
+            def mean_of(key: str, group: list[dict[str, str]] = group) -> float:
+                return sum(float(r[key]) for r in group) / n_group
+            calls = sum(int(float(r["calls"])) for r in group) / n_group
+            rep.append(
+                f"| {arm_name} | {n_group} | {mean_of('tric_s'):.6f} | {mean_of('book_s'):.6f} | "
+                f"{mean_of('accept_s'):.6f} | {mean_of('bookkeep_s'):.6f} | {mean_of('pot_s'):.6f} | {calls:.0f} |"
+            )
     if gate_failures:
         rep.extend(["", "## Gate Failure Details", ""])
         rep.extend(f"- {msg}" for msg in gate_failures)
@@ -953,6 +1003,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--identity", type=Path, default=here / "identity.csv")
     parser.add_argument("--verdict", type=Path, default=here / "verdict.txt")
     parser.add_argument("--report", type=Path, default=here / "README.md")
+    parser.add_argument("--breakdown", type=Path, default=here / "breakdown.csv")
     args = parser.parse_args(argv[1:])
 
     rows = read_rows(args.rows)
@@ -974,7 +1025,7 @@ def main(argv: list[str]) -> int:
             ):
                 if rec.get(key):
                     kit[key] = str(rec[key])
-    summary_rows, identity_rows, verdict_text, report_text = summarize(rows, args.tests, kit)
+    summary_rows, identity_rows, verdict_text, report_text = summarize(rows, args.tests, kit, args.breakdown)
     write_csv(args.summary, SUMMARY_FIELDS, summary_rows)
     write_csv(args.identity, IDENTITY_FIELDS, identity_rows)
     args.verdict.parent.mkdir(parents=True, exist_ok=True)
