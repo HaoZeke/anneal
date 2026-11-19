@@ -1621,6 +1621,29 @@
           "seed": "seed"
         }
       ]
+    },
+    {
+      "rule": "gmin_losses2",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/gmin_panel/run_losses2.py",
+        "scripts/gmin_panel/enter_losses2.sh"
+      ],
+      "budgets": {
+        "source": "scripts/gmin_panel/run_panel.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/gmin_panel/run_panel.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/gmin-losses2/benchmarks/gmin_losses2.py",
+      "rows": [],
+      "missing_outputs": {
+        "/work/gmin-losses2/stamps/panel.stamp": "a touch() stamp outside the tree that marks the rows written under /work/gmin-losses2; it is never committed"
+      }
     }
   ],
   "not_h2h": {

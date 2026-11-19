@@ -1107,3 +1107,19 @@ rule agox_gofee_lj_large:
         bash scripts/ase_gofee_h2h/enter_bench.sh --comparison agox_gofee --no-paper \\
           --systems lj98,lj102,lj103,lj104,lj150
         """
+
+
+# Pair-scaled Morse against the parent preset and GMIN, on the paper
+# panel. Rows and the summary are written under /work or $OUTPUT. The
+# output is a stamp there: Snakemake deletes a declared output before a
+# job, and a tracked table must not be one. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile gmin_losses2
+rule gmin_losses2:
+    output:
+        touch("/work/gmin-losses2/stamps/panel.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        export OUTPUT=/work/gmin-losses2
+        bash scripts/gmin_panel/enter_losses2.sh
+        """
