@@ -1,0 +1,560 @@
+{
+  "bonferroni_threshold": 0.00625,
+  "cells": {
+    "lj38": {
+      "aa_bootstrap_95_band_hit_call_median_ratio_ap_over_a": [
+        0.47942004091391677,
+        2.0858535619280816
+      ],
+      "ab_final_energy_and_charged_calls_identical": {
+        "all": true,
+        "count": 12,
+        "n": 12
+      },
+      "arms": {
+        "A": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              105327.0,
+              262771.5
+            ],
+            "median": 127839.5,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 2040283,
+          "wall_median_s": 0.5993904999999999
+        },
+        "AP": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              105327.0,
+              262771.5
+            ],
+            "median": 127839.5,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 2040283,
+          "wall_median_s": 0.601429
+        },
+        "B": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              105327.0,
+              262771.5
+            ],
+            "median": 127839.5,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 2040283,
+          "wall_median_s": 0.598647
+        }
+      },
+      "display": "LJ38",
+      "fisher_p_ap_vs_a": 1.0,
+      "fisher_p_b_vs_a": 1.0,
+      "hit_call_median_ratio_b_over_a": 1.0,
+      "mann_whitney_p_hit_calls_ap_vs_a": 1.0,
+      "mann_whitney_p_hit_calls_b_vs_a": 1.0
+    },
+    "lj75": {
+      "aa_bootstrap_95_band_hit_call_median_ratio_ap_over_a": [
+        0.10659190968015518,
+        9.381575046367479
+      ],
+      "ab_final_energy_and_charged_calls_identical": {
+        "all": false,
+        "count": 1,
+        "n": 12
+      },
+      "arms": {
+        "A": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              290074.0,
+              3327845.0
+            ],
+            "median": 2721351.0,
+            "n": 5
+          },
+          "hits": 5,
+          "n": 12,
+          "total_calls": 38457980,
+          "wall_median_s": 60.585807
+        },
+        "AP": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              290074.0,
+              3327845.0
+            ],
+            "median": 2721351.0,
+            "n": 5
+          },
+          "hits": 5,
+          "n": 12,
+          "total_calls": 38457980,
+          "wall_median_s": 61.6298305
+        },
+        "B": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              895065.0,
+              2280321.5
+            ],
+            "median": 1793307.5,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 20931190,
+          "wall_median_s": 29.1582255
+        }
+      },
+      "display": "LJ75",
+      "fisher_p_ap_vs_a": 1.0,
+      "fisher_p_b_vs_a": 0.004576659038901602,
+      "hit_call_median_ratio_b_over_a": 0.6589769199195546,
+      "mann_whitney_p_hit_calls_ap_vs_a": 1.0,
+      "mann_whitney_p_hit_calls_b_vs_a": 0.6731012107791359
+    },
+    "lj98": {
+      "aa_bootstrap_95_band_hit_call_median_ratio_ap_over_a": [
+        0.19229936468594014,
+        5.200225188643665
+      ],
+      "ab_final_energy_and_charged_calls_identical": {
+        "all": false,
+        "count": 2,
+        "n": 12
+      },
+      "arms": {
+        "A": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              363251.0,
+              2484398.0
+            ],
+            "median": 1430688.0,
+            "n": 7
+          },
+          "hits": 7,
+          "n": 12,
+          "total_calls": 30921843,
+          "wall_median_s": 77.14382450000001
+        },
+        "AP": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              363251.0,
+              2484398.0
+            ],
+            "median": 1430688.0,
+            "n": 7
+          },
+          "hits": 7,
+          "n": 12,
+          "total_calls": 30921843,
+          "wall_median_s": 75.748373
+        },
+        "B": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              755076.0,
+              2462766.5
+            ],
+            "median": 1298332.0,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 18436241,
+          "wall_median_s": 32.4698985
+        }
+      },
+      "display": "LJ98",
+      "fisher_p_ap_vs_a": 1.0,
+      "fisher_p_b_vs_a": 0.037267080745341616,
+      "hit_call_median_ratio_b_over_a": 0.9074878659777673,
+      "mann_whitney_p_hit_calls_ap_vs_a": 1.0,
+      "mann_whitney_p_hit_calls_b_vs_a": 0.9662636668611169
+    },
+    "m38r10": {
+      "aa_bootstrap_95_band_hit_call_median_ratio_ap_over_a": [
+        0.42845825553480926,
+        2.2466615617354275
+      ],
+      "ab_final_energy_and_charged_calls_identical": {
+        "all": true,
+        "count": 12,
+        "n": 12
+      },
+      "arms": {
+        "A": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              80314.5,
+              257703.5
+            ],
+            "median": 170599.5,
+            "n": 6
+          },
+          "hits": 6,
+          "n": 12,
+          "total_calls": 3417294,
+          "wall_median_s": 3.146838
+        },
+        "AP": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              80314.5,
+              257703.5
+            ],
+            "median": 170599.5,
+            "n": 6
+          },
+          "hits": 6,
+          "n": 12,
+          "total_calls": 3417294,
+          "wall_median_s": 3.1597215
+        },
+        "B": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              80314.5,
+              257703.5
+            ],
+            "median": 170599.5,
+            "n": 6
+          },
+          "hits": 6,
+          "n": 12,
+          "total_calls": 3417294,
+          "wall_median_s": 3.1600075
+        }
+      },
+      "display": "m38r10",
+      "fisher_p_ap_vs_a": 1.0,
+      "fisher_p_b_vs_a": 1.0,
+      "hit_call_median_ratio_b_over_a": 1.0,
+      "mann_whitney_p_hit_calls_ap_vs_a": 1.0,
+      "mann_whitney_p_hit_calls_b_vs_a": 1.0
+    },
+    "m75r14": {
+      "aa_bootstrap_95_band_hit_call_median_ratio_ap_over_a": [
+        0.20940777592298296,
+        4.775371858052612
+      ],
+      "ab_final_energy_and_charged_calls_identical": {
+        "all": false,
+        "count": 4,
+        "n": 12
+      },
+      "arms": {
+        "A": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              177756.0,
+              1112778.0
+            ],
+            "median": 838982.0,
+            "n": 9
+          },
+          "hits": 9,
+          "n": 12,
+          "total_calls": 17900025,
+          "wall_median_s": 29.604713500000003
+        },
+        "AP": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              177756.0,
+              1112778.0
+            ],
+            "median": 838982.0,
+            "n": 9
+          },
+          "hits": 9,
+          "n": 12,
+          "total_calls": 17900025,
+          "wall_median_s": 29.540826
+        },
+        "B": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              220056.0,
+              1191802.0
+            ],
+            "median": 779277.5,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 11316319,
+          "wall_median_s": 23.6300815
+        }
+      },
+      "display": "M75 rho 14",
+      "fisher_p_ap_vs_a": 1.0,
+      "fisher_p_b_vs_a": 0.21739130434782608,
+      "hit_call_median_ratio_b_over_a": 0.9288369714725704,
+      "mann_whitney_p_hit_calls_ap_vs_a": 1.0,
+      "mann_whitney_p_hit_calls_b_vs_a": 0.6955188922850721
+    },
+    "m75r6": {
+      "aa_bootstrap_95_band_hit_call_median_ratio_ap_over_a": [
+        0.2345465730375327,
+        4.263545559627416
+      ],
+      "ab_final_energy_and_charged_calls_identical": {
+        "all": false,
+        "count": 3,
+        "n": 12
+      },
+      "arms": {
+        "A": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              192923.0,
+              1313081.0
+            ],
+            "median": 822536.0,
+            "n": 11
+          },
+          "hits": 11,
+          "n": 12,
+          "total_calls": 13520867,
+          "wall_median_s": 28.804731500000003
+        },
+        "AP": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              192923.0,
+              1313081.0
+            ],
+            "median": 822536.0,
+            "n": 11
+          },
+          "hits": 11,
+          "n": 12,
+          "total_calls": 13520867,
+          "wall_median_s": 28.661544
+        },
+        "B": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              192923.0,
+              1483582.0
+            ],
+            "median": 723381.0,
+            "n": 11
+          },
+          "hits": 11,
+          "n": 12,
+          "total_calls": 13865067,
+          "wall_median_s": 24.844123
+        }
+      },
+      "display": "M75 rho 6",
+      "fisher_p_ap_vs_a": 1.0,
+      "fisher_p_b_vs_a": 1.0,
+      "hit_call_median_ratio_b_over_a": 0.8794520847719735,
+      "mann_whitney_p_hit_calls_ap_vs_a": 1.0,
+      "mann_whitney_p_hit_calls_b_vs_a": 0.7674262468567241
+    },
+    "m80r14": {
+      "aa_bootstrap_95_band_hit_call_median_ratio_ap_over_a": [
+        0.33048121368047384,
+        3.0258906061960036
+      ],
+      "ab_final_energy_and_charged_calls_identical": {
+        "all": false,
+        "count": 1,
+        "n": 12
+      },
+      "arms": {
+        "A": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              878074.0,
+              3757008.0
+            ],
+            "median": 2132943.0,
+            "n": 6
+          },
+          "hits": 6,
+          "n": 12,
+          "total_calls": 37536050,
+          "wall_median_s": 136.8366685
+        },
+        "AP": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              878074.0,
+              3757008.0
+            ],
+            "median": 2132943.0,
+            "n": 6
+          },
+          "hits": 6,
+          "n": 12,
+          "total_calls": 37536050,
+          "wall_median_s": 136.76180449999998
+        },
+        "B": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              822133.0,
+              2413861.0
+            ],
+            "median": 2305686.0,
+            "n": 7
+          },
+          "hits": 7,
+          "n": 12,
+          "total_calls": 33225146,
+          "wall_median_s": 86.3552445
+        }
+      },
+      "display": "M80 rho 14",
+      "fisher_p_ap_vs_a": 1.0,
+      "fisher_p_b_vs_a": 1.0,
+      "hit_call_median_ratio_b_over_a": 1.080988099541338,
+      "mann_whitney_p_hit_calls_ap_vs_a": 1.0,
+      "mann_whitney_p_hit_calls_b_vs_a": 0.6170750774519738
+    },
+    "m80r6": {
+      "aa_bootstrap_95_band_hit_call_median_ratio_ap_over_a": [
+        0.07716631005410025,
+        12.507278776844265
+      ],
+      "ab_final_energy_and_charged_calls_identical": {
+        "all": false,
+        "count": 8,
+        "n": 12
+      },
+      "arms": {
+        "A": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              25845.5,
+              629251.0
+            ],
+            "median": 62677.0,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 4587764,
+          "wall_median_s": 2.2589095
+        },
+        "AP": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              25845.5,
+              629251.0
+            ],
+            "median": 62677.0,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 4587764,
+          "wall_median_s": 2.257413
+        },
+        "B": {
+          "hit_calls": {
+            "bootstrap_95_ci": [
+              25845.5,
+              537013.0
+            ],
+            "median": 62677.0,
+            "n": 12
+          },
+          "hits": 12,
+          "n": 12,
+          "total_calls": 2872667,
+          "wall_median_s": 2.258563
+        }
+      },
+      "display": "M80 rho 6",
+      "fisher_p_ap_vs_a": 1.0,
+      "fisher_p_b_vs_a": 1.0,
+      "hit_call_median_ratio_b_over_a": 1.0,
+      "mann_whitney_p_hit_calls_ap_vs_a": 1.0,
+      "mann_whitney_p_hit_calls_b_vs_a": 0.7069674207299554
+    }
+  },
+  "checks": [
+    {
+      "detail": "1 start, 1 end, 0 abort",
+      "name": "every session ended without abort",
+      "pass": true
+    },
+    {
+      "detail": "288 of 288 rows",
+      "name": "complete schedule",
+      "pass": true
+    },
+    {
+      "detail": "",
+      "name": "one row per sequence",
+      "pass": true
+    },
+    {
+      "detail": "",
+      "name": "same run count in every cell and arm",
+      "pass": true
+    },
+    {
+      "detail": "",
+      "name": "same seeds and starts in every arm",
+      "pass": true
+    },
+    {
+      "detail": "",
+      "name": "ABBA order with A' interleaved",
+      "pass": true
+    },
+    {
+      "detail": "",
+      "name": "one pinned core and one thread",
+      "pass": true
+    },
+    {
+      "detail": "",
+      "name": "arm source identities and binaries are stable",
+      "pass": true
+    },
+    {
+      "detail": "",
+      "name": "all arm worktree status records are empty",
+      "pass": true
+    }
+  ],
+  "gate_losses": {
+    "hit_calls": [],
+    "hits": []
+  },
+  "marginal_losses_0.05_to_0.1": [],
+  "resume": {
+    "resumed": false,
+    "resumed_rows": 0,
+    "session_count": 1
+  },
+  "rule": "PASS only when B has no cell with fewer hits at two-sided Fisher p<0.05 and no cell with a higher hit-call median at two-sided Mann-Whitney p<0.05 above the A/A' bootstrap band",
+  "verdict": "PASS",
+  "wins_bonferroni_8_cells": [
+    {
+      "bonferroni_p": 0.036613272311212815,
+      "cell": "lj75",
+      "metric": "hits",
+      "p": 0.004576659038901602
+    }
+  ]
+}
