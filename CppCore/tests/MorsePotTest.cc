@@ -583,10 +583,10 @@ TEST_CASE(
   }
   CHECK(lost_words == 0);
 
-  // Also stress Phase 0 boundary-word merging in MorsePot::compute on 16
-  // threads with an atom count where interior p0_splits land inside shared
-  // 64-pair active_bits words (last_w of slice s equals first_w of slice s +
-  // 1).
+  // Stress Phase 0 boundary word merging in MorsePot::compute. Team sizes
+  // 4, 8 and 16 place interior p0 splits inside different shared 64 pair
+  // active bit words (last_w of slice s equals first_w of slice s + 1).
+  // Energy and every force component must match the serial reference.
   ThreadGuard guard;
   const rgpot::MorseConfig cu_vacancy{.De = 1.0,
                                       .a = 4.0 / 2.55,
@@ -599,22 +599,32 @@ TEST_CASE(
   rgpot::MorsePot ref_pot(cu_vacancy);
   ref_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
   const auto want = runFullEval(ref_pot, sys.pos, sys.z, sys.box);
+  REQUIRE(want.forces.size() == 3 * n);
 
-  ThreadGuard::set("16");
   rgpot::MorsePot par_pot(cu_vacancy);
   par_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
-  // Build stored list on 1st call, then run 32 back-to-back stored-half
-  // evaluations.
   std::vector<double> fbuf(3 * n, 0.0);
   rgpot::ForceOut out{};
   out.F = fbuf.data();
-  par_pot.forceImpl({n, sys.pos.data(), sys.z.data(), sys.box.data()}, &out);
-  std::size_t bad_evals = 0;
-  for (int iter = 0; iter < 32; ++iter) {
-    par_pot.forceImpl({n, sys.pos.data(), sys.z.data(), sys.box.data()}, &out);
-    if (f64Bits(out.energy) != f64Bits(want.energy)) {
-      ++bad_evals;
+  for (const char *threads : {"4", "8", "16"}) {
+    ThreadGuard::set(threads);
+    std::size_t bad_energy = 0;
+    std::size_t bad_force = 0;
+    for (int iter = 0; iter < 32; ++iter) {
+      par_pot.forceImpl({n, sys.pos.data(), sys.z.data(), sys.box.data()},
+                        &out);
+      if (f64Bits(out.energy) != f64Bits(want.energy)) {
+        ++bad_energy;
+      }
+      for (std::size_t k = 0; k < fbuf.size(); ++k) {
+        if (f64Bits(fbuf[k]) != f64Bits(want.forces[k])) {
+          ++bad_force;
+          break;
+        }
+      }
     }
+    INFO("OMP_NUM_THREADS=" << threads);
+    CHECK(bad_energy == 0);
+    CHECK(bad_force == 0);
   }
-  CHECK(bad_evals == 0);
 }
