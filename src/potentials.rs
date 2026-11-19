@@ -397,9 +397,9 @@ mod tip4p;
 pub use binary_lj::BinaryLennardJones;
 pub use gmin_tip4p::{
     C6 as GMIN_TIP4P_C6, C12 as GMIN_TIP4P_C12, COULOMB as GMIN_TIP4P_COULOMB, GminAngleAxisFile,
-    GminTip4p, block_from_gmin_file, block_from_interleaved_gmin, energy_ohh, gmin_coords_text,
-    gmin_water_geometry, interleaved_gmin_from_block, reference_sites as gmin_tip4p_sites,
-    rigid_from_ohh,
+    GminTip4p, KJ_PER_KCAL, block_from_gmin_file, block_from_interleaved_gmin, energy_ohh,
+    gmin_coords_text, gmin_water_geometry, interleaved_gmin_from_block,
+    reference_sites as gmin_tip4p_sites, rigid_from_ohh,
 };
 pub use gupta::{COPPER_Z, GOLD_Z, Gupta};
 pub use sutton_chen::{SuttonChen, SuttonChenFamily};

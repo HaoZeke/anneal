@@ -116,7 +116,7 @@ pub struct CatalogLedgerEvent {
     pub cumulative_charged: u64,
 }
 
-/// Resolved or unresolved result of one action-labelled perturb--quench step.
+/// Resolved or unresolved result of one action-labeled perturb--quench step.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransitionDestination {
     /// The step did not yield a valid classified minimum.
