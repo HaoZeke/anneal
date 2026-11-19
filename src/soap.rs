@@ -2720,6 +2720,213 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     }
 }
 
+/// Steepest-descent pullback of the observed ν=3 cloud residual, without
+/// forming the normal matrix.
+///
+/// One spherical expansion builds both the per-species ν=3 mean and the
+/// contracted adjoint weights (`residualᵀ ∂B/∂c`), so the step scales
+/// linearly in the neighbour pairs and keeps real defects below
+/// [`NU3_DEFECT`]. Only roundoff, or a uniform shell breath on a framed
+/// mobile mask, declines.
+pub fn step_away_cloud_gradient<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        step_away_cloud(x, spec, rmsd, species, mobile, groups, rng)
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let n_at = x.len() / 3;
+        let ace1 = spec.nu3_dim();
+        let channels = neighbor_channels(species);
+        let n_chan = channels.len();
+        let d1 = ace1 * n_chan;
+        let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+        let n_coeff = spec.n_max * n_lm;
+        let rcut = spec.rcut_nn;
+        let _ = rng;
+        if n_at < 2 || d1 == 0 || n_coeff == 0 || !(rcut > 0.0) {
+            return x.to_owned();
+        }
+        let keep = mobile_mask(n_at, mobile);
+        let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
+        let mut labels: Vec<u32> = Vec::new();
+        for i in 0..n_at {
+            if keep[i] {
+                let z = zi(i);
+                if !labels.contains(&z) {
+                    labels.push(z);
+                }
+            }
+        }
+        if labels.is_empty() {
+            return x.to_owned();
+        }
+        let nlab = labels.len();
+        let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
+        let mut coeffs = vec![Vec::new(); n_at];
+        let mut nu3 = vec![vec![0.0; d1]; n_at];
+        let mut mu = vec![vec![0.0; d1]; nlab];
+        let mut cnt = vec![0.0; nlab];
+        for i in 0..n_at {
+            if !keep[i] {
+                continue;
+            }
+            let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
+            let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+            cnt[k] += 1.0;
+            for ch in 0..n_chan {
+                let c0 = ch * n_coeff;
+                let b = crate::ace::from_c(&ci[c0..c0 + n_coeff], spec.n_max, spec.l_max);
+                for t in 0..ace1 {
+                    let row = ch * ace1 + t;
+                    nu3[i][row] = b[t];
+                    mu[k][row] += b[t];
+                }
+            }
+            coeffs[i] = ci;
+        }
+        for k in 0..nlab {
+            if cnt[k] > 0.0 {
+                for value in &mut mu[k] {
+                    *value /= cnt[k];
+                }
+            }
+        }
+        let mut nu32 = 0.0;
+        let mut nnu = 0.0;
+        let mut per_atom_q = Vec::new();
+        for i in 0..n_at {
+            if !keep[i] {
+                continue;
+            }
+            let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+            let mut q = 0.0;
+            for t in 0..d1 {
+                let d = mu[k][t] - nu3[i][t];
+                q += d * d;
+            }
+            nu32 += q;
+            nnu += d1 as f64;
+            per_atom_q.push(q);
+        }
+        let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
+        let breath = if mobile.is_some() && !per_atom_q.is_empty() {
+            per_atom_q.sort_by(|a, b| a.total_cmp(b));
+            let median = per_atom_q[per_atom_q.len() / 2].max(1e-18);
+            per_atom_q[per_atom_q.len() - 1] < 4.0 * median
+        } else {
+            false
+        };
+        if nu3_rms < NU3_DEFECT * 1e-6 || breath {
+            return x.to_owned();
+        }
+        let mut dr = Array1::zeros(x.len());
+        let mut weights = vec![0.0; n_chan * n_coeff];
+        for i in 0..n_at {
+            if !keep[i] {
+                continue;
+            }
+            let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+            let ci = &coeffs[i];
+            let mut any_weight = false;
+            for ch in 0..n_chan {
+                let mut residual_norm = 0.0;
+                let mut residual = vec![0.0; ace1];
+                for t in 0..ace1 {
+                    let row = ch * ace1 + t;
+                    let value = mu[k][row] - nu3[i][row];
+                    residual[t] = value;
+                    residual_norm += value * value;
+                }
+                let w0 = ch * n_coeff;
+                if residual_norm == 0.0 {
+                    weights[w0..w0 + n_coeff].fill(0.0);
+                    continue;
+                }
+                any_weight = true;
+                let contracted = crate::ace::contract_c(
+                    &ci[w0..w0 + n_coeff],
+                    &residual,
+                    spec.n_max,
+                    spec.l_max,
+                );
+                weights[w0..w0 + n_coeff].copy_from_slice(&contracted);
+            }
+            if !any_weight {
+                continue;
+            }
+            let origin = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+            for &jj in table.neighbors(i) {
+                if jj == i {
+                    continue;
+                }
+                let bond = [
+                    x[3 * jj] - origin[0],
+                    x[3 * jj + 1] - origin[1],
+                    x[3 * jj + 2] - origin[2],
+                ];
+                let r = (bond[0] * bond[0] + bond[1] * bond[1] + bond[2] * bond[2]).sqrt();
+                if r >= rcut || r < 1e-12 {
+                    continue;
+                }
+                let ch = neighbor_channel(species, jj, &channels);
+                let w0 = ch * n_coeff;
+                let u = [bond[0] / r, bond[1] / r, bond[2] / r];
+                let (ylm, dylm) = tesseral(u, spec.l_max);
+                let fc = fcut(r, rcut);
+                let dfc = dfcut(r, rcut);
+                for n in 0..spec.n_max {
+                    let g = radial(n, r, rcut);
+                    let dg = dradial(n, r, rcut);
+                    let w = g * fc;
+                    let dw = dg * fc + g * dfc;
+                    for lm in 0..n_lm {
+                        let weight = weights[w0 + n * n_lm + lm];
+                        if weight == 0.0 {
+                            continue;
+                        }
+                        let yv = ylm[lm];
+                        for a in 0..3 {
+                            let mut slope = 0.0;
+                            for b in 0..3 {
+                                let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                                slope += dylm[lm][b] * proj;
+                            }
+                            let dc = dw * u[a] * yv + w * slope / r;
+                            let gain = weight * dc;
+                            if keep[jj] {
+                                dr[3 * jj + a] += gain;
+                            }
+                            dr[3 * i + a] -= gain;
+                        }
+                    }
+                }
+            }
+        }
+        if keep.iter().all(|&mobile| mobile) {
+            strip_rigid(x, &mut dr);
+        } else {
+            for i in 0..n_at {
+                if !keep[i] {
+                    dr[3 * i] = 0.0;
+                    dr[3 * i + 1] = 0.0;
+                    dr[3 * i + 2] = 0.0;
+                }
+            }
+        }
+        let y = scale_to_cap(x, dr, rmsd);
+        retract_rigid_groups(x, y, groups)
+    }
+}
+
 /// Retract an ambient Cartesian proposal onto the product rigid-body manifold.
 ///
 /// Kabsch gives the nearest finite rigid motion for each declared group. The
@@ -3158,35 +3365,103 @@ fn tesseral(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
 }
 
 /// Associated-Legendre tesseral Y_lm and Cartesian derivatives, any `l_max`.
+///
+/// `P_l^m(z) / ρ^m` is a polynomial `Q_l^m(z)` in `z` alone, while `ρ^m cos(mφ)`
+/// and `ρ^m sin(mφ)` are the real and imaginary parts of `(x + i y)^m`. That
+/// product equals `Y_lm` on the unit sphere with no polar singularity, so its
+/// spherical gradient is `(I − u uᵀ) ∇F` in one pass.
 fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
-    let y = ylm_real(u, l_max);
-    let n_lm = y.len();
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let mut y = vec![0.0; n_lm];
     let mut dy = vec![[0.0; 3]; n_lm];
-    let eps = 1e-7;
-    for a in 0..3 {
-        let mut up = u;
-        up[a] += eps;
-        let np = (up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).sqrt();
-        if np > 1e-15 {
-            up[0] /= np;
-            up[1] /= np;
-            up[2] /= np;
+    let (x, yy, z) = (u[0], u[1], u[2]);
+    let stride = l_max + 1;
+    let mut q = vec![0.0; stride * stride];
+    let mut dq = vec![0.0; stride * stride];
+    q[0] = 1.0;
+    for m in 1..=l_max {
+        q[m * stride + m] = -(2.0 * m as f64 - 1.0) * q[(m - 1) * stride + (m - 1)];
+    }
+    for m in 0..l_max {
+        let scale = (2.0 * m as f64 + 1.0) * q[m * stride + m];
+        q[(m + 1) * stride + m] = z * scale;
+        dq[(m + 1) * stride + m] = scale;
+    }
+    for l in 2..=l_max {
+        let a = 2.0 * l as f64 - 1.0;
+        for m in 0..=l.saturating_sub(2) {
+            let b = (l + m - 1) as f64;
+            let d = (l - m) as f64;
+            let prev1 = q[(l - 1) * stride + m];
+            let prev2 = q[(l - 2) * stride + m];
+            let dprev1 = dq[(l - 1) * stride + m];
+            let dprev2 = dq[(l - 2) * stride + m];
+            q[l * stride + m] = (a * z * prev1 - b * prev2) / d;
+            dq[l * stride + m] = (a * (prev1 + z * dprev1) - b * dprev2) / d;
         }
-        let yp = ylm_real(up, l_max);
-        let mut um = u;
-        um[a] -= eps;
-        let nm = (um[0] * um[0] + um[1] * um[1] + um[2] * um[2]).sqrt();
-        if nm > 1e-15 {
-            um[0] /= nm;
-            um[1] /= nm;
-            um[2] /= nm;
-        }
-        let ym = ylm_real(um, l_max);
-        for i in 0..n_lm {
-            dy[i][a] = (yp[i] - ym[i]) / (2.0 * eps);
+    }
+    let mut cm = vec![0.0; stride];
+    let mut sm = vec![0.0; stride];
+    cm[0] = 1.0;
+    for m in 1..=l_max {
+        cm[m] = x * cm[m - 1] - yy * sm[m - 1];
+        sm[m] = yy * cm[m - 1] + x * sm[m - 1];
+    }
+    let norms = ylm_norms(l_max);
+    let project = |g: [f64; 3]| -> [f64; 3] {
+        let ug = u[0] * g[0] + u[1] * g[1] + u[2] * g[2];
+        [g[0] - ug * u[0], g[1] - ug * u[1], g[2] - ug * u[2]]
+    };
+    for l in 0..=l_max {
+        let idx0 = lm_index(l, 0);
+        let n0 = norms[l * stride];
+        y[idx0] = n0 * q[l * stride];
+        dy[idx0] = project([0.0, 0.0, n0 * dq[l * stride]]);
+        for m in 1..=l {
+            let nlm = norms[l * stride + m];
+            let qlm = q[l * stride + m];
+            let dqlm = dq[l * stride + m];
+            let mf = m as f64;
+            let idx_pos = lm_index(l, m as i32);
+            let idx_neg = lm_index(l, -(m as i32));
+            y[idx_pos] = nlm * qlm * cm[m];
+            dy[idx_pos] = project([
+                nlm * qlm * mf * cm[m - 1],
+                -nlm * qlm * mf * sm[m - 1],
+                nlm * dqlm * cm[m],
+            ]);
+            y[idx_neg] = nlm * qlm * sm[m];
+            dy[idx_neg] = project([
+                nlm * qlm * mf * sm[m - 1],
+                nlm * qlm * mf * cm[m - 1],
+                nlm * dqlm * sm[m],
+            ]);
         }
     }
     (y, dy)
+}
+
+fn ylm_norms(l_max: usize) -> Vec<f64> {
+    const CACHE_MAX: usize = 8;
+    static CACHE: [std::sync::OnceLock<Vec<f64>>; CACHE_MAX + 1] =
+        [const { std::sync::OnceLock::new() }; CACHE_MAX + 1];
+    let build = |lm: usize| {
+        let stride = lm + 1;
+        let mut out = vec![0.0; stride * stride];
+        for l in 0..=lm {
+            let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
+            out[l * stride] = n0;
+            for m in 1..=l {
+                out[l * stride + m] = n0 * (fact_ratio(l - m, l + m) * 2.0).sqrt();
+            }
+        }
+        out
+    };
+    if l_max <= CACHE_MAX {
+        CACHE[l_max].get_or_init(|| build(l_max)).clone()
+    } else {
+        build(l_max)
+    }
 }
 
 fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
@@ -4639,5 +4914,106 @@ mod tests {
                 assert_eq!(left.1.to_bits(), right.1.to_bits());
             }
         }
+    }
+
+    #[test]
+    fn analytic_high_l_tesseral_derivative_matches_central_difference() {
+        let directions = [
+            [0.31_f64, -0.57, 0.76],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+            [1.0e-9, -2.0e-9, 1.0],
+        ];
+        for raw in directions {
+            let norm = (raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2]).sqrt();
+            let u = [raw[0] / norm, raw[1] / norm, raw[2] / norm];
+            for l_max in [4usize, 6, 8] {
+                let (y, dy) = tesseral_al(u, l_max);
+                let ref_y = ylm_real(u, l_max);
+                for i in 0..y.len() {
+                    assert!((y[i] - ref_y[i]).abs() < 1e-13, "l_max {l_max} lm {i}");
+                }
+                let eps = 1e-7;
+                for a in 0..3 {
+                    let mut up = u;
+                    up[a] += eps;
+                    let np = (up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).sqrt();
+                    up = [up[0] / np, up[1] / np, up[2] / np];
+                    let yp = ylm_real(up, l_max);
+                    let mut um = u;
+                    um[a] -= eps;
+                    let nm = (um[0] * um[0] + um[1] * um[1] + um[2] * um[2]).sqrt();
+                    um = [um[0] / nm, um[1] / nm, um[2] / nm];
+                    let ym = ylm_real(um, l_max);
+                    for i in 0..y.len() {
+                        let fd = (yp[i] - ym[i]) / (2.0 * eps);
+                        assert!(
+                            (dy[i][a] - fd).abs() < 1e-5,
+                            "l_max {l_max} lm {i} axis {a}: {} vs {fd}",
+                            dy[i][a]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cloud_gradient_pullback_moves_sub_defect_leftover_and_yields_on_tetrahedron() {
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 3.5,
+        };
+        let mut rng = StdRng::seed_from_u64(19);
+        let exact = tetra();
+        let unmoved =
+            step_away_cloud_gradient(exact.view(), spec, 0.35, None, None, None, &mut rng);
+        for i in 0..exact.len() {
+            assert!((unmoved[i] - exact[i]).abs() < 1e-12);
+        }
+
+        // Small vertex stretch keeps the ν=3 residual strictly below NU3_DEFECT,
+        // where step_away_cloud declines, while step_away_cloud_gradient pulls
+        // along the contracted ν=3 gradient and reduces the cloud dispersion.
+        let mut stretched = &exact * 0.4;
+        stretched[0] += 0.08;
+        let loc_before = local_nu3_z(stretched.view(), spec, None);
+        let d0 = loc_before.ncols() - spec.nu3_feat_dim(None);
+        let variance = |loc: &Array2<f64>| -> f64 {
+            let n_at = loc.nrows();
+            let mut sum = 0.0;
+            for t in d0..loc.ncols() {
+                let mean = (0..n_at).map(|i| loc[[i, t]]).sum::<f64>() / n_at as f64;
+                for i in 0..n_at {
+                    let d = loc[[i, t]] - mean;
+                    sum += d * d;
+                }
+            }
+            sum
+        };
+        let v0 = variance(&loc_before);
+        let rms = (v0 / (4.0 * spec.nu3_feat_dim(None) as f64)).sqrt();
+        assert!(rms > NU3_DEFECT * 1e-6 && rms < NU3_DEFECT, "rms {rms}");
+        let declined = step_away_cloud(stretched.view(), spec, 0.35, None, None, None, &mut rng);
+        assert!(
+            declined
+                .iter()
+                .zip(stretched.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-12)
+        );
+        let stepped =
+            step_away_cloud_gradient(stretched.view(), spec, 0.35, None, None, None, &mut rng);
+        let step_rms = (stepped
+            .iter()
+            .zip(stretched.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            / 4.0)
+            .sqrt();
+        assert!((step_rms - 0.35).abs() < 1e-6, "step_rms {step_rms}");
+        let small = &stretched + &(0.02 * (&stepped - &stretched));
+        let v1 = variance(&local_nu3_z(small.view(), spec, None));
+        assert!(v1 < v0, "variance did not decrease: {v1} vs {v0}");
     }
 }

@@ -4947,6 +4947,7 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    let mut held_cloud: Option<f64> = None;
     // CNA labels are collected for diagnostics only and never read by search.
     let mut packing = packing_bank::PackingBank::new();
     let packing_cutoff = 1.2 * cfg.length_scale;
@@ -5636,6 +5637,66 @@ where
                     action: "restart".to_owned(),
                     external_calls: 0,
                 });
+            }
+        }
+        if internal_action.is_none()
+            && cfg.prior_soap
+            && cfg.soap_mode != SoapProposalMode::Off
+            && cfg.escape_on_stall
+            && !multi_species
+            && !cfg.move_library.is_rigid_body()
+            && call_due
+            && held_cloud.is_none_or(|prev| e < prev - 1e-9)
+            && ledger.remaining() > 0
+        {
+            held_cloud = Some(e);
+            let groups = cfg.move_library.declared_groups();
+            let mobile = match groups {
+                Some(g) => moves::mobile_atoms(cfg, g),
+                None => moves::mobile_atoms(cfg, &[]).filter(|m| !m.is_empty()),
+            };
+            let spec = crate::soap::SoapSpec {
+                n_max: 3,
+                l_max: 6,
+                rcut_nn: preset::LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
+            };
+            let rmsd = preset::LennardJonesPreset::SOAP_RMSD * cfg.length_scale;
+            let mut cloud_rng = StdRng::seed_from_u64(hops as u64);
+            let mut trial = crate::soap::step_away_cloud_gradient(
+                x.view(),
+                spec,
+                rmsd,
+                None,
+                mobile.as_deref(),
+                if cfg.soap_mode == SoapProposalMode::Rigid {
+                    groups
+                } else {
+                    None
+                },
+                &mut cloud_rng,
+            );
+            let moved = trial
+                .iter()
+                .zip(x.iter())
+                .any(|(after, before)| (after - before).abs() > 1e-12);
+            if moved {
+                recentre(&mut trial, cfg.n_points);
+                contain_trial(cfg, &mut trial, cfg.n_points);
+                let (ec, xc) = relax(ledger, trial.view(), cfg.relax_steps);
+                if ec.is_finite() && xc.len() == x.len() && quench_is_sane(cfg, ec, xc.view()) {
+                    if ec < ledger.best - 1e-6 {
+                        ledger.record(ec, xc.view());
+                    }
+                    if ec < e - 1e-6 {
+                        charged_at_best = ledger.spent();
+                        best_seen = ledger.best;
+                        internal_action = Some(CheckpointAction::ExternalAdopt {
+                            state: xc,
+                            action: "soap".to_owned(),
+                            external_calls: 0,
+                        });
+                    }
+                }
             }
         }
         let leave_due = internal_action.is_none() && cfg.escape_on_stall && call_due;
@@ -10229,7 +10290,7 @@ mod tests {
 
     #[test]
     fn a_noop_leave_does_not_consume_the_plateau_clock() {
-        fn activation_calls(retry_noop: bool) -> usize {
+        fn activation_calls(retry_noop: bool, soap_gradient: bool) -> usize {
             let mut cfg = Config::recommended(6);
             cfg.escape_on_stall = true;
             cfg.retry_noop_stall_leave = retry_noop;
@@ -10242,8 +10303,12 @@ mod tests {
             cfg.energy_lattice = false;
             cfg.orbit_complete_on_new = false;
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
-            cfg.soap_mode = SoapProposalMode::Off;
-            cfg.prior_soap = false;
+            cfg.soap_mode = if soap_gradient {
+                SoapProposalMode::Flexible
+            } else {
+                SoapProposalMode::Off
+            };
+            cfg.prior_soap = soap_gradient;
             cfg.restart_patience = 20;
             cfg.max_hops = Some(80);
             cfg.relax_steps = 1;
@@ -10292,8 +10357,8 @@ mod tests {
             activate_calls
         }
 
-        let original_calls = activation_calls(false);
-        let retry_calls = activation_calls(true);
+        let original_calls = activation_calls(false, false);
+        let retry_calls = activation_calls(true, false);
         assert_eq!(
             original_calls, 2,
             "the default must retain the original one-attempt-per-window clock"
@@ -10301,6 +10366,16 @@ mod tests {
         assert!(
             retry_calls >= 4,
             "the opt-in clock must retry no-op leaves (activate_calls={retry_calls})"
+        );
+        assert_eq!(
+            activation_calls(false, true),
+            original_calls,
+            "a declined SOAP plateau step must not alter the default leave clock"
+        );
+        assert_eq!(
+            activation_calls(true, true),
+            retry_calls,
+            "a declined SOAP plateau step must preserve retry-aware leave accounting"
         );
     }
 
@@ -13176,5 +13251,153 @@ mod call_floor_tests {
         assert!((distance(&x, 0, 1) - target).abs() < 1.0e-12);
         assert!(floor.clears(x.view()));
         assert!(distance(&x, 0, 2) > floor.pair(0, 2));
+    }
+
+    #[test]
+    fn a_stalled_plateau_adopts_a_downhill_cloud_gradient_step_once_per_level() {
+        let n = 6usize;
+        let mut cfg = Config::for_cluster(n);
+        cfg.replicas = 1;
+        cfg.max_hops = Some(6);
+        cfg.restart_patience = 2;
+        cfg.escape_on_stall = true;
+        cfg.trail_on_stall = false;
+        cfg.symmetrise_on_stall = false;
+        cfg.tabu_on_stall = false;
+        cfg.bayes_screen = false;
+        cfg.calibrated_screen = false;
+        cfg.return_screen = false;
+        cfg.finish_improving = false;
+        cfg.orbit_complete_on_new = false;
+        cfg.point_symmetrise_on_new = false;
+        cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        cfg.energy_lattice = false;
+        cfg.allocate_moves = false;
+        cfg.move_library = MoveLibrary::WalesDoye;
+        cfg.temperature = 1.0e-6;
+        cfg.polish_records = 0;
+        cfg.relax_steps = 1;
+        cfg.screen_steps = 1;
+        cfg.prior_soap = true;
+        cfg.soap_mode = SoapProposalMode::Flexible;
+
+        let mut start = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.05, 0.0, 0.0, 0.52, 0.92, 0.0, 0.52, 0.31, 0.88, -0.75, 0.45, 0.62,
+            1.42, 0.78, 0.51,
+        ]);
+        recentre(&mut start, n);
+
+        let spec = crate::soap::SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: preset::LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
+        };
+        let rmsd = preset::LennardJonesPreset::SOAP_RMSD * cfg.length_scale;
+        let mut probe_rng = StdRng::seed_from_u64(0);
+        let mut expected_cloud = crate::soap::step_away_cloud_gradient(
+            start.view(),
+            spec,
+            rmsd,
+            None,
+            None,
+            None,
+            &mut probe_rng,
+        );
+        recentre(&mut expected_cloud, n);
+        contain_trial(&cfg, &mut expected_cloud, n);
+        let near = |a: ArrayView1<f64>, b: &Array1<f64>| -> bool {
+            a.iter()
+                .zip(b.iter())
+                .map(|(u, v)| (u - v) * (u - v))
+                .sum::<f64>()
+                .sqrt()
+                < 1.0e-6
+        };
+        assert!(!near(start.view(), &expected_cloud));
+
+        // Downhill cloud step deepens the stalled plateau.
+        let mut ledger = Ledger::new(200);
+        let mut rng = StdRng::seed_from_u64(41);
+        let mut relax = |led: &mut Ledger, y: ArrayView1<f64>, _steps: usize| {
+            let _ = led.charge();
+            if near(y, &expected_cloud) {
+                (-5.0, expected_cloud.clone())
+            } else if near(y, &start) {
+                (-1.0, start.clone())
+            } else {
+                (10.0, y.to_owned())
+            }
+        };
+        let outcome =
+            run_with_gradient(&cfg, start.view(), &mut ledger, &mut relax, None, &mut rng)
+                .expect("finite start");
+        assert!(
+            (outcome.best - (-5.0)).abs() < 1.0e-12,
+            "stalled plateau did not adopt downhill cloud step: best {}",
+            outcome.best
+        );
+        assert!(
+            outcome
+                .accepted_transitions
+                .iter()
+                .any(|edge| edge.action == "soap" && (edge.to_energy - (-5.0)).abs() < 1.0e-12),
+            "expected adopted soap plateau transition, got {:?}",
+            outcome.accepted_transitions
+        );
+
+        // When the cloud quench does not beat the plateau, it is held and not
+        // repeated across later plateau windows at the same incumbent energy.
+        let cloud_quenches = std::sync::atomic::AtomicUsize::new(0);
+        let mut ledger = Ledger::new(200);
+        let mut rng = StdRng::seed_from_u64(41);
+        let mut relax_uphill = |led: &mut Ledger, y: ArrayView1<f64>, _steps: usize| {
+            let _ = led.charge();
+            if near(y, &expected_cloud) {
+                cloud_quenches.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                (-0.5, expected_cloud.clone())
+            } else if near(y, &start) {
+                (-1.0, start.clone())
+            } else {
+                (10.0, y.to_owned())
+            }
+        };
+        let _ = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax_uphill,
+            None,
+            &mut rng,
+        )
+        .expect("finite start");
+        assert_eq!(cloud_quenches.load(std::sync::atomic::Ordering::Relaxed), 1);
+
+        // Turning prior_soap off suppresses the plateau cloud step.
+        cfg.prior_soap = false;
+        cloud_quenches.store(0, std::sync::atomic::Ordering::Relaxed);
+        let mut ledger = Ledger::new(200);
+        let mut rng = StdRng::seed_from_u64(41);
+        let mut relax_off = |led: &mut Ledger, y: ArrayView1<f64>, _steps: usize| {
+            let _ = led.charge();
+            if near(y, &expected_cloud) {
+                cloud_quenches.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                (-5.0, expected_cloud.clone())
+            } else if near(y, &start) {
+                (-1.0, start.clone())
+            } else {
+                (10.0, y.to_owned())
+            }
+        };
+        let off = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax_off,
+            None,
+            &mut rng,
+        )
+        .expect("finite start");
+        assert_eq!(cloud_quenches.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert!((off.best - (-1.0)).abs() < 1.0e-12);
     }
 }
