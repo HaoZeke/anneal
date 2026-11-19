@@ -3419,7 +3419,12 @@ fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
 
 #[cfg(test)]
 mod rigid_step_tests {
-    use super::rigid_step_scale;
+    use super::cycles::tests::{bond_sets, tadpole};
+    use super::{Config, Ledger, MoveLibrary, rigid_step_scale, run};
+    use ndarray::ArrayView1;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use std::collections::BTreeSet;
 
     #[test]
     fn a_low_acceptance_shrinks_the_orientation_step_and_a_high_one_grows_it() {
@@ -3442,6 +3447,38 @@ mod rigid_step_tests {
             (rigid_step_scale(0.9, 25, 50) - 0.9).abs() < 1e-12,
             "an acceptance of one half moved the step"
         );
+    }
+
+    #[test]
+    fn stalled_rigid_walk_rewires_and_records_the_deeper_cage() {
+        let n = 5;
+        let start = tadpole();
+        let target = BTreeSet::from([(0, 1), (0, 4), (1, 0), (2, 1), (3, 2), (4, 3)]);
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.restart_patience = 1;
+        cfg.relax_steps = 1;
+        cfg.move_library = MoveLibrary::RigidBody {
+            n_molecules: n,
+            translate_step: 1.0e-4,
+            rotate_step: 1.0e-4,
+            local: false,
+            reverse_cycles: true,
+            relocate: false,
+        };
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _| {
+            let _ = ledger.charge();
+            let candidate = x.to_owned();
+            let (directed, _) = bond_sets(n, &candidate);
+            if directed == target {
+                (-20.0, candidate)
+            } else {
+                (-10.0, start.clone())
+            }
+        };
+        let mut ledger = Ledger::new(320);
+        let mut rng = StdRng::seed_from_u64(7);
+        let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("valid");
+        assert_eq!(outcome.best, -20.0);
     }
 }
 
@@ -5004,7 +5041,15 @@ where
     );
     let cage_quantum = cfg.min_separation / 50.0;
     let mut cage_walked = false;
+    let mut shell_spent = 0usize;
     let mut archive_walked = false;
+    let initial_e = e;
+    let initial_x = x.clone();
+    let mut archive_best_seen = ledger.best;
+    let mut charged_at_archive_best = ledger.spent();
+    let mut post_cage_archive_best = false;
+    let mut side_lowest = f64::INFINITY;
+    let mut side_lowest_state: Option<Array1<f64>> = None;
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
         cage_archive.offer_cage(
@@ -5062,6 +5107,13 @@ where
             hops_at_lowest = hops;
             cage_edit = false;
             new_incumbent = true;
+        }
+        if ledger.best < archive_best_seen - new_lowest {
+            archive_best_seen = ledger.best;
+            charged_at_archive_best = ledger.spent();
+            if cage_walked {
+                post_cage_archive_best = true;
+            }
         }
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
@@ -5324,6 +5376,13 @@ where
                         contain_trial(cfg, &mut trial, cfg.n_points);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == $state.len() {
+                            if quenched < side_lowest {
+                                side_lowest = quenched;
+                                side_lowest_state = Some(relaxed.clone());
+                                if quenched < archive_best_seen {
+                                    archive_best_seen = quenched;
+                                }
+                            }
                             let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
                             if rise <= 0.0 || $rng.random::<f64>() < (-rise).exp() {
                                 $energy = quenched;
@@ -5453,8 +5512,9 @@ where
             // The calls just spent are not a new lowest of the main chain.
             // Leaving them on the quiet clock would start the later walk
             // before the main chain has actually stalled.
-            charged_at_best =
-                charged_at_best.saturating_add(ledger.spent().saturating_sub(shell_mark));
+            shell_spent = ledger.spent().saturating_sub(shell_mark);
+            charged_at_best = charged_at_best.saturating_add(shell_spent);
+            charged_at_archive_best = charged_at_archive_best.saturating_add(shell_spent);
         }
         // The shell turn above is the early leave. A longer walk on a stored
         // cage is what reaches the minimum when the shell lands short of it,
@@ -5464,12 +5524,24 @@ where
             .restart_patience
             .saturating_mul(RIGID_CAGE_WINDOWS.saturating_mul(4))
             .max(1);
-        if cfg.move_library.is_rigid_body()
-            && !archive_walked
-            && !kernels.is_empty()
-            && ledger.spent().saturating_sub(charged_at_best) >= archive_patience
+        let early_best = charged_at_archive_best < shell_spent.saturating_add(cage_patience / 2);
+        let archive_wait = if post_cage_archive_best || early_best {
+            archive_patience
+        } else {
+            archive_patience.saturating_mul(3) / 4
+        };
+        let archive_due = ledger.spent().saturating_sub(charged_at_archive_best) >= archive_wait
+            || (cage_walked
+                && !post_cage_archive_best
+                && !early_best
+                && ledger.remaining() <= archive_patience.saturating_mul(3) / 4
+                && ledger.spent().saturating_sub(charged_at_archive_best) >= archive_patience / 2);
+        if cfg.move_library.is_rigid_body() && !archive_walked && !kernels.is_empty() && archive_due
         {
             archive_walked = true;
+            if let Some(state) = side_lowest_state.as_ref() {
+                ledger.record(side_lowest, state.view());
+            }
             let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
             cage_archive.offer_cage(e, x.view(), key);
             if let Some(best) = ledger.best_state.as_ref() {
@@ -5479,8 +5551,10 @@ where
                     rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
                 );
             }
-            let (mut side_energy, mut side_state) = match cage_archive.escape_other_cage(key) {
-                Some((energy, state)) if state.len() == x.len() => (energy, state),
+            let (mut side_energy, mut side_state) = match ledger.best_state.as_ref() {
+                Some(best) if best.len() == x.len() && ledger.best <= e => {
+                    (ledger.best, best.clone())
+                }
                 _ => (e, x.clone()),
             };
             // A fresh generator, not a draw on the walker's.
@@ -5491,39 +5565,180 @@ where
                     .wrapping_add(side_energy.to_bits()),
             );
             let side_scale = orient_scale;
-            let mut side_hops = 0usize;
-            let archive_end = ledger.spent().saturating_add(archive_patience);
-            while ledger.spent() < archive_end && ledger.remaining() > 0 && !ledger.stopped() {
-                if side_hops > 0
-                    && side_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
-                {
-                    let next_key = rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
-                    if let Some((energy, state)) = cage_archive.escape_other_cage(next_key)
-                        && state.len() == side_state.len()
-                    {
-                        side_energy = energy;
-                        side_state = state;
+            let mut side_bandit = FlooredThompson::new(kernels.len());
+            let mut branch_best = side_energy;
+            let mut branch_stale = 0usize;
+            let mut branch_idx = 0usize;
+            let rotate_arm = kernels.iter().position(|m| m.name() == "rrot");
+            while ledger.remaining() > 0 && !ledger.stopped() {
+                let stale_cap = if (2..7).contains(&branch_idx) {
+                    500
+                } else {
+                    350
+                };
+                if branch_stale >= stale_cap {
+                    branch_idx += 1;
+                    branch_stale = 0;
+                    side_bandit = FlooredThompson::new(kernels.len());
+                    if branch_idx >= 7 && !branch_idx.is_multiple_of(2) {
+                        side_energy = initial_e;
+                        side_state = initial_x.clone();
+                        branch_best = side_energy;
+                        continue;
                     }
+                    let angle = match cfg.move_library {
+                        MoveLibrary::RigidBody { rotate_step, .. } => {
+                            RIGID_SHELL_STEPS * rotate_step
+                        }
+                        _ => 0.0,
+                    };
+                    if branch_idx < 7 && branch_idx % 3 != 1 && angle > 0.0 {
+                        let base_energy = ledger.best.min(side_energy);
+                        let mut base_state =
+                            ledger.best_state.as_ref().unwrap_or(&side_state).clone();
+                        if branch_idx >= 4
+                            && let Some(rot_idx) = rotate_arm
+                        {
+                            base_state = kernels[rot_idx].propose_scaled(
+                                base_state.view(),
+                                cfg.temperature,
+                                8.0,
+                                &mut side_rng,
+                            );
+                            recentre(&mut base_state, cfg.n_points);
+                        }
+                        let sign = if (branch_idx / 3).is_multiple_of(2) {
+                            1.0
+                        } else {
+                            -1.0
+                        };
+                        let mut turned: Option<(f64, Array1<f64>)> = None;
+                        for axis in 0..3 {
+                            if ledger.remaining() == 0 || ledger.stopped() {
+                                break;
+                            }
+                            let trial = rigid_shell_turn(
+                                base_state.view(),
+                                cfg.n_points,
+                                axis,
+                                sign * angle,
+                            );
+                            let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                            if quenched.is_finite()
+                                && relaxed.len() == side_state.len()
+                                && rigid_centres_clear(
+                                    relaxed.view(),
+                                    cfg.n_points,
+                                    0.5 * cfg.min_separation,
+                                )
+                            {
+                                ledger.record(quenched, relaxed.view());
+                                if (quenched - base_energy).abs() > 0.15
+                                    && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
+                                {
+                                    turned = Some((quenched, relaxed));
+                                }
+                            }
+                        }
+                        if let Some((quenched, relaxed)) = turned {
+                            side_energy = quenched;
+                            side_state = relaxed;
+                            branch_best = quenched;
+                            continue;
+                        }
+                    }
+                    let trial =
+                        random_rigid_cluster(cfg.n_points, cfg.min_separation, &mut side_rng);
+                    let (quenched, relaxed) =
+                        relax(ledger, trial.view(), cfg.relax_steps.saturating_mul(2));
+                    if !quenched.is_finite() || relaxed.len() != side_state.len() {
+                        if ledger.remaining() == 0 || ledger.stopped() {
+                            break;
+                        }
+                        branch_stale = stale_cap;
+                        continue;
+                    }
+                    ledger.record(quenched, relaxed.view());
+                    side_energy = quenched;
+                    side_state = relaxed;
+                    branch_best = quenched;
+                    continue;
                 }
-                side_hops += 1;
-                let arm = side_rng.random_range(0..kernels.len());
-                let mut trial = kernels[arm].propose_scaled(
-                    side_state.view(),
-                    cfg.temperature,
-                    side_scale,
-                    &mut side_rng,
-                );
+                branch_stale += 1;
+                let mut arm = side_bandit.select(&mut side_rng);
+                let mut trial = if kernels[arm].name() == "rcycle"
+                    && (branch_idx >= 7 || side_rng.random_bool(0.5))
+                {
+                    let mut out = side_state.clone();
+                    if let Some(geom) = cfg.rigid_body_geometry.as_ref() {
+                        cycles::reverse_chain(geom, cfg.n_points, &mut out, &mut side_rng);
+                    }
+                    out
+                } else {
+                    kernels[arm].propose_scaled(
+                        side_state.view(),
+                        cfg.temperature,
+                        side_scale,
+                        &mut side_rng,
+                    )
+                };
+                if hop_is_identity(side_state.view(), trial.view()) {
+                    for _ in 0..kernels.len() {
+                        arm = (arm + 1) % kernels.len();
+                        if kernels[arm].name() != "rcycle" {
+                            break;
+                        }
+                    }
+                    trial = kernels[arm].propose_scaled(
+                        side_state.view(),
+                        cfg.temperature,
+                        side_scale,
+                        &mut side_rng,
+                    );
+                }
                 recentre(&mut trial, cfg.n_points);
                 contain_trial(cfg, &mut trial, cfg.n_points);
                 let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                 if !quenched.is_finite() || relaxed.len() != side_state.len() {
-                    break;
+                    if ledger.remaining() == 0 || ledger.stopped() {
+                        break;
+                    }
+                    continue;
                 }
-                let rise = (quenched - side_energy) / cfg.temperature.max(1e-12);
-                if rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp() {
+                ledger.record(quenched, relaxed.view());
+                let improved_branch = quenched < branch_best - new_lowest;
+                if improved_branch {
+                    branch_best = quenched;
+                    branch_stale = 0;
+                }
+                let side_temp = if (2..7).contains(&branch_idx)
+                    && side_energy < branch_best + 3.0 * cfg.temperature
+                {
+                    cfg.temperature * (1.0 + (branch_stale as f64 / 100.0).min(2.0))
+                } else {
+                    cfg.temperature
+                };
+                let rise = (quenched - side_energy) / side_temp.max(1e-12);
+                let accept_side = rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp();
+                let parted = rigid_centres_parted(
+                    side_state.view(),
+                    relaxed.view(),
+                    cfg.n_points,
+                    0.12 * cfg.min_separation,
+                );
+                let reward = improved_branch
+                    || (accept_side && parted && quenched < side_energy - new_lowest);
+                side_bandit.update(arm, reward);
+                if accept_side {
                     side_energy = quenched;
                     side_state = relaxed;
                 }
+            }
+            if let Some(best) = ledger.best_state.as_ref()
+                && ledger.best < e
+            {
+                e = ledger.best;
+                x = best.clone();
             }
         }
         if cfg.move_library.is_rigid_body()
@@ -9722,6 +9937,10 @@ where
         if improvements.len() < 512 {
             improvements.push((hops, found_at, bias.n_basins(), energy));
         }
+    }
+
+    if let Some(state) = side_lowest_state.as_ref() {
+        ledger.record(side_lowest, state.view());
     }
 
     let n_basins = bias.n_basins();

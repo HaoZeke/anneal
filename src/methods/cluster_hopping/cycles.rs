@@ -144,6 +144,80 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
     true
 }
 
+/// Reverses a directed hydrogen-bond cycle, including any stem donor within
+/// [`REWIRE_OO_MAX`] of the closing molecule.
+///
+/// When a donor in the stem sits within the first-shell O–O window of the
+/// last cycle member, starting the reversal at that donor turns its hydrogen
+/// onto the closing oxygen and forms the missing contact while reversing the
+/// path between them. When no stem donor is in range, only the closed cycle
+/// turns.
+pub(crate) fn reverse_chain<R: Rng + ?Sized>(
+    geometry: &RigidBodyGeometry,
+    n: usize,
+    x: &mut Array1<f64>,
+    rng: &mut R,
+) -> bool {
+    let Some((o, h)) = water_sites(geometry) else {
+        return false;
+    };
+    if n < 2 || x.len() != 6 * n {
+        return false;
+    };
+    let sites = lab_sites(geometry, n, x);
+    let donated = donations(&sites, o, h);
+    let donors: Vec<usize> = (0..n).filter(|&i| !donated[i].is_empty()).collect();
+    if donors.is_empty() {
+        return false;
+    }
+    let mut path: Vec<(usize, usize)> = Vec::new();
+    let mut at = donors[rng.random_range(0..donors.len())];
+    let chain = loop {
+        let back = path.last().map(|&(m, _)| m);
+        let out: Vec<(usize, usize)> = donated[at]
+            .iter()
+            .copied()
+            .filter(|&(j, _)| Some(j) != back)
+            .collect();
+        if out.is_empty() || path.len() > n {
+            return false;
+        }
+        let (next, which) = out[rng.random_range(0..out.len())];
+        path.push((at, which));
+        if let Some(start) = path.iter().position(|&(m, _)| m == next) {
+            let last = path[path.len() - 1].0;
+            let cut = (0..start)
+                .find(|&c| norm(sub(sites[path[c].0][o], sites[last][o])) < REWIRE_OO_MAX)
+                .unwrap_or(start);
+            break path.split_off(cut);
+        }
+        at = next;
+    };
+    let mut turns = Vec::with_capacity(chain.len());
+    for (s, &(k, which)) in chain.iter().enumerate() {
+        let prev = chain[(s + chain.len() - 1) % chain.len()].0;
+        let oxygen = sites[k][o];
+        let bonded = unit(sub(sites[k][h[which]], oxygen));
+        let other = unit(sub(sites[k][h[1 - which]], oxygen));
+        let target = unit(sub(sites[prev][o], oxygen));
+        if norm(cross(target, other)) < 1e-6 {
+            return false;
+        }
+        turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
+    }
+    for (k, oxygen, turn) in turns {
+        let centre = [x[3 * k], x[3 * k + 1], x[3 * k + 2]];
+        let moved = add(oxygen, mat_vec(turn, sub(centre, oxygen)));
+        let base = 3 * n + 3 * k;
+        let w = crate::potentials::compose_rotation(turn, [x[base], x[base + 1], x[base + 2]]);
+        for a in 0..3 {
+            x[3 * k + a] = moved[a];
+            x[base + a] = w[a];
+        }
+    }
+    true
+}
+
 /// The rotation that takes the frame of `from` onto the frame of `to`.
 ///
 /// Each pair spans a frame through its bisector and its normal. The two
@@ -514,7 +588,7 @@ fn rodrigues(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
@@ -524,7 +598,7 @@ mod tests {
         crate::potentials::Tip4pCluster::new(2).rigid_geometry()
     }
 
-    fn bond_sets(
+    pub(crate) fn bond_sets(
         n: usize,
         x: &Array1<f64>,
     ) -> (BTreeSet<(usize, usize)>, BTreeSet<(usize, usize)>) {
@@ -720,6 +794,90 @@ mod tests {
         assert!(
             moved > 1.0,
             "half-revolution should carry the hydrogens off their old sites, moved {moved}"
+        );
+    }
+
+    fn place_water(x: &mut Array1<f64>, n: usize, i: usize, at: [f64; 3], to: [f64; 3]) {
+        let g = geometry();
+        let (o, h) = water_sites(&g).expect("water");
+        let body = g.sites();
+        let h1 = unit(sub(body[h[0]], body[o]));
+        let h2 = unit(sub(body[h[1]], body[o]));
+        let hoh = dot(h1, h2).acos();
+        let first = unit(sub(to, at));
+        let second = add(scale(first, hoh.cos()), scale([0.0, 0.0, 1.0], hoh.sin()));
+        let r = frame_rotation((h1, h2), (first, second));
+        let centre = sub(at, mat_vec(r, body[o]));
+        let w = crate::potentials::compose_rotation(r, [0.0; 3]);
+        for k in 0..3 {
+            x[3 * i + k] = centre[k];
+            x[3 * n + 3 * i + k] = w[k];
+        }
+    }
+
+    /// Five waters: `1 -> 2 -> 3 -> 4 -> 1` is a closed square and `0 -> 1` is
+    /// a stem donor whose oxygen sits 3.28 Å from `4`, inside [`REWIRE_OO_MAX`]
+    /// without yet donating to `4`.
+    pub(crate) fn tadpole() -> Array1<f64> {
+        let n = 5;
+        let o0 = [-2.6, 0.8, 0.0];
+        let o1 = [0.0, 0.0, 0.0];
+        let o2 = [2.8, 0.0, 0.0];
+        let o3 = [2.8, 2.8, 0.0];
+        let o4 = [0.0, 2.8, 0.0];
+        let mut x = Array1::zeros(6 * n);
+        place_water(&mut x, n, 0, o0, o1);
+        place_water(&mut x, n, 1, o1, o2);
+        place_water(&mut x, n, 2, o2, o3);
+        place_water(&mut x, n, 3, o3, o4);
+        place_water(&mut x, n, 4, o4, o1);
+        x
+    }
+
+    #[test]
+    fn stem_donor_within_the_first_shell_closes_onto_the_cycle_end() {
+        let n = 5;
+        let start = tadpole();
+        let (directed, _) = bond_sets(n, &start);
+        assert_eq!(
+            directed,
+            BTreeSet::from([(0, 1), (1, 2), (2, 3), (3, 4), (4, 1)])
+        );
+
+        let mut cycle_only = false;
+        for seed in 0..32 {
+            let mut x = start.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+            if reverse_cycle(&geometry(), n, &mut x, &mut rng) {
+                let (after, _) = bond_sets(n, &x);
+                assert!(
+                    !after.contains(&(0, 4)),
+                    "closed-cycle reversal should not bridge the stem onto 4"
+                );
+                cycle_only = true;
+            }
+        }
+        assert!(cycle_only);
+
+        let mut bridged = false;
+        for seed in 0..32 {
+            let mut x = start.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+            if reverse_chain(&geometry(), n, &mut x, &mut rng) {
+                let (after, _) = bond_sets(n, &x);
+                if after.contains(&(0, 4)) {
+                    assert_eq!(
+                        after,
+                        BTreeSet::from([(0, 1), (0, 4), (1, 0), (2, 1), (3, 2), (4, 3)])
+                    );
+                    bridged = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            bridged,
+            "stem donor within REWIRE_OO_MAX must bridge onto the cycle end"
         );
     }
 }
