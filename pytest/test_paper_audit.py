@@ -603,6 +603,7 @@ def test_resolved_hit_tolerances_follow_the_expression():
 def test_the_british_spelling_of_labeled_is_caught():
     for word in ("labelled", "labelling", "modelled", "travelled"):
         assert audit_mod.BRITISH.search(word)
+    assert not audit_mod.BRITISH.search("labeled")
 
 
 def test_an_unrelated_local_branch_does_not_count_as_present(tmp_path, monkeypatch):
@@ -628,5 +629,3 @@ def test_an_unrelated_local_branch_does_not_count_as_present(tmp_path, monkeypat
     index = audit_mod.RevisionIndex((base, stale), (), (), ())
     assert index.exists(base)
     assert not index.exists(stale)
-
-    assert not audit_mod.BRITISH.search("labeled")
