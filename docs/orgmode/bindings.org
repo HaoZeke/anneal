@@ -42,46 +42,141 @@ pkg_check_modules(ANNEAL_CORE REQUIRED IMPORTED_TARGET anneal-core)
 target_link_libraries(myprog PRIVATE PkgConfig::ANNEAL_CORE)
 #+END_SRC
 
-** Tiny C example (preset + run)
+** Tiny C example (box ensemble)
+
+The objective and its gradient are DLPack callbacks. =x= goes in as the
+first replica's start and comes back as the best point.
 
 #+BEGIN_SRC c
 #include <anneal-core.h>
 #include <stdio.h>
 
-static double rosen(const double *x, void *user) {
+static enum anneal_status_t sphere(void *user,
+                                   const DLManagedTensorVersioned *x,
+                                   double *value_out) {
+    const double *v = (const double *)x->dl_tensor.data;
     (void)user;
-    return (1.0 - x[0])*(1.0 - x[0]) + 100.0*(x[1] - x[0]*x[0])*(x[1] - x[0]*x[0]);
+    *value_out = v[0] * v[0] + v[1] * v[1];
+    return ANNEAL_SUCCESS;
+}
+
+static enum anneal_status_t sphere_grad(void *user,
+                                        const DLManagedTensorVersioned *x,
+                                        DLManagedTensorVersioned *grad_out) {
+    const double *v = (const double *)x->dl_tensor.data;
+    double *g = (double *)grad_out->dl_tensor.data;
+    (void)user;
+    g[0] = 2.0 * v[0];
+    g[1] = 2.0 * v[1];
+    return ANNEAL_SUCCESS;
+}
+
+static void point_at(DLManagedTensorVersioned *t, double *data,
+                     int64_t *shape, int64_t *strides, int64_t n) {
+    shape[0] = n;
+    strides[0] = 1;
+    t->version.major = 1;
+    t->version.minor = 0;
+    t->manager_ctx = NULL;
+    t->deleter = NULL;
+    t->flags = 0;
+    t->dl_tensor.data = data;
+    t->dl_tensor.device.device_type = kDLCPU;
+    t->dl_tensor.device.device_id = 0;
+    t->dl_tensor.ndim = 1;
+    t->dl_tensor.dtype.code = kDLFloat;
+    t->dl_tensor.dtype.bits = 64;
+    t->dl_tensor.dtype.lanes = 1;
+    t->dl_tensor.shape = shape;
+    t->dl_tensor.strides = strides;
+    t->dl_tensor.byte_offset = 0;
 }
 
 int main(void) {
+    double x[2] = {1.5, -1.0};
+    int64_t shape[1], strides[1];
+    DLManagedTensorVersioned tensor;
     double low[2] = {-5.0, -5.0};
     double high[2] = {5.0, 5.0};
-    AnnealHandle *h = anneal_boltzmann(rosen, NULL, low, high, 2, 5.0, 0.5);
-    anneal_run(h, 20, 80, 42);
-    double best[2];
-    double val = anneal_best(h, best, 2);
-    printf("best val %.6f at (%.4f, %.4f)\n", val, best[0], best[1]);
-    anneal_free(h);
-    return 0;
+    struct anneal_box_config_t cfg;
+    struct anneal_box_report_t report;
+    enum anneal_status_t status;
+
+    point_at(&tensor, x, shape, strides, 2);
+    if (anneal_box_config_default(&cfg) != ANNEAL_SUCCESS)
+        return 1;
+    cfg.seed = 1;
+    status = anneal_box_minimize(sphere, sphere_grad, NULL, &tensor,
+                                 low, high, &cfg, &report);
+    printf("%s status %d value %.6f at (%.4f, %.4f)\n",
+           anneal_core_version(), (int)status, report.value, x[0], x[1]);
+    return status == ANNEAL_SUCCESS ? 0 : 1;
 }
 #+END_SRC
 
 ** Tiny C++ example (using the hand-written header)
 
+Compiled as C++, the generated declarations live in =namespace anneal=.
+=anneal::version()= is the hand-written wrapper.
+
 #+BEGIN_SRC cpp
 #include <anneal-core.hpp>
 #include <iostream>
 
-double rosen(const double* x, void*) {
-    return (1.0 - x[0])*(1.0 - x[0]) + 100.0*(x[1]-x[0]*x[0])*(x[1]-x[0]*x[0]);
+static anneal::anneal_status_t sphere(void *, const DLManagedTensorVersioned *x,
+                                      double *value_out) {
+    const double *v = static_cast<const double *>(x->dl_tensor.data);
+    *value_out = v[0] * v[0] + v[1] * v[1];
+    return anneal::ANNEAL_SUCCESS;
+}
+
+static anneal::anneal_status_t sphere_grad(void *, const DLManagedTensorVersioned *x,
+                                           DLManagedTensorVersioned *grad_out) {
+    const double *v = static_cast<const double *>(x->dl_tensor.data);
+    double *g = static_cast<double *>(grad_out->dl_tensor.data);
+    g[0] = 2.0 * v[0];
+    g[1] = 2.0 * v[1];
+    return anneal::ANNEAL_SUCCESS;
+}
+
+static void point_at(DLManagedTensorVersioned *t, double *data,
+                     int64_t *shape, int64_t *strides, int64_t n) {
+    shape[0] = n;
+    strides[0] = 1;
+    t->version.major = 1;
+    t->version.minor = 0;
+    t->manager_ctx = nullptr;
+    t->deleter = nullptr;
+    t->flags = 0;
+    t->dl_tensor.data = data;
+    t->dl_tensor.device.device_type = kDLCPU;
+    t->dl_tensor.device.device_id = 0;
+    t->dl_tensor.ndim = 1;
+    t->dl_tensor.dtype.code = kDLFloat;
+    t->dl_tensor.dtype.bits = 64;
+    t->dl_tensor.dtype.lanes = 1;
+    t->dl_tensor.shape = shape;
+    t->dl_tensor.strides = strides;
+    t->dl_tensor.byte_offset = 0;
 }
 
 int main() {
-    std::array<double,2> lo{-5, -5}, hi{5, 5};
-    auto h = anneal::make_boltzmann(rosen, nullptr, lo.data(), hi.data(), 2, 5.0, 0.5);
-    h.run(20, 80, 42);
-    auto [pos, val] = h.best();
-    std::cout << "best " << val << " at " << pos[0] << "," << pos[1] << "\n";
+    double x[2] = {1.5, -1.0};
+    int64_t shape[1], strides[1];
+    DLManagedTensorVersioned tensor{};
+    double low[2] = {-5.0, -5.0};
+    double high[2] = {5.0, 5.0};
+    anneal::anneal_box_config_t cfg{};
+    anneal::anneal_box_report_t report{};
+    point_at(&tensor, x, shape, strides, 2);
+    if (anneal::anneal_box_config_default(&cfg) != anneal::ANNEAL_SUCCESS)
+        return 1;
+    cfg.seed = 1;
+    auto status = anneal::anneal_box_minimize(
+        sphere, sphere_grad, nullptr, &tensor, low, high, &cfg, &report);
+    std::cout << anneal::version() << " value " << report.value
+              << " at " << x[0] << "," << x[1] << "\n";
+    return status == anneal::ANNEAL_SUCCESS ? 0 : 1;
 }
 #+END_SRC
 

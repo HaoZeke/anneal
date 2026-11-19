@@ -101,7 +101,13 @@ _py = find_program('python3', 'python')
 # the build localizes every symbol the header does not declare.
 anneal_cargo = custom_target(
     'anneal-cargo',
-    input: files('Cargo.toml', 'Cargo.lock', 'src/lib.rs', 'src/ffi.rs'),
+    input: files(
+        'Cargo.toml',
+        'Cargo.lock',
+        'src/lib.rs',
+        'src/ffi.rs',
+        'scripts/meson_cargo_build.py',
+    ),
     output: _cargo_lib_name,
     command: [
         _py, files('scripts/meson_cargo_build.py'),
