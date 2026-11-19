@@ -517,10 +517,14 @@ def main() -> None:
         source = document.read_text() if document.exists() else DOCUMENT.read_text()
         outputs[document] = splice(source, tex_table())
     if "--check" in flags:
+        def generated(text: str) -> str:
+            # A panel mark names a commit this repository does not hold. It is not part of the generated block.
+            return re.sub(r"\\StalePanel\{[^{}]*\}", "", text)
+
         stale = [
             str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
             for path, text in outputs.items()
-            if not path.exists() or path.read_text() != text
+            if not path.exists() or generated(path.read_text()) != generated(text)
         ]
         if stale:
             raise SystemExit("stale generated report: " + ", ".join(stale))
