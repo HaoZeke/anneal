@@ -130,6 +130,7 @@ KNOWN_GAPS = {
     "bench/ase-lj55/rows.csv": "revision 36548663 is not in this repository; revision 5a7f629d is not in this "
                                "repository; revision b49341e3 is not in this repository",
     "bench/ase-lj98/rows.csv": "revision 5a7f629d is not in this repository; revision b49341e3 is not in this repository",
+    "bench/ase-gofee-h2h/lj-large-seeds.csv": "revision 89de725a is not in this repository",
     "bench/ase-nonlj/rows.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
     "bench/ase-nonlj/identity.csv": "revision and host unrecorded (no revision or host column)",
     "bench/ase-nonlj/summary.csv": "revision 90b88235 is not in this repository; revision 9a30f319 is not in this repository",
