@@ -5744,6 +5744,13 @@ where
             if archive_due {
                 archive_walked = true;
                 let book = stall_book.as_mut().expect("a rigid stall book");
+                let propose: fn(
+                    &ClusterMove,
+                    ArrayView1<f64>,
+                    f64,
+                    f64,
+                    &mut StdRng,
+                ) -> Array1<f64> = ClusterMove::propose_scaled;
                 stall_bridge::walk_armed_rigid_archive(
                     cfg,
                     ledger,
@@ -5751,6 +5758,7 @@ where
                     book,
                     &mut cage_archive,
                     &kernels,
+                    propose,
                     &mut e,
                     &mut x,
                     hops,

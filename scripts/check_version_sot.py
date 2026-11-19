@@ -133,7 +133,7 @@ def main() -> int:
         fail(errors, f"first Cargo.toml version line is {first_version}")
 
     lock = anneal_version.load_toml(ROOT / "Cargo.lock")
-    for crate in ("anneal-core", "anneal-python"):
+    for crate in ("anneal-core", "anneal-python", "anneal-bridge"):
         locked = [
             pkg.get("version")
             for pkg in lock.get("package", [])
@@ -142,11 +142,12 @@ def main() -> int:
         if locked != [version]:
             fail(errors, f"Cargo.lock {crate} version is {locked}")
 
-    member = (ROOT / "crates" / "anneal-python" / "Cargo.toml").read_text(encoding="utf-8")
-    if "version.workspace = true" not in member:
-        fail(errors, "crates/anneal-python/Cargo.toml does not inherit the workspace version")
-    if re.search(r'(?m)^version = "[0-9]+\.[0-9]+\.[0-9]+"', member):
-        fail(errors, "crates/anneal-python/Cargo.toml has its own version")
+    for member_name in ("anneal-python", "anneal-bridge"):
+        member = (ROOT / "crates" / member_name / "Cargo.toml").read_text(encoding="utf-8")
+        if "version.workspace = true" not in member:
+            fail(errors, f"crates/{member_name}/Cargo.toml does not inherit the workspace version")
+        if re.search(r'(?m)^version = "[0-9]+\.[0-9]+\.[0-9]+"', member):
+            fail(errors, f"crates/{member_name}/Cargo.toml has its own version")
     handwritten = [
         line
         for line in cargo_text.splitlines()

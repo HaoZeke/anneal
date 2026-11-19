@@ -9,7 +9,7 @@
 //! minimiser's move: it has no proposal ratio, so a chain that uses it does
 //! not sample proton disorder at equilibrium.
 
-use ndarray::Array1;
+use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 
 use crate::rigid_body::RigidBodyGeometry;
@@ -32,7 +32,11 @@ pub(crate) fn water_sites(geometry: &RigidBodyGeometry) -> Option<(usize, [usize
 }
 
 /// Lab-frame sites of every molecule, indexed by molecule and then site.
-fn lab_sites(geometry: &RigidBodyGeometry, n: usize, x: &Array1<f64>) -> Vec<Vec<[f64; 3]>> {
+pub(crate) fn lab_sites(
+    geometry: &RigidBodyGeometry,
+    n: usize,
+    x: ArrayView1<f64>,
+) -> Vec<Vec<[f64; 3]>> {
     let per = geometry.sites().len();
     let flat = geometry.expand(n, x.view());
     (0..n)
@@ -46,7 +50,11 @@ fn lab_sites(geometry: &RigidBodyGeometry, n: usize, x: &Array1<f64>) -> Vec<Vec
 
 /// Donated hydrogen bonds of every molecule, as the acceptor and which of
 /// the two hydrogens donates (0 or 1).
-fn donations(sites: &[Vec<[f64; 3]>], o: usize, h: [usize; 2]) -> Vec<Vec<(usize, usize)>> {
+pub(crate) fn donations(
+    sites: &[Vec<[f64; 3]>],
+    o: usize,
+    h: [usize; 2],
+) -> Vec<Vec<(usize, usize)>> {
     let n = sites.len();
     (0..n)
         .map(|i| {
@@ -94,7 +102,7 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
     if n < 2 || x.len() != 6 * n {
         return false;
     }
-    let sites = lab_sites(geometry, n, x);
+    let sites = lab_sites(geometry, n, x.view());
     let donated = donations(&sites, o, h);
     let donors: Vec<usize> = (0..n).filter(|&i| !donated[i].is_empty()).collect();
     if donors.is_empty() {
@@ -147,83 +155,62 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
 /// Reverses a directed hydrogen-bond cycle, including any stem donor within
 /// [`REWIRE_OO_MAX`] of the closing molecule.
 ///
-/// When a donor in the stem sits within the first-shell O–O window of the
-/// last cycle member, starting the reversal at that donor turns its hydrogen
-/// onto the closing oxygen and forms the missing contact while reversing the
-/// path between them. When no stem donor is in range, only the closed cycle
-/// turns.
-pub(crate) fn reverse_chain<R: Rng + ?Sized>(
+/// The walk itself is compiled in `anneal-bridge`. This wrapper exists so the
+/// cycle tests call that walk, and it is absent from a release build.
+#[cfg(test)]
+fn reverse_chain(
     geometry: &RigidBodyGeometry,
     n: usize,
     x: &mut Array1<f64>,
-    rng: &mut R,
+    rng: &mut rand::rngs::StdRng,
 ) -> bool {
-    super::count_chain_scan();
-    let Some((o, h)) = water_sites(geometry) else {
-        return false;
+    // The bridge calls one pointer at a time and does not keep it, so this
+    // pack stays exclusively borrowed for the call.
+    let mut pack = ChainPack { geometry, n };
+    let ctx = (&mut pack as *mut ChainPack).cast::<u8>();
+    let fns = anneal_bridge::ChainFns {
+        count_scan: super::count_chain_scan,
+        water_sites: chain_water,
+        lab_sites: chain_sites,
+        donations,
+        frame_rotation,
+        compose_rotation: crate::potentials::compose_rotation,
+        rewire_oo_max: || REWIRE_OO_MAX,
     };
-    if n < 2 || x.len() != 6 * n {
-        return false;
-    };
-    let sites = lab_sites(geometry, n, x);
-    let donated = donations(&sites, o, h);
-    let donors: Vec<usize> = (0..n).filter(|&i| !donated[i].is_empty()).collect();
-    if donors.is_empty() {
-        return false;
-    }
-    let mut path: Vec<(usize, usize)> = Vec::new();
-    let mut at = donors[rng.random_range(0..donors.len())];
-    let chain = loop {
-        let back = path.last().map(|&(m, _)| m);
-        let out: Vec<(usize, usize)> = donated[at]
-            .iter()
-            .copied()
-            .filter(|&(j, _)| Some(j) != back)
-            .collect();
-        if out.is_empty() || path.len() > n {
-            return false;
-        }
-        let (next, which) = out[rng.random_range(0..out.len())];
-        path.push((at, which));
-        if let Some(start) = path.iter().position(|&(m, _)| m == next) {
-            let last = path[path.len() - 1].0;
-            let cut = (0..start)
-                .find(|&c| norm(sub(sites[path[c].0][o], sites[last][o])) < REWIRE_OO_MAX)
-                .unwrap_or(start);
-            break path.split_off(cut);
-        }
-        at = next;
-    };
-    let mut turns = Vec::with_capacity(chain.len());
-    for (s, &(k, which)) in chain.iter().enumerate() {
-        let prev = chain[(s + chain.len() - 1) % chain.len()].0;
-        let oxygen = sites[k][o];
-        let bonded = unit(sub(sites[k][h[which]], oxygen));
-        let other = unit(sub(sites[k][h[1 - which]], oxygen));
-        let target = unit(sub(sites[prev][o], oxygen));
-        if norm(cross(target, other)) < 1e-6 {
-            return false;
-        }
-        turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
-    }
-    for (k, oxygen, turn) in turns {
-        let centre = [x[3 * k], x[3 * k + 1], x[3 * k + 2]];
-        let moved = add(oxygen, mat_vec(turn, sub(centre, oxygen)));
-        let base = 3 * n + 3 * k;
-        let w = crate::potentials::compose_rotation(turn, [x[base], x[base + 1], x[base + 2]]);
-        for a in 0..3 {
-            x[3 * k + a] = moved[a];
-            x[base + a] = w[a];
-        }
-    }
-    true
+    anneal_bridge::reverse_directed(&fns, ctx, n, x, rng)
+}
+
+#[cfg(test)]
+struct ChainPack<'a> {
+    geometry: &'a RigidBodyGeometry,
+    n: usize,
+}
+
+#[cfg(test)]
+fn chain_water(raw: *mut u8) -> Option<(usize, [usize; 2])> {
+    // Exclusive for this call: the bridge does not hold the pointer.
+    // SAFETY: the caller passes the pack pointer from this module and does not
+    // hold it across another call.
+    let pack = unsafe { &*raw.cast::<ChainPack>() };
+    water_sites(pack.geometry)
+}
+
+#[cfg(test)]
+fn chain_sites(raw: *mut u8, x: ArrayView1<f64>) -> Vec<Vec<[f64; 3]>> {
+    // SAFETY: the caller passes the pack pointer from this module and does not
+    // hold it across another call.
+    let pack = unsafe { &*raw.cast::<ChainPack>() };
+    lab_sites(pack.geometry, pack.n, x)
 }
 
 /// The rotation that takes the frame of `from` onto the frame of `to`.
 ///
 /// Each pair spans a frame through its bisector and its normal. The two
 /// pairs need not open at the same angle; the bisectors and the planes match.
-fn frame_rotation(from: ([f64; 3], [f64; 3]), to: ([f64; 3], [f64; 3])) -> [[f64; 3]; 3] {
+pub(crate) fn frame_rotation(
+    from: ([f64; 3], [f64; 3]),
+    to: ([f64; 3], [f64; 3]),
+) -> [[f64; 3]; 3] {
     let frame = |(a, b): ([f64; 3], [f64; 3])| {
         let bisector = unit(add(a, b));
         let normal = unit(cross(a, b));
@@ -397,7 +384,7 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
 /// minimum is near 3.5 Å (Soper, *Chem. Phys.* **2000**, *258*, 121). A
 /// neighbour inside that window is an acceptor a hydrogen can be turned onto.
 const REWIRE_OO_MIN: f64 = 2.4;
-const REWIRE_OO_MAX: f64 = 3.5;
+pub(crate) const REWIRE_OO_MAX: f64 = 3.5;
 
 /// Smallest turn, in radians, that is not the half-radian group shake.
 ///
@@ -605,7 +592,7 @@ pub(crate) mod tests {
     ) -> (BTreeSet<(usize, usize)>, BTreeSet<(usize, usize)>) {
         let g = geometry();
         let (o, h) = water_sites(&g).expect("water");
-        let directed: BTreeSet<(usize, usize)> = donations(&lab_sites(&g, n, x), o, h)
+        let directed: BTreeSet<(usize, usize)> = donations(&lab_sites(&g, n, x.view()), o, h)
             .iter()
             .enumerate()
             .flat_map(|(i, out)| out.iter().map(move |&(j, _)| (i, j)))

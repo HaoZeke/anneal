@@ -1,0 +1,13 @@
+[package]
+name = "anneal-bridge"
+version.workspace = true
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Stalled rigid-body archive walk, compiled apart from the search"
+repository = "https://github.com/HaoZeke/anneal"
+
+[dependencies]
+libm = { version = "0.2.16", default-features = false }
+ndarray = "0.17"
+rand = "0.9"

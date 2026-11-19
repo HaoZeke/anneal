@@ -215,7 +215,7 @@ fn rgpot_pair_stays_out_of_the_published_dependencies() {
         .and_then(|rest| rest.split("\n[").next())
         .expect("[dependencies] table");
     assert!(!dependencies.contains("git ="));
-    assert!(manifest.contains("members = [\"crates/anneal-python\"]"));
+    assert!(manifest.contains("members = [\"crates/anneal-python\", \"crates/anneal-bridge\"]"));
     let pyproject = include_str!("../pyproject.toml");
     assert!(pyproject.contains("manifest-path = \"crates/anneal-python/Cargo.toml\""));
     let wheel = include_str!("../crates/anneal-python/src/lib.rs");

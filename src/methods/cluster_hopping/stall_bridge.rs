@@ -1,21 +1,63 @@
 //! Stalled rigid-body archive walk.
 //!
-//! The walk lives outside the hop loop. Keeping its body in that loop
-//! changes how the monomorphised Tric step is partitioned and optimised,
-//! including on a molecular search that never arms the bridge.
+//! The loop is compiled in `anneal-bridge` and reached through function
+//! pointers. The pointers are the helpers this crate already had, so the
+//! loop adds no body for a molecular Tric step to inherit.
 
 use ndarray::{Array1, ArrayView1};
-use rand::Rng;
-use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 use super::{ClusterMove, Config, Ledger, MoveLibrary, RigidStallBook};
 use crate::allocate::FlooredThompson;
+use anneal_bridge::Ops;
+
+static OPS: Ops = Ops {
+    count_entry: super::count_bridge_entry,
+    offer,
+    remaining,
+    stopped,
+    best_energy,
+    has_best,
+    copy_best,
+    has_side,
+    side_energy,
+    copy_side,
+    initial_energy,
+    copy_initial,
+    cage_key: super::rigid_cage_key,
+    recentre: super::recentre,
+    shell_turn: super::rigid_shell_turn,
+    centres_clear: super::rigid_centres_clear,
+    centres_parted: super::rigid_centres_parted,
+    identity: super::hop_is_identity,
+    random_cluster,
+    contain,
+    has_geometry,
+    count_scan: super::count_chain_scan,
+    water_sites,
+    lab_sites,
+    donations: super::cycles::donations,
+    frame_rotation: super::cycles::frame_rotation,
+    compose_rotation: crate::potentials::compose_rotation,
+    rewire_oo_max,
+    propose,
+    relax: relax_point,
+    record,
+    reset_bandit,
+    bandit_select,
+    bandit_update,
+    name_is,
+    n_points,
+    temperature,
+    min_separation,
+    relax_steps,
+    shell_angle,
+    n_kernels,
+};
 
 /// Walk a stored cage after a rigid chain has stalled.
 ///
-/// Not inlined. The hop loop calls this only when the rigid bridge is
-/// armed, so a molecular or Tric step does not carry the walk.
+/// The hop calls this only when the rigid bridge is armed.
 #[inline(never)]
 #[cold]
 pub(super) fn walk_armed_rigid_archive(
@@ -25,6 +67,7 @@ pub(super) fn walk_armed_rigid_archive(
     book: &mut RigidStallBook,
     cage_archive: &mut crate::methods::stall_archive::StallArchive,
     kernels: &[ClusterMove],
+    propose: ProposeStd,
     e: &mut f64,
     x: &mut Array1<f64>,
     hops: usize,
@@ -32,201 +75,242 @@ pub(super) fn walk_armed_rigid_archive(
     orient_scale: f64,
     new_lowest: f64,
 ) {
-    super::count_bridge_entry();
-    if let Some(state) = book.side_lowest_state.as_ref() {
-        ledger.record(book.side_lowest, state.view());
-    }
-    let key = super::rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
-    cage_archive.offer_cage(*e, x.view(), key);
-    if let Some(best) = ledger.best_state.as_ref() {
-        cage_archive.offer_cage(
-            ledger.best,
-            best.view(),
-            super::rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
-        );
-    }
-    let (mut side_energy, mut side_state) = match ledger.best_state.as_ref() {
-        Some(best) if best.len() == x.len() && ledger.best <= *e => (ledger.best, best.clone()),
-        _ => (*e, x.clone()),
+    let mut ctx = Ctx {
+        cfg,
+        ledger,
+        relax,
+        book,
+        cage_archive,
+        kernels,
+        propose,
+        bandit: None,
     };
-    // A fresh generator, not a draw on the walker's.
-    let mut side_rng = StdRng::seed_from_u64(
-        (hops as u64)
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            .wrapping_add(key)
-            .wrapping_add(side_energy.to_bits()),
-    );
-    let side_scale = orient_scale;
-    let mut side_bandit = FlooredThompson::new(kernels.len());
-    let mut branch_best = side_energy;
-    let mut branch_stale = 0usize;
-    let mut branch_idx = 0usize;
-    let rotate_arm = kernels.iter().position(|m| m.name() == "rrot");
-    while ledger.remaining() > 0 && !ledger.stopped() {
-        let stale_cap = if (2..7).contains(&branch_idx) {
-            500
-        } else {
-            350
-        };
-        if branch_stale >= stale_cap {
-            branch_idx += 1;
-            branch_stale = 0;
-            side_bandit = FlooredThompson::new(kernels.len());
-            if branch_idx >= 7 && !branch_idx.is_multiple_of(2) {
-                side_energy = book.initial_e;
-                side_state = book.initial_x.clone();
-                branch_best = side_energy;
-                continue;
-            }
-            let angle = match cfg.move_library {
-                MoveLibrary::RigidBody { rotate_step, .. } => {
-                    super::RIGID_SHELL_STEPS * rotate_step
-                }
-                _ => 0.0,
-            };
-            if branch_idx < 7 && branch_idx % 3 != 1 && angle > 0.0 {
-                let base_energy = ledger.best.min(side_energy);
-                let mut base_state = ledger.best_state.as_ref().unwrap_or(&side_state).clone();
-                if branch_idx >= 4
-                    && let Some(rot_idx) = rotate_arm
-                {
-                    base_state = kernels[rot_idx].propose_scaled(
-                        base_state.view(),
-                        cfg.temperature,
-                        8.0,
-                        &mut side_rng,
-                    );
-                    super::recentre(&mut base_state, cfg.n_points);
-                }
-                let sign = if (branch_idx / 3).is_multiple_of(2) {
-                    1.0
-                } else {
-                    -1.0
-                };
-                let mut turned: Option<(f64, Array1<f64>)> = None;
-                for axis in 0..3 {
-                    if ledger.remaining() == 0 || ledger.stopped() {
-                        break;
-                    }
-                    let trial = super::rigid_shell_turn(
-                        base_state.view(),
-                        cfg.n_points,
-                        axis,
-                        sign * angle,
-                    );
-                    let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
-                    if quenched.is_finite()
-                        && relaxed.len() == side_state.len()
-                        && super::rigid_centres_clear(
-                            relaxed.view(),
-                            cfg.n_points,
-                            0.5 * cfg.min_separation,
-                        )
-                    {
-                        ledger.record(quenched, relaxed.view());
-                        if (quenched - base_energy).abs() > 0.15
-                            && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
-                        {
-                            turned = Some((quenched, relaxed));
-                        }
-                    }
-                }
-                if let Some((quenched, relaxed)) = turned {
-                    side_energy = quenched;
-                    side_state = relaxed;
-                    branch_best = quenched;
-                    continue;
-                }
-            }
-            let trial =
-                super::random_rigid_cluster(cfg.n_points, cfg.min_separation, &mut side_rng);
-            let (quenched, relaxed) =
-                relax(ledger, trial.view(), cfg.relax_steps.saturating_mul(2));
-            if !quenched.is_finite() || relaxed.len() != side_state.len() {
-                if ledger.remaining() == 0 || ledger.stopped() {
-                    break;
-                }
-                branch_stale = stale_cap;
-                continue;
-            }
-            ledger.record(quenched, relaxed.view());
-            side_energy = quenched;
-            side_state = relaxed;
-            branch_best = quenched;
-            continue;
-        }
-        branch_stale += 1;
-        let mut arm = side_bandit.select(&mut side_rng);
-        let mut trial =
-            if kernels[arm].name() == "rcycle" && (branch_idx >= 7 || side_rng.random_bool(0.5)) {
-                let mut out = side_state.clone();
-                if let Some(geom) = cfg.rigid_body_geometry.as_ref() {
-                    super::cycles::reverse_chain(geom, cfg.n_points, &mut out, &mut side_rng);
-                }
-                out
-            } else {
-                kernels[arm].propose_scaled(
-                    side_state.view(),
-                    cfg.temperature,
-                    side_scale,
-                    &mut side_rng,
-                )
-            };
-        if super::hop_is_identity(side_state.view(), trial.view()) {
-            for _ in 0..kernels.len() {
-                arm = (arm + 1) % kernels.len();
-                if kernels[arm].name() != "rcycle" {
-                    break;
-                }
-            }
-            trial = kernels[arm].propose_scaled(
-                side_state.view(),
-                cfg.temperature,
-                side_scale,
-                &mut side_rng,
-            );
-        }
-        super::recentre(&mut trial, cfg.n_points);
-        super::contain_trial(cfg, &mut trial, cfg.n_points);
-        let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
-        if !quenched.is_finite() || relaxed.len() != side_state.len() {
-            if ledger.remaining() == 0 || ledger.stopped() {
-                break;
-            }
-            continue;
-        }
-        ledger.record(quenched, relaxed.view());
-        let improved_branch = quenched < branch_best - new_lowest;
-        if improved_branch {
-            branch_best = quenched;
-            branch_stale = 0;
-        }
-        let side_temp =
-            if (2..7).contains(&branch_idx) && side_energy < branch_best + 3.0 * cfg.temperature {
-                cfg.temperature * (1.0 + (branch_stale as f64 / 100.0).min(2.0))
-            } else {
-                cfg.temperature
-            };
-        let rise = (quenched - side_energy) / side_temp.max(1e-12);
-        let accept_side = rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp();
-        let parted = super::rigid_centres_parted(
-            side_state.view(),
-            relaxed.view(),
-            cfg.n_points,
-            0.12 * cfg.min_separation,
-        );
-        let reward =
-            improved_branch || (accept_side && parted && quenched < side_energy - new_lowest);
-        side_bandit.update(arm, reward);
-        if accept_side {
-            side_energy = quenched;
-            side_state = relaxed;
-        }
+    if let Some((next_e, next_x)) = anneal_bridge::walk(
+        &OPS,
+        (&mut ctx as *mut Ctx<'_>).cast(),
+        *e,
+        x.view(),
+        hops,
+        cage_quantum,
+        orient_scale,
+        new_lowest,
+    ) {
+        *e = next_e;
+        *x = next_x;
     }
-    if let Some(best) = ledger.best_state.as_ref()
-        && ledger.best < *e
-    {
-        *e = ledger.best;
-        *x = best.clone();
+}
+
+struct Ctx<'a> {
+    cfg: &'a Config,
+    ledger: &'a mut Ledger,
+    relax: &'a mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
+    book: &'a mut RigidStallBook,
+    cage_archive: &'a mut crate::methods::stall_archive::StallArchive,
+    kernels: &'a [ClusterMove],
+    propose: ProposeStd,
+    bandit: Option<FlooredThompson>,
+}
+
+type ProposeStd = fn(&ClusterMove, ArrayView1<f64>, f64, f64, &mut StdRng) -> Array1<f64>;
+
+/// The walk calls one pointer at a time and does not hold the pointer
+/// across that call, so the context is exclusively borrowed inside it.
+#[cold]
+fn ctx<'a>(raw: *mut u8) -> &'a mut Ctx<'a> {
+    unsafe { &mut *raw.cast() }
+}
+
+#[cold]
+fn offer(raw: *mut u8, energy: f64, x: ArrayView1<f64>, key: u64) {
+    let ctx = ctx(raw);
+    let put: fn(&mut crate::methods::stall_archive::StallArchive, f64, ArrayView1<f64>, u64) =
+        crate::methods::stall_archive::StallArchive::offer_cage;
+    call(put)(ctx.cage_archive, energy, x, key);
+}
+
+#[cold]
+fn name_is(raw: *mut u8, arm: usize, name: &str) -> bool {
+    call::<fn(&ClusterMove) -> String>(ClusterMove::name)(&ctx(raw).kernels[arm]) == name
+}
+
+#[cold]
+fn call<T>(f: T) -> T {
+    std::hint::black_box(f)
+}
+
+#[cold]
+fn copy_point(x: &Array1<f64>) -> Array1<f64> {
+    call::<fn(&Array1<f64>) -> Array1<f64>>(Clone::clone)(x)
+}
+
+#[cold]
+fn has_best(raw: *mut u8) -> bool {
+    ctx(raw).ledger.best_state.is_some()
+}
+
+#[cold]
+fn copy_best(raw: *mut u8) -> Array1<f64> {
+    copy_point(ctx(raw).ledger.best_state.as_ref().unwrap())
+}
+
+#[cold]
+fn has_side(raw: *mut u8) -> bool {
+    ctx(raw).book.side_lowest_state.is_some()
+}
+
+#[cold]
+fn side_energy(raw: *mut u8) -> f64 {
+    ctx(raw).book.side_lowest
+}
+
+#[cold]
+fn copy_side(raw: *mut u8) -> Array1<f64> {
+    copy_point(ctx(raw).book.side_lowest_state.as_ref().unwrap())
+}
+
+#[cold]
+fn initial_energy(raw: *mut u8) -> f64 {
+    ctx(raw).book.initial_e
+}
+
+#[cold]
+fn copy_initial(raw: *mut u8) -> Array1<f64> {
+    copy_point(&ctx(raw).book.initial_x)
+}
+
+#[cold]
+fn remaining(raw: *mut u8) -> usize {
+    call::<fn(&Ledger) -> usize>(Ledger::remaining)(ctx(raw).ledger)
+}
+
+#[cold]
+fn stopped(raw: *mut u8) -> bool {
+    call::<fn(&Ledger) -> bool>(Ledger::stopped)(ctx(raw).ledger)
+}
+
+#[cold]
+fn best_energy(raw: *mut u8) -> f64 {
+    ctx(raw).ledger.best
+}
+
+#[cold]
+fn random_cluster(n: usize, separation: f64, rng: &mut StdRng) -> Array1<f64> {
+    let fold: fn(usize, &mut [f64]) = crate::potentials::fold_rotation_vectors;
+    anneal_bridge::rigid_draw(n, separation, rng, call(fold))
+}
+
+#[cold]
+fn has_geometry(raw: *mut u8) -> bool {
+    ctx(raw).cfg.rigid_body_geometry.is_some()
+}
+
+#[cold]
+fn water_sites(raw: *mut u8) -> Option<(usize, [usize; 2])> {
+    let geometry = ctx(raw).cfg.rigid_body_geometry.as_ref()?;
+    let sites: fn(&crate::rigid_body::RigidBodyGeometry) -> Option<(usize, [usize; 2])> =
+        super::cycles::water_sites;
+    call(sites)(geometry)
+}
+
+#[cold]
+fn lab_sites(raw: *mut u8, x: ArrayView1<f64>) -> Vec<Vec<[f64; 3]>> {
+    let ctx = ctx(raw);
+    let geometry = ctx.cfg.rigid_body_geometry.as_ref().unwrap();
+    let n = ctx.cfg.n_points;
+    let place: fn(
+        &crate::rigid_body::RigidBodyGeometry,
+        usize,
+        ArrayView1<f64>,
+    ) -> Vec<Vec<[f64; 3]>> = super::cycles::lab_sites;
+    call(place)(geometry, n, x)
+}
+
+#[cold]
+fn rewire_oo_max() -> f64 {
+    super::cycles::REWIRE_OO_MAX
+}
+
+#[cold]
+fn contain(raw: *mut u8, x: &mut Array1<f64>) {
+    let ctx = ctx(raw);
+    let put: fn(&Config, &mut Array1<f64>, usize) = super::contain_trial;
+    put(ctx.cfg, x, ctx.cfg.n_points);
+}
+
+#[cold]
+fn propose(
+    raw: *mut u8,
+    arm: usize,
+    x: ArrayView1<f64>,
+    temperature: f64,
+    scale: f64,
+    rng: &mut StdRng,
+) -> Array1<f64> {
+    let ctx = ctx(raw);
+    (ctx.propose)(&ctx.kernels[arm], x, temperature, scale, rng)
+}
+
+#[cold]
+fn relax_point(raw: *mut u8, x: ArrayView1<f64>, steps: usize) -> (f64, Array1<f64>) {
+    let ctx = ctx(raw);
+    (ctx.relax)(ctx.ledger, x, steps)
+}
+
+#[cold]
+fn record(raw: *mut u8, energy: f64, x: ArrayView1<f64>) {
+    let write: fn(&mut Ledger, f64, ArrayView1<f64>) = Ledger::record;
+    write(ctx(raw).ledger, energy, x);
+}
+
+#[cold]
+fn reset_bandit(raw: *mut u8, arms: usize) {
+    let fresh = call::<fn(usize) -> FlooredThompson>(FlooredThompson::new)(arms);
+    let old = ctx(raw).bandit.replace(fresh);
+    let drop_old: fn(Option<FlooredThompson>) = std::mem::drop;
+    call(drop_old)(old);
+}
+
+#[cold]
+fn bandit_select(raw: *mut u8, rng: &mut StdRng) -> usize {
+    let choose: fn(&mut FlooredThompson, &mut StdRng) -> usize = FlooredThompson::select;
+    choose(ctx(raw).bandit.as_mut().expect("bandit"), rng)
+}
+
+#[cold]
+fn bandit_update(raw: *mut u8, arm: usize, reward: bool) {
+    let note: fn(&mut FlooredThompson, usize, bool) = FlooredThompson::update;
+    note(ctx(raw).bandit.as_mut().expect("bandit"), arm, reward);
+}
+
+#[cold]
+fn n_points(raw: *mut u8) -> usize {
+    ctx(raw).cfg.n_points
+}
+
+#[cold]
+fn temperature(raw: *mut u8) -> f64 {
+    ctx(raw).cfg.temperature
+}
+
+#[cold]
+fn min_separation(raw: *mut u8) -> f64 {
+    ctx(raw).cfg.min_separation
+}
+
+#[cold]
+fn relax_steps(raw: *mut u8) -> usize {
+    ctx(raw).cfg.relax_steps
+}
+
+#[cold]
+fn shell_angle(raw: *mut u8) -> f64 {
+    match ctx(raw).cfg.move_library {
+        MoveLibrary::RigidBody { rotate_step, .. } => super::RIGID_SHELL_STEPS * rotate_step,
+        _ => 0.0,
     }
+}
+
+#[cold]
+fn n_kernels(raw: *mut u8) -> usize {
+    ctx(raw).kernels.len()
 }

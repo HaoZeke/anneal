@@ -8,7 +8,7 @@
 # stable rustfmt.
 # crates/anneal-python builds the wheel. It links rgpot-pair, which is a
 # git dependency, so it is not published.
-members = ["crates/anneal-python"]
+members = ["crates/anneal-python", "crates/anneal-bridge"]
 exclude = ["vendor/nng", "vendor/nng-sys", "vendor/metatensor-sys"]
 
 # The one handwritten package version. Member crates inherit it.
@@ -76,6 +76,7 @@ petgraph = { version = "0.8", optional = true }
 nauty-pet = { version = "0.14", optional = true }
 
 thiserror   = "2"
+anneal-bridge = { path = "crates/anneal-bridge" }
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
 # Published 0.3.11 is the previous git pin, sources included.
