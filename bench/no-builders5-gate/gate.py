@@ -441,16 +441,16 @@ def fisher(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
 def midranks(values: list[float]) -> list[int]:
     order = sorted(range(len(values)), key=lambda index: values[index])
     scaled = [0] * len(values)
-    cursor = 0
+    start = 0
     count = len(values)
-    while cursor < count:
-        end = cursor
-        while end + 1 < count and values[order[end + 1]] == values[order[cursor]]:
+    while start < count:
+        end = start
+        while end + 1 < count and values[order[end + 1]] == values[order[start]]:
             end += 1
-        rank = cursor + end + 2
-        for index in range(cursor, end + 1):
+        rank = start + end + 2
+        for index in range(start, end + 1):
             scaled[order[index]] = rank
-        cursor = end + 1
+        start = end + 1
     return scaled
 
 
