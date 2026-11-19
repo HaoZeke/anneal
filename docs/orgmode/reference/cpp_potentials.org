@@ -182,8 +182,9 @@ class.
 
 - Inputs :: =path= (the table file, no default), =format=
   (=EAMTableFormat::Funcfl=, =Setfl= or =FinnisSinclair=, default =Setfl=),
-  =periodic= (minimum image, default true), =stress= (write the stress, default
-  false), =skin= (Verlet skin of the potential's own pair list, default 1.0).
+  =periodic= (sum over periodic images, default true), =stress= (write the
+  stress, default false), =skin= (Verlet skin of the potential's own pair
+  list, default 1.0).
 - Units :: none; the table carries its own units, eV and Angstrom for the LAMMPS
   metal files.
   =skin= is in the length unit of the table.
@@ -928,8 +929,8 @@ EAMTablePot(const EAMTable &table, bool periodic, bool stress,
   array count or length does not match, when =skin= is negative or not finite,
   and for a negative atomic number in an element line.
   The force call throws it for an atomic number in no element line, for a
-  periodic call without a cell, and when the cutoff exceeds half a face spacing
-  of the cell.
+  periodic call without a cell, when the image extent on one axis would pass
+  1024, and when one pair would visit more than 262144 lattice shifts.
 
 This class is built with =-Dwith_eam_table=true=.
 
