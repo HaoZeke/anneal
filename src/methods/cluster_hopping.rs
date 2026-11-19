@@ -693,19 +693,22 @@ impl Ledger {
 
     /// Hide `reserve` calls from the hop so a final polish can spend them.
     ///
-    /// [`Ledger::release_tail`] puts them back. A reserve larger than the
-    /// room left is cut to that room.
-    pub fn hold_tail(&mut self, reserve: usize) {
+    /// [`Ledger::release_tail`] puts a caller's own reserve back. A reserve
+    /// larger than the room left is cut to that room and the amount actually
+    /// held is returned.
+    pub fn hold_tail(&mut self, reserve: usize) -> usize {
         let room = self.budget.saturating_sub(self.spent);
         let reserve = reserve.min(room);
         self.budget -= reserve;
         self.held_tail = self.held_tail.saturating_add(reserve);
+        reserve
     }
 
-    /// Restore calls hidden by [`Ledger::hold_tail`].
-    pub fn release_tail(&mut self) {
-        self.budget = self.budget.saturating_add(self.held_tail);
-        self.held_tail = 0;
+    /// Restore one caller's calls hidden by [`Ledger::hold_tail`].
+    pub fn release_tail(&mut self, reserve: usize) {
+        let released = reserve.min(self.held_tail);
+        self.budget = self.budget.saturating_add(released);
+        self.held_tail -= released;
     }
 
     /// Charged calls spent tightening recorded answers after the hop.
@@ -10318,6 +10321,31 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn releasing_a_fork_tail_keeps_the_molecular_reserve() {
+        let mut ledger = Ledger::new(100);
+        let polish = ledger.hold_tail(8);
+        assert_eq!(polish, 8);
+        let fork = ledger.hold_tail(24);
+        assert_eq!(fork, 24);
+        assert_eq!(ledger.held_tail, polish + fork);
+        ledger.release_tail(fork);
+        assert_eq!(
+            ledger.held_tail, polish,
+            "the molecular reserve was released"
+        );
+        ledger.release_tail(polish);
+        assert_eq!(ledger.held_tail, 0);
+        assert_eq!(ledger.budget(), 100);
+
+        let mut short = Ledger::new(5);
+        assert_eq!(
+            short.hold_tail(9),
+            5,
+            "a reserve larger than the room was not cut"
+        );
+    }
 
     #[test]
     fn parked_move_arms_are_closed_in_every_selection_mode() {

@@ -1487,11 +1487,13 @@ where
 {
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
-    let reserve = molecular_answer_reserve(cfg, ledger);
-    if reserve > 0 {
+    let requested_reserve = molecular_answer_reserve(cfg, ledger);
+    let reserve = if requested_reserve > 0 {
         ledger.keep_answer_seats(crate::methods::stall_archive::SEATS);
-        ledger.hold_tail(reserve);
-    }
+        ledger.hold_tail(requested_reserve)
+    } else {
+        0
+    };
 
     // Split deliberately: the relaxation needs the optimizer mutably, the
     // gradient needs only the objective. Sharing the objective by reference is
@@ -1528,7 +1530,7 @@ where
         )
     };
     if reserve > 0 {
-        ledger.release_tail();
+        ledger.release_tail(reserve);
     }
     let mut out = searched?;
     if reserve > 0 {
@@ -1582,11 +1584,13 @@ where
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
-    let reserve = molecular_answer_reserve(cfg, ledger);
-    if reserve > 0 {
+    let requested_reserve = molecular_answer_reserve(cfg, ledger);
+    let reserve = if requested_reserve > 0 {
         ledger.keep_answer_seats(crate::methods::stall_archive::SEATS);
-        ledger.hold_tail(reserve);
-    }
+        ledger.hold_tail(requested_reserve)
+    } else {
+        0
+    };
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let searched = {
         let paid = PaidCheck::default();
@@ -1612,7 +1616,7 @@ where
         )
     };
     if reserve > 0 {
-        ledger.release_tail();
+        ledger.release_tail(reserve);
     }
     let mut out = searched?;
     if reserve > 0 {
