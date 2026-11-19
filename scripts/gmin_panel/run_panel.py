@@ -749,6 +749,31 @@ HEADER = ["System", "Budget", "Arm", "Hits", "Median calls", "IQR", "Wall (s)", 
           "Fisher p", "MW p calls", "MW p wall"]
 
 
+def _commit_held(revision: str) -> bool:
+    """The revision is a commit object in this repository."""
+    if not revision or revision == "latest":
+        return False
+    root = Path(__file__).resolve().parents[2]
+    return subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+        cwd=root, capture_output=True,
+    ).returncode == 0
+
+
+def quoted_summary(summary: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Summary rows whose anneal and harness commits this repository holds.
+
+    The manuscript quotes these rows. The README keeps every stored row.
+    """
+    kept = []
+    for row in summary:
+        anneal = row["anneal_revision"].split()
+        harness = row["harness_revision"].split()
+        if anneal and harness and all(_commit_held(rev) for rev in (*anneal, *harness)):
+            kept.append(row)
+    return kept
+
+
 def readme_table(summary: list[dict[str, str]]) -> str:
     rows = ["| " + " | ".join(HEADER) + " |", "| " + " | ".join("---" for _ in HEADER) + " |"]
     rows += ["| " + " | ".join(cells) + " |" for cells in table_lines(summary, tex=False)]
@@ -845,7 +870,7 @@ def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: boo
     splice(prepared(root / README, readme or (root / README)), README_MARKS, readme_table(summary))
     if tex:
         splice(prepared(root / MANUSCRIPT, manuscript or (root / MANUSCRIPT)), TEX_MARKS,
-               tex_table(summary, revision))
+               tex_table(quoted_summary(summary), revision))
 
 
 def self_test() -> None:
