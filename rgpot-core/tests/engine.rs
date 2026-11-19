@@ -21,6 +21,44 @@ use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 const SPRING: f64 = 2.5;
 const CELL: [f64; 9] = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
 
+#[cfg(feature = "cpmd-fixture")]
+#[derive(Debug)]
+enum CpmdFixtureError {
+    MissingEnvironment(&'static str),
+    Read(std::io::Error),
+    Engine(EngineError),
+}
+
+#[cfg(feature = "cpmd-fixture")]
+impl std::fmt::Display for CpmdFixtureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingEnvironment(name) => {
+                write!(f, "required CPMD fixture variable {name} is not set")
+            }
+            Self::Read(error) => write!(f, "read CPMD fixture parameters: {error}"),
+            Self::Engine(error) => error.fmt(f),
+        }
+    }
+}
+
+#[cfg(feature = "cpmd-fixture")]
+impl std::error::Error for CpmdFixtureError {}
+
+#[cfg(feature = "cpmd-fixture")]
+impl From<std::io::Error> for CpmdFixtureError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Read(error)
+    }
+}
+
+#[cfg(feature = "cpmd-fixture")]
+impl From<EngineError> for CpmdFixtureError {
+    fn from(error: EngineError) -> Self {
+        Self::Engine(error)
+    }
+}
+
 fn build(name: &str, defines: &[&str]) -> PathBuf {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/harmonic_engine.c");
     let include = Path::new(env!("CARGO_MANIFEST_DIR")).join("../CppCore");
@@ -369,52 +407,46 @@ fn batch_is_the_same_answer_as_one_call_per_system() {
     }
 }
 
+#[cfg(feature = "cpmd-fixture")]
 #[test]
-fn cpmd_fixture_batch_preserves_single_call_bits_and_order() {
-    let Some(engine_path) = std::env::var_os("RGPOT_ENGINE_CPMD_FIXTURE") else {
-        return;
-    };
-    let Some(params_path) = std::env::var_os("RGPOT_ENGINE_CPMD_PARAMS") else {
-        return;
-    };
-    let config = std::fs::read(params_path).expect("read CPMD fixture parameters");
+fn cpmd_fixture_batch_preserves_single_call_bits_and_order() -> Result<(), CpmdFixtureError> {
+    let engine_path = std::env::var_os("RGPOT_ENGINE_CPMD_FIXTURE").ok_or(
+        CpmdFixtureError::MissingEnvironment("RGPOT_ENGINE_CPMD_FIXTURE"),
+    )?;
+    let params_path = std::env::var_os("RGPOT_ENGINE_CPMD_PARAMS").ok_or(
+        CpmdFixtureError::MissingEnvironment("RGPOT_ENGINE_CPMD_PARAMS"),
+    )?;
+    let config = std::fs::read(params_path)?;
     let positions = [0.0, 0.0, 0.0, 0.8, 0.1, 0.0, 1.5, -0.2, 0.3, 0.1, 0.4, -0.7];
     let numbers = [7, 1];
     let mut boxes = CELL.to_vec();
     boxes.extend_from_slice(&CELL);
 
-    let mut singles =
-        EngineSession::load(Path::new(&engine_path), &config).expect("load CPMD fixture session");
-    let first = singles
-        .force(
-            &EngineRequest {
-                positions: &positions[..6],
-                atomic_numbers: &numbers,
-                box_matrix: &CELL,
-            },
-            None,
-        )
-        .expect("first CPMD fixture point");
-    let second = singles
-        .force(
-            &EngineRequest {
-                positions: &positions[6..],
-                atomic_numbers: &numbers,
-                box_matrix: &CELL,
-            },
-            None,
-        )
-        .expect("second CPMD fixture point");
+    let mut singles = EngineSession::load(Path::new(&engine_path), &config)?;
+    let first = singles.force(
+        &EngineRequest {
+            positions: &positions[..6],
+            atomic_numbers: &numbers,
+            box_matrix: &CELL,
+        },
+        None,
+    )?;
+    let second = singles.force(
+        &EngineRequest {
+            positions: &positions[6..],
+            atomic_numbers: &numbers,
+            box_matrix: &CELL,
+        },
+        None,
+    )?;
 
-    let mut batch =
-        EngineSession::load(Path::new(&engine_path), &config).expect("load CPMD batch session");
-    let answers = batch
-        .force_batch(&numbers, &positions, &boxes, None)
-        .expect("CPMD fixture batch");
+    let mut batch = EngineSession::load(Path::new(&engine_path), &config)?;
+    let answers = batch.force_batch(&numbers, &positions, &boxes, None)?;
     assert_eq!(answers[0].energy.to_bits(), first.energy.to_bits());
     assert_eq!(answers[1].energy.to_bits(), second.energy.to_bits());
     assert_eq!(answers[0].forces, first.forces);
     assert_eq!(answers[1].forces, second.forces);
+    Ok(())
 }
 
 #[test]
