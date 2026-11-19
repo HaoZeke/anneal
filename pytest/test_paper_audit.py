@@ -2021,3 +2021,11 @@ def test_reachable_panel_numbers_are_not_flagged_as_unheld():
     audit_mod.manuscript_gmin(audit)
     assert _unreachable_number(audit) == []
     assert any(row[2] == "a printed number traces to a commit this repository holds" for row in audit.results)
+
+
+def test_an_unheld_hash_in_a_paper_script_fails():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/scripts/replay_v127.py"
+    audit.text_cache[path] = audit.text(path) + '\nOLDTIP = "9109df21fbfd9470c16cff37a7a7b5228bb809e0"\n'
+    audit_mod.script_commit_hashes(audit)
+    assert any(row[0] == "DRIFT" and row[4].startswith("9109df21") for row in audit.results)

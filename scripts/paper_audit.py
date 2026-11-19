@@ -822,7 +822,10 @@ def unheld_bench_quotes(audit: Audit) -> None:
 
 
 def unheld_panel_numbers(audit: Audit, panel: object, groups: dict) -> None:
-    """A printed GMIN-panel count, call total, wall, or test comes from a commit this repository holds."""
+    """A printed GMIN-panel count, call total, wall, or test comes from a commit this repository holds.
+
+    A mark around the number does not exempt it.
+    """
     quoted = set(quoted_systems(panel, groups))
     unquoted = [system for system in panel.PAPER_BUDGETS if system not in quoted]
     labels = {panel.LABELS[system][1]: system for system in unquoted}
@@ -4762,7 +4765,7 @@ STALE_AU55 = (
 
 
 def stale_sentences(text: str) -> list[str]:
-    """The sentences that hold an Au55 count or test from a GMIN panel that the rerun replaced."""
+    """Sentences that state an Au55 hit count or a significance claim outside the GMIN panel rows."""
     prose = re.sub(r"\\begin\{tabular\}.*?\\end\{tabular\}", " ", text, flags=re.DOTALL)
     flat, found, start = collapse(prose), [], 0
     for end in [m.end() for m in SENTENCE_END.finditer(flat)] + [len(flat)]:
@@ -4778,7 +4781,7 @@ def stale_sentences(text: str) -> list[str]:
 
 
 def manuscript_au55(audit: Audit) -> None:
-    """The Au55 row of the GMIN panel, the significant clusters, and the absence of the earlier counts."""
+    """The Au55 hits of the GMIN panel and the clusters Fisher's test separates."""
     panel, groups = gmin_panel_groups(audit)
     systems = quoted_systems(panel, groups)
 
@@ -5113,10 +5116,12 @@ def tip4p_unscored(audit: Audit) -> None:
         TEX,
         "\\cite{walesCambridgeClusterDatabase,walesGlobalMinimaWater1998,jorgensen1983}",
     )
+    rates_tolerance = 0.001 * KJ_PER_KCAL
+    shown_kj = format(rates_tolerance, ".6f")
     audit.said(
         SI,
         "The hit tolerance for these water-rate rows is 0.001~kcal/mol\n"
-        "(0.004184~kJ/mol) above the reference.",
+        f"({shown_kj}~kJ/mol) above the reference.",
     )
     audit.said(
         SI,
@@ -5125,9 +5130,8 @@ def tip4p_unscored(audit: Audit) -> None:
     rates_readme = "bench/tip4p-water-rates/README.md"
     audit.said(
         rates_readme,
-        "within 0.001 kcal/mol (0.004184 kJ/mol) of the Wales-Hodges\nreference",
+        f"within 0.001 kcal/mol ({shown_kj} kJ/mol) of the Wales-Hodges\nreference",
     )
-    rates_tolerance = 0.004184
     for path in (
         "bench/tip4p-water-rates/rates-a24ba760.csv",
         "bench/tip4p-water-rates/rates.csv",
@@ -5143,7 +5147,7 @@ def tip4p_unscored(audit: Audit) -> None:
         audit.record(
             not mismatches,
             path,
-            "every water-rate hit flag uses the printed 0.004184 kJ/mol tolerance",
+            f"every water-rate hit flag uses the printed {shown_kj} kJ/mol tolerance",
             "all flags reproduce",
             f"{len(mismatches)} mismatches" if mismatches else "all flags reproduce",
         )
@@ -5268,6 +5272,41 @@ def prose_receipt_lines(audit: Audit) -> None:
                      string, at.strip() or "missing")
 
 
+_CLAIMED_COMMIT = re.compile(
+    r"(?:paper at |scripts of |did at |\\CommitShort\{|OLDTIP\s*=\s*\")"
+    r"([0-9a-f]{7,40})"
+)
+_MACRO_COMMIT = re.compile(r"\\newcommand\{\\([A-Za-z]+)\}\{([0-9a-f]{40})\}")
+
+
+def script_commit_hashes(audit: Audit) -> None:
+    """A commit a paper script or the macros names is a commit this repository holds.
+
+    A mark does not apply here: the hash is the claim. The rgpot pin is a
+    dependency revision, not a commit of this repository.
+    """
+    paths = sorted((ROOT / "paper/jctc/scripts").glob("*.py"))
+    paths = [path for path in paths if not path.name.startswith("test_")]
+    paths.append(ROOT / "paper/jctc/macros.tex")
+    failed = False
+    for path in paths:
+        rel = path.relative_to(ROOT).as_posix()
+        text = audit.text(rel)
+        claimed = [match.group(1) for match in _CLAIMED_COMMIT.finditer(text)]
+        if path.name == "macros.tex":
+            claimed.extend(
+                revision for name, revision in _MACRO_COMMIT.findall(text)
+                if name != "RgpotRevision"
+            )
+        for revision in claimed:
+            if commit_held(revision) or revision == _UPSTREAM_GMIN or _UPSTREAM_GMIN.startswith(revision):
+                continue
+            failed = True
+            audit.record(False, rel, HELD_NUMBER, "absent", revision[:12])
+    if not failed:
+        audit.record(True, "paper/jctc/scripts", HELD_NUMBER, "absent", "absent")
+
+
 def figure_row_hashes(audit: Audit) -> None:
     """Each figure row of FIGURES.md names the SHA-256 of the file it describes."""
     path = "paper/jctc/FIGURES.md"
@@ -5297,7 +5336,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, reproduction_records, covalent_panels, covalent_gfn2,
                   ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, sutton_chen, supporting_numbers, method_definitions, prior_switches, jctc_requirements, crest_equal, crest_equal_bench, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter, manuscript_review, append_only_rows, tip4p_unscored, bibliography_keys, history_narration, conversion_literals, prose_receipt_lines, figure_row_hashes):
+                  manuscript_ase, panel_references, generated_tables, sutton_chen, supporting_numbers, method_definitions, prior_switches, jctc_requirements, crest_equal, crest_equal_bench, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter, manuscript_review, append_only_rows, tip4p_unscored, bibliography_keys, history_narration, conversion_literals, prose_receipt_lines, script_commit_hashes, figure_row_hashes):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))

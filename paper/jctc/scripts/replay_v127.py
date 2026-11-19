@@ -1,5 +1,8 @@
 # Copyright (c) anneal developers
-"""One commit-tree pass. No sleeps. No author or committer dates are set."""
+"""One commit-tree pass over commits this repository holds.
+
+No sleeps. No author or committer dates are set. The range is MAIN through DEVELOP.
+"""
 import os
 import subprocess
 from pathlib import Path
@@ -7,7 +10,7 @@ from pathlib import Path
 REPO = Path(".")
 MAIN = "3675c9c375bbe560773cdf860bc672b8cbfe74d2"
 DEVELOP = "91b15a024749320b9463e4abbdf10d37e933174b"
-OLDTIP = "9109df21fbfd9470c16cff37a7a7b5228bb809e0"
+OLDTIP = DEVELOP
 
 
 def git(*args, env=None, data=None):

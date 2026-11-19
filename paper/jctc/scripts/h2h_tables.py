@@ -6,7 +6,7 @@ Five blocks, each between a pair of marker comments:
 
     tab:gofee       si.tex          bench/ase-gofee-h2h/summary.csv
     tab:tip4p-gmin  si.tex          bench/tip4p-h2h/rows-h2h-r2.csv, wall-r2.csv
-    tab:gofee-si    si.tex          bench/ase-gofee-h2h/asg2-summary.csv, arms measured there
+    tab:gofee-si    si.tex          written only when asg2-summary.csv names a held commit
     tab:sc          manuscript.tex  bench/metal-cluster-h2h/sc-n12/results.csv, pvalues.csv
     tab:sc-si       si.tex          bench/metal-cluster-h2h/sc-n12/results.csv
 
@@ -318,7 +318,13 @@ def tip4p_block() -> str:
 
 
 def gofee_si_block() -> str:
+    """The other-panel GOFEE table, or nothing when its rows name no held commit."""
     rows = [r for r in read(GOFEE / "asg2-summary.csv") if r["source"] == "measured"]
+    revision_keys = ("code_revision", "head", "anneal_sha", "harness_revision")
+    if not rows or not any(key in rows[0] for key in revision_keys):
+        return ""
+    if any(not commit_held(row.get(key, "")) for row in rows for key in revision_keys if row.get(key)):
+        return ""
     body = []
     for system in OTHER_LABEL:
         first = True

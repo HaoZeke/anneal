@@ -44,3 +44,8 @@ paper/jctc/data/system_visuals/provenance.txt	f4f59a33568e13d086c3e48461344f6f63
 paper/jctc/scripts/fig_disconnectivity.py	6ea9b54081d8900970fa579500f189ec84e5432342fae184dac7521f990c501a	script	active	supersedes a stale receipt with the current committed source hash
 paper/jctc/data/lj_csm_sizes/provenance.txt	fa775df37cb205955d676d2dd6436981c8f82791862a5f23a272f62ccabff76c	data	active	retains the develop provenance formatting
 paper/jctc/scripts/render_all.py	82096a1f0f23154196d53d2b554bf0ba9a44cfcaa3d72af5a9a564ca7518a326	script	active	the renderer takes an output directory
+paper/jctc/scripts/fig_disconnectivity.py	b74373f9c84e89e978ed76ad811e8ca1de8ebd3ac36eb0696d1d353e1995ce3c	script	active	the source names commits this repository holds
+paper/jctc/scripts/fig_landscapes.py	3d8bc5649ce8dab5849234ead39b3bd68918c381f0bd6a7224df72b12c559c52	script	active	the source names commits this repository holds
+paper/jctc/scripts/lj75_gmin_table.py	9d79311438fef5eeaf540318a543f6322042ffed22946d14753a1544da9a1099	script	active	the source names commits this repository holds
+paper/jctc/scripts/sketchmap_landscapes.py	c922e562b347d37a708739e583eaebc8eee0ec88076aadaf42be2dda20752a27	script	active	the source names commits this repository holds
+paper/jctc/scripts/system_visuals.py	52bcda5936a263f62def7a8ddfd71c2478e03cf4b5075e9e03f95152c589b7c2	script	active	the source names commits this repository holds

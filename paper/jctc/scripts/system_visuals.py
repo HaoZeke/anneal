@@ -13,7 +13,7 @@ ccd/ holds the coordinates of the Cambridge Cluster Database for every other ref
 the tables of the Supporting Information that needs only coordinates, at the paths of
 their URLs, and references.csv the published energy of each reference structure, as the
 table of the database it names prints it. sketchmap/ holds the reference minima the
-sketch-map runs of the paper at 028d995 pinned and the projection of each size that
+sketch-map runs pinned and the projection of each size that
 sketchmap_landscapes.py writes.
 
 Each reference structure is at its published energy, recomputed from its coordinates: the
