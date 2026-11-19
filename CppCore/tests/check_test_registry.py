@@ -354,6 +354,7 @@ def parse_cli(argv: list[str] | None = None) -> argparse.Namespace:
 def selftest() -> int:
     import contextlib
     import io
+    import shutil
     import stat
     import tempfile
     import unittest
@@ -461,6 +462,70 @@ def selftest() -> int:
                 self.assertEqual(rc, 0)
                 self.assertTrue(out_list.is_file())
                 self.assertIn("feature tests=0\n", out_list.read_text())
+
+        def test_spaced_cmake_test_name_is_one_test(self) -> None:
+            """CTest must keep a registry name that contains spaces.
+
+            The project includes `tests.cmake`, which includes
+            `RgpotTestRegistry.cmake` and then calls `rgpot_add_test`.
+            Each `include()` pops the policy scope it pushed. CTest quotes
+            a name only when CMP0110 is NEW on the directory stack at
+            generation. The probe copies `cmake_minimum_required` from the
+            top level `CMakeLists.txt`, which is what sets that stack. A
+            bare `VERSION 3.16` leaves the name as `CuH2`.
+            """
+            cmake = shutil.which("cmake")
+            ctest = shutil.which("ctest")
+            self.assertIsNotNone(cmake, "cmake is required")
+            self.assertIsNotNone(ctest, "ctest is required")
+            listed = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+            requirement = re.search(
+                r"^cmake_minimum_required\(VERSION [^)]+\)",
+                listed,
+                re.MULTILINE,
+            )
+            self.assertIsNotNone(requirement)
+            registry_cmake = ROOT / "cmake" / "RgpotTestRegistry.cmake"
+            with tempfile.TemporaryDirectory() as tmp:
+                src = Path(tmp) / "src"
+                src.mkdir()
+                (src / "CMakeLists.txt").write_text(
+                    f"{requirement.group(0)}\n"
+                    "project(spaced_name LANGUAGES NONE)\n"
+                    'include("${CMAKE_CURRENT_LIST_DIR}/caller.cmake")\n',
+                    encoding="utf-8",
+                )
+                (src / "caller.cmake").write_text(
+                    f'include("{registry_cmake.as_posix()}")\n'
+                    "set(RGPOT_TEST_FEATURE_tests TRUE)\n"
+                    "set(RGPOT_TEST_FEATURE_core TRUE)\n"
+                    "set(RGPOT_TEST_FEATURE_xtensor TRUE)\n"
+                    "enable_testing()\n"
+                    "rgpot_add_test(\"CuH2 Utils Test\""
+                    " COMMAND \"${CMAKE_COMMAND}\" -E true)\n",
+                    encoding="utf-8",
+                )
+                build = Path(tmp) / "build"
+                configured = subprocess.run(
+                    [cmake, "-S", str(src), "-B", str(build)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(
+                    configured.returncode,
+                    0,
+                    configured.stdout + configured.stderr,
+                )
+                shown = subprocess.run(
+                    [ctest, "--test-dir", str(build), "--show-only=json-v1"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(shown.returncode, 0, shown.stderr)
+                names = [test["name"] for test in json.loads(shown.stdout)["tests"]]
+            self.assertEqual(names, ["CuH2 Utils Test"])
 
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(CliAndParitySelfTest)
     result = unittest.TextTestRunner(stream=sys.stdout, verbosity=2).run(suite)
