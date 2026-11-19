@@ -81,7 +81,9 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
     if len(record_names) != len(report_names) or set(record_names) != report_names:
         missing = sorted(report_names.difference(record_names))
         extra = sorted(set(record_names).difference(report_names))
-        raise SystemExit(f"arm set mismatch: {', '.join(missing + extra)}")
+        missing_text = ", ".join(missing) if missing else "(none)"
+        extra_text = ", ".join(extra) if extra else "(none)"
+        raise SystemExit(f"arm set mismatch: missing {missing_text}; extra {extra_text}")
     for arm in record:
         name = arm["name"]
         recorded = arm.get("tree")
