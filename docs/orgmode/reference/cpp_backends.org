@@ -34,7 +34,7 @@ and try the next name.
 | =CP2KPot=    | =libcp2kc_rgpot=        | =enginePath=, =CP2KC_LIBRARY=, =RGPOT_CP2K_ENGINE=, =libcp2kc_rgpot.so=, =./libcp2kc_rgpot.so= |
 | =CPMDPot=    | =libcpmdc=              | =enginePath=, =CPMDC_LIBRARY=, =RGPOT_CPMDC_ENGINE=, =RGPOT_CPMD_ENGINE=, =libcpmdc.so=, =./libcpmdc.so= |
 | =MOPACPot=   | =libmopacc=             | =Config::engine_path=, =MOPACC_LIBRARY=, =RGPOT_MOPACC_ENGINE=, =libmopacc.so=, =./libmopacc.so= |
-| =NWChemPot=  | =libnwchemc=            | =enginePath=, =NWCHEMC_LIBRARY=, =RGPOT_NWCHEMC_ENGINE=, =RGPOT_NWCHEM_ENGINE=, =libnwchemc.so=, =./libnwchemc.so= |
+| =NWChemPot=  | =libnwchemc=            | =enginePath= alone when set; else the variables that are set among =NWCHEMC_LIBRARY=, =RGPOT_NWCHEMC_ENGINE= and =RGPOT_NWCHEM_ENGINE=, in that order, with no default names after them; else =libnwchemc.so=, =./libnwchemc.so= |
 | =SkalaPot=   | =libnwchemc=            | as =NWChemPot=                                                                                |
 | =LammpsPot=  | engine plugin           | =engine_path= alone when set; else =RGPOT_LAMMPS_ENGINE=, =LAMMPS_ENGINE=, =liblammps_engine.so=, =liblj_engine.so= |
 | =GromacsPot= | =rgpot_md_native_force= | =engine_path= alone; empty means the in-process Lennard-Jones                                 |
