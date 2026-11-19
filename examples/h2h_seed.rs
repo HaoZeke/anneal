@@ -305,6 +305,8 @@ fn main() {
     };
     std::fs::write(format!("{prefix}.xyz"), geometry).expect("geometry");
 
+    println!("best_bits {}", seen.lowest.to_bits());
+    println!("outcome_bits {}", out.best.to_bits());
     println!("system: {kind}");
     println!("n: {n}");
     println!("rho: {rho}");

@@ -202,6 +202,8 @@ fn cmd_run(args: &[String]) -> i32 {
     } else {
         budget
     };
+    println!("best_bits {}", outcome.best.to_bits());
+    println!("outcome_bits {}", outcome.best.to_bits());
     println!("system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s");
     let outside = (wall - pot_s).max(0.0);
     println!(
