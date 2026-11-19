@@ -201,10 +201,16 @@ def bootstrap_median_ci(values: list[float], draws: int = BOOTSTRAP_DRAWS) -> tu
     if not values:
         return float("nan"), float("nan")
     sample = np.asarray(values, dtype=float)
+    point = float(np.median(sample))
+    if not math.isfinite(point):
+        return point, point
     rng = np.random.default_rng(BOOTSTRAP_SEED)
     picks = rng.integers(0, sample.size, size=(draws, sample.size))
     stats = np.median(sample[picks], axis=1)
-    low, high = np.percentile(stats, [2.5, 97.5])
+    finite_stats = stats[np.isfinite(stats)]
+    if finite_stats.size == 0:
+        return point, point
+    low, high = np.percentile(finite_stats, [2.5, 97.5])
     return float(low), float(high)
 
 
