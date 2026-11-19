@@ -35,9 +35,10 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// (`2π/5` and `3π/5`), the continuous-symmetry orientation (`τ/5`),
 /// and the energy-lattice softmax. Those use the `libm` crate as well.
 /// On that walk Linux plain was `0x517b` (9 seeds). Merging develop's
-/// stall-growth hold moves it to `0x91e4` (7 seeds). The fivefold
-/// residual keeps the built-in assignment when IRA is linked, so the
-/// IRA build has the same mask.
+/// stall-growth hold moves it to `0x91e4` (7 seeds). The packing SOAP
+/// hop is the descriptor residual. On this base the ACE derivative is
+/// the analytic contraction, and the plain walk is `0x8411` (4 seeds).
+/// The cutoff walk stays `0xffff`.
 ///
 /// Those masks were measured at a 200-step quench. `recommended` now
 /// quenches for 1000 steps, and at that length the plain walk reaches
@@ -80,8 +81,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
         }
     }
     // The template-free walk is deterministic: cutoff 0xffff, plain
-    // 0x240d (5 seeds), with and without IRA.
-    let plain_exact = 0x240d;
+    // 0x8411 (4 seeds), with and without IRA.
+    let plain_exact = 0x8411;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

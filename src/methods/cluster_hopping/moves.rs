@@ -1170,8 +1170,9 @@ fn soap_arm(
         rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
         class: cfg.soap_class_residual && packing,
-        // One element takes the unlabelled fivefold hop. The label is
-        // not a second species, so it is not a partition of the residual.
+        // One repeated label is not a second species, so it does not
+        // partition the residual. The hop is the descriptor gradient
+        // either way.
         species: if packing { None } else { cfg.species.clone() },
         mobile,
         groups: if cfg.soap_mode == SoapProposalMode::Rigid {
@@ -2620,7 +2621,7 @@ impl ClusterMove {
             ClusterMove::Soap {
                 rmsd,
                 cutoff,
-                class,
+                class: _,
                 species,
                 mobile,
                 groups,
@@ -2630,33 +2631,14 @@ impl ClusterMove {
                     l_max: 6,
                     rcut_nn: *cutoff,
                 };
-                // A declared rigid group is retracted, not replaced by the
-                // fivefold packing hop. One element without groups still
-                // takes that hop.
+                // One element, nothing frozen, no rigid groups: the
+                // descriptor gradient, and a fingerprint-outlier hop when
+                // that residual is flat. A masked or molecular system
+                // follows the gradient only, so a leftover with nothing
+                // local in it declines instead of kicking.
                 let packing = species.is_none() && mobile.is_none() && groups.is_none();
-                if *class && packing {
-                    crate::soap::step_away(x, &[], spec, *rmsd, rng)
-                } else if packing {
-                    // SOFI C5 residual on a fivefold axis. The measured
-                    // single-axis hop is a deterministic function of x,
-                    // so drawing this arm twice from one minimum
-                    // proposes the same trial twice and pays for it
-                    // twice; a chain that revisits a minimum pays every
-                    // time. The drawn-axis hop varies, but yields on a
-                    // disordered shell where too few axes are still
-                    // fivefold, and a proposal that never moves is
-                    // worse than a repeated one. So draw first and keep
-                    // the measured hop for when the draw declines.
-                    let drawn = crate::soap::step_away_fivefold(x, *rmsd, rng);
-                    let moved = drawn
-                        .iter()
-                        .zip(x.iter())
-                        .any(|(after, before)| (after - before).abs() > 1e-12);
-                    if moved {
-                        drawn
-                    } else {
-                        crate::soap::step_away_fivefold_measured(x, *rmsd)
-                    }
+                if packing {
+                    crate::soap::step_descriptor(x, spec, *rmsd, None, None, None, rng)
                 } else {
                     crate::soap::step_away_cloud(
                         x,
@@ -3473,7 +3455,7 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn recommended_packing_soap_is_the_fivefold_residual() {
+    fn recommended_packing_soap_follows_the_descriptor_residual() {
         let rec = Config::recommended(13);
         let soap = rec
             .move_library
@@ -3481,7 +3463,7 @@ mod move_scaling_tests {
             .into_iter()
             .find(|k| matches!(k, ClusterMove::Soap { class: false, .. }))
             .expect("recommended LeanBurst has a packing SOAP arm");
-        let ClusterMove::Soap { rmsd, .. } = soap else {
+        let ClusterMove::Soap { rmsd, cutoff, .. } = soap else {
             panic!("recommended SOAP arm is not Soap");
         };
         let x = Array1::from_vec(vec![
@@ -3491,13 +3473,32 @@ mod move_scaling_tests {
         ]);
         let mut move_rng = StdRng::seed_from_u64(11);
         let proposed = soap.propose(x.view(), 0.8, &mut move_rng);
-        let five = crate::soap::step_away_fivefold_measured(x.view(), rmsd);
+        let spec = crate::soap::SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: cutoff,
+        };
+        let mut descriptor_rng = StdRng::seed_from_u64(11);
+        let descriptor = crate::soap::step_descriptor(
+            x.view(),
+            spec,
+            rmsd,
+            None,
+            None,
+            None,
+            &mut descriptor_rng,
+        );
         for index in 0..x.len() {
             assert!(
-                (proposed[index] - five[index]).abs() < 1e-12,
-                "packing SOAP left the measured fivefold residual at {index}"
+                (proposed[index] - descriptor[index]).abs() < 1e-12,
+                "packing SOAP left the descriptor residual at {index}"
             );
         }
+        let moved = proposed
+            .iter()
+            .zip(x.iter())
+            .any(|(after, before)| (after - before).abs() > 1e-12);
+        assert!(moved, "descriptor SOAP on a mixed shell was the identity");
     }
 
     #[test]
@@ -3575,7 +3576,7 @@ mod move_scaling_tests {
                 .kernels(&cfg)
                 .iter()
                 .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. })),
-            "the fivefold SOAP arm is still built when the prior is off"
+            "the SOAP arm is still built when the prior is off"
         );
         cfg.general_collective = true;
         assert!(

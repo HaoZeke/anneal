@@ -5824,9 +5824,8 @@ fn run_capnp_catalog(
                     } else if replica % 2 == 1 {
                         // Occupied local environments. APE queues a dimer on
                         // one classified atom. The destination family is not
-                        // a target. A residual that exists on this structure
-                        // (fivefold or otherwise) is an offered seed, not a
-                        // named morphology.
+                        // a target. The seed is the descriptor residual, or
+                        // the fingerprint outliers when that residual is flat.
                         anneal_core::known_basin::arm_leave_free(
                             snapshot.current_state(),
                             anneal_core::known_basin::LEAVE_RUNG_RMSD,
@@ -5841,24 +5840,21 @@ fn run_capnp_catalog(
                         } else {
                             let (atom, class) = queue[(extra_cover - 1) % queue.len()];
                             anneal_core::known_basin::arm_leave_cover(atom);
-                            let offered =
-                                if anneal_core::soap::fivefold_axis_count(snapshot.current_state())
-                                    >= 2
-                                {
-                                    let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
-                                        (u64::from(replica) << 17)
-                                            ^ checkpoint_sequence
-                                                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                                            ^ extra_cover as u64,
-                                    );
-                                    anneal_core::soap::step_away_fivefold(
-                                        snapshot.current_state(),
-                                        anneal_core::known_basin::LEAVE_RUNG_RMSD,
-                                        &mut residual_rng,
-                                    )
-                                } else {
-                                    snapshot.current_state().to_owned()
-                                };
+                            let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
+                                (u64::from(replica) << 17)
+                                    ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                                    ^ extra_cover as u64,
+                            );
+                            let spec = anneal_core::soap::structure_spec(snapshot.current_state());
+                            let offered = anneal_core::soap::step_descriptor(
+                                snapshot.current_state(),
+                                spec,
+                                anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                                None,
+                                None,
+                                None,
+                                &mut residual_rng,
+                            );
                             println!(
                                 "  ape seed atom {} class {} hops {} neighbors {}",
                                 atom,

@@ -7557,8 +7557,8 @@ where
                 history_new += 1;
             }
         }
-        // The floor the fivefold channel reads is the incumbent before this
-        // record. Gap and energy are not that comparison.
+        // The floor the packing seam reads is the incumbent before this
+        // record. The gap is the DECAF distance, not a template share.
         let channel_floor_energy = ledger.best;
         let channel_floor_state = seam.as_ref().and_then(|_| ledger.best_state.clone());
         if recordable {
@@ -8043,14 +8043,19 @@ where
                 && recordable
                 && let (Some(floor_state), Some(trial)) =
                     (channel_floor_state.as_ref(), x_new.as_slice())
+                && let Some(floor_slice) = floor_state.as_slice()
             {
-                let share = crate::catalog::icosahedral_share(x_new.view());
-                let floor_share = crate::catalog::icosahedral_share(floor_state.view());
-                if crate::catalog::fivefold_channel(e_new, channel_floor_energy, share, floor_share)
-                    && seam.offer(share, e_new, trial)
+                // Packing-fingerprint gap inside the seam's own energy
+                // window. A template share is not a coordinate of the ladder.
+                let gap = crate::catalog::packing_seam_gap(floor_slice, trial);
+                if e_new.is_finite()
+                    && channel_floor_energy.is_finite()
+                    && e_new <= channel_floor_energy + crate::catalog::SEAM_WINDOW
+                    && gap.is_finite()
+                    && seam.offer(gap, e_new, trial)
                     && frontier_exchange
                 {
-                    crate::catalog::offer_frontier_post(share, e_new, trial);
+                    crate::catalog::offer_frontier_post(gap, e_new, trial);
                 }
             }
             // One arrival on the packing the chain has just moved onto.

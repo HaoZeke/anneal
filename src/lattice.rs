@@ -26,11 +26,9 @@
 //! geometry it reads whatever that potential prefers, and at a molecular
 //! geometry it reads that.
 //!
-//! [`Source::Named`] offers the alternative orders instead, from the
-//! classifier's own template library in [`crate::structure`], so a chain sitting
-//! in close packing can be handed icosahedral order and the other way round.
-//! Which is worth proposing is left to the allocator; nothing here knows that
-//! 38 points want a truncated octahedron.
+//! [`Source::Named`] can still grow one ideal shell, and the tests of the
+//! grower use it. The search library does not offer it. A chain is not
+//! handed a packing it has not read off the structure it is standing on.
 //!
 //! The same construction is what a ring or cage topology would drive for a
 //! molecular system, where the repeated unit is a cage rather than a
@@ -61,14 +59,12 @@ pub enum Source {
 
 impl Source {
     /// The sources worth offering as separate arms.
+    ///
+    /// Only the order read off the structure the chain is standing on.
+    /// Named lattice templates and the pentagonal bipyramid are not arms:
+    /// a search that writes a packing down is not a search.
     pub fn library() -> Vec<Source> {
-        vec![
-            Source::Observed,
-            Source::Named(Template::FaceCentredCubic),
-            Source::Named(Template::HexagonalClosePacked),
-            Source::Named(Template::Icosahedral),
-            Source::Named(Template::SimpleCubic),
-        ]
+        vec![Source::Observed]
     }
 
     /// Short name for reporting.
