@@ -1,0 +1,2 @@
+host,machine_id,cpu_model,logical_cpus,os,arch,core,affinity,compiler
+anneal-ci,3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873,Intel(R) Xeon(R) Processor,8,Linux,x86_64,0,0,rustc 1.88.0 (6b00bc388 2025-06-23)
