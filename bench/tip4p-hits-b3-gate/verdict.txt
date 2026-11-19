@@ -1,0 +1,42 @@
+verdict: FAIL
+alpha: 0.05
+overall_outside_s_a: 555.421305
+overall_outside_s_b: 522.044778
+overall_outside_ratio_b_over_a: 0.939908
+aa_complete_cells: 5
+aa_overall_outside_ratio: 0.998114
+aa_max_cell_outside_ratio: 1.002058
+aa_min_outside_p: 0.551167
+tests_ok: 1
+placement_ready: 1
+placement_bonferroni_m: 5
+abba_balanced: 1
+base_ref: 5eb79cdcb0a986984dc7b487e5a3cc93224246f9
+base_tree: 7a2ba49b37241a8fe42b2c45c226374de6d92274
+b_kit_sha256: a983aa97a5a3f152cbdc21c44e0cc4fa0d9613d73298d1ac336abec08f7a5312
+b_kit_tree: 3eb47d63c8de0251b69abe821b3c2ca747434ed6
+harness_run_gate: 336e9afe241e2261949f675b85b99cee7a5d4474
+harness_summarize: c94272d2975ee4421dec49d53094fe9d920052a6
+harness_snakefile: 14800e12b2bbd76971e4c37a66e4d746f9594e98
+placement_ratio_min: 0.995609
+placement_ratio_max: 1.009309
+placement_hexamer_ratio: 1.122072
+placement_hexamer_vs_band: outside
+placement_mw_u: 720.0
+placement_mw_p: 1.3018e-13
+placement_mw_p_adj: 6.50902e-13
+placement_n_b: 12
+placement_n_pooled: 60
+placement_bit_identical: 1
+tip4p21_outside_ratio: 0.824297
+tip4p21_vs_placement_band: outside
+tip4p25_outside_ratio: 0.784553
+tip4p25_vs_placement_band: outside
+tip4p15_hits_a: 7/12
+tip4p15_hits_b: 12/12
+tip4p15_prior_gain_holds: 1
+hop_phase_source: instrumented_build_not_used_for_verdict
+hop_phase_A: n=12 tric_s=1.811116 book_s=0.000076 accept_s=0.000683 bookkeep_s=0.030842 pot_s=16.292639
+hop_phase_B: n=12 tric_s=2.020307 book_s=0.000070 accept_s=0.000704 bookkeep_s=0.031233 pot_s=16.316445
+failures:
+- AB/water_hexamer: outside_placement_band:ratio=1.1221,band=0.9956-1.0093,p=1.3018e-13,p_adj=6.50902e-13
