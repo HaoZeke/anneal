@@ -49,12 +49,15 @@ temperature 300 K, 500 iterations, neutral, closed shell, vacuum box of 60 A)
 linked against xtb 6.7.1. The two builds are given the shim in its place.
 
 The buffer the engine returns is the force, minus dE/dx; `sign_check.py` checks
-this against central finite differences. A publishes it as a force. B negates
-it, because it takes the buffer for dE/dx, and with the real engine it walks
-uphill and never leaves a dissociated state. The shim therefore hands A the
-buffer unchanged and hands B the negated buffer. `preflight.py` prints the
-finite-difference table for the engine and for both shim modes, and one short
-seed of each build with each buffer.
+this against central finite differences. A publishes it as a force. B runs
+through the force-negation shim, because the native xtb path on commit
+`bc16d35c` has a known sign defect: anneal re-negates a buffer that already
+holds the physical force, so unpatched B walks uphill and never leaves a
+dissociated state. The shim hands A the buffer unchanged and hands B the
+negated buffer, so the B numbers are the physically correct path. A source fix
+is pending upstream. `preflight.py` prints the finite-difference table for the
+engine and for both shim modes, and one short seed of each build with each
+buffer.
 
 ## Inputs
 
@@ -88,7 +91,8 @@ reached through the generic calculator. The call server counts every request
 and refuses requests beyond the budget; CREST then ends its run by itself. The
 frames scored are the structures of the metadynamics trajectory, 180 of them
 for a budget of 4000 calls. CREST is not seeded, so its runs under A and under
-B are independent draws; only the scoring differs between them.
+B are independent draws. The two CREST arms are a timing null: the same work
+runs under both builds, and only the scoring differs between them.
 
 ## Hit criterion
 

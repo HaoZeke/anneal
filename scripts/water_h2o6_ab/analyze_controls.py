@@ -14,7 +14,9 @@ after its sha256 is checked; a directory that the manifest does not list is
 read in place if it has a table.
 """
 import argparse
+import contextlib
 import csv
+import io
 import statistics
 import sys
 from collections import defaultdict
@@ -167,7 +169,7 @@ def ordering_section(frames):
                   "RMSD present for one ordering only", "largest RMSD difference A"], rows)
 
 
-def main():
+def report():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directories", nargs="+")
     parser.add_argument("--manifest", help="external_manifest.csv that lists the frame tables")
@@ -190,6 +192,19 @@ def main():
         print("## Runs with a frame within other gates of a reference (build A, references as used)\n\n"
               + gate_section(frames) + "\n")
     return 0
+
+
+def main():
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            status = report()
+    except SystemExit:
+        sys.stdout.write(buffer.getvalue())
+        raise
+    if status == 0:
+        sys.stdout.write(buffer.getvalue().rstrip("\n") + "\n")
+    return status
 
 
 if __name__ == "__main__":

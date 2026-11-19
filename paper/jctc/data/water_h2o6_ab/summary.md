@@ -1,5 +1,11 @@
 # Water hexamer A/B: 192 seeds, 1536 runs, gate 0.598496 A
 
+## How the builds ran
+
+Build B runs through the force-negation shim. The native xtb path on commit bc16d35c has a known sign defect: anneal re-negates a buffer that already holds the physical force, so unpatched B walks uphill and never leaves a dissociated state (preflight.txt). The shim hands B the negated buffer, so the B numbers are the physically correct path. A source fix is pending upstream. Build A takes the buffer as the force and gets it unchanged.
+
+The CREST arms are a timing null: the same work, CREST on the same engine with the same call budget, runs under both builds, and only the scoring code differs.
+
 ## Hits
 
 | arm | A hits | B hits | A - B | Fisher exact p |

@@ -9,6 +9,17 @@ one session of 34261 s, A and B back to back for every seed and arm with the
 order of the pair flipped on odd seeds. Both builds ran on the same GFN2-xTB
 engine.
 
+Build B runs through the force-negation shim. The native xtb path on commit
+`bc16d35c` has a known sign defect: anneal re-negates a buffer that already
+holds the physical force, so unpatched B walks uphill and never leaves a
+dissociated state (`preflight.txt`). The shim hands B the negated buffer, so the
+B numbers are the physically correct path. A source fix is pending upstream.
+Build A takes the buffer as the force and gets it unchanged.
+
+The `crest` and `crest_fair` arms are a timing null: the same work, CREST on the
+same engine with the same call budget, runs under both builds, and only the
+scoring code differs.
+
 ## Files
 
 | file | content |

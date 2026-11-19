@@ -13,7 +13,9 @@ manifest; the sha256 of the file is checked first. A session that has no
 manifest yet can point at the frame table directly.
 """
 import argparse
+import contextlib
 import csv
+import io
 import json
 import statistics
 import sys
@@ -29,6 +31,14 @@ ARMS = ("anneal", "polish_fair", "crest", "crest_fair")
 CODES = ("A", "B")
 REFERENCES = ("prism", "cage", "book")
 OLD_GATE = 0.784112
+
+
+BUILD_NOTES = """## How the builds ran
+
+Build B runs through the force-negation shim. The native xtb path on commit bc16d35c has a known sign defect: anneal re-negates a buffer that already holds the physical force, so unpatched B walks uphill and never leaves a dissociated state (preflight.txt). The shim hands B the negated buffer, so the B numbers are the physically correct path. A source fix is pending upstream. Build A takes the buffer as the force and gets it unchanged.
+
+The CREST arms are a timing null: the same work, CREST on the same engine with the same call budget, runs under both builds, and only the scoring code differs.
+"""
 
 
 def number(text):
@@ -511,7 +521,7 @@ def old_receipts_section(directory, frames, gate_new):
     return table(header, rows)
 
 
-def main():
+def report():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", required=True)
     parser.add_argument("--manifest", help="external_manifest.csv that lists the frame table")
@@ -533,6 +543,7 @@ def main():
     gate_values = {number(r["gate_A"]) for r in runs if number(r["gate_A"]) is not None}
     gate_new = gate_values.pop() if len(gate_values) == 1 else float("nan")
     print(f"# Water hexamer A/B: {len(seeds)} seeds, {len(runs)} runs, gate {gate_new:.6f} A\n")
+    print(BUILD_NOTES)
     hits, paired = hits_section(grouped, seeds)
     print("## Hits\n\n" + hits + "\n\nPaired by seed\n\n" + paired + "\n")
     medians, tests = timing_section(grouped)
@@ -568,6 +579,19 @@ def main():
         print(f"## {arm}: gate, reference set and hit rule\n\n"
               + sensitivity_section(runs_by_key, minima, best, arm, gate_new) + "\n")
     return 0
+
+
+def main():
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            status = report()
+    except SystemExit:
+        sys.stdout.write(buffer.getvalue())
+        raise
+    if status == 0:
+        sys.stdout.write(buffer.getvalue().rstrip("\n") + "\n")
+    return status
 
 
 if __name__ == "__main__":
