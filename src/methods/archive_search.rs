@@ -212,7 +212,9 @@ fn residual_start<R: Rng + ?Sized>(
     y
 }
 
-fn hops_from_start<'g, R: Rng + ?Sized>(
+// The hop clones its generator before the held stream draws. A seed taken
+// from `rng` would consume that draw and move every later proposal.
+fn hops_from_start<'g, R: Rng + Clone>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
@@ -428,7 +430,7 @@ fn fold_hop(
 ///
 /// Large-budget: skip-return explore, then residual hops on unsaturated
 /// local keys. The caller's recommended defaults are not written.
-pub fn archive_search<'g, R: Rng + ?Sized>(
+pub fn archive_search<'g, R: Rng + Clone>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
