@@ -1,0 +1,12 @@
+verdict: FAIL
+alpha: 0.05
+overall_outside_s_a: 597.966291
+overall_outside_s_b: 571.767693
+overall_outside_ratio_b_over_a: 0.956187
+aa_complete_cells: 4
+aa_overall_outside_ratio: 1.010267
+aa_max_cell_outside_ratio: 1.002643
+aa_min_outside_p: 0.589876
+tests_ok: 1
+failures:
+- AB/water_hexamer: outside_regression_beyond_AA:ratio=1.124,p=5.17722e-06
