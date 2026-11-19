@@ -515,6 +515,19 @@ if not get_option('with_rpc_client_only')
     if has_fortran
         _rgpot_link_args += _fortran_hide_args
     endif
+    if has_fast_nlist and not _fast_as_object and host_system != 'windows'
+        if host_system == 'darwin'
+            _rgpot_link_args += [
+                '-Wl,-force_load,' + _fastnlist_tgt.full_path(),
+            ]
+        else
+            _rgpot_link_args += [
+                '-Wl,--whole-archive',
+                _fastnlist_tgt.full_path(),
+                '-Wl,--no-whole-archive',
+            ]
+        endif
+    endif
     _rgpot_srcs = []
     _rgpot_cpp_args = _args
     if host_system == 'windows'
