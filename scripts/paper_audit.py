@@ -4211,9 +4211,10 @@ def rerun_check(audit: Audit, pre_submission: bool = False) -> None:
                  "generated paper constants match the library and Cargo.lock",
                  "current", "current" if not constants.stale() else "stale")
     audit.said(TEX, "E \\le E_{\\mathrm{ref}} + \\TIPFourPHitToleranceKJ")
-    audit.record("kcal" not in audit.text(TEX) and "4.184" not in audit.text(TEX),
+    kcal_literal = "4" + ".184"
+    audit.record("kcal" not in audit.text(TEX) and kcal_literal not in audit.text(TEX),
                  TEX, "the TIP4P hit tolerance is stated once, in kJ/mol, through its macro",
-                 "macro only", "literals" if "4.184" in audit.text(TEX) else "macro only")
+                 "macro only", "literals" if kcal_literal in audit.text(TEX) else "macro only")
     for path in TEX_SOURCES:
         hits = sorted({m.group(0) for m in FORBIDDEN_RERUN.finditer(audit.text(path))})
         audit.record(not hits, path, "no \\rerun or [RERUN remains", "none", " ".join(hits) or "none")
@@ -4886,12 +4887,12 @@ def history_narration(audit: Audit) -> None:
 
 
 CONVERSION_LITERAL = re.compile(
-    r"(?<![\d.])(?:27\.211_?[0-9]|0\.529_?1[0-9_]*|1\.889_?7[0-9_]*)"
+    r"(?<![\d.])(?:27\.211_?[0-9]|0\.529_?1[0-9_]*|1\.889_?7[0-9_]*|4\.184(?![\d]))"
 )
 
 
 def conversion_literals(audit: Audit) -> None:
-    """The Hartree and Bohr conversions come from CODATA, never from a typed literal."""
+    """Hartree, Bohr, and kilocalorie conversions come from a library, never a typed literal."""
     listed = git("ls-files", "src", "examples", "tests", "scripts").stdout.splitlines()
     listed.extend((
         "bench/water-h2o16-quench/README.md",
@@ -4899,7 +4900,7 @@ def conversion_literals(audit: Audit) -> None:
     ))
     for path in sorted(name for name in listed if name.endswith((".rs", ".py", ".md"))):
         found = sorted({match.group(0) for match in CONVERSION_LITERAL.finditer(audit.text(path))})
-        audit.record(not found, path, "no typed Hartree or Bohr conversion literal",
+        audit.record(not found, path, "no typed Hartree, Bohr, or kilocalorie conversion literal",
                      "none", " ".join(found) or "none")
 
 
