@@ -775,21 +775,18 @@ def ranked_calls(group: list[dict[str, str]], budget: int) -> list[float] | None
     return [float(row["calls_to_hit"]) if row["hit"] == "1" else math.inf for row in group]
 
 
+def wall_capped(row: dict[str, str]) -> bool:
+    return row.get("wall_capped") == "1" or (row["hit"] == "0" and int(row["calls"]) < int(row["budget"]))
+
+
 def ranked_wall(left: list[dict[str, str]], right: list[dict[str, str]]) -> tuple[list[float], list[float]] | None:
-    left_miss = [float(row["wall_s"]) for row in left if row["hit"] == "0"]
-    right_miss = [float(row["wall_s"]) for row in right if row["hit"] == "0"]
-    if left_miss and right_miss:
+    if any(wall_capped(row) for row in left + right):
         return None
-    left_hit = [float(row["wall_s"]) for row in left if row["hit"] == "1"]
-    right_hit = [float(row["wall_s"]) for row in right if row["hit"] == "1"]
-    if any(miss < hit for miss in left_miss for hit in right_hit):
-        return None
-    if any(miss < hit for miss in right_miss for hit in left_hit):
-        return None
-    return (
-        [float(row["wall_s"]) if row["hit"] == "1" else math.inf for row in left],
-        [float(row["wall_s"]) if row["hit"] == "1" else math.inf for row in right],
-    )
+
+    def series(group: list[dict[str, str]]) -> list[float]:
+        return [float(row["wall_s"]) if row["hit"] == "1" else math.inf for row in group]
+
+    return series(left), series(right)
 
 
 def arm_stats(group: list[dict[str, str]], prefix: str) -> dict[str, str]:
@@ -1143,6 +1140,18 @@ def self_test() -> None:
         raise SystemExit("ranked misses")
     if ranked_calls([{"hit": "0", "calls": "5"}], 100) is not None:
         raise SystemExit("censor")
+    both_miss = ranked_wall(
+        [{"hit": "0", "calls": "10", "budget": "10", "wall_s": "2", "wall_capped": "0"}],
+        [{"hit": "1", "calls": "4", "budget": "10", "wall_s": "1", "wall_capped": "0"}],
+    )
+    if both_miss != ([math.inf], [1.0]):
+        raise SystemExit(f"wall rank {both_miss}")
+    misses = [{"hit": "0", "calls": "10", "budget": "10", "wall_s": "9", "wall_capped": "0"}]
+    if ranked_wall(misses, misses) != ([math.inf], [math.inf]):
+        raise SystemExit("two misses still have a wall rank")
+    capped = [{"hit": "0", "calls": "3", "budget": "10", "wall_s": "7200", "wall_capped": "1"}]
+    if ranked_wall(capped, capped) is not None:
+        raise SystemExit("wall cap should censor")
     sample = "\n".join(
         [
             "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s",
