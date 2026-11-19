@@ -8,8 +8,6 @@ import ctypes
 from pathlib import Path
 
 import numpy as np
-from rdkit import Chem
-from rdkit.Chem import AllChem
 
 KCAL_PER_EV = 23.060547830619026
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,9 +15,7 @@ MOLECULES = ROOT / "bench" / "openconf-h2h" / "molecules.csv"
 
 # Lipinski's strict rotatable bond, without the acyclic condition. The ring
 # condition is applied separately so a macrocycle bond can count.
-_ROTOR = Chem.MolFromSmarts(
-    "[!$([NH]!@C(=O))&!D1&!$(*#*)]-[!$([NH]!@C(=O))&!D1&!$(*#*)]"
-)
+_ROTOR_SMARTS = "[!$([NH]!@C(=O))&!D1&!$(*#*)]-[!$([NH]!@C(=O))&!D1&!$(*#*)]"
 SMALL_RING = 7
 
 
@@ -30,6 +26,8 @@ def molecules(path: Path = MOLECULES) -> dict[str, dict[str, str]]:
 
 def build_mol(smiles: str) -> Chem.Mol:
     """Hydrogen-complete molecule in a fixed atom order."""
+    from rdkit import Chem
+
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError(f"unparsable SMILES {smiles}")
@@ -38,6 +36,8 @@ def build_mol(smiles: str) -> Chem.Mol:
 
 def reference_smiles(mol: Chem.Mol) -> str:
     """Isomeric SMILES of the input graph, the stereo every conformer keeps."""
+    from rdkit import Chem
+
     return Chem.MolToSmiles(Chem.RemoveHs(mol))
 
 
@@ -48,9 +48,17 @@ def rigid_groups(mol: Chem.Mol) -> list[list[int]]:
     no ring of seven or fewer atoms. That is Lipinski's strict count on an
     acyclic molecule, and it also cuts the single bonds of a macrocycle.
     """
+    from rdkit import Chem
+
+    rotor = getattr(rigid_groups, "rotor", None)
+    if rotor is None:
+        rotor = Chem.MolFromSmarts(_ROTOR_SMARTS)
+        if rotor is None:
+            raise ValueError("the rotatable-bond pattern did not compile")
+        rigid_groups.rotor = rotor
     ring_info = mol.GetRingInfo()
     cut = []
-    for begin, end in mol.GetSubstructMatches(_ROTOR):
+    for begin, end in mol.GetSubstructMatches(rotor):
         bond = mol.GetBondBetweenAtoms(begin, end)
         if bond is None or bond.GetBondType() != Chem.BondType.SINGLE:
             continue
@@ -73,6 +81,8 @@ def mmff94(mol: Chem.Mol, conf_id: int = -1):
     The non-bonded list is RDKit's default, every pair within 100 Å of the
     geometry the field is built on, the same list openconf builds.
     """
+    from rdkit.Chem import AllChem
+
     props = AllChem.MMFFGetMoleculeProperties(mol, mmffVariant="MMFF94")
     if props is None:
         raise ValueError("MMFF94 cannot type this molecule")
@@ -85,6 +95,8 @@ def mmff94(mol: Chem.Mol, conf_id: int = -1):
 
 def embed(mol: Chem.Mol, seed: int) -> np.ndarray:
     """One ETKDGv3 geometry with no force-field cleanup, centred."""
+    from rdkit.Chem import AllChem
+
     params = AllChem.ETKDGv3()
     params.randomSeed = int(seed)
     params.numThreads = 1
@@ -190,4 +202,8 @@ def read_xyz(path: Path) -> list[tuple[list[str], np.ndarray, str]]:
 
 
 def symbols(mol: Chem.Mol) -> list[str]:
+    from rdkit import Chem
+
+    if not isinstance(mol, Chem.Mol):
+        raise TypeError("symbols needs a molecule")
     return [atom.GetSymbol() for atom in mol.GetAtoms()]
