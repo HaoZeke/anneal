@@ -1411,3 +1411,11 @@ These are carbon clusters on semiempirical, density-functional, and GAP-20 surfa
 On 18 November 2026 the release APIs and tag lists were unchanged: CREST v3.0.2, AGOX v3.11.1, ASE 3.29.0, GOFEE v0.1.0, and pele v0.1.2 remain the newest numbered tags. The GitHub and GitLab repository searches found no official release repository for de Souza's GOAT or for GMIN.
 
 Cite `kuchminaCarbon2026`.
+
+## 2026-11-19 — Planar boron clusters and generative conformational sampling
+
+Qiu, Qian, Mu, Liu, Zhang, Kim, and Ding, Physical Review B 114, 254105 (5 November 2026), doi:10.1103/x3bz-g9zz, report bonding rules and stability criteria for planar boron clusters together with a global structure search accelerated by a machine-learning force field. This is a free-cluster global search, but it is on a learned boron surface rather than the Lennard-Jones, TIP4P, or GFN2-xTB surfaces in the manuscript. The journal record gives no Lennard-Jones energy or water-hexamer hit rate, so it contradicts no Cambridge target, 121 of 192, or 97 of 192. A head-to-head would require a shared planar-boron potential and evaluation budget; it does not add an arm to the current benchmark.
+
+B E and Mondal, Journal of Chemical Theory and Computation 22, 9343--9359 (7 September 2026), doi:10.1021/acs.jctc.6c01009, compare denoising diffusion and rectified-flow models for equilibrium conformational sampling on a two-dimensional multimodal potential, Trp-cage, and an intrinsically disordered protein. They find that diffusion recovers configurational breadth through late stochastic relaxation across the tested architectures, while rectified flow depends more strongly on architectural expressivity. These are ensemble-distribution tests, not low-energy conformer searches on the GFN2-xTB water hexamer, and they report neither a CREST comparison nor a motif hit rate. They therefore contradict no printed count and do not require a new head-to-head on the sealed hexamer table.
+
+Cite `qiuPlanarBoron2026` and `beGenerativeConvergence2026`.
