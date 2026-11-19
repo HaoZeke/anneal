@@ -626,6 +626,7 @@ def run(client: Path, build_record: Path | None, cpu: int) -> None:
     from optbench.eon_akmc import _write_config, prepare_client_env
     from optbench.eon_parse import saddle_progress
 
+    prepare_client_env(client)
     version = _client_version(client)
     sha_before = _sha256_file(client.resolve())
     folder = CHECKPOINT
@@ -652,7 +653,6 @@ def run(client: Path, build_record: Path | None, cpu: int) -> None:
         _write_config(template, work / "config.ini", client, catalog.SEED, 1)
     for relative in ("jobs/scratch", "jobs/in", "jobs/out", "jobs/incomplete", "states", "potfiles"):
         (work / relative).mkdir(parents=True, exist_ok=True)
-    prepare_client_env(client)
     import logging
 
     for name in ("akmc", "eon", "state", "communicator"):
