@@ -26,6 +26,7 @@ A =feature= option takes =enabled=, =disabled= or =auto=.
 | =with_cache= | boolean | =false= | Link RocksDB and xxhash and build =PotentialCache=. |
 | =pure_lib= | boolean | =true= | When false, link fmt and define =NOT_PURE_LIB=. |
 | =with_rust_core= | boolean | =false= | Build =rgpot-core= with cargo and link =librgpot_core.a=. The cargo features =rpc= and =cache= follow =with_rpc= and =with_cache=. The C header is the checked-in =rgpot-core/include/rgpot.h=; cbindgen does not run. |
+| =team_min_atoms= | integer | =8192= | Minimum atom count for opening an OpenMP team. |
 | =with_fast_nlist= | feature | =auto= | linkcell/minimage pair list. Auto when cargo and rustc 1.89 or newer are found; otherwise the C++ pair scan is used. |
 | =with_cp2k= | feature | =disabled= | CP2KPot, the potserv CP2K backend and libcp2kc_rgpot.so against libcp2k (pkg-config libcp2k); needs with_rpc |
 | =with_mpi= | feature | =disabled= | Build =librgpot_mpi=, which =librgpot= loads with =dlopen= so calculator groups can split and share across ranks. =librgpot= itself never links MPI. |
