@@ -14,3 +14,38 @@ documentation = true
 documentation_style = "Doxy"
 documentation_length = "full"
 line_endings = "LF"
+
+# The header is the C ABI in src/ffi.rs: the four anneal_* exports and the
+# types they use. Rust constants are not part of that ABI, and cbindgen
+# flattens same-named constants from different modules into one C scope.
+# The excluded names are C imports (or, for SoapSpec, a type those
+# constants mention), not symbols this crate exports.
+[export]
+item_types = ["enums", "structs", "unions", "typedefs", "opaque", "functions"]
+exclude = [
+    "gpr_version_components",
+    "gpr_atoms_create_simple",
+    "gpr_atoms_destroy",
+    "gpr_model_create",
+    "gpr_model_destroy",
+    "gpr_model_config_defaults",
+    "gpr_model_init",
+    "gpr_model_train",
+    "gpr_model_predict_full",
+    "gpr_model_predict",
+    "gpr_model_n_observations",
+    "gpr_model_set_hssvd_backend",
+    "gpr_model_get_hssvd_backend",
+    "lammps_open_no_mpi",
+    "lammps_close",
+    "lammps_command",
+    "lammps_scatter_atoms",
+    "lammps_gather_atoms",
+    "lammps_has_error",
+    "lammps_get_last_error_message",
+    "vesin_neighbors",
+    "vesin_free",
+    "libira_try_mat",
+    "libira_match",
+    "SoapSpec",
+]

@@ -34,8 +34,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Corrosion)
 
+# The C ABI is the `capi` feature. Without it the imported library has
+# no anneal_* exports and a C consumer cannot link.
 corrosion_import_crate(MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-                       CRATES anneal-core)
+                       CRATES anneal-core
+                       FEATURES capi)
 # Corrosion >=0.5 mirrors cargo's post-1.79 dash-to-underscore rule for
 # library target names, so the imported target is `anneal_core` even though
 # the package name is `anneal-core`.

@@ -37,18 +37,39 @@ def main(argv: list[str]) -> int:
     shutil.copy2(built, out)
     if not objcopy or not nm:
         return 0
-    # Every defined global symbol that is not anneal's own C ABI is made
-    # local: the archive then adds nothing to the consumer's symbol table
-    # that another Rust archive (rgmin carries eindir-core too) also defines.
-    listing = subprocess.run([nm, "-g", "--defined-only", out], check=True,
-                             capture_output=True, text=True).stdout
+    # eindir-core, rgmin and rgsaddle also export C symbols, and a consumer
+    # that links this archive beside one of those would see each symbol
+    # twice. The copy here is made local. A static archive is several
+    # objects: one member defines eindir_core_abi_stamp and another still
+    # has an undefined reference to it. Localizing the definition inside
+    # the archive leaves that reference unresolved, so the consumer fails
+    # to link. Resolve the members into one object first; the reference is
+    # then inside that object and stays resolved after the symbol is local.
+    ld = shutil.which("ld")
+    ar = shutil.which("ar")
+    if ld is None or ar is None:
+        print("ld and ar are required to pack the C archive", file=sys.stderr)
+        return 1
+    combined = str(Path(out).with_suffix(".o"))
+    subprocess.check_call([ld, "-r", "-o", combined, "--whole-archive", out])
+    listing = subprocess.run(
+        [nm, "-g", "--defined-only", combined],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
     foreign = sorted({
         line.split()[-1] for line in listing.splitlines()
         if line.strip() and not line.split()[-1].startswith("anneal_")
         and line.split()[-1].startswith(("eindir_", "rgmin_", "rgsaddle_"))
     })
     if foreign:
-        subprocess.check_call([objcopy] + [f"--localize-symbol={s}" for s in foreign] + [out])
+        subprocess.check_call(
+            [objcopy] + [f"--localize-symbol={s}" for s in foreign] + [combined]
+        )
+    Path(out).unlink()
+    subprocess.check_call([ar, "crs", out, combined])
+    Path(combined).unlink()
     return 0
 
 
