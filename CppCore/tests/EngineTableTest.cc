@@ -120,6 +120,18 @@ kj::Array<capnp::word> builtin_params(const std::string &name) {
   return capnp::messageToFlatArray(msg);
 }
 
+kj::Array<capnp::word> xtb_params(const std::string &method) {
+  capnp::MallocMessageBuilder msg;
+  auto p = msg.initRoot<::BuiltinParams>();
+  p.setName("xtb");
+  auto x = p.initConfig().initXtb();
+  x.setMethod(method);
+  x.setAccuracy(0.1);
+  x.setElectronicTemperature(100.0);
+  x.setMaxIterations(300);
+  return capnp::messageToFlatArray(msg);
+}
+
 RgpotEnginePot *create(const Engine &e, const kj::Array<capnp::word> &words,
                        std::string *error = nullptr) {
   auto bytes = words.asBytes();
@@ -511,6 +523,18 @@ TEST_CASE("xtb engine matches the generic table contract", "[engine][xtb]") {
                   nullptr, nullptr) == 0);
   REQUIRE(energy < -100.0); // eV, GFN2 water is about -137 eV
   e.destroy(pot);
+
+  std::string error;
+  REQUIRE(create(e, xtb_params("nonesuch"), &error) == nullptr);
+  REQUIRE(error.find("unknown method 'nonesuch'") != std::string::npos);
+  RgpotEnginePot *gfn1 = create(e, xtb_params("gfn1"), &error);
+  INFO(error);
+  REQUIRE(gfn1 != nullptr);
+  double gfn1_energy = 0.0;
+  REQUIRE(e.force(gfn1, 3, pos, z, forces.data(), &gfn1_energy, nullptr,
+                  box.data(), nullptr, nullptr) == 0);
+  REQUIRE(gfn1_energy != energy);
+  e.destroy(gfn1);
 }
 
 TEST_CASE("metatomic engine keeps its own table and adds the generic one",
