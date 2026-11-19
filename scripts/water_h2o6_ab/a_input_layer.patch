@@ -61,7 +61,7 @@ index 6394e394f..d619320e4 100644
 @@ -478,6 +509,32 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
      text
  }
- 
+
 +fn write_geometry(seed: u64, coordinates: &[f64], energy: f64) {
 +    let Ok(dir) = std::env::var("WATER_GEOM_DIR") else {
 +        return;
