@@ -1131,11 +1131,19 @@ if not meson.is_subproject() and get_option('with_tests')
                 endif
             endforeach
         endif
+        # A .py file is allowed only inside the rgpot package directory
+        # that the Python install uses.
+        _installed_args = [files('CppCore/tests/check_installed_sources.py')]
+        if get_option('with_python')
+            _installed_args += [
+                '--python-dir',
+                py.get_install_dir(pure: false, subdir: 'rgpot'),
+            ]
+        endif
         test(
             'installed_sources',
             _install_py,
-            args: [
-                files('CppCore/tests/check_installed_sources.py'),
+            args: _installed_args + [
                 meson.project_build_root(),
                 _install_meson.full_path(),
             ],
