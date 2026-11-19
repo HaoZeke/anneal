@@ -5,13 +5,7 @@ Use :class:`rgpot.ase.RgpotRpcCalculator`.
 
 from __future__ import annotations
 
-import sys
 import warnings
-from pathlib import Path
-
-_python = Path(__file__).resolve().parents[3] / "python"
-if _python.is_dir() and str(_python) not in sys.path:
-    sys.path.insert(0, str(_python))
 
 warnings.warn(
     "ase_calculator.RgpotCalculator is deprecated; "

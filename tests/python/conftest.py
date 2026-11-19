@@ -1,17 +1,17 @@
-"""Pytest hooks for the free-threaded ASE suite."""
+"""Pytest hooks for the free-threaded ASE suite.
+
+Tests import the installed rgpot. The source tree under python/ is not
+placed on sys.path, because that would shadow the wheel.
+"""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-# Source tree: python/rgpot. A wheel install already has rgpot on the path.
+# Local helpers such as support.py. This directory is not the package.
 _HERE = Path(__file__).resolve().parent
-_ROOT = _HERE.parents[1]
-_PYTHON = _ROOT / "python"
 sys.path.insert(0, str(_HERE))
-if (_PYTHON / "rgpot" / "__init__.py").is_file():
-    sys.path.insert(0, str(_PYTHON))
 
 
 def pytest_configure(config) -> None:
