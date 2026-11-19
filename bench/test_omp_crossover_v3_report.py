@@ -12,23 +12,29 @@ from pathlib import Path
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--harness", type=Path, required=True)
     parser.add_argument("--json", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
-    expected = args.report.read_bytes()
+    repo = args.repo.resolve()
+    harness = repo / args.harness
+    source_json = repo / args.json
+    source_report = repo / args.report
+    expected = source_report.read_bytes()
     with tempfile.TemporaryDirectory() as directory:
         rendered = Path(directory) / "report.md"
         subprocess.run(
             [
                 sys.executable,
-                str(args.harness),
+                str(harness),
                 "render",
                 "--input-json",
-                str(args.json),
+                str(source_json),
                 "--output-report",
                 str(rendered),
             ],
+            cwd=repo,
             check=True,
         )
         actual = rendered.read_bytes()
