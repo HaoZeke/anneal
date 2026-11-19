@@ -2,8 +2,8 @@
 # Copyright (c) anneal developers
 """Draw fig:disconnectivity: the approximate disconnectivity graph of the LJ38 minima.
 
-The steps and settings are those of campaign_disconnectivity.py of the paper at 028d995,
-on the LJ38 dumps of data/landscapes_7695255/ and the fcc and icosahedral references of
+The steps and settings follow
+the LJ38 dumps of data/landscapes_7695255/ and the fcc and icosahedral references of
 data/system_visuals/sketchmap/, each read through system_visuals.py against its digest:
 the dumps of basin hopping, the recommended hop and random structure search pooled, at
 most 1200 drawn by the random stream of seed 11 with the deepest kept, and those at or

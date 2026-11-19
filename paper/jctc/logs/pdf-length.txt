@@ -3,5 +3,5 @@ abstract_numerals=4
 body_words=5010
 pages=22
 sha256 f035bff24003d5fa7149e868841aa79c239289bc9cdf72341215d152eae4c607  paper/jctc/manuscript.tex
-sha256 341d42927467441d06e60032abc18c4a2e48428bfca06bd6ccfd67606cee04bd  paper/jctc/macros.tex
-sha256 d91ee7780406ebbe7875b6845417ac5d674a24838dbf0ecb660d5c3e4cc30ced  paper/jctc/labels-si.tex
+sha256 6652e653ffa2ceba20a11fced397ff4baac356fe845bc95cd239af2ddf527ede  paper/jctc/macros.tex
+sha256 a19aa0e9d06733a0e8e4706ed62a4e0a5ab23796bdee481ee63bc8c475f281ca  paper/jctc/labels-si.tex

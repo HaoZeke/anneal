@@ -11,6 +11,8 @@ import random
 import sys
 from pathlib import Path
 
+from scipy.stats import norm
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -22,7 +24,7 @@ TOLERANCE = 1.0e-6
 V8_BEST = -81.389905659858
 BOOT_SEED = 20261110
 BOOT_DRAWS = 10000
-Z = 1.959963984540054
+Z = float(norm.ppf(0.975))
 
 
 def ranks(values):

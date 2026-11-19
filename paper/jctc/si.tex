@@ -977,8 +977,6 @@ AGOX searches with a local surrogate, and GOFEE is the surrogate search of Bisbo
 The versions are ASE 3.29.0 and AGOX 3.11.1.
 \cite{larsenAse2017,christiansenAgox2022,bisboEfficientGlobalStructure2020}
 A surrogate replaces force calls with model fits, so the cost of a run is not in its force calls alone.
-Section~\ref{sec:si-gofee} gives ASE and GOFEE on Au\(_{55}\), Cu\(_{38}\), Cu\(_{12}\)Au\(_{26}\), Si\(_{10}\),
-C\(_{10}\), and \((\mathrm{H_2O})_{8}\).
 
 \section{Structure plates, sketch-maps, and landfold}
 Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.
@@ -1083,59 +1081,6 @@ In the sealed table, the recommended hop stops \(0.022\) above the Leary
 minimum and basin hopping \(0.119\) above it.}
 \label{fig:occ-lj98}
 \end{figure}
-
-\section{ASE and GOFEE on the other panel systems}
-\label{sec:si-gofee}
-Table~\ref{tab:gofee-si} gives the ASE basin hopping, the ASE minima hopping, and
-AGOX GOFEE on the panel systems that are not Lennard-Jones.
-The potential is that of this code, through \texttt{asg\_eval} for the Gupta
-systems.
-The rows are the arms measured in \path{bench/ase-gofee-h2h/asg2-summary.csv}.
-The other arms of that file are rows recorded in other campaigns, and they are not
-repeated here.
-
-% gofee-si table: start
-\begin{table}
-\caption{ASE basin hopping (BH), ASE minima hopping (MH) and AGOX GOFEE on the
-non-Lennard-Jones panel systems, on the potential of this code.
-Six seeds, one core, budget in force calls, and a wall cap of 2 hours per run.
-Capped counts the runs stopped by the cap, which are misses.
-Calls is the median force-call count of the runs that hit, and Wall is the median
-wall in seconds of all six runs.}
-\label{tab:gofee-si}
-\centering
-\small
-\begin{tabular}{@{}llrrrrr@{}}
-\toprule
-System & Arm & Budget & Hits & Capped & Calls & Wall (s) \\
-\midrule
-Au\(_{55}\) & ASE BH & \(1\times 10^{6}\) & 0/6 & 0 & -- & 197.7 \\
- & ASE MH &  & 0/6 & 6 & -- & 7219.2 \\
- & GOFEE &  & 0/6 & 0 & -- & 3982.8 \\
-\addlinespace
-Cu\(_{38}\) & ASE BH & \(4\times 10^{5}\) & 0/6 & 0 & -- & 56.825 \\
- & ASE MH &  & 0/6 & 0 & -- & 2045.2 \\
- & GOFEE &  & 0/6 & 0 & -- & 568.4 \\
-\addlinespace
-Cu\(_{12}\)Au\(_{26}\) & ASE BH & \(4\times 10^{5}\) & 0/6 & 0 & -- & 56.154 \\
- & ASE MH &  & 0/6 & 0 & -- & 368.8 \\
- & GOFEE &  & 0/6 & 0 & -- & 433.2 \\
-\addlinespace
-Si\(_{10}\) & ASE BH & \(1\times 10^{5}\) & 2/6 & 0 & 49119 & 6.236 \\
- & ASE MH &  & 6/6 & 0 & 6834 & 0.817 \\
- & GOFEE &  & 6/6 & 0 & 7017 & 2.880 \\
-\addlinespace
-C\(_{10}\) & ASE BH & \(1\times 10^{5}\) & 0/6 & 0 & -- & 6.483 \\
- & ASE MH &  & 0/6 & 0 & -- & 48.165 \\
- & GOFEE &  & 0/6 & 0 & -- & 23.545 \\
-\addlinespace
-(H\(_2\)O)\(_8\) & ASE BH & \(2\times 10^{6}\) & 4/6 & 0 & 852121 & 110.0 \\
- & ASE MH &  & 1/6 & 5 & 104019 & 7201.5 \\
- & GOFEE &  & 0/6 & 0 & -- & 604.8 \\
-\bottomrule
-\end{tabular}
-\end{table}
-% gofee-si table: end
 
 \section{TIP4P clusters}
 \label{sec:si-tip4p}
