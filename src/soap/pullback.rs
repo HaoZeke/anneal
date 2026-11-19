@@ -89,6 +89,122 @@ fn tables(spec: SoapSpec) -> Tables {
     }
 }
 
+/// `Jᵀ dp`, the steepest-descent direction of the descriptor leftover:
+/// `-½ ∇ ‖dp - J dr‖²` at `dr = 0`.
+///
+/// A centre's rows reach only its own neighbourhood, and `dp` enters through
+/// the chain rule alone. The adjoint of a centre's coefficients,
+/// `aᵢ = (∂ rows / ∂ cᵢ)ᵀ dpᵢ`, is formed once, and each pair then needs one
+/// contraction with the derivative of its coefficients. No row of `J` and no
+/// entry of `JᵀJ` is built, so the cost is a pass over the pairs and one
+/// coefficient Jacobian per centre. A centre whose `dp` row is zero costs
+/// nothing, which is how fixed atoms drop out.
+///
+/// Returns `None` for a shape mismatch or a non-finite result, so the caller
+/// can fall back to the full solve.
+pub(super) fn descent_direction(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    coefficients: &[Vec<f64>],
+    dp: &[f64],
+) -> Option<Vec<f64>> {
+    let n_at = x.len() / 3;
+    let ace1 = spec.nu3_dim();
+    if n_at < 2 || !(spec.rcut_nn > 0.0) || ace1 == 0 || coefficients.len() != n_at {
+        return None;
+    }
+    let n_max = spec.n_max;
+    let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+    let n_c = n_max * n_lm;
+    let channels = neighbor_channels(species);
+    let n_chan = channels.len();
+    let dim1 = spec.dim();
+    let d0 = dim1 * n_chan;
+    let dim = d0 + ace1 * n_chan;
+    if dp.len() != n_at * dim || !dp.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    let triples = ace1 / n_max;
+    let tab = tables(spec);
+    let mut grad = vec![0.0; 3 * n_at];
+    let mut adjoint = vec![0.0; n_chan * n_c];
+    let mut scaled = vec![0.0; n_lm];
+    for i in 0..n_at {
+        let row = &dp[i * dim..(i + 1) * dim];
+        if row.iter().all(|&value| value == 0.0) {
+            continue;
+        }
+        adjoint.fill(0.0);
+        for ch in 0..n_chan {
+            let c_ch = &coefficients[i][ch * n_c..(ch + 1) * n_c];
+            let a = &mut adjoint[ch * n_c..(ch + 1) * n_c];
+            let soap = &row[ch * dim1..(ch + 1) * dim1];
+            if soap.iter().any(|&value| value != 0.0) {
+                for n in 0..n_max {
+                    for lm in 0..n_lm {
+                        let mut sum = 0.0;
+                        for term in &tab.soap_terms[n][tab.lm_l[lm]] {
+                            let s = if term.doubled {
+                                2.0 * c_ch[n * n_lm + lm]
+                            } else {
+                                c_ch[term.partner * n_lm + lm]
+                            };
+                            sum += soap[term.row] * s;
+                        }
+                        a[n * n_lm + lm] += sum;
+                    }
+                }
+            }
+            let ace = &row[d0 + ch * ace1..d0 + (ch + 1) * ace1];
+            if ace.iter().any(|&value| value != 0.0) {
+                let db = crate::ace::d_from_c(c_ch, n_max, spec.l_max);
+                let db = db
+                    .as_slice()
+                    .expect("ACE coefficient Jacobian is contiguous");
+                for (t, &weight) in ace.iter().enumerate() {
+                    if weight == 0.0 {
+                        continue;
+                    }
+                    let n = t / triples;
+                    let base = t * n_c + n * n_lm;
+                    for &lm in &tab.lms_of_triple[t % triples] {
+                        a[n * n_lm + lm] += weight * db[base + lm];
+                    }
+                }
+            }
+        }
+        for pair in pair_derivatives_of(x, spec, i) {
+            let ch = neighbor_channel(species, pair.neighbor, &channels);
+            let a = &adjoint[ch * n_c..(ch + 1) * n_c];
+            // push = Σ a[n,lm] (g'ₙ u Yₗₘ + gₙ ∇Yₗₘ), grouped so each
+            // harmonic is visited once per radial channel.
+            let mut along = 0.0;
+            scaled.fill(0.0);
+            for n in 0..n_max {
+                let mut projected = 0.0;
+                for lm in 0..n_lm {
+                    projected += a[n * n_lm + lm] * pair.ylm[lm];
+                    scaled[lm] += pair.weight[n] * a[n * n_lm + lm];
+                }
+                along += pair.dweight[n] * projected;
+            }
+            let mut push = [along * pair.u[0], along * pair.u[1], along * pair.u[2]];
+            for lm in 0..n_lm {
+                let dy = pair.dy_cartesian[lm];
+                for k in 0..3 {
+                    push[k] += scaled[lm] * dy[k];
+                }
+            }
+            for k in 0..3 {
+                grad[3 * pair.neighbor + k] += push[k];
+                grad[3 * i + k] -= push[k];
+            }
+        }
+    }
+    grad.iter().all(|value| value.is_finite()).then_some(grad)
+}
+
 /// Builds `JᵀJ` and `Jᵀ dp` for all-mobile atoms, or `None` when the dense
 /// route has to decide (too few atoms, a non-finite entry, a shape mismatch).
 pub(super) fn normal_equations(

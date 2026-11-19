@@ -261,51 +261,55 @@ struct PairDerivative {
 }
 
 fn pair_derivative_cache(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<Vec<PairDerivative>> {
+    (0..x.len() / 3)
+        .map(|i| pair_derivatives_of(x, spec, i))
+        .collect()
+}
+
+/// The neighbours of atom `i` inside the cutoff, in ascending index order,
+/// with the harmonics and radial weights of each pair.
+fn pair_derivatives_of(x: ArrayView1<f64>, spec: SoapSpec, i: usize) -> Vec<PairDerivative> {
     let n_at = x.len() / 3;
-    let mut pairs = Vec::with_capacity(n_at);
-    for i in 0..n_at {
-        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
-        let mut local = Vec::new();
-        for neighbor in 0..n_at {
-            if neighbor == i {
-                continue;
-            }
-            let d = [
-                x[3 * neighbor] - xi[0],
-                x[3 * neighbor + 1] - xi[1],
-                x[3 * neighbor + 2] - xi[2],
-            ];
-            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            if r >= spec.rcut_nn || r < 1e-12 {
-                continue;
-            }
-            let u = [d[0] / r, d[1] / r, d[2] / r];
-            let (ylm, dy_cartesian) = tesseral_cartesian(u, spec.l_max, r);
-            let fc = fcut(r, spec.rcut_nn);
-            let dfc = dfcut(r, spec.rcut_nn);
-            let mut weight = Vec::with_capacity(spec.n_max);
-            let mut dweight = Vec::with_capacity(spec.n_max);
-            for n in 0..spec.n_max {
-                let g = radial(n, r, spec.rcut_nn);
-                let dg = dradial(n, r, spec.rcut_nn);
-                weight.push(g * fc);
-                dweight.push(dg * fc + g * dfc);
-            }
-            local.push(PairDerivative {
-                neighbor,
-                r,
-                u,
-                ylm,
-                dy_cartesian,
-                fc,
-                dfc,
-                weight,
-                dweight,
-            });
+    let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+    let mut local = Vec::new();
+    for neighbor in 0..n_at {
+        if neighbor == i {
+            continue;
         }
-        pairs.push(local);
+        let d = [
+            x[3 * neighbor] - xi[0],
+            x[3 * neighbor + 1] - xi[1],
+            x[3 * neighbor + 2] - xi[2],
+        ];
+        let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if r >= spec.rcut_nn || r < 1e-12 {
+            continue;
+        }
+        let u = [d[0] / r, d[1] / r, d[2] / r];
+        let (ylm, dy_cartesian) = tesseral_cartesian(u, spec.l_max, r);
+        let fc = fcut(r, spec.rcut_nn);
+        let dfc = dfcut(r, spec.rcut_nn);
+        let mut weight = Vec::with_capacity(spec.n_max);
+        let mut dweight = Vec::with_capacity(spec.n_max);
+        for n in 0..spec.n_max {
+            let g = radial(n, r, spec.rcut_nn);
+            let dg = dradial(n, r, spec.rcut_nn);
+            weight.push(g * fc);
+            dweight.push(dg * fc + g * dfc);
+        }
+        local.push(PairDerivative {
+            neighbor,
+            r,
+            u,
+            ylm,
+            dy_cartesian,
+            fc,
+            dfc,
+            weight,
+            dweight,
+        });
     }
-    pairs
+    local
 }
 
 /// Species-aware SOAP plus the same 4-body scalars (all neighbors).
@@ -1090,7 +1094,18 @@ pub fn pullback_nu3(
     mobile: Option<&[usize]>,
 ) -> Array1<f64> {
     let cache = nu3_cache(x, spec, species);
-    pullback_nu3_with_cache(x, target, spec, species, mobile, &cache)
+    pullback_nu3_with_cache(x, target, spec, species, mobile, &cache, Pullback::Exact)
+}
+
+/// How far a descriptor pullback is carried.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pullback {
+    /// The regularised Gauss-Newton step, `(JᵀJ + λI) dr = Jᵀ dp`.
+    Exact,
+    /// The descent direction `Jᵀ dp`, for proposals whose length the cap
+    /// sets afterwards. Only the direction is used, and neither `J` nor
+    /// `JᵀJ` is formed.
+    Descent,
 }
 
 fn pullback_nu3_with_cache(
@@ -1100,6 +1115,7 @@ fn pullback_nu3_with_cache(
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
     cache: &Nu3Cache,
+    kind: Pullback,
 ) -> Array1<f64> {
     let loc = &cache.local;
     let n_at = loc.nrows();
@@ -1116,6 +1132,34 @@ fn pullback_nu3_with_cache(
     let coefficients = (cache.coefficients.len() == n_at).then_some(cache.coefficients.as_slice());
     let keep = mobile_mask(n_at, mobile);
     let all_mobile = keep.iter().all(|&b| b);
+    if kind == Pullback::Descent {
+        if let Some(coefficients) = coefficients {
+            for i in (0..n_at).filter(|&i| !keep[i]) {
+                for t in 0..dim {
+                    dp[i * dim + t] = 0.0;
+                }
+            }
+            if let Some(grad) = pullback::descent_direction(
+                x,
+                spec,
+                species,
+                coefficients,
+                dp.as_slice().unwrap_or(&[]),
+            ) {
+                let mut dr = Array1::from(grad);
+                if all_mobile {
+                    strip_rigid(x, &mut dr);
+                } else {
+                    for i in (0..n_at).filter(|&i| !keep[i]) {
+                        for a in 0..3 {
+                            dr[3 * i + a] = 0.0;
+                        }
+                    }
+                }
+                return dr;
+            }
+        }
+    }
     if all_mobile {
         if let Some(coefficients) = coefficients {
             if let Some(mut dr) =
@@ -1258,7 +1302,15 @@ fn step_away_outliers_with_cache<R: Rng + ?Sized>(
             target[i * dim + t] = loc[[i, t]] + u[t];
         }
     }
-    let dr = pullback_nu3_with_cache(x, target.view(), spec, species, mobile, cache);
+    let dr = pullback_nu3_with_cache(
+        x,
+        target.view(),
+        spec,
+        species,
+        mobile,
+        cache,
+        Pullback::Descent,
+    );
     scale_to_cap(x, dr, rmsd)
 }
 
@@ -3017,7 +3069,15 @@ fn step_away_cloud_with_cache(
     if nu3_rms < NU3_DEFECT {
         return x.to_owned();
     }
-    let dr = pullback_nu3_with_cache(x, target.view(), spec, species, mobile, cache);
+    let dr = pullback_nu3_with_cache(
+        x,
+        target.view(),
+        spec,
+        species,
+        mobile,
+        cache,
+        Pullback::Descent,
+    );
     let y = scale_to_cap(x, dr, rmsd);
     retract_rigid_groups(x, y, groups)
 }
@@ -4228,6 +4288,118 @@ mod tests {
                 "pullback differs for {n} atoms, mode {species_mode}"
             );
         }
+    }
+
+    fn leftover_cluster(
+        n: usize,
+        seed: u64,
+        two_species: bool,
+    ) -> (
+        Array1<f64>,
+        SoapSpec,
+        Option<Vec<u32>>,
+        Nu3Cache,
+        Array1<f64>,
+    ) {
+        let x = jittered_cluster(n, seed);
+        let spec = structure_spec(x.view());
+        let labels = two_species.then(|| (0..n).map(|i| (i % 3 == 0) as u32 + 1).collect());
+        let cache = nu3_cache(x.view(), spec, labels.as_deref());
+        let dim = cache.local.ncols();
+        let mut dp = Array1::<f64>::zeros(n * dim);
+        for i in 0..n {
+            for t in 0..dim {
+                if (i + t) % 5 != 0 {
+                    dp[i * dim + t] = 0.03 * ((i * dim + t + 1) as f64).sin();
+                }
+            }
+        }
+        (x, spec, labels, cache, dp)
+    }
+
+    #[test]
+    fn descent_direction_is_the_transposed_jacobian_applied_to_the_leftover() {
+        for (n, two_species, seed) in [(9usize, false, 11u64), (26, true, 12), (31, false, 13)] {
+            let (x, spec, labels, cache, dp) = leftover_cluster(n, seed, two_species);
+            let species = labels.as_deref();
+            let dim = cache.local.ncols();
+            let j = jacobian_nu3_with_cache(x.view(), spec, species, Some(&cache.coefficients));
+            let mut sparse = dp.clone();
+            for i in (0..n).filter(|i| i % 3 == 1) {
+                for t in 0..dim {
+                    sparse[i * dim + t] = 0.0;
+                }
+            }
+            for leftover in [&dp, &sparse] {
+                let want = j.t().dot(leftover);
+                let got = pullback::descent_direction(
+                    x.view(),
+                    spec,
+                    species,
+                    &cache.coefficients,
+                    leftover.as_slice().unwrap(),
+                )
+                .expect("a finite leftover has a direction");
+                let scale = want.iter().map(|v| v.abs()).fold(0.0, f64::max);
+                assert!(scale > 0.0);
+                let worst = got
+                    .iter()
+                    .zip(want.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f64::max);
+                assert!(
+                    worst <= 1e-10 * scale,
+                    "descent direction off by {worst:e} (scale {scale:e}) for {n} atoms"
+                );
+                let decrease = j.dot(&Array1::from(got)).dot(leftover);
+                assert!(decrease > 0.0, "the step must lower the leftover");
+            }
+        }
+    }
+
+    #[test]
+    fn a_proposal_pullback_follows_the_descent_direction_of_the_mobile_centres() {
+        let (x, spec, labels, cache, dp) = leftover_cluster(24, 21, false);
+        let species = labels.as_deref();
+        let target = &cache.local + &dp.clone().into_shape_with_order(cache.local.dim()).unwrap();
+        let target = target.iter().copied().collect::<Array1<f64>>();
+        let exact = pullback_nu3_with_cache(
+            x.view(),
+            target.view(),
+            spec,
+            species,
+            None,
+            &cache,
+            Pullback::Exact,
+        );
+        let fast = pullback_nu3_with_cache(
+            x.view(),
+            target.view(),
+            spec,
+            species,
+            None,
+            &cache,
+            Pullback::Descent,
+        );
+        assert_eq!(fast.len(), exact.len());
+        let dot: f64 = fast.iter().zip(exact.iter()).map(|(a, b)| a * b).sum();
+        assert!(dot > 0.0, "both steps must lower the same leftover");
+        let mean: f64 = (0..24).map(|i| fast[3 * i]).sum::<f64>() / 24.0;
+        assert!(mean.abs() < 1e-12, "rigid translation was not removed");
+        let mobile = [0usize, 2, 3, 5, 7, 11, 13];
+        let held = pullback_nu3_with_cache(
+            x.view(),
+            target.view(),
+            spec,
+            species,
+            Some(&mobile),
+            &cache,
+            Pullback::Descent,
+        );
+        for i in (0..24).filter(|i| !mobile.contains(i)) {
+            assert_eq!(&held.as_slice().unwrap()[3 * i..3 * i + 3], &[0.0; 3]);
+        }
+        assert!(held.iter().any(|&v| v != 0.0));
     }
 
     #[test]
