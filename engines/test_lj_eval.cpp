@@ -184,6 +184,7 @@ int main() {
                     stress) != 0) {
     return fail("rgpot_lj_eval rejected the dimer");
   }
+  const double first_energy = energy;
   const double expect = shifted(r, u0, cutoff, psi);
   if (std::abs(energy - expect) > 1e-12) {
     std::fprintf(stderr, "energy %.16e expect %.16e\n", energy, expect);
@@ -213,6 +214,17 @@ int main() {
   if (rgpot_lj_eval(nullptr, z, 2, box, u0, cutoff, psi, forces, &energy, &has_stress,
                     stress) == 0) {
     return fail("a null coordinate pointer was accepted");
+  }
+  const double coincident[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  if (rgpot_lj_eval(coincident, z, 2, box, u0, cutoff, psi, forces, &energy, &has_stress,
+                    stress) != 1) {
+    return fail("coincident atoms were accepted by rgpot_lj_eval");
+  }
+  double recovered = 0.0;
+  if (rgpot_lj_eval(xyz, z, 2, box, u0, cutoff, psi, forces, &recovered, &has_stress,
+                    stress) != 0 ||
+      recovered != first_energy) {
+    return fail("rgpot_lj_eval did not recover after coincident atoms");
   }
   return kept_checks();
 }

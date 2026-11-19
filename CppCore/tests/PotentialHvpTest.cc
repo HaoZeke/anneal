@@ -84,7 +84,7 @@ TEST_CASE("LJPot reports coincident atoms through its public APIs", "[hvp][lj]")
   std::array<double, 6> raw_positions{};
   std::array<int, 2> raw_atoms{1, 1};
   std::array<double, 9> raw_cell{
-      20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 20.0};
+      20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0};
   InputSpec input(raw_atoms.size(), raw_positions.data(), raw_atoms.data(),
                   raw_cell.data());
   auto handle = PotentialHandle::from_impl(lj);
@@ -92,7 +92,27 @@ TEST_CASE("LJPot reports coincident atoms through its public APIs", "[hvp][lj]")
   CHECK(rgpot_potential_calculate(handle.raw(), &input.c_struct(),
                                   &output.c_struct()) ==
         RGPOT_INTERNAL_ERROR);
+  CHECK_THAT(rgpot_last_error(),
+             Catch::Matchers::ContainsSubstring("coincident atoms"));
   CHECK_THROWS_AS(handle.calculate(input), rgpot::Error);
+
+  CHECK(rgpot_potential_hvp_centre(handle.raw(), &input.c_struct(),
+                                   &output.c_struct()) ==
+        RGPOT_INTERNAL_ERROR);
+  CHECK(handle.fused_error_kind() == RGPOT_FUSED_ENGINE_FAILED);
+  CHECK_THROWS_AS(handle.hvp_centre(input), rgpot::Error);
+
+  const std::vector<double> v{0.2, -0.1, 0.3, -0.2, 0.4, -0.3};
+  std::vector<double> hv(v.size(), 0.0);
+  for (const auto scheme :
+       {RGPOT_HVP_AUTO, RGPOT_HVP_ANALYTIC, RGPOT_HVP_FORWARD}) {
+    CHECK(rgpot_potential_hvp(handle.raw(), &input.c_struct(), v.data(), 0.0,
+                              static_cast<int32_t>(scheme), hv.data()) ==
+          RGPOT_INTERNAL_ERROR);
+    CHECK_THAT(rgpot_last_error(),
+               Catch::Matchers::ContainsSubstring("coincident atoms"));
+  }
+  CHECK_THROWS_AS(handle.hvp(input, v), rgpot::Error);
 }
 
 TEST_CASE("k forward products through a handle cost k + 1 force calls", "[hvp]") {

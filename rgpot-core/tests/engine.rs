@@ -932,3 +932,120 @@ fn engine_caps_layout_is_the_c_header_layout() {
     }
     assert_eq!(size_of::<RgpotEngineCaps>(), 4 * declared.len());
 }
+
+#[test]
+fn coincident_pair_reports_recoverable_eval_error_and_internal_status() {
+    let path = build("harmonic_coincident", &["REJECT_COINCIDENT"]);
+    let mut engine = load(&path);
+    let coincident = [1.0, 2.0, 3.0, 1.0, 2.0, 3.0];
+    let numbers = [1, 1];
+    let direction = [0.5, -0.25, 0.75, -0.5, 0.25, -0.75];
+    let expected = EngineError::Recoverable {
+        code: 2,
+        message: "coincident atoms".into(),
+    };
+
+    assert_eq!(
+        engine
+            .force(&EngineRequest {
+                positions: &coincident,
+                atomic_numbers: &numbers,
+                box_matrix: &CELL,
+            })
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        engine
+            .force_batch(&numbers, &coincident, &CELL)
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        engine
+            .hvp(
+                &EngineRequest {
+                    positions: &coincident,
+                    atomic_numbers: &numbers,
+                    box_matrix: &CELL,
+                },
+                &direction,
+            )
+            .unwrap_err(),
+        expected
+    );
+
+    let potential = engine.into_potential();
+    let mut positions = coincident.to_vec();
+    let mut atomic_numbers = numbers.to_vec();
+    let mut cell = CELL;
+    let input = rgpot_force_input_t {
+        positions: unsafe { rgpot_tensor_cpu_f64_2d(positions.as_mut_ptr(), 2, 3) },
+        atomic_numbers: unsafe { rgpot_tensor_cpu_i32_1d(atomic_numbers.as_mut_ptr(), 2) },
+        box_matrix: unsafe { rgpot_tensor_cpu_f64_matrix3(cell.as_mut_ptr()) },
+    };
+    let mut output = rgpot_force_out_t {
+        forces: std::ptr::null_mut(),
+        energy: 0.0,
+        variance: 0.0,
+    };
+    assert_eq!(
+        unsafe { potential.calculate(&input, &mut output) },
+        rgpot_status_t::RGPOT_INTERNAL_ERROR
+    );
+    assert!(output.forces.is_null());
+
+    assert_eq!(
+        unsafe {
+            rgpot_core::c_api::hvp::rgpot_potential_hvp_centre(
+                potential.as_handle() as *const _,
+                &input,
+                &mut output,
+            )
+        },
+        rgpot_status_t::RGPOT_INTERNAL_ERROR
+    );
+    let mut hv_out = [0.0; 6];
+    for scheme in [
+        rgpot_hvp_scheme_t::RGPOT_HVP_AUTO,
+        rgpot_hvp_scheme_t::RGPOT_HVP_ANALYTIC,
+        rgpot_hvp_scheme_t::RGPOT_HVP_FORWARD,
+    ] {
+        assert_eq!(
+            unsafe {
+                rgpot_core::c_api::hvp::rgpot_potential_hvp(
+                    potential.as_handle() as *const _,
+                    &input,
+                    direction.as_ptr(),
+                    0.0,
+                    scheme as c_int,
+                    hv_out.as_mut_ptr(),
+                )
+            },
+            rgpot_status_t::RGPOT_INTERNAL_ERROR
+        );
+    }
+
+    unsafe {
+        rgpot_tensor_free(input.positions);
+        rgpot_tensor_free(input.atomic_numbers);
+        rgpot_tensor_free(input.box_matrix);
+    }
+
+    let mut separated = [0.0, 0.0, 0.0, 1.5, 0.0, 0.0];
+    let sep_input = rgpot_force_input_t {
+        positions: unsafe { rgpot_tensor_cpu_f64_2d(separated.as_mut_ptr(), 2, 3) },
+        atomic_numbers: unsafe { rgpot_tensor_cpu_i32_1d(atomic_numbers.as_mut_ptr(), 2) },
+        box_matrix: unsafe { rgpot_tensor_cpu_f64_matrix3(cell.as_mut_ptr()) },
+    };
+    assert_eq!(
+        unsafe { potential.calculate(&sep_input, &mut output) },
+        rgpot_status_t::RGPOT_SUCCESS
+    );
+    unsafe {
+        rgpot_tensor_free(output.forces);
+        rgpot_tensor_free(sep_input.positions);
+        rgpot_tensor_free(sep_input.atomic_numbers);
+        rgpot_tensor_free(sep_input.box_matrix);
+    }
+}
