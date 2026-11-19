@@ -80,7 +80,7 @@ fn incremental_exp_and_supplied_coefficients_use_the_same_recurrences() {
         reciprocal
             .coefficients()
             .iter()
-            .map(Interval::bounds)
+            .map(|coefficient| coefficient.bounds())
             .collect::<Vec<_>>(),
         vec![(1.0, 1.0); 3]
     );
