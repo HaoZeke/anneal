@@ -67,7 +67,11 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 HIT_TOL = DEFAULT_HIT_TOL
+# SVNREV of the rows behind bench/gmin-panel/rows.csv and the paper table.
 GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+# 2026-11-19 snapshot pinned by scripts/gmin_panel/build_gmin.sh.
+GMIN_PIN = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 PAPER_BUDGETS = {
     "lj38": 400_000,
     "lj55": 1_000_000,
@@ -919,8 +923,12 @@ def main(argv: list[str]) -> int:
     source = dict(
         line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line
     )
-    if source.get("svnrev") != GMIN_REV:
-        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {GMIN_REV}")
+    if source.get("svnrev") != GMIN_PIN:
+        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {GMIN_PIN}")
+    if source.get("tarball_sha256") != GMIN_TARBALL_SHA256:
+        raise SystemExit(
+            f"GMIN tarball sha256 {source.get('tarball_sha256')} is not {GMIN_TARBALL_SHA256}"
+        )
     systems = [row[0] for row in SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
         budget, reference = binary_budget(args.bin, args.tree, system)
@@ -935,12 +943,12 @@ def main(argv: list[str]) -> int:
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     done = set() if args.rerun else {row_key(r) for r in read_rows(args.rows)}
     seeds = tuple(args.seed) if args.seed else SEEDS
-    print(f"session {session} revision {args.revision} gmin {GMIN_REV} order {args.order}", flush=True)
+    print(f"session {session} revision {args.revision} gmin {GMIN_PIN} order {args.order}", flush=True)
     for system in systems:
         driver, _binary = resolve_driver(args.bin, args.tree, system)
         for seed in seeds:
             for slot, code in enumerate(arm_sequence(args.order, seed)):
-                code_revision = args.revision if code == "anneal" else GMIN_REV
+                code_revision = args.revision if code == "anneal" else GMIN_PIN
                 key = (system, code, str(seed), code_revision, args.revision)
                 if key in done:
                     print(f"skip {system} {code} {seed}", flush=True)
