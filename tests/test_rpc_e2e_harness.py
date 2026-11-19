@@ -118,6 +118,14 @@ def test_python_api_metatomic_flag_matches_the_binding() -> None:
     window = text[start : text.index("*** =rgpot.has_xckernel=")]
     assert "compiled with =RGPOT_HAS_METATOMIC=" not in window
     assert "every" in window.lower()
+    calls = text.index("*** =rgpot.evaluate_metatomic=")
+    calls = text[calls : text.index("*** =rgpot.default_metatomic_engine_path=")]
+    assert "has no MetatomicDlopen frontend" not in calls
+    assert "has_metatomic_dlopen= is false" not in calls
+    howto = (ROOT / "docs" / "orgmode" / "howto" / "pip-python.org").read_text(
+        encoding="utf-8"
+    )
+    assert "has_metatomic_dlopen= is =False=" not in howto
 
 
 def test_librgpot_soname_is_an_installed_target() -> None:

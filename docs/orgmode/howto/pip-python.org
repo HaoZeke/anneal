@@ -135,8 +135,9 @@ pot = rgpot.ExprPot("lj + morse", {
 
 =evaluate_metatomic= takes =model_path=, =engine_path= and =device= as
 keyword-only arguments.
-It raises =RuntimeError= when the build has no =MetatomicDlopen= frontend
-(=rgpot.has_metatomic_dlopen= is =False=).
+The dlopen frontend is present in every build, so
+=rgpot.has_metatomic_dlopen= is =True=.
+The engine library is opened at runtime.
 
 #+attr_rgpot: compile needs a Metatomic model file and the engine plugin
 #+begin_src python

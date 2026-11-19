@@ -165,7 +165,8 @@ def evaluate_metatomic(
 ) -> Any:
     """Evaluate a Metatomic model through the dlopen engine.
 
-    Raises RuntimeError when the build has no Metatomic dlopen frontend.
+    The frontend is part of every build. The engine library is opened
+    at runtime.
     """
     # Load torch via the Python extension first so the engine's DT_NEEDED
     # libtorch resolves to the same process image (avoids dual-load races).
