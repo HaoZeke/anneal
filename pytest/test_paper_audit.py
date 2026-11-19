@@ -1687,3 +1687,22 @@ def test_tblite_receipt_reads_package_metadata(tmp_path):
     assert receipt["metadata_sha256"] == hashlib.sha256(
         metadata.read_bytes()
     ).hexdigest()
+
+
+@pytest.mark.parametrize("path", ["paper/jctc/manuscript.tex", "paper/jctc/si.tex", "paper/jctc/cover-letter.tex"])
+def test_a_reinstated_science_institute_affiliation_is_rejected(path):
+    audit = audit_mod.Audit()
+    audit_mod.manuscript_new(audit)
+    assert not [row for row in audit.drifts() if "Science Institute" in row[2]]
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path) + "\nScience Institute, University of Iceland\n"
+    audit_mod.manuscript_new(audit)
+    assert [row for row in audit.drifts() if row[1] == path and "Science Institute" in row[2]]
+
+
+@pytest.mark.parametrize("path", ["CITATION.cff", ".zenodo.json"])
+def test_a_swapped_citation_affiliation_order_is_rejected(path):
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path).replace("SURF B.V.; TurtleTech ehf", "TurtleTech ehf; SURF B.V.")
+    audit_mod.manuscript_new(audit)
+    assert [row for row in audit.drifts() if row[1] == path]
