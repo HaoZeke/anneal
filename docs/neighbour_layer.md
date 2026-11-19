@@ -221,7 +221,14 @@ candidate upper pairs (`kMinParallelHalfPairs`), `MorsePot` evaluates
 each upper pair once in a two-phase OpenMP region (`forEachSlicePhase`),
 batching `simd::exp_fixed_n` and partitioning atoms by pair count on
 8-atom boundaries before reducing forces in partner index order; sparser
-stored lists stay on one thread. `fastTiles` runs
+stored lists stay on one thread. Boundary words of the 1-bit active-pair
+mask are merged with `std::atomic_ref` (which on LLVM's C++ library
+requires `libc++` 19 or newer, `_LIBCPP_VERSION >= 190000`), falling
+back to `__atomic_fetch_or` on older `libc++`: Meson checks
+`_LIBCPP_VERSION < 190000` and probes `__atomic_fetch_or`, while CMake
+probes `std::atomic_ref<std::uint64_t>` directly and then probes the
+compiler intrinsic fallback, failing at configure time if neither is
+supported. `fastTiles` runs
 only when `streaming()` holds, so `forCellTeam` on a stored list walks
 `walkStored` instead of rebuilding a 27-cell tile stencil. A
 stream walks whole rows on any thread count, so on one thread a two-body

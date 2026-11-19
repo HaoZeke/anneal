@@ -84,6 +84,24 @@ endif()
 
 # 1. Server/Physics Dependencies
 if(NOT RGPOT_RPC_CLIENT_ONLY)
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles(
+    "#include <atomic>\n#include <cstdint>\nint main() { std::uint64_t w = 0; std::atomic_ref<std::uint64_t>(w).fetch_or(1u, std::memory_order_relaxed); return 0; }"
+    RGPOT_HAS_STD_ATOMIC_REF)
+  if(NOT RGPOT_HAS_STD_ATOMIC_REF)
+    check_cxx_source_compiles(
+      "#include <cstdint>\n#if defined(_MSC_VER)\n#include <intrin.h>\n#endif\nint main() {\n  std::uint64_t w = 0;\n#if defined(__GNUC__) || defined(__clang__)\n  __atomic_fetch_or(&w, 1u, __ATOMIC_RELAXED);\n#elif defined(_MSC_VER)\n  _InterlockedOr64(reinterpret_cast<volatile long long *>(&w), 1LL);\n#else\n#error \"no atomic_fetch_or fallback\"\n#endif\n  return 0;\n}"
+      RGPOT_HAS_ATOMIC_FETCH_OR_FALLBACK)
+    if(NOT RGPOT_HAS_ATOMIC_FETCH_OR_FALLBACK)
+      message(
+        FATAL_ERROR
+          "std::atomic_ref requires libc++ 19 or newer (or a compiler with __atomic_fetch_or)"
+      )
+    endif()
+    message(
+      STATUS
+        "std::atomic_ref unavailable, using compiler atomic fetch_or fallback")
+  endif()
   # Core builds provide every public Fortran potential. The RPC-only
   # bridge has no numerical kernels and does not need a Fortran compiler.
   enable_language(Fortran)

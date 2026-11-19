@@ -130,6 +130,28 @@ if host_system != 'windows'
     endif
 endif
 
+if not get_option('with_rpc_client_only')
+    _libcpp_ver = cppc.get_define(
+        '_LIBCPP_VERSION',
+        prefix: '#include <version>',
+        args: cppc.get_supported_arguments(['-std=c++20', '/std:c++20']),
+    ).strip()
+    if _libcpp_ver != '' and _libcpp_ver.to_int() < 190000
+        if not cppc.compiles(
+            '#include <cstdint>\nint main() { std::uint64_t w = 0; __atomic_fetch_or(&w, 1u, __ATOMIC_RELAXED); return 0; }',
+            args: cppc.get_supported_arguments(['-std=c++20']),
+            name: 'atomic_fetch_or fallback for libc++ < 19',
+        )
+            error(
+                'libc++ ' + _libcpp_ver + ' (< 190000) lacks std::atomic_ref and compiler lacks __atomic_fetch_or; upgrade to libc++ 19 or newer',
+            )
+        endif
+        message(
+            'libc++ ' + _libcpp_ver + ' (< 19): std::atomic_ref unavailable, using __atomic_fetch_or fallback',
+        )
+    endif
+endif
+
 # ------------------------ vesin (neighbour lists)
 # One vesin for the whole tree: the nlist headers, MetatomicPot, and the
 # Fortran pots all consume this dependency. Prefer an installed vesin

@@ -39,6 +39,9 @@ struct MorseSplitSnapshot {
 [[nodiscard]] RGPOT_MORSE_TEST_HIDDEN MorseSplitSnapshot
 morseStoredSplitSnapshot();
 
+RGPOT_MORSE_TEST_HIDDEN void
+morseAtomicFetchOrWord(std::uint64_t &word, std::uint64_t mask) noexcept;
+
 } // namespace detail
 
 } // namespace rgpot

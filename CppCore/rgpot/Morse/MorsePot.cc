@@ -18,6 +18,9 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 // clang-format on
 
 #include "rgpot/Morse/MorsePot.hpp"
@@ -69,6 +72,21 @@ struct PairForce {
   double fy;
   double fz;
 };
+
+inline void atomicFetchOr(std::uint64_t &word, std::uint64_t mask) noexcept {
+#if defined(__cpp_lib_atomic_ref) && __cpp_lib_atomic_ref >= 201806L
+  std::atomic_ref<std::uint64_t>(word).fetch_or(mask,
+                                                std::memory_order_relaxed);
+#elif defined(__GNUC__) || defined(__clang__)
+  __atomic_fetch_or(&word, mask, __ATOMIC_RELAXED);
+#elif defined(_MSC_VER)
+  _InterlockedOr64(reinterpret_cast<volatile long long *>(&word),
+                   static_cast<long long>(mask));
+#else
+#error                                                                         \
+    "atomicFetchOr requires std::atomic_ref, __atomic_fetch_or, or _InterlockedOr64"
+#endif
+}
 
 struct MorseWorkspace {
   const nlist::Neighbours *owner = nullptr;
@@ -540,12 +558,10 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
                 });
             flushBatch(batch, emit);
             if (first_mask != 0ULL) {
-              std::atomic_ref<std::uint64_t>(active_bits[first_w])
-                  .fetch_or(first_mask, std::memory_order_relaxed);
+              atomicFetchOr(active_bits[first_w], first_mask);
             }
             if (last_mask != 0ULL) {
-              std::atomic_ref<std::uint64_t>(active_bits[last_w])
-                  .fetch_or(last_mask, std::memory_order_relaxed);
+              atomicFetchOr(active_bits[last_w], last_mask);
             }
             return;
           }
@@ -839,6 +855,10 @@ void MorsePot::hessianVectorImpl(const ForceInput &in, const double *v,
 }
 
 namespace detail {
+
+void morseAtomicFetchOrWord(std::uint64_t &word, std::uint64_t mask) noexcept {
+  atomicFetchOr(word, mask);
+}
 
 MorseSplitSnapshot morseStoredSplitSnapshot() {
   WorkspaceLease lease;
