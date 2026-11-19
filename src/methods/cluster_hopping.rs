@@ -3421,7 +3421,8 @@ fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
 mod rigid_step_tests {
     use super::cycles::tests::{bond_sets, tadpole};
     use super::{Config, Ledger, MoveLibrary, rigid_step_scale, run};
-    use ndarray::ArrayView1;
+    use super::{RIGID_STALL_HOP_NOTES, RIGID_STALL_OPENING_COPIES};
+    use ndarray::{Array1, ArrayView1};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
     use std::collections::BTreeSet;
@@ -3479,6 +3480,51 @@ mod rigid_step_tests {
         let mut rng = StdRng::seed_from_u64(7);
         let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("valid");
         assert_eq!(outcome.best, -20.0);
+    }
+
+    #[test]
+    fn a_short_hop_copies_the_stall_opening_once_and_not_per_step() {
+        fn drive(cfg: &Config, start: Array1<f64>, budget: usize) {
+            let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _| {
+                let _ = ledger.charge();
+                (-1.0, x.to_owned())
+            };
+            let mut ledger = Ledger::new(budget);
+            let mut rng = StdRng::seed_from_u64(11);
+            run(cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("valid");
+        }
+        RIGID_STALL_OPENING_COPIES.with(|n| n.set(0));
+        RIGID_STALL_HOP_NOTES.with(|n| n.set(0));
+        let molecular = Config::for_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        drive(&molecular, Array1::zeros(18), 24);
+        assert_eq!(
+            RIGID_STALL_OPENING_COPIES.with(|n| n.get()),
+            0,
+            "a molecular hop copied an opening geometry for a rigid stall"
+        );
+        assert_eq!(
+            RIGID_STALL_HOP_NOTES.with(|n| n.get()),
+            0,
+            "a molecular hop consulted the rigid stall book"
+        );
+        RIGID_STALL_OPENING_COPIES.with(|n| n.set(0));
+        RIGID_STALL_HOP_NOTES.with(|n| n.set(0));
+        let mut rigid = Config::recommended_tip4p(6);
+        rigid.restart_patience = 10_000;
+        rigid.relax_steps = 1;
+        drive(&rigid, Array1::zeros(36), 24);
+        let copies = RIGID_STALL_OPENING_COPIES.with(|n| n.get());
+        let notes = RIGID_STALL_HOP_NOTES.with(|n| n.get());
+        assert_eq!(copies, 1, "opening copies {copies}");
+        assert!(notes > 1, "the rigid hop never reached the stall note");
+        assert!(
+            copies < notes,
+            "opening copies {copies} tracked hop notes {notes}"
+        );
     }
 }
 
@@ -4217,6 +4263,107 @@ fn lengths_of_quenched_cluster(cfg: &Config, x: ArrayView1<f64>) -> Option<Confi
     scaled.container *= factor;
     scaled.neighbour_cutoff *= factor;
     Some(scaled)
+}
+
+/// Bookkeeping for a stalled rigid-body walk.
+///
+/// The fields live in one heap box. The hop loop holds the box, not the
+/// opening geometry: a Tric step on a small water cluster was spilling that
+/// geometry across every potential call even when the walk never stalled.
+struct RigidStallBook {
+    initial_e: f64,
+    initial_x: Array1<f64>,
+    archive_best_seen: f64,
+    charged_at_archive_best: usize,
+    post_cage_archive_best: bool,
+    side_lowest: f64,
+    side_lowest_state: Option<Array1<f64>>,
+    shell_spent: usize,
+}
+
+thread_local! {
+    /// Opening geometries copied while arming a rigid stall book.
+    ///
+    /// A molecular search stays at zero. A rigid search takes one, when the
+    /// book is armed, not one per hop.
+    pub(crate) static RIGID_STALL_OPENING_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Times the hop loop consulted the stall book. Molecular hops do not.
+    pub(crate) static RIGID_STALL_HOP_NOTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn count_opening_copy() {
+    RIGID_STALL_OPENING_COPIES.with(|n| n.set(n.get().saturating_add(1)));
+}
+
+fn count_hop_note() {
+    RIGID_STALL_HOP_NOTES.with(|n| n.set(n.get().saturating_add(1)));
+}
+
+/// Record a lower ledger minimum for the stalled walk.
+///
+/// Not inlined: the book's fields must not be live across the quench.
+#[inline(never)]
+fn note_rigid_stall_best(
+    book: &mut RigidStallBook,
+    best: f64,
+    spent: usize,
+    cage_walked: bool,
+    new_lowest: f64,
+) {
+    count_hop_note();
+    if best < book.archive_best_seen - new_lowest {
+        book.archive_best_seen = best;
+        book.charged_at_archive_best = spent;
+        if cage_walked {
+            book.post_cage_archive_best = true;
+        }
+    }
+}
+
+/// Whether the stalled archive walk should start.
+///
+/// Not inlined, for the same reason as [`note_rigid_stall_best`].
+#[inline(never)]
+fn rigid_archive_due(
+    book: &RigidStallBook,
+    cfg: &Config,
+    spent: usize,
+    remaining: usize,
+    cage_walked: bool,
+) -> bool {
+    let cage_patience = cfg
+        .restart_patience
+        .saturating_mul(RIGID_CAGE_WINDOWS)
+        .max(1);
+    let archive_patience = cfg
+        .restart_patience
+        .saturating_mul(RIGID_CAGE_WINDOWS.saturating_mul(4))
+        .max(1);
+    let early_best =
+        book.charged_at_archive_best < book.shell_spent.saturating_add(cage_patience / 2);
+    let archive_wait = if book.post_cage_archive_best || early_best {
+        archive_patience
+    } else {
+        archive_patience.saturating_mul(3) / 4
+    };
+    spent.saturating_sub(book.charged_at_archive_best) >= archive_wait
+        || (cage_walked
+            && !book.post_cage_archive_best
+            && !early_best
+            && remaining <= archive_patience.saturating_mul(3) / 4
+            && spent.saturating_sub(book.charged_at_archive_best) >= archive_patience / 2)
+}
+
+/// Keep the deepest side-walk quench for the ledger.
+#[inline(never)]
+fn note_side_lowest(book: &mut RigidStallBook, quenched: f64, relaxed: &Array1<f64>) {
+    if quenched < book.side_lowest {
+        book.side_lowest = quenched;
+        book.side_lowest_state = Some(relaxed.clone());
+        if quenched < book.archive_best_seen {
+            book.archive_best_seen = quenched;
+        }
+    }
 }
 
 fn run_full<'g, R, H>(
@@ -5041,15 +5188,22 @@ where
     );
     let cage_quantum = cfg.min_separation / 50.0;
     let mut cage_walked = false;
-    let mut shell_spent = 0usize;
     let mut archive_walked = false;
-    let initial_e = e;
-    let initial_x = x.clone();
-    let mut archive_best_seen = ledger.best;
-    let mut charged_at_archive_best = ledger.spent();
-    let mut post_cage_archive_best = false;
-    let mut side_lowest = f64::INFINITY;
-    let mut side_lowest_state: Option<Array1<f64>> = None;
+    // Armed only for a rigid library. A molecular or TricOpt hop never
+    // clones the opening geometry and never reads this book.
+    let mut stall_book = cfg.move_library.is_rigid_body().then(|| {
+        count_opening_copy();
+        Box::new(RigidStallBook {
+            initial_e: e,
+            initial_x: x.clone(),
+            archive_best_seen: ledger.best,
+            charged_at_archive_best: ledger.spent(),
+            post_cage_archive_best: false,
+            side_lowest: f64::INFINITY,
+            side_lowest_state: None,
+            shell_spent: 0,
+        })
+    });
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
         cage_archive.offer_cage(
@@ -5108,12 +5262,8 @@ where
             cage_edit = false;
             new_incumbent = true;
         }
-        if ledger.best < archive_best_seen - new_lowest {
-            archive_best_seen = ledger.best;
-            charged_at_archive_best = ledger.spent();
-            if cage_walked {
-                post_cage_archive_best = true;
-            }
+        if let Some(book) = stall_book.as_mut() {
+            note_rigid_stall_best(book, ledger.best, ledger.spent(), cage_walked, new_lowest);
         }
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
@@ -5376,12 +5526,8 @@ where
                         contain_trial(cfg, &mut trial, cfg.n_points);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == $state.len() {
-                            if quenched < side_lowest {
-                                side_lowest = quenched;
-                                side_lowest_state = Some(relaxed.clone());
-                                if quenched < archive_best_seen {
-                                    archive_best_seen = quenched;
-                                }
+                            if let Some(book) = stall_book.as_mut() {
+                                note_side_lowest(book, quenched, &relaxed);
                             }
                             let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
                             if rise <= 0.0 || $rng.random::<f64>() < (-rise).exp() {
@@ -5512,35 +5658,27 @@ where
             // The calls just spent are not a new lowest of the main chain.
             // Leaving them on the quiet clock would start the later walk
             // before the main chain has actually stalled.
-            shell_spent = ledger.spent().saturating_sub(shell_mark);
+            let shell_spent = ledger.spent().saturating_sub(shell_mark);
             charged_at_best = charged_at_best.saturating_add(shell_spent);
-            charged_at_archive_best = charged_at_archive_best.saturating_add(shell_spent);
+            if let Some(book) = stall_book.as_mut() {
+                book.shell_spent = shell_spent;
+                book.charged_at_archive_best =
+                    book.charged_at_archive_best.saturating_add(shell_spent);
+            }
         }
         // The shell turn above is the early leave. A longer walk on a stored
         // cage is what reaches the minimum when the shell lands short of it,
         // and it waits out a longer quiet stretch so a chain that is still
         // descending is not spent here.
-        let archive_patience = cfg
-            .restart_patience
-            .saturating_mul(RIGID_CAGE_WINDOWS.saturating_mul(4))
-            .max(1);
-        let early_best = charged_at_archive_best < shell_spent.saturating_add(cage_patience / 2);
-        let archive_wait = if post_cage_archive_best || early_best {
-            archive_patience
-        } else {
-            archive_patience.saturating_mul(3) / 4
-        };
-        let archive_due = ledger.spent().saturating_sub(charged_at_archive_best) >= archive_wait
-            || (cage_walked
-                && !post_cage_archive_best
-                && !early_best
-                && ledger.remaining() <= archive_patience.saturating_mul(3) / 4
-                && ledger.spent().saturating_sub(charged_at_archive_best) >= archive_patience / 2);
+        let archive_due = stall_book.as_ref().is_some_and(|book| {
+            rigid_archive_due(book, cfg, ledger.spent(), ledger.remaining(), cage_walked)
+        });
         if cfg.move_library.is_rigid_body() && !archive_walked && !kernels.is_empty() && archive_due
         {
             archive_walked = true;
-            if let Some(state) = side_lowest_state.as_ref() {
-                ledger.record(side_lowest, state.view());
+            let book = stall_book.as_mut().expect("a rigid stall book");
+            if let Some(state) = book.side_lowest_state.as_ref() {
+                ledger.record(book.side_lowest, state.view());
             }
             let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
             cage_archive.offer_cage(e, x.view(), key);
@@ -5581,8 +5719,8 @@ where
                     branch_stale = 0;
                     side_bandit = FlooredThompson::new(kernels.len());
                     if branch_idx >= 7 && !branch_idx.is_multiple_of(2) {
-                        side_energy = initial_e;
-                        side_state = initial_x.clone();
+                        side_energy = book.initial_e;
+                        side_state = book.initial_x.clone();
                         branch_best = side_energy;
                         continue;
                     }
@@ -9939,8 +10077,10 @@ where
         }
     }
 
-    if let Some(state) = side_lowest_state.as_ref() {
-        ledger.record(side_lowest, state.view());
+    if let Some(book) = stall_book.as_ref()
+        && let Some(state) = book.side_lowest_state.as_ref()
+    {
+        ledger.record(book.side_lowest, state.view());
     }
 
     let n_basins = bias.n_basins();
