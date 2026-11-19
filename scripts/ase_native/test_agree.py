@@ -165,18 +165,25 @@ def check_compare_matches_ase() -> None:
     rng = np.random.default_rng(7)
     original = ComparePositions._indistinguishable_compare
     cases = []
+
+    def add_pair(pos1: np.ndarray, pos2: np.ndarray) -> None:
+        n_atoms = len(pos1)
+        left = Atoms(f"Ar{n_atoms}", positions=pos1, pbc=False)
+        right = Atoms(f"Ar{n_atoms}", positions=pos2, pbc=False)
+        slow = original(ComparePositions(translate=False), left, right)
+        fast = greedy_dmax(pos1, pos2)
+        if slow != fast:
+            raise AssertionError(f"greedy dmax {fast} != {slow}")
+        whole = ComparePositions(translate=True)(left, right)
+        cases.append((left, right, whole))
+
     for n_atoms in (4, 9, 15):
-        for _ in range(6):
+        for _ in range(4):
             pos1 = rng.normal(size=(n_atoms, 3))
-            pos2 = pos1 + rng.normal(scale=0.05, size=pos1.shape)
-            left = Atoms(f"Ar{n_atoms}", positions=pos1, pbc=False)
-            right = Atoms(f"Ar{n_atoms}", positions=pos2, pbc=False)
-            slow = original(ComparePositions(translate=False), left, right)
-            fast = greedy_dmax(pos1, pos2)
-            if slow != fast:
-                raise AssertionError(f"greedy dmax {fast} != {slow}")
-            whole = ComparePositions(translate=True)(left, right)
-            cases.append((left, right, whole))
+            add_pair(pos1, pos1 + rng.normal(scale=0.05, size=pos1.shape))
+            add_pair(pos1, rng.normal(size=(n_atoms, 3)))
+            order = rng.permutation(n_atoms)
+            add_pair(pos1, pos1[order] + np.array([1.25, -0.4, 0.7]))
     install_fast_compare()
     for left, right, whole in cases:
         sped = ComparePositions(translate=True)(left, right)
@@ -185,22 +192,31 @@ def check_compare_matches_ase() -> None:
     from eval_client import DmaxServer
 
     # One persistent process, several sizes. The scalar walk has to return
-    # ASE's distance, not a cheaper bound.
+    # ASE's distance. With a threshold, the value may be a bound, and the
+    # comparison with that threshold has to match ASE outside the band.
     by_size: dict[int, list[tuple[np.ndarray, np.ndarray, float]]] = {}
     for left, right, whole in cases:
-        by_size.setdefault(len(left), []).append((left.positions.copy(), right.positions.copy(), whole))
+        by_size.setdefault(len(left), []).append((left.positions.copy(), right.positions.copy(), float(whole)))
+    thresholds = (0.05, 0.2, 0.7, 1.4, 3.0)
     for n_atoms, samples in by_size.items():
         server = DmaxServer(n_atoms)
+        decided = {threshold: DmaxServer(n_atoms, threshold=threshold) for threshold in thresholds}
         try:
             for pos1, pos2, whole in samples:
                 distance = server.distance(pos1, pos2)
                 if abs(distance - whole) > 1.0e-12:
                     raise AssertionError(f"scalar dmax {distance} != {whole}")
-                for threshold in (0.05, 0.2, 0.7, 1.4):
-                    if abs(distance - threshold) > 1.0e-9 and (distance < threshold) != (whole < threshold):
-                        raise AssertionError("threshold decision changed")
+                for threshold, checker in decided.items():
+                    got = checker.distance(pos1, pos2)
+                    if abs(whole - threshold) <= 1.0e-9:
+                        if abs(got - whole) > 1.0e-12:
+                            raise AssertionError(f"band dmax {got} != {whole}")
+                    elif (got < threshold) != (whole < threshold):
+                        raise AssertionError(f"threshold decision changed at {threshold}")
         finally:
             server.close()
+            for checker in decided.values():
+                checker.close()
 
 
 def main() -> int:
