@@ -148,6 +148,7 @@ NeighbourListTest | tests core | unit neighbour_list_test NeighbourListTest.cc |
 VesinEmptyResetTest | tests core | unit vesin_empty_reset_test VesinEmptyResetTest.cc |
 EAMCellVerletTest | tests core | unit eam_cell_verlet_test EAMCellVerletTest.cc fp_contract=off |
 ManyBodyForceTest | tests core | unit many_body_force_test ManyBodyForceTest.cc |
+PairForceFDTest | tests core | unit pair_force_fd_test PairForceFDTest.cc |
 SkinPairTest | tests core | unit skin_pair_test SkinPairTest.cc |
 MinImageIsaHash | tests core | unit minimage_isa_hash MinImageIsaHash.cc |
 BatchEvaluatorTest | tests core | unit batch_evaluator_test BatchEvaluatorTest.cc |
