@@ -81,6 +81,47 @@ def test_script_exits_zero():
     assert audit_mod.run() == 0
 
 
+def workspace_version():
+    """The crate version, read the same way ``unauditable`` reads it."""
+    return re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
+
+
+def test_missing_release_tag_and_referenced_remote_stop_the_audit(monkeypatch):
+    real_git = audit_mod.git
+    version = workspace_version()
+    missing = {
+        f"refs/tags/v{version}",
+        "refs/remotes/origin/develop",
+    }
+
+    def without_required_refs(*args, stdin=None):
+        if args[:3] == ("show-ref", "--verify", "--quiet") and args[3] in missing:
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", without_required_refs)
+    problems = audit_mod.unauditable()
+    assert f"the release tag v{version} is not present; fetch tags from origin" in problems
+    assert "the remote ref origin/develop is not present; fetch develop from origin" in problems
+
+
+def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch):
+    real_git = audit_mod.git
+    dropped = {
+        "refs/remotes/origin/record/repro-pin",
+        "refs/remotes/origin/bench/cov-floor2",
+        "refs/remotes/origin/fix/sc-shelf-waypoint",
+    }
+
+    def hide_unreferenced(*args, stdin=None):
+        if args[:3] == ("show-ref", "--verify", "--quiet") and args[3] in dropped:
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", hide_unreferenced)
+    assert audit_mod.unauditable() == []
+
+
 def test_a_drifted_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
