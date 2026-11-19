@@ -736,12 +736,16 @@ pub struct Config {
     /// is the Oakley, Johnston and Wales continuous symmetry measure over
     /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
     pub continuous_symmetry: ContinuousSymmetry,
-    /// Scan rotational orders `3..=n_points` in [`ContinuousSymmetry::Measure`]
-    /// instead of the fixed fivefold channel.
+    /// Admit a symmetry read from a principal shell when
+    /// [`ContinuousSymmetry::Measure`] is on.
     ///
     /// Off by default, which keeps the `C_i`, `C_5`, and `D_5h` channel and
     /// leaves every default trajectory and resolved configuration digest
-    /// unchanged.
+    /// unchanged. On, the fixed channel is still scored. Another order is
+    /// solved only when a shell's outer ring has azimuthal gaps of one full
+    /// turn over that population, and it replaces the fixed winner only when
+    /// its wide turns improve on that winner by more than their standard
+    /// error.
     #[serde(skip_serializing_if = "is_false")]
     pub general_symmetry: bool,
     /// Largest deviation at which an approximate symmetry is worth using.

@@ -44,7 +44,7 @@ fn project_with_op_measure(
         return None;
     }
     let (centred, centroid, scale) = centre_and_scale(x, n)?;
-    let mut best: Option<(f64, f64, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
+    let mut best: Option<(f64, f64, f64, f64, f64, usize, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
     let mut solved: Vec<Vec<Matched>> = Vec::with_capacity(orientations.len());
     for (index, rotation) in orientations.iter().enumerate() {
         let y = apply_all(rotation, &centred);
@@ -61,6 +61,10 @@ fn project_with_op_measure(
         let mut here: Vec<Matched> = Vec::with_capacity(ops.len());
         let mut hat = vec![[0.0; 3]; n];
         let mut op_residual = 0.0;
+        let mut worst_residual = 0.0_f64;
+        let mut wide_residual = 0.0_f64;
+        let mut wide_square = 0.0_f64;
+        let mut wide_count = 0.0_f64;
         for (op_index, op) in ops.iter().enumerate() {
             let conjugate = turn.and_then(|(earlier, turn)| {
                 let conjugate = matmul(matmul(transpose(turn), *op), turn);
@@ -82,12 +86,23 @@ fn project_with_op_measure(
                     })
             });
             let matched = match_operated(&y, classes, op, hint)?;
+            let mut this_residual = 0.0;
             for atom in 0..n {
                 let image = mul_vec(op, y[matched.assignment[atom]]);
                 for axis in 0..3 {
                     hat[atom][axis] += image[axis];
                     let delta = y[atom][axis] - image[axis];
-                    op_residual += delta * delta;
+                    let squared = delta * delta;
+                    op_residual += squared;
+                    this_residual += squared;
+                }
+            }
+            if !is_identity(op) {
+                worst_residual = worst_residual.max(this_residual);
+                if improper_or_wide(op) {
+                    wide_residual += this_residual;
+                    wide_square += this_residual * this_residual;
+                    wide_count += 1.0;
                 }
             }
             here.push(matched);
@@ -110,14 +125,39 @@ fn project_with_op_measure(
         let measure = residual / norm;
         let non_identity = ops.len().saturating_sub(1).max(1) as f64;
         let op_measure = op_residual / (2.0 * non_identity * norm);
+        let worst = worst_residual / (2.0 * norm);
+        let wide = if wide_count > 0.0 {
+            wide_residual / (2.0 * wide_count * norm)
+        } else {
+            op_measure
+        };
+        let wide_se = if wide_count > 1.0 {
+            let mean = wide_residual / wide_count;
+            let variance = (wide_square / wide_count - mean * mean).max(0.0);
+            variance.sqrt() / (wide_count.sqrt() * 2.0 * norm)
+        } else {
+            0.0
+        };
         if best
             .as_ref()
-            .is_none_or(|(incumbent, _, _, _)| measure < *incumbent)
+            .is_none_or(|(incumbent, _, _, _, _, _, _, _)| measure < *incumbent)
         {
-            best = Some((measure, op_measure, *rotation, hat));
+            best = Some((
+                measure,
+                op_measure,
+                worst,
+                wide,
+                wide_se,
+                wide_count.round() as usize,
+                *rotation,
+                hat,
+            ));
         }
     }
-    let (measure, op_measure, rotation, hat) = best?;
+    let (measure, op_measure, worst, wide, wide_se, wide_ops, rotation, hat) = best?;
+    LAST_OP_SPLIT.with(|slot| slot.set((worst, wide)));
+    LAST_OP_SE.with(|slot| slot.set(wide_se));
+    LAST_WIDE_OPS.with(|slot| slot.set(wide_ops));
     let back = transpose(rotation);
     let mut coordinates = Array1::zeros(3 * n);
     for atom in 0..n {
@@ -212,15 +252,17 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     best
 }
 
-/// Projects onto `C_i`, `C_n`, or `D_nh` across rotational orders `3..=N`,
-/// selecting the candidate with the lowest per-operation continuous symmetry
-/// measure.
+/// Projects onto `C_i`, `C_n`, or `D_nh`.
 ///
-/// Raw centroid CSM averages the operation displacements before taking the
-/// norm, so inconsistent permutations across a larger group cancel in vector
-/// sum and artificially lower the centroid shift. Ranking by the mean squared
-/// assignment residual per non-identity group operation compares candidate
-/// orders per symmetry constraint without vector cancellation.
+/// The fixed channel (`C_i`, `C_5`, `D_5h`) is always scored. A `C_5` winner
+/// is replaced by `D_5h` when the dihedral group's per-operation residual is
+/// lower: the raw centroid measure lets the mirrors cancel. Any other order
+/// is the dominant angular period of a principal shell. It replaces the fixed
+/// winner only when the mean residual of its wide turns (a right angle or
+/// more, and every improper isometry) is lower by more than the combined
+/// standard error of those two means. Acute turns match a compact body to
+/// itself and are not part of that mean. Inversion does not displace a
+/// rotational winner.
 pub fn propose_general(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
     if let Some(cached) = cached_propose(x, classes, true) {
         return cached;
@@ -228,45 +270,298 @@ pub fn propose_general(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupP
     let n = classes.len();
     let (centred, _, _) = centre_and_scale(x, n)?;
     let base = principal_orientations(&centred)?;
-    let mut best: Option<(f64, GroupProjection)> = None;
-    let mut consider =
-        |order: usize, name: &'static str, ops: &[[[f64; 3]; 3]], ori: &[[[f64; 3]; 3]]| {
-            let Some((coordinates, measure, op_measure)) =
-                project_with_op_measure(x, classes, ops, ori)
-            else {
-                return;
-            };
-            if closest_pair(&coordinates) < SINGULAR_PAIR {
-                return;
-            }
-            if best
-                .as_ref()
-                .is_none_or(|(incumbent, _)| op_measure < *incumbent)
-            {
-                best = Some((
-                    op_measure,
-                    GroupProjection {
-                        coordinates,
-                        measure,
-                        group: name,
-                        order,
-                    },
-                ));
-            }
-        };
-    for order in 3..=n {
-        clear_op_cache();
-        let orientations = with_phase_orientations(&base, order);
-        let dnh = dihedral_horizontal_ops(order);
-        let cn = cyclic_about_z(order);
-        consider(order, "D_nh", &dnh, &orientations);
-        consider(order, "C_n", &cn, &orientations);
+    let mut cyclic5: Option<Scored> = None;
+    let mut dihedral5: Option<Scored> = None;
+    let mut inversion: Option<Scored> = None;
+    clear_op_cache();
+    let fivefold = with_phase_orientations(&base, 5);
+    if let Some(scored) = score_group(x, classes, 5, "D_nh", &d5h_ops(), &fivefold) {
+        dihedral5 = Some(scored);
+    }
+    if let Some(scored) = score_group(x, classes, 5, "C_n", &cyclic_about_z(5), &fivefold) {
+        cyclic5 = Some(scored);
     }
     clear_op_cache();
-    consider(2, "C_i", &inversion_ops(), &base);
-    let best = best.map(|(_, projection)| projection);
+    if let Some(scored) = score_group(x, classes, 2, "C_i", &inversion_ops(), &base) {
+        inversion = Some(scored);
+    }
+    // The published fixed-channel order: raw centroid measure, with D_5h
+    // ahead of C_5 ahead of C_i on a tie.
+    let mut incumbent: Option<Scored> = None;
+    for (rank, candidate) in [
+        (2, dihedral5.clone()),
+        (1, cyclic5.clone()),
+        (0, inversion.clone()),
+    ] {
+        let Some(candidate) = candidate else {
+            continue;
+        };
+        let replace = match &incumbent {
+            None => true,
+            Some(held) => {
+                candidate.measure < held.measure
+                    || (candidate.measure == held.measure && rank < held.rank)
+            }
+        };
+        if replace {
+            incumbent = Some(Scored { rank, ..candidate });
+        }
+    }
+    if let (Some(held), Some(dihedral), Some(cyclic)) = (&incumbent, &dihedral5, &cyclic5)
+        && held.group == "C_n"
+        && held.order == 5
+        && dihedral.op < cyclic.op
+    {
+        incumbent = Some(dihedral.clone());
+    }
+    if let Some(held) = incumbent.as_mut() {
+        for order in shell_orders(&centred) {
+            if order == 5 {
+                continue;
+            }
+            clear_op_cache();
+            let orientations = with_phase_orientations(&base, order);
+            let dihedral = score_group(
+                x,
+                classes,
+                order,
+                "D_nh",
+                &dihedral_horizontal_ops(order),
+                &orientations,
+            );
+            let cyclic = score_group(
+                x,
+                classes,
+                order,
+                "C_n",
+                &cyclic_about_z(order),
+                &orientations,
+            );
+            let Some(alternative) = better_by_operation(dihedral, cyclic) else {
+                continue;
+            };
+            if wide_improvement(held, &alternative) {
+                *held = alternative;
+            }
+        }
+    }
+    let best = incumbent.map(|scored| scored.projection());
     store_propose(x, classes, true, best.as_ref());
     best
+}
+
+/// Per-operation residual of the wide turns, and the fixed-channel bookkeeping.
+#[derive(Clone)]
+struct Scored {
+    coordinates: Array1<f64>,
+    measure: f64,
+    group: &'static str,
+    order: usize,
+    rank: usize,
+    op: f64,
+    wide: f64,
+    se: f64,
+    wide_ops: usize,
+}
+
+impl Scored {
+    fn projection(self) -> GroupProjection {
+        GroupProjection {
+            coordinates: self.coordinates,
+            measure: self.measure,
+            group: self.group,
+            order: self.order,
+        }
+    }
+}
+
+fn score_group(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    order: usize,
+    name: &'static str,
+    ops: &[[[f64; 3]; 3]],
+    orientations: &[[[f64; 3]; 3]],
+) -> Option<Scored> {
+    #[cfg(test)]
+    SCORED_ORDERS.with(|slot| slot.borrow_mut().push(order));
+    let (coordinates, measure, op) = project_with_op_measure(x, classes, ops, orientations)?;
+    if closest_pair(&coordinates) < SINGULAR_PAIR {
+        return None;
+    }
+    let (wide, se, wide_ops) = LAST_OP_SPLIT.with(|slot| {
+        let wide = slot.get().1;
+        let se = LAST_OP_SE.with(|se| se.get());
+        let wide_ops = LAST_WIDE_OPS.with(|count| count.get());
+        (wide, se, wide_ops)
+    });
+    Some(Scored {
+        coordinates,
+        measure,
+        group: name,
+        order,
+        rank: 0,
+        op,
+        wide,
+        se,
+        wide_ops,
+    })
+}
+
+/// `D_nh` wins a tie of per-operation residuals. A strict cyclic improvement
+/// is a missing mirror, not a smaller group to be preferred by default.
+fn better_by_operation(dihedral: Option<Scored>, cyclic: Option<Scored>) -> Option<Scored> {
+    match (dihedral, cyclic) {
+        (Some(dihedral), Some(cyclic)) if cyclic.op < dihedral.op => Some(cyclic),
+        (Some(dihedral), _) => Some(dihedral),
+        (None, cyclic) => cyclic,
+    }
+}
+
+/// The wide-turn means differ by more than the combined standard error.
+///
+/// One standard error is the sampling error of each mean, not a tuned
+/// acceptance window. A one-operation inversion has no such error and does
+/// not displace a rotational incumbent.
+fn wide_improvement(incumbent: &Scored, alternative: &Scored) -> bool {
+    if alternative.order == 2 && incumbent.order != 2 {
+        return false;
+    }
+    if alternative.wide_ops < 2 {
+        return false;
+    }
+    // A lower wide-turn mean that moves the centroid further from the
+    // structure is the small-turn dilution: the average stays put while a
+    // few wide turns look slightly better. The centroid has to improve too.
+    if alternative.measure > incumbent.measure {
+        return false;
+    }
+    let gap = incumbent.wide - alternative.wide;
+    // A one-operation incumbent has no sampling error of its own. The
+    // challenger's error is then the only one that is defined.
+    let noise = if incumbent.wide_ops < 2 {
+        alternative.se
+    } else {
+        incumbent.se.hypot(alternative.se)
+    };
+    gap > noise
+}
+
+/// Order of one principal shell, when that shell is a single ring.
+///
+/// A half turn is already carried by inversion, so a cyclic shell starts at
+/// order three. Fewer off-axis atoms than two such shells cannot be split,
+/// and the set is that order. A larger set contributes its outermost ring
+/// only when the ring's azimuthal gaps equal one full turn over that
+/// population: a high order on a compact body is a small turn, and the
+/// identity assignment then looks better than a real symmetry.
+fn shell_orders(centred: &[[f64; 3]]) -> Vec<usize> {
+    let Some(axes) = principal_orientations(centred) else {
+        return Vec::new();
+    };
+    let mut orders = Vec::new();
+    for aligned in &axes {
+        if let Some(order) = dominant_order(centred, aligned[2])
+            && !orders.contains(&order)
+        {
+            orders.push(order);
+        }
+    }
+    orders
+}
+
+fn dominant_order(centred: &[[f64; 3]], axis: [f64; 3]) -> Option<usize> {
+    let tangent = normalize(perpendicular(axis))?;
+    let bitangent = normalize(cross(axis, tangent))?;
+    let mut samples = Vec::new();
+    for point in centred {
+        let height = point[0] * axis[0] + point[1] * axis[1] + point[2] * axis[2];
+        let radial = [
+            point[0] - height * axis[0],
+            point[1] - height * axis[1],
+            point[2] - height * axis[2],
+        ];
+        let rho = norm(radial);
+        if rho > 1e-8 {
+            let x = radial[0] * tangent[0] + radial[1] * tangent[1] + radial[2] * tangent[2];
+            let y = radial[0] * bitangent[0] + radial[1] * bitangent[1] + radial[2] * bitangent[2];
+            samples.push((rho, y.atan2(x)));
+        }
+    }
+    let mut radii: Vec<f64> = samples.iter().map(|sample| sample.0).collect();
+    let order = ring_order(&mut radii)?;
+    // Two minimum shells cannot fit, so there is no outer ring to test.
+    if samples.len() < minimum_shell_order() * 2 {
+        return Some(order);
+    }
+    outer_ring_is_regular(&samples, order).then_some(order)
+}
+
+/// Smallest cyclic order that is not the half turn already in `C_i`.
+fn minimum_shell_order() -> usize {
+    3
+}
+
+fn ring_order(radii: &mut [f64]) -> Option<usize> {
+    let minimum = minimum_shell_order();
+    if radii.len() < minimum {
+        return None;
+    }
+    radii.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    if radii.len() < minimum * 2 {
+        return Some(radii.len());
+    }
+    // The gap that peels the axis is not a shell boundary. The outer half,
+    // including the step that separates it from the body, is the shell.
+    let start = radii.len() / 2;
+    let mut gap = 0.0;
+    let mut cut = radii[start];
+    for pair in radii[start - 1..].windows(2) {
+        let step = pair[1] - pair[0];
+        if step > gap {
+            gap = step;
+            cut = pair[1];
+        }
+    }
+    if gap == 0.0 {
+        if radii[0] == radii[radii.len() - 1] {
+            return Some(radii.len());
+        }
+        let shell = radii.len() - (start - 1);
+        return (shell >= minimum).then_some(shell);
+    }
+    let outer = radii.iter().filter(|rho| **rho >= cut).count();
+    (outer >= minimum).then_some(outer)
+}
+
+/// Azimuthal gaps of a regular ring equal one turn divided by the population.
+///
+/// The excess of the largest gap over that step is rounding of the axis,
+/// not an acceptance window: the gaps sum to one turn, so any missing
+/// vertex makes the largest gap strictly larger than the step.
+fn outer_ring_is_regular(samples: &[(f64, f64)], order: usize) -> bool {
+    if order < minimum_shell_order() || order > samples.len() {
+        return false;
+    }
+    let mut ranked: Vec<usize> = (0..samples.len()).collect();
+    ranked.sort_by(|&left, &right| {
+        samples[right]
+            .0
+            .partial_cmp(&samples[left].0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut angles: Vec<f64> = ranked
+        .into_iter()
+        .take(order)
+        .map(|index| samples[index].1)
+        .collect();
+    angles.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    let step = std::f64::consts::TAU / order as f64;
+    let mut max_gap = angles[0] + std::f64::consts::TAU - angles[order - 1];
+    for pair in angles.windows(2) {
+        max_gap = max_gap.max(pair[1] - pair[0]);
+    }
+    max_gap <= step + step * f64::EPSILON.sqrt()
 }
 
 struct ProposeCache {
@@ -358,6 +653,35 @@ fn centre_and_scale(x: ArrayView1<'_, f64>, n: usize) -> Option<(Vec<[f64; 3]>, 
         }
     }
     Some((centred, centroid, max_r))
+}
+
+std::thread_local! {
+    static LAST_OP_SPLIT: std::cell::Cell<(f64, f64)> = const { std::cell::Cell::new((0.0, 0.0)) };
+    static LAST_OP_SE: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+    static LAST_WIDE_OPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+// Orders passed to the assignment while a test calls `propose_general`.
+#[cfg(test)]
+std::thread_local! {
+    static SCORED_ORDERS: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Proper rotations near or past a right angle, and every improper isometry.
+///
+/// A high-order turn by a few degrees matches atoms to themselves on any
+/// compact body, so it is not a symmetry constraint. Reflections, inversion
+/// and wide turns are.
+fn improper_or_wide(op: &[[f64; 3]; 3]) -> bool {
+    let det = op[0][0] * (op[1][1] * op[2][2] - op[1][2] * op[2][1])
+        - op[0][1] * (op[1][0] * op[2][2] - op[1][2] * op[2][0])
+        + op[0][2] * (op[1][0] * op[2][1] - op[1][1] * op[2][0]);
+    if det < 0.0 {
+        return true;
+    }
+    let trace = op[0][0] + op[1][1] + op[2][2];
+    let cosine = ((trace - 1.0) * 0.5).clamp(-1.0, 1.0);
+    cosine.acos() >= std::f64::consts::FRAC_PI_2
 }
 
 fn is_identity(op: &[[f64; 3]; 3]) -> bool {
@@ -1294,5 +1618,71 @@ mod tests {
         );
         let chosen = propose_general(x.view(), &classes).expect("competitive bipyramid");
         assert_eq!((chosen.group, chosen.order), ("D_nh", 5));
+    }
+
+    /// A compact cloud has no regular outer ring. Scanning every order anyway
+    /// solves a small turn, whose per-operation residual undercuts the
+    /// fivefold group and is the projection the search must not take.
+    #[test]
+    fn general_channel_leaves_a_compact_cloud_on_the_fixed_groups() {
+        let n = 24;
+        let mut state = 0x5ce9_bd63_87b8_32f7u64;
+        let mut coords = Vec::with_capacity(3 * n);
+        while coords.len() < 3 * n {
+            let mut point = [0.0; 3];
+            for component in &mut point {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                *component = ((state >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0;
+            }
+            if point.iter().map(|value| value * value).sum::<f64>() <= 1.0 {
+                coords.extend(point);
+            }
+        }
+        let cloud = Array1::from_vec(coords);
+        let classes = vec![0u32; n];
+        SCORED_ORDERS.with(|slot| slot.borrow_mut().clear());
+        let chosen = propose_general(cloud.view(), &classes).expect("compact cloud");
+        let scored = SCORED_ORDERS.with(|slot| slot.borrow().clone());
+        assert!(
+            scored.iter().all(|order| *order == 2 || *order == 5),
+            "orders outside the fixed channel were solved: {scored:?}"
+        );
+        assert_eq!(scored.iter().filter(|order| **order == 5).count(), 2);
+        assert_eq!(scored.iter().filter(|order| **order == 2).count(), 1);
+
+        let fixed = propose(cloud.view(), &classes).expect("fixed channel");
+        let upgraded = fixed.group == "C_5" && chosen.group == "D_nh" && chosen.order == 5;
+        let same = match fixed.group {
+            "D_5h" => chosen.group == "D_nh" && chosen.order == 5,
+            "C_5" => chosen.group == "C_n" && chosen.order == 5,
+            "C_i" => chosen.group == "C_i" && chosen.order == 2,
+            _ => false,
+        };
+        assert!(
+            same || upgraded,
+            "fixed {} {} versus general {} {}",
+            fixed.group,
+            fixed.order,
+            chosen.group,
+            chosen.order
+        );
+
+        let (centred, _, _) = centre_and_scale(cloud.view(), n).unwrap();
+        let base = principal_orientations(&centred).unwrap();
+        clear_op_cache();
+        let fivefold = with_phase_orientations(&base, 5);
+        let (_, _, op_fivefold) =
+            project_with_op_measure(cloud.view(), &classes, &d5h_ops(), &fivefold)
+                .expect("fivefold");
+        clear_op_cache();
+        let turned = with_phase_orientations(&base, n);
+        let (_, _, op_turn) =
+            project_with_op_measure(cloud.view(), &classes, &cyclic_about_z(n), &turned)
+                .expect("full turn");
+        assert!(
+            op_turn < op_fivefold,
+            "a full-order turn must undercut the fivefold residual ({op_turn} vs {op_fivefold}) or this cloud no longer catches the scan"
+        );
+        assert_ne!(chosen.order, n);
     }
 }
