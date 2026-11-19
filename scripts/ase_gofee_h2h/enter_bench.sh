@@ -47,10 +47,12 @@ exec sudo -n unshare --uts sh -c \
     OMP_PLACES=cores \
     RAYON_NUM_THREADS=1 \
     RAY_AUTH_MODE=disabled \
-    PATH=/work/ase-gofee-h2h/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PATH='"$VENV"'/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     taskset -c 0 \
-    /work/ase-gofee-h2h/venv/bin/python -u /work/anneal/scripts/ase_gofee_h2h/campaign.py \
+    '"$VENV"'/bin/python -u /work/anneal/scripts/ase_gofee_h2h/campaign.py \
       --binary /work/target/release/examples/h2h_gmin_proof \
+      --metal /work/target/release/examples/h2h_metal \
       --repo /work/anneal \
-      --runs /work/ase-gofee-h2h/runs \
+      --runs /work/ase-agox-h2h/runs \
+      --out /work/anneal/bench/ase-agox-h2h \
       "$@"' _ "$@"

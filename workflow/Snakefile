@@ -338,11 +338,12 @@ rule tip4p_rates:
         """
 
 
-# Paper preset against ASE basin hopping. Not part of `rule all`.
+# Paper preset against ASE basin hopping. Writes the new table and leaves
+# bench/ase-gofee-h2h untouched. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile ase_bh_h2h
 rule ase_bh_h2h:
     output:
-        "bench/ase-gofee-h2h/ase_bh.csv",
+        "bench/ase-agox-h2h/ase_bh.csv",
     shell:
         """
         set -euo pipefail
@@ -350,11 +351,12 @@ rule ase_bh_h2h:
         """
 
 
-# Paper preset against ASE minima hopping. Not part of `rule all`.
+# Paper preset against ASE minima hopping. Writes the new table and leaves
+# bench/ase-gofee-h2h untouched. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile ase_mh_h2h
 rule ase_mh_h2h:
     output:
-        "bench/ase-gofee-h2h/ase_mh.csv",
+        "bench/ase-agox-h2h/ase_mh.csv",
     shell:
         """
         set -euo pipefail
@@ -383,11 +385,36 @@ rule gad_published:
         """
 
 
-# Paper preset against AGOX GOFEE. Not part of `rule all`.
+# AGOX basin hopping, no surrogate model. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile agox_bh_h2h
+rule agox_bh_h2h:
+    output:
+        "bench/ase-agox-h2h/agox_bh.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/ase_gofee_h2h/enter_bench.sh --comparison agox_bh
+        """
+
+
+# AGOX random structure search, no surrogate model. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile agox_rss_h2h
+rule agox_rss_h2h:
+    output:
+        "bench/ase-agox-h2h/agox_rss.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/ase_gofee_h2h/enter_bench.sh --comparison agox_rss
+        """
+
+
+# Paper preset against AGOX GOFEE. Writes the new table and leaves
+# bench/ase-gofee-h2h untouched. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile agox_gofee_h2h
 rule agox_gofee_h2h:
     output:
-        "bench/ase-gofee-h2h/agox_gofee.csv",
+        "bench/ase-agox-h2h/agox_gofee.csv",
     shell:
         """
         set -euo pipefail
