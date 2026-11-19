@@ -50,6 +50,15 @@ def run_checker(payload: dict) -> subprocess.CompletedProcess[str]:
         )
 
 
+def run_bare_checker() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(CHECKER)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+
+
 def require_tree_rejection(result: subprocess.CompletedProcess[str], arm: str, recorded: str, actual: str) -> None:
     text = result.stdout + result.stderr
     if result.returncode == 0 or arm not in text or recorded not in text or actual not in text:
@@ -60,6 +69,22 @@ def require_missing_arm(result: subprocess.CompletedProcess[str], arm: str) -> N
     text = result.stdout + result.stderr
     if result.returncode == 0 or arm not in text:
         raise SystemExit(f"missing arm {arm} was not rejected")
+
+
+def require_named_rejection(
+    result: subprocess.CompletedProcess[str], missing: str, extra: str
+) -> None:
+    text = result.stdout + result.stderr
+    if result.returncode == 0 or missing not in text or extra not in text:
+        raise SystemExit(f"renamed arm {missing} -> {extra} was not rejected")
+
+
+def require_commit_rejection(
+    result: subprocess.CompletedProcess[str], arm: str, sha: str
+) -> None:
+    text = result.stdout + result.stderr
+    if result.returncode == 0 or arm not in text or sha not in text:
+        raise SystemExit(f"unresolvable commit for {arm} was not rejected: {sha}")
 
 
 def require_threshold_rejection(
@@ -78,6 +103,10 @@ def require_threshold_rejection(
 
 
 def main() -> None:
+    bare = run_bare_checker()
+    if bare.returncode != 0:
+        raise SystemExit(f"bare provenance check failed: {bare.stderr.strip()}")
+
     original = json.loads(SOURCE_JSON.read_text(encoding="utf-8"))
     accepted = run_checker(json.loads(json.dumps(original)))
     if accepted.returncode != 0:
@@ -122,6 +151,14 @@ def main() -> None:
     swapped_team["sha"] = stock["sha"]
     require_tree_rejection(run_checker(swapped_commit), "team-1", team_tree, stock_tree)
 
+    unresolved_commit = json.loads(json.dumps(original))
+    changed_team = next(
+        arm for arm in unresolved_commit["metadata"]["arms"] if arm["name"] == "team-1"
+    )
+    missing_sha = "0" * 40
+    changed_team["sha"] = missing_sha
+    require_commit_rejection(run_checker(unresolved_commit), "team-1", missing_sha)
+
     wrong_threshold = json.loads(json.dumps(original))
     changed_team = next(
         arm for arm in wrong_threshold["metadata"]["arms"] if arm["name"] == "team-1"
@@ -134,6 +171,13 @@ def main() -> None:
         arm for arm in missing_arm["metadata"]["arms"] if arm["name"] != "team-1"
     ]
     require_missing_arm(run_checker(missing_arm), "team-1")
+
+    renamed_arm = json.loads(json.dumps(original))
+    changed_team = next(
+        arm for arm in renamed_arm["metadata"]["arms"] if arm["name"] == "team-1"
+    )
+    changed_team["name"] = "renamed-team"
+    require_named_rejection(run_checker(renamed_arm), "team-1", "renamed-team")
 
 
 if __name__ == "__main__":
