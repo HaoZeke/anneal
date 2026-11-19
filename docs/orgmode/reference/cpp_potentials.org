@@ -988,23 +988,36 @@ explicit SuttonChenPot(const SuttonChenConfig &c);
 void setPairTermLimit(std::size_t pairs) noexcept;
 #+end_src
 
-- Inputs :: =pairs=, the most pairs, summed over the threads of a call, whose
-  density-pass terms the force pass reads back.
-- Units :: none.
+- Inputs :: =pairs=, the pair-count limit: the maximum candidate upper pairs
+  (=total_up <= pairs=) for the three-phase stored OpenMP path, and the maximum
+  pairs, summed over the threads of a call, whose density-pass terms the
+  two-pass force pass reads back.
+- Units :: none (a pair count, not a byte count).
 - Outputs :: none.
-  On the three-phase stored path, this limit must satisfy
-  =total_up <= pairs= or that path is skipped and the call falls back to the
-  threaded two-pass row walk.
-  The three-phase scratch cost from the code's per-slot vectors is 69 bytes per
-  candidate upper pair:
-  =active= 1 byte + =pair_phi= 8 + =pair_force= 48 + =up_j= 4 + =lo_refs= 8.
-  With per-atom energies (=forcePerAtom= with =atoms.energy= non-null) it is 77
-  bytes, because =pair_he= adds 8.
-  The force pass computes terms of the pairs past the kept room again, with the
-  same bits.
-  The room for a call follows the pairs the previous call saw, so a walk whose
-  pair count is not known in advance keeps its terms from the second call on.
-  The default keeps 32 MiB of terms, and 0 keeps none.
+  On the three-phase stored path, the candidate upper-pair count must satisfy
+  =total_up <= pairs= and =pairScratchFits(total_up, atoms, scratch_avail)=, or that path is skipped before building the half-pair index when =est_half_pairs > pairs=
+  and otherwise falls back to the threaded two-pass row walk.
+  =pairScratchFits= checks that the per-slot vectors fit within half of
+  =nlist::availableBytes()= (or allows the path when =availableBytes()= returns
+  0): 69 bytes per candidate upper pair (=active= 1 byte +
+  =pair_phi= 8 + =pair_force= 48 + =up_j= 4 + =lo_refs= 8), or 77 bytes with
+  per-atom energies (=forcePerAtom= with =atoms.energy= non-null, where
+  =pair_he= adds 8).
+  Per-atom vectors (=up_off=, =lo_off=, =rho=, =weight=, =row_e=, =row_emb=, and
+  =row_s= with stress) are =O(nAtoms)=, already bounded by =Neighbours::buildCells= and present as =rho_=
+  and =weight_= on the two-pass path, so they are not counted against the
+  pair-slot budget; the per-call scratch vectors are released when the
+  three-phase call returns.
+  On the two-pass path, a force call keeps =epsilon n (a/r)^n=, =m (a/r)^m= and
+  =1/r^2= in =PairTerms<3>= for each accepted pair up to =pairs / lanes= per
+  lane (24 bytes per pair), and the force pass computes the terms of any pairs
+  past the kept room from the coordinates, with the same bits.
+  The room for a two-pass call follows the pairs the previous call saw, so a
+  walk whose pair count is not known in advance keeps its terms from the second
+  call on.
+  The default is =PairTerms<3>::kDefaultLimit= (1398101 pairs, which is 32 MiB
+  of two-pass =PairTerms<3>= storage at 24 bytes per pair), and 0 skips the
+  three-phase path and keeps no two-pass terms.
 - Errors :: none.
 
 *** =rgpot::EMTPot=

@@ -47,6 +47,7 @@ STRUCTS = (
     ("CppCore/rgpot/LennardJones/LJClusterPot.hpp", "LJClusterConfig"),
     ("CppCore/rgpot/Morse/MorsePot.hpp", "MorseConfig"),
     ("CppCore/rgpot/ZBL/ZBLPot.hpp", "ZBLConfig"),
+    ("CppCore/rgpot/SuttonChen/SuttonChenPot.hpp", "SuttonChenConfig"),
 )
 
 # Classes whose sizeof the stamp folds. Only instance data members are
@@ -58,6 +59,7 @@ CLASSES = (
     ("CppCore/rgpot/LennardJones/LJClusterPot.hpp", "LJClusterPot"),
     ("CppCore/rgpot/Morse/MorsePot.hpp", "MorsePot"),
     ("CppCore/rgpot/ZBL/ZBLPot.hpp", "ZBLPot"),
+    ("CppCore/rgpot/SuttonChen/SuttonChenPot.hpp", "SuttonChenPot"),
     ("CppCore/rgpot/nlist/Neighbours.hpp", "Neighbours"),
     ("CppCore/rgpot/simd/from_cache.hpp", "CachedPairs"),
 )

@@ -24,6 +24,7 @@
 #include "rgpot/PairTerms.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/SuttonChen/SuttonChenScales.hpp"
+#include "rgpot/SuttonChen/detail/SuttonChenWorkspaceSnapshot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -32,17 +33,6 @@ using Catch::Matchers::WithinAbs;
 using rgpot::types::AtomMatrix;
 
 namespace {
-
-struct SuttonChenPotDevelopLayout : rgpot::Potential<rgpot::SuttonChenPot> {
-  rgpot::SuttonChenConfig m_config;
-  std::uint64_t m_paramsKey;
-  rgpot::nlist::Mode mode_;
-  std::size_t term_limit_;
-  mutable rgpot::nlist::Neighbours neighbours_;
-  mutable std::vector<rgpot::PairTerms<3>> terms_;
-  mutable std::vector<double> rho_;
-  mutable std::vector<double> weight_;
-};
 
 AtomMatrix load_points(const std::string &path, double *epsilon, double *c,
                        double *a, int *nexp, int *mexp) {
@@ -205,10 +195,6 @@ std::vector<double> fcc_cell(int cells, double lattice, double *box) {
 }
 
 } // namespace
-
-TEST_CASE("Sutton-Chen layout matches develop baseline", "[SuttonChen][layout]") {
-  REQUIRE(sizeof(rgpot::SuttonChenPot) == sizeof(SuttonChenPotDevelopLayout));
-}
 
 TEST_CASE("Sutton-Chen dimer matches an independent derivative",
           "[SuttonChen]") {
@@ -726,9 +712,11 @@ TEST_CASE("pair-term limit keeps threaded row walks when three-phase is skipped"
     // First call builds the stored list. Measure the reused call so any team
     // open comes from the force path itself.
     pot.forceImpl({pos.size() / 3, pos.data(), nullptr, box}, &out);
+    REQUIRE_FALSE(pot.listReused());
     std::fill(forces.begin(), forces.end(), 0.0);
     const auto before = rgpot::teamsOpened();
     pot.forceImpl({pos.size() / 3, pos.data(), nullptr, box}, &out);
+    REQUIRE(pot.listReused());
     return std::tuple<double, std::vector<double>, std::uint64_t>{
         out.energy, std::move(forces), rgpot::teamsOpened() - before};
   };
@@ -747,6 +735,64 @@ TEST_CASE("pair-term limit keeps threaded row walks when three-phase is skipped"
   REQUIRE(std::memcmp(&mid_energy, &ref_mid_energy, sizeof(double)) == 0);
   REQUIRE(same_bits(mid_forces, ref_mid_forces));
   REQUIRE(mid_teams > 0);
+
+  // A limit of 0 skips the three-phase workspace and runs the two-pass row
+  // walk with zero kept pair terms.
+  auto [ref_zero_energy, ref_zero_forces, ref_zero_teams] = run_eval("1", 0);
+  REQUIRE(ref_zero_teams == 0);
+  auto [zero_energy, zero_forces, zero_teams] = run_eval("4", 0);
+  REQUIRE(std::memcmp(&zero_energy, &ref_zero_energy, sizeof(double)) == 0);
+  REQUIRE(same_bits(zero_forces, ref_zero_forces));
+  REQUIRE(zero_teams > 0);
+
+  // When the limit is below est_half_pairs, the three-phase workspace is
+  // skipped before buildStoredHalfIndex, leaving the thread-local workspace
+  // unallocated. When the limit accepts the call, the per-call scratch
+  // vectors are released after the region completes while the half-pair index
+  // and slice splits remain cached for Verlet reuse.
+  {
+    setThreads("4");
+    rgpot::detail::releaseSuttonChenWorkspace();
+    REQUIRE(rgpot::detail::suttonChenWorkspaceSnapshot().index_builds == 0);
+    rgpot::SuttonChenPot skipped(cfg);
+    skipped.setNeighbourMode(rgpot::nlist::Mode::Stored);
+    skipped.setPairTermLimit(mid_limit);
+    std::vector<double> forces(pos.size(), 0.0);
+    rgpot::ForceOut out{};
+    out.F = forces.data();
+    skipped.forceImpl({n, pos.data(), nullptr, box}, &out);
+    REQUIRE_FALSE(skipped.listReused());
+    const auto snap_skipped = rgpot::detail::suttonChenWorkspaceSnapshot();
+    CHECK(snap_skipped.index_builds == 0);
+    CHECK(snap_skipped.index_capacity_bytes == 0);
+    CHECK(snap_skipped.scratch_capacity_bytes == 0);
+
+    rgpot::SuttonChenPot accepted(cfg);
+    accepted.setNeighbourMode(rgpot::nlist::Mode::Stored);
+    accepted.setPairTermLimit(total_up);
+    std::vector<double> atom_e(n, 0.0);
+    std::vector<double> atom_v(6 * n, 0.0);
+    accepted.forcePerAtom({n, pos.data(), nullptr, box}, &out,
+                          {atom_e.data(), atom_v.data()});
+    REQUIRE_FALSE(accepted.listReused());
+    const auto snap_built = rgpot::detail::suttonChenWorkspaceSnapshot();
+    CHECK(snap_built.index_builds == 1);
+    CHECK(snap_built.total_up == total_up);
+    CHECK(snap_built.index_capacity_bytes > 0);
+    CHECK(snap_built.scratch_capacity_bytes == 0);
+
+    accepted.forcePerAtom({n, pos.data(), nullptr, box}, &out,
+                          {atom_e.data(), atom_v.data()});
+    REQUIRE(accepted.listReused());
+    const auto snap_reused = rgpot::detail::suttonChenWorkspaceSnapshot();
+    CHECK(snap_reused.index_builds == 1);
+    CHECK(snap_reused.scratch_capacity_bytes == 0);
+
+    rgpot::detail::releaseSuttonChenWorkspace();
+    const auto snap_released = rgpot::detail::suttonChenWorkspaceSnapshot();
+    CHECK(snap_released.index_capacity_bytes == 0);
+    CHECK(snap_released.scratch_capacity_bytes == 0);
+  }
 
   setThreads("1");
 }

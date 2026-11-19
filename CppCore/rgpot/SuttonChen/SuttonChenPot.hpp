@@ -154,9 +154,12 @@ public:
   /// True when the last force call kept the Verlet list.
   [[nodiscard]] bool listReused() const noexcept { return neighbours_.reused(); }
 
-  /// Pairs, over all threads, whose density-pass powers the force pass
-  /// reads back. It computes the rest again, with the same bits. The
-  /// default keeps 32 MiB of terms.
+  /// Maximum pairs, over all threads, whose density-pass powers the
+  /// two-pass force pass reads back (`PairTerms<3>::kDefaultLimit`,
+  /// 1,398,101 pairs = 32 MiB at 24 bytes per pair, by default), and the
+  /// upper-pair count bound (`total_up <= pairs`) for the three-phase
+  /// stored OpenMP path. 0 skips the three-phase path and keeps no
+  /// two-pass pair terms.
   void setPairTermLimit(std::size_t pairs) noexcept { term_limit_ = pairs; }
 
 private:
