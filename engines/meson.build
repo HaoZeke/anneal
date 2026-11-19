@@ -506,17 +506,19 @@ if (
         env: nested_meson_env,
         timeout: 300,
     )
-    test(
-        'fortran_sw_module_order',
-        python3_engines,
-        args: [
-            files('test_fortran_sw_module_order.py'),
-            meson.project_source_root(),
-            meson_prog.full_path(),
-        ],
-        env: nested_meson_env,
-        timeout: 600,
-    )
+    if has_fortran
+        test(
+            'fortran_sw_module_order',
+            python3_engines,
+            args: [
+                files('test_fortran_sw_module_order.py'),
+                meson.project_source_root(),
+                meson_prog.full_path(),
+            ],
+            env: nested_meson_env,
+            timeout: 600,
+        )
+    endif
 endif
 
 abi_script = find_program('../scripts/abi_symbols.sh')
