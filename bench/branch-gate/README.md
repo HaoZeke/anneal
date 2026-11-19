@@ -44,3 +44,29 @@ Result: losses remain (e.g. LJ75, LJ102, M80 rho 14), so the feature stays opt-i
 - M80 rho 14: 7/8, Fisher 1, calls p=0.678, inside 80.79/64.46 (p=0.371), outside 30.90/23.47 (p=0.624)
 
 Held-out also keeps M80 rho 14 as a loss, so default-on is still not met.
+
+## Phase 2 retune (dev seeds only) and re-gate attempt
+
+Retune used only development seeds 1000-1011 and general budget-aware controls:
+side-chain share cap, side-chain stop on weak records-per-call, and near-target
+suppression. The best dev setting reached no losses on the 13-system dev panel
+(`devfull5-compare.csv`), then was promoted to a full re-gate and held-out run.
+
+### Dev panel (1000-1011), 13 systems
+
+- compare file: `devfull5-compare.csv`
+- no seed-count losses (`LOSSES []`)
+
+### Re-gate on 2000-2011, 13 systems
+
+- compare file: `compare-default-2000.csv`
+- still loses on **M80 rho 14**: branch 8/12 vs develop 9/12
+- key row: `m80r14,8,9,Fisher p=1,calls p=0.747846`
+
+### Held-out on 3000-3011 (LJ150, LJ75, LJ104, Au55, M80 rho 14)
+
+- compare file: `compare-default-3000.csv`
+- still loses on **Au55**: branch 6/12 vs develop 7/12
+- key row: `au55,6,7,Fisher p=1,calls p=0.693119`
+
+Verdict after re-gate: still not default-on; keep `branch_on_stall` opt-in.
