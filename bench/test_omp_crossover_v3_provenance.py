@@ -81,9 +81,13 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
     if len(record_names) != len(report_names) or set(record_names) != report_names:
         missing = sorted(report_names.difference(record_names))
         extra = sorted(set(record_names).difference(report_names))
-        raise SystemExit(f"arm set mismatch: {', '.join(missing + extra)}")
+        missing_text = ", ".join(missing) if missing else "(none)"
+        extra_text = ", ".join(extra) if extra else "(none)"
+        raise SystemExit(f"arm set mismatch: missing {missing_text}; extra {extra_text}")
     for arm in record:
-        name = arm["name"]
+        name = arm["name"] if isinstance(arm.get("name"), str) and arm.get("name") else "<unnamed>"
+        if "sha" not in arm:
+            raise SystemExit(f"{name}: arm record is missing required key sha")
         recorded = arm.get("tree")
         actual = resolved_commit_tree(repo, name, arm["sha"])
         if recorded != actual:
@@ -98,21 +102,29 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, required=True)
-    parser.add_argument("--json", type=Path, required=True)
+    parser.add_argument("--repo", type=Path, default=Path("."))
+    parser.add_argument(
+        "--json",
+        type=Path,
+        default=Path("bench/results/rgpot_omp_crossover_v3_results.json"),
+    )
     parser.add_argument("--json-relative", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    json_path = args.json
+    repo = args.repo.resolve()
+    json_path = args.json if args.json.is_absolute() else repo / args.json
     if args.json_relative is not None:
         json_path = json_path / args.json_relative
     payload = json.loads(json_path.read_text(encoding="utf-8"))
-    report_path = args.report or json_path.with_name(REPORT_NAME)
-    if not report_path.is_absolute():
-        report_path = args.repo / report_path
+    if args.report is None:
+        report_path = json_path.with_name(REPORT_NAME)
+    elif args.report.is_absolute():
+        report_path = args.report
+    else:
+        report_path = repo / args.report
     if not report_path.is_file():
         raise SystemExit(f"report is missing: {report_path.name}")
-    check_provenance(args.repo, payload, report_path.read_text(encoding="utf-8"))
+    check_provenance(repo, payload, report_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

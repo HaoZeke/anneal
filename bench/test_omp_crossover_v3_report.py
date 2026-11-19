@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--json", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--analysis-report", type=Path)
+    parser.add_argument("--clarified-report", type=Path)
     args = parser.parse_args()
     repo = args.repo.resolve()
     harness = repo / args.harness
@@ -62,6 +63,37 @@ def main() -> None:
             actual_analysis = rendered.read_bytes()
         if actual_analysis != expected_analysis:
             raise SystemExit("corrected report differs from a fresh analysis")
+    if args.clarified_report is not None:
+        clarified_report = repo / args.clarified_report
+        expected_clarified = clarified_report.read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            rendered = Path(directory) / "clarified-report.md"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(harness),
+                    "analyze-v3e",
+                    "--input-json",
+                    str(source_json),
+                    "--output-report",
+                    str(rendered),
+                ],
+                cwd=repo,
+                check=True,
+            )
+            actual_clarified = rendered.read_bytes()
+        if actual_clarified != expected_clarified:
+            raise SystemExit("clarified report differs from a fresh analysis")
+        note = (
+            "The team-1 activation value comes from the worker --identity probe. "
+            "The slice count is capped at the atom count, so one atom remains one "
+            "slice and two atoms are the first multi-slice activation."
+        )
+        clarified_text = expected_clarified.decode()
+        if note not in clarified_text:
+            raise SystemExit("clarified report does not name the worker --identity probe")
+        if "derived by the harness" in clarified_text:
+            raise SystemExit("clarified report still says the harness derives activation")
 
 
 if __name__ == "__main__":

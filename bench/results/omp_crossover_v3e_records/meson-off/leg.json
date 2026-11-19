@@ -1,0 +1,35 @@
+{
+  "title": "Meson, rpc and cache off",
+  "runner": "meson",
+  "build": "build/verify-meson-off",
+  "setup": [
+    "meson",
+    "setup",
+    "build/verify-meson-off",
+    "-Dwith_tests=True",
+    "-Dwith_examples=False",
+    "-Dwith_xtensor=False",
+    "-Dwith_eigen=False",
+    "-Dpure_lib=False",
+    "-Dwith_rpc=false",
+    "-Dwith_cache=false"
+  ],
+  "compile": [
+    "meson",
+    "compile",
+    "-C",
+    "build/verify-meson-off"
+  ],
+  "test": [
+    "meson",
+    "test",
+    "-C",
+    "build/verify-meson-off",
+    "--print-errorlogs"
+  ],
+  "log": "test.txt",
+  "configured": "buildoptions.json",
+  "setup_log": "setup.txt",
+  "machines": "machines.json",
+  "pkgconfig": "rgpot.pc"
+}

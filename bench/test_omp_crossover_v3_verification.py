@@ -1,0 +1,541 @@
+#!/usr/bin/env python3
+"""The verification note must take its counts from the test logs."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "bench" / "record_omp_crossover_v3_verification.py"
+RECORDS = ROOT / "bench" / "results" / "omp_crossover_v3e_records"
+NOTE = ROOT / "bench" / "results" / "rgpot_omp_crossover_v3e_verification.md"
+LEG_ORDER = ("meson-on", "meson-off", "meson-mpi", "cmake-on")
+# An absolute path begins at a token boundary. A slash inside a repo-relative
+# path, or the slash in a URL, is not one.
+_ABS_PATH = re.compile(
+    r"(?:^|[\s\"'=(,`\[])/(?:[A-Za-z0-9._+-]+)(?:/[A-Za-z0-9._+-]+)+",
+    re.MULTILINE,
+)
+
+
+def load_recorder():
+    spec = importlib.util.spec_from_file_location("record_omp_crossover_v3_verification", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def write(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+
+
+def toolchain() -> dict[str, str]:
+    return {
+        "cc": "gcc (GCC) 13.3.0",
+        "cxx": "g++ (GCC) 13.3.0",
+        "gfortran": "no",
+        "rustc": "rustc 1.83.0 (90b35a623 2024-11-26)",
+        "ase": "no",
+        "pytest": "no",
+        "mpi": "no",
+        "meson": "1.5.2",
+        "cmake": "3.28.3",
+        "ninja": "1.11.1",
+    }
+
+
+def meson_options() -> list[dict[str, object]]:
+    values: list[tuple[str, object]] = [
+        ("with_tests", True),
+        ("with_examples", False),
+        ("with_xtensor", False),
+        ("with_eigen", False),
+        ("with_rpc", True),
+        ("with_cache", True),
+        ("pure_lib", False),
+        ("with_fortran_pots", "auto"),
+        ("with_fast_nlist", "disabled"),
+        ("with_mpi", "disabled"),
+        ("with_ipi", "auto"),
+    ]
+    return [{"name": name, "value": value} for name, value in values]
+
+
+def meson_log() -> str:
+    decoy = (
+        "Ok:                 1\n"
+        "Expected Fail:      0\n"
+        "Fail:               1\n"
+        "Unexpected Pass:    0\n"
+        "Skipped:            0\n"
+        "Timeout:            0\n"
+    )
+    final = (
+        "Ok:                 10\n"
+        "Expected Fail:      2\n"
+        "Fail:               0\n"
+        "Unexpected Pass:    0\n"
+        "Skipped:            1\n"
+        "Timeout:            0\n"
+    )
+    return "noise\n" + decoy + "1/13 sample OK\n" + final
+
+
+def cmake_cache() -> str:
+    return "\n".join(
+        [
+            "// comment",
+            "CMAKE_CXX_COMPILER_LAUNCHER:UNINITIALIZED=ccache",
+            "CMAKE_C_COMPILER_LAUNCHER:UNINITIALIZED=ccache",
+            "CMAKE_BUILD_TYPE:STRING=Release",
+            "RGPOT_BUILD_TESTS:BOOL=ON",
+            "RGPOT_BUILD_EXAMPLES:BOOL=OFF",
+            "RGPOT_WITH_XTENSOR:BOOL=OFF",
+            "RGPOT_WITH_EIGEN:BOOL=OFF",
+            "RGPOT_WITH_RPC:BOOL=ON",
+            "RGPOT_WITH_CACHE:BOOL=ON",
+            "RGPOT_PURE_LIB:BOOL=OFF",
+            "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++",
+            "",
+        ]
+    )
+
+
+def setup_log() -> str:
+    return "\n".join(
+        [
+            "Host machine cpu family: x86_64",
+            "Fortran compiler for the host machine: /opt/secret/gfortran (GCC) 13.3.0",
+            "Message: fast pair list: disabled, classical pots use the C++ scan",
+            "Dependency mpi for host machine skipped: feature with_mpi disabled",
+            "Message: i-PI driver tests skipped: needs pytest",
+            "",
+        ]
+    )
+
+
+def ctest_log() -> str:
+    return (
+        "50% tests passed, 1 tests failed out of 2\n"
+        "100% tests passed, 0 tests failed out of 8\n"
+    )
+
+
+def build_fixture(directory: Path) -> tuple[Path, Path, Path]:
+    write(directory / "toolchain.json", json.dumps(toolchain()) + "\n")
+    write(directory / "hidden-meson.log", meson_log())
+    write(directory / "hidden-setup.log", setup_log())
+    write(directory / "hidden-machines.json", json.dumps({"host": {"system": "linux"}}) + "\n")
+    write(directory / "hidden-options.json", json.dumps(meson_options()))
+    write(
+        directory / "hidden-rgpot.pc",
+        "\n".join(
+            [
+                "Name: rgpot",
+                "Cflags: -I${includedir} -DRGPOT_HAS_POTLIB=TRUE -DRGPOT_HAS_IPI=TRUE",
+                "",
+            ]
+        ),
+    )
+    write(directory / "hidden-ctest.log", ctest_log())
+    write(directory / "hidden-cache.txt", cmake_cache())
+    write(
+        directory / "hidden-cmake-setup.log",
+        "\n".join(
+            [
+                "-- The Fortran compiler identification is GNU 13.3.0",
+                "-- Check for working Fortran compiler: /opt/secret/gfortran - skipped",
+                "-- Performing Test RGPOT_MPI_COMPILES - Failed",
+                "",
+            ]
+        ),
+    )
+    meson_leg = {
+        "title": "Meson, RPC and cache enabled",
+        "runner": "meson",
+        "build": "build/meson-on",
+        "setup": [
+            "meson",
+            "setup",
+            "build/meson-on",
+            "-Dwith_tests=True",
+            "-Dwith_examples=False",
+            "-Dwith_xtensor=False",
+            "-Dwith_eigen=False",
+            "-Dwith_rpc=true",
+            "-Dwith_cache=true",
+            "-Dpure_lib=False",
+        ],
+        "compile": ["meson", "compile", "-C", "build/meson-on"],
+        "test": ["meson", "test", "-C", "build/meson-on", "--print-errorlogs"],
+        "log": "hidden-meson.log",
+        "configured": "hidden-options.json",
+        "setup_log": "hidden-setup.log",
+        "machines": "hidden-machines.json",
+        "pkgconfig": "hidden-rgpot.pc",
+    }
+    cmake_leg = {
+        "title": "CMake CTest, RPC and cache enabled",
+        "runner": "cmake",
+        "build": "build/cmake-on",
+        "setup": [
+            "cmake",
+            "-S",
+            ".",
+            "-B",
+            "build/cmake-on",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DRGPOT_BUILD_TESTS=True",
+            "-DRGPOT_BUILD_EXAMPLES=False",
+            "-DRGPOT_WITH_XTENSOR=OFF",
+            "-DRGPOT_WITH_EIGEN=OFF",
+            "-DRGPOT_WITH_RPC=ON",
+            "-DRGPOT_WITH_CACHE=ON",
+            "-DRGPOT_PURE_LIB=OFF",
+        ],
+        "compile": ["cmake", "--build", "build/cmake-on", "--parallel", "8"],
+        "test": ["ctest", "--test-dir", "build/cmake-on", "--output-on-failure"],
+        "log": "hidden-ctest.log",
+        "configured": "hidden-cache.txt",
+        "setup_log": "hidden-cmake-setup.log",
+    }
+    meson_path = directory / "meson-leg.json"
+    cmake_path = directory / "cmake-leg.json"
+    write(meson_path, json.dumps(meson_leg) + "\n")
+    write(cmake_path, json.dumps(cmake_leg) + "\n")
+    return directory / "toolchain.json", meson_path, cmake_path
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise SystemExit(message)
+
+
+def require_exit(message: str) -> None:
+    raise SystemExit(message)
+
+
+def render_records(records: Path, output: Path) -> subprocess.CompletedProcess[str]:
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "render",
+        "--toolchain",
+        str(records / "toolchain.json"),
+        "--output",
+        str(output),
+    ]
+    for name in LEG_ORDER:
+        command.extend(["--leg", str(records / name / "leg.json")])
+    return subprocess.run(command, text=True, capture_output=True)
+
+
+def summaries_from_records(recorder, records: Path) -> list[str]:
+    summaries: list[str] = []
+    for name in LEG_ORDER:
+        leg_path = records / name / "leg.json"
+        leg = json.loads(leg_path.read_text(encoding="utf-8"))
+        log = (leg_path.parent / str(leg["log"])).read_text(encoding="utf-8")
+        if leg["runner"] == "meson":
+            summaries.append(recorder.meson_summary(recorder.parse_meson_summary(log)))
+        elif leg["runner"] == "cmake":
+            summaries.append(recorder.ctest_summary(recorder.parse_ctest_summary(log)))
+        else:
+            require_exit(f"{name} runner is not meson or cmake")
+    return summaries
+
+
+def require_scrubbed(path: Path, text: str) -> None:
+    require("\r" not in text, f"{path.name} is not LF text")
+    leaked = _ABS_PATH.search(text)
+    require(leaked is None, f"{path.name} contains an absolute path")
+
+
+def check_committed_records(recorder) -> None:
+    require(RECORDS.is_dir(), "committed verification records are missing")
+    require(NOTE.is_file(), "published verification note is missing")
+    published = NOTE.read_text(encoding="utf-8")
+    require_scrubbed(NOTE, published)
+    for path in sorted(RECORDS.rglob("*")):
+        if path.is_file():
+            require_scrubbed(path, path.read_text(encoding="utf-8"))
+    for summary in summaries_from_records(recorder, RECORDS):
+        require(summary in published, f"published note is missing the record summary {summary}")
+    with tempfile.TemporaryDirectory() as directory_name:
+        output = Path(directory_name) / "note.md"
+        result = render_records(RECORDS, output)
+        if result.returncode != 0:
+            require_exit(result.stderr.strip() or result.stdout.strip() or "record render failed")
+        rendered = output.read_text(encoding="utf-8")
+    require(rendered == published, "published note disagrees with the committed records")
+
+
+def check_tampered_record(recorder) -> None:
+    published = NOTE.read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as directory_name:
+        records = Path(directory_name) / "records"
+        shutil.copytree(RECORDS, records)
+        leg = json.loads((records / "meson-on" / "leg.json").read_text(encoding="utf-8"))
+        log_path = records / "meson-on" / str(leg["log"])
+        original = log_path.read_text(encoding="utf-8")
+        match = None
+        for candidate in re.finditer(r"^Ok:\s+(\d+)\s*$", original, re.MULTILINE):
+            match = candidate
+        require(match is not None, "meson-on test log has no Ok row to tamper")
+        bumped = str(int(match.group(1)) + 1)
+        tampered = original[: match.start(1)] + bumped + original[match.end(1) :]
+        log_path.write_text(tampered, encoding="utf-8", newline="\n")
+        output = Path(directory_name) / "tampered.md"
+        result = render_records(records, output)
+        if result.returncode != 0:
+            require_exit(result.stderr.strip() or result.stdout.strip() or "tampered render failed")
+        rendered = output.read_text(encoding="utf-8")
+        require(rendered != published, "a tampered test log still matched the published note")
+        tampered_summary = recorder.meson_summary(recorder.parse_meson_summary(tampered))
+        require(
+            tampered_summary not in published,
+            "tampered meson count is still in the published note",
+        )
+
+
+def main() -> None:
+    recorder = load_recorder()
+    meson_counts = recorder.parse_meson_summary(meson_log())
+    require(
+        meson_counts
+        == {
+            "Ok": 10,
+            "Expected Fail": 2,
+            "Fail": 0,
+            "Unexpected Pass": 0,
+            "Skipped": 1,
+            "Ignored": 0,
+            "Timeout": 0,
+        },
+        f"meson parser kept the wrong summary: {meson_counts}",
+    )
+    require(
+        recorder.mpi_from_setup("mpic++ found: YES (/opt/secret/mpic++) 5.0.11\n") == "enabled",
+        "mpic++ found was not resolved as enabled",
+    )
+    require(
+        recorder.mpi_from_setup(
+            "Dependency mpi for host machine found: YES 5.0.11\n"
+        )
+        == "enabled",
+        "mpi found: YES was not resolved as enabled",
+    )
+    require(
+        recorder.mpi_from_setup(
+            "Dependency mpi for host machine found: NO (tried pkgconfig and cmake)\n"
+        )
+        == "disabled",
+        "mpi found: NO was resolved as enabled",
+    )
+    require(
+        recorder.mpi_from_setup(
+            "Dependency mpi for host machine found: NO (tried pkgconfig and cmake)\n"
+            "Program mpirun found: YES (/opt/secret/mpirun)\n"
+        )
+        == "disabled",
+        "mpi found: NO was resolved as enabled because another line said YES",
+    )
+    enabled_pc = "Name: rgpot\nCflags: -I${includedir} -DRGPOT_HAS_IPI=TRUE\n"
+    disabled_pc = "Name: rgpot\nCflags: -I${includedir} -DRGPOT_HAS_POTLIB=TRUE\n"
+    decoy_pc = "Libs: -lrgpot -DRGPOT_HAS_IPI=TRUE\nCflags: -I${includedir}\n"
+    require(
+        recorder.ipi_from_pkgconfig(enabled_pc) == "enabled",
+        "pkg-config Cflags did not record with_ipi as enabled",
+    )
+    require(
+        recorder.ipi_from_pkgconfig(disabled_pc) == "disabled",
+        "pkg-config Cflags without the i-PI flag was recorded as enabled",
+    )
+    require(
+        recorder.ipi_from_pkgconfig(decoy_pc) == "disabled",
+        "an i-PI flag outside Cflags was recorded as enabled",
+    )
+    try:
+        recorder.ipi_from_pkgconfig("Name: rgpot\n")
+    except SystemExit as exc:
+        require("Cflags" in str(exc), f"pkg-config record without Cflags said {exc}")
+    else:
+        require_exit("pkg-config record without Cflags was accepted")
+    compact = recorder.parse_meson_summary("Ok:                4\nExpected Fail:     1\nFail:              0\n")
+    require(
+        compact["Ok"] == 4
+        and compact["Expected Fail"] == 1
+        and compact["Skipped"] == 0
+        and compact["Ignored"] == 0
+        and sum(compact.values()) == 5,
+        f"compact meson summary was parsed as {compact}",
+    )
+    ctest_counts = recorder.parse_ctest_summary(ctest_log())
+    require(
+        ctest_counts == {"passed": 8, "failed": 0, "total": 8},
+        f"ctest parser kept the wrong summary: {ctest_counts}",
+    )
+    try:
+        recorder.parse_meson_summary("Ok: 1\n")
+    except SystemExit as exc:
+        require(str(exc) == "Meson log has no summary", f"incomplete meson log said {exc}")
+    else:
+        require_exit("incomplete meson log was accepted")
+    try:
+        recorder.parse_ctest_summary("99% tests passed, 0 tests failed out of 2\n")
+    except SystemExit as exc:
+        require("percent" in str(exc), f"inconsistent ctest percent said {exc}")
+    else:
+        require_exit("inconsistent ctest percent was accepted")
+
+    with tempfile.TemporaryDirectory() as directory_name:
+        directory = Path(directory_name)
+        toolchain_path, meson_path, cmake_path = build_fixture(directory)
+        output = directory / "note.md"
+        with tempfile.TemporaryDirectory() as other_name:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "render",
+                    "--toolchain",
+                    str(toolchain_path),
+                    "--leg",
+                    str(meson_path),
+                    "--leg",
+                    str(cmake_path),
+                    "--output",
+                    str(output),
+                ],
+                cwd=other_name,
+                text=True,
+                capture_output=True,
+            )
+        if result.returncode != 0:
+            require_exit(result.stderr.strip() or result.stdout.strip())
+        text = output.read_text(encoding="utf-8")
+        meson_line = recorder.meson_summary(meson_counts)
+        ctest_line = recorder.ctest_summary(ctest_counts)
+        require(meson_line in text, "note omitted the parsed meson summary")
+        require(ctest_line in text, "note omitted the parsed ctest summary")
+        require("|Ok|10|" in text and "|Total|13|" in text, "meson table does not match the log")
+        require("|Passed|8|" in text and "|Total|8|" in text, "ctest table does not match the log")
+        require("Fail 1" not in text and "Ok 1," not in text, "note kept an earlier meson summary")
+        require("1 tests failed" not in text, "note kept an earlier ctest summary")
+        require("-Dwith_rpc=true" in text and "|with_fast_nlist|disabled|disabled|" in text, "meson options were dropped")
+        require("|with_fortran_pots|auto|enabled|" in text, "fortran resolution was dropped")
+        require("|with_ipi|auto|enabled|" in text, "i-PI resolution was dropped")
+        require(
+            "with_ipi is parsed from the pkg-config Cflags" in text,
+            "note does not name the pkg-config record for with_ipi",
+        )
+        disabled_leg = json.loads(meson_path.read_text(encoding="utf-8"))
+        disabled_pc = directory / "disabled-rgpot.pc"
+        write(
+            disabled_pc,
+            "Name: rgpot\nCflags: -I${includedir} -DRGPOT_HAS_POTLIB=TRUE\n",
+        )
+        disabled_leg["pkgconfig"] = disabled_pc.name
+        disabled_leg_path = directory / "disabled-ipi-leg.json"
+        write(disabled_leg_path, json.dumps(disabled_leg) + "\n")
+        disabled_note = directory / "disabled-ipi.md"
+        disabled_render = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "render",
+                "--toolchain",
+                str(toolchain_path),
+                "--leg",
+                str(disabled_leg_path),
+                "--output",
+                str(disabled_note),
+            ],
+            cwd=directory,
+            text=True,
+            capture_output=True,
+        )
+        if disabled_render.returncode != 0:
+            require_exit(disabled_render.stderr.strip() or disabled_render.stdout.strip())
+        disabled_text = disabled_note.read_text(encoding="utf-8")
+        require(
+            "|with_ipi|auto|disabled|" in disabled_text,
+            "missing i-PI cflag was still reported as enabled",
+        )
+        require("/opt/secret" not in text, "note leaked a setup-log path")
+        require("|RGPOT_WITH_RPC|ON|" in text, "cmake cache value was dropped")
+        require("|RGPOT_HAVE_MPI|OFF|" in text and "|Fortran|GNU 13.3.0|" in text, "cmake detection was dropped")
+        require("hidden-meson.log" not in text and "hidden-ctest.log" not in text, "note leaked a log path")
+        require("/usr/bin" not in text and str(directory) not in text, "note leaked a filesystem path")
+        require("These counts are environment-specific." in text, "counts are not labeled environment-specific")
+        require("92" not in text and "94" not in text, "note cites an unsubstantiated aggregate")
+        require("\r" not in text and text.endswith("\n"), "note is not LF text")
+
+        mismatched = json.loads(meson_path.read_text(encoding="utf-8"))
+        mismatched["setup"] = list(mismatched["setup"])
+        mismatched["setup"][mismatched["setup"].index("-Dwith_rpc=true")] = "-Dwith_rpc=false"
+        bad_leg = directory / "bad-leg.json"
+        write(bad_leg, json.dumps(mismatched) + "\n")
+        rejected = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "render",
+                "--toolchain",
+                str(toolchain_path),
+                "--leg",
+                str(bad_leg),
+                "--output",
+                str(directory / "bad.md"),
+            ],
+            cwd=directory,
+            text=True,
+            capture_output=True,
+        )
+        rejected_text = (rejected.stdout + rejected.stderr).strip()
+        require(
+            rejected.returncode != 0 and "with_rpc" in rejected_text,
+            f"mismatched option was not rejected: {rejected_text}",
+        )
+
+        bad_toolchain = toolchain()
+        bad_toolchain["cxx"] = "/usr/bin/g++"
+        bad_toolchain_path = directory / "bad-toolchain.json"
+        write(bad_toolchain_path, json.dumps(bad_toolchain) + "\n")
+        leaked = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "render",
+                "--toolchain",
+                str(bad_toolchain_path),
+                "--leg",
+                str(meson_path),
+                "--output",
+                str(directory / "leaked.md"),
+            ],
+            cwd=directory,
+            text=True,
+            capture_output=True,
+        )
+        leaked_text = (leaked.stdout + leaked.stderr).strip()
+        require(
+            leaked.returncode != 0 and "absolute path" in leaked_text,
+            f"absolute toolchain path was not rejected: {leaked_text}",
+        )
+
+    check_committed_records(recorder)
+    check_tampered_record(recorder)
+
+
+if __name__ == "__main__":
+    main()

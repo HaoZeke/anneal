@@ -1,0 +1,38 @@
+{
+  "title": "CMake, rpc and cache on",
+  "runner": "cmake",
+  "build": "build/verify-cmake-on",
+  "setup": [
+    "cmake",
+    "-S",
+    ".",
+    "-B",
+    "build/verify-cmake-on",
+    "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+    "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DRGPOT_BUILD_TESTS=True",
+    "-DRGPOT_BUILD_EXAMPLES=False",
+    "-DRGPOT_WITH_XTENSOR=OFF",
+    "-DRGPOT_WITH_EIGEN=OFF",
+    "-DRGPOT_WITH_RPC=ON",
+    "-DRGPOT_WITH_CACHE=ON",
+    "-DRGPOT_PURE_LIB=OFF"
+  ],
+  "compile": [
+    "cmake",
+    "--build",
+    "build/verify-cmake-on",
+    "--parallel",
+    "8"
+  ],
+  "test": [
+    "ctest",
+    "--test-dir",
+    "build/verify-cmake-on",
+    "--output-on-failure"
+  ],
+  "log": "test.txt",
+  "configured": "CMakeCache.txt",
+  "setup_log": "setup.txt"
+}

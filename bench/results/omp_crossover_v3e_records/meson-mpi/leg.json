@@ -1,0 +1,36 @@
+{
+  "title": "Meson, rpc and cache on, MPI enabled",
+  "runner": "meson",
+  "build": "build/verify-meson-mpi",
+  "setup": [
+    "meson",
+    "setup",
+    "build/verify-meson-mpi",
+    "-Dwith_tests=True",
+    "-Dwith_examples=False",
+    "-Dwith_xtensor=False",
+    "-Dwith_eigen=False",
+    "-Dpure_lib=False",
+    "-Dwith_rpc=true",
+    "-Dwith_cache=true",
+    "-Dwith_mpi=enabled"
+  ],
+  "compile": [
+    "meson",
+    "compile",
+    "-C",
+    "build/verify-meson-mpi"
+  ],
+  "test": [
+    "meson",
+    "test",
+    "-C",
+    "build/verify-meson-mpi",
+    "--print-errorlogs"
+  ],
+  "log": "test.txt",
+  "configured": "buildoptions.json",
+  "setup_log": "setup.txt",
+  "machines": "machines.json",
+  "pkgconfig": "rgpot.pc"
+}

@@ -1,0 +1,13 @@
+prefix=usr/local
+includedir=${prefix}/include
+libdir=${prefix}/lib/x86_64-linux-gnu
+
+Name: rgpot
+Description: rgpot potentials (librgpot umbrella) + QM frontends
+URL: https://github.com/OmniPotentRPC/rgpot
+Version: 3.7.0
+Requires: rocksdb, capnp-rpc
+Requires.private: libxxhash, fmt
+Libs: -L${libdir} -lrgpot
+Libs.private: -lm -lstdc++ -pthread -ldl -fopenmp build/verify-meson-on/librgpot_fastnlist.a -lgcc_s -lutil -lrt -lpthread -lc .pixi/envs/mpibld/bin/../lib/gcc/x86_64-conda-linux-gnu/14.4.0/libgfortran.so -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp -fopenmp
+Cflags: -I${includedir} -DRGPOT_HAS_POTLIB=TRUE -DRGPOT_HAS_FORTRAN_POTS=TRUE -DRGPOT_HAS_IPI=TRUE -DRGPOT_HAS_CACHE=TRUE -DRGPOT_HAS_NWCHEM_FRONTEND=TRUE -DRGPOT_HAS_CPMD_FRONTEND=TRUE

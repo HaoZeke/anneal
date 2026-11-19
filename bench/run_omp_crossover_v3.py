@@ -571,7 +571,9 @@ def format_p(value: float, n: int) -> str:
     return rendered
 
 
-def render_report(payload: dict[str, Any]) -> str:
+def render_report(
+    payload: dict[str, Any], *, explain_team_one_activation: bool = False
+) -> str:
     metadata = payload["metadata"]
     lines = [
         "# OpenMP crossover benchmark v3",
@@ -604,6 +606,13 @@ def render_report(payload: dict[str, Any]) -> str:
             f"{arm['identity']['observed_team_activation_atoms']}|`{arm['library_sha256']}`|"
             f"`{arm['git_status_porcelain']}`|"
         )
+    if explain_team_one_activation:
+        lines += [
+            "",
+            "The team-1 activation value comes from the worker --identity probe. "
+            "The slice count is capped at the atom count, so one atom remains one "
+            "slice and two atoms are the first multi-slice activation.",
+        ]
     lines += [
         "",
         "## Crossovers",
@@ -782,6 +791,9 @@ def main() -> None:
     analyze_parser = subparsers.add_parser("analyze")
     analyze_parser.add_argument("--input-json", type=Path, required=True)
     analyze_parser.add_argument("--output-report", type=Path, required=True)
+    clarified_parser = subparsers.add_parser("analyze-v3e")
+    clarified_parser.add_argument("--input-json", type=Path, required=True)
+    clarified_parser.add_argument("--output-report", type=Path, required=True)
     provenance_parser = subparsers.add_parser("provenance")
     provenance_parser.add_argument("--repo", type=Path, required=True)
     provenance_parser.add_argument("--input-json", type=Path, required=True)
@@ -795,6 +807,14 @@ def main() -> None:
         payload = json.loads(args.input_json.read_text(encoding="utf-8"))
         corrected_analysis(payload)
         args.output_report.write_text(render_report(payload), encoding="utf-8")
+        return
+    if args.command == "analyze-v3e":
+        payload = json.loads(args.input_json.read_text(encoding="utf-8"))
+        corrected_analysis(payload)
+        args.output_report.write_text(
+            render_report(payload, explain_team_one_activation=True),
+            encoding="utf-8",
+        )
         return
     if args.command == "provenance":
         payload = json.loads(args.input_json.read_text(encoding="utf-8"))
