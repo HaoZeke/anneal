@@ -5,9 +5,6 @@
 # Hits: anneal default 121/192, budget-fair.
 
 # polish 148/192, plain CREST 97/192, budget-fair CREST+polish 114/192.
-# The plain-CREST count in this older four-arm ledger is superseded by the
-# fresh rerun-9a30f319 receipts: 94/192. The two opt-in polish arms still use
-# this ledger.
 # Max crest_fair calls 3907 (reserve 618, CREST cap 3382).
 
 # Port tip.

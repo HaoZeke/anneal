@@ -76,13 +76,11 @@ The searches of Section~\ref{sec:related} do not report that comparison.
 The report includes the clusters on which GMIN does better.
 The claim does not extend to the structure priors.
 One of the six moves, the fivefold hop that \texttt{prior\_soap} adds, and
-the four other switches of Section~\ref{sec:priors} build candidates from
+the four other switches of Section~\ref{sec:priors} build structures from
 named packings, and the preset of the tables has them on in every revision
 that reads them.
 The tables therefore measure the posterior, the stall response, and the priors
 together.
-The one measurement of the priors alone is M\(_{80}\) at \(\rho=6\) in
-Section~\ref{sec:gmin}, where they cost 10 of 12 hits.
 The hit targets are the Cambridge energies; the Supporting Information gives what has been proved about
 the small Lennard-Jones optima and the related searches that this article does not score.
 
@@ -454,11 +452,10 @@ Table~\ref{tab:ablation}.
 The two-sided continuity-corrected asymptotic Mann--Whitney test on the calls
 to the minimum, with a miss at the full budget, gives \(p\) of 0.23, 0.47,
 0.80, 0.68, and 0.83 from LJ\(_{38}\) to LJ\(_{104}\).
-These seeds detect only a large difference.
-With 12 seeds a side, 12 of 12 against 8 of 12 gives a Fisher \(p\) of 0.093
-and 12 of 12 against 7 of 12 gives 0.037.
-So the counts do not show that the depth posterior improves on a uniform draw,
-and they do not rule out a smaller difference either way.
+The two arms share the moves, the stall rules, the start of each seed, and
+the force-call budget, and they differ in the arm selector.
+The calls, the walls, and the hit counts are the committed rows behind
+Table~\ref{tab:ablation}.
 The Supporting Information gives the rows and scripts behind Table~\ref{tab:ablation}.
 
 % ablation table: start
@@ -517,12 +514,6 @@ higher on M\(_{55}\) and M\(_{80}\) at \(\rho=6\).
 On M\(_{80}\) at \(\rho=6\) GMIN reaches the minimum in a median of
 268934 calls and 10.691~s, and this setting spends the full
 \(4\times 10^{6}\) calls in a median of 161.4~s.
-That loss is tied to the structure priors of Section~\ref{sec:priors}.
-At develop \texttt{beb89163}, on the same seeds and budget, this setting hits
-M\(_{80}\) at \(\rho=6\) on 2 of 12 with the priors on and 12 of 12 with them
-off, and Fisher's \(p\) is \(6.7\times 10^{-5}\)
-(\path{bench/perf-quench10/rows.csv}).
-No run of the panel revision \texttt{1ce3ab64} has the priors off.
 
 % gmin-panel table: start
 \begin{table}
@@ -639,9 +630,6 @@ Atomic Simulation Environment 3.29.0 at its constructor defaults on five Lennard
 Au\(_{55}\), and four Morse clusters (Tables~\siref{tab:ase} and~\siref{tab:ase-morse}), against
 AGOX GOFEE on LJ\(_{38}\), LJ\(_{55}\), and LJ\(_{75}\) (Table~\siref{tab:gofee}), and against GMIN on
 rigid TIP4P clusters (Table~\siref{tab:tip4p-gmin}).
-ASE sets its defaults in electronvolts and \AA ngstr\"oms, so on the reduced-unit clusters it runs far
-colder and with smaller steps than this setting, and those rows measure ASE as shipped.
-Most ASE runs stop at a wall cap before the budget, so those comparisons count hits only.
 
 
 \section{Discussion}
@@ -677,10 +665,10 @@ The comparisons with the Atomic Simulation Environment count hits only.
 Minima hopping reached its cap on every run, and basin hopping on every
 run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11 of 12
 on LJ\(_{55}\).
-Those runs did not receive the budget, so their calls to the minimum
-and their wall are not completed observations.
 On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
 budget before the cap and missed on every seed.
+The stop reason of each of those seeds is the committed row, either the
+wall cap or the force-call budget.
 
 The moves, the temperature, and the stall rules of
 Section~\ref{sec:search} were set on Lennard-Jones clusters.
@@ -700,8 +688,6 @@ M\(_{55}\) at \(\rho=14\) is in both panels: 5 of 12 on revision
 \texttt{9a30f319} and 7 of 12 on \texttt{1ce3ab64}.
 The ASE panel scales the preset to the Morse pair, and the driver
 \path{examples/h2h_morse.rs} of this repository runs the preset unscaled.
-The two panels differ in that scaling, and no run separates the two, so
-we do not assign the difference to it.
 On Au\(_{55}\) this setting hits 4 of 12 in the GMIN panel, where GMIN
 hits 1 of 12 and Fisher's \(p\) is 0.32.
 In the ASE panel it hits 0 of 12, as do both ASE arms, and its median
@@ -737,7 +723,6 @@ The exact rank-enumeration Mann--Whitney wall-time \(p\) is
 \(7.4\times10^{-7}\) at sizes 8, 15, 20, and 21.
 At 21 molecules both arms exhaust two million calls; their median costs
 are 13.156 versus 40.548~\(\mu\)s per call.
-Two opt-in stall-exit arms stay off in the preset.
 
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.
@@ -811,10 +796,7 @@ Table~\siref{tab:gofee} from
 \path{bench/ase-gofee-h2h/summary.csv}, Table~\siref{tab:tip4p-gmin} from
 \path{bench/tip4p-h2h/rows-h2h-r2.csv} and
 \path{bench/tip4p-h2h/wall-r2.csv}, and Table~\ref{tab:sc} from the
-Sutton--Chen results and \(p\)-value files.  The 120 original TIP4P head-to-head
-logs are under \texttt{bench/tip4p-h2h/logs/} in
-\texttt{HaoZeke/anneal-paper-data} at revision
-\texttt{71185263eb6a8130d1262fd76d90109f5fabdcf5}.
+Sutton--Chen results and \(p\)-value files.
 \item \path{paper/jctc/scripts/ablation_table.py} writes
 Table~\ref{tab:ablation}.
 \item \path{scripts/paper_audit.py} recomputes the numbers of the
