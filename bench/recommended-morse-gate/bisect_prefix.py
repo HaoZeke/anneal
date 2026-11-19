@@ -133,6 +133,13 @@ def main(argv: list[str]) -> int:
             if line.startswith("system="):
                 print(line, flush=True)
         trace = parse_trace(proc.stdout)
+        calls = ""
+        charged = ""
+        for line in proc.stdout.splitlines():
+            if line.startswith("system="):
+                fields = dict(part.split("=", 1) for part in line.split())
+                calls = fields.get("first_calls", "")
+                charged = fields.get("charged", "")
         if args.record is not None:
             args.record.write_text("".join(f"{energy}\n" for energy in trace))
             print(f"recorded {len(trace)} steps", flush=True)
@@ -142,8 +149,17 @@ def main(argv: list[str]) -> int:
             return 125
         expected = [line.strip() for line in args.expected.read_text().splitlines() if line.strip()]
         step = first_difference(expected, trace)
+        expect_calls = os.environ.get("EXPECT_CALLS", "")
+        expect_charged = os.environ.get("EXPECT_CHARGED", "")
+        if step is None and expect_calls and (calls != expect_calls or charged != expect_charged):
+            print(
+                f"differ step=calls first_calls={calls} charged={charged} "
+                f"expected_calls={expect_calls} expected_charged={expect_charged}",
+                flush=True,
+            )
+            return 1
         if step is None:
-            print(f"match steps={len(trace)}", flush=True)
+            print(f"match steps={len(trace)} first_calls={calls} charged={charged}", flush=True)
             return 0
         print(f"differ step={step} expected_len={len(expected)} found_len={len(trace)}", flush=True)
         return 1
