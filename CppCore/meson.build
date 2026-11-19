@@ -2929,7 +2929,12 @@ if not meson.is_subproject()
     install_subdir(
         'rgpot',
         install_dir: get_option('includedir'),
-        exclude_directories: ['__pycache__', 'rpc/local', 'Morse/detail'],
+        exclude_directories: [
+            '__pycache__',
+            'rpc/local',
+            'Morse/detail',
+            'SuttonChen/detail',
+        ],
         exclude_files: _install_exclude,
     )
     if get_option('with_tests')

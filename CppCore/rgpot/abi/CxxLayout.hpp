@@ -39,6 +39,7 @@
 #include "rgpot/Morse/MorsePot.hpp"
 #include "rgpot/CalculatorGroup.hpp"
 #include "rgpot/Potential.hpp"
+#include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
 #include "rgpot/pot_caps.hpp"
 #include "rgpot/pot_types.hpp"
@@ -181,7 +182,8 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 1;
 /// 6 drops the copied half-list from LJ and Morse, and gives ZBL and the
 /// open Lennard-Jones cluster a neighbour member. The pair term runs on
 /// the shared walk, so CachedPairs is no longer part of those objects.
-inline constexpr std::uint32_t kCxxSoversion = 7;
+/// 8 stamps SuttonChenConfig, PotType::SuttonChen and SuttonChenPot.
+inline constexpr std::uint32_t kCxxSoversion = 8;
 
 /// One recorded no-cache layout hash. `tag` is `kCxxPlatformTag`.
 struct CxxSoversionEntry {
@@ -194,7 +196,7 @@ struct CxxSoversionEntry {
 /// platform still compiles. How to update the table:
 /// docs/orgmode/contributing/developer/abi-bump.org.
 inline constexpr std::array<CxxSoversionEntry, 1> kCxxSoversionTable{{
-    {"linux-x86_64-libstdc++-lp64", 0xdf2b96303d5ac68full},
+    {"linux-x86_64-libstdc++-lp64", 0x0a33f3aa4b4e5162ull},
 }};
 
 /// This translation unit's platform tag (`os-arch-stdlib-datamodel`).
@@ -330,6 +332,15 @@ constexpr std::uint64_t compute_hash() {
   f.type<ZBLConfig>();
   f.add(offsetof(ZBLConfig, cut_inner));
   f.add(offsetof(ZBLConfig, cut_global));
+  f.type<SuttonChenConfig>();
+  f.add(offsetof(SuttonChenConfig, epsilon));
+  f.add(offsetof(SuttonChenConfig, c));
+  f.add(offsetof(SuttonChenConfig, a));
+  f.add(offsetof(SuttonChenConfig, n));
+  f.add(offsetof(SuttonChenConfig, m));
+  f.add(offsetof(SuttonChenConfig, cutoff));
+  f.add(offsetof(SuttonChenConfig, periodic));
+  f.add(offsetof(SuttonChenConfig, stress));
 
   // Enumerations: underlying width and the values consumers switch on.
   f.type<Reentrancy>();
@@ -343,6 +354,7 @@ constexpr std::uint64_t compute_hash() {
   f.add(static_cast<std::uint64_t>(PotType::Morse));
   f.add(static_cast<std::uint64_t>(PotType::LJCluster));
   f.add(static_cast<std::uint64_t>(PotType::ZBL));
+  f.add(static_cast<std::uint64_t>(PotType::SuttonChen));
   f.add(static_cast<std::uint64_t>(PotType::Eckart));
   f.add(static_cast<std::uint64_t>(PotType::MullerBrown));
   f.add(static_cast<std::uint64_t>(PotType::ModifiedMullerBrown));
@@ -364,6 +376,7 @@ constexpr std::uint64_t compute_hash() {
   f.type<LJClusterPot>();
   f.type<MorsePot>();
   f.type<ZBLPot>();
+  f.type<SuttonChenPot>();
 #ifdef RGPOT_HAS_CACHE
   f.type<cache::EvalCounts>();
   f.add(offsetof(cache::EvalCounts, computed));

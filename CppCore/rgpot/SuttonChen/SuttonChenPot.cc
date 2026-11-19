@@ -30,6 +30,7 @@
 #include "rgpot/KeptPotential.hpp"
 #include "rgpot/Slices.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
+#include "rgpot/SuttonChen/detail/SuttonChenWorkspaceSnapshot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
 
@@ -102,6 +103,7 @@ struct PairForceData {
 struct SuttonChenWorkspace {
   const rgpot::nlist::Neighbours *owner = nullptr;
   std::uint64_t build_id = 0;
+  std::uint64_t index_builds = 0;
   std::size_t index_atoms = 0;
   std::size_t slots = 0;
 
@@ -134,6 +136,64 @@ struct SuttonChenWorkspace {
   std::uint64_t scratch_build_id = 0;
   std::size_t scratch_slots = 0;
   std::uint64_t scratch_avail = 0;
+
+  void releaseScratch() noexcept {
+    std::vector<std::uint8_t>().swap(active);
+    std::vector<double>().swap(pair_phi);
+    std::vector<PairForceData>().swap(pair_force);
+    std::vector<double>().swap(pair_he);
+    std::vector<double>().swap(rho);
+    std::vector<double>().swap(weight);
+    std::vector<double>().swap(row_e);
+    std::vector<double>().swap(row_emb);
+    std::vector<double>().swap(row_s);
+  }
+
+  void releaseAll() noexcept {
+    owner = nullptr;
+    build_id = 0;
+    index_builds = 0;
+    index_atoms = 0;
+    slots = 0;
+    std::vector<std::int32_t>().swap(up_off);
+    std::vector<std::int32_t>().swap(lo_off);
+    std::vector<std::int32_t>().swap(lo_count);
+    std::vector<std::int32_t>().swap(up_j);
+    std::vector<LoRef>().swap(lo_refs);
+    releaseScratch();
+    std::vector<std::size_t>().swap(p0_splits);
+    std::vector<std::size_t>().swap(p1_splits);
+    split_owner = nullptr;
+    split_build_id = 0;
+    split_atoms = 0;
+    split_slices = 0;
+    split_total_up = 0;
+    split_total_inc = 0;
+    scratch_owner = nullptr;
+    scratch_build_id = 0;
+    scratch_slots = 0;
+    scratch_avail = 0;
+  }
+
+  [[nodiscard]] std::size_t indexCapacityBytes() const noexcept {
+    return up_off.capacity() * sizeof(std::int32_t) +
+           lo_off.capacity() * sizeof(std::int32_t) +
+           lo_count.capacity() * sizeof(std::int32_t) +
+           up_j.capacity() * sizeof(std::int32_t) +
+           lo_refs.capacity() * sizeof(LoRef);
+  }
+
+  [[nodiscard]] std::size_t scratchCapacityBytes() const noexcept {
+    return active.capacity() * sizeof(std::uint8_t) +
+           pair_phi.capacity() * sizeof(double) +
+           pair_force.capacity() * sizeof(PairForceData) +
+           pair_he.capacity() * sizeof(double) +
+           rho.capacity() * sizeof(double) +
+           weight.capacity() * sizeof(double) +
+           row_e.capacity() * sizeof(double) +
+           row_emb.capacity() * sizeof(double) +
+           row_s.capacity() * sizeof(double);
+  }
 };
 
 struct WorkspaceLease {
@@ -214,8 +274,10 @@ void buildStoredHalfIndex(SuttonChenWorkspace &ws, const rgpot::nlist::Neighbour
 
   ws.owner = &cells;
   ws.build_id = cells.builds();
+  ++ws.index_builds;
   ws.index_atoms = n;
   ws.slots = cells.slots();
+  std::vector<std::int32_t>().swap(ws.lo_count);
   ws.split_owner = nullptr;
   ws.split_build_id = 0;
   ws.split_atoms = 0;
@@ -268,6 +330,15 @@ std::uint64_t cachedAvailableBytes(SuttonChenWorkspace &ws,
   return ws.scratch_avail;
 }
 
+/// True when the candidate upper-pair scratch of the three-phase stored path
+/// (`PairForceData`, `pair_phi`, `active`, `up_j`, `lo_refs`, and `pair_he`
+/// when `atoms != nullptr && atoms->energy != nullptr`) fits within half of
+/// `avail` (`nlist::availableBytes()`), or when `avail == 0` (`MemAvailable`
+/// not reported). Per-atom vectors (`up_off`, `lo_off`, `rho`, `weight`,
+/// `row_e`, `row_emb`, and `row_s` with stress) are `O(nAtoms)`, already
+/// bounded by `Neighbours::buildCells` and present as `rho_` and `weight_` on
+/// the two-pass fallback, so they are not counted against this pair-slot
+/// budget.
 bool pairScratchFits(std::size_t num_pairs, const rgpot::PerAtomOut *atoms,
                      std::uint64_t avail) {
   std::size_t bytes_per_pair = sizeof(PairForceData) + sizeof(double) + sizeof(std::uint8_t) +
@@ -387,7 +458,8 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
     const std::uint64_t scratch_avail = cachedAvailableBytes(ws, neighbours_);
     if (est_half_pairs < kMinParallelHalfPairs) {
       sparse_stored = true;
-    } else if (pairScratchFits(est_half_pairs, atoms, scratch_avail)) {
+    } else if (est_half_pairs <= term_limit_ &&
+               pairScratchFits(est_half_pairs, atoms, scratch_avail)) {
       const bool index_valid = neighbours_.reused() && ws.owner == &neighbours_ &&
                                ws.build_id == neighbours_.builds() &&
                                ws.index_atoms == n_size &&
@@ -398,11 +470,8 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
       const auto total_up = static_cast<std::size_t>(ws.up_off[n_size]);
       if (total_up < kMinParallelHalfPairs) {
         sparse_stored = true;
-      } else if (total_up > term_limit_) {
-        // The three-phase path keeps every candidate upper pair in scratch.
-        // If that count exceeds the configured limit, keep the row-team
-        // two-pass path so threaded rows still run.
-      } else if (pairScratchFits(total_up, atoms, scratch_avail)) {
+      } else if (total_up <= term_limit_ &&
+                 pairScratchFits(total_up, atoms, scratch_avail)) {
         ws.active.resize(total_up);
         ws.pair_phi.resize(total_up);
         ws.pair_force.resize(total_up);
@@ -661,6 +730,7 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
         if (cfg.stress) {
           publishCauchyStress(out, strain, cellVolume(in.box));
         }
+        ws.releaseScratch();
         return;
       }
     }
@@ -962,6 +1032,33 @@ RGPOT_SC_API void Kept<SuttonChenPot>::release() noexcept {
     slot.clear();
   }
 }
+
+namespace detail {
+
+SuttonChenWorkspaceSnapshot suttonChenWorkspaceSnapshot() {
+  WorkspaceLease lease;
+  const SuttonChenWorkspace &ws = *lease.ws;
+  const std::size_t total_up =
+      ws.index_atoms < ws.up_off.size()
+          ? static_cast<std::size_t>(ws.up_off[ws.index_atoms])
+          : 0;
+  return SuttonChenWorkspaceSnapshot{
+      .owner = ws.owner,
+      .build_id = ws.build_id,
+      .index_builds = ws.index_builds,
+      .atoms = ws.index_atoms,
+      .total_up = total_up,
+      .index_capacity_bytes = ws.indexCapacityBytes(),
+      .scratch_capacity_bytes = ws.scratchCapacityBytes(),
+  };
+}
+
+void releaseSuttonChenWorkspace() noexcept {
+  WorkspaceLease lease;
+  lease.ws->releaseAll();
+}
+
+} // namespace detail
 
 } // namespace rgpot
 
