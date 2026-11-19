@@ -574,12 +574,12 @@ TEST_CASE("a negative or non-finite skin is rejected", "[nlist][api][edge]") {
                       std::numeric_limits<double>::infinity(),
                       -std::numeric_limits<double>::infinity()}) {
     non_finite.skin = skin;
-    REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, box, non_finite),
-                      rgpot::nlist::Error);
     try {
       rgpot::nlist::build(table, pos, 2, box, non_finite);
+      FAIL("build accepted the skin " << skin);
     } catch (const rgpot::nlist::Error &err) {
       REQUIRE(err.code() == rgpot::nlist::Code::Cutoff);
+      REQUIRE(err.what() == std::string("skin must be finite and >= 0"));
     }
   }
 }
@@ -635,107 +635,89 @@ TEST_CASE("a non-finite box element is rejected", "[nlist][api][edge]") {
 
 TEST_CASE("a streaming walk rejects buffers too short for the pair cap",
           "[nlist][api][edge]") {
-  // The chunked-walk test above ("a chunked walk returns the stored
-  // pairs") only ever hands pull() buffers that are long enough. Walk::pull
-  // validates each optional buffer independently (Code::Short); none of
-  // those branches run anywhere else.
+  // Walk::pull checks each buffer against the pair cap in a fixed order and
+  // every check throws Code::Short with its own message. Each sub-block gives
+  // every enabled buffer a valid size except the one under test, so only that
+  // check can fire, and the message says which one did. The cap is one more
+  // than the number of pairs, so a short buffer is still long enough for
+  // every pair a pull would write and a skipped check cannot overrun it.
   const double box[9] = {6, 0, 0, 0, 5, 0, 1, 0, 7};
   const std::vector<double> pos = {0.5, 0.5, 0.5, 2.0, 1.0, 1.0, 4.5, 3.0, 6.0};
+  const std::size_t natoms = pos.size() / 3;
   rgpot::nlist::Query query;
   query.cutoff = 4.0;
   query.shape = rgpot::nlist::Pairs{rgpot::nlist::Shell::Full};
   query.cut = rgpot::nlist::Cut::Strict;
+  REQUIRE(query.fields.shifts);
+  REQUIRE(query.fields.vectors);
+  REQUIRE(query.fields.distances);
 
-  auto freshWalk = [&] {
-    return rgpot::nlist::Walk(pos.data(), pos.size() / 3, box, query);
+  rgpot::nlist::Query cluster_query = query;
+  cluster_query.shape = rgpot::nlist::Cluster4{};
+
+  auto pair_count = [&](const rgpot::nlist::Query &q) {
+    rgpot::nlist::Table table;
+    rgpot::nlist::build(table, pos.data(), natoms, box, q);
+    return table.size();
+  };
+  const std::size_t pairs = pair_count(query);
+  const std::size_t cluster_pairs = pair_count(cluster_query);
+  REQUIRE(pairs >= 2);
+  REQUIRE(cluster_pairs >= 1);
+
+  struct Storage {
+    explicit Storage(std::size_t cap)
+        : first(cap), second(cap), shift(3 * cap), vector(3 * cap), distance(cap), mask(cap) {}
+    std::vector<std::int32_t> first, second, shift;
+    std::vector<double> vector, distance;
+    std::vector<std::uint8_t> mask;
+    rgpot::nlist::Buffers valid() {
+      return {first, second, shift, vector, distance, mask};
+    }
   };
 
-  std::vector<std::int32_t> first(2), second(2), shift(6), bad_shift(2);
-  std::vector<double> vector(6), bad_vector(2), distance(2), bad_distance(1);
-  std::vector<std::uint8_t> mask(2), bad_mask(1);
-  auto expect_short = [](auto &&call, const char *what) {
-    REQUIRE_THROWS_AS(call(), rgpot::nlist::Error);
+  auto expect_short = [&](const rgpot::nlist::Query &q, std::size_t cap,
+                          auto &&shorten, const char *what) {
+    Storage store(cap);
+    rgpot::nlist::Buffers dest = store.valid();
+    shorten(dest);
+    rgpot::nlist::Walk walk(pos.data(), natoms, box, q);
+    bool done = false;
     try {
-      call();
+      (void)walk.pull(dest, done);
+      FAIL("pull accepted a short buffer: " << what);
     } catch (const rgpot::nlist::Error &err) {
       REQUIRE(err.code() == rgpot::nlist::Code::Short);
       REQUIRE(err.what() == std::string(what));
     }
   };
 
+  const std::size_t cap = pairs + 1;
+  expect_short(
+      query, cap, [&](rgpot::nlist::Buffers &d) { d.second = d.second.first(cap - 1); },
+      "first and second buffers have different lengths");
+  expect_short(
+      query, cap, [&](rgpot::nlist::Buffers &d) { d.shift = d.shift.first(3 * cap - 1); },
+      "shift buffer needs 3 entries per pair");
+  expect_short(
+      query, cap, [&](rgpot::nlist::Buffers &d) { d.vector = d.vector.first(3 * cap - 1); },
+      "vector buffer needs 3 entries per pair");
+  expect_short(
+      query, cap, [&](rgpot::nlist::Buffers &d) { d.distance = d.distance.first(cap - 1); },
+      "distance buffer is shorter than the pair buffer");
+  const std::size_t cluster_cap = cluster_pairs + 1;
+  expect_short(
+      cluster_query, cluster_cap,
+      [&](rgpot::nlist::Buffers &d) { d.mask = d.mask.first(cluster_cap - 1); },
+      "a cluster list needs one mask byte per pair");
+
   {
-    auto walk = freshWalk();
-    rgpot::nlist::Buffers dest;
-    dest.first = first;
-    dest.second = std::span<std::int32_t>(second.data(), 1); // mismatched
-    dest.shift = shift;
-    dest.vector = vector;
-    dest.distance = distance;
+    Storage store(cap);
+    rgpot::nlist::Buffers dest = store.valid();
+    rgpot::nlist::Walk walk(pos.data(), natoms, box, query);
     bool done = false;
-    expect_short([&] { (void)walk.pull(dest, done); }, "first and second buffers have different lengths");
-  }
-  {
-    auto walk = freshWalk();
-    rgpot::nlist::Buffers dest;
-    dest.first = first;
-    dest.second = second;
-    dest.vector = vector;
-    dest.distance = distance;
-    dest.shift = bad_shift; // too short: needs 3 * cap
-    bool done = false;
-    expect_short([&] { (void)walk.pull(dest, done); }, "shift buffer needs 3 entries per pair");
-  }
-  {
-    auto walk = freshWalk();
-    rgpot::nlist::Buffers dest;
-    dest.first = first;
-    dest.second = second;
-    dest.shift = shift;
-    dest.distance = distance;
-    dest.vector = bad_vector; // too short: needs 3 * cap
-    bool done = false;
-    expect_short([&] { (void)walk.pull(dest, done); }, "vector buffer needs 3 entries per pair");
-  }
-  {
-    auto walk = freshWalk();
-    rgpot::nlist::Buffers dest;
-    dest.first = first;
-    dest.second = second;
-    dest.shift = shift;
-    dest.vector = vector;
-    dest.distance = bad_distance; // too short: needs cap
-    bool done = false;
-    expect_short([&] { (void)walk.pull(dest, done); },
-                 "distance buffer is shorter than the pair buffer");
-  }
-  {
-    // A cluster-of-four query needs a mask byte per pair.
-    rgpot::nlist::Query clusterQuery = query;
-    clusterQuery.shape = rgpot::nlist::Cluster4{};
-    rgpot::nlist::Walk walk(pos.data(), pos.size() / 3, box, clusterQuery);
-    rgpot::nlist::Buffers dest;
-    dest.first = first;
-    dest.second = second;
-    dest.shift = shift;
-    dest.vector = vector;
-    dest.distance = distance;
-    dest.mask = bad_mask; // too short: needs cap
-    bool done = false;
-    expect_short([&] { (void)walk.pull(dest, done); },
-                 "a cluster list needs one mask byte per pair");
-  }
-  // A well-formed call still succeeds after each of the rejections above.
-  {
-    auto walk = freshWalk();
-    rgpot::nlist::Buffers dest;
-    dest.first = first;
-    dest.second = second;
-    dest.shift = shift;
-    dest.vector = vector;
-    dest.distance = distance;
-    dest.mask = mask;
-    bool done = false;
-    REQUIRE_NOTHROW(walk.pull(dest, done));
+    REQUIRE(walk.pull(dest, done) == pairs);
+    REQUIRE(done);
   }
 }
 
