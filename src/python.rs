@@ -3914,6 +3914,19 @@ fn cluster_search(
     };
     dict.set_item("local_step", quench)?;
     dict.set_item("quench_seconds", stats.quench_seconds)?;
+    let ledger_split = PyDict::new(py);
+    ledger_split.set_item("spent", ledger.spent())?;
+    ledger_split.set_item("screen", stats.screen_charged)?;
+    ledger_split.set_item("full", stats.full_charged)?;
+    ledger_split.set_item("check", stats.check_charged)?;
+    ledger_split.set_item("quenches", stats.total())?;
+    ledger_split.set_item("converged", stats.converged)?;
+    ledger_split.set_item("capped", stats.capped)?;
+    ledger_split.set_item("screened_out", out.screened_out)?;
+    ledger_split.set_item("returned", out.returned)?;
+    ledger_split.set_item("overlap_rejected", stats.overlap_rejected)?;
+    ledger_split.set_item("basins", out.basins)?;
+    dict.set_item("ledger", ledger_split)?;
     Ok(dict.into())
 }
 

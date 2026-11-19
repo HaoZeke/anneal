@@ -352,6 +352,24 @@ def test_cluster_search_tric_local_step():
         cluster_search(energy, grad, 6, 600, local_step="bfgs", **kwargs)
 
 
+def test_cluster_search_reports_where_the_budget_went():
+    def energy(x):
+        return flexible_water(x, 2)[0]
+
+    def grad(x):
+        return flexible_water(x, 2)[1]
+
+    kwargs = dict(start=WATER_DIMER, species=[8, 1, 1] * 2, groups=[[0, 1, 2], [3, 4, 5]], seed=2)
+    out = cluster_search(energy, grad, 6, 600, local_step="tric", **kwargs)
+    split = out["ledger"]
+    assert 0 < split["spent"] <= 600
+    quench = split["screen"] + split["full"] + split["check"]
+    assert 0 < quench <= split["spent"]
+    assert split["quenches"] == split["converged"] + split["capped"] > 0
+    assert split["basins"] >= 1
+    assert out["hops"] >= split["screened_out"] + split["returned"]
+
+
 def test_cluster_search_auto_quench_takes_tric_for_a_slow_gradient():
     import time
 

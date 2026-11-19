@@ -161,6 +161,7 @@ def run_anneal(
         "groups": len(groups),
         "local_step": result.get("local_step"),
         "quench_seconds": result.get("quench_seconds"),
+        "ledger": result.get("ledger"),
         "settings": "cluster_search recommended_molecular, energy scale 1 eV, local step "
         + (local_step or "preset")
         + (f", quench gradient {quench_gradient:g}" if quench_gradient is not None else ""),
