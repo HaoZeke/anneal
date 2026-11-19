@@ -2262,6 +2262,10 @@ impl Config {
         // GFN-class force is eV per angstrom, and an iteration-capped
         // quasi-Newton step leaves a maximum component near 1e-2.
         cfg.record_gradient = 5.0e-2;
+        // Conformer ranking needs minima settled more tightly than the wider
+        // record gate retained for iteration-capped electronic-structure
+        // descents.
+        cfg.quench_gradient = 1.0e-3;
         // A TRIC quench takes about half the calls of a Cartesian one, and
         // its steps cost more than a cheap force field's call. The opening
         // quench times both.
@@ -2456,6 +2460,7 @@ mod coverage_behaviour {
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
+        assert_eq!(recommended.quench_gradient, 1.0e-3);
         assert!(
             recommended
                 .resolved_json()

@@ -4241,7 +4241,7 @@ mod tests {
             cfg.record_gradient
         );
         assert!((cfg.record_gradient - 5.0e-2).abs() < 1e-15);
-        assert_eq!(cfg.quench_gradient, 0.0);
+        assert_eq!(cfg.quench_gradient, 1.0e-3);
     }
 
     #[test]
