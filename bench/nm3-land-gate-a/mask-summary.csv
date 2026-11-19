@@ -1,0 +1,3 @@
+arm,n,hits,mask,median_calls_to_hit
+A,16,5,0x240d,30000
+B,16,2,0x0014,30000
