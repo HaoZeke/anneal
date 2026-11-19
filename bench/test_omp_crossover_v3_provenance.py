@@ -98,8 +98,12 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, required=True)
-    parser.add_argument("--json", type=Path, required=True)
+    parser.add_argument("--repo", type=Path, default=Path("."))
+    parser.add_argument(
+        "--json",
+        type=Path,
+        default=Path("bench/results/rgpot_omp_crossover_v3_results.json"),
+    )
     parser.add_argument("--json-relative", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
