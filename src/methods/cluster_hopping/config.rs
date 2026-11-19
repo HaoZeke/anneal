@@ -2274,7 +2274,7 @@ impl Config {
             target_energy: None,
             improvement_rewards: false,
             incumbent_gap: 0.0,
-            relax_steps: 200,
+            relax_steps: Self::BASE_RELAX_STEPS,
             two_phase: None,
             reoccupy: None,
             reoccupy_interval: 5_000,
@@ -2531,6 +2531,34 @@ impl Config {
         cfg
     }
 
+    /// Relaxation steps of [`Config::with_scales`], before a converged quench.
+    pub const BASE_RELAX_STEPS: usize = 200;
+
+    /// Steps a full quench receives when it stops on [`Config::quench_gradient`].
+    pub const CONVERGED_QUENCH_STEPS: usize = 500;
+
+    /// Stop a full quench at `gradient`.
+    ///
+    /// A positive gradient also gives the quench at least
+    /// [`Self::CONVERGED_QUENCH_STEPS`] steps. A non-positive gradient leaves
+    /// `relax_steps` unchanged. The groups binding and
+    /// [`Config::recommended_molecular`] both call this, so a settled quench
+    /// has one step floor.
+    pub fn set_quench_gradient(&mut self, gradient: f64) {
+        self.quench_gradient = gradient;
+        if gradient > 0.0 {
+            self.relax_steps = self.relax_steps.max(Self::CONVERGED_QUENCH_STEPS);
+        }
+    }
+
+    /// Drop a converged quench and the step floor it added to the base count.
+    pub fn clear_quench_gradient(&mut self) {
+        self.quench_gradient = 0.0;
+        if self.relax_steps == Self::CONVERGED_QUENCH_STEPS {
+            self.relax_steps = Self::BASE_RELAX_STEPS;
+        }
+    }
+
     /// Measured allocation and stall controls over a molecular move library.
     ///
     /// SOAP is the same observed-cloud residual as the cluster hop:
@@ -2562,6 +2590,10 @@ impl Config {
         // GFN-class force is eV per angstrom, and an iteration-capped
         // quasi-Newton step leaves a maximum component near 1e-2.
         cfg.record_gradient = 5.0e-2;
+        // Conformer ranking needs minima settled more tightly than the wider
+        // record gate retained for iteration-capped electronic-structure
+        // descents. The same call lengthens the full quench.
+        cfg.set_quench_gradient(1.0e-3);
         // A TRIC quench takes about half the calls of a Cartesian one, and
         // its steps cost more than a cheap force field's call. The opening
         // quench times both.
@@ -2756,6 +2788,19 @@ mod coverage_behaviour {
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
+        assert_eq!(recommended.quench_gradient, 1.0e-3);
+        assert_eq!(recommended.relax_steps, Config::CONVERGED_QUENCH_STEPS);
+        assert!(
+            recommended
+                .resolved_json()
+                .unwrap()
+                .contains("\"relax_steps\":500")
+        );
+        let mut plain = Config::for_molecular(species.clone(), groups.clone(), 1.0);
+        assert_eq!(plain.relax_steps, Config::BASE_RELAX_STEPS);
+        plain.set_quench_gradient(1.0e-3);
+        assert_eq!(plain.relax_steps, Config::CONVERGED_QUENCH_STEPS);
+        assert_eq!(Config::recommended(38).relax_steps, 1000);
         assert!(
             recommended
                 .resolved_json()
@@ -2767,6 +2812,44 @@ mod coverage_behaviour {
             LocalStep::Lbfgs
         );
         assert_eq!(Config::recommended(13).local_step, LocalStep::Lbfgs);
+    }
+
+    #[test]
+    fn cluster_presets_omit_the_molecular_quench_gradient() {
+        let lennard_jones = Config::recommended(38).resolved_json().unwrap();
+        let morse = Config::recommended(55).resolved_json().unwrap();
+        let gold = Config::recommended(55)
+            .with_species(vec![79; 55], None)
+            .resolved_json()
+            .unwrap();
+        for (name, json) in [
+            ("lennard-jones", &lennard_jones),
+            ("morse", &morse),
+            ("gold", &gold),
+        ] {
+            assert!(
+                !json.contains("quench_gradient"),
+                "{name} resolved JSON includes the molecular quench"
+            );
+            assert!(
+                json.contains("\"relax_steps\":1000"),
+                "{name} resolved JSON changed relax_steps"
+            );
+        }
+        let mut water = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        crate::catalog::molecular::configure_water_arm(
+            &mut water,
+            crate::catalog::molecular::WaterSearchArm::Recommended,
+        );
+        assert_eq!(water.quench_gradient, 0.0);
+        assert_eq!(water.relax_steps, Config::BASE_RELAX_STEPS);
+        assert!(!water.resolved_json().unwrap().contains("quench_gradient"));
+        assert!(
+            Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
+                .resolved_json()
+                .unwrap()
+                .contains("\"quench_gradient\":0.001")
+        );
     }
 
     #[test]

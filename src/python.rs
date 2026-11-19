@@ -3773,8 +3773,7 @@ fn cluster_search(
             cfg.measured_energy_scale = measured;
         }
         if let Some(gtol) = quench_gradient {
-            cfg.quench_gradient = gtol;
-            cfg.relax_steps = cfg.relax_steps.max(500);
+            cfg.set_quench_gradient(gtol);
         }
         cfg
     } else if let Some(geometry) = water {
