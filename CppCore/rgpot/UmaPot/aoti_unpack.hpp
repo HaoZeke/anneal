@@ -319,6 +319,12 @@ inline bool safe_model_name(const std::string &name) {
   return true;
 }
 
+// Hidden so the function and its local statics (counter, seed) are not
+// emitted as STB_GNU_UNIQUE dynamic exports in librgpot.
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(_WIN32) &&            \
+    !defined(__CYGWIN__)
+__attribute__((visibility("hidden")))
+#endif
 inline std::string unique_token() {
   static std::atomic<uint64_t> counter{0};
   static const uint64_t seed = [] {
