@@ -978,8 +978,8 @@ def write_outputs(work: Path, repo: Path) -> None:
     text = "\n".join(lines) + "\n"
     (work / "REPORT.txt").write_text(text)
     fieldnames = ROW_FIELDS
-    with (work / "rows.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+    with (work / "rows.csv").open("w", newline="\n") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         for row in sorted(rows, key=lambda r: (r["panel"], r["system"], r["band"], r["seed"], r["slot"], r["arm"])):
             writer.writerow(row)
@@ -1006,9 +1006,12 @@ def write_outputs(work: Path, repo: Path) -> None:
     bin_root = work / "bin"
     if bin_root.is_dir():
         for path in sorted(bin_root.rglob("*")):
-            if path.is_file() and path.suffix != ".py":
-                digest = hashlib.sha256(path.read_bytes()).hexdigest()
-                session["bin_sha256"][str(path.relative_to(bin_root))] = digest
+            if "__pycache__" in path.parts or path.suffix in {".py", ".pyc"}:
+                continue
+            if path.is_symlink() or not path.is_file():
+                continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            session["bin_sha256"][str(path.relative_to(bin_root))] = digest
     (work / "sessions.json").write_text(json.dumps(session, indent=2, sort_keys=True) + "\n")
     print(text)
 
