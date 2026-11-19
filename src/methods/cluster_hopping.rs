@@ -2462,7 +2462,7 @@ fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
 /// On Tersoff carbon half the accepted hops of a ten-atom walk held such an
 /// atom. A tail that never reaches zero, as in Lennard-Jones and Morse,
 /// leaves some force on every atom and never meets the test. Rigid bodies
-/// and labelled species keep their own notion of contact and are not judged
+/// and labeled species keep their own notion of contact and are not judged
 /// here.
 fn sheds_free_atom(cfg: &Config, x: ArrayView1<f64>, gradient: Option<ArrayView1<f64>>) -> bool {
     let n = cfg.n_points;
@@ -4405,7 +4405,7 @@ where
     // the preset and moves only while acceptance is outside a quarter of
     // one half, and never above one contact.
     let mut scaled = cfg.clone();
-    // The budget-window law is not forced on for a labelled cluster.
+    // The budget-window law is not forced on for a labeled cluster.
     // It cools from the gap and the calls still left, and it does not
     // read acceptance, so a binary chain sat in the first deep basin for
     // the rest of the budget. The acceptance dial is the temperature, as
@@ -4810,7 +4810,7 @@ where
     // minimum. The preset temperature is the Metropolis temperature.
     let species_wide = large_diameter_ratio(cfg);
     // A build without the escape stops at the first hop that asks for it.
-    // The labelled side probes would otherwise spend the budget first and
+    // The labeled side probes would otherwise spend the budget first and
     // the run would end without saying so.
     let escape_refused = !cfg!(feature = "rgsaddle")
         && ((species_wide && energy_grad.is_some())
@@ -5129,7 +5129,7 @@ where
         }
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
-        // unless two labels are present, so an unlabelled chain is unchanged.
+        // unless two labels are present, so an unlabeled chain is unchanged.
         // A frozen atom is the frame: exchanging it moves the substrate.
         let frame_frozen = frame_atoms(cfg, x.view());
         let atom_is_frame = |atom: usize| {
@@ -6730,7 +6730,7 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        // The labelled cut wins by handing the quench a compact body and an
+        // The labeled cut wins by handing the quench a compact body and an
         // ordering the energy itself prefers. The same two steps, without a
         // named body: grow onto the holes of the best-coordinated atoms, then
         // put one species on the sites an unrelaxed swap ranks lowest. The
@@ -9937,9 +9937,9 @@ where
             if cfg.superbasin_quotient {
                 #[cfg(feature = "ira")]
                 {
-                    // Zero for a structure against its own relabelling and
+                    // Zero for a structure against its own relabeling and
                     // rotation, order one between different minima: measured
-                    // 2.7e-16 for a relabelled copy at 13 points and 2.9e-16 at
+                    // 2.7e-16 for a relabeled copy at 13 points and 2.9e-16 at
                     // 38, against 1.58 for a different basin. The threshold sits
                     // in a gap of fifteen orders of magnitude, and the report
                     // carries the largest accepted and smallest rejected
@@ -10952,7 +10952,7 @@ mod tests {
         let pure = search_kernels(&Config::recommended(8).with_species(vec![79; 8], None));
         assert!(
             pure.iter().any(|kernel| kernel.name() == "dls-kernel"),
-            "one repeated label lost the unlabelled lattice exchange"
+            "one repeated label lost the unlabeled lattice exchange"
         );
         let mixed = search_kernels(
             &Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None),
@@ -12620,9 +12620,9 @@ mod tests {
         assert!(sheds_free_atom(&cfg, apart.view(), Some(gradient.view())));
         gradient[7] = 1.0e-300;
         assert!(!sheds_free_atom(&cfg, apart.view(), Some(gradient.view())));
-        let mut labelled = cfg.clone();
-        labelled.species = Some(vec![29, 29, 79]);
-        assert!(!sheds_free_atom(&labelled, apart.view(), None));
+        let mut labeled = cfg.clone();
+        labeled.species = Some(vec![29, 29, 79]);
+        assert!(!sheds_free_atom(&labeled, apart.view(), None));
     }
 
     #[test]

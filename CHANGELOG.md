@@ -20,9 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - ``Config::recommended_molecular`` turns on ring crankshafts. A rotatable bond is a bridge of the bond graph, so a torsion never changes a ring. With ``ring_moves`` the torsion kernel also turns one arc of a flexible ring about the axis through the two ring atoms that bound it. A molecule with no flexible ring draws the same hops.
 - ``Config::hold_stereocentres`` refuses a quench step that turns a declared stereocentre over from the hand the quench started in. The refused step is not a potential call. It backs off toward the anchor and the descent continues. ``recommended_molecular`` sets it.
 - ``Config::measured_energy_scale`` replaces ``energy_scale`` in a single chain's temperature and deposit height with the median quenched energy change of the first 20 hops. Convergence and the return screen keep the declared scale. A replica ladder is left alone. ``recommended_molecular`` sets it. It is off unless the preset or the caller sets it.
-- On a labelled cluster the paper preset exchanges unlike pairs on the quenched geometry, keeps an exchange when the unrelaxed energy drops, quenches the reordered geometry, and keeps the lower of the two. It ranks that polish of a new best by one unrelaxed read and quenches the lowest of those reads. It sets the temperature from the budget-window law rather than from the Lennard-Jones well. The flags are ``homotop_descent``, ``homotop_ranked`` and ``homotop_window``.
-- ``Config::homotop_reorder`` reorders a stalled labelled incumbent from its own packing. The smaller label goes on the innermost sites and the ordering is ranked by site energy and refined by quenched exchanges. A lower ordering is recorded and the walker stays on its own packing. The wait after a try that leaves the lowest where it was doubles, and it resets when the lowest moves. Off in the paper preset. ``h2h_metal`` reads ``H2H_REORDER``.
-- ``Config::prior_handover`` stops the labelled core cuts once they stall and hands their best to the walk. The cuts get at most half of the calls that remain. Before each refinement they stop when the calls since their last lower quench exceed the calls it took to reach that quench. The improvement is stamped with the probe call that found it. On in the paper preset. ``h2h_metal`` reads ``H2H_HANDOVER``.
+- On a labeled cluster the paper preset exchanges unlike pairs on the quenched geometry, keeps an exchange when the unrelaxed energy drops, quenches the reordered geometry, and keeps the lower of the two. It ranks that polish of a new best by one unrelaxed read and quenches the lowest of those reads. It sets the temperature from the budget-window law rather than from the Lennard-Jones well. The flags are ``homotop_descent``, ``homotop_ranked`` and ``homotop_window``.
+- ``Config::homotop_reorder`` reorders a stalled labeled incumbent from its own packing. The smaller label goes on the innermost sites and the ordering is ranked by site energy and refined by quenched exchanges. A lower ordering is recorded and the walker stays on its own packing. The wait after a try that leaves the lowest where it was doubles, and it resets when the lowest moves. Off in the paper preset. ``h2h_metal`` reads ``H2H_REORDER``.
+- ``Config::prior_handover`` stops the labeled core cuts once they stall and hands their best to the walk. The cuts get at most half of the calls that remain. Before each refinement they stop when the calls since their last lower quench exceed the calls it took to reach that quench. The improvement is stamped with the probe call that found it. On in the paper preset. ``h2h_metal`` reads ``H2H_HANDOVER``.
 - ``Config::recommended`` draws one lattice-site exchange. The occupied site of highest pair energy moves onto a vacant site of the lattice the current structure defines, and the quench is kept only when the Metropolis test accepts it. A fully coordinated interior atom stays put.
 - A how-to guide shows how to run the Sutton-Chen head-to-head runner over a seed range and score its arms.
   ``docs/scripts/plot_sc_hits.py`` prints hits, median calls to hit, mean penalised average runtime with factor 2 (PAR-2) and a paired sign-flip p-value.
@@ -93,7 +93,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   writes a ``RunManifest``. LJ38 uses the first 72 seeds of 2000-2199
   at 400000 evaluations. LJ75 and LJ98 use the first 48 at 4000000.
   Held-out landscapes use 2200-2247 and do not invent a budget. A run
-  launched before the v0.12.0 tag is a smoke and is labelled smoke.
+  launched before the v0.12.0 tag is a smoke and is labeled smoke.
 - Catalogue selection uses four ranks. The default log weight is
   ``-r_E + 0.8 r_N + 0.6 r_S + 0.4 r_U``, clipped at 4 nats. ``r_U`` is
   the rank of the graph-field score ``variance / (1 + effort)``. Scores
@@ -101,7 +101,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ``lj38_catalogue_epoch`` logs one four-replica LJ38 epoch on seeds
   3100-3103. The paper force total is 400000, shared by the four
   replicas. A run launched before the v0.12.0 tag is a smoke and is
-  labelled smoke.
+  labeled smoke.
 - ``water_hexamer`` reads deposited isomer geometries from
   ``WATER_ISOMER_DIR`` and sets the assignment gate to half the minimum
   species-aware IRA RMSD before any seed. ``ASE_PYTHON`` selects the
@@ -120,7 +120,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   unassigned. Isomer names wait on same-level reference geometries.
   The isolated-water template is not that set. Seeds are 0-31 and the
   force budget is 4000 on every engine. A run launched before the
-  v0.12.0 tag is a smoke and is labelled smoke.
+  v0.12.0 tag is a smoke and is labeled smoke.
 - Lattice-ensemble ablation arms on ``Plan``. ``retire = 0`` never frees a
   bank slot. ``Resemblance::LeeCsa`` uses eq. (2) of Lee, Lee and Lee,
   Phys. Rev. Lett. 91, 080201 (2003): the weighted absolute difference of
@@ -473,9 +473,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ``install_cluster_kernels``. Without them, Lennard-Jones and Morse use
   the pair loop and Gupta refuses. The wheel crate installs the kernels
   before it registers ``anneal._core``.
-- A labelled motif reseed is charged for every probe call, and the probe
+- A labeled motif reseed is charged for every probe call, and the probe
   stops at the calls the chain has left.
-- With the ``rgsaddle`` feature, the labelled binary-core probe takes half
+- With the ``rgsaddle`` feature, the labeled binary-core probe takes half
   of the calls the chain has left. A default build still offers the probe
   the whole remainder.
 - ``Config::recommended`` keeps ``MoveLibrary::LeanBurst`` at every size.
@@ -703,7 +703,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `{0,1,8,11,13,17}` share the multiset and are not congruent. `TripletSpectrum`
   appends the spectra of `A` and of the mode-3 contraction
   `M = A .* (A A)` of the triangle tensor `T_ijk = A_ij A_jk A_ik`, both exactly
-  invariant to relabelling and to rigid motions, to the sorted distances it
+  invariant to relabeling and to rigid motions, to the sorted distances it
   leaves unchanged. Worst-case separation over all pairs of distinct quenched
   Lennard-Jones minima, in units of the descriptor's own response to a 0.02
   jitter, goes from 0.85 to 1.17 at 38 points and from 0.87 to 1.11 at 55, both
@@ -1530,7 +1530,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- Exact basin identity by canonical contact-graph labelling through nauty,
+- Exact basin identity by canonical contact-graph labeling through nauty,
   vertex-coloured with per-species-pair cutoffs (``graphkey`` feature);
   vesin cell lists compiled from upstream as the neighbour backend
   (``vesin-nl``); Franzblau primitive-ring profiles; the diffusion-map

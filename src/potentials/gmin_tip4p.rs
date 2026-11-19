@@ -34,6 +34,8 @@ use ndarray::{Array1, ArrayView1};
 
 use super::tip4p::{cross, left_jacobian_t, mat_vec, rotation_matrix, rotation_vector};
 
+/// Thermochemical kilojoules per kilocalorie.
+pub const KJ_PER_KCAL: f64 = 4.184;
 /// Lennard-Jones attractive coefficient, kJ/mol Å^6.
 pub const C6: f64 = 2552.24;
 /// Lennard-Jones repulsive coefficient, kJ/mol Å^12.
@@ -689,7 +691,6 @@ mod tests {
     /// The checked bound is 1e-5 kcal/mol.
     #[test]
     fn cambridge_headers_match_within_1e_5_kcal() {
-        const KJ_PER_KCAL: f64 = 4.184;
         let cases = [
             (
                 include_str!("../../tests/fixtures/tip4p-10.xyz"),

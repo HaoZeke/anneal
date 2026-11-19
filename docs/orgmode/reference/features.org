@@ -21,7 +21,7 @@ LAMMPS_LIB_DIR=/path/to/lammps/lib cargo check --locked --features lammps
 
 * =graphkey=
 
-Exact basin identity by canonical contact-graph labelling through nauty.
+Exact basin identity by canonical contact-graph labeling through nauty.
 
 #+begin_src sh
 cargo check --locked --features graphkey

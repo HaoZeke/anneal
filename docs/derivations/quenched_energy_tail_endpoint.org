@@ -318,7 +318,7 @@ rates being exclusion rates:
 Every Bayes factor is below one and four of the six are below 0.25, so the data
 favour one shared exclusion rate over two by four to five to one. This is
 evidence of no difference rather than an absence of evidence of one, which is
-the distinction the p-value the campaign no longer reports cannot draw.
+the distinction a p-value cannot draw.
 
 ** 6.3 The production configuration
 

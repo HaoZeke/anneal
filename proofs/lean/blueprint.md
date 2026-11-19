@@ -2,7 +2,7 @@
 
 Goal: every occupancy bound in the Wiley SI has a Lean 4 declaration
 that `lake build` accepts. Same Lea contract as the d-SEAMS 2.0
-supplement (`VIDA-NYU/Lea`): a labelled statement and a matching
+supplement (`VIDA-NYU/Lea`): a labeled statement and a matching
 declaration in `Hop/OccupancyGt.lean`.
 
 ## Assembly

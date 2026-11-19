@@ -23,9 +23,10 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
-HARTREE_EV = 27.211386245988
-BOHR_ANG = 0.529177210903
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from codata2018 import BOHR_ANGSTROM as BOHR_ANG, HARTREE_EV
 TBLITE_VERSION = "0.7.0"
 PYSCF_VERSION = "2.14.0"
 ASE_VERSION = "3.29.0"

@@ -785,7 +785,7 @@ pub fn symmetrise_group(
 }
 
 /// As [`symmetrise_group`], but an orbit may not pair atoms of different
-/// `classes`. An empty `classes` slice is the unlabelled group. A labelled
+/// `classes`. An empty `classes` slice is the unlabeled group. A labeled
 /// orbit that cannot close inside one class is left unmoved.
 pub fn symmetrise_group_within(
     x: ArrayView1<f64>,
