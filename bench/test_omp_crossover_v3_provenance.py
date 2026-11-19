@@ -85,7 +85,9 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
         extra_text = ", ".join(extra) if extra else "(none)"
         raise SystemExit(f"arm set mismatch: missing {missing_text}; extra {extra_text}")
     for arm in record:
-        name = arm["name"]
+        name = arm["name"] if isinstance(arm.get("name"), str) and arm.get("name") else "<unnamed>"
+        if "sha" not in arm:
+            raise SystemExit(f"{name}: arm record is missing required key sha")
         recorded = arm.get("tree")
         actual = resolved_commit_tree(repo, name, arm["sha"])
         if recorded != actual:
