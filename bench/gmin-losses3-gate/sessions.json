@@ -1,0 +1,326 @@
+{
+  "b_kit_sha256": "14d0cf394fa5146bd1f769f5e8ab5a26a9afc7d8fe7dbba3e9cd118698a7288d",
+  "b_tree": "70871f7307271806926b2aec9870e838dffbe924",
+  "base_commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+  "base_tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274",
+  "bin_sha256": {
+    "A/h2h_gmin_proof": "12b48562c39a3ea62fd631aa2233ed8e82faed735ea24eefaff2d863e3cf3978",
+    "A/h2h_metal": "0e64212b3a7932f8f781f82dd712573299bab070e1456808ddfc82246c53e15a",
+    "A/h2h_morse": "33475d5e2f78eb25e6e1331ad0df4ef42d839eb16ec0223827e5f0a76fbe1740",
+    "A/h2h_seed": "71a8f24613635c7d0401fd7962430b5c1bbbb1fdfa8e29b99eb536733e387703",
+    "A/py/anneal/_core.so": "7779ae2560680f6bcb4cc416c3ba894828bd70d006ca85bf9f16ee05f9c5eff6",
+    "AP/h2h_gmin_proof": "e18a7124b4dd0c143053db26b4456e0835bde5cf9510761dae308ce03a879476",
+    "AP/h2h_metal": "ef803d6805b620ffc20c020defe56c530993b2f68b0fb25529306e745df52671",
+    "AP/h2h_morse": "b329beb56e00fb5e3cbd6ac368675121623c4d5c75786a3a87cacb718f07914b",
+    "AP/h2h_seed": "80c146ceb52ac16fbbe95a5b992f9b71be199ba03ad09ce1f920b111c1ad7ea9",
+    "AP/py/anneal/_core.so": "7779ae2560680f6bcb4cc416c3ba894828bd70d006ca85bf9f16ee05f9c5eff6",
+    "B/h2h_gmin_proof": "fe241e125a2e046e4d44ba8ccd983b84f883c906cc38b1e786f67c9088e47b73",
+    "B/h2h_metal": "aa55846ca95675865d62a157c410f2f9f6af515312f13de401c856d133656145",
+    "B/h2h_morse": "5be9864b04d1ee5eefebd093fb5b70d1527ca9333a5381c6b87f0c138358511f",
+    "B/h2h_seed": "6e76b0e5c351e9503dd174c7ecf1aa7cda5815abb09e8cb37035b41077f15410",
+    "B/py/anneal/_core.so": "c64ab5104fbf06eb10dfbd7a2d3854ae52dc78032e135ebb372eb90b03dfda90",
+    "L1/h2h_gmin_proof": "ca165bbf9871dd304188a58fae78029c96e74e711f4a2984dc2cab0a9547fc96",
+    "L1/h2h_metal": "915cb0bfc5b41295983e99f98f5cc422d5bc5a629566021ff00e299c3af694f4",
+    "L1/h2h_morse": "00799befaa6cdd1dd424f084ed1570d120e824064dfe8229ab6e6e8273a062bd",
+    "L1/h2h_seed": "010221a5568356fb1e85c6ed6a2d5df38d8977eb9c5ca344c48244d2840815f2",
+    "L1/py/anneal/_core.so": "0c2a3bbb38e96afae2b62b563b152bbf58b05a6cb0f4fa0bd17b07dd29d1a74f",
+    "L2/h2h_gmin_proof": "faf2c5b2ed10310e35130e8c6dbcdb256d0c9155a12b342f82cf2bf56e0955f9",
+    "L2/h2h_metal": "dd90751ab5617a565db538380412e52ba86ee51efd49e8e4baa25fd866b45758",
+    "L2/h2h_morse": "c85e02950b3bab644b03ccca67fba39c5d6c8ed3b001b98d069709b46b13fe92",
+    "L2/h2h_seed": "47b8c72c0db29ba68cc9d944d1b02f2c70c8c8a00386aa46b0c6cb40c3446268",
+    "L2/py/anneal/_core.so": "3d16c6a7fce0bdec939aaa0fff9d8ec2e879bd7d77f966da7669777627f86281",
+    "L3/h2h_gmin_proof": "b8ed1affca06e9f49e8361e6bb65794a4450bd0bc770bda98e58ea55d7f6b3ba",
+    "L3/h2h_metal": "ac214339517a4641bdd588a032a328e34123fe15da3a04f48a136f21d1b56a8d",
+    "L3/h2h_morse": "66e6c735bb37b63e523a4cf2ccd87aeac8b0d70b9857c64ae19d702a9ae38988",
+    "L3/h2h_seed": "52cff4b12d1c2be78a5a0ea00f96875ab1c52e23b227b25471f370615bef55cb",
+    "L3/py/anneal/_core.so": "deb00fbb0f84dae53894081a0764a637ff6c6bc35ba8357e4d0f4683ae673757",
+    "L4/h2h_gmin_proof": "dc3eff02a8fe279c3c61907ccd50bc5855ed1f0d96ce17693d926bdfe4552afc",
+    "L4/h2h_metal": "d7704b8fd314799a7fc89a4ed839e36ac3a4563cdd4439cbc8cad63b9fd79d4b",
+    "L4/h2h_morse": "3a6537e254a2ff0977bfcd3694ebb84b891648386be9294bf5fc4d3f2063c14e",
+    "L4/h2h_seed": "71c6fc69227ac8fadcd7e90e8e740eaa5423cf7e950e453347526a3ba93e977c",
+    "L4/py/anneal/_core.so": "de2d7464929c91472c29f6c4dcfc086cb36417da7578056518d939f800451fe5",
+    "L5/h2h_gmin_proof": "f37836bff58dcec28afbf35ab528c6331b6a323f42063da4b24ac72921e0c62c",
+    "L5/h2h_metal": "85ae9d525e5ec1eb61df582c9e9f72cf5573afb64e6eaeb2bff15818cf6a605e",
+    "L5/h2h_morse": "7aa262d7e7c90d9c8048ef25813863430f0eb865207d92ab7f750309b912daa1",
+    "L5/h2h_seed": "8c5344fd8c954507c20a9c6b0ebcc2c5253966baec17e37f76d203e26a49c35f",
+    "L5/py/anneal/_core.so": "491feeeafda642bef05ece47f683f341d5e6de3fabb359408d96b6fbd6c690ee"
+  },
+  "builds": {
+    "A": {
+      "commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+      "tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+    },
+    "AP": {
+      "commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+      "tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+    },
+    "B": {
+      "commit": "73d9166b4ee759a732ba976ca3baea32326346ee",
+      "tree": "70871f7307271806926b2aec9870e838dffbe924"
+    },
+    "L1": {
+      "commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+      "tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+    },
+    "L2": {
+      "commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+      "tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+    },
+    "L3": {
+      "commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+      "tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+    },
+    "L4": {
+      "commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+      "tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+    },
+    "L5": {
+      "commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+      "tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+    },
+    "PA": {
+      "commit": "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+      "tree": "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+    }
+  },
+  "core": 0,
+  "harness_blob": "ba7041d75ccb38389eb467037936359f7ddf84d5",
+  "layouts": {
+    "L1": "-C link-arg=-Wl,-z,max-page-size=65536",
+    "L2": "-C link-arg=-Wl,-z,max-page-size=16384",
+    "L3": "-C link-arg=-Wl,--hash-style=sysv",
+    "L4": "-C link-arg=-Wl,-z,norelro",
+    "L5": "-C link-arg=-Wl,-z,max-page-size=2097152"
+  },
+  "machine_id_sha256": "3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873",
+  "n_rows": 1068,
+  "order2": [
+    [
+      "A",
+      "B"
+    ],
+    [
+      "B",
+      "A"
+    ],
+    [
+      "B",
+      "A"
+    ],
+    [
+      "A",
+      "B"
+    ],
+    [
+      "A",
+      "B"
+    ],
+    [
+      "B",
+      "A"
+    ],
+    [
+      "B",
+      "A"
+    ],
+    [
+      "A",
+      "B"
+    ],
+    [
+      "A",
+      "B"
+    ],
+    [
+      "B",
+      "A"
+    ],
+    [
+      "B",
+      "A"
+    ],
+    [
+      "A",
+      "B"
+    ]
+  ],
+  "order3": [
+    [
+      "A",
+      "AP",
+      "B"
+    ],
+    [
+      "AP",
+      "B",
+      "A"
+    ],
+    [
+      "AP",
+      "B",
+      "A"
+    ],
+    [
+      "A",
+      "AP",
+      "B"
+    ],
+    [
+      "A",
+      "B",
+      "AP"
+    ],
+    [
+      "B",
+      "A",
+      "AP"
+    ],
+    [
+      "B",
+      "A",
+      "AP"
+    ],
+    [
+      "A",
+      "B",
+      "AP"
+    ],
+    [
+      "AP",
+      "A",
+      "B"
+    ],
+    [
+      "B",
+      "AP",
+      "A"
+    ],
+    [
+      "B",
+      "AP",
+      "A"
+    ],
+    [
+      "AP",
+      "A",
+      "B"
+    ]
+  ],
+  "order6": [
+    [
+      "PA",
+      "L1",
+      "L2",
+      "L3",
+      "L4",
+      "L5"
+    ],
+    [
+      "L1",
+      "L2",
+      "L3",
+      "L4",
+      "L5",
+      "PA"
+    ],
+    [
+      "L2",
+      "L3",
+      "L4",
+      "L5",
+      "PA",
+      "L1"
+    ],
+    [
+      "L3",
+      "L4",
+      "L5",
+      "PA",
+      "L1",
+      "L2"
+    ],
+    [
+      "L4",
+      "L5",
+      "PA",
+      "L1",
+      "L2",
+      "L3"
+    ],
+    [
+      "L5",
+      "PA",
+      "L1",
+      "L2",
+      "L3",
+      "L4"
+    ],
+    [
+      "L5",
+      "L4",
+      "L3",
+      "L2",
+      "L1",
+      "PA"
+    ],
+    [
+      "PA",
+      "L5",
+      "L4",
+      "L3",
+      "L2",
+      "L1"
+    ],
+    [
+      "L1",
+      "PA",
+      "L5",
+      "L4",
+      "L3",
+      "L2"
+    ],
+    [
+      "L2",
+      "L1",
+      "PA",
+      "L5",
+      "L4",
+      "L3"
+    ],
+    [
+      "L3",
+      "L2",
+      "L1",
+      "PA",
+      "L5",
+      "L4"
+    ],
+    [
+      "L4",
+      "L3",
+      "L2",
+      "L1",
+      "PA",
+      "L5"
+    ]
+  ],
+  "placement_band": [
+    0.8584964745338102,
+    1.0431192040269743
+  ],
+  "record_ref": "origin/record/gmin-losses",
+  "seeds": [
+    2000,
+    2001,
+    2002,
+    2003,
+    2004,
+    2005,
+    2006,
+    2007,
+    2008,
+    2009,
+    2010,
+    2011
+  ]
+}
