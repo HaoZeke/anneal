@@ -369,6 +369,40 @@ def test_cluster_search_auto_quench_takes_tric_for_a_slow_gradient():
     assert call > step
 
 
+def test_quench_gradient_sets_the_shared_step_floor():
+    def energy(x):
+        return flexible_water(x, 2)[0]
+
+    def grad(x):
+        return flexible_water(x, 2)[1]
+
+    kwargs = dict(
+        start=WATER_DIMER,
+        species=[8, 1, 1] * 2,
+        groups=[[0, 1, 2], [3, 4, 5]],
+        seed=2,
+        recommended=False,
+    )
+    tight = cluster_search(energy, grad, 6, 80, quench_gradient=1e-3, **kwargs)
+    assert tight["quench_gradient"] == pytest.approx(1e-3)
+    assert tight["relax_steps"] == 500
+    plain = cluster_search(energy, grad, 6, 80, **kwargs)
+    assert plain["quench_gradient"] == 0.0
+    assert plain["relax_steps"] == 200
+    preset = cluster_search(
+        energy,
+        grad,
+        6,
+        80,
+        start=WATER_DIMER,
+        species=[8, 1, 1] * 2,
+        groups=[[0, 1, 2], [3, 4, 5]],
+        seed=2,
+    )
+    assert preset["quench_gradient"] == pytest.approx(1e-3)
+    assert preset["relax_steps"] == 500
+
+
 def test_cluster_search_quench_gradient_is_opt_in_and_needs_groups():
     def energy(x):
         return flexible_water(x, 2)[0]
