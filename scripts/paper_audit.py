@@ -2245,6 +2245,7 @@ def release(audit: Audit) -> None:
 def lj_large(audit: Audit) -> None:
     audit.rows("bench/ase-gofee-h2h/lj-large.csv")
     audit.rows("bench/ase-gofee-h2h/lj-large-seeds.csv")
+    audit.rows("bench/ase-gofee-h2h/lj-large-compare.csv")
 
 
 def ase_gofee(audit: Audit) -> None:
