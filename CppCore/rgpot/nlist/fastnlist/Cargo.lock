@@ -3,23 +3,47 @@
 version = 4
 
 [[package]]
-name = "linkcell"
-version = "0.3.11"
+name = "cc"
+version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c3dda532d851012acca8717b8635166fe9e99d73a4af2e3e95d958995616f17"
+checksum = "33ef9e3e8154a45c7a95cff4c1299702106ad94062d7bb85fdc5d3a5afd91d45"
 dependencies = [
+ "find-msvc-tools",
+ "shlex",
+]
+
+[[package]]
+name = "find-msvc-tools"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
+
+[[package]]
+name = "linkcell"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d37b50d4e1643620f68f9f37c8a55a444a44ca4166b87b86959bfb300aca463"
+dependencies = [
+ "cc",
  "minimage",
 ]
 
 [[package]]
 name = "minimage"
-version = "0.1.4"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e0c930112bcf7c3606a5e4dd67c90522432cb536a250d879967d094f1803abe"
+checksum = "1d618b9714c2b6d2a72601fe8895134c44db19d5f0ba59958449d92257a0c9f4"
 
 [[package]]
 name = "rgpot_fastnlist"
 version = "0.1.0"
 dependencies = [
  "linkcell",
+ "minimage",
 ]
+
+[[package]]
+name = "shlex"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"

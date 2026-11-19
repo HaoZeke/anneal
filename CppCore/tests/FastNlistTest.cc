@@ -418,6 +418,30 @@ TEST_CASE("A wide cell returns a short linkcell list", "[fastnlist][linkcell]") 
 }
 
 #ifdef RGPOT_HAS_FAST_NLIST
+TEST_CASE("Fast wraps separations spanning several periodic images",
+          "[fastnlist][minimage]") {
+  const double ortho[9] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
+  const double diffs[6] = {25, 0, 0, 35, 0, 0};
+  double wrapped[6]{};
+  REQUIRE(rgpot_fast_wrap(ortho, diffs, 2, wrapped) == 0);
+  REQUIRE(std::abs(wrapped[0]) == 5);
+  REQUIRE(std::abs(wrapped[3]) == 5);
+  REQUIRE(wrapped[1] == 0);
+  REQUIRE(wrapped[2] == 0);
+  REQUIRE(wrapped[4] == 0);
+  REQUIRE(wrapped[5] == 0);
+
+  // 2.6 a + 3.4 b in a cell with b tilted by 2 A. The wrapped
+  // fractional vector is -0.4 a + 0.4 b.
+  const double triclinic[9] = {10, 0, 0, 2, 10, 0, 0, 0, 10};
+  const double triclinic_diff[3] = {32.8, 34, 0};
+  double triclinic_wrapped[3]{};
+  REQUIRE(rgpot_fast_wrap(triclinic, triclinic_diff, 1, triclinic_wrapped) == 0);
+  REQUIRE_THAT(triclinic_wrapped[0], WithinAbs(-3.2, 1e-12));
+  REQUIRE_THAT(triclinic_wrapped[1], WithinAbs(4.0, 1e-12));
+  REQUIRE(triclinic_wrapped[2] == 0);
+}
+
 TEST_CASE("A narrow cell is every unordered pair", "[fastnlist]") {
   const auto pos = slab();
   const double box[9] = {18, 0, 0, 0, 18, 0, 0, 0, 30};

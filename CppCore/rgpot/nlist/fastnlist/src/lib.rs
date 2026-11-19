@@ -8,7 +8,8 @@ use std::cell::RefCell;
 use std::ffi::CString;
 use std::os::raw::c_char;
 
-use linkcell::{pairs_within, wrap_many, Cell};
+use linkcell::{pairs_within, Cell};
+use minimage::wrap_many;
 
 /// Bins of at least one cutoff that a periodic axis needs before a
 /// linked-cell walk pays. Each bin is checked against itself and its 26
