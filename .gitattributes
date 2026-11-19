@@ -1,0 +1,3 @@
+scripts/ase_native/** text eol=lf
+examples/ase_native_eval.rs text eol=lf
+bench/ase-native/** text eol=lf
