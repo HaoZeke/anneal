@@ -41,7 +41,7 @@ if [[ -z $blas ]]; then
 fi
 cat > "$WORK/gmin-source.txt" << EOF
 url=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
-revision=aac1548a8aec13b53ad12a8d6904625081685d2e
+revision=9cbec1a446352bc9ef064bd2b1a5767194655919
 svnrev=GMIN/source/SVNREV
 potential=SC
 blas=$(readlink -f "$blas")

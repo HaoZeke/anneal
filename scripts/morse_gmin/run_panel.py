@@ -3,7 +3,9 @@
 """Morse head-to-head of the recommended preset against GMIN.
 
 Systems are M30, M38, M55 and M80 at rho 6 and 14, plus M80 at rho 3.
-Twelve seeds, 2000-2011, one core, hostname bench. Both arms use the
+Twelve seeds, 2000-2011, one core, hostname bench. Seeds alternate
+anneal then GMIN with GMIN then anneal, so 2000-2011 run ABBA
+repeated. Both arms use the
 paper budget. A hit is within 0.001 of the Cambridge table. A miss is
 entered at the budget. Medians are Hyndman-Fan type 7. Fisher is the
 two-sided exact test on hits. Mann-Whitney is the two-sided normal
@@ -45,7 +47,7 @@ SYSTEMS = (
     ("m80r14", 80, 14.0, 4_000_000, -340.811371),
 )
 SEEDS = tuple(range(2000, 2012))
-GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+GMIN_REV = "9cbec1a446352bc9ef064bd2b1a5767194655919"
 ARCHIVES = (
     "bench/morse-h2h/seeds.csv",
     "bench/morse14-h2h/seeds.csv",
@@ -513,38 +515,49 @@ def main() -> int:
     write_rows(seeds_path, rows)
     for name, _n, rho, budget, target in systems:
         for seed in seeds:
-            if args.arm in ("anneal", "both") and (name, "anneal", seed) not in done:
-                print(f"anneal {name} {seed}", flush=True)
-                row = run_anneal(binary, name, seed, budget, revision)
-                rows.append(row)
-                done[(name, "anneal", seed)] = row
-                write_rows(seeds_path, rows)
-                print(
-                    f"done anneal {name} {seed} hit={row['hit']} best={row['best']} "
-                    f"calls={row['evals_to_hit']} pot_s={row['pot_s']} outside_s={row['outside_s']}",
-                    flush=True,
-                )
-            if args.arm in ("gmin", "both") and (name, "gmin", seed) not in done:
-                print(f"gmin {name} {seed}", flush=True)
-                row = run_gmin(
-                    binary,
-                    args.gmin,
-                    data,
-                    name,
-                    rho,
-                    seed,
-                    budget,
-                    target,
-                    args.work / name / f"gmin-{seed}",
-                )
-                rows.append(row)
-                done[(name, "gmin", seed)] = row
-                write_rows(seeds_path, rows)
-                print(
-                    f"done gmin {name} {seed} hit={row['hit']} best={row['best']} "
-                    f"calls={row['evals_to_hit']} wall_s={row['wall_s']}",
-                    flush=True,
-                )
+            if args.arm == "anneal":
+                order = ("anneal",)
+            elif args.arm == "gmin":
+                order = ("gmin",)
+            elif (seed - SEEDS[0]) % 2 == 0:
+                order = ("anneal", "gmin")
+            else:
+                order = ("gmin", "anneal")
+            for code in order:
+                if (name, code, seed) in done:
+                    continue
+                if code == "anneal":
+                    print(f"anneal {name} {seed}", flush=True)
+                    row = run_anneal(binary, name, seed, budget, revision)
+                    rows.append(row)
+                    done[(name, "anneal", seed)] = row
+                    write_rows(seeds_path, rows)
+                    print(
+                        f"done anneal {name} {seed} hit={row['hit']} best={row['best']} "
+                        f"calls={row['evals_to_hit']} pot_s={row['pot_s']} outside_s={row['outside_s']}",
+                        flush=True,
+                    )
+                else:
+                    print(f"gmin {name} {seed}", flush=True)
+                    row = run_gmin(
+                        binary,
+                        args.gmin,
+                        data,
+                        name,
+                        rho,
+                        seed,
+                        budget,
+                        target,
+                        args.work / name / f"gmin-{seed}",
+                    )
+                    rows.append(row)
+                    done[(name, "gmin", seed)] = row
+                    write_rows(seeds_path, rows)
+                    print(
+                        f"done gmin {name} {seed} hit={row['hit']} best={row['best']} "
+                        f"calls={row['evals_to_hit']} wall_s={row['wall_s']}",
+                        flush=True,
+                    )
     write_rows(seeds_path, rows)
     summary = summarise(rows, reused)
     write_summary(summary_path, summary)

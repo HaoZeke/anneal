@@ -6,8 +6,10 @@ The systems are the ones already in the six-seed table: 12-6, 10-8 and
 9-6 at 38, 55 and 80 atoms. Seeds are 2000–2011. A finished seed is
 left in place. The six-seed files are not opened.
 
-80-atom anneal runs first, then 80-atom GMIN, then the smaller sizes.
-A hit is a quenched energy within 0.001 of the Cambridge table. Fisher
+Eighty-atom systems run first, then the smaller sizes. Within a system the
+seeds 2000-2011 alternate anneal then GMIN with GMIN then anneal, so the
+arm order is ABBA repeated. A hit is a quenched energy within 0.001 of
+the Cambridge table. Fisher
 exact compares hit counts. Mann–Whitney compares calls to the hit and
 wall time. Inside and outside time are the medians of those clocks.
 """
@@ -26,7 +28,7 @@ import run_sc as sc  # noqa: E402
 SEEDS = tuple(range(2000, 2012))
 EIGHTY = ("sc126-80", "sc96-80", "sc108-80")
 SMALLER = tuple(name for name in sc.PAPER_BUDGETS if name not in EIGHTY)
-SCHEDULE_SEED = "ordered-80-first"
+SCHEDULE_SEED = "abba-80-first"
 
 SEED_FIELDS = (
     "system",
@@ -150,18 +152,19 @@ def mann_whitney(left: list[float], right: list[float]) -> float:
     return min(1.0, math.erfc(z / math.sqrt(2.0)))
 
 
+def arm_sequence(seed: int) -> tuple[str, str]:
+    """Anneal then GMIN on even offsets, GMIN then anneal on odd offsets."""
+    if (seed - SEEDS[0]) % 2 == 0:
+        return ("anneal", "gmin")
+    return ("gmin", "anneal")
+
+
 def jobs() -> list[tuple[str, int, str]]:
     ordered: list[tuple[str, int, str]] = []
-    for system in EIGHTY:
+    for system in EIGHTY + SMALLER:
         for seed in SEEDS:
-            ordered.append((system, seed, "anneal"))
-    for system in EIGHTY:
-        for seed in SEEDS:
-            ordered.append((system, seed, "gmin"))
-    for system in SMALLER:
-        for seed in SEEDS:
-            ordered.append((system, seed, "anneal"))
-            ordered.append((system, seed, "gmin"))
+            for arm in arm_sequence(seed):
+                ordered.append((system, seed, arm))
     return ordered
 
 
