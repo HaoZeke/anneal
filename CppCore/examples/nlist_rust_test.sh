@@ -11,13 +11,13 @@ set -eu
 root=$1
 build=$2
 shift 2
-rustc_bin=rustc
+rustc_bin=${RUSTC:-rustc}
 if ! "$rustc_bin" --version >/dev/null 2>&1; then
   rustc_bin=$(find /usr/local/rustup/toolchains "${RUSTUP_HOME:-/usr/local/rustup}/toolchains" \
     -path '*/bin/rustc' -type f -print -quit 2>/dev/null || true)
 fi
 if [ -z "$rustc_bin" ]; then
-  echo "rustc is not available" >&2
+  echo "rustc is not available (set RUSTC or add rustc to PATH)" >&2
   exit 1
 fi
 find_archive() {
@@ -31,6 +31,19 @@ if [ -z "$half" ] || [ -z "$mini" ] || [ -z "$fma" ]; then
   exit 1
 fi
 cxx=${CXX:-c++}
+for tool_bin in "$cxx" "${CC:-}"; do
+  case "$tool_bin" in
+    */*)
+      tool_dir=$(dirname "$tool_bin")
+      if [ -d "$tool_dir" ]; then
+        case ":${PATH:-}:" in
+          *":$tool_dir:"*) ;;
+          *) PATH="${PATH:+$PATH:}$tool_dir"; export PATH ;;
+        esac
+      fi
+      ;;
+  esac
+done
 os=$(uname -s)
 dir=$(mktemp -d)
 out=$(mktemp)
@@ -198,12 +211,50 @@ case "$os" in
       -L "native=${wdir}" -lnlist
     ;;
   *)
+    rust_lib_dirs=
+    add_rust_lib_dir() {
+      case "$1" in
+        */*)
+          cand_dir=$(dirname "$1")
+          if [ -d "$cand_dir" ]; then
+            cand_dir=$(CDPATH= cd -- "$cand_dir" 2>/dev/null && pwd || printf '%s' "$cand_dir")
+            case ":$rust_lib_dirs:" in
+              *":$cand_dir:"*) ;;
+              *) rust_lib_dirs="${rust_lib_dirs:+$rust_lib_dirs:}$cand_dir" ;;
+            esac
+          fi
+          ;;
+      esac
+    }
+    add_rust_lib_dir "$("$cxx" -print-libgcc-file-name 2>/dev/null || true)"
+    add_rust_lib_dir "$("$cxx" -print-file-name=libgcc_s.so 2>/dev/null || true)"
+    case "$cxx_rt" in
+      -lstdc++)
+        add_rust_lib_dir "$("$cxx" -print-file-name=libstdc++.so 2>/dev/null || true)"
+        add_rust_lib_dir "$("$cxx" -print-file-name=libstdc++.a 2>/dev/null || true)"
+        ;;
+      -lc++)
+        add_rust_lib_dir "$("$cxx" -print-file-name=libc++.so 2>/dev/null || true)"
+        add_rust_lib_dir "$("$cxx" -print-file-name=libc++.dylib 2>/dev/null || true)"
+        add_rust_lib_dir "$("$cxx" -print-file-name=libc++.a 2>/dev/null || true)"
+        ;;
+    esac
     set --
     if [ -n "$san_flag" ]; then
       set -- "$@" -C "linker=$cxx" -C "link-arg=$san_flag"
     fi
     if [ -n "$cxx_rt" ]; then
       set -- "$@" -C "link-arg=$cxx_rt"
+    fi
+    if [ -n "$rust_lib_dirs" ]; then
+      old_ifs=$IFS
+      IFS=:
+      for lib_dir in $rust_lib_dirs; do
+        if [ -n "$lib_dir" ]; then
+          set -- "$@" -L "$lib_dir"
+        fi
+      done
+      IFS=$old_ifs
     fi
     "$rustc_bin" --edition 2021 "$root/CppCore/examples/nlist_rust/main.rs" -o "$out" \
       "$@" -L "$dir" -lnlist
@@ -218,6 +269,22 @@ case "$os" in
     PATH="$dir:$PATH" "$out"
     ;;
   *)
+    rt_lib_path=$dir
+    for rt_soname in libstdc++.so.6 libc++.so.1 libgomp.so.1 libomp.so; do
+      rt_file=$("$cxx" -print-file-name="$rt_soname" 2>/dev/null || true)
+      case "$rt_file" in
+        */*)
+          rt_dir=$(dirname "$rt_file")
+          if [ -d "$rt_dir" ]; then
+            rt_dir=$(CDPATH= cd -- "$rt_dir" 2>/dev/null && pwd || printf '%s' "$rt_dir")
+            case ":$rt_lib_path:" in
+              *":$rt_dir:"*) ;;
+              *) rt_lib_path="$rt_lib_path:$rt_dir" ;;
+            esac
+          fi
+          ;;
+      esac
+    done
     preload=
     if [ -n "$san_flag" ] && command -v ldd >/dev/null 2>&1; then
       preload=$(ldd "$dir/libnlist.so" 2>/dev/null | awk '/lib(a|t)san\.so/ {print $3; exit}')
@@ -227,19 +294,19 @@ case "$os" in
         if command -v setarch >/dev/null 2>&1 && setarch -R true >/dev/null 2>&1; then
           setarch -R env \
             ${preload:+LD_PRELOAD="$preload${LD_PRELOAD:+:$LD_PRELOAD}"} \
-            LD_LIBRARY_PATH="$dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            LD_LIBRARY_PATH="$rt_lib_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
             "$out"
         else
           env \
             ${preload:+LD_PRELOAD="$preload${LD_PRELOAD:+:$LD_PRELOAD}"} \
-            LD_LIBRARY_PATH="$dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            LD_LIBRARY_PATH="$rt_lib_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
             "$out"
         fi
         ;;
       *)
         env \
           ${preload:+LD_PRELOAD="$preload${LD_PRELOAD:+:$LD_PRELOAD}"} \
-          LD_LIBRARY_PATH="$dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+          LD_LIBRARY_PATH="$rt_lib_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
           "$out"
         ;;
     esac

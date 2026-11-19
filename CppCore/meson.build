@@ -2137,9 +2137,12 @@ if get_option('with_tests')
         if _sanitize != 'none'
             _nlist_rust_args += ['-fsanitize=' + _sanitize]
         endif
+        _nlist_rust_cc = cc.cmd_array()
         _nlist_rust_cxx = cppc.cmd_array()
         _nlist_rust_env = {
+            'CC': _nlist_rust_cc[_nlist_rust_cc.length() - 1],
             'CXX': _nlist_rust_cxx[_nlist_rust_cxx.length() - 1],
+            'RUSTC': _rustc.full_path(),
         }
         if 'thread' in _sanitize
             _nlist_rust_env += {'TSAN_OPTIONS': _tsan_options}
