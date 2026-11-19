@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Serial same-session A/B and A/A gate for the tip4p-hits-b patch."""
+"""Serial same-session A/B, A/A, and water_hexamer placement-band gate."""
 
 from __future__ import annotations
 
@@ -785,6 +785,7 @@ def run_hexamer(
     run_dir: Path,
     log_path: Path,
     machine_id_sha256: str,
+    driver: str = "rgpot_xtb_py",
 ) -> dict:
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -829,7 +830,7 @@ def run_hexamer(
         "band": band,
         "panel": "molecular",
         "system": "water_hexamer",
-        "driver": "rgpot_xtb_py",
+        "driver": driver,
         "arm": arm,
         "seed": seed,
         "arm_order": arm_order,
@@ -893,7 +894,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--rdff-lib", type=Path, required=True)
     parser.add_argument("--xtb-engine", type=Path, required=True)
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
-    parser.add_argument("--bands", nargs="+", default=["AB", "AA"], choices=["AB", "AA"])
+    parser.add_argument("--bands", nargs="+", default=["AB", "AA"], choices=["AB", "AA", "PL"])
+    parser.add_argument("--placement-py", nargs=5, type=Path)
+    parser.add_argument("--placement-kind", nargs=5)
     parser.add_argument("--systems", nargs="*")
     parser.add_argument("--polish-workers", type=int, default=os.cpu_count() or 1)
     args = parser.parse_args(argv[1:])
@@ -901,6 +904,12 @@ def main(argv: list[str]) -> int:
     verify_pinned()
     verify_references(args.root)
     conformer_specs = load_conformer_specs(args.root)
+    if "PL" in args.bands:
+        if args.placement_py is None or args.placement_kind is None:
+            raise SystemExit("PL band requires five --placement-py paths and five --placement-kind labels")
+        for kind in args.placement_kind:
+            if not kind or any(ch.isspace() for ch in kind) or "/" in kind or "\\" in kind:
+                raise SystemExit(f"placement kind {kind!r} must be a single path-free token")
 
     session_id = now_session_id()
     mid_sha = hashed_machine_id()
@@ -957,6 +966,8 @@ def main(argv: list[str]) -> int:
             "n_seeds": len(SEEDS),
             "seeds": [SEEDS[0], SEEDS[-1]],
             "arm_order_protocol": "ABBA_interleaved_per_seed",
+            "placement_kinds": list(args.placement_kind or []),
+            "placement_bands": ["PLAA", "PL1", "PL2", "PL3", "PL4", "PL5"] if "PL" in args.bands else [],
         },
     )
 
@@ -1093,7 +1104,7 @@ def main(argv: list[str]) -> int:
                 append_csv(args.rows, ROW_FIELDS, row)
                 committed_done.add(rkey)
 
-    def run_hexamer_cell(band: str, pair_arms: tuple[str, str]) -> None:
+    def run_hexamer_cell(band: str, pair_arms: tuple[str, str], drivers: dict[str, str] | None = None) -> None:
         if not wanted("water_hexamer"):
             return
         for offset, seed in enumerate(SEEDS):
@@ -1125,6 +1136,7 @@ def main(argv: list[str]) -> int:
                     run_dir=args.work / "runs" / band / "water_hexamer" / f"{arm_name}-{seed}",
                     log_path=args.logs / band / "water_hexamer" / f"{seed}-{arm_name}.log",
                     machine_id_sha256=mid_sha,
+                    driver=(drivers or {}).get(arm_name, "rgpot_xtb_py"),
                 )
                 append_raw(raw_path, rec)
                 append_csv(args.rows, ROW_FIELDS, rec)
@@ -1156,6 +1168,18 @@ def main(argv: list[str]) -> int:
             run_conformer_cell("AB", ("A", "B"), molecule)
         for panel, system, n, budget, ref, tol in LJ_SPECS:
             run_h2h_cell("AB", ("A", "B"), panel, system, "lj", n, budget, ref, tol)
+
+    if "PL" in args.bands:
+        # Same-binary A/A on the untouched hexamer, then each padding variant against A.
+        run_hexamer_cell("PLAA", ("A1", "A2"))
+        for index, (py_dir, kind) in enumerate(zip(args.placement_py, args.placement_kind, strict=True), start=1):
+            arm_specs["V"] = {
+                "bin": args.a_bin,
+                "py": py_dir,
+                "rev": args.a_rev,
+                "tree": args.a_tree,
+            }
+            run_hexamer_cell(f"PL{index}", ("A", "V"), {"V": kind})
 
     return 0
 

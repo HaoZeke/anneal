@@ -40,6 +40,47 @@ rule summarize:
         """
 
 
+rule placement:
+    input:
+        f"{GATE_DIR}/run_gate.py",
+    output:
+        touch(f"{GATE_WORK}/placement.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        "{PYTHON}" -u {GATE_DIR}/run_gate.py \
+          --rows {GATE_DIR}/rows.csv \
+          --sessions {GATE_DIR}/sessions.jsonl \
+          --hosts {GATE_DIR}/hosts.csv \
+          --work {GATE_WORK} \
+          --logs {GATE_WORK}/logs \
+          --python "{PYTHON}" \
+          --bands PL \
+          --a-bin "${{GATE_A_BIN:?set GATE_A_BIN}}" \
+          --b-bin "${{GATE_B_BIN:?set GATE_B_BIN}}" \
+          --a-py "${{GATE_A_PY:?set GATE_A_PY}}" \
+          --b-py "${{GATE_B_PY:?set GATE_B_PY}}" \
+          --a-rev "${{GATE_A_REV:?set GATE_A_REV}}" \
+          --b-rev "${{GATE_B_REV:?set GATE_B_REV}}" \
+          --a-tree "${{GATE_A_TREE:?set GATE_A_TREE}}" \
+          --b-tree "${{GATE_B_TREE:?set GATE_B_TREE}}" \
+          --rdff-lib "${{GATE_RDFF_LIB:?set GATE_RDFF_LIB}}" \
+          --xtb-engine "${{GATE_XTB_ENGINE:?set GATE_XTB_ENGINE}}" \
+          --placement-py \
+            "${{GATE_PL_PY1:?set GATE_PL_PY1}}" \
+            "${{GATE_PL_PY2:?set GATE_PL_PY2}}" \
+            "${{GATE_PL_PY3:?set GATE_PL_PY3}}" \
+            "${{GATE_PL_PY4:?set GATE_PL_PY4}}" \
+            "${{GATE_PL_PY5:?set GATE_PL_PY5}}" \
+          --placement-kind \
+            "${{GATE_PL_KIND1:?set GATE_PL_KIND1}}" \
+            "${{GATE_PL_KIND2:?set GATE_PL_KIND2}}" \
+            "${{GATE_PL_KIND3:?set GATE_PL_KIND3}}" \
+            "${{GATE_PL_KIND4:?set GATE_PL_KIND4}}" \
+            "${{GATE_PL_KIND5:?set GATE_PL_KIND5}}"
+        """
+
+
 rule gate:
     input:
         f"{GATE_DIR}/run_gate.py",

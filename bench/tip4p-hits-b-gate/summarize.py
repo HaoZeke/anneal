@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Summarize tip4p-hits-b gate rows, compute exact tests, A/A calibration, report, and verdict."""
+"""Summarize tip4p-hits-b gate rows, exact tests, A/A calibration, placement band, and verdict."""
 
 from __future__ import annotations
 
@@ -12,6 +12,10 @@ from pathlib import Path
 
 ALPHA = 0.05
 MAX_OVERALL_OUTSIDE_RATIO = 1.10
+PLACEMENT_VARIANT_BANDS = ("PL1", "PL2", "PL3", "PL4", "PL5")
+PLACEMENT_BANDS = ("PLAA",) + PLACEMENT_VARIANT_BANDS
+# One comparison per layout variant, applied to the single pooled test.
+PLACEMENT_BONFERRONI_M = len(PLACEMENT_VARIANT_BANDS)
 
 EXPECTED_AB_CELLS = [
     ("tip4p", "tip4p8"),
@@ -201,6 +205,104 @@ def fmt_p(p: float) -> str:
     return f"{p:.6g}"
 
 
+def placement_cell_fails(ratio: float, lo: float, hi: float, p_adj: float) -> bool:
+    """Fail an untouched cell when its outside ratio is past the placement band and the corrected test is significant."""
+    if not (math.isfinite(ratio) and math.isfinite(lo) and math.isfinite(hi) and math.isfinite(p_adj)):
+        return False
+    outside = ratio < lo or ratio > hi
+    return outside and p_adj < ALPHA
+
+
+def _hex_rows(raw_summary: list[dict[str, object]], band: str) -> dict[str, object] | None:
+    for item in raw_summary:
+        if item["band"] == band and item["system"] == "water_hexamer":
+            return item
+    return None
+
+
+def analyze_placement(raw_summary: list[dict[str, object]]) -> dict[str, object]:
+    """Median outside ratios of the five layout variants and the hexamer A/A, plus B versus the pooled variants."""
+    found: dict[str, dict[str, object]] = {}
+    missing: list[str] = []
+    for band in PLACEMENT_BANDS:
+        item = _hex_rows(raw_summary, band)
+        if item is None or item["status"] != "ok":
+            missing.append(band)
+        elif item is not None:
+            found[band] = item
+    ab = _hex_rows(raw_summary, "AB")
+    if ab is None or ab["status"] != "ok":
+        missing.append("AB")
+    if missing:
+        return {"ready": False, "missing": missing}
+
+    series: list[dict[str, object]] = []
+    ratios: list[float] = []
+    for band in PLACEMENT_BANDS:
+        item = found[band]
+        ratio = float(item["outside_ratio"])
+        ratios.append(ratio)
+        right_rows = item["rows_r"]
+        kind = str(right_rows[0]["driver"]) if right_rows else ""
+        series.append(
+            {
+                "band": band,
+                "kind": kind,
+                "ratio": ratio,
+                "med_a": float(item["med_out_a"]),
+                "med_b": float(item["med_out_b"]),
+                "bit_identical": int(item["bit_identical"]),
+                "n_common": int(item["n_common"]),
+                "p_out": float(item["p_out"]),
+            }
+        )
+    lo, hi = min(ratios), max(ratios)
+    pooled: list[float] = []
+    for band in PLACEMENT_VARIANT_BANDS:
+        pooled.extend(float(row["outside_s"]) for row in found[band]["rows_r"])
+    b_times = [float(row["outside_s"]) for row in ab["rows_r"]]
+    u_stat, p_value = mann_whitney_exact(b_times, pooled)
+    p_adj = min(1.0, p_value * PLACEMENT_BONFERRONI_M)
+
+    def rows_match(left: dict[str, str], right: dict[str, str]) -> bool:
+        return (
+            left["calls"] == right["calls"]
+            and left["charged"] == right["charged"]
+            and left["hit"] == right["hit"]
+            and left["best"] == right["best"]
+            and left["final_energy_bits"] == right["final_energy_bits"]
+            and bool(left["trace_sha256"])
+            and left["trace_sha256"] == right["trace_sha256"]
+        )
+
+    archived = {int(row["seed"]): row for row in ab["rows_l"]}
+    cross_ok = True
+    for band in PLACEMENT_BANDS:
+        item = found[band]
+        arms = [item["rows_l"], item["rows_r"]]
+        # PLAA is A versus A. Variant bands compare the right arm (the variant) to archived A.
+        check_rows = arms[0] + arms[1] if band == "PLAA" else arms[1]
+        for row in check_rows:
+            base = archived.get(int(row["seed"]))
+            if base is None or not rows_match(base, row):
+                cross_ok = False
+    within_ok = all(int(found[band]["bit_identical"]) == int(found[band]["n_common"]) for band in PLACEMENT_BANDS)
+    return {
+        "ready": True,
+        "missing": [],
+        "series": series,
+        "lo": lo,
+        "hi": hi,
+        "u": u_stat,
+        "p": p_value,
+        "p_adj": p_adj,
+        "n_b": len(b_times),
+        "n_pooled": len(pooled),
+        "within_ok": within_ok,
+        "cross_ok": cross_ok,
+    }
+
+
 def summarize(rows: list[dict[str, str]], tests_path: Path | None = None) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str]:
     by_key: dict[tuple[str, str, str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
@@ -215,7 +317,11 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None) -> tup
     raw_summary: list[dict[str, object]] = []
 
     def pair_names(band: str) -> tuple[str, str]:
-        return ("A", "B") if band == "AB" else ("A1", "A2")
+        if band == "AB":
+            return ("A", "B")
+        if band.startswith("PL") and band != "PLAA":
+            return ("A", "V")
+        return ("A1", "A2")
 
     cells: list[tuple[str, str, str]] = []
     for panel, system in EXPECTED_AA_CELLS:
@@ -411,6 +517,7 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None) -> tup
     tests_ok, test_lines = parse_tests_file(tests_path)
     gate_failures: list[str] = []
     incomplete_cells: list[str] = []
+    placement = analyze_placement(raw_summary)
 
     if not tests_ok:
         gate_failures.append("B-only test failure in tests.txt")
@@ -435,6 +542,10 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None) -> tup
         if status != "ok":
             incomplete_cells.append(f"{band}/{system} ({status})")
 
+        if str(band).startswith("PL") and status == "ok":
+            if int(item["bit_identical"]) != int(item["n_common"]):
+                reasons.append(f"placement_not_bit_identical:{item['bit_identical']}/{item['n_common']}")
+
         if band == "AB" and status == "ok":
             n_common = int(item["n_common"])
             bit_id = int(item["bit_identical"])
@@ -446,7 +557,30 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None) -> tup
                 reasons.append(f"call_regression:p={fmt_p(float(item['p_calls']))}")
             out_ratio = float(item["outside_ratio"])
             p_out = float(item["p_out"])
-            if bool(item["out_inc"]) and p_out < ALPHA:
+            hexamer = panel == "molecular" and system == "water_hexamer"
+            if hexamer:
+                # Untouched control: the same-binary A/A band did not cover this cell.
+                if not placement["ready"]:
+                    incomplete_cells.append(
+                        "placement band for water_hexamer (" + ",".join(str(b) for b in placement["missing"]) + ")"
+                    )
+                else:
+                    if not bool(placement["within_ok"]) or not bool(placement["cross_ok"]):
+                        reasons.append("placement_trajectory_mismatch")
+                    if placement_cell_fails(
+                        out_ratio,
+                        float(placement["lo"]),
+                        float(placement["hi"]),
+                        float(placement["p_adj"]),
+                    ):
+                        reasons.append(
+                            "outside_placement_band:"
+                            f"ratio={out_ratio:.4f},"
+                            f"band={float(placement['lo']):.4f}-{float(placement['hi']):.4f},"
+                            f"p={fmt_p(float(placement['p']))},"
+                            f"p_adj={fmt_p(float(placement['p_adj']))}"
+                        )
+            elif bool(item["out_inc"]) and p_out < ALPHA:
                 if out_ratio > aa_max_ratio or p_out < aa_min_outside_p:
                     reasons.append(f"outside_regression_beyond_AA:ratio={out_ratio:.3f},p={fmt_p(p_out)}")
 
@@ -506,6 +640,23 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None) -> tup
     else:
         verdict = "PASS"
 
+    hex_ab = _hex_rows(raw_summary, "AB")
+    hex_ratio = float(hex_ab["outside_ratio"]) if hex_ab and hex_ab["status"] == "ok" else float("nan")
+
+    def ab_ratio(system: str) -> float:
+        for item in ab_items:
+            if item["system"] == system and item["status"] == "ok":
+                return float(item["outside_ratio"])
+        return float("nan")
+
+    tip4p21_ratio = ab_ratio("tip4p21")
+    tip4p25_ratio = ab_ratio("tip4p25")
+
+    def inside_band(ratio: float) -> str:
+        if not placement["ready"] or not math.isfinite(ratio):
+            return "unknown"
+        return "inside" if float(placement["lo"]) <= ratio <= float(placement["hi"]) else "outside"
+
     v_lines = [
         f"verdict: {verdict}",
         f"alpha: {ALPHA}",
@@ -517,7 +668,30 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None) -> tup
         f"aa_max_cell_outside_ratio: {aa_max_ratio:.6f}",
         f"aa_min_outside_p: {fmt_p(aa_min_outside_p)}",
         f"tests_ok: {int(tests_ok)}",
+        f"placement_ready: {int(bool(placement['ready']))}",
+        f"placement_bonferroni_m: {PLACEMENT_BONFERRONI_M}",
     ]
+    if placement["ready"]:
+        v_lines.extend(
+            [
+                f"placement_ratio_min: {float(placement['lo']):.6f}",
+                f"placement_ratio_max: {float(placement['hi']):.6f}",
+                f"placement_hexamer_ratio: {hex_ratio:.6f}" if math.isfinite(hex_ratio) else "placement_hexamer_ratio: nan",
+                f"placement_hexamer_vs_band: {inside_band(hex_ratio)}",
+                f"placement_mw_u: {float(placement['u']):.1f}",
+                f"placement_mw_p: {fmt_p(float(placement['p']))}",
+                f"placement_mw_p_adj: {fmt_p(float(placement['p_adj']))}",
+                f"placement_n_b: {int(placement['n_b'])}",
+                f"placement_n_pooled: {int(placement['n_pooled'])}",
+                f"placement_bit_identical: {int(bool(placement['within_ok']) and bool(placement['cross_ok']))}",
+                f"tip4p21_outside_ratio: {tip4p21_ratio:.6f}",
+                f"tip4p21_vs_placement_band: {inside_band(tip4p21_ratio)}",
+                f"tip4p25_outside_ratio: {tip4p25_ratio:.6f}",
+                f"tip4p25_vs_placement_band: {inside_band(tip4p25_ratio)}",
+            ]
+        )
+    else:
+        v_lines.append("placement_missing: " + ",".join(str(b) for b in placement["missing"]))
     if gate_failures:
         v_lines.append("failures:")
         v_lines.extend(f"- {msg}" for msg in gate_failures)
@@ -566,6 +740,45 @@ def summarize(rows: list[dict[str, str]], tests_path: Path | None = None) -> tup
     rep.extend(md_table(ab_rows, "A", "B"))
     rep.extend(["", "## A/A Calibration Band (12 seeds, 2000-2011, serial core 0, A1 vs A2)", ""])
     rep.extend(md_table(aa_rows, "A1", "A2"))
+    rep.extend(["", "## Placement Band (water_hexamer)", ""])
+    rep.append(
+        "Arm A layout variants change only object size or section alignment of `anneal._core`. "
+        "Each variant is run against arm A, and an A/A on `water_hexamer` is pooled with those "
+        "variant/A median outside-potential ratios. Seeds 2000-2011, serial core 0, ABBA order, one thread."
+    )
+    rep.append("")
+    if not placement["ready"]:
+        rep.append(
+            "Placement band incomplete: " + ", ".join(str(b) for b in placement["missing"]) + "."
+        )
+    else:
+        rep.extend(
+            [
+                "| Series | Kind | Out med left/right (s) | Ratio | Exact MW p | Bit-ID |",
+                "| --- | --- | --- | ---: | ---: | --- |",
+            ]
+        )
+        for series in placement["series"]:
+            rep.append(
+                f"| {series['band']} | {series['kind']} | {float(series['med_a']):.6f} / {float(series['med_b']):.6f} | "
+                f"{float(series['ratio']):.4f} | {fmt_p(float(series['p_out']))} | "
+                f"{series['bit_identical']}/{series['n_common']} |"
+            )
+        hex_vs = inside_band(hex_ratio)
+        rep.extend(
+            [
+                "",
+                f"- Pooled placement band (min and max of the six median ratios): `{float(placement['lo']):.4f}` to `{float(placement['hi']):.4f}`",
+                f"- `water_hexamer` B/A median outside ratio `{hex_ratio:.4f}` is {hex_vs} the placement band"
+                if math.isfinite(hex_ratio)
+                else "- `water_hexamer` B/A median outside ratio: incomplete",
+                f"- Exact Mann-Whitney of arm B outside times (n={int(placement['n_b'])}) against the pooled variant outside times (n={int(placement['n_pooled'])}): U=`{float(placement['u']):.1f}`, p=`{fmt_p(float(placement['p']))}`, Bonferroni m=`{PLACEMENT_BONFERRONI_M}`, p_adj=`{fmt_p(float(placement['p_adj']))}`",
+                "- `water_hexamer` fails only when that ratio lies outside the band and p_adj < 0.05",
+                f"- `tip4p21` outside ratio `{tip4p21_ratio:.4f}` is {inside_band(tip4p21_ratio)} the placement band",
+                f"- `tip4p25` outside ratio `{tip4p25_ratio:.4f}` is {inside_band(tip4p25_ratio)} the placement band",
+                f"- Variant and A/A trajectories match arm A: `{int(bool(placement['within_ok']) and bool(placement['cross_ok']))}`",
+            ]
+        )
     if gate_failures:
         rep.extend(["", "## Gate Failure Details", ""])
         rep.extend(f"- {msg}" for msg in gate_failures)
@@ -622,6 +835,10 @@ def self_test() -> None:
         u, p = mann_whitney_exact(left, right)
         assert abs(u - want.statistic) < 1e-9 and abs(p - want.pvalue) < 1e-12
         assert abs(fisher_two_sided(9, 12, 2, 12) - fisher_exact([[9, 3], [2, 10]])[1]) < 1e-12
+    assert placement_cell_fails(1.1242, 0.90, 1.05, 0.01)
+    assert not placement_cell_fails(1.1242, 0.90, 1.20, 0.01)
+    assert not placement_cell_fails(1.1242, 0.90, 1.05, 0.05)
+    assert not placement_cell_fails(1.1242, 0.90, 1.05, 0.20)
     print("ok")
 
 
