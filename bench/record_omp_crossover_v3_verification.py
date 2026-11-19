@@ -405,7 +405,7 @@ def render_verification(toolchain: dict[str, str], legs: list[dict[str, object]]
         "Meson and CTest logs of the legs below. Another compiler, gfortran,",
         "rustc, ASE, pytest, or MPI install can register a different set. The",
         "configure arguments are the ones that produced each log, and the",
-        "resolved values are the ones that build recorded.",
+        "resolved values are the ones the build recorded.",
         "",
         "## Toolchain",
         "",
