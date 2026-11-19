@@ -8,8 +8,10 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -933,4 +935,107 @@ TEST_CASE("EAM multi-image rejects a large image count", "[EAMTable][nlist]") {
   const std::vector<int> z{29};
   REQUIRE_THROWS_WITH(eval_full(pot, pos, z, box),
                       Catch::Matchers::ContainsSubstring("image count"));
+}
+
+namespace {
+
+/// Orthogonal cell short enough that evaluation takes the image walk.
+void short_cube(double spacing, double cutoff, double box[9]) {
+  REQUIRE(spacing > 0.0);
+  REQUIRE(2.0 * cutoff >= spacing);
+  box[0] = spacing;
+  box[1] = 0.0;
+  box[2] = 0.0;
+  box[3] = 0.0;
+  box[4] = spacing;
+  box[5] = 0.0;
+  box[6] = 0.0;
+  box[7] = 0.0;
+  box[8] = spacing;
+  REQUIRE(face_spacing(box, 0) <= 2.0 * cutoff);
+}
+
+} // namespace
+
+TEST_CASE("EAM multi-image rejects a fractional separation past int",
+          "[EAMTable][nlist]") {
+  const rgpot::EAMTablePot pot = pair_only();
+  const double spacing = 4.0;
+  double box[9];
+  short_cube(spacing, pot.locality().cutoff, box);
+  const std::vector<int> z{29, 29};
+
+  // Atom 0 carries the shift, so the walk's separation x0 - x1 is `cells`.
+  const auto past_limit = [](long long cells) {
+    const double shift = static_cast<double>(cells) * 4.0;
+    const std::vector<double> pos{0.25 + shift, 0.3, 0.4, 0.25, 0.3, 0.4};
+    const double fractional = (pos[0] - pos[3]) / 4.0;
+    REQUIRE(std::llround(fractional) == cells);
+    return pos;
+  };
+
+  SECTION("above the maximum int") {
+    const long long cells =
+        static_cast<long long>(std::numeric_limits<int>::max()) + 2;
+    REQUIRE(cells > std::numeric_limits<int>::max());
+    const std::vector<double> pos = past_limit(cells);
+    REQUIRE_THROWS_AS(eval_full(pot, pos, z, box), std::invalid_argument);
+    REQUIRE_THROWS_WITH(
+        eval_full(pot, pos, z, box),
+        Catch::Matchers::ContainsSubstring(
+            "fractional separation exceeds lattice index range"));
+  }
+
+  SECTION("below the minimum int") {
+    const long long cells =
+        static_cast<long long>(std::numeric_limits<int>::min()) - 2;
+    REQUIRE(cells < std::numeric_limits<int>::min());
+    const std::vector<double> pos = past_limit(cells);
+    REQUIRE_THROWS_AS(eval_full(pot, pos, z, box), std::invalid_argument);
+    REQUIRE_THROWS_WITH(
+        eval_full(pot, pos, z, box),
+        Catch::Matchers::ContainsSubstring(
+            "fractional separation exceeds lattice index range"));
+  }
+}
+
+TEST_CASE("EAM multi-image rejects a non-finite fractional separation",
+          "[EAMTable][nlist]") {
+  const rgpot::EAMTablePot pot = pair_only();
+  const double spacing = 4.0;
+  double box[9];
+  short_cube(spacing, pot.locality().cutoff, box);
+  const std::vector<double> pos{
+      0.25, 0.3, 0.4, std::numeric_limits<double>::quiet_NaN(), 0.3, 0.4};
+  const std::vector<int> z{29, 29};
+  REQUIRE(std::isnan(pos[3]));
+  REQUIRE_THROWS_AS(eval_full(pot, pos, z, box), std::invalid_argument);
+  REQUIRE_THROWS_WITH(
+      eval_full(pot, pos, z, box),
+      Catch::Matchers::ContainsSubstring("non-finite fractional separation"));
+}
+
+TEST_CASE("EAM multi-image matches brute force near the int shift limit",
+          "[EAMTable][nlist]") {
+  const rgpot::EAMTable table = pair_table_data();
+  const double spacing = 4.0;
+  double box[9];
+  short_cube(spacing, table.cutoff, box);
+  const int extent = static_cast<int>(std::ceil(table.cutoff / spacing));
+  REQUIRE(extent > 0);
+  // Largest centre whose image window still fits in int. The last index
+  // on that axis is the maximum int.
+  const long long center =
+      static_cast<long long>(std::numeric_limits<int>::max()) -
+      static_cast<long long>(extent);
+  REQUIRE(center + static_cast<long long>(extent) ==
+          std::numeric_limits<int>::max());
+  const double shift = static_cast<double>(center) * spacing;
+  // Atom 0 carries the shift, so the walk rounds x0 - x1. Half an
+  // angstrom along x, and a smaller offset along z, keeps the home image
+  // inside the cutoff and the force from cancelling.
+  const std::vector<double> pos{0.75 + shift, 0.3, 0.55, 0.25, 0.3, 0.4};
+  const double fractional = (pos[0] - pos[3]) / spacing;
+  REQUIRE(std::llround(fractional) == center);
+  expect_matches_brute_force(table, pos, box);
 }

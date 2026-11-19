@@ -92,8 +92,10 @@ for one pair.
 The constructor does not check the cutoff against a cell.
 It throws =std::invalid_argument= for a file it cannot open or parse.
 =forceImpl= throws =std::invalid_argument= when the image extent or the image
-count is past that limit, for a periodic call without a cell, and for an
-atomic number that is in no element line.
+count is past that limit, for a periodic call without a cell, for an
+atomic number that is in no element line, when a fractional separation is
+not finite, and when the nearest integer to that separation plus the image
+extent does not fit in an =int= lattice index.
 
 * Stress
 

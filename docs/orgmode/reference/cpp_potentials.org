@@ -930,7 +930,9 @@ EAMTablePot(const EAMTable &table, bool periodic, bool stress,
   and for a negative atomic number in an element line.
   The force call throws it for an atomic number in no element line, for a
   periodic call without a cell, when the image extent on one axis would pass
-  1024, and when one pair would visit more than 262144 lattice shifts.
+  1024, when one pair would visit more than 262144 lattice shifts, when a
+  fractional separation is not finite, and when the nearest integer to that
+  separation plus the image extent does not fit in an =int= lattice index.
 
 This class is built with =-Dwith_eam_table=true=.
 

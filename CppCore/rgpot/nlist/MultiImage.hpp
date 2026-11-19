@@ -14,13 +14,16 @@
  * scan and, for each pair, a cube of lattice shifts O((2e + 1)^3), where e is
  * the per-axis image extent. For short-face slabs this is intentionally slow;
  * a cell-list acceleration for this path is left out of scope. The product of
- * the per-axis shift counts is bounded, so three thin faces are refused.
+ * the per-axis shift counts is bounded, so three thin faces are refused. A
+ * fractional separation that is not finite, or whose nearest integer plus the
+ * extent does not fit in an `int` index, is refused the same way.
  */
 
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -82,7 +85,7 @@ inline bool invertColumns(const double m[9], double inv[9]) noexcept {
   return true;
 }
 
-inline bool positiveHalfSpace(int h, int k, int l) noexcept {
+inline bool positiveHalfSpace(long long h, long long k, long long l) noexcept {
   return h > 0 || (h == 0 && (k > 0 || (k == 0 && l > 0)));
 }
 
@@ -92,6 +95,39 @@ constexpr int kMaxImageExtent = 1024;
 /// `2 * extent + 1`. One thin face may still reach the per-axis cap when the
 /// other faces are wide. Three thin faces are refused here. 64 cubed.
 constexpr std::int64_t kMaxImageCount = 64 * 64 * 64;
+
+/// Image loops index with `int`. A centre is usable only when `centre ±
+/// extent` stays inside these limits.
+constexpr long long kMinImageIndex = std::numeric_limits<int>::min();
+constexpr long long kMaxImageIndex = std::numeric_limits<int>::max();
+
+/// `std::llround` is specified only inside the range of `long long`.
+constexpr double kMinRoundableShift =
+    static_cast<double>(std::numeric_limits<long long>::min());
+constexpr double kMaxRoundableShift =
+    static_cast<double>(std::numeric_limits<long long>::max());
+
+/// Nearest lattice index of a fractional separation. Throws the same
+/// `std::invalid_argument` as a bad cell when the value is not finite, when
+/// `std::llround` cannot represent it, or when the image window around the
+/// rounded centre does not fit in `int`.
+inline int imageCenter(double fractional, int extent) {
+  if (!std::isfinite(fractional)) {
+    throw std::invalid_argument("EAM table: non-finite fractional separation");
+  }
+  if (!(fractional > kMinRoundableShift) ||
+      !(fractional < kMaxRoundableShift)) {
+    throw std::invalid_argument(
+        "EAM table: fractional separation exceeds lattice index range");
+  }
+  const long long shift = std::llround(fractional);
+  const long long span = static_cast<long long>(extent);
+  if (shift < kMinImageIndex + span || shift > kMaxImageIndex - span) {
+    throw std::invalid_argument(
+        "EAM table: fractional separation exceeds lattice index range");
+  }
+  return static_cast<int>(shift);
+}
 
 inline int extentForAxis(double cutoff, double spacing, int axis) {
   if (!(spacing > 0.0) || !std::isfinite(spacing)) {
@@ -121,6 +157,9 @@ inline int extentForAxis(double cutoff, double spacing, int axis) {
 
 /// Unordered pairs `(i, j)` with `j >= i`, one call per image inside the
 /// cutoff. `fn` is `fn(i, j, dx, dy, dz, r2)`.
+/// Throws `std::invalid_argument` for a singular cell, an image extent or
+/// image count past the cap, a non-finite fractional separation, or a
+/// separation whose nearest integer plus the extent does not fit in `int`.
 template <typename Fn>
 void visitHalfImages(const double *pos, std::size_t n, const double *box,
                      const std::array<bool, 3> &periodic, double cutoff,
@@ -167,12 +206,20 @@ void visitHalfImages(const double *pos, std::size_t n, const double *box,
       const double f0 = inverse[0] * dx0 + inverse[3] * dy0 + inverse[6] * dz0;
       const double f1 = inverse[1] * dx0 + inverse[4] * dy0 + inverse[7] * dz0;
       const double f2 = inverse[2] * dx0 + inverse[5] * dy0 + inverse[8] * dz0;
-      const int c0 = static_cast<int>(std::lround(f0));
-      const int c1 = static_cast<int>(std::lround(f1));
-      const int c2 = static_cast<int>(std::lround(f2));
-      for (int h = c0 - extent[0]; h <= c0 + extent[0]; ++h) {
-        for (int k = c1 - extent[1]; k <= c1 + extent[1]; ++k) {
-          for (int l = c2 - extent[2]; l <= c2 + extent[2]; ++l) {
+      const int c0 = detail::imageCenter(f0, extent[0]);
+      const int c1 = detail::imageCenter(f1, extent[1]);
+      const int c2 = detail::imageCenter(f2, extent[2]);
+      // The sums fit in int. The counters are wide so the increment after
+      // the maximum int, which ends a window on that limit, is defined.
+      const int h_lo = c0 - extent[0];
+      const int h_hi = c0 + extent[0];
+      const int k_lo = c1 - extent[1];
+      const int k_hi = c1 + extent[1];
+      const int l_lo = c2 - extent[2];
+      const int l_hi = c2 + extent[2];
+      for (long long h = h_lo; h <= h_hi; ++h) {
+        for (long long k = k_lo; k <= k_hi; ++k) {
+          for (long long l = l_lo; l <= l_hi; ++l) {
             if (!periodic[0] && h != 0) {
               continue;
             }
