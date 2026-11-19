@@ -1504,6 +1504,30 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
+    /// Spend a stalled stretch on independent descents from fresh random
+    /// clusters.
+    ///
+    /// Off leaves the chain as it was. On, once the walk has gone longer
+    /// without a lower minimum than it took to reach the one it holds, longer
+    /// than twice its longest stretch between two lower minima, and longer
+    /// than [`Config::restart_patience`] calls, a branch search runs from a
+    /// new random start: this configuration less the branch, on its own
+    /// ledger slice and generator. The branch stops when it has gone longer
+    /// without a lower quench than it took to reach its lowest, or as soon
+    /// as its lowest is a minimum the walk holds or an earlier branch
+    /// stalled in. The walk then runs at least as many calls as that branch
+    /// spent before it may branch again.
+    ///
+    /// The walk never sees a branch. Its generator, state and clocks count
+    /// only its own calls, so it follows the trajectory it would have
+    /// followed without branches, later by the calls they spent. A branch
+    /// that reaches the ledger's stop target ends the run at the call that
+    /// found it; a lower minimum short of the target is recorded when the
+    /// walk returns. Unlike [`Config::restart_on_stall`] nothing the walk
+    /// built is discarded, and a fresh descent that lands in a worse funnel
+    /// costs its calls and nothing else.
+    #[serde(skip_serializing_if = "is_false")]
+    pub branch_on_stall: bool,
 }
 
 /// Opening hops whose quenched energy changes set
@@ -2243,6 +2267,7 @@ impl Config {
             ring_moves: false,
             hold_stereocentres: false,
             measured_energy_scale: false,
+            branch_on_stall: false,
         }
     }
 

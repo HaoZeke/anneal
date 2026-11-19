@@ -302,6 +302,10 @@ fn try_config(
     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }
+    // `1` turns on the fresh-start branch, `Config::branch_on_stall`.
+    if std::env::var("H2H_BRANCH").is_ok_and(|value| value == "1") {
+        cfg.branch_on_stall = true;
+    }
     Ok(cfg)
 }
 
