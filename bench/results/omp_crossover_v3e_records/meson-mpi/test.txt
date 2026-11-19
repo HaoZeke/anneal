@@ -167,8 +167,8 @@ ninja: no work to do.
 165/166 rgpot:optional_engine_install                 OK               11.49s
 166/166 docs - rgpot:doccheck_examples                OK               26.04s
 
-Ok:                164 
-Expected Fail:     2   
-Fail:              0   
+Ok:                164
+Expected Fail:     2
+Fail:              0
 
 Full log written to build/verify-meson-mpi/meson-logs/testlog.txt

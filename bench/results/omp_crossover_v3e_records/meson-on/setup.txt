@@ -44,9 +44,9 @@ Sanity check built target output for host machine cpp compiler
 -----------
 Sanity check: `build/verify-meson-on/meson-private/sanity_check_for_cpp.exe` -> 0
  -- stdout:
- 
+
  -- stderr:
- 
+
  -- returncode: 0
 C++ compiler for the host machine: x86_64-conda-linux-gnu-c++ (gcc 14.4.0 "x86_64-conda-linux-gnu-c++ (conda-forge gcc 14.4.0-7) 14.4.0")
 C++ linker for the host machine: x86_64-conda-linux-gnu-c++ ld.bfd 2.46.1
@@ -94,9 +94,9 @@ Sanity check built target output for build machine cpp compiler
 -----------
 Sanity check: `build/verify-meson-on/meson-private/sanity_check_for_cpp.exe` -> 0
  -- stdout:
- 
+
  -- stderr:
- 
+
  -- returncode: 0
 C++ compiler for the build machine: x86_64-conda-linux-gnu-c++ (gcc 14.4.0 "x86_64-conda-linux-gnu-c++ (conda-forge gcc 14.4.0-7) 14.4.0")
 C++ linker for the build machine: x86_64-conda-linux-gnu-c++ ld.bfd 2.46.1
@@ -141,9 +141,9 @@ Sanity check built target output for host machine c compiler
 -----------
 Sanity check: `build/verify-meson-on/meson-private/sanity_check_for_c.exe` -> 0
  -- stdout:
- 
+
  -- stderr:
- 
+
  -- returncode: 0
 C compiler for the host machine: x86_64-conda-linux-gnu-cc (gcc 14.4.0 "x86_64-conda-linux-gnu-cc (conda-forge gcc 14.4.0-7) 14.4.0")
 C linker for the host machine: x86_64-conda-linux-gnu-cc ld.bfd 2.46.1
@@ -255,7 +255,7 @@ Fortran compilation is working.
   Fortran compilation is working.
 
  -- stderr:
- 
+
  -- returncode: 0
 Fortran compiler for the host machine: .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran (gcc 14.4.0 "GNU Fortran (conda-forge gcc 14.4.0-7) 14.4.0")
 Fortran linker for the host machine: .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran ld.bfd 2.46.1
@@ -348,7 +348,7 @@ namespace __gnu_cxx
 "MESON_GET_DEFINE_UNDEFINED_SENTINEL"
 "MESON_GET_DEFINE_DELIMITER_END"
 -----------
-Fetching value of define "_LIBCPP_VERSION" : (undefined) 
+Fetching value of define "_LIBCPP_VERSION" : (undefined)
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpe83khq0m
 Code:
@@ -362,7 +362,7 @@ Pkg-config binary missing from cross or native file, or env var undefined.
 Trying a default Pkg-config fallback at pkg-config
 Found pkg-config: YES (.pixi/envs/mpibld/bin/pkg-config) 0.29.2
 Determining dependency 'vesin' with pkg-config executable '.pixi/envs/mpibld/bin/pkg-config'
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --modversion vesin` -> 1
@@ -424,7 +424,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp4ilos7f0/testfile.cpp -o build/verify-meson-on/meson-private/tmp4ilos7f0/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fvisibility=hidden` -> 0
-Compiler for C++ supports arguments -fvisibility=hidden: YES 
+Compiler for C++ supports arguments -fvisibility=hidden: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpineo_sed
 Code:
@@ -496,14 +496,14 @@ Running command: .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -print-fi
 
 Message: fortran runtime (compiler file): .pixi/envs/mpibld/bin/../lib/gcc/x86_64-conda-linux-gnu/14.4.0/libgfortran.so
 Determining dependency 'fmt' with pkg-config executable '.pixi/envs/mpibld/bin/pkg-config'
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --modversion fmt` -> 0
 stdout:
 11.2.0
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --cflags fmt` -> 0
@@ -511,14 +511,14 @@ stdout:
 -I.pixi/envs/mpibld/include
 -----------
 env[PKG_CONFIG_ALLOW_SYSTEM_LIBS]: 1
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs fmt` -> 0
 stdout:
 -L.pixi/envs/mpibld/lib -lfmt
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs fmt` -> 0
@@ -601,7 +601,7 @@ note: native-static-libs: -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc
 
 Message: fast pair list: enabled (rustc minor 98)
 Determining dependency 'libhwy' with pkg-config executable '.pixi/envs/mpibld/bin/pkg-config'
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --modversion libhwy` -> 1
@@ -636,14 +636,14 @@ Running command: usr/bin/sh -c 'printf %s "$TSAN_OPTIONS"'
 
 
 Determining dependency 'rocksdb' with pkg-config executable '.pixi/envs/mpibld/bin/pkg-config'
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --modversion rocksdb` -> 0
 stdout:
 10.10.1
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --cflags rocksdb` -> 0
@@ -651,14 +651,14 @@ stdout:
 -I.pixi/envs/mpibld/include
 -----------
 env[PKG_CONFIG_ALLOW_SYSTEM_LIBS]: 1
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs rocksdb` -> 0
 stdout:
 -L.pixi/envs/mpibld/lib -lrocksdb
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs rocksdb` -> 0
@@ -669,7 +669,7 @@ Run-time dependency rocksdb found: YES 10.10.1
 Downloading xxhash source from https://github.com/Cyan4973/xxHash/archive/v0.8.3.tar.gz
 Downloading xxhash patch from https://wrapdb.mesonbuild.com/v2/xxhash_0.8.3-2/get_patch
 
-Executing subproject xxhash for machine: host 
+Executing subproject xxhash for machine: host
 
 Project name: xxHash
 Project version: 0.8.3
@@ -710,9 +710,9 @@ Sanity check built target output for build machine c compiler
 -----------
 Sanity check: `build/verify-meson-on/meson-private/sanity_check_for_c.exe` -> 0
  -- stdout:
- 
+
  -- stderr:
- 
+
  -- returncode: 0
 C compiler for the build machine: x86_64-conda-linux-gnu-cc (gcc 14.4.0 "x86_64-conda-linux-gnu-cc (conda-forge gcc 14.4.0-7) 14.4.0")
 C linker for the build machine: x86_64-conda-linux-gnu-cc ld.bfd 2.46.1
@@ -739,7 +739,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off` -> 0
-Compiler for C++ supports arguments -ffp-contract=off: YES 
+Compiler for C++ supports arguments -ffp-contract=off: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpcw4wfka6
 Code:
@@ -752,7 +752,7 @@ stderr:
 x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
 -----------
-Compiler for C++ supports arguments fp:precise: NO 
+Compiler for C++ supports arguments fp:precise: NO
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmp3peic9dn
 Code:
@@ -761,7 +761,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp3peic9dn/testfile.cpp -o build/verify-meson-on/meson-private/tmp3peic9dn/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fno-trapping-math` -> 0
-Compiler for C++ supports arguments -fno-trapping-math: YES 
+Compiler for C++ supports arguments -fno-trapping-math: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmptslsib9h
 Code:
@@ -770,7 +770,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmptslsib9h/testfile.cpp -o build/verify-meson-on/meson-private/tmptslsib9h/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fno-math-errno` -> 0
-Compiler for C++ supports arguments -fno-math-errno: YES 
+Compiler for C++ supports arguments -fno-math-errno: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpkqhemf_r
 Code:
@@ -779,7 +779,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpkqhemf_r/testfile.cpp -o build/verify-meson-on/meson-private/tmpkqhemf_r/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ftree-vectorize` -> 0
-Compiler for C++ supports arguments -ftree-vectorize: YES 
+Compiler for C++ supports arguments -ftree-vectorize: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpq3fno3gj
 Code:
@@ -788,12 +788,12 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpq3fno3gj/testfile.cpp -o build/verify-meson-on/meson-private/tmpq3fno3gj/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fvect-cost-model=dynamic` -> 0
-Compiler for C++ supports arguments -fvect-cost-model=dynamic: YES 
+Compiler for C++ supports arguments -fvect-cost-model=dynamic: YES
 Running compile:
 Working directory:  tmp/tmp2o5ke7ea
 Code:
 
-        
+
         #ifndef _OPENMP
         # define _OPENMP "MESON_GET_DEFINE_UNDEFINED_SENTINEL"
         #endif
@@ -822,14 +822,14 @@ Code:
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmprhgc5tfm/testfile.cpp -E -P -fopenmp -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -P -O0 -U_FORTIFY_SOURCE -fpermissive` -> 0
 Run-time dependency OpenMP for cpp found: YES 4.5
 Determining dependency 'capnp-rpc' with pkg-config executable '.pixi/envs/mpibld/bin/pkg-config'
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --modversion capnp-rpc` -> 0
 stdout:
 1.5.0
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --cflags capnp-rpc` -> 0
@@ -837,14 +837,14 @@ stdout:
 -pthread -I.pixi/envs/mpibld/include
 -----------
 env[PKG_CONFIG_ALLOW_SYSTEM_LIBS]: 1
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs capnp-rpc` -> 0
 stdout:
 -L.pixi/envs/mpibld/lib -lcapnp-rpc -lcapnp -pthread -lkj-async -pthread -lkj -pthread
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs capnp-rpc` -> 0
@@ -855,7 +855,7 @@ Run-time dependency capnp-rpc found: YES 1.5.0
 Program capnp found: YES (.pixi/envs/mpibld/bin/capnp)
 Program python3 found: YES (.pixi/envs/mpibld/bin/python3)
 
-Executing subproject potentials-schema for machine: host 
+Executing subproject potentials-schema for machine: host
 
 Project name: potentials-schema
 Project version: 1.16.0
@@ -874,7 +874,7 @@ Code:
         #if defined __stub_dlopen || defined __stub___dlopen
         fail fail fail this function is not going to work
         #endif
-        
+
 int main(void) {
             void *a = (void*) &dlopen;
             long long b = (long long) a;
@@ -949,131 +949,131 @@ Code:
 stop; end program
 -----------
 Command line: `.pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpr3rpxjlg/testfile.f90 -o build/verify-meson-on/meson-private/tmpr3rpxjlg/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -std=f2018 -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include` -> 0
-Compiler for Fortran supports arguments -std=f2018: YES 
+Compiler for Fortran supports arguments -std=f2018: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmp02v289kr
 Code:
 stop; end program
 -----------
 Command line: `.pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmp02v289kr/testfile.f90 -o build/verify-meson-on/meson-private/tmp02v289kr/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -fimplicit-none -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include` -> 0
-Compiler for Fortran supports arguments -fimplicit-none: YES 
+Compiler for Fortran supports arguments -fimplicit-none: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmp90em7sgp
 Code:
 stop; end program
 -----------
 Command line: `.pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmp90em7sgp/testfile.f90 -o build/verify-meson-on/meson-private/tmp90em7sgp/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -Wall -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include` -> 0
-Compiler for Fortran supports arguments -Wall: YES 
+Compiler for Fortran supports arguments -Wall: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpncvtv63j
 Code:
 stop; end program
 -----------
 Command line: `.pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpncvtv63j/testfile.f90 -o build/verify-meson-on/meson-private/tmpncvtv63j/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -Wunused-dummy-argument -Wno-unused-dummy-argument -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include` -> 0
-Compiler for Fortran supports arguments -Wno-unused-dummy-argument: YES 
+Compiler for Fortran supports arguments -Wno-unused-dummy-argument: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpx0t8iw28
 Code:
 stop; end program
 -----------
 Command line: `.pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpx0t8iw28/testfile.f90 -o build/verify-meson-on/meson-private/tmpx0t8iw28/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -fvisibility=hidden -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include` -> 0
-Compiler for Fortran supports arguments -fvisibility=hidden: YES 
+Compiler for Fortran supports arguments -fvisibility=hidden: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpbf1va62u
 Code:
 stop; end program
 -----------
 Command line: `.pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpbf1va62u/testfile.f90 -o build/verify-meson-on/meson-private/tmpbf1va62u/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -frecursive -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include` -> 0
-Compiler for Fortran supports arguments -frecursive: YES 
+Compiler for Fortran supports arguments -frecursive: YES
 Program python3 found: YES (.pixi/envs/mpibld/bin/python3)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
  x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
 
 Compiler for C++ supports arguments fp:precise: NO (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp4ilos7f0/testfile.cpp -o build/verify-meson-on/meson-private/tmp4ilos7f0/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fvisibility=hidden 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp4ilos7f0/testfile.cpp -o build/verify-meson-on/meson-private/tmp4ilos7f0/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fvisibility=hidden
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -fvisibility=hidden: YES (cached)
 Dependency openmp for host machine found: YES 4.5 (cached)
 Using cached compile:
-Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpr3rpxjlg/testfile.f90 -o build/verify-meson-on/meson-private/tmpr3rpxjlg/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -std=f2018 -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include 
+Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpr3rpxjlg/testfile.f90 -o build/verify-meson-on/meson-private/tmpr3rpxjlg/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -std=f2018 -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include
 
 Code:
  stop; end program
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for Fortran supports arguments -std=f2018: YES (cached)
 Using cached compile:
-Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmp02v289kr/testfile.f90 -o build/verify-meson-on/meson-private/tmp02v289kr/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -fimplicit-none -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include 
+Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmp02v289kr/testfile.f90 -o build/verify-meson-on/meson-private/tmp02v289kr/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -fimplicit-none -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include
 
 Code:
  stop; end program
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for Fortran supports arguments -fimplicit-none: YES (cached)
 Using cached compile:
-Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmp90em7sgp/testfile.f90 -o build/verify-meson-on/meson-private/tmp90em7sgp/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -Wall -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include 
+Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmp90em7sgp/testfile.f90 -o build/verify-meson-on/meson-private/tmp90em7sgp/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -Wall -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include
 
 Code:
  stop; end program
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for Fortran supports arguments -Wall: YES (cached)
 Using cached compile:
-Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpncvtv63j/testfile.f90 -o build/verify-meson-on/meson-private/tmpncvtv63j/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -Wunused-dummy-argument -Wno-unused-dummy-argument -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include 
+Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpncvtv63j/testfile.f90 -o build/verify-meson-on/meson-private/tmpncvtv63j/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -Wunused-dummy-argument -Wno-unused-dummy-argument -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include
 
 Code:
  stop; end program
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for Fortran supports arguments -Wno-unused-dummy-argument: YES (cached)
 Using cached compile:
-Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpbf1va62u/testfile.f90 -o build/verify-meson-on/meson-private/tmpbf1va62u/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -frecursive -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include 
+Cached command line:  .pixi/envs/mpibld/bin/x86_64-conda-linux-gnu-gfortran -L.pixi/envs/mpibld/lib -I.pixi/envs/mpibld/include build/verify-meson-on/meson-private/tmpbf1va62u/testfile.f90 -o build/verify-meson-on/meson-private/tmpbf1va62u/output.obj -D_FILE_OFFSET_BITS=64 -c -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem .pixi/envs/mpibld/include -O0 -U_FORTIFY_SOURCE -frecursive -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -isystem .pixi/envs/mpibld/include
 
 Code:
  stop; end program
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for Fortran supports arguments -frecursive: YES (cached)
 Adding test "FortranSWGather"
 Adding test "FortranCuH2Gather"
@@ -1090,7 +1090,7 @@ int main(void) { return 0; }
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ -L.pixi/envs/mpibld/lib build/verify-meson-on/meson-private/tmptsdo2nul/testfile.cpp -o build/verify-meson-on/meson-private/tmptsdo2nul/output.exe -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -Wl,--fatal-warnings -Wl,--exclude-libs,librgpot_fortran_kernels.a -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib` -> 0
-Compiler for C++ supports link arguments -Wl,--exclude-libs,librgpot_fortran_kernels.a: YES 
+Compiler for C++ supports link arguments -Wl,--exclude-libs,librgpot_fortran_kernels.a: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmp44f457ri
 Code:
@@ -1098,7 +1098,7 @@ int main(void) { return 0; }
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ -L.pixi/envs/mpibld/lib build/verify-meson-on/meson-private/tmp44f457ri/testfile.cpp -o build/verify-meson-on/meson-private/tmp44f457ri/output.exe -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -Wl,--fatal-warnings -Wl,--exclude-libs,librgpot_sw_lib.a -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib` -> 0
-Compiler for C++ supports link arguments -Wl,--exclude-libs,librgpot_sw_lib.a: YES 
+Compiler for C++ supports link arguments -Wl,--exclude-libs,librgpot_sw_lib.a: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpacj0h9wf
 Code:
@@ -1106,7 +1106,7 @@ int main(void) { return 0; }
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ -L.pixi/envs/mpibld/lib build/verify-meson-on/meson-private/tmpacj0h9wf/testfile.cpp -o build/verify-meson-on/meson-private/tmpacj0h9wf/output.exe -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -Wl,--fatal-warnings -Wl,--exclude-libs,librgpot_sw_capi_lib.a -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib` -> 0
-Compiler for C++ supports link arguments -Wl,--exclude-libs,librgpot_sw_capi_lib.a: YES 
+Compiler for C++ supports link arguments -Wl,--exclude-libs,librgpot_sw_capi_lib.a: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmp1nz8ss45
 Code:
@@ -1114,7 +1114,7 @@ int main(void) { return 0; }
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ -L.pixi/envs/mpibld/lib build/verify-meson-on/meson-private/tmp1nz8ss45/testfile.cpp -o build/verify-meson-on/meson-private/tmp1nz8ss45/output.exe -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -Wl,--fatal-warnings -Wl,--exclude-libs,libvesin_fortran.a -Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined -Wl,-rpath,.pixi/envs/mpibld/lib -Wl,-rpath-link,.pixi/envs/mpibld/lib` -> 0
-Compiler for C++ supports link arguments -Wl,--exclude-libs,libvesin_fortran.a: YES 
+Compiler for C++ supports link arguments -Wl,--exclude-libs,libvesin_fortran.a: YES
 Dependency dl for host machine found: YES unknown (cached)
 Dependency dl for host machine found: YES unknown (cached)
 Program ../scripts/audit_fortran_symbols.sh found: YES (CppCore/../scripts/audit_fortran_symbols.sh)
@@ -1212,26 +1212,26 @@ Adding test "HessianVectorTest"
 Adding test "ModelPotsTest"
 Adding test "SWSiTest"
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
  x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
@@ -1243,26 +1243,26 @@ Adding test "HalfShellTest"
 Adding test "SuttonChenPotTest"
 Adding test "KeptPotentialTest"
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
  x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
@@ -1272,26 +1272,26 @@ Adding test "ReducedPairTest"
 Adding test "EMTPotTest"
 Adding test "EAMCellPotTest"
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
  x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
@@ -1300,26 +1300,26 @@ Compiler for C++ supports arguments fp:precise: NO (cached)
 Adding test "NeighbourLayerTest"
 Adding test "ThreadTeamTest"
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
  x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
@@ -1327,26 +1327,26 @@ x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No s
 Compiler for C++ supports arguments fp:precise: NO (cached)
 Adding test "TersoffZblBuildTest"
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
  x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
@@ -1356,26 +1356,26 @@ Adding test "StreamParityTest"
 Adding test "NeighbourListTest"
 Adding test "VesinEmptyResetTest"
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
  x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
@@ -1395,26 +1395,26 @@ Adding test "PerAtomTest"
 Adding test "LocalityTest"
 Adding test "StagedTest"
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpcw4wfka6/testfile.cpp -o build/verify-meson-on/meson-private/tmpcw4wfka6/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive fp:precise
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
  x86_64-conda-linux-gnu-c++: warning: fp:precise: linker input file unused because linking not done
 x86_64-conda-linux-gnu-c++: error: fp:precise: linker input file not found: No such file or directory
@@ -1439,14 +1439,14 @@ Adding test "nlist_batch"
 Adding test "nlist_c"
 Adding test "nlist_verlet"
 Determining dependency 'capnp' with pkg-config executable '.pixi/envs/mpibld/bin/pkg-config'
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --modversion capnp` -> 0
 stdout:
 1.5.0
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --cflags capnp` -> 0
@@ -1454,14 +1454,14 @@ stdout:
 -pthread -I.pixi/envs/mpibld/include
 -----------
 env[PKG_CONFIG_ALLOW_SYSTEM_LIBS]: 1
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs capnp` -> 0
 stdout:
 -L.pixi/envs/mpibld/lib -lcapnp -pthread -lkj -pthread
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs capnp` -> 0
@@ -1470,14 +1470,14 @@ stdout:
 -----------
 Run-time dependency capnp found: YES 1.5.0
 Determining dependency 'capnpc' with pkg-config executable '.pixi/envs/mpibld/bin/pkg-config'
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --modversion capnpc` -> 0
 stdout:
 1.5.0
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --cflags capnpc` -> 0
@@ -1485,14 +1485,14 @@ stdout:
 -pthread -I.pixi/envs/mpibld/include
 -----------
 env[PKG_CONFIG_ALLOW_SYSTEM_LIBS]: 1
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs capnpc` -> 0
 stdout:
 -L.pixi/envs/mpibld/lib -lcapnpc -pthread -lkj -pthread
 -----------
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --libs capnpc` -> 0
@@ -1508,16 +1508,16 @@ Program rustc found: YES (.pixi/envs/mpibld/bin/rustc)
 Program sh found: YES (usr/bin/sh)
 Adding test "nlist_rust"
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpsacywwt7
@@ -1527,7 +1527,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpsacywwt7/testfile.cpp -o build/verify-meson-on/meson-private/tmpsacywwt7/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fno-tree-vectorize` -> 0
-Compiler for C++ supports arguments -fno-tree-vectorize: YES 
+Compiler for C++ supports arguments -fno-tree-vectorize: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmp8maillu7
 Code:
@@ -1536,7 +1536,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp8maillu7/testfile.cpp -o build/verify-meson-on/meson-private/tmp8maillu7/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mno-avx` -> 0
-Compiler for C++ supports arguments -mno-avx: YES 
+Compiler for C++ supports arguments -mno-avx: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpqybkr8ez
 Code:
@@ -1545,18 +1545,18 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpqybkr8ez/testfile.cpp -o build/verify-meson-on/meson-private/tmpqybkr8ez/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mno-fma` -> 0
-Compiler for C++ supports arguments -mno-fma: YES 
+Compiler for C++ supports arguments -mno-fma: YES
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpg8sixl3h
@@ -1566,42 +1566,42 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpg8sixl3h/testfile.cpp -o build/verify-meson-on/meson-private/tmpg8sixl3h/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -msse2` -> 0
-Compiler for C++ supports arguments -msse2: YES 
+Compiler for C++ supports arguments -msse2: YES
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp8maillu7/testfile.cpp -o build/verify-meson-on/meson-private/tmp8maillu7/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mno-avx 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp8maillu7/testfile.cpp -o build/verify-meson-on/meson-private/tmp8maillu7/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mno-avx
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -mno-avx: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpqybkr8ez/testfile.cpp -o build/verify-meson-on/meson-private/tmpqybkr8ez/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mno-fma 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpqybkr8ez/testfile.cpp -o build/verify-meson-on/meson-private/tmpqybkr8ez/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mno-fma
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -mno-fma: YES (cached)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmp2o0smf27
@@ -1611,7 +1611,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp2o0smf27/testfile.cpp -o build/verify-meson-on/meson-private/tmp2o0smf27/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mavx2` -> 0
-Compiler for C++ supports arguments -mavx2: YES 
+Compiler for C++ supports arguments -mavx2: YES
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmpkn8hly6d
 Code:
@@ -1620,18 +1620,18 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpkn8hly6d/testfile.cpp -o build/verify-meson-on/meson-private/tmpkn8hly6d/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mfma` -> 0
-Compiler for C++ supports arguments -mfma: YES 
+Compiler for C++ supports arguments -mfma: YES
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Running compile:
 Working directory:  build/verify-meson-on/meson-private/tmp9junwe0w
@@ -1641,18 +1641,18 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmp9junwe0w/testfile.cpp -o build/verify-meson-on/meson-private/tmp9junwe0w/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -mavx512f` -> 0
-Compiler for C++ supports arguments -mavx512f: YES 
+Compiler for C++ supports arguments -mavx512f: YES
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpj0pu195k/testfile.cpp -o build/verify-meson-on/meson-private/tmpj0pu195k/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -ffp-contract=off
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -ffp-contract=off: YES (cached)
 Program ci/gha/check_minimage_isa.sh found: YES (ci/gha/check_minimage_isa.sh)
 Adding test "MinImageIsaVariants"
@@ -1853,7 +1853,7 @@ int i;
 
 -----------
 Command line: `x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpkief3byx/testfile.cpp -o build/verify-meson-on/meson-private/tmpkief3byx/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fsanitize=thread` -> 0
-Compiler for C++ supports arguments -fsanitize=thread: YES 
+Compiler for C++ supports arguments -fsanitize=thread: YES
 Program setarch found: YES (usr/bin/setarch)
 Running command: usr/bin/setarch -R true
 --- stdout ---
@@ -1886,7 +1886,7 @@ ModuleNotFoundError: No module named 'lammps'
 
 
 Determining dependency 'plumed' with pkg-config executable '.pixi/envs/mpibld/bin/pkg-config'
-env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG_PATH]:
 env[PKG_CONFIG]: .pixi/envs/mpibld/bin/pkg-config
 -----------
 Called: `.pixi/envs/mpibld/bin/pkg-config --modversion plumed` -> 1
@@ -1970,16 +1970,16 @@ Dependency capnpc for host machine found: YES 1.5.0 (cached)
 Program capnp found: YES (.pixi/envs/mpibld/bin/capnp)
 Program rustc found: YES (.pixi/envs/mpibld/bin/rustc)
 Using cached compile:
-Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpkief3byx/testfile.cpp -o build/verify-meson-on/meson-private/tmpkief3byx/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fsanitize=thread 
+Cached command line:  x86_64-conda-linux-gnu-c++ build/verify-meson-on/meson-private/tmpkief3byx/testfile.cpp -o build/verify-meson-on/meson-private/tmpkief3byx/output.obj -c -fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -D_FILE_OFFSET_BITS=64 -O0 -U_FORTIFY_SOURCE -fpermissive -fsanitize=thread
 
 Code:
  extern int i;
 int i;
 
 Cached compiler stdout:
- 
+
 Cached compiler stderr:
- 
+
 Compiler for C++ supports arguments -fsanitize=thread: YES (cached)
 Adding test "test_list_parity"
 Build targets in project: 184

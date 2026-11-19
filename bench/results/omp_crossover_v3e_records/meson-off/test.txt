@@ -119,8 +119,8 @@ ninja: Entering directory `build/verify-meson-off'
 117/118 rgpot:optional_engine_install             OK               13.26s
 118/118 docs - rgpot:doccheck_examples            OK               17.05s
 
-Ok:                116 
-Expected Fail:     2   
-Fail:              0   
+Ok:                116
+Expected Fail:     2
+Fail:              0
 
 Full log written to build/verify-meson-off/meson-logs/testlog.txt
