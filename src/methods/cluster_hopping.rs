@@ -3998,6 +3998,7 @@ fn molecular_plateau_restart(
     last_restart: usize,
     energy: f64,
     best: f64,
+    temperature: f64,
 ) -> bool {
     cfg.move_library.is_molecular()
         && cfg.quench_gradient > 0.0
@@ -4005,6 +4006,7 @@ fn molecular_plateau_restart(
         && hops.saturating_sub(hops_at_lowest) >= AcceptDial::BLOCK
         && hops.saturating_sub(last_restart) >= AcceptDial::BLOCK
         && energy > best + cfg.quench_gradient * cfg.length_scale
+        && (energy - best) / temperature.max(f64::EPSILON) > portable_ln(AcceptDial::BLOCK as f64)
 }
 
 #[cfg(test)]
@@ -4091,7 +4093,8 @@ mod contact_unit_tests {
             0,
             0,
             1.0,
-            0.0
+            0.0,
+            0.1
         ));
         assert!(molecular_plateau_restart(
             &cfg,
@@ -4099,7 +4102,8 @@ mod contact_unit_tests {
             0,
             0,
             1.0,
-            0.0
+            0.0,
+            0.1
         ));
         assert!(!molecular_plateau_restart(
             &cfg,
@@ -4107,7 +4111,8 @@ mod contact_unit_tests {
             0,
             AcceptDial::BLOCK,
             1.0,
-            0.0
+            0.0,
+            0.1
         ));
         assert!(!molecular_plateau_restart(
             &cfg,
@@ -4115,7 +4120,17 @@ mod contact_unit_tests {
             0,
             0,
             cfg.quench_gradient / 2.0,
-            0.0
+            0.0,
+            0.1
+        ));
+        assert!(!molecular_plateau_restart(
+            &cfg,
+            2 * AcceptDial::BLOCK,
+            0,
+            0,
+            0.2,
+            0.0,
+            0.1
         ));
     }
 }
@@ -6162,14 +6177,16 @@ where
             last_basin_restart,
             e,
             ledger.best,
+            dial.temperature(),
         ) && let Some(state) = ledger.best_state.clone()
             && state.len() == x.len()
         {
             // A molecular chain can accept one uphill conformer and then
             // spend almost the whole budget revisiting that plateau. The
             // acceptance dial heats such a chain, which makes escape still
-            // less likely. A block with no new incumbent is enough evidence:
-            // relaunch from the certified best, while retaining every bias
+            // less likely. A block with no new incumbent triggers a relaunch
+            // only when the plateau is so high that its bare Metropolis return
+            // probability is below one chance per block. Retain every bias
             // deposit and allocator observation learned on the plateau.
             last_basin_restart = hops;
             x = state;
