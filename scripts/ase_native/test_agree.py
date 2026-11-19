@@ -182,6 +182,25 @@ def check_compare_matches_ase() -> None:
         sped = ComparePositions(translate=True)(left, right)
         if sped != whole:
             raise AssertionError(f"translated dmax {sped} != {whole}")
+    from eval_client import DmaxServer
+
+    # One persistent process, several sizes. The scalar walk has to return
+    # ASE's distance, not a cheaper bound.
+    by_size: dict[int, list[tuple[np.ndarray, np.ndarray, float]]] = {}
+    for left, right, whole in cases:
+        by_size.setdefault(len(left), []).append((left.positions.copy(), right.positions.copy(), whole))
+    for n_atoms, samples in by_size.items():
+        server = DmaxServer(n_atoms)
+        try:
+            for pos1, pos2, whole in samples:
+                distance = server.distance(pos1, pos2)
+                if abs(distance - whole) > 1.0e-12:
+                    raise AssertionError(f"scalar dmax {distance} != {whole}")
+                for threshold in (0.05, 0.2, 0.7, 1.4):
+                    if abs(distance - threshold) > 1.0e-9 and (distance < threshold) != (whole < threshold):
+                        raise AssertionError("threshold decision changed")
+        finally:
+            server.close()
 
 
 def main() -> int:
