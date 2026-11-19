@@ -4,7 +4,8 @@
 
 Five blocks, each between a pair of marker comments:
 
-    tab:gofee       si.tex          bench/ase-gofee-h2h/summary.csv
+    tab:gofee       si.tex          bench/ase-gofee-h2h/lj-large-seeds.csv
+                                    or summary.csv when that file is absent
     tab:tip4p-gmin  si.tex          bench/tip4p-h2h/rows-h2h-r2.csv, wall-r2.csv
     tab:gofee-si    si.tex          written only when asg2-summary.csv names a held commit
     tab:sc          manuscript.tex  bench/metal-cluster-h2h/sc-n12/results.csv, pvalues.csv
@@ -17,6 +18,7 @@ Five blocks, each between a pair of marker comments:
 from __future__ import annotations
 
 import csv
+import math
 import os
 import subprocess
 import sys
@@ -54,6 +56,20 @@ SC_ORDER = ("sc126-38", "sc108-38", "sc96-38", "sc126-55", "sc108-55", "sc96-55"
 SC_FORM = {"126": "12-6", "108": "10-8", "96": "9-6"}
 ARM_LABEL = {"paper": "This work", "ase_bh": "ASE BH", "ase_mh": "ASE MH", "agox_gofee": "GOFEE"}
 LJ_LABEL = {"lj38": "LJ\\(_{38}\\)", "lj55": "LJ\\(_{55}\\)", "lj75": "LJ\\(_{75}\\)"}
+LARGE_LABEL = {
+    "lj98": "LJ\\(_{98}\\)", "lj102": "LJ\\(_{102}\\)", "lj103": "LJ\\(_{103}\\)",
+    "lj104": "LJ\\(_{104}\\)", "lj150": "LJ\\(_{150}\\)",
+}
+LARGE_SYSTEMS = tuple(LARGE_LABEL)
+# The later AGOX seeds name this harness head. It is not in the repository, and
+# bench/unreachable-revisions.csv lists the rows. The table still counts them.
+UNHELD_AGOX = "89de725a337b6e37daef05877796ae8192fbf8e1"
+ANNEAL_SOURCE = "786c1a3b87fc948be5823927bee83027570e3223"
+AGOX_HEADS = (
+    "4508a253b8bd41dbba19ccf61278b3080249e400",
+    ANNEAL_SOURCE,
+    UNHELD_AGOX,
+)
 OTHER_LABEL = {"au55": "Au\\(_{55}\\)", "cu38": "Cu\\(_{38}\\)", "cu12au26": "Cu\\(_{12}\\)Au\\(_{26}\\)",
                "sw10": "Si\\(_{10}\\)", "tc10": "C\\(_{10}\\)", "tip4p8": "(H\\(_2\\)O)\\(_8\\)"}
 TIP4P_LABEL = {"tip4p8": "(H\\(_2\\)O)\\(_8\\)", "tip4p15": "(H\\(_2\\)O)\\(_{15}\\)",
@@ -113,7 +129,137 @@ def budget_tex(budget: str) -> str:
     return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
 
 
+def show_sci(value: float) -> str:
+    text = f"{value:.3g}"
+    if "e" not in text:
+        return text
+    mantissa, exponent = text.split("e")
+    return f"\\({mantissa}\\times 10^{{{int(exponent)}}}\\)"
+
+
+def fisher_p(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
+    """Two-sided Fisher exact p, the same sum the audit uses."""
+    hits = hits_a + hits_b
+    ways = math.comb(n_a + n_b, hits)
+
+    def prob(k: int) -> float:
+        return math.comb(n_a, k) * math.comb(n_b, hits - k) / ways
+
+    observed = prob(hits_a)
+    lo, hi = max(0, hits - n_b), min(n_a, hits)
+    return min(1.0, sum(prob(k) for k in range(lo, hi + 1) if prob(k) <= observed * (1 + 1e-7)))
+
+
+def large_seeds() -> list[dict[str, str]] | None:
+    """The LJ98--LJ150 seed rows, or nothing when a quoted commit is not the recorded set."""
+    path = GOFEE / "lj-large-seeds.csv"
+    if not path.is_file():
+        return None
+    rows = read(path)
+    for system in LARGE_SYSTEMS:
+        for arm in ("anneal", "agox_gofee"):
+            group = [row for row in rows if row["system"] == system and row["arm"] == arm]
+            if len(group) != 12:
+                return None
+    if any(row["code_revision"] != ANNEAL_SOURCE for row in rows if row["arm"] == "anneal"):
+        return None
+    if any(row["code_revision"] not in AGOX_HEADS for row in rows if row["arm"] == "agox_gofee"):
+        return None
+    if any(not commit_held(row["code_revision"]) for row in rows if row["code_revision"] != UNHELD_AGOX):
+        return None
+    if len({row["budget"] for row in rows}) != 1:
+        return None
+    return rows
+
+
+def gofee_hits_sentence() -> str:
+    """The hit sentence for the five large clusters, or nothing when the rows are not quotable."""
+    rows = large_seeds()
+    if not rows:
+        return ""
+    bits = []
+    for system in LARGE_SYSTEMS:
+        hits = sum(int(row["hit"]) for row in rows if row["system"] == system and row["arm"] == "anneal")
+        bits.append(f"{LARGE_LABEL[system]} on {hits} of 12")
+    return (
+        "This setting hits " + bits[0] + " seeds, " + ", ".join(bits[1:-1])
+        + " and " + bits[-1] + ", and GOFEE hits none."
+    )
+
+
+def gofee_wall_sentence() -> str:
+    """The wall-cap sentence, or nothing when AGOX did not stop on that cap."""
+    rows = large_seeds()
+    if not rows:
+        return ""
+    agox = [row for row in rows if row["arm"] == "agox_gofee"]
+    if any(row["stop"] != "capped" for row in agox):
+        return ""
+    wall = type7_median([float(row["wall_s"]) for row in agox])
+    if abs(wall - 7200) > 60:
+        return ""
+    calls = type7_median([float(row["charged"]) for row in agox])
+    budget = budget_tex(rows[0]["budget"])
+    return (
+        "AGOX stopped on the 2~h wall cap at a median of "
+        f"{show_sci(calls)} calls, against this work's {budget}-call budget."
+    )
+
+
+def gofee_large_block() -> str:
+    """LJ98, LJ102, LJ103, LJ104 and LJ150 against AGOX GOFEE, from the seed rows."""
+    rows = large_seeds()
+    sentence = gofee_wall_sentence()
+    if not rows or not sentence:
+        return ""
+    missing = sum(row["code_revision"] == UNHELD_AGOX for row in rows if row["arm"] == "agox_gofee")
+    body = []
+    for system in LARGE_SYSTEMS:
+        anneal = [row for row in rows if row["system"] == system and row["arm"] == "anneal"]
+        agox = [row for row in rows if row["system"] == system and row["arm"] == "agox_gofee"]
+        hits_a = sum(int(row["hit"]) for row in anneal)
+        hits_g = sum(int(row["hit"]) for row in agox)
+        body.append(" & ".join([
+            LARGE_LABEL[system],
+            f"{hits_a}/{len(anneal)}",
+            f"{hits_g}/{len(agox)}",
+            show_p(fisher_p(hits_a, len(anneal), hits_g, len(agox))),
+        ]) + " \\\\")
+    return "\n".join([
+        "\\begin{table}",
+        "\\caption{This work against AGOX GOFEE on LJ\\(_{98}\\), LJ\\(_{102}\\),",
+        "LJ\\(_{103}\\), LJ\\(_{104}\\) and LJ\\(_{150}\\).",
+        "Seeds 2000--2011, twelve per cluster, one core.",
+        f"The budget is {budget_tex(rows[0]['budget'])} force calls.",
+        sentence,
+        "\\(p\\) is the two-sided Fisher exact test on the hits.",
+        "The anneal rows are from \\texttt{786c1a3b}.",
+        "The AGOX harness heads this repository holds are \\texttt{786c1a3b} and \\texttt{4508a253}.",
+        f"{missing} AGOX rows name a harness head listed in",
+        "\\texttt{bench/unreachable-revisions.csv}, and the hits count those rows.}",
+        "\\label{tab:gofee}",
+        "\\centering",
+        "\\small",
+        "\\begin{tabular}{@{}lrrr@{}}",
+        "\\toprule",
+        "Cluster & This work & GOFEE & \\(p\\) \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
 def gofee_block() -> str:
+    """The large-cluster GOFEE table, or the three-cluster table when those rows are what is quotable."""
+    large = gofee_large_block()
+    if large:
+        return large
+    return gofee_small_block()
+
+
+def gofee_small_block() -> str:
     """The Lennard-Jones GOFEE table, or nothing when a quoted row cites an absent commit."""
     seeds = [row for row in read(GOFEE / "results.csv") if row["system"] in LJ_LABEL]
     if not seeds or any(not commit_held(row["head"]) for row in seeds):

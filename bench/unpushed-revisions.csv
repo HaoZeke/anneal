@@ -23,3 +23,4 @@ b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac,"the build head of the recommended arm 
 fc1af066a915a80eb46a3bc478caaf155cc9b29f,"the build head of the Au55 cluster-preset rerun and its ASE arms, first cited by 0f69a6b1; no pushed branch holds it and its rows record no tree"
 1ce3ab64493196afd25e8690648e21157d91b882,"the template-free landing head for the GMIN panel and the Au55 ASE reruns, first cited by 93e17b69; no pushed branch holds it and its rows record no tree"
 90b88235fe54abace3bde32789582eb6573ed40a,"the build head of the Morse ASE panel, first cited by c3bcdc01; no pushed branch holds it and its rows record no tree"
+89de725a337b6e37daef05877796ae8192fbf8e1,the local harness head of the LJ98-LJ150 AGOX seeds 2006 onward; it was not pushed
