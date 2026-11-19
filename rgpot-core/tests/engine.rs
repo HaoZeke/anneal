@@ -160,6 +160,13 @@ fn library_is_mapped(path: &Path) -> bool {
         .any(|mapped| Path::new(mapped) == canonical)
 }
 
+fn batch_calls(path: &Path) -> c_int {
+    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
+    let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { library.get(b"fixture_batch_call_count\0") }.expect("batch call count symbol");
+    unsafe { count() }
+}
+
 fn unsupported_code(path: &Path) -> c_int {
     let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
     let value: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
@@ -332,9 +339,11 @@ fn batch_is_the_same_answer_as_one_call_per_system() {
     positions.extend_from_slice(&second);
     let mut boxes = CELL.to_vec();
     boxes.extend_from_slice(&CELL);
+    let before = batch_calls(&path);
     let batch = engine
         .force_batch(&numbers, &positions, &boxes)
         .expect("batch");
+    assert_eq!(batch_calls(&path), before + 1);
     assert_eq!(batch.len(), 2);
     for (system, one) in [first, second].iter().enumerate() {
         let single = engine

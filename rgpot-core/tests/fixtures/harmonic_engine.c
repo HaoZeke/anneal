@@ -39,12 +39,14 @@ struct RgpotEnginePot {
 
 static int destroyed = 0;
 static int native_calls = 0;
+static int batch_calls = 0;
 #ifdef FATAL_ONCE
 static int fatal_once_fired = 0;
 #endif
 
 int fixture_destroy_count(void) { return destroyed; }
 int fixture_native_call_count(void) { return native_calls; }
+int fixture_batch_call_count(void) { return batch_calls; }
 int fixture_unsupported_code(void) { return RGPOT_ENGINE_ERR_UNSUPPORTED; }
 
 int rgpot_engine_abi_version(void) { return FIXTURE_ABI; }
@@ -179,6 +181,7 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long n_systems, long n,
                              void *user) {
   long s;
   native_calls += 1;
+  batch_calls += 1;
   (void)variances;
   for (s = 0; s < n_systems; s++) {
     int rc = rgpot_engine_force(pot, n, positions + 3 * n * s, atomic_nrs,
