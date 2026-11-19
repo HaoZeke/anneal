@@ -20,7 +20,8 @@ Created create(const void *config, std::size_t config_len) {
       return out;
     }
     auto backend = std::make_unique<Backend>();
-    backend->pot = std::make_unique<XTBPot>();
+    backend->pot =
+        std::make_unique<XTBPot>(builtin.xtb.value_or(XTBConfig{}));
     out.backend = std::move(backend);
   } catch (const std::exception &e) {
     out.error = e.what();

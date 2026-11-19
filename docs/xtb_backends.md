@@ -14,6 +14,13 @@ pkg-config xtb. Linked `XTBPot.hpp` still includes libxtb and requires
 `-Dwith_xtb=true`.
 
 Default method: **GFN2-xTB** (`GFNMethod::GFN2xTB` / `RGPOT_XTB_METHOD_GFN2`).
+The generic `libxtb_engine` reads the `BuiltinParams.config.xtb` arm when it
+is present; method, accuracy, electronic temperature, iteration limit, charge
+and UHF are passed to `XTBPot`. An absent arm keeps the defaults above.
+
+libxtb does not expose a Hessian through its public C API. Consequently this
+engine advertises `analytic_hvp = 0`; hosts that need exact curvature must use
+an engine whose underlying implementation supplies it.
 
 ## ISO_C_BINDING C API (libxtb)
 
