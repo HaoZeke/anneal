@@ -111,16 +111,20 @@ def main() -> None:
     parser.add_argument("--json-relative", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    json_path = args.json
+    repo = args.repo.resolve()
+    json_path = args.json if args.json.is_absolute() else repo / args.json
     if args.json_relative is not None:
         json_path = json_path / args.json_relative
     payload = json.loads(json_path.read_text(encoding="utf-8"))
-    report_path = args.report or json_path.with_name(REPORT_NAME)
-    if not report_path.is_absolute():
-        report_path = args.repo / report_path
+    if args.report is None:
+        report_path = json_path.with_name(REPORT_NAME)
+    elif args.report.is_absolute():
+        report_path = args.report
+    else:
+        report_path = repo / args.report
     if not report_path.is_file():
         raise SystemExit(f"report is missing: {report_path.name}")
-    check_provenance(args.repo, payload, report_path.read_text(encoding="utf-8"))
+    check_provenance(repo, payload, report_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
