@@ -205,6 +205,97 @@ fn read_exact(input: &mut impl Read, bytes: &mut [u8]) -> io::Result<bool> {
     Ok(true)
 }
 
+/// Greedy bottleneck distance used by ASE ``ComparePositions``.
+///
+/// Atoms of `a` are walked in order. Each takes the closest still-free
+/// atom of `b`, ties keeping the earlier index. The result is the largest
+/// of those distances. Scalar arithmetic only.
+fn greedy_dmax(a: &[f64], b: &[f64], n: usize) -> f64 {
+    let mut alive = vec![true; n];
+    let mut furthest = 0.0;
+    for i in 0..n {
+        let base = 3 * i;
+        let ax = a[base];
+        let ay = a[base + 1];
+        let az = a[base + 2];
+        let mut best_i = 0;
+        let mut best_d = f64::INFINITY;
+        for j in 0..n {
+            if !alive[j] {
+                continue;
+            }
+            let other = 3 * j;
+            let dx = ax - b[other];
+            let dy = ay - b[other + 1];
+            let dz = az - b[other + 2];
+            let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+            if distance < best_d {
+                best_d = distance;
+                best_i = j;
+            }
+        }
+        if best_d > furthest {
+            furthest = best_d;
+        }
+        alive[best_i] = false;
+    }
+    furthest
+}
+
+/// Minimum greedy distance over ASE's origin choice, with no periodic images.
+fn translated_dmax(pos1: &[f64], pos2: &[f64], n: usize) -> f64 {
+    let mut standard = vec![0.0; 3 * n];
+    let ox = pos1[0];
+    let oy = pos1[1];
+    let oz = pos1[2];
+    for i in 0..n {
+        let base = 3 * i;
+        standard[base] = pos1[base] - ox;
+        standard[base + 1] = pos1[base + 1] - oy;
+        standard[base + 2] = pos1[base + 2] - oz;
+    }
+    let mut shifted = vec![0.0; 3 * n];
+    let mut best = f64::INFINITY;
+    for j in 0..n {
+        let origin = 3 * j;
+        let sx = pos2[origin];
+        let sy = pos2[origin + 1];
+        let sz = pos2[origin + 2];
+        for i in 0..n {
+            let base = 3 * i;
+            shifted[base] = pos2[base] - sx;
+            shifted[base + 1] = pos2[base + 1] - sy;
+            shifted[base + 2] = pos2[base + 2] - sz;
+        }
+        let distance = greedy_dmax(&standard, &shifted, n);
+        if distance < best {
+            best = distance;
+        }
+    }
+    best
+}
+
+fn serve_dmax(n: usize) -> io::Result<()> {
+    let mut input = io::stdin().lock();
+    let mut output = io::stdout().lock();
+    let mut request = vec![0u8; 8 * 6 * n];
+    let mut coords = vec![0.0f64; 6 * n];
+    loop {
+        if !read_exact(&mut input, &mut request)? {
+            return Ok(());
+        }
+        for (index, slot) in coords.iter_mut().enumerate() {
+            let start = 8 * index;
+            let mut bytes = [0u8; 8];
+            bytes.copy_from_slice(&request[start..start + 8]);
+            *slot = f64::from_le_bytes(bytes);
+        }
+        let distance = translated_dmax(&coords[..3 * n], &coords[3 * n..], n);
+        output.write_all(&distance.to_le_bytes())?;
+        output.flush()?;
+    }
+}
+
 fn serve(pot: &Pot, n: usize) -> io::Result<()> {
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
@@ -236,6 +327,18 @@ fn main() {
     anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().map(String::as_str).unwrap_or("");
+    if command == "dmax" {
+        let n: usize = args.get(1).and_then(|text| text.parse().ok()).unwrap_or(0);
+        if n < 2 {
+            eprintln!("dmax needs the atom count");
+            std::process::exit(2);
+        }
+        if let Err(err) = serve_dmax(n) {
+            eprintln!("dmax: {err}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let name = args.get(1).map(String::as_str).unwrap_or("");
     let Some(kind) = system(name) else {
         eprintln!("unknown system {name}");
@@ -252,7 +355,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("usage: ase_native_eval scales|serve SYSTEM");
+            eprintln!("usage: ase_native_eval scales|serve SYSTEM | dmax N");
             std::process::exit(2);
         }
     }
