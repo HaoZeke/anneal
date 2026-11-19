@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
@@ -23,6 +24,7 @@
 #include "rgpot/PairTerms.hpp"
 #include "rgpot/SuttonChen/SuttonChenPot.hpp"
 #include "rgpot/SuttonChen/SuttonChenScales.hpp"
+#include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/stress.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
@@ -30,6 +32,17 @@ using Catch::Matchers::WithinAbs;
 using rgpot::types::AtomMatrix;
 
 namespace {
+
+struct SuttonChenPotDevelopLayout : rgpot::Potential<rgpot::SuttonChenPot> {
+  rgpot::SuttonChenConfig m_config;
+  std::uint64_t m_paramsKey;
+  rgpot::nlist::Mode mode_;
+  std::size_t term_limit_;
+  mutable rgpot::nlist::Neighbours neighbours_;
+  mutable std::vector<rgpot::PairTerms<3>> terms_;
+  mutable std::vector<double> rho_;
+  mutable std::vector<double> weight_;
+};
 
 AtomMatrix load_points(const std::string &path, double *epsilon, double *c,
                        double *a, int *nexp, int *mexp) {
@@ -192,6 +205,10 @@ std::vector<double> fcc_cell(int cells, double lattice, double *box) {
 }
 
 } // namespace
+
+TEST_CASE("Sutton-Chen layout matches develop baseline", "[SuttonChen][layout]") {
+  REQUIRE(sizeof(rgpot::SuttonChenPot) == sizeof(SuttonChenPotDevelopLayout));
+}
 
 TEST_CASE("Sutton-Chen dimer matches an independent derivative",
           "[SuttonChen]") {
@@ -660,6 +677,77 @@ TEST_CASE("Sutton-Chen force terms read back keep the bits of computing them aga
       }
     }
   }
+  setThreads("1");
+}
+
+TEST_CASE("pair-term limit keeps threaded row walks when three-phase is skipped",
+          "[SuttonChen][terms][nlist]") {
+  double box[9] = {};
+  rgpot::SuttonChenConfig cfg = rgpot::sutton_chen_platinum();
+  cfg.cutoff = 1.6 * cfg.a;
+  cfg.periodic = true;
+  const auto pos = fcc_cell(13, cfg.a, box);
+  REQUIRE(pos.size() / 3 >= rgpot::kTeamMinAtoms);
+  const auto n = pos.size() / 3;
+
+  rgpot::nlist::Neighbours cells;
+  rgpot::nlist::updateCells(cells, pos.data(), n, box, cfg.cutoff, cfg.cutoff / 5.0,
+                            rgpot::nlist::Image::Round, rgpot::nlist::Mode::Stored,
+                            std::array<bool, 3>{true, true, true});
+  const auto &off = cells.offsets();
+  const auto &nbr = cells.neighbours();
+  constexpr std::size_t kMinParallelHalfPairs = 4096;
+  std::size_t total_up = 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    const auto lo = off[i];
+    const auto hi = off[i + 1];
+    const auto self = static_cast<std::int32_t>(i);
+    const auto mid = static_cast<std::int32_t>(
+        std::upper_bound(nbr.begin() + lo, nbr.begin() + hi, self) -
+        nbr.begin());
+    total_up += static_cast<std::size_t>(hi - mid);
+  }
+  REQUIRE(total_up > kMinParallelHalfPairs);
+  const std::size_t low_limit = 3;
+  REQUIRE(low_limit < 4);
+  const std::size_t mid_limit =
+      kMinParallelHalfPairs + (total_up - kMinParallelHalfPairs) / 2;
+  REQUIRE(mid_limit > kMinParallelHalfPairs);
+  REQUIRE(mid_limit < total_up);
+
+  auto run_eval = [&](const char *threads, std::size_t limit) {
+    setThreads(threads);
+    rgpot::SuttonChenPot pot(cfg);
+    pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+    pot.setPairTermLimit(limit);
+    std::vector<double> forces(pos.size(), 0.0);
+    rgpot::ForceOut out{};
+    out.F = forces.data();
+    // First call builds the stored list. Measure the reused call so any team
+    // open comes from the force path itself.
+    pot.forceImpl({pos.size() / 3, pos.data(), nullptr, box}, &out);
+    std::fill(forces.begin(), forces.end(), 0.0);
+    const auto before = rgpot::teamsOpened();
+    pot.forceImpl({pos.size() / 3, pos.data(), nullptr, box}, &out);
+    return std::tuple<double, std::vector<double>, std::uint64_t>{
+        out.energy, std::move(forces), rgpot::teamsOpened() - before};
+  };
+
+  auto [ref_low_energy, ref_low_forces, ref_low_teams] = run_eval("1", low_limit);
+  auto [ref_mid_energy, ref_mid_forces, ref_mid_teams] = run_eval("1", mid_limit);
+  REQUIRE(ref_low_teams == 0);
+  REQUIRE(ref_mid_teams == 0);
+
+  auto [low_energy, low_forces, low_teams] = run_eval("4", low_limit);
+  REQUIRE(std::memcmp(&low_energy, &ref_low_energy, sizeof(double)) == 0);
+  REQUIRE(same_bits(low_forces, ref_low_forces));
+  REQUIRE(low_teams > 0);
+
+  auto [mid_energy, mid_forces, mid_teams] = run_eval("4", mid_limit);
+  REQUIRE(std::memcmp(&mid_energy, &ref_mid_energy, sizeof(double)) == 0);
+  REQUIRE(same_bits(mid_forces, ref_mid_forces));
+  REQUIRE(mid_teams > 0);
+
   setThreads("1");
 }
 

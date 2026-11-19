@@ -398,6 +398,10 @@ void SuttonChenPot::compute(const ForceInput &in, ForceOut *out,
       const auto total_up = static_cast<std::size_t>(ws.up_off[n_size]);
       if (total_up < kMinParallelHalfPairs) {
         sparse_stored = true;
+      } else if (total_up > term_limit_) {
+        // The three-phase path keeps every candidate upper pair in scratch.
+        // If that count exceeds the configured limit, keep the row-team
+        // two-pass path so threaded rows still run.
       } else if (pairScratchFits(total_up, atoms, scratch_avail)) {
         ws.active.resize(total_up);
         ws.pair_phi.resize(total_up);
