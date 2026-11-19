@@ -1,0 +1,93 @@
+diff --git a/examples/water_hexamer.rs b/examples/water_hexamer.rs
+index 6394e394f..d619320e4 100644
+--- a/examples/water_hexamer.rs
++++ b/examples/water_hexamer.rs
+@@ -224,6 +224,12 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
+     };
+     let budget = if smoke {
+         SMOKE_BUDGET
++    } else if let Ok(text) = std::env::var("WATER_FORCE_BUDGET") {
++        let budget: usize = text
++            .parse()
++            .unwrap_or_else(|error| panic!("WATER_FORCE_BUDGET {text:?}: {error}"));
++        assert!(budget > 0, "WATER_FORCE_BUDGET must be positive");
++        budget
+     } else {
+         match engine {
+             "gfn2" => GFN2_HEXAMER_BUDGET,
+@@ -232,8 +238,24 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
+             other => panic!("unknown engine {other}"),
+         }
+     };
+-    let seed0 = WATER_HEXAMER_SEED_START;
+-    let seeds = if smoke { 1 } else { WATER_HEXAMER_SEED_COUNT };
++    let (seed0, seeds) = if smoke {
++        (WATER_HEXAMER_SEED_START, 1)
++    } else {
++        let first = match std::env::var("WATER_SEED_FIRST") {
++            Ok(text) => text
++                .parse()
++                .unwrap_or_else(|error| panic!("WATER_SEED_FIRST {text:?}: {error}")),
++            Err(_) => WATER_HEXAMER_SEED_START,
++        };
++        let count = match std::env::var("WATER_SEED_COUNT") {
++            Ok(text) => text
++                .parse()
++                .unwrap_or_else(|error| panic!("WATER_SEED_COUNT {text:?}: {error}")),
++            Err(_) => WATER_HEXAMER_SEED_COUNT,
++        };
++        assert!(count > 0, "WATER_SEED_COUNT must be positive");
++        (first, count)
++    };
+     let mut text = String::new();
+     text.push_str(&format!(
+         "\nengine: {engine}\narm: {arm_name}\nbudget: {budget}\nseeds: {seed0}..{}\n",
+@@ -403,6 +425,15 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
+         };
+         let wall_s = wall.elapsed().as_secs_f64();
+         let best = outcome.best;
++        write_geometry(
++            seed,
++            outcome
++                .best_state
++                .as_ref()
++                .and_then(|state| state.as_slice())
++                .unwrap_or(&[]),
++            best,
++        );
+         let intact = outcome
+             .best_state
+             .as_ref()
+@@ -478,6 +509,32 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
+     text
+ }
+ 
++fn write_geometry(seed: u64, coordinates: &[f64], energy: f64) {
++    let Ok(dir) = std::env::var("WATER_GEOM_DIR") else {
++        return;
++    };
++    if coordinates.len() != 9 * WATER_HEXAMER_MOLECULES {
++        return;
++    }
++    if std::fs::create_dir_all(&dir).is_err() {
++        return;
++    }
++    let mut text = format!("18\nseed {seed} energy {energy:.10}\n");
++    for molecule in 0..WATER_HEXAMER_MOLECULES {
++        for (offset, symbol) in [(0, "O"), (3, "H"), (6, "H")] {
++            let base = 9 * molecule + offset;
++            text.push_str(&format!(
++                "{symbol} {:.10} {:.10} {:.10}\n",
++                coordinates[base],
++                coordinates[base + 1],
++                coordinates[base + 2]
++            ));
++        }
++    }
++    let path = PathBuf::from(dir).join(format!("seed-{seed}.xyz"));
++    let _ = std::fs::write(path, text);
++}
++
+ fn engine_settings(engine: &str) -> String {
+     match engine {
+         "gfn2" => format!(
