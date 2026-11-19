@@ -24,7 +24,9 @@ distances converted from ``sigma`` by ``r0 / 2**(1/6)``, and the 0.1 eV
 temperature of Wales's ``examples/GMIN/MGupta.tar.bz2``.
 
 One process, ``taskset -c 0``, one thread. For each system the seeds run
-in order, anneal then GMIN. Rows are appended after every run and never
+in order. The default is anneal then GMIN on every seed. ``--order abba``
+alternates that with GMIN then anneal, so seeds 2000-2011 run ABBA
+repeated. Rows are appended after every run and never
 rewritten; without ``--rerun``, a row already stored for the same system,
 code, seed, code revision and harness revision is kept and its run
 skipped, while ``--summarize`` reads the latest stored row of each seed.
@@ -65,7 +67,11 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 HIT_TOL = DEFAULT_HIT_TOL
+# SVNREV of the rows behind bench/gmin-panel/rows.csv and the paper table.
 GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+# 2026-11-19 snapshot pinned by scripts/gmin_panel/build_gmin.sh.
+GMIN_PIN = "9cbec1a446352bc9ef064bd2b1a5767194655919"
+GMIN_TARBALL_SHA256 = "ec5730d5e27fd5c1ac142360278abc62bd3c7dbea8686c9a2dc9de817b58b776"
 PAPER_BUDGETS = {
     "lj38": 400_000,
     "lj55": 1_000_000,
@@ -849,7 +855,38 @@ def self_test() -> None:
         raise SystemExit("opt p format")
     if show_budget(400_000, tex=True) != "\\(4\\times 10^{5}\\)" or show_budget(1_000_000, tex=False) != "1000000":
         raise SystemExit("budget format")
+    if any(arm_sequence("anneal-gmin", seed) != ("anneal", "gmin") for seed in SEEDS):
+        raise SystemExit("default order")
+    pairs = slot_arm_pairs("abba")
+    if [arm for _slot, arm in pairs[:4]] != ["anneal", "gmin", "gmin", "anneal"]:
+        raise SystemExit(f"abba opening {pairs[:4]}")
+    for slot in (0, 1):
+        for arm in ("anneal", "gmin"):
+            if sum(pair == (slot, arm) for pair in pairs) != len(SEEDS) // 2:
+                raise SystemExit(f"abba balance {slot} {arm} {pairs}")
+    if len(pairs) != len(SEEDS) * 2:
+        raise SystemExit("abba length")
     print("ok")
+
+
+def arm_sequence(order: str, seed: int) -> tuple[str, ...]:
+    """Arms for one seed. ``anneal-gmin`` is anneal then GMIN.
+
+    ``abba`` uses anneal then GMIN when ``seed - 2000`` is even and GMIN
+    then anneal when it is odd, so seeds 2000-2011 run ABBA repeated.
+    """
+    if order == "anneal-gmin":
+        return ("anneal", "gmin")
+    if order == "abba":
+        if (seed - SEEDS[0]) % 2 == 0:
+            return ("anneal", "gmin")
+        return ("gmin", "anneal")
+    raise ValueError(f"unknown arm order {order}")
+
+
+def slot_arm_pairs(order: str, seeds: tuple[int, ...] = SEEDS) -> list[tuple[int, str]]:
+    """``(slot, arm)`` in run order. Slot 0 is the first arm of a seed."""
+    return [(slot, code) for seed in seeds for slot, code in enumerate(arm_sequence(order, seed))]
 
 
 def main(argv: list[str]) -> int:
@@ -870,6 +907,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--morse-data", type=Path)
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
+    parser.add_argument(
+        "--order",
+        choices=("anneal-gmin", "abba"),
+        default="anneal-gmin",
+        help="arm order within each seed (default: anneal then GMIN)",
+    )
     parser.add_argument("--rerun", action="store_true", help="run requested systems/seeds and append even if stored")
     parser.add_argument("--summarize", action="store_true")
     parser.add_argument("--tex", action="store_true", help="with --summarize, also rewrite tab:gmin")
@@ -894,8 +937,12 @@ def main(argv: list[str]) -> int:
     source = dict(
         line.split("=", 1) for line in args.gmin_source.read_text().splitlines() if "=" in line
     )
-    if source.get("svnrev") != GMIN_REV:
-        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {GMIN_REV}")
+    if source.get("svnrev") != GMIN_PIN:
+        raise SystemExit(f"GMIN SVNREV {source.get('svnrev')} is not {GMIN_PIN}")
+    if source.get("tarball_sha256") != GMIN_TARBALL_SHA256:
+        raise SystemExit(
+            f"GMIN tarball sha256 {source.get('tarball_sha256')} is not {GMIN_TARBALL_SHA256}"
+        )
     systems = [row[0] for row in SYSTEMS if not args.system or row[0] in args.system]
     for system in systems:
         budget, reference = binary_budget(args.bin, args.tree, system)
@@ -910,17 +957,17 @@ def main(argv: list[str]) -> int:
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     done = set() if args.rerun else {row_key(r) for r in read_rows(args.rows)}
     seeds = tuple(args.seed) if args.seed else SEEDS
-    print(f"session {session} revision {args.revision} gmin {GMIN_REV}", flush=True)
+    print(f"session {session} revision {args.revision} gmin {GMIN_PIN} order {args.order}", flush=True)
     for system in systems:
         driver, _binary = resolve_driver(args.bin, args.tree, system)
         for seed in seeds:
-            for code in ("anneal", "gmin"):
-                code_revision = args.revision if code == "anneal" else GMIN_REV
+            for slot, code in enumerate(arm_sequence(args.order, seed)):
+                code_revision = args.revision if code == "anneal" else GMIN_PIN
                 key = (system, code, str(seed), code_revision, args.revision)
                 if key in done:
                     print(f"skip {system} {code} {seed}", flush=True)
                     continue
-                print(f"start {system} {code} {seed}", flush=True)
+                print(f"start {system} {code} {seed} slot={slot}", flush=True)
                 log = args.logs / system / f"{code}-{seed}.log"
                 if code == "anneal":
                     result = run_anneal(args.bin, args.tree, system, seed, log)
@@ -947,7 +994,7 @@ def main(argv: list[str]) -> int:
                 append_row(args.rows, row)
                 done.add(key)
                 print(
-                    f"done {system} {code} {seed} hit={row['hit']} calls={row['evals_to_hit']} "
+                    f"done {system} {code} {seed} slot={slot} hit={row['hit']} calls={row['evals_to_hit']} "
                     f"wall_s={row['wall_s']} pot_s={row['pot_s']} outside_s={row['outside_s']} best={row['best']}",
                     flush=True,
                 )
