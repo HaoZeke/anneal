@@ -30,7 +30,11 @@ fn fresh_bias(cfg: &Config) -> BasinBias<ClusterFingerprint> {
 
 #[test]
 fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
-    let cfg = Config::recommended(6);
+    let mut cfg = Config::recommended(6);
+    // The toy charges one call per requested step. The preset's safety
+    // bound would empty this ledger on the opening quench, before a
+    // checkpoint.
+    cfg.relax_steps = 1;
     let mut seeding_rng = StdRng::seed_from_u64(0x5eed);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut seeding_rng);
     let mut uninterrupted_rng = seeding_rng.clone();
@@ -405,7 +409,11 @@ fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
 
 #[test]
 fn occupancy_retire_stops_the_chain() {
-    let cfg = Config::recommended(6);
+    let mut cfg = Config::recommended(6);
+    // The toy charges one call per requested step. The preset's safety
+    // bound would empty this ledger on the opening quench, before the
+    // retire checkpoint.
+    cfg.relax_steps = 1;
     let mut rng = StdRng::seed_from_u64(0xd0_0e);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(4_000);

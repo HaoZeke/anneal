@@ -39,10 +39,10 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// residual keeps the built-in assignment when IRA is linked, so the
 /// IRA build has the same mask.
 ///
-/// Those masks were measured at a 200-step quench. `recommended` now
-/// quenches for 1000 steps, and at that length the plain walk reaches
-/// the octahedron on more seeds, so this comparison keeps the 200-step
-/// quench the masks were measured on.
+/// Those masks were measured at a 200-step quench. This comparison
+/// keeps that quench, so the hit masks stay the ones printed above.
+/// The preset's own full descent runs until the gradient meets the
+/// solver tolerance.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     anneal_core::install_rgpot_kernels!();

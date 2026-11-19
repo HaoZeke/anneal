@@ -1286,8 +1286,7 @@ pub struct Config {
     /// almost no state meets the tolerance a shared census identifies basins
     /// at, and a cooperative run has nothing valid to offer. Polishing only
     /// the states that improve the record bounds the cost to the number of
-    /// improvements. `Config::recommended` sets that polish to one full quench,
-    /// 1000 steps, and the calls are charged to the ledger.
+    /// improvements. Those calls are charged to the ledger.
     /// Zero disables the polish and leaves the solo behaviour untouched.
     pub polish_records: usize,
     /// Predictive spread, in units of the temperature, above which the first
@@ -1746,6 +1745,13 @@ impl Config {
         Ok(())
     }
 
+    /// Most steps a full quench may take.
+    ///
+    /// The descent stops when the gradient infinity norm falls below the
+    /// solver tolerance. This bound ends a descent that never meets that
+    /// tolerance. It is the same at every size and for every species.
+    pub const QUENCH_SAFETY_STEPS: usize = 100_000;
+
     /// Settings for `n_points` at the campaign's measured defaults.
     ///
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
@@ -1759,8 +1765,9 @@ impl Config {
     /// Orbit completion runs on every new basin, and below 98 points the
     /// relaxation draws between the plain surface and the two-phase
     /// relative 0.7 surface, the same rule as [`Config::communicating`].
-    /// A full quench runs up to 1000 steps, against 200 in
-    /// [`Config::for_cluster`].
+    /// A full quench stops when the gradient meets the solver tolerance,
+    /// and no later than [`Config::QUENCH_SAFETY_STEPS`].
+    /// [`Config::for_cluster`] still stops at 200 steps.
     /// On optbench archive starts at development seeds, without them this
     /// stack needed a median 1.4e5 force calls on 32 LJ38 starts and solved
     /// 2 of 16 LJ75 starts in 1e6; with them, 4.9e3 and 16 of 16.
@@ -1772,7 +1779,7 @@ impl Config {
     /// use anneal_core::methods::cluster_hopping::Config;
     /// let cfg = Config::recommended(13);
     /// assert_eq!(cfg.n_points, 13);
-    /// assert_eq!(cfg.relax_steps, 1000);
+    /// assert_eq!(cfg.relax_steps, Config::QUENCH_SAFETY_STEPS);
     /// assert!(cfg.energy_lattice);
     /// ```
     pub fn recommended(n_points: usize) -> Self {
@@ -1797,7 +1804,7 @@ impl Config {
     /// use anneal_core::methods::cluster_hopping::Config;
     /// let cfg = Config::recommended_with_scales(13, 1.0, 2.0);
     /// assert_eq!((cfg.length_scale, cfg.energy_scale), (1.0, 2.0));
-    /// assert_eq!(cfg.relax_steps, 1000);
+    /// assert_eq!(cfg.relax_steps, Config::QUENCH_SAFETY_STEPS);
     /// ```
     pub fn recommended_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
@@ -1826,15 +1833,11 @@ impl Config {
             let beta = energy_scale / length_scale.powi(4);
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, beta)];
         }
-        // At 200 steps at least 27 per cent of the full quenches of LJ98
-        // runs stop above the record gradient, and the chain accepts on
-        // their energies. GMIN's LJ98 deck sets MAXIT 1000 1000. At 1000,
-        // LJ98 seeds 0-63 at 2e6 calls reach the Leary tetrahedron on 61
-        // of 64 against 53 of 64. LJ55 gets slower, with calls to hit as
-        // median [IQR] (n=64) of 10200.5 [4292.5, 19646.75] against
-        // 6603 [3344, 16285.25]. The Bayes threshold keeps its 200-step
-        // value.
-        cfg.relax_steps = 1000;
+        // The descent stops when the gradient meets the solver tolerance.
+        // The step count only cuts off a descent that never meets it, and
+        // it does not depend on the number of atoms or the species. The
+        // Bayes threshold keeps the 200-step screen cost.
+        cfg.relax_steps = Self::QUENCH_SAFETY_STEPS;
         // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
         cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
         // Shao, Cheng and Cai, J. Comput. Chem. 25, 1693 (2004): the
@@ -1973,7 +1976,7 @@ impl Config {
     /// use anneal_core::methods::cluster_hopping::Config;
     /// let cfg = Config::derived(38);
     /// assert!(cfg.budget_window && cfg.bayes_screen);
-    /// assert_eq!(cfg.relax_steps, 1000);
+    /// assert_eq!(cfg.relax_steps, Config::QUENCH_SAFETY_STEPS);
     /// ```
     pub fn derived(n_points: usize) -> Self {
         let mut cfg = Self::recommended(n_points);
@@ -2732,6 +2735,53 @@ mod coverage_behaviour {
             LocalStep::Lbfgs
         );
         assert_eq!(Config::recommended(13).local_step, LocalStep::Lbfgs);
+    }
+
+    /// `minimize(x, cfg.relax_steps)` on this diagonal quadratic meets
+    /// the solver tolerance only after a thousand iterations. A
+    /// thousand-step limit leaves the gradient above the tolerance.
+    #[test]
+    fn a_full_quench_stops_on_the_gradient_not_a_thousand_steps() {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        use ndarray::{Array1, ArrayView1};
+
+        let cfg = Config::recommended(16);
+        let scales: Vec<f64> = (0..16)
+            .map(|i| 10.0_f64.powf(6.0 * i as f64 / 15.0))
+            .collect();
+        let quad = |x: ArrayView1<f64>| {
+            let mut energy = 0.0;
+            let mut gradient = Array1::zeros(x.len());
+            for (i, curvature) in scales.iter().copied().enumerate() {
+                energy += 0.5 * curvature * x[i] * x[i];
+                gradient[i] = curvature * x[i];
+            }
+            (energy, gradient)
+        };
+        let start = Array1::from_elem(16, 1.0);
+        let mut opt = WarmLbfgs::default();
+        let mut last_iter = 0usize;
+        let (_energy, state, _evals) = opt.minimize_watched(
+            start.view(),
+            cfg.relax_steps,
+            |point| Some(quad(point)),
+            |iteration, _value| {
+                last_iter = iteration;
+                true
+            },
+        );
+        let (_, gradient) = quad(state.view());
+        let largest = gradient
+            .iter()
+            .fold(0.0_f64, |max, value| max.max(value.abs()));
+        assert!(
+            largest < opt.gtol,
+            "the quench stopped at iteration {last_iter} with |g| = {largest}"
+        );
+        assert!(
+            last_iter > 1_000,
+            "the quench met the tolerance by iteration {last_iter}"
+        );
     }
 
     #[test]
