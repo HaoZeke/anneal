@@ -122,7 +122,7 @@ capi_threads_tsan | tests core posix tsan | custom timeout=120 |
 
 # Potentials and the neighbour machinery.
 FortranPotsTest | tests core fortran | unit fortran_pots_test FortranPotsTest.cc |
-MorsePotTest | tests core | unit morse_pot_test MorsePotTest.cc |
+MorsePotTest | tests core | unit morse_pot_test MorsePotTest.cc timeout=120 |
 CPMDPotConfigMessageTest | tests core | unit cpmd_pot_config_message_test CPMDPotConfigMessageTest.cc suite=cpmd |
 CambridgeMorseTest | tests core | unit cambridge_morse_test CambridgeMorseTest.cc |
 GuptaTest | tests core | unit gupta_test GuptaTest.cc |

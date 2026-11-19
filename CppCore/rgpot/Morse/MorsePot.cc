@@ -88,6 +88,32 @@ inline void atomicFetchOr(std::uint64_t &word, std::uint64_t mask) noexcept {
 #endif
 }
 
+/// Thread-local scratch for the OpenMP stored half-pair evaluation and row
+/// accumulators. Buffers grow to the high-water mark of the thread and shrink
+/// back when a later call requires less than a quarter of the retained
+/// capacity (above kShrinkFloor).
+constexpr std::size_t kShrinkFloor = 4096;
+
+template <typename T>
+void resizeBuffer(std::vector<T> &vec, std::size_t count) {
+  if (vec.capacity() > kShrinkFloor && count * 4 < vec.capacity()) {
+    std::vector<T> fresh(count);
+    vec.swap(fresh);
+  } else {
+    vec.resize(count);
+  }
+}
+
+template <typename T>
+void assignBuffer(std::vector<T> &vec, std::size_t count, const T &value) {
+  if (vec.capacity() > kShrinkFloor && count * 4 < vec.capacity()) {
+    std::vector<T> fresh(count, value);
+    vec.swap(fresh);
+  } else {
+    vec.assign(count, value);
+  }
+}
+
 struct MorseWorkspace {
   const nlist::Neighbours *owner = nullptr;
   std::uint64_t build_id = 0;
@@ -148,11 +174,55 @@ struct WorkspaceLease {
   WorkspaceLease &operator=(const WorkspaceLease &) = delete;
 };
 
+/// Sizes kept for one evaluation. Zero releases that buffer when its
+/// retained capacity is above kShrinkFloor and the request is under a
+/// quarter of that capacity.
+struct WorkspaceUse {
+  std::size_t up_off = 0;
+  std::size_t lo_off = 0;
+  std::size_t lo_u = 0;
+  std::size_t lo_count = 0;
+  std::size_t active_bits = 0;
+  std::size_t pair_forces = 0;
+  std::size_t pair_he = 0;
+  std::size_t pair_hv = 0;
+  std::size_t row_e = 0;
+  std::size_t row_s = 0;
+};
+
+/// Apply the shrink rule to every scratch buffer. Dropping the transpose
+/// index clears the cached build so the next stored half pair call rebuilds
+/// it. Tiny, serial, sparse and parallel evaluations all come through here.
+void releaseWorkspaceTo(MorseWorkspace &ws, const WorkspaceUse &use) {
+  resizeBuffer(ws.up_off, use.up_off);
+  resizeBuffer(ws.lo_off, use.lo_off);
+  resizeBuffer(ws.lo_u, use.lo_u);
+  resizeBuffer(ws.lo_count, use.lo_count);
+  resizeBuffer(ws.active_bits, use.active_bits);
+  resizeBuffer(ws.pair_forces, use.pair_forces);
+  resizeBuffer(ws.pair_he, use.pair_he);
+  resizeBuffer(ws.pair_hv, use.pair_hv);
+  resizeBuffer(ws.row_e, use.row_e);
+  resizeBuffer(ws.row_s, use.row_s);
+  if (use.up_off == 0) {
+    ws.owner = nullptr;
+    ws.build_id = 0;
+    ws.index_atoms = 0;
+    ws.slots = 0;
+    ws.split_owner = nullptr;
+    ws.split_build_id = 0;
+    ws.split_atoms = 0;
+    ws.split_slices = 0;
+    ws.split_total_up = 0;
+    ws.split_total_inc = 0;
+  }
+}
+
 void buildStoredHalfIndex(MorseWorkspace &ws, const nlist::Neighbours &cells, std::size_t n) {
   const auto &off = cells.offsets();
   const auto &nbr = cells.neighbours();
-  ws.up_off.resize(n + 1);
-  ws.lo_count.assign(n, 0);
+  resizeBuffer(ws.up_off, n + 1);
+  assignBuffer(ws.lo_count, n, std::int32_t{0});
   const auto row = nbr.begin();
   std::int32_t total_up = 0;
   for (std::size_t i = 0; i < n; ++i) {
@@ -169,7 +239,7 @@ void buildStoredHalfIndex(MorseWorkspace &ws, const nlist::Neighbours &cells, st
   }
   ws.up_off[n] = total_up;
 
-  ws.lo_off.resize(n + 1);
+  resizeBuffer(ws.lo_off, n + 1);
   std::int32_t acc = 0;
   for (std::size_t i = 0; i < n; ++i) {
     ws.lo_off[i] = acc;
@@ -178,7 +248,7 @@ void buildStoredHalfIndex(MorseWorkspace &ws, const nlist::Neighbours &cells, st
   }
   ws.lo_off[n] = acc;
 
-  ws.lo_u.resize(static_cast<std::size_t>(total_up));
+  resizeBuffer(ws.lo_u, static_cast<std::size_t>(total_up));
   for (std::size_t i = 0; i < n; ++i) {
     const auto hi = off[i + 1];
     const auto count_i = ws.up_off[i + 1] - ws.up_off[i];
@@ -312,6 +382,11 @@ inline void MorsePot::pairTerm(double r, double &energy, double &fscale) const {
 }
 
 void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const {
+  // One lease for every return path, including a call too small to open a
+  // team. The matching releaseWorkspaceTo is what keeps the retain cap.
+  WorkspaceLease lease;
+  MorseWorkspace &ws = *lease.ws;
+
   const auto N = static_cast<long>(in.nAtoms);
   double *F = out->F;
   double *U = &out->energy;
@@ -320,6 +395,7 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
   publishCauchyStress(out, strain, volume);
   *U = 0.0;
   if (N < 2 || cuttOffR <= 0.0) {
+    releaseWorkspaceTo(ws, {});
     for (long k = 0; k < 3 * N; ++k) {
       F[k] = 0.0;
     }
@@ -362,6 +438,7 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
   };
 
   if (n_atoms < kTeamMinAtoms) {
+    releaseWorkspaceTo(ws, {});
     std::fill_n(F, 3 * n_atoms, 0.0);
     double energy = 0.0;
     PairBatch batch;
@@ -412,8 +489,6 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
     return;
   }
 
-  WorkspaceLease lease;
-  MorseWorkspace &ws = *lease.ws;
   const int slices = teamSize(n_atoms);
 
   if (!neighbours_.streaming()) {
@@ -430,18 +505,21 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
       const auto total_up = static_cast<std::size_t>(ws.up_off[n_atoms]);
       if (total_up >= kMinParallelHalfPairs) {
         const std::size_t nwords = (total_up + 63) / 64;
-        ws.active_bits.assign(nwords, 0ULL);
-        ws.pair_forces.resize(total_up);
         const bool want_he = atoms != nullptr && atoms->energy != nullptr;
         const bool want_hv = atoms != nullptr && atoms->virial != nullptr;
-        if (want_he) {
-          ws.pair_he.resize(total_up);
-        }
-        if (want_hv) {
-          ws.pair_hv.resize(6 * total_up);
-        }
-        ws.row_e.resize(n_atoms);
-        ws.row_s.resize(6 * n_atoms);
+        releaseWorkspaceTo(ws, WorkspaceUse{
+                                   .up_off = n_atoms + 1,
+                                   .lo_off = n_atoms + 1,
+                                   .lo_u = total_up,
+                                   .lo_count = n_atoms,
+                                   .active_bits = nwords,
+                                   .pair_forces = total_up,
+                                   .pair_he = want_he ? total_up : 0,
+                                   .pair_hv = want_hv ? 6 * total_up : 0,
+                                   .row_e = n_atoms,
+                                   .row_s = 6 * n_atoms,
+                               });
+        assignBuffer(ws.active_bits, nwords, std::uint64_t{0});
 
         const std::int64_t total_inc =
             static_cast<std::int64_t>(ws.lo_off[n_atoms]) + static_cast<std::int64_t>(total_up);
@@ -645,9 +723,13 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
     }
   }
 
+  // Serial and sparse evaluations do not use the transpose index or the
+  // pair scratch. Release those buffers through the same helper as the
+  // parallel path so a previous high water mark cannot stick.
+  releaseWorkspaceTo(ws, WorkspaceUse{.row_e = n_atoms, .row_s = 6 * n_atoms});
   std::fill_n(F, 3 * n_atoms, 0.0);
-  ws.row_e.assign(n_atoms, 0.0);
-  ws.row_s.assign(6 * n_atoms, 0.0);
+  assignBuffer(ws.row_e, n_atoms, 0.0);
+  assignBuffer(ws.row_s, 6 * n_atoms, 0.0);
   double *row_e = ws.row_e.data();
   double *row_s = ws.row_s.data();
 
@@ -860,6 +942,8 @@ void morseAtomicFetchOrWord(std::uint64_t &word, std::uint64_t mask) noexcept {
   atomicFetchOr(word, mask);
 }
 
+std::size_t morseWorkspaceRetainCap() noexcept { return kShrinkFloor; }
+
 MorseSplitSnapshot morseStoredSplitSnapshot() {
   WorkspaceLease lease;
   const MorseWorkspace &ws = *lease.ws;
@@ -870,6 +954,16 @@ MorseSplitSnapshot morseStoredSplitSnapshot() {
       .slices = ws.split_slices,
       .total_up = ws.split_total_up,
       .total_inc = ws.split_total_inc,
+      .up_off_cap = ws.up_off.capacity(),
+      .lo_off_cap = ws.lo_off.capacity(),
+      .lo_u_cap = ws.lo_u.capacity(),
+      .lo_count_cap = ws.lo_count.capacity(),
+      .active_bits_cap = ws.active_bits.capacity(),
+      .pair_forces_cap = ws.pair_forces.capacity(),
+      .pair_he_cap = ws.pair_he.capacity(),
+      .pair_hv_cap = ws.pair_hv.capacity(),
+      .row_e_cap = ws.row_e.capacity(),
+      .row_s_cap = ws.row_s.capacity(),
       .p0_splits = ws.p0_splits,
       .p1_splits = ws.p1_splits,
   };
