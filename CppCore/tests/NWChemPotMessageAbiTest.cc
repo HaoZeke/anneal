@@ -245,3 +245,62 @@ TEST_CASE("NWChemPot reports a missing engine in setPotentialConfig",
   REQUIRE(stored.asReader().getTheory() == "dft");
   REQUIRE(stored.asReader().getEnginePath() == "/nonexistent/libnwchemc.so");
 }
+
+TEST_CASE("NWChemPot rejects a nonexistent explicit engine path after a load",
+          "[nwchem][abi]") {
+  const char *raw_live = std::getenv("RGPOT_NWCHEM_ENGINE");
+  REQUIRE(raw_live != nullptr);
+  const std::string live_engine = std::filesystem::absolute(raw_live).string();
+  const std::string missing_engine = "/nonexistent/other-libnwchemc.so";
+
+  RestoreEnv nwchem_library("NWCHEMC_LIBRARY");
+  RestoreEnv nwchemc_engine("RGPOT_NWCHEMC_ENGINE");
+  RestoreEnv nwchem_engine("RGPOT_NWCHEM_ENGINE");
+  nwchem_library.clear();
+  nwchemc_engine.clear();
+  nwchem_engine.set(live_engine.c_str());
+
+  rgpot::NWChemPot pot;
+  REQUIRE(pot.available());
+
+  ::capnp::MallocMessageBuilder valid_message;
+  auto valid_config = valid_message.initRoot<::PotentialConfig>();
+  auto valid = valid_config.initNwchem();
+  valid.setBasis("6-31g");
+  valid.setTheory("dft");
+  valid.setScfType("rhf");
+  valid.setCharge(0);
+  valid.setMultiplicity(1);
+  valid.setEnginePath(live_engine.c_str());
+
+  std::string result;
+  REQUIRE(pot.setPotentialConfig(valid_config.asReader(), &result));
+  REQUIRE(pot.available());
+
+  ::capnp::MallocMessageBuilder missing_message;
+  auto missing_config = missing_message.initRoot<::PotentialConfig>();
+  auto missing = missing_config.initNwchem();
+  missing.setBasis("6-31g");
+  missing.setTheory("dft");
+  missing.setScfType("rhf");
+  missing.setCharge(0);
+  missing.setMultiplicity(1);
+  missing.setEnginePath(missing_engine.c_str());
+
+  REQUIRE_FALSE(pot.setPotentialConfig(missing_config.asReader(), &result));
+  REQUIRE_FALSE(pot.available());
+  REQUIRE_THAT(result, ContainsSubstring("engine not loaded") &&
+                           ContainsSubstring(missing_engine));
+
+  rgpot::types::AtomMatrix positions = rgpot::types::AtomMatrix::Zero(1, 3);
+  std::vector<int> atmtypes{8};
+  std::array<std::array<double, 3>, 3> box = {
+      {{20.0, 0.0, 0.0}, {0.0, 20.0, 0.0}, {0.0, 0.0, 20.0}}};
+  REQUIRE_THROWS_WITH(pot(positions, atmtypes, box),
+                      ContainsSubstring("NWChem engine (libnwchemc) not "
+                                        "loaded") &&
+                          ContainsSubstring(missing_engine));
+
+  REQUIRE(pot.setPotentialConfig(valid_config.asReader(), &result));
+  REQUIRE(pot.available());
+}
