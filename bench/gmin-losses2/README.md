@@ -53,3 +53,28 @@ interacting causes:
    `H2H_PLATEAU_HEAT=0`, `H2H_ACCEPTANCE_ADAPT=0`, and `H2H_POPULATION=0`. This
    preserves every Lennard-Jones and Gupta trajectory (including LJ75 9/12)
    bit-for-bit while giving Morse its pair-minimum length scale.
+
+## Gate result
+
+The full 13-system gate (`baseline` at `628773d6` vs `fix2` at `e5883055`)
+completed with zero lost seeds anywhere:
+
+| System | Base hits | Fix2 hits | Fisher p | Base calls med | Fix2 calls med | MW p | Same |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| lj38 | 12/12 | 12/12 | 1 | 14823.50 | 14823.50 | 1 | 12 |
+| lj55 | 12/12 | 12/12 | 1 | 87628.00 | 87628.00 | 1 | 12 |
+| lj75 | 9/12 | 9/12 | 1 | 2720685.50 | 2720685.50 | 1 | 12 |
+| lj98 | 3/12 | 3/12 | 1 | 4000000.00 | 4000000.00 | 1 | 12 |
+| lj102 | 0/12 | 0/12 | 1 | 4000000.00 | 4000000.00 | 1 | 12 |
+| lj103 | 2/12 | 2/12 | 1 | 4000000.00 | 4000000.00 | 1 | 12 |
+| lj104 | 1/12 | 1/12 | 1 | 4000000.00 | 4000000.00 | 1 | 12 |
+| lj150 | 0/12 | 0/12 | 1 | 4000000.00 | 4000000.00 | 1 | 12 |
+| au55 | 3/12 | 3/12 | 1 | 1000000.00 | 1000000.00 | 1 | 12 |
+| m55r6 | 12/12 | 12/12 | 1 | 212047.50 | 93309.50 | 0.126022 | 0 |
+| m55r14 | 0/12 | 0/12 | 1 | 1000000.00 | 1000000.00 | 1 | 0 |
+| m80r6 | 0/12 | 6/12 | 0.01373 | 4000000.00 | 3745334.50 | 0.0070541 | 3 |
+| m80r14 | 0/12 | 0/12 | 1 | 4000000.00 | 4000000.00 | 1 | 1 |
+
+`H2H_PAIR_SCALE=1` stays opt-in in `examples/h2h_morse.rs` so the default
+trajectory pins (`a22093e7` and `b22e2121`) stay bit-identical when off, and
+template-free LJ150 stays 0/12 against GMIN's 9/12.
