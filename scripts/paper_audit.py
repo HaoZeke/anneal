@@ -132,6 +132,7 @@ KNOWN_GAPS = {
                                        "not in this repository",
     "bench/ase-gofee-h2h/summary.csv": "revision and host unrecorded (no revision or host column)",
     "bench/ase-gofee-h2h/asg2-summary.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/ase-gofee-h2h/lj-large-seeds.csv": "revision 89de725a is not in this repository",
     "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
     "bench/nh3-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
@@ -3217,6 +3218,13 @@ def release(audit: Audit) -> None:
 
 def lj_large(audit: Audit) -> None:
     audit.rows("bench/ase-gofee-h2h/lj-large.csv")
+    seeds = "bench/ase-gofee-h2h/lj-large-seeds.csv"
+    if not (ROOT / seeds).is_file():
+        return
+    audit.rows(seeds)
+    h2h = load_script("h2h_large_gofee", "paper/jctc/scripts/h2h_tables.py")
+    audit.said(SI, h2h.gofee_hits_sentence())
+    audit.said(SI, h2h.gofee_wall_sentence())
 
 
 def ase_gofee(audit: Audit) -> None:

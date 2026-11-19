@@ -977,6 +977,37 @@ AGOX searches with a local surrogate, and GOFEE is the surrogate search of Bisbo
 The versions are ASE 3.29.0 and AGOX 3.11.1.
 \cite{larsenAse2017,christiansenAgox2022,bisboEfficientGlobalStructure2020}
 A surrogate replaces force calls with model fits, so the cost of a run is not in its force calls alone.
+Table~\ref{tab:gofee} scores this setting against AGOX GOFEE on
+LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\) and LJ\(_{150}\).
+This setting hits LJ\(_{98}\) on 7 of 12 seeds, LJ\(_{102}\) on 6 of 12, LJ\(_{103}\) on 6 of 12, LJ\(_{104}\) on 5 of 12 and LJ\(_{150}\) on 8 of 12, and GOFEE hits none.
+% gofee table: start
+\begin{table}
+\caption{This work against AGOX GOFEE on LJ\(_{98}\), LJ\(_{102}\),
+LJ\(_{103}\), LJ\(_{104}\) and LJ\(_{150}\).
+Seeds 2000--2011, twelve per cluster, one core.
+The budget is \(4\times 10^{6}\) force calls.
+AGOX stopped on the 2~h wall cap at a median of \(9.59\times 10^{5}\) calls, against this work's \(4\times 10^{6}\)-call budget.
+\(p\) is the two-sided Fisher exact test on the hits.
+The anneal rows are from \texttt{786c1a3b}.
+The AGOX harness heads this repository holds are \texttt{786c1a3b} and \texttt{4508a253}.
+10 AGOX rows name a harness head listed in
+\texttt{bench/unreachable-revisions.csv}, and the hits count those rows.}
+\label{tab:gofee}
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Cluster & This work & GOFEE & \(p\) \\
+\midrule
+LJ\(_{98}\) & 7/12 & 0/12 & \(4.6\times 10^{-3}\) \\
+LJ\(_{102}\) & 6/12 & 0/12 & 0.014 \\
+LJ\(_{103}\) & 6/12 & 0/12 & 0.014 \\
+LJ\(_{104}\) & 5/12 & 0/12 & 0.037 \\
+LJ\(_{150}\) & 8/12 & 0/12 & \(1.3\times 10^{-3}\) \\
+\bottomrule
+\end{tabular}
+\end{table}
+% gofee table: end
 
 \section{Structure plates, sketch-maps, and landfold}
 Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.
