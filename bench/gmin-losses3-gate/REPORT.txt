@@ -1,0 +1,77 @@
+gmin-losses3 same-session gate
+base 5eb79cdcb0a986984dc7b487e5a3cc93224246f9 tree 7a2ba49b37241a8fe42b2c45c226374de6d92274
+B tree 70871f7307271806926b2aec9870e838dffbe924
+B kit sha256 14d0cf394fa5146bd1f769f5e8ab5a26a9afc7d8fe7dbba3e9cd118698a7288d
+seeds 2000..2011 n=12 core 0
+placement cells lj38 m38r10 m55r6 rq3 tip4p8 water_hexamer xld
+water_hexamer not run: engine library absent
+placement band median wall ratio 0.858496 .. 1.043119
+AP/A lj38 1.039678
+L1/PA lj38 1.000302
+L2/PA lj38 0.994581
+L3/PA lj38 1.001591
+L4/PA lj38 1.018575
+L5/PA lj38 1.022280
+AP/A m38r10 0.975976
+L1/PA m38r10 0.974201
+L2/PA m38r10 0.996810
+L3/PA m38r10 1.035881
+L4/PA m38r10 0.996081
+L5/PA m38r10 0.990257
+AP/A m55r6 1.010692
+L1/PA m55r6 1.043119
+L2/PA m55r6 0.996009
+L3/PA m55r6 0.965965
+L4/PA m55r6 0.966742
+L5/PA m55r6 0.987212
+AP/A rq3 1.003559
+L1/PA rq3 0.981597
+L2/PA rq3 1.014862
+L3/PA rq3 0.988741
+L4/PA rq3 0.986859
+L5/PA rq3 0.991202
+AP/A tip4p8 1.003106
+L1/PA tip4p8 0.911813
+L2/PA tip4p8 0.888236
+L3/PA tip4p8 0.883468
+L4/PA tip4p8 0.858496
+L5/PA tip4p8 0.904095
+AP/A xld 0.995290
+L1/PA xld 0.995152
+L2/PA xld 0.998269
+L3/PA xld 0.990058
+L4/PA xld 0.972387
+L5/PA xld 0.983164
+
+panel default
+system hits_A hits_B hit_p call_p wall_p wall_ratio identical status
+lj38 12/12 12/12 1 1 0.932301 0.986057 yes PASS 
+lj75 5/12 5/12 1 1 0.589876 0.998344 yes PASS 
+au55 4/12 4/12 1 1 0.798745 1.00521 yes PASS 
+m38r10 11/12 11/12 1 1 0.977402 0.968608 yes PASS 
+m55r6 12/12 12/12 1 1 0.932301 0.997071 yes PASS 
+m80r6 12/12 12/12 1 1 0.887386 1.00801 yes PASS 
+m80r6 detail default: A 12/12 B 12/12 identical=True
+water_hexamer 0/0 0/0 - - - - no INCOMPLETE incomplete
+tip4p8 12/12 12/12 1 1 0.932301 1.0229 yes PASS 
+rq3 12/12 12/12 1 1 0.755285 0.992056 yes PASS 
+xld 9/12 9/12 1 1 0.629726 0.981787 yes PASS 
+
+panel opt
+system hits_A hits_B hit_p call_p wall_p wall_ratio identical status
+lj38 12/12 12/12 1 1 0.932301 0.981346 yes PASS 
+lj55 12/12 12/12 1 1 0.977402 1.01161 yes PASS 
+lj75 5/12 5/12 1 1 0.932301 0.9792 yes PASS 
+lj98 7/12 7/12 1 1 0.67066 0.987904 yes PASS 
+lj102 6/12 6/12 1 1 0.977402 0.985853 yes PASS 
+lj103 6/12 6/12 1 1 0.977402 0.991123 yes PASS 
+lj104 5/12 5/12 1 1 1 1.00008 yes PASS 
+lj150 8/12 8/12 1 1 0.932301 1.002 yes PASS 
+au55 4/12 4/12 1 1 0.629726 1.0015 yes PASS 
+m55r6 12/12 12/12 1 0.00363662 0.00182978 0.493802 no PASS 
+m55r14 9/12 7/12 0.666846 0.760098 0.442833 0.982816 no PASS 
+m80r6 12/12 12/12 1 0.477575 0.40951 0.731073 no PASS 
+m80r6 detail opt: A 12/12 B 12/12 identical=False
+m80r14 7/12 4/12 0.413649 0.123541 0.887386 1.58182 no PASS 
+
+overall INCOMPLETE
