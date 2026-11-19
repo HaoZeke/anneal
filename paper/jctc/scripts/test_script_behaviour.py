@@ -255,8 +255,16 @@ def test_tally_covers_hits_misses_and_missing(tmp_path: Path) -> None:
         hq_sci_tally.seed_file(empty, "absent", 0)
 
 
-def test_coverage_receipt_writes_both_toolchains(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(coverage_receipts, "version", lambda toolchain, tool: f"{tool} ({toolchain})")
+def test_coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
+    original = coverage_receipts.version
+    coverage_receipts.version = lambda toolchain, tool: f"{tool} ({toolchain})"
+    try:
+        _coverage_receipt_writes_both_toolchains(tmp_path)
+    finally:
+        coverage_receipts.version = original
+
+
+def _coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
     lines = {
         "data": [
             {

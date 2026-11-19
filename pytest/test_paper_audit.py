@@ -95,6 +95,10 @@ def test_untraced_numbers_are_still_quoted(audited):
         assert audit_mod.collapse(fragment) in audit_mod.collapse((ROOT / path).read_text()), (path, fragment)
 
 
+def test_script_exits_zero():
+    assert audit_mod.run() == 0
+
+
 def test_paper_audit_has_no_drift(capsys):
     assert audit_mod.UNTRACED == []
     assert audit_mod.run() == 0
