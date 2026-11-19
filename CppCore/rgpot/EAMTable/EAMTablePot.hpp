@@ -143,6 +143,11 @@ private:
 
   void compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const;
 
+  /// Every periodic image inside the cutoff. A separate translation unit,
+  /// so the stored neighbour walk in compute is not compiled with it.
+  void computeAllImages(const ForceInput &in, ForceOut *out,
+                        const PerAtomOut *atoms) const;
+
   EAMTable m_table;
   /// PairEAM::interpolate coefficients, seven per point, same layout as
   /// the m_table arrays.

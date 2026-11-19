@@ -2,6 +2,7 @@
 eam_table = static_library(
     'eam_table',
     'EAMTablePot.cc',
+    'EAMTableImages.cc',
     dependencies: _deps,
     cpp_args: _args,
     include_directories: ['../../'],
