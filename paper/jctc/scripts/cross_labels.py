@@ -82,7 +82,16 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="fail when a committed labels file is stale")
     parser.add_argument("--aux", type=Path, help="compare with the aux files of a build in this directory")
+    parser.add_argument("--output", type=Path, help="write the label files in this directory")
     args = parser.parse_args(argv)
+    if args.output:
+        args.output.mkdir(parents=True, exist_ok=True)
+        for document in DOCUMENTS:
+            dest = args.output / f"labels-{document}.tex"
+            if dest.exists():
+                raise SystemExit(f"refusing to overwrite {dest}")
+            dest.write_text(labels_text(document))
+        return 0
     if args.aux:
         mismatches = aux_mismatches(args.aux)
         for mismatch in mismatches:

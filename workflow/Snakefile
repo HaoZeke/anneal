@@ -391,7 +391,7 @@ rule morse_gmin:
 
 # Morse rho = 14, M55 and M80, twelve seeds, paper budgets.
 # Not part of `rule all`. GMIN rows already stored at these budgets
-# are kept; missing seeds are appended.
+# are kept, and each seed outside that table is appended.
 #   snakemake -s workflow/Snakefile morse14_h2h
 rule morse14_h2h:
     output:
@@ -448,7 +448,12 @@ rule covalent_gfn2_crest:
     shell:
         """
         set -euo pipefail
-        bash scripts/covalent_h2h/gfn2_enter_bench.sh
+        mkdir -p /work/covalent-h2h/gfn2
+        GFN2_ROWS=/work/covalent-h2h/gfn2/rows.csv \
+        GFN2_SUMMARY=/work/covalent-h2h/gfn2/summaries.csv \
+        GFN2_SESSIONS=/work/covalent-h2h/gfn2/sessions.jsonl \
+        GFN2_HISTORY=/work/covalent-h2h/gfn2/seeds.csv \
+          bash scripts/covalent_h2h/gfn2_enter_bench.sh
         """
 
 
@@ -497,7 +502,13 @@ rule covalent_gfn2_crest_si10_n12:
     shell:
         """
         set -euo pipefail
-        GFN2_CODES=crest bash scripts/covalent_h2h/gfn2_enter_bench.sh \
+        mkdir -p /work/covalent-h2h/gfn2
+        GFN2_CODES=crest \
+        GFN2_ROWS=/work/covalent-h2h/gfn2/rows.csv \
+        GFN2_SUMMARY=/work/covalent-h2h/gfn2/summaries.csv \
+        GFN2_SESSIONS=/work/covalent-h2h/gfn2/sessions.jsonl \
+        GFN2_HISTORY=/work/covalent-h2h/gfn2/seeds.csv \
+          bash scripts/covalent_h2h/gfn2_enter_bench.sh \
           --systems si10 --crest-seeds 2004 2005 2006 2007 2008 2009 2010 2011
         """
 
@@ -679,8 +690,9 @@ rule water_h2o20_goat:
     shell:
         """
         set -euo pipefail
-        mkdir -p /work/anneal-snakemake
-        bash scripts/h2o20_goat_campaign.sh
+        mkdir -p /work/h2o20-goat
+        H2O_OUT_CSV=/work/h2o20-goat/results.csv \
+          bash scripts/h2o20_goat_campaign.sh
         """
 
 
@@ -727,8 +739,9 @@ rule water_gmin:
     shell:
         """
         set -euo pipefail
-        mkdir -p /work/anneal-snakemake
-        bash scripts/tip4p_h2h/enter_water_gmin.sh
+        mkdir -p /work/water-gmin/output
+        WATER_GMIN_OUT=/work/water-gmin/output \
+          bash scripts/tip4p_h2h/enter_water_gmin.sh
         """
 
 
@@ -736,7 +749,7 @@ rule water_gmin:
 # sweep: 2M, 4M and 8M charged evaluations, twelve seeds, the same serial arm
 # as tip4p_h2h. GMIN at a (budget, seed) pair is deterministic, so the rows
 # the 2M head-to-head and the 4M/8M runs already stored are reused through
-# H2H_GMIN_ROWS; GMIN only runs for pairs they are missing. Not part of
+# H2H_GMIN_ROWS; GMIN runs each remaining pair. Not part of
 # `rule all`:
 #   snakemake -s workflow/Snakefile tip4p21_budget_h2h
 rule tip4p21_budget_h2h:
@@ -811,7 +824,7 @@ rule gad_published:
             https://zenodo.org/api/records/19001618/files/supplementary_data.zip/content
         fi
         echo "e140fde0c62c71f08b326b12ac50d77e  $zip" | md5sum -c -
-        GAD_ZIP="$zip" bash scripts/gad_published/enter_bench.sh --summary bench/gad-published/rows.csv
+        GAD_ZIP="$zip" bash scripts/gad_published/enter_bench.sh --summary /work/gad-published/rows.csv
         """
 
 
@@ -1088,8 +1101,9 @@ rule paper_0120:
     shell:
         """
         set -euo pipefail
-        mkdir -p /work/anneal-snakemake
-        bash scripts/paper_0120/enter_bench.sh
+        mkdir -p /work/paper-0120/output
+        PAPER_0120_OUT=/work/paper-0120/output \
+          bash scripts/paper_0120/enter_bench.sh
         """
 
 

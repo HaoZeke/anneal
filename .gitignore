@@ -285,6 +285,7 @@ data/
 !/data/hf-files.csv
 !/scripts/data/
 !/scripts/data/**
+scripts/data/**/__pycache__/
 proofs/lean/.lake/
 
 # Bonobo head-to-head scratch. The summary tables are the committed record.

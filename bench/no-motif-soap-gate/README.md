@@ -96,7 +96,7 @@ mutually exclusive outcomes:
 - `PASS`: every declared system has `status == "ok"` and no criterion in
   `GATE_LOSS_CRITERIA` triggers.
 
-Systems whose status is not `ok` are split into two labelled lists with
+Systems whose status is not `ok` are split into two labeled lists with
 reasons taken from `unsupported.csv`, `declared-n.csv`, `rows.csv`, and
 `summary.csv`:
 

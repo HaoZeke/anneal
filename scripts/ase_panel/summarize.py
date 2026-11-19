@@ -514,10 +514,8 @@ def main() -> None:
         outputs[recommended] = "\n".join(aggregate) + "\n"
     if "--tex" in flags:
         document = Path(os.environ["ASE_PANEL_TEX"]) if os.environ.get("ASE_PANEL_TEX") else DOCUMENT
-        if document != DOCUMENT and not document.exists():
-            document.parent.mkdir(parents=True, exist_ok=True)
-            document.write_text(DOCUMENT.read_text())
-        outputs[document] = splice(document.read_text(), tex_table())
+        source = document.read_text() if document.exists() else DOCUMENT.read_text()
+        outputs[document] = splice(source, tex_table())
     if "--check" in flags:
         stale = [
             str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
@@ -527,6 +525,9 @@ def main() -> None:
         if stale:
             raise SystemExit("stale generated report: " + ", ".join(stale))
     else:
+        present = [str(path) for path in outputs if path.exists()]
+        if present:
+            raise SystemExit("refusing to overwrite " + ", ".join(present))
         for path, text in outputs.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)

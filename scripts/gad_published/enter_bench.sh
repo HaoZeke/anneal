@@ -47,7 +47,7 @@ export RAYON_NUM_THREADS=1
 export TQDM_DISABLE=1
 cd $WORK
 if [ "\$#" -eq 0 ]; then
-  set -- --summary $ROOT/bench/gad-published/rows.csv
+  set -- --summary /work/gad-published/rows.csv
 fi
 HEAD=\$(cat $WORK/anneal-head)
 exec taskset -c $CORE $WORK/venv/bin/python -u $WORK/bin/run_campaign.py \\

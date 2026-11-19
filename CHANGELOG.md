@@ -13,8 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - ``Config::recommended_for_pair`` applies ``Config::recommended`` in a unit-depth pair potential's own length unit. Lennard-Jones is unchanged. ``h2h_morse`` reads ``H2H_PAIR_SCALE=1`` and otherwise keeps the preset.
 - ``Config::plateau_heat`` doubles the Metropolis temperature and the lattice-exchange temperature on each escape plateau, up to four times the preset, and returns to the preset when a new lowest minimum is recorded. The proposal step stays the configured length. Off leaves the preset trajectory. ``h2h_gmin_proof``, ``h2h_morse`` and ``h2h_metal`` read ``H2H_PLATEAU_HEAT=1``.
 - ``gmin_losses2`` compares the parent preset, this tree with Morse lengths on the pair minimum, and GMIN. Rows go under ``/work`` or ``$OUTPUT``. The Snakemake output is a stamp, so a rerun cannot delete a tracked table.
+- Hartree-to-eV and bohr conversions use the CODATA constants. The typed numeric ``HARTREE_EV`` and bohr literals are gone from the quench, the catalog signature, the GFN2 driver, the ASE objective, and the TRIC comparison.
 - ``bench/h2h.json`` lists every head-to-head Snakemake rule with its competitors, runners, budget source, asv suite and committed row tables. Rules that are not head-to-heads are listed with a reason. ``pytest/test_h2h_coverage.py`` checks that every rule is classified, that each suite imports and has a smoke, that the suite, the runner and the committed rows agree on ``PAPER_BUDGETS``, that runners use at least six seeds, that drivers pin to one core, that committed rows carry ``code_revision`` and ``host``, and that ``snakemake -n`` resolves every head-to-head target.
-- Every head-to-head asv suite has a smoke built on ``bench/h2h.py``. The helper builds an example and runs it at a small budget in a scratch directory. Setup raises ``NotImplementedError`` when an external engine, library or Python stack is missing, so asv reports n/a. New suites cover the Darby metal run, the third covalent panel, the (H2O)20 GOAT campaign and the TRIC quench. Those smokes write to scratch instead of over the committed tables.
+- Every head-to-head asv suite has a smoke built on ``bench/h2h.py``. The helper builds an example and runs it at a small budget in a scratch directory. Setup raises ``NotImplementedError`` when an external engine, library or Python stack is not installed, so asv reports n/a. New suites cover the Darby metal run, the third covalent panel, the (H2O)20 GOAT campaign and the TRIC quench. Those smokes write to scratch instead of over the committed tables.
 - ``covalent_h2h`` runs the third covalent panel. It calls ``scripts/covalent_h2h/enter_bench.sh`` with ``BENCH_OUT=v3`` and ``BEFORE_REV=7da10659``, and writes ``bench/covalent-h2h/v3/seeds.csv`` and ``results.csv``.
 - Head-to-head rows record ``code_revision`` and ``host``. ``code_revision`` is the anneal checkout for anneal rows and the competitor's own revision where the runner knows it. openconf keeps its harness checkout in ``code_revision`` and the pinned openconf commit in ``openconf_revision``. ``host`` is the UTS nodename the drivers set to bench. Rows already on disk are not backfilled. An append-only table widens a stored header to the new columns once and leaves the new cells empty.
 - ``Config::recommended_molecular`` turns on ring crankshafts. A rotatable bond is a bridge of the bond graph, so a torsion never changes a ring. With ``ring_moves`` the torsion kernel also turns one arc of a flexible ring about the axis through the two ring atoms that bound it. A molecule with no flexible ring draws the same hops.
@@ -188,7 +189,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   An icosahedral plateau that has not deepened the incumbent for five hops draws a fresh cluster, closes its core orbits, and projects before that quench.
   A rigid chart leaves the move off.
 - A cluster hop run reports why it returned in ``Outcome::stop``.
-  ``HopStop`` names the budget, the target, a caller stop, a checkpoint retirement and its reason, a missing NVE escape, the hop cap, or an empty Hamiltonian proposal.
+  ``HopStop`` names the budget, the target, a caller stop, a checkpoint retirement and its reason, an NVE escape that did not finish, the hop cap, or an empty Hamiltonian proposal.
   ``HopStop`` is ``#[non_exhaustive]``, so a ``match`` on it outside the crate needs a wildcard arm, and a later reason is not a breaking change.
   The water hexamer record prints it as ``hop_stop``.
   Search results are unchanged.
@@ -427,7 +428,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ``examples/morse_table.rs`` scores Morse clusters against the Cambridge table.
 - ``Tip4pCluster`` uses the TIP4P parameters the Cambridge Cluster Database minima were computed with: the oxygen well depth is ``C6^2 / 4 C12`` from Jorgensen's coefficients instead of the rounded 0.6485 kJ/mol, and the Coulomb prefactor is GMIN's 1389.354848.
   The rounded depth left every minimum about 1.3e-3 kJ/mol per molecule above the database, so 15 and 20 molecule runs on this objective could not reach the published energies.
-  ``ccd_tip4p_minimum`` lists the database energies for 2 to 21 molecules at full precision; ``wales_hodges_minimum`` now returns the same values, which adds the missing 15-molecule entry and replaces the two-decimal values for 8, 12, 20 and 21 molecules, which sat up to 2.57e-3 kJ/mol (N = 21) below the database energies.
+  ``ccd_tip4p_minimum`` lists the database energies for 2 to 21 molecules at full precision; ``wales_hodges_minimum`` now returns the same values, which adds the 15-molecule entry and replaces the two-decimal values for 8, 12, 20 and 21 molecules, which sat up to 2.57e-3 kJ/mol (N = 21) below the database energies.
 - ``WATER_POLISH_EXTERNAL=1`` runs the Euclidean answer polish only when the search geometry is outside the IRA gate, and stops that polish at the first accepted iterate inside the gate. CREST ``--opt extreme`` runs only on that outside path. Unset, ``answer_gradient`` stays zero and the reported geometry is unchanged.
 - ``WATER_POLISH_EXTERNAL=1`` stops the Euclidean polish after CREST at the first accepted iterate inside the IRA gate and keeps the lowest-energy geometry that is already inside that gate. A polish that starts inside the gate cannot report a geometry outside it.
 - ``WarmLbfgs`` backtracks from an evaluation answered with a non-finite
@@ -549,7 +550,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   handshake there and waited for a protocol header the reservation never
   sends. That wait is ten seconds. Closing the reservation on macOS leaves
   the unaccepted connection open. A five second connectivity check then
-  expired with replicas missing.
+  expired before the replicas answered.
 - Search drivers return as soon as the caller stops evaluation and keep the
   best state found. They no longer spend the rest of the budget after the
   potential stops answering. A ledger slice keeps the caller's stop flag.
@@ -637,7 +638,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ``binary_water_campaign`` reads optbench ``.aa`` starts as GMIN ``coords`` (centres, then angle-axis vectors); ``--legacy-interleaved`` keeps the earlier reading, and ``GminAngleAxisFile::LegacyInterleaved`` loads interleaved files written with negated rotations.
   ``scripts/optbench/anneal_globalopt.py`` opens the archive start GMIN opens.
 - The macOS test harness links libpython and does not pass ``-undefined dynamic_lookup``.
-  With that flag and no libpython, dyld stops the feature tests before they start because ``_PyBaseObject_Type`` is missing from the flat namespace.
+  With that flag and no libpython, dyld stops the feature tests before they start because ``_PyBaseObject_Type`` is not in the flat namespace.
   Maturin still builds the extension with that lookup. The interpreter that imports the extension provides the symbols.
 - The water arms now record and quench at ``catalog::molecular::WATER_RECORD_GRADIENT``, the xtb ``vtight`` gradient of 2e-4 Eh/bohr.
   At the molecular preset's 5e-2 eV/Å a recorded energy could sit 0.3 eV above its own minimum, so the GFN2 hexamer search reached the CREST minimum and then ranked a higher basin first.
@@ -1004,11 +1005,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the start ended the opening before the descent converged and GSA's first
   phase ends at its first slice, the descent takes a turn before CMA-ES's
   phase. After an opening the phases, and that turn, stop short of the closing
-  reserve plus a slice for each other arm not yet played, counted again at
+  reserve plus a slice for each other arm without a completed turn, counted again at
   every slice, and without one short of a slice for DE while it has not played.
   CMA-ES, the descent, GSA,
   DE, the additive surrogate and the QMC restart arm then each take a turn if
-  they have not yet and the budget left holds eight evaluations beyond the
+  they have no completed turn and the budget left holds eight evaluations beyond the
   closing reserve; later rounds pick uniformly with probability ``1/round``,
   otherwise replay an arm whose last turn lowered the incumbent, and otherwise
   draw by discounted Thompson sampling. A turn is one slice, but the descent
@@ -1104,7 +1105,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ``ask`` / ``tell`` otherwise, and refuse a fitter with neither pair before
   ``init``; only ``run_benchmark`` still drives ``evaluate`` or ``ask`` without
   its partner, with a ``FutureWarning``. On current ChemFit, ``fit_anneal``,
-  ``fit_chemfit`` and ``run_fitter`` called the missing ``ask``, scored every
+  ``fit_chemfit`` and ``run_fitter`` called ``ask``, which that fitter does not provide, scored every
   candidate as ``+inf`` with the ``AttributeError`` swallowed, and handed
   ``finish`` a point that was never evaluated. The first exception the fitter
   raises, or a loss that is not one real number, now ends the fit: the fitter is

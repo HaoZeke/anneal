@@ -9,7 +9,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/water-gmin
-OUT=$ROOT/bench/water-gmin
+OUT=${WATER_GMIN_OUT:-/work/water-gmin/output}
 
 if [[ -n $(git -C "$ROOT" status --porcelain -- src examples Cargo.toml Cargo.lock build.rs) ]]; then
   echo "anneal sources differ from HEAD; code_revision would not name the binary" >&2

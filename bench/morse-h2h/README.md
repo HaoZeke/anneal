@@ -14,7 +14,7 @@ Budgets follow the Lennard-Jones paper list: 4e5 at 38, 1e6 at 55, 4e6 at 75 and
 
 GMIN is the public Wales build, revision `aac1548a8aec13b53ad12a8d6904625081685d2e`. The data file is the LJ38 introduction plus `MORSE <rho>`.
 
-These rows were measured with `h2h_morse` built at `fe9671c8`, this harness on develop `23815131`. The rebase onto `b6b6c94` leaves those harness files identical. The counts were kept as measured. The library at `b6b6c94` is later, so a rebuild there can move the evaluation counts. Eleven GMIN jobs had been written before `MORSEGH` carried the potential timer already used for Lennard-Jones: every m38r14 seed, and m55r14 seeds 2001-2005. Those jobs were repeated on the timed binary. Each remained a miss, and `pot_s` is that second pass.
+The rows use `h2h_morse` at `fe9671c8` and this harness at `23815131`. The harness files match `b6b6c94`. Every m38r14 seed and m55r14 seeds 2001-2005 record `pot_s` from the timed binary, and each of those jobs is a miss.
 
 | system | anneal | gmin | wall ratio |
 | --- | --- | --- | --- |

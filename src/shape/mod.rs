@@ -280,10 +280,10 @@ impl crate::bias::Fingerprint for CanonicalOrder {
     ///   structure being matched is the one the order is defined against.
     /// - A relabeling of a structure that *differs from the reference by a
     ///   real distortion*, in
-    ///   `tests::canonicalising_a_relabeled_copy_of_a_distorted_structure`.
+    ///   `tests::canonicalizing_a_relabeled_copy_of_a_distorted_structure`.
     ///   This is what a search actually produces and the only case that bears
     ///   on whether a coordinate-space model can be trusted. A jittered cluster
-    ///   and a relabeled copy of it canonicalise to the same coordinates at
+    ///   and a relabeled copy of it canonicalize to the same coordinates at
     ///   2.7e-16 root-mean-square on 13 points and 2.9e-16 on 38, costing 2.4
     ///   ms per structure warm.
     ///
@@ -735,12 +735,12 @@ mod tests {
     /// relabeled copy reads as a different structure. Measured through that
     /// model on 13 points: the posterior mean moved by 218 standard deviations
     /// and the reported standard deviation rose from 1.42e-4 to 9.74e-1, a
-    /// factor of 6900. Canonicalising every structure before it enters the
+    /// factor of 6900. Canonicalizing every structure before it enters the
     /// model is the cheapest proposed fix, and it is only a fix if it is exact
     /// on structures away from the reference.
     #[cfg(feature = "ira")]
     #[test]
-    fn canonicalising_a_relabeled_copy_of_a_distorted_structure() {
+    fn canonicalizing_a_relabeled_copy_of_a_distorted_structure() {
         for n in [13usize, 38] {
             let reference = shell(n, 0.0, 11);
             let canon = CanonicalOrder::new(reference.clone(), 1.8);
