@@ -42,8 +42,8 @@ Only the quench changes, at 98 atoms, and structure priors propose
 close-packed motifs.
 Each comparison counts hits of the published minimum, force calls, and wall
 time on one core.
-Against GMIN on Lennard-Jones, Gupta, and Morse clusters, this setting hits
-more seeds on 9 of 13 and GMIN hits more on two.
+Against GMIN on Lennard-Jones clusters, this setting hits
+more seeds on 6 of 8 and GMIN hits more on one.
 On nine Sutton--Chen clusters, this setting hits at least as many seeds as
 GMIN on each, while GMIN has the lower median wall on seven.
 A uniform draw over the moves hits as often as the depth posterior, so these
@@ -56,8 +56,8 @@ On the Lennard-Jones pair potential the number of minima grows quickly with the 
 Here, we keep one fixed setting across all sizes, with a move library that does not change with the atom count and a reduced temperature of \(0.8\), the value Wales and Doye used \cite{wales1997}.
 Below 98 atoms the quench chooses between the plain potential and one diameter penalty, and at 98 atoms and above the penalty is absent.
 At every size, a stall does not replace the walker with a random cluster.
-Section~\ref{sec:results} runs this setting against GMIN on 13 Lennard-Jones, Gupta, and Morse clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 5 Lennard-Jones clusters, Gupta Au\(_{55}\), and 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
-GMIN hits more seeds on 2 of the 13, LJ\(_{150}\) and \StalePanel{m80r6}M\(_{80}\) at \(\rho=6\).
+Section~\ref{sec:results} runs this setting against GMIN on 8 Lennard-Jones clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 5 Lennard-Jones clusters, Gupta Au\(_{55}\), and 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
+GMIN hits more seeds on 1 of the 8, LJ\(_{150}\).
 
 This article does not claim a new move.
 Displacement moves, relocation of a surface atom, symmetrization, tabu
@@ -486,41 +486,65 @@ LJ\(_{104}\) & \(4\times 10^{6}\) & 5/12 & 6/12 & 1 \\
 \subsection{GMIN on the paper panel}
 \label{sec:gmin}
 Table~\ref{tab:gmin} puts this work against GMIN on eight
-Lennard-Jones sizes, Gupta Au\(_{55}\), and Morse M\(_{55}\) and
-M\(_{80}\) at \(\rho=6\) and \(14\), with both arms of each cluster
+Lennard-Jones sizes, with both arms of each cluster
 in one session on one core of one host.
 Both arms use seeds 2000--2011, the budget in the table and the start
 this code writes for the seed.
 GMIN runs the Wales LJ\(_{38}\) input in reduced units, and the Supporting Information gives its
 settings, the references, and the drivers of this setting.
-This setting hits more seeds than GMIN on 9 of the 13 clusters.
-GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12, and on
-M\(_{80}\) at \(\rho=6\), 12 of 12 against \StalePanel{m80r6}2 of 12.
-The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\).
-Fisher's test on hits is below 0.05 on 6 clusters: 5 for this work and
-\StalePanel{m80r6}M\(_{80}\) at \(\rho=6\) for GMIN.
-The 5 are LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\), and M\(_{55}\) and
-M\(_{80}\) at \(\rho=14\).
-The other 4 wins of this setting are LJ\(_{102}\), LJ\(_{103}\),
-LJ\(_{104}\), and Au\(_{55}\), at \(p\) of 0.21, 0.10, 0.40, and
-0.32, and the GMIN win on LJ\(_{150}\) is not significant
+This setting hits more seeds than GMIN on 6 of the 8 clusters.
+GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12.
+The two tie on LJ\(_{55}\).
+Fisher's test on hits is below 0.05 on 3 clusters, all for this work.
+The 3 are LJ\(_{38}\), LJ\(_{75}\), and LJ\(_{98}\).
+The other 3 wins of this setting are LJ\(_{102}\), LJ\(_{103}\),
+and LJ\(_{104}\), at \(p\) of 0.21, 0.10, and
+0.40, and the GMIN win on LJ\(_{150}\) is not significant
 either.
-The 13 tests are one family.
-Under Holm's step-down correction for 13 tests, 5 clusters stay below 0.05:
-LJ\(_{75}\), LJ\(_{98}\), and M\(_{55}\) and M\(_{80}\) at \(\rho=14\) for
-this setting and \StalePanel{m80r6}M\(_{80}\) at \(\rho=6\) for GMIN.
+The 8 tests are one family.
+Under Holm's step-down correction for 8 tests, 2 clusters stay below 0.05:
+LJ\(_{75}\) and LJ\(_{98}\) for this setting.
 LJ\(_{38}\), at \(p=0.037\), does not stay below 0.05.
 \cite{holm1979}
-The median wall of a run is lower for this setting on 11 of the 13 clusters and
-higher on M\(_{55}\) and M\(_{80}\) at \(\rho=6\).
-\StalePanel{m80r6}On M\(_{80}\) at \(\rho=6\) GMIN reaches the minimum in a median of
-268934 calls and 10.691~s, and this setting spends the full
-\(4\times 10^{6}\) calls in a median of 161.4~s.
+The median wall of a run is lower for this setting on 8 of the 8 clusters.
+The committed rows of the eight clusters read as follows.
+On LJ\(_{38}\) this setting hits 12 of 12 and GMIN hits 7 of 12.
+The median calls are 10615.5 against 389399, and the interquartile ranges of those calls are 3591.25 and 173127.75.
+The median wall is 0.075~s against 3.658~s, the median time inside the potential is 0.029~s against 2.673~s, and the median time outside the potential is 0.047~s against 0.979~s.
+Fisher's exact \(p\) on the hits is 0.037, and the Mann--Whitney \(p\) on calls is \(3.4\times 10^{-5}\), and on wall \(3.4\times 10^{-5}\).
+On LJ\(_{55}\) this setting hits 12 of 12 and GMIN hits 12 of 12.
+The median calls are 12242 against 12764.5, and the interquartile ranges of those calls are 22988.5 and 12435.75.
+The median wall is 0.142~s against 0.236~s, the median time inside the potential is 0.062~s against 0.191~s, and the median time outside the potential is 0.082~s against 0.045~s.
+Fisher's exact \(p\) on the hits is 1, and the Mann--Whitney \(p\) on calls is 0.75, and on wall 0.31.
+On LJ\(_{75}\) this setting hits 12 of 12 and GMIN hits 0 of 12.
+The median calls are 1409229.5 against 4000000, and the interquartile ranges of those calls are 983622 and 0.
+The median wall is 27.019~s against 119.9~s, the median time inside the potential is 12.543~s against 102.9~s, and the median time outside the potential is 13.818~s against 16.952~s.
+Fisher's exact \(p\) on the hits is \(7.4\times 10^{-7}\), and the Mann--Whitney \(p\) on calls is \(1.0\times 10^{-5}\), and on wall \(1.0\times 10^{-5}\).
+On LJ\(_{98}\) this setting hits 10 of 12 and GMIN hits 0 of 12.
+The median calls are 1511030.5 against 4000000, and the interquartile ranges of those calls are 1985194.5 and 0.
+The median wall is 41.586~s against 182.5~s, the median time inside the potential is 23.825~s against 161.9~s, and the median time outside the potential is 17.949~s against 20.311~s.
+Fisher's exact \(p\) on the hits is \(6.7\times 10^{-5}\), and the Mann--Whitney \(p\) on calls is \(1.3\times 10^{-4}\).
+On LJ\(_{102}\) this setting hits 9 of 12 and GMIN hits 5 of 12.
+The median calls are 894801 against 4000000, and the interquartile ranges of those calls are 3401143.75 and 2463305.5.
+The median wall is 27.445~s against 194.4~s, the median time inside the potential is 15.463~s against 173.8~s, and the median time outside the potential is 11.982~s against 20.614~s.
+Fisher's exact \(p\) on the hits is 0.21, and the Mann--Whitney \(p\) on calls is 0.093.
+On LJ\(_{103}\) this setting hits 8 of 12 and GMIN hits 3 of 12.
+The median calls are 2293133 against 4000000, and the interquartile ranges of those calls are 2608443.75 and 239453.25.
+The median wall is 66.188~s against 204.9~s, the median time inside the potential is 39.673~s against 183.1~s, and the median time outside the potential is 26.763~s against 21.660~s.
+Fisher's exact \(p\) on the hits is 0.10, and the Mann--Whitney \(p\) on calls is 0.047.
+On LJ\(_{104}\) this setting hits 9 of 12 and GMIN hits 6 of 12.
+The median calls are 2328723 against 3696118, and the interquartile ranges of those calls are 2947098 and 1285122.25.
+The median wall is 69.306~s against 193.6~s, the median time inside the potential is 39.241~s against 173.6~s, and the median time outside the potential is 30.064~s against 20.007~s.
+Fisher's exact \(p\) on the hits is 0.40, and the Mann--Whitney \(p\) on calls is 0.16.
+On LJ\(_{150}\) this setting hits 5 of 12 and GMIN hits 9 of 12.
+The median calls are 4000000 against 3129518.5, and the interquartile ranges of those calls are 1477851 and 3240050.5.
+The median wall is 237.2~s against 326.1~s, the median time inside the potential is 139.7~s against 302.1~s, and the median time outside the potential is 96.075~s against 23.955~s.
+Fisher's exact \(p\) on the hits is 0.21, and the Mann--Whitney \(p\) on calls is 0.17.
 
 % gmin-panel table: start
 \begin{table}
 \caption{This work against GMIN, both arms of each cluster on one host in one session.
-Revisions: anneal \texttt{c2de652d} on LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\); \StalePanel{1ce3ab64}\texttt{1ce3ab64} on Au\(_{55}\), M\(_{55}\) at \(\rho=6\), M\(_{55}\) at \(\rho=14\), M\(_{80}\) at \(\rho=6\), and M\(_{80}\) at \(\rho=14\), GMIN \texttt{aac1548a}.
+Revisions: anneal \texttt{c2de652d} on LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\), GMIN \texttt{aac1548a}.
 Seeds 2000--2011, one core, budget in force calls.
 Calls and IQR are the median and the interquartile range of the
 calls to the minimum, with a miss at the full budget.
@@ -556,16 +580,6 @@ LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 9/12 & 2328723 & 2947098 & 69.30
  &  & GMIN & 6/12 & 3696118 & 1285122.25 & 193.6 & 173.6 & 20.007 &  &  &  \\
 LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 1477851 & 237.2 & 139.7 & 96.075 & 0.21 & 0.17 & -- \\
  &  & GMIN & 9/12 & 3129518.5 & 3240050.5 & 326.1 & 302.1 & 23.955 &  &  &  \\
-Au\(_{55}\) & \(1\times 10^{6}\) & this work & \StalePanel{au55}4/12 & 1000000 & 736743.75 & 38.043 & 28.083 & 9.966 & 0.32 & 0.21 & -- \\
- &  & GMIN & 1/12 & 1000000 & 0 & 59.573 & 56.427 & 3.152 &  &  &  \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & \StalePanel{m55r6}12/12 & 92049.5 & 103998.75 & 1.742 & 1.196 & 0.547 & 1 & 0.069 & 0.078 \\
- &  & GMIN & 12/12 & 37047.5 & 37358.75 & 0.751 & 0.637 & 0.115 &  &  &  \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & \StalePanel{m55r14}7/12 & 730604 & 623707.5 & 12.814 & 9.196 & 3.618 & \(4.6\times 10^{-3}\) & \(2.9\times 10^{-3}\) & -- \\
- &  & GMIN & 0/12 & 1000000 & 0 & 18.898 & 16.322 & 2.577 &  &  &  \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & \StalePanel{m80r6}2/12 & 4000000 & 0 & 161.4 & 107.8 & 53.778 & \(6.7\times 10^{-5}\) & \(3.1\times 10^{-5}\) & \(3.1\times 10^{-5}\) \\
- &  & GMIN & 12/12 & 268934 & 268091.5 & 10.691 & 9.582 & 1.109 &  &  &  \\
-M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & \StalePanel{m80r14}9/12 & 1338932.5 & 3064673 & 49.325 & 37.783 & 11.542 & \(3.4\times 10^{-4}\) & \(3.8\times 10^{-4}\) & -- \\
- &  & GMIN & 0/12 & 4000000 & 0 & 152.7 & 138.3 & 14.430 &  &  &  \\
 \bottomrule
 \end{tabular}
 }
@@ -636,17 +650,12 @@ rigid TIP4P clusters (Table~\siref{tab:tip4p-gmin}).
 
 \section{Discussion}
 \label{sec:discussion}
-GMIN hits more seeds than this setting on 2 of the 13 clusters of
+GMIN hits more seeds than this setting on 1 of the 8 clusters of
 Table~\ref{tab:gmin}.
-On M\(_{80}\) at \(\rho=6\) GMIN hits 12 of 12 and this setting \StalePanel{m80r6}2 of
-12, and Fisher's \(p\) is \(6.7\times 10^{-5}\).
 On LJ\(_{150}\) GMIN hits 9 of 12 and this setting 5 of 12, and
 Fisher's \(p\) is 0.21.
-The two tie on LJ\(_{55}\) and M\(_{55}\) at \(\rho=6\), where both hit
-\StalePanel{m55r6}12 of 12.
-\StalePanel{m80r6}On M\(_{80}\) at \(\rho=6\) GMIN reaches the minimum in a median of
-268934 calls and 10.691~s, and this setting spends the full
-\(4\times 10^{6}\) calls in a median of 161.4~s.
+The two tie on LJ\(_{55}\), where both hit
+12 of 12.
 
 Section~\ref{sec:gmin} gives the median walls of the GMIN panel.
 On the Sutton--Chen clusters at equal budgets the median wall of GMIN is lower
@@ -682,21 +691,11 @@ of gold.
 Against the Atomic Simulation Environment this setting hits M\(_{38}\)
 at \(\rho=6\) and \(\rho=14\) and M\(_{55}\) at \(\rho=6\) on 12 of 12
 and M\(_{55}\) at \(\rho=14\) on 5 of 12, where neither ASE arm hits.
-Against GMIN it hits M\(_{55}\) at \(\rho=6\) on \StalePanel{m55r6}12 of 12,
-M\(_{55}\) at \(\rho=14\) on \StalePanel{m55r14}7 of 12, and M\(_{80}\) at \(\rho=14\) on
-\StalePanel{m80r14}9 of 12, where GMIN hits 12, 0, and 0, and it hits M\(_{80}\) at
-\(\rho=6\) on \StalePanel{m80r6}2 of 12, where GMIN hits 12.
-M\(_{55}\) at \(\rho=14\) is in both panels: 5 of 12 on revision
-\texttt{9a30f319} and \StalePanel{m55r14}7 of 12 on \StalePanel{1ce3ab64}\texttt{1ce3ab64}.
 The ASE panel scales the preset to the Morse pair, and the driver
 \path{examples/h2h_morse.rs} of this repository runs the preset unscaled.
-On Au\(_{55}\) this setting hits \StalePanel{au55}4 of 12 in the GMIN panel, where GMIN
-hits 1 of 12 and Fisher's \(p\) is 0.32.
-In the ASE panel it hits 0 of 12, as do both ASE arms, and its median
-best energy lies 0.051~eV above the reference.
-Both Au\(_{55}\) counts come from revision \StalePanel{1ce3ab64}\texttt{1ce3ab64}, the first
-with the gold driver of Section~\ref{sec:gmin} and the second with the
-preset scaled to the Gupta length and well depth.
+On Au\(_{55}\) the ASE panel hits 0 of 12 for this setting, as do both
+ASE arms, and the median best energy of this setting lies 0.051~eV above
+the reference.
 
 \section{Conclusions}
 We have evaluated one basin-hopping setting, with the moves of Section~\ref{sec:moves} and \(T=0.8\), across the clusters reported here.
@@ -705,9 +704,8 @@ Pooled with seeds 7000--7005, LJ\(_{75}\) is 11 of 12 against 12 of 12,
 LJ\(_{98}\) is 9 of 12 on both arms, and LJ\(_{104}\) is 5 of 12
 against 6 of 12.
 These counts do not show that the depth posterior improves on a uniform draw.
-Against GMIN on seeds 2000--2011, this setting hits more seeds on 9 of
-13 clusters, and GMIN hits more on LJ\(_{150}\) and on M\(_{80}\) at
-\(\rho=6\), 9 of 12 against 5 of 12 and 12 of 12 against \StalePanel{m80r6}2 of 12.
+Against GMIN on seeds 2000--2011, this setting hits more seeds on 6 of
+8 clusters, and GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12.
 Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, scored by Fisher's test on hits, this setting
 hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse

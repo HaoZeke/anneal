@@ -1495,15 +1495,15 @@ def test_the_landfold_figure_records_its_redrawn_panels():
     assert all(row[0] == "OK" for row in rows)
 
 
-@pytest.mark.parametrize("stale, fresh", [
-    ("on 11 of the 13 clusters", "on 99 of the 13 clusters"),
-    ("calls in a median of 161.4~s", "calls in a median of 999.9~s"),
+@pytest.mark.parametrize("stale, sentence", [
+    ("on 8 of the 8 clusters", "The median wall is lower for this setting on 99 of the 8 clusters."),
+    ("on 1 of the 8", "GMIN hits more seeds on 9 of the 8."),
 ])
-def test_a_stale_second_copy_of_a_gmin_number_is_reported(stale, fresh):
+def test_a_stale_second_copy_of_a_gmin_number_is_reported(stale, sentence):
     audit = audit_mod.Audit()
     text = audit.text(audit_mod.TEX)
     assert stale in " ".join(text.split())
-    audit.text_cache[audit_mod.TEX] = text + f"\n\\section{{Copy}}\nThe median wall is lower for this setting {fresh}.\n"
+    audit.text_cache[audit_mod.TEX] = text + f"\n\\section{{Copy}}\n{sentence}\n"
     panel, groups = audit_mod.gmin_panel_groups(audit)
     audit_mod.gmin_body_copies(audit, panel, groups)
     assert [row for row in audit.drifts() if "every copy" in row[2]]
@@ -2076,16 +2076,79 @@ def test_a_swapped_citation_affiliation_order_is_rejected(path):
     assert [row for row in audit.drifts() if row[1] == path]
 
 
-def test_an_unmarked_table_quote_of_an_unreachable_panel_row_fails():
+def _unreachable_number(audit):
+    return [
+        row for row in audit.drifts()
+        if row[2] == "a printed number traces to a commit this repository holds"
+    ]
+
+
+def test_a_table_quote_of_an_unreachable_panel_number_fails():
     audit = audit_mod.Audit()
     audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        r"& \StalePanel{m80r6}2/12 &", "& 2/12 &", 1,
+        r"LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12",
+        "LJ\\(_{150}\\) & \\(4\\times 10^{6}\\) & this work & 5/12 \\\\\n"
+        "M\\(_{80}\\), \\(\\rho=6\\) & \\(4\\times 10^{6}\\) & this work & 2/12",
+        1,
+    )
+    audit_mod.manuscript_gmin(audit)
+    assert any(row[1].endswith("tab:gmin m80r6") for row in _unreachable_number(audit))
+
+
+def test_a_prose_quote_of_an_unreachable_panel_number_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
+        r"\label{sec:gmin}",
+        "\\label{sec:gmin}\nOn M\\(_{80}\\) at \\(\\rho=6\\) this setting hits 2 of 12.\n",
+        1,
     )
     audit_mod.manuscript_gmin(audit)
     assert any(
-        row[2] == "a quoted panel row cites a commit in this repository" and row[4] == "absent"
-        for row in audit.drifts()
+        row[1] == "paper/jctc/manuscript.tex m80r6" and row[4] == "2 of 12"
+        for row in _unreachable_number(audit)
     )
+
+
+def test_a_prose_quote_of_an_unreachable_panel_wall_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
+        r"\label{sec:gmin}",
+        "\\label{sec:gmin}\nOn M\\(_{80}\\) at \\(\\rho=6\\) the median wall is 161.4~s.\n",
+        1,
+    )
+    audit_mod.manuscript_gmin(audit)
+    assert any(row[1] == "paper/jctc/manuscript.tex m80r6" and row[4] == "161.4"
+               for row in _unreachable_number(audit))
+
+
+def test_a_mark_does_not_excuse_an_unreachable_panel_number():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
+        r"\label{sec:gmin}",
+        "\\label{sec:gmin}\nOn M\\(_{80}\\) at \\(\\rho=6\\) this setting hits \\StalePanel{m80r6}2 of 12.\n",
+        1,
+    )
+    audit_mod.manuscript_gmin(audit)
+    assert any(row[4] == "2 of 12" for row in _unreachable_number(audit))
+
+
+def test_reachable_panel_numbers_are_not_flagged_as_unheld():
+    audit = audit_mod.Audit()
+    audit_mod.manuscript_gmin(audit)
+    assert _unreachable_number(audit) == []
+    assert any(row[2] == "a printed number traces to a commit this repository holds" for row in audit.results)
+
+
+def test_an_unmarked_table_quote_of_an_unreachable_panel_row_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
+        r"LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12",
+        "LJ\\(_{150}\\) & \\(4\\times 10^{6}\\) & this work & 5/12 \\\\\n"
+        "M\\(_{80}\\), \\(\\rho=6\\) & \\(4\\times 10^{6}\\) & this work & 2/12",
+        1,
+    )
+    audit_mod.manuscript_gmin(audit)
+    assert any(row[1].endswith("tab:gmin m80r6") for row in _unreachable_number(audit))
 
 
 def test_an_unmarked_prose_quote_of_an_unreachable_panel_row_fails():
@@ -2097,21 +2160,17 @@ def test_an_unmarked_prose_quote_of_an_unreachable_panel_row_fails():
     )
     audit_mod.manuscript_gmin(audit)
     assert any(
-        row[1] == "paper/jctc/manuscript.tex m80r6"
-        and row[2] == "a quoted panel row cites a commit in this repository"
-        and row[4] == "absent"
-        for row in audit.drifts()
+        row[1] == "paper/jctc/manuscript.tex m80r6" and row[4] == "2 of 12"
+        for row in _unreachable_number(audit)
     )
 
 
 def test_a_stale_mark_on_a_reachable_panel_row_fails():
+    """A mark on a held row does not turn that row into an unheld number."""
     audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        "& 12/12 & 10615.5 &", r"& \StalePanel{lj38}12/12 & 10615.5 &", 1,
-    )
+    text = audit.text(audit_mod.TEX)
+    old = "& 12/12 & 10615.5 &"
+    assert text.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = text.replace(old, r"& \StalePanel{lj38}12/12 & 10615.5 &", 1)
     audit_mod.manuscript_gmin(audit)
-    assert any(
-        row[2] == "a stale panel mark covers a commit this repository does not hold"
-        and row[4] == "present"
-        for row in audit.drifts()
-    )
+    assert not any(row[1].endswith("lj38") for row in _unreachable_number(audit))
