@@ -32,6 +32,16 @@ struct MorseSplitSnapshot {
   int slices = 0;
   std::size_t total_up = 0;
   std::size_t total_inc = 0;
+  std::size_t up_off_cap = 0;
+  std::size_t lo_off_cap = 0;
+  std::size_t lo_u_cap = 0;
+  std::size_t lo_count_cap = 0;
+  std::size_t active_bits_cap = 0;
+  std::size_t pair_forces_cap = 0;
+  std::size_t pair_he_cap = 0;
+  std::size_t pair_hv_cap = 0;
+  std::size_t row_e_cap = 0;
+  std::size_t row_s_cap = 0;
   std::vector<std::size_t> p0_splits;
   std::vector<std::size_t> p1_splits;
 };

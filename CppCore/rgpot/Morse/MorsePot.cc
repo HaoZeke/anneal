@@ -88,6 +88,32 @@ inline void atomicFetchOr(std::uint64_t &word, std::uint64_t mask) noexcept {
 #endif
 }
 
+/// Thread-local scratch for the OpenMP stored half-pair evaluation and row
+/// accumulators. Buffers grow to the high-water mark of the thread and shrink
+/// back when a later call requires less than a quarter of the retained
+/// capacity (above kShrinkFloor).
+constexpr std::size_t kShrinkFloor = 4096;
+
+template <typename T>
+void resizeBuffer(std::vector<T> &vec, std::size_t count) {
+  if (vec.capacity() > kShrinkFloor && count * 4 < vec.capacity()) {
+    std::vector<T> fresh(count);
+    vec.swap(fresh);
+  } else {
+    vec.resize(count);
+  }
+}
+
+template <typename T>
+void assignBuffer(std::vector<T> &vec, std::size_t count, const T &value) {
+  if (vec.capacity() > kShrinkFloor && count * 4 < vec.capacity()) {
+    std::vector<T> fresh(count, value);
+    vec.swap(fresh);
+  } else {
+    vec.assign(count, value);
+  }
+}
+
 struct MorseWorkspace {
   const nlist::Neighbours *owner = nullptr;
   std::uint64_t build_id = 0;
@@ -151,8 +177,8 @@ struct WorkspaceLease {
 void buildStoredHalfIndex(MorseWorkspace &ws, const nlist::Neighbours &cells, std::size_t n) {
   const auto &off = cells.offsets();
   const auto &nbr = cells.neighbours();
-  ws.up_off.resize(n + 1);
-  ws.lo_count.assign(n, 0);
+  resizeBuffer(ws.up_off, n + 1);
+  assignBuffer(ws.lo_count, n, std::int32_t{0});
   const auto row = nbr.begin();
   std::int32_t total_up = 0;
   for (std::size_t i = 0; i < n; ++i) {
@@ -169,7 +195,7 @@ void buildStoredHalfIndex(MorseWorkspace &ws, const nlist::Neighbours &cells, st
   }
   ws.up_off[n] = total_up;
 
-  ws.lo_off.resize(n + 1);
+  resizeBuffer(ws.lo_off, n + 1);
   std::int32_t acc = 0;
   for (std::size_t i = 0; i < n; ++i) {
     ws.lo_off[i] = acc;
@@ -178,7 +204,7 @@ void buildStoredHalfIndex(MorseWorkspace &ws, const nlist::Neighbours &cells, st
   }
   ws.lo_off[n] = acc;
 
-  ws.lo_u.resize(static_cast<std::size_t>(total_up));
+  resizeBuffer(ws.lo_u, static_cast<std::size_t>(total_up));
   for (std::size_t i = 0; i < n; ++i) {
     const auto hi = off[i + 1];
     const auto count_i = ws.up_off[i + 1] - ws.up_off[i];
@@ -430,18 +456,22 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
       const auto total_up = static_cast<std::size_t>(ws.up_off[n_atoms]);
       if (total_up >= kMinParallelHalfPairs) {
         const std::size_t nwords = (total_up + 63) / 64;
-        ws.active_bits.assign(nwords, 0ULL);
-        ws.pair_forces.resize(total_up);
+        assignBuffer(ws.active_bits, nwords, std::uint64_t{0});
+        resizeBuffer(ws.pair_forces, total_up);
         const bool want_he = atoms != nullptr && atoms->energy != nullptr;
         const bool want_hv = atoms != nullptr && atoms->virial != nullptr;
         if (want_he) {
-          ws.pair_he.resize(total_up);
+          resizeBuffer(ws.pair_he, total_up);
+        } else {
+          resizeBuffer(ws.pair_he, 0);
         }
         if (want_hv) {
-          ws.pair_hv.resize(6 * total_up);
+          resizeBuffer(ws.pair_hv, 6 * total_up);
+        } else {
+          resizeBuffer(ws.pair_hv, 0);
         }
-        ws.row_e.resize(n_atoms);
-        ws.row_s.resize(6 * n_atoms);
+        resizeBuffer(ws.row_e, n_atoms);
+        resizeBuffer(ws.row_s, 6 * n_atoms);
 
         const std::int64_t total_inc =
             static_cast<std::int64_t>(ws.lo_off[n_atoms]) + static_cast<std::int64_t>(total_up);
@@ -646,8 +676,8 @@ void MorsePot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *at
   }
 
   std::fill_n(F, 3 * n_atoms, 0.0);
-  ws.row_e.assign(n_atoms, 0.0);
-  ws.row_s.assign(6 * n_atoms, 0.0);
+  assignBuffer(ws.row_e, n_atoms, 0.0);
+  assignBuffer(ws.row_s, 6 * n_atoms, 0.0);
   double *row_e = ws.row_e.data();
   double *row_s = ws.row_s.data();
 
@@ -870,6 +900,16 @@ MorseSplitSnapshot morseStoredSplitSnapshot() {
       .slices = ws.split_slices,
       .total_up = ws.split_total_up,
       .total_inc = ws.split_total_inc,
+      .up_off_cap = ws.up_off.capacity(),
+      .lo_off_cap = ws.lo_off.capacity(),
+      .lo_u_cap = ws.lo_u.capacity(),
+      .lo_count_cap = ws.lo_count.capacity(),
+      .active_bits_cap = ws.active_bits.capacity(),
+      .pair_forces_cap = ws.pair_forces.capacity(),
+      .pair_he_cap = ws.pair_he.capacity(),
+      .pair_hv_cap = ws.pair_hv.capacity(),
+      .row_e_cap = ws.row_e.capacity(),
+      .row_s_cap = ws.row_s.capacity(),
       .p0_splits = ws.p0_splits,
       .p1_splits = ws.p1_splits,
   };
