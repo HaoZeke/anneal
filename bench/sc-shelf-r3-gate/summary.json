@@ -1,0 +1,2275 @@
+{
+  "aa": [
+    {
+      "budget": 400000,
+      "ci_a1": [
+        105327.0,
+        262771.5
+      ],
+      "ci_a2": [
+        105327.0,
+        262771.5
+      ],
+      "difference": 0.0,
+      "fisher_p": 1.0,
+      "hits_a1": 12,
+      "hits_a2": 12,
+      "mannwhitney_p": 1.0,
+      "median_a1": 127839.5,
+      "median_a2": 127839.5,
+      "n": 12,
+      "system": "lj38",
+      "total_calls_a1": 2040283,
+      "total_calls_a2": 2040283
+    },
+    {
+      "budget": 4000000,
+      "ci_a1": [
+        290074.0,
+        3327845.0
+      ],
+      "ci_a2": [
+        290074.0,
+        3327845.0
+      ],
+      "difference": 0.0,
+      "fisher_p": 1.0,
+      "hits_a1": 5,
+      "hits_a2": 5,
+      "mannwhitney_p": 1.0,
+      "median_a1": 2721351.0,
+      "median_a2": 2721351.0,
+      "n": 12,
+      "system": "lj75",
+      "total_calls_a1": 38457980,
+      "total_calls_a2": 38457980
+    }
+  ],
+  "aa_band_calls": 0.0,
+  "affinity": "0",
+  "alpha": 0.05,
+  "arms": {
+    "A": {
+      "binaries": {
+        "h2h_metal": "e31d361ed4f5cbcabd37582012382fda78938baac1d0258e10b0ec093a08d405",
+        "h2h_morse": "ba2b0879832ec45a2353bf31e6defecef0749b5d39e6f90292b2d8774baf6cbe",
+        "h2h_seed": "9c6d539a60bda028ebd129212a04fbe36be7c7cf3567f7fb1766bea3d7c5939e",
+        "lj_shelf_gate": "441896082e0b80173d5fbef1862f783bf50c7635a123798bf6ab6780e58fa30a"
+      },
+      "clean": true,
+      "commit": "76a9001b6c76f7a1297d16d287301278f1876b9d",
+      "porcelain": "",
+      "tree": "d8b35f5a2750409ce7ba3594d906b7f3441f2fb4"
+    },
+    "B": {
+      "binaries": {
+        "h2h_metal": "39930cb497cde69c8c7272bec678640514430ca8547b88e065c25241875f5a27",
+        "h2h_morse": "e7af83c7fccffc782354aa2c8ff42cef60655743fb0c10d98cf0c2ab1743b49b",
+        "h2h_seed": "a11114649ae34be054dffa8e108e2d14977a4010a6a4f17933968ab09fa9f2c5",
+        "lj_shelf_gate": "a5bcb720003bed41e0dc8eedf38a3e80144bebcf69483847f115d6f6424f3bf8"
+      },
+      "clean": true,
+      "commit": "696761e200e8a40368c660154bea046ef896a2d7",
+      "porcelain": "",
+      "tree": "24e4303aa2ca9b80db48d42759b2b21e2aff3bb1"
+    }
+  },
+  "bootstrap": {
+    "interval": 0.95,
+    "n": 10000,
+    "seed": 7619001
+  },
+  "compiler": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+  "core": 0,
+  "cpu": "Intel(R) Xeon(R) Processor",
+  "hit_tolerance": 0.001,
+  "host": "anneal-ci",
+  "io_resumes": 0,
+  "losses": [
+    {
+      "fisher_p": 0.03607484183604792,
+      "mannwhitney_p": 0.7111111111111111,
+      "reasons": [
+        "fewer hits"
+      ],
+      "system": "lj77"
+    }
+  ],
+  "machine_id": "3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873",
+  "marginal": [],
+  "marginal_alpha": 0.1,
+  "order": "ABBA",
+  "outside_s_a": 6417.686829,
+  "outside_s_b": 6205.131898,
+  "rule": "PASS only if B loses on no system. B loses a system when B hits on fewer seeds and the two-sided Fisher exact p is below 0.05, or when the median energy calls to a hit on hitting runs is higher for B than for A, the two-sided exact Mann-Whitney p is below 0.05, and that median difference is strictly larger than the A/A band. The A/A band is the larger of the two median-call differences between a second copy of arm A and the first, on LJ38 and LJ75, at the same twelve seeds. Marginal losses use the same tests at p below 0.1 and are listed separately. A marginal loss does not change the verdict.",
+  "seeds": [
+    2000,
+    2001,
+    2002,
+    2003,
+    2004,
+    2005,
+    2006,
+    2007,
+    2008,
+    2009,
+    2010,
+    2011
+  ],
+  "starts_checked": 228,
+  "systems": [
+    {
+      "budget": 400000,
+      "calls_a": {
+        "ci95": [
+          105327.0,
+          262771.5
+        ],
+        "median": 127839.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          127615.0,
+          245714.0
+        ],
+        "median": 155428.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.4428331797425888,
+      "mannwhitney_u_b": 86.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 27589.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 5.225744,
+      "outside_s_b": 5.904849,
+      "reference": -173.928427,
+      "system": "lj38",
+      "total_calls_a": 2040283,
+      "total_calls_b": 2302554
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          290074.0,
+          3327845.0
+        ],
+        "median": 2721351.0,
+        "n": 5
+      },
+      "calls_b": {
+        "ci95": [
+          95583.0,
+          2893247.0
+        ],
+        "median": 2015754.0,
+        "n": 4
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 5,
+      "hits_b": 4,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.5555555555555556,
+      "mannwhitney_u_b": 7.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -705597.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 243.598571,
+      "outside_s_b": 237.573868,
+      "reference": -397.492331,
+      "system": "lj75",
+      "total_calls_a": 38457980,
+      "total_calls_b": 39020338
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          6738.0,
+          3985536.0
+        ],
+        "median": 1409754.0,
+        "n": 5
+      },
+      "calls_b": {
+        "ci95": [
+          6738.0,
+          3288982.0
+        ],
+        "median": 2539903.0,
+        "n": 4
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 5,
+      "hits_b": 4,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6111111111111112,
+      "mannwhitney_u_b": 12.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 1130149.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 225.60671,
+      "outside_s_b": 253.516296,
+      "reference": -402.894866,
+      "system": "lj76",
+      "total_calls_a": 36008422,
+      "total_calls_b": 40375526
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          1210212.0,
+          3074994.5
+        ],
+        "median": 2138360.5,
+        "n": 8
+      },
+      "calls_b": {
+        "ci95": [
+          430610.0,
+          2706599.0
+        ],
+        "median": 1568604.5,
+        "n": 2
+      },
+      "family": "lj",
+      "fisher_p": 0.03607484183604792,
+      "hits_a": 8,
+      "hits_b": 2,
+      "loss": true,
+      "loss_reasons": [
+        "fewer hits"
+      ],
+      "mannwhitney_p": 0.7111111111111111,
+      "mannwhitney_u_b": 6.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -569756.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 222.632565,
+      "outside_s_b": 277.27334,
+      "reference": -409.083517,
+      "system": "lj77",
+      "total_calls_a": 33706555,
+      "total_calls_b": 43137209
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          48749.0,
+          274100.0
+        ],
+        "median": 85204.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          121454.5,
+          360013.5
+        ],
+        "median": 149361.0,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.24723055918371573,
+      "mannwhitney_u_b": 92.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 64156.5,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 22.044516,
+      "outside_s_b": 20.20082,
+      "reference": -414.794401,
+      "system": "lj78",
+      "total_calls_a": 2768353,
+      "total_calls_b": 2599296
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          21102.0,
+          197217.5
+        ],
+        "median": 77456.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          21102.0,
+          233603.0
+        ],
+        "median": 74042.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9227788633495997,
+      "mannwhitney_u_b": 74.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -3413.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 10.564867000000001,
+      "outside_s_b": 19.335777,
+      "reference": -421.810897,
+      "system": "lj79",
+      "total_calls_a": 1400250,
+      "total_calls_b": 2544876
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          8856.0,
+          90691.0
+        ],
+        "median": 17245.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          8856.0,
+          124496.5
+        ],
+        "median": 17245.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9237714096376096,
+      "mannwhitney_u_b": 74.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 6.390378999999999,
+      "outside_s_b": 6.788863,
+      "reference": -428.083564,
+      "system": "lj80",
+      "total_calls_a": 797741,
+      "total_calls_b": 818051
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          22483.5,
+          310935.5
+        ],
+        "median": 102841.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          38515.5,
+          742940.5
+        ],
+        "median": 148287.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.4859290662225108,
+      "mannwhitney_u_b": 84.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 45446.5,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 18.287603,
+      "outside_s_b": 34.380953000000005,
+      "reference": -434.343643,
+      "system": "lj81",
+      "total_calls_a": 2409451,
+      "total_calls_b": 4540701
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          192525.0,
+          712403.5
+        ],
+        "median": 402201.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          178660.5,
+          932916.0
+        ],
+        "median": 606001.0,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.4872751424104231,
+      "mannwhitney_u_b": 84.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 203800.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 41.145621,
+      "outside_s_b": 57.474535,
+      "reference": -440.550425,
+      "system": "lj82",
+      "total_calls_a": 5607941,
+      "total_calls_b": 7732709
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          204186.0,
+          992643.0
+        ],
+        "median": 517378.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          356088.5,
+          1106209.5
+        ],
+        "median": 604949.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.45212406384838744,
+      "mannwhitney_u_b": 85.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 87571.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 58.249873,
+      "outside_s_b": 64.587738,
+      "reference": -446.924094,
+      "system": "lj83",
+      "total_calls_a": 7896141,
+      "total_calls_b": 9145260
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          366465.0,
+          1321028.5
+        ],
+        "median": 1005838.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          308166.0,
+          1530723.5
+        ],
+        "median": 596081.0,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8873859348351204,
+      "mannwhitney_u_b": 69.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -409757.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 87.905884,
+      "outside_s_b": 89.027046,
+      "reference": -452.657214,
+      "system": "lj84",
+      "total_calls_a": 11247599,
+      "total_calls_b": 11482477
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          34694.5,
+          304406.0
+        ],
+        "median": 176449.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          91051.0,
+          560046.0
+        ],
+        "median": 305093.0,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.29688893688086043,
+      "mannwhitney_u_b": 90.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 128643.5,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 20.352254,
+      "outside_s_b": 37.154802000000004,
+      "reference": -459.055799,
+      "system": "lj85",
+      "total_calls_a": 2408452,
+      "total_calls_b": 4397046
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          131680.5,
+          1643759.5
+        ],
+        "median": 643521.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          469338.5,
+          1467475.0
+        ],
+        "median": 688707.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6826248189823368,
+      "mannwhitney_u_b": 79.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 45186.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 87.114237,
+      "outside_s_b": 95.206752,
+      "reference": -465.384493,
+      "system": "lj86",
+      "total_calls_a": 11337759,
+      "total_calls_b": 12655428
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          234647.0,
+          953571.0
+        ],
+        "median": 705145.0,
+        "n": 11
+      },
+      "calls_b": {
+        "ci95": [
+          326921.5,
+          1740103.0
+        ],
+        "median": 656780.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 11,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6075241221290487,
+      "mannwhitney_u_b": 75.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -48364.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 91.74758200000001,
+      "outside_s_b": 94.24598800000001,
+      "reference": -472.098165,
+      "system": "lj87",
+      "total_calls_a": 11865287,
+      "total_calls_b": 12225424
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          271802.5,
+          807063.0
+        ],
+        "median": 494222.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          270806.0,
+          1186079.0
+        ],
+        "median": 389081.0,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.990777159305898,
+      "mannwhitney_u_b": 71.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -105141.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 65.13185,
+      "outside_s_b": 56.444191000000004,
+      "reference": -479.03263,
+      "system": "lj88",
+      "total_calls_a": 7845899,
+      "total_calls_b": 7484985
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          384420.0,
+          1106419.0
+        ],
+        "median": 829426.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          407015.5,
+          1599203.0
+        ],
+        "median": 789518.0,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8428359902313328,
+      "mannwhitney_u_b": 76.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -39908.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 95.0571,
+      "outside_s_b": 99.38089099999999,
+      "reference": -486.053911,
+      "system": "lj89",
+      "total_calls_a": 11422318,
+      "total_calls_b": 12045652
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          733056.5,
+          1194268.5
+        ],
+        "median": 1065412.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          193476.0,
+          2366828.0
+        ],
+        "median": 821329.0,
+        "n": 11
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 11,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6947025245584945,
+      "mannwhitney_u_b": 59.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -244083.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 110.453578,
+      "outside_s_b": 143.592519,
+      "reference": -492.433908,
+      "system": "lj90",
+      "total_calls_a": 13026561,
+      "total_calls_b": 17243726
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          942568.5,
+          1833887.0
+        ],
+        "median": 1420053.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          151398.0,
+          1135553.0
+        ],
+        "median": 347344.0,
+        "n": 11
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 11,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.0933873637467661,
+      "mannwhitney_u_b": 38.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -1072709.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 149.558254,
+      "outside_s_b": 126.04543,
+      "reference": -498.81106,
+      "system": "lj91",
+      "total_calls_a": 17427223,
+      "total_calls_b": 14904326
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          406098.0,
+          1709320.5
+        ],
+        "median": 806125.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          480064.0,
+          2900077.5
+        ],
+        "median": 1103159.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.4873683323003555,
+      "mannwhitney_u_b": 84.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 297034.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 110.94087400000001,
+      "outside_s_b": 159.66272,
+      "reference": -505.185309,
+      "system": "lj92",
+      "total_calls_a": 12750891,
+      "total_calls_b": 18149785
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          176859.0,
+          1832837.0
+        ],
+        "median": 544518.0,
+        "n": 11
+      },
+      "calls_b": {
+        "ci95": [
+          397821.0,
+          2379738.0
+        ],
+        "median": 971607.0,
+        "n": 10
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 11,
+      "hits_b": 10,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6539028566892344,
+      "mannwhitney_u_b": 62.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 427089.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 149.552383,
+      "outside_s_b": 171.623134,
+      "reference": -510.877688,
+      "system": "lj93",
+      "total_calls_a": 16996355,
+      "total_calls_b": 20220665
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          220665.0,
+          1290262.0
+        ],
+        "median": 527160.0,
+        "n": 11
+      },
+      "calls_b": {
+        "ci95": [
+          287859.0,
+          2021836.0
+        ],
+        "median": 595568.5,
+        "n": 12
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 11,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.5365370932742046,
+      "mannwhitney_u_b": 76.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 68408.5,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 107.330024,
+      "outside_s_b": 116.44915700000001,
+      "reference": -517.264131,
+      "system": "lj94",
+      "total_calls_a": 12117101,
+      "total_calls_b": 13013475
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          192622.5,
+          3471870.5
+        ],
+        "median": 1283035.0,
+        "n": 6
+      },
+      "calls_b": {
+        "ci95": [
+          212912.0,
+          937444.0
+        ],
+        "median": 565369.5,
+        "n": 10
+      },
+      "family": "lj",
+      "fisher_p": 0.19302732534661463,
+      "hits_a": 6,
+      "hits_b": 10,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.4278221778221778,
+      "mannwhitney_u_b": 22.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -717665.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 337.893639,
+      "outside_s_b": 135.655779,
+      "reference": -523.640211,
+      "system": "lj95",
+      "total_calls_a": 33895056,
+      "total_calls_b": 14391732
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          700685.0,
+          2993177.0
+        ],
+        "median": 1931253.0,
+        "n": 11
+      },
+      "calls_b": {
+        "ci95": [
+          896962.0,
+          3258199.0
+        ],
+        "median": 1567266.5,
+        "n": 10
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 11,
+      "hits_b": 10,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8632667641955568,
+      "mannwhitney_u_b": 52.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -363986.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 246.584469,
+      "outside_s_b": 260.323149,
+      "reference": -529.879146,
+      "system": "lj96",
+      "total_calls_a": 24983402,
+      "total_calls_b": 26810517
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          361171.0,
+          2345359.0
+        ],
+        "median": 1037374.0,
+        "n": 9
+      },
+      "calls_b": {
+        "ci95": [
+          370513.0,
+          2530931.0
+        ],
+        "median": 956618.0,
+        "n": 9
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 9,
+      "hits_b": 9,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 40.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -80756.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 234.416308,
+      "outside_s_b": 224.945035,
+      "reference": -536.681383,
+      "system": "lj97",
+      "total_calls_a": 23436174,
+      "total_calls_b": 23252750
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          363251.0,
+          2484398.0
+        ],
+        "median": 1430688.0,
+        "n": 7
+      },
+      "calls_b": {
+        "ci95": [
+          293376.0,
+          3250106.0
+        ],
+        "median": 481090.0,
+        "n": 9
+      },
+      "family": "lj",
+      "fisher_p": 0.6668461434917217,
+      "hits_a": 7,
+      "hits_b": 9,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6805944055944056,
+      "mannwhitney_u_b": 27.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -949598.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 298.276991,
+      "outside_s_b": 225.045573,
+      "reference": -543.665361,
+      "system": "lj98",
+      "total_calls_a": 30921843,
+      "total_calls_b": 24670789
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          586606.5,
+          2723618.0
+        ],
+        "median": 1282286.5,
+        "n": 10
+      },
+      "calls_b": {
+        "ci95": [
+          58036.0,
+          3206057.0
+        ],
+        "median": 288688.5,
+        "n": 6
+      },
+      "family": "lj",
+      "fisher_p": 0.19302732534661463,
+      "hits_a": 10,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.38224275724275725,
+      "mannwhitney_u_b": 21.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -993598.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 241.41912100000002,
+      "outside_s_b": 290.354328,
+      "reference": -550.666526,
+      "system": "lj99",
+      "total_calls_a": 24464835,
+      "total_calls_b": 31105563
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          43641.0,
+          1645210.5
+        ],
+        "median": 493581.5,
+        "n": 6
+      },
+      "calls_b": {
+        "ci95": [
+          79437.0,
+          3308869.0
+        ],
+        "median": 426692.0,
+        "n": 8
+      },
+      "family": "lj",
+      "fisher_p": 0.6801722977520528,
+      "hits_a": 6,
+      "hits_b": 8,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.7545787545787546,
+      "mannwhitney_u_b": 27.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -66889.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 289.052576,
+      "outside_s_b": 249.23722,
+      "reference": -557.03982,
+      "system": "lj100",
+      "total_calls_a": 28364866,
+      "total_calls_b": 25112187
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          236226.0,
+          2517936.0
+        ],
+        "median": 760494.0,
+        "n": 7
+      },
+      "calls_b": {
+        "ci95": [
+          299768.0,
+          2616364.0
+        ],
+        "median": 828625.0,
+        "n": 9
+      },
+      "family": "lj",
+      "fisher_p": 0.6668461434917217,
+      "hits_a": 7,
+      "hits_b": 9,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 31.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 68131.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 303.556522,
+      "outside_s_b": 223.477369,
+      "reference": -563.411308,
+      "system": "lj101",
+      "total_calls_a": 29319966,
+      "total_calls_b": 21963372
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          671396.5,
+          2503199.5
+        ],
+        "median": 1816132.5,
+        "n": 6
+      },
+      "calls_b": {
+        "ci95": [
+          1293161.0,
+          3301482.0
+        ],
+        "median": 2187685.0,
+        "n": 6
+      },
+      "family": "lj",
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.30952380952380953,
+      "mannwhitney_u_b": 25.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 371552.5,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 350.518672,
+      "outside_s_b": 374.98627899999997,
+      "reference": -569.363652,
+      "system": "lj102",
+      "total_calls_a": 33981457,
+      "total_calls_b": 37564656
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          40135.5,
+          2454847.5
+        ],
+        "median": 638914.5,
+        "n": 6
+      },
+      "calls_b": {
+        "ci95": [
+          111789.0,
+          2821666.0
+        ],
+        "median": 962367.0,
+        "n": 8
+      },
+      "family": "lj",
+      "fisher_p": 0.6801722977520528,
+      "hits_a": 6,
+      "hits_b": 8,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.5138195138195139,
+      "mannwhitney_u_b": 29.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 323452.5,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 316.795019,
+      "outside_s_b": 290.563399,
+      "reference": -575.766131,
+      "system": "lj103",
+      "total_calls_a": 30267795,
+      "total_calls_b": 26691224
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          416266.0,
+          2303715.0
+        ],
+        "median": 1300907.0,
+        "n": 5
+      },
+      "calls_b": {
+        "ci95": [
+          683808.0,
+          1628067.0
+        ],
+        "median": 1154783.0,
+        "n": 7
+      },
+      "family": "lj",
+      "fisher_p": 0.6842726529090778,
+      "hits_a": 5,
+      "hits_b": 7,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 17.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -146124.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 358.815768,
+      "outside_s_b": 303.415905,
+      "reference": -582.086642,
+      "system": "lj104",
+      "total_calls_a": 34528945,
+      "total_calls_b": 28829507
+    },
+    {
+      "budget": 400000,
+      "calls_a": {
+        "ci95": [
+          2728.5,
+          10331.5
+        ],
+        "median": 5184.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          2728.5,
+          10331.5
+        ],
+        "median": 5184.5,
+        "n": 12
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 72.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 0.316599,
+      "outside_s_b": 0.316335,
+      "reference": -118.432844,
+      "system": "m30r6",
+      "total_calls_a": 102084,
+      "total_calls_b": 102084
+    },
+    {
+      "budget": 400000,
+      "calls_a": {
+        "ci95": [
+          45772.0,
+          225523.0
+        ],
+        "median": 155782.0,
+        "n": 8
+      },
+      "calls_b": {
+        "ci95": [
+          51923.5,
+          243322.0
+        ],
+        "median": 155961.0,
+        "n": 12
+      },
+      "family": "morse",
+      "fisher_p": 0.09316770186335403,
+      "hits_a": 8,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.7777407319202985,
+      "mannwhitney_u_b": 52.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 179.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 4.972461,
+      "outside_s_b": 3.48838,
+      "reference": -106.83579,
+      "system": "m30r14",
+      "total_calls_a": 2790589,
+      "total_calls_b": 1963959
+    },
+    {
+      "budget": 400000,
+      "calls_a": {
+        "ci95": [
+          18557.0,
+          84500.0
+        ],
+        "median": 49438.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          23929.0,
+          75913.5
+        ],
+        "median": 33046.5,
+        "n": 12
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.7662035770125688,
+      "mannwhitney_u_b": 66.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -16392.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 2.4202429999999997,
+      "outside_s_b": 1.732615,
+      "reference": -157.477108,
+      "system": "m38r6",
+      "total_calls_a": 824378,
+      "total_calls_b": 617238
+    },
+    {
+      "budget": 400000,
+      "calls_a": {
+        "ci95": [
+          25004.0,
+          219638.0
+        ],
+        "median": 79869.0,
+        "n": 4
+      },
+      "calls_b": {
+        "ci95": [
+          34680.5,
+          234741.0
+        ],
+        "median": 57685.0,
+        "n": 6
+      },
+      "family": "morse",
+      "fisher_p": 0.6801722977520528,
+      "hits_a": 4,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8761904761904762,
+      "mannwhitney_u_b": 13.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -22184.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 8.94591,
+      "outside_s_b": 7.331083,
+      "reference": -144.321054,
+      "system": "m38r14",
+      "total_calls_a": 3604407,
+      "total_calls_b": 3054213
+    },
+    {
+      "budget": 1000000,
+      "calls_a": {
+        "ci95": [
+          16637.5,
+          72421.0
+        ],
+        "median": 22596.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          17331.0,
+          72421.0
+        ],
+        "median": 22596.0,
+        "n": 12
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.9664398059875244,
+      "mannwhitney_u_b": 71.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 2.231218,
+      "outside_s_b": 2.149807,
+      "reference": -250.286609,
+      "system": "m55r6",
+      "total_calls_a": 483858,
+      "total_calls_b": 464941
+    },
+    {
+      "budget": 1000000,
+      "calls_a": {
+        "ci95": [
+          76491.0,
+          519192.0
+        ],
+        "median": 334221.0,
+        "n": 9
+      },
+      "calls_b": {
+        "ci95": [
+          209424.0,
+          532134.5
+        ],
+        "median": 402613.0,
+        "n": 10
+      },
+      "family": "morse",
+      "fisher_p": 0.9999999999999999,
+      "hits_a": 9,
+      "hits_b": 10,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.49669834809153696,
+      "mannwhitney_u_b": 54.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 68392.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 27.891426,
+      "outside_s_b": 26.908209,
+      "reference": -220.646208,
+      "system": "m55r14",
+      "total_calls_a": 6122689,
+      "total_calls_b": 6133251
+    },
+    {
+      "budget": 1000000,
+      "calls_a": {
+        "ci95": [
+          209396.0,
+          567252.0
+        ],
+        "median": 350107.0,
+        "n": 11
+      },
+      "calls_b": {
+        "ci95": [
+          95163.0,
+          449014.0
+        ],
+        "median": 291180.0,
+        "n": 10
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 11,
+      "hits_b": 10,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.3397010626112793,
+      "mannwhitney_u_b": 41.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -58927.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 42.635639,
+      "outside_s_b": 38.945116999999996,
+      "reference": -577.739782,
+      "system": "m70r3",
+      "total_calls_a": 5249659,
+      "total_calls_b": 4814235
+    },
+    {
+      "budget": 1000000,
+      "calls_a": {
+        "ci95": [
+          34503.0,
+          105597.0
+        ],
+        "median": 58235.0,
+        "n": 11
+      },
+      "calls_b": {
+        "ci95": [
+          66922.0,
+          357443.5
+        ],
+        "median": 111817.5,
+        "n": 12
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 11,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.19438523517134368,
+      "mannwhitney_u_b": 87.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 53582.5,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 24.388792999999996,
+      "outside_s_b": 24.960195,
+      "reference": -325.887749,
+      "system": "m70r6",
+      "total_calls_a": 2839166,
+      "total_calls_b": 2937004
+    },
+    {
+      "budget": 1000000,
+      "calls_a": {
+        "ci95": [
+          92970.0,
+          818658.5
+        ],
+        "median": 357245.0,
+        "n": 6
+      },
+      "calls_b": {
+        "ci95": [
+          82547.0,
+          987839.0
+        ],
+        "median": 719594.0,
+        "n": 4
+      },
+      "family": "morse",
+      "fisher_p": 0.6801722977520528,
+      "hits_a": 6,
+      "hits_b": 4,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6095238095238096,
+      "mannwhitney_u_b": 15.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 362349.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 62.273437,
+      "outside_s_b": 78.345148,
+      "reference": -296.412149,
+      "system": "m70r10",
+      "total_calls_a": 8537747,
+      "total_calls_b": 10509574
+    },
+    {
+      "budget": 1000000,
+      "calls_a": {
+        "ci95": [
+          134144.5,
+          631450.0
+        ],
+        "median": 273155.0,
+        "n": 10
+      },
+      "calls_b": {
+        "ci95": [
+          45940.0,
+          762633.0
+        ],
+        "median": 506296.0,
+        "n": 8
+      },
+      "family": "morse",
+      "fisher_p": 0.6404053612291598,
+      "hits_a": 10,
+      "hits_b": 8,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.618995383701266,
+      "mannwhitney_u_b": 46.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 233141.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 38.036218999999996,
+      "outside_s_b": 50.892441000000005,
+      "reference": -292.462856,
+      "system": "m70r14",
+      "total_calls_a": 5694188,
+      "total_calls_b": 7509027
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          18677.5,
+          67070.5
+        ],
+        "median": 36120.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          18677.5,
+          53499.5
+        ],
+        "median": 33465.5,
+        "n": 12
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8094540403734104,
+      "mannwhitney_u_b": 67.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -2655.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 6.202886000000001,
+      "outside_s_b": 6.061312,
+      "reference": -318.40733,
+      "system": "m75r14",
+      "total_calls_a": 641700,
+      "total_calls_b": 618461
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          549686.0,
+          1125749.5
+        ],
+        "median": 916054.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          547659.0,
+          1448990.0
+        ],
+        "median": 751923.0,
+        "n": 11
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 11,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 66.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -164131.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 131.660663,
+      "outside_s_b": 170.61237,
+      "reference": -690.57789,
+      "system": "m80r3",
+      "total_calls_a": 12660083,
+      "total_calls_b": 16139070
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          25845.5,
+          629251.0
+        ],
+        "median": 62677.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          17218.5,
+          112407.5
+        ],
+        "median": 65518.0,
+        "n": 12
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.5994816867074236,
+      "mannwhitney_u_b": 62.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 2841.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 54.48110500000001,
+      "outside_s_b": 20.119533999999994,
+      "reference": -378.333471,
+      "system": "m80r6",
+      "total_calls_a": 4587764,
+      "total_calls_b": 1762329
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          670688.5,
+          2782576.5
+        ],
+        "median": 1678563.5,
+        "n": 6
+      },
+      "calls_b": {
+        "ci95": [
+          381247.0,
+          2669385.0
+        ],
+        "median": 1560813.0,
+        "n": 8
+      },
+      "family": "morse",
+      "fisher_p": 0.6801722977520528,
+      "hits_a": 6,
+      "hits_b": 8,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.7545787545787546,
+      "mannwhitney_u_b": 21.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -117750.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 347.14704400000005,
+      "outside_s_b": 284.873895,
+      "reference": -344.911381,
+      "system": "m80r10",
+      "total_calls_a": 34263657,
+      "total_calls_b": 28733443
+    },
+    {
+      "budget": 4000000,
+      "calls_a": {
+        "ci95": [
+          878074.0,
+          3757008.0
+        ],
+        "median": 2132943.0,
+        "n": 6
+      },
+      "calls_b": {
+        "ci95": [
+          532123.5,
+          3050612.5
+        ],
+        "median": 1734299.5,
+        "n": 6
+      },
+      "family": "morse",
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.8181818181818182,
+      "mannwhitney_u_b": 16.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": -398643.5,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 343.097999,
+      "outside_s_b": 310.976645,
+      "reference": -340.811371,
+      "system": "m80r14",
+      "total_calls_a": 37536050,
+      "total_calls_b": 34634071
+    },
+    {
+      "budget": 400000,
+      "calls_a": {
+        "ci95": [
+          84509.0,
+          192767.0
+        ],
+        "median": 161757.5,
+        "n": 8
+      },
+      "calls_b": {
+        "ci95": [
+          60998.5,
+          340850.0
+        ],
+        "median": 180034.5,
+        "n": 6
+      },
+      "family": "gold",
+      "fisher_p": 0.6801722977520528,
+      "hits_a": 8,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.6103896103896104,
+      "mannwhitney_u_b": 28.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 18277.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 13.384533,
+      "outside_s_b": 16.993816,
+      "reference": -130.54001708,
+      "system": "au38",
+      "total_calls_a": 2838860,
+      "total_calls_b": 3563766
+    },
+    {
+      "budget": 400000,
+      "calls_a": {
+        "ci95": null,
+        "median": null,
+        "n": 0
+      },
+      "calls_b": {
+        "ci95": null,
+        "median": null,
+        "n": 0
+      },
+      "family": "gold",
+      "fisher_p": 1.0,
+      "hits_a": 0,
+      "hits_b": 0,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": null,
+      "mannwhitney_u_b": null,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": null,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 22.248402,
+      "outside_s_b": 22.157586000000002,
+      "reference": -130.79994836,
+      "system": "cu6au32",
+      "total_calls_a": 4800000,
+      "total_calls_b": 4800000
+    },
+    {
+      "budget": 1000000,
+      "calls_a": {
+        "ci95": [
+          39878.0,
+          313188.0
+        ],
+        "median": 96178.5,
+        "n": 4
+      },
+      "calls_b": {
+        "ci95": [
+          39878.0,
+          869351.0
+        ],
+        "median": 571640.5,
+        "n": 4
+      },
+      "family": "gold",
+      "fisher_p": 1.0,
+      "hits_a": 4,
+      "hits_b": 4,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 0.22857142857142856,
+      "mannwhitney_u_b": 12.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 475462.0,
+      "n": 12,
+      "outside_aa_band": true,
+      "outside_s_a": 78.44527,
+      "outside_s_b": 92.886819,
+      "reference": -191.0308528,
+      "system": "au55",
+      "total_calls_a": 8545423,
+      "total_calls_b": 10052510
+    },
+    {
+      "budget": 1000000,
+      "calls_a": {
+        "ci95": null,
+        "median": null,
+        "n": 0
+      },
+      "calls_b": {
+        "ci95": null,
+        "median": null,
+        "n": 0
+      },
+      "family": "gold",
+      "fisher_p": 1.0,
+      "hits_a": 0,
+      "hits_b": 0,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": null,
+      "mannwhitney_u_b": null,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": null,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 114.096677,
+      "outside_s_b": 113.75614700000001,
+      "reference": -182.93136675,
+      "system": "cu27au28",
+      "total_calls_a": 12000000,
+      "total_calls_b": 12000000
+    },
+    {
+      "budget": 80000,
+      "calls_a": {
+        "ci95": [
+          65395.0,
+          65395.0
+        ],
+        "median": 65395.0,
+        "n": 1
+      },
+      "calls_b": {
+        "ci95": [
+          65395.0,
+          65395.0
+        ],
+        "median": 65395.0,
+        "n": 1
+      },
+      "family": "gold",
+      "fisher_p": 1.0,
+      "hits_a": 1,
+      "hits_b": 1,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 0.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 2.334728,
+      "outside_s_b": 2.3660359999999994,
+      "reference": -122.99148391,
+      "system": "cu19au19",
+      "total_calls_a": 951003,
+      "total_calls_b": 951003
+    },
+    {
+      "budget": 2000000,
+      "calls_a": {
+        "ci95": [
+          3259.5,
+          12233.5
+        ],
+        "median": 6339.0,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          3259.5,
+          12233.5
+        ],
+        "median": 6339.0,
+        "n": 12
+      },
+      "family": "water",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 72.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 0.19172799999999998,
+      "outside_s_b": 0.196142,
+      "reference": -305.5183221676,
+      "system": "tip4p8",
+      "total_calls_a": 93163,
+      "total_calls_b": 93163
+    },
+    {
+      "budget": 2000000,
+      "calls_a": {
+        "ci95": [
+          18953.0,
+          108333.0
+        ],
+        "median": 41418.5,
+        "n": 12
+      },
+      "calls_b": {
+        "ci95": [
+          18953.0,
+          108333.0
+        ],
+        "median": 41418.5,
+        "n": 12
+      },
+      "family": "water",
+      "fisher_p": 1.0,
+      "hits_a": 12,
+      "hits_b": 12,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 72.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 1.477965,
+      "outside_s_b": 1.4891240000000001,
+      "reference": -492.9082357122,
+      "system": "tip4p12",
+      "total_calls_a": 837434,
+      "total_calls_b": 837434
+    },
+    {
+      "budget": 2000000,
+      "calls_a": {
+        "ci95": [
+          322043.0,
+          1228021.0
+        ],
+        "median": 647181.0,
+        "n": 7
+      },
+      "calls_b": {
+        "ci95": [
+          322043.0,
+          1228021.0
+        ],
+        "median": 647181.0,
+        "n": 7
+      },
+      "family": "water",
+      "fisher_p": 1.0,
+      "hits_a": 7,
+      "hits_b": 7,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 24.5,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 28.786771,
+      "outside_s_b": 29.122513,
+      "reference": -628.3722525077,
+      "system": "tip4p15",
+      "total_calls_a": 15634002,
+      "total_calls_b": 15634002
+    },
+    {
+      "budget": 2000000,
+      "calls_a": {
+        "ci95": [
+          200146.0,
+          350155.0
+        ],
+        "median": 275150.5,
+        "n": 2
+      },
+      "calls_b": {
+        "ci95": [
+          200146.0,
+          350155.0
+        ],
+        "median": 275150.5,
+        "n": 2
+      },
+      "family": "water",
+      "fisher_p": 1.0,
+      "hits_a": 2,
+      "hits_b": 2,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 2.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 42.457698,
+      "outside_s_b": 42.802018,
+      "reference": -681.1925945898,
+      "system": "tip4p16",
+      "total_calls_a": 20550301,
+      "total_calls_b": 20550301
+    },
+    {
+      "budget": 2000000,
+      "calls_a": {
+        "ci95": [
+          257399.0,
+          1095142.5
+        ],
+        "median": 556785.0,
+        "n": 6
+      },
+      "calls_b": {
+        "ci95": [
+          257399.0,
+          1095142.5
+        ],
+        "median": 556785.0,
+        "n": 6
+      },
+      "family": "water",
+      "fisher_p": 1.0,
+      "hits_a": 6,
+      "hits_b": 6,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": 1.0,
+      "mannwhitney_u_b": 18.0,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": 0.0,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 41.826628,
+      "outside_s_b": 42.091766,
+      "reference": -872.9887544952,
+      "system": "tip4p20",
+      "total_calls_a": 15818653,
+      "total_calls_b": 15818653
+    },
+    {
+      "budget": 2000000,
+      "calls_a": {
+        "ci95": null,
+        "median": null,
+        "n": 0
+      },
+      "calls_b": {
+        "ci95": null,
+        "median": null,
+        "n": 0
+      },
+      "family": "water",
+      "fisher_p": 1.0,
+      "hits_a": 0,
+      "hits_b": 0,
+      "loss": false,
+      "loss_reasons": [],
+      "mannwhitney_p": null,
+      "mannwhitney_u_b": null,
+      "marginal": false,
+      "marginal_reasons": [],
+      "median_difference": null,
+      "n": 12,
+      "outside_aa_band": false,
+      "outside_s_a": 69.515233,
+      "outside_s_b": 69.68314,
+      "reference": -916.707430294,
+      "system": "tip4p21",
+      "total_calls_a": 24000000,
+      "total_calls_b": 24000000
+    }
+  ],
+  "total_calls_a": 785709759,
+  "total_calls_b": 784725538,
+  "verdict": "FAIL"
+}
