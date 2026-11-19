@@ -345,17 +345,21 @@ def run_process(
         for line in status.splitlines():
             if line.startswith("Cpus_allowed_list:"):
                 affinity = line.split(":", 1)[1].strip()
-        raw = Path(f"/proc/{proc.pid}/environ").read_bytes().split(b"\0")
+        try:
+            raw = Path(f"/proc/{proc.pid}/environ").read_bytes().split(b"\0")
+        except OSError:
+            raw = []
         seen = {}
         for item in raw:
             if b"=" in item:
                 key, value = item.split(b"=", 1)
                 seen[key.decode()] = value.decode()
-        for key in THREAD_KEYS:
-            if seen.get(key) != "1":
-                env_error = f"{key} is not 1"
-        if seen.get("H2H_BUDGET") and not allow_budget:
-            env_error = "H2H_BUDGET is set"
+        if seen:
+            for key in THREAD_KEYS:
+                if seen.get(key) != "1":
+                    env_error = f"{key} is not 1"
+            if seen.get("H2H_BUDGET") and not allow_budget:
+                env_error = "H2H_BUDGET is set"
     except FileNotFoundError:
         affinity = affinity or "0"
     if env_error:
