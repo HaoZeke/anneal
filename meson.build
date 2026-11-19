@@ -138,18 +138,43 @@ if not get_option('with_rpc_client_only')
         args: cppc.get_supported_arguments(['-std=c++20', '/std:c++20']),
     ).strip()
     if _libcpp_ver != '' and _libcpp_ver.to_int() < 190000
-        if not cppc.compiles(
-            '#include <cstdint>\nint main() { std::uint64_t w = 0; __atomic_fetch_or(&w, 1u, __ATOMIC_RELAXED); return 0; }',
-            args: cppc.get_supported_arguments(['-std=c++20']),
-            name: 'atomic_fetch_or fallback for libc++ < 19',
-        )
-            error(
-                'libc++ ' + _libcpp_ver + ' (< 190000) lacks std::atomic_ref and compiler lacks __atomic_fetch_or; upgrade to libc++ 19 or newer',
+        # compiles() never links. On targets where __atomic_fetch_or is a
+        # libcall, the builtin needs libatomic or the library fails at link.
+        _atomic_or_src = '''#include <stdint.h>
+int main(void) {
+    uint64_t word = 0;
+    uint64_t previous = __atomic_fetch_or(&word, (uint64_t)1, __ATOMIC_RELAXED);
+    return (int)(previous ^ word);
+}
+'''
+        if cc.links(_atomic_or_src, name: '__atomic_fetch_or')
+            message(
+                'libc++ ' + _libcpp_ver + ' (< 19): std::atomic_ref unavailable, using __atomic_fetch_or fallback',
             )
+        else
+            _libatomic_dep = cc.find_library('atomic', required: false)
+            if (
+                _libatomic_dep.found()
+                and cc.links(
+                    _atomic_or_src,
+                    dependencies: _libatomic_dep,
+                    name: '__atomic_fetch_or with libatomic',
+                )
+            )
+                _deps += _libatomic_dep
+                message(
+                    'libc++ '
+                    + _libcpp_ver
+                    + ' (< 19): std::atomic_ref unavailable, using __atomic_fetch_or with libatomic',
+                )
+            else
+                error(
+                    'libc++ '
+                    + _libcpp_ver
+                    + ' (< 190000) lacks std::atomic_ref and __atomic_fetch_or does not link, with or without libatomic; upgrade to libc++ 19 or newer',
+                )
+            endif
         endif
-        message(
-            'libc++ ' + _libcpp_ver + ' (< 19): std::atomic_ref unavailable, using __atomic_fetch_or fallback',
-        )
     endif
 endif
 
