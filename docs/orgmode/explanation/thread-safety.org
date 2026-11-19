@@ -17,15 +17,15 @@ in more than one interpreter.
 ** One instance per calling thread
 
 A potential object is not a session.
-=LJPot=, =LJClusterPot=, =MorsePot=, =ExprPot=, =D3Pot=, =D4Pot= and the Fortran
+=LJClusterPot=, =MorsePot=, =ExprPot=, =D3Pot=, =D4Pot= and the Fortran
 potentials wrap their kernel in a holder that keeps one kernel instance per
 calling thread.
 The constructing thread uses the instance built with the object.
 Another thread's first call creates an instance for that thread, under a
 per-object mutex that is taken only while the interpreter is detached.
-Two threads may therefore call one Lennard-Jones object at the same time.
-A kernel that declares =Reentrancy::SharedInstance= keeps the single instance
-for every thread instead.
+Two threads may therefore call one such object at the same time.
+A kernel that declares =Reentrancy::SharedInstance=, such as =LJPot=, keeps the
+single instance for every thread instead.
 
 The per-thread map keeps one instance for every caller thread id other than the
 constructing thread.

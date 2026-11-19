@@ -28,6 +28,7 @@
 //! | [`ch5_2008`] | Exact Taylor jet of the CH5 2008 surface |
 //! | [`c_api`] | `extern "C"` entry points collected by cbindgen |
 //! | [`version`] | Loaded library version, to check against `rgpot.h` |
+//! | [`engine`] | Loader for the generic engine C ABI (`engine` feature) |
 //! | [`rpc`] | Cap'n Proto RPC client and server (feature-gated) |
 //!
 //! ## Design Principles
@@ -79,6 +80,9 @@ pub mod Potentials_capnp {
 
 #[cfg(feature = "schema")]
 pub mod compat;
+
+#[cfg(feature = "engine")]
+pub mod engine;
 
 #[cfg(feature = "profile")]
 pub mod profile;

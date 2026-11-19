@@ -25,8 +25,9 @@ use crate::tensor::create_owned_f64_tensor;
 use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 
 fn fail(err: HvpError) -> rgpot_status_t {
-    if let HvpError::Invalid(why) = &err {
-        set_last_error(why);
+    match &err {
+        HvpError::Invalid(why) => set_last_error(why),
+        HvpError::Callback { message, .. } => set_last_error(message),
     }
     err.status()
 }
@@ -220,5 +221,23 @@ pub unsafe extern "C" fn rgpot_potential_hvp_counts(
 pub unsafe extern "C" fn rgpot_potential_reset_hvp_counts(pot: *const rgpot_potential_t) {
     if !pot.is_null() {
         unsafe { &*pot }.reset_hvp_counts();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_callback_failure_restores_its_message() {
+        let status = fail(HvpError::Callback {
+            status: rgpot_status_t::RGPOT_SCC_NOT_CONVERGED,
+            message: "cached SCC did not converge".to_owned(),
+        });
+        assert_eq!(status, rgpot_status_t::RGPOT_SCC_NOT_CONVERGED);
+        assert_eq!(
+            crate::status::last_error_message(),
+            "cached SCC did not converge"
+        );
     }
 }

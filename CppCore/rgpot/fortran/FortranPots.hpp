@@ -64,10 +64,29 @@ RGPOT_FORTRAN_POT_CLASS(EDIPPot, EDIP);
 RGPOT_FORTRAN_POT_CLASS(LenoskyPot, LenoskySi);
 RGPOT_FORTRAN_POT_CLASS(EAMAlPot, EAMAl);
 RGPOT_FORTRAN_POT_CLASS(FeHePot, FeHe);
-RGPOT_FORTRAN_POT_CLASS(CuH2Pot, CuH2);
 RGPOT_FORTRAN_POT_CLASS(WaterHPot, WaterH);
 
 #undef RGPOT_FORTRAN_POT_CLASS
+
+/// Copper-hydrogen EAM (PotType::CuH2), with the analytic Hessian-vector
+/// product of rgpot_cuh2.f90.
+class CuH2Pot : public Potential<CuH2Pot> {
+public:
+  CuH2Pot() : Potential(PotType::CuH2) {}
+  void forceImpl(const ForceInput &in, ForceOut *out) const override;
+  /// @f$H v@f$ from the pair, density and embedding second derivatives.
+  /// @a v and @a hv hold @c 3*in.nAtoms doubles.
+  void hessianVectorImpl(const ForceInput &in, const double *v,
+                         double *hv) const override;
+  [[nodiscard]] PotCaps caps() const noexcept override {
+    return {.reentrancy = Reentrancy::PerInstance,
+            .perImageInstances = true,
+            .analyticHvp = true};
+  }
+
+private:
+  FortranWorkspace m_ws;
+};
 
 /// Stillinger-Weber silicon (PotType::SWSi). Epsilon is eOn's
 /// 2.16826 * 1.06767385 = 2.3149945 eV, not the published 2.16723920 eV

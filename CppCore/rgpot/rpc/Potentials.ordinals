@@ -1953,3 +1953,5 @@ CP2KParams @21 field extraForceEvalSections :List(Text) upstream
 PotentialSpec @6 arm cp2k :CP2KParams upstream
 PotentialConfig @17 arm cp2k :CP2KParams upstream
 UmaParams @10 field cacheDir :Text local
+Capabilities.Operation @10 enumerant hessianVector - local
+Potential @14 method calculateHvp (fip:ForceInput,direction:List(Float64))->(product:List(Float64)) local

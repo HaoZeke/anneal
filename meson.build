@@ -92,6 +92,12 @@ if has_eam_table
     _args += ['-DRGPOT_HAS_EAM_TABLE=TRUE']
 endif
 
+cbe_dep = dependency('cbe', required: get_option('with_cbe'))
+has_cbe = cbe_dep.found()
+if has_cbe
+    _args += ['-DRGPOT_HAS_CBE=TRUE']
+endif
+
 rpc_enabled = get_option('with_rpc') or get_option('with_rpc_client_only')
 
 if get_option('with_rpc_client_only')

@@ -1,0 +1,1 @@
+`LJPot` keeps its `nlist::Neighbours` scratch per thread through `rgpot::Kept`, so concurrent `const` evaluations on a shared `LJPot` instance run without locks or races, and `LJPot::caps().reentrancy` is now `Reentrancy::SharedInstance`.

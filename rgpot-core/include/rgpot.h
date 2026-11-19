@@ -41,7 +41,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 4
+#define RGPOT_ABI_VERSION_MINOR 5
 
 /**
  * Layout revision of this build.
@@ -59,8 +59,29 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * Additive protocol revision.
  */
-#define PROTOCOL_MINOR 0
+#define PROTOCOL_MINOR 1
 #endif
+
+/**
+ * The ABI major this loader speaks, `RGPOT_ENGINE_ABI_VERSION` of the header.
+ */
+#define ENGINE_ABI_VERSION 1
+
+/**
+ * The ABI minor this loader requires, `RGPOT_ENGINE_ABI_MINOR` of the header.
+ */
+#define ENGINE_ABI_MINOR 4
+
+/**
+ * The struct layout revision this loader expects,
+ * `RGPOT_ENGINE_ABI_LAYOUT_REVISION` of the header.
+ */
+#define ENGINE_ABI_LAYOUT_REVISION 1
+
+/**
+ * Engine code meaning the backend does not support the requested operation.
+ */
+#define ENGINE_ERR_UNSUPPORTED 3
 
 /**
  * Which kind of failure a fused evaluation ended in.
@@ -722,6 +743,25 @@ rgpot_rpc_client_t *rgpot_rpc_client_new(const char *host, uint16_t port);
 enum rgpot_status_t rgpot_rpc_calculate(rgpot_rpc_client_t *client,
                                         const struct rgpot_force_input_t *input,
                                         struct rgpot_force_out_t *output);
+#endif
+
+#if (defined(RGPOT_HAS_RPC) && defined(RGPOT_HAS_RPC))
+/**
+ * Compute an analytic Hessian-vector product through the remote potential.
+ *
+ * `direction` and `product` each hold `3 * n_atoms` doubles.
+ *
+ * # Safety
+ *
+ * `client` must be a live pointer from `rgpot_rpc_client_new`.
+ * `input` must point to a valid `rgpot_force_input_t`.
+ * `direction` and `product` must each point to arrays of at least
+ * `3 * n_atoms` doubles, where `n_atoms` comes from `input`.
+ */
+enum rgpot_status_t
+rgpot_rpc_calculate_hvp(rgpot_rpc_client_t *client,
+                        const struct rgpot_force_input_t *input,
+                        const double *direction, double *product);
 #endif
 
 #if (defined(RGPOT_HAS_RPC) && defined(RGPOT_HAS_RPC))

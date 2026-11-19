@@ -56,6 +56,7 @@ endif()
 
 option(RGPOT_WITH_EAM_TABLE
        "EAM and Finnis-Sinclair potentials read from LAMMPS tables" OFF)
+option(RGPOT_WITH_CBE "Linked external cbe-pes frontend" OFF)
 option(RGPOT_BUILD_TESTS "Build tests" ${RGPOT_IS_TOP_LEVEL})
 option(RGPOT_WITH_CP2K
        "CP2KPot, the potserv CP2K backend and libcp2kc_rgpot against libcp2k (pkg-config libcp2k)" OFF)
@@ -226,6 +227,8 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       CppCore/rgpot/LennardJones/LJClusterPot.cc
       CppCore/rgpot/LennardJones/LJClusterKernel.cc
       CppCore/rgpot/Morse/MorsePot.cc
+      CppCore/rgpot/Models/ModelPots.cc
+      CppCore/rgpot/Models/ModelCapi.cc
       CppCore/rgpot/ZBL/ZBLPot.cc
       CppCore/rgpot/simd/dispatch.cc
       CppCore/rgpot/simd/scalar_kernels.cc
@@ -410,7 +413,17 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
       APPEND PROPERTY COMPILE_OPTIONS ${RGPOT_VECTOR_LOOP_FLAGS})
   endif()
   add_subdirectory(CppCore/rgpot/fortran)
+  if(RGPOT_WITH_CBE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(CBE REQUIRED cbe)
+    find_path(CBE_HEADER_DIR NAMES cbe.h HINTS ${CBE_INCLUDE_DIRS}
+              NO_DEFAULT_PATH REQUIRED)
+    find_library(CBE_LIBRARY NAMES cbe HINTS ${CBE_LIBRARY_DIRS}
+                 NO_DEFAULT_PATH REQUIRED)
+    list(APPEND RGPOT_SOURCES CppCore/rgpot/CBEPot/CBEPot.cc)
+  endif()
   add_library(rgpot ${RGPOT_SOURCES})
+  target_compile_definitions(rgpot PRIVATE RGPOT_MODEL_BUILD)
   if(RGPOT_WITH_HIGHWAY)
     target_link_libraries(rgpot PRIVATE hwy)
     target_compile_definitions(rgpot PRIVATE RGPOT_WITH_HIGHWAY)
@@ -420,6 +433,11 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
                                         VERSION ${PROJECT_VERSION}
                                         SOVERSION ${RGPOT_CXX_SOVERSION})
   target_link_libraries(rgpot PRIVATE rgpot_fortran_kernels rgpot_nlist Threads::Threads)
+  if(RGPOT_WITH_CBE)
+    target_include_directories(rgpot PRIVATE ${CBE_HEADER_DIR})
+    target_link_libraries(rgpot PRIVATE ${CBE_LIBRARY})
+    target_compile_definitions(rgpot PUBLIC RGPOT_HAS_CBE)
+  endif()
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(
       rgpot PRIVATE

@@ -43,6 +43,8 @@ struct FusedSettingsSpec {
   double charge = 0.0;           //!< Total charge, in elementary charges.
   double accuracy = 0.0;         //!< Numerical accuracy level.
   double electronicTemperature = 0.0; //!< Kelvin.
+  double warmMove = 0.0;         //!< Wavefunction reuse displacement, Angstrom.
+  double warmMinGap = 0.0;       //!< Wavefunction reuse gap threshold, eV.
   std::string sccMixer;          //!< Name of the SCC mixer.
   std::string engineBuild;       //!< Build or version string of the engine.
 };

@@ -455,14 +455,17 @@ void SuttonChenPot::forceStage(const HalfList &list, const double *densities, do
 
 template <>
 RGPOT_SC_API KeptCounts Kept<SuttonChenPot>::counts() noexcept {
-  return local().counts;
+  return retired() ? KeptCounts{} : local().counts;
 }
 
 template <>
 RGPOT_SC_API void Kept<SuttonChenPot>::release() noexcept {
-  Slot &slot = local();
-  slot.pot.reset();
-  std::vector<int>().swap(slot.species);
+  if (retired()) {
+    return;
+  }
+  for (Slot &slot : local().slots) {
+    slot.clear();
+  }
 }
 
 } // namespace rgpot

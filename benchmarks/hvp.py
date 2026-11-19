@@ -27,7 +27,7 @@ class HessianVector:
     ``forward`` reuses the centre forces, so the loop makes 17 force
     calls; ``forward_naive`` drops the centre before every product, the
     loop a force-only consumer writes, and makes 32; ``central`` makes 32
-    at second order; ``analytic`` is the Morse kernel's own product.
+    at second order; ``analytic`` is the selected kernel's own product.
     """
 
     params = [3, 5]

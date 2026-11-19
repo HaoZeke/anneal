@@ -127,6 +127,7 @@ CPMDPotConfigMessageTest | tests core | unit cpmd_pot_config_message_test CPMDPo
 CambridgeMorseTest | tests core | unit cambridge_morse_test CambridgeMorseTest.cc |
 GuptaTest | tests core | unit gupta_test GuptaTest.cc |
 HessianVectorTest | tests core | unit hessian_vector_test HessianVectorTest.cc |
+ModelPotsTest | tests core | unit model_pots_test ModelPotsTest.cc |
 SWSiTest | tests core | unit sw_si_test SWSiTest.cc |
 TersoffSiCTest | tests core | unit tersoff_sic_test TersoffSiCTest.cc fp_contract=off |
 HalfShellScanTest | tests core | unit half_shell_scan_test HalfShellScanTest.cc |
@@ -153,6 +154,7 @@ BatchEvaluatorTest | tests core | unit batch_evaluator_test BatchEvaluatorTest.c
 CalculatorGroupTest | tests core | unit calculator_group_test CalculatorGroupTest.cc |
 CalculatorAbortFlagTest | tests core | unit calculator_abort_flag_test CalculatorAbortFlagTest.cc |
 LJClusterPotTest | tests core | unit ljcluster_pot_test LJClusterPotTest.cc |
+LJPotThreadsTest | tests core | unit lj_pot_threads_test LJPotThreadsTest.cc timeout=120 |
 ZBLPotTest | tests core | unit zbl_pot_test ZBLPotTest.cc |
 PerAtomTest | tests core | unit per_atom_test PerAtomTest.cc |
 LocalityTest | tests core | unit locality_test LocalityTest.cc |

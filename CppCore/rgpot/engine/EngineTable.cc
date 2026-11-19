@@ -6,9 +6,11 @@
 #include "rgpot/engine/EngineTable.hpp"
 #include "rgpot/engine/Sha256.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -219,6 +221,53 @@ int rgpot_engine_force(RgpotEnginePot *pot, long nAtoms,
   }
 }
 
+int rgpot_engine_hvp(RgpotEnginePot *pot, long nAtoms,
+                     const double *positions, const int *atomicNrs,
+                     const double *direction, double *hv_out,
+                     const double *box) {
+  if (!pot || !pot->backend) {
+    return RGPOT_ENGINE_ERR_INVALID;
+  }
+  if (!pot->caps.analyticHvp) {
+    return fail(pot, RGPOT_ENGINE_ERR_UNSUPPORTED,
+                "potential has no analytic Hessian-vector product");
+  }
+  if (!positions || !atomicNrs || !direction || !hv_out || !box ||
+      nAtoms <= 0 ||
+      static_cast<unsigned long>(nAtoms) >
+          std::numeric_limits<size_t>::max() / (3 * sizeof(double))) {
+    return fail(pot, RGPOT_ENGINE_ERR_INVALID, "invalid HVP argument");
+  }
+  const auto db = reinterpret_cast<std::uintptr_t>(direction);
+  const auto hb = reinterpret_cast<std::uintptr_t>(hv_out);
+  const std::uintptr_t bytes =
+      static_cast<std::uintptr_t>(nAtoms) * 3 * sizeof(double);
+  const auto overlaps = [hb, bytes](const void *input,
+                                    std::uintptr_t inputBytes) {
+    const auto begin = reinterpret_cast<std::uintptr_t>(input);
+    return hb < begin + inputBytes && begin < hb + bytes;
+  };
+  if (overlaps(direction, bytes) || overlaps(positions, bytes) ||
+      overlaps(atomicNrs, static_cast<std::uintptr_t>(nAtoms) * sizeof(int)) ||
+      overlaps(box, 9 * sizeof(double))) {
+    return fail(pot, RGPOT_ENGINE_ERR_INVALID,
+                "HVP output overlaps an input buffer");
+  }
+  try {
+    RgpotEnginePot::CallGuard guard(*pot);
+    SoftGilRelease no_gil;
+    const rgpot::ForceInput in{static_cast<size_t>(nAtoms),
+                               positions, atomicNrs, box};
+    pot->backend->pot->hessianVectorImpl(in, direction, hv_out);
+    pot->clear_error();
+    return RGPOT_ENGINE_OK;
+  } catch (const std::exception &e) {
+    return fail(pot, RGPOT_ENGINE_ERR_EVAL, e.what());
+  } catch (...) {
+    return fail(pot, RGPOT_ENGINE_ERR_EVAL, "unknown exception");
+  }
+}
+
 int rgpot_engine_force_batch(RgpotEnginePot *pot, long nSystems, long nAtoms,
                              const double *positions, const int *atomicNrs,
                              double *forces, double *energies,
@@ -307,6 +356,7 @@ int rgpot_engine_caps(const RgpotEnginePot *pot, RgpotEngineCaps *out) {
   filled.group_collective = pot->caps.groupCollective ? 1 : 0;
   filled.orbital_selection = pot->backend->select_orbitals ? 1 : 0;
   filled.orbital_copy = pot->backend->copy_orbitals ? 1 : 0;
+  filled.analytic_hvp = pot->caps.analyticHvp ? 1 : 0;
   // The host's struct may be older (smaller) than this engine's: write only
   // the bytes it announced room for.
   const unsigned room = out->size < sizeof(filled) ? out->size : sizeof(filled);

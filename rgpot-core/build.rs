@@ -132,10 +132,17 @@ fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
     println!("cargo::rerun-if-env-changed=RGPOT_SOURCE_REVISION");
+    println!("cargo::rerun-if-changed=src/version.rs");
+    println!("cargo::rerun-if-changed=src/engine.rs");
+    println!("cargo::rerun-if-changed=cbindgen.toml");
+    println!("cargo::rerun-if-changed=../CppCore/rgpot/engine_c_abi.h");
     println!(
         "cargo::rustc-env=RGPOT_SOURCE_REVISION={}",
         source_revision(&crate_dir)
     );
+    if let Ok(target) = env::var("TARGET") {
+        println!("cargo::rustc-env=RGPOT_BUILD_TARGET={target}");
+    }
 
     // eindir-core is a normal Cargo dependency now; its capi #[no_mangle] symbols
     // resolve through the shared crate, so no prebuilt static lib link is needed.

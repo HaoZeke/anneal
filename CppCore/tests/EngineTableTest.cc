@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -47,6 +48,8 @@ struct Engine {
   int (*force)(RgpotEnginePot *, long, const double *, const int *, double *,
                double *, double *, const double *,
                rgpot_engine_coord_transform, void *) = nullptr;
+  int (*hvp)(RgpotEnginePot *, long, const double *, const int *,
+             const double *, double *, const double *) = nullptr;
   int (*force_batch)(RgpotEnginePot *, long, long, const double *, const int *,
                      double *, double *, double *, const double *,
                      rgpot_engine_coord_transform, void *) = nullptr;
@@ -93,6 +96,7 @@ bool open_engine(const std::string &key, Engine &out) {
   out.create = sym<decltype(out.create)>(h, "rgpot_engine_create");
   out.destroy = sym<decltype(out.destroy)>(h, "rgpot_engine_destroy");
   out.force = sym<decltype(out.force)>(h, "rgpot_engine_force");
+  out.hvp = sym<decltype(out.hvp)>(h, "rgpot_engine_hvp");
   out.force_batch = sym<decltype(out.force_batch)>(h, "rgpot_engine_force_batch");
   out.stamp = sym<decltype(out.stamp)>(h, "rgpot_engine_abi_stamp");
   out.caps = sym<decltype(out.caps)>(h, "rgpot_engine_caps");
@@ -166,9 +170,8 @@ TEST_CASE("classical engine matches the directly compiled LJPot",
   RgpotEngineCaps caps;
   caps.size = sizeof(caps);
   REQUIRE(e.caps(pot, &caps) == 0);
-  // Neighbour scratch is per instance. The engine serializes this handle;
-  // the following test calls it from several threads.
-  REQUIRE(caps.reentrancy == 1);
+  // Neighbour scratch is kept per thread, so one LJPot instance is shared.
+  REQUIRE(caps.reentrancy == 0);
 
   const long n = 5;
   std::vector<double> forces(3 * n, 0.0);
@@ -214,6 +217,44 @@ TEST_CASE("classical engine matches the directly compiled LJPot",
   REQUIRE(e.set_num_threads(pot, 1, 1) == 3);
   REQUIRE(e.select_orbitals(pot, 1) == 3);
   REQUIRE(e.copy_orbitals(pot, 1, 2) == 3);
+  e.destroy(pot);
+}
+
+TEST_CASE("classical engine LJPot analytic HVP rejects in-place aliasing",
+          "[engine][classical][hvp]") {
+  Engine e;
+  if (!open_engine("CLASSICAL", e)) {
+    SKIP("no classical engine in this build");
+  }
+  RgpotEnginePot *pot = create(e, builtin_params("lj"));
+  REQUIRE(pot != nullptr);
+
+  const long n = 5;
+  const std::vector<double> direction = {
+      0.2, -0.3, 0.4, -0.1, 0.5, -0.2, 0.3, 0.1,
+      -0.4, 0.6, -0.5, 0.2, -0.3, 0.4, -0.1};
+  std::vector<double> product(direction.size(), 0.0);
+  REQUIRE(e.hvp(pot, n, kCluster.data(), kZ.data(), direction.data(),
+                product.data(), kBox.data()) == RGPOT_ENGINE_OK);
+
+  rgpot::LJPot direct;
+  std::vector<double> ref_product(direction.size(), 0.0);
+  const rgpot::ForceInput fi{.nAtoms = static_cast<size_t>(n),
+                             .pos = kCluster.data(),
+                             .atmnrs = kZ.data(),
+                             .box = kBox.data()};
+  direct.hessianVectorImpl(fi, direction.data(), ref_product.data());
+  const double tol =
+      64.0 * std::numeric_limits<double>::epsilon();
+  for (std::size_t k = 0; k < direction.size(); ++k) {
+    REQUIRE(product[k] == Catch::Approx(ref_product[k]).margin(tol));
+  }
+
+  std::vector<double> aliased = direction;
+  REQUIRE(e.hvp(pot, n, kCluster.data(), kZ.data(), aliased.data(),
+                aliased.data(), kBox.data()) == RGPOT_ENGINE_ERR_INVALID);
+  REQUIRE(error_of(e, pot).find("overlap") != std::string::npos);
+  REQUIRE(aliased == direction);
   e.destroy(pot);
 }
 

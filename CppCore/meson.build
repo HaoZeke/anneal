@@ -350,6 +350,14 @@ if not get_option('with_rpc_client_only')
     subdir('rgpot/Morse')  # 'morse'
     rgpotentials += [morse]
 
+    subdir('rgpot/Models')
+    rgpotentials += [model_pots]
+
+    if has_cbe
+        subdir('rgpot/CBEPot')
+        rgpotentials += [cbe_pot]
+    endif
+
     subdir('rgpot/Gupta')  # 'gupta'
     rgpotentials += [gupta]
 
@@ -550,7 +558,16 @@ if not get_option('with_rpc_client_only')
             capnp_rpc_dep,
             ptlrpc_dep,
         ] + fortran_rt_deps
-        _classical_whole = [lennard_jones, morse, zbl]
+        _classical_whole = [
+            lennard_jones,
+            morse,
+            zbl,
+            model_pots,
+            rgpot_halfshell,
+        ]
+        if has_cbe
+            _classical_whole += [cbe_pot]
+        endif
         if has_water
             _classical_whole += [water_pots]
         endif
@@ -1997,6 +2014,11 @@ if get_option('with_tests')
             endif
         else
             _export_dynamic = false
+        endif
+        if _rt[0] == 'ModelPotsTest'
+            # This test links the model C API archive directly. On Windows its
+            # declarations must not name DLL import thunks.
+            case_args += ['-DRGPOT_MODEL_BUILD']
         endif
         _test_exe = executable(
             _rt[2][0],

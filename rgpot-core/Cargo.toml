@@ -20,6 +20,7 @@ crate-type = ["staticlib", "cdylib", "lib"]
 default = []
 schema = ["dep:capnp", "dep:capnpc"]
 profile = ["schema", "dep:libloading"]
+engine = ["dep:libloading"]
 rpc = ["schema", "dep:capnp-rpc", "dep:tokio", "dep:tokio-util", "dep:futures"]
 cache = []
 gen-header = ["dep:cbindgen"]
@@ -41,7 +42,13 @@ tokio-util = { version = "0.7", features = ["compat"], optional = true }
 futures = { version = "0.3", optional = true }
 
 [dev-dependencies]
+cc = "1.4.2"
 ndarray = "0.17.2"
+
+[[test]]
+name = "engine"
+path = "tests/engine.rs"
+required-features = ["engine"]
 
 [[test]]
 name = "profile"

@@ -418,6 +418,7 @@ C_HEADERS = (
     "CppCore/rgpot/engine_c_abi.h",
     "CppCore/rgpot/ExternalPot/external_potentials.h",
     "CppCore/rgpot/calculator_mpi_abi.h",
+    "CppCore/rgpot/Models/ModelCapi.h",
     "CppCore/rgpot/MetatomicPot/metatomic_c_abi.h",
     "CppCore/rgpot/XTBPot/xtb_c_abi.h",
     "engines/gromacs/libcp2k.h",
@@ -1494,6 +1495,65 @@ def facts_errors(root: Path = ROOT, pages: list[Path] | None = None) -> list[str
                 errors.extend(_pixi_errors(loc, m.group(1), m.group(2), envs, tasks))
     errors.extend(build_option_table_errors(root, options, cmake))
     errors.extend(gromacs_key_errors(root))
+    errors.extend(engine_table_export_errors(root))
+    return errors
+
+
+ENGINE_ABI_HEADER = "CppCore/rgpot/engine_c_abi.h"
+ENGINE_TABLE_SOURCE = "CppCore/rgpot/engine/EngineTable.cc"
+ENGINE_ABI_PAGE = "docs/orgmode/reference/engine_abi.org"
+
+
+def engine_table_export_errors(root: Path = ROOT, page: Path | None = None) -> list[str]:
+    """The library export list in engine_abi.org matches EngineTable.cc and engine_c_abi.h."""
+    hdr = root / ENGINE_ABI_HEADER
+    src = root / ENGINE_TABLE_SOURCE
+    if not hdr.is_file() or not src.is_file():
+        return []
+    page = page if page is not None else root / ENGINE_ABI_PAGE
+    where = rel(page, root)
+    if not page.is_file():
+        return [f"{where} is missing"]
+    hdr_text = hdr.read_text(encoding="utf-8")
+    marker = "Optional symbols:"
+    if marker not in hdr_text:
+        return [f"{ENGINE_ABI_HEADER}: {marker!r} marker was not found"]
+    optional = set()
+    for stmt in _c_statements(hdr_text.split(marker, 1)[1]):
+        if stmt.startswith("typedef"):
+            continue
+        m = re.search(r"\b(rgpot_engine_\w+)\s*\(", stmt)
+        if m:
+            optional.add(m.group(1))
+    table_code = strip_c_comments(src.read_text(encoding="utf-8"))
+    exported = {name for name in optional if re.search(rf"\b{name}\s*\(", table_code)}
+    omitted = optional - exported
+    doc_text = page.read_text(encoding="utf-8")
+    m = re.search(
+        r"Every library above exports\s+(.*?)\s+None of them exports\s+(.*?)(?:\n\s*\n|\Z)",
+        doc_text,
+        re.S,
+    )
+    if not m:
+        return [f"{where}: the library export list was not found"]
+    doc_exported = set(re.findall(r"=(rgpot_engine_\w+)=", m.group(1)))
+    doc_omitted = set(re.findall(r"=(rgpot_engine_\w+)=", m.group(2)))
+    errors = [
+        f"{where}: {ENGINE_TABLE_SOURCE} export {s} is not in the library export list"
+        for s in sorted(exported - doc_exported)
+    ]
+    errors += [
+        f"{where}: {s} is not an optional symbol exported by {ENGINE_TABLE_SOURCE}"
+        for s in sorted(doc_exported - exported)
+    ]
+    errors += [
+        f"{where}: unexported optional symbol {s} is not listed"
+        for s in sorted(omitted - doc_omitted)
+    ]
+    errors += [
+        f"{where}: {s} is not an unexported optional symbol of {ENGINE_ABI_HEADER}"
+        for s in sorted(doc_omitted - omitted)
+    ]
     return errors
 
 

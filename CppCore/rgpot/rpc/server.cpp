@@ -62,10 +62,14 @@ class MpiPefSession;
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
+#include "rgpot/Models/ModelPots.hpp"
 #include "rgpot/NWChemPot/NWChemPot.hpp"
 #include "rgpot/Potential.hpp"
 #include "rgpot/abi/Handshake.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
+#ifdef RGPOT_HAS_CBE
+#include "rgpot/CBEPot/CBEPot.hpp"
+#endif
 #ifdef RGPOT_HAS_IPI
 #include "rgpot/IPIPot/IPIPot.hpp"
 #endif
@@ -161,9 +165,11 @@ public:
     caps.setBackendName("rgpot");
     caps.setBackendVersion(RGPOT_BUILD_VERSION);
     caps.setAvailable(true);
-    auto ops = caps.initOperations(2);
+    auto ops = caps.initOperations(m_potential->caps().analyticHvp ? 3 : 2);
     ops.set(0, ::Capabilities::Operation::ENERGY);
     ops.set(1, ::Capabilities::Operation::FORCES);
+    if (m_potential->caps().analyticHvp)
+      ops.set(2, ::Capabilities::Operation::HESSIAN_VECTOR);
     rgpot::abi::fill_compatibility(caps);
     return kj::READY_NOW;
   }
@@ -192,8 +198,10 @@ public:
     std::string energyUnit = fip.getEnergyUnit();
     double len_to_angstrom = rgpot::units::unit_conversion_factor(lengthUnit, "angstrom");
     double ev_to_caller = rgpot::units::unit_conversion_factor("eV", energyUnit);
-    // Force unit: energy/length in caller's system
-    double force_to_caller = ev_to_caller / len_to_angstrom;
+    // F_caller = dE_caller/dx_caller
+    //          = (d(E*E_eV)/d(x_A/len_to_angstrom))
+    //          = ev_to_caller * len_to_angstrom * F_A.
+    double force_to_caller = ev_to_caller * len_to_angstrom;
 
     rgpot::types::AtomMatrix nativePositions =
         rgpot::types::adapt::capnp::convertPositionsFromCapnp(fip.getPos(),
@@ -261,6 +269,43 @@ public:
     }
 #endif
 
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> calculateHvp(CalculateHvpContext context) override {
+    auto params = context.getParams();
+    auto fip = params.getFip();
+    auto direction = params.getDirection();
+    const std::size_t n = fip.getPos().size() / 3;
+    KJ_REQUIRE(fip.getPos().size() == 3 * n, "position size mismatch");
+    KJ_REQUIRE(fip.getAtmnrs().size() == n, "atomic number size mismatch");
+    KJ_REQUIRE(fip.getBox().size() == 9, "box size mismatch");
+    KJ_REQUIRE(direction.size() == 3 * n, "direction size mismatch");
+    KJ_REQUIRE(m_potential->caps().analyticHvp,
+               "potential has no analytic Hessian-vector product");
+    const double lengthToAngstrom = rgpot::units::unit_conversion_factor(
+        std::string(fip.getLengthUnit()), "angstrom");
+    const double evToCaller = rgpot::units::unit_conversion_factor(
+        "eV", std::string(fip.getEnergyUnit()));
+    std::vector<double> positions(3 * n), vector(3 * n), product(3 * n);
+    for (std::size_t i = 0; i < 3 * n; ++i) {
+      positions[i] = fip.getPos()[i] * lengthToAngstrom;
+      vector[i] = direction[i] * lengthToAngstrom;
+    }
+    std::vector<int> numbers(n);
+    for (std::size_t i = 0; i < n; ++i)
+      numbers[i] = fip.getAtmnrs()[i];
+    std::array<double, 9> box{};
+    for (std::size_t i = 0; i < 9; ++i)
+      box[i] = fip.getBox()[i] * lengthToAngstrom;
+    rgpot::ForceInput input{n, positions.data(), numbers.data(), box.data()};
+    m_potential->hessianVectorImpl(input, vector.data(), product.data());
+    auto output = context.getResults().initProduct(3 * n);
+    // HVP follows the same chain rule as force once direction has been
+    // converted: (H v)_caller = evToCaller * lengthToAngstrom * (H v)_A.
+    const double productToCaller = evToCaller * lengthToAngstrom;
+    for (std::size_t i = 0; i < 3 * n; ++i)
+      output.set(i, product[i] * productToCaller);
     return kj::READY_NOW;
   }
 
@@ -384,6 +429,7 @@ int runServer(int argc, char *argv[]
 #ifdef RGPOT_HAS_CP2K
               << ", CP2K"
 #endif
+              << ", DoubleWell, CoupledProtonWell"
               << std::endl;
     return 1;
   }
@@ -430,6 +476,31 @@ int runServer(int argc, char *argv[]
   } else if (pot_type == "ZBL") {
     std::cout << "Loading ZBL potential..." << std::endl;
     potential_to_use = std::make_unique<rgpot::ZBLPot>();
+  } else if (pot_type == "Eckart") {
+    potential_to_use = std::make_unique<rgpot::EckartPot>();
+  } else if (pot_type == "MullerBrown") {
+    potential_to_use = std::make_unique<rgpot::MullerBrownPot>();
+  } else if (pot_type == "ModifiedMullerBrown") {
+    potential_to_use = std::make_unique<rgpot::ModifiedMullerBrownPot>();
+  } else if (pot_type == "LEPS-HH2") {
+    potential_to_use =
+        std::make_unique<rgpot::LepsPot>(rgpot::LepsSystem::HH2);
+  } else if (pot_type == "LEPS-HCl2") {
+    potential_to_use =
+        std::make_unique<rgpot::LepsPot>(rgpot::LepsSystem::HCl2);
+  } else if (pot_type == "LEPS-FH2") {
+    potential_to_use =
+        std::make_unique<rgpot::LepsPot>(rgpot::LepsSystem::FH2);
+  } else if (pot_type == "DoubleWell") {
+    potential_to_use =
+        std::make_unique<rgpot::DoubleWellPot>(2, 1.0, 2.0, 1.0, 0.25);
+  } else if (pot_type == "CoupledProtonWell") {
+    potential_to_use =
+        std::make_unique<rgpot::CoupledProtonWellPot>(1.0, 5.0, 8.0 / 25.0);
+#ifdef RGPOT_HAS_CBE
+  } else if (pot_type == "CBE") {
+    potential_to_use = std::make_unique<rgpot::CBEPot>();
+#endif
 #ifdef RGPOT_HAS_IPI
   } else if (pot_type == "IPI" || pot_type.rfind("IPI:", 0) == 0) {
     if (pot_type.size() < 5) {

@@ -484,6 +484,7 @@ rgpot.LJPot(u0=1.0, cutoff=15.0, psi=1.0, switch_width=0.0)
 - Units :: =u0= eV; =cutoff=, =psi= and =switch_width= Angstrom.
 - Outputs :: a periodic Lennard-Jones potential.
   =evaluate= returns the stress.
+  It has an analytic Hessian-vector product: =has_analytic_hvp()= is true.
 - Errors :: a nonzero =switch_width= outside =0 < switch_width <= cutoff= raises
   =ValueError= =QuinticSwitch: switch width must satisfy 0 < width <= cutoff=.
 
@@ -520,8 +521,7 @@ rgpot.MorsePot(De=0.7102, a=1.6047, re=2.897, cutoff=9.5, switch_width=0.0)
   cell (on a diagonal cell only axes with a positive diagonal entry wrap, and
   each distinct atom pair contributes at most one minimum image).
   =evaluate= returns the stress.
-  It is the only class here with an analytic Hessian-vector product:
-  =has_analytic_hvp()= is true.
+  It has an analytic Hessian-vector product: =has_analytic_hvp()= is true.
 - Errors :: as =rgpot.LJPot=; on a sheared cell a singular or non-finite =box=
   raises =ValueError=.
 
@@ -637,6 +637,7 @@ rgpot.CuH2Pot()
 - Units :: energy eV, lengths Angstrom.
 - Outputs :: the Fortran copper-hydrogen embedded-atom kernel.
   No stress.
+  It has an analytic Hessian-vector product: =has_analytic_hvp()= is true.
 - Errors :: any other atomic number raises =RuntimeError=
   =CuH2 potential failed (status 2): rgpot_cuh2: atom K has atomic number Z; ...=.
   Two atoms at the same position also raise =RuntimeError=.
@@ -1047,7 +1048,8 @@ hvp(positions, atom_types, box, direction, step=0.0, scheme='auto')
   order in =step=.
   ="central"= displaces both ways, two force calls a product, second order in
   =step=.
-  ="analytic"= uses the kernel's own product, which only =MorsePot= has.
+  ="analytic"= uses the kernel's own product, available for =MorsePot=, =LJPot=
+  and =CuH2Pot=.
   ="auto"= is ="analytic"= when =has_analytic_hvp()= is true and ="forward"=
   otherwise.
 - Units :: positions, box and =step= in Angstrom.
@@ -1097,7 +1099,7 @@ print(pot.has_analytic_hvp(), rgpot.MorsePot().has_analytic_hvp())
 #+begin_example
 {'products': 3, 'force_calls': 4, 'centre_reused': 3, 'analytic': 0}
 {'products': 1, 'force_calls': 2, 'centre_reused': 0, 'analytic': 0}
-False True
+True True
 #+end_example
 
 *** =.hvp_centre=
@@ -1190,7 +1192,8 @@ has_analytic_hvp()
 - Units :: none.
 - Outputs :: =True= when the kernel has its own Hessian-vector product, so
   =scheme='auto'= uses it.
-  Of these classes only =MorsePot= returns =True=.
+  Of these classes =MorsePot=, =LJPot= and =CuH2Pot= return =True=.
+  The query is read-only and reads =primary().caps()=, as for =caps()=.
 - Errors :: none.
 
 *** =.energy_gradient=

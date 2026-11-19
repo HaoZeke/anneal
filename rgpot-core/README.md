@@ -15,6 +15,7 @@ Data exchange uses the [DLPack](https://github.com/dmlc/dlpack) tensor protocol 
 | *(default)* | Core types, DLPack tensor helpers, callback-based potential dispatch |
 | `schema` | Generated bindings for the shared `PotentialConfig`, `ForceInput`, and `PotentialResult` carriers |
 | `profile` | Prefix-generic in-process loader with one persistent backend session |
+| `engine` | Native loader for shared libraries that implement the generic engine C ABI |
 | `rpc` | Cap'n Proto RPC client and server for distributed calculations |
 | `cache` | *(planned)* Result caching layer |
 
@@ -44,6 +45,13 @@ Enable the RPC client and server:
 rgpot-core = { version = "3.7.0", features = ["rpc"] }
 ```
 <!-- [[[end]]] -->
+
+Enable the generic engine C ABI loader:
+
+```toml
+[dependencies]
+rgpot-core = { version = "3.7.0", features = ["engine"] }
+```
 
 ## Documentation
 

@@ -18,13 +18,39 @@
 namespace {
 
 struct Probe {
-  explicit Probe(int built) : id(built) {}
-  ~Probe() { ++dropped; }
+  explicit Probe(int built) : id(built), heap_id(std::make_unique<int>(built)) {}
+  ~Probe() {
+    if (heap_id) {
+      *heap_id = -1;
+    }
+    ++dropped;
+  }
   int id;
+  std::unique_ptr<int> heap_id;
   static inline std::atomic<int> dropped{0};
 };
 
 using KeptProbe = rgpot::Kept<Probe>;
+
+/// A kept object whose destructor uses another table of this thread, as
+/// LJPot does with its neighbour scratch. The destructor leaves what it
+/// builds in that table alone, so only a retired table frees it.
+struct Owner {
+  explicit Owner(const rgpot::KeptKey &inner) : inner_key(inner) {}
+  ~Owner();
+  rgpot::KeptKey inner_key;
+  static inline std::atomic<int> destroyed{0};
+  static inline std::atomic<int> dropped_before{0};
+  static inline std::atomic<int> dropped_at_entry{0};
+  static inline std::atomic<bool> found_none{false};
+  static inline std::atomic<std::uint64_t> builds_at_entry{0};
+  static inline std::atomic<std::uint64_t> reuses_at_entry{0};
+  static inline std::atomic<int> rebuilt_id{0};
+  static inline std::atomic<int> rebuilt_ref_id{0};
+};
+
+using KeptInner = rgpot::Kept<Probe, 2>;
+using KeptOwner = rgpot::Kept<Owner>;
 
 rgpot::KeptKey key(double param, std::size_t n, const int *species) {
   rgpot::KeptKey k;
@@ -33,6 +59,19 @@ rgpot::KeptKey key(double param, std::size_t n, const int *species) {
 }
 
 int id(const Probe &probe) { return probe.id; }
+const int &ref_id(const Probe &probe) { return *probe.heap_id; }
+
+Owner::~Owner() {
+  dropped_at_entry = Probe::dropped.load() - dropped_before.load();
+  found_none = KeptInner::peek(inner_key) == nullptr;
+  builds_at_entry = KeptInner::counts().builds;
+  reuses_at_entry = KeptInner::counts().reuses;
+  rebuilt_id = KeptInner::with(
+      inner_key, [] { return std::make_unique<Probe>(41); }, id);
+  rebuilt_ref_id = KeptInner::with(
+      inner_key, [] { return std::make_unique<Probe>(53); }, ref_id);
+  ++destroyed;
+}
 
 } // namespace
 
@@ -149,4 +188,80 @@ TEST_CASE("each thread keeps its own object", "[kept]") {
   KeptProbe::release();
   REQUIRE(Probe::dropped == dropped + 1);
   REQUIRE(KeptProbe::with(k, make, id) != here);
+}
+
+TEST_CASE("multi-slot Kept evicts the least recently used slot and supports peek",
+          "[kept]") {
+  using KeptTwo = rgpot::Kept<Probe, 2>;
+  KeptTwo::release();
+  int built = 0;
+  auto make = [&] { return std::make_unique<Probe>(++built); };
+
+  const int tag_a = 1;
+  const int tag_b = 2;
+  const int tag_c = 3;
+  rgpot::KeptKey ka, kb, kc;
+  ka.ptr(&tag_a).f64(1.0);
+  kb.ptr(&tag_b).f64(1.0);
+  kc.ptr(&tag_c).f64(1.0);
+
+  REQUIRE(KeptTwo::peek(ka) == nullptr);
+  REQUIRE(KeptTwo::with(ka, make, id) == 1);
+  REQUIRE(KeptTwo::with(kb, make, id) == 2);
+  REQUIRE(KeptTwo::peek(ka) != nullptr);
+  REQUIRE(KeptTwo::peek(ka)->id == 1);
+  REQUIRE(KeptTwo::peek(kb) != nullptr);
+  REQUIRE(KeptTwo::peek(kb)->id == 2);
+
+  // Touch ka so kb becomes least recently used; kc then evicts kb.
+  REQUIRE(KeptTwo::with(ka, make, id) == 1);
+  REQUIRE(KeptTwo::with(kc, make, id) == 3);
+  REQUIRE(KeptTwo::peek(ka) != nullptr);
+  REQUIRE(KeptTwo::peek(ka)->id == 1);
+  REQUIRE(KeptTwo::peek(kb) == nullptr);
+  REQUIRE(KeptTwo::peek(kc) != nullptr);
+  REQUIRE(KeptTwo::peek(kc)->id == 3);
+
+  KeptTwo::release(ka);
+  REQUIRE(KeptTwo::peek(ka) == nullptr);
+  REQUIRE(KeptTwo::peek(kc) != nullptr);
+  KeptTwo::release();
+  REQUIRE(KeptTwo::peek(kc) == nullptr);
+}
+
+TEST_CASE("a kept object may use another kept table while its thread exits",
+          "[kept][threads]") {
+  const int tag_owner = 1;
+  const int tag_inner = 2;
+  rgpot::KeptKey owner_key;
+  rgpot::KeptKey inner_key;
+  owner_key.ptr(&tag_owner);
+  inner_key.ptr(&tag_inner);
+
+  const int destroyed = Owner::destroyed;
+  const int dropped = Probe::dropped;
+  Owner::dropped_before = dropped;
+  std::thread worker([&] {
+    // The owner's table is first used before the inner one, so it is
+    // destroyed after it.
+    KeptOwner::with(
+        owner_key, [&] { return std::make_unique<Owner>(inner_key); },
+        [](Owner &) {});
+    KeptInner::with(
+        inner_key, [] { return std::make_unique<Probe>(7); }, id);
+  });
+  worker.join();
+
+  REQUIRE(Owner::destroyed == destroyed + 1);
+  // The inner table was destroyed first, with its probe, so the owner's
+  // destructor runs against a table that is gone.
+  REQUIRE(Owner::dropped_at_entry.load() == 1);
+  CHECK(Owner::found_none.load());
+  CHECK(Owner::builds_at_entry.load() == 0);
+  CHECK(Owner::reuses_at_entry.load() == 0);
+  CHECK(Owner::rebuilt_id.load() == 41);
+  CHECK(Owner::rebuilt_ref_id.load() == 53);
+  // The probes built there are dropped when the owner's destructor ends. A
+  // table that is gone would keep them, and nothing would ever free them.
+  CHECK(Probe::dropped.load() == dropped + 3);
 }

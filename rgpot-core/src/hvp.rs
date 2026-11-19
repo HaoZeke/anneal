@@ -113,7 +113,10 @@ pub enum HvpError {
     Invalid(String),
     /// A callback returned this status. Its own `rgpot_last_error`
     /// message, if it set one, is left in place.
-    Callback(rgpot_status_t),
+    Callback {
+        status: rgpot_status_t,
+        message: String,
+    },
 }
 
 impl HvpError {
@@ -121,7 +124,7 @@ impl HvpError {
     pub fn status(&self) -> rgpot_status_t {
         match self {
             Self::Invalid(_) => rgpot_status_t::RGPOT_INVALID_PARAMETER,
-            Self::Callback(status) => *status,
+            Self::Callback { status, .. } => *status,
         }
     }
 }
@@ -130,7 +133,9 @@ impl std::fmt::Display for HvpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Invalid(why) => f.write_str(why),
-            Self::Callback(status) => write!(f, "callback returned {status:?}"),
+            Self::Callback { status, message } => {
+                write!(f, "{message} (callback returned {status:?})")
+            }
         }
     }
 }
@@ -158,7 +163,10 @@ impl From<FusedError> for HvpError {
     fn from(error: FusedError) -> Self {
         match error {
             FusedError::Invalid { message } => Self::Invalid(message),
-            other => Self::Callback(other.status()),
+            other => Self::Callback {
+                status: other.status(),
+                message: other.to_string(),
+            },
         }
     }
 }
@@ -357,7 +365,15 @@ impl rgpot_potential_t {
                     )
                 };
                 if status != rgpot_status_t::RGPOT_SUCCESS {
-                    return Err(HvpError::Callback(status));
+                    let message = crate::status::last_error_message();
+                    return Err(HvpError::Callback {
+                        status,
+                        message: if message.is_empty() {
+                            format!("analytic HVP callback returned {status:?}")
+                        } else {
+                            message
+                        },
+                    });
                 }
                 if let Some(i) = hv_out.iter().position(|v| !v.is_finite()) {
                     return Err(invalid(format!(

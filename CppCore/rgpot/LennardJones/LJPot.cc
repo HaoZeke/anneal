@@ -10,12 +10,16 @@
  */
 
 // clang-format off
+#include <algorithm>
 #include <array>
 #include <cmath>
-#include <limits>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 // clang-format on
 
+#include "rgpot/KeptPotential.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/nlist/PairSum.hpp"
@@ -76,7 +80,53 @@ simd::LjParams lj_params(double u0, double psi, double shift, const LJConfig &c,
   return params;
 }
 
+struct LjNeighbours {
+  nlist::Neighbours cells;
+};
+
+using KeptLjNeighbours = Kept<LjNeighbours, 4>;
+
+// One angstrom of skin. A stored list keeps pairs out to cutoff + skin and
+// the kernels drop those past the cutoff. Stream asks for no skin: the bins
+// are not reused unless the coordinates match.
+void updateScratchCells(LjNeighbours &scratch, const ForceInput &in,
+                        double cutoff, nlist::Mode mode) {
+  const double skin = mode == nlist::Mode::Stream ? 0.0 : 1.0;
+  const std::array<bool, 3> periodic{{true, true, true}};
+  nlist::updateCells(scratch.cells, in.pos, static_cast<std::size_t>(in.nAtoms),
+                     in.box, cutoff, skin, nlist::Image::Round, mode, periodic);
+}
+
+KeptKey ljNeighbourKey(const LJPot *self, double cutoff,
+                       nlist::Mode mode) noexcept {
+  KeptKey key;
+  key.ptr(self).f64(cutoff).i64(static_cast<std::int64_t>(mode));
+  return key;
+}
+
 } // namespace
+
+LJPot::~LJPot() {
+  for (const nlist::Mode mode :
+       {nlist::Mode::Auto, nlist::Mode::Stored, nlist::Mode::Stream}) {
+    KeptLjNeighbours::release(ljNeighbourKey(this, cuttOffR, mode));
+  }
+}
+
+bool LJPot::listReused() const noexcept {
+  const LjNeighbours *kept =
+      KeptLjNeighbours::peek(ljNeighbourKey(this, cuttOffR, mode_));
+  return kept != nullptr && kept->cells.reused();
+}
+
+std::size_t LJPot::retainedPairs() const noexcept {
+  const LjNeighbours *kept =
+      KeptLjNeighbours::peek(ljNeighbourKey(this, cuttOffR, mode_));
+  if (kept == nullptr || kept->cells.streaming()) {
+    return 0;
+  }
+  return kept->cells.slots();
+}
 
 /**
  * @class LJPot
@@ -107,7 +157,6 @@ void LJPot::forcePerAtom(const ForceInput &in, ForceOut *out, const PerAtomOut &
 
 void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms) const {
   const long N = in.nAtoms;
-  const double *R = in.pos;
   const double *box = in.box;
   double *F = out->F;
   double *U = &out->energy;
@@ -120,29 +169,104 @@ void LJPot::compute(const ForceInput &in, ForceOut *out, const PerAtomOut *atoms
     F[3 * i + 2] = 0;
   }
   if (N < 2 || cuttOffR <= 0.0) {
+    KeptLjNeighbours::release(ljNeighbourKey(this, cuttOffR, mode_));
     publishCauchyStress(out, strain, volume);
     return;
   }
 
   const simd::LjParams params = lj_params(u0, psi, cuttOffU, m_config, m_switch);
   const auto n_atoms = static_cast<std::size_t>(N);
-  // One angstrom of skin. A stored list keeps pairs out to cutoff + skin
-  // and the kernel below drops those past the cutoff. Stream asks for no
-  // skin: the bins are not reused unless the coordinates match.
-  const double skin = mode_ == nlist::Mode::Stream ? 0.0 : 1.0;
-  const std::array<bool, 3> periodic{{true, true, true}};
-  nlist::updateCells(neighbours_, R, n_atoms, box, cuttOffR, skin, nlist::Image::Round,
-                     mode_, periodic);
   const double cutoff2 = cuttOffR * cuttOffR;
   // Two different atoms on the same point make the energy NaN. Skipping
   // the pair would report a finite energy of zero and hide the singularity.
-  nlist::sumPairs(
-      neighbours_, n_atoms, cutoff2, nlist::Overlap::Poison,
-      [&params](std::int32_t, std::int32_t, double r2, double &pair_e, double &fscale) {
-        lj_pair(r2, params, pair_e, fscale);
-      },
-      F, *U, strain, atoms);
+  KeptLjNeighbours::with(
+      ljNeighbourKey(this, cuttOffR, mode_),
+      [] { return std::make_unique<LjNeighbours>(); },
+      [&](LjNeighbours &scratch) {
+        updateScratchCells(scratch, in, cuttOffR, mode_);
+        nlist::sumPairs(
+            scratch.cells, n_atoms, cutoff2, nlist::Overlap::Poison,
+            [&params](std::int32_t, std::int32_t, double r2, double &pair_e,
+                      double &fscale) { lj_pair(r2, params, pair_e, fscale); },
+            F, *U, strain, atoms);
+      });
+  if (std::isnan(*U)) {
+    throw std::domain_error("LJPot force is undefined for coincident atoms");
+  }
   publishCauchyStress(out, strain, volume);
+}
+
+/**
+ * @details
+ *
+ * With @f$a = (\psi/r)^6@f$ the bare pair term @f$V = 4 u_0 a (a - 1)@f$
+ * has @f$V' = (4 u_0 / r)(6 a - 12 a^2)@f$ and
+ * @f$V'' = (4 u_0 / r^2)(156 a^2 - 42 a)@f$. The shift is a constant and
+ * drops out. The switch multiplies the bare term by @f$S@f$, so
+ * @f$\phi' = V' S + V S'@f$ and @f$\phi'' = V'' S + 2 V' S' + V S''@f$.
+ * @a v and @a hv must not overlap (`hv` is zeroed up front).
+ */
+void LJPot::hessianVectorImpl(const ForceInput &in, const double *v, double *hv) const {
+  const auto N = static_cast<long>(in.nAtoms);
+  std::fill_n(hv, 3 * in.nAtoms, 0.0);
+  if (N < 2 || cuttOffR <= 0.0) {
+    return;
+  }
+  const double cutoff2 = cuttOffR * cuttOffR;
+  const double psi2 = psi * psi;
+  const double fourU0 = 4.0 * u0;
+  const bool switched = m_config.switch_width != 0.0;
+  const auto addPair = [&](std::int32_t i, std::int32_t j, double dx, double dy,
+                           double dz, double r2) {
+    if (!(i < j) || r2 > cutoff2) {
+      return;
+    }
+    if (!(r2 > 0.0)) {
+      throw std::domain_error(
+          "LJPot Hessian-vector product is undefined for coincident atoms");
+    }
+    const double r = std::sqrt(r2);
+    const double inv_r = 1.0 / r;
+    const double sr2 = psi2 / r2;
+    const double a = sr2 * sr2 * sr2;
+    double d1 = fourU0 * inv_r * (6.0 * a - 12.0 * a * a);
+    double d2 = fourU0 * inv_r * inv_r * (156.0 * a * a - 42.0 * a);
+    if (switched) {
+      const double bare = fourU0 * a * (a - 1.0);
+      const auto s = m_switch(r);
+      const double s2 = m_switch.d2sdr2(r);
+      d2 = d2 * s.s + 2.0 * d1 * s.dsdr + bare * s2;
+      d1 = d1 * s.s + bare * s.dsdr;
+    }
+    const double ux = dx * inv_r;
+    const double uy = dy * inv_r;
+    const double uz = dz * inv_r;
+    const double *vi = v + 3 * static_cast<std::size_t>(i);
+    const double *vj = v + 3 * static_cast<std::size_t>(j);
+    const double wx = vi[0] - vj[0];
+    const double wy = vi[1] - vj[1];
+    const double wz = vi[2] - vj[2];
+    const double radial = d1 * inv_r;
+    const double along = (d2 - radial) * (ux * wx + uy * wy + uz * wz);
+    const double kx = along * ux + radial * wx;
+    const double ky = along * uy + radial * wy;
+    const double kz = along * uz + radial * wz;
+    double *hi = hv + 3 * static_cast<std::size_t>(i);
+    double *hj = hv + 3 * static_cast<std::size_t>(j);
+    hi[0] += kx;
+    hi[1] += ky;
+    hi[2] += kz;
+    hj[0] -= kx;
+    hj[1] -= ky;
+    hj[2] -= kz;
+  };
+  KeptLjNeighbours::with(
+      ljNeighbourKey(this, cuttOffR, mode_),
+      [] { return std::make_unique<LjNeighbours>(); },
+      [&](LjNeighbours &scratch) {
+        updateScratchCells(scratch, in, cuttOffR, mode_);
+        nlist::visitHalf(scratch.cells, 0, N, addPair);
+      });
 }
 
 void LJPot::forceStage(const HalfList &list, const double *, double *forces,
@@ -159,10 +283,7 @@ void LJPot::forceStage(const HalfList &list, const double *, double *forces,
             return;
           }
           if (!(r2 > 0.0)) {
-            if constexpr (decltype(tallied)::value) {
-              tally->energy = std::numeric_limits<double>::quiet_NaN();
-            }
-            return;
+            throw std::domain_error("LJPot force is undefined for coincident atoms");
           }
           double pair_e = 0.0;
           double fscale = 0.0;

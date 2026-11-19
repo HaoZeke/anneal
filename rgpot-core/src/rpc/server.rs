@@ -17,6 +17,7 @@ use futures::AsyncReadExt;
 use std::os::raw::c_void;
 use tokio::runtime::Runtime;
 
+use crate::hvp::rgpot_hvp_scheme_t;
 use crate::potential::{rgpot_potential_t, PotentialCallback};
 use crate::rpc::schema::potential;
 use crate::status::rgpot_status_t;
@@ -30,6 +31,7 @@ use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 struct PotentialServer {
     callback: PotentialCallback,
     user_data: *mut c_void,
+    potential: *const rgpot_potential_t,
 }
 
 // Safety: the user_data pointer is only accessed through the callback
@@ -43,7 +45,9 @@ impl potential::Server for PotentialServer {
         _params: potential::GetCapabilitiesParams,
         mut results: potential::GetCapabilitiesResults,
     ) -> capnp::capability::Promise<(), CapnpError> {
-        crate::compat::describe_server(results.get().init_capabilities());
+        let analytic_hvp =
+            !self.potential.is_null() && unsafe { &*self.potential }.has_hessian_vector_callback();
+        crate::compat::describe_server(results.get().init_capabilities(), analytic_hvp);
         capnp::capability::Promise::ok(())
     }
 
@@ -130,6 +134,72 @@ impl potential::Server for PotentialServer {
 
         capnp::capability::Promise::ok(())
     }
+
+    fn calculate_hvp(
+        &mut self,
+        params: potential::CalculateHvpParams,
+        mut results: potential::CalculateHvpResults,
+    ) -> capnp::capability::Promise<(), CapnpError> {
+        if self.potential.is_null() {
+            return capnp::capability::Promise::err(CapnpError::failed(
+                "server has no potential handle".to_string(),
+            ));
+        }
+        let params = pry!(params.get());
+        let fip = pry!(params.get_fip());
+        let positions = pry!(fip.get_pos());
+        let atmnrs = pry!(fip.get_atmnrs());
+        let box_data = pry!(fip.get_box());
+        let direction = pry!(params.get_direction());
+        let n_atoms = atmnrs.len() as usize;
+        let dimension = 3 * n_atoms;
+        if positions.len() as usize != dimension || direction.len() as usize != dimension {
+            return capnp::capability::Promise::err(CapnpError::failed(
+                "HVP position or direction size mismatch".to_string(),
+            ));
+        }
+        if box_data.len() != 9 {
+            return capnp::capability::Promise::err(CapnpError::failed(
+                "HVP box size mismatch".to_string(),
+            ));
+        }
+        let mut pos_vec: Vec<f64> = (0..positions.len()).map(|i| positions.get(i)).collect();
+        let mut atom_vec: Vec<i32> = (0..atmnrs.len()).map(|i| atmnrs.get(i)).collect();
+        let mut box_vec: Vec<f64> = (0..box_data.len()).map(|i| box_data.get(i)).collect();
+        let direction_vec: Vec<f64> = (0..direction.len()).map(|i| direction.get(i)).collect();
+        let pos_tensor =
+            unsafe { rgpot_tensor_cpu_f64_2d(pos_vec.as_mut_ptr(), n_atoms as i64, 3) };
+        let atom_tensor = unsafe { rgpot_tensor_cpu_i32_1d(atom_vec.as_mut_ptr(), n_atoms as i64) };
+        let box_tensor = unsafe { rgpot_tensor_cpu_f64_matrix3(box_vec.as_mut_ptr()) };
+        let input = rgpot_force_input_t {
+            positions: pos_tensor,
+            atomic_numbers: atom_tensor,
+            box_matrix: box_tensor,
+        };
+        let mut product = vec![0.0; dimension];
+        let answer = unsafe {
+            (&*self.potential).hessian_vector(
+                &input,
+                &direction_vec,
+                0.0,
+                rgpot_hvp_scheme_t::RGPOT_HVP_ANALYTIC,
+                &mut product,
+            )
+        };
+        unsafe {
+            rgpot_tensor_free(input.positions);
+            rgpot_tensor_free(input.atomic_numbers);
+            rgpot_tensor_free(input.box_matrix);
+        }
+        if let Err(error) = answer {
+            return capnp::capability::Promise::err(CapnpError::failed(error.to_string()));
+        }
+        let mut builder = results.get().init_product(dimension as u32);
+        for (i, value) in product.into_iter().enumerate() {
+            builder.set(i as u32, value);
+        }
+        capnp::capability::Promise::ok(())
+    }
 }
 
 /// Start an RPC server listening on `host:port`, dispatching to `pot`.
@@ -206,6 +276,7 @@ pub unsafe extern "C" fn rgpot_rpc_server_start(
                 let server_impl = PotentialServer {
                     callback: pot_ref.callback,
                     user_data: pot_ref.pot_user_data,
+                    potential: pot,
                 };
 
                 let potential_client = capnp_rpc::new_client::<potential::Client, _>(server_impl);
@@ -265,10 +336,26 @@ mod tests {
         rgpot_status_t::RGPOT_SUCCESS
     }
 
+    unsafe extern "C" fn probe_hvp(
+        _user_data: *mut c_void,
+        input: *const rgpot_force_input_t,
+        direction: *const f64,
+        product: *mut f64,
+    ) -> rgpot_status_t {
+        let dimension = unsafe { (*input).n_atoms() }
+            .and_then(|n| n.checked_mul(3))
+            .expect("test input");
+        for i in 0..dimension {
+            unsafe { *product.add(i) = 2.0 * *direction.add(i) };
+        }
+        rgpot_status_t::RGPOT_SUCCESS
+    }
+
     fn call(probe: &Probe, pos: &[f64], atm: &[i32], cell: &[f64]) -> Result<Vec<f64>, String> {
         let client = capnp_rpc::new_client::<potential::Client, _>(PotentialServer {
             callback: probe_callback,
             user_data: probe as *const Probe as *mut c_void,
+            potential: std::ptr::null(),
         });
         let mut request = client.calculate_request();
         {
@@ -305,6 +392,53 @@ mod tests {
     }
 
     const CELL: [f64; 9] = [10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0];
+
+    #[test]
+    fn analytic_hvp_is_served_through_the_rpc_method() {
+        let probe = probe(false);
+        let pot = unsafe {
+            crate::c_api::potential::rgpot_potential_new(
+                probe_callback,
+                &probe as *const Probe as *mut c_void,
+                None,
+            )
+        };
+        assert!(!pot.is_null());
+        unsafe { &*pot }.set_hessian_vector_callback(Some(probe_hvp));
+        let client = capnp_rpc::new_client::<potential::Client, _>(PotentialServer {
+            callback: probe_callback,
+            user_data: &probe as *const Probe as *mut c_void,
+            potential: pot,
+        });
+        let direction = [0.2, -0.3, 0.4];
+        let mut request = client.calculate_hvp_request();
+        {
+            let mut root = request.get();
+            let mut fip = root.reborrow().init_fip();
+            let mut positions = fip.reborrow().init_pos(3);
+            for (i, value) in [0.1, 0.2, 0.3].into_iter().enumerate() {
+                positions.set(i as u32, value);
+            }
+            fip.reborrow().init_atmnrs(1).set(0, 1);
+            let mut cell = fip.init_box(9);
+            for (i, value) in CELL.into_iter().enumerate() {
+                cell.set(i as u32, value);
+            }
+            let mut vector = root.init_direction(3);
+            for (i, value) in direction.into_iter().enumerate() {
+                vector.set(i as u32, value);
+            }
+        }
+        let response = futures::executor::block_on(request.send().promise).expect("HVP response");
+        let product = response
+            .get()
+            .and_then(|value| value.get_product())
+            .expect("HVP product");
+        for (i, value) in direction.into_iter().enumerate() {
+            assert!((product.get(i as u32) - 2.0 * value).abs() <= f64::EPSILON);
+        }
+        unsafe { crate::c_api::potential::rgpot_potential_free(pot) };
+    }
 
     #[test]
     fn well_formed_request_succeeds() {

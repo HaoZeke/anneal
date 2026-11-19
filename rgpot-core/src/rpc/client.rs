@@ -19,6 +19,7 @@ use dlpk::sys::DLDeviceType;
 use futures::AsyncReadExt;
 use tokio::runtime::Runtime;
 
+use crate::rpc::schema::capabilities::Operation;
 use crate::rpc::schema::potential;
 use crate::tensor::create_owned_f64_tensor;
 use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
@@ -52,6 +53,16 @@ impl RpcClient {
     ) -> Result<(), String> {
         let local = tokio::task::LocalSet::new();
         local.block_on(&self.runtime, self.calculate_async(input, output))
+    }
+
+    /// Compute the server's analytic Cartesian energy-Hessian product.
+    pub fn calculate_hvp(
+        &mut self,
+        input: &rgpot_force_input_t,
+        direction: &[f64],
+    ) -> Result<Vec<f64>, String> {
+        let local = tokio::task::LocalSet::new();
+        local.block_on(&self.runtime, self.calculate_hvp_async(input, direction))
     }
 
     async fn calculate_async(
@@ -145,6 +156,87 @@ impl RpcClient {
         output.forces = create_owned_f64_tensor(forces_vec, vec![n as i64, 3]);
 
         Ok(())
+    }
+
+    async fn calculate_hvp_async(
+        &self,
+        input: &rgpot_force_input_t,
+        direction: &[f64],
+    ) -> Result<Vec<f64>, String> {
+        let n = unsafe { input.n_atoms() }
+            .ok_or_else(|| "cannot determine n_atoms from input tensors".to_string())?;
+        let dimension = n
+            .checked_mul(3)
+            .ok_or_else(|| "n_atoms * 3 overflows".to_string())?;
+        if direction.len() != dimension {
+            return Err(format!(
+                "direction size mismatch: expected {dimension}, got {}",
+                direction.len()
+            ));
+        }
+        let (positions, atmnrs, box_data) = unsafe { extract_cpu_input(input, n)? };
+        let stream = tokio::net::TcpStream::connect(&self.addr)
+            .await
+            .map_err(|e| format!("connection failed: {e}"))?;
+        stream
+            .set_nodelay(true)
+            .map_err(|e| format!("set_nodelay failed: {e}"))?;
+        let (reader, writer) = tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
+        let network = twoparty::VatNetwork::new(
+            futures::io::BufReader::new(reader),
+            futures::io::BufWriter::new(writer),
+            rpc_twoparty_capnp::Side::Client,
+            Default::default(),
+        );
+        let mut rpc_system = RpcSystem::new(Box::new(network), None);
+        let potential_client: potential::Client =
+            rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+        tokio::task::spawn_local(rpc_system);
+
+        let mut expectation = crate::compat::Expectation::default();
+        expectation
+            .required_operations
+            .push(Operation::HessianVector);
+        crate::compat::check_server(&potential_client, &expectation).await?;
+
+        let mut request = potential_client.calculate_hvp_request();
+        {
+            let mut root = request.get();
+            let mut fip = root.reborrow().init_fip();
+            let mut pos_builder = fip.reborrow().init_pos(positions.len() as u32);
+            for (i, &value) in positions.iter().enumerate() {
+                pos_builder.set(i as u32, value);
+            }
+            let mut atom_builder = fip.reborrow().init_atmnrs(atmnrs.len() as u32);
+            for (i, &value) in atmnrs.iter().enumerate() {
+                atom_builder.set(i as u32, value);
+            }
+            let mut box_builder = fip.init_box(9);
+            for (i, &value) in box_data.iter().enumerate() {
+                box_builder.set(i as u32, value);
+            }
+            let mut direction_builder = root.init_direction(direction.len() as u32);
+            for (i, &value) in direction.iter().enumerate() {
+                direction_builder.set(i as u32, value);
+            }
+        }
+        let response = request
+            .send()
+            .promise
+            .await
+            .map_err(|e: CapnpError| format!("RPC HVP call failed: {e}"))?;
+        let product = response
+            .get()
+            .map_err(|e| format!("failed to read HVP response: {e}"))?
+            .get_product()
+            .map_err(|e| format!("failed to read HVP product: {e}"))?;
+        if product.len() as usize != dimension {
+            return Err(format!(
+                "HVP size mismatch: expected {dimension}, got {}",
+                product.len()
+            ));
+        }
+        Ok((0..product.len()).map(|i| product.get(i)).collect())
     }
 }
 

@@ -18,7 +18,7 @@ pub const PROTOCOL_FAMILY: &str = "rgpot.potentials";
 /// Wire-incompatible protocol revision.
 pub const PROTOCOL_MAJOR: u16 = 1;
 /// Additive protocol revision.
-pub const PROTOCOL_MINOR: u16 = 0;
+pub const PROTOCOL_MINOR: u16 = 1;
 /// Cap'n Proto identity of `Potentials.capnp`.
 pub const SCHEMA_ID: &str = "0xbd1f89fa17369103";
 
@@ -191,13 +191,17 @@ pub fn fill_compatibility(mut caps: Builder<'_>) {
 }
 
 /// Fill `caps` as the self-description of an rgpot RPC server.
-pub fn describe_server(mut caps: Builder<'_>) {
+pub fn describe_server(mut caps: Builder<'_>, analytic_hvp: bool) {
     caps.set_backend_name("rgpot");
     caps.set_backend_version(env!("CARGO_PKG_VERSION"));
     caps.set_available(true);
-    let mut ops = caps.reborrow().init_operations(2);
+    let count = if analytic_hvp { 3 } else { 2 };
+    let mut ops = caps.reborrow().init_operations(count);
     ops.set(0, Operation::Energy);
     ops.set(1, Operation::Forces);
+    if analytic_hvp {
+        ops.set(2, Operation::HessianVector);
+    }
     fill_compatibility(caps);
 }
 
@@ -393,7 +397,7 @@ mod server_tests {
             _p: potential::GetCapabilitiesParams,
             mut r: potential::GetCapabilitiesResults,
         ) -> Promise<(), capnp::Error> {
-            describe_server(r.get().init_capabilities());
+            describe_server(r.get().init_capabilities(), false);
             Promise::ok(())
         }
     }
@@ -406,7 +410,7 @@ mod server_tests {
             mut r: potential::GetCapabilitiesResults,
         ) -> Promise<(), capnp::Error> {
             let mut caps = r.get().init_capabilities();
-            describe_server(caps.reborrow());
+            describe_server(caps.reborrow(), false);
             caps.set_protocol_family("other.family");
             Promise::ok(())
         }

@@ -14,6 +14,67 @@ The members every potential inherits (=forceImpl=, =forceBatch=, =caps=,
 =setCache=, ...) are on [[file:cpp_api.org][C++ API]].
 How the classes fit together is on [[file:architecture.org][Architecture]].
 
+** CppCore/rgpot/Models/ModelPots.hpp: analytic models
+
+*** =rgpot::AnalyticModelPot=
+
+The common =rgpot::Potential= implementation for Eckart, Muller-Brown, modified
+Muller-Brown, LEPS H + H2 / H + Cl2 / F + H2, the generic quartic double well
+and the coupled proton well.
+Forces are minus the energy gradient; all models advertise and implement an
+exact Hessian-vector product.
+
+- Inputs :: constructed through one of its concrete model classes.
+- Units :: the non-LEPS constructors use eV and Angstrom.
+  LEPS evaluates the published hartree/bohr formulas and converts at the rgpot
+  boundary.
+- Outputs :: a built-in potential with energy, force and analytic HVP calls.
+- Errors :: model-specific invalid parameters and nondifferentiable LEPS
+  geometries throw.
+
+*** =rgpot::AnalyticModelPot::dimensions=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] std::size_t dimensions() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: none.
+- Outputs :: the natural coordinate count, including counts not divisible by
+  three.
+- Errors :: none.
+
+*** =rgpot::AnalyticModelPot::evaluateCoordinates=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] ModelEvaluation
+evaluateCoordinates(std::span<const double> coordinates,
+                    std::span<const double> direction) const;
+#+end_src
+
+- Inputs :: natural coordinates and a same-sized direction.
+- Units :: Angstrom for coordinates and direction; eV for energy.
+- Outputs :: energy, the energy gradient, and the analytic product
+  =H direction=.
+- Errors :: throws
+  =std::invalid_argument= for a wrong coordinate count or an invalid model parameter, and =std::domain_error=
+  at a nondifferentiable LEPS geometry.
+
+*** =rgpot::CBEPot=
+
+The optional linked frontend to the external =cbe-pes= H + CH4 library.
+
+- Inputs :: exactly six Cartesian atoms ordered as required by =cbe-pes=.
+- Units :: positions in Angstrom, energy in eV, force and HVP result in
+  eV/Angstrom.
+- Outputs :: energy, force and the external library's analytic Hessian-vector
+  product.
+- Errors :: throws for the wrong atom count or a non-success =cbe-pes= status.
+  It is built only with =with_cbe= / =RGPOT_WITH_CBE= and does not load a local
+  PES library.
+
 A force call takes a =rgpot::ForceInput=: =nAtoms=, =pos= (3 * nAtoms doubles, x
 y z per atom, Angstrom), =atmnrs= (one atomic number per atom) and =box= (nine
 doubles, one cell vector per row, Angstrom).

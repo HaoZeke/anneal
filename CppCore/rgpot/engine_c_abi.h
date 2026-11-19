@@ -95,8 +95,13 @@ typedef int (*rgpot_engine_coord_transform)(void *user, long nAtoms,
  * minor 0, layout 1.
  */
 #define RGPOT_ENGINE_ABI_VERSION 1
-#define RGPOT_ENGINE_ABI_MINOR 3
+#define RGPOT_ENGINE_ABI_MINOR 4
 #define RGPOT_ENGINE_ABI_LAYOUT_REVISION 1
+
+#define RGPOT_ENGINE_OK 0
+#define RGPOT_ENGINE_ERR_INVALID 1
+#define RGPOT_ENGINE_ERR_EVAL 2
+#define RGPOT_ENGINE_ERR_UNSUPPORTED 3
 
 RGPOT_ENGINE_API int rgpot_engine_abi_version(void);
 
@@ -161,6 +166,19 @@ RGPOT_ENGINE_API int rgpot_engine_force(
 /* ------------------------------------------------------------------ */
 /* Optional symbols: probe with dlsym; absence means unsupported.     */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Analytic Hessian-vector product H(positions) * direction, in eV/Angstrom
+ * for a direction in Angstrom. direction and hv_out hold 3*nAtoms doubles
+ * and must not overlap. Returns RGPOT_ENGINE_OK (0) on success,
+ * RGPOT_ENGINE_ERR_INVALID (1) for invalid or overlapping arguments, and
+ * RGPOT_ENGINE_ERR_UNSUPPORTED (3) when the backend does not support
+ * analytic HVP.
+ */
+RGPOT_ENGINE_API int rgpot_engine_hvp(
+    RgpotEnginePot *pot, long nAtoms, const double *positions,
+    const int *atomicNrs, const double *direction, double *hv_out,
+    const double *box);
 
 /**
  * Strided-uniform batched evaluation: nSystems systems sharing one
@@ -272,6 +290,7 @@ typedef struct {
   int group_collective;    /**< every rank of a group enters each call */
   int orbital_selection;   /**< select_orbitals is supported */
   int orbital_copy;        /**< copy_orbitals is supported */
+  int analytic_hvp;        /**< rgpot_engine_hvp is exact for this potential */
 } RgpotEngineCaps;
 
 RGPOT_ENGINE_API int rgpot_engine_caps(const RgpotEnginePot *pot,
