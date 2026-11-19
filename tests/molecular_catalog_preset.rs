@@ -1,9 +1,9 @@
 use anneal_core::catalog::molecular::{
     DESCRIPTOR_SCHEMA, ENGINE_BINARY_INPUT, ENGINE_KIND, GFN2_ACCURACY, GFN2_MAX_ITERATIONS,
-    GROUP_SCHEMA, MAX_GRADIENT_NORM, WATER_HEXAMER_MOLECULES, component_gradient_tolerance,
-    descriptor_space, engine_binary_digest, engine_config_digest, fresh_evaluation,
-    leftover_descriptor_dim, leftover_space, leftover_spec, leftover_values, length_scale,
-    reference_coordinates, system_signature, validator_config, water_groups, water_species,
+    GROUP_SCHEMA, MAX_GRADIENT_NORM, component_gradient_tolerance, descriptor_space,
+    engine_binary_digest, engine_config_digest, fresh_evaluation, leftover_descriptor_dim,
+    leftover_space, leftover_spec, leftover_values, length_scale, reference_coordinates,
+    system_signature, validator_config, water_groups, water_species,
 };
 #[cfg(feature = "featomic")]
 use anneal_core::descriptor_space::{
@@ -17,6 +17,8 @@ use anneal_core::soap::SoapSpec;
 fn engine_digest(byte: u8) -> [u8; 32] {
     [byte; 32]
 }
+
+const WATER_HEXAMER_MOLECULES: usize = 6;
 
 #[test]
 fn hexamer_signature_records_gfn2_kind_and_universal_dim() {

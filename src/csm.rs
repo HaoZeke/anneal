@@ -26,6 +26,22 @@ pub fn project(
     ops: &[[[f64; 3]; 3]],
     orientations: &[[[f64; 3]; 3]],
 ) -> Option<(Array1<f64>, f64)> {
+    project_with_op_measure(x, classes, ops, orientations)
+        .map(|projection| (projection.coordinates, projection.measure))
+}
+
+struct OpProjection {
+    coordinates: Array1<f64>,
+    measure: f64,
+    op_measure: f64,
+}
+
+fn project_with_op_measure(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    ops: &[[[f64; 3]; 3]],
+    orientations: &[[[f64; 3]; 3]],
+) -> Option<OpProjection> {
     let n = classes.len();
     if ops.is_empty() || orientations.is_empty() || x.len() != n.checked_mul(3)? {
         return None;
@@ -34,7 +50,7 @@ pub fn project(
         return None;
     }
     let (centred, centroid, scale) = centre_and_scale(x, n)?;
-    let mut best: Option<(f64, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
+    let mut best: Option<(f64, f64, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
     let mut solved: Vec<Vec<Matched>> = Vec::with_capacity(orientations.len());
     for (index, rotation) in orientations.iter().enumerate() {
         let y = apply_all(rotation, &centred);
@@ -50,6 +66,7 @@ pub fn project(
         });
         let mut here: Vec<Matched> = Vec::with_capacity(ops.len());
         let mut hat = vec![[0.0; 3]; n];
+        let mut op_residual = 0.0;
         for (op_index, op) in ops.iter().enumerate() {
             let conjugate = turn.and_then(|(earlier, turn)| {
                 let conjugate = matmul(matmul(transpose(turn), *op), turn);
@@ -75,6 +92,8 @@ pub fn project(
                 let image = mul_vec(op, y[matched.assignment[atom]]);
                 for axis in 0..3 {
                     hat[atom][axis] += image[axis];
+                    let delta = y[atom][axis] - image[axis];
+                    op_residual += delta * delta;
                 }
             }
             here.push(matched);
@@ -95,14 +114,16 @@ pub fn project(
             continue;
         }
         let measure = residual / norm;
+        let non_identity = ops.len().saturating_sub(1).max(1) as f64;
+        let op_measure = op_residual / (2.0 * non_identity * norm);
         if best
             .as_ref()
-            .is_none_or(|(incumbent, _, _)| measure < *incumbent)
+            .is_none_or(|(incumbent, _, _, _)| measure < *incumbent)
         {
-            best = Some((measure, *rotation, hat));
+            best = Some((measure, op_measure, *rotation, hat));
         }
     }
-    let (measure, rotation, hat) = best?;
+    let (measure, op_measure, rotation, hat) = best?;
     let back = transpose(rotation);
     let mut coordinates = Array1::zeros(3 * n);
     for atom in 0..n {
@@ -111,7 +132,11 @@ pub fn project(
             coordinates[3 * atom + axis] = centroid[axis] + restored[axis] * scale;
         }
     }
-    Some((coordinates, measure))
+    Some(OpProjection {
+        coordinates,
+        measure,
+        op_measure,
+    })
 }
 
 /// Pair distance below which an average is a coordinate singularity.
@@ -129,13 +154,15 @@ pub struct GroupProjection {
     pub coordinates: Array1<f64>,
     /// Normalised squared distance to the average. Zero is exact symmetry.
     pub measure: f64,
-    /// `C_i`, `C_5`, or `D_5h`.
+    /// `C_i`, `C_n`, or `D_nh`.
     pub group: &'static str,
+    /// Principal rotational order (`2` for inversion).
+    pub order: usize,
 }
 
 /// Projects onto the library group with the lowest measure.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
-    if let Some(cached) = cached_propose(x, classes) {
+    if let Some(cached) = cached_propose(x, classes, false) {
         return cached;
     }
     let orientations = inertia_orientations(x, classes.len())?;
@@ -144,10 +171,10 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     // in the published order C_i, C_5, D_5h.
     clear_op_cache();
     let mut best: Option<(usize, GroupProjection)> = None;
-    for (rank, name, ops) in [
-        (2, "D_5h", d5h_ops()),
-        (1, "C_5", cyclic_about_z(5)),
-        (0, "C_i", inversion_ops()),
+    for (rank, order, name, ops) in [
+        (2, 5, "D_nh", d5h_ops()),
+        (1, 5, "C_n", cyclic_about_z(5)),
+        (0, 2, "C_i", inversion_ops()),
     ] {
         // Inversion is not a fivefold operation, so its permutations are
         // not in the D_5h cache. The nearest-image residual is a lower
@@ -185,16 +212,299 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
                     coordinates,
                     measure,
                     group: name,
+                    order,
                 },
             ));
         }
     }
     let best = best.map(|(_, projection)| projection);
-    store_propose(x, classes, best.as_ref());
+    store_propose(x, classes, false, best.as_ref());
     best
 }
 
+/// Projects onto `C_i`, `C_n`, or `D_nh`.
+///
+/// Every order is read the same way. Along each principal axis the off-axis
+/// atoms split into shells wherever a radial gap exceeds the gaps inside the
+/// shell, and a shell contributes the number of distinct azimuthal directions
+/// when those directions are one regular cycle. A set too small to hold two
+/// cycles of order three is that population: it cannot be split into rings.
+/// Inversion is one more candidate, not a fallback. The winner is the lowest
+/// per-operation residual. The raw centroid measure is not compared, because
+/// mirrors cancel in it.
+pub fn propose_general(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+    if let Some(cached) = cached_propose(x, classes, true) {
+        return cached;
+    }
+    let n = classes.len();
+    let (centred, _, _) = centre_and_scale(x, n)?;
+    let base = principal_orientations(&centred)?;
+    let mut best: Option<Scored> = None;
+    let mut consider = |candidate: Scored| {
+        let replace = match &best {
+            None => true,
+            Some(held) => {
+                // Two residuals within an ulp of a unit-radius structure are
+                // the same measurement. The larger group then wins, which is
+                // how an exact dihedral prism beats the inversion it contains.
+                let scale = candidate.op.abs().max(held.op.abs()).max(1.0);
+                if (candidate.op - held.op).abs() <= scale * f64::EPSILON {
+                    group_rank(candidate.group) < group_rank(held.group)
+                } else {
+                    candidate.op < held.op
+                }
+            }
+        };
+        if replace {
+            best = Some(candidate);
+        }
+    };
+    clear_op_cache();
+    if let Some(scored) = score_group(x, classes, 2, "C_i", &inversion_ops(), &base) {
+        consider(scored);
+    }
+    for order in shell_orders(&centred) {
+        clear_op_cache();
+        let orientations = with_phase_orientations(&base, order);
+        if let Some(scored) = score_group(
+            x,
+            classes,
+            order,
+            "D_nh",
+            &dihedral_horizontal_ops(order),
+            &orientations,
+        ) {
+            consider(scored);
+        }
+        if let Some(scored) = score_group(
+            x,
+            classes,
+            order,
+            "C_n",
+            &cyclic_about_z(order),
+            &orientations,
+        ) {
+            consider(scored);
+        }
+    }
+    let best = best.map(|scored| scored.projection());
+    store_propose(x, classes, true, best.as_ref());
+    best
+}
+
+/// `D_nh` ahead of `C_n` ahead of `C_i` when the per-operation residuals tie.
+fn group_rank(group: &str) -> usize {
+    match group {
+        "D_nh" => 0,
+        "C_n" => 1,
+        _ => 2,
+    }
+}
+
+#[derive(Clone)]
+struct Scored {
+    coordinates: Array1<f64>,
+    measure: f64,
+    group: &'static str,
+    order: usize,
+    op: f64,
+}
+
+impl Scored {
+    fn projection(self) -> GroupProjection {
+        GroupProjection {
+            coordinates: self.coordinates,
+            measure: self.measure,
+            group: self.group,
+            order: self.order,
+        }
+    }
+}
+
+fn score_group(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    order: usize,
+    name: &'static str,
+    ops: &[[[f64; 3]; 3]],
+    orientations: &[[[f64; 3]; 3]],
+) -> Option<Scored> {
+    let projection = project_with_op_measure(x, classes, ops, orientations)?;
+    if closest_pair(&projection.coordinates) < SINGULAR_PAIR {
+        return None;
+    }
+    Some(Scored {
+        coordinates: projection.coordinates,
+        measure: projection.measure,
+        group: name,
+        order,
+        op: projection.op_measure,
+    })
+}
+
+/// Orders of the regular cycles on the principal shells.
+///
+/// A half turn is already carried by inversion, so a cyclic shell starts at
+/// order three. Fewer off-axis atoms than two such shells cannot be split
+/// into rings, and that population is the order. A larger set is split at
+/// every radial gap that exceeds the gaps inside the shell being closed, and
+/// each shell is kept when its distinct azimuthal directions are one regular
+/// cycle. Counting atoms instead of directions would call two coincident
+/// rings a cycle of twice the order.
+fn shell_orders(centred: &[[f64; 3]]) -> Vec<usize> {
+    let Some(axes) = principal_orientations(centred) else {
+        return Vec::new();
+    };
+    let mut orders = Vec::new();
+    for aligned in &axes {
+        for order in axis_orders(centred, aligned[2]) {
+            if !orders.contains(&order) {
+                orders.push(order);
+            }
+        }
+    }
+    orders
+}
+
+fn axis_orders(centred: &[[f64; 3]], axis: [f64; 3]) -> Vec<usize> {
+    let Some(tangent) = normalize(perpendicular(axis)) else {
+        return Vec::new();
+    };
+    let Some(bitangent) = normalize(cross(axis, tangent)) else {
+        return Vec::new();
+    };
+    let mut samples = Vec::new();
+    for point in centred {
+        let height = point[0] * axis[0] + point[1] * axis[1] + point[2] * axis[2];
+        let radial = [
+            point[0] - height * axis[0],
+            point[1] - height * axis[1],
+            point[2] - height * axis[2],
+        ];
+        let rho = norm(radial);
+        if rho > 1e-8 {
+            let x = radial[0] * tangent[0] + radial[1] * tangent[1] + radial[2] * tangent[2];
+            let y = radial[0] * bitangent[0] + radial[1] * bitangent[1] + radial[2] * bitangent[2];
+            samples.push((rho, y.atan2(x)));
+        }
+    }
+    let minimum = minimum_shell_order();
+    if samples.len() < minimum {
+        return Vec::new();
+    }
+    if samples.len() < minimum * 2 {
+        return vec![samples.len()];
+    }
+    let mut orders = Vec::new();
+    for shell in radius_shells(&samples) {
+        if let Some(order) = regular_shell_order(&samples, &shell) {
+            orders.push(order);
+        }
+    }
+    orders
+}
+
+/// Smallest cyclic order that is not the half turn already in `C_i`.
+fn minimum_shell_order() -> usize {
+    3
+}
+
+/// Index groups of `samples`, split where a radial gap exceeds the shell's own.
+fn radius_shells(samples: &[(f64, f64)]) -> Vec<Vec<usize>> {
+    let mut order: Vec<usize> = (0..samples.len()).collect();
+    order.sort_by(|&left, &right| {
+        samples[left]
+            .0
+            .partial_cmp(&samples[right].0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut shells = Vec::new();
+    let mut start = 0;
+    let mut interior = 0.0;
+    for index in 1..order.len() {
+        let here = samples[order[index]].0;
+        let previous = samples[order[index - 1]].0;
+        let gap = here - previous;
+        // A gap at the scale of the radius's own rounding is one shell.
+        let rounding = here.max(previous) * f64::EPSILON.sqrt();
+        if index > start + 1 && gap > interior + rounding {
+            shells.push(order[start..index].to_vec());
+            start = index;
+            interior = 0.0;
+        } else {
+            interior = interior.max(gap);
+        }
+    }
+    shells.push(order[start..].to_vec());
+    shells
+}
+
+/// Distinct azimuthal directions, when they form one regular cycle.
+///
+/// The largest gap of a regular cycle is one turn over the direction count.
+/// Anything past that is rounding of the axis, `step * sqrt(epsilon)`, plus
+/// the shell's own radial thickness as a fraction of its mean radius: a
+/// perfectly thin ring has to be perfectly regular, and a shell that is
+/// already thick in radius is not a stricter angular object than that.
+fn regular_shell_order(samples: &[(f64, f64)], members: &[usize]) -> Option<usize> {
+    if members.len() < minimum_shell_order() {
+        return None;
+    }
+    let angles: Vec<f64> = members.iter().map(|&index| samples[index].1).collect();
+    let directions = distinct_angles(&angles);
+    let order = directions.len();
+    if order < minimum_shell_order() {
+        return None;
+    }
+    let turn = std::f64::consts::TAU;
+    let step = turn / order as f64;
+    let mut max_gap = directions[0] + turn - directions[order - 1];
+    for pair in directions.windows(2) {
+        max_gap = max_gap.max(pair[1] - pair[0]);
+    }
+    let mut min_rho = f64::INFINITY;
+    let mut max_rho = 0.0_f64;
+    let mut sum_rho = 0.0;
+    for &index in members {
+        let rho = samples[index].0;
+        min_rho = min_rho.min(rho);
+        max_rho = max_rho.max(rho);
+        sum_rho += rho;
+    }
+    let mean = sum_rho / members.len() as f64;
+    let relative = if mean > 0.0 {
+        (max_rho - min_rho) / mean
+    } else {
+        0.0
+    };
+    let slack = step * relative + step * f64::EPSILON.sqrt();
+    (max_gap <= step + slack).then_some(order)
+}
+
+fn distinct_angles(angles: &[f64]) -> Vec<f64> {
+    if angles.is_empty() {
+        return Vec::new();
+    }
+    let mut sorted = angles.to_vec();
+    sorted.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    let merge = std::f64::consts::TAU * f64::EPSILON.sqrt();
+    let mut directions = vec![sorted[0]];
+    for &angle in &sorted[1..] {
+        if angle - *directions.last().unwrap() > merge {
+            directions.push(angle);
+        }
+    }
+    if directions.len() > 1 {
+        let wrap = directions[0] + std::f64::consts::TAU - directions[directions.len() - 1];
+        if wrap <= merge {
+            directions.pop();
+        }
+    }
+    directions
+}
+
 struct ProposeCache {
+    general: bool,
     coordinates: Vec<u64>,
     classes: Vec<u32>,
     value: Option<GroupProjection>,
@@ -212,18 +522,30 @@ fn same_bits(cached: &[u64], x: ArrayView1<'_, f64>) -> bool {
             .all(|(bits, value)| *bits == value.to_bits())
 }
 
-fn cached_propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<Option<GroupProjection>> {
+fn cached_propose(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    general: bool,
+) -> Option<Option<GroupProjection>> {
     PROPOSE_CACHE.with(|slot| {
         let slot = slot.borrow();
         let cached = slot.as_ref()?;
-        (same_bits(&cached.coordinates, x) && cached.classes == classes)
+        (cached.general == general
+            && same_bits(&cached.coordinates, x)
+            && cached.classes == classes)
             .then(|| cached.value.clone())
     })
 }
 
-fn store_propose(x: ArrayView1<'_, f64>, classes: &[u32], value: Option<&GroupProjection>) {
+fn store_propose(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    general: bool,
+    value: Option<&GroupProjection>,
+) {
     PROPOSE_CACHE.with(|slot| {
         *slot.borrow_mut() = Some(ProposeCache {
+            general,
             coordinates: x.iter().map(|value| value.to_bits()).collect(),
             classes: classes.to_vec(),
             value: value.cloned(),
@@ -550,10 +872,14 @@ fn cyclic_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
 }
 
 fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
-    let turns = cyclic_about_z(5);
+    dihedral_horizontal_ops(5)
+}
+
+fn dihedral_horizontal_ops(order: usize) -> Vec<[[f64; 3]; 3]> {
+    let turns = cyclic_about_z(order);
     let twofold = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
     let mirror = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
-    let mut ops = Vec::with_capacity(20);
+    let mut ops = Vec::with_capacity(4 * turns.len());
     for turn in &turns {
         ops.push(*turn);
         ops.push(matmul(twofold, *turn));
@@ -565,10 +891,9 @@ fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
     ops
 }
 
-fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
-    let (centred, _, _) = centre_and_scale(x, n)?;
-    let axes = jacobi(inertia(&centred));
-    let mut orientations = Vec::with_capacity(6);
+fn principal_orientations(centred: &[[f64; 3]]) -> Option<Vec<[[f64; 3]; 3]>> {
+    let axes = jacobi(inertia(centred));
+    let mut orientations = Vec::with_capacity(3);
     for axis in 0..3 {
         let z_axis = normalize(column(axes, axis))?;
         let mut x_axis = reject(column(axes, (axis + 1) % 3), z_axis);
@@ -577,11 +902,25 @@ fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3
         }
         let x_axis = normalize(x_axis)?;
         let y_axis = normalize(cross(z_axis, x_axis))?;
-        let aligned = [x_axis, y_axis, z_axis];
-        orientations.push(aligned);
-        orientations.push(matmul(rot_z(std::f64::consts::TAU / 5.0), aligned));
+        orientations.push([x_axis, y_axis, z_axis]);
     }
     Some(orientations)
+}
+
+fn with_phase_orientations(base: &[[[f64; 3]; 3]], order: usize) -> Vec<[[f64; 3]; 3]> {
+    let step = rot_z(std::f64::consts::TAU / order as f64);
+    let mut orientations = Vec::with_capacity(2 * base.len());
+    for aligned in base {
+        orientations.push(*aligned);
+        orientations.push(matmul(step, *aligned));
+    }
+    orientations
+}
+
+fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
+    let (centred, _, _) = centre_and_scale(x, n)?;
+    let base = principal_orientations(&centred)?;
+    Some(with_phase_orientations(&base, 5))
 }
 
 fn closest_pair(x: &Array1<f64>) -> f64 {
@@ -782,10 +1121,10 @@ mod tests {
         let orientations = inertia_orientations(x, classes.len())?;
         clear_op_cache();
         let mut best: Option<(usize, GroupProjection)> = None;
-        for (rank, name, ops) in [
-            (2, "D_5h", d5h_ops()),
-            (1, "C_5", cyclic_about_z(5)),
-            (0, "C_i", inversion_ops()),
+        for (rank, order, name, ops) in [
+            (2, 5, "D_nh", d5h_ops()),
+            (1, 5, "C_n", cyclic_about_z(5)),
+            (0, 2, "C_i", inversion_ops()),
         ] {
             let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
                 continue;
@@ -807,6 +1146,7 @@ mod tests {
                         coordinates,
                         measure,
                         group: name,
+                        order,
                     },
                 ));
             }
@@ -1069,5 +1409,167 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn general_propose_detects_orders_and_normalises_per_operation() {
+        // 1. Order 3 at the lower and upper loop bound (n = 3): an isosceles
+        // planar triangle selects D_3h while the fixed channel proposes D_5h.
+        let triangle = Array1::from_vec(vec![
+            1.15,
+            0.0,
+            0.0,
+            -0.5,
+            0.866_025_403_784_438_6,
+            0.0,
+            -0.5,
+            -0.866_025_403_784_438_6,
+            0.0,
+        ]);
+        let tri_classes = [0u32; 3];
+        let fixed_tri = propose(triangle.view(), &tri_classes).expect("fixed triangle");
+        assert_eq!((fixed_tri.group, fixed_tri.order), ("D_nh", 5));
+        let gen_tri = propose_general(triangle.view(), &tri_classes).expect("general triangle");
+        assert_eq!((gen_tri.group, gen_tri.order), ("D_nh", 3));
+        // Cache separation between propose and propose_general.
+        let cached_gen = propose_general(triangle.view(), &tri_classes).expect("cached general");
+        assert_eq!(cached_gen, gen_tri);
+        let cached_fixed = propose(triangle.view(), &tri_classes).expect("cached fixed");
+        assert_eq!((cached_fixed.group, cached_fixed.order), ("D_nh", 5));
+
+        // 2. Order 4 at the upper loop bound (n = 4): a D_2d-puckered 4-ring
+        // breaks inversion on every vertex while keeping seven of the fifteen
+        // non-identity D_4h operations exact, so it selects D_4h.
+        let square = Array1::from_vec(vec![
+            1.0, 0.0, 0.15, 0.0, 1.0, -0.15, -1.0, 0.0, 0.15, 0.0, -1.0, -0.15,
+        ]);
+        let sq_proj = propose_general(square.view(), &[0u32; 4]).expect("square");
+        assert_eq!((sq_proj.group, sq_proj.order), ("D_nh", 4));
+
+        // 3. Chiral cyclic C_3 (n = 6): two unequally sized, twisted triangles
+        // break horizontal mirror, C_2', and inversion while keeping C_3.
+        let mut chiral_c3 = Vec::with_capacity(18);
+        for k in 0..3 {
+            let a = std::f64::consts::TAU * k as f64 / 3.0;
+            chiral_c3.extend([a.cos(), a.sin(), 0.6]);
+        }
+        for k in 0..3 {
+            let a = std::f64::consts::TAU * k as f64 / 3.0 + 0.35;
+            chiral_c3.extend([0.7 * a.cos(), 0.7 * a.sin(), -0.4]);
+        }
+        let c3_arr = Array1::from_vec(chiral_c3);
+        let c3_proj = propose_general(c3_arr.view(), &[0u32; 6]).expect("chiral c3");
+        assert_eq!((c3_proj.group, c3_proj.order), ("C_n", 3));
+        assert!(c3_proj.measure < 1e-12, "{}", c3_proj.measure);
+
+        // 4. Centrosymmetric C_i (n = 4) with no rotational axis of order >= 3.
+        let ci_cluster = Array1::from_vec(vec![
+            1.3, 0.2, 0.5, -1.3, -0.2, -0.5, 0.1, 1.7, -0.4, -0.1, -1.7, 0.4,
+        ]);
+        let ci_proj = propose_general(ci_cluster.view(), &[0u32; 4]).expect("ci cluster");
+        assert_eq!((ci_proj.group, ci_proj.order), ("C_i", 2));
+        assert!(ci_proj.measure < 1e-12, "{}", ci_proj.measure);
+
+        // Verify the exact C_i relation op_measure == 2 * measure on a noisy
+        // 4-atom point set.
+        let mut noisy_ci = ci_cluster;
+        noisy_ci[0] += 0.15;
+        let (centred_ci, _, _) = centre_and_scale(noisy_ci.view(), 4).unwrap();
+        let base_ci = principal_orientations(&centred_ci).unwrap();
+        let noisy =
+            project_with_op_measure(noisy_ci.view(), &[0u32; 4], &inversion_ops(), &base_ci)
+                .unwrap();
+        let (m_ci, op_ci) = (noisy.measure, noisy.op_measure);
+        assert!(m_ci > 1e-4 && (op_ci - 2.0 * m_ci).abs() < 1e-12);
+
+        // 5. Singular-pair rejection in both the axial loop (n = 3) and C_i (n = 2).
+        let singular_pair = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0]);
+        assert!(propose_general(singular_pair.view(), &[0, 0]).is_none());
+        let singular_axial =
+            Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0, -0.004, 0.003, 0.0]);
+        assert!(propose_general(singular_axial.view(), &[0, 0, 0]).is_none());
+
+        // 6. Competitive 7-atom perturbed pentagonal bipyramid where raw
+        // centroid CSM prefers D_4h (m4_d < m5_d) by vector cancellation of
+        // inconsistent operations and unnormalised |G| division prefers C_5,
+        // while per-non-identity-operation CSM selects D_5h (order = 5).
+        let mut s = 0x5ce9_bd63_87b8_32f7u64;
+        let mut x = bipyramid();
+        for v in x.iter_mut() {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let u = ((s >> 11) as f64 / (1u64 << 53) as f64) - 0.5;
+            *v += 0.38 * u;
+        }
+        let classes = vec![0u32; 7];
+        let (centred, _, _) = centre_and_scale(x.view(), 7).unwrap();
+        let base = principal_orientations(&centred).unwrap();
+        clear_op_cache();
+        let ori4 = with_phase_orientations(&base, 4);
+        let fourth =
+            project_with_op_measure(x.view(), &classes, &dihedral_horizontal_ops(4), &ori4)
+                .unwrap();
+        let (m4_d, op4_d) = (fourth.measure, fourth.op_measure);
+        clear_op_cache();
+        let ori5 = with_phase_orientations(&base, 5);
+        let fifth = project_with_op_measure(x.view(), &classes, &dihedral_horizontal_ops(5), &ori5)
+            .unwrap();
+        let (m5_d, op5_d) = (fifth.measure, fifth.op_measure);
+        let op5_c = project_with_op_measure(x.view(), &classes, &cyclic_about_z(5), &ori5)
+            .unwrap()
+            .op_measure;
+        assert!(
+            m4_d < m5_d,
+            "raw centroid CSM must prefer D_4h ({m4_d}) over D_5h ({m5_d})"
+        );
+        assert!(
+            op5_d < op4_d && op5_d < op5_c,
+            "per-operation CSM must prefer D_5h ({op5_d}) over D_4h ({op4_d}) and C_5 ({op5_c})"
+        );
+        assert!(
+            op5_c * 4.0 / 5.0 < op5_d * 19.0 / 20.0,
+            "dividing by |G| instead of |G| - 1 would prefer C_5 over D_5h"
+        );
+        let chosen = propose_general(x.view(), &classes).expect("competitive bipyramid");
+        assert_eq!((chosen.group, chosen.order), ("D_nh", 5));
+    }
+
+    /// Two hexagonal rings at one radius. The outer radial half is both rings,
+    /// twelve atoms, and that set is not a regular 12-cycle, so a channel that
+    /// only scores a regular outer ring and always keeps order five reports
+    /// five. The two rings are six directions.
+    #[test]
+    fn a_double_hexagon_is_sixfold_though_its_outer_half_is_not_one_ring() {
+        let mut coords = Vec::with_capacity(36);
+        for height in [-0.6, 0.6] {
+            for step in 0..6 {
+                let angle = std::f64::consts::TAU * step as f64 / 6.0;
+                coords.extend([angle.cos(), angle.sin(), height]);
+            }
+        }
+        let prism = Array1::from_vec(coords);
+        let chosen = propose_general(prism.view(), &[0u32; 12]).expect("hexagonal prism");
+        assert_eq!((chosen.group, chosen.order), ("D_nh", 6));
+        assert!(chosen.measure < 1e-8, "{}", chosen.measure);
+    }
+
+    #[test]
+    fn a_compact_cloud_is_not_a_full_order_turn() {
+        let n = 24;
+        let mut state = 0x5ce9_bd63_87b8_32f7u64;
+        let mut coords = Vec::with_capacity(3 * n);
+        while coords.len() < 3 * n {
+            let mut point = [0.0; 3];
+            for component in &mut point {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                *component = ((state >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0;
+            }
+            if point.iter().map(|value| value * value).sum::<f64>() <= 1.0 {
+                coords.extend(point);
+            }
+        }
+        let cloud = Array1::from_vec(coords);
+        let chosen = propose_general(cloud.view(), &[0u32; 24]).expect("compact cloud");
+        assert_ne!(chosen.order, n);
+        assert!(chosen.order <= 6, "{} {}", chosen.group, chosen.order);
     }
 }

@@ -2560,8 +2560,13 @@ fn choose_arm<R: Rng + ?Sized>(
 }
 
 /// Kernels the chain actually draws, including the energy-lattice arm.
+#[cfg(test)]
 fn search_kernels(cfg: &Config) -> Vec<ClusterMove> {
-    let mut kernels = cfg.move_library.kernels(cfg);
+    search_kernels_in(cfg, None)
+}
+
+fn search_kernels_in(cfg: &Config, geometry: Option<ArrayView1<'_, f64>>) -> Vec<ClusterMove> {
+    let mut kernels = cfg.move_library.kernels_in(cfg, geometry);
     if cfg.displacement_only {
         kernels = vec![ClusterMove::AllPoints { step: 0.38 }];
     } else if cfg.energy_lattice && cfg.packing_cna_applies() {
@@ -3216,15 +3221,6 @@ where
 /// Drop below another energy that counts as strictly lower, so rounding noise is no improvement.
 const STRICT_IMPROVEMENT: f64 = 1e-10;
 
-/// Body count at and below which the rigid factor may climb to 24.
-///
-/// An all-body kick on a ten-water chart still falls into the target
-/// basin at that factor. A larger chart caps the factor at
-/// [`RIGID_FACTOR_CAP_LARGE`] and can still cool when the acceptance
-/// rate is high.
-const RIGID_HOT_BODIES: usize = 10;
-/// Highest rigid factor on a chart with more than [`RIGID_HOT_BODIES`] bodies.
-const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
 /// Metropolis acceptance the orientation amplitude aims at.
 ///
 /// The ratio a Cartesian basin-hopping step is adjusted toward, and the
@@ -3414,7 +3410,7 @@ fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
 
 #[cfg(test)]
 mod rigid_step_tests {
-    use super::rigid_step_scale;
+    use super::{RIGID_ACCEPT_BLOCK, RIGID_ACCEPT_TARGET, RigidAdapt, rigid_step_scale};
 
     #[test]
     fn a_low_acceptance_shrinks_the_orientation_step_and_a_high_one_grows_it() {
@@ -3436,6 +3432,37 @@ mod rigid_step_tests {
         assert!(
             (rigid_step_scale(0.9, 25, 50) - 0.9).abs() < 1e-12,
             "an acceptance of one half moved the step"
+        );
+    }
+
+    #[test]
+    fn orientation_adapts_while_the_factor_is_still_one() {
+        let mut adapt = RigidAdapt::new();
+        assert_eq!(adapt.factor, 1.0);
+        for _ in 0..RIGID_ACCEPT_BLOCK {
+            adapt.note_orientation(false);
+        }
+        assert!(
+            adapt.orient_scale < 1.0,
+            "the orientation window left the step at {}",
+            adapt.orient_scale
+        );
+    }
+
+    #[test]
+    fn the_factor_cap_is_the_acceptance_width_of_the_observed_rise() {
+        let mut adapt = RigidAdapt::new();
+        let temperature = 0.8;
+        let rise = 1.6;
+        let expected = rise / (temperature * (-RIGID_ACCEPT_TARGET.ln()));
+        assert!(expected > 2.0 && expected < 4.0, "{expected}");
+        for _ in 0..48 {
+            adapt.note_temperature(false, rise, temperature);
+        }
+        assert!(
+            (adapt.factor - expected).abs() < 1.0e-9,
+            "factor {} against the rise cap {expected}",
+            adapt.factor
         );
     }
 }
@@ -3609,11 +3636,81 @@ mod biased_metropolis_tests {
     }
 }
 
-fn rigid_factor_cap(n_bodies: usize) -> f64 {
-    if n_bodies > RIGID_HOT_BODIES {
-        RIGID_FACTOR_CAP_LARGE
-    } else {
-        24.0
+/// Acceptance temperature and orientation amplitude of one rigid chart.
+///
+/// The factor starts at one. Its ceiling is the value that puts the mean
+/// uphill rise seen so far at [`RIGID_ACCEPT_TARGET`]: `mean / (T * -ln target)`.
+/// Until a rise has been seen there is nothing to scale, and the ceiling
+/// stays at one. The orientation window runs on every rigid step. It does
+/// not wait for the factor to reach a fixed height.
+struct RigidAdapt {
+    factor: f64,
+    orient_scale: f64,
+    orient_window: usize,
+    orient_yes: usize,
+    window: usize,
+    hits: usize,
+    rise_sum: f64,
+    rise_count: usize,
+}
+
+impl RigidAdapt {
+    fn new() -> Self {
+        Self {
+            factor: 1.0,
+            orient_scale: 1.0,
+            orient_window: 0,
+            orient_yes: 0,
+            window: 0,
+            hits: 0,
+            rise_sum: 0.0,
+            rise_count: 0,
+        }
+    }
+
+    fn cap(&self, temperature: f64) -> f64 {
+        if self.rise_count == 0 {
+            return 1.0;
+        }
+        let mean = self.rise_sum / self.rise_count as f64;
+        let width = temperature.max(1.0e-12) * (-RIGID_ACCEPT_TARGET.ln());
+        (mean / width).max(1.0)
+    }
+
+    fn note_orientation(&mut self, accept: bool) {
+        self.orient_window += 1;
+        if accept {
+            self.orient_yes += 1;
+        }
+        if self.orient_window >= RIGID_ACCEPT_BLOCK {
+            self.orient_scale =
+                rigid_step_scale(self.orient_scale, self.orient_yes, self.orient_window);
+            self.orient_window = 0;
+            self.orient_yes = 0;
+        }
+    }
+
+    fn note_temperature(&mut self, accept: bool, delta: f64, temperature: f64) {
+        if delta > 0.0 {
+            self.rise_sum += delta;
+            self.rise_count += 1;
+        }
+        let changed = accept && delta.abs() > 5.0e-2;
+        self.window += 1;
+        if changed {
+            self.hits += 1;
+        }
+        if self.window >= 8 {
+            let rate = self.hits as f64 / self.window as f64;
+            let cap = self.cap(temperature);
+            if rate < 0.25 {
+                self.factor = (self.factor * 2.0).min(cap);
+            } else if rate > 0.6 {
+                self.factor = (self.factor / 1.5).max(1.0);
+            }
+            self.window = 0;
+            self.hits = 0;
+        }
     }
 }
 
@@ -4435,7 +4532,7 @@ where
          silently remain a descriptor-space number"
     );
 
-    let mut kernels = search_kernels(cfg);
+    let mut kernels = search_kernels_in(cfg, Some(x.view()));
     let mut general_taboo = general::FingerprintTaboo::default();
     let mut collective = general::CollectiveShare::default();
     let mut regrow_share = general::CollectiveShare::patient();
@@ -4919,25 +5016,11 @@ where
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
     let mut arm_counts: Vec<ArmCount> = Vec::new();
-    // A rigid chart is not in the preset's reduced energy unit. Charts of
-    // ten bodies or fewer start at the top of the acceptance window and let
-    // the rate pull the factor down. A chart with more bodies stays at the
-    // lower cap: the orientation amplitude, not the temperature, is what
-    // tracks the acceptance ratio. Letting that factor climb back to 24
-    // leaves the hydrogen-bond funnel.
-    let mut rigid_factor: f64 = if cfg.move_library.is_rigid_body() {
-        rigid_factor_cap(cfg.n_points)
-    } else {
-        1.0
-    };
-    let mut rigid_window = 0usize;
-    let mut rigid_hits = 0usize;
-    // Large rigid charts hold the acceptance temperature at the factor cap.
-    // The orientation amplitude is what moves toward a one-half acceptance
-    // ratio. Charts of ten bodies and fewer leave both untouched.
-    let mut orient_scale = 1.0_f64;
-    let mut orient_window = 0usize;
-    let mut orient_yes = 0usize;
+    // A rigid chart is not in the preset's reduced energy unit. The factor
+    // starts at one and its ceiling is the Metropolis value of the rises
+    // the chart has actually seen. The orientation amplitude moves on every
+    // step, toward the same acceptance ratio.
+    let mut rigid = RigidAdapt::new();
     let mut hops = 0usize;
     let mut proposal_overlaps = 0usize;
     let mut checkpoint_hops = 0usize;
@@ -5182,7 +5265,7 @@ where
                 let mut trial = kernels[arm].propose_scaled(
                     best_state.view(),
                     cfg.temperature,
-                    orient_scale,
+                    rigid.orient_scale,
                     &mut side_rng,
                 );
                 recentre(&mut trial, cfg.n_points);
@@ -5299,7 +5382,7 @@ where
                     .wrapping_add(key)
                     .wrapping_add(side_energy.to_bits()),
             );
-            let side_scale = orient_scale;
+            let side_scale = rigid.orient_scale;
             macro_rules! hop_side {
                 ($rng:ident, $energy:ident, $state:ident) => {{
                     let mut going = false;
@@ -5481,7 +5564,7 @@ where
                     .wrapping_add(key)
                     .wrapping_add(side_energy.to_bits()),
             );
-            let side_scale = orient_scale;
+            let side_scale = rigid.orient_scale;
             let mut side_hops = 0usize;
             let archive_end = ledger.spent().saturating_add(archive_patience);
             while ledger.spent() < archive_end && ledger.remaining() > 0 && !ledger.stopped() {
@@ -6390,8 +6473,12 @@ where
                         None
                     } else {
                         new_incumbent = false;
-                        crate::csm::propose(x.view(), classes)
-                            .map(|projected| projected.coordinates)
+                        let projected = if cfg.general_symmetry {
+                            crate::csm::propose_general(x.view(), classes)
+                        } else {
+                            crate::csm::propose(x.view(), classes)
+                        };
+                        projected.map(|projected| projected.coordinates)
                     }
                 }
                 ContinuousSymmetry::Off => None,
@@ -6505,7 +6592,7 @@ where
             // The preset temperature stays in its own energy unit. A rigid
             // water chart is not that unit, so a local factor moves the
             // acceptance rate toward one half without editing the preset.
-            temperature *= rigid_factor;
+            temperature *= rigid.factor;
         }
         // The coldest rung's temperature from the state it holds, which the
         // energy bias is built and filled at. Read here, where that rung's own
@@ -6585,7 +6672,7 @@ where
                     reactive: *reactive,
                     reverse_cycles: *reverse_cycles,
                 }
-                .kernels(cfg);
+                .kernels_in(cfg, Some(x.view()));
                 if !cfg.prior_soap {
                     rebuilt.retain(|kernel| !matches!(kernel, ClusterMove::Soap { .. }));
                 }
@@ -6821,7 +6908,7 @@ where
         } else {
             1.0
         };
-        let proposal_scale = escape * orient_scale;
+        let proposal_scale = escape * rigid.orient_scale;
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -8106,16 +8193,8 @@ where
             let rise = (e_new - e) / cfg.temperature.max(1e-12);
             accept = rise <= 0.0 || rng.random::<f64>() < (-rise).exp();
         }
-        if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
-            orient_window += 1;
-            if accept {
-                orient_yes += 1;
-            }
-            if orient_window >= RIGID_ACCEPT_BLOCK {
-                orient_scale = rigid_step_scale(orient_scale, orient_yes, orient_window);
-                orient_window = 0;
-                orient_yes = 0;
-            }
+        if cfg.move_library.is_rigid_body() {
+            rigid.note_orientation(accept);
         }
         // AS-KMC (Chatterjee–Voter 2010): after N_f sightings the
         // intra-packing hop is a frequent process. Raise its barrier
@@ -8142,29 +8221,11 @@ where
             // temperature window should see.
             accept = false;
         }
-        if cfg.move_library.is_rigid_body()
-            && cfg.n_points <= RIGID_HOT_BODIES
-            && (!returning || (e_new - e).abs() > 5.0e-2)
-        {
+        if cfg.move_library.is_rigid_body() && (!returning || (e_new - e).abs() > 5.0e-2) {
             // Same-basin accepts have no energy change, and counting them
             // keeps a rigid chart cold. Only a move that lands on a
             // different minimum says whether the temperature is high enough.
-            let changed = accept && (e_new - e).abs() > 5.0e-2;
-            rigid_window += 1;
-            if changed {
-                rigid_hits += 1;
-            }
-            if rigid_window >= 8 {
-                let rate = rigid_hits as f64 / rigid_window as f64;
-                let cap = rigid_factor_cap(cfg.n_points);
-                if rate < 0.25 {
-                    rigid_factor = (rigid_factor * 2.0).min(cap);
-                } else if rate > 0.6 {
-                    rigid_factor = (rigid_factor / 1.5).max(1.0);
-                }
-                rigid_window = 0;
-                rigid_hits = 0;
-            }
+            rigid.note_temperature(accept, e_new - e, cfg.temperature);
         }
         // An uphill step the bare rule accepted is checked with the
         // deposits before the chain moves. A filled destination can

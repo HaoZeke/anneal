@@ -736,6 +736,16 @@ pub struct Config {
     /// is the Oakley, Johnston and Wales continuous symmetry measure over
     /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
     pub continuous_symmetry: ContinuousSymmetry,
+    /// Admit a symmetry read from the principal shells when
+    /// [`ContinuousSymmetry::Measure`] is on.
+    ///
+    /// Off by default, which keeps the fixed `C_i`, `C_n`, and `D_nh`
+    /// channel at order five and leaves every default trajectory and
+    /// resolved configuration digest unchanged. On, every regular cycle of
+    /// a principal shell is scored the same way, inversion included, and
+    /// the lowest per-operation residual is kept.
+    #[serde(skip_serializing_if = "is_false")]
+    pub general_symmetry: bool,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
     /// Coordinate-space radius used to merge points after symmetrisation.
@@ -2170,6 +2180,7 @@ impl Config {
             symmetrise_core_fraction: 0.6,
             point_symmetrise_every_accept: false,
             continuous_symmetry: ContinuousSymmetry::Off,
+            general_symmetry: false,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetrise_patience: 2_000,
@@ -2408,6 +2419,7 @@ impl Config {
         self.orbit_core = OrbitCore::Fraction;
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;
+        self.general_symmetry = false;
         self.rigid_body_geometry = Some(geometry);
         self
     }

@@ -64,8 +64,134 @@ pub const PACKING_SPEC: SoapSpec = SoapSpec {
     rcut_nn: 3.5,
 };
 
-/// A closed-shell class histogram needs a real neighbour cloud.
-pub(crate) const MINIMUM_PACKING_ATOMS: usize = 13;
+/// True when some site lies strictly inside the convex hull of the others.
+///
+/// Enclosure is a fact about the point set: a site is enclosed when every
+/// supporting plane of the hull leaves it strictly on the interior side.
+/// Nothing in the test is a bond-length multiple or a cancellation
+/// tolerance, and a planar sheet or a hollow cage has every atom on the
+/// boundary. Four points are a tetrahedron and each of them is a vertex,
+/// so a set that small is never enclosed.
+pub(crate) fn has_enclosed_site(coordinates: &[f64]) -> bool {
+    if coordinates.len() < 15 || !coordinates.len().is_multiple_of(3) {
+        return false;
+    }
+    if coordinates.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
+    let (points, _) = coordinates.as_chunks::<3>();
+    point_strictly_inside_hull(points)
+}
+
+fn tet_volume(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> f64 {
+    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let ad = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+    ab[0] * (ac[1] * ad[2] - ac[2] * ad[1]) - ab[1] * (ac[0] * ad[2] - ac[2] * ad[0])
+        + ab[2] * (ac[0] * ad[1] - ac[1] * ad[0])
+}
+
+/// Faces are oriented so a point in the interior has negative volume.
+fn point_strictly_inside_hull(points: &[[f64; 3]]) -> bool {
+    let n = points.len();
+    let mut seed = None;
+    'search: for a in 0..n {
+        for b in (a + 1)..n {
+            for c in (b + 1)..n {
+                for d in (c + 1)..n {
+                    if tet_volume(points[a], points[b], points[c], points[d]) != 0.0 {
+                        seed = Some([a, b, c, d]);
+                        break 'search;
+                    }
+                }
+            }
+        }
+    }
+    let Some(seed) = seed else {
+        return false;
+    };
+    let mut faces = initial_hull_faces(points, seed);
+    for index in 0..n {
+        if seed.contains(&index) {
+            continue;
+        }
+        add_hull_point(points, &mut faces, index);
+    }
+    points.iter().any(|point| {
+        faces
+            .iter()
+            .all(|&(a, b, c)| tet_volume(points[a], points[b], points[c], *point) < 0.0)
+    })
+}
+
+fn initial_hull_faces(points: &[[f64; 3]], seed: [usize; 4]) -> Vec<(usize, usize, usize)> {
+    let [a, b, c, d] = seed;
+    [(b, c, d, a), (a, c, d, b), (a, b, d, c), (a, b, c, d)]
+        .into_iter()
+        .map(|(i, j, k, inside)| {
+            if tet_volume(points[i], points[j], points[k], points[inside]) > 0.0 {
+                (i, k, j)
+            } else {
+                (i, j, k)
+            }
+        })
+        .collect()
+}
+
+fn add_hull_point(points: &[[f64; 3]], faces: &mut Vec<(usize, usize, usize)>, index: usize) {
+    let point = points[index];
+    let visible: Vec<bool> = faces
+        .iter()
+        .map(|&(a, b, c)| tet_volume(points[a], points[b], points[c], point) > 0.0)
+        .collect();
+    if !visible.iter().any(|&seen| seen) {
+        return;
+    }
+    let mut horizon: Vec<(usize, usize)> = Vec::new();
+    for (slot, &(a, b, c)) in faces.iter().enumerate() {
+        if !visible[slot] {
+            continue;
+        }
+        for edge in [(a, b), (b, c), (c, a)] {
+            if let Some(at) = horizon
+                .iter()
+                .position(|other| other.0 == edge.1 && other.1 == edge.0)
+            {
+                horizon.swap_remove(at);
+            } else {
+                horizon.push(edge);
+            }
+        }
+    }
+    let retained: Vec<(usize, usize, usize)> = faces
+        .iter()
+        .enumerate()
+        .filter(|(slot, _)| !visible[*slot])
+        .map(|(_, face)| *face)
+        .collect();
+    let mut next = retained;
+    for (a, b) in horizon {
+        // The horizon edge is oriented as the visible face saw it. The new
+        // face shares that edge, so it takes the opposite direction, and a
+        // vertex that stayed on the hull must not lie outside it.
+        let mut face = (b, a, index);
+        if let Some(witness) = next.iter().find_map(|&(i, j, k)| {
+            [i, j, k]
+                .into_iter()
+                .find(|&vertex| vertex != a && vertex != b && vertex != index)
+        }) && tet_volume(
+            points[face.0],
+            points[face.1],
+            points[face.2],
+            points[witness],
+        ) > 0.0
+        {
+            face = (a, b, index);
+        }
+        next.push(face);
+    }
+    *faces = next;
+}
 
 /// Recompute DECAF only when some atom moved more than this.
 /// Sits well below [`ENVIRONMENT_RADIUS`] and the packing-family grain.
@@ -476,11 +602,7 @@ impl PackingBook {
     }
 
     fn assign_histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if !coordinates.len().is_multiple_of(3) {
-            return None;
-        }
-        let atoms = coordinates.len() / 3;
-        if atoms < MINIMUM_PACKING_ATOMS {
+        if !has_enclosed_site(coordinates) {
             return None;
         }
         let loc = self.descriptor_rows(coordinates);
@@ -500,11 +622,7 @@ impl PackingBook {
     }
 
     fn assign_growing(&mut self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if !coordinates.len().is_multiple_of(3) {
-            return None;
-        }
-        let atoms = coordinates.len() / 3;
-        if atoms < MINIMUM_PACKING_ATOMS {
+        if !has_enclosed_site(coordinates) {
             return None;
         }
         let loc = self.descriptor_rows(coordinates);
@@ -1020,12 +1138,11 @@ fn update_packing_reference(coordinates: &[f64], count_matching_arrival: bool) {
         book.observe(&reference.coordinates);
     }
     if book.observe(coordinates).is_none() {
-        // DECAF starts at [`MINIMUM_PACKING_ATOMS`]. A smaller well still
-        // belongs in the cloud: the Leave repels from positions, and a
-        // numerically identical copy is one well, not a missing one.
+        // Without an enclosed interior shell the Leave repels from positions,
+        // and a numerically identical copy is one well, not a missing one.
         if !coordinates.is_empty()
             && coordinates.len().is_multiple_of(3)
-            && coordinates.len() / 3 < MINIMUM_PACKING_ATOMS
+            && !has_enclosed_site(coordinates)
             && coordinates.iter().all(|value| value.is_finite())
         {
             record_sub_decaf_reference(held, coordinates, count_matching_arrival);
@@ -1148,11 +1265,7 @@ pub fn nearby_packing(here: &[f64], other: &[f64]) -> bool {
     if here.len() != other.len() || here.is_empty() || !here.len().is_multiple_of(3) {
         return false;
     }
-    // DECAF histograms start at [`MINIMUM_PACKING_ATOMS`]. Below that the
-    // book has no cells, and a 0.01% copy would read as a different
-    // packing. The move epsilon is the displacement the book itself
-    // treats as the same structure.
-    if here.len() / 3 < MINIMUM_PACKING_ATOMS {
+    if !has_enclosed_site(here) || !has_enclosed_site(other) {
         return !atom_moved(here, other, PACKING_MOVE_EPS);
     }
     let mut book = PackingBook::default();
@@ -1573,4 +1686,104 @@ pub fn offer_known_minimum(energy: f64, coordinates: &[f64]) {
 /// fold into its screen bank at its own cadence.
 pub fn take_known_minima() -> Vec<(f64, Vec<f64>)> {
     SCREEN_KNOWN.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
+}
+
+#[cfg(test)]
+mod enclosed_site_tests {
+    use super::has_enclosed_site;
+
+    fn flatten(points: &[[f64; 3]]) -> Vec<f64> {
+        points.iter().flat_map(|point| *point).collect()
+    }
+
+    /// Regular tetrahedron of edge 3 with its centroid. Five atoms, under the
+    /// old thirteen-atom gate, and the centroid is a convex combination.
+    fn centred_tetrahedron() -> Vec<f64> {
+        let vertices = [
+            [1.0, 1.0, 1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+        ];
+        let mut points = vec![[0.0, 0.0, 0.0]];
+        let edge = (8.0_f64).sqrt();
+        let scale = 3.0 / edge;
+        for vertex in vertices {
+            points.push([vertex[0] * scale, vertex[1] * scale, vertex[2] * scale]);
+        }
+        flatten(&points)
+    }
+
+    /// The same tetrahedron, plus short dimers far away. The median nearest
+    /// neighbour is the dimer length, so a cutoff of 1.45 times that length
+    /// never reaches the centroid, while the centroid stays inside the hull.
+    fn tetrahedron_with_short_dimers(dimers: usize) -> Vec<f64> {
+        let mut points = centred_tetrahedron();
+        for dimer in 0..dimers {
+            let x = 40.0 + 10.0 * dimer as f64;
+            points.extend_from_slice(&[x, 0.0, 0.0, x + 0.2, 0.0, 0.0]);
+        }
+        points
+    }
+
+    #[test]
+    fn a_centred_tetrahedron_is_enclosed_below_thirteen_atoms() {
+        let points = centred_tetrahedron();
+        assert_eq!(points.len() / 3, 5);
+        assert!(has_enclosed_site(&points));
+    }
+
+    #[test]
+    fn a_planar_sheet_above_thirteen_atoms_is_not_enclosed() {
+        let mut points = Vec::new();
+        for row in 0..4 {
+            for col in 0..4 {
+                points.extend_from_slice(&[col as f64, row as f64, 0.0]);
+            }
+        }
+        assert_eq!(points.len() / 3, 16);
+        assert!(!has_enclosed_site(&points));
+    }
+
+    #[test]
+    fn a_hollow_tetrahedron_is_not_enclosed() {
+        let mut points = centred_tetrahedron();
+        points.drain(0..3);
+        assert_eq!(points.len() / 3, 4);
+        assert!(!has_enclosed_site(&points));
+    }
+
+    #[test]
+    fn the_lj_reference_clusters_stay_enclosed() {
+        for fixture in [
+            include_str!("../../tests/fixtures/lj38_ico.xyz"),
+            include_str!("../../tests/fixtures/lj38_fcc.xyz"),
+            include_str!("../../tests/fixtures/lj75_ico.xyz"),
+            include_str!("../../tests/fixtures/lj75_marks.xyz"),
+        ] {
+            let points = fixture
+                .lines()
+                .skip(2)
+                .filter(|line| !line.trim().is_empty())
+                .flat_map(|line| {
+                    line.split_whitespace()
+                        .skip(1)
+                        .take(3)
+                        .map(|value| value.parse::<f64>().unwrap())
+                })
+                .collect::<Vec<_>>();
+            assert!(points.len() / 3 >= 13);
+            assert!(has_enclosed_site(&points), "{}", points.len() / 3);
+        }
+    }
+
+    #[test]
+    fn enclosure_does_not_follow_a_median_neighbour_cutoff() {
+        let points = tetrahedron_with_short_dimers(3);
+        assert_eq!(points.len() / 3, 11);
+        assert!(has_enclosed_site(&points));
+        let larger = tetrahedron_with_short_dimers(6);
+        assert!(larger.len() / 3 > 13);
+        assert!(has_enclosed_site(&larger));
+    }
 }

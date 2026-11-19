@@ -109,6 +109,18 @@ impl MoveLibrary {
 
     /// Builds proposal kernels using the scales declared by `cfg`.
     pub fn kernels(&self, cfg: &Config) -> Vec<ClusterMove> {
+        self.kernels_in(cfg, None)
+    }
+
+    /// As [`Self::kernels`], with `geometry` the structure the groups were
+    /// read from. A lone group drops its rigid arms only when that structure
+    /// has a rotatable bond or a ring crankshaft. Without the coordinates
+    /// the arms stay: a torsion is a fact about the bonds, not the labels.
+    pub fn kernels_in(
+        &self,
+        cfg: &Config,
+        geometry: Option<ArrayView1<'_, f64>>,
+    ) -> Vec<ClusterMove> {
         let atomic = || {
             ClusterMove::library_scaled(
                 cfg.n_points,
@@ -221,15 +233,19 @@ impl MoveLibrary {
                 let mobile = mobile_atoms(cfg, groups);
                 // One free group: a group shake, relocation or burst carries
                 // it whole, the quench returns the conformer it started from,
-                // and the hop pays a quench for it. A rotatable bond has two
-                // atoms on each side, so a group of three or fewer keeps the
-                // rigid arms. Whether the SOAP arm stays is
+                // and the hop pays a quench for it. The group keeps those
+                // arms unless the geometry has a bond or a ring arc that
+                // actually turns. Whether the SOAP arm stays is
                 // [`Config::with_flexible_molecules`]'s call: only it knows
                 // the group is one covalent molecule.
                 let lone_molecule = groups.len() == 1
-                    && groups[0].len() >= 4
-                    && mobile.is_none()
-                    && cfg.species.is_some();
+                    && has_rotatable_valence(
+                        &groups[0],
+                        cfg.species.as_deref(),
+                        geometry,
+                        cfg.bond_tolerance,
+                    )
+                    && mobile.is_none();
                 if lone_molecule {
                     kernels.retain(|kernel| {
                         !matches!(
@@ -240,14 +256,7 @@ impl MoveLibrary {
                         )
                     });
                 }
-                // The flexible SOAP leftover is an atomic packing pullback.
-                // On a water cluster larger than the hexamer it spends the
-                // quench inside the spherical-harmonic expansion and never
-                // calls the potential. The group moves already carry the
-                // search; the hexamer keeps the arm it was measured with.
-                let large_water = groups.len() > crate::catalog::molecular::WATER_HEXAMER_MOLECULES
-                    && super::cycles::is_water_groups(groups);
-                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap && !large_water {
+                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap {
                     kernels.push(soap_arm(cfg, mobile.clone(), Some(groups.clone())));
                 }
                 if let Some(species) = cfg.species.as_ref() {
@@ -264,14 +273,9 @@ impl MoveLibrary {
                     kernels.push(ClusterMove::GroupCycleReverse {
                         groups: groups.clone(),
                     });
-                    // The hexamer library stays the one its arm was measured
-                    // with. A larger cage needs a turn onto a free oxygen; the
-                    // half-radian shake quenches back into the bond it left.
-                    if large_water {
-                        kernels.push(ClusterMove::GroupRewire {
-                            groups: groups.clone(),
-                        });
-                    }
+                    kernels.push(ClusterMove::GroupRewire {
+                        groups: groups.clone(),
+                    });
                 }
                 kernels
             }
@@ -1536,9 +1540,8 @@ pub fn active_mask(
 /// (doi:10.1039/B801115J); zero for numbers outside the table, which makes an
 /// unknown species bond to nothing rather than to everything.
 pub fn covalent_radius(z: u32) -> f64 {
-    // Single-bond covalent radii (A), Cordero et al., Dalton Trans. 2008,
-    // 2832-2838 (doi:10.1039/B801115J). Index is Z; 0 is unused. Unknown
-    // species stay 0 so they bond to nothing rather than to everything.
+    // Physical constant table (a): Cordero et al. (Dalton Trans. 2008, 2832-2838)
+    // experimental single-bond covalent radii in Angstroms for Z = 1..=96.
     const R: [f64; 97] = [
         0.0, // unused
         0.31, 0.28, // H He
@@ -1559,6 +1562,36 @@ pub fn covalent_radius(z: u32) -> f64 {
     } else {
         0.0
     }
+}
+
+/// True when `group` has a bond or a ring arc that [`rotatable_bonds`] or
+/// [`ring_crankshafts`] would turn.
+///
+/// Both of those already decide from the bond graph and the geometry: a
+/// single bridge with two atoms on each side, or a crankshaft arc of a
+/// ring. A triple bond is shorter than a single bond, so acetylene has
+/// nothing to turn, and ammonia and methane have a terminal atom on every
+/// bond.
+fn has_rotatable_valence(
+    group: &[usize],
+    species: Option<&[u32]>,
+    geometry: Option<ArrayView1<'_, f64>>,
+    tolerance: f64,
+) -> bool {
+    let (Some(labels), Some(geometry)) = (species, geometry) else {
+        return false;
+    };
+    let turns = |bond: &RotatableBond| group.contains(&bond.fixed) && group.contains(&bond.pivot);
+    if rotatable_bonds(geometry, labels, tolerance)
+        .iter()
+        .any(turns)
+    {
+        return true;
+    }
+    ring_crankshafts(geometry, labels, tolerance)
+        .0
+        .iter()
+        .any(turns)
 }
 
 /// Connected components under the bond-matrix rule: two atoms bond when their
@@ -3525,45 +3558,31 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn a_large_water_cluster_does_not_draw_the_atomic_soap_pullback() {
-        let molecules = 20;
-        let species: Vec<u32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
-        let groups: Vec<Vec<usize>> = (0..molecules)
-            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
-            .collect();
-        let rec = Config::recommended_molecular(species, groups, 1.0);
-        let names: Vec<_> = rec
-            .move_library
-            .kernels(&rec)
-            .iter()
-            .map(|kernel| kernel.name())
-            .collect();
-        assert!(
-            !names.iter().any(|name| *name == "soap"),
-            "atomic SOAP pullback is still drawn for (H2O)20: {names:?}"
+    fn water_clusters_share_one_size_independent_move_library() {
+        let arms_for = |molecules: usize| -> Vec<String> {
+            let species: Vec<u32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
+            let groups: Vec<Vec<usize>> = (0..molecules)
+                .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
+                .collect();
+            let rec = Config::recommended_molecular(species, groups, 1.0);
+            rec.move_library
+                .kernels(&rec)
+                .iter()
+                .map(ClusterMove::name)
+                .collect()
+        };
+        let large_names = arms_for(20);
+        let small_names = arms_for(6);
+        assert_eq!(
+            small_names, large_names,
+            "water move library must not branch on molecule count"
         );
-        for required in ["gshake", "gsurface", "gburst", "gcycle", "hbrewire"] {
+        for required in ["gshake", "gsurface", "gburst", "soap", "gcycle", "hbrewire"] {
             assert!(
-                names.iter().any(|name| *name == required),
-                "missing {required} on (H2O)20: {names:?}"
+                large_names.iter().any(|name| name == required),
+                "missing {required} on water library: {large_names:?}"
             );
         }
-        let hexamer = 6;
-        let species: Vec<u32> = (0..hexamer).flat_map(|_| [8, 1, 1]).collect();
-        let groups: Vec<Vec<usize>> = (0..hexamer)
-            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
-            .collect();
-        let small = Config::recommended_molecular(species, groups, 1.0);
-        let small_names: Vec<_> = small
-            .move_library
-            .kernels(&small)
-            .iter()
-            .map(|kernel| kernel.name())
-            .collect();
-        assert!(
-            !small_names.iter().any(|name| *name == "hbrewire"),
-            "the hexamer library gained a rewire arm: {small_names:?}"
-        );
     }
 
     #[test]
@@ -4459,14 +4478,17 @@ mod torsion_tests {
 
     #[test]
     fn a_lone_molecule_keeps_only_its_torsion() {
-        use crate::methods::cluster_hopping::search_kernels;
-        let names = |cfg: &Config| -> Vec<String> {
-            search_kernels(cfg).iter().map(|k| k.name()).collect()
-        };
+        use crate::methods::cluster_hopping::search_kernels_in;
         let mut x = Array1::zeros(18);
         for atom in 0..6 {
             x[3 * atom] = 1.5 * atom as f64;
         }
+        let names = |cfg: &Config| -> Vec<String> {
+            search_kernels_in(cfg, Some(x.view()))
+                .iter()
+                .map(|k| k.name())
+                .collect()
+        };
         let cut =
             Config::recommended_molecular(vec![6; 6], vec![vec![0, 1, 2], vec![3, 4, 5]], 0.05);
         assert!(names(&cut).len() > 1);
@@ -4478,5 +4500,75 @@ mod torsion_tests {
         assert!(names(&held).iter().any(|name| name == "soap"));
         let declared = Config::recommended_molecular(vec![6; 6], vec![(0..6).collect()], 0.05);
         assert!(names(&declared).iter().any(|name| name == "soap"));
+    }
+
+    fn molecule(points: &[[f64; 3]], species: Vec<u32>) -> (Array1<f64>, Config) {
+        let flat: Vec<f64> = points.iter().flat_map(|point| *point).collect();
+        let coordinates = Array1::from_vec(flat);
+        let n = species.len();
+        let cfg = Config::recommended_molecular(species, vec![(0..n).collect()], 1.0);
+        (coordinates, cfg)
+    }
+
+    fn keeps_group_arms(points: &[[f64; 3]], species: Vec<u32>) {
+        let (coordinates, cfg) = molecule(points, species);
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels_in(&cfg, Some(coordinates.view()))
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        for arm in ["gshake", "gsurface", "gburst"] {
+            assert!(
+                names.iter().any(|name| name == arm),
+                "{arm} missing from {names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ammonia_methane_and_acetylene_keep_their_group_arms() {
+        keeps_group_arms(
+            &[
+                [0.0, 0.0, 0.12],
+                [0.94, 0.0, -0.28],
+                [-0.47, 0.814, -0.28],
+                [-0.47, -0.814, -0.28],
+            ],
+            vec![7, 1, 1, 1],
+        );
+        let along = 1.09 / 3.0_f64.sqrt();
+        keeps_group_arms(
+            &[
+                [0.0, 0.0, 0.0],
+                [along, along, along],
+                [along, -along, -along],
+                [-along, along, -along],
+                [-along, -along, along],
+            ],
+            vec![6, 1, 1, 1, 1],
+        );
+        keeps_group_arms(
+            &[
+                [0.0, 0.0, 0.0],
+                [1.06, 0.0, 0.0],
+                [2.26, 0.0, 0.0],
+                [3.32, 0.0, 0.0],
+            ],
+            vec![1, 6, 6, 1],
+        );
+    }
+
+    #[test]
+    fn methanol_drops_the_group_arms_that_acetylene_keeps() {
+        let (coordinates, species) = methanol();
+        let cfg = Config::recommended_molecular(species, vec![(0..6).collect()], 1.0);
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels_in(&cfg, Some(coordinates.view()))
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(names.iter().all(|name| name != "gshake"), "{names:?}");
     }
 }
