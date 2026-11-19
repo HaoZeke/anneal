@@ -107,6 +107,7 @@ jobs:
           export PYTHONPATH="${site}:${PWD}/python:${PWD}/tests/python"
           meson setup /tmp/rgpot-ci-build \
             -Dwith_python=true \
+            -Dwith_eam_table=true \
             -Dwith_fortran_pots=enabled \
             -Dwith_metatomic=false \
             -Dwith_rpc=false \
