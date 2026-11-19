@@ -572,6 +572,19 @@ pub struct Config {
     /// improving costs a few per cent and supplies the one thing a biased
     /// random walk has no mechanism for: leaving a funnel on purpose.
     pub escape_on_stall: bool,
+    /// Retry a call-clock leave immediately when no escape candidate exists.
+    ///
+    /// Off preserves the original clock: an attempted leave consumes its
+    /// plateau window. On, only a leave that actually runs consumes it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub retry_noop_stall_leave: bool,
+    /// Start call-clock leaves from the recorded best instead of the walker.
+    ///
+    /// The call clock is armed by that record, while the live walker may have
+    /// accepted an uphill hop into another basin. Off preserves the original
+    /// live-state activation target.
+    #[serde(skip_serializing_if = "is_false")]
+    pub align_directed_stall_source: bool,
     /// Leave a stalled basin back through the door the chain came in.
     ///
     /// The screen state of the accepted trial that entered the current basin
@@ -2152,6 +2165,8 @@ impl Config {
             escape_overshoot: 1.5,
             escape_max_climb: 24,
             escape_on_stall: false,
+            retry_noop_stall_leave: false,
+            align_directed_stall_source: false,
             trail_on_stall: false,
             escape_stall_patience: 5_000,
             escape_stall_factor: 2.0,
