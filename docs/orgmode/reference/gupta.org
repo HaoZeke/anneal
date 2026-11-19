@@ -8,7 +8,10 @@ These are C kernels, not =rgpot::Potential= classes.
 Lengths are the caller's length unit.
 The Gupta arrays and the Sutton-Chen metal rows use Angstrom and eV.
 The reduced Lennard-Jones and Morse kernels use the caller's reduced units,
-where the well depth and the equilibrium distance are 1.
+where the well depth is 1.
+The Morse equilibrium distance is 1.
+The Lennard-Jones =sigma= is 1, so its pair energy is zero at =r = 1= and its
+minimum is at =r = 2^(1/6)=, which is 1.1225 to four decimals.
 None of them reads a cell.
 A pair at zero separation is not differentiable.
 
