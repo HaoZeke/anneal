@@ -490,7 +490,24 @@ rule gmin_h2h:
         bash scripts/gmin_h2h/enter_bench.sh
         """
 
-
+# `Config::branch_on_stall` against develop on the paper panel: LJ38, LJ55,
+# LJ75, LJ98, LJ102, LJ103, LJ104, LJ150, Au55, M55 rho 6 and 14, and M80
+# rho 6 and 14. Seeds 2000-2011. One session on core 0 with hostname bench;
+# for each system and seed the develop build (`develop_rev`, default c2de652d)
+# runs, then this checkout's build with H2H_BRANCH=1. Rows are appended to
+# bench/branch-gate/rows.csv, which is not a declared output. Not part of
+# `rule all`:
+#   snakemake -s workflow/Snakefile branch_gate [--config develop_rev=<sha>]
+rule branch_gate:
+    params:
+        develop=config.get("develop_rev", "c2de652dca0bc75e2b0cb4afffac91fd656404e4"),
+    output:
+        "bench/branch-gate/compare.csv",
+    shell:
+        """
+        set -euo pipefail
+        DEVELOP_REV={params.develop} bash scripts/branch_gate/enter_bench.sh
+        """
 # Fiorentino and Marzari RPQA against the paper preset on LJ38.
 # Not part of `rule all`. One serial session, both arms, core 0:
 #   snakemake -s workflow/Snakefile pimc_lj38

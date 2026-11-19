@@ -1637,6 +1637,7 @@
     "tip4p_rates": "anneal TIP4P rates, no competitor",
     "growpal_h2h_v2_uncapped": "one uncapped seed per system (5e8 calls) to see whether GrowPAL ever reaches LJ38 and LJ55; a diagnostic of the v2 panel, not a paper-budget comparison",
     "fetch_paper_data": "downloads the paper data set",
-    "paper_0120": "the headline panel on the 0.12.0 release build against stored develop rows, no competitor"
+    "paper_0120": "the headline panel on the 0.12.0 release build against stored develop rows, no competitor",
+    "branch_gate": "anneal branch_on_stall against anneal develop on the GMIN panel, no competitor"
   }
 }
