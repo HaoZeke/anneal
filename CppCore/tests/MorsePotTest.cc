@@ -12,6 +12,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <catch2/catch_all.hpp>
@@ -543,4 +544,77 @@ TEST_CASE("MorsePot OpenMP threaded and serial paths agree across build, Verlet 
       CHECK(countBitDiffs(got_back, ref_back) == 0);
     }
   }
+}
+
+TEST_CASE(
+    "MorsePot boundary active-bit merge is loss-free under concurrent updates",
+    "[MorsePot][threads][atomic]") {
+  constexpr std::size_t kThreads = 8;
+  constexpr std::size_t kWords = 4096;
+  std::vector<std::uint64_t> words(kWords, 0ULL);
+  std::atomic<bool> start{false};
+  std::atomic<std::size_t> ready{0};
+
+  std::vector<std::thread> workers;
+  workers.reserve(kThreads);
+  for (std::size_t t = 0; t < kThreads; ++t) {
+    workers.emplace_back([&, t]() {
+      const std::uint64_t mask = 0x0101010101010101ULL << t;
+      ready.fetch_add(1, std::memory_order_release);
+      while (!start.load(std::memory_order_acquire)) {
+      }
+      for (std::size_t w = 0; w < kWords; ++w) {
+        rgpot::detail::morseAtomicFetchOrWord(words[w], mask);
+      }
+    });
+  }
+  while (ready.load(std::memory_order_acquire) < kThreads) {
+  }
+  start.store(true, std::memory_order_release);
+  for (auto &th : workers) {
+    th.join();
+  }
+
+  std::size_t lost_words = 0;
+  for (std::size_t w = 0; w < kWords; ++w) {
+    if (words[w] != ~0ULL) {
+      ++lost_words;
+    }
+  }
+  CHECK(lost_words == 0);
+
+  // Also stress Phase 0 boundary-word merging in MorsePot::compute on 16
+  // threads with an atom count where interior p0_splits land inside shared
+  // 64-pair active_bits words (last_w of slice s equals first_w of slice s +
+  // 1).
+  ThreadGuard guard;
+  const rgpot::MorseConfig cu_vacancy{.De = 1.0,
+                                      .a = 4.0 / 2.55,
+                                      .re = 2.55,
+                                      .cutoff = 5.3,
+                                      .switch_width = 0.0};
+  const auto sys = fccVacancy(13, 2.55 * std::sqrt(2.0), 29);
+  const std::size_t n = sys.z.size();
+  ThreadGuard::set("1");
+  rgpot::MorsePot ref_pot(cu_vacancy);
+  ref_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+  const auto want = runFullEval(ref_pot, sys.pos, sys.z, sys.box);
+
+  ThreadGuard::set("16");
+  rgpot::MorsePot par_pot(cu_vacancy);
+  par_pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+  // Build stored list on 1st call, then run 32 back-to-back stored-half
+  // evaluations.
+  std::vector<double> fbuf(3 * n, 0.0);
+  rgpot::ForceOut out{};
+  out.F = fbuf.data();
+  par_pot.forceImpl({n, sys.pos.data(), sys.z.data(), sys.box.data()}, &out);
+  std::size_t bad_evals = 0;
+  for (int iter = 0; iter < 32; ++iter) {
+    par_pot.forceImpl({n, sys.pos.data(), sys.z.data(), sys.box.data()}, &out);
+    if (f64Bits(out.energy) != f64Bits(want.energy)) {
+      ++bad_evals;
+    }
+  }
+  CHECK(bad_evals == 0);
 }
