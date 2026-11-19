@@ -10,7 +10,7 @@
 //! `[coords]` is an optional start, one Cartesian line per atom. Without
 //! it, `run` draws the start. `H2H_PAIR_SCALE=1` uses
 //! `Config::recommended_for_pair` in place of `Config::recommended`.
-//! Unset, the driver keeps the preset.
+//! `H2H_PLATEAU_HEAT=1` heats a stalled walk. Unset, both leave the preset.
 //!
 //! The potential is the in-tree Morse pair, Doye and Wales' form with
 //! `epsilon = 1` and `r_0 = 1`. `rho` is the range. A hit is a quenched energy at
@@ -189,6 +189,10 @@ fn cmd_run(args: &[String]) -> i32 {
     // `1` turns on the fresh-start branch, `Config::branch_on_stall`.
     if std::env::var("H2H_BRANCH").is_ok_and(|value| value == "1") {
         cfg.branch_on_stall = true;
+    }
+    // `1` heats the walk on each call plateau. Unset leaves the preset.
+    if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
+        cfg.plateau_heat = true;
     }
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {
