@@ -49,10 +49,10 @@ def meson_options() -> list[dict[str, object]]:
         ("with_rpc", True),
         ("with_cache", True),
         ("pure_lib", False),
-        ("with_fortran_pots", "disabled"),
+        ("with_fortran_pots", "auto"),
         ("with_fast_nlist", "disabled"),
         ("with_mpi", "disabled"),
-        ("with_ipi", "enabled"),
+        ("with_ipi", "auto"),
     ]
     return [{"name": name, "value": value} for name, value in values]
 
@@ -97,6 +97,19 @@ def cmake_cache() -> str:
     )
 
 
+def setup_log() -> str:
+    return "\n".join(
+        [
+            "Host machine cpu family: x86_64",
+            "Fortran compiler for the host machine: /opt/secret/gfortran (GCC) 13.3.0",
+            "Message: fast pair list: disabled, classical pots use the C++ scan",
+            "Dependency mpi for host machine skipped: feature with_mpi disabled",
+            "Message: i-PI driver tests skipped: needs pytest",
+            "",
+        ]
+    )
+
+
 def ctest_log() -> str:
     return (
         "50% tests passed, 1 tests failed out of 2\n"
@@ -107,6 +120,8 @@ def ctest_log() -> str:
 def build_fixture(directory: Path) -> tuple[Path, Path, Path]:
     write(directory / "toolchain.json", json.dumps(toolchain()) + "\n")
     write(directory / "hidden-meson.log", meson_log())
+    write(directory / "hidden-setup.log", setup_log())
+    write(directory / "hidden-machines.json", json.dumps({"host": {"system": "linux"}}) + "\n")
     write(directory / "hidden-options.json", json.dumps(meson_options()))
     write(directory / "hidden-ctest.log", ctest_log())
     write(directory / "hidden-cache.txt", cmake_cache())
@@ -130,6 +145,8 @@ def build_fixture(directory: Path) -> tuple[Path, Path, Path]:
         "test": ["meson", "test", "-C", "build/meson-on", "--print-errorlogs"],
         "log": "hidden-meson.log",
         "configured": "hidden-options.json",
+        "setup_log": "hidden-setup.log",
+        "machines": "hidden-machines.json",
     }
     cmake_leg = {
         "title": "CMake CTest, RPC and cache enabled",
@@ -177,8 +194,30 @@ def main() -> None:
     recorder = load_recorder()
     meson_counts = recorder.parse_meson_summary(meson_log())
     require(
-        meson_counts == {"Ok": 10, "Expected Fail": 2, "Fail": 0, "Unexpected Pass": 0, "Skipped": 1, "Timeout": 0},
+        meson_counts
+        == {
+            "Ok": 10,
+            "Expected Fail": 2,
+            "Fail": 0,
+            "Unexpected Pass": 0,
+            "Skipped": 1,
+            "Ignored": 0,
+            "Timeout": 0,
+        },
         f"meson parser kept the wrong summary: {meson_counts}",
+    )
+    require(
+        recorder.mpi_from_setup("mpic++ found: YES (/opt/secret/mpic++) 5.0.11\n") == "enabled",
+        "mpic++ found was not resolved as enabled",
+    )
+    compact = recorder.parse_meson_summary("Ok:                4\nExpected Fail:     1\nFail:              0\n")
+    require(
+        compact["Ok"] == 4
+        and compact["Expected Fail"] == 1
+        and compact["Skipped"] == 0
+        and compact["Ignored"] == 0
+        and sum(compact.values()) == 5,
+        f"compact meson summary was parsed as {compact}",
     )
     ctest_counts = recorder.parse_ctest_summary(ctest_log())
     require(
@@ -232,7 +271,10 @@ def main() -> None:
         require("|Passed|8|" in text and "|Total|8|" in text, "ctest table does not match the log")
         require("Fail 1" not in text and "Ok 1," not in text, "note kept an earlier meson summary")
         require("1 tests failed" not in text, "note kept an earlier ctest summary")
-        require("-Dwith_rpc=true" in text and "|with_fast_nlist|disabled|" in text, "meson options were dropped")
+        require("-Dwith_rpc=true" in text and "|with_fast_nlist|disabled|disabled|" in text, "meson options were dropped")
+        require("|with_fortran_pots|auto|enabled|" in text, "fortran resolution was dropped")
+        require("|with_ipi|auto|enabled|" in text, "i-PI resolution was dropped")
+        require("/opt/secret" not in text, "note leaked a setup-log path")
         require("|RGPOT_WITH_RPC|ON|" in text, "cmake cache value was dropped")
         require("hidden-meson.log" not in text and "hidden-ctest.log" not in text, "note leaked a log path")
         require("/usr/bin" not in text and str(directory) not in text, "note leaked a filesystem path")

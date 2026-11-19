@@ -21,6 +21,7 @@ MESON_KEYS = (
     "Fail",
     "Unexpected Pass",
     "Skipped",
+    "Ignored",
     "Timeout",
 )
 RESOLVED_FEATURES = (
@@ -108,27 +109,40 @@ def format_command(argv: list[str]) -> str:
     return "\n".join(lines)
 
 
+_SUMMARY_LINE = re.compile(
+    r"^(Ok|Expected Fail|Fail|Unexpected Pass|Skipped|Ignored|Timeout):\s+(\d+)$"
+)
+
+
 def parse_meson_summary(text: str) -> dict[str, int]:
-    lines = text.splitlines()
-    found: list[dict[str, int]] = []
-    index = 0
-    while index + len(MESON_KEYS) <= len(lines):
-        block: dict[str, int] = {}
-        matched = True
-        for offset, key in enumerate(MESON_KEYS):
-            match = re.fullmatch(rf"{re.escape(key)}:\s+(\d+)", lines[index + offset].strip())
-            if match is None:
-                matched = False
-                break
-            block[key] = int(match.group(1))
-        if matched:
-            found.append(block)
-            index += len(MESON_KEYS)
-        else:
-            index += 1
-    if not found:
+    """Parse the last Meson summary.
+
+    Meson always prints Ok and Fail. It prints the other rows only when
+    their count is not zero. Missing rows are zero.
+    """
+    blocks: list[dict[str, int]] = []
+    current: dict[str, int] = {}
+
+    def close() -> None:
+        nonlocal current
+        if "Ok" in current and "Fail" in current:
+            blocks.append(current)
+        current = {}
+
+    for line in text.splitlines():
+        match = _SUMMARY_LINE.fullmatch(line.strip())
+        if match is None:
+            close()
+            continue
+        key = match.group(1)
+        if key in current:
+            close()
+        current[key] = int(match.group(2))
+    close()
+    if not blocks:
         fail("Meson log has no summary")
-    return found[-1]
+    last = blocks[-1]
+    return {key: last.get(key, 0) for key in MESON_KEYS}
 
 
 def parse_ctest_summary(text: str) -> dict[str, int]:
@@ -216,6 +230,70 @@ def load_commands(leg: dict[str, object]) -> tuple[list[str], list[str], list[st
     return setup, compile_cmd, test_cmd
 
 
+def feature_state(text: str, name: str) -> str:
+    if text not in {"auto", "enabled", "disabled"}:
+        fail(f"{name} value {text} is not a feature state")
+    return text
+
+
+def fast_from_setup(text: str) -> str:
+    enabled = "Message: fast pair list: enabled" in text
+    disabled = "Message: fast pair list: disabled" in text
+    if enabled == disabled:
+        fail("setup log does not resolve with_fast_nlist")
+    return "enabled" if enabled else "disabled"
+
+
+def mpi_from_setup(text: str) -> str:
+    enabled = "Dependency mpi for host machine found:" in text or "mpic++ found: YES" in text
+    disabled = "Dependency mpi for host machine skipped: feature with_mpi disabled" in text
+    if enabled == disabled:
+        fail("setup log does not resolve with_mpi")
+    return "enabled" if enabled else "disabled"
+
+
+def fortran_from_setup(text: str) -> str:
+    found = False
+    for line in text.splitlines():
+        if line.startswith("Fortran compiler for the host machine:"):
+            found = "not found" not in line.lower()
+    return "enabled" if found else "disabled"
+
+
+def ipi_from_option(configured: object, system: str) -> str:
+    state = feature_state(display_option(configured), "with_ipi")
+    if state == "disabled" or system == "windows":
+        return "disabled"
+    return "enabled"
+
+
+def resolved_features(
+    setup_text: str, configured: dict[str, object], system: str
+) -> list[tuple[str, str, str]]:
+    detected = {
+        "with_fast_nlist": fast_from_setup(setup_text),
+        "with_mpi": mpi_from_setup(setup_text),
+        "with_fortran_pots": fortran_from_setup(setup_text),
+        "with_ipi": ipi_from_option(configured["with_ipi"], system),
+    }
+    rows: list[tuple[str, str, str]] = []
+    for name in RESOLVED_FEATURES:
+        state = feature_state(display_option(configured[name]), name)
+        resolved = detected[name]
+        if state in {"enabled", "disabled"} and state != resolved:
+            fail(f"{name} is {state} in the build and {resolved} in the setup log")
+        rows.append((name, state, resolved))
+    return rows
+
+
+def host_system(path: Path) -> str:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    system = payload.get("host", {}).get("system") if isinstance(payload, dict) else None
+    if system not in {"linux", "darwin", "windows", "cygwin"}:
+        fail("meson machines host system is missing")
+    return str(system)
+
+
 def load_meson_leg(leg: dict[str, object], root: Path) -> dict[str, object]:
     build = require_recordable("build", leg["build"])
     setup, compile_cmd, test_cmd = load_commands(leg)
@@ -230,12 +308,14 @@ def load_meson_leg(leg: dict[str, object], root: Path) -> dict[str, object]:
     for name in RESOLVED_FEATURES:
         if name not in configured:
             fail(f"Meson buildoptions omit {name}")
+    setup_text = (root / str(leg["setup_log"])).read_text(encoding="utf-8")
+    system = host_system(root / str(leg["machines"]))
     counts = parse_meson_summary((root / str(leg["log"])).read_text(encoding="utf-8"))
     return {
         "runner": "meson",
         "title": require_recordable("title", leg["title"]),
         "commands": [setup, compile_cmd, test_cmd],
-        "resolved": [(name, display_option(configured[name])) for name in RESOLVED_FEATURES],
+        "resolved": resolved_features(setup_text, configured, system),
         "counts": counts,
         "summary": meson_summary(counts),
     }
@@ -269,11 +349,17 @@ def load_leg(path: Path) -> dict[str, object]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         fail("leg must be an object")
-    expected = {"title", "runner", "build", "setup", "compile", "test", "log", "configured"}
+    common = {"title", "runner", "build", "setup", "compile", "test", "log", "configured"}
+    runner = payload.get("runner")
+    if runner == "meson":
+        expected = common | {"setup_log", "machines"}
+    elif runner == "cmake":
+        expected = common
+    else:
+        fail("leg runner must be meson or cmake")
     if set(payload) != expected:
         fail("leg fields do not match the required set")
     root = path.parent
-    runner = payload["runner"]
     if runner == "meson":
         return load_meson_leg(payload, root)
     if runner == "cmake":
@@ -317,9 +403,16 @@ def render_verification(toolchain: dict[str, str], legs: list[dict[str, object]]
         lines.append("\n\n".join(rendered))
         lines += ["```"]
         if leg["runner"] == "meson":
-            lines += ["", "Resolved features:", "", "|Option|Value|", "|---|---|"]
-            for name, value in leg["resolved"]:
-                lines.append(f"|{name}|{value}|")
+            lines += [
+                "",
+                "Resolved features are parsed from the setup log and the",
+                "host system. Configured is the option value.",
+                "",
+                "|Option|Configured|Resolved|",
+                "|---|---|---|",
+            ]
+            for name, configured_text, resolved in leg["resolved"]:
+                lines.append(f"|{name}|{configured_text}|{resolved}|")
             counts = leg["counts"]
             total = sum(counts[key] for key in MESON_KEYS)
             rows = [(key, str(counts[key])) for key in MESON_KEYS]
