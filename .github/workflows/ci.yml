@@ -279,14 +279,13 @@ jobs:
           fi
 
       # scripts/paper_audit.py recomputes every paper and bench-table number
-      # from the committed rows and checks the revision each row cites: a
-      # revision is pushed when a fetched remote ref contains it, through
-      # bench/revision-aliases.csv when it was rebuilt on push, or through the
-      # code_tree its rows record; bench/unpushed-revisions.csv gives the
-      # reason for each one left. It needs the full history and every remote
-      # head. The audit itself refuses a shallow clone or a missing alias
-      # commit with exit status 2, and any drift or unlisted unpushed revision
-      # with exit status 1.
+      # from the committed rows and checks the revision each row cites. A
+      # revision is resolved when a fetched remote ref contains it, when
+      # bench/revision-aliases.csv verifies it, or when the recorded
+      # code_tree matches a fetched tree. bench/unpushed-revisions.csv gives
+      # the reason for each revision that stays unresolved. The audit exits
+      # 2 when the checkout is shallow or an alias target is absent, and
+      # exits 1 on drift or an unresolved revision with no reason.
       - name: Paper audit
         if: ${{ !cancelled() }}
         run: |
