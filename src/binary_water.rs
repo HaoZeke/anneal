@@ -10,10 +10,9 @@
 //! [`crate::binary_water::StockSearch::nve_unavailable`] is set; the
 //! library kick is not substituted. A narrow ratio exchanges mismatched
 //! labels. Water takes
-//! an all-body orientation step. A chart with more than ten bodies holds
-//! the acceptance factor at its cap and scales that step toward an
-//! acceptance ratio of one half. Ten bodies or fewer keep the factor
-//! window and the fixed orientation cap. The rigid quench is the same
+//! an all-body orientation step. Acceptance uses the temperature stored
+//! for that potential, and the orientation amplitude moves toward an
+//! acceptance ratio of one half. The rigid quench is the same
 //! L-BFGS descent, and a rigid record accepts the root-mean-square
 //! force. The chain keeps the eight lowest distinct minima of its
 //! quenched start, accepted quenches and lowest recorded minimum.

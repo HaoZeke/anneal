@@ -596,7 +596,7 @@ mod tests {
         assert!(!cfg.restart_on_stall);
         assert!(!cfg.surfaces.is_empty());
         let large = Config::recommended(98);
-        assert!(large.surfaces.is_empty());
+        assert!(!large.surfaces.is_empty());
         let small = Config::recommended(38);
         assert_eq!(small.move_library, MoveLibrary::LeanBurst);
         assert!(!small.surfaces.is_empty());

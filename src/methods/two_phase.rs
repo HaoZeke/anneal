@@ -594,6 +594,13 @@ pub struct SurfacePortfolio {
     latest_best: f64,
     /// Lowest plain energy any full relaxation of the block reached.
     block_lowest: f64,
+    /// A finished restraint block whose lowest energy did not beat the
+    /// incumbent it opened on. Cleared when the caller takes it.
+    restraint_block_failed: bool,
+    /// Set when the search asks later blocks to hold the plain surface.
+    plain_only: bool,
+    /// The call to [`Self::begin`] that opened the block now held.
+    just_opened: bool,
     rng: StdRng,
 }
 
@@ -653,6 +660,9 @@ impl SurfacePortfolio {
             block_start_best: f64::INFINITY,
             latest_best: f64::INFINITY,
             block_lowest: f64::INFINITY,
+            restraint_block_failed: false,
+            plain_only: false,
+            just_opened: false,
             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
         }
     }
@@ -781,6 +791,30 @@ impl SurfacePortfolio {
         Ok(())
     }
 
+    /// Whether a restraint block has finished without beating its opening
+    /// incumbent since the last take.
+    pub fn take_restraint_block_failed(&mut self) -> bool {
+        let failed = self.restraint_block_failed;
+        self.restraint_block_failed = false;
+        failed
+    }
+
+    /// Whether the block now held was opened by the last [`Self::begin`].
+    pub fn take_block_opened(&mut self) -> bool {
+        let opened = self.just_opened;
+        self.just_opened = false;
+        opened
+    }
+
+    /// Later blocks hold the plain surface.
+    ///
+    /// A restraint block that stopped beating the incumbent has reached a
+    /// basin the restraint does not leave. The plain quench is what leaves
+    /// it, so the allocator is not asked for the restraint again.
+    pub fn hold_plain(&mut self) {
+        self.plain_only = true;
+    }
+
     /// The surface for the relaxation about to start.
     ///
     /// A screening relaxation opens a hop; the block's arm is redrawn once
@@ -795,7 +829,12 @@ impl SurfacePortfolio {
         }
         if self.held.is_none() {
             self.block_source = self.occupied.clone();
-            self.held = Some(self.select_arm());
+            self.just_opened = true;
+            self.held = Some(if self.plain_only {
+                0
+            } else {
+                self.select_arm()
+            });
             self.hops_in_block = self.hops_in_block.max(1);
             self.block_start_best = self.latest_best;
         }
@@ -832,6 +871,14 @@ impl SurfacePortfolio {
             } else {
                 0.0
             };
+            let restraint = self.arms.get(arm).is_some_and(|two| two.is_some());
+            if restraint
+                && self.block_start_best.is_finite()
+                && self.block_lowest.is_finite()
+                && reward <= 0.0
+            {
+                self.restraint_block_failed = true;
+            }
             if let Some(key) = self.block_source.take() {
                 self.credit_source(key, arm, reward);
             } else {
