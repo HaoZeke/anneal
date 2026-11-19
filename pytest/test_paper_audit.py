@@ -64,6 +64,7 @@ CHECKS = (
     audit_mod.cover_letter,
     audit_mod.rerun_check,
     audit_mod.append_only_rows,
+    audit_mod.bibliography_keys,
     audit_mod.revision_map,
 )
 
@@ -915,6 +916,28 @@ def test_history_narration_ignores_look_alikes(sentence):
     audit.text_cache[path] = audit.text(path) + f"\n{sentence}\n"
     audit_mod.history_narration(audit)
     assert not [row for row in audit.drifts() if row[1] == path]
+
+
+@pytest.mark.parametrize("citation", [
+    r"\cite{missingCitationKey}",
+    r"\citep{missingCitationKey}",
+    r"\citet{missingCitationKey}",
+    r"\nocite{missingCitationKey}",
+    r"\cite*{missingCitationKey}",
+    r"\citep*{missingCitationKey}",
+    r"\citet*{missingCitationKey}",
+])
+def test_an_unresolved_cite_key_is_rejected(citation):
+    path = "paper/jctc/manuscript.tex"
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path) + f"\n{citation}\n"
+    audit_mod.bibliography_keys(audit)
+    assert any(
+        row[1] == "paper/jctc/refs.bib"
+        and row[2] == "every \\cite key resolves in the paper bibliography"
+        and "missingCitationKey" in row[4]
+        for row in audit.drifts()
+    )
 
 
 @pytest.mark.parametrize("literal", ["27.2113862", "27.211_386_245_988", "0.529177210903", "0.529_177_210_903", "1.8897261"])

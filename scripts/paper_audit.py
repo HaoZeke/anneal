@@ -4730,6 +4730,38 @@ def tip4p_unscored(audit: Audit) -> None:
     )
 
 
+def bibliography_keys(audit: Audit) -> None:
+    """Require every citation in the JCTC TeX sources to resolve in refs.bib."""
+    cited: set[str] = set()
+    for source in sorted((ROOT / "paper/jctc").glob("*.tex")):
+        path = source.relative_to(ROOT).as_posix()
+        text = re.sub(r"(?m)(?<!\\)%.*$", "", audit.text(path))
+        for group in re.findall(
+            r"\\(?:cite[pt]?|nocite)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]+)\}",
+            text,
+            re.DOTALL,
+        ):
+            cited.update(
+                key.strip()
+                for key in group.split(",")
+                if key.strip() and key.strip() != "*"
+            )
+
+    bibliography = audit.text("paper/jctc/refs.bib")
+    available = set(re.findall(
+        r"(?mi)^@\w+\s*\{\s*([^,\s]+)\s*,",
+        bibliography,
+    ))
+    missing = sorted(cited - available)
+    audit.record(
+        not missing,
+        "paper/jctc/refs.bib",
+        "every \\cite key resolves in the paper bibliography",
+        f"{len(cited)} cited keys resolve",
+        ", ".join(missing) if missing else f"{len(cited)} cited keys resolve",
+    )
+
+
 HISTORY_PHRASES = (
     ("previously", r"previously"),
     ("no longer", r"no longer"),
@@ -4836,7 +4868,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
                   manuscript_cross_field, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, reproduction_records, covalent_panels, covalent_gfn2,
                   ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, panel_references, generated_tables, sutton_chen, supporting_numbers, method_definitions, prior_switches, jctc_requirements, crest_equal, crest_equal_bench, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter, manuscript_review, append_only_rows, tip4p_unscored, history_narration, conversion_literals, prose_receipt_lines, figure_row_hashes):
+                  manuscript_ase, panel_references, generated_tables, sutton_chen, supporting_numbers, method_definitions, prior_switches, jctc_requirements, crest_equal, crest_equal_bench, au55_superseded, manuscript_new, manuscript_followups, manuscript_au55, cover_letter, manuscript_review, append_only_rows, tip4p_unscored, bibliography_keys, history_narration, conversion_literals, prose_receipt_lines, figure_row_hashes):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
