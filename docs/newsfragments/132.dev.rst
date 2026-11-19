@@ -1,0 +1,1 @@
+The GMIN panel runner takes ``--order abba`` to alternate anneal-then-GMIN with GMIN-then-anneal across seeds, ``build_gmin.sh`` pins GMIN to the 2026-11-19 snapshot (SVNREV ``9cbec1a4``, tarball sha256 ``ec5730d5``) and checks a local ``--tarball`` before use, and ``bench/gmin-panel/cells.txt`` lists the panel's systems in the order the stored rows introduce them.
