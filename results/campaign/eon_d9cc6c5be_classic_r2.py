@@ -335,7 +335,7 @@ def _eonclient_calls(invocations: list[dict], *, version: bool) -> list[dict]:
     rows = []
     for item in invocations:
         argv = [str(part) for part in item.get("argv") or []]
-        if not argv or Path(argv[-1]).name != "eonclient":
+        if not argv or not any(Path(part).name == "eonclient" for part in argv):
             continue
         if ("--version" in argv) != version:
             continue
