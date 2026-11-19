@@ -36,7 +36,7 @@ For that gold row the value is -3.1678 eV.
 =GuptaTest= checks the same identity to 1e-12.
 
 The gradient is zeroed before any pair is visited.
-The first pair with =r2 <= 0.0= sets the energy to positive infinity and
+The first pair with ~r2 <= 0.0~ sets the energy to positive infinity and
 returns, so later pairs are not visited and the gradient stays zero.
 Atoms 0 and 1 coincident and atom 2 =NaN= therefore give positive infinity and a
 zero gradient.
@@ -44,7 +44,7 @@ For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
 zero.
 If the scratch allocation fails, the energy is positive infinity and the
 gradient is zero.
-=NaN= is not =<= 0.0=.
+=NaN= is not ~<= 0.0~.
 A pair that is reached with a =NaN= coordinate is evaluated, and the energy and
 the gradient become =NaN=.
 Null pointers, =slot= entries at or above =n_species=, and =r0= entries that are
@@ -110,12 +110,12 @@ void rgpot_gupta(const double *x, size_t n, const unsigned char *slot,
 - Errors :: no status code and no error message.
   A failed scratch allocation (=realloc= returning null) sets =*energy= to
   =+INFINITY=, zeroes the 3 n entries of =gradient= and returns.
-  The first pair with =r2 <= 0.0= sets =*energy= to =+INFINITY= and returns.
+  The first pair with ~r2 <= 0.0~ sets =*energy= to =+INFINITY= and returns.
   The gradient is left at the zeros written before that pair, and later pairs
   are not visited.
   Atoms 0 and 1 coincident and atom 2 =NaN= therefore give =+INFINITY= and a
   zero gradient.
-  =NaN= is not =<= 0.0=, so a pair that is reached with a =NaN= coordinate is
+  =NaN= is not ~<= 0.0~, so a pair that is reached with a =NaN= coordinate is
   evaluated and the energy and the gradient become =NaN=.
   Null pointers, =slot= entries at or above =n_species=, and =r0= entries that
   are not positive are not checked.
@@ -135,8 +135,8 @@ void rgpot_cambridge_morse(const double *x, size_t n, double rho,
 - Outputs :: one energy and 3 n gradient components.
   For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
   zero.
-  For =n >= 2= a coincident pair (=r2 <= 0.0=) is skipped, and a =NaN=
-  coordinate does not satisfy =r2 <= 0.0=, so =NaN= propagates into the energy
+  For ~n >= 2~ a coincident pair (~r2 <= 0.0~) is skipped, and a =NaN=
+  coordinate does not satisfy ~r2 <= 0.0~, so =NaN= propagates into the energy
   and the gradient.
 - Errors :: no status code and no error message.
   Null pointers are not checked.
@@ -156,8 +156,8 @@ void rgpot_cluster_lj(const double *x, size_t n, double *energy,
 - Outputs :: one energy and 3 n gradient components.
   For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
   zero.
-  For =n >= 2= a coincident pair (=r2 <= 0.0=) is skipped, and a =NaN=
-  coordinate does not satisfy =r2 <= 0.0=, so =NaN= propagates into the energy
+  For ~n >= 2~ a coincident pair (~r2 <= 0.0~) is skipped, and a =NaN=
+  coordinate does not satisfy ~r2 <= 0.0~, so =NaN= propagates into the energy
   and the gradient.
 - Errors :: no status code and no error message.
   Null pointers are not checked.
@@ -249,10 +249,10 @@ int rgpot_lj_partial_gradient(double epsilon, double sigma, int32_t natoms,
 - Units :: as =rgpot_lj_gradient=, with no cutoff.
 - Outputs :: gradient rows of the atoms listed in =moved=.
   Every other row is zero, and pairs with =!(r2 > 0.0)= are skipped.
-- Errors :: returns 1 when =natoms < 0=,
-  =n_moved < 0=, =gradient= is null, =natoms > 0= and =positions= is null, =n_moved > 0=
-  and =moved= is null, or =moved[m] < 0= or =moved[m] >= natoms=, and 0
-  otherwise, with no error message.
+- Errors :: returns 1 when =gradient= is null, =natoms < 0=,
+  =n_moved < 0=, =natoms > 0= and =positions= is null, =n_moved > 0= and =moved=
+  is null, or =moved[m] < 0= or ~moved[m] >= natoms~, and 0 otherwise, with no
+  error message.
   An index outside =[0, natoms)= is checked after =gradient= is zeroed and after
   the earlier =moved= rows have been accumulated, so the gradient is partial on
   that error.
