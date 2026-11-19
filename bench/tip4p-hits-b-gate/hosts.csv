@@ -1,0 +1,2 @@
+session_id,utc,uts_hostname,machine_id_sha256,arch,kernel,cpu_model,cpu_count,affinity,mem_kib,rustc,cargo,python_version
+20261119T054709Z,2026-11-19T05:47:09Z,bench,3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873,x86_64,6.12.113+,Intel(R) Xeon(R) Processor,8,0,49342816,absent,absent,3.12.16

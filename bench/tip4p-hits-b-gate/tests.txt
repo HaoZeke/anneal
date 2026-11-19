@@ -1,0 +1,11 @@
+# tip4p-hits-b pre-gate build and test suite parity
+# Arm A: dd054749d4703923f4cf4c34f50589c574ee1276 (tree f1705d6f02f7f257f50e831c16057740283efea5)
+# Arm B: 1d73d2f5bd3153af7736e9dd28d63496f390d7dc (tree 582ca3b8bae674059c65dc60168797a8ab455255)
+suite=cargo_test_default arm=A cmd="cargo +1.88.0 test --locked" status=ok suites=187 passed=2247 failed=0 ignored=0
+suite=cargo_test_default arm=B cmd="cargo +1.88.0 test --locked" status=ok suites=187 passed=2249 failed=0 ignored=0
+suite=cargo_test_ci_features arm=A cmd="cargo +1.88.0 test --locked --features ira,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex" status=ok suites=187 passed=2532 failed=0 ignored=0
+suite=cargo_test_ci_features arm=B cmd="cargo +1.88.0 test --locked --features ira,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex" status=ok suites=187 passed=2534 failed=0 ignored=0
+suite=pytest arm=A cmd="python -m pytest pytest/" status=ok passed=1688 failed=0 skipped=87
+suite=pytest arm=B cmd="python -m pytest pytest/" status=ok passed=1688 failed=0 skipped=87
+b_only_failures=0
+verdict=PASS
