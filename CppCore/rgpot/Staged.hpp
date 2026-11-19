@@ -15,8 +15,10 @@
  *   void forceStage(const HalfList &, const double *densities,
  *                   double *forces, StageTally *tally) const;
  *
- * evaluates its host's atoms on that list with copies out to its cutoff,
- * not out to Locality::forceRange. The density stage adds the pair terms
+ * evaluates its host's atoms on that list with copies out to
+ * Locality::ghostReach, not necessarily out to Locality::forceRange. A
+ * pair potential and a density potential (EAM, Sutton-Chen) use a half
+ * list and a reach of one cutoff. The density stage adds the pair terms
  * of each atom's densities (the electron density of EAM and Sutton-Chen)
  * into an array the host has zeroed, Locality::densities consecutive
  * values per atom. The host then completes them: with HalfList::newton
@@ -29,6 +31,14 @@
  * of the copies too, so no third stage runs between the exchanges. A
  * pairwise potential has no densities; its density stage does nothing
  * and the host skips the exchange.
+ *
+ * A three body kernel sets Locality::full and a reach of 2. The host
+ * then builds a full neighbour list, the list pair_sw and pair_tersoff
+ * request, and holds copies out to twice the cutoff so each neighbour's
+ * own list can be filled. The force stage evaluates owned centres. With
+ * newton on it writes the copy's force as well, and the host reverse
+ * sums those forces onto their owners, which is the communication
+ * pair_sw and pair_tersoff use. The density stage writes nothing.
  *
  * The @c StagedPotential concept detects the two members, as
  * @c PerAtomPotential detects forcePerAtom, so they add no virtual
@@ -62,6 +72,15 @@ namespace rgpot {
  * writes its own atom. Entries beyond the cutoff are skipped, so a list
  * built with a skin works. A copy sits at its image, so the separation of
  * a pair is the plain difference of its positions.
+ *
+ * With @c full, each owned atom's row lists every neighbour, and a copy's
+ * row, when the host fills it, is that neighbour's full list. pair_sw and
+ * pair_tersoff build this list and require newton on. A two body term on
+ * such a list is counted from one end only, the end @c fullPairFromHere
+ * selects, so a pair stored at both owned atoms is not added twice. A
+ * three body term is counted at the owned centre. Rows of copies are not
+ * centres: the copy's owner evaluates them, and this host receives the
+ * force by the reverse sum.
  */
 struct HalfList {
   std::size_t nAtoms = 0;
@@ -74,7 +93,26 @@ struct HalfList {
   const int *const *neighbours = nullptr;
   int indexMask = ~0;
   bool newton = false;
+  /// Every neighbour of a centre, rather than one direction of each pair.
+  bool full = false;
 };
+
+/// True when a full list counts a two body term from the atom at
+/// (@p ix, @p iy, @p iz) rather than from its partner. The partner must
+/// sit strictly above it in z, then y, then x. That is the tie break
+/// pair_sw uses when two atom tags match. The positions are the images
+/// the host stored, so of the two hosts that hold the pair, exactly one
+/// counts it.
+inline bool fullPairFromHere(double iz, double iy, double ix, double jz, double jy,
+                             double jx) noexcept {
+  if (jz != iz) {
+    return jz > iz;
+  }
+  if (jy != iy) {
+    return jy > iy;
+  }
+  return jx > ix;
+}
 
 /**
  * @brief What forceStage adds up besides the forces.

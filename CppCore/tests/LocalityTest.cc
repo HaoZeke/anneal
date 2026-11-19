@@ -208,6 +208,9 @@ TEST_CASE("Pair potentials declare their cutoff as a pairwise range", "[Locality
   CHECK(lj.cutoff == 8.5);
   CHECK(lj.pairwise);
   CHECK(lj.forceRange() == 8.5);
+  CHECK_FALSE(lj.full);
+  CHECK(lj.reach == 1);
+  CHECK(lj.ghostReach() == 8.5);
   const rgpot::Locality morse = rgpot::MorsePot({.cutoff = 7.0}).locality();
   CHECK(morse.cutoff == 7.0);
   CHECK(morse.pairwise);
@@ -221,6 +224,9 @@ TEST_CASE("Many-body potentials reach twice their cutoff", "[Locality]") {
   CHECK(sc.cutoff == 7.0);
   CHECK_FALSE(sc.pairwise);
   CHECK(sc.forceRange() == 14.0);
+  CHECK_FALSE(sc.full);
+  CHECK(sc.reach == 1);
+  CHECK(sc.ghostReach() == 7.0);
   c.cutoff = 0.0;
   CHECK_FALSE(rgpot::SuttonChenPot(c).locality().finite());
 }

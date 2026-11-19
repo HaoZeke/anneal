@@ -26,10 +26,15 @@
  * per-atom virials (PerAtom.hpp) of its own atoms: they equal those of
  * the whole system.
  *
- * A potential with the staged evaluation of Staged.hpp needs less: atoms
- * within @c cutoff and an exchange of @c densities values per atom
- * between its two stages, which carries what the neighbours of the
- * neighbours contribute.
+ * A potential with the staged evaluation of Staged.hpp names how far the
+ * copies reach. @c reach is 1 when an exchange of @c densities values
+ * per atom carries what the neighbours of the neighbours contribute, so
+ * the copies stop at @c cutoff. It is 2 when a three body term reads the
+ * full neighbour list of each neighbour and the copies must reach
+ * 2 * cutoff. @c full selects that list, the one pair_sw and pair_tersoff
+ * build. @c ghostReach() is @c reach * cutoff. @c forceRange() stays the
+ * distance that sets one force: @c cutoff when @c pairwise, otherwise
+ * twice @c cutoff, whether or not a density exchange shortens the copies.
  *
  * A cutoff of 0 declares no finite range (a whole-system or long-range
  * potential, or a truncation switched off).
@@ -48,12 +53,26 @@ struct Locality {
   /// neighbours and the force stage reads at both atoms of a pair. 0 for
   /// a potential without densities.
   int densities = 0;
+  /// The staged neighbour list keeps every neighbour of a centre, as
+  /// pair_sw and pair_tersoff request. False keeps the half list of a
+  /// pair potential or a density potential.
+  bool full = false;
+  /// Copies the staged host must hold, in units of cutoff. 1 when the
+  /// density exchange carries the second shell. 2 when a three body term
+  /// needs each neighbour's full list, a reach of 2 * cutoff.
+  int reach = 1;
 
   [[nodiscard]] constexpr bool finite() const noexcept { return cutoff > 0.0; }
 
   /// Distance within which the atoms set the force on one atom.
   [[nodiscard]] constexpr double forceRange() const noexcept {
     return pairwise ? cutoff : 2.0 * cutoff;
+  }
+
+  /// Distance of the copies a staged host holds. 0 when there is no
+  /// finite range.
+  [[nodiscard]] constexpr double ghostReach() const noexcept {
+    return finite() ? static_cast<double>(reach) * cutoff : 0.0;
   }
 };
 

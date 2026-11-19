@@ -127,7 +127,7 @@ two runs:
 
 #+attr_rgpot: output lines that init writes to the log
 #+begin_example
-pair_style rgpot: domain decomposition, cutoff 6.3943324, densities 1
+pair_style rgpot: domain decomposition, cutoff 6.3943324, densities 1, reach 1
 pair_style rgpot: gather on rank 0; the rgpot potential EMT declares no finite range
 #+end_example
 
@@ -172,16 +172,25 @@ between the ranks, and takes the forces in a second pass.
 The domain path runs every rgpot potential that has these two stages the same
 way (see the C++ interface under per-atom energy below).
 
-| Name                    | Range               | Densities per atom |
-|-------------------------+---------------------+--------------------|
-| =LJ=, =u0 psi=, =Morse= | cutoff, pairwise    |                  0 |
-| =SuttonChen=            | cutoff, if positive |                  1 |
-| =EAMTable=              | cutoff of the table |                  1 |
+| Name                    | Range                                  | Densities per atom |
+|-------------------------+----------------------------------------+--------------------|
+| =LJ=, =u0 psi=, =Morse= | cutoff, pairwise, half list            |                  0 |
+| =SuttonChen=            | cutoff, if positive, half list         |                  1 |
+| =EAMTable=              | cutoff of the table, half list         |                  1 |
+| =SWSi1985=              | twice the cutoff, full list            |                  0 |
+| =TersoffSi=             | twice the silicon outer cutoff, full   |                  0 |
 
-For these potentials the style returns the cutoff from =init_one= and requests a
-half neighbour list, as a native style does.
-LAMMPS keeps the atoms within the cutoff plus the neighbour skin of a rank's
+=init_one= returns =Locality::ghostReach()=.
+For a pair potential and a density potential that reach is one cutoff, and the
+style requests a half neighbour list.
+LAMMPS keeps the atoms within that reach plus the neighbour skin of a rank's
 atoms as ghosts, and rebuilds the list when an atom has moved half the skin.
+=SWSi1985= and =TersoffSi= set the reach to twice the cutoff and request the
+full list that =pair_sw= and =pair_tersoff= use.
+The style then requires =newton on=, because the force stage writes the copy's
+force for LAMMPS to reverse communicate.
+The kernel keeps pairs inside its own cutoff, so the longer list does not add
+interactions.
 On every step:
 
 1. The density stage adds the contribution of each listed pair to the densities
@@ -198,6 +207,9 @@ On every step:
 
 A pair potential has no densities, so the style skips both exchanges and runs
 the force stage alone.
+A three-body kernel also has no densities.
+Its force stage evaluates owned centres on the full list and writes the forces
+on ghosts for the same reverse communication.
 
 =pair_style eam= sends \(F'(\rho)\) instead of \(\rho\).
 Sending \(\rho\) and taking \(F'\) of the ghosts on every rank means a potential
@@ -223,8 +235,8 @@ another order.
 - the run has more than one rank;
 - the potential is built by name or with =u0 psi=, not an engine;
 - it declares a finite range;
-- it has the density and force stages (=LJ=, =u0 psi=, =Morse=, =SuttonChen= and
-  =EAMTable= do);
+- it has the density and force stages (=LJ=, =u0 psi=, =Morse=, =SuttonChen=,
+  =EAMTable=, =SWSi1985= and =TersoffSi= do);
 - the virial is not =virial fd=, which strains the whole box.
 
 =mode gather= always gathers.
@@ -378,21 +390,26 @@ The concept =rgpot::PerAtomPotential= in =rgpot/PerAtom.hpp= tells whether a
 potential type has it.
 
 The range is the non-virtual member =Locality locality() const noexcept= of
-=LJPot=, =MorsePot=, =SuttonChenPot= and =EAMTablePot=, in =rgpot/Locality.hpp=.
+=LJPot=, =MorsePot=, =SuttonChenPot=, =EAMTablePot=, =StillingerWeberSi= and
+=TersoffSiC=, in =rgpot/Locality.hpp=.
 =Locality::cutoff= is the range of a site energy in the potential's length unit,
 0 when there is none, and =Locality::pairwise= is set when every energy term is
 a function of one pair distance.
+=Locality::full= asks for a full neighbour list, and =Locality::reach= is the
+number of cutoffs of ghosts.
+=Locality::ghostReach()= is that product.
 =Locality::forceRange()= is the cutoff for a pairwise potential and twice it
 otherwise.
 =Locality::densities= is the number of densities per atom that the stages below
-exchange, 0 for a pairwise potential.
+exchange, 0 for a pairwise potential and for =StillingerWeberSi= and
+=TersoffSiC=.
 The concept =rgpot::LocalPotential= tells whether a potential type declares one,
 and =rgpot::spec::Built::locality= carries it for a potential built by name.
 
 The stages are the non-virtual members =densityStage= and =forceStage= of the
-same four classes, in =rgpot/Staged.hpp=; :doc:`../reference/cpp_potentials`
+same classes, in =rgpot/Staged.hpp=; :doc:`../reference/cpp_potentials`
 gives their signatures.
-=HalfList= is a host's half neighbour list over its own atoms and their copies,
+=HalfList= is a host's neighbour list over its own atoms and their copies,
 in the layout of a LAMMPS =NeighList=, with or without =newton=.
 The host zeroes the densities and runs the density stage.
 It then completes them: with =newton= it adds the entries of the copies to their
@@ -509,6 +526,14 @@ The numbers below are from one run; the tests assert looser bounds.
   Morse, SuttonChen and EAMTable, orthogonal and triclinic.
   Without the exchange, Sutton-Chen forces near a slab boundary are off by more
   than 1e-3 of the largest force.
+- =Staged3BodyTest= (C++) splits periodic silicon and silicon carbide cells into
+  2, 4 and 8 slabs, and adds a triclinic cell and a slab thinner than two
+  cutoffs.
+  Each host holds the images within twice the cutoff plus a skin, and builds a
+  full list with =nlist::build=.
+  Summing the owned energies and reverse summing the forces on the copies
+  matches =forceImpl= to a relative tolerance of 1e-10 for =StillingerWeberSi=
+  and =TersoffSiC=.
 
 ** Limitations
 

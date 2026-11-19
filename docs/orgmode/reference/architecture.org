@@ -56,6 +56,9 @@ Epsilon is 3.4723e-12 erg, 2.16723920 eV, the value of equation (2.9).
 =energyAndGradient= evaluates one configuration, and =energyAndGradientBatch=
 several configurations that share a cell and a species list.
 See [[file:sw_si.org][Stillinger-Weber silicon (1985)]].
+=locality= declares a full neighbour list and a ghost reach of twice the cutoff,
+so a domain-decomposed host can evaluate owned atoms and reverse sum the forces
+on the copies.
 The Fortran =SWPot= kernel (=PotType::SWSi=) uses eOn's rescaled epsilon,
 2.16826 × 1.06767385 = 2.3149945 eV.
 The ratio of that epsilon to the published value is 1.068176741337.
@@ -69,6 +72,9 @@ The Fortran =TersoffPot=, which also reports =PotType::TersoffSi= and is the
 engine name =tersoff=, sends all-silicon calls and a null species pointer to its
 Fortran gather and every other call to =TersoffSiC=.
 =setHeldSkin= keeps one Verlet list for =forceImpl=.
+=locality= declares a full neighbour list and a ghost reach of twice the silicon
+outer cutoff, so a domain-decomposed host can evaluate owned atoms and reverse
+sum the forces on the copies.
 See [[file:tersoff_sic.org][Tersoff silicon-carbon (1989)]].
 - =ZBLPot= (=PotType::ZBL=) :: Screened nuclear repulsion
   (Ziegler-Biersack-Littmark) with the LAMMPS switching function, on free

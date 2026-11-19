@@ -62,6 +62,77 @@ PairTerm pairTerm(double r) {
   return {true, f2, dedr, gexp, dgdr};
 }
 
+/// IndexHalf counts a pair when the partner index is above the centre,
+/// which is the whole cell. Otherwise the partner must sit above the
+/// centre in the images the host stored (fullPairFromHere), so a
+/// full list does not add the pair from both ends.
+template <bool IndexHalf, typename Sink>
+void swCentre(int i, const std::vector<Bond> &nb, double scale, Sink &sink) {
+  const int m = static_cast<int>(nb.size());
+  for (int a = 0; a < m; ++a) {
+    const Bond &bj = nb[static_cast<std::size_t>(a)];
+    if constexpr (IndexHalf) {
+      if (bj.j <= i) {
+        continue;
+      }
+    } else if (!fullPairFromHere(0.0, 0.0, 0.0, bj.z, bj.y, bj.x)) {
+      continue;
+    }
+    const PairTerm t = pairTerm(bj.r);
+    if (!t.live) {
+      continue;
+    }
+    sink.energy(StillingerWeberSi::kEpsilon * t.f2);
+    const double inv_r = 1.0 / bj.r;
+    const double sx = scale * t.dedr * bj.x * inv_r;
+    const double sy = scale * t.dedr * bj.y * inv_r;
+    const double sz = scale * t.dedr * bj.z * inv_r;
+    sink.pair(static_cast<std::size_t>(a), bj.j, sx, sy, sz);
+    if (sink.strained()) {
+      // dE/d(bj) is (dedr / r) bj. bj is the negative of the d in
+      // stress.hpp when the walk stores r_i - r_j. The term is
+      // quadratic in that vector, so the sign does not change it.
+      sink.pairStrain(-t.dedr * inv_r, bj.x, bj.y, bj.z);
+    }
+  }
+  for (int a = 0; a < m; ++a) {
+    const Bond &bj = nb[static_cast<std::size_t>(a)];
+    for (int b = a + 1; b < m; ++b) {
+      const Bond &bk = nb[static_cast<std::size_t>(b)];
+      const double inv_r1 = 1.0 / bj.r;
+      const double inv_r2 = 1.0 / bk.r;
+      const double inv = inv_r1 * inv_r2;
+      double cth = (bj.x * bk.x + bj.y * bk.y + bj.z * bk.z) * inv;
+      if (cth > 1.0) {
+        cth = 1.0;
+      } else if (cth < -1.0) {
+        cth = -1.0;
+      }
+      const double ang = cth + (1.0 / 3.0);
+      const double ang2 = ang * ang;
+      sink.energy(StillingerWeberSi::kEpsilon * StillingerWeberSi::kLambda * bj.gexp * bk.gexp *
+                  ang2);
+      const double pref = StillingerWeberSi::kEpsilon * StillingerWeberSi::kLambda;
+      const double d_edcth = pref * bj.gexp * bk.gexp * 2.0 * ang;
+      const double d_edr1 = pref * bj.dgdr * bk.gexp * ang2;
+      const double d_edr2 = pref * bj.gexp * bk.dgdr * ang2;
+      const double g1x = d_edr1 * bj.x * inv_r1 + d_edcth * (bk.x * inv - cth * bj.x * inv_r1 * inv_r1);
+      const double g1y = d_edr1 * bj.y * inv_r1 + d_edcth * (bk.y * inv - cth * bj.y * inv_r1 * inv_r1);
+      const double g1z = d_edr1 * bj.z * inv_r1 + d_edcth * (bk.z * inv - cth * bj.z * inv_r1 * inv_r1);
+      const double g2x = d_edr2 * bk.x * inv_r2 + d_edcth * (bj.x * inv - cth * bk.x * inv_r2 * inv_r2);
+      const double g2y = d_edr2 * bk.y * inv_r2 + d_edcth * (bj.y * inv - cth * bk.y * inv_r2 * inv_r2);
+      const double g2z = d_edr2 * bk.z * inv_r2 + d_edcth * (bj.z * inv - cth * bk.z * inv_r2 * inv_r2);
+      // g is dE/d(neighbor). Force on that atom is -g.
+      sink.triplet(static_cast<std::size_t>(a), bj.j, static_cast<std::size_t>(b), bk.j, scale, g1x,
+                   g1y, g1z, g2x, g2y, g2z);
+      if (sink.strained()) {
+        sink.bondStrain(bj.x, bj.y, bj.z, g1x, g1y, g1z);
+        sink.bondStrain(bk.x, bk.y, bk.z, g2x, g2y, g2z);
+      }
+    }
+  }
+}
+
 } // namespace
 
 StillingerWeberSi::StillingerWeberSi() : Potential(PotType::SWSi1985) {
@@ -190,86 +261,12 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
     }
     std::sort(nb.begin(), nb.end(), [](const Bond &a, const Bond &b) { return a.j < b.j; });
   };
-  // The terms of centre i, into a CentreDirect or a CentreTerms.
-  auto centre = [&](int i, const std::vector<Bond> &nb, auto &sink) {
-    const int m = static_cast<int>(nb.size());
-    for (int a = 0; a < m; ++a) {
-      const Bond &bj = nb[static_cast<std::size_t>(a)];
-      if (bj.j <= i) {
-        continue;
-      }
-      const PairTerm t = pairTerm(bj.r);
-      if (!t.live) {
-        continue;
-      }
-      sink.energy(kEpsilon * t.f2);
-      const double inv_r = 1.0 / bj.r;
-      const double sx = scale * t.dedr * bj.x * inv_r;
-      const double sy = scale * t.dedr * bj.y * inv_r;
-      const double sz = scale * t.dedr * bj.z * inv_r;
-      sink.pair(static_cast<std::size_t>(a), bj.j, sx, sy, sz);
-      if (sink.strained()) {
-        // dE/d(bj) is (dedr / r) bj. bj is the negative of the d in
-        // stress.hpp when the walk stores r_i - r_j. The term is
-        // quadratic in that vector, so the sign does not change it.
-        sink.pairStrain(-t.dedr * inv_r, bj.x, bj.y, bj.z);
-      }
-    }
-    for (int a = 0; a < m; ++a) {
-      const Bond &bj = nb[static_cast<std::size_t>(a)];
-      for (int b = a + 1; b < m; ++b) {
-        const Bond &bk = nb[static_cast<std::size_t>(b)];
-        const double inv_r1 = 1.0 / bj.r;
-        const double inv_r2 = 1.0 / bk.r;
-        const double inv = inv_r1 * inv_r2;
-        double cth = (bj.x * bk.x + bj.y * bk.y + bj.z * bk.z) * inv;
-        if (cth > 1.0) {
-          cth = 1.0;
-        } else if (cth < -1.0) {
-          cth = -1.0;
-        }
-        const double ang = cth + (1.0 / 3.0);
-        const double ang2 = ang * ang;
-        sink.energy(kEpsilon * kLambda * bj.gexp * bk.gexp * ang2);
-        const double pref = kEpsilon * kLambda;
-        const double d_edcth = pref * bj.gexp * bk.gexp * 2.0 * ang;
-        const double d_edr1 = pref * bj.dgdr * bk.gexp * ang2;
-        const double d_edr2 = pref * bj.gexp * bk.dgdr * ang2;
-        const double g1x =
-            d_edr1 * bj.x * inv_r1 +
-            d_edcth * (bk.x * inv - cth * bj.x * inv_r1 * inv_r1);
-        const double g1y =
-            d_edr1 * bj.y * inv_r1 +
-            d_edcth * (bk.y * inv - cth * bj.y * inv_r1 * inv_r1);
-        const double g1z =
-            d_edr1 * bj.z * inv_r1 +
-            d_edcth * (bk.z * inv - cth * bj.z * inv_r1 * inv_r1);
-        const double g2x =
-            d_edr2 * bk.x * inv_r2 +
-            d_edcth * (bj.x * inv - cth * bk.x * inv_r2 * inv_r2);
-        const double g2y =
-            d_edr2 * bk.y * inv_r2 +
-            d_edcth * (bj.y * inv - cth * bk.y * inv_r2 * inv_r2);
-        const double g2z =
-            d_edr2 * bk.z * inv_r2 +
-            d_edcth * (bj.z * inv - cth * bk.z * inv_r2 * inv_r2);
-        // g is dE/d(neighbor). Force on that atom is -g.
-        sink.triplet(static_cast<std::size_t>(a), bj.j, static_cast<std::size_t>(b), bk.j, scale,
-                     g1x, g1y, g1z, g2x, g2y, g2z);
-        if (sink.strained()) {
-          sink.bondStrain(bj.x, bj.y, bj.z, g1x, g1y, g1z);
-          sink.bondStrain(bk.x, bk.y, bk.z, g2x, g2y, g2z);
-        }
-      }
-    }
-  };
-
   if (n_atoms < kTeamMinAtoms) {
     std::vector<Bond> nb;
     for (int i = 0; i < n; ++i) {
       load(i, nb);
       CentreDirect sink(i, acc, energy, strain);
-      centre(i, nb, sink);
+      swCentre<true>(i, nb, scale, sink);
     }
     return;
   }
@@ -278,9 +275,76 @@ void StillingerWeberSi::evaluate(const double *positions, const double *box,
       [&](std::int32_t i, CentreTerms &terms, std::vector<Bond> &nb) {
         load(i, nb);
         terms.reset(i, nb);
-        centre(i, nb, terms);
+        swCentre<true>(static_cast<int>(i), nb, scale, terms);
       },
       acc, *energy, strain);
+}
+
+void StillingerWeberSi::forceStage(const HalfList &list, const double *, double *forces,
+                                   StageTally *tally) const {
+  if (!list.full) {
+    throw std::invalid_argument(
+        "StillingerWeberSi: staged evaluation needs a full neighbour list");
+  }
+  if (!list.newton) {
+    throw std::invalid_argument("StillingerWeberSi: staged evaluation needs newton on");
+  }
+  if (list.nAtoms == 0) {
+    return;
+  }
+  if (list.pos == nullptr || forces == nullptr || list.count == nullptr ||
+      list.neighbours == nullptr || (list.nRows > 0 && list.rows == nullptr)) {
+    throw std::invalid_argument("StillingerWeberSi: null staged buffer");
+  }
+  const double cut = kCut * kSigma;
+  const double cut2 = cut * cut;
+  const auto owned = static_cast<int>(list.nOwned);
+  double energy = 0.0;
+  double strain[6] = {};
+  std::vector<Bond> nb;
+  for (std::size_t k = 0; k < list.nRows; ++k) {
+    const int i = list.rows[k];
+    if (i < 0 || i >= owned) {
+      continue;
+    }
+    nb.clear();
+    const int n = list.count[static_cast<std::size_t>(i)];
+    const int *row = n > 0 ? list.neighbours[static_cast<std::size_t>(i)] : nullptr;
+    if (n > 0 && row == nullptr) {
+      throw std::invalid_argument("StillingerWeberSi: null neighbour row");
+    }
+    const double *xi = list.pos + 3 * static_cast<std::size_t>(i);
+    for (int q = 0; q < n; ++q) {
+      const int j = row[q] & list.indexMask;
+      const double *xj = list.pos + 3 * static_cast<std::size_t>(j);
+      const double dx = xi[0] - xj[0];
+      const double dy = xi[1] - xj[1];
+      const double dz = xi[2] - xj[2];
+      if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) {
+        throw std::invalid_argument("StillingerWeberSi: non-finite position");
+      }
+      const double r2 = dx * dx + dy * dy + dz * dz;
+      if (!(r2 > 0.0) || r2 >= cut2) {
+        continue;
+      }
+      const double r = std::sqrt(r2);
+      const PairTerm t = pairTerm(r);
+      if (!t.live) {
+        continue;
+      }
+      nb.push_back(Bond{j, -dx, -dy, -dz, r, t.gexp, t.dgdr});
+    }
+    std::sort(nb.begin(), nb.end(), [](const Bond &a, const Bond &b) { return a.j < b.j; });
+    CentreDirect sink(i, forces, &energy, strain);
+    swCentre<false>(i, nb, 1.0, sink);
+  }
+  if (tally == nullptr) {
+    return;
+  }
+  tally->energy += energy;
+  for (int c = 0; c < 6; ++c) {
+    tally->virial[c] -= strain[c];
+  }
 }
 
 } // namespace rgpot

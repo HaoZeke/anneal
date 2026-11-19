@@ -23,6 +23,7 @@
 #include <cstdint>
 
 #include "rgpot/Potential.hpp"
+#include "rgpot/Staged.hpp"
 #include "rgpot/nlist/HalfShell.hpp"
 #include "rgpot/nlist/Neighbours.hpp"
 
@@ -63,6 +64,23 @@ public:
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
     return m_paramsKey;
   }
+
+  /// The bond order of a neighbour needs that neighbour's full list, so
+  /// the copies reach twice the widest taper. Silicon's outer cutoff is
+  /// the widest.
+  [[nodiscard]] Locality locality() const noexcept;
+
+  /// Staged.hpp: a three body kernel has no densities to exchange.
+  void densityStage(const HalfList &list, double *densities) const {
+    (void)list;
+    (void)densities;
+  }
+
+  /// Staged.hpp: owned centres on a full list. Each directed bond keeps
+  /// the one half already in the 1989 sum. With newton on, forces written
+  /// on copies are for the host to reverse sum.
+  void forceStage(const HalfList &list, const double *densities, double *forces,
+                  StageTally *tally) const;
 
   /// Forces, energy and the Cauchy stress sigma = (1/V) dE/dε in
   /// eV/Angstrom^3, the convention of stress.hpp. The virial sums each
