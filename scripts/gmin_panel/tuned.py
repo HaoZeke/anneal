@@ -414,11 +414,11 @@ def parse_csv_row(text: str) -> dict[str, str]:
         if line.startswith("system,code,seed"):
             header = line
             data = ""
-        elif header and line and not line.startswith("system,"):
+        elif header and line.count(",") == header.count(","):
             data = line
     if not header or not data:
         raise RuntimeError(f"expected one csv result\n{text[-1500:]}")
-    return dict(zip(header.split(","), data.split(",")))
+    return dict(zip(header.split(","), data.split(","), strict=True))
 
 
 def measured_from(fields: dict[str, str], reference: float, budget: int, label: str) -> dict[str, str]:
@@ -1140,6 +1140,17 @@ def self_test() -> None:
         raise SystemExit("ranked misses")
     if ranked_calls([{"hit": "0", "calls": "5"}], 100) is not None:
         raise SystemExit("censor")
+    sample = "\n".join(
+        [
+            "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s",
+            "m80r6,anneal,2000,4000000,true,37038,37038,1.347350,-378.33346188,0.972210,0.375140",
+            "arm single draws 27 accepts 13 best -367.445388",
+            "arm dls-kernel draws 134 accepts 100 best -376.674472",
+        ]
+    )
+    parsed = parse_csv_row(sample)
+    if parsed["system"] != "m80r6" or parsed["charged"] != "37038":
+        raise SystemExit(f"csv parse {parsed}")
     print("ok")
 
 
