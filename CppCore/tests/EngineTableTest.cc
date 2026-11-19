@@ -29,6 +29,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "rgpot/LennardJones/LJPot.hpp"
+#include "rgpot/Models/ModelPots.hpp"
 #include "rgpot/ZBL/ZBLPot.hpp"
 #ifdef RGPOT_HAS_WATER
 #include "rgpot/Water/WaterPots.hpp"
@@ -142,6 +143,18 @@ kj::Array<capnp::word> xtb_params(const std::string &method) {
   return capnp::messageToFlatArray(msg);
 }
 
+kj::Array<capnp::word> muller_brown_params(double first_amplitude) {
+  capnp::MallocMessageBuilder msg;
+  auto params = msg.initRoot<::BuiltinParams>();
+  params.setName("muller_brown");
+  auto config = params.initConfig().initMullerBrown();
+  const rgpot::MullerBrownConfig defaults;
+  auto amplitude = config.initAmplitude(4);
+  for (std::size_t i = 0; i < defaults.amplitude.size(); ++i)
+    amplitude.set(i, i == 0 ? first_amplitude : defaults.amplitude[i]);
+  return capnp::messageToFlatArray(msg);
+}
+
 RgpotEnginePot *create(const Engine &e, const kj::Array<capnp::word> &words,
                        std::string *error = nullptr) {
   auto bytes = words.asBytes();
@@ -240,6 +253,68 @@ TEST_CASE("classical engine matches the directly compiled LJPot",
   REQUIRE(e.set_num_threads(pot, 1, 1) == 3);
   REQUIRE(e.select_orbitals(pot, 1) == 3);
   REQUIRE(e.copy_orbitals(pot, 1, 2) == 3);
+  e.destroy(pot);
+}
+
+TEST_CASE("classical engine reproduces Muller-Brown stationary energies",
+          "[engine][classical][muller-brown]") {
+  Engine e;
+  if (!open_engine("CLASSICAL", e)) {
+    SKIP("no classical engine in this build");
+  }
+  RgpotEnginePot *pot = create(e, builtin_params("muller_brown"));
+  REQUIRE(pot != nullptr);
+  struct Point {
+    double x, y, energy;
+  };
+  constexpr std::array<Point, 5> points{{
+      {-0.558, 1.442, -146.70},
+      {0.623, 0.028, -108.17},
+      {-0.050, 0.467, -80.77},
+      {-0.822, 0.624, -40.66},
+      {0.212, 0.293, -72.25},
+  }};
+  const std::array<int, 1> atomicNumbers{1};
+  for (const Point &point : points) {
+    const std::array<double, 3> position{point.x, point.y, 4.0};
+    std::array<double, 3> force{};
+    double energy = 0.0;
+    REQUIRE(e.force(pot, 1, position.data(), atomicNumbers.data(),
+                    force.data(), &energy, nullptr, kBox.data(), nullptr,
+                    nullptr) == 0);
+    REQUIRE(energy == Catch::Approx(point.energy).margin(0.01));
+    REQUIRE(force[2] == 0.0);
+  }
+  e.destroy(pot);
+}
+
+TEST_CASE("classical engine applies Muller-Brown constructor config",
+          "[engine][classical][muller-brown]") {
+  Engine e;
+  if (!open_engine("CLASSICAL", e)) {
+    SKIP("no classical engine in this build");
+  }
+  RgpotEnginePot *pot = create(e, muller_brown_params(-123.0));
+  REQUIRE(pot != nullptr);
+  const std::array<double, 3> position{0.23, -0.17, 4.0};
+  const std::vector<int> atomicNumbers{1};
+  std::array<double, 3> force{};
+  double energy = 0.0;
+  REQUIRE(e.force(pot, 1, position.data(), atomicNumbers.data(), force.data(),
+                  &energy, nullptr, kBox.data(), nullptr, nullptr) == 0);
+  rgpot::MullerBrownConfig config;
+  config.amplitude[0] = -123.0;
+  rgpot::MullerBrownPot direct(config);
+  rgpot::types::AtomMatrix positions{{position[0], position[1], position[2]}};
+  const std::array<std::array<double, 3>, 3> box = {
+      {{40, 0, 0}, {0, 40, 0}, {0, 0, 40}}};
+  auto [expectedEnergy, expectedForce, variance] =
+      direct(positions, atomicNumbers, box);
+  (void)variance;
+  REQUIRE(energy == expectedEnergy);
+  REQUIRE(force[0] == expectedForce(0, 0));
+  REQUIRE(force[1] == expectedForce(0, 1));
+  REQUIRE(force[2] == 0.0);
   e.destroy(pot);
 }
 

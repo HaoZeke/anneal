@@ -9,6 +9,7 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <optional>
 #include <stdexcept>
@@ -24,9 +25,19 @@
 namespace rgpot::engine {
 
 struct Builtin {
+  struct MullerBrown {
+    std::array<double, 4> amplitude{-200.0, -100.0, -170.0, 15.0};
+    std::array<double, 4> a{-1.0, -1.0, -6.5, 0.7};
+    std::array<double, 4> b{0.0, 0.0, 11.0, 0.6};
+    std::array<double, 4> c{-10.0, -10.0, -6.5, 0.7};
+    std::array<double, 4> x0{1.0, 0.0, -0.5, -1.0};
+    std::array<double, 4> y0{0.0, 0.5, 1.5, 1.0};
+  };
+
   std::string name;    ///< Lowercased.
   std::string library; ///< Optional explicit engine library path.
   std::optional<rgpot::XTBConfig> xtb; ///< Present for the XTB config arm.
+  std::optional<MullerBrown> mullerBrown;
 };
 
 inline Builtin read_builtin(const void *config, std::size_t config_len) {
@@ -65,6 +76,25 @@ inline Builtin read_builtin(const void *config, std::size_t config_len) {
     target.charge = source.getCharge();
     target.uhf = source.getUhf();
     out.xtb = target;
+  }
+  if (native.which() == ::PotentialConfig::MULLER_BROWN) {
+    out.mullerBrown.emplace();
+    const auto wire = native.getMullerBrown();
+    const auto copy = [](const auto &source, auto &target,
+                         const char *name) {
+      if (source.size() == 0)
+        return;
+      if (source.size() != target.size())
+        throw std::invalid_argument(std::string("Muller-Brown ") + name +
+                                    " must contain four values");
+      std::copy(source.begin(), source.end(), target.begin());
+    };
+    copy(wire.getAmplitude(), out.mullerBrown->amplitude, "amplitude");
+    copy(wire.getA(), out.mullerBrown->a, "a");
+    copy(wire.getB(), out.mullerBrown->b, "b");
+    copy(wire.getC(), out.mullerBrown->c, "c");
+    copy(wire.getX0(), out.mullerBrown->x0, "x0");
+    copy(wire.getY0(), out.mullerBrown->y0, "y0");
   }
   return out;
 }

@@ -111,6 +111,18 @@ std::size_t atomCount(std::size_t dimensions) {
     throw std::overflow_error("rgpot built-in model dimension overflow");
   return (dimensions + 2) / 3;
 }
+
+rgpot::MullerBrownConfig
+mullerBrownConfig(const rgpot_muller_brown_config &source) {
+  rgpot::MullerBrownConfig config;
+  std::copy_n(source.amplitude, 4, config.amplitude.begin());
+  std::copy_n(source.a, 4, config.a.begin());
+  std::copy_n(source.b, 4, config.b.begin());
+  std::copy_n(source.c, 4, config.c.begin());
+  std::copy_n(source.x0, 4, config.x0.begin());
+  std::copy_n(source.y0, 4, config.y0.begin());
+  return config;
+}
 } // namespace
 
 extern "C" rgpot_builtin_model *
@@ -119,6 +131,34 @@ rgpot_builtin_model_new(rgpot_builtin_kind kind) {
     std::size_t dimensions = 0;
     auto potential = defaultPotential(kind, dimensions);
     return new rgpot_builtin_model{std::move(potential), dimensions};
+  });
+}
+
+extern "C" void
+rgpot_muller_brown_config_default(rgpot_muller_brown_config *config) {
+  if (config == nullptr) {
+    lastError = "Muller-Brown config is null";
+    return;
+  }
+  const rgpot::MullerBrownConfig defaults;
+  std::copy(defaults.amplitude.begin(), defaults.amplitude.end(),
+            config->amplitude);
+  std::copy(defaults.a.begin(), defaults.a.end(), config->a);
+  std::copy(defaults.b.begin(), defaults.b.end(), config->b);
+  std::copy(defaults.c.begin(), defaults.c.end(), config->c);
+  std::copy(defaults.x0.begin(), defaults.x0.end(), config->x0);
+  std::copy(defaults.y0.begin(), defaults.y0.end(), config->y0);
+  lastError.clear();
+}
+
+extern "C" rgpot_builtin_model *
+rgpot_builtin_muller_brown_new(const rgpot_muller_brown_config *config) {
+  return guardedNew([=]() -> rgpot_builtin_model * {
+    const rgpot::MullerBrownConfig native =
+        config == nullptr ? rgpot::MullerBrownConfig{}
+                          : mullerBrownConfig(*config);
+    auto potential = std::make_unique<rgpot::MullerBrownPot>(native);
+    return new rgpot_builtin_model{std::move(potential), 2};
   });
 }
 

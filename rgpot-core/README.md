@@ -53,6 +53,10 @@ Enable the generic engine C ABI loader:
 rgpot-core = { version = "3.7.0", features = ["engine"] }
 ```
 
+With the `schema` and `engine` features, the generated `Potentials_capnp`
+bindings carry `MullerBrownParams` to the classical engine. Rust callers use
+that engine path rather than a second implementation of the analytic surface.
+
 ## Documentation
 
 Full documentation is available at [rgpot.rgoswami.me](https://rgpot.rgoswami.me).

@@ -76,6 +76,7 @@ class MpiPefSession;
 #endif
 #include "rgpot/rpc/CompositeConfigure.hpp"
 #include "rgpot/rpc/MorseConfigure.hpp"
+#include "rgpot/rpc/MullerBrownConfigure.hpp"
 #include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 #include "rgpot/types/adapters/capnp/capnp_adapter.hpp"
@@ -123,6 +124,8 @@ private:
   rgpot::D2Pot *m_d2 = nullptr;
   /// Set when the backend is D2Cpmd; configure() replaces the pot.
   rgpot::D2CpmdPot *m_d2cpmd = nullptr;
+  /// Set when the backend is Muller-Brown; configure() replaces the surface.
+  rgpot::MullerBrownPot *m_muller_brown = nullptr;
 #ifdef RGPOT_HAS_DFTD4
   /// Set when the backend is D4; configure() replaces the pot.
   rgpot::D4Pot *m_d4 = nullptr;
@@ -148,7 +151,8 @@ public:
         m_morse(dynamic_cast<rgpot::MorsePot *>(m_potential.get())),
         m_sum(dynamic_cast<rgpot::SumPot *>(m_potential.get())),
         m_d2(dynamic_cast<rgpot::D2Pot *>(m_potential.get())),
-        m_d2cpmd(dynamic_cast<rgpot::D2CpmdPot *>(m_potential.get()))
+        m_d2cpmd(dynamic_cast<rgpot::D2CpmdPot *>(m_potential.get())),
+        m_muller_brown(dynamic_cast<rgpot::MullerBrownPot *>(m_potential.get()))
 #ifdef RGPOT_HAS_DFTD4
         ,
         m_d4(dynamic_cast<rgpot::D4Pot *>(m_potential.get()))
@@ -420,6 +424,16 @@ public:
       auto applied = rgpot::rpc::configureComposite(cfg);
       if (applied.replacement) {
         m_sum = applied.replacement.get();
+        m_potential = std::move(applied.replacement);
+      }
+      results.setOk(applied.ok);
+      results.setMessage(applied.message);
+      return kj::READY_NOW;
+    }
+    if (m_muller_brown) {
+      auto applied = rgpot::rpc::configureMullerBrown(cfg, *m_muller_brown);
+      if (applied.replacement) {
+        m_muller_brown = applied.replacement.get();
         m_potential = std::move(applied.replacement);
       }
       results.setOk(applied.ok);

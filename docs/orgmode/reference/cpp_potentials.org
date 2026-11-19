@@ -32,6 +32,23 @@ exact Hessian-vector product.
 - Errors :: model-specific invalid parameters and nondifferentiable LEPS
   geometries throw.
 
+*** =rgpot::MullerBrownConfig=
+
+- Inputs :: six four-entry arrays: =amplitude=, =a=,
+  =b=, =c=, =x0= and =y0=. They default to the published parameters.
+- Units :: the model's reduced energy and coordinate units, represented at the
+  rgpot boundary as eV and Angstrom.
+- Outputs :: constructor settings for =MullerBrownPot=, the standard
+  two-dimensional Muller-Brown surface on the first
+  atom's x and y coordinates. The first atom's z force and all coordinates of
+  later atoms have zero force. The product hook is the analytic Hessian-vector
+  product.
+- Errors :: construction throws =std::invalid_argument= for a non-finite
+  parameter.
+
+Parameter source: Müller and Brown, Theoret. Chim. Acta 53, 75-93 (1979),
+doi:10.1007/BF00547608.
+
 *** =rgpot::AnalyticModelPot::dimensions=
 
 #+attr_rgpot: signature

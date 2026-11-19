@@ -20,6 +20,15 @@ extern "C" {
 
 typedef struct rgpot_builtin_model rgpot_builtin_model;
 
+typedef struct rgpot_muller_brown_config {
+  double amplitude[4];
+  double a[4];
+  double b[4];
+  double c[4];
+  double x0[4];
+  double y0[4];
+} rgpot_muller_brown_config;
+
 typedef enum rgpot_builtin_kind {
   RGPOT_BUILTIN_ECKART = 1,
   RGPOT_BUILTIN_MULLER_BROWN = 2,
@@ -36,6 +45,16 @@ typedef enum rgpot_builtin_kind {
  */
 RGPOT_MODEL_API rgpot_builtin_model *
 rgpot_builtin_model_new(rgpot_builtin_kind kind);
+
+/*
+ * Fill a config with the published Muller-Brown parameters, then construct a
+ * model from it. Passing NULL to the constructor uses those defaults.
+ */
+RGPOT_MODEL_API void
+rgpot_muller_brown_config_default(rgpot_muller_brown_config *config);
+
+RGPOT_MODEL_API rgpot_builtin_model *
+rgpot_builtin_muller_brown_new(const rgpot_muller_brown_config *config);
 
 /*
  * Construct a DoubleWell model with caller-provided parameters.

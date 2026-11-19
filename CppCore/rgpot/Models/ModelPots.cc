@@ -25,30 +25,27 @@ void requireSize(std::span<const double> x, std::span<const double> v,
 }
 
 ModelEvaluation muller(std::span<const double> x, std::span<const double> v,
-                       double ripple, double wave) {
+                       const MullerBrownConfig &config, double ripple,
+                       double wave) {
   requireSize(x, v, 2);
-  constexpr std::array<double, 4> amp{-200.0, -100.0, -170.0, 15.0};
-  constexpr std::array<double, 4> aa{-1.0, -1.0, -6.5, 0.7};
-  constexpr std::array<double, 4> bb{0.0, 0.0, 11.0, 0.6};
-  constexpr std::array<double, 4> cc{-10.0, -10.0, -6.5, 0.7};
-  constexpr std::array<double, 4> x0{1.0, 0.0, -0.5, -1.0};
-  constexpr std::array<double, 4> y0{0.0, 0.5, 1.5, 1.0};
   ModelEvaluation out{0.0, std::vector<double>(2), std::vector<double>(2)};
-  for (std::size_t i = 0; i < amp.size(); ++i) {
-    const double dx = x[0] - x0[i];
-    const double dy = x[1] - y0[i];
-    const double sx = 2.0 * aa[i] * dx + bb[i] * dy;
-    const double sy = bb[i] * dx + 2.0 * cc[i] * dy;
-    const double term =
-        amp[i] * std::exp(aa[i] * dx * dx + bb[i] * dx * dy + cc[i] * dy * dy);
+  for (std::size_t i = 0; i < config.amplitude.size(); ++i) {
+    const double dx = x[0] - config.x0[i];
+    const double dy = x[1] - config.y0[i];
+    const double sx = 2.0 * config.a[i] * dx + config.b[i] * dy;
+    const double sy = config.b[i] * dx + 2.0 * config.c[i] * dy;
+    const double term = config.amplitude[i] *
+                        std::exp(config.a[i] * dx * dx +
+                                 config.b[i] * dx * dy +
+                                 config.c[i] * dy * dy);
     const double ds = sx * v[0] + sy * v[1];
     out.energy += term;
     out.gradient[0] += term * sx;
     out.gradient[1] += term * sy;
     out.product[0] +=
-        term * (sx * ds + 2.0 * aa[i] * v[0] + bb[i] * v[1]);
+        term * (sx * ds + 2.0 * config.a[i] * v[0] + config.b[i] * v[1]);
     out.product[1] +=
-        term * (sy * ds + bb[i] * v[0] + 2.0 * cc[i] * v[1]);
+        term * (sy * ds + config.b[i] * v[0] + 2.0 * config.c[i] * v[1]);
   }
   const double frequency = 2.0 * std::numbers::pi * wave;
   const double sx = std::sin(frequency * x[0]);
@@ -184,6 +181,7 @@ std::array<Curve, 3> curves(LepsSystem system) {
 struct AnalyticModelPot::Impl {
   std::size_t dimensions;
   Kernel kernel;
+  MullerBrownConfig mullerConfig{};
 };
 
 AnalyticModelPot::AnalyticModelPot(PotType type, std::unique_ptr<Impl> impl)
@@ -248,11 +246,27 @@ EckartPot::EckartPot(double v0, double width)
                      (width * width) * v[0]}};
               }})) {}
 
-MullerBrownPot::MullerBrownPot()
+MullerBrownPot::MullerBrownPot(MullerBrownConfig config)
     : AnalyticModelPot(
           PotType::MullerBrown,
-          std::make_unique<Impl>(
-              Impl{2, [](auto x, auto v) { return muller(x, v, 0.0, 0.0); }})) {}
+          std::make_unique<Impl>(Impl{
+              2,
+              [config](auto x, auto v) {
+                return muller(x, v, config, 0.0, 0.0);
+              },
+              config})) {
+  const auto finite = [](const auto &values) {
+    return std::all_of(values.begin(), values.end(),
+                       [](double value) { return std::isfinite(value); });
+  };
+  if (!finite(config.amplitude) || !finite(config.a) || !finite(config.b) ||
+      !finite(config.c) || !finite(config.x0) || !finite(config.y0))
+    throw std::invalid_argument("Muller-Brown parameters must be finite");
+}
+
+const MullerBrownConfig &MullerBrownPot::config() const noexcept {
+  return impl_->mullerConfig;
+}
 
 ModifiedMullerBrownPot::ModifiedMullerBrownPot(double amplitude,
                                                double wave)
@@ -260,7 +274,7 @@ ModifiedMullerBrownPot::ModifiedMullerBrownPot(double amplitude,
           PotType::ModifiedMullerBrown,
           std::make_unique<Impl>(Impl{
               2, [amplitude, wave](auto x, auto v) {
-                return muller(x, v, amplitude, wave);
+                return muller(x, v, MullerBrownConfig{}, amplitude, wave);
               }})) {}
 
 LepsPot::LepsPot(LepsSystem system)

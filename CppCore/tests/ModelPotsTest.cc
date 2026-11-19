@@ -247,6 +247,57 @@ TEST_CASE("Muller variants match analytic dense products") {
   close(got.product[1], dense[1] + mixed * v[0] + diagonal * v[1], 4000.0);
 }
 
+TEST_CASE("Muller-Brown matches the published stationary-point energies") {
+  const rgpot::MullerBrownPot pot;
+  struct Point {
+    double x, y, energy;
+  };
+  // Müller and Brown, Theoret. Chim. Acta 53, 75-93 (1979), Table 1.
+  constexpr std::array<Point, 5> points{{
+      {-0.558, 1.442, -146.70},
+      {0.623, 0.028, -108.17},
+      {-0.050, 0.467, -80.77},
+      {-0.822, 0.624, -40.66},
+      {0.212, 0.293, -72.25},
+  }};
+  const std::array<double, 2> zero{};
+  for (const Point &point : points) {
+    const std::array<double, 2> coordinates{point.x, point.y};
+    const auto got = pot.evaluateCoordinates(coordinates, zero);
+    REQUIRE(got.energy == Catch::Approx(point.energy).margin(0.01));
+  }
+}
+
+TEST_CASE("Muller-Brown analytic force matches finite differences") {
+  rgpot::MullerBrownConfig config;
+  config.amplitude[3] = 12.5;
+  const rgpot::MullerBrownPot pot(config);
+  const std::array<double, 3> position{0.23, -0.17, 4.0};
+  const std::array<int, 1> atomicNumbers{1};
+  const std::array<double, 9> box{};
+  std::array<double, 3> force{};
+  rgpot::ForceInput input{1, position.data(), atomicNumbers.data(), box.data()};
+  rgpot::ForceOut output{force.data(), 0.0, 0.0, {}, 0};
+  pot.forceImpl(input, &output);
+  constexpr double step = 1.0e-6;
+  for (std::size_t axis = 0; axis < 2; ++axis) {
+    auto plus = position;
+    auto minus = position;
+    plus[axis] += step;
+    minus[axis] -= step;
+    const std::array<double, 2> plusCoordinates{plus[0], plus[1]};
+    const std::array<double, 2> minusCoordinates{minus[0], minus[1]};
+    const std::array<double, 2> zero{};
+    const double derivative =
+        (pot.evaluateCoordinates(plusCoordinates, zero).energy -
+         pot.evaluateCoordinates(minusCoordinates, zero).energy) /
+        (2.0 * step);
+    REQUIRE(force[axis] == Catch::Approx(-derivative).epsilon(2.0e-8));
+  }
+  REQUIRE(force[2] == 0.0);
+  REQUIRE(pot.config().amplitude[3] == 12.5);
+}
+
 TEST_CASE("coupled proton well matches its two-by-two Hessian") {
   rgpot::CoupledProtonWellPot pot(2.0, 3.0, 1.7);
   const std::array<double, 2> x{0.7, -0.2};
@@ -290,6 +341,29 @@ TEST_CASE("built-in C handle dispatches the analytic product hook") {
     close(force[i], -expected.gradient[i], 8.0);
     close(product[i], expected.product[i], 8.0);
   }
+  rgpot_builtin_model_free(model);
+}
+
+TEST_CASE("Muller-Brown C constructor accepts overridden parameters") {
+  rgpot_muller_brown_config config{};
+  rgpot_muller_brown_config_default(&config);
+  config.amplitude[0] *= 0.5;
+  rgpot_builtin_model *model = rgpot_builtin_muller_brown_new(&config);
+  REQUIRE(model != nullptr);
+  REQUIRE(rgpot_builtin_model_dimensions(model) == 2);
+  const std::array<double, 2> coordinates{0.23, -0.17};
+  std::array<double, 2> force{};
+  double energy = 0.0;
+  REQUIRE(rgpot_builtin_model_calculate(model, 1, coordinates.data(), &energy,
+                                        force.data()) == 0);
+  rgpot::MullerBrownConfig directConfig;
+  directConfig.amplitude[0] *= 0.5;
+  rgpot::MullerBrownPot direct(directConfig);
+  const std::array<double, 2> zero{};
+  const auto expected = direct.evaluateCoordinates(coordinates, zero);
+  close(energy, expected.energy, 200.0);
+  close(force[0], -expected.gradient[0], 200.0);
+  close(force[1], -expected.gradient[1], 200.0);
   rgpot_builtin_model_free(model);
 }
 

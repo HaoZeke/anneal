@@ -4,12 +4,22 @@
 
 #include "rgpot/Potential.hpp"
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <span>
 #include <vector>
 
 namespace rgpot {
+
+struct MullerBrownConfig {
+  std::array<double, 4> amplitude{-200.0, -100.0, -170.0, 15.0};
+  std::array<double, 4> a{-1.0, -1.0, -6.5, 0.7};
+  std::array<double, 4> b{0.0, 0.0, 11.0, 0.6};
+  std::array<double, 4> c{-10.0, -10.0, -6.5, 0.7};
+  std::array<double, 4> x0{1.0, 0.0, -0.5, -1.0};
+  std::array<double, 4> y0{0.0, 0.5, 1.5, 1.0};
+};
 
 struct ModelEvaluation {
   double energy;
@@ -47,7 +57,8 @@ public:
 
 class MullerBrownPot final : public AnalyticModelPot {
 public:
-  MullerBrownPot();
+  explicit MullerBrownPot(MullerBrownConfig config = {});
+  [[nodiscard]] const MullerBrownConfig &config() const noexcept;
 };
 
 class ModifiedMullerBrownPot final : public AnalyticModelPot {

@@ -14,17 +14,17 @@ Backend options for a live =Potential= go in =PotentialConfig=
 It is a union whose arms and ordinals are =none= @0, =nwchem= @1, =cpmd= @2,
 =metatomic= @4, =lammps= @5, =xtb= @6, =tblite= @7, =uma= @8, =lj= @9, =morse=
 @10, =zbl= @11, =d3= @12, =d4= @13, =mopac= @14, =skala= @15, =expr= @16, =cp2k=
-@17, =composite= @18, =d2= @19 and =d2cpmd= @20.
-=composite=, =d2= and =d2cpmd= are local additions
-(=CppCore/rgpot/rpc/local/composite.diff=, =d2.diff= and =d2cpmd.diff=) to the
-pinned schema, as are =D4Params.periodic= (=d4-periodic.diff=) and
-=D2CpmdParams.symmetry= (=d2cpmd-symmetry.diff=).
+@17, =composite= @18, =d2= @19, =d2cpmd= @20 and =mullerBrown= @21.
+=composite=, =d2=, =d2cpmd= and =mullerBrown= are local additions
+(=CppCore/rgpot/rpc/local/composite.diff=, =d2.diff=, =d2cpmd.diff= and
+=muller-brown.diff=) to the pinned schema, as are =D4Params.periodic=
+(=d4-periodic.diff=) and =D2CpmdParams.symmetry= (=d2cpmd-symmetry.diff=).
 Outside the union, =common= @3 is a =CommonMethodSpec= overlay.
 Geometry stays on =ForceInput=; =configure(config)= applies method and backend
 setup only.
-=potserv= applies =nwchem=, =cpmd=, =morse=, =composite=, =d2= and =d2cpmd= on
-the matching backend, =cp2k= on a build with CP2K and =d4= on a build with
-dftd4.
+=potserv= applies =nwchem=, =cpmd=, =morse=, =composite=, =d2=, =d2cpmd= and
+=mullerBrown= on the matching backend, =cp2k= on a build with CP2K and =d4= on
+a build with dftd4.
 =none= is a no-op on every backend.
 Every other arm gets =ok=false= with a message that names the arm.
 An arm from a newer schema is named by its discriminant.
@@ -53,6 +53,19 @@ so the next =calculate= uses them.
 A non-finite value, a cutoff that is not positive, or a cutoff below the switch
 width gets =ok=false= and leaves the pot as it was.
 =tests/rpc_integ.py= doubles =de= and checks that the energy at =re= doubles.
+
+** Muller-Brown arm (=PotentialConfig.mullerBrown= / =MullerBrownParams=)
+
+With =potserv <port> MullerBrown=, the =mullerBrown= arm rebuilds the surface.
+The six list fields are =amplitude=, =a=, =b=, =c=, =x0= and =y0=.
+Each is empty to retain its published default or contains exactly four finite values.
+Their schema names are =MullerBrownParams.amplitude=, =MullerBrownParams.a=,
+=MullerBrownParams.b=, =MullerBrownParams.c=, =MullerBrownParams.x0= and
+=MullerBrownParams.y0=.
+The =libclassical_engine= accepts the same arm nested in =BuiltinParams.config=
+when =name= is =muller_brown=.
+A list of any other length, a non-finite value, or any other arm gets
+=ok=false= and leaves the surface as it was.
 
 ** Composite arm (=PotentialConfig.composite= / =CompositeParams=)
 
