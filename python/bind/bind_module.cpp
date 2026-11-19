@@ -38,10 +38,8 @@
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
 
-#ifdef RGPOT_HAS_METATOMIC
 #include "rgpot/MetatomicPot/MetatomicConfig.hpp"
 #include "rgpot/MetatomicPot/MetatomicDlopen.hpp"
-#endif
 
 #ifdef RGPOT_HAS_CACHE
 #include "rgpot/PotentialCache.hpp"
@@ -487,11 +485,9 @@ NB_MODULE(_core, m) {
             "kernels, are absent when the build left them out. Evaluations "
             "release the interpreter while the kernel runs.";
   m.attr("__version__") = RGPOT_PY_VERSION;
-#ifdef RGPOT_HAS_METATOMIC
+  // MetatomicDlopen is linked into every librgpot. Torch is not.
+  // The engine plugin itself stays optional and is opened at runtime.
   m.attr("has_metatomic_dlopen") = true;
-#else
-  m.attr("has_metatomic_dlopen") = false;
-#endif
 #ifdef RGPOT_HAS_CACHE
   m.attr("has_cache") = true;
 #else
@@ -548,7 +544,6 @@ NB_MODULE(_core, m) {
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert());
 
-#ifdef RGPOT_HAS_METATOMIC
   m.def(
       "evaluate_metatomic_dlopen",
       [](const F64 &positions, nb::handle atom_types, const F64 &box,
@@ -596,7 +591,6 @@ NB_MODULE(_core, m) {
       "the directories in EON_POTENTIALS_PATH and RGPOT_ENGINE_PATH. "
       "rgpot.evaluate_metatomic also tries the engines bundled with the "
       "package. Each call builds its own frontend.");
-#endif
 
 #ifdef RGPOT_HAS_CACHE
   nb::class_<rgpot::cache::PotentialCache>(m, "PotentialCache")
