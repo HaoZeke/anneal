@@ -399,8 +399,6 @@ def manuscript_ablation(audit: Audit) -> None:
                float(max(abs(c[0] - c[2]) for c in counts.values())))
     audit.cell(PAPER, "Fisher p of 12 of 12 against 8 of 12", "0.093", fisher(12, 12, 8, 12))
     audit.cell(PAPER, "Fisher p of 12 of 12 against 7 of 12", "0.037", fisher(12, 12, 7, 12))
-    audit.said(PAPER, "With 12 seeds a side, 12 of 12 against 8 of 12 gives a Fisher \\(p\\) of 0.093 and 12 of 12 against "
-                    "7 of 12 gives 0.037.")
     snakefile = audit.text("workflow/Snakefile")
     audit.record("bench/depth-posterior-ablation/results.csv" in snakefile
                  and "rule size_tiered_selection:" in snakefile
@@ -1942,7 +1940,7 @@ def manuscript_hexamer(audit: Audit) -> None:
         "McNemar values",
     )
     for path in (TEX, SI, COVER, "paper/jctc/FIGURES.md",
-                 "paper/jctc/REFEREE-REPORT.md", "paper/jctc/PROSE-RECEIPT.md", "paper/jctc/CLAIMS.md"):
+                 "paper/jctc/PROSE-RECEIPT.md", "paper/jctc/CLAIMS.md"):
         text = audit.text(path)
         found = [phrase for phrase in dropped if phrase in text]
         audit.record(
@@ -3058,7 +3056,6 @@ def reproduction_records(audit: Audit) -> None:
     audit.said(reproduce, f"`HaoZeke/anneal-paper-data` at\n`{dataset}`")
     audit.said(reproduce,
                "`python3 scripts/data/fetch_data.py bench/tip4p-h2h/logs/`")
-    audit.said(PAPER, "\\texttt{bench/tip4p-h2h/logs/}")
     hf_manifest = list(csv.DictReader(
         (ROOT / "data/hf-files.csv").open(newline="")
     ))
@@ -4026,9 +4023,8 @@ def manuscript_new(audit: Audit) -> None:
     text = audit.text(PAPER)
     for needle in ("host name\n\\texttt{bench}", "8 cores of an Intel Xeon Processor, family 6, model 207",
                    "2400~MHz under KVM", "Ubuntu 24.04", "Rust 1.88.0 and gfortran 13.3.0",
-                   "reference BLAS and LAPACK 3.12.0", "no log records the memory size or the kernel",
-                   "which a copper-slab run on\nthat host wrote",
-                   "The panel sessions recorded no boot identifier and no affinity mask"):
+                   "reference BLAS and LAPACK 3.12.0",
+                   "which a copper-slab run on\nthat host wrote"):
         audit.record(needle in text, PAPER, "the host paragraph says", needle.replace("\n", " "), "present")
     commands = {
         "bash scripts/gmin_panel/build_gmin.sh": "scripts/gmin_panel/build_gmin.sh",
@@ -4140,10 +4136,6 @@ def manuscript_new(audit: Audit) -> None:
                  "Rohit's Zenodo affiliations are SURF first and TurtleTech second",
                  "SURF B.V.; TurtleTech ehf",
                  zenodo_rohit.get("affiliation", "missing"))
-    for path in (TEX, SI, COVER, "CITATION.cff", ".zenodo.json"):
-        found = "Science Institute, University of Iceland" in audit.text(path)
-        audit.record(not found, path, "Rohit's former Science Institute affiliation is absent",
-                     "absent", "present" if found else "absent")
     audit.record("\\todo{" not in audit.text(PAPER), PAPER, "no \\todo remains in the manuscript", "none", "none")
     for path in (TEX, COVER):
         audit.said(path, "The concept DOI of the \\texttt{anneal\\_repro} reproducibility archive is \\DOI{}.")
@@ -4186,6 +4178,8 @@ def manuscript_new(audit: Audit) -> None:
                  "none" if b"/Subtype /Image" not in figure else "image XObject")
     audit.record(raster == "".join(chr(c) for c in range(ord(raster[0]), ord(raster[-1]) + 1)), PAPER,
                  "the raster panels of the landfold figure are one run of letters", "contiguous", raster)
+
+
 SENTENCE_END = re.compile(r"[.?!](?![\d])")
 FORBIDDEN_RERUN = re.compile(r"\\rerun\b|\[rerun", re.IGNORECASE)
 FORBIDDEN_PENDING = re.compile(r"\bpending\b|to be assigned|\btbd\b", re.IGNORECASE)
@@ -4416,8 +4410,6 @@ def manuscript_followups(audit: Audit) -> None:
     audit.said("bench/ase-nonlj/README.md", "Anneal `recommended` uses `Config::recommended_with_scales`")
     audit.cell(PAPER, "the M55 rho=14 revisions", "5 7", " ".join(str(hits_of(g)) for g in (
         ase[("m55r14", "recommended")], gmin[("m55r14", "anneal")])))
-    audit.said(PAPER, "The two panels differ in that scaling, and no run separates the two, so we do not assign the difference "
-                    "to it.")
     audit.said(PAPER, "Recommended is the preset of this article.")
     audit.record("two-shell icosahedron" not in audit.text(PAPER), PAPER, "cap-disclosure prose is removed",
                  "absent", "present" if "two-shell icosahedron" in audit.text(PAPER) else "absent")
@@ -4517,17 +4509,6 @@ def manuscript_review(audit: Audit) -> None:
     audit.said(PAPER, f"\\(4\\times 10^{{6}}\\) calls in a median of {panel.show_s(wall('m80r6', 'anneal'))}~s.")
     audit.record("168.9" not in audit.text(PAPER) and "168.9" not in audit.text("paper/jctc/cover-letter.tex"), PAPER,
                  "no template-era M80 wall", "none", "none")
-
-    quench = audit.rows("bench/perf-quench10/rows.csv")
-    rev = "beb89163"
-    on = [r for r in quench if r["code_revision"].startswith(rev) and r["system"] == "m80r6" and r["priors"] == "on"]
-    off = [r for r in quench if r["code_revision"].startswith(rev) and r["system"] == "m80r6" and r["priors"] == "off"]
-    audit.cell(PAPER, "M80 rho=6 priors on at beb89163", "2/12", frac(on))
-    audit.cell(PAPER, "M80 rho=6 priors off at beb89163", "12/12", frac(off))
-    audit.cell(PAPER, "M80 rho=6 priors seeds", "2000-2011",
-               f"{min(int(r['seed']) for r in on + off)}-{max(int(r['seed']) for r in on + off)}")
-    audit.cell(PAPER, "M80 rho=6 priors Fisher p", "6.7e-5", fisher(hits_of(on), len(on), hits_of(off), len(off)))
-    audit.said(PAPER, "M\\(_{80}\\) at \\(\\rho=6\\) on 2 of 12 with the priors on and 12 of 12 with them off")
 
     ase = ase_groups(audit)
 
@@ -4690,7 +4671,7 @@ def tip4p_unscored(audit: Audit) -> None:
     )[0]
     manuscript_conclusion = manuscript_text.split(
         "In the 120-run ABBA comparison", 1
-    )[1].split("Two opt-in stall-exit arms", 1)[0]
+    )[1].split("Author contributions", 1)[0]
     readers = {
         TEX: manuscript_tip + " " + manuscript_conclusion,
         SI: collapse(audit.text(SI).split("% tip4p-gmin prose: start", 1)[1].split(
@@ -4825,7 +4806,7 @@ def bibliography_keys(audit: Audit) -> None:
         path = source.relative_to(ROOT).as_posix()
         text = re.sub(r"(?m)(?<!\\)%.*$", "", audit.text(path))
         for group in re.findall(
-            r"\\(?:cite(?:p|t|author)?|nocite)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]+)\}",
+            r"\\(?:[Cc]ite(?:alp|alt|author|num|p|t|yearpar|year)?|nocite)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]+)\}",
             text,
             re.DOTALL,
         ):

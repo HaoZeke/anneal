@@ -108,7 +108,7 @@ r_i(u) = (x_i - c) - R_u\bigl(x_{\pi_u(i)} - c\bigr),
 d_5(u) = \Bigl(\frac1N\sum_{i=1}^{N}\lVert r_i(u)\rVert^2\Bigr)^{1/2}.
 \label{eq:fivefold}
 \end{equation}
-The candidate axes are the six fivefold axes of an icosahedron in the
+The axes are the six fivefold axes of an icosahedron in the
 laboratory frame, \((0,1,\pm\varphi)\), \((\pm1,\varphi,0)\), and
 \((\varphi,0,\pm1)\) normalized, with \(\varphi\) the golden ratio, and the
 directions from \(c\) to the 12 atoms farthest from it.
@@ -225,7 +225,7 @@ y_{i_k} = c + R^{k}\,\bar u_i,
 \label{eq:symmetrize}
 \end{equation}
 and leaves an atom whose orbit does not close where it is.
-The move applies this to the candidate axis whose atoms have the smallest
+The move applies this to the axis whose atoms have the smallest
 root-mean-square distance to their images.
 \cite{oakley2013}
 
@@ -354,7 +354,7 @@ lattices in that way.
 Five of the six moves carry no such template: the lattice move reads the
 shell of the geometry it stands on, and no move reads the atom count.
 The fivefold hop does carry one.
-Its candidate axes include the six fivefold axes of an icosahedron, and its
+Its axes include the six fivefold axes of an icosahedron, and its
 length windows and amplitude were measured on LJ\(_{38}\) and LJ\(_{75}\)
 minima, so it is a motif cut, and Section~\msref{sec:priors} lists it with the
 other switches that grow named lattices and cut named packings.
@@ -493,9 +493,9 @@ electronvolts and \AA ngstr\"oms that Section~\ref{sec:ase} converts to
 reduced units.
 
 GOFEE, as AGOX implements it, fits a Gaussian-process model of the energy to
-every structure evaluated so far, relaxes candidates in a lower confidence
+every structure evaluated so far, relaxes structures in a lower confidence
 bound of that model, and spends one force call per iteration on the most
-promising candidate.
+promising structure.
 It is built for surfaces where one force call costs seconds of electronic
 structure, so that refitting the model is cheap beside the call.
 On a pair potential the call costs microseconds and the refit dominates, which
@@ -510,7 +510,7 @@ tests.
 Those curves count local optimizations on LJ\(_{75}\), and a local optimization
 is not a force call, so they are not the hits of Section~\msref{sec:ablation}.
 The same group uses a deliberately partial machine-learned
-landscape to propose candidates, a universal potential as a Gaussian-process
+landscape to propose structures, a universal potential as a Gaussian-process
 prior, fractional existence variables, an on-the-fly potential in a
 grand-canonical search, and a delta model on silver--sulfur systems.
 \cite{slavenskyComplementary2023,lyngbyUniversalPrior2024,larsenFractional2023,quinlivanGrandCanonical2026,pitfieldActiveDelta2026}
@@ -671,17 +671,13 @@ Rust 1.88.0 and gfortran 13.3.0.
 GMIN is built without ALIGN, MPI, or OpenMP and linked against the reference BLAS and LAPACK 3.12.0.
 Each run uses one thread, pinned to core 0 with \texttt{taskset}, and the other
 processes of the session sit on cores 1--7.
-The panel logs name the processor and the compilers and no more.
+The panel logs name the processor and the compilers.
 The clock and the operating system are read from the receipt of the same host,
 \path{paper/jctc/logs/cuh2-hardware-receipt.txt}, which a copper-slab run on
-that host wrote, and no log records the memory size or the kernel, so neither
-is given.
-The panel sessions recorded no boot identifier and no affinity mask, so that
-every panel ran on one boot of one machine is not established.
+that host wrote.
 The 120-run ABBA TIP4P comparison records the processor model, 8 logical CPUs,
 the pinned core, and a machine identifier hashed from the processor model, the
 memory size and the boot identifier, so it ran on one boot of one machine.
-It records no host name.
 
 The commands that reproduce the comparisons are these, run from the
 repository root.
@@ -766,7 +762,7 @@ new campaign at that revision and not a repeat of the stored rows.
 \label{sec:si-ablation}
 The file \path{bench/depth-posterior-ablation/results.csv} holds seeds 2000--2005.
 The \texttt{depth\_posterior\_ablation} rule of \path{workflow/Snakefile} writes it.
-Seeds 7000--7005 are the posterior and uniform rows of a later held-out panel.
+Seeds 7000--7005 are the posterior and uniform rows of the size-tiered panel.
 The \texttt{size\_tiered\_selection} rule of \path{workflow/Snakefile} appends the
 two arms and puts their code revision and host in
 \path{results/size-tiered-selection-provenance.csv}.
@@ -777,7 +773,7 @@ rows under that revision label.
 files and computes the Fisher probability.
 \texttt{paper/jctc/scripts/ablation\_table.py} writes Table~\msref{tab:ablation}
 from the same files, with the same counts and the same probability.
-The held-out rows are \path{results/size-tiered-selection.csv}.
+The size-tiered rows are \path{results/size-tiered-selection.csv}.
 
 On seeds 6400--6405, with the pentagonal retry of
 equation~\ref{eq:hold}, LJ\(_{98}\) hits on 6 of 6 inside

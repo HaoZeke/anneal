@@ -16,7 +16,7 @@ the other's label numbers from `paper/jctc/labels-manuscript.tex` and
 `paper/jctc/labels-si.tex`.  After a label moves or a float is added, rewrite
 both files, build the manuscript, and measure the rendered text:
 
-    python3 paper/jctc/scripts/cross_labels.py
+    python3 paper/jctc/scripts/cross_labels.py --output /tmp/jctc-labels
     (cd paper/jctc && latexmk -pdf -outdir=/tmp/jctc manuscript.tex)
     python3 paper/jctc/scripts/pdf_length.py --pdf /tmp/jctc/manuscript.pdf --check
 
@@ -111,47 +111,47 @@ while writing a fresh wall summary and exact rank-enumeration test:
       --check-out /work/tip4p-h2h-rerun/check-r2.md \
       --wall-out /work/tip4p-h2h-rerun/wall-r2.csv
 
-The original run's raw logs remain in the pinned paper-data snapshot;
-`python3 scripts/data/fetch_data.py bench/tip4p-h2h/logs/` retrieves them.
+`python3 scripts/data/fetch_data.py bench/tip4p-h2h/logs/` retrieves the
+pinned paper-data logs.
 
 The driver draws the 17 figures.
 It also draws the summary-rates figure and the contents graphic.
 
-    python3 paper/jctc/scripts/render_all.py
+    python3 paper/jctc/scripts/render_all.py /tmp/jctc-figs
 
 Rows 1 and 2, the two schematics:
 
-    python3 paper/jctc/scripts/fig_algorithm_stack.py paper/jctc/figs/algorithm_stack.pdf
+    python3 paper/jctc/scripts/fig_algorithm_stack.py /tmp/jctc-figs/algorithm_stack.pdf
 
-    python3 paper/jctc/scripts/fig_rec_arms.py paper/jctc/figs/rec_arms.pdf
+    python3 paper/jctc/scripts/fig_rec_arms.py /tmp/jctc-figs/rec_arms.pdf
 
 Rows 3 to 5:
 
-    python3 paper/jctc/scripts/fig_lj75_ecdf.py paper/jctc/figs/lj75_ecdf.pdf
+    python3 paper/jctc/scripts/fig_lj75_ecdf.py /tmp/jctc-figs/lj75_ecdf.pdf
 
-    python3 paper/jctc/scripts/fig_disconnectivity.py paper/jctc/figs/disconnectivity.pdf
+    python3 paper/jctc/scripts/fig_disconnectivity.py /tmp/jctc-figs/disconnectivity.pdf
 
-    python3 paper/jctc/scripts/fig_landfold_maps.py paper/jctc/figs/landfold_maps.pdf
+    python3 paper/jctc/scripts/fig_landfold_maps.py /tmp/jctc-figs/landfold_maps.pdf
 
 Rows 6 to 9:
 
-    python3 paper/jctc/scripts/fig_landscapes.py paper/jctc/figs/landscapes.pdf
+    python3 paper/jctc/scripts/fig_landscapes.py /tmp/jctc-figs/landscapes.pdf
 
-    python3 paper/jctc/scripts/fig_systems.py paper/jctc/figs/systems.pdf
+    python3 paper/jctc/scripts/fig_systems.py /tmp/jctc-figs/systems.pdf
 
-    python3 paper/jctc/scripts/fig_si_structures.py paper/jctc/figs/si_structures.pdf
+    python3 paper/jctc/scripts/fig_si_structures.py /tmp/jctc-figs/si_structures.pdf
 
-    python3 paper/jctc/scripts/fig_si_water.py paper/jctc/figs/si_water.pdf
+    python3 paper/jctc/scripts/fig_si_water.py /tmp/jctc-figs/si_water.pdf
 
 Rows 10 to 17:
 
-    python3 paper/jctc/scripts/fig_si_panels.py paper/jctc/figs
+    python3 paper/jctc/scripts/fig_si_panels.py /tmp/jctc-figs
 
 Source hashes of the vendored files are in the immutable
 paper/jctc/FIGURE-SOURCE.tsv ledger and its append-only updates file.
 The paper audit checks every effective row against the current file.
-Seventeen nested checksum files have no line in the original checksum list.
-They match the sealed files and the effective figure-source rows.
+The nested checksum files match the sealed files and the effective
+figure-source rows.
 The paths follow.
 
 ```

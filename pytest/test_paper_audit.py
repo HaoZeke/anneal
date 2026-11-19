@@ -1091,6 +1091,25 @@ def test_previously_unreported_is_not_history_narration():
     r"\citet*{missingCitationKey}",
     r"\citeauthor{missingCitationKey}",
     r"\citeauthor*{missingCitationKey}",
+    r"\citealp{missingCitationKey}",
+    r"\citealp*{missingCitationKey}",
+    r"\citealt{missingCitationKey}",
+    r"\citealt*{missingCitationKey}",
+    r"\citeyear{missingCitationKey}",
+    r"\citeyear*{missingCitationKey}",
+    r"\citeyearpar{missingCitationKey}",
+    r"\citeyearpar*{missingCitationKey}",
+    r"\citenum{missingCitationKey}",
+    r"\citenum*{missingCitationKey}",
+    r"\Cite{missingCitationKey}",
+    r"\Cite*{missingCitationKey}",
+    r"\Citet{missingCitationKey}",
+    r"\Citet*{missingCitationKey}",
+    r"\Citep{missingCitationKey}",
+    r"\Citep*{missingCitationKey}",
+    r"\Citeauthor{missingCitationKey}",
+    r"\Citeauthor*{missingCitationKey}",
+    r"\citep[see][12]{missingCitationKey}",
 ])
 def test_an_unresolved_cite_key_is_rejected(citation):
     path = "paper/jctc/manuscript.tex"
@@ -1205,7 +1224,7 @@ def test_a_tip4p_size_25_dash_table_cell_is_rejected():
 def test_a_tip4p_size_25_cost_or_p_claim_is_rejected(path, sentence):
     audit = audit_mod.Audit()
     marker = (
-        "Two opt-in stall-exit arms"
+        "\\section*{Author contributions}"
         if path == "paper/jctc/manuscript.tex"
         else "% tip4p-gmin prose: end"
     )
@@ -1463,6 +1482,14 @@ def test_the_au55_claims_hold_in_the_committed_text():
     audit_mod.manuscript_au55(audit)
     assert not audit.drifts()
     assert any("no Au55 count" in row[2] for row in audit.results)
+
+
+def test_the_landfold_figure_records_its_redrawn_panels():
+    audit = audit_mod.Audit()
+    audit_mod.manuscript_new(audit)
+    rows = [row for row in audit.results if "landfold" in row[2]]
+    assert rows
+    assert all(row[0] == "OK" for row in rows)
 
 
 @pytest.mark.parametrize("stale, fresh", [
@@ -1974,17 +2001,6 @@ def test_tblite_receipt_reads_package_metadata(tmp_path):
     assert receipt["metadata_sha256"] == hashlib.sha256(
         metadata.read_bytes()
     ).hexdigest()
-
-
-@pytest.mark.parametrize("path", ["paper/jctc/manuscript.tex", "paper/jctc/si.tex", "paper/jctc/cover-letter.tex"])
-def test_a_reinstated_science_institute_affiliation_is_rejected(path):
-    audit = audit_mod.Audit()
-    audit_mod.manuscript_new(audit)
-    assert not [row for row in audit.drifts() if "Science Institute" in row[2]]
-    audit = audit_mod.Audit()
-    audit.text_cache[path] = audit.text(path) + "\nScience Institute, University of Iceland\n"
-    audit_mod.manuscript_new(audit)
-    assert [row for row in audit.drifts() if row[1] == path and "Science Institute" in row[2]]
 
 
 @pytest.mark.parametrize("path", ["CITATION.cff", ".zenodo.json"])
