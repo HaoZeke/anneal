@@ -3,12 +3,12 @@
 /// Default hit tolerance above a reference target energy.
 pub const DEFAULT_HIT_TOL: f64 = 1.0e-3;
 
-/// Hit window shared by the cluster-search drivers.
+/// Hit window of the cluster-search solved flag and the first encounter.
 ///
-/// The solved flag, the first-encounter statistic, and the ensemble
-/// discovery level all use this window. It is tighter than
-/// [`DEFAULT_HIT_TOL`]: those drivers were scored at `1e-4`, and widening
-/// them to the default would count a different set of runs.
+/// Solved flags and first encounters were already scored at 1e-4.
+/// The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved
+/// from reference + 1e-3 to reference + 1e-4. Widening that window back to
+/// [`DEFAULT_HIT_TOL`] would count a different set of runs.
 pub const SEARCH_HIT_TOL: f64 = 1.0e-4;
 
 /// Whether `energy` hits `target` under the one-sided rule `energy <= target + tol`.
@@ -77,9 +77,9 @@ mod tests {
         assert!(!energy_hits(on_search.next_up(), target, SEARCH_HIT_TOL));
         assert!(!energy_hits(between, target, SEARCH_HIT_TOL));
         assert!(energy_hits(between, target, DEFAULT_HIT_TOL));
-        // The ensemble records a discovery at reference + window, then tests
-        // that level with no extra slack. The default window would accept
-        // `between`; the shared search window does not.
+        // The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved
+        // from reference + 1e-3 to reference + 1e-4. They follow that level
+        // with no extra slack. The default window would accept `between`.
         assert!(energy_hits(on_search, target + SEARCH_HIT_TOL, 0.0));
         assert!(!energy_hits(between, target + SEARCH_HIT_TOL, 0.0));
         assert!(energy_hits(between, target + DEFAULT_HIT_TOL, 0.0));

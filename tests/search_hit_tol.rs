@@ -1,5 +1,8 @@
-//! The cluster drivers score a solved flag, a first encounter, and an
-//! ensemble discovery on one tolerance.
+//! Solved flags and first encounters share `SEARCH_HIT_TOL` (`1e-4`).
+//! The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved
+//! from reference + 1e-3 to reference + 1e-4.
+//! `lj_ensemble_splice`, `ttt_lj38`, `lj_core_census` and `lj_lattice_probe`
+//! score hits with `DEFAULT_HIT_TOL`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +28,20 @@ fn is_search_tol(arg: &str) -> bool {
 
 fn is_bare_search_literal(arg: &str) -> bool {
     matches!(compact(arg).as_str(), "1e-4" | "1.0e-4" | "0.0001")
+}
+
+fn is_default_hit_tol(arg: &str) -> bool {
+    matches!(
+        compact(arg).as_str(),
+        "anneal_core::DEFAULT_HIT_TOL" | "crate::DEFAULT_HIT_TOL" | "DEFAULT_HIT_TOL"
+    )
+}
+
+fn is_hard_coded_hit_tol(arg: &str) -> bool {
+    matches!(
+        compact(arg).as_str(),
+        "1e-3" | "1.0e-3" | "0.001" | "1e-4" | "1.0e-4" | "0.0001"
+    )
 }
 
 /// Arguments of each `name(...)` call. Nested parentheses stay inside an argument.
@@ -295,7 +312,106 @@ fn no_energy_hits_call_passes_a_bare_search_literal() {
     }
     assert!(
         offenders.is_empty(),
-        "hit tolerances must come from SEARCH_HIT_TOL:\n{}",
+        "a bare 1e-4 is not a named hit tolerance:\n{}",
         offenders.join("\n")
     );
+}
+
+const ENSEMBLE_MOVE: &str = "The ensemble SOLVED marker, `tally.solved` and `first_target_calls` moved from reference + 1e-3 to reference + 1e-4.";
+
+fn flat(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            let trimmed = trimmed
+                .strip_prefix("//!")
+                .or_else(|| trimmed.strip_prefix("///"))
+                .or_else(|| trimmed.strip_prefix("//"))
+                .or_else(|| trimmed.strip_prefix('#'))
+                .unwrap_or(trimmed);
+            trimmed.trim()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Drivers whose hit window is the paper default, not the search window.
+const DEFAULT_WINDOW_DRIVERS: &[&str] = &[
+    "examples/lj_core_census.rs",
+    "examples/lj_ensemble_splice.rs",
+    "examples/lj_lattice_probe.rs",
+    "examples/ttt_lj38.rs",
+];
+
+fn default_window_problems(text: &str) -> Vec<String> {
+    let hits = call_args(text, "energy_hits");
+    let mut problems = Vec::new();
+    if hits.is_empty() {
+        problems.push("no energy_hits call".into());
+    }
+    for args in &hits {
+        let tol = args.last().copied().unwrap_or("");
+        if is_hard_coded_hit_tol(tol) {
+            problems.push(format!("hard-coded tolerance {tol:?}"));
+        } else if !is_default_hit_tol(tol) {
+            problems.push(format!("tolerance {tol:?} is not DEFAULT_HIT_TOL"));
+        }
+    }
+    problems
+}
+
+#[test]
+fn the_ensemble_move_is_stated_plainly() {
+    for rel in [
+        "src/target_tol.rs",
+        "scripts/target_tol.py",
+        "examples/lj_cluster_search.rs",
+        "examples/common/ensemble_report.rs",
+        "src/methods/ensemble.rs",
+        "pytest/test_target_tol.py",
+    ] {
+        let text = flat(&read(rel));
+        assert!(
+            text.contains(ENSEMBLE_MOVE),
+            "{rel} does not state the ensemble move"
+        );
+        assert!(
+            !text.contains("those drivers were scored"),
+            "{rel} still claims every driver was already scored at 1e-4"
+        );
+        assert!(
+            !text.contains("already at 1e-4"),
+            "{rel} still says something was already at 1e-4"
+        );
+    }
+    let own = flat(&read("tests/search_hit_tol.rs"));
+    assert!(own.contains(ENSEMBLE_MOVE));
+}
+
+#[test]
+fn default_window_drivers_use_default_hit_tol() {
+    for rel in DEFAULT_WINDOW_DRIVERS {
+        let text = read(rel);
+        let problems = default_window_problems(&text);
+        assert!(problems.is_empty(), "{rel}: {problems:?}");
+        let hard = text.replacen("anneal_core::DEFAULT_HIT_TOL", "1e-3", 1);
+        assert_ne!(text, hard, "{rel} has no DEFAULT_HIT_TOL to hard-code");
+        assert!(
+            !default_window_problems(&hard).is_empty(),
+            "{rel}: a hard-coded tolerance must fail"
+        );
+        let other = text.replacen(
+            "anneal_core::DEFAULT_HIT_TOL",
+            "anneal_core::SEARCH_HIT_TOL",
+            1,
+        );
+        assert_ne!(text, other);
+        assert!(
+            !default_window_problems(&other).is_empty(),
+            "{rel}: a different tolerance must fail"
+        );
+    }
 }

@@ -589,11 +589,72 @@ def test_a_shifted_jcc_claim_is_reported():
 
 
 def test_resolved_hit_tolerances_follow_the_expression():
-    names = {"DEFAULT_HIT_TOL": 1.0e-3}
+    names = {"DEFAULT_HIT_TOL": 1.0e-3, "SEARCH_HIT_TOL": 1.0e-4}
     assert audit_mod.resolve_named_hit_tol("${DEFAULT_HIT_TOL}", names) == 1.0e-3
+    assert audit_mod.resolve_named_hit_tol("$DEFAULT_HIT_TOL", names) == 1.0e-3
     assert audit_mod.resolve_named_hit_tol("DEFAULT_HIT_TOL", names) == 1.0e-3
+    assert audit_mod.resolve_named_hit_tol('f"{DEFAULT_HIT_TOL}"', names) == 1.0e-3
+    assert audit_mod.resolve_named_hit_tol("$SEARCH_HIT_TOL", names) == 1.0e-4
     assert audit_mod.resolve_named_hit_tol("1e-4", names) == 1.0e-4
     assert audit_mod.resolve_named_hit_tol("not-a-tolerance", names) is None
+
+
+def test_jcc_line_43_uses_the_shared_tolerance():
+    audit = audit_mod.Audit()
+    audit_mod.supporting_numbers(audit)
+    row = [item for item in audit.results if item[2] == "TARGET_TOLERANCE at line 43"]
+    assert row == [
+        (
+            "OK",
+            "scripts/elja_jcc_molslab_ensemble.sh",
+            "TARGET_TOLERANCE at line 43",
+            "0.001",
+            "0.001",
+        )
+    ]
+    tol_rows = [
+        item
+        for item in audit.results
+        if item[2] == "TARGET_TOLERANCE at line 43"
+        or re.search(
+            r"^(?:HIT_TOL|SEED_HIT_TOL|LJ_HIT_TOL|TARGET_TOL|TARGET_TOLERANCE|H2H_TOL|REFERENCE_TOL_EV|DEFAULT_HIT_TOL) line \d+$",
+            item[2],
+        )
+    ]
+    assert len(tol_rows) > 1
+    assert all(item[0] == "OK" for item in tol_rows)
+
+
+def test_a_jcc_target_tolerance_literal_is_reported():
+    audit = audit_mod.Audit()
+    path = "scripts/elja_jcc_molslab_ensemble.sh"
+    text = audit.text(path)
+    assert text.splitlines()[42] == "TARGET_TOLERANCE=$DEFAULT_HIT_TOL"
+    audit.text_cache[path] = text.replace(
+        "TARGET_TOLERANCE=$DEFAULT_HIT_TOL",
+        "TARGET_TOLERANCE=1e-4",
+        1,
+    )
+    audit_mod.supporting_numbers(audit)
+    named = [row for row in audit.drifts() if row[2] == "TARGET_TOLERANCE at line 43"]
+    alias = [row for row in audit.drifts() if row[1] == path and row[2].startswith("TARGET_TOL line")]
+    assert named == [
+        ("DRIFT", path, "TARGET_TOLERANCE at line 43", "0.001", "0.0001")
+    ]
+    assert alias and all(row[4] == "0.0001" for row in alias)
+
+
+def test_a_script_hit_tol_literal_is_reported():
+    audit = audit_mod.Audit()
+    path = "scripts/gmin_panel/run_panel.py"
+    text = audit.text(path)
+    assert "HIT_TOL = DEFAULT_HIT_TOL" in text
+    audit.text_cache[path] = text.replace("HIT_TOL = DEFAULT_HIT_TOL", "HIT_TOL = 1e-4", 1)
+    audit_mod.supporting_numbers(audit)
+    drift = [row for row in audit.drifts() if row[1] == path and row[2].startswith("HIT_TOL line")]
+    assert len(drift) == 1
+    assert drift[0][3] == "0.001"
+    assert drift[0][4] == "0.0001"
 
 
 def test_the_british_spelling_of_labeled_is_caught():
