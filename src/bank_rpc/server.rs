@@ -16,6 +16,62 @@ use crate::nng_rpc;
 /// Hausdorff length below which two members are the same geometry.
 #[cfg(feature = "ira")]
 const IRA_SAME: f64 = 0.05;
+
+/// Dimensionless IRA search-radius multiplier \(1 + r_{\text{rms}} / d_{\text{nn}}\)
+/// derived from the structure's root-mean-square radius about its centre of mass
+/// and its median nearest-neighbour spacing.
+#[cfg_attr(not(any(test, feature = "ira")), allow(dead_code))]
+fn geometric_kmax_factor(coords: ArrayView1<f64>) -> f64 {
+    let count = coords.len() / 3;
+    if count < 2 || !coords.len().is_multiple_of(3) || coords.iter().any(|v| !v.is_finite()) {
+        return 1.0;
+    }
+    let mut com = [0.0; 3];
+    for i in 0..count {
+        for axis in 0..3 {
+            com[axis] += coords[3 * i + axis];
+        }
+    }
+    for value in &mut com {
+        *value /= count as f64;
+    }
+    let mut sum_r2 = 0.0_f64;
+    let mut nearest = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut r2 = 0.0;
+        for axis in 0..3 {
+            let d = coords[3 * i + axis] - com[axis];
+            r2 += d * d;
+        }
+        sum_r2 += r2;
+        let mut best = f64::INFINITY;
+        for j in 0..count {
+            if i == j {
+                continue;
+            }
+            let mut d2 = 0.0;
+            for axis in 0..3 {
+                let d = coords[3 * i + axis] - coords[3 * j + axis];
+                d2 += d * d;
+            }
+            best = best.min(d2);
+        }
+        if best.is_finite() && best > 0.0 {
+            nearest.push(best.sqrt());
+        }
+    }
+    if nearest.is_empty() {
+        return 1.0;
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let bond = nearest[nearest.len() / 2];
+    let r_rms = (sum_r2 / count as f64).sqrt();
+    if !bond.is_finite() || bond <= 1e-12 {
+        1.0
+    } else {
+        1.0 + r_rms / bond
+    }
+}
 /// AS-KMC / MCAMC: well height at which the packing is a raised
 /// superbasin (N_f = 20 deposits of 0.25). Intra-well hops are then
 /// rate-scaled and the well is absorbing: sample will not start there.
@@ -128,15 +184,15 @@ impl Inner {
                 // Dcut makes every offer novel or every offer a duplicate.
                 #[cfg(feature = "ira")]
                 {
-                    let n = p.len() / 3;
                     let ira = crate::shape::IraMetric {
-                        kmax_factor: if n >= 55 { 2.5 } else { 1.8 },
+                        kmax_factor: geometric_kmax_factor(p),
                     };
                     let ira_d = ira.distance(p, q);
                     if ira_d.is_finite() && ira_d <= IRA_SAME {
                         return 0.0;
                     }
                 }
+                #[cfg(not(feature = "ira"))]
                 let _ = p;
                 states
                     .iter()
@@ -487,5 +543,72 @@ mod tests {
     fn an_ephemeral_bank_reports_its_allocated_port() {
         let bound = bind_bank_listener("127.0.0.1:0").unwrap();
         assert_ne!(bound.addr.expect("tcp bind").port(), 0);
+    }
+
+    #[test]
+    fn geometric_kmax_factor_is_scale_invariant_and_grows_with_shell_depth() {
+        assert_eq!(geometric_kmax_factor(Array1::<f64>::zeros(3).view()), 1.0);
+        let dimer = Array1::from_vec(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        assert!((geometric_kmax_factor(dimer.view()) - 1.5).abs() < 1e-12);
+
+        let mut single_shell = vec![0.0, 0.0, 0.0];
+        for &(x, y, z) in &[
+            (1.0, 0.0, 0.0),
+            (-1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, -1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (0.0, 0.0, -1.0),
+        ] {
+            single_shell.extend_from_slice(&[x, y, z]);
+        }
+        let s1 = Array1::from_vec(single_shell.clone());
+        let s1_scaled: Array1<f64> = s1.mapv(|v| 3.7 * v + 1.25);
+        let k1 = geometric_kmax_factor(s1.view());
+        let k1_scaled = geometric_kmax_factor(s1_scaled.view());
+        assert!(
+            (k1 - k1_scaled).abs() < 1e-12,
+            "scale/translation changed kmax: {k1} vs {k1_scaled}"
+        );
+
+        let mut two_shell = single_shell;
+        for ix in [-2i32, -1, 0, 1, 2] {
+            for iy in [-2i32, -1, 0, 1, 2] {
+                for iz in [-2i32, -1, 0, 1, 2] {
+                    if ix.abs().max(iy.abs()).max(iz.abs()) == 2 {
+                        two_shell.extend_from_slice(&[ix as f64, iy as f64, iz as f64]);
+                    }
+                }
+            }
+        }
+        let s2 = Array1::from_vec(two_shell);
+        let k2 = geometric_kmax_factor(s2.view());
+        assert!(
+            k2 > k1 && k1 > 1.5,
+            "multi-shell kmax {k2} must exceed single-shell {k1}"
+        );
+    }
+
+    #[cfg(feature = "ira")]
+    #[test]
+    fn a_permuted_copy_is_a_duplicate_through_the_offer_guard() {
+        let mut inner = Inner::new(1);
+        let coords = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ]);
+        let soap = Array1::<f64>::zeros(0);
+        let (seeded, _) = inner.offer(-1.0, coords.clone(), soap.clone());
+        assert_eq!(seeded, 0);
+        let mut permuted = coords.to_vec();
+        permuted.swap(3, 6);
+        permuted.swap(4, 7);
+        permuted.swap(5, 8);
+        let (same, _) = inner.offer(-0.5, Array1::from_vec(permuted), soap.clone());
+        assert_eq!(same, 2, "the geometric IRA guard missed a permuted copy");
+        let other = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 4.0, 0.2, 0.0, 0.2, 3.5, 0.4, -3.0, 0.5, 1.5, 0.4, -1.0, 3.0,
+        ]);
+        let (distinct, _) = inner.offer(-0.4, other, soap);
+        assert_eq!(distinct, 4, "a different geometry was treated as the same");
     }
 }
