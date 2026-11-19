@@ -180,9 +180,9 @@ pub enum ContinuousSymmetry {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
-    /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
-    /// symmetry measure. GMIN's `NSYMINTERVAL` default is the same ten
-    /// quenches (`keywords.f90`).
+    /// Project onto symmetry operations detected on the incumbent and quench
+    /// the lowest continuous symmetry measure. GMIN's `NSYMINTERVAL` default
+    /// is the same ten quenches (`keywords.f90`).
     Measure {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
@@ -734,7 +734,8 @@ pub struct Config {
     /// each group image and quenches the averaged geometry on a fixed
     /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
     /// is the Oakley, Johnston and Wales continuous symmetry measure over
-    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
+    /// operations detected on the incumbent, with orientations taken from
+    /// the inertia tensor.
     pub continuous_symmetry: ContinuousSymmetry,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,

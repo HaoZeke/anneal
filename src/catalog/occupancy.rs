@@ -1268,15 +1268,17 @@ pub fn ring_novelty(origin: (usize, usize, usize), trial: (usize, usize, usize))
 
 /// Atom weight when leaving `origin`.
 ///
-/// Five-rings, when the occupied packing has them, are the Franzblau
-/// fivefold signature: extras move those atoms. Otherwise extras move
-/// three-rings. Uniform incidence is a global scale and does not steer.
+/// Atoms are weighted by incidence in ring orders that are currently rare.
+/// This favours local ring novelty instead of privileging one fixed order.
 pub fn ring_leave_weight(origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
-    if origin.2 > 0 {
-        1.0 + f64::from(atom[2])
-    } else {
-        1.0 + f64::from(atom[0])
-    }
+    let baseline = [
+        1.0 / (1.0 + origin.0 as f64),
+        1.0 / (1.0 + origin.1 as f64),
+        1.0 / (1.0 + origin.2 as f64),
+    ];
+    1.0 + f64::from(atom[0]) * baseline[0]
+        + f64::from(atom[1]) * baseline[1]
+        + f64::from(atom[2]) * baseline[2]
 }
 
 /// Scale a Cartesian increment so leave-ring atoms move more.
@@ -3064,11 +3066,11 @@ mod tests {
     }
 
     #[test]
-    fn ring_leave_weight_breaks_pentagons_on_ico_and_triangles_on_oh() {
+    fn ring_leave_weight_favors_novel_ring_orders() {
         let ico = (165, 17, 6);
         let oh = (152, 22, 0);
         assert!(ring_leave_weight(ico, [0, 0, 3]) > ring_leave_weight(ico, [10, 0, 0]));
-        assert!(ring_leave_weight(oh, [4, 0, 0]) > ring_leave_weight(oh, [0, 2, 0]));
+        assert!(ring_leave_weight(oh, [0, 0, 1]) > ring_leave_weight(oh, [0, 2, 0]));
         assert_eq!(ring_novelty(ico, ico), 0);
         assert!(ring_novelty(ico, oh) > 0);
     }
