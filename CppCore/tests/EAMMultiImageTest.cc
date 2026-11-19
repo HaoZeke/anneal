@@ -580,6 +580,27 @@ rgpot::EAMTable cu_table() {
   return rgpot::read_eam_table(in, EAMTableFormat::Funcfl);
 }
 
+rgpot::EAMTable pair_table_data() {
+  std::istringstream in(pair_table());
+  return rgpot::read_eam_table(in, EAMTableFormat::Setfl);
+}
+
+std::size_t multi_image_pairs(const std::vector<Image> &images, std::size_t n) {
+  std::vector<std::size_t> count(n * n, 0);
+  for (const Image &im : images) {
+    if (im.i < im.j) {
+      ++count[im.i * n + im.j];
+    }
+  }
+  std::size_t pairs = 0;
+  for (const std::size_t c : count) {
+    if (c > 1) {
+      ++pairs;
+    }
+  }
+  return pairs;
+}
+
 void expect_same_eval(const Eval &got, const Eval &want) {
   REQUIRE_THAT(got.energy, WithinAbs(want.energy, kEnergyTol));
   REQUIRE(got.forces.size() == want.forces.size());
@@ -636,6 +657,88 @@ TEST_CASE("EAM neighbour lists match a brute force sum over every image",
     const std::vector<double> pos{1.0, 1.5, 2.0, 3.4, 1.8, 2.6,
                                   1.6, 3.6, 2.4, 3.0, 3.2, 4.2};
     expect_matches_brute_force(cu, pos, box);
+  }
+
+  SECTION("cubic 4A cell, every face short") {
+    const double box[9] = {4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0};
+    REQUIRE(short_axes(box, cutoff) == 3);
+    const std::vector<double> pos{0.3, 0.4, 0.5, 1.9, 2.2, 0.9, 2.7, 1.1, 3.1};
+    REQUIRE(multi_image_pairs(brute_images(pos, box, cutoff), 3) > 0);
+    expect_matches_brute_force(cu, pos, box);
+  }
+
+  SECTION("cubic 2.9A cell, second shell needed") {
+    // cutoff / spacing is 1.7, so an image two cells away is inside the
+    // cutoff for a pair offset by 0.4 of a cell.
+    const double box[9] = {2.9, 0.0, 0.0, 0.0, 2.9, 0.0, 0.0, 0.0, 2.9};
+    REQUIRE(short_axes(box, cutoff) == 3);
+    const std::vector<double> pos{0.2, 0.3, 0.4, 1.36, 0.5, 0.6, 2.0, 1.9, 1.1};
+    REQUIRE(multi_image_pairs(brute_images(pos, box, cutoff), 3) > 0);
+    expect_matches_brute_force(cu, pos, box);
+  }
+
+  SECTION("orthogonal slab, short along z only") {
+    const double box[9] = {12.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 0.0, 7.0};
+    REQUIRE(short_axes(box, cutoff) == 1);
+    REQUIRE(2.0 * cutoff < face_spacing(box, 0));
+    REQUIRE(2.0 * cutoff < face_spacing(box, 1));
+    REQUIRE(face_spacing(box, 2) < 2.0 * cutoff);
+    const std::vector<double> pos{1.0, 2.0, 1.0, 3.2, 2.4, 4.5,
+                                  2.2, 4.5, 3.2, 4.0, 3.5, 5.0};
+    REQUIRE(multi_image_pairs(brute_images(pos, box, cutoff), 4) > 0);
+    expect_matches_brute_force(cu, pos, box);
+  }
+
+  SECTION("orthogonal slab, short along x only") {
+    const double box[9] = {7.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 0.0, 12.0};
+    REQUIRE(short_axes(box, cutoff) == 1);
+    REQUIRE(face_spacing(box, 0) < 2.0 * cutoff);
+    const std::vector<double> pos{1.0, 2.0, 1.0, 4.5, 2.4, 3.2,
+                                  3.2, 4.5, 2.2, 5.0, 3.5, 4.0};
+    REQUIRE(multi_image_pairs(brute_images(pos, box, cutoff), 4) > 0);
+    expect_matches_brute_force(cu, pos, box);
+  }
+
+  SECTION("triclinic cell, every face short") {
+    const double box[9] = {6.0, 0.0, 0.0, 2.0, 5.5, 0.0, -1.5, 1.2, 5.0};
+    REQUIRE(short_axes(box, cutoff) == 3);
+    const std::vector<double> pos{0.5, 0.7, 0.9, 3.1, 2.2, 1.4, 1.2, 3.9, 3.3};
+    REQUIRE(multi_image_pairs(brute_images(pos, box, cutoff), 3) > 0);
+    expect_matches_brute_force(cu, pos, box);
+  }
+
+  SECTION("triclinic cell, short along c only") {
+    const double box[9] = {12.0, 0.0, 0.0, 0.5, 12.4, 0.0, -0.4, 0.6, 7.0};
+    REQUIRE(short_axes(box, cutoff) == 1);
+    REQUIRE(face_spacing(box, 2) < 2.0 * cutoff);
+    const std::vector<double> pos{1.0, 1.5, 1.0, 3.4, 1.8, 4.6,
+                                  1.6, 3.6, 2.4, 3.0, 3.2, 5.2};
+    REQUIRE(multi_image_pairs(brute_images(pos, box, cutoff), 4) > 0);
+    expect_matches_brute_force(cu, pos, box);
+  }
+
+  SECTION("pair-only table on a short triclinic cell") {
+    const rgpot::EAMTable pairs = pair_table_data();
+    const double box[9] = {3.6, 0.0, 0.0, 1.8, 3.1, 0.0, 1.8, 1.0, 2.9};
+    REQUIRE(short_axes(box, pairs.cutoff) == 3);
+    const std::vector<double> pos{0.2, 0.3, 0.4, 1.7, 1.1, 0.8};
+    expect_matches_brute_force(pairs, pos, box);
+  }
+
+  SECTION("unwrapped positions on a short cell") {
+    const double box[9] = {6.0, 0.0, 0.0, 2.0, 5.5, 0.0, -1.5, 1.2, 5.0};
+    const std::vector<double> home{0.5, 0.7, 0.9, 3.1, 2.2, 1.4};
+    std::vector<double> far = home;
+    for (std::size_t c = 0; c < 3; ++c) {
+      far[c] += 4.0 * box[c] - 3.0 * box[3 + c] + 2.0 * box[6 + c];
+      far[3 + c] -= 5.0 * box[c] + box[3 + c] - 6.0 * box[6 + c];
+    }
+    const rgpot::EAMTablePot pot(cu, true, true);
+    const std::vector<int> z(2, cu.z[0]);
+    const Eval got = eval_full(pot, far, z, box);
+    const Eval want = BruteForceEam(cu).evaluate(home, box);
+    REQUIRE(std::abs(want.energy) > kMinSignal);
+    expect_same_eval(got, want);
   }
 }
 
