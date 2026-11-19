@@ -52,6 +52,12 @@ morseStoredSplitSnapshot();
 RGPOT_MORSE_TEST_HIDDEN void
 morseAtomicFetchOrWord(std::uint64_t &word, std::uint64_t mask) noexcept;
 
+/// Element capacity above which a smaller request releases scratch.
+/// `resizeBuffer` shrinks when the retained capacity is above this cap and
+/// the new request is under a quarter of that capacity.
+[[nodiscard]] RGPOT_MORSE_TEST_HIDDEN std::size_t
+morseWorkspaceRetainCap() noexcept;
+
 } // namespace detail
 
 } // namespace rgpot

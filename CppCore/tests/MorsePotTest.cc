@@ -792,3 +792,173 @@ TEST_CASE("MorsePot workspace shrinks retained capacities when a smaller "
   CHECK(snap_1t_dilute.row_e_cap < snap_1t_wide.row_e_cap);
   CHECK(snap_1t_dilute.row_s_cap < snap_1t_wide.row_s_cap);
 }
+
+namespace {
+
+rgpot::MorseConfig cuVacancyConfig() {
+  return rgpot::MorseConfig{.De = 1.0,
+                            .a = 4.0 / 2.55,
+                            .re = 2.55,
+                            .cutoff = 5.3,
+                            .switch_width = 0.0};
+}
+
+void requireScratchAboveCap(const rgpot::detail::MorseSplitSnapshot &snap,
+                            std::size_t cap) {
+  REQUIRE(snap.total_up > cap * 64);
+  REQUIRE(snap.slices > 1);
+  REQUIRE(snap.up_off_cap > cap);
+  REQUIRE(snap.lo_off_cap > cap);
+  REQUIRE(snap.lo_u_cap > cap);
+  REQUIRE(snap.lo_count_cap > cap);
+  REQUIRE(snap.active_bits_cap > cap);
+  REQUIRE(snap.pair_forces_cap > cap);
+  REQUIRE(snap.pair_he_cap > cap);
+  REQUIRE(snap.pair_hv_cap > cap);
+  REQUIRE(snap.row_e_cap > cap);
+  REQUIRE(snap.row_s_cap > cap);
+}
+
+void checkReleasedAtCap(const rgpot::detail::MorseSplitSnapshot &snap, std::size_t cap,
+                        bool rows) {
+  CHECK(snap.up_off_cap <= cap);
+  CHECK(snap.lo_off_cap <= cap);
+  CHECK(snap.lo_u_cap <= cap);
+  CHECK(snap.lo_count_cap <= cap);
+  CHECK(snap.active_bits_cap <= cap);
+  CHECK(snap.pair_forces_cap <= cap);
+  CHECK(snap.pair_he_cap <= cap);
+  CHECK(snap.pair_hv_cap <= cap);
+  if (rows) {
+    CHECK(snap.row_e_cap <= cap);
+    CHECK(snap.row_s_cap <= cap);
+  }
+}
+
+/// 16x16x16 Cu vacancy. Upper pairs are far above the retain cap, including
+/// the active bit words (total_up / 64).
+VacancyLattice largeCuVacancy() {
+  auto sys = fccVacancy(16, 2.55 * std::sqrt(2.0), 29);
+  REQUIRE(sys.z.size() == 16383);
+  return sys;
+}
+
+void growWorkspaceAboveCap(rgpot::MorsePot &pot, const VacancyLattice &sys) {
+  ThreadGuard::set("4");
+  (void)runFullEval(pot, sys.pos, sys.z, sys.box);
+  requireScratchAboveCap(rgpot::detail::morseStoredSplitSnapshot(),
+                         rgpot::detail::morseWorkspaceRetainCap());
+}
+
+struct DiluteLattice {
+  std::vector<double> pos;
+  std::vector<int> z;
+  std::array<double, 9> box{};
+};
+
+/// Atoms at kTeamMinAtoms and above, with a handful of pairs inside the
+/// cutoff, so the stored list stays under the parallel pair threshold.
+DiluteLattice diluteAboveTeamMin() {
+  const std::size_t n = rgpot::kTeamMinAtoms + 16;
+  const double spacing = 12.0;
+  const int grid = 22;
+  const double side = static_cast<double>(grid) * spacing;
+  DiluteLattice out;
+  out.box = {side, 0.0, 0.0, 0.0, side, 0.0, 0.0, 0.0, side};
+  out.pos.reserve(3 * n);
+  for (std::size_t a = 0; a < n; ++a) {
+    const auto g = static_cast<std::size_t>(grid);
+    const std::size_t gx = a % g;
+    const std::size_t gy = (a / g) % g;
+    const std::size_t gz = a / (g * g);
+    out.pos.push_back((static_cast<double>(gx) + 0.5) * spacing);
+    out.pos.push_back((static_cast<double>(gy) + 0.5) * spacing);
+    out.pos.push_back((static_cast<double>(gz) + 0.5) * spacing);
+  }
+  for (std::size_t p = 0; p < 10; ++p) {
+    out.pos[3 * (2 * p + 1)] = out.pos[3 * (2 * p)] + 2.6;
+    out.pos[3 * (2 * p + 1) + 1] = out.pos[3 * (2 * p) + 1];
+    out.pos[3 * (2 * p + 1) + 2] = out.pos[3 * (2 * p) + 2];
+  }
+  out.z.assign(n, 29);
+  return out;
+}
+
+} // namespace
+
+TEST_CASE("MorsePot tiny call drops retained workspace capacity to the cap",
+          "[MorsePot][threads][shrink][cap]") {
+  ThreadGuard guard;
+  const auto cfg = cuVacancyConfig();
+  const auto tiny = fccVacancy(2, 2.55 * std::sqrt(2.0), 29);
+  REQUIRE(tiny.z.size() >= 2);
+  REQUIRE(tiny.z.size() < rgpot::kTeamMinAtoms);
+
+  ThreadGuard::set("4");
+  rgpot::MorsePot ref(cfg);
+  ref.setNeighbourMode(rgpot::nlist::Mode::Stored);
+  const auto want = runFullEval(ref, tiny.pos, tiny.z, tiny.box);
+
+  const auto large = largeCuVacancy();
+  rgpot::MorsePot pot(cfg);
+  pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+  growWorkspaceAboveCap(pot, large);
+
+  const auto got = runFullEval(pot, tiny.pos, tiny.z, tiny.box);
+  CHECK(countBitDiffs(got, want) == 0);
+  checkReleasedAtCap(rgpot::detail::morseStoredSplitSnapshot(),
+                     rgpot::detail::morseWorkspaceRetainCap(), true);
+}
+
+TEST_CASE("MorsePot serial call drops retained workspace capacity to the cap",
+          "[MorsePot][threads][shrink][cap]") {
+  ThreadGuard guard;
+  const auto cfg = cuVacancyConfig();
+  const auto serial_sys = fccVacancy(13, 2.55 * std::sqrt(2.0), 29);
+  REQUIRE(serial_sys.z.size() >= rgpot::kTeamMinAtoms);
+
+  ThreadGuard::set("1");
+  rgpot::MorsePot ref(cfg);
+  ref.setNeighbourMode(rgpot::nlist::Mode::Stored);
+  const auto want = runFullEval(ref, serial_sys.pos, serial_sys.z, serial_sys.box);
+
+  const auto large = largeCuVacancy();
+  rgpot::MorsePot pot(cfg);
+  pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+  growWorkspaceAboveCap(pot, large);
+
+  ThreadGuard::set("1");
+  const auto got = runFullEval(pot, serial_sys.pos, serial_sys.z, serial_sys.box);
+  CHECK(countBitDiffs(got, want) == 0);
+  // Row accumulators hold one entry per atom, so they stay above the cap.
+  // Pair scratch and the transpose index are not used on this path.
+  checkReleasedAtCap(rgpot::detail::morseStoredSplitSnapshot(),
+                     rgpot::detail::morseWorkspaceRetainCap(), false);
+}
+
+TEST_CASE("MorsePot sparse call drops retained workspace capacity to the cap",
+          "[MorsePot][threads][shrink][cap]") {
+  ThreadGuard guard;
+  const auto cfg = cuVacancyConfig();
+  const auto dilute = diluteAboveTeamMin();
+  REQUIRE(dilute.z.size() >= rgpot::kTeamMinAtoms);
+
+  ThreadGuard::set("1");
+  rgpot::MorsePot ref(cfg);
+  ref.setNeighbourMode(rgpot::nlist::Mode::Stored);
+  const auto want = runFullEval(ref, dilute.pos, dilute.z, dilute.box);
+  REQUIRE(ref.retainedPairs() < rgpot::detail::morseWorkspaceRetainCap());
+
+  const auto large = largeCuVacancy();
+  rgpot::MorsePot pot(cfg);
+  pot.setNeighbourMode(rgpot::nlist::Mode::Stored);
+  growWorkspaceAboveCap(pot, large);
+
+  ThreadGuard::set("4");
+  const auto teams_before = rgpot::teamsOpened();
+  const auto got = runFullEval(pot, dilute.pos, dilute.z, dilute.box);
+  CHECK(rgpot::teamsOpened() == teams_before);
+  CHECK(countBitDiffs(got, want) == 0);
+  checkReleasedAtCap(rgpot::detail::morseStoredSplitSnapshot(),
+                     rgpot::detail::morseWorkspaceRetainCap(), false);
+}
