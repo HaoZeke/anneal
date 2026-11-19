@@ -26,6 +26,7 @@
 //! | [`jet`] | Validated Taylor jets along a line, with typed refusals |
 //! | [`taylor`] | Interval Taylor series that implement a jet |
 //! | [`ch5_2008`] | Exact Taylor jet of the CH5 2008 surface |
+//! | [`eam_table`] | Tabulated EAM potentials read from DYNAMO tables |
 //! | [`c_api`] | `extern "C"` entry points collected by cbindgen |
 //! | [`version`] | Loaded library version, to check against `rgpot.h` |
 //! | [`engine`] | Loader for the generic engine C ABI (`engine` feature) |
@@ -56,6 +57,7 @@
 
 pub mod c_api;
 pub mod ch5_2008;
+pub mod eam_table;
 pub mod eindir;
 pub mod fused;
 pub mod hvp;

@@ -788,6 +788,33 @@ if get_option('with_rust_core')
         )
     endif
 
+    # The EAM table constructor as a C host calls it, on the archive itself.
+    if get_option('with_tests')
+        _eam_table_capi = executable(
+            'eam_table_capi_test',
+            'rgpot-core/tests/c/eam_table_capi.c',
+            include_directories: include_directories(
+                'rgpot-core' / 'include',
+                'include',
+            ),
+            dependencies: [
+                rgpot_rust_lib,
+                thread_dep,
+                dl_dep,
+                meson.get_compiler('c').find_library('m', required: false),
+            ],
+            link_language: 'c',
+            build_by_default: true,
+        )
+        test(
+            'EAMTableCAbiTest',
+            _eam_table_capi,
+            args: [meson.current_source_dir() / 'CppCore/tests/data/eam_table'],
+            depends: rgpot_rust_target,
+            timeout: 30,
+        )
+    endif
+
     # Include paths: generated C header + C++ RAII wrappers
     _incdirs += [
         include_directories('rgpot-core' / 'include'),  # rgpot.h (cbindgen)

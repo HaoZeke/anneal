@@ -29,6 +29,28 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /* [[[end]]] */
 
 /**
+ * Format code of the C ABI: choose from the suffix of the file name.
+ * `.eam.alloy` and `.setfl` are setfl, `.eam.fs` is Finnis-Sinclair and
+ * `.eam` is funcfl.
+ */
+#define RGPOT_EAM_TABLE_AUTO 0
+
+/**
+ * Format code of the C ABI: funcfl, `pair_style eam`, one element.
+ */
+#define RGPOT_EAM_TABLE_FUNCFL 1
+
+/**
+ * Format code of the C ABI: setfl, `pair_style eam/alloy`.
+ */
+#define RGPOT_EAM_TABLE_SETFL 2
+
+/**
+ * Format code of the C ABI: Finnis-Sinclair, `pair_style eam/fs`.
+ */
+#define RGPOT_EAM_TABLE_FINNIS_SINCLAIR 3
+
+/**
  * Displacement length used when a caller passes a step of 0.
  */
 #define RGPOT_HVP_DEFAULT_STEP 1.0e-3
@@ -41,7 +63,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 5
+#define RGPOT_ABI_VERSION_MINOR 6
 
 /**
  * Layout revision of this build.
@@ -453,6 +475,40 @@ typedef struct rgpot_interval_t {
   double lo;
   double hi;
 } rgpot_interval_t;
+
+/**
+ * Create a potential that evaluates a tabulated EAM table in process.
+ *
+ * Reads the DYNAMO table at `path` and returns a handle that evaluates its
+ * energy in eV and its forces in eV/Angstrom through
+ * `rgpot_potential_calculate`. Positions and the box are in Angstrom, the
+ * box is the lattice vectors as rows, and an atom takes its element from its
+ * atomic number, matched against the first field of the element lines of the
+ * file.
+ *
+ * - `path`: NUL-terminated path of the table file.
+ * - `format`: `RGPOT_EAM_TABLE_FUNCFL` (`pair_style eam`),
+ *   `RGPOT_EAM_TABLE_SETFL` (`eam/alloy`), `RGPOT_EAM_TABLE_FINNIS_SINCLAIR`
+ *   (`eam/fs`), or `RGPOT_EAM_TABLE_AUTO` to choose from the suffix of the
+ *   file name (`.eam`, `.eam.alloy` or `.setfl`, `.eam.fs`).
+ * - `periodic`: keep the nearest image of each partner. A calculation then
+ *   needs a box whose face spacings all exceed twice the cutoff of the file,
+ *   and is refused with `RGPOT_INVALID_PARAMETER` for a smaller one. With
+ *   `false` the box is ignored and the atoms are a free cluster.
+ *
+ * Returns a heap-allocated `rgpot_potential_t*`, or `NULL` on failure with
+ * the reason in `rgpot_last_error`: a NULL or empty `path`, an unknown
+ * `format`, a file that cannot be opened, or one that is not a table of that
+ * format. The caller must eventually pass the returned pointer to
+ * `rgpot_potential_free`.
+ *
+ * # Safety
+ *
+ * `path` must be NULL or point to a NUL-terminated string that stays valid
+ * for the call.
+ */
+struct rgpot_potential_t *
+rgpot_potential_new_eam_table(const char *path, int format, bool periodic);
 
 /**
  * Register `callback` as the analytic Hessian-vector product of `pot`, or

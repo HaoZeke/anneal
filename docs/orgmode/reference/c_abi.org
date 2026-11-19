@@ -492,6 +492,70 @@ struct rgpot_potential_t *rgpot_potential_new_eindir(PotentialCallback callback,
   does not fit in =uintptr_t=.
   The pointers are not otherwise checked.
 
+*** =rgpot_potential_new_eam_table=
+
+#+attr_rgpot: signature
+#+begin_src c
+struct rgpot_potential_t *rgpot_potential_new_eam_table(const char *path,
+                                                        int format,
+                                                        bool periodic);
+#+end_src
+
+- Inputs :: =path=, the table file; =format=, one of
+  =RGPOT_EAM_TABLE_AUTO= (0, the suffix chooses: =.eam=, =.eam.alloy= or =.setfl=, =.eam.fs=), =RGPOT_EAM_TABLE_FUNCFL=
+  (1, =pair_style eam=), =RGPOT_EAM_TABLE_SETFL= (2,
+  =eam/alloy=) or =RGPOT_EAM_TABLE_FINNIS_SINCLAIR= (3, =eam/fs=); =periodic=,
+  whether a calculation takes the nearest image of each partner on the cell, or
+  treats the atoms as a free cluster and ignores the cell.
+- Units :: positions and cell in Angstrom, the cell as lattice vectors in rows;
+  energy in eV and forces in eV per Angstrom.
+- Outputs :: a new handle that evaluates the table in process, with no C++
+  kernel behind it.
+  An atom takes its element from its atomic number, matched against the first
+  field of each element line of the file.
+  =rgpot_potential_calculate= writes a =forces= tensor of shape =[n, 3]=, the
+  energy and a variance of 0.
+  The evaluation follows =EAMTablePot= and so agrees with LAMMPS to rounding;
+  see [[file:eam_table.org][Tabulated EAM and Finnis-Sinclair potentials]].
+  Free the handle with =rgpot_potential_free=.
+- Errors :: returns NULL and stores =EAM table: path is NULL=, =path is empty=,
+  =format code N is not one of ...=, =cannot open <path>: <reason>=, a message
+  that names the unreadable or negative table field for a file that is not a
+  table of that format, or
+  =cannot tell the table format of <path> from its suffix= for
+  =RGPOT_EAM_TABLE_AUTO= and an unknown suffix.
+  A later =rgpot_potential_calculate= returns =RGPOT_INVALID_PARAMETER= with
+  =cutoff exceeds half a face spacing= for a periodic cell whose face spacing
+  does not exceed twice the cutoff, for a coordinate count that does not match
+  the atoms, a non-finite coordinate, or an atomic number that is in no element
+  line, and =RGPOT_INTERNAL_ERROR= when the energy or a force is not finite.
+
+#+attr_rgpot: compile
+#+begin_src c
+#include <stdio.h>
+
+#include "rgpot/eindir_abi.hpp"
+#include "rgpot.h"
+
+int vacancy_energy(const char *table, const struct rgpot_force_input_t *input,
+                   double *energy) {
+  struct rgpot_potential_t *pot =
+      rgpot_potential_new_eam_table(table, RGPOT_EAM_TABLE_FUNCFL, true);
+  if (pot == NULL) {
+    fprintf(stderr, "%s\n", rgpot_last_error());
+    return 1;
+  }
+  struct rgpot_force_out_t output = rgpot_force_out_create();
+  enum rgpot_status_t s = rgpot_potential_calculate(pot, input, &output);
+  if (s == RGPOT_SUCCESS) {
+    *energy = output.energy;
+    rgpot_tensor_free(output.forces);
+  }
+  rgpot_potential_free(pot);
+  return s == RGPOT_SUCCESS ? 0 : 1;
+}
+#+end_src
+
 *** =rgpot_potential_calculate=
 
 #+attr_rgpot: signature

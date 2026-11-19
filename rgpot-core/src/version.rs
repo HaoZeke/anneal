@@ -43,7 +43,7 @@ pub struct rgpot_abi_stamp_t {
 /// ABI major of this build.
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
-pub const RGPOT_ABI_VERSION_MINOR: u16 = 5;
+pub const RGPOT_ABI_VERSION_MINOR: u16 = 6;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -182,6 +182,20 @@ mod tests {
         );
     }
 
+    /// `rgpot_potential_new_eam_table` is additive, so the minor moves to 6
+    /// after the engine and RPC Hessian-vector exports, and a caller built
+    /// against any earlier minor still matches.
+    #[test]
+    fn the_minor_counts_the_eam_table_constructor() {
+        assert_eq!(RGPOT_ABI_VERSION_MAJOR, 1);
+        assert_eq!(RGPOT_ABI_VERSION_MINOR, 6);
+        assert_eq!(rgpot_abi_stamp().abi_minor, 6);
+        for earlier in 0..RGPOT_ABI_VERSION_MINOR {
+            assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, earlier, 1)) }, 1);
+        }
+        assert_eq!(unsafe { rgpot_abi_compatible(&stamp(1, 7, 1)) }, 0);
+    }
+
     fn stamp(major: u16, minor: u16, layout: u16) -> rgpot_abi_stamp_t {
         rgpot_abi_stamp_t {
             abi_major: major,
@@ -293,6 +307,11 @@ mod tests {
             "rgpot_potential_fused_error_kind(const struct rgpot_potential_t *pot)",
             "rgpot_set_last_error(const char *msg)",
             "RGPOT_SCC_NOT_CONVERGED = 5",
+            "rgpot_potential_new_eam_table(const char *path, int format, bool periodic)",
+            "#define RGPOT_EAM_TABLE_AUTO 0",
+            "#define RGPOT_EAM_TABLE_FUNCFL 1",
+            "#define RGPOT_EAM_TABLE_SETFL 2",
+            "#define RGPOT_EAM_TABLE_FINNIS_SINCLAIR 3",
         ] {
             assert!(flat.contains(f), "rgpot.h lacks {f}");
         }
