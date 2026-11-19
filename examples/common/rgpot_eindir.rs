@@ -537,8 +537,10 @@ unsafe extern "C" fn xtb_callback(
         };
     out.energy = energy;
     out.variance = var;
-    // The engine buffer is xtb's ∂E/∂x. rgpot negates this tensor.
-    anneal_core::xtb_gradient::store_as_force(&mut kernel.scratch);
+    // `rgpot_xtb_force` already stores a force: xtb's ∂E/∂x times
+    // NEG_GRAD_TO_FORCE. rgpot negates this buffer to build the objective
+    // gradient, so a second negation walks the quench uphill and the dimer
+    // probe never sees a restoring slope.
     out.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
     rgpot_status_t::RGPOT_SUCCESS
 }

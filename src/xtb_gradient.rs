@@ -1,24 +1,13 @@
-//! xtb reports ∂E/∂x. The rgpot callback buffer is a force.
+//! The pinned xtb engine returns a force, and rgpot negates it.
 //!
-//! rgpot builds the objective gradient by negating that buffer. Publishing
-//! the xtb gradient unchanged makes the objective gradient minus the true
-//! slope, and a descent step walks uphill.
+//! `rgpot_xtb_force` writes xtb's ∂E/∂x multiplied by `NEG_GRAD_TO_FORCE`,
+//! which is a force in eV/Å. rgpot builds the objective gradient by negating
+//! that buffer. Negating it in the callback as well makes the objective
+//! gradient minus the true slope.
 
-/// Replace an xtb gradient, in place, with the force rgpot expects.
-pub fn store_as_force(gradient: &mut [f64]) {
-    for component in gradient {
-        *component = -*component;
-    }
-}
-
-/// Objective component after rgpot negates a published force.
-///
-/// This is the composition the GFN2 callback relies on: the engine buffer
-/// is ∂E/∂x, [`store_as_force`] flips it, and rgpot flips it back.
-pub fn objective_component(xtb_gradient: f64) -> f64 {
-    let mut force = [xtb_gradient];
-    store_as_force(&mut force);
-    -force[0]
+/// Objective component after rgpot negates a published engine force.
+pub fn objective_from_engine_force(force: f64) -> f64 {
+    -force
 }
 
 #[cfg(test)]
@@ -26,21 +15,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_positive_energy_slope_stays_positive_after_rgpot_negates_the_force() {
-        let slope = 4.895_135_30;
-        let objective = objective_component(slope);
-        assert!(
-            (objective - slope).abs() < 1e-12,
-            "objective {objective} does not match the energy slope {slope}"
-        );
+    fn a_repulsive_force_is_a_positive_energy_slope() {
+        // A positive force on the outgoing atom is a negative energy slope.
+        let force = -4.895_135_30;
+        let objective = objective_from_engine_force(force);
+        assert!((objective - 4.895_135_30).abs() < 1e-12);
     }
 
     #[test]
-    fn the_gfn2_callback_stores_the_xtb_gradient_as_a_force() {
+    fn the_gfn2_callback_publishes_the_engine_force_unchanged() {
         let source = include_str!("../examples/common/rgpot_eindir.rs");
         assert!(
-            source.contains("xtb_gradient::store_as_force"),
-            "the callback publishes the xtb gradient without converting it to a force"
+            !source.contains("store_as_force"),
+            "the callback negates an engine buffer that is already a force"
         );
     }
 }
