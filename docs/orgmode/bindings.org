@@ -15,13 +15,22 @@ cargo cinstall --release --prefix /usr/local
 pkg-config --cflags --libs anneal-core
 #+END_SRC
 
-A hand-written companion header =anneal-core.hpp= wraps the C declarations in =namespace anneal= for ergonomic C++ usage.
+cargo-c enables the =capi= feature itself, which compiles the C ABI in =src/ffi.rs=. A plain =cargo build= needs =--features capi= for the C symbols to exist.
+
+A hand-written companion header =anneal-core.hpp= includes the generated header and adds =anneal::version()=. The generated header declares everything else inside =namespace anneal= when compiled as C++.
+
+The C ABI is the box ensemble over two callbacks:
+
+- =anneal_box_config_default= writes the default =anneal_box_config_t=: four replicas, a budget of 400 work units, the default coverage field and Gaussian escapes. Set =seed=, =budget=, =replicas= and the coverage and Langevin fields (=escape= is =ANNEAL_BOX_ESCAPE_GAUSSIAN= or =ANNEAL_BOX_ESCAPE_LANGEVIN=) before the call.
+- =anneal_box_minimize(eval, grad, user, x, low, high, cfg, out)= minimizes over the box =[low, high]=. =x= is a one-dimensional CPU float64 DLPack tensor (=DLManagedTensorVersioned=). It holds the start of the first replica on entry and the best evaluated point on exit, and =out= (=anneal_box_report_t=) receives =value=, =n_evals=, =n_grads= and =hops=. The callbacks take the same DLPack tensors as =rgmin_minimize=, so one pair serves a local rgmin fit and this global stage.
+- =anneal_last_error= returns the message of the last failed call on the thread, and =anneal_core_version= the package version.
 
 =anneal_box_minimize= reads =ANNEAL_SUCCESS= from a callback as "keep
 going". =ANNEAL_STOPPED= asks the search to return at once: the best point
 found is written back, and the call itself returns =ANNEAL_STOPPED=. Any
-other status is a failure and leaves the start in place. The variants live
-in the generated =anneal-core.h=.
+other status is a failure and leaves the start in place. The variants
+(=ANNEAL_SUCCESS=, =ANNEAL_INVALID_PARAMETER=, =ANNEAL_INTERNAL_ERROR=,
+=ANNEAL_STOPPED=) live in the generated =anneal-core.h=.
 
 The install also places =dlpack/dlpack.h= (DLPack 1.3, the header =dlpk= 0.1.5 was translated from) on that include prefix. =anneal-core.h= includes it, so =pkg-config --cflags anneal-core= is enough to compile a consumer. Meson and CMake install the same header.
 
@@ -42,7 +51,19 @@ pkg_check_modules(ANNEAL_CORE REQUIRED IMPORTED_TARGET anneal-core)
 target_link_libraries(myprog PRIVATE PkgConfig::ANNEAL_CORE)
 #+END_SRC
 
+* Examples
+
+Every program below was compiled against the generated header and the =capi= library, and run.
+The objective and its gradient are callbacks that take DLPack tensors.
+Build any of them against an installed prefix with:
+
+#+BEGIN_SRC bash
+cc  main.c   $(pkg-config --cflags --libs anneal-core) -lm -o main
+c++ main.cpp $(pkg-config --cflags --libs anneal-core) -o main
+#+END_SRC
+
 ** Tiny C example (box ensemble)
+
 
 The objective and its gradient are DLPack callbacks. =x= goes in as the
 first replica's start and comes back as the best point.
@@ -180,3 +201,161 @@ int main() {
 }
 #+END_SRC
 
+** C example: box minimization of Rastrigin
+
+
+The callbacks read the point from the tensor and, for the gradient, write into the preallocated =grad_out= tensor.
+The program links against =anneal_core= and =libm=. It prints =value 0.000000= for this seed, the global minimum of the two-dimensional Rastrigin function.
+
+#+BEGIN_SRC c
+#include <anneal-core.h>
+#include <math.h>
+#include <stdio.h>
+
+#define DIM 2
+#define PI 3.14159265358979323846
+
+static const double *view(const DLManagedTensorVersioned *t) {
+    return (const double *)((const char *)t->dl_tensor.data +
+                            t->dl_tensor.byte_offset);
+}
+
+static anneal_status_t eval(void *user, const DLManagedTensorVersioned *x,
+                            double *value_out) {
+    const double *p = view(x);
+    double f = 0.0;
+    (void)user;
+    for (int i = 0; i < DIM; i++) {
+        f += p[i] * p[i] - 10.0 * cos(2.0 * PI * p[i]) + 10.0;
+    }
+    *value_out = f;
+    return ANNEAL_SUCCESS;
+}
+
+static anneal_status_t grad(void *user, const DLManagedTensorVersioned *x,
+                            DLManagedTensorVersioned *grad_out) {
+    const double *p = view(x);
+    double *g = (double *)grad_out->dl_tensor.data;
+    (void)user;
+    for (int i = 0; i < DIM; i++) {
+        g[i] = 2.0 * p[i] + 20.0 * PI * sin(2.0 * PI * p[i]);
+    }
+    return ANNEAL_SUCCESS;
+}
+
+int main(void) {
+    double start[DIM] = {3.0, -2.0};
+    double low[DIM] = {-5.12, -5.12};
+    double high[DIM] = {5.12, 5.12};
+    int64_t shape[1] = {DIM};
+    int64_t strides[1] = {1};
+
+    DLManagedTensorVersioned x = {0};
+    x.version.major = DLPACK_MAJOR_VERSION;
+    x.version.minor = DLPACK_MINOR_VERSION;
+    x.dl_tensor.data = start;
+    x.dl_tensor.device.device_type = kDLCPU;
+    x.dl_tensor.ndim = 1;
+    x.dl_tensor.dtype.code = kDLFloat;
+    x.dl_tensor.dtype.bits = 64;
+    x.dl_tensor.dtype.lanes = 1;
+    x.dl_tensor.shape = shape;
+    x.dl_tensor.strides = strides;
+
+    anneal_box_config_t cfg;
+    anneal_box_config_default(&cfg);
+    cfg.seed = 7;
+    cfg.budget = 600;
+
+    anneal_box_report_t report;
+    anneal_status_t status =
+        anneal_box_minimize(eval, grad, NULL, &x, low, high, &cfg, &report);
+    if (status != ANNEAL_SUCCESS) {
+        fprintf(stderr, "anneal %s: %s\n", anneal_core_version(),
+                anneal_last_error());
+        return 1;
+    }
+    printf("value %.6f at (%.4f, %.4f), %zu evals, %zu grads\n", report.value,
+           start[0], start[1], report.n_evals, report.n_grads);
+    return 0;
+}
+#+END_SRC
+
+** C++ example: box minimization of Rastrigin
+
+#+BEGIN_SRC cpp
+#include <anneal-core.hpp>
+
+#include <array>
+#include <cmath>
+#include <cstdio>
+
+namespace {
+
+constexpr int kDim = 2;
+constexpr double kPi = 3.14159265358979323846;
+
+const double *view(const DLManagedTensorVersioned *t) {
+    return reinterpret_cast<const double *>(
+        static_cast<const char *>(t->dl_tensor.data) + t->dl_tensor.byte_offset);
+}
+
+anneal::anneal_status_t eval(void *, const DLManagedTensorVersioned *x,
+                             double *value_out) {
+    const double *p = view(x);
+    double f = 0.0;
+    for (int i = 0; i < kDim; i++) {
+        f += p[i] * p[i] - 10.0 * std::cos(2.0 * kPi * p[i]) + 10.0;
+    }
+    *value_out = f;
+    return anneal::ANNEAL_SUCCESS;
+}
+
+anneal::anneal_status_t grad(void *, const DLManagedTensorVersioned *x,
+                             DLManagedTensorVersioned *grad_out) {
+    const double *p = view(x);
+    double *g = static_cast<double *>(grad_out->dl_tensor.data);
+    for (int i = 0; i < kDim; i++) {
+        g[i] = 2.0 * p[i] + 20.0 * kPi * std::sin(2.0 * kPi * p[i]);
+    }
+    return anneal::ANNEAL_SUCCESS;
+}
+
+}  // namespace
+
+int main() {
+    std::array<double, kDim> start{3.0, -2.0};
+    std::array<double, kDim> low{-5.12, -5.12};
+    std::array<double, kDim> high{5.12, 5.12};
+    std::array<int64_t, 1> shape{kDim};
+    std::array<int64_t, 1> strides{1};
+
+    DLManagedTensorVersioned x{};
+    x.version.major = DLPACK_MAJOR_VERSION;
+    x.version.minor = DLPACK_MINOR_VERSION;
+    x.dl_tensor.data = start.data();
+    x.dl_tensor.device.device_type = kDLCPU;
+    x.dl_tensor.ndim = 1;
+    x.dl_tensor.dtype.code = kDLFloat;
+    x.dl_tensor.dtype.bits = 64;
+    x.dl_tensor.dtype.lanes = 1;
+    x.dl_tensor.shape = shape.data();
+    x.dl_tensor.strides = strides.data();
+
+    anneal::anneal_box_config_t cfg{};
+    anneal::anneal_box_config_default(&cfg);
+    cfg.seed = 7;
+    cfg.budget = 600;
+
+    anneal::anneal_box_report_t report{};
+    auto status = anneal::anneal_box_minimize(eval, grad, nullptr, &x, low.data(),
+                                              high.data(), &cfg, &report);
+    if (status != anneal::ANNEAL_SUCCESS) {
+        std::fprintf(stderr, "anneal %s: %s\n", anneal::version(),
+                     anneal::anneal_last_error());
+        return 1;
+    }
+    std::printf("value %.6f at (%.4f, %.4f)\n", report.value, start[0], start[1]);
+    return 0;
+}
+#+END_SRC
