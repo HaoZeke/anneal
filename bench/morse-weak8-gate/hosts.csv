@@ -1,0 +1,2 @@
+host_id,cpu_model,logical_cpus,mem_total_kb,arch,kernel_release,os_release
+417ad3ecfabd2aa8,Intel(R) Xeon(R) Processor,8,49342816,x86_64,6.12.113+,Ubuntu 24.04.5 LTS
