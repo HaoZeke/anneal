@@ -81,8 +81,8 @@ def cmake_cache() -> str:
     return "\n".join(
         [
             "// comment",
-            "CMAKE_CXX_COMPILER_LAUNCHER:STRING=ccache",
-            "CMAKE_C_COMPILER_LAUNCHER:STRING=ccache",
+            "CMAKE_CXX_COMPILER_LAUNCHER:UNINITIALIZED=ccache",
+            "CMAKE_C_COMPILER_LAUNCHER:UNINITIALIZED=ccache",
             "CMAKE_BUILD_TYPE:STRING=Release",
             "RGPOT_BUILD_TESTS:BOOL=ON",
             "RGPOT_BUILD_EXAMPLES:BOOL=OFF",
@@ -125,6 +125,17 @@ def build_fixture(directory: Path) -> tuple[Path, Path, Path]:
     write(directory / "hidden-options.json", json.dumps(meson_options()))
     write(directory / "hidden-ctest.log", ctest_log())
     write(directory / "hidden-cache.txt", cmake_cache())
+    write(
+        directory / "hidden-cmake-setup.log",
+        "\n".join(
+            [
+                "-- The Fortran compiler identification is GNU 13.3.0",
+                "-- Check for working Fortran compiler: /opt/secret/gfortran - skipped",
+                "-- Performing Test RGPOT_MPI_COMPILES - Failed",
+                "",
+            ]
+        ),
+    )
     meson_leg = {
         "title": "Meson, RPC and cache enabled",
         "runner": "meson",
@@ -173,6 +184,7 @@ def build_fixture(directory: Path) -> tuple[Path, Path, Path]:
         "test": ["ctest", "--test-dir", "build/cmake-on", "--output-on-failure"],
         "log": "hidden-ctest.log",
         "configured": "hidden-cache.txt",
+        "setup_log": "hidden-cmake-setup.log",
     }
     meson_path = directory / "meson-leg.json"
     cmake_path = directory / "cmake-leg.json"
@@ -276,6 +288,7 @@ def main() -> None:
         require("|with_ipi|auto|enabled|" in text, "i-PI resolution was dropped")
         require("/opt/secret" not in text, "note leaked a setup-log path")
         require("|RGPOT_WITH_RPC|ON|" in text, "cmake cache value was dropped")
+        require("|RGPOT_HAVE_MPI|OFF|" in text and "|Fortran|GNU 13.3.0|" in text, "cmake detection was dropped")
         require("hidden-meson.log" not in text and "hidden-ctest.log" not in text, "note leaked a log path")
         require("/usr/bin" not in text and str(directory) not in text, "note leaked a filesystem path")
         require("These counts are environment-specific." in text, "counts are not labeled environment-specific")
