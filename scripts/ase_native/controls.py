@@ -31,6 +31,7 @@ from mapping import (  # noqa: E402
     ARMIJO,
     ASE_RELAX_STEPS,
     LBFGS_MEMORY,
+    LINE_SEARCH_EVALS,
     MD_MINIMA,
     WOLFE_CURVATURE,
     basin_dr,
@@ -122,14 +123,35 @@ def make_local_optimizer(length_scale: float):
                 return False
 
         def line_search(self, r, g, e):
+            if not np.isfinite(g).all() or not np.isfinite(self.p).all():
+                raise RuntimeError("LineSearch failed!")
             p_size = float(np.sqrt((self.p**2).sum()))
             floor = float(np.sqrt(self.optimizable.ndofs() / 3 * 1e-10))
             if p_size <= floor:
                 self.p /= p_size / floor
+            probes = {"n": 0}
+
+            def func(x):
+                probes["n"] += 1
+                if probes["n"] > LINE_SEARCH_EVALS or not np.isfinite(x).all():
+                    raise RuntimeError("LineSearch failed!")
+                value = self.func(x)
+                if not np.isfinite(value):
+                    raise RuntimeError("LineSearch failed!")
+                return value
+
+            def fprime(x):
+                if not np.isfinite(x).all():
+                    raise RuntimeError("LineSearch failed!")
+                grad = self.fprime(x)
+                if not np.isfinite(grad).all():
+                    raise RuntimeError("LineSearch failed!")
+                return grad
+
             search = LineSearch(get_gradient_norm=self.optimizable.gradient_norm)
             self.alpha_k, _energy, self.e0, self.no_update = search._line_search(
-                self.func,
-                self.fprime,
+                func,
+                fprime,
                 r,
                 self.p,
                 g,
@@ -140,7 +162,7 @@ def make_local_optimizer(length_scale: float):
                 c2=WOLFE_CURVATURE,
                 stpmax=50.0,
             )
-            if self.alpha_k is None:
+            if self.alpha_k is None or not np.isfinite(self.alpha_k):
                 raise RuntimeError("LineSearch failed!")
 
     MatchedLBFGS.__name__ = "MatchedLBFGS"

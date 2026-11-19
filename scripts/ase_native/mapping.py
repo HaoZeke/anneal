@@ -57,6 +57,10 @@ controls they replace:
                                        as the inverse-Hessian diagonal,
                                        and rgmin's inverse_curvature is 1
     c1 = 1e-4, c2 = 0.9                Armijo and Wolfe curvature
+    line_search_evals = 40             twice WarmLbfgs max_line_evals, the
+                                       rgmin total cap. ASE's search has
+                                       no cap; past 40 probes the direction
+                                       is abandoned and that quench ends.
     relax_steps = 200                  anneal's WarmLbfgs iteration cap
     maxstep = min(1, length_scale)     per-atom Euclidean cap. ASE's
                                        LBFGS rejects a cap above 1 angstrom.
@@ -141,6 +145,12 @@ ASE_RELAX_STEPS = 4000
 LBFGS_MEMORY = 8
 ARMIJO = 1.0e-4
 WOLFE_CURVATURE = 0.9
+# rgmin stops a bracket after max_line_evals probes and the whole search
+# after twice that. ASE's More-Thuente loop has no cap and does not return
+# on a non-finite step, so the same total is enforced here. Past it, the
+# direction is abandoned and the quench ends.
+MAX_LINE_EVALS = 20
+LINE_SEARCH_EVALS = 2 * MAX_LINE_EVALS
 INVERSE_CURVATURE = 1.0
 ASE_MAXSTEP_CEILING = 1.0
 MD_TIMESTEP = 0.005
