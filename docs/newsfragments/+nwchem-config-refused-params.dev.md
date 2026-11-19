@@ -1,0 +1,1 @@
+`NWChemPotMessageAbiTest` now counts `nwchemc_set_params` calls through `nwchemc_fake_engine` and pins `NWChemPot::setPotentialConfig` across initial parameter refusal, repeated refusal, applied parameters, `none`, and unhandled configuration arms.

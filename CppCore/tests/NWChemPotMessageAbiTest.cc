@@ -76,6 +76,17 @@ struct RejectParamsGuard {
   RejectParamsGuard &operator=(const RejectParamsGuard &) = delete;
 };
 
+std::string configured_engine_path() {
+  const char *names[] = {"NWCHEMC_LIBRARY", "RGPOT_NWCHEMC_ENGINE",
+                         "RGPOT_NWCHEM_ENGINE"};
+  for (const char *name : names) {
+    if (const char *value = std::getenv(name); value && *value) {
+      return value;
+    }
+  }
+  return {};
+}
+
 } // namespace
 
 TEST_CASE("NWChemPot passes serialized NWChemParams to nwchemc engine",
@@ -220,4 +231,102 @@ TEST_CASE("NWChemPot reports a missing engine in setPotentialConfig",
   REQUIRE(result == "rgpot params nwchem arm failed (engine not loaded): "
                     "basis=6-31g theory=dft scfType=rhf charge=0 mult=1 "
                     "enginePath=/nonexistent/libnwchemc.so");
+}
+
+// NWChemPot has no session handle: available() checks only that libnwchemc
+// loaded with nwchemc_energy_gradient and nwchemc_set_params, and setParams
+// keeps both when nwchemc_set_params returns nonzero.
+TEST_CASE("NWChemPot setPotentialConfig distinguishes missing engine from "
+          "refused params",
+          "[nwchem][abi]") {
+  const std::string engine_path = configured_engine_path();
+  if (engine_path.empty()) {
+    SKIP("explicit nwchemc engine path not set in environment");
+  }
+
+  rgpot::DynLib lib(engine_path);
+  using VersionFn = const char *(*)(void);
+  using CountFn = int (*)(void);
+  auto version = lib.sym_optional<VersionFn>("nwchemc_version");
+  auto reject_params = lib.sym_optional<RejectParamsGuard::RejectParamsFn>(
+      "nwchemc_fake_reject_params");
+  auto set_params_count =
+      lib.sym_optional<CountFn>("nwchemc_fake_set_params_count");
+  const bool is_fake =
+      version && std::string(version()).rfind("nwchemc-fake/", 0) == 0;
+  if (is_fake) {
+    REQUIRE(reject_params != nullptr);
+    REQUIRE(set_params_count != nullptr);
+  } else if (!reject_params || !set_params_count) {
+    SKIP("real libnwchemc does not expose fake refusal controls");
+  }
+  reject_params(0);
+
+  RestoreEnv nwchem_library("NWCHEMC_LIBRARY");
+  RestoreEnv nwchemc_engine("RGPOT_NWCHEMC_ENGINE");
+  RestoreEnv nwchem_engine("RGPOT_NWCHEM_ENGINE");
+  nwchem_library.clear();
+  nwchemc_engine.clear();
+  nwchem_engine.clear();
+
+  rgpot::NWChemPot pot;
+  if (pot.available()) {
+    SKIP("default libnwchemc on loader search path masks missing engine path");
+  }
+
+  ::capnp::MallocMessageBuilder cfg_msg;
+  auto cfg = cfg_msg.initRoot<::PotentialConfig>();
+  auto nw = cfg.initNwchem();
+  nw.setBasis("6-31g");
+  nw.setTheory("dft");
+  nw.setScfType("blyp");
+  nw.setCharge(-1);
+  nw.setMultiplicity(2);
+  nw.setEnginePath("/nonexistent/libnwchemc.so");
+
+  const int before = set_params_count();
+  std::string message;
+  REQUIRE_FALSE(pot.setPotentialConfig(cfg.asReader(), &message));
+  REQUIRE_FALSE(pot.available());
+  REQUIRE(set_params_count() == before);
+  REQUIRE(message == "rgpot params nwchem arm failed (engine not loaded): "
+                     "basis=6-31g theory=dft scfType=blyp charge=-1 mult=2 "
+                     "enginePath=/nonexistent/libnwchemc.so");
+
+  const std::string summary =
+      "basis=6-31g theory=dft scfType=blyp charge=-1 mult=2 enginePath=" +
+      engine_path;
+  nw.setEnginePath(engine_path);
+  {
+    RejectParamsGuard reject_guard(reject_params);
+    REQUIRE_FALSE(pot.setPotentialConfig(cfg.asReader(), &message));
+    REQUIRE(pot.available());
+    REQUIRE(set_params_count() == before + 1);
+    REQUIRE(message == "rgpot params nwchem arm rejected by embed: " + summary);
+
+    REQUIRE_FALSE(pot.setPotentialConfig(cfg.asReader(), &message));
+    REQUIRE(pot.available());
+    REQUIRE(set_params_count() == before + 2);
+    REQUIRE(message == "rgpot params nwchem arm rejected by embed: " + summary);
+  }
+
+  REQUIRE(pot.setPotentialConfig(cfg.asReader(), &message));
+  REQUIRE(pot.available());
+  REQUIRE(set_params_count() == before + 3);
+  REQUIRE(message == "rgpot params applied (nwchem arm): " + summary);
+
+  ::capnp::MallocMessageBuilder none_msg;
+  auto none_cfg = none_msg.initRoot<::PotentialConfig>();
+  none_cfg.setNone();
+  REQUIRE(pot.setPotentialConfig(none_cfg.asReader(), &message));
+  REQUIRE(set_params_count() == before + 3);
+  REQUIRE(message == "no-op (rgpot params: none)");
+
+  ::capnp::MallocMessageBuilder cpmd_msg;
+  auto cpmd_cfg = cpmd_msg.initRoot<::PotentialConfig>();
+  cpmd_cfg.initCpmd();
+  REQUIRE_FALSE(pot.setPotentialConfig(cpmd_cfg.asReader(), &message));
+  REQUIRE(set_params_count() == before + 3);
+  REQUIRE(message == "rgpot params arm cpmd not handled by NWChemPot "
+                     "(use matching backend pot)");
 }
