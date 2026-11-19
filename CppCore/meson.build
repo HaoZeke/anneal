@@ -556,7 +556,10 @@ if not get_option('with_rpc_client_only')
     # (rgpot/engine/EngineTable.cc) and a small backend file each. The UMA,
     # Metatomic and XTB engines add the same table to their own libraries.
     if _rpc_stack and host_system != 'windows'
-        _engine_common = files('rgpot/engine/EngineTable.cc')
+        _engine_common = [
+            engine_abi_stamp_source,
+            files('rgpot/engine/EngineTable.cc'),
+        ]
         _engine_args = _args + [
             '-DRGPOT_ENGINE_BUILD',
             '-DRGPOT_ENGINE_PROJECT_VERSION="@0@"'.format(
@@ -2336,7 +2339,11 @@ if get_option('with_tests')
             # no torch.
             engine_stub = shared_library(
                 'engine_stub',
-                ['tests/engine_stub.cc', 'rgpot/engine/EngineTable.cc'],
+                [
+                    'tests/engine_stub.cc',
+                    'rgpot/engine/EngineTable.cc',
+                    engine_abi_stamp_source,
+                ],
                 include_directories: _incdirs + ['.'],
                 cpp_args: test_args + [
                     '-DRGPOT_ENGINE_PROJECT_VERSION="@0@"'.format(

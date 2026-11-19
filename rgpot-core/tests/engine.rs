@@ -87,6 +87,32 @@ fn load(path: &Path) -> EnginePotential {
     unsafe { EnginePotential::load(path, &config()) }.expect("load the harmonic engine")
 }
 
+#[test]
+fn configured_external_engine_reaches_create_after_the_abi_check() {
+    let Some(path) = std::env::var_os("RGPOT_TEST_ENGINE") else {
+        return;
+    };
+    assert_eq!(
+        RgpotEngineAbiStamp::HOST,
+        RgpotEngineAbiStamp {
+            abi_major: 1,
+            abi_minor: 4,
+            layout_revision: 1,
+        }
+    );
+    match unsafe { EnginePotential::load(Path::new(&path), &[]) } {
+        Err(EngineError::Create(_)) => {}
+        Err(error) => panic!(
+            "rgpot host rejected {} before create: {error}",
+            Path::new(&path).display()
+        ),
+        Ok(_) => panic!(
+            "{} accepted an empty configuration",
+            Path::new(&path).display()
+        ),
+    }
+}
+
 fn destroyed(path: &Path) -> c_int {
     let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
     let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =

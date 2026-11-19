@@ -22,6 +22,7 @@ if _rpc_stack
             'UmaPot.cc',
             'UmaEngineAbi.cc',
             '../engine/EngineTable.cc',
+            engine_abi_stamp_source,
         ],
         # ptlrpc_dep carries the generated Potentials.capnp.h include
         # view plus the schema TU objects (final-binary rule: a plugin
