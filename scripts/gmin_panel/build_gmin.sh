@@ -11,6 +11,11 @@ SRC=$WORK/gmin-src
 TARBALL=$WORK/svn.tar.bz2
 URL=http://www-wales.ch.cam.ac.uk/svn.tar.bz2
 REV=aac1548a8aec13b53ad12a8d6904625081685d2e
+# GMIN_EXPECT_REV overrides the pinned panel revision when the public
+# image has moved. GMIN_TARBALL_SHA256, when set, is checked before the
+# tree is used. GMIN_PANEL_EXTRA_PATCHES is a colon-separated list of
+# patch files applied after the panel patches.
+EXPECT=${GMIN_EXPECT_REV:-$REV}
 PATCHES=(
   "$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch"
   "$ROOT/scripts/morse_h2h/morse-timer.patch"
@@ -35,14 +40,32 @@ if [[ ! -f $SRC/wales/GMIN/source/SVNREV ]]; then
     ./wales/HiRE
 fi
 
+if [[ -n ${GMIN_TARBALL_SHA256:-} ]]; then
+  gotsha=$(sha256sum "$TARBALL" | cut -d' ' -f1)
+  if [[ $gotsha != "$GMIN_TARBALL_SHA256" ]]; then
+    echo "tarball sha256 is $gotsha, expected $GMIN_TARBALL_SHA256" >&2
+    exit 1
+  fi
+fi
+
 got=$(tr -d '[:space:]' < "$SRC/wales/GMIN/source/SVNREV")
-if [[ $got != "$REV" ]]; then
-  echo "GMIN SVNREV is $got, expected $REV" >&2
+if [[ $got != "$EXPECT" ]]; then
+  echo "GMIN SVNREV is $got, expected $EXPECT" >&2
   exit 1
 fi
 
 if [[ ! -f $SRC/wales/GMIN/source/h2h_cap.f90 ]]; then
   for patch in "${PATCHES[@]}"; do
+    patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$patch"
+  done
+fi
+
+if [[ -n ${GMIN_PANEL_EXTRA_PATCHES:-} ]]; then
+  IFS=':' read -r -a extra <<< "$GMIN_PANEL_EXTRA_PATCHES"
+  for patch in "${extra[@]}"; do
+    if [[ $patch == *newtip* ]] && grep -q H2H_POT_ENTER "$SRC/wales/GMIN/source/newtip.f90"; then
+      continue
+    fi
     patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$patch"
   done
 fi
@@ -68,7 +91,8 @@ fi
 
 {
   echo "url=$URL"
-  echo "revision=$REV"
+  echo "revision=$got"
+  echo "panel_revision=$REV"
   echo "svnrev=$got"
   echo "tarball_sha256=$(sha256sum "$TARBALL" | cut -d' ' -f1)"
   for patch in "${PATCHES[@]}"; do
@@ -79,4 +103,4 @@ fi
   echo "linked=$(ldd "$WORK/bin/GMIN" | awk '/blas|lapack/ {print $3}' | xargs -r readlink -f | paste -sd' ' -)"
   echo "binary_sha256=$(sha256sum "$WORK/bin/GMIN" | cut -d' ' -f1)"
 } > "$WORK/gmin-source.txt"
-echo "gmin url=$URL revision=$REV binary=$WORK/bin/GMIN"
+echo "gmin url=$URL revision=$got binary=$WORK/bin/GMIN"
