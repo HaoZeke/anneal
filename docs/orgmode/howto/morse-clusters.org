@@ -7,15 +7,24 @@
 A Morse pair has its minimum at 1, at every range.
 On reduced units, every length in the preset is 12% too wide for Morse.
 
-Pass the pair's own length scale instead:
+To search in the pair's own length scale, which is opt-in and not the default:
 
 #+begin_src rust
 use anneal_core::methods::cluster_hopping::Config;
 use anneal_core::potentials::PairPotential;
 
 let pot = PairPotential::morse(43, 6.0);
-let cfg = Config::recommended_with_scales(43, pot.kind().length_scale(), 1.0);
+let cfg = Config::recommended_for_pair(43, pot.kind());
+let same = Config::recommended_with_scales(43, pot.kind().length_scale(), 1.0);
+assert_eq!(cfg.resolved_json().unwrap(), same.resolved_json().unwrap());
 #+end_src
+
+=recommended_for_pair= is =recommended_with_scales= at that length and a unit depth.
+Lennard-Jones resolves to the same configuration as =recommended=.
+
+The measurements below are at rho = 6.
+On short-range Morse (rho = 14) a serial test of the pair scale found the minimum less often than the default did, so the pair scale is not a free improvement.
+Check the range of your pair before adopting it.
 
 =PairKind::length_scale= is =r_min / 2^(1/6)=: 1 for Lennard-Jones and 0.891 for Morse.
 

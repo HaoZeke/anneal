@@ -1,0 +1,4 @@
+``Config::plateau_heat`` doubles the Metropolis temperature, and the lattice-exchange temperature, on each escape plateau, up to four times the preset.
+A new lowest minimum returns both to the preset, and the proposal step stays the configured length.
+It is off by default and is left out of the resolved configuration while off, so a stock preset keeps its digest.
+``h2h_gmin_proof``, ``h2h_morse`` and ``h2h_metal`` turn it on when ``H2H_PLATEAU_HEAT=1`` is set.

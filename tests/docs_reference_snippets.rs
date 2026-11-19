@@ -91,3 +91,28 @@ fn binary_lennard_jones_evaluates() {
     assert!(e.is_finite() && g.len() == 15);
     let _ = <BinaryLennardJones as DifferentiableObjective<f64>>::value_and_gradient;
 }
+
+#[test]
+fn recommended_for_pair_scales_morse_and_keeps_lennard_jones() {
+    use anneal_core::methods::cluster_hopping::Config;
+    use anneal_core::potentials::PairKind;
+    let lj = Config::recommended_for_pair(13, PairKind::LennardJones);
+    assert_eq!(
+        lj.resolved_json().unwrap(),
+        Config::recommended(13).resolved_json().unwrap()
+    );
+    let morse = Config::recommended_for_pair(13, PairKind::Morse { rho: 6.0 });
+    assert_eq!(morse.energy_scale, 1.0);
+    assert!((morse.length_scale - 2.0_f64.powf(-1.0 / 6.0)).abs() < 1e-15);
+}
+
+#[test]
+fn plateau_heat_is_off_and_leaves_the_digest_alone() {
+    use anneal_core::methods::cluster_hopping::Config;
+    let stock = Config::recommended(38);
+    assert!(!stock.plateau_heat);
+    assert!(!stock.resolved_json().unwrap().contains("plateau_heat"));
+    let mut cfg = stock.clone();
+    cfg.plateau_heat = true;
+    assert!(cfg.resolved_json().unwrap().contains("plateau_heat"));
+}

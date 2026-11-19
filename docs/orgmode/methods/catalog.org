@@ -61,7 +61,7 @@ inverse-gamma =a0 = b0 = 1e-3= (src/screen.rs:115-118). Config-side knobs:
 (src/methods/cluster_hopping/config.rs:794, 962, 964, 966).
 =Config::derived= switches the screen on and sets =bayes_threshold=
 from =cost_asymmetric_threshold(screen_steps, relax_steps)=
-(src/methods/cluster_hopping/config.rs:1978-1985).
+(src/methods/cluster_hopping/config.rs:2003-2010).
 
 Feeds/consumes: gates whether a trial proceeds to full relaxation inside
 the hop loop; independent of, and switchable alongside, the quench
@@ -80,7 +80,7 @@ Key types and functions: config flags =return_screen=, =return_polish=,
 Constants and defaults: measured separation on a shape distance after a
 partial relaxation, returns vs. escapes: 0.160 vs. 1.846, 97% of pairs
 ordered correctly at thirty iterations (config.rs:1056-1062). On by
-default in =Config::recommended= (src/methods/cluster_hopping/config.rs:1778).
+default in =Config::recommended= (src/methods/cluster_hopping/config.rs:1786).
 
 Feeds/consumes: complements the Bayesian screen; both exist to spend
 charged evaluations only where they are likely to pay.
@@ -107,9 +107,9 @@ stops descending (=finish_improving=). Only a converged structure is
 recorded, and on TIP4P20 at 80 steps a 3e5-call run converged 70 of its
 13329 relaxations, screens included, so at most 70 of its 832 full ones.
 
-Key types and functions: =ScreenDescent= (src/methods/cluster_hopping.rs:3726)
+Key types and functions: =ScreenDescent= (src/methods/cluster_hopping.rs:3731)
 with =observe=, =allowance= and =audit=; =finish_improving=
-(src/methods/cluster_hopping.rs:3774); config flags =calibrated_screen=
+(src/methods/cluster_hopping.rs:3779); config flags =calibrated_screen=
 and =finish_improving= (src/methods/cluster_hopping/config.rs:1188, 1197),
 both on in =Config::with_scales= and so in every preset.
 
@@ -296,7 +296,7 @@ density-of-states tool (src/dos.rs:3-7).
 
 Feeds/consumes: an alternative/complementary acceptance and deposit
 target to =BasinBias=, wired into the same hop loop
-(src/methods/cluster_hopping.rs:8281-8345 region shows the deposit and
+(src/methods/cluster_hopping.rs:8299-8363 region shows the deposit and
 sweep-refresh logic inline). On a replica ladder under
 =statistical_temperature= only the rungs at ratio one feed
 =DensityOfStates=, the coldest rung alone unless the ladder is flat,
@@ -349,6 +349,12 @@ stopped improving, each answering a different way of being stuck.
   dominated (=ih_dominated=, src/soap.rs:1449), so the mechanism never
   invents a packing the observed cloud does not have.
   The hop passes =SoapSpec::at_length(length_scale)=, so the 555 test bonds the first shell at the preset's own length.
+- Plateau heat (=plateau_heat=, config.rs:1290; =PLATEAU_HEAT_CAP=,
+  src/methods/cluster_hopping.rs:2583): doubles the Metropolis temperature
+  and the lattice-exchange temperature on each escape plateau, to at most
+  four times the preset, and returns both to the preset when a new lowest
+  minimum is recorded. The proposal step stays the configured length.
+  Off by default, so a stock preset keeps its digest.
 - Funnel tracking (=track_funnels=, config.rs:635; src/funnel_spectral.rs):
   builds a transition graph on accepted hops keyed by basin identity;
   =Partition= (src/funnel_spectral.rs:43) and =FunnelSpectrum=
@@ -438,7 +444,7 @@ Feeds/consumes: consumes =crate::curvature::curvature_features= for
 the Lanczos mode and shares the perpendicular-projection convention
 with =crate::path= (activation.rs:46-48); called from
 =cluster_hopping='s soft-mode-climb stall response
-(cluster_hopping.rs:9195-9222), documented as a black-box call
+(cluster_hopping.rs:9213-9240), documented as a black-box call
 site under [[file:catalog.org::*Stall escapes][stall escapes]] above
 ("Soft-mode climb ... Escalates over =minima_hopping='s always-on
 scaled move"); this section documents the climb mechanism itself.
@@ -494,11 +500,11 @@ prices itself out of the budget is not escalation" (minima_hopping.rs:801-806).
 
 Feeds/consumes: constructed and driven by
 =cluster_hopping::run_with_gradient= (=EscapeFeedback::new= at
-cluster_hopping.rs:3890; the driver feeds it through
-=observe_driver_local= and =observe_shared= at 4712-4817 and 7998-8041,
-=feedback.escape()= scales the library move at 6820 and the soft-mode
-climb's overshoot at 9205-9215, and =feedback.accept= gates uphill
-trials at 8024 and 8041), documented as a
+cluster_hopping.rs:3895; the driver feeds it through
+=observe_driver_local= and =observe_shared= at 4717-4822 and 8016-8059,
+=feedback.escape()= scales the library move at 6838 and the soft-mode
+climb's overshoot at 9223-9233, and =feedback.accept= gates uphill
+trials at 8042 and 8059), documented as a
 black-box call site under
 [[file:catalog.org::*Stall escapes][stall escapes]] above; this
 section documents the feedback mechanism itself.
@@ -544,8 +550,8 @@ Key types and functions: =BudgetWindowTemperature= (src/allocate.rs:34).
 
 Constants and defaults: config knob =theta= (must lie strictly below 2),
 =budget_window= toggle (config.rs:441/454). The default is
-=theta = 0.5=, the midpoint of the descent window (config.rs:2111), and
-=Config::derived= switches =budget_window= on (config.rs:1978-1985).
+=theta = 0.5=, the midpoint of the descent window (config.rs:2136), and
+=Config::derived= switches =budget_window= on (config.rs:2003-2010).
 
 Feeds/consumes: replaces the fixed =temperature= field when enabled; the
 gap is measured against the incumbent and the barrier estimated from
@@ -593,7 +599,7 @@ Key types and functions: =DepthAllocator= (src/allocate.rs:782).
 Constants and defaults: config knob =depth_reward= (config.rs:863-866);
 weakly informative prior =kappa = 1e-6=, =alpha = beta = 1.0=
 (src/allocate.rs:824-826). On by default in =Config::recommended=
-(config.rs:1778).
+(config.rs:1786).
 
 Feeds/consumes: alternative reward signal for the same arm-selection
 slot =FlooredThompson= occupies; selected instead of it when
@@ -674,7 +680,7 @@ Key types and functions: =crate::delayed::Surrogate= and its
 =predict_at= method (src/delayed.rs).
 
 Constants and defaults: config knobs =delayed_acceptance=,
-=surrogate_tolerance= (config.rs:1293-1297).
+=surrogate_tolerance= (config.rs:1301-1305).
 
 Feeds/consumes: an alternative to the plain screen for the
 acceptance-uncertainty tradeoff, generalizing what the screen was

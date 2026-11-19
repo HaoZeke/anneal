@@ -1,0 +1,3 @@
+``gmin_losses2`` compares the parent preset, this tree with Morse lengths on the pair minimum, and GMIN.
+Its rows and summary go under ``/work`` or ``$OUTPUT``, and its Snakemake rule declares a stamp there, so a rerun cannot delete a tracked table.
+``scripts/gmin_panel/run_panel.py`` takes optional environment overrides and a shared start path, and callers that pass neither keep the preset environment and draw.

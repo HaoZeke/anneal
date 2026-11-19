@@ -6,7 +6,7 @@ each mechanism from [[file:catalog.org][catalog.org]] as it appears. The walk fo
 (examples/lj_cluster_search.rs:4028-6730), which runs one replica of the
 =catalog= mode against
 =anneal_core::methods::cluster_hopping::run_with_bias_at_checkpoints=
-(src/methods/cluster_hopping.rs:2786).
+(src/methods/cluster_hopping.rs:2791).
 
 * Start: configuration and identity
 
@@ -37,7 +37,7 @@ default) (examples/lj_cluster_search.rs:4313-4323).
 
 * The hop loop
 
-=run_with_bias_at_checkpoints= (src/methods/cluster_hopping.rs:2786)
+=run_with_bias_at_checkpoints= (src/methods/cluster_hopping.rs:2791)
 drives the ordinary perturb-quench chain against a =BasinBias= keyed on
 =ClusterFingerprint= (examples/lj_cluster_search.rs:4532-4537), calling
 back into the closure below every =checkpoint_interval= charged
@@ -200,7 +200,7 @@ gated.
 Separately from the checkpoint cadence, =Config.polish_records= extends
 the relaxation of any trial that improves the run's *record* (not every
 hop) to the shared-catalog convergence tolerance
-(src/methods/cluster_hopping/config.rs:1283-1292). This bounds the extra
+(src/methods/cluster_hopping/config.rs:1291-1300). This bounds the extra
 cost to the number of record improvements -- a few hundred evaluations
 each over tens of events across a campaign budget -- rather than paying
 full precision on every accepted hop. Only states polished to this
