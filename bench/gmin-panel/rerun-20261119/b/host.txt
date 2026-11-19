@@ -1,0 +1,2 @@
+machine_id_sha256=3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873
+applies_to=every row in rows.csv and host.csv
