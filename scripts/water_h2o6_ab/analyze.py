@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Tables for the water hexamer code-only A/B.
 
-Reads runs.csv and crest_frames.csv written by run_ab.py and prints, as
-markdown, the hits and timings of A against B for every arm with Fisher exact
-tests on the hits and Mann-Whitney tests on calls and times, the seeds where A
-and B disagree on a CREST hit, and the sensitivity of the CREST hits to the
-gate, to the reference set and to the hit rule.
+Reads runs.csv written by run_ab.py and the frame table crest_frames.csv, and
+prints, as markdown, the hits and timings of A against B for every arm with
+Fisher exact tests on the hits and Mann-Whitney tests on calls and times, the
+seeds where A and B disagree on a CREST hit, and the sensitivity of the CREST
+hits to the gate, to the reference set and to the hit rule.
+
+The frame table is large and is kept outside git. It is read through
+external_manifest.csv from a local directory that holds the files named in the
+manifest; the sha256 of the file is checked first. A session that has no
+manifest yet can point at the frame table directly.
 """
 import argparse
 import csv
@@ -17,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 from scipy import stats
+
+import external
 
 ARMS = ("anneal", "polish_fair", "crest", "crest_fair")
 CODES = ("A", "B")
@@ -31,9 +38,23 @@ def number(text):
         return None
 
 
+FRAMES_FILE = "crest_frames.csv"
+
+
 def load(path):
     with open(path, newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def load_frames(args):
+    if args.manifest:
+        if not args.external_dir:
+            raise external.ExternalError("--manifest needs --external-dir")
+        manifest = external.read_manifest(args.manifest)
+        return external.load_rows(manifest, FRAMES_FILE, args.external_dir)
+    if args.frames:
+        return load(args.frames)
+    raise external.ExternalError("give --manifest and --external-dir, or --frames")
 
 
 def median(values):
@@ -493,14 +514,20 @@ def old_receipts_section(directory, frames, gate_new):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", required=True)
-    parser.add_argument("--frames", required=True)
+    parser.add_argument("--manifest", help="external_manifest.csv that lists the frame table")
+    parser.add_argument("--external-dir", help="local directory with the files named in the manifest")
+    parser.add_argument("--frames", help="frame table written by run_ab.py, for a session without a manifest")
     parser.add_argument("--reference-energy", type=float,
                         help="energy of the prism minimum at the level of the engine, eV")
     parser.add_argument("--old-perseed", help="per-seed table of the earlier record")
     parser.add_argument("--old-receipts", help="directory with the per-seed CREST receipts of the earlier record")
     args = parser.parse_args()
     runs = load(args.runs)
-    frames = load(args.frames)
+    try:
+        frames = load_frames(args)
+    except external.ExternalError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     grouped = by_arm_code(runs)
     seeds = sorted({int(r["seed"]) for r in runs})
     gate_values = {number(r["gate_A"]) for r in runs if number(r["gate_A"]) is not None}

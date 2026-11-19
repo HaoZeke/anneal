@@ -7,17 +7,40 @@ frame source and reference variant: how many references were loaded, the gate,
 how many runs have a frame inside the gate, how many frames are inside the
 gate, how often the two builds disagree on a frame, and how often the other
 reference orderings disagree with the ordering of the A/B on a frame.
+
+The frame tables are kept outside git. With --manifest and --external-dir the
+table of a directory that the manifest lists is read from the local directory
+after its sha256 is checked; a directory that the manifest does not list is
+read in place if it has a table.
 """
 import argparse
 import csv
 import statistics
+import sys
 from collections import defaultdict
 from pathlib import Path
+
+import external
 
 
 def load(path):
     with open(path, newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def frames_of(directory, manifest, manifest_path, external_dir):
+    if manifest is not None:
+        try:
+            relative = Path(directory).resolve().relative_to(Path(manifest_path).resolve().parent)
+        except ValueError:
+            relative = None
+        name = f"{relative.as_posix()}/controls_frames.csv" if relative is not None else None
+        if name in manifest:
+            if not external_dir:
+                raise external.ExternalError("--manifest needs --external-dir")
+            return external.load_rows(manifest, name, external_dir)
+    path = Path(directory) / "controls_frames.csv"
+    return load(path) if path.exists() else []
 
 
 def number(text):
@@ -147,13 +170,18 @@ def ordering_section(frames):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directories", nargs="+")
+    parser.add_argument("--manifest", help="external_manifest.csv that lists the frame tables")
+    parser.add_argument("--external-dir", help="local directory with the files named in the manifest")
     args = parser.parse_args()
+    manifest = external.read_manifest(args.manifest) if args.manifest else None
     runs, frames = [], []
-    for directory in args.directories:
-        runs += load(Path(directory) / "controls_runs.csv")
-        path = Path(directory) / "controls_frames.csv"
-        if path.exists():
-            frames += load(path)
+    try:
+        for directory in args.directories:
+            runs += load(Path(directory) / "controls_runs.csv")
+            frames += frames_of(directory, manifest, args.manifest, args.external_dir)
+    except external.ExternalError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     print("## Control runs\n\n" + runs_section(runs) + "\n")
     if frames:
         print("## Build A against build B on the same frames\n\n" + agreement_section(frames) + "\n")

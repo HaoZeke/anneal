@@ -35,14 +35,19 @@ without frames, `noise-0.3` and `noise-0.6`, have the same table of a header
 line only, and so the same name.
 
 `summary.md` and `controls/summary.md` are regenerated from the files of this
-directory with
+directory and the frame tables of the manifest with, in this directory,
 
 ```
-python scripts/water_h2o6_ab/analyze.py --runs runs.csv --frames crest_frames.csv \
+python scripts/water_h2o6_ab/analyze.py --runs runs.csv --manifest external_manifest.csv \
+    --external-dir <local directory with the published files> \
     --reference-energy -829.852228 --old-perseed ../water_v45b/water-v45b-perseed.csv \
     --old-receipts ../water_v45b/rerun-9a30f319/crest
-python scripts/water_h2o6_ab/analyze_controls.py controls/<directory> [controls/<directory> ...]
+python scripts/water_h2o6_ab/analyze_controls.py --manifest external_manifest.csv \
+    --external-dir <local directory with the published files> controls/<directory> [controls/<directory> ...]
 ```
+
+The scripts check the sha256 of every frame table against the manifest before
+they read it, and stop when a file differs.
 
 The reference energy is the energy written in the comment line of the prism
 file of `../hq_sci_h2o6`; it is used only to count final energies within 1 meV

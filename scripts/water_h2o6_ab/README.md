@@ -22,7 +22,8 @@ engine.
 | `crest_driver.c` | call server and per-call client that give CREST the same engine and the same call budget |
 | `polish.py` | L-BFGS polish of one structure within a fixed number of engine calls |
 | `run_ab.py` | the orchestrator; writes `runs.csv`, `crest_frames.csv`, `inputs.csv`, `meta.json` |
-| `analyze.py` | tables, tests and sensitivity checks from the two CSV files |
+| `analyze.py` | tables, tests and sensitivity checks from `runs.csv` and the frame table |
+| `external.py`, `test_external.py` | manifest of the frame tables that are kept outside git: build it, stage the files under their hashes, verify a local directory, and the tests of the check |
 | `controls.py`, `analyze_controls.py` | controls that rerun only the CREST arm from other start geometries (displaced, packed at random, the isomers themselves), on another engine, and against other reference orderings, and the tables of their results |
 | `sign_check.py`, `preflight.py` | finite-difference check of the buffer sign and the short runs that show why the shim is needed |
 | `a_input_layer.patch` | the input-layer edit of the example driver of A |
@@ -122,6 +123,22 @@ python run_ab.py --binary-a <build A> --binary-b <build B> --engine <engine libr
 python analyze.py --runs <results directory>/runs.csv --frames <results directory>/crest_frames.csv \
     --reference-energy <energy of the prism minimum in eV> \
     --old-perseed <per-seed table of the earlier record> --old-receipts <per-seed CREST receipts of the earlier record>
+```
+
+The frame tables are large and are not kept in git. `external.py build` writes
+`external_manifest.csv` for the frame tables under a results directory, and
+`external.py stage` copies them into a directory under the names
+`<sha256>-<basename>`. Once the manifest is kept, the analysis reads the tables
+through it from a local directory that holds those files, after checking their
+sha256, and refuses a file that differs:
+
+```
+python analyze.py --runs runs.csv --manifest external_manifest.csv --external-dir <local directory> \
+    --reference-energy <energy of the prism minimum in eV> \
+    --old-perseed <per-seed table of the earlier record> --old-receipts <per-seed CREST receipts of the earlier record>
+python analyze_controls.py --manifest external_manifest.csv --external-dir <local directory> controls/<directory> ...
+python external.py verify --manifest external_manifest.csv --directory <local directory>
+python -m unittest test_external
 ```
 
 The shim and the driver are built with `cc -O2 -shared -fPIC engine_shim.c -ldl`
