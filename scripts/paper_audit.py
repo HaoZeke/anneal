@@ -96,10 +96,6 @@ AUDIT_OPTIONAL_REMOTES = (
 # Cited revisions that no remote ref contains, no verified alias covers and no
 # recorded code_tree resolves, each with the reason. The file only explains an
 # unresolved revision: reachability decides which revisions are unresolved.
-# de22f437 records the ASE and GOFEE panel from five campaign heads and sits on
-# the last, e09e0487, alone. The pushed history before it has one commit,
-# 57735de1, that adds the two-hour cap, yet three heads ran capped, so the heads
-# are not its commits one to one.
 UNPUSHED_FILE = "bench/unpushed-revisions.csv"
 # Row groups whose revision column is empty or "unknown", with why each cannot be recovered.
 UNRECORDED_FILE = "bench/unrecorded-revisions.csv"
