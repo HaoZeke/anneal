@@ -13,6 +13,13 @@ meson compile -C bbdir
 meson test -C bbdir --print-errorlogs
 #+end_src
 
+The =pixi= environments supply all build and test tools.
+In a manual toolchain outside =pixi=, the top-level Meson configure tests need
+=ninja=, =pkg-config=, =cmake=, the Python =venv= module, and a Fortran compiler
+(=gfortran= or =flang=) for =fortran_sw_module_order=.
+=eigen_subproject_fallback= also needs network access or a populated
+=subprojects/packagecache= from =meson subprojects download eigen=.
+
 =cmake= works as well.
 CMake's =RGPOT_WITH_CACHE= defaults to =ON= and needs RocksDB, unlike Meson's
 =with_cache=false=, so the command below turns it off.

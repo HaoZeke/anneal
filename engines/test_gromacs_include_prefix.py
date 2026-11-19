@@ -14,8 +14,12 @@ import os
 import subprocess
 import sys
 import tempfile
-import venv
 from pathlib import Path
+
+try:
+    import venv
+except ImportError:
+    venv = None  # type: ignore[assignment]
 
 PARENT = """project('rgpot_parent', 'c', 'cpp')
 subproject(
@@ -32,15 +36,36 @@ subproject(
 """
 
 
+def _meson_argv(argv: list[str]) -> list[str]:
+    if len(argv) == 1 and Path(argv[0]).name.lower().startswith("python"):
+        return [argv[0], "-m", "mesonbuild.mesonmain"]
+    return argv
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 3:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
+    if venv is None:
+        print(
+            "gromacs_include_prefix requires the Python standard library venv module "
+            "(on Debian/Ubuntu, install python3-venv)",
+            file=sys.stderr,
+        )
+        return 2
     root = Path(sys.argv[1]).resolve()
-    meson = sys.argv[2]
+    meson = _meson_argv(sys.argv[2:])
     with tempfile.TemporaryDirectory(prefix="rgpot-gromacs-") as work:
         parent = Path(work)
-        venv.create(parent / ".venv", with_pip=False)
+        try:
+            venv.create(parent / ".venv", with_pip=False)
+        except Exception as exc:
+            print(
+                f"gromacs_include_prefix could not create a Python venv ({exc}); "
+                "ensure python3-venv is installed",
+                file=sys.stderr,
+            )
+            return 1
         py = parent / ".venv" / "bin" / "python"
         prefix = subprocess.check_output(
             [str(py), "-c", "import sys; print(sys.prefix)"],
@@ -55,19 +80,37 @@ def main() -> int:
         env = os.environ.copy()
         env["PATH"] = str(parent / ".venv" / "bin") + os.pathsep + env.get("PATH", "")
         setup = subprocess.run(
-            [meson, "setup", str(parent / "build")],
+            [*meson, "setup", str(parent / "build")],
             cwd=parent,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
         )
-        if setup.returncode != 0 or "absolute path to a dir in the source tree" in setup.stdout:
+        if "absolute path to a dir in the source tree" in setup.stdout:
             print(setup.stdout, file=sys.stderr)
             print(
                 "configure rejected the in-tree Python prefix",
                 file=sys.stderr,
             )
+            return 1
+        if setup.returncode != 0:
+            print(setup.stdout, file=sys.stderr)
+            if "Could not detect Ninja" in setup.stdout:
+                print(
+                    "gromacs_include_prefix requires ninja on PATH or in NINJA",
+                    file=sys.stderr,
+                )
+            elif "Unknown compiler(s)" in setup.stdout:
+                print(
+                    "gromacs_include_prefix requires C and C++ compilers on PATH or in CC/CXX",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "parent project did not configure with the in-tree Python prefix",
+                    file=sys.stderr,
+                )
             return 1
     print("in-tree Python prefix does not fail configure")
     return 0

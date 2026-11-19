@@ -132,7 +132,7 @@ _core_sources = files('bind/bind_module.cpp') + [_nb_combined]
 if _nb_free_threaded
     _nb_cpp_args += ['-DNB_FREE_THREADED']
     message('rgpot python: FREE_THREADED build; stable ABI skipped')
-    py.extension_module(
+    _py_core = py.extension_module(
         '_core',
         sources: _core_sources,
         dependencies: [py_dep, nanobind_dep, dl_dep] + _py_hdr_deps,
@@ -150,7 +150,7 @@ else
     _use_abi3 = py.language_version().version_compare('>=3.12')
     if _use_abi3
         message('rgpot python: STABLE_ABI build (abi3, Py_LIMITED_API=3.12)')
-        py.extension_module(
+        _py_core = py.extension_module(
             '_core',
             sources: _core_sources,
             dependencies: [py_dep, nanobind_dep, dl_dep] + _py_hdr_deps,
@@ -169,7 +169,7 @@ else
         warning(
             'rgpot python: Python < 3.12 — version-specific extension ' + '(stable ABI requires 3.12+)',
         )
-        py.extension_module(
+        _py_core = py.extension_module(
             '_core',
             sources: _core_sources,
             dependencies: [py_dep, nanobind_dep, dl_dep] + _py_hdr_deps,
@@ -197,7 +197,7 @@ py.install_sources(
 )
 # rgpot.ase speaks the schema the server serves: the vendored copy with the
 # rgpot-local series applied.
-custom_target(
+_py_ase_schema = custom_target(
     'ase_effective_schema',
     input: '../CppCore/rgpot/rpc/Potentials.capnp',
     output: 'Potentials.capnp',

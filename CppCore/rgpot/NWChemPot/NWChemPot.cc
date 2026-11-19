@@ -41,14 +41,18 @@ struct ParamsView {
 std::vector<std::string>
 engine_lib_candidates(const std::string &explicit_path) {
   std::vector<std::string> out;
-  if (!explicit_path.empty())
+  if (!explicit_path.empty()) {
     out.emplace_back(explicit_path);
+    return out;
+  }
   if (const char *e = std::getenv("NWCHEMC_LIBRARY"); e && *e)
     out.emplace_back(e);
   if (const char *e = std::getenv("RGPOT_NWCHEMC_ENGINE"); e && *e)
     out.emplace_back(e);
   if (const char *e = std::getenv("RGPOT_NWCHEM_ENGINE"); e && *e)
     out.emplace_back(e);
+  if (!out.empty())
+    return out;
   out.emplace_back("libnwchemc.so");
   out.emplace_back("./libnwchemc.so");
   out.emplace_back("libnwchemc.dylib");
@@ -77,6 +81,9 @@ struct EngineBundle {
   VersionFn version = nullptr;
   AvailableFn available = nullptr;
   std::string load_error;
+  // Explicit enginePath the current function table was loaded from; empty when
+  // it came from the environment seams or the default names.
+  std::string loaded_path;
   bool loaded = false;
 };
 
@@ -112,6 +119,7 @@ void retain_engine(EngineBundle &bundle) {
 
 bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
   b.load_error.clear();
+  b.loaded_path.clear();
   b.loaded = false;
   b.energy_gradient = nullptr;
   b.set_params = nullptr;
@@ -149,6 +157,7 @@ bool try_load_engine(EngineBundle &b, const std::string &engine_path) {
     return false;
   }
   retain_engine(b);
+  b.loaded_path = engine_path;
   b.loaded = true;
   return true;
 }
@@ -310,8 +319,14 @@ bool NWChemPot::setParams(const ::NWChemParams::Reader &params) {
   impl_->nwchem_root = next_nwchem_root;
   apply_env_hints(impl_->nwchem_root);
 
-  // Do not dlclose libnwchemc once loaded — NWChem/GA/MA are process-global.
-  if (!impl_->bundle.loaded) {
+  // Do not dlclose libnwchemc once loaded: NWChem/GA/MA are process-global.
+  // A loaded engine stays in use unless an explicit enginePath names a
+  // different library. That path is then loaded, and a failed load leaves the
+  // bundle unloaded so the old engine cannot report success for it.
+  const bool explicit_path_changed =
+      !next_engine_path.empty() &&
+      next_engine_path != impl_->bundle.loaded_path;
+  if (!impl_->bundle.loaded || explicit_path_changed) {
     if (!try_load_engine(impl_->bundle, impl_->engine_path))
       return false;
   }

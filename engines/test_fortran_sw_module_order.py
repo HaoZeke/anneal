@@ -10,6 +10,8 @@ Usage: test_fortran_sw_module_order.py <root> <meson>
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,17 +28,34 @@ def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _meson_argv(argv: list[str]) -> list[str]:
+    if len(argv) == 1 and Path(argv[0]).name.lower().startswith("python"):
+        return [argv[0], "-m", "mesonbuild.mesonmain"]
+    return argv
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 3:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
     root = Path(sys.argv[1]).resolve()
-    meson = sys.argv[2]
+    meson = _meson_argv(sys.argv[2:])
+    ninja = (
+        os.environ.get("NINJA")
+        or shutil.which("ninja")
+        or shutil.which("ninja-build")
+    )
+    if ninja is None:
+        print(
+            "fortran_sw_module_order requires ninja on PATH or in NINJA",
+            file=sys.stderr,
+        )
+        return 2
     with tempfile.TemporaryDirectory(prefix="rgpot-sw-") as work:
         build = Path(work) / "build"
         setup = run(
             [
-                meson,
+                *meson,
                 "setup",
                 str(build),
                 str(root),
@@ -51,7 +70,14 @@ def main() -> int:
         )
         if setup.returncode != 0:
             print(setup.stdout, file=sys.stderr)
-            print("rgpot did not configure with Fortran pots", file=sys.stderr)
+            if "Unknown compiler(s)" in setup.stdout and "gfortran" in setup.stdout:
+                print(
+                    "fortran_sw_module_order requires a Fortran compiler "
+                    "(such as gfortran or flang) on PATH or in FC",
+                    file=sys.stderr,
+                )
+            else:
+                print("rgpot did not configure with Fortran pots", file=sys.stderr)
             return 1
         ninja_file = (build / "build.ninja").read_text(errors="replace")
         sw = []
@@ -67,7 +93,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        built = run(["ninja", "-C", str(build), sw[0]], root)
+        built = run([ninja, "-C", str(build), sw[0]], root)
         if built.returncode != 0:
             print(built.stdout, file=sys.stderr)
             print(f"failed to build {sw[0]}", file=sys.stderr)

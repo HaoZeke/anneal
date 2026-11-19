@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "RestoreEnv.hpp"
 #include "cpmd_stress_oracle.hpp"
 #include "rgpot/CPMDPot/CPMDPot.hpp"
 #include "rgpot/NWChemPot/DynLib.hpp"
@@ -39,30 +40,7 @@ struct FakeEngineCounter {
   int sessions() const { return count(); }
 };
 
-// Puts the process environment back so later cases still find the engine.
-class RestoreEnv {
-public:
-  explicit RestoreEnv(const char *name) : name_(name) {
-    if (const char *value = std::getenv(name)) {
-      had_ = true;
-      value_ = value;
-    }
-  }
-
-  void clear() const { unsetenv(name_); }
-
-  ~RestoreEnv() {
-    if (had_)
-      setenv(name_, value_.c_str(), 1);
-    else
-      unsetenv(name_);
-  }
-
-private:
-  const char *name_;
-  bool had_ = false;
-  std::string value_;
-};
+using rgpot::test_support::RestoreEnv;
 
 } // namespace
 

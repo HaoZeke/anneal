@@ -37,16 +37,30 @@ def _wrapper(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
+def _meson_argv(argv: list[str]) -> list[str]:
+    if len(argv) == 1 and Path(argv[0]).name.lower().startswith("python"):
+        return [argv[0], "-m", "mesonbuild.mesonmain"]
+    return argv
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 3:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
     root = Path(sys.argv[1]).resolve()
-    meson = sys.argv[2]
-    real_pc = shutil.which("pkg-config")
+    meson = _meson_argv(sys.argv[2:])
+    real_pc = shutil.which("pkg-config") or shutil.which("pkgconf")
     real_cm = shutil.which("cmake")
-    if real_pc is None or real_cm is None:
-        print("pkg-config and cmake are required", file=sys.stderr)
+    missing = [
+        name
+        for name, path in (("pkg-config", real_pc), ("cmake", real_cm))
+        if path is None
+    ]
+    if missing:
+        print(
+            f"eigen_subproject_fallback requires {', '.join(missing)} on PATH",
+            file=sys.stderr,
+        )
         return 2
     with tempfile.TemporaryDirectory(prefix="rgpot-eigen-") as work:
         parent = Path(work)
@@ -70,11 +84,16 @@ def main() -> int:
         )
         (parent / "subprojects").mkdir()
         (parent / "subprojects" / "rgpot").symlink_to(root, target_is_directory=True)
+        pkgcache = root / "subprojects" / "packagecache"
+        if pkgcache.is_dir():
+            (parent / "subprojects" / "packagecache").symlink_to(
+                pkgcache, target_is_directory=True
+            )
         (parent / "meson.build").write_text(PARENT)
         env = os.environ.copy()
         env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
         setup = subprocess.run(
-            [meson, "setup", str(parent / "build")],
+            [*meson, "setup", str(parent / "build")],
             cwd=parent,
             env=env,
             stdout=subprocess.PIPE,
@@ -84,10 +103,23 @@ def main() -> int:
         out = setup.stdout
         if setup.returncode != 0 or "eigen.wrap" not in out:
             print(out, file=sys.stderr)
-            print(
-                "with_eigen did not fall back to the eigen wrap",
-                file=sys.stderr,
-            )
+            if "is the internet available?" in out or "failed to download" in out:
+                print(
+                    "eigen_subproject_fallback could not download eigen.wrap; "
+                    "network access or a populated subprojects/packagecache "
+                    "(meson subprojects download eigen) is required",
+                    file=sys.stderr,
+                )
+            elif "Could not detect Ninja" in out:
+                print(
+                    "eigen_subproject_fallback requires ninja on PATH or in NINJA",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "with_eigen did not fall back to the eigen wrap",
+                    file=sys.stderr,
+                )
             return 1
         if "unknown keyword arguments" in out:
             print(out, file=sys.stderr)

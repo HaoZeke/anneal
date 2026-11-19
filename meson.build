@@ -1006,6 +1006,70 @@ if not get_option('with_python')
     install_headers('bind/include/rgbind/rgbind.hpp', subdir: 'rgbind')
 endif
 
+if not meson.is_subproject() and get_option('with_tests')
+    _install_py = find_program('python3', required: false)
+    _install_meson = find_program('meson', required: false)
+    if _install_py.found() and _install_meson.found()
+        _installed_targets = []
+        foreach _tgt_name : [
+            'rgpot_mpi_lib',
+            'rgpot_effective_schema',
+            'gen_rpc',
+            'pot_bridge',
+            'cp2kc_shim',
+            'rgpot_cuh2',
+            'xtb_engine',
+            'metatomic_engine',
+            'uma_engine',
+            'rgpot',
+            'classical_engine',
+            'mopac_engine',
+            'nwchem_engine',
+            'skala_engine',
+            'server',
+            'mpi_server',
+            'nwchem_mpi_force_host',
+            'rgpot_ipi_driver',
+            'rgpot_lj',
+            'lj_engine',
+            'plumed_lib',
+            'gmx_dropin',
+            'native_lj_engine',
+            'openmm_engine',
+            '_py_core',
+            '_py_ase_schema',
+        ]
+            if is_variable(_tgt_name)
+                _tgt = get_variable(_tgt_name)
+                if not is_disabler(_tgt)
+                    _installed_targets += [_tgt]
+                endif
+            endif
+        endforeach
+        if get_option('with_rpc_client_only')
+            foreach _tgt_name : ['nwchempot', 'cpmdpot']
+                if is_variable(_tgt_name)
+                    _tgt = get_variable(_tgt_name)
+                    if not is_disabler(_tgt)
+                        _installed_targets += [_tgt]
+                    endif
+                endif
+            endforeach
+        endif
+        test(
+            'installed_sources',
+            _install_py,
+            args: [
+                files('CppCore/tests/check_installed_sources.py'),
+                meson.project_build_root(),
+                _install_meson.full_path(),
+            ],
+            depends: _installed_targets,
+            kwargs: _rt_kw['installed_sources'],
+        )
+    endif
+endif
+
 # The documentation's run and compile blocks against this build;
 # doccheck_static checks the rest against the source.
 _doc_python = find_program('python3', required: false)
@@ -1015,6 +1079,23 @@ if get_option('with_tests') and _doc_python.found()
     # -Wl,-rpath), and most run blocks link librgpot. Windows has cl.exe,
     # and rgpot.dll exports only rgpot_library_version, as for engines/.
     if host_system != 'windows'
+        _doccheck_depends = []
+        foreach _tgt_name : [
+            'rgpot',
+            'gen_rpc',
+            'rgpot_rust_target',
+            'rgpot_eval',
+            'capi_threads',
+            '_py_core',
+            '_py_ase_schema',
+        ]
+            if is_variable(_tgt_name)
+                _tgt = get_variable(_tgt_name)
+                if not is_disabler(_tgt)
+                    _doccheck_depends += [_tgt]
+                endif
+            endif
+        endforeach
         test(
             'doccheck_examples',
             _doc_python,
@@ -1026,6 +1107,7 @@ if get_option('with_tests') and _doc_python.found()
                 '--build-dir',
                 meson.project_build_root(),
             ],
+            depends: _doccheck_depends,
             suite: 'docs',
             timeout: 1200,
             priority: -10,
