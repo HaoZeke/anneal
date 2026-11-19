@@ -98,7 +98,7 @@ for turn in range(N_SEEDS):
 
 LAYOUT_FLAGS = {
     "L1": "-C link-arg=-Wl,-z,max-page-size=65536",
-    "L2": "-C link-arg=-Wl,-z,separate-code",
+    "L2": "-C link-arg=-Wl,-z,max-page-size=16384",
     "L3": "-C link-arg=-Wl,--hash-style=sysv",
     "L4": "-C link-arg=-Wl,-z,norelro",
     "L5": "-C link-arg=-Wl,-z,max-page-size=2097152",
