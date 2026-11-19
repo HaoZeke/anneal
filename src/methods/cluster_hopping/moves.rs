@@ -944,6 +944,14 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
                 })
             })
     };
+    let terminal_tip = |i: usize, across: usize| {
+        adj[i].len() == 2
+            && adj[i]
+                .iter()
+                .copied()
+                .find(|&a| a != across)
+                .is_some_and(|a| adj[a].len() == 1)
+    };
     // Three or more identical terminal tips (such as a methyl) map onto
     // themselves under rotation; two identical tips do so only when the
     // pivot is planar (such as -NO2 or an sp2 -NH2), whereas a pyramidal
@@ -981,7 +989,10 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
             fixed,
             pivot,
             side,
-            constrained: planar_neighbourhood(i, j) && (flat_pivot(i) || flat_pivot(j)),
+            constrained: planar_neighbourhood(i, j)
+                && ((flat_pivot(i) && flat_pivot(j))
+                    || (flat_pivot(i) && terminal_tip(j, i))
+                    || (flat_pivot(j) && terminal_tip(i, j))),
         });
     }
     out
@@ -4319,6 +4330,29 @@ mod torsion_tests {
             .find(|bond| (bond.fixed.min(bond.pivot), bond.fixed.max(bond.pivot)) == (0, 1))
             .expect("the planar bridge is retained");
         assert!(central.constrained);
+    }
+
+    #[test]
+    fn a_planar_bridge_to_a_branched_centre_stays_free() {
+        // One end is planar and the neighbourhood lies in that plane, but
+        // the other end is a branched centre rather than a terminal tip.
+        // Unlike tips keep the bond from being dropped as a symmetric top.
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, // planar end
+            1.50, 0.0, 0.0, // branched end
+            -0.75, 1.30, 0.0, // unlike tip
+            -0.75, -1.30, 0.0, // unlike tip
+            2.25, 1.30, 0.0, // branch
+            2.25, -1.30, 0.0, // branch
+            3.00, 0.0, 0.0, // branch continuation
+            4.30, 0.70, 0.0, // keeps the continuation from being terminal
+        ]);
+        let bonds = rotatable_bonds(x.view(), &[6, 6, 7, 8, 6, 5, 6, 6], 1.25);
+        let central = bonds
+            .iter()
+            .find(|bond| (bond.fixed.min(bond.pivot), bond.fixed.max(bond.pivot)) == (0, 1))
+            .expect("the planar bridge is retained");
+        assert!(!central.constrained);
     }
 
     #[test]
