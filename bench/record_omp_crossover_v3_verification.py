@@ -321,6 +321,24 @@ def load_meson_leg(leg: dict[str, object], root: Path) -> dict[str, object]:
     }
 
 
+def cmake_detection(text: str) -> list[tuple[str, str]]:
+    if "Performing Test RGPOT_MPI_COMPILES - Success" in text:
+        mpi = "ON"
+    elif "Performing Test RGPOT_MPI_COMPILES - Failed" in text:
+        mpi = "OFF"
+    elif "Found MPI:" not in text:
+        mpi = "OFF"
+    else:
+        fail("cmake setup log does not resolve RGPOT_HAVE_MPI")
+    fortran = "OFF"
+    marker = "The Fortran compiler identification is "
+    for line in text.splitlines():
+        if marker in line:
+            fortran = require_recordable("fortran identification", line.split(marker, 1)[1].strip())
+            break
+    return [("Fortran", fortran), ("RGPOT_HAVE_MPI", mpi)]
+
+
 def load_cmake_leg(leg: dict[str, object], root: Path) -> dict[str, object]:
     build = require_recordable("build", leg["build"])
     setup, compile_cmd, test_cmd = load_commands(leg)
@@ -333,6 +351,7 @@ def load_cmake_leg(leg: dict[str, object], root: Path) -> dict[str, object]:
         fail("ctest command does not match the build directory")
     configured = cmake_configured(root / str(leg["configured"]))
     check_options(setup, configured)
+    setup_text = (root / str(leg["setup_log"])).read_text(encoding="utf-8")
     counts = parse_ctest_summary((root / str(leg["log"])).read_text(encoding="utf-8"))
     cache_rows = [(name, require_recordable(name, configured[name])) for name in d_options(setup)]
     return {
@@ -340,6 +359,7 @@ def load_cmake_leg(leg: dict[str, object], root: Path) -> dict[str, object]:
         "title": require_recordable("title", leg["title"]),
         "commands": [setup, compile_cmd, test_cmd],
         "cache": cache_rows,
+        "detected": cmake_detection(setup_text),
         "counts": counts,
         "summary": ctest_summary(counts),
     }
@@ -354,7 +374,7 @@ def load_leg(path: Path) -> dict[str, object]:
     if runner == "meson":
         expected = common | {"setup_log", "machines"}
     elif runner == "cmake":
-        expected = common
+        expected = common | {"setup_log"}
     else:
         fail("leg runner must be meson or cmake")
     if set(payload) != expected:
@@ -420,14 +440,20 @@ def render_verification(toolchain: dict[str, str], legs: list[dict[str, object]]
         else:
             lines += [
                 "",
-                "The CMake core build enables Fortran. Cache values below",
-                "were checked against the configure arguments. with_mpi and",
-                "with_fast_nlist are Meson options.",
+                "CMake runs find_package(MPI) even when the configure",
+                "arguments do not name MPI. RGPOT_HAVE_MPI is ON only when",
+                "the compile check succeeds. Cache values below were checked",
+                "against the configure arguments. Fortran and RGPOT_HAVE_MPI",
+                "are parsed from the CMake setup log. with_fast_nlist is a",
+                "Meson option.",
                 "",
                 "|Cache variable|Value|",
                 "|---|---|",
             ]
             for name, value in leg["cache"]:
+                lines.append(f"|{name}|{value}|")
+            lines += ["", "|Detection|Value|", "|---|---|"]
+            for name, value in leg["detected"]:
                 lines.append(f"|{name}|{value}|")
             counts = leg["counts"]
             rows = [
