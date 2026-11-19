@@ -288,6 +288,40 @@ def self_test() -> None:
     print("self-test ok")
 
 
+def prepare_rdkit_counter() -> None:
+    """Point the call counter at the wheel's hashed ForceField library.
+
+    The counter looks up ``libRDKitForceField.so.1``. The wheel ships that
+    library under a hashed soname, so the unhashed name has to resolve to it.
+    """
+    import rdkit
+
+    root = Path(rdkit.__file__).resolve().parent
+    libs = root.parent / "rdkit.libs"
+    hashed = sorted(libs.glob("libRDKitForceField-*.so.1"))
+    if not hashed:
+        return
+    alias = libs / "libRDKitForceField.so.1"
+    if not alias.exists():
+        alias.symlink_to(hashed[0].name)
+    old = hashed[0].name
+    for module in root.rglob("*.so"):
+        needed = subprocess.check_output(["objdump", "-p", str(module)], text=True, errors="replace")
+        if old in needed:
+            subprocess.check_call(["patchelf", "--replace-needed", old, alias.name, str(module)])
+
+
+def complete_python_package(repo: Path, bindir: Path) -> None:
+    py = bindir / "py" / "anneal"
+    if not (py / "_core.so").is_file():
+        return
+    py.mkdir(parents=True, exist_ok=True)
+    for source in (repo / "python/anneal").glob("*.py"):
+        dest = py / source.name
+        if not dest.is_file() or dest.read_bytes() != source.read_bytes():
+            shutil.copy2(source, dest)
+
+
 def machine_hash() -> str:
     raw = Path("/etc/machine-id").read_bytes().strip()
     return hashlib.sha256(raw).hexdigest()
@@ -300,7 +334,7 @@ def blob_id(path: Path) -> str:
 
 def thread_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     keep = {}
-    for key in ("PATH", "HOME", "LANG", "LC_ALL", "USER", "LOGNAME", "TMPDIR", "PYTHONPATH", "LD_LIBRARY_PATH", "LD_PRELOAD"):
+    for key in ("PATH", "HOME", "LANG", "LC_ALL", "USER", "LOGNAME", "TMPDIR", "PYTHONPATH", "LD_LIBRARY_PATH"):
         if key in os.environ:
             keep[key] = os.environ[key]
     keep.update(
@@ -585,6 +619,10 @@ def measure(args: argparse.Namespace) -> None:
             raise SystemExit(f"git object {obj} is not in the repository")
     machine = machine_hash()
     bins = binaries(args)
+    for bindir in bins.values():
+        if bindir.is_dir():
+            complete_python_package(repo, bindir)
+    prepare_rdkit_counter()
     base_env = thread_env()
     preload = args.preload
     if not preload:
@@ -880,6 +918,7 @@ def write_outputs(work: Path, repo: Path) -> None:
     lines.append(f"B tree {B_TREE}")
     lines.append(f"B kit sha256 {B_MBOX_SHA256}")
     lines.append(f"seeds {SEEDS[0]}..{SEEDS[-1]} n={N_SEEDS} core {CORE}")
+    lines.append("placement cells " + " ".join(sorted(PLACE_SYSTEMS)))
     if (work / "skip-water").is_file():
         lines.append("water_hexamer not run: engine library absent")
     if lo is None:
@@ -1029,8 +1068,9 @@ def stage_bin(src: Path, target: Path, dest: Path) -> None:
         if not matches:
             raise SystemExit(f"python extension missing under {release}")
         so = matches[0]
+    for source in (src / "python/anneal").glob("*.py"):
+        shutil.copy2(source, py / source.name)
     shutil.copy2(so, py / "_core.so")
-    shutil.copy2(src / "python/anneal/__init__.py", py / "__init__.py")
 
 
 def cmd_build(args: argparse.Namespace) -> None:
