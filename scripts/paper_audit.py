@@ -4572,6 +4572,12 @@ APPEND_ONLY_RECORDS = {
 }
 
 
+def touched_record_paths(base: str) -> set[str]:
+    """Every csv and jsonl path named from base to HEAD, including one absent at HEAD."""
+    log = git("log", "--name-only", "--pretty=format:", "--no-renames", f"{base}..HEAD")
+    return {line for line in log.stdout.splitlines() if line.endswith((".csv", ".jsonl"))}
+
+
 def append_only_rows(audit: Audit) -> None:
     """Every record preserves baseline lines and the series never removes one."""
     paths = set(git("ls-files", "**/rows.csv", "rows.csv").stdout.splitlines())
@@ -4580,7 +4586,16 @@ def append_only_rows(audit: Audit) -> None:
         ref for ref in APPEND_ONLY_BASES
         if git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0
     ]
+    base_ref = next(
+        (ref for ref in ("origin/develop", "develop")
+         if git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0),
+        None,
+    )
+    if base_ref is not None:
+        paths.update(touched_record_paths(base_ref))
     for path in sorted(paths):
+        if not (ROOT / path).is_file():
+            continue
         cur_lines = audit.text(path).splitlines(keepends=True)
         rewritten = []
         refs_for_path = (
@@ -4607,11 +4622,7 @@ def append_only_rows(audit: Audit) -> None:
             "append-only",
             "; ".join(rewritten) or "append-only",
         )
-    base = next(
-        (ref for ref in ("origin/develop", "develop")
-         if git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0),
-        None,
-    )
+    base = base_ref
     if base is not None:
         history = git(
             "log", "-p", "--no-renames", "--format=", f"{base}..HEAD", "--",
