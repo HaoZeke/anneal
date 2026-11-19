@@ -21,6 +21,8 @@ from typing import Any
 THREADS = (1, 2, 4, 8)
 STAGES = ("build", "force")
 P_FLOOR_N12 = 1.0 / math.comb(24, 12)
+CROSSOVER_MIN_SPEEDUP = {2: 1.2, 8: 2.0}
+CROSSOVER_P_LIMIT = 0.01
 
 
 @dataclass(frozen=True)
@@ -432,8 +434,17 @@ def summarize_cell(
 
 def add_crossovers(payload: dict[str, Any]) -> None:
     rows = payload["measurements"]
+    stock_threshold = next(
+        arm["threshold"] for arm in payload["metadata"]["arms"] if arm["name"] == "stock"
+    )
     crossovers = []
-    keys = sorted({(row["arm"], row["potential"], row["stage"], row["threads"]) for row in rows})
+    keys = sorted(
+        {
+            (row["arm"], row["potential"], row["stage"], row["threads"])
+            for row in rows
+            if row["threads"] in CROSSOVER_MIN_SPEEDUP
+        }
+    )
     for arm, potential, stage, threads in keys:
         candidates = sorted(
             (
@@ -441,11 +452,15 @@ def add_crossovers(payload: dict[str, Any]) -> None:
                 for row in rows
                 if (row["arm"], row["potential"], row["stage"], row["threads"])
                 == (arm, potential, stage, threads)
+                and row["atoms"] < stock_threshold
             ),
             key=lambda row: row["atoms"],
         )
+        minimum_speedup = CROSSOVER_MIN_SPEEDUP[threads]
         qualifies = [
-            row["speedup"] > row["aa_band"][1] and row["mw_p_team_faster"] < 0.05
+            row["speedup"] >= minimum_speedup
+            and row["speedup"] > row["aa_band"][1]
+            and row["mw_p_team_faster"] < CROSSOVER_P_LIMIT
             for row in candidates
         ]
         crossover = None
@@ -460,36 +475,93 @@ def add_crossovers(payload: dict[str, Any]) -> None:
                 "stage": stage,
                 "threads": threads,
                 "atoms": crossover,
+                "minimum_speedup": minimum_speedup,
             }
         )
     payload["crossovers"] = crossovers
 
 
+def one_thread_no_regression(
+    payload: dict[str, Any],
+    arm: str,
+    potential: str,
+    stage: str,
+    stock_threshold: int,
+) -> bool:
+    rows = [
+        row
+        for row in payload["measurements"]
+        if (row["arm"], row["potential"], row["stage"], row["threads"])
+        == (arm, potential, stage, 1)
+        and row["atoms"] < stock_threshold
+    ]
+    return bool(rows) and all(row["speedup"] >= row["aa_band"][0] for row in rows)
+
+
 def add_recommendation(payload: dict[str, Any]) -> None:
     metadata = payload["metadata"]
     crossovers = payload["crossovers"]
-    candidates = []
-    for arm in metadata["arms"]:
-        if arm["name"] == "stock":
-            continue
-        rows = [row for row in crossovers if row["arm"] == arm["name"]]
-        if rows and all(row["atoms"] is not None for row in rows):
-            candidates.append(arm)
-    if candidates:
-        selected = max(candidates, key=lambda arm: arm["threshold"])
-        metadata["recommendation"] = (
-            f"Set kTeamMinAtoms to {selected['threshold']}: this is the largest measured candidate "
-            "whose team arm satisfies the declared persistent crossover rule for every measured "
-            "potential, stage, and thread count."
+    stock = next(arm for arm in metadata["arms"] if arm["name"] == "stock")
+    teams = [arm for arm in metadata["arms"] if arm["name"] != "stock"]
+    phases = sorted(
+        {(row["potential"], row["stage"]) for row in payload["measurements"]}
+    )
+    recommendations = []
+    for potential, stage in phases:
+        eligible = []
+        for arm in teams:
+            rows = [
+                row
+                for row in crossovers
+                if (row["arm"], row["potential"], row["stage"])
+                == (arm["name"], potential, stage)
+            ]
+            by_thread = {row["threads"]: row for row in rows}
+            if set(by_thread) != set(CROSSOVER_MIN_SPEEDUP):
+                continue
+            if any(row["atoms"] is None for row in by_thread.values()):
+                continue
+            if not one_thread_no_regression(
+                payload,
+                arm["name"],
+                potential,
+                stage,
+                stock["threshold"],
+            ):
+                continue
+            threshold = max(row["atoms"] for row in by_thread.values())
+            eligible.append((threshold, arm["threshold"], arm["name"]))
+        if eligible:
+            threshold, _, supporting_arm = min(eligible)
+        else:
+            threshold, supporting_arm = stock["threshold"], "stock"
+        recommendations.append(
+            {
+                "potential": potential,
+                "stage": stage,
+                "team_min_atoms": threshold,
+                "supporting_arm": supporting_arm,
+            }
         )
-        metadata["recommended_team_min_atoms"] = selected["threshold"]
-    else:
-        stock = next(arm for arm in metadata["arms"] if arm["name"] == "stock")
-        metadata["recommendation"] = (
-            f"Keep kTeamMinAtoms at {stock['threshold']}: no candidate team arm satisfies the "
-            "declared persistent crossover rule for every measured potential, stage, and thread count."
-        )
-        metadata["recommended_team_min_atoms"] = stock["threshold"]
+    payload["recommendations"] = recommendations
+    metadata.pop("recommended_team_min_atoms", None)
+    metadata["recommendation"] = (
+        "The corrected analysis reports kTeamMinAtoms per potential and phase; "
+        "the shipped default is unchanged."
+    )
+
+
+def corrected_analysis(payload: dict[str, Any]) -> None:
+    payload["metadata"]["analysis_revision"] = "persistent-below-stock-threshold"
+    payload["metadata"]["crossover_rule"] = (
+        "The crossover is the smallest measured N below the stock threshold where the team arm "
+        "beats stock outside the same-binary A/A band with exact one-sided Mann–Whitney p<0.01, "
+        "reaches 1.2x at 2 threads or 2x at 8 threads, and keeps doing so at every larger "
+        "measured N below the stock threshold. One-thread measurements must show no slowdown "
+        "outside the A/A band."
+    )
+    add_crossovers(payload)
+    add_recommendation(payload)
 
 
 def format_p(value: float, n: int) -> str:
@@ -558,6 +630,17 @@ def render_report(payload: dict[str, Any]) -> str:
         )
     recommendation = metadata["recommendation"]
     lines += ["", "## Recommendation", "", recommendation, ""]
+    if "recommendations" in payload:
+        lines += [
+            "|Potential|Phase|Recommended kTeamMinAtoms|Supporting arm|",
+            "|---|---|---:|---|",
+        ]
+        for row in payload["recommendations"]:
+            lines.append(
+                f"|{row['potential']}|{row['stage']}|{row['team_min_atoms']}|"
+                f"{row['supporting_arm']}|"
+            )
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -670,8 +753,7 @@ def benchmark(args: argparse.Namespace) -> None:
         "skipped_cells": skipped_cells,
     }
     add_arm_provenance(payload, repo)
-    add_crossovers(payload)
-    add_recommendation(payload)
+    corrected_analysis(payload)
     args.output_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     args.output_report.write_text(render_report(payload), encoding="utf-8")
 
@@ -697,6 +779,9 @@ def main() -> None:
     render_parser = subparsers.add_parser("render")
     render_parser.add_argument("--input-json", type=Path, required=True)
     render_parser.add_argument("--output-report", type=Path, required=True)
+    analyze_parser = subparsers.add_parser("analyze")
+    analyze_parser.add_argument("--input-json", type=Path, required=True)
+    analyze_parser.add_argument("--output-report", type=Path, required=True)
     provenance_parser = subparsers.add_parser("provenance")
     provenance_parser.add_argument("--repo", type=Path, required=True)
     provenance_parser.add_argument("--input-json", type=Path, required=True)
@@ -704,6 +789,11 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "render":
         payload = json.loads(args.input_json.read_text(encoding="utf-8"))
+        args.output_report.write_text(render_report(payload), encoding="utf-8")
+        return
+    if args.command == "analyze":
+        payload = json.loads(args.input_json.read_text(encoding="utf-8"))
+        corrected_analysis(payload)
         args.output_report.write_text(render_report(payload), encoding="utf-8")
         return
     if args.command == "provenance":

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -48,6 +49,31 @@ def resolved_commit_tree(repo: Path, arm: str, sha: str) -> str:
     ).stdout.strip()
 
 
+def tree_file(repo: Path, tree: str, path: str) -> str:
+    result = subprocess.run(
+        ["git", "show", f"{tree}:{path}"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def tree_threshold(repo: Path, arm: str, tree: str) -> int:
+    options = tree_file(repo, tree, "meson_options.txt")
+    match = re.search(
+        r"option\(\s*'team_min_atoms'.*?value:\s*([0-9]+)",
+        options,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        slices = tree_file(repo, tree, "CppCore/rgpot/Slices.hpp")
+        match = re.search(r"kTeamMinAtoms\s*=\s*([0-9]+)", slices)
+    if match is None:
+        raise SystemExit(f"{arm}: tree {tree} has no kTeamMinAtoms value")
+    return int(match.group(1))
+
+
 def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
     record = payload["metadata"]["arms"]
     record_names = [arm["name"] for arm in record]
@@ -62,16 +88,26 @@ def check_provenance(repo: Path, payload: dict, report_text: str) -> None:
         actual = resolved_commit_tree(repo, name, arm["sha"])
         if recorded != actual:
             raise SystemExit(f"{name}: recorded tree {recorded} does not match commit tree {actual}")
+        actual_threshold = tree_threshold(repo, name, recorded)
+        if arm["threshold"] != actual_threshold:
+            raise SystemExit(
+                f"{name}: recorded threshold {arm['threshold']} "
+                f"does not match tree threshold {actual_threshold}"
+            )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--json", type=Path, required=True)
+    parser.add_argument("--json-relative", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    payload = json.loads(args.json.read_text(encoding="utf-8"))
-    report_path = args.report or args.json.with_name(REPORT_NAME)
+    json_path = args.json
+    if args.json_relative is not None:
+        json_path = json_path / args.json_relative
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    report_path = args.report or json_path.with_name(REPORT_NAME)
     if not report_path.is_file():
         raise SystemExit(f"report is missing: {report_path.name}")
     check_provenance(args.repo, payload, report_path.read_text(encoding="utf-8"))

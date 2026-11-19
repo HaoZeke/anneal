@@ -174,7 +174,7 @@ ThreadTeamTest_limit2 | tests core | rerun ThreadTeamTest env=OMP_THREAD_LIMIT=2
 openmp_confined | tests python | py CppCore/tests/test_openmp_confined.py @root@ |
 omp_crossover_v3_provenance | tests python | py bench/test_omp_crossover_v3_provenance.py --repo @root@ --json @root@ --json-relative bench/results/rgpot_omp_crossover_v3_results.json |
 omp_crossover_v3_provenance_cases | tests python | py bench/test_omp_crossover_v3_provenance_cases.py |
-omp_crossover_v3_report | tests python | py bench/test_omp_crossover_v3_report.py --repo @root@ --harness bench/run_omp_crossover_v3.py --json bench/results/rgpot_omp_crossover_v3_results.json --report bench/results/rgpot_omp_crossover_v3_report.md |
+omp_crossover_v3_report | tests python | py bench/test_omp_crossover_v3_report.py --repo @root@ --harness bench/run_omp_crossover_v3.py --json bench/results/rgpot_omp_crossover_v3_results.json --report bench/results/rgpot_omp_crossover_v3_report.md --analysis-report bench/results/rgpot_omp_crossover_v3d_report.md |
 omp_crossover_v3_analysis | tests python | py bench/test_omp_crossover_v3_analysis.py |
 MinImageIsaVariants | tests core isa_variants | custom |
 ExactFmaEq | tests core | custom |
