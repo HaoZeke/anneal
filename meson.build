@@ -1078,6 +1078,23 @@ if get_option('with_tests') and _doc_python.found()
     # -Wl,-rpath), and most run blocks link librgpot. Windows has cl.exe,
     # and rgpot.dll exports only rgpot_library_version, as for engines/.
     if host_system != 'windows'
+        _doccheck_depends = []
+        foreach _tgt_name : [
+            'rgpot',
+            'gen_rpc',
+            'rgpot_rust_target',
+            'rgpot_eval',
+            'capi_threads',
+            '_py_core',
+            '_py_ase_schema',
+        ]
+            if is_variable(_tgt_name)
+                _tgt = get_variable(_tgt_name)
+                if not is_disabler(_tgt)
+                    _doccheck_depends += [_tgt]
+                endif
+            endif
+        endforeach
         test(
             'doccheck_examples',
             _doc_python,
@@ -1089,6 +1106,7 @@ if get_option('with_tests') and _doc_python.found()
                 '--build-dir',
                 meson.project_build_root(),
             ],
+            depends: _doccheck_depends,
             suite: 'docs',
             timeout: 1200,
             priority: -10,

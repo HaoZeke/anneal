@@ -1913,6 +1913,7 @@ class BuildInfo:
     python_ok: bool
     features: dict[str, bool]
     targets: list[dict] = field(default_factory=list)
+    compilers: dict[str, str] = field(default_factory=dict)
 
 
 def _flags_from_compile_commands(build_dir: Path, suffix: str) -> list[str]:
@@ -1970,7 +1971,32 @@ def build_info(build_dir: Path | None, root: Path = ROOT) -> BuildInfo | None:
         targets = json.loads((build_dir / "meson-info" / "intro-targets.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         targets = []
-    return BuildInfo(build_dir, cpp, c, libs, python_ok, features, targets)
+    compilers = _build_compilers(build_dir)
+    return BuildInfo(build_dir, cpp, c, libs, python_ok, features, targets, compilers)
+
+
+def _build_compilers(build_dir: Path) -> dict[str, str]:
+    path = build_dir / "meson-info" / "intro-compilers.json"
+    try:
+        host = json.loads(path.read_text(encoding="utf-8")).get("host", {})
+    except (OSError, ValueError, AttributeError):
+        return {}
+    out: dict[str, str] = {}
+    extra_dirs = [str(Path(sys.executable).resolve().parent)]
+    for lang, meta in host.items():
+        exelist = meta.get("exelist") if isinstance(meta, dict) else None
+        if not exelist:
+            continue
+        dirs = list(extra_dirs)
+        for token in exelist:
+            if os.path.isabs(token):
+                dirs.insert(0, str(Path(token).parent))
+        search_path = os.pathsep.join([os.environ.get("PATH", ""), *dirs])
+        cand = exelist[-1]
+        resolved = cand if (os.path.isabs(cand) and os.access(cand, os.X_OK)) else shutil.which(cand, path=search_path)
+        if resolved:
+            out[lang] = resolved
+    return out
 
 
 def _stage_python(build_dir: Path, root: Path) -> Path | None:
@@ -2068,21 +2094,46 @@ def run_block(block: Block, info: BuildInfo, root: Path = ROOT) -> tuple[str, st
             return "skip", f"build lacks {', '.join(missing)}"
         return _compile_c(block, info, root)
     if block.lang == "fortran":
-        fc = shutil.which(os.environ.get("FC", "gfortran"))
+        fc_env = os.environ.get("FC")
+        fc = (shutil.which(fc_env) if fc_env else info.compilers.get("fortran")) or shutil.which("gfortran")
         if not fc:
             return "skip", "no Fortran compiler"
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "block.f90"
             src.write_text(block.body)
-            return _run([fc, "-fsyntax-only", "-ffree-line-length-none", str(src)], "", None, Path(tmp))
+            return _run([fc, "-fsyntax-only", "-ffree-line-length-none", str(src)], "", _tool_env(fc), Path(tmp))
     return "skip", f"no runner for {block.lang}"
+
+
+def _tool_env(*tools: str) -> dict[str, str] | None:
+    dirs: list[str] = []
+    for tool in tools:
+        if tool and os.path.isabs(tool):
+            parent = str(Path(tool).parent)
+            if parent not in dirs:
+                dirs.append(parent)
+    if not dirs:
+        return None
+    env = dict(os.environ)
+    cur = env.get("PATH", "")
+    parts = [p for p in cur.split(os.pathsep) if p]
+    for d in dirs:
+        if d not in parts:
+            parts.append(d)
+    env["PATH"] = os.pathsep.join(parts)
+    return env
 
 
 def _compile_c(block: Block, info: BuildInfo, root: Path) -> tuple[str, str]:
     cpp = block.lang == "cpp"
-    compiler = shutil.which(os.environ.get("CXX" if cpp else "CC", "c++" if cpp else "cc"))
+    env_key = "CXX" if cpp else "CC"
+    lang_key = "cpp" if cpp else "c"
+    default_key = "c++" if cpp else "cc"
+    env_val = os.environ.get(env_key)
+    compiler = (shutil.which(env_val) if env_val else info.compilers.get(lang_key)) or shutil.which(default_key)
     if not compiler:
         return "skip", "no compiler"
+    compile_env = _tool_env(compiler)
     flags = info.cpp_flags if cpp else (info.c_flags or [f for f in info.cpp_flags if not f.startswith("-std")])
     flags = flags + [f"-I{root / d}" for d in ("CppCore", "include", "rgpot-core/include")]
     if cpp and not any(f.startswith("-std") for f in flags):
@@ -2092,20 +2143,23 @@ def _compile_c(block: Block, info: BuildInfo, root: Path) -> tuple[str, str]:
         src = Path(tmp) / ("block.cc" if cpp else "block.c")
         src.write_text(block.body + "\n")
         if block.kind == "compile":
-            return _run([compiler, "-fsyntax-only", *flags, *extra, str(src)], "", None, root)
+            return _run([compiler, "-fsyntax-only", *flags, *extra, str(src)], "", compile_env, root)
         obj, exe = Path(tmp) / "block.o", Path(tmp) / "block"
-        status, detail = _run([compiler, "-c", *flags, *extra, str(src), "-o", str(obj)], "", None, root)
+        status, detail = _run([compiler, "-c", *flags, *extra, str(src), "-o", str(obj)], "", compile_env, root)
         if status != "ok":
             return status, detail
         names = [name for name in block.options.get("link", "").split(",") if name]
         linker, args = _meson_link(info, names, block.lang) or (
             [compiler], [f"-L{d}" for d in info.lib_dirs] + [f"-l{name}" for name in names]
         )
-        if not shutil.which(linker[0]):
+        search_path = (compile_env or os.environ).get("PATH", "")
+        resolved_linker = linker[0] if (os.path.isabs(linker[0]) and os.access(linker[0], os.X_OK)) else shutil.which(linker[0], path=search_path)
+        if not resolved_linker:
             return "skip", f"no linker {linker[0]}"
+        linker = [resolved_linker, *linker[1:]]
         rpath = [f"-Wl,-rpath,{d}" for d in info.lib_dirs]
         # Meson names its own outputs relative to the build directory.
-        status, detail = _run([*linker, str(obj), "-o", str(exe), *args, *rpath], "", None, info.build_dir)
+        status, detail = _run([*linker, str(obj), "-o", str(exe), *args, *rpath], "", _tool_env(compiler, resolved_linker), info.build_dir)
         if status != "ok":
             return status, detail
         return _run([str(exe)], "", None, root)
