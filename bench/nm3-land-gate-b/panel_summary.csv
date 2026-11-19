@@ -1,0 +1,5 @@
+panel,systems,runs_a,runs_b,hits_a,hits_b,p_hits,p_calls,van_elteren_z,calls_direction,wall_sum_a,wall_sum_b,wall_ratio,inside_sum_a,inside_sum_b,inside_ratio,outside_sum_a,outside_sum_b,outside_ratio,outside_per_call_us_a,outside_per_call_us_b,outside_per_call_ratio,identical_runs,failed_a,failed_b,lost_systems,loss_hits,loss_calls,verdict
+Sutton-Chen,2,24,24,24,24,1,0.838256,0.204124,B fewer calls,65.954,67.136,1.0179,61.839,62.666,1.0134,4.115,4.470,1.0863,3.3093,3.5429,1.0706,0,0,0,,0,0,PASS
+Morse M75 rho14,1,12,12,9,11,0.590062,0.224336,,B more calls,579.907,896.453,1.5459,420.952,654.193,1.5541,158.955,242.260,1.5241,8.8802,8.6352,0.9724,1,0,0,,0,0,PASS
+BLJ,7,84,84,46,42,0.368081,0.247425,-1.156626,B more calls,2920.852,2912.203,0.9970,1529.004,1542.686,1.0089,1391.848,1369.517,0.9840,17.8453,17.2710,0.9678,6,0,0,,0,0,PASS
+water/TIP4P rigid,14,168,168,113,113,1,1,0.000000,equal,1343.457,1341.117,0.9983,1014.238,1011.573,0.9974,329.219,329.544,1.0010,2.4017,2.4041,1.0010,168,0,0,,0,0,PASS

@@ -1,0 +1,25 @@
+panel,system,driver,budget,reference
+water/TIP4P rigid,tip4p8,h2h_seed,2000000,-305.5183221676
+water/TIP4P rigid,tip4p9,h2h_seed,2000000,-344.4352092012
+water/TIP4P rigid,tip4p10,h2h_seed,2000000,-391.0226842125
+water/TIP4P rigid,tip4p11,h2h_seed,2000000,-431.4890723318
+water/TIP4P rigid,tip4p12,h2h_seed,2000000,-492.9082357122
+water/TIP4P rigid,tip4p13,h2h_seed,2000000,-532.9705363445
+water/TIP4P rigid,tip4p14,h2h_seed,2000000,-582.9911036211
+water/TIP4P rigid,tip4p15,h2h_seed,2000000,-628.3722525077
+water/TIP4P rigid,tip4p16,h2h_seed,2000000,-681.1925945898
+water/TIP4P rigid,tip4p17,h2h_seed,2000000,-723.8077531390
+water/TIP4P rigid,tip4p18,h2h_seed,2000000,-773.2318693143
+water/TIP4P rigid,tip4p19,h2h_seed,2000000,-821.0369191145
+water/TIP4P rigid,tip4p20,h2h_seed,2000000,-872.9887544952
+water/TIP4P rigid,tip4p21,h2h_seed,2000000,-916.7074302940
+Sutton-Chen,sc96-38,h2h_sc,400000,-8917.7056000000
+Sutton-Chen,sc126-55,h2h_sc,1000000,-52884.6806000000
+Morse M75 rho14,m75r14,nm3-gate-driver,4000000,-318.4073300000
+BLJ,blj105n38,nm3-gate-driver,400000,-177.2090846748
+BLJ,blj115n38,nm3-gate-driver,400000,-187.3676867453
+BLJ,blj130n38,nm3-gate-driver,400000,-191.1840192602
+BLJ,blj105n55,nm3-gate-driver,1000000,-283.1545313810
+BLJ,blj115n55,nm3-gate-driver,1000000,-289.2931853058
+BLJ,blj130n55,nm3-gate-driver,1000000,-306.7337643721
+BLJ,blj130n98,nm3-gate-driver,4000000,-590.7874132760
