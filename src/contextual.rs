@@ -150,13 +150,24 @@ impl ContextualAllocator {
 
     /// Picks a move for `context` by Thompson sampling.
     pub fn select<R: Rng + ?Sized>(&mut self, context: ArrayView1<f64>, rng: &mut R) -> usize {
+        self.select_where(context, rng, |_| true)
+    }
+
+    /// Picks among the moves for which `open` is true.
+    pub fn select_where<R, F>(&mut self, context: ArrayView1<f64>, rng: &mut R, open: F) -> usize
+    where
+        R: Rng + ?Sized,
+        F: Fn(usize) -> bool,
+    {
+        let open_arms: Vec<_> = (0..self.arms.len()).filter(|&arm| open(arm)).collect();
+        assert!(!open_arms.is_empty(), "at least one move must be open");
         let k = if rng.random::<f64>() < self.floor {
             self.forced += 1;
-            rng.random_range(0..self.arms.len())
+            open_arms[rng.random_range(0..open_arms.len())]
         } else {
-            let mut best = 0usize;
+            let mut best = open_arms[0];
             let mut best_score = f64::NEG_INFINITY;
-            for a in 0..self.arms.len() {
+            for a in open_arms {
                 // Sampled value: posterior mean plus a normal draw scaled by
                 // the posterior standard deviation at this context. A move
                 // never tried in this region has a wide posterior and can win

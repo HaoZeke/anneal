@@ -181,14 +181,25 @@ impl FlooredThompson {
 
     /// Chooses an arm.
     pub fn select<R: Rng + ?Sized>(&mut self, rng: &mut R) -> usize {
+        self.select_where(rng, |_| true)
+    }
+
+    /// Chooses among the arms for which `open` is true.
+    pub fn select_where<R, F>(&mut self, rng: &mut R, open: F) -> usize
+    where
+        R: Rng + ?Sized,
+        F: Fn(usize) -> bool,
+    {
+        let open_arms: Vec<_> = (0..self.len()).filter(|&arm| open(arm)).collect();
+        assert!(!open_arms.is_empty(), "at least one arm must be open");
         self.t += 1;
         let floor = (self.floor_scale / (self.t as f64).sqrt()).min(0.5);
         if rng.random::<f64>() < floor {
-            return rng.random_range(0..self.len());
+            return open_arms[rng.random_range(0..open_arms.len())];
         }
-        let mut best = 0;
+        let mut best = open_arms[0];
         let mut best_draw = f64::NEG_INFINITY;
-        for k in 0..self.len() {
+        for k in open_arms {
             let draw = sample_beta(self.alpha[k], self.beta[k], rng);
             if draw > best_draw {
                 best_draw = draw;

@@ -1320,6 +1320,20 @@ pub type Relax<'a> =
 pub type Settle<'a> =
     &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>, &[usize], usize) -> Array1<f64>;
 
+fn reborrow_settle<'a>(settle: &'a mut Option<Settle<'_>>) -> Option<Settle<'a>> {
+    settle
+        .as_mut()
+        .map(|callback| &mut **callback as Settle<'a>)
+}
+
+fn reborrow_history<'a>(
+    history: &'a mut Option<&mut dyn HistoryHook>,
+) -> Option<&'a mut dyn HistoryHook> {
+    history
+        .as_mut()
+        .map(|callback| &mut **callback as &'a mut dyn HistoryHook)
+}
+
 /// Gradient of the objective, charged to the ledger by the caller.
 ///
 /// A supplied callback certifies candidate answers and supports soft-mode
@@ -2550,18 +2564,22 @@ where
     F: Fn(usize) -> bool,
 {
     if let Some(features) = context {
-        return contextual.select(features, rng);
+        return contextual.select_where(features, rng, &open);
     }
     if cfg.arm_selection == ArmSelection::Uniform {
-        return rng.random_range(0..n_arms);
+        let arms: Vec<_> = (0..n_arms).filter(|&arm| open(arm)).collect();
+        assert!(!arms.is_empty(), "at least one move arm must be open");
+        return arms[rng.random_range(0..arms.len())];
     }
     if cfg.allocate_moves && cfg.depth_reward {
-        return depth_allocator.select_where(rng, open);
+        return depth_allocator.select_where(rng, &open);
     }
     if cfg.allocate_moves {
-        return allocator.select(rng);
+        return allocator.select_where(rng, &open);
     }
-    rng.random_range(0..n_arms)
+    let arms: Vec<_> = (0..n_arms).filter(|&arm| open(arm)).collect();
+    assert!(!arms.is_empty(), "at least one move arm must be open");
+    arms[rng.random_range(0..arms.len())]
 }
 
 /// Kernels the chain actually draws, including the energy-lattice arm.
@@ -4223,6 +4241,96 @@ fn run_full<'g, R, H>(
     relax: Relax<'_>,
     mut grad: Option<&mut GradFn<'g>>,
     mut energy_grad: Option<&mut EnergyGradFn<'g>>,
+    mut external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
+    mut settle: Option<Settle<'_>>,
+    mut history: Option<&mut dyn HistoryHook>,
+    checkpoint_interval: Option<usize>,
+    checkpoint: &mut H,
+    rng: &mut R,
+) -> Result<Outcome, SearchError>
+where
+    R: Rng + Clone,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    // Reserve the second stream outside the worker. This gives every worker
+    // exit one release point, including an exhausted or non-finite start.
+    let mut forked = (cfg.adaptive_search && cfg.stream_hold).then(|| rng.clone());
+    let escape_tail = if forked.is_some() {
+        let room = ledger.remaining();
+        let tail = room.saturating_sub((1usize << 19).min(room));
+        ledger.hold_tail(tail);
+        tail
+    } else {
+        0
+    };
+    let held = run_stream(
+        cfg,
+        start,
+        ledger,
+        &mut *relax,
+        grad.as_deref_mut(),
+        energy_grad.as_deref_mut(),
+        external_bias.as_deref_mut(),
+        reborrow_settle(&mut settle),
+        reborrow_history(&mut history),
+        checkpoint_interval,
+        checkpoint,
+        rng,
+    );
+    if escape_tail > 0 {
+        ledger.release_tail();
+    }
+    let mut held = held?;
+    if escape_tail == 0 || ledger.target_reached() {
+        return Ok(held);
+    }
+
+    let Some(forked) = forked.as_mut() else {
+        return Ok(held);
+    };
+    let held_best = ledger.best;
+    let held_state = ledger.best_state.clone();
+    let held_encounters = std::mem::take(&mut ledger.encounters);
+    ledger.best = f64::INFINITY;
+    ledger.best_state = None;
+    // Fractional debt belongs to the stream that incurred it.
+    ledger.fract = 0.0;
+    let mut escape_cfg = cfg.clone();
+    escape_cfg.stream_hold = false;
+    let escaped = run_stream(
+        &escape_cfg,
+        start,
+        ledger,
+        &mut *relax,
+        grad,
+        energy_grad,
+        external_bias,
+        settle,
+        history,
+        checkpoint_interval,
+        checkpoint,
+        forked,
+    );
+    match escaped {
+        Ok(escaped) if ledger.best.is_finite() && ledger.best < held_best => Ok(escaped),
+        _ => {
+            ledger.best = held_best;
+            ledger.best_state = held_state;
+            ledger.encounters = held_encounters;
+            held.charged = ledger.spent();
+            held.stop = Some(HopStop::of_closed(ledger));
+            Ok(held)
+        }
+    }
+}
+
+fn run_stream<'g, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    mut grad: Option<&mut GradFn<'g>>,
+    mut energy_grad: Option<&mut EnergyGradFn<'g>>,
     external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
     mut settle: Option<Settle<'_>>,
     mut history: Option<&mut dyn HistoryHook>,
@@ -4238,19 +4346,6 @@ where
     // Charges before this call belong to an outer walk. The plateau clock
     // is this walk's own records, not that earlier spend.
     let walk_origin = ledger.spent();
-    // The held chain keeps the caller's stream. The copy is taken before
-    // either walk draws, so the unheld walk is the adaptive search that
-    // stream would have been. It receives only the calls the held chain
-    // has not spent after 2^19 of them. A shorter budget never forks.
-    let mut forked = (cfg.adaptive_search && cfg.stream_hold).then(|| rng.clone());
-    let escape_tail = if forked.is_some() {
-        let room = ledger.remaining();
-        let tail = room.saturating_sub((1usize << 19).min(room));
-        ledger.hold_tail(tail);
-        tail
-    } else {
-        0
-    };
     let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
         relax_off_call_floor(cfg, &mut *relax, led, x, steps)
     };
@@ -5098,7 +5193,7 @@ where
     let mut held_cv: Option<Array1<f64>> = None;
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
-    let mut stop = loop {
+    let stop = loop {
         // An untried escape arm has a wide posterior, so the depth draw
         // selects it at once or, when it loses, still spends the random
         // sample and shifts every later arm. Acceptance scaling and a
@@ -9831,42 +9926,6 @@ where
         *slot = bias;
     }
 
-    if escape_tail > 0 {
-        ledger.release_tail();
-        if !ledger.target_reached()
-            && let Some(forked) = forked.as_mut()
-        {
-            // The forked walk ranks against its own records. Leaving the
-            // held chain's incumbent in place changes which moves count as
-            // improvements, so the fork is not the unheld search.
-            let saved_best = ledger.best;
-            let saved_state = ledger.best_state.clone();
-            ledger.best = f64::INFINITY;
-            ledger.best_state = None;
-            // A leftover partial charge belongs to the held chain. Carrying
-            // it into the fork settles one call early and shifts the record.
-            ledger.fract = 0.0;
-            let mut escape_cfg = cfg.clone();
-            escape_cfg.stream_hold = false;
-            match run_with_gradient(&escape_cfg, start, ledger, relax, grad, forked) {
-                Ok(escape) => {
-                    hops += escape.hops;
-                    orbits_completed += escape.orbits.0;
-                    restarts += escape.restarts;
-                    if !ledger.best.is_finite() || ledger.best > saved_best {
-                        ledger.best = saved_best;
-                        ledger.best_state = saved_state;
-                    }
-                }
-                Err(_) => {
-                    ledger.best = saved_best;
-                    ledger.best_state = saved_state;
-                }
-            }
-            stop = HopStop::of_closed(ledger);
-        }
-    }
-
     Ok(Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
@@ -10410,6 +10469,272 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parked_move_arms_are_closed_in_every_selection_mode() {
+        let mut cfg = Config::for_cluster(3);
+        let context = Array1::from(vec![1.0, 0.5, -0.5]);
+        let open = |arm| arm == 0;
+
+        for mode in 0..4 {
+            cfg.contextual_moves = mode == 0;
+            cfg.arm_selection = if mode == 1 {
+                ArmSelection::Uniform
+            } else {
+                ArmSelection::Posterior
+            };
+            cfg.allocate_moves = mode == 2;
+            cfg.depth_reward = false;
+            let mut contextual = ContextualAllocator::new(3, 3, 0.5);
+            let depth = crate::allocate::DepthAllocator::new(3);
+            let mut thompson = FlooredThompson::new(3);
+            let mut rng = StdRng::seed_from_u64(70 + mode);
+            for _ in 0..32 {
+                let selected = choose_arm(
+                    &cfg,
+                    cfg.contextual_moves.then_some(context.view()),
+                    &mut contextual,
+                    &depth,
+                    &mut thompson,
+                    3,
+                    &mut rng,
+                    open,
+                );
+                assert_eq!(selected, 0, "selection mode {mode} used a parked arm");
+            }
+        }
+    }
+
+    #[test]
+    fn a_reserved_fork_tail_is_released_when_the_start_fails() {
+        let mut cfg = Config::for_cluster(1);
+        cfg.adaptive_search = true;
+        cfg.stream_hold = true;
+        let budget = (1usize << 19) + 17;
+        let mut ledger = Ledger::new(budget);
+        ledger.set_start_attempts(1);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(led.charge());
+            (f64::NAN, x.to_owned())
+        };
+        let mut rng = StdRng::seed_from_u64(71);
+        let result = run(
+            &cfg,
+            Array1::zeros(3).view(),
+            &mut ledger,
+            &mut relax,
+            &mut rng,
+        );
+        assert!(matches!(result, Err(SearchError::NoFiniteStart { .. })));
+        assert_eq!(ledger.budget(), budget);
+    }
+
+    #[test]
+    fn the_winning_fork_supplies_the_result_and_its_diagnostics() {
+        let mut cfg = Config::for_cluster(1);
+        cfg.adaptive_search = true;
+        cfg.stream_hold = true;
+        cfg.max_hops = Some(0);
+        let mut ledger = Ledger::new((1usize << 19) + 4);
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            assert!(led.charge());
+            let spent = led.spent() as f64;
+            (-spent, Array1::from(vec![spent, 0.0, 0.0]))
+        };
+        let mut rng = StdRng::seed_from_u64(72);
+        let outcome = run(
+            &cfg,
+            Array1::zeros(3).view(),
+            &mut ledger,
+            &mut relax,
+            &mut rng,
+        )
+        .expect("both starts are finite");
+
+        assert_eq!(outcome.best, -2.0);
+        assert_eq!(outcome.final_energy, -2.0);
+        assert_eq!(outcome.final_state.as_ref().expect("final state")[0], 2.0);
+        assert_eq!(
+            outcome.improvements.last().expect("fork improvement").3,
+            -2.0
+        );
+    }
+
+    #[test]
+    fn the_fork_reuses_every_supplied_run_path() {
+        struct CountingHistory {
+            observations: usize,
+        }
+        impl HistoryHook for CountingHistory {
+            fn observe(
+                &mut self,
+                _energy: f64,
+                _state: ArrayView1<f64>,
+                _gradient: ArrayView1<f64>,
+            ) -> Option<HistoryReport> {
+                self.observations += 1;
+                None
+            }
+
+            fn mark_accepted(&mut self, _minimum: usize) {}
+
+            fn cost(&self) -> (usize, usize, f64) {
+                (self.observations, 0, 0.0)
+            }
+        }
+
+        fn exercise(budget: usize) -> (usize, usize, usize) {
+            let mut cfg = Config::for_cluster(2);
+            cfg.adaptive_search = true;
+            cfg.stream_hold = true;
+            cfg.max_hops = Some(2);
+            cfg.relax_steps = 1;
+            cfg.screen_steps = 1;
+            let mut bias = BasinBias::new(
+                ClusterFingerprint::for_keying(2, false),
+                cfg.merge_radius,
+                cfg.bias_height,
+                cfg.bias_gamma,
+            );
+            let mut history = CountingHistory { observations: 0 };
+            let mut checkpoints = 0usize;
+            let mut checkpoint = |_: ChainCheckpoint<'_>| {
+                checkpoints += 1;
+                CheckpointAction::Continue
+            };
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(led.charge());
+                let mut state = x.to_owned();
+                state[3] = 1.0 + led.spent() as f64;
+                (-(led.spent() as f64), state)
+            };
+            let mut grad = |_led: &mut Ledger, x: ArrayView1<f64>| Some(Array1::zeros(x.len()));
+            let mut ledger = Ledger::new(budget);
+            let mut rng = StdRng::seed_from_u64(73);
+            run_full(
+                &cfg,
+                Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                None,
+                Some(&mut bias),
+                None,
+                Some(&mut history),
+                Some(1),
+                &mut checkpoint,
+                &mut rng,
+            )
+            .expect("finite streams");
+            (history.observations, checkpoints, bias.n_basins())
+        }
+
+        fn exercise_energy_gradient(budget: usize) -> usize {
+            let mut cfg = Config::for_cluster(2);
+            cfg.adaptive_search = true;
+            cfg.stream_hold = true;
+            cfg.max_hops = Some(2);
+            cfg.relax_steps = 1;
+            let mut hmc =
+                crate::hmc::hop::HopConfig::new(2, crate::hmc::metric::MetricKind::Identity);
+            hmc.max_depth = 1;
+            cfg.hmc = Some(hmc);
+            let mut energy_gradient_calls = 0usize;
+            let mut energy_gradient =
+                |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                    energy_gradient_calls += 1;
+                    led.charge().then(|| {
+                        let energy = x.iter().map(|value| value * value).sum();
+                        (energy, x.mapv(|value| 2.0 * value))
+                    })
+                };
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(led.charge());
+                let energy = x.iter().map(|value| value * value).sum();
+                (energy, x.to_owned())
+            };
+            let mut checkpoint = continue_without_checkpoint;
+            let mut ledger = Ledger::new(budget);
+            let mut rng = StdRng::seed_from_u64(74);
+            run_full(
+                &cfg,
+                Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).view(),
+                &mut ledger,
+                &mut relax,
+                None,
+                Some(&mut energy_gradient),
+                None,
+                None,
+                None,
+                None,
+                &mut checkpoint,
+                &mut rng,
+            )
+            .expect("finite HMC streams");
+            energy_gradient_calls
+        }
+
+        fn exercise_settle(budget: usize) -> usize {
+            let mut cfg = Config::for_cluster(16);
+            cfg.adaptive_search = true;
+            cfg.stream_hold = true;
+            cfg.max_hops = Some(24);
+            cfg.relax_steps = 1;
+            cfg.screen_steps = 1;
+            cfg.staged_quench = true;
+            cfg.settle_iters = 1;
+            cfg.move_library = MoveLibrary::Lean;
+            cfg.arm_selection = ArmSelection::Uniform;
+            cfg.allocate_moves = false;
+            let mut settle_calls = 0usize;
+            let mut settle =
+                |_led: &mut Ledger, x: ArrayView1<f64>, _moved: &[usize], _steps: usize| {
+                    settle_calls += 1;
+                    x.to_owned()
+                };
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(led.charge());
+                (x.iter().map(|value| value * value).sum(), x.to_owned())
+            };
+            let mut checkpoint = continue_without_checkpoint;
+            let mut ledger = Ledger::new(budget);
+            let mut rng = StdRng::seed_from_u64(75);
+            let start = random_cluster(16, 0.7, cfg.min_separation, &mut rng);
+            run_full(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                None,
+                None,
+                None,
+                Some(&mut settle),
+                None,
+                None,
+                &mut checkpoint,
+                &mut rng,
+            )
+            .expect("finite staged streams");
+            settle_calls
+        }
+
+        let held = exercise(1usize << 19);
+        let forked = exercise((1usize << 19) + 64);
+        assert!(forked.0 > held.0, "history was not passed to the fork");
+        assert!(forked.1 > held.1, "checkpoints were not passed to the fork");
+        assert!(
+            forked.2 > held.2,
+            "external bias was not passed to the fork"
+        );
+        assert!(
+            exercise_energy_gradient((1usize << 19) + 64) > exercise_energy_gradient(1usize << 19),
+            "energy-gradient was not passed to the fork"
+        );
+        assert!(
+            exercise_settle((1usize << 19) + 64) > exercise_settle(1usize << 19),
+            "settle was not passed to the fork"
+        );
+    }
 
     #[test]
     fn an_ordinary_target_improvement_uses_the_completed_quench_clock() {
