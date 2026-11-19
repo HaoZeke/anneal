@@ -118,12 +118,29 @@ fn a_basin_stride_is_resolved_only_off_its_default() {
 fn paper_preset_priors_stay_out_of_the_resolved_hash() {
     let cfg = Config::recommended(38);
     let json = cfg.resolved_json().unwrap();
-    for name in ["prior_soap", "homotop_reorder", "general_collective"] {
+    for name in [
+        "prior_soap",
+        "homotop_reorder",
+        "general_collective",
+        "general_symmetry",
+    ] {
         assert!(
             !json.contains(name),
             "{name} at the paper preset stays out of the resolved JSON"
         );
     }
+    let mut general_sym = cfg.clone();
+    general_sym.general_symmetry = true;
+    assert!(
+        general_sym
+            .resolved_json()
+            .unwrap()
+            .contains("\"general_symmetry\":true")
+    );
+    assert_ne!(
+        general_sym.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
     let mut dropped = cfg.clone();
     dropped.prior_soap = false;
     assert!(

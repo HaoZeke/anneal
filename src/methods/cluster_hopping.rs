@@ -6206,8 +6206,12 @@ where
                         None
                     } else {
                         new_incumbent = false;
-                        crate::csm::propose(x.view(), classes)
-                            .map(|projected| projected.coordinates)
+                        let projected = if cfg.general_symmetry {
+                            crate::csm::propose_general(x.view(), classes)
+                        } else {
+                            crate::csm::propose(x.view(), classes)
+                        };
+                        projected.map(|projected| projected.coordinates)
                     }
                 }
                 ContinuousSymmetry::Off => None,

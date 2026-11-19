@@ -129,13 +129,15 @@ pub struct GroupProjection {
     pub coordinates: Array1<f64>,
     /// Normalised squared distance to the average. Zero is exact symmetry.
     pub measure: f64,
-    /// `C_i`, `C_5`, or `D_5h`.
+    /// `C_i`, `C_5`, `D_5h`, `C_n`, or `D_nh`.
     pub group: &'static str,
+    /// Principal rotational order (`2` for inversion).
+    pub order: usize,
 }
 
 /// Projects onto the library group with the lowest measure.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
-    if let Some(cached) = cached_propose(x, classes) {
+    if let Some(cached) = cached_propose(x, classes, false) {
         return cached;
     }
     let orientations = inertia_orientations(x, classes.len())?;
@@ -144,10 +146,10 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     // in the published order C_i, C_5, D_5h.
     clear_op_cache();
     let mut best: Option<(usize, GroupProjection)> = None;
-    for (rank, name, ops) in [
-        (2, "D_5h", d5h_ops()),
-        (1, "C_5", cyclic_about_z(5)),
-        (0, "C_i", inversion_ops()),
+    for (rank, order, name, ops) in [
+        (2, 5, "D_5h", d5h_ops()),
+        (1, 5, "C_5", cyclic_about_z(5)),
+        (0, 2, "C_i", inversion_ops()),
     ] {
         // Inversion is not a fivefold operation, so its permutations are
         // not in the D_5h cache. The nearest-image residual is a lower
@@ -185,16 +187,66 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
                     coordinates,
                     measure,
                     group: name,
+                    order,
                 },
             ));
         }
     }
     let best = best.map(|(_, projection)| projection);
-    store_propose(x, classes, best.as_ref());
+    store_propose(x, classes, false, best.as_ref());
+    best
+}
+
+/// Projects onto `C_i`, `C_n`, or `D_nh` across rotational orders `3..=N`,
+/// selecting the candidate with the lowest continuous symmetry measure.
+pub fn propose_general(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+    if let Some(cached) = cached_propose(x, classes, true) {
+        return cached;
+    }
+    let n = classes.len();
+    let (centred, _, _) = centre_and_scale(x, n)?;
+    let base = principal_orientations(&centred)?;
+    let mut best: Option<(f64, GroupProjection)> = None;
+    let mut consider =
+        |order: usize, name: &'static str, ops: &[[[f64; 3]; 3]], ori: &[[[f64; 3]; 3]]| {
+            let Some((coordinates, measure)) = project(x, classes, ops, ori) else {
+                return;
+            };
+            if closest_pair(&coordinates) < SINGULAR_PAIR {
+                return;
+            }
+            if best
+                .as_ref()
+                .is_none_or(|(incumbent, _)| measure < *incumbent)
+            {
+                best = Some((
+                    measure,
+                    GroupProjection {
+                        coordinates,
+                        measure,
+                        group: name,
+                        order,
+                    },
+                ));
+            }
+        };
+    for order in 3..=n {
+        clear_op_cache();
+        let orientations = with_phase_orientations(&base, order);
+        let dnh = dihedral_horizontal_ops(order);
+        let cn = cyclic_about_z(order);
+        consider(order, "D_nh", &dnh, &orientations);
+        consider(order, "C_n", &cn, &orientations);
+    }
+    clear_op_cache();
+    consider(2, "C_i", &inversion_ops(), &base);
+    let best = best.map(|(_, projection)| projection);
+    store_propose(x, classes, true, best.as_ref());
     best
 }
 
 struct ProposeCache {
+    general: bool,
     coordinates: Vec<u64>,
     classes: Vec<u32>,
     value: Option<GroupProjection>,
@@ -212,18 +264,30 @@ fn same_bits(cached: &[u64], x: ArrayView1<'_, f64>) -> bool {
             .all(|(bits, value)| *bits == value.to_bits())
 }
 
-fn cached_propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<Option<GroupProjection>> {
+fn cached_propose(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    general: bool,
+) -> Option<Option<GroupProjection>> {
     PROPOSE_CACHE.with(|slot| {
         let slot = slot.borrow();
         let cached = slot.as_ref()?;
-        (same_bits(&cached.coordinates, x) && cached.classes == classes)
+        (cached.general == general
+            && same_bits(&cached.coordinates, x)
+            && cached.classes == classes)
             .then(|| cached.value.clone())
     })
 }
 
-fn store_propose(x: ArrayView1<'_, f64>, classes: &[u32], value: Option<&GroupProjection>) {
+fn store_propose(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    general: bool,
+    value: Option<&GroupProjection>,
+) {
     PROPOSE_CACHE.with(|slot| {
         *slot.borrow_mut() = Some(ProposeCache {
+            general,
             coordinates: x.iter().map(|value| value.to_bits()).collect(),
             classes: classes.to_vec(),
             value: value.cloned(),
@@ -550,10 +614,14 @@ fn cyclic_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
 }
 
 fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
-    let turns = cyclic_about_z(5);
+    dihedral_horizontal_ops(5)
+}
+
+fn dihedral_horizontal_ops(order: usize) -> Vec<[[f64; 3]; 3]> {
+    let turns = cyclic_about_z(order);
     let twofold = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
     let mirror = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
-    let mut ops = Vec::with_capacity(20);
+    let mut ops = Vec::with_capacity(4 * turns.len());
     for turn in &turns {
         ops.push(*turn);
         ops.push(matmul(twofold, *turn));
@@ -565,10 +633,9 @@ fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
     ops
 }
 
-fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
-    let (centred, _, _) = centre_and_scale(x, n)?;
-    let axes = jacobi(inertia(&centred));
-    let mut orientations = Vec::with_capacity(6);
+fn principal_orientations(centred: &[[f64; 3]]) -> Option<Vec<[[f64; 3]; 3]>> {
+    let axes = jacobi(inertia(centred));
+    let mut orientations = Vec::with_capacity(3);
     for axis in 0..3 {
         let z_axis = normalize(column(axes, axis))?;
         let mut x_axis = reject(column(axes, (axis + 1) % 3), z_axis);
@@ -577,11 +644,25 @@ fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3
         }
         let x_axis = normalize(x_axis)?;
         let y_axis = normalize(cross(z_axis, x_axis))?;
-        let aligned = [x_axis, y_axis, z_axis];
-        orientations.push(aligned);
-        orientations.push(matmul(rot_z(std::f64::consts::TAU / 5.0), aligned));
+        orientations.push([x_axis, y_axis, z_axis]);
     }
     Some(orientations)
+}
+
+fn with_phase_orientations(base: &[[[f64; 3]; 3]], order: usize) -> Vec<[[f64; 3]; 3]> {
+    let step = rot_z(std::f64::consts::TAU / order as f64);
+    let mut orientations = Vec::with_capacity(2 * base.len());
+    for aligned in base {
+        orientations.push(*aligned);
+        orientations.push(matmul(step, *aligned));
+    }
+    orientations
+}
+
+fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
+    let (centred, _, _) = centre_and_scale(x, n)?;
+    let base = principal_orientations(&centred)?;
+    Some(with_phase_orientations(&base, 5))
 }
 
 fn closest_pair(x: &Array1<f64>) -> f64 {
@@ -782,10 +863,10 @@ mod tests {
         let orientations = inertia_orientations(x, classes.len())?;
         clear_op_cache();
         let mut best: Option<(usize, GroupProjection)> = None;
-        for (rank, name, ops) in [
-            (2, "D_5h", d5h_ops()),
-            (1, "C_5", cyclic_about_z(5)),
-            (0, "C_i", inversion_ops()),
+        for (rank, order, name, ops) in [
+            (2, 5, "D_5h", d5h_ops()),
+            (1, 5, "C_5", cyclic_about_z(5)),
+            (0, 2, "C_i", inversion_ops()),
         ] {
             let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
                 continue;
@@ -807,6 +888,7 @@ mod tests {
                         coordinates,
                         measure,
                         group: name,
+                        order,
                     },
                 ));
             }
