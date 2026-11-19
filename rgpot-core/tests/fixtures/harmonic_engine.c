@@ -40,6 +40,7 @@ struct RgpotEnginePot {
 static int destroyed = 0;
 static int native_calls = 0;
 static int batch_calls = 0;
+static int null_callback_clears = 0;
 #ifdef FATAL_ONCE
 static int fatal_once_fired = 0;
 #endif
@@ -47,6 +48,7 @@ static int fatal_once_fired = 0;
 int fixture_destroy_count(void) { return destroyed; }
 int fixture_native_call_count(void) { return native_calls; }
 int fixture_batch_call_count(void) { return batch_calls; }
+int fixture_null_callback_clear_count(void) { return null_callback_clears; }
 int fixture_unsupported_code(void) { return RGPOT_ENGINE_ERR_UNSUPPORTED; }
 
 int rgpot_engine_abi_version(void) { return FIXTURE_ABI; }
@@ -200,8 +202,33 @@ unsigned long long rgpot_engine_model_state(const RgpotEnginePot *pot) {
 int rgpot_engine_set_callbacks(RgpotEnginePot *pot,
                                const RgpotEngineCallbacks *callbacks) {
   if (pot == NULL) return RGPOT_ENGINE_ERR_INVALID;
-  memset(&pot->callbacks, 0, sizeof pot->callbacks);
-  if (callbacks != NULL) pot->callbacks = *callbacks;
+  if (callbacks == NULL) {
+    null_callback_clears += 1;
+    memset(&pot->callbacks, 0, sizeof pot->callbacks);
+    return RGPOT_ENGINE_OK;
+  }
+  if (pot->callbacks.oracle != NULL) {
+    snprintf(pot->error, sizeof pot->error, "callback replacement refused");
+    return RGPOT_ENGINE_ERR_EVAL;
+  }
+  pot->callbacks = *callbacks;
+  return RGPOT_ENGINE_OK;
+}
+
+int rgpot_engine_hint(RgpotEnginePot *pot, const void *msg, size_t msg_len,
+                      char *errbuf, size_t errlen) {
+  const unsigned char *bytes = msg;
+  if (pot == NULL || msg == NULL || msg_len == 0) {
+    snprintf(errbuf, errlen, "invalid hint");
+    return RGPOT_ENGINE_ERR_INVALID;
+  }
+  if (bytes[0] == 0xff) {
+    snprintf(errbuf, errlen, "hint refused");
+    return RGPOT_ENGINE_ERR_EVAL;
+  }
+  pot->model_state += 1;
+  if (pot->callbacks.on_model_update != NULL)
+    pot->callbacks.on_model_update(pot->callbacks.ctx, pot->model_state);
   return RGPOT_ENGINE_OK;
 }
 

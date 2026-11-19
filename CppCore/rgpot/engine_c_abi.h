@@ -79,7 +79,10 @@ typedef struct RgpotEnginePot RgpotEnginePot;
  * Optional host-side transform applied by the engine to its scratch
  * copy of (positions, box) before evaluation. positions holds
  * 3*nAtoms doubles, box 9 doubles (row-major). Return 0 on success;
- * nonzero aborts the force call with that code.
+ * nonzero aborts the force call with that code. A batch engine may invoke the
+ * transform concurrently for different systems. Each invocation completes
+ * before the force or force_batch call returns; the engine must not retain the
+ * function pointer, user pointer, positions, or box.
  */
 typedef int (*rgpot_engine_coord_transform)(void *user, long nAtoms,
                                             double *positions, double *box);
@@ -235,10 +238,12 @@ typedef struct {
 } RgpotEngineCallbacks;
 
 /**
- * Register host callbacks. The struct is copied; ctx must outlive the
- * potential or a subsequent call replacing it. Learning engines
- * require an oracle before the first evaluation and fail create-time
- * validation without one.
+ * Register host callbacks. A NULL callbacks pointer clears the registration.
+ * On success the struct is copied, and ctx must outlive the potential or a
+ * successful subsequent call replacing or clearing it. On nonzero return the
+ * previous registration remains unchanged and the engine must not retain the
+ * supplied struct or ctx. Learning engines require an oracle before the first
+ * evaluation and fail create-time validation without one.
  */
 RGPOT_ENGINE_API int rgpot_engine_set_callbacks(
     RgpotEnginePot *pot, const RgpotEngineCallbacks *callbacks);

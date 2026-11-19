@@ -168,6 +168,11 @@ fn configured_external_engine_passes_the_abi_check() {
     }
 }
 
+fn load_session(path: &Path) -> EngineSession {
+    // SAFETY: `path` names the fixture compiled from the ABI header above.
+    unsafe { EngineSession::load(path, &config()) }.expect("load the harmonic engine session")
+}
+
 struct FixtureObserver(libloading::Library);
 
 impl FixtureObserver {
@@ -202,6 +207,14 @@ fn batch_calls(path: &Path) -> c_int {
     let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
     let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
         unsafe { library.get(b"fixture_batch_call_count\0") }.expect("batch call count symbol");
+    unsafe { count() }
+}
+
+fn null_callback_clears(path: &Path) -> c_int {
+    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
+    let count: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { library.get(b"fixture_null_callback_clear_count\0") }
+            .expect("null callback clear count symbol");
     unsafe { count() }
 }
 
@@ -252,7 +265,7 @@ impl CoordinateTransform for Shift {
 #[test]
 fn session_transform_changes_only_engine_scratch() {
     let path = build("harmonic_session_transform", &[]);
-    let mut session = EngineSession::load(&path, &config()).expect("load session");
+    let mut session = load_session(&path);
     let positions = [1.0, 2.0, 3.0];
     let mut shift = Shift;
     let answer = session
@@ -309,7 +322,7 @@ impl EngineCallbacks for Oracle {
 fn session_owns_callbacks_and_reports_model_state() {
     let path = build("harmonic_session_callbacks", &[]);
     let record = Arc::new(Mutex::new(CallbackRecord::default()));
-    let mut session = EngineSession::load(&path, &config()).expect("load session");
+    let mut session = load_session(&path);
     session
         .set_callbacks(Some(Box::new(Oracle {
             record: Arc::clone(&record),
@@ -334,6 +347,243 @@ fn session_owns_callbacks_and_reports_model_state() {
 }
 
 #[test]
+fn failed_callback_replacement_keeps_old_registration_and_none_passes_null() {
+    let path = build("harmonic_callback_transaction", &[]);
+    let old = Arc::new(Mutex::new(CallbackRecord::default()));
+    let replacement = Arc::new(Mutex::new(CallbackRecord::default()));
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(Oracle {
+            record: Arc::clone(&old),
+        })))
+        .expect("set initial callbacks");
+
+    let error = session
+        .set_callbacks(Some(Box::new(Oracle {
+            record: Arc::clone(&replacement),
+        })))
+        .expect_err("fixture refuses callback replacement");
+    assert_eq!(
+        error,
+        EngineError::Recoverable {
+            code: 2,
+            message: "callback replacement refused".into(),
+        }
+    );
+    session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 2.0, 3.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect("old oracle remains registered");
+    assert_eq!(
+        old.lock().expect("old callback record").acquisitions,
+        [AcquireReason::Variance]
+    );
+    assert!(replacement
+        .lock()
+        .expect("replacement callback record")
+        .acquisitions
+        .is_empty());
+
+    let before = null_callback_clears(&path);
+    session.set_callbacks(None).expect("clear callbacks");
+    assert_eq!(null_callback_clears(&path), before + 1);
+    let answer = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect("harmonic force after clearing callbacks");
+    assert_eq!(answer.energy.to_bits(), 1.25f64.to_bits());
+}
+
+struct PanicOracle;
+
+impl EngineCallbacks for PanicOracle {
+    fn oracle(&mut self, _request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        panic!("oracle panic for fixture")
+    }
+}
+
+struct PanicModelUpdate;
+
+impl EngineCallbacks for PanicModelUpdate {
+    fn oracle(&mut self, request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        Ok(EngineEvaluation {
+            energy: 0.0,
+            forces: vec![0.0; request.positions.len()],
+        })
+    }
+
+    fn on_model_update(&mut self, _model_state: u64) {
+        panic!("model update panic for fixture")
+    }
+}
+
+struct PanicTransform;
+
+impl CoordinateTransform for PanicTransform {
+    fn transform(
+        &mut self,
+        _positions: &mut [f64],
+        _box_matrix: &mut [f64; 9],
+    ) -> Result<(), EngineFailure> {
+        panic!("transform panic for fixture")
+    }
+}
+
+fn assert_poisoned_without_an_extra_force(session: &mut EngineSession, path: &Path) {
+    let observer = FixtureObserver::open(path);
+    let before = observer.native_calls();
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("fatal session remains poisoned");
+    assert_eq!(
+        error.engine_status(),
+        Some(EngineStatus::FatalInstanceFailure(-1))
+    );
+    assert_eq!(observer.native_calls(), before);
+}
+
+#[test]
+fn oracle_panic_is_fatal_and_poisons_the_session() {
+    let path = build("harmonic_oracle_panic", &[]);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(PanicOracle)))
+        .expect("set panic callback");
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("oracle panic is fatal");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "oracle callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path);
+}
+
+#[test]
+fn transform_panic_is_fatal_and_poisons_the_session() {
+    let path = build("harmonic_transform_panic", &[]);
+    let mut session = load_session(&path);
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            Some(&mut PanicTransform),
+        )
+        .expect_err("transform panic is fatal");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "coordinate transform panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path);
+}
+
+#[test]
+fn hint_reports_status_updates_state_and_surfaces_callback_panics() {
+    let path = build("harmonic_hint", &[]);
+    let mut session = load_session(&path);
+    session.hint(&[1]).expect("valid hint");
+    assert_eq!(session.model_state().expect("model state"), 1);
+    let error = session.hint(&[0xff]).expect_err("fixture refuses hint");
+    assert_eq!(
+        error,
+        EngineError::Recoverable {
+            code: 2,
+            message: "hint refused".into(),
+        }
+    );
+    assert_eq!(session.model_state().expect("model state"), 1);
+
+    let panic_path = build("harmonic_hint_callback_panic", &[]);
+    let mut panic_session = load_session(&panic_path);
+    panic_session
+        .set_callbacks(Some(Box::new(PanicModelUpdate)))
+        .expect("set model-update callback");
+    let error = panic_session
+        .hint(&[1])
+        .expect_err("model-update callback panic is fatal");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "model-update callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut panic_session, &panic_path);
+}
+
+#[test]
+fn native_fatal_status_poisons_an_engine_session() {
+    let path = build("harmonic_session_fatal_once", &["FATAL_ONCE"]);
+    let observer = FixtureObserver::open(&path);
+    let mut session = load_session(&path);
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("fixture fires one fatal status");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -7,
+            message: "fatal once".into(),
+        }
+    );
+    let before = observer.native_calls();
+    let later = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("session remains poisoned");
+    assert_eq!(later, error);
+    assert_eq!(observer.native_calls(), before);
+}
+
+#[test]
 fn typed_status_does_not_retry_from_error_text() {
     assert_eq!(EngineStatus::from_code(0), EngineStatus::Success);
     assert_eq!(
@@ -347,7 +597,7 @@ fn typed_status_does_not_retry_from_error_text() {
 
     let path = build("harmonic_session_no_retry", &[]);
     let observer = FixtureObserver::open(&path);
-    let mut session = EngineSession::load(&path, &config()).expect("load session");
+    let mut session = load_session(&path);
     let before = observer.native_calls();
     let error = session
         .force(
@@ -422,7 +672,9 @@ fn cpmd_fixture_batch_preserves_single_call_bits_and_order() -> Result<(), CpmdF
     let mut boxes = CELL.to_vec();
     boxes.extend_from_slice(&CELL);
 
-    let mut singles = EngineSession::load(Path::new(&engine_path), &config)?;
+    // SAFETY: this feature deliberately trusts the externally supplied CPMD
+    // fixture to implement the versioned engine ABI.
+    let mut singles = unsafe { EngineSession::load(Path::new(&engine_path), &config) }?;
     let first = singles.force(
         &EngineRequest {
             positions: &positions[..6],
@@ -440,7 +692,8 @@ fn cpmd_fixture_batch_preserves_single_call_bits_and_order() -> Result<(), CpmdF
         None,
     )?;
 
-    let mut batch = EngineSession::load(Path::new(&engine_path), &config)?;
+    // SAFETY: the same trusted CPMD fixture is loaded into a fresh instance.
+    let mut batch = unsafe { EngineSession::load(Path::new(&engine_path), &config) }?;
     let answers = batch.force_batch(&numbers, &positions, &boxes, None)?;
     assert_eq!(answers[0].energy.to_bits(), first.energy.to_bits());
     assert_eq!(answers[1].energy.to_bits(), second.energy.to_bits());

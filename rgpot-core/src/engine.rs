@@ -25,6 +25,13 @@
 //! [`PotentialImpl`], the handle the rest of the crate evaluates through, so
 //! an engine library takes part in everything that takes a potential.
 //!
+//! [`EngineSession`] owns callbacks and transform calls around one
+//! [`EnginePotential`]. Loading either type is unsafe because a dynamic
+//! library's initializers and exported signatures cannot be verified by Rust.
+//! Once loaded, session evaluation is safe: callback state is owned for the
+//! native registration lifetime, and transform invocations are serialized
+//! even when an engine parallelizes a batch.
+//!
 //! Dropping the handle destroys the engine instance before unloading its
 //! library. Engine implementations must therefore release library-owned
 //! callbacks, threads, and other process state from `rgpot_engine_destroy`.
@@ -93,7 +100,7 @@ pub struct EngineFailure {
 }
 
 /// A host-side coordinate transform applied to the engine's scratch geometry.
-pub trait CoordinateTransform {
+pub trait CoordinateTransform: Send {
     fn transform(
         &mut self,
         positions: &mut [f64],
@@ -500,9 +507,22 @@ struct Poisoned {
     message: String,
 }
 
-struct TransformCall<'a> {
+struct TransformState<'a> {
     transform: &'a mut dyn CoordinateTransform,
     failure: Option<EngineFailure>,
+}
+
+struct TransformCall<'a> {
+    state: Mutex<TransformState<'a>>,
+}
+
+impl TransformCall<'_> {
+    fn take_failure(&self) -> Option<EngineFailure> {
+        match self.state.lock() {
+            Ok(mut state) => state.failure.take(),
+            Err(mut poisoned) => poisoned.get_mut().failure.take(),
+        }
+    }
 }
 
 unsafe extern "C" fn transform_trampoline(
@@ -514,7 +534,7 @@ unsafe extern "C" fn transform_trampoline(
     if user.is_null() || n_atoms <= 0 || positions.is_null() || box_matrix.is_null() {
         return ENGINE_ERR_INVALID;
     }
-    let call = unsafe { &mut *user.cast::<TransformCall<'_>>() };
+    let call = unsafe { &*user.cast::<TransformCall<'_>>() };
     let count = match usize::try_from(n_atoms) {
         Ok(count) => count,
         Err(_) => return -1,
@@ -524,20 +544,31 @@ unsafe extern "C" fn transform_trampoline(
     };
     let positions = unsafe { std::slice::from_raw_parts_mut(positions, position_len) };
     let box_matrix = unsafe { &mut *box_matrix.cast::<[f64; 9]>() };
+    let mut state = match call.state.lock() {
+        Ok(state) => state,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        call.transform.transform(positions, box_matrix)
+        state.transform.transform(positions, box_matrix)
     })) {
         Ok(Ok(())) => 0,
         Ok(Err(failure)) => {
-            let code = failure.status.code();
-            call.failure = Some(failure);
+            let code = match failure.status {
+                EngineStatus::Success => ENGINE_ERR_INVALID,
+                status => status.code(),
+            };
+            if state.failure.is_none() {
+                state.failure = Some(failure);
+            }
             code
         }
         Err(_) => {
-            call.failure = Some(EngineFailure {
-                status: EngineStatus::FatalInstanceFailure(-1),
-                message: "coordinate transform panicked".into(),
-            });
+            if state.failure.is_none() {
+                state.failure = Some(EngineFailure {
+                    status: EngineStatus::FatalInstanceFailure(-1),
+                    message: "coordinate transform panicked".into(),
+                });
+            }
             -1
         }
     }
@@ -549,7 +580,7 @@ fn transform_parts(
     match transform {
         Some(call) => (
             Some(transform_trampoline),
-            (call as *mut TransformCall<'_>).cast(),
+            (call as *const TransformCall<'_>).cast_mut().cast(),
         ),
         None => (None, std::ptr::null_mut()),
     }
@@ -673,8 +704,10 @@ impl EnginePotential {
         let mut forces = vec![0.0; 3 * n_atoms];
         let mut energy = 0.0;
         let mut transform = transform.map(|transform| TransformCall {
-            transform,
-            failure: None,
+            state: Mutex::new(TransformState {
+                transform,
+                failure: None,
+            }),
         });
         let (transform_fn, transform_user) = transform_parts(&mut transform);
         let code = unsafe {
@@ -691,7 +724,8 @@ impl EnginePotential {
                 transform_user,
             )
         };
-        self.answer_with_failure(code, transform.and_then(|call| call.failure))?;
+        let failure = transform.as_ref().and_then(TransformCall::take_failure);
+        self.answer_with_failure(code, failure)?;
         finite(energy, &forces)?;
         Ok(EngineEvaluation { energy, forces })
     }
@@ -741,8 +775,10 @@ impl EnginePotential {
         let mut forces = vec![0.0; positions.len()];
         let mut energies = vec![0.0; n_systems];
         let mut transform = transform.map(|transform| TransformCall {
-            transform,
-            failure: None,
+            state: Mutex::new(TransformState {
+                transform,
+                failure: None,
+            }),
         });
         let (transform_fn, transform_user) = transform_parts(&mut transform);
         let code = unsafe {
@@ -760,7 +796,8 @@ impl EnginePotential {
                 transform_user,
             )
         };
-        self.answer_with_failure(code, transform.and_then(|call| call.failure))?;
+        let failure = transform.as_ref().and_then(TransformCall::take_failure);
+        self.answer_with_failure(code, failure)?;
         let mut out = Vec::with_capacity(n_systems);
         for (energy, block) in energies.iter().zip(forces.chunks_exact(3 * n_atoms)) {
             finite(*energy, block)?;
@@ -1154,7 +1191,7 @@ unsafe extern "C" fn model_update_trampoline(ctx: *mut c_void, model_state: u64)
     }
 }
 
-/// Owning safe session over one version-checked engine instance.
+/// Owning session over one version-checked engine instance.
 pub struct EngineSession {
     engine: EnginePotential,
     callbacks: Option<Box<CallbackState>>,
@@ -1162,7 +1199,14 @@ pub struct EngineSession {
 
 impl EngineSession {
     /// Load a version-compatible engine and create one session.
-    pub fn load(path: &Path, config: &[u8]) -> Result<Self, EngineError> {
+    ///
+    /// # Safety
+    ///
+    /// The library is trusted to run initializers safely and to implement the
+    /// versioned `rgpot_engine_*` ABI exactly. The version and optional ABI
+    /// stamp checks cannot prove that arbitrary machine code obeys that
+    /// contract.
+    pub unsafe fn load(path: &Path, config: &[u8]) -> Result<Self, EngineError> {
         let engine = unsafe { EnginePotential::load(path, config) }?;
         Ok(Self {
             engine,
@@ -1195,6 +1239,9 @@ impl EngineSession {
     }
 
     /// Register owned learning-engine callbacks, or clear them with `None`.
+    ///
+    /// `None` is represented by a null callback-table pointer. If native
+    /// replacement fails, the previous owned callbacks remain registered.
     pub fn set_callbacks(
         &mut self,
         callbacks: Option<Box<dyn EngineCallbacks>>,
@@ -1232,9 +1279,13 @@ impl EngineSession {
         };
         let code = unsafe { set_callbacks(self.engine.handle.as_ptr(), raw_ptr) };
         let direct = next.as_ref().and_then(|state| state.take_failure());
-        self.engine.answer_with_failure(code, direct)?;
-        self.callbacks = next;
-        Ok(())
+        if code == 0 {
+            // The native side now owns a copy of `raw`, so keep its context
+            // alive even if a synchronously reported callback failure poisons
+            // the session.
+            self.callbacks = next;
+        }
+        self.engine.answer_with_failure(code, direct)
     }
 
     /// Monotone model state, or zero for a static engine.
@@ -1283,7 +1334,8 @@ impl EngineSession {
                 message: text_of(&error),
             })
         };
-        self.engine.answer_with_failure(code, direct)
+        let answer = self.engine.answer_with_failure(code, direct);
+        self.finish(answer)
     }
 
     fn finish<T>(&mut self, answer: Result<T, EngineError>) -> Result<T, EngineError> {
@@ -1544,4 +1596,94 @@ unsafe extern "C" fn engine_hessian_vector_callback(
             }
         }
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingTransform {
+        calls: AtomicUsize,
+    }
+
+    impl CoordinateTransform for CountingTransform {
+        fn transform(
+            &mut self,
+            _positions: &mut [f64],
+            _box_matrix: &mut [f64; 9],
+        ) -> Result<(), EngineFailure> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            std::thread::yield_now();
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn null_context_trampolines_are_rejected_or_noops() {
+        assert_eq!(
+            unsafe {
+                transform_trampoline(
+                    std::ptr::null_mut(),
+                    1,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            ENGINE_ERR_INVALID
+        );
+        assert_eq!(
+            unsafe {
+                oracle_trampoline(
+                    std::ptr::null_mut(),
+                    1,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            },
+            ENGINE_ERR_INVALID
+        );
+        unsafe {
+            acquire_trampoline(std::ptr::null_mut(), 1);
+            model_update_trampoline(std::ptr::null_mut(), 1);
+        }
+    }
+
+    #[test]
+    fn transform_trampoline_serializes_concurrent_batch_invocations() {
+        const THREADS: usize = 8;
+        let mut transform = CountingTransform {
+            calls: AtomicUsize::new(0),
+        };
+        let call = TransformCall {
+            state: Mutex::new(TransformState {
+                transform: &mut transform,
+                failure: None,
+            }),
+        };
+        let user = (&call as *const TransformCall<'_>).addr();
+        std::thread::scope(|scope| {
+            for _ in 0..THREADS {
+                scope.spawn(move || {
+                    let mut positions = [0.0; 3];
+                    let mut box_matrix = [0.0; 9];
+                    let code = unsafe {
+                        transform_trampoline(
+                            user as *mut c_void,
+                            1,
+                            positions.as_mut_ptr(),
+                            box_matrix.as_mut_ptr(),
+                        )
+                    };
+                    assert_eq!(code, 0);
+                });
+            }
+        });
+        assert!(call.take_failure().is_none());
+        drop(call);
+        assert_eq!(transform.calls.load(Ordering::SeqCst), THREADS);
+    }
 }
