@@ -9,6 +9,8 @@ The install check runs meson install --destdir and prints every staged
 file. It fails when a staged file is an implementation source. .cc is
 the suffix the header tree was leaking. The other suffixes are the ones
 the old globs were meant to drop. Installed libraries stay allowed.
+A .py module of the installed Python package stays allowed. A .py file
+under the include tree does not.
 
 Usage:
   check_installed_sources.py --list DIR
@@ -39,8 +41,19 @@ IMPL_SUFFIXES = {
 }
 
 # The prefix is supposed to contain libraries. Only sources fail the
-# staged tree.
+# staged tree. A .py file is a header leak only when it lands in the
+# include tree. The Python package installs its own modules, and those
+# are not implementation sources.
 STAGED_SOURCE_SUFFIXES = IMPL_SUFFIXES - {".o", ".a", ".so"}
+
+
+def is_leaked_source(path: str) -> bool:
+    suffix = Path(path).suffix
+    if suffix not in STAGED_SOURCE_SUFFIXES:
+        return False
+    if suffix == ".py":
+        return "include" in Path(path).parts
+    return True
 
 
 def list_impl(root: Path) -> int:
@@ -90,11 +103,7 @@ def check_install(build: Path, meson: list[str]) -> int:
         )
         for path in files:
             print(path)
-        bad = [
-            path
-            for path in files
-            if Path(path).suffix in STAGED_SOURCE_SUFFIXES
-        ]
+        bad = [path for path in files if is_leaked_source(path)]
         if bad:
             print("installed implementation sources:", file=sys.stderr)
             for path in bad:
