@@ -16,6 +16,7 @@ records the calls, the wall time, the best energy, and the cap.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -220,11 +221,18 @@ def main() -> int:
         print("seed is outside 2000-2011", file=sys.stderr)
         return 2
     check_pair()
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
-    ).stdout.strip()
+    revision = os.environ.get("ASE_LJ75_REVISION", "").strip()
+    if revision:
+        if not re.fullmatch(r"[0-9a-f]{40}", revision):
+            print("ASE_LJ75_REVISION must be a full lowercase commit SHA", file=sys.stderr)
+            return 2
+    else:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        if arm == "anneal":
+            revision = ANNEAL_REVISION
     if arm == "anneal":
-        revision = ANNEAL_REVISION
         row = run_anneal(seed, BUDGET)
     else:
         cap_text = os.environ.get("ASE_LJ75_WALL_CAP", "")

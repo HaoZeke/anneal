@@ -41,7 +41,12 @@ case "$SEED" in
 esac
 
 mkdir -p "$WORK/runs" "$WORK/home"
-ROWS=$ROOT/bench/ase-lj75/rows.csv
+ROWS=${ASE_LJ75_ROWS:-$ROOT/bench/ase-lj75/rows.csv}
+REV=${ASE_LJ75_REVISION:-}
+if [[ -n $REV && ! $REV =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ASE_LJ75_REVISION must be a full lowercase commit SHA" >&2
+  exit 2
+fi
 if [[ -f $ROWS ]] && grep -q ",${ARM},${SEED}," "$ROWS"; then
   echo "keep existing $ARM seed $SEED"
   exit 0
@@ -69,9 +74,9 @@ ANNEAL=${ANNEAL_LJ75:-/work/target-gate/release/examples/leave_gate}
 PY=${PYTHON:-python3}
 sudo -n unshare --uts sh -c "hostname bench; \
   export HOME=$WORK/home; \
-  export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1; \
+  export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 RAYON_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1; \
   export OMP_PROC_BIND=TRUE OMP_PLACES=cores PYTHONUNBUFFERED=1; \
-  export ASE_LJ75_WORK=$WORK/runs ANNEAL_LJ75=$ANNEAL ASE_LJ75_WALL_CAP=$CAP; \
+  export ASE_LJ75_WORK=$WORK/runs ANNEAL_LJ75=$ANNEAL ASE_LJ75_WALL_CAP=$CAP ASE_LJ75_REVISION=$REV; \
   exec taskset -c 0 $PY $HERE/run_one.py $ARM $SEED" \
   > "$WORK/runs/${ARM}-${SEED}.stdout" 2> "$WORK/runs/${ARM}-${SEED}.stderr"
 
