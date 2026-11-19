@@ -2948,21 +2948,6 @@ if not meson.is_subproject()
         exclude_directories: ['__pycache__', 'rpc/local', 'Morse/detail'],
         exclude_files: _install_exclude,
     )
-    if get_option('with_tests')
-        _install_meson = find_program('meson', required: false)
-        if _install_meson.found()
-            test(
-                'installed_sources',
-                _install_py,
-                args: [
-                    meson.current_source_dir() / 'tests' / 'check_installed_sources.py',
-                    meson.project_build_root(),
-                    _install_meson.full_path(),
-                ],
-                kwargs: _rt_kw['installed_sources'],
-            )
-        endif
-    endif
 
     # The .pc always ships: consumers discover whatever this build enabled
     # through the RGPOT_HAS_* cflags rather than by the file's absence.

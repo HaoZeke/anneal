@@ -58,12 +58,12 @@ def list_impl(root: Path) -> int:
     return 0
 
 
-def check_install(build: Path, meson: str) -> int:
+def check_install(build: Path, meson: list[str]) -> int:
     with tempfile.TemporaryDirectory(prefix="rgpot-destdir-") as dest:
         try:
             proc = subprocess.run(
                 [
-                    meson,
+                    *meson,
                     "install",
                     "-C",
                     str(build),
@@ -104,14 +104,20 @@ def check_install(build: Path, meson: str) -> int:
     return 0
 
 
+def _meson_argv(argv: list[str]) -> list[str]:
+    if len(argv) == 1 and Path(argv[0]).name.lower().startswith("python"):
+        return [argv[0], "-m", "mesonbuild.mesonmain"]
+    return argv
+
+
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--list":
         return list_impl(Path(sys.argv[2]))
-    if len(sys.argv) == 3:
-        return check_install(Path(sys.argv[1]), sys.argv[2])
+    if len(sys.argv) >= 3 and sys.argv[1] != "--list":
+        return check_install(Path(sys.argv[1]), _meson_argv(sys.argv[2:]))
     print(
         "usage: check_installed_sources.py --list DIR\n"
-        "       check_installed_sources.py BUILDDIR MESON",
+        "       check_installed_sources.py BUILDDIR MESON [MESON_ARGS...]",
         file=sys.stderr,
     )
     return 2
