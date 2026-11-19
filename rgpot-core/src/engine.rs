@@ -1249,16 +1249,27 @@ impl EngineSession {
     /// Send a typed runtime hint message to a learning engine.
     pub fn hint(&mut self, message: &[u8]) -> Result<(), EngineError> {
         self.engine.check_alive()?;
+        if message.is_empty() {
+            return Err(EngineError::Invalid(
+                "an engine hint cannot be empty".into(),
+            ));
+        }
         let hint = self
             .engine
             .symbols
             .hint
             .ok_or_else(|| unsupported_symbol("rgpot_engine_hint"))?;
+        let mut aligned = vec![0_u64; message.len().div_ceil(8)];
+        for (word, chunk) in aligned.iter_mut().zip(message.chunks(8)) {
+            let mut bytes = [0_u8; 8];
+            bytes[..chunk.len()].copy_from_slice(chunk);
+            *word = u64::from_ne_bytes(bytes);
+        }
         let mut error = vec![0 as c_char; ERROR_CAPACITY];
         let code = unsafe {
             hint(
                 self.engine.handle.as_ptr(),
-                message.as_ptr().cast(),
+                aligned.as_ptr().cast(),
                 message.len(),
                 error.as_mut_ptr(),
                 error.len(),
