@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -58,6 +59,16 @@ OTHER_LABEL = {"au55": "Au\\(_{55}\\)", "cu38": "Cu\\(_{38}\\)", "cu12au26": "Cu
 TIP4P_LABEL = {"tip4p8": "(H\\(_2\\)O)\\(_8\\)", "tip4p15": "(H\\(_2\\)O)\\(_{15}\\)",
                "tip4p20": "(H\\(_2\\)O)\\(_{20}\\)", "tip4p21": "(H\\(_2\\)O)\\(_{21}\\)",
                "tip4p25": "(H\\(_2\\)O)\\(_{25}\\)"}
+
+
+def commit_held(revision: str) -> bool:
+    """The revision is a commit object in this repository."""
+    if not revision or revision in {"unknown", "latest"}:
+        return False
+    return subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+        cwd=ROOT, capture_output=True,
+    ).returncode == 0
 
 
 def show_s(value: float) -> str:
@@ -103,6 +114,10 @@ def budget_tex(budget: str) -> str:
 
 
 def gofee_block() -> str:
+    """The Lennard-Jones GOFEE table, or nothing when a quoted row cites an absent commit."""
+    seeds = [row for row in read(GOFEE / "results.csv") if row["system"] in LJ_LABEL]
+    if not seeds or any(not commit_held(row["head"]) for row in seeds):
+        return ""
     rows = read(GOFEE / "summary.csv")
     body = []
     for system in LJ_LABEL:
@@ -375,7 +390,17 @@ def sc_tests() -> dict[str, dict[str, str]]:
     return tests
 
 
+def sc_gmin_quotable() -> bool:
+    """The corrected GMIN harness of every Sutton-Chen system is a commit this repository holds."""
+    return all(
+        commit_held(anneal["harness_revision"]) and commit_held(gmin["harness_revision"])
+        for anneal, gmin in sc_pairs()
+    )
+
+
 def sc_block() -> str:
+    if not sc_gmin_quotable():
+        return _sc_anneal_block()
     body = []
     tests = sc_tests()
     seed_rows = read(SC_SEEDS)
@@ -431,7 +456,84 @@ def sc_block() -> str:
     ])
 
 
+def _sc_anneal_block() -> str:
+    """This setting only. The GMIN arm of the comparison cites a commit this repository does not hold."""
+    body = []
+    seed_rows = read(SC_SEEDS)
+    harnesses = set()
+    for anneal, _gmin in sc_pairs():
+        if not commit_held(anneal["harness_revision"]):
+            continue
+        system = anneal["system"]
+        harnesses.add(anneal["harness_revision"][:8])
+        calls = [float(row["evals_to_hit"]) for row in seed_rows
+                 if row["system"] == system and row["arm"] == "anneal"
+                 and row["harness_revision"] == anneal["harness_revision"]]
+        if len(calls) != 12:
+            raise SystemExit(f"{system}: expected 12 held anneal seed rows, found {len(calls)}")
+        body.append(" & ".join([
+            sc_label(system), budget_tex(anneal["budget"]), anneal["hits_over_n"],
+            show_calls_median(type7_median(calls)), show_s(float(anneal["wall_median_s"])),
+        ]) + " \\\\")
+    shown = ", ".join(f"\\texttt{{{item}}}" for item in sorted(harnesses))
+    return "\n".join([
+        "\\begin{table}",
+        "\\caption{This setting on reduced Sutton--Chen clusters.",
+        "Form \\(n\\)-\\(m\\) and size \\(N\\); seeds 2000--2011; one run at a time on one core.",
+        "Calls is the median force-call count with a miss at the budget, and Wall the",
+        f"median wall in seconds over the 12 runs. Every row is harness {shown}.}}",
+        "\\label{tab:sc}",
+        "\\centering",
+        "\\scriptsize",
+        "\\setlength{\\tabcolsep}{2.5pt}%",
+        "\\begin{tabular}{@{}lrrrr@{}}",
+        "\\toprule",
+        "Form, \\(N\\) & Budget & Hits & Calls & Wall (s) \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
+def _sc_anneal_si_block() -> str:
+    body = []
+    harnesses = set()
+    for anneal, _gmin in sc_pairs():
+        if not commit_held(anneal["harness_revision"]):
+            continue
+        harnesses.add(anneal["harness_revision"][:8])
+        body.append(" & ".join([
+            sc_label(anneal["system"]), f"\\({anneal['reference']}\\)",
+            f"{1e6 * float(anneal['pot_per_eval_s']):.2f}",
+            f"{1e6 * float(anneal['outside_per_eval_s']):.2f}",
+        ]) + " \\\\")
+    shown = ", ".join(f"\\texttt{{{item}}}" for item in sorted(harnesses))
+    return "\n".join([
+        "\\begin{table}",
+        "\\caption{Reference energies and the cost per force call of this setting on Sutton--Chen.",
+        "The reference is the Doye--Wales global minimum in reduced units.",
+        "Inside is the median time per call inside the energy and gradient, and",
+        "Outside the median time per call spent elsewhere, in microseconds.",
+        f"Every row is harness {shown}.}}",
+        "\\label{tab:sc-si}",
+        "\\centering",
+        "\\small",
+        "\\begin{tabular}{@{}lrrr@{}}",
+        "\\toprule",
+        "Form, \\(N\\) & Reference & Inside (\\(\\mu\\)s) & Outside (\\(\\mu\\)s) \\\\",
+        "\\midrule",
+        *body,
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+
+
 def sc_si_block() -> str:
+    if not sc_gmin_quotable():
+        return _sc_anneal_si_block()
     body = []
     for anneal, gmin in sc_pairs():
         body.append(" & ".join([
@@ -555,6 +657,10 @@ BLOCKS = {
 
 def splice(text: str, marks: tuple[str, str], block: str) -> str:
     start, end = marks
+    if not block:
+        if start in text or end in text:
+            raise SystemExit(f"{start!r}: the file still marks an empty block")
+        return text
     if text.count(start) != 1 or text.count(end) != 1:
         raise SystemExit(f"{start!r}: the file needs exactly one block")
     head, rest = text.split(start, 1)

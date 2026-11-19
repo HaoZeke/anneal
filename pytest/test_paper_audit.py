@@ -167,14 +167,21 @@ def test_a_drifted_table_cell_is_reported():
 
 
 def test_a_drifted_ase_table_cell_is_reported():
+    """An ASE table row, or its caption revision, fails when the commit is not in this repository."""
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.SI)
-    old = "& 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 &"
-    assert tex.count(old) == 1
-    audit.text_cache[audit_mod.SI] = tex.replace(old, "& 246.5 & 11/12 & 0/12 & 0/12 & 0 & 12 &")
-    audit_mod.manuscript_ase(audit)
-    audit_mod.generated_tables(audit)
-    assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
+    insert = (
+        "\\begin{tabular}{ll}\n"
+        "LJ\\(_{38}\\) & 12/12 \\\\\n"
+        "\\end{tabular}\n"
+        "This work is anneal \\texttt{1ce3ab64}.\n"
+    )
+    audit.text_cache[audit_mod.SI] = audit.text(audit_mod.SI).replace(
+        r"\label{sec:ase}", "\\label{sec:ase}\n" + insert, 1,
+    )
+    audit_mod.manuscript_gmin(audit)
+    shown = {row[4] for row in _unreachable_number(audit)}
+    assert "1ce3ab64" in shown
+    assert "12/12" in shown
 
 
 def test_a_drifted_morse_ase_table_cell_is_reported():
@@ -1420,8 +1427,8 @@ def test_labels_are_numbered_as_achemso_numbers_them():
 def test_an_undefined_cross_reference_or_a_stale_label_file_is_reported(monkeypatch):
     audit = audit_mod.Audit()
     text = audit.text(audit_mod.TEX)
-    assert text.count("Table~\\siref{tab:gofee}") >= 1
-    audit.text_cache[audit_mod.TEX] = text.replace("Table~\\siref{tab:gofee}", "Table~\\siref{tab:gofee-moved}", 1)
+    assert text.count("Table~\\siref{tab:ase-morse}") >= 1
+    audit.text_cache[audit_mod.TEX] = text.replace("Table~\\siref{tab:ase-morse}", "Table~\\siref{tab:ase-morse-moved}", 1)
     labels = cross_labels()
     monkeypatch.setattr(audit_mod, "load_script", lambda name, path: labels)
     monkeypatch.setattr(labels, "stale", lambda: ["labels-si.tex"])
@@ -1958,11 +1965,18 @@ def test_a_mark_does_not_excuse_an_unreachable_panel_number():
     assert any(row[4] == "2 of 12" for row in _unreachable_number(audit))
 
 
-def test_reachable_panel_numbers_are_not_flagged_as_unheld():
+def test_a_quote_of_an_unreachable_sutton_chen_number_fails():
+    """A Sutton--Chen GMIN wall from an absent harness fails the same way."""
     audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
+        r"\label{sec:sc}",
+        "\\label{sec:sc}\n12-6, 38 & GMIN wall 0.471, harness \\texttt{f9d1ac05}.\n",
+        1,
+    )
     audit_mod.manuscript_gmin(audit)
-    assert _unreachable_number(audit) == []
-    assert any(row[2] == "a printed number traces to a commit this repository holds" for row in audit.results)
+    shown = {row[4] for row in _unreachable_number(audit)}
+    assert "f9d1ac05" in shown
+    assert "0.471" in shown
 
 
 def test_an_unmarked_table_quote_of_an_unreachable_panel_row_fails():
@@ -2000,3 +2014,10 @@ def test_a_stale_mark_on_a_reachable_panel_row_fails():
     audit.text_cache[audit_mod.TEX] = text.replace(old, r"& \StalePanel{lj38}12/12 & 10615.5 &", 1)
     audit_mod.manuscript_gmin(audit)
     assert not any(row[1].endswith("lj38") for row in _unreachable_number(audit))
+
+
+def test_reachable_panel_numbers_are_not_flagged_as_unheld():
+    audit = audit_mod.Audit()
+    audit_mod.manuscript_gmin(audit)
+    assert _unreachable_number(audit) == []
+    assert any(row[2] == "a printed number traces to a commit this repository holds" for row in audit.results)

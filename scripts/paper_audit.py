@@ -713,6 +713,114 @@ def _gmin_caption(audit: Audit) -> str:
     return text[start:label]
 
 
+_UPSTREAM_GMIN = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+_REVISION_COLUMNS = frozenset({
+    "code_revision", "harness_revision", "anneal_sha", "anneal_head", "anneal_revision", "head",
+})
+
+
+def unheld_revision_prefixes(audit: Audit) -> set[str]:
+    """Eight-character prefixes of anneal or harness commits this repository does not hold.
+
+    The upstream GMIN revision is not an anneal commit. A row may cite it beside a harness this
+    repository does hold.
+    """
+    prefixes: set[str] = set()
+    for path in (ROOT / "bench").rglob("*.csv"):
+        try:
+            with path.open(newline="") as handle:
+                rows = list(csv.DictReader(line for line in handle if line.strip() and not line.startswith("#")))
+        except (OSError, csv.Error, UnicodeDecodeError):
+            continue
+        for row in rows:
+            for column, value in row.items():
+                if column not in _REVISION_COLUMNS or not re.fullmatch(r"[0-9a-f]{8,40}", value or ""):
+                    continue
+                if value == _UPSTREAM_GMIN or _UPSTREAM_GMIN.startswith(value):
+                    continue
+                if not commit_held(value):
+                    prefixes.add(value[:8])
+    return prefixes
+
+
+def _window_has_token(text: str, label: str, tokens: set[str]) -> str | None:
+    flat = collapse(text)
+    for match in re.finditer(re.escape(label), flat):
+        window = flat[max(0, match.start() - 160):match.end() + 220]
+        for token in sorted(tokens, key=len, reverse=True):
+            if re.search(rf"(?<!\d){re.escape(token)}", window):
+                return token
+    return None
+
+
+def unheld_bench_quotes(audit: Audit) -> None:
+    """Every printed number from a bench record traces to commits this repository holds.
+
+    The GMIN panel has its own span check. This one covers the other records the paper quotes:
+    ASE, CREST, AGOX, GOFEE, TIP4P, Sutton--Chen, and the Morse panel, and any printed revision.
+    """
+    documents = "\n".join(audit.text(path) for path in (TEX, SI, COVER))
+    for prefix in sorted(unheld_revision_prefixes(audit)):
+        if prefix in documents:
+            audit.record(False, PAPER, HELD_NUMBER, "absent", prefix)
+    panel = load_script("ase_quote_panel", "scripts/ase_panel/summarize.py")
+    groups = ase_groups(audit)
+    ase_span = _between(audit.text(SI), r"\label{sec:ase}", r"\section{AGOX")
+    ase_span += "\n" + "\n".join(
+        sentence for sentence in _sentences(documents) if _ase_sentence(sentence)
+    )
+    for system in panel.SYSTEMS:
+        arms = ("recommended", "ase_bh", "ase_mh", "anneal")
+        rows = [row for arm in arms for row in groups.get((system, arm), [])]
+        if not rows or all(commit_held(row["code_revision"]) for row in rows):
+            continue
+        tokens = set()
+        for arm in arms:
+            arm_rows = groups.get((system, arm), [])
+            if not arm_rows:
+                continue
+            tokens.add(frac(arm_rows).replace(" ", ""))
+            tokens.add(frac(arm_rows))
+            tokens.add(f"{hits_of(arm_rows)} of {len(arm_rows)}")
+        hit = _window_has_token(ase_span, panel.TEX_LABELS[system], tokens)
+        if hit:
+            audit.record(False, f"{SI} {system}", HELD_NUMBER, "absent", hit)
+    h2h = load_script("h2h_quote", "paper/jctc/scripts/h2h_tables.py")
+    if not h2h.sc_gmin_quotable():
+        sc_span = _between(audit.text(TEX), r"\label{sec:sc}", r"\label{sec:other-panels}")
+        sc_span += "\n" + _between(audit.text(SI), r"\section{Sutton", r"\section{The Atomic")
+        for anneal, gmin in h2h.sc_pairs():
+            if commit_held(gmin["harness_revision"]):
+                continue
+            wall = h2h.show_s(float(gmin["wall_median_s"]))
+            anneal_wall = h2h.show_s(float(anneal["wall_median_s"]))
+            tokens = {wall, f"{gmin['hits']}/12", f"{gmin['hits']} of 12"} - {anneal_wall, f"{anneal['hits']}/12",
+                                                                              f"{anneal['hits']} of 12"}
+            hit = _window_has_token(sc_span, h2h.sc_label(anneal["system"]), tokens)
+            if hit:
+                audit.record(False, f"{TEX} {anneal['system']}", HELD_NUMBER, "absent", hit)
+    gofee_rows = audit.rows("bench/ase-gofee-h2h/results.csv")
+    if gofee_rows and any(not commit_held(row["head"]) for row in gofee_rows):
+        summary = {(row["system"], row["arm"]): row for row in audit.rows("bench/ase-gofee-h2h/summary.csv")}
+        gofee_span = _between(audit.text(SI), r"\label{sec:gofee}", r"\section{")
+        gofee_span += "\n" + "\n".join(sentence for sentence in _sentences(documents) if "GOFEE" in sentence)
+        labels = {"lj38": "LJ\\(_{38}\\)", "lj55": "LJ\\(_{55}\\)", "lj75": "LJ\\(_{75}\\)"}
+        for system, label in labels.items():
+            tokens = set()
+            for arm in ("paper", "ase_bh", "ase_mh", "agox_gofee"):
+                row = summary.get((system, arm))
+                if row is None:
+                    continue
+                tokens.add(f"{row['hits']}/{row['n']}")
+                tokens.add(f"{row['hits']} of {row['n']}")
+                tokens.add(f"{float(row['wall_median_s']):.1f}")
+            hit = _window_has_token(gofee_span, label, tokens)
+            if hit:
+                audit.record(False, f"{SI} {system}", HELD_NUMBER, "absent", hit)
+    if not any(row[2] == HELD_NUMBER and row[0] == "DRIFT" for row in audit.results):
+        audit.record(True, PAPER, HELD_NUMBER, "absent", "absent")
+
+
 def unheld_panel_numbers(audit: Audit, panel: object, groups: dict) -> None:
     """A printed GMIN-panel count, call total, wall, or test comes from a commit this repository holds."""
     quoted = set(quoted_systems(panel, groups))
@@ -752,6 +860,7 @@ def unheld_panel_numbers(audit: Audit, panel: object, groups: dict) -> None:
                 audit.record(False, f"{path} {system}", HELD_NUMBER, "absent", hit[0])
         if not found and system not in quoted_in_table:
             audit.record(True, f"{TEX} {system}", HELD_NUMBER, "absent", "absent")
+    unheld_bench_quotes(audit)
 
 
 def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
@@ -1132,22 +1241,29 @@ def manuscript_ase(audit: Audit) -> None:
         atoms = panel.SYSTEMS[system][0] if system in panel.SYSTEMS else nonlj.SPEC[system][0]
         audit.cell(f"ase panel {system}", "budget by atom count", str(by_atoms.get(atoms, 4_000_000)),
                    float(budgets[system]))
-    audit.said(PAPER, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms, \\(1\\times 10^{6}\\) for 55, "
-                    "and \\(4\\times 10^{6}\\) for 98 atoms and above, on one core of one host.")
+    audit.said(PAPER, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms and \\(1\\times 10^{6}\\) for 55, "
+                    "on one core of one host.")
     audit.said("scripts/ase_panel/run_one.py", 'ASE_VERSION = "3.29.0"')
     audit.said("bench/ase-nonlj/README.md", "ASE basin hopping and minima hopping use the ASE 3.29 constructor defaults")
     audit.said(PAPER, "Environment 3.29.0 at its constructor defaults")
     audit.said("scripts/ase_panel/run_one.py", "Au55 is Gupta::copper_gold through asg_eval serve, the same potential "
                                                "the anneal arms evaluate.")
 
-    # tab:ase and the combined recommended summary.
+    # tab:ase and the combined recommended summary. The table is absent when a quoted arm
+    # cites a commit this repository does not hold; the summary files stay.
     revision = sorted({r["code_revision"] for s in ASE_PANEL for r in groups[(s, "recommended")]})
     audit.record(len(revision) >= 1, PAPER, "tab:ase recommended revisions", "at least one", str(len(revision)))
-    rev_ase_text = ", ".join(revision)
-    audit.said(PAPER, f"This work is anneal \\texttt{{{rev_ase_text}}}.")
+    ase_held = bool(panel.tex_table())
     by_label = {label: s for s, label in panel.TEX_LABELS.items()}
     shown = []
-    for cells in tex_table(audit, PAPER, "tab:ase"):
+    if ase_held:
+        rev_ase_text = ", ".join(revision)
+        audit.said(PAPER, f"This work is anneal \\texttt{{{rev_ase_text}}}.")
+    else:
+        present = "\\label{tab:ase}" in audit.text(SI) or "\\label{tab:ase}" in audit.text(TEX)
+        audit.record(not present, SI, "tab:ase is absent when its commits are not held", "absent",
+                     "present" if present else "absent")
+    for cells in (tex_table(audit, PAPER, "tab:ase") if ase_held else []):
         system = by_label.get(cells[0])
         where = f"{PAPER} tab:ase {system}"
         if system is None or len(cells) != 13:
@@ -1165,7 +1281,8 @@ def manuscript_ase(audit: Audit) -> None:
                        median([float(r["wall_s"]) for r in groups[(system, arm)]]))
         for cell, arm in zip(cells[11:13], ASE_ARMS):
             audit.cell(where, f"Fisher p against {arm}", cell, p(system, arm))
-    audit.cell(PAPER, "tab:ase lines", " ".join(shown), " ".join(ASE_PANEL))
+    if ase_held:
+        audit.cell(PAPER, "tab:ase lines", " ".join(shown), " ".join(ASE_PANEL))
     summary = "bench/ase-recommended/summary.csv"
     for line in audit.rows(summary):
         system, arm = line["system"], line["arm"]
@@ -1242,38 +1359,39 @@ def manuscript_ase(audit: Audit) -> None:
     mh_walls = sum(stops(s, "ase_mh") for s in ASE_PANEL)
     audit.cell(PAPER, "tab:ase minima-hopping runs at the cap", str(mh_runs), float(mh_walls))
     bh = [(s, stops(s, "ase_bh")) for s in ASE_PANEL if stops(s, "ase_bh")]
-    audit.said(PAPER, f"Minima hopping stopped at the cap on all {mh_runs} runs of Table~\\ref{{tab:ase}}, and basin "
-                    f"hopping on {sum(n for _, n in bh)}: {series(f'{n} on {label(s)}' for s, n in bh)}.")
     spent = [s for s in ASE_PANEL if stops(s, "ase_bh", "budget") == len(groups[(s, "ase_bh")])]
     for s in spent:
         audit.cell(PAPER, f"{s} basin hopping charged the budget on every seed", "4000000",
                    float(min(int(r["charged"]) for r in groups[(s, "ase_bh")])))
-    audit.said(PAPER, f"On {series(label(s) for s in spent)} basin hopping spent the full \\(4\\times 10^{{6}}\\) calls "
-                    "on every seed.")
     runs = []
     for s in lj:
         if runs and runs[-1][1] == hits(s, "recommended"):
             runs[-1][0].append(s)
         else:
             runs.append(([s], hits(s, "recommended")))
-    audit.said(PAPER, "This setting hits " + series(f"{' and '.join(label(s) for s in names)} on {n} of 12"
-                                                  for names, n in runs) + ".")
     bh_hits = [s for s in ASE_PANEL if hits(s, "ase_bh")]
     mh_hits = [s for s in ASE_PANEL if hits(s, "ase_mh")]
     audit.cell(PAPER, "basin hopping hits one cluster", "lj55", " ".join(bh_hits))
     audit.cell(PAPER, "minima hopping hits none", "", " ".join(mh_hits))
-    audit.said(PAPER, f"Basin hopping hits {label('lj55')} on {hits('lj55', 'ase_bh')} of 12 and no other cluster, and "
-                    "minima hopping hits none.")
     below = [s for s in lj if max(p(s, a) for a in ASE_ARMS) < 0.05]
-    audit.said(PAPER, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
     audit.cell(PAPER, "Fisher below 0.05 on every Lennard-Jones cluster", " ".join(lj), " ".join(below))
     au_hits = [hits("au55", a) for a in ("anneal", "recommended", *ASE_ARMS)]
     audit.cell(PAPER, "no arm of the ASE panel hits Au55", "0", float(sum(au_hits)))
-    audit.said(PAPER, f"No arm hits {label('au55')}.")
     au_ref = references["au55"]
     au_gaps = [f"{gap('au55', a, au_ref):.3f}" for a in ("recommended", *ASE_ARMS)]
-    audit.said(PAPER, f"There the median best energy lies {au_gaps[0]}~eV above the reference for this setting, "
-                    f"{au_gaps[1]}~eV for basin hopping, and {au_gaps[2]}~eV for minima hopping.")
+    if ase_held:
+        audit.said(PAPER, f"Minima hopping stopped at the cap on all {mh_runs} runs of Table~\\ref{{tab:ase}}, and basin "
+                        f"hopping on {sum(n for _, n in bh)}: {series(f'{n} on {label(s)}' for s, n in bh)}.")
+        audit.said(PAPER, f"On {series(label(s) for s in spent)} basin hopping spent the full \\(4\\times 10^{{6}}\\) calls "
+                        "on every seed.")
+        audit.said(PAPER, "This setting hits " + series(f"{' and '.join(label(s) for s in names)} on {n} of 12"
+                                                      for names, n in runs) + ".")
+        audit.said(PAPER, f"Basin hopping hits {label('lj55')} on {hits('lj55', 'ase_bh')} of 12 and no other cluster, and "
+                        "minima hopping hits none.")
+        audit.said(PAPER, f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters.")
+        audit.said(PAPER, f"No arm hits {label('au55')}.")
+        audit.said(PAPER, f"There the median best energy lies {au_gaps[0]}~eV above the reference for this setting, "
+                        f"{au_gaps[1]}~eV for basin hopping, and {au_gaps[2]}~eV for minima hopping.")
     morse_walls = all(r["stop"] == "wall" for s in MORSE_PANEL for a in ASE_ARMS for r in groups[(s, a)])
     audit.record(morse_walls, PAPER, "every Morse ASE run stopped at the cap", "every", "every" if morse_walls else "not every")
     audit.said(PAPER, "Every basin-hopping and minima-hopping run of Table~\\ref{tab:ase-morse} stopped at the cap.")
@@ -1307,9 +1425,13 @@ def manuscript_ase(audit: Audit) -> None:
     au_gmin = f"{hits_of(gmin_au[0])} of {len(gmin_au[0])}", f"{hits_of(gmin_au[1])} of {len(gmin_au[1])}"
     audit.cell(PAPER, "Morse hits of this setting against ASE", "12 12 12 5", " ".join(str(n) for n in m))
     audit.cell(PAPER, "Morse hits of the ASE arms", "0", float(max(morse_ase)))
-    audit.said(PAPER, f"and against the basin hopping and the minima hopping of the Atomic Simulation Environment on "
-                    f"{len(lj)} Lennard-Jones clusters, Gupta {label('au55')}, and {len(MORSE_PANEL)} Morse clusters "
-                    "\\cite{wales1997,larsenAse2017,goedecker2004}.")
+    if ase_held:
+        audit.said(PAPER, f"and against the basin hopping and the minima hopping of the Atomic Simulation Environment on "
+                        f"{len(lj)} Lennard-Jones clusters, Gupta {label('au55')}, and {len(MORSE_PANEL)} Morse clusters "
+                        "\\cite{wales1997,larsenAse2017,goedecker2004}.")
+    else:
+        audit.said(PAPER, "and against the basin hopping and the minima hopping of the Atomic Simulation Environment on "
+                        f"{len(MORSE_PANEL)} Morse clusters \\cite{{wales1997,larsenAse2017,goedecker2004}}.")
     quoted = quoted_systems(gmin_panel, gmin)
     kinds = [name for name, present in (
         ("Lennard-Jones", any(s.startswith("lj") for s in quoted)),
@@ -1324,13 +1446,14 @@ def manuscript_ase(audit: Audit) -> None:
 
     full = [s for s in ASE_PANEL if stops(s, "ase_bh") == len(groups[(s, "ase_bh")])]
     part = [s for s in ASE_PANEL if 0 < stops(s, "ase_bh") < len(groups[(s, "ase_bh")])]
-    audit.said(PAPER, "Minima hopping reached its cap on every run, and basin hopping on every run of "
-                    f"{series([*(label(s) for s in full), 'the Morse clusters'])} and "
-                    f"{' and '.join(partial(s) for s in part)}.")
+    if ase_held:
+        audit.said(PAPER, "Minima hopping reached its cap on every run, and basin hopping on every run of "
+                        f"{series([*(label(s) for s in full), 'the Morse clusters'])} and "
+                        f"{' and '.join(partial(s) for s in part)}.")
+        audit.said(PAPER, f"On {series(label(s) for s in spent)} basin hopping spent the budget before the cap and missed on "
+                        "every seed.")
     missed = [s for s in spent if hits(s, "ase_bh") == 0]
     audit.cell(PAPER, "basin hopping spent the budget and missed", " ".join(spent), " ".join(missed))
-    audit.said(PAPER, f"On {series(label(s) for s in spent)} basin hopping spent the budget before the cap and missed on "
-                    "every seed.")
     audit.said(PAPER, f"Against the Atomic Simulation Environment this setting hits {morse_sentence} and "
                     f"{label('m55r14')} on {m[3]} of 12, where neither ASE arm hits.")
 
@@ -1358,9 +1481,10 @@ def manuscript_ase(audit: Audit) -> None:
                             f"\\texttt{{{sorted(rev_gmin)[0][:8]}}}.")
     rev_gmin_text = sorted(rev_gmin)[0][:8]
     audit.cell(PAPER, "the GMIN panel revision", "1ce3ab64", rev_gmin_text)
-    audit.said(PAPER, f"On {label('au55')} the ASE panel hits {hits('au55', 'recommended')} of 12 for this setting, "
-                    f"as do both ASE arms, and the median best energy of this setting lies {au_gaps[0]}~eV above "
-                    "the reference.")
+    if ase_held:
+        audit.said(PAPER, f"On {label('au55')} the ASE panel hits {hits('au55', 'recommended')} of 12 for this setting, "
+                        f"as do both ASE arms, and the median best energy of this setting lies {au_gaps[0]}~eV above "
+                        "the reference.")
     audit.cell(PAPER, "revisions behind the two Au55 counts", "1", float(len(rev_gmin | rev_ase)))
     step = 1e-4
 
@@ -1377,8 +1501,11 @@ def manuscript_ase(audit: Audit) -> None:
     ahead_morse = [s for s in MORSE_PANEL if hits(s, "recommended") > max(hits(s, a) for a in ASE_ARMS)]
     audit.cell(PAPER, "ahead of both ASE arms on every Lennard-Jones and Morse cluster",
                " ".join((*lj, *MORSE_PANEL)), " ".join((*ahead_lj, *ahead_morse)))
-    audit.said(PAPER, f"this setting hits more seeds on all {len(ahead_lj)} Lennard-Jones clusters and all "
-                    f"{len(ahead_morse)} Morse clusters, and no arm hits {label('au55')}.")
+    if ase_held:
+        audit.said(PAPER, f"this setting hits more seeds on all {len(ahead_lj)} Lennard-Jones clusters and all "
+                        f"{len(ahead_morse)} Morse clusters, and no arm hits {label('au55')}.")
+    else:
+        audit.said(PAPER, f"this setting hits more seeds on all {len(ahead_morse)} Morse clusters")
 
 
 def panel_references(audit: Audit) -> None:
@@ -1450,14 +1577,14 @@ def generated_tables(audit: Audit) -> None:
             ("tab:sc", h2h.MARKS["sc"], h2h.sc_block(), text),
             ("tab:sc-si", h2h.MARKS["sc-si"], h2h.sc_si_block(), si_text)):
         found = source.split(marks[0], 1)[1].split(marks[1], 1)[0].strip("\n") if marks[0] in source else ""
-        ok = found == written
+        ok = (marks[0] not in source) if not written else found == written
         audit.record(ok, SI if source is si_text else PAPER, f"{label} is the generator's block",
                      "as written" if ok else "edited by hand", "as written")
     for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
                                   ("tab:gmin", gmin.TEX_MARKS, want),
                                   ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
                                   ("tab:ase-morse", nonlj.TEX_MARKS, nonlj.tex_table(nonlj.load_rows()))):
-        ok = block(marks) == written
+        ok = (marks[0] not in text and marks[0] not in si_text) if not written else block(marks) == written
         audit.record(ok, PAPER, f"{label} is the summariser's block", "as written" if ok else "edited by hand", "as written")
 
 
@@ -1479,11 +1606,17 @@ def sutton_chen(audit: Audit) -> None:
     audit.cell(PAPER, "Sutton-Chen clusters where GMIN has the lower median wall", "7", float(gmin_faster))
     audit.cell(PAPER, "Sutton-Chen per-call ratio inside the potential, low", "3.4", min(ratios))
     audit.cell(PAPER, "Sutton-Chen per-call ratio inside the potential, high", "4.9", max(ratios))
-    for path in (PAPER, COVER):
-        audit.said(path, f"On {spelled(len(pairs))} Sutton--Chen clusters, this setting hits at least as many seeds as "
-                         f"GMIN on each, while GMIN has the lower median wall on {spelled(gmin_faster)}.")
-    audit.said(PAPER, "This setting hits more seeds on 5 of the 9 clusters and the two tie on 4.")
-    audit.said(PAPER, "Per call, this setting spends 3.4 to 4.9 times as long inside the potential as GMIN;")
+    if h2h.sc_gmin_quotable():
+        for path in (PAPER, COVER):
+            audit.said(path, f"On {spelled(len(pairs))} Sutton--Chen clusters, this setting hits at least as many seeds as "
+                             f"GMIN on each, while GMIN has the lower median wall on {spelled(gmin_faster)}.")
+        audit.said(PAPER, "This setting hits more seeds on 5 of the 9 clusters and the two tie on 4.")
+        audit.said(PAPER, "Per call, this setting spends 3.4 to 4.9 times as long inside the potential as GMIN;")
+    else:
+        audit.said(PAPER, "This setting hits 12 of 12 on the three forms at 38 atoms and on the 12-6 and "
+                          "9-6 forms at 55 atoms.")
+        audit.said(PAPER, "It hits 5 of 12 on the 10-8 form at 55 atoms and on the 12-6 form at 80 atoms, "
+                          "4 of 12 on the 10-8 form at 80 atoms, and 7 of 12 on the 9-6 form at 80 atoms.")
     audit.said(PAPER, "\\path{bench/metal-cluster-h2h/sc-n12/seeds.csv} holds the 324 seed rows")
     sc_seeds = audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
     audit.cell(PAPER, "Sutton-Chen seed rows", "324", float(len(sc_seeds)))
@@ -1500,12 +1633,19 @@ def sutton_chen(audit: Audit) -> None:
         g_calls = [float(r["evals_to_hit"]) for r in sc_seeds
                    if r["system"] == sys_name and r["arm"] == "gmin"
                    and r["harness_revision"] == g_row["harness_revision"]]
-        want_a = gmin_panel.show_calls(median(a_calls))
-        want_g = gmin_panel.show_calls(median(g_calls))
-        audit.record(cells[4] == want_a, f"{PAPER} tab:sc {sys_name}", "anneal median calls formatted like tab:gmin",
-                     cells[4], want_a)
-        audit.record(cells[5] == want_g, f"{PAPER} tab:sc {sys_name}", "GMIN median calls formatted like tab:gmin",
-                     cells[5], want_g)
+        if h2h.sc_gmin_quotable():
+            want_a = gmin_panel.show_calls(median(a_calls))
+            want_g = gmin_panel.show_calls(median(g_calls))
+            audit.record(cells[4] == want_a, f"{PAPER} tab:sc {sys_name}", "anneal median calls formatted like tab:gmin",
+                         cells[4], want_a)
+            audit.record(cells[5] == want_g, f"{PAPER} tab:sc {sys_name}", "GMIN median calls formatted like tab:gmin",
+                         cells[5], want_g)
+        else:
+            want_a = h2h.show_calls_median(h2h.type7_median(a_calls))
+            audit.record(cells[2] == a_row["hits_over_n"], f"{PAPER} tab:sc {sys_name}",
+                         "anneal hits", cells[2] if len(cells) > 2 else "", a_row["hits_over_n"])
+            audit.record(len(cells) > 3 and cells[3] == want_a, f"{PAPER} tab:sc {sys_name}",
+                         "anneal median calls", cells[3] if len(cells) > 3 else "", want_a)
     sutton_chen_pvalues(audit)
 
 
@@ -3844,35 +3984,40 @@ def manuscript_new(audit: Audit) -> None:
     audit.cell(PAPER, "ASE basin hopping and GOFEE hit none of the three", "0 0 0 0 0 0",
                " ".join(summary[(s, a)]["hits"] for a in ("ase_bh", "agox_gofee") for s in lj))
     mh = [summary[(s, "ase_mh")]["hits"] for s in lj]
-    audit.said(PAPER, "ASE basin hopping hits none of them, and GOFEE hits none.")
     audit.cell(PAPER, "ASE minima hopping hits none of LJ75", "0", float(mh[2]))
-    audit.said(PAPER, f"ASE minima hopping hits LJ\\(_{{38}}\\) on {mh[0]} of 6, LJ\\(_{{55}}\\) on {mh[1]} of 6, and "
-                    "LJ\\(_{75}\\) on none.")
-    audit.said(PAPER, "This setting hits all three clusters on 6 of 6 seeds.")
     g = [float(summary[(s, "agox_gofee")]["wall_median_s"]) for s in lj]
     a = [float(summary[(s, "paper")]["wall_median_s"]) for s in lj]
-    audit.said(PAPER, f"The median wall of a GOFEE run is {s_(g[0])}~s on LJ\\(_{{38}}\\), {s_(g[1])}~s on "
-                    f"LJ\\(_{{55}}\\), and {s_(g[2])}~s on LJ\\(_{{75}}\\), against {s_(a[0])}~s, {s_(a[1])}~s, "
-                    f"and {s_(a[2])}~s for this setting.")
     audit.record(all(x > y for x, y in zip(g, a)), PAPER, "the GOFEE median wall is higher on all three",
                  "higher", "higher" if all(x > y for x, y in zip(g, a)) else "not")
-    audit.said(PAPER, "its median wall is higher than that of this setting on all three")
-    rows = audit.rows(f"{gofee_dir}/results.csv")
+    gofee_rows = audit.rows(f"{gofee_dir}/results.csv")
+    gofee_held = bool(gofee_rows) and all(commit_held(r["head"]) for r in gofee_rows)
+    if gofee_held:
+        audit.said(PAPER, "ASE basin hopping hits none of them, and GOFEE hits none.")
+        audit.said(PAPER, f"ASE minima hopping hits LJ\\(_{{38}}\\) on {mh[0]} of 6, LJ\\(_{{55}}\\) on {mh[1]} of 6, and "
+                        "LJ\\(_{75}\\) on none.")
+        audit.said(PAPER, "This setting hits all three clusters on 6 of 6 seeds.")
+        audit.said(PAPER, f"The median wall of a GOFEE run is {s_(g[0])}~s on LJ\\(_{{38}}\\), {s_(g[1])}~s on "
+                        f"LJ\\(_{{55}}\\), and {s_(g[2])}~s on LJ\\(_{{75}}\\), against {s_(a[0])}~s, {s_(a[1])}~s, "
+                        f"and {s_(a[2])}~s for this setting.")
+        audit.said(PAPER, "its median wall is higher than that of this setting on all three")
+    rows = gofee_rows
     heads = {r["head"][:8] for r in rows if r["head"] != "unknown"}
     unknown = sum(r["head"] == "unknown" for r in rows)
-    audit.said(PAPER, f"The rows of Table~\\ref{{tab:gofee}} span {len(heads)} repository heads.")
-    audit.said(
-        PAPER,
-        f"\\texttt{{results.csv}} records those heads on {len(rows) - unknown} rows.\n"
-        f"\\path{{bench/unreachable-revisions.csv}} indexes the other {unknown} rows.",
-    )
+    if gofee_held:
+        audit.said(PAPER, f"The rows of Table~\\ref{{tab:gofee}} span {len(heads)} repository heads.")
+        audit.said(
+            PAPER,
+            f"\\texttt{{results.csv}} records those heads on {len(rows) - unknown} rows.\n"
+            f"\\path{{bench/unreachable-revisions.csv}} indexes the other {unknown} rows.",
+        )
     mapped = sum(int(r["rows"]) for r in committed_revision_map()
                  if r["row_file"] == f"{gofee_dir}/results.csv" and r["revision"] == UNRECORDED)
     audit.cell(PAPER, "the GOFEE rows with an unrecorded head in the revision map", str(unknown), float(mapped))
     versions = dict(line.split("=", 1) for line in audit.text(f"{gofee_dir}/versions.txt").split() if "=" in line)
     audit.said(PAPER, f"The versions are ASE {versions['ase']} and AGOX {versions['agox']}.")
     audit.cell(PAPER, "the GOFEE and minima-hopping wall cap on LJ75 is 2 hours", "2", float(versions["lj75_mh_gofee_wall_cap_s"]) / 3600)
-    audit.said(PAPER, "ASE minima hopping and GOFEE on LJ\\(_{75}\\) also stop at a wall cap of 2 hours")
+    if gofee_held:
+        audit.said(PAPER, "ASE minima hopping and GOFEE on LJ\\(_{75}\\) also stop at a wall cap of 2 hours")
     other = [r for r in audit.rows(f"{gofee_dir}/asg2-summary.csv") if r["source"] == "measured"]
     audit.cell(SI, "the other panel systems of the GOFEE table", "au55 cu38 cu12au26 sw10 tc10 tip4p8",
                " ".join(dict.fromkeys(r["system"] for r in other)))
@@ -4213,7 +4358,7 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("scripts/ase_panel/enter_bench.sh", "ROWS=${ASE_PANEL_ROWS:-$DEFAULT_ROWS}")
     audit.said("scripts/ase_nonlj/enter_bench.sh", 'echo "keep existing $SYSTEM $ARM seed $SEED"')
     audit.said(PAPER, "Both ASE panels can be searched again from this repository")
-    audit.said(PAPER, "\\path{bench/unreachable-revisions.csv}, and that file lists\neach revision with the rows that cite it.")
+    audit.said(PAPER, "\\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.")
     morse_revs = {r["code_revision"] for r in audit.rows("bench/ase-nonlj/rows.csv")}
     newest = "9a30f3190b3bb7040c675a904f8388eb68224151"
     audit.record(newest in morse_revs, PAPER, "the Morse ASE rows carry the revision the commands build", newest[:8],
@@ -4525,19 +4670,22 @@ def manuscript_followups(audit: Audit) -> None:
     names = {"lj38": "LJ\\(_{38}\\)", "lj55": "LJ\\(_{55}\\)", "lj98": "LJ\\(_{98}\\)", "lj104": "LJ\\(_{104}\\)",
              "lj150": "LJ\\(_{150}\\)", "au55": "Au\\(_{55}\\)"}
     hits = [hits_of(ase[(system, "anneal")]) for system in ASE_PANEL]
-    audit.said(PAPER, f"Its hits are {', '.join(map(str, hits[:-1]))}, and {hits[-1]} of 12 on "
-                    f"{', '.join(names[s] for s in ASE_PANEL[:-1])}, and {names['au55']}.")
+    panel = load_script("ase_panel_followups", "scripts/ase_panel/summarize.py")
+    if panel.tex_table():
+        audit.said(PAPER, f"Its hits are {', '.join(map(str, hits[:-1]))}, and {hits[-1]} of 12 on "
+                        f"{', '.join(names[s] for s in ASE_PANEL[:-1])}, and {names['au55']}.")
     audit.cell(PAPER, "cluster-preset arm rows per system", "12", float(len(ase[("lj38", "anneal")])))
 
     summary = audit.rows("bench/ase-recommended/summary.csv")
     caps = {r["system"]: float(r["wall_cap_s"]) for r in summary if r["arm"] == "recommended"}
     gofee = {(r["system"], r["arm"]): r for r in audit.rows("bench/ase-gofee-h2h/summary.csv")}
     mh38, mh55 = gofee[("lj38", "ase_mh")], gofee[("lj55", "ase_mh")]
-    audit.said(PAPER, f"ASE minima hopping on 0 of 12 seeds at LJ\\(_{{38}}\\) and LJ\\(_{{55}}\\), because its runs stop at wall caps "
-                    f"of {caps['lj38']:.3f} and {caps['lj55']:.3f}~s.")
-    audit.said(PAPER, f"They hit LJ\\(_{{38}}\\) on {mh38['hits']} of {mh38['n']} seeds in a median wall of "
-                    f"{float(mh38['wall_median_s']):.1f}~s and LJ\\(_{{55}}\\) on {mh55['hits']} of {mh55['n']} in "
-                    f"{float(mh55['wall_median_s']):.1f}~s, both far beyond those caps.")
+    if panel.tex_table():
+        audit.said(PAPER, f"ASE minima hopping on 0 of 12 seeds at LJ\\(_{{38}}\\) and LJ\\(_{{55}}\\), because its runs stop at wall caps "
+                        f"of {caps['lj38']:.3f} and {caps['lj55']:.3f}~s.")
+        audit.said(PAPER, f"They hit LJ\\(_{{38}}\\) on {mh38['hits']} of {mh38['n']} seeds in a median wall of "
+                        f"{float(mh38['wall_median_s']):.1f}~s and LJ\\(_{{55}}\\) on {mh55['hits']} of {mh55['n']} in "
+                        f"{float(mh55['wall_median_s']):.1f}~s, both far beyond those caps.")
     audit.cell(PAPER, "gofee ASE MH LJ38 and LJ55 are uncapped", "0 0", f"{mh38['capped']} {mh55['capped']}")
     audit.cell(PAPER, "gofee walls exceed the panel caps", "1", float(float(mh38["wall_median_s"]) > caps["lj38"]
                                                                   and float(mh55["wall_median_s"]) > caps["lj55"]))
@@ -4723,8 +4871,9 @@ def manuscript_review(audit: Audit) -> None:
         dropped = sorted({key.split("/")[0] for key in tests if tests[key] < 0.05 and key not in kept})
         audit.cell(PAPER, f"ASE {family} tests", str(len(tests)), float(len(tests)))
         audit.cell(PAPER, f"ASE {family} clusters below 0.05 before Holm and not after", dropped_want, " ".join(dropped))
-    audit.said(PAPER, "Under Holm's correction for those 10 tests, LJ\\(_{150}\\), at \\(p=0.037\\) against each arm, "
-                    "does not stay below 0.05.")
+    if load_script("ase_panel_holm", "scripts/ase_panel/summarize.py").tex_table():
+        audit.said(PAPER, "Under Holm's correction for those 10 tests, LJ\\(_{150}\\), at \\(p=0.037\\) against each arm, "
+                        "does not stay below 0.05.")
     audit.said(PAPER, "Under Holm's correction for those 8 tests, M\\(_{55}\\) at \\(\\rho=14\\) does not stay below 0.05.")
     runner = audit.text("scripts/ase_panel/run_one.py")
     audit.record("BasinHopping(\n                atoms,\n                logfile=None," in runner and "temperature=" not in runner

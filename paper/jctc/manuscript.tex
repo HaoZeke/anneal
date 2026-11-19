@@ -44,8 +44,6 @@ Each comparison counts hits of the published minimum, force calls, and wall
 time on one core.
 Against GMIN on Lennard-Jones clusters, this setting hits
 more seeds on 6 of 8 and GMIN hits more on one.
-On nine Sutton--Chen clusters, this setting hits at least as many seeds as
-GMIN on each, while GMIN has the lower median wall on seven.
 A uniform draw over the moves hits as often as the depth posterior, so these
 seeds do not show that the posterior helps.
 \end{abstract}
@@ -56,7 +54,7 @@ On the Lennard-Jones pair potential the number of minima grows quickly with the 
 Here, we keep one fixed setting across all sizes, with a move library that does not change with the atom count and a reduced temperature of \(0.8\), the value Wales and Doye used \cite{wales1997}.
 Below 98 atoms the quench chooses between the plain potential and one diameter penalty, and at 98 atoms and above the penalty is absent.
 At every size, a stall does not replace the walker with a random cluster.
-Section~\ref{sec:results} runs this setting against GMIN on 8 Lennard-Jones clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 5 Lennard-Jones clusters, Gupta Au\(_{55}\), and 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
+Section~\ref{sec:results} runs this setting against GMIN on 8 Lennard-Jones clusters, and against the basin hopping and the minima hopping of the Atomic Simulation Environment on 4 Morse clusters \cite{wales1997,larsenAse2017,goedecker2004}.
 GMIN hits more seeds on 1 of the 8, LJ\(_{150}\).
 
 This article does not claim a new move.
@@ -395,7 +393,7 @@ The Atomic Simulation Environment provides a basin-hopping optimizer and a
 minima-hopping optimizer, which are the tools a user reaches for first.
 \cite{larsenAse2017,goedecker2004}
 Section~\ref{sec:other-panels} scores both on the clusters of
-Tables~\siref{tab:ase} and~\siref{tab:ase-morse}.
+Table~\siref{tab:ase-morse}.
 AGOX searches with a local surrogate, and later releases add
 replica exchange.
 \cite{christiansenAgox2022}
@@ -403,8 +401,6 @@ GOFEE is the surrogate search of Bisbo and Hammer.
 \cite{bisboEfficientGlobalStructure2020}
 A surrogate replaces force calls with model fits, so the cost of a run is not in
 its force calls alone.
-Section~\ref{sec:other-panels} runs GOFEE on the same seeds, with its wall time
-beside its hits.
 
 The Supporting Information sets out how each scored code differs from this setting and why the other
 recent searches of these clusters are not scored.
@@ -588,52 +584,57 @@ LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 1477851 & 237.2
 
 \subsection{Sutton--Chen clusters at equal workload}
 \label{sec:sc}
-Table~\ref{tab:sc} runs this setting against GMIN \texttt{aac1548a} on the
-reduced Sutton--Chen 12-6, 10-8, and 9-6 forms at 38, 55, and 80 atoms, on
-seeds 2000--2011.
+Table~\ref{tab:sc} gives this setting on the reduced Sutton--Chen 12-6, 10-8, and
+9-6 forms at 38, 55, and 80 atoms, on seeds 2000--2011.
 \cite{suttonLongrangeFinnisSinclair1990}
-Both arms start each seed from one start file and receive one force-call budget, and the Supporting
-Information gives the protocol.
+Each seed starts from one start file and receives one force-call budget, and the Supporting
+Information gives the protocol and the reference energies.
 
-This setting hits more seeds on 5 of the 9 clusters and the two tie on 4.
-Fisher's test on hits is below 0.05 on 3, the 10-8 form at 38 atoms and the
-12-6 and 9-6 forms at 80 atoms, and GMIN hits more on none.
-GMIN has the lower median wall on 7 of the 9, and this setting on the 10-8 and
-9-6 forms at 38 atoms.
-Per call, this setting spends 3.4 to 4.9 times as long inside the potential
-as GMIN; the Supporting Information gives both times and the reference energies.
+This setting hits 12 of 12 on the three forms at 38 atoms and on the 12-6 and
+9-6 forms at 55 atoms.
+It hits 5 of 12 on the 10-8 form at 55 atoms and on the 12-6 form at 80 atoms,
+4 of 12 on the 10-8 form at 80 atoms, and 7 of 12 on the 9-6 form at 80 atoms.
+The median force-call count, with a miss counted at the budget, is 10344.5 on
+the 12-6 form at 38 atoms, 11193 on the 10-8 form, and 9177 on the 9-6 form.
+At 55 atoms the same counts are 65397.5, 1000000, and 17280, and at 80 atoms
+they are 1000000, 1000000, and 773712.5.
+The median wall is 0.518~s, 0.504~s, and 0.399~s at 38 atoms, 5.104~s,
+81.861~s, and 1.316~s at 55 atoms, and 147.5~s, 155.3~s, and 117.3~s at 80 atoms.
+The reference energies of those nine clusters, in reduced units, are
+\(-35419.9804\), \(-10117.2454\), and \(-8917.7056\) at 38 atoms,
+\(-52884.6806\), \(-14814.5225\), and \(-13217.8963\) at 55 atoms, and
+\(-78414.6271\), \(-21819.9952\), and \(-19560.8966\) at 80 atoms.
+One force call of this setting takes 39.97, 38.61, and 36.86 microseconds
+inside the potential at 38 atoms, and 4.85, 4.64, and 4.55 microseconds
+outside it.
+At 55 atoms those times are 70.70, 72.84, and 65.34 inside and 8.34, 11.18,
+and 7.83 outside.
+At 80 atoms they are 127.14, 136.26, and 131.05 inside and 20.49, 21.02, and
+19.91 outside.
 
 % sc table: start
 \begin{table}
-\caption{This work against GMIN on reduced Sutton--Chen clusters at equal workload.
-Form \(n\)-\(m\) and size \(N\); seeds 2000--2011; the same start file and
-the same force-call budget for both arms; one run at a time on one core.
+\caption{This setting on reduced Sutton--Chen clusters.
+Form \(n\)-\(m\) and size \(N\); seeds 2000--2011; one run at a time on one core.
 Calls is the median force-call count with a miss at the budget, and Wall the
-median wall in seconds over the 12 runs.
-\(p_\mathrm{F}\) is the two-sided Fisher exact test on hits, and \(p_\mathrm{U}\)
-the two-sided continuity-corrected asymptotic Mann--Whitney test on calls and on wall
-against the Doye--Wales Sutton--Chen GMIN rows, as
-\texttt{scripts/metal\_h2h/sc\_n12\_pvalues.py} writes them to
-\texttt{bench/metal-cluster-h2h/sc-n12/pvalues.csv}.}
+median wall in seconds over the 12 runs. Every row is harness \texttt{e3ed7dad}.}
 \label{tab:sc}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{2.5pt}%
-\begin{tabular}{@{}lrrrrrrrrrr@{}}
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
- & & \multicolumn{2}{c}{Hits} & \multicolumn{2}{c}{Calls} & \multicolumn{2}{c}{Wall (s)} & & \multicolumn{2}{c}{\(p_\mathrm{U}\)} \\
-\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}\cmidrule(lr){10-11}
-Form, \(N\) & Budget & This work & GMIN & This work & GMIN & This work & GMIN & \(p_\mathrm{F}\) & Calls & Wall \\
+Form, \(N\) & Budget & Hits & Calls & Wall (s) \\
 \midrule
-12-6, 38 & \(4\times 10^{5}\) & 12/12 & 12/12 & 10344.5 & 48872.5 & 0.518 & 0.471 & 1 & \(4.3\times 10^{-3}\) & 0.89 \\
-10-8, 38 & \(4\times 10^{5}\) & 12/12 & 0/12 & 11193 & 400000 & 0.504 & 4.305 & \(7.4\times 10^{-7}\) & \(1.0\times 10^{-5}\) & \(3.7\times 10^{-5}\) \\
-9-6, 38 & \(4\times 10^{5}\) & 12/12 & 12/12 & 9177 & 44974 & 0.399 & 0.458 & 1 & \(5.9\times 10^{-4}\) & 0.62 \\
-12-6, 55 & \(1\times 10^{6}\) & 12/12 & 12/12 & 65397.5 & 30565.5 & 5.104 & 0.576 & 1 & 0.21 & \(2.5\times 10^{-4}\) \\
-10-8, 55 & \(1\times 10^{6}\) & 5/12 & 2/12 & 1000000 & 1000000 & 81.861 & 21.165 & 0.37 & 0.18 & \(6.1\times 10^{-3}\) \\
-9-6, 55 & \(1\times 10^{6}\) & 12/12 & 12/12 & 17280 & 32261 & 1.316 & 0.652 & 1 & 0.100 & 0.040 \\
-12-6, 80 & \(1\times 10^{6}\) & 5/12 & 0/12 & 1000000 & 1000000 & 147.5 & 38.015 & 0.037 & 0.016 & \(5.9\times 10^{-4}\) \\
-10-8, 80 & \(1\times 10^{6}\) & 4/12 & 0/12 & 1000000 & 1000000 & 155.3 & 42.888 & 0.093 & 0.037 & 0.17 \\
-9-6, 80 & \(1\times 10^{6}\) & 7/12 & 0/12 & 773712.5 & 1000000 & 117.3 & 40.355 & \(4.6\times 10^{-3}\) & \(2.9\times 10^{-3}\) & \(6.1\times 10^{-3}\) \\
+12-6, 38 & \(4\times 10^{5}\) & 12/12 & 10344.5 & 0.518 \\
+10-8, 38 & \(4\times 10^{5}\) & 12/12 & 11193 & 0.504 \\
+9-6, 38 & \(4\times 10^{5}\) & 12/12 & 9177 & 0.399 \\
+12-6, 55 & \(1\times 10^{6}\) & 12/12 & 65397.5 & 5.104 \\
+10-8, 55 & \(1\times 10^{6}\) & 5/12 & 1000000 & 81.861 \\
+9-6, 55 & \(1\times 10^{6}\) & 12/12 & 17280 & 1.316 \\
+12-6, 80 & \(1\times 10^{6}\) & 5/12 & 1000000 & 147.5 \\
+10-8, 80 & \(1\times 10^{6}\) & 4/12 & 1000000 & 155.3 \\
+9-6, 80 & \(1\times 10^{6}\) & 7/12 & 773712.5 & 117.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -642,10 +643,9 @@ Form, \(N\) & Budget & This work & GMIN & This work & GMIN & This work & GMIN & 
 \subsection{Other panels}
 \label{sec:other-panels}
 The Supporting Information puts this setting against the basin hopping and the minima hopping of the
-Atomic Simulation Environment 3.29.0 at its constructor defaults on five Lennard-Jones clusters,
-Au\(_{55}\), and four Morse clusters (Tables~\siref{tab:ase} and~\siref{tab:ase-morse}), against
-AGOX GOFEE on LJ\(_{38}\), LJ\(_{55}\), and LJ\(_{75}\) (Table~\siref{tab:gofee}), and against GMIN on
-rigid TIP4P clusters (Table~\siref{tab:tip4p-gmin}).
+Atomic Simulation Environment 3.29.0 at its constructor defaults on four Morse clusters
+(Table~\siref{tab:ase-morse}), and against GMIN on rigid TIP4P clusters
+(Table~\siref{tab:tip4p-gmin}).
 
 
 \section{Discussion}
@@ -658,12 +658,8 @@ The two tie on LJ\(_{55}\), where both hit
 12 of 12.
 
 Section~\ref{sec:gmin} gives the median walls of the GMIN panel.
-On the Sutton--Chen clusters at equal budgets the median wall of GMIN is lower
-on 7 of 9, and this setting spends 3.4 to 4.9 times as long per call inside
-the potential (Table~\ref{tab:sc} and the Supporting Information).
-AGOX GOFEE hits none of LJ\(_{38}\), LJ\(_{55}\), and LJ\(_{75}\), and
-its median wall is higher than that of this setting on all three
-(Table~\siref{tab:gofee}).
+Section~\ref{sec:sc} gives this setting on the nine Sutton--Chen clusters
+(Table~\ref{tab:sc}).
 Against GMIN on TIP4P, this setting hits more seeds at 8, 15, and 20
 molecules, and neither arm hits at 21 molecules.
 Size 25 has no independent reference and is unscored.
@@ -673,13 +669,8 @@ is 35.730266~s.  GMIN's corresponding values are
 \(-1087.3344641800\) and \(-1082.1265516750\)~kJ/mol and 107.109000~s.
 
 The comparisons with the Atomic Simulation Environment count hits only.
-Minima hopping reached its cap on every run, and basin hopping on every
-run of LJ\(_{38}\), Au\(_{55}\), and the Morse clusters and on 11 of 12
-on LJ\(_{55}\).
-On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
-budget before the cap and missed on every seed.
-The stop reason of each of those seeds is the committed row, either the
-wall cap or the force-call budget.
+Every basin-hopping and minima-hopping run of Table~\siref{tab:ase-morse}
+stopped at the cap.
 
 The moves, the temperature, and the stall rules of
 Section~\ref{sec:search} were set on Lennard-Jones clusters.
@@ -693,9 +684,6 @@ at \(\rho=6\) and \(\rho=14\) and M\(_{55}\) at \(\rho=6\) on 12 of 12
 and M\(_{55}\) at \(\rho=14\) on 5 of 12, where neither ASE arm hits.
 The ASE panel scales the preset to the Morse pair, and the driver
 \path{examples/h2h_morse.rs} of this repository runs the preset unscaled.
-On Au\(_{55}\) the ASE panel hits 0 of 12 for this setting, as do both
-ASE arms, and the median best energy of this setting lies 0.051~eV above
-the reference.
 
 \section{Conclusions}
 We have evaluated one basin-hopping setting, with the moves of Section~\ref{sec:moves} and \(T=0.8\), across the clusters reported here.
@@ -708,12 +696,7 @@ Against GMIN on seeds 2000--2011, this setting hits more seeds on 6 of
 8 clusters, and GMIN hits more on LJ\(_{150}\), 9 of 12 against 5 of 12.
 Against the basin hopping and the minima hopping of the Atomic
 Simulation Environment, scored by Fisher's test on hits, this setting
-hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse
-clusters, and no arm hits Au\(_{55}\).
-Against GMIN on nine Sutton--Chen clusters at equal budgets, this setting hits
-more seeds on 5 and ties on 4, with Fisher's \(p\) below 0.05 on 3, and GMIN
-has the lower median wall on 7.
-AGOX GOFEE hits none of the three Lennard-Jones clusters on 6 seeds, and
+hits more seeds on all 4 Morse clusters, and
 against GMIN on TIP4P this setting hits \((\mathrm{H_2O})_{15}\) on 7 of 12
 and GMIN on 0 of 12.
 In the 120-run ABBA comparison on one machine pinned to core 0,
@@ -789,16 +772,14 @@ Each table is written or checked by a script in the repository.
 \item \path{scripts/gmin_panel/run_panel.py} writes Table~\ref{tab:gmin}.
 \item \path{scripts/ase_panel/enter_bench.sh} and
 \path{scripts/ase_nonlj/enter_bench.sh} run the ASE seeds.
-\item \path{scripts/ase_panel/summarize.py} writes
-Table~\siref{tab:ase}, and \path{scripts/ase_nonlj/summarize.py} writes
+\item \path{scripts/ase_nonlj/summarize.py} writes
 Table~\siref{tab:ase-morse}.
 \item \path{scripts/metal_h2h/enter_sc_n12.sh} and
 \path{scripts/metal_h2h/run_sc_n12.py} run the Sutton--Chen seeds.
 \item \path{scripts/metal_h2h/sc_n12_pvalues.py} computes the
 Sutton--Chen \(p\) values against the Doye--Wales Sutton--Chen GMIN rows.
 \item \path{paper/jctc/scripts/h2h_tables.py} writes
-Table~\siref{tab:gofee} from
-\path{bench/ase-gofee-h2h/summary.csv}, Table~\siref{tab:tip4p-gmin} from
+Table~\siref{tab:tip4p-gmin} from
 \path{bench/tip4p-h2h/rows-h2h-r2.csv} and
 \path{bench/tip4p-h2h/wall-r2.csv}, and Table~\ref{tab:sc} from the
 Sutton--Chen results and \(p\)-value files.

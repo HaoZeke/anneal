@@ -750,9 +750,7 @@ that revision and repeat any seed of any arm under it.
 and caps an ASE or recommended seed at three times the slowest cluster-preset
 wall of the same revision, so the 12 cluster-preset seeds of a system run
 first.
-The Lennard-Jones and Au\(_{55}\) rows of Table~\ref{tab:ase} cite the
-revisions in \path{bench/unreachable-revisions.csv}, and that file lists
-each revision with the rows that cite it.
+\path{bench/unreachable-revisions.csv} lists each revision with the rows that cite it.
 \path{scripts/ase_panel/enter_bench.sh} writes the search at the revision
 in \texttt{ASE\_PANEL\_REVISION}, a full commit SHA, into the rows file in
 \texttt{ASE\_PANEL\_ROWS}, with the same cap rule.
@@ -847,19 +845,18 @@ the container that GMIN sizes for the cluster, and \texttt{SLOPPYCONV}
 The runs are one at a time on core 0 of one host.
 \path{bench/metal-cluster-h2h/sc-n12/seeds.csv} holds the 324 seed rows:
 108 of this setting, 108 of GMIN with the Doye--Wales Sutton--Chen data
-file used in the table, and 108 unused GMIN rows with Lennard-Jones step
+file, and 108 unused GMIN rows with Lennard-Jones step
 and temperature; \path{scripts/metal_h2h/run_sc_n12.py} writes
 \path{results.csv} from them and
 \path{paper/jctc/scripts/h2h_tables.py} writes the table.
 
 Table~\ref{tab:sc-si} gives the reference energy of each cluster of the main
-text's Sutton--Chen table and the cost of one force call for each arm.
+text's Sutton--Chen table and the cost of one force call for this setting.
 Inside is the median over the 12 runs of the time inside the energy and
 gradient divided by the calls, and Outside the rest of the wall divided by
 the calls.
-This setting evaluates rgpot's Sutton--Chen routine through its C entry, and
-GMIN its own \texttt{SC} routine.
-Both run on core 0 of the same host, one run at a time, in a namespace with
+This setting evaluates rgpot's Sutton--Chen routine through its C entry.
+The runs are on core 0 of one host, one run at a time, in a namespace with
 hostname \texttt{bench}.
 Each GMIN row starts from the anneal row's start file under the GMIN data
 file of \path{scripts/metal_h2h/run_sc.py}.
@@ -871,30 +868,27 @@ The command \texttt{bash scripts/metal\_h2h/enter\_sc\_n12.sh} runs seeds
 
 % sc-si table: start
 \begin{table}
-\caption{Reference energies and the cost per force call of the Sutton--Chen panel.
+\caption{Reference energies and the cost per force call of this setting on Sutton--Chen.
 The reference is the Doye--Wales global minimum in reduced units.
 Inside is the median time per call inside the energy and gradient, and
 Outside the median time per call spent elsewhere, in microseconds.
-Harness is the revision of the GMIN Sutton--Chen data file; every anneal row is
-harness \texttt{e3ed7dad}.}
+Every row is harness \texttt{e3ed7dad}.}
 \label{tab:sc-si}
 \centering
 \small
-\begin{tabular}{@{}lrrrrrl@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
- & & \multicolumn{2}{c}{Inside (\(\mu\)s)} & \multicolumn{2}{c}{Outside (\(\mu\)s)} & \\
-\cmidrule(lr){3-4}\cmidrule(lr){5-6}
-Form, \(N\) & Reference & This work & GMIN & This work & GMIN & Harness \\
+Form, \(N\) & Reference & Inside (\(\mu\)s) & Outside (\(\mu\)s) \\
 \midrule
-12-6, 38 & \(-35419.9804\) & 39.97 & 8.10 & 4.85 & 1.55 & f9d1ac05 \\
-10-8, 38 & \(-10117.2454\) & 38.61 & 9.23 & 4.64 & 1.53 & f9d1ac05 \\
-9-6, 38 & \(-8917.7056\) & 36.86 & 8.62 & 4.55 & 1.57 & 9149d1b0 \\
-12-6, 55 & \(-52884.6806\) & 70.70 & 16.75 & 8.34 & 2.12 & a50f4b02 \\
-10-8, 55 & \(-14814.5225\) & 72.84 & 19.10 & 11.18 & 2.09 & a50f4b02 \\
-9-6, 55 & \(-13217.8963\) & 65.34 & 17.95 & 7.83 & 2.16 & a50f4b02 \\
-12-6, 80 & \(-78414.6271\) & 127.14 & 35.32 & 20.49 & 2.69 & a50f4b02 \\
-10-8, 80 & \(-21819.9952\) & 136.26 & 40.23 & 21.02 & 2.65 & a50f4b02 \\
-9-6, 80 & \(-19560.8966\) & 131.05 & 37.65 & 19.91 & 2.70 & a50f4b02 \\
+12-6, 38 & \(-35419.9804\) & 39.97 & 4.85 \\
+10-8, 38 & \(-10117.2454\) & 38.61 & 4.64 \\
+9-6, 38 & \(-8917.7056\) & 36.86 & 4.55 \\
+12-6, 55 & \(-52884.6806\) & 70.70 & 8.34 \\
+10-8, 55 & \(-14814.5225\) & 72.84 & 11.18 \\
+9-6, 55 & \(-13217.8963\) & 65.34 & 7.83 \\
+12-6, 80 & \(-78414.6271\) & 127.14 & 20.49 \\
+10-8, 80 & \(-21819.9952\) & 136.26 & 21.02 \\
+9-6, 80 & \(-19560.8966\) & 131.05 & 19.91 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -902,13 +896,12 @@ Form, \(N\) & Reference & This work & GMIN & This work & GMIN & Harness \\
 
 \section{The Atomic Simulation Environment}
 \label{sec:ase}
-Tables~\ref{tab:ase} and~\ref{tab:ase-morse} put this setting against
+Table~\ref{tab:ase-morse} puts this setting against
 the basin hopping and the minima hopping of the Atomic Simulation
 Environment 3.29.0 at its constructor defaults, on seeds 2000--2011,
-at \(4\times 10^{5}\) calls for 38 atoms, \(1\times 10^{6}\) for 55,
-and \(4\times 10^{6}\) for 98 atoms and above, on one core of one host.
+at \(4\times 10^{5}\) calls for 38 atoms and \(1\times 10^{6}\) for 55,
+on one core of one host.
 \cite{larsenAse2017,goedecker2004}
-On Au\(_{55}\) both codes evaluate the same Gupta routine.
 On the Morse clusters the Atomic Simulation Environment evaluates its
 own Morse calculator, which agrees with this code at the seed-2000
 start to \(6.8\times 10^{-12}\) in energy and \(3.6\times 10^{-12}\)
@@ -916,7 +909,7 @@ in force.
 The two codes draw their starting geometries with different generators,
 so seed labels are not pairs.
 ASE sets those defaults in electronvolts and \AA ngstr\"oms, and the
-Lennard-Jones and Morse pairs here have unit well depth and unit length.
+Morse pair here has unit well depth and unit length.
 On those clusters ASE basin hopping therefore runs at \(k_BT=0.0086\) in
 reduced units and shifts every coordinate by at most 0.1, against
 \(T=0.8\) and single-atom shifts of up to 1 here, and ASE minima hopping
@@ -925,68 +918,13 @@ The ASE rows measure ASE as shipped, not ASE tuned to these surfaces.
 Each run stops at a hit, at the budget, or at a wall cap.
 The cap of the basin-hopping and minima-hopping runs is three times
 the slowest wall of the panel's cluster-preset arm on that cluster.
-That arm is not the setting of this article, and the tables leave it
+That arm is not the setting of this article, and the table leaves it
 out.
-Its hits are 10, 12, 4, 0, 0, and 0 of 12 on LJ\(_{38}\), LJ\(_{55}\),
-LJ\(_{98}\), LJ\(_{104}\), LJ\(_{150}\), and Au\(_{55}\).
 No run of this setting reached its cap.
 A run stopped at the cap is a miss with fewer calls than the budget, so
 its calls to the minimum are censored.
-The tables compare hits with Fisher's exact test and report no rank
+The table compares hits with Fisher's exact test and reports no rank
 test on calls or on wall.
-
-Minima hopping stopped at the cap on all 72 runs of
-Table~\ref{tab:ase}, and basin hopping on 35: 12 on LJ\(_{38}\), 11 on
-LJ\(_{55}\), and 12 on Au\(_{55}\).
-On LJ\(_{98}\), LJ\(_{104}\), and LJ\(_{150}\) basin hopping spent the
-full \(4\times 10^{6}\) calls on every seed.
-This setting hits LJ\(_{38}\) and LJ\(_{55}\) on 12 of 12, LJ\(_{98}\)
-on 10 of 12, LJ\(_{104}\) on 9 of 12, and LJ\(_{150}\) on 5 of 12.
-Basin hopping hits LJ\(_{55}\) on 1 of 12 and no other cluster, and
-minima hopping hits none.
-Fisher's test against each ASE arm is below 0.05 on all 5
-Lennard-Jones clusters.
-Under Holm's correction for those 10 tests, LJ\(_{150}\), at \(p=0.037\)
-against each arm, does not stay below 0.05.
-No arm hits Au\(_{55}\).
-There the median best energy lies 0.051~eV above the reference for this
-setting, 1.196~eV for basin hopping, and 0.737~eV for minima hopping.
-
-% ase-panel table: start
-\begin{table}
-\caption{\raggedright This work against the basin hopping (BH) and minima hopping
-(MH) of ASE 3.29.0 at its constructor defaults.
-This work is anneal \texttt{1ce3ab64493196afd25e8690648e21157d91b882, b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac}.
-Seeds 2000--2011, one core, budget in force calls.
-Cap is the wall in seconds at which a BH or MH run stops, three times
-the slowest wall of the cluster-preset arm of the panel.
-Stops counts the BH and MH runs that ended at the cap; those runs
-are misses with fewer calls than the budget.
-No run of this work ended at a cap.
-Wall is the median over the 12 runs of the seconds each run took;
-a BH or MH run that ended at the cap is counted at its wall.
-\(p_\mathrm{BH}\) and \(p_\mathrm{MH}\) are the two-sided Fisher
-exact test on hits against each ASE arm.}
-\label{tab:ase}
-\centering
-\scriptsize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrrrrr@{}}
-\toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} & & \\
-\cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
-Cluster & Budget & Cap & This work & BH & MH & BH & MH & This work & BH & MH & \(p_\mathrm{BH}\) & \(p_\mathrm{MH}\) \\
-\midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 4.654 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.067 & 4.654 & 4.864 & \(7.4\times 10^{-7}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 4.425 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.128 & 4.425 & 4.488 & \(9.6\times 10^{-6}\) & \(7.4\times 10^{-7}\) \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 & 37.017 & 118.3 & 254.8 & \(6.7\times 10^{-5}\) & \(6.7\times 10^{-5}\) \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 280.9 & 9/12 & 0/12 & 0/12 & 0 & 12 & 65.136 & 127.2 & 287.9 & \(3.4\times 10^{-4}\) & \(3.4\times 10^{-4}\) \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & 544.4 & 5/12 & 0/12 & 0/12 & 0 & 12 & 216.0 & 213.5 & 571.3 & 0.037 & 0.037 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 122.7 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.069 & 122.7 & 126.8 & 1 & 1 \\
-\bottomrule
-\end{tabular}
-\end{table}
-% ase-panel table: end
 
 Every basin-hopping and minima-hopping run of
 Table~\ref{tab:ase-morse} stopped at the cap.
@@ -1035,69 +973,12 @@ M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 54.130 & 5/12 & 0/12 & 0/12 & 17.
 
 \section{AGOX GOFEE}
 \label{sec:gofee}
-Table~\ref{tab:gofee} adds AGOX GOFEE to the two ASE arms on LJ\(_{38}\),
-LJ\(_{55}\), and LJ\(_{75}\), on seeds 2000--2005, which are the seeds of this
-setting in Section~\msref{sec:ablation}.
+AGOX searches with a local surrogate, and GOFEE is the surrogate search of Bisbo and Hammer.
 The versions are ASE 3.29.0 and AGOX 3.11.1.
 \cite{larsenAse2017,christiansenAgox2022,bisboEfficientGlobalStructure2020}
-The budgets are those of Section~\ref{sec:ase}.
-ASE minima hopping and GOFEE on LJ\(_{75}\) also stop at a wall cap of 2 hours
-per seed, and a seed stopped there is a miss.
-This setting hits all three clusters on 6 of 6 seeds.
-ASE basin hopping hits none of them, and GOFEE hits none.
-ASE minima hopping hits LJ\(_{38}\) on 1 of 6, LJ\(_{55}\) on 6 of 6, and
-LJ\(_{75}\) on none.
-The median wall of a GOFEE run is 499.4~s on LJ\(_{38}\), 3453.6~s on
-LJ\(_{55}\), and 7203.7~s on LJ\(_{75}\), against 0.081~s, 0.154~s, and
-26.220~s for this setting.
-The rows of this setting are the paper-preset rows of those seeds.
-The rows of Table~\ref{tab:gofee} span 5 repository heads.
-\texttt{results.csv} records those heads on 69 rows.
-\path{bench/unreachable-revisions.csv} indexes the other 3 rows.
-Section~\ref{sec:si-gofee} gives the same ASE and GOFEE arms on Au\(_{55}\), Cu\(_{38}\), Cu\(_{12}\)Au\(_{26}\), Si\(_{10}\),
+A surrogate replaces force calls with model fits, so the cost of a run is not in its force calls alone.
+Section~\ref{sec:si-gofee} gives ASE and GOFEE on Au\(_{55}\), Cu\(_{38}\), Cu\(_{12}\)Au\(_{26}\), Si\(_{10}\),
 C\(_{10}\), and \((\mathrm{H_2O})_{8}\).
-
-% gofee table: start
-\begin{table}
-\caption{This work against ASE basin hopping (BH), ASE minima hopping (MH)
-and AGOX GOFEE on the same three Lennard-Jones clusters.
-Seeds 2000--2005, one core, budget in force calls.
-Capped counts the runs stopped by a wall cap of 2 hours, which are misses.
-Calls is the median force-call count of the runs that hit, and Wall is the median
-wall in seconds of all six runs.}
-\label{tab:gofee}
-\centering
-\small
-\begin{tabular}{@{}llrrrrr@{}}
-\toprule
-Cluster & Arm & Budget & Hits & Capped & Calls & Wall (s) \\
-\midrule
-LJ\(_{38}\) & This work & \(4\times 10^{5}\) & 6/6 & 0 & 10190 & 0.081 \\
- & ASE BH &  & 0/6 & 0 & -- & 7.506 \\
- & ASE MH &  & 1/6 & 0 & 342831 & 1037.8 \\
- & GOFEE &  & 0/6 & 0 & -- & 499.4 \\
-\addlinespace
-LJ\(_{55}\) & This work & \(1\times 10^{6}\) & 6/6 & 0 & 11246 & 0.154 \\
- & ASE BH &  & 0/6 & 0 & -- & 23.287 \\
- & ASE MH &  & 6/6 & 0 & 129854 & 410.4 \\
- & GOFEE &  & 0/6 & 0 & -- & 3453.6 \\
-\addlinespace
-LJ\(_{75}\) & This work & \(4\times 10^{6}\) & 6/6 & 0 & 979290 & 26.220 \\
- & ASE BH &  & 0/6 & 0 & -- & 125.8 \\
- & ASE MH &  & 0/6 & 6 & -- & 7241.5 \\
- & GOFEE &  & 0/6 & 5 & -- & 7203.7 \\
-\bottomrule
-\end{tabular}
-\end{table}
-% gofee table: end
-
-Table~\ref{tab:ase} shows ASE minima hopping on 0 of 12 seeds at
-LJ\(_{38}\) and LJ\(_{55}\), because its runs stop at wall caps of
-4.654 and 4.425~s.
-The runs of Table~\ref{tab:gofee} have no wall cap.
-They hit LJ\(_{38}\) on 1 of 6 seeds in a median wall of 1037.8~s and
-LJ\(_{55}\) on 6 of 6 in 410.4~s, both far beyond those caps.
-The two tables are different runs, and neither contradicts the other.
 
 \section{Structure plates, sketch-maps, and landfold}
 Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.
