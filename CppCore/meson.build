@@ -591,7 +591,7 @@ if not get_option('with_rpc_client_only')
             'classical_engine',
             [_engine_common, files('rgpot/engine/ClassicalEngine.cc')],
             dependencies: _engine_deps,
-            link_with: [rgpot_core, rgpot_halfshell],
+            link_with: [rgpot_core],
             link_whole: _classical_whole,
             cpp_args: _engine_args,
             include_directories: _incdirs,
