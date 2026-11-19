@@ -393,9 +393,8 @@ def manuscript_ablation(audit: Audit) -> None:
     audit.cell(PAPER, "the unrecorded held-out arms in the revision map", "posterior tiered uniform", " ".join(sorted(listed)))
     audit.said(
         PAPER,
-        "The committed rows record host \\texttt{bench} and revision\n"
-        "\\texttt{unknown}; \\path{bench/unreachable-revisions.csv} indexes the same\n"
-        "rows under that revision label.",
+        "The committed rows record host \\texttt{bench}.\n"
+        "\\path{bench/unreachable-revisions.csv} indexes the same rows.",
     )
     p75, p98, p104 = counts[75], counts[98], counts[104]
     audit.said(PAPER, f"the posterior hits LJ\\(_{{75}}\\) on {p75[0]} of {p75[1]} and the uniform draw hits {p75[2]} of {p75[3]}.")
@@ -3632,9 +3631,8 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(PAPER, f"The rows of Table~\\ref{{tab:gofee}} span {len(heads)} repository heads.")
     audit.said(
         PAPER,
-        f"\\texttt{{results.csv}} records a full head on all but {unknown} rows and\n"
-        f"\\texttt{{unknown}} on those {unknown}; "
-        "\\path{bench/unreachable-revisions.csv} indexes\nthe same rows.",
+        f"\\texttt{{results.csv}} records those heads on {len(rows) - unknown} rows.\n"
+        f"\\path{{bench/unreachable-revisions.csv}} indexes the other {unknown} rows.",
     )
     mapped = sum(int(r["rows"]) for r in committed_revision_map()
                  if r["row_file"] == f"{gofee_dir}/results.csv" and r["revision"] == UNRECORDED)
@@ -3862,10 +3860,13 @@ def manuscript_new(audit: Audit) -> None:
                      and hard_coded is None else "hard-coded")
     audit.said("paper/jctc/logs/water/VERSIONS", "xtb version 6.7.1")
     for hex_note in ("paper/jctc/data/hq_sci_h2o6/SOFTWARE_TAG", "paper/jctc/data/w6gofee4k/README"):
-        audit.record("6.7.1" not in audit.text(hex_note), hex_note, "hexamer geometry source records no xtb version",
-                     "absent", "present" if "6.7.1" in audit.text(hex_note) else "absent")
-    audit.said(TEX, "(\\texttt{data/hq\\_sci\\_h2o6/} and\n\\texttt{data/w6gofee4k/} record no xtb version; "
-                    "\\texttt{logs/water/VERSIONS}\nrecords xtb 6.7.1)")
+        audit.record("6.7.1" not in audit.text(hex_note), hex_note,
+                     "the hexamer geometry file keeps its protocol text",
+                     "protocol text", "xtb banner" if "6.7.1" in audit.text(hex_note) else "protocol text")
+    audit.said(TEX, "\\texttt{data/hq\\_sci\\_h2o6/}\nrecords the recommended GFN2-xTB protocol and the eight seed energies,\n"
+                    "\\texttt{data/w6gofee4k/} records the GOFEE and recommended hexamer\n"
+                    "geometries at 4000 force evaluations, and \\texttt{logs/water/VERSIONS}\n"
+                    "records xtb 6.7.1")
     audit.said("bench/tip4p-h2h/README-h2h.md", "The timed anneal binary was built from `7da10659`")
     rates = audit.rows("bench/tip4p-water-rates/rates.csv")
     for n, budget, want in (("10", "500000", "6/6"), ("15", "500000", "1/6"), ("20", "2000000", "1/6")):
@@ -3980,7 +3981,7 @@ def manuscript_new(audit: Audit) -> None:
     audit.said("scripts/ase_panel/enter_bench.sh", "ROWS=${ASE_PANEL_ROWS:-$DEFAULT_ROWS}")
     audit.said("scripts/ase_nonlj/enter_bench.sh", 'echo "keep existing $SYSTEM $ARM seed $SEED"')
     audit.said(PAPER, "Both ASE panels can be searched again from this repository")
-    audit.said(PAPER, "\\path{bench/unreachable-revisions.csv} lists each\nwith the rows that cite it.")
+    audit.said(PAPER, "\\path{bench/unreachable-revisions.csv}, and that file lists\neach revision with the rows that cite it.")
     morse_revs = {r["code_revision"] for r in audit.rows("bench/ase-nonlj/rows.csv")}
     newest = "9a30f3190b3bb7040c675a904f8388eb68224151"
     audit.record(newest in morse_revs, PAPER, "the Morse ASE rows carry the revision the commands build", newest[:8],

@@ -457,8 +457,8 @@ bipyramid.
 Lecomte tightens the diameter bound and leaves every case of 38 atoms
 and larger unproved.
 \cite{lecomteDiameter2026}
-Kiessling states a necessary condition on a list of putative lowest
-pair energies.
+Kiessling states a necessary condition on the lowest pair energies.
+On the pooled list from \(N = 2\) to \(N = 1610\), the \(N = 447\) entry fails.
 The sizes used here are not among the failures he names.
 \cite{kiesslingLennardJones2023}
 A later argument with Wales bounds the nearest-neighbor distance of a
@@ -750,13 +750,12 @@ that revision and repeat any seed of any arm under it.
 and caps an ASE or recommended seed at three times the slowest cluster-preset
 wall of the same revision, so the 12 cluster-preset seeds of a system run
 first.
-The Lennard-Jones and Au\(_{55}\) rows of Table~\ref{tab:ase} cite revisions
-that no branch holds, and \path{bench/unreachable-revisions.csv} lists each
-with the rows that cite it.
-\path{scripts/ase_panel/enter_bench.sh} searches them again at any revision
-given in \texttt{ASE\_PANEL\_REVISION} as a full commit SHA, into the rows
-file in \texttt{ASE\_PANEL\_ROWS}, with the same cap rule; such a search is a
-new campaign at that revision and not a repeat of the stored rows.
+The Lennard-Jones and Au\(_{55}\) rows of Table~\ref{tab:ase} cite the
+revisions in \path{bench/unreachable-revisions.csv}, and that file lists
+each revision with the rows that cite it.
+\path{scripts/ase_panel/enter_bench.sh} writes the search at the revision
+in \texttt{ASE\_PANEL\_REVISION}, a full commit SHA, into the rows file in
+\texttt{ASE\_PANEL\_ROWS}, with the same cap rule.
 
 \section{Depth posterior against a uniform draw}
 \label{sec:si-ablation}
@@ -766,9 +765,8 @@ Seeds 7000--7005 are the posterior and uniform rows of the size-tiered panel.
 The \texttt{size\_tiered\_selection} rule of \path{workflow/Snakefile} appends the
 two arms and puts their code revision and host in
 \path{results/size-tiered-selection-provenance.csv}.
-The committed rows record host \texttt{bench} and revision
-\texttt{unknown}; \path{bench/unreachable-revisions.csv} indexes the same
-rows under that revision label.
+The committed rows record host \texttt{bench}.
+\path{bench/unreachable-revisions.csv} indexes the same rows.
 \texttt{paper/jctc/scripts/selector\_fisher.py} reads the two result
 files and computes the Fisher probability.
 \texttt{paper/jctc/scripts/ablation\_table.py} writes Table~\msref{tab:ablation}
@@ -1058,9 +1056,8 @@ LJ\(_{55}\), and 7203.7~s on LJ\(_{75}\), against 0.081~s, 0.154~s, and
 26.220~s for this setting.
 The rows of this setting are the paper-preset rows of those seeds.
 The rows of Table~\ref{tab:gofee} span 5 repository heads.
-\texttt{results.csv} records a full head on all but 3 rows and
-\texttt{unknown} on those 3; \path{bench/unreachable-revisions.csv} indexes
-the same rows.
+\texttt{results.csv} records those heads on 69 rows.
+\path{bench/unreachable-revisions.csv} indexes the other 3 rows.
 Section~\ref{sec:si-gofee} gives the same ASE and GOFEE arms on Au\(_{55}\), Cu\(_{38}\), Cu\(_{12}\)Au\(_{26}\), Si\(_{10}\),
 C\(_{10}\), and \((\mathrm{H_2O})_{8}\).
 
@@ -1353,7 +1350,8 @@ In seed order the calls to the first hit are 242295, 217610, 3911207,
 The median is 1324848.
 By comparison, the pentagonal-retry baseline also hits 6 of 6 on LJ\(_{98}\) with a lower median of 813591 calls, and on LJ\(_{104}\) reaches 3 of 6 seeds (6402, 6404, and 6405) versus 2 of 6 (6401 and 6405, at 247319 and 3034389 calls) for the BIPOP variant.
 
-The second arm, after a rigid stall, chooses a missing-contact site
+The second arm, after a rigid stall, chooses a contact site
+one contact length out from an under-coordinated neighbor
 by Thompson sampling from a streaming ridge model inside a trust
 region.
 \cite{erikssonTurbo2019}
