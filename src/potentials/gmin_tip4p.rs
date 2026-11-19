@@ -684,12 +684,13 @@ mod tests {
 
     /// Cambridge headers at the rigid geometry of the printed minima.
     ///
-    /// The thermochemical calorie is 4.184 kJ. Printed coordinates are
-    /// 1e-7 Å, and the (H2O)10 header is reproduced to 7.5e-6 kcal/mol.
-    /// The checked bound is 1e-5 kcal/mol.
+    /// The calorie is readcon's thermochemical kcal, 4184 J. Printed
+    /// coordinates are 1e-7 Å, and the (H2O)10 header is reproduced to
+    /// 7.5e-6 kcal/mol. The checked bound is 1e-5 kcal/mol.
     #[test]
     fn cambridge_headers_match_within_1e_5_kcal() {
-        const KJ_PER_KCAL: f64 = 4.184;
+        let kj_per_kcal =
+            readcon_core::units::unit_conversion_factor("kcal", "kJ").expect("thermochemical kcal");
         let cases = [
             (
                 include_str!("../../tests/fixtures/tip4p-10.xyz"),
@@ -709,7 +710,7 @@ mod tests {
             assert!((header - published).abs() < 1.0e-12);
             let n = coords.len() / 9;
             let energy = GminTip4p::new(n).eval(rigid_from_ohh(&coords).view());
-            let err_kcal = (energy - published).abs() / KJ_PER_KCAL;
+            let err_kcal = (energy - published).abs() / kj_per_kcal;
             assert!(
                 err_kcal < 1.0e-5,
                 "n={n} rigid {energy} header {published} err {err_kcal:.3e} kcal/mol"
