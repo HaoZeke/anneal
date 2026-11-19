@@ -11,7 +11,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 REV=${PAPER_REV:-07f89cadbd9ccd8386e92408a8ff0e8153b180e3}
 WORK=/work/paper-0120
-OUT=$ROOT/bench/paper-0120
+OUT=${PAPER_0120_OUT:-/work/paper-0120/output}
+PATCH=$ROOT/bench/paper-0120/lj103-table.patch
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 examples="--example h2h_gmin_proof --example h2h_morse --example h2h_metal --example h2h_seed"
 
@@ -49,7 +50,7 @@ done
 
 tree "$WORK/lj103-src"
 git -C "$WORK/lj103-src" checkout -q -- examples/h2h_gmin_proof.rs
-git -C "$WORK/lj103-src" apply "$OUT/lj103-table.patch"
+git -C "$WORK/lj103-src" apply "$PATCH"
 build "$WORK/lj103-src" "$WORK/target-lj103" --example h2h_gmin_proof
 cp -f "$WORK/target-lj103/release/examples/h2h_gmin_proof" "$WORK/bin/h2h_gmin_proof_lj103"
 sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"

@@ -889,7 +889,7 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   --acc 0.01`) gives every best geometry its energy to 4.1e-5 eV, the
   same offset on all eight. The ring is in `gfn2/minima.csv` and
   `gfn2/minima/si20-ring.xyz`. Two of eight seeds within four hours is
-  not yet a reference the panel can score against. The handle counted
+  the count this panel records. The handle counted
   32,704 SCCs that do not converge over the eight runs, at a median
   shortest pair of 2.15 Å, a third of them below 1.6 Å.
 

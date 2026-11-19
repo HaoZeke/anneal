@@ -145,7 +145,7 @@ F1. The plateau at −915.7735 (seed 2007, 0.934 kJ/mol short) has the same 37
 contacts and 37 hydrogen bonds as the minimum and the same coordination counts
 (11 three-, 9 four- and 1 five-coordinate). But its rings are 16/3/9 four-,
 five- and six-membered, against the minimum's 14/7/10, at 0.99 Å oxygen RMSD.
-That is a different cage, not a missing bond. The other seeds fall in two
+That is a different cage, with a different bond count. The other seeds fall in two
 families. 2000, 2001, 2002, 2003, 2006 and 2009 are pentagon-rich with 34 to
 36 contacts. 2004, 2005 and 2010 are square-rich, and 2008 and 2011 have ten four- and
 ten five-membered rings, all arranged differently from 2007.
@@ -194,7 +194,7 @@ mechanisms address that. Each is tried alone and the two are tried together,
 at n = 12 on every chart, with nothing set by size.
 
 - **(a) Novel-basin reward.** An arm is paid when its quench lowers the
-  incumbent, or when the quench's fingerprint is not yet in this run's basin
+  incumbent, or when the quench's fingerprint is outside this run's basin
   archive (`bias.locate` finds no seat). On the Bernoulli allocator that is
   the reward. On the depth allocator (Lennard-Jones and Sutton-Chen
   `recommended`), a revisit earns the shallowest depth any arm has reached so

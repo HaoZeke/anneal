@@ -1538,7 +1538,7 @@ phases. If the bar on the first slice from below the start ended the
 opening before the descent converged and =gsa='s first phase ends at
 its first slice, the descent takes a turn before =cma='s phase. The
 phases, and that turn, stop short of the closing descent plus a slice
-for each other arm not yet played, counted again at every slice
+for each other arm without a completed turn, counted again at every slice
 (without an opening, for =de= only, until it has played). Every
 unplayed arm then
 takes one turn while eight evaluations beyond the closing reserve are

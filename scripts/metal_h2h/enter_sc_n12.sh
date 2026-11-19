@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
 # Twelve-seed Sutton–Chen head-to-head. One UTS namespace, hostname bench.
-# Finished seeds already in the table are kept. The six-seed table is not
-# opened.
+# An existing results, seed, or session file is refused. The six-seed table
+# is not opened.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/metal-sc
 OUTPUT=${SC_H2H_N12_OUTPUT:-$WORK/output}
+if [[ -e $OUTPUT/results.csv || -e $OUTPUT/seeds.csv || -e $OUTPUT/sessions.jsonl ]]; then
+  echo "refusing to overwrite output under $OUTPUT" >&2
+  exit 1
+fi
 LOGS=$OUTPUT/logs
 RUNS=$WORK/runs-n12
 LIB=${RGPOT_SC_LIB:-/work/rgpot/bdir-xtb/CppCore/librgpot.so}

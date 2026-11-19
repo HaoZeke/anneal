@@ -43,3 +43,4 @@ paper/jctc/data/results_jcc_c47d301/provenance.txt	f980fadceec20f81744662e157762
 paper/jctc/data/system_visuals/provenance.txt	f4f59a33568e13d086c3e48461344f6f631ab320a792df285675f15d7fa6df63	data	active	supersedes a stale receipt with the current committed source hash
 paper/jctc/scripts/fig_disconnectivity.py	6ea9b54081d8900970fa579500f189ec84e5432342fae184dac7521f990c501a	script	active	supersedes a stale receipt with the current committed source hash
 paper/jctc/data/lj_csm_sizes/provenance.txt	fa775df37cb205955d676d2dd6436981c8f82791862a5f23a272f62ccabff76c	data	active	retains the develop provenance formatting
+paper/jctc/scripts/render_all.py	82096a1f0f23154196d53d2b554bf0ba9a44cfcaa3d72af5a9a564ca7518a326	script	active	the renderer takes an output directory
