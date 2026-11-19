@@ -2,11 +2,13 @@
 
 use std::ffi::c_int;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use rgpot_core::engine::{
-    EngineError, EnginePotential, EngineRequest, RgpotEngineAbiStamp, RgpotEngineCaps,
-    RgpotEngineComponent, ENGINE_ABI_LAYOUT_REVISION, ENGINE_ABI_MINOR, ENGINE_ABI_VERSION,
-    ENGINE_ERR_UNSUPPORTED,
+    AcquireReason, CoordinateTransform, EngineCallbacks, EngineError, EngineEvaluation,
+    EngineFailure, EnginePotential, EngineRequest, EngineSession, EngineStatus,
+    RgpotEngineAbiStamp, RgpotEngineCaps, RgpotEngineComponent, ENGINE_ABI_LAYOUT_REVISION,
+    ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_UNSUPPORTED,
 };
 use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
@@ -187,6 +189,138 @@ fn force_is_the_harmonic_energy_and_minus_the_gradient() {
     assert!(all_within_roundoff(&answer.forces, &expected));
 }
 
+struct Shift;
+
+impl CoordinateTransform for Shift {
+    fn transform(
+        &mut self,
+        positions: &mut [f64],
+        _box_matrix: &mut [f64; 9],
+    ) -> Result<(), EngineFailure> {
+        for value in positions {
+            *value += 1.0;
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn session_transform_changes_only_engine_scratch() {
+    let path = build("harmonic_session_transform", &[]);
+    let mut session = EngineSession::load(&path, &config()).expect("load session");
+    let positions = [1.0, 2.0, 3.0];
+    let mut shift = Shift;
+    let answer = session
+        .force(
+            &EngineRequest {
+                positions: &positions,
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            Some(&mut shift),
+        )
+        .expect("transformed force");
+    assert_eq!(positions, [1.0, 2.0, 3.0]);
+    assert_eq!(answer.energy.to_bits(), 36.25f64.to_bits());
+    assert_eq!(answer.forces, [-5.0, -7.5, -10.0]);
+}
+
+#[derive(Default)]
+struct CallbackRecord {
+    acquisitions: Vec<AcquireReason>,
+    states: Vec<u64>,
+}
+
+struct Oracle {
+    record: Arc<Mutex<CallbackRecord>>,
+}
+
+impl EngineCallbacks for Oracle {
+    fn oracle(&mut self, request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        Ok(EngineEvaluation {
+            energy: request.positions.iter().sum(),
+            forces: request.positions.iter().map(|value| -*value).collect(),
+        })
+    }
+
+    fn on_acquire(&mut self, reason: AcquireReason) {
+        self.record
+            .lock()
+            .expect("callback record")
+            .acquisitions
+            .push(reason);
+    }
+
+    fn on_model_update(&mut self, model_state: u64) {
+        self.record
+            .lock()
+            .expect("callback record")
+            .states
+            .push(model_state);
+    }
+}
+
+#[test]
+fn session_owns_callbacks_and_reports_model_state() {
+    let path = build("harmonic_session_callbacks", &[]);
+    let record = Arc::new(Mutex::new(CallbackRecord::default()));
+    let mut session = EngineSession::load(&path, &config()).expect("load session");
+    session
+        .set_callbacks(Some(Box::new(Oracle {
+            record: Arc::clone(&record),
+        })))
+        .expect("set callbacks");
+    let answer = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 2.0, 3.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect("oracle force");
+    assert_eq!(answer.energy, 6.0);
+    assert_eq!(answer.forces, [-1.0, -2.0, -3.0]);
+    assert_eq!(session.model_state().expect("model state"), 1);
+    let record = record.lock().expect("callback record");
+    assert_eq!(record.acquisitions, [AcquireReason::Variance]);
+    assert_eq!(record.states, [1]);
+}
+
+#[test]
+fn typed_status_does_not_retry_from_error_text() {
+    assert_eq!(EngineStatus::from_code(0), EngineStatus::Success);
+    assert_eq!(
+        EngineStatus::from_code(2),
+        EngineStatus::RecoverableInputFailure(2)
+    );
+    assert_eq!(
+        EngineStatus::from_code(-2),
+        EngineStatus::FatalInstanceFailure(-2)
+    );
+
+    let path = build("harmonic_session_no_retry", &[]);
+    let observer = FixtureObserver::open(&path);
+    let mut session = EngineSession::load(&path, &config()).expect("load session");
+    let before = observer.native_calls();
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[0.0, 0.0, 0.0],
+                atomic_numbers: &[0],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("recoverable input");
+    assert_eq!(
+        error.engine_status(),
+        Some(EngineStatus::RecoverableInputFailure(1))
+    );
+    assert_eq!(observer.native_calls() - before, 2);
+}
+
 #[test]
 fn batch_is_the_same_answer_as_one_call_per_system() {
     let path = build("harmonic_batch", &[]);
@@ -210,13 +344,68 @@ fn batch_is_the_same_answer_as_one_call_per_system() {
                 box_matrix: &CELL,
             })
             .expect("single");
-        assert!(within_roundoff(
-            batch[system].energy,
-            single.energy,
-            3 * one.len()
-        ));
-        assert!(all_within_roundoff(&batch[system].forces, &single.forces));
+        assert_eq!(batch[system].energy.to_bits(), single.energy.to_bits());
+        assert_eq!(
+            batch[system]
+                .forces
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            single
+                .forces
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
     }
+}
+
+#[test]
+fn cpmd_fixture_batch_preserves_single_call_bits_and_order() {
+    let Some(engine_path) = std::env::var_os("RGPOT_ENGINE_CPMD_FIXTURE") else {
+        return;
+    };
+    let Some(params_path) = std::env::var_os("RGPOT_ENGINE_CPMD_PARAMS") else {
+        return;
+    };
+    let config = std::fs::read(params_path).expect("read CPMD fixture parameters");
+    let positions = [0.0, 0.0, 0.0, 0.8, 0.1, 0.0, 1.5, -0.2, 0.3, 0.1, 0.4, -0.7];
+    let numbers = [7, 1];
+    let mut boxes = CELL.to_vec();
+    boxes.extend_from_slice(&CELL);
+
+    let mut singles =
+        EngineSession::load(Path::new(&engine_path), &config).expect("load CPMD fixture session");
+    let first = singles
+        .force(
+            &EngineRequest {
+                positions: &positions[..6],
+                atomic_numbers: &numbers,
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect("first CPMD fixture point");
+    let second = singles
+        .force(
+            &EngineRequest {
+                positions: &positions[6..],
+                atomic_numbers: &numbers,
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect("second CPMD fixture point");
+
+    let mut batch =
+        EngineSession::load(Path::new(&engine_path), &config).expect("load CPMD batch session");
+    let answers = batch
+        .force_batch(&numbers, &positions, &boxes, None)
+        .expect("CPMD fixture batch");
+    assert_eq!(answers[0].energy.to_bits(), first.energy.to_bits());
+    assert_eq!(answers[1].energy.to_bits(), second.energy.to_bits());
+    assert_eq!(answers[0].forces, first.forces);
+    assert_eq!(answers[1].forces, second.forces);
 }
 
 #[test]

@@ -32,6 +32,8 @@ struct RgpotEnginePot {
   double k;
   double last_energy;
   int evaluated;
+  unsigned long long model_state;
+  RgpotEngineCallbacks callbacks;
   char error[128];
 };
 
@@ -87,27 +89,56 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
                        rgpot_engine_coord_transform transform, void *user) {
   long i;
   double e = 0.0;
+  double *scratch = NULL;
+  double scratch_box[9];
   native_calls += 1;
   (void)variance;
-  (void)box;
-  (void)transform;
-  (void)user;
+  if (transform != NULL) {
+    int rc;
+    scratch = malloc((size_t)(3 * n) * sizeof(double));
+    memcpy(scratch, positions, (size_t)(3 * n) * sizeof(double));
+    memcpy(scratch_box, box, sizeof scratch_box);
+    rc = transform(user, n, scratch, scratch_box);
+    if (rc != 0) {
+      free(scratch);
+      return rc;
+    }
+    positions = scratch;
+    box = scratch_box;
+  }
 #ifdef FATAL_ONCE
   if (!fatal_once_fired) {
     fatal_once_fired = 1;
     snprintf(pot->error, sizeof pot->error, "fatal once");
+    free(scratch);
     return -7;
   }
 #endif
   for (i = 0; i < n; i++) {
     if (atomic_nrs[i] == 0) {
       snprintf(pot->error, sizeof pot->error, "atom %ld has atomic number 0", i);
+      free(scratch);
       return 1;
     }
     if (atomic_nrs[i] < 0) {
       snprintf(pot->error, sizeof pot->error, "atom %ld has a negative atomic number", i);
+      free(scratch);
       return -1;
     }
+  }
+  if (pot->callbacks.oracle != NULL) {
+    int rc;
+    if (pot->callbacks.on_acquire != NULL)
+      pot->callbacks.on_acquire(pot->callbacks.ctx, RGPOT_ACQUIRE_VARIANCE);
+    rc = pot->callbacks.oracle(pot->callbacks.ctx, n, positions, atomic_nrs,
+                               forces, energy, box);
+    if (rc == 0) {
+      pot->model_state += 1;
+      if (pot->callbacks.on_model_update != NULL)
+        pot->callbacks.on_model_update(pot->callbacks.ctx, pot->model_state);
+    }
+    free(scratch);
+    return rc;
   }
 #ifdef REJECT_COINCIDENT
   {
@@ -119,6 +150,7 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
         double dz = positions[3 * i + 2] - positions[3 * j + 2];
         if (!(dx * dx + dy * dy + dz * dz > 0.0)) {
           snprintf(pot->error, sizeof pot->error, "coincident atoms");
+          free(scratch);
           return RGPOT_ENGINE_ERR_EVAL;
         }
       }
@@ -133,6 +165,7 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
   pot->last_energy = e;
   pot->evaluated = 1;
   pot->error[0] = '\0';
+  free(scratch);
   return 0;
 }
 #endif
@@ -156,6 +189,18 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long n_systems, long n,
   return 0;
 }
 #endif
+
+unsigned long long rgpot_engine_model_state(const RgpotEnginePot *pot) {
+  return pot->model_state;
+}
+
+int rgpot_engine_set_callbacks(RgpotEnginePot *pot,
+                               const RgpotEngineCallbacks *callbacks) {
+  if (pot == NULL) return RGPOT_ENGINE_ERR_INVALID;
+  memset(&pot->callbacks, 0, sizeof pot->callbacks);
+  if (callbacks != NULL) pot->callbacks = *callbacks;
+  return RGPOT_ENGINE_OK;
+}
 
 #ifndef NO_LAST_ERROR
 size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len) {
