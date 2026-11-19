@@ -32,13 +32,19 @@ const REPAIR_STEP_CAP: f64 = 0.35;
 /// Angular displacement used to read local torsional curvature.
 const BARRIER_PROBE_ANGLE: f64 = std::f64::consts::FRAC_PI_6;
 
-/// Fraction of the covalent-radius sum below which a planar bridge is a
-/// double bond. C=C, C=N and N=N sit at 0.87-0.89 of the sum; the partial
-/// double bonds of amides, amidines, vinylogous systems and aryl-N sit at
-/// 0.92 and above. Bridges whose planar neighbourhood is shorter than this
-/// keep their E/Z isomer through a proposal, since a half turn about a true
-/// double bond is a different stereoisomer, not a different conformer.
+/// Fraction of the covalent-radius sum below which a bridge is a double
+/// bond. C=C, C=N and N=N sit at 0.87-0.89 of the sum; the partial double
+/// bonds of amides, amidines, vinylogous systems and aryl-N sit at 0.92 and
+/// above. A bridge shorter than this whose ends are bent keeps its E/Z
+/// isomer through a proposal, since a half turn about a true double bond is
+/// a different stereoisomer, not a different conformer. The length decides,
+/// not the planarity of the neighbourhood: a conjugated alkene a quench has
+/// twisted by 14 degrees is still the same double bond.
 const DOUBLE_BOND_FRACTION: f64 = 0.90;
+
+/// Cosine of the bond angle at an end of a double bond above which the end
+/// is linear: an alkyne or a cumulene has no E/Z isomer to hold.
+const LINEAR_COSINE: f64 = -0.9;
 
 /// Rotatable bonds and contact radii of one structure.
 #[derive(Debug, Clone)]
@@ -85,6 +91,16 @@ fn dihedral(x: ArrayView1<f64>, q: &[usize; 4]) -> f64 {
     let v = sub(b0, b1.map(|c| c * dot(b0, b1)));
     let w = sub(b2, b1.map(|c| c * dot(b2, b1)));
     dot(cross(b1, v), w).atan2(dot(v, w))
+}
+
+/// Whether the angle at `vertex` between `a` and `b` is short of linear.
+fn bent(x: ArrayView1<f64>, a: usize, vertex: usize, b: usize) -> bool {
+    let arm = |t: usize| [0, 1, 2].map(|c| x[3 * t + c] - x[3 * vertex + c]);
+    let (u, v) = (arm(a), arm(b));
+    let dot = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let norms =
+        (u.iter().map(|c| c * c).sum::<f64>() * v.iter().map(|c| c * c).sum::<f64>()).sqrt();
+    dot > LINEAR_COSINE * norms.max(1e-12)
 }
 
 /// Signs of the volumes spanned by the bonds from `h[0]` to each three of
@@ -174,12 +190,22 @@ impl Topology {
             for (t, torsion) in torsions[..bonds].iter().enumerate() {
                 let (f, p) = (torsion.fixed, torsion.pivot);
                 let sum = covalent_radius(species[f]) + covalent_radius(species[p]);
-                if !torsion.constrained || distance(x, f, p) >= DOUBLE_BOND_FRACTION * sum {
+                if distance(x, f, p) >= DOUBLE_BOND_FRACTION * sum
+                    || nb[f].len() > 3
+                    || nb[p].len() > 3
+                {
                     continue;
                 }
-                let first =
-                    |end: usize, other: usize| nb[end].iter().copied().find(|&a| a != other);
-                if let (Some(a), Some(b)) = (first(f, p), first(p, f)) {
+                let first = |end: usize, other: usize, turns: bool| {
+                    nb[end]
+                        .iter()
+                        .copied()
+                        .find(|&a| a != other && torsion.side.contains(&a) == turns)
+                };
+                if let (Some(a), Some(b)) = (first(f, p, false), first(p, f, true))
+                    && bent(x, a, f, p)
+                    && bent(x, f, p, b)
+                {
                     isomers[t] = Some([a, f, p, b]);
                 }
             }
@@ -446,10 +472,14 @@ impl Topology {
         let mut measured = vec![false; self.bonds];
         let mut profiles = vec![None; self.bonds];
         self.propose_by(x, rng, |index, torsion, rng| {
-            if !torsion.constrained {
-                return rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
-            }
             let held = self.isomers[index].is_some();
+            if !torsion.constrained {
+                return if held {
+                    rng.random_range(-BARRIER_PROBE_ANGLE..BARRIER_PROBE_ANGLE)
+                } else {
+                    rng.random_range(-std::f64::consts::PI..std::f64::consts::PI)
+                };
+            }
             if !measured[index] {
                 measured[index] = true;
                 let probe = |theta: f64, evaluate: &mut F| {
@@ -810,6 +840,37 @@ mod tests {
             measured <= 800,
             "{measured} probes: only the small turns are priced"
         );
+    }
+
+    #[test]
+    fn a_twisted_double_bond_keeps_its_isomer_through_a_proposal() {
+        let (mut x, z) = amidine(1.28);
+        let flat = Topology::of(x.view(), &z, 1.25, None, false);
+        turn_bond(&mut x, &flat.torsions[0], 0.45);
+        let top = Topology::of(x.view(), &z, 1.25, None, false);
+        assert_eq!(top.torsions.len(), 1, "only the C=N turns");
+        assert!(
+            !top.torsions[0].constrained,
+            "a twist of 26 degrees leaves the planar test"
+        );
+        let mut rng = StdRng::seed_from_u64(5);
+        for _ in 0..400 {
+            let y = top.propose(x.view(), &mut rng);
+            assert!(!flipped(&x, &y), "a half turn changed the E/Z isomer");
+            let y = top.propose_measured(x.view(), 0.0, 50.0, &mut rng, |_| Some(1.0));
+            assert!(!flipped(&x, &y), "a priced half turn changed the isomer");
+        }
+    }
+
+    #[test]
+    fn a_linear_bridge_has_no_isomer_to_hold() {
+        let (x, z) = amidine(1.28);
+        let mut line = x.clone();
+        for k in 0..3 {
+            line[3 * 2 + k] = x[3 + k] + (x[3 + k] - x[k]) * 0.8;
+        }
+        let top = Topology::of(line.view(), &z, 1.25, None, false);
+        assert!(top.isomers.iter().all(Option::is_none));
     }
 
     #[test]
