@@ -6,9 +6,10 @@ constants, and gates the converged quench against same-session develop
 (`628773d6`) and openconf on fresh seeds 2048-2071. Total lowest-conformer
 hits rise from 87/192 to 112/192 (openconf 41/192), winning on six molecules
 and tying on one, while losing three seeds on `rq3` (21/24 against 24/24).
-Under the gate rule (default-on only if it loses on no molecule),
-`quench_gradient` stays opt-in and `recommended_molecular` keeps develop's
-quench stop.
+These rows are that intermediate run. They are not the gate for the
+later constrained-torsion, barrier, imine, tip, or plateau changes.
+The shipped `recommended_molecular` stops a full quench at
+`quench_gradient` 1e-3 eV/Å and gives that quench 500 steps.
 
 - branch: anneal `c6f1d3e205d19d91aad81ea5abbe8a033e73971c`, the `anneal`
   rows (`quench_gradient = 1e-3` eV/Å, reproducible from HEAD through
@@ -99,8 +100,10 @@ MMFF94 (in eV and Å, 1 eV/Å = 23.06 kcal/(mol·Å)):
 - **Quench and rotor bookkeeping**: `charge_rejecting_repeat_failure` treats
   uncharged `lost_a_bond` pullbacks like overlap refusals; `rotatable_bonds`
   treats two-tip rotors as symmetric tops only when the pivot is planar;
-  under `quench_gradient > 0`, `AcceptDial` ignores self-basin returns and
-  returns the walker to `best_state` at the end of the opening scale pilot.
+  under `quench_gradient > 0`, `AcceptDial` ignores self-basin returns and,
+  once the opening scale pilot finishes, returns the walker to
+  `best_state`. With the gradient unset that pilot does not move the
+  walker.
 - **Audit fix**: `RevisionIndex.exists` in `scripts/paper_audit.py` walks
   `HEAD` and `refs/remotes` rather than `--all`, so unrelated local branches
   in a developer clone no longer trip `bench/revision-aliases.csv`.
@@ -196,9 +199,9 @@ at 23, 7 and 5 against the 47 median). Excluding planar conjugated amide
 `C-N` bonds from uniform `(-pi, pi)` draws (or restricting conjugated bonds
 to 180-degree flips) is the clean follow-up.
 
-Because the gate loses on `rq3` (21/24 vs 24/24), `quench_gradient` stays
-opt-in (`cluster_search(..., quench_gradient=1e-3)`) rather than default-on
-in `Config::recommended_molecular`.
+On this intermediate run `rq3` lost three seeds (21/24 vs 24/24), so
+the quench was not turned on at that revision. That loss is not the
+gate for the later torsion and plateau changes.
 
 ## Shipped molecular quench
 
@@ -206,3 +209,5 @@ in `Config::recommended_molecular`.
 1e-3 eV/Å and gives that quench 500 steps. `record_gradient` stays
 5e-2 eV/Å. Lennard-Jones, Morse and gold stay on `Config::recommended`
 and omit `quench_gradient`. A water arm clears the converged quench.
+With the gradient unset, the opening scale pilot does not return the
+walker to `best_state`.
