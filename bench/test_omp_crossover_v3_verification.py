@@ -244,6 +244,27 @@ def main() -> None:
         == "disabled",
         "mpi found: NO was resolved as enabled because another line said YES",
     )
+    enabled_pc = "Name: rgpot\nCflags: -I${includedir} -DRGPOT_HAS_IPI=TRUE\n"
+    disabled_pc = "Name: rgpot\nCflags: -I${includedir} -DRGPOT_HAS_POTLIB=TRUE\n"
+    decoy_pc = "Libs: -lrgpot -DRGPOT_HAS_IPI=TRUE\nCflags: -I${includedir}\n"
+    require(
+        recorder.ipi_from_pkgconfig(enabled_pc) == "enabled",
+        "pkg-config Cflags did not record with_ipi as enabled",
+    )
+    require(
+        recorder.ipi_from_pkgconfig(disabled_pc) == "disabled",
+        "pkg-config Cflags without the i-PI flag was recorded as enabled",
+    )
+    require(
+        recorder.ipi_from_pkgconfig(decoy_pc) == "disabled",
+        "an i-PI flag outside Cflags was recorded as enabled",
+    )
+    try:
+        recorder.ipi_from_pkgconfig("Name: rgpot\n")
+    except SystemExit as exc:
+        require("Cflags" in str(exc), f"pkg-config record without Cflags said {exc}")
+    else:
+        require_exit("pkg-config record without Cflags was accepted")
     compact = recorder.parse_meson_summary("Ok:                4\nExpected Fail:     1\nFail:              0\n")
     require(
         compact["Ok"] == 4
