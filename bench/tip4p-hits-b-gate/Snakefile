@@ -1,0 +1,68 @@
+# Copyright (c) anneal developers
+# Snakemake rules for the tip4p-hits-b same-session hit and cost gate.
+
+import os
+import sys
+
+PYTHON = sys.executable
+GATE_DIR = "bench/tip4p-hits-b-gate"
+GATE_WORK = os.environ.get("GATE_WORK", "build/tip4p-hits-b-gate")
+
+
+rule all:
+    input:
+        f"{GATE_DIR}/summary.csv",
+        f"{GATE_DIR}/identity.csv",
+        f"{GATE_DIR}/verdict.txt",
+        f"{GATE_DIR}/README.md",
+
+
+rule summarize:
+    input:
+        f"{GATE_DIR}/rows.csv",
+        f"{GATE_DIR}/tests.txt",
+        f"{GATE_DIR}/summarize.py",
+    output:
+        f"{GATE_DIR}/summary.csv",
+        f"{GATE_DIR}/identity.csv",
+        f"{GATE_DIR}/verdict.txt",
+        f"{GATE_DIR}/README.md",
+    shell:
+        """
+        set -euo pipefail
+        "{PYTHON}" {GATE_DIR}/summarize.py \
+          --rows {GATE_DIR}/rows.csv \
+          --tests {GATE_DIR}/tests.txt \
+          --summary {GATE_DIR}/summary.csv \
+          --identity {GATE_DIR}/identity.csv \
+          --verdict {GATE_DIR}/verdict.txt \
+          --report {GATE_DIR}/README.md
+        """
+
+
+rule gate:
+    input:
+        f"{GATE_DIR}/run_gate.py",
+    output:
+        touch(f"{GATE_WORK}/gate.stamp"),
+    shell:
+        """
+        set -euo pipefail
+        "{PYTHON}" -u {GATE_DIR}/run_gate.py \
+          --rows {GATE_DIR}/rows.csv \
+          --sessions {GATE_DIR}/sessions.jsonl \
+          --hosts {GATE_DIR}/hosts.csv \
+          --work {GATE_WORK} \
+          --logs {GATE_WORK}/logs \
+          --python "{PYTHON}" \
+          --a-bin "${{GATE_A_BIN:?set GATE_A_BIN}}" \
+          --b-bin "${{GATE_B_BIN:?set GATE_B_BIN}}" \
+          --a-py "${{GATE_A_PY:?set GATE_A_PY}}" \
+          --b-py "${{GATE_B_PY:?set GATE_B_PY}}" \
+          --a-rev "${{GATE_A_REV:?set GATE_A_REV}}" \
+          --b-rev "${{GATE_B_REV:?set GATE_B_REV}}" \
+          --a-tree "${{GATE_A_TREE:?set GATE_A_TREE}}" \
+          --b-tree "${{GATE_B_TREE:?set GATE_B_TREE}}" \
+          --rdff-lib "${{GATE_RDFF_LIB:?set GATE_RDFF_LIB}}" \
+          --xtb-engine "${{GATE_XTB_ENGINE:?set GATE_XTB_ENGINE}}"
+        """
