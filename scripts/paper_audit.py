@@ -4096,9 +4096,42 @@ def manuscript_new(audit: Audit) -> None:
     title = "One basin-hopping setting for Lennard-Jones,\nMorse, gold, and water clusters"
     audit.said(PAPER, "\\title{" + title + "}")
     audit.said(SI, "One basin-hopping setting for Lennard-Jones,\nMorse, gold, and water clusters")
+    rohit_affiliations = (
+        "\\author{Rohit Goswami}\n"
+        "\\affiliation{SURF B.V., Amsterdam}\n"
+        "\\alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}\n"
+    )
     for path in (TEX, SI):
-        audit.said(path, "\\affiliation{SURF B.V., Amsterdam}")
+        rohit_block = audit.text(path).split("\\author{Rohit Goswami}", 1)[1].split("\\author{Ruhila Goswami}", 1)[0]
+        shown = "\\author{Rohit Goswami}" + rohit_block
+        audit.record(shown == rohit_affiliations, path,
+                     "Rohit's affiliations are SURF first and TurtleTech second",
+                     rohit_affiliations.strip(), shown.strip())
         audit.record("SURF BV" not in audit.text(path), path, "the affiliation is spelled one way", "SURF B.V.", "SURF B.V.")
+    cover_address = (
+        "\\noindent Rohit Goswami\\\\\n"
+        "SURF B.V., Amsterdam, The Netherlands\\\\\n"
+        "TurtleTech ehf., Reykjavik, Iceland\\\\\n"
+        "Email: \\url{rgoswami@ieee.org}"
+    )
+    audit.said(COVER, cover_address)
+    citation_rohit = audit.text("CITATION.cff").split('given-names: "Rohit"', 1)[1].split("- family-names:", 1)[0]
+    audit.record('affiliation: "SURF B.V.; TurtleTech ehf"' in citation_rohit,
+                 "CITATION.cff", "Rohit's citation affiliations are SURF first and TurtleTech second",
+                 "SURF B.V.; TurtleTech ehf",
+                 citation_rohit.strip())
+    zenodo_creators = json.loads(audit.text(".zenodo.json"))["creators"]
+    zenodo_rohit = next(creator for creator in zenodo_creators
+                        if creator["name"] == "Goswami, Rohit")
+    audit.record(zenodo_rohit.get("affiliation") == "SURF B.V.; TurtleTech ehf",
+                 ".zenodo.json",
+                 "Rohit's Zenodo affiliations are SURF first and TurtleTech second",
+                 "SURF B.V.; TurtleTech ehf",
+                 zenodo_rohit.get("affiliation", "missing"))
+    for path in (TEX, SI, COVER, "CITATION.cff", ".zenodo.json"):
+        found = "Science Institute, University of Iceland" in audit.text(path)
+        audit.record(not found, path, "Rohit's former Science Institute affiliation is absent",
+                     "absent", "present" if found else "absent")
     audit.record("\\todo{" not in audit.text(PAPER), PAPER, "no \\todo remains in the manuscript", "none", "none")
     for path in (TEX, COVER):
         audit.said(path, "The concept DOI of the \\texttt{anneal\\_repro} reproducibility archive is \\DOI{}.")
