@@ -1,0 +1,19 @@
+# rep 1 force_calls 7967978 total_searches 16974 connected 27 seed 20261016
+code eOn
+code_version 3.5.0 (d9cc6c5b) compiled Thu Nov 19 08:39:08 AM GMT 2026
+commit d9cc6c5bee432d625eb6c56d7ea74b723a37ee3b
+algorithm Dimer
+dimer_improved false
+template eon/develop-saddle-pt-dimer
+problem saddle-search/pt-island
+counter client-search-results
+count_keys sad-fcs+mins-fcs
+seed 20261016
+communicator_jobs 1
+repetitions 1
+total_searches 16974
+connected 27
+goal 27
+nfailed 0
+wall_seconds 22002.247882
+cpu_affinity 0
