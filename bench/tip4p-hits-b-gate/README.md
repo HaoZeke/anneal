@@ -45,6 +45,27 @@ verdict=PASS
 | conformer | rq3 | 56914 | 12/12 vs 12/12 | 1 | 12738.0 / 12738.0 | 1 | 1.000142 / 1.001857 | 1.0017 | 0.589876 | 12/12 | ok |
 | lj | lj38 | 400000 | 12/12 vs 12/12 | 1 | 6357.0 / 6357.0 | 1 | 0.030685 / 0.030680 | 0.9998 | 0.932301 | 12/12 | ok |
 
+## Placement Band (water_hexamer)
+
+Arm A layout variants change only object size or section alignment of `anneal._core`. Each variant is run against arm A, and an A/A on `water_hexamer` is pooled with those variant/A median outside-potential ratios. Seeds 2000-2011, serial core 0, ABBA order, one thread.
+
+| Series | Kind | Out med left/right (s) | Ratio | Exact MW p | Bit-ID |
+| --- | --- | --- | ---: | ---: | --- |
+| PLAA | rgpot_xtb_py | 2.338964 / 2.332869 | 0.9974 | 0.712535 | 12/12 |
+| PL1 | pad32 | 2.332917 / 2.304528 | 0.9878 | 0.241524 | 12/12 |
+| PL2 | pad96 | 2.278474 / 2.257478 | 0.9908 | 0.159973 | 12/12 |
+| PL3 | pad400 | 2.308281 / 2.312110 | 1.0017 | 0.712535 | 12/12 |
+| PL4 | pad1200 | 2.312771 / 2.306072 | 0.9971 | 0.977402 | 12/12 |
+| PL5 | pad700-pagesize65536 | 2.291603 / 2.266620 | 0.9891 | 0.842836 | 12/12 |
+
+- Pooled placement band (min and max of the six median ratios): `0.9878` to `1.0017`
+- `water_hexamer` B/A median outside ratio `1.1242` is outside the placement band
+- Exact Mann-Whitney of arm B outside times (n=12) against the pooled variant outside times (n=60): U=`709.0`, p=`2.53852e-11`, Bonferroni m=`5`, p_adj=`1.26926e-10`
+- `water_hexamer` fails only when that ratio lies outside the band and p_adj < 0.05
+- `tip4p21` outside ratio `0.8540` is outside the placement band
+- `tip4p25` outside ratio `0.7906` is outside the placement band
+- Variant and A/A trajectories match arm A: `1`
+
 ## Gate Failure Details
 
-- AB/water_hexamer: outside_regression_beyond_AA:ratio=1.124,p=5.17722e-06
+- AB/water_hexamer: outside_placement_band:ratio=1.1242,band=0.9878-1.0017,p=2.53852e-11,p_adj=1.26926e-10

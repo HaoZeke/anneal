@@ -8,5 +8,21 @@ aa_overall_outside_ratio: 1.010267
 aa_max_cell_outside_ratio: 1.002643
 aa_min_outside_p: 0.589876
 tests_ok: 1
+placement_ready: 1
+placement_bonferroni_m: 5
+placement_ratio_min: 0.987831
+placement_ratio_max: 1.001659
+placement_hexamer_ratio: 1.124185
+placement_hexamer_vs_band: outside
+placement_mw_u: 709.0
+placement_mw_p: 2.53852e-11
+placement_mw_p_adj: 1.26926e-10
+placement_n_b: 12
+placement_n_pooled: 60
+placement_bit_identical: 1
+tip4p21_outside_ratio: 0.854023
+tip4p21_vs_placement_band: outside
+tip4p25_outside_ratio: 0.790624
+tip4p25_vs_placement_band: outside
 failures:
-- AB/water_hexamer: outside_regression_beyond_AA:ratio=1.124,p=5.17722e-06
+- AB/water_hexamer: outside_placement_band:ratio=1.1242,band=0.9878-1.0017,p=2.53852e-11,p_adj=1.26926e-10
