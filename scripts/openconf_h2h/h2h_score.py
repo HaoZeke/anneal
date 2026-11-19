@@ -103,6 +103,20 @@ class Molecule:
     def same(self, a, b) -> bool:
         return abs(a[1] - b[1]) < ENERGY_TIE and self.rmsd(a[0], b[0]) < RMSD
 
+    def same_or_mirror(self, a, b) -> bool:
+        """``same``, or ``b`` is the mirror image of ``a``.
+
+        A polished geometry has passed the stereo check, so a mirror image of
+        a conformer that passes it too belongs to a molecule with no net
+        handedness: the enantiomeric conformer is the same species with the
+        same energy. The fit in ``rmsd`` keeps proper rotations, so a mirror
+        image never matches under ``same``.
+        """
+        if self.same(a, b):
+            return True
+        flipped = np.asarray(b[0]).reshape(-1, 3) * np.array([1.0, 1.0, -1.0])
+        return abs(a[1] - b[1]) < ENERGY_TIE and self.rmsd(a[0], flipped) < RMSD
+
     def dedupe(self, items: list[tuple[np.ndarray, float]]) -> list[tuple[np.ndarray, float]]:
         kept: list[tuple[np.ndarray, float]] = []
         for item in sorted(items, key=lambda t: t[1]):
