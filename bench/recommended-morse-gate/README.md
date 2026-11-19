@@ -80,3 +80,18 @@ python3 -m snakemake -s bench/recommended-morse-gate/Snakefile --cores 1
 
 `hosts.csv` carries the first 12 hex digits of the SHA-256 of the
 machine-id file with its trailing newline removed. Logs stay out of git.
+
+## Result
+
+See `verdict.txt`. B loses `m38r14` on the median eval count (adjusted
+p below 0.05). Hits on that cell are 12/12 against 9/12 and are not
+significant after the same adjustment. The other three cells do not
+lose. The second build and the three layouts match B on the harness
+record.
+
+The missing object `90b88235` was not built. Arm A is `7fda9e44`.
+Its `m38r6` seed 2000 row matches the recorded panel row. `git bisect
+run` on seeds 2001 and 2004, first parent then the side of the merge,
+finds `1c1b1238` (`fix: remove structure templates from cluster
+search`), which `bc16d35c` merges. The quench prefix matches arm A
+through step 18 on seed 2001 and step 25 on seed 2004.
