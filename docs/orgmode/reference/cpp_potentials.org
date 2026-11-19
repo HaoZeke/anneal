@@ -464,7 +464,8 @@ void forceStage(const HalfList &list, const double *densities, double *forces,
 #+end_src
 
 - Applies to :: rgpot::EAMPot, rgpot::EAMTablePot, rgpot::LJClusterPot,
-  rgpot::LJPot, rgpot::MorsePot, rgpot::TersoffSiC, rgpot::ZBLPot
+  rgpot::LJPot, rgpot::MorsePot, rgpot::SuttonChenPot, rgpot::TersoffSiC,
+  rgpot::ZBLPot
 - Inputs :: none.
 - Units :: none.
 - Outputs :: true when the last force call kept the Verlet list, because no atom
@@ -991,9 +992,16 @@ void setPairTermLimit(std::size_t pairs) noexcept;
   density-pass terms the force pass reads back.
 - Units :: none.
 - Outputs :: none.
-  A force call keeps =epsilon n (a/r)^n=, =m (a/r)^m= and =1/r^2= for each pair
-  the density pass accepts, 24 bytes a pair, and the force pass computes the
-  terms of the pairs past the limit again, with the same bits.
+  On the three-phase stored path, this limit must satisfy
+  =total_up <= pairs= or that path is skipped and the call falls back to the
+  threaded two-pass row walk.
+  The three-phase scratch cost from the code's per-slot vectors is 69 bytes per
+  candidate upper pair:
+  =active= 1 byte + =pair_phi= 8 + =pair_force= 48 + =up_j= 4 + =lo_refs= 8.
+  With per-atom energies (=forcePerAtom= with =atoms.energy= non-null) it is 77
+  bytes, because =pair_he= adds 8.
+  The force pass computes terms of the pairs past the kept room again, with the
+  same bits.
   The room for a call follows the pairs the previous call saw, so a walk whose
   pair count is not known in advance keeps its terms from the second call on.
   The default keeps 32 MiB of terms, and 0 keeps none.
