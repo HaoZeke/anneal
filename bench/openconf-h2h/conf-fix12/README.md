@@ -1,19 +1,13 @@
 Copyright (c) anneal developers
 
-conf-fix12 finds why the molecular quench in `Config::recommended_molecular`
-stops unconverged, fixes the cause in `anneal` without molecule-specific
-constants, and gates the converged quench against same-session develop
-(`628773d6`) and openconf on fresh seeds 2048-2071. Total lowest-conformer
-hits rise from 87/192 to 112/192 (openconf 41/192), winning on six molecules
-and tying on one, while losing three seeds on `rq3` (21/24 against 24/24).
-These rows are that intermediate run. They are not the gate for the
-later constrained-torsion, barrier, imine, tip, or plateau changes.
-The shipped `recommended_molecular` stops a full quench at
-`quench_gradient` 1e-3 eV/Å and gives that quench 500 steps.
+conf-fix12 records an intermediate comparison of a tighter molecular
+quench against same-session develop (`628773d6`) and openconf, on seeds
+2048-2071. The `anneal` revision is not in this clone. The tables below
+are the committed rows.
 
 - branch: anneal `c6f1d3e205d19d91aad81ea5abbe8a033e73971c`, the `anneal`
-  rows (`quench_gradient = 1e-3` eV/Å, reproducible from HEAD through
-  `--quench-gradient 1e-3`).
+  rows (`quench_gradient = 1e-3` eV/Å). Develop does not contain that
+  commit. `refs/remotes/origin/record/conf-fix12` does.
 - develop: anneal `628773d6837ea2d959a27256ff4163b21162fd4d`, the `develop`
   rows.
 - openconf: rowansci/openconf `e32c5fa7b6e6aac944bda31c851be42e14340235`
@@ -58,9 +52,8 @@ MMFF94 (in eV and Å, 1 eV/Å = 23.06 kcal/(mol·Å)):
    Cartesian `L-BFGS` spent stopping at `5e-2` eV/Å), but rebuilt its dense
    Wilson SVD and dense primitive-space Hessian eigendecomposition at every
    step with column-strided `O(n^3)` and `O(rows^2 * m)` loops (168 ms/step
-   on 94-atom lopinavir), and `LocalStep::Auto` tested `per_call > per_step`
-   (assuming a 2x call saving measured at `5e-2` eV/Å rather than the ~16x
-   saving on dihedral-bearing molecules at `1e-3` eV/Å).
+   on 94-atom lopinavir). `LocalStep::Auto` compared one potential call
+   with one internal-coordinate step.
 4. **L-BFGS history across moves and split passes.** `warm_relax_with`
    called `opt.forget()` on every `relax` invocation, so stale history never
    leaked across torsion moves, but the 25-step screening prefix discarded
@@ -87,16 +80,14 @@ MMFF94 (in eV and Å, 1 eV/Å = 23.06 kcal/(mol·Å)):
 
 - **`Config::quench_gradient`** (`src/methods/cluster_hopping/config.rs`,
   `cluster_search(..., quench_gradient=...)`): separates the full-quench
-  stopping tolerance (`1e-3` eV/Å, with `relax_steps >= 500`) from the
-  `5e-2` eV/Å record gate (`record_gradient`).
+  stopping tolerance from the `5e-2` eV/Å record gate (`record_gradient`).
 - **Fixed-chart `TricOpt`** (`src/methods/tric_opt.rs`): builds one
   delocalized chart `U` per quench from sparse Wilson rows and unit-stride
   EISPACK `tred2`/`tql2`, caches the blocked-GEMM Cholesky factor of the
   active Gram matrix `B_d B_d^T` within 0.15 Å atomic drift with PCG
   refinement, updates `(H_d, H_d^-1)` for `O(m^2)` Powell dogleg steps,
-  lowers `min_trust` to `1e-5`, continues warm across `screen -> full`
-  passes, and scales `LocalStep::Auto` by `TricOpt::call_saving` (60x faster
-  per quench on lopinavir: 12.8 s down to 0.22 s).
+  lowers `min_trust` to `1e-5`, and continues warm across `screen -> full`
+  passes.
 - **Quench and rotor bookkeeping**: `charge_rejecting_repeat_failure` treats
   uncharged `lost_a_bond` pullbacks like overlap refusals; `rotatable_bonds`
   treats two-tip rotors as symmetric tops only when the pivot is planar;
@@ -122,11 +113,8 @@ MMFF94 (in eV and Å, 1 eV/Å = 23.06 kcal/(mol·Å)):
 
 ## Gate (fresh seeds 2048-2071, all 8 molecules)
 
-One serial bench session on host `bench`, core 0:
-
-`snakemake -s workflow/Snakefile openconf_h2h_conf_fix12`
-
-Branch (`quench_gradient = 1e-3` eV/Å) against same-session develop
+One serial bench session on host `bench`, core 0. Branch
+(`quench_gradient = 1e-3` eV/Å) against same-session develop
 (`628773d6`) and openconf, 24 seeds per molecule, 576 runs.
 
 | molecule | hits branch | hits develop | hits openconf | Fisher p vs develop | Fisher p vs openconf | n_3kcal branch | n_3kcal develop | n_3kcal openconf | ΔE_min branch | ΔE_min develop | ΔE_min openconf |
@@ -188,26 +176,14 @@ potentials (GFN2-xTB, tens of milliseconds per call) it is a fraction of
 
 ## Why `rq3` lost three seeds, and decision
 
-On `rq3` seeds 2061, 2063 and 2066 (`ΔE_min` = 0.12, 0.25 and 0.45 kcal/mol),
-94.2%, 98.6% and 99.3% of harvested candidates carry the secondary amide bond
-`N7-C8(=O)` (`len = 1.385` Å = `0.942` of the Cordero sum, just above
-`SINGLE_BOND_FRACTION = 0.93`) in its high-energy cis rotamer (~6.5 kcal/mol
-above trans). Once an accepted uphill move flips that conjugated amide to
-cis, `rotatable_bonds` only draws `N7-C8` once in ten hops and the walk
-spends almost its entire budget in cis-amide conformers (leaving `n_3kcal`
-at 23, 7 and 5 against the 47 median). Excluding planar conjugated amide
-`C-N` bonds from uniform `(-pi, pi)` draws (or restricting conjugated bonds
-to 180-degree flips) is the clean follow-up.
-
-On this intermediate run `rq3` lost three seeds (21/24 vs 24/24), so
-the quench was not turned on at that revision. That loss is not the
-gate for the later torsion and plateau changes.
+On `rq3` seeds 2061, 2063 and 2066 the walk spent the budget in
+cis-amide conformers. The hit table records 21/24 against develop's 24/24.
 
 ## Shipped molecular quench
 
-`Config::recommended_molecular` stops a full quench at `quench_gradient`
-1e-3 eV/Å and gives that quench 500 steps. `record_gradient` stays
+`Config::recommended_molecular` does not set `quench_gradient`. A caller
+who sets one keeps the `relax_steps` they chose. `record_gradient` stays
 5e-2 eV/Å. Lennard-Jones, Morse and gold stay on `Config::recommended`
-and omit `quench_gradient`. A water arm clears the converged quench.
+and omit `quench_gradient`. A water arm clears a gradient a caller set.
 With the gradient unset, the opening scale pilot does not return the
 walker to `best_state`.
