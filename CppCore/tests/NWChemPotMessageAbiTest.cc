@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "RestoreEnv.hpp"
 #include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/NWChemPot/NWChemPot.hpp"
 #include "rgpot/rpc/Potentials.capnp.h"
@@ -22,42 +23,7 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
-class RestoreEnv {
-public:
-  explicit RestoreEnv(const char *name) : name_(name) {
-    if (const char *value = std::getenv(name)) {
-      had_ = true;
-      value_ = value;
-    }
-  }
-
-  void clear() const {
-#ifdef _WIN32
-    _putenv_s(name_, "");
-#else
-    unsetenv(name_);
-#endif
-  }
-
-  ~RestoreEnv() {
-#ifdef _WIN32
-    _putenv_s(name_, had_ ? value_.c_str() : "");
-#else
-    if (had_)
-      setenv(name_, value_.c_str(), 1);
-    else
-      unsetenv(name_);
-#endif
-  }
-
-  RestoreEnv(const RestoreEnv &) = delete;
-  RestoreEnv &operator=(const RestoreEnv &) = delete;
-
-private:
-  const char *name_;
-  bool had_ = false;
-  std::string value_;
-};
+using rgpot::test_support::RestoreEnv;
 
 struct RejectParamsGuard {
   using RejectParamsFn = void (*)(int);
