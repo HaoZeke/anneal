@@ -179,6 +179,7 @@ omp_crossover_v3_provenance | tests python | py bench/test_omp_crossover_v3_prov
 omp_crossover_v3_provenance_cases | tests python | py bench/test_omp_crossover_v3_provenance_cases.py |
 omp_crossover_v3_report | tests python | py bench/test_omp_crossover_v3_report.py --repo @root@ --harness bench/run_omp_crossover_v3.py --json bench/results/rgpot_omp_crossover_v3_results.json --report bench/results/rgpot_omp_crossover_v3_report.md --analysis-report bench/results/rgpot_omp_crossover_v3d_report.md --clarified-report bench/results/rgpot_omp_crossover_v3e_report.md |
 omp_crossover_v3_analysis | tests python | py bench/test_omp_crossover_v3_analysis.py |
+omp_crossover_v3_verification | tests python | py bench/test_omp_crossover_v3_verification.py |
 MinImageIsaVariants | tests core isa_variants | custom |
 ExactFmaEq | tests core | custom |
 ExpFixedEq | tests core | custom |
