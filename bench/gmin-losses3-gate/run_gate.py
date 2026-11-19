@@ -609,6 +609,9 @@ def measure(args: argparse.Namespace) -> None:
     assert_record_panel(repo)
     work = Path(args.work)
     work.mkdir(parents=True, exist_ok=True)
+    (work / "scratch").mkdir(parents=True, exist_ok=True)
+    (work / "starts").mkdir(parents=True, exist_ok=True)
+    (work / "logs").mkdir(parents=True, exist_ok=True)
     raw = work / "raw.jsonl"
     done = load_done(raw)
     harness = repo / "bench/gmin-losses3-gate/run_gate.py"
