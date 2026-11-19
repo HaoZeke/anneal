@@ -160,6 +160,7 @@ fortran_kernels_dep = declare_dependency(
         rgpot_sw_lib,
         fortran_kernels,
         rgpot_halfshell,
+        rgpot_core,
         rgpot_minimage,
         rgpot_exact_fma,
     ],
@@ -187,7 +188,12 @@ rgpot_cuh2 = library(
         'rgpot_cuh2.f90',
         'rgpot_cuh2_capi.f90',
     ],
-    link_with: [rgpot_halfshell, rgpot_minimage, rgpot_exact_fma],
+    link_with: [
+        rgpot_halfshell,
+        rgpot_core,
+        rgpot_minimage,
+        rgpot_exact_fma,
+    ],
     # C++ is the link language so the half-shell archives resolve, and meson
     # then does not add the Fortran runtime. fortran_rt_deps is the same
     # search the umbrella uses for _gfortran_* (and the flang equivalents).

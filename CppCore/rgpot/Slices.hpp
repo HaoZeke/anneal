@@ -12,10 +12,14 @@
 // suite when OpenMP appears outside Slices.hpp and Slices.cc.
 //
 // A call over atoms takes its slice count from teamSize, so a small system
-// opens no region at all.
+// opens no region at all. A batch of such systems is the other way around:
+// forEachBatchSystem spreads the systems, and each system stays whole so a
+// larger one can still open its own team.
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <vector>
 
 #if defined(_OPENMP)
 #include <omp.h>
@@ -36,7 +40,7 @@
 #include <utility>
 #endif
 
-#if defined(RGPOT_TSAN_ACTIVE) && defined(_OPENMP) && defined(__GNUC__) && \
+#if defined(RGPOT_TSAN_ACTIVE) && defined(_OPENMP) && defined(__GNUC__) &&     \
     !defined(__clang__)
 #define RGPOT_GOMP_TSAN 1
 extern "C" void GOMP_parallel(void (*)(void *), void *, unsigned, unsigned);
@@ -52,7 +56,8 @@ struct Range {
 
 /// Contiguous run of `n` items for `slice` in `[0, nslices)`. The runs
 /// cover `n` without overlap, in slice order. Any other slice is empty.
-[[nodiscard]] inline Range partition(std::int64_t n, int slice, int nslices) noexcept {
+[[nodiscard]] inline Range partition(std::int64_t n, int slice,
+                                     int nslices) noexcept {
   if (nslices < 1) {
     nslices = 1;
   }
@@ -161,8 +166,7 @@ void gompParallel(int threads, Function &&function) {
 ///
 /// MSVC rejects `#pragma omp` inside a lambda (C2760, token PRAGMA_OMP).
 /// The regions live here; the lambdas only supply the bodies.
-template <typename Body>
-void forEachSlice(int nslices, Body &&body) {
+template <typename Body> void forEachSlice(int nslices, Body &&body) {
 #if defined(_OPENMP)
   const int request = nslices > 1 ? detail::teamFor(nslices) : 1;
   if (request > 1) {
@@ -367,6 +371,71 @@ template <typename Body>
   (void)body;
   return false;
 #endif
+}
+
+/// Evaluates `n` independent systems on the thread team.
+///
+/// `atomsOf(i)` is the atom count of system `i`. `body(i)` evaluates
+/// that system. When every system is below `kTeamMinAtoms`, more than
+/// one thread is requested, and this call is not already inside a team,
+/// the systems are spread across `threadsRequested()` slices. A system
+/// at `kTeamMinAtoms` or above, or a batch that contains one, keeps the
+/// serial order so that system's own team is not nested. One system, or
+/// one requested thread, does the same.
+///
+/// The split is the one `BatchEvaluator` uses for configurations, run
+/// here on the existing team rather than a second pool.
+/// `threadsRequested()` honours `OMP_NUM_THREADS`. Each slice may run on
+/// its own thread. `body` keeps scratch off any state another slice
+/// writes. A system is evaluated whole, so its bits match the serial
+/// loop. A slice that throws is caught, and the exception from the
+/// lowest numbered slice is rethrown after the team joins.
+template <typename AtomsOf, typename Body>
+void forEachBatchSystem(std::size_t n, AtomsOf &&atomsOf, Body &&body) {
+  if (n == 0) {
+    return;
+  }
+  bool spread = n > 1 && threadsRequested() > 1;
+#if defined(_OPENMP)
+  if (omp_in_parallel()) {
+    spread = false;
+  }
+#endif
+  if (spread) {
+    for (std::size_t i = 0; i < n; ++i) {
+      if (atomsOf(i) >= kTeamMinAtoms) {
+        spread = false;
+        break;
+      }
+    }
+  }
+  if (!spread) {
+    for (std::size_t i = 0; i < n; ++i) {
+      body(i);
+    }
+    return;
+  }
+  int slices = threadsRequested();
+  if (n < static_cast<std::size_t>(slices)) {
+    slices = static_cast<int>(n);
+  }
+  std::vector<std::exception_ptr> errors(static_cast<std::size_t>(slices));
+  forEachSlice(slices, [&](int slice) {
+    try {
+      const Range range =
+          partition(static_cast<std::int64_t>(n), slice, slices);
+      for (std::int64_t i = range.begin; i < range.end; ++i) {
+        body(static_cast<std::size_t>(i));
+      }
+    } catch (...) {
+      errors[static_cast<std::size_t>(slice)] = std::current_exception();
+    }
+  });
+  for (const std::exception_ptr &error : errors) {
+    if (error) {
+      std::rethrow_exception(error);
+    }
+  }
 }
 
 } // namespace rgpot

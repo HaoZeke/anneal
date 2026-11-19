@@ -95,8 +95,9 @@ public:
    * @param gradient Receives dE/dx, length 3 * n_atoms, eV/Angstrom.
    *        The library force is the negation of this gradient.
    * @param neighbors Optional Verlet list. Null uses the internal list,
-   *        with a skin of one fifth of the cutoff (none in Stream mode). A list is reused while each atom has moved by at
-   *        most half its skin and the cell is unchanged.
+   *        with a skin of one fifth of the cutoff (none in Stream mode). A list
+   * is reused while each atom has moved by at most half its skin and the cell
+   * is unchanged.
    */
   void energyAndGradient(const double *positions, const int *atomic_numbers,
                          const double *box, std::size_t n_atoms, double *energy,
@@ -113,6 +114,11 @@ public:
    * @param n_atoms Atom count of each configuration.
    * @param energies Length n_config.
    * @param gradients Length n_config * n_atoms * 3.
+   *
+   * Configurations below @c kTeamMinAtoms are spread across the thread
+   * team. Each one is evaluated on one thread and on its own neighbour
+   * list. A larger configuration stays on the calling thread so its
+   * in-system team is not nested. The bits match that serial loop.
    */
   void energyAndGradientBatch(std::size_t n_config, const double *positions,
                               const int *atomic_numbers, const double *box,
@@ -122,9 +128,12 @@ public:
 private:
   /// scale +1 writes forces, scale -1 writes dE/dx. A non-null strain
   /// gains dE/dε in eV, in the Voigt order of stress.hpp.
+  /// @c cells is the neighbour scratch for this call. The caller owns it
+  /// and does not share it with another thread.
   void evaluate(const double *positions, const double *box, std::size_t n_atoms,
                 double *energy, double *acc, double scale,
-                nlist::NeighborList *neighbors, double *strain) const;
+                nlist::NeighborList *neighbors, double *strain,
+                nlist::Neighbours &cells) const;
 
   uint64_t m_paramsKey{0};
   nlist::Mode mode_ = nlist::Mode::Auto;

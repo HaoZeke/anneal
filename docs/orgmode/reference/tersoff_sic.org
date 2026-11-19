@@ -41,12 +41,20 @@ The cell is periodic in each direction.
 =energyAndGradient= writes the energy and dE/dx for one configuration.
 =energyAndGradientBatch= writes both for several configurations that share one
 cell and one species list, so a caller enters the library once per batch.
+Configurations below =rgpot::kTeamMinAtoms= atoms are spread across the threads
+=OMP_NUM_THREADS= requests, unless the call is already inside a team or only one
+thread is requested.
+Each configuration is evaluated whole.
+A configuration of that many atoms or more, or a batch that contains one, stays
+on the calling thread.
+The bits match a one-thread batch and a fresh =energyAndGradient= of the same
+configuration.
 The Python method =energy_gradient= accepts positions of shape =(n_atoms, 3)= or
 =(n_config, n_atoms, 3)= and uses that entry.
 
-Every call takes its pairs from the instance's shared neighbour layer
-(=nlist::updateCells=), searched to the silicon outer cutoff, 3.0 Angstrom, the
-longest in this set.
+=forceImpl= and =energyAndGradient= take their pairs from the instance neighbour
+layer (=nlist::updateCells=), searched to the silicon outer cutoff, 3.0
+Angstrom, the longest in this set.
 The skin is that of a =nlist::NeighborList= passed to =energyAndGradient= when
 it is positive.
 Otherwise it is one fifth of that cutoff, 0.6 Angstrom, or 0 under
@@ -54,7 +62,11 @@ Otherwise it is one fifth of that cutoff, 0.6 Angstrom, or 0 under
 The pairs are reused while each atom has moved by at most half the skin and the
 cell and the atom count are unchanged.
 With skin 0 they are reused only for identical coordinates.
-=energyAndGradientBatch= passes no =nlist::NeighborList=.
+=energyAndGradientBatch= builds a new layer for each configuration, on the
+thread that evaluates it, and passes no =nlist::NeighborList=.
+That layer starts empty, so it is not reused across configurations.
+Its skin is the same default.
+Species and kind scratch stay =thread_local=.
 
 ** Held list on the force path
 

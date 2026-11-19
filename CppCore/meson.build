@@ -199,6 +199,7 @@ if _mpi_dep.found()
     )
 endif
 _rgpot_srcs += files('rgpot/PotHelpers.cc')
+_rgpot_srcs += files('rgpot/Slices.cc')
 _rgpot_srcs += files('rgpot/units.cc')
 _rgpot_srcs += files('rgpot/abi/CxxLayout.cc')
 _rgpot_srcs += files(
@@ -257,14 +258,12 @@ rgpot_minimage = static_library(
     pic: true,
     install: false,
 )
-# threadsRequested lives in Slices.cc. The regions are templates in
-# Slices.hpp, but the thread count is read here, so this archive has to be
-# built with OpenMP or every potential stays on one thread.
+# Neighbour-list sources instantiate the slice templates, so they still need
+# OpenMP even though the non-template team helpers now live in rgpot_core.
 _halfshell_omp = dependency('openmp', language: 'cpp', required: false)
 rgpot_halfshell = static_library(
     'rgpot_halfshell',
     files(
-        'rgpot/Slices.cc',
         'rgpot/nlist/HalfShell.cc',
         'rgpot/nlist/HalfShellWalk.cc',
         'rgpot/nlist/NeighbourList.cc',
@@ -2064,7 +2063,12 @@ if get_option('with_tests')
             test(_rt[0], _rt_exes[_rt[2][0]], kwargs: _rt_kw[_rt[0]])
         endif
     endforeach
-    _nlist_link = [rgpot_halfshell, rgpot_minimage, rgpot_exact_fma]
+    _nlist_link = [
+        rgpot_halfshell,
+        rgpot_core,
+        rgpot_minimage,
+        rgpot_exact_fma,
+    ]
     foreach _rt : _rt_tests
         if _rt[1] == 'nlist'
             test(

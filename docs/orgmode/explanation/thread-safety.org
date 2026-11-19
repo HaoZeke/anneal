@@ -47,6 +47,10 @@ The handle-free entry's legacy workspace is not used by Python.
 Other classes, such as =StillingerWeberSi= and =TersoffSiC=, hold one kernel
 instance and no per-thread map.
 Do not call one such object from two threads at once.
+One call may still use the library's own thread team.
+=energyAndGradientBatch= spreads configurations smaller than
+=rgpot::kTeamMinAtoms= across the threads =OMP_NUM_THREADS= requests, each on
+its own neighbour list.
 
 ** What is not reentrant (F5)
 

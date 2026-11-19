@@ -55,6 +55,9 @@ the cell, the atom count and the settings are unchanged.
 Epsilon is 3.4723e-12 erg, 2.16723920 eV, the value of equation (2.9).
 =energyAndGradient= evaluates one configuration, and =energyAndGradientBatch=
 several configurations that share a cell and a species list.
+A batch whose configurations are all below =rgpot::kTeamMinAtoms= atoms is
+spread across the threads =OMP_NUM_THREADS= requests.
+Each configuration is evaluated whole, on a neighbour list of its own.
 See [[file:sw_si.org][Stillinger-Weber silicon (1985)]].
 =locality= declares a full neighbour list and a ghost reach of twice the cutoff,
 so a domain-decomposed host can evaluate owned atoms and reverse sum the forces
@@ -75,6 +78,8 @@ Fortran gather and every other call to =TersoffSiC=.
 =locality= declares a full neighbour list and a ghost reach of twice the silicon
 outer cutoff, so a domain-decomposed host can evaluate owned atoms and reverse
 sum the forces on the copies.
+=energyAndGradientBatch= spreads configurations below =rgpot::kTeamMinAtoms= the
+same way as =StillingerWeberSi=.
 See [[file:tersoff_sic.org][Tersoff silicon-carbon (1989)]].
 - =ZBLPot= (=PotType::ZBL=) :: Screened nuclear repulsion
   (Ziegler-Biersack-Littmark) with the LAMMPS switching function, on free

@@ -152,6 +152,7 @@ PairForceFDTest | tests core | unit pair_force_fd_test PairForceFDTest.cc |
 SkinPairTest | tests core | unit skin_pair_test SkinPairTest.cc |
 MinImageIsaHash | tests core | unit minimage_isa_hash MinImageIsaHash.cc |
 BatchEvaluatorTest | tests core | unit batch_evaluator_test BatchEvaluatorTest.cc |
+BatchSpreadTest | tests core | unit batch_spread_test BatchSpreadTest.cc fp_contract=off timeout=120 |
 CalculatorGroupTest | tests core | unit calculator_group_test CalculatorGroupTest.cc |
 CalculatorAbortFlagTest | tests core | unit calculator_abort_flag_test CalculatorAbortFlagTest.cc |
 LJClusterPotTest | tests core | unit ljcluster_pot_test LJClusterPotTest.cc |

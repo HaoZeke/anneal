@@ -257,7 +257,7 @@ void TersoffSiC::forceImpl(const ForceInput &in, ForceOut *out) const {
   }
   double strain[6] = {};
   evaluate(in.pos, in.atmnrs, in.box, in.nAtoms, &out->energy, out->F, 1.0,
-           m_held.skin > 0.0 ? &m_held : nullptr, strain);
+           m_held.skin > 0.0 ? &m_held : nullptr, strain, neighbours_);
   publishCauchyStress(out, strain, cellVolume(in.box));
 }
 
@@ -280,7 +280,7 @@ void TersoffSiC::energyAndGradient(const double *positions,
     throw std::invalid_argument("TersoffSiC: null energy buffer");
   }
   evaluate(positions, atomic_numbers, box, n_atoms, energy, gradient, -1.0,
-           neighbors, nullptr);
+           neighbors, nullptr, neighbours_);
 }
 
 void TersoffSiC::energyAndGradientBatch(std::size_t n_config,
@@ -298,17 +298,24 @@ void TersoffSiC::energyAndGradientBatch(std::size_t n_config,
     throw std::invalid_argument("TersoffSiC: null batch buffer");
   }
   const std::size_t stride = n_atoms * 3;
-  for (std::size_t c = 0; c < n_config; ++c) {
-    energyAndGradient(positions + c * stride, atomic_numbers, box, n_atoms,
-                      energies + c, gradients + c * stride);
-  }
+  // One neighbour list per system, on the thread that evaluates it.
+  // Kind scratch is already thread_local. The instance list stays with
+  // the single-system calls.
+  forEachBatchSystem(
+      n_config, [&](std::size_t) { return n_atoms; },
+      [&](std::size_t c) {
+        nlist::Neighbours cells;
+        evaluate(positions + c * stride, atomic_numbers, box, n_atoms,
+                 energies + c, gradients + c * stride, -1.0, nullptr, nullptr,
+                 cells);
+      });
 }
 
 void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
                           const double *box, std::size_t n_atoms,
                           double *energy, double *acc, double scale,
-                          nlist::NeighborList *neighbors,
-                          double *strain) const {
+                          nlist::NeighborList *neighbors, double *strain,
+                          nlist::Neighbours &cells) const {
   *energy = 0.0;
   for (std::size_t i = 0; i < n_atoms * 3; ++i) {
     acc[i] = 0.0;
@@ -328,14 +335,15 @@ void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
   const int n = static_cast<int>(n_atoms);
   const double cut2 = kMaxCut * kMaxCut;
 
-  const double skin = (neighbors != nullptr && neighbors->skin > 0.0)
-                          ? neighbors->skin
-                          : (mode_ == nlist::Mode::Stream ? 0.0 : kMaxCut / 5.0);
-  const auto before = neighbours_.builds();
-  nlist::updateCells(neighbours_, positions, n_atoms, box, kMaxCut, skin, nlist::Image::Round,
-                     mode_, {true, true, true});
+  const double skin =
+      (neighbors != nullptr && neighbors->skin > 0.0)
+          ? neighbors->skin
+          : (mode_ == nlist::Mode::Stream ? 0.0 : kMaxCut / 5.0);
+  const auto before = cells.builds();
+  nlist::updateCells(cells, positions, n_atoms, box, kMaxCut, skin,
+                     nlist::Image::Round, mode_, {true, true, true});
   if (neighbors != nullptr && neighbors->skin > 0.0 &&
-      (neighbours_.builds() != before || !neighbors->built)) {
+      (cells.builds() != before || !neighbors->built)) {
     neighbors->ref.assign(positions, positions + 3 * n_atoms);
     std::memcpy(neighbors->box, box, 9 * sizeof(double));
     neighbors->n = n_atoms;
@@ -350,7 +358,8 @@ void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
   auto load = [&](int i, std::vector<Bond> &nb) {
     nb.clear();
     const int ki = kind[i];
-    auto take = [&](std::int32_t, std::int32_t j, double dx, double dy, double dz, double r2) {
+    auto take = [&](std::int32_t, std::int32_t j, double dx, double dy,
+                    double dz, double r2) {
       if (!(r2 > 0.0) || r2 >= cut2) {
         return;
       }
@@ -363,12 +372,13 @@ void TersoffSiC::evaluate(const double *positions, const int *atomic_numbers,
       radial(pij, r, forth);
       nb.push_back(forth);
     };
-    if (neighbours_.streaming()) {
-      neighbours_.forAtom(static_cast<std::int32_t>(i), take);
+    if (cells.streaming()) {
+      cells.forAtom(static_cast<std::int32_t>(i), take);
     } else {
-      nlist::visitDirected(neighbours_, i, static_cast<std::int64_t>(i) + 1, take);
+      nlist::visitDirected(cells, i, static_cast<std::int64_t>(i) + 1, take);
     }
-    std::sort(nb.begin(), nb.end(), [](const Bond &a, const Bond &b) { return a.j < b.j; });
+    std::sort(nb.begin(), nb.end(),
+              [](const Bond &a, const Bond &b) { return a.j < b.j; });
   };
 
   if (n_atoms < kTeamMinAtoms) {

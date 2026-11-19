@@ -24,9 +24,10 @@ find_archive() {
   find "$build" \( -name "$1" -o -name "$2" -o -name "$3" \) -print -quit
 }
 half=$(find_archive librgpot_halfshell.a librgpot_halfshell.lib rgpot_halfshell.lib)
+core=$(find_archive librgpot_core.a librgpot_core.lib rgpot_core.lib)
 mini=$(find_archive librgpot_minimage.a librgpot_minimage.lib rgpot_minimage.lib)
 fma=$(find_archive librgpot_exact_fma.a librgpot_exact_fma.lib rgpot_exact_fma.lib)
-if [ -z "$half" ] || [ -z "$mini" ] || [ -z "$fma" ]; then
+if [ -z "$half" ] || { [ -z "$core" ] && { [ -z "$mini" ] || [ -z "$fma" ]; }; }; then
   echo "neighbour archives were not built" >&2
   exit 1
 fi
@@ -166,9 +167,15 @@ fi
 
 case "$os" in
   Darwin)
-    "$cxx" -shared -o "$dir/libnlist.dylib" \
-      -Wl,-force_load,"$half" -Wl,-force_load,"$mini" -Wl,-force_load,"$fma" \
-      "$@" ${omp_flag:+"$omp_flag"} ${extra_rt:+"$extra_rt"} ${extra_san:+"$extra_san"} ${gcov_flag:+"$gcov_flag"}
+    if [ -n "$core" ]; then
+      "$cxx" -shared -o "$dir/libnlist.dylib" \
+        -Wl,-force_load,"$half" "$core" \
+        "$@" ${omp_flag:+"$omp_flag"} ${extra_rt:+"$extra_rt"} ${extra_san:+"$extra_san"} ${gcov_flag:+"$gcov_flag"}
+    else
+      "$cxx" -shared -o "$dir/libnlist.dylib" \
+        -Wl,-force_load,"$half" -Wl,-force_load,"$mini" -Wl,-force_load,"$fma" \
+        "$@" ${omp_flag:+"$omp_flag"} ${extra_rt:+"$extra_rt"} ${extra_san:+"$extra_san"} ${gcov_flag:+"$gcov_flag"}
+    fi
     ;;
   MINGW*|MSYS*|CYGWIN*)
     # cl rejects -Wl,--whole-archive. link.exe pulls every object; the
@@ -177,15 +184,25 @@ case "$os" in
     # or Git bash rewrites /WHOLEARCHIVE. rustc is a Windows binary and
     # creates its metadata dir from TMP; an MSYS /tmp does not exist there.
     whalf=$(cygpath -w "$half")
-    wmini=$(cygpath -w "$mini")
-    wfma=$(cygpath -w "$fma")
     wdir=$(cygpath -w "$dir")
-    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
-      link.exe /nologo /DLL "/OUT:${wdir}\\nlist.dll" \
-      "/WHOLEARCHIVE:${whalf}" "/WHOLEARCHIVE:${wmini}" "/WHOLEARCHIVE:${wfma}" \
-      /EXPORT:rgpot_nlist_build \
-      /EXPORT:rgpot_nlist_request_init \
-      /EXPORT:rgpot_nlist_strerror
+    if [ -n "$core" ]; then
+      wcore=$(cygpath -w "$core")
+      MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+        link.exe /nologo /DLL "/OUT:${wdir}\\nlist.dll" \
+        "/WHOLEARCHIVE:${whalf}" "$wcore" \
+        /EXPORT:rgpot_nlist_build \
+        /EXPORT:rgpot_nlist_request_init \
+        /EXPORT:rgpot_nlist_strerror
+    else
+      wmini=$(cygpath -w "$mini")
+      wfma=$(cygpath -w "$fma")
+      MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+        link.exe /nologo /DLL "/OUT:${wdir}\\nlist.dll" \
+        "/WHOLEARCHIVE:${whalf}" "/WHOLEARCHIVE:${wmini}" "/WHOLEARCHIVE:${wfma}" \
+        /EXPORT:rgpot_nlist_build \
+        /EXPORT:rgpot_nlist_request_init \
+        /EXPORT:rgpot_nlist_strerror
+    fi
     if [ ! -f "$dir/nlist.lib" ]; then
       echo "link.exe did not write nlist.lib" >&2
       ls -la "$dir" >&2 || true
@@ -197,8 +214,13 @@ case "$os" in
     export TMP TEMP TMPDIR
     ;;
   *)
-    "$cxx" -shared -o "$dir/libnlist.so" -Wl,--whole-archive "$half" "$mini" "$fma" \
-      -Wl,--no-whole-archive "$@" ${omp_flag:+"$omp_flag"} ${extra_rt:+"$extra_rt"} ${extra_san:+"$extra_san"} ${gcov_flag:+"$gcov_flag"}
+    if [ -n "$core" ]; then
+      "$cxx" -shared -o "$dir/libnlist.so" -Wl,--whole-archive "$half" \
+        -Wl,--no-whole-archive "$core" "$@" ${omp_flag:+"$omp_flag"} ${extra_rt:+"$extra_rt"} ${extra_san:+"$extra_san"} ${gcov_flag:+"$gcov_flag"}
+    else
+      "$cxx" -shared -o "$dir/libnlist.so" -Wl,--whole-archive "$half" "$mini" "$fma" \
+        -Wl,--no-whole-archive "$@" ${omp_flag:+"$omp_flag"} ${extra_rt:+"$extra_rt"} ${extra_san:+"$extra_san"} ${gcov_flag:+"$gcov_flag"}
+    fi
     ;;
 esac
 
