@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,6 +14,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "bench" / "record_omp_crossover_v3_verification.py"
+RECORDS = ROOT / "bench" / "results" / "omp_crossover_v3e_records"
+NOTE = ROOT / "bench" / "results" / "rgpot_omp_crossover_v3e_verification.md"
+LEG_ORDER = ("meson-on", "meson-off", "meson-mpi", "cmake-on")
+_ABS_PATH = re.compile(
+    r"(?<![\w:}$])/(?:[A-Za-z0-9._+-]+)(?:/[A-Za-z0-9._+-]+)+"
+)
 
 
 def load_recorder():
@@ -211,6 +219,88 @@ def require(condition: bool, message: str) -> None:
 
 def require_exit(message: str) -> None:
     raise SystemExit(message)
+
+
+def render_records(records: Path, output: Path) -> subprocess.CompletedProcess[str]:
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "render",
+        "--toolchain",
+        str(records / "toolchain.json"),
+        "--output",
+        str(output),
+    ]
+    for name in LEG_ORDER:
+        command.extend(["--leg", str(records / name / "leg.json")])
+    return subprocess.run(command, text=True, capture_output=True)
+
+
+def summaries_from_records(recorder, records: Path) -> list[str]:
+    summaries: list[str] = []
+    for name in LEG_ORDER:
+        leg_path = records / name / "leg.json"
+        leg = json.loads(leg_path.read_text(encoding="utf-8"))
+        log = (leg_path.parent / str(leg["log"])).read_text(encoding="utf-8")
+        if leg["runner"] == "meson":
+            summaries.append(recorder.meson_summary(recorder.parse_meson_summary(log)))
+        elif leg["runner"] == "cmake":
+            summaries.append(recorder.ctest_summary(recorder.parse_ctest_summary(log)))
+        else:
+            require_exit(f"{name} runner is not meson or cmake")
+    return summaries
+
+
+def require_scrubbed(path: Path, text: str) -> None:
+    require("\r" not in text, f"{path.name} is not LF text")
+    leaked = _ABS_PATH.search(text)
+    require(leaked is None, f"{path.name} contains an absolute path")
+
+
+def check_committed_records(recorder) -> None:
+    require(RECORDS.is_dir(), "committed verification records are missing")
+    require(NOTE.is_file(), "published verification note is missing")
+    published = NOTE.read_text(encoding="utf-8")
+    require_scrubbed(NOTE, published)
+    for path in sorted(RECORDS.rglob("*")):
+        if path.is_file():
+            require_scrubbed(path, path.read_text(encoding="utf-8"))
+    for summary in summaries_from_records(recorder, RECORDS):
+        require(summary in published, f"published note is missing the record summary {summary}")
+    with tempfile.TemporaryDirectory() as directory_name:
+        output = Path(directory_name) / "note.md"
+        result = render_records(RECORDS, output)
+        if result.returncode != 0:
+            require_exit(result.stderr.strip() or result.stdout.strip() or "record render failed")
+        rendered = output.read_text(encoding="utf-8")
+    require(rendered == published, "published note disagrees with the committed records")
+
+
+def check_tampered_record(recorder) -> None:
+    published = NOTE.read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as directory_name:
+        records = Path(directory_name) / "records"
+        shutil.copytree(RECORDS, records)
+        log_path = records / "meson-on" / "test.log"
+        original = log_path.read_text(encoding="utf-8")
+        match = None
+        for candidate in re.finditer(r"^Ok:\s+(\d+)\s*$", original, re.MULTILINE):
+            match = candidate
+        require(match is not None, "meson-on test log has no Ok row to tamper")
+        bumped = str(int(match.group(1)) + 1)
+        tampered = original[: match.start(1)] + bumped + original[match.end(1) :]
+        log_path.write_text(tampered, encoding="utf-8", newline="\n")
+        output = Path(directory_name) / "tampered.md"
+        result = render_records(records, output)
+        if result.returncode != 0:
+            require_exit(result.stderr.strip() or result.stdout.strip() or "tampered render failed")
+        rendered = output.read_text(encoding="utf-8")
+        require(rendered != published, "a tampered test log still matched the published note")
+        tampered_summary = recorder.meson_summary(recorder.parse_meson_summary(tampered))
+        require(
+            tampered_summary not in published,
+            "tampered meson count is still in the published note",
+        )
 
 
 def main() -> None:
@@ -438,6 +528,9 @@ def main() -> None:
             leaked.returncode != 0 and "absolute path" in leaked_text,
             f"absolute toolchain path was not rejected: {leaked_text}",
         )
+
+    check_committed_records(recorder)
+    check_tampered_record(recorder)
 
 
 if __name__ == "__main__":
