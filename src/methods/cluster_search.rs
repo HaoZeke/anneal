@@ -1487,11 +1487,11 @@ where
 {
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
-    let reserve = molecular_answer_reserve(cfg, ledger);
-    if reserve > 0 {
+    let requested_reserve = molecular_answer_reserve(cfg, ledger);
+    let mut hold = (requested_reserve > 0).then(|| {
         ledger.keep_answer_seats(crate::methods::stall_archive::SEATS);
-        ledger.hold_tail(reserve);
-    }
+        ledger.hold_tail(requested_reserve)
+    });
 
     // Split deliberately: the relaxation needs the optimizer mutably, the
     // gradient needs only the objective. Sharing the objective by reference is
@@ -1527,11 +1527,11 @@ where
             seed,
         )
     };
-    if reserve > 0 {
-        ledger.release_tail();
+    if let Some(hold) = hold.as_mut() {
+        ledger.release_tail(hold);
     }
     let mut out = searched?;
-    if reserve > 0 {
+    if hold.is_some() {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }
     Ok(finish_search(
@@ -1582,11 +1582,11 @@ where
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
-    let reserve = molecular_answer_reserve(cfg, ledger);
-    if reserve > 0 {
+    let requested_reserve = molecular_answer_reserve(cfg, ledger);
+    let mut hold = (requested_reserve > 0).then(|| {
         ledger.keep_answer_seats(crate::methods::stall_archive::SEATS);
-        ledger.hold_tail(reserve);
-    }
+        ledger.hold_tail(requested_reserve)
+    });
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let searched = {
         let paid = PaidCheck::default();
@@ -1611,11 +1611,11 @@ where
             &mut rng,
         )
     };
-    if reserve > 0 {
-        ledger.release_tail();
+    if let Some(hold) = hold.as_mut() {
+        ledger.release_tail(hold);
     }
     let mut out = searched?;
-    if reserve > 0 {
+    if hold.is_some() {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }
     Ok(finish_search(

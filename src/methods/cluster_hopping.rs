@@ -580,8 +580,29 @@ impl HopStop {
     }
 }
 
+/// Calls hidden from a hop by [`Ledger::hold_tail`], owned by the caller
+/// that held them.
+///
+/// Only a ledger builds one, and it can be neither copied nor cloned, so a
+/// caller can restore only the calls it held. [`Ledger::release_tail`] empties
+/// it: a second release of the same hold restores nothing.
+#[derive(Debug)]
+#[must_use = "held calls stay hidden from the hop until the hold is released"]
+pub struct TailHold {
+    ledger: u64,
+    calls: usize,
+}
+
+impl TailHold {
+    /// Calls this hold still keeps hidden.
+    pub fn calls(&self) -> usize {
+        self.calls
+    }
+}
+
 /// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
+    id: u64,
     budget: usize,
     spent: usize,
     /// Fractional debt accumulated by partial-system evaluations, settled
@@ -649,7 +670,9 @@ impl Drop for DiagnosticQuench<'_> {
 impl Ledger {
     /// Creates a ledger with `budget` charged evaluations.
     pub fn new(budget: usize) -> Self {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             budget,
             spent: 0,
             fract: 0.0,
@@ -693,19 +716,32 @@ impl Ledger {
 
     /// Hide `reserve` calls from the hop so a final polish can spend them.
     ///
-    /// [`Ledger::release_tail`] puts them back. A reserve larger than the
-    /// room left is cut to that room.
-    pub fn hold_tail(&mut self, reserve: usize) {
+    /// A reserve larger than the room left is cut to that room. The returned
+    /// [`TailHold`] is the caller's claim on exactly the calls hidden;
+    /// [`Ledger::release_tail`] puts them back.
+    pub fn hold_tail(&mut self, reserve: usize) -> TailHold {
         let room = self.budget.saturating_sub(self.spent);
         let reserve = reserve.min(room);
         self.budget -= reserve;
         self.held_tail = self.held_tail.saturating_add(reserve);
+        TailHold {
+            ledger: self.id,
+            calls: reserve,
+        }
     }
 
-    /// Restore calls hidden by [`Ledger::hold_tail`].
-    pub fn release_tail(&mut self) {
-        self.budget = self.budget.saturating_add(self.held_tail);
-        self.held_tail = 0;
+    /// Restore the calls `hold` keeps hidden and return how many came back.
+    ///
+    /// Other holds are untouched. A hold already released, or one taken from
+    /// another ledger, restores nothing.
+    pub fn release_tail(&mut self, hold: &mut TailHold) -> usize {
+        if hold.ledger != self.id {
+            return 0;
+        }
+        let released = std::mem::take(&mut hold.calls).min(self.held_tail);
+        self.budget = self.budget.saturating_add(released);
+        self.held_tail -= released;
+        released
     }
 
     /// Charged calls spent tightening recorded answers after the hop.
@@ -10318,6 +10354,63 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn releasing_a_fork_tail_keeps_the_molecular_reserve() {
+        let mut ledger = Ledger::new(100);
+        let mut polish = ledger.hold_tail(8);
+        assert_eq!(polish.calls(), 8);
+        let mut fork = ledger.hold_tail(24);
+        assert_eq!(fork.calls(), 24);
+        assert_eq!(ledger.held_tail, 32);
+        assert_eq!(ledger.release_tail(&mut fork), 24);
+        assert_eq!(ledger.held_tail, 8, "the molecular reserve was released");
+        assert_eq!(ledger.budget(), 92);
+        assert_eq!(ledger.release_tail(&mut polish), 8);
+        assert_eq!(ledger.held_tail, 0);
+        assert_eq!(ledger.budget(), 100);
+
+        let mut short = Ledger::new(5);
+        assert_eq!(
+            short.hold_tail(9).calls(),
+            5,
+            "a reserve larger than the room was not cut"
+        );
+    }
+
+    #[test]
+    fn releasing_a_fork_tail_twice_keeps_the_molecular_reserve() {
+        let mut ledger = Ledger::new(100);
+        let polish = ledger.hold_tail(8);
+        let mut fork = ledger.hold_tail(24);
+        assert_eq!(ledger.release_tail(&mut fork), 24);
+        assert_eq!(
+            ledger.release_tail(&mut fork),
+            0,
+            "a second release restored calls"
+        );
+        assert_eq!(
+            ledger.held_tail,
+            polish.calls(),
+            "the second release took the molecular reserve"
+        );
+        assert_eq!(ledger.budget(), 92);
+    }
+
+    #[test]
+    fn a_hold_from_another_ledger_restores_nothing() {
+        let mut mine = Ledger::new(50);
+        let mut yours = Ledger::new(50);
+        let mut mine_held = mine.hold_tail(10);
+        let mut yours_held = yours.hold_tail(10);
+        assert_eq!(mine.release_tail(&mut yours_held), 0);
+        assert_eq!(mine.held_tail, 10);
+        assert_eq!(yours_held.calls(), 10, "a foreign release emptied the hold");
+        assert_eq!(yours.release_tail(&mut yours_held), 10);
+        assert_eq!(mine.release_tail(&mut mine_held), 10);
+        assert_eq!(mine.budget(), 50);
+        assert_eq!(yours.budget(), 50);
+    }
 
     #[test]
     fn parked_move_arms_are_closed_in_every_selection_mode() {
