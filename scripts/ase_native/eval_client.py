@@ -79,13 +79,22 @@ class EvalServer:
 
 
 class DmaxServer:
-    """Persistent scalar walk for ASE's translated greedy distance."""
+    """Persistent scalar walk for ASE's translated greedy distance.
 
-    def __init__(self, n_atoms: int, binary: Path | None = None):
+    With ``threshold``, a returned distance is the full bottleneck when
+    that bottleneck lies within 1e-9 of the threshold. Further away it may
+    be a bound, and it is below the threshold exactly when the full
+    bottleneck is.
+    """
+
+    def __init__(self, n_atoms: int, binary: Path | None = None, threshold: float | None = None):
         self.n_atoms = n_atoms
         self.binary = binary or binary_path()
+        command = [str(self.binary), "dmax", str(n_atoms)]
+        if threshold is not None:
+            command.append(repr(float(threshold)))
         self.proc = subprocess.Popen(
-            [str(self.binary), "dmax", str(n_atoms)],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
