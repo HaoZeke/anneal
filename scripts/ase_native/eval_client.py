@@ -78,6 +78,60 @@ class EvalServer:
                 self.proc.kill()
 
 
+class DmaxServer:
+    """Persistent scalar walk for ASE's translated greedy distance."""
+
+    def __init__(self, n_atoms: int, binary: Path | None = None):
+        self.n_atoms = n_atoms
+        self.binary = binary or binary_path()
+        self.proc = subprocess.Popen(
+            [str(self.binary), "dmax", str(n_atoms)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+        )
+        self._in_bytes = 8 * 6 * n_atoms
+
+    def distance(self, pos1: np.ndarray, pos2: np.ndarray) -> float:
+        if self.proc.poll() is not None:
+            raise RuntimeError("distance process exited")
+        payload = np.ascontiguousarray(
+            np.concatenate([np.asarray(pos1, dtype=np.float64).reshape(-1), np.asarray(pos2, dtype=np.float64).reshape(-1)]),
+            dtype="<f8",
+        )
+        if payload.size != 6 * self.n_atoms:
+            raise RuntimeError("distance geometry has the wrong length")
+        assert self.proc.stdin is not None
+        assert self.proc.stdout is not None
+        view = memoryview(payload.tobytes())
+        sent = 0
+        while sent < len(view):
+            wrote = self.proc.stdin.write(view[sent:])
+            if not wrote:
+                raise RuntimeError("distance process stopped reading")
+            sent += wrote
+        self.proc.stdin.flush()
+        raw = bytearray()
+        while len(raw) < 8:
+            chunk = self.proc.stdout.read(8 - len(raw))
+            if not chunk:
+                raise RuntimeError("short distance reply")
+            raw.extend(chunk)
+        return float(np.frombuffer(raw, dtype="<f8")[0])
+
+    def close(self) -> None:
+        if self.proc.poll() is None and self.proc.stdin is not None:
+            try:
+                self.proc.stdin.close()
+            except BrokenPipeError:
+                pass
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+
+
 def read_scales(system: str, binary: Path | None = None) -> dict[str, str]:
     path = binary or binary_path()
     proc = subprocess.run(
