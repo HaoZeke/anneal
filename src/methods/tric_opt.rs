@@ -1453,10 +1453,10 @@ impl TricOpt {
         self.species.len()
     }
 
-    /// Expected call-count advantage `(N_LBFGS / N_TRIC - 1)` at `x`:
-    /// dihedral-bearing molecules have torsional modes two decades softer than
-    /// stretches (~16x fewer calls at `1e-3` eV/Å), whereas stretch-and-bend
-    /// clusters without dihedrals save ~4x (`bench/tric-quench`).
+    /// Call ratio `N_LBFGS / N_TRIC` at `x`. Dihedral-bearing molecules have
+    /// torsional modes two decades softer than stretches, so the ratio is
+    /// 16 at `1e-3` eV/Å. Stretch-and-bend clusters without dihedrals
+    /// return 3 (`bench/tric-quench`).
     pub fn call_saving(&self, x: ArrayView1<f64>) -> f64 {
         let coords = Tric::new(&self.species, x);
         let has_dihedrals = coords
