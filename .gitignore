@@ -328,3 +328,9 @@ paper/jctc/data/**/*.log
 paper/jctc/data/**/*.png
 paper/jctc/data/**/*hist.txt
 paper/jctc/**/*.tar.xz
+
+# Standalone minima-hopping scratch and its virtualenv.
+# bench/ase-mhpkg/rows.csv, aa_rows.csv, summary.csv, REPORT.md, and README.md stay.
+.mhpkg-venv/
+bench/ase-mhpkg/work/
+bench/ase-mhpkg/work-smoke/

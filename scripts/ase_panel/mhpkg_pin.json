@@ -1,0 +1,30 @@
+{
+  "distribution": "minimahopping",
+  "version": "1.1.3",
+  "repository": "https://gitlab.com/goedeckergroup/ase_mh",
+  "revision": "ff7e32bbd9a9b235f5f2a1dec11b311bf874300d",
+  "tag": "1.1.3",
+  "pypi": "absent",
+  "pypi_note": "The project name minimahopping is not on PyPI. The same HTTP 404 is returned for minima-hopping, minima_hopping, ase-mh, ase_mh, and python-minima-hopping. The pin is the GitLab tag 1.1.3.",
+  "gitlab_archive_sha256": "dd103f13c316a68acbad1c5b3605dfeb2cb7ccb3f46f01641ed556e97c78a8f7",
+  "sdist_sha256": "a13b444510a9e480669bf59fc15ac8dc7de03ae6b70ea5990f1f4a542874db20",
+  "wheel_sha256": "ce156752b89dfed82fc81422168713f5f81c01cbc0445a47a83b3dfdad6dac35",
+  "sdist_name": "minimahopping-1.1.3.tar.gz",
+  "wheel_name": "minimahopping-1.1.3-py3-none-any.whl",
+  "ase": "3.29.0",
+  "ase_note": "Release 1.1.3 calls MaxwellBoltzmannDistribution with communicator='serial'. That keyword is accepted through ASE 3.28.0 and removed in ASE 3.29.0. This harness pins ASE 3.29.0 and rewrites the keyword to comm=DummyMPI(), the replacement ASE 3.28 applies for communicator='serial'.",
+  "numpy_note": "numpy 2.5.0 and later return a complex eigenvector from linalg.eig for a real symmetric inertia tensor. The package subtracts that vector into a real velocity array during torque removal, which then fails. numpy 2.4.6 is the last release whose eig result for that tensor is real.",
+  "sqnm_revision": "4241692173cccb42a9ae05974bfd62285ec2cd7b",
+  "sqnm_url": "https://github.com/moritzgubler/vc-sqnm",
+  "requirements": {
+    "ase": "3.29.0",
+    "numpy": "2.4.6",
+    "scipy": "1.18.1",
+    "scikit-learn": "1.9.1",
+    "networkx": "3.7",
+    "mpi4py": "4.1.2",
+    "dataclasses-json": "0.6.7",
+    "numba": "0.68.1",
+    "spglib": "2.8.0"
+  }
+}
