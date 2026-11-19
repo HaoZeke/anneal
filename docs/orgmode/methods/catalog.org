@@ -174,17 +174,32 @@ as an enum rather than a trait object so the generic =propose= stays
 monomorphized per call.
 
 Key types and functions: =MoveLibrary= (src/methods/cluster_hopping/moves.rs:12)
-with variants =Atomic=, =Lean=, =LeanBurst=, =Visit=, =Twin=,
-=SelfReseed=, =LearnedReseed=, =Reseed=, =GrowthAndTwin=, =Molecular=;
-its =kernels= method (moves.rs:111) composes the concrete arms. =ClusterMove=
-enum (moves.rs:421) with variants =AllPoints=, =SinglePoint=, =Visit=,
-=Burst= (composed surface relocations, one acceptance test per excursion),
-=GroupRelocate=/=GroupBurst=/=GroupShake= (rigid molecular analogues),
-=SurfaceRelocate=, =ShellRotate=, =Symmetrise=, =Twin= (reflect across a
-dense plane), =Reseed= (regrow a local order from a template, the only
-kernel that crosses a funnel boundary in one step; see
-[[file:catalog.org::*Descriptors and identity][descriptors]]/=crate::lattice=), =Angular= (Wales-Doye worst-bound-point
-move), =Soap= (descriptor-space pullback step; see the SOAP entry below).
+with variants =WalesDoye=, =Atomic=, =Lean=, =LeanBurst=,
+=LeanBurstHollow=, =LeanBurstFill=, =Visit=, =Twin=, =SelfReseed=,
+=LearnedReseed=, =Reseed=, =GrowthAndTwin=, =Molecular= and
+=RigidBody=; its =kernels= method (moves.rs:111) composes the concrete
+arms. =ClusterMove= enum (moves.rs:421) with variants =AllPoints=,
+=SinglePoint=, =Visit=, =Burst= (composed surface relocations, one
+acceptance test per excursion), =GroupRelocate=/=GroupBurst=/=GroupShake=
+(rigid molecular analogues), =SurfaceRelocate=, =HollowRelocate=/
+=HollowFill= (the dynamic-lattice relocation and sweep), =EnergyLattice=
+(a Boltzmann-weighted exchange of a high-energy atom), =ShellRotate=,
+=Symmetrise=, =OrbitComplete= (the orbit completion of the incumbent,
+as a proposal), =PointSymmetrise= (push onto the nearly held point
+group), =SoapRepel= (a descriptor-space step away from the packings the
+population occupies), =Twin= (reflect across a dense plane), =Reseed=
+(regrow a local order from a template, the only kernel that crosses a
+funnel boundary in one step; see
+[[file:catalog.org::*Descriptors and identity][descriptors]]/=crate::lattice=),
+=Angular= (Wales-Doye worst-bound-point move), =SpeciesSwap= (exchange
+coordinates of unlike species), the rigid-body kernels =RigidTranslate=,
+=RigidKick=, =RigidRotate=, =RigidRelocate=, =RigidTranslateOne=,
+=RigidRotateOne=, =RigidReorient=, =RigidOrientAll= and
+=RigidReverseCycle=, the water-network kernels =GroupCycleReverse= and
+=GroupRewire=, =Plane= (rotate or reflect the atoms on one side of a
+random plane), =Soap= (descriptor-space pullback step; see the SOAP
+entry below) and =Torsion= (turn one side of a rotatable covalent
+bond).
 =worst_bound=/=worst_bound_scaled= (moves.rs:1233/1244) decide when a point
 is loose enough for the angular move. =connectivity_groups=
 (moves.rs:1476) derives rigid molecular groups from the current bonding
