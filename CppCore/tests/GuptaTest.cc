@@ -24,6 +24,39 @@ TEST_CASE("Gupta dimer at r0 is 2A - 2 xi", "[gupta]") {
   REQUIRE(energy == Catch::Approx(2.0 * a - 2.0 * xi).margin(1e-12));
 }
 
+TEST_CASE("Gupta stretched dimer gradient matches a central difference",
+          "[gupta]") {
+  const double a = 0.2061;
+  const double xi = 1.790;
+  const double p = 10.229;
+  const double q = 4.036;
+  const double r0 = 2.884;
+  const unsigned char slot[2] = {0, 0};
+  const double x[6] = {0.0, 0.0, 0.0, 1.2 * r0, -0.3 * r0, 0.4 * r0};
+  double energy = 0.0;
+  double gradient[6] = {};
+  rgpot_gupta(x, 2, slot, 1, &a, &xi, &p, &q, &r0, &energy, gradient);
+  const double h = 1.0e-6;
+  for (std::size_t coord = 0; coord < 6; ++coord) {
+    double up[6];
+    double down[6];
+    for (std::size_t k = 0; k < 6; ++k) {
+      up[k] = x[k];
+      down[k] = x[k];
+    }
+    up[coord] += h;
+    down[coord] -= h;
+    double eu = 0.0;
+    double ed = 0.0;
+    double unused[6];
+    rgpot_gupta(up, 2, slot, 1, &a, &xi, &p, &q, &r0, &eu, unused);
+    rgpot_gupta(down, 2, slot, 1, &a, &xi, &p, &q, &r0, &ed, unused);
+    const double numeric = (eu - ed) / (2.0 * h);
+    REQUIRE(std::abs(numeric) > 1.0e-2);
+    REQUIRE(gradient[coord] == Catch::Approx(numeric).margin(1.0e-7));
+  }
+}
+
 TEST_CASE("Gupta keeps a distant pair", "[gupta]") {
   const double a = 0.2061;
   const double xi = 1.790;
