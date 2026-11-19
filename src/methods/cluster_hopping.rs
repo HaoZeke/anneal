@@ -4963,6 +4963,16 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    // Basis order belongs to a basin, not to the run. Test each basin at most
+    // once, whether or not another basin previously exhibited that order.
+    let mut observed_basis_seen: std::collections::HashSet<usize> =
+        std::collections::HashSet::new();
+    // A side reconstruction may win the answer without becoming the walk's
+    // incumbent. It is merged only after the walk has finished.
+    let mut observed_basis_best: Option<(f64, Array1<f64>)> = None;
+    // Calls charged by side reconstructions, hidden from the walk's stall
+    // clocks and settled back onto the caller's ledger when the walk ends.
+    let mut observed_basis_spent = 0usize;
     // Multiple of the preset temperature the walk hops at. It stays one
     // unless `plateau_heat` is on.
     let mut heat = 1.0_f64;
@@ -4980,6 +4990,11 @@ where
     let mut branch_draws = 0u64;
     let mut branch_ends: Vec<f64> = Vec::new();
     let mut branch_held: Option<(f64, Array1<f64>, usize)> = None;
+    // A primitive basis needs four observed points. Its evidence floor is the
+    // number of distinct tetrahedra the current point count can present.
+    let basis_evidence = (0..4).fold(1usize, |count, chosen| {
+        count.saturating_mul(n.saturating_sub(chosen)) / (chosen + 1)
+    });
     // CNA labels are collected for diagnostics only and never read by search.
     let mut packing = packing_bank::PackingBank::new();
     let packing_cutoff = 1.2 * cfg.length_scale;
@@ -9220,7 +9235,52 @@ where
                 directed_leave,
                 ledger.best_state.as_ref(),
             );
-            if hop_room(hops)
+            if directed_leave && hop_room(hops) && ledger.budget() >= basis_evidence {
+                let source_basin = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+                if observed_basis_seen.insert(source_basin)
+                    && let Some(candidate) =
+                        crate::lattice::observed_basis_candidate(x.view(), true)
+                {
+                    let mut side_ledger = Ledger::new(ledger.remaining());
+                    side_ledger.stop = ledger.stop.clone();
+                    let (basis_energy, basis_state) =
+                        relax(&mut side_ledger, candidate.view(), cfg.relax_steps);
+                    let sane = !basis_state.is_empty()
+                        && quench_is_sane(cfg, basis_energy, basis_state.view());
+                    let required = grad.is_some();
+                    let gradient = if sane {
+                        grad.as_deref_mut().and_then(|evaluate| {
+                            evaluate(&mut side_ledger, basis_state.view()).filter(|values| {
+                                answer_gradient_ok(cfg, values.view(), basis_state.len())
+                            })
+                        })
+                    } else {
+                        None
+                    };
+                    let recordable = sane && (!required || gradient.is_some());
+                    if !recordable {
+                        unconverged_records += 1;
+                    }
+                    let side_spent = side_ledger.spent();
+                    ledger.budget = ledger.budget.saturating_sub(side_spent);
+                    observed_basis_spent = observed_basis_spent.saturating_add(side_spent);
+                    if recordable && ledger.below_target(basis_energy) {
+                        ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
+                        ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
+                        observed_basis_spent = 0;
+                        ledger.record(basis_energy, basis_state.view());
+                    } else if recordable
+                        && observed_basis_best
+                            .as_ref()
+                            .is_none_or(|(energy, _)| basis_energy < *energy)
+                    {
+                        observed_basis_best = Some((basis_energy, basis_state));
+                    }
+                }
+            }
+            if stall_outcome.is_none()
+                && hop_room(hops)
+                && !ledger.target_reached()
                 && let Some(g) = grad.as_deref_mut()
             {
                 let scale = if cfg.minima_hopping {
@@ -9715,6 +9775,13 @@ where
         }
     };
 
+    ledger.budget = ledger.budget.saturating_add(observed_basis_spent);
+    ledger.spent = ledger.spent.saturating_add(observed_basis_spent);
+    if let Some((energy, state)) = observed_basis_best
+        && energy < ledger.best
+    {
+        ledger.record(energy, state.view());
+    }
     if let Some((energy, state, found_at)) = branch_held
         && energy < ledger.best - 1e-10
     {
