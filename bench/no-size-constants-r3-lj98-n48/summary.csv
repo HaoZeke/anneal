@@ -1,0 +1,3 @@
+cohort,n,budget,reference,tol,hits_a,hits_b,fisher_p,median_evals_a,median_evals_b,mannwhitney_u,mannwhitney_p,median_outside_per_charged_a,median_outside_per_charged_b,outside_per_charged_ratio,hit_drop,b_better,outcome
+n48,48,4000000,-543.6653610000,0.001,45/48,38/48,0.0704367,1317269.5,1451825.0,1387.5,0.0846825,1.66285e-05,1.71005e-05,1.02839,1,0,FAIL
+n60,60,4000000,-543.6653610000,0.001,55/60,47/60,0.0713813,1321410.0,1588222.0,2232.0,0.0232915,1.61954e-05,1.67051e-05,1.03148,1,0,FAIL
