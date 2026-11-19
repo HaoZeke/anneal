@@ -59,6 +59,16 @@ def run_bare_checker() -> subprocess.CompletedProcess[str]:
     )
 
 
+def run_checker_from_other_directory() -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory() as directory:
+        return subprocess.run(
+            [sys.executable, str(CHECKER), "--repo", str(ROOT)],
+            cwd=directory,
+            text=True,
+            capture_output=True,
+        )
+
+
 def require_tree_rejection(result: subprocess.CompletedProcess[str], arm: str, recorded: str, actual: str) -> None:
     text = result.stdout + result.stderr
     if result.returncode == 0 or arm not in text or recorded not in text or actual not in text:
@@ -112,6 +122,13 @@ def main() -> None:
     bare = run_bare_checker()
     if bare.returncode != 0:
         raise SystemExit(f"bare provenance check failed: {bare.stderr.strip()}")
+
+    away = run_checker_from_other_directory()
+    if away.returncode != 0:
+        raise SystemExit(
+            "provenance check with --repo from another directory failed: "
+            + (away.stderr or away.stdout).strip()
+        )
 
     original = json.loads(SOURCE_JSON.read_text(encoding="utf-8"))
     accepted = run_checker(json.loads(json.dumps(original)))
