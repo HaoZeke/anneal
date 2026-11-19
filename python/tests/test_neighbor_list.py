@@ -122,7 +122,7 @@ def _fcc(ncell):
 
 
 def _vesin(pos, cell, cutoff, full):
-    import vesin
+    vesin = pytest.importorskip("vesin")
 
     calc = vesin.NeighborList(cutoff=cutoff, full_list=full, skin=0.0, n_threads=1)
     i, j, d = calc.compute(pos, cell, True, quantities="ijd")
