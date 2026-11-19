@@ -343,6 +343,15 @@ def load_breakdown(path: Path | None) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def write_breakdown(path: Path, rows: list[dict[str, str]]) -> None:
+    fields = ["arm", "seed", "tric_s", "book_s", "accept_s", "bookkeep_s", "pot_s", "calls"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def summarize(rows: list[dict[str, str]], tests_path: Path | None = None, kit: dict[str, str] | None = None, breakdown_path: Path | None = None) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str]:
     by_key: dict[tuple[str, str, str, str], dict[int, dict[str, str]]] = {}
     for row in rows:
