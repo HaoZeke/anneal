@@ -158,6 +158,7 @@ pub(crate) fn reverse_chain<R: Rng + ?Sized>(
     x: &mut Array1<f64>,
     rng: &mut R,
 ) -> bool {
+    super::count_chain_scan();
     let Some((o, h)) = water_sites(geometry) else {
         return false;
     };
