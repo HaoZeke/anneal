@@ -45,7 +45,7 @@ use crate::types::{rgpot_force_input_t, rgpot_force_out_t};
 
 /// The ABI major this loader speaks, `RGPOT_ENGINE_ABI_VERSION` of the header.
 pub const ENGINE_ABI_VERSION: c_int = 1;
-/// The ABI minor this loader requires, `RGPOT_ENGINE_ABI_MINOR` of the header.
+/// The ABI minor this loader advertises, `RGPOT_ENGINE_ABI_MINOR` of the header.
 pub const ENGINE_ABI_MINOR: u16 = 5;
 /// The struct layout revision this loader expects, `RGPOT_ENGINE_ABI_LAYOUT_REVISION` of the header.
 pub const ENGINE_ABI_LAYOUT_REVISION: u16 = 1;
@@ -88,12 +88,14 @@ impl RgpotEngineAbiStamp {
         layout_revision: ENGINE_ABI_LAYOUT_REVISION,
     };
 
-    /// Compatibility rule of `rgpot_engine_abi_compatible` in `engine_c_abi.h`:
-    /// equal major, equal layout revision, and an engine minor at least `host`'s.
+    /// Compatibility rule for a loaded plugin stamp (`self`) against `host`:
+    /// equal major, equal layout revision, and a plugin minor at most `host`'s,
+    /// so plugins from earlier minors whose newer optional exports are absent
+    /// still load while plugins from a newer minor than `host` are rejected.
     pub const fn serves(self, host: Self) -> bool {
         self.abi_major == host.abi_major
             && self.layout_revision == host.layout_revision
-            && self.abi_minor >= host.abi_minor
+            && self.abi_minor <= host.abi_minor
     }
 }
 
@@ -157,6 +159,34 @@ pub type HvpFn = unsafe extern "C" fn(
 pub type CapsFn = unsafe extern "C" fn(*const RgpotEnginePot, *mut RgpotEngineCaps) -> c_int;
 /// `rgpot_engine_last_error`.
 pub type LastErrorFn = unsafe extern "C" fn(*const RgpotEnginePot, *mut c_char, usize) -> usize;
+/// `rgpot_engine_last_components`.
+pub type LastComponentsFn = unsafe extern "C" fn(
+    *const RgpotEnginePot,
+    *mut RgpotEngineComponent,
+    *mut f64,
+    c_long,
+) -> c_long;
+/// `rgpot_engine_component_name`.
+pub type ComponentNameFn =
+    unsafe extern "C" fn(*const RgpotEnginePot, c_long, *mut c_char, usize) -> usize;
+
+/// Raw `RgpotEngineComponent` from `rgpot/engine_c_abi.h`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RgpotEngineComponent {
+    /// Weight applied to the term in the composite sum.
+    pub weight: f64,
+    /// The term's own energy in eV before its weight.
+    pub energy: f64,
+    /// The term's own stress in eV/Angstrom^3 before its weight.
+    pub stress: [f64; 9],
+    /// Nonzero when the term is enabled.
+    pub enabled: c_int,
+    /// Nonzero when the term was evaluated on the last force call.
+    pub evaluated: c_int,
+    /// Nonzero when `stress` holds the term's stress.
+    pub has_stress: c_int,
+}
 
 /// Raw `RgpotEngineCaps` from `rgpot/engine_c_abi.h`.
 #[repr(C)]
@@ -226,6 +256,10 @@ pub struct EngineSymbols {
     pub caps: Option<CapsFn>,
     /// Optional symbol `rgpot_engine_last_error`.
     pub last_error: Option<LastErrorFn>,
+    /// Optional symbol `rgpot_engine_last_components`.
+    pub last_components: Option<LastComponentsFn>,
+    /// Optional symbol `rgpot_engine_component_name`.
+    pub component_name: Option<ComponentNameFn>,
 }
 
 /// Why an engine could not be loaded or an evaluation failed.
@@ -441,6 +475,11 @@ impl EnginePotential {
         self.stamp
     }
 
+    /// The resolved symbol table of the loaded engine.
+    pub fn symbols(&self) -> &EngineSymbols {
+        &self.symbols
+    }
+
     /// Energy and forces of one geometry.
     pub fn force(&mut self, request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineError> {
         self.check_alive()?;
@@ -621,6 +660,70 @@ impl EnginePotential {
         Ok(hv_out)
     }
 
+    /// Per-term record of the last successful force call on a composite engine
+    /// via `rgpot_engine_last_components`. Returns [`EngineError::Unsupported`]
+    /// when the plugin does not export `rgpot_engine_last_components`.
+    pub fn last_components(&self) -> Result<Vec<RgpotEngineComponent>, EngineError> {
+        self.check_alive()?;
+        let last_components = self
+            .symbols
+            .last_components
+            .ok_or_else(|| unsupported_symbol("rgpot_engine_last_components"))?;
+        let total = unsafe {
+            last_components(
+                self.handle.as_ptr(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if total < 0 {
+            return Err(EngineError::Invalid(format!(
+                "rgpot_engine_last_components returned negative count {total}"
+            )));
+        }
+        if total == 0 {
+            return Ok(Vec::new());
+        }
+        let mut out = vec![RgpotEngineComponent::default(); total as usize];
+        let written = unsafe {
+            last_components(
+                self.handle.as_ptr(),
+                out.as_mut_ptr(),
+                std::ptr::null_mut(),
+                total,
+            )
+        };
+        if written < 0 {
+            return Err(EngineError::Invalid(format!(
+                "rgpot_engine_last_components returned negative count {written}"
+            )));
+        }
+        out.truncate((written as usize).min(out.len()));
+        Ok(out)
+    }
+
+    /// Name of term `index` of a composite engine via
+    /// `rgpot_engine_component_name`. Returns [`EngineError::Unsupported`] when
+    /// the plugin does not export `rgpot_engine_component_name`.
+    pub fn component_name(&self, index: usize) -> Result<String, EngineError> {
+        self.check_alive()?;
+        let component_name = self
+            .symbols
+            .component_name
+            .ok_or_else(|| unsupported_symbol("rgpot_engine_component_name"))?;
+        let index = c_long::try_from(index).map_err(|_| {
+            EngineError::Invalid(format!("component index {index} does not fit c_long"))
+        })?;
+        let len = unsafe { component_name(self.handle.as_ptr(), index, std::ptr::null_mut(), 0) };
+        if len == 0 {
+            return Ok(String::new());
+        }
+        let mut buf = vec![0 as c_char; len + 1];
+        unsafe { component_name(self.handle.as_ptr(), index, buf.as_mut_ptr(), buf.len()) };
+        Ok(text_of(&buf))
+    }
+
     /// The instance as a [`PotentialImpl`]. The handle owns the engine and
     /// destroys it on drop. Calls through the handle are serialized. When
     /// both the optional capability and HVP symbols are present and
@@ -774,6 +877,8 @@ unsafe fn resolve(library: &Library) -> Result<EngineSymbols, EngineError> {
         hvp: unsafe { optional(library, "rgpot_engine_hvp") },
         caps: unsafe { optional(library, "rgpot_engine_caps") },
         last_error: unsafe { optional(library, "rgpot_engine_last_error") },
+        last_components: unsafe { optional(library, "rgpot_engine_last_components") },
+        component_name: unsafe { optional(library, "rgpot_engine_component_name") },
     })
 }
 

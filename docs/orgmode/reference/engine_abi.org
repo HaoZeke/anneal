@@ -1217,15 +1217,17 @@ the handle as a =PotentialImpl=.
   =ENGINE_ABI_LAYOUT_REVISION= :: Host ABI identity (=1=, =5=, =1=) matching =RGPOT_ENGINE_ABI_VERSION=,
   =RGPOT_ENGINE_ABI_MINOR= and =RGPOT_ENGINE_ABI_LAYOUT_REVISION=.
 - =RgpotEngineAbiStamp= :: Compatibility stamp (=abi_major=, =abi_minor=,
-  =layout_revision=) with =RgpotEngineAbiStamp::HOST= and =serves(host)= implementing the =rgpot_engine_abi_compatible=
-  rule.
+  =layout_revision=) with =RgpotEngineAbiStamp::HOST= and =serves(host)= accepting any plugin of the same major and layout revision whose minor is at most =host.abi_minor= (rejecting plugins with a newer minor than the host's).
 - =RgpotEnginePot= :: Opaque handle type matching =struct RgpotEnginePot=.
+- =RgpotEngineComponent= :: Per-term composite record matching =RgpotEngineComponent= of the header.
 - =CoordTransformFn=, =AbiVersionFn=, =AbiStampFn=, =CreateFn=, =DestroyFn=,
-  =ForceFn=, =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn= :: =extern "C"=
+  =ForceFn=, =ForceBatchFn=, =HvpFn=, =CapsFn=, =LastErrorFn=,
+  =LastComponentsFn=, =ComponentNameFn= :: =extern "C"=
   function-pointer types matching the C declarations above.
 - =EngineSymbols= :: Resolved symbol table holding required
   (=abi_version=, =create=, =destroy=, =force=) and optional (=abi_stamp=,
-  =force_batch=, =hvp=, =caps=, =last_error=) function pointers.
+  =force_batch=, =hvp=, =caps=, =last_error=, =last_components=,
+  =component_name=) function pointers.
 - =EngineError= :: Typed error enum covering =Load=, =Missing=, =Abi=
   (=expected=, =found=), =AbiStamp= (=expected=, =found=), =Create=, =Invalid=,
   =Unsupported=, =Recoverable= (=code=, =message=), and =Fatal= (=code=,

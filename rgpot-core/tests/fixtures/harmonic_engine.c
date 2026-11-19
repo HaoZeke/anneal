@@ -30,6 +30,8 @@
 
 struct RgpotEnginePot {
   double k;
+  double last_energy;
+  int evaluated;
   char error[128];
 };
 
@@ -128,6 +130,8 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
     forces[i] = -pot->k * positions[i];
   }
   *energy = e;
+  pot->last_energy = e;
+  pot->evaluated = 1;
   pot->error[0] = '\0';
   return 0;
 }
@@ -259,5 +263,38 @@ int rgpot_engine_hvp(RgpotEnginePot *pot, long n, const double *positions,
   pot->error[0] = '\0';
   return 0;
 #endif
+}
+#endif
+
+#if !defined(NO_COMPONENTS) && (FIXTURE_ABI_MINOR >= 5)
+long rgpot_engine_last_components(const RgpotEnginePot *pot,
+                                  RgpotEngineComponent *out, double *forces,
+                                  long capacity) {
+  native_calls += 1;
+  (void)forces;
+  if (!pot) return -1;
+  if (!out || capacity <= 0) return 1;
+  memset(&out[0], 0, sizeof out[0]);
+  out[0].weight = 1.0;
+  out[0].energy = pot->last_energy;
+  out[0].enabled = 1;
+  out[0].evaluated = pot->evaluated;
+  out[0].has_stress = 0;
+  return 1;
+}
+
+size_t rgpot_engine_component_name(const RgpotEnginePot *pot, long index,
+                                   char *buf, size_t len) {
+  static const char name[] = "harmonic";
+  size_t full = sizeof(name) - 1;
+  native_calls += 1;
+  if (!pot || index != 0) {
+    if (buf && len > 0) buf[0] = '\0';
+    return 0;
+  }
+  if (buf && len > 0) {
+    snprintf(buf, len, "%s", name);
+  }
+  return full;
 }
 #endif

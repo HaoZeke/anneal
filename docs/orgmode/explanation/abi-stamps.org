@@ -56,6 +56,16 @@ Other interfaces carry their own numbers:
 The engine plugins (for example
 =libclassical_engine.so= and =libmopac_engine.so=) are built without a soversion
 and opened by those unversioned names.
+Each plugin reports =RgpotEngineAbiStamp= (=RGPOT_ENGINE_ABI_VERSION=,
+=RGPOT_ENGINE_ABI_MINOR=, =RGPOT_ENGINE_ABI_LAYOUT_REVISION=) through
+=rgpot_engine_abi_stamp=, or is minor 0, layout 1 when that symbol is absent.
+Because engine minor bumps add optional exports that the host probes with
+=dlsym= (such as =rgpot_engine_last_components= and
+=rgpot_engine_component_name= in minor 5), the Rust loader's
+=RgpotEngineAbiStamp::serves(host)= accepts any plugin with the same major and
+layout revision whose minor is at most the host's (=ENGINE_ABI_MINOR=),
+resolving optional exports only when present and reporting them as absent
+otherwise, while rejecting plugins whose minor is newer than the host's.
 
 ** The C++ layout stamp
 

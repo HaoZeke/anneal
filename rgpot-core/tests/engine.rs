@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use rgpot_core::engine::{
     EngineError, EnginePotential, EngineRequest, RgpotEngineAbiStamp, RgpotEngineCaps,
-    ENGINE_ABI_LAYOUT_REVISION, ENGINE_ABI_MINOR, ENGINE_ABI_VERSION, ENGINE_ERR_UNSUPPORTED,
+    RgpotEngineComponent, ENGINE_ABI_LAYOUT_REVISION, ENGINE_ABI_MINOR, ENGINE_ABI_VERSION,
+    ENGINE_ERR_UNSUPPORTED,
 };
 use rgpot_core::hvp::rgpot_hvp_scheme_t;
 use rgpot_core::status::rgpot_status_t;
@@ -434,6 +435,7 @@ fn an_abi_major_other_than_the_loader_is_refused() {
 
 #[test]
 fn an_incompatible_abi_stamp_is_refused_and_names_both_stamps() {
+    let newer_minor = format!("FIXTURE_ABI_MINOR={}", ENGINE_ABI_MINOR + 1);
     for (name, define, found) in [
         (
             "harmonic_layout2",
@@ -454,11 +456,11 @@ fn an_incompatible_abi_stamp_is_refused_and_names_both_stamps() {
             },
         ),
         (
-            "harmonic_minor2",
-            "FIXTURE_ABI_MINOR=2",
+            "harmonic_stamp_newer",
+            newer_minor.as_str(),
             RgpotEngineAbiStamp {
                 abi_major: ENGINE_ABI_VERSION as u16,
-                abi_minor: 2,
+                abi_minor: ENGINE_ABI_MINOR + 1,
                 layout_revision: ENGINE_ABI_LAYOUT_REVISION,
             },
         ),
@@ -493,46 +495,15 @@ fn an_incompatible_abi_stamp_is_refused_and_names_both_stamps() {
 }
 
 #[test]
-fn a_missing_abi_stamp_symbol_is_refused_as_minor_zero() {
+fn a_missing_abi_stamp_symbol_is_served_as_minor_zero() {
     let path = build("harmonic_nostamp", &["NO_STAMP"]);
-    let error = unsafe { EnginePotential::load(&path, &config()) }
-        .err()
-        .expect("missing rgpot_engine_abi_stamp must be refused by the current host");
-    let found = RgpotEngineAbiStamp {
-        abi_major: ENGINE_ABI_VERSION as u16,
-        abi_minor: 0,
-        layout_revision: 1,
-    };
-    assert_eq!(
-        error,
-        EngineError::AbiStamp {
-            expected: RgpotEngineAbiStamp::HOST,
-            found,
-        }
-    );
-    let text = error.to_string();
-    assert!(
-        text.contains(&RgpotEngineAbiStamp::HOST.to_string()),
-        "{text}"
-    );
-    assert!(text.contains(&found.to_string()), "{text}");
-}
-
-#[test]
-fn a_compatible_abi_stamp_loads_at_equal_or_higher_minor() {
-    let equal = build("harmonic_stamp_equal", &[]);
-    let engine = load(&equal);
-    assert_eq!(engine.abi_stamp(), RgpotEngineAbiStamp::HOST);
-
-    let fixture_minor = format!("FIXTURE_ABI_MINOR={}", ENGINE_ABI_MINOR + 1);
-    let newer = build("harmonic_stamp_newer", &[&fixture_minor]);
-    let mut engine = load(&newer);
+    let mut engine = load(&path);
     assert_eq!(
         engine.abi_stamp(),
         RgpotEngineAbiStamp {
             abi_major: ENGINE_ABI_VERSION as u16,
-            abi_minor: ENGINE_ABI_MINOR + 1,
-            layout_revision: ENGINE_ABI_LAYOUT_REVISION,
+            abi_minor: 0,
+            layout_revision: 1,
         }
     );
     let answer = engine
@@ -541,8 +512,106 @@ fn a_compatible_abi_stamp_loads_at_equal_or_higher_minor() {
             atomic_numbers: &[1],
             box_matrix: &CELL,
         })
-        .expect("force on compatible minor-4 engine");
+        .expect("force on minor-0 engine");
     assert!(within_roundoff(answer.energy, 0.5 * SPRING, 3));
+}
+
+#[test]
+fn minor_4_plugin_is_served_without_component_exports_minor_5_gets_them_and_newer_is_rejected() {
+    assert_eq!(ENGINE_ABI_MINOR, 5);
+
+    // A minor-4 plugin omits rgpot_engine_last_components and
+    // rgpot_engine_component_name; the host serves it, resolves those symbols
+    // as absent, and evaluates force and HVP normally.
+    let minor4_path = build("harmonic_stamp_minor4", &["FIXTURE_ABI_MINOR=4"]);
+    let mut minor4 = load(&minor4_path);
+    assert_eq!(
+        minor4.abi_stamp(),
+        RgpotEngineAbiStamp {
+            abi_major: ENGINE_ABI_VERSION as u16,
+            abi_minor: 4,
+            layout_revision: ENGINE_ABI_LAYOUT_REVISION,
+        }
+    );
+    assert!(minor4.symbols().last_components.is_none());
+    assert!(minor4.symbols().component_name.is_none());
+    assert_eq!(
+        minor4.last_components().unwrap_err(),
+        EngineError::Unsupported {
+            operation: "rgpot_engine_last_components",
+            message: "symbol is not exported".into(),
+        }
+    );
+    assert_eq!(
+        minor4.component_name(0).unwrap_err(),
+        EngineError::Unsupported {
+            operation: "rgpot_engine_component_name",
+            message: "symbol is not exported".into(),
+        }
+    );
+    let req = EngineRequest {
+        positions: &[1.0, -2.0, 0.5],
+        atomic_numbers: &[1],
+        box_matrix: &CELL,
+    };
+    let answer4 = minor4.force(&req).expect("force on minor-4 plugin");
+    let sum: f64 = req.positions.iter().map(|x| x * x).sum();
+    assert!(within_roundoff(answer4.energy, 0.5 * SPRING * sum, 9));
+    let hv4 = minor4
+        .hvp(&req, &[1.0, 0.0, -1.0])
+        .expect("hvp on minor-4 plugin");
+    assert!(all_within_roundoff(&hv4, &[SPRING, 0.0, -SPRING]));
+
+    // A minor-5 plugin exports both component symbols and the host resolves
+    // and calls them.
+    let minor5_path = build("harmonic_stamp_minor5", &["FIXTURE_ABI_MINOR=5"]);
+    let mut minor5 = load(&minor5_path);
+    assert_eq!(minor5.abi_stamp(), RgpotEngineAbiStamp::HOST);
+    assert!(minor5.symbols().last_components.is_some());
+    assert!(minor5.symbols().component_name.is_some());
+    assert_eq!(minor5.component_name(0).expect("component 0"), "harmonic");
+    assert_eq!(minor5.component_name(1).expect("out-of-range component"), "");
+    assert_eq!(
+        minor5.last_components().expect("components before force"),
+        vec![RgpotEngineComponent {
+            weight: 1.0,
+            energy: 0.0,
+            stress: [0.0; 9],
+            enabled: 1,
+            evaluated: 0,
+            has_stress: 0,
+        }]
+    );
+    let answer5 = minor5.force(&req).expect("force on minor-5 plugin");
+    assert_eq!(
+        minor5.last_components().expect("components after force"),
+        vec![RgpotEngineComponent {
+            weight: 1.0,
+            energy: answer5.energy,
+            stress: [0.0; 9],
+            enabled: 1,
+            evaluated: 1,
+            has_stress: 0,
+        }]
+    );
+
+    // A plugin whose minor is newer than the host's is rejected.
+    let newer_define = format!("FIXTURE_ABI_MINOR={}", ENGINE_ABI_MINOR + 1);
+    let newer_path = build("harmonic_stamp_minor_too_new", &[&newer_define]);
+    let error = unsafe { EnginePotential::load(&newer_path, &config()) }
+        .err()
+        .expect("plugin newer than the host minor must be refused");
+    assert_eq!(
+        error,
+        EngineError::AbiStamp {
+            expected: RgpotEngineAbiStamp::HOST,
+            found: RgpotEngineAbiStamp {
+                abi_major: ENGINE_ABI_VERSION as u16,
+                abi_minor: ENGINE_ABI_MINOR + 1,
+                layout_revision: ENGINE_ABI_LAYOUT_REVISION,
+            },
+        }
+    );
 }
 
 #[test]
