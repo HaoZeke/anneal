@@ -84,6 +84,16 @@ def main() -> None:
             actual_clarified = rendered.read_bytes()
         if actual_clarified != expected_clarified:
             raise SystemExit("clarified report differs from a fresh analysis")
+        note = (
+            "The team-1 activation value comes from the worker --identity probe. "
+            "The slice count is capped at the atom count, so one atom remains one "
+            "slice and two atoms are the first multi-slice activation."
+        )
+        clarified_text = expected_clarified.decode()
+        if note not in clarified_text:
+            raise SystemExit("clarified report does not name the worker --identity probe")
+        if "derived by the harness" in clarified_text:
+            raise SystemExit("clarified report still says the harness derives activation")
 
 
 if __name__ == "__main__":
