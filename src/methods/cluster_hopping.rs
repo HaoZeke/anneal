@@ -5791,9 +5791,9 @@ where
                 if recorded {
                     ledger.record(energy, relaxed.view());
                 }
-                // A cut that loses to the chain used to replace it anyway.
-                // That spends the plateau on a worse basin. The chain moves
-                // only when the quenched cut beats the incumbent.
+                // A cut that loses to the chain must not replace it. That
+                // spends the plateau on a worse basin. The chain moves only
+                // when the quenched cut beats the incumbent.
                 if energy < e {
                     collective.observe(true, recorded);
                     x = relaxed;

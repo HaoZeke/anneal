@@ -394,7 +394,7 @@ parallel. They count calls only; the numbers are not from the timed panel.
 - C10 container, G with the old flags (24 seeds): 1.0x 50k, 22/24 hits;
   0.8x 22.7k, 24/24; gather into the measured reach 31.1k, 24/24. With the
   orbit arm and the window, every container from 0.7x to 1.2x lands at
-  15k-22k calls, so the constant no longer matters.
+  15k-22k calls, so the constant has no effect.
 - C20, what was blocking the bowl: with the orbit arm and window but inside
   the sphere, P goes 0/6. The sphere was the obstacle. Gathering alone, or
   gathering with the window, reaches it in at most 1 of 12 runs, and the

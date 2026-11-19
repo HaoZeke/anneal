@@ -208,7 +208,7 @@ fn from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let trips = triples_cached(l_max);
     let terms = nonzero_terms(l_max);
-    // Complex coefficients once per radial channel. The `m` loops used to
+    // Complex coefficients once per radial channel, so the `m` loops do not
     // rebuild each one for every triple that touches it.
     let mut re = vec![0.0; n_max * n_lm];
     let mut im = vec![0.0; n_max * n_lm];

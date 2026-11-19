@@ -32,7 +32,7 @@ bonds differ from the SMILES is invalid and dropped.
 The branch and develop each hit 37 of 96 runs, openconf 26. 95 of the 96
 branch runs are develop's run call for call. The one that is not is
 lorlatinib seed 2000, where a crankshaft leaves the CH(CH3)-O carbon
-nearly planar and the quench used to descend through it into the mirror
+nearly planar and the develop quench descends through it into the mirror
 well: develop reports 591 candidates there, 98 of them inverted and
 dropped, and the branch 567 with none inverted, at the same ΔE_min (1.21
 kcal/mol). No run of the branch has an invalid candidate.

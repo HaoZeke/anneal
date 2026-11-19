@@ -718,7 +718,7 @@ mod tests {
     }
 
     /// A stop raised on the campaign ledger has to end the bank at once.
-    /// Each chain runs on a slice, and that slice used to ignore the flag.
+    /// Each chain runs on a slice, and that slice must honour the flag.
     #[test]
     fn caller_stop_ends_the_bank_at_once() {
         use std::sync::Arc;

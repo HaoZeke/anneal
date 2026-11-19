@@ -12,4 +12,4 @@ See =CITATION.cff= in the repository root, or use the Zenodo DOI badge in the RE
 * Driver choice, Bayesian mixer, gradients, precision channels, reproducibility
 
 See [[file:howto/faq.org][howto/faq]] (the Diataxis how-to layer).
-The questions that were previously collected here now live with the short recipes.
+The questions of this page live with the short recipes there.

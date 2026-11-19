@@ -110,7 +110,7 @@ const NEAR_BEST_ORDERS: f64 = 6.0;
 ///
 /// Must **not** return the full remaining budget on early cycles when
 /// `remaining` is large enough for multi-start: the first projected-
-/// gradient call used to exhaust the tail and starve jittered restarts
+/// gradient call would exhaust the tail and starve jittered restarts
 /// (CMA exclusives on CERI*/COOLHANS were polish-depth ties).
 ///
 /// - `dry == 0`: two thirds of remaining (deepen incumbent), leave ≥1/3 residual
@@ -1830,8 +1830,8 @@ fn benchmark_projected_stationary(projected_grad_norm: f64, value: f64) -> bool 
         && projected_grad_norm <= DOLAN_MORE_CONVERGENCE_TAU * value.abs().max(1.0)
 }
 
-// Retained for the convergence-threshold unit tests; the driver no longer
-// stops early on this criterion (budget is the caller's authority).
+// Retained for the convergence-threshold unit tests; the driver does not
+// stop early on this criterion (budget is the caller's authority).
 #[allow(dead_code)]
 fn benchmark_objective_converged(center_value: f64, best_value: f64) -> bool {
     if !center_value.is_finite() || !best_value.is_finite() {
@@ -3194,8 +3194,7 @@ fn run_arm<O, G>(
             // Persistent chain: each slice extends the same annealing
             // trajectory (cooling epoch continues where the last slice
             // stopped). Slice-restarted SA re-heats every slice and never
-            // anneals, which is why the classical presets used to beat
-            // this arm on multimodal boxes.
+            // anneals; this arm continues the cooling epoch instead.
             let steps = (4 * (dim + 1)).clamp(16, 64);
             let epochs = (slice / steps).max(2);
             let fresh_obj = BudgetedObjective {

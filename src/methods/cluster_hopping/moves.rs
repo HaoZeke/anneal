@@ -640,7 +640,7 @@ pub enum ClusterMove {
     /// least-coordinated point and places it near the surface. This takes the
     /// point with the highest pair energy and throws it to the far edge of the
     /// cluster at a random angle, which is a much larger step and is the move
-    /// the 1997 paper used to reach the decahedral minima.
+    /// the 1997 paper uses to reach the decahedral minima.
     Angular {
         /// Points in a state.
         n_points: usize,

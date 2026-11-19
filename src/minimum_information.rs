@@ -348,11 +348,11 @@ impl MinimumInformationSearch {
         let singleton_scores = self.score(candidates, minimum_samples)?;
         // Every predictive-observation correlation the greedy loop can ask
         // for, once. The loop below asks for a k-by-k block per candidate
-        // per pick, and each block entry used to cost three posterior
-        // covariances of O(n^2) in the model's sites; on a 48-replica
-        // coordinator that was 35 to 99 s per policy request under the
-        // state lock (watchdog-measured), now one joint posterior per
-        // mechanism.
+        // per pick, and a block entry costs three posterior covariances of
+        // O(n^2) in the model's sites if computed one by one; on a
+        // 48-replica coordinator that is 35 to 99 s per policy request under
+        // the state lock (watchdog-measured). One joint posterior per
+        // mechanism avoids it.
         let correlations = self.candidate_correlations(candidates);
         let mut selected = Vec::<usize>::with_capacity(batch_size);
         let mut family_sizes = std::collections::BTreeMap::<usize, usize>::new();

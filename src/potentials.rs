@@ -1,9 +1,9 @@
 //! Cluster potentials as objectives.
 //!
-//! Every cluster example in this crate used to define its own energy and
-//! gradient as loose functions. That made the potential an implementation
-//! detail of a demonstration: not reusable, not tested, and not the potential
-//! any consumer of this crate would actually run. A campaign reported against a
+//! A cluster example that defines its own energy and gradient as loose
+//! functions makes the potential an implementation detail of a
+//! demonstration: not reusable, not tested, and not the potential any
+//! consumer of this crate would actually run. A campaign reported against a
 //! potential written inside its own example is reporting on something no one
 //! else can obtain.
 //!
@@ -663,8 +663,9 @@ mod tests {
         assert_eq!(Gradient::dim(&p), 12);
     }
 
-    /// A half turn used to come back on the x axis, because the skew part
-    /// of the matrix vanishes and the old recovery ignored the axis.
+    /// A half turn must come back on its own axis. The skew part of the
+    /// matrix vanishes there, so a recovery that reads the axis from the skew
+    /// part alone loses it.
     #[test]
     fn a_half_turn_about_y_keeps_its_axis() {
         let pi = std::f64::consts::PI;

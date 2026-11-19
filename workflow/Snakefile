@@ -84,9 +84,6 @@ rule sc_h2h:
 # table above is left as it is. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile sc_h2h_n12
 rule sc_h2h_n12:
-    output:
-        "bench/metal-cluster-h2h/sc-n12/results.csv",
-        "bench/metal-cluster-h2h/sc-n12/seeds.csv",
     shell:
         """
         set -euo pipefail
@@ -662,8 +659,6 @@ rule fetch_paper_data:
 # sudo unshare --uts with hostname bench. Not part of `rule all`:
 #   snakemake -s workflow/Snakefile tip4p_h2h
 rule tip4p_h2h:
-    output:
-        "bench/tip4p-h2h/h2h-summary.csv",
     shell:
         """
         set -euo pipefail
@@ -798,8 +793,6 @@ rule occat_h2h:
 
 #   snakemake -s workflow/Snakefile agox_gofee_h2h
 rule agox_gofee_h2h:
-    output:
-        "bench/ase-gofee-h2h/agox_gofee.csv",
     shell:
         """
         set -euo pipefail

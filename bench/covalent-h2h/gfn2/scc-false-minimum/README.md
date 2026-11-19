@@ -26,7 +26,7 @@ each alone after a reset:
 
 The xtb column is `xtb frame.xyz --gfn 2 --sp --etemp 3000 --acc 0.01
 --iterations 500` on each frame: -16.839548846661, -2.274956711392 and
--16.502296115731 Eh at 27.21138505 eV per Eh. The largest atom moves are
+-16.502296115731 Eh converted with the CODATA Hartree energy in eV. The largest atom moves are
 0.717 Å from 605 to 606 and 0.586 Å from 606 to 621, both inside the warm
 move, so the engine passes 605's converged density to 606 as the guess,
 and 606's to 621. Call 606 is a compressed geometry, one Si-Si pair at

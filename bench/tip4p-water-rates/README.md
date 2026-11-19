@@ -16,5 +16,4 @@ reference.
   section and conclusions compare them with `rates.csv`.
 
 Neither file has a `code_revision` or `host` column. The hostname is bench
-by the runner's check; the tree it built is not recorded beyond the
-commit that added the rows.
+by the runner's check; the rows name no revision for the tree that the runner built.
