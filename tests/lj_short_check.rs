@@ -65,3 +65,26 @@ LJ38 -170.7113081194624442 21 14 19 2500
 LJ98 -520.1078794915391654 10 9 9 2500";
     assert_eq!(records.join("\n"), expected);
 }
+
+#[test]
+fn lj38_short_search_with_general_symmetry_reaches_the_same_basin() {
+    anneal_core::install_rgpot_kernels!();
+    let mut cfg = Config::recommended(38);
+    assert!(!cfg.general_symmetry);
+    cfg.general_symmetry = true;
+    let pot = PairPotential::lennard_jones(38);
+    let mut ledger = Ledger::new(2500);
+    let (out, stats) = search(&pot, &cfg, &mut ledger, 1).expect("finite");
+    assert!(
+        (out.best - (-170.711_308_119_462_44)).abs() < 1e-9,
+        "LJ38 general_symmetry {:.16} hops {} conv {} cap {}",
+        out.best,
+        out.hops,
+        stats.converged,
+        stats.capped
+    );
+    assert_eq!(out.hops, 21);
+    assert_eq!(stats.converged, 14);
+    assert_eq!(stats.capped, 19);
+    assert_eq!(ledger.spent(), 2500);
+}

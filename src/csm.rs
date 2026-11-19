@@ -26,6 +26,16 @@ pub fn project(
     ops: &[[[f64; 3]; 3]],
     orientations: &[[[f64; 3]; 3]],
 ) -> Option<(Array1<f64>, f64)> {
+    project_with_op_measure(x, classes, ops, orientations)
+        .map(|(coordinates, measure, _)| (coordinates, measure))
+}
+
+fn project_with_op_measure(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    ops: &[[[f64; 3]; 3]],
+    orientations: &[[[f64; 3]; 3]],
+) -> Option<(Array1<f64>, f64, f64)> {
     let n = classes.len();
     if ops.is_empty() || orientations.is_empty() || x.len() != n.checked_mul(3)? {
         return None;
@@ -34,7 +44,7 @@ pub fn project(
         return None;
     }
     let (centred, centroid, scale) = centre_and_scale(x, n)?;
-    let mut best: Option<(f64, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
+    let mut best: Option<(f64, f64, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
     let mut solved: Vec<Vec<Matched>> = Vec::with_capacity(orientations.len());
     for (index, rotation) in orientations.iter().enumerate() {
         let y = apply_all(rotation, &centred);
@@ -50,6 +60,7 @@ pub fn project(
         });
         let mut here: Vec<Matched> = Vec::with_capacity(ops.len());
         let mut hat = vec![[0.0; 3]; n];
+        let mut op_residual = 0.0;
         for (op_index, op) in ops.iter().enumerate() {
             let conjugate = turn.and_then(|(earlier, turn)| {
                 let conjugate = matmul(matmul(transpose(turn), *op), turn);
@@ -75,6 +86,8 @@ pub fn project(
                 let image = mul_vec(op, y[matched.assignment[atom]]);
                 for axis in 0..3 {
                     hat[atom][axis] += image[axis];
+                    let delta = y[atom][axis] - image[axis];
+                    op_residual += delta * delta;
                 }
             }
             here.push(matched);
@@ -95,14 +108,16 @@ pub fn project(
             continue;
         }
         let measure = residual / norm;
+        let non_identity = ops.len().saturating_sub(1).max(1) as f64;
+        let op_measure = op_residual / (2.0 * non_identity * norm);
         if best
             .as_ref()
-            .is_none_or(|(incumbent, _, _)| measure < *incumbent)
+            .is_none_or(|(incumbent, _, _, _)| measure < *incumbent)
         {
-            best = Some((measure, *rotation, hat));
+            best = Some((measure, op_measure, *rotation, hat));
         }
     }
-    let (measure, rotation, hat) = best?;
+    let (measure, op_measure, rotation, hat) = best?;
     let back = transpose(rotation);
     let mut coordinates = Array1::zeros(3 * n);
     for atom in 0..n {
@@ -111,7 +126,7 @@ pub fn project(
             coordinates[3 * atom + axis] = centroid[axis] + restored[axis] * scale;
         }
     }
-    Some((coordinates, measure))
+    Some((coordinates, measure, op_measure))
 }
 
 /// Pair distance below which an average is a coordinate singularity.
@@ -198,7 +213,14 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
 }
 
 /// Projects onto `C_i`, `C_n`, or `D_nh` across rotational orders `3..=N`,
-/// selecting the candidate with the lowest continuous symmetry measure.
+/// selecting the candidate with the lowest per-operation continuous symmetry
+/// measure.
+///
+/// Raw centroid CSM averages the operation displacements before taking the
+/// norm, so inconsistent permutations across a larger group cancel in vector
+/// sum and artificially lower the centroid shift. Ranking by the mean squared
+/// assignment residual per non-identity group operation compares candidate
+/// orders per symmetry constraint without vector cancellation.
 pub fn propose_general(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
     if let Some(cached) = cached_propose(x, classes, true) {
         return cached;
@@ -209,7 +231,9 @@ pub fn propose_general(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupP
     let mut best: Option<(f64, GroupProjection)> = None;
     let mut consider =
         |order: usize, name: &'static str, ops: &[[[f64; 3]; 3]], ori: &[[[f64; 3]; 3]]| {
-            let Some((coordinates, measure)) = project(x, classes, ops, ori) else {
+            let Some((coordinates, measure, op_measure)) =
+                project_with_op_measure(x, classes, ops, ori)
+            else {
                 return;
             };
             if closest_pair(&coordinates) < SINGULAR_PAIR {
@@ -217,10 +241,10 @@ pub fn propose_general(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupP
             }
             if best
                 .as_ref()
-                .is_none_or(|(incumbent, _)| measure < *incumbent)
+                .is_none_or(|(incumbent, _)| op_measure < *incumbent)
             {
                 best = Some((
-                    measure,
+                    op_measure,
                     GroupProjection {
                         coordinates,
                         measure,
@@ -1151,5 +1175,124 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn general_propose_detects_orders_and_normalises_per_operation() {
+        // 1. Order 3 at the lower and upper loop bound (n = 3): an isosceles
+        // planar triangle selects D_3h while the fixed channel proposes D_5h.
+        let triangle = Array1::from_vec(vec![
+            1.15,
+            0.0,
+            0.0,
+            -0.5,
+            0.866_025_403_784_438_6,
+            0.0,
+            -0.5,
+            -0.866_025_403_784_438_6,
+            0.0,
+        ]);
+        let tri_classes = [0u32; 3];
+        let fixed_tri = propose(triangle.view(), &tri_classes).expect("fixed triangle");
+        assert_eq!((fixed_tri.group, fixed_tri.order), ("D_5h", 5));
+        let gen_tri = propose_general(triangle.view(), &tri_classes).expect("general triangle");
+        assert_eq!((gen_tri.group, gen_tri.order), ("D_nh", 3));
+        // Cache separation between propose and propose_general.
+        let cached_gen = propose_general(triangle.view(), &tri_classes).expect("cached general");
+        assert_eq!(cached_gen, gen_tri);
+        let cached_fixed = propose(triangle.view(), &tri_classes).expect("cached fixed");
+        assert_eq!((cached_fixed.group, cached_fixed.order), ("D_5h", 5));
+
+        // 2. Order 4 at the upper loop bound (n = 4): a D_2d-puckered 4-ring
+        // breaks inversion on every vertex while keeping seven of the fifteen
+        // non-identity D_4h operations exact, so it selects D_4h.
+        let square = Array1::from_vec(vec![
+            1.0, 0.0, 0.15, 0.0, 1.0, -0.15, -1.0, 0.0, 0.15, 0.0, -1.0, -0.15,
+        ]);
+        let sq_proj = propose_general(square.view(), &[0u32; 4]).expect("square");
+        assert_eq!((sq_proj.group, sq_proj.order), ("D_nh", 4));
+
+        // 3. Chiral cyclic C_3 (n = 6): two unequally sized, twisted triangles
+        // break horizontal mirror, C_2', and inversion while keeping C_3.
+        let mut chiral_c3 = Vec::with_capacity(18);
+        for k in 0..3 {
+            let a = std::f64::consts::TAU * k as f64 / 3.0;
+            chiral_c3.extend([a.cos(), a.sin(), 0.6]);
+        }
+        for k in 0..3 {
+            let a = std::f64::consts::TAU * k as f64 / 3.0 + 0.35;
+            chiral_c3.extend([0.7 * a.cos(), 0.7 * a.sin(), -0.4]);
+        }
+        let c3_arr = Array1::from_vec(chiral_c3);
+        let c3_proj = propose_general(c3_arr.view(), &[0u32; 6]).expect("chiral c3");
+        assert_eq!((c3_proj.group, c3_proj.order), ("C_n", 3));
+        assert!(c3_proj.measure < 1e-12, "{}", c3_proj.measure);
+
+        // 4. Centrosymmetric C_i (n = 4) with no rotational axis of order >= 3.
+        let ci_cluster = Array1::from_vec(vec![
+            1.3, 0.2, 0.5, -1.3, -0.2, -0.5, 0.1, 1.7, -0.4, -0.1, -1.7, 0.4,
+        ]);
+        let ci_proj = propose_general(ci_cluster.view(), &[0u32; 4]).expect("ci cluster");
+        assert_eq!((ci_proj.group, ci_proj.order), ("C_i", 2));
+        assert!(ci_proj.measure < 1e-12, "{}", ci_proj.measure);
+
+        // Verify the exact C_i relation op_measure == 2 * measure on a noisy
+        // 4-atom point set.
+        let mut noisy_ci = ci_cluster;
+        noisy_ci[0] += 0.15;
+        let (centred_ci, _, _) = centre_and_scale(noisy_ci.view(), 4).unwrap();
+        let base_ci = principal_orientations(&centred_ci).unwrap();
+        let (_, m_ci, op_ci) =
+            project_with_op_measure(noisy_ci.view(), &[0u32; 4], &inversion_ops(), &base_ci)
+                .unwrap();
+        assert!(m_ci > 1e-4 && (op_ci - 2.0 * m_ci).abs() < 1e-12);
+
+        // 5. Singular-pair rejection in both the axial loop (n = 3) and C_i (n = 2).
+        let singular_pair = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0]);
+        assert!(propose_general(singular_pair.view(), &[0, 0]).is_none());
+        let singular_axial =
+            Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0, -0.004, 0.003, 0.0]);
+        assert!(propose_general(singular_axial.view(), &[0, 0, 0]).is_none());
+
+        // 6. Competitive 7-atom perturbed pentagonal bipyramid where raw
+        // centroid CSM prefers D_4h (m4_d < m5_d) by vector cancellation of
+        // inconsistent operations and unnormalised |G| division prefers C_5,
+        // while per-non-identity-operation CSM selects D_5h (order = 5).
+        let mut s = 0x5ce9_bd63_87b8_32f7u64;
+        let mut x = bipyramid();
+        for v in x.iter_mut() {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let u = ((s >> 11) as f64 / (1u64 << 53) as f64) - 0.5;
+            *v += 0.38 * u;
+        }
+        let classes = vec![0u32; 7];
+        let (centred, _, _) = centre_and_scale(x.view(), 7).unwrap();
+        let base = principal_orientations(&centred).unwrap();
+        clear_op_cache();
+        let ori4 = with_phase_orientations(&base, 4);
+        let (_, m4_d, op4_d) =
+            project_with_op_measure(x.view(), &classes, &dihedral_horizontal_ops(4), &ori4)
+                .unwrap();
+        clear_op_cache();
+        let ori5 = with_phase_orientations(&base, 5);
+        let (_, m5_d, op5_d) =
+            project_with_op_measure(x.view(), &classes, &dihedral_horizontal_ops(5), &ori5)
+                .unwrap();
+        let (_, _, op5_c) =
+            project_with_op_measure(x.view(), &classes, &cyclic_about_z(5), &ori5).unwrap();
+        assert!(
+            m4_d < m5_d,
+            "raw centroid CSM must prefer D_4h ({m4_d}) over D_5h ({m5_d})"
+        );
+        assert!(
+            op5_d < op4_d && op5_d < op5_c,
+            "per-operation CSM must prefer D_5h ({op5_d}) over D_4h ({op4_d}) and C_5 ({op5_c})"
+        );
+        assert!(
+            op5_c * 4.0 / 5.0 < op5_d * 19.0 / 20.0,
+            "dividing by |G| instead of |G| - 1 would prefer C_5 over D_5h"
+        );
+        let chosen = propose_general(x.view(), &classes).expect("competitive bipyramid");
+        assert_eq!((chosen.group, chosen.order), ("D_nh", 5));
     }
 }
