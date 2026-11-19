@@ -2074,3 +2074,44 @@ def test_a_swapped_citation_affiliation_order_is_rejected(path):
     audit.text_cache[path] = audit.text(path).replace("SURF B.V.; TurtleTech ehf", "TurtleTech ehf; SURF B.V.")
     audit_mod.manuscript_new(audit)
     assert [row for row in audit.drifts() if row[1] == path]
+
+
+def test_an_unmarked_table_quote_of_an_unreachable_panel_row_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
+        r"& \StalePanel{m80r6}2/12 &", "& 2/12 &", 1,
+    )
+    audit_mod.manuscript_gmin(audit)
+    assert any(
+        row[2] == "a quoted panel row cites a commit in this repository" and row[4] == "absent"
+        for row in audit.drifts()
+    )
+
+
+def test_an_unmarked_prose_quote_of_an_unreachable_panel_row_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
+        r"\label{sec:gmin}",
+        "\\label{sec:gmin}\nM\\(_{80}\\) at \\(\\rho=6\\) hits 2 of 12.\n",
+        1,
+    )
+    audit_mod.manuscript_gmin(audit)
+    assert any(
+        row[1] == "paper/jctc/manuscript.tex m80r6"
+        and row[2] == "a quoted panel row cites a commit in this repository"
+        and row[4] == "absent"
+        for row in audit.drifts()
+    )
+
+
+def test_a_stale_mark_on_a_reachable_panel_row_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
+        "& 12/12 & 10615.5 &", r"& \StalePanel{lj38}12/12 & 10615.5 &", 1,
+    )
+    audit_mod.manuscript_gmin(audit)
+    assert any(
+        row[2] == "a stale panel mark covers a commit this repository does not hold"
+        and row[4] == "present"
+        for row in audit.drifts()
+    )

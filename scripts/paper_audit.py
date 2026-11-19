@@ -190,7 +190,10 @@ class Audit:
         self.record(agrees(shown, value), where, label, shown, value)
 
     def said(self, path: str, fragment: str) -> None:
-        self.record(collapse(fragment) in collapse(self.text(path)), path, "prose", fragment, "present")
+        self.record(
+            collapse(strip_stale_panel(fragment)) in collapse(strip_stale_panel(self.text(path))),
+            path, "prose", fragment, "present",
+        )
 
     def drifts(self) -> list[tuple[str, str, str, str, str]]:
         return [r for r in self.results if r[0] != "OK"]
@@ -198,6 +201,24 @@ class Audit:
 
 def collapse(text: str) -> str:
     return " ".join(text.split())
+
+
+STALE_PANEL = re.compile(r"\\StalePanel\{([^{}]*)\}")
+
+
+def strip_stale_panel(text: str) -> str:
+    """Drop panel marks so a quotation still matches the words it prints."""
+    return STALE_PANEL.sub("", text)
+
+
+_COMMIT_HELD: dict[str, bool] = {}
+
+
+def commit_held(rev: str) -> bool:
+    """The revision is a commit object in this repository."""
+    if rev not in _COMMIT_HELD:
+        _COMMIT_HELD[rev] = git("cat-file", "-e", f"{rev}^{{commit}}").returncode == 0
+    return _COMMIT_HELD[rev]
 
 
 def type7(values: list[float], p: float) -> float:
@@ -622,11 +643,123 @@ def gmin_panel_summary(audit: Audit, panel: object, groups: dict) -> None:
         audit.cell(where, "seeds", line["seeds"], " ".join(r["seed"] for r in a))
 
 
+def quoted_panel_row(audit: Audit, where: str, rev: str, marked: bool) -> None:
+    """A quoted panel row names a commit this repository holds, unless the quotation is marked."""
+    held = commit_held(rev)
+    if marked:
+        audit.record(not held, where, "a stale panel mark covers a commit this repository does not hold",
+                     rev[:8], "absent" if not held else "present")
+    else:
+        audit.record(held, where, "a quoted panel row cites a commit in this repository",
+                     rev[:8], "present" if held else "absent")
+
+
+def _between(text: str, start: str, end: str) -> str:
+    begin = text.find(start)
+    if begin < 0:
+        return ""
+    stop = text.find(end, begin + len(start))
+    return text[begin:] if stop < 0 else text[begin:stop]
+
+
+def _sentences(text: str) -> list[str]:
+    prose = re.sub(r"\\begin\{tabular\}.*?\\end\{tabular\}", " ", text, flags=re.S)
+    flat, found, start = collapse(prose), [], 0
+    for end in [match.end() for match in SENTENCE_END.finditer(flat)] + [len(flat)]:
+        sentence, start = flat[start:end].strip(), end
+        if sentence:
+            found.append(sentence)
+    return found
+
+
+def _system_named(sentence: str, system: str) -> bool:
+    if system == "au55":
+        return "Au\\(_{55}\\)" in sentence
+    if system.startswith("lj"):
+        return f"LJ\\(_{{{system[2:]}}}\\)" in sentence
+    cluster = "55" if system.startswith("m55") else "80"
+    rho = "6" if system.endswith("r6") else "14"
+    return f"M\\(_{{{cluster}}}\\)" in sentence and f"\\rho={rho}" in sentence
+
+
+def _quotes_anneal(sentence: str, system: str, rows: list[dict[str, str]]) -> bool:
+    if "Atomic Simulation" in sentence or re.search(r"\bASE\b", sentence):
+        return False
+    if not _system_named(sentence, system):
+        return False
+    hits, n = hits_of(rows), len(rows)
+    if f"{hits} of {n}" in sentence or f"{hits}/{n}" in sentence:
+        return True
+    return system == "m80r6" and "loses that row" in sentence
+
+
+# The M80 rho=6 hit count stays printed. Each of these quotations carries the mark.
+M80_STALE_QUOTES = (
+    (TEX, r"LJ\(_{150}\) and \StalePanel{m80r6}M\(_{80}\) at \(\rho=6\).", 1),
+    (TEX, r"against \StalePanel{m80r6}2 of 12.", 2),
+    (TEX, r"\StalePanel{m80r6}M\(_{80}\) at \(\rho=6\) for GMIN.", 2),
+    (TEX, r"\StalePanel{m80r6}On M\(_{80}\) at \(\rho=6\) GMIN reaches", 2),
+    (TEX, r"this setting \StalePanel{m80r6}2 of", 1),
+    (TEX, r"on \StalePanel{m80r6}2 of 12", 1),
+    (TEX, r"& \StalePanel{m80r6}2/12 &", 1),
+    (SI, r"\StalePanel{m80r6}this code loses that row", 1),
+)
+
+
+def quoted_panel_prose(audit: Audit, groups: dict) -> None:
+    """Prose that states a GMIN-panel anneal count quotes that row's commit.
+
+    ``\\StalePanel{system}`` marks a count whose rows name a commit this repository
+    does not hold. The printed words stay. An unmarked quotation of such a row fails.
+    """
+    for path, snippet, copies in M80_STALE_QUOTES:
+        found = audit.text(path).count(snippet)
+        audit.record(found == copies, path, "the M80 rho=6 panel count is marked",
+                     snippet, f"{found} of {copies}")
+    spans = {
+        TEX: "\n".join((
+            _between(audit.text(TEX), r"\label{sec:gmin}", r"\label{sec:sc}"),
+            _between(audit.text(TEX), r"\section{Discussion}", r"\section{Conclusions}"),
+            _between(audit.text(TEX), r"\section{Conclusions}", r"\section*{Author contributions}"),
+        )),
+        SI: _between(audit.text(SI), r"\label{sec:si-gmin}", r"\section{Sutton"),
+    }
+    unheld: dict[str, str] = {}
+    for (system, arm), rows in groups.items():
+        if arm != "anneal" or not rows:
+            continue
+        for rev in sorted({row["code_revision"] for row in rows}):
+            for path, text in spans.items():
+                for sentence in _sentences(text):
+                    if not _quotes_anneal(sentence, system, rows):
+                        continue
+                    quoted_panel_row(
+                        audit, f"{path} {system}", rev, f"\\StalePanel{{{system}}}" in sentence,
+                    )
+            if not commit_held(rev):
+                unheld[rev[:8]] = rev
+    for path in (TEX, SI):
+        text = audit.text(path)
+        for prefix in unheld:
+            for match in re.finditer(re.escape(prefix), text):
+                before = text[max(0, match.start() - 24):match.start()]
+                if before.endswith("\\StalePanel{"):
+                    continue
+                window = text[max(0, match.start() - 80):match.start()]
+                quoted_panel_row(audit, f"{path} {prefix}", unheld[prefix],
+                                 f"\\StalePanel{{{prefix}}}" in window)
+
+
 def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
                     budget: int) -> None:
     """One table line: Budget, Arm, Hits, Median calls, IQR, Wall, Inside, Outside, Fisher p, MW p calls, MW p wall."""
+    raw_hits = cells[2]
+    cells = [strip_stale_panel(cell) for cell in cells]
     group = groups[(system, arm)]
     other = groups[(system, "gmin" if arm == "anneal" else "anneal")]
+    if arm == "anneal" and where.startswith(PAPER):
+        for rev in sorted({row["code_revision"] for row in group}):
+            quoted_panel_row(audit, f"{where} {system}", rev, f"\\StalePanel{{{system}}}" in raw_hits)
 
     def col(rows: list[dict[str, str]], key: str) -> list[float]:
         return [float(r[key]) for r in rows]
@@ -721,6 +854,7 @@ def manuscript_gmin(audit: Audit) -> None:
         audit.cell(path, "gmin panel lines", " ".join(f"{s}/{a}" for s, a in shown), " ".join(f"{s}/{a}" for s, a in want))
     gmin_panel_readme(audit, panel, groups)
     gmin_panel_prose(audit, panel, groups)
+    quoted_panel_prose(audit, groups)
 
 
 def gmin_panel_prose(audit: Audit, panel: object, groups: dict) -> None:
@@ -1262,14 +1396,14 @@ def generated_tables(audit: Audit) -> None:
             ("tab:sc", h2h.MARKS["sc"], h2h.sc_block(), text),
             ("tab:sc-si", h2h.MARKS["sc-si"], h2h.sc_si_block(), si_text)):
         found = source.split(marks[0], 1)[1].split(marks[1], 1)[0].strip("\n") if marks[0] in source else ""
-        ok = found == written
+        ok = strip_stale_panel(found) == written
         audit.record(ok, SI if source is si_text else PAPER, f"{label} is the generator's block",
                      "as written" if ok else "edited by hand", "as written")
     for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
                                   ("tab:gmin", gmin.TEX_MARKS, want),
                                   ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
                                   ("tab:ase-morse", nonlj.TEX_MARKS, nonlj.tex_table(nonlj.load_rows()))):
-        ok = block(marks) == written
+        ok = strip_stale_panel(block(marks)) == written
         audit.record(ok, PAPER, f"{label} is the summariser's block", "as written" if ok else "edited by hand", "as written")
 
 
