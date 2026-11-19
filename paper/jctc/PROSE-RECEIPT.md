@@ -10,12 +10,12 @@ The data-availability section is the v1.16 text.
 
 Hit: az-spine at base line 67.
 The line break now falls after "made that".
-It no longer falls before "method for atomic clusters".
+It follows "method for atomic clusters".
 No word changes.
 
 Hit: subject-verb-distance at base line 282.
 The LJ75 figure now follows the systems figure.
-It no longer precedes the information-theory section.
+It follows the information-theory section.
 No word of the caption changes.
 
 Hit: echo-skeleton at base line 493.

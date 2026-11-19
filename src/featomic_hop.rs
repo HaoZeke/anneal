@@ -28,8 +28,8 @@ pub const LMIN: i32 = 5;
 /// `Dcut` when every seed is the same packing.
 ///
 /// High-`l` mean SOAP of LJ75 Mackay vs Marks is 0.163; of a structure
-/// to itself is 0. The bank used to fall back to `merge_radius` (0.7),
-/// which is a length, and 0.163 < 0.7 so Marks was a duplicate of
+/// to itself is 0. The bank cannot fall back to `merge_radius` (0.7),
+/// which is a length: 0.163 < 0.7 would make Marks a duplicate of
 /// Mackay. This floor sits below the packing gap and above numerical
 /// zero, so a one-funnel seed bank still admits the other funnel.
 pub const SOAP_DCUT_FALLBACK: f64 = 0.05;
@@ -1118,8 +1118,8 @@ pub fn in_stored_well(
 /// [`crate::catalog::occupancy_leave_adopt`] Refuse does not install a
 /// same-packing hole.
 ///
-/// This is the leftover-SOAP hole generator, and the hop loop no longer
-/// reaches for it on a refused Leave: a hole of the occupied packing
+/// This is the leftover-SOAP hole generator, and the hop loop does not
+/// reach for it on a refused Leave: a hole of the occupied packing
 /// quenches into the occupied packing.
 /// [`crate::known_basin::leave_packing_ladder`] is the escalation.
 pub fn leave_occupied_packing<R, Q>(

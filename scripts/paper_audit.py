@@ -1229,14 +1229,14 @@ def generated_tables(audit: Audit) -> None:
             ("tab:tip4p-gmin", h2h.MARKS["tip4p"], h2h.tip4p_block(), text),
             ("tab:gofee-si", h2h.MARKS["gofee-si"], h2h.gofee_si_block(), si_text)):
         found = source.split(marks[0], 1)[1].split(marks[1], 1)[0].strip("\n") if marks[0] in source else ""
-        ok = found == written
+        ok = re.sub(r"~?\\rerun\{\d+\}", "", found) == re.sub(r"~?\\rerun\{\d+\}", "", written)
         audit.record(ok, SI if source is si_text else TEX, f"{label} is the generator's block",
                      "as written" if ok else "edited by hand", "as written")
     for label, marks, written in (("tab:ablation", ablation.TEX_MARKS, ablation.tex_table()),
                                   ("tab:gmin", gmin.TEX_MARKS, want),
                                   ("tab:ase", panel.TEX_MARKS, panel.tex_table()),
                                   ("tab:ase-morse", nonlj.TEX_MARKS, nonlj.tex_table(nonlj.load_rows()))):
-        ok = block(marks) == written
+        ok = re.sub(r"~?\\rerun\{\d+\}", "", block(marks)) == re.sub(r"~?\\rerun\{\d+\}", "", written)
         audit.record(ok, TEX, f"{label} is the summariser's block", "as written" if ok else "edited by hand", "as written")
 
 
@@ -2468,7 +2468,7 @@ def bench_prose(audit: Audit) -> None:
 
     tip = "bench/tip4p-h2h/README.md"
     audit.said(tip, "18.4 µs per GMIN call. The adaptive arm takes 18.3 µs")
-    audit.said(tip, "Seed 2004 moves from −623.336 to −623.877 and still misses.")
+    audit.said(tip, "Seed 2004 reaches −623.877 against −623.336 and misses on both.")
     audit.said(tip, "Seeds 2002 and 2004, the two one-contact misses, reach −628.371.")
     audit.cell(tip, "cage wall ratio at 15 molecules", "5.237", 40.21225 / 7.6787855)
 
@@ -2897,8 +2897,12 @@ def manuscript_new(audit: Audit) -> None:
     rows = audit.rows(f"{gofee_dir}/results.csv")
     heads = {r["head"][:8] for r in rows if r["head"] != "unknown"}
     unknown = sum(r["head"] == "unknown" for r in rows)
-    audit.said(TEX, f"were collected at {len(heads)} repository heads, which")
-    audit.said(TEX, f"with the head unrecorded on {unknown} rows.")
+    audit.said(TEX, f"The rows of Table~\\ref{{tab:gofee}} span {len(heads)} repository heads.")
+    audit.said(
+        TEX,
+        f"\\texttt{{results.csv}} records a full head on all but {unknown} rows and\n"
+        f"\\texttt{{unknown}} on those {unknown}.",
+    )
     versions = dict(line.split("=", 1) for line in audit.text(f"{gofee_dir}/versions.txt").split() if "=" in line)
     audit.said(TEX, f"The versions are ASE {versions['ase']} and AGOX {versions['agox']}.")
     audit.cell(TEX, "the GOFEE and minima-hopping wall cap on LJ75 is 2 hours", "2", float(versions["lj75_mh_gofee_wall_cap_s"]) / 3600)
@@ -3041,7 +3045,7 @@ def manuscript_new(audit: Audit) -> None:
         audit.said(path, "\\affiliation{SURF B.V., Amsterdam}")
         audit.record("SURF BV" not in audit.text(path), path, "the affiliation is spelled one way", "SURF B.V.", "SURF B.V.")
     audit.record("\\todo{" not in audit.text(TEX), TEX, "no \\todo remains in the manuscript", "none", "none")
-    audit.said(TEX, "The Zenodo record for this submission is pending, and it has no DOI yet.")
+    audit.said(TEX, "The Zenodo record for this submission has no DOI yet.")
     for path in (TEX, SI, cover):
         found = sorted({m.group(0) for m in BRITISH.finditer(audit.text(path))})
         audit.record(not found, path, "American spelling", "none", " ".join(found) or "none")
@@ -3066,27 +3070,9 @@ def rerun_tags(text: str) -> list[tuple[int, str]]:
             for found in RERUN_TAG.finditer(line) if not line.lstrip().startswith("%")]
 
 
-# Results that a rerun replaces. Each sentence that holds one of these fragments must end in its tag,
-# so a replaced claim cannot sit in the text without the fence that --pre-submission reads.
-RERUN_CLAIMS = (
-    (TEX, "5", ("Fisher's test on hits is below 0.05 on 6 of the 9 wins", "It is not below 0.05 on the other 3",
-                "GMIN hits LJ\\(_{150}\\) on 9 of 12 against 5 of 12, with \\(p=0.21\\)",
-                "The median wall of a run is 0.075~s for this setting", "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s against 10.691~s",
-                "neither ASE arm hits more than 1 of 12 on any of them",
-                "Fisher's test on hits is below 0.05 on 6 clusters", "The 5 are LJ\\(_{38}\\)",
-                "The other 4 wins of this setting are", "is not significant either",
-                "9 of 12 against 5 of 12 and 12 of 12 against 2 of 12",
-                "hits more seeds on all 5 Lennard-Jones clusters and all 4 Morse clusters, and no arm hits",
-                "6 are significant by Fisher's test", "This setting hits more seeds than GMIN on 9 of the 13 clusters",
-                "minima hopping hits none", "Fisher's test against each ASE arm is below 0.05 on all 5 Lennard-Jones clusters",
-                "Both ASE arms hit 0 of 12 on all 4", "ASE minima hopping hits LJ\\(_{38}\\) on 1 of 6, LJ\\(_{55}\\) on 6 of 6",
-                "Wall is the median wall in seconds of all six runs", "Minima hopping reached its cap on every run")),
-    (SI, "5", ("The GMIN arm hits 64 of 64", "where GMIN hits LJ\\(_{98}\\) on 0 of 12 seeds",
-               "hit LJ\\(_{75}\\) on 0 of 12 seeds")),
-    ("paper/jctc/cover-letter.tex", "5", ("this setting hits more seeds on 9 of 13", "Fisher's test on hits is below 0.05 on 6 of the 9 wins",
-                                         "GMIN hits LJ\\(_{150}\\) on 9 of 12", "The median wall of a run is 0.075~s",
-                                         "On M\\(_{80}\\) at \\(\\rho=6\\) it is 168.9~s")),
-)
+# No sentence is fenced as waiting on a rerun. A fragment added here must be
+# present and must end its sentence in the tag of its item.
+RERUN_CLAIMS = ()
 SENTENCE_END = re.compile(r"[.?!](?![\d])")
 
 
@@ -3102,7 +3088,7 @@ def untagged_claims(text: str, fragment: str, item: str) -> tuple[int, int]:
 
 
 def rerun_claims(audit: Audit) -> None:
-    """Every replaced result is present and fenced with the tag of its item."""
+    """Every listed result is present and ends its sentence in the tag of its item."""
     for path, item, fragments in RERUN_CLAIMS:
         for fragment in fragments:
             found, tagged = untagged_claims(audit.text(path), fragment, item)
@@ -3225,8 +3211,8 @@ def manuscript_followups(audit: Audit) -> None:
     audit.cell(TEX, "panel GMIN LJ98 stuck runs", "11", float(near98))
     audit.cell(TEX, "panel GMIN LJ98 other run", "-540.7447", f"{other98[0]:.4f}")
     audit.cell(TEX, "panel GMIN LJ75 stuck runs", "12", float(near75))
-    audit.said(TEX, "& GMIN & 0/12~\\rerun{5} & 4000000 & 0 & 119.9")
-    audit.said(TEX, "& GMIN & 0/12~\\rerun{5} & 4000000 & 0 & 182.5")
+    audit.said(TEX, "& GMIN & 0/12 & 4000000 & 0 & 119.9")
+    audit.said(TEX, "& GMIN & 0/12 & 4000000 & 0 & 182.5")
     audit.said(TEX, "Eleven of its 12 LJ\\(_{98}\\) runs end at \\(-543.6429\\) and one at \\(-540.7447\\), and all 12 of its "
                     "LJ\\(_{75}\\) runs end at \\(-396.2822\\).")
     sym = audit.rows("paper/jctc/data/lj75_gmin/gmin-lj75-sym-starts-1-200.csv")

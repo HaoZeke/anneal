@@ -752,7 +752,7 @@ pub struct Config {
     /// "If the highest pair energy rose above a fraction R of the lowest pair
     /// energy then an angular move was employed for the atom in question with
     /// all other atoms fixed" (J. Phys. Chem. A 101, 5111). This is the move
-    /// their unbiased search used to reach the decahedral minima at 75 and 102
+    /// their unbiased search uses to reach the decahedral minima at 75 and 102
     /// points, and it is not in this crate's library: the nearest thing,
     /// surface relocation, picks the least-coordinated point rather than the
     /// worst-bound one and places it near the surface rather than at the far

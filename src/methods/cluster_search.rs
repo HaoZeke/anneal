@@ -600,8 +600,8 @@ where
 /// One geometry where the potential itself failed, and how many such calls
 /// this descent has already paid for.
 ///
-/// A non-finite answer used to come back as a finite stand-in. The line
-/// search treats that as a real value, so it zooms. On a potential that
+/// A non-finite answer must not come back as a finite stand-in. The line
+/// search would treat that as a real value, and zoom. On a potential that
 /// fails throughout a neighbourhood (xtb's SCC does, around one contact)
 /// every shorter probe fails too, and each probe pays the full call. The
 /// walker never leaves. A repeat of that geometry is not a new trial.
@@ -2829,7 +2829,7 @@ mod tests {
     }
 
     /// An all-NaN gradient is a failed evaluation. `f64::max` drops NaN, so
-    /// the infinity-norm fold used to report that failure as a zero gradient.
+    /// an infinity-norm fold would report that failure as a zero gradient.
     #[test]
     fn a_nonfinite_gradient_is_not_converged() {
         let broken = Array1::from_vec(vec![f64::NAN, f64::NAN]);
@@ -2960,9 +2960,9 @@ mod tests {
     }
 
     /// A potential that fails throughout a neighbourhood must not be asked
-    /// for that neighbourhood again. The line search used to zoom there, and
-    /// every probe paid a full call, so a run sat on one contact until the
-    /// budget was gone.
+    /// for that neighbourhood again. Otherwise the line search zooms there,
+    /// every probe pays a full call, and a run sits on one contact until the
+    /// budget is gone.
     #[test]
     fn a_potential_that_fails_in_a_region_cannot_stall_the_run() {
         use eindir_core::gradient::Gradient;
@@ -4108,9 +4108,9 @@ mod tests {
         let (plain, plain_g) = chain_relax_cost(false);
         let (pre, pre_g) = chain_relax_cost(true);
         assert!(plain_g <= 1e-4 && pre_g <= 1e-4, "{plain_g} {pre_g}");
-        // The molecular call wall and the 64-probe line search close the
-        // gap this chain used to show. Both descents still settle inside
-        // the ledger.
+        // The molecular call wall and the 64-probe line search keep this
+        // chain from opening a gap between the two descents. Both settle
+        // inside the ledger.
         assert!(pre < 20_000 && plain < 20_000, "{pre} {plain}");
     }
 
@@ -4410,7 +4410,8 @@ mod tests {
 
     /// Separation parks a clash one ulp outside the call limit. The force
     /// there is a spike, and a unit line-search step re-enters the gate, so
-    /// the quench used to report that same geometry with the spike intact.
+    /// a quench without the gate reports that same geometry with the spike
+    /// intact.
     #[test]
     fn a_clash_parked_on_the_overlap_gate_is_quenched() {
         use eindir_core::gradient::Gradient;
