@@ -367,11 +367,11 @@ nb::tuple stillinger_weber_energy_gradient(rgpot::StillingerWeberSi &self,
     const std::vector<int> species = rgpot::pybind::read_types(atom_types, n);
     auto *grad = new double[std::max<std::size_t>(n * 3, 1)]();
     double energy = 0.0;
-    {
-      nb::gil_scoped_release release;
+    rgpot::pybind::run_detached([&] {
       self.energyAndGradient(positions.data(), species.data(), cell, n, &energy,
                              grad);
-    }
+      return 0;
+    });
     auto arr =
         nb::ndarray<nb::numpy, double, nb::c_contig>(grad, {n, 3}, own(grad));
     return nb::make_tuple(energy, arr);
@@ -386,11 +386,11 @@ nb::tuple stillinger_weber_energy_gradient(rgpot::StillingerWeberSi &self,
     const std::vector<int> species = rgpot::pybind::read_types(atom_types, n);
     auto *energies = new double[std::max<std::size_t>(n_config, 1)]();
     auto *grads = new double[std::max<std::size_t>(n_config * n * 3, 1)]();
-    {
-      nb::gil_scoped_release release;
+    rgpot::pybind::run_detached([&] {
       self.energyAndGradientBatch(n_config, positions.data(), species.data(),
                                   cell, n, energies, grads);
-    }
+      return 0;
+    });
     auto earr = nb::ndarray<nb::numpy, double, nb::c_contig>(
         energies, {n_config}, own(energies));
     auto garr = nb::ndarray<nb::numpy, double, nb::c_contig>(
@@ -420,11 +420,11 @@ nb::tuple tersoff_sic_energy_gradient(rgpot::TersoffSiC &self,
     const std::vector<int> species = rgpot::pybind::read_types(atom_types, n);
     auto *grad = new double[std::max<std::size_t>(n * 3, 1)]();
     double energy = 0.0;
-    {
-      nb::gil_scoped_release release;
+    rgpot::pybind::run_detached([&] {
       self.energyAndGradient(positions.data(), species.data(), cell, n, &energy,
                              grad);
-    }
+      return 0;
+    });
     auto arr =
         nb::ndarray<nb::numpy, double, nb::c_contig>(grad, {n, 3}, own(grad));
     return nb::make_tuple(energy, arr);
@@ -439,11 +439,11 @@ nb::tuple tersoff_sic_energy_gradient(rgpot::TersoffSiC &self,
     const std::vector<int> species = rgpot::pybind::read_types(atom_types, n);
     auto *energies = new double[std::max<std::size_t>(n_config, 1)]();
     auto *grads = new double[std::max<std::size_t>(n_config * n * 3, 1)]();
-    {
-      nb::gil_scoped_release release;
+    rgpot::pybind::run_detached([&] {
       self.energyAndGradientBatch(n_config, positions.data(), species.data(),
                                   cell, n, energies, grads);
-    }
+      return 0;
+    });
     auto earr = nb::ndarray<nb::numpy, double, nb::c_contig>(
         energies, {n_config}, own(energies));
     auto garr = nb::ndarray<nb::numpy, double, nb::c_contig>(
@@ -519,19 +519,7 @@ NB_MODULE(_core, m) {
       [](const F64 &positions, nb::handle atom_types, const F64 &box) {
         auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
         rgpot::LJPot pot;
-        double energy = 0.0;
-        double variance = 0.0;
-        AtomMatrix forces;
-        {
-          nb::gil_scoped_release release;
-          std::tie(energy, forces, variance) =
-              pot(geom.pos, geom.types, geom.box);
-        }
-        if (!std::isfinite(energy)) {
-          throw rgbind::NumericalError("energy is not finite");
-        }
-        return nb::make_tuple(energy, rgpot::pybind::matrix_to_numpy(forces),
-                              variance);
+        return rgpot::pybind::call_detached(pot, geom);
       },
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert());
@@ -565,10 +553,10 @@ NB_MODULE(_core, m) {
         }
         rgpot::ForceInput in{n, geom.pos.data(), geom.types.data(), flat};
         rgpot::ForceOut out{forces.data(), 0.0, 0.0, {}, 0};
-        {
-          nb::gil_scoped_release release;
+        rgpot::pybind::run_detached([&] {
           front.forceImpl(in, &out);
-        }
+          return 0;
+        });
         if (!std::isfinite(out.energy)) {
           throw rgbind::NumericalError("energy is not finite");
         }
@@ -746,11 +734,8 @@ NB_MODULE(_core, m) {
           [](rgpot::StillingerWeberSi &self, const F64 &positions,
              nb::handle atom_types, const F64 &box) {
             auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-            rgpot::pybind::FullResult result;
-            {
-              nb::gil_scoped_release release;
-              result = rgpot::pybind::run_force(self, geom);
-            }
+            rgpot::pybind::FullResult result = rgpot::pybind::run_detached(
+                [&] { return rgpot::pybind::run_force(self, geom); });
             return rgpot::pybind::result_dict(result);
           },
           nb::arg("positions").noconvert(), nb::arg("atom_types"),
@@ -1126,19 +1111,7 @@ NB_MODULE(_core, m) {
       [](rgpot::LammpsPot &self, const F64 &positions, nb::handle atom_types,
          const F64 &box) {
         auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-        double energy = 0.0;
-        rgpot::types::AtomMatrix forces;
-        double variance = 0.0;
-        {
-          nb::gil_scoped_release release;
-          std::tie(energy, forces, variance) =
-              self(geom.pos, geom.types, geom.box);
-        }
-        if (!std::isfinite(energy)) {
-          throw rgbind::NumericalError("energy is not finite");
-        }
-        return nb::make_tuple(energy, rgpot::pybind::matrix_to_numpy(forces),
-                              variance);
+        return rgpot::pybind::call_detached(self, geom);
       },
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert(),
@@ -1149,19 +1122,7 @@ NB_MODULE(_core, m) {
       [](rgpot::GromacsPot &self, const F64 &positions, nb::handle atom_types,
          const F64 &box) {
         auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-        double energy = 0.0;
-        rgpot::types::AtomMatrix forces;
-        double variance = 0.0;
-        {
-          nb::gil_scoped_release release;
-          std::tie(energy, forces, variance) =
-              self(geom.pos, geom.types, geom.box);
-        }
-        if (!std::isfinite(energy)) {
-          throw rgbind::NumericalError("energy is not finite");
-        }
-        return nb::make_tuple(energy, rgpot::pybind::matrix_to_numpy(forces),
-                              variance);
+        return rgpot::pybind::call_detached(self, geom);
       },
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert(),
@@ -1178,19 +1139,7 @@ NB_MODULE(_core, m) {
       [](rgpot::OpenMMPot &self, const F64 &positions, nb::handle atom_types,
          const F64 &box) {
         auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-        double energy = 0.0;
-        rgpot::types::AtomMatrix forces;
-        double variance = 0.0;
-        {
-          nb::gil_scoped_release release;
-          std::tie(energy, forces, variance) =
-              self(geom.pos, geom.types, geom.box);
-        }
-        if (!std::isfinite(energy)) {
-          throw rgbind::NumericalError("energy is not finite");
-        }
-        return nb::make_tuple(energy, rgpot::pybind::matrix_to_numpy(forces),
-                              variance);
+        return rgpot::pybind::call_detached(self, geom);
       },
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert(),
