@@ -90,7 +90,8 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library is deterministic on every build. The hash
-    // moved when orbit completion and stall symmetrisation left the preset.
-    let expected = "2edb99fdb15752be0c232473fa7fb58dee6991e06991d2dd76439563b32723c1";
+    // moved when orbit completion and stall symmetrisation left the preset,
+    // and again when a loosely detected group stopped being refused.
+    let expected = "6694fdbfde2baf72c3c48582df3d03302125c470a4d3efd8d2b3499b3fa18366";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
