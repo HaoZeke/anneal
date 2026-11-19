@@ -1504,6 +1504,23 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
+    /// Opt-in population search. [`Config::recommended`] leaves this off,
+    /// and a false value is absent from the resolved JSON, so that preset's
+    /// proposals are the ones it had without this field.
+    ///
+    /// When set, the library gains one return move, further replicas are
+    /// quenched from starts far from the incumbent, the step and the
+    /// temperature follow the acceptance rate, one same-basin landing
+    /// schedules one return move, and a quiet record restarts from a fresh
+    /// structure.
+    #[serde(skip_serializing_if = "is_false")]
+    pub adaptive_search: bool,
+    /// Keep the incumbent on the single-chain proposal stream for an opening
+    /// run of calls, then give a forked copy of that stream the calls still
+    /// left. The forked walk leaves this off. Absent from the resolved JSON
+    /// when false, and false on [`Config::recommended`].
+    #[serde(skip_serializing_if = "is_false")]
+    pub stream_hold: bool,
 }
 
 /// Opening hops whose quenched energy changes set
@@ -1753,6 +1770,33 @@ impl Config {
     /// ```
     pub fn recommended(n_points: usize) -> Self {
         Self::recommended_with_scales(
+            n_points,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::REDUCED_SCALE,
+        )
+    }
+
+    /// [`Config::recommended`] with the population search turned on.
+    ///
+    /// Two replicas on a non-reversible ladder whose top sits at twice the
+    /// cold temperature. The single-chain preset does not call this.
+    pub fn recommended_adaptive_with_scales(
+        n_points: usize,
+        length_scale: f64,
+        energy_scale: f64,
+    ) -> Self {
+        let mut cfg = Self::recommended_with_scales(n_points, length_scale, energy_scale);
+        cfg.adaptive_search = true;
+        cfg.stream_hold = true;
+        cfg.replicas = 2;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.ladder_top = 2.0;
+        cfg
+    }
+
+    /// [`Self::recommended_adaptive_with_scales`] at the Lennard-Jones scales.
+    pub fn recommended_adaptive(n_points: usize) -> Self {
+        Self::recommended_adaptive_with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
@@ -2243,6 +2287,8 @@ impl Config {
             ring_moves: false,
             hold_stereocentres: false,
             measured_energy_scale: false,
+            adaptive_search: false,
+            stream_hold: false,
         }
     }
 
@@ -2707,6 +2753,27 @@ mod coverage_behaviour {
             LocalStep::Lbfgs
         );
         assert_eq!(Config::recommended(13).local_step, LocalStep::Lbfgs);
+    }
+
+    #[test]
+    fn recommended_adaptive_stays_off_the_default_preset() {
+        let base = Config::recommended(38);
+        assert!(!base.adaptive_search);
+        assert!(!base.stream_hold);
+        assert_eq!(base.replicas, 1);
+        let base_json = base.resolved_json().unwrap();
+        assert!(!base_json.contains("adaptive_search"));
+        assert!(!base_json.contains("stream_hold"));
+        let adaptive = Config::recommended_adaptive(38);
+        assert!(adaptive.adaptive_search);
+        assert!(adaptive.stream_hold);
+        assert_eq!(adaptive.replicas, 2);
+        assert_eq!(adaptive.ladder_mode, super::LadderMode::NonReversible);
+        assert_eq!(adaptive.ladder_top, 2.0);
+        assert_ne!(
+            base.resolved_sha256().unwrap(),
+            adaptive.resolved_sha256().unwrap()
+        );
     }
 
     #[test]

@@ -156,6 +156,11 @@ impl MoveLibrary {
                         max_moves: 12,
                     }));
                 }
+                if cfg.adaptive_search {
+                    kernels.push(ClusterMove::Twin {
+                        n_points: cfg.n_points,
+                    });
+                }
                 kernels
             }
             Self::Visit => {
@@ -3469,6 +3474,26 @@ mod move_scaling_tests {
             (rec.merge_radius - 0.7).abs() < 1e-12,
             "recommended merge is the pair-spectrum 0.7, got {}",
             rec.merge_radius
+        );
+    }
+
+    #[test]
+    fn twin_is_an_adaptive_only_general_arm() {
+        let recommended = Config::recommended(13);
+        assert!(
+            recommended
+                .move_library
+                .kernels(&recommended)
+                .iter()
+                .all(|kernel| !matches!(kernel, ClusterMove::Twin { .. }))
+        );
+        let adaptive = Config::recommended_adaptive(13);
+        assert!(
+            adaptive
+                .move_library
+                .kernels(&adaptive)
+                .iter()
+                .any(|kernel| matches!(kernel, ClusterMove::Twin { .. }))
         );
     }
 
