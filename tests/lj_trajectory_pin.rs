@@ -90,7 +90,8 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library is deterministic on every build.
-    // Fixed fivefold proposals were removed, so this short walk hash moved.
-    let expected = "0924506debcb5ee68f76b1b595070e85f78e98d4abef2f944fcf33fd5b4f7911";
+    // Every order the point count can hold is tried, so this short
+    // walk hash moved.
+    let expected = "26e62219242880d6c978e46672918c651fc59476c7af0b06e276c8810889d287";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

@@ -888,7 +888,8 @@ pub fn symmetrise_core(
             core[3 * k + d] = x[3 * a + d];
         }
     }
-    let cands = detect_all(core.view(), m, &ROTATION_ORDERS, tolerance);
+    let orders = orders_held(m);
+    let cands = detect_all(core.view(), m, &orders, tolerance);
     if cands.is_empty() {
         return None;
     }
@@ -1113,7 +1114,8 @@ pub fn orbit_complete_core(
             core[3 * k + d] = x[3 * a + d];
         }
     }
-    let cands = detect_all(core.view(), m, &ROTATION_ORDERS, tolerance);
+    let orders = orders_held(m);
+    let cands = detect_all(core.view(), m, &orders, tolerance);
     if cands.is_empty() {
         return None;
     }
@@ -1210,8 +1212,17 @@ const POLAR_STEPS: usize = 60;
 const CENTRE_STEPS: usize = 200;
 /// Fewest points [`shell_core_group`] reads a group from, the smallest set that need not be planar.
 const MIN_CORE_POINTS: usize = 4;
-/// Rotation orders [`detect_all`] tries on a core: the crystallographic ones and the icosahedral five.
-const ROTATION_ORDERS: [usize; 5] = [2, 3, 4, 5, 6];
+
+/// Rotation orders a cloud of `n` points can carry.
+///
+/// A cycle longer than the point count cannot send an atom onto a
+/// different atom, so detection stops at `n`. One point has no turn.
+pub(crate) fn orders_held(n: usize) -> Vec<usize> {
+    if n < 2 {
+        return Vec::new();
+    }
+    (2..=n).collect()
+}
 /// Cosine above which two detected operations' directions count as one, so only the first is kept.
 const PARALLEL_COSINE: f64 = 0.995;
 
@@ -1416,7 +1427,8 @@ pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Optio
                 cx[3 * k + d] = p[d];
             }
         }
-        let cands = detect_all(cx.view(), m, &ROTATION_ORDERS, spec.tolerance);
+        let orders = orders_held(m);
+        let cands = detect_all(cx.view(), m, &orders, spec.tolerance);
         if cands.is_empty() {
             continue;
         }
