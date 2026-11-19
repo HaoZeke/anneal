@@ -21,7 +21,7 @@ PAPER_BUDGETS = {38: 400_000, 55: 1_000_000, 75: 4_000_000}
 
 
 class AseGofeeHeadToHead:
-    params = ([38, 55, 75], ["paper", "ase_bh", "ase_mh", "agox_gofee"])
+    params = ([38, 55, 75], ["paper", "ase_bh", "ase_mh", "agox_bh", "agox_rss", "agox_gofee"])
     param_names = ["size", "arm"]
     timeout = 86400
 

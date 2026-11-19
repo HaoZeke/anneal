@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Serial head-to-head on LJ38, LJ55 and LJ75.
+"""Serial head-to-head on LJ38, LJ55, LJ75, Au55 and Cu6Au32.
 
-Arms, one shared seed list, one force-call budget per size:
+Arms, one shared seed list, one force-call budget per system:
 
-* paper: ``Config::recommended`` via ``h2h_gmin_proof``
+* paper: ``Config::recommended`` via ``h2h_gmin_proof`` or ``h2h_metal``
 * ase_bh: ``ase.optimize.basin.BasinHopping`` at the 3.29.0 constructor defaults
   (FIRE, dr=0.1, fmax=0.1, temperature=100 kB)
 * ase_mh: ``ase.optimize.minimahopping.MinimaHopping`` at its constructor defaults
+* agox_bh: AGOX basin hopping with no surrogate model
+* agox_rss: AGOX random structure search with no surrogate model
 * agox_gofee: the GOFEE script on the AGOX algorithm page (kappa=2, the
   documented kernel, KMeans sample 10, the candidate schedule, a five-step
   surrogate relaxation from iteration 8, true-potential fmax 0.05)
@@ -59,6 +61,7 @@ from potential import (
     CapReached,
     HitReached,
     LjCalculator,
+    gupta_value_and_gradient,
     lj_value_and_gradient,
     warmup,
 )
@@ -73,7 +76,15 @@ LARGE_BUDGETS = {
     "lj104": 4_000_000,
     "lj150": 4_000_000,
 }
-BUDGETS = {**PAPER_BUDGETS, **LARGE_BUDGETS}
+METAL_BUDGETS = {"au55": 1_000_000, "cu6au32": 400_000}
+ASE_AGOX_BUDGETS = {
+    "lj38": 400_000,
+    "lj55": 1_000_000,
+    "lj75": 4_000_000,
+    "au55": 1_000_000,
+    "cu6au32": 400_000,
+}
+BUDGETS = {**PAPER_BUDGETS, **LARGE_BUDGETS, **METAL_BUDGETS}
 REFERENCES = {
     "lj38": -173.928427,
     "lj55": -279.248470,
@@ -83,14 +94,23 @@ REFERENCES = {
     "lj103": -575.766131,
     "lj104": -582.086642,
     "lj150": -893.310258,
+    "au55": -191.03085280,
+    "cu6au32": -130.79994836,
+}
+# Slot 0 is copper and slot 1 is gold, matching Gupta::copper_gold.
+SPECIES = {
+    "au55": ("Au55", [1] * 55),
+    "cu6au32": ("Cu6Au32", [0] * 6 + [1] * 32),
 }
 # ASE minima hopping and AGOX GOFEE on LJ75. The paper budget stays in the
 # budget column. A seed that reaches this wall is a miss marked capped.
 LJ75_WALL_CAP_S = 7200.0
 HIT_TOL = DEFAULT_HIT_TOL
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
-ARMS = ("paper", "ase_bh", "ase_mh", "agox_gofee")
+ARMS = ("paper", "ase_bh", "ase_mh", "agox_bh", "agox_rss", "agox_gofee")
 ORDER_SEED = 20261111
+# Competitor rows already measured at these versions are kept.
+KEPT_ARMS = ("ase_bh", "ase_mh", "agox_gofee")
 FMAX = {"ase_bh": 0.1, "ase_mh": 0.05, "agox_gofee": 0.05}
 ASE_VERSION = "3.29.0"
 AGOX_VERSION = "3.11.1"
@@ -168,8 +188,14 @@ def read_coords(path: Path, n: int):
     return np.asarray(rows, dtype=np.float64)
 
 
+def atom_count(system: str) -> int:
+    if system in SPECIES:
+        return len(SPECIES[system][1])
+    return int(system[2:])
+
+
 def ensure_start(binary: Path, repo: Path, system: str, seed: int, path: Path) -> None:
-    n = int(system[2:])
+    n = atom_count(system)
     if path.is_file():
         try:
             read_coords(path, n)
@@ -187,6 +213,24 @@ def ensure_start(binary: Path, repo: Path, system: str, seed: int, path: Path) -
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr[-2000:])
     read_coords(path, n)
+
+
+def symbols_of(system: str) -> str:
+    if system in SPECIES:
+        return SPECIES[system][0]
+    return f"Ar{int(system[2:])}"
+
+
+def make_calc(system: str, budget: int, fmax: float, deadline: float | None) -> LjCalculator:
+    calc = LjCalculator(budget, REFERENCES[system], HIT_TOL, fmax, deadline=deadline)
+    if system in SPECIES:
+        slot = __import__("numpy").asarray(SPECIES[system][1], dtype="int64")
+
+        def evaluate(positions, slot=slot):
+            return gupta_value_and_gradient(positions, slot)
+
+        calc.evaluate = evaluate
+    return calc
 
 
 def check_potential(binary: Path, repo: Path, start: Path) -> None:
@@ -242,7 +286,7 @@ def run_paper(binary: Path, repo: Path, system: str, seed: int, work: Path) -> d
         "inside_s": inside,
         "outside_s": max(0.0, wall - inside),
         "best": float(row["best"]),
-        "head": row["head"],
+        "head": row.get("head", ""),
     }
 
 
@@ -273,11 +317,11 @@ def run_ase_bh(system: str, seed: int, budget: int, work: Path, start: Path) -> 
     from ase import Atoms
     from ase.optimize.basin import BasinHopping
 
-    n = int(system[2:])
+    n = int(system[2:]) if system.startswith("lj") else len(SPECIES[system][1])
     os.chdir(work)
     np.random.seed(seed)
-    atoms = Atoms(f"Ar{n}", positions=read_coords(start, n), pbc=False)
-    calc = LjCalculator(budget, REFERENCES[system], HIT_TOL, FMAX["ase_bh"])
+    atoms = Atoms(symbols_of(system), positions=read_coords(start, n), pbc=False)
+    calc = make_calc(system, budget, FMAX["ase_bh"], None)
     atoms.calc = calc
     started = time.perf_counter()
     try:
@@ -301,13 +345,13 @@ def run_ase_mh(
     from ase import Atoms
     from ase.optimize.minimahopping import MinimaHopping
 
-    n = int(system[2:])
+    n = int(system[2:]) if system.startswith("lj") else len(SPECIES[system][1])
     os.chdir(work)
     np.random.seed(seed)
     started = time.perf_counter()
     deadline = None if wall_cap_s is None else started + wall_cap_s
-    atoms = Atoms(f"Ar{n}", positions=read_coords(start, n), pbc=False)
-    calc = LjCalculator(budget, REFERENCES[system], HIT_TOL, FMAX["ase_mh"], deadline=deadline)
+    atoms = Atoms(symbols_of(system), positions=read_coords(start, n), pbc=False)
+    calc = make_calc(system, budget, FMAX["ase_mh"], deadline)
     atoms.calc = calc
     capped = False
     try:
@@ -363,7 +407,7 @@ def run_gofee(system: str, seed: int, budget: int, work: Path, wall_cap_s: float
             draw = np.random.choice(pool, size=self.m_points - len(chosen), replace=False)
             return np.sort(np.concatenate([np.fromiter(chosen, dtype=int), draw]))
 
-    n = int(system[2:])
+    n = int(system[2:]) if system.startswith("lj") else len(SPECIES[system][1])
     os.chdir(work)
     # Angstrom box from the in-repo GOFEE driver. The repulsive prior is
     # written in Angstroms. The energy is still the untruncated reduced
@@ -377,19 +421,22 @@ def run_gofee(system: str, seed: int, budget: int, work: Path, wall_cap_s: float
     # epsilon = sigma makes the documented 0.05 eV/A force threshold a
     # reduced force of 0.05, so a finished relaxation can sit within the
     # 0.001 hit window. The reported energy is divided back by epsilon.
-    calc = LjCalculator(
-        budget,
-        REFERENCES[system],
-        HIT_TOL,
-        FMAX["agox_gofee"],
-        sigma=3.4,
-        epsilon=3.4,
-        deadline=deadline,
-    )
+    if system in SPECIES:
+        calc = make_calc(system, budget, FMAX["agox_gofee"], deadline)
+    else:
+        calc = LjCalculator(
+            budget,
+            REFERENCES[system],
+            HIT_TOL,
+            FMAX["agox_gofee"],
+            sigma=3.4,
+            epsilon=3.4,
+            deadline=deadline,
+        )
     template = Atoms("", cell=np.eye(3) * cell, pbc=False)
     environment = Environment(
         template=template,
-        symbols=f"Ar{n}",
+        symbols=symbols_of(system),
         confinement_cell=np.eye(3) * conf,
         confinement_corner=np.full(3, corner),
         print_report=False,
@@ -465,6 +512,65 @@ def run_gofee(system: str, seed: int, budget: int, work: Path, wall_cap_s: float
     return _finish(calc, time.perf_counter() - started, git_head(), capped)
 
 
+def run_agox(kind: str, system: str, seed: int, budget: int, work: Path, start: Path, wall_cap_s: float | None) -> dict:
+    """AGOX basin hopping or random search. Neither trains a model."""
+    started = time.perf_counter()
+    deadline = None if wall_cap_s is None else started + wall_cap_s
+    import contextlib
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import numpy as np
+    from ase import Atoms
+
+    install_constraint_shim()
+    from agox.algorithms import BasinHoppingConfig, RandomSearchConfig, create_search
+    from agox.algorithms.config import ProblemConfig, RunConfig
+
+    n = int(system[2:]) if system.startswith("lj") else len(SPECIES[system][1])
+    os.chdir(work)
+    scale = (n / 38.0) ** (1.0 / 3.0)
+    cell = 18.0 * scale if system.startswith("lj") else 18.0 * scale * 2.6
+    conf = 12.0 * scale if system.startswith("lj") else cell * 0.7
+    corner = (cell - conf) / 2.0
+    calc = make_calc(system, budget, 0.05, deadline)
+    template = Atoms("", cell=np.eye(3) * cell, pbc=False)
+    problem = ProblemConfig(
+        template=template,
+        symbols=symbols_of(system),
+        confinement_cell=np.eye(3) * conf,
+        confinement_corner=np.full(3, corner),
+        calculator=calc,
+    )
+    algorithm = BasinHoppingConfig() if kind == "agox_bh" else RandomSearchConfig()
+    algorithm |= {"evaluator": {"max_steps": 1000, "fmax": 0.05, "store_trajectory": False}}
+    search = create_search(problem=problem, run=RunConfig(path=work, seed=seed), algorithm=algorithm)
+    # The recorded start is the first candidate, so both codes leave the same point.
+    positions = read_coords(start, n)
+    log = (work / f"{kind}.stdio").open("w")
+    capped = False
+    try:
+        with contextlib.redirect_stdout(log):
+            try:
+                # Algorithm.run takes iteration count. The calculator stops the
+                # search when the shared call budget is spent.
+                search.run(iterations=budget)
+            finally:
+                import atexit
+
+                if hasattr(search, "on_failure"):
+                    atexit.unregister(search.on_failure)
+    except (HitReached, BudgetReached):
+        pass
+    except CapReached:
+        capped = True
+    finally:
+        log.close()
+    del positions
+    return _finish(calc, time.perf_counter() - started, git_head(), capped)
+
+
 def git_head() -> str:
     proc = subprocess.run(
         ["git", "-C", str(REPO), "rev-parse", "HEAD"],
@@ -477,7 +583,7 @@ def git_head() -> str:
     return proc.stdout.strip()
 
 
-def run_job(binary, repo, runs, system, seed, arm, head) -> dict:
+def run_job(binary, metal, repo, runs, system, seed, arm, head) -> dict:
     budget = BUDGETS[system]
     cap = LJ75_WALL_CAP_S if (system == "lj75" or system in LARGE_BUDGETS) and arm in {"ase_mh", "agox_gofee"} else None
     work = runs / system / arm / f"seed{seed}"
@@ -485,15 +591,20 @@ def run_job(binary, repo, runs, system, seed, arm, head) -> dict:
         shutil.rmtree(work)
     work.mkdir(parents=True)
     start = runs / "starts" / system / f"seed{seed}.txt"
-    ensure_start(binary, repo, system, seed, start)
+    if metal is None and not system.startswith("lj"):
+        metal = Path("/work/target/release/examples/h2h_metal")
+    source = binary if system.startswith("lj") else metal
+    ensure_start(source, repo, system, seed, start)
     if arm == "paper":
-        row = run_paper(binary, repo, system, seed, work)
+        row = run_paper(source, repo, system, seed, work)
     elif arm == "ase_bh":
         row = run_ase_bh(system, seed, budget, work, start)
     elif arm == "ase_mh":
         row = run_ase_mh(system, seed, budget, work, start, cap)
     elif arm == "agox_gofee":
         row = run_gofee(system, seed, budget, work, cap)
+    elif arm in {"agox_bh", "agox_rss"}:
+        row = run_agox(arm, system, seed, budget, work, start, cap)
     else:
         raise RuntimeError(arm)
     row.update(
@@ -571,10 +682,62 @@ def num(value, digits: int) -> str:
     return f"{float(value):.{digits}f}"
 
 
+def charged_calls(item: dict) -> float:
+    """Calls used in the rank test. A miss, including a wall-capped seed, is the budget."""
+    if int(item["hit"]):
+        return float(item["calls_to_hit"])
+    if item.get("stop") == "capped":
+        return float(item["budget"])
+    return float(item["charged"])
+
+
+def revision_of(group: list[dict], key: str) -> str:
+    values = []
+    for item in group:
+        value = str(item.get(key) or "")
+        if value and value not in values:
+            values.append(value)
+    return "|".join(values)
+
+
+def fisher_mann(paper: list[dict], other: list[dict]) -> tuple[str, str]:
+    if not paper or not other:
+        return "", ""
+    from scipy.stats import fisher_exact, mannwhitneyu
+
+    table = [
+        [
+            sum(int(item["hit"]) for item in paper),
+            sum(1 - int(item["hit"]) for item in paper),
+        ],
+        [
+            sum(int(item["hit"]) for item in other),
+            sum(1 - int(item["hit"]) for item in other),
+        ],
+    ]
+    _odds, fisher_p = fisher_exact(table, alternative="two-sided")
+    paper_calls = [charged_calls(item) for item in paper]
+    other_calls = [charged_calls(item) for item in other]
+    try:
+        mw = float(
+            mannwhitneyu(paper_calls, other_calls, alternative="two-sided", method="auto").pvalue
+        )
+    except ValueError:
+        mw = float("nan")
+    # Identical samples have no rank difference. SciPy returns NaN when every
+    # value is the same, which is that tie.
+    if math.isnan(mw):
+        mw_text = "1" if paper_calls == other_calls or len(set(paper_calls + other_calls)) == 1 else ""
+    else:
+        mw_text = f"{mw:.6g}"
+    return f"{float(fisher_p):.6g}", mw_text
+
+
 def summarise(rows: list[dict]) -> str:
     header = (
         "system,arm,n,hits,capped,budget,calls_to_hit_median,calls_to_hit_iqr,"
-        "wall_median_s,wall_ratio,inside_median_s,outside_median_s"
+        "wall_median_s,wall_ratio,inside_median_s,outside_median_s,"
+        "anneal_head,ase,agox,fisher_p,mannwhitney_p"
     )
     grouped: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
@@ -603,6 +766,8 @@ def summarise(rows: list[dict]) -> str:
             else:
                 call_text = ","
             capped = sum(1 for item in group if item.get("stop") == "capped")
+            paper = grouped.get((system, "paper"), [])
+            fisher_p, mannwhitney_p = ("", "") if arm == "paper" else fisher_mann(paper, group)
             lines.append(
                 ",".join(
                     [
@@ -617,6 +782,11 @@ def summarise(rows: list[dict]) -> str:
                         ratio,
                         "" if not insides else f"{median_iqr(insides)[0]:.6f}",
                         "" if not outsides else f"{median_iqr(outsides)[0]:.6f}",
+                        revision_of(group, "head"),
+                        revision_of(group, "ase"),
+                        revision_of(group, "agox"),
+                        fisher_p,
+                        mannwhitney_p,
                     ]
                 )
             )
@@ -775,14 +945,15 @@ def write_lj_large(rows: list[dict], repo: Path, systems: list[str]) -> None:
     out.write_text(text + "\n".join(extra) + "\n")
 
 
-def write_tables(rows: list[dict], repo: Path, comparison: str | None) -> None:
-    out = repo / "bench" / "ase-gofee-h2h"
+def write_tables(rows: list[dict], repo: Path, comparison: str | None, out: Path | None = None) -> None:
+    if out is None:
+        out = repo / "bench" / "ase-gofee-h2h"
     out.mkdir(parents=True, exist_ok=True)
     summary = summarise(rows)
     if comparison is None:
         (out / "results.csv").write_text(format_results(rows))
         (out / "summary.csv").write_text(summary)
-        for arm in ("ase_bh", "ase_mh", "agox_gofee"):
+        for arm in ("ase_bh", "ase_mh", "agox_bh", "agox_rss", "agox_gofee"):
             (out / f"{arm}.csv").write_text(comparison_slice(summary, arm))
     else:
         (out / f"{comparison}.csv").write_text(comparison_slice(summary, comparison))
@@ -797,12 +968,14 @@ def main() -> int:
     warmup()
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--metal", type=Path, default=None)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
-    parser.add_argument("--comparison", choices=["ase_bh", "ase_mh", "agox_gofee"])
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--comparison", choices=["ase_bh", "ase_mh", "agox_bh", "agox_rss", "agox_gofee"])
     parser.add_argument("--panel", choices=["asg2"])
-    parser.add_argument("--system")
     parser.add_argument("--size", type=int)
+    parser.add_argument("--system")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--arm", choices=ARMS)
     parser.add_argument("--systems", default="")
@@ -822,15 +995,18 @@ def main() -> int:
     ensure_start(args.binary, args.repo, "lj38", 2000, start)
     check_potential(args.binary, args.repo, start)
 
-    if args.size or args.seed or args.arm:
-        if not (args.size and args.seed is not None and args.arm):
-            print("a single run needs --size, --seed and --arm", file=sys.stderr)
+    if args.system or args.size or args.seed or args.arm:
+        if args.system and args.size:
+            print("pass either --system or --size", file=sys.stderr)
             return 2
-        system = f"lj{args.size}"
+        if not ((args.system or args.size) and args.seed is not None and args.arm):
+            print("a single run needs --system or --size, plus --seed and --arm", file=sys.stderr)
+            return 2
+        system = args.system or f"lj{args.size}"
         if system not in BUDGETS:
-            print(f"unknown size {args.size}", file=sys.stderr)
+            print(f"unknown system {system}", file=sys.stderr)
             return 2
-        row = run_job(args.binary, args.repo, args.runs, system, args.seed, args.arm, head)
+        row = run_job(args.binary, args.metal, args.repo, args.runs, system, args.seed, args.arm, head)
         row["order"] = 0
         print(format_results([row]), end="")
         return 0
@@ -842,16 +1018,30 @@ def main() -> int:
             print(f"unknown systems {unknown}", file=sys.stderr)
             return 2
     jobs = schedule(args.comparison, systems, include_paper=not args.no_paper)
+    out = args.out
     journal_path = args.runs / ("journal.csv" if args.comparison is None else f"journal-{args.comparison}.csv")
     rows = load_journal(journal_path)
+    kept = []
+    prior = args.repo / "bench" / "ase-gofee-h2h" / "results.csv"
+    for row in load_journal(prior):
+        if row["arm"] not in KEPT_ARMS or row["seed"] > 2005:
+            continue
+        if not str(row["system"]).startswith("lj"):
+            continue
+        if row["arm"].startswith("ase") and row.get("ase") not in {ASE_VERSION, ""}:
+            continue
+        if row["arm"].startswith("agox") and row.get("agox") not in {AGOX_VERSION, ""}:
+            continue
+        kept.append(row)
     done = {(row["system"], row["seed"], row["arm"]) for row in rows}
+    done.update((row["system"], row["seed"], row["arm"]) for row in kept)
     print(f"jobs {len(jobs)} already {len(done)}", flush=True)
     for index, (system, seed, arm) in enumerate(jobs, start=1):
         if (system, seed, arm) in done:
             continue
         print(f"start {index}/{len(jobs)} {system} {arm} seed={seed}", flush=True)
         try:
-            row = run_job(args.binary, args.repo, args.runs, system, seed, arm, head)
+            row = run_job(args.binary, args.metal, args.repo, args.runs, system, seed, arm, head)
         except Exception:
             traceback.print_exc()
             return 1
@@ -860,7 +1050,7 @@ def main() -> int:
         journal_path.parent.mkdir(parents=True, exist_ok=True)
         journal_path.write_text(format_results(rows))
         if not systems:
-            write_tables(rows, args.repo, args.comparison)
+            write_tables(rows, args.repo, args.comparison, out)
         inside_text = "" if row["inside_s"] == "" else f"{row['inside_s']:.3f}"
         print(
             f"done {index}/{len(jobs)} {system} {arm} seed={seed} hit={row['hit']} "
@@ -872,7 +1062,7 @@ def main() -> int:
     if systems:
         write_lj_large(rows, args.repo, systems)
     else:
-        write_tables(rows, args.repo, args.comparison)
+        write_tables(rows, args.repo, args.comparison, out)
     print(summarise(rows), end="", flush=True)
     return 0
 

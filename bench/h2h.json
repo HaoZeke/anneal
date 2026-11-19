@@ -842,6 +842,62 @@
       ]
     },
     {
+      "rule": "agox_bh_h2h",
+      "competitors": [
+        "AGOX basin hopping"
+      ],
+      "runners": [
+        "scripts/ase_gofee_h2h/campaign.py",
+        "scripts/ase_gofee_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "ASE_AGOX_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-agox-h2h/benchmarks/ase_agox_h2h.py::AseAgoxHeadToHead",
+      "rows": [
+        {
+          "path": "bench/ase-agox-h2h/agox_bh.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
+      "rule": "agox_rss_h2h",
+      "competitors": [
+        "AGOX random structure search"
+      ],
+      "runners": [
+        "scripts/ase_gofee_h2h/campaign.py",
+        "scripts/ase_gofee_h2h/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "ASE_AGOX_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/ase_gofee_h2h/campaign.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/ase-agox-h2h/benchmarks/ase_agox_h2h.py::AseAgoxHeadToHead",
+      "rows": [
+        {
+          "path": "bench/ase-agox-h2h/agox_rss.csv",
+          "key": "system",
+          "arm": "arm",
+          "budget": "budget",
+          "n": "n"
+        }
+      ]
+    },
+    {
       "rule": "agox_gofee_lj_large",
       "competitors": [
         "AGOX GOFEE"
