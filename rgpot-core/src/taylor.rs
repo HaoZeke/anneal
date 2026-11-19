@@ -68,6 +68,103 @@ fn point(value: f64) -> Interval {
     Interval::new(value, value)
 }
 
+/// Coefficients on which the Taylor exponential recurrence can operate.
+///
+/// Implementations define the coefficient algebra while
+/// [`TaylorExponential`] fixes the recurrence and its summation order.  An
+/// interval polynomial, for example, can use this to obtain a bivariate
+/// exponential without flattening either variable or giving up directed
+/// rounding.
+pub trait TaylorCoefficient: Clone {
+    /// Add `scale * left * right` to `self`.
+    fn add_scaled_product(&mut self, scale: usize, left: &Self, right: &Self);
+
+    /// Divide `self` by the positive integer `divisor`.
+    fn divide_usize(&mut self, divisor: usize);
+
+    fn zero() -> Self;
+    fn one() -> Self;
+}
+
+impl TaylorCoefficient for Interval {
+    fn add_scaled_product(&mut self, scale: usize, left: &Self, right: &Self) {
+        *self = *self + point(scale as f64) * *left * *right;
+    }
+
+    fn divide_usize(&mut self, divisor: usize) {
+        *self = *self / point(divisor as f64);
+    }
+
+    fn zero() -> Self {
+        Interval::ZERO
+    }
+
+    fn one() -> Self {
+        Interval::ONE
+    }
+}
+
+/// Incremental coefficients of `exp(u)` for a series with `u_0 = 0`.
+///
+/// After coefficients `u_1, ..., u_n` have been pushed, `coefficients()[k]`
+/// is `w_k` in
+///
+/// ```text
+/// w_0 = 1,  w_k = (1/k) sum_{j=1}^k j u_j w_{k-j}.
+/// ```
+///
+/// Keeping the state incremental avoids recomputing lower orders when a
+/// caller validates or consumes one coefficient at a time.
+#[derive(Debug, Clone)]
+pub struct TaylorExponential<C> {
+    input: Vec<C>,
+    output: Vec<C>,
+}
+
+impl<C: TaylorCoefficient> TaylorExponential<C> {
+    pub fn new() -> Self {
+        Self {
+            input: vec![C::zero()],
+            output: vec![C::one()],
+        }
+    }
+
+    fn with_constant(input: C, output: C) -> Self {
+        Self {
+            input: vec![input],
+            output: vec![output],
+        }
+    }
+
+    /// Append the next coefficient of `u` and return the corresponding
+    /// coefficient of `exp(u)`.
+    pub fn push(&mut self, coefficient: C) -> &C {
+        self.input.push(coefficient);
+        let k = self.input.len() - 1;
+        let mut next = C::zero();
+        for j in 1..=k {
+            next.add_scaled_product(j, &self.input[j], &self.output[k - j]);
+        }
+        next.divide_usize(k);
+        self.output.push(next);
+        &self.output[k]
+    }
+
+    pub fn coefficients(&self) -> &[C] {
+        &self.output
+    }
+
+    pub fn into_coefficients(self) -> Vec<C> {
+        self.output
+    }
+}
+
+impl<C: TaylorCoefficient> Default for TaylorExponential<C> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Enclosures of `u_0, ..., u_K`.
 #[derive(Debug, Clone)]
 pub struct Taylor {
@@ -75,6 +172,16 @@ pub struct Taylor {
 }
 
 impl Taylor {
+    /// A series from coefficient enclosures; refused when it is empty.
+    pub fn from_coefficients(c: Vec<Interval>) -> Result<Self, JetError> {
+        if c.is_empty() {
+            return Err(JetError::Shape(
+                "Taylor series needs at least its constant coefficient",
+            ));
+        }
+        Ok(Self { c })
+    }
+
     /// The constant `value` through order `order`.
     pub fn constant(value: Interval, order: usize) -> Self {
         let mut c = vec![Interval::ZERO; order + 1];
@@ -183,16 +290,13 @@ impl Taylor {
 
     /// `exp(self)` from `w' = w u'`.
     pub fn exp(&self) -> Taylor {
-        let mut w = vec![Interval::ZERO; self.c.len()];
-        w[0] = self.c[0].exp();
-        for k in 1..w.len() {
-            let mut sum = Interval::ZERO;
-            for j in 1..=k {
-                sum = sum + point(j as f64) * self.c[j] * w[k - j];
-            }
-            w[k] = sum / point(k as f64);
+        let mut recurrence = TaylorExponential::with_constant(self.c[0], self.c[0].exp());
+        for coefficient in self.c.iter().skip(1) {
+            recurrence.push(*coefficient);
         }
-        Taylor { c: w }
+        Taylor {
+            c: recurrence.into_coefficients(),
+        }
     }
 
     /// `tanh(self)` from `w' = (1 - w^2) u'`.
