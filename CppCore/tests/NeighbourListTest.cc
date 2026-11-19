@@ -569,9 +569,19 @@ TEST_CASE("a negative or non-finite skin is rejected", "[nlist][api][edge]") {
 
   rgpot::nlist::Query non_finite;
   non_finite.cutoff = 2.0;
-  non_finite.skin = std::numeric_limits<double>::infinity();
-  REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, box, non_finite),
-                    rgpot::nlist::Error);
+  non_finite.cut = rgpot::nlist::Cut::Loose;
+  for (double skin : {std::numeric_limits<double>::quiet_NaN(),
+                      std::numeric_limits<double>::infinity(),
+                      -std::numeric_limits<double>::infinity()}) {
+    non_finite.skin = skin;
+    REQUIRE_THROWS_AS(rgpot::nlist::build(table, pos, 2, box, non_finite),
+                      rgpot::nlist::Error);
+    try {
+      rgpot::nlist::build(table, pos, 2, box, non_finite);
+    } catch (const rgpot::nlist::Error &err) {
+      REQUIRE(err.code() == rgpot::nlist::Code::Cutoff);
+    }
+  }
 }
 
 TEST_CASE("an out-of-range shell or cut mode is rejected", "[nlist][api][edge]") {
@@ -643,41 +653,60 @@ TEST_CASE("a streaming walk rejects buffers too short for the pair cap",
   std::vector<std::int32_t> first(2), second(2), shift(6), bad_shift(2);
   std::vector<double> vector(6), bad_vector(2), distance(2), bad_distance(1);
   std::vector<std::uint8_t> mask(2), bad_mask(1);
+  auto expect_short = [](auto &&call, const char *what) {
+    REQUIRE_THROWS_AS(call(), rgpot::nlist::Error);
+    try {
+      call();
+    } catch (const rgpot::nlist::Error &err) {
+      REQUIRE(err.code() == rgpot::nlist::Code::Short);
+      REQUIRE(err.what() == std::string(what));
+    }
+  };
 
   {
     auto walk = freshWalk();
     rgpot::nlist::Buffers dest;
     dest.first = first;
     dest.second = std::span<std::int32_t>(second.data(), 1); // mismatched
+    dest.shift = shift;
+    dest.vector = vector;
+    dest.distance = distance;
     bool done = false;
-    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+    expect_short([&] { (void)walk.pull(dest, done); }, "first and second buffers have different lengths");
   }
   {
     auto walk = freshWalk();
     rgpot::nlist::Buffers dest;
     dest.first = first;
     dest.second = second;
+    dest.vector = vector;
+    dest.distance = distance;
     dest.shift = bad_shift; // too short: needs 3 * cap
     bool done = false;
-    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+    expect_short([&] { (void)walk.pull(dest, done); }, "shift buffer needs 3 entries per pair");
   }
   {
     auto walk = freshWalk();
     rgpot::nlist::Buffers dest;
     dest.first = first;
     dest.second = second;
+    dest.shift = shift;
+    dest.distance = distance;
     dest.vector = bad_vector; // too short: needs 3 * cap
     bool done = false;
-    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+    expect_short([&] { (void)walk.pull(dest, done); }, "vector buffer needs 3 entries per pair");
   }
   {
     auto walk = freshWalk();
     rgpot::nlist::Buffers dest;
     dest.first = first;
     dest.second = second;
+    dest.shift = shift;
+    dest.vector = vector;
     dest.distance = bad_distance; // too short: needs cap
     bool done = false;
-    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+    expect_short([&] { (void)walk.pull(dest, done); },
+                 "distance buffer is shorter than the pair buffer");
   }
   {
     // A cluster-of-four query needs a mask byte per pair.
@@ -687,9 +716,13 @@ TEST_CASE("a streaming walk rejects buffers too short for the pair cap",
     rgpot::nlist::Buffers dest;
     dest.first = first;
     dest.second = second;
+    dest.shift = shift;
+    dest.vector = vector;
+    dest.distance = distance;
     dest.mask = bad_mask; // too short: needs cap
     bool done = false;
-    REQUIRE_THROWS_AS(walk.pull(dest, done), rgpot::nlist::Error);
+    expect_short([&] { (void)walk.pull(dest, done); },
+                 "a cluster list needs one mask byte per pair");
   }
   // A well-formed call still succeeds after each of the rejections above.
   {
