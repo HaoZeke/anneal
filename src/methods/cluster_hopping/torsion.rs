@@ -360,8 +360,15 @@ impl Topology {
     /// has, and a draw that inverts a crankshaft end is dropped. Without,
     /// the random stream is the torsion move's alone.
     pub(crate) fn propose<R: Rng + ?Sized>(&self, x: ArrayView1<f64>, rng: &mut R) -> Array1<f64> {
-        self.propose_by(x, rng, |_, _, rng| {
-            rng.random_range(-std::f64::consts::PI..std::f64::consts::PI)
+        // A constrained bridge is not a uniform rotor on this path either.
+        // The measured proposal is what turns it, and only after the
+        // potential has priced the barrier.
+        self.propose_by(x, rng, |_, torsion, rng| {
+            if torsion.constrained {
+                0.0
+            } else {
+                rng.random_range(-std::f64::consts::PI..std::f64::consts::PI)
+            }
         })
     }
 
@@ -771,6 +778,93 @@ mod tests {
             cosine(&flipped) < -0.99,
             "downhill half turn was not preferred"
         );
+    }
+
+    fn flip_count(samples: &[(f64, f64, f64, f64)], temperature: f64, draws: u64) -> usize {
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 1.5, 0.0, 1.5, -1.5, 0.0,
+        ]);
+        let mut top = Topology::of(x.view(), &[6; 4], 1.2, None, false);
+        top.torsions[0].constrained = true;
+        let cosine = |y: &Array1<f64>| -y[3 * 3 + 1] / 1.5;
+        let mut flips = 0;
+        for seed in 0..draws {
+            let mut calls = 0usize;
+            let y = top.propose_measured(
+                x.view(),
+                0.0,
+                temperature,
+                &mut StdRng::seed_from_u64(seed),
+                |_| {
+                    let sample = samples[calls.min(samples.len() - 1)];
+                    calls += 1;
+                    Some(match calls {
+                        1 => sample.0,
+                        2 => sample.1,
+                        3 => sample.2,
+                        _ => sample.3,
+                    })
+                },
+            );
+            if cosine(&y) < -0.99 {
+                flips += 1;
+            }
+        }
+        flips
+    }
+
+    #[test]
+    fn a_hot_pilot_does_not_cross_a_barrier_above_the_local_rise() {
+        let flips = flip_count(&[(2.0, 2.0, 100.0, 100.0)], 1_000.0, 40);
+        assert_eq!(
+            flips, 0,
+            "the thermal cap let a hot pilot cross the barrier"
+        );
+    }
+
+    #[test]
+    fn a_low_endpoint_does_not_hide_the_barrier_above_it() {
+        let flips = flip_count(&[(2.0, 2.0, 100.0, -5.0)], 1_000.0, 40);
+        assert_eq!(flips, 0, "the half turn was priced by its endpoint alone");
+    }
+
+    #[test]
+    fn a_downhill_half_turn_is_preferred_when_the_cap_binds() {
+        let flips = flip_count(&[(2.0, 2.0, -5.0, -5.0)], 1_000.0, 40);
+        assert!(
+            flips > 30,
+            "a downhill half turn was not preferred under the cap ({flips})"
+        );
+    }
+
+    #[test]
+    fn repair_does_not_ratchet_a_constrained_bridge() {
+        // The tip on atom 5 sits four bonds from the left substituent, so a
+        // half turn of the bridge is a real contact. Both bridges are planar,
+        // and repair has no free torsion it can spend instead.
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.30, 0.0, 0.0, -0.60, 1.10, 0.0, -0.60, -1.10, 0.0, 1.90, 1.10, 0.0,
+            1.20, -1.80, 0.0, -0.25, -2.75, 0.0,
+        ]);
+        let top = Topology::of(x.view(), &[6, 6, 7, 8, 7, 6, 8], 1.25, None, false);
+        let t = top
+            .torsions
+            .iter()
+            .position(|bond| (bond.fixed.min(bond.pivot), bond.fixed.max(bond.pivot)) == (0, 1))
+            .expect("the bridge turns");
+        assert!(top.torsions[t].constrained);
+        let mut y = x.clone();
+        // Short of a half turn, so the contact still has a slope. At exactly
+        // pi the two atoms are at their closest and the torsion gradient
+        // vanishes, which would hide a repair that is allowed to turn the bond.
+        turn_bond(&mut y, &top.torsions[t], 2.6);
+        assert!(
+            !top.clashes(y.view()).is_empty(),
+            "the half turn made no contact to repair"
+        );
+        let before = y.clone();
+        assert!(!top.repair(&mut y));
+        assert_eq!(before, y);
     }
 
     #[test]
