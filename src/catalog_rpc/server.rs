@@ -138,7 +138,7 @@ impl ServerConfig {
         })
     }
 
-    /// Shared motif-class stall and trial budgets used by
+    /// Shared descriptor-class stall and trial budgets used by
     /// [`CatalogOperation::ReportCoreClass`].
     pub fn with_core_class(mut self, patience: usize, trial: usize) -> Self {
         self.core_patience = patience;
@@ -549,7 +549,7 @@ struct CoordinatorState {
     halving: Option<SuccessiveHalving>,
     /// Raw frontier excursion posts, shared across every replica.
     frontier: std::collections::VecDeque<crate::catalog_rpc::CatalogFrontierPost>,
-    /// Shared motif-class table for cooperative restarts.
+    /// Shared descriptor-class table for cooperative restarts.
     core_class: CoreClassTable,
     surface_evidence: crate::surface_evidence::SurfaceReportBook,
     /// A journal append failed after the live state had already moved,

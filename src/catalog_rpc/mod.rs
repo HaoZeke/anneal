@@ -385,9 +385,9 @@ pub enum CatalogOperation {
         /// Desired number of live replicas.
         live_target: u32,
     },
-    /// Report one chain's motif class and energy to the shared table.
+    /// Report one chain's descriptor class and energy to the shared table.
     ReportCoreClass {
-        /// [`crate::corekey::MotifClass::index`] of the live state.
+        /// [`crate::corekey::DescriptorClass::index`] of the live state.
         class: u8,
         /// Current energy of the reporting chain.
         energy: f64,
