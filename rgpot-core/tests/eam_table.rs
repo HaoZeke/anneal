@@ -251,7 +251,7 @@ fn new_handle(path: &str, format: i32, periodic: bool) -> Handle {
 struct Input {
     _positions: Vec<f64>,
     _numbers: Vec<i32>,
-    _cell: [f64; 9],
+    _cell: Box<[f64; 9]>,
     input: rgpot_force_input_t,
 }
 
@@ -259,7 +259,9 @@ impl Input {
     fn new(reference: &Reference) -> Self {
         let mut positions = reference.positions.clone();
         let mut numbers = reference.z.clone();
-        let mut cell = reference.cell;
+        // The DLPack tensor borrows this buffer, so its address must remain
+        // stable when the Input is returned from this constructor.
+        let mut cell = Box::new(reference.cell);
         let input = unsafe {
             rgpot_force_input_create(
                 numbers.len(),
@@ -275,6 +277,18 @@ impl Input {
             input,
         }
     }
+}
+
+#[test]
+fn the_c_abi_input_keeps_the_cell_at_its_borrowed_address() {
+    let reference = reference("cu_u3_vacancy.ref");
+    let input = Input::new(&reference);
+    let tensor_cell = unsafe { rgpot_tensor_data(input.input.box_matrix).cast::<f64>() };
+    assert_eq!(tensor_cell, input._cell.as_ptr());
+    assert_eq!(
+        unsafe { std::slice::from_raw_parts(tensor_cell, input._cell.len()) },
+        input._cell.as_slice()
+    );
 }
 
 impl Drop for Input {
