@@ -512,9 +512,11 @@ rgpot_add_test(simd-env-avx2 COMMAND simd_env known avx2)
 rgpot_test_enabled(EngineAdapterTest _on)
 if(_on)
   add_library(engine_stub SHARED CppCore/tests/engine_stub.cc
-                                 CppCore/rgpot/engine/EngineTable.cc)
+                                 CppCore/rgpot/engine/EngineTable.cc
+                                 CppCore/rgpot/engine/EngineAbiStamp.cc)
   target_include_directories(engine_stub PRIVATE CppCore include)
   target_compile_definitions(engine_stub PRIVATE ${_rgpot_test_definitions}
+    RGPOT_ENGINE_BUILD
     RGPOT_ENGINE_PROJECT_VERSION="${PROJECT_VERSION}")
   target_link_libraries(engine_stub PRIVATE rgpot::rgpot)
   rgpot_test_executable(engine_adapter_test CppCore/tests/EngineAdapterTest.cc)

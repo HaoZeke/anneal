@@ -1500,15 +1500,18 @@ def facts_errors(root: Path = ROOT, pages: list[Path] | None = None) -> list[str
 
 
 ENGINE_ABI_HEADER = "CppCore/rgpot/engine_c_abi.h"
-ENGINE_TABLE_SOURCE = "CppCore/rgpot/engine/EngineTable.cc"
+ENGINE_TABLE_SOURCES = (
+    "CppCore/rgpot/engine/EngineTable.cc",
+    "CppCore/rgpot/engine/EngineAbiStamp.cc",
+)
 ENGINE_ABI_PAGE = "docs/orgmode/reference/engine_abi.org"
 
 
 def engine_table_export_errors(root: Path = ROOT, page: Path | None = None) -> list[str]:
-    """The library export list in engine_abi.org matches EngineTable.cc and engine_c_abi.h."""
+    """The library export list matches the engine implementation and C ABI header."""
     hdr = root / ENGINE_ABI_HEADER
-    src = root / ENGINE_TABLE_SOURCE
-    if not hdr.is_file() or not src.is_file():
+    sources = [root / source for source in ENGINE_TABLE_SOURCES]
+    if not hdr.is_file() or any(not source.is_file() for source in sources):
         return []
     page = page if page is not None else root / ENGINE_ABI_PAGE
     where = rel(page, root)
@@ -1525,7 +1528,9 @@ def engine_table_export_errors(root: Path = ROOT, page: Path | None = None) -> l
         m = re.search(r"\b(rgpot_engine_\w+)\s*\(", stmt)
         if m:
             optional.add(m.group(1))
-    table_code = strip_c_comments(src.read_text(encoding="utf-8"))
+    table_code = "\n".join(
+        strip_c_comments(source.read_text(encoding="utf-8")) for source in sources
+    )
     exported = {name for name in optional if re.search(rf"\b{name}\s*\(", table_code)}
     omitted = optional - exported
     doc_text = page.read_text(encoding="utf-8")
@@ -1539,11 +1544,11 @@ def engine_table_export_errors(root: Path = ROOT, page: Path | None = None) -> l
     doc_exported = set(re.findall(r"=(rgpot_engine_\w+)=", m.group(1)))
     doc_omitted = set(re.findall(r"=(rgpot_engine_\w+)=", m.group(2)))
     errors = [
-        f"{where}: {ENGINE_TABLE_SOURCE} export {s} is not in the library export list"
+        f"{where}: engine source export {s} is not in the library export list"
         for s in sorted(exported - doc_exported)
     ]
     errors += [
-        f"{where}: {s} is not an optional symbol exported by {ENGINE_TABLE_SOURCE}"
+        f"{where}: {s} is not an optional symbol exported by the engine sources"
         for s in sorted(doc_exported - exported)
     ]
     errors += [

@@ -322,6 +322,7 @@ EngineTableTest | tests core rpc posix | custom workdir=. | @engine_plugins
 lj_eval | core posix | custom timeout=60 | @engines
 lj_engine | core posix | custom timeout=60 | @engines
 external_potentials | core posix | custom timeout=120 | @engines
+engine_abi_stamps | core posix | custom | @engines
 ipi_driver_ase | core posix ipi probe | custom timeout=600 | @engines
 lammps_lj | core posix probe | custom timeout=180 | @engines
 lammps_pair_rgpot | core posix probe | custom timeout=900 | @engines

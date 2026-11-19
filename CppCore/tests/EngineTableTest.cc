@@ -145,6 +145,7 @@ void check_identity(const Engine &e, const std::string &name) {
   REQUIRE(std::string(e.version()).rfind(name + "/", 0) == 0);
   const RgpotEngineAbiStamp stamp = e.stamp();
   REQUIRE(stamp.abi_minor == RGPOT_ENGINE_ABI_MINOR);
+  REQUIRE(stamp.layout_revision == RGPOT_ENGINE_ABI_LAYOUT_REVISION);
 }
 
 // Five LJ atoms, Angstrom, reduced units.
