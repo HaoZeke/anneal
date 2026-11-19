@@ -284,7 +284,8 @@ def check_tampered_record(recorder) -> None:
     with tempfile.TemporaryDirectory() as directory_name:
         records = Path(directory_name) / "records"
         shutil.copytree(RECORDS, records)
-        log_path = records / "meson-on" / "test.log"
+        leg = json.loads((records / "meson-on" / "leg.json").read_text(encoding="utf-8"))
+        log_path = records / "meson-on" / str(leg["log"])
         original = log_path.read_text(encoding="utf-8")
         match = None
         for candidate in re.finditer(r"^Ok:\s+(\d+)\s*$", original, re.MULTILINE):
