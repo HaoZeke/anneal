@@ -1,0 +1,11 @@
+ase==3.29.0
+numpy==2.4.6
+scipy==1.18.1
+scikit-learn==1.9.1
+networkx==3.7
+mpi4py==4.1.2
+dataclasses-json==0.6.7
+numba==0.68.1
+spglib==2.8.0
+sqnm @ git+https://github.com/moritzgubler/vc-sqnm.git@4241692173cccb42a9ae05974bfd62285ec2cd7b#subdirectory=src/python
+minimahopping @ git+https://gitlab.com/goedeckergroup/ase_mh.git@ff7e32bbd9a9b235f5f2a1dec11b311bf874300d

@@ -21,6 +21,11 @@
 //! the Darby, Mortimer-Jones, Johnston and Roberts, J. Chem. Phys. 116, 1536
 //! (2002), parameter rows. `au38`, `cu6au32`, `au55` and `cu27au28` take the
 //! size budgets from the Lennard-Jones paper map, 400000 and 1000000 calls.
+//!
+//! `H2H_COORDS`, when set, is a coordinate file used as the start instead
+//! of the generated cluster. `H2H_WALL_S`, when set to a positive number of
+//! seconds, stops the search at that wall time. The run keeps the calls it
+//! made and prints `h2h_stop`. Unset, neither variable changes the search.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -330,14 +335,49 @@ fn cmd_run(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let start = start_of(&cfg, spec.n, seed);
-    if let Some(path) = args.get(3)
-        && let Err(err) = write_coords(path, &start)
-    {
-        eprintln!("coords: {err}");
-        return 1;
-    }
-    let (outcome, wall, pot_s) = search(&cfg, &spec, &start, seed, budget);
+    let generated = start_of(&cfg, spec.n, seed);
+    let start = match coords_from_env(spec.n) {
+        Ok(Some(coords)) => coords,
+        Ok(None) => {
+            if let Some(path) = args.get(3)
+                && let Err(err) = write_coords(path, &generated)
+            {
+                eprintln!("coords: {err}");
+                return 1;
+            }
+            generated
+        }
+        Err(err) => {
+            eprintln!("coords: {err}");
+            return 1;
+        }
+    };
+    let cap = match wall_limit() {
+        Ok(cap) => cap,
+        Err(err) => {
+            eprintln!("{err}");
+            return 2;
+        }
+    };
+    let (outcome, wall, pot_s, stop) = match cap {
+        None => {
+            let (outcome, wall, pot_s) = search(&cfg, &spec, &start, seed, budget);
+            (outcome, wall, pot_s, None)
+        }
+        Some(limit) => {
+            let (outcome, wall, pot_s, flagged) =
+                search_capped(&cfg, &spec, &start, seed, budget, limit);
+            let hit_now = anneal_core::energy_hits(outcome.best, reference_of(&spec), HIT_TOL);
+            let label = if hit_now {
+                "hit"
+            } else if flagged {
+                "wall"
+            } else {
+                "budget"
+            };
+            (outcome, wall, pot_s, Some(label))
+        }
+    };
     if let Ok(path) = std::env::var("H2H_BEST")
         && let Some(state) = outcome.best_state.as_ref()
         && let Err(err) = write_coords(&path, state)
@@ -354,6 +394,9 @@ fn cmd_run(args: &[String]) -> i32 {
         pot_s,
         reference_of(&spec),
     );
+    if let Some(stop) = stop {
+        println!("h2h_stop={stop}");
+    }
     0
 }
 
@@ -482,6 +525,31 @@ fn env_budget() -> Option<usize> {
     (budget > 0).then_some(budget)
 }
 
+fn wall_limit() -> Result<Option<f64>, String> {
+    let Ok(text) = std::env::var("H2H_WALL_S") else {
+        return Ok(None);
+    };
+    let value = text
+        .parse::<f64>()
+        .map_err(|_| "H2H_WALL_S is not a number".to_string())?;
+    if value > 0.0 {
+        Ok(Some(value))
+    } else {
+        Err("H2H_WALL_S must be positive".into())
+    }
+}
+
+fn coords_from_env(n: usize) -> Result<Option<Array1<f64>>, String> {
+    let Ok(path) = std::env::var("H2H_COORDS") else {
+        return Ok(None);
+    };
+    let coords = read_coords(&path).map_err(|err| err.to_string())?;
+    if coords.len() != 3 * n {
+        return Err(format!("coords length {} is not {}", coords.len(), 3 * n));
+    }
+    Ok(Some(coords))
+}
+
 fn start_of(cfg: &Config, n: usize, seed: u64) -> Array1<f64> {
     let mut rng = StdRng::seed_from_u64(seed);
     random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng)
@@ -540,6 +608,83 @@ fn search(
     .expect("finite start");
     let pot_s = pot_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1.0e9;
     (outcome, started.elapsed().as_secs_f64(), pot_s)
+}
+
+fn search_capped(
+    cfg: &Config,
+    spec: &Spec,
+    start: &Array1<f64>,
+    seed: u64,
+    budget: usize,
+    limit: f64,
+) -> (Outcome, f64, f64, bool) {
+    let evaluated = potential(spec);
+    let started = Instant::now();
+    let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut ledger = Ledger::with_stop(budget, std::sync::Arc::clone(&stop_flag));
+    ledger.stop_below(reference_of(spec) + HIT_TOL);
+    let mut optimiser = WarmLbfgs::default();
+    let pot_ns = std::sync::atomic::AtomicU64::new(0);
+    let flag_relax = std::sync::Arc::clone(&stop_flag);
+    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+        if started.elapsed().as_secs_f64() >= limit {
+            flag_relax.store(true, std::sync::atomic::Ordering::Relaxed);
+            return (f64::INFINITY, x.to_owned());
+        }
+        optimiser.forget();
+        let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
+            if started.elapsed().as_secs_f64() >= limit {
+                flag_relax.store(true, std::sync::atomic::Ordering::Relaxed);
+                return None;
+            }
+            if !led.charge() {
+                return None;
+            }
+            let mark = Instant::now();
+            let pair = evaluated.value_and_gradient(v);
+            pot_ns.fetch_add(
+                mark.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            Some(pair)
+        });
+        (value, relaxed)
+    };
+    let flag_grad = std::sync::Arc::clone(&stop_flag);
+    let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
+        if started.elapsed().as_secs_f64() >= limit {
+            flag_grad.store(true, std::sync::atomic::Ordering::Relaxed);
+            return None;
+        }
+        if !led.charge() {
+            return None;
+        }
+        let mark = Instant::now();
+        let gradient = evaluated.value_and_gradient(v).1;
+        pot_ns.fetch_add(
+            mark.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        Some(gradient)
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+    let outcome = run_with_gradient(
+        cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut grad),
+        &mut rng,
+    )
+    .expect("finite start");
+    let pot_s = pot_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1.0e9;
+    let flagged = stop_flag.load(std::sync::atomic::Ordering::Relaxed);
+    (
+        outcome,
+        started.elapsed().as_secs_f64(),
+        pot_s,
+        flagged,
+    )
 }
 
 fn report(
