@@ -1411,3 +1411,15 @@ These are carbon clusters on semiempirical, density-functional, and GAP-20 surfa
 On 18 November 2026 the release APIs and tag lists were unchanged: CREST v3.0.2, AGOX v3.11.1, ASE 3.29.0, GOFEE v0.1.0, and pele v0.1.2 remain the newest numbered tags. The GitHub and GitLab repository searches found no official release repository for de Souza's GOAT or for GMIN.
 
 Cite `kuchminaCarbon2026`.
+
+## 2026-11-19 — Batched GFN-xTB and two conformer generators
+
+Lu, Xu, Zhu, Gu, and Zeng, arXiv:2611.24807 (18 November 2026), release xTBloom, a GPU batching library for repeated GFN-xTB energy and force evaluations. It groups work by atomic-orbital count, keeps independent self-consistent-charge and failure states, and uses a ragged layout rather than padding every system to one size. The tests cover GFN2-xTB on QM9 and OMol25, finite-difference forces, controlled failures, and a LAMMPS interface for batching across sampling windows. This is an evaluation backend for conformational and free-energy sampling, not a new conformer-search algorithm.
+
+Cheng and co-workers, arXiv:2611.19072 (14 November 2026), introduce Nahual, a decoder-only autoregressive diffusion model over mixed text and three-dimensional molecular sequences. Its twelve training tasks include microsolvation, molecular conformer search, and adsorption on metal surfaces. The abstract reports one set of weights across all tasks, but it does not report a water-hexamer motif hit rate or a Lennard-Jones minimum.
+
+Lema-Saavedra and Fernandez-Ramos, arXiv:2611.10564 (7 November 2026), derive symmetry equivalences in Cremer--Pople phases before Cartesian reconstruction and geometry optimisation. Their reduced phase domains remove symmetry-equivalent ring-puckering samples, including extensions for one heteroatom and for two identical heteroatoms. The cyclohexadecane example is a ring-conformer enumeration, not a free-cluster global optimisation.
+
+None of these papers reports a TIP4P or GFN2-xTB water-hexamer energy, the sealed motif counts, or a Cambridge Lennard-Jones energy. xTBloom does not recompute the six hexamer finals, so the table remains pinned to xtb 6.7.1. Nahual and the ring-puckering construction do not fill the ASE, AGOX, and GMIN comparison kit. They do not contradict a manuscript number and do not require a new head-to-head on the current benchmarks.
+
+Cite `luXtbloom2026`, `chengNahual2026`, and `lemaSaavedraRingPuckering2026`.

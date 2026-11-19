@@ -1,0 +1,43 @@
+Related-work watch queries run 2026-11-19
+
+The date window for Crossref was 2026-11-05 through 2026-11-19. arXiv
+results were sorted by submitted date and screened over the same window,
+then checked against paper/related-work.md. Repeated requests after HTTP
+429 or 403 responses used the same URL and are listed once. The supplied
+vetted-account X result was zero posts in the preceding 24 hours and was
+not rerun.
+
+GET https://export.arxiv.org/api/query?search_query=all%3A%22cluster%20global%20optimization%22%20OR%20all%3A%22cluster%20global%20optimisation%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22Lennard-Jones%20cluster%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22water%20cluster%22%20AND%20%28all%3A%22global%20optimization%22%20OR%20all%3A%22global%20optimisation%22%20OR%20all%3A%22structure%20search%22%29&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=all%3A%22conformer%20search%22%20OR%20all%3A%22conformational%20search%22&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3Acluster%20AND%20%28all%3A%22global%20optimization%22%20OR%20all%3A%22global%20optimisation%22%20OR%20all%3A%22structure%20search%22%20OR%20all%3A%22basin%20hopping%22%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3A%22Lennard-Jones%22%20AND%20all%3Acluster%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28all%3Awater%20AND%20all%3Acluster%20AND%20%28all%3Asearch%20OR%20all%3Aoptimization%20OR%20all%3Aoptimisation%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+GET https://export.arxiv.org/api/query?search_query=%28%28all%3Aconformer%20OR%20all%3Aconformational%29%20AND%20%28all%3Asearch%20OR%20all%3Asampling%20OR%20all%3Ageneration%29%29&start=0&max_results=200&sortBy=submittedDate&sortOrder=descending
+
+GET https://api.crossref.org/works?query.bibliographic=cluster%20global%20optimization&filter=from-pub-date:2026-11-05,until-pub-date:2026-11-19&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title
+GET https://api.crossref.org/works?query.bibliographic=Lennard-Jones%20cluster&filter=from-pub-date:2026-11-05,until-pub-date:2026-11-19&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title
+GET https://api.crossref.org/works?query.bibliographic=water%20cluster%20global%20optimization&filter=from-pub-date:2026-11-05,until-pub-date:2026-11-19&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title
+GET https://api.crossref.org/works?query.bibliographic=conformer%20search&filter=from-pub-date:2026-11-05,until-pub-date:2026-11-19&sort=published&order=desc&rows=100&select=DOI,title,author,published,created,URL,type,container-title
+
+GET https://api.github.com/repos/crest-lab/crest/releases?per_page=100
+GET https://api.github.com/repos/pele-python/pele/releases?per_page=100
+GET https://api.github.com/repos/ksags/GOFEE/releases?per_page=100
+GET https://api.github.com/search/repositories?q=GOFEE%20in%3Aname&per_page=100
+GET https://api.github.com/search/repositories?q=GOAT%20global%20optimization%20chemistry&per_page=100
+GET https://api.github.com/search/repositories?q=GMIN%20Wales%20cluster&per_page=100
+
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/releases?per_page=100
+GET https://gitlab.com/api/v4/projects/agox%2Fagox/repository/tags?per_page=100
+GET https://gitlab.com/api/v4/projects/ase%2Fase/releases?per_page=100
+GET https://gitlab.com/api/v4/projects/ase%2Fase/repository/tags?per_page=100
+GET https://gitlab.com/api/v4/projects?search=GOAT%20global%20optimization&simple=true&per_page=100
+GET https://gitlab.com/api/v4/projects?search=GMIN%20Wales&simple=true&per_page=100
+GET https://gitlab.com/api/v4/projects?search=GOFEE&simple=true&per_page=100
+
+Release result: no numbered release changed since the 2026-11-18 watch.
+CREST remains v3.0.2, AGOX remains v3.11.1, ASE remains 3.29.0,
+GOFEE remains integrated in AGOX with no newer numbered standalone
+release found, and pele remains v0.1.2. The repository searches found no
+official GitHub or GitLab release repository for de Souza's GOAT or GMIN.
