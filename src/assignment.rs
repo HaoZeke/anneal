@@ -1395,7 +1395,6 @@ mod tests {
             !certifies(&costs, n, &out_of_range, &certificate),
             "a column past the matrix is not a permutation"
         );
-
     }
 
     /// Large tied matrices retain the same deterministic walk permutation.
