@@ -1,0 +1,84 @@
+# Morse weak8 paired gate. Run from the repository root:
+#   snakemake -s bench/morse-weak8-gate/Snakefile --cores 1 \
+#     --config arm_a=... arm_ap=... arm_b=... work=... logs=...
+
+BASE_REVISION = "5eb79cdcb0a986984dc7b487e5a3cc93224246f9"
+BASE_TREE = "7a2ba49b37241a8fe42b2c45c226374de6d92274"
+B_TREE = "e45fa8e672477cad76454b61c36498ee027d7340"
+CELLS = "lj75,lj98,m75r6,m75r14,m80r6,m80r14,lj38,m38r10"
+
+
+rule all:
+    input:
+        "bench/morse-weak8-gate/rows.csv",
+        "bench/morse-weak8-gate/sessions.jsonl",
+        "bench/morse-weak8-gate/hosts.csv",
+        "bench/morse-weak8-gate/summary.json",
+        "bench/morse-weak8-gate/report.md",
+
+
+rule paired_gate:
+    output:
+        rows="bench/morse-weak8-gate/rows.csv",
+        sessions="bench/morse-weak8-gate/sessions.jsonl",
+        hosts="bench/morse-weak8-gate/hosts.csv",
+    params:
+        arm_a=lambda wildcards: config["arm_a"],
+        arm_ap=lambda wildcards: config["arm_ap"],
+        arm_b=lambda wildcards: config["arm_b"],
+        work=lambda wildcards: config["work"],
+        logs=lambda wildcards: config["logs"],
+        base_revision=BASE_REVISION,
+        base_tree=BASE_TREE,
+        b_tree=B_TREE,
+        cells=CELLS,
+    shell:
+        """
+        set -euo pipefail
+        export PYTHONDONTWRITEBYTECODE=1
+        exec taskset -c 1-7 python3 bench/morse-weak8-gate/runner.py run \
+          --harness-root "." \
+          --base-revision "{params.base_revision}" \
+          --base-tree "{params.base_tree}" \
+          --arm-a "{params.arm_a}" \
+          --arm-a-revision "{params.base_revision}" \
+          --arm-a-tree "{params.base_tree}" \
+          --arm-ap "{params.arm_ap}" \
+          --arm-ap-revision "{params.base_revision}" \
+          --arm-ap-tree "{params.base_tree}" \
+          --arm-b "{params.arm_b}" \
+          --arm-b-revision "{params.base_revision}" \
+          --arm-b-tree "{params.b_tree}" \
+          --toolchain 1.88.0 \
+          --work-root "{params.work}" \
+          --core 0 \
+          --cells "{params.cells}" \
+          --rounds 12 \
+          --seed0 2000 \
+          --timeout-s 1800 \
+          --rows "{output.rows}" \
+          --sessions "{output.sessions}" \
+          --hosts "{output.hosts}" \
+          --logs "{params.logs}"
+        """
+
+
+rule summarize:
+    input:
+        rows="bench/morse-weak8-gate/rows.csv",
+        sessions="bench/morse-weak8-gate/sessions.jsonl",
+        hosts="bench/morse-weak8-gate/hosts.csv",
+    output:
+        summary="bench/morse-weak8-gate/summary.json",
+        report="bench/morse-weak8-gate/report.md",
+    shell:
+        """
+        set -euo pipefail
+        export PYTHONDONTWRITEBYTECODE=1
+        python3 bench/morse-weak8-gate/summarize.py \
+          --rows "{input.rows}" \
+          --sessions "{input.sessions}" \
+          --hosts "{input.hosts}" \
+          --summary "{output.summary}" \
+          --out "{output.report}"
+        """
