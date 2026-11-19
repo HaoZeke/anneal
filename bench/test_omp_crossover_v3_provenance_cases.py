@@ -65,18 +65,20 @@ def require_tree_rejection(result: subprocess.CompletedProcess[str], arm: str, r
         raise SystemExit(f"{arm} was not rejected with recorded tree {recorded} and commit tree {actual}")
 
 
+def require_exact_rejection(result: subprocess.CompletedProcess[str], expected: str) -> None:
+    text = (result.stdout + result.stderr).strip()
+    if result.returncode == 0 or text != expected:
+        raise SystemExit(f"expected exact rejection {expected!r}, got {result.returncode} {text!r}")
+
+
 def require_missing_arm(result: subprocess.CompletedProcess[str], arm: str) -> None:
-    text = result.stdout + result.stderr
-    if result.returncode == 0 or arm not in text:
-        raise SystemExit(f"missing arm {arm} was not rejected")
+    require_exact_rejection(result, f"arm set mismatch: missing {arm}; extra (none)")
 
 
 def require_named_rejection(
     result: subprocess.CompletedProcess[str], missing: str, extra: str
 ) -> None:
-    text = result.stdout + result.stderr
-    if result.returncode == 0 or missing not in text or extra not in text:
-        raise SystemExit(f"renamed arm {missing} -> {extra} was not rejected")
+    require_exact_rejection(result, f"arm set mismatch: missing {missing}; extra {extra}")
 
 
 def require_commit_rejection(
