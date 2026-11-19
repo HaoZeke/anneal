@@ -524,7 +524,7 @@ pub fn adjoint_from_c(c: &[f64], n_max: usize, l_max: usize, weights: &[f64], ou
                         if d_re == 0.0 && d_im == 0.0 {
                             continue;
                         }
-                        scatter_weighted(out, base, l, m, weight * d_re, weight * d_im);
+                        scatter_adjoint(out, base, l, m, weight, d_re, d_im);
                     }
                 }
             }
@@ -590,6 +590,32 @@ fn finite_terms(l1: usize, l2: usize, l3: usize) -> Vec<CgTerm> {
     terms
 }
 
+fn scatter_adjoint(
+    out: &mut [f64],
+    base: usize,
+    l: usize,
+    m: i32,
+    weight: f64,
+    d_re: f64,
+    d_im: f64,
+) {
+    if m == 0 {
+        out[base + lm_index(l, 0)] += weight * d_re;
+        return;
+    }
+    let am = m.abs();
+    let sign = if am % 2 == 0 { 1.0 } else { -1.0 };
+    let pos = base + lm_index(l, am);
+    let neg = base + lm_index(l, -am);
+    if m > 0 {
+        out[pos] += weight * (d_re * sign / SQRT_2);
+        out[neg] += weight * (d_im * sign / SQRT_2);
+    } else {
+        out[pos] += weight * (d_re / SQRT_2);
+        out[neg] += weight * (d_im * (-1.0 / SQRT_2));
+    }
+}
+
 /// Add `∂p/∂re * dre_scale` and `∂p/∂im * dim_scale` into the tesseral row.
 fn scatter(j: &mut Array2<f64>, row: usize, base: usize, l: usize, m: i32, d_re: f64, d_im: f64) {
     if m == 0 {
@@ -606,25 +632,6 @@ fn scatter(j: &mut Array2<f64>, row: usize, base: usize, l: usize, m: i32, d_re:
     } else {
         j[[row, pos]] += d_re / SQRT_2;
         j[[row, neg]] += d_im * (-1.0 / SQRT_2);
-    }
-}
-
-/// [`scatter`] with the row weight already multiplied in, added into `out`.
-fn scatter_weighted(out: &mut [f64], base: usize, l: usize, m: i32, d_re: f64, d_im: f64) {
-    if m == 0 {
-        out[base + lm_index(l, 0)] += d_re;
-        return;
-    }
-    let am = m.abs();
-    let sign = if am % 2 == 0 { 1.0 } else { -1.0 };
-    let pos = base + lm_index(l, am);
-    let neg = base + lm_index(l, -am);
-    if m > 0 {
-        out[pos] += d_re * sign / SQRT_2;
-        out[neg] += d_im * sign / SQRT_2;
-    } else {
-        out[pos] += d_re / SQRT_2;
-        out[neg] += d_im * (-1.0 / SQRT_2);
     }
 }
 
@@ -807,7 +814,7 @@ mod tests {
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0_f64, f64::max);
             assert!(
-                worst <= 1e-9 * scale.max(1.0),
+                worst <= 1e-12 * scale.max(1.0),
                 "adjoint off by {worst:e} at n_max {n_max} l_max {l_max}"
             );
         }

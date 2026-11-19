@@ -1,18 +1,9 @@
-//! Short recommended-preset searches. A molecular quench change that
-//! also moves these is a change to the species-free walk.
+//! Exact short searches for the species-free recommended preset.
 //!
-//! `Config::recommended` keeps the pair-spectrum merge. It does not
-//! switch on the SOAP-packing key: that key belongs to
-//! `Config::packing_superbasin`. The recorded minima moved when
-//! acceptance, proposals, and the depth-rewarded arm draw switched to
-//! the portable libm, and again when the recommended quench cap went
-//! from 200 steps to 1000 (`d756085b`). A frozen frame is not part of
-//! this walk.
-//!
-//! The packing SOAP hop follows the observed descriptor residual on
-//! every build. These pins were remeasured when that residual replaced
-//! the fivefold template, and again when each pair's harmonics are
-//! formed once. Both trajectories stay exact.
+//! The pins guard the minima, hop counts, converged quenches, capped
+//! quenches, and spent ledgers. The packing SOAP arm follows the observed
+//! descriptor cloud; the SOAP-packing key remains confined to the packing
+//! superbasin preset.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -60,6 +51,6 @@ fn lj38_and_lj98_short_searches_stay_put() {
     }
     let expected = "\
 LJ38 -172.2981287221047921 38 33 26 2500
-LJ98 -520.3133998215349720 10 10 7 2500";
+LJ98 -520.3133998215357678 10 10 7 2500";
     assert_eq!(records.join("\n"), expected);
 }

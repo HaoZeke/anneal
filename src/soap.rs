@@ -312,24 +312,50 @@ fn pair_derivatives_of(x: ArrayView1<f64>, spec: SoapSpec, i: usize) -> Vec<Pair
     local
 }
 
-/// One unordered pair, with both orientations of the same harmonics.
+/// One unordered pair, with analytic harmonics shared by both orientations.
 ///
-/// `u` points from `i` to `j`. The opposite direction is `(-1)^l` on each
-/// harmonic and the same factor with a minus on the Cartesian derivative,
-/// which is the parity of `Y(v/|v|)` at `-u`.
+/// `u` points from `i` to `j`. The opposite direction follows the exact
+/// tesseral parity after the value-and-derivative recurrence.
 pub(super) struct PairEnds<'a> {
     pub i: usize,
     pub j: usize,
     pub u: [f64; 3],
     pub ylm: &'a [f64],
     pub dy: &'a [[f64; 3]],
-    pub ylm_neg: &'a [f64],
-    pub dy_neg: &'a [[f64; 3]],
+    pub parity: &'a [f64],
     pub weight: &'a [f64],
     pub dweight: &'a [f64],
 }
 
-/// Each neighbour pair inside the cutoff, harmonics formed once.
+#[derive(Default)]
+struct PairScratch {
+    y: Vec<f64>,
+    dy: Vec<[f64; 3]>,
+    parity: Vec<f64>,
+    weight: Vec<f64>,
+    dweight: Vec<f64>,
+    legendre: LegendreScratch,
+}
+
+thread_local! {
+    static PAIR_SCRATCH: std::cell::RefCell<PairScratch> =
+        const { std::cell::RefCell::new(PairScratch {
+            y: Vec::new(),
+            dy: Vec::new(),
+            parity: Vec::new(),
+            weight: Vec::new(),
+            dweight: Vec::new(),
+            legendre: LegendreScratch {
+                p: Vec::new(),
+                d_rho: Vec::new(),
+                d_z: Vec::new(),
+                cos: Vec::new(),
+                sin: Vec::new(),
+            },
+        }) };
+}
+
+/// Each neighbour pair inside the cutoff, with reusable harmonic buffers.
 ///
 /// A centre that is not `live` has nothing to push, so a pair of two quiet
 /// centres is skipped. The visitor must not hold the borrows past the call.
@@ -341,94 +367,58 @@ pub(super) fn visit_unordered_pairs(
 ) {
     let n_at = x.len() / 3;
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
-    let stacked = spec.l_max <= YLM_STACK_L_MAX;
-    let mut y_stack = [0.0; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
-    let mut dy_stack = [[0.0; 3]; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
-    let mut yn_stack = [0.0; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
-    let mut dyn_stack = [[0.0; 3]; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
-    let mut y_heap = Vec::new();
-    let mut dy_heap = Vec::new();
-    let mut yn_heap = Vec::new();
-    let mut dyn_heap = Vec::new();
-    let mut parity = vec![1.0; n_lm];
-    for lm in 0..n_lm {
-        if lm_to_l(lm) % 2 == 1 {
-            parity[lm] = -1.0;
+    PAIR_SCRATCH.with(|slot| {
+        let mut scratch = slot.borrow_mut();
+        scratch.y.resize(n_lm, 0.0);
+        scratch.dy.resize(n_lm, [0.0; 3]);
+        scratch.parity.resize(n_lm, 1.0);
+        for lm in 0..n_lm {
+            scratch.parity[lm] = if lm_to_l(lm) % 2 == 0 { 1.0 } else { -1.0 };
         }
-    }
-    let mut weight = vec![0.0; spec.n_max];
-    let mut dweight = vec![0.0; spec.n_max];
-    for i in 0..n_at {
-        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
-        for j in (i + 1)..n_at {
-            if !live[i] && !live[j] {
-                continue;
-            }
-            let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
-            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            if r >= spec.rcut_nn || r < 1e-12 {
-                continue;
-            }
-            let u = [d[0] / r, d[1] / r, d[2] / r];
-            if stacked {
-                cartesian_into(
+        scratch.weight.resize(spec.n_max, 0.0);
+        scratch.dweight.resize(spec.n_max, 0.0);
+        let PairScratch {
+            y,
+            dy,
+            parity,
+            weight,
+            dweight,
+            legendre,
+        } = &mut *scratch;
+        for i in 0..n_at {
+            let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+            for j in (i + 1)..n_at {
+                if !live[i] && !live[j] {
+                    continue;
+                }
+                let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
+                let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                if r >= spec.rcut_nn || r < 1e-12 {
+                    continue;
+                }
+                let u = [d[0] / r, d[1] / r, d[2] / r];
+                cartesian_into_reusing(u, spec.l_max, r, y, dy, legendre);
+                let fc = fcut(r, spec.rcut_nn);
+                let dfc = dfcut(r, spec.rcut_nn);
+                for n in 0..spec.n_max {
+                    let g = radial(n, r, spec.rcut_nn);
+                    let dg = dradial(n, r, spec.rcut_nn);
+                    weight[n] = g * fc;
+                    dweight[n] = dg * fc + g * dfc;
+                }
+                visit(PairEnds {
+                    i,
+                    j,
                     u,
-                    spec.l_max,
-                    r,
-                    &mut y_stack[..n_lm],
-                    &mut dy_stack[..n_lm],
-                );
-                for lm in 0..n_lm {
-                    let p = parity[lm];
-                    yn_stack[lm] = p * y_stack[lm];
-                    let g = dy_stack[lm];
-                    dyn_stack[lm] = [-p * g[0], -p * g[1], -p * g[2]];
-                }
-            } else {
-                let (y, dy) = tesseral_cartesian(u, spec.l_max, r);
-                yn_heap = vec![0.0; n_lm];
-                dyn_heap = vec![[0.0; 3]; n_lm];
-                for lm in 0..n_lm {
-                    let p = parity[lm];
-                    yn_heap[lm] = p * y[lm];
-                    let g = dy[lm];
-                    dyn_heap[lm] = [-p * g[0], -p * g[1], -p * g[2]];
-                }
-                y_heap = y;
-                dy_heap = dy;
+                    ylm: y,
+                    dy,
+                    parity,
+                    weight,
+                    dweight,
+                });
             }
-            let fc = fcut(r, spec.rcut_nn);
-            let dfc = dfcut(r, spec.rcut_nn);
-            for n in 0..spec.n_max {
-                let g = radial(n, r, spec.rcut_nn);
-                let dg = dradial(n, r, spec.rcut_nn);
-                weight[n] = g * fc;
-                dweight[n] = dg * fc + g * dfc;
-            }
-            let (ylm, dy, ylm_neg, dy_neg): (&[f64], &[[f64; 3]], &[f64], &[[f64; 3]]) = if stacked
-            {
-                (
-                    &y_stack[..n_lm],
-                    &dy_stack[..n_lm],
-                    &yn_stack[..n_lm],
-                    &dyn_stack[..n_lm],
-                )
-            } else {
-                (&y_heap, &dy_heap, &yn_heap, &dyn_heap)
-            };
-            visit(PairEnds {
-                i,
-                j,
-                u,
-                ylm,
-                dy,
-                ylm_neg,
-                dy_neg,
-                weight: &weight,
-                dweight: &dweight,
-            });
         }
-    }
+    });
 }
 
 /// Species-aware SOAP plus the same 4-body scalars (all neighbors).
@@ -3201,8 +3191,67 @@ fn step_away_cloud_with_cache(
         cache,
         Pullback::Descent,
     );
-    let y = scale_to_cap(x, dr, rmsd);
+    let toward = scale_to_cap(x, dr.clone(), rmsd);
+    let y = if coordination_is_underdispersed(x, spec.rcut_nn) {
+        let away = scale_to_cap(x, dr.mapv(|value| -value), rmsd);
+        let here = minimum_pair_squared(x);
+        let toward_change = (minimum_pair_squared(toward.view()) - here).abs();
+        let away_change = (minimum_pair_squared(away.view()) - here).abs();
+        if away_change > toward_change {
+            away
+        } else {
+            toward
+        }
+    } else {
+        toward
+    };
     retract_rigid_groups(x, y, groups)
+}
+
+#[cfg(not(feature = "featomic"))]
+fn coordination_is_underdispersed(x: ArrayView1<f64>, cutoff: f64) -> bool {
+    let n = x.len() / 3;
+    if n < 2 || !(cutoff > 0.0) {
+        return false;
+    }
+    let cutoff2 = cutoff * cutoff;
+    let mut degree = vec![0usize; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            if dx * dx + dy * dy + dz * dz < cutoff2 {
+                degree[i] += 1;
+                degree[j] += 1;
+            }
+        }
+    }
+    let mean = degree.iter().sum::<usize>() as f64 / n as f64;
+    let variance = degree
+        .iter()
+        .map(|&value| {
+            let delta = value as f64 - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / n as f64;
+    variance < mean
+}
+
+#[cfg(not(feature = "featomic"))]
+fn minimum_pair_squared(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    let mut smallest = f64::INFINITY;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            smallest = smallest.min(dx * dx + dy * dy + dz * dz);
+        }
+    }
+    smallest
 }
 
 /// SOAP spec written at this structure's own nearest-neighbour length.
@@ -3787,6 +3836,28 @@ fn tesseral_cartesian(u: [f64; 3], l_max: usize, r: f64) -> (Vec<f64>, Vec<[f64;
 
 /// [`tesseral_cartesian`] into caller buffers of length `(l_max + 1)²`.
 fn cartesian_into(u: [f64; 3], l_max: usize, r: f64, y: &mut [f64], dy: &mut [[f64; 3]]) {
+    cartesian_into_impl(u, l_max, r, y, dy, None);
+}
+
+fn cartesian_into_reusing(
+    u: [f64; 3],
+    l_max: usize,
+    r: f64,
+    y: &mut [f64],
+    dy: &mut [[f64; 3]],
+    scratch: &mut LegendreScratch,
+) {
+    cartesian_into_impl(u, l_max, r, y, dy, Some(scratch));
+}
+
+fn cartesian_into_impl(
+    u: [f64; 3],
+    l_max: usize,
+    r: f64,
+    y: &mut [f64],
+    dy: &mut [[f64; 3]],
+    scratch: Option<&mut LegendreScratch>,
+) {
     let n_lm = (l_max + 1) * (l_max + 1);
     let project = |src: &[[f64; 3]], dy: &mut [[f64; 3]]| {
         for lm in 0..n_lm {
@@ -3807,20 +3878,18 @@ fn cartesian_into(u: [f64; 3], l_max: usize, r: f64, y: &mut [f64], dy: &mut [[f
         project(&dy_du, dy);
         return;
     }
-    let rho2 = u[0] * u[0] + u[1] * u[1];
-    if l_max > YLM_STACK_L_MAX || rho2 < 1e-16 {
-        let (values, dy_du) = tesseral_al_finite(u, l_max);
-        y[..n_lm].copy_from_slice(&values);
-        project(&dy_du, dy);
-        return;
+    if let Some(scratch) = scratch {
+        ylm_gradient_with_scratch(u, l_max, y, dy, scratch);
+    } else {
+        ylm_gradient_into(u, l_max, y, dy);
     }
-    ylm_gradient_into(u, l_max, y, dy);
-    // Same projector the polynomial branch applies, including to a
-    // gradient that is already tangential. The division by r is the
-    // chain rule through the unit vector.
-    let mut held = [[0.0; 3]; (YLM_STACK_L_MAX + 1) * (YLM_STACK_L_MAX + 1)];
-    held[..n_lm].copy_from_slice(&dy[..n_lm]);
-    project(&held[..n_lm], dy);
+    // The differentiated recurrence returns a tangential gradient. The
+    // Cartesian chain rule therefore only divides by the pair distance.
+    for value in &mut dy[..n_lm] {
+        for a in 0..3 {
+            value[a] /= r;
+        }
+    }
 }
 
 /// Real tesseral Y_lm(u) and ∂Y/∂u of the harmonic polynomial, |u|=1.
@@ -3911,15 +3980,9 @@ fn tesseral(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
 
 /// Associated-Legendre tesseral Y_lm and ∂Y/∂v of `Y(v/|v|)`.
 ///
-/// For `l > 3` this used to be a central difference: six extra harmonic
-/// evaluations per direction, plus the value. The Legendre recursion
-/// differentiates in the same pass. A direction on the z axis has no
-/// azimuth, so that case keeps the difference.
+/// The Legendre recurrence advances values and derivatives together.
+/// Its polar limit is analytic, so every direction follows this path.
 fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
-    let rho2 = u[0] * u[0] + u[1] * u[1];
-    if l_max > YLM_STACK_L_MAX || rho2 < 1e-16 {
-        return tesseral_al_finite(u, l_max);
-    }
     let n_lm = (l_max + 1) * (l_max + 1);
     let mut y = vec![0.0; n_lm];
     let mut dy = vec![[0.0; 3]; n_lm];
@@ -3927,7 +3990,8 @@ fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     (y, dy)
 }
 
-/// The central difference [`tesseral_al`] used for every direction.
+/// Central-difference reference for [`tesseral_al`].
+#[cfg(test)]
 fn tesseral_al_finite(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     let y = ylm_real(u, l_max);
     let n_lm = y.len();
@@ -3961,85 +4025,167 @@ fn tesseral_al_finite(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     (y, dy)
 }
 
-/// Values and ∂/∂v of `Y(v/|v|)` from one differentiated Legendre recursion.
+#[derive(Default)]
+struct LegendreScratch {
+    p: Vec<f64>,
+    d_rho: Vec<f64>,
+    d_z: Vec<f64>,
+    cos: Vec<f64>,
+    sin: Vec<f64>,
+}
+
+impl LegendreScratch {
+    fn ensure(&mut self, side: usize) {
+        let square = side * side;
+        if self.p.len() < square {
+            self.p.resize(square, 0.0);
+            self.d_rho.resize(square, 0.0);
+            self.d_z.resize(square, 0.0);
+        }
+        if self.cos.len() < side {
+            self.cos.resize(side, 0.0);
+            self.sin.resize(side, 0.0);
+        }
+    }
+}
+
+thread_local! {
+    static LEGENDRE_SCRATCH: std::cell::RefCell<LegendreScratch> =
+        const { std::cell::RefCell::new(LegendreScratch {
+            p: Vec::new(),
+            d_rho: Vec::new(),
+            d_z: Vec::new(),
+            cos: Vec::new(),
+            sin: Vec::new(),
+        }) };
+}
+
+/// Values and ∂/∂v of `Y(v/|v|)` from one differentiated Legendre
+/// recurrence.
 fn ylm_gradient_into(u: [f64; 3], l_max: usize, y: &mut [f64], dy: &mut [[f64; 3]]) {
-    let norms = ylm_norms();
+    LEGENDRE_SCRATCH.with(|slot| {
+        ylm_gradient_with_scratch(u, l_max, y, dy, &mut slot.borrow_mut());
+    });
+}
+
+fn ylm_gradient_with_scratch(
+    u: [f64; 3],
+    l_max: usize,
+    y: &mut [f64],
+    dy: &mut [[f64; 3]],
+    scratch: &mut LegendreScratch,
+) {
     let (x, yy, z) = (u[0], u[1], u[2]);
+    let side = l_max + 1;
+    let n_lm = side * side;
+    if y.len() < n_lm || dy.len() < n_lm {
+        return;
+    }
     let rho2 = x * x + yy * yy;
     let rho = rho2.sqrt();
-    let mut p = [[0.0f64; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1];
-    let mut d_rho = [[0.0f64; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1];
-    let mut d_z = [[0.0f64; YLM_STACK_L_MAX + 1]; YLM_STACK_L_MAX + 1];
-    p[0][0] = 1.0;
+    if rho <= 1e-14 {
+        ylm_real_into(u, l_max, y);
+        dy[..n_lm].fill([0.0; 3]);
+        for l in 1..=l_max {
+            let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
+            let n1 = if l <= YLM_STACK_L_MAX {
+                ylm_norms().nlm[l][1]
+            } else {
+                n0 * (fact_ratio(l - 1, l + 1) * 2.0).sqrt()
+            };
+            let parity = if z < 0.0 && l % 2 == 0 { -1.0 } else { 1.0 };
+            let slope = -parity * n1 * (l * (l + 1)) as f64 * 0.5;
+            dy[lm_index(l, 1)][0] = slope;
+            dy[lm_index(l, -1)][1] = slope;
+        }
+        return;
+    }
+    scratch.ensure(side);
+    let at = |l: usize, m: usize| l * side + m;
+    scratch.p[at(0, 0)] = 1.0;
+    scratch.d_rho[at(0, 0)] = 0.0;
+    scratch.d_z[at(0, 0)] = 0.0;
     for m in 1..=l_max {
         let factor = -(2.0 * m as f64 - 1.0);
-        p[m][m] = factor * rho * p[m - 1][m - 1];
-        d_rho[m][m] = factor * (p[m - 1][m - 1] + rho * d_rho[m - 1][m - 1]);
-        d_z[m][m] = factor * rho * d_z[m - 1][m - 1];
+        let prev = at(m - 1, m - 1);
+        let here = at(m, m);
+        scratch.p[here] = factor * rho * scratch.p[prev];
+        scratch.d_rho[here] = factor * (scratch.p[prev] + rho * scratch.d_rho[prev]);
+        scratch.d_z[here] = factor * rho * scratch.d_z[prev];
     }
     for m in 0..l_max {
         let factor = 2.0 * m as f64 + 1.0;
-        p[m + 1][m] = z * factor * p[m][m];
-        d_rho[m + 1][m] = z * factor * d_rho[m][m];
-        d_z[m + 1][m] = factor * (p[m][m] + z * d_z[m][m]);
+        let prev = at(m, m);
+        let here = at(m + 1, m);
+        scratch.p[here] = z * factor * scratch.p[prev];
+        scratch.d_rho[here] = z * factor * scratch.d_rho[prev];
+        scratch.d_z[here] = factor * (scratch.p[prev] + z * scratch.d_z[prev]);
     }
     for l in 2..=l_max {
         for m in 0..=l - 2 {
             let a = 2.0 * l as f64 - 1.0;
             let b = (l + m - 1) as f64;
             let d = (l - m) as f64;
-            p[l][m] = (a * z * p[l - 1][m] - b * p[l - 2][m]) / d;
-            d_rho[l][m] = (a * z * d_rho[l - 1][m] - b * d_rho[l - 2][m]) / d;
-            d_z[l][m] = (a * (p[l - 1][m] + z * d_z[l - 1][m]) - b * d_z[l - 2][m]) / d;
+            let here = at(l, m);
+            let one = at(l - 1, m);
+            let two = at(l - 2, m);
+            scratch.p[here] = (a * z * scratch.p[one] - b * scratch.p[two]) / d;
+            scratch.d_rho[here] = (a * z * scratch.d_rho[one] - b * scratch.d_rho[two]) / d;
+            scratch.d_z[here] =
+                (a * (scratch.p[one] + z * scratch.d_z[one]) - b * scratch.d_z[two]) / d;
         }
     }
-    let mut cosph = [1.0f64; YLM_STACK_L_MAX + 1];
-    let mut sinph = [0.0f64; YLM_STACK_L_MAX + 1];
-    cosph[1] = x / rho;
-    sinph[1] = yy / rho;
+    scratch.cos[0] = 1.0;
+    scratch.sin[0] = 0.0;
+    if l_max > 0 {
+        scratch.cos[1] = x / rho;
+        scratch.sin[1] = yy / rho;
+    }
     for m in 2..=l_max {
-        cosph[m] = cosph[1] * cosph[m - 1] - sinph[1] * sinph[m - 1];
-        sinph[m] = sinph[1] * cosph[m - 1] + cosph[1] * sinph[m - 1];
+        scratch.cos[m] = scratch.cos[1] * scratch.cos[m - 1] - scratch.sin[1] * scratch.sin[m - 1];
+        scratch.sin[m] = scratch.sin[1] * scratch.cos[m - 1] + scratch.cos[1] * scratch.sin[m - 1];
     }
     let inv_rho = 1.0 / rho;
     let inv_rho2 = 1.0 / rho2;
+    let cached = (l_max <= YLM_STACK_L_MAX).then(ylm_norms);
     let project = |g: [f64; 3]| {
         let radial = g[0] * x + g[1] * yy + g[2] * z;
         [g[0] - x * radial, g[1] - yy * radial, g[2] - z * radial]
     };
     for l in 0..=l_max {
-        let n0 = norms.n0[l];
-        y[lm_index(l, 0)] = n0 * p[l][0];
+        let n0 = cached
+            .map(|norms| norms.n0[l])
+            .unwrap_or_else(|| ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt());
+        let p0 = at(l, 0);
+        y[lm_index(l, 0)] = n0 * scratch.p[p0];
         dy[lm_index(l, 0)] = project([
-            n0 * d_rho[l][0] * x * inv_rho,
-            n0 * d_rho[l][0] * yy * inv_rho,
-            n0 * d_z[l][0],
+            n0 * scratch.d_rho[p0] * x * inv_rho,
+            n0 * scratch.d_rho[p0] * yy * inv_rho,
+            n0 * scratch.d_z[p0],
         ]);
         for m in 1..=l {
-            let nlm = norms.nlm[l][m];
-            let pm = p[l][m];
-            let c = cosph[m];
-            let s = sinph[m];
+            let nlm = cached
+                .map(|norms| norms.nlm[l][m])
+                .unwrap_or_else(|| n0 * (fact_ratio(l - m, l + m) * 2.0).sqrt());
+            let pm = scratch.p[at(l, m)];
+            let c = scratch.cos[m];
+            let s = scratch.sin[m];
             let mf = m as f64;
             y[lm_index(l, m as i32)] = nlm * pm * c;
             y[lm_index(l, -(m as i32))] = nlm * pm * s;
-            let p_x = d_rho[l][m] * x * inv_rho;
-            let p_y = d_rho[l][m] * yy * inv_rho;
-            let p_z = d_z[l][m];
+            let p_x = scratch.d_rho[at(l, m)] * x * inv_rho;
+            let p_y = scratch.d_rho[at(l, m)] * yy * inv_rho;
+            let p_z = scratch.d_z[at(l, m)];
             let phi_x = -yy * inv_rho2;
             let phi_y = x * inv_rho2;
-            let dc_x = -mf * s * phi_x;
-            let dc_y = -mf * s * phi_y;
-            let ds_x = mf * c * phi_x;
-            let ds_y = mf * c * phi_y;
             dy[lm_index(l, m as i32)] = project([
-                nlm * (p_x * c + pm * dc_x),
-                nlm * (p_y * c + pm * dc_y),
+                nlm * (p_x * c - pm * mf * s * phi_x),
+                nlm * (p_y * c - pm * mf * s * phi_y),
                 nlm * (p_z * c),
             ]);
             dy[lm_index(l, -(m as i32))] = project([
-                nlm * (p_x * s + pm * ds_x),
-                nlm * (p_y * s + pm * ds_y),
+                nlm * (p_x * s + pm * mf * c * phi_x),
+                nlm * (p_y * s + pm * mf * c * phi_y),
                 nlm * (p_z * s),
             ]);
         }

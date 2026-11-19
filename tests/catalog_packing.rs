@@ -1,12 +1,12 @@
 use anneal_core::catalog::{
     OccupancyCertificate, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook,
     ape_highlight_queue, ape_local_seed, different_decaf_family, include_packing_reference,
-    leaves_packing, nearby_packing, occupancy_fes_delta, occupancy_fes_from_histograms,
-    occupancy_landfold_floor, occupancy_leave_new_class, occupancy_leave_new_packing,
-    occupancy_retire_at, occupancy_ring_floor, occupancy_ring_profile, occupancy_sparsify_packing,
-    occupied_unseen_share, packing_community_count, packing_distance, packing_fingerprint,
-    packing_link_labels, packing_reference_book, remember_packing_reference, same_packing,
-    set_packing_references,
+    leaves_packing, lens_ring_displacement, nearby_packing, occupancy_fes_delta,
+    occupancy_fes_from_histograms, occupancy_landfold_floor, occupancy_leave_new_class,
+    occupancy_leave_new_packing, occupancy_retire_at, occupancy_ring_floor, occupancy_ring_profile,
+    occupancy_sparsify_packing, occupied_unseen_share, packing_community_count, packing_distance,
+    packing_fingerprint, packing_link_labels, packing_reference_book, remember_packing_reference,
+    same_packing, set_packing_references,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
@@ -26,6 +26,28 @@ fn load_xyz(text: &str) -> Array1<f64> {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     Array1::from_vec(coordinates)
+}
+
+#[test]
+fn shell_outlier_lens_steers_a_fixture_displacement() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let mut dr = vec![0.0; ico.len()];
+    for atom in 0..ico.len() / 3 {
+        dr[3 * atom] = 1.0;
+    }
+    lens_ring_displacement(ico.as_slice().unwrap(), &mut dr);
+    let steps: Vec<f64> = (0..ico.len() / 3).map(|atom| dr[3 * atom]).collect();
+    let smallest = steps.iter().copied().fold(f64::INFINITY, f64::min);
+    let largest = steps.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    assert!(
+        smallest >= 1.0,
+        "a shell lens must not shorten an atom's step"
+    );
+    assert_eq!(largest, 2.0, "the widest shell receives the full lens");
+    assert!(
+        steps.iter().any(|&step| step > smallest && step < largest),
+        "the shell lens must retain its continuous atom weights"
+    );
 }
 
 #[test]

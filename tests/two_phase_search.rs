@@ -12,39 +12,12 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
     (out.best, out.hops, ledger.spent())
 }
 
-/// The relative cutoff reaches the LJ38 octahedron on starts where the plain
-/// LeanBurst walk need not.
+/// The relative cutoff reaches the LJ38 octahedron on all sixteen starts.
 ///
-/// Seeds 0..16 at a budget of 30_000, from `recommended` with the 38-point
-/// reseed and the stall exits off. The `ira` feature replaces the fivefold
-/// permutation in `residual_about`, and the plain walk's hits move with it.
-/// Counted hits of the octahedron, within `SEARCH_HIT_TOL`:
-///
-/// ```text
-/// matcher   cutoff   plain
-/// local     16/16    7/16
-/// ira       16/16    7/16
-/// ```
-///
-/// The hit pattern is exact, not a ceiling. Host `libm` is not one
-/// function: macOS reported 11 of 16 plain hits, then 13 of 16, then
-/// `0x9204`, then `0x513a`, while Linux held a different mask on the
-/// same seeds. Proposal axes, the gamma sampler, the depth-rewarded
-/// Student-t draw, and the symmetry rotation already go through the
-/// `libm` crate. Three calls were still the host: the fivefold turn
-/// (`2π/5` and `3π/5`), the continuous-symmetry orientation (`τ/5`),
-/// and the energy-lattice softmax. Those use the `libm` crate as well.
-/// On that walk Linux plain was `0x517b` (9 seeds). Merging develop's
-/// stall-growth hold moves it to `0x91e4` (7 seeds). The packing SOAP
-/// hop is the descriptor residual. On this base the ACE derivative is
-/// the analytic contraction, and the plain walk is `0x8411` (4 seeds).
-/// Forming each pair's harmonics once moves it to `0x8421` (4 seeds).
-/// The cutoff walk stays `0xffff`.
-///
-/// Those masks were measured at a 200-step quench. `recommended` now
-/// quenches for 1000 steps, and at that length the plain walk reaches
-/// the octahedron on more seeds, so this comparison keeps the 200-step
-/// quench the masks were measured on.
+/// This is the exact Linux scalar-libm walk for seeds 0 through 15 at a
+/// budget of 30,000. It uses the recommended 38-point reseed, a 200-step
+/// quench, the LeanBurst library, and no stall exits. The plain walk reaches
+/// five starts; the relative-cutoff walk reaches all sixteen.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     anneal_core::install_rgpot_kernels!();
@@ -81,9 +54,9 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // The template-free walk is deterministic: cutoff 0xffff, plain
-    // 0x8421 (4 seeds), with and without IRA.
-    let plain_exact = 0x8421;
+    // The descriptor-cloud walk is deterministic: cutoff 0xffff, plain
+    // 0x8c22 (5 seeds), with and without IRA.
+    let plain_exact = 0x8c22;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"

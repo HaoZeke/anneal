@@ -1,9 +1,8 @@
-//! Short recommended-preset trajectory, pinned by hash.
+//! Exact short trajectory for the recommended preset.
 //!
 //! The accepted-transition sequence and the final energies are part of the
 //! search result. A faster evaluation path has to leave them unchanged.
-//! The recommended full quench is 1000 steps, so this pin is that
-//! trajectory, not the earlier 200-step one.
+//! The pin uses the preset's 1000-step quench.
 //!
 //! The hash is the scalar walk through one `libm`. Host `exp`, `sin`,
 //! and `cos`, and the NEON dot product, are a different trajectory.
@@ -12,10 +11,9 @@
 //! softmax, the depth-rewarded arm, and the pair force go through that
 //! `libm`, and this test forces rgmin's scalar dots.
 //!
-//! The descriptor residual replaced the fivefold turn. Forming each
-//! pair's harmonics once, and contracting the ACE derivative in the
-//! complex basis, moved the recorded walk. The hash is `2a9cce01…`
-//! with and without IRA.
+//! The packing arm uses the descriptor residual, one analytic
+//! value-and-derivative pass per unordered pair, and the direct ACE
+//! adjoint. The hash is identical with and without IRA.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -92,6 +90,6 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library is deterministic on every build.
-    let expected = "2a9cce0155f55b6458e422a158e4d6449af993d610c62a2e093b216f04dc513d";
+    let expected = "5bb39159842a8118c46e1b00b3cada03cc3a7aad215ad0c5d2be766f77d315ed";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

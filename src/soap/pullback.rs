@@ -24,6 +24,20 @@
 
 use super::*;
 
+#[derive(Default)]
+struct DescentScratch {
+    adjoint: Vec<f64>,
+    live: Vec<bool>,
+}
+
+thread_local! {
+    static DESCENT_SCRATCH: std::cell::RefCell<DescentScratch> =
+        const { std::cell::RefCell::new(DescentScratch {
+            adjoint: Vec::new(),
+            live: Vec::new(),
+        }) };
+}
+
 /// `Σ a[n,lm] (g'ₙ û Yₗₘ + gₙ ∇Yₗₘ)` for one neighbour.
 ///
 /// The harmonic axis is contiguous, so this is a dot product and a
@@ -33,32 +47,34 @@ fn pair_push(
     a: &[f64],
     ylm: &[f64],
     dy: &[[f64; 3]],
+    parity: Option<&[f64]>,
     weight: &[f64],
     dweight: &[f64],
-    scaled: &mut [f64],
     n_max: usize,
     n_lm: usize,
     u: [f64; 3],
 ) -> [f64; 3] {
-    scaled[..n_lm].fill(0.0);
     let mut along = 0.0;
     for n in 0..n_max {
         let a_n = &a[n * n_lm..n * n_lm + n_lm];
         let mut projected = 0.0;
-        let w = weight[n];
         for lm in 0..n_lm {
-            projected += a_n[lm] * ylm[lm];
-            scaled[lm] += w * a_n[lm];
+            let p = parity.map_or(1.0, |values| values[lm]);
+            projected += a_n[lm] * (p * ylm[lm]);
         }
         along += dweight[n] * projected;
     }
     let mut push = [along * u[0], along * u[1], along * u[2]];
     for lm in 0..n_lm {
-        let s = scaled[lm];
+        let mut s = 0.0;
+        for n in 0..n_max {
+            s += weight[n] * a[n * n_lm + lm];
+        }
         let g = dy[lm];
-        push[0] += s * g[0];
-        push[1] += s * g[1];
-        push[2] += s * g[2];
+        let p = parity.map_or(1.0, |values| -values[lm]);
+        push[0] += s * (p * g[0]);
+        push[1] += s * (p * g[1]);
+        push[2] += s * (p * g[2]);
     }
     push
 }
@@ -137,9 +153,10 @@ fn tables(spec: SoapSpec) -> Tables {
 /// A centre's rows reach only its own neighbourhood, and `dp` enters through
 /// the chain rule alone. The adjoint of a centre's coefficients,
 /// `aᵢ = (∂ rows / ∂ cᵢ)ᵀ dpᵢ`, is formed once. Each pair forms its
-/// harmonics once; the opposite centre reuses them through `Y(-u)`. No row
-/// of `J` and no entry of `JᵀJ` is built. A centre whose `dp` row is zero
-/// costs nothing, which is how fixed atoms drop out.
+/// harmonics and derivatives in one recurrence; the opposite orientation
+/// follows by tesseral parity. No row of `J` and no entry of `JᵀJ` is built.
+/// A centre whose `dp` row is zero costs nothing, which is how fixed atoms
+/// drop out.
 ///
 /// Returns `None` for a shape mismatch or a non-finite result, so the caller
 /// can fall back to the full solve.
@@ -166,11 +183,23 @@ pub(super) fn descent_direction(
     if dp.len() != n_at * dim || !dp.iter().all(|value| value.is_finite()) {
         return None;
     }
-    let tab = tables(spec);
-    let mut grad = vec![0.0; 3 * n_at];
+    let has_soap = dp
+        .chunks_exact(dim)
+        .any(|row| row[..d0].iter().any(|&value| value != 0.0));
+    let tab = has_soap.then(|| tables(spec));
     let stride = n_chan * n_c;
-    let mut adjoint = vec![0.0; n_at * stride];
-    let mut live = vec![false; n_at];
+    let (mut adjoint, mut live) = DESCENT_SCRATCH.with(|slot| {
+        let mut scratch = slot.borrow_mut();
+        (
+            std::mem::take(&mut scratch.adjoint),
+            std::mem::take(&mut scratch.live),
+        )
+    });
+    adjoint.resize(n_at * stride, 0.0);
+    adjoint.fill(0.0);
+    live.resize(n_at, false);
+    live.fill(false);
+    let mut grad = vec![0.0; 3 * n_at];
     for i in 0..n_at {
         let row = &dp[i * dim..(i + 1) * dim];
         if row.iter().all(|&value| value == 0.0) {
@@ -182,6 +211,7 @@ pub(super) fn descent_direction(
             let a = &mut adjoint[i * stride + ch * n_c..i * stride + (ch + 1) * n_c];
             let soap = &row[ch * dim1..(ch + 1) * dim1];
             if soap.iter().any(|&value| value != 0.0) {
+                let tab = tab.as_ref().expect("nonzero SOAP rows have tables");
                 for n in 0..n_max {
                     for lm in 0..n_lm {
                         let mut sum = 0.0;
@@ -206,9 +236,8 @@ pub(super) fn descent_direction(
             }
         }
     }
-    // One harmonic table per pair. The opposite centre reuses it through
-    // Y(-u) = (-1)^l Y(u), instead of a second Legendre recursion.
-    let mut scaled = vec![0.0; n_lm];
+    // The opposite orientation follows the exact tesseral parity, avoiding
+    // a second value-and-derivative recurrence.
     visit_unordered_pairs(x, spec, &live, |pair| {
         if live[pair.i] {
             let ch = neighbor_channel(species, pair.j, &channels);
@@ -217,9 +246,9 @@ pub(super) fn descent_direction(
                 a,
                 pair.ylm,
                 pair.dy,
+                None,
                 pair.weight,
                 pair.dweight,
-                &mut scaled,
                 n_max,
                 n_lm,
                 pair.u,
@@ -235,11 +264,11 @@ pub(super) fn descent_direction(
             let u_neg = [-pair.u[0], -pair.u[1], -pair.u[2]];
             let push = pair_push(
                 a,
-                pair.ylm_neg,
-                pair.dy_neg,
+                pair.ylm,
+                pair.dy,
+                Some(pair.parity),
                 pair.weight,
                 pair.dweight,
-                &mut scaled,
                 n_max,
                 n_lm,
                 u_neg,
@@ -250,7 +279,13 @@ pub(super) fn descent_direction(
             }
         }
     });
-    grad.iter().all(|value| value.is_finite()).then_some(grad)
+    let finite = grad.iter().all(|value| value.is_finite());
+    DESCENT_SCRATCH.with(|slot| {
+        let mut scratch = slot.borrow_mut();
+        scratch.adjoint = adjoint;
+        scratch.live = live;
+    });
+    finite.then_some(grad)
 }
 
 /// Builds `JᵀJ` and `Jᵀ dp` for all-mobile atoms, or `None` when the dense
