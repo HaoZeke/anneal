@@ -353,7 +353,8 @@ def cluster_search(
 
     Returns a dict with ``best`` (flat coordinates in the state layout),
     ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``,
-    ``local_step`` and ``quench_seconds``. ``accepted`` counts the hops the
+    ``local_step``, ``quench_seconds``, ``quench_gradient`` and
+    ``relax_steps``. ``accepted`` counts the hops the
     acceptance rule took. ``nve_unavailable`` is true when a constant-energy
     (NVE) escape was requested and that escape is not compiled; the
     ``python`` feature compiles it. ``quench_seconds`` is ``None`` unless

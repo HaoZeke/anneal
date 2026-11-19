@@ -3927,6 +3927,8 @@ fn cluster_search(
     };
     dict.set_item("local_step", quench)?;
     dict.set_item("quench_seconds", stats.quench_seconds)?;
+    dict.set_item("quench_gradient", cfg.quench_gradient)?;
+    dict.set_item("relax_steps", cfg.relax_steps)?;
     Ok(dict.into())
 }
 
