@@ -540,8 +540,9 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
-    /// Two bent carbon arms on a central bond; turning it half way brings
-    /// their tips together.
+    /// Two bent carbon arms on a central single bond; turning it half way
+    /// brings their tips together. The central carbons carry their valence
+    /// in hydrogens, so that bond is saturated.
     fn hook() -> (Array1<f64>, Vec<u32>) {
         let x = Array1::from(vec![
             0.0, 0.0, 0.0, // C1
@@ -550,8 +551,12 @@ mod tests {
             1.0, 2.6, 0.0, //
             1.5, -1.5, 0.0, // arm on C2
             1.0, -2.6, 0.0, //
+            -0.40217, -0.67028, 0.75966, // H on C1
+            -0.40217, -0.67028, -0.75966, //
+            1.84434, 0.44272, 0.93463, // H on C2
+            1.84434, 0.44272, -0.93463, //
         ]);
-        (x, vec![6; 6])
+        (x, vec![6, 6, 6, 6, 6, 6, 1, 1, 1, 1])
     }
 
     fn central(top: &Topology) -> usize {

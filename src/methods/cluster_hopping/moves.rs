@@ -820,11 +820,119 @@ pub enum ClusterMove {
     },
 }
 
-/// Fraction of the covalent-radius sum below which a ring edge is treated as
-/// multiple. Bridge bonds do not use this geometric proxy for bond order:
-/// [`rotatable_bonds`] marks a locally planar bridge as constrained and the
-/// potential measures its torsional barrier before it is turned.
-const SINGLE_BOND_FRACTION: f64 = 0.93;
+/// Largest triple product of three unit bonds, and the largest
+/// `|sin φ|` between the substituent planes of a bond, that still counts
+/// as one plane.
+///
+/// An ideal tetrahedral centre has triple product 0.77 and three bonds in
+/// a plane have 0. The same bound is `|axis · (u × v)|` for the unit
+/// projections of the substituents perpendicular to the bond, which is
+/// `|sin φ|` between those projections. A perpendicular pair is 1.
+const PLANAR_VOLUME: f64 = 0.2;
+
+fn bond_unit(x: ArrayView1<f64>, a: usize, b: usize) -> [f64; 3] {
+    let v = [0, 1, 2].map(|k| x[3 * b + k] - x[3 * a + k]);
+    let norm = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-12);
+    v.map(|c| c / norm)
+}
+
+fn triple_product(u: [f64; 3], v: [f64; 3], w: [f64; 3]) -> f64 {
+    u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0])
+        + u[2] * (v[0] * w[1] - v[1] * w[0])
+}
+
+/// A three-coordinate centre whose bonds lie in one plane.
+fn centre_is_flat(x: ArrayView1<f64>, adj: &[Vec<usize>], pivot: usize) -> bool {
+    let [a, b, c] = adj[pivot][..] else {
+        return false;
+    };
+    triple_product(
+        bond_unit(x, pivot, a),
+        bond_unit(x, pivot, b),
+        bond_unit(x, pivot, c),
+    )
+    .abs()
+        < PLANAR_VOLUME
+}
+
+/// Both ends have fewer neighbours than their valence, so the bond between
+/// them carries the missing order.
+fn both_unsaturated(species: &[u32], adj: &[Vec<usize>], i: usize, j: usize) -> bool {
+    let open = |atom: usize| {
+        let valence = covalent_valence(species[atom]);
+        valence > 0 && adj[atom].len() < valence as usize
+    };
+    open(i) && open(j)
+}
+
+/// Substituent directions, projected perpendicular to the bond, lie in one
+/// plane. An empty side is not a neighbourhood. A substituent that lies on
+/// the bond axis has no perpendicular direction and does not break the plane.
+fn substituents_share_the_bond_plane(
+    x: ArrayView1<f64>,
+    adj: &[Vec<usize>],
+    i: usize,
+    j: usize,
+) -> bool {
+    let axis = bond_unit(x, i, j);
+    let radial = |centre: usize, atom: usize| {
+        let bond = bond_unit(x, centre, atom);
+        let along = bond
+            .iter()
+            .zip(axis.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        let mut out = [0, 1, 2].map(|k| bond[k] - along * axis[k]);
+        let norm = out.iter().map(|c| c * c).sum::<f64>().sqrt();
+        if norm > 1.0e-12 {
+            out.iter_mut().for_each(|c| *c /= norm);
+        }
+        (out, norm)
+    };
+    let left: Vec<usize> = adj[i].iter().copied().filter(|&a| a != j).collect();
+    let right: Vec<usize> = adj[j].iter().copied().filter(|&a| a != i).collect();
+    !left.is_empty()
+        && !right.is_empty()
+        && left.iter().all(|&a| {
+            right.iter().all(|&b| {
+                let (u, un) = radial(i, a);
+                let (v, vn) = radial(j, b);
+                if un <= 1.0e-12 || vn <= 1.0e-12 {
+                    return true;
+                }
+                let cross = [
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ];
+                axis.iter()
+                    .zip(cross.iter())
+                    .map(|(p, q)| p * q)
+                    .sum::<f64>()
+                    .abs()
+                    < PLANAR_VOLUME
+            })
+        })
+}
+
+/// A bond whose geometry and valence both say it is not a free rotor.
+///
+/// The substituents have to share the bond's plane. Within that plane the
+/// bond is held when both ends are short of their valence, as C=N and N=N
+/// are, or when both ends are planar three-coordinate centres, as an amide
+/// C–N is. A pyramidal centre, a perpendicular pair of substituents, and a
+/// saturated single bond stay free.
+fn bond_is_held(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    adj: &[Vec<usize>],
+    i: usize,
+    j: usize,
+) -> bool {
+    substituents_share_the_bond_plane(x, adj, i, j)
+        && (both_unsaturated(species, adj, i, j)
+            || (centre_is_flat(x, adj, i) && centre_is_flat(x, adj, j)))
+}
 
 /// One rotatable covalent bond and the side that turns about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -848,9 +956,9 @@ pub struct RotatableBond {
 /// A bond is rotatable when it is a bridge of the bond graph (not in a ring)
 /// and has at least two atoms on each side. Bond length does not decide
 /// partial-double character. A bridge is marked
-/// [`RotatableBond::constrained`] when its substituents are coplanar with
-/// the bond and both ends are planar, or one end is planar and the other
-/// is a terminal tip. Every proposal path then leaves that bridge unturned
+/// [`RotatableBond::constrained`] when its substituents share the bond's
+/// plane and either the bond is a multiple bond by valence or both ends
+/// are planar centres. Every proposal path then leaves that bridge unturned
 /// until the potential has priced its barrier. The smaller side turns, and
 /// of two sides of one size, one that is not a symmetric top. A symmetric
 /// top is three or more identical terminal atoms, or two when the pivot is
@@ -889,76 +997,13 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
         }
         seen
     };
-    let unit = |a: usize, b: usize| -> [f64; 3] {
-        let v = [0, 1, 2].map(|k| x[3 * b + k] - x[3 * a + k]);
-        let norm = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-12);
-        v.map(|c| c / norm)
-    };
-    let flat_pivot = |pivot: usize| -> bool {
-        let [a, b, c] = adj[pivot][..] else {
-            return false;
-        };
-        let (u, v, w) = (unit(pivot, a), unit(pivot, b), unit(pivot, c));
-        let volume = u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0])
-            + u[2] * (v[0] * w[1] - v[1] * w[0]);
-        volume.abs() < PLANAR_VOLUME
-    };
-    let planar_neighbourhood = |i: usize, j: usize| -> bool {
-        let axis = unit(i, j);
-        let radial = |centre: usize, atom: usize| {
-            let bond = unit(centre, atom);
-            let along = bond
-                .iter()
-                .zip(axis.iter())
-                .map(|(a, b)| a * b)
-                .sum::<f64>();
-            let mut out = [0, 1, 2].map(|k| bond[k] - along * axis[k]);
-            let norm = out.iter().map(|c| c * c).sum::<f64>().sqrt();
-            if norm > 1.0e-12 {
-                out.iter_mut().for_each(|c| *c /= norm);
-            }
-            (out, norm)
-        };
-        let left: Vec<usize> = adj[i].iter().copied().filter(|&a| a != j).collect();
-        let right: Vec<usize> = adj[j].iter().copied().filter(|&a| a != i).collect();
-        !left.is_empty()
-            && !right.is_empty()
-            && left.iter().all(|&a| {
-                right.iter().all(|&b| {
-                    let (u, un) = radial(i, a);
-                    let (v, vn) = radial(j, b);
-                    if un <= 1.0e-12 || vn <= 1.0e-12 {
-                        return true;
-                    }
-                    let cross = [
-                        u[1] * v[2] - u[2] * v[1],
-                        u[2] * v[0] - u[0] * v[2],
-                        u[0] * v[1] - u[1] * v[0],
-                    ];
-                    axis.iter()
-                        .zip(cross.iter())
-                        .map(|(a, b)| a * b)
-                        .sum::<f64>()
-                        .abs()
-                        < PLANAR_VOLUME
-                })
-            })
-    };
-    let terminal_tip = |i: usize, across: usize| {
-        adj[i].len() == 2
-            && adj[i]
-                .iter()
-                .copied()
-                .find(|&a| a != across)
-                .is_some_and(|a| adj[a].len() == 1)
-    };
     // Three or more identical terminal tips (such as a methyl) map onto
     // themselves under rotation; two identical tips do so only when the
     // pivot is planar (such as -NO2 or an sp2 -NH2), whereas a pyramidal
     // -NH2 exchanges its hydrogens with its lone pair under a half turn.
     let symmetric_top = |pivot: usize, side: &[usize]| {
         let tips: Vec<usize> = side.iter().copied().filter(|&a| a != pivot).collect();
-        (tips.len() >= 3 || (tips.len() == 2 && flat_pivot(pivot)))
+        (tips.len() >= 3 || (tips.len() == 2 && centre_is_flat(x, &adj, pivot)))
             && tips
                 .iter()
                 .all(|&t| adj[t].len() == 1 && species[t] == species[tips[0]])
@@ -989,18 +1034,11 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
             fixed,
             pivot,
             side,
-            constrained: planar_neighbourhood(i, j)
-                && ((flat_pivot(i) && flat_pivot(j))
-                    || (flat_pivot(i) && terminal_tip(j, i))
-                    || (flat_pivot(j) && terminal_tip(i, j))),
+            constrained: bond_is_held(x, species, &adj, i, j),
         });
     }
     out
 }
-
-/// Largest triple product of the three unit bonds of a planar atom. An ideal
-/// tetrahedral centre has 0.77, three bonds in a plane 0.
-const PLANAR_VOLUME: f64 = 0.2;
 
 /// Ring crankshafts of a covalent structure, and the ring torsions they span.
 ///
@@ -1016,11 +1054,12 @@ const PLANAR_VOLUME: f64 = 0.2;
 /// The ends are never bonded: an arc turned about its own ring bond is the
 /// whole ring turned rigidly, which only bends the substituents of the ends.
 /// An arc is offered when it meets each end through exactly one bond and
-/// both bonds are single: as long as `SINGLE_BOND_FRACTION` of the radius
-/// sum, and not between two conjugated atoms. An aromatic ring has no single
-/// bond, and a peptide C–N is no end. The second value counts the
-/// ring torsions those arcs move: the single non-bridge bonds less three per
-/// independent cycle they close, `m - 3` for a saturated ring of `m`.
+/// neither bond is held. A held bond is the same judgement as a constrained
+/// bridge: substituents in one plane, and a multiple bond by valence or two
+/// planar centres. An aromatic ring has no such end, and a
+/// peptide C–N is no end. The second value counts the ring torsions those
+/// arcs move: the free non-bridge bonds less three per independent cycle
+/// they close, `m - 3` for a saturated ring of `m`.
 pub fn ring_crankshafts(
     x: ArrayView1<f64>,
     species: &[u32],
@@ -1028,7 +1067,6 @@ pub fn ring_crankshafts(
 ) -> (Vec<RotatableBond>, usize) {
     let n = species.len().min(x.len() / 3);
     let mut adj = vec![Vec::<usize>::new(); n];
-    let mut long = Vec::new();
     for i in 0..n {
         for j in (i + 1)..n {
             let sum = covalent_radius(species[i]) + covalent_radius(species[j]);
@@ -1041,38 +1079,17 @@ pub fn ring_crankshafts(
             }
             adj[i].push(j);
             adj[j].push(i);
-            if d >= SINGLE_BOND_FRACTION * sum {
-                long.push((i, j));
-            }
         }
     }
-    // A three-bonded atom whose bonds lie in one plane, and a two-bonded atom
-    // between two of those, is conjugated. A bond between two such atoms
-    // stays planar whatever its length, as an aromatic C-N or C-S is.
-    let unit = |i: usize, j: usize| -> [f64; 3] {
-        let v = [0, 1, 2].map(|k| x[3 * j + k] - x[3 * i + k]);
-        let norm = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-12);
-        v.map(|c| c / norm)
-    };
-    let flat: Vec<bool> = (0..n)
-        .map(|i| {
-            let [u, v, w] = match adj[i][..] {
-                [a, b, c] => [unit(i, a), unit(i, b), unit(i, c)],
-                _ => return false,
-            };
-            let volume = u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0])
-                + u[2] * (v[0] * w[1] - v[1] * w[0]);
-            volume.abs() < PLANAR_VOLUME
-        })
-        .collect();
-    let conjugated: Vec<bool> = (0..n)
-        .map(|i| flat[i] || matches!(adj[i][..], [a, b] if flat[a] && flat[b]))
-        .collect();
+    // A held bond is not a crankshaft end. The judgement is the bridge
+    // rule: one plane, and a multiple bond by valence or two planar centres.
     let mut single = vec![Vec::<usize>::new(); n];
-    for (i, j) in long {
-        if !(conjugated[i] && conjugated[j]) {
-            single[i].push(j);
-            single[j].push(i);
+    for i in 0..n {
+        for &j in adj[i].iter().filter(|&&j| j > i) {
+            if !bond_is_held(x, species, &adj, i, j) {
+                single[i].push(j);
+                single[j].push(i);
+            }
         }
     }
     // Components of the graph without the atoms in `cut`.
@@ -1611,6 +1628,24 @@ pub fn active_mask(
         }
     }
     active
+}
+
+/// Lowest common valence by atomic number.
+///
+/// Zero for an unlisted element, so that element is not treated as
+/// unsaturated. Hydrogen is 1, carbon and silicon 4, nitrogen and
+/// phosphorus 3, oxygen and sulfur 2, and the halogens 1. A bond between
+/// two atoms that each have fewer neighbours than this valence is a
+/// multiple bond.
+pub fn covalent_valence(z: u32) -> u32 {
+    match z {
+        1 => 1,
+        6 | 14 => 4,
+        7 | 15 => 3,
+        8 | 16 => 2,
+        9 | 17 | 35 | 53 => 1,
+        _ => 0,
+    }
 }
 
 /// Covalent radius in Angstrom by atomic number, Cordero and coworkers
@@ -4357,6 +4392,156 @@ mod torsion_tests {
         assert_eq!(short[0].constrained, long[0].constrained);
     }
 
+    fn bridge(bonds: &[RotatableBond], a: usize, b: usize) -> Option<&RotatableBond> {
+        bonds.iter().find(|bond| {
+            (bond.fixed.min(bond.pivot), bond.fixed.max(bond.pivot)) == (a.min(b), a.max(b))
+        })
+    }
+
+    fn stays_still(x: &Array1<f64>, species: &[u32], quartet: [usize; 4]) {
+        let [a, b, c, d] = quartet;
+        let d0 = dihedral(x, a, b, c, d);
+        let top = super::super::torsion::Topology::of(x.view(), species, 1.25, None, false);
+        let mut rng = StdRng::seed_from_u64(1);
+        for _ in 0..200 {
+            let y = top.propose(x.view(), &mut rng);
+            assert!(
+                angle_gap(d0, dihedral(&y, a, b, c, d)) < 1.0e-8,
+                "a uniform draw turned the held bond"
+            );
+        }
+    }
+
+    #[test]
+    fn an_imine_cn_bond_is_held() {
+        // CH3–CH=N–CH3, hydrogens on the methyls omitted. Both ends are
+        // short of their valence and the substituents lie in the bond plane.
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.28, 0.0, 0.0, -0.75, 1.20, 0.0, -0.55, -0.90, 0.0, 2.03, -1.20, 0.0,
+        ]);
+        let species = [6u32, 7, 6, 1, 6];
+        let bonds = rotatable_bonds(x.view(), &species, 1.25);
+        let cn = bridge(&bonds, 0, 1).expect("the C=N bridge is retained");
+        assert!(cn.constrained);
+        stays_still(&x, &species, [2, 0, 1, 4]);
+    }
+
+    #[test]
+    fn a_twisted_cn_bond_is_not_held() {
+        // The same imine with the N-methyl out of the carbon's plane.
+        // Valence still says multiple; the geometry does not.
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.28, 0.0, 0.0, -0.75, 1.20, 0.0, -0.55, -0.90, 0.0, 1.58, -1.55, 0.55,
+        ]);
+        let bonds = rotatable_bonds(x.view(), &[6, 7, 6, 1, 6], 1.25);
+        let cn = bridge(&bonds, 0, 1).expect("the twisted C=N bridge is retained");
+        assert!(
+            !cn.constrained,
+            "valence held a bond whose substituents are not coplanar"
+        );
+    }
+
+    #[test]
+    fn an_azo_nn_bond_is_held() {
+        // CH3–N=N–CH3. Each nitrogen has two neighbours, below valence 3.
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.25, 0.0, 0.0, -0.80, 1.15, 0.0, 2.05, -1.15, 0.0,
+        ]);
+        let species = [7u32, 7, 6, 6];
+        let bonds = rotatable_bonds(x.view(), &species, 1.25);
+        let nn = bridge(&bonds, 0, 1).expect("the N=N bridge is retained");
+        assert!(nn.constrained);
+        stays_still(&x, &species, [2, 0, 1, 3]);
+    }
+
+    #[test]
+    fn an_oxime_holds_the_double_bond_and_leaves_the_single_bond_free() {
+        // CH3–CH=N–OH. C=N is a multiple bond in the plane. N–O is not:
+        // oxygen's two neighbours meet its valence, and neither end of N–O
+        // is a planar three-coordinate centre.
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.28, 0.0, 0.0, -0.75, 1.20, 0.0, -0.55, -0.90, 0.0, 1.98, 1.15, 0.0,
+            2.48, 1.98, 0.0,
+        ]);
+        let bonds = rotatable_bonds(x.view(), &[6, 7, 6, 1, 8, 1], 1.25);
+        assert!(bridge(&bonds, 0, 1).expect("C=N").constrained);
+        let no = bridge(&bonds, 1, 4).expect("N–O is rotatable");
+        assert!(!no.constrained);
+    }
+
+    #[test]
+    fn a_short_conjugated_bridge_is_held_only_while_planar() {
+        // A short C=C is held when its substituents share the bond plane,
+        // and the same length is free when one end is turned through a
+        // right angle. Length is not the decision.
+        let species = [6u32, 6, 6, 1, 6, 1];
+        let planar = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.34, 0.0, 0.0, -0.65, 1.10, 0.0, -0.55, -1.05, 0.0, 1.99, 1.10, 0.0,
+            1.89, -1.05, 0.0,
+        ]);
+        let twisted = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.34, 0.0, 0.0, -0.65, 1.10, 0.0, -0.55, -1.05, 0.0, 1.99, 0.0, 1.10,
+            1.89, 0.0, -1.05,
+        ]);
+        assert!(
+            bridge(&rotatable_bonds(planar.view(), &species, 1.25), 0, 1)
+                .expect("the planar C=C is retained")
+                .constrained
+        );
+        stays_still(&planar, &species, [2, 0, 1, 4]);
+        assert!(
+            !bridge(&rotatable_bonds(twisted.view(), &species, 1.25), 0, 1)
+                .expect("the twisted C=C is retained")
+                .constrained
+        );
+    }
+
+    #[test]
+    fn the_planarity_tolerance_bounds_both_of_its_uses() {
+        // `|sin φ|` between substituent planes. Both ends are flat carbons,
+        // and the tips differ so neither end is a symmetric top. Only the
+        // plane angle decides. 8° is inside 0.2 and 16° is outside.
+        let species = [6u32, 6, 7, 8, 1, 9];
+        let inside = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.50, 0.0, 0.0, -0.70, 1.20, 0.0, -0.70, -1.20, 0.0, 2.15, 1.11488,
+            0.15669, 2.15, -1.11488, -0.15669,
+        ]);
+        let outside = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.50, 0.0, 0.0, -0.70, 1.20, 0.0, -0.70, -1.20, 0.0, 2.15, 1.08222,
+            0.31032, 2.15, -1.08222, -0.31032,
+        ]);
+        assert!(
+            bridge(&rotatable_bonds(inside.view(), &species, 1.25), 0, 1)
+                .expect("the shallower pair is retained")
+                .constrained
+        );
+        assert!(
+            !bridge(&rotatable_bonds(outside.view(), &species, 1.25), 0, 1)
+                .expect("the steeper pair is retained")
+                .constrained
+        );
+
+        // Triple product of a three-coordinate nitrogen with two identical
+        // hydrogens. 0.15 is inside the planar bound, so the amine is a
+        // symmetric top and is not turned. 0.25 is outside, so it is turned.
+        let amine = |h: [f64; 6]| {
+            Array1::from_vec(vec![
+                0.0, 0.0, 0.0, 1.47, 0.0, 0.0, h[0], h[1], h[2], h[3], h[4], h[5], -0.36, 0.0,
+                1.02, -0.36, -0.88335, -0.51, -0.36, 0.88335, -0.51,
+            ])
+        };
+        let flat = amine([1.10820, 0.93946, 0.08132, 1.10820, -0.93946, 0.08132]);
+        let pyramidal = amine([1.10847, 0.93314, 0.13656, 1.10847, -0.93314, 0.13656]);
+        let labels = [6u32, 7, 1, 1, 1, 1, 1];
+        assert!(
+            rotatable_bonds(flat.view(), &labels, 1.25).is_empty(),
+            "a centre inside the planar bound was turned"
+        );
+        let bonds = rotatable_bonds(pyramidal.view(), &labels, 1.25);
+        assert_eq!(bonds.len(), 1, "{bonds:?}");
+        assert_eq!(bonds[0].pivot, 1);
+    }
+
     #[test]
     fn a_planar_four_atom_neighbourhood_marks_a_bridge_constrained() {
         // A generic planar X-X bridge. The unlike tips prevent either side
@@ -4380,8 +4565,9 @@ mod torsion_tests {
     #[test]
     fn a_planar_bridge_to_a_branched_centre_stays_free() {
         // One end is planar and the neighbourhood lies in that plane, but
-        // the other end is a branched centre rather than a terminal tip.
-        // Unlike tips keep the bond from being dropped as a symmetric top.
+        // the other end is a saturated branched centre, so neither valence
+        // nor two planar centres hold the bond. Unlike tips keep it from
+        // being dropped as a symmetric top.
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, // planar end
             1.50, 0.0, 0.0, // branched end
