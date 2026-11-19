@@ -7,6 +7,7 @@
 // and the Sutton-Chen eam/fs run of data/sutton_chen/make_lammps_ref.py.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -90,6 +91,79 @@ Eval eval(const rgpot::EAMTablePot &pot, const std::vector<double> &pos,
   std::copy(out.stress, out.stress + 9, e.stress);
   e.has_stress = out.has_stress;
   return e;
+}
+
+double face_spacing(const double *box, int axis) {
+  const double *u = box + 3 * ((axis + 1) % 3);
+  const double *v = box + 3 * ((axis + 2) % 3);
+  const double cx = u[1] * v[2] - u[2] * v[1];
+  const double cy = u[2] * v[0] - u[0] * v[2];
+  const double cz = u[0] * v[1] - u[1] * v[0];
+  const double area = std::sqrt(cx * cx + cy * cy + cz * cz);
+  const double vol = std::abs(box[0] * (box[4] * box[8] - box[5] * box[7]) -
+                              box[1] * (box[3] * box[8] - box[5] * box[6]) +
+                              box[2] * (box[3] * box[7] - box[4] * box[6]));
+  REQUIRE(area > 0.0);
+  REQUIRE(vol > 0.0);
+  return vol / area;
+}
+
+std::array<int, 3> replication(const double *box, double cutoff) {
+  std::array<int, 3> rep{1, 1, 1};
+  for (int axis = 0; axis < 3; ++axis) {
+    const double spacing = face_spacing(box, axis);
+    while (!(2.0 * cutoff < rep[static_cast<std::size_t>(axis)] * spacing)) {
+      ++rep[static_cast<std::size_t>(axis)];
+    }
+  }
+  return rep;
+}
+
+Eval supercell_reference(const rgpot::EAMTablePot &pot,
+                         const std::vector<double> &pos,
+                         const std::vector<int> &z, const double *box) {
+  const std::array<int, 3> rep = replication(box, pot.locality().cutoff);
+  const std::size_t n = z.size();
+  const std::size_t nrep = static_cast<std::size_t>(rep[0] * rep[1] * rep[2]);
+  const double big_box[9] = {rep[0] * box[0], rep[0] * box[1], rep[0] * box[2],
+                             rep[1] * box[3], rep[1] * box[4], rep[1] * box[5],
+                             rep[2] * box[6], rep[2] * box[7], rep[2] * box[8]};
+  std::vector<double> big_pos;
+  std::vector<int> big_z;
+  big_pos.reserve(3 * n * nrep);
+  big_z.reserve(n * nrep);
+  for (int h = 0; h < rep[0]; ++h) {
+    for (int k = 0; k < rep[1]; ++k) {
+      for (int l = 0; l < rep[2]; ++l) {
+        const double sx = h * box[0] + k * box[3] + l * box[6];
+        const double sy = h * box[1] + k * box[4] + l * box[7];
+        const double sz = h * box[2] + k * box[5] + l * box[8];
+        for (std::size_t i = 0; i < n; ++i) {
+          big_pos.push_back(pos[3 * i] + sx);
+          big_pos.push_back(pos[3 * i + 1] + sy);
+          big_pos.push_back(pos[3 * i + 2] + sz);
+          big_z.push_back(z[i]);
+        }
+      }
+    }
+  }
+  const Eval big = eval(pot, big_pos, big_z, big_box);
+  Eval ref;
+  ref.energy = big.energy / static_cast<double>(nrep);
+  std::copy(big.stress, big.stress + 9, ref.stress);
+  ref.has_stress = big.has_stress;
+  ref.forces.assign(3 * n, 0.0);
+  for (std::size_t t = 0; t < nrep; ++t) {
+    for (std::size_t i = 0; i < n; ++i) {
+      const std::size_t src = t * n + i;
+      for (int c = 0; c < 3; ++c) {
+        ref.forces[3 * i + static_cast<std::size_t>(c)] +=
+            big.forces[3 * src + static_cast<std::size_t>(c)] /
+            static_cast<double>(nrep);
+      }
+    }
+  }
+  return ref;
 }
 
 void check_against(const rgpot::EAMTablePot &pot, const LammpsRef &ref,
@@ -213,9 +287,6 @@ TEST_CASE("EAM table rejects bad input", "[EAMTable]") {
   std::vector<int> nickel(ref.z.size(), 28);
   REQUIRE_THROWS_AS(eval(cu_u3(true, false), ref.pos, nickel, ref.box),
                     std::invalid_argument);
-  const double small[9] = {9.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 9.0};
-  REQUIRE_THROWS_AS(eval(cu_u3(true, false), ref.pos, ref.z, small),
-                    std::invalid_argument);
   std::ifstream file(kData + "eam_table/Cu_u3.eam");
   std::string head, line;
   for (int k = 0; k < 40 && std::getline(file, line); ++k)
@@ -223,6 +294,25 @@ TEST_CASE("EAM table rejects bad input", "[EAMTable]") {
   std::istringstream cut(head);
   REQUIRE_THROWS_AS(rgpot::read_eam_table(cut, EAMTableFormat::Funcfl),
                     std::invalid_argument);
+}
+
+TEST_CASE("EAM table sums images for a 9 angstrom cell", "[EAMTable]") {
+  const LammpsRef ref = load_ref("eam_table/cu_u3_cubic.ref", true);
+  const double small[9] = {9.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 9.0};
+  const rgpot::EAMTablePot pot = cu_u3(true, true);
+  REQUIRE(face_spacing(small, 0) > pot.locality().cutoff);
+  REQUIRE(face_spacing(small, 0) < 2.0 * pot.locality().cutoff);
+  const Eval folded = eval(pot, ref.pos, ref.z, small);
+  const Eval want = supercell_reference(pot, ref.pos, ref.z, small);
+  REQUIRE_THAT(folded.energy, WithinAbs(want.energy, 1e-8));
+  for (std::size_t c = 0; c < folded.forces.size(); ++c) {
+    REQUIRE_THAT(folded.forces[c], WithinAbs(want.forces[c], 1e-7));
+  }
+  REQUIRE(folded.has_stress == 1);
+  REQUIRE(want.has_stress == 1);
+  for (int c = 0; c < 9; ++c) {
+    REQUIRE_THAT(folded.stress[c], WithinAbs(want.stress[c], 1e-10));
+  }
 }
 
 namespace {
@@ -235,7 +325,8 @@ struct Full {
 /// forceImpl, then forcePerAtom on the same atoms. `reused` is
 /// listReused() after the first of the two.
 Full eval_full(const rgpot::EAMTablePot &pot, const std::vector<double> &pos,
-               const std::vector<int> &z, const double *box, bool *reused = nullptr) {
+               const std::vector<int> &z, const double *box,
+               bool *reused = nullptr) {
   Full f;
   f.e = eval(pot, pos, z, box);
   if (reused != nullptr) {
@@ -273,7 +364,8 @@ void wrap_cell(std::vector<double> &pos, const double *box) {
 
 } // namespace
 
-TEST_CASE("EAM table pair list reuse gives the bits of a rebuilt list", "[EAMTable][skin]") {
+TEST_CASE("EAM table pair list reuse gives the bits of a rebuilt list",
+          "[EAMTable][skin]") {
   // The cached list keeps its pairs out to the cutoff plus 1 Angstrom; a
   // skin of 0 rebuilds the list whenever an atom moves, so it is the
   // evaluation without the cache. Both visit the pairs in the same order.
@@ -311,7 +403,8 @@ TEST_CASE("EAM table pair list reuse gives the bits of a rebuilt list", "[EAMTab
   // Steps of at most 0.12 Angstrom in all, under half the skin.
   for (int k = 0; k < 3; ++k) {
     for (std::size_t c = 0; c < pos.size(); ++c) {
-      pos[c] += 0.04 / std::sqrt(3.0) * std::sin(0.37 * static_cast<double>(c) + k);
+      pos[c] +=
+          0.04 / std::sqrt(3.0) * std::sin(0.37 * static_cast<double>(c) + k);
     }
     step(true);
   }
@@ -351,7 +444,8 @@ TEST_CASE("EAM table pair list reuse gives the bits of a rebuilt list", "[EAMTab
   step(false);
 }
 
-TEST_CASE("EAM table pair list follows a free cluster and a stream", "[EAMTable][skin]") {
+TEST_CASE("EAM table pair list follows a free cluster and a stream",
+          "[EAMTable][skin]") {
   const LammpsRef ref = load_ref("eam_table/cu_u3_cubic.ref", true);
   const std::string path = kData + "eam_table/Cu_u3.eam";
   const rgpot::EAMTablePot warm(
@@ -359,8 +453,10 @@ TEST_CASE("EAM table pair list follows a free cluster and a stream", "[EAMTable]
   rgpot::EAMTablePot stream(
       {.path = path, .format = EAMTableFormat::Funcfl, .periodic = false});
   stream.setNeighbourMode(rgpot::nlist::Mode::Stream);
-  const rgpot::EAMTablePot cold(
-      {.path = path, .format = EAMTableFormat::Funcfl, .periodic = false, .skin = 0.0});
+  const rgpot::EAMTablePot cold({.path = path,
+                                 .format = EAMTableFormat::Funcfl,
+                                 .periodic = false,
+                                 .skin = 0.0});
   std::vector<double> pos = ref.pos;
   std::vector<double> built;
   int reuses = 0;
@@ -369,8 +465,9 @@ TEST_CASE("EAM table pair list follows a free cluster and a stream", "[EAMTable]
       pos[c] += 0.08 * std::cos(0.53 * static_cast<double>(c) + k);
     }
     // No cell, so the move is the plain displacement.
-    const bool keep = !built.empty() &&
-                      rgpot::nlist::withinSkin(built.data(), pos.data(), pos.size() / 3, 1.0);
+    const bool keep =
+        !built.empty() &&
+        rgpot::nlist::withinSkin(built.data(), pos.data(), pos.size() / 3, 1.0);
     const Eval got = eval(warm, pos, ref.z, nullptr);
     const Eval want = eval(cold, pos, ref.z, nullptr);
     REQUIRE(warm.listReused() == keep);

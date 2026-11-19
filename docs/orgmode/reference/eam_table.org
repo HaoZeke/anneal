@@ -79,12 +79,23 @@ Only one =Funcfl= file is read, so the LAMMPS mixing of several =.eam= files is
 not available.
 The =eam/he= and =eam/cd= layouts are not read.
 
-Periodic evaluation keeps one image of each partner, so it needs the cutoff
-under half of every face spacing of the cell.
-The constructor does not check the cutoff against a cell; it throws
-=std::invalid_argument= for a file it cannot open or parse.
-=forceImpl= throws =std::invalid_argument= for a smaller cell, for a periodic
-call without a cell, and for an atomic number that is in no element line.
+Periodic evaluation sums every image of a pair that lies inside the cutoff.
+When every face spacing is greater than twice the cutoff, that image is the
+minimum image, and =forceImpl= walks the stored neighbour list.
+When a face spacing is at most twice the cutoff, a pair can have several
+images inside the cutoff, and an atom can see a translation of itself.
+=forceImpl= then walks those images directly and does not build the stored
+list.
+The walk refuses a cell whose image extent on one axis would pass 1024, and a
+cell whose three axes together would visit more than 262144 lattice shifts
+for one pair.
+The constructor does not check the cutoff against a cell.
+It throws =std::invalid_argument= for a file it cannot open or parse.
+=forceImpl= throws =std::invalid_argument= when the image extent or the image
+count is past that limit, for a periodic call without a cell, for an
+atomic number that is in no element line, when a fractional separation is
+not finite, and when the nearest integer to that separation plus the image
+extent does not fit in an =int= lattice index.
 
 * Stress
 
@@ -106,6 +117,7 @@ The potential has no setter for them, so they change only with a new potential.
 within the cutoff plus =EAMTableConfig::skin= (1 Angstrom by default), and reuse
 it while every atom stays within half the skin of where it was at the last
 build.
+The image walk does not build or reuse that list.
 The move is measured to the nearest periodic image, so atoms that the caller
 wraps back into the cell keep the list.
 A new cell, another atom count, or a move past half the skin rebuilds it.

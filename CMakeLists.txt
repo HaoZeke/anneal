@@ -339,7 +339,8 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   endif()
 
   if(RGPOT_WITH_EAM_TABLE)
-    list(APPEND RGPOT_SOURCES CppCore/rgpot/EAMTable/EAMTablePot.cc)
+    list(APPEND RGPOT_SOURCES CppCore/rgpot/EAMTable/EAMTablePot.cc
+         CppCore/rgpot/EAMTable/EAMTableImages.cc)
   endif()
 
   if(RGPOT_BUILD_TESTS)

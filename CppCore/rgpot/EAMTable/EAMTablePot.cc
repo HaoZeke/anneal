@@ -410,7 +410,11 @@ void EAMTablePot::compute(const ForceInput &in, ForceOut *out,
       const double cy = u[2] * v[0] - u[0] * v[2];
       const double cz = u[0] * v[1] - u[1] * v[0];
       if (!(2.0 * t.cutoff < vol / std::sqrt(cx * cx + cy * cy + cz * cz))) {
-        bad("cutoff exceeds half a face spacing");
+        // Shorter than half a face: every image inside the cutoff.
+        // That walk is another translation unit, so this function stays
+        // the stored pair kernel.
+        computeAllImages(in, out, atoms);
+        return;
       }
     }
   } else {
