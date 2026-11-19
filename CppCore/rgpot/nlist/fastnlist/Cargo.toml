@@ -16,7 +16,8 @@ name = "rgpot_fastnlist"
 crate-type = ["staticlib"]
 
 [dependencies]
-linkcell = { version = "0.3.11", default-features = false }
+linkcell = { version = "=0.4.2", default-features = false }
+minimage = { version = "=0.2.3", default-features = false }
 
 [profile.release]
 lto = "thin"
