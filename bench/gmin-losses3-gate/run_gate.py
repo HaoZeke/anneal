@@ -99,7 +99,7 @@ for turn in range(N_SEEDS):
 LAYOUT_FLAGS = {
     "L1": "-C link-arg=-Wl,-z,max-page-size=65536",
     "L2": "-C link-arg=-Wl,-z,separate-code",
-    "L3": "-C link-arg=-Wl,--no-rosegment",
+    "L3": "-C link-arg=-Wl,--hash-style=sysv",
     "L4": "-C link-arg=-Wl,-z,norelro",
     "L5": "-C link-arg=-Wl,-z,max-page-size=2097152",
 }
@@ -994,6 +994,7 @@ def write_outputs(work: Path, repo: Path) -> None:
         "order2": ORDER2,
         "order6": ORDER6,
         "placement_band": [lo, hi],
+        "layouts": LAYOUT_FLAGS,
         "bin_sha256": {},
         "n_rows": len(rows),
     }
