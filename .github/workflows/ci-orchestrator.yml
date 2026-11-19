@@ -626,6 +626,8 @@ jobs:
           cache: true
           environments: devbld
           activate-environment: devbld
+      - name: Check shared Rust dependency versions
+        run: python3 scripts/check_rust_dependency_versions.py
       - name: Install cargo-nextest
         uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
         with:
