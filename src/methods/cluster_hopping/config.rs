@@ -1783,6 +1783,23 @@ impl Config {
         )
     }
 
+    /// [`Config::recommended`] in the natural length and energy units of a
+    /// unit-depth pair potential.
+    ///
+    /// The same rule is used for every pair form. Lennard-Jones is
+    /// bit-identical to [`Config::recommended`]; Morse rescales every length
+    /// from the Lennard-Jones diameter to its own pair minimum.
+    ///
+    /// ```
+    /// use anneal_core::methods::cluster_hopping::Config;
+    /// use anneal_core::potentials::PairKind;
+    /// let lj = Config::recommended_for_pair(13, PairKind::LennardJones);
+    /// assert_eq!(lj.length_scale, Config::recommended(13).length_scale);
+    /// ```
+    pub fn recommended_for_pair(n_points: usize, kind: crate::potentials::PairKind) -> Self {
+        Self::recommended_with_scales(n_points, kind.length_scale(), 1.0)
+    }
+
     /// [`Config::recommended`] with every length in `length_scale` and every
     /// energy in `energy_scale`, as [`Config::with_scales`] reads them.
     ///
