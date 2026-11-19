@@ -289,7 +289,7 @@ enum class Depth { Full, Counts };
 // potential need not move.
 template <typename Make>
 void checkPotential(const char *name, Make make, const System &s, Depth depth = Depth::Full) {
-  const bool large = s.z.size() >= rgpot::kTeamMinAtoms;
+  const bool large = s.z.size() >= rgpot::kTeamMinAtoms && s.z.size() > 1;
   const bool split = depth == Depth::Full;
   INFO(name << " on " << s.z.size() << " atoms");
   setThreads("");
@@ -507,12 +507,17 @@ TEST_CASE("onFullTeam runs every rank at once or none", "[threads][slices]") {
 }
 
 TEST_CASE("a call below kTeamMinAtoms takes one slice", "[threads][slices]") {
+  STATIC_REQUIRE(rgpot::kTeamMinAtoms ==
+                 static_cast<std::size_t>(RGPOT_TEAM_MIN_ATOMS));
   setThreads("8");
   CHECK(rgpot::teamSize(0) == 1);
-  CHECK(rgpot::teamSize(55) == 1);
+  if (55 < rgpot::kTeamMinAtoms) {
+    CHECK(rgpot::teamSize(55) == 1);
+  }
   CHECK(rgpot::teamSize(rgpot::kTeamMinAtoms - 1) == 1);
 #if defined(_OPENMP)
-  CHECK(rgpot::teamSize(rgpot::kTeamMinAtoms) == 8);
+  CHECK(rgpot::teamSize(rgpot::kTeamMinAtoms) ==
+        std::min<int>(8, static_cast<int>(rgpot::kTeamMinAtoms)));
 #else
   CHECK(rgpot::teamSize(rgpot::kTeamMinAtoms) == 1);
 #endif

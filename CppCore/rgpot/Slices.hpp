@@ -73,7 +73,11 @@ struct Range {
 /// costs more than such a call: on 8 threads a neighbour search of 64
 /// atoms, and a Sutton-Chen call on 55 to 80 atoms, took several times
 /// their one-thread time.
-inline constexpr std::size_t kTeamMinAtoms = 8192;
+#if !defined(RGPOT_TEAM_MIN_ATOMS)
+#define RGPOT_TEAM_MIN_ATOMS 8192
+#endif
+static_assert(RGPOT_TEAM_MIN_ATOMS > 0);
+inline constexpr std::size_t kTeamMinAtoms = RGPOT_TEAM_MIN_ATOMS;
 
 /// Slices for a call over `n` atoms: one below kTeamMinAtoms or when
 /// threadsRequested() is one, else threadsRequested(), at most `n`.

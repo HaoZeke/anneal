@@ -30,6 +30,7 @@ _deps = []  # Dependencies
 _linkto = []  # All the sub-libraries (potentials)
 _incdirs = []  # All the includes
 _rgpot_srcs = []
+_args += ['-DRGPOT_TEAM_MIN_ATOMS=' + get_option('team_min_atoms').to_string()]
 
 # Add conditionals
 if host_system == 'darwin'
