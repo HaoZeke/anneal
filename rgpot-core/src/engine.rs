@@ -1032,7 +1032,9 @@ impl EnginePotential {
 
     fn fail(&self, status: EngineStatus, message: String) -> Result<(), EngineError> {
         match status {
-            EngineStatus::Success => Ok(()),
+            EngineStatus::Success => Err(EngineError::Invalid(
+                "a host failure was reported with success status".into(),
+            )),
             EngineStatus::RecoverableInputFailure(code) => {
                 Err(EngineError::Recoverable { code, message })
             }
@@ -1353,7 +1355,7 @@ impl EngineSession {
             Some(failure) => self
                 .engine
                 .fail(failure.status, failure.message)
-                .and_then(|()| answer),
+                .and(answer),
             None => answer,
         }
     }

@@ -1734,3 +1734,33 @@ fn coincident_pair_reports_recoverable_eval_error_and_internal_status() {
         rgpot_tensor_free(sep_input.box_matrix);
     }
 }
+
+struct SuccessStatusFailure;
+
+impl CoordinateTransform for SuccessStatusFailure {
+    fn transform(
+        &mut self,
+        _positions: &mut [f64],
+        _box_matrix: &mut [f64; 9],
+    ) -> Result<(), EngineFailure> {
+        Err(EngineFailure {
+            status: EngineStatus::Success,
+            message: "failure with success status".into(),
+        })
+    }
+}
+
+#[test]
+fn transform_failure_with_success_status_is_an_error() {
+    let path = build("harmonic_transform_success_status", &[]);
+    let mut session = load_session(&path);
+    let answer = session.force(
+        &EngineRequest {
+            positions: &[1.0, 2.0, 3.0],
+            atomic_numbers: &[1],
+            box_matrix: &CELL,
+        },
+        Some(&mut SuccessStatusFailure),
+    );
+    assert!(matches!(answer, Err(EngineError::Invalid(_))), "{answer:?}");
+}
