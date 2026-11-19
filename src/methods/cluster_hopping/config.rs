@@ -1536,6 +1536,25 @@ pub struct Config {
     /// costs its calls and nothing else.
     #[serde(skip_serializing_if = "is_false")]
     pub branch_on_stall: bool,
+    /// Opt-in population search. [`Config::recommended`] leaves this off,
+    /// and a false value is absent from the resolved JSON, so that preset's
+    /// proposals are the ones it had without this field.
+    ///
+    /// When set, the library gains one return move, further replicas are
+    /// quenched from starts far from the incumbent, one same-basin landing
+    /// schedules one return move, and a quiet record restarts from every
+    /// parked chain. The proposal step and the acceptance temperature stay
+    /// on the preset. The dial that moves a steep well already reads the
+    /// median opening change; this search does not add a second band.
+    #[serde(skip_serializing_if = "is_false")]
+    pub adaptive_search: bool,
+    /// Keep the incumbent on the single-chain proposal stream for
+    /// [`Config::STREAM_HOLD_OPENING`] calls, then give a forked copy of
+    /// that stream the calls still left. A budget at or below that opening
+    /// does not fork. The forked walk leaves this off. Absent from the
+    /// resolved JSON when false, and false on [`Config::recommended`].
+    #[serde(skip_serializing_if = "is_false")]
+    pub stream_hold: bool,
 }
 
 /// Opening hops whose quenched energy changes set
@@ -1576,6 +1595,13 @@ pub enum ArmSelection {
 }
 
 impl Config {
+    /// Calls the incumbent stream keeps before [`Config::stream_hold`] forks.
+    ///
+    /// A budget at or below this opening does not fork, because the second
+    /// stream would have nothing left to spend. The count is an absolute
+    /// call budget, not a system size.
+    pub const STREAM_HOLD_OPENING: usize = 1 << 19;
+
     /// Canonical, versioned JSON for the fully resolved configuration.
     pub fn resolved_json(&self) -> Result<String, serde_json::Error> {
         #[derive(serde::Serialize)]
@@ -1806,6 +1832,33 @@ impl Config {
     /// ```
     pub fn recommended_for_pair(n_points: usize, kind: crate::potentials::PairKind) -> Self {
         Self::recommended_with_scales(n_points, kind.length_scale(), 1.0)
+    }
+
+    /// [`Config::recommended`] with the population search turned on.
+    ///
+    /// Two replicas on a non-reversible ladder whose top sits at twice the
+    /// cold temperature. The single-chain preset does not call this.
+    pub fn recommended_adaptive_with_scales(
+        n_points: usize,
+        length_scale: f64,
+        energy_scale: f64,
+    ) -> Self {
+        let mut cfg = Self::recommended_with_scales(n_points, length_scale, energy_scale);
+        cfg.adaptive_search = true;
+        cfg.stream_hold = true;
+        cfg.replicas = 2;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.ladder_top = 2.0;
+        cfg
+    }
+
+    /// [`Self::recommended_adaptive_with_scales`] at the Lennard-Jones scales.
+    pub fn recommended_adaptive(n_points: usize) -> Self {
+        Self::recommended_adaptive_with_scales(
+            n_points,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::REDUCED_SCALE,
+        )
     }
 
     /// [`Config::recommended`] with every length in `length_scale` and every
@@ -2294,6 +2347,8 @@ impl Config {
             hold_stereocentres: false,
             measured_energy_scale: false,
             branch_on_stall: false,
+            adaptive_search: false,
+            stream_hold: false,
         }
     }
 
@@ -2758,6 +2813,28 @@ mod coverage_behaviour {
             LocalStep::Lbfgs
         );
         assert_eq!(Config::recommended(13).local_step, LocalStep::Lbfgs);
+    }
+
+    #[test]
+    fn recommended_adaptive_stays_off_the_default_preset() {
+        let base = Config::recommended(38);
+        assert!(!base.adaptive_search);
+        assert!(!base.stream_hold);
+        assert_eq!(base.replicas, 1);
+        let base_json = base.resolved_json().unwrap();
+        assert!(!base_json.contains("adaptive_search"));
+        assert!(!base_json.contains("stream_hold"));
+        let adaptive = Config::recommended_adaptive(38);
+        assert!(adaptive.adaptive_search);
+        assert!(adaptive.stream_hold);
+        assert_eq!(adaptive.replicas, 2);
+        assert_eq!(adaptive.ladder_mode, super::LadderMode::NonReversible);
+        assert_eq!(adaptive.ladder_top, 2.0);
+        assert_eq!(Config::STREAM_HOLD_OPENING, 1 << 19);
+        assert_ne!(
+            base.resolved_sha256().unwrap(),
+            adaptive.resolved_sha256().unwrap()
+        );
     }
 
     #[test]

@@ -2635,6 +2635,89 @@ fn energy_lattice_proposal<R: Rng + ?Sized>(
     .propose(x, cfg.temperature, rng)
 }
 
+/// A start far from the structures already held, drawn on `rng`.
+///
+/// The first draw is the ordinary cluster. Later draws are kept only when
+/// their descriptor sits further from every anchor than the best so far.
+/// An empty anchor list returns the first draw, so a lone chain is unchanged.
+fn diverse_cluster_start<R: Rng + ?Sized>(
+    cfg: &Config,
+    bias: &BasinBias<ClusterFingerprint>,
+    anchors: &[Array1<f64>],
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = cfg.n_points;
+    let first = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+    if anchors.is_empty() {
+        return first;
+    }
+    let min_dist = |cv: &Array1<f64>| -> f64 {
+        anchors
+            .iter()
+            .map(|anchor| {
+                anchor
+                    .iter()
+                    .zip(cv.iter())
+                    .map(|(p, q)| (p - q) * (p - q))
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let mut best = first;
+    let mut best_dist = min_dist(&bias.cv(best.view()));
+    for _ in 1..8 {
+        let cand = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+        if cand.len() != 3 * n {
+            continue;
+        }
+        let dist = min_dist(&bias.cv(cand.view()));
+        if dist > best_dist {
+            best = cand;
+            best_dist = dist;
+        }
+    }
+    best
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct PlateauAnchorNote {
+    passed: usize,
+    parked: usize,
+    after_swap: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static PLATEAU_NOTES: std::cell::RefCell<Vec<PlateauAnchorNote>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static PLATEAU_SWAP_SEEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn note_accepted_replica_swap() {
+    PLATEAU_SWAP_SEEN.with(|seen| seen.set(true));
+}
+
+#[cfg(test)]
+fn note_plateau_anchors(passed: usize, parked: usize) {
+    let after_swap = PLATEAU_SWAP_SEEN.with(|seen| seen.get());
+    PLATEAU_NOTES.with(|notes| {
+        notes.borrow_mut().push(PlateauAnchorNote {
+            passed,
+            parked,
+            after_swap,
+        });
+    });
+}
+
+#[cfg(test)]
+fn take_plateau_notes() -> Vec<PlateauAnchorNote> {
+    PLATEAU_SWAP_SEEN.with(|seen| seen.set(false));
+    PLATEAU_NOTES.with(|notes| std::mem::take(&mut *notes.borrow_mut()))
+}
+
 /// Runs the driver until the ledger is spent.
 ///
 /// `start` is a starting configuration and `relax` performs a relaxation of the
@@ -4232,6 +4315,9 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let _caller_stop = ledger.bind_stop();
+    // Records are measured from the start of this ledger. A reused
+    // ledger keeps that origin, so calls already spent do not shift it.
+    let walk_origin = 0usize;
     let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
         relax_off_call_floor(cfg, &mut *relax, led, x, steps)
     };
@@ -4922,12 +5008,23 @@ where
     // Every rung's start is held to the first one's contract before it is
     // recorded, and keeps its validation gradient for the first step the rung
     // takes from it.
+    let mut initial_anchors: Vec<Array1<f64>> = if cfg.adaptive_search && n_rep > 1 {
+        vec![bias.cv(x.view())]
+    } else {
+        Vec::new()
+    };
+    // Further replicas are quenched before the walk. An adaptive
+    // run draws each of them far from the incumbent and from each other.
     for _ in 1..n_rep {
         // A rigid chart holds six coordinates per body, not the three a plain
         // centre draw gives; its rungs start from a fresh rigid cluster, or the
         // six-per-body potential rejects the three-per-body length.
         let s0 = if cfg.move_library.is_rigid_body() {
             random_rigid_cluster(n, cfg.min_separation, rng)
+        } else if cfg.adaptive_search {
+            let picked = diverse_cluster_start(cfg, &bias, &initial_anchors, rng);
+            initial_anchors.push(bias.cv(picked.view()));
+            picked
         } else {
             random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
         };
@@ -4955,6 +5052,22 @@ where
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
     let mut arm_counts: Vec<ArmCount> = Vec::new();
+    let mut revisit_kick = vec![false; n_rep];
+    let mut adaptive_best_seen = ledger.best;
+    let effort_divisor = if cfg.adaptive_search && chains.is_empty() {
+        1
+    } else {
+        n_rep
+    };
+    let initial_record_effort =
+        (ledger.spent().saturating_sub(walk_origin) / effort_divisor).max(1);
+    let mut replica_improve_spent = vec![0usize; n_rep];
+    let mut replica_record_quiet = vec![initial_record_effort; n_rep];
+    let mut replica_own_spent = vec![0usize; n_rep];
+    let mut prev_ledger_spent = ledger.spent();
+    let mut orbit_checks = 0usize;
+    let mut orbit_misses = 0usize;
+    let mut orbit_skip_mod = 1usize;
     // A rigid chart is not in the preset's reduced energy unit. Charts of
     // ten bodies or fewer start at the top of the acceptance window and let
     // the rate pull the factor down. A chart with more bodies stays at the
@@ -4978,8 +5091,8 @@ where
     let mut proposal_overlaps = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
-    let mut checkpoint_transition_start = 0usize;
     let mut next_checkpoint = checkpoint_interval;
+    let mut checkpoint_transition_start = 0usize;
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
     // Energy last polished by an unlike-pair quench. `NaN` until the first
@@ -6871,6 +6984,9 @@ where
         } else {
             1.0
         };
+        // The population search does not retune this. A second band of
+        // acceptance rates would be a tuned threshold, and the dial above
+        // already moves a steep well from the median opening change.
         let proposal_scale = escape * orient_scale;
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
@@ -7284,6 +7400,15 @@ where
             hops += 1;
             continue;
         }
+        // One accepted return to the same fingerprint schedules one return
+        // move. A forced response cannot schedule itself.
+        let forced_return_twin = cfg.adaptive_search && std::mem::take(&mut revisit_kick[rep]);
+        if forced_return_twin {
+            trial = ClusterMove::Twin {
+                n_points: cfg.n_points,
+            }
+            .propose(x.view(), cfg.temperature, rng);
+        }
         let editing_cage = cage_edit;
         if editing_cage {
             // One edit, then the library again. Replacing every later
@@ -7297,7 +7422,9 @@ where
             cage_edit = false;
             hops_at_lowest = hops;
         }
-        let proposal_action = if cov_fire {
+        let proposal_action = if forced_return_twin {
+            "twin".to_owned()
+        } else if cov_fire {
             "covariance".to_owned()
         } else if soft_fire && soft_cache.is_some() {
             "soft_mode".to_owned()
@@ -8769,7 +8896,23 @@ where
         // Under a shared history each minimum is completed by one chain only,
         // and every product is reported, so other chains recognise it.
         let mut orbit_offer = None;
-        if cfg.packing_surface().orbit_on_new
+        let run_orbit_now = if cfg.adaptive_search {
+            if cfg.packing_surface().orbit_on_new
+                && accept
+                && hop_room(hops)
+                && (moved_basin || cfg.point_symmetrise_every_accept)
+            {
+                orbit_checks += 1;
+                orbit_checks.is_multiple_of(orbit_skip_mod.min(8))
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+        let orbit_best_before = ledger.best;
+        if run_orbit_now
+            && cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
@@ -8827,6 +8970,19 @@ where
             }
         }
         if let Some((es, xs, sym_gradient, product_report)) = orbit_offer {
+            let orbit_improved_best = ledger.best < orbit_best_before - STRICT_IMPROVEMENT;
+            if cfg.adaptive_search {
+                if orbit_improved_best {
+                    orbit_misses = 0;
+                    orbit_skip_mod = 1;
+                } else {
+                    orbit_misses += 1;
+                    if orbit_misses >= 8 {
+                        orbit_skip_mod = (orbit_skip_mod * 2).min(8);
+                        orbit_misses = 0;
+                    }
+                }
+            }
             let mut biases: Vec<&dyn Bias> = Vec::new();
             if stalled(cfg, quiet, longest_quiet)
                 && returns_to_deposit(&bias, xs.view())
@@ -8934,6 +9090,13 @@ where
         } else {
             None
         };
+        if cfg.adaptive_search
+            && !forced_return_twin
+            && let (Some(previous), Some(now)) = (here_before, landed)
+            && previous == now
+        {
+            revisit_kick[rep] = true;
+        }
         if let (Some(sb), Some(from), Some(now)) = (superbasin.as_mut(), here_before, landed) {
             sb.observe_accepted(from, now);
             // Every accepted state is a landing point: the chain is standing
@@ -9426,6 +9589,93 @@ where
             }
         }
 
+        if cfg.adaptive_search {
+            let now_spent = ledger.spent();
+            replica_own_spent[rep] += now_spent.saturating_sub(prev_ledger_spent);
+            prev_ledger_spent = now_spent;
+            if ledger.best < adaptive_best_seen - 1e-9 {
+                adaptive_best_seen = ledger.best;
+                let record_span = replica_own_spent[rep]
+                    .saturating_sub(replica_improve_spent[rep])
+                    .max(1);
+                replica_record_quiet[rep] = replica_record_quiet[rep].max(record_span);
+                replica_improve_spent = replica_own_spent.clone();
+            }
+            // The calls that produced a record say how long a productive
+            // walk can stay quiet. A restart waits for four times the
+            // longest such interval on this replica, and a restart that
+            // does not improve the record doubles that clock.
+            let plateau_calls = replica_record_quiet[rep].saturating_mul(4);
+            let threshold = if n_rep > 1 && rep == 0 {
+                plateau_calls.saturating_mul(2)
+            } else {
+                plateau_calls
+            };
+            if hops > 0
+                && !cfg.move_library.is_rigid_body()
+                && replica_own_spent[rep].saturating_sub(replica_improve_spent[rep]) >= threshold
+                && ledger.remaining() > cfg.relax_steps
+                && hop_room(hops)
+            {
+                // The live replica is not in `chains`: it was removed when
+                // it became active. Every entry left is a parked chain, and
+                // a swap moves those entries, so the list index is not a
+                // replica id. Dropping one leaves the restart with the tabu
+                // list alone.
+                let mut anchors: Vec<Array1<f64>> = chains
+                    .iter()
+                    .map(|chain| bias.cv(chain.coordinates.view()))
+                    .collect();
+                #[cfg(test)]
+                note_plateau_anchors(anchors.len(), chains.len());
+                anchors.extend(tabu.iter().cloned());
+                let fresh = diverse_cluster_start(cfg, &bias, &anchors, rng);
+                let (ef, xf) = relax(ledger, fresh.view(), cfg.relax_steps);
+                let restart_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    ef,
+                    xf.view(),
+                    &mut unconverged_records,
+                );
+                let after_spent = ledger.spent();
+                replica_own_spent[rep] += after_spent.saturating_sub(prev_ledger_spent);
+                prev_ledger_spent = after_spent;
+                hops += 1;
+                restarts += 1;
+                quiet = 0;
+                longest_quiet = 0;
+                replica_record_quiet[rep] = replica_record_quiet[rep]
+                    .max(replica_own_spent[rep].saturating_sub(replica_improve_spent[rep]));
+                if ef.is_finite() && xf.len() == x.len() {
+                    let reached = identity.basin_of(xf.view());
+                    adopt_minimum!(
+                        ef,
+                        xf,
+                        restart_gradient,
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        Some((here, reached)),
+                        Some("plateau-restart"),
+                        hops
+                    );
+                    soft_cache = None;
+                    basin_entry = None;
+                }
+                if ledger.best < adaptive_best_seen - 1e-9 {
+                    adaptive_best_seen = ledger.best;
+                    replica_improve_spent = replica_own_spent.clone();
+                }
+                if ledger.target_reached() {
+                    break HopStop::Target;
+                }
+                if ledger.remaining() == 0 {
+                    break HopStop::of_closed(ledger);
+                }
+            }
+        }
+
         if n_rep > 1 {
             if !ladder_built && rep == 0 {
                 // Welford over the cold rung's energies. This is the whole
@@ -9541,6 +9791,10 @@ where
                                 }
                             })
                         };
+                        #[cfg(test)]
+                        if !taken.is_empty() {
+                            note_accepted_replica_swap();
+                        }
                         for k in taken {
                             chains.swap(k, k + 1);
                         }
@@ -9599,6 +9853,8 @@ where
                         };
                         if rng.random::<f64>() < p {
                             swaps_accepted += 1;
+                            #[cfg(test)]
+                            note_accepted_replica_swap();
                             chains.swap(k, j);
                             if let Some(t) = transport.as_mut() {
                                 t.swap(k, j);
@@ -10380,6 +10636,221 @@ mod tests {
                 assert_eq!(selected, 0, "selection mode {mode} used a parked arm");
             }
         }
+    }
+
+    #[test]
+    fn a_restart_after_a_swap_keeps_every_parked_anchor() {
+        let mut cfg = Config::for_cluster(2);
+        cfg.adaptive_search = true;
+        cfg.stream_hold = false;
+        cfg.replicas = 2;
+        cfg.displacement_only = true;
+        cfg.relax_steps = 0;
+        cfg.screen_steps = 0;
+        cfg.max_hops = Some(2000);
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+        let mut ledger = Ledger::new(3000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            (-1.0, x.to_owned())
+        };
+        take_plateau_notes();
+        let mut rng = StdRng::seed_from_u64(82);
+        let outcome =
+            run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        let notes = take_plateau_notes();
+        assert!(outcome.restarts >= 1, "the plateau restart did not run");
+        let after_swap: Vec<_> = notes.iter().filter(|note| note.after_swap).collect();
+        assert!(
+            !after_swap.is_empty(),
+            "no restart ran after an accepted swap"
+        );
+        for note in &after_swap {
+            assert!(note.parked >= 1, "the restart had no parked chain");
+            assert_eq!(
+                note.passed, note.parked,
+                "a parked anchor was dropped after the swap"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reused_recommended_ledger_keeps_the_original_checkpoint_clock() {
+        let mut cfg = Config::recommended(13);
+        assert!(!cfg.adaptive_search && !cfg.stream_hold);
+        cfg.max_hops = Some(2);
+        let interval = 300usize;
+        let mut ledger = Ledger::new(1_200);
+        assert!(ledger.charge_many(400));
+        let prior = ledger.spent();
+        assert!(ledger.record_quench_boundary(
+            prior - 1,
+            -1.0,
+            Array1::zeros(39),
+            Some(Array1::zeros(39)),
+        ));
+        let start = Array1::zeros(39);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            (0.0, x.to_owned())
+        };
+        let mut first = Vec::new();
+        let mut checkpoint = |state: ChainCheckpoint<'_>| {
+            let energies: Vec<f64> = state
+                .quench_boundaries()
+                .iter()
+                .map(|boundary| boundary.energy())
+                .collect();
+            first.push((state.charged(), state.hops(), energies));
+            CheckpointAction::Continue
+        };
+        let mut rng = StdRng::seed_from_u64(86);
+        run_with_energy_gradient_at_checkpoints(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            None,
+            &mut rng,
+            interval,
+            &mut checkpoint,
+        )
+        .expect("first recommended pass");
+        let (charged, _, energies) = first.first().expect("a checkpoint on the original clock");
+        assert!(
+            energies.contains(&-1.0),
+            "the pre-recorded boundary was dropped"
+        );
+        assert!(
+            *charged < prior + interval,
+            "checkpoint waited for a restarted clock at {charged}, prior {prior}"
+        );
+
+        let at_second = ledger.spent();
+        let mut second = Vec::new();
+        let mut checkpoint = |state: ChainCheckpoint<'_>| {
+            let energies: Vec<f64> = state
+                .quench_boundaries()
+                .iter()
+                .map(|boundary| boundary.energy())
+                .collect();
+            second.push((state.charged(), energies));
+            CheckpointAction::Continue
+        };
+        let mut rng = StdRng::seed_from_u64(87);
+        run_with_energy_gradient_at_checkpoints(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            None,
+            &mut rng,
+            interval,
+            &mut checkpoint,
+        )
+        .expect("second recommended pass");
+        let (charged, energies) = second.first().expect("the reused ledger still checkpoints");
+        assert!(energies.contains(&-1.0));
+        assert!(
+            *charged < at_second + interval,
+            "the second pass restarted its clock at {charged}, entry {at_second}"
+        );
+    }
+
+    #[test]
+    fn a_reused_nonadaptive_ladder_keeps_the_original_checkpoint_clock() {
+        let mut cfg = Config::recommended(13);
+        cfg.replicas = 2;
+        cfg.adaptive_search = false;
+        cfg.stream_hold = false;
+        assert!(cfg.replicas > 1);
+        cfg.max_hops = Some(2);
+        let interval = 300usize;
+        let mut ledger = Ledger::new(1_200);
+        assert!(ledger.charge_many(400));
+        let prior = ledger.spent();
+        assert!(ledger.record_quench_boundary(
+            prior - 1,
+            -1.0,
+            Array1::zeros(39),
+            Some(Array1::zeros(39)),
+        ));
+        let start = Array1::zeros(39);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            (0.0, x.to_owned())
+        };
+        let mut first = Vec::new();
+        let mut checkpoint = |state: ChainCheckpoint<'_>| {
+            let energies: Vec<f64> = state
+                .quench_boundaries()
+                .iter()
+                .map(|boundary| boundary.energy())
+                .collect();
+            first.push((state.charged(), energies));
+            CheckpointAction::Continue
+        };
+        let mut rng = StdRng::seed_from_u64(89);
+        run_with_energy_gradient_at_checkpoints(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            None,
+            &mut rng,
+            interval,
+            &mut checkpoint,
+        )
+        .expect("first non-adaptive ladder pass");
+        let (charged, energies) = first.first().expect("a checkpoint on the original clock");
+        assert!(
+            energies.contains(&-1.0),
+            "the pre-recorded boundary was dropped"
+        );
+        assert!(
+            *charged < prior + interval,
+            "the ladder restarted its clock at {charged}, prior {prior}"
+        );
+
+        let at_second = ledger.spent();
+        let mut second = Vec::new();
+        let mut checkpoint = |state: ChainCheckpoint<'_>| {
+            let energies: Vec<f64> = state
+                .quench_boundaries()
+                .iter()
+                .map(|boundary| boundary.energy())
+                .collect();
+            second.push((state.charged(), energies));
+            CheckpointAction::Continue
+        };
+        let mut rng = StdRng::seed_from_u64(90);
+        run_with_energy_gradient_at_checkpoints(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            None,
+            &mut rng,
+            interval,
+            &mut checkpoint,
+        )
+        .expect("second non-adaptive ladder pass");
+        let (charged, energies) = second.first().expect("the reused ledger still checkpoints");
+        assert!(energies.contains(&-1.0));
+        assert!(
+            *charged < at_second + interval,
+            "the ladder's second pass restarted its clock at {charged}, entry {at_second}"
+        );
     }
 
     #[test]
