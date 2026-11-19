@@ -129,6 +129,9 @@ def main(argv: list[str]) -> int:
         if proc.returncode != 0:
             print(proc.stderr[-500:], file=sys.stderr)
             return 125
+        for line in proc.stdout.splitlines():
+            if line.startswith("system="):
+                print(line, flush=True)
         trace = parse_trace(proc.stdout)
         if args.record is not None:
             args.record.write_text("".join(f"{energy}\n" for energy in trace))
