@@ -39,3 +39,4 @@ rgpot_set_last_error
 rgpot_fused_settings_default
 rgpot_potential_set_fused_settings
 rgpot_potential_fused_error_kind
+rgpot_potential_new_eam_table

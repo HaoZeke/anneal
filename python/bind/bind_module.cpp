@@ -56,6 +56,9 @@
 #ifdef RGPOT_HAS_EXPR
 #include "rgpot/ExprPot/ExprPot.hpp"
 #endif
+#ifdef RGPOT_HAS_EAM_TABLE
+#include "rgpot/EAMTable/EAMTablePot.hpp"
+#endif
 #ifdef RGPOT_HAS_FORTRAN_POTS
 #include "rgpot/fortran/FortranPots.hpp"
 #endif
@@ -81,6 +84,22 @@ void translate_invalid_argument(const std::exception_ptr &ptr, void *) {
     PyErr_SetString(PyExc_ValueError, err.what());
   }
 }
+
+#ifdef RGPOT_HAS_EAM_TABLE
+rgpot::EAMTableFormat eam_table_format(const std::string &name) {
+  if (name == "funcfl" || name == "eam") {
+    return rgpot::EAMTableFormat::Funcfl;
+  }
+  if (name == "setfl" || name == "alloy" || name == "eam/alloy") {
+    return rgpot::EAMTableFormat::Setfl;
+  }
+  if (name == "fs" || name == "eam/fs" || name == "finnis-sinclair") {
+    return rgpot::EAMTableFormat::FinnisSinclair;
+  }
+  throw std::invalid_argument(
+      "EAM table format must be funcfl, setfl, or fs, got '" + name + "'");
+}
+#endif
 
 #ifdef RGPOT_HAS_DFTD3
 rgpot::D3Damping d3_damping(const std::string &name) {
@@ -503,6 +522,11 @@ NB_MODULE(_core, m) {
 #else
   m.attr("has_fortran_pots") = false;
 #endif
+#ifdef RGPOT_HAS_EAM_TABLE
+  m.attr("has_eam_table") = true;
+#else
+  m.attr("has_eam_table") = false;
+#endif
 #ifdef RGPOT_HAS_IPI
   m.attr("has_ipi") = true;
 #else
@@ -696,6 +720,37 @@ NB_MODULE(_core, m) {
     return out;
   });
   rgpot::pybind::bind_calls(morse_cls);
+
+#ifdef RGPOT_HAS_EAM_TABLE
+  auto eam_table =
+      nb::class_<PotHolder<rgpot::EAMTablePot>>(m, "EAMTablePot");
+  eam_table.def(
+      "__init__",
+      [](PotHolder<rgpot::EAMTablePot> *self, const std::string &file,
+         const std::string &format, bool periodic, bool stress, double skin) {
+        const rgpot::EAMTableFormat table_format = eam_table_format(format);
+        new (self) PotHolder<rgpot::EAMTablePot>([=] {
+          rgpot::EAMTableConfig cfg;
+          cfg.path = file;
+          cfg.format = table_format;
+          cfg.periodic = periodic;
+          cfg.stress = stress;
+          cfg.skin = skin;
+          return std::make_unique<rgpot::EAMTablePot>(cfg);
+        });
+      },
+      nb::arg("file"), nb::arg("format"), nb::arg("periodic") = true,
+      nb::arg("stress") = false, nb::arg("skin") = 1.0,
+      "Tabulated EAM or Finnis-Sinclair potential. format is funcfl, "
+      "setfl, or fs. Energies and lengths use the table's units.");
+  eam_table.def_prop_ro(
+      "cutoff",
+      [](const PotHolder<rgpot::EAMTablePot> &self) {
+        return self.primary().cutoff();
+      },
+      "Radial cutoff read from the table.");
+  rgpot::pybind::bind_calls(eam_table);
+#endif
 
 #ifdef RGPOT_HAS_FORTRAN_POTS
   bind_default_pot<rgpot::fortranpots::SWPot>(m, "SWPot");

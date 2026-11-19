@@ -25,6 +25,8 @@ has_xckernel: bool = True
 
 has_fortran_pots: bool = True
 
+has_eam_table: bool = True
+
 has_ipi: bool = True
 
 def echo_f64(values: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> NDArray[numpy.float64]: ...
@@ -145,6 +147,59 @@ class MorsePot:
         """
 
     def config(self) -> dict: ...
+
+    def caps(self) -> dict: ...
+
+    def __call__(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple: ...
+
+    def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
+        """
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
+        """
+
+    def evaluate_per_atom(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
+        """
+        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. The kernel runs with the interpreter released.
+        """
+
+    def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
+        """
+        One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
+        """
+
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
+
+class EAMTablePot:
+    def __init__(self, file: str, format: str, periodic: bool = True, stress: bool = False, skin: float = 1.0) -> None:
+        """
+        Tabulated EAM or Finnis-Sinclair potential. format is funcfl, setfl, or fs. Energies and lengths use the table's units.
+        """
+
+    @property
+    def cutoff(self) -> float:
+        """Radial cutoff read from the table."""
 
     def caps(self) -> dict: ...
 

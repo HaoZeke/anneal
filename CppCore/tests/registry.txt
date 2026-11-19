@@ -314,6 +314,8 @@ UmaProvenanceTest | tests metatomic | custom workdir=. | @metatomic
 SkalaPotTest | tests core rpc skala | custom suite=skala workdir=. | @skala
 PotentialHvpTest | tests core rust_core | unit potential_hvp_test PotentialHvpTest.cc | @rust_core
 abi_core_symbols | rust_core linux | custom | @rust_core
+EAMTableCAbiTest | tests rust_core | custom | @rust_core
+EAMTableHandleTest | tests core rust_core | unit eam_table_handle_test EAMTableHandleTest.cc | @rust_core
 EngineTableTest | tests core rpc posix | custom workdir=. | @engine_plugins
 lj_eval | core posix | custom timeout=60 | @engines
 lj_engine | core posix | custom timeout=60 | @engines

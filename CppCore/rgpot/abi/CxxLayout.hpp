@@ -165,11 +165,11 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 1;
 /// did not increase.
 ///
 /// This is not `RGPOT_ABI_LAYOUT_REVISION`. The C ABI stamp in `rgpot.h`
-/// is major 1, minor 5, layout revision 1. Minor 1 added
+/// is major 1, minor 6, layout revision 1. Minor 1 added
 /// `rgpot_eindir_abi_compatible`, minor 2 the Hessian-vector functions,
 /// minor 3 the fused-cache settings and error kind, minor 4 the Taylor
-/// jet functions and minor 5 the engine and RPC Hessian-vector exports.
-/// No exported C struct
+/// jet functions, minor 5 the engine and RPC Hessian-vector exports and
+/// minor 6 `rgpot_potential_new_eam_table`. No exported C struct
 /// of that header changed layout. The neighbour query is `RGPOT_NLIST_ABI` 4.
 /// The C API is exported from librgpot, so it has no shared library of
 /// its own and rides this SONAME. `librgpot_mpi` stays at soversion 3

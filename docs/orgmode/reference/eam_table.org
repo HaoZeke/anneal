@@ -49,6 +49,37 @@ rgpot::EAMTablePot pot({.path = "CuNi.eam.alloy",
 =read_eam_table= parses a stream into an =EAMTable=, and a second constructor
 takes that table directly.
 
+* From the C ABI, Rust and Python
+
+A host that links =rgpot-core= and no C++ kernel builds the same potential with
+=rgpot_potential_new_eam_table=, declared in =rgpot.h= since C ABI 1.6.
+It takes the path, a format code and =periodic=, returns a handle of the usual
+kind and reports a refusal as NULL with =rgpot_last_error=; the entry is in
+[[file:c_abi.org][C ABI of rgpot-core]].
+The format codes are
+=RGPOT_EAM_TABLE_AUTO= (the suffix chooses), =RGPOT_EAM_TABLE_FUNCFL=,
+=RGPOT_EAM_TABLE_SETFL= and =RGPOT_EAM_TABLE_FINNIS_SINCLAIR=, the rows of the
+table above.
+C++ calls =rgpot::PotentialHandle::eam_table=, which throws =rgpot::Error=
+instead of returning NULL.
+
+The Rust crate holds its own evaluation of the table, in
+=rgpot_core::eam_table=, because =rgpot-core= links no C++ kernel and the handle
+must work in a build that has none.
+=EamTablePotential::open(path, format, periodic)= builds it and
+=EamTablePotential::force= returns the energy and the forces.
+It repeats the steps of the previous section, so the two implementations are
+checked against the same LAMMPS data rather than against each other.
+It differs from =EAMTablePot= in what it leaves out: no stress, no pair list and
+no per-atom terms.
+It visits every pair and takes the nearest image of the partner from rounded
+fractional coordinates, so a periodic call needs every face spacing above twice
+the cutoff, and the call fails with =RGPOT_INVALID_PARAMETER= for a smaller
+cell.
+
+Python builds the C++ potential, not the Rust one:
+=rgpot.EAMTablePot(file, format)= is in [[file:python_api.org][the Python API]].
+
 * Agreement with LAMMPS
 
 The tables go through the steps of =src/MANYBODY/pair_eam.cpp=, so a file gives
@@ -181,3 +212,28 @@ blocks.
 The A-A, A-B and B-B dimers give -2, -11 and -28 in the documented order.
 Reading the sections or the blocks inside a section the other way round changes
 at least one of them.
+
+* The copper vacancy
+
+=rgpot-core/tests/eam_table.rs=, =rgpot-core/tests/c/eam_table_capi.c= and =EAMTableHandleTest= evaluate 107 copper atoms around one vacancy through the Rust wrapper, the C ABI and the C++ handle, and compare with LAMMPS version 22 Jul 2025 (20250722), =pair_style eam=
+with =pair_coeff * * Cu_u3.eam=.
+=CppCore/tests/data/eam_table/make_vacancy_ref.py= writes =cu_u3_vacancy.ref=.
+The script takes the 108 sites of a 3 x 3 x 3 fcc cell with a = 3.615 Angstrom,
+moves every atom by a uniform random amount up to 0.12 Angstrom in each
+coordinate (seed 23), removes the first atom, and runs LAMMPS with
+=units metal=, =atom_style atomic=, =boundary p p p=, =neighbor 1.0 bin= and
+=run 0=.
+The cell is a 10.845 Angstrom cube, so every face spacing is 2.19 times the 4.95
+Angstrom cutoff.
+The file is
+=Cu_u3.eam= with sha256 =3436c491a4c75ea8b7141adbc6ee382a118f5fdb47f609c2a660fc1eb772599f=, the copy in the LAMMPS =potentials= directory that =CppCore/tests/data/eam_table=
+holds.
+The energy is -371.54901154618921 eV.
+
+| Case          | energy gap (eV) | largest force gap (eV/Angstrom) |
+|---------------+-----------------+---------------------------------|
+| Vacancy cell  |         4e-13   |                         6e-15   |
+
+The tests ask for 1e-11 eV and 1e-12 eV/Angstrom.
+The same suites read three refusals: a missing file, a file whose arrays end
+early (=malformed_funcfl.eam=) and a NULL or empty path.
