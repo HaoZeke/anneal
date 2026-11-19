@@ -244,9 +244,30 @@ def fast_from_setup(text: str) -> str:
     return "enabled" if enabled else "disabled"
 
 
+_MPI_FOUND = re.compile(r"Dependency mpi for host machine found:\s+(YES|NO)\b")
+
+
 def mpi_from_setup(text: str) -> str:
-    enabled = "Dependency mpi for host machine found:" in text or "mpic++ found: YES" in text
-    disabled = "Dependency mpi for host machine skipped: feature with_mpi disabled" in text
+    """Resolve with_mpi from the setup log.
+
+    Meson prints ``Dependency mpi for host machine found: YES`` or ``NO``.
+    The ``found:`` prefix is not enough: a ``NO`` line must stay disabled.
+    ``mpic++ found: YES`` is a separate probe and does not override ``NO``.
+    """
+    found_yes = False
+    found_no = False
+    for line in text.splitlines():
+        match = _MPI_FOUND.search(line)
+        if match is None:
+            continue
+        if match.group(1) == "YES":
+            found_yes = True
+        else:
+            found_no = True
+    skipped = "Dependency mpi for host machine skipped: feature with_mpi disabled" in text
+    mpicxx = "mpic++ found: YES" in text
+    enabled = found_yes or (mpicxx and not found_no)
+    disabled = found_no or skipped
     if enabled == disabled:
         fail("setup log does not resolve with_mpi")
     return "enabled" if enabled else "disabled"
