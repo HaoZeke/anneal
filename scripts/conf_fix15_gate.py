@@ -22,6 +22,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -216,10 +217,21 @@ def score_panel1(args: argparse.Namespace, provenance: dict) -> None:
     hc, Molecule = import_scorer(source_root)
     molecules = {name: Molecule(hc.molecules()[name]) for name in SYSTEMS1}
     jobs = panel1_jobs(args.work)
+    shared_cache = args.work / "panel1-polished"
+    shared_cache.mkdir(parents=True, exist_ok=True)
+    for job_dir, _gate, _info in jobs:
+        local_cache = job_dir / "gate-polished.npz"
+        if not local_cache.is_file():
+            continue
+        key = hashlib.sha256((job_dir / "candidates.xyz").read_bytes()).hexdigest()
+        destination = shared_cache / f"{key}.npz"
+        if not destination.is_file():
+            shutil.copyfile(local_cache, destination)
     scored = []
     for job_dir, gate, info in jobs:
         molecule = molecules[info["molecule"]]
-        cache = job_dir / "gate-polished.npz"
+        key = hashlib.sha256((job_dir / "candidates.xyz").read_bytes()).hexdigest()
+        cache = shared_cache / f"{key}.npz"
         if cache.is_file():
             import numpy as np
 
