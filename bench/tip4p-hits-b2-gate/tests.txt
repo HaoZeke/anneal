@@ -1,0 +1,11 @@
+# tip4p-hits-b2 test suite parity
+# Arm A tree 7a2ba49b37241a8fe42b2c45c226374de6d92274
+# Arm B kit tree bf5617649af17a19b5a3cd704c676014055a689b
+# One compile-contract test invokes cargo, so the test binaries ran after cargo test --no-run.
+suite=cargo_test_default arm=A cmd="cargo +1.88.0 test --locked" status=ok suites=188 passed=2250 failed=0 ignored=0
+suite=cargo_test_default arm=B cmd="cargo +1.88.0 test --locked" status=ok suites=188 passed=2253 failed=0 ignored=0
+suite=cargo_test_ci_features arm=A cmd="cargo +1.88.0 test --locked --features ira,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex" status=build_failed detail=vesin_src_and_libira_absent
+suite=cargo_test_ci_features arm=B cmd="cargo +1.88.0 test --locked --features ira,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex" status=build_failed detail=vesin_src_and_libira_absent
+suite=pytest arm=A cmd="pytest pytest/" status=ok passed=1609 failed=0 skipped=166
+suite=pytest arm=B cmd="pytest pytest/" status=ok passed=1609 failed=0 skipped=166
+b_only_failures=0
