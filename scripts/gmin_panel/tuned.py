@@ -1028,13 +1028,16 @@ def report(args: argparse.Namespace, table: dict[str, Cell]) -> None:
 
 
 def verify(args: argparse.Namespace, table: dict[str, Cell]) -> None:
+    if not args.system or len(args.system) != 1 or args.code is None or args.seed is None:
+        raise SystemExit("verify needs one --system, --code and --seed")
+    system = args.system[0]
     rows = read_rows(args.rows)
     matches = [
         row for row in rows
-        if row["system"] == args.system and row["code"] == args.code and row["seed"] == str(args.seed)
+        if row["system"] == system and row["code"] == args.code and row["seed"] == str(args.seed)
     ]
     if not matches:
-        raise SystemExit(f"no stored row {args.system} {args.code} {args.seed}")
+        raise SystemExit(f"no stored row {system} {args.code} {args.seed}")
     row = matches[-1]
     command = row["command"]
     assert_clean(command)
