@@ -173,6 +173,32 @@ class QuietMinimaHopping(MinimaHopping):
         with self._optimizer(self._atoms, logfile=None) as opt:
             opt.run(fmax=self._fmax)
 
+    def _unique_minimum_position(self):
+        server = getattr(self, "_dmax", None)
+        if server is None:
+            return super()._unique_minimum_position()
+        self._read_minima()
+        unique = True
+        closest = 99999.0
+        current = np.asarray(self._atoms.positions, dtype=np.float64)
+        for minimum in self._minima:
+            # ComparePositions(translate=True)(minimum, current). The first
+            # geometry is shifted by its first atom; every atom of the second
+            # is tried as the origin. The scalar walk matches that distance
+            # to a unit in the last place. Within 1e-9 of the threshold the
+            # decision is taken from ASE's own compare, so a last-bit
+            # difference cannot change acceptance.
+            distance = server.distance(minimum.positions, current)
+            if abs(distance - self._minima_threshold) <= 1.0e-9:
+                from ase.optimize.minimahopping import ComparePositions
+
+                distance = float(ComparePositions(translate=True)(minimum, self._atoms))
+            if distance < self._minima_threshold:
+                unique = False
+            if distance < closest:
+                closest = distance
+        return unique, closest
+
     def _molecular_dynamics(self, resume=None):
         if resume is not None:
             raise RuntimeError("this run does not resume a trajectory")
@@ -238,6 +264,16 @@ def run_minima_hopping(atoms, seed: int, length_scale: float, energy_scale: floa
     """One minima-hopping search. Stops when the calculator raises."""
     atoms.set_masses(np.ones(len(atoms)))
     install_fast_compare()
+    from eval_client import DmaxServer
+
+    server = DmaxServer(len(atoms))
+    try:
+        _run_minima_hopping(atoms, seed, length_scale, energy_scale, fmax, server)
+    finally:
+        server.close()
+
+
+def _run_minima_hopping(atoms, seed: int, length_scale: float, energy_scale: float, fmax: float, server) -> None:
     search = QuietMinimaHopping(
         atoms,
         T0=minima_temperature_kelvin(energy_scale, units.kB),
@@ -251,4 +287,5 @@ def run_minima_hopping(atoms, seed: int, length_scale: float, energy_scale: floa
         logfile="hop.log",
         rng=np.random.RandomState(seed),
     )
+    search._dmax = server
     search(totalsteps=10**9)
