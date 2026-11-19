@@ -15,12 +15,18 @@ REV=${GMIN_PANEL_REV:-c2de652dca0bc75e2b0cb4afffac91fd656404e4}
 BASE_REV=${GMIN_PANEL_BASE_REV:-628773d6837ea2d959a27256ff4163b21162fd4d}
 WORK=${GMIN_PANEL_WORK:-/work/gmin-panel}
 MODE=${GMIN_PANEL_MODE:-panel}
-if [[ $MODE == fix ]]; then
-  OUT=${GMIN_PANEL_OUT:-$ROOT/bench/gmin-losses}
+if [[ $MODE == fix || $MODE == fix2 ]]; then
+  if [[ $MODE == fix2 ]]; then
+    OUT=${GMIN_PANEL_OUT:-$ROOT/bench/gmin-losses2}
+    ARM=fix2
+  else
+    OUT=${GMIN_PANEL_OUT:-$ROOT/bench/gmin-losses}
+    ARM=fix
+  fi
   RUNNER=run_fix_gate.py
   SUMMARY=(--summary "$OUT/summary.csv")
-  BASE_SUMMARY=(--base-revision "$BASE_REV")
-  BASE_RUN=(--base-revision "$BASE_REV" --base-bin "$WORK/base-bin" --base-tree "$WORK/base-src")
+  BASE_SUMMARY=(--base-revision "$BASE_REV" --arm "$ARM")
+  BASE_RUN=(--base-revision "$BASE_REV" --base-bin "$WORK/base-bin" --base-tree "$WORK/base-src" --arm "$ARM")
 else
   OUT=${GMIN_PANEL_OUT:-$ROOT/bench/gmin-panel}
   RUNNER=run_panel.py
@@ -95,7 +101,7 @@ if [ -n "$(git -C "$WORK/anneal-src" status --porcelain)" ]; then
 fi
 build_bins candidate "$WORK/anneal-src" "$REV" "$WORK/target" "$WORK/bin"
 
-if [[ $MODE == fix ]]; then
+if [[ $MODE == fix || $MODE == fix2 ]]; then
   tree "$WORK/base-src" "$BASE_REV"
   apply_once "$WORK/base-src" "$ROOT/bench/gmin-losses/no-template-base.patch"
   git -C "$WORK/base-src" add examples src/methods/cluster_hopping/config.rs
@@ -111,7 +117,7 @@ fi
 
 GMIN_PANEL_WORK=$WORK bash "$HERE/build_gmin.sh"
 sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"
-if [[ $MODE == fix ]]; then
+if [[ $MODE == fix || $MODE == fix2 ]]; then
   sha256sum "$WORK"/base-bin/* > "$WORK/base-bin-sha256.txt"
 fi
 cp -f "$WORK/gmin-source.txt" "$OUT/gmin-source.txt"

@@ -8974,7 +8974,12 @@ where
             height = AdaptiveHeight::new(0.1, cfg.height_revisits, bias_height);
             bias.set_height(height.height());
         }
-        dial.observe(accept);
+        // `plateau_heat` temporarily elevates acceptance to leave a local trap;
+        // feeding those heated accepts into `AcceptDial` shrinks
+        // `dial.temperature()` and inflates the step scale when heat drops.
+        if heat <= 1.0 + 1e-12 {
+            dial.observe(accept);
+        }
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage

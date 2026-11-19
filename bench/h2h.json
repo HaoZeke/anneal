@@ -1650,6 +1650,35 @@
           "seed": "seed"
         }
       ]
+    },
+    {
+      "rule": "gmin_losses2",
+      "competitors": [
+        "GMIN"
+      ],
+      "runners": [
+        "scripts/gmin_panel/run_fix_gate.py",
+        "scripts/gmin_panel/run_panel.py",
+        "scripts/gmin_panel/enter_bench.sh"
+      ],
+      "budgets": {
+        "source": "scripts/gmin_panel/run_panel.py",
+        "name": "PAPER_BUDGETS"
+      },
+      "seeds": {
+        "source": "scripts/gmin_panel/run_fix_gate.py",
+        "name": "GATE_SEEDS"
+      },
+      "asv": "bench/gmin-losses2/benchmarks/gmin_losses2.py",
+      "rows": [
+        {
+          "path": "bench/gmin-losses2/rows.csv",
+          "key": "system",
+          "arm": "code",
+          "budget": "budget",
+          "seed": "seed"
+        }
+      ]
     }
   ],
   "not_h2h": {

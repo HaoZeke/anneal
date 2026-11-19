@@ -1063,6 +1063,25 @@ rule gmin_losses:
         """
 
 
+# Reviewed base against pair-scaled general search (`fix2`) on the full
+# 13-system GMIN panel, preserving LJ75 and all other LJ/metal trajectories
+# bit-for-bit while keeping `AcceptDial` decoupled from `plateau_heat`.
+#   snakemake -s workflow/Snakefile gmin_losses2
+rule gmin_losses2:
+    output:
+        "bench/gmin-losses2/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        rev=$(git rev-parse HEAD)
+        export GMIN_PANEL_MODE=fix2
+        export GMIN_PANEL_REV=$rev
+        export GMIN_PANEL_WORK=/work/gmin-losses2
+        bash scripts/gmin_panel/enter_bench.sh
+        bash scripts/gmin_panel/enter_bench.sh --summarize
+        """
+
+
 # Paired (H2O)16 rows. Not part of `rule all`. The script rewrites the
 # summary from the committed seeds and does not start a search.
 #   snakemake -s workflow/Snakefile h2o16_crest

@@ -42,6 +42,14 @@ ARMS = {
         "H2H_ACCEPTANCE_ADAPT": "1",
         "H2H_POPULATION": "1",
     },
+    "fix2": {
+        "H2H_TEMPLATES": "0",
+        "H2H_MACKAY": "0",
+        "H2H_PAIR_SCALE": "1",
+        "H2H_PLATEAU_HEAT": "0",
+        "H2H_ACCEPTANCE_ADAPT": "0",
+        "H2H_POPULATION": "0",
+    },
 }
 
 SUMMARY_FIELDS = [
@@ -85,11 +93,13 @@ def rows_for(
     code: str,
 ) -> list[dict[str, str]]:
     seed_set = set(HELDOUT_SEEDS if campaign == "heldout" else GATE_SEEDS)
-    expected_revision = {
-        "baseline": base_revision,
-        "fix": harness_revision,
-        "gmin": panel.GMIN_REV,
-    }[code]
+    expected_revision = (
+        base_revision
+        if code == "baseline"
+        else panel.GMIN_REV
+        if code == "gmin"
+        else harness_revision
+    )
     selected: dict[int, dict[str, str]] = {}
     for row in rows:
         seed = int(row["seed"])
@@ -173,19 +183,19 @@ def comparison(
 
 
 def summarise(
-    rows: list[dict[str, str]], revision: str, base_revision: str
+    rows: list[dict[str, str]], revision: str, base_revision: str, arm: str = "fix"
 ) -> list[dict[str, str]]:
     summary = []
     for system, *_rest in panel.SYSTEMS:
         baseline = rows_for(rows, revision, base_revision, "gate", system, "baseline")
-        fix = rows_for(rows, revision, base_revision, "gate", system, "fix")
+        fix = rows_for(rows, revision, base_revision, "gate", system, arm)
         if baseline and fix:
             summary.append(
                 comparison(
                     "gate",
                     system,
                     "baseline",
-                    "fix",
+                    arm,
                     baseline,
                     fix,
                     revision,
@@ -193,14 +203,14 @@ def summarise(
                 )
             )
     for system in LOSS_SYSTEMS:
-        fix = rows_for(rows, revision, base_revision, "heldout", system, "fix")
+        fix = rows_for(rows, revision, base_revision, "heldout", system, arm)
         gmin = rows_for(rows, revision, base_revision, "heldout", system, "gmin")
         if fix and gmin:
             summary.append(
                 comparison(
                     "heldout",
                     system,
-                    "fix",
+                    arm,
                     "gmin",
                     fix,
                     gmin,
@@ -212,9 +222,9 @@ def summarise(
 
 
 def write_summary(
-    path: Path, rows: list[dict[str, str]], revision: str, base_revision: str
+    path: Path, rows: list[dict[str, str]], revision: str, base_revision: str, arm: str = "fix"
 ) -> None:
-    panel.write_csv(path, SUMMARY_FIELDS, summarise(rows, revision, base_revision))
+    panel.write_csv(path, SUMMARY_FIELDS, summarise(rows, revision, base_revision, arm))
 
 
 def shared_start(
@@ -253,6 +263,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--lj-data", type=Path)
     parser.add_argument("--morse-data", type=Path)
     parser.add_argument("--heldout", action="store_true")
+    parser.add_argument("--arm", choices=("fix", "fix2"), default="fix")
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--summarize", action="store_true")
@@ -263,6 +274,7 @@ def main(argv: list[str]) -> int:
             panel.read_rows(args.rows),
             args.revision,
             args.base_revision,
+            args.arm,
         )
         return 0
     if socket.gethostname() != "bench" or os.sched_getaffinity(0) != {0}:
@@ -305,7 +317,7 @@ def main(argv: list[str]) -> int:
     systems = tuple(system for system in available_systems if not args.system or system in args.system)
     default_seeds = HELDOUT_SEEDS if args.heldout else GATE_SEEDS
     seeds = tuple(args.seed) if args.seed else default_seeds
-    codes = ("baseline", "fix", "gmin") if args.heldout else ("baseline", "fix")
+    codes = ("baseline", args.arm, "gmin") if args.heldout else ("baseline", args.arm)
     lj_data = args.lj_data.read_text()
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
@@ -318,7 +330,7 @@ def main(argv: list[str]) -> int:
     for system in systems:
         for label, bin_dir, tree in (
             ("baseline", args.base_bin, args.base_tree),
-            ("fix", args.bin, args.tree),
+            (args.arm, args.bin, args.tree),
         ):
             budget, reference = panel.binary_budget(bin_dir, tree, system)
             if (
@@ -330,11 +342,13 @@ def main(argv: list[str]) -> int:
             coords = args.work / "starts" / system / f"{seed}.xyz"
             shared_start(args.base_bin, args.base_tree, system, seed, coords)
             for code in codes:
-                code_revision = {
-                    "baseline": args.base_revision,
-                    "fix": args.revision,
-                    "gmin": panel.GMIN_REV,
-                }[code]
+                code_revision = (
+                    args.base_revision
+                    if code == "baseline"
+                    else panel.GMIN_REV
+                    if code == "gmin"
+                    else args.revision
+                )
                 key = (system, code, str(seed), code_revision, args.revision)
                 if key in done:
                     continue
@@ -392,6 +406,7 @@ def main(argv: list[str]) -> int:
         panel.read_rows(args.rows),
         args.revision,
         args.base_revision,
+        args.arm,
     )
     return 0
 
