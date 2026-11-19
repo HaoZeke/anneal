@@ -281,21 +281,34 @@ def fortran_from_setup(text: str) -> str:
     return "enabled" if found else "disabled"
 
 
-def ipi_from_option(configured: object, system: str) -> str:
-    state = feature_state(display_option(configured), "with_ipi")
-    if state == "disabled" or system == "windows":
-        return "disabled"
-    return "enabled"
+def ipi_from_pkgconfig(text: str) -> str:
+    """Resolve with_ipi from the pkg-config file the build wrote.
+
+    The Cflags line carries ``-DRGPOT_HAS_IPI=TRUE`` only when the build
+    enabled the socket server. The option value alone is not a record of
+    that choice.
+    """
+    cflags = [line for line in text.splitlines() if line.startswith("Cflags:")]
+    if len(cflags) != 1:
+        fail("pkg-config record has no single Cflags line")
+    tokens = cflags[0].split()
+    return "enabled" if "-DRGPOT_HAS_IPI=TRUE" in tokens else "disabled"
 
 
 def resolved_features(
-    setup_text: str, configured: dict[str, object], system: str
+    setup_text: str,
+    configured: dict[str, object],
+    system: str,
+    pkgconfig_text: str,
 ) -> list[tuple[str, str, str]]:
+    ipi = ipi_from_pkgconfig(pkgconfig_text)
+    if system == "windows" and ipi == "enabled":
+        fail("with_ipi is enabled in the pkg-config record on windows")
     detected = {
         "with_fast_nlist": fast_from_setup(setup_text),
         "with_mpi": mpi_from_setup(setup_text),
         "with_fortran_pots": fortran_from_setup(setup_text),
-        "with_ipi": ipi_from_option(configured["with_ipi"], system),
+        "with_ipi": ipi,
     }
     rows: list[tuple[str, str, str]] = []
     for name in RESOLVED_FEATURES:
@@ -331,12 +344,13 @@ def load_meson_leg(leg: dict[str, object], root: Path) -> dict[str, object]:
             fail(f"Meson buildoptions omit {name}")
     setup_text = (root / str(leg["setup_log"])).read_text(encoding="utf-8")
     system = host_system(root / str(leg["machines"]))
+    pkgconfig_text = (root / str(leg["pkgconfig"])).read_text(encoding="utf-8")
     counts = parse_meson_summary((root / str(leg["log"])).read_text(encoding="utf-8"))
     return {
         "runner": "meson",
         "title": require_recordable("title", leg["title"]),
         "commands": [setup, compile_cmd, test_cmd],
-        "resolved": resolved_features(setup_text, configured, system),
+        "resolved": resolved_features(setup_text, configured, system, pkgconfig_text),
         "counts": counts,
         "summary": meson_summary(counts),
     }
@@ -393,7 +407,7 @@ def load_leg(path: Path) -> dict[str, object]:
     common = {"title", "runner", "build", "setup", "compile", "test", "log", "configured"}
     runner = payload.get("runner")
     if runner == "meson":
-        expected = common | {"setup_log", "machines"}
+        expected = common | {"setup_log", "machines", "pkgconfig"}
     elif runner == "cmake":
         expected = common | {"setup_log"}
     else:
@@ -446,8 +460,9 @@ def render_verification(toolchain: dict[str, str], legs: list[dict[str, object]]
         if leg["runner"] == "meson":
             lines += [
                 "",
-                "Resolved features are parsed from the setup log and the",
-                "host system. Configured is the option value.",
+                "Resolved features other than with_ipi are parsed from the",
+                "setup log. with_ipi is parsed from the pkg-config Cflags",
+                "the build wrote. Configured is the option value.",
                 "",
                 "|Option|Configured|Resolved|",
                 "|---|---|---|",

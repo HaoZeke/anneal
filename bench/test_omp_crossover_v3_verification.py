@@ -123,6 +123,16 @@ def build_fixture(directory: Path) -> tuple[Path, Path, Path]:
     write(directory / "hidden-setup.log", setup_log())
     write(directory / "hidden-machines.json", json.dumps({"host": {"system": "linux"}}) + "\n")
     write(directory / "hidden-options.json", json.dumps(meson_options()))
+    write(
+        directory / "hidden-rgpot.pc",
+        "\n".join(
+            [
+                "Name: rgpot",
+                "Cflags: -I${includedir} -DRGPOT_HAS_POTLIB=TRUE -DRGPOT_HAS_IPI=TRUE",
+                "",
+            ]
+        ),
+    )
     write(directory / "hidden-ctest.log", ctest_log())
     write(directory / "hidden-cache.txt", cmake_cache())
     write(
@@ -158,6 +168,7 @@ def build_fixture(directory: Path) -> tuple[Path, Path, Path]:
         "configured": "hidden-options.json",
         "setup_log": "hidden-setup.log",
         "machines": "hidden-machines.json",
+        "pkgconfig": "hidden-rgpot.pc",
     }
     cmake_leg = {
         "title": "CMake CTest, RPC and cache enabled",
@@ -329,6 +340,43 @@ def main() -> None:
         require("-Dwith_rpc=true" in text and "|with_fast_nlist|disabled|disabled|" in text, "meson options were dropped")
         require("|with_fortran_pots|auto|enabled|" in text, "fortran resolution was dropped")
         require("|with_ipi|auto|enabled|" in text, "i-PI resolution was dropped")
+        require(
+            "with_ipi is parsed from the pkg-config Cflags" in text,
+            "note does not name the pkg-config record for with_ipi",
+        )
+        disabled_leg = json.loads(meson_path.read_text(encoding="utf-8"))
+        disabled_pc = directory / "disabled-rgpot.pc"
+        write(
+            disabled_pc,
+            "Name: rgpot\nCflags: -I${includedir} -DRGPOT_HAS_POTLIB=TRUE\n",
+        )
+        disabled_leg["pkgconfig"] = disabled_pc.name
+        disabled_leg_path = directory / "disabled-ipi-leg.json"
+        write(disabled_leg_path, json.dumps(disabled_leg) + "\n")
+        disabled_note = directory / "disabled-ipi.md"
+        disabled_render = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "render",
+                "--toolchain",
+                str(toolchain_path),
+                "--leg",
+                str(disabled_leg_path),
+                "--output",
+                str(disabled_note),
+            ],
+            cwd=directory,
+            text=True,
+            capture_output=True,
+        )
+        if disabled_render.returncode != 0:
+            require_exit(disabled_render.stderr.strip() or disabled_render.stdout.strip())
+        disabled_text = disabled_note.read_text(encoding="utf-8")
+        require(
+            "|with_ipi|auto|disabled|" in disabled_text,
+            "missing i-PI cflag was still reported as enabled",
+        )
         require("/opt/secret" not in text, "note leaked a setup-log path")
         require("|RGPOT_WITH_RPC|ON|" in text, "cmake cache value was dropped")
         require("|RGPOT_HAVE_MPI|OFF|" in text and "|Fortran|GNU 13.3.0|" in text, "cmake detection was dropped")
