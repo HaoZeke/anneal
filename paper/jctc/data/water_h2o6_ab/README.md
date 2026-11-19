@@ -14,14 +14,25 @@ engine.
 | file | content |
 | --- | --- |
 | `runs.csv` | one row per job: 192 seeds, 4 arms, 2 builds |
-| `crest_frames.csv` | one row per CREST frame of the `crest` and `crest_fair` arms, with the verdict of the build that ran it, the verdict of the other build, and the RMSD against each single reference |
+| `external_manifest.csv` | relative path, sha256, size in bytes, row count and a one-line description of every frame-level table that is kept outside git |
 | `inputs.csv` | name, size and sha256 of every input, binary and library of the session |
 | `inputs/` | the start geometry and the three references of the session, the references in their original atom order, and the sha256 of each |
 | `meta.json` | settings of the session |
 | `summary.md` | the output of `analyze.py` on the two CSV files and the per-seed table of the earlier record |
 | `preflight.txt` | finite-difference table of the engine buffer and short runs of both builds with both buffer signs, run before the session |
 | `diagnostics/b_seed83.txt` | one rerun of build B on seed 83 after the session, to see why its session row has one call; it replaces nothing |
-| `controls/` | CREST controls run after the session, one directory per control, with `summary.md` |
+| `controls/` | CREST controls run after the session, one directory per control with its `controls_runs.csv`, and `summary.md` |
+
+## Files kept outside git
+
+The frame-level tables are not in git: `crest_frames.csv`, with one row per
+CREST frame of the `crest` and `crest_fair` arms, and the `controls_frames.csv`
+of every control directory. `external_manifest.csv` lists each of them with its
+relative path, sha256, size in bytes, number of data rows and a one-line
+description. The files are published on the HaoZeke/anneal-paper-data dataset
+under `water_h2o6_ab/`, each named `<sha256>-<basename>`. The two controls
+without frames, `noise-0.3` and `noise-0.6`, have the same table of a header
+line only, and so the same name.
 
 `summary.md` and `controls/summary.md` are regenerated from the files of this
 directory with
