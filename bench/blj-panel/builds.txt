@@ -1,0 +1,45 @@
+[arm A]
+arm=A
+revision=bc16d35cf13e71c2edaf343b80fd8c41368631d4
+tree=5f746b218dee3774616745b2a84cced311ec4f10
+toolchain=1.88.0
+rustc=rustc 1.88.0 (6b00bc388 2025-06-23)
+cargo=cargo 1.88.0 (873a06493 2025-05-10)
+profile=release locked
+driver_h2h_blj=7b48f3bb8234d922031f841dc2658ae9f0983c0a26cf612dddfb3c80181dade6
+24202bb682093de59bbaf9c523cf246f413a78ee016afe6c15c7972b338e9b8e  h2h_blj
+1c1d942b5f71bcdedef37d4e3cae5db853c241b9f4e38df831318c14030ce440  h2h_gmin_proof
+e51d4aa0fe3eaa84dae34ee688e28bdf32c1e33ca606eaf1da5b37a80357e4dd  h2h_morse
+6fe9b5a36923b8e30fde9e7754600a00e929b2a36e3c8fcd323d48713525f0a5  h2h_sc
+
+[arm B]
+arm=B
+revision=3192eaa63e2fe2619a482a6d1e19219d1c7db0a8
+tree=e1b1087093f2be749d86fd3b3486cf27b038c4e3
+toolchain=1.88.0
+rustc=rustc 1.88.0 (6b00bc388 2025-06-23)
+cargo=cargo 1.88.0 (873a06493 2025-05-10)
+profile=release locked
+driver_h2h_blj=7b48f3bb8234d922031f841dc2658ae9f0983c0a26cf612dddfb3c80181dade6
+6502887a0d7da0b38e28dbff119dc6ba9b59af59d43fd2cd390d5cd84d418678  h2h_blj
+d172cd329d10df85bb563d37c767e66c3eae989e301ceaefa5d90d9e57f5dbb3  h2h_gmin_proof
+e6a812fd1e78a70dee78f178b0d3c2f102cb13e57c164536170bddbb1cea3193  h2h_morse
+28e379f58f30f31e47bffd15dbb3accc5f47b70aabd4632baaeb2ac4b9a60248  h2h_sc
+
+[sutton-chen library]
+source=https://github.com/OmniPotentRPC/rgpot
+revision=8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e
+build=meson release
+options=with_fast_nlist=disabled with_highway=disabled with_rpc=false with_cache=false
+compiler=g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+library=librgpot.so (librgpot.so.3.7.0)
+sha256=79489096fe0b7a243b2acd79b33a6a7ae7bb0e32516e21c2b414cfba134f4a05
+
+[harness]
+revision=565fde1ae7aab8b73b68739eb3b5106c8d2d9b23
+tracked_changes=no
+run_panel.py_sha256=a161f3b79a32d3733a52f891a4cd11a75fd4703416792d5f1a965fff6c12d2cd
+h2h_blj.rs_sha256=7b48f3bb8234d922031f841dc2658ae9f0983c0a26cf612dddfb3c80181dade6
+enter_bench.sh_sha256=2034e450822fca307a4bfcf82996dcc45c755428af5dd4ce9196ea0897d95a67
+build_arms.sh_sha256=0aa9ecf97f6860df9a75647b6b09f158d8d9cfd22c77b1d35ead609dc28a3c91
+build_rgpot.sh_sha256=d0b6919aaaf878012257f5eede4bedf419d07396c4b0e0ffa4a7eadc842268fd

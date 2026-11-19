@@ -457,10 +457,7 @@
           "budget": "budget",
           "seed": "seed"
         }
-      ],
-      "missing_outputs": {
-        "bench/blj-panel/summary.csv": "written from rows.csv when the gate has run every seed"
-      }
+      ]
     },
     {
       "rule": "pimc_lj38",
