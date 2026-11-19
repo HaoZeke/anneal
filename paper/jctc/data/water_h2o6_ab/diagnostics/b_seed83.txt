@@ -1,0 +1,58 @@
+Diagnostic rerun of build B on seed 83, outside the session, with the inputs of the session and a budget of 4000 calls.
+It was run once after the session, to see why the session row of this seed has one call. It is not part of the results and replaces nothing.
+
+calls seen by the shim: 3
+
+standard error of the build:
+geometry_rejected 1 min_pair_A 0.677238
+geometry_rejected 2 min_pair_A 0.677238
+geometry_rejected 3 min_pair_A 0.677238
+geometry_rejected 4 min_pair_A 0.677238
+seed_done: 83 force_calls=1 wall_seconds=14.009578 best_energy=inf
+
+report of the build:
+seed: 83
+start_monomers_intact: true
+start_spread_steps: 3
+start_oh_min_A: 0.957776
+start_oh_max_A: 0.957776
+best_energy: inf
+best_monomers_intact: false
+best_oh_min_A: NaN
+best_oh_max_A: NaN
+isomer: unassigned
+isomer_rmsd_A: none
+isomer_gate_A: 0.598496
+isomer_reason: dissociated monomer
+first_hit_calls: none
+first_hit_wall_seconds: none
+first_hit_isomer: none
+first_prism_calls: none
+first_prism_wall_seconds: none
+force_calls: 1
+wall_seconds: 14.009578
+force_calls_per_second: 0.071380
+hops: 12001
+hop_stop: budget
+basins: 1
+converged: 0
+quenches: 1651
+hit: 0
+prism_rmsd_A: none
+prism_delta_eV: inf
+answer_gradient: 0
+external_polish: none
+external_polish_calls: 0
+external_polish_wall_seconds: 0.000000
+phase_before_wall_seconds: 0.024966
+phase_search_seconds: 14.009561
+phase_lbfgs_seconds: 0.000002
+phase_lbfgs_calls: 0
+phase_answer_polish: library
+phase_external_setup_seconds: 0.000000
+phase_crest_check_seconds: 0.000000
+phase_crest_check_calls: 0
+phase_lbfgs2_seconds: 0.000000
+phase_lbfgs2_calls: 0
+phase_after_wall_seconds: 0.000004
+phase_matched_wall_seconds: 14.018155

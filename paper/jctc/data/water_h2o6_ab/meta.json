@@ -1,0 +1,19 @@
+{
+  "arms": [
+    "anneal",
+    "polish_fair",
+    "crest",
+    "crest_fair"
+  ],
+  "seeds": "0-191",
+  "budget": 4000,
+  "search_budget": 3382,
+  "polish_budget": 618,
+  "polish_gtol_eV_A": 0.0005,
+  "polish_history": 10,
+  "core": 5,
+  "affinity": [
+    5
+  ],
+  "wall_s": 34261.0
+}

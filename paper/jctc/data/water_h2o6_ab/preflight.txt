@@ -1,0 +1,34 @@
+finite-difference sign check of the buffer
+
+real engine
+energy_eV: -829.142130133
+coordinate  0: dE/dx finite difference +0.115812  buffer -0.115812  buffer/difference -1.0000
+coordinate  4: dE/dx finite difference +0.154539  buffer -0.154539  buffer/difference -1.0000
+coordinate  7: dE/dx finite difference -0.513408  buffer +0.513408  buffer/difference -1.0000
+coordinate 13: dE/dx finite difference +1.617469  buffer -1.617468  buffer/difference -1.0000
+coordinate 30: dE/dx finite difference +0.412674  buffer -0.412674  buffer/difference -1.0000
+
+shim, force mode
+energy_eV: -829.142130133
+coordinate  0: dE/dx finite difference +0.115812  buffer -0.115812  buffer/difference -1.0000
+coordinate  4: dE/dx finite difference +0.154539  buffer -0.154539  buffer/difference -1.0000
+coordinate  7: dE/dx finite difference -0.513408  buffer +0.513408  buffer/difference -1.0000
+coordinate 13: dE/dx finite difference +1.617469  buffer -1.617468  buffer/difference -1.0000
+coordinate 30: dE/dx finite difference +0.412674  buffer -0.412674  buffer/difference -1.0000
+
+shim, gradient mode
+energy_eV: -829.142130133
+coordinate  0: dE/dx finite difference +0.115812  buffer +0.115812  buffer/difference +1.0000
+coordinate  4: dE/dx finite difference +0.154539  buffer +0.154539  buffer/difference +1.0000
+coordinate  7: dE/dx finite difference -0.513408  buffer -0.513408  buffer/difference +1.0000
+coordinate 13: dE/dx finite difference +1.617469  buffer +1.617468  buffer/difference +1.0000
+coordinate 30: dE/dx finite difference +0.412674  buffer +0.412674  buffer/difference +1.0000
+
+one seed, budget 1500
+code | engine buffer | best energy eV | monomers intact | force calls | isomer | reason
+A | real engine | -829.8214847662565 | true | 1500 | unassigned | outside gate
+A | shim force | -829.8214847662565 | true | 1500 | unassigned | outside gate
+A | shim gradient | inf | false | 1500 | unassigned | dissociated monomer
+B | real engine | inf | false | 1125 | unassigned | dissociated monomer
+B | shim force | inf | false | 1125 | unassigned | dissociated monomer
+B | shim gradient | -829.8522190186809 | true | 1500 | prism | inside gate
