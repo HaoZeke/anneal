@@ -181,14 +181,54 @@ impl FlooredThompson {
 
     /// Chooses an arm.
     pub fn select<R: Rng + ?Sized>(&mut self, rng: &mut R) -> usize {
+        self.select_where(rng, |_| true)
+    }
+
+    /// Chooses among the arms for which `open` is true.
+    pub fn select_where<R, F>(&mut self, rng: &mut R, open: F) -> usize
+    where
+        R: Rng + ?Sized,
+        F: Fn(usize) -> bool,
+    {
+        let unrestricted = (0..self.len()).all(&open);
+        let open_arms: Vec<_> = if unrestricted {
+            Vec::new()
+        } else {
+            (0..self.len()).filter(|&arm| open(arm)).collect()
+        };
+        assert!(
+            unrestricted || !open_arms.is_empty(),
+            "at least one arm must be open"
+        );
         self.t += 1;
         let floor = (self.floor_scale / (self.t as f64).sqrt()).min(0.5);
         if rng.random::<f64>() < floor {
-            return rng.random_range(0..self.len());
+            let width = if unrestricted {
+                self.len()
+            } else {
+                open_arms.len()
+            };
+            let drawn = rng.random_range(0..width);
+            return if unrestricted {
+                drawn
+            } else {
+                open_arms[drawn]
+            };
         }
-        let mut best = 0;
+        let mut best = if unrestricted { 0 } else { open_arms[0] };
         let mut best_draw = f64::NEG_INFINITY;
-        for k in 0..self.len() {
+        let candidates: &[usize] = if unrestricted { &[] } else { &open_arms };
+        if unrestricted {
+            for k in 0..self.len() {
+                let draw = sample_beta(self.alpha[k], self.beta[k], rng);
+                if draw > best_draw {
+                    best_draw = draw;
+                    best = k;
+                }
+            }
+            return best;
+        }
+        for &k in candidates {
             let draw = sample_beta(self.alpha[k], self.beta[k], rng);
             if draw > best_draw {
                 best_draw = draw;
@@ -513,6 +553,26 @@ mod discovery_accounting_tests {
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn an_open_thompson_draw_does_not_allocate() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut open = FlooredThompson::new(6);
+        let allocated = crate::test_alloc::count_allocations(|| {
+            for _ in 0..64 {
+                open.select_where(&mut rng, |_| true);
+            }
+        });
+        assert_eq!(allocated, 0, "an open arm list built a vector");
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut closed = FlooredThompson::new(6);
+        let allocated = crate::test_alloc::count_allocations(|| {
+            for _ in 0..8 {
+                closed.select_where(&mut rng, |arm| arm != 1);
+            }
+        });
+        assert!(allocated > 0, "a closed arm list did not build a vector");
+    }
 
     #[test]
     fn temperature_respects_the_descent_boundary() {
@@ -851,9 +911,30 @@ impl DepthAllocator {
 
     /// Draws an arm by Thompson sampling on the posterior predictive.
     pub fn select<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
+        self.select_where(rng, |_| true)
+    }
+
+    /// As [`Self::select`], drawing only arms for which `open` is true.
+    ///
+    /// A parked arm is not sampled, so the random stream of the arms that
+    /// remain is the stream those arms would have drawn on their own.
+    ///
+    /// # Panics
+    ///
+    /// When no arm is open, as every other selection mode does.
+    pub fn select_where<R, F>(&self, rng: &mut R, open: F) -> usize
+    where
+        R: Rng + ?Sized,
+        F: Fn(usize) -> bool,
+    {
         let mut best = 0usize;
         let mut best_v = f64::NEG_INFINITY;
+        let mut any_open = false;
         for k in 0..self.mu.len() {
+            if !open(k) {
+                continue;
+            }
+            any_open = true;
             // Predictive is Student-t with 2 alpha degrees of freedom, centred
             // at mu, scaled by beta (kappa + 1) / (alpha kappa). An arm with no
             // evidence has a very small kappa and so an enormous spread, which
@@ -866,6 +947,7 @@ impl DepthAllocator {
                 best = k;
             }
         }
+        assert!(any_open, "at least one arm must be open");
         best
     }
 
@@ -899,6 +981,23 @@ mod depth_allocator_tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    #[should_panic(expected = "at least one arm must be open")]
+    fn a_depth_draw_with_every_arm_closed_is_rejected() {
+        let allocator = DepthAllocator::new(3);
+        let mut rng = StdRng::seed_from_u64(5);
+        allocator.select_where(&mut rng, |_| false);
+    }
+
+    #[test]
+    fn a_single_open_depth_arm_is_always_the_draw() {
+        let allocator = DepthAllocator::new(4);
+        let mut rng = StdRng::seed_from_u64(5);
+        for _ in 0..16 {
+            assert_eq!(allocator.select_where(&mut rng, |arm| arm == 2), 2);
+        }
+    }
 
     #[test]
     fn sufficient_statistics_reconstruct_every_posterior_parameter() {

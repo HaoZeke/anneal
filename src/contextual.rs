@@ -150,13 +150,49 @@ impl ContextualAllocator {
 
     /// Picks a move for `context` by Thompson sampling.
     pub fn select<R: Rng + ?Sized>(&mut self, context: ArrayView1<f64>, rng: &mut R) -> usize {
+        self.select_where(context, rng, |_| true)
+    }
+
+    /// Picks among the moves for which `open` is true.
+    pub fn select_where<R, F>(&mut self, context: ArrayView1<f64>, rng: &mut R, open: F) -> usize
+    where
+        R: Rng + ?Sized,
+        F: Fn(usize) -> bool,
+    {
+        let unrestricted = (0..self.arms.len()).all(&open);
+        let open_arms: Vec<_> = if unrestricted {
+            Vec::new()
+        } else {
+            (0..self.arms.len()).filter(|&arm| open(arm)).collect()
+        };
+        assert!(
+            unrestricted || !open_arms.is_empty(),
+            "at least one move must be open"
+        );
         let k = if rng.random::<f64>() < self.floor {
             self.forced += 1;
-            rng.random_range(0..self.arms.len())
-        } else {
+            if unrestricted {
+                rng.random_range(0..self.arms.len())
+            } else {
+                open_arms[rng.random_range(0..open_arms.len())]
+            }
+        } else if unrestricted {
             let mut best = 0usize;
             let mut best_score = f64::NEG_INFINITY;
             for a in 0..self.arms.len() {
+                let sd = (self.shared.variance(context) + self.arms[a].variance(context)).sqrt()
+                    * self.exploration;
+                let score = self.value(a, context) + sd * standard_normal(rng);
+                if score > best_score {
+                    best_score = score;
+                    best = a;
+                }
+            }
+            best
+        } else {
+            let mut best = open_arms[0];
+            let mut best_score = f64::NEG_INFINITY;
+            for a in open_arms {
                 // Sampled value: posterior mean plus a normal draw scaled by
                 // the posterior standard deviation at this context. A move
                 // never tried in this region has a wide posterior and can win
@@ -248,6 +284,31 @@ mod tests {
     use ndarray::array;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    fn an_open_context_draw_allocates_no_arm_vector() {
+        let context = array![1.0, 0.0, 0.0];
+        let arm_vector = 8 * std::mem::size_of::<usize>();
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut open = ContextualAllocator::new(8, 3, 0.0);
+        let open_allocs = crate::test_alloc::count_sized(arm_vector, || {
+            for _ in 0..16 {
+                open.select_where(context.view(), &mut rng, |_| true);
+            }
+        });
+        assert_eq!(open_allocs, 0, "an open arm list built a vector");
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut closed = ContextualAllocator::new(8, 3, 0.0);
+        let closed_allocs = crate::test_alloc::count_sized(arm_vector, || {
+            for _ in 0..4 {
+                closed.select_where(context.view(), &mut rng, |arm| arm != 1);
+            }
+        });
+        assert!(
+            closed_allocs > 0,
+            "a closed arm list did not build a vector"
+        );
+    }
 
     /// Two contexts, two moves, and each move is right in one of them. A
     /// context-free allocator cannot represent this at all: both moves have the
