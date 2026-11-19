@@ -13,7 +13,7 @@ rust-version = "1.89"
 
 [lib]
 name = "rgpot_fastnlist"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 linkcell = { version = "=0.4.2", default-features = false }

@@ -116,25 +116,31 @@ int main(void) {
 *** Meson
 
 The =with_rust_core= option (default =false=) adds a =custom_target= in
-=meson.build= that runs =cargo build= on =rgpot-core/Cargo.toml=.
+=meson.build= that runs =cargo build= through =scripts/build_rust_core.py=.
 Cargo writes to =<builddir>/cargo-target/debug=, or to
 =<builddir>/cargo-target/release= when =buildtype= is =release=.
-Meson links the resulting =librgpot_core.a= and adds =rgpot-core/include= and
-=include= to the include path.
+The script copies the archive to the build directory, and Meson links that
+copy.
+Ninja builds the archive before anything that links it, so a fresh
+=meson setup= and =meson compile= need no earlier cargo run:
+
+#+attr_rgpot: syntax
+#+begin_src bash
+meson setup bbdir -Dwith_rust_core=true
+meson compile -C bbdir
+#+end_src
+
+Meson also adds =rgpot-core/include= and =include= to the include path.
 The =rpc= cargo feature is enabled when =with_rpc= or =with_rpc_client_only= is
 on.
 The =cache= cargo feature is enabled when =with_cache= is on.
 
-=meson setup= looks for =librgpot_core.a= in that directory, so a fresh setup
-fails until cargo has built it once.
-Build the crate into the build directory first, with the same features:
-
-#+attr_rgpot: syntax
-#+begin_src bash
-cargo build --manifest-path rgpot-core/Cargo.toml --target-dir bbdir/cargo-target
-meson setup bbdir -Dwith_rust_core=true
-meson compile -C bbdir
-#+end_src
+When the fast pair list is on as well, the archive is =librgpot_bundle.a=.
+It is built from =rgpot-bundle=, a crate that links =rgpot-core= and the pair
+list once.
+Each of those is a Rust static library with its own copy of the Rust runtime,
+and linking both defines that runtime twice.
+The bundle exports the same C symbols as the two archives.
 
 *** Standalone Rust
 

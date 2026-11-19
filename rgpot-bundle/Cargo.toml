@@ -1,0 +1,46 @@
+# Copyright 2023--present rgpot developers
+#
+# One static library that carries rgpot-core and the linkcell/minimage pair
+# list. Each is a Rust staticlib that embeds its own copy of std and
+# compiler_builtins, so linking both archives defines those symbols twice.
+# This crate links them once, and the meson build uses it in place of the
+# two archives when with_rust_core and the fast pair list are both on.
+#
+# Cargo.lock holds the versions of the registry crates. It also records the
+# version of rgpot-core, which moves with each release, so the build does
+# not pass --locked: cargo rewrites that one line and leaves the rest.
+[workspace]
+
+[package]
+name = "rgpot-bundle"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "rgpot-core and the fast pair list in one staticlib"
+# The pair list kernels need AVX-512 target features, stable from 1.89.
+rust-version = "1.89"
+
+[lib]
+name = "rgpot_bundle"
+crate-type = ["staticlib"]
+
+[features]
+rpc = ["rgpot-core/rpc"]
+cache = ["rgpot-core/cache"]
+
+[dependencies]
+rgpot-core = { path = "../rgpot-core" }
+rgpot_fastnlist = { path = "../CppCore/rgpot/nlist/fastnlist" }
+
+# The standalone pair list archive is always built with --release. Keep its
+# kernels optimised under a debug build too, without touching rgpot-core.
+[profile.dev.package.rgpot_fastnlist]
+opt-level = 3
+[profile.dev.package.linkcell]
+opt-level = 3
+[profile.dev.package.minimage]
+opt-level = 3
+
+[profile.release.package.rgpot_fastnlist]
+codegen-units = 1

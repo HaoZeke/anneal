@@ -46,7 +46,7 @@ Then:
    declaring a baseline name.
 
 In a Meson build with =with_rust_core= on Linux, the test =abi_core_symbols=
-fails when =librgpot_core.so= no longer exports a baseline name.
+fails when the Rust archive no longer exports a baseline name.
 =scripts/abi_baseline.txt= and =scripts/abi_baseline_fast.txt= are the same
 check for the neighbour-list and fast-list exports of =librgpot= (Meson test
 =abi_symbols=).

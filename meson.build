@@ -732,18 +732,17 @@ endif
 # --------------------- Rust Core (rgpot-core)
 #
 # Build the Rust crate via Cargo and link the resulting static library.
-# The crate also generates include/rgpot.h via cbindgen.
+# The crate also generates include/rgpot.h via cbindgen. The cargo options
+# are set here; the pair list block below builds the archive when both are
+# on, and the continuation after it builds it otherwise.
 
 if get_option('with_rust_core')
     cargo = find_program('cargo', required: true)
 
-    # Determine Cargo build profile and library name
+    # Cargo build profile; the script that runs cargo takes it by name.
+    _cargo_profile_dir = 'debug'
     if get_option('buildtype') == 'release'
         _cargo_profile_dir = 'release'
-        _cargo_args = ['build', '--release']
-    else
-        _cargo_profile_dir = 'debug'
-        _cargo_args = ['build']
     endif
 
     # Add feature flags for the Rust crate
@@ -758,93 +757,7 @@ if get_option('with_rust_core')
         _cargo_features += ['cache']
     endif
 
-    if _cargo_features.length() > 0
-        _cargo_args += ['--features', ','.join(_cargo_features)]
-    endif
-
     _rgpot_core_dir = meson.current_source_dir() / 'rgpot-core'
-
-    # Build the Rust crate; produces librgpot_core.a and include/rgpot.h
-    rgpot_rust_target = custom_target(
-        'rgpot_rust_core',
-        command: [
-            cargo,
-            _cargo_args,
-            '--manifest-path',
-            _rgpot_core_dir / 'Cargo.toml',
-            '--target-dir',
-            meson.current_build_dir() / 'cargo-target',
-        ],
-        output: ['librgpot_core.a'],
-        build_by_default: true,
-        console: true,
-    )
-
-    # Link the Rust static library
-    _rust_target_dir = meson.current_build_dir() / 'cargo-target' / _cargo_profile_dir
-    rgpot_rust_lib = cppc.find_library(
-        'rgpot_core',
-        dirs: [_rust_target_dir],
-        required: true,
-        static: true,
-    )
-
-    # Thread and dl libraries needed by the Rust runtime
-    thread_dep = dependency('threads')
-    dl_dep = cppc.find_library('dl', required: false)
-
-    _deps += [rgpot_rust_lib, thread_dep, dl_dep]
-
-    # librgpot links the archive and keeps only the members it references,
-    # so the C ABI of rgpot-core is checked on the cdylib cargo builds
-    # next to it.
-    if host_machine.system() == 'linux'
-        test(
-            'abi_core_symbols',
-            find_program('scripts/abi_symbols.sh'),
-            args: [
-                '-p',
-                '^rgpot_',
-                _rust_target_dir / 'librgpot_core.so',
-                files('scripts/abi_core_baseline.txt'),
-            ],
-            depends: rgpot_rust_target,
-            timeout: 30,
-        )
-    endif
-
-    # The EAM table constructor as a C host calls it, on the archive itself.
-    if get_option('with_tests')
-        _eam_table_capi = executable(
-            'eam_table_capi_test',
-            'rgpot-core/tests/c/eam_table_capi.c',
-            include_directories: include_directories(
-                'rgpot-core' / 'include',
-                'include',
-            ),
-            dependencies: [
-                rgpot_rust_lib,
-                thread_dep,
-                dl_dep,
-                meson.get_compiler('c').find_library('m', required: false),
-            ],
-            link_language: 'c',
-            build_by_default: true,
-        )
-        test(
-            'EAMTableCAbiTest',
-            _eam_table_capi,
-            args: [meson.current_source_dir() / 'CppCore/tests/data/eam_table'],
-            depends: rgpot_rust_target,
-            timeout: 30,
-        )
-    endif
-
-    # Include paths: generated C header + C++ RAII wrappers
-    _incdirs += [
-        include_directories('rgpot-core' / 'include'),  # rgpot.h (cbindgen)
-        include_directories('include'),  # rgpot/*.hpp (C++ RAII)
-    ]
 endif
 
 # --------------------- linkcell / minimage pair list
@@ -914,14 +827,26 @@ if has_fast_nlist
         get_option('default_library') == 'static'
         and host_system != 'windows'
     )
-    _fast_lib_name = 'librgpot_fastnlist.a'
-    if _fast_as_object
-        _fast_lib_name = 'rgpot_fastnlist.o'
-    elif host_system == 'windows' and (
+    # With with_rust_core, rgpot-core is linked too. Each is a Rust
+    # staticlib that embeds its own std, so two archives define the runtime
+    # twice. rgpot-bundle links both into one staticlib instead, and that
+    # archive takes the pair list's place below.
+    _fast_bundled = get_option('with_rust_core')
+    _fast_lib_stem = 'rgpot_fastnlist'
+    if _fast_bundled
+        _fast_lib_stem = 'rgpot_bundle'
+    endif
+    # The name cargo gives the archive, and the name meson gives the output.
+    _fast_artifact = 'lib' + _fast_lib_stem + '.a'
+    if host_system == 'windows' and (
         cppc.get_id() == 'msvc'
         or cppc.get_id() == 'clang-cl'
     )
-        _fast_lib_name = 'rgpot_fastnlist.lib'
+        _fast_artifact = _fast_lib_stem + '.lib'
+    endif
+    _fast_lib_name = _fast_artifact
+    if _fast_as_object
+        _fast_lib_name = _fast_lib_stem + '.o'
     endif
     _fastnlist_src = meson.current_source_dir() / 'CppCore/rgpot/nlist/fastnlist'
     _fast_target_dir = meson.current_build_dir() / 'fastnlist-cargo'
@@ -949,26 +874,55 @@ if has_fast_nlist
     if _fast_native.length() == 0
         error('fast pair list: rustc printed no native-static-libs')
     endif
-    _fastnlist_tgt = custom_target(
-        'rgpot_fastnlist',
-        command: [
-            _fast_py,
-            files('scripts/build_fastnlist.py'),
-            '--copy',
-            _fast_cargo.full_path(),
-            _fastnlist_src / 'Cargo.toml',
-            _fast_target_dir,
-            '@OUTPUT@',
-        ],
-        input: files(
-            'CppCore/rgpot/nlist/fastnlist/Cargo.lock',
-            'CppCore/rgpot/nlist/fastnlist/Cargo.toml',
-            'CppCore/rgpot/nlist/fastnlist/src/lib.rs',
-        ),
-        output: _fast_lib_name,
-        build_by_default: true,
-        console: true,
-    )
+    if _fast_bundled
+        _fastnlist_tgt = custom_target(
+            'rgpot_rust_core',
+            command: [
+                _fast_py,
+                files('scripts/build_rust_core.py'),
+                '--cargo',
+                _fast_cargo.full_path(),
+                '--manifest',
+                meson.current_source_dir() / 'rgpot-bundle/Cargo.toml',
+                '--target-dir',
+                meson.current_build_dir() / 'cargo-target',
+                '--profile',
+                _cargo_profile_dir,
+                '--artifact',
+                _fast_artifact,
+                '--features',
+                ','.join(_cargo_features),
+                '--fast-toolchain',
+                '@OUTPUT0@',
+                '@OUTPUT1@',
+            ],
+            output: [_fast_lib_name, 'rgpot_rust_built.h'],
+            build_always_stale: true,
+            build_by_default: true,
+            console: true,
+        )
+    else
+        _fastnlist_tgt = custom_target(
+            'rgpot_fastnlist',
+            command: [
+                _fast_py,
+                files('scripts/build_fastnlist.py'),
+                '--copy',
+                _fast_cargo.full_path(),
+                _fastnlist_src / 'Cargo.toml',
+                _fast_target_dir,
+                '@OUTPUT@',
+            ],
+            input: files(
+                'CppCore/rgpot/nlist/fastnlist/Cargo.lock',
+                'CppCore/rgpot/nlist/fastnlist/Cargo.toml',
+                'CppCore/rgpot/nlist/fastnlist/src/lib.rs',
+            ),
+            output: _fast_lib_name,
+            build_by_default: true,
+            console: true,
+        )
+    endif
     _args += ['-DRGPOT_HAS_FAST_NLIST']
     # Archive first, then the system libraries rustc named. The generated
     # source is what ninja builds; repeating its path here keeps that
@@ -1000,6 +954,130 @@ else
     fastnlist_dep = declare_dependency()
     fastnlist_native_dep = fastnlist_dep
     message('fast pair list: disabled, classical pots use the C++ scan')
+endif
+
+# --------------------- Rust Core (rgpot-core), continued
+#
+# The crate's static library, linked into librgpot. The pair list block
+# above has already built rgpot-bundle when both are on; this block takes
+# that archive instead of building a second one.
+if get_option('with_rust_core')
+    # The header is a stamp. A dependency that lists it as a source makes
+    # every target that uses the dependency wait for cargo, and meson does
+    # not hand it to ar, as it would the archive: a static library takes
+    # the archive's path on its ar command line when the archive is a
+    # source. Only the link arguments name the archive.
+    if has_fast_nlist
+        rgpot_rust_target = _fastnlist_tgt
+        _rust_archive = _fast_artifact
+        _rust_link = []
+        if not _fast_as_object
+            _rust_link += [_fastnlist_tgt[0].full_path()]
+        endif
+        _rust_link += _fast_native
+    else
+        _rust_archive = 'librgpot_core.a'
+        if host_system == 'windows' and (
+            cppc.get_id() == 'msvc'
+            or cppc.get_id() == 'clang-cl'
+        )
+            _rust_archive = 'rgpot_core.lib'
+        endif
+        # The library is a generated file, so ninja runs cargo before
+        # anything links it. A find_library on the cargo output fails on a
+        # fresh setup: nothing has built the file when meson configures.
+        rgpot_rust_target = custom_target(
+            'rgpot_rust_core',
+            command: [
+                find_program('python3'),
+                files('scripts/build_rust_core.py'),
+                '--cargo',
+                cargo.full_path(),
+                '--manifest',
+                _rgpot_core_dir / 'Cargo.toml',
+                '--target-dir',
+                meson.current_build_dir() / 'cargo-target',
+                '--profile',
+                _cargo_profile_dir,
+                '--artifact',
+                _rust_archive,
+                '--features',
+                ','.join(_cargo_features),
+                '@OUTPUT0@',
+                '@OUTPUT1@',
+            ],
+            output: [_rust_archive, 'rgpot_rust_built.h'],
+            build_always_stale: true,
+            build_by_default: true,
+            console: true,
+        )
+        _rust_link = [rgpot_rust_target[0].full_path()]
+    endif
+    rgpot_rust_lib = declare_dependency(
+        sources: [rgpot_rust_target[1]],
+        link_args: _rust_link,
+    )
+    _rust_target_dir = meson.current_build_dir() / 'cargo-target' / _cargo_profile_dir
+
+    # Thread and dl libraries needed by the Rust runtime
+    thread_dep = dependency('threads')
+    dl_dep = cppc.find_library('dl', required: false)
+
+    _deps += [rgpot_rust_lib, thread_dep, dl_dep]
+
+    # librgpot links the archive and keeps only the members it references,
+    # so the C ABI is checked on the archive cargo writes: the symbols it
+    # holds are what a consumer can link, whether or not librgpot pulled
+    # them in. rgpot-bundle re-exports rgpot-core, so the same baseline
+    # covers both layouts.
+    if host_machine.system() == 'linux'
+        test(
+            'abi_core_symbols',
+            find_program('scripts/abi_symbols.sh'),
+            args: [
+                '-p',
+                '^rgpot_',
+                _rust_target_dir / _rust_archive,
+                files('scripts/abi_core_baseline.txt'),
+            ],
+            depends: rgpot_rust_target,
+            timeout: 30,
+        )
+    endif
+
+    # The EAM table constructor as a C host calls it, on the archive itself.
+    if get_option('with_tests')
+        _eam_table_capi = executable(
+            'eam_table_capi_test',
+            'rgpot-core/tests/c/eam_table_capi.c',
+            include_directories: include_directories(
+                'rgpot-core' / 'include',
+                'include',
+            ),
+            dependencies: [
+                rgpot_rust_lib,
+                fastnlist_dep,
+                thread_dep,
+                dl_dep,
+                meson.get_compiler('c').find_library('m', required: false),
+            ],
+            link_language: 'c',
+            build_by_default: true,
+        )
+        test(
+            'EAMTableCAbiTest',
+            _eam_table_capi,
+            args: [meson.current_source_dir() / 'CppCore/tests/data/eam_table'],
+            depends: rgpot_rust_target,
+            timeout: 30,
+        )
+    endif
+
+    # Include paths: generated C header + C++ RAII wrappers
+    _incdirs += [
+        include_directories('rgpot-core' / 'include'),  # rgpot.h (cbindgen)
+        include_directories('include'),  # rgpot/*.hpp (C++ RAII)
+    ]
 endif
 
 # ------------------------ Highway (runtime ISA dispatch)

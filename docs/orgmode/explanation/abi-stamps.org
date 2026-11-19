@@ -32,9 +32,10 @@ field type; callers and libraries with different layout revisions never match.
 The stamp is not an ELF soversion.
 In a Meson build with =with_rust_core=, =librgpot= links the static archive
 =librgpot_core.a= and keeps only the archive members it references.
-The cdylib
-=librgpot_core.so= that cargo builds next to it exports the whole C ABI, and the Meson test =abi_core_symbols=
-checks that library.
+The archive holds the whole C ABI, and the Meson test =abi_core_symbols=
+checks it.
+With the fast pair list on, the archive is =librgpot_bundle.a=, which carries
+the same C ABI next to the pair list.
 
 ** Scope
 
