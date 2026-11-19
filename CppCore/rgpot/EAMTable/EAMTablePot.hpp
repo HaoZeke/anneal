@@ -114,6 +114,9 @@ public:
     return {.cutoff = m_table.cutoff, .densities = 1};
   }
 
+  /// Radial cutoff read from the table, in the table's length unit.
+  [[nodiscard]] double cutoff() const noexcept { return m_table.cutoff; }
+
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
   /// forceImpl plus per-atom terms: each atom's embedding F_a(rho_i), and

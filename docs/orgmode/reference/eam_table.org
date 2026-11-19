@@ -49,7 +49,7 @@ rgpot::EAMTablePot pot({.path = "CuNi.eam.alloy",
 =read_eam_table= parses a stream into an =EAMTable=, and a second constructor
 takes that table directly.
 
-* From the C ABI, Rust and C++
+* From the C ABI, Rust and Python
 
 A host that links =rgpot-core= and no C++ kernel builds the same potential with
 =rgpot_potential_new_eam_table=, declared in =rgpot.h= since C ABI 1.6.
@@ -76,6 +76,9 @@ It visits every pair and takes the nearest image of the partner from rounded
 fractional coordinates, so a periodic call needs every face spacing above twice
 the cutoff, and the call fails with =RGPOT_INVALID_PARAMETER= for a smaller
 cell.
+
+Python builds the C++ potential, not the Rust one:
+=rgpot.EAMTablePot(file, format)= is in [[file:python_api.org][the Python API]].
 
 * Agreement with LAMMPS
 

@@ -87,6 +87,7 @@ setup = [
   # repair step vendors libgfortran into the wheel like any other
   # dependency.
   "-Dwith_fortran_pots=enabled",
+  "-Dwith_eam_table=true",
   "-Dwith_metatomic=true",
   "-Dwith_xtb=false",
   "-Dwith_xckernel=true",

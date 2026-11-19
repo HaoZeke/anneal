@@ -38,6 +38,7 @@ has_cache = _core.has_cache
 has_dftd3 = _core.has_dftd3
 has_dftd4 = _core.has_dftd4
 has_expr = _core.has_expr
+has_eam_table = _core.has_eam_table
 has_fortran_pots = _core.has_fortran_pots
 has_metatomic_dlopen = _core.has_metatomic_dlopen
 has_xckernel = _core.has_xckernel
@@ -58,6 +59,7 @@ EDIPPot: Any = getattr(_core, "EDIPPot", None)
 LenoskyPot: Any = getattr(_core, "LenoskyPot", None)
 TersoffPot: Any = getattr(_core, "TersoffPot", None)
 EAMAlPot: Any = getattr(_core, "EAMAlPot", None)
+EAMTablePot: Any = getattr(_core, "EAMTablePot", None)
 FeHePot: Any = getattr(_core, "FeHePot", None)
 CuH2Pot: Any = getattr(_core, "CuH2Pot", None)
 WaterHPot: Any = getattr(_core, "WaterHPot", None)
@@ -203,6 +205,7 @@ __all__ = [
     "LenoskyPot",
     "TersoffPot",
     "EAMAlPot",
+    "EAMTablePot",
     "FeHePot",
     "CuH2Pot",
     "WaterHPot",
@@ -215,6 +218,7 @@ __all__ = [
     "has_metatomic_dlopen",
     "has_cache",
     "has_expr",
+    "has_eam_table",
     "has_ipi",
     "has_dftd3",
     "has_dftd4",

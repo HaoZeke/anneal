@@ -933,6 +933,21 @@ EAMTablePot(const EAMTable &table, bool periodic, bool stress,
 
 This class is built with =-Dwith_eam_table=true=.
 
+*** =rgpot::EAMTablePot::cutoff=
+
+#+attr_rgpot: signature
+#+begin_src cpp
+[[nodiscard]] double cutoff() const noexcept;
+#+end_src
+
+- Inputs :: none.
+- Units :: the length unit of the table, Angstrom for the tables of LAMMPS.
+- Outputs :: the radial cutoff read from the table, which is
+  =locality().cutoff=.
+  Python reads it as =rgpot.EAMTablePot.cutoff=, and =RgpotCalculator= uses it
+  to size the open box and the supercell.
+- Errors :: none.
+
 *** =rgpot::EAMTablePot::listBuilds=
 
 #+attr_rgpot: signature

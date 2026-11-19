@@ -195,6 +195,9 @@ def _spec_of(potential: Any) -> tuple[str, dict[str, Any]] | None:
 
 def _kernel_cutoff(potential: Any) -> float:
     """Cutoff the open box and the supercell have to clear, in Angstrom."""
+    cutoff = getattr(potential, "cutoff", None)
+    if cutoff is not None:
+        return float(cutoff)
     config = getattr(potential, "config", None)
     if callable(config):
         cfg = config()
