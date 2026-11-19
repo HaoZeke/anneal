@@ -108,6 +108,15 @@ def test_density_fields_match_cartesian_contractions():
         np.testing.assert_allclose(actual[name], values, rtol=0, atol=0)
 
 
+# Exact text from grid_from_numpy / scal_from_dict in the binding.
+# The symbolic ranks are literals, so the match is anchored on them.
+_OPERAND_SHAPE_MESSAGE = {
+    "dchi": r"^dchi: expected shape \(3, nbf, npts\)$",
+    "lapl_chi": r"^lapl_chi: expected shape \(nbf, npts\)$",
+    "hess_chi": r"^hess_chi: expected shape \(6, nbf, npts\)$",
+}
+
+
 @pytest.mark.parametrize(
     "operand,shape",
     [("dchi", (2, 3, 3)), ("lapl_chi", (3, 2)), ("hess_chi", (2, 6, 3))],
@@ -117,7 +126,7 @@ def test_rejects_wrong_operand_shapes(operand, shape, operation):
     chi, dchi, lapl, weights, density = fixture()
     operands = {"dchi": dchi, "lapl_chi": lapl}
     operands[operand] = np.zeros(shape)
-    with pytest.raises(ValueError, match=f"{operand} must have shape"):
+    with pytest.raises(ValueError, match=_OPERAND_SHAPE_MESSAGE[operand]):
         if operation == "contract":
             rgpot.XcKernel("xck_lda_r_o1").contract(
                 chi, scal={"w": weights, "vrho": weights}, **operands
@@ -129,7 +138,10 @@ def test_rejects_wrong_operand_shapes(operand, shape, operation):
 @pytest.mark.parametrize("shape", [(), (2,), (3, 2), (1, 3), (3, 1, 1)])
 def test_rejects_wrong_scalar_shapes(shape):
     chi, _, _, weights, _ = fixture()
-    with pytest.raises(ValueError, match="scalar vrho must have shape"):
+    with pytest.raises(
+        ValueError,
+        match=r"^scalar vrho: expected shape \(npts,\) or \(npts, 1\)$",
+    ):
         rgpot.XcKernel("xck_lda_r_o1").contract(
             chi, None, {"w": weights, "vrho": np.ones(shape)}
         )
