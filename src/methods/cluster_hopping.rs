@@ -3957,6 +3957,22 @@ impl AcceptDial {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static SCALE_RESETS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static PLATEAU_RESTARTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn note_scale_reset() {
+    SCALE_RESETS.with(|n| n.set(n.get() + 1));
+}
+
+#[cfg(test)]
+fn note_plateau_restart() {
+    PLATEAU_RESTARTS.with(|n| n.set(n.get() + 1));
+}
+
 fn molecular_plateau_restart(
     cfg: &Config,
     hops: usize,
@@ -3978,7 +3994,7 @@ fn molecular_plateau_restart(
 #[cfg(test)]
 mod contact_unit_tests {
     use super::*;
-    use ndarray::Array1;
+    use ndarray::{Array1, ArrayView1};
 
     #[test]
     fn a_measuring_dial_takes_the_median_opening_change_once() {
@@ -4098,6 +4114,200 @@ mod contact_unit_tests {
             0.0,
             0.1
         ));
+    }
+
+    fn dihedral(x: ArrayView1<f64>, a: usize, b: usize, c: usize, d: usize) -> f64 {
+        let p = |i: usize| [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        let sub = |u: [f64; 3], v: [f64; 3]| [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
+        let cross = |u: [f64; 3], v: [f64; 3]| {
+            [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ]
+        };
+        let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        let b1 = sub(p(b), p(a));
+        let b2 = sub(p(c), p(b));
+        let b3 = sub(p(d), p(c));
+        let n1 = cross(b1, b2);
+        let n2 = cross(b2, b3);
+        let m = cross(n1, n2);
+        (dot(m, b2) / dot(b2, b2).sqrt()).atan2(dot(n1, n2))
+    }
+
+    fn angle_gap(a: f64, b: f64) -> f64 {
+        let d = (a - b).abs() % std::f64::consts::TAU;
+        d.min(std::f64::consts::TAU - d)
+    }
+
+    /// One constrained bridge: a planar three-bond centre, a short link,
+    /// and a terminal tip.
+    fn constrained_bridge() -> Array1<f64> {
+        Array1::from_vec(vec![
+            0.0, 0.0, 0.0, // planar centre
+            1.30, 0.0, 0.0, // short bridge
+            -0.60, 1.10, 0.0, // unlike substituent
+            -0.60, -1.10, 0.0, // unlike substituent
+            1.80, 0.95, 0.0, // terminal tip, inside the C–H cutoff
+        ])
+    }
+
+    #[test]
+    fn a_converged_search_probes_a_half_turn_of_a_constrained_bridge() {
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        let start = constrained_bridge();
+        let bonds = crate::methods::cluster_hopping::moves::rotatable_bonds(
+            start.view(),
+            &[6, 6, 7, 8, 1],
+            1.25,
+        );
+        assert!(
+            bonds.iter().any(|bond| bond.constrained),
+            "the short bridge is unconstrained: {bonds:?}"
+        );
+        let d0 = dihedral(start.view(), 2, 0, 1, 4);
+        let mut cfg = Config::for_molecular(vec![6, 6, 7, 8, 1], vec![(0..5).collect()], 1.0);
+        cfg.quench_gradient = 1.0e-3;
+        cfg.measured_energy_scale = false;
+        cfg.relax_steps = 1;
+        cfg.screen_steps = 1;
+        cfg.max_hops = Some(60);
+        cfg.incumbent_gap = 0.0;
+        let mut saw_half_turn = false;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            let gap = angle_gap(d0, dihedral(x, 2, 0, 1, 4));
+            if (gap - std::f64::consts::PI).abs() < 1.0e-4 {
+                saw_half_turn = true;
+            }
+            (1.0, x.to_owned())
+        };
+        let mut grad = |ledger: &mut Ledger, x: ArrayView1<f64>| {
+            ledger.charge().then(|| Array1::zeros(x.len()))
+        };
+        let mut ledger = Ledger::new(4_000);
+        let mut rng = StdRng::seed_from_u64(9);
+        run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert!(
+            saw_half_turn,
+            "the search never priced a half turn of the constrained bridge"
+        );
+    }
+
+    #[test]
+    fn an_opt_out_water_dimer_does_not_reset_after_the_scale_pilot() {
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 2.9, 0.1, 0.0, 3.86, 0.1, 0.0, 2.66,
+            1.03, 0.0,
+        ]);
+        let drive = |quench: f64| {
+            SCALE_RESETS.with(|n| n.set(0));
+            let mut cfg = Config::for_molecular(
+                vec![8, 1, 1, 8, 1, 1],
+                vec![vec![0, 1, 2], vec![3, 4, 5]],
+                1.0,
+            );
+            cfg.quench_gradient = quench;
+            cfg.measured_energy_scale = true;
+            cfg.temperature = 2.0;
+            cfg.merge_radius = 1.0e-4;
+            cfg.relax_steps = 1;
+            cfg.screen_steps = 1;
+            cfg.max_hops = Some(80);
+            cfg.incumbent_gap = 0.0;
+            cfg.calibrated_screen = false;
+            let origin = start.clone();
+            let mut relax = move |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                let home = (&x - &origin).mapv(|v| v * v).sum().sqrt() < 1.0e-8;
+                // Distinct basins, each a small step above the start, so the
+                // opening window records real rises and the walker is above
+                // its best when that window closes.
+                let wobble = (3.0 * x[0]).sin().abs() + (3.0 * x[1]).cos().abs();
+                let energy = if home { 0.0 } else { 0.25 + 0.2 * wobble };
+                (energy, x.to_owned())
+            };
+            let mut grad = |ledger: &mut Ledger, x: ArrayView1<f64>| {
+                ledger.charge().then(|| Array1::zeros(x.len()))
+            };
+            let mut ledger = Ledger::new(20_000);
+            let mut rng = StdRng::seed_from_u64(7);
+            run_with_gradient(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut rng,
+            )
+            .expect("water dimer");
+            SCALE_RESETS.with(|n| n.get())
+        };
+        assert_eq!(drive(0.0), 0, "opt-out reset the walker");
+        assert!(
+            drive(1.0e-3) > 0,
+            "the scale pilot did not return the water dimer to its best"
+        );
+    }
+
+    #[test]
+    fn the_search_restarts_an_inaccessible_molecular_plateau() {
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        let start = constrained_bridge();
+        let drive = |quench: f64| {
+            PLATEAU_RESTARTS.with(|n| n.set(0));
+            let mut cfg = Config::for_molecular(vec![6, 6, 7, 8, 1], vec![(0..5).collect()], 1.0);
+            cfg.quench_gradient = quench;
+            cfg.measured_energy_scale = false;
+            // Just past ln(AcceptDial::BLOCK), so a return is rarer than one
+            // chance per block and an uphill step is still accepted.
+            cfg.temperature = 1.0;
+            cfg.relax_steps = 1;
+            cfg.screen_steps = 1;
+            cfg.max_hops = Some(500);
+            cfg.incumbent_gap = 0.0;
+            cfg.improvement_rewards = false;
+            cfg.calibrated_screen = false;
+            let origin = start.clone();
+            let mut relax = move |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                let home = (&x - &origin).mapv(|v| v * v).sum().sqrt() < 1.0e-8;
+                (if home { 0.0 } else { 3.8 }, x.to_owned())
+            };
+            let mut grad = |ledger: &mut Ledger, x: ArrayView1<f64>| {
+                ledger.charge().then(|| Array1::zeros(x.len()))
+            };
+            let mut ledger = Ledger::new(20_000);
+            let mut rng = StdRng::seed_from_u64(3);
+            run_with_gradient(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut rng,
+            )
+            .expect("plateau");
+            PLATEAU_RESTARTS.with(|n| n.get())
+        };
+        assert!(
+            drive(1.0e-3) > 0,
+            "the search never relaunched from the inaccessible plateau"
+        );
+        assert_eq!(drive(0.0), 0, "opt-out relaunched");
     }
 }
 
@@ -5818,6 +6028,8 @@ where
             // probability is below one chance per block. Retain every bias
             // deposit and allocator observation learned on the plateau.
             last_basin_restart = hops;
+            #[cfg(test)]
+            note_plateau_restart();
             x = state;
             e = ledger.best;
             current_validation_gradient = None;
@@ -7118,8 +7330,18 @@ where
         // the best minimum once the chain has climbed past that gap.
         if basin_hold > 0 {
             basin_hold -= 1;
-        } else if ((std::mem::take(&mut recalibrated_to_best) && e > ledger.best)
-            || (cfg.incumbent_gap > 0.0 && e > ledger.best + cfg.incumbent_gap))
+        } else if cfg.quench_gradient > 0.0
+            && std::mem::take(&mut recalibrated_to_best)
+            && e > ledger.best
+            && let Some(state) = ledger.best_state.clone()
+            && state.len() == x.len()
+        {
+            #[cfg(test)]
+            note_scale_reset();
+            x = state;
+            e = ledger.best;
+        } else if cfg.incumbent_gap > 0.0
+            && e > ledger.best + cfg.incumbent_gap
             && let Some(state) = ledger.best_state.clone()
             && state.len() == x.len()
         {
