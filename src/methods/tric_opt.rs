@@ -1453,19 +1453,6 @@ impl TricOpt {
         self.species.len()
     }
 
-    /// Call ratio `N_LBFGS / N_TRIC` at `x`. Dihedral-bearing molecules have
-    /// torsional modes two decades softer than stretches, so the ratio is
-    /// 16 at `1e-3` eV/Å. Stretch-and-bend clusters without dihedrals
-    /// return 3 (`bench/tric-quench`).
-    pub fn call_saving(&self, x: ArrayView1<f64>) -> f64 {
-        let coords = Tric::new(&self.species, x);
-        let has_dihedrals = coords
-            .primitives
-            .iter()
-            .any(|p| matches!(p, Primitive::Dihedral(..)));
-        if has_dihedrals { 16.0 } else { 3.0 }
-    }
-
     /// Wall seconds one amortized step at `x` spends outside the potential:
     /// one chart build amortized over a quench plus the per-step Jacobian,
     /// dogleg and back-transformation, with `energy` and `gradient` standing

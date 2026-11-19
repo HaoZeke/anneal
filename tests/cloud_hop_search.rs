@@ -476,11 +476,28 @@ impl BondedChain {
         Self { atoms, bounds }
     }
 
+    /// 1.50 Å bonds, 120° angles, and a 60° torsion. A flat chain of these
+    /// carbons shares one substituent plane, so its bridges are held; this
+    /// torsion leaves them free.
     fn zigzag(&self) -> Array1<f64> {
+        let placed: [[f64; 3]; 10] = [
+            [0.0, 0.0, 0.0],
+            [1.5, 0.0, 0.0],
+            [2.25, 1.2990381057, 0.0],
+            [2.0625, 2.273316708, 1.125],
+            [2.390625, 1.867367302, 2.53125],
+            [3.78515625, 1.441120438, 2.8828125],
+            [4.930664063, 2.390027066, 2.689453125],
+            [4.947509766, 3.703019848, 3.414550781],
+            [4.931213379, 3.731880188, 4.91418457],
+            [6.035293579, 3.075621819, 5.688995361],
+        ];
         let mut x = Array1::zeros(3 * self.atoms);
-        for i in 0..self.atoms {
-            x[3 * i] = 1.299 * i as f64;
-            x[3 * i + 1] = if i % 2 == 0 { 0.0 } else { 0.75 };
+        let n = self.atoms.min(placed.len());
+        for i in 0..n {
+            for k in 0..3 {
+                x[3 * i + k] = placed[i][k];
+            }
         }
         x
     }

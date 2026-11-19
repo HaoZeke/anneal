@@ -380,9 +380,10 @@ impl Topology {
     /// half turn is offered, with Boltzmann weights whose scale is capped by
     /// the measured local barrier.
     /// The cap matters during the opening pilot, before the acceptance
-    /// temperature has learned the potential's units. Thus a trans partial
-    /// double bond stays near trans, while a chain that reached a high cis
-    /// well strongly prefers the downhill flip. Probe calls are supplied by
+    /// temperature has learned the potential's units. A half turn is
+    /// preferred when the higher of the midpoint and the endpoint lies
+    /// below the small-step energies. A low endpoint behind a high
+    /// midpoint is not preferred on its own. Probe calls are supplied by
     /// the search so they are charged to the same evaluation ledger.
     pub(crate) fn propose_measured<R, F>(
         &self,

@@ -343,9 +343,9 @@ def cluster_search(
         hops instead of an energy scale of one. ``None`` keeps the preset's:
         on for ``recommended=True``, off otherwise.
       quench_gradient: largest Cartesian gradient component at which a full
-        quench of a ``groups`` search stops (with at least 500 relaxation
-        steps), while ``record_gradient`` remains the record gate. ``None``
-        keeps the preset's.
+        quench of a ``groups`` search stops. The step count stays
+        ``relax_steps``. ``record_gradient`` remains the record gate.
+        ``None`` keeps the preset's, which does not set one.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.

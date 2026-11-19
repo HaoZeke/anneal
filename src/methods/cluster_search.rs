@@ -807,9 +807,9 @@ where
         && (cfg.local_step == LocalStep::Tric
             || (converged_molecular && cfg.local_step == LocalStep::Auto));
     // Under `Auto` the opening calls are timed and compared once against a
-    // TRIC step probe. At `quench_gradient = 1e-3` eV/Å Cartesian L-BFGS
-    // spends 12–35 times as many calls per flexible-molecule quench as TRIC,
-    // so TRIC saves calls and wall time up to `24 * per_call`.
+    // TRIC step. TRIC is kept when one potential call took longer than one
+    // TRIC step outside the potential. A frozen atom stays on L-BFGS:
+    // TRIC does not honour a frozen mask.
     let mut deciding = tric.is_some() && cfg.local_step == LocalStep::Auto;
     let mut call_seconds = 0.0_f64;
     let mut timed_calls = 0usize;
@@ -1124,12 +1124,7 @@ where
         {
             let per_call = call_seconds / timed_calls as f64;
             let per_step = tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
-            let saving = if converged_molecular {
-                tric.call_saving(check.at.view())
-            } else {
-                1.0
-            };
-            use_tric = saving * per_call > per_step;
+            use_tric = per_call > per_step;
             deciding = false;
             stats.quench_seconds = Some((per_call, per_step));
             stats.local_step = if use_tric {
@@ -4285,6 +4280,78 @@ mod tests {
     }
 
     #[test]
+    fn a_frozen_atom_does_not_build_tric() {
+        use crate::methods::tric_opt::LocalStep;
+        use eindir_core::gradient::Gradient;
+        use eindir_core::{Bounds, Objective};
+
+        struct Bowl {
+            bounds: Bounds<f64>,
+        }
+
+        impl Bowl {
+            fn pair(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                let mut energy = 0.0;
+                let mut gradient = Array1::zeros(x.len());
+                for (i, coordinate) in x.iter().enumerate() {
+                    energy += 0.5 * coordinate * coordinate;
+                    gradient[i] = *coordinate;
+                }
+                (energy, gradient)
+            }
+        }
+
+        impl Objective<f64> for Bowl {
+            fn dim(&self) -> usize {
+                6
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.pair(x).0
+            }
+        }
+
+        impl Gradient<f64> for Bowl {
+            fn dim(&self) -> usize {
+                6
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.pair(x).1
+            }
+        }
+
+        impl DifferentiableObjective<f64> for Bowl {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.pair(x)
+            }
+        }
+
+        let bowl = Bowl {
+            bounds: Bounds::new(Array1::from_elem(6, -4.0), Array1::from_elem(6, 4.0), 0.0),
+        };
+        let start = Array1::from_vec(vec![0.4, -0.2, 0.1, 1.2, 0.3, -0.5]);
+        for step in [LocalStep::Tric, LocalStep::Auto] {
+            let mut cfg = Config::for_cluster(2);
+            cfg.species = Some(vec![8, 1]);
+            cfg.frozen = Some(vec![true, false]);
+            cfg.local_step = step;
+            cfg.max_hops = Some(0);
+            cfg.relax_steps = 40;
+            let mut ledger = Ledger::new(2_000);
+            let (_, stats) =
+                search_from(&bowl, &cfg, &mut ledger, start.view(), 3).expect("search");
+            assert_eq!(
+                stats.local_step,
+                LocalStep::Lbfgs,
+                "{step:?} built a TRIC quench over a frozen atom"
+            );
+            assert!(stats.quench_seconds.is_none(), "{step:?} timed a TRIC step");
+        }
+    }
+
+    #[test]
     fn the_molecular_record_gate_sits_above_a_gfn_quench_floor() {
         let cfg = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
         let reduced = 1.0e-3 / cfg.length_scale;
@@ -4294,7 +4361,7 @@ mod tests {
             cfg.record_gradient
         );
         assert!((cfg.record_gradient - 5.0e-2).abs() < 1e-15);
-        assert_eq!(cfg.quench_gradient, 1.0e-3);
+        assert_eq!(cfg.quench_gradient, 0.0);
     }
 
     #[test]

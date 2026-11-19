@@ -3547,9 +3547,9 @@ fn rigid_probe(
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
 ///   quench_gradient: `Config::quench_gradient` of a `groups` search, the
-///     largest Cartesian gradient component at which a full quench stops
-///     (with at least 500 relaxation steps), while `record_gradient` remains
-///     the record gate. Unset keeps the preset's.
+///     largest Cartesian gradient component at which a full quench stops.
+///     The step count stays `relax_steps`. `record_gradient` remains the
+///     record gate. Unset keeps the preset's, which does not set one.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
