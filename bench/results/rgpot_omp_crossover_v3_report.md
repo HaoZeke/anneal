@@ -16,12 +16,14 @@ For an exact one-sided Mann–Whitney comparison at n=12 per binary, the minimum
 - Pinning: `{"environment_by_threads": {"1": {"GOMP_CPU_AFFINITY": "0", "OMP_DYNAMIC": "false", "OMP_NUM_THREADS": "1", "OMP_PLACES": "{0}", "OMP_PROC_BIND": "close"}, "2": {"GOMP_CPU_AFFINITY": "0,1", "OMP_DYNAMIC": "false", "OMP_NUM_THREADS": "2", "OMP_PLACES": "{0},{1}", "OMP_PROC_BIND": "close"}, "4": {"GOMP_CPU_AFFINITY": "0,1,2,3", "OMP_DYNAMIC": "false", "OMP_NUM_THREADS": "4", "OMP_PLACES": "{0},{1},{2},{3}", "OMP_PROC_BIND": "close"}, "8": {"GOMP_CPU_AFFINITY": "0,1,2,3,4,5,6,7", "OMP_DYNAMIC": "false", "OMP_NUM_THREADS": "8", "OMP_PLACES": "{0},{1},{2},{3},{4},{5},{6},{7}", "OMP_PROC_BIND": "close"}}, "physical_cpus": [0, 1, 2, 3, 4, 5, 6, 7], "policy": "taskset plus OMP_PLACES and GOMP_CPU_AFFINITY; close binding"}`
 - Inherited OMP/GOMP variables: `{}`
 
-|Arm|Commit|Parameter|Observed activation|Library SHA-256|Clean status|
-|---|---|---:|---:|---|---|
-|stock|`32e8fb1bba2b0f92d60603722a2f5e12636d5e66`|8192|8192|`7ed795fef3f471155565e453ce1f9c2a71b222d6703fe6defec3dfffcdf5ce0a`|``|
-|team-1|`e06abcefc2c023fe7e049fae64be52cdf48b5fa7`|1|2|`0c68f190ca3212ee5078a1baee5144b43db15e577347410558bb477ec03f240a`|``|
-|team-1024|`f86bdf80c8e8466dffc6038a7c431f26f5708536`|1024|1024|`6aa3f0e384325a93329e9e9de56b492761e03169618098fc9bff44c90398166a`|``|
-|team-4096|`1ed94957c6b64016d077d4fb5e4220265cdc320c`|4096|4096|`aed6d92072c5d3cddc9def57983f4a2044b86e07abb5cdbc90e7b0f93bec0675`|``|
+Commit SHAs are pre-landing identifiers. Tree SHAs are landing-invariant and identify the applied arm contents.
+
+|Arm|Pre-landing commit|Landing-invariant tree|Commit subject|Parameter|Observed activation|Library SHA-256|Clean status|
+|---|---|---|---|---:|---:|---|---|
+|stock|`32e8fb1bba2b0f92d60603722a2f5e12636d5e66`|`c16effc9194d2c8f0e3f3b60121d00e8df230769`|Merge pull request #242 from OmniPotentRPC/fix/morse-omp-followups-r2|8192|8192|`7ed795fef3f471155565e453ce1f9c2a71b222d6703fe6defec3dfffcdf5ce0a`|``|
+|team-1|`e06abcefc2c023fe7e049fae64be52cdf48b5fa7`|`9ed37e2f439d8726cd1a926d1afa2155f003de55`|test(bench): define one-atom team arm|1|2|`0c68f190ca3212ee5078a1baee5144b43db15e577347410558bb477ec03f240a`|``|
+|team-1024|`f86bdf80c8e8466dffc6038a7c431f26f5708536`|`102018297727e18c2e43ffeb7575768efa353995`|test(bench): define 1024-atom team arm|1024|1024|`6aa3f0e384325a93329e9e9de56b492761e03169618098fc9bff44c90398166a`|``|
+|team-4096|`1ed94957c6b64016d077d4fb5e4220265cdc320c`|`42a386d9aa0c8bf863ccdc49e3d8646a9c9e134a`|test(bench): define 4096-atom team arm|4096|4096|`aed6d92072c5d3cddc9def57983f4a2044b86e07abb5cdbc90e7b0f93bec0675`|``|
 
 ## Crossovers
 
