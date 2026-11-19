@@ -893,7 +893,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     cpu = cpu_model()
     logical_cpus = os.cpu_count() or 1
     session = args.session or now_session()
-    started_utc = now_utc()
 
     hosts_path = out_dir / "hosts.csv"
     write_csv(
@@ -916,6 +915,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     rows_path = out_dir / "rows.csv"
     existing_rows = read_csv(rows_path)
+    started_utc = min((r["utc"] for r in existing_rows if r.get("utc")), default=now_utc())
     done = {
         (r["experiment"], r["panel"], r["system"], int(r["seed"]), r["arm"])
         for r in existing_rows
