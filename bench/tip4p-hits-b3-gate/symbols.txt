@@ -1,0 +1,22 @@
+# Release symbol sizes. nm --print-size --radix=d. rustc 1.88.0. No symbol of 13652 bytes is present.
+# Profile: cargo test --locked --release --lib --no-run, then the release python library.
+#
+# The earlier b2 release test binary measures this symbol at 12185 bytes.
+symbol=anneal_core::methods::cluster_search::tests::it_searches_an_objective_given_as_a_trait_object
+arm_A_bytes=12492
+arm_B_bytes=12345
+b2_bytes=12185
+#
+# O=C=O springs test. On arm A, TricOpt::minimize is inlined into the test.
+# On arm B the test calls TricOpt::minimize_watched (14390 bytes).
+symbol=anneal_core::methods::tric_opt::tests::a_bend_pulled_straight_still_converges
+arm_A_bytes=15652
+arm_B_bytes=2409
+arm_A_tricopt_minimize_watched_bytes=inlined
+arm_B_tricopt_minimize_watched_bytes=14390
+b2_test_bytes=2409
+b2_tricopt_minimize_watched_bytes=14566
+#
+# Release library TricOpt::minimize_watched copies.
+arm_A_release_library_bytes=13788,13533,13533
+arm_B_release_library_bytes=13788,13533,13533,9509
