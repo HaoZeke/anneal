@@ -904,7 +904,17 @@ where
         // that minimum to the plain relaxation below. Both phases charge.
         let compacted;
         let surface = match surfaces.as_mut() {
-            Some(portfolio) => portfolio.begin(screening),
+            Some(portfolio) => {
+                let chosen = portfolio.begin(screening);
+                if portfolio.take_block_opened() {
+                    led.block_opened = true;
+                }
+                if portfolio.take_restraint_block_failed() {
+                    led.revert_unrestrained = true;
+                    portfolio.hold_plain();
+                }
+                chosen
+            }
             None => cfg.two_phase.filter(|two| two.is_active()),
         };
         // The last physical point the descent paid for, kept so the
@@ -936,6 +946,8 @@ where
                     *last.borrow_mut() = None;
                 }
             };
+        // The proposal the move drew, before a restraint replaces the start.
+        let bare = x.to_owned();
         let x = match surface {
             Some(two) => {
                 let cutoff = two.cutoff_for(x);
@@ -978,112 +990,114 @@ where
         let mut opening = prior.clone();
         let mut call_seconds = 0.0_f64;
         let mut timed_calls = 0usize;
-        let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-            if let Some(check) = opening.take_if(|check| check.at == v) {
-                let answer = (check.energy, check.gradient.clone());
-                *last.borrow_mut() = Some(check);
-                return Some(answer);
-            }
-            let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
-            let answered = charge_rejecting_repeat_failure(
-                objective,
-                led,
-                stats,
-                v,
-                &mut anchor,
-                refuse_overlap,
-                wall,
-                &held,
-                &mut failure,
-            );
-            if let Some((spent, started)) = clock
-                && led.spent() > spent
-            {
-                call_seconds += started.elapsed().as_secs_f64();
-                timed_calls += led.spent() - spent;
-            }
-            let (energy, gradient, physical) = answered?;
-            remember(v, energy, &gradient, physical);
-            Some((energy, gradient))
-        };
-        let mut watch = |_: usize, fv: f64| {
-            if !quench_watch_continues(stop_energy, fv) {
-                return false;
-            }
-            if screening && probe {
-                // Never stops. Records where a stop would have happened and
-                // what it would have claimed, so the claim can be scored
-                // against the value the full pass actually reaches.
+        let (f, xr) = {
+            let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if let Some(check) = opening.take_if(|check| check.at == v) {
+                    let answer = (check.energy, check.gradient.clone());
+                    *last.borrow_mut() = Some(check);
+                    return Some(answer);
+                }
+                let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+                let answered = charge_rejecting_repeat_failure(
+                    objective,
+                    led,
+                    stats,
+                    v,
+                    &mut anchor,
+                    refuse_overlap,
+                    wall,
+                    &held,
+                    &mut failure,
+                );
+                if let Some((spent, started)) = clock
+                    && led.spent() > spent
+                {
+                    call_seconds += started.elapsed().as_secs_f64();
+                    timed_calls += led.spent() - spent;
+                }
+                let (energy, gradient, physical) = answered?;
+                remember(v, energy, &gradient, physical);
+                Some((energy, gradient))
+            };
+            let mut watch = |_: usize, fv: f64| {
+                if !quench_watch_continues(stop_energy, fv) {
+                    return false;
+                }
+                if screening && probe {
+                    // Never stops. Records where a stop would have happened and
+                    // what it would have claimed, so the claim can be scored
+                    // against the value the full pass actually reaches.
+                    pred.observe(fv);
+                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                    }
+                    return true;
+                }
+                if !(screening && adaptive) {
+                    return true;
+                }
                 pred.observe(fv);
-                if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
-                    probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                // Only the hopeless verdict stops the descent. A promising one
+                // is followed by the full relaxation anyway, so cutting its
+                // screen short saves at most the tail of a pass that 2 per cent
+                // of trials reach, and it hands the return screen an
+                // extrapolated energy below the incumbent attached to a
+                // structure that was never relaxed.
+                if pred.verdict(target) != Verdict::Hopeless {
+                    return true;
                 }
-                return true;
-            }
-            if !(screening && adaptive) {
-                return true;
-            }
-            pred.observe(fv);
-            // Only the hopeless verdict stops the descent. A promising one
-            // is followed by the full relaxation anyway, so cutting its
-            // screen short saves at most the tail of a pass that 2 per cent
-            // of trials reach, and it hands the return screen an
-            // extrapolated energy below the incumbent attached to a
-            // structure that was never relaxed.
-            if pred.verdict(target) != Verdict::Hopeless {
-                return true;
-            }
-            early = true;
-            false
-        };
-        let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
-        let quench_tric = tric
-            .as_mut()
-            .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
-        let (f, xr) = if molecular_anc {
-            let (f, xr, _) = crate::methods::anc_quench::anc_minimize_watched(
-                x,
-                &atomic_numbers,
-                iters,
-                cfg.record_gradient,
-                &mut evaluate,
-                &mut watch,
-            );
-            (f, xr)
-        } else {
-            match (quench_tric, preconditioner) {
-                (Some(tric), _) => {
-                    tric.gtol = opt.gtol;
-                    let (f, xr, _) = tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
-                    (f, xr)
-                }
-                (None, None) => {
-                    let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
-                    (f, xr)
-                }
-                (None, Some(pre)) => {
-                    // The reduced gradient has other units, so the solver's own
-                    // test is off and the stop reads the Cartesian one.
-                    let origin = x.to_owned();
-                    let gtol = opt.gtol;
-                    opt.gtol = 0.0;
-                    let (f, zr, _) = opt.minimize_watched(
-                        Array1::zeros(x.len()).view(),
-                        iters,
-                        |z| {
-                            let v = pre.expand(origin.view(), z);
-                            evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
-                        },
-                        |it, fv| {
-                            let settled = last
-                                .borrow()
-                                .as_ref()
-                                .is_some_and(|c| largest_component(c.gradient.view()) <= gtol);
-                            !settled && watch(it, fv)
-                        },
-                    );
-                    opt.gtol = gtol;
-                    (f, pre.expand(origin.view(), zr.view()))
+                early = true;
+                false
+            };
+            let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
+            let quench_tric = tric
+                .as_mut()
+                .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
+            if molecular_anc {
+                let (f, xr, _) = crate::methods::anc_quench::anc_minimize_watched(
+                    x,
+                    &atomic_numbers,
+                    iters,
+                    cfg.record_gradient,
+                    &mut evaluate,
+                    &mut watch,
+                );
+                (f, xr)
+            } else {
+                match (quench_tric, preconditioner) {
+                    (Some(tric), _) => {
+                        tric.gtol = opt.gtol;
+                        let (f, xr, _) = tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                        (f, xr)
+                    }
+                    (None, None) => {
+                        let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                        (f, xr)
+                    }
+                    (None, Some(pre)) => {
+                        // The reduced gradient has other units, so the solver's own
+                        // test is off and the stop reads the Cartesian one.
+                        let origin = x.to_owned();
+                        let gtol = opt.gtol;
+                        opt.gtol = 0.0;
+                        let (f, zr, _) = opt.minimize_watched(
+                            Array1::zeros(x.len()).view(),
+                            iters,
+                            |z| {
+                                let v = pre.expand(origin.view(), z);
+                                evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
+                            },
+                            |it, fv| {
+                                let settled = last
+                                    .borrow()
+                                    .as_ref()
+                                    .is_some_and(|c| largest_component(c.gradient.view()) <= gtol);
+                                !settled && watch(it, fv)
+                            },
+                        );
+                        opt.gtol = gtol;
+                        (f, pre.expand(origin.view(), zr.view()))
+                    }
                 }
             }
         };
@@ -1143,7 +1157,7 @@ where
         // The call that raises the stop has already been paid. If it is
         // below the solver's accepted point, that point is the best state
         // the run found.
-        let (f, xr) = if led.stopped()
+        let (mut f, mut xr) = if led.stopped()
             && let Some((energy, state)) = best_physical.borrow().clone()
             && energy < f
             && state.iter().all(|value| value.is_finite())
@@ -1153,8 +1167,193 @@ where
         } else {
             (f, xr)
         };
+        // The restraint is one candidate for this proposal. The same
+        // proposal is also relaxed with no penalty. The chain walks from
+        // whichever minimum is lower.
+        let restrained_energy = f;
+        if surface.is_some() {
+            let kept_early = early;
+            let kept_last = last.borrow().clone();
+            let kept_best = best_physical.borrow().clone();
+            let kept_refused = stats.refused;
+            opt.forget();
+            early = false;
+            probe_at = None;
+            pred = QuenchPredictor::new();
+            pred.warmup = cfg.quench_warmup;
+            pred.confidence = cfg.quench_confidence;
+            *last.borrow_mut() = None;
+            *best_physical.borrow_mut() = None;
+            opening = prior.clone();
+            call_seconds = 0.0;
+            timed_calls = 0;
+            let x = bare.view();
+            let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
+            let quench_tric = tric
+                .as_mut()
+                .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
+            let spent_at = led.spent();
+            let (f2, xr2) = {
+                let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                    if let Some(check) = opening.take_if(|check| check.at == v) {
+                        let answer = (check.energy, check.gradient.clone());
+                        *last.borrow_mut() = Some(check);
+                        return Some(answer);
+                    }
+                    let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+                    let answered = charge_rejecting_repeat_failure(
+                        objective,
+                        led,
+                        stats,
+                        v,
+                        &mut anchor,
+                        refuse_overlap,
+                        wall,
+                        &held,
+                        &mut failure,
+                    );
+                    if let Some((spent, started)) = clock
+                        && led.spent() > spent
+                    {
+                        call_seconds += started.elapsed().as_secs_f64();
+                        timed_calls += led.spent() - spent;
+                    }
+                    let (energy, gradient, physical) = answered?;
+                    remember(v, energy, &gradient, physical);
+                    Some((energy, gradient))
+                };
+                let mut watch = |_: usize, fv: f64| {
+                    if !quench_watch_continues(stop_energy, fv) {
+                        return false;
+                    }
+                    if screening && probe {
+                        pred.observe(fv);
+                        if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                            probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                        }
+                        return true;
+                    }
+                    if !(screening && adaptive) {
+                        return true;
+                    }
+                    pred.observe(fv);
+                    if pred.verdict(target) != Verdict::Hopeless {
+                        return true;
+                    }
+                    early = true;
+                    false
+                };
+                if molecular_anc {
+                    let (f2, xr2, _) = crate::methods::anc_quench::anc_minimize_watched(
+                        x,
+                        &atomic_numbers,
+                        iters,
+                        cfg.record_gradient,
+                        &mut evaluate,
+                        &mut watch,
+                    );
+                    (f2, xr2)
+                } else {
+                    match (quench_tric, preconditioner) {
+                        (Some(tric), _) => {
+                            tric.gtol = opt.gtol;
+                            let (f2, xr2, _) =
+                                tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                            (f2, xr2)
+                        }
+                        (None, None) => {
+                            let (f2, xr2, _) =
+                                opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                            (f2, xr2)
+                        }
+                        (None, Some(pre)) => {
+                            let origin = x.to_owned();
+                            let gtol = opt.gtol;
+                            opt.gtol = 0.0;
+                            let (f2, zr, _) = opt.minimize_watched(
+                                Array1::zeros(x.len()).view(),
+                                iters,
+                                |z| {
+                                    let v = pre.expand(origin.view(), z);
+                                    evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
+                                },
+                                |it, fv| {
+                                    let settled = last.borrow().as_ref().is_some_and(|c| {
+                                        largest_component(c.gradient.view()) <= gtol
+                                    });
+                                    !settled && watch(it, fv)
+                                },
+                            );
+                            opt.gtol = gtol;
+                            (f2, pre.expand(origin.view(), zr.view()))
+                        }
+                    }
+                }
+            };
+            if !molecular_anc
+                && deciding
+                && timed_calls >= 3
+                && let Some(tric) = tric.as_ref()
+                && let Some(check) = last.borrow().as_ref()
+                && check.at.len() == 3 * tric.atoms()
+            {
+                let per_call = call_seconds / timed_calls as f64;
+                let per_step =
+                    tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
+                use_tric = per_call > per_step;
+                deciding = false;
+                stats.quench_seconds = Some((per_call, per_step));
+                stats.local_step = if use_tric {
+                    LocalStep::Tric
+                } else {
+                    LocalStep::Lbfgs
+                };
+            }
+            stats.refused = opt.refused();
+            if let Some((at, claim)) = probe_at {
+                stats.probe_stops += 1;
+                stats.probe_steps += at;
+                stats.probe_error += (claim - f2).abs();
+            }
+            let cost = led.spent() - spent_at;
+            if screening {
+                stats.screen_charged += cost;
+                stats.screen_steps_taken += pred.len();
+            } else {
+                stats.full_charged += cost;
+            }
+            let f2 = if early {
+                pred.stopped_energy(target, f2)
+            } else {
+                f2
+            };
+            let (f2, xr2) = if led.stopped()
+                && let Some((energy, state)) = best_physical.borrow().clone()
+                && energy < f2
+                && state.iter().all(|value| value.is_finite())
+            {
+                led.record(energy, state.view());
+                (energy, state)
+            } else {
+                (f2, xr2)
+            };
+            if restrained_energy < f2 {
+                early = kept_early;
+                *last.borrow_mut() = kept_last;
+                *best_physical.borrow_mut() = kept_best;
+                stats.refused = kept_refused;
+            } else {
+                f = f2;
+                xr = xr2;
+            }
+        }
         if let Some(portfolio) = surfaces.as_mut() {
-            portfolio.observe(screening, f, target);
+            let reached = if surface.is_some() {
+                restrained_energy
+            } else {
+                f
+            };
+            portfolio.observe(screening, reached, target);
         }
         // A descent stopped on a verdict is known not to be converged, so
         // asking is spending an evaluation on an answer already in hand. The
@@ -1175,8 +1374,6 @@ where
         // counts evaluations has to count this one.
         // A descent that never left a certified start already has its answer,
         // and so does one whose last paid evaluation is where it stopped.
-        let mut f = f;
-        let mut xr = xr;
         let stored_gradient = |point: &Array1<f64>| -> Option<Array1<f64>> {
             last.borrow()
                 .clone()
@@ -2731,7 +2928,7 @@ mod tests {
         let cfg = Config::recommended(8);
         assert!(
             !cfg.surfaces.is_empty(),
-            "the preset installs a two-phase surface below 98 points"
+            "the preset installs a measured two-phase surface at every size"
         );
         let objective = PairPotential::lennard_jones(8);
         let mut x = Array1::zeros(24);

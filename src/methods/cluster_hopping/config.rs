@@ -1764,9 +1764,9 @@ impl Config {
     /// [`Config::restart_on_stall`] stays off, so a stalled walker is never
     /// redrawn from random coordinates. Basin identity stays the measured
     /// pair-spectrum merge at 0.7.
-    /// Orbit completion runs on every new basin, and below 98 points the
-    /// relaxation draws between the plain surface and the two-phase
-    /// relative 0.7 surface, the same rule as [`Config::communicating`].
+    /// Orbit completion runs on every new basin, and the relaxation draws
+    /// between the plain surface and the two-phase relative 0.7 surface at
+    /// every size, the same rule as [`Config::communicating`].
     /// A full quench runs up to 1000 steps, against 200 in
     /// [`Config::for_cluster`].
     /// On optbench archive starts at development seeds, without them this
@@ -1846,11 +1846,10 @@ impl Config {
         // global minima are not those packings, it is worse than none.
         // Installing it only at 38 atoms was per-system tuning, so the
         // preset keeps LeanBurst at every size.
-        if n_points < 98 {
-            // The quartic penalty is an energy per length^4.
-            let beta = energy_scale / length_scale.powi(4);
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, beta)];
-        }
+        // The quartic penalty is an energy per length^4. The portfolio
+        // measures the arm, so every size starts with the same surface.
+        let beta = energy_scale / length_scale.powi(4);
+        cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, beta)];
         // At 200 steps at least 27 per cent of the full quenches of LJ98
         // runs stop above the record gradient, and the chain accepts on
         // their energies. GMIN's LJ98 deck sets MAXIT 1000 1000. At 1000,
@@ -1875,9 +1874,9 @@ impl Config {
     /// Thompson, the return screen, and orbit completion: 31/48 Marks,
     /// 30/48 Leary), not [`Self::recommended`] (LeanBurst, SOAP leftover
     /// as a burst library, tabu-on-stall, stall jump). Peer visit counts
-    /// stay off the escape controller. Two-phase relative 0.7 stays on
-    /// below 98 (occupancy-measured on 38 and 75; 18/48 Leary when left
-    /// on at 98). Grosso replacement is not installed.
+    /// stay off the escape controller. The two-phase relative 0.7 arm is
+    /// offered at every size and the surface portfolio measures whether to
+    /// draw it. Grosso replacement is not installed.
     ///
     /// ```
     /// use anneal_core::methods::cluster_hopping::Config;
@@ -1894,9 +1893,7 @@ impl Config {
         cfg.orbit_core = OrbitCore::Fraction;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
-        if n_points < 98 {
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
-        }
+        cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
         cfg
     }
@@ -2658,10 +2655,9 @@ impl Config {
         // gradient regardless of their bonds, or, retracted onto the one
         // group, carries the molecule whole, and pays for the expansion
         // before the overlap gate sees the proposal.
-        if groups.len() == 1
-            && groups[0].len() >= 4
-            && super::moves::mobile_atoms(&cfg, &groups).is_none()
-        {
+        if super::moves::lone_internal_fragment(&cfg, &groups) {
+            // The SOAP expansion is paid before the overlap gate, and on one
+            // fragment it moves atoms off the dihedrals the torsion arm turns.
             cfg.prior_soap = false;
         }
         cfg.move_library = MoveLibrary::Molecular {
