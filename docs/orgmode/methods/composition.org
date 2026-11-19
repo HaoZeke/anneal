@@ -91,7 +91,7 @@ checkpoint. It runs, in order:
    unadopted probe transitions into =RegisterCurrent=/=Adopt=/=Unresolved=
    operations, posted without blocking the hop to
    =CooperativeRun::post_record_current=/=post_record_transition=
-   (examples/lj_cluster_search.rs:4954-4983), building the same
+   (examples/lj_cluster_search.rs:4955-4983), building the same
    append-only transition evidence
    =crate::transition_graph::TransitionGraph= consumes elsewhere. The
    occupied minimum is registered only when it has changed
@@ -384,12 +384,12 @@ flux-balance weight transfer producing a committor surrogate along
 the channel. The wiring closes the loop the other cooperative
 mechanisms open. The
 [[file:catalog.org::*Spectral referee over the explored landscape (=landscape_graph=)][spectral referee]]
-names the seam. The coordinator no longer commissions a bridge
-from the seam's two best-anchored
+names the seam. The coordinator does not commission a bridge from the
+seam's two best-anchored
 [[file:catalog.org::*Active basin catalog][catalog]] entries at the
 population epoch boundary, so it stores none; the two protocol
 operations (assignment poll at server.rs:1659, crossing report at
-server.rs:1705) are kept and a poll returns no bridge. Given a stored
+server.rs:1705) are served, and a poll returns no bridge. Given a stored
 bridge, the run loop, behind the =CATALOG_BRIDGE= gate
 (examples/lj_cluster_search.rs:4335), jumps to stored entry states
 through the ordinary probe-proposal path and reports every region

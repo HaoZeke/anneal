@@ -444,7 +444,7 @@ Feeds/consumes: consumes =crate::curvature::curvature_features= for
 the Lanczos mode and shares the perpendicular-projection convention
 with =crate::path= (activation.rs:46-48); called from
 =cluster_hopping='s soft-mode-climb stall response
-(cluster_hopping.rs:9213-9240), documented as a black-box call
+(cluster_hopping.rs:9213-9241), documented as a black-box call
 site under [[file:catalog.org::*Stall escapes][stall escapes]] above
 ("Soft-mode climb ... Escalates over =minima_hopping='s always-on
 scaled move"); this section documents the climb mechanism itself.
@@ -721,8 +721,8 @@ Preset values =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5= (LennardJonesPreset).
 
 Feeds/consumes: consumed by =ClusterMove::Soap= for the hop proposal,
 by =DescriptorSpace= (below) for catalog descriptors, and by
-=boundary_transport= (via =horn_rotation=, src/boundary_transport.rs:98)
-for rigid alignment.
+=boundary_transport= (src/boundary_transport.rs:98, which aligns through
+=alignment_rotation=, src/boundary_transport.rs:169) for rigid alignment.
 
 ** featomic leftover hop
 
@@ -1325,9 +1325,10 @@ entry lists (src/catalog_rpc/server.rs:3858) and serves it through two
 protocol operations, an assignment poll
 (=CatalogOperation::BridgeAssignment=, server.rs:1659) and a crossing
 report (=CatalogOperation::BridgeCrossing=, server.rs:1705). The
-coordinator no longer commissions a bridge at the population epoch
-boundary, so none is stored: a poll returns no bridge record and a
-crossing report names an unknown bridge and is rejected. The run
+coordinator commissions no bridge at the population epoch boundary: its
+bridge map starts empty and nothing adds to it, so a poll returns no
+bridge record and a crossing report names an unknown bridge and is
+rejected. The run
 loop consumes it behind the =CATALOG_BRIDGE= gate
 (examples/lj_cluster_search.rs:4335): entry states re-enter through
 the ordinary probe-proposal path and every region change of the live
@@ -1413,12 +1414,12 @@ Feeds/consumes: fed by =CatalogOperation::RecordVisit= in
 visit and =observe_crossing= when a replica's last basin differs from
 its current one (src/catalog_rpc/server.rs:2266/2781, "the census-
 visit stream is the referee's evidence"). The coordinator's population
-plan no longer reads the split to hold a family slot open, and the
-coordinator no longer reads it to commission a bridge. It is consumed by
-=occupancy_floor= (server.rs, Fiedler split after DECAF labels the
+plan does not read the split to hold a family slot open, and the
+coordinator does not read it to commission a bridge. It is consumed by
+=occupancy_floor= (server.rs:4946, Fiedler split after DECAF labels the
 sides, or the landfold community count when the book already holds
 a second packing extras have Left: leftover wells of one packing
-are one family, a packing seam is two), and by the =observerStatus= reply (server.rs:4946),
+are one family, a packing seam is two), and by the =observerStatus= reply (=observer_status_reply=, server.rs:5725, which builds the seam in =coordinator_status=, server.rs:5636),
 which reports =landscape_basins= and a =LandscapeSeam= (algebraic
 connectivity, conductance, community sizes, representative basins)
 as the seam fields of =CoordinatorStatus= (=landscapeBasins @9=
@@ -1932,10 +1933,9 @@ time, and never an unmatched budget.
 
 * Portfolio arms and standalone algebra points
 
-Points of the typed Sampler algebra that ship as both a
-=portfolio::run_capnp_catalog=-adjacent portfolio arm and a standalone,
-directly callable solver, none of them specific to the cluster/catalog
-domain above. Grouped here as one section because they share a common
+Points of the typed Sampler algebra that ship as both a portfolio arm
+and a standalone, directly callable solver, none of them specific to the
+cluster/catalog domain above. Grouped here as one section because they share a common
 role (an interchangeable arm the [[file:catalog.org::*Portfolio (budget-only driver)][portfolio]]
 picks between) rather than a common mechanism.
 
@@ -2030,8 +2030,10 @@ Key types and functions: =BayesianMixingSampler<S: Sampler<f64>>=
 per-chain =History=, =proposal_counts=); =run=
 (bayesian_mixing.rs:56).
 
-Feeds/consumes: generic over any =Sampler<f64>= impl; re-exported at
-the crate root (src/lib.rs:228) and exercised by
+Feeds/consumes: generic over any =Sampler<f64>= impl (=Sampler= is
+re-exported at src/lib.rs:330); =BayesianMixingSampler= and
+=BayesianMixingResult= are re-exported at the crate root
+(src/lib.rs:301); exercised by
 =tests/bayesian_mixing.rs=; no example or portfolio-arm call site
 found in this scan (contrast =mcmc_sa= below, which is referenced from
 =src/hmc/nuts.rs= even without a call site).
@@ -2307,8 +2309,10 @@ Key types and functions: =MultiChainState= (mcmc_sa.rs:24);
 =GelmanRubin= (mcmc_sa.rs:40); =MultiChainSampler=/=MultiChainResult=
 (re-exported src/methods/mod.rs:133).
 
-Feeds/consumes: generic over any =Sampler<f64>= impl; re-exported at
-the crate root (src/lib.rs:330), referenced from
+Feeds/consumes: generic over any =Sampler<f64>= impl (=Sampler= is
+re-exported at src/lib.rs:330); =GelmanRubin=, =MultiChainSampler= and
+=MultiChainResult= are re-exported at the crate root (src/lib.rs:303-304);
+referenced from
 src/hmc/nuts.rs:288 ("=NutsSaSampler= drops into =run_rs= and
 =MultiChainSampler= like =HmcSaSampler='"), and exercised by
 =tests/mcmc_sa.rs= and =tests/nuts_sa.rs=; no portfolio-arm or example

@@ -225,7 +225,7 @@ The Rust blocks are the ones in =tests/docs_reference_snippets.rs=, which =cargo
 
 * Binary Lennard-Jones
 
-=potentials::BinaryLennardJones::new(n_a, n_b, eps_aa, eps_ab, eps_bb, sigma_aa, sigma_ab, sigma_bb)= is a two-species Lennard-Jones cluster with no cutoff.
+=potentials::BinaryLennardJones::new(n_a, n_b, epsilon_aa, epsilon_ab, epsilon_bb, sigma_aa, sigma_ab, sigma_bb)= is a two-species Lennard-Jones cluster with no cutoff.
 The first =n_a= atoms are species A and the rest are species B, and every parameter is positive and finite.
 =value_and_gradient= evaluates through the =binary_lj= kernel of rgpot when the process has installed the kernels (=ClusterKernels::binary_lj=, filled by =install_rgpot_kernels!=), and through a local pair loop otherwise.
 A search on it declares =species= and =sigmas= on the =Config=, as the binary =cluster_search= does.
@@ -305,7 +305,7 @@ except ValueError as err:
 
 * Search surfaces
 
-- =cluster_search(obj, grad, n, budget, seed=0, recommended=True, derived=False, communicating=False, *, ras=False, start=None, length_scale=None, species=None, sigmas=None, rigid=False, layout="block", target=None, water_sites=None, groups=None, local_step=None, ring_moves=None, hold_stereocentres=None, measured_energy_scale=None)= :: \(3N\) point set, or \(6N\) for =rigid=True= or =water_sites=.
+- =cluster_search(obj_fn, grad_fn, n, budget, seed=0, recommended=True, derived=False, communicating=False, *, ras=False, start=None, length_scale=None, species=None, sigmas=None, rigid=False, layout="block", target=None, water_sites=None, groups=None, local_step=None, ring_moves=None, hold_stereocentres=None, measured_energy_scale=None)= :: \(3N\) point set, or \(6N\) for =rigid=True= or =water_sites=.
   Always needs a gradient or force.
   =species= is one label per point and =sigmas= is one diameter per point; two or more labels add a swap move.
   A wide diameter ratio also tries one downhill unlike-pair exchange beside the microcanonical step and the inner-outer exchange.
@@ -336,9 +336,9 @@ except ValueError as err:
   The returned dict has =best=, =best_energy=, =hops=, =accepted=, =nve_unavailable=, =local_step= and =quench_seconds=.
   A callback may raise a =BaseException= that is not an =Exception=, such as =KeyboardInterrupt=.
   The run then stops at the next evaluation, and the exception is re-raised.
-- =ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)= :: design box. Gradient → hop and quench; no gradient → portfolio.
+- =ensemble_optimize(obj_fn, low, high, budget, ..., grad_fn=None)= :: design box. Gradient → hop and quench; no gradient → portfolio.
 - =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
-- =global_optimize(obj, low, high, budget, ...)= :: portfolio arms when the caller does not want hops.
+- =global_optimize(obj_fn, low, high, budget, ...)= :: portfolio arms when the caller does not want hops.
 
 A callback that raises =BaseException= other than =Exception= (a harness
 stop, or =KeyboardInterrupt=) ends the search at once. The best state
@@ -355,11 +355,11 @@ See [[file:../howto/choose-driver.org][choose a driver]].
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
 - =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
+All called via =run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None, max_evals=None)=.
 Each move is mirror-reflected into =[low, high]= and the neighbourhood is the
-box, so =obj= is only evaluated inside it. =x0= starts the walk at a given
+box, so =obj_fn= is only evaluated inside it. =x0= starts the walk at a given
 point; without it the start is a uniform draw. The start costs one
-evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls.
+evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls, or =max_evals= calls when that is smaller. =max_evals= is at least 1.
 =run_qmc= and =global_optimize= take =x0= as well.
 =low=, =high= and =x0= may be any array-like of one shape, flattened in C order.
 A coordinate with =low == high= stays fixed. A NaN objective value counts as
@@ -375,14 +375,14 @@ worse than every number, =+inf= included, so it is never kept as the best.
 These drivers require gradients.
 Gradient support is provided by =eindir=; see the [[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]].
 
-- =polish(obj, grad, low, high, x0, max_fevals=200, ...)
-- =qmc_polish(obj, grad, low, high, n_starts, max_fevals_per_start, ...)=
+- =polish(obj_fn, grad_fn, low, high, x0, max_fevals=200, ...)
+- =qmc_polish(obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, ...)=
 - =shifted_qmc_polish(..., n_replicates=1, ...)
 
 * Advanced drivers
 
-- =additive_independence(obj, low, high, max_fevals, seed=0, degree=8, ... n_pilot=0)= (values only, rank-1 surrogate).
-- =gle_langevin(obj, grad, low, high, max_fevals, seed=0, omega0=0.2, dt=0.2, n_epochs=40)= (gradient, colored noise).
+- =additive_independence(obj_fn, low, high, max_fevals, seed=0, degree=8, ... n_pilot=0)= (values only, rank-1 surrogate).
+- =gle_langevin(obj_fn, grad_fn, low, high, max_fevals, seed=0, omega0=None, dt=0.2, n_epochs=40, x0=None)= (gradient, colored noise). Without =omega0= the adaptive variant runs.
 
 * Device and ensemble (same kernel)
 
