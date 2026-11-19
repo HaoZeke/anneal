@@ -11,6 +11,7 @@ import csv
 import math
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -437,13 +438,30 @@ def show_cap(cap: str) -> str:
     return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
 
 
+def commit_held(revision: str) -> bool:
+    """The revision is a commit object in this repository."""
+    if not revision or revision in {"unknown", "latest"}:
+        return False
+    return subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+        cwd=ROOT, capture_output=True,
+    ).returncode == 0
+
+
 def tex_table() -> str:
-    """Table tab:ase: recommended against both ASE arms, Fisher on hits only."""
+    """Table tab:ase: recommended against both ASE arms, Fisher on hits only.
+
+    A system is omitted when any quoted arm cites a commit this repository does not hold.
+    The block is empty when that is every system.
+    """
     body = []
     revisions = set()
     for system in SYSTEMS:
         _, budget, _, _ = SYSTEMS[system]
         grouped = load(system)
+        quoted = [row for arm in ("recommended", *ASE_ARMS) for row in grouped[arm]]
+        if not quoted or any(not commit_held(row["code_revision"]) for row in quoted):
+            continue
         revisions |= {row["code_revision"] for row in grouped["recommended"]}
         if any(row["stop"] == "wall" for row in grouped["recommended"]):
             raise SystemExit(f"{system}: a recommended row stopped at the wall cap")
@@ -471,7 +489,7 @@ def tex_table() -> str:
             show_p(fisher(hits("recommended"), hits("ase_mh"))),
         ]) + " \\\\")
     if not revisions:
-        raise SystemExit("no recommended revisions found")
+        return ""
     rev_text = ", ".join(sorted(revisions))
     return "\n".join([
         "\\begin{table}",
@@ -509,6 +527,10 @@ def tex_table() -> str:
 
 def splice(text: str, block: str) -> str:
     start, end = TEX_MARKS
+    if not block:
+        if start in text or end in text:
+            raise SystemExit(f"{DOCUMENT} still marks a table with no held row")
+        return text
     if text.count(start) != 1 or text.count(end) != 1:
         raise SystemExit(f"{DOCUMENT} needs one '{start}' and one '{end}'")
     head, rest = text.split(start, 1)
