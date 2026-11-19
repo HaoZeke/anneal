@@ -222,6 +222,28 @@ def main() -> None:
         recorder.mpi_from_setup("mpic++ found: YES (/opt/secret/mpic++) 5.0.11\n") == "enabled",
         "mpic++ found was not resolved as enabled",
     )
+    require(
+        recorder.mpi_from_setup(
+            "Dependency mpi for host machine found: YES 5.0.11\n"
+        )
+        == "enabled",
+        "mpi found: YES was not resolved as enabled",
+    )
+    require(
+        recorder.mpi_from_setup(
+            "Dependency mpi for host machine found: NO (tried pkgconfig and cmake)\n"
+        )
+        == "disabled",
+        "mpi found: NO was resolved as enabled",
+    )
+    require(
+        recorder.mpi_from_setup(
+            "Dependency mpi for host machine found: NO (tried pkgconfig and cmake)\n"
+            "Program mpirun found: YES (/opt/secret/mpirun)\n"
+        )
+        == "disabled",
+        "mpi found: NO was resolved as enabled because another line said YES",
+    )
     compact = recorder.parse_meson_summary("Ok:                4\nExpected Fail:     1\nFail:              0\n")
     require(
         compact["Ok"] == 4
