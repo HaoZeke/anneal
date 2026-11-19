@@ -245,7 +245,7 @@ endif
 if host_machine.system() == 'linux'
     _readelf = find_program('readelf', required: true)
     _librgpot_soname = 'librgpot.so.' + rgpot_cxx_soversion
-    custom_target(
+    librgpot_soname = custom_target(
         'librgpot_soname',
         input: rgpot,
         output: _librgpot_soname,

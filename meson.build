@@ -1096,6 +1096,7 @@ if not meson.is_subproject() and get_option('with_tests')
             'metatomic_engine',
             'uma_engine',
             'rgpot',
+            'librgpot_soname',
             'classical_engine',
             'mopac_engine',
             'nwchem_engine',
