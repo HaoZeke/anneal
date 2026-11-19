@@ -17,8 +17,11 @@ SCRIPT = ROOT / "bench" / "record_omp_crossover_v3_verification.py"
 RECORDS = ROOT / "bench" / "results" / "omp_crossover_v3e_records"
 NOTE = ROOT / "bench" / "results" / "rgpot_omp_crossover_v3e_verification.md"
 LEG_ORDER = ("meson-on", "meson-off", "meson-mpi", "cmake-on")
+# An absolute path begins at a token boundary. A slash inside a repo-relative
+# path, or the slash in a URL, is not one.
 _ABS_PATH = re.compile(
-    r"(?<![\w:}$])/(?:[A-Za-z0-9._+-]+)(?:/[A-Za-z0-9._+-]+)+"
+    r"(?:^|[\s\"'=(,`\[])/(?:[A-Za-z0-9._+-]+)(?:/[A-Za-z0-9._+-]+)+",
+    re.MULTILINE,
 )
 
 
