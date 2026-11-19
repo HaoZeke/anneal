@@ -200,26 +200,27 @@ class QuietMinimaHopping(MinimaHopping):
         if server is None:
             return super()._unique_minimum_position()
         self._read_minima()
-        unique = True
         closest = 99999.0
         current = np.asarray(self._atoms.positions, dtype=np.float64)
         for minimum in self._minima:
             # ComparePositions(translate=True)(minimum, current). The first
             # geometry is shifted by its first atom; every atom of the second
-            # is tried as the origin. The scalar walk matches that distance
-            # to a unit in the last place. Within 1e-9 of the threshold the
+            # is tried as the origin. Within 1e-9 of the threshold the
             # decision is taken from ASE's own compare, so a last-bit
-            # difference cannot change acceptance.
+            # difference cannot change acceptance. ASE uses the boolean
+            # only: the numeric closest distance is written to the log and
+            # does not move the temperature, so the first minimum inside
+            # the threshold ends the scan.
             distance = server.distance(minimum.positions, current)
             if abs(distance - self._minima_threshold) <= 1.0e-9:
                 from ase.optimize.minimahopping import ComparePositions
 
                 distance = float(ComparePositions(translate=True)(minimum, self._atoms))
-            if distance < self._minima_threshold:
-                unique = False
             if distance < closest:
                 closest = distance
-        return unique, closest
+            if distance < self._minima_threshold:
+                return False, closest
+        return True, closest
 
     def _molecular_dynamics(self, resume=None):
         if resume is not None:
@@ -288,7 +289,7 @@ def run_minima_hopping(atoms, seed: int, length_scale: float, energy_scale: floa
     install_fast_compare()
     from eval_client import DmaxServer
 
-    server = DmaxServer(len(atoms))
+    server = DmaxServer(len(atoms), threshold=minima_threshold(length_scale))
     try:
         _run_minima_hopping(atoms, seed, length_scale, energy_scale, fmax, server)
     finally:
