@@ -91,8 +91,9 @@ affinity, the hashed machine id, and one command that repeats the run.
 `--verify` repeats that command for one stored row and checks the hit,
 the calls and the best energy.
 
-The same-binary A/A block runs GMIN against GMIN on LJ38, ABBA, twelve
-seeds, the tuned LJ38 input, and is the noise band.
+The same-binary A/A block runs GMIN against GMIN on the first named cell,
+or on LJ38 when no cell is named. It uses ABBA, twelve seeds and that
+cell's tuned input, and is the noise band.
 
 Hits use Fisher's exact test. Calls to the minimum and wall to the
 minimum use the two-sided Mann-Whitney test, normal approximation with

@@ -687,8 +687,21 @@ def data_blob(root: Path, name: str) -> str:
     ).stdout.strip()
 
 
+def rows_file(args: argparse.Namespace) -> Path:
+    if args.rows is not None:
+        return args.rows
+    return args.root / "bench" / "gmin-tuned" / "rows.csv"
+
+
+def aa_cell_name(args: argparse.Namespace) -> str:
+    # The noise block uses the first named cell. With no cell named it is LJ38.
+    if args.system:
+        return args.system[0]
+    return "lj38"
+
+
 def evaluate(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, str]) -> None:
-    rows_path = args.root / "bench" / "gmin-tuned" / "rows.csv"
+    rows_path = rows_file(args)
     stored = read_rows(rows_path)
     done = {(row["system"], row["code"], row["seed"]) for row in stored}
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
@@ -701,12 +714,15 @@ def evaluate(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, 
         cell = table[name]
         for job in abba(EVAL_SEEDS, "anneal", "gmin"):
             plan.append((name, cell, job, cell.name))
+    aa_label = ""
     if args.aa:
-        cell = table["lj38"]
+        aa_name = aa_cell_name(args)
+        aa_label = f"{aa_name}aa"
+        cell = table[aa_name]
         for job in abba(EVAL_SEEDS, "gmin_a", "gmin_b"):
-            plan.append(("lj38aa", cell, job, "lj38"))
-    counts = balance([job for name, _cell, job, _data in plan if name != "lj38aa"])
-    aa_counts = balance([job for name, _cell, job, _data in plan if name == "lj38aa"])
+            plan.append((aa_label, cell, job, aa_name))
+    counts = balance([job for name, _cell, job, _data in plan if name != aa_label])
+    aa_counts = balance([job for name, _cell, job, _data in plan if aa_label and name == aa_label])
     per_slot = len(EVAL_SEEDS) // 4
     if names and (len(counts) != 8 or set(counts.values()) != {len(names) * per_slot}):
         raise SystemExit(f"ABBA counts {counts}")
@@ -866,40 +882,54 @@ def summarise(rows: list[dict[str, str]], names: list[str]) -> list[dict[str, st
     return out
 
 
+def aa_labels(rows: list[dict[str, str]]) -> list[str]:
+    found: list[str] = []
+    for row in rows:
+        system = row["system"]
+        if system.endswith("aa") and system not in found:
+            found.append(system)
+    return found
+
+
 def aa_summary(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    left = latest(rows, "lj38aa", "gmin_a")
-    right = latest(rows, "lj38aa", "gmin_b")
-    if len(left) != len(EVAL_SEEDS) or len(right) != len(EVAL_SEEDS):
-        return []
-    check_balance(left, right, "lj38aa")
-    by_seed = {row["seed"]: row for row in right}
-    deltas = []
-    for row in left:
-        other = by_seed[row["seed"]]
-        deltas.append(
+    labels = aa_labels(rows) or ["lj38aa"]
+    out: list[dict[str, str]] = []
+    for label in labels:
+        left = latest(rows, label, "gmin_a")
+        right = latest(rows, label, "gmin_b")
+        if len(left) != len(EVAL_SEEDS) or len(right) != len(EVAL_SEEDS):
+            continue
+        check_balance(left, right, label)
+        by_seed = {row["seed"]: row for row in right}
+        deltas = []
+        for row in left:
+            other = by_seed[row["seed"]]
+            deltas.append(
+                {
+                    "calls": abs(float(row["calls"]) - float(other["calls"])),
+                    "calls_to_hit": abs(float(row["calls_to_hit"]) - float(other["calls_to_hit"])),
+                    "best": abs(float(row["best"]) - float(other["best"])),
+                    "wall_s": abs(float(row["wall_s"]) - float(other["wall_s"])),
+                    "outside_per_call_s": abs(float(row["outside_per_call_s"]) - float(other["outside_per_call_s"])),
+                }
+            )
+
+        def pack(key: str) -> str:
+            values = [item[key] for item in deltas]
+            return f"{type7(values, 0.5):.6g} {iqr(values):.6g} {max(values):.6g}"
+
+        out.append(
             {
-                "calls": abs(float(row["calls"]) - float(other["calls"])),
-                "calls_to_hit": abs(float(row["calls_to_hit"]) - float(other["calls_to_hit"])),
-                "best": abs(float(row["best"]) - float(other["best"])),
-                "wall_s": abs(float(row["wall_s"]) - float(other["wall_s"])),
-                "outside_per_call_s": abs(float(row["outside_per_call_s"]) - float(other["outside_per_call_s"])),
+                "system": label,
+                "n": str(len(EVAL_SEEDS)),
+                "median_iqr_max_calls": pack("calls"),
+                "median_iqr_max_calls_to_hit": pack("calls_to_hit"),
+                "median_iqr_max_best": pack("best"),
+                "median_iqr_max_wall_s": pack("wall_s"),
+                "median_iqr_max_outside_per_call_s": pack("outside_per_call_s"),
             }
         )
-    def pack(key: str) -> str:
-        values = [item[key] for item in deltas]
-        return f"{type7(values, 0.5):.6g} {iqr(values):.6g} {max(values):.6g}"
-
-    return [
-        {
-            "system": "lj38aa",
-            "n": str(len(EVAL_SEEDS)),
-            "median_iqr_max_calls": pack("calls"),
-            "median_iqr_max_calls_to_hit": pack("calls_to_hit"),
-            "median_iqr_max_best": pack("best"),
-            "median_iqr_max_wall_s": pack("wall_s"),
-            "median_iqr_max_outside_per_call_s": pack("outside_per_call_s"),
-        }
-    ]
+    return out
 
 
 def show(value: str, digits: int = 4) -> str:
@@ -982,7 +1012,7 @@ def results_block(summary: list[dict[str, str]], choices: list[dict[str, str]], 
         lines.extend(
             [
                 "",
-                "## LJ38 same-binary noise",
+                f"## {band['system'][:-2].upper() if band['system'].endswith('aa') else band['system'].upper()} same-binary noise",
                 "",
                 "Absolute difference of the two GMIN arms, median, IQR and maximum.",
                 "",
@@ -1009,17 +1039,15 @@ def splice(path: Path, block: str) -> None:
 def report(args: argparse.Namespace, table: dict[str, Cell]) -> None:
     root = args.root
     choices = read_rows(root / "bench" / "gmin-tuned" / "tuning-choice.csv")
-    rows = read_rows(root / "bench" / "gmin-tuned" / "rows.csv")
+    rows = read_rows(rows_file(args))
     names = [cell.name for cell in cells_of(root)]
     summary = summarise(rows, names)
     aa_rows = aa_summary(rows)
-    write_csv(root / "bench" / "gmin-tuned" / "summary.csv", SUMMARY_FIELDS, summary)
+    summary_path = args.summary if args.summary is not None else root / "bench" / "gmin-tuned" / "summary.csv"
+    write_csv(summary_path, SUMMARY_FIELDS, summary)
     if aa_rows:
-        write_csv(
-            root / "bench" / "gmin-tuned" / "aa.csv",
-            list(aa_rows[0].keys()),
-            aa_rows,
-        )
+        aa_path = args.aa_csv if args.aa_csv is not None else root / "bench" / "gmin-tuned" / "aa.csv"
+        write_csv(aa_path, list(aa_rows[0].keys()), aa_rows)
     splice(root / README, results_block(summary, choices, aa_rows))
     print(f"summary cells {len(summary)} choices {len(choices)} aa {len(aa_rows)}", flush=True)
 
@@ -1043,7 +1071,8 @@ def verify(args: argparse.Namespace, table: dict[str, Cell]) -> None:
         cell = table[row["system"]]
         fresh = finish_anneal(proc, cell, int(row["seed"]), int(row["budget"]))
     else:
-        cell_name = "lj38" if row["system"] == "lj38aa" else row["system"]
+        system = row["system"]
+        cell_name = system[:-2] if system.endswith("aa") and system[:-2] in table else system
         cell = table[cell_name]
         fresh = finish_gmin(proc, args.work, cell.reference, int(row["budget"]), f"verify {row['system']}")
     for key in ("hit", "calls", "calls_to_hit"):
@@ -1178,6 +1207,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--logs", type=Path)
     parser.add_argument("--build", type=Path)
     parser.add_argument("--rows", type=Path)
+    parser.add_argument("--summary", type=Path)
+    parser.add_argument("--aa-csv", type=Path)
     parser.add_argument("--system", action="append")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--code")
