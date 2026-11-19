@@ -45,8 +45,16 @@ Atoms 0 and 1 coincident and atom 2 =NaN= therefore give positive infinity and a
 zero gradient.
 For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
 zero.
-If the scratch allocation fails, the energy is positive infinity and the
-gradient is zero.
+The call keeps thread local scratch that only grows.
+It holds one double per atom for the density and 6 doubles per pair, which is
+8 bytes per atom and 48 bytes per pair, with =n (n - 1) / 2= pairs.
+When =realloc= returns null for either buffer, the call sets the energy to
+positive infinity, zeroes the 3 n gradient entries and returns before it reads
+a coordinate.
+There is no status code, so the caller sees the same outputs as for a
+coincident pair and cannot tell the two apart from the outputs alone.
+The buffers keep their earlier size, so a later call that fits them still
+works.
 =NaN= is not ~<= 0.0~.
 A pair that is reached with a =NaN= coordinate is evaluated, and the energy and
 the gradient become =NaN=.
@@ -111,8 +119,10 @@ void rgpot_gupta(const double *x, size_t n, const unsigned char *slot,
   For =n < 2= the pair loop does not run, so the energy is 0 and the gradient is
   zero.
 - Errors :: no status code and no error message.
-  A failed scratch allocation (=realloc= returning null) sets =*energy= to
-  =+INFINITY=, zeroes the 3 n entries of =gradient= and returns.
+  A failed scratch allocation (=realloc= returning null for the density or the
+  pair buffer) sets =*energy= to =+INFINITY=, zeroes the 3 n entries of
+  =gradient= and returns.
+  The outputs are those of a coincident pair, and no coordinate is read.
   The first pair with ~r2 <= 0.0~ sets =*energy= to =+INFINITY= and returns.
   The gradient is left at the zeros written before that pair, and later pairs
   are not visited.

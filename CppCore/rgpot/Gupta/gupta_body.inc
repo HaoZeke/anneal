@@ -8,6 +8,12 @@
   if (n >= 2) {
     pairs = n * (n - 1) / 2;
   }
+  /* rgpot_gupta_ensure grows the thread local scratch: one double per atom
+   * for the density and 6 doubles per pair. It returns 1 only when realloc
+   * returns null. There is no status return, so the caller sees an infinite
+   * energy and a zero gradient, the outputs of a coincident pair, and no
+   * coordinate is read. The old buffers stay valid, so a later call that
+   * fits them still works. */
   if (rgpot_gupta_ensure(n, pairs) != 0) {
     *energy = INFINITY;
     for (size_t k = 0; k < 3 * n; k++) {
