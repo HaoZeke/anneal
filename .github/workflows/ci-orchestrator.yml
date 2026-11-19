@@ -442,7 +442,9 @@ jobs:
   # --- Stage 2a''': classical pair scan, no cargo ---
   # manylinux wheels, conda and the eOn subproject configure without cargo.
   # This leg forces that fallback on a runner that does have cargo, so the
-  # C++ scan is what the tests exercise.
+  # C++ scan is what the tests exercise. with_rust_core is on here, so the
+  # plain rgpot-core archive (no pair list to share a runtime with) is built
+  # and linked, and the rust core tests run.
   build_fast_nlist_off:
     name: meson / ubuntu [fast nlist off]
     needs: [prepare]
@@ -463,6 +465,7 @@ jobs:
           meson setup bbdir \
             -Dwith_tests=true \
             -Dwith_eam_table=true \
+            -Dwith_rust_core=true \
             -Dwith_examples=false \
             -Dwith_xtensor=false \
             -Dwith_eigen=false \
@@ -539,6 +542,8 @@ jobs:
   # fewer threads than it asks for, and results must keep the bits of their
   # slice count. One build, two test runs. Linux only: the macOS legs build
   # without OpenMP, and MSVC's OpenMP 2.0 runtime has no thread limit.
+  # with_rust_core is on next to the fast pair list, so rgpot-bundle, the one
+  # archive that carries both, is what links.
   thread_limit:
     name: meson / ubuntu [OMP_THREAD_LIMIT 1, 2]
     needs: [prepare]
@@ -559,6 +564,7 @@ jobs:
         run: |
           meson setup bbdir \
             -Dwith_tests=true \
+            -Dwith_rust_core=true \
             -Dwith_examples=false \
             -Dwith_xtensor=false \
             -Dwith_eigen=false \
