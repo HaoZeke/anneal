@@ -846,15 +846,15 @@ pub struct RotatableBond {
 /// Rotatable bonds of a covalent structure.
 ///
 /// A bond is rotatable when it is a bridge of the bond graph (not in a ring)
-/// and has at least two atoms on each side. A bridge with planar three-bond
-/// four-atom neighbourhood is planar is retained but marked
-/// [`RotatableBond::constrained`];
-/// proposal-time potential calls measure its local and half-turn barriers
-/// instead of inferring them from bond length. The smaller side is the one
-/// that turns, and of two sides of one size, one that is not a symmetric top. A
-/// bond whose turning side is a symmetric top, a pivot carrying two or more
-/// identical terminal atoms and nothing else such as a methyl, is left out:
-/// turning it maps the group back onto itself and a quench undoes the rest.
+/// and has at least two atoms on each side. Bond length does not decide
+/// partial-double character. A bridge is marked
+/// [`RotatableBond::constrained`] when its substituents are coplanar with
+/// the bond and both ends are planar, or one end is planar and the other
+/// is a terminal tip. Every proposal path then leaves that bridge unturned
+/// until the potential has priced its barrier. The smaller side turns, and
+/// of two sides of one size, one that is not a symmetric top. A symmetric
+/// top is three or more identical terminal atoms, or two when the pivot is
+/// planar, and is left out: turning it maps the group onto itself.
 pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Vec<RotatableBond> {
     let n = species.len().min(x.len() / 3);
     let mut adj = vec![Vec::<usize>::new(); n];
@@ -4301,6 +4301,51 @@ mod torsion_tests {
                 "bond {i}-{j} moved to {after}"
             );
         }
+    }
+
+    #[test]
+    fn a_short_planar_bridge_is_kept_and_not_spun() {
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.30, 0.0, 0.0, -0.60, 1.10, 0.0, -0.60, -1.10, 0.0, 1.80, 0.95, 0.0,
+        ]);
+        let species = [6u32, 6, 7, 8, 1];
+        let bonds = rotatable_bonds(x.view(), &species, 1.25);
+        let central = bonds
+            .iter()
+            .find(|bond| (bond.fixed.min(bond.pivot), bond.fixed.max(bond.pivot)) == (0, 1))
+            .expect("a short planar bridge is retained");
+        assert!(central.constrained);
+        let d0 = dihedral(&x, 2, 0, 1, 4);
+        let top = super::super::torsion::Topology::of(x.view(), &species, 1.25, None, false);
+        let mut rng = StdRng::seed_from_u64(1);
+        for _ in 0..200 {
+            let y = top.propose(x.view(), &mut rng);
+            assert!(
+                angle_gap(d0, dihedral(&y, 2, 0, 1, 4)) < 1.0e-8,
+                "a uniform draw turned the constrained bridge"
+            );
+        }
+    }
+
+    #[test]
+    fn a_perpendicular_neighbourhood_is_not_constrained() {
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, // left centre, planar in xy
+            1.45, 0.0, 0.0, // right centre, planar in xz
+            -0.70, 1.20, 0.0, // left tip
+            -0.20, -1.25, 0.0, // left substituent
+            2.15, 0.0, 1.20, // right tip
+            2.15, 0.0, -1.25, // right substituent
+        ]);
+        let bonds = rotatable_bonds(x.view(), &[6, 6, 7, 8, 9, 5], 1.25);
+        let central = bonds
+            .iter()
+            .find(|bond| (bond.fixed.min(bond.pivot), bond.fixed.max(bond.pivot)) == (0, 1))
+            .expect("the bridge is retained");
+        assert!(
+            !central.constrained,
+            "perpendicular substituents were treated as one plane"
+        );
     }
 
     #[test]
