@@ -962,7 +962,10 @@ def test_an_unresolved_cite_key_is_rejected(citation):
     )
 
 
-@pytest.mark.parametrize("literal", ["27.2113862", "27.211_386_245_988", "0.529177210903", "0.529_177_210_903", "1.8897261"])
+@pytest.mark.parametrize("literal", [
+    "27.2113862", "27.211_386_245_988", "0.529177210903", "0.529_177_210_903", "1.8897261",
+    "4" + ".184",
+])
 @pytest.mark.parametrize("path", [
     "src/methods/tric_opt.rs",
     "tests/catalog_signature.rs",

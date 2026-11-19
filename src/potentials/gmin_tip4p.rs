@@ -34,8 +34,11 @@ use ndarray::{Array1, ArrayView1};
 
 use super::tip4p::{cross, left_jacobian_t, mat_vec, rotation_matrix, rotation_vector};
 
-/// Thermochemical kilojoules per kilocalorie.
-pub const KJ_PER_KCAL: f64 = 4.184;
+/// Thermochemical kilojoules per kilocalorie, from `readcon_core::units`.
+pub fn kj_per_kcal() -> f64 {
+    readcon_core::units::unit_conversion_factor("kcal", "kJ")
+        .expect("kcal and kJ share an energy dimension")
+}
 /// Lennard-Jones attractive coefficient, kJ/mol Å^6.
 pub const C6: f64 = 2552.24;
 /// Lennard-Jones repulsive coefficient, kJ/mol Å^12.
@@ -614,6 +617,12 @@ mod tests {
     use super::*;
     use crate::methods::warm_lbfgs::WarmLbfgs;
 
+    #[test]
+    fn kj_per_kcal_matches_the_thermochemical_calorie() {
+        let factor = kj_per_kcal();
+        assert_eq!(factor.to_bits(), (4184.0_f64 / 1000.0).to_bits());
+    }
+
     fn load_xyz(text: &str) -> (f64, Vec<f64>) {
         let mut lines = text.lines();
         let _count = lines.next();
@@ -686,7 +695,7 @@ mod tests {
 
     /// Cambridge headers at the rigid geometry of the printed minima.
     ///
-    /// The thermochemical calorie is 4.184 kJ. Printed coordinates are
+    /// The thermochemical calorie is the kcal-to-kJ factor. Printed coordinates are
     /// 1e-7 Å, and the (H2O)10 header is reproduced to 7.5e-6 kcal/mol.
     /// The checked bound is 1e-5 kcal/mol.
     #[test]
@@ -710,7 +719,7 @@ mod tests {
             assert!((header - published).abs() < 1.0e-12);
             let n = coords.len() / 9;
             let energy = GminTip4p::new(n).eval(rigid_from_ohh(&coords).view());
-            let err_kcal = (energy - published).abs() / KJ_PER_KCAL;
+            let err_kcal = (energy - published).abs() / kj_per_kcal();
             assert!(
                 err_kcal < 1.0e-5,
                 "n={n} rigid {energy} header {published} err {err_kcal:.3e} kcal/mol"
