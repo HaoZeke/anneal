@@ -153,8 +153,10 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
 
 fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
     let n = x.len() / 3;
-    let max_order = n.clamp(2, 12);
-    let orders: Vec<usize> = (2..=max_order).collect();
+    if n < 2 {
+        return vec![identity()];
+    }
+    let orders: Vec<usize> = (2..=n).collect();
     let mut candidates = crate::symmetrise::detect_all(x, n, &orders, 0.25);
     if candidates.is_empty()
         && let Some(candidate) = crate::symmetrise::detect(x, n, &orders, f64::INFINITY)
