@@ -81,6 +81,10 @@ def require_named_rejection(
     require_exact_rejection(result, f"arm set mismatch: missing {missing}; extra {extra}")
 
 
+def require_missing_sha(result: subprocess.CompletedProcess[str], arm: str) -> None:
+    require_exact_rejection(result, f"{arm}: arm record is missing required key sha")
+
+
 def require_commit_rejection(
     result: subprocess.CompletedProcess[str], arm: str, sha: str
 ) -> None:
@@ -152,6 +156,11 @@ def main() -> None:
     swapped_team = next(arm for arm in swapped_commit["metadata"]["arms"] if arm["name"] == "team-1")
     swapped_team["sha"] = stock["sha"]
     require_tree_rejection(run_checker(swapped_commit), "team-1", team_tree, stock_tree)
+
+    omitted_sha = json.loads(json.dumps(original))
+    changed_team = next(arm for arm in omitted_sha["metadata"]["arms"] if arm["name"] == "team-1")
+    del changed_team["sha"]
+    require_missing_sha(run_checker(omitted_sha), "team-1")
 
     unresolved_commit = json.loads(json.dumps(original))
     changed_team = next(
