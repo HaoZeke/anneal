@@ -139,7 +139,7 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     }
     let orientations = inertia_orientations(x, classes.len())?;
     clear_op_cache();
-    let ops = detected_ops(x);
+    let ops = detected_ops(x, classes);
     let best = project(x, classes, &ops, &orientations).and_then(|(coordinates, measure)| {
         (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
             coordinates,
@@ -151,7 +151,7 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
     best
 }
 
-fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
+fn detected_ops(x: ArrayView1<'_, f64>, classes: &[u32]) -> Vec<[[f64; 3]; 3]> {
     let n = x.len() / 3;
     if n < 2 {
         return vec![identity()];
@@ -160,14 +160,160 @@ fn detected_ops(x: ArrayView1<'_, f64>) -> Vec<[[f64; 3]; 3]> {
     // Operations outside the tolerance are not a group of this structure.
     // Filling that gap with the least-bad rotation kept a high order whose
     // turn maps every atom to itself, then closed it into a long cyclic
-    // group and assigned every element.
-    let candidates = crate::symmetrise::detect_generators(x, n, &orders, 0.25);
-    let group = crate::symmetrise::close_symmetries(&candidates, x, n, 0.25, 64);
-    if group.is_empty() {
+    // group and assigned every element. The same tolerance is the radial
+    // window below: it is the one the detector was given, not a second cut.
+    let tolerance = 0.25;
+    let candidates = crate::symmetrise::detect_generators_in(x, n, &orders, tolerance, classes);
+    let group = crate::symmetrise::close_symmetries(&candidates, x, n, tolerance, 64);
+    let kept: Vec<_> = group
+        .into_iter()
+        .filter(|op| radial_multiset_allows(x, classes, op, tolerance))
+        .collect();
+    if kept.is_empty() {
         vec![identity()]
     } else {
-        group
+        kept
     }
+}
+
+/// Whether `op` can be a symmetry at `tolerance`, read from the radii.
+///
+/// An orthogonal map about the centroid preserves every distance to the
+/// centroid, so the sorted radii of each species and of their images
+/// agree. A map that moves those sorted lists by more than `tolerance`
+/// is not a symmetry of this centred set, and the assignment is not run.
+///
+/// A proper rotation of order `k >= 3` says more. Atoms of one species
+/// whose radii lie within `tolerance` of each other are one shell. The
+/// axis meets that sphere in at most two points, so at most two atoms of
+/// the shell are fixed and the rest form orbits of size `k`. The shell
+/// size modulo `k` is therefore at most 2. A larger remainder cannot be
+/// that rotation.
+fn radial_multiset_allows(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    op: &[[f64; 3]; 3],
+    tolerance: f64,
+) -> bool {
+    let n = classes.len();
+    if n == 0 || x.len() != 3 * n || !tolerance.is_finite() {
+        return false;
+    }
+    if x.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
+    let mut centroid = [0.0; 3];
+    for atom in 0..n {
+        for axis in 0..3 {
+            centroid[axis] += x[3 * atom + axis];
+        }
+    }
+    let scale = n as f64;
+    for value in &mut centroid {
+        *value /= scale;
+    }
+    let mut centred = Vec::with_capacity(n);
+    for atom in 0..n {
+        centred.push([
+            x[3 * atom] - centroid[0],
+            x[3 * atom + 1] - centroid[1],
+            x[3 * atom + 2] - centroid[2],
+        ]);
+    }
+    let images: Vec<[f64; 3]> = centred.iter().map(|point| mul_vec(op, *point)).collect();
+    let mut labels: Vec<u32> = classes.to_vec();
+    labels.sort_unstable();
+    labels.dedup();
+    for label in labels {
+        let radii = sorted_radii(&centred, classes, label);
+        let image_radii = sorted_radii(&images, classes, label);
+        if radii.len() != image_radii.len() {
+            return false;
+        }
+        if radii
+            .iter()
+            .zip(image_radii.iter())
+            .any(|(radius, image)| (radius - image).abs() > tolerance)
+        {
+            return false;
+        }
+        match rotation_kind(op, n) {
+            RotationKind::Order(order) if order >= 3 && !shells_admit(&radii, order, tolerance) => {
+                return false;
+            }
+            // A proper rotation that has not closed by `n` has order
+            // above the atom count. No off-axis orbit of that size fits.
+            RotationKind::Open => return false,
+            RotationKind::Order(_) | RotationKind::Improper => {}
+        }
+    }
+    true
+}
+
+fn sorted_radii(points: &[[f64; 3]], classes: &[u32], label: u32) -> Vec<f64> {
+    let mut radii: Vec<f64> = points
+        .iter()
+        .enumerate()
+        .filter(|(atom, _)| classes[*atom] == label)
+        .map(|(_, point)| (point[0] * point[0] + point[1] * point[1] + point[2] * point[2]).sqrt())
+        .collect();
+    radii.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    radii
+}
+
+/// Shells are maximal runs of the sorted radii whose span is within
+/// `tolerance`. Each run can hide at most two axial atoms.
+fn shells_admit(radii: &[f64], order: usize, tolerance: f64) -> bool {
+    if radii.is_empty() || order < 2 {
+        return true;
+    }
+    let mut start = 0;
+    for index in 1..=radii.len() {
+        let ended = index == radii.len() || radii[index] - radii[start] > tolerance;
+        if !ended {
+            continue;
+        }
+        if (index - start) % order > 2 {
+            return false;
+        }
+        start = index;
+    }
+    true
+}
+
+/// How a matrix acts as a candidate symmetry of `n` atoms.
+enum RotationKind {
+    /// Determinant is not positive: a reflection, inversion, or a
+    /// singular map. The shell count is a property of a proper rotation.
+    Improper,
+    /// Smallest positive exponent that restores the identity.
+    Order(usize),
+    /// Proper, and no power up to `n` is the identity.
+    Open,
+}
+
+/// A proper rotation's order, when it closes by `n`.
+///
+/// An orbit under `n` atoms cannot be larger than `n`, so a proper
+/// rotation that has not closed by then is [`RotationKind::Open`].
+fn rotation_kind(op: &[[f64; 3]; 3], n: usize) -> RotationKind {
+    if determinant(op) <= 0.0 {
+        return RotationKind::Improper;
+    }
+    let mut power = identity();
+    for order in 1..=n.max(1) {
+        power = matmul(power, *op);
+        if matrix_close(&power, &identity()) {
+            return RotationKind::Order(order);
+        }
+    }
+    RotationKind::Open
+}
+
+fn determinant(op: &[[f64; 3]; 3]) -> f64 {
+    op[0][0] * (op[1][1] * op[2][2] - op[1][2] * op[2][1])
+        - op[0][1] * (op[1][0] * op[2][2] - op[1][2] * op[2][0])
+        + op[0][2] * (op[1][0] * op[2][1] - op[1][1] * op[2][0])
 }
 
 struct ProposeCache {
@@ -859,5 +1005,44 @@ mod tests {
         assert!(along_x[0].abs() < 1e-12);
         let along_z = perpendicular([0.0, 0.0, 1.0]);
         assert!(along_z[2].abs() < 1e-12);
+    }
+
+    /// A five-fold turn preserves a pentagon's one shell of five and
+    /// cannot be a symmetry of four points at one radius. A stretch is
+    /// not orthogonal, so the sorted radii move by more than the
+    /// detection tolerance.
+    #[test]
+    fn the_radial_multiset_keeps_only_operations_the_shells_allow() {
+        let mut pentagon = Vec::with_capacity(15);
+        for step in 0..5 {
+            let angle = std::f64::consts::TAU * step as f64 / 5.0;
+            pentagon.extend([angle.cos(), angle.sin(), 0.0]);
+        }
+        let pentagon = Array1::from_vec(pentagon);
+        let turn = turns_about_z(5)[1];
+        assert!(radial_multiset_allows(
+            pentagon.view(),
+            &[0; 5],
+            &turn,
+            0.25
+        ));
+        let square = Array1::from_vec(vec![
+            1.0, 1.0, 0.0, -1.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0,
+        ]);
+        assert!(!radial_multiset_allows(square.view(), &[0; 4], &turn, 0.25));
+        let stretch = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 3.0]];
+        assert!(!radial_multiset_allows(
+            pentagon.view(),
+            &[0; 5],
+            &stretch,
+            0.25
+        ));
+        let mirror = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
+        assert!(radial_multiset_allows(
+            square.view(),
+            &[0; 4],
+            &mirror,
+            0.25
+        ));
     }
 }
