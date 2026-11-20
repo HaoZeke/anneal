@@ -494,9 +494,10 @@ OpenMMPot -0.3203213355 96.48533212331002 0.8 0.1
 Each class entry gives the constructor.
 The methods are in the shared-method entries further down, and each lists the
 classes that have it.
-Only the nineteen classes =LJPot=, =LJClusterPot=, =MorsePot=, =MullerBrownPot=, =D2Pot=,
-=D2CpmdPot=, =SWPot=, =EDIPPot=, =LenoskyPot=, =TersoffPot=, =EAMAlPot=,
-=EAMTablePot=, =FeHePot=, =CuH2Pot=, =WaterHPot=, =D3Pot=, =D4Pot=, =ExprPot=
+Only the nineteen classes =LJPot=, =LJClusterPot=, =MorsePot=,
+=MullerBrownPot=, =D2Pot=, =D2CpmdPot=, =SWPot=, =EDIPPot=, =LenoskyPot=,
+=TersoffPot=, =EAMAlPot=, =EAMTablePot=, =FeHePot=, =CuH2Pot=, =WaterHPot=,
+=D3Pot=, =D4Pot=, =ExprPot=
 and =SumPot= have =hvp= and =evaluate_batch=.
 =StillingerWeberSi=, =TersoffSiC=, =IPIPot=, =LammpsPot=, =GromacsPot= and
 =OpenMMPot= do not.
@@ -647,17 +648,18 @@ rgpot.EAMTablePot(file, format, periodic=True, stress=False, skin=1.0)
 rgpot.MullerBrownPot(amplitude=[-200, -100, -170, 15], a=[-1, -1, -6.5, 0.7], b=[0, 0, 11, 0.6], c=[-10, -10, -6.5, 0.7], x0=[1, 0, -0.5, -1], y0=[0, 0.5, 1.5, 1])
 #+end_src
 
-- Inputs :: each parameter is a sequence of four finite numbers. Positions need
-  at least one atom; only its x and y coordinates are active. Defaults are
-  =amplitude=(-200, -100, -170, 15)=, =a=(-1, -1, -6.5, 0.7)=,
-  =b=(0, 0, 11, 0.6)=, =c=(-10, -10, -6.5, 0.7)=,
-  =x0=(1, 0, -0.5, -1)= and =y0=(0, 0.5, 1.5, 1)=.
-- Units :: reduced surface coordinates and energies, carried as Angstrom and eV
-  by the generic rgpot interface.
-- Outputs :: the standard Muller-Brown surface. The first atom's z force and
-  every force on later atoms are zero. =hvp= uses the analytic product.
-- Errors :: a parameter with another length or a non-finite value raises
-  =ValueError=.
+- Inputs :: each parameter is a sequence of four finite numbers.
+  Positions need at least one atom; only its x and y coordinates are active.
+  Defaults are =amplitude=(-200, -100, -170, 15)=, =a=(-1, -1, -6.5, 0.7)=,
+  =b=(0, 0, 11, 0.6)=, =c=(-10, -10, -6.5, 0.7)=, =x0=(1, 0, -0.5, -1)= and
+  =y0=(0, 0.5, 1.5, 1)=.
+- Units :: reduced surface coordinates and energies.
+  The generic rgpot interface carries them as Angstrom and eV.
+- Outputs :: the standard Muller-Brown surface.
+  The first atom's z force and every force on later atoms are zero.
+  =hvp= uses the analytic product.
+- Errors :: another length raises =ValueError=.
+  So does a non-finite value.
 
 *** =rgpot.SWPot=
 
@@ -1044,7 +1046,8 @@ rgpot.IPIPot(address, timeout_s=30.0)
 __call__(positions, atom_types, box)
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1067,7 +1070,8 @@ __call__(positions, atom_types, box)
 caps()
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1088,7 +1092,8 @@ caps()
 config()
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.D4Pot
 - Inputs :: none.
 - Units :: as the constructor: eV for =u0= and =De=, 1/Angstrom for =a=,
@@ -1109,7 +1114,8 @@ config()
 evaluate(positions, atom_types, box)
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1192,7 +1198,8 @@ True True
 evaluate_batch(positions, atom_types, box, n_threads=0)
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1243,7 +1250,8 @@ print(sorted(rows[0]), [r["energy"] for r in rows] == serial)
 hvp(positions, atom_types, box, direction, step=0.0, scheme='auto')
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1377,7 +1385,8 @@ The Hessians follow =rgpot_potential_hessian=; see the
 hvp_centre(positions, atom_types, box)
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1400,7 +1409,8 @@ hvp_centre(positions, atom_types, box)
 invalidate_hvp()
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1418,7 +1428,8 @@ invalidate_hvp()
 hvp_counts()
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1438,7 +1449,8 @@ hvp_counts()
 reset_hvp_counts()
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,
@@ -1457,7 +1469,8 @@ reset_hvp_counts()
 has_analytic_hvp()
 #+end_src
 
-- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot, rgpot.MullerBrownPot, rgpot.D2Pot,
+- Applies to :: rgpot.LJPot, rgpot.LJClusterPot, rgpot.MorsePot,
+  rgpot.MullerBrownPot, rgpot.D2Pot,
   rgpot.D2CpmdPot, rgpot.SWPot, rgpot.EDIPPot, rgpot.LenoskyPot,
   rgpot.TersoffPot, rgpot.EAMAlPot, rgpot.EAMTablePot, rgpot.FeHePot,
   rgpot.CuH2Pot, rgpot.WaterHPot, rgpot.D3Pot, rgpot.D4Pot, rgpot.ExprPot,

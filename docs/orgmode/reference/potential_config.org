@@ -22,9 +22,9 @@ It is a union whose arms and ordinals are =none= @0, =nwchem= @1, =cpmd= @2,
 Outside the union, =common= @3 is a =CommonMethodSpec= overlay.
 Geometry stays on =ForceInput=; =configure(config)= applies method and backend
 setup only.
-=potserv= applies =nwchem=, =cpmd=, =morse=, =composite=, =d2=, =d2cpmd= and
-=mullerBrown= on the matching backend, =cp2k= on a build with CP2K and =d4= on
-a build with dftd4.
+=potserv= applies =nwchem=, =cpmd=, =morse=, =composite=, =d2=,
+=d2cpmd= and =mullerBrown= on the matching backend.
+It applies =cp2k= on a build with CP2K and =d4= on a build with dftd4.
 =none= is a no-op on every backend.
 Every other arm gets =ok=false= with a message that names the arm.
 An arm from a newer schema is named by its discriminant.
@@ -58,14 +58,16 @@ width gets =ok=false= and leaves the pot as it was.
 
 With =potserv <port> MullerBrown=, the =mullerBrown= arm rebuilds the surface.
 The six list fields are =amplitude=, =a=, =b=, =c=, =x0= and =y0=.
-Each is empty to retain its published default or contains exactly four finite values.
+Each is empty to retain its published default.
+Otherwise it holds exactly four finite values.
 Their schema names are =MullerBrownParams.amplitude=, =MullerBrownParams.a=,
 =MullerBrownParams.b=, =MullerBrownParams.c=, =MullerBrownParams.x0= and
 =MullerBrownParams.y0=.
-The =libclassical_engine= accepts the same arm nested in =BuiltinParams.config=
-when =name= is =muller_brown=.
-A list of any other length, a non-finite value, or any other arm gets
-=ok=false= and leaves the surface as it was.
+The =libclassical_engine= takes the same arm in =BuiltinParams.config=.
+It does so when =name= is =muller_brown=.
+A list of any other length is refused.
+A non-finite value is refused.
+Any other arm gets =ok=false= and leaves the surface as it was.
 
 ** Composite arm (=PotentialConfig.composite= / =CompositeParams=)
 
