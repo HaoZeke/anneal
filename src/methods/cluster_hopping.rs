@@ -3479,6 +3479,15 @@ fn returns_to_deposit<F: Fingerprint>(bias: &BasinBias<F>, state: ArrayView1<f64
     bias.potential(bias.cv(state).view()) > 0.0
 }
 
+/// A quench at or above the record that lands in its basin.
+///
+/// The partial return screen never sees this. A relocation looks new
+/// halfway, the full descent falls into the recorded basin, and the
+/// acceptance step walks back onto it.
+fn refuse_return_to_record(energy: f64, recorded: f64, back_on_record: bool) -> bool {
+    energy >= recorded && back_on_record
+}
+
 /// Whether `state` lies in the same deposited basin as `best`, the lowest
 /// structure the run has seen, by the bias's own lookup.
 fn returns_to_best<F: Fingerprint>(
@@ -3507,7 +3516,10 @@ fn stalled(cfg: &Config, quiet: usize, longest_quiet: usize) -> bool {
 
 #[cfg(test)]
 mod biased_metropolis_tests {
-    use super::{Config, biased_metropolis, returns_to_best, returns_to_deposit, stalled};
+    use super::{
+        Config, biased_metropolis, refuse_return_to_record, returns_to_best, returns_to_deposit,
+        stalled,
+    };
     use crate::bias::{BasinBias, Bias, SortedPairs};
     use ndarray::Array1;
     use rand::SeedableRng;
@@ -3601,6 +3613,14 @@ mod biased_metropolis_tests {
         assert!(returns_to_best(&bias, Some(&offer), offer.view()));
         assert!(!returns_to_best(&bias, Some(&here), offer.view()));
         assert!(!returns_to_best(&bias, None, offer.view()));
+    }
+
+    #[test]
+    fn a_quench_back_on_the_record_is_refused_and_an_improvement_is_kept() {
+        assert!(refuse_return_to_record(-1.0, -1.0, true));
+        assert!(!refuse_return_to_record(-1.1, -1.0, true));
+        assert!(!refuse_return_to_record(-1.0, -1.0, false));
+        assert!(!refuse_return_to_record(f64::NAN, -1.0, true));
     }
 
     #[test]
@@ -4951,6 +4971,10 @@ where
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
+    // The record a quench is judged against. Updated before the
+    // proposal, so a descent during this hop is still compared with
+    // the record it started from.
+    let mut recorded_energy = ledger.best;
     // Energy last polished by an unlike-pair quench. `NaN` until the first
     // binary incumbent, so a one-species chain never enters the sweep.
     let mut polished_best = f64::NAN;
@@ -5056,6 +5080,7 @@ where
             1e-9
         };
         if ledger.best < best_seen - new_lowest {
+            recorded_energy = ledger.best;
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             heat = 1.0;
@@ -6489,6 +6514,7 @@ where
         // A leave or a symmetry quench can lower the best after the loop
         // head has passed. The proposal below then uses the preset.
         if ledger.best < best_seen - 1e-9 {
+            recorded_energy = ledger.best;
             best_seen = ledger.best;
             heat = 1.0;
         }
@@ -8284,6 +8310,18 @@ where
                 accept = false;
                 tabu_hits += 1;
             }
+        }
+        // The partial return screen compares the half-relaxed trial with
+        // the chain. A relocation looks new there, then the full quench
+        // falls into the recorded basin and the acceptance step walks
+        // back onto it. The bias already knows that basin. Keep a quench
+        // that beats the record held before this descent.
+        if refuse_return_to_record(
+            e_new,
+            recorded_energy,
+            returns_to_best(&bias, ledger.best_state.as_ref(), x_new.view()),
+        ) {
+            accept = false;
         }
         finish_arm(&mut arm_counts, &proposal_action, accept, improved);
         // The quench was recorded before this test. The minima file already

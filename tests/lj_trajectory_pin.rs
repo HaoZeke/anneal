@@ -90,6 +90,8 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library is deterministic on every build.
-    let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
+    // A quench back on the recorded basin is refused, so the walk
+    // is not the previous one.
+    let expected = "de8b28a2f28cf70f9d115d3bc7b15626724d2bd9497842ee1e21472f4c857d2e";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

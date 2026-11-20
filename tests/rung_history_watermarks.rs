@@ -118,7 +118,10 @@ fn each_rung_accounts_for_foreign_history_visits_in_its_own_bias() {
         assert_eq!(outcome.rungs.len(), 2);
         assert_eq!(outcome.swaps_tried, 0);
         assert_eq!(outcome.swaps_accepted, 0);
-        assert_eq!(outcome.accepted_transitions.len(), 4);
+        // A quench back on the recorded basin is refused. Two of the
+        // four hops are adopted; the visit watermarks below are the
+        // same either way.
+        assert_eq!(outcome.accepted_transitions.len(), 2);
         assert!(
             outcome
                 .accepted_transitions

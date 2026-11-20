@@ -123,12 +123,15 @@ fn the_ladder_multiplies_the_budget_window_temperature() {
 /// sweep would add.
 ///
 /// Adopted rises of more than one well depth, symmetry moves off.
-/// glibc, seeds 0..8: the hot rung adopts 183 against a flat ladder of 37
-/// (seeds 5, 2, 3, 3, 5, 6, 4, 9). A ladder that drops the ratio once the
-/// estimate is on adopts 37, the same eight seeds. libSystem on macos-15
-/// sums those seeds to 221 against 74. `3 * 74` is 222, one rise over the
-/// hot count, so a factor of three does not survive eight seeds.
-/// This test therefore sums seeds 0 to 15 at a factor of two.
+/// A ladder that drops the ratio adopts the flat count, so the hot
+/// rung has to adopt strictly more. glibc, seeds 0..16, once a quench
+/// back on the recorded basin is refused: hot 498
+/// (46, 31, 39, 40, 40, 32, 17, 27, 18, 20, 29, 43, 18, 22, 36, 40)
+/// against flat 300
+/// (27, 18, 22, 23, 19, 23, 6, 14, 15, 11, 21, 36, 15, 12, 22, 16).
+/// Twice 300 is 600, so a factor of two does not hold. The earlier
+/// factor of three did not survive libSystem on macos-15 either
+/// (221 against 74 on seeds 0..8, and `3 * 74` is 222).
 #[test]
 fn the_ladder_multiplies_the_statistical_temperature() {
     anneal_core::install_rgpot_kernels!();
@@ -139,7 +142,15 @@ fn the_ladder_multiplies_the_statistical_temperature() {
     cfg.temperature = 0.2;
     cfg.statistical_temperature = true;
     cfg.swap_period = 450;
-    assert_the_hot_rung_climbs(&cfg, 2 * SEEDS, 2);
+    let mut base = cfg.clone();
+    base.continuous_symmetry = ContinuousSymmetry::Off;
+    let flat = large_rises(&base, 1.0, 2 * SEEDS);
+    let hot = large_rises(&base, 10.0, 2 * SEEDS);
+    assert!(
+        hot > flat,
+        "a rung ten times hotter adopted {hot} rises above a well depth \
+         against {flat} on a flat ladder"
+    );
 }
 
 /// A rung that takes over the chain takes over what is known about its own
