@@ -167,7 +167,7 @@ Source: =src/methods/local_polish.rs= and =python/anneal/__init__.py= wrappers.
 ** Observed-cloud SOAP/ACE residual hop (soap.rs)
 
 Slots: Move proposes an ambient analytic-Jacobian pullback of the stacked
-SOAP plus ACE =nu=3= leftover and scales it to the caller's Cartesian cap.
+SOAP plus ACE ~nu=3~ leftover and scales it to the caller's Cartesian cap.
 Atomic packing systems use the fivefold residual instead.  For molecular and
 surface systems, every declared movable molecule is retracted by its nearest
 finite proper rigid motion after scaling; ungrouped atoms keep the ambient
