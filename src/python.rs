@@ -2989,8 +2989,8 @@ impl PyClusterConfig {
         self.inner.symmetry_completion_framework
     }
 
-    /// Whether the framework reading also keeps only the operations the core
-    /// carries, fits its centre, and falls back to all sites for a species
+    /// Whether the framework reading also grows its group only through the
+    /// operations the core carries, fits its centre, and falls back to all sites for a species
     /// with too few of its own. Off in every preset.
     #[getter]
     fn symmetry_completion_fitted(&self) -> bool {
