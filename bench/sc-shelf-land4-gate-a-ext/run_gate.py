@@ -752,7 +752,7 @@ def render_readme(results: dict[str, object] | None) -> str:
     for row in summary:
         lines.append(f"| {row['system']} | {row['cohort']} | `{row['hit_str_a']}` | `{row['hit_str_b']}` |")
     lines.append("")
-    return text
+    return text + "\n".join(lines)
 
 
 def run_campaign(args: argparse.Namespace) -> int:
