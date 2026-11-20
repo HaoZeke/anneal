@@ -3671,6 +3671,23 @@ fn shelf_holds(
         .any(|(held, stored)| same_shelf(held.view(), *stored, landing, energy, length))
 }
 
+/// Whether `landing` is a quarantined shelf distinct from the standing minimum.
+///
+/// A self-return leaves the chain on the same minimum; refusing it or
+/// withholding its depth score perturbs the allocator and orbit completion
+/// without blocking a cross-basin return onto a previously left shelf.
+fn cross_basin_shelf_return(
+    shelf: &[(Array1<f64>, f64)],
+    standing: ArrayView1<f64>,
+    standing_energy: f64,
+    landing: ArrayView1<f64>,
+    landing_energy: f64,
+    length: f64,
+) -> bool {
+    shelf_holds(shelf, landing, landing_energy, length)
+        && !same_shelf(standing, standing_energy, landing, landing_energy, length)
+}
+
 /// Shared refusal gate for every learned stall-response arm.
 fn stall_landing_on_shelf(
     cfg: &Config,
@@ -3729,6 +3746,37 @@ fn remember_shelf_energies(
 #[cfg(test)]
 fn last_shelf_energies() -> (Vec<f64>, Vec<Vec<f64>>) {
     LAST_SHELF_ENERGIES.with(|slot| slot.borrow().clone())
+}
+
+#[cfg(test)]
+type AllocatorSnapshot = (
+    (Vec<u64>, Vec<u64>, Vec<usize>, usize),
+    (Vec<u64>, Vec<u64>, Vec<u64>, Vec<u64>, Vec<usize>),
+);
+
+#[cfg(test)]
+std::thread_local! {
+    static LAST_ALLOCATOR_STATE: std::cell::RefCell<Option<AllocatorSnapshot>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn remember_allocator_state(
+    allocator: &crate::allocate::FlooredThompson,
+    depth_allocator: &crate::allocate::DepthAllocator,
+) {
+    LAST_ALLOCATOR_STATE.with(|slot| {
+        *slot.borrow_mut() = Some((allocator.state_snapshot(), depth_allocator.state_snapshot()));
+    });
+}
+
+#[cfg(test)]
+fn last_allocator_state() -> AllocatorSnapshot {
+    LAST_ALLOCATOR_STATE.with(|slot| {
+        slot.borrow()
+            .clone()
+            .expect("allocator snapshot recorded by run_with_gradient")
+    })
 }
 
 /// Decay both the active rung's shelf and every parked rung's shelf against
@@ -8709,8 +8757,22 @@ where
             let veto = if skip_basin {
                 let landing = bias.cv(x_new.view());
                 shelf_holds(&shelf, landing.view(), e_new, cfg.escape_epsilon)
+                    && !same_shelf(
+                        bias.cv(x.view()).view(),
+                        e,
+                        landing.view(),
+                        e_new,
+                        cfg.escape_epsilon,
+                    )
             } else {
-                shelf_holds(&shelf, s_new.view(), e_new, cfg.escape_epsilon)
+                cross_basin_shelf_return(
+                    &shelf,
+                    s_old.view(),
+                    e,
+                    s_new.view(),
+                    e_new,
+                    cfg.escape_epsilon,
+                )
             };
             if veto {
                 accept = false;
@@ -8881,8 +8943,22 @@ where
                     && if skip_basin {
                         let landing = bias.cv(x_new.view());
                         shelf_holds(&shelf, landing.view(), e_new, cfg.escape_epsilon)
+                            && !same_shelf(
+                                bias.cv(x.view()).view(),
+                                e,
+                                landing.view(),
+                                e_new,
+                                cfg.escape_epsilon,
+                            )
                     } else {
-                        shelf_holds(&shelf, s_new.view(), e_new, cfg.escape_epsilon)
+                        cross_basin_shelf_return(
+                            &shelf,
+                            s_old.view(),
+                            e,
+                            s_new.view(),
+                            e_new,
+                            cfg.escape_epsilon,
+                        )
                     };
                 if !home || improved {
                     depth_allocator.update(k, -(e_new - ledger.best));
@@ -10279,7 +10355,10 @@ where
     decay_all_shelves(&mut shelf, &mut parked_shelves, &chains, ledger.best, e);
     let held_shelves = shelf.len() + parked_shelves.iter().map(Vec::len).sum::<usize>();
     #[cfg(test)]
-    remember_shelf_energies(&shelf, &parked_shelves);
+    {
+        remember_shelf_energies(&shelf, &parked_shelves);
+        remember_allocator_state(&allocator, &depth_allocator);
+    }
 
     Ok(Outcome {
         best: ledger.best,
@@ -11972,9 +12051,9 @@ mod tests {
     }
 
     /// The hop stall that used to fill the fingerprint tabu does not fall
-    /// inside this run: its patience stays past the last hop. Every quench
-    /// falls back onto one well. The call plateau is what names that well,
-    /// and a later proposal of the same geometry is refused.
+    /// inside this run: its patience stays past the last hop. The call plateau
+    /// names the occupied shelf, and a later cross-basin return onto that
+    /// quarantined geometry is refused.
     #[test]
     fn a_call_plateau_quarantines_a_repeated_shelf() {
         let n = 4;
@@ -11984,6 +12063,10 @@ mod tests {
         cfg.relax_steps = 80;
         cfg.screen_steps = 1;
         cfg.max_hops = Some(30);
+        cfg.temperature = 100.0;
+        cfg.bias_height = 0.0;
+        cfg.bayes_screen = false;
+        cfg.screen_margin = f64::INFINITY;
         cfg.continuous_symmetry = ContinuousSymmetry::Off;
         cfg.orbit_complete_on_new = false;
         cfg.energy_lattice = false;
@@ -11994,10 +12077,39 @@ mod tests {
         let target = Array1::from(vec![
             0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 0.4, 0.9,
         ]);
+        let mut away = target.clone();
+        away[0] += 0.35;
+        let mut quench_calls = 0usize;
         let mut rng = StdRng::seed_from_u64(2000);
         let mut ledger = Ledger::new(8_000);
-        let mut relax =
-            |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| well_relax(&target, led, x, steps);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let before = led.spent();
+            let (well, offset) = if steps <= 1 {
+                (&target, 0.0)
+            } else {
+                quench_calls += 1;
+                if quench_calls <= 3 {
+                    (&target, 0.0)
+                } else if quench_calls == 4 {
+                    (&away, 0.1)
+                } else {
+                    (&target, 0.0)
+                }
+            };
+            let mut cur = x.to_owned();
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+                cur = well + &((&cur - well) * 0.85);
+            }
+            let d = &cur - well;
+            let e = offset + d.iter().map(|v| v * v).sum::<f64>();
+            if steps > 1 {
+                led.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
+            }
+            (e, cur)
+        };
         let out = run_with_gradient(&cfg, target.view(), &mut ledger, &mut relax, None, &mut rng)
             .expect("finite start");
         assert!(
@@ -12026,6 +12138,118 @@ mod tests {
             "the well was accepted on {shelf_accepts} of {} hops",
             out.hops
         );
+    }
+
+    /// A self-return onto a quarantined standing minimum follows the exact
+    /// pre-series path: it is accepted, updates both move allocators, runs
+    /// orbit completion, and consumes the identical RNG draw sequence.
+    #[test]
+    fn a_self_return_after_quarantine_matches_the_pre_series_rng_and_allocators() {
+        struct CountingRng {
+            inner: StdRng,
+            u32_draws: usize,
+            u64_draws: usize,
+        }
+
+        impl rand::RngCore for CountingRng {
+            fn next_u32(&mut self) -> u32 {
+                self.u32_draws += 1;
+                self.inner.next_u32()
+            }
+
+            fn next_u64(&mut self) -> u64 {
+                self.u64_draws += 1;
+                self.inner.next_u64()
+            }
+
+            fn fill_bytes(&mut self, dest: &mut [u8]) {
+                self.inner.fill_bytes(dest);
+            }
+        }
+
+        let n = 6;
+        let mut target = Array1::from(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        for (i, value) in target.iter_mut().enumerate() {
+            *value += 0.08 * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
+        }
+
+        let run_case = |tabu_capacity: usize| {
+            let mut cfg = Config::recommended(n);
+            cfg.tabu_capacity = tabu_capacity;
+            cfg.restart_patience = 40;
+            cfg.escape_stall_patience = 1_000_000;
+            cfg.escape_on_stall = true;
+            cfg.restart_on_stall = false;
+            cfg.relax_steps = 80;
+            cfg.screen_steps = 1;
+            cfg.max_hops = Some(16);
+            cfg.continuous_symmetry = ContinuousSymmetry::Off;
+            cfg.orbit_complete_on_new = true;
+            cfg.orbit_core = OrbitCore::Fraction;
+            cfg.energy_lattice = false;
+            cfg.surfaces.clear();
+            cfg.symmetrise_on_stall = false;
+            cfg.trail_on_stall = false;
+            cfg.return_screen = false;
+            cfg.bayes_screen = false;
+            cfg.screen_margin = f64::INFINITY;
+            cfg.bias_height = 0.0;
+            let mut rng = CountingRng {
+                inner: StdRng::seed_from_u64(2000),
+                u32_draws: 0,
+                u64_draws: 0,
+            };
+            let mut ledger = Ledger::new(20_000);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                well_relax(&target, led, x, steps)
+            };
+            let out =
+                run_with_gradient(&cfg, target.view(), &mut ledger, &mut relax, None, &mut rng)
+                    .expect("finite start");
+            let alloc = last_allocator_state();
+            (out, (rng.u32_draws, rng.u64_draws), alloc)
+        };
+
+        let (pre_out, pre_draws, pre_alloc) = run_case(0);
+        let (quar_out, quar_draws, quar_alloc) = run_case(8);
+
+        assert_eq!(pre_out.tabu, (0, 0), "pre-series baseline held a shelf");
+        assert!(
+            quar_out.tabu.0 >= 1,
+            "the call plateau never quarantined the standing minimum: {:?}",
+            quar_out.tabu
+        );
+        assert_eq!(
+            quar_out.tabu.1, 0,
+            "a self-return onto the standing shelf was vetoed: {:?}",
+            quar_out.tabu
+        );
+        assert!(
+            quar_out.orbits.0 >= 1,
+            "orbit_complete_on_new never executed on the self-return fixture"
+        );
+        assert_eq!(
+            quar_out.orbits, pre_out.orbits,
+            "orbit completion diverged after shelf quarantine"
+        );
+        assert_eq!(
+            quar_draws, pre_draws,
+            "self-return after quarantine perturbed the RNG draw counts"
+        );
+        assert_eq!(
+            quar_alloc, pre_alloc,
+            "self-return after quarantine perturbed allocator state"
+        );
+        assert_eq!(
+            quar_out.arms, pre_out.arms,
+            "self-return after quarantine perturbed arm statistics"
+        );
+        assert_eq!(quar_out.hops, pre_out.hops);
+        assert_eq!(quar_out.charged, pre_out.charged);
+        assert_eq!(quar_out.accepted_transitions, pre_out.accepted_transitions);
     }
 
     #[test]
@@ -13038,7 +13262,7 @@ mod tests {
         cfg.return_screen = false;
         cfg.relax_steps = 80;
         cfg.screen_steps = 1;
-        cfg.max_hops = Some(45);
+        cfg.max_hops = Some(90);
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
             let before = led.spent();
             let u = x[0] - shelf_min[0];

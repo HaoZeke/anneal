@@ -172,6 +172,16 @@ impl FlooredThompson {
         &self.pulls
     }
 
+    #[cfg(test)]
+    pub(crate) fn state_snapshot(&self) -> (Vec<u64>, Vec<u64>, Vec<usize>, usize) {
+        (
+            self.alpha.iter().map(|value| value.to_bits()).collect(),
+            self.beta.iter().map(|value| value.to_bits()).collect(),
+            self.pulls.clone(),
+            self.t,
+        )
+    }
+
     /// Posterior mean success rate of each arm.
     pub fn rates(&self) -> Vec<f64> {
         (0..self.len())
@@ -831,6 +841,17 @@ impl DepthAllocator {
     /// Number of arms.
     pub fn arms(&self) -> usize {
         self.mu.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn state_snapshot(&self) -> (Vec<u64>, Vec<u64>, Vec<u64>, Vec<u64>, Vec<usize>) {
+        (
+            self.mu.iter().map(|value| value.to_bits()).collect(),
+            self.kappa.iter().map(|value| value.to_bits()).collect(),
+            self.alpha.iter().map(|value| value.to_bits()).collect(),
+            self.beta.iter().map(|value| value.to_bits()).collect(),
+            self.draws.clone(),
+        )
     }
 
     /// Records the depth an arm reached.
