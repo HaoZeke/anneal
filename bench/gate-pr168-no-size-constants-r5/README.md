@@ -190,4 +190,61 @@ the core, the affinity, the peak resident set and the exit code.
 
 ## Verdict
 
-Not yet run.
+Fail. The failing cell is `lj75-seed`. The other 29 measured cells
+pass. `au55-seed` and `tip4p25` are missing and are not scored.
+Session `20261120T125320Z`, 2160 rows, every exit code 0. The largest
+resident set was 918944 KiB. The hit band is 0 and the charged-call
+band is 1.
+
+`lj75-seed` hits are 24, 21 and 24 for A, B and A'. Seeds 2004, 2010
+and 2011 hit on A and missed on B. McNemar p is 0.25. The charged
+ratio is 0.771 and the outside ratio is 0.817. Bit identity is 0 of
+24 seeds.
+
+On every unreached guard, B matches A on the printed best, the calls
+and the charged count for all 24 seeds. The same holds for the reached
+water guards.
+
+Six early rows stored the mask from before the pin and were repeated
+once: m38r6 A 2000, au55 A 2000, tip4p12 A 2000, m80r14 A 2000,
+lj55 A' 2001, lj98 A' 2001. The table uses the repeat. Every kept row
+is pinned to its lane core.
+
+Hits are A, B, A'. `p` is the exact McNemar value. `ch` and `out` are
+the B/A median ratios. `bits` is the number of seeds on which the
+printed best, calls and charged count match.
+
+| cell | verdict | hits | p | A-only | B-only | ch | out | bits |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| lj38 | PASS | 23/23/23 | 1 | 0 | 0 | 1 | 0.976309 | 24 |
+| lj55 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 0.992847 | 24 |
+| lj75 | PASS | 7/7/7 | 1 | 0 | 0 | 1 | 0.990305 | 24 |
+| lj98 | PASS | 16/16/16 | 1 | 0 | 0 | 1 | 1.00234 | 24 |
+| lj102 | PASS | 11/11/11 | 1 | 0 | 0 | 1 | 1.00065 | 24 |
+| lj103 | PASS | 13/13/13 | 1 | 0 | 0 | 1 | 1.00034 | 24 |
+| lj104 | PASS | 11/11/11 | 1 | 0 | 0 | 1 | 0.960985 | 24 |
+| lj150 | PASS | 18/18/18 | 1 | 0 | 0 | 1 | 0.982269 | 24 |
+| au55 | PASS | 8/8/8 | 1 | 0 | 0 | 1 | 1.00146 | 24 |
+| m30r6 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 0.983509 | 24 |
+| m30r14 | PASS | 17/17/17 | 1 | 0 | 0 | 1 | 0.989099 | 24 |
+| m38r6 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 0.993682 | 24 |
+| m38r14 | PASS | 11/11/11 | 1 | 0 | 0 | 1 | 0.975279 | 24 |
+| m55r6 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 0.992064 | 24 |
+| m55r14 | PASS | 18/18/18 | 1 | 0 | 0 | 1 | 0.977784 | 24 |
+| m80r3 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 0.979352 | 24 |
+| m80r6 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 0.997895 | 24 |
+| m80r14 | PASS | 15/15/15 | 1 | 0 | 0 | 1 | 0.994776 | 24 |
+| hexamer | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 0.969784 | 24 |
+| tip4p4 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 1.03341 | 24 |
+| tip4p8 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 1.00366 | 24 |
+| tip4p12 | PASS | 24/24/24 | 1 | 0 | 0 | 1 | 0.987947 | 24 |
+| tip4p15 | PASS | 15/15/15 | 1 | 0 | 0 | 1 | 0.991889 | 24 |
+| tip4p16 | PASS | 7/7/7 | 1 | 0 | 0 | 1 | 0.984213 | 24 |
+| tip4p20 | PASS | 6/6/6 | 1 | 0 | 0 | 1 | 0.973151 | 24 |
+| tip4p21 | PASS | 1/1/1 | 1 | 0 | 0 | 1 | 0.993122 | 24 |
+| lj75-seed | FAIL | 24/21/24 | 0.25 | 3 | 0 | 0.771448 | 0.816796 | 0 |
+| lj103-seed | PASS | 15/24/15 | 0.00390625 | 0 | 9 | 0.00792048 | 0.794199 | 1 |
+| m38r6-seed | PASS | 7/24/7 | 1.52588e-05 | 0 | 17 | 0.25397 | 0.883654 | 3 |
+| m55r14-seed | PASS | 4/14/4 | 0.0129395 | 2 | 12 | 0.532823 | 1.01628 | 1 |
+| au55-seed | MISSING | h2h_seed has no gold potential | | | | | | |
+| tip4p25 | MISSING | no published reference | | | | | | |
