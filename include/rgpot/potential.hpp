@@ -177,8 +177,8 @@ public:
   /**
    * @brief Write the dense Hessian at @a input to @a hessian_out.
    *
-   * See @c rgpot_potential_hessian. @a hessian_out holds
-   * @c (3*n_atoms)^2 doubles, row-major. There is no automatic scheme:
+   * See @c rgpot_potential_hessian. @a hessian_out holds @c 3*n_atoms rows
+   * of @c 3*n_atoms doubles. There is no automatic scheme:
    * @c RGPOT_HESSIAN_CENTRAL makes @c 6*n_atoms force calls and runs only
    * when asked for.
    *
@@ -198,8 +198,9 @@ public:
     return used;
   }
 
-  /// @c hessian() into a new vector of @c (3*n_atoms)^2 doubles, writing
-  /// the scheme that ran to @a scheme_used when it is not @c nullptr.
+  /// @c hessian() into a new vector of @c 3*n_atoms rows of @c 3*n_atoms
+  /// doubles, writing the scheme that ran to @a scheme_used when it is not
+  /// @c nullptr.
   std::vector<double>
   hessian(const InputSpec &input, rgpot_hessian_scheme_t scheme,
           double step = 0.0,
