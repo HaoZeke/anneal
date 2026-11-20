@@ -15,6 +15,12 @@ ROOT=$(cd "$HERE/../.." && pwd)
 REV=${GMIN_PANEL_REV:-c2de652dca0bc75e2b0cb4afffac91fd656404e4}
 WORK=${GMIN_PANEL_WORK:-/work/gmin-panel}
 OUT=${GMIN_PANEL_OUT:-$ROOT/bench/gmin-panel}
+ROWS=${GMIN_PANEL_ROWS:-$OUT/rows.csv}
+SESSIONS=${GMIN_PANEL_SESSIONS:-}
+session_arg=
+if [ -n "$SESSIONS" ]; then
+  session_arg="--sessions $SESSIONS"
+fi
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 
 if [[ ${1:-} == --summarize ]]; then
@@ -67,7 +73,7 @@ GMIN_PANEL_WORK=$WORK bash "$HERE/build_gmin.sh"
 sha256sum "$WORK"/bin/* > "$WORK/bin-sha256.txt"
 cp -f "$WORK/gmin-source.txt" "$OUT/gmin-source.txt"
 (cd "$WORK/bin" && sha256sum -- *) > "$OUT/bin-sha256.txt"
-cp -f "$HERE/run_panel.py" "$ROOT/scripts/target_tol.py" "$WORK/"
+cp -f "$HERE/run_panel.py" "$HERE/lj_datafile.py" "$ROOT/scripts/target_tol.py" "$WORK/"
 cp -f "$ROOT/examples/h2h_gmin_lj.data" "$ROOT/examples/h2h_gmin_morse.data" "$WORK/"
 # Captured before HOME moves.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
@@ -82,8 +88,9 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 RAYON_NUM_THRE
 cd $WORK
 exec taskset -c 0 /usr/bin/python3 -u $WORK/run_panel.py \\
   --root $ROOT \\
-  --rows $OUT/rows.csv \\
+  --rows $ROWS \\
   --revision $REV \\
+  $session_arg \\
   --bin $WORK/bin \\
   --tree $WORK/anneal-src \\
   --work $WORK/runs \\

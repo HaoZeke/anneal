@@ -16,8 +16,11 @@ build of the same revision with ``bench/paper-0120/lj103-table.patch``,
 which adds the Cambridge energy and the 4e6 budget and nothing else; its
 rows carry driver ``h2h_gmin_proof+lj103``. GMIN is one build with the
 evaluator cap and a timer inside the Lennard-Jones, Morse and binary
-Gupta potentials. Its inputs are ``examples/h2h_gmin_lj.data``,
-``examples/h2h_gmin_morse.data`` plus ``MORSE <rho>``, and for Au55 the
+Gupta potentials. Each Lennard-Jones size reads
+``bench/gmin-panel/lj-data/<system>.data``: the keyword lines of
+``examples/h2h_gmin_lj.data`` plus the container in
+``bench/gmin-panel/lj-datafile-rule.md``. Morse reads
+``examples/h2h_gmin_morse.data`` plus ``MORSE <rho>``, and Au55 reads the
 same quench and taboo block on ``BGUPTAT`` with the Darby gold row,
 GMIN's ``io1.f90`` nearest-neighbour container radius, step and avoid
 distances converted from ``sigma`` by ``r0 / 2**(1/6)``, and the 0.1 eV
@@ -51,6 +54,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import json
 import math
 import os
 import socket
@@ -63,6 +68,12 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
+_panel_dir = Path(__file__).resolve().parent
+if str(_panel_dir) not in sys.path:
+    sys.path.insert(0, str(_panel_dir))
+from lj_datafile import load as load_lj_data  # noqa: E402
+from lj_datafile import path_for as lj_data_path  # noqa: E402
+from lj_datafile import radius_text as lj_radius_text  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
@@ -154,7 +165,28 @@ ROW_FIELDS = [
     "cpu",
     "session",
     "utc",
+    "core",
+    "affinity",
+    "machine_id",
+    "data_sha256",
+    "gmin_revision",
+    "gmin_tarball_sha256",
 ]
+
+# One thread in every library this process or its children might start.
+THREAD_ENV = (
+    "OMP_NUM_THREADS",
+    "OMP_THREAD_LIMIT",
+    "MKL_NUM_THREADS",
+    "MKL_DOMAIN_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "GOTO_NUM_THREADS",
+    "RAYON_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMBA_NUM_THREADS",
+)
 
 SUMMARY_FIELDS = [
     "system",
@@ -271,9 +303,27 @@ def single_thread_env() -> dict[str, str]:
     for key in list(env):
         if key.startswith(("H2H_", "ANNEAL_")):
             del env[key]
-    for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "RAYON_NUM_THREADS"):
+    for key in THREAD_ENV:
         env[key] = "1"
     return env
+
+
+def machine_id() -> str:
+    """sha256 of the machine-id file bytes."""
+    return hashlib.sha256(Path("/etc/machine-id").read_bytes()).hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def append_jsonl(path: Path, record: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def resolve_driver(bin_dir: Path, tree: Path, system: str) -> tuple[str, str]:
@@ -382,10 +432,13 @@ def gmin_gupta_radius(n: int, r0: float = GOLD_R0) -> float:
     return (2.0 + (3.0 * n / 17.77153175) ** (1.0 / 3.0)) * r0
 
 
-def gmin_data(system: str, seed: int, lj_data: str, morse_data: str) -> str:
+def gmin_data(system: str, seed: int, lj_data: str, morse_data: str, root: Path | None = None) -> str:
     _name, kind, n, _reference, rho, _driver, _binary = spec(system)
     if kind == "lj":
-        return lj_data + f"RANSEED {seed}\n"
+        # ``lj_data`` is the shared LJ38 text. Each size reads its own file.
+        del lj_data
+        text = load_lj_data(system, root)
+        return text + f"RANSEED {seed}\n"
     if kind == "morse":
         return morse_data + f"MORSE {rho:.1f}\nRANSEED {seed}\n"
     radius = gmin_gupta_radius(n)
@@ -439,7 +492,15 @@ def run_anneal(
 
 
 def run_gmin(
-    bin_dir: Path, tree: Path, system: str, seed: int, work: Path, log: Path, lj_data: str, morse_data: str
+    bin_dir: Path,
+    tree: Path,
+    system: str,
+    seed: int,
+    work: Path,
+    log: Path,
+    lj_data: str,
+    morse_data: str,
+    root: Path | None = None,
 ) -> dict[str, str]:
     _driver, binary = resolve_driver(bin_dir, tree, system)
     budget = PAPER_BUDGETS[system]
@@ -455,7 +516,7 @@ def run_gmin(
         text=True,
         check=True,
     )
-    (work / "data").write_text(gmin_data(system, seed, lj_data, morse_data))
+    (work / "data").write_text(gmin_data(system, seed, lj_data, morse_data, root=root))
     env = single_thread_env()
     env.update(
         {
@@ -815,6 +876,14 @@ def self_test() -> None:
         raise SystemExit(f"gmin row {row}")
     if "MORSE 14.0\nRANSEED 2003\n" not in gmin_data("m80r14", 2003, "", "x\n"):
         raise SystemExit("morse data")
+    if not {"OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "RAYON_NUM_THREADS"} <= set(THREAD_ENV):
+        raise SystemExit("thread env")
+    lj38 = gmin_data("lj38", 2000, "SHARED\n", "")
+    lj75 = gmin_data("lj75", 2000, "SHARED\n", "")
+    if f"RADIUS {lj_radius_text(38)}\n" not in lj38 or f"RADIUS {lj_radius_text(75)}\n" not in lj75:
+        raise SystemExit("lj radius")
+    if "SHARED" in lj38 or lj38 == lj75 or lj_radius_text(38) == lj_radius_text(75):
+        raise SystemExit("lj sizes share a data file")
     au_data = gmin_data("au55", 2000, "", "")
     if not au_data.startswith(f"BGUPTAT 55 {GOLD_ROW}\n"):
         raise SystemExit("gupta data")
@@ -913,6 +982,7 @@ def main(argv: list[str]) -> int:
         default="anneal-gmin",
         help="arm order within each seed (default: anneal then GMIN)",
     )
+    parser.add_argument("--sessions", type=Path, help="append one JSON record at the start and end of the run")
     parser.add_argument("--rerun", action="store_true", help="run requested systems/seeds and append even if stored")
     parser.add_argument("--summarize", action="store_true")
     parser.add_argument("--tex", action="store_true", help="with --summarize, also rewrite tab:gmin")
@@ -952,12 +1022,40 @@ def main(argv: list[str]) -> int:
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
     morse_data += "" if morse_data.endswith("\n") else "\n"
-    host = socket.gethostname()
+    data_sha: dict[str, str] = {}
+    for system in systems:
+        if spec(system)[1] != "lj":
+            continue
+        load_lj_data(system, args.root)
+        data_sha[system] = file_sha256(lj_data_path(system, args.root))
+    machine = machine_id()
+    affinity = ",".join(str(index) for index in sorted(os.sched_getaffinity(0)))
     cpu = cpu_model()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     done = set() if args.rerun else {row_key(r) for r in read_rows(args.rows)}
     seeds = tuple(args.seed) if args.seed else SEEDS
+    if args.sessions:
+        append_jsonl(
+            args.sessions,
+            {
+                "affinity": affinity,
+                "anneal_revision": args.revision,
+                "core": "0",
+                "data_sha256": data_sha,
+                "event": "start",
+                "gmin_binary_sha256": source.get("binary_sha256", ""),
+                "gmin_revision": GMIN_PIN,
+                "gmin_tarball_sha256": GMIN_TARBALL_SHA256,
+                "machine_id": machine,
+                "order": args.order,
+                "seeds": [str(seed) for seed in seeds],
+                "session": session,
+                "systems": systems,
+                "threads": {key: "1" for key in THREAD_ENV},
+            },
+        )
     print(f"session {session} revision {args.revision} gmin {GMIN_PIN} order {args.order}", flush=True)
+    wrote = 0
     for system in systems:
         driver, _binary = resolve_driver(args.bin, args.tree, system)
         for seed in seeds:
@@ -975,7 +1073,15 @@ def main(argv: list[str]) -> int:
                         raise SystemExit(f"{system} {seed}: binary reports another head")
                 else:
                     result = run_gmin(
-                        args.bin, args.tree, system, seed, args.work / system / str(seed), log, lj_data, morse_data
+                        args.bin,
+                        args.tree,
+                        system,
+                        seed,
+                        args.work / system / str(seed),
+                        log,
+                        lj_data,
+                        morse_data,
+                        root=args.root,
                     )
                 row = {
                     "system": system,
@@ -986,18 +1092,37 @@ def main(argv: list[str]) -> int:
                     **result,
                     "code_revision": code_revision,
                     "harness_revision": args.revision,
-                    "host": host,
+                    "host": machine,
                     "cpu": cpu,
                     "session": session,
                     "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "core": "0",
+                    "affinity": affinity,
+                    "machine_id": machine,
+                    "data_sha256": data_sha.get(system, ""),
+                    "gmin_revision": GMIN_PIN,
+                    "gmin_tarball_sha256": GMIN_TARBALL_SHA256,
                 }
                 append_row(args.rows, row)
+                wrote += 1
                 done.add(key)
                 print(
                     f"done {system} {code} {seed} slot={slot} hit={row['hit']} calls={row['evals_to_hit']} "
                     f"wall_s={row['wall_s']} pot_s={row['pot_s']} outside_s={row['outside_s']} best={row['best']}",
                     flush=True,
                 )
+    if args.sessions:
+        append_jsonl(
+            args.sessions,
+            {
+                "event": "end",
+                "gmin_revision": GMIN_PIN,
+                "gmin_tarball_sha256": GMIN_TARBALL_SHA256,
+                "machine_id": machine,
+                "session": session,
+                "wrote": wrote,
+            },
+        )
     return 0
 
 
