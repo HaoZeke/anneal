@@ -34,9 +34,11 @@ Rows are appended to ``--rows`` with the anneal revision, the host and the
 binary hashes, and a file with another header is refused, never
 rewritten. ``--history`` names earlier rows files, such as ``seeds.csv``,
 read alongside it. ``--summary`` appends one line per system and code over
-all of them, with Fisher's exact test on hits and a two-sided Mann-Whitney
-on calls to the hit, with a miss ranked after every hit, both against
-anneal; alone when no binaries are given, over ``--systems``, and with
+all of them. ``stop_target_eV`` is the campaign stop target the stored
+hits were scored against, with Fisher's exact test on those hits and a
+two-sided Mann-Whitney on calls to the hit, a miss ranked after every
+hit, both against anneal; alone when no binaries are given, over
+``--systems``, and with
 ``--anneal-revision`` over anneal's rows of that ``code_revision`` only.
 ``--false-hits`` names rows, by system, code, revision and seed, whose hit
 is not the geometry's energy; the summary counts them as misses at their
@@ -133,6 +135,7 @@ PROVENANCE_FIELDS = [
 SUMMARY_FIELDS = [
     "system",
     "code",
+    "stop_target_eV",
     "runs",
     "hits",
     "seeds",
@@ -501,12 +504,14 @@ def summarise(
     anneal_revision: str | None = None,
     systems: list[str] | None = None,
     false_hits: Path | None = None,
+    on_date: str | None = None,
 ) -> None:
     """Append one line per system and code over every rows file.
 
     With ``anneal_revision``, anneal's rows are only those of that
     ``code_revision``. A row named in ``false_hits`` by system, code,
-    revision and seed counts as a miss at its budget.
+    revision and seed counts as a miss at its budget. ``on_date``
+    records a summary that was already dated; a new summary uses today.
     """
     table = []
     for path in paths:
@@ -533,7 +538,7 @@ def summarise(
             else row
             for row in table
         ]
-    date = datetime.date.today().isoformat()
+    date = on_date or datetime.date.today().isoformat()
     lines = []
     for system in systems or SYSTEMS:
         groups = {
@@ -547,6 +552,8 @@ def summarise(
             runs = groups[code]
             if not runs:
                 continue
+            if system not in REFERENCE:
+                raise SystemExit(f"no stop target for {system}")
             evals = [float(row["evals_to_hit"]) for row in runs]
             hits = sum(row["hit"] == "true" for row in runs)
             seeds = sorted(int(row["seed"]) for row in runs)
@@ -554,6 +561,7 @@ def summarise(
             line = {
                 "system": system,
                 "code": code,
+                "stop_target_eV": f"{REFERENCE[system]:.8f}",
                 "runs": len(runs),
                 "hits": hits,
                 "seeds": " ".join(str(seed) for seed in seeds),

@@ -115,6 +115,27 @@ def test_a_reference_without_a_source_is_refused(tmp_path):
         floor_gate.read_minima(path)
 
 
+def test_si13_summary_hits_are_the_stop_target_score(tmp_path):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_crest_summary", "scripts/covalent_h2h/gfn2_crest.py")
+    gfn2 = ROOT / "bench" / "covalent-h2h" / "gfn2"
+    out = tmp_path / "summaries.csv"
+    crest.summarise([gfn2 / "rows.csv"], out, "0" * 40, "bench", systems=["si13"])
+    fresh = {row["code"]: row for row in read(out)}
+    stop = f"{crest.REFERENCE['si13']:.8f}"
+    assert fresh["anneal-general"]["stop_target_eV"] == stop
+    assert fresh["crest"]["stop_target_eV"] == stop
+    assert (fresh["anneal-general"]["runs"], fresh["anneal-general"]["hits"]) == ("6", "6")
+    assert (fresh["crest"]["runs"], fresh["crest"]["hits"]) == ("6", "4")
+    assert fresh["crest"]["fisher_p"] == "0.454545"
+    assert fresh["crest"]["mannwhitney_p"] == "0.00499812"
+    committed = [row for row in read(gfn2 / "summaries.csv") if row["system"] == "si13"]
+    assert {(row["code"], row["runs"], row["hits"], row["stop_target_eV"]) for row in committed} == {
+        ("anneal-general", "6", "6", stop),
+        ("crest", "6", "4", stop),
+    }
+
+
 def test_crest_rescore_reproduces_the_committed_row(tmp_path):
     pytest.importorskip("scipy.stats")
     crest = load("gfn2_crest", "scripts/covalent_h2h/gfn2_crest.py")
