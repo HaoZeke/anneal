@@ -842,6 +842,110 @@ fn the_native_archive_ships_a_prefix_relative_pkg_config_file() {
 }
 
 #[test]
+fn native_release_cross_builds_aarch64_linux_without_secrets() {
+    let workflow = release();
+    let native = job(&workflow, "native-libs");
+    let cells = native["strategy"]["matrix"]["include"]
+        .as_sequence()
+        .unwrap();
+    let triple = "aarch64-unknown-linux-gnu";
+    let aarch64: Vec<&Value> = cells
+        .iter()
+        .filter(|cell| cell["target"].as_str() == Some(triple))
+        .collect();
+    assert_eq!(aarch64.len(), 1, "one aarch64 Linux cell");
+    let cell = aarch64[0];
+    assert_eq!(cell["os"].as_str(), Some("linux"));
+    assert_eq!(cell["artifact"].as_str(), Some("anneal-core-linux-aarch64"));
+    assert_eq!(cell["static_lib"].as_str(), Some("libanneal_core.a"));
+    assert_eq!(cell["shared_lib"].as_str(), Some("libanneal_core.so"));
+
+    // A hosted x86_64 runner, so no runner label that needs a plan, and no
+    // secret anywhere in the job.
+    assert_eq!(cell["runner"].as_str(), Some("ubuntu-latest"));
+    let text = serde_yaml_ng::to_string(native).unwrap();
+    assert!(!text.contains("secrets."), "the native job reads a secret");
+
+    // The cell links with the cross compiler and runs under qemu-user,
+    // against the cross libc. Every other cell links with the runner's cc
+    // and runs directly.
+    assert_eq!(cell["consumer_cc"].as_str(), Some("aarch64-linux-gnu-gcc"));
+    assert_eq!(
+        cell["emulator"].as_str(),
+        Some("qemu-aarch64 -L /usr/aarch64-linux-gnu")
+    );
+    let names: BTreeSet<&str> = cells
+        .iter()
+        .map(|cell| cell["artifact"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), cells.len(), "artifact names are unique");
+    for other in cells.iter().filter(|other| *other != cell) {
+        assert_eq!(other["consumer_cc"].as_str(), Some("cc"), "{other:?}");
+        assert_eq!(other["emulator"].as_str(), Some(""), "{other:?}");
+    }
+
+    // cargo and the cc crate are told which compiler builds that target.
+    let upper = triple.to_uppercase().replace('-', "_");
+    let lower = triple.replace('-', "_");
+    let env = native["env"].as_mapping().expect("job env");
+    assert_eq!(
+        env[format!("CARGO_TARGET_{upper}_LINKER").as_str()].as_str(),
+        cell["consumer_cc"].as_str()
+    );
+    assert_eq!(
+        env[format!("CC_{lower}").as_str()].as_str(),
+        cell["consumer_cc"].as_str()
+    );
+
+    // The toolchain is installed for that cell only, before anything builds.
+    let (install_at, install) = step(native, "Install the aarch64 Linux cross toolchain");
+    let (build_at, _) = step(native, "Build static + shared library");
+    assert!(install_at < build_at);
+    assert_eq!(
+        install["if"].as_str(),
+        Some("matrix.target == 'aarch64-unknown-linux-gnu'")
+    );
+    assert!(install.get("continue-on-error").is_none());
+    let lines = script(install);
+    assert_eq!(lines[0], "sudo apt-get update");
+    let packages: BTreeSet<&str> = lines[1]
+        .strip_prefix("sudo apt-get install -y --no-install-recommends ")
+        .expect("an apt install")
+        .split_whitespace()
+        .collect();
+    assert_eq!(
+        packages,
+        BTreeSet::from([
+            "gcc-aarch64-linux-gnu",
+            "libc6-dev-arm64-cross",
+            "qemu-user"
+        ])
+    );
+    // The rust target is added by the toolchain step for every cell.
+    let (_, toolchain) = step(native, "Install Rust toolchain");
+    assert_eq!(
+        toolchain["with"]["targets"].as_str(),
+        Some("${{ matrix.target }}")
+    );
+
+    // The release attaches every tarball the job uploads.
+    let release_job = job(&workflow, "github-release");
+    let uses = |prefix: &str| {
+        steps(release_job)
+            .iter()
+            .find(|s| s["uses"].as_str().is_some_and(|u| u.starts_with(prefix)))
+            .unwrap_or_else(|| panic!("github-release has no {prefix}"))
+    };
+    let download = uses("actions/download-artifact");
+    assert_eq!(download["with"]["merge-multiple"].as_bool(), Some(true));
+    let create = uses("softprops/action-gh-release");
+    assert_eq!(
+        create["with"]["files"].as_str().unwrap(),
+        format!("{}*.tar.gz", download["with"]["path"].as_str().unwrap())
+    );
+}
+
+#[test]
 fn native_release_compiles_a_consumer_against_the_archive() {
     let workflow = release();
     let native = job(&workflow, "native-libs");
@@ -861,8 +965,11 @@ fn native_release_compiles_a_consumer_against_the_archive() {
             .unwrap_or_else(|| panic!("the consumer step lacks {wanted:?}: {lines:?}"))
     };
     let extract = at("tar xzf ${{ matrix.artifact }}.tar.gz -C consumer");
+    // The syntax checks use the runner's own compiler, which parses the
+    // header whatever the target. The links use the cell's compiler.
+    let target_cc = "${{ matrix.consumer_cc }} ";
     let compiles: Vec<usize> = (0..lines.len())
-        .filter(|&i| lines[i].starts_with("cc "))
+        .filter(|&i| lines[i].starts_with("cc ") || lines[i].starts_with(target_cc))
         .collect();
     assert_eq!(compiles.len(), 4, "{lines:?}");
     let [syntax, pc_syntax, link, pc_link] = compiles[..] else {
@@ -871,14 +978,16 @@ fn native_release_compiles_a_consumer_against_the_archive() {
     let linux_only = at(r#"if [[ "${{ matrix.os }}" == linux ]]; then"#);
     let path = at(r#"export PKG_CONFIG_PATH="$PWD/consumer/lib/pkgconfig""#);
     let exists = at("pkg-config --exists anneal-core");
-    let run = at("./consumer/ffi_smoke");
-    let version =
-        at(r#"test "$(./consumer/ffi_pkgconfig)" = "$(pkg-config --modversion anneal-core)""#);
+    let run = at("${{ matrix.emulator }} ./consumer/ffi_smoke");
+    let version = at(
+        r#"test "$(${{ matrix.emulator }} ./consumer/ffi_pkgconfig)" = "$(pkg-config --modversion anneal-core)""#,
+    );
     assert!(extract < syntax && syntax < path && path < exists && exists < pc_syntax);
     assert!(pc_syntax < linux_only && linux_only < link && link < run && run < pc_link);
     assert!(pc_link < version);
-    assert!(lines[syntax].contains("-fsyntax-only"));
-    assert!(lines[pc_syntax].contains("-fsyntax-only"));
+    assert!(lines[syntax].starts_with("cc ") && lines[syntax].contains("-fsyntax-only"));
+    assert!(lines[pc_syntax].starts_with("cc ") && lines[pc_syntax].contains("-fsyntax-only"));
+    assert!(lines[link].starts_with(target_cc) && lines[pc_link].starts_with(target_cc));
     assert!(lines[link].contains("-Lconsumer/lib") && lines[link].contains("-lanneal_core"));
     assert!(lines[link].contains("-o consumer/ffi_smoke"));
     assert!(lines[pc_link].contains("-o consumer/ffi_pkgconfig"));

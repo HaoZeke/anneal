@@ -60,6 +60,10 @@ jobs:
     name: Native libs (${{ matrix.os }}, ${{ matrix.target }})
     needs: validate-release
     runs-on: ${{ matrix.runner }}
+    # Read only when the target is aarch64 Linux, which is cross-compiled.
+    env:
+      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
     strategy:
       fail-fast: false
       matrix:
@@ -70,12 +74,26 @@ jobs:
             artifact: anneal-core-linux-x86_64
             static_lib: libanneal_core.a
             shared_lib: libanneal_core.so
+            consumer_cc: cc
+            emulator: ""
+          # aarch64 Linux is cross-compiled on the x86_64 runner with the
+          # distribution's cross gcc, and the consumer runs under qemu-user.
+          - os: linux
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: anneal-core-linux-aarch64
+            static_lib: libanneal_core.a
+            shared_lib: libanneal_core.so
+            consumer_cc: aarch64-linux-gnu-gcc
+            emulator: qemu-aarch64 -L /usr/aarch64-linux-gnu
           - os: macos
             runner: macos-15
             target: aarch64-apple-darwin
             artifact: anneal-core-macos-aarch64
             static_lib: libanneal_core.a
             shared_lib: libanneal_core.dylib
+            consumer_cc: cc
+            emulator: ""
           # x86_64 mac is cross-compiled from the arm64 runner. macos-14 is
           # retired on 2026-11-02 and the brownout cancels the job at once.
           - os: macos
@@ -84,6 +102,8 @@ jobs:
             artifact: anneal-core-macos-x86_64
             static_lib: libanneal_core.a
             shared_lib: libanneal_core.dylib
+            consumer_cc: cc
+            emulator: ""
 
     steps:
       - uses: actions/checkout@v6
@@ -96,6 +116,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install the aarch64 Linux cross toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user
 
       - name: Install cbindgen
         run: cargo install cbindgen --version 0.29.4 --locked
@@ -145,9 +171,10 @@ jobs:
           tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.shared_lib }}"
 
       # A consumer sees only what the archive holds. The header must parse
-      # on every target, by hand and through the archive's .pc file. Where
-      # the runner can run the target's code, a Linux consumer also links
-      # the shared library, by hand and through pkg-config, and runs.
+      # on every target, by hand and through the archive's .pc file. On
+      # Linux a consumer also links the shared library, by hand and through
+      # pkg-config, with the target's compiler, and runs it directly or
+      # under the cell's emulator.
       - name: Compile a consumer against the archive
         shell: bash
         run: |
@@ -162,14 +189,14 @@ jobs:
           pkg-config --exists anneal-core
           cc -std=c99 -Wall -Wextra -fsyntax-only $(pkg-config --cflags anneal-core) tests/ffi_smoke.c
           if [[ "${{ matrix.os }}" == linux ]]; then
-            cc -std=c99 -Wall -Wextra -Iconsumer/include tests/ffi_smoke.c \
+            ${{ matrix.consumer_cc }} -std=c99 -Wall -Wextra -Iconsumer/include tests/ffi_smoke.c \
               -Lconsumer/lib -lanneal_core -Wl,-rpath,"$PWD/consumer/lib" \
               -o consumer/ffi_smoke
-            ./consumer/ffi_smoke
-            cc -std=c99 -Wall -Wextra $(pkg-config --cflags anneal-core) tests/ffi_smoke.c \
+            ${{ matrix.emulator }} ./consumer/ffi_smoke
+            ${{ matrix.consumer_cc }} -std=c99 -Wall -Wextra $(pkg-config --cflags anneal-core) tests/ffi_smoke.c \
               $(pkg-config --libs anneal-core) -Wl,-rpath,"$PWD/consumer/lib" \
               -o consumer/ffi_pkgconfig
-            test "$(./consumer/ffi_pkgconfig)" = "$(pkg-config --modversion anneal-core)"
+            test "$(${{ matrix.emulator }} ./consumer/ffi_pkgconfig)" = "$(pkg-config --modversion anneal-core)"
           fi
 
       - uses: actions/upload-artifact@v4
