@@ -795,8 +795,11 @@ innermost =symmetry_core_fraction= of the points are read for operations
 over every rotation order the structure can carry (=order_bound=: the
 largest order whose rotation still moves a point at the structure's radius
 by a nearest-neighbour distance), the operations are closed into a group
-(a closure that does not stop is cut at the bound the finite subgroups of
-O(3) set, and the elements reached first are kept), and every atom is
+(products are one element only when they differ by no more than the
+rounding of a word as long as the cap, so the closure of operations that
+are only approximate does not stop, and it is cut at the bound the
+finite subgroups of O(3) set, with the elements reached first kept), and
+every atom is
 re-seated on the group's site set. The result is quenched, recorded and
 offered to the acceptance rule like any hop. No group, order, size or
 species is named: a structure with no approximate symmetry gives no

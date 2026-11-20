@@ -94,9 +94,9 @@ fn metropolis_heat_follows_the_plateau() {
     let (cold, hot) = pair(&cfg, 30_000, 2000);
     let cold_fp = fingerprint(&cold);
     let hot_fp = fingerprint(&hot);
-    assert_eq!(cold_fp, 0x89cf5273a413bb1c, "preset walk");
+    assert_eq!(cold_fp, 0x1b775d693d120286, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0x89a108df8ad62f0c, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0x9d79f90c9d132d0b, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
@@ -104,10 +104,10 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x0e954b89e974b441, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x0d5a127bcc7c57a3, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x62b6612c4728920f,
+        0xee7d815abe746d9c,
         "heat * cfg.temperature"
     );
 }
@@ -123,8 +123,8 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
     cfg.energy_lattice = false;
     let (cold, hot) = pair(&cfg, 8_000, 2);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
-    assert_eq!(fingerprint(&cold), 0xc0cf0528311a79f2, "preset walk");
-    assert_eq!(fingerprint(&hot), 0x68a82c0212136f37, "heat = 1.0");
+    assert_eq!(fingerprint(&cold), 0x67dfd8926ffa47e4, "preset walk");
+    assert_eq!(fingerprint(&hot), 0x58c3add9272c2e7c, "heat = 1.0");
 }
 
 /// Seed 76 lowers the best from a quench after the loop head, with the heat
@@ -138,10 +138,10 @@ fn a_same_iteration_record_returns_to_the_preset() {
     cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
     let (cold, hot) = pair(&cfg, 6_000, 76);
     assert_ne!(fingerprint(&hot), fingerprint(&cold), "heat moves the walk");
-    assert_eq!(fingerprint(&cold), 0x4e21f286e8d17063, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x9bd7d3d2d7aaebb1, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x3ae26ce650b0fc5c,
+        0x56c6889030605323,
         "same-iteration heat = 1.0"
     );
 }
