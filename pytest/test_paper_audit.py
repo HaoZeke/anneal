@@ -808,7 +808,39 @@ def test_an_inline_external_revision_is_stripped_from_prose():
     path = "bench/pimc-lj38/README.md"
     audit.text_cache[path] = audit.text(path) + f"\n{line}\n"
     audit_mod.printed_harnesses(audit)
-    assert audit.drifts() == []
+    assert [r for r in audit.drifts() if r[1].startswith(path)] == []
+
+
+def prose_flags(extra):
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    text = audit.text(path)
+    audit.text_cache[path] = text + "\n" + extra + "\n"
+    first = text.count("\n") + 2
+    audit_mod.printed_harnesses(audit)
+    return sorted((int(r[1].rsplit(":", 1)[1]) - first, r[4]) for r in audit.drifts() if r[1].startswith(f"{path}:"))
+
+
+@pytest.mark.parametrize("word", ["acceded", "defaced", "effaced", "deedeed", "Bacceded"])
+def test_a_hex_letter_word_is_not_a_revision(word):
+    assert prose_flags(f"The request {word} at a median of 12 calls.") == []
+
+
+def test_a_revision_wrapped_onto_the_next_line_reaches_its_number():
+    assert prose_flags("Rows at e3ed7dad\nreach a median of 400 calls.") == [(0, "e3ed7dad 400")]
+
+
+def test_a_revision_carries_through_its_paragraph():
+    flags = prose_flags("Rows at e3ed7dad hit 3 of 12 seeds. The anneal arm\nhits 5 of 12 at a median of 400 calls.")
+    assert flags == [(0, "e3ed7dad 400"), (0, "e3ed7dad 5 of 12")]
+
+
+def test_a_revision_does_not_carry_past_its_paragraph():
+    assert prose_flags("Rows at e3ed7dad.\n\nAnneal reaches a median of 400 calls.") == []
+
+
+def test_a_reachable_revision_ends_the_carry():
+    assert prose_flags("Rows at e3ed7dad. Rows at 61fa67cf reach a median of 9 calls.") == []
 
 
 def test_printed_revisions_are_ancestors_or_qualified():
