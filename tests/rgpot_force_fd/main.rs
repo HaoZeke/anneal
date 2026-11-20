@@ -10,9 +10,10 @@
 //! passes `GFN2_ACCURACY`, and rgpot publishes the energy in eV, so the
 //! absolute precision `δ` is that threshold times `HARTREE_EV`. An
 //! analytic backend that returns one rounded value uses one unit in the
-//! last place of that energy. The CuH2 embedding polynomial is degree 8,
-//! so its precision is Horner's `γ_{16}` times the sum of the absolute
-//! terms, and one ulp is only the floor.
+//! last place of that energy. The CuH2 potential propagates directed-upward
+//! forward error bounds through rgpot's actual `rgpot_cuh2` operation
+//! sequence (pair distance, cutoff shifts, exponentials, explicit powers
+//! `rho2..rho8`, and reductions), with one ulp as the floor.
 //!
 //! A central difference at step `h` has noise `δ / h`. The shortest pair
 //! distance `L` is the length on which a pair slope changes by its own
@@ -73,6 +74,9 @@ fn main() -> ExitCode {
         failures.push(error);
     }
     if let Err(error) = the_step_minimizes_the_model_bound() {
+        failures.push(error);
+    }
+    if let Err(error) = force_sign::cuh2_bound_is_valid_and_old_horner_is_invalid() {
         failures.push(error);
     }
 
@@ -313,7 +317,8 @@ fn library_file(var: &str, file_name: &str) -> Result<Option<PathBuf>, String> {
 enum EnergyPrecision {
     /// The same absolute precision at every geometry.
     Fixed(f64),
-    /// Horner bound on the degree-8 CuH2 embedding, floored at one ulp.
+    /// Operation-by-operation forward error bound for `rgpot_cuh2`,
+    /// floored at one ulp.
     Cuh2Embedding,
 }
 
@@ -396,8 +401,13 @@ fn compare_geometry(
         EnergyPrecision::Fixed(precision) => precision,
         EnergyPrecision::Cuh2Embedding => {
             let precision = force_sign::cuh2_precision(&CUH2_SPECIES, geometry, energy);
+            if let Err(error) =
+                force_sign::cuh2_verify_energy(&CUH2_SPECIES, geometry, energy, precision)
+            {
+                panic!("{backend} geometry {index}: {error}");
+            }
             println!(
-                "{backend} geometry {index} energy precision {precision:.6e} eV (degree-8 embedding, energy {energy:.12})"
+                "{backend} geometry {index} energy precision {precision:.6e} eV (forward error bound, energy {energy:.12})"
             );
             precision
         }

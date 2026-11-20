@@ -96,6 +96,9 @@ fn main() -> ExitCode {
     if let Err(error) = force_sign::the_step_minimizes_the_model_bound() {
         failures.push(error);
     }
+    if let Err(error) = force_sign::cuh2_bound_is_valid_and_old_horner_is_invalid() {
+        failures.push(error);
+    }
     failures.extend(check_lj_catalog());
     failures.extend(check_tip4p_profile());
     failures.extend(check_rgpot_fresh());
@@ -291,7 +294,16 @@ fn check_rgpot_fresh() -> Vec<String> {
                 "cuh2-fresh",
                 &CUH2,
                 |coordinates, energy| {
-                    force_sign::cuh2_precision(&CUH2_SPECIES, coordinates, energy)
+                    let precision = force_sign::cuh2_precision(&CUH2_SPECIES, coordinates, energy);
+                    if let Err(error) = force_sign::cuh2_verify_energy(
+                        &CUH2_SPECIES,
+                        coordinates,
+                        energy,
+                        precision,
+                    ) {
+                        panic!("cuh2-fresh: {error}");
+                    }
+                    precision
                 },
                 None,
                 |coordinates| {
