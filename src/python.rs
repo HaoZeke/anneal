@@ -145,6 +145,9 @@ fn checked_bounds(low: Vec<f64>, high: Vec<f64>, slack: f64) -> PyResult<Bounds<
 ///
 /// `eindir-core` 0.6.0 builds a box with an assertion, so the arrays are
 /// checked here and the class is called only with arrays it accepts.
+///
+/// Raises `BoundsError` for sides of different lengths, an inverted pair, a
+/// coordinate that is not a number, and a negative or NaN `slack`.
 #[pyfunction]
 #[pyo3(signature = (low, high, slack = 1e-6))]
 fn make_bounds<'py>(
@@ -3093,6 +3096,10 @@ impl PyClusterConfig {
     }
 
     /// The communicating arm on `n` rigid TIP4P waters.
+    ///
+    /// Raises `InvalidArgumentError` when `6 * n` does not fit in a machine
+    /// word, and `MemoryError` when the allocator refuses the two vectors of
+    /// `6 * n` numbers that the preset builds.
     #[staticmethod]
     fn communicating_tip4p(n: usize) -> PyResult<Self> {
         check_waters(n)?;
@@ -3103,6 +3110,10 @@ impl PyClusterConfig {
     }
 
     /// The recommended arm on `n` rigid TIP4P waters.
+    ///
+    /// Raises `InvalidArgumentError` when `6 * n` does not fit in a machine
+    /// word, and `MemoryError` when the allocator refuses the two vectors of
+    /// `6 * n` numbers that the preset builds.
     #[staticmethod]
     fn recommended_tip4p(n: usize) -> PyResult<Self> {
         check_waters(n)?;
@@ -3113,6 +3124,10 @@ impl PyClusterConfig {
     }
 
     /// The plain protocol on `n` rigid TIP4P waters.
+    ///
+    /// Raises `InvalidArgumentError` when `6 * n` does not fit in a machine
+    /// word, and `MemoryError` when the allocator refuses the two vectors of
+    /// `6 * n` numbers that the preset builds.
     #[staticmethod]
     fn for_tip4p(n: usize) -> PyResult<Self> {
         check_waters(n)?;
@@ -4223,6 +4238,13 @@ fn rigid_probe(
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
 /// kept, and the exception is raised from this call.
+///
+/// Raises `InvalidArgumentError` for an argument the search cannot use,
+/// among them an `n` whose state of `3 * n` numbers (`6 * n` for rigid
+/// bodies) does not fit in a machine word. Raises `MemoryError` when the
+/// allocator refuses what the first hop holds, the size that
+/// `anneal_core::memory::first_hop_bytes` adds up; no largest `n` is built
+/// in. Raises `NoFiniteStartError` when no quench was finite.
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,

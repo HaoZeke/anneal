@@ -32,6 +32,13 @@ A callback that raises BaseException other than Exception, such as
 KeyboardInterrupt or a harness stop, ends the search at once. The best
 state found is kept, and the exception is re-raised. An ordinary
 Exception is scored as the worst value.
+
+Input that a call rejects raises a subclass of ``AnnealError``, which is a
+``ValueError``: ``InvalidArgumentError``, and ``BoundsError`` for a box.
+``cluster_search`` and the TIP4P presets of ``Config`` also raise the
+builtin ``MemoryError`` when the allocator refuses the memory the first hop
+of the search needs, and ``InvalidArgumentError`` when ``n`` is so large that
+the length of the state does not fit in a machine word.
 """
 
 import json

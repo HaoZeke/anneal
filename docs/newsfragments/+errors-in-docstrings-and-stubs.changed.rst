@@ -1,0 +1,3 @@
+The docstrings of ``anneal._core`` and its stubs (``_core.pyi``) now say which calls raise ``InvalidArgumentError``, ``BoundsError`` and ``MemoryError``: ``make_bounds``, ``cluster_search`` and the TIP4P ``Config`` presets (``for_tip4p``, ``recommended_tip4p``, ``communicating_tip4p``).
+The exception classes carry their docstrings in the stubs, and the module docstring of ``anneal`` names the errors a call can raise.
+``pytest/test_public_names.py`` fails when a stub and the module disagree on an exported name, on a docstring that names an error, or on the errors that a call raises (it runs the calls with an ``n`` the machine cannot hold in a child process).

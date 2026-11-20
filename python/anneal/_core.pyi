@@ -83,16 +83,29 @@ __version__: Final[str]
 DEFAULT_HIT_TOL: Final[float]
 SEARCH_HIT_TOL: Final[float]
 
-class AnnealError(ValueError): ...
-class InvalidArgumentError(AnnealError): ...
-class BoundsError(InvalidArgumentError): ...
+class AnnealError(ValueError):
+    """Base class of every error that `anneal` raises for a rejected input or a failed search."""
+
+class InvalidArgumentError(AnnealError):
+    """An argument has a value, length or combination that the call cannot use, or a number of points whose state length does not fit in a machine word."""
+
+class BoundsError(InvalidArgumentError):
+    """The box is empty, has sides of different lengths, has a bound that is not a number, not finite or not ordered, or has a negative or NaN slack."""
+
 class ConfigError(AnnealError):
+    """A configuration payload could not be read. The `key` attribute names the offending key."""
+
     key: str
 
-class RemovedConfigKeyError(ConfigError): ...
-class FeatureUnavailableError(AnnealError): ...
+class RemovedConfigKeyError(ConfigError):
+    """A configuration sets a key that a past release removed."""
+
+class FeatureUnavailableError(AnnealError):
+    """The call needs a Cargo feature that this build of `anneal` does not include."""
 
 class NoFiniteStartError(AnnealError):
+    """No initial quench was finite. The `attempts` attribute counts the quenches tried."""
+
     attempts: int
 
 @final
@@ -177,7 +190,16 @@ class Bounds:
     @property
     def slack(self) -> float: ...
 
-def make_bounds(low: _Vector, high: _Vector, slack: float = 1e-6) -> Bounds: ...
+def make_bounds(low: _Vector, high: _Vector, slack: float = 1e-6) -> Bounds:
+    """Build the `Bounds` that `anneal.Bounds(low, high, slack)` returns.
+
+    `eindir-core` 0.6.0 builds a box with an assertion, so the arrays are
+    checked here and the class is called only with arrays it accepts.
+
+    Raises `BoundsError` for sides of different lengths, an inverted pair, a
+    coordinate that is not a number, and a negative or NaN `slack`.
+    """
+
 
 @final
 class PyObjective:
@@ -205,11 +227,29 @@ class Config:
     @staticmethod
     def for_cluster(n: int) -> Config: ...
     @staticmethod
-    def communicating_tip4p(n: int) -> Config: ...
+    def communicating_tip4p(n: int) -> Config:
+        """The communicating arm on `n` rigid TIP4P waters.
+
+        Raises `InvalidArgumentError` when `6 * n` does not fit in a machine
+        word, and `MemoryError` when the allocator refuses the two vectors of
+        `6 * n` numbers that the preset builds.
+        """
     @staticmethod
-    def recommended_tip4p(n: int) -> Config: ...
+    def recommended_tip4p(n: int) -> Config:
+        """The recommended arm on `n` rigid TIP4P waters.
+
+        Raises `InvalidArgumentError` when `6 * n` does not fit in a machine
+        word, and `MemoryError` when the allocator refuses the two vectors of
+        `6 * n` numbers that the preset builds.
+        """
     @staticmethod
-    def for_tip4p(n: int) -> Config: ...
+    def for_tip4p(n: int) -> Config:
+        """The plain protocol on `n` rigid TIP4P waters.
+
+        Raises `InvalidArgumentError` when `6 * n` does not fit in a machine
+        word, and `MemoryError` when the allocator refuses the two vectors of
+        `6 * n` numbers that the preset builds.
+        """
     @staticmethod
     def with_scales(n: int, length_scale: float, energy_scale: float) -> Config: ...
     @staticmethod
@@ -719,7 +759,21 @@ def cluster_search(
     measured_energy_scale: bool | None = None,
     config: Config | None = None,
     full: bool = False,
-) -> _Result: ...
+) -> _Result:
+    """Runs the measured cluster-search layer on a user energy and gradient.
+
+    A callback raising `BaseException` that is not an `Exception`, such as
+    `KeyboardInterrupt`, stops the search at once. The best state found is
+    kept, and the exception is raised from this call.
+
+    Raises `InvalidArgumentError` for an argument the search cannot use,
+    among them an `n` whose state of `3 * n` numbers (`6 * n` for rigid
+    bodies) does not fit in a machine word. Raises `MemoryError` when the
+    allocator refuses what the first hop holds, the size that
+    `anneal_core::memory::first_hop_bytes` adds up; no largest `n` is built
+    in. Raises `NoFiniteStartError` when no quench was finite.
+    """
+
 def quench(
     fg_fn: Callable[[_Vector], tuple[float, ArrayLike]],
     x0: _Vector,

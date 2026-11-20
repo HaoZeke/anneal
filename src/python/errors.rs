@@ -22,13 +22,13 @@ pyo3::create_exception!(
     anneal,
     InvalidArgumentError,
     AnnealError,
-    "An argument has a value, length or combination that the call cannot use."
+    "An argument has a value, length or combination that the call cannot use, or a number of points whose state length does not fit in a machine word."
 );
 pyo3::create_exception!(
     anneal,
     BoundsError,
     InvalidArgumentError,
-    "The box is empty, has mismatched sides, or has a bound that is not finite or not ordered."
+    "The box is empty, has sides of different lengths, has a bound that is not a number, not finite or not ordered, or has a negative or NaN slack."
 );
 pyo3::create_exception!(
     anneal,
