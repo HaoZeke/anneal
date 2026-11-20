@@ -9,7 +9,7 @@ object reports more than one rank.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Callable, Mapping, Sequence, cast
 
 import numpy as np
 
@@ -63,6 +63,8 @@ def type_numbers(elements: str | Sequence[str | int], n_types: int) -> np.ndarra
     items = elements.split() if isinstance(elements, str) else list(elements)
     numbers: list[int] = []
     for item in items:
+        if isinstance(item, bool):
+            raise ValueError(f"atomic number {item!r} must be an element or integer")
         if isinstance(item, (int, np.integer)) or (
             isinstance(item, str) and item.isdigit()
         ):
@@ -82,6 +84,8 @@ def type_numbers(elements: str | Sequence[str | int], n_types: int) -> np.ndarra
 
 def _mpi_world(comm: Any, size: int) -> Any:
     if comm is None:
+        if size <= 1:
+            return None
         try:
             from mpi4py import MPI
         except ImportError as exc:
@@ -95,7 +99,7 @@ def _mpi_world(comm: Any, size: int) -> Any:
             f"comm has {comm.Get_size()} ranks, but LAMMPS runs on {size}; "
             "pass the communicator the lammps object was created with"
         )
-    return comm
+    return comm if size > 1 else None
 
 
 def _exception_text(error: BaseException) -> str:
@@ -105,9 +109,7 @@ def _exception_text(error: BaseException) -> str:
 
 
 class _CollectiveError(RuntimeError):
-    def __init__(self, message: str, original: BaseException | None) -> None:
-        super().__init__(message)
-        self.original = original
+    pass
 
 
 class FixExternal:
@@ -139,8 +141,8 @@ class FixExternal:
         if virial not in {"auto", "none"}:
             raise ValueError("virial must be 'auto' or 'none'")
 
-        self._lmp = lmp
-        self.potential = potential
+        self._lmp: Any = lmp
+        self.potential: Any = potential
         self.fix_id = fix_id
         self.virial = virial
         self.units = str(lmp.extract_global("units"))
@@ -160,7 +162,7 @@ class FixExternal:
         self.periodic = all(periodicity)
 
         size = int(lmp.extract_setting("world_size"))
-        self._comm = _mpi_world(comm, size) if size > 1 else None
+        self._comm = _mpi_world(comm, size)
         self._size = size
         self._root = self._comm is None or self._comm.Get_rank() == 0
         self._imgmask = int(lmp.extract_setting("IMGMASK"))
@@ -177,44 +179,55 @@ class FixExternal:
         self._cached_tags: np.ndarray | None = None
         self._cached_index: np.ndarray | None = None
 
-        if create:
-            lmp.command(f"fix {fix_id} all external pf/callback 1 1")
-            lmp.command(f"fix_modify {fix_id} energy yes virial yes")
-        self._fix_registered = True
-        lmp.command(f"variable {self._flag} internal 0")
-        lmp.command(
-            f"fix {fix_id}_halt all halt 1 v_{self._flag} "
-            "> 0.5 error hard message yes"
-        )
-        self._halt_registered = True
-        lmp.set_fix_external_callback(fix_id, self._callback, None)
-        self._callback_registered = True
+        try:
+            if create:
+                lmp.command(f"fix {fix_id} all external pf/callback 1 1")
+                self._fix_registered = True
+                lmp.command(f"fix_modify {fix_id} energy yes virial yes")
+            lmp.command(f"variable {self._flag} internal 0")
+            lmp.command(
+                f"fix {fix_id}_halt all halt 1 v_{self._flag} "
+                "> 0.5 error hard message yes"
+            )
+            self._halt_registered = True
+            lmp.set_fix_external_callback(fix_id, self._callback, None)
+            self._callback_registered = True
+            self._fix_registered = True
+        except BaseException:
+            try:
+                self.close()
+            except BaseException:
+                pass
+            raise
 
     def _callback(
         self, _caller: Any, _step: int, nlocal: int, tag: Any, x: Any, f: Any
     ) -> None:
+        if self.error is not None:
+            try:
+                f[:nlocal] = 0.0
+            except BaseException:
+                pass
+            return
         try:
             self._step(int(nlocal), tag, x, f)
         except BaseException as exc:
-            if self.error is None:
-                self.error = exc
+            self.error = exc
             try:
                 f[:nlocal] = 0.0
-            except BaseException as recovery_error:
-                if self.error is None:
-                    self.error = recovery_error
+            except BaseException:
+                pass
             try:
                 if self._lmp is not None:
                     self._lmp.set_internal_variable(self._flag, 1.0)
-            except BaseException as recovery_error:
-                if self.error is None:
-                    self.error = recovery_error
+            except BaseException:
+                pass
 
-    def _unwrapped(self, nlocal: int, x: Any, rows: np.ndarray) -> np.ndarray:
+    def _unwrapped(self, lmp: Any, nlocal: int, x: Any, rows: np.ndarray) -> np.ndarray:
         xu = np.array(x[:nlocal], dtype=float).reshape(nlocal, 3)
         if self.periodic and nlocal:
             image = np.asarray(
-                self._lmp.numpy.extract_atom("image")[:nlocal], dtype=np.int64
+                lmp.numpy.extract_atom("image")[:nlocal], dtype=np.int64
             )
             shifts = np.empty((nlocal, 3), dtype=float)
             shifts[:, 0] = (image & self._imgmask) - self._imgmax
@@ -230,14 +243,22 @@ class FixExternal:
     ) -> tuple[float, np.ndarray, np.ndarray | None]:
         evaluate = getattr(self.potential, "evaluate", None)
         if callable(evaluate):
-            result = evaluate(positions, numbers, rows)
+            eval_fn = cast(
+                Callable[[np.ndarray, np.ndarray, np.ndarray], Mapping[str, Any]],
+                evaluate,
+            )
+            result = eval_fn(positions, numbers, rows)
             energy = float(result["energy"])
             forces = np.asarray(result["forces"], dtype=float)
             stress = result.get("stress")
         else:
-            energy, forces, _variance = self.potential(positions, numbers, rows)
-            energy = float(energy)
-            forces = np.asarray(forces, dtype=float)
+            call_fn = cast(
+                Callable[[np.ndarray, np.ndarray, np.ndarray], tuple[Any, Any, Any]],
+                self.potential,
+            )
+            raw_energy, raw_forces, _variance = call_fn(positions, numbers, rows)
+            energy = float(raw_energy)
+            forces = np.asarray(raw_forces, dtype=float)
             stress_method = getattr(self.potential, "stress", None)
             stress = stress_method() if callable(stress_method) else None
         if forces.shape != positions.shape:
@@ -324,7 +345,7 @@ class FixExternal:
             return None
         report = None if error is None else _exception_text(error)
         reports = comm.gather(report, root=0)
-        problem = None
+        problem: str | None = None
         if self._root:
             assert reports is not None
             for rank, item in enumerate(reports):
@@ -332,12 +353,17 @@ class FixExternal:
                     problem = f"rank {rank} failed while {phase}: {item}"
                     break
             assert problem is not None
-        return comm.bcast(problem, root=0)
+        broadcast = comm.bcast(problem, root=0)
+        return str(broadcast)
 
     def _step(self, nlocal: int, tag: Any, x: Any, f: Any) -> None:
+        lmp: Any = self._lmp
         local_error: BaseException | None = None
+        rows = np.zeros((3, 3), dtype=float)
+        tags = np.empty(0, dtype=np.int64)
+        numbers = np.empty(0, dtype=np.int32)
+        xu = np.empty((0, 3), dtype=float)
         try:
-            lmp = self._lmp
             if lmp is None:
                 raise RuntimeError("FixExternal is closed")
             boxlo, boxhi, xy, yz, xz = lmp.extract_box()[:5]
@@ -347,7 +373,7 @@ class FixExternal:
                 lmp.numpy.extract_atom("type")[:nlocal], dtype=np.int64
             )
             numbers = self.type_numbers[types - 1]
-            xu = self._unwrapped(nlocal, x, rows)
+            xu = self._unwrapped(lmp, nlocal, x, rows)
         except BaseException as exc:
             local_error = exc
 
@@ -359,7 +385,7 @@ class FixExternal:
             comm = self._comm
             problem = self._collective_problem(local_error, "preparing local atoms")
             if problem is not None:
-                raise _CollectiveError(problem, local_error)
+                raise _CollectiveError(problem)
             parts = comm.gather((tags, xu, numbers), root=0)
             outcome: tuple[float, np.ndarray] | None = None
             shares: list[Any] | None = None
@@ -385,11 +411,12 @@ class FixExternal:
                     caught = exc
             problem = self._collective_problem(caught, "evaluating the potential")
             if problem is not None:
-                raise _CollectiveError(problem, caught)
+                raise _CollectiveError(problem)
             assert outcome is not None or not self._root
             energy, virial = comm.bcast(outcome, root=0)
             forces = comm.scatter(shares, root=0)
 
+        assert lmp is not None
         f[:nlocal] = forces
         v = virial.tolist()
         lmp.fix_external_set_energy_global(self.fix_id, float(energy))
@@ -423,7 +450,9 @@ class FixExternal:
 
     def _take_error(self) -> BaseException:
         error, self.error = self.error, None
-        self._lmp.set_internal_variable(self._flag, 0.0)
+        lmp = self._lmp
+        if lmp is not None:
+            lmp.set_internal_variable(self._flag, 0.0)
         assert error is not None
         return error
 

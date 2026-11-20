@@ -62,7 +62,9 @@ With periodic boundaries, image flags unwrap each Cartesian position as
 All three boundaries must be periodic or all three non-periodic; mixed
 boundaries raise =ValueError=.
 The potential protocol always receives the 3 by 3 cell.
-A free-boundary potential may ignore it.
+A free-boundary potential may ignore it; a periodic potential such as =LJPot=
+folds pairs across the cell vectors and should not be used with
+=boundary f f f=.
 
 The evaluation is in increasing atom-ID order.
 Returned forces are mapped back to each rank's local order.

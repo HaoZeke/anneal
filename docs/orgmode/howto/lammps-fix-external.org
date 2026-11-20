@@ -37,7 +37,8 @@ with FixExternal(lmp, potential, "Ar") as driver:
 The frontend creates =fix rgpot all external pf/callback 1 1=, enables its
 energy and virial, and adds a =fix halt= that stops a run after a callback
 failure.
-=driver.run(...)= then raises the original Python exception.
+=driver.run(...)= then raises the original Python exception on one rank, or a
+collective =RuntimeError= naming the failing rank under MPI.
 Use =fix_id= to choose another fix name.
 With =create=False= the input must already define the external fix and its
 =fix_modify energy yes virial yes= settings.
@@ -48,6 +49,9 @@ The default =virial="auto"= uses the potential's analytic stress.
 A periodic box whose potential reports no stress raises an error that names the
 potential and says it lacks analytic stress, so =fix npt=, =fix nph= and
 =fix box/relax= are not driven by a guessed pressure.
+A non-periodic box (=boundary f f f=) still passes the box extents as the cell
+to the potential; use a cluster potential such as =rgpot.LJClusterPot= rather
+than a periodic potential that wraps pairs across the box faces.
 A non-periodic box with no stress returns a zero virial.
 Set =virial="none"= when a zero virial is intentional.
 

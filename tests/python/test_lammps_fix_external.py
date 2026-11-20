@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -129,6 +130,8 @@ def test_units_and_elements_use_rgpot_conventions():
         type_numbers(["H"], 2)
     with pytest.raises(ValueError, match="unknown element"):
         type_numbers(["Qq", "H"], 2)
+    with pytest.raises(ValueError, match="must be an element or integer"):
+        type_numbers([True, "H"], 2)
 
 
 def test_triclinic_cell_unwrapping_id_order_and_virial():
@@ -243,6 +246,15 @@ def test_empty_atom_list_is_refused():
         driver._step(0, lmp.tags, lmp.positions, np.zeros((0, 3)))
 
 
+def test_single_rank_rejects_mismatched_comm():
+    class TwoRankComm:
+        def Get_size(self):
+            return 2
+
+    with pytest.raises(RuntimeError, match="comm has 2 ranks, but LAMMPS runs on 1"):
+        FixExternal(FakeLammps(), RecordingPotential(), "H He", comm=TwoRankComm())
+
+
 class RootComm:
     def __init__(self, parts):
         self.parts = parts
@@ -250,53 +262,51 @@ class RootComm:
         self.shares = None
 
     def Get_size(self):
-        return 2
+        return len(self.parts)
 
     def Get_rank(self):
         return 0
 
     def allreduce(self, value):
-        return value + 1
+        return value + len(self.parts) - 1
 
-    def gather(self, part, root=0):
+    def gather(self, value, root=0):
         assert root == 0
-        if not isinstance(part, tuple):
-            return [part, None]
-        return self.parts
+        if isinstance(value, tuple):
+            return self.parts
+        return [value] + [None] * (len(self.parts) - 1)
 
     def bcast(self, value, root=0):
         assert root == 0
         self.outcome = value
         return value
 
-    def scatter(self, shares, root=0):
+    def scatter(self, value, root=0):
         assert root == 0
-        self.shares = shares
-        return shares[0]
+        self.shares = value
+        return value[0]
 
 
 class CollectiveWorld:
     def __init__(self, size=2):
         self.size = size
-        self.condition = threading.Condition()
+        self.cond = threading.Condition()
         self.calls = {}
 
-    def exchange(self, index, rank, kind, value, root):
-        with self.condition:
+    def exchange(self, index, rank, kind, value, root=0):
+        with self.cond:
             call = self.calls.setdefault(
-                index,
-                {"kind": kind, "root": root, "values": {}, "reads": 0},
+                index, {"kind": kind, "root": root, "values": {}, "reads": 0}
             )
             assert call["kind"] == kind
-            assert call["root"] == root
             call["values"][rank] = value
-            self.condition.notify_all()
-            ready = self.condition.wait_for(
-                lambda: len(call["values"]) == self.size,
-                timeout=2,
-            )
-            if not ready:
-                raise TimeoutError(f"{kind} collective did not complete")
+            if len(call["values"]) < self.size:
+                self.cond.wait_for(
+                    lambda: len(call["values"]) == self.size, timeout=3.0
+                )
+            else:
+                self.cond.notify_all()
+            assert len(call["values"]) == self.size, f"collective {kind} timed out"
             values = call["values"]
             if kind == "allreduce":
                 result = sum(values.values())
@@ -356,7 +366,7 @@ def test_duplicate_ids_are_refused():
         driver._step(2, lmp.tags, lmp.positions, np.zeros((2, 3)))
 
 
-def test_rank_zero_reraises_the_original_error():
+def test_rank_zero_raises_collective_error():
     parts = [
         (np.array([1]), np.zeros((1, 3)), np.array([1])),
         (np.array([2]), np.zeros((1, 3)), np.array([2])),
@@ -507,14 +517,20 @@ def test_rank_zero_gathers_by_id_and_scatters_local_forces():
 
 
 def test_callback_failure_stops_run_and_reraises_original_error():
+    calls = 0
+
     class Broken:
         def __call__(self, *_args):
+            nonlocal calls
+            calls += 1
             raise ValueError("evaluation failed")
 
     lmp = FakeLammps()
     driver = FixExternal(lmp, Broken(), "H He")
     forces = np.ones((2, 3))
     driver._callback(None, 0, 2, lmp.tags, lmp.positions, forces)
+    driver._callback(None, 1, 2, lmp.tags, lmp.positions, forces)
+    assert calls == 1
     np.testing.assert_array_equal(forces, 0.0)
     assert lmp.variables["rgpot_failed"] == 1.0
     with pytest.raises(ValueError, match="evaluation failed"):
@@ -608,6 +624,15 @@ def test_close_preserves_state_and_reraises_unfix_failure():
     assert driver._lmp is None
 
 
+def test_constructor_failure_rolls_back_registered_fixes():
+    lmp = FakeLammps()
+    lmp.fail_command = "fix rgpot_halt all halt 1 v_rgpot_failed > 0.5 error hard message yes"
+    with pytest.raises(RuntimeError, match="failed command"):
+        FixExternal(lmp, RecordingPotential(np.eye(3)), "H He")
+    assert "unfix rgpot" in lmp.commands
+    assert "rgpot" not in lmp.callback
+
+
 def test_real_lammps_smoke():
     """Energy, forces, and virial from fix external match a direct LJ evaluation."""
     lammps = pytest.importorskip("lammps")
@@ -662,6 +687,123 @@ def test_real_lammps_smoke():
         )
     finally:
         lmp.close()
+
+
+def test_real_lammps_two_rank_mpi():
+    """Two MPI ranks gather atoms across subdomains, match direct LJ, and raise collective errors."""
+    lammps = pytest.importorskip("lammps")
+    pytest.importorskip("mpi4py")
+    mpirun = shutil.which("mpirun") or shutil.which("mpiexec")
+    if mpirun is None:
+        pytest.skip("needs mpirun or mpiexec")
+    probe = lammps.lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
+    try:
+        has_mpi = bool(getattr(probe, "has_mpi_support", True))
+    finally:
+        probe.close()
+    if not has_mpi:
+        pytest.skip("LAMMPS built without MPI support")
+
+    prefix = [mpirun, "-np", "2"]
+    version = subprocess.run(
+        [mpirun, "--version"], capture_output=True, text=True, check=False
+    )
+    if "Open MPI" in version.stdout + version.stderr:
+        prefix.append("--oversubscribe")
+
+    env = os.environ.copy()
+    root = Path(__file__).resolve().parents[2]
+    pythonpath = env.get("PYTHONPATH", "")
+    extra = str(root / "python")
+    env["PYTHONPATH"] = extra if not pythonpath else extra + os.pathsep + pythonpath
+
+    script = """
+import numpy as np
+import pytest
+from lammps import lammps
+from mpi4py import MPI
+import rgpot
+from rgpot.lammps import FixExternal
+
+comm = MPI.COMM_WORLD
+assert comm.Get_size() == 2
+
+positions = np.array([
+    [2.0, 2.0, 2.0],
+    [3.5, 2.5, 2.0],
+    [12.0, 2.0, 2.0],
+    [13.5, 2.5, 2.0],
+])
+cell = np.array([[20.0, 0.0, 0.0], [1.2, 20.0, 0.0], [-0.6, 0.8, 20.0]])
+pot = rgpot.LJPot(u0=0.0104, psi=3.40, cutoff=8.5)
+direct = pot.evaluate(positions, np.ones(4, dtype=np.int32), cell)
+stress = np.asarray(direct["stress"], dtype=float).reshape(3, 3)
+virial = -abs(float(np.linalg.det(cell))) * 0.5 * (stress + stress.T)
+expected = np.array([
+    virial[0, 0], virial[1, 1], virial[2, 2],
+    virial[0, 1], virial[0, 2], virial[1, 2],
+])
+
+lmp = lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"], comm=comm)
+try:
+    assert int(lmp.extract_setting("world_size")) == 2
+    lmp.commands_string('''
+        clear
+        units metal
+        atom_style atomic
+        atom_modify map array sort 0 0
+        boundary p p p
+        processors 2 1 1
+        region box prism 0 20 0 20 0 20 1.2 -0.6 0.8
+        create_box 1 box
+        create_atoms 1 single 2.0 2.0 2.0
+        create_atoms 1 single 3.5 2.5 2.0
+        create_atoms 1 single 12.0 2.0 2.0
+        create_atoms 1 single 13.5 2.5 2.0
+        mass 1 39.948
+        compute vrg all pressure NULL virial
+    ''')
+    nlocal = int(lmp.extract_global("nlocal"))
+    assert comm.allgather(nlocal) == [2, 2]
+    with FixExternal(lmp, pot, "Ar", comm=comm) as driver:
+        driver.run(0)
+        pe = float(lmp.get_thermo("pe"))
+        forces = np.array(lmp.gather_atoms("f", 1, 3), dtype=float).reshape(-1, 3)
+        pressure = np.array(lmp.numpy.extract_compute("vrg", 0, 1), dtype=float)
+        volume = float(lmp.get_thermo("vol"))
+        nktv2p = float(lmp.extract_global("nktv2p"))
+        assert driver.evaluations == 1
+    assert pe == pytest.approx(direct["energy"])
+    np.testing.assert_allclose(forces, direct["forces"], atol=1e-12, rtol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(pressure, dtype=float).reshape(-1)[:6] * volume / nktv2p,
+        expected,
+        atol=1e-12,
+        rtol=1e-12,
+    )
+
+    class Boom:
+        def __call__(self, *_args):
+            raise ValueError("boom on root")
+
+    with FixExternal(lmp, Boom(), "Ar", comm=comm) as broken:
+        with pytest.raises(
+            RuntimeError,
+            match="rank 0 failed while evaluating the potential: ValueError: boom on root",
+        ):
+            broken.run(0)
+finally:
+    lmp.close()
+"""
+    proc = subprocess.run(
+        [*prefix, sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
 
 
 def test_ids_in_order_reach_the_potential_without_a_permutation():
