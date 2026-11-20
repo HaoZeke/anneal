@@ -1,0 +1,1 @@
+An engine oracle callback can no longer hand native code a success it did not earn. A failure that carries a success status is reported to the engine as `ENGINE_ERR_INVALID`, and an oracle answer with a non-finite energy or force is refused with the same code, so the evaluation fails with a recoverable `EngineError` instead of returning the unwritten buffers.

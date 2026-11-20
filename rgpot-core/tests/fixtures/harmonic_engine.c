@@ -41,6 +41,7 @@ static int destroyed = 0;
 static int native_calls = 0;
 static int batch_calls = 0;
 static int null_callback_clears = 0;
+static int last_oracle_rc = -1000000;
 #ifdef FATAL_ONCE
 static int fatal_once_fired = 0;
 #endif
@@ -49,6 +50,7 @@ int fixture_destroy_count(void) { return destroyed; }
 int fixture_native_call_count(void) { return native_calls; }
 int fixture_batch_call_count(void) { return batch_calls; }
 int fixture_null_callback_clear_count(void) { return null_callback_clears; }
+int fixture_last_oracle_rc(void) { return last_oracle_rc; }
 int fixture_unsupported_code(void) { return RGPOT_ENGINE_ERR_UNSUPPORTED; }
 
 int rgpot_engine_abi_version(void) { return FIXTURE_ABI; }
@@ -136,6 +138,7 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
       pot->callbacks.on_acquire(pot->callbacks.ctx, RGPOT_ACQUIRE_VARIANCE);
     rc = pot->callbacks.oracle(pot->callbacks.ctx, n, positions, atomic_nrs,
                                forces, energy, box);
+    last_oracle_rc = rc;
     if (rc == 0) {
       pot->model_state += 1;
       if (pot->callbacks.on_model_update != NULL)

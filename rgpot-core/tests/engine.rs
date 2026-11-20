@@ -218,6 +218,13 @@ fn null_callback_clears(path: &Path) -> c_int {
     unsafe { count() }
 }
 
+fn last_oracle_rc(path: &Path) -> c_int {
+    let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
+    let value: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { library.get(b"fixture_last_oracle_rc\0") }.expect("oracle code symbol");
+    unsafe { value() }
+}
+
 fn unsupported_code(path: &Path) -> c_int {
     let library = unsafe { libloading::Library::new(path) }.expect("reopen the fixture");
     let value: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
@@ -1831,4 +1838,170 @@ fn engine_errors_report_a_status_of_their_own_class() {
         message: String::new(),
     };
     assert_eq!(contradictory.engine_status(), None);
+}
+
+struct ScriptedOracle {
+    answer: Result<EngineEvaluation, EngineFailure>,
+}
+
+impl EngineCallbacks for ScriptedOracle {
+    fn oracle(&mut self, _request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        self.answer.clone()
+    }
+}
+
+fn oracle_force(
+    name: &str,
+    answer: Result<EngineEvaluation, EngineFailure>,
+) -> (
+    PathBuf,
+    EngineSession,
+    Result<EngineEvaluation, EngineError>,
+) {
+    let path = build(name, &[]);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(ScriptedOracle { answer })))
+        .expect("set callbacks");
+    let answer = session.force(
+        &EngineRequest {
+            positions: &[1.0, 2.0, 3.0],
+            atomic_numbers: &[1],
+            box_matrix: &CELL,
+        },
+        None,
+    );
+    (path, session, answer)
+}
+
+#[test]
+fn oracle_failure_with_success_status_reaches_native_code_as_an_error() {
+    let (path, session, answer) = oracle_force(
+        "harmonic_oracle_success_status",
+        Err(EngineFailure {
+            status: EngineStatus::Success,
+            message: "failure with success status".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), ENGINE_ERR_INVALID);
+    assert_eq!(
+        answer,
+        Err(EngineError::Recoverable {
+            code: ENGINE_ERR_INVALID,
+            message: "failure with success status".into(),
+        })
+    );
+    assert_eq!(session.model_state().expect("model state"), 0);
+}
+
+#[test]
+fn every_oracle_failure_status_reaches_native_code_as_its_own_nonzero_code() {
+    let (path, session, answer) = oracle_force(
+        "harmonic_oracle_recoverable",
+        Err(EngineFailure {
+            status: EngineStatus::from_code(5),
+            message: "oracle refused this geometry".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), 5);
+    assert_eq!(
+        answer
+            .expect_err("recoverable oracle failure")
+            .engine_status(),
+        Some(EngineStatus::from_code(5))
+    );
+    assert_eq!(session.model_state().expect("model state"), 0);
+
+    let (path, mut session, answer) = oracle_force(
+        "harmonic_oracle_fatal",
+        Err(EngineFailure {
+            status: EngineStatus::from_code(-9),
+            message: "oracle lost its backend".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), -9);
+    assert_eq!(
+        answer.expect_err("fatal oracle failure").engine_status(),
+        Some(EngineStatus::from_code(-9))
+    );
+    assert_poisoned_with_code(&mut session, -9);
+
+    let (path, _session, answer) = oracle_force(
+        "harmonic_oracle_wrong_length",
+        Ok(EngineEvaluation {
+            energy: 1.0,
+            forces: vec![0.0],
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), ENGINE_ERR_INVALID);
+    assert!(
+        matches!(answer, Err(EngineError::Recoverable { code, .. }) if code == ENGINE_ERR_INVALID),
+        "{answer:?}"
+    );
+}
+
+fn assert_poisoned_with_code(session: &mut EngineSession, code: c_int) {
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 0.0, 0.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("fatal session remains poisoned");
+    assert_eq!(error.engine_status(), Some(EngineStatus::from_code(code)));
+}
+
+#[test]
+fn oracle_output_that_is_not_finite_is_an_error_not_a_success() {
+    let cases = [
+        ("energy_nan", f64::NAN, vec![0.0, 0.0, 0.0], "energy"),
+        ("energy_inf", f64::INFINITY, vec![0.0, 0.0, 0.0], "energy"),
+        (
+            "force_nan",
+            1.0,
+            vec![0.0, f64::NAN, 0.0],
+            "force at element 1",
+        ),
+        (
+            "force_inf",
+            1.0,
+            vec![0.0, 0.0, f64::NEG_INFINITY],
+            "force at element 2",
+        ),
+    ];
+    for (name, energy, forces, what) in cases {
+        let (path, session, answer) = oracle_force(
+            &format!("harmonic_oracle_{name}"),
+            Ok(EngineEvaluation { energy, forces }),
+        );
+        assert_eq!(last_oracle_rc(&path), ENGINE_ERR_INVALID, "{name}");
+        match answer {
+            Err(EngineError::Recoverable { code, message }) => {
+                assert_eq!(code, ENGINE_ERR_INVALID, "{name}");
+                assert!(message.contains(what), "{name}: {message}");
+                assert!(message.contains("not finite"), "{name}: {message}");
+            }
+            other => panic!("{name}: expected a recoverable error, got {other:?}"),
+        }
+        assert_eq!(session.model_state().expect("model state"), 0, "{name}");
+    }
+}
+
+#[test]
+fn a_finite_oracle_answer_still_succeeds() {
+    let (path, session, answer) = oracle_force(
+        "harmonic_oracle_finite",
+        Ok(EngineEvaluation {
+            energy: -2.5,
+            forces: vec![0.5, -0.5, 0.0],
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), 0);
+    let answer = answer.expect("finite oracle answer");
+    assert_eq!(answer.energy, -2.5);
+    assert_eq!(answer.forces, [0.5, -0.5, 0.0]);
+    assert_eq!(session.model_state().expect("model state"), 1);
 }

@@ -1179,36 +1179,36 @@ unsafe extern "C" fn oracle_trampoline(
         };
         callbacks.oracle(&request)
     }));
-    match result {
-        Ok(Ok(answer)) if answer.forces.len() == position_len => {
-            unsafe {
-                std::ptr::copy_nonoverlapping(answer.forces.as_ptr(), forces, position_len);
-                *energy = answer.energy;
-            }
-            0
-        }
-        Ok(Ok(_)) => {
-            let failure = EngineFailure {
+    let failure = match result {
+        Ok(Ok(answer)) if answer.forces.len() != position_len => EngineFailure {
+            status: INVALID_STATUS,
+            message: "oracle returned the wrong force length".into(),
+        },
+        Ok(Ok(answer)) => match non_finite_output(answer.energy, &answer.forces) {
+            Some(message) => EngineFailure {
                 status: INVALID_STATUS,
-                message: "oracle returned the wrong force length".into(),
-            };
-            state.record(failure.clone());
-            failure.status.code()
-        }
-        Ok(Err(failure)) => {
-            let code = failure.status.code();
-            state.record(failure);
-            code
-        }
-        Err(_) => {
-            let failure = EngineFailure {
-                status: PANIC_STATUS,
-                message: "oracle callback panicked".into(),
-            };
-            state.record(failure.clone());
-            failure.status.code()
-        }
-    }
+                message: format!("oracle {message}"),
+            },
+            None => {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(answer.forces.as_ptr(), forces, position_len);
+                    *energy = answer.energy;
+                }
+                return 0;
+            }
+        },
+        Ok(Err(failure)) => EngineFailure {
+            status: failure.status.or_invalid(),
+            message: failure.message,
+        },
+        Err(_) => EngineFailure {
+            status: PANIC_STATUS,
+            message: "oracle callback panicked".into(),
+        },
+    };
+    let code = failure.status.code();
+    state.record(failure);
+    code
 }
 
 unsafe extern "C" fn acquire_trampoline(ctx: *mut c_void, reason: c_int) {
@@ -1461,16 +1461,19 @@ fn unsupported_symbol(operation: &'static str) -> EngineError {
     }
 }
 
-fn finite(energy: f64, forces: &[f64]) -> Result<(), EngineError> {
+fn non_finite_output(energy: f64, forces: &[f64]) -> Option<String> {
     if !energy.is_finite() {
-        return Err(EngineError::Invalid(
-            "the engine energy is not finite".into(),
-        ));
+        return Some("energy is not finite".into());
     }
-    match forces.iter().position(|value| !value.is_finite()) {
-        Some(index) => Err(EngineError::Invalid(format!(
-            "the engine force at element {index} is not finite"
-        ))),
+    forces
+        .iter()
+        .position(|value| !value.is_finite())
+        .map(|index| format!("force at element {index} is not finite"))
+}
+
+fn finite(energy: f64, forces: &[f64]) -> Result<(), EngineError> {
+    match non_finite_output(energy, forces) {
+        Some(message) => Err(EngineError::Invalid(format!("the engine {message}"))),
         None => Ok(()),
     }
 }
