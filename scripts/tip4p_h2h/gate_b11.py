@@ -434,7 +434,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def opc(row: dict[str, str]) -> float:
-    return (float(row["wall_s"]) - float(row["pot_s"])) / float(row["calls"])
+    return (float(row["wall_s"]) - float(row["pot_s"])) / float(row["charged"])
+
+
+def pooled_opc(rows: list[dict[str, str]]) -> float:
+    return sum(float(r["wall_s"]) - float(r["pot_s"]) for r in rows) / sum(float(r["charged"]) for r in rows)
 
 
 def score_size25(rows: list[dict[str, str]]) -> float:
@@ -462,6 +466,8 @@ NONRIGID_IDENTITY = (
     "trace_sha",
     "geometry_sha",
 )
+PUBLIC_FIELDS = FIELDS + ["pause_gap_s"]
+PAUSE_GAP_S = 5.0
 
 
 def pick(rows: list[dict[str, str]], cell: str, arm: str, driver: str = "h2h_seed") -> list[dict[str, str]]:
@@ -469,113 +475,203 @@ def pick(rows: list[dict[str, str]], cell: str, arm: str, driver: str = "h2h_see
     return sorted(found, key=lambda r: int(r["seed"]))
 
 
-def cmd_score(args: argparse.Namespace) -> int:
-    rigid = read_rows(args.rigid)
-    nonrigid = read_rows(args.nonrigid)
-    check_starts(rigid)
-    check_starts(nonrigid)
-    ref25 = score_size25(rigid)
-    summary = []
-    report = {"reference_tip4p25": ref25, "cells": [], "nonrigid": [], "claims": {}}
-    for n in SIZES:
-        cell = f"tip4p{n}"
-        arm_rows = {arm: pick(rigid, cell, arm) for arm in ("A", "A2", "B", "C")}
-        if any(len(v) != len(SEEDS) for v in arm_rows.values()):
-            raise SystemExit(f"{cell} lacks rows")
-        med = {arm: type7([opc(r) for r in v]) for arm, v in arm_rows.items()}
-        pooled = {
-            arm: sum(float(r["wall_s"]) - float(r["pot_s"]) for r in v) / sum(float(r["calls"]) for r in v)
-            for arm, v in arm_rows.items()
-        }
-        hits = {arm: sum(r["hit"] == "1" for r in v) for arm, v in arm_rows.items()}
-        lost = [int(a["seed"]) for a, b in zip(arm_rows["A"], arm_rows["B"]) if a["hit"] == "1" and b["hit"] == "0"]
-        gained = [int(a["seed"]) for a, b in zip(arm_rows["A"], arm_rows["B"]) if a["hit"] == "0" and b["hit"] == "1"]
-        same_bc = sum(
+def log_name(row: dict[str, str]) -> str:
+    if row["driver"] == "h2h_seed":
+        return f"seed-{row['cell']}-s{row['seed']}-{row['arm']}.log"
+    return f"panel-{row['cell']}-s{row['seed']}-{row['arm']}.log"
+
+
+def mark_pauses(rows: list[dict[str, str]], work: Path) -> None:
+    """Time between consecutive log ends not covered by the run's own wall.
+
+    Runs are serial in journal order, so a gap of seconds means the host
+    stopped the machine between the end of one run and the end of the
+    next. The driver's monotonic clock does not count such a stop.
+    """
+    previous = None
+    for row in rows:
+        end = (work / "logs" / log_name(row)).stat().st_mtime
+        row["pause_gap_s"] = "" if previous is None else f"{end - previous - float(row['wall_s']):.3f}"
+        previous = end
+
+
+def paused(row: dict[str, str]) -> bool:
+    return row.get("pause_gap_s", "") != "" and float(row["pause_gap_s"]) > PAUSE_GAP_S
+
+
+def mcnemar(b: int, c: int) -> float:
+    from math import comb
+
+    n = b + c
+    if n == 0:
+        return 1.0
+    tail = sum(comb(n, k) for k in range(min(b, c) + 1)) / 2.0**n
+    return min(1.0, 2.0 * tail)
+
+
+def hit_string(rows: list[dict[str, str]]) -> str:
+    return "".join("1" if r["hit"] == "1" else "0" for r in rows)
+
+
+def cell_entry(rows: list[dict[str, str]], cell: str, arms: tuple[str, ...], seeds: tuple[int, ...]) -> dict:
+    arm_rows = {arm: pick(rows, cell, arm) for arm in arms}
+    for arm, found in arm_rows.items():
+        if [int(r["seed"]) for r in found] != list(seeds):
+            raise SystemExit(f"{cell} arm {arm} lacks rows")
+    med = {arm: type7([opc(r) for r in v]) for arm, v in arm_rows.items()}
+    pooled = {arm: pooled_opc(v) for arm, v in arm_rows.items()}
+    hits = {arm: sum(r["hit"] == "1" for r in v) for arm, v in arm_rows.items()}
+    a_rows, b_rows = arm_rows["A"], arm_rows[arms[1] if "B" not in arms else "B"]
+    entry = {
+        "cell": cell,
+        "hits": hits,
+        "hit_table": {arm: hit_string(v) for arm, v in arm_rows.items()},
+        "opc_us": {arm: med[arm] * 1e6 for arm in arms},
+        "ratio_to_a": {arm: med[arm] / med["A"] for arm in arms if arm != "A"},
+        "pooled_ratio_to_a": {arm: pooled[arm] / pooled["A"] for arm in arms if arm != "A"},
+        "median_charged": {arm: type7([float(r["charged"]) for r in v]) for arm, v in arm_rows.items()},
+        "paused_rows": {arm: sum(paused(r) for r in v) for arm, v in arm_rows.items()},
+        "seeds_a_hit_other_miss": " ".join(
+            r["seed"] for r, o in zip(a_rows, b_rows) if r["hit"] == "1" and o["hit"] == "0"
+        ),
+        "seeds_a_miss_other_hit": " ".join(
+            r["seed"] for r, o in zip(a_rows, b_rows) if r["hit"] == "0" and o["hit"] == "1"
+        ),
+    }
+    if "A2" in arms:
+        ratio_aa = entry["ratio_to_a"]["A2"]
+        entry["aa_noisy"] = int(not (1.0 / COST_LIMIT <= ratio_aa <= COST_LIMIT))
+    if "B" in arms:
+        entry["fail_hits"] = int(hits["B"] < hits["A"])
+        entry["fail_cost"] = int(entry["ratio_to_a"]["B"] > COST_LIMIT)
+    if "C" in arms:
+        entry["ratio_b_to_c"] = med["B"] / med["C"]
+        entry["pooled_ratio_b_to_c"] = pooled["B"] / pooled["C"]
+        entry["rows_b_eq_c"] = sum(
             all(b[k] == c[k] for k in IDENTITY) for b, c in zip(arm_rows["B"], arm_rows["C"])
         )
-        ratio_ba = med["B"] / med["A"]
-        ratio_aa = med["A2"] / med["A"]
-        entry = {
-            "cell": cell,
-            "hits_a": hits["A"],
-            "hits_a2": hits["A2"],
-            "hits_b": hits["B"],
-            "hits_c": hits["C"],
-            "seeds_a_hit_b_miss": " ".join(map(str, lost)),
-            "seeds_a_miss_b_hit": " ".join(map(str, gained)),
-            "median_calls_a": type7([float(r["calls"]) for r in arm_rows["A"]]),
-            "median_calls_b": type7([float(r["calls"]) for r in arm_rows["B"]]),
-            "opc_us_a": med["A"] * 1e6,
-            "opc_us_a2": med["A2"] * 1e6,
-            "opc_us_b": med["B"] * 1e6,
-            "opc_us_c": med["C"] * 1e6,
-            "ratio_ba": ratio_ba,
-            "ratio_aa": ratio_aa,
-            "ratio_bc": med["B"] / med["C"],
-            "pooled_ratio_ba": pooled["B"] / pooled["A"],
-            "pooled_ratio_aa": pooled["A2"] / pooled["A"],
-            "pooled_ratio_bc": pooled["B"] / pooled["C"],
-            "aa_noisy": int(not (1.0 / COST_LIMIT <= ratio_aa <= COST_LIMIT)),
-            "rows_b_eq_c": same_bc,
-            "fail_hits": int(hits["B"] < hits["A"]),
-            "fail_cost": int(ratio_ba > COST_LIMIT),
-            "hit_table": {
-                arm: "".join("1" if r["hit"] == "1" else "0" for r in v) for arm, v in arm_rows.items()
-            },
-        }
-        report["cells"].append(entry)
-    systems = sorted({(r["cell"], r["driver"]) for r in nonrigid})
-    for system, driver in systems:
+        entry["rows_a_eq_c"] = sum(
+            all(a[k] == c[k] for k in IDENTITY) for a, c in zip(arm_rows["A"], arm_rows["C"])
+        )
+    return entry
+
+
+def size_of(cell: str) -> int:
+    return int(cell[len("tip4p") :])
+
+
+def cmd_score(args: argparse.Namespace) -> int:
+    rigid = read_rows(args.rigid)
+    second = read_rows(args.second)
+    nonrigid = read_rows(args.nonrigid)
+    for rows in (rigid, second, nonrigid):
+        mark_pauses(rows, args.work)
+        check_starts(rows)
+    probes = []
+    for spec in args.probe:
+        journal, _, work = spec.partition(":")
+        rows = read_rows(Path(journal))
+        mark_pauses(rows, Path(work))
+        check_starts(rows)
+        probes.append(rows)
+    tip4p = rigid + second + [r for rows in probes for r in rows]
+    bad = [r for r in tip4p if r["calls"] != r["charged"]]
+    if bad:
+        raise SystemExit(f"{len(bad)} TIP4P rows have calls != charged")
+    report: dict = {"reference_tip4p25": score_size25(rigid)}
+    report["primary"] = [cell_entry(rigid, f"tip4p{n}", ("A", "A2", "B", "C"), SEEDS) for n in SIZES]
+    report["second"] = [cell_entry(second, f"tip4p{n}", ("A", "B"), SECOND_SEEDS) for n in SECOND_SIZES]
+    pooled_pairs = []
+    mc = []
+    for n in SECOND_SIZES:
+        cell = f"tip4p{n}"
+        pairs = list(zip(pick(rigid, cell, "A") + pick(second, cell, "A"), pick(rigid, cell, "B") + pick(second, cell, "B")))
+        if len(pairs) != 24 or any(a["seed"] != b["seed"] for a, b in pairs):
+            raise SystemExit(f"{cell} pooled pairs")
+        pooled_pairs += pairs
+        b = sum(a["hit"] == "1" and o["hit"] == "0" for a, o in pairs)
+        c = sum(a["hit"] == "0" and o["hit"] == "1" for a, o in pairs)
+        mc.append({"cell": cell, "n": 24, "hits_a": sum(a["hit"] == "1" for a, _ in pairs),
+                   "hits_b": sum(o["hit"] == "1" for _, o in pairs), "b": b, "c": c, "p": mcnemar(b, c)})
+    b = sum(a["hit"] == "1" and o["hit"] == "0" for a, o in pooled_pairs)
+    c = sum(a["hit"] == "0" and o["hit"] == "1" for a, o in pooled_pairs)
+    mc.append({"cell": "tip4p15-21", "n": len(pooled_pairs), "hits_a": sum(a["hit"] == "1" for a, _ in pooled_pairs),
+               "hits_b": sum(o["hit"] == "1" for _, o in pooled_pairs), "b": b, "c": c, "p": mcnemar(b, c)})
+    report["mcnemar"] = mc
+    nonrigid_report = []
+    for system, driver in sorted({(r["cell"], r["driver"]) for r in nonrigid}):
         a_rows = pick(nonrigid, system, "A", driver)
         b_rows = pick(nonrigid, system, "B", driver)
         if len(a_rows) != len(NONRIGID_SEEDS) or len(b_rows) != len(NONRIGID_SEEDS):
             raise SystemExit(f"{system} {driver} lacks rows")
         diffs = []
-        for a, b in zip(a_rows, b_rows):
-            diffs += [f"{a['seed']}:{k}" for k in NONRIGID_IDENTITY if a.get(k, "") != b.get(k, "")]
-        report["nonrigid"].append(
-            {
-                "cell": system,
-                "driver": driver,
-                "seeds": len(a_rows),
-                "best_a": " ".join(r["best"] for r in a_rows),
-                "charged_a": " ".join(r["charged"] for r in a_rows),
-                "identical": int(not diffs),
-                "diffs": " ".join(diffs),
-            }
-        )
-    cells = report["cells"]
+        for a, o in zip(a_rows, b_rows):
+            diffs += [f"{a['seed']}:{k}" for k in NONRIGID_IDENTITY if a.get(k, "") != o.get(k, "")]
+        nonrigid_report.append({"cell": system, "driver": driver, "seeds": len(a_rows),
+                                "best_a": " ".join(r["best"] for r in a_rows),
+                                "charged_a": " ".join(r["charged"] for r in a_rows),
+                                "identical": int(not diffs), "diffs": " ".join(diffs)})
+    report["nonrigid"] = nonrigid_report
+    cells = report["primary"] + report["second"]
     rule1 = not any(c["fail_hits"] for c in cells)
     rule2 = not any(c["fail_cost"] for c in cells)
-    rule3 = all(r["identical"] for r in report["nonrigid"])
+    rule3 = bool(nonrigid_report) and all(r["identical"] for r in nonrigid_report)
     report["rules"] = {"hits": rule1, "outside": rule2, "nonrigid": rule3, "pass": rule1 and rule2 and rule3}
-    sub = [c for c in cells if 9 <= int(c["cell"][5:]) <= 21]
-    b_rows = [r for r in rigid if r["arm"] == "B" and r["driver"] == "h2h_seed"]
-    c_rows = [r for r in rigid if r["arm"] == "C" and r["driver"] == "h2h_seed"]
-
-    def pooled_of(rows, lo, hi):
-        rows = [r for r in rows if lo <= int(r["cell"][5:]) <= hi]
-        return sum(float(r["wall_s"]) - float(r["pot_s"]) for r in rows) / sum(float(r["calls"]) for r in rows)
-
-    report["claims"] = {
-        "bc_ratio_min_8_21": min(c["ratio_bc"] for c in cells if int(c["cell"][5:]) <= 21),
-        "bc_ratio_max_8_21": max(c["ratio_bc"] for c in cells if int(c["cell"][5:]) <= 21),
-        "bc_pooled_8_21": pooled_of(b_rows, 8, 21) / pooled_of(c_rows, 8, 21),
-        "ba_pooled_8_25": pooled_of(b_rows, 8, 25)
-        / pooled_of([r for r in rigid if r["arm"] == "A"], 8, 25),
-        "aa_pooled_8_25": pooled_of([r for r in rigid if r["arm"] == "A2"], 8, 25)
-        / pooled_of([r for r in rigid if r["arm"] == "A"], 8, 25),
-        "hits_b_15_21": sum(c["hits_b"] for c in cells if 15 <= int(c["cell"][5:]) <= 21),
-        "hits_c_15_21": sum(c["hits_c"] for c in cells if 15 <= int(c["cell"][5:]) <= 21),
-        "hits_a_15_21": sum(c["hits_a"] for c in cells if 15 <= int(c["cell"][5:]) <= 21),
-        "hits_bc_equal_all": all(c["hits_b"] == c["hits_c"] for c in cells),
-        "rows_b_eq_c_9_21": sum(c["rows_b_eq_c"] for c in sub),
-        "rows_9_21": len(sub) * len(SEEDS),
+    by = {c["cell"]: c for c in report["primary"]}
+    window = [by[f"tip4p{n}"] for n in SECOND_SIZES]
+    report["b6"] = {
+        "ratio_tip4p9": by["tip4p9"]["ratio_to_a"]["C"],
+        "ratio_tip4p15": by["tip4p15"]["ratio_to_a"]["C"],
+        "hits_tip4p17": [by["tip4p17"]["hits"]["A"], by["tip4p17"]["hits"]["C"]],
+        "hits_15_21": {arm: sum(c["hits"][arm] for c in window) for arm in ("A", "A2", "B", "C")},
     }
-    public = [{k: r.get(k, "") for k in FIELDS} for r in rigid + nonrigid]
+    report["b6"]["bad"] = bool(
+        report["b6"]["ratio_tip4p9"] > COST_LIMIT
+        or report["b6"]["ratio_tip4p15"] > COST_LIMIT
+        or by["tip4p17"]["hits"]["C"] < by["tip4p17"]["hits"]["A"]
+        or report["b6"]["hits_15_21"]["C"] < report["b6"]["hits_15_21"]["A"]
+    )
+    probe_report = []
+    for rows in probes:
+        entries = {n: cell_entry(rows, f"tip4p{n}", ("A", "P"), SEEDS) for n in PROBE_SIZES}
+        commit = rows[0]["probe"]
+        verdict = (
+            entries[9]["ratio_to_a"]["P"] > COST_LIMIT
+            or entries[15]["ratio_to_a"]["P"] > COST_LIMIT
+            or entries[17]["hits"]["P"] < entries[17]["hits"]["A"]
+        )
+        probe_report.append({"commit": commit, "tree": [r for r in rows if r["arm"] == "P"][0]["tree"],
+                             "ratio_tip4p9": entries[9]["ratio_to_a"]["P"],
+                             "ratio_tip4p15": entries[15]["ratio_to_a"]["P"],
+                             "hits_tip4p17": [entries[17]["hits"]["A"], entries[17]["hits"]["P"]],
+                             "hits_tip4p9": [entries[9]["hits"]["A"], entries[9]["hits"]["P"]],
+                             "hits_tip4p15": [entries[15]["hits"]["A"], entries[15]["hits"]["P"]],
+                             "paused_rows": sum(paused(r) for r in rows),
+                             "bad": bool(verdict)})
+    report["probes"] = probe_report
+    sub = [c for c in report["primary"] if 9 <= size_of(c["cell"]) <= 21]
+    b_rows = [r for r in rigid if r["arm"] == "B" and size_of(r["cell"]) <= 21]
+    c_rows = [r for r in rigid if r["arm"] == "C" and size_of(r["cell"]) <= 21]
+    a_rows = [r for r in rigid if r["arm"] == "A"]
+    report["claims"] = {
+        "b_to_c_ratio_range_8_21": [
+            min(c["ratio_b_to_c"] for c in report["primary"] if size_of(c["cell"]) <= 21),
+            max(c["ratio_b_to_c"] for c in report["primary"] if size_of(c["cell"]) <= 21),
+        ],
+        "b_to_c_pooled_8_21": pooled_opc(b_rows) / pooled_opc(c_rows),
+        "b_to_a_pooled_all": pooled_opc([r for r in rigid if r["arm"] == "B"]) / pooled_opc(a_rows),
+        "a2_to_a_pooled_all": pooled_opc([r for r in rigid if r["arm"] == "A2"]) / pooled_opc(a_rows),
+        "c_to_a_pooled_all": pooled_opc([r for r in rigid if r["arm"] == "C"]) / pooled_opc(a_rows),
+        "hits_equal_b_c_all_cells": all(c["hits"]["B"] == c["hits"]["C"] for c in report["primary"]),
+        "rows_b_eq_c_9_21": [sum(c["rows_b_eq_c"] for c in sub), len(sub) * len(SEEDS)],
+        "rows_a_eq_c_9_21": [sum(c["rows_a_eq_c"] for c in sub), len(sub) * len(SEEDS)],
+        "paused_rows": sum(paused(r) for r in rigid + second + nonrigid),
+        "rows": len(rigid) + len(second) + len(nonrigid) + sum(len(p) for p in probes),
+    }
+    public = [{k: r.get(k, "") for k in PUBLIC_FIELDS} for r in rigid + second + nonrigid + [r for p in probes for r in p]]
     args.rows.parent.mkdir(parents=True, exist_ok=True)
     with args.rows.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=PUBLIC_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(public)
     args.summary.write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
@@ -636,6 +732,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--rigid", type=Path)
     parser.add_argument("--nonrigid", type=Path)
+    parser.add_argument("--second", type=Path)
+    parser.add_argument("--probe", action="append", default=[], help="JOURNAL:WORK")
     parser.add_argument("--rows", type=Path)
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args(argv[1:])
