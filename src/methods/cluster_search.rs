@@ -1496,10 +1496,25 @@ where
     // Split deliberately: the relaxation needs the optimizer mutably, the
     // gradient needs only the objective. Sharing the objective by reference is
     // what lets both closures exist at once.
-    let searched = {
+    let (searched, generic_candidate) = {
         let paid = PaidCheck::default();
         let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
         let mut grad = gated_grad(objective, &paid);
+        let mut candidate_ledger = ledger.slice(ledger.remaining());
+        let generic_candidate = crate::methods::cluster_hopping::generic_packing_candidate(
+            cfg,
+            &mut candidate_ledger,
+            &mut relax,
+        )
+        .and_then(|(energy, state)| {
+            grad(&mut candidate_ledger, state.view())
+                .filter(|gradient| {
+                    gradient.len() == state.len()
+                        && gradient_is_converged(gradient.view(), cfg.record_gradient)
+                })
+                .map(|_| (energy, state))
+        });
+        ledger.charge_many(candidate_ledger.spent());
 
         // Value and gradient in one charge, which is what a Hamiltonian leapfrog
         // leaf needs. On a pairwise potential both come out of one pass over the
@@ -1518,19 +1533,33 @@ where
                     .map(|(energy, gradient, _)| (energy, gradient))
             };
 
-        optimize_with_energy_gradient(
-            cfg,
-            ledger,
-            &mut relax,
-            Some(&mut grad),
-            Some(&mut energy_grad),
-            seed,
+        (
+            optimize_with_energy_gradient(
+                cfg,
+                ledger,
+                &mut relax,
+                Some(&mut grad),
+                Some(&mut energy_grad),
+                seed,
+            ),
+            generic_candidate,
         )
     };
     if reserve > 0 {
         ledger.release_tail();
     }
     let mut out = searched?;
+    if let Some((energy, state)) = generic_candidate
+        && energy < out.best
+    {
+        ledger.record(energy, state.view());
+        out.best = energy;
+        out.best_state = Some(state);
+        if out.hops > 0 {
+            out.improvements
+                .push((out.hops, ledger.spent(), out.basins, energy));
+        }
+    }
     if reserve > 0 {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }

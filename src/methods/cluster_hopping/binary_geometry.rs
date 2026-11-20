@@ -104,6 +104,358 @@ fn assign_sites(
     placed
 }
 
+/// Where an fcc cut is centred.
+#[derive(Clone, Copy)]
+pub(crate) enum FccCentre {
+    /// An occupied lattice site.
+    Atom,
+    /// The void with six neighbours.
+    Octahedral,
+    /// The void with four neighbours.
+    Tetrahedral,
+}
+
+/// The `n` fcc sites nearest `centre`.
+///
+/// The final rescaling makes the shortest pair exactly `nearest`.  `n` only
+/// truncates the distance ordering; there are no shell-size cases.
+pub(crate) fn fcc_cut(n: usize, centre: FccCentre, nearest: f64) -> Array1<f64> {
+    if !valid_request(n, nearest) {
+        return Array1::zeros(0);
+    }
+    let origin = match centre {
+        FccCentre::Atom => [0.0, 0.0, 0.0],
+        FccCentre::Octahedral => [1.0, 0.0, 0.0],
+        FccCentre::Tetrahedral => [0.5, 0.5, 0.5],
+    };
+    let mut limit = 1i32;
+    let mut sites = Vec::new();
+    while sites.len() < n {
+        sites.clear();
+        for i in -limit..=limit {
+            for j in -limit..=limit {
+                for k in -limit..=limit {
+                    if (i + j + k).rem_euclid(2) == 0 {
+                        sites.push([f64::from(i), f64::from(j), f64::from(k)]);
+                    }
+                }
+            }
+        }
+        limit += 1;
+    }
+    sites.sort_by(|left, right| {
+        dist2(left, &origin)
+            .total_cmp(&dist2(right, &origin))
+            .then_with(|| point_order(left, right))
+    });
+    sites.truncate(n);
+    scale_to_nearest(&sites, nearest)
+}
+
+/// How successive icosahedra share sites.
+#[derive(Clone, Copy)]
+pub(crate) enum IcosahedronJoin {
+    /// Grow around the site with the most neighbours already present.
+    Compact,
+    /// Grow from the most recently added centre.
+    Linear,
+}
+
+/// The first `n` sites in a growth of interpenetrating icosahedra.
+///
+/// Every shell uses the same regular icosahedron.  Its centre is selected
+/// from geometry already generated, not from a cluster-size table.
+pub(crate) fn polyicosahedral_cut(n: usize, join: IcosahedronJoin, nearest: f64) -> Array1<f64> {
+    if !valid_request(n, nearest) {
+        return Array1::zeros(0);
+    }
+    let vertices = icosahedron_vertices();
+    let radial = norm(vertices[0]);
+    let unit: Vec<[f64; 3]> = vertices
+        .iter()
+        .map(|point| [point[0] / radial, point[1] / radial, point[2] / radial])
+        .collect();
+    let mut sites = vec![[0.0, 0.0, 0.0]];
+    let mut centres = vec![0usize];
+    while sites.len() < n {
+        let host = match join {
+            IcosahedronJoin::Linear => *centres.last().expect("one centre"),
+            IcosahedronJoin::Compact => (0..sites.len())
+                .filter(|site| !centres.contains(site))
+                .max_by(|&left, &right| {
+                    neighbour_count(&sites, left)
+                        .cmp(&neighbour_count(&sites, right))
+                        .then_with(|| right.cmp(&left))
+                })
+                .unwrap_or_else(|| sites.len() - 1),
+        };
+        let centre = sites[host];
+        let before = sites.len();
+        for direction in &unit {
+            let point = [
+                centre[0] + direction[0],
+                centre[1] + direction[1],
+                centre[2] + direction[2],
+            ];
+            push_distinct(&mut sites, point);
+        }
+        if sites.len() == before {
+            let direction = unit[centres.len() % unit.len()];
+            push_distinct(
+                &mut sites,
+                [
+                    centre[0] + direction[0],
+                    centre[1] + direction[1],
+                    centre[2] + direction[2],
+                ],
+            );
+        }
+        match join {
+            IcosahedronJoin::Compact => centres.push(host),
+            IcosahedronJoin::Linear => centres.push(sites.len() - 1),
+        }
+    }
+    sites.truncate(n);
+    scale_to_nearest(&sites, nearest)
+}
+
+/// The first `n` sites of a Mackay icosahedron.
+///
+/// Shell `s` is the integer barycentric subdivision of every icosahedron
+/// face with `i + j + k = s`.  This is the same construction at every shell,
+/// so it continues past 55 atoms without a magic-size branch.
+pub(crate) fn mackay_cut(n: usize, nearest: f64) -> Array1<f64> {
+    if !valid_request(n, nearest) {
+        return Array1::zeros(0);
+    }
+    let mut sites = vec![[0.0, 0.0, 0.0]];
+    let mut shell = 1usize;
+    while sites.len() < n {
+        append_mackay_shell(&mut sites, shell);
+        shell += 1;
+    }
+    sites.truncate(n);
+    scale_to_nearest(&sites, nearest)
+}
+
+/// The `n` Mackay sites nearest a fivefold cap.
+///
+/// The underlying shell construction is [`mackay_cut`]'s.  Distance to an
+/// outer vertex supplies one geometric ordering for every atom count.
+pub(crate) fn mackay_cap(n: usize, nearest: f64) -> Array1<f64> {
+    if !valid_request(n, nearest) {
+        return Array1::zeros(0);
+    }
+    let mut sites = vec![[0.0, 0.0, 0.0]];
+    let mut shell = 1usize;
+    while sites.len() < n.saturating_mul(2) {
+        append_mackay_shell(&mut sites, shell);
+        shell += 1;
+    }
+    let vertex = icosahedron_vertices()[0];
+    let focus = [
+        vertex[0] * shell as f64,
+        vertex[1] * shell as f64,
+        vertex[2] * shell as f64,
+    ];
+    sites.sort_by(|left, right| {
+        dist2(left, &focus)
+            .total_cmp(&dist2(right, &focus))
+            .then_with(|| point_order(left, right))
+    });
+    sites.truncate(n);
+    scale_to_nearest(&sites, nearest)
+}
+
+/// The `n` sites nearest the axis of an hcp lattice.
+///
+/// This retains the axial packing role of the removed binary builder without
+/// reading species, composition, or radii.  Atom count only truncates one
+/// geometric ordering.
+pub(crate) fn axial_spine_cut(n: usize, nearest: f64) -> Array1<f64> {
+    if !valid_request(n, nearest) {
+        return Array1::zeros(0);
+    }
+    let mut limit = 1i32;
+    let mut sites = Vec::new();
+    while sites.len() < n {
+        sites.clear();
+        for layer in -limit..=limit {
+            let odd = layer.rem_euclid(2) != 0;
+            let offset = if odd {
+                [0.5, 3.0_f64.sqrt() / 6.0]
+            } else {
+                [0.0, 0.0]
+            };
+            for i in -limit..=limit {
+                for j in -limit..=limit {
+                    sites.push([
+                        f64::from(i) + 0.5 * f64::from(j) + offset[0],
+                        3.0_f64.sqrt() * 0.5 * f64::from(j) + offset[1],
+                        f64::from(layer) * (2.0 / 3.0_f64).sqrt(),
+                    ]);
+                }
+            }
+        }
+        limit += 1;
+    }
+    sites.sort_by(|left, right| {
+        let left_radius = left[0] * left[0] + left[1] * left[1];
+        let right_radius = right[0] * right[0] + right[1] * right[1];
+        left_radius
+            .total_cmp(&right_radius)
+            .then_with(|| left[2].abs().total_cmp(&right[2].abs()))
+            .then_with(|| point_order(left, right))
+    });
+    sites.truncate(n);
+    scale_to_nearest(&sites, nearest)
+}
+
+/// All generic atomic packings offered by cluster search.
+pub(crate) fn packing_candidates(n: usize, nearest: f64) -> Vec<Array1<f64>> {
+    let mut candidates = Vec::new();
+    for centre in [
+        FccCentre::Atom,
+        FccCentre::Octahedral,
+        FccCentre::Tetrahedral,
+    ] {
+        candidates.push(fcc_cut(n, centre, nearest));
+    }
+    for join in [IcosahedronJoin::Compact, IcosahedronJoin::Linear] {
+        candidates.push(polyicosahedral_cut(n, join, nearest));
+    }
+    candidates.push(mackay_cut(n, nearest));
+    candidates.push(mackay_cap(n, nearest));
+    candidates.push(axial_spine_cut(n, nearest));
+    candidates
+}
+
+fn valid_request(n: usize, nearest: f64) -> bool {
+    n > 0 && nearest.is_finite() && nearest > 0.0
+}
+
+fn append_mackay_shell(sites: &mut Vec<[f64; 3]>, shell: usize) {
+    let vertices = icosahedron_vertices();
+    for [a, b, c] in icosahedron_faces(&vertices) {
+        for i in 0..=shell {
+            for j in 0..=(shell - i) {
+                let k = shell - i - j;
+                let point = [
+                    (i as f64 * a[0] + j as f64 * b[0] + k as f64 * c[0]),
+                    (i as f64 * a[1] + j as f64 * b[1] + k as f64 * c[1]),
+                    (i as f64 * a[2] + j as f64 * b[2] + k as f64 * c[2]),
+                ];
+                push_distinct(sites, point);
+            }
+        }
+    }
+}
+
+fn icosahedron_vertices() -> [[f64; 3]; 12] {
+    let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    [
+        [0.0, 1.0, phi],
+        [0.0, 1.0, -phi],
+        [0.0, -1.0, phi],
+        [0.0, -1.0, -phi],
+        [1.0, phi, 0.0],
+        [1.0, -phi, 0.0],
+        [-1.0, phi, 0.0],
+        [-1.0, -phi, 0.0],
+        [phi, 0.0, 1.0],
+        [-phi, 0.0, 1.0],
+        [phi, 0.0, -1.0],
+        [-phi, 0.0, -1.0],
+    ]
+}
+
+fn icosahedron_faces(vertices: &[[f64; 3]; 12]) -> Vec<[[f64; 3]; 3]> {
+    let edge = (0..vertices.len())
+        .flat_map(|i| ((i + 1)..vertices.len()).map(move |j| dist2(&vertices[i], &vertices[j])))
+        .filter(|distance| *distance > 0.0)
+        .min_by(f64::total_cmp)
+        .expect("an icosahedron has edges");
+    let tolerance = edge * f64::EPSILON.sqrt();
+    let mut faces = Vec::new();
+    for i in 0..vertices.len() {
+        for j in (i + 1)..vertices.len() {
+            for k in (j + 1)..vertices.len() {
+                if (dist2(&vertices[i], &vertices[j]) - edge).abs() <= tolerance
+                    && (dist2(&vertices[i], &vertices[k]) - edge).abs() <= tolerance
+                    && (dist2(&vertices[j], &vertices[k]) - edge).abs() <= tolerance
+                {
+                    faces.push([vertices[i], vertices[j], vertices[k]]);
+                }
+            }
+        }
+    }
+    faces
+}
+
+fn neighbour_count(sites: &[[f64; 3]], site: usize) -> usize {
+    let nearest = minimum_pair_distance(sites);
+    let tolerance = nearest * f64::EPSILON.sqrt();
+    sites
+        .iter()
+        .enumerate()
+        .filter(|(other, point)| {
+            *other != site && (dist2(&sites[site], point).sqrt() - nearest).abs() <= tolerance
+        })
+        .count()
+}
+
+fn push_distinct(sites: &mut Vec<[f64; 3]>, point: [f64; 3]) {
+    let scale = norm(point).max(1.0);
+    let tolerance = scale * f64::EPSILON.sqrt();
+    if sites
+        .iter()
+        .all(|have| dist2(have, &point).sqrt() > tolerance)
+    {
+        sites.push(point);
+    }
+}
+
+fn scale_to_nearest(sites: &[[f64; 3]], nearest: f64) -> Array1<f64> {
+    let present = minimum_pair_distance(sites);
+    let scale = if present.is_finite() && present > 0.0 {
+        nearest / present
+    } else {
+        nearest
+    };
+    let mut out = Array1::zeros(3 * sites.len());
+    for (index, point) in sites.iter().enumerate() {
+        for axis in 0..3 {
+            out[3 * index + axis] = scale * point[axis];
+        }
+    }
+    out
+}
+
+fn minimum_pair_distance(sites: &[[f64; 3]]) -> f64 {
+    let mut nearest = f64::INFINITY;
+    for i in 0..sites.len() {
+        for j in (i + 1)..sites.len() {
+            nearest = nearest.min(dist2(&sites[i], &sites[j]).sqrt());
+        }
+    }
+    nearest
+}
+
+fn norm(point: [f64; 3]) -> f64 {
+    (point[0] * point[0] + point[1] * point[1] + point[2] * point[2]).sqrt()
+}
+
+fn dist2(left: &[f64; 3], right: &[f64; 3]) -> f64 {
+    (left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2)
+}
+
+fn point_order(left: &[f64; 3], right: &[f64; 3]) -> std::cmp::Ordering {
+    left[0]
+        .total_cmp(&right[0])
+        .then_with(|| left[1].total_cmp(&right[1]))
+        .then_with(|| left[2].total_cmp(&right[2]))
+}
+
 /// Coordination, then distance from the centre. Higher coordination and
 /// a smaller radius sort first.
 fn interior_order(coords: ArrayView1<f64>) -> Vec<usize> {
@@ -255,6 +607,18 @@ pub(crate) trait QuenchProbe {
     fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)>;
 }
 
+/// Quench a generated packing without reordering its sites.
+///
+/// The axial cut's geometric ordering is already complete. Site-energy or
+/// coordination ordering would make it a different candidate.
+pub(crate) fn quench_as_placed<P: QuenchProbe>(
+    coords: Array1<f64>,
+    probe: &mut P,
+) -> Option<(f64, Array1<f64>)> {
+    let (value, point) = probe.quench(coords.view())?;
+    value.is_finite().then_some((value, point))
+}
+
 /// Site ranking, when two species are present, and one quench.
 pub(crate) fn arrange<P: QuenchProbe>(
     mut coords: Array1<f64>,
@@ -340,6 +704,59 @@ pub(crate) fn polish<P: QuenchProbe>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn shortest_pair(coordinates: ArrayView1<f64>) -> f64 {
+        let n = coordinates.len() / 3;
+        let mut shortest = f64::INFINITY;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let mut square = 0.0;
+                for axis in 0..3 {
+                    square += (coordinates[3 * i + axis] - coordinates[3 * j + axis]).powi(2);
+                }
+                shortest = shortest.min(square.sqrt());
+            }
+        }
+        shortest
+    }
+
+    #[test]
+    fn every_atom_count_uses_the_same_generic_packing_contract() {
+        for n in [2usize, 3, 4, 5, 12, 13, 14, 37, 38, 39, 54, 55, 56, 79, 126] {
+            let nearest = 0.73 + n as f64 / 100.0;
+            let candidates = packing_candidates(n, nearest);
+            assert_eq!(candidates.len(), 8);
+            for (index, candidate) in candidates.iter().enumerate() {
+                assert_eq!(candidate.len(), 3 * n, "generator {index}, n={n}");
+                let measured = shortest_pair(candidate.view());
+                assert!(
+                    (measured - nearest).abs() <= nearest * 1.0e-10,
+                    "generator {index}, n={n}: {measured} != {nearest}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn axial_quench_keeps_the_generated_site_order() {
+        struct Probe;
+
+        impl QuenchProbe for Probe {
+            fn energy(&mut self, _point: ArrayView1<f64>) -> Option<f64> {
+                panic!("a no-reorder quench does not rank sites")
+            }
+
+            fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+                Some((-1.0, point.to_owned()))
+            }
+        }
+
+        let axial = axial_spine_cut(17, 1.7);
+        let (energy, quenched) =
+            quench_as_placed(axial.clone(), &mut Probe).expect("finite quench");
+        assert_eq!(energy, -1.0);
+        assert_eq!(quenched, axial);
+    }
 
     #[test]
     fn a_label_blind_pair_keeps_its_own_distance() {

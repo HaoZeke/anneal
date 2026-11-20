@@ -4182,6 +4182,190 @@ fn lengths_of_quenched_cluster(cfg: &Config, x: ArrayView1<f64>) -> Option<Confi
     Some(scaled)
 }
 
+/// A dimer with every spectator moved to the machine-precision far field.
+///
+/// The objective keeps its full dimension. Spectators are not interpreted by
+/// species; their reciprocal separation is the square root of machine epsilon.
+fn isolated_pair(n: usize, distance: f64) -> Array1<f64> {
+    let mut point = Array1::zeros(3 * n);
+    point[0] = -0.5 * distance;
+    point[3] = 0.5 * distance;
+    let far = f64::EPSILON.sqrt().recip();
+    for atom in 2..n {
+        point[3 * atom + 1] = far * (atom - 1) as f64;
+    }
+    point
+}
+
+fn pair_probe<F>(ledger: &mut Ledger, relax: &mut F, n: usize, distance: f64) -> Option<f64>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    if !(distance.is_finite() && distance > 0.0) || ledger.remaining() == 0 {
+        return None;
+    }
+    let before = ledger.spent();
+    let (energy, _) = relax(ledger, isolated_pair(n, distance).view(), 0);
+    if ledger.spent() == before || !energy.is_finite() {
+        None
+    } else {
+        Some(energy)
+    }
+}
+
+/// Measure the potential's isolated-pair minimum under the caller's ledger.
+///
+/// Bracketing expands geometrically from the coordinate unit, then golden
+/// section search spends at most one mantissa bit per refinement. These are
+/// numerical rules, not potential, species, motif, or atom-count thresholds.
+fn measured_pair_minimum<F>(
+    ledger: &mut Ledger,
+    relax: &mut F,
+    n: usize,
+    probe_limit: usize,
+) -> Option<f64>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    if n < 2 || probe_limit < 3 {
+        return None;
+    }
+    let used = std::cell::Cell::new(0usize);
+    let mut evaluate = |distance: f64| {
+        if used.get() >= probe_limit {
+            return None;
+        }
+        let value = pair_probe(ledger, relax, n, distance);
+        if value.is_some() {
+            used.set(used.get() + 1);
+        }
+        value
+    };
+    let mut middle = 1.0;
+    let mut middle_energy = evaluate(middle)?;
+    let mut low = middle / 2.0;
+    let mut high = middle * 2.0;
+    let mut low_energy = evaluate(low).unwrap_or(f64::INFINITY);
+    let mut high_energy = evaluate(high).unwrap_or(f64::INFINITY);
+    while used.get() < probe_limit && (low_energy < middle_energy || high_energy < middle_energy) {
+        if low_energy <= high_energy {
+            high = middle;
+            middle = low;
+            middle_energy = low_energy;
+            low /= 2.0;
+            low_energy = evaluate(low).unwrap_or(f64::INFINITY);
+        } else {
+            low = middle;
+            middle = high;
+            middle_energy = high_energy;
+            high *= 2.0;
+            high_energy = evaluate(high).unwrap_or(f64::INFINITY);
+        }
+    }
+    if !middle_energy.is_finite() {
+        return None;
+    }
+
+    let ratio = (5.0_f64.sqrt() - 1.0) / 2.0;
+    let mut left = low;
+    let mut right = high;
+    let mut c = right - ratio * (right - left);
+    let mut d = left + ratio * (right - left);
+    let mut fc = evaluate(c).unwrap_or(f64::INFINITY);
+    let mut fd = evaluate(d).unwrap_or(f64::INFINITY);
+    while used.get() < probe_limit
+        && right - left > f64::EPSILON.sqrt() * left.abs().max(right.abs()).max(1.0)
+    {
+        if fc <= fd {
+            right = d;
+            d = c;
+            fd = fc;
+            c = right - ratio * (right - left);
+            fc = evaluate(c).unwrap_or(f64::INFINITY);
+        } else {
+            left = c;
+            c = d;
+            fc = fd;
+            d = left + ratio * (right - left);
+            fd = evaluate(d).unwrap_or(f64::INFINITY);
+        }
+    }
+    let (distance, energy) = if fc <= fd { (c, fc) } else { (d, fd) };
+    energy.is_finite().then_some(distance)
+}
+
+struct GenericPackingProbe<'a, F: ?Sized> {
+    ledger: &'a mut Ledger,
+    relax: &'a mut F,
+    steps: usize,
+}
+
+impl<F> binary_geometry::QuenchProbe for GenericPackingProbe<'_, F>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    fn energy(&mut self, point: ArrayView1<f64>) -> Option<f64> {
+        let (value, _) = (self.relax)(self.ledger, point, 0);
+        value.is_finite().then_some(value)
+    }
+
+    fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+        let result = (self.relax)(self.ledger, point, self.steps);
+        result.0.is_finite().then_some(result)
+    }
+}
+
+/// Quench every generic packing and retain the lowest measured energy.
+///
+/// Candidate generation itself is free. The pair search and every relaxation
+/// use the supplied ledger, so all potential evaluations are charged. No
+/// second-neighbour or potential-family switch is consulted.
+pub(crate) fn generic_packing_candidate<F>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut F,
+) -> Option<(f64, Array1<f64>)>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    let n = cfg.n_points;
+    if n < 2 || cfg.move_library.is_molecular() || cfg.move_library.is_rigid_body() {
+        return None;
+    }
+    let candidate_count = 8usize;
+    if ledger.remaining() <= candidate_count {
+        return None;
+    }
+    let probe_limit =
+        (ledger.remaining() / (candidate_count + 2)).min(f64::MANTISSA_DIGITS as usize);
+    let nearest = measured_pair_minimum(ledger, relax, n, probe_limit)?;
+    let mut best: Option<(f64, Array1<f64>)> = None;
+    let mut candidates = binary_geometry::packing_candidates(n, nearest);
+    let axial = candidates.pop()?;
+    for (index, candidate) in candidates.iter().enumerate() {
+        let candidates_left = candidates.len() - index;
+        let steps = cfg
+            .relax_steps
+            .min(ledger.remaining().saturating_sub(candidates_left));
+        let (energy, relaxed) = relax(ledger, candidate.view(), steps);
+        if energy.is_finite() && best.as_ref().is_none_or(|(held, _)| energy < *held) {
+            best = Some((energy, relaxed));
+        }
+    }
+    let steps = cfg.relax_steps.min(ledger.remaining());
+    let mut probe = GenericPackingProbe {
+        ledger,
+        relax,
+        steps,
+    };
+    if let Some((energy, relaxed)) = binary_geometry::quench_as_placed(axial, &mut probe)
+        && best.as_ref().is_none_or(|(held, _)| energy < *held)
+    {
+        best = Some((energy, relaxed));
+    }
+    best
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -10288,6 +10472,34 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pair_minimum_probes_and_packing_offers_are_charged() {
+        let cfg = Config::for_cluster(12);
+        let start = Array1::from_iter((0..36).map(|index| index as f64 / 7.0));
+        let mut ledger = Ledger::new(1_000);
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _iterations: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            let distance = (x[3] - x[0]).abs();
+            ((distance - 2.3).powi(2), x.to_owned())
+        };
+        let measured = measured_pair_minimum(&mut ledger, &mut relax, 12, 53).expect("minimum");
+        assert!((measured - 2.3).abs() < 1.0e-7, "{measured}");
+        let before = ledger.spent();
+        let (_, selected) =
+            generic_packing_candidate(&cfg, &mut ledger, &mut relax).expect("candidate");
+        assert_eq!(selected.len(), start.len());
+        assert!(
+            ledger.spent() >= before + 12,
+            "the second pair search and eight packing offers spent only {} calls",
+            ledger.spent() - before
+        );
+        assert_eq!(calls, ledger.spent());
+    }
 
     #[test]
     fn an_ordinary_target_improvement_uses_the_completed_quench_clock() {
