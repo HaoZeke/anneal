@@ -1,0 +1,1 @@
+`UmaPot` compiles against torch 2.8 again. Loading a package's constants blob called `update_constant_buffer_from_blob`, which that torch does not have; the call is now made only where the member exists, and a package with a blob reports that the linked torch cannot load it.

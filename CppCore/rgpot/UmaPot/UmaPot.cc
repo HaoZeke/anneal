@@ -28,6 +28,25 @@
 namespace rgpot {
 namespace {
 
+// A package can keep its constants in a separate blob, which the runner
+// reads with update_constant_buffer_from_blob. Torch 2.8 has no such member,
+// and packages it exports carry no blob. The first overload is chosen when
+// the member exists; the second keeps this file compiling against a torch
+// without it and reports a package that torch cannot load.
+template <class Runner>
+auto loadConstantsBlob(Runner &runner, const std::string &blob, int)
+    -> decltype(runner.update_constant_buffer_from_blob(blob), void()) {
+  runner.update_constant_buffer_from_blob(blob);
+}
+
+template <class Runner>
+void loadConstantsBlob(Runner &, const std::string &blob, long) {
+  throw std::runtime_error(
+      "UmaPot: the package keeps its constants in " + blob +
+      ", and this torch has no update_constant_buffer_from_blob to load "
+      "them; use the torch that exported the package");
+}
+
 bool ends_with(const std::string &s, const std::string &suf) {
   return s.size() >= suf.size() &&
          s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
@@ -274,7 +293,7 @@ void UmaPot::ensureLoaded() const {
       create->second(unpacked.so.string(), 1, device.str(),
                      unpacked.model_dir.string(), false);
   if (!unpacked.blob.empty())
-    m_impl->runner->update_constant_buffer_from_blob(unpacked.blob.string());
+    loadConstantsBlob(*m_impl->runner, unpacked.blob.string(), 0);
   auto num = [&](const char *key, double fallback) {
     const auto it = meta.find(key);
     if (it == meta.end() || it->second.empty())
