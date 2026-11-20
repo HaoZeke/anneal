@@ -222,6 +222,15 @@ fn rgpot_pair_stays_out_of_the_published_dependencies() {
     assert!(wheel.contains("anneal_core::install_rgpot_kernels!();"));
 }
 
+#[test]
+fn packaged_wheel_crate_has_a_versioned_path_dependency() {
+    let version = env!("CARGO_PKG_VERSION");
+    let manifest = include_str!("../crates/anneal-python/Cargo.toml");
+    assert!(manifest.contains(&format!(
+        "anneal-core = {{ version = \"{version}\", path = \"../..\""
+    )));
+}
+
 // An example that skips the installation runs Lennard-Jones and Morse on the
 // pair loop and cannot evaluate Gupta.
 #[test]
