@@ -323,8 +323,8 @@ the journal. What is actually there:
 
 - Transport: two-party Cap'n Proto RPC on TCP. =Catalog.capnp=
   defines =Coordinator=, =Session=, and =Subscriber=. A replica
-  ~attach=es with its identity and a subscriber capability, then
-  =Session.call~ carries the existing =CatalogRequest= /
+  calls =attach= with its identity and a subscriber capability, then
+  =Session.call= carries the existing =CatalogRequest= /
   =CatalogReply= payload so journal identity and every operation
   handler stay unchanged. =Coordinator.observe= needs no identity.
 - Coordination: =CatalogServer::start= binds one socket and runs a
