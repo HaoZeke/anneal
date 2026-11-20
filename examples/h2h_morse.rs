@@ -2,14 +2,16 @@
 //! One seed of `Config::recommended` on a Cambridge Morse cluster.
 //!
 //! ```text
-//! h2h_morse run <system> <seed> [coords] [--trace <path>]
+//! h2h_morse run <system> <seed> [coords] [--trace <path>] [--incumbents <path>]
 //! h2h_morse coords <system> <seed> <path>
 //! h2h_morse budget <system>
 //! ```
 //!
 //! `--trace` writes every minimum the chain adopts to `<path>` as one
 //! extended XYZ frame, with the charged count, hop, move and energy on the
-//! comment line. Without it nothing is traced.
+//! comment line. Without it nothing is traced. `--incumbents` writes every
+//! lowering of the best the same way, with the hop, the energy bits and
+//! round-trip coordinates; its last frame is the reported best.
 //!
 //! `[coords]` is an optional start, one Cartesian line per atom. Without
 //! it, `run` draws the start. `H2H_PAIR_SCALE=1` uses
@@ -82,8 +84,10 @@ fn system_spec(name: &str) -> Option<Spec> {
 fn main() {
     anneal_core::install_rgpot_kernels!();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let trace = match take_trace(&mut args) {
-        Ok(trace) => trace,
+    let (trace, incumbents) = match take_path(&mut args, "--trace").and_then(|trace| {
+        take_path(&mut args, "--incumbents").map(|incumbents| (trace, incumbents))
+    }) {
+        Ok(paths) => paths,
         Err(err) => {
             eprintln!("{err}");
             std::process::exit(2);
@@ -91,7 +95,7 @@ fn main() {
     };
     let cmd = args.first().map(String::as_str).unwrap_or("run");
     let status = match cmd {
-        "run" => cmd_run(&args, trace.as_deref()),
+        "run" => cmd_run(&args, trace.as_deref(), incumbents.as_deref()),
         "coords" => cmd_coords(&args),
         "budget" => cmd_budget(&args),
         _ => {
@@ -149,7 +153,7 @@ fn cmd_coords(args: &[String]) -> i32 {
     }
 }
 
-fn cmd_run(args: &[String], trace: Option<&str>) -> i32 {
+fn cmd_run(args: &[String], trace: Option<&str>, incumbents: Option<&str>) -> i32 {
     let Some(system) = args.get(1).map(String::as_str) else {
         eprintln!("run needs a system");
         return 2;
@@ -220,7 +224,8 @@ fn cmd_run(args: &[String], trace: Option<&str>) -> i32 {
     } else {
         start_of(&cfg, spec.n, seed)
     };
-    let (outcome, wall, pot_s) = match search(&cfg, &spec, &start, seed, budget, trace) {
+    let (outcome, wall, pot_s) = match search(&cfg, &spec, &start, seed, budget, trace, incumbents)
+    {
         Ok(done) => done,
         Err(err) => {
             eprintln!("trace: {err}");
@@ -274,12 +279,16 @@ fn search(
     seed: u64,
     budget: usize,
     trace: Option<&str>,
+    incumbents: Option<&str>,
 ) -> std::io::Result<(anneal_core::methods::cluster_hopping::Outcome, f64, f64)> {
     let potential = PairPotential::morse(spec.n, spec.rho);
     let mut ledger = Ledger::new(budget);
     ledger.stop_below(spec.reference + HIT_TOL);
     let trace = trace
         .map(|path| open_trace(&mut ledger, path))
+        .transpose()?;
+    let incumbents = incumbents
+        .map(|path| open_incumbents(&mut ledger, path))
         .transpose()?;
     let mut optimiser = WarmLbfgs::default();
     let pot_ns = std::sync::atomic::AtomicU64::new(0);
@@ -327,17 +336,20 @@ fn search(
     if let Some(trace) = trace {
         close_trace(&trace)?;
     }
+    if let Some(incumbents) = incumbents {
+        close_trace(&incumbents)?;
+    }
     Ok((outcome, wall, pot_s))
 }
 
-/// Removes `--trace <path>` from the arguments and returns the path.
-fn take_trace(args: &mut Vec<String>) -> Result<Option<String>, String> {
-    let Some(at) = args.iter().position(|arg| arg == "--trace") else {
+/// Removes `<flag> <path>` from the arguments and returns the path.
+fn take_path(args: &mut Vec<String>, flag: &str) -> Result<Option<String>, String> {
+    let Some(at) = args.iter().position(|arg| arg == flag) else {
         return Ok(None);
     };
     args.remove(at);
     if at >= args.len() {
-        return Err("--trace needs a path".to_owned());
+        return Err(format!("{flag} needs a path"));
     }
     Ok(Some(args.remove(at)))
 }
@@ -368,6 +380,36 @@ fn open_trace(ledger: &mut Ledger, path: &str) -> std::io::Result<Trace> {
         );
         for atom in minimum.state.exact_chunks(3) {
             text.push_str(&format!("X {:.6} {:.6} {:.6}\n", atom[0], atom[1], atom[2]));
+        }
+        let mut file = sink.lock().expect("trace lock");
+        if file.error.is_none()
+            && let Err(err) = file.out.write_all(text.as_bytes())
+        {
+            file.error = Some(err);
+        }
+    });
+    Ok(trace)
+}
+
+/// One extended XYZ frame per lowering of the best, coordinates round-trip.
+fn open_incumbents(ledger: &mut Ledger, path: &str) -> std::io::Result<Trace> {
+    let trace = std::sync::Arc::new(std::sync::Mutex::new(TraceFile {
+        out: std::io::BufWriter::new(std::fs::File::create(path)?),
+        error: None,
+    }));
+    let sink = std::sync::Arc::clone(&trace);
+    ledger.trace_incumbent(move |best| {
+        use std::io::Write as _;
+        let mut text = format!(
+            "{}\ncall={} hop={} energy_bits={:016x} energy={:?}\n",
+            best.state.len() / 3,
+            best.spent,
+            best.hop,
+            best.energy.to_bits(),
+            best.energy
+        );
+        for atom in best.state.exact_chunks(3) {
+            text.push_str(&format!("X {:?} {:?} {:?}\n", atom[0], atom[1], atom[2]));
         }
         let mut file = sink.lock().expect("trace lock");
         if file.error.is_none()
