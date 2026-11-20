@@ -293,6 +293,63 @@ def test_a_rerun_without_its_tests_is_reported():
     assert ("Fisher p", "1") in [(r[2], r[3]) for r in audit.drifts()]
 
 
+SC_RERUN_ROWS = "bench/paper-rerun/sc-h2h/rows.csv"
+SIDE_COMMIT = "e3ed7dadfce4f0c0aa3b9616f6f07dd9b3171e0a"
+
+
+def test_a_sutton_chen_summary_off_its_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(SC_RERUN_ROWS)
+    for row in rows:
+        if row["system"] == "sc126-38" and row["arm"] == "anneal" and row["hit"] == "1":
+            row["evals_to_hit"] = str(int(row["evals_to_hit"]) + 400)
+    audit_mod.head_to_head(audit)
+    drifted = {(r[1], r[2]) for r in audit.drifts()}
+    assert (f"{audit_mod.SC_RERUN_SUMMARY} sc126-38 anneal", "calls_median") in drifted
+
+
+def test_a_sutton_chen_summary_cell_off_its_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(SC_RERUN_ROWS)
+    row = next(r for r in rows if r["system"] == "sc108-38" and r["arm"] == "gmin" and r["hit"] == "0")
+    row["hit"] = "1"
+    audit_mod.head_to_head(audit)
+    drifted = {(r[1], r[2]) for r in audit.drifts()}
+    assert {(f"{audit_mod.SC_RERUN_SUMMARY} sc108-38 gmin", "hits"),
+            (f"{audit_mod.SC_RERUN_SUMMARY} sc108-38 anneal", "fisher_p_vs_gmin")} <= drifted
+
+
+def test_a_missing_sutton_chen_rerun_row_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(SC_RERUN_ROWS)
+    assert len(rows) == 216
+    dropped = rows.pop(5)
+    audit_mod.head_to_head(audit)
+    drifted = {(r[2], r[3]) for r in audit.drifts()}
+    assert ("rows", "215") in drifted
+    assert (f"manifest cell {dropped['system']} {dropped['arm']} {dropped['seed']}", "0") in drifted
+
+
+def test_the_sutton_chen_code_revision_comes_from_the_rows():
+    audit = audit_mod.Audit()
+    for row in audit.rows(SC_RERUN_ROWS):
+        row["code_revision"] = SIDE_COMMIT
+    audit_mod.head_to_head(audit)
+    labels = [r[2] for r in audit.drifts()]
+    assert "the rerun code revision is an ancestor of HEAD" in labels
+    assert labels.count("code revision") == 36
+
+
+def test_the_sutton_chen_rerun_rows_are_provenance_checked():
+    audit = audit_mod.Audit()
+    audit_mod.head_to_head(audit)
+    assert SC_RERUN_ROWS in audit.read
+    audit.read[SC_RERUN_ROWS][7]["harness_revision"] = "0" * 40
+    gaps = audit_mod.provenance(audit)
+    assert "revision 00000000 is not in this repository" in gaps[SC_RERUN_ROWS]
+    assert ("unpushed revision 00000000", "not listed") in {(r[2], r[3]) for r in audit.drifts()}
+
+
 def test_a_gmin_row_left_on_the_old_file_is_reported():
     audit = audit_mod.Audit()
     summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
