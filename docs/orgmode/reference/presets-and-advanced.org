@@ -476,10 +476,10 @@ assert res.success and pop["n_evals"] <= 40
 - =flatten_parameters(params)= :: flatten a nested parameter dictionary to =(vector, spec)=.
 - =unflatten_parameters(vector, spec, template)= :: reconstruct a nested parameter dictionary from =(vector, spec)=.
 - =chemfit_box(fitter, vector, default_span=3.0)= :: construct finite =(low, high)= arrays from ChemFit fitter bounds.
-- =fit_anneal(fitter, budget, *, driver="portfolio", seed=0, ...)= :: optimize a ChemFit =Fitter= with an =anneal= gradient-free driver.
-- =fit_chemfit(fitter, budget, method="portfolio", seed=0, ...)= :: optimize ChemFit parameters with optional checkpoint persistence.
-- =run_fitter(fitter, budget, method="global_optimize", preset=None, seed=42, **kwargs)= :: run a ChemFit fitter through the gradient-free bridges.
-- =run_benchmark(benchmark_context, *, method="portfolio", seed=0, ...)= :: run a ChemFit benchmark dictionary end to end.
+- =fit_anneal(fitter, budget, *, driver="portfolio", seed=0, x0=None, low=None, high=None, bound_span=3.0, steps_per_epoch=100, preset_kwargs=None)= :: optimize a ChemFit =Fitter= with an =anneal= gradient-free driver.
+- =fit_chemfit(fitter, budget, method="portfolio", seed=0, default_span=3.0, tell_every=50, steps_per_epoch=100, **preset_kwargs)= :: optimize ChemFit parameters using =default_span= for unbounded leaves and periodic =tell_every= step notices under the portfolio.
+- =run_fitter(fitter, budget, method="global_optimize", preset=None, seed=42, **kwargs)= :: run a ChemFit fitter through the gradient-free bridges (delegating to =fitter.fit_anneal= when present).
+- =run_benchmark(benchmark_context, *, method="portfolio", seed=0, steps_per_epoch=100, low=None, high=None, preset=None)= :: run a ChemFit benchmark dictionary end to end.
 
 #+begin_src python
 import numpy as np

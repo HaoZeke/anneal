@@ -1,0 +1,1 @@
+Corrected the documented ``anneal.chemfit`` signatures and descriptions in ``presets-and-advanced`` and ``communication`` (``fit_chemfit`` does not take checkpoint persistence, and the ChemFit bridges drive single-replica ``global_optimize`` / ``run`` rather than ``minimize(..., jac=False)``).
