@@ -191,62 +191,6 @@ struct Check {
     gradient: Array1<f64>,
 }
 
-/// Length-scaled increments around one rigid-body quench start.
-struct RigidChart {
-    origin: Array1<f64>,
-    physical: Array1<f64>,
-    split: usize,
-    rotation_scale: f64,
-}
-
-impl RigidChart {
-    fn new(origin: ArrayView1<f64>, bodies: usize, rotation_scale: f64) -> Option<Self> {
-        (origin.len() == 6 * bodies && rotation_scale.is_finite() && rotation_scale > 0.0).then(
-            || {
-                let origin = origin.to_owned();
-                Self {
-                    physical: origin.clone(),
-                    origin,
-                    split: 3 * bodies,
-                    rotation_scale,
-                }
-            },
-        )
-    }
-
-    fn set_scaled(&mut self, scaled: ArrayView1<f64>) {
-        debug_assert_eq!(scaled.len(), self.origin.len());
-        for index in 0..self.split {
-            self.physical[index] = self.origin[index] + scaled[index];
-        }
-        for index in self.split..scaled.len() {
-            self.physical[index] = self.origin[index] + scaled[index] / self.rotation_scale;
-        }
-    }
-
-    fn physical(&self) -> ArrayView1<'_, f64> {
-        self.physical.view()
-    }
-
-    fn scale_gradient(&self, gradient: &mut Array1<f64>) {
-        debug_assert_eq!(gradient.len(), self.origin.len());
-        for index in self.split..gradient.len() {
-            gradient[index] /= self.rotation_scale;
-        }
-    }
-
-    fn expand(&self, scaled: ArrayView1<f64>) -> Array1<f64> {
-        let mut physical = self.origin.clone();
-        for index in 0..self.split {
-            physical[index] += scaled[index];
-        }
-        for index in self.split..scaled.len() {
-            physical[index] += scaled[index] / self.rotation_scale;
-        }
-        physical
-    }
-}
-
 /// Gradient already charged by a relaxation, shared with the driver's check.
 #[derive(Clone)]
 struct PaidCheck(Arc<Mutex<Option<Check>>>);
@@ -818,11 +762,6 @@ where
     // solver's own default.
     let settled = opt.gtol;
     let stop = cfg.record_gradient;
-    let rigid_rotation_scale = cfg
-        .rigid_body_geometry
-        .as_ref()
-        .map(|geometry| geometry.site_reach())
-        .filter(|scale| scale.is_finite() && *scale > 0.0);
     // The driver calls the screening pass with `screen_steps`, the full one
     // with `relax_steps` and a record polish with `polish_records`, so the
     // iteration count identifies which is which.
@@ -1117,34 +1056,6 @@ where
                     tric.gtol = opt.gtol;
                     let (f, xr, _) = tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
                     (f, xr)
-                }
-                (None, None) if rigid_rotation_scale.is_some() => {
-                    let rotation_scale =
-                        rigid_rotation_scale.expect("guarded rigid rotation scale");
-                    let mut chart = RigidChart::new(x, cfg.n_points, rotation_scale)
-                        .expect("rigid state matches its declared body count");
-                    let gtol = opt.gtol;
-                    opt.gtol = 0.0;
-                    let (f, zr, _) = opt.minimize_watched(
-                        Array1::zeros(x.len()).view(),
-                        iters,
-                        |z| {
-                            chart.set_scaled(z);
-                            evaluate(chart.physical()).map(|(energy, mut gradient)| {
-                                chart.scale_gradient(&mut gradient);
-                                (energy, gradient)
-                            })
-                        },
-                        |it, fv| {
-                            let continues = watch(it, fv);
-                            let converged = last.borrow().as_ref().is_some_and(|check| {
-                                gradient_is_converged(check.gradient.view(), gtol)
-                            });
-                            continues && !converged
-                        },
-                    );
-                    opt.gtol = gtol;
-                    (f, chart.expand(zr.view()))
                 }
                 (None, None) => {
                     let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
@@ -2799,32 +2710,6 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
-
-    #[test]
-    fn rigid_chart_puts_rotation_in_declared_length_units() {
-        let origin = Array1::from_iter((0..12).map(|index| index as f64));
-        let mut chart = RigidChart::new(origin.view(), 2, 2.0).expect("valid chart");
-        let mut scaled = Array1::zeros(12);
-        scaled[0] = 1.0;
-        scaled[6] = 4.0;
-
-        chart.set_scaled(scaled.view());
-
-        assert_eq!(chart.physical()[0], origin[0] + 1.0);
-        assert_eq!(chart.physical()[6], origin[6] + 2.0);
-        assert_eq!(chart.expand(scaled.view()), chart.physical());
-        let mut gradient = Array1::from_elem(12, 6.0);
-        chart.scale_gradient(&mut gradient);
-        assert_eq!(gradient[0], 6.0);
-        assert_eq!(gradient[6], 3.0);
-    }
-
-    #[test]
-    fn rigid_chart_rejects_an_invalid_declaration() {
-        let state = Array1::zeros(12);
-        assert!(RigidChart::new(state.view(), 3, 1.0).is_none());
-        assert!(RigidChart::new(state.view(), 2, 0.0).is_none());
-    }
 
     #[test]
     fn quench_watch_rejects_negative_infinity() {
