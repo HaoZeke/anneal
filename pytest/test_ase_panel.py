@@ -31,7 +31,7 @@ def test_rows_are_complete_and_reports_are_generated_from_them(system):
 
 
 def test_combined_recommended_summary_is_generated_from_the_same_rows():
-    subprocess.run(["python3", str(SCRIPT), "--all", "--check", "--tex"], cwd=ROOT, check=True)
+    subprocess.run(["python3", str(SCRIPT), "--all", "--check"], cwd=ROOT, check=True)
 
 
 def test_fisher_is_two_sided_exact():
@@ -39,28 +39,15 @@ def test_fisher_is_two_sided_exact():
     assert SUMMARY.fisher(1, 12) == pytest.approx(9.614829913579703e-06)
 
 
-def test_mann_whitney_has_tie_and_continuity_corrections():
-    statistic, probability = SUMMARY.mann_whitney(
-        [400_000.0] * 12,
-        [336_650, 141_347, 164_437, 10_413, 307_562, 203_015,
-         400_000, 349_934, 164_167, 19_727, 400_000, 339_051],
-    )
-    assert statistic == 132
-    assert probability == pytest.approx(0.0001253087278839309)
-
-
-def test_wall_censored_arms_have_no_mann_whitney_claim():
+def test_reports_compare_hits_by_fisher_alone():
     summary, report = SUMMARY.render("lj38")
-    rows = {row.split(",", 1)[0]: row.split(",") for row in summary.splitlines()[1:]}
-    assert rows["ase_bh"][11:13] == ["", ""]
-    assert rows["ase_mh"][11:13] == ["", ""]
-    assert rows["recommended"][16:18] == ["", ""]
-    assert rows["recommended"][19:21] == ["", ""]
-    assert (
-        "| recommended against basin hopping | 12/12 vs 0/12 | "
-        "7.39602e-07 | not estimated | not estimated | "
-    ) in report
-    assert "manufacture observations that were never run" in report
+    header = summary.splitlines()[0].split(",")
+    assert not [column for column in header if "mann" in column]
+    rows = {row.split(",", 1)[0]: dict(zip(header, row.split(","))) for row in summary.splitlines()[1:]}
+    assert rows["recommended"]["fisher_p_bh"] == "7.39602e-07"
+    assert "| recommended against basin hopping | 12/12 vs 0/12 | 7.39602e-07 |" in report
+    assert "Mann-Whitney" not in report
+    assert not hasattr(SUMMARY, "mann_whitney")
 
 
 def test_runner_refuses_implicit_or_mismatched_provenance():
