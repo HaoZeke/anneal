@@ -32,14 +32,15 @@ meson compile -C "$BUILD"
 meson test -C "$BUILD" --print-errorlogs \
   --timeout-multiplier "${RGPOT_COV_TIMEOUT_MULTIPLIER:-1}"
 
-# lcov 2 renamed the branch-coverage rc option and rejects the old name. It
-# also checks gcov data against source lines and reports template instances in
-# toolchain headers as inconsistent; that one class is tolerated, every other
-# lcov error still fails the script.
+# lcov 2 renamed the branch-coverage rc option and rejects the old name. With
+# GCC 14 + OpenMP, geninfo also reports template instances in toolchain headers
+# as inconsistent, exception-branch tags across template instantiations (e.g.
+# bits/vector.tcc) as mismatch, and non-atomic OpenMP arc counter updates as
+# negative; tolerate those classes while keeping every other lcov error fatal.
 LCOV_MAJOR=$(lcov --version | sed -n 's/.*LCOV version \([0-9][0-9]*\)\..*/\1/p')
 LCOV_ARGS=()
 if [[ "${LCOV_MAJOR:-0}" -ge 2 ]]; then
-  LCOV_ARGS+=(--rc branch_coverage=1 --ignore-errors inconsistent)
+  LCOV_ARGS+=(--rc branch_coverage=1 --ignore-errors inconsistent,mismatch,negative)
 else
   LCOV_ARGS+=(--rc lcov_branch_coverage=1)
 fi
