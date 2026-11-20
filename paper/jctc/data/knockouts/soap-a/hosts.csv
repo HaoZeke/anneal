@@ -1,0 +1,2 @@
+session_id,utc,machine_id_sha256,arch,kernel,cpu_model,cpu_count,affinity,mem_kib,rustc,cargo,python_version
+20261120T200106Z,2026-11-20T20:01:06Z,9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8,x86_64,6.12.113+,Intel(R) Xeon(R) Processor,8,0,49342816,rustc 1.100.0 (0ef1bc386 2026-11-09),cargo 1.100.0 (3acc79c0c 2026-11-05),3.12.3
