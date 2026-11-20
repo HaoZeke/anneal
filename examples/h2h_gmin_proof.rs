@@ -15,14 +15,16 @@
 //! spent. A miss is reported as the full budget. `pot_s` is the time
 //! spent inside the potential, summed over the charged evaluations.
 //! The configuration is `Config::recommended`. `H2H_PLATEAU_HEAT=1` heats
-//! a stalled walk; unset, the temperature stays on the preset. `[coords]`
+//! a stalled walk; unset, the temperature stays on the preset.
+//! `H2H_KNOCKOUT`, a comma list of `prior_soap` and `move_choice`, switches
+//! those parts off; unset or empty, it leaves the preset. `[coords]`
 //! receives the start `run` quenches, one Cartesian line per atom.
 //!
 //! `coords` writes the start that `run` quenches, one Cartesian line per
 //! atom, so another code can open the same geometry.
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
+    Config, Knockouts, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -79,6 +81,17 @@ fn cmd_run(args: &[String]) -> i32 {
     // `1` heats the walk on each call plateau. Unset leaves the preset.
     if std::env::var("H2H_PLATEAU_HEAT").is_ok_and(|value| value == "1") {
         cfg.plateau_heat = true;
+    }
+    // A comma list of parts to switch off, `Knockouts::parse`. Unset or
+    // empty leaves the preset.
+    if let Ok(text) = std::env::var("H2H_KNOCKOUT") {
+        match Knockouts::parse(&text) {
+            Ok(knockouts) => cfg.apply_knockouts(knockouts),
+            Err(err) => {
+                eprintln!("H2H_KNOCKOUT: {err}");
+                return 1;
+            }
+        }
     }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)

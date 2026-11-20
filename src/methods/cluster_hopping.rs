@@ -95,7 +95,7 @@ pub(crate) use torsion::HeldHands;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
-    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, PairRange,
+    ArmSelection, Config, ContinuousSymmetry, Keying, Knockouts, LadderMode, OrbitCore, PairRange,
     PriorSwitches, REMOVED_PRIOR_KEYS, RemovedConfigKeyError, SoapProposalMode,
 };
 pub use moves::*;
