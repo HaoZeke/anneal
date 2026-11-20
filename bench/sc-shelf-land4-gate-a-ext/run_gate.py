@@ -509,8 +509,10 @@ def check_budget(binary: Path, cell: Cell) -> None:
     if proc.returncode != 0:
         raise RuntimeError(f"budget query failed for {cell.system}: {proc.stderr[-500:]}")
     lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if len(lines) < 2 or int(lines[0]) != cell.budget or lines[1] != cell.reference_str:
+    if len(lines) < 2 or int(lines[0]) != cell.budget:
         raise RuntimeError(f"budget table mismatch for {cell.system}: {lines[:2]}")
+    if abs(float(lines[1]) - cell.reference) > 1e-9:
+        raise RuntimeError(f"reference mismatch for {cell.system}: {lines[1]}")
 
 
 def prior_rows_path(out_dir: Path) -> Path:
