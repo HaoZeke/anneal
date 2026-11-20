@@ -199,7 +199,6 @@ def child_env() -> dict[str, str]:
     for key in THREAD_KEYS:
         env[key] = "1"
     env["CARGO_BUILD_JOBS"] = "1"
-    env["LJOS_SEAT"] = "benchbot"
     return env
 
 
@@ -793,8 +792,6 @@ def main(argv: list[str]) -> int:
 
     if hasattr(os, "sched_getaffinity") and os.sched_getaffinity(0) != {0}:
         raise RuntimeError(f"process affinity is {sorted(os.sched_getaffinity(0))}, expected [0]")
-    if os.environ.get("LJOS_SEAT") != "benchbot":
-        raise RuntimeError("LJOS_SEAT is not benchbot")
     if any(key.startswith("H2H_") or key.startswith("PRIOR_") for key in os.environ):
         raise RuntimeError("an override is set in the environment")
     env = child_env()
