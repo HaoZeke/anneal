@@ -16,6 +16,7 @@
 //! `3436c491a4c75ea8b7141adbc6ee382a118f5fdb47f609c2a660fc1eb772599f`.
 
 use std::ffi::{CStr, CString};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -249,56 +250,71 @@ fn new_handle(path: &str, format: i32, periodic: bool) -> Handle {
 
 /// Owns the arrays a `rgpot_force_input_t` borrows.
 struct Input {
-    _positions: Vec<f64>,
-    _numbers: Vec<i32>,
-    _cell: Box<[f64; 9]>,
-    input: rgpot_force_input_t,
+    positions: Vec<f64>,
+    numbers: Vec<i32>,
+    cell: [f64; 9],
 }
 
 impl Input {
     fn new(reference: &Reference) -> Self {
-        let mut positions = reference.positions.clone();
-        let mut numbers = reference.z.clone();
-        // The DLPack tensor borrows this buffer, so its address must remain
-        // stable when the Input is returned from this constructor.
-        let mut cell = Box::new(reference.cell);
+        Self {
+            positions: reference.positions.clone(),
+            numbers: reference.z.clone(),
+            cell: reference.cell,
+        }
+    }
+
+    /// Wrap the arrays in a C input. The `rgpot_force_input_t` holds raw
+    /// pointers into `self`, so the returned guard keeps `self` mutably
+    /// borrowed: the arrays cannot move or drop while it is alive. The
+    /// pointers are taken here, after `self` has reached its final place,
+    /// never from a local that is later copied into the struct.
+    fn as_c(&mut self) -> CInput<'_> {
         let input = unsafe {
             rgpot_force_input_create(
-                numbers.len(),
-                positions.as_mut_ptr(),
-                numbers.as_mut_ptr(),
-                cell.as_mut_ptr(),
+                self.numbers.len(),
+                self.positions.as_mut_ptr(),
+                self.numbers.as_mut_ptr(),
+                self.cell.as_mut_ptr(),
             )
         };
-        Self {
-            _positions: positions,
-            _numbers: numbers,
-            _cell: cell,
+        CInput {
             input,
+            _borrow: PhantomData,
         }
+    }
+}
+
+/// The C view of an [`Input`], valid for the borrow `'a`.
+struct CInput<'a> {
+    input: rgpot_force_input_t,
+    _borrow: PhantomData<&'a mut Input>,
+}
+
+impl Drop for CInput<'_> {
+    fn drop(&mut self) {
+        unsafe { rgpot_force_input_free(&mut self.input) };
     }
 }
 
 #[test]
 fn the_c_abi_input_keeps_the_cell_at_its_borrowed_address() {
     let reference = reference("cu_u3_vacancy.ref");
-    let input = Input::new(&reference);
+    let mut owner = Input::new(&reference);
+    let expected_cell_ptr = owner.cell.as_ptr();
+    let expected_cell = owner.cell;
+    let input = owner.as_c();
     let tensor_cell = unsafe { rgpot_tensor_data(input.input.box_matrix).cast::<f64>() };
-    assert_eq!(tensor_cell, input._cell.as_ptr());
+    assert_eq!(tensor_cell, expected_cell_ptr);
     assert_eq!(
-        unsafe { std::slice::from_raw_parts(tensor_cell, input._cell.len()) },
-        input._cell.as_slice()
+        unsafe { std::slice::from_raw_parts(tensor_cell, expected_cell.len()) },
+        expected_cell.as_slice()
     );
 }
 
-impl Drop for Input {
-    fn drop(&mut self) {
-        unsafe { rgpot_force_input_free(&mut self.input) };
-    }
-}
-
 fn calculate(handle: &Handle, reference: &Reference) -> (rgpot_status_t, rgpot_force_out_t) {
-    let input = Input::new(reference);
+    let mut owner = Input::new(reference);
+    let input = owner.as_c();
     let mut output = rgpot_force_out_t {
         forces: std::ptr::null_mut(),
         energy: 0.0,
