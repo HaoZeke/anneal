@@ -265,13 +265,52 @@ rgpot_minimage = static_library(
 # Slices.cc. Keeping the object inside rgpot_halfshell satisfies
 # --no-undefined links that take halfshell without rgpot_core, while
 # rgpot_core links rgpot_halfshell instead of compiling a second copy.
-_halfshell_omp = dependency('openmp', language: 'cpp', required: false)
+#
+# Every OpenMP target takes rgpot_openmp_deps. A static library hands the
+# link arguments of its dependencies to whatever links it, so a static
+# librgpot would put -fopenmp on every consumer's link line. Outside a
+# shared build the targets therefore compile with the OpenMP flag and link
+# the runtime by name, which is what gcc's -fopenmp adds to a link. A
+# compiler whose runtime is not found by name keeps the flag.
+rgpot_openmp = dependency('openmp', language: 'cpp', required: false)
+rgpot_openmp_deps = []
+if rgpot_openmp.found()
+    rgpot_openmp_deps = [rgpot_openmp]
+    if get_option('default_library') != 'shared'
+        _omp_runtime = []
+        foreach _name : {
+            'gcc': ['gomp'],
+            'clang': ['omp', 'gomp', 'iomp5'],
+            'intel': ['iomp5'],
+            'intel-llvm': ['iomp5'],
+        }.get(cppc.get_id(), [])
+            if _omp_runtime.length() == 0
+                _lib = cppc.find_library(_name, required: false)
+                if _lib.found()
+                    _omp_runtime = [_lib]
+                endif
+            endif
+        endforeach
+        if _omp_runtime.length() > 0
+            rgpot_openmp_deps = [
+                rgpot_openmp.partial_dependency(
+                    compile_args: true,
+                    includes: true,
+                ),
+            ] + _omp_runtime
+        elif cppc.get_argument_syntax() != 'msvc'
+            message(
+                'OpenMP runtime not found by name: a static librgpot links consumers with the OpenMP flag',
+            )
+        endif
+    endif
+endif
 rgpot_slices = static_library(
     'rgpot_slices',
     files('rgpot/Slices.cc'),
     include_directories: _incdirs,
     cpp_args: _args + _fp_contract_off,
-    dependencies: _halfshell_omp.found() ? [_halfshell_omp] : [],
+    dependencies: rgpot_openmp_deps,
     pic: true,
     install: false,
 )
@@ -285,7 +324,7 @@ rgpot_halfshell = static_library(
     ),
     include_directories: _incdirs,
     cpp_args: _args,
-    dependencies: _halfshell_omp.found() ? [_halfshell_omp] : [],
+    dependencies: rgpot_openmp_deps,
     link_whole: [rgpot_slices],
     link_with: [rgpot_minimage, rgpot_exact_fma],
     pic: true,
@@ -325,10 +364,7 @@ if not get_option('with_rpc_client_only')
     # Product-sums in the simd sources are explicit. Contraction stays off
     # in this archive so a multiply that is not written as mul_add is not fused.
     _deps += dependency('threads')
-    _nlist_openmp = dependency('openmp', language: 'cpp', required: false)
-    if _nlist_openmp.found()
-        _deps += _nlist_openmp
-    endif
+    _deps += rgpot_openmp_deps
     _rgpot_srcs += files(
         'rgpot/plugin/PluginBridge.cc',
         'rgpot/plugin/PluginRegistry.cc',
@@ -519,9 +555,6 @@ if not get_option('with_rpc_client_only')
     # vesin objects and the Fortran runtime enter here, once, rather than
     # through the convenience archives (see the vesin_hdr_dep note).
     rgpot_deps = _deps_sans_core + [vesin_dep, fastnlist_dep] + fortran_rt_deps
-    if eam_openmp.found()
-        rgpot_deps += eam_openmp
-    endif
     _rpc_whole = []
     if _rpc_stack
         # link_whole, not link_with: the RPC entry points are called by
@@ -689,9 +722,28 @@ if not get_option('with_rpc_client_only')
     if _rpc_stack
         _rgpot_consumer_deps += [ptlrpc_hdr_dep]
     endif
+    # rgpot_dep hands the OpenMP dependency on, so its consumer compiles
+    # and links with the OpenMP flag. rgpot_dep_no_openmp does not. librgpot
+    # keeps its teams: they open in its own objects, and the templates in
+    # Slices.hpp run serially in a translation unit without _OPENMP. A
+    # shared librgpot records the runtime as NEEDED. A static one carries
+    # the runtime by name in rgpot_openmp_deps.
+    _rgpot_openmp_consumer = rgpot_openmp.found() ? [rgpot_openmp] : []
     rgpot_dep = declare_dependency(
         link_with: rgpot,
-        dependencies: _rgpot_consumer_deps,
+        dependencies: _rgpot_consumer_deps + _rgpot_openmp_consumer,
+        include_directories: _incdirs,
+        compile_args: _args,
+    )
+    _rgpot_consumer_deps_no_openmp = []
+    foreach _d : _rgpot_consumer_deps
+        if _d.name() != 'openmp'
+            _rgpot_consumer_deps_no_openmp += [_d]
+        endif
+    endforeach
+    rgpot_dep_no_openmp = declare_dependency(
+        link_with: rgpot,
+        dependencies: _rgpot_consumer_deps_no_openmp,
         include_directories: _incdirs,
         compile_args: _args,
     )

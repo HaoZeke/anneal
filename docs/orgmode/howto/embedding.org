@@ -24,6 +24,39 @@ rgpot_proj = subproject('rgpot',
 rgpot_dep = rgpot_proj.get_variable('rgpot_dep')
 #+end_src
 
+*** Linking without OpenMP
+
+=rgpot_dep= passes rgpot's OpenMP dependency on, so the consumer compiles and
+links with =-fopenmp=.
+A consumer that does not use OpenMP itself takes =rgpot_dep_no_openmp=, which
+has the same headers, defines and libraries without the OpenMP flag:
+
+#+attr_rgpot: fragment
+#+begin_src meson
+rgpot_proj = subproject('rgpot', default_options: ['with_tests=false'])
+rgpot_dep_no_openmp = rgpot_proj.get_variable('rgpot_dep_no_openmp')
+#+end_src
+
+librgpot is still built with OpenMP, and its potentials open their thread
+teams as before, under =OMP_NUM_THREADS=.
+A shared librgpot records the OpenMP runtime as =NEEDED=.
+A static librgpot (=default_library=static=) links the runtime library by name
+(=libgomp= for GCC, =libomp= for Clang), so the consumer's link line names that
+library rather than =-fopenmp=.
+With a compiler whose runtime is not found by name, a static build keeps the
+flag on the link line, and configure says so.
+The templates in =rgpot/Slices.hpp= run serially in a translation unit
+compiled without =_OPENMP=; their instantiations in librgpot do not change.
+A client-only build (=with_rpc_client_only=) defines =rgpot_dep_no_openmp= as
+=rgpot_dep=, which carries no OpenMP flag there.
+
+For a shared librgpot, the =Cflags= and =Libs= of the installed =rgpot.pc=
+carry no OpenMP flag, and =Libs.private=, which =pkg-config --static= reads,
+keeps it.
+A static librgpot has meson write its dependencies into =Cflags= and =Libs=:
+=Libs= names the runtime library rather than =-fopenmp=, and =Cflags= keeps
+the OpenMP compile flag.
+
 *** RPC schema only (client mode)
 
 Use this when your project only needs to /call/ a remote potential server, or

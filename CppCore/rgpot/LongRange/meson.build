@@ -12,7 +12,7 @@ lr_src = files(
     'SumPot.cc',
 )
 # The thread teams are OpenMP. Without it every summand runs serially.
-lr_deps = _deps + [dependency('openmp', required: false)]
+lr_deps = _deps + rgpot_openmp_deps
 lr_args = _args
 if get_option('with_cuda')
     nvcc = find_program('nvcc', required: true)

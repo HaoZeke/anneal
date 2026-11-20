@@ -496,6 +496,25 @@ if (
         env: nested_meson_env,
         timeout: 300,
     )
+    _consumer_pc_args = [
+        '--pc',
+        meson.project_build_root() / 'meson-private' / 'rgpot.pc',
+    ]
+    if get_option('default_library') != 'shared'
+        _consumer_pc_args += ['--pc-static']
+    endif
+    test(
+        'consumer_no_openmp',
+        python3_engines,
+        args: [
+            files('test_consumer_no_openmp.py'),
+        ] + _consumer_pc_args + [
+            meson.project_source_root(),
+            meson_prog.full_path(),
+        ],
+        env: nested_meson_env,
+        timeout: 1200,
+    )
     test(
         'gromacs_include_prefix',
         python3_engines,
