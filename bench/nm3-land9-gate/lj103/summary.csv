@@ -1,0 +1,2 @@
+cell,n,budget,reference,hits_a,hits_b,evals_median_a,evals_median_b,fisher_p,mannwhitney_p,outside_per_call_median_a,outside_per_call_median_b,outside_ratio,aa_n,aa_outside_per_call_median_a1,aa_outside_per_call_median_a2,aa_outside_ratio,verdict,reasons
+lj103,12,4000000,-575.766131,6,5,3905072.5,4000000.0,1,0.21575448,1.1547826e-05,2.8579717e-05,2.4749003,,,,,FAIL,outside
