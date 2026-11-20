@@ -1198,10 +1198,12 @@ KNOCKOUT_DATA = "paper/jctc/data/knockouts"
 KNOCKOUT_CODE = {
     "templates": ("628773d6837ea2d959a27256ff4163b21162fd4d", "1c1b12384683485cf820d3a244151b48973dc0f7"),
     "pairscale": (SUBMITTED, SUBMITTED),
+    "move-a": (SUBMITTED, SUBMITTED),
 }
 # How the rows of each block name the revision of an arm.
 KNOCKOUT_REVISION = {"templates": ("revision", "628773d6", "1c1b1238"),
-                     "pairscale": ("revision", "b12293b9", "b12293b9")}
+                     "pairscale": ("revision", "b12293b9", "b12293b9"),
+                     "move-a": ("revision", "b12293b9", "b12293b9")}
 PAIRSCALE_TREE = "b12293b9d637dd32417be3aa482302e0f30dd594"
 SEARCH_SOURCE = ("src", "examples", "Cargo.toml", "Cargo.lock")
 # The files the default-off knockout switches add to the search source of the submitted revision.
@@ -1259,6 +1261,75 @@ def knockout_cells(audit: Audit, knock: object, knockout: object) -> dict[str, d
         out[system] = {"budget": budgets.pop() if len(budgets) == 1 else "mixed", "n": len(first), "table": table,
                        "p": mcnemar(table[1], table[2]), "interval": newcombe_paired_interval(*table)}
     return out
+
+
+MOVE_A_DRIVERS = {"lj38": "h2h_gmin_proof", "lj55": "h2h_gmin_proof", "lj75": "h2h_gmin_proof", "au55": "h2h_metal"}
+
+
+def knockout_move_a(audit: Audit, cells: dict[str, dict]) -> None:
+    """The move-choice block: its record, the tree and drivers its rows ran, the order, and its prose."""
+    folder = f"{KNOCKOUT_DATA}/move-a"
+    fields = dict(line.split(" ", 1) for line in audit.text(f"{folder}/PROVENANCE").splitlines())
+    audit.cell(f"{folder}/PROVENANCE", "tree of the record commit", fields.get("tree"),
+               git("rev-parse", f"{fields['commit']}^{{tree}}").stdout.strip())
+    audit.cell(f"{folder}/PROVENANCE", "the rows ran the tree two commits below the record commit", PAIRSCALE_TREE,
+               git("rev-parse", f"{fields['commit']}~2^{{tree}}").stdout.strip())
+    ancestor_of(audit, f"{folder}/PROVENANCE", fields.get("ancestor", ""))
+    ancestor_of(audit, f"{folder}/PROVENANCE", fields.get("ancestor", ""), fields["commit"])
+    rows = audit.rows(f"{folder}/rows.csv")
+    wrong = sorted({r["system"] for r in rows if r["driver_blob"] != git(
+        "rev-parse", f"{PAIRSCALE_TREE}:examples/{MOVE_A_DRIVERS.get(r['system'], 'h2h_morse')}.rs").stdout.strip()})
+    audit.cell(f"{folder}/rows.csv", "every row ran the driver of the tree the rows name for its cluster", "none",
+               " ".join(wrong) or "none")
+    audit.cell(f"{folder}/rows.csv", "every row names the tree", PAIRSCALE_TREE,
+               " ".join(sorted({r["revision"] for r in rows})))
+    audit.cell(f"{folder}/rows.csv", "machines", "1", float(len({r["machine_id"] for r in rows})))
+    audit.cell(f"{folder}/rows.csv", "arms", "H2H_KNOCKOUT=move_choice stock", " ".join(sorted({r["arm"] for r in rows})))
+    first: dict[tuple[str, str], str] = {}
+    for r in rows:
+        first.setdefault((r["system"], r["seed"]), r["arm"])
+    order = [f"{s}/{seed}" for (s, seed), arm in first.items()
+             if arm != ("stock" if int(seed) % 2 == 0 else "H2H_KNOCKOUT=move_choice")]
+    audit.cell(f"{folder}/rows.csv", "even seeds stock first, odd seeds uniform first", "none", " ".join(order) or "none")
+
+    def show_signed(x: float) -> str:
+        return f"\\(-\\){abs(x):.2f}" if x < 0 else f"{x:.2f}"
+
+    pooled = [0, 0, 0, 0]
+    for c in cells.values():
+        pooled = [a + b for a, b in zip(pooled, c["table"])]
+    pooled_p = mcnemar(pooled[1], pooled[2])
+    low, high = newcombe_paired_interval(*pooled)
+    n = sum(c["n"] for c in cells.values())
+    audit.cell(TEX, "move choice: clusters", "8", float(len(cells)))
+    audit.cell(TEX, "move choice: clusters whose McNemar p is not 1", "none",
+               " ".join(s for s, c in cells.items() if c["p"] != 1.0) or "none")
+    audit.said(TEX, "Drawing each move from equation~\\ref{eq:uniform} changes the hits on no cluster at \\(p<0.05\\), "
+                    "with a McNemar \\(p\\) of 1 on each of the eight.")
+    audit.said(TEX, f"Pooled over the eight clusters, the preset hits {pooled[0] + pooled[1]} of {n} seeds and the "
+                    f"uniform draw {pooled[0] + pooled[2]} (pooled McNemar \\(p={pp(pooled_p)}\\), interval "
+                    f"{show_signed(low)} to {show_signed(high)}).")
+    audit.said(TEX, f"On the same search source, replacing the adaptive move choice by a uniform draw shows no "
+                    f"difference in hits at \\(p<0.05\\) on eight Lennard-Jones, gold and Morse clusters, each or "
+                    f"pooled ({pooled[0] + pooled[1]} against {pooled[0] + pooled[2]} of {n} seeds, pooled McNemar "
+                    f"\\(p={pp(pooled_p)}\\)).")
+    audit.said(TEX, "Parts of the search with no knockout run are described as design, with no claim about their "
+                    "effect.")
+    audit.said(TEX, "Section~\\ref{sec:knockouts} gives those knockouts: removing the structure templates, rescaling "
+                    "the preset lengths to the Morse pair minimum, and replacing the adaptive move choice by a "
+                    "uniform draw.")
+    audit.said(TEX, "The third runs the same tree on LJ\\(_{38}\\), LJ\\(_{55}\\), LJ\\(_{75}\\), Au\\(_{55}\\), and "
+                    "M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) and 14, from one start per seed:")
+    audit.said(TEX, "Of the rows of this article, only the Without arm of the move-choice block of "
+                    "Table~\\ref{tab:knockouts} sets it.")
+    audit.said(COVER, "replacing the adaptive move choice by a uniform draw changes the hits on none of the "
+                      "Lennard-Jones, gold and Morse clusters tested.")
+    audit.said(SI, "\\texttt{\\seqsplit{50c532253f3ad11e6457a119bb603f05b4f0be79}} of \\path{record/knockout-move-a}, on "
+                   "the same develop commit.")
+    audit.said(SI, "even seeds run the preset first and odd seeds the uniform draw first.")
+    audit.record("the choice among the moves, the" not in collapse(audit.text(TEX)), TEX,
+                 "the move choice is not listed among the parts with no run", "absent",
+                 "absent" if "the choice among the moves, the" not in collapse(audit.text(TEX)) else "present")
 
 
 def knockout_pairscale(audit: Audit, cells: dict[str, dict]) -> None:
@@ -1371,6 +1442,7 @@ def manuscript_knockouts(audit: Audit) -> None:
             audit.record(system == "lj75" and not ancestors, TEX, f"{knockout.key}: {system} is left out only for the "
                          "LJ75 rule", "lj75 outside history", f"{system} {'ancestors' if ancestors else 'outside'}")
     knockout_pairscale(audit, cells_of["pairscale"])
+    knockout_move_a(audit, cells_of["move-a"])
     tem = cells_of["templates"]
     for rev in KNOCKOUT_CODE["templates"]:
         ancestor_of(audit, f"{KNOCKOUT_DATA}/templates", rev, SUBMITTED)
@@ -3943,11 +4015,12 @@ def science_claims(audit: Audit) -> None:
             found = re.search(rf"\b{word}", audit.text(path), re.IGNORECASE)
             audit.record(found is None, path, f"the text does not say {word}", "absent",
                          "absent" if found is None else "present")
-    audit.said(TEX, "Two parts of the search have a run with and without them, and Section~\\ref{sec:knockouts} "
-                    "reports both: the structure templates (Section~\\ref{sec:priors}), at two revisions in the history "
-                    "of the submitted revision, and the length unit, on the search source of the submitted revision.")
+    audit.said(TEX, "Three parts of the search have a run with and without them, and Section~\\ref{sec:knockouts} "
+                    "reports all three: the structure templates (Section~\\ref{sec:priors}), at two revisions in the "
+                    "history of the submitted revision, and the length unit and the choice among the moves, on the "
+                    "search source of the submitted revision.")
     audit.said(TEX, "The packing moves, the symmetry proposals, the stall rules, the basin bias, the tabu list, the "
-                    "screens, the choice among the moves, the remaining structure prior, and the "
+                    "screens, the remaining structure prior, and the "
                     "atom-count gates have no such run, and the trail step has one only on LJ\\(_{75}\\) at a revision "
                     "outside the history of the submitted revision, which the article does not print.")
     audit.said(TEX, "They are described here as the design of the search, and the article makes no claim about what "

@@ -47,8 +47,12 @@ Run on the search source of the submitted revision with the preset lengths in
 the Lennard-Jones diameter or rescaled to the Morse pair minimum, four Morse
 clusters show no difference in hits at \(p<0.05\), each or pooled (40 against
 35 of 48 seeds, pooled McNemar \(p=0.30\)).
-The other parts of the search are described as design, with no claim about
-their effect.
+On the same search source, replacing the adaptive move choice by a uniform
+draw shows no difference in hits at \(p<0.05\) on eight Lennard-Jones, gold
+and Morse clusters, each or pooled (73 against 75 of 96 seeds, pooled McNemar
+\(p=0.85\)).
+Parts of the search with no knockout run are described as design, with no
+claim about their effect.
 Paired by seed against GMIN run with the Wales-group LJ\(_{38}\) input at
 every Lennard-Jones and Morse size, the code hits LJ\(_{98}\) on 7 of 12
 seeds and GMIN on none (\(p=0.016\)), Morse M\(_{55}\) and M\(_{80}\) at
@@ -91,15 +95,15 @@ cluster \cite{shaoChengCai2004}.
 
 A search that combines several such parts can be scored against other codes,
 but such a comparison cannot say which part carries the result.
-This article reports the paired change in hits for the two parts of one
+This article reports the paired change in hits for the three parts of one
 basin-hopping code that have been run with and without them, the structure
-templates and the length unit, and describes the rest of the search as
-design.
+templates, the length unit and the choice among the moves, and describes the
+rest of the search as design.
 Section~\ref{sec:search} describes the search and marks which of its parts
 have such a run.
-Section~\ref{sec:knockouts} gives those knockouts, the removal of the
-structure templates and the rescaling of the preset lengths to the Morse pair
-minimum.
+Section~\ref{sec:knockouts} gives those knockouts: removing the structure
+templates, rescaling the preset lengths to the Morse pair minimum, and
+replacing the adaptive move choice by a uniform draw.
 Section~\ref{sec:benchmarks} then compares the code with GMIN on
 Lennard-Jones, Morse, and rigid TIP4P clusters, paired by seed, and with the
 Atomic Simulation Environment at the effort each run reports
@@ -124,12 +128,13 @@ removal of the structure templates in commit \texttt{1c1b1238}; the one run
 with them in this article is the With arm of the knockout of
 Section~\ref{sec:knockouts}, at the earlier template-assisted revision
 \texttt{628773d6}.
-Two parts of the search have a run with and without them, and
-Section~\ref{sec:knockouts} reports both: the structure templates
+Three parts of the search have a run with and without them, and
+Section~\ref{sec:knockouts} reports all three: the structure templates
 (Section~\ref{sec:priors}), at two revisions in the history of the submitted
-revision, and the length unit, on the search source of the submitted revision.
+revision, and the length unit and the choice among the moves, on the search
+source of the submitted revision.
 The packing moves, the symmetry proposals, the stall rules, the basin bias,
-the tabu list, the screens, the choice among the moves, the
+the tabu list, the screens, the
 remaining structure prior, and the atom-count gates have no such run, and the
 trail step has one only on LJ\(_{75}\) at a revision outside the history of
 the submitted revision, which the article does not print.
@@ -547,7 +552,7 @@ with xtb 6.7.1 (\texttt{-{}-gfn 2 -{}-opt vtight}), as
 \section{Knockouts}
 \label{sec:knockouts}
 \label{sec:results}
-Table~\ref{tab:knockouts} gives the two runs that switch one part of the
+Table~\ref{tab:knockouts} gives the three runs that switch one part of the
 search on and off with all else held.
 The first, and the one such run in the history of the submitted revision, is
 on the same seeds from the same starts: revision \texttt{628773d6} against its
@@ -557,12 +562,17 @@ submitted revision with the default-off knockout switches of the drivers, on
 four Morse clusters: \texttt{Config::recommended}\((N)\) in the Lennard-Jones
 diameter against \texttt{Config::recommended\_for\_pair}\((N)\), which rescales
 every preset length to the Morse pair minimum.
-The rows of both are copied unchanged from the records that the
+The third runs the same tree on LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\),
+Au\(_{55}\), and M\(_{55}\) and M\(_{80}\) at \(\rho=6\) and 14, from one start
+per seed: \texttt{Config::recommended}\((N)\) against the same preset with
+\texttt{H2H\_KNOCKOUT=move\_choice}, which draws each move from
+equation~\ref{eq:uniform} in place of equation~\ref{eq:thompson}.
+The rows of all three are copied unchanged from the records that the
 \texttt{PROVENANCE} files beside them name.
 
 % knockout table: start
 \begin{table*}
-\caption{Two parts of the search run with and without them on the same seeds.
+\caption{Three parts of the search run with and without them on the same seeds.
 The structure templates, from the same starts: the earlier template-assisted revision
 \texttt{628773d6} (structure templates since removed in \texttt{1c1b1238}) against its child
 \texttt{1c1b1238}, both ancestors of the submitted revision.
@@ -576,13 +586,19 @@ order by seed.
 With is \texttt{Config::recommended}\((N)\) in the Lennard-Jones diameter it was measured in, the
 method of this article, and Without is \texttt{Config::recommended\_for\_pair}\((N)\), every preset
 length rescaled to the Morse pair minimum.
+The choice among the moves: both arms run the same tree and binaries, through \texttt{h2h\_gmin\_proof},
+\texttt{h2h\_metal} and \texttt{h2h\_morse}, from one start per seed, in alternating order by seed;
+With is \texttt{Config::recommended}\((N)\), and Without the same preset with
+\texttt{H2H\_KNOCKOUT=move\_choice}, which draws each move from equation~\ref{eq:uniform} in place of
+equation~\ref{eq:thompson}.
 With and Without are the hits of the two arms, Only with and Only without the seeds that
 one arm alone hits.
 \(p_\mathrm{M}\) is the two-sided exact McNemar test on those seeds, and \(\Delta\) the 95\%
 interval of Newcombe's method 10 for paired data, for the hit rate of With less that of Without.
 A budget counts one call per combined energy and gradient pass.
-The rows are \texttt{paper/jctc/data/knockouts/templates/rows.csv} and
-\texttt{paper/jctc/data/knockouts/pairscale/rows.csv}, copied from the records their
+The rows are \texttt{paper/jctc/data/knockouts/templates/rows.csv},
+\texttt{paper/jctc/data/knockouts/pairscale/rows.csv} and
+\texttt{paper/jctc/data/knockouts/move-a/rows.csv}, copied from the records their
 \texttt{PROVENANCE} files name.}
 \label{tab:knockouts}
 \centering
@@ -602,6 +618,16 @@ M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \
 M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 12 & 9/12 & 7/12 & 4 & 2 & 0.6875 & \(-\)0.21 to 0.49 \\
 M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & 12 & 7/12 & 4/12 & 6 & 3 & 0.51 & \(-\)0.21 to 0.61 \\
+\midrule
+\multicolumn{9}{@{}l}{\emph{Choice among the moves, equation~\ref{eq:thompson} against equation~\ref{eq:uniform}, tree \texttt{b12293b9}}} \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & 12 & 5/12 & 6/12 & 3 & 4 & 1 & \(-\)0.44 to 0.31 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 12 & 4/12 & 5/12 & 2 & 3 & 1 & \(-\)0.41 to 0.27 \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 12 & 9/12 & 8/12 & 4 & 3 & 1 & \(-\)0.32 to 0.46 \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & 12 & 7/12 & 8/12 & 3 & 4 & 1 & \(-\)0.45 to 0.31 \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -622,13 +648,19 @@ of 12 seeds against 7 (\(p=0.6875\)) and M\(_{80}\) on 7 against 4
 (\(p=0.51\)), and pooled over the four clusters it hits 40 of 48 against 35
 (pooled McNemar \(p=0.30\), interval \(-\)0.06 to 0.26).
 
+Drawing each move from equation~\ref{eq:uniform} changes the hits on no
+cluster at \(p<0.05\), with a McNemar \(p\) of 1 on each of the eight.
+Pooled over the eight clusters, the preset hits 73 of 96 seeds and the uniform
+draw 75 (pooled McNemar \(p=0.85\), interval \(-\)0.13 to 0.09).
+
 The structure prior that remains and the choice among the moves can each be
 switched off by name in the Lennard-Jones, Morse, and gold drivers:
 \texttt{H2H\_KNOCKOUT=prior\_soap} turns off \texttt{prior\_soap} and its
 proposal, and \texttt{H2H\_KNOCKOUT=move\_choice} replaces
 equation~\ref{eq:thompson} by equation~\ref{eq:uniform}.
 With the variable unset, the drivers run the preset unchanged.
-No row of this article sets it.
+Of the rows of this article, only the Without arm of the move-choice block of
+Table~\ref{tab:knockouts} sets it.
 
 \section{Benchmarks}
 \label{sec:benchmarks}

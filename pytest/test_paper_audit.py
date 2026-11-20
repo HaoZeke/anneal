@@ -602,6 +602,37 @@ def test_a_gmin_claim_in_the_template_era_section_is_reported():
         r[2] for r in audit.drifts()]
 
 
+def test_a_drifted_move_choice_cell_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & 12 & 5/12 & 6/12 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("5/12 & 6/12", "7/12 & 6/12"))
+    audit_mod.manuscript_knockouts(audit)
+    assert "with" in [r[2] for r in audit.drifts()]
+
+
+def test_a_move_choice_row_from_another_driver_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/knockouts/move-a/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    next(r for r in rows if r["system"] == "au55")["driver_blob"] = "0" * 40
+    audit.read[path] = rows
+    knock = audit_mod.load_script("knockout_tables_audit", "paper/jctc/scripts/knockout_tables.py")
+    audit_mod.knockout_move_a(audit, audit_mod.knockout_cells(audit, knock, knock.KNOCKOUTS[2]))
+    assert "every row ran the driver of the tree the rows name for its cluster" in [r[2] for r in audit.drifts()]
+
+
+def test_a_drifted_pooled_move_choice_sentence_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "(73 against 75 of 96 seeds, pooled McNemar\n\\(p=0.85\\))"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "(73 against 70 of 96 seeds, pooled McNemar\n\\(p=0.85\\))")
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
+
 def test_an_unpaired_fisher_p_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
