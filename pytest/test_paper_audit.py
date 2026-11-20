@@ -332,6 +332,30 @@ def test_paired_statistics_match_scipy():
         assert math.isclose(audit_mod.wilcoxon_signed_rank(diffs)[2], expected, rel_tol=1e-9)
 
 
+def test_the_shared_statistics_match_scipy():
+    shared = audit_mod.paired_stats_module()
+    shared.self_test()
+    stats = pytest.importorskip("scipy.stats")
+    for only_a, only_b in ((5, 0), (1, 4), (12, 0), (9, 0), (4, 1), (2, 10)):
+        expected = stats.binomtest(min(only_a, only_b), only_a + only_b, 0.5).pvalue
+        assert math.isclose(shared.mcnemar_exact(only_a, only_b), expected, rel_tol=1e-9)
+    for diffs in ([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, -1.0, 4.0, -1.5, 5.0, 9.0, -2.6, 5.3]):
+        expected = stats.wilcoxon(diffs, alternative="two-sided", method="exact").pvalue
+        assert math.isclose(shared.wilcoxon_exact(diffs)[2], expected, rel_tol=1e-9)
+    for a, b in ((12, 0), (7, 0), (4, 1), (121, 94)):
+        n = 192 if a > 12 else 12
+        expected = stats.fisher_exact([[a, n - a], [b, n - b]]).pvalue
+        assert math.isclose(shared.fisher_exact(a, n, b, n), expected, rel_tol=1e-9)
+
+
+def test_a_literal_normal_quantile_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/scripts/water_rerun.py"
+    audit.text_cache[path] = audit.text(path) + "\nHALF = 1.96 * 0.1\n"
+    audit_mod.paired_statistics(audit)
+    assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(path, "literal normal quantile", "1.96")]
+
+
 def test_the_paired_newcombe_interval_matches_the_published_example():
     low, high = audit_mod.newcombe_paired_interval(36, 12, 2, 0)
     assert (round(low, 4), round(high, 4)) == (0.0569, 0.3404)
