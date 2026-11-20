@@ -431,6 +431,109 @@ fn packaged_and_checked(package: &Value) -> (BTreeSet<String>, BTreeSet<String>)
     (copied, checked)
 }
 
+/// Every workflow under .github/workflows, parsed, with its file name.
+fn every_workflow() -> Vec<(String, Value)> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows");
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("read .github/workflows") {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) == Some("yml") {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            found.push((
+                name,
+                serde_yaml_ng::from_str(&text).expect("workflow parses as YAML"),
+            ));
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    found
+}
+
+#[test]
+fn cbindgen_is_installed_at_one_exact_version_from_its_lockfile() {
+    // Whatever cbindgen version a runner gets writes anneal-core.h, the
+    // header every native archive ships. So every install names one exact
+    // version and builds it from the lockfile the crate was published with.
+    let mut versions = BTreeSet::new();
+    let mut installs = 0;
+    for (file, workflow) in every_workflow() {
+        for (name, job) in workflow["jobs"].as_mapping().expect("jobs") {
+            for step in steps(job) {
+                let at = format!(
+                    "{file}, job {}, step {:?}",
+                    name.as_str().unwrap(),
+                    step["name"]
+                );
+                // A prebuilt-binary installer takes whatever it is given.
+                if step["uses"]
+                    .as_str()
+                    .is_some_and(|uses| uses.starts_with("taiki-e/install-action"))
+                {
+                    let tools = step["with"]["tool"].as_str().unwrap_or_default();
+                    assert!(
+                        !tools.contains("cbindgen"),
+                        "{at} installs cbindgen unpinned"
+                    );
+                }
+                let Some(run) = step["run"].as_str() else {
+                    continue;
+                };
+                for line in run.lines().map(str::trim) {
+                    let words: Vec<&str> = line.split_whitespace().collect();
+                    let installs_it = words.windows(2).any(|w| w == ["install", "cbindgen"])
+                        || (words.contains(&"install") && words.contains(&"cbindgen"));
+                    if !installs_it {
+                        continue;
+                    }
+                    installs += 1;
+                    assert_eq!(
+                        &words[..3],
+                        ["cargo", "install", "cbindgen"],
+                        "{at}: {line}"
+                    );
+                    assert!(words.contains(&"--locked"), "{at}: {line}");
+                    let flag = words.iter().position(|w| *w == "--version");
+                    let version = words[flag.unwrap_or_else(|| panic!("{at}: {line}")) + 1];
+                    let parts: Vec<&str> = version.split('.').collect();
+                    assert!(
+                        parts.len() == 3
+                            && parts
+                                .iter()
+                                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())),
+                        "{at}: {version} is not an exact MAJOR.MINOR.PATCH"
+                    );
+                    assert_eq!(words.len(), 6, "{at}: {line}");
+                    assert_binding(step);
+                    versions.insert(version.to_owned());
+                }
+            }
+        }
+    }
+    assert_eq!(installs, 2, "the release job and the CI ffi job install it");
+    assert_eq!(versions.len(), 1, "{versions:?}");
+
+    // Meson asks for at least 0.29.0, which the pinned version satisfies.
+    let pinned: Vec<u32> = versions
+        .iter()
+        .next()
+        .unwrap()
+        .split('.')
+        .map(|p| p.parse().unwrap())
+        .collect();
+    let meson = include_str!("../meson.build");
+    let wanted = meson
+        .split("find_program('cbindgen', version: '>=")
+        .nth(1)
+        .and_then(|rest| rest.split('\'').next())
+        .expect("meson.build asks for a cbindgen version");
+    let wanted: Vec<u32> = wanted.split('.').map(|p| p.parse().unwrap()).collect();
+    assert!(
+        pinned >= wanted,
+        "{pinned:?} is older than meson's {wanted:?}"
+    );
+}
+
 #[test]
 fn the_native_archive_holds_every_header_its_headers_include() {
     let workflow = release();

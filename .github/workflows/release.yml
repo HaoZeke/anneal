@@ -98,9 +98,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cbindgen
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cbindgen
+        run: cargo install cbindgen --version 0.29.4 --locked
 
       - name: Build static + shared library
         run: cargo build --release --features capi --target ${{ matrix.target }} --target-dir target

@@ -570,9 +570,7 @@ jobs:
           tool: cargo-c
 
       - name: Install cbindgen
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cbindgen
+        run: cargo install cbindgen --version 0.29.4 --locked
 
       - name: cargo cinstall (smoke)
         run: |
