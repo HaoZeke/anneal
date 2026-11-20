@@ -113,6 +113,60 @@ def test_header_carries_every_coverage_counter_and_the_decisions(header):
     assert len(names) == 12
 
 
+def _struct(header, name):
+    found = re.search(
+        rf"((?:/\*\*(?:(?!\*/).)*\*/\s*)?)typedef struct {name} \{{(.*?)\}} {name};",
+        header,
+        re.S,
+    )
+    assert found, f"{name} is not in the header"
+    return found.group(1), found.group(2)
+
+
+def _fields(body):
+    return re.findall(r"\b(\w+);", body)
+
+
+def _documented_fields(body):
+    return re.findall(
+        r"/\*\*((?:(?!\*/).)*)\*/\s*[\w\s\*]+?\b(\w+);", body, re.S
+    )
+
+
+@pytest.mark.parametrize("name", ["anneal_box_stats_t", "anneal_box_coverage_decisions_t"])
+def test_header_documents_every_field(header, name):
+    _, body = _struct(header, name)
+    documented = _documented_fields(body)
+    assert [field for _, field in documented] == _fields(body)
+    empty = [field for doc, field in documented if not re.sub(r"[\s*]", "", doc)]
+    assert not empty, f"no description in the header for {empty}"
+
+
+def test_header_says_where_the_first_layout_of_the_stats_ends(header):
+    doc, body = _struct(header, "anneal_box_stats_t")
+    fields = _fields(body)
+    assert fields[16] == "coverage_repelled_proposals"
+    assert fields[17] == "coverage_peer_recrossings"
+    assert "17 eight-byte words" in doc
+    _, decisions = _struct(header, "anneal_box_coverage_decisions_t")
+    words = len(fields) - 1 + len(_fields(decisions))
+    assert f"{words} words in all" in doc.replace("\n * ", " ")
+    for field in ("struct_size", "coverage_repelled_proposals", "coverage_peer_recrossings",
+                  "coverage_constrained_repulsions", "coverage_regions_largest",
+                  "coverage_regions_smallest", "coverage_decisions", "n_evals"):
+        assert f"`{field}`" in doc.replace("\n * ", " "), field
+
+
+def test_the_bindings_page_lists_the_stats_layouts_as_the_header_has_them(header):
+    _, body = _struct(header, "anneal_box_stats_t")
+    fields = _fields(body)
+    page = (ROOT / "docs" / "orgmode" / "bindings.org").read_text()
+    first = page.split("- first layout", 1)[1].split("- second layout", 1)[0]
+    second = page.split("- second layout", 1)[1].split("\n\n", 1)[0]
+    assert re.findall(r"=(\w+)=", first) == fields[:17]
+    assert re.findall(r"=(\w+)=", second) == fields[17:]
+
+
 def _ci_valgrind_flags():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     step = ci.split("- name: valgrind ffi_smoke", 1)[1].split("\n\n", 1)[0]

@@ -224,6 +224,19 @@ pub struct anneal_box_options_t {
 ///
 /// `struct_size` is the caller's `sizeof(anneal_box_stats_t)`; the library
 /// writes only the bytes that fit.
+///
+/// The structure grows at its end and nowhere else, so a field never moves.
+/// The first layout runs from `struct_size` to
+/// `coverage_repelled_proposals`, 17 eight-byte words. The second adds the
+/// other coverage counters of the exchange, from `coverage_peer_recrossings`
+/// to `coverage_constrained_repulsions`, then `coverage_regions_largest` and
+/// `coverage_regions_smallest`, the extremes of the per-chain region counts
+/// that Python returns as the list `coverage_regions_per_chain`, and last
+/// `coverage_decisions`, 42 words in all. A program built against the first
+/// header sets `struct_size` to its own size and gets the fields that lie
+/// within it. The library copies the first `struct_size` bytes of its own
+/// structure and no more, so nothing past the caller's structure is written.
+/// A `struct_size` below the offset of `n_evals` is an error.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct anneal_box_stats_t {

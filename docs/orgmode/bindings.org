@@ -45,6 +45,33 @@ largest and smallest entry as =coverage_regions_largest= and
 coverage heights on acceptance: the counts of comparisons, their peer
 overlaps and probability changes, and the sum and largest of those changes.
 
+The fields of =anneal_box_stats_t= come in two layouts, and a field never
+moves when a layout is added. A program built against the first header
+reads the first layout and nothing else.
+
+- first layout, 17 words :: =struct_size=, =value=, =n_evals=, =n_grads=,
+  =hops=, =history_observations=, =history_minima=, =history_refusals=,
+  =history_seconds=, =shared_deposits=, =coverage_observations=,
+  =coverage_published=, =coverage_applied_foreign=,
+  =coverage_capped_foreign=, =coverage_recrossings=,
+  =coverage_novel_arrivals= and =coverage_repelled_proposals=.
+- second layout, 42 words in all :: =coverage_peer_recrossings=,
+  =coverage_peer_only_recrossings=, =coverage_escape_updates=,
+  =coverage_novelty_updates=, =coverage_published_samples=,
+  =coverage_applied_foreign_samples=, =coverage_sample_peer_checks=,
+  =coverage_sample_anchor_overlaps=,
+  =coverage_sample_anchor_only_overlaps=, =coverage_sample_overlaps=,
+  =coverage_constrained_repulsions=, =coverage_regions_largest=,
+  =coverage_regions_smallest= and =coverage_decisions=.
+
+The library copies the first =struct_size= bytes of its own structure into
+the caller's, so a =struct_size= of =sizeof= in either header is safe, and
+nothing is written past the caller's structure. A =struct_size= below the
+offset of =n_evals= is refused. =tests/ffi_smoke.c= pins the offsets of the
+first layout.
+=coverage_decisions= is an =anneal_box_coverage_decisions_t= of eight
+counts and four real numbers.
+
 #+BEGIN_SRC c
 anneal_box_options_t options;
 anneal_box_stats_t stats;
