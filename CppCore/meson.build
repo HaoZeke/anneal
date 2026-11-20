@@ -566,6 +566,39 @@ if not get_option('with_rpc_client_only')
         install: not meson.is_subproject(),
     )
 
+    # 49 rgpot_* exports when the rust archive is linked normally, 95 when
+    # the bundle is whole-archived. The extra 46 are the public C ABI.
+    if get_option('with_rust_core') and host_machine.system() == 'linux'
+        _so_export_whole = false
+        if has_fast_nlist
+            _so_export_whole = not _fast_as_object
+        endif
+        if _so_export_whole or not has_fast_nlist
+            if _so_export_whole
+                _so_export_archive = _fastnlist_tgt[0].full_path()
+            else
+                _so_export_archive = rgpot_rust_target[0].full_path()
+            endif
+            _so_export_args = [
+                files('scripts/check_rgpot_exports.py'),
+                rgpot.full_path(),
+                _so_export_archive,
+                files('scripts/abi_core_baseline.txt'),
+            ]
+            if _so_export_whole
+                _so_export_args += ['--whole-archive']
+                _so_export_args += files('scripts/abi_baseline_fast.txt')
+            endif
+            test(
+                'rgpot_so_exports',
+                find_program('python3'),
+                args: _so_export_args,
+                depends: [rgpot, rgpot_rust_target],
+                timeout: 30,
+            )
+        endif
+    endif
+
     # Generic rgpot_engine_* plugins (engine_c_abi.h) for the backends that
     # have no tensor runtime: one shared table over PotentialBase
     # (rgpot/engine/EngineTable.cc) and a small backend file each. The UMA,
