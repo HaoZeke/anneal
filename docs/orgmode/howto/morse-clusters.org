@@ -7,15 +7,23 @@
 A Morse pair has its minimum at 1, at every range.
 On reduced units, every length in the preset is 12% too wide for Morse.
 
-Pass the pair's own length scale instead:
+To search in the pair's own length scale, which is opt-in and not the default:
 
 #+begin_src rust
 use anneal_core::methods::cluster_hopping::Config;
 use anneal_core::potentials::PairPotential;
 
 let pot = PairPotential::morse(43, 6.0);
-let cfg = Config::recommended_with_scales(43, pot.kind().length_scale(), 1.0);
+let cfg = Config::recommended_for_pair(43, pot.kind());
+let same = Config::recommended_with_scales(43, pot.kind().length_scale(), 1.0);
+assert_eq!(cfg.resolved_json().unwrap(), same.resolved_json().unwrap());
 #+end_src
+
+=recommended_for_pair= is =recommended_with_scales= at that length and a unit depth.
+Lennard-Jones resolves to the same configuration as =recommended=.
+
+The measurements below are at rho = 6.
+The pair scale stays opt-in and =Config::recommended= is the default.
 
 =PairKind::length_scale= is =r_min / 2^(1/6)=: 1 for Lennard-Jones and 0.891 for Morse.
 
@@ -43,7 +51,7 @@ The figure is written to =build/morse6/morse6-hits.svg= from that file.
 - Sizes: N = 35, 37, 43, 44 and 60 at rho = 6.
 - Seeds: 12000 to 12015.
 - Budget: 100000 calls per run.
-- Hit: within 1e-3 of the Cambridge table's energy, with every gradient component at most 1e-3.
+- Hit: an energy at or below the Cambridge table's energy plus 1e-3, with every gradient component at most 1e-3.
 
 To reproduce:
 
@@ -53,3 +61,5 @@ cargo run --release --example morse_table -- \
 #+end_src
 
 Append =reduced= to run =Config::recommended= on reduced units.
+
+=Config::for_cluster_with_scales= takes the same two scales for the plain =for_cluster= preset.

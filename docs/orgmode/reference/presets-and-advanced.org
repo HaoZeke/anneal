@@ -25,6 +25,21 @@ The block under the constructor is the example =cargo test --doc= runs.
   assert_eq!(cfg.relax_steps, 1000);
   #+end_src
 
+- =recommended_for_pair(n, kind)= :: =recommended= in the length unit of a unit-depth pair potential, taken from =PairKind::length_scale()=.
+  The same rule serves every pair form.
+  Lennard-Jones resolves to the same configuration as =recommended(n)=, and Morse moves every length from the Lennard-Jones diameter onto its own pair minimum.
+  It is opt-in: =recommended= stays the default.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::Config;
+  use anneal_core::potentials::PairKind;
+  let lj = Config::recommended_for_pair(13, PairKind::LennardJones);
+  assert_eq!(lj.resolved_json().unwrap(), Config::recommended(13).resolved_json().unwrap());
+  let morse = Config::recommended_for_pair(13, PairKind::Morse { rho: 6.0 });
+  assert_eq!(morse.energy_scale, 1.0);
+  assert!((morse.length_scale - 2.0_f64.powf(-1.0 / 6.0)).abs() < 1e-15);
+  #+end_src
+
 - =communicating(n)= :: orbit completion, Thompson allocation, the return screen, and Recognition.
 
   #+begin_src rust
@@ -60,6 +75,20 @@ The block under the constructor is the example =cargo test --doc= runs.
   let cfg = Config::for_cluster(13);
   assert_eq!(cfg.n_points, 13);
   assert!(cfg.bayes_screen);
+  #+end_src
+
+- =for_cluster_with_scales(n, length, energy)= :: =for_cluster= at caller-supplied physical scales.
+  It keeps the whole cluster preset, including the scaled shell core of =orbit_core=, and changes only the length and energy.
+  At =(1.0, 1.0)= it resolves to the same configuration as =for_cluster(n)=.
+  Use it for a potential that is not Lennard-Jones, such as the Gupta potential.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::Config;
+  let plain = Config::for_cluster(13);
+  let same = Config::for_cluster_with_scales(13, 1.0, 1.0);
+  assert_eq!(plain.resolved_sha256().unwrap(), same.resolved_sha256().unwrap());
+  let morse = Config::for_cluster_with_scales(43, 0.891, 1.0);
+  assert_eq!((morse.length_scale, morse.energy_scale), (0.891, 1.0));
   #+end_src
 
 - =for_cluster_dual_core(n)= :: =for_cluster= with orbit completion on two cores and a restart after a stall.
@@ -126,9 +155,156 @@ The block under the constructor is the example =cargo test --doc= runs.
   assert_eq!(cfg.local_step, LocalStep::Auto);
   #+end_src
 
+* Cluster search options
+
+These are fields of =anneal_core::methods::cluster_hopping::Config=.
+Every one is off or unset in the stock presets, and is left out of the resolved JSON, and so out of the configuration digest, while it is off.
+The Rust blocks are the ones in =tests/docs_reference_snippets.rs=, which =cargo test= runs.
+
+- =call_floor= :: the pair distance at or below which the objective refuses to evaluate, such as the 0.90 angstrom floor of the GFN2 handle.
+  A trial with a pair inside the floor has that pair opened to 1.05 times the floor before the relaxation sees it.
+  A trial that cannot be opened is dropped without a charge, and so is a zero-step read inside the floor.
+  A floor that is not a positive distance is refused when the search starts.
+- =call_floor_elements= :: the atomic number of each point, read only by =call_floor=.
+  Each pair's floor is then =element_call_floor=, 0.70 of the summed covalent radii and never below =call_floor=: 1.55 angstrom for Si-Si, 1.06 for C-C, and =call_floor= for any pair with hydrogen.
+  The list must name every point, or the search is refused.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::{Config, element_call_floor};
+  let mut cfg = Config::recommended(13);
+  assert!(cfg.call_floor.is_none() && cfg.call_floor_elements.is_none());
+  cfg.call_floor = Some(0.90);
+  cfg.call_floor_elements = Some(vec![14; 13]);
+  assert!((element_call_floor(14, 14, 0.90) - 1.55).abs() < 0.01);
+  assert!((element_call_floor(6, 6, 0.90) - 1.06).abs() < 0.01);
+  assert_eq!(element_call_floor(1, 1, 0.90), 0.90);
+  #+end_src
+
+- =branch_on_stall= :: spend part of a stalled stretch on independent descents from fresh random clusters.
+  A branch starts once the walk has gone longer without a lower minimum than it took to reach the one it holds, longer than twice its longest stretch between two lower minima, and longer than =restart_patience= calls.
+  The walk never sees a branch and keeps its own trajectory, later by the calls the branches spent.
+  A branch that reaches the ledger's stop target ends the run at the call that found it.
+- =retry_noop_stall_leave= :: retry a directed leave on the next hop when its activation produced no candidate.
+  By default an attempted leave uses up its plateau window whether or not it moved the chain.
+- =align_directed_stall_source= :: start a directed leave from the recorded best rather than from the live walker, which may have accepted an uphill hop into another basin since the call clock was armed.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::Config;
+  let stock = Config::recommended(38);
+  assert!(!stock.branch_on_stall && !stock.retry_noop_stall_leave);
+  assert!(!stock.align_directed_stall_source);
+  let mut cfg = stock.clone();
+  cfg.branch_on_stall = true;
+  cfg.retry_noop_stall_leave = true;
+  cfg.align_directed_stall_source = true;
+  assert!(cfg.resolved_json().unwrap().contains("branch_on_stall"));
+  assert!(!stock.resolved_json().unwrap().contains("branch_on_stall"));
+  assert_ne!(cfg.resolved_sha256().unwrap(), stock.resolved_sha256().unwrap());
+  #+end_src
+
+- =plateau_heat= :: double the Metropolis temperature, and the lattice-exchange temperature, on each escape plateau, up to four times the preset.
+  A new lowest minimum returns both to the preset, and the proposal step stays on =temperature=.
+
+  #+begin_src rust
+  use anneal_core::methods::cluster_hopping::Config;
+  let stock = Config::recommended(38);
+  assert!(!stock.plateau_heat);
+  assert!(!stock.resolved_json().unwrap().contains("plateau_heat"));
+  let mut cfg = stock.clone();
+  cfg.plateau_heat = true;
+  assert!(cfg.resolved_json().unwrap().contains("plateau_heat"));
+  #+end_src
+
+- =capped_lindh_quench= :: quench Cartesian molecules with a Lindh-preconditioned step cut to a trust radius, in place of L-BFGS.
+  A cold L-BFGS step is one coordinate unit long, which climbs a bond, and the line search then spends evaluations walking it back.
+  It applies only to a Cartesian molecular library with species declared, and it is ignored for rigid-body charts.
+  =methods::anc_quench= exposes the solver as =anc_minimize= and =anc_minimize_watched=.
+
+=methods::surrogate_level::polish_tip4p_minima= hops on TIP4P from a water cluster and polishes the lowest distinct cages on the caller's objective, so the ledger is charged only for the polish.
+
+* Binary Lennard-Jones
+
+=potentials::BinaryLennardJones::new(n_a, n_b, epsilon_aa, epsilon_ab, epsilon_bb, sigma_aa, sigma_ab, sigma_bb)= is a two-species Lennard-Jones cluster with no cutoff.
+The first =n_a= atoms are species A and the rest are species B, and every parameter is positive and finite.
+=value_and_gradient= evaluates through the =binary_lj= kernel of rgpot when the process has installed the kernels (=ClusterKernels::binary_lj=, filled by =install_rgpot_kernels!=), and through a local pair loop otherwise.
+A search on it declares =species= and =sigmas= on the =Config=, as the binary =cluster_search= does.
+
+#+begin_src rust
+use anneal_core::potentials::BinaryLennardJones;
+use ndarray::Array1;
+
+let pot = BinaryLennardJones::new(3, 2, 1.0, 1.0, 1.0, 1.0, 1.15, 1.3);
+assert_eq!(pot.n_points(), 5);
+let x = Array1::from_iter((0..15).map(|i| 1.35 * (i as f64).sin()));
+let (energy, gradient) = pot.value_and_gradient(x.view());
+assert!(energy.is_finite() && gradient.len() == 15);
+#+end_src
+
+* Target hits
+
+A search reaches a target energy under one rule, =energy <= target + tol=.
+It is one-sided and inclusive: an energy exactly at =target + tol= is a hit, and an energy below the target is a hit whatever the gap.
+A non-finite energy, target or tolerance, or a negative tolerance, is never a hit.
+
+- =energy_hits(energy, target, tol)= :: the rule.
+- =DEFAULT_HIT_TOL= :: 1e-3, the default window above a reference energy.
+- =SEARCH_HIT_TOL= :: 1e-4, the window of the solved flag, the first encounter and the ensemble discovery level.
+
+Rust has all three at the crate root.
+Python has =anneal.energy_hits(energy, target, tol=DEFAULT_HIT_TOL)=, =anneal.DEFAULT_HIT_TOL= and =anneal.SEARCH_HIT_TOL=.
+=scripts/target_tol.py= holds the same rule for the benchmark scripts, and =tests/target_tol_lint.rs= fails on a raw comparison with a target energy.
+
+#+begin_src rust
+use anneal_core::{DEFAULT_HIT_TOL, SEARCH_HIT_TOL, energy_hits};
+
+let target = -173.928427;
+assert!(energy_hits(target + DEFAULT_HIT_TOL, target, DEFAULT_HIT_TOL));
+assert!(energy_hits(target - 5.0, target, SEARCH_HIT_TOL));
+assert!(!energy_hits(target + 2.0 * DEFAULT_HIT_TOL, target, DEFAULT_HIT_TOL));
+assert!(!energy_hits(f64::NAN, target, DEFAULT_HIT_TOL));
+#+end_src
+
+#+begin_src python
+import anneal
+
+target = -173.928427
+assert anneal.energy_hits(target + anneal.DEFAULT_HIT_TOL, target, anneal.DEFAULT_HIT_TOL)
+assert anneal.energy_hits(target - 1.0, target)
+assert not anneal.energy_hits(float("nan"), target)
+#+end_src
+
+* Removed configuration keys
+
+=Config::prior_reseed=, =prior_growth=, =prior_core=, =prior_handover= and =prior_motif= are removed, and so is =reseed_hops= of =ContinuousSymmetry::Measure=.
+Only =prior_soap= remains.
+A JSON or TOML configuration, a campaign file or a Python =Config= payload that sets a removed key is refused with a =RemovedConfigKeyError= that names the key, rather than being read and ignored.
+=Config::validate_json_keys(text)= and =Config::validate_toml_keys(text)= run that check on a text, and Python has =Config.validate_json(text)= and =Config.validate_toml(text)=, which raise =ValueError=.
+The driver environments refuse the matching names: =H2H_PRIORS= accepts =soap=, =0=, =none= and =1=, and =Config::parse_prior_switches= and =Config::check_removed_env= do that parsing.
+
+#+begin_src rust
+use anneal_core::methods::cluster_hopping::Config;
+
+let err = Config::validate_json_keys(r#"{"prior_reseed": true}"#).unwrap_err();
+assert_eq!(err.key, "prior_reseed");
+let err = Config::validate_toml_keys("[search]\nprior_core = 1\n").unwrap_err();
+assert_eq!(err.key, "search.prior_core");
+assert!(Config::validate_json_keys(r#"{"prior_soap": true}"#).is_ok());
+assert!(Config::parse_prior_switches("reseed").is_err());
+#+end_src
+
+#+begin_src python
+import anneal
+
+anneal.Config.validate_json('{"prior_soap": true}')
+try:
+    anneal.Config.validate_json('{"prior_reseed": true}')
+except ValueError as err:
+    assert "prior_reseed" in str(err)
+#+end_src
+
 * Search surfaces
 
-- =cluster_search(obj, grad, n, budget, seed=0, recommended=True, derived=False, communicating=False, *, ras=False, start=None, length_scale=None, species=None, sigmas=None, rigid=False, layout="block", target=None, water_sites=None)= :: \(3N\) point set, or \(6N\) for =rigid=True= or =water_sites=.
+- =cluster_search(obj_fn, grad_fn, n, budget, seed=0, recommended=True, derived=False, communicating=False, *, ras=False, start=None, length_scale=None, species=None, sigmas=None, rigid=False, layout="block", target=None, water_sites=None, groups=None, local_step=None, ring_moves=None, hold_stereocentres=None, measured_energy_scale=None)= :: \(3N\) point set, or \(6N\) for =rigid=True= or =water_sites=.
   Always needs a gradient or force.
   =species= is one label per point and =sigmas= is one diameter per point; two or more labels add a swap move.
   A wide diameter ratio also tries one downhill unlike-pair exchange beside the microcanonical step and the inner-outer exchange.
@@ -150,11 +326,20 @@ The block under the constructor is the example =cargo test --doc= runs.
   The preset is then =Config.communicating_tip4p=, =Config.recommended_tip4p= or =Config.for_tip4p=.
   =water_sites= needs a start.
   It excludes =ras=, =derived=, =length_scale=, =rigid=, =species=, =sigmas=, and a non-block layout.
+  =groups= is one list of atom indices per rigid group of a molecular search.
+  The preset is then =recommended_molecular=, or =for_molecular= with =recommended=False=, at an energy scale of one.
+  It needs =species= and =start=, and it excludes =ras=, =derived=, =communicating=, =length_scale=, =rigid=, =sigmas=, =water_sites= and a non-block layout.
+  =local_step= is =lbfgs=, =tric= or =auto=, the optimizer of every quench of a =groups= search.
+  =ring_moves=, =hold_stereocentres= and =measured_energy_scale= switch the ring crankshafts, the refusal of a quench step that mirrors a four-bonded centre, and the temperature measured from the opening hops.
+  For all four, =None= keeps the preset's value: the measured molecular controls for =recommended=True=, and the plain ones otherwise.
+  The returned dict has =best=, =best_energy=, =hops=, =accepted=, =nve_unavailable=, =local_step= and =quench_seconds=.
   A callback may raise a =BaseException= that is not an =Exception=, such as =KeyboardInterrupt=.
   The run then stops at the next evaluation, and the exception is re-raised.
-- =ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)= :: design box. Gradient → hop and quench; no gradient → portfolio.
+- =quench(fg_fn, x0, gtol, max_iter=10000, *, method="lbfgs", species=None)= :: local relaxation matching =cluster_search= (Cartesian L-BFGS or TRIC over =species=).
+- =ensemble_optimize(obj_fn, low, high, budget, seed=0, grad_fn=None, x0=None, replicas=4, history="shared", membership="accepted", *, coverage_shared=None, coverage_radius=None, coverage_neighbors=None)= :: design box. Gradient → hop and quench; no gradient → portfolio (1 replica) or values-only hop chains.
+- =minimize(fun, x0, bounds, jac=None, *, budget=None, seed=0, replicas=4, history="shared", membership="accepted", store=None, coverage_shared=None, coverage_radius=None, coverage_neighbors=None)= :: SciPy-shaped wrapper over =ensemble_optimize= with optional HDF5/JSONL =store=.
 - =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
-- =global_optimize(obj, low, high, budget, ...)= :: portfolio arms when the caller does not want hops.
+- =global_optimize(obj_fn, low, high, budget, seed=0, grad_fn=None, noise_sigma=None, policy="auto", x0=None, *, replicas=1, coverage_shared=True, coverage_radius=0.05, coverage_neighbors=0)= :: portfolio arms when the caller does not want hops.
 
 A callback that raises =BaseException= other than =Exception= (a harness
 stop, or =KeyboardInterrupt=) ends the search at once. The best state
@@ -169,13 +354,13 @@ See [[file:../howto/choose-driver.org][choose a driver]].
 
 - =Boltzmann(t_init, sigma)= :: Logarithmic cooling + Gaussian + Metropolis.
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
-- =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
+- =Gsa(t_init, q_v, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
+All called via =run(obj_fn, low, high, preset, n_epochs=100, steps_per_epoch=200, seed=42, x0=None, max_evals=None)=.
 Each move is mirror-reflected into =[low, high]= and the neighbourhood is the
-box, so =obj= is only evaluated inside it. =x0= starts the walk at a given
+box, so =obj_fn= is only evaluated inside it. =x0= starts the walk at a given
 point; without it the start is a uniform draw. The start costs one
-evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls.
+evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls, or =max_evals= calls when that is smaller. =max_evals= is at least 1.
 =run_qmc= and =global_optimize= take =x0= as well.
 =low=, =high= and =x0= may be any array-like of one shape, flattened in C order.
 A coordinate with =low == high= stays fixed. A NaN objective value counts as
@@ -191,14 +376,15 @@ worse than every number, =+inf= included, so it is never kept as the best.
 These drivers require gradients.
 Gradient support is provided by =eindir=; see the [[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]].
 
-- =polish(obj, grad, low, high, x0, max_fevals=200, ...)
-- =qmc_polish(obj, grad, low, high, n_starts, max_fevals_per_start, ...)=
-- =shifted_qmc_polish(..., n_replicates=1, ...)
+- =polish(obj_fn, grad_fn, low, high, x0, max_fevals=200, step0=1.0, grad_tol=1e-8)=
+- =qmc_polish(obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed=0, step0=1.0, grad_tol=1e-8, top_k=0)=
+- =shifted_qmc_polish(obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed=0, n_replicates=1, step0=1.0, grad_tol=1e-8, top_k=0)=
 
 * Advanced drivers
 
-- =additive_independence(obj, low, high, max_fevals, seed=0, degree=8, ... n_pilot=0)= (values only, rank-1 surrogate).
-- =gle_langevin(obj, grad, low, high, max_fevals, seed=0, omega0=0.2, dt=0.2, n_epochs=40)= (gradient, colored noise).
+- =additive_independence(obj_fn, low, high, max_fevals, seed=0, degree=8, grid_m=65, local_frac=0.2, n_epochs=40, n_pilot=0)= (values only, rank-1 surrogate).
+- =gle_langevin(obj_fn, grad_fn, low, high, max_fevals, seed=0, omega0=None, dt=0.2, n_epochs=40, x0=None)= (gradient, colored noise). Without =omega0= the adaptive variant runs.
+- =gle_langevin_preconditioned(obj_fn, grad_fn, low, high, max_fevals, seed=0, omega0=None, dt=0.2, n_epochs=40, x0=None, preconditioner_probes=None)= (diagonal coordinate preconditioning).
 
 * Device and ensemble (same kernel)
 
