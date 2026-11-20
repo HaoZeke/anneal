@@ -99,10 +99,15 @@ The machine is recorded by the sha256 of its machine id: LJ\(_{38}\),
 LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\),
 LJ\(_{104}\), and M\(_{80}\) of the first block ran on
 \texttt{\seqsplit{3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873}},
+an x86\_64 machine with an Intel Xeon processor, 8 logical CPUs, 49342816~KiB
+of memory, and Linux kernel 6.12.113+, as its host record in
+\path{paper/jctc/data/hosts/3b11c160} gives;
 LJ\(_{150}\) on
 \texttt{\seqsplit{9eb296774121518feb1b187b0f6a109a42de7a5dd39e62ccd37d6e7d329604b8}},
+whose record names no processor, memory, or kernel;
 and every cluster of the second block on
-\texttt{\seqsplit{e06d886d760e0a59870126b963636ff6408201594f2686f72deb66816fccadb3}}.
+\texttt{\seqsplit{e06d886d760e0a59870126b963636ff6408201594f2686f72deb66816fccadb3}},
+whose rows name an Intel Xeon processor and no memory or kernel.
 GMIN is built by \path{scripts/gmin_panel/build_gmin.sh} with ALIGN, MPI,
 and OpenMP off, against the system BLAS and LAPACK; the record does not
 give the compiler version.
@@ -292,7 +297,7 @@ local optimization is not a force call; a later GOFEE run puts a
 spectral-graph and Voronoi filter in front of the sampling step.
 \cite{slavenskyClassifier2024}
 The same group has used a deliberately incomplete machine-learned
-landscape to propose candidates, a universal potential as a Gaussian-process
+landscape to propose structures, a universal potential as a Gaussian-process
 prior, fractional existence variables, an on-the-fly potential in a
 grand-canonical search, and a delta model on silver--sulfur systems.
 \cite{slavenskyComplementary2023,lyngbyUniversalPrior2024,larsenFractional2023,quinlivanGrandCanonical2026,pitfieldActiveDelta2026}

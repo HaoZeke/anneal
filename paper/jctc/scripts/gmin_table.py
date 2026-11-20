@@ -126,6 +126,8 @@ def table() -> str:
             "\\begin{table}",
             "\\caption{This code at the revision each block names against GMIN with the inputs of",
             "Section~\\ref{sec:protocol}, both arms of each cluster on one host, in alternating order by seed.",
+            "On every Lennard-Jones size, LJ\\(_{75}\\) included, GMIN runs the Wales-group LJ\\(_{38}\\)",
+            "introduction file with no symmetrization keyword, not the published LJ\\(_{75}\\) input.",
             "On Au\\(_{55}\\) the gold driver of this code applies the basin bias of",
             "equation~\\ref{eq:delta} on a stride of 8.",
             "GMIN is the snapshot of SVNREV \\texttt{9cbec1a4} built with three patches,",
