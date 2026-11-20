@@ -261,6 +261,75 @@ pub struct anneal_box_stats_t {
     pub coverage_novel_arrivals: u64,
     /// Proposals pushed away from an evaluated region.
     pub coverage_repelled_proposals: u64,
+    /// Recrossings whose return region holds admitted peer visits.
+    pub coverage_peer_recrossings: u64,
+    /// Recrossings with peer visits and no local arrivals in the region.
+    pub coverage_peer_only_recrossings: u64,
+    /// Recrossing updates that change the bounded escape scale.
+    pub coverage_escape_updates: u64,
+    /// Novel-arrival updates that change the bounded escape scale.
+    pub coverage_novelty_updates: u64,
+    /// Distinct launch and boundary descriptors sent through the sample
+    /// channel.
+    pub coverage_published_samples: u64,
+    /// Received sampled descriptors, excluding self-delivery and replay.
+    pub coverage_applied_foreign_samples: u64,
+    /// Proposals checked against a nonempty peer sample cloud.
+    pub coverage_sample_peer_checks: u64,
+    /// Checks whose occupied position lies within the interaction radius of
+    /// a held peer sample.
+    pub coverage_sample_anchor_overlaps: u64,
+    /// Checks whose occupied position overlaps a peer sample while the
+    /// proposed one does not.
+    pub coverage_sample_anchor_only_overlaps: u64,
+    /// Proposed positions within the sample interaction radius.
+    pub coverage_sample_overlaps: u64,
+    /// Overlaps that box constraints or another sample keep from improving.
+    pub coverage_constrained_repulsions: u64,
+    /// Regions held by the chain with the most, imported ones included.
+    ///
+    /// The per-chain counts are not a census and cannot be summed, so the
+    /// extremes stand for the vector the Python call returns.
+    pub coverage_regions_largest: u64,
+    /// Regions held by the chain with the fewest.
+    pub coverage_regions_smallest: u64,
+    /// Conditional influence of imported coverage heights on acceptance.
+    pub coverage_decisions: anneal_box_coverage_decisions_t,
+}
+
+/// Conditional influence of imported coverage heights on terminal
+/// acceptance, the `coverage_decisions` of an `anneal_box_stats_t`.
+///
+/// Each comparison holds the actual proposal, temperature, region map and
+/// local deposit heights fixed and removes only the imported height
+/// increments. It is not a replay of a chain with a private history.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct anneal_box_coverage_decisions_t {
+    /// Terminal acceptance comparisons, unresolved arithmetic included.
+    pub comparisons: u64,
+    /// Comparisons that nonfinite arithmetic keeps out of the measures.
+    pub unresolved: u64,
+    /// Trials the actual biased decision accepted.
+    pub accepted: u64,
+    /// Comparisons with imported visits in either selected region.
+    pub peer_overlap: u64,
+    /// Comparisons with a nonzero difference of imported endpoint heights.
+    pub peer_delta_changes: u64,
+    /// Comparisons whose acceptance probability changes without it.
+    pub probability_changes: u64,
+    /// Comparisons that consume a uniform acceptance draw.
+    pub drawn_comparisons: u64,
+    /// Different decisions under an actual draw with imports removed.
+    pub drawn_disagreements: u64,
+    /// Sum of the absolute acceptance-probability changes.
+    pub probability_change_sum: f64,
+    /// Largest absolute acceptance-probability change.
+    pub max_probability_change: f64,
+    /// Largest absolute difference of imported endpoint heights.
+    pub max_abs_peer_delta: f64,
+    /// That difference divided by the effective acceptance temperature.
+    pub max_abs_peer_delta_over_temperature: f64,
 }
 
 thread_local! {
@@ -847,6 +916,51 @@ fn stats_of(result: &BoxEnsembleResult) -> anneal_box_stats_t {
         coverage_recrossings: result.coverage.recrossings as u64,
         coverage_novel_arrivals: result.coverage.novel_arrivals as u64,
         coverage_repelled_proposals: result.coverage.repelled_proposals as u64,
+        coverage_peer_recrossings: result.coverage.peer_recrossings as u64,
+        coverage_peer_only_recrossings: result.coverage.peer_only_recrossings as u64,
+        coverage_escape_updates: result.coverage.escape_updates as u64,
+        coverage_novelty_updates: result.coverage.novelty_updates as u64,
+        coverage_published_samples: result.coverage.published_samples,
+        coverage_applied_foreign_samples: result.coverage.applied_foreign_samples as u64,
+        coverage_sample_peer_checks: result.coverage.sample_peer_checks as u64,
+        coverage_sample_anchor_overlaps: result.coverage.sample_anchor_overlaps as u64,
+        coverage_sample_anchor_only_overlaps: result.coverage.sample_anchor_only_overlaps as u64,
+        coverage_sample_overlaps: result.coverage.sample_overlaps as u64,
+        coverage_constrained_repulsions: result.coverage.constrained_repulsions as u64,
+        coverage_regions_largest: result
+            .coverage
+            .per_chain_regions
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0) as u64,
+        coverage_regions_smallest: result
+            .coverage
+            .per_chain_regions
+            .iter()
+            .copied()
+            .min()
+            .unwrap_or(0) as u64,
+        coverage_decisions: decisions_of(&result.coverage_decisions),
+    }
+}
+
+fn decisions_of(
+    decisions: &crate::methods::box_hopping::CoverageDecisionStats,
+) -> anneal_box_coverage_decisions_t {
+    anneal_box_coverage_decisions_t {
+        comparisons: decisions.comparisons as u64,
+        unresolved: decisions.unresolved as u64,
+        accepted: decisions.accepted as u64,
+        peer_overlap: decisions.peer_overlap as u64,
+        peer_delta_changes: decisions.peer_delta_changes as u64,
+        probability_changes: decisions.probability_changes as u64,
+        drawn_comparisons: decisions.drawn_comparisons as u64,
+        drawn_disagreements: decisions.drawn_disagreements as u64,
+        probability_change_sum: decisions.probability_change_sum,
+        max_probability_change: decisions.max_probability_change,
+        max_abs_peer_delta: decisions.max_abs_peer_delta,
+        max_abs_peer_delta_over_temperature: decisions.max_abs_peer_delta_over_temperature,
     }
 }
 
@@ -1621,6 +1735,284 @@ mod tests {
         let mut unset = anneal_box_stats_t::default();
         assert_eq!(call(&mut unset), anneal_status_t::ANNEAL_INVALID_PARAMETER);
         assert!(last_error().contains("struct_size"));
+    }
+
+    #[test]
+    fn the_stats_keep_the_layout_of_the_first_release() {
+        use std::mem::{offset_of, size_of};
+
+        let word = size_of::<usize>();
+        assert_eq!(offset_of!(anneal_box_stats_t, struct_size), 0);
+        assert_eq!(offset_of!(anneal_box_stats_t, n_evals), 2 * word);
+        assert_eq!(offset_of!(anneal_box_stats_t, shared_deposits), 9 * word);
+        assert_eq!(
+            offset_of!(anneal_box_stats_t, coverage_repelled_proposals),
+            16 * word
+        );
+        assert_eq!(
+            offset_of!(anneal_box_stats_t, coverage_peer_recrossings),
+            17 * word
+        );
+        assert_eq!(
+            offset_of!(anneal_box_stats_t, coverage_decisions),
+            30 * word
+        );
+        assert_eq!(size_of::<anneal_box_coverage_decisions_t>(), 12 * word);
+        assert_eq!(size_of::<anneal_box_stats_t>(), 42 * word);
+    }
+
+    #[test]
+    fn every_counter_is_copied_from_the_result() {
+        use crate::methods::box_hopping::{CoverageDecisionStats, CoverageStats};
+
+        let coverage = CoverageStats {
+            local_observations: 1,
+            published_visits: 2,
+            applied_foreign_visits: 3,
+            capped_foreign_visits: 4,
+            per_chain_regions: vec![9, 7, 12, 8],
+            recrossings: 5,
+            peer_recrossings: 6,
+            peer_only_recrossings: 7,
+            escape_updates: 8,
+            novel_arrivals: 9,
+            novelty_updates: 10,
+            published_samples: 11,
+            applied_foreign_samples: 12,
+            sample_peer_checks: 13,
+            sample_anchor_overlaps: 14,
+            sample_anchor_only_overlaps: 15,
+            sample_overlaps: 16,
+            repelled_proposals: 17,
+            constrained_repulsions: 18,
+        };
+        let decisions = CoverageDecisionStats {
+            comparisons: 21,
+            unresolved: 22,
+            accepted: 23,
+            peer_overlap: 24,
+            peer_delta_changes: 25,
+            probability_changes: 26,
+            drawn_comparisons: 27,
+            drawn_disagreements: 28,
+            probability_change_sum: 2.5,
+            max_probability_change: 0.25,
+            max_abs_peer_delta: 3.5,
+            max_abs_peer_delta_over_temperature: 1.5,
+        };
+        let result = BoxEnsembleResult {
+            best_pos: Array1::zeros(1),
+            best_val: -1.0,
+            n_evals: 31,
+            n_grads: 32,
+            hops: 33,
+            history_observations: 34,
+            history_minima: 35,
+            history_cost: (36, 37, 0.5),
+            shared_deposits: 38,
+            coverage,
+            coverage_decisions: decisions,
+        };
+        let stats = stats_of(&result);
+        let counters = [
+            stats.coverage_observations,
+            stats.coverage_published,
+            stats.coverage_applied_foreign,
+            stats.coverage_capped_foreign,
+            stats.coverage_recrossings,
+            stats.coverage_novel_arrivals,
+            stats.coverage_repelled_proposals,
+            stats.coverage_peer_recrossings,
+            stats.coverage_peer_only_recrossings,
+            stats.coverage_escape_updates,
+            stats.coverage_novelty_updates,
+            stats.coverage_published_samples,
+            stats.coverage_applied_foreign_samples,
+            stats.coverage_sample_peer_checks,
+            stats.coverage_sample_anchor_overlaps,
+            stats.coverage_sample_anchor_only_overlaps,
+            stats.coverage_sample_overlaps,
+            stats.coverage_constrained_repulsions,
+        ];
+        let expected: [u64; 18] = [
+            1, 2, 3, 4, 5, 9, 17, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 18,
+        ];
+        assert_eq!(counters, expected);
+        assert_eq!(stats.coverage_regions_largest, 12);
+        assert_eq!(stats.coverage_regions_smallest, 7);
+        let d = stats.coverage_decisions;
+        assert_eq!(
+            [
+                d.comparisons,
+                d.unresolved,
+                d.accepted,
+                d.peer_overlap,
+                d.peer_delta_changes,
+                d.probability_changes,
+                d.drawn_comparisons,
+                d.drawn_disagreements,
+            ],
+            [21, 22, 23, 24, 25, 26, 27, 28]
+        );
+        assert_eq!(d.probability_change_sum, 2.5);
+        assert_eq!(d.max_probability_change, 0.25);
+        assert_eq!(d.max_abs_peer_delta, 3.5);
+        assert_eq!(d.max_abs_peer_delta_over_temperature, 1.5);
+        assert_eq!([stats.n_evals, stats.n_grads, stats.hops], [31, 32, 33]);
+    }
+
+    #[test]
+    fn a_chain_free_result_reports_no_regions() {
+        let result = BoxEnsembleResult {
+            best_pos: Array1::zeros(1),
+            best_val: 0.0,
+            n_evals: 0,
+            n_grads: 0,
+            hops: 0,
+            history_observations: 0,
+            history_minima: 0,
+            history_cost: (0, 0, 0.0),
+            shared_deposits: 0,
+            coverage: Default::default(),
+            coverage_decisions: Default::default(),
+        };
+        let stats = stats_of(&result);
+        assert_eq!(stats.coverage_regions_largest, 0);
+        assert_eq!(stats.coverage_regions_smallest, 0);
+    }
+
+    #[test]
+    fn a_run_reports_every_coverage_counter() {
+        let (status, _, stats, _) = run_wells(&wells_options());
+        assert_eq!(status, anneal_status_t::ANNEAL_SUCCESS);
+        let d = stats.coverage_decisions;
+        let live = [
+            stats.coverage_peer_recrossings,
+            stats.coverage_peer_only_recrossings,
+            stats.coverage_escape_updates,
+            stats.coverage_novelty_updates,
+            stats.coverage_published_samples,
+            stats.coverage_applied_foreign_samples,
+            stats.coverage_sample_peer_checks,
+            stats.coverage_sample_anchor_overlaps,
+            stats.coverage_sample_anchor_only_overlaps,
+            stats.coverage_sample_overlaps,
+            stats.coverage_constrained_repulsions,
+            stats.coverage_regions_smallest,
+            d.comparisons,
+            d.accepted,
+            d.peer_overlap,
+            d.peer_delta_changes,
+            d.probability_changes,
+            d.drawn_comparisons,
+            d.drawn_disagreements,
+        ];
+        assert!(live.iter().all(|&count| count > 0), "{stats:#?}");
+        assert!(stats.coverage_regions_smallest <= stats.coverage_regions_largest);
+        assert_eq!(d.comparisons as usize, stats.hops);
+        assert!(d.accepted <= d.comparisons && d.unresolved <= d.comparisons);
+        assert!(d.drawn_disagreements <= d.drawn_comparisons);
+        assert!(d.max_probability_change <= d.probability_change_sum);
+        assert!(d.max_abs_peer_delta > 0.0);
+    }
+
+    #[test]
+    fn coverage_off_leaves_the_new_counters_at_zero() {
+        let mut options = wells_options();
+        options.shared_deposits = 0;
+        options.coverage_height = 0.0;
+        options.coverage_shared = anneal_box_coverage_t::ANNEAL_BOX_COVERAGE_PRIVATE as i32;
+        let (_, _, stats, _) = run_wells(&options);
+        assert_eq!(stats.coverage_peer_recrossings, 0);
+        assert_eq!(stats.coverage_published_samples, 0);
+        assert_eq!(stats.coverage_applied_foreign_samples, 0);
+        assert_eq!(stats.coverage_sample_peer_checks, 0);
+        assert_eq!(stats.coverage_decisions.peer_overlap, 0);
+        assert_eq!(stats.coverage_decisions.peer_delta_changes, 0);
+    }
+
+    #[test]
+    fn an_older_callers_stats_are_filled_as_far_as_they_reach() {
+        use std::mem::offset_of;
+
+        let (_, _, full, _) = run_wells(&wells_options());
+        let sentinel = {
+            let mut stats = anneal_box_stats_t {
+                coverage_peer_recrossings: 777,
+                coverage_regions_largest: 778,
+                ..Default::default()
+            };
+            stats.coverage_decisions.comparisons = 779;
+            stats.coverage_decisions.max_abs_peer_delta = 7.5;
+            stats
+        };
+        let call = |size: usize| {
+            let mut wells = Wells { evals: 0 };
+            let mut x = vec![3.0, -2.0];
+            let mut shell = StandingShell::new();
+            let mut stats = sentinel;
+            stats.struct_size = size;
+            let low = [-5.0, -5.0];
+            let high = [5.0, 5.0];
+            let options = wells_options();
+            let status = unsafe {
+                anneal_box_minimize_ex(
+                    wells_value,
+                    wells_grad,
+                    (&mut wells as *mut Wells).cast(),
+                    shell.point_at(x.as_mut_ptr(), 2),
+                    low.as_ptr(),
+                    high.as_ptr(),
+                    &options,
+                    &mut stats,
+                )
+            };
+            assert_eq!(status, anneal_status_t::ANNEAL_SUCCESS);
+            assert_eq!(stats.struct_size, size);
+            stats
+        };
+
+        let first_release = call(offset_of!(anneal_box_stats_t, coverage_peer_recrossings));
+        assert_eq!(
+            first_release.coverage_repelled_proposals,
+            full.coverage_repelled_proposals
+        );
+        assert_eq!(
+            first_release.coverage_applied_foreign,
+            full.coverage_applied_foreign
+        );
+        assert_eq!(first_release.coverage_peer_recrossings, 777);
+        assert_eq!(first_release.coverage_regions_largest, 778);
+        assert_eq!(
+            first_release.coverage_decisions,
+            sentinel.coverage_decisions
+        );
+
+        let into_decisions = offset_of!(anneal_box_stats_t, coverage_decisions)
+            + offset_of!(anneal_box_coverage_decisions_t, accepted);
+        let cut = call(into_decisions);
+        assert_eq!(
+            cut.coverage_peer_recrossings,
+            full.coverage_peer_recrossings
+        );
+        assert_eq!(cut.coverage_regions_largest, full.coverage_regions_largest);
+        assert_eq!(
+            cut.coverage_decisions.comparisons,
+            full.coverage_decisions.comparisons
+        );
+        assert_eq!(
+            cut.coverage_decisions.unresolved,
+            full.coverage_decisions.unresolved
+        );
+        assert_eq!(cut.coverage_decisions.accepted, 0);
+        assert_eq!(cut.coverage_decisions.max_abs_peer_delta, 7.5);
+
+        let whole = call(std::mem::size_of::<anneal_box_stats_t>());
+        assert_eq!(whole.coverage_decisions, full.coverage_decisions);
+        assert_eq!(
+            whole.coverage_peer_recrossings,
+            full.coverage_peer_recrossings
+        );
     }
 
     #[test]

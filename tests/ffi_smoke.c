@@ -7,6 +7,7 @@
 #include <anneal-core.h>
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -284,6 +285,129 @@ static void test_a_callback_can_stop_the_search(void) {
     CHECK(isfinite(stopped.stats.value));
 }
 
+/* The statistics of the first release, which a program built against that
+ * header still has. */
+typedef struct {
+    size_t struct_size;
+    double value;
+    size_t n_evals;
+    size_t n_grads;
+    size_t hops;
+    size_t history_observations;
+    size_t history_minima;
+    size_t history_refusals;
+    double history_seconds;
+    size_t shared_deposits;
+    uint64_t coverage_observations;
+    uint64_t coverage_published;
+    uint64_t coverage_applied_foreign;
+    uint64_t coverage_capped_foreign;
+    uint64_t coverage_recrossings;
+    uint64_t coverage_novel_arrivals;
+    uint64_t coverage_repelled_proposals;
+} stats_first_release_t;
+
+static void test_every_coverage_counter_is_reported(void) {
+    anneal_box_options_t options = defaults();
+    run_t base = run(&options, 0);
+    const anneal_box_stats_t *s = &base.stats;
+    const anneal_box_coverage_decisions_t *d = &s->coverage_decisions;
+    const uint64_t live[] = {
+        s->coverage_peer_recrossings,
+        s->coverage_peer_only_recrossings,
+        s->coverage_escape_updates,
+        s->coverage_novelty_updates,
+        s->coverage_published_samples,
+        s->coverage_applied_foreign_samples,
+        s->coverage_sample_peer_checks,
+        s->coverage_sample_anchor_overlaps,
+        s->coverage_sample_anchor_only_overlaps,
+        s->coverage_sample_overlaps,
+        s->coverage_constrained_repulsions,
+        s->coverage_regions_smallest,
+        d->comparisons,
+        d->accepted,
+        d->peer_overlap,
+        d->peer_delta_changes,
+        d->probability_changes,
+        d->drawn_comparisons,
+        d->drawn_disagreements,
+    };
+    size_t i;
+
+    CHECK(base.status == ANNEAL_SUCCESS);
+    for (i = 0; i < sizeof live / sizeof live[0]; i++) {
+        if (live[i] == 0) {
+            fprintf(stderr, "counter %zu is zero\n", i);
+            failures++;
+        }
+    }
+    CHECK(s->coverage_regions_smallest <= s->coverage_regions_largest);
+    CHECK(d->comparisons == s->hops);
+    CHECK(d->accepted <= d->comparisons);
+    CHECK(d->unresolved <= d->comparisons);
+    CHECK(d->drawn_disagreements <= d->drawn_comparisons);
+    CHECK(d->max_probability_change <= d->probability_change_sum);
+    CHECK(d->max_abs_peer_delta > 0.0);
+    CHECK(d->max_abs_peer_delta_over_temperature > 0.0);
+
+    options.shared_deposits = 0;
+    options.coverage_shared = ANNEAL_BOX_COVERAGE_PRIVATE;
+    options.coverage_height = 0.0;
+    base = run(&options, 0);
+    CHECK(base.stats.coverage_peer_recrossings == 0);
+    CHECK(base.stats.coverage_applied_foreign_samples == 0);
+    CHECK(base.stats.coverage_decisions.peer_overlap == 0);
+    CHECK(base.stats.coverage_decisions.peer_delta_changes == 0);
+}
+
+static void test_the_stats_layout_only_grows_at_the_end(void) {
+    CHECK(offsetof(anneal_box_stats_t, n_evals) == 2 * sizeof(size_t));
+    CHECK(offsetof(anneal_box_stats_t, shared_deposits) == 9 * sizeof(size_t));
+    CHECK(offsetof(anneal_box_stats_t, coverage_repelled_proposals) ==
+          16 * sizeof(size_t));
+    CHECK(offsetof(anneal_box_stats_t, coverage_peer_recrossings) ==
+          sizeof(stats_first_release_t));
+    CHECK(sizeof(stats_first_release_t) == 17 * sizeof(size_t));
+    CHECK(sizeof(anneal_box_stats_t) > sizeof(stats_first_release_t));
+}
+
+static void test_a_first_release_program_gets_its_statistics(void) {
+    const anneal_box_options_t options = defaults();
+    run_t full = run(&options, 0);
+    struct {
+        stats_first_release_t stats;
+        unsigned char guard[sizeof(anneal_box_stats_t)];
+    } held;
+    unsigned char untouched[sizeof held.guard];
+    counter_t counter = {0, 0};
+    double x[2] = {3.0, -2.0};
+    int64_t shape[1], strides[1];
+    DLManagedTensorVersioned tensor;
+    const double low[2] = {-5.0, -5.0};
+    const double high[2] = {5.0, 5.0};
+
+    memset(&held, 0xA5, sizeof held);
+    memset(untouched, 0xA5, sizeof untouched);
+    held.stats.struct_size = sizeof held.stats;
+    point_at(&tensor, x, shape, strides, 2);
+    CHECK(anneal_box_minimize_ex(wells, wells_grad, &counter, &tensor, low,
+                                 high, &options,
+                                 (anneal_box_stats_t *)&held.stats) ==
+          ANNEAL_SUCCESS);
+    CHECK(held.stats.struct_size == sizeof held.stats);
+    CHECK(memcmp(held.guard, untouched, sizeof untouched) == 0);
+    CHECK(held.stats.value == full.stats.value);
+    CHECK(held.stats.n_evals == full.stats.n_evals);
+    CHECK(held.stats.n_grads == full.stats.n_grads);
+    CHECK(held.stats.hops == full.stats.hops);
+    CHECK(held.stats.history_minima == full.stats.history_minima);
+    CHECK(held.stats.shared_deposits == full.stats.shared_deposits);
+    CHECK(held.stats.coverage_recrossings == full.stats.coverage_recrossings);
+    CHECK(held.stats.coverage_repelled_proposals ==
+          full.stats.coverage_repelled_proposals);
+}
+
 static void test_null_arguments_are_refused(void) {
     anneal_box_options_t options = defaults();
     double x[2] = {0.0, 0.0};
@@ -312,6 +436,9 @@ int main(void) {
     test_a_bad_option_is_refused_before_a_callback();
     test_struct_size_ignores_what_lies_past_it();
     test_a_callback_can_stop_the_search();
+    test_every_coverage_counter_is_reported();
+    test_the_stats_layout_only_grows_at_the_end();
+    test_a_first_release_program_gets_its_statistics();
     test_null_arguments_are_refused();
     if (failures != 0) {
         fprintf(stderr, "%d checks failed\n", failures);

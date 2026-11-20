@@ -36,6 +36,14 @@ the structure with the Rust defaults, so a run that changes nothing
 reproduces =anneal_box_minimize= with a default =anneal_box_config_t=,
 step for step. =anneal_box_minimize_ex= takes it, and an optional
 =anneal_box_stats_t= that reports the history and coverage counters.
+Every counter of the Python =box_ensemble_optimize= result is there. The
+coverage counters of the exchange are the =coverage_*= fields; the Python
+=coverage_regions_per_chain= list, which cannot be summed, is its
+largest and smallest entry as =coverage_regions_largest= and
+=coverage_regions_smallest=. The last field, =coverage_decisions=, is an
+=anneal_box_coverage_decisions_t= with the conditional influence of imported
+coverage heights on acceptance: the counts of comparisons, their peer
+overlaps and probability changes, and the sum and largest of those changes.
 
 #+BEGIN_SRC c
 anneal_box_options_t options;
@@ -56,7 +64,9 @@ is refused with =ANNEAL_INVALID_PARAMETER= and a message in
 with =struct_size=. The library reads only the bytes the caller's
 structure has and takes the default for the rest, and writes only the
 statistics that fit, so a newer library can add fields at the end without
-breaking a program built against this header. =tests/ffi_smoke.c= builds
+breaking a program built against this header: a program that was built
+before the coverage counters existed gets the statistics it knows, and
+nothing is written past its =struct_size=. =tests/ffi_smoke.c= builds
 against the installed header, and =scripts/ffi_smoke.sh= runs it from a
 checkout.
 

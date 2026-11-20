@@ -75,3 +75,38 @@ def test_c_smoke_program_passes():
         ["bash", str(SCRIPT)], cwd=ROOT, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-4000:]
+
+
+def test_header_carries_every_coverage_counter_and_the_decisions(header):
+    stats = re.search(
+        r"typedef struct anneal_box_stats_t \{(.*?)\} anneal_box_stats_t;", header, re.S
+    )
+    assert stats, "anneal_box_stats_t is not in the header"
+    fields = re.findall(r"\b(\w+);", stats.group(1))
+    assert fields[0] == "struct_size"
+    for field in (
+        "coverage_peer_recrossings",
+        "coverage_peer_only_recrossings",
+        "coverage_escape_updates",
+        "coverage_novelty_updates",
+        "coverage_published_samples",
+        "coverage_applied_foreign_samples",
+        "coverage_sample_peer_checks",
+        "coverage_sample_anchor_overlaps",
+        "coverage_sample_anchor_only_overlaps",
+        "coverage_sample_overlaps",
+        "coverage_constrained_repulsions",
+        "coverage_regions_largest",
+        "coverage_regions_smallest",
+    ):
+        assert field in fields, field
+    assert fields[-1] == "coverage_decisions", "new fields are appended at the end"
+    assert re.search(r"anneal_box_coverage_decisions_t coverage_decisions;", header)
+    decisions = re.search(
+        r"typedef struct anneal_box_coverage_decisions_t \{(.*?)\} anneal_box_coverage_decisions_t;",
+        header,
+        re.S,
+    )
+    assert decisions
+    names = re.findall(r"\b(\w+);", decisions.group(1))
+    assert len(names) == 12
