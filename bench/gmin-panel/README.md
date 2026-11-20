@@ -4,15 +4,26 @@ Both arms of each cluster in one session on one host: anneal develop
 `c2de652dca0bc75e2b0cb4afffac91fd656404e4`, built with Rust 1.88.0,
 `--release --locked`, and GMIN at Wales revision
 `aac1548a8aec13b53ad12a8d6904625081685d2e`.
-`snakemake -s workflow/Snakefile gmin_panel`: seeds 2000-2011, the paper
-call budgets (`PAPER_BUDGETS` in `scripts/gmin_panel/run_panel.py`), one
+`snakemake -s workflow/Snakefile gmin_panel`: seeds 2000-2011. Budgets
+are per size, and both arms of a size share that budget
+(`PAPER_BUDGETS` in `scripts/gmin_panel/run_panel.py`): 400,000 calls
+at LJ38, 1,000,000 at LJ55, Au55 and both M55 ranges, and 4,000,000 at
+LJ75, LJ98, LJ102, LJ103, LJ104, LJ150 and both M80 ranges. One
 process on core 0 (`taskset -c 0`, one thread, every other process moved
 to cores 1-7), `sudo unshare --uts` with hostname `bench`. For each
 system the seeds run in order, anneal then GMIN on the same seed.
 
-A hit is a quenched energy at or below the Cambridge Cluster Database
-energy plus 0.001: the Lennard-Jones table, pure gold at 55 in the Cu-Au
-Gupta archive, and the Doye-Wales Morse table. A miss is entered at the
+A hit is a finite best energy at or below the reference plus 0.001.
+The references are the Cambridge Cluster Database values stored for
+these sizes (Wales, Doye, Dullweber, Hodges, Naumkin, Calvo,
+Hernández-Rojas and Middleton,
+https://www-wales.ch.cam.ac.uk/CCD.html): Lennard-Jones -173.928427
+at LJ38, -279.248470 at LJ55, -397.492331 at LJ75, -543.665361 at
+LJ98, -569.363652 at LJ102, -575.766131 at LJ103, -582.086642 at
+LJ104 and -893.310258 at LJ150; pure gold at 55 in the Cu-Au Gupta
+archive, -191.03085280 eV; and the Doye-Wales Morse table, -250.286609
+and -220.646208 at M55 for rho 6 and 14, and -378.333471 and
+-340.811371 at M80 for rho 6 and 14. A miss is entered at the
 budget. Both arms start from the geometry the anneal example writes with
 `coords` for that seed, and both count one call per energy and gradient.
 anneal runs `Config::recommended` through `h2h_gmin_proof` (Lennard-Jones),
@@ -111,3 +122,39 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
 | M80 ρ=14 | 4000000 | anneal | 9/12 | 1338932.5 | 3064673 | 49.325 | 37.783 | 11.542 | 3.4e-4 | 3.8e-4 | - |
 |  |  | GMIN | 0/12 | 4000000 | 0 | 152.7 | 138.3 | 14.430 |  |  |  |
 <!-- gmin-panel table: end -->
+
+## Per-size Lennard-Jones files
+
+`rows-lj-per-size.csv` records a separate session of the eight
+Lennard-Jones sizes, seeds 2000-2011, both arms. It leaves `rows.csv`
+unchanged. Budgets are per size: 400,000 calls at LJ38, 1,000,000 at
+LJ55, and 4,000,000 at LJ75, LJ98, LJ102, LJ103, LJ104 and LJ150.
+Both arms of a size share that budget. A hit is a finite best energy
+at or below the Cambridge Cluster Database reference plus 0.001. Those
+references are the values in the table (Wales, Doye, Dullweber, Hodges,
+Naumkin, Calvo, Hernández-Rojas and Middleton,
+https://www-wales.ch.cam.ac.uk/CCD.html). Medians are Hyndman-Fan type
+7 of the stored calls and of the stored wall, and a miss is entered at
+the budget. Fisher p is the two-sided exact test on the hit counts.
+`summary-lj-per-size.csv` is this table. `GMIN-INPUTS.md` compares the
+GMIN data file, command line, budget accounting and binary with the
+panel at tree `b3ce4162` on `record/g1-develop-stock`.
+
+| System | Budget | Reference | Arm | Hits | Median calls | Median wall (s) | Fisher p |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| LJ38 | 400000 | -173.92842700 | anneal | 12/12 | 127839.5 | 0.652 | 0.03726708074534162 |
+|  |  |  | GMIN | 7/12 | 389399 | 3.604 |  |
+| LJ55 | 1000000 | -279.24847000 | anneal | 12/12 | 5722 | 0.061 | 1 |
+|  |  |  | GMIN | 12/12 | 12764.5 | 0.244 |  |
+| LJ75 | 4000000 | -397.49233100 | anneal | 5/12 | 4000000 | 59.508 | 0.03726708074534162 |
+|  |  |  | GMIN | 0/12 | 4000000 | 112.6 |  |
+| LJ98 | 4000000 | -543.66536100 | anneal | 7/12 | 3166811.5 | 80.308 | 0.004576659038901602 |
+|  |  |  | GMIN | 0/12 | 4000000 | 179.8 |  |
+| LJ102 | 4000000 | -569.36365200 | anneal | 6/12 | 3256052.5 | 88.031 | 1 |
+|  |  |  | GMIN | 5/12 | 4000000 | 188.4 |  |
+| LJ103 | 4000000 | -575.76613100 | anneal | 6/12 | 3905072.5 | 100.3 | 0.400323058285099 |
+|  |  |  | GMIN | 3/12 | 4000000 | 186.3 |  |
+| LJ104 | 4000000 | -582.08664200 | anneal | 5/12 | 4000000 | 102.0 | 1 |
+|  |  |  | GMIN | 6/12 | 3696118 | 176.6 |  |
+| LJ150 | 4000000 | -893.31025800 | anneal | 8/12 | 1129381.5 | 58.915 | 1 |
+|  |  |  | GMIN | 9/12 | 3129518.5 | 296.6 |  |
