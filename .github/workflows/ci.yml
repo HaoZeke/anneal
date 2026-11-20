@@ -14,7 +14,10 @@ env:
   # Linux jobs append `lammps`: `liblammps-dev` supplies the shared
   # library and `LAMMPS_LIB_DIR` is set when those dependencies are
   # built. macOS runners do not install it, so this list stays without
-  # it. `gpr` stays out because `libgpr_optim` is not a package a
+  # it. `profile` also stays out of `CI_FEATURES` because `rgpot-core/profile`
+  # compiles Cap'n Proto schemas via `capnp`, which macOS runners do not
+  # install; the Linux `lint` job installs `capnproto` so `--all-features`
+  # lints it. `gpr` stays out because `libgpr_optim` is not a package a
   # runner can fetch. `nng-transport` is excluded because it gates no
   # source at all yet and its dependency builds the nng C library
   # through cmake; put it back the day it does.
@@ -160,7 +163,8 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gfortran liblapack-dev liblammps-dev
+          sudo apt-get install -y --no-install-recommends gfortran liblapack-dev liblammps-dev capnproto
+          command -v capnp >/dev/null
           cmake -S .ci/ira -B .ci/ira/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_Fortran_COMPILER=gfortran
