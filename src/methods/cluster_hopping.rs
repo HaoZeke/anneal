@@ -8984,7 +8984,13 @@ where
                 let orders: Vec<usize> = (2..=n).collect();
                 let cands =
                     crate::symmetrise::detect_orders(x.view(), n, &orders, cfg.symmetry_tolerance);
-                let group = crate::symmetrise::generate_group(&cands, 60);
+                let group = crate::symmetrise::close_symmetries(
+                    &cands,
+                    x.view(),
+                    n,
+                    cfg.symmetry_tolerance,
+                    60,
+                );
                 let detected_orders: Vec<usize> =
                     cands.iter().map(|candidate| candidate.order).collect();
                 let symmetrised_state = if group.len() > 1 {
