@@ -1095,6 +1095,7 @@ class JsonlParameterStore:
         self.path = Path(path)
 
     def observations(self):
+        """Return stored ``(x, f)`` rows from the JSON lines archive."""
         if not self.path.is_file():
             return []
         out = []
@@ -1107,6 +1108,7 @@ class JsonlParameterStore:
         return out
 
     def record(self, x, f):
+        """Append one ``(x, f)`` row to the JSON lines archive."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         row = json.dumps({"x": np.asarray(x, dtype=np.float64).tolist(), "f": float(f)})
         with self.path.open("a") as handle:
@@ -1122,6 +1124,7 @@ class Hdf5ParameterStore:
         self.path = Path(path)
 
     def observations(self):
+        """Return stored ``(x, f)`` rows from the HDF5 archive."""
         h5py = _require_h5py()
         if not self.path.is_file():
             return []
@@ -1135,6 +1138,7 @@ class Hdf5ParameterStore:
         return [(xs[i], float(fs[i])) for i in range(min(len(xs), len(fs)))]
 
     def record(self, x, f):
+        """Append one ``(x, f)`` row to the HDF5 archive."""
         h5py = _require_h5py()
         x = np.asarray(x, dtype=np.float64).reshape(1, -1)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -1538,6 +1542,8 @@ def global_optimize_objective(
     seed: int = 0,
     use_gradient: bool = True,
     x0=None,
+    *,
+    noise_sigma=None,
 ):
     """Portfolio global optimizer over a native ``PyObjective`` handle."""
     out = _core_global_optimize_objective(
@@ -1545,7 +1551,7 @@ def global_optimize_objective(
         int(budget),
         int(seed),
         bool(use_gradient),
-        None,
+        noise_sigma if noise_sigma is None else float(noise_sigma),
         _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)

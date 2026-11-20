@@ -1254,6 +1254,7 @@ class ChemFitVector:
 
     @property
     def dim(self) -> int:
+        """Total flattened scalar dimension of the parameter layout."""
         return self._layout.size
 
     def _base_key(self, key: str) -> str:

@@ -189,9 +189,11 @@ class Anneal:
         self._observers: list[tuple] = []
 
     def get_number_of_steps(self) -> int:
+        """Return the number of completed optimizer steps."""
         return self.nsteps
 
     def converged(self, forces=None) -> bool:
+        """Return whether the maximum atomic force is below ``fmax``."""
         if forces is None:
             return _max_force(self.atoms) < self.fmax
         forces = np.asarray(forces, dtype=np.float64)
@@ -200,6 +202,7 @@ class Anneal:
         return float(np.sqrt((forces * forces).sum(axis=1)).max()) < self.fmax
 
     def log(self, *args, **kwargs) -> None:
+        """Write one step summary line to ``logfile`` when enabled."""
         if self.logfile is None:
             return
         e = float(self.atoms.get_potential_energy())
@@ -215,6 +218,7 @@ class Anneal:
             handle.write(line)
 
     def attach(self, function, interval: int = 1, *args, **kwargs) -> None:
+        """Register a callback to invoke every ``interval`` steps."""
         if not callable(function):
             function = getattr(function, "write", None)
         if not callable(function):

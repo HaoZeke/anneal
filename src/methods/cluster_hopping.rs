@@ -1601,7 +1601,7 @@ impl<'a> CallFloor<'a> {
             && (0..n).all(|a| ((a + 1)..n).all(|b| pair_distance(x, a, b) > self.pair(a, b)))
     }
 
-    /// Opens every pair at or inside its floor to [`CALL_FLOOR_OPENING`]
+    /// Opens every pair at or inside its floor to `CALL_FLOOR_OPENING`
     /// times that floor, as [`open_call_floor`] does for a single one.
     pub fn open(&self, x: &mut Array1<f64>, frozen: Option<&[bool]>) -> bool {
         if self.elements.is_none() {
@@ -1763,7 +1763,7 @@ pub fn open_call_floor(
 ///
 /// Declared species keep the group-aware [`separate_contacts`], and a pair
 /// it leaves inside its element floor is opened after it. A point set
-/// without them opens only the offending pairs, to [`CALL_FLOOR_OPENING`]
+/// without them opens only the offending pairs, to `CALL_FLOOR_OPENING`
 /// times the floor, because every pair of an atomic cluster may be a bond
 /// and the group repair would stretch it.
 fn open_for_call(
