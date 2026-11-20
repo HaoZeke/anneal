@@ -9604,12 +9604,26 @@ where
                     // different minimum. The chain has already shown it
                     // cannot improve from where it is, so the value of the
                     // new structure is that it is somewhere else. The same
-                    // minimum is the shelf, and adopting it would zero the
-                    // quiet count without leaving. A neighbour inside the
-                    // escape step is kept when its energy is not that minimum.
+                    // minimum is the shelf: it is not a leave, so the stall
+                    // clock stays and the depth score stays with the arms
+                    // that actually left. The chain still stands on the
+                    // requenched landing. Keeping the pre-climb coordinates
+                    // leaves the walk off the funnel the climb returned to.
+                    // A neighbour inside the escape step is kept when its
+                    // energy is not that minimum.
                     let climb_home = stall_landing_on_shelf(cfg, &shelf, &bias, xe.view(), ee);
                     if climb_home {
                         tabu_hits += 1;
+                        adopt_minimum!(
+                            ee,
+                            xe,
+                            escape_gradient,
+                            None,
+                            AdoptionHistory::Fresh,
+                            None,
+                            Some("stall-climb"),
+                            hops
+                        );
                     } else {
                         quiet = 0;
                         longest_quiet = 0;
