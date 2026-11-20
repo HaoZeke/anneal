@@ -1966,6 +1966,29 @@ def morse_g1(audit: Audit) -> None:
     audit.cell(f"{G1_DATA}/PROVENANCE", "the cited record commit", "4256269394435f77787d2bfdbead2321e08340a6", commit)
 
 
+TIP4P_GMIN = "aac1548a8aec13b53ad12a8d6904625081685d2e"
+
+
+def gmin_sources(audit: Audit) -> None:
+    """Every GMIN row behind a printed GMIN number names the GMIN revision and the machine it ran on."""
+    machine = re.compile(r"[0-9a-f]{64}")
+    shard_b = {(r["system"], r["seed"]): r["machine_id_sha256"]
+               for r in audit.rows(f"{GMIN_RERUN}/b/host.csv") if r["code"] == "gmin"}
+    sources = [(f"{GMIN_RERUN}/{shard}/rows.csv", "code", "code_revision", "host", GMIN_RERUN_SNAPSHOT)
+               for shard in GMIN_SHARDS]
+    sources += [(f"{GMIN_DEVELOP}/rows.csv", "code", "code_revision", "host", GMIN_RERUN_SNAPSHOT),
+                ("paper/jctc/data/tip4p_gmin/rows.csv", "arm", "gmin_revision", "machine_id", TIP4P_GMIN)]
+    for path, code, revision, host, want in sources:
+        rows = [r for r in audit.rows(path) if r[code] == "gmin"]
+        revisions = sorted({r[revision] for r in rows})
+        audit.cell(path, "GMIN revision of every GMIN row", want, " ".join(revisions))
+        hosts = {shard_b.get((r["system"], r["seed"]), "") if r[host] == "bench" and path.endswith("/b/rows.csv")
+                 else r[host] for r in rows}
+        named = all(machine.fullmatch(h) for h in hosts) and bool(rows)
+        audit.record(named, path, "every GMIN row names its machine", "sha256 of the machine id",
+                     "all" if named else ", ".join(sorted(h[:8] or "none" for h in hosts)))
+
+
 MOVE_CHOICE = re.compile(r"Thompson|move choice|choice among the moves|choosing among the moves|posterior", re.I)
 MOVE_CHOICE_CLAIM = re.compile(r"\b(drives?|driven|driving|improv\w*|help\w*|responsib\w*|key to|enabl\w*|boost\w*|explain\w*|"
                                r"account\w* for|behind the|leads? to|raises?|lifts?|increas\w*)\b", re.I)
@@ -4271,7 +4294,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     audit = Audit()
     for check in (paired_statistics, manuscript_gmin, withdrawn_benchmarks, supporting_information, release, paper_0120, gad_published, openconf,
                   head_to_head, sc96_78_howto, stale_claims, tip4p_panel, covalent_panels, covalent_gfn2, ase_gofee, lj_large, bench_prose,
-                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, morse_g1, no_move_choice_claim):
+                  manuscript_ase, manuscript_knockouts, manuscript_priors, panel_references, generated_tables, supporting_numbers, manuscript_new, manuscript_followups, cover_letter, science_claims, rigid_stall, presets_and_templates, no_anneal_restart, hexamer_provenance, template_era, outside_session, morse_g1, gmin_sources, no_move_choice_claim):
         check(audit)
     if write_map:
         (ROOT / REVISION_MAP).write_text(revision_map_text(revision_map_rows(audit)))
