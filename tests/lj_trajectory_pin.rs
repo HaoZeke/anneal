@@ -92,6 +92,6 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     // The general move library is deterministic on every build.
     // Every order the point count can hold is tried, so this short
     // walk hash moved.
-    let expected = "663aa3fbceda184ae10b98446ba01438f112e0ea4428da48575cf1645ae9b57d";
+    let expected = "f733415f0b74b6f408cc34770af2b81f14d6461c8d0cf2dcc26455679a3ec95c";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

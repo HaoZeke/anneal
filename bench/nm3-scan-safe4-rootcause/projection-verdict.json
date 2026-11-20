@@ -1,0 +1,37 @@
+{
+  "culprit_detected_candidate": {
+    "order": 3,
+    "improper": false,
+    "deviation": 0.2898208225054814,
+    "axis": [
+      -0.8217311851504174,
+      0.5623864081191248,
+      -0.09208358873414686
+    ],
+    "closed_group_size": 3
+  },
+  "transitions": {
+    "develop": {
+      "hop": 9,
+      "action": "continuous-symmetry-csm",
+      "from_bits": 13864033525292697787,
+      "to_bits": 13864181810410439694,
+      "adopted": true,
+      "from_energy": -183.53238924878482,
+      "to_energy": -187.74690577809855
+    },
+    "culprit": {
+      "hop": 9,
+      "action": "continuous-symmetry-csm",
+      "from_bits": 13864033525292697787,
+      "to_bits": 13863894787427032835,
+      "adopted": false,
+      "from_energy": -183.53238924878482,
+      "to_energy": -179.58922194386113
+    }
+  },
+  "develop_selected_projection": {
+    "group": "D_5h",
+    "measure": 0.037389704963383626
+  }
+}
