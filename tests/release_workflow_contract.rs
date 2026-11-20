@@ -74,6 +74,15 @@ fn release_installs_and_imports_the_built_sdist() {
 }
 
 #[test]
+fn release_validates_every_built_wheel() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let wheels = workflow_job(workflow, "wheels");
+
+    assert!(wheels.contains("pipx run twine check --strict dist/*"));
+    assert!(!wheels.contains("matrix.target != 'aarch64'"));
+}
+
+#[test]
 fn scientific_tests_optimize_kernels_without_disabling_debug_checks() {
     let manifest = include_str!("../Cargo.toml");
 
