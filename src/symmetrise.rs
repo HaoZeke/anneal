@@ -146,6 +146,9 @@ struct Cloud {
     xs: Vec<f64>,
     ys: Vec<f64>,
     zs: Vec<f64>,
+    /// Squared nearest-neighbour gaps, filled the first time a turn has to
+    /// be told apart from the identity.
+    gaps: std::cell::RefCell<Option<Vec<f64>>>,
 }
 
 impl Cloud {
@@ -159,7 +162,168 @@ impl Cloud {
             ys.push(x[3 * atom + 1] - c[1]);
             zs.push(x[3 * atom + 2] - c[2]);
         }
-        Self { xs, ys, zs }
+        Self {
+            xs,
+            ys,
+            zs,
+            gaps: std::cell::RefCell::new(None),
+        }
+    }
+
+    /// Squared distance from each atom to its nearest other atom.
+    ///
+    /// Built only after a residual has passed, or when a scan with no cap
+    /// would otherwise score a turn that maps every atom to itself.
+    fn nearest_gaps(&self) -> Vec<f64> {
+        let n = self.xs.len();
+        let mut nn_sq = vec![f64::INFINITY; n];
+        for left in 0..n {
+            for right in (left + 1)..n {
+                let dx = self.xs[left] - self.xs[right];
+                let dy = self.ys[left] - self.ys[right];
+                let dz = self.zs[left] - self.zs[right];
+                let distance = dx * dx + dy * dy + dz * dz;
+                if distance < nn_sq[left] {
+                    nn_sq[left] = distance;
+                }
+                if distance < nn_sq[right] {
+                    nn_sq[right] = distance;
+                }
+            }
+        }
+        nn_sq
+    }
+
+    fn gaps(&self) -> std::cell::Ref<'_, Vec<f64>> {
+        if self.gaps.borrow().is_none() {
+            let computed = self.nearest_gaps();
+            *self.gaps.borrow_mut() = Some(computed);
+        }
+        std::cell::Ref::map(self.gaps.borrow(), |slot| slot.as_ref().expect("gaps"))
+    }
+
+    fn perp_sq_at(&self, index: usize, axis: [f64; 3]) -> f64 {
+        let along = self.xs[index] * axis[0] + self.ys[index] * axis[1] + self.zs[index] * axis[2];
+        let radius_sq = self.xs[index] * self.xs[index]
+            + self.ys[index] * self.ys[index]
+            + self.zs[index] * self.zs[index]
+            - along * along;
+        radius_sq.max(0.0)
+    }
+
+    /// An atom can leave its site when its chord reaches half its own
+    /// nearest-neighbour gap. Otherwise the triangle inequality puts the
+    /// image closer to the source than to any other atom.
+    ///
+    /// The farthest atom is tested first. A low order moves that atom, so
+    /// the scan of the rest does not run. A high order whose turn is shorter
+    /// than every gap fails here and never reaches the residual scan.
+    fn any_atom_can_leave(&self, axis: [f64; 3], order: usize) -> bool {
+        if order < 2 || self.xs.is_empty() {
+            return false;
+        }
+        let sine = libm::sin(std::f64::consts::PI / order as f64);
+        // chord^2 = 4 * r_perp^2 * sin^2, and (gap / 2)^2 = gap^2 / 4,
+        // so chord >= gap / 2 is 16 * r_perp^2 * sin^2 >= gap^2.
+        let scale = 16.0 * sine * sine;
+        let gaps = self.gaps();
+        let can_leave = |index: usize| {
+            let gap = gaps[index];
+            gap.is_finite() && gap > 0.0 && scale * self.perp_sq_at(index, axis) >= gap
+        };
+        let mut far = 0usize;
+        let mut far_sq = -1.0;
+        for index in 0..self.xs.len() {
+            let radius = self.perp_sq_at(index, axis);
+            if radius > far_sq {
+                far_sq = radius;
+                far = index;
+            }
+        }
+        if can_leave(far) {
+            return true;
+        }
+        (0..self.xs.len()).any(|index| index != far && can_leave(index))
+    }
+
+    fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
+        let mut best_index = 0usize;
+        let mut best = f64::INFINITY;
+        for index in 0..self.xs.len() {
+            let dx = image[0] - self.xs[index];
+            let dy = image[1] - self.ys[index];
+            let dz = image[2] - self.zs[index];
+            let distance = dx * dx + dy * dy + dz * dz;
+            if distance < best {
+                best = distance;
+                best_index = index;
+            }
+        }
+        (best_index, best)
+    }
+
+    /// Root-mean-square distance of a rotation that permutes off-axis atoms.
+    ///
+    /// The residual scan is the vectorised one. A turn that cannot move any
+    /// atom off its own site is rejected before that scan: its residual is
+    /// the chord length, and a high order makes that smaller than the
+    /// acceptance tolerance without being a symmetry. A residual that does
+    /// pass is kept only when every atom that could have moved did so.
+    /// The nearest-image residual of a turn that maps every atom to itself
+    /// is the chord length. Once the sum of those squared chords reaches
+    /// `cap`, the ordinary scan can reject the turn on its own and the
+    /// neighbour list is not needed. A turn that stays under the cap cannot
+    /// be rejected that way, so it is kept only when some atom can reach a
+    /// different atom.
+    fn identity_stays_under(&self, axis: [f64; 3], order: usize, cap: f64) -> bool {
+        if !cap.is_finite() {
+            return true;
+        }
+        let sine = libm::sin(std::f64::consts::PI / order as f64);
+        let scale = 4.0 * sine * sine;
+        let limit = cap * cap * self.xs.len() as f64;
+        let mut total = 0.0;
+        for index in 0..self.xs.len() {
+            total += scale * self.perp_sq_at(index, axis);
+            if total >= limit {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn symmetry_deviation(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        if order < 2 {
+            return None;
+        }
+        if self.identity_stays_under(axis, order, cap) && !self.any_atom_can_leave(axis, order) {
+            return None;
+        }
+        let deviation = self.rotation_deviation(axis, order, cap)?;
+        self.permutation_moves(axis, order).then_some(deviation)
+    }
+
+    fn permutation_moves(&self, axis: [f64; 3], order: usize) -> bool {
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let sine = libm::sin(std::f64::consts::PI / order as f64);
+        let scale = 4.0 * sine * sine;
+        let gaps = self.gaps();
+        let mut moved = false;
+        for index in 0..self.xs.len() {
+            let gap = gaps[index];
+            let chord_sq = scale * self.perp_sq_at(index, axis);
+            // chord^2 < (gap / 2)^2. An atom that close to the axis has no
+            // other site it can reach, so staying put is the permutation.
+            let axial = !gap.is_finite() || gap <= 0.0 || chord_sq < gap * 0.25;
+            let (partner, _) = self.nearest_index(rotate(self.point(index), axis, angle));
+            if !axial && partner == index {
+                return false;
+            }
+            if partner != index {
+                moved = true;
+            }
+        }
+        moved
     }
 
     fn point(&self, index: usize) -> [f64; 3] {
@@ -478,7 +642,7 @@ pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) ->
     let cloud = Cloud::from_view(x, n);
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
+            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
                 continue;
             };
             if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
@@ -492,6 +656,68 @@ pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) ->
         }
     }
     best
+}
+
+/// Lowest nearest-image residual about one axis, among orders that exchange atoms.
+///
+/// A high order whose turn is shorter than the nearest-neighbour gap matches
+/// every atom to itself and is not a candidate. `None` when no requested
+/// order moves an atom onto a different atom.
+pub fn best_order_about(
+    x: ArrayView1<f64>,
+    n: usize,
+    axis: [f64; 3],
+    orders: &[usize],
+) -> Option<usize> {
+    let cloud = Cloud::from_view(x, n);
+    let mut best_order = None;
+    let mut best = f64::INFINITY;
+    for &order in orders {
+        let Some(deviation) = cloud.symmetry_deviation(axis, order, f64::INFINITY) else {
+            continue;
+        };
+        if deviation < best {
+            best = deviation;
+            best_order = Some(order);
+        }
+    }
+    best_order
+}
+
+/// Best proper rotation of each requested order.
+///
+/// One centred cloud and one axis list serve every order. An order whose
+/// rotation cannot exchange atoms is omitted. The survivors are in the
+/// order they were requested, which is the order a later group closure sees.
+pub fn detect_orders(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+) -> Vec<Candidate> {
+    let cloud = Cloud::from_view(x, n);
+    let axes = candidate_axes(x, n);
+    let mut out = Vec::new();
+    for &order in orders {
+        let mut best: Option<Candidate> = None;
+        for &axis in &axes {
+            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
+                continue;
+            };
+            if d < tolerance && best.as_ref().map(|b| d < b.deviation).unwrap_or(true) {
+                best = Some(Candidate {
+                    axis,
+                    order,
+                    improper: false,
+                    deviation: d,
+                });
+            }
+        }
+        if let Some(candidate) = best {
+            out.push(candidate);
+        }
+    }
+    out
 }
 
 /// All approximate symmetries of `x`, proper and improper.
@@ -510,7 +736,7 @@ pub fn detect_all(
     let cloud = Cloud::from_view(x, n);
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
+            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
                 continue;
             };
             if d < tolerance {
@@ -1553,6 +1779,39 @@ mod tests {
         let x = octahedron(1.0);
         let d = deviation(x.view(), 6, [0.0, 0.0, 1.0], 4);
         assert!(d < 1e-12, "a four-fold axis of an octahedron gave {d}");
+    }
+
+    #[test]
+    fn a_regular_octagon_keeps_its_eightfold_axis() {
+        let mut coords = Vec::with_capacity(24);
+        for step in 0..8 {
+            let angle = std::f64::consts::TAU * step as f64 / 8.0;
+            coords.push(angle.cos());
+            coords.push(angle.sin());
+            coords.push(0.0);
+        }
+        let x = Array1::from(coords);
+        let found = detect(x.view(), 8, &[8], 0.05).expect("octagon");
+        assert_eq!(found.order, 8);
+        assert!(found.deviation < 1e-8, "{}", found.deviation);
+    }
+
+    #[test]
+    fn a_turn_shorter_than_the_nearest_pair_is_not_a_symmetry() {
+        let mut coords = Vec::with_capacity(24);
+        for step in 0..8 {
+            let angle = std::f64::consts::TAU * step as f64 / 8.0;
+            coords.push(3.0 * angle.cos());
+            coords.push(3.0 * angle.sin());
+            coords.push(0.0);
+        }
+        let x = Array1::from(coords);
+        let rms = deviation(x.view(), 8, [0.0, 0.0, 1.0], 40);
+        assert!(
+            rms < 0.5,
+            "a fortieth of a turn is a small nearest-image residual, got {rms}"
+        );
+        assert!(detect(x.view(), 8, &[40], 0.5).is_none());
     }
 
     #[test]
