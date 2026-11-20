@@ -9,6 +9,7 @@
 #include <capnp/serialize.h>
 #include <kj/array.h>
 
+#include <cctype>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -229,6 +230,35 @@ TEST_CASE("Capabilities handshake rejection matrix",
   REQUIRE(verdict([](B) {}, strict).find("protocol minor") !=
           std::string::npos);
   REQUIRE(verdict([](B c) { c.setProtocolMinor(2); }, strict).empty());
+}
+
+TEST_CASE("Capabilities handshake accepts a schema id with an optional 0x prefix",
+          "[abi][profile][compat]") {
+  const std::string stored = rgpot::abi::kSchemaId;
+  REQUIRE(stored.rfind("0x", 0) == 0);
+  const std::string bare = stored.substr(2);
+  REQUIRE(bare != stored);
+  REQUIRE(verdict([&](::Capabilities::Builder caps) { caps.setSchemaId(bare); })
+              .empty());
+
+  std::string upper = stored;
+  for (char &ch : upper)
+    ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+  REQUIRE(upper != stored);
+  REQUIRE(verdict([&](::Capabilities::Builder caps) { caps.setSchemaId(upper); })
+              .empty());
+
+  std::string prefixed = "0X";
+  for (char ch : bare)
+    prefixed.push_back(
+        static_cast<char>(std::toupper(static_cast<unsigned char>(ch))));
+  REQUIRE(verdict([&](::Capabilities::Builder caps) {
+            caps.setSchemaId(prefixed);
+          }).empty());
+
+  const auto mismatch =
+      verdict([](::Capabilities::Builder caps) { caps.setSchemaId("deadbeef"); });
+  REQUIRE(mismatch.find("schema id") != std::string::npos);
 }
 
 TEST_CASE("checked_load accepts the fake engine, whose capabilities are "
