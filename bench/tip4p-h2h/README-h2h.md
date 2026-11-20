@@ -18,9 +18,10 @@ Both arms open the same molecular centres: `h2h_seed` writes the start it
 draws for a seed and GMIN reads it as its `coords`. One charged evaluation is
 one entry to the potential on either side. A hit is a quenched energy at or
 below the reference plus 0.001 kJ/mol. The references are the Cambridge
-Cluster Database TIP4P headers, which the database lists for n ≤ 21; (H₂O)₂₅
-is not in the database, so its hit is scored against the lowest energy either
-arm reached in the session and no early stop is armed.
+Cluster Database TIP4P headers, which the database lists for n ≤ 21. (H₂O)₂₅
+has no independent reference. Hits are not scored for that size, and only the
+best energies are reported: the median and the minimum on each arm. No early
+stop is armed.
 
 GMIN is built from source by `scripts/gmin_h2h/build_gmin.sh` at revision
 `aac1548a`, gfortran 13.3.0, reference BLAS/LAPACK, with NEWTIP, TIPID 4,
@@ -62,15 +63,24 @@ is the two-sided Mann–Whitney U test on the per-seed best energies.
 | (H₂O)₁₅ | 9/12  | 0/12 | −628.3716 / −628.3714 | −622.859 / −619.933 | 8.01 / 40.81 | 6.12 / 36.97 | 0.00034 | 3.2e-05 |
 | (H₂O)₂₀ | 5/12  | 0/12 | −872.9879 / −864.394 | −860.701 / −851.443 | 22.17 / 71.13 | 17.61 / 66.39 | 0.037 | 5.3e-05 |
 | (H₂O)₂₁ | 0/12  | 0/12 | −915.774 / −914.294 | −903.760 / −895.593 | 24.89 / 76.37 | 19.21 / 71.46 | 1.000 | 3.2e-05 |
-| (H₂O)₂₅ | 1/12  | 0/12 | −1113.035 / −1103.345 | −1087.334 / −1082.127 | 33.86 / 105.23 | 26.23 / 99.89 | 1.000 | 3.2e-05 |
 
-GMIN beats anneal nowhere. Anneal has at least as many hits at every size and
-a lower per-seed best-energy distribution at every size from 15 up, with the
-Mann–Whitney p at or below 5.3e-05. At (H₂O)₂₁ neither arm reaches the global
-minimum in 2 M calls, but anneal stops 0.93 kJ/mol short of it against GMIN's
-13 kJ/mol; at (H₂O)₂₅ anneal reaches −1113.03 kJ/mol against GMIN's −1087.33.
-Anneal's median wall is 3.1 to 85× shorter, and most of each wall on both
-sides is time inside the potential.
+(H₂O)₂₅ has no independent reference. Hits are not scored. Only best energies
+are reported: the minimum and the median on each arm. There is no hit column
+and no Fisher or calls-to-hit column for that size.
+
+| Size | anneal min / median | GMIN min / median |
+| --- | --- | --- |
+| (H₂O)₂₅ | −1113.035 / −1103.345 | −1087.334 / −1082.127 |
+
+GMIN beats anneal nowhere on the scored sizes. Anneal has at least as many hits
+at every scored size and a lower per-seed best-energy distribution at 15, 20,
+and 21, with the Mann–Whitney p at or below 5.3e-05. At (H₂O)₂₁ neither arm
+reaches the global minimum in 2 M calls, but anneal stops 0.93 kJ/mol short of
+it against GMIN's 13 kJ/mol. At (H₂O)₂₅ the best energy is −1113.03 kJ/mol on
+anneal and −1087.33 kJ/mol on GMIN.
+
+Anneal's median wall is 3.1 to 85× shorter on the scored sizes, and most of
+each wall on both sides is time inside the potential.
 
 At (H₂O)₈ both arms find the same global-minimum cage. GMIN's best reads
 1.2 mJ/mol below anneal's there, which is the potential offset above plus

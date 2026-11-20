@@ -2786,7 +2786,7 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(TEX, f"Against GMIN on TIP4P, this setting hits more seeds on {len(more)} of the {len(tip)} sizes")
     audit.said(TEX, "against GMIN on TIP4P this setting hits \\((\\mathrm{H_2O})_{15}\\) on 9 of 12\nand GMIN on 0 of 12.")
     audit.said("bench/tip4p-h2h/README-h2h.md",
-               "(H₂O)₂₅ is not in the database, so its hit is scored against the lowest energy either arm reached")
+               "(H₂O)₂₅\nhas no independent reference. Hits are not scored")
 
     # Constants of the definitions and of the priors, read from the source.
     preset = "src/methods/cluster_hopping/preset.rs"
