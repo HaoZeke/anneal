@@ -98,7 +98,7 @@ library tarballs, then publishes the Python artifacts to PyPI, publishes
 =anneal-core= to crates.io if that version is absent, and opens the
 GitHub Release.
 
-* Why 0.8.0 and 0.9.0 were missing from PyPI
+* Why PyPI has no release for 0.8.0 and 0.9.0
 
 PyPI and crates.io stopped at =0.7.2= (=v0.7.2=, 2026-08-01).
 

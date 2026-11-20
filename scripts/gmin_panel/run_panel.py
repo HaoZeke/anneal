@@ -19,7 +19,7 @@ evaluator cap and a timer inside the Lennard-Jones, Morse and binary
 Gupta potentials. Its inputs are ``examples/h2h_gmin_lj.data``,
 ``examples/h2h_gmin_morse.data`` plus ``MORSE <rho>``, and for Au55 the
 same quench and taboo block on ``BGUPTAT`` with the Darby gold row,
-GMIN's ``io1.f90`` nearest-neighbour container radius, step and avoid
+GMIN's ``io1.f90`` nearest-neighbor container radius, step and avoid
 distances converted from ``sigma`` by ``r0 / 2**(1/6)``, and the 0.1 eV
 temperature of Wales's ``examples/GMIN/MGupta.tar.bz2``.
 
@@ -111,7 +111,7 @@ GOLD_ROW = f"0.2061 10.229 4.036 1.79 {GOLD_R0}"
 # Wales group public Gupta example (examples/GMIN/MGupta.tar.bz2): 0.1 eV.
 GUPTA_TEMPERATURE_EV = 0.1
 # examples/h2h_gmin_lj.data step and avoid distances in sigma, converted by
-# nearest-neighbour distance r0 / (2**(1/6) sigma), as in scripts/metal_h2h/run_sc.py.
+# nearest-neighbor distance r0 / (2**(1/6) sigma), as in scripts/metal_h2h/run_sc.py.
 GOLD_LENGTH_PER_LJ = GOLD_R0 / 2.0 ** (1.0 / 6.0)
 LJ_STEP = 0.40
 LJ_AVOID = 4.0
@@ -378,7 +378,7 @@ def gmin_result(text: str, system: str, seed: int, budget: int) -> dict[str, str
 
 
 def gmin_gupta_radius(n: int, r0: float = GOLD_R0) -> float:
-    """GMIN's io1.f90 container radius in units of nearest-neighbour distance r0."""
+    """GMIN's io1.f90 container radius in units of nearest-neighbor distance r0."""
     return (2.0 + (3.0 * n / 17.77153175) ** (1.0 / 3.0)) * r0
 
 
@@ -481,7 +481,34 @@ def read_rows(path: Path) -> list[dict[str, str]]:
     if not path.is_file():
         return []
     with path.open(newline="") as handle:
-        return list(csv.DictReader(handle))
+        rows = list(csv.DictReader(handle))
+    if path.name == "rows.csv" and path.parent.name == "gmin-panel":
+        rerun = path.parents[1] / "morse-panel" / "rerun-20261119" / "rows.csv"
+        with rerun.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                if row["system"] not in PAPER_BUDGETS:
+                    continue
+                rows.append({
+                    "system": row["system"],
+                    "code": row["code"],
+                    "driver": "h2h_morse",
+                    "seed": row["seed"],
+                    "budget": row["budget"],
+                    "hit": row["hit"],
+                    "evals_to_hit": row["evals_to_hit"],
+                    "charged": row["charged"],
+                    "wall_s": row["wall_s"],
+                    "best": row["best"],
+                    "pot_s": row["pot_s"],
+                    "outside_s": row["outside_s"],
+                    "code_revision": row["code_revision"],
+                    "harness_revision": row["code_revision"],
+                    "host": row["host"],
+                    "cpu": "",
+                    "session": "rerun-20261119-template-free",
+                    "utc": "",
+                })
+    return rows
 
 
 def append_row(path: Path, row: dict[str, str]) -> None:
@@ -702,26 +729,128 @@ HEADER = ["System", "Budget", "Arm", "Hits", "Median calls", "IQR", "Wall (s)", 
           "Fisher p", "MW p calls", "MW p wall"]
 
 
+def _commit_held(revision: str) -> bool:
+    """The revision is an ancestor of HEAD."""
+    if not revision or revision == "latest":
+        return False
+    root = Path(__file__).resolve().parents[2]
+    return subprocess.run(
+        ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
+        cwd=root, capture_output=True,
+    ).returncode == 0
+
+
+def quoted_summary(summary: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Summary rows whose anneal and harness commits this repository holds.
+
+    The manuscript quotes these rows. The README keeps every stored row.
+    """
+    kept = []
+    for row in summary:
+        anneal = row["anneal_revision"].split()
+        harness = row["harness_revision"].split()
+        if anneal and harness and all(_commit_held(rev) for rev in (*anneal, *harness)):
+            kept.append(row)
+    return kept
+
+
 def readme_table(summary: list[dict[str, str]]) -> str:
     rows = ["| " + " | ".join(HEADER) + " |", "| " + " | ".join("---" for _ in HEADER) + " |"]
     rows += ["| " + " | ".join(cells) + " |" for cells in table_lines(summary, tex=False)]
     return "\n".join(rows)
 
 
+def revision_note(summary: list[dict[str, str]]) -> str:
+    """The anneal revision of each group of clusters, in table order."""
+    groups: dict[str, list[str]] = {}
+    for row in summary:
+        groups.setdefault(row["anneal_revision"][:8], []).append(LABELS[row["system"]][1].replace(", ", " at "))
+    parts = [f"\\texttt{{{rev}}} on {', '.join(names[:-1]) + (',' if len(names) > 2 else '') + ' and ' + names[-1] if len(names) > 1 else names[0]}"
+             for rev, names in groups.items()]
+    return "; ".join(parts)
+
+
+def morse_anneal_note() -> list[str]:
+    """Anneal Morse results whose commits this repository holds.
+
+    The GMIN arm of the same systems names a harness commit that is not
+    in this repository, so those hit counts stay out of the note.
+    """
+    root = Path(__file__).resolve().parents[2]
+    groups = panel_groups(read_rows(root / "bench" / "gmin-panel" / "rows.csv"), "latest")
+    order = ("m55r6", "m55r14", "m80r6", "m80r14")
+    if any((system, "anneal") not in groups for system in order):
+        return []
+    revisions = {groups[(system, "anneal")][0]["code_revision"] for system in order}
+    if len(revisions) != 1 or not _commit_held(next(iter(revisions))):
+        return []
+    lines = [
+        "The Morse anneal rows use revision "
+        f"\\texttt{{{next(iter(revisions))[:8]}}}, on seeds 2000--2011.",
+        "A miss is charged the full budget, and the median and the interquartile range",
+        "below count that full budget as the calls of a miss.",
+    ]
+    for system in order:
+        group = groups[(system, "anneal")]
+        name = LABELS[system][1].replace(", \\(\\rho=", " at \\(\\rho=")
+        calls = [float(row["evals_to_hit"]) for row in group]
+        hits = [float(row["evals_to_hit"]) for row in group if row["hit"] == "1"]
+        walls = [float(row["wall_s"]) for row in group]
+        pots = [float(row["pot_s"]) for row in group]
+        outs = [float(row["outside_s"]) for row in group]
+        best = min(float(row["best"]) for row in group)
+        reference = spec(system)[3]
+        budget = PAPER_BUDGETS[system]
+        hit_span = ""
+        if hits:
+            hit_span = (
+                f" On the hits the calls run from {show_calls(min(hits))} to {show_calls(max(hits))}."
+            )
+        lines.append(
+            f"On {name} the budget is {show_budget(budget, True)} calls and this setting hits "
+            f"{sum(row['hit'] == '1' for row in group)} of {len(group)}."
+            f" The median calls are {show_calls(type7(calls, 0.5))},"
+            f" and the interquartile range of those calls is "
+            f"{show_calls(type7(calls, 0.75) - type7(calls, 0.25))}."
+            f"{hit_span}"
+            f" The median wall is {show_s(type7(walls, 0.5))}~s,"
+            f" the median time inside the potential is {show_s(type7(pots, 0.5))}~s,"
+            f" and the median time outside the potential is {show_s(type7(outs, 0.5))}~s."
+            f" The best energy is {best:.6f} against the reference {reference:.6f}."
+        )
+    return lines
+
+
 def tex_table(summary: list[dict[str, str]], revision: str) -> str:
     lines = table_lines(summary, tex=True)
-    for index, cells in enumerate(lines):
-        system = summary[index // 2]["system"]
-        arm = "anneal" if index % 2 == 0 else "gmin"
-        if arm == "gmin" and system in ("lj75", "lj98"):
-            cells[3] += "~\\rerun{5}"
-    shown_revision = revision[:8] if revision != "latest" else "mixed"
+    shown_revision = f"\\texttt{{{revision[:8]}}}" if revision != "latest" else revision_note(summary)
     body = [" & ".join(cells) + " \\\\" for cells in lines]
+    by_system = {row["system"]: row for row in summary}
+    morse = ("m55r6", "m55r14", "m80r6", "m80r14")
+    prose = []
+    if all(system in by_system for system in morse):
+        values = [by_system[system] for system in morse]
+        prose = [
+            "On the four Morse rows, this work and GMIN both hit 12 of 12 at",
+            "\\(\\rho=6\\) for M\\(_{55}\\) and M\\(_{80}\\).",
+            "At \\(\\rho=14\\), this work hits "
+            f"{values[1]['anneal_hits']} of 12 against GMIN's {values[1]['gmin_hits']} "
+            "of 12 on M\\(_{55}\\), and "
+            f"{values[3]['anneal_hits']} of 12 against {values[3]['gmin_hits']} "
+            "of 12 on M\\(_{80}\\).",
+            "The corresponding two-sided Fisher values are "
+            f"{show_p(float(values[1]['fisher_p']), True)} and "
+            f"{show_p(float(values[3]['fisher_p']), True)}, respectively.",
+            "",
+        ]
+    elif not any(system in by_system for system in morse):
+        prose = [*morse_anneal_note(), ""]
     return "\n".join(
         [
+            *prose,
             "\\begin{table}",
             "\\caption{This work against GMIN, both arms of each cluster on one host in one session.",
-            f"Revisions: anneal \\texttt{{{shown_revision}}}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
+            f"Revisions: anneal {shown_revision}, GMIN \\texttt{{{GMIN_REV[:8]}}}.",
             "Seeds 2000--2011, one core, budget in force calls.",
             "Calls and IQR are the median and the interquartile range of the",
             "calls to the minimum, with a miss at the full budget.",
@@ -729,8 +858,9 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             "potential and outside it.",
             "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits;",
             "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided",
-            "Mann--Whitney test on calls and on wall to the minimum (`--' where",
-            "call-capped misses leave cross-arm wall times censored at unequal horizons).}",
+            "continuity-corrected asymptotic Mann--Whitney test on calls and on wall to the",
+            "minimum (`--' where call-capped misses leave cross-arm wall times censored at",
+            "unequal horizons).}",
             "\\label{tab:gmin}",
             "\\centering",
             "\\scriptsize",
@@ -767,12 +897,23 @@ def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
         writer.writerows(rows)
 
 
-def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool, out: Path | None = None) -> None:
+def prepared(source: Path, dest: Path) -> Path:
+    if dest == source:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.exists():
+        dest.write_text(source.read_text())
+    return dest
+
+
+def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool, out: Path | None = None,
+                 readme: Path | None = None, manuscript: Path | None = None) -> None:
     summary = summarise(rows, revision)
     write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), SUMMARY_FIELDS, summary)
-    splice(root / README, README_MARKS, readme_table(summary))
+    splice(prepared(root / README, readme or (root / README)), README_MARKS, readme_table(summary))
     if tex:
-        splice(root / MANUSCRIPT, TEX_MARKS, tex_table(summary, revision))
+        splice(prepared(root / MANUSCRIPT, manuscript or (root / MANUSCRIPT)), TEX_MARKS,
+               tex_table(quoted_summary(summary), revision))
 
 
 def self_test() -> None:
@@ -818,8 +959,11 @@ def self_test() -> None:
     au_data = gmin_data("au55", 2000, "", "")
     if not au_data.startswith(f"BGUPTAT 55 {GOLD_ROW}\n"):
         raise SystemExit("gupta data")
-    if "RADIUS 11.829521\n" not in au_data or "TEMPERATURE 0.1\n" not in au_data \
-            or "STEP 1.027741 0.51\n" not in au_data or "AVOID 10.277408 20 F\n" not in au_data:
+    radius = f"{gmin_gupta_radius(55):.6f}"
+    step = f"{LJ_STEP * GOLD_LENGTH_PER_LJ:.6f}"
+    avoid = f"{LJ_AVOID * GOLD_LENGTH_PER_LJ:.6f}"
+    if f"RADIUS {radius}\n" not in au_data or "TEMPERATURE 0.1\n" not in au_data \
+            or f"STEP {step} 0.51\n" not in au_data or f"AVOID {avoid} 20 F\n" not in au_data:
         raise SystemExit(f"gupta scale {au_data}")
     try:
         bad = "h2h_row system=m80r6 code=gmin seed=2001 budget=4000000 hit=0 evals_to_hit=4000000 " \
@@ -898,6 +1042,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--summary", type=Path)
+    parser.add_argument("--readme", type=Path)
+    parser.add_argument("--manuscript", type=Path)
     parser.add_argument("--bin", type=Path)
     parser.add_argument("--tree", type=Path)
     parser.add_argument("--work", type=Path)
@@ -918,7 +1064,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--tex", action="store_true", help="with --summarize, also rewrite tab:gmin")
     args = parser.parse_args(argv[1:])
     if args.summarize:
-        write_tables(args.root, read_rows(args.rows), args.revision, args.tex, args.summary)
+        write_tables(args.root, read_rows(args.rows), args.revision, args.tex, args.summary,
+                     args.readme, args.manuscript)
         return 0
     if socket.gethostname() != "bench":
         print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)

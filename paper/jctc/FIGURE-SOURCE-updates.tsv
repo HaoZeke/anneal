@@ -1,0 +1,51 @@
+path	source_sha256	kind	status	update_reason
+paper/jctc/scripts/emit_sealed_stats.py	5ce82e863b008e7affccf9c4d147b8e761f2d5ef3d07a34fd30bd5a0aaf34c2e	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_algorithm_stack.py	56a75e4f0fdafa008b26bbef7d78c87d321ec5064787b05608395212e50b57c4	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_disconnectivity.py	97c00cbfd76123a914b02072369c7bfdd3e8b2dc976ed92f366e06ea2b1b6a09	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_landfold_maps.py	babc173dbf4f3062c57f906d4cbf29c2779de53cff6e09be5228b84fe8cb1c78	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_landscapes.py	36767b9fb2551579fd3a83af68d23e639739d59ca936e9d35e782d3a1cd5e86b	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_lj75_ecdf.py	8de85ae32f1d6df3061f5cfc108927b27b3774af400480b206b4ec9c7a40bda9	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_rec_arms.py	ed47518108303fb885acaf74dc11af556658f8d6f23e48ab79f8ffb260d8b1b6	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_si_panels.py	81d0b733d5e175d0847d34bf1e3377361889007a3807bfeef80275e224ed75b1	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_si_structures.py	6e6225a716abbf6cb80aafb23d7f990fac24329c0b9bd63e102a5e79324acfb4	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_si_water.py	417c1e56a3ee005770701dc3a8079c7e090ffa837d8577a2d2aa7d4a8d3b47bf	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_summary_rates.py	5606d5b302351b41f9cdbe3653f17524254d410b015388ec374ab51aec3c60dd	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_systems.py	ba9eb4a87506fe748904523dad1cfd481750b0cbfd4d74d37b155e0f29eff661	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/figstyle.py	87b5e5eac1bf3f5bdb175344c39724bf290f9b09d83654fc6bf54a3c1fa4afa4	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/lj75_gmin_table.py	9356d8fb3c04c16782dc03de2ad18358835baf07c28b10b3a18c02b701ec739b	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/lj_csm_sizes_table.py	74c588430acf9adef9b7a27187e8f96be449303479a662c6cdd1594f78725c5b	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/render_all.py	179f31ca68e2eae69b5a7b9708c60fc6134c3fb74fcb13a2102a8d7dc47eaa08	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/results_jcc.py	ca8649f79f615a4e0097cb5eb0bfbeca1213e0a8985c32d300fe21484194a970	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/sketchmap_landscapes.py	e206d551ed2856fb770ec305abbfc06b7628a6565c8d187d0d93a946c14229d7	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/system_visuals.py	e3d7c83a1482c8872f3c4a5a79a1f0ce4e85fd2d2175967bfe228b6ac17219a7	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/tip4p_constants.py	fac13c8b6f327140ddc2ac641645866ef3dd482a186720a67ef59f6a33e40d5d	script	active	supersedes the source hash after the paper reroll
+paper/jctc/scripts/fig_water_crest.py	b9b39e464d0a1dcbf7ca09e8291105f427a21bec53ff6659bab711ef519eead4	script	superseded	the source was retired by the paper reroll
+paper/jctc/scripts/water_results_table.py	0c736a44350791e9050f01a47cc176c59a153639bb8d1aef3e818d41ce6e2db8	script	superseded	the source was retired by the paper reroll
+paper/jctc/data/water_v45b/provenance.txt	e39349b6341e841a3a803c603d2ee38f912f45904736f852e08a0660a3e0708a	data	superseded	the source was retired by the paper reroll
+paper/jctc/data/water_v45b/water-v45b-perseed-report.md	d29932dcad63928b0023ae83f6f2f06cfc92feae00e2fe14f80a4df1f8902ac5	data	superseded	the source was retired by the paper reroll
+paper/jctc/data/water_v45b/water-v45b-perseed.csv	d7c661258f757619b86fbf841ff270d7d872b984d306f819efbb3d933c041b7c	data	superseded	the source was retired by the paper reroll
+paper/jctc/data/gmin_lj_sizes_v45b/provenance.txt	2a90a723b6c2745c70b016ac4a06ef18d97fe2b60de48c27e8dbfff3fd4bc5cd	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/hq_sci_h2o6/TALLY.txt	1e2ae0f1845521d361f3ace01bf439559e40ae5d44ba8587f1cf591ff63adc69	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landfold_maps_v7/provenance.txt	df259893b2e9fc290557fbcc3e0a1ad33a05c4c1a1816ea30fdca1378a01f6a3	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/README.md	7a13f6d16d70a2f30300af8be446a70d9b8812589e4cea4e0305e5bde29dad57	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj38.figure.provenance.txt	9869fc046dc8e992ab3bdfd45115a102d0dbda27751c1c31ac3ac1d7b1a9ee36	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj38_bh_s0.provenance.txt	474549f1c29b82dbb7f528e80881e42e0c0f986d109976224138524de735f93f	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj38_recommended_s0.provenance.txt	10c80ab2e3af833fb26ed1deaa86b24dc675563bc4f8c62c9a22fc17b9580bf6	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj38_rss_s0.provenance.txt	9c3d6e6539f0c7b687173c6e49381472662cbe0b7492681b17f73849b4039b0b	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj75.figure.provenance.txt	3c5bcd2d7f6773b7b0eb9de2b4afb652f6ac9f40559b8c8e327ada1a2dfdc5da	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj75_bh_s0.provenance.txt	3484e090ab62f54901195cadea66be179044e72bedae4a8df1c4e44ddfb57548	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj75_recommended_s0.provenance.txt	39b27e24bffd97718eafa7c2b0873ee339063f6f872431592cdf54c9593684ee	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj98.figure.provenance.txt	afa896778d2eb2b9e368a1c78942f23ff4ea30fd84978ce29d323a38906ece89	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj98_bh_s0.provenance.txt	ecf299973da6a62f1638921763e2a8cd26e671f8489124abc040c242c62a238a	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/landscapes_7695255/lj98_recommended_s0.provenance.txt	fbd61bffd1f9e3a56a108c460215feeea4294df6ee0f88a0ce231a2c7e574bcd	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/lj75_gmin/provenance.txt	f3e62543a94c59ce2371be848ef19211c3a7452ed464afab5454d22fba3baedd	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/results_jcc_c47d301/provenance.txt	f980fadceec20f81744662e157762a689de8cbc9cd4bb7580bbce0122571ba79	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/system_visuals/provenance.txt	f4f59a33568e13d086c3e48461344f6f631ab320a792df285675f15d7fa6df63	data	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/scripts/fig_disconnectivity.py	6ea9b54081d8900970fa579500f189ec84e5432342fae184dac7521f990c501a	script	active	supersedes a stale receipt with the current committed source hash
+paper/jctc/data/lj_csm_sizes/provenance.txt	fa775df37cb205955d676d2dd6436981c8f82791862a5f23a272f62ccabff76c	data	active	retains the develop provenance formatting
+paper/jctc/scripts/render_all.py	82096a1f0f23154196d53d2b554bf0ba9a44cfcaa3d72af5a9a564ca7518a326	script	active	the renderer takes an output directory
+paper/jctc/scripts/fig_disconnectivity.py	b74373f9c84e89e978ed76ad811e8ca1de8ebd3ac36eb0696d1d353e1995ce3c	script	active	the source names commits this repository holds
+paper/jctc/scripts/fig_landscapes.py	3d8bc5649ce8dab5849234ead39b3bd68918c381f0bd6a7224df72b12c559c52	script	active	the source names commits this repository holds
+paper/jctc/scripts/lj75_gmin_table.py	9d79311438fef5eeaf540318a543f6322042ffed22946d14753a1544da9a1099	script	active	the source names commits this repository holds
+paper/jctc/scripts/sketchmap_landscapes.py	c922e562b347d37a708739e583eaebc8eee0ec88076aadaf42be2dda20752a27	script	active	the source names commits this repository holds
+paper/jctc/scripts/system_visuals.py	52bcda5936a263f62def7a8ddfd71c2478e03cf4b5075e9e03f95152c589b7c2	script	active	the source names commits this repository holds

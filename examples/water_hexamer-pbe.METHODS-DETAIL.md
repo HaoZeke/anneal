@@ -16,6 +16,6 @@ Budget 4000, not the 1200 named in FIXES R6. Seeds 0-31. Selector `pbe`.
 See `water_hexamer.METHODS-DETAIL.md`.
 
 This build of rgpot-core does not enable its profile client, so the
-driver records the settings and does not call NWChem. A missing library
-or config is part of that load failure. The smoke file does not invent
+driver records the settings and does not call NWChem. A library
+or config that the loader cannot open is part of that load failure. The smoke file does not invent
 an energy.

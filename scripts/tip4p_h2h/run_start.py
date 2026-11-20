@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Append TIP4P rows where GMIN opens anneal's rigid start.
 
-``h2h_seed`` writes each start as the chart's centres and Rodrigues vectors,
+``h2h_seed`` writes each start as the chart's centers and Rodrigues vectors,
 the block NEWTIP reads. Before the searches GMIN evaluates that block once
 (``CHECKD 0``) and the run stops if its energy is not anneal's start energy.
 Every seed runs ``gmin-control-same-start`` and ``gmin-radius-same-start``

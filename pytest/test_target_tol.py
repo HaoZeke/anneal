@@ -378,7 +378,7 @@ def test_ase_summarizers_reject_nan_hit_rows(tmp_path: Path, monkeypatch):
         ase_panel.load("lj38")
 
     ase_nonlj = _load_module("test_ase_nonlj_nan_mod", "scripts/ase_nonlj/summarize.py")
-    nonlj_dir = tmp_path / "bench" / "ase-nonlj"
+    nonlj_dir = tmp_path / "bench" / "ase-nonlj" / "rerun-20261119"
     nonlj_dir.mkdir(parents=True)
     (nonlj_dir / "rows.csv").write_text(
         ",".join(ase_nonlj.ROW_FIELDS)

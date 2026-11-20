@@ -2,19 +2,19 @@
 # Copyright (c) anneal developers
 """Draw fig:disconnectivity: the approximate disconnectivity graph of the LJ38 minima.
 
-The steps and settings are those of campaign_disconnectivity.py of the paper at 028d995,
-on the LJ38 dumps of data/landscapes_7695255/ and the fcc and icosahedral references of
+The steps and settings follow
+the LJ38 dumps of data/landscapes_7695255/ and the fcc and icosahedral references of
 data/system_visuals/sketchmap/, each read through system_visuals.py against its digest:
 the dumps of basin hopping, the recommended hop and random structure search pooled, at
 most 1200 drawn by the random stream of seed 11 with the deepest kept, and those at or
 below -170 epsilon kept; the references first; the sorted smoothed coordination numbers
 at cutoff 1.5 as the descriptor; minima within 0.15 of a deeper one merged; and, through
-chemparseplot, the merge tree of the 6-nearest-neighbour graph over 48 energy levels.
+chemparseplot, the merge tree of the 6-nearest-neighbor graph over 48 energy levels.
 The graph records no transition state, so a merge stands at the level at which two sets
-of minima first join in the graph, not at a barrier. The stems are coloured by five
-spectral basins of the same graph in the five colours of the Ruhi palette, as chemparseplot
+of minima first join in the graph, not at a barrier. The stems are colored by five
+spectral basins of the same graph in the five colors of the Ruhi palette, as chemparseplot
 paints its basins, named by their deepest minimum and its reference, and the four deepest
-leaves are labelled.
+leaves are labeled.
 
 Usage: fig_disconnectivity.py [--data DIR] out.pdf
 """
@@ -38,7 +38,7 @@ DEDUP = 0.15
 KNN = 6
 LEVELS = 48
 BASINS = 5
-LABELLED = 4
+LABELED = 4
 NAMES = {"fcc": "fcc global minimum", "icosahedral": "icosahedral minimum"}
 # Given in order of the deepest minimum of each basin, so the pale sunshine falls on the shallowest.
 PALETTE = (figstyle.SKY, figstyle.MAGENTA, figstyle.CORAL, figstyle.TEAL, figstyle.SUNSHINE)
@@ -123,7 +123,7 @@ def main(argv=None) -> int:
               handlelength=1.6, borderaxespad=0.2)
     leaves = {node.leaf: node for node in iter_nodes(root) if node.leaf is not None}
     span = float(np.ptp(energies))
-    for rank, i in enumerate(np.argsort(energies)[:LABELLED]):
+    for rank, i in enumerate(np.argsort(energies)[:LABELED]):
         ax.annotate(f"{kind(i)}, \N{GREEK CAPITAL LETTER DELTA}E = {energies[i] - e0:.3f}",
                     xy=(leaves[i].x, energies[i]), xytext=(0.04 * len(leaves), e0 - (0.05 + 0.05 * rank) * span),
                     ha="left", va="center", fontsize=figstyle.SMALLEST,
@@ -133,7 +133,7 @@ def main(argv=None) -> int:
     ax.text(0.99, 0.02, f"{pooled} minima at or below \N{MINUS SIGN}170 \N{GREEK SMALL LETTER EPSILON} and 2 references, "
             f"{distinct} distinct", transform=ax.transAxes, ha="right", va="bottom", fontsize=figstyle.SMALLEST)
     ax.margins(y=0.08)
-    ax.set_ylim(e0 - (0.1 + 0.05 * LABELLED) * span, None)
+    ax.set_ylim(e0 - (0.1 + 0.05 * LABELED) * span, None)
     ax.set_yticks(np.arange(np.floor(e0), np.floor(energies.max()) + 1))
     ax.set_xticks([])
     ax.spines["bottom"].set_visible(False)

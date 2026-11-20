@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -43,8 +45,9 @@ TEX_LABELS = {
     "lj150": "LJ\\(_{150}\\)",
     "au55": "Au\\(_{55}\\)",
 }
-MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
+DOCUMENT = ROOT / "paper" / "jctc" / "si.tex"
 TEX_MARKS = ("% ase-panel table: start", "% ase-panel table: end")
+PROSE_MARKS = ("% ase-panel prose: start", "% ase-panel prose: end")
 ASE_VERSION = "3.29.0"
 HIT_TOL = DEFAULT_HIT_TOL
 HEADER = (
@@ -409,13 +412,155 @@ def show_cap(cap: str) -> str:
     return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
 
 
+def commit_held(revision: str) -> bool:
+    """The revision is a commit object in this repository."""
+    if not revision or revision in {"unknown", "latest"}:
+        return False
+    return subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+        cwd=ROOT, capture_output=True,
+    ).returncode == 0
+
+
+def series(items) -> str:
+    """A list with the serial comma: ``a``, ``a and b``, ``a, b, and c``."""
+    items = [str(item) for item in items]
+    return " and ".join(items) if len(items) <= 2 else ", ".join(items[:-1]) + ", and " + items[-1]
+
+
+def quoted_campaigns() -> dict[str, dict[str, list[dict[str, str]]]]:
+    """Systems whose quoted arms all name a commit this repository holds."""
+    found = {}
+    for system in SYSTEMS:
+        grouped = load(system)
+        quoted = [row for arm in ("recommended", *ASE_ARMS) for row in grouped[arm]]
+        if quoted and all(commit_held(row["code_revision"]) for row in quoted):
+            found[system] = grouped
+    return found
+
+
+def held_prose() -> str:
+    """Sentences that accompany tab:ase once its quoted commits are held.
+
+    The block is empty while the table is empty, so the expected failure stays
+    until a record fills both.
+    """
+    groups = quoted_campaigns()
+    if not groups:
+        return ""
+    order = [system for system in SYSTEMS if system in groups]
+
+    def hits(system: str, arm: str) -> int:
+        return sum(row["hit"] == "1" for row in groups[system][arm])
+
+    def stops(system: str, arm: str, stop: str = "wall") -> int:
+        return sum(row["stop"] == stop for row in groups[system][arm])
+
+    revisions = ", ".join(sorted({
+        row["code_revision"] for system in order for row in groups[system]["recommended"]
+    }))
+    sentences = [f"This work is anneal \\texttt{{{revisions}}}."]
+    mh_runs = sum(len(groups[system]["ase_mh"]) for system in order)
+    bh = [(system, stops(system, "ase_bh")) for system in order if stops(system, "ase_bh")]
+    if bh:
+        bh_clause = (
+            f"and basin hopping on {sum(count for _, count in bh)}: "
+            f"{series(f'{count} on {TEX_LABELS[system]}' for system, count in bh)}."
+        )
+    else:
+        bh_clause = "and basin hopping on none."
+    sentences.append(
+        f"Minima hopping stopped at the cap on all {mh_runs} runs of Table~\\ref{{tab:ase}}, {bh_clause}"
+    )
+    spent = [
+        system for system in order
+        if groups[system]["ase_bh"]
+        and stops(system, "ase_bh", "budget") == len(groups[system]["ase_bh"])
+        and all(int(row["budget"]) == 4_000_000 for row in groups[system]["ase_bh"])
+    ]
+    if spent:
+        sentences.append(
+            f"On {series(TEX_LABELS[system] for system in spent)} basin hopping spent the full "
+            "\\(4\\times 10^{6}\\) calls on every seed."
+        )
+    lj = [system for system in order if system != "au55"]
+    runs: list[tuple[list[str], int]] = []
+    for system in lj:
+        count = hits(system, "recommended")
+        if runs and runs[-1][1] == count:
+            runs[-1][0].append(system)
+        else:
+            runs.append(([system], count))
+    if runs:
+        sentences.append(
+            "This setting hits " + series(
+                f"{series(TEX_LABELS[system] for system in names)} on {count} of 12"
+                for names, count in runs
+            ) + "."
+        )
+    bh_hits = [system for system in order if hits(system, "ase_bh")]
+    mh_hits = [system for system in order if hits(system, "ase_mh")]
+    if bh_hits == ["lj55"] and not mh_hits:
+        sentences.append(
+            f"Basin hopping hits {TEX_LABELS['lj55']} on {hits('lj55', 'ase_bh')} of 12 "
+            "and no other cluster, and minima hopping hits none."
+        )
+    else:
+        bh_text = series(
+            f"{TEX_LABELS[system]} on {hits(system, 'ase_bh')} of 12" for system in bh_hits
+        ) or "none"
+        mh_text = series(
+            f"{TEX_LABELS[system]} on {hits(system, 'ase_mh')} of 12" for system in mh_hits
+        ) or "none"
+        sentences.append(f"Basin hopping hits {bh_text}, and minima hopping hits {mh_text}.")
+    below = [
+        system for system in lj
+        if max(fisher(hits(system, "recommended"), hits(system, arm)) for arm in ASE_ARMS) < 0.05
+    ]
+    if lj and len(below) == len(lj):
+        sentences.append(
+            f"Fisher's test against each ASE arm is below 0.05 on all {len(below)} Lennard-Jones clusters."
+        )
+    elif below:
+        sentences.append(
+            "Fisher's test against each ASE arm is below 0.05 on "
+            f"{len(below)} of the {len(lj)} Lennard-Jones clusters."
+        )
+    if "au55" in groups:
+        if all(hits("au55", arm) == 0 for arm in ("anneal", "recommended", *ASE_ARMS)):
+            sentences.append(f"No arm hits {TEX_LABELS['au55']}.")
+        else:
+            counts = ", ".join(
+                f"{hits('au55', arm)} of 12 for {LABELS[arm]}"
+                for arm in ("recommended", *ASE_ARMS)
+            )
+            sentences.append(f"{TEX_LABELS['au55']} hits are {counts}.")
+        reference = SYSTEMS["au55"][2]
+        gaps = [
+            median([float(row["best"]) for row in groups["au55"][arm]]) - reference
+            for arm in ("recommended", *ASE_ARMS)
+        ]
+        sentences.append(
+            f"There the median best energy lies {gaps[0]:.3f}~eV above the reference for this setting, "
+            f"{gaps[1]:.3f}~eV for basin hopping, and {gaps[2]:.3f}~eV for minima hopping."
+        )
+    return "\n".join(sentences)
+
+
 def tex_table() -> str:
-    """Table tab:ase: recommended against both ASE arms, Fisher on hits only."""
+    """Table tab:ase: recommended against both ASE arms, Fisher on hits only.
+
+    A system is omitted when any quoted arm cites a commit this repository does not hold.
+    The block is empty when that is every system.
+    """
     body = []
     revisions = set()
     for system in SYSTEMS:
         _, budget, _, _ = SYSTEMS[system]
         grouped = load(system)
+        quoted = [row for arm in ("recommended", *ASE_ARMS) for row in grouped[arm]]
+        if not quoted or any(not commit_held(row["code_revision"]) for row in quoted):
+            continue
         revisions |= {row["code_revision"] for row in grouped["recommended"]}
         if any(row["stop"] == "wall" for row in grouped["recommended"]):
             raise SystemExit(f"{system}: a recommended row stopped at the wall cap")
@@ -443,11 +588,11 @@ def tex_table() -> str:
             show_p(fisher(hits("recommended"), hits("ase_mh"))),
         ]) + " \\\\")
     if not revisions:
-        raise SystemExit("no recommended revisions found")
+        return ""
     rev_text = ", ".join(sorted(revisions))
     return "\n".join([
         "\\begin{table}",
-        "\\caption{This work against the basin hopping (BH) and minima hopping",
+        "\\caption{\\raggedright This work against the basin hopping (BH) and minima hopping",
         f"(MH) of ASE {ASE_VERSION} at its constructor defaults.",
         f"This work is anneal \\texttt{{{rev_text}}}.",
         "Seeds 2000--2011, one core, budget in force calls.",
@@ -479,13 +624,26 @@ def tex_table() -> str:
     ])
 
 
-def splice(text: str, block: str) -> str:
-    start, end = TEX_MARKS
+def splice_at(text: str, marks: tuple[str, str], block: str) -> str:
+    """Put ``block`` between ``marks``. An empty block clears the interior and keeps the marks."""
+    start, end = marks
     if text.count(start) != 1 or text.count(end) != 1:
-        raise SystemExit(f"{MANUSCRIPT} needs one '{start}' and one '{end}'")
+        if not block and start not in text and end not in text:
+            return text
+        raise SystemExit(f"{DOCUMENT} needs one '{start}' and one '{end}'")
     head, rest = text.split(start, 1)
     _old, tail = rest.split(end, 1)
-    return f"{head}{start}\n{block}\n{end}{tail}"
+    middle = f"\n{block}\n" if block else "\n"
+    return f"{head}{start}{middle}{end}{tail}"
+
+
+def splice(text: str, block: str) -> str:
+    return splice_at(text, TEX_MARKS, block)
+
+
+def apply_document(text: str) -> str:
+    """Splice the table and its prose. Both stay empty while the commits are not held."""
+    return splice_at(splice(text, tex_table()), PROSE_MARKS, held_prose())
 
 
 def main() -> None:
@@ -503,22 +661,32 @@ def main() -> None:
     aggregate = [AGGREGATE_HEADER]
     for system in selected:
         summary, report = render(system)
-        directory = ROOT / "bench" / f"ase-{system}"
+        root = Path(os.environ["ASE_PANEL_OUT"]) if os.environ.get("ASE_PANEL_OUT") else ROOT / "bench"
+        directory = root / f"ase-{system}"
         outputs[directory / "summary.csv"] = summary
         outputs[directory / "README.md"] = report
         aggregate.extend(aggregate_rows(system, summary))
     if selected == list(SYSTEMS):
-        outputs[ROOT / "bench" / "ase-recommended" / "summary.csv"] = (
-            "\n".join(aggregate) + "\n"
-        )
+        recommended = root / "ase-recommended" / "summary.csv"
+        outputs[recommended] = "\n".join(aggregate) + "\n"
     if "--tex" in flags:
-        outputs[MANUSCRIPT] = splice(MANUSCRIPT.read_text(), tex_table())
+        document = Path(os.environ["ASE_PANEL_TEX"]) if os.environ.get("ASE_PANEL_TEX") else DOCUMENT
+        source = document.read_text() if document.exists() else DOCUMENT.read_text()
+        outputs[document] = apply_document(source)
     if "--check" in flags:
-        stale = [str(path.relative_to(ROOT)) for path, text in outputs.items() if path.read_text() != text]
+        stale = [
+            str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+            for path, text in outputs.items()
+            if not path.exists() or path.read_text() != text
+        ]
         if stale:
             raise SystemExit("stale generated report: " + ", ".join(stale))
     else:
+        present = [str(path) for path in outputs if path.exists()]
+        if present:
+            raise SystemExit("refusing to overwrite " + ", ".join(present))
         for path, text in outputs.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
 
 

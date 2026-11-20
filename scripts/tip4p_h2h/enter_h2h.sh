@@ -7,6 +7,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/tip4p-h2h
+OUTPUT=${TIP4P_H2H_OUTPUT:-$WORK/output}
 
 bash "$HERE/build_anneal.sh"
 
@@ -19,7 +20,7 @@ if [[ -f $GMIN_SRC ]] && ! grep -q H2H_POT_ENTER "$GMIN_SRC"; then
 fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
-mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm"
+mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/gm" "$OUTPUT"
 cp -a "$HERE/run_h2h.py" "$ROOT/scripts/target_tol.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 # A single-point data file for the reproduction check: no basin hops, and
@@ -50,17 +51,21 @@ export OMP_PROC_BIND=TRUE
 export OMP_PLACES=cores
 export RAYON_NUM_THREADS=1
 cd /work
-exec /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
+taskset -c 0 /usr/bin/python3 $ROOT/scripts/session_metadata.py \\
+  --output $OUTPUT/sessions.jsonl \\
+  --campaign tip4p-gmin --root $ROOT -- \\
+  snakemake -s workflow/Snakefile tip4p_h2h --cores 1 --force
+exec taskset -c 0 /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
   --binary $WORK/bin/h2h_seed \\
   --point $WORK/bin/h2h_tip4p_point \\
   --gmin $WORK/bin/GMIN \\
   --data $WORK/bin/h2h_gmin_tip4p.data \\
   --verify-data $WORK/bin/h2h_gmin_tip4p_verify.data \\
   --gm-dir $WORK/gm \\
-  --verify-out $WORK/verify.csv \\
+  --verify-out $OUTPUT/verify.csv \\
   --work $WORK/runs \\
-  --rows $WORK/rows.csv \\
-  --summary $ROOT/bench/tip4p-h2h/h2h-summary.csv \\
+  --rows $OUTPUT/rows-h2h.csv \\
+  --summary $OUTPUT/h2h-summary.csv \\
   --head-file $WORK/anneal-head \\
   --gmin-source $WORK/gmin-source.txt \\
   "\$@"

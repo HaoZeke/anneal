@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib.util
 import os
 import subprocess
 import sys
@@ -112,6 +113,15 @@ def score(directories: dict[str, Path]) -> str:
     return text
 
 
+def sc_step_text() -> str:
+    """The Sutton-Chen step, from the constants in scripts/metal_h2h/run_sc.py."""
+    path = ROOT / "scripts" / "metal_h2h" / "run_sc.py"
+    spec = importlib.util.spec_from_file_location("run_sc_step", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return f"{module.sc_step():.6f}"
+
+
 def result_paragraph(rows: list[dict[str, str]], harness: str) -> str:
     by_arm: dict[str, list[dict[str, str]]] = {arm: [] for arm in ARMS}
     earlier = []
@@ -126,7 +136,8 @@ def result_paragraph(rows: list[dict[str, str]], harness: str) -> str:
         "GMIN is the Wales program at SVNREV aac1548a, linked against OpenBLAS.",
         f"Its rows are those of harness {harness[:8]}, one seed at a time on one core, "
         "from =scripts/metal_h2h/enter_sc96_gmin.sh=.",
-        "Its file is the 9-6 row of =scripts/metal_h2h/run_sc.py=: temperature 10, step 0.251984, "
+        "Its file is the 9-6 row of =scripts/metal_h2h/run_sc.py=: temperature 10, "
+        f"step {sc_step_text()}, "
         "the container GMIN sizes for Sutton-Chen, and the quench block there.",
     ]
     for arm in ARMS:

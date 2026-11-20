@@ -5,9 +5,12 @@
 The hygienic panel replaces the original seed 15000 row with the rerun.
 The original panel keeps that first row. Neither panel overwrites a row.
 """
+import os
 import random
 import sys
 from pathlib import Path
+
+from scipy.stats import norm
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
@@ -20,7 +23,7 @@ TOLERANCE = 1.0e-6
 V8_BEST = -81.389905659858
 BOOT_SEED = 20261110
 BOOT_DRAWS = 10000
-Z = 1.959963984540054
+Z = float(norm.ppf(0.975))
 
 
 def ranks(values):
@@ -128,7 +131,9 @@ def main():
     text = "panel,n,W_plus,W_minus,p,rank_biserial,median_gap_Eh,bootstrap_low_Eh,bootstrap_high_Eh,anneal_hits,crest_hits\n"
     text += line("hygienic", panel(rows, "hygienic"))
     text += line("original", panel(rows, "original"))
-    SUMMARY.write_text(text)
+    destination = Path(os.environ.get("H2O16_CREST_SUMMARY", str(SUMMARY)))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(text)
 
 
 if __name__ == "__main__":

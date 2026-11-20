@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Gupta Au55, twelve seeds, the paper budget.
 
-The search sphere and the neighbour shell follow the opening quench
+The search sphere and the neighbor shell follow the opening quench
 when that quench is outside the reduced unit. A hit is a quenched
 energy within 0.001 of the Cambridge minimum. GMIN rows already stored
 in ``bench/au55-gupta`` are copied and not launched again.

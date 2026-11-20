@@ -22,6 +22,8 @@ TARGET=${CARGO_TARGET_DIR:-/work/pin/tip}
 CODES=${GFN2_CODES:-anneal-general crest}
 ROWS=${GFN2_ROWS:-$OUT/rows.csv}
 SUMMARY=${GFN2_SUMMARY:-$OUT/summaries.csv}
+SESSIONS=${GFN2_SESSIONS:-$OUT/sessions.jsonl}
+HISTORY=${GFN2_HISTORY:-$OUT/seeds.csv}
 CORE=${GFN2_CORE:-0}
 PY=${GFN2_PYTHON:-/usr/bin/python3}
 
@@ -38,7 +40,8 @@ done
 (cd "$ROOT" && CARGO_TARGET_DIR=$TARGET cargo +1.88.0 build --release --features rgpot-ex \
   --example gfn2_covalent_h2h)
 
-mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$(dirname "$ROWS")" "$(dirname "$SUMMARY")"
+mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$(dirname "$ROWS")" "$(dirname "$SUMMARY")" \
+  "$(dirname "$SESSIONS")" "$(dirname "$HISTORY")"
 cp -a "$TARGET/release/examples/gfn2_covalent_h2h" "$WORK/bin/gfn2_covalent_h2h"
 git -C "$ROOT" rev-parse HEAD > "$WORK/anneal-head"
 
@@ -51,10 +54,13 @@ export LD_LIBRARY_PATH=$LIB
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 RAYON_NUM_THREADS=1
 export PANEL_PYTHON=$PY
 cd $WORK
+taskset -c $CORE $PY $ROOT/scripts/session_metadata.py \\
+  --output $SESSIONS --campaign gfn2-crest-full --root $ROOT -- \\
+  snakemake -s workflow/Snakefile covalent_gfn2_crest --cores 1 --force
 exec taskset -c $CORE $PY -u $HERE/gfn2_crest.py \\
   --anneal $WORK/bin/gfn2_covalent_h2h --crest $CREST --xtb $XTB \\
   --engine $ENGINE --head-file $WORK/anneal-head \\
-  --out $WORK/runs --rows $ROWS --history $OUT/seeds.csv --summary $SUMMARY \\
+  --out $WORK/runs --rows $ROWS --history $HISTORY --summary $SUMMARY \\
   --codes $CODES "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"

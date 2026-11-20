@@ -121,7 +121,7 @@ before the descent converged, as from a far start on a curved valley,
 and =gsa='s first phase ends at its first slice, the descent takes a
 turn before =cma='s phase and keeps it while it pays. After an opening
 a phase, and that turn, stop short of the closing reserve plus one
-slice for each other arm not yet played, counted again at every slice;
+slice for each other arm without a completed turn, counted again at every slice;
 without one, short of the closing reserve plus one slice for =de= until
 it has played, since slices held there for the surrogate and the
 restart arm cost the phases more than those arms return. Against a
@@ -129,7 +129,7 @@ descended incumbent a GSA record is a lower basin and a CMA-ES gain a
 better point of the same one; both come in bursts (records as the
 anneal cools, a run per covariance) that single slices would not see.
 
-Each arm not yet played then takes a turn, in the table's order (the
+Each arm without a completed turn then takes a turn, in the table's order (the
 warm-up round, as in the main bandit), while the budget holds eight
 evaluations beyond the closing reserve, so the last of them may be
 short. After it a round picks uniformly with probability =1/round=

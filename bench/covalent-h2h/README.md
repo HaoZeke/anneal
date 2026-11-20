@@ -170,7 +170,7 @@ already holds a free atom, which a random start can, it keeps moving
 normally.
 
 Lennard-Jones and Morse tails never reach zero, so no atom meets the test and
-their trajectories are unchanged. Rigid bodies and labelled species are not
+their trajectories are unchanged. Rigid bodies and labeled species are not
 judged. A first version tested geometry alone, and it moved the ρ=14 Morse
 rows at 55 atoms. Testing the force exactly is what keeps that row fixed.
 
@@ -394,7 +394,7 @@ parallel. They count calls only; the numbers are not from the timed panel.
 - C10 container, G with the old flags (24 seeds): 1.0x 50k, 22/24 hits;
   0.8x 22.7k, 24/24; gather into the measured reach 31.1k, 24/24. With the
   orbit arm and the window, every container from 0.7x to 1.2x lands at
-  15k-22k calls, so the constant no longer matters.
+  15k-22k calls, so the constant has no effect.
 - C20, what was blocking the bowl: with the orbit arm and window but inside
   the sphere, P goes 0/6. The sphere was the obstacle. Gathering alone, or
   gathering with the window, reaches it in at most 1 of 12 runs, and the
@@ -449,7 +449,7 @@ Lennard-Jones, Morse, Gupta and TIP4P pins.
   to 57.
 - P and G complete orbits on every new basin, as R does, and keep the
   allocator's orbit arm (`25838776`). The five prior gates develop added
-  (fivefold SOAP, icosahedral reseed, lattice regrowth, labelled core and
+  (fivefold SOAP, icosahedral reseed, lattice regrowth, labeled core and
   motif reseed) are off in P and G.
 - GMIN on carbon (`9631d65a`). `scripts/covalent_h2h/tersoff_userpot.f90`
   takes the place of GMIN's `dummy_userpot.f90` in a second build
@@ -889,7 +889,7 @@ energy from a fresh SCC to 1e-10 eV, but Si13 and Si20 minima do not
   --acc 0.01`) gives every best geometry its energy to 4.1e-5 eV, the
   same offset on all eight. The ring is in `gfn2/minima.csv` and
   `gfn2/minima/si20-ring.xyz`. Two of eight seeds within four hours is
-  not yet a reference the panel can score against. The handle counted
+  the count this panel records. The handle counted
   32,704 SCCs that do not converge over the eight runs, at a median
   shortest pair of 2.15 Å, a third of them below 1.6 Å.
 

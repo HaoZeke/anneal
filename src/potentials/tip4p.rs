@@ -35,7 +35,8 @@ pub const Q_M: f64 = -1.04;
 /// Oxygen Lennard-Jones well depth, kJ/mol.
 ///
 /// Jorgensen et al. give the oxygen pair as `A = 600e3` kcal/mol Å^12 and
-/// `C = 610` kcal/mol Å^6, which at 4.184 kJ/kcal are GMIN's `C12` and `C6`.
+/// `C = 610` kcal/mol Å^6. The kcal-to-kJ factor converts them to GMIN's
+/// `C12` and `C6`.
 /// The well depth is `C6² / 4 C12`; the rounded 0.6485 leaves every cluster
 /// minimum about 1.3e-3 kJ/mol per molecule above the database energies.
 pub const EPSILON: f64 =

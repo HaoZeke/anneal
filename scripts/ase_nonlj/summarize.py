@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import re
 import sys
 from pathlib import Path
@@ -37,6 +38,7 @@ SPEC = {
 ROW_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
     "wall_s", "inside_s", "outside_s", "code_revision", "host", "stop", "cap_s",
+    "harness_revision",
 )
 HIT_TOL = DEFAULT_HIT_TOL
 TEX_LABELS = {
@@ -45,10 +47,10 @@ TEX_LABELS = {
     "m55r6": "M\\(_{55}\\), \\(\\rho=6\\)",
     "m55r14": "M\\(_{55}\\), \\(\\rho=14\\)",
 }
-MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
+DOCUMENT = ROOT / "paper" / "jctc" / "si.tex"
 TEX_MARKS = ("% ase-nonlj table: start", "% ase-nonlj table: end")
 ASE_VERSION = "3.29.0"
-REVISION = "9a30f3190b3bb7040c675a904f8388eb68224151"
+REVISION = "5eb79cdcb0a986984dc7b487e5a3cc93224246f9"
 
 
 def type7(ordered: list[float], probability: float) -> float:
@@ -155,7 +157,7 @@ def against(group: list[dict[str, str]], other: list[dict[str, str]]) -> tuple[s
 
 
 def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
-    path = ROOT / "bench" / "ase-nonlj" / "rows.csv"
+    path = ROOT / "bench" / "ase-nonlj" / "rerun-20261119" / "rows.csv"
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
         if tuple(reader.fieldnames or ()) != ROW_FIELDS:
@@ -306,7 +308,7 @@ def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
 def splice(text: str, block: str) -> str:
     start, end = TEX_MARKS
     if text.count(start) != 1 or text.count(end) != 1:
-        raise SystemExit(f"{MANUSCRIPT} needs one '{start}' and one '{end}'")
+        raise SystemExit(f"{DOCUMENT} needs one '{start}' and one '{end}'")
     head, rest = text.split(start, 1)
     _old, tail = rest.split(end, 1)
     return f"{head}{start}\n{block}\n{end}{tail}"
@@ -331,7 +333,8 @@ def main() -> None:
         "fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,"
         "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s,code_revision,host"
     )
-    summary_path = ROOT / "bench" / "ase-nonlj" / "summary.csv"
+    summary_root = Path(os.environ["ASE_NONLJ_OUT"]) if os.environ.get("ASE_NONLJ_OUT") else ROOT / "bench" / "ase-nonlj"
+    summary_path = summary_root / "summary.csv"
     summary_lines = [summary_header]
     if summary_path.exists():
         existing = summary_path.read_text().splitlines()
@@ -450,23 +453,28 @@ def main() -> None:
             "",
         ]
     )
-    out = ROOT / "bench" / "ase-nonlj"
     outputs = {
         summary_path: "\n".join(summary_lines) + "\n",
-        out / "README.md": "\n".join(readme),
+        summary_root / "README.md": "\n".join(readme),
     }
     if "--tex" in flags:
-        outputs[MANUSCRIPT] = splice(MANUSCRIPT.read_text(), tex_table(grouped))
+        document = Path(os.environ["ASE_NONLJ_TEX"]) if os.environ.get("ASE_NONLJ_TEX") else DOCUMENT
+        source = document.read_text() if document.exists() else DOCUMENT.read_text()
+        outputs[document] = splice(source, tex_table(grouped))
     if "--check" in flags:
         stale = [
-            str(path.relative_to(ROOT))
+            str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
             for path, text in outputs.items()
-            if path.read_text() != text
+            if not path.exists() or path.read_text() != text
         ]
         if stale:
             raise SystemExit("stale generated report: " + ", ".join(stale))
     else:
+        present = [str(path) for path in outputs if path.exists()]
+        if present:
+            raise SystemExit("refusing to overwrite " + ", ".join(present))
         for path, text in outputs.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
 
 

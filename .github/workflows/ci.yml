@@ -279,24 +279,21 @@ jobs:
           fi
 
       # scripts/paper_audit.py recomputes every paper and bench-table number
-      # from the committed rows and checks the revision each row cites,
-      # through bench/revision-aliases.csv for the ones rebuilt on push. It
-      # needs the full history and every branch the alias table names. A
-      # branch that cannot be fetched fails here; the audit itself refuses a
-      # shallow clone or a missing alias commit with exit status 2, and any
-      # drift or unlisted unpushed revision with exit status 1.
+      # from the committed rows and checks the revision each row cites. A
+      # revision is resolved when a fetched remote ref contains it, when
+      # bench/revision-aliases.csv verifies it, or when the recorded
+      # code_tree matches a fetched tree. bench/unpushed-revisions.csv gives
+      # the reason for each revision that stays unresolved. The audit exits
+      # 2 when the checkout is shallow or an alias target is absent, and
+      # exits 1 on drift or an unresolved revision with no reason.
       - name: Paper audit
         if: ${{ !cancelled() }}
         run: |
-          branches=$(python3 -c 'import csv
-          rows = csv.DictReader(l for l in open("bench/revision-aliases.csv") if not l.startswith("#"))
-          print("\n".join(sorted({r["branch"] for r in rows if r["branch"]})))')
-          for branch in $branches; do
-            git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch" || {
-              echo "::error::bench/revision-aliases.csv names $branch, which cannot be fetched from origin"
-              exit 1
-            }
-          done
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --no-tags --unshallow origin '+refs/heads/*:refs/remotes/origin/*'
+          else
+            git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          fi
           python3 scripts/paper_audit.py
 
   test:
@@ -431,7 +428,7 @@ jobs:
       - name: Install maturin + pytest + array-api-strict
         run: |
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy array-api-strict
+          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy scipy sympy array-api-strict
           .venv/bin/python -c "import array_api_strict"
 
       - name: maturin develop

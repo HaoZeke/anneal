@@ -139,7 +139,7 @@ pub mod funnel_spectral;
 #[cfg(feature = "gpr")]
 pub mod gpr;
 pub mod grad;
-/// Exact basin identity by canonical contact-graph labelling (nauty).
+/// Exact basin identity by canonical contact-graph labeling (nauty).
 #[cfg(feature = "graphkey")]
 pub mod graphkey;
 /// Calibrate the model Hessian on a run's own descents.

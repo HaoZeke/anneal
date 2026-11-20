@@ -13,5 +13,5 @@ negative of the returned force.
 Budget 4000. Seeds 0-31. Selector `petmad`. See
 `water_hexamer.METHODS-DETAIL.md`.
 
-A missing plugin or model is an engine-load failure. The smoke file
+A plugin or model the loader cannot open is an engine-load failure. The smoke file
 does not invent an energy.

@@ -6,7 +6,8 @@ Reads data/landfold_maps_v7/: PROVENANCE.json of every campaign that wrote a map
 the digests of provenance.txt. When landscape.ld is present it is drawn as a scatter on
 the Ruhi free-energy ramp, recomputed on a uniform grid from the sealed coordinates when
 fes.csv is missing or failed. When only the sealed landscape.png of the handoff is present,
-that PNG is shown. A map the seal skips is no panel.
+its recorded pixels are emitted as vector rectangles; the output PDF contains no raster
+image. A map the seal skips is no panel.
 
 Usage: fig_landfold_maps.py [--data DIR] OUT.pdf
 """
@@ -67,7 +68,8 @@ def provenance(data: Path) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def load(data: Path = DATA) -> tuple[dict[str, str], list[Map], list[str]]:
-    fetch_paper_data()
+    if not (data / "provenance.txt").is_file():
+        fetch_paper_data()
     keys, digests = provenance(data)
     for name, want in digests.items():
         path = data / name
@@ -167,6 +169,35 @@ def fes_from_points(coords: np.ndarray, nx: int) -> tuple[np.ndarray, np.ndarray
     return xc, yc, fes
 
 
+def vector_pixels(ax, image_path: Path) -> None:
+    """Draw an exact PNG pixel field with PDF vector primitives, not an image XObject."""
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import PolyCollection
+
+    image = plt.imread(image_path)
+    if image.ndim != 3 or image.shape[2] not in (3, 4):
+        die(f"{image_path}: expected an RGB or RGBA PNG")
+    height, width = image.shape[:2]
+    background = image[0, 0]
+    polygons, colours = [], []
+    for y, row in enumerate(image):
+        start = 0
+        while start < width:
+            colour = row[start]
+            stop = start + 1
+            while stop < width and np.array_equal(row[stop], colour):
+                stop += 1
+            if not np.array_equal(colour, background):
+                polygons.append(((start, y), (stop, y), (stop, y + 1), (start, y + 1)))
+                colours.append(colour)
+            start = stop
+    ax.set_facecolor(background)
+    ax.add_collection(PolyCollection(polygons, facecolors=colours, edgecolors="none", antialiased=False))
+    ax.set_xlim(0, width)
+    ax.set_ylim(height, 0)
+    ax.set_aspect("equal", adjustable="box")
+
+
 def draw_panel(ax, entry: Map):
     import matplotlib.pyplot as plt
     from matplotlib.colors import Normalize
@@ -199,9 +230,9 @@ def draw_panel(ax, entry: Map):
         ax.set_xlabel("landfold coordinate 1 (arb. units)", fontsize=figstyle.SMALLEST, labelpad=1)
         ax.set_ylabel("landfold coordinate 2 (arb. units)", fontsize=figstyle.SMALLEST, labelpad=1)
         return mesh
-    # Sealed campaign PNG for maps whose tables are still on the campaign disk.
-    image = plt.imread(png)
-    ax.imshow(image, origin="upper")
+    # The source table is unavailable, but the sealed map is recorded. Emit
+    # one vector rectangle per horizontal run of equal pixels.
+    vector_pixels(ax, png)
     ax.set_xticks([])
     ax.set_yticks([])
     for side in ax.spines.values():

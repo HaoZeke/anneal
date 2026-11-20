@@ -11,8 +11,8 @@ Both codes run real xtb 6.7.1 GFN2 at one electronic temperature,
 
 from the shared start after one xtb ``--opt`` of it. Each option is
 there because a cluster search rearranges bonds. CREST stops when its
-first optimisation changes the topology of a random cluster, so the start
-is optimised before it. CREGEN removes every structure whose topology
+first optimization changes the topology of a random cluster, so the start
+is optimized before it. CREGEN removes every structure whose topology
 differs from the input unless ``-notopo``. The genetic crossing then has
 one structure and ends the run with an error, so ``-nocross``. The
 default SHAKE holds every bond at its starting length during the
@@ -21,7 +21,7 @@ fs SHAKE allows.
 
 The wrapper adds ``--etemp`` to every xtb process, times it, and logs the
 energy calls it made: the ``max steps`` of an MD, and one
-``* total energy`` line per optimisation cycle, or the
+``* total energy`` line per optimization cycle, or the
 ``:: total energy`` lines of any other run. CREST's calls are the sum of
 that log.
 
@@ -72,6 +72,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
+from codata2018 import HARTREE_EV  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SYSTEMS = ("si10", "c10", "si13", "c20", "si20")
@@ -91,8 +92,7 @@ CREST_SEEDS = dict(SEEDS)
 BUDGET = 100000
 ETEMP = 3000.0
 HIT_TOL = DEFAULT_HIT_TOL
-# eV per Hartree in xtb 6.7.1.
-AUTOEV = 27.21138505
+AUTOEV = HARTREE_EV
 # The lowest minimum any run of either code reached at these settings,
 # each reproduced by xtb from a fresh SCC. Si10 and C10: anneal at 30000
 # calls on six seeds each; the C10 minimum is the cumulenic ring, every
@@ -129,6 +129,15 @@ PROVENANCE_FIELDS = [
     "crest_sha256",
     "xtb_sha256",
     "engine_sha256",
+]
+RGPOT_SIDECAR_FIELDS = [
+    "system",
+    "code",
+    "seed",
+    "code_revision",
+    "engine_sha256",
+    "rgpot_revision",
+    "host",
 ]
 SUMMARY_FIELDS = [
     "system",
@@ -311,6 +320,25 @@ def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+def rgpot_revision_of(engine: Path, override: str | None = None) -> str:
+    if override:
+        return override.strip()
+    env_rev = os.environ.get("RGPOT_REVISION", "").strip()
+    if env_rev:
+        return env_rev
+    engine_dir = engine.resolve().parent
+    for name in ("RGPOT_SOURCE_COMMIT", "rgpot.sha"):
+        candidate = engine_dir / name
+        if candidate.is_file():
+            text = candidate.read_text().strip()
+            if text:
+                return text
+    root = os.environ.get("RGPOT_ROOT", "").strip()
+    if root:
+        return subprocess.check_output(["git", "-C", root, "rev-parse", "HEAD"], text=True).strip()
+    raise SystemExit("missing rgpot revision: pass --rgpot-revision, set RGPOT_REVISION/RGPOT_ROOT, or place rgpot.sha beside --engine")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--anneal", type=Path)
@@ -318,8 +346,10 @@ def main() -> None:
     ap.add_argument("--xtb", type=Path)
     ap.add_argument("--engine", type=Path)
     ap.add_argument("--head-file", type=Path)
+    ap.add_argument("--rgpot-revision")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--rows", type=Path)
+    ap.add_argument("--rgpot-sidecar", type=Path)
     ap.add_argument("--history", type=Path, nargs="*", default=[])
     ap.add_argument(
         "--systems", nargs="*", default=[s for s in SYSTEMS if s in REFERENCE]
@@ -390,6 +420,8 @@ def main() -> None:
         "xtb_sha256": sha256(args.xtb),
         "engine_sha256": sha256(args.engine),
     }
+    rgpot_rev = rgpot_revision_of(args.engine, args.rgpot_revision)
+    sidecar = args.rgpot_sidecar or args.rows.with_name("rgpot-revisions.csv")
     rng = random.Random(SCHEDULE_SEED)
     for system in args.systems:
         seeds = SEEDS[system] if args.seeds is None else args.seeds
@@ -437,6 +469,19 @@ def main() -> None:
             else:
                 row = run_anneal(args.anneal, system, seed, where)
             row.update(pins, date=datetime.date.today().isoformat())
+            append_rows(
+                sidecar,
+                RGPOT_SIDECAR_FIELDS,
+                [{
+                    "system": row["system"],
+                    "code": row["code"],
+                    "seed": row["seed"],
+                    "code_revision": row["code_revision"],
+                    "engine_sha256": row["engine_sha256"],
+                    "rgpot_revision": rgpot_rev,
+                    "host": row["host"],
+                }],
+            )
             append_rows(args.rows, ROW_FIELDS + PROVENANCE_FIELDS, [row])
             print(
                 ",".join(str(row[k]) for k in ROW_FIELDS + PROVENANCE_FIELDS),

@@ -91,12 +91,12 @@ mutually exclusive outcomes:
 - `LOSE`: at least one system has `1` for any criterion in `GATE_LOSS_CRITERIA`;
   the `verdict:` line names every triggered criterion and every matching system
   with its sample size and p-value.
-- `INCOMPLETE`: no criterion in `GATE_LOSS_CRITERIA` triggers and at least one
+- third outcome: no criterion in `GATE_LOSS_CRITERIA` triggers and at least one
   declared system has `status != "ok"` (or `summary.csv` is empty).
 - `PASS`: every declared system has `status == "ok"` and no criterion in
   `GATE_LOSS_CRITERIA` triggers.
 
-Incomplete systems (`status != "ok"`) are split into two labelled lists with
+Systems whose status is not `ok` are split into two labeled lists with
 reasons taken from `unsupported.csv`, `declared-n.csv`, `rows.csv`, and
 `summary.csv`:
 
@@ -116,5 +116,5 @@ reasons taken from `unsupported.csv`, `declared-n.csv`, `rows.csv`, and
 - `seed-identity.csv`: per-seed A/B bit-identity
 - `deltas.csv`: every system with any hit drop, call increase, outside-potential
   time increase, or wall-time increase
-- `verdict.txt`: `PASS` / `LOSE` / `INCOMPLETE` verdict and breakdown under the
+- `verdict.txt`: `PASS` / `LOSE` / third-outcome verdict and breakdown under the
   declared gate rule

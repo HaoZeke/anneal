@@ -17,7 +17,7 @@ The anneal mean wall is 1203.0 s. The CREST mean wall is 690.9 s. The ratio of t
 
 ## Where the (H2O)16 wall goes
 
-Seed 16001, 28000 calls, same wrapper as the table above, scored −2214.506788 eV in 655.035 s. CREST on the same start scored −2214.590238 eV in 292.682 s. Of the anneal wall, 649.696 s is inside xtb and 5.338 s is outside it, 0.191 ms per call. That remainder does not account for the gap.
+Seed 16001 on this wrapper records 28000 calls. Of that anneal wall, 649.696 s is inside xtb and 5.338 s is outside it, 0.191 ms per call.
 
 The 28000 charged calls are 191 converged quenches and 1 capped quench, 146.6 calls per converged quench. There were 177 hops. Every hop started inside the overlap gate (`proposal_overlap_rejected` 177) and was separated, then quenched in full (`screens` 0). Line-search overlap rejections (665) and geometry rejections (0) are not charged. SCC rejections were 0.
 
@@ -37,7 +37,7 @@ The wall is those full quenches. Shortening one is the quench-convergence work a
 
 The recommended water arm now pays the allocator only when a hop improves the incumbent, starts the hydrogen-bond rewire with a prior of three improvements, and after 32 hops without a new lowest minimum leaves from another stored basin for eight hops. Quench convergence is unchanged. A binary homotop polish was quenching every oxygen–hydrogen swap and spending the budget before a hop; that polish now stays on an atomic library. The search below is that binary, not the warm GFN2 calculator.
 
-Anneal walls are the in-process clock around the 28000 calls. The shell clock ran longer on some seeds; those gaps are not search time. CREST walls are CREST's own total where it printed one. Seeds 15002 and 15004 aborted in CREST's structure crossing (`confcross_0.xyz` missing, exit 1). Their energies are the vtight score of the geometry CREST had already written, not a finished ensemble.
+Anneal walls are the in-process clock around the 28000 calls. The shell clock ran longer on some seeds; those gaps are not search time. CREST walls are CREST's own total where it printed one. Seeds 15002 and 15004 stopped in CREST's structure crossing at exit 1 before `confcross_0.xyz` was written. Their energies are the vtight score of the geometry CREST had already written, not a finished ensemble.
 
 The anneal mean wall is 1185.3 s. The four CREST runs that finished average 782.7 s, and the anneal mean on those same four seeds is 1192.8 s, ratio 1.52. Anneal's scored energy is lower on all six seeds. Anneal hits three seeds and CREST hits none. Seed 15005, a miss in the table above, is now inside the window. Seed 15003 is 0.015 eV short of the reference. `target_energy` was off.
 
@@ -50,4 +50,4 @@ The anneal mean wall is 1185.3 s. The four CREST runs that finished average 782.
 | 15005 | −2768.555365 | 1194.294 | 759.912 | 17816 | none | −2768.459521 | 625.170 | anneal | 188 | 83 |
 | 15006 | −2768.434243 | 1201.728 | none | none | none | −2764.305609 | 635.727 | neither | 172 | 77 |
 
-Seed 16001 in this same session scored −2214.687531 eV in 785.859 s. CREST on that start scored −2214.521423 eV in 271.636 s. The 28000 calls are 220 converged quenches and 1 capped quench, 127.3 calls per converged quench, and 191 hops. Every hop started inside the overlap gate and was separated (`screens` 0, line-search overlap rejections 703, SCC rejections 0). Of 191 proposals, 186 were accepted and 29 improved the incumbent: hbrewire 44/44/6, gshake 48/46/13, gsurface 35/35/4, gcycle 40/38/6, gburst 24/23/0. The wall is still those quenches.
+Seed 16001 records 28000 calls: 220 converged quenches and 1 capped quench, 127.3 calls per converged quench, and 191 hops. Every hop started inside the overlap gate and was separated (`screens` 0, line-search overlap rejections 703, SCC rejections 0). Of 191 proposals, 186 were accepted and 29 improved the incumbent: hbrewire 44/44/6, gshake 48/46/13, gsurface 35/35/4, gcycle 40/38/6, gburst 24/23/0. The wall is still those quenches.

@@ -1,10 +1,10 @@
 //! A replica ladder on a rigid chart seeds its extra rungs as rigid bodies.
 //!
 //! A rigid-body chart holds six coordinates per body: three centre, three
-//! rotation. The extra rungs of a replica ladder used to draw a plain centre
-//! cluster, three per body, and the six-per-body potential rejected the length
-//! the moment it quenched that rung's start. A rigid ladder therefore panicked
-//! at startup for any `replicas > 1`. The run below seeds four rigid rungs and
+//! rotation. The extra rungs of a replica ladder must draw all six. A plain
+//! centre cluster, three per body, is rejected by the six-per-body potential
+//! the moment it quenches that rung's start, and a rigid ladder would panic at
+//! startup for any `replicas > 1`. The run below seeds four rigid rungs and
 //! must reach a finite best without panicking.
 
 use anneal_core::methods::cluster_hopping::{

@@ -1,0 +1,10 @@
+# Row groups whose revision column is empty or "unknown", each with the reason
+# the revision cannot be recovered. scripts/paper_audit.py lists every such
+# group in bench/unreachable-revisions.csv under the revision "unrecorded" and
+# fails on a group with no line here and on a line no group matches. Adding a
+# line records that a revision cannot be recovered; it does not recover it.
+row_file,revision_column,reason
+bench/ase-gofee-h2h/results.csv,head,"the campaign writes unknown when git rev-parse fails in its checkout; de22f437 committed the rows without logs, and no other record names the head of these three rows"
+data/sc96_78_hits.csv,code_revision,"93273639 recovered the GMIN revision from the SVNREV check; nothing records the anneal build of these runs"
+data/sc96_78_hits.csv,harness_revision,"93273639 found no record of the harness revision of these runs"
+results/size-tiered-selection-provenance.csv,code_revision,"the tiered arm ran a candidate selector that no commit holds, in one session with the other two arms; abfe15b6 committed the rows without a revision, and no log of the session is committed"

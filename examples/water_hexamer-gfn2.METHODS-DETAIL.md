@@ -14,5 +14,5 @@ file, not guessed here.
 Budget 4000. Seeds 0-31. Arms and the smoke command are in
 `water_hexamer.METHODS-DETAIL.md`. Use selector `gfn2`.
 
-A missing `libxtb_engine.so` is an engine-load failure. The smoke file
-says `engine_loaded: false` and does not invent an energy.
+An engine-load failure sets `engine_loaded: false`. The smoke file
+does not invent an energy.

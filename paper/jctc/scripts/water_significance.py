@@ -13,7 +13,9 @@ import random
 import sys
 from pathlib import Path
 
-Z = 1.959963984540054
+from scipy.stats import norm
+
+Z = float(norm.ppf(0.975))
 ARMS = ("crest", "driver-count budget", "paper4000", "engrad_matched")
 
 

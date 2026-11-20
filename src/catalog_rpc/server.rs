@@ -553,7 +553,7 @@ struct CoordinatorState {
     core_class: CoreClassTable,
     surface_evidence: crate::surface_evidence::SurfaceReportBook,
     /// A journal append failed after the live state had already moved,
-    /// so a replay of the log no longer reproduces this coordinator.
+    /// so replaying the log does not reproduce this coordinator.
     journal_broken: bool,
 }
 
@@ -3221,9 +3221,9 @@ where
     }
     // The worker already evaluated leftover SOAP. The book merges the
     // posted vector; the validator still checks length and finite
-    // values. What follows used to recompute SOAP under the
-    // coordinator's lock, serializing every replica behind one
-    // descriptor call; the caller now runs this with no lock held.
+    // values. Nothing here recomputes SOAP, which under the
+    // coordinator's lock would serialize every replica behind one
+    // descriptor call; the caller runs this with no lock held.
     let record = CandidateRecord {
         signature: signature.clone(),
         producer_replica: candidate.producer_replica,

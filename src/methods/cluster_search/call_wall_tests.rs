@@ -59,7 +59,7 @@ fn a_species_free_search_is_never_walled() {
 }
 
 #[test]
-fn a_labelled_metal_keeps_the_absolute_floor() {
+fn a_labeled_metal_keeps_the_absolute_floor() {
     for species in [vec![29, 29], vec![29, 79], vec![79, 79], vec![78, 29]] {
         let cfg = Config::for_cluster(2).with_species(species.clone(), None);
         let wall = CallWall::of(&cfg);
@@ -71,11 +71,11 @@ fn a_labelled_metal_keeps_the_absolute_floor() {
     }
 }
 
-/// A labelled metal dimer is not a molecule. Its Gupta minimum is inside the
+/// A labeled metal dimer is not a molecule. Its Gupta minimum is inside the
 /// summed covalent radii, and a search that refuses that contact never
 /// reaches it.
 #[test]
-fn labelled_metal_dimers_reach_their_gupta_minimum() {
+fn labeled_metal_dimers_reach_their_gupta_minimum() {
     for species in [vec![29, 29], vec![29, 79], vec![79, 79]] {
         let gupta = Gupta::elements(&species);
         let r0 = Gupta::homonuclear_r0(species[0]).expect("tabulated");
@@ -133,10 +133,10 @@ fn a_reactive_library_may_form_a_bond_between_groups() {
 
 #[test]
 fn a_non_finite_geometry_is_refused_when_walled() {
-    let labelled = Config::for_cluster(2).with_species(vec![29, 79], None);
+    let labeled = Config::for_cluster(2).with_species(vec![29, 79], None);
     let water = two_waters(false);
     let reactive = two_waters(true);
-    for cfg in [&labelled, &water, &reactive] {
+    for cfg in [&labeled, &water, &reactive] {
         let wall = CallWall::of(cfg);
         let mut point = if cfg.n_points == 2 {
             pair(2.5)
@@ -209,10 +209,10 @@ proptest! {
         let n = species.len();
         let point = Array1::from(coordinates);
         let groups = grouped(&labels);
-        let labelled = Config::for_cluster(n).with_species(species.clone(), None);
+        let labeled = Config::for_cluster(n).with_species(species.clone(), None);
         let rigid = molecular(species.clone(), groups.clone(), false);
         let reactive = molecular(species.clone(), groups.clone(), true);
-        let absolute = CallWall::of(&labelled).refuses(point.view());
+        let absolute = CallWall::of(&labeled).refuses(point.view());
         let covalent = CallWall::of(&rigid).refuses(point.view());
         let bonding = CallWall::of(&reactive).refuses(point.view());
 
@@ -221,7 +221,7 @@ proptest! {
         prop_assert!(!bonding || covalent, "a reactive wall refuses more than a rigid one");
 
         let far = &point * stretch;
-        for cfg in [&labelled, &rigid, &reactive] {
+        for cfg in [&labeled, &rigid, &reactive] {
             let wall = CallWall::of(cfg);
             if !wall.refuses(point.view()) {
                 prop_assert!(!wall.refuses(far.view()), "{:?} refused a stretched cluster", wall);

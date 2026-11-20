@@ -276,7 +276,7 @@ fn try_config(
             cfg.soap_mode = anneal_core::methods::cluster_hopping::SoapProposalMode::Off;
         }
     }
-    // Empty leaves the labelled-cluster search on. `0` turns its three
+    // Empty leaves the labeled-cluster search on. `0` turns its three
     // parts off. A comma list turns off the named ones: descent, ranked,
     // window. A one-species cluster never uses them.
     if let Ok(text) = std::env::var("H2H_HOMOTOP") {

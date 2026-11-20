@@ -19,7 +19,23 @@ cargo_home=${CARGO_HOME:-$HOME/.cargo}
 
 if [[ ${1:-} == --summarize ]]; then
   shift
+  prev=
+  for arg in "$@"; do
+    case $prev in
+      --summary|--readme|--manuscript)
+        if [[ -e $arg ]]; then
+          echo "refusing to overwrite $arg" >&2
+          exit 1
+        fi
+        ;;
+    esac
+    prev=$arg
+  done
   exec python3 "$HERE/run_panel.py" --summarize --root "$ROOT" --rows "$OUT/rows.csv" --revision "$REV" "$@"
+fi
+if [[ -e $OUT/rows.csv ]]; then
+  echo "refusing to overwrite $OUT/rows.csv" >&2
+  exit 1
 fi
 
 tree() {
