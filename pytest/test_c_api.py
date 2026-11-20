@@ -7,6 +7,7 @@ fails here as a compile error, and a setting that does not reach the
 ensemble fails as a check.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -110,3 +111,43 @@ def test_header_carries_every_coverage_counter_and_the_decisions(header):
     assert decisions
     names = re.findall(r"\b(\w+);", decisions.group(1))
     assert len(names) == 12
+
+
+def _ci_valgrind_flags():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    step = ci.split("- name: valgrind ffi_smoke", 1)[1].split("\n\n", 1)[0]
+    return re.findall(r"(--[a-z-]+=\S+?)(?:\s|\\|$)", step)
+
+
+def test_the_smoke_script_runs_under_valgrind_with_the_flags_of_ci(tmp_path):
+    _needs_toolchain()
+    stub = tmp_path / "bin" / "valgrind"
+    stub.parent.mkdir()
+    record = tmp_path / "argv"
+    stub.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$@" > {record}\n'
+        'for last; do :; done\n'
+        'exec "$last"\n'
+    )
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{stub.parent}:{os.environ['PATH']}", "FFI_SMOKE_VALGRIND": "1"}
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], cwd=ROOT, capture_output=True, text=True, env=env
+    )
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-4000:]
+    flags = _ci_valgrind_flags()
+    assert "--error-exitcode=1" in flags and "--leak-check=full" in flags, flags
+    argv = record.read_text().split()
+    assert argv[:-1] == flags
+    assert argv[-1].endswith("ffi_smoke")
+
+    plain = subprocess.run(
+        ["bash", str(SCRIPT)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env={**env, "FFI_SMOKE_VALGRIND": "0"},
+    )
+    assert plain.returncode == 0
+    assert record.read_text().split() == argv, "valgrind ran with FFI_SMOKE_VALGRIND=0"

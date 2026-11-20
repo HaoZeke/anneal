@@ -68,7 +68,8 @@ breaking a program built against this header: a program that was built
 before the coverage counters existed gets the statistics it knows, and
 nothing is written past its =struct_size=. =tests/ffi_smoke.c= builds
 against the installed header, and =scripts/ffi_smoke.sh= runs it from a
-checkout.
+checkout. =FFI_SMOKE_VALGRIND=1 scripts/ffi_smoke.sh= runs it under
+valgrind, as the ffi job in CI does.
 
 The install also places =dlpack/dlpack.h= (DLPack 1.3, the header =dlpk= 0.1.5 was translated from) on that include prefix. =anneal-core.h= includes it, so =pkg-config --cflags anneal-core= is enough to compile a consumer. Meson and CMake install the same header.
 

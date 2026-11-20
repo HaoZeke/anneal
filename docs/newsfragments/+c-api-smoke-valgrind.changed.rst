@@ -1,0 +1,1 @@
+``scripts/ffi_smoke.sh`` runs the smoke program under valgrind when ``FFI_SMOKE_VALGRIND=1`` is set, with the flags of the valgrind step of the ``ffi-smoke`` job in CI, so the check that CI makes can be made from a checkout.
