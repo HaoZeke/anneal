@@ -1,6 +1,0 @@
-branch record/gmin-losses
-tip 7bdf0d86c327dd1da8a5065d3e4e965669565148
-commit 7bdf0d86c327dd1da8a5065d3e4e965669565148
-ancestor 628773d6837ea2d959a27256ff4163b21162fd4d
-source bench/gmin-losses2/rows.csv
-blob 7327d06daeca47f4e435cfb3b1dd2ea4754d1e4f

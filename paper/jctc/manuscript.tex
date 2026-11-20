@@ -6,9 +6,9 @@
 
 \input{macros}
 
-\title{Seed-paired knockouts of a basin-hopping search: structure priors,
-templates, stall rules, and the length unit, with comparisons to GMIN,
-CREST, and the Atomic Simulation Environment}
+\title{Removing the structure templates of a basin-hopping search: a
+seed-paired knockout, with comparisons to GMIN, CREST, and the Atomic
+Simulation Environment}
 
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
@@ -34,21 +34,17 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \begin{document}
 
 \begin{abstract}
-We test which parts of a basin-hopping search change how many seeds reach the
-global minimum of a cluster, by running each part with and without it on the
-same seeds from the same starts and comparing the paired hits with the exact
-McNemar test.
-Switching off the structure priors, which build candidates from known
-packings, lowers the hits on six Cu--Au and Pt--Cu Gupta alloys from 12 of 12
-to between 0 and 5 of 12 (\(p\le 0.016\)); on LJ\(_{150}\) the hits rise
-from 3 to 8 of 12 (\(p=0.18\)).
-Removing the structure templates lowers the hits on Morse M\(_{38}\) at
-\(\rho=14\) from 12 to 4 of 12 (\(p=7.8\times 10^{-3}\)).
-Measuring lengths in units of the pair minimum raises the hits on M\(_{80}\)
-at \(\rho=6\) from 0 to 6 of 12 (\(p=0.031\)) and leaves the hits on the
-eleven other clusters reported for it unchanged.
-A restart from a diverse population on a plateau and a Thompson choice among
-the moves change no cluster at \(p<0.05\).
+We test whether one part of a basin-hopping search changes how many seeds
+reach the global minimum of a cluster, by running the code with and without it
+on the same seeds from the same starts and comparing the paired hits with the
+exact McNemar test.
+Removing the structure templates, the builders of close-packed and
+icosahedral cuts behind five of the six structure priors, lowers the hits on
+Morse M\(_{38}\) at \(\rho=14\) from 12 to 4 of 12
+(\(p=7.8\times 10^{-3}\)), at a revision and its child in the history of the
+code.
+The other parts of the search are described as design, with no claim about
+their effect.
 Paired by seed against GMIN, the code hits LJ\(_{98}\) on 7 of 12 seeds and
 GMIN on none (\(p=0.016\)), Morse M\(_{55}\) and M\(_{80}\) at \(\rho=14\) on 9
 and 6 of 12 against none (\(p=3.9\times 10^{-3}\) and 0.031), and rigid
@@ -92,13 +88,13 @@ cluster \cite{shaoChengCai2004}.
 
 A search that combines several such parts can be scored against other codes,
 but such a comparison cannot say which part carries the result.
-This article reports, for each part of one basin-hopping code that has been
-run with and without it, the paired change in hits.
+This article reports the paired change in hits for the part of one
+basin-hopping code that has been run with and without it at two revisions in
+the history of the code, and describes the rest of the search as design.
 Section~\ref{sec:search} describes the search and marks which of its parts
-have such a run.
-Section~\ref{sec:knockouts} gives the knockouts: the structure priors, the
-structure templates, a restart on a plateau, the length unit of the preset,
-and the choice among the moves.
+has such a run.
+Section~\ref{sec:knockouts} gives that knockout, the removal of the
+structure templates.
 Section~\ref{sec:benchmarks} then compares the code with GMIN on
 Lennard-Jones, Morse, and rigid TIP4P clusters, paired by seed, with CREST on
 the water hexamer at equal calls, and with the Atomic Simulation Environment
@@ -111,16 +107,16 @@ A chain stores a minimum \(x\) with energy \(E(x)\).
 One step draws a move, quenches the proposal, and applies the acceptance
 rule of Section~\ref{sec:accept}.
 The reported runs are single chains, and every constant below is that of the
-preset in units of the pair minimum and the pair well depth.
-Five parts of the search have a run with and without them, and
-Section~\ref{sec:knockouts} reports those runs: the structure priors and the
-structure templates (Section~\ref{sec:priors}), the restart on a plateau
-(Section~\ref{sec:stall}), the length unit (Section~\ref{sec:units}), and
-the choice among the moves (Section~\ref{sec:posterior}).
-The packing moves, the symmetry proposals, the basin bias, the tabu list, the
-screens, and the atom-count gates have no such run, and the trail step has one
-only on LJ\(_{75}\) at a revision outside the history of the submitted
-revision, which the article does not print.
+preset in the reduced units of the Lennard-Jones pair, its diameter and its
+well depth.
+One part of the search, the structure templates (Section~\ref{sec:priors}),
+has a run with and without it at two revisions in the history of the submitted
+revision, and Section~\ref{sec:knockouts} reports it.
+The packing moves, the symmetry proposals, the stall rules, the basin bias,
+the tabu list, the screens, the choice among the moves, the length unit, the
+remaining structure prior, and the atom-count gates have no such run, and the
+trail step has one only on LJ\(_{75}\) at a revision outside the history of
+the submitted revision, which the article does not print.
 They are described here as the design of the search, and the article makes no
 claim about what any of them contributes.
 
@@ -243,8 +239,6 @@ S - S_{\star} \ge 5000.
 On that plateau the chain takes one climb, of amplitude \(0.25\) in reduced
 units, and continues from the quenched result; it does not draw a new random
 cluster.
-The restart from a diverse population that Section~\ref{sec:k-stall} tests
-replaces the chain on that plateau instead, and it is off in the preset.
 
 Let \(q\) be the number of hops since the last improvement, and let
 \(q_{\mathrm{long}}\) be the longest such stretch already seen.
@@ -378,7 +372,8 @@ a large scale \(s_k\), so it is tried.
 The quench surface of equation~\ref{eq:penalty} is chosen by the same rule,
 and the reward for a block of 100 hops is the best energy at the start of the
 block minus the lowest energy the block reached.
-The comparison arm of Section~\ref{sec:ablation} draws
+With the move choice switched off (Section~\ref{sec:knockouts}) the chain
+draws
 \begin{equation}
 k^{\star} \sim \mathrm{Uniform}\{0,\ldots,n_{\mathrm{moves}}-1\}
 \label{eq:uniform}
@@ -389,11 +384,16 @@ the acceptance rule stay the same.
 \subsection{Units and atom-count gates}
 \label{sec:units}
 The temperature \(0.8\) is the value Wales and Doye used for Lennard-Jones
-basin hopping \cite{wales1997}, and every length and energy above is in units
-of the pair minimum and the well depth.
-For a Morse or Gupta potential the preset is scaled to that potential's pair
-minimum and well depth; the length unit of the pair minimum is the switch
-that Section~\ref{sec:k-units} tests on Morse clusters.
+basin hopping \cite{wales1997}, and every length and energy above is in the
+reduced units of the Lennard-Jones pair.
+The Morse and gold drivers of Table~\ref{tab:gmin} run
+\texttt{Config::recommended} without rescaling its lengths to the pair
+minimum of their potential.
+The Morse driver selects \texttt{Config::recommended\_for\_pair}, which
+rescales them to the Morse pair minimum, only under
+\texttt{H2H\_PAIR\_SCALE=1}, and no row of Table~\ref{tab:gmin} sets it; the
+Morse rows of Table~\ref{tab:ase-morse} run
+\texttt{Config::recommended\_with\_scales} at that length scale.
 For atomic clusters the preset has one atom-count gate: the diameter penalty
 of equation~\ref{eq:penalty} is used only below 98 atoms.
 The revisions with the structure priors on had a second, the growth hold of
@@ -423,16 +423,11 @@ they stalled and continued from the best of them.
 \texttt{prior\_motif} grew the best structure on a face-centered cubic,
 pentagonal, or icosahedral lattice when a run had gone half its budget without
 improvement.
-The knockout of Section~\ref{sec:k-priors} builds one switch,
-\texttt{Config::structural\_priors}, on develop \texttt{f2a628c0}; it turns
-off every path that builds a structure from a known packing or chooses a move
-by classifying one, \texttt{prior\_soap} included, and with the switch on
-that build gives the trajectory pins of develop \texttt{f2a628c0}.
 Commit \texttt{1c1b1238} removed the structure templates, the builders of
 face-centered cubic, polyicosahedral, Mackay, and axial-spine cuts behind the
 last five priors; the builders are parameterized by the atom count and a
 nearest-neighbor length and hold no coordinate table for one cluster.
-Section~\ref{sec:k-priors} tests the switch and the removal.
+Section~\ref{sec:knockouts} tests the removal.
 
 \subsection{The hit}
 \label{sec:hit}
@@ -461,9 +456,8 @@ the copper--gold Gupta archive, and from the Morse table
 \(14\), \(-250.286609\) and \(-220.646208\) for M\(_{55}\), and
 \(-378.333471\) and \(-340.811371\) for M\(_{80}\).
 \cite{walesCambridgeClusterDatabase,cleriRosato1993,darbyCuAu2002,doyeWalesMorse1997}
-The Cu--Au and Pt--Cu alloys of Section~\ref{sec:k-priors} use the
-references that the record of that run names, and the Sutton--Chen clusters of
-the template run those of its record \cite{suttonLongrangeFinnisSinclair1990}.
+The Sutton--Chen clusters of the template run use the references that its
+record names \cite{suttonLongrangeFinnisSinclair1990}.
 
 For TIP4P the same test is applied in kilojoules per mole, with the
 thermochemical calorie \(4.184\)~kJ:
@@ -542,25 +536,23 @@ No join is a barrier.}
 \section{Knockouts}
 \label{sec:knockouts}
 \label{sec:results}
-Table~\ref{tab:knockouts} gathers every run in the repository that switches
-one part of the search on and off with all else held, on the same seeds from
-the same starts.
-Each block names the revision it ran at, and its rows are copied unchanged
-from the record that the \texttt{PROVENANCE} file beside them names.
-The blocks ran at different revisions, so a count in one block is not a count
-of another.
+Table~\ref{tab:knockouts} gives the one run in the history of the submitted
+revision that switches one part of the search on and off with all else held,
+on the same seeds from the same starts: revision \texttt{628773d6} against its
+child \texttt{1c1b1238}, which removes the structure templates.
+Its rows are copied unchanged from the record that the \texttt{PROVENANCE}
+file beside them names.
 
 % knockout table: start
 \begin{table*}
-\caption{Each search switch run with and without it on the same seeds from the same starts, at the
-revision named in its heading.
+\caption{The structure templates run with and without them on the same seeds from the same starts,
+at revision \texttt{628773d6} and its child \texttt{1c1b1238}, both ancestors of the submitted revision.
 With and Without are the hits of the two arms, Only with and Only without the seeds that
 one arm alone hits.
 \(p_\mathrm{M}\) is the two-sided exact McNemar test on those seeds, and \(\Delta\) the 95\%
-interval of Newcombe's method 10 for paired data, for the hit rate with the switch less that without it.
+interval of Newcombe's method 10 for paired data, for the hit rate with the templates less that without them.
 Budgets are in force calls.
-LJ\(_{75}\) is printed only in a block whose two arms ran the code of ancestors of the submitted revision.
-The rows of each block are \texttt{paper/jctc/data/knockouts/*/rows.csv}, copied from the
+The rows are \texttt{paper/jctc/data/knockouts/templates/rows.csv}, copied from the
 record their \texttt{PROVENANCE} names.}
 \label{tab:knockouts}
 \centering
@@ -569,164 +561,30 @@ record their \texttt{PROVENANCE} names.}
 \toprule
 System & Budget & Seeds & With & Without & Only with & Only without & \(p_\mathrm{M}\) & \(\Delta\), 95\% \\
 \midrule
-\multicolumn{9}{@{}l}{\emph{Structure priors, a switch built on develop \texttt{f2a628c0}}} \\
-LJ\(_{38}\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 12 & 10/12 & 6/12 & 6 & 2 & 0.29 & \(-\)0.12 to 0.65 \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 12 & 8/12 & 10/12 & 1 & 3 & 0.625 & \(-\)0.47 to 0.18 \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & 12 & 3/12 & 8/12 & 2 & 7 & 0.18 & \(-\)0.72 to 0.05 \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & 12 & 9/12 & 12/12 & 0 & 3 & 0.25 & \(-\)0.53 to 0.04 \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 12 & 9/12 & 10/12 & 1 & 2 & 1 & \(-\)0.39 to 0.24 \\
-M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & 12 & 8/12 & 6/12 & 3 & 1 & 0.625 & \(-\)0.17 to 0.45 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 12 & 8/12 & 3/12 & 7 & 2 & 0.18 & \(-\)0.05 to 0.72 \\
-Cu\(_{6}\)Au\(_{32}\) & \(4\times 10^{5}\) & 12 & 12/12 & 0/12 & 12 & 0 & \(4.9\times 10^{-4}\) & 0.66 to 1.00 \\
-Cu\(_{19}\)Au\(_{19}\) & \(4\times 10^{5}\) & 12 & 12/12 & 0/12 & 12 & 0 & \(4.9\times 10^{-4}\) & 0.66 to 1.00 \\
-Cu\(_{27}\)Au\(_{28}\) & \(1\times 10^{6}\) & 12 & 12/12 & 1/12 & 11 & 0 & \(9.8\times 10^{-4}\) & 0.55 to 0.99 \\
-Cu\(_{10}\)Au\(_{45}\) & \(1\times 10^{6}\) & 12 & 12/12 & 2/12 & 10 & 0 & \(2.0\times 10^{-3}\) & 0.46 to 0.95 \\
-Cu\(_{30}\)Au\(_{8}\) & \(4\times 10^{5}\) & 12 & 12/12 & 5/12 & 7 & 0 & 0.016 & 0.22 to 0.81 \\
-Cu\(_{12}\)Au\(_{26}\) & \(4\times 10^{5}\) & 12 & 0/12 & 0/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-Pt\(_{12}\)Cu\(_{11}\) & \(2\times 10^{5}\) & 12 & 12/12 & 1/12 & 11 & 0 & \(9.8\times 10^{-4}\) & 0.55 to 0.99 \\
-(H\(_2\)O)\(_{4}\) & \(2\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-(H\(_2\)O)\(_{8}\) & \(2\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-(H\(_2\)O)\(_{15}\) & \(2\times 10^{6}\) & 12 & 7/12 & 7/12 & 0 & 0 & 1 & \(-\)0.15 to 0.15 \\
-\midrule
 \multicolumn{9}{@{}l}{\emph{Structure templates, \texttt{628773d6} against \texttt{1c1b1238}}} \\
 M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 12 & 12/12 & 4/12 & 8 & 0 & \(7.8\times 10^{-3}\) & 0.30 to 0.86 \\
 SC 12--6, \(N=38\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 SC 10--8, \(N=38\) & \(4\times 10^{5}\) & 12 & 12/12 & 7/12 & 5 & 0 & 0.0625 & 0.09 to 0.68 \\
-\midrule
-\multicolumn{9}{@{}l}{\emph{Restart from a diverse population on a plateau, \texttt{d12f8825} against \texttt{7192e9f8}}} \\
-LJ\(_{38}\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-LJ\(_{76}\) & \(4\times 10^{6}\) & 24 & 23/24 & 23/24 & 0 & 0 & 1 & \(-\)0.15 to 0.15 \\
-LJ\(_{77}\) & \(4\times 10^{6}\) & 12 & 10/12 & 11/12 & 0 & 1 & 1 & \(-\)0.35 to 0.18 \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 24 & 20/24 & 18/24 & 2 & 0 & 0.5 & \(-\)0.06 to 0.24 \\
-LJ\(_{102}\) & \(4\times 10^{6}\) & 24 & 17/24 & 17/24 & 0 & 0 & 1 & \(-\)0.10 to 0.10 \\
-LJ\(_{103}\) & \(4\times 10^{6}\) & 12 & 7/12 & 8/12 & 0 & 1 & 1 & \(-\)0.28 to 0.13 \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 12 & 9/12 & 9/12 & 0 & 0 & 1 & \(-\)0.19 to 0.19 \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & 24 & 15/24 & 12/24 & 3 & 0 & 0.25 & \(-\)0.03 to 0.26 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 12 & 6/12 & 6/12 & 0 & 0 & 1 & \(-\)0.14 to 0.14 \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 24 & 13/24 & 15/24 & 0 & 2 & 0.5 & \(-\)0.21 to 0.05 \\
-(H\(_2\)O)\(_{15}\) & \(2\times 10^{6}\) & 12 & 7/12 & 7/12 & 0 & 0 & 1 & \(-\)0.15 to 0.15 \\
-\midrule
-\multicolumn{9}{@{}l}{\emph{Length unit of the pair minimum, \texttt{e5883055} against \texttt{628773d6} with the templates patched out}} \\
-LJ\(_{38}\) & \(4\times 10^{5}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 12 & 3/12 & 3/12 & 0 & 0 & 1 & \(-\)0.19 to 0.19 \\
-LJ\(_{102}\) & \(4\times 10^{6}\) & 12 & 0/12 & 0/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-LJ\(_{103}\) & \(4\times 10^{6}\) & 12 & 2/12 & 2/12 & 0 & 0 & 1 & \(-\)0.22 to 0.22 \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 12 & 1/12 & 1/12 & 0 & 0 & 1 & \(-\)0.25 to 0.25 \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & 12 & 0/12 & 0/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 12 & 3/12 & 3/12 & 0 & 0 & 1 & \(-\)0.19 to 0.19 \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 12 & 12/12 & 12/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & 12 & 6/12 & 0/12 & 6 & 0 & 0.031 & 0.15 to 0.75 \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 12 & 0/12 & 0/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
-M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & 12 & 0/12 & 0/12 & 0 & 0 & 1 & \(-\)0.24 to 0.24 \\
 \bottomrule
 \end{tabular}
 \end{table*}
 % knockout table: end
 
-\subsection{Structure priors and templates}
-\label{sec:k-priors}
-With the switch built on develop \texttt{f2a628c0}, turning the structure
-priors off lowers the hits on six of the seven Gupta alloys.
-Cu\(_6\)Au\(_{32}\) and Cu\(_{19}\)Au\(_{19}\) fall from 12 of 12 to 0 of
-12 (\(p=4.9\times 10^{-4}\)), Cu\(_{27}\)Au\(_{28}\) and
-Pt\(_{12}\)Cu\(_{11}\) to 1 of 12 (\(p=9.8\times 10^{-4}\)),
-Cu\(_{10}\)Au\(_{45}\) to 2 of 12 (\(p=2.0\times 10^{-3}\)), and
-Cu\(_{30}\)Au\(_8\) to 5 of 12 (\(p=0.016\)); neither arm hits
-Cu\(_{12}\)Au\(_{26}\).
-On Au\(_{55}\) the hits fall from 8 to 3 of 12 (\(p=0.18\)), and on
-LJ\(_{150}\) they rise from 3 to 8 of 12, with \(p=0.18\).
-No Lennard-Jones or Morse cluster separates the arms at \(p<0.05\), and the
-two arms hit the same TIP4P seeds at all three sizes.
-
-At \texttt{628773d6} against its child \texttt{1c1b1238}, which removes the
-structure templates, the hits on M\(_{38}\) at \(\rho=14\) fall from 12 to 4
-of 12 (\(p=7.8\times 10^{-3}\), interval 0.30 to 0.86), and on the
-Sutton--Chen 10--8 cluster of 38 atoms from 12 to 7 of 12 (\(p=0.0625\)).
+At \texttt{628773d6} against its child \texttt{1c1b1238}, the hits on
+M\(_{38}\) at \(\rho=14\) fall from 12 to 4 of 12
+(\(p=7.8\times 10^{-3}\), interval 0.30 to 0.86), and on the Sutton--Chen
+10--8 cluster of 38 atoms from 12 to 7 of 12 (\(p=0.0625\)).
 Both revisions hit M\(_{38}\) at \(\rho=6\) and the Sutton--Chen 12--6
 cluster of 38 atoms on every seed.
 
-\subsection{Stall rules}
-\label{sec:k-stall}
-A restart of the chain from a diverse population on a plateau, revision
-\texttt{d12f8825} against develop \texttt{7192e9f8}, changes no cluster at
-\(p<0.05\) on the twelve clusters of that block of
-Table~\ref{tab:knockouts}, with 12 or 24 seeds each.
-The largest differences are on LJ\(_{150}\), 15 against 12 of 24
-(\(p=0.25\)), on LJ\(_{98}\), 20 against 18 of 24 (\(p=0.5\)), and on
-M\(_{55}\) at \(\rho=14\), 13 against 15 of 24 (\(p=0.5\)).
-The restart is off in the preset.
-
-\subsection{Length unit}
-\label{sec:k-units}
-Measuring the lengths of the preset in units of the pair minimum, revision
-\texttt{e5883055} against \texttt{628773d6} with a patch that removes the
-structure templates (tree \texttt{a9cef902}), raises the hits on M\(_{80}\) at
-\(\rho=6\) from 0 to 6 of 12 (\(p=0.031\), interval 0.15 to 0.75).
-The other eleven clusters of that block of Table~\ref{tab:knockouts},
-seven Lennard-Jones sizes,
-Au\(_{55}\), and three Morse clusters, hit the same seeds in both arms.
-
-\subsection{Move selection}
-\label{sec:ablation}
-The depth posterior of Section~\ref{sec:posterior} is compared against the
-uniform draw of equation~\ref{eq:uniform} on seeds 2000--2005 at all five
-sizes and on seeds 7000--7005 at LJ\(_{75}\), LJ\(_{98}\), and LJ\(_{104}\),
-at budgets of \(4\times 10^{5}\) at LJ\(_{38}\), \(1\times 10^{6}\) at
-LJ\(_{55}\), and \(4\times 10^{6}\) above.
-Table~\ref{tab:ablation} pairs the two arms by seed.
-On the first list both arms hit LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6
-seeds.
-Pooled over the twelve seeds, the posterior hits LJ\(_{75}\) on 11 of
-12 and the uniform draw hits 12 of 12.
-Each arm hits LJ\(_{98}\) on 9 of 12: both hit 7 seeds, each arm alone
-hits 2, and neither hits 1.
-The posterior hits LJ\(_{104}\) on 5 of 12 and the uniform draw hits
-6 of 12.
-The two-sided exact McNemar probability is 1 at each size in
-Table~\ref{tab:ablation}, and the paired 95\% Newcombe interval of the
-difference in hit rate spans 0.52 or more at every size.
-Pooled over the five sizes the posterior hits 37 of 48 and the uniform draw
-39 of 48, the posterior alone hits 4 seeds and the uniform draw alone 6, and
-the exact McNemar \(p\) is 0.75, with an interval from \(-0.18\) to 0.10.
-No equivalence margin was set before the runs, so the table supports no claim
-that the two draws are equivalent.
-
-% ablation table: start
-\begin{table}
-\caption{Hits for the depth posterior and a uniform draw, paired by seed.
-LJ\(_{38}\) and LJ\(_{55}\) are seeds 2000--2005.
-The other rows pool those seeds with 7000--7005.
-Both arms of a seed start from the same geometry.
-Both, Post., Unif., and Neither count the seeds both arms, the posterior alone, the uniform
-draw alone, and neither arm hit.
-The column \(p\) is the two-sided exact McNemar test, and the last column the 95\%
-interval of Newcombe's method 10 for paired data, for the posterior hit rate less the
-uniform one.
-A hit satisfies equation~\ref{eq:hit}.}
-\label{tab:ablation}
-\centering
-\footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrr@{}}
-\toprule
-Cluster & Budget & Posterior & Uniform & Both & Post. & Unif. & Neither & \(p\) & 95\% interval \\
-\midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 6/6 & 6/6 & 6 & 0 & 0 & 0 & 1 & \(-\)0.39 to 0.39 \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 6/6 & 6/6 & 6 & 0 & 0 & 0 & 1 & \(-\)0.39 to 0.39 \\
-LJ\(_{75}\) & \(4\times 10^{6}\) & 11/12 & 12/12 & 11 & 0 & 1 & 0 & 1 & \(-\)0.35 to 0.17 \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 9/12 & 9/12 & 7 & 2 & 2 & 1 & 1 & \(-\)0.33 to 0.33 \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 5/12 & 6/12 & 3 & 2 & 3 & 4 & 1 & \(-\)0.42 to 0.28 \\
-\midrule
-Pooled &  & 37/48 & 39/48 & 33 & 4 & 6 & 5 & 0.75 & \(-\)0.18 to 0.10 \\
-\bottomrule
-\end{tabular}
-\end{table}
-% ablation table: end
+The structure prior that remains and the choice among the moves can each be
+switched off by name in the Lennard-Jones, Morse, and gold drivers:
+\texttt{H2H\_KNOCKOUT=prior\_soap} turns off \texttt{prior\_soap} and its
+proposal, and \texttt{H2H\_KNOCKOUT=move\_choice} replaces
+equation~\ref{eq:thompson} by equation~\ref{eq:uniform}.
+With the variable unset, the drivers run the preset unchanged.
+No row of this article sets it.
 
 \section{Benchmarks}
 \label{sec:benchmarks}
@@ -1023,16 +881,10 @@ M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 
 % ase-nonlj table: end
 
 \section{Conclusions}
-Of the five parts of this basin-hopping search that have been run with and
-without them, three change the hits at \(p<0.05\).
-The structure priors carry the hits on six Gupta alloys, from 0 to 5 of 12
-without them to 12 of 12 with them.
-The structure templates carry the hits on Morse M\(_{38}\) at \(\rho=14\),
-12 of 12 against 4.
-The length unit of the pair minimum carries 6 of 12 seeds on M\(_{80}\) at
-\(\rho=6\) against none.
-A restart from a diverse population and a Thompson choice among the moves
-change no cluster at that level.
+Removing the structure templates, at a revision and its child in the history
+of this basin-hopping code, lowers the hits on Morse M\(_{38}\) at
+\(\rho=14\) from 12 of 12 to 4, the one cluster of that run whose arms differ
+at \(p<0.05\).
 With the templates removed, the code hits more seeds than GMIN on
 LJ\(_{98}\), 7 of 12 against none, on Morse M\(_{55}\) and M\(_{80}\) at
 \(\rho=14\) at the submitted revision, 9 and 6 of 12 against none, and on

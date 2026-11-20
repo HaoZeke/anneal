@@ -17,8 +17,6 @@ SPEC.loader.exec_module(audit_mod)
 
 CHECKS = (
     audit_mod.paired_statistics,
-    audit_mod.manuscript_ablation,
-    audit_mod.selection_tables,
     audit_mod.manuscript_retry,
     audit_mod.manuscript_gmin,
     audit_mod.manuscript_tip4p,
@@ -236,14 +234,22 @@ def test_a_trap_in_the_results_is_reported():
     assert [r[2] for r in audit.drifts()] == ["the results and conclusions do not say trap"]
 
 
-def test_the_prior_switch_must_be_named_on_the_develop_build():
+def test_a_drifted_template_count_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.TEX)
-    old = "With the switch built on develop \\texttt{f2a628c0}, turning the structure"
-    assert old in audit_mod.collapse(tex)
-    audit.text_cache[audit_mod.TEX] = audit_mod.collapse(tex).replace(old, old.replace("f2a628c0", "7192e9f8"))
+    tex = audit_mod.collapse(audit.text(audit_mod.TEX))
+    old = "at \\(\\rho=14\\) from 12 of 12 to 4,"
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("to 4,", "to 3,"))
     audit_mod.manuscript_knockouts(audit)
     assert {r[2] for r in audit.drifts()} == {"prose"}
+
+
+def test_a_withdrawn_knockout_in_the_text_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\n% Section~\\ref{sec:k-priors}\n"
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["withdrawn knockout text stays out: sec:k-priors"]
 
 
 def test_every_todo_marker_fails_both_audits():
@@ -408,9 +414,9 @@ def test_the_paired_newcombe_interval_matches_the_published_example():
 def test_a_title_across_funnels_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "\\title{Seed-paired knockouts of a basin-hopping search:"
+    old = "of a basin-hopping search: a"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\title{Seed-paired knockouts of a basin-hopping search across funnels:")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "of a basin-hopping search across funnels: a")
     audit_mod.science_claims(audit)
     assert [r[2] for r in audit.drifts()] == ["no overclaim: across funnels"]
     titled = audit_mod.Audit()
@@ -958,11 +964,11 @@ def test_a_drifted_ase_call_range_is_reported():
 def test_a_drifted_newcombe_interval_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 5/12 & 6/12 & 3 & 2 & 3 & 4 & 1 & \\(-\\)0.42 to 0.28 \\\\"
+    old = "& 12/12 & 4/12 & 8 & 0 & \\(7.8\\times 10^{-3}\\) & 0.30 to 0.86 \\\\"
     assert old in tex
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("0.28", "0.29"))
-    audit_mod.manuscript_ablation(audit)
-    assert [r[2] for r in audit.drifts()] == ["paired Newcombe 95% interval"]
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("0.86", "0.87"))
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["Newcombe upper"]
 
 
 def test_the_newcombe_interval_matches_the_published_example():

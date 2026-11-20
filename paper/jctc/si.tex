@@ -7,9 +7,9 @@
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 \input{macros}
-\title{Seed-paired knockouts of a basin-hopping search: structure priors,
-templates, stall rules, and the length unit, with comparisons to GMIN,
-CREST, and the Atomic Simulation Environment}
+\title{Removing the structure templates of a basin-hopping search: a
+seed-paired knockout, with comparisons to GMIN, CREST, and the Atomic
+Simulation Environment}
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
 \alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
@@ -181,11 +181,6 @@ rewrite its table from the committed rows without a new search.
 The ASE rows are copied unchanged into \path{paper/jctc/data/ase_rerun}
 from the record branches their \texttt{PROVENANCE} files name, and
 \path{paper/jctc/scripts/ase_table.py} writes both ASE tables from them.
-\texttt{paper/jctc/scripts/selector\_fisher.py} reads the two result
-files of the move-selection comparison and checks each hit flag against its
-energy, and \texttt{paper/jctc/scripts/ablation\_table.py} writes the
-ablation table of the main text from the same files, with the two arms
-paired by seed.
 
 \section{Code revisions behind the tables}
 \label{sec:si-revisions}
@@ -200,26 +195,10 @@ The rows of this code in the second block are the submitted revision
 20261120T072444Z of \path{paper/jctc/data/gmin_develop}, copied from the
 record branch its \texttt{PROVENANCE} file names.
 
-The blocks of the knockout table ran at the revisions their headings name.
-The structure-prior block is the last row of each system, arm, and seed at
-\texttt{f2a628c0} in the record of the prior switch, whose binaries are the
-switch of commit \texttt{4f5ec0c5} built on develop \texttt{f2a628c0}; with
-the switch on, that build gives the trajectory pins of develop.
-The record also ran LJ\(_{75}\), and the table leaves it out of this block,
-because the arm without the priors is not the code of an ancestor of the
-submitted revision.
-The template block is the release pair of the record that runs the parent
-\texttt{628773d6} and the child \texttt{1c1b1238}, even seeds parent first and
-odd seeds child first.
-The restart block is the session of \texttt{d12f8825} against develop
-\texttt{7192e9f8}, and the length-unit block the gate of \texttt{e5883055}
-against \texttt{628773d6} with the patch of sha256 \texttt{1c5575a2} that
-removes the structure templates, tree \texttt{a9cef902}.
-Revisions \texttt{d12f8825} and \texttt{e5883055} are not in the repository;
-their records are.
-Both records also ran LJ\(_{75}\), and the table leaves that cluster out of
-both blocks, because the arm with the switch did not run at an ancestor of the
-submitted revision.
+The knockout table is the release pair of the record that runs the parent
+\texttt{\seqsplit{628773d6837ea2d959a27256ff4163b21162fd4d}} and the child
+\texttt{\seqsplit{1c1b12384683485cf820d3a244151b48973dc0f7}}, both ancestors
+of the submitted revision, even seeds parent first and odd seeds child first.
 The trail step has one record, on LJ\(_{75}\), whose two arms ran at
 \texttt{666591a0}, a commit outside the history of the submitted revision, so
 the knockout table has no trail block.
@@ -235,10 +214,8 @@ That preset is not a configuration of the main-text tables.
 Its hits are 10, 12, 4, 0, and 0 of 12 on LJ\(_{38}\), LJ\(_{55}\),
 LJ\(_{98}\), LJ\(_{104}\), and Au\(_{55}\), and 5, 0, 12, and 0 of 12 on
 M\(_{38}\) and M\(_{55}\) at \(\rho=6\) and 14 in the order of the Morse table.
-The move-selection rows were recorded by commit \texttt{07092af2}, and the
-TIP4P rows of the GMIN comparison by revision \texttt{e1a69a57}, both
-ancestors of the submitted revision.
-The parent of \texttt{07092af2} has no prior switch.
+The TIP4P rows of the GMIN comparison were recorded by revision
+\texttt{e1a69a57}, an ancestor of the submitted revision.
 The anneal arm of the 192-seed hexamer run is source \texttt{36086e98}, which
 is not in the repository, recorded at revision \texttt{9a30f319}.
 
@@ -277,7 +254,7 @@ on each seed.
 The paired outcome table counts \(a\) seeds that both arms hit, \(b\) that
 only the first arm hits, \(c\) that only the second hits, and \(d\) that
 neither hits, with \(n=a+b+c+d\).
-The GMIN table, the move-selection table, and the water hexamer pair their
+The GMIN tables, the knockout table, and the water hexamer pair their
 arms in this way.
 
 \emph{Exact McNemar test.}
