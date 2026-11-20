@@ -92,7 +92,8 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
     // The general move library is deterministic on every build. The hash
     // moved when orbit completion and stall symmetrisation left the preset,
-    // and again when a loosely detected group stopped being refused.
-    let expected = "6694fdbfde2baf72c3c48582df3d03302125c470a4d3efd8d2b3499b3fa18366";
+    // when a loosely detected group stopped being refused, and again when
+    // its closure became exact.
+    let expected = "07b11c1a777761f65fece7dbc5b81227210b11eb005429cbaaeebba36f2a1f6e";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

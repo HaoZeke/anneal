@@ -79,10 +79,10 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // The walk is deterministic: cutoff 0xffff, plain 0x5a02 (5 seeds), with
-    // and without IRA. A completion that stops refusing a loosely detected
-    // group moved the plain mask from 0x1004 (2 seeds).
-    let plain_exact = 0x5a02;
+    // The walk is deterministic: cutoff 0xffff, plain 0x00a2 (3 seeds), with
+    // and without IRA. An exact closure of the detected operations moved the
+    // plain mask from 0x5a02 (5 seeds).
+    let plain_exact = 0x0082;
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"
