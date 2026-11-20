@@ -26,7 +26,7 @@ coordinator leaves local execution active rather than failing the run
 (=RpcFallback=).
 
 Runtime configuration derives from =Config::recommended(n)= with
-=budget_window= forced on (=run_cfg.budget_window = true=,
+=budget_window= forced on (~run_cfg.budget_window = true~,
 examples/lj_cluster_search.rs:1999-2000) and =polish_records= equal to
 one full quench (=relax_steps=, 1000 on =Config::recommended=).
 Two cooperative-only
@@ -176,7 +176,7 @@ cost to the number of record improvements -- a few hundred evaluations
 each over tens of events across a campaign budget -- rather than paying
 full precision on every accepted hop. Only states polished to this
 tolerance are valid offers in step 3 above; a solo (non-cooperative) run
-leaves =polish_records = 0= and never pays this cost.
+leaves ~polish_records = 0~ and never pays this cost.
 
 * Population epoch: reconfiguration
 
@@ -323,8 +323,8 @@ the journal. What is actually there:
 
 - Transport: two-party Cap'n Proto RPC on TCP. =Catalog.capnp=
   defines =Coordinator=, =Session=, and =Subscriber=. A replica
-  =attach=es with its identity and a subscriber capability, then
-  =Session.call= carries the existing =CatalogRequest= /
+  ~attach=es with its identity and a subscriber capability, then
+  =Session.call~ carries the existing =CatalogRequest= /
   =CatalogReply= payload so journal identity and every operation
   handler stay unchanged. =Coordinator.observe= needs no identity.
 - Coordination: =CatalogServer::start= binds one socket and runs a
