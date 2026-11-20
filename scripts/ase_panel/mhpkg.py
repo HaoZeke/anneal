@@ -778,18 +778,25 @@ def run_mhpkg(
     os.chdir(run_dir)
     started = time.perf_counter()
     meter["t0"] = started
+    failure = ""
     try:
         with Minimahopping(atoms, **params) as hopper:
             try:
                 hopper(totalsteps=10**12)
             except StopSearch as stop:
                 meter["stop"] = stop.reason
+            except Exception as exc:
+                failure = f"{type(exc).__name__}: {exc}"
+                meter["stop"] = "error"
+                print(f"{cell} seed {seed} {failure}", file=sys.stderr)
             if not meter["stop"]:
                 meter["stop"] = "return"
     finally:
         wall = time.perf_counter() - started
         os.chdir(previous)
         server.close()
+    if failure:
+        (run_dir / "error.txt").write_text(failure + "\n")
     best = meter["best"] if meter["best"] is not None else meter["lowest"]
     if best is None:
         die(f"{cell} seed {seed} made no potential call")
