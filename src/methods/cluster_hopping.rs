@@ -157,6 +157,25 @@ pub struct AcceptedTransition {
     pub adopted: bool,
 }
 
+/// One minimum the live chain adopted, as handed to [`Ledger::trace_accepted`].
+#[derive(Debug, Clone, Copy)]
+pub struct AcceptedMinimum<'a> {
+    /// Completed hop index when the chain adopted the minimum.
+    pub hop: usize,
+    /// [`Ledger::spent`] at adoption.
+    pub spent: usize,
+    /// Mechanism that produced the minimum: the proposal kernel's name, a
+    /// named stall or symmetry action, `start` for the opening quench, or
+    /// `unattributed` for an occupancy change no named site reported.
+    pub action: &'a str,
+    /// Quenched energy of the adopted minimum.
+    pub energy: f64,
+    /// Coordinates of the adopted minimum.
+    pub state: ArrayView1<'a, f64>,
+}
+
+type AcceptSink = Box<dyn FnMut(&AcceptedMinimum<'_>) + Send>;
+
 /// Coordinates and their paid evidence travel together through adoption and
 /// ladder scheduling. A shared identity belongs only to this exact occupancy.
 struct OccupiedMinimum {
@@ -619,6 +638,10 @@ pub struct Ledger {
     /// The count is [`Ledger::spent`] at that call, before any later relaxation.
     /// Capped at [`IMPROVEMENT_CAP`] records, the same cap as [`Outcome::improvements`].
     encounters: Vec<(usize, f64)>,
+    /// Receiver of every adopted minimum. `None` skips all trace work.
+    accept_sink: Option<AcceptSink>,
+    /// Energy and coordinate bits of the minimum last handed to the sink.
+    traced_bits: Vec<u64>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -669,6 +692,59 @@ impl Ledger {
             answer_polish_calls: 0,
             held_tail: 0,
             encounters: Vec::new(),
+            accept_sink: None,
+            traced_bits: Vec::new(),
+        }
+    }
+
+    /// Hand every minimum the live chain adopts to `sink`, in order.
+    ///
+    /// Off by default. The sink sees each adoption once, with the charged
+    /// count at that moment. It cannot charge the ledger or draw from the
+    /// chain's random stream, so a traced run spends the same calls and
+    /// reaches the same minima as an untraced one.
+    pub fn trace_accepted<F>(&mut self, sink: F)
+    where
+        F: FnMut(&AcceptedMinimum<'_>) + Send + 'static,
+    {
+        self.accept_sink = Some(Box::new(sink));
+        self.traced_bits.clear();
+    }
+
+    /// Whether [`Ledger::trace_accepted`] installed a sink.
+    pub fn traces_accepted(&self) -> bool {
+        self.accept_sink.is_some()
+    }
+
+    fn note_accepted(&mut self, action: &str, hop: usize, energy: f64, state: ArrayView1<f64>) {
+        let Some(sink) = self.accept_sink.as_mut() else {
+            return;
+        };
+        self.traced_bits.clear();
+        self.traced_bits.push(energy.to_bits());
+        self.traced_bits.extend(state.iter().map(|v| v.to_bits()));
+        sink(&AcceptedMinimum {
+            hop,
+            spent: self.spent,
+            action,
+            energy,
+            state,
+        });
+    }
+
+    /// Reports the occupied minimum when it differs from the last one traced.
+    fn note_if_moved(&mut self, action: &str, hop: usize, energy: f64, state: ArrayView1<f64>) {
+        if self.accept_sink.is_none() {
+            return;
+        }
+        let same = self.traced_bits.len() == state.len() + 1
+            && self.traced_bits[0] == energy.to_bits()
+            && self.traced_bits[1..]
+                .iter()
+                .zip(state.iter())
+                .all(|(held, v)| *held == v.to_bits());
+        if !same {
+            self.note_accepted(action, hop, energy, state);
         }
     }
 
@@ -4357,6 +4433,7 @@ where
         ledger.record(e, x.view());
         ledger.mark_last_recorded(true);
     }
+    ledger.note_accepted("start", 0, e, x.view());
     let mut current_validation_gradient = initial_validation_gradient;
     // The opening quench is the potential's own length. A reduced-unit
     // cluster stays on the preset. A physical cluster would otherwise
@@ -4864,6 +4941,9 @@ where
                 occupancy_generation,
                 here,
             ) = destination.into_live();
+            if let Some(action) = action {
+                ledger.note_accepted(action, $hop, e, x.view());
+            }
         }};
     }
     if let (Some(h), Some(g)) = (history.as_deref_mut(), current_validation_gradient.as_ref()) {
@@ -5025,6 +5105,9 @@ where
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
     let stop = loop {
+        if ledger.traces_accepted() {
+            ledger.note_if_moved("unattributed", hops, e, x.view());
+        }
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
         // charge, and the callback that the last hop completed never runs.
@@ -6241,6 +6324,7 @@ where
                         None,
                         hops
                     );
+                    ledger.note_accepted(&action, hops, e, x.view());
                     accepted += 1;
                     bias.deposit(x.view(), cfg.temperature);
                     accepted_transitions.push(AcceptedTransition {
@@ -6330,6 +6414,7 @@ where
                             None,
                             hops
                         );
+                        ledger.note_accepted(&action, hops, e, x.view());
                         accepted += 1;
                         bias.deposit(x.view(), cfg.temperature);
                     }
@@ -6455,6 +6540,7 @@ where
                         None,
                         hops
                     );
+                    ledger.note_accepted(symmetry_action, hops, e, x.view());
                     soft_cache = None;
                     basin_entry = None;
                     quiet = 0;
@@ -8593,6 +8679,7 @@ where
                     let _ = writeln!(fh, "{} {e_new:.8}", ledger.spent());
                 }
             }
+            ledger.note_accepted(&proposal_action, hops, e_new, x_new.view());
             accepted_transitions.push(AcceptedTransition {
                 hop: hops,
                 action: proposal_action,
