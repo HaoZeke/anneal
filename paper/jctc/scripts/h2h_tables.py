@@ -1096,16 +1096,27 @@ BLOCKS = {
 
 
 def splice(text: str, marks: tuple[str, str], block: str) -> str:
+    """Put ``block`` between ``marks``. An empty block clears the interior and keeps the marks."""
     start, end = marks
-    if not block:
-        if start in text or end in text:
-            raise SystemExit(f"{start!r}: the file still marks an empty block")
-        return text
     if text.count(start) != 1 or text.count(end) != 1:
+        if not block and start not in text and end not in text:
+            return text
         raise SystemExit(f"{start!r}: the file needs exactly one block")
     head, rest = text.split(start, 1)
     _, tail = rest.split(end, 1)
-    return f"{head}{start}\n{block}\n{end}{tail}"
+    middle = f"\n{block}\n" if block else "\n"
+    return f"{head}{start}{middle}{end}{tail}"
+
+
+def refresh(names: tuple[str, ...]) -> None:
+    """Rewrite the named blocks in place. Other blocks are left as they are."""
+    texts: dict[Path, str] = {}
+    for name in names:
+        path, make = BLOCKS[name]
+        text = texts.get(path, path.read_text())
+        texts[path] = splice(text, MARKS[name], make())
+    for path, text in texts.items():
+        path.write_text(text)
 
 
 def main(argv: list[str]) -> int:
