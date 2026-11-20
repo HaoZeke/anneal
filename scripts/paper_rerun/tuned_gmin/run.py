@@ -4,8 +4,10 @@
 
 Reads ``manifest.csv``. Rows with status ``run`` execute at
 ``scripts/gmin_panel/run_panel.py`` ``PAPER_BUDGETS``, seeds
-``seed_first`` through ``seed_last``, both arms, ABBA within each seed.
-Status ``unrunnable`` and ``not_tuned`` are not executed.
+``seed_first`` through ``seed_last``. When both codes of a system are
+``run``, the seed order is ABBA. A system with one ``run`` code executes
+that code on every seed. Status ``unrunnable`` and ``not_tuned`` are
+not executed.
 
 A hit is ``scripts/target_tol.py`` ``energy_hits``: best <= reference + 0.001.
 GMIN keywords come from ``run_panel.gmin_data`` and the committed data
@@ -234,17 +236,20 @@ def run_gmin(
 
 
 def jobs(manifest: list[dict[str, str]], panel) -> list[tuple[str, int, str]]:
+    runnable = set()
     systems = []
     for row in manifest:
         if row["status"] != "run":
             continue
+        runnable.add((row["system"], row["code"]))
         if row["system"] not in systems:
             systems.append(row["system"])
     out = []
     for system in systems:
         for seed in panel.SEEDS:
             for code in panel.arm_sequence("abba", seed):
-                out.append((system, seed, code))
+                if (system, code) in runnable:
+                    out.append((system, seed, code))
     return out
 
 
@@ -277,7 +282,9 @@ def main(argv: list[str]) -> int:
         if seeds != {panel.SEEDS[0]} or ends != {panel.SEEDS[-1]}:
             raise SystemExit(f"{system} seed span is not {panel.SEEDS[0]}-{panel.SEEDS[-1]}")
     head = check_ancestor(root)
-    check_gmin_source(panel, args.gmin_source)
+    planned = jobs(manifest, panel)
+    if any(code == "gmin" for _system, _seed, code in planned):
+        check_gmin_source(panel, args.gmin_source)
     check_budgets(panel, args.bin, root, systems)
     lj_data = (root / "examples" / "h2h_gmin_lj.data").read_text()
     morse_data = (root / "examples" / "h2h_gmin_morse.data").read_text()
@@ -298,8 +305,8 @@ def main(argv: list[str]) -> int:
         (row["system"], row["code"], row["seed"], row["code_revision"], row["harness_revision"])
         for row in stored
     }
-    print(f"session {session} head {head} code {CODE_REVISION} gmin {panel.GMIN_PIN} jobs {len(jobs(manifest, panel))}", flush=True)
-    for system, seed, code in jobs(manifest, panel):
+    print(f"session {session} head {head} code {CODE_REVISION} gmin {panel.GMIN_PIN} jobs {len(planned)}", flush=True)
+    for system, seed, code in planned:
         code_revision = CODE_REVISION if code == "anneal" else panel.GMIN_PIN
         key = (system, code, str(seed), code_revision, head)
         if key in done:

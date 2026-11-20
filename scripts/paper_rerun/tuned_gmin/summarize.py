@@ -126,7 +126,8 @@ def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]]) -> 
         "are recorded in this tree and whose earlier harness commit is not.",
         "The base is 61fa67cf380e46876b569da45e7cc091647a775b.",
         "Budgets are PAPER_BUDGETS in scripts/gmin_panel/run_panel.py.",
-        "Seeds of a run cell are 2000-2011. Arm order inside a seed is ABBA.",
+        "Seeds of a run cell are 2000-2011.",
+        "Arm order inside a seed is ABBA when both codes of that system run.",
         "",
         "A hit is energy_hits in scripts/target_tol.py: best <= reference + 0.001.",
         "DEFAULT_HIT_TOL is 0.001. A miss is stored at the budget.",
@@ -168,8 +169,11 @@ def readme(panel, summary: list[dict[str, str]], rows: list[dict[str, str]]) -> 
     lines.extend(
         [
             "",
-            "status run was executed. status unrunnable has no recorded keyword",
-            "file or start generator in this tree, so it was not guessed.",
+            "status run was executed. status unrunnable was not executed.",
+            "lj75-sym and lj98-early have no keyword file or start generator",
+            "in this tree. The per-cluster GMIN arms record their keywords,",
+            "and the pinned tarball named by build_gmin.sh was not reachable,",
+            "so those arms were not substituted.",
             "status not_tuned is a printed GMIN count under one shared input,",
             "which the manuscript separates from a per-cluster input.",
             "",
