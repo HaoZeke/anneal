@@ -1,0 +1,5 @@
+arm,hits,n,median_best,gap_to_reference,median_wall_s,median_inside_s,median_outside_s,median_over_anneal,median_anneal_over,fisher_p,mann_whitney_U,mann_whitney_p,wall_stops,wall_cap_s,fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh
+anneal,0,12,-190.81083051,0.22002228,35.971753,29.562451,6.335481,1.000000,1.000000,1,72,1,0,,1,,,1,,
+recommended,0,12,-190.98001732,0.05083548,35.818263,28.050455,7.808884,0.995733,1.004285,1,72,1,0,116.748798,1,,,1,,
+ase_bh,0,12,-189.83270197,1.19815083,116.749711,17.975330,98.795435,3.245594,0.308110,1,,,12,116.748798,1,,,1,,
+ase_mh,0,12,-190.29395447,0.73689833,119.542323,2.351380,117.026571,3.323228,0.300912,1,,,12,116.748798,1,,,1,,

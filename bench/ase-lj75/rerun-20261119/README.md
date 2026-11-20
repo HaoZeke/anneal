@@ -1,0 +1,9 @@
+Copyright (c) anneal developers
+
+ASE 3.29.0 default-settings rerun.
+BASE 5eb79cdcb0a986984dc7b487e5a3cc93224246f9
+Harness scripts/ase_lj75/enter_bench.sh at dd99ff590c325964e125d1342ecd4743aac83d88
+code_revision dd99ff590c325964e125d1342ecd4743aac83d88
+n 12
+seeds 2000-2011
+machine 3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873
