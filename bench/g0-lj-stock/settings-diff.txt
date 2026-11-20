@@ -1,0 +1,100 @@
+Settings at c2de652d against the stock preset at 61fa67cf.
+
+The paper GMIN driver built Config::recommended and left the
+structure priors at their constructor defaults. Gold also set the
+gold species list and a basin stride of 8. Morse set long_ranged
+when the second-neighbour energy was below -0.05. No prior
+environment variable was set on that driver. Stock is
+Config::recommended with no prior flag. Gold keeps the species list
+and stride 8. Morse does not set long_ranged.
+
+The comparison is field by field, including fields the c2de652d
+serializer omitted when they were true. Every other field matched
+inside each pair below: container, minimum separation, length,
+temperature, surfaces (one below 98 atoms, none from 98 up),
+LeanBurst, fraction orbit core, relax_steps 1000, energy_lattice,
+escape_on_stall, and prior_soap all stay as they were. Gold's
+species list matches. Basin stride stays 1, and 8 for gold.
+
+On at c2de652d and absent on stock, for every cell:
+
+  prior_reseed = true
+  prior_growth = true
+  prior_core = true
+  prior_handover = true
+  prior_motif = true
+  continuous_symmetry.reseed_hops = 5
+
+continuous_symmetry.interval stays 10. The reseed count is gone.
+
+Present only on stock, and off, for every cell:
+
+  align_directed_stall_source = false
+  branch_on_stall = false
+  call_floor = none
+  call_floor_elements = none
+  capped_lindh_quench = false
+  plateau_heat = false
+  retry_noop_stall_leave = false
+
+These names did not exist at c2de652d. Their stock values do not
+turn a feature on.
+
+Changed value:
+
+  long_ranged, gmin-m55r6 and gmin-m80r6 only
+    c2de652d true, stock false
+    second-neighbour energy -0.1596649824036894
+  long_ranged, gmin-m55r14 and gmin-m80r14
+    already false at c2de652d
+    second-neighbour energy -0.0060520443849328
+
+The five ASE Lennard-Jones cells use the same stock config as the
+GMIN Lennard-Jones cell of that size. Their committed recommended
+rows are revision b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac, which
+is not c2de652d and is not in this clone. The comparison in the
+summary uses those rows. This file is the c2de652d constructor
+against stock.
+
+Preset hashes, c2de652d then stock:
+
+  38 atoms
+    577fbe8078d3218aa947111e965ea8851558293195112af5ebae64e567b84365
+    32e59764f29aea5583d64df9975c1c1418616d61298f5846c50e5f56666712d6
+  55 atoms
+    2eb8d24d98f830775c5d96f3d7c25a740c54a42c938026f381789368ae297258
+    a4b937a5d71aad58ed2ee12b39cf3d37228f97c8afc51a7dc5500d6f6517daed
+  75 atoms
+    dca7d7a4b94e83e2e6182fa2385d53792deea9af140a23267c2ae0f6f83ccc52
+    cfdcebadd6f3dfbfeacd300098eb644767c7c3080fafe02859446d79075ec660
+  80 atoms, rho 14
+    25b520c36cd2d64651d1151931402c313178b3a8aa9f193aeef6201154daac73
+    c07ca603ec1ddd3d73fc94b2457fd0bf096425f6fdd2d4cf729cdf25174841fd
+  98 atoms
+    969a60eef830cf034cf7e01f37798c4227ed29a4510e61ae6cd32855a2aac585
+    79a5533b2e3c1810d1feb5da317505874bb429815b247af793e9c6652788a962
+  102 atoms
+    c0066b04016e8b9fa56f85fbea42be330666368dffdf2ec5573ef7fc6d3acd47
+    2bc4ac27a6a6c780ad6b1e0dd955817d959854d82a36ca56efaf1d8bfd80d1c1
+  103 atoms
+    af819e319e02805088667c9fcbb44dc24738591e6059206f6260d9dbf34a6b16
+    b12cfe57f47d7ffa3863305066b9db6183273d132c1a2d20681219a081f3feae
+  104 atoms
+    c9e0d91337b52101279fa8c00a8c2d045f8178f0eae25d310c8a3edf0464c501
+    fc718cbc9f391e5f8c56411de46ab59009726547ff75f9a4edbbdb9cee864130
+  150 atoms
+    4033baef6a8ad38910efda508ac66416a07c9235eb6c8a7ee32405ea91e4da57
+    e9e26f25a7b799624564c90293188a7095e16c43a449d5c8f83c1906ad9160c1
+  gold, 55 atoms, stride 8
+    710f662bd78a4d696de8d87bba3225fb830a1d63582f7a68fb4713d1f9410f15
+    446122062ed1b6aefa138a622c660dd9bea7d49a5913bb403cdadd7eb53d7756
+  Morse rho 6, 55 atoms
+    2b06b3bec4423c1f33fc3975756e4b4409eaa20029798dd41753992535ab4561
+    a4b937a5d71aad58ed2ee12b39cf3d37228f97c8afc51a7dc5500d6f6517daed
+  Morse rho 6, 80 atoms
+    fe3cf2ed6413ba24c323325609ecc1df600ebf97a8ee86a3fbe9dab03dfeb31b
+    c07ca603ec1ddd3d73fc94b2457fd0bf096425f6fdd2d4cf729cdf25174841fd
+
+Stock Morse rho 14 uses the 55-atom and 80-atom hashes above. Stock
+Morse rho 6 uses those same hashes, because long_ranged stays false
+and the preset does not store rho.

@@ -32,6 +32,14 @@ container and minimum separation, seeded by the cell seed. Each
 start is stored under `starts/` as little-endian hex bits of the
 coordinates. The search reads that file.
 
+`manifest.csv` freezes the cells, seeds, start digests, references,
+and the paper hit and call counts. A paper miss leaves the call
+count empty. Au55 has two stored sessions at the paper revision;
+the later one is kept, and its hits and call counts match the
+earlier one. The ASE recommended rows are revision
+b49341e308e6e98e39a2ea7bcc7fbf743f6c45ac, not that paper revision.
+`settings-diff.txt` is the constructor comparison.
+
 ## Miss classification
 
 These rules are fixed before any miss is read. They are not adjusted
