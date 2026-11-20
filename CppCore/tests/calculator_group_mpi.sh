@@ -1,7 +1,8 @@
 #!/bin/sh
 # mpirun -n 4 calculator_group_test.
 # share: rank 3's buffer matches the values rank 0 filled.
-# bad-owner: an owner outside the calculator count aborts every rank.
+# bad-owner: an owner outside the calculator count aborts the world and the
+# error names every rank.
 set -eu
 
 if [ "$#" -ne 2 ]; then
@@ -24,18 +25,11 @@ fi
 help=$("$LAUNCH" --help 2>&1 || true)
 ver=$("$LAUNCH" --version 2>&1 || true)
 OVER=
-TAG=
 # Open MPI 5 --help is a short usage line. Both flags are in the man page.
 if printf '%s\n' "$help" "$ver" | grep -q 'Open MPI'; then
   OVER=--oversubscribe
-  TAG=--tag-output
-else
-  if printf '%s\n' "$help" | grep -q -- '--oversubscribe'; then
-    OVER=--oversubscribe
-  fi
-  if printf '%s\n' "$help" | grep -q -- '--tag-output'; then
-    TAG=--tag-output
-  fi
+elif printf '%s\n' "$help" | grep -q -- '--oversubscribe'; then
+  OVER=--oversubscribe
 fi
 
 run_bounded() {
@@ -73,7 +67,7 @@ if [ "$MODE" = "bad-owner" ]; then
   export RGPOT_CALCULATOR_BAD_OWNER=1
   set +e
   # shellcheck disable=SC2086
-  run_bounded "$LAUNCH" -n 4 $OVER $TAG "$EXE" --order decl >"$log" 2>&1
+  run_bounded "$LAUNCH" -n 4 $OVER "$EXE" --order decl >"$log" 2>&1
   rc=$?
   set -e
   if [ "$rc" -eq 0 ] || [ "$rc" -eq 124 ]; then
@@ -81,21 +75,18 @@ if [ "$MODE" = "bad-owner" ]; then
     cat "$log" >&2
     exit 1
   fi
-  if [ -n "$TAG" ]; then
-    for rank in 0 1 2 3; do
-      if ! grep -E -q "[0-9]+,${rank}>.*shareFromCalculator owner out of range|\\[${rank}\\].*shareFromCalculator owner out of range|,${rank}\\].*shareFromCalculator owner out of range" "$log"; then
-        echo "rank $rank did not print the owner error" >&2
-        cat "$log" >&2
-        exit 1
-      fi
-    done
-    exit 0
-  fi
-  if ! grep -q 'shareFromCalculator owner out of range' "$log"; then
-    echo "missing owner error" >&2
-    cat "$log" >&2
-    exit 1
-  fi
+  # The first rank to see the bad owner prints one line for every rank that
+  # passed it, then aborts the world. The launcher kills the other ranks
+  # without waiting for them to print, so the log can hold their lines or not.
+  # What is certain is that the aborting rank named every rank, so each rank
+  # must be named somewhere in the log, whichever process wrote the line.
+  for rank in 0 1 2 3; do
+    if ! grep -q "rgpot rank ${rank}: shareFromCalculator owner out of range" "$log"; then
+      echo "rank $rank was not named in the owner error" >&2
+      cat "$log" >&2
+      exit 1
+    fi
+  done
   exit 0
 fi
 
