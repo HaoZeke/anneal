@@ -125,6 +125,10 @@ pub struct RelaxStats {
     /// gradient. The line search backtracks from each, and a refused start
     /// ends its relaxation at `+inf`.
     pub refused: usize,
+    /// Restraint blocks that finished without beating the incumbent they
+    /// opened on. Each returns the chain to where it stood when that
+    /// incumbent was found, and later blocks hold the plain surface.
+    pub restraint_releases: usize,
 }
 
 impl RelaxStats {
@@ -910,6 +914,7 @@ where
                     led.block_opened = true;
                 }
                 if portfolio.take_restraint_block_failed() {
+                    stats.restraint_releases += 1;
                     led.revert_unrestrained = true;
                     portfolio.hold_plain();
                 }
@@ -2962,6 +2967,31 @@ mod tests {
         }
         assert_eq!(stats.screens, 0);
         assert!(led.quench_boundaries().is_empty());
+    }
+
+    #[test]
+    fn a_restraint_block_that_cannot_beat_its_incumbent_releases_the_chain() {
+        // LJ31 has restraint blocks that settle more than a unit above the
+        // incumbent they opened on, so the release follows a real shortfall
+        // rather than rounding at a re-found minimum.
+        let objective = PairPotential::lennard_jones(31);
+        let cfg = Config::recommended(31);
+        assert!(!cfg.surfaces.is_empty());
+        let mut ledger = Ledger::new(100_000);
+        let (_, stats) = search(&objective, &cfg, &mut ledger, 1).unwrap();
+        assert!(
+            stats.restraint_releases >= 1,
+            "no restraint block released the chain"
+        );
+
+        let mut plain = cfg.clone();
+        plain.surfaces.clear();
+        let mut ledger = Ledger::new(100_000);
+        let (_, stats) = search(&objective, &plain, &mut ledger, 1).unwrap();
+        assert_eq!(
+            stats.restraint_releases, 0,
+            "a search without a restraint arm released a restraint block"
+        );
     }
 
     #[test]

@@ -1071,6 +1071,60 @@ mod tests {
     }
 
     #[test]
+    fn only_a_restraint_block_that_cannot_beat_its_incumbent_holds_the_plain_surface() {
+        let deep = TwoPhase::diameter(2.0, 1.0);
+        let block = 3;
+        // Walks blocks until one of the wanted arm has settled. `lowers`
+        // says whether that arm improves on the incumbent; every other arm
+        // stays above it. Returns whether the settled block was reported.
+        let settle = |portfolio: &mut SurfacePortfolio, want: Option<TwoPhase>, lowers: bool| {
+            let mut best = 0.0_f64;
+            portfolio.observe(false, best, best);
+            let mut flagged_on = Vec::new();
+            let mut previous = None;
+            for _ in 0..600 {
+                let arm = portfolio.begin(true);
+                if portfolio.take_restraint_block_failed() {
+                    flagged_on.push(previous);
+                }
+                let reached = if arm == want && lowers {
+                    best - 1.0
+                } else {
+                    best + 1.0
+                };
+                best = best.min(reached);
+                portfolio.observe(false, reached, best);
+                previous = Some(arm);
+            }
+            flagged_on
+        };
+
+        let mut failing = SurfacePortfolio::with_block(&[deep], 3, block);
+        let flagged = settle(&mut failing, Some(deep), false);
+        assert!(
+            !flagged.is_empty(),
+            "a failed restraint block was not reported"
+        );
+        assert!(
+            flagged.iter().all(|arm| *arm == Some(Some(deep))),
+            "a plain block was reported as a failed restraint: {flagged:?}"
+        );
+
+        let mut improving = SurfacePortfolio::with_block(&[deep], 3, block);
+        let flagged = settle(&mut improving, Some(deep), true);
+        assert!(
+            flagged.is_empty(),
+            "an improving restraint block was reported as failed: {flagged:?}"
+        );
+
+        failing.hold_plain();
+        for _ in 0..10 * block {
+            assert_eq!(failing.begin(true), None, "a held chain drew the restraint");
+            failing.observe(false, 1.0, 0.0);
+        }
+    }
+
+    #[test]
     fn chains_sharing_a_posterior_learn_from_each_other_s_blocks() {
         let deep = TwoPhase::diameter(2.0, 1.0);
         let shared = shared_surface_allocator(&[deep]);
