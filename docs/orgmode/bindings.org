@@ -39,19 +39,21 @@ executable('myprog', 'main.cpp', dependencies: anneal_core_dep)
 Meson builds the static archive with
 =scripts/meson_cargo_build.py=. Leave
 =ANNEAL_REPRODUCIBLE_ARCHIVE= unset for that ordinary build. The
-script then forwards the caller's Cargo environment and packs the
-final object with =ar crs=.
+script then forwards the caller's Cargo environment. On hosts where
+Meson passes =objcopy= and =nm=, it packs the final object with
+=ar crs=. On macOS and Windows it ships Cargo's archive as built.
 
 Set =ANNEAL_REPRODUCIBLE_ARCHIVE=1= to change three things.
 
-Archiver flags. After =ld -r=, the archive that ships is packed
-with =ar crsD= when that archiver accepts =D= (zero mtime, uid, and
-gid). An archiver that rejects =D=, including Apple =ar=, is packed
-with =ar crs= and the member headers are then rewritten to those
-same zeros. On macOS and Windows, Meson passes an empty =objcopy=
-and =nm=, so no archiver is invoked and the copied archive's
-headers are rewritten in process. =AR= is used when it is set,
-otherwise =ar= on =PATH=, otherwise =llvm-ar=.
+Archiver flags. On hosts where Meson passes =objcopy= and =nm=,
+the members are joined with =ld -r= and the archive that ships is
+packed with =ar crsD= when that archiver accepts =D= (zero mtime,
+uid, and gid). An archiver that rejects =D= is packed with =ar crs=
+and the member headers are then rewritten to those same zeros. On
+that path =AR= is used when it is set, otherwise =ar= on =PATH=,
+otherwise =llvm-ar=. On macOS and Windows, Meson passes an empty
+=objcopy= and =nm=, so no archiver runs: the copied Cargo archive's
+headers are rewritten in process and =AR= is ignored.
 
 Remapped prefixes. Cargo runs with =CARGO_INCREMENTAL=0= and
 =-Ccodegen-units=1=. =--remap-path-prefix= sends the source tree to
