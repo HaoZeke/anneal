@@ -1,0 +1,9 @@
+[package]
+name = "nm3-scan-safe4-microbench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anneal-core = { path = "../../.." }
+ndarray = "0.17"
