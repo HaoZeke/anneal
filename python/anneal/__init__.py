@@ -1001,11 +1001,52 @@ def box_ensemble_optimize(
     replicas: int = 4,
     history: str = "shared",
     membership: str = "accepted",
+    *,
+    identity_tol=None,
+    shared_deposits=None,
+    shared_visit_policy=None,
+    escape=None,
+    langevin_steps=None,
+    langevin_omega0=None,
+    langevin_dt=None,
+    langevin_friction=None,
+    coverage_shared=None,
+    coverage_radius=None,
+    coverage_neighbors=None,
+    coverage_height=None,
+    coverage_well_tempering=None,
+    coverage_peer_weight=None,
 ):
     """Communicating box hops on SharedDesignHistory / MinimumHistory.
 
     Requires ``grad_fn``. Kick and quench in the box. Without a gradient
     use ``ensemble_optimize`` (portfolio). Not cluster hopping.
+
+    The result has ``best_val``, ``best_pos``, ``charged`` (``n_evals`` plus
+    ``n_grads``), ``hops``, the minimum-history counters, ``shared_deposits``
+    and the ``coverage_*`` counters.
+
+    Settings beyond ``replicas``, ``history`` and ``membership`` (``None``
+    keeps the default; a value outside its range raises
+    ``InvalidArgumentError``):
+
+    - ``identity_tol``: scaled max-norm that identifies two quenched points
+      as one minimum (positive; default ``1e-3``).
+    - ``shared_deposits``: foreign coverage visits paid into each receiving
+      region per hop boundary (default 8; zero disables incoming deposits).
+    - ``shared_visit_policy``: ``"tabu"`` (default; peer visits mark a basin
+      known and inflate escape) or ``"recognition"`` (peer visits only
+      identify the basin).
+    - ``escape``: ``"gaussian"`` (default) or ``"langevin"``, persistent
+      Langevin noise that integrates forces and so needs ``grad_fn``.
+      ``langevin_steps`` (default 16), ``langevin_omega0`` (0.2) and
+      ``langevin_dt`` (0.01) configure it; ``langevin_friction`` selects
+      scalar white noise with that damping rate, and ``None`` the colored
+      noise. They are refused with the Gaussian escape.
+    - ``coverage_shared``, ``coverage_radius``, ``coverage_neighbors``,
+      ``coverage_height`` (nonnegative), ``coverage_well_tempering`` (above
+      one) and ``coverage_peer_weight`` (nonnegative): the evaluated-region
+      coverage, independent of the minimum ledger.
     """
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
@@ -1021,6 +1062,20 @@ def box_ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_friction=langevin_friction,
+        coverage_shared=coverage_shared,
+        coverage_radius=coverage_radius,
+        coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1038,9 +1093,20 @@ def ensemble_optimize(
     history: str = "shared",
     membership: str = "accepted",
     *,
+    identity_tol=None,
+    shared_deposits=None,
+    shared_visit_policy=None,
+    escape=None,
+    langevin_steps=None,
+    langevin_omega0=None,
+    langevin_dt=None,
+    langevin_friction=None,
     coverage_shared=None,
     coverage_radius=None,
     coverage_neighbors=None,
+    coverage_height=None,
+    coverage_well_tempering=None,
+    coverage_peer_weight=None,
 ):
     """Search on a design box.
 
@@ -1058,10 +1124,32 @@ def ensemble_optimize(
     ``coverage_radius`` sets the normalized RMS parameter distance.
     ``coverage_neighbors`` restricts both sample and deposit delivery to direct
     cyclic neighbours: zero is all-to-all, one selects the two adjacent chains.
-    Explicit coverage controls select native hop chains, including for one
-    replica. With no coverage controls, the one-replica values-only portfolio
-    remains the convenience policy. Coverage requires no gradient and does not
+    Explicit coverage controls, and any of the settings below, select native
+    hop chains, including for one replica. With none of them, the
+    one-replica values-only portfolio remains the convenience policy. Coverage requires no gradient and does not
     restrict the optional minimum ledger or forward received observations.
+
+    Settings beyond ``replicas``, ``history`` and ``membership`` (``None``
+    keeps the default; a value outside its range raises
+    ``InvalidArgumentError``):
+
+    - ``identity_tol``: scaled max-norm that identifies two quenched points
+      as one minimum (positive; default ``1e-3``).
+    - ``shared_deposits``: foreign coverage visits paid into each receiving
+      region per hop boundary (default 8; zero disables incoming deposits).
+    - ``shared_visit_policy``: ``"tabu"`` (default; peer visits mark a basin
+      known and inflate escape) or ``"recognition"`` (peer visits only
+      identify the basin).
+    - ``escape``: ``"gaussian"`` (default) or ``"langevin"``, persistent
+      Langevin noise that integrates forces and so needs ``grad_fn``.
+      ``langevin_steps`` (default 16), ``langevin_omega0`` (0.2) and
+      ``langevin_dt`` (0.01) configure it; ``langevin_friction`` selects
+      scalar white noise with that damping rate, and ``None`` the colored
+      noise. They are refused with the Gaussian escape.
+    - ``coverage_shared``, ``coverage_radius``, ``coverage_neighbors``,
+      ``coverage_height`` (nonnegative), ``coverage_well_tempering`` (above
+      one) and ``coverage_peer_weight`` (nonnegative): the evaluated-region
+      coverage, independent of the minimum ledger.
 
     Coordinates are design variables regardless of dimension. Atomic
     symmetry-aware proposals require the explicit ``cluster_search`` adapter.
@@ -1080,9 +1168,20 @@ def ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_friction=langevin_friction,
         coverage_shared=coverage_shared,
         coverage_radius=coverage_radius,
         coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out

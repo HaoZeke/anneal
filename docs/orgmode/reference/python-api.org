@@ -129,6 +129,53 @@ else:
     raise AssertionError("a state of the wrong length must raise")
 #+end_src
 
+* Box ensembles
+
+=box_ensemble_optimize= and =ensemble_optimize= take, beside =replicas=,
+=history= and =membership=, every setting of the Rust =BoxEnsembleConfig=,
+=GleEscapeConfig= and =BoxCoverageConfig= as keywords.
+=pytest/test_box_ensemble_tuning.py= reads the three structs and fails when a
+field has no keyword.
+
+| Keyword                                        | Sets                                                    |
+|------------------------------------------------+---------------------------------------------------------|
+| =identity_tol=                                 | scaled max-norm that makes two quenches one minimum     |
+| =shared_deposits=                              | foreign visits paid per region per hop boundary         |
+| =shared_visit_policy=                          | ="tabu"= or ="recognition"=                             |
+| =escape=                                       | ="gaussian"= or ="langevin"=                            |
+| =langevin_steps=, =langevin_omega0=,           | the Langevin segment; =langevin_friction= selects       |
+| =langevin_dt=, =langevin_friction=             | white noise, and =None= the colored noise               |
+| =coverage_shared=, =coverage_neighbors=        | who receives coverage                                   |
+| =coverage_radius=, =coverage_height=,          | region size, deposit height, well-tempering factor      |
+| =coverage_well_tempering=,                     | and peer weight                                         |
+| =coverage_peer_weight=                         |                                                         |
+
+=escape="langevin"= integrates forces and needs =grad_fn=. Any of the
+keywords selects hop chains in =ensemble_optimize=, also for one values-only
+replica. A value that Rust asserts on, such as =identity_tol=0= or a
+=coverage_well_tempering= of 1, raises =InvalidArgumentError= before the
+first callback. =box_ensemble_optimize= also reports =charged=, the sum of
+=n_evals= and =n_grads=.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+def energy(x):
+    return float(np.sum(np.cos(3.0 * x)))
+
+def gradient(x):
+    return -3.0 * np.sin(3.0 * x)
+
+low, high = np.full(2, -5.0), np.full(2, 5.0)
+out = anneal.box_ensemble_optimize(
+    energy, low, high, budget=600, seed=1, grad_fn=gradient,
+    escape="langevin", langevin_steps=8, shared_deposits=0,
+)
+assert out["charged"] == out["n_evals"] + out["n_grads"] <= 600
+assert out["shared_deposits"] == 0
+#+end_src
+
 * Configuration
 
 =anneal.Config= wraps the Rust =cluster_hopping::Config=. A preset builds

@@ -33,6 +33,7 @@ use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
 use errors::{bounds_error, config_error, invalid_argument, search_error};
 
+mod box_tuning;
 mod config_fields;
 mod device;
 mod errors;
@@ -2014,12 +2015,23 @@ fn coverage_decisions_dict<'py>(
 ///
 /// Four (or `replicas`) algebraic hops divide one work-unit budget. They
 /// share a Euclidean minimum history and Goedecker escape feedback. This is
-/// not cluster hopping: the move is a reflected Gaussian on the box. A
-/// callback raising `BaseException` that is not an `Exception` stops the
-/// ensemble at once and is re-raised. The best point found is kept.
+/// not cluster hopping: the move is a reflected Gaussian on the box unless
+/// `escape="langevin"` integrates forces instead. `identity_tol`,
+/// `shared_deposits`, `shared_visit_policy`, the `langevin_*` settings and
+/// the `coverage_*` settings are the fields of `BoxEnsembleConfig`,
+/// `GleEscapeConfig` and `BoxCoverageConfig`. A value outside the range Rust
+/// asserts on raises `InvalidArgumentError`. A callback raising
+/// `BaseException` that is not an `Exception` stops the ensemble at once and
+/// is re-raised. The best point found is kept.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
-                    replicas = 4, history = "shared", membership = "accepted"))]
+                    replicas = 4, history = "shared", membership = "accepted", *,
+                    identity_tol = None, shared_deposits = None, shared_visit_policy = None,
+                    escape = None, langevin_steps = None, langevin_omega0 = None,
+                    langevin_dt = None, langevin_friction = None,
+                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None,
+                    coverage_height = None, coverage_well_tempering = None,
+                    coverage_peer_weight = None))]
 #[allow(clippy::too_many_arguments)]
 fn box_ensemble_optimize(
     py: Python<'_>,
@@ -2033,19 +2045,47 @@ fn box_ensemble_optimize(
     replicas: usize,
     history: &str,
     membership: &str,
+    identity_tol: Option<f64>,
+    shared_deposits: Option<usize>,
+    shared_visit_policy: Option<&str>,
+    escape: Option<&str>,
+    langevin_steps: Option<usize>,
+    langevin_omega0: Option<f64>,
+    langevin_dt: Option<f64>,
+    langevin_friction: Option<f64>,
+    coverage_shared: Option<bool>,
+    coverage_radius: Option<f64>,
+    coverage_neighbors: Option<usize>,
+    coverage_height: Option<f64>,
+    coverage_well_tempering: Option<f64>,
+    coverage_peer_weight: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
     let seed_view = parsed.x0.as_ref().map(|a| a.view());
-    let config = crate::methods::box_hopping::BoxEnsembleConfig {
+    let base = crate::methods::box_hopping::BoxEnsembleConfig {
         replicas,
         budget,
         history: parsed.history,
         membership: parsed.membership,
-        identity_tol: crate::methods::box_hopping::IDENTITY_TOL,
-        shared_deposits: 8,
-        shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
         ..crate::methods::box_hopping::BoxEnsembleConfig::default()
     };
+    let tuning = box_tuning::BoxTuning {
+        identity_tol,
+        shared_deposits,
+        shared_visit_policy,
+        escape,
+        langevin_steps,
+        langevin_omega0,
+        langevin_dt,
+        langevin_friction,
+        coverage_shared,
+        coverage_radius,
+        coverage_neighbors,
+        coverage_height,
+        coverage_well_tempering,
+        coverage_peer_weight,
+    };
+    let box_tuning::Resolved { config, coverage } = tuning.resolve(base, grad_fn.is_some())?;
     let Some(grad_fn) = grad_fn else {
         return Err(invalid_argument(
             "box_ensemble_optimize requires grad_fn; use ensemble_optimize without a gradient",
@@ -2056,12 +2096,18 @@ fn box_ensemble_optimize(
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let dim = parsed.dim;
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
-    let result = with_replica_threads(py, || {
-        crate::methods::box_hopping::box_ensemble_optimize(&obj, &grad, seed, seed_view, &config)
+    let result = with_replica_threads(py, || match coverage.as_ref() {
+        Some(coverage) => crate::methods::box_hopping::box_ensemble_optimize_with_coverage(
+            &obj, &grad, seed, seed_view, &config, coverage,
+        ),
+        None => crate::methods::box_hopping::box_ensemble_optimize(
+            &obj, &grad, seed, seed_view, &config,
+        ),
     });
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
     out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
+    out.set_item("charged", result.n_evals + result.n_grads)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("hops", result.hops)?;
@@ -2135,12 +2181,21 @@ fn box_ensemble_optimize(
 
 /// Box search split on gradient: hop-and-quench, or the values-only portfolio.
 ///
+/// Any of the tuning settings of `box_ensemble_optimize` selects hop chains,
+/// including for one values-only replica. `escape="langevin"` needs
+/// `grad_fn`.
+///
 /// A callback raising `BaseException` that is not an `Exception` stops the
 /// search at once and is re-raised. The best point found is kept.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
                     replicas = 4, history = "shared", membership = "accepted", *,
-                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None))]
+                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None,
+                    identity_tol = None, shared_deposits = None, shared_visit_policy = None,
+                    escape = None, langevin_steps = None, langevin_omega0 = None,
+                    langevin_dt = None, langevin_friction = None,
+                    coverage_height = None, coverage_well_tempering = None,
+                    coverage_peer_weight = None))]
 #[allow(clippy::too_many_arguments)]
 fn ensemble_optimize(
     py: Python<'_>,
@@ -2157,13 +2212,19 @@ fn ensemble_optimize(
     coverage_shared: Option<bool>,
     coverage_radius: Option<f64>,
     coverage_neighbors: Option<usize>,
+    identity_tol: Option<f64>,
+    shared_deposits: Option<usize>,
+    shared_visit_policy: Option<&str>,
+    escape: Option<&str>,
+    langevin_steps: Option<usize>,
+    langevin_omega0: Option<f64>,
+    langevin_dt: Option<f64>,
+    langevin_friction: Option<f64>,
+    coverage_height: Option<f64>,
+    coverage_well_tempering: Option<f64>,
+    coverage_peer_weight: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
-    if coverage_radius.is_some_and(|radius| !radius.is_finite() || radius <= 0.0) {
-        return Err(invalid_argument(
-            "coverage radius must be finite and positive",
-        ));
-    }
     let seed_view = parsed.x0.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, parsed.bounds);
     let errors = obj.errors();
@@ -2171,30 +2232,33 @@ fn ensemble_optimize(
     let dim = parsed.dim;
     let history_mode = parsed.history;
     let membership = parsed.membership;
-    let coverage =
-        (coverage_shared.is_some() || coverage_radius.is_some() || coverage_neighbors.is_some())
-            .then(|| {
-                let defaults = crate::methods::box_hopping::BoxCoverageConfig::default();
-                crate::methods::box_hopping::BoxCoverageConfig {
-                    shared: coverage_shared.unwrap_or(matches!(
-                        history_mode,
-                        crate::methods::ensemble::HistoryMode::Shared
-                    )),
-                    radius: coverage_radius.unwrap_or(defaults.radius),
-                    neighbors: coverage_neighbors.unwrap_or(defaults.neighbors),
-                    ..defaults
-                }
-            });
+    let base = crate::methods::box_hopping::BoxEnsembleConfig {
+        replicas,
+        budget,
+        history: history_mode,
+        membership,
+        ..Default::default()
+    };
+    let tuning = box_tuning::BoxTuning {
+        identity_tol,
+        shared_deposits,
+        shared_visit_policy,
+        escape,
+        langevin_steps,
+        langevin_omega0,
+        langevin_dt,
+        langevin_friction,
+        coverage_shared,
+        coverage_radius,
+        coverage_neighbors,
+        coverage_height,
+        coverage_well_tempering,
+        coverage_peer_weight,
+    };
+    let box_tuning::Resolved { config, coverage } = tuning.resolve(base, grad_fn.is_some())?;
     let result = with_replica_threads(py, || {
         let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
         if let Some(coverage) = coverage.as_ref() {
-            let config = crate::methods::box_hopping::BoxEnsembleConfig {
-                replicas,
-                budget,
-                history: history_mode,
-                membership,
-                ..Default::default()
-            };
             crate::methods::box_hopping::ensemble_hop_optimize_with_config(
                 &obj,
                 grad.as_ref(),

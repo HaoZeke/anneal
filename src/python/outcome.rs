@@ -3,7 +3,7 @@
 //! The result dict of `cluster_search`: every field of
 //! [`crate::methods::cluster_hopping::Outcome`].
 //!
-//! `pytest/test_cluster_search_outcome.py` reads the struct and fails when a
+//! `pytest/test_cluster_search_config.py` reads the struct and fails when a
 //! field has no key here. Two names differ from the struct: `Outcome::best`
 //! is the energy and keeps the key `best_energy`, and `Outcome::best_state`
 //! is the geometry and keeps the key `best`.
