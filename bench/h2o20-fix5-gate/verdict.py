@@ -321,6 +321,11 @@ def provenance() -> list[str]:
         "are byte-identical to the same switch at c2de652d, the original panel's "
         "revision. Hashes are in `starts.csv`.",
         "",
+        "The generator moves every water 0.25 angstrom away from the centroid per step "
+        "until no intermolecular contact is below 1.5 angstrom. Spread steps per seed: "
+        + ", ".join(f"{row['seed']} {row['spread_steps']}" for row in starts)
+        + ".",
+        "",
         "Arms were checked by tree only: DEVELOP "
         f"`{panel.TREES['develop']}`, TIP `{panel.TREES['tip']}`. Every row carries its "
         "library tree, the runner blob, the driver blob and the hashed machine id.",
