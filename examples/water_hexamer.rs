@@ -1239,6 +1239,23 @@ fn load_pbe(_atomic_numbers: Vec<i32>, _n_atoms: usize) -> Result<ForceObjective
 }
 
 fn load_petmad(atomic_numbers: Vec<i32>, n_atoms: usize) -> Result<ForceObjective, String> {
+    // The hexamer manifest records the potlib file name. A different
+    // checkpoint is reported and still loaded.
+    load_petmad_file(atomic_numbers, n_atoms, PETMAD_MODEL_NAME, false)
+}
+
+/// Checkpoint file the finite-difference check loads.
+///
+/// pet-mad 1.4.4 publishes this file. [`PETMAD_MODEL_NAME`] is the
+/// different file named by the potlib dlopen test.
+pub(crate) const PETMAD_CHECKPOINT: &str = "pet-mad-1.0.2.pt";
+
+fn load_petmad_file(
+    atomic_numbers: Vec<i32>,
+    n_atoms: usize,
+    cited: &str,
+    require_cited_name: bool,
+) -> Result<ForceObjective, String> {
     let Some(library) = engine_file("RGPOT_METATOMIC_ENGINE", "libmetatomic_engine.so") else {
         return Err(
             "libmetatomic_engine.so not found (RGPOT_METATOMIC_ENGINE or ./libmetatomic_engine.so)"
@@ -1247,15 +1264,20 @@ fn load_petmad(atomic_numbers: Vec<i32>, n_atoms: usize) -> Result<ForceObjectiv
     };
     let Some(model) = env_file("RGPOT_METATOMIC_MODEL") else {
         return Err(format!(
-            "PET-MAD model not found (RGPOT_METATOMIC_MODEL). Cited file name is {PETMAD_MODEL_NAME}."
+            "PET-MAD model not found (RGPOT_METATOMIC_MODEL). Cited file name is {cited}."
         ));
     };
     let model_name = model
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("unnamed");
-    if model_name != PETMAD_MODEL_NAME {
-        eprintln!("petmad model file is {model_name}; the cited name is {PETMAD_MODEL_NAME}");
+    if model_name != cited {
+        if require_cited_name {
+            return Err(format!(
+                "pet-mad model file is {model_name}; the cited name is {cited}"
+            ));
+        }
+        eprintln!("petmad model file is {model_name}; the cited name is {cited}");
     }
     let lib = unsafe { Library::new(&library) }.map_err(|error| error.to_string())?;
     let create: Symbol<MtaCreate> =
@@ -1337,7 +1359,12 @@ pub(crate) fn petmad_published(
     atomic_numbers: &[i32],
     coordinates: &[f64],
 ) -> Result<(f64, Vec<f64>), String> {
-    let objective = load_petmad(atomic_numbers.to_vec(), coordinates.len() / 3)?;
+    let objective = load_petmad_file(
+        atomic_numbers.to_vec(),
+        coordinates.len() / 3,
+        PETMAD_CHECKPOINT,
+        true,
+    )?;
     let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
     if !energy.is_finite() || gradient.iter().any(|component| !component.is_finite()) {
         return Err("pet-mad returned a non-finite energy or gradient".into());
