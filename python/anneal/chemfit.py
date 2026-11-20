@@ -984,6 +984,8 @@ def flatten_parameters(params: dict[str, Any]):
         raise ValueError("params must be a non-empty dict")
     with _Strings("flatten_parameters"):
         layout = _Layout(params)
+        if not layout.leaves:
+            raise ValueError("params must be a non-empty dict")
         for leaf in layout.leaves:
             if leaf.size == 0:
                 raise ValueError(f"parameter {leaf.name} is empty")
@@ -1756,7 +1758,7 @@ def run_fitter(
     classical method of another kind, and so is ``preset_kwargs`` under the
     portfolio. Each gives a FutureWarning and will raise in a future release.
     """
-    if hasattr(fitter, "fit_anneal"):
+    if callable(getattr(fitter, "fit_anneal", None)):
         return fitter.fit_anneal(
             budget=budget, method=method, preset=preset, seed=seed, **kwargs
         )

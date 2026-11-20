@@ -1,0 +1,1 @@
+Rejected nested-empty parameter mappings in ``flatten_parameters`` (and thus ``fit_anneal``), checked ``callable(fitter.fit_anneal)`` in ``run_fitter``, and expanded ``test_chemfit*`` path and example coverage.
