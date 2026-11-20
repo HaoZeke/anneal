@@ -264,6 +264,24 @@ def test_a_rigid_stall_constant_that_drifts_is_reported():
     assert [r[2] for r in audit.drifts()] == ["barred stall destinations"]
 
 
+def test_a_template_era_row_in_the_text_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\n% revision \\texttt{c2de652d}\n"
+    audit_mod.presets_and_templates(audit)
+    assert [r[2] for r in audit.drifts()] == ["no table is presented as c2de652d"]
+
+
+def test_a_table_without_its_preset_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "This code is \\texttt{Config::recommended\\_tip4p}\\((N)\\) of revision \\texttt{e1a69a57}"
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "This code is of revision \\texttt{e1a69a57}")
+    audit_mod.presets_and_templates(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:tip4p-gmin names its preset"]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):
