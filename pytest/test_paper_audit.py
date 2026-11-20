@@ -282,6 +282,14 @@ def test_a_table_without_its_preset_is_reported():
     assert [r[2] for r in audit.drifts()] == ["tab:tip4p-gmin names its preset"]
 
 
+def test_a_restart_of_this_code_in_the_text_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\nA stalled chain restarts from a random cluster.\n"
+    audit_mod.no_anneal_restart(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.TEX, "every restart the text names is GMIN's")]
+
+
 def test_every_todo_marker_fails_both_audits():
     clean = audit_mod.Audit()
     for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):
