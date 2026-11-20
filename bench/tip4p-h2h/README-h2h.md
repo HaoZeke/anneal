@@ -1,7 +1,7 @@
 # TIP4P head-to-head, anneal against GMIN, twelve seeds
 
 The head-to-head cited in the manuscript is run r2c, record branch
-`record/tip4p-h2h-r2` (commit `e5932b2e` on `c2a9cc2a`, tree `f7ee9adc`).
+`record/tip4p-h2h-r2` (tip `cdae978c` on `c2a9cc2a`, tree `f7ee9adc`).
 Its per-seed rows are `rows-h2h-r2.csv`. Anneal is `e1a69a57` and GMIN is
 `aac1548a`. Twelve seeds, 2000–2011, a budget of 2_000_000 charged
 evaluations at every size, serial, core 0, one machine. Both arms open the
@@ -84,7 +84,7 @@ evaluations, the same twelve seeds and the same serial arm. The driver is
 `tip4p21_budget_h2h`, and the asv class is `Tip4p21BudgetHeadToHead`. GMIN at
 a (budget, seed) pair is deterministic: the 2 M GMIN rows repeat the panel's
 best and median energies, and their median wall is 75.15 s against the
-panel's 76.37 s. Summary rows are `summary-budget21.csv`
+r2c panel's 81.097 s. Summary rows are `summary-budget21.csv`
 and per-seed rows are `rows-budget21.csv`. `p(U)` is the two-sided
 Mann–Whitney U test on the per-seed best energies; the hit counts are 0/12 on
 both arms at every budget, so the Fisher exact p is 1.000 throughout.
