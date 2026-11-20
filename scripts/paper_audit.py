@@ -907,7 +907,7 @@ def paired_statistics(audit: Audit) -> None:
     worst = max(abs(shared.fisher_exact(a, 12, b, 12) - fisher(a, 12, b, 12)) for a in range(13) for b in range(13))
     audit.record(worst < 1e-9, where, "the audit and scripts/paired_stats.py agree on Fisher at 12 against 12",
                  "< 1e-9", f"{worst:.1e}")
-    literal = re.compile(r"(?<![\\d.])1\\.9(?:6|59)\\d*")
+    literal = re.compile(r"(?<![\d.])1\.9(?:6|59)\d*")
     for path in PAPER_CHAIN:
         found = sorted({m.group(0) for m in literal.finditer(audit.text(path))})
         audit.cell(path, "literal normal quantile", "none", " ".join(found) or "none")
