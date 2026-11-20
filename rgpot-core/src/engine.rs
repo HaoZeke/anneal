@@ -16,9 +16,12 @@
 //! evaluation that failed at this input ([`EngineError::Recoverable`]), and a
 //! negative code leaves the instance unusable ([`EngineError::Fatal`]) and
 //! poisons the handle so every later call returns the same [`EngineError::Fatal`]
-//! without re-entering native evaluation or query functions. Dropping a
-//! poisoned handle still calls `rgpot_engine_destroy` once to free the
-//! `RgpotEnginePot` allocation, as required by `engine_c_abi.h`. The message of
+//! without re-entering native evaluation or query functions. A host callback
+//! or transform that fails during a call is considered before the code the
+//! engine returns. A fatal failure from either side wins over a recoverable
+//! one, and the first fatal failure, with its message, is the one latched.
+//! Dropping a poisoned handle still calls `rgpot_engine_destroy` once to free
+//! the `RgpotEnginePot` allocation, as required by `engine_c_abi.h`. The message of
 //! a failed call is the engine's `rgpot_engine_last_error` when it exports one.
 //!
 //! [`EnginePotential::into_potential`] wraps the instance as a
@@ -146,6 +149,10 @@ impl EngineStatus {
             failure => failure,
         }
     }
+
+    const fn is_fatal(self) -> bool {
+        matches!(self, Self::FatalInstanceFailure(_))
+    }
 }
 
 /// A typed failure returned by a host transform or oracle callback.
@@ -153,6 +160,15 @@ impl EngineStatus {
 pub struct EngineFailure {
     pub status: EngineStatus,
     pub message: String,
+}
+
+/// Keep the failure that decides the call: the first fatal one if any
+/// failure is fatal, otherwise the first one.
+fn keep_decisive(slot: &mut Option<EngineFailure>, failure: EngineFailure) {
+    match slot {
+        Some(kept) if kept.status.is_fatal() || !failure.status.is_fatal() => {}
+        _ => *slot = Some(failure),
+    }
 }
 
 /// A host-side coordinate transform applied to the engine's scratch geometry.
@@ -479,9 +495,10 @@ pub enum EngineError {
     /// A negative code: the instance is unusable and the handle is poisoned;
     /// every subsequent call returns this error without calling into the engine.
     Fatal {
-        /// Negative error code returned by the engine.
+        /// Negative code of the first fatal failure, from the engine or from a
+        /// host callback or transform.
         code: i32,
-        /// Error message from `rgpot_engine_last_error`.
+        /// Message of that failure: the host's, or the engine's error text.
         message: String,
     },
 }
@@ -563,6 +580,68 @@ struct Poisoned {
     message: String,
 }
 
+impl Poisoned {
+    fn error(&self) -> EngineError {
+        EngineError::Fatal {
+            code: self.code,
+            message: self.message.clone(),
+        }
+    }
+}
+
+/// The error a nonzero engine return code stands for.
+fn native_error(code: c_int, message: String) -> EngineError {
+    let message = if message.is_empty() {
+        format!("the engine left no message; code {code}")
+    } else {
+        message
+    };
+    if code > 0 {
+        EngineError::Recoverable { code, message }
+    } else {
+        EngineError::Fatal { code, message }
+    }
+}
+
+/// The error a host callback or transform failure stands for.
+fn host_error(failure: EngineFailure) -> EngineError {
+    let status = failure.status;
+    let code = status.code();
+    let message = described(failure);
+    match status {
+        EngineStatus::Success => EngineError::Invalid(message),
+        EngineStatus::RecoverableInputFailure(_) => EngineError::Recoverable { code, message },
+        EngineStatus::FatalInstanceFailure(_) => EngineError::Fatal { code, message },
+    }
+}
+
+/// The message of a host failure, never empty.
+fn described(failure: EngineFailure) -> String {
+    let code = failure.status.code();
+    match (failure.status, failure.message.is_empty()) {
+        (EngineStatus::Success, true) => "a host failure was reported with success status".into(),
+        (EngineStatus::Success, false) => format!(
+            "a host failure was reported with success status: {}",
+            failure.message
+        ),
+        (_, true) => format!("a host callback failed with code {code} and gave no message"),
+        (_, false) => failure.message,
+    }
+}
+
+/// The decisive failure the host reported during one native call, from the
+/// transform and then the registered callbacks.
+fn host_failure(
+    transform: Option<&TransformCall<'_>>,
+    callbacks: Option<&CallbackState>,
+) -> Option<EngineFailure> {
+    let mut decisive = transform.and_then(TransformCall::take_failure);
+    if let Some(failure) = callbacks.and_then(CallbackState::take_failure) {
+        keep_decisive(&mut decisive, failure);
+    }
+    decisive
+}
+
 struct TransformState<'a> {
     transform: &'a mut dyn CoordinateTransform,
     failure: Option<EngineFailure>,
@@ -613,18 +692,17 @@ unsafe extern "C" fn transform_trampoline(
                 EngineStatus::Success => ENGINE_ERR_INVALID,
                 status => status.code(),
             };
-            if state.failure.is_none() {
-                state.failure = Some(failure);
-            }
+            keep_decisive(&mut state.failure, failure);
             code
         }
         Err(_) => {
-            if state.failure.is_none() {
-                state.failure = Some(EngineFailure {
+            keep_decisive(
+                &mut state.failure,
+                EngineFailure {
                     status: PANIC_STATUS,
                     message: "coordinate transform panicked".into(),
-                });
-            }
+                },
+            );
             -1
         }
     }
@@ -754,6 +832,15 @@ impl EnginePotential {
         request: &EngineRequest<'_>,
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<EngineEvaluation, EngineError> {
+        self.force_with_host(request, transform, None)
+    }
+
+    fn force_with_host(
+        &mut self,
+        request: &EngineRequest<'_>,
+        transform: Option<&mut dyn CoordinateTransform>,
+        callbacks: Option<&CallbackState>,
+    ) -> Result<EngineEvaluation, EngineError> {
         self.check_alive()?;
         let n_atoms = request.atomic_numbers.len();
         check_lengths(n_atoms, request.positions.len())?;
@@ -780,8 +867,8 @@ impl EnginePotential {
                 transform_user,
             )
         };
-        let failure = transform.as_ref().and_then(TransformCall::take_failure);
-        self.answer_with_failure(code, failure)?;
+        let failure = host_failure(transform.as_ref(), callbacks);
+        self.settle(code, failure)?;
         finite(energy, &forces)?;
         Ok(EngineEvaluation { energy, forces })
     }
@@ -807,6 +894,17 @@ impl EnginePotential {
         positions: &[f64],
         boxes: &[f64],
         transform: Option<&mut dyn CoordinateTransform>,
+    ) -> Result<Vec<EngineEvaluation>, EngineError> {
+        self.force_batch_with_host(atomic_numbers, positions, boxes, transform, None)
+    }
+
+    fn force_batch_with_host(
+        &mut self,
+        atomic_numbers: &[i32],
+        positions: &[f64],
+        boxes: &[f64],
+        transform: Option<&mut dyn CoordinateTransform>,
+        callbacks: Option<&CallbackState>,
     ) -> Result<Vec<EngineEvaluation>, EngineError> {
         self.check_alive()?;
         let batch = self
@@ -852,8 +950,8 @@ impl EnginePotential {
                 transform_user,
             )
         };
-        let failure = transform.as_ref().and_then(TransformCall::take_failure);
-        self.answer_with_failure(code, failure)?;
+        let failure = host_failure(transform.as_ref(), callbacks);
+        self.settle(code, failure)?;
         let mut out = Vec::with_capacity(n_systems);
         for (energy, block) in energies.iter().zip(forces.chunks_exact(3 * n_atoms)) {
             finite(*energy, block)?;
@@ -877,7 +975,7 @@ impl EnginePotential {
             ..Default::default()
         };
         let code = unsafe { caps_fn(self.handle.as_ptr(), &mut raw) };
-        self.answer(code)?;
+        self.settle(code, None)?;
         Ok(EngineCaps {
             reentrancy: raw.reentrancy,
             per_image_instances: raw.per_image_instances != 0,
@@ -955,7 +1053,7 @@ impl EnginePotential {
                 message: self.last_error_text(code),
             });
         }
-        self.answer(code)?;
+        self.settle(code, None)?;
         finite_product(&hv_out)?;
         Ok(hv_out)
     }
@@ -1043,67 +1141,48 @@ impl EnginePotential {
     }
 
     fn check_alive(&self) -> Result<(), EngineError> {
-        if let Some(poisoned) = self.fatal.get() {
-            return Err(EngineError::Fatal {
-                code: poisoned.code,
-                message: poisoned.message.clone(),
-            });
-        }
-        Ok(())
-    }
-
-    fn answer(&self, code: c_int) -> Result<(), EngineError> {
-        if code == 0 {
-            return Ok(());
-        }
-        let message = self.last_error_text(code);
-        if code > 0 {
-            Err(EngineError::Recoverable { code, message })
-        } else {
-            let _ = self.fatal.set(Poisoned {
-                code,
-                message: message.clone(),
-            });
-            let stored = match self.fatal.get() {
-                Some(poisoned) => poisoned.message.clone(),
-                None => message,
-            };
-            Err(EngineError::Fatal {
-                code,
-                message: stored,
-            })
+        match self.fatal.get() {
+            Some(poisoned) => Err(poisoned.error()),
+            None => Ok(()),
         }
     }
 
-    fn answer_with_failure(
+    /// [`Self::settle_with`] with the message from `rgpot_engine_last_error`.
+    fn settle(&self, code: c_int, host: Option<EngineFailure>) -> Result<(), EngineError> {
+        self.settle_with(code, host, || self.last_error_text(code))
+    }
+
+    /// Classify one native call that returned `code`.
+    ///
+    /// `host` is the decisive failure a host callback or transform reported
+    /// during the call. It happened before the engine returned, so it is
+    /// considered first. A fatal failure from either source wins over a
+    /// recoverable one, and the first fatal failure poisons the handle: the
+    /// error returned here and by every later call is that one, message
+    /// included.
+    fn settle_with(
         &self,
         code: c_int,
-        direct: Option<EngineFailure>,
+        host: Option<EngineFailure>,
+        native_message: impl FnOnce() -> String,
     ) -> Result<(), EngineError> {
-        match direct {
-            Some(failure) => self.fail(failure.status, failure.message),
-            None => self.answer(code),
+        let native = (code != 0).then(|| native_error(code, native_message()));
+        let mut decisive = None;
+        for error in host.map(host_error).into_iter().chain(native) {
+            if let EngineError::Fatal { code, message } = error {
+                return Err(self.poison(code, message));
+            }
+            decisive.get_or_insert(error);
         }
+        decisive.map_or(Ok(()), Err)
     }
 
-    fn fail(&self, status: EngineStatus, message: String) -> Result<(), EngineError> {
-        match status {
-            EngineStatus::Success => Err(EngineError::Invalid(
-                "a host failure was reported with success status".into(),
-            )),
-            EngineStatus::RecoverableInputFailure(_) => Err(EngineError::Recoverable {
-                code: status.code(),
-                message,
-            }),
-            EngineStatus::FatalInstanceFailure(_) => {
-                let code = status.code();
-                let _ = self.fatal.set(Poisoned {
-                    code,
-                    message: message.clone(),
-                });
-                Err(EngineError::Fatal { code, message })
-            }
-        }
+    /// Latch `code` and `message` unless a fatal failure is already latched,
+    /// and return the latched error.
+    fn poison(&self, code: i32, message: String) -> EngineError {
+        self.fatal
+            .get_or_init(|| Poisoned { code, message })
+            .error()
     }
 
     fn last_error_text(&self, code: c_int) -> String {
@@ -1125,17 +1204,31 @@ struct CallbackState {
 }
 
 impl CallbackState {
+    fn slot(&self) -> MutexGuard<'_, Option<EngineFailure>> {
+        self.failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn record(&self, failure: EngineFailure) {
-        match self.failure.lock() {
-            Ok(mut slot) => *slot = Some(failure),
-            Err(mut poisoned) => **poisoned.get_mut() = Some(failure),
-        }
+        keep_decisive(&mut self.slot(), failure);
     }
 
     fn take_failure(&self) -> Option<EngineFailure> {
-        match self.failure.lock() {
-            Ok(mut slot) => slot.take(),
-            Err(mut poisoned) => poisoned.get_mut().take(),
+        self.slot().take()
+    }
+
+    /// Take the recorded failure only when it is fatal. A recoverable one
+    /// stays recorded for the next native call to report.
+    fn take_fatal(&self) -> Option<EngineFailure> {
+        let mut slot = self.slot();
+        if slot
+            .as_ref()
+            .is_some_and(|failure| failure.status.is_fatal())
+        {
+            slot.take()
+        } else {
+            None
         }
     }
 }
@@ -1285,7 +1378,9 @@ impl EngineSession {
         request: &EngineRequest<'_>,
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<EngineEvaluation, EngineError> {
-        let answer = self.engine.force_with_transform(request, transform);
+        let answer = self
+            .engine
+            .force_with_host(request, transform, self.callbacks.as_deref());
         self.finish(answer)
     }
 
@@ -1297,9 +1392,13 @@ impl EngineSession {
         boxes: &[f64],
         transform: Option<&mut dyn CoordinateTransform>,
     ) -> Result<Vec<EngineEvaluation>, EngineError> {
-        let answer =
-            self.engine
-                .force_batch_with_transform(atomic_numbers, positions, boxes, transform);
+        let answer = self.engine.force_batch_with_host(
+            atomic_numbers,
+            positions,
+            boxes,
+            transform,
+            self.callbacks.as_deref(),
+        );
         self.finish(answer)
     }
 
@@ -1307,6 +1406,8 @@ impl EngineSession {
     ///
     /// `None` is represented by a null callback-table pointer. If native
     /// replacement fails, the previous owned callbacks remain registered.
+    /// A failure the previous callbacks recorded and no call has reported yet
+    /// is reported here, since a successful replacement drops them.
     pub fn set_callbacks(
         &mut self,
         callbacks: Option<Box<dyn EngineCallbacks>>,
@@ -1343,14 +1444,20 @@ impl EngineSession {
             std::ptr::null()
         };
         let code = unsafe { set_callbacks(self.engine.handle.as_ptr(), raw_ptr) };
-        let direct = next.as_ref().and_then(|state| state.take_failure());
+        let mut failure = self
+            .callbacks
+            .as_deref()
+            .and_then(CallbackState::take_failure);
+        if let Some(replacement) = next.as_deref().and_then(CallbackState::take_failure) {
+            keep_decisive(&mut failure, replacement);
+        }
         if code == 0 {
             // The native side now owns a copy of `raw`, so keep its context
             // alive even if a synchronously reported callback failure poisons
             // the session.
             self.callbacks = next;
         }
-        self.engine.answer_with_failure(code, direct)
+        self.engine.settle(code, failure)
     }
 
     /// Monotone model state, or zero for a static engine.
@@ -1363,7 +1470,15 @@ impl EngineSession {
     }
 
     /// Send a typed runtime hint message to a learning engine.
+    ///
+    /// The message of a failed hint is the text the engine wrote to the error
+    /// buffer, or one naming the code when the engine wrote none.
     pub fn hint(&mut self, message: &[u8]) -> Result<(), EngineError> {
+        let answer = self.send_hint(message);
+        self.finish(answer)
+    }
+
+    fn send_hint(&mut self, message: &[u8]) -> Result<(), EngineError> {
         self.engine.check_alive()?;
         if message.is_empty() {
             return Err(EngineError::Invalid(
@@ -1391,34 +1506,34 @@ impl EngineSession {
                 error.len(),
             )
         };
-        let direct = if code == 0 {
-            None
-        } else {
-            Some(EngineFailure {
-                status: EngineStatus::from_code(code),
-                message: text_of(&error),
-            })
-        };
-        let answer = self.engine.answer_with_failure(code, direct);
-        self.finish(answer)
+        let failure = host_failure(None, self.callbacks.as_deref());
+        self.engine.settle_with(code, failure, || {
+            let text = text_of(&error);
+            if text.is_empty() {
+                format!("rgpot_engine_hint failed with code {code} and wrote no message")
+            } else {
+                text
+            }
+        })
     }
 
-    fn finish<T>(&mut self, answer: Result<T, EngineError>) -> Result<T, EngineError> {
-        let direct = self
+    /// Report a fatal callback failure that no native call has settled, which
+    /// happens when a call is refused before it reaches the engine. A fatal
+    /// failure wins over the refusal; an error the handle has already latched
+    /// is returned unchanged.
+    fn finish<T>(&self, answer: Result<T, EngineError>) -> Result<T, EngineError> {
+        if matches!(answer, Err(EngineError::Fatal { .. })) {
+            return answer;
+        }
+        match self
             .callbacks
-            .as_ref()
-            .and_then(|callbacks| callbacks.take_failure());
-        match direct {
-            Some(EngineFailure {
-                status: EngineStatus::Success,
-                ..
-            }) => Err(EngineError::Invalid(
-                "callback returned a failure with success status".into(),
-            )),
-            Some(failure) => self
-                .engine
-                .fail(failure.status, failure.message)
-                .and(answer),
+            .as_deref()
+            .and_then(CallbackState::take_fatal)
+        {
+            Some(failure) => {
+                let code = failure.status.code();
+                Err(self.engine.poison(code, described(failure)))
+            }
             None => answer,
         }
     }

@@ -448,20 +448,34 @@ impl CoordinateTransform for PanicTransform {
     }
 }
 
-fn assert_poisoned_without_an_extra_force(session: &mut EngineSession, path: &Path) {
+/// Every later call on a poisoned session returns `expected`, code and
+/// message, without reaching the engine.
+fn assert_poisoned_without_an_extra_force(
+    session: &mut EngineSession,
+    path: &Path,
+    expected: &EngineError,
+) {
+    assert!(
+        matches!(expected, EngineError::Fatal { .. }),
+        "{expected:?}"
+    );
     let observer = FixtureObserver::open(path);
     let before = observer.native_calls();
-    let error = session
-        .force(
-            &EngineRequest {
-                positions: &[1.0, 0.0, 0.0],
-                atomic_numbers: &[1],
-                box_matrix: &CELL,
-            },
-            None,
-        )
-        .expect_err("fatal session remains poisoned");
-    assert_eq!(error.engine_status(), Some(EngineStatus::from_code(-1)));
+    for _ in 0..2 {
+        let error = session
+            .force(
+                &EngineRequest {
+                    positions: &[1.0, 0.0, 0.0],
+                    atomic_numbers: &[1],
+                    box_matrix: &CELL,
+                },
+                None,
+            )
+            .expect_err("fatal session remains poisoned");
+        assert_eq!(&error, expected);
+    }
+    assert_eq!(session.model_state().as_ref(), Err(expected));
+    assert_eq!(session.hint(&[1]).as_ref(), Err(expected));
     assert_eq!(observer.native_calls(), before);
 }
 
@@ -489,7 +503,7 @@ fn oracle_panic_is_fatal_and_poisons_the_session() {
             message: "oracle callback panicked".into(),
         }
     );
-    assert_poisoned_without_an_extra_force(&mut session, &path);
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
 }
 
 #[test]
@@ -513,7 +527,7 @@ fn transform_panic_is_fatal_and_poisons_the_session() {
             message: "coordinate transform panicked".into(),
         }
     );
-    assert_poisoned_without_an_extra_force(&mut session, &path);
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
 }
 
 #[test]
@@ -547,7 +561,7 @@ fn hint_reports_status_updates_state_and_surfaces_callback_panics() {
             message: "model-update callback panicked".into(),
         }
     );
-    assert_poisoned_without_an_extra_force(&mut panic_session, &panic_path);
+    assert_poisoned_without_an_extra_force(&mut panic_session, &panic_path, &error);
 }
 
 #[test]
@@ -1858,7 +1872,19 @@ fn oracle_force(
     EngineSession,
     Result<EngineEvaluation, EngineError>,
 ) {
-    let path = build(name, &[]);
+    oracle_force_with(name, &[], answer)
+}
+
+fn oracle_force_with(
+    name: &str,
+    defines: &[&str],
+    answer: Result<EngineEvaluation, EngineFailure>,
+) -> (
+    PathBuf,
+    EngineSession,
+    Result<EngineEvaluation, EngineError>,
+) {
+    let path = build(name, defines);
     let mut session = load_session(&path);
     session
         .set_callbacks(Some(Box::new(ScriptedOracle { answer })))
@@ -1920,11 +1946,15 @@ fn every_oracle_failure_status_reaches_native_code_as_its_own_nonzero_code() {
         }),
     );
     assert_eq!(last_oracle_rc(&path), -9);
+    let error = answer.expect_err("fatal oracle failure");
     assert_eq!(
-        answer.expect_err("fatal oracle failure").engine_status(),
-        Some(EngineStatus::from_code(-9))
+        error,
+        EngineError::Fatal {
+            code: -9,
+            message: "oracle lost its backend".into(),
+        }
     );
-    assert_poisoned_with_code(&mut session, -9);
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
 
     let (path, _session, answer) = oracle_force(
         "harmonic_oracle_wrong_length",
@@ -1938,20 +1968,6 @@ fn every_oracle_failure_status_reaches_native_code_as_its_own_nonzero_code() {
         matches!(answer, Err(EngineError::Recoverable { code, .. }) if code == ENGINE_ERR_INVALID),
         "{answer:?}"
     );
-}
-
-fn assert_poisoned_with_code(session: &mut EngineSession, code: c_int) {
-    let error = session
-        .force(
-            &EngineRequest {
-                positions: &[1.0, 0.0, 0.0],
-                atomic_numbers: &[1],
-                box_matrix: &CELL,
-            },
-            None,
-        )
-        .expect_err("fatal session remains poisoned");
-    assert_eq!(error.engine_status(), Some(EngineStatus::from_code(code)));
 }
 
 #[test]
@@ -2004,4 +2020,193 @@ fn a_finite_oracle_answer_still_succeeds() {
     assert_eq!(answer.energy, -2.5);
     assert_eq!(answer.forces, [0.5, -0.5, 0.0]);
     assert_eq!(session.model_state().expect("model state"), 1);
+}
+
+#[test]
+fn a_fatal_oracle_failure_is_latched_over_the_engines_own_fatal_code() {
+    let (path, mut session, answer) = oracle_force_with(
+        "harmonic_oracle_fatal_then_engine_fatal",
+        &["FATAL_AFTER_HOST_FAILURE"],
+        Err(EngineFailure {
+            status: EngineStatus::from_code(-9),
+            message: "oracle lost its backend".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), -9);
+    let error = answer.expect_err("fatal oracle failure");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -9,
+            message: "oracle lost its backend".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn a_fatal_hint_with_an_empty_error_buffer_latches_a_message_naming_the_code() {
+    let path = build("harmonic_hint_fatal_without_message", &[]);
+    let mut session = load_session(&path);
+    let error = session.hint(&[0xfe]).expect_err("fixture fails the hint");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -5,
+            message: "rgpot_engine_hint failed with code -5 and wrote no message".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+struct AcquirePanicThenRefuse;
+
+impl EngineCallbacks for AcquirePanicThenRefuse {
+    fn oracle(&mut self, _request: &EngineRequest<'_>) -> Result<EngineEvaluation, EngineFailure> {
+        Err(EngineFailure {
+            status: EngineStatus::from_code(5),
+            message: "oracle refused this geometry".into(),
+        })
+    }
+
+    fn on_acquire(&mut self, _reason: AcquireReason) {
+        panic!("acquisition panic for fixture")
+    }
+}
+
+#[test]
+fn a_recoverable_oracle_failure_does_not_replace_an_earlier_acquisition_panic() {
+    let path = build("harmonic_acquire_panic_then_refuse", &[]);
+    let mut session = load_session(&path);
+    session
+        .set_callbacks(Some(Box::new(AcquirePanicThenRefuse)))
+        .expect("set callbacks");
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 2.0, 3.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            None,
+        )
+        .expect_err("acquisition panic is fatal");
+    assert_eq!(last_oracle_rc(&path), 5);
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -1,
+            message: "acquisition callback panicked".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+/// Fails each call with the next status of `script`.
+struct ScriptedTransform {
+    script: Vec<EngineFailure>,
+}
+
+impl CoordinateTransform for ScriptedTransform {
+    fn transform(
+        &mut self,
+        _positions: &mut [f64],
+        _box_matrix: &mut [f64; 9],
+    ) -> Result<(), EngineFailure> {
+        Err(self.script.remove(0))
+    }
+}
+
+#[test]
+fn a_later_fatal_transform_failure_wins_over_an_earlier_recoverable_one() {
+    let path = build(
+        "harmonic_batch_transform_recoverable_then_fatal",
+        &["BATCH_ALL_SYSTEMS"],
+    );
+    let mut session = load_session(&path);
+    let mut transform = ScriptedTransform {
+        script: vec![
+            EngineFailure {
+                status: EngineStatus::from_code(4),
+                message: "first system refused".into(),
+            },
+            EngineFailure {
+                status: EngineStatus::from_code(-6),
+                message: "transform lost its frame".into(),
+            },
+        ],
+    };
+    let boxes: Vec<f64> = CELL.iter().chain(CELL.iter()).copied().collect();
+    let error = session
+        .force_batch(
+            &[1],
+            &[1.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            &boxes,
+            Some(&mut transform),
+        )
+        .expect_err("fatal transform failure");
+    assert!(transform.script.is_empty());
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -6,
+            message: "transform lost its frame".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn a_fatal_engine_code_wins_over_a_recoverable_transform_failure() {
+    let path = build(
+        "harmonic_transform_recoverable_engine_fatal",
+        &["FATAL_AFTER_HOST_FAILURE"],
+    );
+    let mut session = load_session(&path);
+    let mut transform = ScriptedTransform {
+        script: vec![EngineFailure {
+            status: EngineStatus::from_code(4),
+            message: "transform refused".into(),
+        }],
+    };
+    let error = session
+        .force(
+            &EngineRequest {
+                positions: &[1.0, 2.0, 3.0],
+                atomic_numbers: &[1],
+                box_matrix: &CELL,
+            },
+            Some(&mut transform),
+        )
+        .expect_err("fatal engine code");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -8,
+            message: "host failure left the engine unusable".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
+}
+
+#[test]
+fn a_fatal_engine_code_wins_over_a_recoverable_oracle_failure() {
+    let (path, mut session, answer) = oracle_force_with(
+        "harmonic_oracle_recoverable_engine_fatal",
+        &["FATAL_AFTER_HOST_FAILURE"],
+        Err(EngineFailure {
+            status: EngineStatus::from_code(5),
+            message: "oracle refused this geometry".into(),
+        }),
+    );
+    assert_eq!(last_oracle_rc(&path), 5);
+    let error = answer.expect_err("fatal engine code");
+    assert_eq!(
+        error,
+        EngineError::Fatal {
+            code: -8,
+            message: "host failure left the engine unusable".into(),
+        }
+    );
+    assert_poisoned_without_an_extra_force(&mut session, &path, &error);
 }

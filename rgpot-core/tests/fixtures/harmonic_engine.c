@@ -107,7 +107,12 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
     rc = transform(user, n, scratch, scratch_box);
     if (rc != 0) {
       free(scratch);
+#ifdef FATAL_AFTER_HOST_FAILURE
+      snprintf(pot->error, sizeof pot->error, "host failure left the engine unusable");
+      return -8;
+#else
       return rc;
+#endif
     }
     positions = scratch;
     box = scratch_box;
@@ -139,6 +144,13 @@ int rgpot_engine_force(RgpotEnginePot *pot, long n, const double *positions,
     rc = pot->callbacks.oracle(pot->callbacks.ctx, n, positions, atomic_nrs,
                                forces, energy, box);
     last_oracle_rc = rc;
+#ifdef FATAL_AFTER_HOST_FAILURE
+    if (rc != 0) {
+      snprintf(pot->error, sizeof pot->error, "host failure left the engine unusable");
+      free(scratch);
+      return -8;
+    }
+#endif
     if (rc == 0) {
       pot->model_state += 1;
       if (pot->callbacks.on_model_update != NULL)
@@ -185,6 +197,7 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long n_systems, long n,
                              rgpot_engine_coord_transform transform,
                              void *user) {
   long s;
+  int first = 0;
   native_calls += 1;
   batch_calls += 1;
   (void)variances;
@@ -192,9 +205,13 @@ int rgpot_engine_force_batch(RgpotEnginePot *pot, long n_systems, long n,
     int rc = rgpot_engine_force(pot, n, positions + 3 * n * s, atomic_nrs,
                                 forces + 3 * n * s, energies + s, NULL,
                                 boxes + 9 * s, transform, user);
+#ifdef BATCH_ALL_SYSTEMS
+    if (rc != 0 && first == 0) first = rc;
+#else
     if (rc != 0) return rc;
+#endif
   }
-  return 0;
+  return first;
 }
 #endif
 
@@ -229,6 +246,7 @@ int rgpot_engine_hint(RgpotEnginePot *pot, const void *msg, size_t msg_len,
     snprintf(errbuf, errlen, "hint refused");
     return RGPOT_ENGINE_ERR_EVAL;
   }
+  if (bytes[0] == 0xfe) return -5;
   pot->model_state += 1;
   if (pot->callbacks.on_model_update != NULL)
     pot->callbacks.on_model_update(pot->callbacks.ctx, pot->model_state);
