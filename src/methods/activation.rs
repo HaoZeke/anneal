@@ -2934,17 +2934,8 @@ fn dominant_axis_order(x: ArrayView1<f64>, axis: [f64; 3]) -> usize {
     if n < 2 {
         return 2;
     }
-    let max_order = n;
-    let mut best_order = 2usize;
-    let mut best = f64::INFINITY;
-    for order in 2..=max_order {
-        let deviation = crate::symmetrise::deviation(x, n, axis, order);
-        if deviation < best {
-            best = deviation;
-            best_order = order;
-        }
-    }
-    best_order
+    let orders: Vec<usize> = (2..=n).collect();
+    crate::symmetrise::best_order_about(x, n, axis, &orders).unwrap_or(2)
 }
 
 /// Climb along `direction` first, then track the minimum mode.

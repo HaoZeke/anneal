@@ -8981,15 +8981,9 @@ where
                 if n < 2 {
                     continue;
                 }
-                let max_order = n;
-                let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-                for order in 2..=max_order {
-                    if let Some(c) =
-                        crate::symmetrise::detect(x.view(), n, &[order], cfg.symmetry_tolerance)
-                    {
-                        cands.push(c);
-                    }
-                }
+                let orders: Vec<usize> = (2..=n).collect();
+                let cands =
+                    crate::symmetrise::detect_orders(x.view(), n, &orders, cfg.symmetry_tolerance);
                 let group = crate::symmetrise::generate_group(&cands, 60);
                 let detected_orders: Vec<usize> =
                     cands.iter().map(|candidate| candidate.order).collect();

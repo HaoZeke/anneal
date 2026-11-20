@@ -90,8 +90,8 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The general move library is deterministic on every build.
-    // Detected symmetry is no longer capped at order 12, so this short
-    // walk hash moved.
-    let expected = "9d5e9d8e09257675058e694124e4801c006c791fb8a8b1a5116a46685790e5bf";
+    // A turn that maps every atom to itself is not a symmetry, so this
+    // short walk hash moved.
+    let expected = "7babb82e15897c1517f0d918ecf855a5dee32ee990dceb69a097597a8f39ba84";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
