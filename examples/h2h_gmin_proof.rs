@@ -311,6 +311,7 @@ fn start_of(cfg: &Config, n: usize, seed: u64) -> Array1<f64> {
     random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn search(
     cfg: &Config,
     n: usize,
