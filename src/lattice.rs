@@ -49,6 +49,15 @@ pub enum Source {
     ///
     /// The general case, and the one that assumes nothing.
     Observed,
+    /// Read off the given point of the current structure.
+    ///
+    /// The best-coordinated point of a structure carries the order the
+    /// structure already has, so growing it rebuilds that order. Other
+    /// well-coordinated points can sit in a different local order, a grain
+    /// or a twin boundary of the same structure, and growing one of those
+    /// proposes an order the structure has only in part. See
+    /// [`drawn_site`].
+    Site(usize),
     /// One of the classifier's ideal local environments.
     Named(Template),
     /// Fivefold bipyramid, the local order of a decahedral packing.
@@ -75,6 +84,7 @@ impl Source {
     pub fn name(&self) -> &'static str {
         match self {
             Source::Observed => "observed",
+            Source::Site(_) => "site",
             Source::Named(Template::FaceCentredCubic) => "fcc",
             Source::Named(Template::HexagonalClosePacked) => "hcp",
             Source::Named(Template::Icosahedral) => "ico",
@@ -205,31 +215,61 @@ fn observed_order_at(x: ArrayView1<f64>, cutoff: f64, scale: f64) -> Vec<[f64; 3
     if n < 2 {
         return Vec::new();
     }
-    let reach = cutoff * scale;
     let mut best = (0usize, 0usize);
     let mut shells: Vec<Vec<[f64; 3]>> = Vec::with_capacity(n);
     for i in 0..n {
-        let mut shell = Vec::new();
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            let d = [
-                x[3 * j] - x[3 * i],
-                x[3 * j + 1] - x[3 * i + 1],
-                x[3 * j + 2] - x[3 * i + 2],
-            ];
-            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            if r <= reach {
-                shell.push([d[0] / scale, d[1] / scale, d[2] / scale]);
-            }
-        }
+        let shell = shell_at(x, cutoff, scale, i);
         if shell.len() > best.1 {
             best = (i, shell.len());
         }
         shells.push(shell);
     }
     shells.swap_remove(best.0)
+}
+
+/// Neighbour offsets of point `i`, in units of `scale`.
+fn shell_at(x: ArrayView1<f64>, cutoff: f64, scale: f64, i: usize) -> Vec<[f64; 3]> {
+    let n = x.len() / 3;
+    let reach = cutoff * scale;
+    let mut shell = Vec::new();
+    if i >= n {
+        return shell;
+    }
+    for j in 0..n {
+        if i == j {
+            continue;
+        }
+        let d = [
+            x[3 * j] - x[3 * i],
+            x[3 * j + 1] - x[3 * i + 1],
+            x[3 * j + 2] - x[3 * i + 2],
+        ];
+        let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if r <= reach {
+            shell.push([d[0] / scale, d[1] / scale, d[2] / scale]);
+        }
+    }
+    shell
+}
+
+/// A point drawn uniformly from the better-coordinated half of `x`, the
+/// points whose shell is at least the median size.
+///
+/// The half rather than the single best point because the best one is the
+/// order the structure already has, and rather than every point because a
+/// surface point's shell is a fragment. `None` below two points.
+pub fn drawn_site<R: Rng + ?Sized>(x: ArrayView1<f64>, rng: &mut R) -> Option<usize> {
+    let n = x.len() / 3;
+    if n < 2 {
+        return None;
+    }
+    let scale = nearest_neighbour_scale(x);
+    let counts: Vec<usize> = (0..n).map(|i| shell_at(x, 1.35, scale, i).len()).collect();
+    let mut sorted = counts.clone();
+    sorted.sort_unstable();
+    let median = sorted[n / 2];
+    let pool: Vec<usize> = (0..n).filter(|&i| counts[i] >= median).collect();
+    Some(pool[rng.random_range(0..pool.len())])
 }
 
 /// Grows `n` sites by repeatedly placing `offsets` around already placed ones.
@@ -690,14 +730,19 @@ pub fn candidate_reusing<R: Rng + ?Sized>(
     let same = growth
         .key
         .as_ref()
-        .is_some_and(|(held, held_n, held_bits)| {
-            *held == source && *held_n == n && *held_bits == bits
-        });
+        .is_some_and(|(held_n, held_bits)| *held_n == n && *held_bits == bits);
     if !same {
-        growth.body = grow_body(source, x, n, 0.0);
-        growth.key = Some((source, n, bits));
+        growth.bodies.clear();
+        growth.key = Some((n, bits));
     }
-    match &growth.body {
+    let at = match growth.bodies.iter().position(|(held, _)| *held == source) {
+        Some(at) => at,
+        None => {
+            growth.bodies.push((source, grow_body(source, x, n, 0.0)));
+            growth.bodies.len() - 1
+        }
+    };
+    match &growth.bodies[at].1 {
         Some(body) => cut(body, n, rng),
         None => x.to_owned(),
     }
@@ -711,11 +756,12 @@ struct Body {
     adj: Vec<Vec<usize>>,
 }
 
-/// A growth held between calls of [`candidate_reusing`].
+/// The growths held between calls of [`candidate_reusing`], one per source,
+/// for the last structure seen.
 #[derive(Debug, Clone, Default)]
 pub struct Growth {
-    key: Option<(Source, usize, Vec<u64>)>,
-    body: Option<Body>,
+    key: Option<(usize, Vec<u64>)>,
+    bodies: Vec<(Source, Option<Body>)>,
 }
 
 /// Grows the wide body a candidate is cut from, or `None` when the candidate
@@ -724,6 +770,7 @@ fn grow_body(source: Source, x: ArrayView1<f64>, n: usize, keep: f64) -> Option<
     let scale = nearest_neighbour_scale(x);
     let offsets = match source {
         Source::Observed => observed_order_at(x, 1.35, scale),
+        Source::Site(i) => shell_at(x, 1.35, scale, i),
         Source::Named(t) => t.points(),
         Source::Pentagonal => pentagonal_shell(),
     };
@@ -1341,6 +1388,90 @@ mod tests {
         let a = candidate(Source::Observed, y.view(), 3, &mut first);
         let b = candidate_reusing(&mut growth, Source::Observed, y.view(), 3, &mut second);
         assert_eq!(a.mapv(f64::to_bits), b.mapv(f64::to_bits));
+        assert_eq!(first.random::<u64>(), second.random::<u64>());
+    }
+
+    fn best_coordinated(x: ArrayView1<f64>) -> usize {
+        let scale = nearest_neighbour_scale(x);
+        let counts: Vec<usize> = (0..x.len() / 3)
+            .map(|i| shell_at(x, 1.35, scale, i).len())
+            .collect();
+        let top = *counts.iter().max().unwrap();
+        counts.iter().position(|&c| c == top).unwrap()
+    }
+
+    #[test]
+    fn a_site_at_the_best_point_grows_what_observed_grows() {
+        for n in [13, 38, 80] {
+            let mut x = packed(n);
+            for (k, v) in x.iter_mut().enumerate() {
+                *v += 0.01 * ((k * 7919 % 13) as f64 - 6.0);
+            }
+            let best = best_coordinated(x.view());
+            let mut first = rng();
+            let mut second = rng();
+            let a = candidate(Source::Observed, x.view(), n, &mut first);
+            let b = candidate(Source::Site(best), x.view(), n, &mut second);
+            assert_eq!(a.mapv(f64::to_bits), b.mapv(f64::to_bits), "n={n}");
+        }
+    }
+
+    #[test]
+    fn a_drawn_site_comes_from_the_better_coordinated_half() {
+        let mut r = rng();
+        let x = crate::methods::cluster_hopping::random_cluster_in_radius(38, 2.2, 0.7, &mut r);
+        let scale = nearest_neighbour_scale(x.view());
+        let counts: Vec<usize> = (0..38)
+            .map(|i| shell_at(x.view(), 1.35, scale, i).len())
+            .collect();
+        let mut sorted = counts.clone();
+        sorted.sort_unstable();
+        let median = sorted[19];
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..400 {
+            let i = drawn_site(x.view(), &mut r).expect("38 points");
+            assert!(counts[i] >= median, "site {i} has {} < {median}", counts[i]);
+            seen.insert(i);
+        }
+        let eligible = counts.iter().filter(|&&c| c >= median).count();
+        assert_eq!(seen.len(), eligible, "every eligible site is drawn");
+        assert!(drawn_site(Array1::from(vec![0.0; 3]).view(), &mut r).is_none());
+    }
+
+    #[test]
+    fn a_site_shell_is_that_points_neighbours() {
+        let x = packed(80);
+        let scale = nearest_neighbour_scale(x.view());
+        let mut sizes = std::collections::BTreeSet::new();
+        for i in 0..80 {
+            let shell = shell_at(x.view(), 1.35, scale, i);
+            for p in &shell {
+                let r = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+                assert!(r * scale <= 1.35 * scale + 1e-12);
+            }
+            sizes.insert(shell.len());
+        }
+        assert!(sizes.contains(&12) && sizes.len() > 1, "{sizes:?}");
+        assert!(shell_at(x.view(), 1.35, scale, 80).is_empty());
+    }
+
+    #[test]
+    fn a_reused_growth_keeps_one_growth_per_source() {
+        let mut growth = Growth::default();
+        let x = packed(80);
+        let mut first = rng();
+        let mut second = rng();
+        for step in 0..9 {
+            let source = match step % 3 {
+                0 => Source::Observed,
+                1 => Source::Site(step),
+                _ => Source::Site(70),
+            };
+            let a = candidate(source, x.view(), 80, &mut first);
+            let b = candidate_reusing(&mut growth, source, x.view(), 80, &mut second);
+            assert_eq!(a.mapv(f64::to_bits), b.mapv(f64::to_bits), "step {step}");
+        }
+        assert_eq!(growth.bodies.len(), 1 + 3 + 1);
         assert_eq!(first.random::<u64>(), second.random::<u64>());
     }
 
