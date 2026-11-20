@@ -1,0 +1,54 @@
+diff --git a/src/methods/cluster_hopping.rs b/src/methods/cluster_hopping.rs
+index 38d40f53..d760225e 100644
+--- a/src/methods/cluster_hopping.rs
++++ b/src/methods/cluster_hopping.rs
+@@ -6856,7 +6856,7 @@ where
+         // common neighbours, so it runs only when a reseed can fire.
+         // Counting on every hop was the Au38 slowdown, and with the
+         // reseed interval still ahead the result cannot change the branch.
+-        if csm_reseed_hops > 0
++        if csm_reseed_hops > 0 && { eprintln!("TRACE csm-check spent {}", ledger.spent()); true }
+             && cfg.prior_reseed
+             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
+             && cfg.packing_cna_applies()
+@@ -9831,6 +9831,7 @@ where
+                     other_state.view(),
+                     &mut unconverged_records,
+                 );
++                eprintln!("TRACE packing-leave spent {} from {:.6} other {:.6}", ledger.spent(), e, other_energy);
+                 if grad.is_none() || other_gradient.is_some() {
+                     e = other_energy;
+                     x = other_state;
+@@ -9897,6 +9898,7 @@ where
+                                 crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
+                             let (grown_energy, grown_state) =
+                                 relax(ledger, grown.view(), cfg.relax_steps);
++                            eprintln!("TRACE growth-retry {:?} spent {} from {:.6} grown {:.6} best {:.6}", source, ledger.spent(), e, grown_energy, ledger.best);
+                             if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                                 continue;
+                             }
+@@ -9924,6 +9926,7 @@ where
+                                 crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
+                             let (grown_energy, grown_state) =
+                                 relax(ledger, grown.view(), cfg.relax_steps);
++                            eprintln!("TRACE growth-library {:?} spent {} from {:.6} grown {:.6} best {:.6}", source, ledger.spent(), e, grown_energy, ledger.best);
+                             if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                                 continue;
+                             }
+@@ -10020,6 +10023,7 @@ where
+                             crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
+                         let (grown_energy, grown_state) =
+                             relax(ledger, grown.view(), cfg.relax_steps);
++                        eprintln!("TRACE growth-ih {:?} spent {} from {:.6} grown {:.6} best {:.6}", source, ledger.spent(), e, grown_energy, ledger.best);
+                         if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                             continue;
+                         }
+@@ -10192,7 +10196,7 @@ where
+         // that one site, so the least-bound atoms are tried on every vacant
+         // hollow site of the new best, and the descent follows the lowest
+         // product while it goes down. Bounded by the improvement events.
+-        if cfg.surface_hop_on_best && ledger.best < best_before_iteration - STRICT_IMPROVEMENT {
++        if cfg.surface_hop_on_best && ledger.best < best_before_iteration - STRICT_IMPROVEMENT && { eprintln!("TRACE surface-hop spent {} best {:.6}", ledger.spent(), ledger.best); true } {
+             let cutoff =
+                 crate::soap::contact_cutoff(crate::soap::SoapSpec::at_length(cfg.length_scale));
+             let mut from = ledger.best_state.clone().map(|s| (ledger.best, s));

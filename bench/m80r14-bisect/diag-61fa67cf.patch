@@ -1,0 +1,22 @@
+diff --git a/examples/h2h_morse.rs b/examples/h2h_morse.rs
+index 5d3532d2..839512e1 100644
+--- a/examples/h2h_morse.rs
++++ b/examples/h2h_morse.rs
+@@ -233,6 +233,17 @@ fn cmd_run(args: &[String]) -> i32 {
+         "{system},anneal,{seed},{budget},{hit},{evals},{},{wall:.6},{:.8},{pot_s:.6},{outside:.6}",
+         outcome.charged, outcome.best,
+     );
++    for (h, spent, basins, energy) in &outcome.improvements {
++        println!("improve hops {h} spent {spent} basins {basins} energy {energy:.8}");
++    }
++    if let Some(state) = outcome.best_state.as_ref() {
++        let (f555, f421, f422) =
++            anneal_core::structure::named_triplet_fractions(state.view(), spec.n, 1.35);
++        println!("cna best 555 {f555:.3} 421 {f421:.3} 422 {f422:.3}");
++        if let Ok(path) = std::env::var("H2H_DUMP") {
++            let _ = write_coords(&path, state);
++        }
++    }
+     for (name, draws, accepts, best) in &outcome.arms {
+         println!("arm {name} draws {draws} accepts {accepts} best {best:.6}");
+     }

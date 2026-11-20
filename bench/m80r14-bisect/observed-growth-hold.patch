@@ -1,0 +1,68 @@
+diff --git a/src/methods/cluster_hopping.rs b/src/methods/cluster_hopping.rs
+index fb20f78f..8a32e923 100644
+--- a/src/methods/cluster_hopping.rs
++++ b/src/methods/cluster_hopping.rs
+@@ -4993,6 +4993,7 @@ where
+     // Set after a rigid stall when the preset relocates one molecule.
+     // Cleared when a new lowest minimum is recorded.
+     let mut cage_edit = false;
++    let mut observed_growth_hold: Option<f64> = None;
+     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
+     // Distinct minima a rigid chain has quenched. Its stall moves to one.
+     let mut stall_archive = crate::methods::stall_archive::StallArchive::default();
+@@ -9215,6 +9216,55 @@ where
+                     }
+                 }
+             }
++            if directed_leave
++                && hop_room(hops)
++                && cfg.packing_cna_applies()
++                && ledger.remaining() > 0
++                && observed_growth_hold.is_none_or(|held| ledger.best < held - 1e-9)
++            {
++                let best_before_growth = ledger.best;
++                let mut side = StdRng::seed_from_u64(
++                    (hops as u64).wrapping_mul(0x9E37_79B9) ^ best_before_growth.to_bits(),
++                );
++                let grown = crate::lattice::candidate(
++                    crate::lattice::Source::Observed,
++                    x.view(),
++                    x.len() / 3,
++                    &mut side,
++                );
++                let (grown_energy, grown_state) = relax(ledger, grown.view(), cfg.relax_steps);
++                if std::env::var("OBS_TRACE").is_ok() {
++                    eprintln!("TRACE observed spent {} from {:.6} grown {:.6} best {:.6}", ledger.spent(), e, grown_energy, best_before_growth);
++                }
++                if grown_state.len() == x.len() && grown_energy.is_finite() {
++                    let grown_gradient = record_quenched_answer(
++                        cfg,
++                        ledger,
++                        &mut grad,
++                        grown_energy,
++                        grown_state.view(),
++                        &mut unconverged_records,
++                    );
++                    observed_growth_hold =
++                        (grown_energy >= best_before_growth - 1e-9).then_some(best_before_growth);
++                    if grown_energy < best_before_growth - 1e-9 {
++                        hops += 1;
++                        adopt_minimum!(
++                            grown_energy,
++                            grown_state,
++                            grown_gradient,
++                            None,
++                            AdoptionHistory::Fresh,
++                            None,
++                            Some("stall-growth"),
++                            hops
++                        );
++                        if improvements.len() < 512 {
++                            improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
++                        }
++                    }
++                }
++            }
+             let directed_source = directed_stall_source(
+                 cfg.align_directed_stall_source,
+                 directed_leave,
