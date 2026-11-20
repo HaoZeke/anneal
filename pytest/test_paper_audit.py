@@ -981,3 +981,13 @@ def test_crest_outside_the_related_searches_is_reported():
     audit.text_cache[audit_mod.SI] = si.replace("\\section{Statistical methods}", "CREST.\n\\section{Statistical methods}", 1)
     audit_mod.withdrawn_benchmarks(audit)
     assert [r[2] for r in audit.drifts()] == ["CREST is named only among the searches that report no comparable rate"]
+
+
+def test_a_banned_word_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "landscape to propose structures"
+    assert old in si
+    audit.text_cache[audit_mod.SI] = si.replace(old, "landscape to propose candidates")
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["the text does not say candidate"]
