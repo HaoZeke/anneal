@@ -122,6 +122,59 @@ fn squared_offset(image: [f64; 3], x: f64, y: f64, z: f64) -> f64 {
     dx * dx + dy * dy + dz * dz
 }
 
+/// Sine and cosine of one order, from the same `libm` calls as a direct scan.
+///
+/// `sin(pi / order)` and `sin`/`cos` of `2 pi / order` are computed once.
+/// The double-angle formulas are not those calls, so they are not used.
+#[derive(Clone, Copy)]
+struct OrderTurn {
+    order: usize,
+    /// `4 * sin(pi / order)^2`, the squared-chord scale.
+    chord_scale: f64,
+    /// `16 * sin(pi / order)^2`, the leave-the-site scale.
+    leave_scale: f64,
+    /// `sin(2 pi / order)`.
+    sine: f64,
+    /// `cos(2 pi / order)`.
+    cosine: f64,
+}
+
+impl OrderTurn {
+    fn new(order: usize) -> Option<Self> {
+        if order < 2 {
+            return None;
+        }
+        let half = libm::sin(std::f64::consts::PI / order as f64);
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        Some(Self {
+            order,
+            chord_scale: 4.0 * half * half,
+            leave_scale: 16.0 * half * half,
+            sine: libm::sin(angle),
+            cosine: libm::cos(angle),
+        })
+    }
+}
+
+/// Whether `sqrt(total / n) >= cap * (1 + 1e-6)` after `total > cap^2 * n`.
+///
+/// The square of that gate is `edge`. The computed square root does not
+/// decrease as `total` grows, and every sum strictly above `edge` is
+/// already on the reject side of the comparison. Sums between `cap^2 * n`
+/// and `edge`, including `edge` itself, keep the square root.
+fn sum_past_cap(total: f64, n: usize, cap: f64) -> bool {
+    let limit = cap * cap * (n as f64);
+    if !(total > limit) {
+        return false;
+    }
+    let gate = cap * (1.0 + 1.0e-6);
+    let edge = gate * gate * (n as f64);
+    if total > edge {
+        return true;
+    }
+    (total / n as f64).sqrt() >= gate
+}
+
 /// Squared displacement when the image lies strictly inside half the gap.
 ///
 /// The nearest other atom is `gap` away. An image closer than half that is
@@ -267,14 +320,13 @@ impl Cloud {
     /// The farthest atom is tested first. A low order moves that atom, so
     /// the scan of the rest does not run. A high order whose turn is shorter
     /// than every gap fails here and never reaches the residual scan.
-    fn any_atom_can_leave(&self, axis: [f64; 3], order: usize) -> bool {
-        if order < 2 || self.xs.is_empty() {
+    fn any_atom_can_leave(&self, axis: [f64; 3], turn: &OrderTurn) -> bool {
+        if turn.order < 2 || self.xs.is_empty() {
             return false;
         }
-        let sine = libm::sin(std::f64::consts::PI / order as f64);
         // chord^2 = 4 * r_perp^2 * sin^2, and (gap / 2)^2 = gap^2 / 4,
         // so chord >= gap / 2 is 16 * r_perp^2 * sin^2 >= gap^2.
-        let scale = 16.0 * sine * sine;
+        let scale = turn.leave_scale;
         let gaps = self.gaps();
         let can_leave = |index: usize| {
             let gap = gaps[index];
@@ -361,12 +413,11 @@ impl Cloud {
     /// neighbour list is not needed. A turn that stays under the cap cannot
     /// be rejected that way, so it is kept only when some atom can reach a
     /// different atom.
-    fn identity_stays_under(&self, axis: [f64; 3], order: usize, cap: f64) -> bool {
+    fn identity_stays_under(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> bool {
         if !cap.is_finite() {
             return true;
         }
-        let sine = libm::sin(std::f64::consts::PI / order as f64);
-        let scale = 4.0 * sine * sine;
+        let scale = turn.chord_scale;
         let limit = cap * cap * self.xs.len() as f64;
         let mut total = 0.0;
         for index in 0..self.xs.len() {
@@ -379,13 +430,15 @@ impl Cloud {
     }
 
     fn symmetry_deviation(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
-        if order < 2 {
+        let turn = OrderTurn::new(order)?;
+        self.deviation_with(axis, &turn, cap)
+    }
+
+    fn deviation_with(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> Option<f64> {
+        if self.identity_stays_under(axis, turn, cap) && !self.any_atom_can_leave(axis, turn) {
             return None;
         }
-        if self.identity_stays_under(axis, order, cap) && !self.any_atom_can_leave(axis, order) {
-            return None;
-        }
-        self.exchange_residual(axis, order, cap)
+        self.exchange_residual(axis, turn, cap)
     }
 
     /// Residual and the off-axis exchange, from one nearest-image pass.
@@ -398,26 +451,23 @@ impl Cloud {
     ///
     /// A finite cap that the distances already exceed returns before the
     /// neighbour list is built. The list is only needed for the exchange.
-    fn exchange_residual(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+    fn exchange_residual(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> Option<f64> {
         let n = self.xs.len();
-        if n == 0 || order < 2 {
+        if n == 0 || turn.order < 2 {
             return None;
         }
         if cap.is_finite()
             && self.gaps.borrow().is_none()
-            && self.residual_past_cap(axis, order, cap)
+            && self.residual_past_cap(axis, turn, cap)
         {
             return None;
         }
-        let angle = 2.0 * std::f64::consts::PI / order as f64;
-        let sine = libm::sin(std::f64::consts::PI / order as f64);
-        let scale = 4.0 * sine * sine;
-        let s = libm::sin(angle);
-        let co = libm::cos(angle);
+        let scale = turn.chord_scale;
+        let s = turn.sine;
+        let co = turn.cosine;
         let gaps = self.gaps();
         let mut total = 0.0;
         let mut moved = false;
-        let limit = cap * cap * n as f64;
         let stop = cap.is_finite();
         for index in 0..n {
             let gap = gaps[index];
@@ -439,11 +489,8 @@ impl Cloud {
             if partner != index {
                 moved = true;
             }
-            if stop && total > limit {
-                let partial = (total / n as f64).sqrt();
-                if partial >= cap * (1.0 + 1.0e-6) {
-                    return None;
-                }
+            if stop && sum_past_cap(total, n, cap) {
+                return None;
             }
         }
         moved.then_some((total / n as f64).sqrt())
@@ -457,24 +504,17 @@ impl Cloud {
     /// so a tie has the same squared length and the partial sum matches the
     /// one-pass residual. A turn that stays under the cap is not decided
     /// here.
-    fn residual_past_cap(&self, axis: [f64; 3], order: usize, cap: f64) -> bool {
+    fn residual_past_cap(&self, axis: [f64; 3], turn: &OrderTurn, cap: f64) -> bool {
         let n = self.xs.len();
-        if n == 0 || order < 2 || !cap.is_finite() {
+        if n == 0 || turn.order < 2 || !cap.is_finite() {
             return false;
         }
-        let angle = 2.0 * std::f64::consts::PI / order as f64;
-        let s = libm::sin(angle);
-        let co = libm::cos(angle);
         let mut total = 0.0;
-        let limit = cap * cap * n as f64;
         for index in 0..n {
-            let image = rotate_trig(self.point(index), axis, s, co);
+            let image = rotate_trig(self.point(index), axis, turn.sine, turn.cosine);
             total += self.nearest_squared_wide(image);
-            if total > limit {
-                let partial = (total / n as f64).sqrt();
-                if partial >= cap * (1.0 + 1.0e-6) {
-                    return true;
-                }
+            if sum_past_cap(total, n, cap) {
+                return true;
             }
         }
         false
@@ -850,15 +890,19 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
 pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) -> Option<Candidate> {
     let mut best: Option<Candidate> = None;
     let cloud = Cloud::from_view(x, n);
+    let turns: Vec<OrderTurn> = orders
+        .iter()
+        .filter_map(|&order| OrderTurn::new(order))
+        .collect();
     for axis in candidate_axes(x, n) {
-        for &order in orders {
-            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
+        for turn in &turns {
+            let Some(d) = cloud.deviation_with(axis, turn, tolerance) else {
                 continue;
             };
             if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
                 best = Some(Candidate {
                     axis,
-                    order,
+                    order: turn.order,
                     improper: false,
                     deviation: d,
                 });
@@ -909,15 +953,18 @@ pub fn detect_orders(
     let axes = candidate_axes(x, n);
     let mut out = Vec::new();
     for &order in orders {
+        let Some(turn) = OrderTurn::new(order) else {
+            continue;
+        };
         let mut best: Option<Candidate> = None;
         for &axis in &axes {
-            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
+            let Some(d) = cloud.deviation_with(axis, &turn, tolerance) else {
                 continue;
             };
             if d < tolerance && best.as_ref().map(|b| d < b.deviation).unwrap_or(true) {
                 best = Some(Candidate {
                     axis,
-                    order,
+                    order: turn.order,
                     improper: false,
                     deviation: d,
                 });
@@ -944,15 +991,19 @@ pub fn detect_all(
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
     let cloud = Cloud::from_view(x, n);
+    let turns: Vec<OrderTurn> = orders
+        .iter()
+        .filter_map(|&order| OrderTurn::new(order))
+        .collect();
     for axis in candidate_axes(x, n) {
-        for &order in orders {
-            let Some(d) = cloud.symmetry_deviation(axis, order, tolerance) else {
+        for turn in &turns {
+            let Some(d) = cloud.deviation_with(axis, turn, tolerance) else {
                 continue;
             };
             if d < tolerance {
                 out.push(Candidate {
                     axis,
-                    order,
+                    order: turn.order,
                     improper: false,
                     deviation: d,
                 });
@@ -2819,7 +2870,8 @@ mod shell_tests {
         if n == 0 || order < 2 {
             return None;
         }
-        if cloud.identity_stays_under(axis, order, cap) && !cloud.any_atom_can_leave(axis, order) {
+        let turn = OrderTurn::new(order)?;
+        if cloud.identity_stays_under(axis, &turn, cap) && !cloud.any_atom_can_leave(axis, &turn) {
             return None;
         }
         let angle = 2.0 * std::f64::consts::PI / order as f64;
@@ -2858,7 +2910,8 @@ mod shell_tests {
         if order < 2 || cloud.xs.is_empty() {
             return None;
         }
-        if cloud.identity_stays_under(axis, order, cap) && !cloud.any_atom_can_leave(axis, order) {
+        let turn = OrderTurn::new(order)?;
+        if cloud.identity_stays_under(axis, &turn, cap) && !cloud.any_atom_can_leave(axis, &turn) {
             return None;
         }
         let deviation = cloud.rotation_deviation(axis, order, cap)?;
@@ -2977,6 +3030,34 @@ mod shell_tests {
             let got = cloud.symmetry_deviation(axis, 2, 0.05);
             assert!(got.is_none(), "n={n} {got:?}");
             assert!(cloud.gaps.borrow().is_none(), "n={n}");
+        }
+    }
+
+    /// A sum strictly above the squared gate is the square-root comparison.
+    #[test]
+    fn a_sum_strictly_above_the_squared_gate_matches_the_square_root() {
+        let caps = [1.0e-6, 1.0e-4, 1.0e-2, 0.05, 0.1, 0.2, 1.0, 10.0, 1.0e3];
+        for n in 1..=128 {
+            for cap in caps {
+                let gate = cap * (1.0 + 1.0e-6);
+                let edge = gate * gate * (n as f64);
+                if !edge.is_finite() || edge <= 0.0 {
+                    continue;
+                }
+                let above = edge.next_up();
+                let root = (above / n as f64).sqrt();
+                assert!(root >= gate, "n={n} cap={cap} root={root} gate={gate}");
+                for scale in [0.5, 1.0, 2.0, 16.0] {
+                    let total = edge * scale;
+                    let original =
+                        total > cap * cap * (n as f64) && (total / n as f64).sqrt() >= gate;
+                    assert_eq!(
+                        sum_past_cap(total, n, cap),
+                        original,
+                        "n={n} cap={cap} scale={scale}"
+                    );
+                }
+            }
         }
     }
 
