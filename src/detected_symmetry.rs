@@ -15,7 +15,8 @@
 //! instead of one random axis.
 
 use crate::symmetrise::{
-    Candidate, Rot, centroid, class_members, detect_leading_classed, mirror_matrix, mul, rot_matrix,
+    Candidate, Rot, centroid, class_members, detect_leading_classed, mirror_matrix, mul,
+    operation_deviation, operation_deviation_about, rot_matrix,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -152,6 +153,27 @@ pub fn detected_group_classed(
     classes: Option<&[u32]>,
     tolerance: f64,
 ) -> Option<Vec<Rot>> {
+    read_group(x, n, classes, tolerance, false)
+}
+
+/// [`detected_group_classed`], optionally keeping only the operations that
+/// are themselves symmetries of `x`.
+///
+/// The closure of loosely commensurate generators is cut at its cap, and
+/// what it holds are words in the detected operations, not all of which are
+/// operations the structure has: a word of two loose operations can be a
+/// rotation the structure does not carry at all. With `symmetric_only` an
+/// element stays only when its deviation on `x`, measured as detection
+/// measures a candidate, is under `tolerance`. A completion that applies the
+/// elements then applies only operations the structure has to within the
+/// tolerance a detected one was accepted at.
+fn read_group(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    tolerance: f64,
+    symmetric_only: bool,
+) -> Option<Vec<Rot>> {
     if n < 4 {
         return None;
     }
@@ -174,7 +196,12 @@ pub fn detected_group_classed(
     let cap = (4 * highest).max(LARGEST_POLYHEDRAL_GROUP);
     let operations: Vec<Rot> = generators.iter().map(operation).collect();
     let radius = rms_radius(x, n);
-    let group = close_group(&operations, radius, rounding_closure(radius, cap), cap);
+    let mut group = close_group(&operations, radius, rounding_closure(radius, cap), cap);
+    if symmetric_only {
+        group.retain(|g| {
+            operation_deviation(x, n, classes, g, tolerance).is_some_and(|d| d < tolerance)
+        });
+    }
     (group.len() >= 2).then_some(group)
 }
 
@@ -455,8 +482,32 @@ pub fn complete_orbits_classed(
     pair_cutoff: f64,
     min_separation: f64,
 ) -> Option<Array1<f64>> {
+    match seat_classes(x, n, classes, group, centre, pair_cutoff, min_separation) {
+        Seating::Seated(out) => Some(out),
+        Seating::Unmoved | Seating::Unseatable => None,
+    }
+}
+
+/// What seating a structure on the sites of a group came to.
+enum Seating {
+    Seated(Array1<f64>),
+    /// Every atom is already on a site, or there is nothing to apply.
+    Unmoved,
+    /// Some class has fewer clear sites than atoms.
+    Unseatable,
+}
+
+fn seat_classes(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    group: &[Rot],
+    centre: [f64; 3],
+    pair_cutoff: f64,
+    min_separation: f64,
+) -> Seating {
     if n == 0 || group.len() < 2 || x.len() != 3 * n {
-        return None;
+        return Seating::Unmoved;
     }
     let parts = class_members(classes, n).unwrap_or_else(|| vec![(0..n).collect()]);
     let rel = |a: usize| -> [f64; 3] {
@@ -504,7 +555,7 @@ pub fn complete_orbits_classed(
             }
         }
         if chosen.len() < m {
-            return None;
+            return Seating::Unseatable;
         }
         let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(m * m);
         for (k, &a) in members.iter().enumerate() {
@@ -538,7 +589,11 @@ pub fn complete_orbits_classed(
         }
         taken.extend(chosen);
     }
-    moved.then_some(out)
+    if moved {
+        Seating::Seated(out)
+    } else {
+        Seating::Unmoved
+    }
 }
 
 /// The incumbent pushed onto the point group its innermost points have.
@@ -586,7 +641,7 @@ pub fn complete_detected_classed(
         x,
         n,
         classes,
-        true,
+        Reading::Species,
         tolerance,
         merge_radius,
         core_fraction,
@@ -618,7 +673,7 @@ pub fn complete_detected_framework(
         x,
         n,
         classes,
-        false,
+        Reading::Framework,
         tolerance,
         merge_radius,
         core_fraction,
@@ -626,12 +681,64 @@ pub fn complete_detected_framework(
     )
 }
 
+/// [`complete_detected_framework`] with the three refinements a loosely
+/// symmetric framework needs.
+///
+/// - The group keeps only the operations that are symmetries of the core to
+///   within the detection tolerance. The closure of loosely commensurate
+///   generators is cut at its cap, and about half of what the cut holds are
+///   words of two loose operations that the core does not carry.
+/// - The group acts about the better of two centres, the centroid of the
+///   core it was read on and the centroid of the whole structure: the one
+///   whose operations fit the whole structure with the smaller summed
+///   deviation. A group read on the inner points of a structure with a
+///   lopsided surface fits the whole about the second.
+/// - Each class is seated on the sites made of its own images, so no atom is
+///   put on another class's site and the composition is kept. Only when a
+///   class has fewer clear sites than atoms are the atoms seated on the
+///   sites of all the images together.
+///
+/// Without classes the seating is the one call, and the filter and the
+/// centre still apply.
+pub fn complete_detected_fitted(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    tolerance: f64,
+    merge_radius: f64,
+    core_fraction: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    complete_detected_reading(
+        x,
+        n,
+        classes,
+        Reading::Fitted,
+        tolerance,
+        merge_radius,
+        core_fraction,
+        min_separation,
+    )
+}
+
+/// How the group of a completion is read and applied.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    /// Every operation takes each point onto a point of its own class.
+    Species,
+    /// The group of the points alone, each class on its own sites.
+    Framework,
+    /// [`Reading::Framework`] with symmetric operations only, the better
+    /// centre, and a seating that falls back to all the sites.
+    Fitted,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn complete_detected_reading(
     x: ArrayView1<f64>,
     n: usize,
     classes: Option<&[u32]>,
-    read_classes: bool,
+    reading: Reading,
     tolerance: f64,
     merge_radius: f64,
     core_fraction: f64,
@@ -657,7 +764,7 @@ fn complete_detected_reading(
             core[3 * k + d] = x[3 * a + d];
             centre[d] += x[3 * a + d];
         }
-        if let Some(z) = classes.filter(|z| read_classes && z.len() >= n) {
+        if let Some(z) = classes.filter(|z| reading == Reading::Species && z.len() >= n) {
             core_classes.push(z[a]);
         }
     }
@@ -665,8 +772,77 @@ fn complete_detected_reading(
         *v /= m as f64;
     }
     let core_classes = (core_classes.len() == m).then_some(core_classes.as_slice());
-    let group = detected_group_classed(core.view(), m, core_classes, tolerance)?;
-    complete_orbits_classed(x, n, classes, &group, centre, merge_radius, min_separation)
+    let group = read_group(
+        core.view(),
+        m,
+        core_classes,
+        tolerance,
+        reading == Reading::Fitted,
+    )?;
+    if reading != Reading::Fitted {
+        return complete_orbits_classed(
+            x,
+            n,
+            classes,
+            &group,
+            centre,
+            merge_radius,
+            min_separation,
+        );
+    }
+    let centre = fitted_centre(x, n, &group, centre, c);
+    seat_fitted(x, n, classes, &group, centre, merge_radius, min_separation)
+}
+
+/// Seats each class on its own sites; a class with fewer clear sites than
+/// atoms sends the whole structure to the sites of all the images together.
+fn seat_fitted(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    group: &[Rot],
+    centre: [f64; 3],
+    pair_cutoff: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    match seat_classes(x, n, classes, group, centre, pair_cutoff, min_separation) {
+        Seating::Seated(out) => Some(out),
+        Seating::Unmoved => None,
+        Seating::Unseatable if class_members(classes, n).is_some() => {
+            match seat_classes(x, n, None, group, centre, pair_cutoff, min_separation) {
+                Seating::Seated(out) => Some(out),
+                Seating::Unmoved | Seating::Unseatable => None,
+            }
+        }
+        Seating::Unseatable => None,
+    }
+}
+
+/// Of the centroid of the core a group was read on and the centroid of the
+/// whole structure, the one about which the operations of the group fit the
+/// whole structure with the smaller summed deviation; the core's when they
+/// tie.
+fn fitted_centre(
+    x: ArrayView1<f64>,
+    n: usize,
+    group: &[Rot],
+    core_centre: [f64; 3],
+    whole_centre: [f64; 3],
+) -> [f64; 3] {
+    let misfit = |centre: [f64; 3]| -> f64 {
+        group
+            .iter()
+            .skip(1)
+            .map(|g| {
+                operation_deviation_about(x, n, g, centre, f64::INFINITY).unwrap_or(f64::INFINITY)
+            })
+            .sum()
+    };
+    if misfit(whole_centre) < misfit(core_centre) {
+        whole_centre
+    } else {
+        core_centre
+    }
 }
 
 #[cfg(test)]
@@ -1399,6 +1575,107 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The closure of loosely commensurate generators is cut at its cap, and
+    /// some of what it holds are words the core does not carry. The group of
+    /// the fitted reading is the plain group less exactly those: every element
+    /// kept deviates by less than the tolerance, every element dropped by no
+    /// less, and the identity stays first.
+    #[test]
+    fn the_fitted_group_has_only_operations_the_core_carries() {
+        for (amplitude, tolerance) in [(0.15, 0.25), (0.3, 0.5)] {
+            let x = jitter(&icosahedron(1.0), amplitude);
+            let n = x.len() / 3;
+            let plain = read_group(x.view(), n, None, tolerance, false).expect("a loose group");
+            let kept = read_group(x.view(), n, None, tolerance, true).expect("a symmetric part");
+            assert_eq!(
+                plain.len(),
+                LARGEST_POLYHEDRAL_GROUP,
+                "{amplitude}: the cut"
+            );
+            assert!(kept.len() < plain.len(), "{amplitude}: nothing was dropped");
+            assert_eq!(kept[0], plain[0]);
+            let deviation =
+                |g: &Rot| operation_deviation(x.view(), n, None, g, f64::INFINITY).expect("no cap");
+            for g in &plain {
+                let held = kept.contains(g);
+                assert_eq!(
+                    held,
+                    deviation(g) < tolerance,
+                    "{amplitude}: {}",
+                    deviation(g)
+                );
+            }
+        }
+    }
+
+    /// A group read about a point the structure is not symmetric about acts
+    /// about the other centre when that fits better, and about the core's
+    /// when it does not or when they tie.
+    #[test]
+    fn a_group_acts_about_the_centre_it_fits() {
+        let shift = [0.4, -0.2, 0.1];
+        let mut x = octahedron();
+        for a in 0..6 {
+            for k in 0..3 {
+                x[3 * a + k] += shift[k];
+            }
+        }
+        let origin = [0.0; 3];
+        let quarter = rot_matrix([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2);
+        let identity: Rot = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let group = [identity, quarter, mul(&quarter, &quarter)];
+        let whole = centroid(x.view(), 6);
+        assert_eq!(fitted_centre(x.view(), 6, &group, origin, whole), whole);
+        assert_eq!(fitted_centre(x.view(), 6, &group, whole, origin), whole);
+        assert_eq!(fitted_centre(x.view(), 6, &group, whole, whole), whole);
+        assert_eq!(fitted_centre(x.view(), 6, &group, origin, origin), origin);
+    }
+
+    /// Three points of one class on top of each other have two sites of their
+    /// own under a half turn, so the class cannot be seated on its own sites,
+    /// and the structure is seated on the sites of all the images together;
+    /// when every class has the sites it needs, the seating is its own.
+    #[test]
+    fn a_class_without_sites_of_its_own_falls_back_to_all_the_sites() {
+        let half = rot_matrix([0.0, 0.0, 1.0], std::f64::consts::PI);
+        let identity: Rot = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let group = [identity, half];
+        let x = array![
+            0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.02, 0.0, 1.0, 0.0, 0.02, 0.5, -1.0, 0.5
+        ];
+        let classes = [0u32, 1, 1, 1, 0];
+        let centre = [0.0; 3];
+        assert!(matches!(
+            seat_classes(x.view(), 5, Some(&classes), &group, centre, 0.1, 0.05),
+            Seating::Unseatable
+        ));
+        assert!(
+            complete_orbits_classed(x.view(), 5, Some(&classes), &group, centre, 0.1, 0.05)
+                .is_none()
+        );
+        let y = seat_fitted(x.view(), 5, Some(&classes), &group, centre, 0.1, 0.05)
+            .expect("the images of all the points give six sites");
+        let blind = complete_orbits_classed(x.view(), 5, None, &group, centre, 0.1, 0.05)
+            .expect("five sites");
+        assert_eq!(y, blind);
+
+        let seated = octahedron();
+        let labels = [0u32, 1, 0, 0, 0, 0];
+        let quarter = rot_matrix([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2);
+        let group = [
+            identity,
+            quarter,
+            mul(&quarter, &quarter),
+            mul(&quarter, &mul(&quarter, &quarter)),
+        ];
+        let x = jitter(&seated, 0.05);
+        let own = complete_orbits_classed(x.view(), 6, Some(&labels), &group, centre, 0.3, 0.1)
+            .expect("each class has its sites");
+        let fitted =
+            seat_fitted(x.view(), 6, Some(&labels), &group, centre, 0.3, 0.1).expect("seated");
+        assert_eq!(own, fitted);
     }
 
     /// Without species, and with all the points of one species, the framework

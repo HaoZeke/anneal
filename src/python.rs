@@ -2989,6 +2989,14 @@ impl PyClusterConfig {
         self.inner.symmetry_completion_framework
     }
 
+    /// Whether the framework reading also keeps only the operations the core
+    /// carries, fits its centre, and falls back to all sites for a species
+    /// with too few of its own. Off in every preset.
+    #[getter]
+    fn symmetry_completion_fitted(&self) -> bool {
+        self.inner.symmetry_completion_fitted
+    }
+
     /// Shared-history visit policy: `tabu` or `recognition`.
     #[getter]
     fn shared_visit_policy(&self) -> &'static str {

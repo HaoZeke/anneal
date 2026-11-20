@@ -691,6 +691,17 @@ pub struct Config {
     /// nothing. Off by default; it changes the walk.
     #[serde(skip_serializing_if = "is_false")]
     pub symmetry_completion_framework: bool,
+    /// [`Config::symmetry_completion_framework`] with the refinements a
+    /// loosely symmetric framework needs: only the operations the core
+    /// carries to within the detection tolerance are applied, the group acts
+    /// about whichever of the core's and the whole structure's centroid it
+    /// fits the whole structure better about, and a species with too few
+    /// sites of its own is seated on the sites of all the images. Without
+    /// species the group and the seating are unchanged and the filter and
+    /// the centre apply. Takes precedence over the framework reading. Off by
+    /// default; it changes the walk.
+    #[serde(skip_serializing_if = "is_false")]
+    pub symmetry_completion_fitted: bool,
     /// Fraction of the points, innermost by distance from the centroid,
     /// whose point group [`Config::symmetry_completion_on_new`] reads. The
     /// outer points are the last to order, and a disordered surface would
@@ -2058,6 +2069,7 @@ impl Config {
             symmetry_completion_on_new: false,
             symmetry_completion_once: false,
             symmetry_completion_framework: false,
+            symmetry_completion_fitted: false,
             symmetry_core_fraction: 0.6,
             tabu_on_stall: false,
             tabu_capacity: 8,
