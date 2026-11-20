@@ -515,36 +515,130 @@ pub fn detect_all_classed(
     orders: &[usize],
     tolerance: f64,
 ) -> Vec<Candidate> {
-    let mut out = Vec::new();
+    scan_axes(x, n, classes, orders, tolerance, None)
+}
+
+/// The candidates of [`detect_all_classed`] that a reader needs when it takes
+/// the `count` least deviant ones whose axes are not within `parallel_cosine`
+/// of one it already has (an axis and a plane never compete).
+///
+/// The scan raises its bar as it goes. Once it holds `count` candidates with
+/// axes more than twice that angle apart, the reader has its `count` by the
+/// deviation of the last of them: an axis within the angle of two of them
+/// would put those two within twice the angle of each other, so one earlier
+/// candidate shuts out at most one of the `count`. A test is then refused at
+/// that deviation instead of at `tolerance`, and what it would have returned
+/// lies past where the reader stops. The list is the full list up to that
+/// deviation, in the same order, and nothing the reader reads is missing.
+pub(crate) fn detect_leading_classed(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    orders: &[usize],
+    tolerance: f64,
+    parallel_cosine: f64,
+    count: usize,
+) -> Vec<Candidate> {
+    scan_axes(
+        x,
+        n,
+        classes,
+        orders,
+        tolerance,
+        Some(Leading {
+            parallel_cosine,
+            count,
+        }),
+    )
+}
+
+#[derive(Clone, Copy)]
+struct Leading {
+    parallel_cosine: f64,
+    count: usize,
+}
+
+impl Leading {
+    /// Deviation by which `count` candidates with axes more than twice the
+    /// parallel angle apart exist among `found`, or `None` while they do not.
+    fn bound(&self, found: &[Candidate]) -> Option<f64> {
+        let apart = 2.0 * self.parallel_cosine * self.parallel_cosine - 1.0 - 8.0 * f64::EPSILON;
+        let mut order: Vec<&Candidate> = found.iter().collect();
+        order.sort_by(|a, b| {
+            a.deviation
+                .partial_cmp(&b.deviation)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut chosen: Vec<&Candidate> = Vec::with_capacity(self.count);
+        for c in order {
+            let far = chosen.iter().all(|g| {
+                let dot = g.axis[0] * c.axis[0] + g.axis[1] * c.axis[1] + g.axis[2] * c.axis[2];
+                g.improper != c.improper || dot.abs() < apart
+            });
+            if far {
+                chosen.push(c);
+                if chosen.len() == self.count {
+                    return Some(c.deviation);
+                }
+            }
+        }
+        None
+    }
+}
+
+fn scan_axes(
+    x: ArrayView1<f64>,
+    n: usize,
+    classes: Option<&[u32]>,
+    orders: &[usize],
+    tolerance: f64,
+    leading: Option<Leading>,
+) -> Vec<Candidate> {
+    let mut out: Vec<Candidate> = Vec::new();
     let matcher = Matcher::new(x, n, classes);
+    let mut cap = tolerance;
+    let keep = |out: &mut Vec<Candidate>, candidate: Candidate, cap: &mut f64| {
+        if candidate.deviation < tolerance && candidate.deviation <= *cap {
+            out.push(candidate);
+            if let Some(lead) = leading
+                && candidate.deviation < *cap
+                && let Some(bound) = lead.bound(out)
+            {
+                *cap = cap.min(bound);
+            }
+        }
+    };
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let Some(d) = matcher.deviation(tolerance, |cloud, cap| {
-                cloud.rotation_deviation(axis, order, cap)
-            }) else {
+            let Some(d) =
+                matcher.deviation(cap, |cloud, cap| cloud.rotation_deviation(axis, order, cap))
+            else {
                 continue;
             };
-            if d < tolerance {
-                out.push(Candidate {
+            keep(
+                &mut out,
+                Candidate {
                     axis,
                     order,
                     improper: false,
                     deviation: d,
-                });
-            }
+                },
+                &mut cap,
+            );
         }
-        let Some(d) = matcher.deviation(tolerance, |cloud, cap| cloud.plane_deviation(axis, cap))
-        else {
+        let Some(d) = matcher.deviation(cap, |cloud, cap| cloud.plane_deviation(axis, cap)) else {
             continue;
         };
-        if d < tolerance {
-            out.push(Candidate {
+        keep(
+            &mut out,
+            Candidate {
                 axis,
                 order: 1,
                 improper: true,
                 deviation: d,
-            });
-        }
+            },
+            &mut cap,
+        );
     }
     out.sort_by(|a, b| {
         a.deviation
