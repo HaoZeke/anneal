@@ -1322,6 +1322,43 @@ fn every_publish_job_waits_for_the_artifacts_it_publishes() {
     }
 }
 
+// The token every job gets reads the repository and nothing more. The
+// GitHub release job alone may write to it, and PyPI's trusted publishing
+// alone gets an OIDC token.
+#[test]
+fn only_the_github_release_job_may_write_to_the_repository() {
+    let workflow = release();
+    let permissions = |value: &Value| -> Vec<(String, String)> {
+        value
+            .as_mapping()
+            .unwrap_or_else(|| panic!("permissions {value:?} is not a mapping"))
+            .iter()
+            .map(|(scope, access)| {
+                (
+                    scope.as_str().unwrap().to_owned(),
+                    access.as_str().unwrap().to_owned(),
+                )
+            })
+            .collect()
+    };
+    let pair = |scope: &str, access: &str| vec![(scope.to_owned(), access.to_owned())];
+
+    assert_eq!(
+        permissions(&workflow["permissions"]),
+        pair("contents", "read")
+    );
+    for (name, job) in workflow["jobs"].as_mapping().expect("jobs") {
+        let name = name.as_str().unwrap();
+        let granted = job.get("permissions").map(permissions);
+        let expected = match name {
+            "github-release" => Some(pair("contents", "write")),
+            "publish-pypi" => Some(pair("id-token", "write")),
+            _ => None,
+        };
+        assert_eq!(granted, expected, "job {name} permissions");
+    }
+}
+
 #[test]
 fn scientific_tests_optimize_kernels_without_disabling_debug_checks() {
     let manifest = include_str!("../Cargo.toml");

@@ -6,8 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# A job that needs more names its own permissions. Only github-release,
+# which creates the release, may write to the repository.
 permissions:
-  contents: write
+  contents: read
 
 # Release flow (abi3 wheels + towncrier changelog):
 # - The tag name MUST be vX.Y.Z. A tag named 0.8.0 does not match
@@ -335,6 +337,8 @@ jobs:
     needs: [native-libs, sdist, wheels]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
 
