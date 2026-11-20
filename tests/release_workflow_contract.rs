@@ -1313,6 +1313,49 @@ fn rgpot_pair_stays_out_of_the_published_dependencies() {
     assert!(wheel.contains("anneal_core::install_rgpot_kernels!();"));
 }
 
+/// The development dependency of the root crate, the wheel crate's
+/// dependency and the lockfile entry must name one rgpot revision. Cargo
+/// accepts two revisions side by side, which links two copies of the
+/// kernels, and a lockfile that disagrees with a manifest fails `--locked`.
+#[test]
+fn rgpot_pair_is_pinned_to_one_revision() {
+    let rev_of = |manifest: &toml::Table, table: &str| -> String {
+        let pin = &manifest[table]["rgpot-pair"];
+        assert_eq!(
+            pin["git"].as_str(),
+            Some("https://github.com/OmniPotentRPC/rgpot")
+        );
+        pin["rev"]
+            .as_str()
+            .expect("a rev, not a branch or tag")
+            .to_owned()
+    };
+    let root: toml::Table = include_str!("../Cargo.toml")
+        .parse()
+        .expect("root manifest");
+    let wheel: toml::Table = include_str!("../crates/anneal-python/Cargo.toml")
+        .parse()
+        .expect("wheel manifest");
+    let lock: toml::Table = include_str!("../Cargo.lock").parse().expect("Cargo.lock");
+
+    let rev = rev_of(&root, "dev-dependencies");
+    assert_eq!(rev.len(), 40);
+    assert!(rev.chars().all(|c| c.is_ascii_hexdigit()), "{rev}");
+    assert_eq!(rev_of(&wheel, "dependencies"), rev);
+
+    let entries: Vec<&toml::Value> = lock["package"]
+        .as_array()
+        .expect("packages")
+        .iter()
+        .filter(|package| package["name"].as_str() == Some("rgpot-pair"))
+        .collect();
+    assert_eq!(entries.len(), 1, "one rgpot-pair in Cargo.lock");
+    assert_eq!(
+        entries[0]["source"].as_str(),
+        Some(format!("git+https://github.com/OmniPotentRPC/rgpot?rev={rev}#{rev}").as_str())
+    );
+}
+
 #[test]
 fn wheel_crate_depends_on_anneal_core_at_the_workspace_version() {
     let wheel: toml::Table = include_str!("../crates/anneal-python/Cargo.toml")
