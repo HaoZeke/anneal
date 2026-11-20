@@ -56,7 +56,7 @@ Median wall is 122.1 s on the quench arm and 8363 s on develop. The quench arm c
 | 15001 | −81.382194 | 121.9 | 48 | 2 | 83.3 | −81.356340 | 5493.9 | 208 | −81.384575 | aborted |
 | 15003 | −81.379546 | 132.6 | 44 | 1 | 90.9 | −81.308382 | 9663.7 | 229 | −81.357894 | 569.7 |
 
-Seed 15001's CREST exited 1 (`confcross_0.xyz` missing). The Eh above is the vtight score of the `crest_best.xyz` it had already written.
+Seed 15001's CREST exited 1 during structure crossing before `confcross_0.xyz` was written. The Eh above is the vtight score of the `crest_best.xyz` it had already written.
 
 Inside the quench arm a call is 26–31 ms, and about 2 ms of the wall sits outside xtb. Develop's calls are 76–179 ms because the uphill steps fail SCF. Outside xtb is about 5 ms per charged call where the time file covers the wall.
 

@@ -17,6 +17,7 @@ Five blocks, each between a pair of marker comments:
 from __future__ import annotations
 
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -561,17 +562,29 @@ def splice(text: str, marks: tuple[str, str], block: str) -> str:
     return f"{head}{start}\n{block}\n{end}{tail}"
 
 
+def destination(path: Path) -> Path:
+    override = os.environ.get("H2H_TABLES_OUTPUT", "")
+    if not override:
+        return path
+    dest = Path(override) / path.name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.exists():
+        dest.write_text(path.read_text())
+    return dest
+
+
 def main(argv: list[str]) -> int:
     stale = False
     for name, (path, make) in BLOCKS.items():
-        text = path.read_text()
+        target = destination(path)
+        text = target.read_text()
         updated = splice(text, MARKS[name], make())
         if "--check" in argv:
             if updated != text:
-                print(f"the {name} table in {path.name} is stale", file=sys.stderr)
+                print(f"the {name} table in {target.name} is stale", file=sys.stderr)
                 stale = True
         else:
-            path.write_text(updated)
+            target.write_text(updated)
     return 1 if stale else 0
 
 

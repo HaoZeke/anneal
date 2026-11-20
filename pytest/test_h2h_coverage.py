@@ -7,8 +7,13 @@ and every known shortfall. These tests hold that file to the Snakefile, the
 runner sources, the suites and the rows, so a new rule, a drifted budget, a
 short seed count or a runner that stops stamping provenance fails here.
 
-The dry run needs ``snakemake`` on PATH (or ``SNAKEMAKE``); the only
-outputs it may find missing are the ones the registry records. The smoke runs
+The dry run needs ``snakemake`` on PATH (or ``SNAKEMAKE``). Every
+missing output of the dry run must match both the registry's
+``missing_outputs`` set exactly (``missing == known``) and the exact
+set of ``/work/`` outputs declared in the target rules' ``output:``
+blocks (excluding any path already on disk); every ``/work/`` path in
+``missing_outputs`` must be declared in ``workflow/Snakefile``, and no
+tracked path in ``missing_outputs`` may exist in the tree. The smoke runs
 build each suite's example and run one seed at a small budget; they are
 opt-in with ``ANNEAL_H2H_SMOKE=1``.
 """
@@ -268,6 +273,100 @@ def test_rows_carry_provenance(entry):
     assert "code_revision" in text and "host" in text, f"{entry['runners']} do not write code_revision and host"
 
 
+def declared_rule_work_outputs() -> set[str]:
+    """Return every /work/ output declared in the output: block of a registered rule."""
+    text = (ROOT / "workflow" / "Snakefile").read_text()
+    blocks = re.split(r"(?m)^(?=rule \w+:)", text)
+    target = set(RULES)
+    found: set[str] = set()
+    for block in blocks:
+        head = re.match(r"rule (\w+):", block)
+        if not head or head.group(1) not in target:
+            continue
+        output = re.search(
+            r"(?m)^[ \t]+output:\s*\n((?:[ \t]{8,}.*\n)*)",
+            block,
+        )
+        if not output:
+            continue
+        for quoted in re.findall(r'"([^"]+)"', output.group(1)):
+            if quoted.startswith("/work/"):
+                found.add(quoted)
+    return found
+
+
+def test_registered_rules_declare_only_work_outputs():
+    text = (ROOT / "workflow" / "Snakefile").read_text()
+    blocks = re.split(r"(?m)^(?=rule \w+:)", text)
+    target = set(RULES)
+    non_work = []
+    for block in blocks:
+        head = re.match(r"rule (\w+):", block)
+        if not head or head.group(1) not in target:
+            continue
+        output = re.search(
+            r"(?m)^[ \t]+output:\s*\n((?:[ \t]{8,}.*\n)*)",
+            block,
+        )
+        if not output:
+            continue
+        for quoted in re.findall(r'"([^"]+)"', output.group(1)):
+            if not quoted.startswith("/work/"):
+                non_work.append((head.group(1), quoted))
+    assert not non_work, f"registered rules write outside /work/: {non_work}"
+    assert declared_rule_work_outputs(), "expected declared /work/ outputs in workflow/Snakefile"
+
+
+def verify_snakemake_missing_outputs(
+    missing: set[str],
+    entries: list[dict],
+    work_outputs: set[str],
+) -> None:
+    known = {path for entry in entries for path in entry.get("missing_outputs", {})}
+    tracked_present = sorted(
+        path for path in known
+        if not path.startswith("/") and (ROOT / path).exists()
+    )
+    assert not tracked_present, "registry missing_outputs exist in the tree: " + " ".join(tracked_present)
+    unknown_work = sorted(path for path in known if path.startswith("/work/") and path not in work_outputs)
+    assert not unknown_work, "registry /work/ paths not declared in workflow/Snakefile: " + " ".join(unknown_work)
+    expected = {path for path in work_outputs if not Path(path).exists()}
+    assert missing == expected, (
+        "outputs missing from the dry run differ from declared Snakefile /work/ outputs"
+    )
+    assert missing == known, (
+        "outputs missing from the dry run differ from bench/h2h.json missing_outputs"
+    )
+
+
+def test_bogus_missing_outputs_entry_fails():
+    work_outputs = declared_rule_work_outputs()
+    baseline = {path for path in work_outputs if not Path(path).exists()}
+    verify_snakemake_missing_outputs(baseline, ENTRIES, work_outputs)
+
+    bogus_tracked = [dict(entry) for entry in ENTRIES]
+    bogus_tracked[0] = {
+        **bogus_tracked[0],
+        "missing_outputs": {
+            **bogus_tracked[0].get("missing_outputs", {}),
+            "bench/bogus-nonexistent/rows.csv": "bogus untracked path",
+        },
+    }
+    with pytest.raises(AssertionError, match="missing_outputs"):
+        verify_snakemake_missing_outputs(baseline, bogus_tracked, work_outputs)
+
+    bogus_work = [dict(entry) for entry in ENTRIES]
+    bogus_work[0] = {
+        **bogus_work[0],
+        "missing_outputs": {
+            **bogus_work[0].get("missing_outputs", {}),
+            "/work/anneal-snakemake/bogus.stamp": "bogus work stamp",
+        },
+    }
+    with pytest.raises(AssertionError):
+        verify_snakemake_missing_outputs(baseline, bogus_work, work_outputs)
+
+
 def test_snakemake_resolves_every_head_to_head():
     snakemake = os.environ.get("SNAKEMAKE") or shutil.which("snakemake")
     if not snakemake:
@@ -284,9 +383,9 @@ def test_snakemake_resolves_every_head_to_head():
         path
         for listed in re.findall(r"reason: Missing output files: (.*)", proc.stdout + proc.stderr)
         for path in listed.split(", ")
+        if path
     }
-    known = {path for entry in ENTRIES for path in entry.get("missing_outputs", {})}
-    assert missing == known, "outputs missing from the tree differ from bench/h2h.json missing_outputs"
+    verify_snakemake_missing_outputs(missing, ENTRIES, declared_rule_work_outputs())
 
 
 @pytest.mark.parametrize("path", sorted({suite_of(e)[0] for e in ENTRIES}), ids=lambda p: str(p.relative_to(ROOT)))

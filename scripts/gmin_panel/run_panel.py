@@ -773,12 +773,23 @@ def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None
         writer.writerows(rows)
 
 
-def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool, out: Path | None = None) -> None:
+def prepared(source: Path, dest: Path) -> Path:
+    if dest == source:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.exists():
+        dest.write_text(source.read_text())
+    return dest
+
+
+def write_tables(root: Path, rows: list[dict[str, str]], revision: str, tex: bool, out: Path | None = None,
+                 readme: Path | None = None, manuscript: Path | None = None) -> None:
     summary = summarise(rows, revision)
     write_csv(out or (root / "bench" / "gmin-panel" / "summary.csv"), SUMMARY_FIELDS, summary)
-    splice(root / README, README_MARKS, readme_table(summary))
+    splice(prepared(root / README, readme or (root / README)), README_MARKS, readme_table(summary))
     if tex:
-        splice(root / MANUSCRIPT, TEX_MARKS, tex_table(summary, revision))
+        splice(prepared(root / MANUSCRIPT, manuscript or (root / MANUSCRIPT)), TEX_MARKS,
+               tex_table(summary, revision))
 
 
 def self_test() -> None:
@@ -904,6 +915,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--summary", type=Path)
+    parser.add_argument("--readme", type=Path)
+    parser.add_argument("--manuscript", type=Path)
     parser.add_argument("--bin", type=Path)
     parser.add_argument("--tree", type=Path)
     parser.add_argument("--work", type=Path)
@@ -924,7 +937,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--tex", action="store_true", help="with --summarize, also rewrite tab:gmin")
     args = parser.parse_args(argv[1:])
     if args.summarize:
-        write_tables(args.root, read_rows(args.rows), args.revision, args.tex, args.summary)
+        write_tables(args.root, read_rows(args.rows), args.revision, args.tex, args.summary,
+                     args.readme, args.manuscript)
         return 0
     if socket.gethostname() != "bench":
         print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)

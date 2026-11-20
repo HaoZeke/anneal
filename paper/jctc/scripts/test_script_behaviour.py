@@ -527,6 +527,8 @@ def test_redact_main_rewrites_a_home_path(tmp_path: Path) -> None:
 
 
 def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("chemparseplot")
     os.environ["PYTHONHASHSEED"] = "0"
     os.environ["SOURCE_DATE_EPOCH"] = "0"
     import fig_algorithm_stack

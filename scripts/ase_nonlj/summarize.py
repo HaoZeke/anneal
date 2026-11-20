@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import re
 import sys
 from pathlib import Path
@@ -331,7 +332,8 @@ def main() -> None:
         "fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,"
         "wall_over_bh,wall_over_mh,wall_stops,wall_cap_s,code_revision,host"
     )
-    summary_path = ROOT / "bench" / "ase-nonlj" / "summary.csv"
+    summary_root = Path(os.environ["ASE_NONLJ_OUT"]) if os.environ.get("ASE_NONLJ_OUT") else ROOT / "bench" / "ase-nonlj"
+    summary_path = summary_root / "summary.csv"
     summary_lines = [summary_header]
     if summary_path.exists():
         existing = summary_path.read_text().splitlines()
@@ -450,23 +452,27 @@ def main() -> None:
             "",
         ]
     )
-    out = ROOT / "bench" / "ase-nonlj"
     outputs = {
         summary_path: "\n".join(summary_lines) + "\n",
-        out / "README.md": "\n".join(readme),
+        summary_root / "README.md": "\n".join(readme),
     }
     if "--tex" in flags:
-        outputs[DOCUMENT] = splice(DOCUMENT.read_text(), tex_table(grouped))
+        document = Path(os.environ["ASE_NONLJ_TEX"]) if os.environ.get("ASE_NONLJ_TEX") else DOCUMENT
+        if document != DOCUMENT and not document.exists():
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_text(DOCUMENT.read_text())
+        outputs[document] = splice(document.read_text(), tex_table(grouped))
     if "--check" in flags:
         stale = [
-            str(path.relative_to(ROOT))
+            str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
             for path, text in outputs.items()
-            if path.read_text() != text
+            if not path.exists() or path.read_text() != text
         ]
         if stale:
             raise SystemExit("stale generated report: " + ", ".join(stale))
     else:
         for path, text in outputs.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
 
 

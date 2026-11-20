@@ -3956,10 +3956,22 @@ def manuscript_new(audit: Audit) -> None:
         audit.record(needle in text, PAPER, "the host paragraph says", needle.replace("\n", " "), "present")
     commands = {
         "bash scripts/gmin_panel/build_gmin.sh": "scripts/gmin_panel/build_gmin.sh",
-        "snakemake -s workflow/Snakefile gmin_panel": "workflow/Snakefile",
-        "bash scripts/gmin_panel/enter_bench.sh --summarize --tex": "scripts/gmin_panel/enter_bench.sh",
-        "bash scripts/ase_panel/enter_bench.sh --system lj38\n": "scripts/ase_panel/enter_bench.sh",
-        "bash scripts/ase_nonlj/enter_bench.sh\n": "scripts/ase_nonlj/enter_bench.sh",
+        "GMIN_PANEL_OUT=/work/gmin-panel/output \\\n  snakemake -s workflow/Snakefile gmin_panel": "workflow/Snakefile",
+        "GMIN_PANEL_OUT=/work/gmin-panel/output \\\n  bash scripts/gmin_panel/enter_bench.sh --summarize --tex \\\n"
+        "  --summary /work/gmin-panel/output/summary.csv \\\n  --readme /work/gmin-panel/output/README.md \\\n"
+        "  --manuscript /work/gmin-panel/output/manuscript.tex": "scripts/gmin_panel/enter_bench.sh",
+        "ASE_PANEL_OUT=/work/ase-panel/output \\\n  bash scripts/ase_panel/enter_bench.sh --system lj38\n":
+            "scripts/ase_panel/enter_bench.sh",
+        "ASE_NONLJ_OUT=/work/ase-nonlj/output \\\n  pixi run --locked --frozen bash scripts/ase_nonlj/enter_bench.sh\n":
+            "scripts/ase_nonlj/enter_bench.sh",
+        "H2H_TABLES_OUTPUT=/work/h2h-tables \\\n  python3 paper/jctc/scripts/h2h_tables.py":
+            "paper/jctc/scripts/h2h_tables.py",
+        "SC_H2H_N12_OUTPUT=/work/metal-sc/output \\\n  snakemake -s workflow/Snakefile sc_h2h_n12 --cores 1 --force":
+            "workflow/Snakefile",
+        "TIP4P_H2H_OUTPUT=/work/tip4p-h2h/output \\\n  snakemake -s workflow/Snakefile tip4p_h2h --cores 1 --force":
+            "workflow/Snakefile",
+        "AGOX_GOFEE_OUTPUT=/work/ase-gofee/output \\\n  snakemake -s workflow/Snakefile agox_gofee_h2h --cores 1 --force":
+            "workflow/Snakefile",
     }
     for command, path in commands.items():
         audit.record(command in text and (ROOT / path).exists(), PAPER, "the command names a script that exists",
@@ -4737,7 +4749,7 @@ def bibliography_keys(audit: Audit) -> None:
         path = source.relative_to(ROOT).as_posix()
         text = re.sub(r"(?m)(?<!\\)%.*$", "", audit.text(path))
         for group in re.findall(
-            r"\\(?:cite[pt]?|nocite)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]+)\}",
+            r"\\(?:cite(?:p|t|author)?|nocite)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]+)\}",
             text,
             re.DOTALL,
         ):
