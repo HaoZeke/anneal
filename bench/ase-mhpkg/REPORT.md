@@ -83,3 +83,7 @@ Au38 seeds 2003 through 2011 were measured with harness `37987b38d5c557794a999cf
 `git format-patch 5eb79cdcb0a986984dc7b487e5a3cc93224246f9..34bd3b2215e056a45c02633669ae99e842c0d7ed` has sha256 `a542ced35eea1cabff90ac65be84a5d75844ee820cd8574f54221ce8db87de54`.
 
 Call medians above are the charged counts. `calls_to_hit` is the first quenched record at the threshold and can be smaller than the charged count.
+
+## Anneal arm across the two harness revisions
+
+`git diff --name-only 34bd3b2215e056a45c02633669ae99e842c0d7ed 37987b38d5c557794a999cff0b47f4bf728f37c6` lists `scripts/ase_panel/mhpkg.py` and `bench/ase-mhpkg/README.md`. The Python diff is the handler in `run_mhpkg` that records an optimizer abort, and the README paragraph that describes it. `run_anneal` and the example sources are not in that diff, so `37987b38d5c557794a999cff0b47f4bf728f37c6` does not change anything the anneal arm executes. The Au38 anneal seeds were not rerun.
