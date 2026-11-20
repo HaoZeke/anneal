@@ -99,7 +99,10 @@ def test_the_floor_gate_reference_matches_minima():
     campaign = {"si10": -460.68373809, "c10": -571.32273783, "c20": -1148.85383633}
     cited = {row["system"]: row["source"] for row in rows}
     for system, energy in campaign.items():
-        assert expect[system] == energy == crest.REFERENCE[system]
+        assert crest.energy_hits(expect[system], energy, 0.0)
+        assert crest.energy_hits(energy, expect[system], 0.0)
+        assert crest.energy_hits(energy, crest.REFERENCE[system], 0.0)
+        assert crest.energy_hits(crest.REFERENCE[system], energy, 0.0)
         assert "scripts/covalent_h2h/gfn2_crest.py" in cited[system]
     assert expect["si13"] == -624.70446339
     assert expect["si20"] == -922.98227162
