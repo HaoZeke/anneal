@@ -326,43 +326,57 @@ impl Cloud {
         (0..self.xs.len()).any(|index| index != far && can_leave(index))
     }
 
-    /// Nearest atom, eight coordinates at a time.
+    /// Nearest atom and its squared distance, four coordinates at a time.
     ///
-    /// Strict `<` keeps the earlier index on a tie. The distances in a
-    /// chunk do not depend on each other, so the compiler can autovectorise
-    /// them. The index update stays in program order, then the tail.
+    /// Each lane keeps its own minimum and the earlier index that reached
+    /// it. Strict `<` is the same test as a scalar walk, and the lanes are
+    /// reduced in order, so a tie keeps the earlier atom. The distance-only
+    /// miss path does not use this walk.
     fn nearest_index(&self, image: [f64; 3]) -> (usize, f64) {
-        let n = self.xs.len();
-        let mut index = 0usize;
-        let mut best_index = 0usize;
-        let mut best = f64::INFINITY;
-        while index + 8 <= n {
-            let mut dist = [0.0; 8];
-            for lane in 0..8 {
-                dist[lane] = squared_offset(
-                    image,
-                    self.xs[index + lane],
-                    self.ys[index + lane],
-                    self.zs[index + lane],
-                );
-            }
-            for lane in 0..8 {
-                if dist[lane] < best {
-                    best = dist[lane];
-                    best_index = index + lane;
+        let mut lane = [f64::INFINITY; 4];
+        let mut who = [0usize; 4];
+        let mut xs = self.xs.chunks_exact(4);
+        let mut ys = self.ys.chunks_exact(4);
+        let mut zs = self.zs.chunks_exact(4);
+        let mut base = 0usize;
+        for ((x, y), z) in xs.by_ref().zip(ys.by_ref()).zip(zs.by_ref()) {
+            for offset in 0..4 {
+                let distance = squared_offset(image, x[offset], y[offset], z[offset]);
+                if distance < lane[offset] {
+                    lane[offset] = distance;
+                    who[offset] = base + offset;
                 }
             }
-            index += 8;
+            base += 4;
         }
-        while index < n {
-            let distance = squared_offset(image, self.xs[index], self.ys[index], self.zs[index]);
-            if distance < best {
-                best = distance;
-                best_index = index;
+        for ((&x, &y), &z) in xs
+            .remainder()
+            .iter()
+            .zip(ys.remainder())
+            .zip(zs.remainder())
+        {
+            let distance = squared_offset(image, x, y, z);
+            if distance < lane[0] {
+                lane[0] = distance;
+                who[0] = base;
             }
-            index += 1;
+            base += 1;
         }
-        (best_index, best)
+        let mut best = lane[0];
+        let mut index = who[0];
+        if lane[1] < best {
+            best = lane[1];
+            index = who[1];
+        }
+        if lane[2] < best {
+            best = lane[2];
+            index = who[2];
+        }
+        if lane[3] < best {
+            best = lane[3];
+            index = who[3];
+        }
+        (index, best)
     }
 
     #[cfg(test)]
@@ -2961,8 +2975,25 @@ mod shell_tests {
             clouds.push((name.to_string(), bench_cloud(n, seed), n));
         }
         clouds.push(("ring12".to_string(), bench_ring(12, 2.2), 12));
+        clouds.push(("ring55".to_string(), bench_ring(55, 2.2), 55));
         let (lattice, lattice_n) = bench_lattice(2);
         clouds.push(("lattice".to_string(), lattice, lattice_n));
+        let mut packed = Vec::new();
+        for i in -4..=4 {
+            for j in -4..=4 {
+                for k in -4..=4 {
+                    let r2 = i * i + j * j + k * k;
+                    if r2 > 0 && r2 <= 6 {
+                        packed.push(i as f64);
+                        packed.push(j as f64);
+                        packed.push(k as f64);
+                    }
+                }
+            }
+        }
+        let packed_n = packed.len() / 3;
+        assert_eq!(packed_n, 80);
+        clouds.push(("packed80".to_string(), Array1::from(packed), packed_n));
         let mut duplicated = bench_cloud(6, 3).to_vec();
         duplicated.extend_from_within(..);
         clouds.push(("duplicated".to_string(), Array1::from(duplicated), 12));
