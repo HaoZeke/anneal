@@ -28,7 +28,6 @@ The cover letter still has the open items.
 The manuscript patch is applied exactly.
 The data-availability section matches v1.16.
 Paragraph cohesion at patched lines 565 and 607 stays open.
-PROSE-RECEIPT.md lists each patch change and those two hits.
 
 ## Captions
 
