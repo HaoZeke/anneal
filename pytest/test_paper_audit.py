@@ -242,6 +242,38 @@ def test_a_paired_count_that_drifts_is_reported():
     assert sorted(r[2] for r in audit.drifts()) == ["both hit", "seeds this arm alone hits"]
 
 
+def test_a_drifted_develop_morse_count_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\) on 9 and 6 of 12 against none"
+    assert old in audit_mod.collapse(tex)
+    audit.text_cache[audit_mod.TEX] = audit_mod.collapse(tex).replace(old, old.replace("on 9 and 6", "on 7 and 9"))
+    audit_mod.manuscript_gmin(audit)
+    assert [(r[2], r[3]) for r in audit.drifts()] == [
+        ("prose", "Morse M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=14\\) on 9 and 6 of 12 against none "
+                  "(\\(p=3.9\\times 10^{-3}\\) and 0.031), and rigid")]
+
+
+def test_a_develop_gmin_cell_that_drifts_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "this work & 9/12 & 9 & 0 & 3 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "this work & 7/12 & 9 & 0 & 3 &")
+    audit_mod.manuscript_gmin(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        (f"{audit_mod.TEX} tab:gmin develop m55r14 this work", "hits")]
+
+
+def test_a_develop_row_off_the_submitted_revision_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(f"{audit_mod.GMIN_DEVELOP}/rows.csv")
+    row = next(r for r in rows if r["system"] == "m80r14" and r["code"] == "anneal")
+    row["code_revision"] = "1ce3ab64493196afd25e8690648e21157d91b882"
+    audit_mod.manuscript_gmin(audit)
+    assert "row invariants, pinned revisions, host and session" in {r[2] for r in audit.drifts()}
+
+
 def test_paired_statistics_match_scipy():
     stats = pytest.importorskip("scipy.stats")
     for only_a, only_b in ((5, 0), (1, 4), (12, 0), (5, 1), (2, 10), (4, 6)):
@@ -857,6 +889,16 @@ def test_a_gmin_line_off_the_rerun_is_reported():
     audit.text_cache[audit_mod.TEX] = tex.replace(old, "M\\(_{55}\\), \\(\\rho=14\\) & \\(1\\times 10^{6}\\) & this work")
     audit_mod.manuscript_gmin(audit)
     assert {"table line", "tab:gmin lines"} <= {r[2] for r in audit.drifts()}
+
+
+def test_a_relabeled_develop_block_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "\\emph{The submitted revision \\texttt{61fa67cf}}"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\emph{The submitted revision \\texttt{1ce3ab64}}")
+    audit_mod.manuscript_gmin(audit)
+    assert {"tab:gmin block headings", "table line", "tab:gmin lines"} <= {r[2] for r in audit.drifts()}
 
 
 def test_an_overclaim_that_returns_is_reported():
