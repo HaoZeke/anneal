@@ -1103,6 +1103,20 @@ fn ci_sdist_job_builds_the_sdist_it_then_installs() {
             ".sdist-venv/bin/python -m pip install dist/anneal-*.tar.gz pytest",
         ]
     );
+
+    // pytest runs from the checkout, so the guard first proves the package
+    // under test is the installed one and not the source tree. It is the
+    // command the release workflow runs on the sdist.
+    let release = release();
+    let (_, release_install) = step(job(&release, "sdist"), "Install and import sdist");
+    let guard = script(release_install)[2];
+    assert_eq!(
+        script(test),
+        [
+            guard,
+            ".sdist-venv/bin/python -m pytest pytest/test_cluster_search.py"
+        ]
+    );
 }
 
 #[test]
