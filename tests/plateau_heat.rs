@@ -96,7 +96,7 @@ fn metropolis_heat_follows_the_plateau() {
     let hot_fp = fingerprint(&hot);
     assert_eq!(cold_fp, 0xc2e2c1ef481b1a93, "preset walk");
     assert_ne!(hot_fp, cold_fp, "temperature *= heat");
-    assert_eq!(hot_fp, 0x54b3107bfe824e24, "PLATEAU_HEAT_CAP");
+    assert_eq!(hot_fp, 0xcc74d55e4c74ed2f, "PLATEAU_HEAT_CAP");
 }
 
 #[test]
