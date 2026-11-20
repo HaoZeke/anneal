@@ -934,7 +934,7 @@ if has_fast_nlist
     # without linking the object a second time.
     if _fast_as_object
         fastnlist_dep = declare_dependency(
-            sources: [_fastnlist_tgt],
+            sources: _fast_bundled ? [_fastnlist_tgt[0], _fastnlist_tgt[1]] : [_fastnlist_tgt[0]],
             link_args: _fast_native,
         )
         fastnlist_native_dep = declare_dependency(
@@ -942,8 +942,8 @@ if has_fast_nlist
         )
     else
         fastnlist_dep = declare_dependency(
-            sources: [_fastnlist_tgt],
-            link_args: [_fastnlist_tgt.full_path()] + _fast_native,
+            sources: [_fast_bundled ? _fastnlist_tgt[1] : _fastnlist_tgt],
+            link_args: [_fastnlist_tgt[0].full_path()] + _fast_native,
         )
         fastnlist_native_dep = fastnlist_dep
     endif
@@ -986,6 +986,8 @@ if get_option('with_rust_core')
         # The library is a generated file, so ninja runs cargo before
         # anything links it. A find_library on the cargo output fails on a
         # fresh setup: nothing has built the file when meson configures.
+        # Without the pair list the crate needs only the workspace
+        # rust-version, so the script keeps the cargo it is given.
         rgpot_rust_target = custom_target(
             'rgpot_rust_core',
             command: [

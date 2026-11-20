@@ -10,9 +10,13 @@ are Rust staticlibs that embed a copy of std, and linking the two archives
 defines those symbols twice, so the bundle carries both in one.
 
 The bundle needs the same rustc as the pair list (1.89), so
-``--fast-toolchain`` reuses the toolchain choice and the Darwin archiver
-override of ``build_fastnlist.py``. When the output is a ``.o`` the archive
-is partial-linked to one relocatable object, as for the pair list.
+``--fast-toolchain`` reuses the toolchain choice of ``build_fastnlist.py``.
+rgpot-core on its own builds with the workspace rust-version (1.88) and
+takes the cargo on the command line. Both builds use the Darwin archiver
+override of ``build_fastnlist.py``: rustc writes every staticlib with the
+``AR`` it finds, and Apple ld rejects one written by the conda archiver.
+When the output is a ``.o`` the archive is partial-linked to one
+relocatable object, as for the pair list.
 
 The second output is a header with no declarations. A meson dependency
 lists it as a source, so each target that uses the library waits for this
@@ -76,6 +80,7 @@ def main() -> None:
     base = fast.cargo_argv(args.cargo) if args.fast_toolchain else [args.cargo]
     cmd = base + [
         "build",
+        "--locked",
         "--manifest-path",
         args.manifest,
         "--target-dir",
@@ -85,7 +90,7 @@ def main() -> None:
         cmd.append("--release")
     if args.features:
         cmd += ["--features", args.features]
-    env = fast.cargo_env() if args.fast_toolchain else None
+    env = fast.cargo_env()
     proc = subprocess.run(cmd, check=False, env=env)
     if proc.returncode != 0:
         sys.exit(proc.returncode)

@@ -6,9 +6,9 @@
 # This crate links them once, and the meson build uses it in place of the
 # two archives when with_rust_core and the fast pair list are both on.
 #
-# Cargo.lock holds the versions of the registry crates. It also records the
-# version of rgpot-core, which moves with each release, so the build does
-# not pass --locked: cargo rewrites that one line and leaves the rest.
+# Cargo.lock holds the versions of the registry crates and the release
+# version of rgpot-core, which ci/version/files.txt keeps in step so the
+# build runs with --locked.
 [workspace]
 
 [package]
