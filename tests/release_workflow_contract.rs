@@ -20,7 +20,17 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     assert!(manifest.contains("default = []"));
     assert!(manifest.contains("python = [\"dep:pyo3\", \"dep:numpy\", \"dlpk/pyo3\", \"eindir-core/py-objective\", \"rgsaddle\"]"));
     assert!(manifest.contains("bank-rpc = [\"dep:capnp\", \"dep:capnp-rpc\", \"dep:futures\", \"dep:nng\", \"dep:tokio\", \"dep:tokio-util\", \"dep:libc\", \"rgsaddle\"]"));
-    assert!(manifest.contains("exclude = [\".cargo/config.toml\"]"));
+    assert!(manifest.contains("include = ["));
+    assert!(manifest.contains("\"/Cargo.toml\""));
+    assert!(manifest.contains("\"/Cargo.lock\""));
+    assert!(manifest.contains("\"/README.md\""));
+    assert!(manifest.contains("\"/LICENSE.txt\""));
+    assert!(manifest.contains("\"/CHANGELOG.md\""));
+    assert!(manifest.contains("\"/build.rs\""));
+    assert!(manifest.contains("\"/cbindgen.toml\""));
+    assert!(manifest.contains("\"/src/**\""));
+    assert!(manifest.contains("\"/include/**\""));
+    assert!(manifest.contains("\"/data/**\""));
     // `cargo package` writes anneal-core-${version}.crate. The version
     // comes from cargo metadata.
     assert!(workflow.contains("cargo package"));

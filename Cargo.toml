@@ -25,9 +25,19 @@ description = "Simulated annealing components built on the eindir typed primitiv
 repository = "https://github.com/HaoZeke/anneal"
 categories = ["science", "mathematics"]
 keywords = ["optimization", "simulated-annealing", "metaheuristic"]
-# Development pins and the out-of-tree target directory. The published
-# crate resolves registry versions.
-exclude = [".cargo/config.toml"]
+# Publish from an explicit allowlist so only crate build inputs are shipped.
+include = [
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/LICENSE.txt",
+    "/CHANGELOG.md",
+    "/build.rs",
+    "/cbindgen.toml",
+    "/src/**",
+    "/include/**",
+    "/data/**",
+]
 
 [lib]
 name = "anneal_core"
