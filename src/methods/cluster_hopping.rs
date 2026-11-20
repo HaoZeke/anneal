@@ -3803,11 +3803,12 @@ fn clear_stuck_after_jump(stuck: &mut bool) {
 }
 
 fn finish_stall_leave(
-    arm: &'static str,
+    _arm: &'static str,
     landed_home: bool,
     quiet: &mut usize,
     longest_quiet: &mut usize,
 ) -> bool {
+    #[cfg(test)]
     let before = *quiet;
     if !landed_home {
         *quiet = 0;
@@ -3815,7 +3816,9 @@ fn finish_stall_leave(
     }
     #[cfg(test)]
     HOME_STALL_CLOCKS.with(|values| {
-        values.borrow_mut().push((arm, landed_home, before, *quiet));
+        values
+            .borrow_mut()
+            .push((_arm, landed_home, before, *quiet));
     });
     !landed_home
 }
